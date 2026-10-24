@@ -481,7 +481,7 @@ assert_case "scoped judge reviewer may return a workflow result through Structur
 assert_case "bare reviewer fixture may return a workflow result through StructuredOutput" allow review-aspect StructuredOutput '{}'
 assert_case "scoped PLM may return a workflow result through StructuredOutput" allow zensu:zensu-plm StructuredOutput '{"answer":"x"}'
 PAYLOAD_CWD="$VANISHED_CWD" assert_case "reviewer workflow result resolves no path, so a vanished cwd cannot block it" allow zensu:review-aspect StructuredOutput '{"findings":[]}'
-assert_case "evidence worker stays on the bare read trio without StructuredOutput" deny zensu:pr-review-worker StructuredOutput '{"result":"x"}'
+assert_case "evidence worker cannot invoke StructuredOutput" deny zensu:pr-review-worker StructuredOutput '{"result":"x"}'
 assert_case "reviewer cannot invoke a case variant of StructuredOutput" deny zensu:review-aspect structuredoutput '{}'
 assert_case "reviewer cannot invoke an MCP tool named like StructuredOutput" deny zensu:review-aspect mcp__evil__StructuredOutput '{}'
 assert_case "reviewer cannot invoke a case variant of SubagentHandback" deny zensu:code-reviewer subagenthandback "$HANDBACK_REPORT"
@@ -489,8 +489,8 @@ assert_case "reviewer cannot invoke a padded SubagentHandback name" deny zensu:c
 assert_case "reviewer cannot invoke an MCP tool named like SubagentHandback" deny zensu:code-reviewer mcp__evil__SubagentHandback "$HANDBACK_REPORT"
 assert_case "reviewer cannot message agents through SendMessage" deny zensu:review-aspect SendMessage '{"to":"main","message":"report"}'
 assert_case "PLM cannot message agents through SendMessage" deny zensu:zensu-plm SendMessage '{"to":"main","message":"report"}'
-assert_case "evidence worker stays on the bare read trio without SubagentHandback" deny zensu:pr-review-worker SubagentHandback "$HANDBACK_REPORT"
-assert_case "plan evidence worker stays on the bare read trio without SubagentHandback" deny zensu:plan-review-worker SubagentHandback "$HANDBACK_REPORT"
+assert_case "evidence worker cannot invoke a padded SubagentHandback name" deny zensu:plan-review-worker ' SubagentHandback' "$HANDBACK_REPORT"
+assert_case "evidence worker cannot invoke an MCP tool named like SubagentHandback" deny zensu:pr-review-worker mcp__evil__SubagentHandback "$HANDBACK_REPORT"
 assert_case "neutral child keeps SubagentHandback under host governance" allow general-purpose SubagentHandback "$HANDBACK_REPORT"
 
 HANDBACK_TAIL='only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report'
@@ -515,12 +515,29 @@ case "$HANDBACK_SHAPE_REASON" in
   *)
     check "malformed handback deny must name the admitted input shape (got: ${HANDBACK_SHAPE_REASON:-<empty>})" FAIL ;;
 esac
-WORKER_HANDBACK_REASON="$(deny_reason zensu:pr-review-worker SubagentHandback "$HANDBACK_REPORT")"
-case "$WORKER_HANDBACK_REASON" in
-  'reviewer-capability-v1 deny: evidence-worker-v1 cannot invoke SubagentHandback; only Read, Grep, and Glob are allowed')
-    check "evidence worker is denied SubagentHandback by its own lease policy" PASS ;;
+for type in zensu:pr-review-worker zensu:plan-review-worker; do
+  reason="$(deny_reason "$type" SubagentHandback "$HANDBACK_REPORT")"
+  if [ "$reason" = 'reviewer-capability-v1 deny: evidence-worker-v1 has no unique bound lease' ]; then
+    check "$type hands an exactly shaped SubagentHandback on to its evidence lease, which decides it" PASS
+  else
+    check "$type must hand an exactly shaped SubagentHandback on to its evidence lease (got: ${reason:-<empty>})" FAIL
+  fi
+done
+WORKER_SHAPE_REASON='reviewer-capability-v1 deny: evidence-worker-v1 may invoke SubagentHandback only with exactly one string field, message'
+for input in '{"message":"report","to":"main"}' '{}' '{"message":{"text":"report"}}'; do
+  reason="$(deny_reason zensu:plan-review-worker SubagentHandback "$input")"
+  if [ "$reason" = "$WORKER_SHAPE_REASON" ]; then
+    check "evidence worker handback $input is denied for its input shape" PASS
+  else
+    check "evidence worker handback $input must be denied for its input shape (got: ${reason:-<empty>})" FAIL
+  fi
+done
+WORKER_VARIANT_REASON="$(deny_reason zensu:pr-review-worker subagenthandback "$HANDBACK_REPORT")"
+case "$WORKER_VARIANT_REASON" in
+  'reviewer-capability-v1 deny: evidence-worker-v1 cannot invoke subagenthandback; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the JSON result')
+    check "an evidence worker's case-variant handback is denied with a reason naming SubagentHandback as its result channel" PASS ;;
   *)
-    check "evidence worker must be denied SubagentHandback by its lease policy (got: ${WORKER_HANDBACK_REASON:-<empty>})" FAIL ;;
+    check "an evidence worker's case-variant handback must be denied naming SubagentHandback as its result channel (got: ${WORKER_VARIANT_REASON:-<empty>})" FAIL ;;
 esac
 REVIEWER_ROTATION=(zensu:code-reviewer zensu:review-aspect zensu:review-judge)
 HOST_NON_READ_TOOLS=(
@@ -912,11 +929,16 @@ else
   check "foreign-installation fixture could not be minted" FAIL
 fi
 
-HANDBACK_LITERAL="$(sed -n "s/^const HOST_HANDBACK_TOOL = '\([A-Za-z]*\)';\$/\1/p" "$POLICY")"
+HANDBACK_LITERAL="$(sed -n "s/^const HANDBACK_TOOL = '\([A-Za-z]*\)';\$/\1/p" "$PLUGIN/hooks/lib/review-evidence-lease-v1.js")"
 if [ "$HANDBACK_LITERAL" = SubagentHandback ]; then
-  check "the gate declares SubagentHandback as its one host report tool" PASS
+  check "the evidence lease declares SubagentHandback as the one host report tool" PASS
 else
-  check "the gate must declare HOST_HANDBACK_TOOL as SubagentHandback (got: ${HANDBACK_LITERAL:-<none>})" FAIL
+  check "the evidence lease must declare HANDBACK_TOOL as SubagentHandback (got: ${HANDBACK_LITERAL:-<none>})" FAIL
+fi
+if grep -qx 'const HOST_HANDBACK_TOOL = evidenceLeases.HANDBACK_TOOL;' "$POLICY"; then
+  check "the gate takes its host report tool name from the evidence lease" PASS
+else
+  check "the gate must take HOST_HANDBACK_TOOL from evidenceLeases.HANDBACK_TOOL" FAIL
 fi
 READ_TRIO_LITERAL="$(sed -n "s/^const REVIEWER_READ_TOOLS = new Set(\[\(.*\)]);\$/\1/p" "$POLICY")"
 if [ "$READ_TRIO_LITERAL" = "'Read', 'Grep', 'Glob'" ]; then
@@ -926,9 +948,9 @@ else
 fi
 HANDBACK_PROFILES_LITERAL="$(sed -n "s/^const HANDBACK_PROFILES = new Set(\[\(.*\)]);\$/\1/p" "$POLICY")"
 if [ "$HANDBACK_PROFILES_LITERAL" = "'reviewer-readonly-v1', 'zensu-plm-readonly-v1'" ]; then
-  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a report back" PASS
+  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a free-text report back" PASS
 else
-  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a report back (got: ${HANDBACK_PROFILES_LITERAL:-<none>})" FAIL
+  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a free-text report back (got: ${HANDBACK_PROFILES_LITERAL:-<none>})" FAIL
 fi
 for doc in docs/session-control.md docs/gates.md docs/configuration.md docs/review-chain.md; do
   if [ -n "$HANDBACK_LITERAL" ] && grep -qF "$HANDBACK_LITERAL" "$PLUGIN/$doc"; then
@@ -981,7 +1003,7 @@ host_handback_verdicts() {
       } else if (bundle.indexOf(needle) >= 0) {
         console.log(`PASS\thost ${version} still defines the ${literal} report tool the reviewer gate admits`);
       } else {
-        console.log(`FAIL\thost ${version} no longer defines ${literal}: its subagent report tool was renamed or removed, so zensu reviewers deliver no report; re-measure the bundle and update HOST_HANDBACK_TOOL`);
+        console.log(`FAIL\thost ${version} no longer defines ${literal}: its subagent report tool was renamed or removed, so zensu reviewers deliver no report; re-measure the bundle and update HANDBACK_TOOL in review-evidence-lease-v1.js`);
       }
     }
   ' "${HANDBACK_LITERAL:-SubagentHandback}" 2.1.269 "$@"

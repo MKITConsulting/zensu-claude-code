@@ -53,16 +53,19 @@ never run in GitHub Actions.
   without reading the Session Control record.
 - Offline and installed-plugin contract scenarios also exercise the dedicated
   `zensu:plan-review-worker` and `zensu:pr-review-worker` identities. Each has
-  only `Read`, `Grep`, and `Glob`; attempts to use file mutation, task,
+  only `Read`, `Grep`, and `Glob`, plus `SubagentHandback` to deliver its one
+  lease-validated JSON result; attempts to use file mutation, task,
   messaging, nested-agent, Skill, MCP, Web, or command tools must receive the
   structured capability denial. No fallback child identity is accepted.
 - Plan/PR review scenarios create a private exact-file/safe-subtree lease,
-  bind each spawn's host worker id to one exact role, and collect one raw final
-  JSON object with `kind` exactly `plan-review` or `pr-review`. Collection
+  bind each spawn's host worker id to one exact role, and collect one raw JSON
+  object with `kind` exactly `plan-review` or `pr-review`, delivered as the
+  `message` of `SubagentHandback` when the host offers that tool, else as the
+  final message. Collection
   rejects wrong worker ids, roles, kinds, extra prose/fences/keys, malformed or
   oversized JSON, duplicate role claims, non-identical re-submissions, and
-  output that was not captured through `SubagentStop` (an identical repeated
-  hook delivery is idempotent). PR leases also bind the exact `core.quotePath=false`
+  output that neither the capability gate's `SubagentHandback` validation nor
+  `SubagentStop` captured (an identical repeated delivery is idempotent). PR leases also bind the exact `core.quotePath=false`
   name-status manifest; quoted or backslash-escaped paths fail closed, and every
   inline finding must name a changed path from that manifest. Only the main
   thread materializes accepted results, and close revokes the generation on

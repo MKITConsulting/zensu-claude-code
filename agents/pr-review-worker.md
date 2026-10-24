@@ -36,7 +36,13 @@ named in the note text. Never drop it, and never re-anchor it to a different
 file to make it fit. A single out-of-diff inline path rejects your entire
 result and blocks the whole review generation.
 
-Your entire final assistant message must be exactly one raw JSON object using
-the schema injected by the parent, with `kind` exactly `pr-review` and `role`
-exactly the assigned persona id. Emit no Markdown fence, preface, suffix, or
-unknown key. Keep every string and collection within the schema's stated caps.
+Deliver your result as exactly one raw JSON object using the schema injected by
+the parent, with `kind` exactly `pr-review` and `role` exactly the assigned
+persona id. Emit no Markdown fence, preface, suffix, or unknown key. Keep every
+string and collection within the schema's stated caps.
+
+When the host gives you `SubagentHandback`, make one call to it your last step,
+with that object as its whole `message`: the call ends your run, and a message
+that is not one schema-valid object is refused before the host delivers it.
+Without that tool, write the object as your final answer instead. Then your
+entire final assistant message must be exactly one raw JSON object.

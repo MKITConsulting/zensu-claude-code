@@ -22,6 +22,7 @@ const ROLE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HASH_RE = /^sha256:[a-f0-9]{64}$/;
 const ALLOWED_KINDS = new Set(['plan-review', 'pr-review']);
 const ALLOWED_TOOLS = new Set(['Read', 'Grep', 'Glob']);
+const HANDBACK_TOOL = 'SubagentHandback';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 128 * 1024;
@@ -1613,9 +1614,10 @@ function hasDuplicateJsonObjectKeys(raw) {
   }
 }
 
-function parseWorkerResult(raw, expectedKind, allowedPrPaths, changedProductionPaths) {
+function parseWorkerResult(raw, expectedKind, allowedPrPaths, changedProductionPaths,
+  label = 'last_assistant_message') {
   if (typeof raw !== 'string' || Buffer.byteLength(raw, 'utf8') > MAX_RESULT_BYTES) {
-    fail('last_assistant_message is missing or too large');
+    fail(`${label} is missing or too large`);
   }
   const trimmed = raw.trim();
   // A wrapping fence or surrounding prose cannot satisfy both structural checks: a fenced
@@ -1623,19 +1625,44 @@ function parseWorkerResult(raw, expectedKind, allowedPrPaths, changedProductionP
   // would reject a fence inside a JSON string value — which the pr-team-review personas are
   // explicitly told to emit in an inline finding's `body`.
   if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
-    fail('last_assistant_message must be one pure JSON object without fences or prose');
+    fail(`${label} must be one pure JSON object without fences or prose`);
   }
   if (hasDuplicateJsonObjectKeys(trimmed)) {
-    fail('last_assistant_message contains duplicate JSON object keys');
+    fail(`${label} contains duplicate JSON object keys`);
   }
   let result;
-  try { result = JSON.parse(trimmed); } catch { fail('last_assistant_message is not valid JSON'); }
+  try { result = JSON.parse(trimmed); } catch { fail(`${label} is not valid JSON`); }
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     fail('worker result must be a JSON object');
   }
   validateResultValue(result);
   validateWorkerSchema(result, expectedKind, allowedPrPaths, changedProductionPaths);
   return normalizeWorkerResult(result, expectedKind);
+}
+
+function candidateResultHash(record, raw, label) {
+  let candidate;
+  try {
+    candidate = parseWorkerResult(raw, record.kind, record.allowed_pr_paths,
+      record.changed_production_paths, label);
+  } catch {
+    return null;
+  }
+  return hashObject(candidate);
+}
+
+function claimedRole(record, agentId, role) {
+  return Object.entries(record.workers).some(([otherId, other]) => (
+    otherId !== agentId && other.result && other.result.role === role
+  ));
+}
+
+function completeWorker(worker, result) {
+  worker.status = 'completed';
+  worker.finished_at_ms = Date.now();
+  worker.result = result;
+  worker.result_sha256 = hashObject(result);
+  delete worker.result_error;
 }
 
 function storeWorkerResult(payload, binding) {
@@ -1650,19 +1677,16 @@ function storeWorkerResult(payload, binding) {
     const record = matching[0];
     const worker = record.workers[agentId];
     if (worker.agent_type !== payload.agent_type) fail('worker type does not match its binding');
-    if (record.status !== 'active' || record.expires_at_ms <= Date.now()) {
-      fail('worker binding is no longer active');
-    }
     if (worker.status === 'completed') {
-      let duplicate;
-      try {
-        duplicate = parseWorkerResult(payload.last_assistant_message, kind, record.allowed_pr_paths,
-          record.changed_production_paths);
-      } catch {
+      const candidate = candidateResultHash(record, payload.last_assistant_message,
+        'last_assistant_message');
+      if (candidate !== null && candidate !== worker.result_sha256) {
         fail('completed worker result is create-once');
       }
-      if (hashObject(duplicate) !== worker.result_sha256) fail('completed worker result is create-once');
       return { action: 'stored', leaseId: record.lease_id };
+    }
+    if (record.status !== 'active' || record.expires_at_ms <= Date.now()) {
+      fail('worker binding is no longer active');
     }
     if (!['bound', 'retry'].includes(worker.status)) {
       fail('worker binding is no longer active');
@@ -1692,10 +1716,7 @@ function storeWorkerResult(payload, binding) {
       return { action: 'failed', reason: worker.result_error };
     }
 
-    const duplicateRole = Object.entries(record.workers).some(([otherId, other]) => (
-      otherId !== agentId && other.result && other.result.role === result.role
-    ));
-    if (duplicateRole) {
+    if (claimedRole(record, agentId, result.role)) {
       worker.result_error = `worker result role "${result.role}" was already claimed`;
       if (worker.result_attempts === 1) {
         worker.status = 'retry';
@@ -1710,11 +1731,7 @@ function storeWorkerResult(payload, binding) {
       return { action: 'failed', reason: worker.result_error };
     }
 
-    worker.status = 'completed';
-    worker.finished_at_ms = Date.now();
-    worker.result = result;
-    worker.result_sha256 = hashObject(result);
-    delete worker.result_error;
+    completeWorker(worker, result);
     record.revision += 1;
     atomicWriteRecord(locations.records, record);
     return { action: 'stored', leaseId: record.lease_id };
@@ -1776,12 +1793,45 @@ function traversalPatternViolation(payload) {
   return null;
 }
 
-function toolViolation(payload, binding) {
-  const kind = kindForAgentType(payload.agent_type);
-  if (!kind) return 'evidence-worker-v1 has an unknown agent type';
-  if (!ALLOWED_TOOLS.has(payload.tool_name)) {
-    return `evidence-worker-v1 cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed`;
+function handbackInputValid(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  const keys = Object.keys(input);
+  return keys.length === 1 && keys[0] === 'message' && typeof input.message === 'string';
+}
+
+function handbackRejection(reason) {
+  return `evidence-worker-v1 ${HANDBACK_TOOL} message was rejected: ${reason.slice(0, 1024)}. `
+    + `Call ${HANDBACK_TOOL} once more with exactly one raw schema-valid JSON object for the assigned `
+    + 'kind and role as its whole message; no Markdown fence, preface, or suffix.';
+}
+
+function acceptHandback(locations, record, agentId, worker, message, commit) {
+  let result;
+  try {
+    result = parseWorkerResult(message, record.kind, record.allowed_pr_paths,
+      record.changed_production_paths, `${HANDBACK_TOOL} message`);
+  } catch (error) {
+    return handbackRejection(error.message);
   }
+  if (claimedRole(record, agentId, result.role)) {
+    return handbackRejection(`worker result role "${result.role}" was already claimed`);
+  }
+  if (!commit) return null;
+  worker.result_attempts += 1;
+  completeWorker(worker, result);
+  record.revision += 1;
+  try {
+    atomicWriteRecord(locations.records, record);
+  } catch (error) {
+    if (error && typeof error.code === 'string') {
+      return `evidence-worker-v1 could not store the ${HANDBACK_TOOL} result; call ${HANDBACK_TOOL} once more with the same JSON object`;
+    }
+    return `evidence-worker-v1 cannot store this ${HANDBACK_TOOL} result in the lease; do not send it again and end the run`;
+  }
+  return null;
+}
+
+function judgeLeasedWorker(payload, binding, kind, judge) {
   let agentId;
   try { agentId = requireSafeText(payload.agent_id, 'worker agent_id', 512); } catch (error) {
     return error.message;
@@ -1793,38 +1843,75 @@ function toolViolation(payload, binding) {
         && Object.prototype.hasOwnProperty.call(record.workers, agentId));
       if (matching.length !== 1) return 'evidence-worker-v1 has no unique bound lease';
       const record = matching[0];
-      const worker = record.workers[agentId];
       if (record.status !== 'active') return 'evidence-worker-v1 lease is revoked';
       if (record.expires_at_ms <= Date.now()) return 'evidence-worker-v1 lease is expired';
-      if (worker.agent_type !== payload.agent_type || !['bound', 'retry'].includes(worker.status)) {
-        return 'evidence-worker-v1 agent binding is inactive or mismatched';
-      }
-
-      if (payload.tool_name === 'Read') {
-        const rawPath = payload.tool_input.file_path ?? payload.tool_input.path;
-        if (typeof rawPath !== 'string') return 'evidence-worker-v1 Read requires one explicit file_path';
-        const requested = canonicalToolPath(rawPath, binding.projectRoot, 'Read file_path', 'file');
-        const entry = record.exact_files.find((candidate) => candidate.path === requested);
-        if (!entry) return 'evidence-worker-v1 Read path is not an exact leased file';
-        revalidateExactFile(entry);
-        return null;
-      }
-
-      if (typeof payload.tool_input.path !== 'string') {
-        return `evidence-worker-v1 ${payload.tool_name} requires an explicit leased path`;
-      }
-      const requested = canonicalToolPath(payload.tool_input.path, binding.projectRoot,
-        `${payload.tool_name} path`, 'directory');
-      const entry = record.safe_roots.find((candidate) => candidate.path === requested);
-      if (!entry) return `evidence-worker-v1 ${payload.tool_name} path is not an exact leased traversal root`;
-      const patternViolation = traversalPatternViolation(payload);
-      if (patternViolation) return patternViolation;
-      revalidateSafeRoot(entry);
-      return null;
+      return judge(locations, record, agentId, record.workers[agentId]);
     });
   } catch (error) {
     return `evidence-worker-v1 validation failed: ${error.message}`;
   }
+}
+
+function handbackVerdict(payload, binding, commit) {
+  const kind = kindForAgentType(payload.agent_type);
+  if (!kind) return 'evidence-worker-v1 has an unknown agent type';
+  if (!handbackInputValid(payload.tool_input)) {
+    return `evidence-worker-v1 may invoke ${HANDBACK_TOOL} only with exactly one string field, message`;
+  }
+  return judgeLeasedWorker(payload, binding, kind, (locations, record, agentId, worker) => {
+    if (worker.agent_type === payload.agent_type && worker.status === 'completed') {
+      const candidate = candidateResultHash(record, payload.tool_input.message, `${HANDBACK_TOOL} message`);
+      if (candidate === worker.result_sha256) return null;
+      return `evidence-worker-v1 already stored this worker's result, which is create-once; hand back that same JSON object unchanged or end the run`;
+    }
+    if (worker.agent_type !== payload.agent_type || !['bound', 'retry'].includes(worker.status)) {
+      return 'evidence-worker-v1 agent binding is inactive or mismatched';
+    }
+    return acceptHandback(locations, record, agentId, worker, payload.tool_input.message, commit);
+  });
+}
+
+function admitHandback(payload, binding) {
+  if (payload.tool_name !== HANDBACK_TOOL) {
+    return `evidence-worker-v1 cannot deliver a result through ${payload.tool_name}; only ${HANDBACK_TOOL} delivers it`;
+  }
+  return handbackVerdict(payload, binding, true);
+}
+
+function toolViolation(payload, binding) {
+  const kind = kindForAgentType(payload.agent_type);
+  if (!kind) return 'evidence-worker-v1 has an unknown agent type';
+  if (payload.tool_name === HANDBACK_TOOL) return handbackVerdict(payload, binding, false);
+  if (!ALLOWED_TOOLS.has(payload.tool_name)) {
+    return `evidence-worker-v1 cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HANDBACK_TOOL} to deliver the JSON result`;
+  }
+  return judgeLeasedWorker(payload, binding, kind, (locations, record, agentId, worker) => {
+    if (worker.agent_type !== payload.agent_type || !['bound', 'retry'].includes(worker.status)) {
+      return 'evidence-worker-v1 agent binding is inactive or mismatched';
+    }
+
+    if (payload.tool_name === 'Read') {
+      const rawPath = payload.tool_input.file_path ?? payload.tool_input.path;
+      if (typeof rawPath !== 'string') return 'evidence-worker-v1 Read requires one explicit file_path';
+      const requested = canonicalToolPath(rawPath, binding.projectRoot, 'Read file_path', 'file');
+      const entry = record.exact_files.find((candidate) => candidate.path === requested);
+      if (!entry) return 'evidence-worker-v1 Read path is not an exact leased file';
+      revalidateExactFile(entry);
+      return null;
+    }
+
+    if (typeof payload.tool_input.path !== 'string') {
+      return `evidence-worker-v1 ${payload.tool_name} requires an explicit leased path`;
+    }
+    const requested = canonicalToolPath(payload.tool_input.path, binding.projectRoot,
+      `${payload.tool_name} path`, 'directory');
+    const entry = record.safe_roots.find((candidate) => candidate.path === requested);
+    if (!entry) return `evidence-worker-v1 ${payload.tool_name} path is not an exact leased traversal root`;
+    const patternViolation = traversalPatternViolation(payload);
+    if (patternViolation) return patternViolation;
+    revalidateSafeRoot(entry);
+    return null;
+  });
 }
 
 function parseCli(argv) {
@@ -1916,10 +2003,13 @@ if (require.main === module) {
 }
 
 module.exports = {
+  admitHandback,
   bindWorker,
   collectLease,
   createLease,
   finalizeLease,
+  HANDBACK_TOOL,
+  handbackInputValid,
   hookLeaseProgress,
   hookLeaseWait,
   kindForAgentType,
