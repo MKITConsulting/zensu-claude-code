@@ -29,26 +29,47 @@ if [ -f "$STOP_DEADLINE_LIB" ] && [ ! -L "$STOP_DEADLINE_LIB" ]; then
   [ "${1:-}" = "$ZENSU_STOP_WORKER_FLAG" ] || zensu_stop_supervise "$0" "$INPUT"
 fi
 
+DECISION_EMITTED=false
+STOP_NOTICES=""
+stop_notice() {
+  printf '%s\n' "$1" >&2
+  STOP_NOTICES="${STOP_NOTICES:+$STOP_NOTICES
+}$1"
+}
+emit_stop_notices() {
+  if [ "$DECISION_EMITTED" = "true" ] || [ -z "$STOP_NOTICES" ]; then return 0; fi
+  printf '%s' "$STOP_NOTICES" | node -e '
+    const systemMessage = require("node:fs").readFileSync(0, "utf8");
+    process.stdout.write(JSON.stringify({systemMessage}));
+  ' && echo
+}
+trap emit_stop_notices EXIT
+
 # These responses deliberately have no dynamic fields. Once a trusted main
 # Stop event has been authenticated, durable or inner state plus a missing
 # workflow library must never be interpreted as successful completion.
 emit_runtime_unavailable_block() {
+  DECISION_EMITTED=true
   printf '%s\n' '{"decision":"block","reason":"Zensu Autopilot Stop denied: durable state exists but the durable state runtime is unavailable."}'
 }
 
 emit_inner_runtime_unavailable_block() {
+  DECISION_EMITTED=true
   printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: project-local inner state exists but the required runtime is unavailable."}'
 }
 
 emit_session_runtime_missing_block() {
+  DECISION_EMITTED=true
   printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the Session Control library is missing from this plugin installation, so review-chain and Autopilot completion cannot be proven. Repair the Zensu plugin installation, then retry; /zensu:doctor reports plugin integrity."}'
 }
 
 emit_session_bind_failed_block() {
+  DECISION_EMITTED=true
   printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Four bind failures are released before this point — a session with NO record at all, a record whose recorded project root no longer exists (a deleted or recycled worktree), an intact record served by a declared-incompatible plugin lineage, and an intact record whose minting installation was pruned from the plugin cache (both the shape of a mid-session plugin update; Zensu adopts such a record automatically on the first hook contact, and releases here only when that adoption was REFUSED or did not complete, naming the token) — so this is none of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest that drifted, or a root that still exists but no longer matches. Any release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. /zensu:doctor stays reachable in every bind failure and names the disagreement; where a record does disagree for any other reason, only a fresh Claude Code session helps."}'
 }
 
 emit_session_record_unusable_block() {
+  DECISION_EMITTED=true
   printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the immutable Session Control record of this session no longer resolves against its recorded project root, which still exists, so review-chain and Autopilot completion cannot be proven. Restore that path to exactly what was recorded (a symlinked, moved, or re-created root does not match), then retry."}'
 }
 
@@ -76,14 +97,14 @@ stop_adoption_refusal() {
 zensu_stop_guard_opted_out() {
   local config_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
   if [ "${ZENSU_CHAIN:-}" = "off" ]; then
-    echo "zensu chain-enforcer: releasing Stop because ZENSU_CHAIN=off is set explicitly. With no bindable session the durable Autopilot guard could not be evaluated either — no completion was proven, only the guard was waived." >&2
+    stop_notice "zensu chain-enforcer: releasing Stop because ZENSU_CHAIN=off is set explicitly. With no bindable session the durable Autopilot guard could not be evaluated either — no completion was proven, only the guard was waived."
     return 0
   fi
   if [ -r "$config_lib" ]; then
     # shellcheck disable=SC1090
     source "$config_lib"
     if ! zensu_hook_enabled chainEnforcer; then
-      echo "zensu chain-enforcer: releasing Stop because hooks.chainEnforcer=false is configured. With no bindable session the durable Autopilot guard could not be evaluated either — no completion was proven, only the guard was waived." >&2
+      stop_notice "zensu chain-enforcer: releasing Stop because hooks.chainEnforcer=false is configured. With no bindable session the durable Autopilot guard could not be evaluated either — no completion was proven, only the guard was waived."
       return 0
     fi
   fi
@@ -123,7 +144,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # deadlock this release fixes. Every other bind failure still blocks: a record
   # that exists and disagrees may well own state whose completion is unproven.
   if zensu_session_unregistered "$INPUT"; then
-    echo "zensu chain-enforcer: releasing Stop — Session Control has no record for this session, so no review-chain or Autopilot state exists to enforce and none was waived. A session resumed across a plugin update never mints one. This session is readable but not workable: the TDD phase gate denies every Edit/Write and subagents cannot run. Start a fresh Claude Code session without --continue/--resume, and run /zensu:doctor to confirm the cause." >&2
+    stop_notice "zensu chain-enforcer: releasing Stop — Session Control has no record for this session, so no review-chain or Autopilot state exists to enforce and none was waived. A session resumed across a plugin update never mints one. This session is readable but not workable: the TDD phase gate denies every Edit/Write and subagents cannot run. Start a fresh Claude Code session without --continue/--resume, and run /zensu:doctor to confirm the cause."
     exit 0
   fi
   # The second state with nothing left to enforce, reached from the opposite
@@ -188,7 +209,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
     if ! ORPHANED_PROJECT_ROOT="$(zensu_safe_display_path "$ORPHANED_PROJECT_ROOT")"; then
       ORPHANED_PROJECT_ROOT="(unreadable)"
     fi
-    echo "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document is not reachable from this record and no completion could ever be proven from it. No review-chain or Autopilot state was evaluated: no completion was proven, only an unprovable guard released. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm, which re-creates exactly that directory AND rebuilds the workflow document the removal took with it — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. Or start a new session for further work." >&2
+    stop_notice "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document is not reachable from this record and no completion could ever be proven from it. No review-chain or Autopilot state was evaluated: no completion was proven, only an unprovable guard released. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm, which re-creates exactly that directory AND rebuilds the workflow document the removal took with it — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. Or start a new session for further work."
     exit 0
   fi
   # The THIRD release, and the ONLY one that has two halves. The record reads and
@@ -293,7 +314,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # ZENSU_SAFE_DISPLAY_PATH_RE — but this release is the COMBINED state, where
       # the remedy is an adoption before any restore, so the path is not the fact
       # the reader needs. Naming /zensu:doctor keeps this message about the order.
-      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and running /zensu:adopt-session --restore-root AFTER the adoption reports whether it can be re-created — it writes nothing — with /zensu:adopt-session --restore-root --confirm as the remedy (that repair requires the running installation to SERVE the record, which the adoption is what establishes), and it re-creates the directory AND rebuilds the workflow document in one step where a bare mkdir leaves the second half missing. With no readable workflow document the schema-equality check that normally authorises a takeover is NOT performed, and a document rebuilt by the restore is checked only when it is first read, not here. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
+      stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and running /zensu:adopt-session --restore-root AFTER the adoption reports whether it can be re-created — it writes nothing — with /zensu:adopt-session --restore-root --confirm as the remedy (that repair requires the running installation to SERVE the record, which the adoption is what establishes), and it re-creates the directory AND rebuilds the workflow document in one step where a bare mkdir leaves the second half missing. With no readable workflow document the schema-equality check that normally authorises a takeover is NOT performed, and a document rebuilt by the restore is checked only when it is first read, not here. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory."
       exit 0
     fi
     if [ -n "$ZENSU_ROOT_STATE_UNRESOLVED" ] \
@@ -301,7 +322,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # The probe could not answer. Assert NEITHER half: the state-neutral
       # release says only what this hook actually established, which is that the
       # binding failed and no completion was proven.
-      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. Whether the recorded project root still exists could not be determined here, so nothing is claimed about the workflow document either way — run /zensu:doctor, which names that directory when it is gone. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}." >&2
+      stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. Whether the recorded project root still exists could not be determined here, so nothing is claimed about the workflow document either way — run /zensu:doctor, which names that directory when it is gone. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}."
       exit 0
     fi
     # The remedy is the refusal's own, never a promise: this predicate also
@@ -309,7 +330,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
     # remedy names re-installing the newer version — a rolled back session has no
     # other path back, so claiming the guarantee is merely deferred would be
     # false there.
-    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, its recorded project root still exists, and the disagreement is that the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The recorded project root still EXISTS, so a workflow document under it stays reachable once the session re-binds — this arm establishes that the anchor resolved, and deliberately claims nothing about the document's contents, which no probe on this path opened. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once the record is adopted, a later Stop enforces the chain again — the guard stays released until then. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, its recorded project root still exists, and the disagreement is that the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The recorded project root still EXISTS, so a workflow document under it stays reachable once the session re-binds — this arm establishes that the anchor resolved, and deliberately claims nothing about the document's contents, which no probe on this path opened. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once the record is adopted, a later Stop enforces the chain again — the guard stays released until then. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you."
     exit 0
   fi
   # The FOURTH release, for the other named state with the same in-place remedy:
@@ -369,7 +390,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       EXECUTING_VERSION="(unreadable)"
     fi
     stop_adoption_refusal
-    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so a workflow document under it stays REACHABLE once the session re-binds; this arm establishes that the anchor resolved and claims nothing about the document's contents, which no probe on this path opened. What failed is the session binding, and this hook declines to read a chain it cannot bind, so no completion was proven, only an unprovable guard released. Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once the record is adopted, a later Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so a workflow document under it stays REACHABLE once the session re-binds; this arm establishes that the anchor resolved and claims nothing about the document's contents, which no probe on this path opened. What failed is the session binding, and this hook declines to read a chain it cannot bind, so no completion was proven, only an unprovable guard released. Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once the record is adopted, a later Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you."
     exit 0
   fi
   # The Stop counterpart of the `adoption-incomplete` deny scope. A bind that lost
@@ -412,7 +433,7 @@ if ! zensu_memoize_project_dir || ! PROJECT_ROOT="$(zensu_resolve_project_dir)";
     if ! TOCTOU_PROJECT_ROOT="$(zensu_safe_display_path "${ZENSU_PROJECT_ROOT}")"; then
       TOCTOU_PROJECT_ROOT="(unreadable)"
     fi
-    echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${TOCTOU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm to re-create exactly that directory and rebuild the workflow document in one step — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise start a new session for further work." >&2
+    stop_notice "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${TOCTOU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm to re-create exactly that directory and rebuild the workflow document in one step — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise start a new session for further work."
     exit 0
   fi
   if ! zensu_stop_guard_opted_out; then
@@ -1032,6 +1053,7 @@ case "$INNER_STATUS" in
       _SESSION_CODE_REVIEW_DONE INNER_BOUND_RUN INNER_BOUND_ATTEMPT \
       INNER_BOUND_RETURN_STAGE INNER_BOUND_CHAIN <<<"$INNER_FIELDS"
     inner_flags_ok || {
+      DECISION_EMITTED=true
       printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: current-session inner state is corrupt or unsafe."}'
       exit 0
     }
@@ -1056,10 +1078,12 @@ case "$INNER_STATUS" in
     # there. Promising an unconditional rebuild here would send that user to a
     # repair that refuses by design. Naming the condition is what keeps this arm
     # and the repair from contradicting each other.
+    DECISION_EMITTED=true
     printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: the mandatory current-session workflow baseline is missing. Do not infer completion. If the record is intact and served AND the document is genuinely absent rather than replaced, run /zensu:adopt-session to see the diagnosis and /zensu:adopt-session --confirm to rebuild it. The diagnosis is what tells the two apart: a symlink, a hard link or a non-file at that path is a tamper signal, the repair refuses it by design, and the remedy there is to inspect it and start a fresh Claude Code session."}'
     exit 0
     ;;
   *)
+    DECISION_EMITTED=true
     printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: current-session inner state is corrupt or unsafe."}'
     exit 0
     ;;
@@ -1082,12 +1106,11 @@ fi
 # Autopilot run can block on the very release path the implementing-phase nudge
 # sits on, and a stderr line asserting "Stop is not blocked" beside a
 # decision:"block" on stdout contradicts the authoritative channel.
-DECISION_EMITTED=false
 emit_block() {
   DECISION_EMITTED=true
-  printf '%s' "$1" | node -e '
-    const reason = require("node:fs").readFileSync(0, "utf8");
-    process.stdout.write(JSON.stringify({decision:"block",reason}));
+  printf '%s\0%s' "$1" "$STOP_NOTICES" | node -e '
+    const [reason, systemMessage] = require("node:fs").readFileSync(0, "utf8").split("\0");
+    process.stdout.write(JSON.stringify(systemMessage ? {decision:"block",reason,systemMessage} : {decision:"block",reason}));
   '
   echo
 }
@@ -1290,7 +1313,7 @@ outer_finish() {
   }
   IFS=$'\t' read -r count budget_blocked <<<"$budget_fields"
   if [ "$budget_blocked" = "true" ]; then
-    echo "zensu autopilot: Stop budget exhausted in ${stage}; run moved to audited BLOCKED (never DONE)." >&2
+    stop_notice "zensu autopilot: Stop budget exhausted in ${stage}; run moved to audited BLOCKED (never DONE)."
     return 0
   fi
 
@@ -1343,7 +1366,7 @@ zensu_render_bypass_release() {
   local rendered
   rendered="$(zensu_bypass_display "$(tdd_state_file "$SESSION_ID")")"
   [ -n "$rendered" ] \
-    && echo "Gates bypassed during this session: $rendered" >&2
+    && stop_notice "Gates bypassed during this session: $rendered"
   return 0
 }
 if [ "${ZENSU_CHAIN:-}" = "off" ]; then
@@ -1627,7 +1650,7 @@ zensu_impl_stop_nudge() {
     # there and the one C15's recorded decision covers.
     case "$probe_rc" in
       124|137|143)
-        echo "Zensu review chain: the worktree probe for the implementing-phase turn counter was interrupted by its watchdog, so this turn was neither counted nor reported on. That is not the same as a clean tree. Stop is not blocked." >&2
+        stop_notice "Zensu review chain: the worktree probe for the implementing-phase turn counter was interrupted by its watchdog, so this turn was neither counted nor reported on. That is not the same as a clean tree. Stop is not blocked."
         ;;
     esac
     return 0
@@ -1674,12 +1697,12 @@ zensu_impl_stop_nudge() {
   # the weaker side of it. The sibling can afford the lease because its own path
   # BLOCKS, and this one cannot for exactly the same reason.
   if ! count="$(tdd_increment_counter "$SESSION_ID" implStopCount 2>/dev/null </dev/null)"; then
-    echo "Zensu review chain: the implementing-phase turn counter could not be advanced for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked." >&2
+    stop_notice "Zensu review chain: the implementing-phase turn counter could not be advanced for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked."
     return 0
   fi
   case "$count" in
     ''|*[!0-9]*)
-      echo "Zensu review chain: the implementing-phase turn counter returned an unreadable value for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked." >&2
+      stop_notice "Zensu review chain: the implementing-phase turn counter returned an unreadable value for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked."
       return 0
       ;;
   esac
@@ -1759,7 +1782,7 @@ zensu_impl_stop_nudge() {
     else
       nudge_denial_attempt="Report the refusal and the rule above to the user in your next message rather than acting on it silently; if they say in this conversation that they have just lifted it, completing the implementation is the right next move — the chain issues its own ticket and spawns the reviewer, and a second refusal means stop and say so."
     fi
-    echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+    stop_notice "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'."
     return 0
   fi
   # Says what the probe MEASURES. `git status --porcelain` reports untracked
@@ -1778,7 +1801,7 @@ zensu_impl_stop_nudge() {
   # its own message, so the notice can go silent with the chain exactly where it
   # was — and a reader who took silence as progress would be wrong. The clause
   # names the conditions the code actually re-tests.
-  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+  stop_notice "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'."
   return 0
 }
 
@@ -1794,7 +1817,7 @@ if [ "$SESSION_CHAIN_DONE" = "true" ]; then reviewer_denial_note_clear; outer_fi
 if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
-    echo "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:tdd Phase 6 review sequence." >&2
+    stop_notice "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:tdd Phase 6 review sequence."
   fi
   exit 0
 fi
@@ -1802,7 +1825,7 @@ fi
 if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && background_review_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
-    echo "zensu chain-enforcer: releasing this Stop, still running: $(background_review_subject). The review chain stays armed: each report reaches the main thread as a hand-back or completion notification, a consume reviewer's report claims the ticket and routes the review, and the wait ends ${BACKGROUND_REVIEW_TTL} minutes after the newest launch." >&2
+    stop_notice "zensu chain-enforcer: releasing this Stop, still running: $(background_review_subject). The review chain stays armed: each report reaches the main thread as a hand-back or completion notification, a consume reviewer's report claims the ticket and routes the review, and the wait ends ${BACKGROUND_REVIEW_TTL} minutes after the newest launch."
   fi
   exit 0
 fi
@@ -1915,22 +1938,22 @@ if [ "$BLOCKS" -gt "$CAP" ]; then
     # is the outcome this diagnosis exists to prevent. The probe is memoized, so
     # this costs no second transcript read.
     if reviewer_spawn_denied; then
-      echo "zensu chain-enforcer: that chain never stalled inside Zensu — the zensu:code-reviewer spawn was refused by the host permission layer${REVIEWER_DENIAL_KIND:+ (${REVIEWER_DENIAL_KIND})}. Nothing was reviewed. The remedy is the user's to apply and no agent may apply it for them, least of all by editing a settings file itself: allow the spawn with the permissions.allow rule \"Agent(zensu:code-reviewer)\", or leave the permission mode that refused it. Then re-enter /zensu:tdd for the current task." >&2
+      stop_notice "zensu chain-enforcer: that chain never stalled inside Zensu — the zensu:code-reviewer spawn was refused by the host permission layer${REVIEWER_DENIAL_KIND:+ (${REVIEWER_DENIAL_KIND})}. Nothing was reviewed. The remedy is the user's to apply and no agent may apply it for them, least of all by editing a settings file itself: allow the spawn with the permissions.allow rule \"Agent(zensu:code-reviewer)\", or leave the permission mode that refused it. Then re-enter /zensu:tdd for the current task."
     fi
   else
     reviewer_denial_note_clear
   fi
   if [ "$INNER_CAP_BLOCKED" = "true" ]; then
-    echo "zensu chain-enforcer: inner review did not converge; active Autopilot run moved to audited BLOCKED." >&2
+    stop_notice "zensu chain-enforcer: inner review did not converge; active Autopilot run moved to audited BLOCKED."
     exit 0
   elif [ -n "$INNER_BOUND_RUN" ]; then
     emit_block "Zensu inner review cap was reached, but the bound Autopilot generation did not persist its required audited BLOCKED transition."
     exit 0
   fi
   if [ "$(tdd_code_review_done "$STATE_FILE")" = "true" ]; then
-    echo "zensu chain-enforcer: terminal self-review did not converge after ${CAP} blocked Stops, the Stop cap for this whole chain (autoFixMaxRounds + 3); releasing the standalone Inner guard. Run /zensu:reset-review-limit to re-arm this ticket-bound review generation, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
+    stop_notice "zensu chain-enforcer: terminal self-review did not converge after ${CAP} blocked Stops, the Stop cap for this whole chain (autoFixMaxRounds + 3); releasing the standalone Inner guard. Run /zensu:reset-review-limit to re-arm this ticket-bound review generation, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced."
   else
-    echo "zensu chain-enforcer: review chain did not converge after ${CAP} blocked Stops, the Stop cap for this whole chain (autoFixMaxRounds + 3); releasing the standalone Inner guard. This is a stalled pre-terminus chain, so /zensu:reset-review-limit is not applicable. Run /zensu:doctor (or /zensu:recover-chain) to read the chain shape and the command it names; only otherwise re-enter /zensu:tdd for the current task to start a fresh guarded chain, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
+    stop_notice "zensu chain-enforcer: review chain did not converge after ${CAP} blocked Stops, the Stop cap for this whole chain (autoFixMaxRounds + 3); releasing the standalone Inner guard. This is a stalled pre-terminus chain, so /zensu:reset-review-limit is not applicable. Run /zensu:doctor (or /zensu:recover-chain) to read the chain shape and the command it names; only otherwise re-enter /zensu:tdd for the current task to start a fresh guarded chain, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced."
     # The refusal diagnosis itself is emitted above, before the bound arms, so
     # every cap sub-path carries it rather than the standalone one alone.
   fi
