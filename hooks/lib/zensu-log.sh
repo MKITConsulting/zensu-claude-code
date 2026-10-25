@@ -61,7 +61,7 @@ zensu_state_failure_hint() {
   status="$(tdd_state_status "$state_file" 2>/dev/null)"
   case "$status" in
     missing)
-      echo "zensu-log.sh $verb: no chain state exists for this session — it was never armed in this project, or the state file was removed. '.zensu/' is gitignored, so a git clean, a worktree removal, or a branch cleanup deletes it. Re-run --tdd-begin to arm a fresh chain; the previous chain cannot be recovered." >&2
+      echo "zensu-log.sh $verb: no chain state exists for this session — it was never armed in this project, or the state file was removed. git does not track '.zensu/state/', so a git clean, a worktree removal, or a branch cleanup can delete it. Re-run --tdd-begin to arm a fresh chain; the previous chain cannot be recovered." >&2
       ;;
     invalid)
       echo "zensu-log.sh $verb: the chain state for this session is unreadable or belongs to another session. Run /zensu:doctor for the exact diagnosis; --tdd-begin arms a fresh chain when the current one is beyond repair." >&2

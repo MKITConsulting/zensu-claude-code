@@ -306,3 +306,18 @@ new one — the shape it refuses is byte-identical.
   this session's owner hash, because that hash is not derivable from what the report
   holds. So a foreign session's pointer can be listed. It is listed, never interpreted,
   which is why that is acceptable — but do not describe the list as "this session's".
+
+**The first creation of `.zensu/` also writes `.zensu/.gitignore`.** `workflowStateDirectory` in
+`hooks/lib/session-control-core-v1.js` writes `ZENSU_GITIGNORE_BODY` (`/state/` and
+`/logs/witness-*.log`) with an exclusive create when that call itself created `.zensu`, so a
+consuming project keeps session state and witness logs out of git while its plans and TDD logs
+stay committable, and the project's root `.gitignore` is never touched. A `.zensu` that already
+existed, a `.gitignore` the project wrote there and one the user deleted are left alone, and a
+failed write never fails the state directory. The evidence runner's tree fingerprint is
+unaffected, because it drops `.zensu` from its index copy either way. Projects that had
+`.zensu/` before this change get no file, so the own-document doctor row, its
+`skills/doctor/SKILL.md` bullet and the capability gate's missing-baseline deny state the cause
+without claiming an ignore rule: git does not track `.zensu/state/`. Pinned by the core unit case
+`the first creation of .zensu writes a nested .gitignore for local state and never rewrites one`.
+**Version: `patch`**: no schema field, strict key set, hook, matcher, config key or attestation
+moves; the change writes one new file into a directory the core already creates.

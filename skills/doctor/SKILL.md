@@ -875,7 +875,7 @@ whether browser verification is enforced, not only when a row is red.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because
-  `.zensu/state/` is gitignored. Relay the path the row prints, and both halves of
+  `.zensu/state/` is not in git. Relay the path the row prints, and both halves of
   the remedy: `/zensu:adopt-session` for the diagnosis, `/zensu:adopt-session
   --confirm` to rebuild — AND that rebuilding is a loss rather than a restore, so a
   review chain that was live when the document vanished is gone. Never relay the
