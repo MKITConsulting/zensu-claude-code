@@ -112,7 +112,7 @@ If `feature_scope` is absent (an older backend), default to `user_facing` and sa
 so. When a `public_facing` feature's `estimated_effort` is unknown, author the
 `user_facing` doc and note that the `tutorial` was skipped for lack of an effort
 signal — do not guess. The eight canonical doc types and their required focus live
-in `docs/documentation-guide.md`.
+in `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`.
 
 ## Workflow
 
@@ -160,7 +160,7 @@ For each feature to document:
 2. `zensu doc gen-context <feature-id> --doc-type <type>` — the aggregated
    authoring **context map**: linked source-file paths, symbols, subfeatures,
    security posture, tiers, journeys, existing docs. Per
-   `docs/documentation-guide.md`, this is the **map, not the territory** — it lists
+   `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`, this is the **map, not the territory** — it lists
    *which* files matter and *what* constraints apply; it does NOT contain the
    source code.
 3. If gen-context reports zero linked source files, STOP for that feature: a
@@ -169,8 +169,8 @@ For each feature to document:
 
 ### Phase 3 — Author code-grounded docs (read the territory)
 
-**Read `docs/documentation-guide.md` before authoring** — it is the code-grounding
-source of truth. The failure it exists to prevent is the **metadata dump**:
+**Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` before authoring** — it is
+the plugin's code-grounding source of truth, not a file of the project you document. The failure it exists to prevent is the **metadata dump**:
 condensing gen-context metadata straight into `## Purpose / ## Source files /
 ## Security / ## Notes` sections without opening a single source file. That is the
 feature record reformatted, not documentation. Never publish it.
@@ -196,7 +196,8 @@ feature record reformatted, not documentation. Never publish it.
    feature's Phase 2 context map (linked source paths, symbols, posture). Only
    the main thread runs `zensu doc gen-context`, in Phase 2, so the agent needs no
    shell for the map. Its instruction: **Read the real source files the map names**,
-   author code-grounded Markdown per `docs/documentation-guide.md`, change nothing,
+   author code-grounded Markdown per `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`
+   (pass that absolute path in the brief), change nothing,
    and return `{feature_id, doc_type, title, audience, markdown}`.
    It performs NO Zensu writes.
 3. **Cap concurrency (~8–12 agents) and wave through large batches.** A
@@ -218,19 +219,36 @@ Phase 2 read.
 **No page yet:** one call authors the feature-linked wiki page AND recomputes the
 score:
 
-```
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat > "$f" <<'ZENSU_TEXT_END'
+<authored-markdown>
+ZENSU_TEXT_END
 zensu link docs <feature-id> \
   --doc-type <type> --title "<title>" --audience <audience> \
-  --content "<authored-markdown>"
+  --content "$(cat "$f")"
 ```
+
+**The Markdown never goes into the command line itself.** Inside double quotes the
+shell runs every backtick span of it and expands every `$NAME`, and a single quote ends
+at the first apostrophe. zensu-cli has no stdin or file form for `--content`, so the
+heredoc with the quoted delimiter writes the text to a temporary file unchanged, and
+`"$(cat "$f")"` hands it over as one argument the shell does not expand again. If the
+Markdown holds a line that reads `ZENSU_TEXT_END`, pick another delimiter.
 
 **The page exists** (a re-run, or a refresh after a code change): `--content`
 never changes an existing page, so update the page, then link the doc without
 `--content` to recompute the score:
 
-```
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat > "$f" <<'ZENSU_TEXT_END'
+<authored-markdown>
+ZENSU_TEXT_END
 zensu wiki update <page-id> \
-  --content "<authored-markdown>" --change-summary "<what changed>"
+  --content "$(cat "$f")" --change-summary "<what changed>"
 zensu link docs <feature-id> \
   --doc-type <type> --title "<title>" --audience <audience>
 ```
@@ -295,7 +313,7 @@ Report three explicit buckets:
 
 A discipline gate — the scorer cannot see content, so the skill enforces quality:
 
-- [ ] **Read `docs/documentation-guide.md`** and opened the real linked source
+- [ ] **Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`** and opened the real linked source
       files — not just their gen-context paths.
 - [ ] Every doc **describes what THIS feature actually does** and cites real
       signatures / endpoints / config / behavior from its source.
@@ -326,4 +344,4 @@ never published green.
 | Component | Type | Phase | Purpose |
 |---|---|---|---|
 | `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads the source files its inlined gen-context map names, returns markdown, never mutates and makes no `zensu` call |
-| `docs/documentation-guide.md` | reference | 3 | The code-grounding source of truth (doc types, focus, anti-pattern, checklist) |
+| `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` | reference | 3 | The code-grounding source of truth (doc types, focus, anti-pattern, checklist) |

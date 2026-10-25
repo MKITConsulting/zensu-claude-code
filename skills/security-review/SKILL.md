@@ -46,6 +46,14 @@ Ask the user for the feature ID, then run `zensu security classify <feature-id>`
 - `--threat-model-status`: not-required | pending | completed
 - `--pentest-status`: not-required | pending | passed | failed
 
+**Every value you set is a claim the release gate trusts.** Pass a boolean (spelled
+`--<flag>=true` or `--<flag>=false`), `--threat-model-status` or `--pentest-status` only
+when a `file:line` you read in this session shows it, or when the user stated it
+explicitly, and name that evidence when you present the command. Leave every other flag
+out: the CLI sends only the flags you pass, so an omitted flag keeps the recorded value.
+No file in a repository proves a passed pentest or a completed threat model, so those two
+need the user's own statement.
+
 If the feature already has a classification, run `zensu security analyze <feature-id>` first to see the current state and ask if changes are needed.
 
 ### Step 2: Analyze Security State
@@ -98,12 +106,41 @@ For each recommended and implemented security test, run `zensu security add-test
 
 ### Step 6: Complete Security Review
 
-Run `zensu security review <feature-id>` with:
-- `--reviewer` (required): Reviewer identifier (e.g. "claude-code" or username)
-- `--status` (required): approved | rejected | conditional
-- `--type` (optional): manual | automated | external (default: manual)
-- `--findings` (optional): Review findings summary
-- `--conditions` (optional): Conditions for conditional approval
+The review status is the user's decision, never yours. Before `zensu security review`
+runs, present the findings of Steps 2–5 (score against the required threshold, unmet
+requirements, threat-model highlights, linked tests and their last run status) and ask
+with `AskUserQuestion` which status to record: `approved`, `conditional` (ask for the
+conditions) or `rejected`. Record exactly the answer; when the user declines, record
+nothing.
+
+The command takes:
+- `--reviewer` (required): `claude-code` when you did the analysis; the person's own
+  identifier only when they say they reviewed it themselves
+- `--status` (required): the status the user chose
+- `--type`: `automated` with `--reviewer claude-code`; `manual` only for the person's own
+  review and `external` only for an outside review the user names. The CLI defaults to
+  `manual`, so always pass it.
+- `--findings`: the findings summary; `--conditions`: only for `conditional`
+
+The findings and the conditions are free text and never go into the command line
+itself: inside double quotes the shell runs every backtick span and expands every
+`$NAME`, and a single quote ends at the first apostrophe. zensu-cli has no stdin or file
+form for them, so write each one to a temporary file through a heredoc whose delimiter is
+quoted (pick another delimiter if the text holds that line):
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat > "$f" <<'ZENSU_TEXT_END'
+<findings-summary>
+ZENSU_TEXT_END
+zensu security review <feature-id> --reviewer claude-code --type automated \
+  --status <status-the-user-chose> --findings "$(cat "$f")"
+```
+
+For `conditional`, also run `c="$(mktemp)" || exit 1`, widen the trap to
+`trap 'rm -f "$f" "$c"' EXIT`, write the conditions to `"$c"` through a second quoted
+heredoc, and add `--conditions "$(cat "$c")"`.
 
 ### Step 7: Validate Release Readiness
 

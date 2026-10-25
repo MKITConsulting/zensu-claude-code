@@ -95,7 +95,8 @@ Run `zensu link source <feature-id>` to map implementation files to the feature.
 
 Documentation must be **code-grounded** — written from the real source you just
 implemented, not a restatement of the feature record.
-**Read `docs/documentation-guide.md`** first, then follow it:
+**Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`** (the plugin's guide, not
+a file of this project) first, then follow it:
 
 1. Run `zensu doc gen-context <feature-id> --doc-type <type>` for the context *map*
    (source-file paths, symbols, security posture), not the source.
@@ -110,8 +111,22 @@ implemented, not a restatement of the feature record.
    an unlinked one at `/custom/<slug of the title>`. Its id is the `wikiPageId` of the
    `existingDocs` entry for this doc type in the item 1 `zensu doc gen-context` output, or the `id` of the
    `zensu wiki list --product <product-id> --json` entry whose `path` is that path.
-   - **The page exists:** `zensu wiki update <page-id> --content <markdown> --change-summary "<what changed>"`.
-   - **No page yet:** `zensu wiki create --product <product-id> --title <title> --content <markdown>`
+   The Markdown never goes into the command line itself: inside double quotes the shell
+   runs its backtick spans and expands every `$NAME`, and a single quote ends at the first
+   apostrophe. zensu-cli has no stdin or file form for `--content`, so write the text to a
+   temporary file through a heredoc whose delimiter is quoted (pick another delimiter if
+   the text holds that line), then pass the file:
+
+   ```bash
+   f="$(mktemp)" || exit 1
+   trap 'rm -f "$f"' EXIT
+   cat > "$f" <<'ZENSU_TEXT_END'
+   <markdown>
+   ZENSU_TEXT_END
+   ```
+
+   - **The page exists:** `zensu wiki update <page-id> --content "$(cat "$f")" --change-summary "<what changed>"`.
+   - **No page yet:** `zensu wiki create --product <product-id> --title "<title>" --content "$(cat "$f")"`
      (plus `--entity-type`, `--entity-id`, `--doc-type`, `--audience`). It creates new pages
      only: when a page already exists at the new page's path, it fails with
      `a wiki page already exists at <path> (<page-id>) and was left unchanged` and changes
@@ -131,13 +146,13 @@ Then register the doc with `zensu link docs <feature-id>` (updates the feature's
 - `--publication-status` (optional): draft | published | archived
 
 **One-call form.** When the feature has no page for this doc type yet, passing
-`--content <markdown>` to `zensu link docs` folds authoring + linking into a single call:
-it creates the feature-linked wiki page and recomputes the score, so the `wiki create` in
-step 4 is not needed. It never changes an existing page, so a re-run updates the page with
-`zensu wiki update` (step 4) and then runs `zensu link docs` without `--content`. The
-`/zensu:docs` skill uses this form under the same rule; the two-step `wiki create` +
-`link docs` above stays valid when you want explicit control over the page (`--entity-*`,
-visibility).
+`--content "$(cat "$f")"`, written the same way as in step 4, to `zensu link docs` folds
+authoring + linking into a single call: it creates the feature-linked wiki page and
+recomputes the score, so the `wiki create` in step 4 is not needed. It never changes an
+existing page, so a re-run updates the page with `zensu wiki update` (step 4) and then runs
+`zensu link docs` without `--content`. The `/zensu:docs` skill uses this form under the same
+rule; the two-step `wiki create` + `link docs` above stays valid when you want explicit
+control over the page (`--entity-*`, visibility).
 
 Run `zensu link docs` alone (no wiki page) only for docs that already live in the repo
 or at an external URL.
