@@ -40,9 +40,6 @@ If `<feature>` is missing, ask via `AskUserQuestion` in Phase 0 (the one place a
 - The detected forge's CLI authenticated — `gh` (GitHub, `gh auth status`) **or** `glab`
   (GitLab, `glab auth status`) — for opening the PR/MR + the review steps. The driver's
   `--detect` (Step 0 + Phase 0.B) resolves which forge and whether its CLI is ready.
-- The sibling Zensu skills are present (same plugin): `/zensu:tdd`,
-  `/zensu:pr-team-review`, `/zensu:pr-fix-findings` (and `/zensu:cover`, invoked at Phase 1
-  step 6b when `--cover` is set).
 - Everything else — how to boot, gate, authenticate, and validate the project — the
   skill **discovers and verifies itself** in Phase 0. No config to hand-write.
 
@@ -137,11 +134,17 @@ approved spec plus the exact line `AUTOPILOT-RUN: <RUN_ID>` to every initial or 
 fresh chain id, and uses the bound `--tdd-begin` form; its guarded `--chain-done` returns to
 that exact stage. Never start an unbound TDD generation during an active run.
 
-Every other transition goes through the closed API (stable event ids; exact JSON payload):
+Every other transition goes through the closed API (stable event ids; exact JSON payload,
+written to a file because a `reason` is free text an apostrophe or backtick would break):
 
 ```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat > "$f" <<'ZENSU_TEXT_END'
+<exact-json>
+ZENSU_TEXT_END
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
-  --event-id <stable-id> --payload '<exact-json>'
+  --event-id <stable-id> --payload "$(cat "$f")"
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status
 ```
 

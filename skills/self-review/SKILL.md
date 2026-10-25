@@ -418,9 +418,9 @@ went to stderr; render `UNREADABLE — <the stderr line>` there, never an empty
 value and never `none`. Never substitute `none` for a value you did not read: an
 unread ledger is not a clean ledger.
 
-This line covers the surfaces this stage renders. It is NOT a session-wide
-guarantee. The authoritative residual list is the "What the ledger does and does
-not prove" paragraph in `docs/configuration.md`; do not restate it here. The one
+This line covers the surfaces this stage renders; it is NOT a session-wide
+guarantee. The residual list is the "What the ledger does and does not prove"
+passage in `${CLAUDE_PLUGIN_ROOT}/docs/configuration.md`; never restate it. The one
 residual that matters for THIS line: a workflow document that is edited but still
 schema-valid renders `none`, because validation is structural and the `bypasses`
 array carries no authenticity signal. Do not describe the ledger as proof that no

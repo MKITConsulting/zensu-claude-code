@@ -693,17 +693,30 @@ else
   check "P15i domain-refiner receives only enumerated exact context files" FAIL
 fi
 
-if grep -qF 'In standalone mode, show the user the final body preview + inline count as a progress' "$SKILL_TEXT" \
-   && grep -qF 'record and publish at once. Do not ask for publication approval: invoking the skill on a' "$SKILL_TEXT" \
-   && grep -qF 'It never asks before' "$SKILL_TEXT" \
-   && grep -qF 'PR is the user'"'"'s authorization to post the synthesized review. In delegated mode, record' "$SKILL_TEXT" \
+if grep -qF 'In standalone mode, show the user the final body preview + inline count, then ask exactly' "$SKILL_TEXT" \
+   && grep -qF 'one standalone publish confirmation with `AskUserQuestion` before `--post-review` runs. Its' "$SKILL_TEXT" \
+   && grep -qF 'question names the PR (`<owner>/<repo>#<n>` or the MR reference), the verdict' "$SKILL_TEXT" \
+   && grep -qF 'carries; the options are `Post the review (Recommended)` and `Do not post`. On `Do not post`,' "$SKILL_TEXT" \
+   && grep -qF 'it later, and continue with Phase E. Any answer other than the first option posts nothing.' "$SKILL_TEXT" \
+   && grep -qF 'under the user'"'"'s own forge account, so standalone mode asks exactly once before posting:' "$SKILL_MD" \
    && grep -qF 'the count as a progress update and continue without a preview question or approval gate' "$SKILL_TEXT" \
-   && grep -qF 'Neither mode waits for a publication approval' "$WORKFLOW_MD" \
-   && ! grep -qF 'explicit publication approval' "$SKILL_TEXT" \
-   && ! grep -qF 'explicit publication approval' "$WORKFLOW_MD"; then
-  check "P15j standalone publish follows the final preview without a question; delegated publish stays unattended" PASS
+   && grep -qF 'In standalone mode the preview is followed by exactly one confirmation that names the PR, the verdict and the inline-comment count' "$WORKFLOW_MD" \
+   && grep -qF 'in delegated mode, the run continues unattended through the operation-bound reconciliation/publish flow and waits for no approval' "$WORKFLOW_MD" \
+   && ! grep -qF 'Do not ask for publication approval' "$SKILL_TEXT" \
+   && ! grep -qF 'It never asks before' "$SKILL_TEXT" \
+   && ! grep -qF 'Neither mode waits for a publication approval' "$WORKFLOW_MD"; then
+  check "P15j standalone publish asks one confirmation naming PR, verdict and inline count; delegated publish stays unattended" PASS
 else
-  check "P15j standalone publish follows the final preview without a question; delegated publish stays unattended" FAIL
+  check "P15j standalone publish asks one confirmation naming PR, verdict and inline count; delegated publish stays unattended" FAIL
+fi
+
+PTR_DESC="$(awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f' "$SKILL_MD")"
+if printf '%s\n' "$PTR_DESC" | grep -qF 'Use when the user explicitly asks for a team or' \
+   && printf '%s\n' "$PTR_DESC" | grep -qF 'multi-agent review of a pull request, or via /zensu:pr-team-review.' \
+   && ! printf '%s\n' "$PTR_DESC" | grep -qF 'a PR URL'; then
+  check "P15n the description triggers on an explicit team or multi-agent review request and the slash command, never on a bare PR URL" PASS
+else
+  check "P15n the description triggers on an explicit team or multi-agent review request and the slash command, never on a bare PR URL" FAIL
 fi
 
 # P16 — repo-custom reviewer seats: the cast ingests .claude/agents/zensu-review-*.md

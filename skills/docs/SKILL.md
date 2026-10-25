@@ -84,8 +84,8 @@ required (`require_feature_page = false`, i.e. wiki-only is opt-in).
 **What this forces the skill to do — three hard rules:**
 
 - **Rule 1 — one doc PER feature.** Never link one shared README across many
-  features. Wiki mode satisfies this structurally (each `zensu link docs`
-  authors a fresh page for its one feature). Repo-file mode satisfies it by
+  features. Wiki mode satisfies this structurally (each feature-linked page
+  belongs to its one feature). Repo-file mode satisfies it by
   writing a unique per-feature path (`docs/features/<KEY-N>-<slug>.md`) — never a
   shared component README. This is the precise false-green the gate now rejects.
 - **Rule 2 — correct `doc_type`** derived from the feature's `feature_scope` (see
@@ -112,20 +112,21 @@ If `feature_scope` is absent (an older backend), default to `user_facing` and sa
 so. When a `public_facing` feature's `estimated_effort` is unknown, author the
 `user_facing` doc and note that the `tutorial` was skipped for lack of an effort
 signal — do not guess. The eight canonical doc types and their required focus live
-in `docs/documentation-guide.md`.
+in `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`.
 
 ## Workflow
 
 **Workflow gate (first + last action).** As the VERY FIRST action, run
-`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_docs"`.
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_docs,update_wiki_page"`.
 This marks the Zensu product workflow active so the CLI write-gate
-(`hooks.mcpGate`, default-on) recognizes this skill's `zensu link docs` command
-as workflow-driven rather than freelance and does not block it. As the VERY LAST action (after the final phase,
+(`hooks.mcpGate`, default-on) recognizes this skill's `zensu link docs` and
+`zensu wiki update` commands as workflow-driven rather than freelance and does
+not block them. As the VERY LAST action (after the final phase,
 or on early exit), run
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
 
-The single Zensu **mutation** (`zensu link docs`) runs in
-**this main thread** under that marker. The Phase 3 authoring fan-out uses
+The two Zensu **mutations** (`zensu link docs`, and `zensu wiki update` for a page
+that already exists) run in **this main thread** under that marker. The Phase 3 authoring fan-out uses
 `Explore` agents that are read-only by instruction and run no `zensu` mutation — the exact invariant
 `/zensu:ghost-scan` follows (fan out to read, consolidate + write in the main
 thread).
@@ -159,7 +160,7 @@ For each feature to document:
 2. `zensu doc gen-context <feature-id> --doc-type <type>` — the aggregated
    authoring **context map**: linked source-file paths, symbols, subfeatures,
    security posture, tiers, journeys, existing docs. Per
-   `docs/documentation-guide.md`, this is the **map, not the territory** — it lists
+   `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`, this is the **map, not the territory** — it lists
    *which* files matter and *what* constraints apply; it does NOT contain the
    source code.
 3. If gen-context reports zero linked source files, STOP for that feature: a
@@ -168,8 +169,8 @@ For each feature to document:
 
 ### Phase 3 — Author code-grounded docs (read the territory)
 
-**Read `docs/documentation-guide.md` before authoring** — it is the code-grounding
-source of truth. The failure it exists to prevent is the **metadata dump**:
+**Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` before authoring** — it is
+the plugin's code-grounding source of truth, not a file of the project you document. The failure it exists to prevent is the **metadata dump**:
 condensing gen-context metadata straight into `## Purpose / ## Source files /
 ## Security / ## Notes` sections without opening a single source file. That is the
 feature record reformatted, not documentation. Never publish it.
@@ -195,7 +196,8 @@ feature record reformatted, not documentation. Never publish it.
    feature's Phase 2 context map (linked source paths, symbols, posture). Only
    the main thread runs `zensu doc gen-context`, in Phase 2, so the agent needs no
    shell for the map. Its instruction: **Read the real source files the map names**,
-   author code-grounded Markdown per `docs/documentation-guide.md`, change nothing,
+   author code-grounded Markdown per `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`
+   (pass that absolute path in the brief), change nothing,
    and return `{feature_id, doc_type, title, audience, markdown}`.
    It performs NO Zensu writes.
 3. **Cap concurrency (~8–12 agents) and wave through large batches.** A
@@ -207,24 +209,58 @@ feature record reformatted, not documentation. Never publish it.
 
 Do this in the main thread, per feature, under the workflow marker.
 
-**Wiki mode (default — keeps docs in-Zensu, no repo pollution).** One call authors
-the feature-linked wiki page AND recomputes the score:
+**Wiki mode (default — keeps docs in-Zensu, no repo pollution).** First find out
+whether the feature already has a page for this doc type. Its id is the
+`wikiPageId` of the `existingDocs` entry for the type in the Phase 2 gen-context
+output, or else the `id` of the `zensu wiki list --product <product-id> --json`
+entry whose `path` is `/features/<slug>/<type>`, with the `slug` and `product_id`
+Phase 2 read.
 
-```
+**No page yet:** one call authors the feature-linked wiki page AND recomputes the
+score:
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat > "$f" <<'ZENSU_TEXT_END'
+<authored-markdown>
+ZENSU_TEXT_END
 zensu link docs <feature-id> \
   --doc-type <type> --title "<title>" --audience <audience> \
-  --content "<authored-markdown>"
+  --content "$(cat "$f")"
 ```
 
-`--content` creates the wiki page on first run and **updates it in place** on
-re-run — so refreshing an `is_outdated` doc is just re-running this call with
-fresh markdown. `--publish-to-wiki` defaults true; the call **automatically
-updates the feature's docs score**. For a `public_facing` L/XL feature, run
-`zensu link docs` once per required type (`user_facing` and `tutorial`).
+**The Markdown never goes into the command line itself.** Inside double quotes the
+shell runs every backtick span of it and expands every `$NAME`, and a single quote ends
+at the first apostrophe. zensu-cli has no stdin or file form for `--content`, so the
+heredoc with the quoted delimiter writes the text to a temporary file unchanged, and
+`"$(cat "$f")"` hands it over as one argument the shell does not expand again. If the
+Markdown holds a line that reads `ZENSU_TEXT_END`, pick another delimiter.
 
-> Sibling `/zensu:implement` Step 6 publishes the wiki page in two steps (author
-> the page, then link it); this skill uses the equivalent one-call `--content`
-> form of `zensu link docs`. Both produce a feature-linked wiki page.
+**The page exists** (a re-run, or a refresh after a code change): `--content`
+never changes an existing page, so update the page, then link the doc without
+`--content` to recompute the score:
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat > "$f" <<'ZENSU_TEXT_END'
+<authored-markdown>
+ZENSU_TEXT_END
+zensu wiki update <page-id> \
+  --content "$(cat "$f")" --change-summary "<what changed>"
+zensu link docs <feature-id> \
+  --doc-type <type> --title "<title>" --audience <audience>
+```
+
+`--publish-to-wiki` defaults true, and `zensu link docs` **automatically updates
+the feature's docs score**. For a `public_facing` L/XL feature, publish once per
+required type (`user_facing` and `tutorial`).
+
+> Sibling `/zensu:implement` Step 6 follows the same rule: it updates an existing
+> page with `zensu wiki update` and creates a missing one with `wiki create` or the
+> one-call `--content` form of `zensu link docs`. Both produce a feature-linked
+> wiki page.
 
 **Repo-file mode (`--repo-file`).** Write a **unique per-feature** file, then link
 it:
@@ -277,7 +313,7 @@ Report three explicit buckets:
 
 A discipline gate — the scorer cannot see content, so the skill enforces quality:
 
-- [ ] **Read `docs/documentation-guide.md`** and opened the real linked source
+- [ ] **Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`** and opened the real linked source
       files — not just their gen-context paths.
 - [ ] Every doc **describes what THIS feature actually does** and cites real
       signatures / endpoints / config / behavior from its source.
@@ -299,11 +335,13 @@ never published green.
 | `zensu features list` | 1 | Load the batch feature set (scope by product; filter component client-side) |
 | `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped (UUID only) |
 | `zensu doc gen-context` | 2 | Aggregated authoring context map (paths + posture, not source); only the main thread runs it, and Phase 3 reads its output |
-| `zensu link docs` | 4 | Publish (via `--content`) + link the doc; auto-recomputes the docs score |
+| `zensu wiki list` | 4 | Find a feature-linked page no doc links yet (`--json` lists each page's `id` and `path`) |
+| `zensu wiki update` | 4 | Change a page that already exists; `zensu link docs --content` never does |
+| `zensu link docs` | 4 | Create the page (via `--content`, when none exists) + link the doc; auto-recomputes the docs score |
 
 ## Agents & Skills Used
 
 | Component | Type | Phase | Purpose |
 |---|---|---|---|
 | `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads the source files its inlined gen-context map names, returns markdown, never mutates and makes no `zensu` call |
-| `docs/documentation-guide.md` | reference | 3 | The code-grounding source of truth (doc types, focus, anti-pattern, checklist) |
+| `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` | reference | 3 | The code-grounding source of truth (doc types, focus, anti-pattern, checklist) |

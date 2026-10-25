@@ -19,6 +19,11 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
+if ! command -v node >/dev/null 2>&1; then
+  { cat >/dev/null; } 2>/dev/null
+  printf '%s\n' '{"systemMessage":"zensu: ⚠ node was not found on the PATH that Claude Code was started with, and Zensu blocks every tool call until node is available. Install Node.js or put it on that PATH, then restart Claude Code (see Requirements in the plugin README), or disable the Zensu plugin.","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Zensu plugin: node is missing from the PATH Claude Code was started with, so the Zensu capability gate refuses every tool call in this session. Tell the user to install Node.js or put it on that PATH and restart Claude Code, or to disable the Zensu plugin; no tool call can succeed until then."}}'
+  exit 0
+fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 _ZENSU_BANNER_QUIET=""
 zensu_hook_enabled sessionBanner || _ZENSU_BANNER_QUIET=1

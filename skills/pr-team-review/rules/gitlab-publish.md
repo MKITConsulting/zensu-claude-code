@@ -7,8 +7,9 @@ discussions. The driver owns the loop — the skill never calls `glab api` direc
 
 ## What the driver does
 
-`bash "$VCS" --post-review --provider gitlab --repo-id <ns%2Fproj> --diff-refs-json <json> <iid> <payload.json>`
+`bash "$VCS" --post-review --provider gitlab --repo-id <ns%2Fproj> --diff-refs-json "$DR" <iid> <payload.json>`
 
+(`DR` holds the output of the driver's `--diff-refs` call, `references/publish.md` Phase D)
 consumes the **same** `_synthesis.json` payload the GitHub path uses
 (`{commit_id, event, body, comments:[{path,line,side,body}]}`) and emits, in order:
 

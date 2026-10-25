@@ -96,7 +96,7 @@ ERR1="$ROOT/s1.err"
 verb "$ERR1" --review-ticket
 RC1=$?
 if [ "$RC1" -ne 0 ] && grep -qF "$MISSING_HINT" "$ERR1" \
-  && grep -qF -- "--tdd-begin" "$ERR1" && grep -qF "gitignored" "$ERR1"; then
+  && grep -qF -- "--tdd-begin" "$ERR1" && grep -qF "git does not track" "$ERR1"; then
   check "S1 --review-ticket names the lost state, the cause and the recovery" PASS
 else
   check "S1 --review-ticket (rc=$RC1 err='$(cat "$ERR1" 2>/dev/null)')" FAIL

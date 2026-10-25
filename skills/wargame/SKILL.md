@@ -35,7 +35,7 @@ Skip it for blank-page ideation, vision, or roadmap work — recon starves and e
 
 Work these in order. Depth scales to the mission; the skeleton does not.
 
-**0 — Frame the mission.** Decide the mode (below). If the user opened with `/goal ...` or the mission is a proof/audit/coverage/invariant task, write the goal contract first (`references/goal-contract.md`) — it becomes the doc's header and the referee for "done." Settle the output path (see *Where output goes*).
+**0 — Frame the mission.** Decide the mode (below). If the mission opens with `/goal ...` (as in `/zensu:wargame /goal ...`; a message that itself starts with `/goal` runs Claude Code's built-in `/goal` stop-condition command instead and never reaches this skill) or the mission is a proof/audit/coverage/invariant task, write the goal contract first (`references/goal-contract.md`) — it becomes the doc's header and the referee for "done." Settle the output path (see *Where output goes*).
 
 **1 — Recon, read-only.** Read what the mission depends on before planning a single move: the repo and its core flow, the reference site, the schema, the process description, the transcripts — whatever the brief names. For a `ZEN-XXX` feature, read its current state (`zensu features get <feature-uuid>`, which takes the UUID rather than the `ZEN-XXX` id, and its linked docs/journeys) as recon input. Recon settles assumptions; what it cannot settle becomes RECON NEEDED. Never mutate anything in this phase.
 

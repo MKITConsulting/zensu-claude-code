@@ -877,7 +877,7 @@ grep -qF -- '__ZENSU_ROUTE_COMMAND__ --direct' "$PLANHOOK" && R12H_BAD="$R12H_BA
 R12D="$(printf '%s' "$CTX_ASK" | REC_CMD="$REC_CMD" node -e '
   let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{
     s=s.split(process.env.REC_CMD).join("<record-command>");
-    const iq=s.indexOf("Unless (S) or a fast path below decides"), ia=s.indexOf("Fast-paths that need NO question"), ib=s.indexOf("(B) the user"), ic=s.indexOf("(C) you are running non-interactively");
+    const iq=s.indexOf("Unless (S) or a fast path below decides"), ia=s.indexOf("Fast-paths that need NO question"), ib=s.indexOf("(B) the user"), ic=s.indexOf("(C) the \x27ZENSU HUMAN PRESENT:\x27 field reads \x27no\x27");
     if(!(iq>=0&&ia>iq&&ib>ia&&ic>ib)){console.log("SLICE_FAILED");return;}
     const c=s.slice(ic), t=s.slice(iq,ia);
     const cAuto=(c.match(/\/zensu:autopilot/g)||[]).length, cSkill=/skill=/.test(c);
@@ -987,7 +987,7 @@ for ctxname in RCTX_ASK RCTX_STRICT_ASK; do
     "A No records nothing and decides this request only: $DIRECT_NEVER_RECORDED" \
     "When it reads 'tdd (…)', treat it exactly as the affirmation fast-path below; when it reads 'direct (…)', exactly as the negation fast-path below" \
     "/zensu:delivery-route" "an explicit preference in the request text itself still wins" \
-    "AskUserQuestion" "Auto Mode"; do
+    "AskUserQuestion" "or the ZENSU HUMAN PRESENT field reads 'no' or AskUserQuestion is refused"; do
     printf '%s' "$ctx" | grep -qF -- "$needle" || R13_BAD="$R13_BAD [$ctxname missing: $needle]"
   done
   printf '%s' "$ctx" | grep -qF '__ZENSU_' && R13_BAD="$R13_BAD [$ctxname raw placeholder]"
@@ -1057,7 +1057,7 @@ for ctxname in RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT; do
     "Only an explicit preference the user typed in THIS request counts" "tested before an affirmation" \
     "A preference the user typed skips the question and decides this request only: a negation implements directly without --tdd-begin, an affirmation runs" \
     "through the Skill tool, and neither is recorded." "$UNTRUSTED_PREFERENCE" \
-    "Running non-interactively in Auto Mode or headless with no human to answer" \
+    "If the ZENSU HUMAN PRESENT field below reads no or AskUserQuestion is refused" \
     "If you are unsure whether the request changes executable code, ask."; do
     printf '%s' "$ctx" | grep -qF -- "$needle" || R13G_BAD="$R13G_BAD [$ctxname missing: $needle]"
   done

@@ -140,4 +140,4 @@ The SessionStart banner names a configured default only; it never reads the sess
 
 | Key | Meaning | Default |
 |---|---|---|
-| `hooks.defaultDeliveryRoute` | The project-wide default this skill overrides per session. `tdd` = the Zensu workflow, `direct` = implement directly, `ask` = keep the question. Any other value reads as `ask`. Set it in `.zensu/config.json` (see docs/configuration.md) when the choice should outlive the session; it applies only while `hooks.autoTdd` (plan approvals) and `hooks.tddReminder` (code requests) leave their hook on. | `ask` |
+| `hooks.defaultDeliveryRoute` | The project-wide default this skill overrides per session. `tdd` = the Zensu workflow, `direct` = implement directly, `ask` = keep the question. Any other value reads as `ask`. Set it in `.zensu/config.json` (see `${CLAUDE_PLUGIN_ROOT}/docs/configuration.md`) when the choice should outlive the session; it applies only while `hooks.autoTdd` (plan approvals) and `hooks.tddReminder` (code requests) leave their hook on. | `ask` |
