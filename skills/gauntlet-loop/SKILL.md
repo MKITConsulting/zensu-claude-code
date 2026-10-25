@@ -99,7 +99,7 @@ closes none.
   takes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, or implementing directly —
   before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER `/zensu:tdd`
   yes/no question on every prompt while no chain is active — it offers neither
-  `/zensu:autopilot` nor `/zensu:pilot`, and in non-interactive Auto Mode the
+  `/zensu:autopilot` nor `/zensu:pilot`, and when no human can answer it, the
   fast-path runs the workflow without asking. Approving a gauntlet charter through
   plan mode therefore hands the mission to a different skill. Decide that question
   deliberately before the loop starts, or approve the charter with `AskUserQuestion`
