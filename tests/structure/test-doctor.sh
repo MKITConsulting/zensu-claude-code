@@ -10585,7 +10585,7 @@ SA_ON="$(run_report "$PLUGIN_DIR" - "$EMPTY_PROJECT")"
 SA_OFF="$(run_report "$PLUGIN_DIR" "$SA_OFF_CFG" "$EMPTY_PROJECT")"
 SA_BAD="$(run_report "$PLUGIN_DIR" "$SA_BAD_CFG" "$EMPTY_PROJECT")"
 case "$SA_ON" in
-  *"✅  subagents: a neutral subagent may use every tool except what reaches Zensu's own state"*"A named neutral subagent may run Bash and Monitor commands behind an accident guard, which prevents accidents and is not a sandbox"*)
+  *"✅  subagents: a neutral subagent may use every tool except what reaches Zensu's own state"*"A named neutral subagent may run Bash commands behind an accident guard, which prevents accidents and is not a sandbox"*)
     check "P8sa1 the subagents row states the Zensu-state boundary and the guarded shell" PASS ;;
   *) check "P8sa1 the subagents row states the Zensu-state boundary and the guarded shell" FAIL ;;
 esac
@@ -10615,7 +10615,7 @@ esac
 SA_REF="$PLUGIN_DIR/skills/doctor/references/coexistence.md"
 SA_ROW_MISSING=""
 for SA_ROW in 'a neutral subagent may use every tool except what reaches Zensu' \
-  'A named neutral subagent may run Bash and Monitor commands behind an accident guard' \
+  'A named neutral subagent may run Bash commands behind an accident guard' \
   'The subagent shell is off (hooks.subagentShell=false)' \
   'subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false' \
   'subagents: the capability gate is installed but its shell-guard module'; do

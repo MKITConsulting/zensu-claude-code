@@ -34,13 +34,15 @@ reviewers and the PLM may also call `StructuredOutput`, through which a workflow
 agent returns the result its script asked for; it carries data to that script and
 nothing else. Every other
 neutral `host-profile-v1` child may use every tool except what reaches Zensu's
-own state (listed in [Configuration](configuration.md)). It cannot invoke
-`shell`, `exec`, `exec_command`, `terminal`, `command` or `PowerShell`, and a
-tool whose inputs the gate does not know may not name Zensu's state in its input.
-It runs `Bash` and `Monitor` commands only when it reports an `agent_type`, is
-neither a read-only Zensu agent nor a `zensu-review-*` persona, and
-`hooks.subagentShell` is not `false`; every such command is checked by an
-accident guard that prevents accidents and is not a sandbox.
+own state or runs commands outside `Bash` (listed in
+[Configuration](configuration.md)). It cannot invoke `shell`, `exec`,
+`exec_command`, `terminal`, `command`, `PowerShell`, a `Monitor` command or a
+tool whose name marks it as running commands, and a tool whose inputs the gate
+does not know may not name Zensu's state in its input. It runs `Bash` only when
+it reports an `agent_type`, is neither a read-only Zensu agent nor a
+`zensu-review-*` persona, and `hooks.subagentShell` is not `false`; every such
+command is checked by an accident guard that prevents accidents and is not a
+sandbox.
 
 The two review-worker identities add a private evidence lease on top of that
 three-tool profile. The interactive main thread creates one immutable generation

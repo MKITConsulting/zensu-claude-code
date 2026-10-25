@@ -84,20 +84,21 @@ never run in GitHub Actions.
   `StructuredOutput`; it receives neither `main-v1`
   nor Session Control selectors.
 - Every other neutral `host-profile-v1` child may use every tool except what
-  reaches Zensu's own state. The five shell/command tool aliases other than
-  `Bash` and `PowerShell` are denied before command contents are considered; for
-  those tools this is a capability rule, not a token denylist. A tool whose inputs
-  the gate does not know, command-executing MCP servers included, is admitted
-  unless a path it takes reaches the installed plugin, its private data or a
-  config layer, or a string of its input names that state, the session record or
-  a `.zensu` directory; that check reads text and is no capability rule.
-  `Bash` and `Monitor` commands pass only for a child that reports a usable `agent_type`, and a usable
+  reaches Zensu's own state or runs commands outside `Bash`. The five
+  shell/command tool aliases other than `Bash`, `PowerShell` and a `Monitor`
+  command are denied before command contents are considered; for those tools
+  this is a capability rule, not a token denylist. A tool the gate does not know
+  whose name marks it as running commands or code, command-executing MCP servers
+  such as `ctx_execute` included, is denied by that name, a heuristic over the
+  words of its name. Any other tool whose inputs the gate does not know is
+  admitted unless a path it takes reaches the installed plugin, its private data
+  or a config layer, or a string of its input names that state, the session
+  record or a `.zensu` directory; that check reads text and is no capability rule.
+  `Bash` passes only for a child that reports a usable `agent_type`, and a usable
   `agent_id` whenever it reports one, and that is not a `zensu-review-*` persona,
   only while `hooks.subagentShell` grants it, and only past the accident guard in
-  `hooks/lib/subagent-shell-guard-v1.js`. A refused grant denies `Bash` and a
-  `Monitor` command with the command-execution reason and its cause before the
-  command is considered; a command-executing MCP server is not covered by the
-  grant, so withdrawing it does not stop such a server. The guard parses the command text and is not a capability rule: `env`, selector expansions, named Zensu helpers and binders,
+  `hooks/lib/subagent-shell-guard-v1.js`. A refused grant denies `Bash` with the
+  command-execution reason and its cause before the command is considered. The guard parses the command text and is not a capability rule: `env`, selector expansions, named Zensu helpers and binders,
   and protected paths are denied, while an obfuscated protected path or helper
   passes, a documented gap rather than a boundary. The guard prevents accidents
   and is not a sandbox. The `general-purpose` contract scenario pins both

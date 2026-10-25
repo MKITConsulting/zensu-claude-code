@@ -248,6 +248,9 @@ const KNOWN_TOOLS = new Set([
   'mcp__plugin_context7_context7__query-docs',
 ]);
 const POWERSHELL_TOOL = 'PowerShell';
+const MONITOR_TOOL = 'Monitor';
+const COMMAND_NAME_WORDS = new Set(['exec', 'execute', 'shell', 'terminal', 'command', 'repl', 'eval', 'process', 'bash', 'powershell', 'pwsh', 'cmd']);
+const COMMAND_GATE_SCOPE = "Zensu's command gates see only Bash and PowerShell commands";
 const MAIN_THREAD_REMEDY = 'report the need to the main thread instead';
 const NON_PATH_TOOLS = new Set(['StructuredOutput', 'ReportFindings', 'SubagentHandback', 'AskUserQuestion']);
 const SEARCH_EXAMPLE_LIMIT = 12;
@@ -692,7 +695,7 @@ function configLayerViolation(payload, trusted, candidates) {
 function hostProfileToolViolation(payload, trusted, protectedRoots) {
   const tool = payload.tool_name;
   const commandViolation = () => `${COMMAND_TOOL_DENY}. ${searchRemedy(trusted, protectedRoots)} ${shellGuard.GRANT_TAIL}`;
-  if (shellGuard.isShellCall(payload) || shellGuard.isMonitorCommand(payload)) {
+  if (shellGuard.isShellCall(payload)) {
     const shell = shellGuard.shellViolation(payload, trusted);
     if (!shell) return null;
     return shell.kind === 'grant'
@@ -703,14 +706,41 @@ function hostProfileToolViolation(payload, trusted, protectedRoots) {
   if (tool === POWERSHELL_TOOL) {
     return `host-profile-v1 cannot invoke ${POWERSHELL_TOOL}, because the Zensu accident guard reads only Bash commands; run the command through Bash, or ${MAIN_THREAD_REMEDY}`;
   }
+  if (tool === MONITOR_TOOL && !isMonitorStream(payload.tool_input)) {
+    return `host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because ${COMMAND_GATE_SCOPE}; ${bashRemedy(payload)}`;
+  }
   if (/^mcp__.*zensu/i.test(tool) && !ZENSU_MCP_READ_RE.test(tool.split('__').at(-1))) {
     return `host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist, because Zensu mutations run on the main thread; ${MAIN_THREAD_REMEDY}`;
   }
   if (!knownTool(tool)) {
+    if (runsCommands(tool)) {
+      return `host-profile-v1 cannot invoke ${tool}, because its name marks it as running commands or code and ${COMMAND_GATE_SCOPE}; ${bashRemedy(payload)}`;
+    }
     const mention = shellGuard.inputMention(payload, trusted);
     if (mention) return `host-profile-v1 cannot invoke ${tool} here: ${mention}, and Zensu cannot tell what that tool does with it; ${MAIN_THREAD_REMEDY}`;
   }
   return null;
+}
+
+function bashRemedy(payload) {
+  return shellGuard.grantRefusal(payload) === null
+    ? `run the command through Bash, or ${MAIN_THREAD_REMEDY}`
+    : MAIN_THREAD_REMEDY;
+}
+
+function isMonitorStream(input) {
+  return Boolean(input) && typeof input === 'object' && !Array.isArray(input)
+    && Object.prototype.hasOwnProperty.call(input, 'ws')
+    && !Object.prototype.hasOwnProperty.call(input, 'command');
+}
+
+function runsCommands(tool) {
+  const words = tool.split('__').at(-1)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return words[0] === 'run' || words.some((word) => COMMAND_NAME_WORDS.has(word));
 }
 
 function knownTool(tool) {
@@ -1167,6 +1197,7 @@ module.exports = {
   prunedCause,
   performedDisclosure,
   DENY_PREFIX,
+  COMMAND_NAME_WORDS,
   KNOWN_TOOLS,
   NON_PATH_TOOLS,
   knownTool,

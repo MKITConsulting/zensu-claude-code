@@ -105,10 +105,12 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   `Read`/`Grep`/`Glob` on the paths their private lease names; ordinary
   host-profile children may use every tool that Claude and their agent definitions
   grant, except what reaches Zensu's own state (see **Security boundary** below).
-  A child that reports a usable `agent_type` may also run `Bash` and `Monitor`
-  commands behind an accident guard, a grant that `hooks.subagentShell` can
-  withdraw; `PowerShell` and the five other shell/command aliases stay denied, and
-  so does the shell of an unnamed child or of a `zensu-review-*` persona. The guard prevents accidents
+  A child that reports a usable `agent_type` may also run `Bash` commands behind
+  an accident guard, a grant that `hooks.subagentShell` can withdraw;
+  `PowerShell`, the five other shell/command aliases, a `Monitor` command and a
+  tool whose name marks it as running commands stay denied, because Zensu's
+  command gates see only Bash and PowerShell commands, and so does the shell of
+  an unnamed child or of a `zensu-review-*` persona. The guard prevents accidents
   and is not a sandbox, because command text cannot be safely confined by token
   inspection. A child's file tools also cannot edit a Zensu config layer,
   because those layers decide the grant; the guard refuses a command that names
@@ -157,16 +159,19 @@ project code inside an OS sandbox/container with a separate UID and restricted
 mounts; do not treat `host-profile-v1` as a host sandbox. Normal report prose
 cannot impersonate a principal: identity comes only from trusted hook payload
 fields. For neutral children the gate blocks only what reaches Zensu's own
-state, which the capability-gate row in [Configuration](configuration.md) spells
-out: `PowerShell` and the five shell/command aliases other than `Bash` are
-denied, and a tool whose inputs the gate does not know, a third-party MCP server
-that exposes local execution such as `ctx_execute` or `run_in_terminal`
-included, is admitted unless a path it takes reaches the installed plugin, its
-private data or a config layer, or a string of its input names that state, the
-session record or a `.zensu` directory. That check reads text and is not a
-sandbox either: such a tool runs whatever its server runs, so the host's own
+state or runs commands outside `Bash`, which the capability-gate row in
+[Configuration](configuration.md) spells out: `PowerShell`, the five
+shell/command aliases other than `Bash`, a `Monitor` command and a tool whose
+name marks it as running commands or code, a third-party MCP server that exposes
+local execution such as `ctx_execute` or `run_in_terminal` included, are denied,
+because Zensu's command gates see only Bash and PowerShell commands. Any other
+tool whose inputs the gate does not know is admitted unless a path it takes
+reaches the installed plugin, its private data or a config layer, or a string of
+its input names that state, the session record or a `.zensu` directory. That
+check reads text and is not a sandbox either: such a tool runs whatever its
+server runs, and the name check reads only the tool's name, so the host's own
 permission rules decide how far a newly connected MCP server reaches.
-`Bash`, and a `Monitor` command, are granted only
+`Bash` is granted only
 to a child that reports a usable `agent_type`, and a usable `agent_id` whenever
 it reports one, and that is not a `zensu-review-*` persona. `hooks.subagentShell`
 withdraws the grant when it is `false` in a config file the gate consults: the
@@ -179,7 +184,8 @@ object; when a consulted path is relative or spans lines; and when neither
 does not exist withdraws nothing, so the grant is on by default. While
 `ZENSU_CONFIG` is set, a `false` in the global file or the project overlay is
 not read and does not withdraw the grant. A refused grant
-denies `Bash` and a `Monitor` command before the command is considered. A granted command must still
+denies `Bash` before the command is considered, and the `Monitor` and
+command-tool denies then name only the main thread as the way out. A granted command must still
 pass the accident guard in `hooks/lib/subagent-shell-guard-v1.js`, which parses
 it as shell and denies, among other rules, protected paths, `.zensu`
 directories, a command that runs a Zensu session or workflow helper such as

@@ -515,16 +515,13 @@ function provePrincipalAndPreToolContracts(options) {
 
     for (const [toolName, toolInput] of [
       ['Skill', { skill: 'zensu:doctor' }],
-      ['Monitor', { command: 'sleep 1', description: 'wait for a process' }],
-      ['Monitor', { ws: 'ws://localhost:3000/events', description: 'watch a stream' }],
+      ['Monitor', { ws: { url: 'ws://localhost:3000/events' }, description: 'watch a stream', timeout_ms: 60000 }],
       ['TaskStop', { task_id: 'contract-task' }],
       ['EnterWorktree', { name: 'contract-worktree' }],
       ['Workflow', { script: 'export const meta = { name: "contract", description: "contract" }' }],
       ['Task', { subagent_type: 'Explore', prompt: 'Inspect an ordinary code path.' }],
       ['mcp__plugin_playwright_playwright__browser_navigate', { url: 'http://localhost:3000' }],
       ['mcp__plugin_context-mode_context-mode__ctx_search', { queries: ['review'] }],
-      ['mcp__plugin_context-mode_context-mode__ctx_execute', { language: 'shell', code: 'git status --short' }],
-      ['mcp__terminal__run_in_terminal', { command: 'git status --short' }],
       ['mcp__github__get_pull_request', { owner: 'example', repo: 'example', pull_number: 1 }],
     ]) {
       assertAllowed(invokeRuntime(gate, {
@@ -538,11 +535,34 @@ function provePrincipalAndPreToolContracts(options) {
       }, environment), `general-purpose ${toolName} outside Zensu state`);
     }
 
+    const commandGateTail = "Zensu's command gates see only Bash and PowerShell commands; run the command through Bash, or report the need to the main thread instead";
+    for (const [toolName, toolInput, exactReason] of [
+      ['Monitor', { command: 'sleep 1', description: 'wait for a process', timeout_ms: 60000 },
+        `${DENY_PREFIX}host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because ${commandGateTail}`],
+      ['mcp__plugin_context-mode_context-mode__ctx_execute', { language: 'shell', code: 'git status --short' },
+        `${DENY_PREFIX}host-profile-v1 cannot invoke mcp__plugin_context-mode_context-mode__ctx_execute, because its name marks it as running commands or code and ${commandGateTail}`],
+      ['mcp__terminal__run_in_terminal', { command: 'git status --short' },
+        `${DENY_PREFIX}host-profile-v1 cannot invoke mcp__terminal__run_in_terminal, because its name marks it as running commands or code and ${commandGateTail}`],
+    ]) {
+      const denied = assertDenied(invokeRuntime(gate, {
+        hook_event_name: 'PreToolUse',
+        session_id: sessionId,
+        cwd: externalCwd,
+        agent_id: agentId,
+        agent_type: agentType,
+        tool_name: toolName,
+        tool_input: toolInput,
+      }, environment), `general-purpose ${toolName} command`, 'command gates see only Bash');
+      if (denied.hookSpecificOutput.permissionDecisionReason !== exactReason) {
+        throw new Error(`general-purpose ${toolName} command denial was not exact`);
+      }
+    }
+
     const mentionTail = ', and Zensu cannot tell what that tool does with it; report the need to the main thread instead';
     for (const [label, toolName, toolInput, mention] of [
-      ['code naming .zensu', 'mcp__plugin_context-mode_context-mode__ctx_execute', { language: 'shell', code: 'cat .zensu/state/*.json' },
+      ['a search naming .zensu', 'mcp__plugin_context-mode_context-mode__ctx_search', { queries: ['cat .zensu/state/*.json'] },
         'its input names a .zensu directory, which holds Zensu workflow state or configuration'],
-      ['a terminal command naming plugin data', 'mcp__terminal__run_in_terminal', { command: `ls ${context.plugin_data}` },
+      ['a search naming plugin data', 'mcp__plugin_context-mode_context-mode__ctx_search', { queries: [`ls ${context.plugin_data}`] },
         'its input names the private plugin data, the installed plugin, the session record or the Zensu config file'],
       ['a file URL into .zensu', 'mcp__plugin_playwright_playwright__browser_navigate', { url: `file://${protectedPath}` },
         'its input names a .zensu directory, which holds Zensu workflow state or configuration'],
@@ -672,7 +692,7 @@ function provePrincipalAndPreToolContracts(options) {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }
-    return ['Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedShellAndMonitor:ZensuStateAndShellAliasesDenied'];
+    return ['Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedBash:ZensuStateAndCommandRunnersDenied'];
   }
 
   const denyScenarios = [

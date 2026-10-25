@@ -74,8 +74,8 @@
   vars: { scenario_id: pretool-deleted-cas-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
 - description: "C38 PLM stays neutral and read-only in frontmatter plus PreToolUse"
   vars: { scenario_id: plm-readonly-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:ZensuPlm:SessionStart:host-profile-v1:ReadOnly:WriteDenied' }
-- description: "C39 generic review workers may use every tool that stays clear of Zensu state, with Bash and Monitor commands behind the accident guard, while Zensu state, the shell aliases and PowerShell stay denied"
-  vars: { scenario_id: generic-review-worker-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedShellAndMonitor:ZensuStateAndShellAliasesDenied' }
+- description: "C39 generic review workers may use every tool that stays clear of Zensu state and runs no command outside Bash, with Bash behind the accident guard, while Zensu state, the shell aliases, PowerShell, Monitor commands and MCP tools that run commands stay denied"
+  vars: { scenario_id: generic-review-worker-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedBash:ZensuStateAndCommandRunnersDenied' }
 - description: "C40 native skill helper binds per call, ignores ambient selectors, rejects foreign and derived session ids, and leaves CLAUDE_ENV_FILE untouched"
   vars: { scenario_id: native-helper-binding, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:NativeSkillBinding:PerCall:EnvFileUntouched:AmbientSelectorsIgnored:ForeignAndDerivedSessionDenied' }
 - description: "C41 dedicated evidence-worker definitions expose only leased Read, Grep, and Glob and receive their exact principals"

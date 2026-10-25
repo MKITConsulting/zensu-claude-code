@@ -30,13 +30,13 @@ closes none.
   `pre-reviewer-capability-gate.sh` runs on the PreToolUse matcher `.*`; for a neutral
   `host-profile-v1` child (`hooks/lib/reviewer-capability-v1.js`) it denies Session
   Control and workflow paths, `.zensu/`, writes to the installed plugin or its private
-  data, Zensu configuration layers, Zensu MCP mutations, `PowerShell` and the five
-  shell aliases `shell`, `exec`, `exec_command`, `terminal` and `command`. A
-  command-execution tool from an MCP server, such as `ctx_execute`, is admitted unless
-  its input names that state. `Explore` and `general-purpose` both
-  classify as `host-profile-v1`, so **a builder or critic that reports its `agent_type`
-  may hold a guarded `Bash` unless `hooks.subagentShell` is `false`**, and a `Monitor`
-  command passes the same guard — the guard (`hooks/lib/subagent-shell-guard-v1.js`)
+  data, Zensu configuration layers, Zensu MCP mutations, `PowerShell`, the five
+  shell aliases `shell`, `exec`, `exec_command`, `terminal` and `command`, a `Monitor`
+  command and a command-execution tool from an MCP server, such as `ctx_execute`,
+  because Zensu's command gates see only Bash and PowerShell commands. `Explore` and
+  `general-purpose` both classify as `host-profile-v1`, so **a builder or critic that
+  reports its `agent_type` may hold a guarded `Bash` unless `hooks.subagentShell` is
+  `false`** — the guard (`hooks/lib/subagent-shell-guard-v1.js`)
   prevents accidents and is not a sandbox. They may still read, and may write files
   including outside the project root: `neutralViolation` applies NO project-root
   confinement, and `tests/structure/test-reviewer-capability-gate.sh` pins an external
@@ -46,7 +46,8 @@ closes none.
   Be precise about the bound, because an overclaim here is worse than none — it is
   what makes you stop checking. It is a DENYLIST around Zensu's own state, not an
   allowlist, so a tool a later host adds is admitted the day it ships, browser and
-  desktop-session tools included. `Agent` is admitted, so a neutral child keeps its
+  desktop-session tools included, unless its name marks it as running commands.
+  `Agent` is admitted, so a neutral child keeps its
   nested-spawn capability and `tests/structure/test-reviewer-capability-gate.sh` pins
   that allowance. A `general-purpose` builder can therefore start its own fan-out —
   outside this loop's packet discipline and uncounted against the concurrency cap in

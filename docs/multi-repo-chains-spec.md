@@ -102,9 +102,9 @@ at all, and `pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:636` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:639` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:594-596` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:600-602` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
@@ -407,7 +407,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:293`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:296`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming

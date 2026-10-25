@@ -87,10 +87,10 @@ State the property, not the grant list — "no write tool, no spawn" — and alw
 intent while a grant only removes reach.
 
 **Inside the Zensu plugin an `Explore` critic runs shell commands only through a
-guarded `Bash` or `Monitor`.** The `.*` PreToolUse capability gate denies the other
-shell aliases and `PowerShell` to a neutral `host-profile-v1` child and otherwise
-blocks only what reaches Zensu's own state, so an MCP tool that runs code is
-admitted unless its input names that state. It admits `Bash` only for a child that
+guarded `Bash`.** The `.*` PreToolUse capability gate denies the other shell aliases,
+`PowerShell`, a `Monitor` command and an MCP tool that runs commands to a neutral
+`host-profile-v1` child, because Zensu's command gates see only Bash and PowerShell
+commands, and otherwise blocks only what reaches Zensu's own state. It admits `Bash` only for a child that
 reports its `agent_type`, only while `hooks.subagentShell` is not `false`, and only
 past a guard that prevents accidents and is not a sandbox. `Explore` is such a child *while the
 host reports its `agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin"

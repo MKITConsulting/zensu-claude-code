@@ -239,13 +239,6 @@ function isShellCall(payload) {
   return payload.tool_name === 'Bash';
 }
 
-function isMonitorCommand(payload) {
-  const input = payload.tool_input;
-  return payload.tool_name === 'Monitor'
-    && Boolean(input) && typeof input === 'object' && !Array.isArray(input)
-    && Object.prototype.hasOwnProperty.call(input, 'command');
-}
-
 function grantRefusal(payload, environment = process.env, options = {}) {
   const type = payload.agent_type;
   if (!boundedIdentity(type)) {
@@ -1848,7 +1841,6 @@ module.exports = {
   configAuthorities,
   grantRefusal,
   inputMention,
-  isMonitorCommand,
   isShellCall,
   parseScript,
   shellText,

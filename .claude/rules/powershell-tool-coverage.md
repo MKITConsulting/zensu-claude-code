@@ -121,7 +121,7 @@ shell is refused.
 | `post-artifact-redact.sh` | Parity: the sweep runs as after Bash. |
 | `pre-work-order-gate.sh` | Refused in a bound work-order session; `harness/launcher.js` starts Claude with `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`. |
 | `post-work-order.sh` | Runs for every tool; its `zensu work ask` branch reads Bash only, which the pre gate leaves as the only shell. The `postToolUpdate` PowerShell case in `work-order-v1.test.js` pins that a PowerShell ask ends nothing. |
-| `pre-reviewer-capability-gate.sh` | Denied for every non-main principal: the reviewer, PLM and evidence profiles admit only their read tools, and the neutral profile denies `PowerShell` by name, because the accident guard reads Bash only; the neutral grant covers `Bash` and a `Monitor` command. |
+| `pre-reviewer-capability-gate.sh` | Denied for every non-main principal: the reviewer, PLM and evidence profiles admit only their read tools, and the neutral profile denies `PowerShell` by name, because the accident guard reads Bash only; the neutral grant covers `Bash` alone. |
 
 ## Steering and diagnostics
 

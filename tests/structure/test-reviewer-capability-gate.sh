@@ -299,10 +299,10 @@ assert_case "neutral agent keeps read-only Zensu MCP tools" allow arbitrary-cust
 assert_case "neutral agent may use browser tools of a foreign server keyed playwright" allow arbitrary-custom mcp__playwright__browser_snapshot '{}'
 assert_case "neutral agent cannot point a browser at a file under .zensu" deny arbitrary-custom mcp__Claude_Browser__navigate "{\"url\":\"file://$PROJECT/.zensu/state/tdd-phase-${SESSION_KEY}.json\"}"
 assert_case "neutral nested-agent capability stays host-governed" allow arbitrary-custom Agent '{"subagent_type":"general-purpose","prompt":"review session-control and main-v1"}'
-assert_case "neutral agent may run code through context-mode ctx_execute" allow general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"ls src"}'
-assert_case "neutral agent cannot name .zensu in code it runs through context-mode ctx_execute" deny general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"cat .zensu/state/*.json"}'
-assert_case "neutral agent may run a command through a terminal MCP server" allow general-purpose mcp__terminal__run_in_terminal '{"command":"ls src"}'
-assert_case "neutral agent cannot name .zensu in a command it runs through a terminal MCP server" deny general-purpose mcp__terminal__run_in_terminal '{"command":"ls .zensu/state"}'
+assert_case "neutral agent cannot run code through context-mode ctx_execute, which no Zensu command gate sees" deny general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"ls src"}'
+assert_case "neutral agent may search through context-mode ctx_search" allow general-purpose mcp__plugin_context-mode_context-mode__ctx_search '{"queries":["session control"]}'
+assert_case "neutral agent cannot name .zensu in a context-mode search" deny general-purpose mcp__plugin_context-mode_context-mode__ctx_search '{"queries":["cat .zensu/state/*.json"]}'
+assert_case "neutral agent cannot run a command through a terminal MCP server" deny general-purpose mcp__terminal__run_in_terminal '{"command":"ls src"}'
 assert_case "neutral StructuredOutput may name a .zensu file in its result" allow general-purpose StructuredOutput '{"target_files":[".zensu/state/tdd-phase.json"],"summary":"inspected"}'
 assert_case "neutral Read under .zensu/state stays denied beside that StructuredOutput" deny general-purpose Read "{\"file_path\":\"$PROJECT/.zensu/state/tdd-phase-${SESSION_KEY}.json\"}"
 
@@ -329,19 +329,32 @@ HOST_PROFILE_VERDICTS="$(ZENSU_CONFIG="$TMP/absent-zensu-config.json" node -e '
   const listed = `${known.join(" ")}|${[...gate.NON_PATH_TOOLS].join(" ")}`;
   verdict(listed === "Read Grep Glob Edit Write MultiEdit NotebookEdit apply_patch LSP WebFetch WebSearch ToolSearch TodoWrite TaskCreate TaskGet TaskList TaskUpdate Agent Task SendMessage AskUserQuestion StructuredOutput ReportFindings SubagentHandback Bash mcp__plugin_context7_context7__resolve-library-id mcp__plugin_context7_context7__query-docs|StructuredOutput ReportFindings SubagentHandback AskUserQuestion",
     "the tools whose inputs the gate knows and its path-free tools are exactly the reviewed sets", listed);
-  for (const tool of [...known.filter((name) => name !== "Bash"), "Skill", "Monitor", "TaskOutput", "TaskStop", "BashOutput", "KillShell", "CronCreate", "ScheduleWakeup", "RemoteTrigger", "Workflow", "EnterWorktree", "Artifact", "Config", "REPL", "ListMcpResourcesTool", "ReadMcpResourceTool", "NotebookRead", "subagenthandback", " Read", "MCP__zensu__get_feature", "mcp__github__get_pull_request", "mcp__context7__query-docs", "mcp__plugin_context-mode_context-mode__ctx_search", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__terminal__run_in_terminal", "mcp__Claude_Browser__navigate", "mcp__playwright__browser_snapshot", "mcp__ccd_session_mgmt__search_session_transcripts"]) {
+  for (const tool of [...known.filter((name) => name !== "Bash"), "Skill", "TaskOutput", "TaskStop", "CronCreate", "ScheduleWakeup", "RemoteTrigger", "Workflow", "EnterWorktree", "Artifact", "Config", "ListMcpResourcesTool", "ReadMcpResourceTool", "NotebookRead", "subagenthandback", " Read", "MCP__zensu__get_feature", "mcp__github__get_pull_request", "mcp__context7__query-docs", "mcp__plugin_context-mode_context-mode__ctx_search", "mcp__github__get_workflow_run", "mcp__github__search_code", "mcp__docs__runbook_lookup", "mcp__Claude_Browser__navigate", "mcp__playwright__browser_snapshot", "mcp__ccd_session_mgmt__search_session_transcripts"]) {
     const reason = judge(tool, { path: "src", pattern: "x", prompt: "x" });
     verdict(reason === null, `host-profile-v1 admits ${JSON.stringify(tool)} while its input stays clear of Zensu state`, reason);
   }
-  const guardTail = "The guard prevents accidents and is not a sandbox; report the need to the main thread instead.";
+  const commandWords = [...gate.COMMAND_NAME_WORDS].join(" ");
+  verdict(commandWords === "exec execute shell terminal command repl eval process bash powershell pwsh cmd",
+    "the words that mark a tool name as running commands are exactly the reviewed set", commandWords);
+  const commandScope = "Zensu\x27s command gates see only Bash and PowerShell commands";
+  for (const tool of ["REPL", "BashOutput", "KillShell", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__plugin_context-mode_context-mode__ctx_execute_file", "mcp__terminal__run_in_terminal", "mcp__desktop-commander__start_process", "mcp__ide__executeCode", "mcp__shell__run", "mcp__Blender__execute_blender_code"]) {
+    const unnamed = judge(tool, { path: "src", code: "ls" });
+    verdict(unnamed === `host-profile-v1 cannot invoke ${tool}, because its name marks it as running commands or code and ${commandScope}; report the need to the main thread instead`, `host-profile-v1 denies ${JSON.stringify(tool)}, whose name marks it as running commands, without pointing a child that holds no shell grant at Bash`, unnamed);
+    const named = judgeAs("general-purpose", tool, { path: "src", code: "ls" });
+    verdict(named === `host-profile-v1 cannot invoke ${tool}, because its name marks it as running commands or code and ${commandScope}; run the command through Bash, or report the need to the main thread instead`, `host-profile-v1 points a child that holds the shell grant from ${JSON.stringify(tool)} to Bash`, named);
+  }
+  const monitorDeny = `host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because ${commandScope}; `;
   const monitorCommand = judgeAs("general-purpose", "Monitor", { command: "tail -f build.log" });
-  verdict(monitorCommand === null, "a named neutral child may run a Monitor command behind the accident guard", monitorCommand);
-  const monitorGuard = judgeAs("general-purpose", "Monitor", { command: "tail -f .zensu/state/run.log" });
-  verdict(monitorGuard === `host-profile-v1 shell guard: the command names a .zensu directory, which holds Zensu workflow state or configuration. ${guardTail}`, "the accident guard judges a Monitor command like a Bash command", monitorGuard);
+  verdict(monitorCommand === `${monitorDeny}run the command through Bash, or report the need to the main thread instead`, "a named neutral child cannot run a Monitor command and is pointed at Bash", monitorCommand);
   const personaMonitor = judgeAs("zensu-review-domain", "Monitor", { command: "pwd" });
-  verdict(typeof personaMonitor === "string" && personaMonitor.startsWith("host-profile-v1 cannot invoke command-execution tools: a zensu-review-* persona"), "a zensu-review-* persona gets no Monitor command", personaMonitor);
-  const personaStream = judgeAs("zensu-review-domain", "Monitor", { ws: "wss://example.test/feed" });
-  verdict(personaStream === null, "a Monitor stream runs no command, so it needs no shell grant", personaStream);
+  verdict(personaMonitor === `${monitorDeny}report the need to the main thread instead`, "a zensu-review-* persona, which holds no shell grant, is not pointed at Bash", personaMonitor);
+  const stream = { ws: { url: "wss://example.test/feed" }, description: "feed", timeout_ms: 60000 };
+  const personaStream = judgeAs("zensu-review-domain", "Monitor", stream);
+  verdict(personaStream === null, "a Monitor ws stream runs no command, so every neutral child may open one", personaStream);
+  const mixed = judgeAs("general-purpose", "Monitor", { ...stream, command: "pwd" });
+  verdict(mixed === `${monitorDeny}run the command through Bash, or report the need to the main thread instead`, "a Monitor call that carries a command beside its stream is a command", mixed);
+  const shapeless = judge("Monitor", { description: "x", timeout_ms: 60000 });
+  verdict(shapeless === `${monitorDeny}report the need to the main thread instead`, "a Monitor call without a stream fails closed as a command", shapeless);
   const commandLead = "host-profile-v1 cannot invoke command-execution tools. To search the project, ";
   for (const tool of ["shell", "exec", "exec_command", "terminal", "command"]) {
     const reason = judge(tool, { path: "src/probe.js", command: "pwd" });
@@ -355,8 +368,8 @@ HOST_PROFILE_VERDICTS="$(ZENSU_CONFIG="$TMP/absent-zensu-config.json" node -e '
   const workflowMention = "its input names a .zensu directory, which holds Zensu workflow state or configuration";
   const stateMention = "its input names the private plugin data, the installed plugin, the session record or the Zensu config file";
   for (const [label, tool, input, mention] of [
-    ["code that names .zensu", "mcp__plugin_context-mode_context-mode__ctx_execute", { language: "shell", code: "cat .zensu/state/*.json" }, workflowMention],
-    ["a command that names the private plugin data", "mcp__terminal__run_in_terminal", { command: `ls ${pluginData}` }, stateMention],
+    ["a search query that names .zensu", "mcp__plugin_context-mode_context-mode__ctx_search", { queries: ["cat .zensu/state/*.json"] }, workflowMention],
+    ["text that names the private plugin data", "mcp__github__create_issue", { title: "x", body: `see ${pluginData}` }, stateMention],
     ["a file URL into .zensu", "mcp__Claude_Browser__navigate", { url: `file://${projectRoot}/.zensu/state/tdd-phase.json` }, workflowMention],
     ["text that names the installed plugin", "Skill", { skill: "x", args: `${pluginRoot}/hooks` }, stateMention],
     ["the environment file of a process", "mcp__files__read_text_file", { target: "/proc/self/environ" }, "its input names the environment file of a process"],
@@ -432,11 +445,17 @@ if [ "$REVIEWER_TRAVERSAL_REASON" = "${DENY_PREFIX}reviewer-readonly-v1 traversa
 else
   check "the reviewer traversal deny must name the subdirectory remedy (got: ${REVIEWER_TRAVERSAL_REASON:-<empty>})" FAIL
 fi
-MCP_MENTION_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"grep -r x .zensu"}')"
-if [ "$MCP_MENTION_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke mcp__plugin_context-mode_context-mode__ctx_execute here: its input names a .zensu directory, which holds Zensu workflow state or configuration, and Zensu cannot tell what that tool does with it; report the need to the main thread instead" ]; then
-  check "a code-running MCP tool whose input names .zensu gets the mention deny through the gate" PASS
+MCP_COMMAND_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"ls src"}')"
+if [ "$MCP_COMMAND_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke mcp__plugin_context-mode_context-mode__ctx_execute, because its name marks it as running commands or code and Zensu's command gates see only Bash and PowerShell commands; run the command through Bash, or report the need to the main thread instead" ]; then
+  check "a code-running MCP tool gets the command deny through the gate, with Bash named as the way out" PASS
 else
-  check "a code-running MCP tool whose input names .zensu must get the mention deny (got: ${MCP_MENTION_REASON:-<empty>})" FAIL
+  check "a code-running MCP tool must get the command deny with Bash named as the way out (got: ${MCP_COMMAND_REASON:-<empty>})" FAIL
+fi
+MCP_MENTION_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_search '{"queries":["grep -r x .zensu"]}')"
+if [ "$MCP_MENTION_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke mcp__plugin_context-mode_context-mode__ctx_search here: its input names a .zensu directory, which holds Zensu workflow state or configuration, and Zensu cannot tell what that tool does with it; report the need to the main thread instead" ]; then
+  check "an MCP tool whose input names .zensu gets the mention deny through the gate" PASS
+else
+  check "an MCP tool whose input names .zensu must get the mention deny (got: ${MCP_MENTION_REASON:-<empty>})" FAIL
 fi
 mkdir "$PROJECT/docs"
 DEMAND_REASON="$(deny_reason general-purpose shell '{"command":"ls"}')"
@@ -472,9 +491,9 @@ HOST_CONTEXT_BOUNDARY="$(node -e '
   const text = core.renderHostContext(JSON.parse(fs.readFileSync(process.argv[2], "utf8")));
   const missing = [
     "admits every tool except what reaches Zensu\x27s own state",
-    "Zensu MCP mutations, PowerShell and every shell alias other than Bash",
+    "Zensu MCP mutations, PowerShell, every shell alias other than Bash, a Monitor command and a tool whose name marks it as running commands or code",
     "may not name the installed plugin, its private data, the session record, a Zensu configuration layer or a .zensu directory anywhere in its input",
-    "may run Bash and Monitor commands behind an accident guard unless hooks.subagentShell is false",
+    "may run Bash commands behind an accident guard unless hooks.subagentShell is false",
     "the guard prevents accidents and is not a sandbox",
   ].filter((phrase) => !text.includes(phrase));
   if (/admits only/.test(text)) missing.push("an allowlist claim");
@@ -684,23 +703,24 @@ GATE_HOME="$TMP" assert_case "the shell guard expands \$HOME before matching pro
 CLAUDE_PROJECT_DIR="$PROJECT" GATE_HOME="$TMP" assert_case "a root-level glob passes while the project overlay lies under HOME" allow general-purpose Bash '{"command":"ls *.md"}'
 CLAUDE_PROJECT_DIR="$PROJECT" GATE_HOME="$TMP" assert_case "the project overlay under HOME keeps the project-root rule" deny general-purpose Bash '{"command":"rm -rf *"}'
 GUARD_TAIL='The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
-assert_case "a named neutral agent may run a Monitor command behind the accident guard" allow general-purpose Monitor '{"command":"tail -f build.log"}'
-assert_case "a Monitor stream runs no command and needs no shell grant" allow ? Monitor '{"ws":"wss://example.test/feed"}'
+MONITOR_LEAD="${DENY_PREFIX}host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because Zensu's command gates see only Bash and PowerShell commands; "
+assert_case "a named neutral agent cannot run a Monitor command" deny general-purpose Monitor '{"command":"tail -f build.log"}'
+assert_case "a Monitor ws stream runs no command and needs no shell grant" allow ? Monitor '{"ws":{"url":"wss://example.test/feed"},"description":"feed","timeout_ms":60000}'
 assert_case "an unnamed child gets no Monitor command" deny ? Monitor '{"command":"tail -f build.log"}'
-GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" assert_case "hooks.subagentShell false withdraws the Monitor command too" deny general-purpose Monitor '{"command":"tail -f build.log"}'
-MONITOR_REASON="$(deny_reason general-purpose Monitor '{"command":"tail -f .zensu/state/run.log"}')"
+GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" assert_case "hooks.subagentShell false leaves the Monitor command denied" deny general-purpose Monitor '{"command":"tail -f build.log"}'
+MONITOR_REASON="$(deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"
 case "$MONITOR_REASON" in
-  "${DENY_PREFIX}host-profile-v1 shell guard: the command names a .zensu directory, which holds Zensu workflow state or configuration. $GUARD_TAIL")
-    check "the accident guard judges a Monitor command with the same rule and tail as Bash" PASS ;;
+  "${MONITOR_LEAD}run the command through Bash, or report the need to the main thread instead")
+    check "a Monitor command is denied with Bash named as the way out, because no Zensu command gate sees it" PASS ;;
   *)
-    check "a Monitor command must get the accident guard's deny (got: ${MONITOR_REASON:-<empty>})" FAIL ;;
+    check "a Monitor command must be denied with Bash named as the way out (got: ${MONITOR_REASON:-<empty>})" FAIL ;;
 esac
 MONITOR_OFF_REASON="$(GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"
 case "$MONITOR_OFF_REASON" in
-  "${DENY_PREFIX}host-profile-v1 cannot invoke command-execution tools: hooks.subagentShell withdraws the subagent shell"*)
-    check "a withdrawn grant refuses a Monitor command with the flag that withdrew it" PASS ;;
+  "${MONITOR_LEAD}report the need to the main thread instead")
+    check "a withdrawn grant does not point a Monitor command at Bash" PASS ;;
   *)
-    check "a withdrawn grant must refuse a Monitor command naming hooks.subagentShell (got: ${MONITOR_OFF_REASON:-<empty>})" FAIL ;;
+    check "a withdrawn grant must not point a Monitor command at Bash (got: ${MONITOR_OFF_REASON:-<empty>})" FAIL ;;
 esac
 assert_case "PS1 a named neutral agent's PowerShell command stays outside the shell grant" deny general-purpose PowerShell '{"command":"Get-ChildItem"}'
 assert_case "PS2 a reviewer's PowerShell command is denied" deny zensu:review-aspect PowerShell '{"command":"Get-ChildItem"}'

@@ -50,19 +50,21 @@ Zensu acts in every Claude Code session where the plugin is enabled, not only
 when you run one of its skills. Know these before you add it to a setup you
 already rely on:
 
-- **Subagents keep their tools, except what reaches Zensu's own state.** Every
+- **Subagents keep their tools, except what reaches Zensu's own state or runs
+  commands outside `Bash`.** Every
   subagent that is not one of Zensu's own — the built-in agents such as
   `Explore`, `general-purpose` and `Plan`, your project's agents, and agents
   from other plugins — may call every tool its definition and your permissions
   grant, MCP tools, `Skill` and `Workflow` included. Zensu's capability gate
-  denies it only what reaches Zensu's own state: Session Control and workflow
+  denies it what reaches Zensu's own state: Session Control and workflow
   paths, `.zensu/`, writes to the installed plugin or its private data, Zensu
   configuration layers and Zensu MCP mutations. A tool whose inputs Zensu does
-  not know, such as a browser or terminal MCP tool, may not name that state
-  anywhere in its input. `PowerShell` and the shell aliases other than `Bash`
-  stay denied. A subagent that reports its type, other than a `zensu-review-*`
-  review persona, may run `Bash` and `Monitor` commands behind an accident
-  guard; the guard prevents accidents and is not a sandbox. Subagents may not
+  not know, such as a browser MCP tool, may not name that state anywhere in its
+  input. `PowerShell`, the shell aliases other than `Bash`, `Monitor` commands
+  and tools whose name marks them as running commands stay denied, because
+  Zensu's command gates see only Bash and PowerShell commands. A subagent that
+  reports its type, other than a `zensu-review-*` review persona, may run `Bash`
+  behind an accident guard; the guard prevents accidents and is not a sandbox. Subagents may not
   read `.zensu/`, so Grep and Glob must name a subdirectory: a search from the
   project root is refused. `hooks.subagentShell: false` withdraws the shell
   grant, and the `subagents:` row of `/zensu:doctor` shows the boundary. Details:

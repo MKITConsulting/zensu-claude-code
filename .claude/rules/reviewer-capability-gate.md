@@ -77,7 +77,7 @@ attempts, every one ended with its pure-JSON result as final text. Admitting the
 workers first needs the `SubagentStop` reader to take the result from the handback.
 
 **Neutral children** (`host-profile-v1`) may use every tool except what reaches Zensu's own
-state. Decided on 2026-10-24 after the newcomer audit of 0.27.0 (D5-01, D6-01, D7-02): the tool
+state or runs commands outside `Bash`. Decided on 2026-10-24 after the newcomer audit of 0.27.0 (D5-01, D6-01, D7-02): the tool
 ALLOWLIST that confined neutral children protected at accident level only, because `Bash` was
 already granted behind a guard that is not a sandbox, while it silently took browser,
 context-mode, desktop and every other MCP tool from users who had installed them. The allowlist
@@ -94,7 +94,10 @@ context-mode, desktop and every other MCP tool from users who had installed them
 - the five `COMMAND_TOOLS` aliases other than `Bash`, which G8 pins, with `COMMAND_TOOL_DENY`,
   the search remedy and the main-thread tail;
 - `PowerShell` (`POWERSHELL_TOOL`), because the accident guard reads Bash only; the deny names
-  Bash as the way out. A PowerShell guard is a separate proposal.
+  Bash as the way out. A PowerShell guard is a separate proposal;
+- a `Monitor` call that is not a pure `ws` stream (`isMonitorStream`), and a tool the gate does
+  not know whose name marks it as running commands or code (`runsCommands`), because no Zensu
+  command gate sees a command run through either (§"Commands outside `Bash`").
 
 **Known tools.** `KNOWN_TOOLS` is the former allowlist plus `Bash`, the legacy `Task` spawn tool
 and the two Context7 documentation tools, and `knownTool` adds the Zensu MCP read tools. For
@@ -104,16 +107,24 @@ every other tool the gate cannot tell a read from a write, so:
   denied as if it were a write (`unknownTool` in `neutralViolation`);
 - any input string that names Zensu state is denied through `shellGuard.inputMention`, the
   guard's text rules (`textMention`: a protected form, a `.zensu` segment, `/proc/<pid>/environ`)
-  without its shell parse. That keeps `.zensu` out of a `ctx_execute` or `run_in_terminal` call,
+  without its shell parse. That keeps `.zensu` out of a browser or context-mode search call,
   which the allowlist used to deny outright. It also refuses a GitHub comment that merely
   mentions `.zensu/plans`; that false positive is the Bash guard's own, and it is still less than
   the old outright deny.
 
 A known tool keeps exactly its old checks, so no input the allowlist admitted is denied now.
 
-**`Monitor`.** A `Monitor` call with a `command` runs through the shell grant and the accident
-guard like `Bash` (`isMonitorCommand`); `isShellCall` stays Bash-only for G8 and the unit test.
-A `Monitor` stream (`ws`) needs no grant.
+**Commands outside `Bash`.** Every Zensu command gate (the CLI write gate, the source-write
+gate, the secret scan, the browser consent gate) is registered on `Bash|PowerShell`, and the
+work-order gate reads `Bash` alone, so a command run through any other tool reaches none of them.
+A `Monitor` call is therefore admitted only as a `ws` stream: `isMonitorStream` fails closed on
+an input that carries a `command` or no `ws`. A tool the gate does not know whose name marks it
+as running commands or code is denied by name: `runsCommands` splits the last segment of the
+name into words, camelCase included, and matches `COMMAND_NAME_WORDS` or a leading `run`. Both
+denies name `Bash` as the way out only while `grantRefusal` holds the grant (`bashRemedy`).
+`isShellCall` stays Bash-only for G8 and the unit test. Covering `Monitor` in the shell matchers
+and judging an MCP command tool by its input would let both run behind the gates; that is a
+matcher change, a `minor`, and a separate proposal.
 
 **Deny texts.** Every reason starts with `DENY_PREFIX`,
 `Zensu capability gate (reviewer-capability-v1) deny: `, and every `host-profile-v1` deny ends with
@@ -125,7 +136,8 @@ a plugin root without the capability gate.
 - **Path heuristic.** `pathInputs` returns nothing for `NON_PATH_TOOLS` (`StructuredOutput`,
   `ReportFindings`, `SubagentHandback`, `AskUserQuestion`): they take no filesystem argument,
   and a `target_files` key or a quoted patch header was misread as one. Every other tool keeps
-  the heuristic, MCP tools included, because `ctx_execute_file` takes a `path`.
+  the heuristic, MCP tools included, because a filesystem server's `read_text_file` takes a
+  `path`.
 - **Remedy.** The command deny and the traversal deny end with `searchRemedy`: the real,
   non-hidden subdirectories of the project root that the traversal check admits, read at deny
   time and capped at `SEARCH_EXAMPLE_LIMIT`, or a `Read` fallback when none qualifies. With
@@ -137,7 +149,8 @@ a plugin root without the capability gate.
   eval harness (`lib/contract-provider.js`, `lib/live-evidence.js`,
   `lib/evidence-worker-contract.js`, `tests/live-evidence-negative.test.js`,
   `tests/wrapper-selftest.sh`) and in the jq check of `scripts/session-control-claude-wrapper.sh`.
-  C39 in `contract-provider.js` drives the admitted tools, the mention denies and PowerShell.
+  C39 in `contract-provider.js` drives the admitted tools, the `Monitor` and command-tool denies,
+  the mention denies and PowerShell.
   `skills/gauntlet-loop/SKILL.md` states the bound and G15 in
   `tests/structure/test-gauntlet-loop-skill.sh` pins it. `docs/multi-repo-chains-spec.md` and
   `docs/multi-repo-chains-overview.html` cite lines of this module. Operator accounts: the
@@ -146,8 +159,11 @@ a plugin root without the capability gate.
   custom-persona note in `docs/review-chain.md`, the two neutral-child paragraphs in
   `docs/tdd-manager-workflow.md`, the neutral item in `docs/session-control-release-gate.md`,
   `skills/gauntlet-loop/references/harness.md` and `evals/session-control/README.md`.
-- **Known gaps.** The mention scan reads text: a name assembled at run time, code read from a
-  file and an environment dump inside a code-running MCP tool pass it. A path in a key the path
+- **Known gaps.** The mention scan reads text: a name assembled at run time and code read from a
+  file pass it. The command-tool rule reads only the tool's name, so a tool that runs commands
+  under an unremarkable name passes it, and a tool such as `process_image` is refused. Whether a
+  subagent's `CronCreate`, `ScheduleWakeup`, `RemoteTrigger` or `TaskStop` reaches the main
+  session was not measured; the gate admits all four. A path in a key the path
   heuristic does not read is judged by the mention scan alone. `SendMessage` can reach other
   local sessions, whose main thread is not confined. `zensu-codex`, `zensu-kiro` and
   `zensu-antigravity` carry their own gates and were not changed.

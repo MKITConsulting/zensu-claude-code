@@ -1732,7 +1732,7 @@ function configBlock() {
   subagentBoundaryRow(cfgReads);
 }
 
-var SUBAGENT_BOUNDARY = 'a neutral subagent may use every tool except what reaches Zensu\'s own state: the capability gate denies it Session Control and workflow paths, .zensu/, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell and the shell aliases, and a tool whose inputs the gate does not know may not name that state; every other limit is your own permission rules';
+var SUBAGENT_BOUNDARY = 'a neutral subagent may use every tool except what reaches Zensu\'s own state or runs commands outside Bash: the capability gate denies it Session Control and workflow paths, .zensu/, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell, the shell aliases, Monitor commands and tools whose name marks them as running commands or code, and a tool whose inputs the gate does not know may not name that state; every other limit is your own permission rules';
 
 function subagentBoundaryRow(cfgReads) {
   var root = pluginDir();
@@ -1749,7 +1749,7 @@ function subagentBoundaryRow(cfgReads) {
     return;
   }
   if (granted) {
-    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. A named neutral subagent may run Bash and Monitor commands behind an accident guard, which prevents accidents and is not a sandbox; hooks.subagentShell=false turns that shell off.');
+    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. A named neutral subagent may run Bash commands behind an accident guard, which prevents accidents and is not a sandbox; hooks.subagentShell=false turns that shell off.');
     return;
   }
   var switchedOff = cfgReads.some(function (entry) {
@@ -1758,10 +1758,10 @@ function subagentBoundaryRow(cfgReads) {
       && data.hooks.subagentShell === false);
   });
   if (switchedOff) {
-    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. The subagent shell is off (hooks.subagentShell=false), so the gate denies every subagent Bash and Monitor command.');
+    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. The subagent shell is off (hooks.subagentShell=false), so the gate denies every subagent Bash command.');
     return;
   }
-  line(WARN, 'subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false — a config layer that cannot be read, parsed or resolved, or no layer at all, withdraws it fail-closed, so the gate denies every subagent Bash and Monitor command. Fix the config file the rows above name, or set HOME when no layer can be found.');
+  line(WARN, 'subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false — a config layer that cannot be read, parsed or resolved, or no layer at all, withdraws it fail-closed, so the gate denies every subagent Bash command. Fix the config file the rows above name, or set HOME when no layer can be found.');
 }
 
 // The two ask-hooks each exit on their own flag BEFORE they resolve the route, so a
