@@ -360,6 +360,7 @@ printf '{"hooks":{"worktreeKeep":false}}' > "$STATE_DIR/keep-off.json"
 anchors_digest() { cat "$A/.zensu/state/worktree-anchor-$KEY.json" "$B/.zensu/state/worktree-anchor-$KEY.json" 2>/dev/null | cksum; }
 ANCHORS_BEFORE="$(anchors_digest)"
 printf '{"mode":"strict"}\n' > "$B/.zensu/state/tdd-mode-$KEY.json"
+printf '{"runner":"local"}\n' > "$B/.zensu/state/full-suite-$KEY.json"
 RA_ZENSU_CONFIG="$STATE_DIR/keep-off.json"
 reanchor_from "$A" "$CONFIG" --confirm
 RA_ZENSU_CONFIG=""
@@ -377,13 +378,20 @@ row_is "worktree keep" "disabled" && check "E9d hooks.worktreeKeep false reaches
 expect_eq "E9e with worktree keep off neither keep anchor changed" "$ANCHORS_BEFORE" "$(anchors_digest)"
 expect_eq "E9f one superseded record per move" "2" "$(ls "$DATA/session-control/v1/records" | grep -c "^$KEY\.superseded-reanchor-")"
 expect_eq "E9g two PROJECT_ROOT_REANCHORED entries under each root" "2 2" "$(history_count "$A") $(history_count "$B")"
-row_is "session markers" "moved (tdd-mode)" && check "E9h the report names the moved tdd-mode marker" PASS \
-  || check "E9h the report names the moved tdd-mode marker" FAIL
+row_is "session markers" "moved (tdd-mode, full-suite)" && check "E9h the report names the moved tdd-mode and full-suite markers" PASS \
+  || check "E9h the report names the moved tdd-mode and full-suite markers" FAIL
 MODE="$(CFG="$PLUGIN_DIR/hooks/lib/zensu-config.sh" bash -c 'source "$CFG" >/dev/null 2>&1 && zensu_tdd_mode_override "$1" "$2"' _ "$A" "$KEY" 2>/dev/null)"
 if [ "$MODE" = "strict" ] && [ ! -e "$B/.zensu/state/tdd-mode-$KEY.json" ]; then
   check "E9i the session's /zensu:tdd-mode choice is read under the new anchor and left nowhere else" PASS
 else
   check "E9i tdd-mode marker after the move (mode='$MODE')" FAIL
+fi
+FS_NEW="$(CFG="$PLUGIN_DIR/hooks/lib/zensu-config.sh" bash -c 'source "$CFG" >/dev/null 2>&1 && zensu_full_suite_marker_state "$1" "$2"' _ "$A" "$KEY" 2>/dev/null)"
+FS_OLD="$(CFG="$PLUGIN_DIR/hooks/lib/zensu-config.sh" bash -c 'source "$CFG" >/dev/null 2>&1 && zensu_full_suite_marker_state "$1" "$2"' _ "$B" "$KEY" 2>/dev/null)"
+if [ "$FS_NEW" = "local" ] && [ "$FS_OLD" = "none" ]; then
+  check "E9j the session's /zensu:full-suite choice is read under the new anchor and left nowhere else" PASS
+else
+  check "E9j full-suite marker after the move (new='$FS_NEW' old='$FS_OLD')" FAIL
 fi
 
 echo "=== E10: a /zensu:tdd chain in the new anchor, driven from the start directory ==="
