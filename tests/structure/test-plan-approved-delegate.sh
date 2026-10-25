@@ -849,6 +849,7 @@ fi
 # broken installation rather than a configured choice.
 BANNER_ROUTE_PROMISE='asks which delivery route to take'
 BANNER_SHORT_TIP='zensu: Tip — use Claude Code Plan mode for code changes.'
+BANNER_NODE_WARNING='node was not found on the PATH that Claude Code was started with'
 banner_lines() {
   printf '%s' "$1" | node -e '
     let s = "";
@@ -917,10 +918,10 @@ elif PATH="$STUB_PATH_DIR" command -v node >/dev/null 2>&1; then
   check "D29 stub PATH still resolves node — the arm could not be reached" FAIL
 elif printf '%s' "$BN_NODE_OFF" | grep -qF "$BANNER_ROUTE_PROMISE"; then
   check "D29 the banner promises a route question with no node to run it" FAIL
-elif printf '%s' "$BN_NODE_OFF" | grep -qxF "$BANNER_SHORT_TIP"; then
-  check "D29 the route promise is withheld when node is absent" PASS
+elif printf '%s' "$BN_NODE_OFF" | grep -qF "$BANNER_NODE_WARNING"; then
+  check "D29 the route promise is withheld when node is absent, and the banner names the missing node instead" PASS
 else
-  check "D29 node absent yields neither the promise nor the bare short tip — banner output drifted" FAIL
+  check "D29 node absent yields neither the promise nor the node warning — banner output drifted" FAIL
 fi
 
 # D30 the delegate hook file absent -> the promise is withheld. The fixture is a

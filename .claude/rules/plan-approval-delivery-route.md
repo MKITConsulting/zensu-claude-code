@@ -136,12 +136,15 @@ weekly run for a reason unrelated to the feature. Three further constraints come
 precedent and each was reached by getting it wrong here first: the interpreter is resolved by
 ABSOLUTE path, the two stubs are built by two link loops rather than by copying one onto the other
 (macOS SIGKILLs a copied signed binary), and a shell builtin — whose `command -v` answers a bare
-word — is skipped instead of being linked to itself. TWO banner literals are pinned by `D29`/`D30`
-and both must move with the hook: the route promise `asks which delivery route to take`, and the
-bare else-branch tip, which is matched WHOLE-LINE because it is a strict PREFIX of the
-`autoTdd`-off disclosure and a substring test would let the flag arm satisfy the node arm's check; and `BNR2c` in the vanilla-mode suite, which is the only check
+word — is skipped instead of being linked to itself. THREE banner literals are pinned by `D29`/`D30`
+and all must move with the hook: the route promise `asks which delivery route to take`; the node
+warning `node was not found on the PATH that Claude Code was started with`, which `D29` requires
+because a banner without node exits with that warning before it reaches the guard, so the guard's
+node condition is a second line of defense; and the bare else-branch tip, which `D30` matches
+WHOLE-LINE because it is a strict PREFIX of the `autoTdd`-off disclosure and a substring test would
+let the flag arm satisfy the delegate-hook arm's check; and `BNR2c` in the vanilla-mode suite, which is the only check
 that reaches the four-route IF-branch tip in BOTH mode variants — `D26`/`D27`/`D29`/`D30` reach the
-tips too, and `D29`/`D30` are the sole grader of the bare ELSE-branch tip, while
+tips too, and `D30` is the sole grader of the bare ELSE-branch tip, while
 `P8c` greps the whole banner file and is satisfied by its pre-existing Skills line; and
 `hooks/user-prompt-tdd-reminder.sh` — BOTH heredocs, TDD arms only — together with `P2`, because
 §Language requires these phrase lists in lockstep and this chain edited that hook's arms; that hook

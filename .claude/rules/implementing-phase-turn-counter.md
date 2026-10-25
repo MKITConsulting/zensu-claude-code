@@ -12,8 +12,8 @@ _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLA
 
 `zensu_impl_stop_nudge` counts a TURN whenever a Stop ends with the chain still at
 `implementing` and the worktree reporting changed source, and at or past
-`hooks.implStopNudgeAfter` (default 12) it writes ONE advisory line to stderr and still
-releases. **The default is a JUDGEMENT, not a measurement, and it moved once already:** at 5
+`hooks.implStopNudgeAfter` (default 12) it writes ONE advisory notice, to stderr and as the
+Stop's `systemMessage` (`stop_notice`, `.claude/rules/stop-latency.md`), and still releases. **The default is a JUDGEMENT, not a measurement, and it moved once already:** at 5
 it fired during ordinary work — the implementing phase of this repository's own chains ends
 more than five turns with a dirty tree routinely, including the chain that built this
 feature — which is exactly the "trained away within a day" failure the rejections below

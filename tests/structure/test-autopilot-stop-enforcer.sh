@@ -168,6 +168,21 @@ OUT3="$(invoke "$P1" stop_session_01 "$TMP/missing.json" off)"
 [ "$(printf '%s' "$OUT3" | decision)" = block ] \
   && check "S3 ZENSU_CHAIN=off cannot bypass the outer run" PASS \
   || check "S3 ZENSU_CHAIN=off cannot bypass the outer run" FAIL
+P3B="$TMP/bypass-notice"; start "$P3B" stop_run_bypass stop_session_bypass
+autopilot_apply_event stop_run_bypass plan-bypass PLAN_APPROVED '{"approvedPlanSha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' "$P3B" >/dev/null
+CLAUDE_PROJECT_DIR="$P3B" bash "$LOG" --tdd-begin --session stop_session_bypass --autopilot-run stop_run_bypass \
+  --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id chain-bypass-001 >/dev/null
+OUT3B="$(invoke "$P3B" stop_session_bypass "$TMP/missing.json" off)"
+OUT_TEXT="$OUT3B" node -e '
+  const parsed = JSON.parse(process.env.OUT_TEXT);
+  const keys = Object.keys(parsed);
+  process.exit(keys[0] === "decision" && parsed.decision === "block" && typeof parsed.reason === "string"
+    && parsed.reason.startsWith("STOP intercepted by durable Zensu Autopilot run stop_run_bypass.")
+    && typeof parsed.systemMessage === "string"
+    && parsed.systemMessage.split("\n").includes("Gates bypassed during this session: ZENSU_CHAIN") ? 0 : 1);
+' 2>/dev/null \
+  && check "S3b the outer block of a bound chain carries the inner bypass notice as its systemMessage in the same single JSON object" PASS \
+  || check "S3b the outer block of a bound chain carries the inner bypass notice as its systemMessage (out=$OUT3B)" FAIL
 
 P2="$TMP/escape-env"; start "$P2" stop_run_escape_env stop_session_escape_env
 OUT4="$(invoke "$P2" stop_session_escape_env "$TMP/missing.json" '' off)"
@@ -1815,7 +1830,9 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
   [ "$(printf '%s' "$current" | decision)" = block ] || CAP_BLOCKS=false
 done
 OUT10="$(invoke "$P8" stop_session_cap)"; RF8="$(autopilot_run_file stop_run_cap "$P8")"
-if [ "$CAP_BLOCKS" = true ] && [ -z "$OUT10" ] && field_ok "$RF8" 'j.stage==="BLOCKED"&&j.blocked.code==="STOP_BUDGET_EXHAUSTED"'; then
+if [ "$CAP_BLOCKS" = true ] \
+  && [ "$(OUT_TEXT="$OUT10" node -e 'const p=JSON.parse(process.env.OUT_TEXT);process.stdout.write(Object.keys(p).join()==="systemMessage"&&/^zensu autopilot: Stop budget exhausted in [A-Z_]+; run moved to audited BLOCKED \(never DONE\)\.$/.test(p.systemMessage)?"yes":"no")' 2>/dev/null)" = yes ] \
+  && field_ok "$RF8" 'j.stage==="BLOCKED"&&j.blocked.code==="STOP_BUDGET_EXHAUSTED"'; then
   check "S10 exhausted outer budget moves to audited BLOCKED then permits Stop" PASS
 else check "S10 outer budget cap blocks safely" FAIL; fi
 
