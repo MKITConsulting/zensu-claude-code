@@ -5,6 +5,8 @@ paths:
   - "hooks/lib/zensu-delivery-route.sh"
   - "hooks/lib/zensu-tdd-mode.sh"
   - "hooks/lib/zensu-marker-write.sh"
+  - "hooks/lib/linked-session-v1.js"
+  - "hooks/lib/zensu-linked-session.sh"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/session-start-banner.sh"
@@ -13,6 +15,7 @@ paths:
   - "hooks/user-prompt-tdd-reminder.sh"
   - "skills/delivery-route/**"
   - "tests/structure/test-delivery-route.sh"
+  - "tests/structure/test-linked-session-route.sh"
   - "tests/structure/test-plan-approved-delegate.sh"
   - "tests/structure/test-tdd-vanilla-mode.sh"
 ---
@@ -131,9 +134,15 @@ R8f/R8g/R8h and T9g/T9h/T9i drive the temp-leaf refusal and both halves of the p
 through another `mv` shim and require the helper to end with 130, 143 and 129 and no success line.
 R8j and T9k drive the pre-rename re-check: a `mktemp` shim plants a link to an empty directory at
 the marker leaf after the temp exists, and each helper must refuse with its own prefix, leave the
-link target empty and leave no temp. R8k collects every file under `hooks/lib` that calls
+link target empty and leave no temp. R8k collects every shell file under `hooks/` that calls
 `zensu_write_session_marker` with a script name, requires the four helpers named above among
-them, and requires each to source the library and none to keep its own `mktemp` or `mv -f`.
+them, and requires each to source the library, to keep no `mktemp` or `mv -f` of its own and to
+redirect into no path of its own. It also reads each marker-path function of `zensu-config.sh`
+together with the leaf template in its body, fails when a definition or a template is spelled in
+a form it cannot read, and fails for any other shell file under `hooks/` that calls one of those
+functions without calling the writer, or spells a leaf template itself. R8k2 plants each of these
+bypasses in a scratch tree and requires R8k's reason for it. A marker path built another way, in
+node for example, or written by another tool such as `tee`, still escapes it.
 
 ## Linked sessions inherit `tdd`
 
@@ -161,8 +170,9 @@ id; its `cliSessionId`, when present, equal to the payload's `session_id`; a par
 the own one. The parent's project root comes from the parent's Session Control record (`sessionKey`
 of the parent's `cliSessionId`, read through `privateRecordsDirectory` after `CLAUDE_PLUGIN_DATA` is
 canonicalized by the binder's own `canonicalDirectory`, as `resolveHookSession` does, at most 1 MiB,
-schema and version equal to the core's `SCHEMA` and `SCHEMA_VERSION`, its `session_id_hash` equal to
-the core's `sessionIdHash` of that `cliSessionId` as `readContext` requires, a canonical existing
+schema and version equal to the core's `SCHEMA` and `SCHEMA_VERSION`, its `host` equal to `claude`,
+the host the binder hands the core, and its `session_id_hash` equal to the core's `sessionIdHash` of
+that `cliSessionId` as `readContext` requires, a canonical existing
 directory), never from the desktop record's `cwd`, which
 session-trail measured disagreeing with a fork's own records. Inheritance needs both roots to share
 one real `git rev-parse --git-common-dir`.
@@ -278,7 +288,10 @@ route: a route change moves only the field, and every shape of the reminder carr
   `zensu_inherited_route_marker_path`, `zensu_inherited_route_state`,
   `zensu_linked_session_marker_path`, `zensu_linked_session_state`,
   `zensu_default_delivery_route`, `zensu_delivery_route_resolve`, `zensu_delivery_route_field`,
-  `zensu_delivery_route_status_line`, and the header census of what that file opens.
+  `zensu_delivery_route_status_line`, and the header census of what that file opens. R8k reads
+  each `zensu_*_marker_path()` definition at the start of its line and the
+  `/.zensu/state/<stem>-$session_key.json` template in its body, so a marker written in another
+  spelling fails R8k.
 - The lineage pair: `hooks/lib/linked-session-v1.js` (`KINDS`, `REASONS`, `REPOSITORY`, `TURNS`,
   the six-field `renderVerdict` line the shell reads with one tab-split `read`) and
   `hooks/lib/zensu-linked-session.sh` (`zensu_linked_session_pending`, `zensu_linked_session_resolve`);

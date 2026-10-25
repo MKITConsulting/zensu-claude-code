@@ -148,8 +148,9 @@ The abort condition, a failed R1 or R2, did not occur. Its fallback, a scan of t
   `cliSessionId`, computed by `hooks/lib/session-control-core-v1.js`, and the root is the `project_root` field of
   `$CLAUDE_PLUGIN_DATA/session-control/v1/records/<parent key>.json`, read under the directory checks that
   `privateRecordsDirectory` in `hooks/lib/claude-hook-session-v1.js` applies. The record must carry the core's `SCHEMA`
-  and `SCHEMA_VERSION` and the `session_id_hash` that the core's `sessionIdHash` gives for that `cliSessionId`, as
-  `readContext` requires; any other record leaves the session linked and uninherited (review round 1, R1-F8). Never
+  and `SCHEMA_VERSION`, the host `claude` that the binder expects, and the `session_id_hash` that the core's
+  `sessionIdHash` gives for that `cliSessionId`, as `readContext` requires; any other record leaves the session linked
+  and uninherited (review round 1, R1-F8). Never
   the desktop record's `cwd`:
   session-trail measured it disagreeing with a fork's own first record in 66 of 137 desktop forks.
 - **D5 — Same repository only (default).** Inheritance requires that both roots resolve to the same real

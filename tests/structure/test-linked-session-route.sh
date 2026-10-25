@@ -120,7 +120,7 @@ L3E_OUT="$(node -e '
     const record = path.join(records, core.sessionKey(parentCli) + ".json");
     const env = { CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: store };
     const resolve = (change) => {
-      const context = { schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, session_id_hash: core.sessionIdHash(parentCli), project_root: root };
+      const context = { schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, host: "claude", session_id_hash: core.sessionIdHash(parentCli), project_root: root };
       change(context);
       fs.writeFileSync(record, JSON.stringify(context));
       const v = m.resolveLinkedSession({ env, sessionId: childCli, pluginData: scratch, deps: { recordsDirectory: () => records } });
@@ -134,15 +134,17 @@ L3E_OUT="$(node -e '
       resolve((c) => { delete c.schema; }),
       resolve((c) => { c.schema_version = core.SCHEMA_VERSION + 1; }),
       resolve((c) => { delete c.schema_version; }),
+      resolve((c) => { c.host = "codex"; }),
+      resolve((c) => { delete c.host; }),
     ].join("\n"));
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 ' "$RESOLVER" "$CORE" 2>/dev/null)"
-L3E_WANT="$(printf '%s\n' 'linked/resolved/root' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-')"
+L3E_WANT="$(printf '%s\n' 'linked/resolved/root' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-')"
 [ "$L3E_OUT" = "$L3E_WANT" ] \
-  && check "L3e a parent record whose session hash, schema or schema version is another one or missing leaves the session linked and uninherited, while the matching record resolves" PASS \
-  || check "L3e parent session hash ($(printf '%s' "$L3E_OUT" | tr '\n' ';'))" FAIL
+  && check "L3e a parent record whose session hash, schema, schema version or host is another one or missing leaves the session linked and uninherited, while the matching record resolves" PASS \
+  || check "L3e parent identity ($(printf '%s' "$L3E_OUT" | tr '\n' ';'))" FAIL
 L3F_INNER='
   const cp = require("child_process");
   const fs = require("fs");
@@ -160,10 +162,15 @@ L3F_INNER='
     cp.execFileSync("mkfifo", [own]);
     const realLstat = fs.lstatSync;
     const regular = realLstat(process.argv[1]);
-    fs.lstatSync = (target, ...rest) => (target === own ? regular : realLstat(target, ...rest));
+    let hits = 0;
+    fs.lstatSync = (target, ...rest) => {
+      if (target !== own) return realLstat(target, ...rest);
+      hits += 1;
+      return regular;
+    };
     const env = { CLAUDE_CODE_HOST_SESSION_ID: host, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: path.join(scratch, "store") };
     const v = m.resolveLinkedSession({ env, sessionId: "55555555-5555-4555-8555-555555555555", pluginData: scratch });
-    process.stdout.write(v.kind + "/" + v.reason);
+    process.stdout.write(v.kind + "/" + v.reason + "/" + (hits > 0 ? "stubbed" : "unstubbed"));
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -172,8 +179,8 @@ L3F_OUT="$(node -e '
   const r = require("child_process").spawnSync(process.execPath, ["-e", process.argv[1], process.argv[2]], { encoding: "utf8", timeout: 20000 });
   process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "blocked" : String(r.status) + ":" + r.stdout);
 ' "$L3F_INNER" "$RESOLVER" 2>/dev/null)"
-[ "$L3F_OUT" = "0:none/own-record-refused" ] \
-  && check "L3f a desktop record swapped for a FIFO after its lstat is refused at once instead of blocking the open" PASS \
+[ "$L3F_OUT" = "0:none/own-record-refused/stubbed" ] \
+  && check "L3f a desktop record swapped for a FIFO after its lstat, which the stub saw, is refused at once instead of blocking the open" PASS \
   || check "L3f FIFO swapped in after lstat ($L3F_OUT)" FAIL
 L3G_OUT="$(node -e '
   const fs = require("fs");
@@ -198,7 +205,7 @@ L3G_OUT="$(node -e '
     const root = path.join(scratch, "root");
     fs.mkdirSync(records);
     fs.mkdirSync(root);
-    fs.writeFileSync(path.join(records, core.sessionKey(parentCli) + ".json"), JSON.stringify({ schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, session_id_hash: core.sessionIdHash(parentCli), project_root: root }));
+    fs.writeFileSync(path.join(records, core.sessionKey(parentCli) + ".json"), JSON.stringify({ schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, host: "claude", session_id_hash: core.sessionIdHash(parentCli), project_root: root }));
     const env = { CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: store };
     const realRead = fs.readSync;
     const resolve = (failures) => {

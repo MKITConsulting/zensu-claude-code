@@ -487,19 +487,87 @@ if [ -f "$MARKER_LIB" ] && bash -n "$MARKER_LIB" 2>/dev/null; then
 else
   R8K_BAD="$R8K_BAD [hooks/lib/zensu-marker-write.sh missing or not valid bash]"
 fi
-R8K_HELPERS="$(grep -lE '^[^#]*zensu_write_session_marker [a-z-]+\.sh ' "$PLUGIN_DIR"/hooks/lib/*.sh 2>/dev/null)"
-for r8k_known in "$HELPER" "$TDD_MODE_HELPER" "$LINKED_HELPER" "$FULL_SUITE_HELPER"; do
-  printf '%s\n' "$R8K_HELPERS" | grep -qxF "$r8k_known" || R8K_BAD="$R8K_BAD [$(basename "$r8k_known") is not among the callers of zensu_write_session_marker]"
-done
-while IFS= read -r r8k_helper; do
-  [ -n "$r8k_helper" ] || continue
-  grep -qE 'source "[^"]*/zensu-marker-write\.sh"' "$r8k_helper" || R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") does not source the library]"
-  grep -v '^[[:space:]]*#' "$r8k_helper" | grep -qE 'mktemp|mv -f' && R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") keeps its own write sequence]"
-done <<R8K_LIST
-$R8K_HELPERS
+r8k_scan() {
+  local root="$1" config="$2" helper code pairs name stem funcs stems file
+  R8K_SCAN_BAD=""
+  R8K_SCAN_HELPERS="$(find "$root" -type f -name '*.sh' -exec grep -lE '^[^#]*zensu_write_session_marker [a-z-]+\.sh ' {} + 2>/dev/null)"
+  while IFS= read -r helper; do
+    [ -n "$helper" ] || continue
+    grep -qE 'source "[^"]*/zensu-marker-write\.sh"' "$helper" || R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$helper") does not source the library]"
+    code="$(grep -v '^[[:space:]]*#' "$helper")"
+    printf '%s\n' "$code" | grep -qE 'mktemp|mv -f' && R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$helper") keeps its own write sequence]"
+    printf '%s\n' "$code" | grep -qE "[0-9]*>>?[[:space:]]*[\"']?[\$]" && R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$helper") redirects into a path of its own]"
+  done <<R8K_LIST
+$R8K_SCAN_HELPERS
 R8K_LIST
-[ -z "$R8K_BAD" ] && check "R8k every marker helper writes through the one sequence in hooks/lib/zensu-marker-write.sh" PASS \
+  code="$(grep -v '^[[:space:]]*#' "$config" 2>/dev/null)"
+  pairs="$(printf '%s\n' "$code" | awk '
+    /^zensu_[a-z_]+_marker_path\(\)/ { if (name != "") print name, (stem == "" ? "-" : stem); name = $0; sub(/\(\).*/, "", name); stem = ""; next }
+    name != "" && /^}/ { print name, (stem == "" ? "-" : stem); name = ""; next }
+    name != "" && stem == "" && match($0, /\/\.zensu\/state\/[a-z-]+-\$session_key\.json/) { stem = substr($0, RSTART, RLENGTH); sub(/^\/\.zensu\/state\//, "", stem); sub(/-\$session_key\.json$/, "", stem) }
+    END { if (name != "") print name, (stem == "" ? "-" : stem) }
+  ')"
+  if [ -z "$pairs" ]; then
+    R8K_SCAN_BAD="$R8K_SCAN_BAD [no marker-path function or marker leaf could be read from zensu-config.sh]"
+    return 0
+  fi
+  while read -r name stem; do
+    [ "$stem" = "-" ] && R8K_SCAN_BAD="$R8K_SCAN_BAD [$name spells no marker leaf R8k can read]"
+  done <<R8K_PAIRS
+$pairs
+R8K_PAIRS
+  [ "$(printf '%s\n' "$code" | grep -cE '(^|[[:space:]])(function[[:space:]]+)?zensu_[a-z_]+_marker_path[[:space:]]*(\(\)|\{)')" = "$(printf '%s\n' "$pairs" | grep -c .)" ] \
+    || R8K_SCAN_BAD="$R8K_SCAN_BAD [a marker-path function is defined in a spelling R8k cannot read]"
+  [ "$(printf '%s\n' "$code" | grep -cE '/\.zensu/state/[a-z-]+-')" = "$(printf '%s\n' "$pairs" | grep -vc ' -$')" ] \
+    || R8K_SCAN_BAD="$R8K_SCAN_BAD [a marker leaf template sits outside the form R8k reads]"
+  funcs="$(printf '%s\n' "$pairs" | awk '{ print $1 }' | paste -s -d '|' -)"
+  stems="$(printf '%s\n' "$pairs" | awk '$2 != "-" { print $2 }' | paste -s -d '|' -)"
+  while IFS= read -r file; do
+    [ -n "$file" ] && [ "$file" != "$config" ] || continue
+    code="$(grep -v '^[[:space:]]*#' "$file")"
+    if printf '%s\n' "$code" | grep -qE "(^|[^a-z_])($funcs)([^a-z_]|\$)"; then
+      printf '%s\n' "$R8K_SCAN_HELPERS" | grep -qxF "$file" || R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$file") reaches a marker path without zensu_write_session_marker]"
+    fi
+    [ -n "$stems" ] && printf '%s\n' "$code" | grep -qE "($stems)-[\$]" && R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$file") spells a marker leaf of its own]"
+  done <<R8K_FILES
+$(find "$root" -type f -name '*.sh' | LC_ALL=C sort)
+R8K_FILES
+  return 0
+}
+r8k_scan "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/hooks/lib/zensu-config.sh"
+R8K_BAD="$R8K_BAD$R8K_SCAN_BAD"
+for r8k_known in "$HELPER" "$TDD_MODE_HELPER" "$LINKED_HELPER" "$FULL_SUITE_HELPER"; do
+  printf '%s\n' "$R8K_SCAN_HELPERS" | grep -qxF "$r8k_known" || R8K_BAD="$R8K_BAD [$(basename "$r8k_known") is not among the callers of zensu_write_session_marker]"
+done
+[ -z "$R8K_BAD" ] && check "R8k every marker helper writes through the one sequence in hooks/lib/zensu-marker-write.sh, and no other shell file under hooks/ reaches a marker path or spells a marker leaf" PASS \
   || check "R8k shared marker writer:$R8K_BAD" FAIL
+R8K_FIX="$STATE_DIR/r8k-tree"
+rm -rf "$R8K_FIX"
+mkdir -p "$R8K_FIX/hooks/lib" "$R8K_FIX/brace/lib" "$R8K_FIX/spaced/lib"
+cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$R8K_FIX/hooks/lib/zensu-config.sh"
+printf '%s\n' '#!/bin/bash' 'm="$(zensu_delivery_route_marker_path "$1" "$2")"' 'printf x > "$m"' > "$R8K_FIX/hooks/lib/zensu-bypass.sh"
+printf '%s\n' '#!/bin/bash' 'printf x > "$root/.zensu/state/full-suite-$key.json"' > "$R8K_FIX/hooks/user-prompt-bypass.sh"
+printf '%s\n' '#!/bin/bash' '# zensu_linked_session_marker_path names linked-session-$key.json' 'true' > "$R8K_FIX/hooks/lib/zensu-comment-only.sh"
+printf '%s\n' '#!/bin/bash' 'source "$LIB/zensu-marker-write.sh"' 'zensu_write_session_marker zensu-redirect.sh "$a" "$b" "$c"' 'printf x > "$m"' > "$R8K_FIX/hooks/lib/zensu-redirect.sh"
+printf '%s\n' '#!/bin/bash' 'source "$LIB/zensu-marker-write.sh"' 'USAGE="usage: zensu-quiet.sh --on|--off [--file <path>]"' 'zensu_write_session_marker zensu-quiet.sh "$a" "$b" "$c" >/dev/null 2>&1 || printf "%s\n" "$USAGE" >&2' > "$R8K_FIX/hooks/lib/zensu-quiet.sh"
+r8k_scan "$R8K_FIX/hooks" "$R8K_FIX/hooks/lib/zensu-config.sh"
+R8K2_PLANTED="$R8K_SCAN_BAD"
+sed 's/delivery-route-\$session_key\.json/delivery-route-${session_key}.json/' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" > "$R8K_FIX/brace/lib/zensu-config.sh"
+r8k_scan "$R8K_FIX/brace" "$R8K_FIX/brace/lib/zensu-config.sh"
+R8K2_BRACE="$R8K_SCAN_BAD"
+sed 's/^zensu_full_suite_marker_path() {/zensu_full_suite_marker_path () {/' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" > "$R8K_FIX/spaced/lib/zensu-config.sh"
+r8k_scan "$R8K_FIX/spaced" "$R8K_FIX/spaced/lib/zensu-config.sh"
+R8K2_SPACED="$R8K_SCAN_BAD"
+rm -rf "$R8K_FIX"
+R8K2_BAD=""
+case "$R8K2_PLANTED" in (*"[zensu-bypass.sh reaches a marker path without zensu_write_session_marker]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a library helper reaching a marker path without the writer passed]" ;; esac
+case "$R8K2_PLANTED" in (*"[user-prompt-bypass.sh spells a marker leaf of its own]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a hook spelling a marker leaf passed]" ;; esac
+case "$R8K2_PLANTED" in (*"[zensu-redirect.sh redirects into a path of its own]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a writer caller redirecting into a path of its own passed]" ;; esac
+case "$R8K2_PLANTED" in (*zensu-comment-only.sh*|*zensu-quiet.sh*) R8K2_BAD="$R8K2_BAD [a comment-only mention or a null redirect was refused: $R8K2_PLANTED]" ;; esac
+case "$R8K2_BRACE" in (*"[zensu_delivery_route_marker_path spells no marker leaf R8k can read]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a template spelled with braces passed: $R8K2_BRACE]" ;; esac
+case "$R8K2_SPACED" in (*"[a marker-path function is defined in a spelling R8k cannot read]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a definition with a space before its parentheses passed: $R8K2_SPACED]" ;; esac
+[ -z "$R8K2_BAD" ] && check "R8k2 R8k fails on planted bypasses (a helper reaching a marker path without the writer, a hook spelling a leaf, a writer caller redirecting into a path of its own, a template or definition it cannot read) and passes a comment-only mention and null or descriptor redirects" PASS \
+  || check "R8k2 planted R8k bypasses:$R8K2_BAD" FAIL
 R8L_BAD=""
 for r8l_name in zensu-delivery-route.sh zensu-tdd-mode.sh; do
   r8l_verb=--tdd; [ "$r8l_name" = zensu-tdd-mode.sh ] && r8l_verb=--strict

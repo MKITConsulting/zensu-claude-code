@@ -10,6 +10,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const UNSAFE_PATH_RE = /[\0\t\r\n]/;
 const DESKTOP_RECORD_MAX_BYTES = 8 * 1024 * 1024;
 const CONTEXT_RECORD_MAX_BYTES = 1024 * 1024;
+const CONTEXT_HOST = 'claude';
 const GIT_TIMEOUT_MS = 3000;
 const READ_AGAIN_BUDGET = 16;
 const STORE_SEGMENTS = Object.freeze(['Claude', 'claude-code-sessions']);
@@ -228,6 +229,7 @@ function readParentRoot(pluginData, expected, deps) {
     !context
     || context.schema !== expected.schema.name
     || context.schema_version !== expected.schema.version
+    || context.host !== expected.host
     || context.session_id_hash !== expected.hash
   ) {
     return { reason: REASONS.PARENT_CONTEXT_UNAVAILABLE };
@@ -313,6 +315,7 @@ function resolveLinkedSession(input = {}) {
       key: deps.sessionKey(parentCli),
       hash: deps.sessionIdHash(parentCli),
       schema: deps.contextSchema(),
+      host: CONTEXT_HOST,
     };
   } catch (_) {
     return verdict(KINDS.LINKED, REASONS.PARENT_SESSION_UNKNOWN, { turn });
