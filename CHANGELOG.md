@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-10-25
+
+### Added
+
+- **context**: Load and hydrate linked feature evidence (#504)
+
+### Fixed
+
+- **hooks**: Read who can answer the route question from the host, not from Auto Mode (#508)
+- **session-control**: Ignore local Zensu state in the projects it creates (#507)
+- **hooks**: Name a missing node and show Stop notices to the user (#506)
+- **skills**: Keep free text off the command line, read plugin docs from the plugin root, ask before publishing reviews (#505)
+
 ## [0.30.0] - 2026-10-24
 
 ### Added
