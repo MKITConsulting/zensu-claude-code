@@ -523,6 +523,97 @@ ph_has 'SCANNED 10' && [ "$(ph_count '^HIT ')" = 12 ] && [ "$(ph_count '^ALLOW-M
   || { printf '%s\n' "$PH_FX_OUT" | sed 's/^/      /'; check "AP10 the fixture scan reports exactly the expected findings" FAIL; }
 rm -rf "$PH_FIX" "$PH_PROBE"
 
+FT_PROBE="$(mktemp -t skillft-XXXXXX)"
+cat > "$FT_PROBE" <<'NODE'
+'use strict';
+const fs = require('fs');
+const FREE_TEXT = /markdown|json|document|findings|conditions/i;
+const ARGUMENT = /--[A-Za-z][\w-]*(?:=|[ \t]+)(["']?)<([^<>\n]+)>\1/g;
+let scanned = 0;
+for (const file of process.argv.slice(2)) {
+  const raw = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+  const front = raw.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
+  const body = front ? raw.slice(front[0].length) : raw;
+  const skipped = front ? front[0].split('\n').length - 1 : 0;
+  for (const m of body.matchAll(ARGUMENT)) {
+    if (!FREE_TEXT.test(m[2])) continue;
+    console.log('HIT ' + file + ':' + (skipped + body.slice(0, m.index).split('\n').length) + ' ' + m[0]);
+  }
+  scanned++;
+}
+console.log('SCANNED ' + scanned);
+NODE
+
+ft_scan() {
+  local dir="$1"
+  shift
+  (cd "$dir" && node "$FT_PROBE" "$@") 2>&1
+}
+
+FT_FILES=()
+while IFS= read -r ft_file; do
+  FT_FILES+=("${ft_file#"$CLAUDE_PLUGIN_ROOT"/}")
+done < <(find "$CLAUDE_PLUGIN_ROOT/skills" -type f -name '*.md' | LC_ALL=C sort)
+FT_OUT="$(ft_scan "$CLAUDE_PLUGIN_ROOT" ${FT_FILES[@]+"${FT_FILES[@]}"})"
+FT_BAD="$(printf '%s\n' "$FT_OUT" | grep -E '^HIT ')"
+FT_SCANNED="$(printf '%s\n' "$FT_OUT" | sed -n 's/^SCANNED //p')"
+if [ -z "$FT_BAD" ] && [ "${#FT_FILES[@]}" -gt 1 ] && [ "$FT_SCANNED" = "${#FT_FILES[@]}" ]; then
+  check "FT1 no skill file passes a Markdown, JSON, document or findings placeholder as a quoted or unquoted flag value ($FT_SCANNED files scanned)" PASS
+else
+  printf '%s\n' "${FT_BAD:-$FT_OUT}" | sed 's/^/      /'
+  echo "      write free text to a temporary file through a heredoc with a quoted delimiter and pass \"\$(cat \"\$f\")\""
+  check "FT1 skill files pass free-text placeholders on the command line (scanned ${FT_SCANNED:-0} of ${#FT_FILES[@]})" FAIL
+fi
+
+FT_MISSING=""
+for ft_skill in docs implement bootstrap ghost-scan security-review autopilot; do
+  ft_md="$CLAUDE_PLUGIN_ROOT/skills/$ft_skill/SKILL.md"
+  grep -qF "<<'ZENSU_TEXT_END'" "$ft_md" && grep -qxF 'ZENSU_TEXT_END' <(sed 's/^ *//' "$ft_md") \
+    && grep -qF '"$(cat "$f")"' "$ft_md" && grep -qF "trap 'rm -f \"\$f\"" "$ft_md" \
+    || FT_MISSING="$FT_MISSING $ft_skill"
+done
+[ -z "$FT_MISSING" ] \
+  && check "FT2 every skill that uploads free text writes it through a quoted heredoc into a temporary file and passes \"\$(cat \"\$f\")\"" PASS \
+  || check "FT2 skills without the quoted-heredoc file form for free text:$FT_MISSING" FAIL
+
+FT_FIX="$(mktemp -d -t skillftfix-XXXXXX)"
+mkdir -p "$FT_FIX/bad" "$FT_FIX/good"
+cat > "$FT_FIX/bad/SKILL.md" <<'EOF'
+---
+name: bad
+description: --content "<frontmatter-markdown>"
+---
+zensu link docs <id> --content "<authored-markdown>"
+zensu ghost scan --candidates '<json>'
+zensu products vision-create --content <plan-document> --source claude-code
+zensu security review <id> --findings="<findings-summary>"
+EOF
+cat > "$FT_FIX/good/SKILL.md" <<'EOF'
+---
+name: good
+---
+f="$(mktemp)" || exit 1
+cat > "$f" <<'ZENSU_TEXT_END'
+<authored-markdown>
+ZENSU_TEXT_END
+zensu link docs <feature-id> --title "<title>" --content "$(cat "$f")"
+bash "$LOG" --payload '{"headSha":"<sha>"}'
+Return the `<markdown>` you authored, never a `<json>` dump.
+EOF
+FT_FX_OUT="$(ft_scan "$FT_FIX" bad/SKILL.md good/SKILL.md)"
+ft_has() { printf '%s\n' "$FT_FX_OUT" | grep -qxF -- "$1"; }
+ft_has 'HIT bad/SKILL.md:5 --content "<authored-markdown>"' \
+  && ft_has "HIT bad/SKILL.md:6 --candidates '<json>'" \
+  && ft_has 'HIT bad/SKILL.md:7 --content <plan-document>' \
+  && ft_has 'HIT bad/SKILL.md:8 --findings="<findings-summary>"' \
+  && check "FT3 a double-quoted, a single-quoted, an unquoted and an equals-joined free-text placeholder are flagged at their lines" PASS \
+  || check "FT3 a double-quoted, a single-quoted, an unquoted and an equals-joined free-text placeholder are flagged at their lines" FAIL
+ft_has 'SCANNED 2' && [ "$(printf '%s\n' "$FT_FX_OUT" | grep -c '^HIT ')" = 4 ] \
+  && ! printf '%s\n' "$FT_FX_OUT" | grep -qF 'HIT good/' \
+  && check "FT4 frontmatter, a heredoc body, a short placeholder, a JSON literal and prose stay outside the lint" PASS \
+  || { printf '%s\n' "$FT_FX_OUT" | sed 's/^/      /'; check "FT4 frontmatter, a heredoc body, a short placeholder, a JSON literal and prose stay outside the lint" FAIL; }
+rm -rf "$FT_FIX" "$FT_PROBE"
+
 echo "----"
 echo "test-skill-workflow-markers: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

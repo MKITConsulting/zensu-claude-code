@@ -95,7 +95,7 @@ function changedFiles(rootInput, allowedRelative) {
     if (path.isAbsolute(allowedRelative) || allowedRelative.split('/').includes('..')) fail('unsafe changed-file allowlist');
     allowed.add(allowedRelative);
   }
-  const result = spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all'], {
+  const result = spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=traditional'], {
     encoding: 'buffer',
   });
   if (result.status !== 0) fail('cannot read isolated git status');
@@ -107,6 +107,7 @@ function changedFiles(rootInput, allowedRelative) {
     const rename = relative.indexOf(' -> ');
     if (rename !== -1) relative = relative.slice(rename + 4);
     if (!relative || path.isAbsolute(relative) || relative.split('/').includes('..')) fail('unsafe changed path');
+    if (entry.startsWith('!! ') && !relative.startsWith('.zensu/')) continue;
     if (allowed.has(relative)) continue;
     const file = path.join(root, relative);
     let content;
@@ -116,6 +117,8 @@ function changedFiles(rootInput, allowedRelative) {
       const stat = fs.lstatSync(file);
       if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 4 * 1024 * 1024) fail('unsafe changed file');
       content = fs.readFileSync(file);
+      if (entry.startsWith('?? ') && relative === '.zensu/.gitignore'
+        && content.toString('utf8') === require('../../../hooks/lib/session-control-core-v1.js').ZENSU_GITIGNORE_BODY) continue;
     }
     hashes.set(relative, digest(content));
   }

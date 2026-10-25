@@ -243,6 +243,18 @@ hook_context() {
 
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 reason() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){}});'; }
+stop_notice_only() {
+  OUT_TEXT="$1" ERR_FILE="$2" NEEDLE="${3:-}" node -e '
+    const fs = require("node:fs");
+    let parsed;
+    try { parsed = JSON.parse(process.env.OUT_TEXT); } catch (_) { process.exit(1); }
+    if (!parsed || Object.keys(parsed).join() !== "systemMessage" || typeof parsed.systemMessage !== "string") process.exit(1);
+    const lines = parsed.systemMessage.split("\n");
+    const stderrLines = fs.readFileSync(process.env.ERR_FILE, "utf8").split("\n");
+    if (!lines.every((line) => stderrLines.includes(line))) process.exit(1);
+    process.exit(lines.some((line) => line.includes(process.env.NEEDLE)) ? 0 : 1);
+  ' 2>/dev/null
+}
 
 state_value() {
   FILE="$(tdd_state_file "$1")" FIELD="$2" node -e '
@@ -564,6 +576,7 @@ launch_payload "$G_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$G_AG
 G_COUNT="$(stop_count "$G")"
 G_OUT="$(stop_payload "$G_RAW" | bash "$STOP" 2>"$WORK/stop-release.err")"; G_RC=$?
 if [ "$G_RC" -eq 0 ] && [ "$(printf '%s' "$G_OUT" | decision)" = allow ] \
+  && stop_notice_only "$G_OUT" "$WORK/stop-release.err" 'releasing this Stop, still running: the background zensu:code-reviewer' \
   && grep -qE "releasing this Stop, still running: the background zensu:code-reviewer \\(agent $G_AGENT, launched [0-9]+ min ago\\) for the issued ticket" "$WORK/stop-release.err" \
   && grep -qF 'the wait ends 60 minutes after the newest launch' "$WORK/stop-release.err" \
   && case "$G_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$G")" = "$G_COUNT" ] && [ -f "$G_RECORD" ]; then

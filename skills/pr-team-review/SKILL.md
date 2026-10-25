@@ -2,8 +2,8 @@
 name: pr-team-review
 description: >
   [Zensu] Run a multi-agent PR review on GitHub or GitLab and publish one
-  consolidated review. Use for "team review", "multi-agent PR review", a PR URL
-  with a review request, or /zensu:pr-team-review.
+  consolidated review. Use when the user explicitly asks for a team or
+  multi-agent review of a pull request, or via /zensu:pr-team-review.
 ---
 
 # /zensu:pr-team-review
@@ -36,8 +36,10 @@ invocation with no URL is malformed and must abort without asking.
 ## Invocation modes and delegated envelope
 
 Standalone mode remains interactive and retains the cast confirmation, cleanup/ref-deletion
-choice, next-step offer, and the existing `--post-review` publish path. It never asks before
-posting: invoking the skill on a PR is the authorization to publish the synthesized review.
+choice, next-step offer, and the existing `--post-review` publish path. The review is posted
+under the user's own forge account, so standalone mode asks exactly once before posting:
+after synthesis and before `--post-review`, one `AskUserQuestion` that names the PR, the
+verdict and the inline-comment count (Phase D).
 
 Delegated mode is activated when the invocation contains any delegated-envelope header
 (`ZENSU-DELEGATED-CALLER:`, `AUTOPILOT-BINDING:`, `AUTOPILOT-STAGE:` or `AUTOPILOT-REVIEW-OP:`).

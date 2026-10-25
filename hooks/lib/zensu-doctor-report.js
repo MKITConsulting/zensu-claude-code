@@ -5850,7 +5850,7 @@ function stateBlock(nowMs) {
       + parenthesizedPath(ownFile, ')')
       + ' — while it is gone the capability gate denies every tool in this session, '
       + 'because a deleted document must never be read as "no chain was ever active". '
-      + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
+      + 'A deleted and re-created worktree loses it, since git does not track .zensu/state/. '
       + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '
       + 'and /zensu:adopt-session --confirm to rebuild it; rebuilding is a loss, not a '
       + 'restore — a review chain that was live when it vanished is gone.');

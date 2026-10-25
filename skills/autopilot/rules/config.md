@@ -233,7 +233,7 @@ accepted because the list is declared by a human in the parent environment, whic
 reach only through the settings `env` block under bypass permissions or past the Auto-mode
 classifier, it is bounded at 8 exact origins with no pattern, and in remote mode every entry is
 public HTTPS pinned to an approved address, so no entry reaches a private, metadata or loopback
-address. `docs/verify-feature-consent-spec.md` holds the full analysis.
+address. `$ROOT/docs/verify-feature-consent-spec.md` holds the full analysis.
 
 ### `validate.evidenceSafety` — optional data-classification declaration
 

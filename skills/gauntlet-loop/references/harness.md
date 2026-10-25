@@ -187,11 +187,17 @@ Do not schedule short wakeups to poll subagents — a finished subagent
 re-invokes the lead on its own. Use a long fallback (1200 s+) so the run
 survives a hung agent.
 
-**There is no `/goal` command in Claude Code.** If a `/goal` or `/wargame` skill
-is installed, it is a *planning* step that produces the goal contract, invariants
-and evidence bar; run it before the gauntlet and feed its output into the charter
-as the frozen bar. The gauntlet is the execution loop, not the planner. In this
-plugin that planner is `/zensu:wargame`, which also handles `/goal` contracts. Its
+**Claude Code's own `/goal` command is a stop condition, not a planner.**
+`/goal <condition>` (and `/goal clear`) sets a goal that Claude checks before
+stopping and keeps the session working until a separate evaluator confirms the
+condition is met; it writes no plan, invariants or evidence bar. A message that
+starts with `/goal` runs that host command, so it never reaches a skill as text.
+The *planning* step is `/zensu:wargame`: it produces the goal contract, invariants
+and evidence bar, and a mission passed to it that opens with `/goal`
+(`/zensu:wargame /goal …`) selects its goal-contract mode. Run it before the
+gauntlet and feed its output into the charter as the frozen bar. The gauntlet is
+the execution loop, not the planner, and a host `/goal` condition can at most
+mirror the charter's stop conditions, never replace them. The planner's
 four contract parts — objective and exhaustiveness, invariants to prove or break,
 evidence bar, convergence loop — map onto the charter's goal, hard gates, inspection
 protocol and stop conditions, and its `RECON NEEDED` flags name the assumptions the

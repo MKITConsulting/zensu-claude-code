@@ -107,6 +107,7 @@ zensu_stop_supervise() {
   [ -s "$work/err" ] && cat -- "$work/err" >&2 2>/dev/null
   if [ "$fired" = true ]; then
     zensu_stop_deadline_notice "$deadline" "$decided" >&2
+    [ "$decided" = true ] || printf '{"systemMessage":"%s"}\n' "$(zensu_stop_deadline_notice "$deadline" false)"
     rc=0
   fi
   trap - TERM INT HUP

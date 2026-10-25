@@ -2094,6 +2094,7 @@ function recordReaderRefusals(options) {
 // would move where this module itself resolves every workflow document.
 const WORKFLOW_STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
 const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
+const ZENSU_GITIGNORE_BODY = '/state/\n/logs/witness-*.log\n';
 
 const ADOPTION_REFUSALS = {
   RECORD_UNREADABLE: 'record-unreadable',
@@ -3850,14 +3851,28 @@ function renderHostContext(contextInput) {
   ].join(' ');
 }
 
+function writeZensuGitignore(zensuDirectory) {
+  try {
+    fs.writeFileSync(path.join(zensuDirectory, '.gitignore'), ZENSU_GITIGNORE_BODY, { flag: 'wx', mode: 0o644 });
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 function workflowStateDirectory(projectRootInput) {
+  const projectRoot = canonicalDirectory(projectRootInput, 'project root');
+  const zensuDirectory = path.join(projectRoot, WORKFLOW_STATE_SEGMENTS[0]);
+  const zensuIsNew = !fs.existsSync(zensuDirectory);
   // Reduced over the segment list rather than destructured: a third segment must
   // not be silently dropped here while adoptionWorkflowStatePath's spread picks
   // it up, which is exactly the split the shared constant exists to prevent.
-  return WORKFLOW_STATE_SEGMENTS.reduce(
+  const stateDirectory = WORKFLOW_STATE_SEGMENTS.reduce(
     (parent, segment) => ensureDescendantDirectory(parent, path.join(parent, segment)),
-    canonicalDirectory(projectRootInput, 'project root'),
+    projectRoot,
   );
+  if (zensuIsNew) writeZensuGitignore(zensuDirectory);
+  return stateDirectory;
 }
 
 function resolveWorkflowStateDirectory(options) {
@@ -6108,6 +6123,7 @@ module.exports = {
   // directory, which is the opposite of what a read-only pre-check wants.
   WORKFLOW_STATE_SEGMENTS,
   WORKFLOW_STATE_PREFIX,
+  ZENSU_GITIGNORE_BODY,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,

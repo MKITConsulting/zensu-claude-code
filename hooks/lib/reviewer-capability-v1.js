@@ -1045,7 +1045,7 @@ function main() {
       // sets PLATFORM_SUPPORTED = process.platform !== "win32" and gates both recognizers on
       // it, so on win32 the Bash recognizer admits NEITHER command and an unconditional
       // "both stay reachable" is false in the one state where a wrong remedy has no fallback.
-      const cause = "this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied.";
+      const cause = "this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because git does not track .zensu/state/. It is NOT read as \"no chain was ever active\": that is why every tool is denied.";
       if (callerIsMain) {
         denyBind(`${cause} Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.`);
         return;

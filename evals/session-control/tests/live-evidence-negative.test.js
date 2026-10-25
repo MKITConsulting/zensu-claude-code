@@ -14,6 +14,7 @@ const {
   isLoopbackListenerForbiddenError,
   isLoopbackListenerForbiddenProcessFailure,
 } = require('../lib/local-mutation-canary-status.js');
+const core = require('../../../hooks/lib/session-control-core-v1.js');
 
 const evalRoot = path.resolve(__dirname, '..');
 const evidence = path.join(evalRoot, 'lib', 'live-evidence.js');
@@ -178,6 +179,19 @@ async function main() {
     const treePrototype = run(['snapshot-tree', prototypeRepo]);
     assert.equal(treePrototype.status, 0, treePrototype.stderr);
     assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(treePrototype.stdout), '__proto__'), true);
+    const scaffold = path.join(prototypeRepo, '.zensu', '.gitignore');
+    fs.mkdirSync(path.dirname(scaffold));
+    fs.writeFileSync(scaffold, core.ZENSU_GITIGNORE_BODY);
+    const changedScaffold = run(['changed-files', prototypeRepo]);
+    assert.equal(changedScaffold.status, 0, changedScaffold.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(changedScaffold.stdout)), ['__proto__']);
+    fs.mkdirSync(path.join(prototypeRepo, '.zensu', 'logs'));
+    fs.writeFileSync(path.join(prototypeRepo, '.zensu', 'logs', 'witness-1.log'), 'witness\n');
+    fs.appendFileSync(scaffold, '/plans/\n');
+    const changedUnderScaffold = run(['changed-files', prototypeRepo]);
+    assert.equal(changedUnderScaffold.status, 0, changedUnderScaffold.stderr);
+    assert.deepEqual(Object.keys(JSON.parse(changedUnderScaffold.stdout)).sort(),
+      ['.zensu/.gitignore', '.zensu/logs/witness-1.log', '__proto__'].sort());
 
     const agent = 'zensu:review-aspect';
     const markerInput = path.join(

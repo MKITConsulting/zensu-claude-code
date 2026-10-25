@@ -302,11 +302,13 @@ behind the `Stop hook error occurred` notice, takes blocking reasons, non-zero-e
 execution errors, so exit-0 stderr only sets `hasOutput`. Measured on this machine: in a
 2.1.266 session the bound inner cap's `moved to audited BLOCKED` stderr line exists only as
 `attachment.stderr` of two Stop `hook_success` records in the session JSONL. The desktop app
-starts its sessions without `--include-hook-events`, and its own renderer is unmeasured. The
-bound covers every exit-0 stderr line of the Stop hook, the cap-release notices included. A
+starts its sessions without `--include-hook-events`, and its own renderer is unmeasured. A
 Stop hook reaches the user through a JSON `systemMessage`, which the host files as
-`hook_system_message` and the terminal renders as `<hook> says: <text>`; moving this line
-there is the fix and is not taken here. S7g captures that stderr separately and requires it — the
+`hook_system_message` and the terminal renders as `<hook> says: <text>`. The Stop hook's OWN
+release, cap and nudge notices now take that channel as well as stderr (`stop_notice`, recorded
+in `.claude/rules/stop-latency.md`); THIS line is written by the library and stays stderr-only,
+because surfacing it would repeat it to the user at every turn end of a steady state — it needs
+the once-per-hold band described below first. S7g captures that stderr separately and requires it — the
 hook fixtures cannot, because `invoke()` discards stderr, so without a direct capture the line
 could be deleted with every check green. **Accepted cost, named because it is not obvious:**
 the line is UNRATED and the state that produces it is a steady state, not an event — an
