@@ -674,6 +674,11 @@ test('an intact target document is reused, and a second move takes the anchor ba
 });
 
 test('performReanchor moves this session\'s markers, replaces a stale copy and leaves a linked one in place', (t) => {
+  const templateKinds = (file, pattern) => [...fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', file), 'utf8').matchAll(pattern)].map((match) => match[1]);
+  assert.deepEqual([
+    ...templateKinds('zensu-config.sh', /\/\.zensu\/state\/([a-z][a-z0-9-]*)-\$session_key\.json/g),
+    ...templateKinds('zensu-zen-mode.sh', /\$ZEN_STATE_DIR\/([a-z][a-z0-9-]*)-\$_zensu_sid\.json/g),
+  ].sort(), [...reanchor.SESSION_MARKERS].sort());
   const f = fixture(t);
   const stateA = path.join(f.a, '.zensu', 'state');
   const stateB = path.join(f.b, '.zensu', 'state');
@@ -681,23 +686,27 @@ test('performReanchor moves this session\'s markers, replaces a stale copy and l
   fs.writeFileSync(path.join(stateA, `delivery-route-${f.key}.json`), '{"route":"tdd"}\n');
   fs.writeFileSync(path.join(stateA, `inherited-route-${f.key}.json`), '{"route":"tdd"}\n');
   fs.writeFileSync(path.join(stateA, `linked-session-${f.key}.json`), '{"state":"linked"}\n');
+  fs.writeFileSync(path.join(stateA, `full-suite-${f.key}.json`), '{"runner":"local"}\n');
   fs.symlinkSync(path.join(f.base, 'elsewhere.json'), path.join(stateA, `zen-mode-${f.key}.json`));
   fs.mkdirSync(stateB, { recursive: true });
   fs.writeFileSync(path.join(stateB, `tdd-mode-${f.key}.json`), '{"mode":"vanilla"}\n');
+  fs.writeFileSync(path.join(stateB, `full-suite-${f.key}.json`), '{"runner":"ci"}\n');
   const outcome = reanchor.performReanchor(f.request());
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
-  assert.deepEqual(outcome.markers.moved, ['tdd-mode', 'delivery-route', 'inherited-route', 'linked-session']);
+  assert.deepEqual(outcome.markers.moved, ['tdd-mode', 'delivery-route', 'inherited-route', 'linked-session', 'full-suite']);
   assert.deepEqual(outcome.markers.faults, ['zen-mode: the marker is not a regular file']);
   assert.equal(fs.readFileSync(path.join(stateB, `tdd-mode-${f.key}.json`), 'utf8'), '{"mode":"strict"}\n');
   assert.equal(fs.readFileSync(path.join(stateB, `delivery-route-${f.key}.json`), 'utf8'), '{"route":"tdd"}\n');
   assert.equal(fs.readFileSync(path.join(stateB, `inherited-route-${f.key}.json`), 'utf8'), '{"route":"tdd"}\n');
   assert.equal(fs.readFileSync(path.join(stateB, `linked-session-${f.key}.json`), 'utf8'), '{"state":"linked"}\n');
+  assert.equal(fs.readFileSync(path.join(stateB, `full-suite-${f.key}.json`), 'utf8'), '{"runner":"local"}\n');
   assert.equal(fs.existsSync(path.join(stateA, `tdd-mode-${f.key}.json`)), false);
   assert.equal(fs.existsSync(path.join(stateA, `inherited-route-${f.key}.json`)), false);
   assert.equal(fs.existsSync(path.join(stateA, `linked-session-${f.key}.json`)), false);
+  assert.equal(fs.existsSync(path.join(stateA, `full-suite-${f.key}.json`)), false);
   assert.equal(fs.lstatSync(path.join(stateA, `zen-mode-${f.key}.json`)).isSymbolicLink(), true);
   const rendered = reanchor.renderReanchorOutcome(outcome);
-  assert.match(rendered.text, /session markers +: moved \(tdd-mode, delivery-route, inherited-route, linked-session\)/);
+  assert.match(rendered.text, /session markers +: moved \(tdd-mode, delivery-route, inherited-route, linked-session, full-suite\)/);
   assert.match(rendered.text, /^  marker fault +: .*zen-mode.*the marker is not a regular file/m);
   assert.match(rendered.text, /Set that preference again from here/);
 });
@@ -894,6 +903,7 @@ test('the verdict renderer names both roots and the uncommitted paths before --c
   assert.match(report.text, /\/zensu:converge and \/zensu:verify-feature\n--chain read the anchor from zensu-log\.sh --project-root and run their commands inside it,\n/);
   assert.match(report.text, /and --evidence-run runs there too, so a new \/zensu:tdd chain can start in this session\.\n/);
   assert.match(report.text, /\/zensu:plan-review, \/zensu:setup, \/zensu:cover, \/zensu:autopilot and \/zensu:pilot still\nread plans, config, overlays and templates from the start directory\./);
+  assert.match(report.text, /are set aside, and this session's tdd-mode, delivery-route, inherited-route, linked-session, full-suite and zen-mode\nmarkers move with the anchor\.\n/);
   assert.doesNotMatch(report.text, /fresh session/);
   assert.doesNotMatch(report.text, /cannot run there/);
   const unpastable = reanchor.renderReanchorVerdict({ ...verdict, targetRoot: '/work/re$po/b' }, false).text;

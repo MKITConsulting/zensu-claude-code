@@ -49,7 +49,7 @@ const AUTOPILOT_READER_FAULTS = Object.freeze({
   97: 'the Autopilot state library did not load',
 });
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
-const SESSION_MARKERS = Object.freeze(['tdd-mode', 'delivery-route', 'inherited-route', 'linked-session', 'zen-mode']);
+const SESSION_MARKERS = Object.freeze(['tdd-mode', 'delivery-route', 'inherited-route', 'linked-session', 'full-suite', 'zen-mode']);
 const MAX_REGISTRY_ENTRIES = 1024;
 const MAX_REGISTRY_BYTES = 65536;
 const MAX_RECORD_BYTES = 1024 * 1024;
@@ -721,8 +721,8 @@ function renderReanchorVerdict(verdict, confirmed) {
   text += '/zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot still\n';
   text += 'read plans, config, overlays and templates from the start directory. The workflow\n';
   text += 'document under the recorded root stays where it is; review-evidence leases bound to it\n';
-  text += 'are set aside, and this session\'s tdd-mode, delivery-route, inherited-route,\n';
-  text += 'linked-session and zen-mode markers move with the anchor.\n';
+  text += `are set aside, and this session's ${SESSION_MARKERS.slice(0, -1).join(', ')} and ${SESSION_MARKERS[SESSION_MARKERS.length - 1]}\n`;
+  text += 'markers move with the anchor.\n';
   text += '\nNothing has been changed. Run the same command with --confirm to move the anchor.\n';
   return { text, code: 0, proceed: false };
 }
@@ -828,6 +828,7 @@ module.exports = {
   REANCHOR_REMEDY,
   REANCHOR_HISTORY_PHASE,
   REANCHOR_HISTORY_REASON_PREFIX,
+  SESSION_MARKERS,
   worktreeIdentity,
   registeredWorktrees,
   owningWorktree,
