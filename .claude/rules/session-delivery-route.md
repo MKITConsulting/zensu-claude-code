@@ -49,14 +49,16 @@ removes the workflow together with the question.
 `zensu_delivery_route_field` renders the ONE spelling both directives and the doctor carry, and
 `zensu_delivery_route_status_line` renders the `--status` line from the resolver's answer plus
 the one fact the resolver drops (a RELEASED marker), so the ladder ORDER exists once.
-`_zensu_marker_one_line_value` is the bounded reader shared with the tdd-mode marker: one parse,
-two vocabularies.
+`_zensu_marker_one_line_value` is the bounded reader of every session marker `zensu-config.sh`
+owns — tdd-mode, delivery-route, inherited-route, linked-session and full-suite: one parse, and
+each reader maps it onto its own vocabulary. The zen-mode marker keeps a reader and a writer of its
+own; the write-primitive bullet under §"Known bounds" names both writers.
 
-**Both mechanical ranks are read under the ONE root the caller hands the resolver.** The marker
-lives under it, and the config overlay is read from it through
+**All three mechanical ranks are read under the ONE root the caller hands the resolver.** Both
+markers live under it, and the config overlay is read from it through
 `zensu_default_delivery_route <root>` rather than from the ambient `CLAUDE_PROJECT_DIR`. No
 caller pins `CLAUDE_PROJECT_DIR`; the two hooks, the helper's `--status` and the doctor probe
-all pass the RECORDED project root, so they cannot pair one tree's marker with another tree's
+all pass the RECORDED project root, so they cannot pair one tree's markers with another tree's
 config. An empty root answers `ask`: a hook whose `zensu_resolve_project_dir` failed never lets
 the global config alone pick a route. `autoTdd`, `tddReminder` and `tddImplementation` in the
 same hooks stay harness-anchored on purpose; moving them is its own change with its own pins
@@ -102,10 +104,14 @@ provenance, or keeping a separate record per question, was rejected: either spli
 the two hooks share, and treating a foreign record as a mere recommendation would undo the (S)
 clause's "do NOT ask". The skill states the sharing in its own text.
 
-Both marker writers — this helper and `hooks/lib/zensu-tdd-mode.sh` — write through ONE
-sequence, `zensu_write_session_marker` in `hooks/lib/zensu-marker-write.sh`, sourced right after
-the verb check — a failed load exits 2 with a cannot-load refusal before anything binds (R8l) —
-and handed the helper's own script name so each keeps its message prefix:
+Every writer of a marker `zensu-config.sh` owns — this helper, `hooks/lib/zensu-tdd-mode.sh`,
+`hooks/lib/zensu-full-suite.sh` and `hooks/lib/zensu-linked-session.sh` — writes through ONE
+sequence, `zensu_write_session_marker` in `hooks/lib/zensu-marker-write.sh`, handed the helper's
+own script name so each keeps its message prefix. The three command helpers source it right after
+the verb check, and a failed load exits 2 with a cannot-load refusal before anything binds (R8l
+drives this helper and `zensu-tdd-mode.sh`); `zensu-linked-session.sh` is a library the ask-hooks
+source, and it loads the writer from its own directory unless the function is already defined.
+The sequence is:
 the shared symlink guard before the write and again before the rename (the second
 call is the TOCTOU defense), an O_EXCL `mktemp` temp leaf with an `-L` refusal before the
 redirect, a non-regular check, the rename, and a regular-file post-condition after it, because a
@@ -125,8 +131,9 @@ R8f/R8g/R8h and T9g/T9h/T9i drive the temp-leaf refusal and both halves of the p
 through another `mv` shim and require the helper to end with 130, 143 and 129 and no success line.
 R8j and T9k drive the pre-rename re-check: a `mktemp` shim plants a link to an empty directory at
 the marker leaf after the temp exists, and each helper must refuse with its own prefix, leave the
-link target empty and leave no temp. R8k requires both helpers to source the library and neither
-to keep its own `mktemp` or `mv -f`.
+link target empty and leave no temp. R8k collects every file under `hooks/lib` that calls
+`zensu_write_session_marker` with a script name, requires the four helpers named above among
+them, and requires each to source the library and none to keep its own `mktemp` or `mv -f`.
 
 ## Linked sessions inherit `tdd`
 
@@ -147,12 +154,16 @@ trimmed and MSYS-mapped, is the only store candidate, with no fallback behind it
 session-trail at is the store this module reads; a relative value names no store here, because a
 hook's working directory is not the user's. Binding checks: the shape of
 each id; the store, account and organization directories real directories; each record a regular
-file opened without following a link, at most 8 MiB; the own record's `sessionId` equal to the host
+file opened without following a link and without blocking, at most 8 MiB, a read that keeps
+answering would-block retried 16 times 1 ms apart and then read as unreadable; the own record's
+`sessionId` equal to the host
 id; its `cliSessionId`, when present, equal to the payload's `session_id`; a parent id other than
 the own one. The parent's project root comes from the parent's Session Control record (`sessionKey`
 of the parent's `cliSessionId`, read through `privateRecordsDirectory` after `CLAUDE_PLUGIN_DATA` is
 canonicalized by the binder's own `canonicalDirectory`, as `resolveHookSession` does, at most 1 MiB,
-schema and version checked, a canonical existing directory), never from the desktop record's `cwd`, which
+schema and version equal to the core's `SCHEMA` and `SCHEMA_VERSION`, its `session_id_hash` equal to
+the core's `sessionIdHash` of that `cliSessionId` as `readContext` requires, a canonical existing
+directory), never from the desktop record's `cwd`, which
 session-trail measured disagreeing with a fork's own records. Inheritance needs both roots to share
 one real `git rev-parse --git-common-dir`.
 
@@ -206,7 +217,7 @@ placeholders substituted on the PARSED JSON by `zensu_directive_substitute` in
 ask-hooks through `zensu_delivery_route_substitute`): the record command carries `printf %q`
 backslashes that a shell substitution into the raw text cannot JSON-escape. That library holds
 the record command and the skill fallback too, so `zensu-config.sh` keeps to reading config and
-the two markers. It is one of TWO substitution conventions, and the second is deliberate:
+the session markers. It is one of TWO substitution conventions, and the second is deliberate:
 `hooks/user-prompt-zen-mode.sh` fills `{{ZENSU_CHAIN_ANCHOR}}` by shell parameter expansion on
 the raw body, with no process, because that value is a closed vocabulary that never needs JSON
 escaping. Each hook that substitutes sources the directive library itself. The substitution is
@@ -296,8 +307,9 @@ route: a route change moves only the field, and every shape of the reminder carr
   installs a stub that refuses. `R9h` in `tests/structure/test-delivery-route.sh` grades both
   branches.
 - The twin prologue in `zensu-delivery-route.sh` (the third copy, for the reason the first copy
-  gives), and `hooks/lib/zensu-marker-write.sh`, the one write sequence it and
-  `zensu-tdd-mode.sh` source.
+  gives), and `hooks/lib/zensu-marker-write.sh`, the one write sequence every helper of a
+  `zensu-config.sh` marker sources: it, `zensu-tdd-mode.sh`, `zensu-full-suite.sh` and
+  `zensu-linked-session.sh`.
 - Both heredocs of BOTH ask-hooks; the parity helper's `P1`/`P2` needle lists carry the new
   literals.
 - The route-default block and the `_ZENSU_ROUTE_QUESTION_LIVE` guard in
@@ -408,12 +420,13 @@ ignores both files and asks, which is the fail-safe direction.
 - `/zensu:delivery-route` cannot be exercised live from a `--plugin-dir` checkout in a session
   bound to the installed plugin, because the sibling-root rule refuses the bind; its behavioural
   coverage is the suite's own Session Control fixtures, as for `/zensu:tdd-mode`.
-- Two write primitives serve the three mode markers. `hooks/lib/zensu-zen-mode.sh` opens a fresh
+- Two write primitives serve the session markers. `hooks/lib/zensu-zen-mode.sh` opens a fresh
   temp inode with `O_EXCL` in a node child, writes through that one descriptor, fsyncs and
-  renames; `zensu_write_session_marker` re-opens its `mktemp` leaf through a plain redirect that
-  the `-L` refusal only narrows. The difference is historical: this change moved the tdd-mode
-  sequence into a shared library, not onto zen-mode's primitive. Unifying all three is a separate
-  change, because R8f-R8j and T9g-T9k drive the shell sequence through PATH shims for `mktemp` and
+  renames, for the zen-mode marker alone; `zensu_write_session_marker` re-opens its `mktemp` leaf
+  through a plain redirect that the `-L` refusal only narrows, for the five markers
+  `zensu-config.sh` owns (tdd-mode, delivery-route, inherited-route, linked-session and
+  full-suite). The difference is historical: this change moved the tdd-mode sequence into a
+  shared library, not onto zen-mode's primitive. Unifying the two is a separate change, because R8f-R8j and T9g-T9k drive the shell sequence through PATH shims for `mktemp` and
   `mv`, R8k pins its shape, and all of them would be re-authored with it.
 - The desktop record format is private and unversioned; the resolver was written against Claude
   Desktop 2.42304.0 on macOS. Drift reads as `none` or `unresolved`, which is the ladder without
@@ -428,8 +441,14 @@ ignores both files and asks, which is the fail-safe direction.
   example, leaves the answer uncached, so the module starts again on the next prompt. The test
   covers the read-only and the foreign-owned directory, the common cases.
 - The desktop records and the parent's markers are ordinary user-writable files. A forged lineage
-  can add the workflow, because only `tdd` is inherited, or drop the brief note, which is the
-  behavior from before inheritance.
+  can add the workflow, because only `tdd` is inherited; drop the brief note, which is the
+  behavior from before inheritance; or mark a prompt the user typed as another session's brief,
+  so a route preference in that one prompt decides nothing and the field answers. Under a field
+  that reads `direct` (the own marker or `hooks.defaultDeliveryRoute`) that removes review: a
+  request for the workflow typed into that prompt is implemented directly. The effect covers that
+  one prompt, the brief note asks the model to name the route the prompt asked for, and an `ask`
+  field asks the route question instead. Letting a request for the workflow count even in a brief
+  would close it; that design decision is left open.
 - A brief that is a bare slash command is skipped by the reminder, like every bare slash command,
   so the lineage resolves on the next typed prompt. That prompt carries no brief note once the slash
   command's turn completed and raised `completedTurns`; after a turn that ended in an error, the

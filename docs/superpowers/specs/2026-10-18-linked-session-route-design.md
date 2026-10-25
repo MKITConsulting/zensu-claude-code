@@ -137,14 +137,20 @@ The abort condition, a failed R1 or R2, did not occur. Its fallback, a scan of t
   the host id the host exported already binds the record, and R2 is post hoc about the first prompt. The parent's
   record lies in the same `<account>/<org>` directory. A set `ZENSU_CCD_STORE` names the store, with no fallback
   behind it, as it does for session-trail (review round 1, R1-F2); a relative value names none. The store, account and organization directories must be real
-  directories, each record a regular file opened without following a link, and a desktop record is read only up to
-  8 MiB, a Session Control record up to 1 MiB. Faults on the own side answer `none`, which is final, except a missing
+  directories, each record a regular file opened without following a link and without blocking, so a FIFO swapped in
+  after its `lstat` is refused at once, and a desktop record is read only up to 8 MiB, a Session Control record up to
+  1 MiB. A read that keeps answering would-block (`EAGAIN`, which POSIX leaves possible for a regular file on some
+  network and FUSE mounts) is retried 16 times, 1 ms apart, and then counts as unreadable (review round 1, R1-F5 and
+  R1-F14). Faults on the own side answer `none`, which is final, except a missing
   or unreadable own record, which answers `unresolved` and is retried once. Faults on the parent's side answer
   `linked` without a parent root: the session is still linked, so the brief note applies, and nothing is inherited.
 - **D4 — Parent root: the parent's Session Control record (default).** The parent key is `sessionKey` of the parent's
   `cliSessionId`, computed by `hooks/lib/session-control-core-v1.js`, and the root is the `project_root` field of
   `$CLAUDE_PLUGIN_DATA/session-control/v1/records/<parent key>.json`, read under the directory checks that
-  `privateRecordsDirectory` in `hooks/lib/claude-hook-session-v1.js` applies. Never the desktop record's `cwd`:
+  `privateRecordsDirectory` in `hooks/lib/claude-hook-session-v1.js` applies. The record must carry the core's `SCHEMA`
+  and `SCHEMA_VERSION` and the `session_id_hash` that the core's `sessionIdHash` gives for that `cliSessionId`, as
+  `readContext` requires; any other record leaves the session linked and uninherited (review round 1, R1-F8). Never
+  the desktop record's `cwd`:
   session-trail measured it disagreeing with a fork's own first record in 66 of 137 desktop forks.
 - **D5 — Same repository only (default).** Inheritance requires that both roots resolve to the same real
   `git rev-parse --git-common-dir`. A linked session in another repository gets today's ladder, because a route is a
@@ -274,8 +280,15 @@ The result, case by case:
   drift reads as `none` or `unresolved`, which is today's behavior, never a wrong route.
 - **Windows and Linux are unverified.** The store paths there are the inferred candidates of
   `ccdStoreCandidates` in `trail.mjs`, and the variables were observed on macOS only.
-- **The records are ordinary user-writable files.** A forged lineage can at most add the workflow, since only `tdd`
-  is inherited, or drop the brief note, which is today's behavior.
+- **The records are ordinary user-writable files.** A forged lineage can add the workflow, since only `tdd` is
+  inherited; drop the brief note, which is today's behavior; or mark a prompt the user typed as another session's
+  brief, so a route preference in that one prompt decides nothing and the ZENSU DELIVERY ROUTE field answers (review
+  round 1, R1-F7). That last effect is the one that removes review: while the field reads `direct`, from the own
+  marker or `hooks.defaultDeliveryRoute`, a request for the workflow the user typed into that prompt is implemented
+  directly, without the review chain. It reaches that one prompt, the brief note tells the model the prompt is
+  another session's brief and to name the route it asked for, and a field that reads `ask` asks the route question
+  instead (review round 1, R1-F4). Letting a request for the workflow count even in a brief would close it, at the
+  price of letting a genuine brief add the workflow; that design decision is left open.
 - **This adds a cross-session read to a hook.** On the first prompt the hook reads two desktop records, one Session
   Control record and one or two markers of another session, read-only, and keeps nothing but the two one-line markers
   of D9. Nothing leaves the machine. `docs/configuration.md` names the read.

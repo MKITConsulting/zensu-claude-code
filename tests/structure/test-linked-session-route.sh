@@ -89,6 +89,147 @@ L3C_WANT="$(printf '%s\n' '/s/store' '/s/store' 'D:/store' 'none' '/h/Library/Ap
 [ "$L3C_OUT" = "$L3C_WANT" ] \
   && check "L3c ZENSU_CCD_STORE is the only candidate when set, as session-trail reads it: trimmed, MSYS drive mapped on win32, a relative value names no store, a blank one is ignored" PASS \
   || check "L3c store override ($(printf '%s' "$L3C_OUT" | tr '\n' ';'))" FAIL
+L3D_LITERALS="$(grep -c 'zensu\.session-control' "$RESOLVER" 2>/dev/null || true)"
+L3D_FROM_CORE="$(grep -cE 'controlCore\(\)\.SCHEMA\b.*controlCore\(\)\.SCHEMA_VERSION\b' "$RESOLVER" 2>/dev/null || true)"
+[ "$L3D_LITERALS" = "0" ] && [ "${L3D_FROM_CORE:-0}" -ge 1 ] \
+  && check "L3d the resolver spells no Session Control schema of its own and takes the name and version from the core" PASS \
+  || check "L3d schema source (literals=$L3D_LITERALS from-core=$L3D_FROM_CORE)" FAIL
+L3E_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const core = require(process.argv[2]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-hash-")));
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const childHost = "local_33333333-3333-4333-8333-333333333333";
+    const parentHost = "local_44444444-4444-4444-8444-444444444444";
+    const childCli = "55555555-5555-4555-8555-555555555555";
+    const parentCli = "66666666-6666-4666-8666-666666666666";
+    const store = path.join(scratch, "store");
+    const desk = path.join(store, account, organization);
+    fs.mkdirSync(desk, { recursive: true });
+    fs.writeFileSync(path.join(desk, parentHost + ".json"), JSON.stringify({ sessionId: parentHost, cliSessionId: parentCli }));
+    fs.writeFileSync(path.join(desk, childHost + ".json"), JSON.stringify({ sessionId: childHost, cliSessionId: childCli, spawnedFrom: { sessionId: parentHost } }));
+    const records = path.join(scratch, "records");
+    const root = path.join(scratch, "root");
+    fs.mkdirSync(records);
+    fs.mkdirSync(root);
+    const record = path.join(records, core.sessionKey(parentCli) + ".json");
+    const env = { CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: store };
+    const resolve = (change) => {
+      const context = { schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, session_id_hash: core.sessionIdHash(parentCli), project_root: root };
+      change(context);
+      fs.writeFileSync(record, JSON.stringify(context));
+      const v = m.resolveLinkedSession({ env, sessionId: childCli, pluginData: scratch, deps: { recordsDirectory: () => records } });
+      return v.kind + "/" + v.reason + "/" + (v.parentRoot === root ? "root" : "-");
+    };
+    process.stdout.write([
+      resolve(() => {}),
+      resolve((c) => { c.session_id_hash = core.sessionIdHash(childCli); }),
+      resolve((c) => { delete c.session_id_hash; }),
+      resolve((c) => { c.schema = "zensu.workflow-state"; }),
+      resolve((c) => { delete c.schema; }),
+      resolve((c) => { c.schema_version = core.SCHEMA_VERSION + 1; }),
+      resolve((c) => { delete c.schema_version; }),
+    ].join("\n"));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" "$CORE" 2>/dev/null)"
+L3E_WANT="$(printf '%s\n' 'linked/resolved/root' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-')"
+[ "$L3E_OUT" = "$L3E_WANT" ] \
+  && check "L3e a parent record whose session hash, schema or schema version is another one or missing leaves the session linked and uninherited, while the matching record resolves" PASS \
+  || check "L3e parent session hash ($(printf '%s' "$L3E_OUT" | tr '\n' ';'))" FAIL
+L3F_INNER='
+  const cp = require("child_process");
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-fifo-")));
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const host = "local_33333333-3333-4333-8333-333333333333";
+    const desk = path.join(scratch, "store", account, organization);
+    fs.mkdirSync(desk, { recursive: true });
+    const own = path.join(desk, host + ".json");
+    cp.execFileSync("mkfifo", [own]);
+    const realLstat = fs.lstatSync;
+    const regular = realLstat(process.argv[1]);
+    fs.lstatSync = (target, ...rest) => (target === own ? regular : realLstat(target, ...rest));
+    const env = { CLAUDE_CODE_HOST_SESSION_ID: host, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: path.join(scratch, "store") };
+    const v = m.resolveLinkedSession({ env, sessionId: "55555555-5555-4555-8555-555555555555", pluginData: scratch });
+    process.stdout.write(v.kind + "/" + v.reason);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+'
+L3F_OUT="$(node -e '
+  const r = require("child_process").spawnSync(process.execPath, ["-e", process.argv[1], process.argv[2]], { encoding: "utf8", timeout: 20000 });
+  process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "blocked" : String(r.status) + ":" + r.stdout);
+' "$L3F_INNER" "$RESOLVER" 2>/dev/null)"
+[ "$L3F_OUT" = "0:none/own-record-refused" ] \
+  && check "L3f a desktop record swapped for a FIFO after its lstat is refused at once instead of blocking the open" PASS \
+  || check "L3f FIFO swapped in after lstat ($L3F_OUT)" FAIL
+L3G_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const core = require(process.argv[2]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-again-")));
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const childHost = "local_33333333-3333-4333-8333-333333333333";
+    const parentHost = "local_44444444-4444-4444-8444-444444444444";
+    const childCli = "55555555-5555-4555-8555-555555555555";
+    const parentCli = "66666666-6666-4666-8666-666666666666";
+    const store = path.join(scratch, "store");
+    const desk = path.join(store, account, organization);
+    fs.mkdirSync(desk, { recursive: true });
+    fs.writeFileSync(path.join(desk, parentHost + ".json"), JSON.stringify({ sessionId: parentHost, cliSessionId: parentCli }));
+    fs.writeFileSync(path.join(desk, childHost + ".json"), JSON.stringify({ sessionId: childHost, cliSessionId: childCli, spawnedFrom: { sessionId: parentHost } }));
+    const records = path.join(scratch, "records");
+    const root = path.join(scratch, "root");
+    fs.mkdirSync(records);
+    fs.mkdirSync(root);
+    fs.writeFileSync(path.join(records, core.sessionKey(parentCli) + ".json"), JSON.stringify({ schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, session_id_hash: core.sessionIdHash(parentCli), project_root: root }));
+    const env = { CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: store };
+    const realRead = fs.readSync;
+    const resolve = (failures) => {
+      let left = failures;
+      let thrown = 0;
+      fs.readSync = (...args) => {
+        if (left > 0) {
+          left -= 1;
+          thrown += 1;
+          const error = new Error("resource temporarily unavailable");
+          error.code = "EAGAIN";
+          throw error;
+        }
+        return realRead(...args);
+      };
+      try {
+        const v = m.resolveLinkedSession({ env, sessionId: childCli, pluginData: scratch, deps: { recordsDirectory: () => records } });
+        return v.kind + "/" + v.reason + "/" + (v.parentRoot === root ? "root" : "-") + "/" + (thrown > 0 ? "stubbed" : "unstubbed");
+      } finally {
+        fs.readSync = realRead;
+      }
+    };
+    process.stdout.write([resolve(3), resolve(Infinity)].join("\n"));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" "$CORE" 2>/dev/null)"
+L3G_WANT="$(printf '%s\n' 'linked/resolved/root/stubbed' 'unresolved/own-record-unreadable/-/stubbed')"
+[ "$L3G_OUT" = "$L3G_WANT" ] \
+  && check "L3g a read that answers would-block is retried: three EAGAIN answers still resolve, and one that never ends leaves the session unresolved for its one retry instead of refusing it for good" PASS \
+  || check "L3g would-block reads ($(printf '%s' "$L3G_OUT" | tr '\n' ';'))" FAIL
 
 T="$(mktemp -d 2>/dev/null)" || T=""
 if [ -z "$T" ] || [ ! -d "$T" ]; then

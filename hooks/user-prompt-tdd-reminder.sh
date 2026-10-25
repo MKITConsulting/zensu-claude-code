@@ -80,7 +80,7 @@ STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 # The project dir is resolved through Session Control rather than read from
 # ZENSU_PROJECT_ROOT, for the same reason user-prompt-zen-mode.sh resolves it: the
 # exported root can carry a different spelling on Git Bash and would then miss the
-# marker. Both session markers below are keyed on it.
+# marker. Every session marker below is keyed on it.
 ROUTE_PROJECT="$(zensu_resolve_project_dir 2>/dev/null)"
 
 # The session's already-decided DELIVERY ROUTE, resolved once and handed to the
@@ -90,12 +90,12 @@ ROUTE_PROJECT="$(zensu_resolve_project_dir 2>/dev/null)"
 # the two directives cannot answer differently.
 # The heredocs stay QUOTED and stay TWO (the parity pins count them) and are piped
 # through the substitution rather than interpolated.
-# The resolver reads BOTH ranks under the RECORDED project root it is handed, the root
-# the helper's `--status` and the /zensu:doctor probe pass too, and answers `ask` when
-# that root could not be resolved (an empty ROUTE_PROJECT), so a failed resolve never
-# lets the global config alone pick a route. `tddReminder` above and
-# `tddImplementation` below still read the ambient harness value on purpose — see the
-# plan-approval hook's emission site.
+# The resolver reads its three ranks (own marker, inherited route, config overlay)
+# under the RECORDED project root it is handed, the root the helper's `--status` and
+# the /zensu:doctor probe pass too, and answers `ask` when that root could not be
+# resolved (an empty ROUTE_PROJECT), so a failed resolve never lets the global config
+# alone pick a route. `tddReminder` above and `tddImplementation` below still read the
+# ambient harness value on purpose — see the plan-approval hook's emission site.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-directive.sh"
 LINKED_SESSION=none
 if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" ] \

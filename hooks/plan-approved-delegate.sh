@@ -477,10 +477,10 @@ fi
 # zensu-directive.sh owns the record command and the placeholder substitution. The
 # two heredocs below stay QUOTED
 # and stay TWO — the parity pins count them — and are piped through the substitution
-# rather than interpolated. The resolver reads BOTH ranks, the marker and the config
-# overlay, under the RECORDED project root it is handed — the root the helper's
-# `--status` and the /zensu:doctor probe pass too — so the ambient harness value,
-# which can name a different tree in a worktree session, never reaches the route.
+# rather than interpolated. The resolver reads its three ranks (own marker, inherited
+# route, config overlay) under the RECORDED project root it is handed — the root the
+# helper's `--status` and the /zensu:doctor probe pass too — so the ambient harness
+# value, which can name a different tree in a worktree session, never reaches the route.
 # `autoTdd` above and `tddImplementation` below deliberately still read the harness
 # value — moving those keys is its own change, because their pins assume the harness
 # root.

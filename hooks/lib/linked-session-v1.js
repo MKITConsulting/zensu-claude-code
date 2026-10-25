@@ -11,7 +11,7 @@ const UNSAFE_PATH_RE = /[\0\t\r\n]/;
 const DESKTOP_RECORD_MAX_BYTES = 8 * 1024 * 1024;
 const CONTEXT_RECORD_MAX_BYTES = 1024 * 1024;
 const GIT_TIMEOUT_MS = 3000;
-const CONTEXT_SCHEMA = 'zensu.session-control';
+const READ_AGAIN_BUDGET = 16;
 const STORE_SEGMENTS = Object.freeze(['Claude', 'claude-code-sessions']);
 const EMPTY_FIELD = '-';
 
@@ -113,6 +113,15 @@ function sessionDirectory(platform, env, account, organization) {
   return null;
 }
 
+function pause(milliseconds) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function readBoundedFile(file, maxBytes) {
   let stat;
   try {
@@ -123,7 +132,7 @@ function readBoundedFile(file, maxBytes) {
   if (stat.isSymbolicLink() || !stat.isFile() || stat.size > maxBytes) return { state: 'refused' };
   let fd;
   try {
-    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
   } catch (error) {
     return { state: error && error.code === 'ENOENT' ? 'missing' : 'refused' };
   }
@@ -132,8 +141,18 @@ function readBoundedFile(file, maxBytes) {
     if (!opened.isFile() || opened.size > maxBytes) return { state: 'refused' };
     const buffer = Buffer.alloc(opened.size + 1);
     let length = 0;
+    let againBudget = READ_AGAIN_BUDGET;
     for (;;) {
-      const count = fs.readSync(fd, buffer, length, buffer.length - length, null);
+      let count;
+      try {
+        count = fs.readSync(fd, buffer, length, buffer.length - length, null);
+      } catch (error) {
+        if (!error || (error.code !== 'EAGAIN' && error.code !== 'EWOULDBLOCK')) throw error;
+        if (againBudget === 0) return { state: 'changing' };
+        againBudget -= 1;
+        pause(1);
+        continue;
+      }
       if (count === 0) break;
       length += count;
       if (length === buffer.length) return { state: 'changing' };
@@ -195,17 +214,22 @@ function compareRepositories(ownRoot, parentRoot, env, run) {
   return own === parent ? REPOSITORY.SAME : REPOSITORY.FOREIGN;
 }
 
-function readParentRoot(pluginData, parentKey, deps) {
+function readParentRoot(pluginData, expected, deps) {
   let recordsDirectory;
   try {
     recordsDirectory = deps.recordsDirectory(pluginData);
   } catch (_) {
     return { reason: REASONS.RECORDS_UNAVAILABLE };
   }
-  const file = readBoundedFile(path.join(recordsDirectory, `${parentKey}.json`), CONTEXT_RECORD_MAX_BYTES);
+  const file = readBoundedFile(path.join(recordsDirectory, `${expected.key}.json`), CONTEXT_RECORD_MAX_BYTES);
   if (file.state !== 'read') return { reason: REASONS.PARENT_CONTEXT_UNAVAILABLE };
   const context = parseObject(file.text);
-  if (!context || context.schema !== CONTEXT_SCHEMA || context.schema_version !== 1) {
+  if (
+    !context
+    || context.schema !== expected.schema.name
+    || context.schema_version !== expected.schema.version
+    || context.session_id_hash !== expected.hash
+  ) {
     return { reason: REASONS.PARENT_CONTEXT_UNAVAILABLE };
   }
   const root = context.project_root;
@@ -222,9 +246,15 @@ function readParentRoot(pluginData, parentKey, deps) {
   return { root };
 }
 
+function controlCore() {
+  return require('./session-control-core-v1.js');
+}
+
 function defaultDeps() {
   return {
-    sessionKey: (value) => require('./session-control-core-v1.js').sessionKey(value),
+    sessionKey: (value) => controlCore().sessionKey(value),
+    sessionIdHash: (value) => controlCore().sessionIdHash(value),
+    contextSchema: () => ({ name: controlCore().SCHEMA, version: controlCore().SCHEMA_VERSION }),
     recordsDirectory: (pluginData) => {
       const binder = require('./claude-hook-session-v1.js');
       return binder.privateRecordsDirectory(binder.canonicalDirectory(pluginData, 'CLAUDE_PLUGIN_DATA', true));
@@ -277,16 +307,25 @@ function resolveLinkedSession(input = {}) {
   if (typeof parentCli !== 'string' || !UUID_RE.test(parentCli)) {
     return verdict(KINDS.LINKED, REASONS.PARENT_SESSION_UNKNOWN, { turn });
   }
-  let parentKey;
+  let expected;
   try {
-    parentKey = deps.sessionKey(parentCli);
+    expected = {
+      key: deps.sessionKey(parentCli),
+      hash: deps.sessionIdHash(parentCli),
+      schema: deps.contextSchema(),
+    };
   } catch (_) {
     return verdict(KINDS.LINKED, REASONS.PARENT_SESSION_UNKNOWN, { turn });
   }
-  const parentRoot = readParentRoot(input.pluginData, parentKey, deps);
+  const parentRoot = readParentRoot(input.pluginData, expected, deps);
   if (!parentRoot.root) return verdict(KINDS.LINKED, parentRoot.reason, { turn });
   const repository = compareRepositories(input.projectRoot, parentRoot.root, env, deps.run);
-  return verdict(KINDS.LINKED, REASONS.RESOLVED, { parentRoot: parentRoot.root, parentKey, repository, turn });
+  return verdict(KINDS.LINKED, REASONS.RESOLVED, {
+    parentRoot: parentRoot.root,
+    parentKey: expected.key,
+    repository,
+    turn,
+  });
 }
 
 function renderVerdict(result) {

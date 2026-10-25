@@ -28,6 +28,8 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$PLUGIN_DIR/hooks/lib/zensu-delivery-route.sh"
 TDD_MODE_HELPER="$PLUGIN_DIR/hooks/lib/zensu-tdd-mode.sh"
+LINKED_HELPER="$PLUGIN_DIR/hooks/lib/zensu-linked-session.sh"
+FULL_SUITE_HELPER="$PLUGIN_DIR/hooks/lib/zensu-full-suite.sh"
 CONFIG_LIB="$PLUGIN_DIR/hooks/lib/zensu-config.sh"
 DIRECTIVE_LIB="$PLUGIN_DIR/hooks/lib/zensu-directive.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
@@ -485,11 +487,18 @@ if [ -f "$MARKER_LIB" ] && bash -n "$MARKER_LIB" 2>/dev/null; then
 else
   R8K_BAD="$R8K_BAD [hooks/lib/zensu-marker-write.sh missing or not valid bash]"
 fi
-for r8k_helper in "$HELPER" "$TDD_MODE_HELPER"; do
-  grep -qF 'hooks/lib/zensu-marker-write.sh' "$r8k_helper" || R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") does not source the library]"
-  grep -v '^[[:space:]]*#' "$r8k_helper" | grep -qE 'mktemp|mv -f' && R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") keeps its own write sequence]"
+R8K_HELPERS="$(grep -lE '^[^#]*zensu_write_session_marker [a-z-]+\.sh ' "$PLUGIN_DIR"/hooks/lib/*.sh 2>/dev/null)"
+for r8k_known in "$HELPER" "$TDD_MODE_HELPER" "$LINKED_HELPER" "$FULL_SUITE_HELPER"; do
+  printf '%s\n' "$R8K_HELPERS" | grep -qxF "$r8k_known" || R8K_BAD="$R8K_BAD [$(basename "$r8k_known") is not among the callers of zensu_write_session_marker]"
 done
-[ -z "$R8K_BAD" ] && check "R8k both marker helpers write through the one sequence in hooks/lib/zensu-marker-write.sh" PASS \
+while IFS= read -r r8k_helper; do
+  [ -n "$r8k_helper" ] || continue
+  grep -qE 'source "[^"]*/zensu-marker-write\.sh"' "$r8k_helper" || R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") does not source the library]"
+  grep -v '^[[:space:]]*#' "$r8k_helper" | grep -qE 'mktemp|mv -f' && R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") keeps its own write sequence]"
+done <<R8K_LIST
+$R8K_HELPERS
+R8K_LIST
+[ -z "$R8K_BAD" ] && check "R8k every marker helper writes through the one sequence in hooks/lib/zensu-marker-write.sh" PASS \
   || check "R8k shared marker writer:$R8K_BAD" FAIL
 R8L_BAD=""
 for r8l_name in zensu-delivery-route.sh zensu-tdd-mode.sh; do
