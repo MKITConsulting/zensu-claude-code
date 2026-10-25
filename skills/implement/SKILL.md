@@ -39,7 +39,7 @@ Every `zensu` command this skill runs except `zensu auth` accepts `--json`, and 
 3. Run `zensu security analyze <feature-id>` to load the security context (classification, data sensitivity, OWASP tags, compliance requirements, score)
 4. Run `zensu mocks list <feature-id>` to discover per-feature UI mocks. For each **HTML** mock, pull its markup with `zensu mocks get <feature-id> <mock-id> --raw` and keep it as the visual/structural target the implementation must match. For **image** mocks, note their titles and that a visual reference exists (the raw bytes are not actionable as text). If no mocks are returned, this feature has none — continue normally; mocks are optional context, never a blocker.
 5. Run `zensu design context <product-id>` to load the product/component design system (Design.md guidance + shared CSS + image-asset references), taking `<product-id>` from the `product_id` in Step 2's JSON output; when that response also carries a `component_id`, add `--component <component-id>`. The implementation must conform to this design system. If the product has no design context, continue normally; the design system is optional context, never a blocker.
-6. Run `zensu knowledge search --query "<feature title + key terms>"` to surface related org context — existing features, visions, journeys, and connected sources — so the implementation builds on what the org already knows. It is retrieval-only: synthesize from the returned passages and cite their provenance.
+6. Read and follow [Load and hydrate feature context](references/knowledge-context.md) before planning. Check `zensu knowledge context-pack --help`, load `zensu knowledge context-pack <feature-ref> --json`, inspect truncation, and hydrate relevant real items with `zensu knowledge get <item-id> --json`. Supplement with `zensu knowledge search --query "<feature title + key terms>" --json`; file references require actual reads from the authorized checkout.
 7. Present a summary to the user:
    - Feature title and description
    - Current status and priority
@@ -64,7 +64,7 @@ If the feature's security classification is confidential or restricted, emphasiz
 
 ### Step 3: Implement via the /zensu:tdd skill
 
-Invoke the **`/zensu:tdd` skill** (Skill tool, `skill='zensu:tdd'`) with a feature specification built from Steps 1-2 as the input. Include the feature title, description, component, security classification, security constraints from Step 1, and the implementation plan from Step 2. End the spec with: "Reference this feature as [KEY-N] (the feature's actual id, e.g. [ZEN-42]) in all commit messages." You run the TDD workflow yourself in THIS main thread — do not spawn a subagent.
+Invoke the **`/zensu:tdd` skill** (Skill tool, `skill='zensu:tdd'`) with a feature specification built from Steps 1-2 as the input. Include the feature title, description, component, security classification, security constraints from Step 1, the context evidence summary (contents read, excerpt/metadata only, unresolved sources), and the implementation plan from Step 2. End the spec with: "Reference this feature as [KEY-N] (the feature's actual id, e.g. [ZEN-42]) in all commit messages." You run the TDD workflow yourself in THIS main thread — do not spawn a subagent.
 
 If the TDD workflow cannot proceed or all steps are blocked, continue manually from Step 4.
 
@@ -203,7 +203,7 @@ Present a completion summary:
 | `zensu mocks list` | 1 | Discover per-feature UI mocks (HTML + image) |
 | `zensu mocks get` | 1 | Pull an HTML mock's raw markup to match (`--raw`) |
 | `zensu design context` | 1 | Load the product/component design system (Design.md + shared CSS) |
-| `zensu knowledge search` | 1 | Surface related org knowledge (retrieval-only) |
+| `zensu knowledge context-pack` / `zensu knowledge get` / `zensu knowledge search --json` | 1 | Load linked context, hydrate relevant content, supplement with passages |
 | `zensu link test` | 4 | Link test files |
 | `zensu link source` | 5 | Map source files to feature (bulk via repeated `--file`) |
 | `zensu doc gen-context` | 6 | Get the context map to read source before writing docs |
