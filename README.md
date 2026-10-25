@@ -523,3 +523,15 @@ generator, and to [Claude-of-Duty](https://github.com/mshumer/Claude-of-Duty), i
 text, or asset from those sources is vendored here — the entire third-party surface
 *of those two sources* is the hyperlinks themselves. Build and test dependencies
 are a separate matter and are declared in `package.json`.
+
+## Feature context retrieval
+
+Tracked implementation loads the linked context package through
+`zensu knowledge context-pack <feature-ref> --json`, then hydrates relevant items
+with `zensu knowledge get <item-id> --json` and reads referenced files from the
+authorized checkout. Supplementary search uses `--json` so passages are retained.
+The CLI must expose `knowledge context-pack --help`; older installations report
+the missing capability instead of silently falling back. See the
+[context procedure](skills/implement/references/knowledge-context.md)
+for truncation, access failures and evidence handoff. These reads supplement feature,
+security and design context. They do not record agent usage.
