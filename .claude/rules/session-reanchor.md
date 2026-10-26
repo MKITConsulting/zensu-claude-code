@@ -95,13 +95,21 @@ set-aside name is `<key>.superseded-reanchor-<UTC stamp>.json`, so a second move
 with the first. Provenance, the lease sweep, the keep-anchor move and the marker move run AFTER
 the lock, and each reports its own outcome rather than failing the move.
 
-**Per-session markers move with the anchor.** `tdd-mode-<key>.json`, `delivery-route-<key>.json`
-and `zen-mode-<key>.json` live under the project root, so a marker left behind stops applying. They
-are RENAMED into the new root's state directory, replacing a stale copy of this session's own
-marker there; a marker that is not a regular file, or a `.zensu`/`.zensu/state` component that is
-not a plain directory, is left in place and reported as a `marker fault`. The three names are the
-path templates of `zensu-config.sh` and `zensu-zen-mode.sh`; a new per-session marker belongs in
-`SESSION_MARKERS` too.
+**Per-session markers move with the anchor.** `tdd-mode-<key>.json`, `delivery-route-<key>.json`,
+`full-suite-<key>.json` and `zen-mode-<key>.json` live under the project root, so a marker left
+behind stops applying. They are RENAMED into the new root's state directory, replacing a stale copy
+of this session's own marker there; a marker that is not a regular file, or a `.zensu`/`.zensu/state`
+component that is not a plain directory, is left in place and reported as a `marker fault`. The four
+names are the path templates of `zensu-config.sh` and `zensu-zen-mode.sh`, and the exported
+`SESSION_MARKERS` is the one list of them: `renderReanchorVerdict` builds its sentence from it, and
+the marker case in `session-reanchor-v1.test.js` derives the kinds from the templates of both files
+and requires them equal to it, so a template added there without joining the list fails that case.
+A template in any other file is not seen. `docs/session-control.md` names the four markers;
+`skills/adopt-session/SKILL.md` says "per-session markers" and names none. A full-suite marker left
+behind costs more than a preference: `local` wins in any rank of the full-suite ladder, so a `local`
+session choice left under the old root would let a `ci` choice of the clone or of
+`evidence.fullSuiteRunner` decide the next chain. `E9j` in `test-session-reanchor.sh` reads the
+moved marker through `zensu_full_suite_marker_state`, the reader the full-suite policy consumes.
 
 **Provenance is a history VALUE, reserved in both guard bodies.** `PROJECT_ROOT_REANCHORED` and
 the `project-root-reanchored: ` reason prefix sit beside the other reserved pairs in
