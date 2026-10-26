@@ -6,6 +6,13 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "context-auto-load",
+          "runner": "bash",
+          "path": "tests/structure/test-context-auto-load.sh",
+          "args": [],
+          "timeoutMs": 60000
+        },
+        {
           "id": "autopilot-state-machine",
           "runner": "bash",
           "path": "tests/structure/test-autopilot-state-machine.sh",

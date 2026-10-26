@@ -77,7 +77,9 @@ source (`route-eval-source: <source>`); the rest is the user message.
    the same way; a planning scenario requires its output, so the router's silence is not vacuous
    either. The check proves silence for the prompt
    it sends: it sends no transcript path, so the context nudge would stay quiet even without its
-   switch, and `eval-config.json` switches it off as well.
+   switch, and `eval-config.json` switches it off as well. Automatic feature-context loading is
+   also disabled, so a feature key cannot add context or trigger a CLI retrieval in this isolated
+   routing eval.
 3. It captures the line under test from THIS tree's hook. The hook runs in a sandbox after a
    `SessionStart`, fires twice, and the second output is kept, because the ledger gives the full
    text on the first prompt and the short line on every later one. The capture checks the opening
