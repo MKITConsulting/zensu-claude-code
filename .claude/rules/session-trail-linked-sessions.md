@@ -44,6 +44,7 @@ with a reason, and both briefs print it.
 | `ssh` | stays | `sshConfig` is set, or its saved environment is an SSH preset |
 | `continued` | stays | a `confirmed` lineage edge leaves its current or a prior (`priorCliSessionIds`) id |
 | `started` | stays | the running session has an open child with the handle `cont-<8 hex>` of this run |
+| `unplanned` | later | only on a run that carries `--linked-start`: its names leave the session out; a session they carry skips the next three rows |
 | `place` | if named | its `originCwd` is missing, relative or carries a control character, so no start can be placed in its repository |
 | `fork` | if named | a user fork, started only when the user names it in the plan answer |
 | `ledger-unread` | if named | the ledger read had a directory error or hit its record cap |
@@ -52,6 +53,49 @@ with a reason, and both briefs print it.
 
 Cloud and Remote Control sessions have no `local_` record in the store, so they never appear.
 The list is bounded at `LINKED_LIST_MAX` (64) and says how many it leaves out.
+
+**The run after the yes carries the plan's start set (`--linked-start`).** `takeover --force`
+takes `--linked-start` with `none` or the comma-separated names of the sessions the plan answer
+starts, parsed by `linkedStartNames` (only `cont-` and eight lowercase hexadecimal digits, each
+name kept once, in order). `decideLinked` receives them as `planned`: a session past the six stay
+rows that the names leave out is **later** with `why` `unplanned`; one they carry skips the three
+**if named** rows, so a named user fork, a named session without a usable folder and a named
+session behind an unread ledger start too, and the carried ones start in creation order while
+`LINKED_START_CAP` allows, the rest **later** with `cap`. A carried session that stays keeps its
+reason. Each entry carries `planned` (`true` or `false`, `null` without the flag), and the state
+carries `plan: { names, unlisted }`, `unlisted` being the carried names no listed session has; the
+brief names a carried session it does not start on that session's entry and the unlisted names on
+one line. Without the flag the table above decides alone.
+
+**The plan pass spells the value, and the run after the yes refuses without it.** The plan brief
+(`takeover` without `--force`) names the value for a yes that changes nothing, the names it marks
+start in listed order or `none`, and its lead tells the model to drop a name the user leaves out
+and add an if-named session the user names. The names go in single quotes, in the value line, the
+lead, step 1 of `references/takeover.md` and the flag list of `references/commands.md`, because
+PowerShell passes an unquoted comma list as separate arguments: `--linked-start` then took the
+first name and the rest landed among the positionals, where `takeover` read none of them, so an
+approved session ran as `unplanned` and the edge was recorded. `cmdTakeover` refuses a run that
+carries `--linked-start` and more operands than one selector, naming every operand, before
+`resolve`, which also catches a split list whose rest lands before the selector. A second
+`--linked-start` is refused in `parseArgs`, through `linkedStartOperand`, because every other
+operand flag keeps its last value, and for this one that dropped the names of the first. It refuses
+`--linked-start` without `--force`, and refuses a `--force` run without it while a listed
+session's decision is not `stays`, right after `linkedSessions` and before `recordTakeoverEdge`,
+so a refused run records no edge and prints no brief. `--linked-start` is a flag of `takeover`
+alone in `COMMAND_FLAGS`, and `refuseForeignFlags` reports it, which keeps `L66d`'s parse and
+scope lists the same length. The plan pass still writes nothing. The handoff brief renders
+neither text: its reader starts from the brief its own user confirmed, so it has no second run.
+Step 4 of `references/takeover.md` gives that reader its own sentence, because the rest of the
+step speaks to the carried brief: start each session the handoff brief marks start that the
+user's answer did not leave out and each if-named one the answer named, as that brief's lead
+says. Flow 4 of `references/handoff.md` points there.
+
+**The Zensu Session Hub needs no follow-up.** `Catalog::decide` in
+`src-tauri/src/resources/desktop_sessions/catalog.rs` mirrors the plan pass, which decides exactly
+as before without the flag. The `unplanned` row exists only on the run after the yes, which the Hub
+never computes: it types `takeover <session id> --all` and reads the records and the ledger
+afterwards. `family_continuation` joins by the `cont-` handle and the ledger, so a session the
+plan answer left out reads `Stays` there, as any session the user leaves out does.
 
 **Every session marked start belongs to every yes.** The plan confirmation names each one by its
 title, and the model never leaves one out on its own judgment: not because its own work looks
@@ -76,12 +120,12 @@ these rules fix which answer options the confirmation offers, and that best solu
 to the one line, which carries the model's recommendation marked as such with its cost; the user
 takes it by naming the session.
 
-**The start set is the plan's.** The `--force` run reads the records again, so its brief can mark a
-session start that the plan confirmation never named (an archived start session lets a later one
-past the cap, or a new record appears) and can stop marking one the plan named. Step 4, flow 5 and
-the brief lead start only the named sessions the `--force` brief still marks start; a newly marked
-one is text that first appears in that brief, named to the user and kept for a later message, and
-a named one it no longer marks start is not started, with its reason.
+**The start set is the plan's, and the script holds it.** The `--force` run reads the records
+again, so on its own it could mark a session start that the plan confirmation never named (an
+archived start session lets a later one past the cap, or a new record appears) and stop marking
+one the plan named. Because that run carries the plan answer as `--linked-start`, step 4, flow 5
+and the carried brief lead start every session the carried brief marks start and no other, and the
+model never matches the two briefs by title.
 
 **`openBelow` makes that cost visible.** `familyWalk` returns an `openBelow(run, follows)` walker
 that counts the open records below an open linked session at every level, walking through archived
@@ -175,19 +219,24 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
   file checks the directory and schema against `ledgerPaths` and `LEDGER_SCHEMA_VERSION`. The Hub
   keeps a byte copy in its own `tests/fixtures/handover-contract.json`, updated in Hub step H1.
 - Both briefs render `linkedSessionLines` and `unreadReportLines` after `openChipLines`.
-  `takeover --json` carries `linkedSessions`, each entry with its `openBelow`, and `unreadReports`; the first reports the ledger read
+  `takeover --json` carries `linkedSessions`, each entry with its `openBelow` and `planned` and the
+  state with its `plan`, and `unreadReports`; the first reports the ledger read
   with `ledgerTruncated`, `ledgerError` and `schemaNewer` on one line, as `L36b` requires.
-- `references/takeover.md` step 1 has the plan confirmation name the linked sessions, and step 4
-  starts them right after `takeover --force`, ahead of the chips and `release`.
-  `references/handoff.md` flows 4 and 5, `references/commands.md`, `references/disclosure.md` and
-  the data-source table in `SKILL.md` follow.
+- `references/takeover.md` step 1 has the plan confirmation name the linked sessions and the yes
+  run `--force` with `--linked-start`, step 0 says that run carries them, and step 4 starts what
+  the carried brief marks start right after `takeover --force`, ahead of the chips and `release`.
+  `references/handoff.md` flows 4 and 5, `references/commands.md` (the `takeover` row, the flag
+  list and the `--force` paragraph), `references/disclosure.md` and the data-source table in
+  `SKILL.md` follow. The brief's step 3 asks for the `--linked-start` value whenever a listed
+  session could start.
 - The record-text class lives in the module as `RECORD_CONTROL` and `recordText`, and
   `openTaskChips` uses it, so chips and linked sessions strip the same characters.
 - `trail.mjs` imports the module, so every test that stages `trail.mjs` in a sandbox tree copies
   it too: `mutant_path` and `cont_mutant` in `test-session-trail-verdict.sh` and the TDZ tree of
-  `L46` in `test-session-trail-lineage.sh`. The import line moved the two `trail.mjs` citations in
-  `docs/multi-repo-chains-spec.md` and `docs/multi-repo-chains-overview.html` by one line, which
-  `T36` checks.
+  `L46` in `test-session-trail-lineage.sh`. A line added to `trail.mjs` above `gitState`, such as
+  the `--linked-start` parse branch and `linkedStartOperand`, moves the two `trail.mjs` citations
+  in `docs/multi-repo-chains-spec.md` and `docs/multi-repo-chains-overview.html`, which `T36`
+  checks; re-derive each one per site.
 
 **Pins.** `tests/structure/linked-sessions-v1.test.js` drives the module, and its entry in
 `tests/profiles/unit-files.v1.json` names two guards; `test-session-trail-verdict.sh` runs it as
@@ -207,14 +256,36 @@ unmeasured, against a control with a measured one; it is skipped on Windows, whe
 does not stand in for `git.exe`. The unit case `the module names why a start carries or leaves out
 cwd, and the start follows that reason` drives `cwdWhy` and the start's `cwd` for each
 `sameRepository` value. LS10 and LS13 pin the every-yes lead and the precedence sentence in both
-briefs, and LS10 also the start-set sentence and the absence of the retired `leave out every
-session the user left out`; LS14 pins the rule and the precedence sentence inside the
-plan-confirmation paragraph of step 1, the start set inside the start paragraph of step 4, the
-absence of the two retired sentences there, and both flows of `references/handoff.md`; LS18 pins
-`openBelow` with a side question and an SSH session below the counted one, and the count line on
-its own entry in both briefs. The unit case `each open linked session counts the open sessions
-below it that would follow through it: every level, through archived ones, never into a detached
-one or one its continuation keeps, and once each` drives the count.
+briefs; LS10 also pins the plan pass's `--linked-start` lead with its single-quote sentence, its
+quoted value line for the fixture, the
+step 3 sentence and the absence of the retired `leave out every session the user left out` and of
+the title match, and LS13 that the handoff brief names no `--linked-start`. LS14 pins the rule, the
+precedence sentence and the `--linked-start` yes inside the plan-confirmation paragraph of step 1,
+step 0's carry, the carried start set and the handoff reader's start rule inside the start
+paragraph of step 4, the absence of the retired sentences there, and both flows of
+`references/handoff.md`. LS18 pins `openBelow` with a
+side question and an SSH session below the counted one, and the count line on its own entry in
+both briefs. LS19 drives a `--force --no-record` run whose plan leaves out a start session and
+names a user fork, a session that already continues and a name no session has: every decision,
+`planned` and `plan` in `--json`, the carried brief's tally, lead, unlisted line, `unplanned` why
+lines and the planned line on its own entry, the line and `plan` of a carried run whose desktop
+record is missing, `--linked-start none`, the plan pass's `null` `plan`,
+a `--force` run without the flag refused with and without `--json` (exit status, text, no brief and
+an unchanged ledger), a value split into separate arguments with its rest after and before the
+selector and a flag given twice (exit status, every operand named or the second flag refused, no
+brief and an unchanged ledger), `--linked-start` without `--force`, a malformed value, the flag on
+`show`, and the `references/commands.md` lines. LS20 drives a family whose listed linked sessions
+all stay: its plan pass carries no `--linked-start` lead, value line or step-3 clause, and its
+`--force` run needs no flag and records its edge. LS21 drives a family whose only session that
+could start is a user fork: its plan pass spells `--linked-start none` and the step-3 clause, its
+`--force` run without the flag is refused naming `none` with an unchanged ledger, and
+`--linked-start none` marks the fork `later` as `unplanned`. The unit case `each open linked session counts the open
+sessions below it that would follow through it: every level, through archived ones, never into a
+detached one or one its continuation keeps, and once each` drives the count, and the four cases
+`the plan names are none or a comma-separated list of cont- handles, …`, `a carried plan starts
+exactly the sessions it names that can start, …`, `a carried plan counts its starts against the
+cap in creation order, …` and `the names a carried plan holds that no listed session has are
+reported, …` drive the parser and the carried decisions.
 
 **Known gaps, accepted and named:**
 
@@ -227,9 +298,13 @@ one or one its continuation keeps, and once each` drives the count.
   into every session, is unchanged, so a model weighs a skill sentence against a block that keeps
   the option set for itself. Widening that clause to a skill that reserves an option for the user
   to name is a plugin-wide change and the user's decision.
-- **The model matches the start set across two briefs.** A durable fix carries the plan pass's
-  start names into the `--force` run and has `decideLinked` mark every other session later; that
-  changes the decision table the Zensu Session Hub mirrors.
+- **The carried names are the model's reading of the plan answer.** The script checks their shape
+  and which listed sessions they name, never that the user approved them, so a name the model adds
+  or drops changes what starts. The plan brief spells the value for a yes that changes nothing,
+  which leaves the model only the user's own changes to apply.
+- **The refusal counts the listed sessions only.** A session past `LINKED_LIST_MAX` that could
+  start does not arm it, and the brief does not list such a session, so no run can start it from
+  its brief either.
 - **Two descendants can still count although they never follow.** One started from an SSH saved
   environment without `sshConfig` counts unless a listed session also names a saved environment,
   because `linkedSessions` reads the presets only then; one that already continues elsewhere
@@ -266,4 +341,9 @@ skill text are patch-class, as they were for the open chips; so are `linkedSessi
 `linkedSessions.oldRepositoryMeasured`, each entry's `cwdWhy`, the `place` reason, the repository
 verdict behind `sameCheckout` and the brief's `folder` block, and so are each entry's `openBelow`
 and the every-yes text. The spec read the new contract key
-and the new flow step as minor; neither is in the policy's breaking list.
+and the new flow step as minor; neither is in the policy's breaking list. `--linked-start` is
+`patch` on the same walk: a new flag of a skill script, a new `why` value, each entry's `planned`
+and `linkedSessions.plan` are exchanged `--json` keys no strict validator reads, and nothing is
+persisted. Its refusal of a `--force` run without the flag tightens one verb inside one
+installation and names the flag that answers it, so a session that read the older step 1 and is
+served by this build recovers on its next command; no hook can deny anything new.
