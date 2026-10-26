@@ -91,6 +91,27 @@ if [ -n "$WORK" ]; then
   store_records() {
     find "$PROJECT/.zensu/state" -path "*review-gate-*" -name 'record-r*.json' 2>/dev/null | wc -l | tr -d ' '
   }
+  launch_payload() {
+    TYPE="$1" PROMPT="$2" AGENT="$3" SID_VALUE="$SID" node -e '
+      process.stdout.write(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Agent", session_id: process.env.SID_VALUE,
+        tool_input: { subagent_type: process.env.TYPE, prompt: process.env.PROMPT },
+        tool_response: { status: "async_launched", isAsync: true, agentId: process.env.AGENT } }));'
+  }
+  handback_payload() {
+    AGENT="$1" REPORT="$2" SID_VALUE="$SID" node -e '
+      const body = process.env.REPORT.split("\n").map((line) => `  ${line}`);
+      const prompt = [`<agent-message from="${process.env.AGENT}">`,
+        "[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:",
+        ...body, "</agent-message>"].join("\n");
+      process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
+  }
+  hook_event_of() {
+    node -e 'let s = ""; process.stdin.on("data", (c) => s += c); process.stdin.on("end", () => {
+      try { process.stdout.write(JSON.parse(s).hookSpecificOutput.hookEventName); } catch (_) { process.stdout.write("none"); } });' < "$1"
+  }
+  consume_record() {
+    if [ -f "$CLAUDE_PLUGIN_DATA/background-review/v1/records/$ZENSU_SESSION_KEY.json" ]; then echo present; else echo absent; fi
+  }
 
   bash "$AUDIT" --log /dev/null --allow-unclean >"$WORK/out" 2>&1; RC=$?
   if [ "$RC" -eq 2 ] && grep -qF -- "--allow-unclean applies only to --check-receipt" "$WORK/out"; then
@@ -338,6 +359,88 @@ merged findings: none" "- Verdict: PASS" | bash "$POSTREV" >"$WORK/hook" 2>&1
     fi
   else
     check "RP21 arm a review chain" FAIL
+  fi
+
+  echo "== Background reviewers through the launch and the hand-back =="
+  HANDBACK_HOOK="$ROOT/hooks/user-prompt-review-handback.sh"
+  new_project "$WORK/p-background"
+  if arm_review "rp-background" "$WORK/p-background"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    launch_payload zensu:review-aspect "perspective: correctness
+$PACKET" aspectbg1 | bash "$POSTREV" >"$WORK/hook-aspect" 2>&1
+    launch_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" judgebg1 | bash "$POSTREV" >"$WORK/hook-judge" 2>&1
+    if [ ! -s "$WORK/hook-aspect" ] && [ ! -s "$WORK/hook-judge" ] && [ "$(store_records)" = "2" ]; then
+      check "RP24 a background aspect or judge launch is recorded silently and never reads as a failed judge" PASS
+    else
+      check "RP24 background reviewer launches (records=$(store_records))" FAIL
+      cat "$WORK/hook-aspect" "$WORK/hook-judge"
+    fi
+    handback_payload aspectbg1 "## Aspect: correctness
+- (no findings)" | bash "$HANDBACK_HOOK" >"$WORK/hook-aspect" 2>&1
+    handback_payload judgebg1 "## Aspect: judge
+- (no findings)" | bash "$HANDBACK_HOOK" >"$WORK/hook-judge" 2>&1
+    if [ ! -s "$WORK/hook-aspect" ] && [ ! -s "$WORK/hook-judge" ] && [ "$(store_records)" = "4" ]; then
+      check "RP24a the hand-backs of the background aspect and judge are recorded through the hand-back hook" PASS
+    else
+      check "RP24a background reviewer hand-backs (records=$(store_records))" FAIL
+      cat "$WORK/hook-aspect" "$WORK/hook-judge"
+    fi
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    launch_payload zensu:code-reviewer "PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+merged findings: none" consumebg0 | bash "$POSTREV" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = PostToolUse ] \
+      && grep -qF "REVIEW INCOMPLETE — the consume prompt carries no REVIEW PACKET v1 block" "$WORK/hook" \
+      && grep -qF "spawn zensu:code-reviewer again with the same two header lines" "$WORK/hook" \
+      && [ "$(consume_record)" = absent ] && [ "$(state_field reviewTicketConsumed)" = "false" ]; then
+      check "RP25 a background consume launch without the canonical packet is refused at its launch and records no launch" PASS
+    else
+      check "RP25 refused background consume launch (record=$(consume_record) consumed=$(state_field reviewTicketConsumed))" FAIL
+      cat "$WORK/hook"
+    fi
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    launch_payload zensu:code-reviewer "$CONSUME" consumebg1 | bash "$POSTREV" >"$WORK/hook" 2>&1
+    if grep -qF "returned status async_launched" "$WORK/hook" && ! grep -qF "REVIEW INCOMPLETE" "$WORK/hook" \
+      && [ "$(consume_record)" = present ] && [ "$(state_field reviewTicketConsumed)" = "false" ]; then
+      check "RP25a a background consume launch on the canonical packet passes the gate and is recorded for its arrival" PASS
+    else
+      check "RP25a background consume launch (record=$(consume_record))" FAIL
+      cat "$WORK/hook"
+    fi
+    printf 'v3\n' > "$PROJECT/tracked.txt"
+    handback_payload consumebg1 "# Code Review Report
+
+- Verdict: PASS" | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] \
+      && grep -qF "REVIEW INCOMPLETE — the working tree changed since review round 0's packet was created" "$WORK/hook" \
+      && grep -qF "spawn zensu:code-reviewer again with the same two header lines" "$WORK/hook" \
+      && ! grep -qF "BACKGROUND REVIEW REPORT" "$WORK/hook" && [ "$(consume_record)" = absent ] \
+      && [ "$(state_field reviewTicketConsumed)" = "false" ] && [ "$(state_field reviewRound)" = "0" ]; then
+      check "RP26 a hand-back after the tree changed is refused in the hand-back's own event, claims nothing and retires the launch" PASS
+    else
+      check "RP26 refused hand-back (event=$(hook_event_of "$WORK/hook") record=$(consume_record) consumed=$(state_field reviewTicketConsumed))" FAIL
+      cat "$WORK/hook"
+    fi
+    printf 'v2\n' > "$PROJECT/tracked.txt"
+    launch_payload zensu:code-reviewer "$CONSUME" consumebg2 | bash "$POSTREV" >/dev/null 2>&1
+    handback_payload consumebg2 "# Code Review Report
+
+- Verdict: PASS" | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] && grep -qF "BACKGROUND REVIEW REPORT" "$WORK/hook" \
+      && ! grep -qF "REVIEW INCOMPLETE" "$WORK/hook" \
+      && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ] && [ "$(consume_record)" = absent ]; then
+      check "RP26a a consume reviewer launched again on the unchanged tree claims the ticket when its hand-back arrives" PASS
+    else
+      check "RP26a hand-back claim (event=$(hook_event_of "$WORK/hook") consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook"
+    fi
+  else
+    check "RP24 arm a review chain" FAIL
   fi
 
   echo "== The review chain's config probes read the project config =="

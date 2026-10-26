@@ -440,7 +440,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/release-run-step.test.js` | 11 | – | `test-immutable-marketplace-release.sh` | The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup. |
 | `structure/restore-root-render-cases.test.js` | 79 | – | `test-restore-project-root.sh` | Restoring a vanished recorded project root: the verdict, restore and outcome renderers and their refusal arms. |
 | `structure/review-evidence-sweep-v1.test.js` | 32 | win32 6 | `test-versioned-plugin-upgrade.sh` | The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe. |
-| `structure/review-gate-v1.test.js` | 24 | – | `test-review-packet.sh` | The consume-review gate: reviewer records, canonical-packet equality, freshness and the primary-judge requirement. |
+| `structure/review-gate-v1.test.js` | 31 | – | `test-review-packet.sh` | The consume-review gate: reviewer records, canonical-packet equality, freshness and the primary-judge requirement. |
 | `structure/review-ledger-v1.test.js` | 42 | – | `test-review-convergence.sh` | The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts. |
 | `structure/review-packet-v1.test.js` | 29 | – | `test-review-packet.sh` | The canonical review change set and the immutable per-round review packet. |
 | `structure/review-round-scope-v1.test.js` | 24 | – | `test-incremental-review-rounds.sh` | Delta-scoped review rounds: which files and findings a fix round reviews. |

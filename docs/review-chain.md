@@ -214,6 +214,9 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   the ticket and the prompt's header lines, but only while its `REVIEW-TICKET` is the ticket the
   claim would accept. Its directive tells a standalone chain to end its turn and wait, and an
   Autopilot-bound chain to keep its turn. No ticket is consumed and no second reviewer is spawned.
+  While `hooks.reviewPacketGate` is on, the review packet gate checks that launch first: a launch
+  it refuses is not recorded and gets the gate's refusal instead, and a passing one is recorded
+  in the gate's store with the digest of the block it carried.
 - **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
   the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
   without a `node` child unless the prompt carries one of the two markers and the store holds a
@@ -226,7 +229,18 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   reviewer that has already reported. A frame counts only on a line of its own at column zero that the host's `[Subagent hand-back]`
   line follows, because the host indents every line of a report it forwards. A notification with
   another status, such as `failed`, ends the consume record without a claim and asks for a
-  re-spawn with the same ticket.
+  re-spawn with the same ticket. While `hooks.reviewPacketGate` is on, the gate checks the
+  consume reviewer's arrival once more before the claim, against the digest it recorded at the
+  launch and with the report the hand-back carries; a refusal keeps the ticket unconsumed, ends
+  the record and names the re-spawn.
+- **Panel and judges under the packet gate.** While `hooks.reviewPacketGate` is on, a
+  `zensu:review-aspect`, `zensu:review-judge` or `zensu-review-*` launch is recorded in the gate's
+  store with its agent id and its packet digest. It counts as no run and never as a failed judge,
+  and its hand-back completes it with the report the frame carries, so the consume check counts a
+  panel and judges that ran in the background like foreground ones. Outside auto mode the desktop
+  app sends no hand-back, so those launches never complete, and the consume check refuses with a
+  hint to wait for them or to ask the user whether to set the key to `false`
+  ([gates.md](gates.md#review-packet-gate)).
 - **Stop.** While a consume record younger than 60 minutes still matches the issued ticket, or a
   fan-out entry younger than 60 minutes exists, the Stop guard releases a standalone chain's turn
   end with one stderr line and charges no review budget. An Autopilot-bound chain is held instead:
@@ -244,7 +258,10 @@ not recorded, so a turn end while only a persona runs blocks as before. A notifi
 no report was delivered still claims the ticket, and the directive tells the main thread to ask
 the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
 runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
-post-review hook.
+post-review hook. A persona gets no entry in the background store, so its hand-back reaches the
+packet gate only while a built-in reviewer is still pending; a persona that reports after every
+built-in one stays a launch record, which neither counts nor blocks, and a persona launched with
+another block is then caught only by the advice its launch received.
 
 #### Custom review personas (repo-local)
 

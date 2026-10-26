@@ -143,7 +143,7 @@ fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export ZENSU_CONFIG="$WORK/config.json"
-printf '%s\n' '{"hooks":{"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
+printf '%s\n' '{"hooks":{"autoFixMaxRounds":5,"reviewPacketGate":false}}' > "$ZENSU_CONFIG"
 unset CLAUDE_PLUGIN_DATA ZENSU_PROJECT_ROOT ZENSU_SESSION_CONTEXT ZENSU_SESSION_KEY \
   CLAUDE_AGENT_TYPE ZENSU_CHAIN 2>/dev/null || true
 export ZENSU_TEST_PLUGIN_DATA="$WORK/plugin-data"

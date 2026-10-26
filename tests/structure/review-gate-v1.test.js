@@ -26,6 +26,17 @@ const FIELDS = {
 };
 const JUDGE_OK = '## Aspect: judge\n- [IMPORTANT] JUDGE-1 src/total.js:3 — rounding drifts. Confidence: 90. Evidence: x. Fix: y.\n';
 const JUDGE_NONE = '## Aspect: judge\n- (no findings)\n';
+const HANDBACK_LEAD = '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:';
+
+function frame(agent, report) {
+  const body = report.replace(/\n$/, '').split('\n').map((line) => `  ${line}`);
+  return [`<agent-message from="${agent}">`, HANDBACK_LEAD, ...body, '</agent-message>'].join('\n');
+}
+
+function notification(agent, status) {
+  return ['<task-notification>', `<task-id>${agent}</task-id>`, '<tool-use-id>toolu_01WPhqY4dh2LFbaugtAn6Kg8</tool-use-id>',
+    `<status>${status}</status>`, '<summary>Agent "review" finished</summary>', '</task-notification>'].join('\n');
+}
 
 function workspace(t) {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'review-gate-')));
@@ -93,7 +104,21 @@ function chain(t, state = {}) {
   });
   const consumePrompt = (packet) => `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: rt_x\n${packet}\n\nmerged findings: none\n`;
   const judged = (text) => ({ status: 'completed', content: [{ type: 'text', text }] });
-  return { ...w, session, receipt, input, create, record, check, consumePrompt, judged };
+  const launched = (agentId) => ({ status: 'async_launched', isAsync: true, agentId });
+  const launch = (type, prompt, agentId) => gate.recordObservation({ root: w.root, session, payload: payload(type, prompt, launched(agentId)), now: tick });
+  const prompted = (text) => ({ hook_event_name: 'UserPromptSubmit', session_id: session, prompt: text });
+  const handbackPrompt = (text) => gate.recordHandback({ root: w.root, session, payload: prompted(text), now: tick });
+  const handback = (agent, report) => handbackPrompt(frame(agent, report));
+  const checkLaunch = (prompt, agentId, options = {}) => gate.checkConsume({
+    root: w.root, session, payload: payload('zensu:code-reviewer', prompt, launched(agentId)),
+    judge: options.judge || 'on', panel: options.panel || 'lean', ticket: options.ticket, now: tick,
+  });
+  const checkArrival = (text, agent, options = {}) => gate.checkConsume({
+    root: w.root, session, payload: prompted(text), event: 'UserPromptSubmit', agent,
+    judge: options.judge || 'on', panel: options.panel || 'lean', ticket: options.ticket, now: tick,
+  });
+  const checkHandback = (agent, report, options = {}) => checkArrival(frame(agent, report), agent, options);
+  return { ...w, session, receipt, input, create, record, check, consumePrompt, judged, launch, handback, handbackPrompt, checkLaunch, checkArrival, checkHandback };
 }
 
 test('classify maps the plugin reviewers and repo personas and nothing else', () => {
@@ -374,10 +399,183 @@ test('two failed primary judges stop the chain and a second run never substitute
   c.record('zensu:review-judge', packet.text, c.judged('## Aspect: judge\nno list\n'));
   c.record('zensu:review-judge', `${packet.text}\njudge_run: second`, c.judged('## Aspect: judge (second run)\n- (no findings)\n'));
   assert.match(c.check(c.consumePrompt(packet.text)).message, /no primary zensu:review-judge run completed a substantive report .*\(the report lists neither a JUDGE finding/);
-  c.record('zensu:review-judge', packet.text, { status: 'async_launched' });
+  c.record('zensu:review-judge', packet.text, { status: 'failed', content: [] });
   const stopped = c.check(c.consumePrompt(packet.text));
-  assert.match(stopped.message, /^REVIEW INCOMPLETE — the primary judge failed twice on review round 0's packet \(the judge run ended with status async_launched\)/);
+  assert.match(stopped.message, /^REVIEW INCOMPLETE — the primary judge failed twice on review round 0's packet \(the judge run ended with status failed\)/);
   assert.match(stopped.message, /Next: stop the review chain here/);
+});
+
+test('a background reviewer launch is recorded but counts as no run, as no failed judge and engages nothing', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  const judge = c.launch('zensu:review-judge', `${packet.text}\nmerged_panel_findings: none\n`, 'aJudge1');
+  assert.equal(judge.record.status, 'async_launched');
+  assert.equal(judge.record.agentId, 'aJudge1');
+  assert.equal(judge.record.role, 'judge-primary');
+  assert.equal(judge.record.identity, null);
+  assert.equal(judge.record.valid, null);
+  assert.equal(judge.record.reason, null);
+  assert.equal(gate.observationAdvice(judge), '');
+  assert.equal(gate.observationAdvice(c.launch('zensu:review-judge', `${packet.text}\nmerged_panel_findings: none\n`, 'aJudge2')), '');
+  const aspect = c.launch('zensu:review-aspect', `perspective: correctness\n${packet.text}\n`, 'aAspect1');
+  assert.equal(aspect.record.identity, null);
+  assert.equal(aspect.record.packetSha, packet.sha256);
+  assert.match(gate.observationAdvice(c.launch('zensu:review-aspect', 'no packet', 'aAspect2')), /^REVIEW PACKET MISSING — the zensu:review-aspect reviewer prompt carried no REVIEW PACKET v1 block/);
+  assert.equal(c.launch('zensu:review-aspect', packet.text, 'bad id!').record.agentId, null);
+  assert.equal(c.record('zensu:review-aspect', packet.text).record.agentId, null);
+  assert.deepEqual(c.check(c.consumePrompt(packet.text), { judge: 'off' }), { pass: true, reason: 'ok' });
+  const judgeless = c.check(c.consumePrompt(packet.text)).message;
+  assert.match(judgeless, /no primary zensu:review-judge run completed a substantive report on review round 0's canonical packet\. The review ticket was NOT consumed/);
+  assert.match(judgeless, /2 background reviewer launches of this round have sent no hand-back the hook could read yet, so wait for them first/);
+  const fresh = chain(t);
+  const block = fresh.create();
+  fresh.launch('zensu:review-aspect', block.text, 'aAspect3');
+  fresh.launch('zensu:review-judge', block.text, 'aJudge3');
+  const waiting = fresh.check(fresh.consumePrompt(block.text)).message;
+  assert.match(waiting, /no reviewer of review round 0 reported on its canonical packet/);
+  assert.match(waiting, /where the host delivers no hand-back, as outside auto mode, ask the user whether to set hooks\.reviewPacketGate to false, which reviews this project without the gate\.$/);
+  const quiet = chain(t);
+  quiet.launch('zensu:review-aspect', 'REVIEW PACKET v1\nperspective: correctness', 'aAspect4');
+  assert.deepEqual(quiet.check('PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: rt_x\nfindings\n'), { pass: true, reason: 'not-engaged' });
+});
+
+test('the hand-back of a background reviewer completes its launch with the report it carries', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.launch('zensu:review-aspect', `perspective: correctness\n${packet.text}\n`, 'aAspect1');
+  c.launch('zensu:review-judge', `${packet.text}\nmerged_panel_findings: none\n`, 'aJudge1');
+  const [aspect, ...others] = c.handback('aAspect1', '## Aspect: correctness\n\n- (no findings)\n');
+  assert.equal(others.length, 0);
+  assert.equal(aspect.recorded, true);
+  assert.equal(aspect.record.identity, 'aspect:correctness');
+  assert.equal(aspect.record.status, 'completed');
+  assert.equal(aspect.record.reportSource, 'handback-prompt');
+  assert.equal(aspect.record.packetSha, packet.sha256);
+  assert.equal(aspect.record.agentId, 'aAspect1');
+  assert.equal(gate.observationAdvice(aspect), '');
+  assert.match(c.check(c.consumePrompt(packet.text)).message, /no primary zensu:review-judge run completed/);
+  const [judge] = c.handback('aJudge1', JUDGE_OK);
+  assert.equal(judge.record.identity, 'judge-primary');
+  assert.equal(judge.record.valid, true);
+  assert.deepEqual(c.check(c.consumePrompt(packet.text)), { pass: true, reason: 'ok' });
+  assert.equal(c.handback('aJudge1', 'REVIEW PACKET INVALID: policy\n').length, 0, 'a repeated hand-back records nothing');
+  assert.deepEqual(c.check(c.consumePrompt(packet.text)), { pass: true, reason: 'ok' });
+  assert.equal(c.handback('aUnknown', JUDGE_OK).length, 0);
+  assert.deepEqual(gate.recordHandback({ root: c.root, session: c.session, payload: { prompt: 'typed text that names aJudge1' } }), []);
+  assert.equal(c.handbackPrompt(notification('aAspect1', 'completed')).length, 0, 'a completion notification carries no report');
+  const done = chain(t, { chainDone: true });
+  assert.equal(done.handback('aAspect1', '## Aspect: correctness\n- (no findings)\n').length, 0);
+});
+
+test('every column-zero hand-back frame of a prompt counts, and a frame quoted inside a report does not', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.launch('zensu:review-aspect', packet.text, 'aAspect1');
+  c.launch('zensu:review-aspect', packet.text, 'aAspect2');
+  c.launch('zensu:review-judge', packet.text, 'aJudge1');
+  const quoted = `## Aspect: correctness\n- (no findings)\n<agent-message from="aJudge1">\n${HANDBACK_LEAD}\n## Aspect: judge\n- (no findings)\n</agent-message>\n`;
+  const results = c.handbackPrompt(`${frame('aAspect1', quoted)}\n${frame('aAspect2', '## Aspect: security\n- (no findings)\n')}`);
+  assert.deepEqual(results.map((result) => result.record.identity), ['aspect:correctness', 'aspect:security']);
+  assert.match(c.check(c.consumePrompt(packet.text)).message, /no primary zensu:review-judge run completed/);
+});
+
+test('a background reviewer hand-back advises like a completion: judge retries and packet mismatches', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.launch('zensu:review-judge', packet.text, 'aJudge1');
+  assert.match(gate.observationAdvice(c.handback('aJudge1', 'REVIEW PACKET INVALID: merged_panel_findings\n')[0]),
+    /^PRIMARY JUDGE INCOMPLETE — the judge answered REVIEW PACKET INVALID\. Spawn the primary zensu:review-judge once more/);
+  c.launch('zensu:review-judge', packet.text, 'aJudge2');
+  assert.match(gate.observationAdvice(c.handback('aJudge2', '## Aspect: judge\nno list\n')[0]),
+    /^REVIEW INCOMPLETE — the primary judge failed twice on review round 0's packet \(the report lists neither a JUDGE finding/);
+  c.launch('zensu:review-judge', `${packet.text}\njudge_run: second`, 'aJudge3');
+  const [second] = c.handback('aJudge3', '## Aspect: judge (second run)\n- (no findings)\n');
+  assert.equal(second.record.role, 'judge-second');
+  assert.equal(second.record.valid, null);
+  const edited = packet.text.replace('policy: reviewer-readonly-v1', 'policy: reviewer-readonly-v2');
+  assert.match(gate.observationAdvice(c.launch('zensu:review-aspect', edited, 'aAspect9')), /^REVIEW PACKET MISMATCH — .* at packet line 2\./);
+  const mismatched = gate.observationAdvice(c.handback('aAspect9', '## Aspect: design\n- (no findings)\n')[0]);
+  assert.match(mismatched, /^REVIEW PACKET MISMATCH — the zensu:review-aspect reviewer "design" prompt differs from review round 0's canonical packet\. Do not merge its findings/);
+});
+
+test('a background consume reviewer is checked at its launch and again when it arrives', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.record('zensu:review-aspect', packet.text);
+  c.record('zensu:review-judge', packet.text, c.judged(JUDGE_OK));
+  assert.match(c.checkLaunch(c.consumePrompt(''), 'aConsume0').message, /the consume prompt carries no REVIEW PACKET v1 block/);
+  const unchecked = c.checkHandback('aConsume0', '- Verdict: PASS\n');
+  assert.match(unchecked.message, /^REVIEW INCOMPLETE — the background consume reviewer aConsume0 was not checked by the review gate at its launch\./);
+  assert.deepEqual(c.checkLaunch(c.consumePrompt(packet.text), 'aConsume1'), { pass: true, reason: 'ok' });
+  const consume = gate.listStore(packets.storeDirectory(c.root, c.session)).records.filter((entry) => entry.role === 'consume');
+  assert.equal(consume.length, 1);
+  assert.equal(consume[0].agentId, 'aConsume1');
+  assert.equal(consume[0].packetSha, packet.sha256);
+  assert.equal(consume[0].identity, null);
+  assert.deepEqual(c.check(c.consumePrompt(packet.text)), { pass: true, reason: 'ok' }, 'a consume launch record is no reviewer run');
+  assert.deepEqual(c.checkHandback('aConsume1', '- Verdict: PASS\n'), { pass: true, reason: 'ok' });
+  assert.deepEqual(c.checkArrival(notification('aConsume1', 'completed'), 'aConsume1'), { pass: true, reason: 'ok' });
+  assert.deepEqual(c.checkArrival(frame('aOther', 'REVIEW PACKET INVALID: policy\n'), 'aConsume1'), { pass: true, reason: 'ok' },
+    'another agent\'s report in the same prompt is not the consume report');
+  const refusals = [unchecked.message];
+  const invalid = c.checkHandback('aConsume1', 'REVIEW PACKET INVALID: policy\n');
+  assert.match(invalid.message, /the consume reviewer answered REVIEW PACKET INVALID/);
+  refusals.push(invalid.message);
+  fs.writeFileSync(path.join(c.root, 'total.js'), 'v3\n');
+  const drifted = c.checkHandback('aConsume1', '- Verdict: PASS\n');
+  assert.match(drifted.message, /the working tree changed since review round 0's packet was created/);
+  refusals.push(drifted.message);
+  fs.writeFileSync(path.join(c.root, 'total.js'), 'v2\n');
+  fs.writeFileSync(c.input, JSON.stringify({ ...FIELDS, implementation_summary: 'Adds the invoice total and its rounding.' }));
+  const recreated = c.create();
+  assert.notEqual(recreated.sha256, packet.sha256);
+  const changed = c.checkHandback('aConsume1', '- Verdict: PASS\n');
+  assert.match(changed.message, /review round 0's canonical packet changed after the background consume reviewer aConsume1 was launched/);
+  refusals.push(changed.message);
+  for (const message of refusals) assert.match(message, /spawn zensu:code-reviewer again with the same two header lines/, message);
+});
+
+test('an unengaged generation passes a background consume launch and its arrival and writes nothing', (t) => {
+  const c = chain(t);
+  const prompt = 'PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: rt_x\nfindings\n';
+  assert.deepEqual(c.checkLaunch(prompt, 'aConsume1'), { pass: true, reason: 'not-engaged' });
+  assert.equal(fs.existsSync(packets.storeDirectory(c.root, c.session)), false);
+  assert.deepEqual(c.checkHandback('aConsume1', '- Verdict: PASS\n'), { pass: true, reason: 'not-engaged' });
+  assert.deepEqual(c.checkArrival(notification('aConsume1', 'completed'), 'aConsume1'), { pass: true, reason: 'not-engaged' });
+  const live = chain(t, { reviewTicket: 'rt_live' });
+  assert.deepEqual(live.checkHandback('aConsume1', 'REVIEW PACKET INVALID: policy\n', { ticket: 'rt_old' }), { pass: true, reason: 'not-current-ticket' });
+});
+
+test('the CLI reads a hand-back prompt with --event and the arriving agent with --agent', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.launch('zensu:review-judge', packet.text, 'aJudge1');
+  const run = (args, payload) => spawnSync(process.execPath, [GATE, ...args], { input: payload, encoding: 'utf8' });
+  const prompt = (text) => JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: c.session, prompt: text });
+  const base = ['--root', c.root, '--session', c.session];
+  const recorded = run(['record', ...base, '--event', 'UserPromptSubmit'], prompt(frame('aJudge1', 'REVIEW PACKET INVALID: x\n')));
+  assert.equal(recorded.status, 0, recorded.stderr);
+  const output = JSON.parse(recorded.stdout).hookSpecificOutput;
+  assert.equal(output.hookEventName, 'UserPromptSubmit');
+  assert.match(output.additionalContext, /^PRIMARY JUDGE INCOMPLETE — the judge answered REVIEW PACKET INVALID/);
+  const silent = run(['record', ...base, '--event', 'UserPromptSubmit'], prompt(frame('aOther', JUDGE_OK)));
+  assert.equal(silent.status, 0);
+  assert.equal(silent.stdout, '');
+  const posted = run(['record', ...base, '--event', 'PostToolUse'],
+    JSON.stringify({ session_id: c.session, tool_input: { subagent_type: 'zensu:review-aspect', prompt: 'x' }, tool_response: { status: 'completed' } }));
+  assert.equal(JSON.parse(posted.stdout).hookSpecificOutput.hookEventName, 'PostToolUse');
+  const bad = run(['record', ...base, '--event', 'Stop'], prompt(frame('aJudge1', JUDGE_OK)));
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /--event must be PostToolUse or UserPromptSubmit/);
+  const check = (extra, text) => run(['check', ...base, '--judge', 'off', '--panel', 'lean', ...extra], prompt(text));
+  const checked = check(['--event', 'UserPromptSubmit', '--agent', 'aConsume9'], frame('aConsume9', '- Verdict: PASS\n'));
+  assert.equal(checked.status, 1);
+  assert.match(checked.stdout, /^REVIEW INCOMPLETE — the background consume reviewer aConsume9 was not checked by the review gate at its launch/);
+  for (const extra of [['--event', 'UserPromptSubmit'], ['--agent', 'aConsume9'], ['--event', 'UserPromptSubmit', '--agent', 'bad id!']]) {
+    const refused = check(extra, frame('aConsume9', '- Verdict: PASS\n'));
+    assert.equal(refused.status, 2, extra.join(' '));
+    assert.match(refused.stderr, /--agent/, extra.join(' '));
+  }
 });
 
 test('a consume report that answers REVIEW PACKET INVALID never advances the chain', (t) => {

@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const packets = require('./review-packet-v1.js');
 const principal = require('./claude-principal-v1.js');
+const background = require('./background-review-v1.js');
 
 const RECORD_SCHEMA = 'zensu-review-gate-record-v1';
 const MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
@@ -17,8 +18,11 @@ const RECORD_NAME_RE = /^record-r(\d+)-(\d+)-(\d+)-([0-9a-f]{12})\.json$/;
 const PACKET_NAME_RE = /^packet-r(\d+)\.json$/;
 const DELIVERY_STUB_RE = /^This agent's report was delivered to you as a message from /;
 const PACKET_INVALID_RE = /^REVIEW PACKET INVALID\b/m;
-const ROLES = Object.freeze(['aspect', 'persona', 'judge-primary', 'judge-second']);
+const ROLES = Object.freeze(['aspect', 'persona', 'judge-primary', 'judge-second', 'consume']);
 const PACKET_STATES = Object.freeze(['ok', 'absent', 'duplicate', 'unterminated']);
+const LAUNCHED = 'async_launched';
+const AGENT_ID_RE = background.AGENT_ID_RE;
+const EVENTS = Object.freeze(['PostToolUse', 'UserPromptSubmit']);
 
 class ReviewGateError extends Error {}
 
@@ -53,6 +57,11 @@ function reportText(response) {
   }
   if (text.trim() === '' || DELIVERY_STUB_RE.test(text.trim())) return { text: '', source: 'none' };
   return { text, source: 'content' };
+}
+
+function launchedAgent(response) {
+  if (!response || typeof response !== 'object' || response.status !== LAUNCHED) return null;
+  return typeof response.agentId === 'string' && AGENT_ID_RE.test(response.agentId) ? response.agentId : null;
 }
 
 function clip(value, limit) {
@@ -93,7 +102,8 @@ function readRecord(file) {
     && Number.isSafeInteger(record.at) && ROLES.includes(record.role) && PACKET_STATES.includes(record.packet)
     && (record.packetSha === null || (typeof record.packetSha === 'string' && /^[0-9a-f]{64}$/.test(record.packetSha)))
     && (record.identity === null || typeof record.identity === 'string')
-    && (record.valid === null || typeof record.valid === 'boolean');
+    && (record.valid === null || typeof record.valid === 'boolean')
+    && (record.agentId === undefined || record.agentId === null || (typeof record.agentId === 'string' && AGENT_ID_RE.test(record.agentId)));
   return valid ? record : null;
 }
 
@@ -181,9 +191,10 @@ function recordObservation(options) {
   const packet = packets.extractPacket(prompt);
   const response = payload.tool_response;
   const status = response && typeof response === 'object' && typeof response.status === 'string' ? response.status : '';
-  const report = reportText(response);
+  const launched = status === LAUNCHED;
+  const report = launched ? { text: '', source: 'none' } : reportText(response);
   const name = heading(report.text);
-  const reason = role === 'judge-primary' ? judgeFailure(report, status) : null;
+  const reason = role === 'judge-primary' && !launched ? judgeFailure(report, status) : null;
   const store = packets.ensureStore(root, options.session);
   let canonical = null;
   try {
@@ -197,17 +208,65 @@ function recordObservation(options) {
     at: (options.now || Date.now)(),
     type: clip(input.subagent_type, 80),
     role,
-    identity: role.startsWith('judge') ? role : (name ? `${kind}:${name}` : null),
+    identity: launched ? null : (role.startsWith('judge') ? role : (name ? `${kind}:${name}` : null)),
     packet: packet.status,
     packetSha: packet.sha256 || null,
     status: clip(status, 40),
     reportSource: report.source,
-    valid: role === 'judge-primary' ? reason === null : null,
+    valid: role === 'judge-primary' && !launched ? reason === null : null,
     reason,
+    agentId: launchedAgent(response),
   };
   writeRecord(store, record);
   prune(store);
   return { recorded: true, record, canonical, packetText: packet.text || '', store, commands: remedyCommands(root, options.session) };
+}
+
+function recordHandback(options) {
+  const payload = options.payload || {};
+  const frames = background.handbackReports(payload.prompt);
+  if (frames.length === 0) return [];
+  const root = packets.canonicalRoot(options.root);
+  const state = packets.chainState(root, options.session);
+  if (state.status !== 'ok' || !state.reviewable) return [];
+  const records = listStore(packets.storeDirectory(root, options.session)).records.filter((entry) => entry.round === state.round);
+  const results = [];
+  for (const frame of frames) {
+    const runs = records.filter((entry) => entry.agentId === frame.agentId);
+    const launch = runs.filter((entry) => entry.status === LAUNCHED && entry.role !== 'consume').pop();
+    const kind = launch ? classify(launch.type) : null;
+    if (!kind || runs.some((entry) => entry.status !== LAUNCHED)) continue;
+    const report = { text: frame.report, source: 'handback-prompt' };
+    const name = heading(report.text);
+    const reason = launch.role === 'judge-primary' ? judgeFailure(report, 'completed') : null;
+    const store = packets.ensureStore(root, options.session);
+    let canonical = null;
+    try {
+      canonical = packets.readPacketRecord(store, state.round);
+    } catch (error) {
+      if (!(error instanceof packets.ReviewPacketError)) throw error;
+    }
+    const record = {
+      schema: RECORD_SCHEMA,
+      round: state.round,
+      at: (options.now || Date.now)(),
+      type: launch.type,
+      role: launch.role,
+      identity: launch.role.startsWith('judge') ? launch.role : (name ? `${kind}:${name}` : null),
+      packet: launch.packet,
+      packetSha: launch.packetSha,
+      status: 'completed',
+      reportSource: report.source,
+      valid: launch.role === 'judge-primary' ? reason === null : null,
+      reason,
+      agentId: frame.agentId,
+    };
+    writeRecord(store, record);
+    prune(store);
+    records.push(record);
+    results.push({ recorded: true, record, canonical, packetText: null, store, commands: remedyCommands(root, options.session) });
+  }
+  return results;
 }
 
 function observationAdvice(result) {
@@ -220,7 +279,8 @@ function observationAdvice(result) {
   } else if (record.packet !== 'ok') {
     notes.push(`REVIEW PACKET MISSING — the ${who} prompt carried ${packetProblem(record.packet)}. Do not merge its findings; spawn it again with the block ${commands.show} prints, copied unchanged.`);
   } else if (record.packetSha !== canonical.sha256) {
-    notes.push(`REVIEW PACKET MISMATCH — the ${who} prompt differs from review round ${record.round}'s canonical packet at packet line ${packets.firstDifference(canonical.text, result.packetText)}. Do not merge its findings; spawn it again with the block ${commands.show} prints, copied unchanged.`);
+    const where = result.packetText === null ? '' : ` at packet line ${packets.firstDifference(canonical.text, result.packetText)}`;
+    notes.push(`REVIEW PACKET MISMATCH — the ${who} prompt differs from review round ${record.round}'s canonical packet${where}. Do not merge its findings; spawn it again with the block ${commands.show} prints, copied unchanged.`);
   }
   if (record.role === 'judge-primary' && record.valid === false) {
     const failed = canonical ? primaryFailures(listStore(result.store).records, canonical).filter((entry) => entry.valid === false) : [];
@@ -239,8 +299,10 @@ function consumeRefusal(cause, next) {
 
 function checkConsume(options) {
   const payload = options.payload || {};
-  const input = payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
+  const arrival = options.event === 'UserPromptSubmit';
+  const input = !arrival && payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+  const agent = arrival ? options.agent : null;
   const root = packets.canonicalRoot(options.root);
   const state = packets.chainState(root, options.session);
   if (state.status !== 'ok') return { pass: false, hold: true, reason: `state-${state.status}` };
@@ -249,27 +311,43 @@ function checkConsume(options) {
     return { pass: true, reason: 'not-current-ticket' };
   }
   const commands = remedyCommands(root, options.session);
-  const respawnConsume = `spawn zensu:code-reviewer again with the same two header lines and the block ${commands.show} prints, copied unchanged`;
-  const report = reportText(payload.tool_response);
+  const consumeAgain = 'spawn zensu:code-reviewer again with the same two header lines';
+  const respawnConsume = `${consumeAgain} and the block ${commands.show} prints, copied unchanged`;
+  let report = reportText(payload.tool_response);
+  if (arrival) {
+    const frame = background.handbackReports(payload.prompt).filter((entry) => entry.agentId === agent).pop();
+    report = { text: frame ? frame.report : '', source: frame ? 'handback-prompt' : 'none' };
+  }
   if (PACKET_INVALID_RE.test(report.text)) {
     return consumeRefusal('the consume reviewer answered REVIEW PACKET INVALID', respawnConsume);
   }
   const store = packets.storeDirectory(root, options.session);
   const listing = listStore(store);
-  const supplied = packets.extractPacket(prompt);
-  if (listing.packetRounds.length === 0 && listing.records.length === 0 && supplied.status === 'absent') {
+  const round = state.round;
+  let supplied = packets.extractPacket(prompt);
+  if (arrival) {
+    const launch = listing.records.filter((entry) => entry.round === round && entry.role === 'consume' && entry.agentId === agent).pop();
+    supplied = launch ? { status: launch.packet, sha256: launch.packetSha, text: null } : { status: 'absent', unchecked: true };
+  }
+  const runs = listing.records.filter((entry) => entry.status !== LAUNCHED);
+  if (listing.packetRounds.length === 0 && runs.length === 0 && supplied.status === 'absent') {
     return { pass: true, reason: 'not-engaged' };
   }
-  const round = state.round;
   const canonical = packets.readPacketRecord(store, round);
-  const rerun = 'spawn this round\'s reviewers with the block it prints and merge their findings, then spawn zensu:code-reviewer again with the same two header lines and that block';
+  const rerun = `spawn this round's reviewers with the block it prints and merge their findings, then ${consumeAgain} and that block`;
   if (!canonical) {
     return consumeRefusal(`review round ${round} has no canonical packet`, `run ${commands.create}, ${rerun}`);
+  }
+  if (supplied.unchecked) {
+    return consumeRefusal(`the background consume reviewer ${agent} was not checked by the review gate at its launch`, respawnConsume);
   }
   if (supplied.status !== 'ok') {
     return consumeRefusal(`the consume prompt carries ${packetProblem(supplied.status)}`, respawnConsume);
   }
   if (supplied.sha256 !== canonical.sha256) {
+    if (supplied.text === null) {
+      return consumeRefusal(`review round ${round}'s canonical packet changed after the background consume reviewer ${agent} was launched`, respawnConsume);
+    }
     return consumeRefusal(`the consume prompt's packet differs from review round ${round}'s canonical packet at packet line ${packets.firstDifference(canonical.text, supplied.text)}`, respawnConsume);
   }
   const now = packets.currentScope(root, canonical.scope.baseline || '', canonical.scope.kind === 'git' ? undefined : canonical.scope.changedFiles);
@@ -286,9 +364,12 @@ function checkConsume(options) {
     return consumeRefusal(`an edit-landing receipt was written after review round ${round}'s packet recorded none`, `run ${commands.create} again, ${rerun}`);
   }
   const ofRound = listing.records.filter((entry) => entry.round === round);
+  const unreported = (roles) => ofRound.filter((entry) => entry.status === LAUNCHED && roles.includes(entry.role) && entry.agentId
+    && !ofRound.some((other) => other.agentId === entry.agentId && other.status !== LAUNCHED)).length;
+  const waitHint = (count) => (count === 0 ? '' : `; ${count === 1 ? 'one background reviewer launch of this round has' : `${count} background reviewer launches of this round have`} sent no hand-back the hook could read yet, so wait for ${count === 1 ? 'it' : 'them'} first, and where the host delivers no hand-back, as outside auto mode, ask the user whether to set hooks.reviewPacketGate to false, which reviews this project without the gate`);
   const latest = new Map();
   for (const entry of ofRound) if (entry.identity) latest.set(entry.identity, entry);
-  const respawnReviewer = `spawn that reviewer again with the block ${commands.show} prints, merge its findings in place of the earlier ones, then spawn zensu:code-reviewer again with the same two header lines and that block`;
+  const respawnReviewer = `spawn that reviewer again with the block ${commands.show} prints, merge its findings in place of the earlier ones, then ${consumeAgain} and that block`;
   for (const entry of latest.values()) {
     if (entry.at < canonical.createdAt) {
       return consumeRefusal(`the latest ${describe(entry)} run of review round ${round} predates the round's canonical packet`, respawnReviewer);
@@ -298,7 +379,7 @@ function checkConsume(options) {
     }
   }
   if (latest.size === 0) {
-    return consumeRefusal(`no reviewer of review round ${round} reported on its canonical packet`, `spawn this round's reviewers with the block ${commands.show} prints and merge their findings, then spawn zensu:code-reviewer again with the same two header lines and that block`);
+    return consumeRefusal(`no reviewer of review round ${round} reported on its canonical packet`, `spawn this round's reviewers with the block ${commands.show} prints and merge their findings, then ${consumeAgain} and that block${waitHint(unreported(['aspect', 'persona', 'judge-primary', 'judge-second']))}`);
   }
   const recent = ofRound.filter((entry) => entry.at >= canonical.createdAt);
   const required = options.judge === 'on' && (round === 0 || options.panel === 'full');
@@ -311,8 +392,27 @@ function checkConsume(options) {
           'stop the review chain here, keep both results and report the chain as pending; the second judge run never substitutes for the primary');
       }
       return consumeRefusal(`no primary zensu:review-judge run completed a substantive report on review round ${round}'s canonical packet${failed.length ? ` (${failed[0].reason})` : ''}`,
-        'spawn the primary zensu:review-judge with that block and the merged panel findings, merge its deltas, then spawn zensu:code-reviewer again with the same two header lines and the block; the second judge run never substitutes for it');
+        `spawn the primary zensu:review-judge with that block and the merged panel findings, merge its deltas, then ${consumeAgain} and the block; the second judge run never substitutes for it${waitHint(unreported(['judge-primary']))}`);
     }
+  }
+  const launchAgent = arrival ? null : launchedAgent(payload.tool_response);
+  if (launchAgent) {
+    writeRecord(packets.ensureStore(root, options.session), {
+      schema: RECORD_SCHEMA,
+      round,
+      at: (options.now || Date.now)(),
+      type: clip(input.subagent_type || '', 80),
+      role: 'consume',
+      identity: null,
+      packet: supplied.status,
+      packetSha: supplied.sha256,
+      status: LAUNCHED,
+      reportSource: 'none',
+      valid: null,
+      reason: null,
+      agentId: launchAgent,
+    });
+    prune(store);
   }
   return { pass: true, reason: 'ok' };
 }
@@ -350,8 +450,14 @@ function readPayload(descriptor = 0) {
   return value;
 }
 
-function additionalContext(message) {
-  return `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message } })}\n`;
+function additionalContext(message, event = 'PostToolUse') {
+  return `${JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: message } })}\n`;
+}
+
+function eventFlag(value) {
+  if (value === undefined) return 'PostToolUse';
+  if (!EVENTS.includes(value)) fail('--event must be PostToolUse or UserPromptSubmit');
+  return value;
 }
 
 function main(argv, io = {}) {
@@ -360,24 +466,30 @@ function main(argv, io = {}) {
   const [verb, ...args] = argv;
   try {
     if (verb === 'record') {
-      const flags = packets.parseFlags(args, ['--root', '--session']);
+      const flags = packets.parseFlags(args, ['--root', '--session', '--event']);
+      const event = eventFlag(flags['--event']);
       let advice = '';
       try {
         const payload = io.payload || readPayload();
-        advice = observationAdvice(recordObservation({ root: flags['--root'], session: flags['--session'], payload }));
+        const options = { root: flags['--root'], session: flags['--session'], payload };
+        const results = event === 'UserPromptSubmit' ? recordHandback(options) : [recordObservation(options)];
+        advice = results.map(observationAdvice).filter(Boolean).join(' ');
       } catch (error) {
         advice = `REVIEW GATE UNAVAILABLE — this reviewer result could not be recorded (${clip(error.message, 300)}), so it cannot count toward the review round; the consume review stays refused until a recorded run exists.`;
       }
-      if (advice) stdout.write(additionalContext(advice));
+      if (advice) stdout.write(additionalContext(advice, event));
       return 0;
     }
     if (verb === 'check') {
-      const flags = packets.parseFlags(args, ['--root', '--session', '--judge', '--panel', '--ticket']);
+      const flags = packets.parseFlags(args, ['--root', '--session', '--judge', '--panel', '--ticket', '--event', '--agent']);
       if (!['on', 'off'].includes(flags['--judge'])) fail('--judge must be on or off');
       if (!['lean', 'full'].includes(flags['--panel'])) fail('--panel must be lean or full');
+      const event = eventFlag(flags['--event']);
+      if ((event === 'UserPromptSubmit') !== (flags['--agent'] !== undefined)) fail('--agent names the background consume reviewer and goes with --event UserPromptSubmit only');
+      if (flags['--agent'] !== undefined && !AGENT_ID_RE.test(flags['--agent'])) fail('--agent is not an agent id');
       const payload = io.payload || readPayload();
       const verdict = checkConsume({ root: flags['--root'], session: flags['--session'], payload, judge: flags['--judge'], panel: flags['--panel'],
-        ticket: flags['--ticket'] });
+        ticket: flags['--ticket'], event, agent: flags['--agent'] });
       if (verdict.pass) {
         stdout.write(`pass ${verdict.reason}\n`);
         return 0;
@@ -394,7 +506,7 @@ function main(argv, io = {}) {
       resetStore({ root: flags['--root'], session: flags['--session'] });
       return 0;
     }
-    fail('usage: review-gate-v1.js record|check|reset --root <dir> --session <id> [--judge on|off --panel lean|full [--ticket <review ticket>]]');
+    fail('usage: review-gate-v1.js record|check|reset --root <dir> --session <id> [--event PostToolUse|UserPromptSubmit] [--judge on|off --panel lean|full [--ticket <review ticket>] [--agent <agent id>]]');
   } catch (error) {
     const known = error instanceof ReviewGateError || error instanceof packets.ReviewPacketError;
     stderr.write(`review-gate-v1: ${known ? error.message : `unexpected failure (${error.message})`}\n`);
@@ -412,6 +524,7 @@ module.exports = {
   judgeFailure,
   listStore,
   recordObservation,
+  recordHandback,
   observationAdvice,
   checkConsume,
   remedyCommands,

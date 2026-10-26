@@ -155,7 +155,7 @@
       "summary": "The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe."
     },
     {
-      "path": "tests/structure/review-gate-v1.test.js", "registered": 24,
+      "path": "tests/structure/review-gate-v1.test.js", "registered": 31,
       "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
       "summary": "The consume-review gate: reviewer records, canonical-packet equality, freshness and the primary-judge requirement."
     },

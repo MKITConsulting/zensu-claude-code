@@ -121,7 +121,14 @@ reviewer's report reaches the main thread, with the routing directive the foregr
   (record path and fan-out directory, so a Stop with nothing pending spawns no `node` child), and
   in the prefilter of `user-prompt-review-handback.sh`, which must stay a superset of both.
 - The arrival markers are spelled in `scanLines` and in the prefilter's `case`, which must stay a
-  superset of what `scanLines` accepts.
+  superset of what `scanLines` accepts. `handbackReports` reads the same frame grammar with the
+  same line splitter and exports it, with `AGENT_ID_RE`, to the review packet gate, which takes
+  each frame's de-indented report from it (`.claude/rules/review-packet-gate.md`).
+- With `hooks.reviewPacketGate` on, the delegate's arrival branch runs the gate's `record --event
+  UserPromptSubmit` after `match` and before the `ARRIVAL_MATCH` exit, so a failed `match` sets
+  `ARRIVAL_MATCH` empty instead of ending the branch, and `review_gate_check` runs at the consume
+  launch before `record` and at the arrival before the claim. `tests/structure/test-background-review.sh`
+  turns the gate off in its config, because its fixtures carry no canonical packet.
 - The claim predicate is `review-ticket-state-v1.js`; `_ZENSU_TDD_TICKET_STATE` is in the export
   list of `zensu-tdd-phase.sh` beside `_ZENSU_TDD_CHAIN_RECOVERY`.
 - The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, and

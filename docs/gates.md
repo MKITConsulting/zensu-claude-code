@@ -1158,7 +1158,12 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   finding or `- (no findings)`, and no line starting with `REVIEW PACKET INVALID`. The report is
   read from `handbackReport.text` when the reviewer delivered it through `SubagentHandback`,
   otherwise from the text content. A run whose block differs from the canonical one gets advice
-  at once, naming the first differing line.
+  at once, naming the first differing line. A reviewer the host launches in the background, as
+  the Claude desktop app does with every subagent, answers with status `async_launched` and no
+  report: that launch is recorded with its agent id and its packet digest, counts as no run and
+  never as a failed judge, and the reviewer's hand-back, which `user-prompt-review-handback.sh`
+  passes to the hook, completes it with the report the frame carries. A second hand-back for
+  the same agent is ignored.
 - **The consume refusal.** Before the hook claims a review ticket it refuses, with the ticket
   left unconsumed and the cause and remedy in `additionalContext`, when the round has no
   canonical packet, when the consume prompt's block is missing, duplicated or differs, when the
@@ -1173,7 +1178,15 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   remedy names the full `node <plugin root>/hooks/lib/review-packet-v1.js show` or `create`
   command with the project root and the session key, and the seven fields a `create` input holds.
   A workflow document the gate cannot read or validate holds the claim without a word, the way the
-  hook already treats a malformed or foreign document.
+  hook already treats a malformed or foreign document. A consume-mode reviewer the host launches
+  in the background is checked at its launch, and a refused launch is not recorded for its
+  arrival, so nothing it reports can claim. A passing launch records the block's digest, and the
+  arrival is checked again against that digest and with the report its hand-back carries; a
+  refused arrival answers in the arrival's own `UserPromptSubmit` event, ends the wait for that
+  reviewer and leaves the ticket unconsumed. While background launches of the round have sent
+  no hand-back, the refusals for a missing reviewer and a missing primary judge say to wait for
+  them, and, where the host delivers no hand-back the hook can read, as outside auto mode, to ask
+  the user whether to set `hooks.reviewPacketGate` to `false`.
 - **Only the live ticket is judged.** The hook hands the gate the consume prompt's review ticket.
   A completion whose ticket is not the chain's live, unconsumed ticket, or that arrives after the
   code review was marked done, passes the gate as `not-current-ticket`; the ticket claim after it
@@ -1198,7 +1211,10 @@ store sits in the session-writable `.zensu/state/`, so a Bash write can forge a 
 every plugin store; a deferred review in a session that still holds an earlier generation's
 receipt is judged by that receipt, because only `--tdd-begin` retires one; and the judge's report
 is read from the PostToolUse `tool_response`, whose `handbackReport` shape was measured on Claude
-Code 2.1.299.
+Code 2.1.299, or for a background reviewer from its hand-back frame, whose shape was measured in
+the desktop app in auto mode. Outside auto mode that host sends no hand-back, so a review whose
+reviewers all ran in the background stays refused there until the key is off; no live desktop
+run of a background panel through the gate exists yet.
 
 ## Terminal Edit-Landing Gate
 

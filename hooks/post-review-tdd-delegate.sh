@@ -42,6 +42,7 @@ AUTO_FIX_ON=1
 zensu_hook_enabled autoFix || AUTO_FIX_ON=0
 
 ARRIVAL_LEAD=""
+ARRIVAL_AGENT=""
 emit_post_context() {
   LEAD="$ARRIVAL_LEAD" EVENT="$HOOK_EVENT" node -e '
     const msg = (process.env.LEAD || "") + require("node:fs").readFileSync(0, "utf8");
@@ -89,7 +90,18 @@ if [ "$HOOK_EVENT" = UserPromptSubmit ]; then
   ARRIVAL_MATCH="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BACKGROUND_REVIEW_EXCLUSIONS" \
     ZENSU_BR_PLUGIN_DATA="$BACKGROUND_REVIEW_DATA" ZENSU_BR_SESSION_KEY="$ARRIVAL_SESSION" \
     ZENSU_BR_STATE_FILE="$ARRIVAL_NATIVE_STATE" \
-    node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" match 2>/dev/null)" || exit 0
+    node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" match 2>/dev/null)" || ARRIVAL_MATCH=""
+  if zensu_hook_enabled reviewPacketGate; then
+    GATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
+    GATE_LIB="$(bash "$GATE_LIB/zensu-host-path.sh" "$GATE_LIB" 2>/dev/null || printf '%s' "$GATE_LIB")"
+    GATE_ADVICE="$(node "$GATE_LIB/review-gate-v1.js" record --event UserPromptSubmit \
+      --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$ARRIVAL_SESSION" <<<"$INPUT" 2>/dev/null)"
+    if [ -n "$GATE_ADVICE" ]; then
+      printf '%s\n' "$GATE_ADVICE"
+      exit 0
+    fi
+  fi
+  [ -n "$ARRIVAL_MATCH" ] || exit 0
   ARRIVAL_VERDICT="$(MATCH="$ARRIVAL_MATCH" node -e '
     try {
       const m = JSON.parse(process.env.MATCH);
@@ -382,7 +394,30 @@ REVIEW_LAUNCH_STATUS="$(node -e '
     } catch (_) {}
   });
 ' <<<"$REVIEW_INPUT" 2>/dev/null)"
+review_gate_check() {
+  zensu_hook_enabled reviewPacketGate || return 0
+  local judge=off panel rc=0 lib verdict show
+  zensu_hook_enabled reviewJudge && judge=on
+  panel="$(zensu_review_panel)"
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
+  lib="$(bash "$lib/zensu-host-path.sh" "$lib" 2>/dev/null || printf '%s' "$lib")"
+  verdict="$(node "$lib/review-gate-v1.js" check --event "$HOOK_EVENT" ${ARRIVAL_AGENT:+--agent "$ARRIVAL_AGENT"} \
+    --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$SESSION_ID" \
+    --judge "$judge" --panel "$panel" --ticket "$REVIEW_TICKET" <<<"$INPUT" 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  [ "$rc" -ne 3 ] || exit 0
+  if [ "$rc" -ne 1 ]; then
+    show="$(printf 'node %q show --root %q --session %q' "$lib/review-packet-v1.js" \
+      "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" "$SESSION_ID")"
+    verdict="REVIEW INCOMPLETE — the review gate could not check this consume review (${verdict#review-gate-v1: }). The review ticket was NOT consumed and the review chain did not advance. Next: resolve the cause, then spawn zensu:code-reviewer again with the same two header lines and the block ${show} prints."
+  fi
+  ARRIVAL_LEAD=""
+  printf '%s' "$verdict" | emit_post_context
+  exit 0
+}
+
 if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
+  review_gate_check
   LAUNCH_RECORD="unrecorded reason=store"
   if background_review_env; then
     LAUNCH_RECORD="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BACKGROUND_REVIEW_EXCLUSIONS" \
@@ -413,33 +448,7 @@ if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
   exit 0
 fi
 
-if zensu_hook_enabled reviewPacketGate; then
-  GATE_JUDGE=off
-  zensu_hook_enabled reviewJudge && GATE_JUDGE=on
-  GATE_PANEL="$(zensu_review_panel)"
-  GATE_RC=0
-  GATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
-  GATE_LIB="$(bash "$GATE_LIB/zensu-host-path.sh" "$GATE_LIB" 2>/dev/null || printf '%s' "$GATE_LIB")"
-  GATE_VERDICT="$(node "$GATE_LIB/review-gate-v1.js" check \
-    --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$SESSION_ID" \
-    --judge "$GATE_JUDGE" --panel "$GATE_PANEL" --ticket "$REVIEW_TICKET" <<<"$INPUT" 2>&1)" || GATE_RC=$?
-  if [ "$GATE_RC" -ne 0 ]; then
-    [ "$GATE_RC" -ne 3 ] || exit 0
-    if [ "$GATE_RC" -ne 1 ]; then
-      GATE_SHOW="$(printf 'node %q show --root %q --session %q' "$GATE_LIB/review-packet-v1.js" \
-        "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" "$SESSION_ID")"
-      GATE_VERDICT="REVIEW INCOMPLETE — the review gate could not check this consume review (${GATE_VERDICT#review-gate-v1: }). The review ticket was NOT consumed and the review chain did not advance. Next: resolve the cause, then spawn zensu:code-reviewer again with the same two header lines and the block ${GATE_SHOW} prints."
-    fi
-    printf '%s' "$GATE_VERDICT" | node -e '
-      const msg = require("node:fs").readFileSync(0, "utf8");
-      process.stdout.write(JSON.stringify({hookSpecificOutput:{
-        hookEventName:"PostToolUse", additionalContext:msg
-      }}));
-    '
-    echo
-    exit 0
-  fi
-fi
+review_gate_check
 
 # Claim the one-shot ticket, increment its round, and capture the exact
 # fully-validated Autopilot binding from the same locked state read. There is no

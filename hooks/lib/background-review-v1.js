@@ -462,6 +462,24 @@ function scanPrompt(prompt, agentId) {
   return scanLines(promptLines(prompt), agentId);
 }
 
+function handbackReports(prompt) {
+  if (typeof prompt !== 'string') return [];
+  const lines = promptLines(prompt);
+  const reports = [];
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    const open = /^<agent-message from="([^"]*)">$/.exec(lines[index]);
+    if (!open || !AGENT_ID_RE.test(open[1]) || !lines[index + 1].startsWith(HANDBACK_FRAME_LINE)) continue;
+    const close = lines.indexOf('</agent-message>', index + 2);
+    const body = lines.slice(index + 2, close === -1 ? lines.length : close);
+    const indent = (line) => /^ */.exec(line)[0].length;
+    const widths = body.filter((line) => line.trim() !== '').map(indent);
+    const strip = widths.length ? Math.min(...widths) : 0;
+    reports.push({ agentId: open[1], report: body.map((line) => line.slice(Math.min(strip, indent(line)))).join('\n') });
+    index = close === -1 ? lines.length : close;
+  }
+  return reports;
+}
+
 function consumeRecord(file, expectedText, limits = LIMITS) {
   const taken = `${file}.${crypto.randomBytes(6).toString('hex')}.consumed`;
   try {
@@ -721,6 +739,7 @@ module.exports = {
   WAIT_KINDS,
   ENVELOPES,
   LIMITS,
+  AGENT_ID_RE,
   BackgroundReviewError,
   limitsWith,
   ttlMinutes,
@@ -733,6 +752,7 @@ module.exports = {
   recordLaunch,
   recordFanout,
   scanPrompt,
+  handbackReports,
   consumeRecord,
   matchArrival,
   retireRecord,

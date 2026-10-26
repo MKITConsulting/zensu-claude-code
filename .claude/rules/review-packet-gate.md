@@ -97,6 +97,36 @@ retry; two failed primary runs on one block stop the chain.
 report was delivered as a message; without the handback, `content` holds the text blocks.
 `reportText` reads `handbackReport.text` first and treats the stub as no report.
 
+**Background reviewers are judged by their hand-back.** The Claude desktop app runs every
+subagent in the background (`.claude/rules/background-review-completion.md`), so a reviewer's
+PostToolUse carries `status: "async_launched"`, an `agentId` and no report. Counting that as a run
+failed every primary judge on that host, and ignoring it refused every consume review there,
+because no reviewer had ever reported. So `recordObservation` stores a launch record (role, type,
+packet digest and agent id, `identity: null`, `valid: null`) that `checkConsume` never counts as
+a run, and `recordHandback`, which the delegate's arrival branch runs as `record --event
+UserPromptSubmit` right after `match`, completes the latest launch of that agent in the round
+with the report `handbackReports` in `hooks/lib/background-review-v1.js` de-indents from the
+frame. A second completion for one agent is ignored, so a repeated delivery of a failed judge's
+hand-back never reads as the second failure. The consume-mode reviewer is checked at its launch
+with the launch prompt, before `background-review-v1.js record`, and a passing check writes a
+`consume` record with the agent id and the block's digest. Its arrival is checked again with
+`check --event UserPromptSubmit --agent <id>`, which takes the digest from that record and the
+report from that agent's frame, so a notification-only arrival is judged on the round's records
+alone. Every answer goes out in the arrival's own event, because a `UserPromptSubmit` hook that
+names `PostToolUse` answers nothing. A refused arrival leaves through the delegate's EXIT trap,
+which retires the background record, so the next Stop does not wait for a reviewer that has
+already reported.
+
+**Unobservable reports fail closed.** Outside auto mode the desktop app sends no hand-back, and
+the notification it sends there was never measured, so the gate reads no report from it. Every
+launch of the round without a completion is counted in the refusals for a missing reviewer and a
+missing primary judge, which say to wait for those launches and, where the host delivers no
+hand-back, to ask the user whether to set `hooks.reviewPacketGate` to `false`. The hint asks the
+user rather than naming the edit, because the key is not a ledgered escape, and a model that
+turned it off itself would disable the gate unrecorded. Counting a completion without its report
+was rejected: it would pass a primary judge whose report nothing checked. Reading the report from
+a measured notification would close the gap.
+
 **An unreadable workflow document holds the claim silently.** `check` exits 3 when
 `chainState` cannot read or validate the document, and the hook then exits without a claim and
 without output. A loud refusal broke the byte-stable no-op contract that `S11a` and `S12` in
@@ -145,13 +175,24 @@ in `hooks/lib/zensu-log.sh` runs at `--tdd-begin`, after both `--review-rearm` a
 `hooks/lib/zensu-tdd-phase.sh` runs itself; `config.example.json`; the `reviewPacketGate` and
 `incrementalReviewRounds` rows of `docs/configuration.md`; the auto-fix paragraph, the ignore
 recipe and the publication-safety paragraph of `docs/tdd-manager-workflow.md`; §Review Packet Gate
-of `docs/gates.md`; and `docs/review-chain.md`.
+of `docs/gates.md`; and `docs/review-chain.md`. The background path adds `launchedAgent`,
+`recordHandback`, `LAUNCHED`, `EVENTS` and the `consume` role in `hooks/lib/review-gate-v1.js`,
+which takes `AGENT_ID_RE` and `handbackReports` from `hooks/lib/background-review-v1.js`, so the
+frame grammar and the agent-id pattern keep one owner; `review_gate_check` and the arrival
+branch's `record` call in `hooks/post-review-tdd-delegate.sh`, which runs before the
+`ARRIVAL_MATCH` exit, so a fan-out reviewer's hand-back is recorded while no consume record
+exists; `"reviewPacketGate":false` in `tests/structure/test-background-review.sh`, whose
+fixtures carry no canonical packet; and the panel bullet of §"Background review agents" in
+`docs/review-chain.md`. `RP24` to `RP26a` in `tests/structure/test-review-packet.sh` drive it
+through the shipped hooks.
 
 **Version: `patch`.** No hook added, removed, renamed or re-matched, no `permissionDecision`, no
 workflow-state or context-record field, and the config key is read permissively. The packet
 input, packet record and reviewer record schemas ship for the first time, so no released reader
 predates them. A session upgraded in the middle of a review round re-runs that round's reviewers
-once, because its earlier runs saw no canonical packet.
+once, because its earlier runs saw no canonical packet. Reading background reviewers adds no hook
+either: arrivals reach the delegate through the existing `user-prompt-review-handback.sh`, and
+the record's `agentId` field and `consume` role ship with the record schema's first release.
 
 **Known gaps:**
 
@@ -165,5 +206,17 @@ once, because its earlier runs saw no canonical packet.
   retirement in the `--tdd-begin` branch, or a shared function both call.
 - The `escaped` mode trusts the call's environment as the acceptance gate does, so an
   environment-only escape at `create` reaches the ledger only when the terminus runs with it too.
+- A background reviewer that never hands back stays a launch record, which counts as no run, so a
+  panel whose reports never arrive refuses the consume review rather than passing it.
+- A persona gets no entry in the background store, so its hand-back reaches the gate only while a
+  built-in reviewer is still pending there; a persona that reports after every built-in reviewer
+  stays a launch record, which neither counts nor blocks.
+- A prompt that carried a fan-out reviewer's frame with a packet problem and the consume
+  reviewer's arrival at once would print the advice and leave the claim to the next arrival; the
+  measured host sends each hand-back as its own prompt.
+- While the key is on, every arrival the prompt hook passes on pays one more `node` start for the
+  gate's record read.
+- The hand-back shape is the one measured in the desktop app in auto mode; no live desktop run of
+  a background panel through the gate exists.
 - Windows is unmeasured: `tests/structure/test-review-packet.sh` runs in `ciStructureTests` only.
 - `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
