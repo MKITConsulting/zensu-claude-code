@@ -2,38 +2,43 @@
 set -uo pipefail
 
 fail_closed() {
-  printf '%s\n' 'zensu: reviewer capability gate unavailable' >&2
+  printf 'zensu: reviewer capability gate unavailable: %s\n' "$1" >&2
   exit 2
 }
 
 fail_closed_after_drain() {
   cat >/dev/null 2>&1 || true
-  fail_closed
+  fail_closed "$1"
 }
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)" || fail_closed
-PLUGIN_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd -P)" || fail_closed
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)" \
+  || fail_closed "cannot resolve the directory of this hook"
+PLUGIN_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd -P)" \
+  || fail_closed "cannot resolve the plugin root above this hook"
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   DECLARED_PLUGIN_ROOT="$(CDPATH= cd -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" \
-    || fail_closed_after_drain
-  [ "$DECLARED_PLUGIN_ROOT" = "$PLUGIN_ROOT" ] || fail_closed_after_drain
+    || fail_closed_after_drain "CLAUDE_PLUGIN_ROOT names no readable directory; start a fresh Claude Code session"
+  [ "$DECLARED_PLUGIN_ROOT" = "$PLUGIN_ROOT" ] \
+    || fail_closed_after_drain "CLAUDE_PLUGIN_ROOT names another plugin installation than the one running this hook; start a fresh Claude Code session"
 fi
 POLICY="$SCRIPT_DIR/lib/reviewer-capability-v1.js"
-[ -f "$POLICY" ] || fail_closed
-NODE="$(command -v node 2>/dev/null)" || fail_closed
-[ -n "$NODE" ] || fail_closed
+[ -f "$POLICY" ] || fail_closed "the policy module hooks/lib/reviewer-capability-v1.js is missing; reinstall the plugin"
+NODE_MISSING="node was not found on the PATH that Claude Code was started with, and Zensu blocks every tool call until node is available. Install Node.js or put it on that PATH, then restart Claude Code (see Requirements in $PLUGIN_ROOT/README.md), or disable the Zensu plugin"
+NODE="$(command -v node 2>/dev/null)" || fail_closed_after_drain "$NODE_MISSING"
+[ -n "$NODE" ] || fail_closed_after_drain "$NODE_MISSING"
 NATIVE_PLUGIN_ROOT="$(bash "$SCRIPT_DIR/lib/zensu-host-path.sh" "$PLUGIN_ROOT")" \
-  || fail_closed_after_drain
+  || fail_closed_after_drain "cannot convert the plugin root into a path node can open"
 NATIVE_PLUGIN_DATA="$(bash "$SCRIPT_DIR/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" \
-  || fail_closed_after_drain
-OUTPUT="$(mktemp "${TMPDIR:-/tmp}/zensu-reviewer-gate.XXXXXX" 2>/dev/null)" || fail_closed
+  || fail_closed_after_drain "cannot convert CLAUDE_PLUGIN_DATA into a path node can open"
+TEMP_FAILURE="cannot create a private temporary file under ${TMPDIR:-/tmp}"
+OUTPUT="$(mktemp "${TMPDIR:-/tmp}/zensu-reviewer-gate.XXXXXX" 2>/dev/null)" || fail_closed "$TEMP_FAILURE"
 ERROR_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/zensu-reviewer-gate-error.XXXXXX" 2>/dev/null)" || {
   rm -f "$OUTPUT"
-  fail_closed
+  fail_closed "$TEMP_FAILURE"
 }
 chmod 600 "$OUTPUT" "$ERROR_OUTPUT" 2>/dev/null || {
   rm -f "$OUTPUT" "$ERROR_OUTPUT"
-  fail_closed
+  fail_closed "$TEMP_FAILURE"
 }
 trap 'rm -f "$OUTPUT" "$ERROR_OUTPUT"' EXIT HUP INT TERM
 
@@ -41,6 +46,6 @@ trap 'rm -f "$OUTPUT" "$ERROR_OUTPUT"' EXIT HUP INT TERM
   && CLAUDE_PLUGIN_ROOT="$NATIVE_PLUGIN_ROOT" CLAUDE_PLUGIN_DATA="$NATIVE_PLUGIN_DATA" \
     "$NODE" ./reviewer-capability-v1.js) >"$OUTPUT" 2>"$ERROR_OUTPUT"
 STATUS=$?
-[ "$STATUS" -eq 0 ] || fail_closed
-cat "$OUTPUT" || fail_closed
+[ "$STATUS" -eq 0 ] || fail_closed "the policy check exited with status $STATUS"
+cat "$OUTPUT" || fail_closed "cannot read the policy result"
 exit 0

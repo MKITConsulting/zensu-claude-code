@@ -195,13 +195,15 @@ every prompt while the route is decided, and a note under 400 characters on a CI
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
 `user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above once per generation and about 1.4 K after
 that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
-characters, on every prompt kind for the same reason). Two emit
-only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
-`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose.
+characters, on every prompt kind for the same reason). Three emit
+only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold,
+`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
+`user-prompt-review-handback.sh` only for the hand-back or completion notification of a pending
+background reviewer, where it carries the review's routing directive; it exits before any `node`
+child on a prompt that carries neither marker, and on one that does while no background review is
+pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
-takeover command. `user-prompt-review-handback.sh` emits only on the hand-back of the background
-`zensu:code-reviewer` its chain bound to a review ticket, where it carries the post-review directive
-the foreground completion used to carry. With
+takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
 costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
@@ -262,6 +264,31 @@ rather than the recorded one. That is the same limit the tamper-evidence sentenc
 
 Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
 
+## Context Added to Every Session
+
+Zensu's hooks add text to every session that loads the plugin, whether or not a Zensu skill
+runs. Measured on 2026-10-24 over the transcripts of 65 Zensu 0.29.0 sessions on one machine:
+the census summed each transcript's `hook_additional_context` attachments, the text Claude
+Code hands the model from a hook, and left out other plugins' text. All figures are
+characters.
+
+| When | Zensu text the model receives | Where it comes from |
+|------|-------------------------------|---------------------|
+| Fresh session start | 7,487 to 7,834 in most sessions, up to 11,234 | evidence discipline (939), the `[zensu-session-context]` line (about 430, it carries paths), the best-solution-first block (1,756), the orientation primer (about 2,500) and the model's copy of the banner (about 1,900 to 2,400; the same lines reach you as a system message) |
+| First prompt of a context generation: the first prompt of a session and the first after `/compact` or `/clear` | 9,088, or 11,219 when the prompt names a planning keyword | the best-solution-first reminder (354), the full zen-mode contract (3,117), the full delivery-route reminder (5,617) and, for a planning keyword, the intent router (2,131) |
+| Every later prompt | 1,751 to 5,253 | the reminder (354), the short zen-mode line (1,397), the short delivery-route line (2,532) when the reminder answers that prompt, and the hooks that speak only on a condition |
+
+Automatic work capture landed after 0.29.0, so the census does not contain it: driving
+`hooks/session-start-ai-work.sh` directly, its primer adds about 760 characters, depending on
+the plugin path, to every main-thread `SessionStart`. The skill listing carries Zensu's skill
+descriptions on top: between about 4,100 and 15,000 characters in the same sessions. These are field figures from one machine and nothing
+re-derives them; `tests/structure/test-user-prompt-budget.sh` is what holds each prompt hook
+under a declared ceiling, and the cost paragraph under [Best Solution First](#best-solution-first)
+names every hook on the prompt channel. The switches are in
+[Configuration](configuration.md#hook-opt-out): zen-mode, the delivery-route reminder, the
+intent router and the best-solution-first reminder each have a key; evidence discipline and the
+session-context line have none.
+
 ## Hook Output Size Limit
 
 The host delivers a hook's `additionalContext` to the model inline only up to **10,000
@@ -305,10 +332,11 @@ on it. What the suite enforces is the 9,000-character ceiling, never the host's 
 ```
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-1    → Load context, plan implementation
-3. /zensu:tdd                → Guided main-thread implementation (vanilla; opt-in strict RED→GREEN)
+3. /zensu:tdd                → The Zensu workflow, run by /zensu:implement in the main thread (vanilla; opt-in strict RED→GREEN)
 4. review chain              → 3 or 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-enforced)
 5. auto-fix loop             → Critical findings fixed in-thread (Important ones too under hooks.autoFixSeverity important or all, otherwise parked for the self-review), then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off); with hooks.criticalReproduction a re-review CRITICAL routes only when a failing test reproduces it
-6. /zensu:security-review    → OWASP, threat model, release gate check
+6. /zensu:implement (steps 4-8) → Link tests, sources and docs, create a revision, validate
+7. /zensu:security-review    → OWASP, threat model, release gate check
 ```
 
 ### Existing Codebase
@@ -316,7 +344,7 @@ on it. What the suite enforces is the 9,000-character ceiling, never the host's 
 ```
 1. /zensu:ghost-scan         → Discover features + journeys + docs (multi-agent fan-out); seat each at a v1 build-out baseline
 2. /zensu:security-review    → Assess security posture per feature
-3. /zensu:tdd                → Add tests via TDD for untested features
+3. /zensu:cover ZEN-7        → Backfill durable tests for a feature that has too few (a path glob, a PR or a behavior works as the target too)
 ```
 
 ### Hybrid (Existing Codebase + Forward Plan)
@@ -331,23 +359,31 @@ For a brownfield repo whose plan/vision doc also describes not-yet-built feature
 
 No separate skill — the agent runs ghost-scan, then creates the remainder as planned features.
 
-### Quick Feature (No Full TDD)
+### One Change, No Tracked Feature
 
 ```
-1. /zensu:implement ZEN-42   → Context-aware implementation with artifact linking
-2. @code-reviewer            → Quality review
+1. Plan mode, approve the plan → Zensu asks which delivery route to take
+2. Zensu workflow (/zensu:tdd) → Implement, verify every acceptance criterion, then the Stop-enforced review chain
 ```
+
+`zensu:code-reviewer` is not a standalone reviewer: spawned without the REVIEW PACKET v1
+that the workflow builds, it returns `REVIEW PACKET INVALID` and stops. To review a change
+outside the workflow, use Claude Code's `/code-review`, or `/zensu:pr-team-review` once the
+change is an open pull request.
 
 ## Graceful Degradation
 
-The TDD workflow and code reviewer work **without a Zensu account**. No `zensu` CLI needed for:
+The Zensu workflow and its review chain work **without a Zensu account**. No `zensu` CLI needed for:
 - `/zensu:tdd` orchestration (vanilla by default; strict RED→GREEN when configured or switched per session)
 - Code review (3 or 5 parallel specialist aspects → optional judge → consume-mode reviewer)
 - Progress logging (`.zensu/logs/`) and planning (`.zensu/plans/`) — the log is path-redacted at write time and the plan by a best-effort main-thread PostToolUse pass, so a consuming repo can commit them as an audit trail; see [tdd-manager-workflow.md](tdd-manager-workflow.md#publication-safety-of-the-plan-and-log)
 
-When the `zensu` CLI is installed and authenticated, additional capabilities activate:
-- Automatic `zensu link test` and `zensu link source` after TDD completion
-- Feature status updates (`zensu features status`)
-- Revision creation with implementation summary (`zensu features revision`)
-- Security findings fed into `zensu security review`
-- Release gate validation (`zensu security validate`)
+`/zensu:tdd` itself makes no `zensu` call, so a chain it closes leaves nothing in Zensu. The
+tracking happens only in the skills that call the CLI, once it is installed and authenticated:
+- `/zensu:implement` runs `/zensu:tdd` and then, in its own later steps, links tests and sources (`zensu link test`, `zensu link source`), publishes and links docs, creates a revision (`zensu features revision`) and validates the release gate (`zensu security validate`)
+- `/zensu:pilot` updates feature status (`zensu features status`) as it moves a tracked feature along
+- `/zensu:security-review` records the review and its findings (`zensu security review`)
+- `/zensu:docs` publishes code-grounded documentation and updates the docs score (`zensu link docs`)
+
+The README's skill tables list what every skill needs, and its Data & privacy section what
+each of these sends.

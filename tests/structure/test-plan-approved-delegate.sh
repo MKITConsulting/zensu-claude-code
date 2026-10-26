@@ -255,7 +255,7 @@ process.stdin.on("end", () => {
   const iq = s.indexOf("Unless (S) or a fast path below decides");
   const ia = s.indexOf("Fast-paths that need NO question");
   const ib = s.indexOf("(B) the user");
-  const ic = s.indexOf("(C) you are running non-interactively");
+  const ic = s.indexOf("(C) the 'ZENSU HUMAN PRESENT:' field reads 'no'");
   if (iq < 0 || ia <= iq || ib <= ia || ic <= ib) { process.stdout.write("SLICE_FAILED"); return; }
   // Slices are non-empty by construction once the guard above passes, so no
   // emptiness arm is written here — one would read as a control that cannot fire.
@@ -298,7 +298,7 @@ process.stdin.on("end", () => {
   // let a headless run driven by "no tdd, use autopilot instead" push a branch and
   // open a pull request. Offsets are compared for the same reason the refusal arm
   // compares them: presence is not enough.
-  const B_GUARD = "Before applying ANY arm below: if you are running non-interactively with no human to answer (Auto Mode / headless), /zensu:autopilot and /zensu:pilot are REMOVED from this fast-path set entirely";
+  const B_GUARD = "Before applying ANY arm below: unless the 'ZENSU HUMAN PRESENT:' field reads 'yes', /zensu:autopilot and /zensu:pilot are REMOVED from this fast-path set entirely";
   const bg = b.indexOf(B_GUARD);
   if (bg < 0) bad.push("b-no-noninteractive-guard");
   if (bg < 0 || pf < 0 || bg > pf) bad.push("b-guard-not-before-arms");
@@ -440,7 +440,7 @@ d17_carrier() { # $1 repo-relative file, $2.. clauses that must ALL be present
 }
 d17_carrier docs/configuration.md 'naming the four mutually exclusive delivery routes'
 d17_carrier docs/architecture.md 'ask which delivery route;<br/>only the /zensu:tdd route is drawn'
-d17_carrier README.md 'autopilot to a reviewed PR, the guided workflow'
+d17_carrier README.md 'Autopilot to a reviewed pull request, the Zensu workflow with its review chain'
 d17_carrier skills/tdd/SKILL.md '`/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly'
 d17_carrier skills/gauntlet-loop/SKILL.md 'hands the mission to whichever is chosen' 'it offers neither'
 # An empty roster must FAIL rather than report a clean sweep: deleting the
@@ -849,6 +849,7 @@ fi
 # broken installation rather than a configured choice.
 BANNER_ROUTE_PROMISE='asks which delivery route to take'
 BANNER_SHORT_TIP='zensu: Tip — use Claude Code Plan mode for code changes.'
+BANNER_NODE_WARNING='node was not found on the PATH that Claude Code was started with'
 banner_lines() {
   printf '%s' "$1" | node -e '
     let s = "";
@@ -917,10 +918,10 @@ elif PATH="$STUB_PATH_DIR" command -v node >/dev/null 2>&1; then
   check "D29 stub PATH still resolves node — the arm could not be reached" FAIL
 elif printf '%s' "$BN_NODE_OFF" | grep -qF "$BANNER_ROUTE_PROMISE"; then
   check "D29 the banner promises a route question with no node to run it" FAIL
-elif printf '%s' "$BN_NODE_OFF" | grep -qxF "$BANNER_SHORT_TIP"; then
-  check "D29 the route promise is withheld when node is absent" PASS
+elif printf '%s' "$BN_NODE_OFF" | grep -qF "$BANNER_NODE_WARNING"; then
+  check "D29 the route promise is withheld when node is absent, and the banner names the missing node instead" PASS
 else
-  check "D29 node absent yields neither the promise nor the bare short tip — banner output drifted" FAIL
+  check "D29 node absent yields neither the promise nor the node warning — banner output drifted" FAIL
 fi
 
 # D30 the delegate hook file absent -> the promise is withheld. The fixture is a
@@ -1209,6 +1210,20 @@ case "$D44V" in
   (OK:*/OK:*) check "D44 with the longest route field and the record command counted at $RECORD_COMMAND_RESERVE characters, both branches stay within $DIRECTIVE_CEILING characters, below the host's measured 10000-character inline limit, and carry the field and all four option labels inside the host's $PREVIEW_CHARS-character preview (vanilla/strict: $D44V)" PASS ;;
   (*) check "D44 directive budget (ceiling $DIRECTIVE_CEILING, record command reserve $RECORD_COMMAND_RESERVE, preview $PREVIEW_CHARS; vanilla/strict: $D44V)" FAIL ;;
 esac
+
+D45_BAD=""
+for d45_case in "sdk-cli:auto:no" "cli:dontAsk:no" "claude-desktop:auto:yes" "sdk-py:default:unknown" ":plan:unknown"; do
+  d45_entry="${d45_case%%:*}"; d45_rest="${d45_case#*:}"; d45_mode="${d45_rest%%:*}"; d45_want="${d45_rest#*:}"
+  d45_got="$(SESSION_ID="$SESSION_ID" MODE="$d45_mode" node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse", session_id: process.env.SESSION_ID, permission_mode: process.env.MODE,
+    tool_name: "ExitPlanMode", tool_input: {plan: "add a function"}
+  }))' | env -u CLAUDE_CODE_ENTRYPOINT ${d45_entry:+CLAUDE_CODE_ENTRYPOINT="$d45_entry"} ZENSU_CONFIG="$CFG_ROUTE" bash "$HOOK" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const t=JSON.parse(s).hookSpecificOutput.additionalContext;const m=t.match(/^<!-- zensu:delivery-route -->\nZENSU DELIVERY ROUTE: [^\n]*\n<!-- \/zensu:delivery-route -->\nZENSU HUMAN PRESENT: ([a-z]+)\nSTOP\. /);process.stdout.write(m?m[1]:"absent")}catch(_){process.stdout.write("unparseable")}})')"
+  [ "$d45_got" = "$d45_want" ] || D45_BAD="$D45_BAD [${d45_entry:-unset}/$d45_mode: $d45_got]"
+done
+[ -z "$D45_BAD" ] \
+  && check "D45 the directive carries the human-present field right below the route field, read from the host entrypoint and the payload permission mode" PASS \
+  || check "D45 human-present field:$D45_BAD" FAIL
 
 echo "----"
 echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

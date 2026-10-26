@@ -464,6 +464,37 @@ case "$(uname -s)" in
     ;;
 esac
 rm -rf "$ZC_BASE"
+
+NO_NODE_BIN="$PRIMER_DATA_BASE/no-node-bin"
+mkdir -p "$NO_NODE_BIN"
+for no_node_tool in dirname cat; do
+  printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$no_node_tool")" >"$NO_NODE_BIN/$no_node_tool"
+  chmod +x "$NO_NODE_BIN/$no_node_tool"
+done
+NO_NODE_BASH="$(command -v bash)"
+NO_NODE_QUIET="$PRIMER_DATA_BASE/no-node-quiet.json"
+printf '%s' '{"hooks":{"sessionBanner":false}}' >"$NO_NODE_QUIET"
+NO_NODE_OUT="$(printf '%s' '{"source":"resume"}' | PATH="$NO_NODE_BIN" ZENSU_CONFIG="$NO_NODE_QUIET" "$NO_NODE_BASH" "$BANNER" 2>/dev/null)"
+NO_NODE_RC=$?
+if [ "$NO_NODE_RC" -eq 0 ] && printf '%s' "$NO_NODE_OUT" | node -e '
+  let s = ""; process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    const lines = s.split("\n").filter(Boolean);
+    const j = JSON.parse(lines[0]);
+    const msg = j.systemMessage, ctx = j.hookSpecificOutput && j.hookSpecificOutput.additionalContext;
+    const ok = lines.length === 1
+      && j.hookSpecificOutput.hookEventName === "SessionStart"
+      && msg.includes("node was not found on the PATH that Claude Code was started with")
+      && msg.includes("Zensu blocks every tool call until node is available")
+      && msg.includes("Requirements in the plugin README") && msg.includes("disable the Zensu plugin")
+      && ctx.includes("refuses every tool call") && !s.includes("Zensu PLM v");
+    process.exit(ok ? 0 : 1);
+  });
+' 2>/dev/null; then
+  check "B17 without node the banner emits one fixed JSON systemMessage that names node, the PATH, the README and disabling the plugin, on every source and above the sessionBanner gate" PASS
+else
+  check "B17 node-less banner (rc=$NO_NODE_RC out='$(printf '%s' "$NO_NODE_OUT" | head -c 200)')" FAIL
+fi
 rm -rf "$PRIMER_DATA_BASE"
 
 echo "----"

@@ -127,6 +127,19 @@ stop_run() {
   fi
 }
 
+stop_notice_only() {
+  OUT_FILE="$1" ERR_FILE="$2" NEEDLE="${3:-}" "$REAL_NODE" -e '
+    const fs = require("node:fs");
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(process.env.OUT_FILE, "utf8")); } catch (_) { process.exit(1); }
+    if (!parsed || Object.keys(parsed).join() !== "systemMessage" || typeof parsed.systemMessage !== "string") process.exit(1);
+    const lines = parsed.systemMessage.split("\n");
+    const stderrLines = fs.readFileSync(process.env.ERR_FILE, "utf8").split("\n");
+    if (!lines.every((line) => stderrLines.includes(line))) process.exit(1);
+    process.exit(lines.some((line) => line.includes(process.env.NEEDLE)) ? 0 : 1);
+  ' 2>/dev/null
+}
+
 edit_doc() {
   DOC_FILE="$DOC" "$REAL_NODE" -e '
     const fs = require("node:fs");
@@ -154,8 +167,8 @@ fi
 IDLE_COUNT="$NODE_COUNT"
 
 stop_run lat-no-record "$FULL_PATH_DEADLINE"
-if [ "$STOP_RC" -eq 0 ] && [ -z "$STOP_OUT" ]; then
-  check "L1b a Stop whose session id has no record still releases" PASS
+if [ "$STOP_RC" -eq 0 ] && stop_notice_only "$WORK/out" "$WORK/err" 'Session Control has no record for this session'; then
+  check "L1b a Stop whose session id has no record still releases, and says so to the user as a systemMessage" PASS
 else
   check "L1b unregistered session release (rc=$STOP_RC out=$STOP_OUT)$STOP_NOTE" FAIL
 fi
@@ -182,8 +195,9 @@ fi
 printf '{"hooks":{"chainEnforcer":false}}\n' >"$WORK/enforcer-off.json"
 stop_run lat-idle ZENSU_CONFIG="$WORK/enforcer-off.json" "$FULL_PATH_DEADLINE"
 if [ "$STOP_RC" -eq 0 ] && [ "$STOP_DECISION" = "allow" ] \
-    && printf '%s' "$STOP_ERR" | grep -q 'Gates bypassed during this session: ZENSU_CHAIN'; then
-  check "L4 with hooks.chainEnforcer=false the full path still renders the recorded bypasses" PASS
+    && printf '%s' "$STOP_ERR" | grep -q 'Gates bypassed during this session: ZENSU_CHAIN' \
+    && stop_notice_only "$WORK/out" "$WORK/err" 'Gates bypassed during this session: ZENSU_CHAIN'; then
+  check "L4 with hooks.chainEnforcer=false the full path still renders the recorded bypasses, on stderr and as the user's systemMessage" PASS
 else
   check "L4 bypass rendering with enforcer off (rc=$STOP_RC err=$STOP_ERR)$STOP_NOTE" FAIL
 fi
@@ -406,6 +420,18 @@ printf 'fast stdout'
 printf 'fast stderr\n' >&2
 exit 2
 EOF
+deadline_notice_only() {
+  OUT_FILE="$1" ERR_FILE="$2" "$REAL_NODE" -e '
+    const fs = require("node:fs");
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(process.env.OUT_FILE, "utf8")); } catch (_) { process.exit(1); }
+    if (!parsed || Object.keys(parsed).join() !== "systemMessage" || typeof parsed.systemMessage !== "string") process.exit(1);
+    const message = parsed.systemMessage;
+    const stderrLines = fs.readFileSync(process.env.ERR_FILE, "utf8").split("\n");
+    process.exit(message.startsWith("zensu chain-enforcer: releasing Stop — the Stop checks did not finish within ")
+      && stderrLines.includes(message) ? 0 : 1);
+  ' 2>/dev/null
+}
 alive() { kill -0 "$(cat "$1" 2>/dev/null)" 2>/dev/null && echo yes || echo no; }
 sleepers() { ps -ax -o command= 2>/dev/null | grep -cx "sleep $1"; }
 tmp_left() { ls -A "$WORK/tmp" | wc -l | tr -d ' '; }
@@ -419,7 +445,7 @@ T0="$(date +%s)"
 drive 2 "$WORK/worker-hang.sh" '{"p":1}' >"$WORK/d.out" 2>"$WORK/d.err"
 D_RC=$?
 ELAPSED=$(( $(date +%s) - T0 ))
-if [ "$D_RC" -eq 0 ] && [ ! -s "$WORK/d.out" ] && [ "$ELAPSED" -le 15 ] \
+if [ "$D_RC" -eq 0 ] && deadline_notice_only "$WORK/d.out" "$WORK/d.err" && [ "$ELAPSED" -le 15 ] \
     && grep -q 'releasing Stop' "$WORK/d.err" && grep -q 'partial stderr' "$WORK/d.err"; then
   check "L20 a worker past the deadline is stopped and the Stop is released with a notice (${ELAPSED}s for a 2 s deadline)" PASS
 else
@@ -434,7 +460,7 @@ fi
 
 drive 2 "$WORK/worker-decided.sh" '{}' >"$WORK/d.out" 2>"$WORK/d.err"
 D_RC=$?
-if [ "$D_RC" -eq 0 ] && [ "$(decision <"$WORK/d.out")" = "block" ] \
+if [ "$D_RC" -eq 0 ] && [ "$(decision <"$WORK/d.out")" = "block" ] && ! grep -q 'systemMessage' "$WORK/d.out" \
     && grep -q 'already written stands' "$WORK/d.err" && ! grep -q 'releasing Stop' "$WORK/d.err"; then
   check "L22 a decision written before the deadline is kept, and the notice says so" PASS
 else
@@ -506,7 +532,7 @@ printf '{"hook_event_name":"Stop","session_id":"lat-hang","cwd":"%s"}' "$CLAUDE_
     PATH="$WORK/hang-shim:$PATH" bash "$STOP" >"$WORK/out" 2>"$WORK/err"
 H_RC=$?
 ELAPSED=$(( $(date +%s) - T0 ))
-if [ "$H_RC" -eq 0 ] && [ ! -s "$WORK/out" ] && [ "$ELAPSED" -ge "$EXPECTED_MIN" ] \
+if [ "$H_RC" -eq 0 ] && deadline_notice_only "$WORK/out" "$WORK/err" && [ "$ELAPSED" -ge "$EXPECTED_MIN" ] \
     && [ "$ELAPSED" -le $((EXPECTED_MIN + 15)) ] && grep -q 'releasing Stop' "$WORK/err"; then
   check "L27 the real Stop hook with a hung child is released at its ${EXPECTED_MIN} s deadline (took ${ELAPSED}s)" PASS
 else

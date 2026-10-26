@@ -111,7 +111,7 @@ flowchart TD
     P4 --> P5[Phase 5: Checkpoint<br/>scoped suites + linter]
     P5 --> P6[Phase 6: Audit and Final Report<br/>full suite · build · coverage · drift audit · mtime · live acceptance]
     P6 --> Review[Phase 6: --tdd-complete<br/>skill spawns zensu:code-reviewer<br/>Stop hook enforces it, bounded]
-    Review --> Findings{Critical or<br/>Important findings?}
+    Review --> Findings{Routed findings?<br/>Critical by default}
     Findings -->|Yes| AutoFix[Fix in-thread RED→GREEN<br/>gate active · max 2 rounds by default]
     AutoFix --> Review
     Findings -->|None or max rounds| SelfRev["/zensu:self-review<br/>terminal · ≤ 1 fix round · re-verifies acceptance"]
@@ -318,7 +318,8 @@ PreToolUse and can never inherit main authority. Claude reports plugin-shipped
 agents to hooks through their scoped `agent_type`. `SubagentStart` reads that same parent record and
 injects `reviewer-readonly-v1` for the three exact reviewer identities
 `zensu:code-reviewer`, `zensu:review-aspect`, and
-`zensu:review-judge` (and their bare names), and `evidence-worker-v1` for the
+`zensu:review-judge` (their bare names only under the evaluation opt-in
+`ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=1`), and `evidence-worker-v1` for the
 dedicated `zensu:plan-review-worker` and
 `zensu:pr-review-worker`. Every other child receives neutral `host-profile-v1`,
 including the plugin-scoped PLM identity `zensu:zensu-plm`; that exact PLM
@@ -351,21 +352,20 @@ that allowlist after context revalidation and admits two host tools beside it,
 the `SubagentHandback` report tool and the workflow result tool `StructuredOutput`,
 for the reviewers and the PLM only: no shell,
 Git, control, MCP, or other tool is available to those identities, and the
-evidence workers stay inside their private lease. Other `host-profile-v1` children keep,
-of the tools their agent frontmatter and the Claude host grant, only the gate's
-allowlist: file reads and edits, `LSP`, web fetch and search, `ToolSearch`, the
-task-list tools, `Agent`, `SendMessage`, `AskUserQuestion`, the report tools
-`StructuredOutput`, `ReportFindings` and `SubagentHandback`, and a short named
-list of read-only MCP tools; the capability-gate row in
-[Configuration](configuration.md) lists every name. They cannot invoke `shell`,
-`exec`, `exec_command`, `terminal`, `command`, `Monitor`, or any other tool, every
-other MCP tool included: arbitrary command execution cannot be confined by
-scanning its source text for protected tokens, and an MCP server can expose
-exactly that. The one exception is `Bash` for a child that reports its
-`agent_type` and is neither a read-only Zensu agent nor a `zensu-review-*`
-persona, unless `hooks.subagentShell` is `false`. Every such command is checked by an
-accident guard that scans its source text for protected tokens, so the guard
-prevents accidents and is not a sandbox. The plugin gate adds no separate nesting
+evidence workers stay inside their private lease. Other `host-profile-v1` children may
+use every tool their agent frontmatter and the Claude host grant, except what
+reaches Zensu's own state or runs commands outside `Bash`; the capability-gate
+row in [Configuration](configuration.md) names it. They cannot invoke `shell`,
+`exec`, `exec_command`, `terminal`, `command`, `PowerShell`, a `Monitor` command
+or a tool whose name marks it as running commands, such as an MCP server's
+`ctx_execute` or `run_in_terminal`, because Zensu's command gates see only Bash
+and PowerShell commands. Any other tool whose inputs the gate does not know may
+not name Zensu's state in its input. That check reads text, so the host's own
+permission rules decide what such a tool reaches. `Bash` commands
+are granted to a child that reports its `agent_type` and is neither a read-only
+Zensu agent nor a `zensu-review-*` persona, unless `hooks.subagentShell` is
+`false`. Every such command is checked by an accident guard that scans its source
+text for protected tokens, so the guard prevents accidents and is not a sandbox. The plugin gate adds no separate nesting
 policy: a child spawned by a child is classified and gated by the same rules.
 
 The plan/PR worker pair has a second, workflow-specific boundary. Before spawn,
@@ -391,9 +391,11 @@ terms such as `session-control` or `main-v1`; only traversal roots and path
 filters carry this restriction.
 
 For a neutral child, the gate derives the principal only from the trusted hook
-payload. It denies every tool outside its allowlist, command execution
-included, independently of command text, except a granted `Bash` command, which
-an accident guard judges by its text (`hooks.subagentShell`). It blocks
+payload. It denies `PowerShell`, the shell/command aliases other than `Bash`, a
+`Monitor` command and a tool whose name marks it as running commands
+independently of command text, judges a granted `Bash` command by its text
+through an accident guard (`hooks.subagentShell`), and denies any other tool
+whose inputs it does not know when its input names Zensu's state. It blocks
 actual canonical access to protected Session Control and workflow-root paths,
 blocks every file-tool mutation below the installed-plugin/private plugin-data
 roots (including symlink, case, and hard-link aliases) and of a Zensu config
@@ -414,8 +416,9 @@ project-local CAS mutations, but it cannot make project-local files a
 cryptographic authority against user-authorized build/test programs, external
 processes, or a same-UID process racing after a path check. Untrusted repository
 code requires an OS sandbox/container, separate identity, and restricted mounts.
-Likewise, a third-party MCP tool that exposes arbitrary local execution is
-outside this host-tool boundary and must not be granted to an untrusted agent.
+Likewise, a third-party MCP tool that exposes arbitrary local execution under a
+name that does not mark it as running commands is outside this host-tool
+boundary and must not be granted to an untrusted agent.
 
 ---
 
@@ -444,14 +447,14 @@ These are the guardrails that protect users from common TDD failure modes. Each 
 
 ## 9. Auto-Review Chain
 
-At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-reviewer` itself. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh), registered on the `Stop` matcher in [hooks/hooks.json](../hooks/hooks.json)) enforces the chain even if that spawn is skipped: it blocks the main agent from ending its turn while `implComplete && !chainDone`, and after `autoFixMaxRounds + 3` blocked Stops it releases the turn with a notice that the chain did not converge; a Stop whose checks overrun the hook's deadline (`ZENSU_STOP_DEADLINE_SECONDS`, default 45 s) before reaching a decision is released too, with its own notice. Reviewer findings are routed back into the main thread by [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) to be fixed in-thread under the still-active phase-gate, then the reviewer is re-spawned — looping until PASS or max rounds, after which the terminal `/zensu:self-review` stage runs (see below). On a host that launches the consume-mode reviewer in the background, the launch binds the review ticket to that agent, the Stop guard lets a standalone chain's turn end while it runs, unless the project holds a deferred-review claim, and otherwise blocks naming that agent instead of ordering a new review, and its hand-back, through [hooks/user-prompt-review-handback.sh](../hooks/user-prompt-review-handback.sh), consumes the ticket and brings the same routing ([review-chain.md](review-chain.md#a-consume-mode-reviewer-the-host-runs-in-the-background)).
+At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-reviewer` itself. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh), registered on the `Stop` matcher in [hooks/hooks.json](../hooks/hooks.json)) enforces the chain even if that spawn is skipped: it blocks the main agent from ending its turn while `implComplete && !chainDone`, and after `autoFixMaxRounds + 3` blocked Stops it releases the turn with a notice that the chain did not converge; a Stop whose checks overrun the hook's deadline (`ZENSU_STOP_DEADLINE_SECONDS`, default 45 s) before reaching a decision is released too, with its own notice. Reviewer findings are routed back into the main thread by [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) to be fixed in-thread under the still-active phase-gate, then the reviewer is re-spawned — looping until PASS or max rounds, after which the terminal `/zensu:self-review` stage runs (see below).
 
 ```mermaid
 flowchart LR
     P6[Phase 6 complete<br/>--tdd-complete] --> Spawn[skill spawns<br/>zensu:code-reviewer]
     Stop[/Stop hook backstop:<br/>block until chainDone<br/>or the Stop cap/] -.enforces.-> Spawn
     Spawn --> Reviewer[zensu:code-reviewer<br/>consume mode:<br/>merged review-aspect<br/>panel findings]
-    Reviewer --> Findings{Critical or<br/>Important?}
+    Reviewer --> Findings{Routed findings?<br/>Critical by default}
     Findings -->|Yes| Fix[main agent fixes<br/>in-thread RED→GREEN<br/>gate active]
     Fix --> Spawn
     Findings -->|None or<br/>max rounds| CRD[--code-review-done]
@@ -469,9 +472,9 @@ flowchart LR
 
 Reviewer returns findings in three tiers:
 
-- **Critical**: blocks ship. Auto-fix attempted.
-- **Important**: should land before merge. Auto-fix attempted.
-- **Suggestions**: nice-to-have. NOT auto-fixed.
+- **Critical**: blocks ship. Routed to the auto-fix loop under every `hooks.autoFixSeverity` value.
+- **Important**: should land before merge. Routed only under `important` or `all`; under the default `critical` it is parked and `/zensu:self-review` fixes it once at the end of the chain.
+- **Suggestions**: nice-to-have. Routed only under `all` (or the legacy `hooks.autoFixIncludeSuggestions`), never a self-review candidate.
 
 The three reviewer agents carry the exact definitions from [review-severity.md](review-severity.md). By default (`hooks.autoFixSeverity: critical`) the loop fixes only CRITICAL findings and parks every IMPORTANT finding for the terminal self-review; `important` fixes IMPORTANT findings too, and `all`, or the legacy `hooks.autoFixIncludeSuggestions`, also fixes suggestions, in the first review only while `hooks.reviewConvergence` is enabled.
 

@@ -95,7 +95,7 @@ function changedFiles(rootInput, allowedRelative) {
     if (path.isAbsolute(allowedRelative) || allowedRelative.split('/').includes('..')) fail('unsafe changed-file allowlist');
     allowed.add(allowedRelative);
   }
-  const result = spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all'], {
+  const result = spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=traditional'], {
     encoding: 'buffer',
   });
   if (result.status !== 0) fail('cannot read isolated git status');
@@ -107,6 +107,7 @@ function changedFiles(rootInput, allowedRelative) {
     const rename = relative.indexOf(' -> ');
     if (rename !== -1) relative = relative.slice(rename + 4);
     if (!relative || path.isAbsolute(relative) || relative.split('/').includes('..')) fail('unsafe changed path');
+    if (entry.startsWith('!! ') && !relative.startsWith('.zensu/')) continue;
     if (allowed.has(relative)) continue;
     const file = path.join(root, relative);
     let content;
@@ -116,6 +117,8 @@ function changedFiles(rootInput, allowedRelative) {
       const stat = fs.lstatSync(file);
       if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 4 * 1024 * 1024) fail('unsafe changed file');
       content = fs.readFileSync(file);
+      if (entry.startsWith('?? ') && relative === '.zensu/.gitignore'
+        && content.toString('utf8') === require('../../../hooks/lib/session-control-core-v1.js').ZENSU_GITIGNORE_BODY) continue;
     }
     hashes.set(relative, digest(content));
   }
@@ -414,8 +417,8 @@ function genericReviewWorker(events, expectedAgent, markerFileInput) {
   }
 
   const expectedReasons = [
-    'reviewer-capability-v1 deny: host-profile-v1 shell guard: the command prints the inherited environment',
-    'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools',
+    'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 shell guard: the command prints the inherited environment',
+    'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 cannot invoke command-execution tools',
   ];
   const carriesReason = (value) => expectedReasons.some((reason) => value.includes(reason));
   const commandResult = results.find((entry) => entry.block.tool_use_id === commandUse.block.id);
@@ -518,15 +521,15 @@ function assertDedicatedReadSearch(spawn, exactFile, safeRoot, nonlistedFile, pr
   const expectedDeniedTools = [
     {
       name: 'Read', input: { file_path: nonlistedFile },
-      reason: 'reviewer-capability-v1 deny: evidence-worker-v1 Read path is not an exact leased file',
+      reason: 'Zensu capability gate (reviewer-capability-v1) deny: evidence-worker-v1 Read path is not an exact leased file',
     },
     {
       name: 'Grep', input: { pattern: 'live evidence needle' },
-      reason: 'reviewer-capability-v1 deny: evidence-worker-v1 Grep requires an explicit leased path',
+      reason: 'Zensu capability gate (reviewer-capability-v1) deny: evidence-worker-v1 Grep requires an explicit leased path',
     },
     {
       name: 'Glob', input: { pattern: '**/*', path: projectRoot },
-      reason: 'reviewer-capability-v1 deny: evidence-worker-v1 Glob path is not an exact leased traversal root',
+      reason: 'Zensu capability gate (reviewer-capability-v1) deny: evidence-worker-v1 Glob path is not an exact leased traversal root',
     },
   ];
   const expectedCount = 3 + expectedDeniedTools.length;
@@ -698,7 +701,7 @@ function reviewerAttack(events, expectedAgent, category, projectRootInput, mutat
     fail(`structured ${category} attack is not causally enclosed by the reviewer spawn`);
   }
 
-  const expectedReason = `reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke ${use.block.name}; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report`;
+  const expectedReason = `Zensu capability gate (reviewer-capability-v1) deny: reviewer-readonly-v1 cannot invoke ${use.block.name}; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report`;
   const childResults = childEntries.filter((entry) => entry.type === 'tool_result');
   let denialReason = '';
   if (childResults.length > 1) {

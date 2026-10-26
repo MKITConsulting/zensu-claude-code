@@ -187,9 +187,15 @@ if [ "$DELEGATED" = true ] && [ "$REUSE_DURABLE_PAYLOAD" != true ]; then
 fi
 ```
 
-In standalone mode, show the user the final body preview + inline count as a progress
-record and publish at once. Do not ask for publication approval: invoking the skill on a
-PR is the user's authorization to post the synthesized review. In delegated mode, record
+In standalone mode, show the user the final body preview + inline count, then ask exactly
+one standalone publish confirmation with `AskUserQuestion` before `--post-review` runs. Its
+question names the PR (`<owner>/<repo>#<n>` or the MR reference), the verdict
+(`COMMENT`, `REQUEST_CHANGES` or `APPROVE`) and the number of inline comments the payload
+carries; the options are `Post the review (Recommended)` and `Do not post`. On `Do not post`,
+skip the driver call, report the path of `$WORKDIR/_synthesis.json` so the user can publish
+it later, and continue with Phase E. Any answer other than the first option posts nothing.
+
+In delegated mode, record
 the count as a progress update and continue without a preview question or approval gate
 because the durable delegated capability already authorizes this exact operation/head-bound
 payload.

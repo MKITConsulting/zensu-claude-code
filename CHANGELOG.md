@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-26
+
+### Added
+
+- **knowledge**: Retain agent retrieval receipts and correlate source reads
+
+### Fixed
+
+- **session-control**: Move the full-suite marker on --reanchor (#510)
+
+## [0.30.1] - 2026-10-25
+
+### Added
+
+- **context**: Load and hydrate linked feature evidence (#504)
+
+### Fixed
+
+- **hooks**: Read who can answer the route question from the host, not from Auto Mode (#508)
+- **session-control**: Ignore local Zensu state in the projects it creates (#507)
+- **hooks**: Name a missing node and show Stop notices to the user (#506)
+- **skills**: Keep free text off the command line, read plugin docs from the plugin root, ask before publishing reviews (#505)
+
+## [0.30.0] - 2026-10-24
+
+### Added
+
+- **ai-work**: Capture authenticated work and committed result versions (#498)
+- **tdd**: Give every step task a short name (#500)
+
+### Changed
+
+- **multi-repo**: Specify the folder anchor for stage 2 (#499)
+
+### Upgrade notes
+
+- **tdd task labels**: every step task `/zensu:tdd` creates now carries a short name after its
+  tag, such as `S1 [impl] Config parser`, shortened from the step's `Description` in the plan's
+  Steps table. The user reads the task list without the plan open, and a bare `S1 [impl]` named
+  nothing they could recognize. The in-progress text names the step as well
+  (`Implementing S1: Config parser`). Strict and vanilla mode and the integration `[wire]` task
+  follow the same rule.
+- **wiki publishing**: `/zensu:implement` and `/zensu:docs` now change a wiki page that already
+  exists with `zensu wiki update <page-id>` instead of creating it again. Both look the page up
+  first, through the `wikiPageId` of the feature's linked doc in `zensu doc gen-context` or the
+  page's `path` in `zensu wiki list --json`, and `/zensu:implement` updates the page that a
+  refused `zensu wiki create` names. A re-run of `/zensu:implement` relied on `wiki create`
+  updating the existing page, which a create-only `wiki create` refuses, and a re-run of
+  `/zensu:docs` passed `--content` to `zensu link docs`, which never changes an existing page,
+  so the page kept its old text. Both skills now declare `update_wiki_page` in their workflow
+  window.
+
+## [0.29.0] - 2026-10-23
+
+### Added
+
+- **review-chain**: Consume the review ticket from a background consume-mode reviewer (#490)
+- **session-trail**: Decide the same checkout by repository identity (#487)
+- **session-trail**: Carry task chips over as start_session proposals (#466)
+
+### Changed
+
+- **ci**: Re-budget the Windows reviewer-capability-gate cap against nine measured runs (#493)
+- **stop**: Cut the armed Stop's remaining node spawns (#492)
+- **multi-repo**: Redesign stages 2 and 3 around declared code roots (#491)
+- **changelog**: List #478 and #481 in the 0.28.0 notes and move #480's note to Unreleased (#489)
+
+### Fixed
+
+- **review-chain**: Derive the background-review fan-out types from the principal module (#495)
+- **review-chain**: Replace #490's background ticket claim with launch records (#494)
+- **work-order,autopilot**: Wait on in-flight review seats in both Stop budgets (#483)
+- **review-chain**: Resolve aspectActivation and incrementalReviewRounds (#472)
+- **work-order**: Deny every non-inert Claude Desktop session tool (#486)
+- **secret-scan**: Exempt the plugin's own team-review operation key from the entropy rule (#479)
+- **review-chain**: Read the project config in the tdd, plan-review and pr-team-review flag probes (#480)
+
 ### Upgrade notes
 
 - **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and

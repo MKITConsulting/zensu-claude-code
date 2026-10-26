@@ -1736,6 +1736,39 @@ function configBlock() {
   // continuation of `hooks wiring` above.
   ruleCarrierRows(cfgReads);
   deliveryRouteConfigRow(cfgReads);
+  subagentBoundaryRow(cfgReads);
+}
+
+var SUBAGENT_BOUNDARY = 'a neutral subagent may use every tool except what reaches Zensu\'s own state or runs commands outside Bash: the capability gate denies it Session Control and workflow paths, .zensu/, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell, the shell aliases, Monitor commands and tools whose name marks them as running commands or code, and a tool whose inputs the gate does not know may not name that state; every other limit is your own permission rules';
+
+function subagentBoundaryRow(cfgReads) {
+  var root = pluginDir();
+  try {
+    if (!fs.lstatSync(path.join(root, 'hooks', 'lib', 'reviewer-capability-v1.js')).isFile()) return;
+  } catch (e) { return; }
+  var granted;
+  try {
+    var guardPath = path.join(root, 'hooks', 'lib', 'subagent-shell-guard-v1.js');
+    if (!fs.lstatSync(guardPath).isFile()) throw new Error('shell-guard module is not a regular file');
+    granted = require(guardPath).strictFlagEnabled('subagentShell') === true;
+  } catch (e) {
+    line(WARN, 'subagents: the capability gate is installed but its shell-guard module hooks/lib/subagent-shell-guard-v1.js, or a sibling it requires, could not be loaded, so what a subagent may run could not be judged. This is a broken installation, not a configuration choice; reinstall the plugin.');
+    return;
+  }
+  if (granted) {
+    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. A named neutral subagent may run Bash commands behind an accident guard, which prevents accidents and is not a sandbox; hooks.subagentShell=false turns that shell off.');
+    return;
+  }
+  var switchedOff = cfgReads.some(function (entry) {
+    var data = entry.r && entry.r.ok ? entry.r.data : null;
+    return Boolean(data && typeof data === 'object' && data.hooks && typeof data.hooks === 'object'
+      && data.hooks.subagentShell === false);
+  });
+  if (switchedOff) {
+    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. The subagent shell is off (hooks.subagentShell=false), so the gate denies every subagent Bash command.');
+    return;
+  }
+  line(WARN, 'subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false — a config layer that cannot be read, parsed or resolved, or no layer at all, withdraws it fail-closed, so the gate denies every subagent Bash command. Fix the config file the rows above name, or set HOME when no layer can be found.');
 }
 
 // The two ask-hooks each exit on their own flag BEFORE they resolve the route, so a
@@ -5837,7 +5870,7 @@ function stateBlock(nowMs) {
       + parenthesizedPath(ownFile, ')')
       + ' — while it is gone the capability gate denies every tool in this session, '
       + 'because a deleted document must never be read as "no chain was ever active". '
-      + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
+      + 'A deleted and re-created worktree loses it, since git does not track .zensu/state/. '
       + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '
       + 'and /zensu:adopt-session --confirm to rebuild it; rebuilding is a loss, not a '
       + 'restore — a review chain that was live when it vanished is gone.');

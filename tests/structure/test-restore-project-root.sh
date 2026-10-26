@@ -1001,6 +1001,9 @@ r8_toctou_sentence() {
     source "$SESSION_SH" || exit 9
     ARM="$(sed -n "/if \[ -n \"\${ZENSU_PROJECT_ROOT:-}\" \] \&\& \[ ! -d /,/^  fi\$/p" "$STOPHOOK")"
     case "$ARM" in "") printf "NO-SLICE"; exit 0 ;; esac
+    NOTICE="$(sed -n "/^stop_notice() {/,/^}\$/p" "$STOPHOOK")"
+    case "$NOTICE" in "") printf "NO-NOTICE"; exit 0 ;; esac
+    eval "$NOTICE"
     ZENSU_PROJECT_ROOT="$R8T_VALUE"
     eval "$ARM"
   ' 2>&1 >/dev/null

@@ -93,6 +93,18 @@ cfg_with() {  # $1 = threshold; prints a config path
 payload() { printf '{"session_id":"%s","hook_event_name":"Stop"}' "$1"; }
 stop_out() { printf '%s' "$(payload "$1")" | ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>/dev/null; }
 stop_err() { printf '%s' "$(payload "$1")" | ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>&1 >/dev/null; }
+stop_notice_only() {
+  OUT_FILE="$1" ERR_FILE="$2" NEEDLE="${3:-}" node -e '
+    const fs = require("node:fs");
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(process.env.OUT_FILE, "utf8")); } catch (_) { process.exit(1); }
+    if (!parsed || Object.keys(parsed).join() !== "systemMessage" || typeof parsed.systemMessage !== "string") process.exit(1);
+    const lines = parsed.systemMessage.split("\n");
+    const stderrLines = fs.readFileSync(process.env.ERR_FILE, "utf8").split("\n");
+    if (!lines.every((line) => stderrLines.includes(line))) process.exit(1);
+    process.exit(lines.some((line) => line.includes(process.env.NEEDLE)) ? 0 : 1);
+  ' 2>/dev/null
+}
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 
 counter_of() {  # $1 = session key
@@ -219,11 +231,11 @@ grep -qF "still at 'implementing'" "$C5_ERR" \
   && check "C5b the same Stop that nudged still released" PASS \
   || check "C5b the same Stop that nudged still released" FAIL
 # decision() maps EMPTY stdout to allow, so C5b alone cannot tell a released Stop
-# from one that wrote the notice onto the decision channel. stdout must be empty —
-# graded on the SAME invocation whose stderr C5a just matched.
-[ ! -s "$C5_OUT" ] \
-  && check "C5c the notice never reaches stdout, which is the decision channel" PASS \
-  || check "C5c the notice never reaches stdout, which is the decision channel" FAIL
+# from one that wrote the notice onto the decision channel. stdout may carry only the
+# systemMessage object — graded on the SAME invocation whose stderr C5a just matched.
+stop_notice_only "$C5_OUT" "$C5_ERR" "still at 'implementing'" \
+  && check "C5c the notice reaches stdout only as a systemMessage the user sees, never as a decision" PASS \
+  || check "C5c the notice reaches stdout only as a systemMessage the user sees, never as a decision (out=$(cat "$C5_OUT"))" FAIL
 ERR="$(cat "$C5_ERR")"
 
 # --- C6: names the review path, and NOT the zero-change terminus -----------
@@ -1015,11 +1027,11 @@ else
 fi
 # The branch must stay advisory on BOTH remedies. A diagnostic that starts
 # blocking is the one outcome this whole feature forbids itself.
-# The `[ ! -s ]` companion is not decoration: `decision()` maps an EMPTY stdout and an
+# The `stop_notice_only` companion is not decoration: `decision()` maps an EMPTY stdout and an
 # unparseable one to the same `allow`, so this arm alone cannot tell a released Stop from
 # one that wrote bytes onto the decision channel — which the new note-writing mint on this
 # very path could do if its own output redirection were dropped.
-{ [ "$(decision < "$C27_OUT")" = "allow" ] && [ ! -s "$C27_OUT" ]; } \
+{ [ "$(decision < "$C27_OUT")" = "allow" ] && stop_notice_only "$C27_OUT" "$C27_ERR" "still at 'implementing'"; } \
   && check "C27a the refused-spawn notice still releases Stop and writes no decision bytes" PASS \
   || check "C27a the refused-spawn notice still releases Stop and writes no decision bytes" FAIL
 
@@ -1059,7 +1071,7 @@ if grep -qF 'Two refusals already stand' "$C27B_ERR" \
 else
   check "C27b two observed refusals withdraw the sanction and route to the user" FAIL
 fi
-{ [ "$(decision < "$C27B_OUT")" = "allow" ] && [ ! -s "$C27B_OUT" ]; } \
+{ [ "$(decision < "$C27B_OUT")" = "allow" ] && stop_notice_only "$C27B_OUT" "$C27B_ERR" 'Two refusals already stand'; } \
   && check "C27c the withdrawn-sanction arm still releases Stop and writes no decision bytes" PASS \
   || check "C27c the withdrawn-sanction arm still releases Stop and writes no decision bytes" FAIL
 
@@ -1125,7 +1137,7 @@ if [ -n "$C28_FILE" ] && [ -f "$C28_FILE" ]; then
   else
     check "C28b the failure tail describes the doctor row truthfully" FAIL
   fi
-  { [ "$(decision < "$C28_OUT")" = "allow" ] && [ ! -s "$C28_OUT" ]; } \
+  { [ "$(decision < "$C28_OUT")" = "allow" ] && stop_notice_only "$C28_OUT" "$C28_ERR" 'The counter is stuck, not reset'; } \
     && check "C28a the failed-increment notice still releases Stop and writes no decision bytes" PASS \
     || check "C28a the failed-increment notice still releases Stop and writes no decision bytes" FAIL
 else
@@ -1296,10 +1308,10 @@ fi
 # deleted from one arm and quoted in a comment kept C32_TAILS at 2 with C32 green. The sibling
 # extraction earlier in this file already strips the same way.
 C32_FN="$(hook_fn_body zensu_impl_stop_nudge code)"
-C32_ECHOES="$(printf '%s\n' "$C32_FN" | grep -c '>&2' || true)"
-[ -n "$C32_FN" ] && [ "$C32_ECHOES" -ge 3 ] \
+C32_NOTICES="$(printf '%s\n' "$C32_FN" | grep -c '^[[:space:]]*stop_notice "' || true)"
+[ -n "$C32_FN" ] && [ "$C32_NOTICES" -ge 3 ] \
   && check "C32pre the stripped function body is non-empty and still carries its notices" PASS \
-  || check "C32pre the stripped function body is non-empty and still carries its notices (echoes=$C32_ECHOES)" FAIL
+  || check "C32pre the stripped function body is non-empty and still carries its notices (notices=$C32_NOTICES)" FAIL
 C32_TAILS="$(printf '%s\n' "$C32_FN" | grep -c 'The counter is stuck, not reset')"
 # The retired claim, asserted absent in BOTH arms. It said the doctor row was
 # measuring nothing while a failed increment leaves the persisted counter intact

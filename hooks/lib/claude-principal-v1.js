@@ -8,17 +8,16 @@ const PRINCIPALS = Object.freeze({
 });
 
 // Claude Code reports plugin-shipped agents with the plugin-scoped identifier.
-// Bare names remain exact read-only identities for the --agents evaluation
-// fixtures and same-named project agents; neither form grants main authority.
+// A bare name belongs to whoever defined it, so it is an exact read-only identity
+// only under the --agents evaluation opt-in; neither form grants main authority.
+const EVAL_BARE_IDENTITIES = process.env.ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES === '1';
 const REVIEWER_TYPES = new Set([
   'zensu:code-reviewer',
   'zensu:review-aspect',
   'zensu:review-judge',
-  'code-reviewer',
-  'review-aspect',
-  'review-judge',
+  ...(EVAL_BARE_IDENTITIES ? ['code-reviewer', 'review-aspect', 'review-judge'] : []),
 ]);
-const PLM_TYPES = new Set(['zensu:zensu-plm', 'zensu-plm']);
+const PLM_TYPES = new Set(['zensu:zensu-plm', ...(EVAL_BARE_IDENTITIES ? ['zensu-plm'] : [])]);
 const EVIDENCE_WORKER_TYPES = new Set([
   'zensu:plan-review-worker',
   'zensu:pr-review-worker',
@@ -34,7 +33,7 @@ function boundedIdentity(value) {
 function classifySubagent(agentType, agentId) {
   // Claude's documented security-relevant discriminator is `agent_type`;
   // plugin-shipped agents use scoped identifiers while explicit --agents test
-  // fixtures may use the exact bare names above. `agent_id` is correlation
+  // fixtures may use the bare names above once they opt in. `agent_id` is correlation
   // metadata and is not guaranteed on every hook payload. Never let a missing
   // correlation id broaden an exact read-only identity.
   if (!boundedIdentity(agentType)) return PRINCIPALS.HOST;

@@ -79,7 +79,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 
 ### Linking Artifacts
 - `zensu link test <feature-id>` — Link a test file (`--file` and `--test-type` required: unit|integration|e2e|security|performance|accessibility)
-- `zensu link docs <feature-id>` — Link documentation to a feature (`--doc-type` required; `--content` also writes the linked wiki page)
+- `zensu link docs <feature-id>` — Link documentation to a feature (`--doc-type` required; `--content` also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one)
 - `zensu link source <feature-id>` — Map source files (repeatable `--file`; covers bulk mapping)
 
 ### Security
@@ -158,13 +158,14 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu doc gen-context <feature-id> --doc-type <type>` — Get the *context map* (source-file paths, symbols, security posture) to read the real source before writing docs — NOT a doc generator. See `docs/documentation-guide.md`.
 
 ### Wiki
-- `zensu wiki create` — Create a wiki page (`--product`, `--title` and `--content` required)
-- `zensu wiki update <id>` — Update a wiki page
-- `zensu wiki list --product <id>` — List wiki pages
+- `zensu wiki create` — Create a new wiki page (`--product`, `--title` and `--content` required); when a page already exists at the new page's path, it fails and names that page's id (an older CLI or server updates that page instead)
+- `zensu wiki update <page-id>` — Change an existing wiki page (`--content`, `--title`, `--change-summary`, `--visibility`)
+- `zensu wiki list --product <id>` — List wiki pages (`--json` carries each page's `id` and `path`)
 
 ### Knowledge (Second-Brain)
-- `zensu knowledge search --query <text>` — Hybrid (semantic + keyword) search over the organization's knowledge pool (features, visions, journeys, and connected sources); returns ranked passages with provenance
-- `zensu knowledge get <id>` — Fetch a full knowledge item by id (complete content, excerpt, trust level, provenance)
+- `zensu knowledge context-pack <feature-ref> --json` — Linked feature context, provenance and excerpts; inspect truncation and hydrate relevant real items before decisions
+- `zensu knowledge search --query <text> --json` — Hybrid (semantic + keyword) search over the organization's knowledge pool (features, visions, journeys, and connected sources); returns ranked passages with provenance
+- `zensu knowledge get <id> --json` — Fetch a full knowledge item by id (complete content, excerpt, trust level, provenance)
 - `zensu knowledge sources` — List indexed knowledge sources with type and sync status
 
 ### Pulse (Developer Journal)
@@ -238,7 +239,7 @@ Use the `/zensu:pulse` skill workflow:
 1. Run `zensu doc gen-context <feature-id> --doc-type <type>` — this is the context *map* (source-file paths, symbols, security posture), not the source itself
 2. **Read the real source files it names** (Read/Grep) — the map is not the territory
 3. Author code-grounded Markdown matched to the doc type's focus and audience (8 types: `user_facing`, `api_reference`, `tutorial`, `adr`, `release_notes`, `internal`, `migration_guide`, `overview`)
-4. Publish with `zensu wiki create`, then `zensu link docs` to update the docs score
+4. Publish: update a page that already exists with `zensu wiki update <page-id>` (the id is the `wikiPageId` in the context's `existingDocs`, or the `id` of the matching `path` in `zensu wiki list --product <id> --json`), and create a missing one with `zensu wiki create`. When create reports that a page already exists at that path, update the page it names; never retry under another title. Then `zensu link docs` to update the docs score
 
 Never condense the context metadata straight into a wiki page — that is the forbidden metadata-dump anti-pattern (see Important Rule 10).
 
@@ -259,7 +260,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 - When a user asks about release readiness → use `zensu security validate` and `zensu journeys health`
 - When a user asks about tier pricing → use the tier commands (`zensu tiers create`, `zensu tiers set-feature`, `zensu tiers matrix`)
 - When a user wants to dispatch autonomous work or follow a work plan → use the `zensu plan` and `zensu work` commands; the verbs marked **person** are the user's to run (Important Rule 13)
-- Before planning or implementing a feature, or when the user asks what the org already knows about a topic → `zensu knowledge search` for related context
+- Before advising on a tracked feature, request the loaded context package and hydrated evidence from the main thread. For a topic without a feature reference, request a supplementary `zensu knowledge search --query <text> --json` result.
 - When a user wants to document a feature or generate a wiki page → follow the **documentation** procedure (`docs/documentation-guide.md`): get context, **read the source**, author, publish
 - For any Zensu question not matching a specific workflow → use the appropriate individual `zensu` command
 
@@ -273,7 +274,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 6. **Present results, then wait.** After each workflow phase, show results and wait for user confirmation before proceeding.
 7. **Enrich, don't duplicate.** When ghost scanning a product that already has features, use `--enrich-existing`.
 8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — the scan apply links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and run `zensu ghost apply <scan-id> --product <id> --enrich-existing`; tests attach to the existing features by slug, no duplicates.
-9. **Ground work in existing knowledge.** Before planning or implementing a feature, run `zensu knowledge search` to surface related features, visions, journeys, and connected sources — build on what the org already knows instead of reinventing it. Knowledge commands are **retrieval-only**: they return ranked evidence passages with provenance, never a generated answer. Synthesize from the returned passages yourself and cite their provenance; never assume the server reasoned for you.
+9. **Ground work in existing knowledge.** The main thread loads `zensu knowledge context-pack <feature-ref> --json`, checks `truncated`, hydrates relevant real items with `zensu knowledge get <item-id> --json`, and reads referenced files from the authorized checkout. Require a handoff distinguishing contents read, excerpt/metadata only, and unresolved sources. Missing evidence belongs in your input request, not an invented result. Search uses `--json` to retain passages. These reads supplement feature, security and design context, do not start a workflow, and do not prove recorded agent usage. Respect this profile's execution boundary.
 10. **Documentation is code-grounded, never a metadata dump.** `zensu doc gen-context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.
 11. **Ghost scans are multi-perspective and journey-aware.** A single heuristic pass misses features — augment the seed walk with a read-only `Explore` fan-out (adaptive count, cap 12) and consolidate in the main thread. Treat `detectedDocFiles` as first-class scan data alongside `detectedTestFiles` — glob existing READMEs/`docs` per candidate; an omitted array links zero. After apply, discover and create user journeys (`zensu journeys create` → `zensu journeys step` → `zensu journeys health`) so brownfield imports can pass the journey-health release gate; flag features with zero docs for `/zensu:implement` rather than auto-generating docs.
 12. **CLI flags are kebab-case — pass them as `zensu <noun> <verb> --help` documents.** Commands take flags like `--product`, `--slug`, `--type`, `--classification` (kebab-case), not the snake_case wire keys. Always supply a command's **required** flags — `zensu products create` requires both `--name` AND `--slug` (omitting `--slug` hard-fails). IDs that are path segments are positional args (e.g. `zensu features get <id>`), not flags. When unsure of a command's exact flags, run its `--help` rather than guessing.

@@ -69,11 +69,13 @@ MANDATORY — create BOTH files (plan + log are a pair).
 Create tasks for ALL steps BEFORE starting execution — **MANDATORY**. This is the user's live progress dashboard and the one channel they watch in real time. Do NOT enter Phase 4 until every step has its tasks.
 
 Per TDD step — 3 tasks:
-- `{step_id} [test]` (activeForm: "Creating RED test for {step_id}")
-- `{step_id} [impl]` (activeForm: "Implementing {step_id}")
-- `{step_id} [verify]` (activeForm: "Verifying {step_id}")
+- `{step_id} [test] {short_name}` (activeForm: "Creating RED test for {step_id}: {short_name}")
+- `{step_id} [impl] {short_name}` (activeForm: "Implementing {step_id}: {short_name}")
+- `{step_id} [verify] {short_name}` (activeForm: "Verifying {step_id}: {short_name}")
 
 Per integration step — 1 task:
-- `{step_id} [wire]` (activeForm: "Wiring {step_id}")
+- `{step_id} [wire] {short_name}` (activeForm: "Wiring {step_id}: {short_name}")
 
-Create each via `TaskCreate` with `subject` (the `{step_id} [test]` label), a one-line `description`, and the `activeForm` shown above. Set dependencies with `TaskUpdate(addBlockedBy: [...])` per the dependency graph (not on `TaskCreate`). Mark the Phase 0 "Analyzing" task `completed` with `TaskUpdate`.
+`{short_name}` is a two-to-five-word name for what the step builds, shortened from the step's `Description` in the plan's Steps table, for example `S1 [impl] Config parser`. The user reads the task list without the plan open, and a bare `S1 [impl]` names nothing they can recognize. Every task of one step carries the same short name.
+
+Create each via `TaskCreate` with `subject` (the `{step_id} [test] {short_name}` label), a one-line `description`, and the `activeForm` shown above. Set dependencies with `TaskUpdate(addBlockedBy: [...])` per the dependency graph (not on `TaskCreate`). Mark the Phase 0 "Analyzing" task `completed` with `TaskUpdate`.

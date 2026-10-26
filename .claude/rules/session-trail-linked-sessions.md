@@ -53,6 +53,48 @@ with a reason, and both briefs print it.
 Cloud and Remote Control sessions have no `local_` record in the store, so they never appear.
 The list is bounded at `LINKED_LIST_MAX` (64) and says how many it leaves out.
 
+**Every session marked start belongs to every yes.** The plan confirmation names each one by its
+title, and the model never leaves one out on its own judgment: not because its own work looks
+finished, since the sessions below it follow only through it, not because the new session could
+finish that work, and not because each start costs its own plan confirmation. The confirmation
+never offers a restart as an alternative to finishing that session's work here, and no answer
+option leaves one out; a user who wants one left out names it in the answer, and a restart the
+model thinks pointless costs one line that names what leaving it out costs. Two live Zensu Session
+Hub moves on 2026-10-25 under 0.29.0 showed both shapes: a plan question that recommended finishing
+a linked session's work in the new parent over restarting it, and a parent that restarted one of
+two sessions marked start and dropped the other because its pull request was merged, which also
+stranded that session's own open linked session. A session moved on its own later lands at the
+top level for good, because Claude offers no way to link a session under another one. The rule
+lives in `references/takeover.md` steps 1 and 4, `references/handoff.md` flows 4 and 5, and the
+lead of `linkedSessionLines`, which both briefs render.
+
+**The rule fixes the answer options, and best solution first moves into the one line.** The
+best-solution-first block every session receives yields only an option's order to a skill and
+keeps the option set for itself, so it would ask for the shape that broke the first move: leaving
+a session out as the first, recommended option. Step 1 and the brief lead therefore say that
+these rules fix which answer options the confirmation offers, and that best solution first applies
+to the one line, which carries the model's recommendation marked as such with its cost; the user
+takes it by naming the session.
+
+**The start set is the plan's.** The `--force` run reads the records again, so its brief can mark a
+session start that the plan confirmation never named (an archived start session lets a later one
+past the cap, or a new record appears) and can stop marking one the plan named. Step 4, flow 5 and
+the brief lead start only the named sessions the `--force` brief still marks start; a newly marked
+one is text that first appears in that brief, named to the user and kept for a later message, and
+a named one it no longer marks start is not started, with its reason.
+
+**`openBelow` makes that cost visible.** `familyWalk` returns an `openBelow(run, follows)` walker
+that counts the open records below an open linked session at every level, walking through archived
+ones and never into a detached one, with the same `isArchived` and `isDetached` predicates as the
+walk itself; its visited set keys on the run id, so a record listed twice is counted once and a
+cycle of duplicate ids ends. `decideLinked` passes `follows`, which is `keptWhy`, the first six
+rows of its own decision table (`no-session-id`, `self`, `btw`, `ssh`, `continued`, `started`),
+answering none, so a descendant its own continuation would keep is neither counted nor descended
+into, and the count is the number of sessions that follow only through it. It carries the result
+as `openBelow` on every entry, and the briefs render `- open linked sessions below it: N, which
+follow only through it` when it is not zero. The count changes no decision, so `Catalog::decide`
+in the Zensu Session Hub needs no follow-up.
+
 **The start call is rendered by the script, never composed by the model.** `initiation`
 `user_asked`, `context` `fresh`, `title` (the old title with control characters stripped,
 collapsed to one line and cut to 59 characters, because the tool description says "Under 60
@@ -133,7 +175,7 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
   file checks the directory and schema against `ledgerPaths` and `LEDGER_SCHEMA_VERSION`. The Hub
   keeps a byte copy in its own `tests/fixtures/handover-contract.json`, updated in Hub step H1.
 - Both briefs render `linkedSessionLines` and `unreadReportLines` after `openChipLines`.
-  `takeover --json` carries `linkedSessions` and `unreadReports`; the first reports the ledger read
+  `takeover --json` carries `linkedSessions`, each entry with its `openBelow`, and `unreadReports`; the first reports the ledger read
   with `ledgerTruncated`, `ledgerError` and `schemaNewer` on one line, as `L36b` requires.
 - `references/takeover.md` step 1 has the plan confirmation name the linked sessions, and step 4
   starts them right after `takeover --force`, ahead of the chips and `release`.
@@ -164,10 +206,34 @@ wrapper to show that no chip or linked-session folder is measured while the old 
 unmeasured, against a control with a measured one; it is skipped on Windows, where a shell wrapper
 does not stand in for `git.exe`. The unit case `the module names why a start carries or leaves out
 cwd, and the start follows that reason` drives `cwdWhy` and the start's `cwd` for each
-`sameRepository` value.
+`sameRepository` value. LS10 and LS13 pin the every-yes lead and the precedence sentence in both
+briefs, and LS10 also the start-set sentence and the absence of the retired `leave out every
+session the user left out`; LS14 pins the rule and the precedence sentence inside the
+plan-confirmation paragraph of step 1, the start set inside the start paragraph of step 4, the
+absence of the two retired sentences there, and both flows of `references/handoff.md`; LS18 pins
+`openBelow` with a side question and an SSH session below the counted one, and the count line on
+its own entry in both briefs. The unit case `each open linked session counts the open sessions
+below it that would follow through it: every level, through archived ones, never into a detached
+one or one its continuation keeps, and once each` drives the count.
 
 **Known gaps, accepted and named:**
 
+- **Starting every session marked start is the receiving model's tool call.** The brief and the
+  step make it mandatory and name the shapes that broke it, but no hook checks that the plan
+  confirmation named each one or that each was started. A check that refuses a turn would add a
+  hook that can deny, which is a `minor` release.
+- **The best-solution-first block still yields only the order to a skill.** The precedence
+  sentence lives in this skill; the block's own clause in `docs/best-solution-first.md`, injected
+  into every session, is unchanged, so a model weighs a skill sentence against a block that keeps
+  the option set for itself. Widening that clause to a skill that reserves an option for the user
+  to name is a plugin-wide change and the user's decision.
+- **The model matches the start set across two briefs.** A durable fix carries the plan pass's
+  start names into the `--force` run and has `decideLinked` mark every other session later; that
+  changes the decision table the Zensu Session Hub mirrors.
+- **Two descendants can still count although they never follow.** One started from an SSH saved
+  environment without `sshConfig` counts unless a listed session also names a saved environment,
+  because `linkedSessions` reads the presets only then; one that already continues elsewhere
+  counts when the ledger read was incomplete.
 - **Every Claude rule above is one bundle build's reading.** The admission of a start on the
   answer turn, the record fields of a started session, the kept `name` and `title`, `use_worktree`
   without `sharedCheckout` and the place approval for `cwd` need the Hub's live checks (H11) before
@@ -198,5 +264,6 @@ tests read it in this repository), no hook added, removed or renamed, no matcher
 attestation change, and `session-lineage-v1.mjs` is untouched. New `--json` keys and new brief and
 skill text are patch-class, as they were for the open chips; so are `linkedSessions.sameRepository`,
 `linkedSessions.oldRepositoryMeasured`, each entry's `cwdWhy`, the `place` reason, the repository
-verdict behind `sameCheckout` and the brief's `folder` block. The spec read the new contract key
+verdict behind `sameCheckout` and the brief's `folder` block, and so are each entry's `openBelow`
+and the every-yes text. The spec read the new contract key
 and the new flow step as minor; neither is in the policy's breaking list.

@@ -403,6 +403,11 @@
       </ol>
     </details>
   </figure>
+
+  <p class="sub">The anchor need not be a repository. A session started in a plain folder that
+  holds several repositories has a folder anchor: it keeps the session's state but has no change
+  set of its own, so every file a chain changes there must sit in a declared code root. Section
+  6.5 of the specification states the rules.</p>
 </section>
 
 <section>
@@ -465,7 +470,7 @@
           whatever the list says. The pattern rule is unchanged, and a root is searched like the anchor: through a
           subdirectory other than <code>.zensu</code>, because the traversal check refuses a search
           root that contains a protected directory.</td>
-          <td class="where mono">reviewer-capability-v1.js:633<br>reviewer-capability-v1.js:595-597</td>
+          <td class="where mono">reviewer-capability-v1.js:638<br>reviewer-capability-v1.js:600-602</td>
         </tr>
       </tbody>
     </table>

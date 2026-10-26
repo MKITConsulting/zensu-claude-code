@@ -1,6 +1,8 @@
 ---
 paths:
   - "skills/*/SKILL.md"
+  - "skills/*/references/**"
+  - "skills/*/rules/**"
   - "skills/tdd/references/review-chain.md"
   - "skills/pr-team-review/references/debate.md"
   - "tests/structure/test-skill-workflow-markers.sh"
@@ -90,6 +92,51 @@ are item 2 of the resolution order in `docs/configuration.md` (`P5f`) and the `{
 paragraph of `docs/tdd-manager-workflow.md` (unpinned). `ZENSU_ROOT` is read by nothing else in
 the plugin; pick another name if that ever changes, because the probe hands it to every child the
 sourced library starts.
+
+**Free text never goes into a command line (`FT1`–`FT4`).** A skill that sends model-written
+Markdown, JSON, a plan document, review findings or conditions writes the text to a temporary
+file through a heredoc with a quoted delimiter and passes `"$(cat "$f")"`:
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat > "$f" <<'ZENSU_TEXT_END'
+<authored-markdown>
+ZENSU_TEXT_END
+zensu link docs <feature-id> --doc-type <type> --content "$(cat "$f")"
+```
+
+Inside double quotes the shell runs every backtick span of the text and expands every
+`$NAME`; a single quote ends at the first apostrophe, and the rest of the text becomes shell
+words. The quoted delimiter keeps the heredoc body literal, and the shell inserts the output of
+`"$(cat "$f")"` as one argument without expanding it again. Measured under macOS `/bin/bash`
+3.2.57 and `/bin/zsh` with backticks, `$(…)`, `$HOME`, an apostrophe and parentheses in the text:
+every character arrived unchanged. The heredoc stays OUTSIDE `$( )` on purpose: bash 3.2.57
+refuses `x="$(cat <<'EOF'` with an apostrophe in the body (`unexpected EOF while looking for
+matching`), the same parser hazard as `.claude/rules/bash32-command-substitution.md`. The
+redirect also makes the text a write channel the Bash secret scan inspects: `detectChannels`
+reports `redirect` and `heredoc` for the file form and nothing for the old inline
+`--content "…"`. zensu-cli has no stdin or file form for `--content`, `--candidates`,
+`--result`, `--children`, `--tiers`, `--findings` or `--conditions` (read from its
+`internal/cmd/*.go` at `bffa3ae`), which is why the round trip through a file exists.
+
+`FT1` scans every Markdown file under `skills/`, references and rules included, and fails on a
+`--flag` whose value is a placeholder naming Markdown, JSON, a document, findings or
+conditions, whether unquoted, double-quoted, single-quoted or joined with `=`. `FT2` requires the
+file form in the six skills that send free text: docs, implement, bootstrap, ghost-scan,
+security-review and autopilot. `FT3` and `FT4` pin the four flagged spellings and five near
+misses on fixtures. `B52` and `B52b` in `tests/structure/test-bash-zensu-gate.sh` drive the
+whole form through the CLI write-gate: it passes inside a window that declares its tool and
+stays a denied mutation outside one.
+
+Known gaps: a positional free-text argument and a placeholder with another name are not
+judged; short titles (`--title "<title>"`) and the work-order `--rationale` stay double-quoted,
+so a backtick in a title still runs; nothing checks that the delimiter line is absent from the
+text; the CLI write-gate's token scan reads each heredoc line as a command
+(`.claude/rules/subagent-shell-guard.md`), so a text line that opens with a `zensu` mutation the
+window does not declare is denied; and the text still travels as one command-line argument, so
+the operating system's argument-size limits apply exactly as they did inline. A zensu-cli flag
+that reads stdin or a file would remove both the round trip and that limit; it is a CLI change.
 
 **Version: `patch`.** Skill text and a structure check: no schema field, key set, hook, matcher,
 config key or attestation moves.
