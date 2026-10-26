@@ -167,3 +167,8 @@ The promptfoo/expect harnesses under `evals/tdd-manager/`, `evals/tdd-manager-pr
 and `evals/tdd-review-chain/` still target the pre-0.4.0 `zensu:tdd-manager` subagent
 (removed when TDD moved to the main thread). They are not part of the deterministic
 suite or `run-all.sh`; rewriting them to the main-thread `/zensu:tdd` model is pending.
+
+The automatic-context core contract runs first on `windows-shard-1` with a
+60-second cap. It uses one Node process and injected CLI execution; the POSIX
+wrapper process fixtures remain in the Linux gate. This small suite precedes the
+existing long-running tests so it cannot be starved by their remaining budget.
