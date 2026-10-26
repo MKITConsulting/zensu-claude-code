@@ -291,14 +291,14 @@ classifier will refuse a spawn, not only when the whole table is green.
   it resolves the route; relay which half.
 - **⚠️ config: hooks.defaultDeliveryRoute=… is configured but decides nothing** → both
   readers are off (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so no hook ever
-  resolves the route and the value has no effect. Either turn a reader back on or remove
-  the key; do not tell the user the question is skipped.
+  resolves the route and the value has no effect. Turn a reader back on or remove the key;
+  never say the question is skipped.
 - **⚠️ config: hooks.defaultDeliveryRoute=… is not tdd, direct or ask** → the value is
-  misspelled, quoted differently, or not a string; the hooks read it permissively as `ask`,
-  so the question the user meant to switch off is still asked. The value is shown as
+  misspelled, quoted differently, or not a string; the hooks read it as `ask`, so
+  the question is still asked. The value is shown as
   written — a string without added quotes, anything else in its JSON spelling — cut at
-  40 characters with a trailing `…`. The fix is the config value itself — one of the three
-  lowercase words.
+  40 characters with a trailing `…`. Fix the value: one of the three lowercase words.
+- **subagents:** rows → read `references/coexistence.md`.
 - **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
   not be opened, is not a regular file, is too large, or was read incompletely.
 - **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are

@@ -37,9 +37,10 @@ It is `claude-principal-v1.js`'s `REVIEWER_TYPES` ∪ `EVIDENCE_WORKER_TYPES` �
 classifier `SubagentStart` uses to inject `reviewer-readonly-v1` and `evidence-worker-v1` —
 restricted to the plugin-scoped `zensu:` spellings. Adding a confined agent there reaches this grant with no edit
 here, and CLAUDE.md's standing "grep before renaming `zensu:code-reviewer`" instruction keeps
-holding. **One narrowing is deliberate and load-bearing:** `REVIEWER_TYPES` also carries the
-BARE names (`code-reviewer`, …) so `--agents` fixtures and same-named PROJECT agents get the
-read-only principal. Those are not our files — a project may define `code-reviewer` with
+holding. **One narrowing is deliberate and load-bearing:** `REVIEWER_TYPES` carries the
+BARE names (`code-reviewer`, …) only under the `--agents` evaluation opt-in
+`ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=1`, so eval fixtures get the read-only principal while
+a same-named PROJECT agent stays an ordinary neutral child. Those are not our files — a project may define `code-reviewer` with
 `tools: Bash`, and the principal classification is prompt-level policy while `tools:`
 frontmatter is what the harness enforces. Granting a bare name would hand a project-authored
 agent a classifier-free spawn. **That scope reservation is an UNVERIFIED premise** — nothing in

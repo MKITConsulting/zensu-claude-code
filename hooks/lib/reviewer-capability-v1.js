@@ -218,7 +218,7 @@ const MUTATING_FILE_TOOLS = new Set([
   'apply_patch',
 ]);
 const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
-const HOST_PROFILE_TOOLS = new Set([
+const KNOWN_TOOLS = new Set([
   'Read',
   'Grep',
   'Glob',
@@ -237,19 +237,24 @@ const HOST_PROFILE_TOOLS = new Set([
   'TaskList',
   'TaskUpdate',
   'Agent',
+  'Task',
   'SendMessage',
   'AskUserQuestion',
   'StructuredOutput',
   'ReportFindings',
   'SubagentHandback',
-]);
-const HOST_PROFILE_MCP_READ_TOOLS = new Set([
+  'Bash',
   'mcp__plugin_context7_context7__resolve-library-id',
   'mcp__plugin_context7_context7__query-docs',
 ]);
-const MCP_COMMAND_SEGMENT_RE = /(^|_)(exec|execute|run|shell|terminal|command|code)(_|$)/i;
+const POWERSHELL_TOOL = 'PowerShell';
+const MONITOR_TOOL = 'Monitor';
+const COMMAND_NAME_WORDS = new Set(['exec', 'execute', 'shell', 'terminal', 'command', 'repl', 'eval', 'process', 'bash', 'powershell', 'pwsh', 'cmd']);
+const COMMAND_GATE_SCOPE = "Zensu's command gates see only Bash and PowerShell commands";
+const MAIN_THREAD_REMEDY = 'report the need to the main thread instead';
 const NON_PATH_TOOLS = new Set(['StructuredOutput', 'ReportFindings', 'SubagentHandback', 'AskUserQuestion']);
 const SEARCH_EXAMPLE_LIMIT = 12;
+const DENY_PREFIX = 'Zensu capability gate (reviewer-capability-v1) deny: ';
 
 // `systemMessage` is optional and user-facing. It rides in the ONE object this run
 // writes, beside the decision, so the host's precedence is untouched.
@@ -258,7 +263,7 @@ function deny(reason, systemMessage) {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: `reviewer-capability-v1 deny: ${reason}`,
+      permissionDecisionReason: `${DENY_PREFIX}${reason}`,
     },
   };
   if (typeof systemMessage === 'string' && systemMessage !== '') output.systemMessage = systemMessage;
@@ -645,11 +650,6 @@ function protectedAccessViolation(payload, trusted) {
   return null;
 }
 
-function hostProfileAllowance(shellGranted) {
-  const shell = shellGranted ? ', Bash behind an accident guard' : '';
-  return `a neutral subagent may use only ${[...HOST_PROFILE_TOOLS].join(', ')}${shell}, the MCP tools ${[...HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
-}
-
 function foldedPath(value) {
   return process.platform === 'darwin' || process.platform === 'win32' ? value.toLowerCase() : value;
 }
@@ -694,8 +694,7 @@ function configLayerViolation(payload, trusted, candidates) {
 
 function hostProfileToolViolation(payload, trusted, protectedRoots) {
   const tool = payload.tool_name;
-  const commandViolation = () => `${COMMAND_TOOL_DENY}. ${searchRemedy(trusted, protectedRoots)}`;
-  const unlistedViolation = () => `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance(shellGuard.grantRefusal(payload) === null)}`;
+  const commandViolation = () => `${COMMAND_TOOL_DENY}. ${searchRemedy(trusted, protectedRoots)} ${shellGuard.GRANT_TAIL}`;
   if (shellGuard.isShellCall(payload)) {
     const shell = shellGuard.shellViolation(payload, trusted);
     if (!shell) return null;
@@ -704,19 +703,49 @@ function hostProfileToolViolation(payload, trusted, protectedRoots) {
       : shell.reason;
   }
   if (COMMAND_TOOLS.has(tool)) return commandViolation();
-  if (tool.startsWith('mcp__')) {
-    if (HOST_PROFILE_MCP_READ_TOOLS.has(tool)) return null;
-    const segment = tool.split('__').at(-1);
-    if (/^mcp__.*zensu/i.test(tool)) {
-      return ZENSU_MCP_READ_RE.test(segment)
-        ? null
-        : 'host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist';
-    }
-    if (MCP_COMMAND_SEGMENT_RE.test(segment)) return commandViolation();
-    return unlistedViolation();
+  if (tool === POWERSHELL_TOOL) {
+    return `host-profile-v1 cannot invoke ${POWERSHELL_TOOL}, because the Zensu accident guard reads only Bash commands; run the command through Bash, or ${MAIN_THREAD_REMEDY}`;
   }
-  if (HOST_PROFILE_TOOLS.has(tool)) return null;
-  return unlistedViolation();
+  if (tool === MONITOR_TOOL && !isMonitorStream(payload.tool_input)) {
+    return `host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because ${COMMAND_GATE_SCOPE}; ${bashRemedy(payload)}`;
+  }
+  if (/^mcp__.*zensu/i.test(tool) && !ZENSU_MCP_READ_RE.test(tool.split('__').at(-1))) {
+    return `host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist, because Zensu mutations run on the main thread; ${MAIN_THREAD_REMEDY}`;
+  }
+  if (!knownTool(tool)) {
+    if (runsCommands(tool)) {
+      return `host-profile-v1 cannot invoke ${tool}, because its name marks it as running commands or code and ${COMMAND_GATE_SCOPE}; ${bashRemedy(payload)}`;
+    }
+    const mention = shellGuard.inputMention(payload, trusted);
+    if (mention) return `host-profile-v1 cannot invoke ${tool} here: ${mention}, and Zensu cannot tell what that tool does with it; ${MAIN_THREAD_REMEDY}`;
+  }
+  return null;
+}
+
+function bashRemedy(payload) {
+  return shellGuard.grantRefusal(payload) === null
+    ? `run the command through Bash, or ${MAIN_THREAD_REMEDY}`
+    : MAIN_THREAD_REMEDY;
+}
+
+function isMonitorStream(input) {
+  return Boolean(input) && typeof input === 'object' && !Array.isArray(input)
+    && Object.prototype.hasOwnProperty.call(input, 'ws')
+    && !Object.prototype.hasOwnProperty.call(input, 'command');
+}
+
+function runsCommands(tool) {
+  const words = tool.split('__').at(-1)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return words[0] === 'run' || words.some((word) => COMMAND_NAME_WORDS.has(word));
+}
+
+function knownTool(tool) {
+  return KNOWN_TOOLS.has(tool)
+    || (tool.startsWith('mcp__') && /^mcp__.*zensu/i.test(tool) && ZENSU_MCP_READ_RE.test(tool.split('__').at(-1)));
 }
 
 function neutralViolation(payload, trusted) {
@@ -754,47 +783,57 @@ function neutralViolation(payload, trusted) {
   // Neutral children may write project files and external review reports, but
   // the installed plugin and its private data store are authorities for future
   // capability decisions. Protect both canonical trees from every standard
-  // file-mutation tool. canonicalCandidate resolves existing and dangling
+  // file-mutation tool and from every tool whose inputs the gate does not know.
+  // canonicalCandidate resolves existing and dangling
   // symlink aliases before this comparison, so a project-local alias cannot be
   // used to persist modified runtime bytes or a forged next-session record.
+  const unknownTool = !knownTool(payload.tool_name);
+  const mayWrite = MUTATING_FILE_TOOLS.has(payload.tool_name) || unknownTool;
   const immutableRuntimeRoots = [trusted.pluginRoot, trusted.pluginData]
     .map((value) => path.resolve(value));
   if (
-    MUTATING_FILE_TOOLS.has(payload.tool_name)
+    mayWrite
     && candidates.some((candidate) => candidate
       && immutableRuntimeRoots.some((root) => isInside(root, candidate)))
   ) {
-    return 'host-profile-v1 cannot mutate the installed plugin runtime or private plugin data';
+    return unknownTool
+      ? `host-profile-v1 cannot pass a path inside the installed plugin runtime or private plugin data to ${payload.tool_name}, because Zensu cannot tell whether that tool writes there; ${MAIN_THREAD_REMEDY}`
+      : `host-profile-v1 cannot mutate the installed plugin runtime or private plugin data, because they are Zensu's own state; ${MAIN_THREAD_REMEDY}`;
   }
 
   if (
-    MUTATING_FILE_TOOLS.has(payload.tool_name)
+    mayWrite
     && configLayerViolation(payload, trusted, candidates)
   ) {
-    return 'host-profile-v1 cannot change a Zensu configuration layer, because the layers decide the subagent shell grant; report the need to the main thread instead';
+    return unknownTool
+      ? `host-profile-v1 cannot pass a Zensu configuration layer path to ${payload.tool_name}, because the layers decide the subagent shell grant and Zensu cannot tell whether that tool writes there; ${MAIN_THREAD_REMEDY}`
+      : 'host-profile-v1 cannot change a Zensu configuration layer, because the layers decide the subagent shell grant; report the need to the main thread instead';
   }
 
   // realpath cannot distinguish hard links. A project-local hard link can
   // therefore name the same inode as a plugin-runtime file without living
-  // below pluginRoot. Standard mutation tools must fail closed for every
-  // existing multiply-linked file; ordinary nlink=1 project/report files and
-  // new files keep their normal host semantics.
+  // below pluginRoot. Standard mutation tools and tools whose inputs the gate
+  // does not know must fail closed for every existing multiply-linked file;
+  // ordinary nlink=1 project/report files and new files keep their normal host
+  // semantics.
   if (
-    MUTATING_FILE_TOOLS.has(payload.tool_name)
+    mayWrite
     && candidates.some((candidate) => candidate && isMultiplyLinkedFile(candidate))
   ) {
-    return 'host-profile-v1 cannot mutate multiply linked files';
+    return unknownTool
+      ? `host-profile-v1 cannot pass a multiply linked file to ${payload.tool_name}, because a hard link can alias Zensu's own state and Zensu cannot tell whether that tool writes there; ${MAIN_THREAD_REMEDY}`
+      : `host-profile-v1 cannot mutate multiply linked files, because a hard link can alias Zensu's own state; ${MAIN_THREAD_REMEDY}`;
   }
 
   if (candidates.some((candidate) => candidate
       && protectedRoots.some((root) => isInside(root, candidate)))) {
-    return 'host-profile-v1 cannot access a protected Session Control path';
+    return `host-profile-v1 cannot access a protected Session Control path, because it is Zensu's own workflow state; ${MAIN_THREAD_REMEDY}`;
   }
 
   const traversalViolation = traversalAccessViolation(
     payload, trusted, protectedRoots, candidates,
   );
-  if (traversalViolation) return `host-profile-v1 ${traversalViolation}`;
+  if (traversalViolation) return `host-profile-v1 ${closeSentence(traversalViolation)} If you cannot search another way, ${MAIN_THREAD_REMEDY}.`;
   return null;
 }
 
@@ -1133,7 +1172,7 @@ function judgePrincipal(payload, bound, principal) {
   try {
     return neutralViolation(payload, trusted) || null;
   } catch (error) {
-    return `host-profile-v1 input validation failed: ${error.message}`;
+    return `${closeSentence(`host-profile-v1 input validation failed: ${error.message}`)} ${shellGuard.GRANT_TAIL}`;
   }
 }
 
@@ -1160,8 +1199,10 @@ module.exports = {
   lineageCause,
   prunedCause,
   performedDisclosure,
-  HOST_PROFILE_TOOLS,
-  HOST_PROFILE_MCP_READ_TOOLS,
+  DENY_PREFIX,
+  COMMAND_NAME_WORDS,
+  KNOWN_TOOLS,
   NON_PATH_TOOLS,
+  knownTool,
   neutralViolation,
 };

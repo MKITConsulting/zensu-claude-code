@@ -76,87 +76,119 @@ void. Measured on 51 denied `pr-review-worker` transcripts: after one to four de
 attempts, every one ended with its pure-JSON result as final text. Admitting the tool for
 workers first needs the `SubagentStop` reader to take the result from the handback.
 
-**Neutral children** (`host-profile-v1`) get an ALLOWLIST, not a denylist. `neutralViolation`
-admits a tool only when it is in `HOST_PROFILE_TOOLS`, is named in
-`HOST_PROFILE_MCP_READ_TOOLS`, or is a Zensu MCP read tool (`/^mcp__.*zensu/i` plus
-`ZENSU_MCP_READ_RE`, kept from before); every other tool is denied, with one exception. `Bash`
-is granted to a named neutral child that is not a `zensu-review-*` persona, behind an accident
-guard, unless `hooks.subagentShell` withdraws it (`false` in a consulted config file, or a
-consulted file that cannot be read; the consulted files are the `ZENSU_CONFIG` file alone while it
-is set, else the global file and the project overlay): `hostProfileToolViolation` routes it through `shellViolation` before the `COMMAND_TOOLS`
-deny, and `.claude/rules/subagent-shell-guard.md` documents the grant, the guard and their gaps.
-The guard prevents accidents and is not a sandbox. `Monitor` is not part of that grant and stays
-denied with every other tool outside the list; that deny names `Bash` in its list only while the
-grant admits the caller. The six-name
-`COMMAND_TOOLS` denylist and the Zensu-only MCP check it replaced let every command-executing
-MCP tool through (`ctx_execute`, `ctx_execute_file`, `ctx_batch_execute`, `run_in_terminal`,
-`browser_run_code_unsafe`), and the host's `Monitor`, whose `command` input is a shell script,
-although the comment above the check promised neutral children no command-execution tool at
-all. Their handback is on the list and still passes the `cwd`
-resolution first: allowed with an existing `cwd`, denied with a vanished one.
+**Neutral children** (`host-profile-v1`) may use every tool except what reaches Zensu's own
+state or runs commands outside `Bash`. Decided on 2026-10-24 after the newcomer audit of 0.27.0 (D5-01, D6-01, D7-02): the tool
+ALLOWLIST that confined neutral children protected at accident level only, because `Bash` was
+already granted behind a guard that is not a sandbox, while it silently took browser,
+context-mode, desktop and every other MCP tool from users who had installed them. The allowlist
+(`HOST_PROFILE_TOOLS`, `HOST_PROFILE_MCP_READ_TOOLS`, `hostProfileAllowance`,
+`MCP_COMMAND_SEGMENT_RE`) is gone; do not reintroduce it.
 
-- **Sized from transcripts.** Measured on 2026-10-06 over the local subagent transcripts under
-  `~/.claude/projects`, all projects: 8,159 typed neutral transcripts with 276,590 tool calls.
-  The list the fix was specified with (`Read`, `Grep`, `Glob`, `Edit`, `Write`, `MultiEdit`,
-  `NotebookEdit`, `WebFetch`, `WebSearch`, `ToolSearch`, `TodoWrite`, `StructuredOutput`,
-  `SubagentHandback`, `AskUserQuestion`) gained `LSP` (1,315 calls in 776 transcripts), `Agent`
-  (108 in 70; a child spawned by a child is classified by this same gate, and the suite pins
-  the allowance), `SendMessage` (132 in 81; gauntlet-loop builders coordinate through it), the
-  task-list tools `TaskCreate`, `TaskGet`, `TaskList` and `TaskUpdate` (the newer `TodoWrite`,
-  pinned as kept before), `ReportFindings` (a report channel like `StructuredOutput`) and
-  `apply_patch` (path-checked like the other file tools, pinned before). None of them runs
-  code, and every filesystem argument of an admitted tool still goes through the path checks.
-- **Named read-only MCP tools: only the two Context7 documentation tools.** They reach no
-  local state. Deliberately NOT named: `ctx_search` (it reads an index other principals
-  filled, a read no path check can see), the browser and preview tools (a `file://`
-  navigation reads protected state, and `javascript_tool` and `browser_run_code_unsafe` run
-  code), and the desktop session tools (they read other sessions' transcripts). The `mcp__`
-  prefix test is case-sensitive, so `MCP__zensu__…` is not a Zensu read tool.
-- **Why not the minimum fix.** Denying only MCP tools whose last segment matches
-  `MCP_COMMAND_SEGMENT_RE` leaves host command tools outside `COMMAND_TOOLS` open — `Monitor`
-  runs a shell command — and every MCP server whose code path has no telling name. Measured
-  cost on the same transcripts: the minimum fix newly denies 24,354 calls in 1,334
-  transcripts, the allowlist 32,033 calls in 1,671. The 551 transcripts only the allowlist
-  affects are browser automation (134), context-mode search and indexing (229), desktop
-  session tools (170), one inventory connector (42), `Skill` (18), `TaskStop` (11) and
-  `Monitor` (5), with overlaps. `MCP_COMMAND_SEGMENT_RE` now only picks the deny text: a
-  command-executing MCP tool gets the command deny and its remedy.
+`hostProfileToolViolation` and `neutralViolation` still deny, for every tool:
+
+- protected Session Control and workflow paths and `.zensu/`, directly, and for `Grep` and
+  `Glob` through a traversal root above them;
+- a write below the installed plugin or its private data, an edit of a Zensu config layer, and a
+  mutation of a multiply linked file, for the file-mutation tools and every tool the gate does
+  not know (`mayWrite`);
+- a Zensu MCP mutation (`/^mcp__.*zensu/i` without a `ZENSU_MCP_READ_RE` segment);
+- the five `COMMAND_TOOLS` aliases other than `Bash`, which G8 pins, with `COMMAND_TOOL_DENY`,
+  the search remedy and the main-thread tail;
+- `PowerShell` (`POWERSHELL_TOOL`), because the accident guard reads Bash only; the deny names
+  Bash as the way out. A PowerShell guard is a separate proposal;
+- a `Monitor` call that is not a pure `ws` stream (`isMonitorStream`), and a tool the gate does
+  not know whose name marks it as running commands or code (`runsCommands`), because no Zensu
+  command gate sees a command run through either (§"Commands outside `Bash`").
+
+**Known tools.** `KNOWN_TOOLS` is the former allowlist plus `Bash`, the legacy `Task` spawn tool
+and the two Context7 documentation tools, and `knownTool` adds the Zensu MCP read tools. For
+every other tool the gate cannot tell a read from a write, so:
+
+- a path input that resolves inside the installed plugin, its private data or a config layer is
+  denied as if it were a write (`unknownTool` in `neutralViolation`);
+- any input string that names Zensu state is denied through `shellGuard.inputMention`, the
+  guard's text rules (`textMention`: a protected form, a `.zensu` segment, `/proc/<pid>/environ`)
+  without its shell parse. That keeps `.zensu` out of a browser or context-mode search call,
+  which the allowlist used to deny outright. It also refuses a GitHub comment that merely
+  mentions `.zensu/plans`; that false positive is the Bash guard's own, and it is still less than
+  the old outright deny;
+- an input string that is, as a whole, one of the guard's `protectedParents` (a parent directory
+  of the private data, the installed plugin or the session record, below `HOME` and outside the
+  project's own parents) is denied through `parentMention`, the rule the Bash guard applies to a
+  path word, because a listing there shows Zensu state. Prose that merely names such a directory
+  passes;
+- a path input that is a multiply linked file is denied like a mutation of one.
+
+A known tool keeps exactly its old checks, so no input the allowlist admitted is denied now.
+
+**Commands outside `Bash`.** Every Zensu command gate (the CLI write gate, the source-write
+gate, the secret scan, the browser consent gate) is registered on `Bash|PowerShell`, and the
+work-order gate reads `Bash` alone, so a command run through any other tool reaches none of them.
+A `Monitor` call is therefore admitted only as a `ws` stream: `isMonitorStream` fails closed on
+an input that carries a `command` or no `ws`. A tool the gate does not know whose name marks it
+as running commands or code is denied by name: `runsCommands` splits the last segment of the
+name into words, camelCase included, and matches `COMMAND_NAME_WORDS` or a leading `run`. Both
+denies name `Bash` as the way out only while `grantRefusal` holds the grant (`bashRemedy`).
+`isShellCall` stays Bash-only for G8 and the unit test. Covering `Monitor` in the shell matchers
+and judging an MCP command tool by its input would let both run behind the gates; that is a
+matcher change, a `minor`, and a separate proposal.
+
+**Deny texts.** Every reason starts with `DENY_PREFIX`,
+`Zensu capability gate (reviewer-capability-v1) deny: `, and every `host-profile-v1` deny ends with
+the switch that lifts it (`hooks.subagentShell`) or with `MAIN_THREAD_REMEDY`. The
+`/zensu:doctor` `subagents:` row (`subagentBoundaryRow`, its texts in
+`skills/doctor/references/coexistence.md`) states the boundary and the grant, and stays silent on
+a plugin root without the capability gate.
+
 - **Path heuristic.** `pathInputs` returns nothing for `NON_PATH_TOOLS` (`StructuredOutput`,
   `ReportFindings`, `SubagentHandback`, `AskUserQuestion`): they take no filesystem argument,
   and a `target_files` key or a quoted patch header was misread as one. Every other tool keeps
-  the heuristic, MCP tools included, because `ctx_execute_file` takes a `path`.
+  the heuristic, MCP tools included, because a filesystem server's `read_text_file` takes a
+  `path`.
 - **Remedy.** The command deny and the traversal deny end with `searchRemedy`: the real,
   non-hidden subdirectories of the project root that the traversal check admits, read at deny
   time and capped at `SEARCH_EXAMPLE_LIMIT`, or a `Read` fallback when none qualifies. With
   the bare denies a subagent concluded that it could not search the tree at all.
-- **Coupled sites.** `renderHostContext` in `hooks/lib/session-control-core-v1.js` enumerates
-  both sets, and `tests/structure/test-reviewer-capability-gate.sh` parses that sentence back
-  and compares it with the module's exports. The same sentence is pinned in
+- **Coupled sites.** `renderHostContext` in `hooks/lib/session-control-core-v1.js` names the
+  boundary; `tests/structure/test-reviewer-capability-gate.sh` checks its key phrases, and
   `tests/structure/test-session-control-claude.sh` and
-  `evals/session-control/tests/wrapper-selftest.sh`. The deny texts are pinned in
-  `evals/session-control/lib/contract-provider.js`; `evals/session-control/lib/live-evidence.js`
-  matches the command deny by prefix and also accepts the guard's environment-dump deny. `skills/gauntlet-loop/SKILL.md` states the bound and G15
-  in `tests/structure/test-gauntlet-loop-skill.sh` pins it. `docs/multi-repo-chains-spec.md`
-  and `docs/multi-repo-chains-overview.html` cite lines of this module. Operator accounts of
-  the allowlist: the capability-gate row in `docs/configuration.md`, the principal item and
-  §"Security boundary" in `docs/session-control.md`, the reviewer-boundary paragraph and the
+  `evals/session-control/tests/wrapper-selftest.sh` pin it verbatim. The prefix is pinned in the
+  eval harness (`lib/contract-provider.js`, `lib/live-evidence.js`,
+  `lib/evidence-worker-contract.js`, `tests/live-evidence-negative.test.js`,
+  `tests/wrapper-selftest.sh`) and in the jq check of `scripts/session-control-claude-wrapper.sh`.
+  C39 in `contract-provider.js` drives the admitted tools, the `Monitor` and command-tool denies,
+  the mention denies and PowerShell.
+  `skills/gauntlet-loop/SKILL.md` states the bound and G15 in
+  `tests/structure/test-gauntlet-loop-skill.sh` pins it. `docs/multi-repo-chains-spec.md` and
+  `docs/multi-repo-chains-overview.html` cite lines of this module. Operator accounts: the
+  capability-gate and `subagentShell` rows of `docs/configuration.md`, the principal item and
+  §"Security boundary" of `docs/session-control.md`, the reviewer-boundary paragraph and the
   custom-persona note in `docs/review-chain.md`, the two neutral-child paragraphs in
   `docs/tdd-manager-workflow.md`, the neutral item in `docs/session-control-release-gate.md`,
-  and `skills/gauntlet-loop/references/harness.md`.
-- **Known gaps.** `SendMessage` can reach other local sessions, whose main thread is not
-  confined; that is a prompt-injection path, not a capability this gate grants. `LSP`
-  `workspaceSymbol` searches the whole workspace, `.zensu` included, but only for symbols of
-  source files, and `.zensu` holds JSON, logs and Markdown. A host tool added or renamed later
-  is denied until the list names it, by design. `zensu-codex`, `zensu-kiro` and
+  `skills/gauntlet-loop/references/harness.md` and `evals/session-control/README.md`.
+- **Known gaps.** The mention scan reads text: a name assembled at run time and code read from a
+  file pass it. The command-tool rule reads only the tool's name, so a tool that runs commands
+  under an unremarkable name passes it, and a tool such as `process_image` is refused. A tool the
+  gate does not know may list or search from the project root, which reaches `.zensu`, because
+  denying the project root and its parents would refuse ordinary project tools. A Zensu MCP
+  server registered under a name without `zensu` is not recognized, so its mutations pass as
+  unknown tools; matching Zensu tool names on every server would also refuse other servers'
+  tools of the same name, such as `create_wiki_page` or `create_milestone`, and is left to a
+  product decision. Whether a
+  subagent's `CronCreate`, `ScheduleWakeup`, `RemoteTrigger` or `TaskStop` reaches the main
+  session was not measured; the gate admits all four. A path in a key the path
+  heuristic does not read is judged by the mention scan alone. `SendMessage` can reach other
+  local sessions, whose main thread is not confined. `zensu-codex`, `zensu-kiro` and
   `zensu-antigravity` carry their own gates and were not changed.
-- **Version: `minor`.** The hook now refuses tool calls it used to allow, so it changes the
-  capability set of every session a newer installation would serve, which
-  `.claude/rules/runtime-lineage.md` makes the breaking test. The earlier changes to this
-  module were `patch` because they denied strictly less; this one denies strictly more.
+- **Version: `patch`.** The gate denies strictly less: every tool the allowlist admitted keeps
+  its checks, and every newly admitted tool was denied outright before. The prefix and the tails
+  reword denies. A bare reviewer or PLM name leaves the read-only classification unless the
+  evaluation opt-in `ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=1` is set, so a project agent of
+  that name is gated like any neutral child, which again denies less.
 
 **Version: `patch`.** The change lifts a deny inside an existing hook and rewords a deny
 reason. No schema field, persisted strict key set, hook registration, matcher, config key or
-attestation moves. The tool allowlist and the input-shape check judge a live tool call, never
+attestation moves. The read trio and the input-shape check judge a live tool call, never
 state another runtime wrote. It is the same class as the vanished-cwd change in this module.
 That classifies this change alone. Whether a running session is served after the upgrade
 depends on the class of the release that carries it, which is the strictest class among all
