@@ -73,7 +73,7 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 23,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 25,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"

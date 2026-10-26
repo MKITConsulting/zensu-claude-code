@@ -144,26 +144,95 @@ test('sessions that cannot or must not be continued stay, each with its reason',
   ], { self: cli(3), started: new Set(['cont-00000004']) });
   const got = state.sessions.map((entry) => [entry.decision, entry.why, entry.start === null]);
   assert.deepEqual(got, [['stays', 'no-session-id', true], ['stays', 'ssh', true], ['stays', 'self', true], ['stays', 'started', true], ['start', null, false]]);
-  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'fork', 'ledger-unread', 'cap']) {
+  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'place', 'fork', 'ledger-unread', 'cap']) {
     assert.ok(mod.LINKED_WHY[why], why);
   }
 });
 
-test('a checkout in another repository gets cwd, the same or a nested one does not', () => {
-  const state = decide([
+test('the checkout is the repository verdict, never the path, and a start omits cwd only from the old repository', () => {
+  const verdicts = new Map([[REPO, true], [`${REPO}/.claude/worktrees/two`, true], ['/work/sibling-wt', true], [`${REPO}/nested-repo`, false], ['/work/other', false]]);
+  const checkout = (folder) => (verdicts.has(folder) ? verdicts.get(folder) : null);
+  const records = [
     child(1),
     child(2, { originCwd: `${REPO}/.claude/worktrees/two` }),
-    child(3, { originCwd: '/work/other' }),
-    child(4, { originCwd: '/work/repo-other' }),
-    child(5, { originCwd: 'relative/path' }),
-    child(6, {}, { sharedCheckout: true }),
-  ]);
-  const got = state.sessions.map((entry) => [entry.sameCheckout, entry.start.cwd === undefined ? null : entry.start.cwd]);
-  assert.deepEqual(got, [[true, null], [true, null], [false, '/work/other'], [false, '/work/repo-other'], [null, null], [true, null]]);
-  assert.equal(state.sessions[5].sharedCheckout, true);
-  assert.equal(state.sessions[5].start.use_worktree, true);
+    child(3, { originCwd: '/work/sibling-wt' }),
+    child(4, { originCwd: `${REPO}/nested-repo` }),
+    child(5, { originCwd: '/work/other' }),
+    child(6, { originCwd: `${REPO}/gone` }),
+    child(7, {}, { sharedCheckout: true }),
+  ];
+  const here = decide(records, { checkout, sameRepository: true });
+  const got = here.sessions.map((entry) => [entry.sameCheckout, entry.start.cwd === undefined ? null : entry.start.cwd]);
+  assert.deepEqual(got, [[true, null], [true, null], [true, null], [false, `${REPO}/nested-repo`], [false, '/work/other'], [null, `${REPO}/gone`], [true, null]]);
+  assert.equal(here.sameRepository, true);
+  assert.equal(here.sessions[6].sharedCheckout, true);
+  assert.equal(here.sessions[6].start.use_worktree, true);
+  const elsewhere = decide(records, { checkout, sameRepository: false });
+  assert.equal(elsewhere.sameRepository, false);
+  assert.deepEqual(elsewhere.sessions.map((entry) => entry.start.cwd), records.map((record) => record.originCwd));
+  for (const sameRepository of [null, undefined, 'yes']) {
+    const state = decide(records, { checkout, sameRepository });
+    assert.equal(state.sameRepository, null, String(sameRepository));
+    assert.ok(state.sessions.every((entry) => entry.start.cwd === entry.folder), String(sameRepository));
+  }
+  const unmeasured = decide(records, { sameRepository: true, checkout: () => 'yes' });
+  assert.ok(unmeasured.sessions.every((entry) => entry.sameCheckout === null && entry.start.cwd === entry.folder));
+  assert.ok(decide(records).sessions.every((entry) => entry.sameCheckout === null && entry.start.cwd === entry.folder));
   assert.equal(decide([child(1)], {}).sessions[0].folder, REPO);
-  assert.equal(mod.decideLinked(mod.familyWalk(root({ originCwd: undefined }), [child(1)])).sessions[0].sameCheckout, null);
+});
+
+test('the module names why a start carries or leaves out cwd, and the start follows that reason', () => {
+  const verdicts = new Map([[REPO, true], ['/work/sibling-wt', true], ['/work/other', false]]);
+  const checkout = (folder) => (verdicts.has(folder) ? verdicts.get(folder) : null);
+  const records = [
+    child(1),
+    child(2, { originCwd: '/work/sibling-wt' }),
+    child(3, { originCwd: '/work/other' }),
+    child(4, { originCwd: `${REPO}/gone` }),
+    child(5, { originCwd: 'relative/path' }),
+    child(6, {}, { btw: true }),
+  ];
+  const expected = {
+    true: ['same-repository', 'same-repository', null, null, null, null],
+    false: ['receiver-elsewhere', 'receiver-elsewhere', null, null, null, null],
+    null: ['receiver-unmeasured', 'receiver-unmeasured', null, null, null, null],
+  };
+  for (const sameRepository of [true, false, null]) {
+    const state = decide(records, { checkout, sameRepository });
+    assert.deepEqual(state.sessions.map((entry) => entry.cwdWhy), expected[String(sameRepository)], String(sameRepository));
+    for (const entry of state.sessions.filter((e) => e.start)) {
+      assert.equal('cwd' in entry.start, entry.folder !== null && entry.cwdWhy !== 'same-repository', `${entry.run} ${sameRepository}`);
+    }
+  }
+  assert.deepEqual(Object.keys(mod.LINKED_CWD_WHY), ['same-repository', 'receiver-elsewhere', 'receiver-unmeasured']);
+  assert.ok(mod.LINKED_CWD_WHY['same-repository'].startsWith('it starts without `cwd`'));
+  assert.ok(mod.LINKED_CWD_WHY['receiver-elsewhere'].includes('ran outside the old session\'s repository'));
+  assert.ok(mod.LINKED_CWD_WHY['receiver-unmeasured'].includes('did not measure the repository this session works in'));
+});
+
+test('a linked session without a usable folder waits for the user to name it, and the verdict never sees its value', () => {
+  const seen = [];
+  const checkout = (folder) => {
+    seen.push(folder);
+    return true;
+  };
+  const state = decide([
+    child(1, { originCwd: 'relative/path' }),
+    child(2, { originCwd: undefined }),
+    child(3, { originCwd: `${REPO}\nx` }),
+    child(4, { originCwd: 'relative/fork' }, { userFork: true }),
+    child(5),
+  ], { checkout, sameRepository: true });
+  const got = state.sessions.map((entry) => [entry.folder, entry.sameCheckout, entry.decision, entry.why, 'cwd' in entry.start]);
+  assert.deepEqual(got, [
+    [null, null, 'if-named', 'place', false],
+    [null, null, 'if-named', 'place', false],
+    [null, null, 'if-named', 'place', false],
+    [null, null, 'if-named', 'place', false],
+    [REPO, true, 'start', null, false],
+  ]);
+  assert.deepEqual(seen, [REPO]);
+  assert.ok(mod.LINKED_WHY.place.includes('no usable folder'));
 });
 
 test('a saved environment is named from the account presets, and an SSH preset keeps the session here', () => {
@@ -204,7 +273,7 @@ test('a saved environment is named from the account presets, and an SSH preset k
 
 test('the start call is the one the takeover step names, with a bounded title and the rendered brief', () => {
   const long = `A${ESC}[2K very${LS}long${PS} title ${'x'.repeat(80)}`;
-  const state = decide([child(1, { title: long }), child(2, { title: '' }), child(3, { title: undefined }, { title: '' })]);
+  const state = decide([child(1, { title: long }), child(2, { title: '' }), child(3, { title: undefined }, { title: '' })], { checkout: (folder) => folder === REPO, sameRepository: true });
   const call = state.sessions[0].start;
   assert.deepEqual(Object.keys(call), ['initiation', 'context', 'title', 'name', 'use_worktree', 'prompt', 'background']);
   assert.equal(call.initiation, 'user_asked');
@@ -232,7 +301,7 @@ test('the start call is the one the takeover step names, with a bounded title an
   for (const field of ['source_branch', 'branch_name', 'preset', 'model', 'effort', 'permission_mode']) assert.equal(field in call, false, field);
 });
 
-test('the list is bounded and says how many it holds', () => {
+test('the list is bounded, says how many it holds and measures no folder past its bound', () => {
   const records = Array.from({ length: 5 }, (_, i) => child(i + 1));
   const state = decide(records, { max: 3 });
   assert.equal(state.total, 5);
@@ -240,6 +309,14 @@ test('the list is bounded and says how many it holds', () => {
   assert.equal(state.sessions.length, 3);
   assert.equal(decide(records).truncated, false);
   assert.equal(mod.LINKED_LIST_MAX, 64);
+  const seen = [];
+  const checkout = (folder) => {
+    seen.push(folder);
+    return true;
+  };
+  const bounded = decide(Array.from({ length: 5 }, (_, i) => child(i + 1, { originCwd: `/work/f${i + 1}` })), { max: 3, checkout, sameRepository: true });
+  assert.deepEqual(seen, ['/work/f1', '/work/f2', '/work/f3']);
+  assert.ok(bounded.sessions.every((entry) => entry.sameCheckout === true && !('cwd' in entry.start)));
 });
 
 test('the continuations a session started are its open children with a cont- handle', () => {
@@ -294,7 +371,7 @@ test('record text loses C0, C1 and the line separators but keeps tabs and newlin
 const MERGED_HEAD = 'Background (from the session that started this one):\n';
 
 test('a chip from before proposals is proposed fresh with the fixed background and a title cut to 59 characters', () => {
-  const { proposal, why } = mod.chipProposal({ title: 'L'.repeat(70), tldr: 'Why it matters.', prompt: `Do the thing.${ESC}[2K` }, [REPO]);
+  const { proposal, why } = mod.chipProposal({ title: 'L'.repeat(70), tldr: 'Why it matters.', prompt: `Do the thing.${ESC}[2K` });
   assert.equal(why, null);
   assert.deepEqual(proposal, { initiation: 'own_initiative', context: 'fresh', title: `${'L'.repeat(58)}…`, prompt: 'Do the thing.[2K', background: mod.CHIP_BACKGROUND });
   assert.equal(Array.from(proposal.title).length, mod.START_TITLE_MAX);
@@ -307,7 +384,7 @@ test('a chip from before proposals is proposed fresh with the fixed background a
 test('a fresh proposal gets its own background and brief back, and keeps its worktree choice', () => {
   const background = 'B'.repeat(80);
   const merged = `${MERGED_HEAD}${background}\n\nTask:\nFix the parser.\n\nTask:\nkeep this line`;
-  const { proposal } = mod.chipProposal({ title: 'Parser', prompt: merged, context: 'fresh', useWorktree: false }, [REPO]);
+  const { proposal } = mod.chipProposal({ title: 'Parser', prompt: merged, context: 'fresh', useWorktree: false });
   assert.deepEqual(proposal, { initiation: 'own_initiative', context: 'fresh', title: 'Parser', prompt: 'Fix the parser.\n\nTask:\nkeep this line', background, use_worktree: false });
   assert.equal(`${MERGED_HEAD}${proposal.background}\n\nTask:\n${proposal.prompt}`, merged);
   assert.equal(mod.chipProposal({ title: 'x', prompt: merged, context: 'fresh', useWorktree: true }).proposal.use_worktree, true);
@@ -319,39 +396,56 @@ test('a fresh proposal gets its own background and brief back, and keeps its wor
 
 test('a fork proposal stays a fork, with neither background nor worktree choice', () => {
   const background = 'B'.repeat(80);
-  assert.deepEqual(mod.chipProposal({ title: 'Fork it', prompt: 'Look again.', context: 'fork', useWorktree: true }, [REPO]).proposal, { initiation: 'own_initiative', context: 'fork', title: 'Fork it', prompt: 'Look again.' });
+  assert.deepEqual(mod.chipProposal({ title: 'Fork it', prompt: 'Look again.', context: 'fork', useWorktree: true }).proposal, { initiation: 'own_initiative', context: 'fork', title: 'Fork it', prompt: 'Look again.' });
   assert.equal(mod.chipProposal({ title: 'f', prompt: `${MERGED_HEAD}${background}\n\nTask:\nBrief.`, context: 'fork' }).proposal.prompt, `${MERGED_HEAD}${background}\n\nTask:\nBrief.`);
 });
 
-test('a chip in the checkout taken over is proposed without its folder, and a chip elsewhere is listed', () => {
-  const folders = ['/work/main/.claude/worktrees/x', null, 'relative/path', 7];
-  for (const cwd of ['/work/main/.claude/worktrees/x', '/work/main/.claude/worktrees/x/sub', '/work/main']) {
-    const { proposal, why } = mod.chipProposal({ title: 't', prompt: 'p', cwd }, folders);
+test('a chip folder counts as the checkout taken over by its repository verdict alone, never by its path', () => {
+  const verdicts = new Map([['/work/main', true], ['/work/main/pkg', true], ['/work/wt-sibling', true], ['/work/main/nested-repo', false], ['/work/other', false]]);
+  const seen = [];
+  const checkout = (folder) => {
+    seen.push(folder);
+    return verdicts.has(folder) ? verdicts.get(folder) : null;
+  };
+  for (const cwd of ['/work/main', '/work/main/pkg', '/work/wt-sibling']) {
+    const { proposal, why } = mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout });
     assert.equal(why, null, cwd);
     assert.equal('cwd' in proposal, false, cwd);
   }
-  for (const cwd of ['/work/other', '/work/main/.claude/worktrees/xy', 'relative/path', '/work/main\nx']) {
-    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, folders), { proposal: null, why: 'folder' }, cwd);
+  for (const cwd of ['/work/main/nested-repo', '/work/other']) {
+    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout }), { proposal: null, why: 'folder' }, cwd);
   }
-  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }), { proposal: null, why: 'folder' });
-  assert.equal(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }, [null, '/work/main/a']).why, null);
-  assert.ok(mod.CHIP_WHY.folder.includes('folder'));
+  for (const cwd of ['/work/main/gone', 'relative/path', '  ']) {
+    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout }), { proposal: null, why: 'folder-unmeasured' }, JSON.stringify(cwd));
+  }
+  for (const cwd of ['/work/main\nx', `/work/main${ESC}`, `/work/main${C1}`, `/work/main${LS}`, ESC]) {
+    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout, sameRepository: false }), { proposal: null, why: 'folder-unsafe' }, JSON.stringify(cwd));
+  }
+  assert.deepEqual(seen, ['/work/main', '/work/main/pkg', '/work/wt-sibling', '/work/main/nested-repo', '/work/other', '/work/main/gone']);
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }), { proposal: null, why: 'folder-unmeasured' });
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }, { checkout: () => 'yes' }), { proposal: null, why: 'folder-unmeasured' });
+  assert.ok(mod.CHIP_WHY.folder.includes('another repository'));
+  assert.ok(mod.CHIP_WHY['folder-unmeasured'].includes('could not be measured'));
+  assert.ok(mod.CHIP_WHY['folder-unsafe'].includes('control characters') && mod.CHIP_WHY['folder-unsafe'].includes('no start may pass as `cwd`'));
 });
 
 test('a chip whose prompt is empty once cleaned is listed rather than proposed', () => {
-  assert.deepEqual(mod.chipProposal({ title: 'Only a title', prompt: `${ESC}${C1}${LS}` }, [REPO]), { proposal: null, why: 'prompt' });
+  assert.deepEqual(mod.chipProposal({ title: 'Only a title', prompt: `${ESC}${C1}${LS}` }), { proposal: null, why: 'prompt' });
   assert.deepEqual(mod.chipProposal(null), { proposal: null, why: 'prompt' });
-  assert.deepEqual(mod.chipProposal({ title: 'Elsewhere', prompt: '', cwd: '/elsewhere' }, [REPO]), { proposal: null, why: 'folder' });
+  assert.deepEqual(mod.chipProposal({ title: 'Elsewhere', prompt: '', cwd: '/elsewhere' }, { checkout: () => false }), { proposal: null, why: 'folder' });
   assert.ok(mod.CHIP_WHY.prompt.includes('prompt'));
 });
 
 test('every chip is listed when this session works in another repository, and only then', () => {
-  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p' }, [REPO], { sameRepository: false }), { proposal: null, why: 'repository' });
-  assert.deepEqual(mod.chipProposal({ title: 'f', prompt: 'p', context: 'fork' }, [REPO], { sameRepository: false }), { proposal: null, why: 'repository' });
-  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/elsewhere' }, [REPO], { sameRepository: false }), { proposal: null, why: 'folder' });
-  assert.deepEqual(mod.chipProposal({ title: 't', prompt: `${ESC}` }, [REPO], { sameRepository: false }), { proposal: null, why: 'prompt' });
+  const checkout = (folder) => folder === REPO;
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p' }, { checkout, sameRepository: false }), { proposal: null, why: 'repository' });
+  assert.deepEqual(mod.chipProposal({ title: 'f', prompt: 'p', context: 'fork' }, { checkout, sameRepository: false }), { proposal: null, why: 'repository' });
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: REPO }, { checkout, sameRepository: false }), { proposal: null, why: 'repository' });
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/elsewhere' }, { checkout, sameRepository: false }), { proposal: null, why: 'folder' });
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: `${ESC}` }, { checkout, sameRepository: false }), { proposal: null, why: 'prompt' });
   for (const options of [{ sameRepository: true }, { sameRepository: null }, {}, undefined, null]) {
-    assert.equal(mod.chipProposal({ title: 't', prompt: 'p' }, [REPO], options).why, null, JSON.stringify(options));
+    assert.equal(mod.chipProposal({ title: 't', prompt: 'p' }, options).why, null, JSON.stringify(options));
   }
-  assert.ok(mod.CHIP_WHY.repository.includes('another repository'));
+  assert.equal(mod.chipProposal({ title: 't', prompt: 'p', cwd: REPO }, { checkout, sameRepository: true }).why, null);
+  assert.ok(mod.CHIP_WHY.repository.includes('ran outside the repository of the session taken over'));
 });
