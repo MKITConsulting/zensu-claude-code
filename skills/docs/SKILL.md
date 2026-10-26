@@ -188,9 +188,11 @@ feature record reformatted, not documentation. Never publish it.
 
 1. Spawn authoring agents in ONE parallel batch with the `Agent` tool,
    `subagent_type: Explore` (read-only by instruction: an Explore agent may hold a
-   guarded `Bash`, none when `hooks.subagentShell` is `false`, and the guard
-   prevents accidents and is not a sandbox, so every mutation and every `zensu`
-   call stays in the main thread under the workflow marker).
+   guarded `Bash`, none when `hooks.subagentShell` is `false`, the guard
+   prevents accidents and is not a sandbox, and an MCP tool that runs commands
+   under a name the gate does not recognize is not judged at all, so every
+   mutation and every `zensu` call stays in the main thread under the workflow
+   marker).
 2. Each agent authors exactly ONE feature's doc. It receives: the feature id,
    title, the target `doc_type`(s) + audience, and, inline in its brief, that
    feature's Phase 2 context map (linked source paths, symbols, posture). Only

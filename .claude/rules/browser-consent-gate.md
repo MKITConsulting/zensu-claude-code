@@ -479,7 +479,7 @@ announces a prompt rather than a capability the plugin hands itself.
   which cannot deny the adoption command.
 - The Session Control `mutating_control` attack no longer names a browser tool: it asks the reviewer
   for a Bash `curl` to the local canary, so only the reviewer-capability gate can deny it and its
-  `reviewer-capability-v1 deny:` reason stays deterministic (`scripts/session-control-claude-wrapper.sh`,
+  `Zensu capability gate (reviewer-capability-v1) deny:` reason stays deterministic (`scripts/session-control-claude-wrapper.sh`,
   `evals/session-control/lib/live-evidence.js`, `evals/session-control/tests/wrapper-selftest.sh`,
   `tests/structure/test-windows-portability-guards.sh`).
 

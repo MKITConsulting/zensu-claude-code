@@ -318,7 +318,8 @@ PreToolUse and can never inherit main authority. Claude reports plugin-shipped
 agents to hooks through their scoped `agent_type`. `SubagentStart` reads that same parent record and
 injects `reviewer-readonly-v1` for the three exact reviewer identities
 `zensu:code-reviewer`, `zensu:review-aspect`, and
-`zensu:review-judge` (and their bare names), and `evidence-worker-v1` for the
+`zensu:review-judge` (their bare names only under the evaluation opt-in
+`ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=1`), and `evidence-worker-v1` for the
 dedicated `zensu:plan-review-worker` and
 `zensu:pr-review-worker`. Every other child receives neutral `host-profile-v1`,
 including the plugin-scoped PLM identity `zensu:zensu-plm`; that exact PLM
@@ -351,21 +352,20 @@ that allowlist after context revalidation and admits two host tools beside it,
 the `SubagentHandback` report tool and the workflow result tool `StructuredOutput`,
 for the reviewers and the PLM only: no shell,
 Git, control, MCP, or other tool is available to those identities, and the
-evidence workers stay inside their private lease. Other `host-profile-v1` children keep,
-of the tools their agent frontmatter and the Claude host grant, only the gate's
-allowlist: file reads and edits, `LSP`, web fetch and search, `ToolSearch`, the
-task-list tools, `Agent`, `SendMessage`, `AskUserQuestion`, the report tools
-`StructuredOutput`, `ReportFindings` and `SubagentHandback`, and a short named
-list of read-only MCP tools; the capability-gate row in
-[Configuration](configuration.md) lists every name. They cannot invoke `shell`,
-`exec`, `exec_command`, `terminal`, `command`, `Monitor`, or any other tool, every
-other MCP tool included: arbitrary command execution cannot be confined by
-scanning its source text for protected tokens, and an MCP server can expose
-exactly that. The one exception is `Bash` for a child that reports its
-`agent_type` and is neither a read-only Zensu agent nor a `zensu-review-*`
-persona, unless `hooks.subagentShell` is `false`. Every such command is checked by an
-accident guard that scans its source text for protected tokens, so the guard
-prevents accidents and is not a sandbox. The plugin gate adds no separate nesting
+evidence workers stay inside their private lease. Other `host-profile-v1` children may
+use every tool their agent frontmatter and the Claude host grant, except what
+reaches Zensu's own state or runs commands outside `Bash`; the capability-gate
+row in [Configuration](configuration.md) names it. They cannot invoke `shell`,
+`exec`, `exec_command`, `terminal`, `command`, `PowerShell`, a `Monitor` command
+or a tool whose name marks it as running commands, such as an MCP server's
+`ctx_execute` or `run_in_terminal`, because Zensu's command gates see only Bash
+and PowerShell commands. Any other tool whose inputs the gate does not know may
+not name Zensu's state in its input. That check reads text, so the host's own
+permission rules decide what such a tool reaches. `Bash` commands
+are granted to a child that reports its `agent_type` and is neither a read-only
+Zensu agent nor a `zensu-review-*` persona, unless `hooks.subagentShell` is
+`false`. Every such command is checked by an accident guard that scans its source
+text for protected tokens, so the guard prevents accidents and is not a sandbox. The plugin gate adds no separate nesting
 policy: a child spawned by a child is classified and gated by the same rules.
 
 The plan/PR worker pair has a second, workflow-specific boundary. Before spawn,
@@ -391,9 +391,11 @@ terms such as `session-control` or `main-v1`; only traversal roots and path
 filters carry this restriction.
 
 For a neutral child, the gate derives the principal only from the trusted hook
-payload. It denies every tool outside its allowlist, command execution
-included, independently of command text, except a granted `Bash` command, which
-an accident guard judges by its text (`hooks.subagentShell`). It blocks
+payload. It denies `PowerShell`, the shell/command aliases other than `Bash`, a
+`Monitor` command and a tool whose name marks it as running commands
+independently of command text, judges a granted `Bash` command by its text
+through an accident guard (`hooks.subagentShell`), and denies any other tool
+whose inputs it does not know when its input names Zensu's state. It blocks
 actual canonical access to protected Session Control and workflow-root paths,
 blocks every file-tool mutation below the installed-plugin/private plugin-data
 roots (including symlink, case, and hard-link aliases) and of a Zensu config
@@ -414,8 +416,9 @@ project-local CAS mutations, but it cannot make project-local files a
 cryptographic authority against user-authorized build/test programs, external
 processes, or a same-UID process racing after a path check. Untrusted repository
 code requires an OS sandbox/container, separate identity, and restricted mounts.
-Likewise, a third-party MCP tool that exposes arbitrary local execution is
-outside this host-tool boundary and must not be granted to an untrusted agent.
+Likewise, a third-party MCP tool that exposes arbitrary local execution under a
+name that does not mark it as running commands is outside this host-tool
+boundary and must not be granted to an untrusted agent.
 
 ---
 
