@@ -168,7 +168,11 @@ grows past 64 directories is denied (`directories`).
   to every non-main principal because this guard reads Bash only, which PS1 to PS6 pin.
 - `inputMention` and `MENTIONS` reuse `textMention`, the text half of `textViolation`, so a tool
   the capability gate does not know meets the same `.zensu`, protected-form and
-  `/proc/<pid>/environ` rules as a `Bash` command, without the shell parse.
+  `/proc/<pid>/environ` rules as a `Bash` command, without the shell parse. `parentMention` adds
+  the `protectedParents` rule of `pathWordViolation` for an input string that is, as a whole, such
+  a parent directory; it is not part of `textMention`, because a `Bash` command that names one in
+  prose or a quoted argument would then be refused for text the shell parse already judges by
+  word.
 - Detached `tmux` and `screen` sessions are background shells, because they outlive the
   subagent like `npm run dev &` and are where a model goes once `&` is refused. Other ways to
   keep a process running are known gaps rather than rules.

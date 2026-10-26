@@ -193,9 +193,12 @@ directories, a command that runs a Zensu session or workflow helper such as
 accidents and is not a sandbox: a deliberately obfuscated command can still
 reach Zensu's state past it, as the main thread can, and an OS sandbox is the
 boundary. For every tool the
-gate blocks actual protected paths, protected traversal roots, edits of a Zensu
-config layer, and mutating Zensu
-operations. Every deny reason starts with
+gate blocks actual protected paths, edits of a Zensu config layer, and mutating
+Zensu operations. `Grep` and `Glob` are also denied a traversal root above
+protected state, and a tool whose inputs the gate does not know a parent
+directory of the private data, the installed plugin or the session record and a
+multiply linked file. Such a tool may still list or search from the project
+root, which reaches `.zensu`. Every deny reason starts with
 `Zensu capability gate (reviewer-capability-v1) deny:` and ends with the switch
 that lifts it or with the advice to report the need to the main thread, and the
 `/zensu:doctor` `subagents:` row shows the boundary and the grant. `Grep`/`Glob` must target a concrete safe subtree; omitted paths and

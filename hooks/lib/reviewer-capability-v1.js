@@ -812,14 +812,17 @@ function neutralViolation(payload, trusted) {
 
   // realpath cannot distinguish hard links. A project-local hard link can
   // therefore name the same inode as a plugin-runtime file without living
-  // below pluginRoot. Standard mutation tools must fail closed for every
-  // existing multiply-linked file; ordinary nlink=1 project/report files and
-  // new files keep their normal host semantics.
+  // below pluginRoot. Standard mutation tools and tools whose inputs the gate
+  // does not know must fail closed for every existing multiply-linked file;
+  // ordinary nlink=1 project/report files and new files keep their normal host
+  // semantics.
   if (
-    MUTATING_FILE_TOOLS.has(payload.tool_name)
+    mayWrite
     && candidates.some((candidate) => candidate && isMultiplyLinkedFile(candidate))
   ) {
-    return `host-profile-v1 cannot mutate multiply linked files, because a hard link can alias Zensu's own state; ${MAIN_THREAD_REMEDY}`;
+    return unknownTool
+      ? `host-profile-v1 cannot pass a multiply linked file to ${payload.tool_name}, because a hard link can alias Zensu's own state and Zensu cannot tell whether that tool writes there; ${MAIN_THREAD_REMEDY}`
+      : `host-profile-v1 cannot mutate multiply linked files, because a hard link can alias Zensu's own state; ${MAIN_THREAD_REMEDY}`;
   }
 
   if (candidates.some((candidate) => candidate

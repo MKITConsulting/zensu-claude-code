@@ -623,10 +623,14 @@ test('a mention of Zensu state in any tool input is named, and nothing else is',
   assert.equal(mention({ command: `ls ${fixture.trusted.pluginData}` }), guard.MENTIONS.protectedPath);
   assert.equal(mention({ query: 'see ~/.claude/plugins/cache/zensu/zensu/9.9.9/hooks' }), guard.MENTIONS.protectedPath);
   assert.equal(mention({ target: '/proc/self/environ' }), guard.MENTIONS.dump);
-  for (const input of [{ code: 'ls src' }, { query: 'zensu docs' }, { text: 'my.zensu.example' }, {}]) {
+  assert.equal(mention({ path: path.join(fixture.home, '.claude', 'plugins', 'data') }), guard.MENTIONS.protectedParent);
+  assert.equal(mention({ path: '~/.claude/plugins/' }), guard.MENTIONS.protectedParent);
+  assert.equal(mention({ directory: '~/.claude' }), guard.MENTIONS.protectedParent);
+  assert.equal(mention({ path: path.join(fixture.home, '.claude', 'plugins', 'cache', 'zensu') }), guard.MENTIONS.protectedParent);
+  for (const input of [{ code: 'ls src' }, { query: 'zensu docs' }, { text: 'my.zensu.example' }, {}, { path: '~/.claude/projects' }, { path: fixture.trusted.projectRoot }, { path: path.join(fixture.home, 'work') }, { query: 'settings live in ~/.claude' }]) {
     assert.equal(mention(input), null, JSON.stringify(input));
   }
-  assert.deepEqual(Object.keys(guard.MENTIONS).sort(), ['dump', 'protectedPath', 'workflowDirectory']);
+  assert.deepEqual(Object.keys(guard.MENTIONS).sort(), ['dump', 'protectedParent', 'protectedPath', 'workflowDirectory']);
 });
 
 test('only Bash is a shell call; Monitor and the other command names never reach the guard', () => {

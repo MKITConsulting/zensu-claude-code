@@ -86,10 +86,11 @@ context-mode, desktop and every other MCP tool from users who had installed them
 
 `hostProfileToolViolation` and `neutralViolation` still deny, for every tool:
 
-- protected Session Control and workflow paths and `.zensu/`, directly or through a traversal
-  root;
+- protected Session Control and workflow paths and `.zensu/`, directly, and for `Grep` and
+  `Glob` through a traversal root above them;
 - a write below the installed plugin or its private data, an edit of a Zensu config layer, and a
-  mutation of a multiply linked file, for the file-mutation tools;
+  mutation of a multiply linked file, for the file-mutation tools and every tool the gate does
+  not know (`mayWrite`);
 - a Zensu MCP mutation (`/^mcp__.*zensu/i` without a `ZENSU_MCP_READ_RE` segment);
 - the five `COMMAND_TOOLS` aliases other than `Bash`, which G8 pins, with `COMMAND_TOOL_DENY`,
   the search remedy and the main-thread tail;
@@ -110,7 +111,13 @@ every other tool the gate cannot tell a read from a write, so:
   without its shell parse. That keeps `.zensu` out of a browser or context-mode search call,
   which the allowlist used to deny outright. It also refuses a GitHub comment that merely
   mentions `.zensu/plans`; that false positive is the Bash guard's own, and it is still less than
-  the old outright deny.
+  the old outright deny;
+- an input string that is, as a whole, one of the guard's `protectedParents` (a parent directory
+  of the private data, the installed plugin or the session record, below `HOME` and outside the
+  project's own parents) is denied through `parentMention`, the rule the Bash guard applies to a
+  path word, because a listing there shows Zensu state. Prose that merely names such a directory
+  passes;
+- a path input that is a multiply linked file is denied like a mutation of one.
 
 A known tool keeps exactly its old checks, so no input the allowlist admitted is denied now.
 
@@ -161,7 +168,13 @@ a plugin root without the capability gate.
   `skills/gauntlet-loop/references/harness.md` and `evals/session-control/README.md`.
 - **Known gaps.** The mention scan reads text: a name assembled at run time and code read from a
   file pass it. The command-tool rule reads only the tool's name, so a tool that runs commands
-  under an unremarkable name passes it, and a tool such as `process_image` is refused. Whether a
+  under an unremarkable name passes it, and a tool such as `process_image` is refused. A tool the
+  gate does not know may list or search from the project root, which reaches `.zensu`, because
+  denying the project root and its parents would refuse ordinary project tools. A Zensu MCP
+  server registered under a name without `zensu` is not recognized, so its mutations pass as
+  unknown tools; matching Zensu tool names on every server would also refuse other servers'
+  tools of the same name, such as `create_wiki_page` or `create_milestone`, and is left to a
+  product decision. Whether a
   subagent's `CronCreate`, `ScheduleWakeup`, `RemoteTrigger` or `TaskStop` reaches the main
   session was not measured; the gate admits all four. A path in a key the path
   heuristic does not read is judged by the mention scan alone. `SendMessage` can reach other

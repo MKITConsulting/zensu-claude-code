@@ -86,11 +86,12 @@ State the property, not the grant list — "no write tool, no spawn" — and alw
 "inspect only, change nothing" in the packet, because an instruction is what removes
 intent while a grant only removes reach.
 
-**Inside the Zensu plugin an `Explore` critic runs shell commands only through a
-guarded `Bash`.** The `.*` PreToolUse capability gate denies the other shell aliases,
-`PowerShell`, a `Monitor` command and an MCP tool that runs commands to a neutral
-`host-profile-v1` child, because Zensu's command gates see only Bash and PowerShell
-commands, and otherwise blocks only what reaches Zensu's own state. It admits `Bash` only for a child that
+**Inside the Zensu plugin the guard covers only an `Explore` critic's `Bash`.** The
+`.*` PreToolUse capability gate denies the other shell aliases, `PowerShell`, a
+`Monitor` command and an MCP tool whose name marks it as running commands to a
+neutral `host-profile-v1` child, because Zensu's command gates see only Bash and
+PowerShell commands, and otherwise blocks only what reaches Zensu's own state; an
+MCP tool that runs commands under another name passes. It admits `Bash` only for a child that
 reports its `agent_type`, only while `hooks.subagentShell` is not `false`, and only
 past a guard that prevents accidents and is not a sandbox. `Explore` is such a child *while the
 host reports its `agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin"
@@ -117,8 +118,8 @@ be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
 The packet handed to a critic contains the goal, the frozen bar, house rules,
 the candidate, the reference, redacted gate output and the lead's capture of every
 inspection-recipe step, as redacted output or as files the critic can `Read`,
-because a critic here holds no browser, preview or simulator tool and the lead's one
-measurement is what every critic judges against. It contains no builder transcript,
+because the lead's one measurement is what every critic judges against; the packet
+forbids a critic any browser, preview or simulator tool it may hold. It contains no builder transcript,
 no rationale, no "we tried X because Y", and no hint about which way the lead is
 leaning.
 

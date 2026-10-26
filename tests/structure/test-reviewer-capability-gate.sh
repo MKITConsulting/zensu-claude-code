@@ -646,6 +646,14 @@ case "$(uname -s)" in
     rm -f "$PROJECT/plugin-runtime-hardlink"
     ln "$PLUGIN_DATA/private-hardlink-source" "$PROJECT/plugin-data-hardlink"
     assert_case "neutral Write cannot mutate plugin data through a project hard link" deny arbitrary-custom Write '{"file_path":"plugin-data-hardlink","content":"attack"}'
+    assert_case "a tool the gate does not know cannot take a project hard link to plugin data" deny general-purpose mcp__filesystem__edit_file '{"path":"plugin-data-hardlink","edits":[]}'
+    assert_case "a tool the gate does not know keeps an ordinary nlink=1 project file" allow general-purpose mcp__filesystem__edit_file '{"path":"existing-neutral.txt","edits":[]}'
+    HARDLINK_REASON="$(deny_reason general-purpose mcp__filesystem__edit_file '{"path":"plugin-data-hardlink","edits":[]}')"
+    case "$HARDLINK_REASON" in
+      "${DENY_PREFIX}host-profile-v1 cannot pass a multiply linked file to mcp__filesystem__edit_file, because a hard link can alias Zensu's own state and Zensu cannot tell whether that tool writes there; report the need to the main thread instead")
+        check "the hard-link deny of a tool the gate does not know names the tool and the main thread" PASS ;;
+      *) check "the hard-link deny of a tool the gate does not know names the tool and the main thread (got: $HARDLINK_REASON)" FAIL ;;
+    esac
     ln -s .zensu/state/new-dir "$PROJECT/dangling-protected"
     assert_case "neutral write cannot enter protected state through a dangling symlink leaf" deny arbitrary-custom Write '{"file_path":"dangling-protected/new.txt"}'
     ;;
