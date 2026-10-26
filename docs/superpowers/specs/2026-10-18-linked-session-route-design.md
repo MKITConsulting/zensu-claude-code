@@ -289,7 +289,15 @@ The result, case by case:
   directly, without the review chain. It reaches that one prompt, the brief note tells the model the prompt is
   another session's brief and to name the route it asked for, and a field that reads `ask` asks the route question
   instead (review round 1, R1-F4). Letting a request for the workflow count even in a brief would close it, at the
-  price of letting a genuine brief add the workflow; that design decision is left open.
+  price of letting a genuine brief add the workflow, which is the defect of §1 in its escalating direction. Decided
+  on 2026-10-25: the brief keeps deciding nothing in either direction, and this residual is accepted, for the
+  accidental paths among the bounds below as well: after a first turn that ended in an error, `completedTurns` is
+  still absent, so the user's own next prompt is taken for the brief once more. Every path ends the same way: one
+  prompt, a note that names the requested route, and the route question under an `ask` field. In the default
+  per-user store only a deliberate actor with the user's own write access forges these records, and the plugin
+  guards against accidents, not against such an actor; a `ZENSU_CCD_STORE` that names a directory another account
+  can write extends the residual to that account, because the resolver checks no owner or mode there. A fork the
+  user starts is not resolved as linked (§5), so no prompt typed there is taken for a brief.
 - **This adds a cross-session read to a hook.** On the first prompt the hook reads two desktop records, one Session
   Control record and one or two markers of another session, read-only, and keeps nothing but the two one-line markers
   of D9. Nothing leaves the machine. `docs/configuration.md` names the read.

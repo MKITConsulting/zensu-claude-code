@@ -139,10 +139,20 @@ link target empty and leave no temp. R8k collects every shell file under `hooks/
 them, and requires each to source the library, to keep no `mktemp` or `mv -f` of its own and to
 redirect into no path of its own. It also reads each marker-path function of `zensu-config.sh`
 together with the leaf template in its body, fails when a definition or a template is spelled in
-a form it cannot read, and fails for any other shell file under `hooks/` that calls one of those
-functions without calling the writer, or spells a leaf template itself. R8k2 plants each of these
-bypasses in a scratch tree and requires R8k's reason for it. A marker path built another way, in
-node for example, or written by another tool such as `tee`, still escapes it.
+a form it cannot read, fails for any other shell file under `hooks/` that calls one of those
+functions without calling the writer, and fails for any other file under `hooks/`, whatever its
+type, that spells a leaf itself: a derived stem followed by `-` and then a character that is not
+a letter or digit, or the end of the line, which covers a shell variable, a JavaScript template
+literal, a concatenation with either quote or a backtick and a `printf` format. Only whole comment
+lines are skipped, `#` lines in shell files and `//` lines in JavaScript and TypeScript files; a
+block comment counts as code, so code behind a closed `/* … */` is read. Editor leftovers
+(`*.orig`, `*.rej`, `*~`, `.*.sw?`) are not read. A module that names something other than a
+marker with a stem followed by such a character takes another spelling, as `full-suite-clone-v1`
+does. L2 in `test-linked-session-route.sh` checks only that the two linked-session templates live
+in `zensu-config.sh`. R8k2 plants each of these bypasses in a scratch tree, in shell, JavaScript,
+module, CommonJS, TypeScript and JSON files, and requires R8k's reason for it. A marker path built
+another way, such as a path joined from the bare stem in node, or written by another tool such as
+`tee`, still escapes it.
 
 ## Linked sessions inherit `tdd`
 
@@ -461,7 +471,16 @@ ignores both files and asks, which is the fail-safe direction.
   request for the workflow typed into that prompt is implemented directly. The effect covers that
   one prompt, the brief note asks the model to name the route the prompt asked for, and an `ask`
   field asks the route question instead. Letting a request for the workflow count even in a brief
-  would close it; that design decision is left open.
+  would close it, at the price of letting a genuine brief add the workflow, so the brief decides
+  nothing in either direction and this residual is accepted, for the accidental paths below as
+  well: after a first turn that ended in an error, `completedTurns` is still absent, so the user's
+  own next prompt is taken for the brief once more. Every path ends the same way: one prompt, a
+  note that names the requested route, and the route question under an `ask` field. In the default
+  per-user store only a deliberate actor with the user's own write access forges these files, and
+  the plugin guards against accidents, not against such an actor; a `ZENSU_CCD_STORE` that names a
+  directory another account can write extends the residual to that account, because the resolver
+  checks no owner or mode there. A fork the user starts is not resolved as linked, so no prompt
+  typed there is taken for a brief.
 - A brief that is a bare slash command is skipped by the reminder, like every bare slash command,
   so the lineage resolves on the next typed prompt. That prompt carries no brief note once the slash
   command's turn completed and raised `completedTurns`; after a turn that ended in an error, the

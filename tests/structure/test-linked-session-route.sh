@@ -44,10 +44,8 @@ echo "== Static: module, library, marker templates =="
 L2_BAD=""
 for needle in '.zensu/state/inherited-route-' '.zensu/state/linked-session-'; do
   grep -qF "$needle" "$CONFIG_LIB" || L2_BAD="$L2_BAD [$needle missing from zensu-config.sh]"
-  L2_OTHERS="$(grep -rlF "$needle" "$PLUGIN_DIR/hooks" 2>/dev/null | grep -vxF "$CONFIG_LIB" || true)"
-  [ -z "$L2_OTHERS" ] || L2_BAD="$L2_BAD [$needle also in $L2_OTHERS]"
 done
-[ -z "$L2_BAD" ] && check "L2 both new marker path templates live once, in zensu-config.sh" PASS \
+[ -z "$L2_BAD" ] && check "L2 both new marker path templates live in zensu-config.sh, where R8k in test-delivery-route.sh holds every marker leaf in every file type under hooks/" PASS \
   || check "L2 marker templates:$L2_BAD" FAIL
 L3_VOCAB="$(node -e '
   const m = require(process.argv[1]);
