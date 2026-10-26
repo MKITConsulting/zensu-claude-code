@@ -94,7 +94,9 @@ JSON objects parses neither, so a second object would cost the block decision it
 - **Every stdout writer sets `DECISION_EMITTED`**: `emit_block`, the five literal emitters and the
   three inline blocks of the inner-state snapshot. `emit_block` carries the notices collected
   before it on the same object, `decision` first. A notice written after a block stays on stderr;
-  the nudge and both background-wait releases already return on `DECISION_EMITTED`.
+  the nudge and the three background-wait releases (the workflow wait, the background review wait
+  and the explicit `ZENSU-AWAIT:` wait of `.claude/rules/stop-background-wait.md`) already return
+  on `DECISION_EMITTED`.
 - **The supervisor writes only into an empty stdout.** Its deadline release becomes a
   `systemMessage` only when the worker's stdout file is empty, and a worker killed at the deadline
   never ran its trap, so the two never both write.
@@ -107,8 +109,9 @@ JSON objects parses neither, so a second object would cost the block decision it
 - **Pins:** `E1b`/`E3c` in `test-stop-enforcer-escapes.sh`; `L1b`, `L4`, `L20`, `L22` and `L27`
   here; `C5c`, `C27a`, `C27c`, `C28a` and the source count `C32pre` in
   `test-impl-stop-counter.sh`; `X13` in `test-external-review-hook.sh`; `BR11` in
-  `test-background-review.sh`; `S3b` (the merge) and `S10` in `test-autopilot-stop-enforcer.sh`;
-  the release rows and the `stop_notice` anchor of `AC-C19` in `test-versioned-plugin-upgrade.sh`.
+  `test-background-review.sh`; `B4` in `test-stop-background-wait.sh`; `S3b` (the merge) and `S10`
+  in `test-autopilot-stop-enforcer.sh`; the release rows and the `stop_notice` anchor of `AC-C19` in
+  `test-versioned-plugin-upgrade.sh`.
 - **Version: `patch`.** No hook added or re-matched and no `permissionDecision`; the decision a
   Stop emits is unchanged, and only advisory output joins stdout.
 

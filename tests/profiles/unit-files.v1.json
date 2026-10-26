@@ -214,6 +214,11 @@
       "summary": "The state path walk the tdd-phase lease processes and _tdd_paths_safe share: link, kind and link-count refusals, unreadable components, trusted-root and fallback anchors, and malformed requests."
     },
     {
+      "path": "tests/structure/stop-background-wait-v1.test.js", "registered": 19,
+      "runs": [{ "driver": "tests/structure/test-stop-background-wait.sh" }],
+      "summary": "The Stop guard's background wait: the measured host vocabulary, the ZENSU-AWAIT line grammar, the wait, hint and nowait verdicts, the per-task release bound, the per-generation hint bound, the store and the CLI."
+    },
+    {
       "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 27, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-reviewer-capability-gate.sh" }],
       "summary": "The subagent shell guard: the accident rules, the shell parser and command walker, the mention scan for other tools, the config layers that withdraw the grant, and Windows spellings."

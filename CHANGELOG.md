@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Stop guard background wait**: a turn of an armed review chain that only waits for its own
+  background work no longer has to poll. When its final message carries the line
+  `ZENSU-AWAIT: <task id>` on a line of its own, and Claude Code lists that task as running or
+  pending in the Stop input (a background shell or the Monitor tool, a background agent or a
+  workflow), the Stop guard lets the turn end without charging the review budget, at most five
+  times per task and chain generation, and the harness wakes the session when the task reports.
+  This works in the first review, in fix rounds and in the self-review stage. The first Stop that
+  sees such tasks and no line blocks once with a reason that names them and the line, and does so
+  again only for a new task, at most three times per chain generation. Neither happens once the
+  chain has used up its Stop budget, so the budget's own release still applies. The line is
+  required because a dev server that never ends looks the same to the guard as a run the turn
+  waits for. Set `hooks.backgroundTaskWait` to `false` to keep the previous behaviour.
+
 ## [0.31.1] - 2026-10-26
 
 ### Added

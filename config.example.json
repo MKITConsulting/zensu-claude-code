@@ -31,6 +31,7 @@
     "reviewConvergence": true,
     "criticalReproduction": true,
     "externalReviewImport": true,
+    "backgroundTaskWait": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
     "subagentShell": true,

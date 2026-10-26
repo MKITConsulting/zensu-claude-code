@@ -510,7 +510,7 @@ stop_payload() {
 }
 
 WORKFLOW_TASKS='[{"id":"t1","type":"workflow","status":"running","description":"review","name":"review-changes"}]'
-SHELL_TASKS='[{"id":"t2","type":"shell","status":"running","description":"tail","command":"tail -f x"}]'
+QUIET_TASKS='[{"id":"t2","type":"dream","status":"running","description":"memory consolidation"}]'
 
 arm() {
   local raw="$1"
@@ -559,6 +559,7 @@ for _ in 2 3 4; do
   OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>/dev/null)"
   DECISIONS="$DECISIONS $(printf '%s' "$OUT" | decision)"
 done
+LIMIT_REASON="$(printf '%s' "$OUT" | reason)"
 OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/wait5.err")"
 DECISIONS="$DECISIONS $(printf '%s' "$OUT" | decision)"
 OUT="$(stop_payload stop-wait | bash "$STOP" 2>/dev/null)"
@@ -566,9 +567,11 @@ RESET_DECISION="$(printf '%s' "$OUT" | decision)"
 OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/wait7.err")"
 AGAIN_DECISION="$(printf '%s' "$OUT" | decision)"
 if [ "$DECISIONS" = " allow allow block block" ] && ! grep -qF 'releasing this Stop while' "$WORK/wait5.err" \
+  && printf '%s' "$LIMIT_REASON" | grep -qF 't1 (workflow: "review")' \
+  && printf '%s' "$LIMIT_REASON" | grep -qF "'ZENSU-AWAIT: <task id>'" \
   && [ "$RESET_DECISION" = "block" ] && [ "$AGAIN_DECISION" = "allow" ] && grep -qF 'wait 1 of 3' "$WORK/wait7.err" \
-  && [ "$(stop_count "$WAIT_KEY")" = "$((AFTER + 3))" ]; then
-  check "X14 at most three waits; the limit holds every later Stop until one sees no workflow, which resets it" PASS
+  && [ "$(stop_count "$WAIT_KEY")" = "$((AFTER + 2))" ]; then
+  check "X14 at most three waits; the first Stop past the limit offers the explicit ZENSU-AWAIT wait without charging the budget, and the limit holds until a Stop sees no workflow, which resets it" PASS
 else
   check "X14 bounded waits (decisions=$DECISIONS reset=$RESET_DECISION again=$AGAIN_DECISION count=$(stop_count "$WAIT_KEY"))" FAIL
 fi
@@ -584,7 +587,7 @@ else
 fi
 
 DIFF_OK=true
-for tasks in absent '[]' "$SHELL_TASKS" '"workflow"' '[{"type":"workflow","status":"completed","name":"old"}]'; do
+for tasks in absent '[]' "$QUIET_TASKS" '"workflow"' '[{"type":"workflow","status":"completed","name":"old"}]'; do
   arm "stop-diff-$RANDOM" || DIFF_OK=false
   RAW_NOW="$(basename "$ZENSU_TEST_PLUGIN_DATA")"
   OUT="$(stop_payload "$RAW_NOW" "$tasks" | bash "$STOP" 2>"$WORK/diff.err")"
@@ -592,7 +595,7 @@ for tasks in absent '[]' "$SHELL_TASKS" '"workflow"' '[{"type":"workflow","statu
   if [ "$(printf '%s' "$OUT" | reason | sed "s#$ARMED_DATA#DATA#g")" != "$(printf '%s' "$CONTROL_REASON" | sed "s#$WORK/stop-data/stop-control#DATA#g")" ]; then DIFF_OK=false; fi
 done
 if [ "$DIFF_OK" = "true" ]; then
-  check "X15 an absent, empty, non-workflow, malformed or finished background field renders exactly the control block" PASS
+  check "X15 an absent, empty, malformed or finished background field, or a task type that neither waits nor hints, renders exactly the control block" PASS
 else
   check "X15 differential render" FAIL
 fi
@@ -607,10 +610,12 @@ fi
 
 arm stop-converged || { check "X17 arm" FAIL; finish; exit 1; }
 bash "$LOG" --code-review-done --session "$ARMED_KEY" >/dev/null 2>&1
-OUT="$(stop_payload stop-converged "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/conv.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && printf '%s' "$OUT" | reason | grep -qF "skill='zensu:self-review'" \
+FIRST="$(stop_payload stop-converged "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/conv.err")"
+OUT="$(stop_payload stop-converged "$WORKFLOW_TASKS" | bash "$STOP" 2>>"$WORK/conv.err")"
+if [ "$(printf '%s' "$FIRST" | decision)" = "block" ] && printf '%s' "$FIRST" | reason | grep -qF 't1 (workflow: "review")' \
+  && [ "$(printf '%s' "$OUT" | decision)" = "block" ] && printf '%s' "$OUT" | reason | grep -qF "skill='zensu:self-review'" \
   && ! grep -qF 'releasing this Stop while' "$WORK/conv.err"; then
-  check "X17 a converged chain keeps its self-review directive while a workflow runs" PASS
+  check "X17 a converged chain never takes the implicit workflow wait: it offers the explicit wait once, then keeps its self-review directive" PASS
 else
   check "X17 converged (out=$OUT)" FAIL
 fi
@@ -646,8 +651,9 @@ node -e '
   fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
 ' "$CLAUDE_PROJECT_DIR/.zensu/state/tdd-phase-$ARMED_KEY.json"
 OUT="$(stop_payload stop-fix-round "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/fix.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/fix.err"; then
-  check "X20 a fix round keeps its block while a workflow runs; only the first review waits" PASS
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/fix.err" \
+  && printf '%s' "$OUT" | reason | grep -qF "'ZENSU-AWAIT: <task id>'"; then
+  check "X20 a fix round takes no implicit workflow wait: its Stop blocks with the explicit ZENSU-AWAIT hint while a workflow runs" PASS
 else
   check "X20 fix round (out=$OUT err=$(cat "$WORK/fix.err"))" FAIL
 fi

@@ -291,7 +291,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:984 · zensu-log.sh:1525</p>
+      <p class="src">zensu-edit-landing.sh:984 · zensu-log.sh:1526</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -314,7 +314,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus now counts the same way. A chain that
       claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1536 · zensu-log.sh:1503-1580 · zensu-log.sh:118-119</p>
+      <p class="src">zensu-log.sh:1537 · zensu-log.sh:1504-1581 · zensu-log.sh:118-119</p>
     </div>
   </div>
 </section>
@@ -458,7 +458,7 @@
           <code>unavailable</code>, any non-zero root makes it non-zero, and a code root never
           answers <code>unknown</code>. Otherwise a clean anchor still closes an empty chain. Stage
           1, item 2 already arms <code>--tdd-complete</code> on a logged claim.</td>
-          <td class="where mono">zensu-log.sh:1574<br>zensu-log.sh:118-119</td>
+          <td class="where mono">zensu-log.sh:1575<br>zensu-log.sh:118-119</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 2</span></th>

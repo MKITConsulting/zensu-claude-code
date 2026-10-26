@@ -1482,6 +1482,7 @@ case "${1:-}" in
             echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
           fi
           zensu_external_review_wait_reset "$session_val"
+          zensu_stop_background_wait_reset "$session_val"
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else

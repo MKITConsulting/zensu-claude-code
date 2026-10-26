@@ -3138,6 +3138,22 @@ zensu_external_review_wait_reset() {
   return 0
 }
 
+zensu_stop_background_wait_file() {
+  local key="${1:-}"
+  command -v zensu_session_key_canonical >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  zensu_session_key_canonical "$key" || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  printf '%s/stop-background-wait/v1/%s.json' "$CLAUDE_PLUGIN_DATA" "$key"
+}
+
+zensu_stop_background_wait_reset() {
+  local file
+  file="$(zensu_stop_background_wait_file "${1:-}")" || return 0
+  if [ -e "$file" ] || [ -L "$file" ]; then rm -f -- "$file" 2>/dev/null; fi
+  return 0
+}
+
 _tdd_write_pending_review_critical() {
   local pf="$1"
   local files="$2"
