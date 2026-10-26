@@ -41,7 +41,8 @@ removes the workflow together with the question.
 2. the session marker `<project>/.zensu/state/delivery-route-<session-key>.json`
    (`{"route":"tdd"|"direct"}`; `{"route":"auto"}` is a recorded release and falls through);
 3. `hooks.defaultDeliveryRoute` ∈ `tdd | direct | ask`;
-4. ask.
+4. ask. Under `ask` the plan gate asks no question for a plan that names its own executor; it
+   prints a notice instead (`.claude/rules/plan-approval-delivery-route.md`).
 
 `zensu_delivery_route_resolve <root> <key>` answers `route<TAB>source`,
 `zensu_delivery_route_field` renders the ONE spelling both directives and the doctor carry, and

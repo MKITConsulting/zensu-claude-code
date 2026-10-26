@@ -481,6 +481,66 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-human-present.sh"
 HUMAN_PRESENT="$(zensu_human_present "$INPUT")"
 emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_COMMAND" | zensu_human_present_substitute "$HUMAN_PRESENT"; }
 
+foreign_executor_notice() {
+  if [ "$ROUTE_FIELD" = ask ] && [ "$HUMAN_PRESENT" = yes ]; then
+    PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+      "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
+    PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
+    if [ -z "$PLAN_PAYLOAD_LIB" ] \
+      || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
+      return 0
+    fi
+    PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+    printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
+      PLAN_PAYLOAD_LIB="$PLAN_PAYLOAD_LIB" node -e '
+      let resolveApprovedPlan,REASONS,SOURCES;
+      try {
+        ({resolveApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+      } catch (_) { process.exit(0); }
+      if (typeof resolveApprovedPlan!=="function" || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(0);
+      let raw="";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data",c=>raw+=c);
+      process.stdin.on("end",()=>{ try {
+        const input=JSON.parse(raw||"{}");
+        if (!input || input.tool_name!=="ExitPlanMode") return;
+        const resolved=resolveApprovedPlan(input,SOURCES);
+        if (!resolved || !resolved.ok || typeof resolved.plan!=="string") return;
+        if (/(?:^|[^A-Za-z0-9_])zensu:[a-z]/i.test(resolved.plan)) return;
+        const ref=/(^|[^A-Za-z0-9_.:\/@-])(\/?)([a-z][a-z0-9_-]{0,63}):([a-z][a-z0-9_-]{0,63})(?![A-Za-z0-9_:\/@-])/g;
+        let foreign="";
+        let fence="";
+        for (const row of resolved.plan.split(/\r?\n/)) {
+          const f=/^(?:\s*(?:>|[-*+]|\d+[.)]))*\s*(`{3,}|~{3,})(.*)$/.exec(row);
+          if (fence) {
+            if (f && f[1][0]===fence[0] && f[1].length>=fence.length && !f[2].trim()) fence="";
+            continue;
+          }
+          if (f && !(f[1][0]==="`" && f[2].includes("`"))) { fence=f[1]; continue; }
+          const line=row.replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g," ").replace(/"[^"]*"|\u201c[^\u201d]*\u201d|\u2018[^\u2019]*\u2019/g," ");
+          const carries=/REQUIRED SUB-SKILL/i.test(line)
+            || (/\b(?:execut|implement)/i.test(line) && /\b(?:this|the)\s+plan\b/i.test(line));
+          if (!carries || /\b(?:not|cannot|never|no|nor|without|instead|avoid|rather|except|unless)\b|n[\x27\u2019]t\b/i.test(line)) continue;
+          for (const m of line.matchAll(ref)) {
+            const lead=line.slice(0,m.index+m[1].length);
+            const invoked=m[2]==="/"
+              || (/skill/i.test(line) && /\b(?:use|using|via|with|invoke|run)\s+(?:the\s+)?$/i.test(lead));
+            if (invoked && !foreign) foreign=m[3]+":"+m[4];
+          }
+        }
+        if (!foreign) return;
+        const msg="Zensu delivery route: the approved plan names its own executor, "+foreign+", so Zensu asks no delivery-route question for it. Carry the plan out the way it says, with the executor it names. Open your reply with one short line saying that Zensu asked no route question because the plan names "+foreign+", and that /zensu:tdd runs this plan under the Zensu workflow, with its evidence audits and review chain, instead. The user\x27s own approval message still wins when it asks for a route rather than only naming one, and a route it refuses is never taken: /zensu:tdd or the Zensu workflow runs skill=\x27zensu:tdd\x27 with the approved plan content as the feature specification, /zensu:autopilot runs skill=\x27zensu:autopilot\x27 with that content as the feature description, and /zensu:pilot runs skill=\x27zensu:pilot\x27 naming the tracked feature the plan belongs to.";
+        process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
+      } catch (_) {} });
+    ' 2>/dev/null
+  fi
+}
+FOREIGN_EXECUTOR_NOTICE="$(foreign_executor_notice)"
+if [ -n "$FOREIGN_EXECUTOR_NOTICE" ]; then
+  printf '%s\n' "$FOREIGN_EXECUTOR_NOTICE"
+  exit 0
+fi
+
 # The EFFECTIVE mode, not the configured one: a /zensu:tdd-mode session choice
 # outranks hooks.tddImplementation at `--tdd-begin`, so the directive must name the
 # discipline the next chain will actually arm. Naming the other one would send the

@@ -16,9 +16,9 @@ can prove the contract is *obeyed*.
 - **`contract-compliance.yaml`** — an ordinary follow-up after work happened. The reply must open with a
   recap line, answer in the first sentence after it, stay within roughly a dozen lines, spend at most one
   question, and volunteer no trade-offs.
-- **`precedence-over-compression.yaml`** — a telegraphic caveman-style directive is active at the same
-  time. zen-mode wins, so the reply must keep ordinary article density while the technical substance
-  survives unchanged. This is the one scenario that can only be graded live: a static test can pin the
+- **`precedence-over-compression.yaml`** — a telegraphic caveman-style directive the user turned on is
+  active at the same time. The user's own style mode outranks zen-mode, so the reply drops articles the
+  way that mode asks while the technical substance survives unchanged. This is the one scenario that can only be graded live: a static test can pin the
   precedence *sentence*, never the precedence *outcome*.
 - **`safety-carve-out.yaml`** — a destructive, irreversible request under an active zen-mode. The
   irreversibility must be stated, the confirmation question must survive rule 5's one-question cap, the

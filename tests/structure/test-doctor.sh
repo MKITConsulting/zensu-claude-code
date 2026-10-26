@@ -10626,6 +10626,54 @@ if [ -z "$SA_ROW_MISSING" ] && grep -qF 'read `references/coexistence.md`' "$SKI
 else
   check "P8sa5 every subagents row phrase is emitted by the report and documented in skills/doctor/references/coexistence.md, which the skill names (missing:$SA_ROW_MISSING)" FAIL
 fi
+ZM_DEFAULT_OFF="$SBOX/zen-default-off.json"
+ZM_HOOK_OFF="$SBOX/zen-hook-off.json"
+printf '%s\n' '{"hooks":{"zenModeDefault":false}}' > "$ZM_DEFAULT_OFF"
+printf '%s\n' '{"hooks":{"zenMode":false}}' > "$ZM_HOOK_OFF"
+ZM_ON="$(run_report "$PLUGIN_DIR" - "$EMPTY_PROJECT")"
+ZM_OPT="$(run_report "$PLUGIN_DIR" "$ZM_DEFAULT_OFF" "$EMPTY_PROJECT")"
+ZM_OFF="$(run_report "$PLUGIN_DIR" "$ZM_HOOK_OFF" "$EMPTY_PROJECT")"
+ZM_PREDATES="$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")"
+if printf '%s' "$ZM_ON" | grep -qF "✅  zen-mode default: on (hooks.zenModeDefault) — every session gets low-noise answers, and the user's own CLAUDE.md, output style or a style mode they chose outranks it; \"zen off\" leaves it for one session, hooks.zenModeDefault=false makes it opt-in" \
+  && printf '%s' "$ZM_OPT" | grep -qF '✅  zen-mode default: opt-in (hooks.zenModeDefault=false)' \
+  && printf '%s' "$ZM_OFF" | grep -qF '✅  zen-mode default: off for every session (hooks.zenMode=false)' \
+  && ! printf '%s' "$ZM_PREDATES" | grep -qF 'zen-mode'; then
+  check "P8zm1 the config row names the zen-mode default, the opt-in switch and the hook switch, and a plugin root without the hook renders none" PASS
+else
+  check "P8zm1 zen-mode config row (default='$(printf '%s' "$ZM_ON" | grep -F 'zen-mode default' | head -c 120)')" FAIL
+fi
+ZM_ROWS_BAD=""
+for ZM_CASE in 'on (session marker)|✅' 'on (hooks.zenModeDefault)|✅' 'off (session marker)|✅' 'off (hooks.zenModeDefault)|✅' \
+  'off (hooks.zenMode=false)|✅' 'off (unreadable state)|⚠️' 'unknown|⚠️' 'unjudged|⚠️' 'weird|⚠️'; do
+  ZM_V="${ZM_CASE%|*}"; ZM_G="${ZM_CASE#*|}"
+  ZM_ROW="$(ZDOC_ZEN_MODE="$ZM_V" run_report "$PLUGIN_DIR" - "$EMPTY_PROJECT" | grep -F 'zen-mode: ')"
+  case "$ZM_ROW" in
+    (*"$ZM_G  zen-mode: "*) ;;
+    (*) ZM_ROWS_BAD="$ZM_ROWS_BAD [$ZM_V: $ZM_ROW]" ;;
+  esac
+done
+case "$(ZDOC_ZEN_MODE='on (session marker)' run_report "$SBOX/plug" - "$EMPTY_PROJECT")" in
+  (*"zen-mode"*) ZM_ROWS_BAD="$ZM_ROWS_BAD [a plugin root without the hook rendered a session row]" ;;
+esac
+[ -z "$ZM_ROWS_BAD" ] \
+  && check "P8zm2 the zen-mode session row renders every resolved state with its source, and a missing or unrecognized check is never green" PASS \
+  || check "P8zm2 zen-mode session row:$ZM_ROWS_BAD" FAIL
+ZM_MISSING=""
+for ZM_PHRASE in 'zen-mode default: on (hooks.zenModeDefault)' 'zen-mode default: opt-in (hooks.zenModeDefault=false)' \
+  'zen-mode default: off for every session (hooks.zenMode=false)' 'zen-mode: on (session marker)' 'zen-mode: on (hooks.zenModeDefault)' \
+  'zen-mode: off (session marker)' 'zen-mode: off (hooks.zenModeDefault)' 'zen-mode: off (hooks.zenMode=false)' \
+  'zen-mode: off (unreadable state)' 'zen-mode: not checked' 'zen-mode: could not be read' 'zen-mode: state not recognized'; do
+  grep -qF -- "$ZM_PHRASE" "$SA_REF" || ZM_MISSING="$ZM_MISSING [$ZM_PHRASE]"
+done
+for ZM_PHRASE in 'zen-mode: not checked' 'zen-mode: could not be read' 'zen-mode: state not recognized' 'zen-mode: off (session marker)' \
+  'zen-mode default: opt-in (hooks.zenModeDefault=false)'; do
+  grep -qF -- "$ZM_PHRASE" "$REPORT" || ZM_MISSING="$ZM_MISSING [report: $ZM_PHRASE]"
+done
+if [ -z "$ZM_MISSING" ] && grep -qF '**zen-mode** rows → read `references/coexistence.md`' "$SKILL_MD"; then
+  check "P8zm3 every zen-mode row phrase is documented in skills/doctor/references/coexistence.md, which the skill names for those rows" PASS
+else
+  check "P8zm3 zen-mode row documentation (missing:$ZM_MISSING)" FAIL
+fi
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"

@@ -111,7 +111,7 @@ That gate replaced a witness that logged every Bash call and a cross-check that 
 ## Best Solution First
 
 A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
-`hooks/user-prompt-zen-mode.sh` injects a ~4.2 KB always-on contract on the same
+`hooks/user-prompt-zen-mode.sh` injects a ~4.5 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
 block. It is named here so the next reader does not conclude it was overlooked.
 
@@ -165,7 +165,7 @@ suite to keep it honest. Driving the hook directly, the block
 injection is **1756 characters / 1764 bytes** of `additionalContext`, identical on the
 `SessionStart` and `SubagentStart` legs, and the prompt leg's reminder is 354 characters. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects about 3.1 K characters on the same prompt channel while no chain is armed and about 4.4 K
+injects about 3.2 K characters on the same prompt channel while no chain is armed and about 4.5 K
 while one is, because its rule 6 shrinks to one sentence when the anchor reads `none`. `Z30` and
 `Z30b` in `tests/structure/test-zen-mode.sh` hold the two variants under declared ceilings, but
 they read the hook and never open this document, so the numbers written here are hand-derived
@@ -188,13 +188,13 @@ ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
 typed request, a background-task notification, a subagent hand-back, a shell input behind a
 system reminder, and a CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
 each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
-`user-prompt-tdd-reminder.sh` (about 5.0 K characters strict and 5.5 K vanilla plus the paths of
+`user-prompt-tdd-reminder.sh` (about 5.2 K characters strict and 5.7 K vanilla plus the paths of
 the helper command it renders, on the first typed request or slash command with arguments of a
-generation while no chain is armed, about 2.4 K on later ones, a decided line of about 1.4 to 1.5 K on
-every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,131 characters, then 1,102 later in the generation, only when such
+generation while no chain is armed, about 2.7 K on later ones, a decided line of about 1.4 to 1.5 K on
+every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,332 characters, then 1,303 later in the generation, only when such
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
-`user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above once per generation and about 1.4 K after
-that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
+`user-prompt-zen-mode.sh` (the 3.2 K or 4.5 K above once per generation and about 1.5 K after
+that with no chain armed or 1.9 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
 characters, on every prompt kind for the same reason). Three emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold,
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
@@ -205,11 +205,11 @@ pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
+costs about **11.6 K characters on the first prompt of a generation and 5.9 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
-shell input about 3.5 K, then 1.8 K (3.8 K, then 2.1 K for a CI-monitor event). The generation also receives this
-hook's 1,756-character block once at `SessionStart`, so its first turn costs about 12.8 K in all,
-slightly more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
+shell input about 3.5 K, then 1.9 K (3.9 K, then 2.3 K for a CI-monitor event). The generation also receives this
+hook's 1,756-character block once at `SessionStart`, so its first turn costs about 13.4 K in all,
+more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather
 than on the fan-out figure.
@@ -274,9 +274,9 @@ characters.
 
 | When | Zensu text the model receives | Where it comes from |
 |------|-------------------------------|---------------------|
-| Fresh session start | 7,487 to 7,834 in most sessions, up to 11,234 | evidence discipline (939), the `[zensu-session-context]` line (about 430, it carries paths), the best-solution-first block (1,756), the orientation primer (about 2,500) and the model's copy of the banner (about 1,900 to 2,400; the same lines reach you as a system message) |
-| First prompt of a context generation: the first prompt of a session and the first after `/compact` or `/clear` | 9,088, or 11,219 when the prompt names a planning keyword | the best-solution-first reminder (354), the full zen-mode contract (3,117), the full delivery-route reminder (5,617) and, for a planning keyword, the intent router (2,131) |
-| Every later prompt | 1,751 to 5,253 | the reminder (354), the short zen-mode line (1,397), the short delivery-route line (2,532) when the reminder answers that prompt, and the hooks that speak only on a condition |
+| Fresh session start | 7,997 to 8,344 in most sessions, up to 11,744 | evidence discipline (939), the `[zensu-session-context]` line (about 430, it carries paths), the best-solution-first block (1,756), the orientation primer (about 2,700) and the model's copy of the banner (about 2,200 to 2,700; the same lines reach you as a system message) |
+| First prompt of a context generation: the first prompt of a session and the first after `/compact` or `/clear` | 9,367, or 11,699 when the prompt names a planning keyword | the best-solution-first reminder (354), the full zen-mode contract (3,195), the full delivery-route reminder (5,818) and, for a planning keyword, the intent router (2,332) |
+| Every later prompt | 1,897 to 5,864 | the reminder (354), the short zen-mode line (1,543), the short delivery-route line (2,733) when the reminder answers that prompt, and the hooks that speak only on a condition |
 
 Automatic work capture landed after 0.29.0, so the census does not contain it: driving
 `hooks/session-start-ai-work.sh` directly, its primer adds about 760 characters, depending on

@@ -170,15 +170,15 @@ BUDGETED="user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-
 budget() {
   case "${3:-first}:$1:$2" in
     *:user-prompt-context-nudge.sh:*) echo "0 0" ;;
-    first:user-prompt-intent-router.sh:typed) echo "2000 2200" ;;
-    repeat:user-prompt-intent-router.sh:typed) echo "1 1200" ;;
+    first:user-prompt-intent-router.sh:typed) echo "2000 2400" ;;
+    repeat:user-prompt-intent-router.sh:typed) echo "1 1400" ;;
     *:user-prompt-intent-router.sh:*) echo "0 0" ;;
-    first:user-prompt-tdd-reminder.sh:typed) echo "4500 5600" ;;
-    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2500" ;;
+    first:user-prompt-tdd-reminder.sh:typed) echo "4500 5800" ;;
+    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2750" ;;
     *:user-prompt-tdd-reminder.sh:ci) echo "300 400" ;;
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
-    first:user-prompt-zen-mode.sh:*) echo "3000 3200" ;;
-    repeat:user-prompt-zen-mode.sh:*) echo "1 1500" ;;
+    first:user-prompt-zen-mode.sh:*) echo "3000 3300" ;;
+    repeat:user-prompt-zen-mode.sh:*) echo "1 1650" ;;
     *:user-prompt-best-solution-first.sh:*) echo "300 420" ;;
     *:user-prompt-worktree-keep.sh:*) echo "0 0" ;;
     *:user-prompt-session-hub-receipt.sh:*) echo "0 0" ;;
@@ -189,12 +189,12 @@ budget() {
 
 total_budget() {
   case "$2:$1" in
-    first:typed) echo 11150 ;;
-    first:ci) echo 3900 ;;
-    first:*) echo 3550 ;;
-    repeat:typed) echo 5350 ;;
-    repeat:ci) echo 2200 ;;
-    *) echo 1850 ;;
+    first:typed) echo 11650 ;;
+    first:ci) echo 3950 ;;
+    first:*) echo 3600 ;;
+    repeat:typed) echo 5900 ;;
+    repeat:ci) echo 2300 ;;
+    *) echo 1950 ;;
   esac
 }
 

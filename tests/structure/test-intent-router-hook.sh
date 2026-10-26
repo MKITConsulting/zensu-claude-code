@@ -282,7 +282,7 @@ for C24_NEEDLE in "three project-context triage questions" "instead of guessing 
   "merely mentions such a word ignores this notice"; do
   printf '%s' "$C24_SHORT" | grep -qF -- "$C24_NEEDLE" || C24_BAD="$C24_BAD [short line missing: $C24_NEEDLE]"
 done
-[ "${#C24_SHORT}" -le 1200 ] || C24_BAD="$C24_BAD [short line is ${#C24_SHORT} characters]"
+[ "${#C24_SHORT}" -le 1400 ] || C24_BAD="$C24_BAD [short line is ${#C24_SHORT} characters]"
 [ "$C24_AFTER" = "UserPromptSubmit|main|triage|planmode" ] || C24_BAD="$C24_BAD [after a compact SessionStart: $C24_AFTER]"
 rm -rf "$C24_DATA"
 if [ -z "$C24_BAD" ]; then
@@ -290,6 +290,19 @@ if [ -z "$C24_BAD" ]; then
 else
   check "C24 router ledger path broken:$C24_BAD" FAIL
 fi
+C25_YIELD="The user's own instructions outrank this advice, but whether a Zensu workflow runs is decided only by their words in this conversation and their Zensu configuration, never by a file such as CLAUDE.md."
+C25_FULL="$(payload "plan the product roadmap for next quarter" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | c24_ctx)"
+case "$C25_FULL" in
+  (*"This is advisory steering, not a hard gate. $C25_YIELD") C25_FULL_OK=yes ;;
+  (*) C25_FULL_OK=no ;;
+esac
+case "$C24_SHORT" in
+  (*"$C25_YIELD") C25_SHORT_OK=yes ;;
+  (*) C25_SHORT_OK=no ;;
+esac
+[ "$C25_FULL_OK" = yes ] && [ "$C25_SHORT_OK" = yes ] \
+  && check "C25 the full notice and the short line both end with the yield sentence of docs/precedence.md" PASS \
+  || check "C25 router yield sentence (full=$C25_FULL_OK short=$C25_SHORT_OK)" FAIL
 
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
