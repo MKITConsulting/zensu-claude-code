@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-10-26
+
+### Added
+
+- **context**: Load tracked feature context automatically (#518)
+
+### Fixed
+
+- **brand**: Preserve white fan backing on dark backgrounds (#517)
+- **session-trail**: Keep every linked session marked start in the takeover plan (#512)
+
 ## [0.31.0] - 2026-10-26
 
 ### Added
