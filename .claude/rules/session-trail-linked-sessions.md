@@ -68,13 +68,17 @@ top level for good, because Claude offers no way to link a session under another
 lives in `references/takeover.md` steps 1 and 4, `references/handoff.md` flows 4 and 5, and the
 lead of `linkedSessionLines`, which both briefs render.
 
-**The rule fixes the answer options, and best solution first moves into the one line.** The
-best-solution-first block every session receives yields only an option's order to a skill and
-keeps the option set for itself, so it would ask for the shape that broke the first move: leaving
-a session out as the first, recommended option. Step 1 and the brief lead therefore say that
-these rules fix which answer options the confirmation offers, and that best solution first applies
-to the one line, which carries the model's recommendation marked as such with its cost; the user
-takes it by naming the session.
+**The rule fixes the answer options, and best solution first moves into the one line.** Leaving
+a session out as the first, recommended option is the shape that broke the first move. Step 1 and
+the brief lead therefore say that these rules fix which answer options the confirmation offers,
+and that best solution first applies to the one line, which carries the model's recommendation
+marked as such with its cost; the user takes it by naming the session. The best-solution-first
+block every session receives admits that: where a skill's contract fixes the set and reserves an
+option for the user to name, the block governs one line instead of the set, and its per-prompt
+reminder says the same. Coupled sites that move together: the block, the reminder and the
+§Precedence example in `docs/best-solution-first.md`, the precedence paragraph of
+`docs/architecture.md` §Best Solution First, step 1 of `references/takeover.md`, and the lead
+of `linkedSessionLines` in `scripts/trail.mjs`.
 
 **The start set is the plan's.** The `--force` run reads the records again, so its brief can mark a
 session start that the plan confirmation never named (an archived start session lets a later one
@@ -222,11 +226,6 @@ one or one its continuation keeps, and once each` drives the count.
   step make it mandatory and name the shapes that broke it, but no hook checks that the plan
   confirmation named each one or that each was started. A check that refuses a turn would add a
   hook that can deny, which is a `minor` release.
-- **The best-solution-first block still yields only the order to a skill.** The precedence
-  sentence lives in this skill; the block's own clause in `docs/best-solution-first.md`, injected
-  into every session, is unchanged, so a model weighs a skill sentence against a block that keeps
-  the option set for itself. Widening that clause to a skill that reserves an option for the user
-  to name is a plugin-wide change and the user's decision.
 - **The model matches the start set across two briefs.** A durable fix carries the plan pass's
   start names into the `--force` run and has `decideLinked` mark every other session later; that
   changes the decision table the Zensu Session Hub mirrors.

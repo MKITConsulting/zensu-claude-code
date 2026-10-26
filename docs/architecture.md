@@ -149,21 +149,21 @@ Three things differ from evidence discipline, each deliberate:
 
 The **flag** exists because this rule governs how a decision is *presented*, not whether a claim is *true*; a project may reasonably turn it off, and one that does still receives evidence discipline. The consequence to keep in view is that the project-local config wins per key, so a repository can silence the main-thread injection for whoever opens it — acceptable for a presentation rule. It cannot silence the subagents reviewing it, because the `SubagentStart` leg ignores the flag; evidence discipline goes further and reads no configuration at all.
 
-The **per-prompt** reminder, on top of `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. The full block arrives once per context generation; the reminder keeps the rule's two halves and its precedence on every prompt at about a fifth of the block's length. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
+The **per-prompt** reminder, on top of `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. The full block arrives once per context generation; the reminder keeps the rule's two halves and its precedence on every prompt at about a quarter of the block's length. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
 
 **What it costs, measured rather than asserted — and exactly one of these figures is
 enforced.** `C6` in `tests/structure/test-evidence-discipline.sh` derives an emitted length
 from a hook and greps this paragraph for it. Name the figure, because the referent is easy to
 get backwards: what `C6` pins is the **939-character** figure stated below for
-`session-start-evidence-discipline.sh`, not the 1756/1764 headline for this hook — a grep of
-`tests/` for either of those two numbers returns nothing, and the per-turn total derived from
-the 1756-character half is unpinned with them. Every OTHER number here — the sibling's emitted length, the
+`session-start-evidence-discipline.sh`, not the 1938/1946 headline for this hook — no check in
+`tests/` reads either of those two numbers, and the per-turn total derived from
+the 1938-character half is unpinned with them. Every OTHER number here — the sibling's emitted length, the
 KB estimates and the per-turn totals — is hand-computed and illustrative: they were correct
 when written, nothing re-derives them, and a change to any input silently ages them. Read them
 as an order of magnitude, not as a measurement, and do not add a new figure here expecting the
 suite to keep it honest. Driving the hook directly, the block
-injection is **1756 characters / 1764 bytes** of `additionalContext`, identical on the
-`SessionStart` and `SubagentStart` legs, and the prompt leg's reminder is 354 characters. For scale,
+injection is **1938 characters / 1946 bytes** of `additionalContext`, identical on the
+`SessionStart` and `SubagentStart` legs, and the prompt leg's reminder is 474 characters. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
 injects about 3.1 K characters on the same prompt channel while no chain is armed and about 4.4 K
 while one is, because its rule 6 shrinks to one sentence when the anchor reads `none`. `Z30` and
@@ -172,7 +172,7 @@ they read the hook and never open this document, so the numbers written here are
 like every other one below, and age the same way. `C6` above stays the only figure a check reads
 out of this paragraph. A full-panel `/zensu:build` review round
 (`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge (two on the first review by default) and a code-reviewer, so
-the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
+the `SubagentStart` leg adds about **at least** 13 KB across one fan-out; the default lean panel
 spawns three aspects and runs the judge on the first review only (twice side by side while `hooks.reviewJudgeSecondRun` is on) and on any review the Stop hook resumes — more with repo-custom personas, and again per auto-fix
 round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
 with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
@@ -194,7 +194,7 @@ generation while no chain is armed, about 2.4 K on later ones, a decided line of
 every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,131 characters, then 1,102 later in the generation, only when such
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
 `user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above once per generation and about 1.4 K after
-that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
+that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (474
 characters, on every prompt kind for the same reason). Three emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold,
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
@@ -205,11 +205,11 @@ pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
+costs about **11.2 K characters on the first prompt of a generation and 5.5 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
-shell input about 3.5 K, then 1.8 K (3.8 K, then 2.1 K for a CI-monitor event). The generation also receives this
-hook's 1,756-character block once at `SessionStart`, so its first turn costs about 12.8 K in all,
-slightly more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
+shell input about 3.6 K, then 1.9 K (4.0 K, then 2.2 K for a CI-monitor event). The generation also receives this
+hook's 1,938-character block once at `SessionStart`, so its first turn costs about 13.2 K in all,
+0.7 K more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather
 than on the fan-out figure.
@@ -262,7 +262,7 @@ Still open, and narrower: the row reports the carrier this plugin root ships, so
 sibling install — which `servesRecordedRuntime` permits — is diagnosed through the executing tree
 rather than the recorded one. That is the same limit the tamper-evidence sentence above states.
 
-Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
+Finally, the rule yields where another contract already fixes an order or the option set. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. A skill whose contract fixes the set as well and reserves an option for the user to name keeps that set too — the plan confirmation of a `/zensu:session-trail` takeover offers no answer option that leaves a linked session marked start out, and the user leaves one out by naming it — and the rule then governs one line beside the choice: the recommendation, marked as such, with its cost. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
 
 ## Context Added to Every Session
 
