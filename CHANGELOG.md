@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-26
+
+### Added
+
+- **knowledge**: Retain agent retrieval receipts and correlate source reads
+
+### Fixed
+
+- **session-control**: Move the full-suite marker on --reanchor (#510)
+
 ## [0.30.1] - 2026-10-25
 
 ### Added
