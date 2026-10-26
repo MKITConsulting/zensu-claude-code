@@ -171,6 +171,14 @@ function byCreation(a, b) {
   return a.run < b.run ? -1 : 1;
 }
 
+function isDetached(record) {
+  return record.lineageDetached === true;
+}
+
+function isArchived(record) {
+  return record.isArchived === true;
+}
+
 export function familyWalk(root, records) {
   const rootRun = runIdOf(root && typeof root === 'object' ? root.sessionId : null);
   if (!rootRun) return null;
@@ -186,6 +194,23 @@ export function familyWalk(root, records) {
     children.get(parent).push({ run, record });
   }
   const below = (run) => (children.get(run) || []).slice().sort(byCreation);
+  const openBelow = (run, follows = () => true) => {
+    const visited = new Set([rootRun, run]);
+    const queue = (children.get(run) || []).slice();
+    let count = 0;
+    while (queue.length) {
+      const node = queue.shift();
+      if (visited.has(node.run)) continue;
+      visited.add(node.run);
+      if (isDetached(node.record)) continue;
+      if (!isArchived(node.record)) {
+        if (!follows(node)) continue;
+        count += 1;
+      }
+      queue.push(...(children.get(node.run) || []));
+    }
+    return count;
+  };
   const seen = new Set([rootRun]);
   const open = [];
   let archived = 0;
@@ -195,11 +220,11 @@ export function familyWalk(root, records) {
     const node = pending.shift();
     if (seen.has(node.run)) continue;
     seen.add(node.run);
-    if (node.record.lineageDetached === true) {
+    if (isDetached(node.record)) {
       detached += 1;
       continue;
     }
-    if (node.record.isArchived === true) {
+    if (isArchived(node.record)) {
       archived += 1;
       for (const child of below(node.run)) pending.push({ ...child, throughArchived: true });
       continue;
@@ -207,7 +232,7 @@ export function familyWalk(root, records) {
     open.push(node);
   }
   open.sort(byCreation);
-  return { rootRun, open, archived, detached };
+  return { rootRun, open, archived, detached, openBelow };
 }
 
 function entryOf(node, checkout) {
@@ -271,35 +296,46 @@ export function decideLinked(walk, options = {}) {
   for (const edge of edges) {
     if (edge && edge.confidence === 'confirmed' && edge.from && typeof edge.from.sessionId === 'string') confirmed.add(edge.from.sessionId);
   }
-  let starts = 0;
-  const sessions = walk.open.map((node, index) => {
-    const entry = entryOf(node, index < max ? checkout : null);
+  const factsOf = (node, nodeCheckout) => {
+    const entry = entryOf(node, nodeCheckout);
     const ids = [entry.sessionId, ...entry.priorSessionIds].filter(Boolean);
     const preset = entry.environment ? presetOf(presets, entry.environment) : null;
     const continued = ids.some((id) => confirmed.has(id)) ? true : (ledgerComplete ? false : null);
-    let decision = 'stays';
-    let why = null;
-    if (!entry.sessionId) why = 'no-session-id';
-    else if (self && ids.includes(self)) why = 'self';
-    else if (entry.kind === 'btw') why = 'btw';
-    else if (entry.ssh || (preset && preset.kind === 'ssh')) why = 'ssh';
-    else if (continued === true) why = 'continued';
-    else if (started.has(entry.name)) why = 'started';
-    else if (!entry.folder) {
-      decision = 'if-named';
-      why = 'place';
-    } else if (entry.kind === 'fork') {
-      decision = 'if-named';
-      why = 'fork';
-    } else if (continued === null) {
-      decision = 'if-named';
-      why = 'ledger-unread';
-    } else if (starts < cap) {
-      decision = 'start';
-      starts += 1;
-    } else {
-      decision = 'later';
-      why = 'cap';
+    return { entry, ids, preset, continued };
+  };
+  const keptWhy = ({ entry, ids, preset, continued }) => {
+    if (!entry.sessionId) return 'no-session-id';
+    if (self && ids.includes(self)) return 'self';
+    if (entry.kind === 'btw') return 'btw';
+    if (entry.ssh || (preset && preset.kind === 'ssh')) return 'ssh';
+    if (continued === true) return 'continued';
+    if (started.has(entry.name)) return 'started';
+    return null;
+  };
+  const follows = (node) => keptWhy(factsOf(node, null)) === null;
+  let starts = 0;
+  const sessions = walk.open.map((node, index) => {
+    const facts = factsOf(node, index < max ? checkout : null);
+    const { entry, preset, continued } = facts;
+    let why = keptWhy(facts);
+    let decision = why ? 'stays' : null;
+    if (!decision) {
+      if (!entry.folder) {
+        decision = 'if-named';
+        why = 'place';
+      } else if (entry.kind === 'fork') {
+        decision = 'if-named';
+        why = 'fork';
+      } else if (continued === null) {
+        decision = 'if-named';
+        why = 'ledger-unread';
+      } else if (starts < cap) {
+        decision = 'start';
+        starts += 1;
+      } else {
+        decision = 'later';
+        why = 'cap';
+      }
     }
     const cwdWhy = decision === 'stays' ? null : cwdWhyOf(entry, sameRepository);
     return {
@@ -310,6 +346,7 @@ export function decideLinked(walk, options = {}) {
       title: entry.title,
       createdAt: entry.createdAt,
       throughArchived: entry.throughArchived,
+      openBelow: typeof walk.openBelow === 'function' ? walk.openBelow(node.run, follows) : 0,
       folder: entry.folder,
       sameCheckout: entry.sameCheckout,
       sharedCheckout: entry.sharedCheckout,
