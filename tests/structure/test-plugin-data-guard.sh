@@ -12,7 +12,7 @@ set -u
 # TWO HARNESS TRAPS ARE LOAD-BEARING HERE, both learned by measurement:
 #
 #   1. EVERY payload must carry `cwd`. Without it pre-reviewer-capability-gate.sh
-#      answers `reviewer-capability-v1 deny: tool cwd is unavailable or unsafe`
+#      answers `Zensu capability gate (reviewer-capability-v1) deny: tool cwd is unavailable or unsafe`
 #      (hooks/lib/reviewer-capability-v1.js) for EVERY destination, so a
 #      three-hook check would report a containment that is not there and the
 #      suite would pass for the wrong reason.

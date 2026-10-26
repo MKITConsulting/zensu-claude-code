@@ -50,28 +50,25 @@ Zensu acts in every Claude Code session where the plugin is enabled, not only
 when you run one of its skills. Know these before you add it to a setup you
 already rely on:
 
-- **Subagents work from an allowlist.** Every subagent that is not one of
-  Zensu's own — the built-in agents such as `Explore`, `general-purpose` and
-  `Plan`, your project's agents, and agents from other plugins — may call only
-  Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, `apply_patch`, LSP,
-  WebFetch, WebSearch, ToolSearch, TodoWrite, TaskCreate, TaskGet, TaskList,
-  TaskUpdate, Agent, SendMessage, AskUserQuestion and three report tools (StructuredOutput,
-  ReportFindings, SubagentHandback). A subagent that reports its type, other
-  than a `zensu-review-*` review persona, may also run `Bash` behind an accident
-  guard; the guard prevents accidents and is not a sandbox. Every MCP tool is
-  denied except the two documentation tools of the Context7 plugin
-  (`mcp__plugin_context7_context7__resolve-library-id` and
-  `mcp__plugin_context7_context7__query-docs`) and the read tools of a Zensu MCP
-  server, and so are `Skill`, `Monitor`, `PowerShell` and every other tool not
-  on the list. Subagents may not read `.zensu/`, so Grep and Glob must name a
-  subdirectory: a search from the project root is refused.
-  `hooks.subagentShell: false` withdraws the `Bash` grant; nothing switches the
-  allowlist off. Details:
+- **Subagents keep their tools, except what reaches Zensu's own state or runs
+  commands outside `Bash`.** Every
+  subagent that is not one of Zensu's own — the built-in agents such as
+  `Explore`, `general-purpose` and `Plan`, your project's agents, and agents
+  from other plugins — may call every tool its definition and your permissions
+  grant, MCP tools, `Skill` and `Workflow` included. Zensu's capability gate
+  denies it what reaches Zensu's own state: Session Control and workflow
+  paths, `.zensu/`, writes to the installed plugin or its private data, Zensu
+  configuration layers and Zensu MCP mutations. A tool whose inputs Zensu does
+  not know, such as a browser MCP tool, may not name that state anywhere in its
+  input. `PowerShell`, the shell aliases other than `Bash`, `Monitor` commands
+  and tools whose name marks them as running commands stay denied, because
+  Zensu's command gates see only Bash and PowerShell commands. A subagent that
+  reports its type, other than a `zensu-review-*` review persona, may run `Bash`
+  behind an accident guard; the guard prevents accidents and is not a sandbox. Subagents may not
+  read `.zensu/`, so Grep and Glob must name a subdirectory: a search from the
+  project root is refused. `hooks.subagentShell: false` withdraws the shell
+  grant, and the `subagents:` row of `/zensu:doctor` shows the boundary. Details:
   [Session control](docs/session-control.md#claude-code-workflows-subagent-safety).
-- **Four agent names are taken.** A project agent named exactly `code-reviewer`,
-  `review-aspect`, `review-judge` or `zensu-plm` is treated as one of Zensu's
-  read-only agents: it may call only Read, Grep and Glob, plus the report tools
-  that deliver its result, whatever its own `tools:` line says.
 - **Context is added to every session.** Measured from Zensu 0.29.0 session
   transcripts on 2026-10-24: about 7,500 to 7,800 characters at most session starts
   (the evidence-discipline and best-solution-first rules, an orientation primer
