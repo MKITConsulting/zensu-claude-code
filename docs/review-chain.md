@@ -271,6 +271,14 @@ Four artifact skeletons ship as plugin defaults under `templates/` and resolve w
 | `autopilot-pr-body.md` | `/zensu:autopilot` step 3 | per-AC checklist table (deprecated rows kept) whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix, `Gates bypassed during build:` audit line |
 | `pr-body.md` | `/zensu:pilot` "Commit + open PR" (shared default for any PR opener) | `## Acceptance criteria` table filled from the feature's `## Requirements` rows, with a stub-row fallback, whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix |
 
+The two PR-body templates come last in the order `skills/autopilot/rules/conventions.md` §4 sets:
+
+1. `.zensu/templates/<name>.md` replaces everything, as above, when the `overrides` field of `zensu-vcs.sh --conventions` lists it: a plain file of at most 64 KiB, reached through no symlink.
+2. Without an override, the repository's own PR template is the skeleton, as `zensu-vcs.sh --conventions` reports it in `prTemplate`: the one `vcs.prTemplate` names, passed as `--template`, or with `auto` the one the forge pre-fills a new pull request with (`pull_request_template.md` under `.github/`, the root or `docs/` on GitHub, `.gitlab/merge_request_templates/Default.md` on GitLab). A template in a `PULL_REQUEST_TEMPLATE/` directory is listed in `prTemplates` but is never chosen on its own. Its sections are filled in the repository's language, and Zensu appends its `## Acceptance criteria` section; `/zensu:autopilot` also appends `## Verification` with the `Gates bypassed during build:` line. `vcs.prTemplate: none` skips this step, and a template the probe refuses (`prTemplateRefused`) is never read.
+3. Without either, the plugin template above is the body.
+
+The Acceptance criteria table is never missing: every step carries it, with the template's stub row when no usable `## Requirements` table exists. The section headings Zensu appends stay English, and so do the `AC-###`/`FR-###` ids, the status words and the `Gates bypassed during build:` label inside them, because tools read them back.
+
 #### Code Reviewer — 5 Sequential Specialist Perspectives
 
 The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task` tools) that walks five perspectives in order:

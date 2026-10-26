@@ -190,7 +190,7 @@ Present a completion summary:
 ## Important Notes
 
 - `zensu features update` does NOT change status. Status transitions (planned -> in-progress -> testing -> released) go through `zensu features status <feature-id> <new-status>`.
-- Always reference the feature ID in commit messages: `feat(component): description [KEY-N]`
+- Always reference the feature ID as `[KEY-N]` in commit messages; the message itself follows the repository's commit style, language and attribution practice (`${CLAUDE_PLUGIN_ROOT}/skills/autopilot/rules/conventions.md` §3), read before the first commit with `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-vcs.sh" --conventions --repo "$(git rev-parse --show-toplevel)"`
 - Security classification should be set BEFORE implementation (use `/zensu:security-review` if not yet set)
 - The /zensu:tdd workflow creates a plan at `{project_root}/.zensu/plans/{timestamp}_tdd-{feature-slug}.md` and a progress log at `{project_root}/.zensu/logs/{timestamp}_tdd-{feature-slug}.log`, where `{project_root}` is the path `zensu-log.sh --project-root` prints — the project root this session's Session Control record is bound to
 

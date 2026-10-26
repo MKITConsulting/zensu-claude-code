@@ -2550,8 +2550,11 @@ function blobLink(repository, sha, file) {
   return null;
 }
 
-function planApproval(context, { env = process.env, now = Date.now } = {}) {
+function planApproval(context, { env = process.env, now = Date.now, messageFile = null } = {}) {
   if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
+  if (messageFile !== null && (typeof messageFile !== 'string' || !path.isAbsolute(messageFile))) {
+    return { exit: EXIT.USAGE, message: '--message-file needs the absolute path of the commit message file' };
+  }
   const ended = safeRead(context.files.ended).value;
   if (ended) {
     return {
@@ -2581,8 +2584,11 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   const dirty = git(context.projectRoot, ['status', '--porcelain', '--', file]);
   if (!tracked.ok || dirty.stdout.trim()) {
     const added = git(context.projectRoot, ['add', '-f', '--', file], env);
+    const message = messageFile
+      ? ['-F', messageFile]
+      : ['-m', `docs(plan): add the implementation plan of work order ${context.marker.orderId.slice(0, 8)}`];
     const committed = added.ok
-      ? git(context.projectRoot, ['commit', '-m', `docs(plan): add the implementation plan of work order ${context.marker.orderId.slice(0, 8)}`, '--', file], env)
+      ? git(context.projectRoot, ['commit', ...message, '--', file], env)
       : added;
     if (!committed.ok) {
       return { exit: EXIT.REFUSED, message: `the plan file could not be committed: ${committed.stderr.trim().split('\n').slice(-1)[0] || 'no detail'}` };
@@ -2889,7 +2895,9 @@ function dispatchCli(argv, env) {
       paths: list(options.path),
     }));
   }
-  if (verb === 'plan-approval') return emit(planApproval(context, { env }));
+  if (verb === 'plan-approval') {
+    return emit(planApproval(context, { env, messageFile: options['message-file'] === undefined ? null : options['message-file'] }));
+  }
   if (verb === 'stop') {
     const payload = readStdinJson();
     const decided = stopDecision(context, { env, review: () => require('./review-evidence-lease-v1.js').hookLeaseProgress(payload, { env }) });

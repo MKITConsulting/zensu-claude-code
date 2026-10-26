@@ -155,6 +155,24 @@ else
   check "F9 push/resolve continuity:$CONTINUITY_BAD" FAIL
 fi
 
+CONVENTIONS_BAD=""
+has "$SKILL" 'bash "$VCS" --conventions --provider <provider>' \
+  || CONVENTIONS_BAD="$CONVENTIONS_BAD probe"
+has "$SKILL" '${CLAUDE_PLUGIN_ROOT}/skills/autopilot/rules/conventions.md' \
+  || CONVENTIONS_BAD="$CONVENTIONS_BAD contract"
+printf '%s' "$LAND_STEP" | grep -qF -- "Commit in the repository's commit style, language and attribution practice" \
+  || CONVENTIONS_BAD="$CONVENTIONS_BAD land-step"
+printf '%s' "$RESOLVE_STEP" | grep -qF -- 'Write the note in the language the conventions name' \
+  || CONVENTIONS_BAD="$CONVENTIONS_BAD reply-language"
+if grep -qE 'Conventional Commit message|no watermark' "$SKILL"; then
+  CONVENTIONS_BAD="$CONVENTIONS_BAD own-rule"
+fi
+if [ -z "$CONVENTIONS_BAD" ]; then
+  check "F10 commits and thread replies follow the repository conventions" PASS
+else
+  check "F10 repository conventions:$CONVENTIONS_BAD" FAIL
+fi
+
 echo "----"
 echo "test-pr-fix-findings-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

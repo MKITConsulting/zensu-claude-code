@@ -193,6 +193,68 @@ else
   check "P11h pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" PASS
 fi
 
+CONVENTIONS_MD="$SKILL_DIR/rules/conventions.md"
+CONFIG_MD="$SKILL_DIR/rules/config.md"
+CONV_BAD=""
+[ -f "$CONVENTIONS_MD" ] || CONV_BAD="$CONV_BAD missing"
+for LIT in 'CONVENTIONS="$(bash "$VCS" --conventions --repo "$REPO" --provider "$PROVIDER")"' \
+           '1. **The config value**' \
+           '2. **The repository finding**' \
+           "3. **The user's own instruction**" \
+           'Zensu adds no rule of its own.' \
+           'The AC table is never missing' \
+           '`attribution: none` adds no AI attribution line or trailer'; do
+  grep -qF -- "$LIT" "$CONVENTIONS_MD" 2>/dev/null || CONV_BAD="$CONV_BAD ${LIT// /_}"
+done
+if [ -z "$CONV_BAD" ]; then
+  check "P12a rules/conventions.md states the probe, the precedence and no rule of Zensu's own" PASS
+else
+  check "P12a rules/conventions.md:$CONV_BAD" FAIL
+fi
+PRODUCER_BAD=""
+for producer in pilot pr-fix-findings cover implement; do
+  grep -qF '${CLAUDE_PLUGIN_ROOT}/skills/autopilot/rules/conventions.md' "$PLUGIN_DIR/skills/$producer/SKILL.md" 2>/dev/null \
+    || PRODUCER_BAD="$PRODUCER_BAD $producer"
+done
+grep -qF '**The repository'"'"'s conventions.** Commits and PR text follow `rules/conventions.md`.' "$SKILL_MD" \
+  || PRODUCER_BAD="$PRODUCER_BAD autopilot"
+if [ -z "$PRODUCER_BAD" ]; then
+  check "P12b every commit and PR producer follows rules/conventions.md" PASS
+else
+  check "P12b producers missing the conventions contract:$PRODUCER_BAD" FAIL
+fi
+VCS_KEYS_BAD=""
+for LIT in 'prBase: auto' 'commitStyle: auto' 'attribution: auto' 'language: auto' 'prTemplate: auto' 'worktreeOnly: true'; do
+  grep -qF -- "$LIT" "$CONFIG_MD" || VCS_KEYS_BAD="$VCS_KEYS_BAD ${LIT// /_}"
+done
+if [ -z "$VCS_KEYS_BAD" ]; then
+  check "P12c the vcs block documents the convention keys and their defaults" PASS
+else
+  check "P12c vcs block keys:$VCS_KEYS_BAD" FAIL
+fi
+CONV_FLAT="$(tr -s '[:space:]' ' ' < "$CONVENTIONS_MD")"
+CONV_FIX_BAD=""
+for LIT in 'A skill that sets none of them runs the probe command its own text names.' \
+           'It is a consent, not a convention, so it falls outside the order of §2: add it (`git commit -s`) only when the user asked for it in this session' \
+           'and the line names the AI tool, never a person.' \
+           'still has it with `git ls-remote --exit-code --heads <remote> <base>`.' \
+           '`worktreeOnly: true` is the default and the only value it honors; it ignores `false` and says so in its report' \
+           'So do the tokens tools read back from those sections: the `AC-###` and `FR-###` ids'; do
+  printf '%s' "$CONV_FLAT" | grep -qF -- "$LIT" || CONV_FIX_BAD="$CONV_FIX_BAD ${LIT:0:32}"
+done
+for producer in implement cover; do
+  tr -s '[:space:]' ' ' < "$PLUGIN_DIR/skills/$producer/SKILL.md" \
+    | grep -qF -- 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-vcs.sh" --conventions --repo "$(git rev-parse --show-toplevel)"' \
+    || CONV_FIX_BAD="$CONV_FIX_BAD $producer-probe"
+done
+grep -qF 'worktreeOnly: false` relaxes' "$SKILL_MD" && CONV_FIX_BAD="$CONV_FIX_BAD autopilot-relaxation"
+grep -qF '`<base>` is the base `rules/conventions.md` §5 resolves first.' "$SKILL_MD" || CONV_FIX_BAD="$CONV_FIX_BAD autopilot-base"
+if [ -z "$CONV_FIX_BAD" ]; then
+  check "P12d sign-off by consent, base check, fixed worktree guard, English tokens, probe in implement and cover" PASS
+else
+  check "P12d conventions contract:$CONV_FIX_BAD" FAIL
+fi
+
 echo "----"
 echo "test-autopilot-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

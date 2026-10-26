@@ -75,7 +75,7 @@ ESSENTIALS=(
   "P3n handles the server release-gate rejection|release_gate_blocked"
   "P3o strict status FSM order|planned → in-progress → testing → released"
   "P3p transition mutation named|zensu features status"
-  "P3q unresolved review threads probe|isResolved"
+  "P3q unresolved review threads probe|bash \"\$VCS\" --fetch-threads --provider \"\$PROVIDER\" --repo-id \"\$REPOID\" \"\$PR_ID\""
   "P3r missing setup routes to /zensu:setup|/zensu:setup"
   "P3s every mutation behind explicit confirm|Execute only after explicit confirm"
   "P3t per-mutation gate window, no session arming|per-mutation"
@@ -101,6 +101,39 @@ for entry in "${ESSENTIALS[@]}"; do
     check "$label" FAIL
   fi
 done
+
+DRIVER_PINS=(
+  "P3aa forge detection goes through the VCS driver|bash \"\$VCS\" --detect --repo \"\$REPO\""
+  "P3ab the repository conventions are probed|bash \"\$VCS\" --conventions --repo \"\$REPO\" --provider \"\$PROVIDER\""
+  "P3ac commits and PR text follow the conventions contract|\${CLAUDE_PLUGIN_ROOT}/skills/autopilot/rules/conventions.md"
+  "P3ad PR lookup goes through the VCS driver|bash \"\$VCS\" --locate-pr --provider \"\$PROVIDER\""
+  "P3ae no PR is exit 3 and other exits are errors|exit 3 means \"no PR yet\", which two decision rows key on, and any other non-zero exit is a probe error"
+  "P3af review state goes through the VCS driver|bash \"\$VCS\" --review-summary --provider \"\$PROVIDER\" --repo-id \"\$REPOID\" \"\$PR_ID\""
+  "P3ag review summary fields drive the decision rows|{reviewed, approved, changesRequested}"
+  "P3ah requested changes route back to implementation|PR open, changes requested (\`changesRequested\` true), 0 unresolved threads"
+  "P3ai PR creation goes through the VCS driver|bash \"\$VCS\" --open-pr --provider \"\$PROVIDER\" --base <base> --head <branch> --title <title> --body-file <file>"
+  "P3aj the ladder names both forge CLIs|Forge CLI (\`gh\`/\`glab\`) missing or unauthenticated"
+  "P3ak an override is read only when the probe lists it, and the probe's template is the skeleton|/.zensu/templates/pr-body.md\` when the probe's \`overrides\` lists it, else the probe's \`prTemplate\` with Zensu's Acceptance criteria section appended"
+  "P3am review presence also reads Zensu's published review markers|bash \"\$VCS\" --review-markers --provider \"\$PROVIDER\" --repo-id \"\$REPOID\" \"\$PR_ID\""
+  "P3an a published team review counts as a review|The PR **has a review** when \`reviewed\` is true or a marker line printed"
+  "P3ao the testing transition keys on review presence|| PR has a review, \`changesRequested\` false, 0 unresolved threads, status \`in-progress\` | Transition \`testing\` (confirm) |"
+  "P3ap the branch is pushed before the PR opens|push the branch to the remote it tracks, else \`origin\` (\`git push -u <remote> <branch>\`), and only after the push succeeded open the PR"
+  "P3aq a merged or closed PR branch is never pushed to|never push to the branch of a merged or closed PR"
+  "P3ar requested changes take their content from the user and end with a re-review request|ask the user which changes on the PR (the card's link) are still open, then run \`/zensu:tdd\` with them as the spec · once they are pushed, ask the reviewer to review again"
+)
+for entry in "${DRIVER_PINS[@]}"; do
+  label="${entry%%|*}"; needle="${entry#*|}"
+  if printf '%s' "$NORMALIZED_SKILL" | grep -qF -- "$needle"; then
+    check "$label" PASS
+  else
+    check "$label" FAIL
+  fi
+done
+if grep -qE 'gh pr |gh api|glab mr|glab api|command -v gh|isResolved' "$SKILL_MD"; then
+  check "P3al pilot makes no direct forge CLI call" FAIL
+else
+  check "P3al pilot makes no direct forge CLI call" PASS
+fi
 
 # P4 — chain-terminus safety: the chain-done marker flag MUST be ABSENT
 # (the review-chain terminus belongs to /zensu:self-review, never to pilot).
