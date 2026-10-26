@@ -7582,6 +7582,8 @@ child(10, { startedFromEnvironmentId: "aaaaaaaa-0000-4000-8000-000000000001" });
 child(11, {}, { sharedCheckout: true });
 for (const n of [12, 13, 14, 15]) child(n);
 below(16, 12, 1760000097000);
+put(store, { sessionId: run(162), cliSessionId: cli(162), isArchived: false, title: "linked 162", originCwd: repo, createdAt: 1760000096000, spawnedFrom: { sessionId: run(12), taskId: "task_162", title: "below btw", sideSession: true, btw: true } });
+put(store, { sessionId: run(163), cliSessionId: cli(163), isArchived: false, title: "linked 163", originCwd: repo, createdAt: 1760000095000, sshConfig: { host: "box" }, spawnedFrom: { sessionId: run(12), taskId: "task_163", title: "below ssh", sideSession: true } });
 child(17, { originCwd: path.join(repo, "nested") });
 child(18, { originCwd: path.join(home, "work", "sibling") });
 child(19, { originCwd: "relative/path" });
@@ -7667,7 +7669,14 @@ LS_AT_RECENT="$(printf '%s\n' "$LS_MD" | grep -nF '## Recent instructions' | hea
   && [ "$LS_AT_CHIPS" -lt "$LS_AT_LINKED" ] && [ "$LS_AT_LINKED" -lt "$LS_AT_REPORTS" ] && [ "$LS_AT_REPORTS" -lt "$LS_AT_RECENT" ] \
   || LS_BAD="$LS_BAD order=$LS_AT_CHIPS/$LS_AT_LINKED/$LS_AT_REPORTS/$LS_AT_RECENT"
 printf '%s\n' "$LS_MD" | grep -qF '**17 open linked session(s)**: 8 marked **start**, 2 marked **if named**, 4 marked **later**, 3 marked **stays**.' || LS_BAD="$LS_BAD tally-absent"
-printf '%s\n' "$LS_MD" | grep -qF 'Start them in the turn in which the user confirmed the plan, right after takeover has run with `--force` and before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'Start the sessions marked **start** in the turn in which the user confirmed the plan, right after takeover has run with `--force` and before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_MD" | grep -qF "Every session marked **start** belongs to the plan: name each one by its title in the plan confirmation, and a yes starts all of them unless the user's answer names one to leave out." || LS_BAD="$LS_BAD every-yes-absent"
+printf '%s\n' "$LS_MD" | grep -qF "Never leave one out on your own judgment: not because its own work looks finished, since the linked sessions below it follow only through it, not because this session could finish that session's remaining work, and not because each start costs that session's own plan confirmation." || LS_BAD="$LS_BAD own-judgment-absent"
+printf '%s\n' "$LS_MD" | grep -qF "So the plan confirmation never offers a restart as an alternative to finishing that session's work here, and none of its answer options leaves a session marked **start** out." || LS_BAD="$LS_BAD restart-alternative-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'it stays behind with the old session and its account, it is not linked under this session, the open linked sessions below it, which its entry counts, stay behind with it, and a later move of it on its own lands it at the top level, where Claude cannot link it under a session again' || LS_BAD="$LS_BAD leave-out-cost-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'leave out every session the user left out' && LS_BAD="$LS_BAD permissive-leave-out-back"
+printf '%s\n' "$LS_MD" | grep -qF 'These rules fix which answer options the plan confirmation offers, not only their order: best solution first applies to that one line, which carries your recommendation marked as such with its cost, never to an answer option, and the user takes it by naming the session in the answer.' || LS_BAD="$LS_BAD precedence-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'A brief that the `--force` run printed after the plan answer read the records again, so start only the sessions the plan confirmation named that it still marks **start**: one it marks **start** that the plan did not name appeared after the plan, so name it to the user in one line and keep it for a later message, and one the plan named that it no longer marks **start** is not started, with its reason.' || LS_BAD="$LS_BAD force-run-start-set-absent"
 printf '%s\n' "$LS_MD" | grep -qF 'never more than 8 in one takeover, with `initiation` `user_asked`, `context` `fresh`, `use_worktree` true and neither `source_branch` nor `branch_name`' || LS_BAD="$LS_BAD call-absent"
 printf '%s\n' "$LS_MD" | grep -qxF '### Linked session 1: start' || LS_BAD="$LS_BAD heading-absent"
 printf '%s\n' "$LS_MD" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
@@ -7681,7 +7690,7 @@ printf '%s\n' "$LS_MD" | grep -qxF -- '- why: it runs over SSH, not on this Mac'
 printf '%s\n' "$LS_MD" | grep -qF "such a session lists its \`folder\` instead, which you pass as \`cwd\` when this session works outside that repository" || LS_BAD="$LS_BAD folder-rule-absent"
 printf '%s\n' "$LS_MD" | grep -qF -- '- it starts in its own folder' && LS_BAD="$LS_BAD place-line-in-same-repository"
 case "$LS_MD" in *"$(printf '\033')"*) LS_BAD="$LS_BAD esc-survived" ;; esac
-[ -z "$LS_BAD" ] && check "LS10 the takeover brief carries the linked sessions between the chips and the reports, with the start instruction, each start call in fences and the folder of every start that leaves cwd out" PASS || check "LS10 takeover brief linked sessions:$LS_BAD" FAIL
+[ -z "$LS_BAD" ] && check "LS10 the takeover brief carries the linked sessions between the chips and the reports, with the rule that every session marked start belongs to every yes, the start instruction, each start call in fences and the folder of every start that leaves cwd out" PASS || check "LS10 takeover brief linked sessions:$LS_BAD" FAIL
 
 LS_BAD=""
 printf '%s\n' "$LS_MD" | grep -qF '**10 report(s) from linked sessions that the old session never read; the newest 8 follow.**' || LS_BAD="$LS_BAD lead-absent"
@@ -7706,7 +7715,10 @@ LS_AT_THREADS="$(printf '%s\n' "$LS_HO" | grep -nxF '## Open threads' | head -1 
 [ -n "$LS_AT_CHIPS" ] && [ -n "$LS_AT_LINKED" ] && [ -n "$LS_AT_REPORTS" ] && [ -n "$LS_AT_THREADS" ] \
   && [ "$LS_AT_CHIPS" -lt "$LS_AT_LINKED" ] && [ "$LS_AT_LINKED" -lt "$LS_AT_REPORTS" ] && [ "$LS_AT_REPORTS" -lt "$LS_AT_THREADS" ] \
   || LS_BAD="$LS_BAD order=$LS_AT_CHIPS/$LS_AT_LINKED/$LS_AT_REPORTS/$LS_AT_THREADS"
-printf '%s\n' "$LS_HO" | grep -qF 'Start them in the turn in which the user confirmed your plan, before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_HO" | grep -qF 'Start the sessions marked **start** in the turn in which the user confirmed your plan, before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_HO" | grep -qF "Every session marked **start** belongs to the plan: name each one by its title in the plan confirmation, and a yes starts all of them unless the user's answer names one to leave out." || LS_BAD="$LS_BAD every-yes-absent"
+printf '%s\n' "$LS_HO" | grep -qF 'Never leave one out on your own judgment' || LS_BAD="$LS_BAD own-judgment-absent"
+printf '%s\n' "$LS_HO" | grep -qF 'best solution first applies to that one line, which carries your recommendation marked as such with its cost, never to an answer option' || LS_BAD="$LS_BAD precedence-absent"
 printf '%s\n' "$LS_HO" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
 [ -z "$LS_BAD" ] && check "LS13 the handoff brief carries the same linked sessions and reports ahead of its open threads" PASS || check "LS13 handoff brief linked sessions:$LS_BAD" FAIL
 
@@ -7715,10 +7727,26 @@ LS_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always,
 LS_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
 LS_BAD=""
 [ -n "$LS_AT_START" ] && [ -n "$LS_AT_CARRY" ] && [ -n "$LS_AT_RELEASE" ] && [ "$LS_AT_START" -lt "$LS_AT_CARRY" ] && [ "$LS_AT_CARRY" -lt "$LS_AT_RELEASE" ] || LS_BAD="$LS_BAD order=$LS_AT_START/$LS_AT_CARRY/$LS_AT_RELEASE"
-for LS_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `user_asked`, `context` `fresh`, `use_worktree` true, no `source_branch` and no `branch_name`' 'never more than 8 times in one takeover' 'before the worktree, the carry-over, the chips and `release`' "It names the brief's linked sessions too" 'call `list_start_targets` before the confirmation'; do
+for LS_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `user_asked`, `context` `fresh`, `use_worktree` true, no `source_branch` and no `branch_name`' 'never more than 8 times in one takeover' 'before the worktree, the carry-over, the chips and `release`' "It names the brief's linked sessions too" 'call `list_start_targets` before the confirmation' "Never leave one out on your own judgment: not because its own work looks finished, since the linked sessions below it follow only through it" "So the confirmation never offers a restart as an alternative to finishing that session's work here, and none of its answer options leaves a session marked start out." 'a later move of it on its own lands it at the top level, where Claude cannot link it under a session again' 'Leave out no named session that it still marks **start** on your own judgment'; do
   grep -qF -- "$LS_NEEDLE" "$CH_REF" || LS_BAD="$LS_BAD [missing:$LS_NEEDLE]"
 done
-[ -z "$LS_BAD" ] && check "LS14 references/takeover.md starts the linked sessions right after the --force run, before the chips and the release, and its plan confirmation names them" PASS || check "LS14 takeover.md linked-session step:$LS_BAD" FAIL
+for LS_NEEDLE in 'The user may leave some of them out' 'start none the user left out'; do
+  grep -qF -- "$LS_NEEDLE" "$CH_REF" && LS_BAD="$LS_BAD [retired:$LS_NEEDLE]"
+done
+LS_AT_NAMES="$(grep -nF "It names the brief's linked sessions too" "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_EVERY="$(grep -nF '**Every linked session the brief marks start belongs to every yes.**' "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_UNNAMED="$(grep -nF 'that the plan confirmation named, that the section still marks **start** and that the user did not name to leave out' "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_PRECEDENCE="$(grep -nF 'best solution first applies to that one line, which carries your recommendation marked as such with its cost, never to an answer option' "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_DRIFT="$(grep -nF 'a session it marks **start** that the plan confirmation did not name is text that first appears in this brief' "$CH_REF" | head -1 | cut -d: -f1)"
+[ -n "$LS_AT_EVERY" ] && [ "$LS_AT_EVERY" = "$LS_AT_NAMES" ] || LS_BAD="$LS_BAD every-yes-not-in-the-plan-confirmation=$LS_AT_EVERY/$LS_AT_NAMES"
+[ -n "$LS_AT_PRECEDENCE" ] && [ "$LS_AT_PRECEDENCE" = "$LS_AT_NAMES" ] || LS_BAD="$LS_BAD precedence-not-in-the-plan-confirmation=$LS_AT_PRECEDENCE/$LS_AT_NAMES"
+[ -n "$LS_AT_UNNAMED" ] && [ "$LS_AT_UNNAMED" = "$LS_AT_START" ] || LS_BAD="$LS_BAD start-rule-not-in-step-4=$LS_AT_UNNAMED/$LS_AT_START"
+[ -n "$LS_AT_DRIFT" ] && [ "$LS_AT_DRIFT" = "$LS_AT_START" ] || LS_BAD="$LS_BAD force-run-rule-not-in-step-4=$LS_AT_DRIFT/$LS_AT_START"
+LS_HANDOFF_REF="$PLUGIN_DIR/skills/session-trail/references/handoff.md"
+grep -qF -- 'Its plan confirmation names every linked session the brief marks start, each of which belongs to the yes' "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-4-pointer-absent"
+grep -qF -- 'each of which belongs to the yes unless the user names it to leave out' "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-5-pointer-absent"
+grep -qF -- 'start the linked sessions the plan confirmation named that this brief still marks start' "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-5-start-set-absent"
+[ -z "$LS_BAD" ] && check "LS14 references/takeover.md starts every linked session marked start right after the --force run, before the chips and the release, unless the user named it to leave out, and its plan confirmation names each one and never drops one on the model's own judgment" PASS || check "LS14 takeover.md linked-session step:$LS_BAD" FAIL
 
 LS_FROM_OTHER='[o.linkedSessions.sameRepository, o.openChips.sameRepository, pick(1).sameCheckout, pick(1).start.cwd === path.join(home, "work", "repo"), pick(17).sameCheckout, pick(18).start.cwd === path.join(home, "work", "sibling"), o.linkedSessions.sessions.filter((e) => e.start).every((e) => (e.folder ? e.start.cwd === e.folder : !("cwd" in e.start)))].join(":")'
 LS_GOT="$(ls_eval "$LS_HOME/ls-other.json" "$LS_FROM_OTHER")"
@@ -7748,6 +7776,24 @@ printf '%s\n' "$LS_HO" | grep -qxF -- "$LS_REPO" || LS_BAD="$LS_BAD repository-c
 printf '%s\n' "$LS_HO" | grep -qxF 'folder:' && LS_BAD="$LS_BAD folder-block-in-handoff"
 printf '%s\n' "$LS_HO" | grep -qxF -- '- checkout: another repository than the session taken over' || LS_BAD="$LS_BAD checkout-line-absent"
 [ -z "$LS_BAD" ] && check "LS17 the handoff brief judges each linked session's repository but never its reader's, so every start with a usable folder carries it" PASS || check "LS17 handoff places:$LS_BAD" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[12, 1, 4, 51].map((n) => pick(n).openBelow).join(",") + ":" + o.linkedSessions.sessions.every((e) => Number.isInteger(e.openBelow))')"
+LS_BAD=""
+[ "$LS_GOT" = "1,0,0,0:true" ] || LS_BAD="$LS_BAD json=$LS_GOT"
+LS_COUNT_LINE='- open linked sessions below it: 1, which follow only through it'
+[ "$(printf '%s\n' "$LS_MD" | grep -cxF -- "$LS_COUNT_LINE")" = "1" ] || LS_BAD="$LS_BAD brief-lines=$(printf '%s\n' "$LS_MD" | grep -cxF -- "$LS_COUNT_LINE")"
+LS_AT_TENTH="$(printf '%s\n' "$LS_MD" | grep -nxF '### Linked session 10: start' | head -1 | cut -d: -f1)"
+LS_AT_ELEVENTH="$(printf '%s\n' "$LS_MD" | grep -nxF '### Linked session 11: start' | head -1 | cut -d: -f1)"
+LS_AT_COUNT="$(printf '%s\n' "$LS_MD" | grep -nxF -- "$LS_COUNT_LINE" | head -1 | cut -d: -f1)"
+[ -n "$LS_AT_TENTH" ] && [ -n "$LS_AT_ELEVENTH" ] && [ -n "$LS_AT_COUNT" ] && [ "$LS_AT_TENTH" -lt "$LS_AT_COUNT" ] && [ "$LS_AT_COUNT" -lt "$LS_AT_ELEVENTH" ] || LS_BAD="$LS_BAD count-line-outside-its-entry=$LS_AT_TENTH/$LS_AT_COUNT/$LS_AT_ELEVENTH"
+printf '%s\n' "$LS_MD" | grep -qF -- '- open linked sessions below it: 0' && LS_BAD="$LS_BAD zero-count-rendered"
+[ "$(printf '%s\n' "$LS_HO" | grep -cxF -- "$LS_COUNT_LINE")" = "1" ] || LS_BAD="$LS_BAD handoff-lines=$(printf '%s\n' "$LS_HO" | grep -cxF -- "$LS_COUNT_LINE")"
+LS_HO_TENTH="$(printf '%s\n' "$LS_HO" | grep -nxF '### Linked session 10: start' | head -1 | cut -d: -f1)"
+LS_HO_ELEVENTH="$(printf '%s\n' "$LS_HO" | grep -nxF '### Linked session 11: start' | head -1 | cut -d: -f1)"
+LS_HO_COUNT="$(printf '%s\n' "$LS_HO" | grep -nxF -- "$LS_COUNT_LINE" | head -1 | cut -d: -f1)"
+[ -n "$LS_HO_TENTH" ] && [ -n "$LS_HO_ELEVENTH" ] && [ -n "$LS_HO_COUNT" ] && [ "$LS_HO_TENTH" -lt "$LS_HO_COUNT" ] && [ "$LS_HO_COUNT" -lt "$LS_HO_ELEVENTH" ] || LS_BAD="$LS_BAD handoff-count-line-outside-its-entry=$LS_HO_TENTH/$LS_HO_COUNT/$LS_HO_ELEVENTH"
+printf '%s\n' "$LS_HO" | grep -qF -- '- open linked sessions below it: 0' && LS_BAD="$LS_BAD handoff-zero-count-rendered"
+[ -z "$LS_BAD" ] && check "LS18 every linked session carries the number of open sessions below it that would follow through it, leaving out a side question and an SSH session below it, and both briefs name a nonzero count on that session's own entry" PASS || check "LS18 open-below count:$LS_BAD" FAIL
 
 DR_ACCT=acc0be11-0000-4000-8000-0000000000d0
 DR_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/$DR_ACCT/ws-0001"

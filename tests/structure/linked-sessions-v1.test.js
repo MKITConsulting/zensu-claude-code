@@ -89,6 +89,41 @@ test('a detached linked session and everything below it is never listed', () => 
   assert.equal(walk.archived, 0);
 });
 
+test('each open linked session counts the open sessions below it that would follow through it: every level, through archived ones, never into a detached one or one its continuation keeps, and once each', () => {
+  const under = (n, parent, extra = {}, from = {}) => ({ ...child(n, extra), spawnedFrom: { sessionId: run(parent), taskId: `task_${n}`, title: `below ${parent}`, sideSession: true, ...from } });
+  const records = [
+    child(1),
+    under(11, 1),
+    under(12, 11),
+    under(11, 12),
+    under(13, 1, { isArchived: true }),
+    under(14, 13),
+    under(15, 1, { lineageDetached: true }),
+    under(16, 15),
+    under(17, 1, { isArchived: true, lineageDetached: true }),
+    under(18, 17),
+    child(2),
+    under(21, 2, {}, { btw: true }),
+    under(22, 21),
+    under(23, 2, { sshConfig: { host: 'box' } }),
+    under(24, 2, { cliSessionId: 'not-a-session-id' }),
+    under(25, 2),
+    under(26, 25),
+    under(27, 2),
+    child(3, { isArchived: true }),
+    under(31, 3),
+    under(32, 31, { isArchived: true }),
+  ];
+  const edges = [{ confidence: 'confirmed', from: { sessionId: cli(25) }, to: { sessionId: 'd1d1d1d1-0000-4000-8000-000000000025' } }];
+  const walk = mod.familyWalk(root(), records);
+  assert.deepEqual(walk.open.map((node) => node.run), [run(1), run(2), run(31)]);
+  assert.deepEqual([run(1), run(2), run(31)].map((r) => walk.openBelow(r)), [3, 7, 0]);
+  const state = decide(records, { edges });
+  assert.deepEqual(state.sessions.map((entry) => [entry.run, entry.openBelow, entry.decision, entry.why]), [[run(1), 3, 'start', null], [run(2), 1, 'start', null], [run(31), 0, 'start', null]]);
+  const bare = mod.decideLinked({ rootRun: ROOT_RUN, open: [{ run: run(9), record: child(9), throughArchived: false }], archived: 0, detached: 0 });
+  assert.equal(bare.sessions[0].openBelow, 0);
+});
+
 test('side and task-chip sessions start, a user fork only when named, and a btw never', () => {
   const state = decide([
     child(1),
