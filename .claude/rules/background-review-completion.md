@@ -257,7 +257,14 @@ completes the claim from that note.
   for seconds; a session whose bind keeps failing keeps its pair until the 24-hour sweep.
 - **The Stop recovery runs under the Stop deadline** (45 s by default). On a loaded host it defers
   and the release says the claim is pending; the next prompt then claims with the prompt hook's
-  larger budget.
+  larger budget. Measured on 2026-10-27 at a load of about 100 to 150: one recovery Stop under
+  the 75 s maximum took 42 s, and in a full suite run both recovery Stops of `BR17` deferred. So
+  `recover_until_claimed` lets `BR9h` and `BR17` meet up to three deferring Stops before the
+  claim, and each of them must release with record, note and ticket intact.
+- **A kill inside the ticket CAS leaves two empty temporary files** (`<state>.XXXXXX` and
+  `<state>.next.XXXXXX`) beside the workflow document: `_tdd_consume_review_ticket_critical`
+  creates them before its `node` child and removes them only on its own exits. Nothing reads or
+  sweeps them. Observed after the `BR16` cancel.
 - **Not measured live.** The suite drives the real hooks with payloads shaped like the
   measurements and a host-style cancel; no desktop session has run the patched plugin yet.
 - **Windows is unmeasured.** The suite is in `ciStructureTests` and in no blocking Windows shard;

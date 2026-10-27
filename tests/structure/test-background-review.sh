@@ -367,6 +367,27 @@ recovery_stop() {
   stop_payload "$1" | ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP" 2>/dev/null
 }
 
+recover_until_claimed() {
+  local raw="$1" key="$2" out attempt=0
+  RECOVERY_OUT=""
+  RECOVERY_DEFERRED=0
+  while [ "$attempt" -lt 4 ]; do
+    attempt=$((attempt + 1))
+    out="$(recovery_stop "$raw")"
+    if [ "$(state_value "$key" reviewTicketConsumed)" = true ]; then
+      RECOVERY_OUT="$out"
+      return 0
+    fi
+    [ "$(printf '%s' "$out" | decision)" = allow ] && [ -f "$(record_file "$key")" ] && [ -f "$(arrival_file "$key")" ] || return 1
+    RECOVERY_DEFERRED=$((RECOVERY_DEFERRED + 1))
+  done
+  return 1
+}
+
+deferred_label() {
+  [ "$RECOVERY_DEFERRED" -eq 0 ] || printf ' [after %s Stop(s) that deferred the claim under load]' "$RECOVERY_DEFERRED"
+}
+
 arm_chain br-handback || { check "BR2 arm" FAIL; finish; exit 1; }
 A_RAW=br-handback
 A="$STARTED_KEY"
@@ -649,14 +670,15 @@ else
   check "BR9g arrived release (out=$N_RELEASE count=$N_COUNT/$(stop_count "$N") err=$(head -c 400 "$WORK/arrived-release.err"))" FAIL
 fi
 
-N_STOP="$(recovery_stop "$N_RAW")"
+recover_until_claimed "$N_RAW" "$N"
+N_STOP="$RECOVERY_OUT"
 N_REASON="$(printf '%s' "$N_STOP" | reason)"
 if [ "$(printf '%s' "$N_STOP" | decision)" = block ] \
   && printf '%s' "$N_REASON" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $N_AGENT) delivered its report earlier in this conversation as its hand-back, and the hook that received it did not complete the claim of its review ticket, so the ticket was claimed now." \
   && printf '%s' "$N_REASON" | grep -qF 'The zensu:code-reviewer subagent above just finished.' \
   && [ "$(state_value "$N" reviewTicketConsumed)" = true ] && [ "$(state_value "$N" reviewRound)" = 1 ] \
   && [ ! -e "$(record_file "$N")" ] && [ ! -e "$(arrival_file "$N")" ]; then
-  check "BR9h the next Stop claims the ticket from the arrival note once and blocks with the routing directive" PASS
+  check "BR9h the next Stop claims the ticket from the arrival note once and blocks with the routing directive$(deferred_label)" PASS
 else
   check "BR9h Stop claim (reason=$(printf '%s' "$N_REASON" | head -c 400) consumed=$(state_value "$N" reviewTicketConsumed) round=$(state_value "$N" reviewRound))" FAIL
 fi
@@ -742,7 +764,8 @@ else
   check "BR16 host cancel (blocked=$CANCEL_BLOCKED group=$CANCEL_GROUP gone=$CANCEL_GONE out=$(head -c 200 "$WORK/cancel.out") consumed=$(state_value "$P" reviewTicketConsumed) record=$([ -f "$(record_file "$P")" ] && echo kept) note=$([ -f "$(arrival_file "$P")" ] && echo kept))" FAIL
 fi
 
-P_STOP="$(recovery_stop "$P_RAW")"
+recover_until_claimed "$P_RAW" "$P"
+P_STOP="$RECOVERY_OUT"
 P_REASON="$(printf '%s' "$P_STOP" | reason)"
 P_CLAIMED_ROUND="$(state_value "$P" reviewRound)"
 P_AGAIN="$(recovery_stop "$P_RAW")"
@@ -752,9 +775,9 @@ if [ "$(printf '%s' "$P_STOP" | decision)" = block ] \
   && [ "$P_CLAIMED_ROUND" = 1 ] && [ "$(state_value "$P" reviewTicketConsumed)" = true ] \
   && [ ! -e "$(record_file "$P")" ] && [ ! -e "$(arrival_file "$P")" ] \
   && [ "$(state_value "$P" reviewRound)" = 1 ] && ! printf '%s' "$P_AGAIN" | reason | grep -qF 'BACKGROUND REVIEW REPORT'; then
-  check "BR17 after the cancel the next Stop claims the ticket once and blocks with the routing directive, and a second Stop claims nothing" PASS
+  check "BR17 after the cancel the next Stop claims the ticket once and blocks with the routing directive, and a second Stop claims nothing$(deferred_label)" PASS
 else
-  check "BR17 recovery Stop (reason=$(printf '%s' "$P_REASON" | head -c 400) round=$P_CLAIMED_ROUND/$(state_value "$P" reviewRound) again=$(printf '%s' "$P_AGAIN" | reason | head -c 200))" FAIL
+  check "BR17 recovery Stop (reason=$(printf '%s' "$P_REASON" | head -c 400) round=$P_CLAIMED_ROUND/$(state_value "$P" reviewRound) deferred=$RECOVERY_DEFERRED again=$(printf '%s' "$P_AGAIN" | reason | head -c 200))" FAIL
 fi
 
 arm_chain br-defer || { check "BR18 arm" FAIL; finish; exit 1; }
