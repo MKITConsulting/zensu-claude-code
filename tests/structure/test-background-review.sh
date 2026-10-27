@@ -800,6 +800,30 @@ else
   check "BR17 recovery Stop (reason=$(printf '%s' "$P_REASON" | head -c 400) round=$P_CLAIMED_ROUND/$(state_value "$P" reviewRound) deferred=$RECOVERY_DEFERRED again=$(printf '%s' "$P_AGAIN" | reason | head -c 200))" FAIL
 fi
 
+arm_chain br-cancel-prompt || { check "BR17b arm" FAIL; finish; exit 1; }
+PC_RAW=br-cancel-prompt
+PC="$STARTED_KEY"
+PC_AGENT=a2b4d6f8b0d2f4a6c
+launch_payload "$PC_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$PC_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+prompt_payload "$PC_RAW" "$(handback_text "$PC_AGENT")" > "$WORK/cancel-prompt.json"
+host_cancel_prompt "$WORK/cancel-prompt.json" cancelp
+PC_CANCELLED=no
+if [ "$CANCEL_BLOCKED" = yes ] && [ "$CANCEL_GONE" = yes ] && [ ! -s "$WORK/cancelp.out" ] \
+  && [ "$(state_value "$PC" reviewTicketConsumed)" = false ] && [ -f "$(record_file "$PC")" ] && [ -f "$(arrival_file "$PC")" ]; then
+  PC_CANCELLED=yes
+fi
+PC_CLAIM="$(prompt_payload "$PC_RAW" 'please continue with the next file' | bash "$PROMPT_HOOK" 2>/dev/null | hook_context)"
+PC_AGAIN="$(prompt_payload "$PC_RAW" 'and the file after that' | bash "$PROMPT_HOOK" 2>/dev/null)"
+if [ "$PC_CANCELLED" = yes ] && [ "$(first_line "$PC_CLAIM")" = "UserPromptSubmit" ] \
+  && printf '%s' "$PC_CLAIM" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $PC_AGENT) delivered its report earlier in this conversation as its hand-back, and the hook that received it did not complete the claim of its review ticket, so the ticket was claimed now." \
+  && printf '%s' "$PC_CLAIM" | grep -qF 'The zensu:code-reviewer subagent above just finished.' \
+  && [ "$(state_value "$PC" reviewTicketConsumed)" = true ] && [ "$(state_value "$PC" reviewRound)" = 1 ] \
+  && [ ! -e "$(record_file "$PC")" ] && [ ! -e "$(arrival_file "$PC")" ] && [ -z "$PC_AGAIN" ]; then
+  check "BR17b after a host-style cancel the next typed prompt claims the ticket from the arrival note once and carries the routing directive, and a further prompt claims nothing" PASS
+else
+  check "BR17b prompt after cancel (cancelled=$PC_CANCELLED ctx=$(printf '%s' "$PC_CLAIM" | head -c 400) round=$(state_value "$PC" reviewRound) again=$PC_AGAIN)" FAIL
+fi
+
 arm_chain br-defer || { check "BR18 arm" FAIL; finish; exit 1; }
 Q_RAW=br-defer
 Q="$STARTED_KEY"

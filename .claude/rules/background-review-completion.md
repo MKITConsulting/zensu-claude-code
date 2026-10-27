@@ -225,7 +225,8 @@ completes the claim from that note.
   kept pair, `BR9f` to `BR9h` a
   failed claim, the arrived release and the Stop claim, `BR14c` the bound hold, `BR16` and `BR17`
   a host-style cancel (TERM to the process group and its descendants, KILL 1.5 s later) and the
-  Stop that completes the claim once, `BR18` to `BR18c` the deferral, the cross-session cost and
+  Stop that completes the claim once, `BR17b` the typed prompt that completes it after a second
+  cancel, `BR18` to `BR18c` the deferral, the cross-session cost and
   the prompt that completes the claim, and `BR19` a Stop and a prompt racing on one note. `BR4b`
   counts the root verifications and the calls after the claim through the classifying shim, which
   keys on the `core.readContext({ recordsDir, sessionId: key })` literal the latency suite reads.
