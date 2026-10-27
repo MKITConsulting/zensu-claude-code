@@ -22,9 +22,9 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
-      "path": "tests/structure/background-review-v1.test.js", "registered": 24, "skips": {"win32": 1},
+      "path": "tests/structure/background-review-v1.test.js", "registered": 32, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
-      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival match that claims or retires, the Stop wait verdict and the idle sweeps."
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival note and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
     },
     {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,

@@ -168,10 +168,16 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   bind functions unset it (`L36`, `L49`). A variable or a file that a model-side Bash command
   could set is never a pre-verified binding; `CONTROL_BINDINGS` needs no new entry for that
   reason.
-- **Opt-in, Stop hook only.** Only the Stop hook calls `zensu_memoize_project_dir`. Every other
-  entry point verifies on every call, as before. `zensu-log.sh` is a candidate, not a caller. A
-  future caller may memoize only after its last bind, and only in a process that runs no record
-  writer.
+- **Opt-in, two callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
+  `zensu_memoize_project_dir`, each right after its only bind. Every other entry point verifies on
+  every call, as before. `zensu-log.sh` is a candidate, not a caller. A further caller may memoize
+  only after its last bind, and only in a process that runs no record writer. The delegate meets
+  both: its one bind precedes the memo, and what it writes afterwards is the workflow document's
+  ticket claim and the background-review store, never the context record. Measured with the
+  counting shim on one background hand-back claim through the real prompt hook: 89 `node` children
+  without the memo, 35 of them root verifications, and 55 with it, one of them a root
+  verification. `BR4b` in `tests/structure/test-background-review.sh` pins the single verification
+  (`.claude/rules/background-review-completion.md`).
 - **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
   once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The
   digest was never a defence there, because a changed tree includes the code that checks it.
@@ -188,7 +194,8 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every
-  caller that does not memoize; on the Stop path the memo answers instead.
+  caller that does not memoize; on the Stop path and in the post-review delegate the memo answers
+  instead.
 - **Port.** Host half only; `session-control-core-v1.js` is unchanged. `zensu-codex`,
   `zensu-kiro` and `zensu-antigravity` were NOT included. A port that adopts the memo must take
   the `_ZENSU_PROJECT_DIR_MEMO` unset in both bind functions with it, or a re-bind keeps a stale

@@ -77,10 +77,20 @@ REG="$(node -e '
     promptHook ? `${promptHook.type}/${promptHook.timeout === undefined ? "none" : promptHook.timeout}` : "-",
   ].join(" "));
 ' "$HOOKS_JSON" 2>/dev/null)"
-if [ "$REG" = "UserPromptSubmit:1 PostToolUse:1 Agent|Task command/none" ]; then
-  check "BR1 the prompt hook is registered once, on UserPromptSubmit only and without a timeout, and the delegate stays on PostToolUse Agent|Task" PASS
+if [ "$REG" = "UserPromptSubmit:1 PostToolUse:1 Agent|Task command/180" ]; then
+  check "BR1 the prompt hook is registered once, on UserPromptSubmit only with a 180-second timeout, and the delegate stays on PostToolUse Agent|Task" PASS
 else
   check "BR1 registration ($REG)" FAIL
+fi
+
+HOOK_TIMEOUT="$(sed -n 's/^BR_HOOK_TIMEOUT=\([0-9][0-9]*\)$/\1/p' "$PROMPT_HOOK")"
+HOOK_MARGIN="$(sed -n 's/^BR_CLAIM_MARGIN=\([0-9][0-9]*\)$/\1/p' "$PROMPT_HOOK")"
+if [ "$REG" = "UserPromptSubmit:1 PostToolUse:1 Agent|Task command/${HOOK_TIMEOUT}" ] \
+  && [ -n "$HOOK_MARGIN" ] && [ "$HOOK_MARGIN" -gt 0 ] && [ "$HOOK_MARGIN" -lt "$HOOK_TIMEOUT" ] \
+  && grep -qF 'ZENSU_BR_CLAIM_BY="$(( $(date +%s) - SECONDS + BR_HOOK_TIMEOUT - BR_CLAIM_MARGIN ))"' "$PROMPT_HOOK"; then
+  check "BR1e the prompt hook derives its claim deadline from the same timeout hooks.json registers, less a margin" PASS
+else
+  check "BR1e claim deadline (registered=$REG hook=$HOOK_TIMEOUT margin=$HOOK_MARGIN)" FAIL
 fi
 
 if [ "$(grep -c "path.join(trusted.pluginData, 'background-review')" "$CAPABILITY")" = "2" ]; then
@@ -133,7 +143,10 @@ if grep -qF '| `user-prompt-review-handback.sh` | UserPromptSubmit |' "$CONFIG_D
   && ! grep -qF 'the hook asks for a foreground respawn' "$CONFIG_DOC" \
   && grep -qF 'background-review/v1/records/<scv1-session-key>.json' "$CONFIG_DOC" \
   && grep -qF 'background-review/v1/fanout/<scv1-session-key>/' "$CONFIG_DOC" \
+  && grep -qF 'background-review/v1/arrivals/<scv1-session-key>.json' "$CONFIG_DOC" \
+  && grep -qF -- '--background-recovery' "$CONFIG_DOC" \
   && grep -qF '#### Background review agents' "$REVIEW_DOC" \
+  && grep -qF '**Claim deadline.**' "$REVIEW_DOC" \
   && grep -qF '](review-chain.md#background-review-agents)' "$CONFIG_DOC" \
   && grep -qF '`user-prompt-review-handback.sh`' "$ARCH_DOC"; then
   check "BR1d the hook reference, the review-chain account and the architecture roster describe the background path" PASS
@@ -273,6 +286,10 @@ record_file() {
   printf '%s/background-review/v1/records/%s.json' "$CLAUDE_PLUGIN_DATA" "$1"
 }
 
+arrival_file() {
+  printf '%s/background-review/v1/arrivals/%s.json' "$CLAUDE_PLUGIN_DATA" "$1"
+}
+
 stop_count() {
   tdd_get_counter "$(tdd_state_file "$1")" stopBlockCount 2>/dev/null
 }
@@ -293,6 +310,61 @@ counted_prompt() {
 
 node_calls() {
   if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else printf '0'; fi
+}
+
+CLASS_BIN="$WORK/class-bin"
+mkdir -p "$CLASS_BIN"
+cat > "$CLASS_BIN/node" <<'STUB'
+#!/bin/bash
+kind=x
+case "$*" in
+  (*'core.readContext({ recordsDir, sessionId: key })'*) kind=root ;;
+esac
+[ -z "${TICKET_STATE:-}" ] || kind=cas
+[ -z "${CLAIM_CONTEXT:-}" ] || kind=claim
+printf '%s\n' "$kind" >> "$NODE_CALLS"
+exec "$REAL_NODE" "$@"
+STUB
+chmod +x "$CLASS_BIN/node"
+
+classified_prompt() {
+  prompt_payload "$1" "$2" | PATH="$CLASS_BIN:$PATH" NODE_CALLS="$3" REAL_NODE="$REAL_NODE" bash "$PROMPT_HOOK" 2>/dev/null
+}
+
+kind_calls() {
+  if [ -f "$1" ]; then grep -c "^$2\$" "$1" | tr -d ' '; else printf '0'; fi
+}
+
+calls_from_claim() {
+  node -e '
+    const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
+    const at = lines.indexOf("claim");
+    process.stdout.write(String(at < 0 ? -1 : lines.length - at));
+  ' "$1" 2>/dev/null || printf -- '-1'
+}
+
+REAL_DATE="$(command -v date)"
+DATE_BIN="$WORK/date-bin"
+mkdir -p "$DATE_BIN"
+cat > "$DATE_BIN/date" <<'STUB'
+#!/bin/bash
+if [ "$*" = "+%s" ] && [ -n "${DATE_FIRST:-}" ]; then
+  now="$("$REAL_DATE" +%s)"
+  if [ -f "$DATE_FIRST" ]; then now=$((now + 10000)); else : > "$DATE_FIRST"; fi
+  printf '%s\n' "$now"
+  exit 0
+fi
+exec "$REAL_DATE" "$@"
+STUB
+chmod +x "$DATE_BIN/date"
+
+deferred_prompt() {
+  rm -f "$WORK/date.first"
+  prompt_payload "$1" "$2" | PATH="$DATE_BIN:$PATH" REAL_DATE="$REAL_DATE" DATE_FIRST="$WORK/date.first" bash "$PROMPT_HOOK" 2>/dev/null
+}
+
+recovery_stop() {
+  stop_payload "$1" | ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP" 2>/dev/null
 }
 
 arm_chain br-handback || { check "BR2 arm" FAIL; finish; exit 1; }
@@ -329,15 +401,24 @@ else
   check "BR3 typed prompt (rc=$TYPED_RC out=$TYPED_OUT node=$(node_calls "$WORK/typed.calls"))" FAIL
 fi
 
-CLAIM_CTX="$(counted_prompt "$A_RAW" "$(handback_text "$A_AGENT")" "$WORK/handback.calls" | hook_context)"
+CLAIM_CTX="$(classified_prompt "$A_RAW" "$(handback_text "$A_AGENT")" "$WORK/handback.calls" | hook_context)"
 if [ "$(first_line "$CLAIM_CTX")" = "UserPromptSubmit" ] \
   && printf '%s' "$CLAIM_CTX" | sed -n '2p' | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $A_AGENT) delivered its report in this message as its hand-back, and its review ticket was claimed." \
   && printf '%s' "$CLAIM_CTX" | grep -qF 'The zensu:code-reviewer subagent above just finished.' \
   && [ "$(state_value "$A" reviewTicketConsumed)" = true ] && [ "$(state_value "$A" reviewRound)" = 1 ] \
-  && [ ! -e "$A_RECORD" ] && [ "$(node_calls "$WORK/handback.calls")" -gt 0 ]; then
-  check "BR4 the pending reviewer's hand-back claims the ticket and routes the review as UserPromptSubmit context, and the counted node stub sees the hook run" PASS
+  && [ ! -e "$A_RECORD" ] && [ ! -e "$(arrival_file "$A")" ] && [ "$(node_calls "$WORK/handback.calls")" -gt 0 ]; then
+  check "BR4 the pending reviewer's hand-back claims the ticket and routes the review as UserPromptSubmit context, and retires record and arrival note" PASS
 else
   check "BR4 hand-back claim (ctx=$(printf '%s' "$CLAIM_CTX" | head -c 600) consumed=$(state_value "$A" reviewTicketConsumed) round=$(state_value "$A" reviewRound) node=$(node_calls "$WORK/handback.calls"))" FAIL
+fi
+
+A_ROOTS="$(kind_calls "$WORK/handback.calls" root)"
+A_CAS="$(kind_calls "$WORK/handback.calls" cas)"
+A_TAIL="$(calls_from_claim "$WORK/handback.calls")"
+if [ "$A_ROOTS" = 1 ] && [ "$A_CAS" = 1 ] && [ "$A_TAIL" -ge 1 ] && [ "$A_TAIL" -le 3 ]; then
+  check "BR4b the hand-back claim verifies the project root once and spawns at most three node children after the claim returns (${A_TAIL} of $(node_calls "$WORK/handback.calls"))" PASS
+else
+  check "BR4b claim cost (root verifications=$A_ROOTS claims=$A_CAS after-claim=$A_TAIL total=$(node_calls "$WORK/handback.calls"))" FAIL
 fi
 
 A_CLAIMED="$(digest "$A_STATE")"
@@ -469,8 +550,9 @@ L_RECORDED="$(launch_payload "$L_RAW" "$L_PROMPT" async_launched "$L_AGENT" | ZE
   ZENSU_BR_STATE_FILE="$(tdd_state_file "$L")" ZENSU_BR_ENVELOPE=bound node "$LIB" record 2>/dev/null)"
 L_OUT="$(prompt_payload "$L_RAW" "$(handback_text "$L_AGENT")" | bash "$PROMPT_HOOK" 2>/dev/null)"
 if [ "$L_RECORDED" = "recorded agent=$L_AGENT ttl=60" ] && [ -z "$L_OUT" ] && [ ! -e "$(record_file "$L")" ] \
+  && [ ! -e "$(arrival_file "$L")" ] \
   && [ "$(state_value "$L" reviewTicketConsumed)" = false ] && [ "$(state_value "$L" reviewRound)" = 0 ]; then
-  check "BR9d an arrival whose stored header the preflight refuses claims nothing and retires the record" PASS
+  check "BR9d an arrival whose stored header the preflight refuses claims nothing and retires the record and its arrival note" PASS
 else
   check "BR9d refused arrival (recorded=$L_RECORDED out=$L_OUT consumed=$(state_value "$L" reviewTicketConsumed))" FAIL
 fi
@@ -515,15 +597,15 @@ kill -TERM "$(cat "$WORK/killed.pid" 2>/dev/null)" 2>/dev/null
 touch "$WORK/killed.release"
 wait "$M_READER"
 M_KEPT=no
-[ -f "$(record_file "$M")" ] && M_KEPT=yes
+[ -f "$(record_file "$M")" ] && [ -f "$(arrival_file "$M")" ] && M_KEPT=yes
 M_CONSUMED="$(state_value "$M" reviewTicketConsumed)"
 M_ROUND="$(state_value "$M" reviewRound)"
 M_CTX="$(prompt_payload "$M_RAW" "$(notification_text "$M_AGENT" completed)" | bash "$PROMPT_HOOK" 2>/dev/null | hook_context)"
 if [ "$M_BLOCKED" = yes ] && [ ! -s "$WORK/killed.out" ] && [ "$M_KEPT" = yes ] && [ "$M_CONSUMED" = false ] && [ "$M_ROUND" = 0 ] \
   && printf '%s' "$M_CTX" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $M_AGENT) completed, and its review ticket was claimed." \
   && [ "$(state_value "$M" reviewTicketConsumed)" = true ] && [ "$(state_value "$M" reviewRound)" = 1 ] \
-  && [ ! -e "$(record_file "$M")" ]; then
-  check "BR9e a TERM the prompt hook gets after the claim verdict reaches the delegate, which exits before the claim and keeps the record, and the notification that follows claims the ticket" PASS
+  && [ ! -e "$(record_file "$M")" ] && [ ! -e "$(arrival_file "$M")" ]; then
+  check "BR9e a TERM the prompt hook gets after the claim verdict reaches the delegate, which exits before the claim and keeps record and arrival note, and the notification that follows claims the ticket" PASS
 else
   check "BR9e killed hand-back (blocked=$M_BLOCKED out=$(head -c 300 "$WORK/killed.out") kept=$M_KEPT consumed=$M_CONSUMED round=$M_ROUND ctx=$(printf '%s' "$M_CTX" | head -c 300))" FAIL
 fi
@@ -544,15 +626,195 @@ N_AGENT=a5f7b9d1f3b5d7f9b
 launch_payload "$N_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$N_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
 N_HANDBACK="$(failing_prompt "$N_RAW" "$(handback_text "$N_AGENT")")"
 N_KEPT=no
-[ -f "$(record_file "$N")" ] && N_KEPT=yes
+[ -f "$(record_file "$N")" ] && [ -f "$(arrival_file "$N")" ] && N_KEPT=yes
 N_NOTE="$(failing_prompt "$N_RAW" "$(notification_text "$N_AGENT" completed)")"
-N_STOP="$(stop_payload "$N_RAW" | bash "$STOP" 2>/dev/null)"
-if [ -z "$N_HANDBACK" ] && [ "$N_KEPT" = yes ] && [ -z "$N_NOTE" ] && [ ! -e "$(record_file "$N")" ] \
-  && [ "$(state_value "$N" reviewTicketConsumed)" = false ] && [ "$(state_value "$N" reviewRound)" = 0 ] \
-  && [ "$(printf '%s' "$N_STOP" | decision)" = block ] && ! printf '%s' "$N_STOP" | reason | grep -qF 'Still running:'; then
-  check "BR9f a hand-back whose claim fails keeps the record for the notification, the notification's failed claim retires it, and the next Stop blocks instead of waiting" PASS
+N_STILL=no
+[ -f "$(record_file "$N")" ] && [ -f "$(arrival_file "$N")" ] && N_STILL=yes
+if [ -z "$N_HANDBACK" ] && [ "$N_KEPT" = yes ] && [ -z "$N_NOTE" ] && [ "$N_STILL" = yes ] \
+  && [ "$(state_value "$N" reviewTicketConsumed)" = false ] && [ "$(state_value "$N" reviewRound)" = 0 ]; then
+  check "BR9f a hand-back whose claim fails keeps record and arrival note, and so does the notification's failed claim" PASS
 else
-  check "BR9f failed claims (handback=$N_HANDBACK kept=$N_KEPT note=$N_NOTE consumed=$(state_value "$N" reviewTicketConsumed) stop=$(printf '%s' "$N_STOP" | head -c 300))" FAIL
+  check "BR9f failed claims (handback=$N_HANDBACK kept=$N_KEPT note=$N_NOTE still=$N_STILL consumed=$(state_value "$N" reviewTicketConsumed))" FAIL
+fi
+
+N_COUNT="$(stop_count "$N")"
+N_RELEASE="$(stop_payload "$N_RAW" | PATH="$FAIL_BIN:$PATH" REAL_NODE="$REAL_NODE" ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP" 2>"$WORK/arrived-release.err")"
+if [ "$(printf '%s' "$N_RELEASE" | decision)" = allow ] \
+  && stop_notice_only "$N_RELEASE" "$WORK/arrived-release.err" 'releasing this Stop. The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop' \
+  && ! grep -qF 'still running' "$WORK/arrived-release.err" \
+  && [ "$(stop_count "$N")" = "$N_COUNT" ] && [ -f "$(record_file "$N")" ] && [ -f "$(arrival_file "$N")" ] \
+  && [ "$(state_value "$N" reviewTicketConsumed)" = false ]; then
+  check "BR9g a Stop whose claim from the arrival note fails releases a standalone chain with the arrived-report notice, charges no budget and keeps record and note" PASS
+else
+  check "BR9g arrived release (out=$N_RELEASE count=$N_COUNT/$(stop_count "$N") err=$(head -c 400 "$WORK/arrived-release.err"))" FAIL
+fi
+
+N_STOP="$(recovery_stop "$N_RAW")"
+N_REASON="$(printf '%s' "$N_STOP" | reason)"
+if [ "$(printf '%s' "$N_STOP" | decision)" = block ] \
+  && printf '%s' "$N_REASON" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $N_AGENT) delivered its report earlier in this conversation as its hand-back, and the hook that received it did not complete the claim of its review ticket, so the ticket was claimed now." \
+  && printf '%s' "$N_REASON" | grep -qF 'The zensu:code-reviewer subagent above just finished.' \
+  && [ "$(state_value "$N" reviewTicketConsumed)" = true ] && [ "$(state_value "$N" reviewRound)" = 1 ] \
+  && [ ! -e "$(record_file "$N")" ] && [ ! -e "$(arrival_file "$N")" ]; then
+  check "BR9h the next Stop claims the ticket from the arrival note once and blocks with the routing directive" PASS
+else
+  check "BR9h Stop claim (reason=$(printf '%s' "$N_REASON" | head -c 400) consumed=$(state_value "$N" reviewTicketConsumed) round=$(state_value "$N" reviewRound))" FAIL
+fi
+
+CANCEL_BIN="$WORK/cancel-bin"
+mkdir -p "$CANCEL_BIN"
+cat > "$CANCEL_BIN/node" <<'STUB'
+#!/bin/bash
+if [ -n "${TICKET_STATE:-}" ]; then
+  printf '%s\n' "$$" > "$CANCEL_MARK"
+  while [ ! -f "$CANCEL_RELEASE" ]; do sleep 0.1; done
+  exit 3
+fi
+exec "$REAL_NODE" "$@"
+STUB
+chmod +x "$CANCEL_BIN/node"
+
+descendants() {
+  ps -A -o pid= -o ppid= 2>/dev/null | node -e '
+    const root = process.argv[1];
+    const rows = require("fs").readFileSync(0, "utf8").trim().split("\n").map((line) => line.trim().split(/\s+/));
+    const children = new Map();
+    for (const [pid, ppid] of rows) {
+      if (!children.has(ppid)) children.set(ppid, []);
+      children.get(ppid).push(pid);
+    }
+    const found = [];
+    const queue = [root];
+    while (queue.length) {
+      for (const child of children.get(queue.shift()) || []) {
+        found.push(child);
+        queue.push(child);
+      }
+    }
+    process.stdout.write(found.join(" "));
+  ' "$1" 2>/dev/null
+}
+
+host_cancel_prompt() {
+  local payload="$1" label="$2" leader runner waited=0 kids
+  rm -f "$WORK/$label.mark" "$WORK/$label.release" "$WORK/$label.pid"
+  (
+    set -m
+    PATH="$CANCEL_BIN:$PATH" REAL_NODE="$REAL_NODE" CANCEL_MARK="$WORK/$label.mark" CANCEL_RELEASE="$WORK/$label.release" \
+      bash "$PROMPT_HOOK" < "$payload" > "$WORK/$label.out" 2>/dev/null &
+    printf '%s' "$!" > "$WORK/$label.pid"
+    wait
+  ) &
+  runner=$!
+  while [ ! -s "$WORK/$label.mark" ] && [ "$waited" -lt 1200 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  CANCEL_BLOCKED=no
+  [ -s "$WORK/$label.mark" ] && CANCEL_BLOCKED=yes
+  leader="$(cat "$WORK/$label.pid" 2>/dev/null)"
+  CANCEL_GROUP=no
+  if [ -n "$leader" ] && [ "$(ps -o pgid= -p "$leader" 2>/dev/null | tr -d ' ')" = "$leader" ]; then CANCEL_GROUP=yes; fi
+  kids="$(descendants "$leader")"
+  kill -TERM -- "-$leader" 2>/dev/null
+  [ -z "$kids" ] || kill -TERM $kids 2>/dev/null
+  sleep 1.5
+  kill -KILL -- "-$leader" 2>/dev/null
+  [ -z "$kids" ] || kill -KILL $kids 2>/dev/null
+  touch "$WORK/$label.release"
+  wait "$runner" 2>/dev/null
+  CANCEL_GONE=yes
+  kill -0 -- "-$leader" 2>/dev/null && CANCEL_GONE=no
+}
+
+arm_chain br-cancel || { check "BR16 arm" FAIL; finish; exit 1; }
+P_RAW=br-cancel
+P="$STARTED_KEY"
+P_AGENT=a6a8c0e2a4c6e8a0c
+launch_payload "$P_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$P_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+prompt_payload "$P_RAW" "$(handback_text "$P_AGENT")" > "$WORK/cancel.json"
+host_cancel_prompt "$WORK/cancel.json" cancel
+if [ "$CANCEL_BLOCKED" = yes ] && [ "$CANCEL_GROUP" = yes ] && [ "$CANCEL_GONE" = yes ] && [ ! -s "$WORK/cancel.out" ] \
+  && [ "$(state_value "$P" reviewTicketConsumed)" = false ] && [ "$(state_value "$P" reviewRound)" = 0 ] \
+  && [ -f "$(record_file "$P")" ] && [ -f "$(arrival_file "$P")" ]; then
+  check "BR16 a host-style cancel of the prompt hook during the ticket claim (TERM to its process group and descendants, KILL 1.5 s later) leaves the ticket unconsumed and keeps record and arrival note" PASS
+else
+  check "BR16 host cancel (blocked=$CANCEL_BLOCKED group=$CANCEL_GROUP gone=$CANCEL_GONE out=$(head -c 200 "$WORK/cancel.out") consumed=$(state_value "$P" reviewTicketConsumed) record=$([ -f "$(record_file "$P")" ] && echo kept) note=$([ -f "$(arrival_file "$P")" ] && echo kept))" FAIL
+fi
+
+P_STOP="$(recovery_stop "$P_RAW")"
+P_REASON="$(printf '%s' "$P_STOP" | reason)"
+P_CLAIMED_ROUND="$(state_value "$P" reviewRound)"
+P_AGAIN="$(recovery_stop "$P_RAW")"
+if [ "$(printf '%s' "$P_STOP" | decision)" = block ] \
+  && printf '%s' "$P_REASON" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $P_AGENT) delivered its report earlier in this conversation as its hand-back, and the hook that received it did not complete the claim of its review ticket, so the ticket was claimed now." \
+  && printf '%s' "$P_REASON" | grep -qF 'The zensu:code-reviewer subagent above just finished.' \
+  && [ "$P_CLAIMED_ROUND" = 1 ] && [ "$(state_value "$P" reviewTicketConsumed)" = true ] \
+  && [ ! -e "$(record_file "$P")" ] && [ ! -e "$(arrival_file "$P")" ] \
+  && [ "$(state_value "$P" reviewRound)" = 1 ] && ! printf '%s' "$P_AGAIN" | reason | grep -qF 'BACKGROUND REVIEW REPORT'; then
+  check "BR17 after the cancel the next Stop claims the ticket once and blocks with the routing directive, and a second Stop claims nothing" PASS
+else
+  check "BR17 recovery Stop (reason=$(printf '%s' "$P_REASON" | head -c 400) round=$P_CLAIMED_ROUND/$(state_value "$P" reviewRound) again=$(printf '%s' "$P_AGAIN" | reason | head -c 200))" FAIL
+fi
+
+arm_chain br-defer || { check "BR18 arm" FAIL; finish; exit 1; }
+Q_RAW=br-defer
+Q="$STARTED_KEY"
+Q_AGENT=a7b9d1f3b5d7f9b1d
+launch_payload "$Q_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$Q_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+Q_DEFER="$(deferred_prompt "$Q_RAW" "$(handback_text "$Q_AGENT")" | hook_context)"
+if [ "$(first_line "$Q_DEFER")" = "UserPromptSubmit" ] \
+  && printf '%s' "$Q_DEFER" | grep -qF "BACKGROUND REVIEW REPORT PENDING. The report of the background zensu:code-reviewer (agent $Q_AGENT) reached you, but this hook ran out of time before it could claim the review ticket" \
+  && printf '%s' "$Q_DEFER" | grep -qF 'The claim completes at your next Stop or prompt' \
+  && ! printf '%s' "$Q_DEFER" | grep -qF 'just finished' \
+  && [ "$(state_value "$Q" reviewTicketConsumed)" = false ] && [ "$(state_value "$Q" reviewRound)" = 0 ] \
+  && [ -f "$(record_file "$Q")" ] && [ -f "$(arrival_file "$Q")" ]; then
+  check "BR18 a claim past the prompt hook's deadline defers: no claim, record and arrival note kept, and the prompt carries the deferral notice" PASS
+else
+  check "BR18 deferral (ctx=$(printf '%s' "$Q_DEFER" | head -c 400) consumed=$(state_value "$Q" reviewTicketConsumed))" FAIL
+fi
+
+OTHER_TYPED="$(counted_prompt "$A_RAW" 'please continue with the next file' "$WORK/other-session.calls")"
+if [ -z "$OTHER_TYPED" ] && [ "$(node_calls "$WORK/other-session.calls")" = 1 ] \
+  && [ -f "$(arrival_file "$Q")" ] && [ "$(state_value "$Q" reviewRound)" = 0 ]; then
+  check "BR18b while another session's arrival note is pending, a typed prompt spawns only the arrive child, no delegate, and leaves that note alone" PASS
+else
+  check "BR18b cross-session prompt (out=$OTHER_TYPED node=$(node_calls "$WORK/other-session.calls"))" FAIL
+fi
+
+Q_CLAIM="$(prompt_payload "$Q_RAW" 'please continue with the next file' | bash "$PROMPT_HOOK" 2>/dev/null | hook_context)"
+Q_AGAIN="$(prompt_payload "$Q_RAW" 'and the file after that' | bash "$PROMPT_HOOK" 2>/dev/null)"
+if [ "$(first_line "$Q_CLAIM")" = "UserPromptSubmit" ] \
+  && printf '%s' "$Q_CLAIM" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $Q_AGENT) delivered its report earlier in this conversation as its hand-back, and the hook that received it did not complete the claim of its review ticket, so the ticket was claimed now." \
+  && printf '%s' "$Q_CLAIM" | grep -qF 'The zensu:code-reviewer subagent above just finished.' \
+  && [ "$(state_value "$Q" reviewTicketConsumed)" = true ] && [ "$(state_value "$Q" reviewRound)" = 1 ] \
+  && [ ! -e "$(record_file "$Q")" ] && [ ! -e "$(arrival_file "$Q")" ] && [ -z "$Q_AGAIN" ]; then
+  check "BR18c the next prompt of any kind claims the ticket from the arrival note once and carries the routing directive" PASS
+else
+  check "BR18c prompt claim (ctx=$(printf '%s' "$Q_CLAIM" | head -c 400) again=$Q_AGAIN round=$(state_value "$Q" reviewRound))" FAIL
+fi
+
+arm_chain br-race || { check "BR19 arm" FAIL; finish; exit 1; }
+R_RAW=br-race
+R="$STARTED_KEY"
+R_AGENT=a8c0e2a4c6e8a0c2e
+launch_payload "$R_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$R_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+deferred_prompt "$R_RAW" "$(handback_text "$R_AGENT")" >/dev/null
+R_READY=no
+[ -f "$(record_file "$R")" ] && [ -f "$(arrival_file "$R")" ] && R_READY=yes
+recovery_stop "$R_RAW" > "$WORK/race-stop.out" &
+R_STOP_PID=$!
+prompt_payload "$R_RAW" 'please continue' | bash "$PROMPT_HOOK" > "$WORK/race-prompt.out" 2>/dev/null &
+R_PROMPT_PID=$!
+wait "$R_STOP_PID" "$R_PROMPT_PID"
+R_HITS=0
+reason < "$WORK/race-stop.out" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $R_AGENT)" && R_HITS=$((R_HITS + 1))
+hook_context < "$WORK/race-prompt.out" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $R_AGENT)" && R_HITS=$((R_HITS + 1))
+if [ "$R_READY" = yes ] && [ "$R_HITS" = 1 ] && [ "$(state_value "$R" reviewTicketConsumed)" = true ] && [ "$(state_value "$R" reviewRound)" = 1 ] \
+  && [ ! -e "$(record_file "$R")" ] && [ ! -e "$(arrival_file "$R")" ]; then
+  check "BR19 a Stop and a prompt racing on one arrival note claim the ticket once, and only one of them carries the routing directive" PASS
+else
+  check "BR19 race (ready=$R_READY hits=$R_HITS round=$(state_value "$R" reviewRound) stop=$(head -c 200 "$WORK/race-stop.out") prompt=$(head -c 200 "$WORK/race-prompt.out"))" FAIL
 fi
 
 start_session br-nochain || { check "BR10 session" FAIL; finish; exit 1; }
@@ -620,13 +882,14 @@ else
   check "BR12b fan-out wait (out=$M_ASPECT_OUT stop=$M_STOP_OUT count=$M_COUNT/$(stop_count "$M") err=$(cat "$WORK/fanout-release.err"))" FAIL
 fi
 
-M_ARRIVAL_OUT="$(prompt_payload "$M_RAW" "$(handback_text "$M_ASPECT")" | bash "$PROMPT_HOOK" 2>/dev/null)"
-M_NOTE_OUT="$(prompt_payload "$M_RAW" "$(notification_text "$M_JUDGE" completed)" | bash "$PROMPT_HOOK" 2>/dev/null)"
+M_ARRIVAL_OUT="$(counted_prompt "$M_RAW" "$(handback_text "$M_ASPECT")" "$WORK/fanout-handback.calls")"
+M_NOTE_OUT="$(counted_prompt "$M_RAW" "$(notification_text "$M_JUDGE" completed)" "$WORK/fanout-notification.calls")"
 M_AFTER_OUT="$(stop_payload "$M_RAW" | bash "$STOP" 2>"$WORK/fanout-after.err")"
 if [ -z "$M_ARRIVAL_OUT" ] && [ -z "$M_NOTE_OUT" ] && [ ! -e "$(fanout_file "$M" "$M_ASPECT")" ] && [ ! -e "$(fanout_file "$M" "$M_JUDGE")" ] \
+  && [ "$(node_calls "$WORK/fanout-handback.calls")" = 1 ] && [ "$(node_calls "$WORK/fanout-notification.calls")" = 1 ] \
   && [ "$(printf '%s' "$M_AFTER_OUT" | decision)" = block ] && ! grep -qF 'still running' "$WORK/fanout-after.err" \
   && [ "$(stop_count "$M")" = "$((M_COUNT + 1))" ]; then
-  check "BR12c each fan-out agent's hand-back or notification retires its entry without output, and the next Stop blocks as before" PASS
+  check "BR12c each fan-out agent's hand-back or notification retires its entry through the arrive child alone, without output or delegate, and the next Stop blocks as before" PASS
 else
   check "BR12c fan-out arrival (handback=$M_ARRIVAL_OUT notification=$M_NOTE_OUT stop=$(printf '%s' "$M_AFTER_OUT" | head -c 300) count=$(stop_count "$M"))" FAIL
 fi
@@ -729,6 +992,21 @@ if [ "$H_ARMED" = yes ] && [ -n "$H_TICKET" ] && printf '%s' "$H_LAUNCH" | grep 
 else
   check "BR14 bound launch and Stop (armed=$H_ARMED ticket=$H_TICKET launch=$(printf '%s' "$H_LAUNCH" | head -c 300) reason=$(printf '%s' "$H_STOP_REASON" | head -c 400) count=$H_COUNT/$(stop_count "$H") err=$(cat "$WORK/bound-stop.err"))" FAIL
 fi
+
+H_NOTED="$(prompt_payload "$H_RAW" "$(handback_text "$H_AGENT")" | ZENSU_BR_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" node "$LIB" arrive 2>/dev/null)"
+H_HELD_OUT="$(stop_payload "$H_RAW" | PATH="$FAIL_BIN:$PATH" REAL_NODE="$REAL_NODE" ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP" 2>"$WORK/bound-arrived.err")"
+H_HELD_REASON="$(printf '%s' "$H_HELD_OUT" | reason)"
+if [ "$H_NOTED" = "pending agent=$H_AGENT source=prompt retired=0" ] && [ "$(printf '%s' "$H_HELD_OUT" | decision)" = block ] \
+  && printf '%s' "$H_HELD_REASON" | grep -qF 'Zensu review-chain Stop held. The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop' \
+  && printf '%s' "$H_HELD_REASON" | grep -qF 'this Stop does not count against the inner Stop budget' \
+  && ! printf '%s' "$H_HELD_REASON" | grep -qF 'still running' \
+  && [ "$(stop_count "$H")" = "$H_COUNT" ] && [ "$(state_value "$H" reviewTicketConsumed)" = false ] \
+  && [ -f "$(record_file "$H")" ] && [ -f "$(arrival_file "$H")" ]; then
+  check "BR14c a bound chain whose claim from the arrival note fails is held with the arrived-report wording, without charging the inner Stop budget" PASS
+else
+  check "BR14c bound arrived hold (noted=$H_NOTED reason=$(printf '%s' "$H_HELD_REASON" | head -c 400) count=$H_COUNT/$(stop_count "$H"))" FAIL
+fi
+rm -f "$(arrival_file "$H")"
 
 node -e '
   const fs = require("fs");
