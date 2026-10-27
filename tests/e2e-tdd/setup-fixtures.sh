@@ -1,5 +1,5 @@
 #!/bin/bash
-# Idempotent fixture for the live full /zensu:tdd cycle. A clean git repo with a
+# Idempotent fixture for the live full /zensu:build cycle. A clean git repo with a
 # runnable Node test command and an empty src — the agent writes the RED test and
 # the implementation itself. Node's built-in runner means zero npm install.
 set -eu

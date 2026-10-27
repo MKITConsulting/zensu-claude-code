@@ -771,7 +771,7 @@ edit_payload() {
 # is exactly how two assertions in this file passed for the wrong reason during
 # development.
 #
-# The healthy fixture DOES have an active TDD session (`arm` runs --tdd-begin).
+# The healthy fixture DOES have an active build session (`arm` runs --tdd-begin).
 # Its Edit passes because vanilla mode makes the phase gate pass through, so the
 # control's precondition is `hooks.tddImplementation=false` — pinned explicitly
 # here rather than inherited from the shipped default, which could flip and turn

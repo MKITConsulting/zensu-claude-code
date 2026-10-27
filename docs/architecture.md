@@ -8,7 +8,7 @@ want to install and run it.
 
 ```
 Planning              →  Implementation  →  Tracking
-main-thread skills       /zensu:tdd         Zensu Dashboard
+main-thread skills       /zensu:build         Zensu Dashboard
 /zensu:bootstrap         code-reviewer      (Web UI)
 /zensu:ghost-scan        auto-fix loop
 /zensu:implement         (main thread)
@@ -16,7 +16,7 @@ main-thread skills       /zensu:tdd         Zensu Dashboard
 
 **Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
-**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:tdd` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only, and on any review the Stop hook resumes) → consume-mode code-reviewer → auto-fix loop → self-review.
+**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:build` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only, and on any review the Stop hook resumes) → consume-mode code-reviewer → auto-fix loop → self-review.
 
 **Layer 3 — Tracking (HOW is progress tracked?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
@@ -39,8 +39,8 @@ flowchart TD
 
     subgraph Implementation["Layer 2: Implementation"]
         C -->|"/zensu:implement"| D["Load Feature Context"]
-        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"ask which delivery route;<br/>only the /zensu:tdd route is drawn<br/>(a /zensu:delivery-route marker or hooks.defaultDeliveryRoute answers first)"| E
-        D --> E["/zensu:tdd skill<br/>(main thread)"]
+        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"ask which delivery route;<br/>only the /zensu:build route is drawn<br/>(a /zensu:delivery-route marker or hooks.defaultDeliveryRoute answers first)"| E
+        D --> E["/zensu:build skill<br/>(main thread)"]
         E --> MODE{"mode at --tdd-begin:<br/>/zensu:tdd-mode session choice ><br/>--tdd-mode caller default ><br/>hooks.tddImplementation"}
         MODE -->|"resolved: vanilla (default)<br/>no RED→GREEN, gate passes through"| VAN["IMPL — write code directly<br/>(tests at discretion)"]
         MODE -->|"resolved: strict"| RED["RED — write failing test"]
@@ -102,7 +102,7 @@ It is the only **advisory, context-injecting** hook without a config flag — `h
 
 `tests/structure/test-evidence-discipline.sh` keeps the three carriers honest: the condensed block is extracted from between the canonical file's markers and must appear **verbatim** in every agent and every skill, so a newly added surface that omits it fails the suite instead of shipping without the rule. Anti-vacuity is pinned too — extraction hard-aborts rather than degrading to an empty pattern, the carrier predicate is exercised against missing, paraphrased and unterminated fixtures, and the content assertions run against the hook's *emitted* context rather than its source text.
 
-One reviewer is not a plugin file and so cannot be a carrier: a **repo-custom review persona** (`.claude/agents/zensu-review-*.md`) is authored by the repository under review. `/zensu:pr-team-review` and `/zensu:plan-review` are covered by construction — they spawn a custom seat *as* one of the confined plugin workers, which carries the block like any agent. `/zensu:tdd` is the one path that spawns a custom persona under its own `subagent_type`, so its fan-out prepends the canonical block to that spawn prompt, read from the canonical file at run time rather than duplicated. The suite pins all of it, including the premise: if either other skill ever starts spawning custom seats under their own type, that path loses its carrier the same silent way, and the check fails.
+One reviewer is not a plugin file and so cannot be a carrier: a **repo-custom review persona** (`.claude/agents/zensu-review-*.md`) is authored by the repository under review. `/zensu:pr-team-review` and `/zensu:plan-review` are covered by construction — they spawn a custom seat *as* one of the confined plugin workers, which carries the block like any agent. `/zensu:build` is the one path that spawns a custom persona under its own `subagent_type`, so its fan-out prepends the canonical block to that spawn prompt, read from the canonical file at run time rather than duplicated. The suite pins all of it, including the premise: if either other skill ever starts spawning custom seats under their own type, that path loses its carrier the same silent way, and the check fails.
 
 The prose is the floor, not the ceiling. Where the discipline can be enforced by machinery it already is — the [full-suite gate](gates.md#full-suite-gate) closes a reviewed chain only on a suite run the plugin executed and recorded itself, the [acceptance verification gate](gates.md#acceptance-verification-gate) closes it only when every active acceptance criterion was verified live on the tree that ships, with exit-code checks run by the plugin itself, REVIEW PACKET v1 makes reviewers reject an evidence-less spawn rather than review from imagination, `/zensu:verify-feature` reports `PARTIAL` instead of inferring an outcome, and `/zensu:wargame` marks an unsettled assumption `RECON NEEDED` with the check that settles it. When extending the plugin, prefer a check that fails closed over a sentence asking the model to be careful.
 
@@ -170,7 +170,7 @@ while one is, because its rule 6 shrinks to one sentence when the anchor reads `
 `Z30b` in `tests/structure/test-zen-mode.sh` hold the two variants under declared ceilings, but
 they read the hook and never open this document, so the numbers written here are hand-derived
 like every other one below, and age the same way. `C6` above stays the only figure a check reads
-out of this paragraph. A full-panel `/zensu:tdd` review round
+out of this paragraph. A full-panel `/zensu:build` review round
 (`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge (two on the first review by default) and a code-reviewer, so
 the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
 spawns three aspects and runs the judge on the first review only (twice side by side while `hooks.reviewJudgeSecondRun` is on) and on any review the Stop hook resumes — more with repo-custom personas, and again per auto-fix
@@ -333,7 +333,7 @@ on it. What the suite enforces is the 9,000-character ceiling, never the host's 
 ```
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-1    → Load context, plan implementation
-3. /zensu:tdd                → The Zensu workflow, run by /zensu:implement in the main thread (vanilla; opt-in strict RED→GREEN)
+3. /zensu:build                → The Zensu workflow, run by /zensu:implement in the main thread (vanilla; opt-in strict RED→GREEN)
 4. review chain              → 3 or 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-enforced)
 5. auto-fix loop             → Critical findings fixed in-thread (Important ones too under hooks.autoFixSeverity important or all, otherwise parked for the self-review), then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off); with hooks.criticalReproduction a re-review CRITICAL routes only when a failing test reproduces it
 6. /zensu:implement (steps 4-8) → Link tests, sources and docs, create a revision, validate
@@ -364,7 +364,7 @@ No separate skill — the agent runs ghost-scan, then creates the remainder as p
 
 ```
 1. Plan mode, approve the plan → Zensu asks which delivery route to take
-2. Zensu workflow (/zensu:tdd) → Implement, verify every acceptance criterion, then the Stop-enforced review chain
+2. Zensu workflow (/zensu:build) → Implement, verify every acceptance criterion, then the Stop-enforced review chain
 ```
 
 `zensu:code-reviewer` is not a standalone reviewer: spawned without the REVIEW PACKET v1
@@ -375,13 +375,13 @@ change is an open pull request.
 ## Graceful Degradation
 
 The Zensu workflow and its review chain work **without a Zensu account**. No `zensu` CLI needed for:
-- `/zensu:tdd` orchestration (vanilla by default; strict RED→GREEN when configured or switched per session)
+- `/zensu:build` orchestration (vanilla by default; strict RED→GREEN when configured or switched per session)
 - Code review (3 or 5 parallel specialist aspects → optional judge → consume-mode reviewer)
-- Progress logging (`.zensu/logs/`) and planning (`.zensu/plans/`) — the log is path-redacted at write time and the plan by a best-effort main-thread PostToolUse pass, so a consuming repo can commit them as an audit trail; see [tdd-manager-workflow.md](tdd-manager-workflow.md#publication-safety-of-the-plan-and-log)
+- Progress logging (`.zensu/logs/`) and planning (`.zensu/plans/`) — the log is path-redacted at write time and the plan by a best-effort main-thread PostToolUse pass, so a consuming repo can commit them as an audit trail; see [build-workflow.md](build-workflow.md#publication-safety-of-the-plan-and-log)
 
-`/zensu:tdd` itself makes no `zensu` call, so a chain it closes leaves nothing in Zensu. The
+`/zensu:build` itself makes no `zensu` call, so a chain it closes leaves nothing in Zensu. The
 tracking happens only in the skills that call the CLI, once it is installed and authenticated:
-- `/zensu:implement` runs `/zensu:tdd` and then, in its own later steps, links tests and sources (`zensu link test`, `zensu link source`), publishes and links docs, creates a revision (`zensu features revision`) and validates the release gate (`zensu security validate`)
+- `/zensu:implement` runs `/zensu:build` and then, in its own later steps, links tests and sources (`zensu link test`, `zensu link source`), publishes and links docs, creates a revision (`zensu features revision`) and validates the release gate (`zensu security validate`)
 - `/zensu:pilot` updates feature status (`zensu features status`) as it moves a tracked feature along
 - `/zensu:security-review` records the review and its findings (`zensu security review`)
 - `/zensu:docs` publishes code-grounded documentation and updates the docs score (`zensu link docs`)

@@ -929,7 +929,7 @@ case "${1:-}" in
     # SESSION id rather than of the project.
     #
     # The exit code and stdout are UNCHANGED, and the reason is the SKILLS, not a
-    # hook: `skills/{autopilot,autopilot-release,tdd,pr-team-review,pr-fix-findings,
+    # hook: `skills/{autopilot,autopilot-release,build,pr-team-review,pr-fix-findings,
     # self-review,reset-review-limit}` all run this verb and parse its stdout as
     # JSON, several of them failing closed on a mismatch. An earlier wording here
     # named `session-start-autopilot-resume.sh` instead, which does not call this
@@ -1277,7 +1277,7 @@ case "${1:-}" in
     # matrix below is not what it reads, and this line's placement is a readability
     # choice, not a constraint.
     [ "$seen_tdd_mode" = false ] || [ "$verb" = "--tdd-begin" ] || invalid_known_flag=true
-    # --plan names the session's TDD plan for the requirements-table gate below,
+    # --plan names the session's Zensu plan for the requirements-table gate below,
     # and belongs to exactly ONE verb for the same reason --tdd-mode does: a verb
     # added later inherits the refusal rather than silently accepting a flag only
     # --tdd-complete can act on.
@@ -1974,7 +1974,7 @@ case "${1:-}" in
         # the plan's `## Requirements` table. Without a usable one it takes its
         # legacy stop and reports nothing — and /zensu:autopilot's CONVERGE stage,
         # the ONLY edge into OPEN_PR, then passes on an audit that examined
-        # nothing. Prose asked for the table (skills/tdd/references/planning.md Phase 2 step 1b)
+        # nothing. Prose asked for the table (skills/build/references/planning.md Phase 2 step 1b)
         # and the only check was the warning-level step 6c, which skips silently
         # when the table is absent; measured across real projects a third of plans
         # carried none. Same move as the receipt gate above: make the obligation a
@@ -2005,7 +2005,7 @@ case "${1:-}" in
           fi
           if [ -f "$_tc_receipt" ] && command -v node >/dev/null 2>&1; then
             # Derive from the receipt's own record of the run log it audited. The
-            # plan and the log are created from one {SESSION_TS}_tdd-{slug} stem,
+            # plan and the log are created from one {SESSION_TS}_build-{slug} stem,
             # so .zensu/logs/<stem>.log names .zensu/plans/<stem>.md. Deriving
             # through the receipt — rather than taking the newest plan by mtime,
             # as /zensu:converge does — is what anchors this gate to THIS session,
@@ -2172,7 +2172,7 @@ case "${1:-}" in
             case "$_rq_rc" in
               0) ;;
               3|4)
-                echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's TDD plan carries no usable \`## Requirements\` table, so /zensu:converge would audit nothing and still close clean:" >&2
+                echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's Zensu plan carries no usable \`## Requirements\` table, so /zensu:converge would audit nothing and still close clean:" >&2
                 echo "  ${_rq_verdict}" >&2
                 echo "Fill the table with AC-###/FR-### rows per Phase 2 step 1b, then re-run. Pass --plan <path> when the plan is not the run log's sibling under .zensu/plans/." >&2
                 echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
@@ -2407,9 +2407,9 @@ case "${1:-}" in
                   exit "$chain_done_rc"
                 }
                 if [ "$chain_change_count" = "unavailable" ]; then
-                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. The chain's review is reopened: run git diff --name-only HEAD in the project root to see the git error and resolve it, then resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. The chain's review is reopened: run git diff --name-only HEAD in the project root to see the git error and resolve it, then resume the /zensu:build Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
                 else
-                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but the worktree reports ${chain_change_count} changed file(s). The chain's review is reopened: resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but the worktree reports ${chain_change_count} changed file(s). The chain's review is reopened: resume the /zensu:build Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
                 fi
                 exit 1
               }
@@ -2426,7 +2426,7 @@ case "${1:-}" in
                 if [ "$chain_change_count" = "unavailable" ]; then
                   echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but git could not list this worktree's changes against HEAD, so that claim cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or review the changes through the zensu:code-reviewer chain and close with --claimed-review-ticket." >&2
                 else
-                  echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:tdd for a fresh guarded chain. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+                  echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:build for a fresh guarded chain. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
                 fi
                 exit 1
               }
@@ -2499,9 +2499,9 @@ case "${1:-}" in
               exit "$review_done_rc"
             }
             if [ "$review_change_count" = "unavailable" ]; then
-              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or resume the /zensu:tdd Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
+              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or resume the /zensu:build Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
             else
-              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but it reports ${review_change_count} changed file(s). Resume the /zensu:tdd Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but it reports ${review_change_count} changed file(s). Resume the /zensu:build Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
             fi
             exit 1
           }
@@ -2816,7 +2816,7 @@ case "$cmd" in
           // SCOPED TO `replace`, and the scope was MEASURED rather than assumed.
           // Applying cwd-or-ancestor to every mode denies a working and ordinary
           // call shape: an absolute --log issued from an unrelated cwd, which is
-          // how five checks in the suite, and the log commands of the TDD chains
+          // how five checks in the suite, and the log commands of the build chains
           // in this repo, invoke the verb. An unbound append adds a line to a
           // foreign audit log; an unbound --truncate DESTROYS one, and only the
           // second is worth denying that shape over.

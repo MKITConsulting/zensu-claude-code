@@ -5,7 +5,7 @@ paths:
   - "hooks/user-prompt-review-handback.sh"
   - "hooks/post-review-tdd-delegate.sh"
   - "hooks/stop-chain-enforcer.sh"
-  - "skills/tdd/references/review-chain.md"
+  - "skills/build/references/review-chain.md"
   - "tests/structure/background-review-v1.test.js"
   - "tests/structure/test-background-review.sh"
 ---
@@ -15,7 +15,7 @@ paths:
 The Claude desktop app (Code tab, Claude Code 2.1.304) starts every `Agent` spawn in the
 background, and its Agent tool has no `run_in_background` parameter. The consume-mode
 `zensu:code-reviewer` therefore answers `tool_response.status: async_launched`, and the review
-chain used to demand a foreground re-spawn that this host cannot make: every `/zensu:tdd` chain in
+chain used to demand a foreground re-spawn that this host cannot make: every `/zensu:build` chain in
 the desktop app stalled at the consume step and closed with `--tdd-reset`. The panel, the judge
 pair and a fix round's re-review aspect run in the background too, and a turn end while they ran
 was a blocked Stop that charged the chain-wide budget and ordered a fresh fan-out. The chain now
@@ -186,7 +186,7 @@ completes the claim from that note.
   same session can release a Stop for at most the wait bound.
 - **The re-spawn sentence keeps `run_in_background: false` only where the Agent tool offers that
   parameter**, in the three severity arms of the delegate, the Stop resume reason and steps 10 and 5
-  of `skills/tdd/references/review-chain.md`.
+  of `skills/build/references/review-chain.md`.
 
 ## Coupled sites
 
@@ -229,7 +229,7 @@ completes the claim from that note.
   keys on the `core.readContext({ recordsDir, sessionId: key })` literal the latency suite reads.
 - Operator accounts: the delegate, Stop and prompt-hook rows of `docs/configuration.md`,
   §"Background review agents" of `docs/review-chain.md`, `docs/architecture.md`, and the step-10
-  lead and step 5 of `skills/tdd/references/review-chain.md`.
+  lead and step 5 of `skills/build/references/review-chain.md`.
 
 ## Known gaps
 

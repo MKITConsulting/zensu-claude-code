@@ -1142,9 +1142,9 @@ unit_check_done "every unit file the registry gives this suite was graded"
 
 SANDBOX_MISSING=""
 for text in docs/configuration.md docs/session-control.md docs/gates.md docs/review-chain.md \
-  docs/tdd-manager-workflow.md docs/session-control-release-gate.md evals/session-control/README.md \
+  docs/build-workflow.md docs/session-control-release-gate.md evals/session-control/README.md \
   skills/gauntlet-loop/SKILL.md skills/gauntlet-loop/references/harness.md skills/ghost-scan/SKILL.md \
-  skills/cover/SKILL.md skills/docs/SKILL.md skills/tdd/SKILL.md \
+  skills/cover/SKILL.md skills/docs/SKILL.md skills/build/SKILL.md \
   skills/session-trail/references/limits.md skills/session-trail/references/takeover.md; do
   grep -qE 'not a sandbox|no sandbox' "$PLUGIN/$text" || SANDBOX_MISSING="$SANDBOX_MISSING $text"
 done

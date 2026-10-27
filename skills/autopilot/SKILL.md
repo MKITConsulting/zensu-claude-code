@@ -128,9 +128,9 @@ file it was not given, so the marker has to travel inside the plan itself:
 ```
 
 The plan-approval hook verifies the marker, owner session, and plan SHA-256, applies
-`PLAN_APPROVED`, and delegates directly to `/zensu:tdd` without another question. Pass the
+`PLAN_APPROVED`, and delegates to `/zensu:build` without another question. Pass the
 approved spec plus the exact line `AUTOPILOT-RUN: <RUN_ID>` to every initial or fix-loop
-`/zensu:tdd` invocation. The TDD skill reads the durable attempt/return stage, creates a
+`/zensu:build` invocation. That skill reads the durable attempt/return stage, creates a
 fresh chain id, and uses the bound `--tdd-begin` form; its guarded `--chain-done` returns to
 that exact stage. Never start an unbound TDD generation during an active run.
 
@@ -332,26 +332,26 @@ the plan content you pass to `ExitPlanMode`. Do not proceed if either operation 
 Keep that order: an `ExitPlanMode` approval that finds no durable run at `PLANNING`
 falls through to the standalone plan-approval directive, which asks the four-route question
 while no delivery route is decided, and once one is recorded or configured
-sends this spec to `/zensu:tdd` or implements it directly without asking.
+sends this spec to `/zensu:build` or implements it directly without asking.
 
 ### Phase 1 — Build  (autonomous, ZERO questions) — strictly ordered
 
 Run these in order. Implement **via the Zensu workflow** throughout.
 
-1. **Implement** — invoke `/zensu:tdd` (vanilla mode) with the spec + ACs and the exact
+1. **Implement** — invoke `/zensu:build` (vanilla) with the spec + ACs and the exact
    `AUTOPILOT-RUN: <RUN_ID>` line as the feature
    specification. Let the built-in review chain run and address what it raises.
    Stay in the worktree.
-   (Vanilla `/zensu:tdd` may ship thin coverage — `/zensu:cover` on the diff hardens the
+   (Vanilla `/zensu:build` may ship thin coverage — `/zensu:cover` on the diff hardens the
    durable test net; opt in with `--cover`, applied in step 6b below.)
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
    before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
    Persist `GATES_PASSED` with the tested head SHA; on failure persist `GATES_FAILED`, then
-   run the bound `/zensu:tdd` fix attempt and return here.
+   run the bound `/zensu:build` fix attempt and return here.
 2b. **Converge (report-only)** — run `/zensu:converge <session-plan-path>` (always the
    session plan, never mtime-resolved — scoped fix runs write newer plans): a
    `contradicts` finding on an active AC **blocks the PR open** until fixed via
-   `/zensu:tdd` (vanilla, scoped); after each fix re-run the converge report against the
+   `/zensu:build` (vanilla, scoped); after each fix re-run the converge report against the
    SAME session plan — if `contradicts` persists after 2 fix attempts, treat it as a
    stop-the-world blocker per The one rule (halt + report). `missing`/`partial`
    findings feed the step-6 validate loop; with `--no-validate`, `missing` on an
@@ -389,7 +389,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    🔴 fail, ⚪ deprecated — prefixing the word rather than replacing it; ⚪ is bound to
    provenance, so use it only for a row the spec already marks deprecated. The body also carries one audit line
    `Gates bypassed during build: <list|none|UNREADABLE — …>`
-   from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
+   from the bypass ledger: after EVERY `/zensu:build` chain of this run (the initial one and
    each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
    and union the non-`none` entries. **Check its exit status, not just its output.** On a
    non-zero exit the verb did not read a ledger: exit 3 prints an `UNREADABLE — …` line on
@@ -425,7 +425,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
       never-recycle rule).
    b. Every non-deprecated AC passes + gates green → persist `VALIDATION_PASSED` and
       **exit the loop**.
-   c. Anything off → persist `VALIDATION_FAILED`, fix it through `/zensu:tdd` (vanilla,
+   c. Anything off → persist `VALIDATION_FAILED`, fix it through `/zensu:build` (vanilla,
       scoped to the failing AC(s), carrying `AUTOPILOT-RUN: <RUN_ID>`),
       re-run the step-2 gates, push to update the PR, then go back to (a).
    d. Repeat (a)–(c) until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.

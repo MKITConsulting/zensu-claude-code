@@ -98,7 +98,7 @@ had already been corrected for. Read that line: it is the cheapest source of the
 SIX surfaces name the run id, and any of them is evidence:
 
 1. the `--autopilot-begin` refusal;
-2. the standalone `/zensu:tdd` begin refusal raised when a durable run already holds the tree;
+2. the standalone `/zensu:build` begin refusal raised when a durable run already holds the tree;
 3. the Stop refusal raised when a deferred review cannot be adopted for the same reason;
 4. the `autopilot:` row of `/zensu:doctor`;
 5. the `--autopilot-status` stderr line described above;

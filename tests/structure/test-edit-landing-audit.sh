@@ -6,7 +6,7 @@
 # the review chain consumes comes from git, so such a claim reaches no reviewer,
 # and the suite stays green because it was green before the edit.
 #
-# The recipe used to live as prose in skills/tdd/SKILL.md, re-implemented from
+# The recipe used to live as prose in skills/build/SKILL.md, re-implemented from
 # scratch on every run and testable only by grepping for its own wording. It now
 # lives in hooks/lib/zensu-edit-landing.sh, so this suite DRIVES it against
 # hermetic git fixtures. What remains pinned in the skill is only what a model
@@ -15,7 +15,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh"
 
 T_PASS=0; T_FAIL=0
@@ -489,7 +489,7 @@ else
 fi
 
 echo "== A rendered root is screened before it reaches a verdict line =="
-# These two verdict lines are MODEL-READ: skills/tdd/SKILL.md step 5b b) tells the
+# These two verdict lines are MODEL-READ: skills/build/SKILL.md step 5b b) tells the
 # model to copy every non-`EDIT LANDED` line verbatim into the run log, the final
 # report and the CHAIN-END SUMMARY, and step 10.2c puts the close marker into the
 # REVIEW PACKET. A directory name carrying ` : ` therefore forges a `label : value`
@@ -741,7 +741,7 @@ fi
 
 echo "== The strict-mode step 8 summary line is not a claim =="
 # `*"WIRED"*` also matched `TDD COMPLETE — … | Integration: 1 WIRED | …`, which
-# skills/tdd/SKILL.md step 8 logs BEFORE --tdd-complete runs. That counted the
+# skills/build/SKILL.md step 8 logs BEFORE --tdd-complete runs. That counted the
 # summary as an ungradeable claim, so every audit re-run after step 8 wrote
 # `clean: false` — and once the terminus read the VERDICT, the refusal's own
 # remedy could never clear it. A bare claim is `<step> WIRED …` and nothing else.
@@ -1404,7 +1404,7 @@ check "X21b a newline-bearing foreign root is refused rather than split" "$(verd
 # foreign-claim remedy. The doctor's topology bullets stated no such bound
 # either, so row-absence read as a clean topology. The two HTML docs already
 # carry it; the two skills did not.
-TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 DOC_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 grep -qF 'UNVERIFIED (undetermined root)' "$TDD_SKILL"
 check "X22 step 5b b) names the undetermined-root verdict this library emits" "$(verdict $?)"
