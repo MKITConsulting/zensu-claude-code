@@ -806,40 +806,16 @@ background_review_subject() {
 }
 
 BACKGROUND_REVIEW_CLAIM_MARGIN=20
+BACKGROUND_REVIEW_HOOK_TIMEOUT=90
 BACKGROUND_REVIEW_ARRIVED=false
+BACKGROUND_REVIEW_HOLD_COUNTED=false
 BACKGROUND_REVIEW_DIRECTIVE=""
 BACKGROUND_REVIEW_ARRIVED_PENDING="The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop, so the claim stays pending: the next Stop or prompt retries it and, once it succeeds, hands you the routing directive."
 BACKGROUND_REVIEW_ARRIVED_LEAD=""
-background_review_recover() {
-  local store record note limit claim_by directive held data exclusions verdict word count of
+background_review_defer() {
+  local held="${1:-}" data exclusions verdict word count of
   BACKGROUND_REVIEW_ARRIVED=false
   BACKGROUND_REVIEW_ARRIVED_LEAD=""
-  BACKGROUND_REVIEW_DIRECTIVE=""
-  zensu_session_key_canonical "$SESSION_ID" || return 1
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
-  store="${CLAUDE_PLUGIN_DATA}/background-review/v1"
-  record="${store}/records/${SESSION_ID}.json"
-  note="${store}/arrivals/${SESSION_ID}.json"
-  [ -f "$note" ] && [ ! -L "$note" ] && [ -f "$record" ] && [ ! -L "$record" ] || return 1
-  claim_by=""
-  if [ "$STOP_SUPERVISED" = true ]; then
-    limit="$(zensu_stop_deadline_seconds 2>/dev/null)" || limit=""
-    case "$limit" in
-      ''|*[!0-9]*) ;;
-      *) claim_by="$(( $(date +%s) - SECONDS + limit - BACKGROUND_REVIEW_CLAIM_MARGIN ))" ;;
-    esac
-  fi
-  directive="$(printf '%s' "$INPUT" | ZENSU_BR_CLAIM_BY="$claim_by" \
-    bash "${CLAUDE_PLUGIN_ROOT}/hooks/post-review-tdd-delegate.sh" --background-recovery 2>/dev/null)"
-  if [ -n "$directive" ]; then
-    BACKGROUND_REVIEW_DIRECTIVE="$directive"
-    return 0
-  fi
-  [ -f "$note" ] && [ ! -L "$note" ] && [ -f "$record" ] && [ ! -L "$record" ] || return 1
-  held=""
-  if [ "$OUTER_PRESENT" != false ] || [ "$DEFERRED_ADOPTED" != false ] || [ -n "$INNER_BOUND_RUN" ]; then
-    held=1
-  fi
   data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
   exclusions="$(zensu_msys_env_exclusions ZENSU_BR_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   verdict="$(MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_BR_PLUGIN_DATA="$data" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
@@ -852,11 +828,64 @@ background_review_recover() {
       case "$count" in ''|*[!0-9]*) return 1 ;; esac
       case "$of" in ''|*[!0-9]*) return 1 ;; esac
       BACKGROUND_REVIEW_ARRIVED_LEAD="${BACKGROUND_REVIEW_ARRIVED_PENDING} This Stop is claim attempt ${count} of ${of}: once those are spent, the next Stop that still cannot claim it drops the claim, and the review sequence runs again."
+      BACKGROUND_REVIEW_HOLD_COUNTED=true
       ;;
     release) BACKGROUND_REVIEW_ARRIVED_LEAD="$BACKGROUND_REVIEW_ARRIVED_PENDING" ;;
     *) return 1 ;;
   esac
   BACKGROUND_REVIEW_ARRIVED=true
+  return 0
+}
+background_review_recover() {
+  local store record note limit claim_rel claim_by nap out pid watchdog directive held
+  BACKGROUND_REVIEW_ARRIVED=false
+  BACKGROUND_REVIEW_HOLD_COUNTED=false
+  BACKGROUND_REVIEW_ARRIVED_LEAD=""
+  BACKGROUND_REVIEW_DIRECTIVE=""
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  store="${CLAUDE_PLUGIN_DATA}/background-review/v1"
+  record="${store}/records/${SESSION_ID}.json"
+  note="${store}/arrivals/${SESSION_ID}.json"
+  [ -f "$note" ] && [ ! -L "$note" ] && [ -f "$record" ] && [ ! -L "$record" ] || return 1
+  limit="$BACKGROUND_REVIEW_HOOK_TIMEOUT"
+  if [ "$STOP_SUPERVISED" = true ]; then
+    limit="$(zensu_stop_deadline_seconds 2>/dev/null)" || limit=""
+  fi
+  case "$limit" in ''|*[!0-9]*) limit=0 ;; esac
+  claim_rel=$((limit - BACKGROUND_REVIEW_CLAIM_MARGIN))
+  directive=""
+  if [ "$SECONDS" -lt "$claim_rel" ] && out="$(mktemp "${TMPDIR:-/tmp}/zensu-br-recovery.XXXXXX" 2>/dev/null)"; then
+    claim_by="$(( $(date +%s) - SECONDS + claim_rel ))"
+    nap=$((claim_rel - SECONDS + 1))
+    ZENSU_BR_CLAIM_BY="$claim_by" bash "${CLAUDE_PLUGIN_ROOT}/hooks/post-review-tdd-delegate.sh" --background-recovery \
+      <<<"$INPUT" >"$out" 2>/dev/null &
+    pid=$!
+    (
+      sleeper=""
+      trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
+      sleep "$nap" &
+      sleeper=$!
+      wait "$sleeper"
+      kill -TERM "$pid" 2>/dev/null
+    ) </dev/null >/dev/null 2>&1 &
+    watchdog=$!
+    wait "$pid" 2>/dev/null
+    kill -TERM "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+    directive="$(cat -- "$out" 2>/dev/null)"
+    rm -f -- "$out"
+  fi
+  if [ -n "$directive" ]; then
+    BACKGROUND_REVIEW_DIRECTIVE="$directive"
+    return 0
+  fi
+  [ -f "$note" ] && [ ! -L "$note" ] && [ -f "$record" ] && [ ! -L "$record" ] || return 1
+  held=""
+  if [ "$OUTER_PRESENT" != false ] || [ "$DEFERRED_ADOPTED" != false ] || [ -n "$INNER_BOUND_RUN" ]; then
+    held=1
+  fi
+  background_review_defer "$held" || true
   return 1
 }
 
@@ -2269,6 +2298,9 @@ else
   esac
   REASON="STOP intercepted by zensu chain-enforcer. A main-thread build session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:build Phase 6 review sequence where it left off: build the step 10.2c REVIEW PACKET v1 over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, fan out one zensu:review-aspect agent per perspective of the ${REVIEW_PANEL} review panel (${REVIEW_PERSPECTIVES}), plus the repo-local personas step 10.2b selects, each given that packet, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default; on the first review together with its independent second run in the same tool message while hooks.reviewJudgeSecondRun is enabled), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' (with run_in_background: false where the Agent tool offers that parameter; a background run is routed when its report arrives), ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the complete REVIEW PACKET v1 and then the merged findings. On the first review, and only while hooks.reviewJudge is enabled, take the Phase 6.10 step 3 import path when a finished Workflow run of the plugin's review template (templates/workflows/zensu-review-v1.js) covered this change: it runs zensu-log.sh --external-review, and only an ok or degraded answer replaces the panel's aspect agents, after which it always runs the zensu:review-judge and spawns one aspect per GAP line the judge names; every other answer leaves the panel fan-out as stated, and the rest of this sequence stays as stated either way. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
   REASON="${REASON} ${STATE_LEGEND} ${INNER_RESUME_CLOSER}"
+  if [ "$BACKGROUND_REVIEW_ARRIVED" = "true" ] && [ "$BACKGROUND_REVIEW_HOLD_COUNTED" != "true" ]; then
+    background_review_defer 1 || true
+  fi
   if [ "$BACKGROUND_REVIEW_ARRIVED" = "true" ]; then
     REASON="${BACKGROUND_REVIEW_ARRIVED_LEAD} The resume sequence below does not apply while that claim is pending: do NOT classify or fix anything, do NOT spawn another reviewer and do NOT re-run the review fan-out; end your turn again instead. ${REASON}"
   elif [ "$BACKGROUND_REVIEW_PENDING" = "true" ]; then

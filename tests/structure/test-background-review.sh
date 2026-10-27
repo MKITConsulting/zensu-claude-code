@@ -93,6 +93,23 @@ else
   check "BR1e claim deadline (registered=$REG hook=$HOOK_TIMEOUT margin=$HOOK_MARGIN)" FAIL
 fi
 
+STOP_REG="$(node -e '
+  const manifest = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const hooks = (manifest.hooks.Stop || []).flatMap((group) => group.hooks || [])
+    .filter((hook) => String(hook.command).includes("hooks/stop-chain-enforcer.sh"));
+  process.stdout.write(hooks.length === 1 && hooks[0].timeout !== undefined ? String(hooks[0].timeout) : "-");
+' "$HOOKS_JSON" 2>/dev/null)"
+STOP_TIMEOUT="$(sed -n 's/^BACKGROUND_REVIEW_HOOK_TIMEOUT=\([0-9][0-9]*\)$/\1/p' "$STOP")"
+STOP_MARGIN="$(sed -n 's/^BACKGROUND_REVIEW_CLAIM_MARGIN=\([0-9][0-9]*\)$/\1/p' "$STOP")"
+if [ -n "$STOP_TIMEOUT" ] && [ "$STOP_REG" = "$STOP_TIMEOUT" ] \
+  && [ -n "$STOP_MARGIN" ] && [ "$STOP_MARGIN" -gt 0 ] && [ "$STOP_MARGIN" -lt "$STOP_TIMEOUT" ] \
+  && grep -qF 'limit="$BACKGROUND_REVIEW_HOOK_TIMEOUT"' "$STOP" \
+  && grep -qF 'claim_rel=$((limit - BACKGROUND_REVIEW_CLAIM_MARGIN))' "$STOP"; then
+  check "BR1f an unsupervised Stop recovery takes its claim deadline from the timeout hooks.json registers for the Stop hook, less a margin" PASS
+else
+  check "BR1f Stop claim deadline (registered=$STOP_REG hook=$STOP_TIMEOUT margin=$STOP_MARGIN)" FAIL
+fi
+
 if [ "$(grep -c "path.join(trusted.pluginData, 'background-review')" "$CAPABILITY")" = "2" ]; then
   check "BR1a the background-review store is in both protected-root lists of the capability gate" PASS
 else
@@ -233,6 +250,12 @@ prompt_payload() {
   '
 }
 
+subagent_prompt_payload() {
+  RAW="$1" TEXT="$2" node -e '
+    process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.RAW, prompt: process.env.TEXT, agent_id: "a4a7d6728967b4db8", agent_type: "general-purpose" }));
+  '
+}
+
 handback_text() {
   printf '<agent-message from="%s">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.\n    Verdict: PASS\n</agent-message>' "$1"
 }
@@ -323,6 +346,7 @@ cat > "$CLASS_BIN/node" <<'STUB'
 kind=x
 case "$*" in
   (*'core.readContext({ recordsDir, sessionId: key })'*) kind=root ;;
+  (*'background-review-v1.js retire'*) kind=retire ;;
 esac
 [ -z "${TICKET_STATE:-}" ] || kind=cas
 [ -z "${CLAIM_CONTEXT:-}" ] || kind=claim
@@ -339,12 +363,12 @@ kind_calls() {
   if [ -f "$1" ]; then grep -c "^$2\$" "$1" | tr -d ' '; else printf '0'; fi
 }
 
-calls_from_claim() {
+calls_from() {
   node -e '
     const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
-    const at = lines.indexOf("claim");
+    const at = lines.indexOf(process.argv[2]);
     process.stdout.write(String(at < 0 ? -1 : lines.length - at));
-  ' "$1" 2>/dev/null || printf -- '-1'
+  ' "$1" "$2" 2>/dev/null || printf -- '-1'
 }
 
 REAL_DATE="$(command -v date)"
@@ -439,11 +463,14 @@ fi
 
 A_ROOTS="$(kind_calls "$WORK/handback.calls" root)"
 A_CAS="$(kind_calls "$WORK/handback.calls" cas)"
-A_TAIL="$(calls_from_claim "$WORK/handback.calls")"
-if [ "$A_ROOTS" = 1 ] && [ "$A_CAS" = 1 ] && [ "$A_TAIL" -ge 1 ] && [ "$A_TAIL" -le 3 ]; then
-  check "BR4b the hand-back claim verifies the project root once and spawns at most three node children after the claim returns (${A_TAIL} of $(node_calls "$WORK/handback.calls"))" PASS
+A_RETIRES="$(kind_calls "$WORK/handback.calls" retire)"
+A_FROM_CAS="$(calls_from "$WORK/handback.calls" cas)"
+A_TAIL="$(calls_from "$WORK/handback.calls" retire)"
+if [ "$A_ROOTS" = 1 ] && [ "$A_CAS" = 1 ] && [ "$A_RETIRES" = 1 ] && [ "$A_FROM_CAS" -gt "$A_TAIL" ] \
+  && [ "$A_TAIL" -ge 1 ] && [ "$A_TAIL" -le 3 ]; then
+  check "BR4b the hand-back claim verifies the project root once and spawns at most three node children after the claim returns, the record retire first (${A_TAIL} of $(node_calls "$WORK/handback.calls"))" PASS
 else
-  check "BR4b claim cost (root verifications=$A_ROOTS claims=$A_CAS after-claim=$A_TAIL total=$(node_calls "$WORK/handback.calls"))" FAIL
+  check "BR4b claim cost (root verifications=$A_ROOTS claims=$A_CAS retires=$A_RETIRES from-cas=$A_FROM_CAS after-claim=$A_TAIL total=$(node_calls "$WORK/handback.calls"))" FAIL
 fi
 
 A_CLAIMED="$(digest "$A_STATE")"
@@ -509,14 +536,17 @@ FORGED="$(printf '<agent-message from="%s">\n[Subagent hand-back] The text below
 OTHER_OUT="$(prompt_payload "$C_RAW" "$(handback_text "$C_OTHER")" | bash "$PROMPT_HOOK" 2>/dev/null)"
 FORGED_OUT="$(prompt_payload "$C_RAW" "$FORGED" | bash "$PROMPT_HOOK" 2>/dev/null)"
 OLD_AGENT_OUT="$(prompt_payload "$C_RAW" "$(handback_text "$C_AGENT")" | bash "$PROMPT_HOOK" 2>/dev/null)"
+SUBAGENT_OUT="$(subagent_prompt_payload "$C_RAW" "$(handback_text "$C_AGENT2")" | bash "$PROMPT_HOOK" 2>/dev/null)"
+C_SUBAGENT_NOTE="$([ -f "$(arrival_file "$C")" ] && echo noted || echo none)"
 C_KEPT="$(digest "$C_STATE")"
 C_CLAIM="$(prompt_payload "$C_RAW" "$(handback_text "$C_AGENT2")" | bash "$PROMPT_HOOK" 2>/dev/null | hook_context)"
-if [ -z "$OTHER_OUT" ] && [ -z "$FORGED_OUT" ] && [ -z "$OLD_AGENT_OUT" ] && [ "$C_KEPT" = "$C_BEFORE" ] \
+if [ -z "$OTHER_OUT" ] && [ -z "$FORGED_OUT" ] && [ -z "$OLD_AGENT_OUT" ] && [ -z "$SUBAGENT_OUT" ] \
+  && [ "$C_SUBAGENT_NOTE" = none ] && [ "$C_KEPT" = "$C_BEFORE" ] \
   && printf '%s' "$C_CLAIM" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $C_AGENT2)" \
   && [ "$(state_value "$C" reviewTicketConsumed)" = true ] && [ "$(state_value "$C" reviewRound)" = 1 ]; then
-  check "BR8 another agent's hand-back, a frame quoted inside a report and the ended reviewer's hand-back claim nothing; the pending reviewer's own hand-back still claims" PASS
+  check "BR8 another agent's hand-back, a frame quoted inside a report, the ended reviewer's hand-back and the pending reviewer's hand-back in a subagent's payload claim nothing and note nothing; the pending reviewer's own hand-back still claims" PASS
 else
-  check "BR8 foreign arrivals (other=$OTHER_OUT forged=$FORGED_OUT old=$OLD_AGENT_OUT claim=$(printf '%s' "$C_CLAIM" | head -c 300))" FAIL
+  check "BR8 foreign arrivals (other=$OTHER_OUT forged=$FORGED_OUT old=$OLD_AGENT_OUT subagent=$SUBAGENT_OUT note=$C_SUBAGENT_NOTE claim=$(printf '%s' "$C_CLAIM" | head -c 300))" FAIL
 fi
 
 arm_chain br-stale || { check "BR9 arm" FAIL; finish; exit 1; }
@@ -694,6 +724,35 @@ else
   check "BR9g arrived release (out=$N_RELEASE count=$N_COUNT/$(stop_count "$N") err=$(head -c 400 "$WORK/arrived-release.err"))" FAIL
 fi
 
+WAITFAIL_BIN="$WORK/waitfail-bin"
+mkdir -p "$WAITFAIL_BIN"
+cat > "$WAITFAIL_BIN/node" <<'STUB'
+#!/bin/bash
+[ -z "${TICKET_STATE:-}" ] || exit 3
+case "$*" in
+  (*'background-review-v1.js wait'*) exit 3 ;;
+esac
+exec "$REAL_NODE" "$@"
+STUB
+chmod +x "$WAITFAIL_BIN/node"
+
+note_holds() {
+  node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).holds))' "$(arrival_file "$1")" 2>/dev/null
+}
+
+N_HELD_OUT="$(stop_payload "$N_RAW" | PATH="$WAITFAIL_BIN:$PATH" REAL_NODE="$REAL_NODE" ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP" 2>/dev/null)"
+N_HELD_REASON="$(printf '%s' "$N_HELD_OUT" | reason)"
+N_MAX="$(node -e 'process.stdout.write(String(require(process.argv[1]).LIMITS.maxArrivalHolds))' "$LIB" 2>/dev/null)"
+if [ "$(printf '%s' "$N_HELD_OUT" | decision)" = block ] \
+  && printf '%s' "$N_HELD_REASON" | grep -qF "The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop" \
+  && printf '%s' "$N_HELD_REASON" | grep -qF "This Stop is claim attempt 1 of $N_MAX:" \
+  && [ "$(note_holds "$N")" = 1 ] && [ "$(stop_count "$N")" = "$((N_COUNT + 1))" ] \
+  && [ -f "$(record_file "$N")" ] && [ -f "$(arrival_file "$N")" ] && [ "$(state_value "$N" reviewTicketConsumed)" = false ]; then
+  check "BR9g2 a standalone Stop with an arrived claim that is not released counts as a held attempt and names it, and record and note stay" PASS
+else
+  check "BR9g2 unreleased standalone hold (max=$N_MAX holds=$(note_holds "$N") reason=$(printf '%s' "$N_HELD_REASON" | head -c 400) count=$N_COUNT/$(stop_count "$N"))" FAIL
+fi
+
 recover_until_claimed "$N_RAW" "$N"
 N_STOP="$RECOVERY_OUT"
 N_REASON="$(printf '%s' "$N_STOP" | reason)"
@@ -727,6 +786,33 @@ if [ "$U_PLANTED" = yes ] && [ -z "$U_UNSAFE" ] && [ "$U_KEPT" = yes ] \
   check "BR9i a hand-back whose standalone preflight cannot read the Autopilot store keeps record, note and ticket, and the next prompt claims once the store reads again" PASS
 else
   check "BR9i unreadable Autopilot store (planted=$U_PLANTED unsafe=$(printf '%s' "$U_UNSAFE" | head -c 300) kept=$U_KEPT claim=$(printf '%s' "$U_CLAIM" | head -c 300) consumed=$(state_value "$U" reviewTicketConsumed))" FAIL
+fi
+
+arm_chain br-unreleased || { check "BR9j arm" FAIL; finish; exit 1; }
+V_RAW=br-unreleased
+V="$STARTED_KEY"
+V_AGENT=a3c5e7a9c1e3a5c7e
+launch_payload "$V_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$V_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+V_FAILED="$(failing_prompt "$V_RAW" "$(handback_text "$V_AGENT")")"
+node -e '
+  const fs = require("fs");
+  const file = process.argv[1];
+  const note = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, `${JSON.stringify({ ...note, holds: Number(process.argv[2]) })}\n`);
+' "$(arrival_file "$V")" "$N_MAX" 2>/dev/null
+V_SPENT_HOLDS="$(note_holds "$V")"
+V_COUNT="$(stop_count "$V")"
+V_OUT="$(stop_payload "$V_RAW" | PATH="$WAITFAIL_BIN:$PATH" REAL_NODE="$REAL_NODE" ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP" 2>/dev/null)"
+V_REASON="$(printf '%s' "$V_OUT" | reason)"
+if [ -z "$V_FAILED" ] && [ "$V_SPENT_HOLDS" = "$N_MAX" ] && [ "$(printf '%s' "$V_OUT" | decision)" = block ] \
+  && printf '%s' "$V_REASON" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
+  && ! printf '%s' "$V_REASON" | grep -qF 'already reached you' \
+  && case "$V_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$V")" = "$((V_COUNT + 1))" ] \
+  && [ "$(state_value "$V" reviewTicketConsumed)" = false ] \
+  && [ ! -e "$(record_file "$V")" ] && [ ! -e "$(arrival_file "$V")" ]; then
+  check "BR9j once its held attempts are spent, the next standalone Stop that is not released retires record and note and orders the review again" PASS
+else
+  check "BR9j unreleased standalone spent (failed=$V_FAILED holds=$V_SPENT_HOLDS reason=$(printf '%s' "$V_REASON" | head -c 400) count=$V_COUNT/$(stop_count "$V"))" FAIL
 fi
 
 CANCEL_BIN="$WORK/cancel-bin"
@@ -1044,6 +1130,124 @@ else
   check "BR13b fan-out wait (retired=$PROBE_RETIRED fanout=$PROBE_FANOUT free=$PROBE_FAN_FREE bound=$PROBE_FAN_BOUND)" FAIL
 fi
 
+PROBE_RELAUNCHED="$(launch_payload probe "$(review_prompt "$PROBE_TICKET")" async_launched "$PROBE_AGENT" \
+  | ZENSU_BR_PLUGIN_DATA="$PROBE_DATA" ZENSU_BR_SESSION_KEY="$PROBE_KEY" ZENSU_BR_STATE_FILE="$PROBE_STATE" ZENSU_BR_ENVELOPE=standalone \
+    node "$LIB" record 2>/dev/null)"
+PROBE_NOTED="$(prompt_payload "$PROBE_KEY" "$(handback_text "$PROBE_AGENT")" | ZENSU_BR_PLUGIN_DATA="$PROBE_DATA" node "$LIB" arrive 2>/dev/null)"
+RECOVER_FN="$(sed -n '/^background_review_defer() {/,/^}/p;/^background_review_recover() {/,/^}/p' "$STOP")"
+RECOVER_CONSTANTS="$(grep -E '^BACKGROUND_REVIEW_(CLAIM_MARGIN|HOOK_TIMEOUT|ARRIVED_PENDING)=' "$STOP")"
+RECOVER_ROOT="$WORK/recover-root"
+mkdir -p "$RECOVER_ROOT/hooks"
+ln -s "$PLUGIN_DIR/hooks/lib" "$RECOVER_ROOT/hooks/lib"
+cat > "$RECOVER_ROOT/hooks/post-review-tdd-delegate.sh" <<'STUB'
+#!/bin/bash
+printf '%s %s %s\n' "$$" "${ZENSU_BR_CLAIM_BY:-none}" "$(date +%s)" > "$RECOVER_MARK"
+[ -z "${RECOVER_SLEEP:-}" ] || exec sleep "$RECOVER_SLEEP"
+exit 0
+STUB
+probe_recover() {
+  rm -f "$WORK/recover.mark"
+  SUPERVISED="$1" DEADLINE="$2" BOUND="$3" RECOVER_SLEEP="$4" RECOVER_MARK="$WORK/recover.mark" RECOVER_FN="$RECOVER_FN" \
+    RECOVER_CONSTANTS="$RECOVER_CONSTANTS" RECOVER_ROOT="$RECOVER_ROOT" PROBE_DATA="$PROBE_DATA" PROBE_KEY="$PROBE_KEY" bash -c '
+    set -u
+    eval "$RECOVER_CONSTANTS"
+    eval "$RECOVER_FN"
+    STOP_SUPERVISED="$SUPERVISED"
+    zensu_stop_deadline_seconds() { printf "%s\n" "$DEADLINE"; }
+    OUTER_PRESENT=false
+    DEFERRED_ADOPTED=false
+    INNER_BOUND_RUN="$BOUND"
+    SESSION_ID="$PROBE_KEY"
+    INPUT="{}"
+    CLAUDE_PLUGIN_ROOT="$RECOVER_ROOT"
+    CLAUDE_PLUGIN_DATA="$PROBE_DATA"
+    zensu_session_key_canonical() { case "$1" in scv1_*) return 0 ;; *) return 1 ;; esac; }
+    zensu_msys_env_exclusions() { printf "\n"; }
+    zensu_run_bounded() { "$@"; }
+    SECONDS=0
+    if background_review_recover; then rc=claimed; else rc=none; fi
+    printf "%s %s %s %s %s\n" "$rc" "$SECONDS" "$(( $(date +%s) - SECONDS ))" "$BACKGROUND_REVIEW_ARRIVED" "$BACKGROUND_REVIEW_HOLD_COUNTED"
+    printf "%s\n" "$BACKGROUND_REVIEW_ARRIVED_LEAD"
+  ' 2>/dev/null
+}
+mark_field() {
+  [ -f "$WORK/recover.mark" ] || { printf -- '-'; return 0; }
+  awk -v field="$1" '{ printf "%s", $field }' "$WORK/recover.mark"
+}
+claim_offset() {
+  local by base
+  by="$(mark_field 2)"
+  base="$(printf '%s' "$1" | awk 'NR == 1 { print $3 }')"
+  case "$by$base" in ''|*[!0-9]*) printf -- '-'; return 0 ;; esac
+  printf '%s' "$((by - base))"
+}
+within() {
+  case "$1" in ''|*[!0-9-]*|-) return 1 ;; esac
+  [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]
+}
+H_PROBE_MAX="$(node -e 'process.stdout.write(String(require(process.argv[1]).LIMITS.maxArrivalHolds))' "$LIB" 2>/dev/null)"
+RECOVER_SLOW="$(probe_recover true 23 run-br-bound 60)"
+SLOW_PID="$(mark_field 1)"
+SLOW_GONE=no
+case "$SLOW_PID" in ''|*[!0-9]*) ;; *) kill -0 "$SLOW_PID" 2>/dev/null || SLOW_GONE=yes ;; esac
+SLOW_SECONDS="$(printf '%s' "$RECOVER_SLOW" | awk 'NR == 1 { print $2 }')"
+if [ "$PROBE_RELAUNCHED" = "recorded agent=$PROBE_AGENT ttl=60" ] && [ "$PROBE_NOTED" = "pending agent=$PROBE_AGENT source=prompt retired=0" ] \
+  && [ -n "$RECOVER_FN" ] && [ "$SLOW_GONE" = yes ] && within "$SLOW_SECONDS" 0 30 \
+  && [ "$(printf '%s' "$RECOVER_SLOW" | awk 'NR == 1 { print $1, $4, $5 }')" = "none true true" ] \
+  && printf '%s' "$RECOVER_SLOW" | grep -qF "This Stop is claim attempt 1 of $H_PROBE_MAX:"; then
+  check "BR13c a Stop recovery whose delegate is still running at its claim deadline stops it, then counts the held Stop" PASS
+else
+  check "BR13c recovery watchdog (relaunched=$PROBE_RELAUNCHED noted=$PROBE_NOTED pid=$SLOW_PID gone=$SLOW_GONE out=$(printf '%s' "$RECOVER_SLOW" | head -c 400))" FAIL
+fi
+
+RECOVER_LATE="$(probe_recover true 20 run-br-bound "")"
+RECOVER_LATE_MARK="$(mark_field 1)"
+if [ "$RECOVER_LATE_MARK" = "-" ] \
+  && [ "$(printf '%s' "$RECOVER_LATE" | awk 'NR == 1 { print $1, $4, $5 }')" = "none true true" ] \
+  && printf '%s' "$RECOVER_LATE" | grep -qF "This Stop is claim attempt 2 of $H_PROBE_MAX:"; then
+  check "BR13d a Stop recovery that starts at or past its claim deadline runs no delegate and still counts the held Stop" PASS
+else
+  check "BR13d late recovery (mark=$RECOVER_LATE_MARK out=$(printf '%s' "$RECOVER_LATE" | head -c 400))" FAIL
+fi
+
+RECOVER_FREE="$(probe_recover false 45 "" "")"
+FREE_OFFSET="$(claim_offset "$RECOVER_FREE")"
+RECOVER_TIMED="$(probe_recover true 45 "" "")"
+TIMED_OFFSET="$(claim_offset "$RECOVER_TIMED")"
+if within "$FREE_OFFSET" $((STOP_TIMEOUT - STOP_MARGIN - 2)) $((STOP_TIMEOUT - STOP_MARGIN + 2)) \
+  && within "$TIMED_OFFSET" $((45 - STOP_MARGIN - 2)) $((45 - STOP_MARGIN + 2)) \
+  && [ "$(printf '%s' "$RECOVER_FREE" | awk 'NR == 1 { print $1, $4, $5 }')" = "none true false" ] \
+  && [ "$(printf '%s' "$RECOVER_TIMED" | awk 'NR == 1 { print $1, $4, $5 }')" = "none true false" ]; then
+  check "BR13e an unsupervised Stop recovery passes a claim deadline of the registered Stop timeout less the margin, a supervised one the Stop deadline less the margin, and a released Stop counts nothing" PASS
+else
+  check "BR13e recovery claim deadlines (unsupervised=$FREE_OFFSET supervised=$TIMED_OFFSET free=$(printf '%s' "$RECOVER_FREE" | head -c 200) timed=$(printf '%s' "$RECOVER_TIMED" | head -c 200))" FAIL
+fi
+
+WORKSPACE_PROJECT="$WORK/workspace-project"
+mkdir -p "$WORKSPACE_PROJECT"
+WORKSPACE_PROJECT="$(cd -P "$WORKSPACE_PROJECT" && pwd -P)"
+export CLAUDE_PROJECT_DIR="$WORKSPACE_PROJECT"
+cd "$WORKSPACE_PROJECT" || exit 1
+arm_chain br-workspace || { check "BR9k arm" FAIL; finish; exit 1; }
+W_RAW=br-workspace
+W="$STARTED_KEY"
+W_AGENT=a2d4f6b8d0f2b4d6f
+launch_payload "$W_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$W_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+W_FOREIGN=no
+( source "$STATE_LIB" && autopilot_begin_run br-workspace-foreign-run br_workspace_foreign_session "$WORKSPACE_PROJECT" >/dev/null 2>&1 ) && W_FOREIGN=yes
+source "$PLUGIN_DIR/tests/structure/lib-autopilot-lease.sh"
+W_LEASED="$(prompt_payload "$W_RAW" "$(handback_text "$W_AGENT")" | with_autopilot_lease "$WORKSPACE_PROJECT" bash "$PROMPT_HOOK" 2>/dev/null)"
+W_KEPT=no
+[ -f "$(record_file "$W")" ] && [ -f "$(arrival_file "$W")" ] && [ "$(state_value "$W" reviewTicketConsumed)" = false ] && W_KEPT=yes
+W_HELD="$(prompt_payload "$W_RAW" 'please continue with the next file' | bash "$PROMPT_HOOK" 2>/dev/null)"
+if [ "$W_FOREIGN" = yes ] && [ -z "$W_LEASED" ] && [ "$W_KEPT" = yes ] && [ -z "$W_HELD" ] \
+  && [ "$(state_value "$W" reviewTicketConsumed)" = false ] && [ "$(state_value "$W" reviewRound)" = 0 ] \
+  && [ ! -e "$(record_file "$W")" ] && [ ! -e "$(arrival_file "$W")" ]; then
+  check "BR9k a hand-back whose workspace read cannot take the project lease keeps record, note and ticket, and a lease-free prompt that finds the tree held by another session's run retires both" PASS
+else
+  check "BR9k workspace preflight (foreign=$W_FOREIGN leased=$(printf '%s' "$W_LEASED" | head -c 300) kept=$W_KEPT held=$(printf '%s' "$W_HELD" | head -c 300) consumed=$(state_value "$W" reviewTicketConsumed) record=$([ -f "$(record_file "$W")" ] && echo kept || echo gone) note=$([ -f "$(arrival_file "$W")" ] && echo kept || echo gone))" FAIL
+fi
+
 BOUND_PROJECT="$WORK/bound-project"
 mkdir -p "$BOUND_PROJECT"
 BOUND_PROJECT="$(cd -P "$BOUND_PROJECT" && pwd -P)"
@@ -1186,6 +1390,38 @@ if [ "$(first_line "$H_CLAIM")" = "UserPromptSubmit" ] \
   check "BR15 the bound chain's hand-back claims its ticket and routes the review" PASS
 else
   check "BR15 bound claim (ctx=$(printf '%s' "$H_CLAIM" | head -c 600) consumed=$(state_value "$H" reviewTicketConsumed))" FAIL
+fi
+
+H_TICKET2="$(bash "$LOG" --review-ticket --session "$H" 2>/dev/null)"
+H_AGENT2=a8e7d6c5b4a3f2e1d
+H_PROMPT2="$(printf '%s\nREVIEW-TICKET: %s\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=%s attempt=1 chain=%s\nAUTOPILOT-STAGE: GATES\nREVIEW PACKET v1' \
+  "$REVIEW_MARKER" "$H_TICKET2" "$H_RUN" "$H_CHAIN")"
+H_RELAUNCH="$(launch_payload "$H_RAW" "$H_PROMPT2" async_launched "$H_AGENT2" | bash "$DELEGATE" 2>/dev/null | hook_context)"
+H_NOTED2="$(prompt_payload "$H_RAW" "$(handback_text "$H_AGENT2")" | ZENSU_BR_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" node "$LIB" arrive 2>/dev/null)"
+H_RECOVERY_COUNT="$(stop_count "$H")"
+H_RECOVERY_HELD=0
+H_RECOVERED="$(recovery_stop "$H_RAW")"
+while [ "$(state_value "$H" reviewRound)" != 2 ] && [ "$H_RECOVERY_HELD" -lt $((H_MAX - 1)) ] \
+  && printf '%s' "$H_RECOVERED" | reason | grep -qF 'already reached you'; do
+  H_RECOVERY_HELD=$((H_RECOVERY_HELD + 1))
+  H_RECOVERED="$(recovery_stop "$H_RAW")"
+done
+H_RECOVERED_REASON="$(printf '%s' "$H_RECOVERED" | reason)"
+H_RECOVERED_COUNT="$(stop_count "$H")"
+H_RECOVERED_AGAIN="$(recovery_stop "$H_RAW" | reason)"
+if [ -n "$H_TICKET2" ] && printf '%s' "$H_RELAUNCH" | grep -qF 'the plugin recorded this launch' \
+  && [ "$H_NOTED2" = "pending agent=$H_AGENT2 source=prompt retired=0" ] \
+  && [ "$(printf '%s' "$H_RECOVERED" | decision)" = block ] \
+  && printf '%s' "$H_RECOVERED_REASON" | grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent $H_AGENT2) delivered its report earlier in this conversation as its hand-back" \
+  && printf '%s' "$H_RECOVERED_REASON" | grep -qF 'ZENSU-DELEGATED-CALLER: autopilot' \
+  && printf '%s' "$H_RECOVERED_REASON" | grep -qF "AUTOPILOT-BINDING: run=$H_RUN attempt=1 chain=$H_CHAIN" \
+  && [ "$(state_value "$H" reviewTicketConsumed)" = true ] && [ "$(state_value "$H" reviewRound)" = 2 ] \
+  && case "$H_RECOVERY_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$H_RECOVERED_COUNT" = "$H_RECOVERY_COUNT" ] \
+  && [ ! -e "$(record_file "$H")" ] && [ ! -e "$(arrival_file "$H")" ] \
+  && [ -n "$H_RECOVERED_AGAIN" ] && ! printf '%s' "$H_RECOVERED_AGAIN" | grep -qF 'BACKGROUND REVIEW REPORT'; then
+  check "BR15b a bound chain's Stop claims a later ticket from its arrival note once, routes the review with the Autopilot envelope without charging the inner Stop budget, and the next Stop claims nothing$([ "$H_RECOVERY_HELD" -eq 0 ] || printf ' [after %s held Stop(s) that deferred the claim under load]' "$H_RECOVERY_HELD")" PASS
+else
+  check "BR15b bound Stop claim (ticket=$H_TICKET2 noted=$H_NOTED2 held=$H_RECOVERY_HELD reason=$(printf '%s' "$H_RECOVERED_REASON" | head -c 400) round=$(state_value "$H" reviewRound) count=$H_RECOVERY_COUNT/$H_RECOVERED_COUNT again=$(printf '%s' "$H_RECOVERED_AGAIN" | head -c 200))" FAIL
 fi
 
 cd "$PLUGIN_DIR" || exit 1

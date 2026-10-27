@@ -177,7 +177,8 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   counting shim on one background hand-back claim through the real prompt hook: 89 `node` children
   without the memo, 35 of them root verifications, and 55 with it, one of them a root
   verification. The shipped path, which also runs `arrive` first, spawned 56 in `BR4b` on
-  2026-10-27, two of them after the ticket CAS. `BR4b` in `tests/structure/test-background-review.sh`
+  2026-10-27, three of them after the claim returned: the record retire, the claim-field parse
+  and the emit. `BR4b` in `tests/structure/test-background-review.sh`
   pins the single verification (`.claude/rules/background-review-completion.md`).
 - **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
   once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The

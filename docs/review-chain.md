@@ -219,10 +219,12 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   pending record or entry, or the store holds an arrival note. Its first `node` child,
   `background-review-v1.js arrive`, retires every fan-out entry the prompt names and, for a
   completed arrival of the session's pending consume reviewer, writes an arrival note under
-  `arrivals/` before anything is claimed. Only an arrival the consume record still waits for
-  starts the post-review hook, which claims the ticket once, through the claim the foreground
-  path uses, and returns that path's routing directive as context of the prompt. Record and note
-  are retired together right after the claim and on every deliberate refusal. A claim that fails,
+  `arrivals/` before anything is claimed. It does either only for a prompt of the main thread: a
+  payload that names a subagent (`agent_id` or `agent_type`) or another hook event changes
+  nothing. Only an arrival the consume record still waits for starts the post-review hook, which
+  claims the ticket once, through the claim the foreground path uses, and returns that path's
+  routing directive as context of the prompt. Record and note are retired together right after the
+  claim and on every deliberate refusal. A claim that fails,
   or that a kill of the hook cuts off, keeps both, so the notification, the next Stop or the next
   prompt completes it. A frame counts only on a line of its own at column zero that the host's
   `[Subagent hand-back]` line follows, because the host indents every line of a report it
@@ -237,13 +239,17 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   or prompt, and the ticket stays untouched.
 - **Stop.** A Stop whose store holds an arrival note beside the consume record first runs the
   post-review hook in its recovery mode, which claims the ticket from the note and blocks with the
-  routing directive. While a consume record younger than 60 minutes still matches the issued
-  ticket, or a fan-out entry younger than 60 minutes exists, the Stop guard releases a standalone
-  chain's turn end with one stderr line and charges no review budget. An Autopilot-bound chain is
-  held instead: its Stop blocks, names the agents that still run, and does not count against the
-  inner Stop budget. When the claim from a note did not complete in that Stop, both say that the
-  report arrived and its claim is pending instead. A Stop that is not released, such as an
-  Autopilot-bound chain's, says so at most three times for one claim and names the attempt; the
+  routing directive. It starts that claim only while the Stop has more than 20 seconds left before
+  its deadline, the Stop guard's own (45 seconds by default) or, when the hook runs without that
+  guard, its registered 90-second timeout, and stops a claim that has not reached the ticket by
+  then, so a slow claim never costs the Stop its decision. While a consume record younger than 60
+  minutes still matches the issued ticket, or a fan-out entry younger than 60 minutes exists, the
+  Stop guard releases a standalone chain's turn end with one stderr line and charges no review
+  budget. An Autopilot-bound chain is held instead: its Stop blocks, names the agents that still
+  run, and does not count against the inner Stop budget. When the claim from a note did not
+  complete in that Stop, both say that the report arrived and its claim is pending instead. A Stop
+  that is not released, such as an Autopilot-bound chain's or a standalone chain's whose wait
+  could not be read, says so at most three times for one claim and names the attempt; the
   next one that still cannot claim it retires the record and its note, and so does any Stop whose
   claim still fails 60 minutes after the launch, so the resume directive then runs the review
   again. A session that owns a live Autopilot run

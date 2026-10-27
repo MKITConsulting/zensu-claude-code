@@ -36,6 +36,15 @@ case "${1:-}" in
   --background-arrival) HOOK_EVENT=UserPromptSubmit; BACKGROUND_ARRIVAL=true ;;
   --background-recovery) HOOK_EVENT=Stop; BACKGROUND_ARRIVAL=true; BACKGROUND_RECOVERY=1 ;;
 esac
+background_review_in_time() {
+  local by="${ZENSU_BR_CLAIM_BY:-}" now
+  [ -n "$by" ] || return 0
+  case "$by" in *[!0-9]*) return 1 ;; esac
+  now="$(date +%s 2>/dev/null)" || return 1
+  case "$now" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$now" -le "$by" ]
+}
+[ "$BACKGROUND_RECOVERY" = 0 ] || background_review_in_time || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" "$HOOK_EVENT" || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
@@ -76,15 +85,6 @@ background_review_retire() {
     ZENSU_BR_SESSION_KEY="$ARRIVAL_SESSION" ZENSU_BR_AGENT="$ARRIVAL_AGENT" \
     node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" retire </dev/null >/dev/null 2>&1
   return 0
-}
-
-background_review_in_time() {
-  local by="${ZENSU_BR_CLAIM_BY:-}" now
-  [ -n "$by" ] || return 0
-  case "$by" in *[!0-9]*) return 1 ;; esac
-  now="$(date +%s 2>/dev/null)" || return 1
-  case "$now" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$now" -le "$by" ]
 }
 
 REVIEW_INPUT="$INPUT"
@@ -499,6 +499,7 @@ if zensu_hook_enabled reviewSpawnScopeSentence; then SCOPE_SENTENCE_ON=1; fi
 # while a concurrent generation reset makes every later bound CAS stale.
 if [ "$BACKGROUND_ARRIVAL" = true ]; then
   trap - EXIT
+  [ "$BACKGROUND_RECOVERY" = 0 ] || trap '' TERM
   if ! background_review_in_time; then
     if [ "$HOOK_EVENT" = UserPromptSubmit ]; then
       printf '%s' "BACKGROUND REVIEW REPORT PENDING. The report of the background zensu:code-reviewer (agent ${ARRIVAL_AGENT}) reached you, but this hook ran out of time before it could claim the review ticket, so the ticket was NOT consumed and the review chain did not advance. The claim completes at your next Stop or prompt, and the routing directive arrives with it. Do NOT classify or fix anything, do NOT spawn another zensu:code-reviewer and do NOT re-run the review fan-out; end your turn now." | emit_post_context

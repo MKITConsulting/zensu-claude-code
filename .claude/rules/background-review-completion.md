@@ -97,8 +97,10 @@ completes the claim from that note.
    retires record and note (`retire`), and emits the routing directive as `UserPromptSubmit`
    context with one lead sentence per arrival kind and source.
 3. **Stop.** Before the wait, `background_review_recover` in `stop-chain-enforcer.sh` checks in
-   bash for the session's arrival note beside its consume record. With both present it runs the
-   delegate with `--background-recovery`, whose `match` reads only the note
+   bash for the session's arrival note beside its consume record. With both present, and only
+   while the Stop has more than `BACKGROUND_REVIEW_CLAIM_MARGIN` seconds left before its deadline,
+   it runs the delegate with `--background-recovery` as a background child under a watchdog that
+   sends it `TERM` one second past that point. The delegate's `match` reads only the note
    (`ZENSU_BR_RECOVERY=1`), and a directive it prints becomes the block reason, ahead of
    `outer_finish`. `background_review_wait` asks `wait` while a record or a fan-out entry exists.
    A consume record younger than the bound that still matches the issued ticket, or any fan-out
@@ -107,8 +109,11 @@ completes the claim from that note.
    and skips the inner Stop budget increment. An owned Autopilot run without a bound chain and an
    adopted deferred review take neither; their resume reason is led by one sentence naming the
    running agents. When the recovery left record and note in place, the Stop hook runs
-   `background-review-v1.js defer` once, with `ZENSU_BR_HELD=1` when that Stop will not be
-   released (an Autopilot-bound chain, an owned Autopilot run or an adopted deferred review).
+   `background-review-v1.js defer` once through `background_review_defer`, with
+   `ZENSU_BR_HELD=1` when that Stop will not be released (an Autopilot-bound chain, an owned
+   Autopilot run or an adopted deferred review). A standalone Stop that the wait could not
+   release, because its `wait` child failed, runs `defer` a second time with `ZENSU_BR_HELD=1`
+   right before its resume reason is built, so that Stop is counted too.
    `defer` retires record and note when the record is older than the wait bound; on a held Stop
    it raises the note's `holds` count and retires both once the count would pass
    `LIMITS.maxArrivalHolds`. It prints `hold count=<n> of=<max>`, `release`,
@@ -133,9 +138,15 @@ completes the claim from that note.
   cancel kills the hook's whole process group, so only state written before the kill survives it,
   and the claim is the expensive part. `arrive` is one child that reads no workflow state and
   needs no bind; it derives the session key with the core's `sessionKey`, the function the
-  delegate's `zensu_resolve_session_id` uses on the same payload. A note grants nothing a prompt
-  could not: it records an arrival the column-zero rule already accepted, and every claim still
-  re-runs the header, envelope and preflight checks and the ticket CAS.
+  delegate's `zensu_resolve_session_id` uses on the same payload. `arrive` writes a note, and
+  retires a fan-out entry, only for a `UserPromptSubmit` payload of the main thread: one that
+  `classifyPreToolPayload` of `claude-principal-v1.js` answers `main-v1` for, which carries
+  neither `agent_id` nor `agent_type`. Any other payload answers `idle reason=principal`. The
+  Stop recovery claims from the note without the prompt's bind, so without that check a
+  subagent's payload could have set up a claim the delegate's bind would refuse it. A note
+  therefore grants nothing a main-thread prompt could not: it records an arrival the
+  column-zero rule already accepted, and every claim still re-runs the header, envelope and
+  preflight checks and the ticket CAS.
 - **Record and note live and die together, and a kill keeps both.** A `HUP`/`INT`/`TERM` trap
   clears the EXIT trap on every arrival kind, and a SIGKILL runs no trap at all, so a cut-off
   claim leaves record and note for the next event. The EXIT trap retires both on every deliberate
@@ -155,10 +166,22 @@ completes the claim from that note.
   number a second time, and `BR1e` holds it equal to the registration. The hook passes
   `ZENSU_BR_CLAIM_BY`, 45 s before that limit, and the delegate checks it right before the CAS:
   past it the delegate defers, keeps record and note, and emits a short notice that the claim
-  completes at the next Stop or prompt. The Stop path derives its own deadline from
-  `zensu_stop_deadline_seconds`, 20 s before the supervisor's kill, and passes none when the hook
-  runs unsupervised. A claim cut off after its CAS would leave `reviewRound` raised with no
-  directive delivered, which is what the margin is for.
+  completes at the next Stop or prompt. The Stop path derives its own deadline,
+  `BACKGROUND_REVIEW_CLAIM_MARGIN` (20) seconds before the supervisor's kill at
+  `zensu_stop_deadline_seconds`, or, when the hook runs unsupervised, before its registered 90 s
+  host timeout, which `BACKGROUND_REVIEW_HOOK_TIMEOUT` spells a second time (`BR1f`). A claim cut
+  off after its CAS would leave `reviewRound` raised with no directive delivered, which is what
+  the margin is for.
+- **The Stop recovery never outlives its deadline.** A supervisor kill releases the Stop with no
+  decision, an Autopilot-bound chain's included, which then ends its turn. So the recovery runs no
+  delegate once the deadline has passed (`BR13d`), and a delegate still running one second past
+  it gets a `TERM` from a watchdog subshell in the Stop hook's own process group (`BR13c`); the
+  supervisor's group kill takes both down if it fires first, so the watchdog never outlives the
+  delegate it names. The delegate checks the same deadline before its bind on the recovery path,
+  and from its last deadline check on it ignores `TERM` there, so the watchdog can stop it before
+  the CAS but never inside the CAS or between the CAS and the emit; the margin covers that part.
+  The prompt path keeps its `TERM` trap, because the host's cancel must still stop a claim
+  before its CAS.
 - **Later events complete the claim from the note.** The prompt hook's prefilter passes while any
   note exists, so the next prompt of any kind claims through `arrive` and the delegate. The Stop
   hook runs `background_review_recover` after its three terminal early exits and before both
@@ -201,7 +224,10 @@ completes the claim from that note.
   and orders the review again, which is what an arrival that never claimed got before the note
   existed, and a recovery that still fails past the wait bound does the same for every chain. A
   released Stop counts nothing, because the next prompt still claims with the prompt hook's
-  budget. 3 is a judgement. Rejected: a `zensu-log.sh` verb the hold would name, run under the
+  budget. A standalone Stop the wait could not release is not a released one: it blocks with the
+  arrived lead and counts, or the defer it runs spends the pair (`BR9g2`, `BR9j`);
+  `BACKGROUND_REVIEW_HOLD_COUNTED` keeps a Stop that already counted from counting twice. 3 is a
+  judgement. Rejected: a `zensu-log.sh` verb the hold would name, run under the
   Bash tool's timeout, which would be a claim entry point no hook payload binds to the main
   thread and would hand back the routing directive as tool output.
 - **Fan-out entries carry no ticket and no chain binding.** The Stop hook consults them only on the
@@ -225,12 +251,16 @@ completes the claim from that note.
   `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix of the
   `arrive` line by the prompt hook's `case`, the `source` field of the `match` claim line by
   the delegate's verdict parse, and the `hold count= of=` and `release` lines of `defer` by
-  `background_review_recover`.
+  `background_review_defer`, which `background_review_recover` and the resume reason call.
 - `--background-arrival` and `--background-recovery` are the delegate's two background modes; the
   Stop hook is the only caller of the second. `ZENSU_BR_CLAIM_BY` is read by the delegate, and
   `ZENSU_BR_RECOVERY` and `ZENSU_BR_HELD` by `envOptions`.
 - `BR_HOOK_TIMEOUT` and `BR_CLAIM_MARGIN` in the prompt hook, the registration in
-  `hooks/hooks.json` (`BR1`, `BR1e`), and `BACKGROUND_REVIEW_CLAIM_MARGIN` in the Stop hook.
+  `hooks/hooks.json` (`BR1`, `BR1e`), and `BACKGROUND_REVIEW_CLAIM_MARGIN` and
+  `BACKGROUND_REVIEW_HOOK_TIMEOUT` in the Stop hook, the second held equal to the Stop
+  registration of `stop-chain-enforcer.sh` (`BR1f`).
+- `arrive`'s principal check reads `PRINCIPALS` and `classifyPreToolPayload` from
+  `claude-principal-v1.js`, the same classifier the capability gate uses.
 - The fan-out types are `FANOUT_TYPES` in the module and the `case` in the delegate's PostToolUse
   branch. `FANOUT_TYPES` is derived, never spelled: the `zensu:` names in `REVIEWER_TYPES` of
   `claude-principal-v1.js` other than `REVIEWER_SUBAGENT_TYPE`, because
@@ -244,18 +274,25 @@ completes the claim from that note.
   wording.
 - `tests/structure/test-background-review.sh` drives the paths through `node` stubs keyed to the
   `MATCH`, `TICKET_STATE` and `CLAIM_CONTEXT` variables of the delegate's, the claim's and the
-  claim-field parse's `node` calls: `BR9d` and `BR9d2` a refusal through a hand-back and
-  through a completion notification, which retires record and note, `BR9e` the forwarder and the
-  kept pair, `BR9f` to `BR9h` a
-  failed claim, the arrived release and the Stop claim, `BR9i` an unreadable Autopilot store that
-  keeps the pair, `BR14c` the bound hold and its attempt, `BR14d` the hold limit, `BR14e` a failed
-  claim past the wait bound, `BR14f` a bound hand-back under a held project lease, `BR16` and `BR17`
+  claim-field parse's `node` calls: `BR8` a subagent's payload that notes nothing, `BR9d` and
+  `BR9d2` a refusal through a hand-back and through a completion notification, which retires
+  record and note, `BR9e` the forwarder and the kept pair, `BR9f` to `BR9h` a failed claim, the
+  arrived release and the Stop claim, `BR9g2` and `BR9j` a standalone Stop the wait could not
+  release, counted and then spent, `BR9i` an unreadable Autopilot store that keeps the pair,
+  `BR9k` a workspace read under a held project lease that keeps the pair and a held tree that
+  retires it, `BR13c` to `BR13e` the recovery's watchdog, its late start and its two deadlines,
+  run on the shipped functions with a stub delegate, `BR14c` the bound hold and its attempt,
+  `BR14d` the hold limit, `BR14e` a failed claim past the wait bound, `BR14f` a bound hand-back
+  under a held project lease, `BR15b` a bound chain's claim through a Stop, `BR16` and `BR17`
   a host-style cancel (TERM to the process group and its descendants, KILL 1.5 s later) and the
   Stop that completes the claim once, `BR17b` the typed prompt that completes it after a second
   cancel, `BR18` to `BR18c` the deferral, the cross-session cost and
   the prompt that completes the claim, and `BR19` a Stop and a prompt racing on one note. `BR4b`
-  counts the root verifications and the calls after the claim through the classifying shim, which
-  keys on the `core.readContext({ recordsDir, sessionId: key })` literal the latency suite reads.
+  counts the root verifications and the calls after the claim returned through the classifying
+  shim, which keys on the `core.readContext({ recordsDir, sessionId: key })` literal the latency
+  suite reads, on the `TICKET_STATE` and `CLAIM_CONTEXT` variables and on the
+  `background-review-v1.js retire` argv, and counts from the retire on: the lock release that
+  follows the CAS child on bash 3.2 is part of the claim.
 - Operator accounts: the delegate, Stop and prompt-hook rows of `docs/configuration.md`,
   §"Background review agents" of `docs/review-chain.md`, `docs/architecture.md`, and the step-10
   lead and step 5 of `skills/build/references/review-chain.md`.
@@ -295,6 +332,11 @@ completes the claim from that note.
   the 75 s maximum took 42 s, and in a full suite run both recovery Stops of `BR17` deferred. So
   `recover_until_claimed` lets `BR9h` and `BR17` meet up to three deferring Stops before the
   claim, and each of them must release with record, note and ticket intact.
+- **A delegate the watchdog stops leaves the child it waited on running.** The `TERM` reaches
+  the delegate's own process only, so a `node` child it was waiting on, such as `match`, runs to
+  its end and writes into a pipe nobody reads, and a lease held at that moment is left as a killed
+  hook leaves it (`.claude/rules/lock-holder-liveness.md`). The watchdog sleeps in a child of its
+  own, which it stops when it is stopped, so no `sleep` outlives a recovery.
 - **A kill inside the ticket CAS leaves two empty temporary files** (`<state>.XXXXXX` and
   `<state>.next.XXXXXX`) beside the workflow document: `_tdd_consume_review_ticket_critical`
   creates them before its `node` child and removes them only on its own exits. Nothing reads or
@@ -317,7 +359,10 @@ outside this tree. No hook is added, removed or renamed and no matcher changes: 
 hook's registration gains a `timeout`, which is neither. The prompt hook still returns only
 `additionalContext`, and the Stop hook's recovery emits a block it already emitted, with another
 reason. The claim still runs through the existing ticket transition, so a runtime of the same
-lineage reads the result exactly as it reads a foreground claim. An older installation of the same
+lineage reads the result exactly as it reads a foreground claim. The Stop recovery's deadline,
+its watchdog and the second `defer` call, and the principal check of `arrive`, move no persisted
+shape and add no hook output: a Stop still blocks or releases with reasons it already gave. An
+older installation of the same
 lineage never serves a session after a newer one, and the newer one reads the older records
 unchanged. No config key is added, and no attestation moves. The original feature's walk, recorded
 here before: the record and fan-out key sets shipped for the first time, the added hook returned

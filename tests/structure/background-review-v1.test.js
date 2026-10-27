@@ -595,11 +595,17 @@ test('arrive notes a completed arrival of the pending consume reviewer once, at 
   assert.equal(fs.existsSync(recordPath(f)), true);
 });
 
-test('arrive stays idle without a pending arrival and retires every fan-out entry the prompt names', () => {
+test('arrive stays idle on a payload that is not the main thread\'s prompt or without a pending arrival, and retires every fan-out entry the prompt names', () => {
   const f = fixture();
   assert.deepEqual(br.noteArrival(arrivalPrompt(handback()), options(f)), { pending: false, reason: 'absent', retired: 0 });
   fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
   recorded(f);
+  const subagent = { agent_id: OTHER_AGENT, agent_type: 'general-purpose' };
+  assert.deepEqual(br.noteArrival({ ...arrivalPrompt(handback()), ...subagent }, options(f)), { pending: false, reason: 'principal', retired: 0 });
+  assert.deepEqual(br.noteArrival({ ...arrivalPrompt(handback(ASPECT_AGENT)), agent_type: 'general-purpose' }, options(f)), { pending: false, reason: 'principal', retired: 0 });
+  assert.deepEqual(br.noteArrival({ ...arrivalPrompt(handback()), hook_event_name: 'Stop' }, options(f)), { pending: false, reason: 'principal', retired: 0 });
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
   assert.deepEqual(br.noteArrival(arrivalPrompt('please review the change'), options(f)), { pending: false, reason: 'no-arrival', retired: 0 });
   assert.deepEqual(br.noteArrival(arrivalPrompt(handback(OTHER_AGENT)), options(f)), { pending: false, reason: 'no-arrival', retired: 0 });
   assert.deepEqual(br.noteArrival(arrivalPrompt(handback(ASPECT_AGENT)), options(f)), { pending: false, reason: 'no-arrival', retired: 1 });

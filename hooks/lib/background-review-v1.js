@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { REVIEWER_TYPES } = require('./claude-principal-v1.js');
+const { PRINCIPALS, REVIEWER_TYPES, classifyPreToolPayload } = require('./claude-principal-v1.js');
 const { ensurePrivateDirectory } = require('./review-evidence-lease-v1.js');
 const { REVIEWER_SUBAGENT_TYPE } = require('./reviewer-spawn-denial-v1.js');
 const { claimableTicket } = require('./review-ticket-state-v1.js');
@@ -571,6 +571,9 @@ function arrivalSessionKey(payload) {
 
 function noteArrival(payload, options, limits = LIMITS) {
   if (!isPlainObject(payload) || typeof payload.prompt !== 'string') return idle('prompt');
+  if (payload.hook_event_name !== 'UserPromptSubmit' || classifyPreToolPayload(payload) !== PRINCIPALS.MAIN) {
+    return idle('principal');
+  }
   const sessionKey = arrivalSessionKey(payload);
   if (!sessionKey) return idle('session');
   let locations;

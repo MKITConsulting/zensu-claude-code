@@ -204,8 +204,10 @@ The callers, judged by the same test:
   report.** It already treated every status other than 1 as held, so the verb's 5 ends the hook
   before the claim and the ticket stays unconsumed; the missing piece was the verb. On a
   background arrival 5 also clears the EXIT trap, as the owner-scoped arm does, while a proven
-  holder (0) or an inconsistent inventory (2) still retires the pair. No check holds the lease
-  over a background arrival in a held tree; the one that follows covers only the synchronous path. `O2h` in
+  holder (0) or an inconsistent inventory (2) still retires the pair. `BR9k` in
+  `tests/structure/test-background-review.sh` holds the lease over a background hand-back in a
+  tree another session's run holds and requires the pair and the ticket kept, then requires a
+  lease-free prompt, whose workspace read answers 0, to retire both. `O2h` in
   `tests/structure/test-post-review-outer-ownership-root.sh` holds the lease for the whole hook
   while a foreign run holds the tree and this session owns none, so the owner-scoped look
   answers 1 and the workspace read decides; the unchanged hook claimed the ticket and routed the
