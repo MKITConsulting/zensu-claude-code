@@ -1095,8 +1095,10 @@ echo "== The receipt writer's own refusal arms =="
 # its first temp file and every assertion below would pass or fail for a reason
 # unrelated to its contract. The session-key fallback is guarded by
 # `[ -f "$(dirname "$0")/session-control-core-v1.js" ]`, so a copy of the script
-# WITHOUT its sibling module reaches the fallback with node still available and
-# the writer still able to write.
+# WITHOUT its sibling module reaches the fallback with node still available. The
+# copy carries no audit-scope module either, so it writes no receipt for any key:
+# RW1 and RW2 judge only how the key resolves, and no check here observes where a
+# receipt for a refused key would land.
 RW_DIR="$(mktemp -d)"
 RW_BIN="$RW_DIR/bin"
 mkdir -p "$RW_BIN"
@@ -1128,11 +1130,6 @@ RW_OUT_BAD="$(/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" 
   --project "$RW_PROJ" --session 'scv1_../../escape' 2>&1)"
 printf '%s' "$RW_OUT_BAD" | grep -qF 'session key resolved empty'
 check "RW2 a non-canonical --session is refused by the anchored fallback, not turned into a path" "$(verdict $?)"
-# The whole point of the anchored shape: nothing may land outside the audited
-# project's own state dir. RW1 shows the canonical key is accepted, and RW3a
-# lands a real receipt in that state dir through the full library.
-[ -z "$(find "$RW_DIR" -path "$RW_PROJ/.zensu" -prune -o -name 'edit-landing-*.json' -print 2>/dev/null)" ]
-check "RW2b the refused key wrote no receipt outside the project state dir" "$(verdict $?)"
 RW_HEX63="$(printf '%063d' 0)"
 RW_WIDE="scv1_${RW_HEX63}B"
 RW_WIDE_OUT="$(LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \

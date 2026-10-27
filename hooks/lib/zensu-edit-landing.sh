@@ -31,7 +31,7 @@
 #   --receipt        explicit receipt path ('-' disables the receipt)
 #   --inventory      read-only: report the claimed-file count and the foreign
 #                    roots the claims name, without a change set, a verdict or a
-#                    receipt. Output is `claimed-files=<n>` plus one
+#                    receipt. Output is `claimed-files=<n>`, `bare-wired=<n>` and one
 #                    `foreign-root<TAB><root>` line per distinct non-anchor root,
 #                    whose value domain is a PATH and never a diagnostic. The
 #                    count is NOT the receipt's `claims`: this one counts NAMED
@@ -427,6 +427,20 @@ if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && { [ "$RECEIPT_EXPLICI
       RECEIPT_PATH=""; RECEIPT_FAILED=1
       ;;
   esac
+fi
+
+if [ "$BASELINE_SEEN" -eq 1 ] && [ -n "$BASELINE_SHA" ] && [ -z "$GIT_FAULT" ]; then
+  if [ "$IN_GIT" -eq 1 ]; then
+    BASELINE_FULL="$(_el_git -C "$REPO_ROOT" rev-parse --verify --quiet "${BASELINE_SHA}^{commit}" 2>/dev/null)"
+    BASELINE_RC=$?
+    case "$BASELINE_RC" in
+      (0) BASELINE_SHA="$BASELINE_FULL" ;;
+      (1) BASELINE_SHA="" ;;
+      (*) git_fault "$BASELINE_RC" "$REPO_ROOT" rev-parse --verify --quiet "${BASELINE_SHA}^{commit}" ;;
+    esac
+  else
+    BASELINE_SHA=""
+  fi
 fi
 
 if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ]; then
@@ -989,7 +1003,10 @@ while IFS= read -r line || [ -n "$line" ]; do
       continue
       ;;
     WIRED)
-      [ "$INVENTORY" -eq 1 ] && continue
+      if [ "$INVENTORY" -eq 1 ]; then
+        BARE_WIRED=$((BARE_WIRED + 1))
+        continue
+      fi
       if [ "$CHECK_RECEIPT" -eq 1 ]; then
         BARE_WIRED=$((BARE_WIRED + 1))
         continue
@@ -1040,6 +1057,7 @@ if [ "$INVENTORY" -eq 1 ]; then
     INV_COUNT=$((INV_COUNT + 1))
   done < "$CLAIMS_FILE"
   printf 'claimed-files=%s\n' "$INV_COUNT"
+  printf 'bare-wired=%s\n' "$BARE_WIRED"
   while IFS="$(printf '\t')" read -r step raw; do
     [ -n "${raw// /}" ] || continue
     if [ "$INV_CLAIMS" -ge "$INV_CLAIM_BUDGET" ]; then
@@ -1263,14 +1281,16 @@ else
       elif ! ZEL_SCOPE_DIR="$SCOPE_DIR" ZEL_BARE_WIRED="$BARE_WIRED" node "$EL_RECEIPT_LIB" scope-finish > "$SCOPE_DIR/final.json"; then
         emit "RECEIPT REFUSED — the audit scope could not be sealed, so $(zensu_safe_render "${RECEIPT_PATH}") keeps its nonclean checkpoint"
         RECEIPT_FAILED=1
-      elif ZEL_SESSION="$SESSION_ID" ZEL_LOG="$LOG_ABS" ZEL_CLAIMS="$CLAIM_COUNT" \
+      else
+        receipt_rc=0
+        ZEL_SESSION="$SESSION_ID" ZEL_LOG="$LOG_ABS" ZEL_CLAIMS="$CLAIM_COUNT" \
         ZEL_LANDED="$LANDED" ZEL_NOT="$NOT_LANDED" ZEL_UNVERIFIED="$UNVERIFIED" \
         ZEL_PENDING="$PENDING" ZEL_EXI="$EXEMPT_IGNORED" ZEL_EXV="$EXEMPT_VERIFIED" \
         ZEL_CLEAN="$([ "$CLEAN" -eq 1 ] && echo true || echo false)" ZEL_SCOPE_FILE="$SCOPE_DIR/final.json" \
-        node -e '
+        ZEL_RECEIPT_LIB="$EL_RECEIPT_LIB" node -e '
           const e = process.env;
           const scope = JSON.parse(require("node:fs").readFileSync(e.ZEL_SCOPE_FILE, "utf8"));
-          process.stdout.write(JSON.stringify({
+          const encoded = JSON.stringify({
             // `edit-landing-v2`, because the MEANING of `log` moved: v1 persisted the
             // raw `--log` spelling as the caller wrote it, v2 persists a
             // project-relative suffix. The
@@ -1297,13 +1317,20 @@ else
             exemptVerified: Number(e.ZEL_EXV),
             clean: e.ZEL_CLEAN === "true",
             auditScope: scope,
-          }) + "\n");
-        ' > "$tmp_receipt" 2>/dev/null && mv -f "$tmp_receipt" "$RECEIPT_PATH" 2>/dev/null; then
-        TREE_NOTE="$(ZENSU_ELR_RECEIPT="$RECEIPT_PATH" node "$EL_RECEIPT_LIB" tree-note 2>/dev/null)" || TREE_NOTE=""
-        [ -z "$TREE_NOTE" ] || emit "$(render_claim_value "$TREE_NOTE")"
-      else
-        emit "RECEIPT REFUSED — the receipt could not be written to $(zensu_safe_render "${RECEIPT_PATH}")"
-        RECEIPT_FAILED=1
+          }) + "\n";
+          if (Buffer.byteLength(encoded) > require(e.ZEL_RECEIPT_LIB).MAX_RECEIPT_BYTES) process.exit(3);
+          process.stdout.write(encoded);
+        ' > "$tmp_receipt" 2>/dev/null || receipt_rc=$?
+        if [ "$receipt_rc" -eq 0 ] && mv -f "$tmp_receipt" "$RECEIPT_PATH" 2>/dev/null; then
+          TREE_NOTE="$(ZENSU_ELR_RECEIPT="$RECEIPT_PATH" node "$EL_RECEIPT_LIB" tree-note 2>/dev/null)" || TREE_NOTE=""
+          [ -z "$TREE_NOTE" ] || emit "$(render_claim_value "$TREE_NOTE")"
+        elif [ "$receipt_rc" -eq 3 ]; then
+          emit "RECEIPT REFUSED — the sealed receipt exceeds the 4 MiB its readers accept, so $(zensu_safe_render "${RECEIPT_PATH}") keeps its nonclean checkpoint; claim fewer files in this generation, or arm a new generation with --tdd-begin, which starts an empty audit scope"
+          RECEIPT_FAILED=1
+        else
+          emit "RECEIPT REFUSED — the receipt could not be written to $(zensu_safe_render "${RECEIPT_PATH}")"
+          RECEIPT_FAILED=1
+        fi
       fi
       rm -f "$tmp_receipt" 2>/dev/null
     fi

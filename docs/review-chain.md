@@ -208,8 +208,9 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
 `async_launched`, and no report exists yet when the post-review hook runs.
 
 - **Launch.** The post-review hook records each launch in the plugin's private data store under
-  `background-review/v1/`, at mode `0600`. A `zensu:review-aspect` or `zensu:review-judge` launch
-  becomes one entry per agent under `fanout/<scv1-session-key>/`. The consume-mode
+  `background-review/v1/`, at mode `0600`. A `zensu:review-aspect`, `zensu:review-judge` or
+  repo-local `zensu-review-*` persona launch becomes one entry per agent under
+  `fanout/<scv1-session-key>/`. The consume-mode
   `zensu:code-reviewer` becomes the session's one record under `records/`, holding the agent id,
   the ticket and the prompt's header lines, but only while its `REVIEW-TICKET` is the ticket the
   claim would accept. Its directive tells a standalone chain to end its turn and wait, and an
@@ -253,15 +254,11 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
 measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
 resume directive applies again. The column-zero rule rests on the host indenting what it forwards:
 a peer message the host does not indent, and that names a pending agent id, could still carry a
-forged frame; that id sits only in the session's own `0600` store. Repo-local review personas are
-not recorded, so a turn end while only a persona runs blocks as before. A notification that says
+forged frame; that id sits only in the session's own `0600` store. A notification that says
 no report was delivered still claims the ticket, and the directive tells the main thread to ask
 the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
 runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
-post-review hook. A persona gets no entry in the background store, so its hand-back reaches the
-packet gate only while a built-in reviewer is still pending; a persona that reports after every
-built-in one stays a launch record, which neither counts nor blocks, and a persona launched with
-another block is then caught only by the advice its launch received.
+post-review hook.
 
 #### Custom review personas (repo-local)
 

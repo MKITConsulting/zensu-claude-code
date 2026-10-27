@@ -100,6 +100,7 @@ HEAD_LINE="EDIT LANDING RECEIPT STALE — "
 MISSING="no edit-landing receipt exists for this session; run the audit"
 NOT_CLEAN="the receipt is not clean; resolve its pending, unverified or unlanded claims"
 UNGRADED="the run log holds edit claims the receipt has not graded; re-run the audit"
+UNGRADED_WIRED="the run log holds a WIRED entry with no files: list that the receipt has not graded; re-run the audit"
 CLAIMED_CHANGED="a claimed file changed after the receipt; re-run the audit with current predicate proofs"
 TREE_CHANGED="the working tree changed after the receipt; re-run the audit"
 STAYS_OPEN="the chain stays open; re-run the edit-landing audit named above with current predicate proofs, then run --chain-done again."
@@ -131,10 +132,24 @@ bind() {
 }
 
 arm() {
-  local ctx
   bind "$1" "$2" || return 1
   bash "$LOG" --tdd-begin >/dev/null 2>&1 || return 1
   bash "$LOG" --tdd-complete >/dev/null 2>&1 || return 1
+  consume_review
+}
+
+seed_deferred() {
+  bind "$1" "$2" || return 1
+  if [ -n "${3:-}" ]; then
+    mkdir -p "$(dirname "$RECEIPT")"
+    printf '%s\n' "$3" > "$RECEIPT"
+  fi
+  tdd_seed_deferred_review "$SID" false "dc_telseedclaim" >/dev/null 2>"$WORK/seed-err" || return 1
+  consume_review
+}
+
+consume_review() {
+  local ctx
   TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
   [ -n "$TICKET" ] || return 1
   ctx="$(SID_VALUE="$SID" TICKET="$TICKET" node -e '
@@ -528,6 +543,24 @@ else
   check "E11b arm an unqualified chain" FAIL
 fi
 
+new_project "$WORK/p-zero-late-wired"
+if bind "tel-zero-late-wired" "$WORK/p-zero-late-wired" && bash "$LOG" --tdd-begin >/dev/null 2>&1; then
+  printf 'TDD START — fixture\n' > "$RUN_LOG"
+  audit; ARC=$?
+  bash "$LOG" --tdd-complete >/dev/null 2>&1; TRC=$?
+  printf 'S2 WIRED\n' >> "$RUN_LOG"
+  bash "$LOG" --chain-done >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$TRC" -eq 0 ] && grep -qF '"claims":0' "$RECEIPT" && [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qF "$HEAD_LINE$UNGRADED_WIRED." "$WORK/err" && grep -qF "$STAYS_OPEN" "$WORK/err"; then
+    check "E11b2 a bare WIRED entry logged after a zero-claim audit arms the gate and refuses until the audit grades it" PASS
+  else
+    check "E11b2 bare WIRED after a zero-claim audit (audit=$ARC complete=$TRC rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "E11b2 arm an unqualified chain" FAIL
+fi
+
 new_project "$WORK/p-zero-wired"
 if bind "tel-zero-wired" "$WORK/p-zero-wired" && bash "$LOG" --tdd-begin >/dev/null 2>&1; then
   printf 'TDD START — fixture\n' > "$RUN_LOG"
@@ -585,6 +618,103 @@ if bind "tel-zero-timeout" "$WORK/p-zero-timeout" && bash "$LOG" --tdd-begin >/d
   fi
 else
   check "E11d arm an unqualified chain" FAIL
+fi
+
+DEFERRED_LINE="zensu-log.sh --chain-done: EDIT LANDING — not checked: this chain is a deferred review the Stop hook adopted, and no edit-landing audit ran in it, so there is no receipt to judge."
+OLD_RECEIPT='{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/earlier-generation.log","claims":1,"clean":true}'
+new_project "$WORK/p-deferred"
+if seed_deferred "tel-deferred" "$WORK/p-deferred" "$OLD_RECEIPT"; then
+  RETIRED="$(find "$(dirname "$RECEIPT")" -maxdepth 1 -name "$(basename "$RECEIPT").superseded-*" 2>/dev/null | grep -c .)"
+  if [ ! -e "$RECEIPT" ] && [ "${RETIRED:-0}" -eq 1 ] \
+    && ! grep -qF 'RECEIPT RETIREMENT UNRESOLVED' "$WORK/seed-err" \
+    && [ "$(tdd_deferred_review_generation "$SF")" = "true" ]; then
+    check "E12 seeding a deferred review retires the session's earlier receipt by rename" PASS
+  else
+    check "E12 deferred seed receipt retirement (present=$([ -e "$RECEIPT" ] && echo yes || echo no) retired=${RETIRED:-0})" FAIL
+    cat "$WORK/seed-err" 2>/dev/null
+  fi
+  printf 'v2\n' > "$PROJECT/tracked.txt"
+  chain_done; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -qF "$DEFERRED_LINE" "$WORK/err" \
+    && ! grep -qF "$HEAD_LINE" "$WORK/err" && ! ledgered; then
+    check "E12a a deferred review with no receipt of its own closes on a changed tree and says the edit landing was not checked" PASS
+  else
+    check "E12a deferred review terminus (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "E12 seed a deferred review over an earlier receipt" FAIL
+  cat "$WORK/seed-err" 2>/dev/null
+fi
+
+new_project "$WORK/p-deferred-audit"
+if seed_deferred "tel-deferred-audit" "$WORK/p-deferred-audit"; then
+  printf 'v2\n' > "$PROJECT/tracked.txt"
+  claim S1 missing.txt
+  audit; ARC=$?
+  chain_done; RC=$?
+  if [ "$ARC" -ne 0 ] && [ -f "$RECEIPT" ] && [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qF "$HEAD_LINE$NOT_CLEAN." "$WORK/err" && ! grep -qF "$DEFERRED_LINE" "$WORK/err"; then
+    check "E12b a deferred review whose own audit wrote an unclean receipt is judged by that receipt" PASS
+  else
+    check "E12b deferred review with its own receipt (audit=$ARC rc=$RC done=$(done_flag))" FAIL
+    AUDIT_OUT
+    ERR
+  fi
+else
+  check "E12b seed a deferred review without a receipt" FAIL
+  cat "$WORK/seed-err" 2>/dev/null
+fi
+
+new_project "$WORK/p-size1"
+new_project "$WORK/p-size2"
+SIZE1_DIRTY="$WORK/size1-dirty.txt"
+SIZE2_DIRTY="$WORK/size2-dirty.txt"
+node -e '
+  const lines = [];
+  for (let i = 0; i < 100; i++) lines.push(`d/${"x".repeat(200)}-${String(i).padStart(6, "0")}.txt`);
+  require("fs").writeFileSync(process.argv[1], lines.join("\n") + "\n");
+' "$SIZE1_DIRTY"
+if bind "tel-size1" "$WORK/p-size1"; then
+  printf 'v2\n' > "$PROJECT/tracked.txt"
+  claim S1 tracked.txt
+  audit --dirty-before "$SIZE1_DIRTY"; SIZE1_RC=$?
+  SIZE1_RECEIPT="$RECEIPT"
+else
+  SIZE1_RC=99
+fi
+if [ "$SIZE1_RC" -eq 0 ] && node -e '
+  const fs = require("fs");
+  const receipt = fs.readFileSync(process.argv[1]);
+  const smallJson = JSON.stringify(JSON.parse(receipt.toString("utf8")).auditScope.dirty).length;
+  const target = 4 * 1024 * 1024 + 4 - receipt.length + smallJson;
+  const lines = [];
+  let json = 1;
+  for (let i = 0; json + 213 + 3 + 20 <= target; i++) {
+    const line = `d/${"y".repeat(200)}-${String(i).padStart(6, "0")}.txt`;
+    lines.push(line);
+    json += line.length + 3;
+  }
+  const rest = target - json - 3;
+  if (rest < 12 || rest > 250) process.exit(3);
+  lines.push(`z/${"z".repeat(rest - 6)}.txt`);
+  if (JSON.stringify(lines).length !== target) process.exit(4);
+  fs.writeFileSync(process.argv[2], lines.join("\n") + "\n");
+' "$SIZE1_RECEIPT" "$SIZE2_DIRTY" && bind "tel-size2" "$WORK/p-size2"; then
+  printf 'v2\n' > "$PROJECT/tracked.txt"
+  claim S1 tracked.txt
+  audit --dirty-before "$SIZE2_DIRTY"; ARC=$?
+  RSIZE="$(wc -c < "$RECEIPT" 2>/dev/null | tr -d ' ')"
+  if [ "$ARC" -eq 2 ] && AUDIT_OUT | grep -qF "RECEIPT REFUSED — the sealed receipt exceeds the 4 MiB its readers accept" \
+    && [ -n "$RSIZE" ] && [ "$RSIZE" -le 4194304 ] && grep -qF '"clean":false' "$RECEIPT"; then
+    check "E13 a sealed receipt over the readers' 4 MiB limit is refused and the readable nonclean checkpoint stays" PASS
+  else
+    check "E13 oversized final receipt (audit=$ARC size=${RSIZE:-none})" FAIL
+    AUDIT_OUT | tail -n 5
+  fi
+else
+  check "E13 build the receipt-size fixture (first audit=$SIZE1_RC)" FAIL
+  AUDIT_OUT | tail -n 5
 fi
 
 BOUND_STEM="2026-10-20-0001_tdd-terminal-bound"

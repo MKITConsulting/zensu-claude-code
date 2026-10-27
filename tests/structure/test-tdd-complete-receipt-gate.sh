@@ -364,7 +364,9 @@ Z8F_TOTAL="$(grep -c . "$PLUGIN_DIR/hooks/lib/zensu-log.sh" || true)"
 Z8F_TOTAL="${Z8F_TOTAL:-0}"
 { [ "$Z8F_LINES" -gt 0 ] && [ "$Z8F_LINES" -lt $((Z8F_TOTAL / 4)) ]; }
 check "Z8f-control the begin-success slice is bounded (${Z8F_LINES} lines), not a run to EOF" "$(verdict $?)"
-printf '%s\n' "$Z8F_SLICE" | grep -qF '_tdd_locked_run'
+Z8F_WRAPPER="$(awk '/^tdd_retire_edit_landing_receipt\(\) \{/,/^}$/' "$PHASE_LIB")"
+{ printf '%s\n' "$Z8F_SLICE" | grep -qF 'tdd_retire_edit_landing_receipt "$session_val"' \
+  && printf '%s\n' "$Z8F_WRAPPER" | grep -qF '_tdd_locked_run "$state_file" _tdd_retire_receipt_critical "$receipt"'; }
 check "Z8f the retirement runs under the workflow document's external lease" "$(verdict $?)"
 # ORDERING is a contract, not layout. The retirement used to run above the arm,
 # so a REFUSED `--tdd-begin` — a held workspace, a storage fault, a bad argument —
@@ -386,7 +388,7 @@ z8c_holds() {
   [ -n "$arm" ] || return 1
   end="$(awk -v s="$arm" 'NR>s && /^        else$/{print NR; exit}' "$src")"
   [ -n "$end" ] || return 1
-  mv="$(grep -n '_tdd_retire_receipt_critical "\$begin_receipt"' "$src" 2>/dev/null | head -1 | cut -d: -f1)"
+  mv="$(grep -n 'tdd_retire_edit_landing_receipt "\$session_val"' "$src" 2>/dev/null | head -1 | cut -d: -f1)"
   [ -n "$mv" ] || return 1
   [ "$mv" -gt "$arm" ] && [ "$mv" -lt "$end" ]
 }
@@ -397,9 +399,9 @@ check "Z8c the receipt retirement runs only on the SUCCESSFUL arm of --tdd-begin
 # silently re-grades the claim-armed section by the change set instead of by the
 # claim it is named for.
 Z8C_MUT="$PROJ/.zensu/z8c-mutant.sh"
-grep -v '_tdd_retire_receipt_critical "\$begin_receipt"' "$Z8C_SRC" > "$Z8C_MUT"
-grep -n '_tdd_retire_receipt_critical "\$begin_receipt"' "$Z8C_SRC" | head -1 | cut -d: -f2- >> "$Z8C_MUT"
-{ grep -q '_tdd_retire_receipt_critical "\$begin_receipt"' "$Z8C_MUT" && ! z8c_holds "$Z8C_MUT"; }
+grep -v 'tdd_retire_edit_landing_receipt "\$session_val"' "$Z8C_SRC" > "$Z8C_MUT"
+grep -n 'tdd_retire_edit_landing_receipt "\$session_val"' "$Z8C_SRC" | head -1 | cut -d: -f2- >> "$Z8C_MUT"
+{ grep -q 'tdd_retire_edit_landing_receipt "\$session_val"' "$Z8C_MUT" && ! z8c_holds "$Z8C_MUT"; }
 check "Z8c-mut the same predicate REJECTS a retirement moved out of the success block" "$(verdict $?)"
 
 # From here on the project really changed, so the gate is in scope.
@@ -866,7 +868,7 @@ check "Z14-control an ordinary receipt is retired without the line" "$(verdict $
 # reintroduction takes. Strip comments and search for the fixed string, and
 # prove the pipeline reports a PLANTED one rather than asserting an absence
 # nothing establishes is detectable.
-Z14B_CODE="$(grep -vE '^[[:space:]]*#' "$LOG")"
+Z14B_CODE="$(grep -vE '^[[:space:]]*#' "$PHASE_LIB")"
 { ! printf '%s\n' "$Z14B_CODE" | grep -qF 'dest="${receipt}.superseded"'; }
 check "Z14b the retirement has no fixed-name fallback to overwrite or unlink" "$(verdict $?)"
 Z14B_PROBE="$PROJ/.zensu/z14b-probe.sh"

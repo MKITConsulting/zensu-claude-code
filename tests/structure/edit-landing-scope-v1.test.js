@@ -117,6 +117,27 @@ test('omitting --dirty-before cannot launder a pending receipt; a literal/hash p
   assert.equal(f.load().clean, true);
 });
 
+test('sealing refuses a claimed file or a run log that changed while the audit ran, and the checkpoint stays nonclean', (t) => {
+  const f = fixture(t);
+  const manifest = path.join(f.base, 'manifest');
+  fs.writeFileSync(manifest, 'T01\0a.js\0a.js\0');
+  const landed = path.join(f.base, 'landed');
+  fs.writeFileSync(landed, '1\n');
+  const prepare = () => helper.prepareClaims(helper.prepareScope({ root: f.root, log: f.log, session: f.session }), manifest, '');
+  const claimed = prepare();
+  helper.checkpointScope(claimed, f.receipt, f.session);
+  fs.writeFileSync(path.join(f.root, 'a.js'), 'changed while sealing\n');
+  assert.throws(() => helper.finishScope(claimed, landed, 0), /a claimed file changed while the audit ran/);
+  const logged = prepare();
+  fs.appendFileSync(f.log, 'a note appended while the audit ran\n');
+  assert.throws(() => helper.finishScope(logged, landed, 0), /the run log changed while the audit ran/);
+  assert.equal(f.load().clean, false);
+  assert.equal(typeof f.load().auditFailure, 'string');
+  assert.match(f.check(1).stderr, /did not complete/);
+  const sealed = helper.finishScope(prepare(), landed, 0);
+  assert.equal(sealed.claims[0].certified, true);
+});
+
 test('a later round keeps unchanged certified claims and needs a proof for its new claim', (t) => {
   const f = fixture(t);
   f.audit();

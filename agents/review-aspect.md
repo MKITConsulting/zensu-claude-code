@@ -41,7 +41,7 @@ Optional: `review_scope:` — a line after the packet block listing the paths th
 
 ## Review
 
-1. Read governing `CLAUDE.md` files and every listed changed file.
+1. Read governing `CLAUDE.md` files and every listed changed file, or, when a `review_scope:` line is present, only the paths it lists plus what they reference.
 2. Use the supplied diff summary to focus the review.
 3. Apply only the assigned checklist:
    - correctness: control flow, boundaries, null/error paths, races, resource handling, plus test-source assertions and coverage and consistency with supplied evidence

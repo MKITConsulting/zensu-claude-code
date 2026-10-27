@@ -177,7 +177,6 @@ if [ "$HOOK_EVENT" = PostToolUse ]; then
             --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$GATE_SESSION" <<<"$INPUT" 2>/dev/null
         fi
       fi
-      case "$SUBAGENT_TYPE" in zensu-review-*) exit 0 ;; esac
       case "$INPUT" in *'"async_launched"'*) ;; *) exit 0 ;; esac
       FANOUT_SESSION="$(zensu_resolve_session_id "")" || exit 0
       background_review_env || exit 0

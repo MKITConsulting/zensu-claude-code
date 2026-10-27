@@ -148,9 +148,20 @@ refuse the consume review as predating its round's packet. `--tdd-begin` and the
 start a generation; both `--review-rearm` arms and the `--chain-done` reopen of a minted
 zero-change ticket restart the count inside one. All five reset the store. A reset that fails is
 disclosed on stderr as `REVIEW GATE RESET UNAVAILABLE` and does not undo the transition, as at
-`--tdd-begin`. `RP13`, `RP23` and `RP23a` in `tests/structure/test-review-packet.sh` and `G9k` in
-`tests/structure/test-chain-terminus-zero-change-gate.sh` pin the reset at `--tdd-begin`, after the
-standalone rearm and at the reopen; no check drives the durable rearm arm or the deferred seed.
+`--tdd-begin`. `RP13`, `RP16a`, `RP23` and `RP23a` in `tests/structure/test-review-packet.sh` and
+`G9k` in `tests/structure/test-chain-terminus-zero-change-gate.sh` pin the reset at `--tdd-begin`,
+at the deferred seed, after the standalone rearm and at the reopen; no check drives the durable
+rearm arm. All five call `tdd_review_gate_reset` in `hooks/lib/zensu-tdd-phase.sh`, the four
+`zensu-log.sh` sites through `_zensu_review_gate_reset`.
+
+**The deferred seed also retires the session's receipt.** A deferred generation starts already
+implemented, so a receipt the session still holds belongs to an earlier generation, and its clean
+verdict would close the deferred review at the terminus. `tdd_seed_deferred_review` therefore calls
+`tdd_retire_edit_landing_receipt`, the one retirement `--tdd-begin` calls too, and discloses
+`RECEIPT RETIREMENT UNRESOLVED` when it fails. The terminal edit-landing gate mirrors the `none`
+mode: a deferred generation without a receipt closes with an `EDIT LANDING — not checked` line,
+and one whose own audit wrote a receipt is judged by it (`E12`–`E12b` in
+`tests/structure/test-terminal-edit-landing-gate.sh`).
 
 **Coupled sites:** `classify` in `hooks/lib/review-gate-v1.js`, which asks `REVIEWER_TYPES` in
 `hooks/lib/claude-principal-v1.js` whether a type is a confined reviewer and maps only the
@@ -172,7 +183,9 @@ argument of the hook's `check` call; `receiptPath`, which takes the receipt name
 `jsonMain` of `hooks/lib/finding-verify-v1.js`; the store resets, which `_zensu_review_gate_reset`
 in `hooks/lib/zensu-log.sh` runs at `--tdd-begin`, after both `--review-rearm` arms and in the
 `--chain-done` reopen of a minted zero-change ticket, and `tdd_seed_deferred_review` in
-`hooks/lib/zensu-tdd-phase.sh` runs itself; `config.example.json`; the `reviewPacketGate` and
+`hooks/lib/zensu-tdd-phase.sh` runs through the same `tdd_review_gate_reset`; the deferred arm of
+`_zensu_terminal_edit_landing_gate`, which reads `deferredReviewClaim` through
+`tdd_deferred_review_generation`; `config.example.json`; the `reviewPacketGate` and
 `incrementalReviewRounds` rows of `docs/configuration.md`; the auto-fix paragraph, the ignore
 recipe and the publication-safety paragraph of `docs/tdd-manager-workflow.md`; §Review Packet Gate
 of `docs/gates.md`; and `docs/review-chain.md`. The background path adds `launchedAgent`,
@@ -183,8 +196,9 @@ branch's `record` call in `hooks/post-review-tdd-delegate.sh`, which runs before
 `ARRIVAL_MATCH` exit, so a fan-out reviewer's hand-back is recorded while no consume record
 exists; `"reviewPacketGate":false` in `tests/structure/test-background-review.sh`, whose
 fixtures carry no canonical packet; and the panel bullet of §"Background review agents" in
-`docs/review-chain.md`. `RP24` to `RP26a` in `tests/structure/test-review-packet.sh` drive it
-through the shipped hooks.
+`docs/review-chain.md`. `RP24` to `RP26a`, `RP28a`, `RP28b`, `RP30` and `RP30a` in
+`tests/structure/test-review-packet.sh` drive it through the shipped hooks, and `RP29` drives the
+hook's fallback for a gate that cannot check.
 
 **Version: `patch`.** No hook added, removed, renamed or re-matched, no `permissionDecision`, no
 workflow-state or context-record field, and the config key is read permissively. The packet
@@ -200,17 +214,10 @@ the record's `agentId` field and `consume` role ship with the record schema's fi
   toward the at-least-one rule nor blocks.
 - The store sits in the session-writable `.zensu/state/`; a Bash write can forge a record, as for
   every plugin store.
-- A deferred review in a session that still holds an earlier generation's receipt is judged by
-  that receipt. Only `--tdd-begin` retires a receipt; the deferred seed resets the packet store
-  and leaves the receipt, because retiring it there would need a second copy of the pinned
-  retirement in the `--tdd-begin` branch, or a shared function both call.
 - The `escaped` mode trusts the call's environment as the acceptance gate does, so an
   environment-only escape at `create` reaches the ledger only when the terminus runs with it too.
 - A background reviewer that never hands back stays a launch record, which counts as no run, so a
   panel whose reports never arrive refuses the consume review rather than passing it.
-- A persona gets no entry in the background store, so its hand-back reaches the gate only while a
-  built-in reviewer is still pending there; a persona that reports after every built-in reviewer
-  stays a launch record, which neither counts nor blocks.
 - A prompt that carried a fan-out reviewer's frame with a packet problem and the consume
   reviewer's arrival at once would print the advice and leave the claim to the next arrival; the
   measured host sends each hand-back as its own prompt.

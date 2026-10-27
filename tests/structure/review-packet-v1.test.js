@@ -154,13 +154,25 @@ test('outside git the helper answers explicit-no-git and refuses a baseline', (t
 test('a git failure is a refusal with git\'s reason, never an empty change set', (t) => {
   const w = workspace(t);
   const root = repository(w);
-  const bin = path.join(w.base, 'failing-bin');
-  fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\necho "fatal: synthetic git failure" >&2\nexit 128\n', { mode: 0o755 });
-  const result = w.changes(root, [], { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  const result = w.changes(root, [], { GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' });
   assert.equal(result.status, 2);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /synthetic git failure/);
+  assert.match(result.stderr, /dubious ownership/);
+  const control = w.changes(root);
+  assert.equal(control.status, 0, control.stderr);
+});
+
+test('a file only the user\'s global excludes file ignores is still in the change set', (t) => {
+  const w = workspace(t);
+  const root = repository(w);
+  const globalIgnore = path.join(w.base, 'global-ignore');
+  fs.writeFileSync(globalIgnore, 'global-only.txt\n');
+  fs.writeFileSync(path.join(w.env.HOME, '.gitconfig'), `[core]\n\texcludesFile = ${globalIgnore.replace(/\\/g, '/')}\n`);
+  fs.writeFileSync(path.join(root, 'global-only.txt'), 'new\n');
+  assert.equal(w.git(root, 'ls-files', '--others', '--exclude-standard'), '', 'the global excludes file is active for plain git');
+  const result = w.changes(root);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).changed_files, ['global-only.txt']);
 });
 
 test('ambient discovery variables cannot redirect the enumerated repository', (t) => {
@@ -395,7 +407,7 @@ test('a project outside git needs an explicit changed file list and snapshots it
   assert.equal(packets.scopeDifference(record.scope, same), null);
   fs.writeFileSync(path.join(c.root, 'a.js'), 'two\n');
   assert.equal(packets.scopeDifference(record.scope, packets.currentScope(c.root, '', record.scope.changedFiles)), 'a changed file changed');
-  for (const bad of [['../escape.js'], ['/abs.js'], ['.zensu/x'], ['a/./b']]) {
+  for (const bad of [['../escape.js'], ['/abs.js'], ['.zensu/state/x'], ['.git/config'], ['a/./b']]) {
     c.writeInput({ ...FIELDS, changed_files: bad });
     assert.throws(() => c.create(), /not a normalized path inside the project/);
   }
@@ -431,6 +443,33 @@ test('a nested project root keeps its scope when only workflow state below the r
   assert.equal(packets.scopeDifference(before, packets.currentScope(project, '', undefined)), null);
   fs.writeFileSync(path.join(project, 'src', 'deep.js'), 'v3\n');
   assert.equal(packets.scopeDifference(before, packets.currentScope(project, '', undefined)), 'the working tree changed');
+});
+
+test('a configuration edit under .zensu is reviewed while the plugin\'s workflow artifacts stay out', (t) => {
+  const w = workspace(t);
+  const root = repository(w);
+  fs.writeFileSync(path.join(root, '.gitignore'), 'ignored.txt\n');
+  fs.mkdirSync(path.join(root, '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.zensu', 'config.json'), '{}\n');
+  w.git(root, 'add', '-A');
+  w.git(root, 'commit', '-qm', 'configuration');
+  const before = packets.currentScope(root, '', undefined);
+  for (const base of [root, path.join(root, 'pkg')]) {
+    for (const name of ['state', 'logs', 'plans', 'reviews', 'verify-feature-runs']) {
+      fs.mkdirSync(path.join(base, '.zensu', name), { recursive: true });
+      fs.writeFileSync(path.join(base, '.zensu', name, 'artifact.json'), '{}\n');
+    }
+    fs.writeFileSync(path.join(base, '.zensu', 'hook-events.log'), 'event\n');
+  }
+  const artifacts = packets.currentScope(root, '', undefined);
+  assert.deepEqual(artifacts.changedFiles, []);
+  assert.equal(packets.scopeDifference(before, artifacts), null);
+  fs.writeFileSync(path.join(root, '.zensu', 'config.json'), '{"hooks":{"reviewPacketGate":false}}\n');
+  fs.mkdirSync(path.join(root, 'src', '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', '.zensu', 'loader.js'), 'module.exports = 1;\n');
+  const edited = packets.currentScope(root, '', undefined);
+  assert.deepEqual(edited.changedFiles, ['.zensu/config.json', 'src/.zensu/loader.js']);
+  assert.notEqual(edited.tree, before.tree);
 });
 
 test('show prints the round packet between its markers and refuses before create', (t) => {
@@ -560,4 +599,14 @@ test('create removes its input from a project review directory and keeps every o
   fs.writeFileSync(path.join(nested, 'input.json'), '{}');
   assert.equal(packets.removeConsumedInput(path.join(nested, 'input.json'), c.root), true);
   assert.equal(packets.removeConsumedInput(path.join(nested, 'input.json'), c.root), false);
+  const outside = path.join(c.base, 'outside');
+  fs.mkdirSync(path.join(outside, 'subdir'), { recursive: true });
+  const victim = path.join(outside, 'input.json');
+  fs.writeFileSync(victim, JSON.stringify(FIELDS));
+  assert.equal(packets.removeConsumedInput(`${reviews}${path.sep}..${path.sep}reviews${path.sep}kept.json`, c.root), false);
+  if (process.platform !== 'win32') {
+    fs.symlinkSync(path.join(outside, 'subdir'), path.join(reviews, 'pivot'));
+    assert.equal(packets.removeConsumedInput(`${reviews}/pivot/../input.json`, c.root), false);
+    assert.equal(fs.existsSync(victim), true, 'a symlinked ancestor followed by .. never reaches a file outside the project');
+  }
 });

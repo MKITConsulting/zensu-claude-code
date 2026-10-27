@@ -54,14 +54,20 @@ its reason text reaches committed run-log lines. Over 20000 untracked files or 5
 or on a git failure, the record carries no tree and names the reason. The two size limits also
 answer `limited: true`, so the edit-landing receipt and the review packet can seal such a tree as
 unverified with its reason (`TREE UNVERIFIED — …`) while a git failure stays a fault there. `computeTree` takes an
-options argument whose `workflowStateAtEveryDepth: true` excludes every `.zensu` directory at any
-depth (the `:(exclude,glob)**/.zensu/**` pathspec on the untracked listing and
-`:(glob)**/.zensu/**` on the `git rm --cached`), never through a pathspec on `add`. The
+options argument whose `workflowStateAtEveryDepth: true` excludes the plugin's own workflow
+artifacts under a `.zensu` directory at any depth: the entries `WORKFLOW_ARTIFACTS` names
+(`state`, `logs`, `plans`, `reviews`, `verify-feature-runs` and `hook-events.log`), through
+`:(exclude,glob)**/.zensu/<name>` and `**/.zensu/<name>/**` pathspecs on the untracked listing and
+their `:(glob)` forms on the `git rm --cached`, never through a pathspec on `add`. The
 edit-landing receipt and the review packet pass it, because a project root nested below the
 repository top writes its run log and its state into `<project>/.zensu/`, which the top-level
 `.zensu` exclusion does not reach, so every log append and packet write would otherwise make the
-receipt and the packet stale. The evidence runner, the external-review import and the acceptance
-gate keep the default, which excludes only the top-level `.zensu`.
+receipt and the packet stale. Everything else under `.zensu`, such as `config.json`, an overlay or
+a PR-body template, stays in their tree, so an edit to the project's Zensu configuration stales
+the receipt and is reviewed like any other change. The review packet's change set drops the same
+entries through `excluded()`, which reads `WORKFLOW_ARTIFACTS`, so the two lists cannot drift. The
+evidence runner, the external-review import and the acceptance gate keep the default, which
+excludes the whole top-level `.zensu`.
 
 **The copy keeps the real index's atime and mtime.** git trusts a stat match only when the
 entry's mtime is older than the index file's own mtime (the racy-git check), so a copy with a

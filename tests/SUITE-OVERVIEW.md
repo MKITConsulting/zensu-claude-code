@@ -421,8 +421,8 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/claude-stream-render.test.js` | 6 | – | `test-eval-harness-units.sh` | The eval harness renderer for the claude stream-json output. |
 | `structure/clock-shift-v1.test.js` | 19 | – | `test-clock-shift.sh` | The shifted-clock preload and runner that the scheduled clock-shift pass uses. |
 | `structure/deferred-review-claim-cases.test.js` | 11 | – | `test-windows-ci-contract.sh` (metadata, all) | The deferred-review claim case table. |
-| `structure/edit-landing-scope-v1.test.js` | 36 | win32 1 | `test-edit-landing-audit.sh` | The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal. |
-| `structure/evidence-run-v1.test.js` | 80 | win32 3 | `test-evidence-run.sh` | The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory. |
+| `structure/edit-landing-scope-v1.test.js` | 37 | win32 1 | `test-edit-landing-audit.sh` | The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal. |
+| `structure/evidence-run-v1.test.js` | 82 | win32 3 | `test-evidence-run.sh` | The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory. |
 | `structure/external-review-v1.test.js` | 47 | win32 5 | `test-external-review-hook.sh` | External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, the freshness check against changed files, and the review root bound to the session's work tree with every other layout named. |
 | `structure/finding-verify-v1.test.js` | 35 | win32 1 | `test-finding-verification.sh` | The finding-verification grading module and its bounded JSON input. |
 | `structure/fixture-mutation-watch.test.js` | 19 | – | `test-eval-harness-units.sh` | Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends. |
@@ -442,7 +442,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/review-evidence-sweep-v1.test.js` | 32 | win32 6 | `test-versioned-plugin-upgrade.sh` | The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe. |
 | `structure/review-gate-v1.test.js` | 31 | – | `test-review-packet.sh` | The consume-review gate: reviewer records, canonical-packet equality, freshness and the primary-judge requirement. |
 | `structure/review-ledger-v1.test.js` | 42 | – | `test-review-convergence.sh` | The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts. |
-| `structure/review-packet-v1.test.js` | 29 | – | `test-review-packet.sh` | The canonical review change set and the immutable per-round review packet. |
+| `structure/review-packet-v1.test.js` | 31 | – | `test-review-packet.sh` | The canonical review change set and the immutable per-round review packet. |
 | `structure/review-round-scope-v1.test.js` | 24 | – | `test-incremental-review-rounds.sh` | Delta-scoped review rounds: which files and findings a fix round reviews. |
 | `structure/reviewer-spawn-allow-v1.test.js` | 20 | – | `test-reviewer-spawn-allow.sh` | The reviewer-spawn grant: the derived agent set, its silence on every non-grant path and the one-definition scan. |
 | `structure/reviewer-spawn-denial-v1.test.js` | 37 | win32 2 | `test-stop-enforcer-self-review-routing.sh` | Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds. |

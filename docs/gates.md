@@ -1136,7 +1136,12 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   `changed_files` from the canonical change set (a project outside git lists them in the input
   and gets a content snapshot instead), binds the tree with the evidence runner's fingerprint, and
   renders the seven model-written fields as indented blocks, so no field line can forge the
-  `REVIEW PACKET v1` or `END REVIEW PACKET v1` boundary. With a receipt, the change set is taken
+  `REVIEW PACKET v1` or `END REVIEW PACKET v1` boundary. The change set lists untracked files
+  without the user's global excludes file, as the edit-landing audit does, so a file only that
+  file ignores is still reviewed. It leaves out the plugin's own workflow artifacts under any
+  `.zensu` directory (state, logs, plans, review inputs, verification runs and the hook-event
+  log) and nothing else there, so an edit to the project's Zensu configuration is reviewed too.
+  With a receipt, the change set is taken
   against the baseline the edit-landing audit recorded, and a `--baseline` that differs from it is
   refused; the `change_set:` line names where the baseline came from (`baseline_source=receipt`,
   `argument` or `none`). A tree the fingerprint cannot measure, such as one with more than 20000
@@ -1240,9 +1245,10 @@ receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --
   outcome `pass`. Outcomes `max-rounds` and `no-changes` are not gated. A chain without a receipt
   is exempt only while its change count is zero or cannot be evaluated (no `git`, a root outside a
   work tree, a HEAD that names no commit). On such a count a receipt exempts the chain too when it
-  records `claims: 0` and the claim inventory of its run log completes with `claimed-files=0`, the
-  two inputs on which `--tdd-complete` arms, so a step 5b audit of a chain that claimed nothing
-  never wedges the zero-change terminus; a claim logged after that audit arms the gate again. An
+  records `claims: 0` and the claim inventory of its run log completes with `claimed-files=0` and
+  `bare-wired=0`, so a step 5b audit of a chain that claimed nothing never wedges the zero-change
+  terminus; a claim or a bare `WIRED` entry logged after that audit arms the gate again, and the
+  refusal names the entry the receipt has not graded. An
   inventory that does not complete arms the gate when its partial count is above zero, and
   otherwise refuses with its own cause, `EDIT LANDING — … the claim inventory over its run log did
   not complete …`, naming the `--inventory` command that shows why. That is stricter than
@@ -1250,6 +1256,16 @@ receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --
   set alone, because this gate is the last point at which a claim logged after the audit can be
   caught. With changes it refuses with `no edit-landing receipt exists for this session`, and when
   git cannot list the changes the refusal names git, not the audit.
+- **A deferred review the Stop hook adopted.** Its generation is seeded already implemented, so
+  no step 5b audit runs in it. Without a receipt it closes on any change count and prints
+  `EDIT LANDING — not checked: this chain is a deferred review the Stop hook adopted, and no
+  edit-landing audit ran in it, so there is no receipt to judge.`, which is the review packet's
+  `none` mode at the terminus; the exemption records no bypass-ledger entry, because no gate was
+  escaped. Once an audit in that generation writes the session's receipt, for example after a fix
+  round, the receipt is checked like any other. The seed retires a receipt the session still holds
+  from an earlier generation exactly as `--tdd-begin` does, by renaming it to a unique
+  `.superseded-*` name, and discloses `RECEIPT RETIREMENT UNRESOLVED` on stderr when it cannot, so
+  an earlier generation's clean verdict never closes the deferred review.
 - **A tree the fingerprint cannot measure.** More than 20000 untracked files, or more than 512 MiB
   of them, leave the evidence runner's fingerprint without a tree id. The audit then seals the
   receipt with no tree id and the reason, and the audit and every freshness check print
@@ -1269,7 +1285,9 @@ receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --
   | Working audit scope | 16 MiB | the same |
   | Run log | none | read in 1 MiB chunks, so a long log never refuses |
 
-  The predicate document and the `--dirty-before` list are read up to 4 MiB each.
+  The predicate document and the `--dirty-before` list are read up to 4 MiB each. A sealed receipt
+  over the receipt bound is refused with `RECEIPT REFUSED` before it replaces anything, so the
+  nonclean checkpoint the audit wrote at its start stays in place.
 - **Bypass** with `ZENSU_EDIT_LANDING_GATE=off`, the switch that also exempts `--tdd-complete`.
   The escape is recorded in the bypass ledger only where the gate applies, and a chain whose
   ledger already records it is not gated again.

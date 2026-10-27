@@ -293,7 +293,7 @@ function workflowState(root, session) {
   if (!session) return { status: 'none' };
   const engine = core();
   const file = engine.adoptionWorkflowStatePath(root, session);
-  const loaded = readBoundedJson(file, MAX_RECEIPT_BYTES);
+  const loaded = readBoundedJson(file, engine.MAX_JSON_BYTES);
   if (loaded.absent) return { status: 'absent' };
   if (loaded.invalid) return { status: 'invalid', reason: `it is ${loaded.invalid}` };
   const value = loaded.value;
@@ -303,7 +303,7 @@ function workflowState(root, session) {
   }
   const chain = engine.workflowChainSnapshot(value, session);
   if (!chain) return { status: 'invalid', reason: 'its chain fields do not validate' };
-  return { status: 'ok', active: chain.active === true && chain.chainDone !== true, chain };
+  return { status: 'ok', active: chain.active === true && chain.chainDone !== true, chain, value };
 }
 
 function scopeLogValue(root, log) {
@@ -635,8 +635,7 @@ function measuredTree(root) {
   if (where.applicable !== true) auditFail(`the current tree is unavailable: ${where.reason}`);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-landing-tree-'));
   try {
-    const result = evidence.computeTree(root, scratch, { ...evidence.LIMITS, gitTimeoutMs: GIT_TIMEOUT_MS },
-      { workflowStateAtEveryDepth: true });
+    const result = evidence.computeTree(root, scratch, evidence.LIMITS, { workflowStateAtEveryDepth: true });
     if (result.tree) return { kind: 'git', tree: result.tree };
     if (result.limited === true) return { kind: 'git', tree: null, reason: result.reason };
     return auditFail(`the current tree is unavailable: ${result.reason}`);

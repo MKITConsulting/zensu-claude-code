@@ -13,6 +13,7 @@ const SCHEMA = 'evidence-run-v1';
 const STORE_SEGMENTS = Object.freeze(['evidence-run', 'v1']);
 const SCOPES = Object.freeze(['full', 'lint', 'build', 'coverage', 'scoped', 'acceptance']);
 const TREE_SCOPES = Object.freeze(['full', 'scoped', 'acceptance']);
+const WORKFLOW_ARTIFACTS = Object.freeze(['state', 'logs', 'plans', 'reviews', 'verify-feature-runs', 'hook-events.log']);
 const TEST_SCOPES = Object.freeze(['full', 'scoped']);
 const RECORD_STATES = Object.freeze(['running', 'completed', 'interrupted']);
 const GATE_MODES = Object.freeze(['required', 'advisory']);
@@ -376,18 +377,23 @@ function runDirectory(projectRoot, requested, limits = LIMITS) {
   return { cwd: projectRoot, moved: true };
 }
 
+function artifactPathspecs(magic) {
+  return WORKFLOW_ARTIFACTS.flatMap((name) => [`${magic}**/.zensu/${name}`, `${magic}**/.zensu/${name}/**`]);
+}
+
 function computeTree(projectRoot, scratchDirectory, limits = LIMITS, options = {}) {
   const everyDepth = options.workflowStateAtEveryDepth === true;
   const excluded = Array.isArray(options.excluded) ? options.excluded : [];
-  const inside = git(projectRoot, ['rev-parse', '--is-inside-work-tree']);
+  const timeoutMs = limits.gitTimeoutMs;
+  const inside = git(projectRoot, ['rev-parse', '--is-inside-work-tree'], { timeoutMs });
   if (!inside.ok || inside.stdout.trim() !== 'true') return { tree: null, reason: 'not a git work tree' };
-  const prefix = git(projectRoot, ['rev-parse', '--show-prefix']);
+  const prefix = git(projectRoot, ['rev-parse', '--show-prefix'], { timeoutMs });
   if (!prefix.ok) return { tree: null, reason: prefix.reason };
-  const indexPath = git(projectRoot, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+  const indexPath = git(projectRoot, ['rev-parse', '--path-format=absolute', '--git-path', 'index'], { timeoutMs });
   if (!indexPath.ok) return { tree: null, reason: indexPath.reason };
   const untracked = git(projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.',
-    everyDepth ? ':(exclude,glob)**/.zensu/**' : ':(exclude).zensu',
-    ...excluded.map((entry) => `:(exclude,literal)${entry}`)], { encoding: 'buffer' });
+    ...(everyDepth ? artifactPathspecs(':(exclude,glob)') : [':(exclude).zensu']),
+    ...excluded.map((entry) => `:(exclude,literal)${entry}`)], { encoding: 'buffer', timeoutMs });
   if (!untracked.ok) return { tree: null, reason: untracked.reason };
   const untrackedPaths = untracked.stdout.toString('utf8').split('\0').filter(Boolean);
   if (untrackedPaths.length > limits.untrackedMaxFiles) {
@@ -411,14 +417,14 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS, options = {
       fs.utimesSync(temporaryIndex, indexStat.atime, indexStat.mtime);
     }
     const env = { GIT_INDEX_FILE: temporaryIndex };
-    const added = git(projectRoot, ['add', '-A', '--', '.'], { env });
+    const added = git(projectRoot, ['add', '-A', '--', '.'], { env, timeoutMs });
     if (!added.ok) return { tree: null, reason: added.reason };
     const pruned = git(projectRoot, ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '-q', '--',
-      everyDepth ? ':(glob)**/.zensu/**' : '.zensu',
-      ...excluded.map((entry) => `:(literal)${entry}`)], { env });
+      ...(everyDepth ? artifactPathspecs(':(glob)') : ['.zensu']),
+      ...excluded.map((entry) => `:(literal)${entry}`)], { env, timeoutMs });
     if (!pruned.ok) return { tree: null, reason: pruned.reason };
     const relativePrefix = prefix.stdout.trim();
-    const written = git(projectRoot, relativePrefix ? ['write-tree', `--prefix=${relativePrefix}`] : ['write-tree'], { env });
+    const written = git(projectRoot, relativePrefix ? ['write-tree', `--prefix=${relativePrefix}`] : ['write-tree'], { env, timeoutMs });
     if (!written.ok) return { tree: null, reason: written.reason };
     const tree = written.stdout.trim();
     if (!TREE_RE.test(tree)) return { tree: null, reason: 'git write-tree returned no tree id' };
@@ -1365,6 +1371,7 @@ module.exports = {
   STORE_SEGMENTS,
   CHILD_SCRUBBED_ENV,
   GIT_SCRUBBED_ENV,
+  WORKFLOW_ARTIFACTS,
   WITHHELD,
   EvidenceRunError,
   newRecordId,

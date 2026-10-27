@@ -30,6 +30,7 @@ CONFIG_EX="$ROOT/config.example.json"
 CONFIG_DOC="$ROOT/docs/configuration.md"
 CHAIN_DOC="$ROOT/docs/review-chain.md"
 WORKFLOW_DOC="$ROOT/docs/tdd-manager-workflow.md"
+ASPECT_MD="$ROOT/agents/review-aspect.md"
 
 PASS=0; FAIL=0
 check() {
@@ -40,7 +41,7 @@ check() {
 grep_ok() { grep -qF -- "$2" "$1" && echo PASS || echo FAIL; }
 
 for f in "$SCOPE_LIB" "$ASPECT_LIB" "$SCOPE_UNIT" "$ASPECT_UNIT" "$TDD_MD" \
-         "$DELEGATE" "$CONFIG_EX" "$CONFIG_DOC" "$CHAIN_DOC" "$WORKFLOW_DOC"; do
+         "$DELEGATE" "$CONFIG_EX" "$CONFIG_DOC" "$CHAIN_DOC" "$WORKFLOW_DOC" "$ASPECT_MD"; do
   if [ ! -f "$f" ]; then
     check "I0 required file exists: $f" FAIL
     echo "----"
@@ -167,6 +168,7 @@ esac
 check "I17g the round-scope helper path is quoted beside the ledger helper" "$(grep_ok "$DELEGATE" 'SCOPE_HELPER_Q="$(printf '"'"'%q'"'"' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-round-scope-v1.js")"')"
 check "I17h the convergence clause names the round-scope helper whatever the round scope says" "$(grep_ok "$DELEGATE" 'run the round-scope helper, node ${SCOPE_HELPER_Q} --log {log_file} --root \"\$TOP\", with --round ${NEXT} and node ${LEDGER_HELPER_Q}')"
 check "I17e the disabled round scope keeps the whole diff" "$(grep_ok "$DELEGATE" "ROUND_SCOPE=\"hooks.incrementalReviewRounds is off, so THIS round's packet keeps the whole diff")"
+check "I17i a review_scope line narrows the aspect's own read in step 1" "$(grep_ok "$ASPECT_MD" '1. Read governing `CLAUDE.md` files and every listed changed file, or, when a `review_scope:` line is present, only the paths it lists plus what they reference.')"
 
 BASELINE="$ROOT/tests/session-control/initialize-baseline.sh"
 LOG_WRITER="$ROOT/hooks/lib/zensu-log.sh"

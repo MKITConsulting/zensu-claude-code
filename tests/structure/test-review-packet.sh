@@ -105,6 +105,12 @@ if [ -n "$WORK" ]; then
         ...body, "</agent-message>"].join("\n");
       process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
   }
+  notification_payload() {
+    AGENT="$1" STATUS="$2" SID_VALUE="$SID" node -e '
+      const prompt = ["<task-notification>", `<task-id>${process.env.AGENT}</task-id>`, "<tool-use-id>toolu_01WPhqY4dh2LFbaugtAn6Kg8</tool-use-id>",
+        `<status>${process.env.STATUS}</status>`, "<summary>Agent consume review finished</summary>", "</task-notification>"].join("\n");
+      process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
+  }
   hook_event_of() {
     node -e 'let s = ""; process.stdin.on("data", (c) => s += c); process.stdin.on("end", () => {
       try { process.stdout.write(JSON.parse(s).hookSpecificOutput.hookEventName); } catch (_) { process.stdout.write("none"); } });' < "$1"
@@ -441,6 +447,129 @@ merged findings: none"
     fi
   else
     check "RP24 arm a review chain" FAIL
+  fi
+
+  echo "== A stale receipt, repo personas, a gate that cannot check, and notification arrivals =="
+  new_project "$WORK/p-stale"
+  if arm_review "rp-stale" "$WORK/p-stale"; then
+    printf 'v3\n' > "$PROJECT/tracked.txt"
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"; RC=$?
+    if [ "$RC" -eq 2 ] && grep -qF "review-packet-v1: EDIT LANDING RECEIPT STALE — " "$WORK/created.err" \
+      && [ -z "$(find "$PROJECT/.zensu/state" -path '*review-gate-*' -name 'packet-r*.json' 2>/dev/null)" ] && [ -f "$INPUT_JSON" ]; then
+      check "RP27 create refuses through the real receipt check once the claimed file changed after the audit, and writes no packet" PASS
+    else
+      check "RP27 create on a stale receipt (rc=$RC)" FAIL
+      cat "$WORK/created" "$WORK/created.err"
+    fi
+  else
+    check "RP27 arm a review chain" FAIL
+  fi
+
+  new_project "$WORK/p-persona"
+  if arm_review "rp-persona" "$WORK/p-persona"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    EDITED="$(printf '%s\n' "$PACKET" | sed 's/^policy: reviewer-readonly-v1$/policy: reviewer-readonly/')"
+    PERSONA_REPORT="## Aspect: zensu-review-api
+- (no findings)"
+    agent_payload zensu-review-api "$EDITED" "$PERSONA_REPORT" | bash "$POSTREV" >"$WORK/hook" 2>&1; RC=$?
+    if [ "$RC" -eq 0 ] && grep -qF 'REVIEW PACKET MISMATCH — the zensu-review-api reviewer \"zensu-review-api\" prompt differs' "$WORK/hook" \
+      && [ "$(store_records)" = "1" ]; then
+      check "RP28 a repo persona's completion is recorded through the hook's record arm and gets the mismatch advice" PASS
+    else
+      check "RP28 persona record arm (rc=$RC records=$(store_records))" FAIL
+      cat "$WORK/hook"
+    fi
+    agent_payload zensu-review-api "$PACKET" "$PERSONA_REPORT" | bash "$POSTREV" >/dev/null 2>&1
+    agent_payload zensu:review-aspect "perspective: correctness
+$PACKET" "## Aspect: correctness
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    agent_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" "## Aspect: judge
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    PERSONA_ENTRY="$CLAUDE_PLUGIN_DATA/background-review/v1/fanout/$ZENSU_SESSION_KEY/personabg1.json"
+    launch_payload zensu-review-api "$EDITED" personabg1 | bash "$POSTREV" >"$WORK/hook" 2>&1
+    if [ -f "$PERSONA_ENTRY" ] && grep -qF "REVIEW PACKET MISMATCH — the zensu-review-api reviewer prompt differs" "$WORK/hook" \
+      && [ "$(store_records)" = "5" ]; then
+      check "RP28a a background persona launch gets a fan-out entry beside its launch record" PASS
+    else
+      check "RP28a background persona launch (entry=$([ -f "$PERSONA_ENTRY" ] && echo present || echo absent) records=$(store_records))" FAIL
+      cat "$WORK/hook"
+    fi
+    handback_payload personabg1 "$PERSONA_REPORT" | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] \
+      && grep -qF 'REVIEW PACKET MISMATCH — the zensu-review-api reviewer \"zensu-review-api\" prompt differs' "$WORK/hook" \
+      && [ ! -e "$PERSONA_ENTRY" ] && [ "$(store_records)" = "6" ]; then
+      check "RP28b a persona that hands back after every built-in reviewer still reaches the gate and retires its entry" PASS
+    else
+      check "RP28b late persona hand-back (event=$(hook_event_of "$WORK/hook") records=$(store_records))" FAIL
+      cat "$WORK/hook"
+    fi
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    agent_payload zensu:code-reviewer "$CONSUME" "- Verdict: PASS" | bash "$POSTREV" >"$WORK/hook" 2>&1
+    if grep -qF 'REVIEW INCOMPLETE — the latest zensu-review-api reviewer \"zensu-review-api\" run of review round 0 saw another packet than the canonical one' "$WORK/hook" \
+      && [ "$(state_field reviewTicketConsumed)" = "false" ] && [ "$(state_field reviewRound)" = "0" ]; then
+      check "RP28c the late persona's run on another block refuses the consume review" PASS
+    else
+      check "RP28c consume after a late persona mismatch (consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook"
+    fi
+    STORE_DIR="$(find "$PROJECT/.zensu/state" -maxdepth 1 -type d -name 'review-gate-*' | head -n 1)"
+    printf 'not json\n' > "$STORE_DIR/packet-r0.json"
+    agent_payload zensu:code-reviewer "$CONSUME" "- Verdict: PASS" | bash "$POSTREV" >"$WORK/hook" 2>&1; RC=$?
+    if [ "$RC" -eq 0 ] && grep -qF "REVIEW INCOMPLETE — the review gate could not check this consume review (the canonical packet of review round 0 is not JSON)" "$WORK/hook" \
+      && grep -qF "The review ticket was NOT consumed" "$WORK/hook" \
+      && [ "$(state_field reviewTicketConsumed)" = "false" ] && [ "$(state_field reviewRound)" = "0" ]; then
+      check "RP29 a gate that errs on an invalid canonical packet keeps the ticket and the round unchanged" PASS
+    else
+      check "RP29 gate error (rc=$RC consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook"
+    fi
+  else
+    check "RP28 arm a review chain" FAIL
+  fi
+
+  new_project "$WORK/p-arrival"
+  if arm_review "rp-arrival" "$WORK/p-arrival"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    agent_payload zensu:review-aspect "perspective: correctness
+$PACKET" "## Aspect: correctness
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    agent_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" "## Aspect: judge
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    launch_payload zensu:code-reviewer "$CONSUME" consumeend1 | bash "$POSTREV" >/dev/null 2>&1
+    notification_payload consumeend1 failed | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] \
+      && grep -qF "The background zensu:code-reviewer (agent consumeend1) ended with status failed before it completed its review" "$WORK/hook" \
+      && [ "$(consume_record)" = absent ] && [ "$(state_field reviewTicketConsumed)" = "false" ] && [ "$(state_field reviewRound)" = "0" ]; then
+      check "RP30 with the gate on, a consume reviewer that ended without completing claims nothing and retires its launch" PASS
+    else
+      check "RP30 ended notification (event=$(hook_event_of "$WORK/hook") record=$(consume_record) consumed=$(state_field reviewTicketConsumed))" FAIL
+      cat "$WORK/hook"
+    fi
+    launch_payload zensu:code-reviewer "$CONSUME" consumenote1 | bash "$POSTREV" >/dev/null 2>&1
+    notification_payload consumenote1 completed | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] && grep -qF "BACKGROUND REVIEW REPORT" "$WORK/hook" \
+      && ! grep -qF "REVIEW INCOMPLETE" "$WORK/hook" && [ "$(consume_record)" = absent ] \
+      && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ]; then
+      check "RP30a with the gate on, a completion notification alone claims the ticket on the round's records" PASS
+    else
+      check "RP30a notification-only claim (event=$(hook_event_of "$WORK/hook") record=$(consume_record) consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook"
+    fi
+  else
+    check "RP30 arm a review chain" FAIL
   fi
 
   echo "== The review chain's config probes read the project config =="

@@ -20,6 +20,7 @@ const AGENT = 'a84666756e22c9750';
 const OTHER_AGENT = 'a4a7d6728967b4db8';
 const ASPECT_AGENT = 'a1c2e3a4b5c6d7e8f';
 const JUDGE_AGENT = 'a9f8e7d6c5b4a3f2e';
+const PERSONA_AGENT = 'a5d4c3b2a1f0e9d8c';
 const BASE = 1792600000000;
 const MINUTE = 60 * 1000;
 
@@ -389,7 +390,7 @@ test('the wait verdict holds while a fresh record matches the issued ticket', ()
   assert.equal(br.ttlMinutes(br.limitsWith({ waitTtlMs: 90 * MINUTE })), 90);
 });
 
-test('a background review-aspect or review-judge launch records one fan-out entry; nothing else does', () => {
+test('a background review-aspect, review-judge or repo-persona launch records one fan-out entry; nothing else does', () => {
   const f = fixture();
   const aspect = fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
   assert.deepEqual(aspect, { recorded: true, agentId: ASPECT_AGENT, ttlMinutes: 60 });
@@ -399,8 +400,15 @@ test('a background review-aspect or review-judge launch records one fan-out entr
   assert.equal(entry.subagent_type, 'zensu:review-aspect');
   assert.equal(br.validateFanout(entry, { sessionKey: SESSION, agentId: ASPECT_AGENT }), null);
   if (process.platform !== 'win32') assert.equal(fs.statSync(fanoutPath(f, ASPECT_AGENT)).mode & 0o777, 0o600);
+  assert.deepEqual(fannedOut(f, 'zensu-review-api', PERSONA_AGENT), { recorded: true, agentId: PERSONA_AGENT, ttlMinutes: 60 });
+  const persona = JSON.parse(fs.readFileSync(fanoutPath(f, PERSONA_AGENT), 'utf8'));
+  assert.equal(persona.subagent_type, 'zensu-review-api');
+  assert.equal(br.validateFanout(persona, { sessionKey: SESSION, agentId: PERSONA_AGENT }), null);
+  assert.equal(br.validateFanout({ ...persona, subagent_type: 'zensu-review-' }, { sessionKey: SESSION, agentId: PERSONA_AGENT }), 'fanout subagent type');
   assert.equal(br.recordFanout(fanoutPayload('zensu:code-reviewer', OTHER_AGENT), options(f)).reason, 'subagent-type');
   assert.equal(br.recordFanout(fanoutPayload('Explore', OTHER_AGENT), options(f)).reason, 'subagent-type');
+  assert.equal(br.recordFanout(fanoutPayload('zensu-review-', OTHER_AGENT), options(f)).reason, 'subagent-type');
+  assert.equal(br.recordFanout(fanoutPayload('acme:zensu-review-api', OTHER_AGENT), options(f)).reason, 'subagent-type');
   assert.equal(br.recordFanout(fanoutPayload('zensu:review-aspect', OTHER_AGENT, 'completed'), options(f)).reason, 'not-async');
   assert.equal(br.recordFanout(fanoutPayload('zensu:review-aspect', '../x'), options(f)).reason, 'agent-id');
   assert.equal(fs.existsSync(fanoutPath(f, OTHER_AGENT)), false);

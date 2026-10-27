@@ -11,7 +11,6 @@ const RECORD_SCHEMA = 'zensu-review-gate-record-v1';
 const MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
 const MAX_RECORD_BYTES = 64 * 1024;
 const MAX_RECORDS = 400;
-const PERSONA_RE = /^zensu-review-[A-Za-z0-9_-]+$/;
 const PLUGIN_SCOPE = 'zensu:';
 const REVIEWER_ROLES = new Map([['review-aspect', 'aspect'], ['review-judge', 'judge']]);
 const RECORD_NAME_RE = /^record-r(\d+)-(\d+)-(\d+)-([0-9a-f]{12})\.json$/;
@@ -22,6 +21,7 @@ const ROLES = Object.freeze(['aspect', 'persona', 'judge-primary', 'judge-second
 const PACKET_STATES = Object.freeze(['ok', 'absent', 'duplicate', 'unterminated']);
 const LAUNCHED = 'async_launched';
 const AGENT_ID_RE = background.AGENT_ID_RE;
+const PERSONA_RE = background.PERSONA_TYPE_RE;
 const EVENTS = Object.freeze(['PostToolUse', 'UserPromptSubmit']);
 
 class ReviewGateError extends Error {}

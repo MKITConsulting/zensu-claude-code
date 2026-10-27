@@ -26,6 +26,7 @@ const RECORD_KEYS = Object.freeze(['agent_id', 'header', 'launched_at_ms', 'sche
 const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'session_key', 'subagent_type']);
 const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
   .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
+const PERSONA_TYPE_RE = /^zensu-review-[A-Za-z0-9_-]+$/;
 const VERDICTS = Object.freeze(['claim', 'ended', 'none']);
 const ARRIVALS = Object.freeze(['handback', 'notification']);
 const WAIT_KINDS = Object.freeze(['consume', 'fanout']);
@@ -107,6 +108,10 @@ function validateRecord(record, expected = {}, limits = LIMITS) {
   return headerProblem(record.header, record.ticket, limits);
 }
 
+function fanoutType(type) {
+  return FANOUT_TYPES.includes(type) || (typeof type === 'string' && PERSONA_TYPE_RE.test(type));
+}
+
 function validateFanout(entry, expected = {}) {
   if (!exactKeys(entry, FANOUT_KEYS)) return 'fanout keys';
   if (entry.schema !== SCHEMA) return 'fanout schema';
@@ -114,7 +119,7 @@ function validateFanout(entry, expected = {}) {
   if (expected.sessionKey !== undefined && entry.session_key !== expected.sessionKey) return 'fanout session mismatch';
   if (typeof entry.agent_id !== 'string' || !AGENT_ID_RE.test(entry.agent_id)) return 'fanout agent id';
   if (expected.agentId !== undefined && entry.agent_id !== expected.agentId) return 'fanout agent mismatch';
-  if (!FANOUT_TYPES.includes(entry.subagent_type)) return 'fanout subagent type';
+  if (!fanoutType(entry.subagent_type)) return 'fanout subagent type';
   if (!Number.isSafeInteger(entry.launched_at_ms) || entry.launched_at_ms < 0) return 'fanout launch time';
   return null;
 }
@@ -380,7 +385,7 @@ function recordFanout(payload, options, limits = LIMITS) {
   const sessionKey = requireSessionKey(options.sessionKey);
   if (!isPlainObject(payload)) return { recorded: false, reason: 'payload' };
   const input = isPlainObject(payload.tool_input) ? payload.tool_input : {};
-  if (!FANOUT_TYPES.includes(input.subagent_type)) return { recorded: false, reason: 'subagent-type' };
+  if (!fanoutType(input.subagent_type)) return { recorded: false, reason: 'subagent-type' };
   const response = payload.tool_response;
   if (!isPlainObject(response) || response.status !== ASYNC_STATUS) return { recorded: false, reason: 'not-async' };
   const agentId = launchAgentId(response);
@@ -734,6 +739,7 @@ module.exports = {
   RECORD_KEYS,
   FANOUT_KEYS,
   FANOUT_TYPES,
+  PERSONA_TYPE_RE,
   VERDICTS,
   ARRIVALS,
   WAIT_KINDS,

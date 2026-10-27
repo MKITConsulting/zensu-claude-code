@@ -29,7 +29,6 @@ const PACKET_OVERHEAD_BYTES = 64 * 1024;
 const inputBytesLimit = () => LIMITS.fieldBytes + LIMITS.changedListBytes;
 const packetBytesLimit = () => LIMITS.fieldBytes + LIMITS.changedListBytes + PACKET_OVERHEAD_BYTES;
 const recordBytesLimit = () => 2 * packetBytesLimit() + 1024 * 1024;
-const MAX_STATE_BYTES = 1024 * 1024;
 const MAX_RECEIPT_BYTES = 4 * 1024 * 1024;
 const MAX_SNAPSHOT_FILES = 20000;
 const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
@@ -82,8 +81,21 @@ function git(root, args, options = {}) {
   fail(`git ${args[0]} failed: ${first.slice(0, 200)}`);
 }
 
+function untrackedListing(repository) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-no-global-excludes-'));
+  try {
+    const empty = path.join(directory, 'excludes');
+    fs.writeFileSync(empty, '', { flag: 'wx', mode: 0o600 });
+    return git(repository, ['-c', `core.excludesFile=${empty}`, 'ls-files', '--others', '--exclude-standard', '-z', '--']).stdout;
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function excluded(file) {
-  return file.split('/').some((part) => part === '.zensu' || part === '.git');
+  const artifacts = require('./evidence-run-v1.js').WORKFLOW_ARTIFACTS;
+  const parts = file.split('/');
+  return parts.some((part, index) => part === '.git' || (part === '.zensu' && artifacts.includes(parts[index + 1])));
 }
 
 function canonicalRoot(root) {
@@ -127,7 +139,7 @@ function collectChanges(options = {}) {
     if (baseline) fail('--baseline cannot apply to a repository whose HEAD is unborn');
     add(git(repository, ['ls-files', '--cached', '-z', '--']).stdout);
   }
-  add(git(repository, ['ls-files', '--others', '--exclude-standard', '-z', '--']).stdout);
+  add(untrackedListing(repository));
   return {
     schema: 'zensu-change-set-v1',
     kind: 'git',
@@ -165,21 +177,10 @@ function requireSession(session) {
 }
 
 function chainState(root, session) {
-  const engine = core();
-  const loaded = readBounded(engine.adoptionWorkflowStatePath(root, session), MAX_STATE_BYTES);
-  if (loaded.absent) return { status: 'absent' };
-  if (loaded.invalid) return { status: 'invalid', reason: `it is ${loaded.invalid}` };
-  let value;
-  try {
-    value = JSON.parse(loaded.bytes.toString('utf8'));
-  } catch {
-    return { status: 'invalid', reason: 'it is not JSON' };
-  }
-  if (!value || typeof value !== 'object' || value.schema !== engine.WORKFLOW_SCHEMA
-      || value.session_id_hash !== engine.sessionIdHash(session)) {
-    return { status: 'invalid', reason: 'it belongs to another session or carries another schema' };
-  }
-  if (!engine.workflowChainSnapshot(value, session)) return { status: 'invalid', reason: 'its chain fields do not validate' };
+  const state = require('./edit-landing-receipt-v1.js').workflowState(root, session);
+  if (state.status === 'none') return { status: 'absent' };
+  if (state.status !== 'ok') return state;
+  const value = state.value;
   return {
     status: 'ok',
     reviewable: value.active === true && value.implComplete === true && value.chainDone !== true,
@@ -268,7 +269,7 @@ function snapshotFiles(root, files) {
   let total = 0;
   for (const file of [...new Set(files)].sort()) {
     if (typeof file !== 'string' || file === '' || /[\x00-\x1f\x7f\\]/.test(file) || path.isAbsolute(file)
-        || path.posix.normalize(file) !== file || file.split('/').some((part) => ['', '.', '..', '.git', '.zensu'].includes(part))) {
+        || path.posix.normalize(file) !== file || file.split('/').some((part) => ['', '.', '..'].includes(part)) || excluded(file)) {
       fail(`the changed_files entry ${JSON.stringify(String(file)).slice(0, 120)} is not a normalized path inside the project`);
     }
     const parts = file.split('/');
@@ -563,14 +564,16 @@ function createPacket(options = {}) {
 function removeConsumedInput(file, root) {
   try {
     if (typeof file !== 'string' || file === '' || typeof root !== 'string' || root === '') return false;
+    if (file.split(/[\\/]/).includes('..')) return false;
     const projectRoot = fs.realpathSync(root);
-    const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1) return false;
-    const directory = fs.realpathSync(path.dirname(path.resolve(file)));
+    const directory = fs.realpathSync(path.dirname(file));
     if (path.basename(directory) !== REVIEW_INPUT_SEGMENTS[1] || path.basename(path.dirname(directory)) !== REVIEW_INPUT_SEGMENTS[0]) return false;
     const relative = path.relative(projectRoot, path.dirname(path.dirname(directory)));
     if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return false;
-    fs.unlinkSync(file);
+    const target = path.join(directory, path.basename(file));
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1) return false;
+    fs.unlinkSync(target);
     return true;
   } catch {
     return false;

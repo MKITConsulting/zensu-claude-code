@@ -68,12 +68,14 @@ claim to verify. When a channel exists but does not resolve, the verb DISCLOSES
 
 **The claim grammar has ONE owner.** `zensu-edit-landing.sh` already extracted
 `IMPL completed — files:` / `WIRED — files:` claims for grading; `--inventory` reports
-the same extraction read-only — `claimed-files=<n>` plus one `foreign-root<TAB><root>` line per
-distinct non-anchor root — without a change set, a verdict or a receipt. Its three
+the same extraction read-only — `claimed-files=<n>`, `bare-wired=<n>` and one
+`foreign-root<TAB><root>` line per distinct non-anchor root — without a change set, a verdict or a
+receipt. Its three
 consumers are `--tdd-complete` (for `_tc_armed`), the terminal edit-landing gate at `--chain-done`
 (`_zensu_receipt_claims_nothing`, which exempts a zero-change chain whose receipt records
-`claims: 0` only on a completed inventory reporting `claimed-files=0`, so it arms exactly where
-`--tdd-complete` arms; an inventory that did not complete arms it when its partial count is
+`claims: 0` only on a completed inventory reporting `claimed-files=0` and `bare-wired=0`, so it
+arms where `--tdd-complete` arms and also on a bare `WIRED` entry logged after the audit, which
+the receipt never graded; an inventory that did not complete arms it when its partial count is
 positive and otherwise refuses with its own cause, which is stricter than `--tdd-complete`, where
 an inventory that answered nothing leaves the requirement on the change set alone, because the
 terminus is the last point at which a claim logged after the audit can be caught) and the doctor row. **The wire format is a
@@ -117,9 +119,13 @@ backtick-quoted marker. `review-round-scope-v1.js` anchors its `CLAIM` regex at 
 position; `X29`–`X33` in `tests/structure/test-edit-landing-audit.sh` pin the grammar.
 **`claimed-files=` deliberately counts LESS than the audit's own `CLAIM_COUNT`:** a bare
 `<step> WIRED` entry with no `files:` list is a claim to the GRADER (reported
-`UNVERIFIED`) and is NOT one here: it names no file, and arming the terminus on it would
-wedge a zero-change chain whose audit can then only ever report it again. An empty file
-list and a `WIRED (verified, no change)` line count as claims in neither.
+`UNVERIFIED`) and is NOT one here: it names no file, and arming `--tdd-complete` on it would
+wedge a zero-change chain whose audit can then only ever report it again. The terminal gate
+reads the separate `bare-wired=` count instead, because its exemption trusts a `claims: 0`
+receipt: a bare entry logged after that audit would otherwise close a chain the receipt never
+graded, while one logged before it already refuses there as an unverified claim (`E11b2`,
+`E11c` in `tests/structure/test-terminal-edit-landing-gate.sh`). An empty file list and a
+`WIRED (verified, no change)` line count as claims in neither.
 
 **An absolute claim is judged by where it RESOLVES.** `absolute_claim_verdict`
 canonicalizes the claim's nearest existing ancestor before comparing it with the audited
@@ -333,8 +339,10 @@ failed command under `LC_ALL=C` through `_el_git` and keeps git's first message 
 localized git otherwise turns a root outside git into a fault. The rule covers every later git
 call on the grading path too: `--show-toplevel`; a HEAD probe exiting anything but 0, or 1 for an
 unborn branch; a `--baseline` probe that does the same (it is peeled with `^{commit}`, so a
-baseline naming no commit stays a skipped hint and never reaches a failing `diff`); and any
-listing that exits non-zero. `union_add` captures each listing before it appends, so git's status
+baseline naming no commit stays a skipped hint and never reaches a failing `diff`, and the same
+peel runs before the audit scope is bound, so `auditScope.baseline` holds a full commit id or
+nothing and the review packet's baseline check accepts what the audit persisted; `M2b` and `G8a`
+pin both); and any listing that exits non-zero. `union_add` captures each listing before it appends, so git's status
 and the write's status are no longer one status, and a failed append dies with its own message.
 Each one is a fault because reading it any other way grades claims: a refusal read as "not a git
 work tree" grades every claim `UNVERIFIED` or `PENDING PREDICATE`, an aborted HEAD probe read as

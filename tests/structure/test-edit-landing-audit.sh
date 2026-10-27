@@ -193,6 +193,12 @@ OUT7="$(run_audit --log "$MC/run.log" --project "$MC" --baseline "$BASE" --recei
 RC7=$?
 { [ "$RC7" -eq 0 ] && printf '%s' "$OUT7" | grep -qF 'EDIT LANDED — S1: b.txt'; }
 check "M2 with --baseline the committed change is correctly landed" "$(verdict $?)"
+M2B_RECEIPT="$MC/.zensu/state/edit-landing-abbreviated.json"
+OUT7B="$(run_audit --log "$MC/run.log" --project "$MC" --baseline "${BASE:0:8}" --receipt "$M2B_RECEIPT")"
+RC7B=$?
+{ [ "$RC7B" -eq 0 ] && printf '%s' "$OUT7B" | grep -qF 'EDIT LANDED — S1: b.txt' \
+  && [ "$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).auditScope.baseline)' "$M2B_RECEIPT" 2>/dev/null)" = "$BASE" ]; }
+check "M2b an abbreviated --baseline is persisted as the full commit id the review packet accepts" "$(verdict $?)"
 
 echo "== Outside a git work tree =="
 NG="$WORK/nogit"
@@ -349,6 +355,11 @@ GB_OUT="$(run_audit --log "$GF/run.log" --project "$GF" --baseline "$GB_BLOB" --
 { [ -n "$GB_BLOB" ] && [ "$GB_RC" -eq 1 ] && printf '%s' "$GB_OUT" | grep -qF 'EDIT LANDED — S1: a.txt' \
   && ! printf '%s' "$GB_OUT" | grep -qF 'AUDIT FAULT'; }
 check "G8 a --baseline naming no commit is skipped as before, never turned into a fault" "$(verdict $?)"
+G8A_RECEIPT="$GF/.zensu/state/edit-landing-blob-baseline.json"
+run_audit --log "$GF/run.log" --project "$GF" --baseline "$GB_BLOB" --receipt "$G8A_RECEIPT" >/dev/null
+{ [ -f "$G8A_RECEIPT" ] \
+  && [ "$(node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).auditScope.baseline))' "$G8A_RECEIPT" 2>/dev/null)" = '""' ]; }
+check "G8a a --baseline naming no commit is not persisted, so it cannot lock the generation out of packet creation" "$(verdict $?)"
 
 echo "== Multi-root: a claim outside the audited root is named, never silently graded =="
 # Stage 1 of docs/multi-repo-chains-spec.md: one audit run grades ONE root. A claim
@@ -659,6 +670,8 @@ RCI=$?
 check "V1 the inventory mode exits 0 — it reports, it never grades" "$(verdict $?)"
 printf '%s' "$INV" | grep -qxF 'claimed-files=3'
 check "V2 one claim per NAMED file: an empty list, a verified-no-change line and a bare WIRED entry count none" "$(verdict $?)"
+printf '%s' "$INV" | grep -qxF 'bare-wired=1'
+check "V2b the bare WIRED entry the file count leaves out is reported on a line of its own" "$(verdict $?)"
 printf '%s' "$INV" | grep -qF "foreign-root$(printf '\t')${MR_SIB_ABS}"
 check "V3 the inventory names the distinct foreign roots" "$(verdict $?)"
 ! printf '%s' "$INV" | grep -qE 'EDIT LANDED|EDIT NOT LANDED|EDIT LANDING AUDIT'

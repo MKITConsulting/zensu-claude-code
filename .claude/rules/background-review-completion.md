@@ -46,8 +46,9 @@ reviewer's report reaches the main thread, with the routing directive the foregr
 
 1. **Launch.** On `async_launched`, `post-review-tdd-delegate.sh` records the launch in
    `<CLAUDE_PLUGIN_DATA>/background-review/v1/` (temp file then rename at `0600`, exact key sets).
-   A `zensu:review-aspect` or `zensu:review-judge` launch becomes one entry per agent under
-   `fanout/<scv1-key>/<agentId>.json` (`background-review-v1.js fanout`). The consume-mode
+   A `zensu:review-aspect`, `zensu:review-judge` or repo-local `zensu-review-*` persona launch
+   becomes one entry per agent under `fanout/<scv1-key>/<agentId>.json`
+   (`background-review-v1.js fanout`). The consume-mode
    `zensu:code-reviewer`, after the header, envelope and preflight checks, becomes the session's
    one record `records/<scv1-key>.json` (`record`), written only while the prompt's ticket is the
    ticket the claim would accept. Its directive tells a standalone chain to end its turn and wait,
@@ -111,6 +112,13 @@ reviewer's report reaches the main thread, with the routing directive the foregr
 - **Fan-out entries carry no ticket and no chain binding.** The Stop hook consults them only on the
   path where it would block for an armed review chain, so an entry from an earlier chain of the
   same session can release a Stop for at most the wait bound.
+- **A repo persona's launch is a fan-out entry too.** Without one, the prompt hook passed a
+  persona's hand-back on only while a built-in reviewer was still pending, so a persona that
+  reported last stayed a launch record without an identity in the review packet gate, which
+  neither counts nor blocks, and a persona launched with another block was caught only by the
+  advice its launch received. Its type is repo-authored, but the main thread spawned it, so the
+  entry gives the repository no lever the spawn did not already have: like a built-in reviewer's
+  entry, it releases a standalone Stop for at most the wait bound.
 - **The re-spawn sentence keeps `run_in_background: false` only where the Agent tool offers that
   parameter**, in the three severity arms of the delegate, the Stop resume reason and steps 10 and 5
   of `skills/tdd/references/review-chain.md`.
@@ -128,16 +136,20 @@ reviewer's report reaches the main thread, with the routing directive the foregr
   UserPromptSubmit` after `match` and before the `ARRIVAL_MATCH` exit, so a failed `match` sets
   `ARRIVAL_MATCH` empty instead of ending the branch, and `review_gate_check` runs at the consume
   launch before `record` and at the arrival before the claim. `tests/structure/test-background-review.sh`
-  turns the gate off in its config, because its fixtures carry no canonical packet.
+  turns the gate off in its config, because its fixtures carry no canonical packet, so `RP28b`,
+  `RP30` and `RP30a` in `tests/structure/test-review-packet.sh` drive the advice exit, an ended
+  notification and a claim from the completion notification alone with the gate on.
 - The claim predicate is `review-ticket-state-v1.js`; `_ZENSU_TDD_TICKET_STATE` is in the export
   list of `zensu-tdd-phase.sh` beside `_ZENSU_TDD_CHAIN_RECOVERY`.
 - The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, and
   the `recorded agent= ttl=` line by the delegate's launch arm.
-- The fan-out types are `FANOUT_TYPES` in the module and the `case` in the delegate's PostToolUse
-  branch. `FANOUT_TYPES` is derived, never spelled: the `zensu:` names in `REVIEWER_TYPES` of
-  `claude-principal-v1.js` other than `REVIEWER_SUBAGENT_TYPE`, because
-  `tests/structure/reviewer-spawn-allow-v1.test.js` fails on any second spelled copy of a confined
-  reviewer under `hooks/`.
+- The fan-out types are `FANOUT_TYPES` plus `PERSONA_TYPE_RE`, joined in `fanoutType`, and the
+  `case` in the delegate's PostToolUse branch. `FANOUT_TYPES` is derived, never spelled: the
+  `zensu:` names in `REVIEWER_TYPES` of `claude-principal-v1.js` other than
+  `REVIEWER_SUBAGENT_TYPE`, because `tests/structure/reviewer-spawn-allow-v1.test.js` fails on any
+  second spelled copy of a confined reviewer under `hooks/`. `classify` in
+  `hooks/lib/review-gate-v1.js` takes `PERSONA_TYPE_RE` from the module, so the persona pattern
+  has one owner.
 - The store is in both protected-root lists of `reviewer-capability-v1.js` (`BR1a`).
 - The prompt hook has a `budget()` row in `tests/structure/test-user-prompt-budget.sh` and a row in
   the table of `.claude/rules/prompt-origin.md`; the hook count in `docs/configuration.md` moved
@@ -160,8 +172,6 @@ reviewer's report reaches the main thread, with the routing directive the foregr
   not indent, and that names a pending agent id, could still carry a forged frame; the id sits only
   in the session's own `0600` store, and the hand-back frame text is the only measured statement
   of that indentation.
-- **Repo-local review personas are not recorded.** Their subagent types are repo-authored, so a turn
-  end while only a persona runs blocks and charges the budget as before.
 - **An Autopilot-bound chain's hold costs turns.** Each held Stop is one more model turn until the
   report arrives; the bound caps it, the budget does not.
 - **A notification that says no report was delivered** still claims the ticket; the lead sentence
@@ -184,7 +194,9 @@ reviewer's report reaches the main thread, with the routing directive the foregr
 
 Walked against `.claude/rules/runtime-lineage.md` entry by entry: no context-record or
 workflow-state field; the record and fan-out key sets are strict but ship for the first time, so
-no released reader or writer predates them, and a later change to either is a `minor`. The added
+no released reader or writer predates them, and a later change to either is a `minor`. Admitting
+persona types adds no key: an installation that predates it skips a persona entry as invalid,
+which only restores the behaviour it had. The added
 `UserPromptSubmit` hook returns only `additionalContext`, and the Stop hook's new hold is a block
 it already emitted, minus one budget increment. The claim now reads its predicate from
 `review-ticket-state-v1.js` with the same field test, so it accepts and refuses exactly the

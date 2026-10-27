@@ -463,8 +463,14 @@ test('the hand-back of a background reviewer completes its launch with the repor
   assert.equal(c.handback('aUnknown', JUDGE_OK).length, 0);
   assert.deepEqual(gate.recordHandback({ root: c.root, session: c.session, payload: { prompt: 'typed text that names aJudge1' } }), []);
   assert.equal(c.handbackPrompt(notification('aAspect1', 'completed')).length, 0, 'a completion notification carries no report');
-  const done = chain(t, { chainDone: true });
-  assert.equal(done.handback('aAspect1', '## Aspect: correctness\n- (no findings)\n').length, 0);
+  const done = chain(t);
+  const block = done.create();
+  done.launch('zensu:review-aspect', `perspective: correctness\n${block.text}\n`, 'aAspect1');
+  const stored = () => gate.listStore(packets.storeDirectory(done.root, done.session)).records.length;
+  const launches = stored();
+  writeWorkflow(done.root, done.session, { chainDone: true });
+  assert.equal(done.handback('aAspect1', '## Aspect: correctness\n- (no findings)\n').length, 0, 'a finished chain completes no launch');
+  assert.equal(stored(), launches);
 });
 
 test('every column-zero hand-back frame of a prompt counts, and a frame quoted inside a report does not', (t) => {
