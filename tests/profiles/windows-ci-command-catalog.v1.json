@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "commands": [
+    {"runner":"bash","path":"tests/structure/test-context-auto-load.sh","args":[]},
     {"runner":"bash","path":"tests/structure/test-deferred-review-claim.sh","args":["--cases","C4r,C4rc,C4ro,C4ri,C4rib,C4ris,C4risb,C4,C5,C6"]},
     {"runner":"bash","path":"tests/structure/test-post-review-self-review-handoff.sh","args":[]},
     {"runner":"bash","path":"tests/structure/test-deferred-review-fallback.sh","args":[]},

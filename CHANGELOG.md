@@ -32,6 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back once.
 - **docs**: `docs/tdd-manager-workflow.md` is now `docs/build-workflow.md`.
 
+## [0.31.1] - 2026-10-26
+
+### Added
+
+- **context**: Load tracked feature context automatically (#518)
+
+### Fixed
+
+- **brand**: Preserve white fan backing on dark backgrounds (#517)
+- **session-trail**: Keep every linked session marked start in the takeover plan (#512)
+
 ## [0.31.0] - 2026-10-26
 
 ### Added

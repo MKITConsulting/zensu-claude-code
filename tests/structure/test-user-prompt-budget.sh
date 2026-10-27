@@ -165,10 +165,11 @@ ROSTER="$(node -e '
   process.stdout.write(out.join("\n"));
 ' "$HOOKS_JSON" 2>/dev/null)"
 
-BUDGETED="user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-review-handback.sh"
+BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-review-handback.sh"
 
 budget() {
   case "${3:-first}:$1:$2" in
+    *:user-prompt-context-auto-load.sh:*) echo "0 0" ;;
     *:user-prompt-context-nudge.sh:*) echo "0 0" ;;
     first:user-prompt-intent-router.sh:typed) echo "2000 2200" ;;
     repeat:user-prompt-intent-router.sh:typed) echo "1 1200" ;;

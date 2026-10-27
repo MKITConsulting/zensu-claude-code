@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.31.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.31.1-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -298,7 +298,7 @@ Not every hook can be turned off:
 
 | | Hooks | How |
 |-|-------|-----|
-| **Switched off by a config key** | The banner and primer, the pulse banner, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
+| **Switched off by a config key** | The banner and primer, the pulse banner, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, automatic feature context, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
 | **Off unless you opt in** | The source-write gate's checks of Bash writes | `hooks.bashWriteGate: true` |
 | **Bypassed only through the environment** | The TDD phase gate | `ZENSU_TDD_GATE=off` in the environment Claude Code starts with |
 | **Always on while the plugin is enabled** | Session Control and the capability gate that confines subagents (`hooks.subagentShell: false` only withdraws their `Bash`), the Session Control check inside the source-write gate, evidence discipline, the plugin-data guard, the browser consent gate and its recorder, the artifact path redactor, the prompt-ledger reset, Autopilot resume context, the review-evidence hooks, the work-order hooks (inert outside a work-order session), the background-review hand-back and both automatic work-capture hooks | Disable the plugin ([Turn Zensu off or remove it](#turn-zensu-off-or-remove-it)) |
@@ -530,3 +530,7 @@ the missing capability instead of silently falling back. See the
 [context procedure](skills/implement/references/knowledge-context.md)
 for truncation, access failures and evidence handoff. These reads supplement feature,
 security and design context. The context board records these API retrievals by package `load_id`, declared agent and server time. Local file reads and model comprehension are not recorded.
+
+## Automatic feature context
+
+An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. Disable with `hooks.contextAutoLoad: false`. See [automatic context](docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
