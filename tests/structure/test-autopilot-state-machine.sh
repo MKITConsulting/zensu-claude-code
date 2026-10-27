@@ -1623,7 +1623,7 @@ fi
 
 # --- The standalone-TDD occupancy gate ---
 # `_autopilot_begin_standalone_tdd_critical` is the gate that keeps an unbound
-# /zensu:tdd chain from arming underneath a live durable run in the same tree.
+# /zensu:build chain from arming underneath a live durable run in the same tree.
 # Nothing drove it before, so its refusal could not be observed at all — and it
 # discarded the holder record that names the only command able to release it.
 # Two SIBLING worktrees, neither containing the other. A plain directory pair
@@ -2594,7 +2594,7 @@ fi
 # form, so reverting to a bare `!rel.startsWith("..")` satisfied all three. No fixture
 # builds a worktree whose basename starts with `..`, so nothing behavioural catches it
 # either — and the consequence is not cosmetic: `<project>/..bak` would read as FREE,
-# `workspaceHolder` would find no holder, and a standalone `/zensu:tdd` chain would arm
+# `workspaceHolder` would find no holder, and a standalone `/zensu:build` chain would arm
 # underneath a live durable run in the same tree. Both clauses, or neither.
 W18B_OK=true
 # Filtered off comment lines, the same class W19 was fixed for: `contains` sits

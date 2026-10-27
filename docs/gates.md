@@ -4,7 +4,7 @@ Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt — whose VERDICT is what is judged, not its existence, and which a logged
 claim arms even when the anchor's tree is clean (discipline patch 10 in
-[tdd-manager-workflow.md](tdd-manager-workflow.md))
+[build-workflow.md](build-workflow.md))
 and §Requirements-Table Gate below, which has its own section here — and TWO
 terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
 Eight of the ten are
@@ -1031,7 +1031,7 @@ the same call with an existing one.
 
 ## TDD Phase Gate
 
-Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
+Unlike prompt-based TDD ("please write tests first"), the `/zensu:build` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
 
 - **Phase declaration.** Before any edit, the main agent declares the current TDD phase through the top-level Skill command template `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>`. Claude renders both native plugin placeholders in top-level Skill/Agent content. The helper then uses the host-exposed `CLAUDE_CODE_SESSION_ID` only inside that Bash process to validate the exact immutable record and derive its internal selectors; it never trusts an ambient plugin-private selector. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
 - **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
@@ -1043,7 +1043,7 @@ Additional features: dependency graph for independent-step sequencing, 3-retry I
 ## Requirements-Table Gate
 
 `--tdd-complete` carries two preconditions, and both are refusals rather than reminders. The
-first is the Phase 6 step 5b edit-landing receipt. The second is this one: the session's TDD
+first is the Phase 6 step 5b edit-landing receipt. The second is this one: the session's Zensu
 plan must carry a usable `## Requirements` table.
 
 - **Why it is a gate.** [`/zensu:converge`](../skills/converge/SKILL.md) anchors its flow-back
@@ -1198,7 +1198,7 @@ verified live on the tree that ships. The one exception is a max-rounds close wi
 `hooks.selfReview` off, described under **Where it applies**. A criterion is an `AC-###` row of
 the plan's `## Requirements` table whose Requirement cell does not start with `(deprecated)`,
 `[deprecated]` or the word `deprecated` followed by a separator. `FR-###` rows are not verified
-live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before the review, and
+live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before the review, and
 `/zensu:self-review` runs it again when review rounds made the records stale.
 
 - **How a verdict is recorded.** `zensu-log.sh --acceptance-record --ac <id> --verdict
@@ -1272,4 +1272,4 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   nobody verified, or one verified before a later edit; it does not stop a model that forges a
   record on purpose.
 
-**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-14, four-channel logging.
+**Full workflow reference:** [docs/build-workflow.md](build-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-14, four-channel logging.

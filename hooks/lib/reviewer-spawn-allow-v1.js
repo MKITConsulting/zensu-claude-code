@@ -39,7 +39,7 @@
 // calls are permission-checked separately. An armed-chain condition was specified
 // and then rejected on discovery — `plan-review-worker` and `pr-review-worker` are
 // spawned by `/zensu:plan-review` and `/zensu:pr-team-review`, neither of which arms
-// a TDD chain or calls `--workflow-begin`, so that condition would have shipped a
+// a build chain or calls `--workflow-begin`, so that condition would have shipped a
 // grant missing two of the five. `zensu:zensu-plm` is EXCLUDED for the STRUCTURAL
 // reason and that one only: `PLM_TYPES` is a separate classification returning
 // `PRINCIPALS.HOST`, and it is never fed to `pluginScoped` below. Do NOT restate this

@@ -14,7 +14,7 @@ HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 CAPABILITY="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
-CHAIN_DOC="$PLUGIN_DIR/skills/tdd/references/review-chain.md"
+CHAIN_DOC="$PLUGIN_DIR/skills/build/references/review-chain.md"
 source "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 PASS=0; FAIL=0

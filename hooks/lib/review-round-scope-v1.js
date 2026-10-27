@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // review-round-scope-v1.js — deterministic round-delta extractor for the
-// /zensu:tdd auto-fix loop.
+// /zensu:build auto-fix loop.
 //
 // Phase 6 step 10 used to re-review the WHOLE diff on every auto-fix round. An
 // aspect agent re-reading a file that has not changed since the previous round

@@ -2,7 +2,7 @@
 set -u
 
 # Structure test for stable requirement IDs + traceable spec artifact (P1-1).
-# Pins: the plugin plan template (templates/tdd-plan.md) carries a ## Requirements table with stable
+# Pins: the plugin plan template (templates/zensu-plan.md) carries a ## Requirements table with stable
 # AC-###/FR-### IDs, the Steps table + step detail carry a Covers mapping, the
 # never-recycle allocation rule is stated, and Phase 6 runs a warning-level
 # requirements coverage cross-check; the autopilot SKILL assigns stable AC-###
@@ -15,13 +15,13 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
-TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
+TPL_PLAN="$PLUGIN_DIR/templates/zensu-plan.md"
 AUTOPILOT_MD="$PLUGIN_DIR/skills/autopilot/SKILL.md"
 SELF_REVIEW_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
 COVER_MD="$PLUGIN_DIR/skills/cover/SKILL.md"
 DELEGATE_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-WORKFLOW_DOC="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
+WORKFLOW_DOC="$PLUGIN_DIR/docs/build-workflow.md"
 
 PASS=0; FAIL=0
 check() {
@@ -40,7 +40,7 @@ for f in "$TDD_MD" "$TPL_PLAN" "$AUTOPILOT_MD" "$SELF_REVIEW_MD" "$COVER_MD" "$D
 done
 check "P0 all target files exist" PASS
 
-# P1 — plugin plan template (templates/tdd-plan.md): Requirements table with stable IDs
+# P1 — plugin plan template (templates/zensu-plan.md): Requirements table with stable IDs
 # P1a uses exact-line match: backticked prose mentions of `## Requirements`
 # elsewhere in the skill must not satisfy the heading pin.
 if grep -qxF "## Requirements" "$TPL_PLAN"; then

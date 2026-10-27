@@ -1,12 +1,12 @@
 #!/bin/bash
-# Pins skills/tdd/SKILL.md Phase 6 step 10: on PASS / suggestions-only the chain
+# Pins skills/build/SKILL.md Phase 6 step 10: on PASS / suggestions-only the chain
 # no longer closes directly with --chain-done; it routes to --code-review-done +
 # /zensu:self-review, and the self-review stage owns the --chain-done terminus.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+SKILL_MD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 
 PASS=0; FAIL=0
 check() {
@@ -16,7 +16,7 @@ check() {
 }
 
 if [ ! -f "$SKILL_MD" ]; then
-  check "skills/tdd/SKILL.md exists" FAIL
+  check "skills/build/SKILL.md exists" FAIL
   echo "test-tdd-skill-self-review-handoff: $PASS PASS / $FAIL FAIL"
   exit 1
 fi

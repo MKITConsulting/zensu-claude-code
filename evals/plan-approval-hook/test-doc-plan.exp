@@ -1,6 +1,6 @@
 #!/usr/bin/env expect -f
 # Negative test: a doc-only plan is a fast-path — Claude should NOT ask the TDD
-# question and should NOT run /zensu:tdd; it proceeds directly ('Skipping TDD:
+# question and should NOT run /zensu:build; it proceeds directly ('Skipping /zensu:build:
 # docs only'). The hook directive routes doc-only/Markdown plans straight past
 # the AskUserQuestion step.
 
@@ -38,7 +38,7 @@ expect {
   -re "tdd-manager" {
     send_user "\n>>> tdd-manager mention detected (delegation path)\n"
   }
-  -re "skip.*tdd|proceed${GAP}normally|doc-only|escape" {
+  -re "Skipping${GAP}/zensu:build|skip.*tdd|proceed${GAP}normally|doc-only|escape" {
     send_user "\n>>> ESCAPE-HATCH: doc-only path detected\n"
   }
   timeout {

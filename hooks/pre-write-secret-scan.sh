@@ -110,7 +110,7 @@ fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled secretScan || exit 0
 
-# Bypass ledger: escapes stay free, but while a TDD session is active the
+# Bypass ledger: escapes stay free, but while a build session is active the
 # opt-out is recorded to chain state (fail-open, gate name only). The inline
 # escape is reported by the decider itself (__bypass__ verdict) — the one code
 # path that decides the bypass (heredoc-stripped, segment-leading env prefix,

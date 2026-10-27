@@ -269,7 +269,7 @@ grows past 64 directories is denied (`directories`).
 - Operator prose: the capability-gate and `subagentShell` rows and the plugin-data guard
   residuals of `docs/configuration.md`, `docs/session-control.md`, the inline-prefix sentence of
   `docs/gates.md` §"CLI Write-Gate" and its plugin-data guard residuals, `docs/review-chain.md`,
-  `docs/tdd-manager-workflow.md`, the neutral item and L04 in
+  `docs/build-workflow.md`, the neutral item and L04 in
   `docs/session-control-release-gate.md`, the C39 summary in `evals/session-control/README.md`,
   `skills/gauntlet-loop/SKILL.md`, `skills/gauntlet-loop/references/harness.md`,
   `skills/ghost-scan/SKILL.md`, `skills/cover/SKILL.md`, `skills/docs/SKILL.md` and the two

@@ -29,7 +29,7 @@ diagnose here.
 available to a read-only renderer distinguishes a forked-away session from a live sibling
 driving its own chain in the same project — and a live sibling is ORDINARY under this
 repository's own worktree rule. An earlier draft asserted the fork as fact and prescribed
-`/zensu:tdd`; that made a false claim about a running session and told the reader to arm a
+`/zensu:build`; that made a false claim about a running session and told the reader to arm a
 competing chain. Only the WORDING changed — the row is still `WARN`, `line()` counts WARN toward
 `warnCount`, and `main()` gates "all checks green" on it, so the green-summary consequence below
 is still live and is listed as a gap rather than as something the reword fixed.

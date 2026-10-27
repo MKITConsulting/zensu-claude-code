@@ -161,7 +161,7 @@ clean_arm() {
   fi
   return 0
 }
-printf 'TDD STARTED — claim fixture\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — claim fixture\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/clean-claim.log"
 clean_arm gate-clean-claim
 CC_ERR="$(bash "$LOG" --tdd-complete --session gate-clean-claim \
@@ -171,7 +171,7 @@ CC_RC=$?
 check "Z1 a clean anchor whose run log carries a claim is GATED" "$(verdict $?)"
 printf '%s' "$CC_ERR" | grep -qF 'no edit-landing receipt'
 check "Z2 the claim-armed refusal is the receipt refusal, naming the audit that produces it" "$(verdict $?)"
-printf 'TDD STARTED — no claim fixture\nCHECKPOINT — cmd="true" exit=0 result="PASS"\n' \
+printf 'BUILD STARTED — no claim fixture\nCHECKPOINT — cmd="true" exit=0 result="PASS"\n' \
   > "$PROJ/.zensu/logs/clean-noclaim.log"
 clean_arm gate-clean-noclaim
 CC_ERR="$(bash "$LOG" --tdd-complete --session gate-clean-noclaim \
@@ -234,9 +234,9 @@ check "Z10a the disclosure names the claim channel rather than the run log" "$(v
 # JUDGE-3 — a receipt is evidence about ONE run log. `--tdd-begin` retires the
 # previous generation's, and a receipt naming a DIFFERENT log is refused rather
 # than accepted as this chain's clean verdict.
-printf 'TDD STARTED — other generation\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — other generation\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/other-gen.log"
-printf 'TDD STARTED — stem fixture\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — stem fixture\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/stem-bind.log"
 clean_arm gate-stem-bind
 mkdir -p "$(dirname "$(receipt_for gate-stem-bind)")"
@@ -560,7 +560,7 @@ bash "$LOG" --tdd-begin --session gate-armed-log >/dev/null 2>&1
 # must pass so the only thing left to observe is the run-log channel.
 mkdir -p "$PROJ/.zensu/plans"
 cat > "$PROJ/.zensu/plans/never-written.md" <<'PLANEOF'
-# TDD Plan: armed-log fixture
+# Zensu Plan: armed-log fixture
 
 ## Requirements
 | ID | Requirement | Source |
@@ -761,7 +761,7 @@ Z12_DEEP="$PROJ/.zensu/deep"; Z12_I=0
 while [ "$Z12_I" -lt 70 ]; do Z12_DEEP="$Z12_DEEP/d"; Z12_I=$((Z12_I+1)); done
 mkdir -p "$Z12_DEEP"
 printf 'x\n' > "$Z12_DEEP/f.txt"
-printf 'TDD STARTED — budget fixture\nS1 IMPL completed — files: tracked.txt\nS2 IMPL completed — files: %s/f.txt\n' "$Z12_DEEP" \
+printf 'BUILD STARTED — budget fixture\nS1 IMPL completed — files: tracked.txt\nS2 IMPL completed — files: %s/f.txt\n' "$Z12_DEEP" \
   > "$PROJ/.zensu/logs/budget-claim.log"
 clean_arm gate-budget-claim
 CC_ERR="$(bash "$LOG" --tdd-complete --session gate-budget-claim \
@@ -797,7 +797,7 @@ check "Z12b-control a completable inventory arms and emits no incompleteness lin
 # word, which is the exact shape both disclosures exist to remove: a skipped
 # check reading like a passed one. The receipt is a file in `.zensu/state/`, so
 # dropping one field is the cheapest way to reach it.
-printf 'TDD STARTED — nolog fixture\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — nolog fixture\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/nolog.log"
 clean_arm gate-nolog
 mkdir -p "$(dirname "$(receipt_for gate-nolog)")"

@@ -43,7 +43,7 @@
     "./skills/security-review",
     "./skills/session-trail",
     "./skills/setup",
-    "./skills/tdd",
+    "./skills/build",
     "./skills/tdd-mode",
     "./skills/verify-feature",
     "./skills/wargame",

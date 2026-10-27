@@ -110,7 +110,7 @@ fi
 PROJ="$WORK/project"
 mkdir -p "$PROJ"
 CFG_ROUTE_TDD="$WORK/route-tdd.json"
-printf '%s' '{"hooks":{"defaultDeliveryRoute":"tdd"}}' > "$CFG_ROUTE_TDD"
+printf '%s' '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$CFG_ROUTE_TDD"
 CFG_ROUTE_DIRECT="$WORK/route-direct.json"
 printf '%s' '{"hooks":{"defaultDeliveryRoute":"direct"}}' > "$CFG_ROUTE_DIRECT"
 SESSION_SEQ=0

@@ -2,7 +2,7 @@
 
 Apply this read-only procedure before planning or implementing a known Zensu feature.
 The main agent performs the reads and passes the resulting evidence to read-only reviewers.
-This procedure does not start TDD, a mutation workflow or a sync. It records explicit retrieval receipts.
+This procedure does not start /zensu:build, a mutation workflow or a sync. It records explicit retrieval receipts.
 
 1. Check `zensu knowledge context-pack --help` for `--agent` and `zensu knowledge get --help`
    for `--context-load`. If either capability is unavailable, report

@@ -58,10 +58,10 @@ else
   check "B5a primer preserves its pre-quoted model command across MSYS env conversion" FAIL
 fi
 
-if grep -qF '/zensu:tdd' "$BANNER" && grep -qF 'Zensu PLM' "$BANNER" && grep -qF 'hooks.sessionBanner=false' "$BANNER"; then
-  check "B6 banner mentions Zensu PLM + /zensu:tdd + opt-out hint" PASS
+if grep -qF '/zensu:build' "$BANNER" && grep -qF 'Zensu PLM' "$BANNER" && grep -qF 'hooks.sessionBanner=false' "$BANNER"; then
+  check "B6 banner mentions Zensu PLM + /zensu:build + opt-out hint" PASS
 else
-  check "B6 banner mentions Zensu PLM + /zensu:tdd + opt-out hint" FAIL
+  check "B6 banner mentions Zensu PLM + /zensu:build + opt-out hint" FAIL
 fi
 if grep -qF '/zensu:tdd-manager' "$BANNER"; then
   check "B7 banner has NO stale /zensu:tdd-manager" FAIL
@@ -69,10 +69,10 @@ else
   check "B7 banner has NO stale /zensu:tdd-manager" PASS
 fi
 
-if grep -qF 'Plan mode' "$PRIMER" && grep -qF '/zensu:tdd' "$PRIMER"; then
-  check "B8 primer mentions Plan mode + /zensu:tdd" PASS
+if grep -qF 'Plan mode' "$PRIMER" && grep -qF '/zensu:build' "$PRIMER"; then
+  check "B8 primer mentions Plan mode + /zensu:build" PASS
 else
-  check "B8 primer mentions Plan mode + /zensu:tdd" FAIL
+  check "B8 primer mentions Plan mode + /zensu:build" FAIL
 fi
 if grep -qF '/zensu:tdd-manager' "$PRIMER"; then
   check "B9 primer has NO stale /zensu:tdd-manager" FAIL

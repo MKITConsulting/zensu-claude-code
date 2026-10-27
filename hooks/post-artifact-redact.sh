@@ -2,8 +2,8 @@
 set -u
 
 # PostToolUse redactor for the two .zensu run artifacts consuming repos commit:
-# the plan `.zensu/plans/{ts}_tdd-{slug}.md` and the narrative log
-# `.zensu/logs/{ts}_tdd-{slug}.log`.
+# the plan `.zensu/plans/{ts}_build-{slug}.md` and the narrative log
+# `.zensu/logs/{ts}_build-{slug}.log`.
 #
 # `zensu-log.sh append` is the WRITER-side chokepoint and does the real work.
 # This hook is the net under it, and it exists because the two artifacts are
