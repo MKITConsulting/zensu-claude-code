@@ -578,6 +578,26 @@ else
   check "BR9d refused arrival (recorded=$L_RECORDED out=$L_OUT consumed=$(state_value "$L" reviewTicketConsumed))" FAIL
 fi
 
+arm_chain br-refused-note || { check "BR9d2 arm" FAIL; finish; exit 1; }
+LN_RAW=br-refused-note
+LN="$STARTED_KEY"
+LN_AGENT=a9c1e3a5b7d9f1c3e
+LN_PROMPT="$(printf '%s\nREVIEW-TICKET: %s\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=run-br-refused-note attempt=1 chain=chain-br-refused-note\nAUTOPILOT-STAGE: GATES\nREVIEW PACKET v1' \
+  "$REVIEW_MARKER" "$ARMED_TICKET")"
+LN_RECORDED="$(launch_payload "$LN_RAW" "$LN_PROMPT" async_launched "$LN_AGENT" | ZENSU_BR_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" ZENSU_BR_SESSION_KEY="$LN" \
+  ZENSU_BR_STATE_FILE="$(tdd_state_file "$LN")" ZENSU_BR_ENVELOPE=bound node "$LIB" record 2>/dev/null)"
+LN_NOTED="$(prompt_payload "$LN_RAW" "$(notification_text "$LN_AGENT" completed)" | ZENSU_BR_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" node "$LIB" arrive 2>/dev/null)"
+LN_HELD=no
+[ -f "$(arrival_file "$LN")" ] && LN_HELD=yes
+LN_OUT="$(prompt_payload "$LN_RAW" "$(notification_text "$LN_AGENT" completed)" | bash "$PROMPT_HOOK" 2>/dev/null)"
+if [ "$LN_RECORDED" = "recorded agent=$LN_AGENT ttl=60" ] && [ "$LN_NOTED" = "pending agent=$LN_AGENT source=prompt retired=0" ] \
+  && [ "$LN_HELD" = yes ] && [ -z "$LN_OUT" ] && [ ! -e "$(record_file "$LN")" ] && [ ! -e "$(arrival_file "$LN")" ] \
+  && [ "$(state_value "$LN" reviewTicketConsumed)" = false ] && [ "$(state_value "$LN" reviewRound)" = 0 ]; then
+  check "BR9d2 a completion notification whose stored header the preflight refuses claims nothing and retires the record and its arrival note too" PASS
+else
+  check "BR9d2 refused notification (recorded=$LN_RECORDED noted=$LN_NOTED held=$LN_HELD out=$LN_OUT consumed=$(state_value "$LN" reviewTicketConsumed))" FAIL
+fi
+
 BLOCK_BIN="$WORK/block-bin"
 mkdir -p "$BLOCK_BIN"
 cat > "$BLOCK_BIN/node" <<'STUB'

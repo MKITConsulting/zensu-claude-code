@@ -220,7 +220,9 @@ completes the claim from that note.
   wording.
 - `tests/structure/test-background-review.sh` drives the paths through `node` stubs keyed to the
   `MATCH`, `TICKET_STATE` and `CLAIM_CONTEXT` variables of the delegate's, the claim's and the
-  claim-field parse's `node` calls: `BR9e` the forwarder and the kept pair, `BR9f` to `BR9h` a
+  claim-field parse's `node` calls: `BR9d` and `BR9d2` a refusal through a hand-back and
+  through a completion notification, which retires record and note, `BR9e` the forwarder and the
+  kept pair, `BR9f` to `BR9h` a
   failed claim, the arrived release and the Stop claim, `BR14c` the bound hold, `BR16` and `BR17`
   a host-style cancel (TERM to the process group and its descendants, KILL 1.5 s later) and the
   Stop that completes the claim once, `BR18` to `BR18c` the deferral, the cross-session cost and
