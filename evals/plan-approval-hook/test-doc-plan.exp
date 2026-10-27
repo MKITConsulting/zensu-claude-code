@@ -1,5 +1,5 @@
 #!/usr/bin/env expect -f
-# Negative test: a doc-only plan is a fast-path — Claude should NOT ask the TDD
+# Negative test: a doc-only plan is a fast-path — Claude should NOT ask the route
 # question and should NOT run /zensu:build; it proceeds directly ('Skipping /zensu:build:
 # docs only'). The hook directive routes doc-only/Markdown plans straight past
 # the AskUserQuestion step.

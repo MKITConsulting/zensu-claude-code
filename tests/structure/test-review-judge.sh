@@ -148,7 +148,7 @@ else
   check "P3i Phase 6 imports a fresh external review on the first review and spawns one aspect per judge gap" FAIL
 fi
 
-# P3 — tdd SKILL Phase 6 judge stage
+# P3 — build SKILL Phase 6 judge stage
 if grep -qF "Judge second pass" "$TDD_MD" && grep -qF "subagent_type='zensu:review-judge'" "$TDD_MD"; then
   check "P3a Phase 6 carries the judge stage spawning zensu:review-judge" PASS
 else

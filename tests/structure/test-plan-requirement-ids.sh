@@ -74,19 +74,19 @@ else
   check "P2b step detail carries a Covers line" FAIL
 fi
 
-# P3 — tdd SKILL: never-recycle allocation rule + ID adoption at the autopilot seam
+# P3 — build SKILL: never-recycle allocation rule + ID adoption at the autopilot seam
 if grep -qF "Requirement-ID allocation rule" "$TDD_MD" && grep -qF "NEVER reused" "$TDD_MD" && grep -qF "marked deprecated in the Requirement column" "$TDD_MD"; then
-  check "P3a tdd SKILL pins the never-recycle allocation rule" PASS
+  check "P3a build SKILL pins the never-recycle allocation rule" PASS
 else
-  check "P3a tdd SKILL pins the never-recycle allocation rule" FAIL
+  check "P3a build SKILL pins the never-recycle allocation rule" FAIL
 fi
 if grep -qF "adopt them verbatim" "$TDD_MD" && grep -qF "above the highest ID seen" "$TDD_MD"; then
-  check "P3b tdd SKILL pins the incoming-ID adoption rule" PASS
+  check "P3b build SKILL pins the incoming-ID adoption rule" PASS
 else
-  check "P3b tdd SKILL pins the incoming-ID adoption rule" FAIL
+  check "P3b build SKILL pins the incoming-ID adoption rule" FAIL
 fi
 
-# P4 — tdd SKILL Phase 6: warning-level requirements coverage cross-check
+# P4 — build SKILL Phase 6: warning-level requirements coverage cross-check
 if grep -qF "Requirements Coverage Cross-Check" "$TDD_MD" && grep -qF "REQUIREMENT COVERAGE WARNING" "$TDD_MD"; then
   check "P4a Phase 6 runs the requirements coverage cross-check" PASS
 else
