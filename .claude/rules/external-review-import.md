@@ -108,9 +108,12 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
 - `stop-wait` — the Stop hook's `external_review_workflow_wait`. It releases a standalone
   chain's Stop at review round 0 while `background_tasks` lists a `workflow` entry whose status
   is in `RUNNING_TASK_STATUSES`, before the inner budget increment, after `outer_finish`, at
-  most `LIMITS.maxWaits` (3) times in a row; after that every Stop blocks until one sees no
-  running workflow, which deletes the counter, and `--tdd-begin` deletes it for every new chain
-  generation. A chain whose workflows end and start again therefore waits again. A session that owns a live Autopilot run (`OUTER_PRESENT`), an Autopilot-bound
+  most `LIMITS.maxWaits` (3) times in a row; after that this wait releases no Stop until one sees
+  no running workflow, which deletes the counter, and `--tdd-begin` deletes it for every new chain
+  generation. A chain whose workflows end and start again therefore waits again. Past the limit,
+  and in a fix round or a converged chain, a workflow the turn names on a `ZENSU-AWAIT:` line is
+  still released by the explicit wait of `.claude/rules/stop-background-wait.md`, which runs after
+  this one. A session that owns a live Autopilot run (`OUTER_PRESENT`), an Autopilot-bound
   chain (`INNER_BOUND_RUN`), a Stop that adopted a deferred review and a project holding a
   deferred claim never wait; all four exclusions sit inside the function. The counter is
   `waits/<scv1-key>.json` in the store, swept after 24 hours, so no workflow-state field was
@@ -214,7 +217,9 @@ and `sweepStaleWaits` in the module and `zensu_external_review_wait_file` in `ze
 the Stop hook's prefilter miss and `zensu-log.sh --tdd-begin` call through
 `zensu_external_review_wait_reset`; `X14` drives the limit and the reset, `X25` the reset at
 `--tdd-begin`, `X20`-`X23` the round, Autopilot and deferred-review exclusions, and `X24` the
-bound-chain exclusion by running the shipped function with stubbed collaborators. The resume reason names the panel and the import path (`X12`). The store is in both
+bound-chain exclusion by running the shipped function with stubbed collaborators; `X14`, `X17` and
+`X20` also expect the explicit wait's hint where a running workflow meets the limit, a converged
+chain or a fix round. The resume reason names the panel and the import path (`X12`). The store is in both
 protected-root lists of `reviewer-capability-v1.js` (`X1a`). The Phase 6.10 text lives in
 `skills/tdd/references/review-chain.md` steps 3, 4, 4b, 4c and 5, plus the `Subagent / Claude
 Code Workflow safety` and `Work sequentially` bullets of `skills/tdd/SKILL.md`, whose body

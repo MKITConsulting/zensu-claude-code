@@ -181,7 +181,9 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   sees no running workflow, which restarts the count, and arming a new chain with
   `--tdd-begin` restarts it too. A session that owns a live Autopilot run, a chain
   that adopted or holds a deferred review, a fix round, a converged chain, an Autopilot-bound
-  chain and a refused reviewer spawn never wait.
+  chain and a refused reviewer spawn never wait. Past those three waits, and in a fix round or
+  a converged chain, the explicit wait of
+  [Waiting for background work](#waiting-for-background-work) applies.
 
 `hooks.externalReviewImport` (default `true`) switches the record, the import and the wait
 off; the chain then reviews exactly as before.
@@ -244,6 +246,49 @@ no report was delivered still claims the ticket, and the directive tells the mai
 the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
 runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
 post-review hook.
+
+#### Waiting for background work
+
+The `Stop` guard blocks every turn end while an armed chain's review is open. A turn that only
+waits for background work of its own, such as an E2E run, an affected suite or a background
+agent, was therefore forced to poll. The guard releases such a `Stop`, but only when the turn
+says what it waits for:
+
+- **The turn names the task.** Its final message carries the line `ZENSU-AWAIT: <task id>` on a
+  line of its own (backticks around it are accepted). While the `Stop` input's
+  `background_tasks` lists that task as `running` or `pending`, with the type `shell` (a
+  background shell or the Monitor tool), `monitor`, `subagent` or `workflow`, the guard
+  releases the `Stop` without charging the review budget and names the task in a notice the
+  user sees (the Stop's `systemMessage`, also on stderr). The chain stays armed, and the
+  harness wakes the session when the task reports.
+- **The guard explains the line once.** A `Stop` that sees such tasks running but no line
+  naming one of them blocks once with a reason that lists every task (id, type and description)
+  and the line, also without charging the budget. It does so once per new task and at most three
+  times per chain generation: a later `Stop` that sees no new task, or comes after the third such
+  block, gets the ordinary directive and is charged as before.
+- **Why explicit.** A background shell, the Monitor tool and a dev server that never ends all
+  carry the type `shell`, so the guard cannot tell a run the turn waits for from a server that
+  never wakes the session. The line puts that choice where the knowledge is, and the named task
+  must still be running according to the host.
+- **Bounds.** Each task releases at most five `Stop`s per chain generation; after that the
+  ordinary directive blocks. `--tdd-begin` starts every new generation with no releases and no
+  explained tasks. Neither the release nor the explanation runs once the chain has spent its
+  `Stop` budget (`autoFixMaxRounds + 3`), so the cap still releases it with its disclosure.
+
+The wait applies in every armed state past implementation: the first review, a routed fix
+round and the self-review stage. The two waits above come first: at review round 0 the workflow
+wait, and the background review wait while a recorded review agent runs. Once the workflow wait
+has spent its three releases, a running workflow is treated like any other task here. A session
+that owns a live Autopilot run, an Autopilot-bound chain, a chain that adopted or holds a
+deferred review and a refused reviewer spawn never take this wait. `hooks.backgroundTaskWait`
+(default `true`) switches the release and the explanation off.
+
+**Residuals.** The task types and statuses were read from the Claude Code 2.1.299 build, not
+captured from a live `Stop`; any other type or status neither releases nor explains. A turn
+that names a task that never ends releases up to five `Stop`s, each ending a turn that nothing
+wakes, so the review chain waits for the next prompt. A Monitor that reports more than five
+times spends its task's bound, and a host that sends no `last_assistant_message` never
+releases.
 
 #### Custom review personas (repo-local)
 

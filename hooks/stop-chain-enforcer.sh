@@ -803,6 +803,49 @@ background_review_subject() {
   fi
 }
 
+stop_background_wait() {
+  local lib data verdict verdict_head exclusions pending claim blocks
+  STOP_WAIT_VERDICT=""
+  STOP_WAIT_TEXT=""
+  case "$INPUT" in
+    *'"background_tasks":[{'*|*'"background_tasks": [{'*) ;;
+    *) return 1 ;;
+  esac
+  [ "$OUTER_PRESENT" = false ] || return 1
+  [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/stop-background-wait-v1.js"
+  [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled backgroundTaskWait ) || return 1
+  if reviewer_spawn_denied; then return 1; fi
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  case "${CAP:-}" in ''|*[!0-9]*) return 1 ;; esac
+  blocks="$(tdd_get_counter "$STATE_FILE" stopBlockCount)"
+  case "$blocks" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$blocks" -lt "$CAP" ] || return 1
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_SBW_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_SBW_PLUGIN_DATA="$data" \
+    ZENSU_SBW_SESSION_KEY="$SESSION_ID" zensu_run_bounded node "$lib" stop-wait 2>/dev/null)" || return 1
+  verdict_head="${verdict%%$'\n'*}"
+  case "$verdict" in
+    *$'\n'*) STOP_WAIT_TEXT="${verdict#*$'\n'}" ;;
+    *) return 1 ;;
+  esac
+  case "$STOP_WAIT_TEXT" in
+    ''|*$'\n'*) STOP_WAIT_TEXT=""; return 1 ;;
+  esac
+  case "$verdict_head" in
+    'wait release='*) STOP_WAIT_VERDICT=wait ;;
+    'hint tasks='*) STOP_WAIT_VERDICT=hint ;;
+    *) STOP_WAIT_TEXT=""; return 1 ;;
+  esac
+  return 0
+}
+
 # Best-effort only: /zensu:doctor has no transcript path of its own, so without
 # this note the diagnosis would exist for exactly one Stop and nowhere else.
 # A failed write never changes the decision this hook emits.
@@ -1833,6 +1876,19 @@ fi
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
+
+if stop_background_wait; then
+  if [ "$STOP_WAIT_VERDICT" = "hint" ]; then
+    emit_block "$STOP_WAIT_TEXT"
+    exit 0
+  fi
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    stop_notice "$STOP_WAIT_TEXT"
+  fi
+  exit 0
+fi
+
 INNER_CAP_BLOCKED=false
 if [ "$BACKGROUND_REVIEW_PENDING" = "true" ] && [ -n "$INNER_BOUND_RUN" ]; then
   emit_block "Zensu review-chain Stop held, still running: $(background_review_subject). This Autopilot-bound chain keeps its turn while its background review runs, so this Stop does not count against the inner Stop budget of ${CAP}; the hold ends ${BACKGROUND_REVIEW_TTL} minutes after the newest launch. Do NOT spawn another reviewer or re-run the review fan-out: each report reaches you as a hand-back or completion notification, and a consume reviewer's report claims the ticket and routes the review. Wait for those reports, then continue the review sequence from them."

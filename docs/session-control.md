@@ -267,7 +267,9 @@ main thread spawns `zensu:code-reviewer`. The review chain therefore runs in the
 - **The workflow only implemented.** Run the ordinary Phase 6.10 sequence in the main thread
   after it finished. Once implementation is marked complete, a `Stop` that falls while the
   workflow still runs is released up to three times in a row before the first review, so the chain
-  waits for the workflow instead of starting a review beside it; a fix round never waits.
+  waits for the workflow instead of starting a review beside it. A fix round gets no such implicit
+  wait: it waits only for a workflow its final message names on a `ZENSU-AWAIT:` line (see
+  [Waiting for background work](review-chain.md#waiting-for-background-work)).
 - **No chain is armed in this session.** The main thread records a project-scoped marker
   with `zensu-log.sh --pending-review --files "<changed>"`, and a later interactive `Stop` in
   that project adopts it. Adoption turns the marker into a claim (see below); the review
