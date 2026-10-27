@@ -1,5 +1,5 @@
 #!/bin/bash
-# LIVE full /zensu:tdd cycle E2E — drives real `claude --print` through an entire
+# LIVE full /zensu:build cycle E2E — drives real `claude --print` through an entire
 # feature implementation under the active TDD hooks, then asserts the cycle really
 # happened via deterministic post-run state (not just stdout text):
 #   - chain-state chainDone=true        (the Stop-hook drove the chain to completion)
@@ -47,9 +47,9 @@ check() {
   else FAIL=$((FAIL+1)); log "  FAIL  $label"; fi
 }
 
-PROMPT='/zensu:tdd Implement add(a, b) in src/math.js as a CommonJS module (module.exports = { add }) returning a + b. Write the test FIRST in test/math.test.js using node:test and node:assert, run it with "node --test", and follow strict RED -> GREEN. Keep the scope to this one function.'
+PROMPT='/zensu:build Implement add(a, b) in src/math.js as a CommonJS module (module.exports = { add }) returning a + b. Write the test FIRST in test/math.test.js using node:test and node:assert, run it with "node --test", and follow strict RED -> GREEN. Keep the scope to this one function.'
 
-log "=== Live full /zensu:tdd cycle E2E: $TIMESTAMP ($MODE) ==="
+log "=== Live full /zensu:build cycle E2E: $TIMESTAMP ($MODE) ==="
 log "Plugin dir: $PLUGIN_DIR"
 log "Fixture:    $FIXTURE"
 
@@ -115,7 +115,7 @@ else
 fi
 
 # 7. the plugin ran the full suite itself: the run log carries the runner's own line.
-RLOG="$(ls -t "$FIXTURE"/.zensu/logs/*_tdd-*.log 2>/dev/null | head -1)"
+RLOG="$(ls -t "$FIXTURE"/.zensu/logs/*_build-*.log 2>/dev/null | head -1)"
 ER_LINE="$( [ -n "$RLOG" ] && grep -F 'EVIDENCE RUN — scope=full exit=0 ' "$RLOG" | tail -1 )"
 if [ -n "$ER_LINE" ]; then
   check "7 the run log carries a green full-suite line written by the evidence runner" PASS

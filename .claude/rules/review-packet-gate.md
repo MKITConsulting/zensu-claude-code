@@ -45,7 +45,7 @@ large change set is never refused as long summaries. A successful `create` remov
 file when it lies in a `.zensu/reviews/` directory at or below the root (`removeConsumedInput`,
 best effort, never a symlink or a hard-linked file), and `finding-verify-v1.js --input` removes the
 findings file it graded the same way: both inputs carry model-written text, `.zensu/` is often
-committed, and the ignore recipe in `docs/tdd-manager-workflow.md` names `.zensu/reviews/`.
+committed, and the ignore recipe in `docs/build-workflow.md` names `.zensu/reviews/`.
 
 **Three receipt modes, chosen by `create` from the workflow document.** `receipt`: the step 5b
 receipt is checked through `--check-receipt --allow-unclean`, and its digest is bound into the
@@ -171,7 +171,7 @@ unscoped name to a role, because the one-definition scan in
 types, since a type it omits never reaches the gate; the three fix-round arms of `hooks/post-review-tdd-delegate.sh`, whose
 `I17` needles in `tests/structure/test-incremental-review-rounds.sh` must stay at three each and
 out of the convergence clause lines (`R16` in `tests/structure/test-review-convergence.sh`); step 10.2c, step 3, step 4b,
-step 5 and the fix-round paragraph of `skills/tdd/references/review-chain.md`; the `review_scope`
+step 5 and the fix-round paragraph of `skills/build/references/review-chain.md`; the `review_scope`
 paragraph of `agents/review-aspect.md` and the `merged_panel_findings` sentence of
 `agents/review-judge.md`; `--check-receipt --allow-unclean` in `hooks/lib/zensu-edit-landing.sh`
 and `requireClean` in `hooks/lib/edit-landing-receipt-v1.js`; the audit-mode `BARE_WIRED` count
@@ -187,7 +187,7 @@ in `hooks/lib/zensu-log.sh` runs at `--tdd-begin`, after both `--review-rearm` a
 `_zensu_terminal_edit_landing_gate`, which reads `deferredReviewClaim` through
 `tdd_deferred_review_generation`; `config.example.json`; the `reviewPacketGate` and
 `incrementalReviewRounds` rows of `docs/configuration.md`; the auto-fix paragraph, the ignore
-recipe and the publication-safety paragraph of `docs/tdd-manager-workflow.md`; §Review Packet Gate
+recipe and the publication-safety paragraph of `docs/build-workflow.md`; §Review Packet Gate
 of `docs/gates.md`; and `docs/review-chain.md`. The background path adds `launchedAgent`,
 `recordHandback`, `LAUNCHED`, `EVENTS` and the `consume` role in `hooks/lib/review-gate-v1.js`,
 which takes `AGENT_ID_RE` and `handbackReports` from `hooks/lib/background-review-v1.js`, so the

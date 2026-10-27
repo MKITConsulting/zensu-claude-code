@@ -119,7 +119,7 @@ new_project() {
 }
 
 bind() {
-  local sid="$1" project="$2" stem="${3:-2026-10-20-0000_tdd-$1}"
+  local sid="$1" project="$2" stem="${3:-2026-10-20-0000_build-$1}"
   export CLAUDE_PROJECT_DIR="$project"
   cd "$project" || return 1
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
@@ -717,7 +717,7 @@ else
   AUDIT_OUT | tail -n 5
 fi
 
-BOUND_STEM="2026-10-20-0001_tdd-terminal-bound"
+BOUND_STEM="2026-10-20-0001_build-terminal-bound"
 APPROVED_SHA="$(printf 'a%.0s' $(seq 1 64))"
 new_project "$WORK/p-bound"
 if bind "tel-bound" "$WORK/p-bound" "$BOUND_STEM" \

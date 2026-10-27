@@ -1,7 +1,7 @@
 export const meta = {
   name: 'zensu-review-v1',
   description: 'Zensu review of one change set: one finder per lens, cross-lens dedup, one refuter per CRITICAL or IMPORTANT finding, every agent outcome reported',
-  whenToUse: 'The /zensu:tdd review step when a Workflow reviews the change, so that Zensu can import the result',
+  whenToUse: 'The /zensu:build review step when a Workflow reviews the change, so that Zensu can import the result',
   phases: [
     { title: 'Find', detail: 'one read-only finder per lens' },
     { title: 'Refute', detail: 'one refuter per CRITICAL or IMPORTANT finding, CRITICAL first' },

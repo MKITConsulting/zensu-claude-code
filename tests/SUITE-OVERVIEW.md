@@ -141,7 +141,7 @@ retained), the mode precedence at the freeze point (`tdd-mode-toggle` — sessio
 choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
 unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
-anchors on — and the 5-agent review fan-out wiring in `skills/tdd/references/review-chain.md`.
+anchors on — and the 5-agent review fan-out wiring in `skills/build/references/review-chain.md`.
 
 ### Review chain & findings (31)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
@@ -519,7 +519,7 @@ last capture without re-spending).
 | `tests/e2e` | `code-reviewer` anti-loop guardrails | 5 pattern files: `clean-pr`, `build-fails`, `docs-only`, `false-test-claim`, `stale-branch` |
 | `tests/e2e-plm` | `zensu-plm` agent workflow + tool sequencing | 7 prompt/pattern pairs: `bootstrap`, `ghost-scan`, `implement`, `security-review`, `status-transition`, `pulse-session`, `feature-id-guard` |
 | `tests/e2e-skills` | skills + reviewer agents | 6 pattern files: `zensu-help`, `plan-review`, `self-review`, `converge`, `review-aspect`, `review-judge` (last two also as `.agent` prompts) |
-| `tests/e2e-tdd` | **heaviest** — full `/zensu:tdd` cycle | asserts post-run *state*, not stdout: `chainDone=true`, FSM history has `RED_FAIL` + `GREEN_PASS`/`IMPL`, real `node --test` passes in the fixture, the run log carries the evidence runner's green full-suite line. Default timeout 1200 s |
+| `tests/e2e-tdd` | **heaviest** — full `/zensu:build` cycle | asserts post-run *state*, not stdout: `chainDone=true`, FSM history has `RED_FAIL` + `GREEN_PASS`/`IMPL`, real `node --test` passes in the fixture, the run log carries the evidence runner's green full-suite line. Default timeout 1200 s |
 | `tests/e2e-context-nudge` | `user-prompt-context-nudge.sh` against a **real** session transcript | read → occupancy → threshold → `/compact` proposal; fail-open contract |
 | `tests/e2e-intent-router` | `user-prompt-intent-router.sh` on a planning fixture | timeout 180 s |
 | `tests/e2e-source-write-gate` | PreToolUse(Bash) source-write gate, 3 layers | `--self-check` structural / `--offline` real PreToolUse payloads against a throwaway git project / full live block check |
@@ -600,7 +600,7 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
 - The promptfoo/expect harnesses under `evals/tdd-manager/`, `evals/tdd-manager-pretool/`,
   and `evals/tdd-review-chain/` still target the pre-0.4.0 `zensu:tdd-manager` subagent
   that was removed when TDD moved to the main thread. Rewriting them to the main-thread
-  `/zensu:tdd` model is pending (also noted in `tests/README.md`).
+  `/zensu:build` model is pending (also noted in `tests/README.md`).
 
 ## 10. Maintaining this document
 

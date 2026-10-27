@@ -18,7 +18,7 @@ set -u
 #
 # G8-G11 and G15 pin six load-bearing runtime claims the skill's "Inside the Zensu
 # plugin" section makes. Two review rounds found FALSE claims there — that an
-# active TDD chain gates a spawned builder's edits, and that a code-reviewer
+# active build chain gates a spawned builder's edits, and that a code-reviewer
 # spawn consumes a review ticket — and prose that is wrong about a gate is
 # worse than prose that is silent, because the model acts on it. Each check
 # asserts the skill's claim against the hook that decides it, so a change to

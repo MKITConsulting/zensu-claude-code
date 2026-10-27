@@ -186,7 +186,7 @@ C8_STATE_DIR="$(mktemp -d -t hookmirror-c8-XXXX)"
 C8_LOG="$(mktemp -t hookmirror-c8-log-XXXX)"
 : > "$C8_LOG"
 seed_active "$C8_STATE_DIR" "hookmirror-test"
-PAYLOAD_ZENSU='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/plans/2026-01-01_tdd-x.md"},"session_id":"hookmirror-test"}'
+PAYLOAD_ZENSU='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/plans/2026-01-01_build-x.md"},"session_id":"hookmirror-test"}'
 OUT_C8=$(printf '%s' "$PAYLOAD_ZENSU" | \
   STATE_DIR="$C8_STATE_DIR" ZENSU_HOOK_LOG="$C8_LOG" bash "$HOOK" 2>&1)
 RC_C8=$?

@@ -39,7 +39,7 @@
 #      `done`, `else`, `then`, `do`, `{`, `}`, `)`, `;;`, a markdown table rule).
 #
 # Property 2 is what catches the two defects this test was written against:
-# `skills/tdd/SKILL.md:193` was a blank line and
+# `skills/build/SKILL.md:193` was a blank line and
 # `hooks/pre-edit-tdd-reminder.sh:161` was a bare `fi`. Neither is a wrong
 # FILE — a path-existence check alone passes both — and both were cited as
 # evidence for a claim the reader cannot then verify.
@@ -53,7 +53,7 @@
 # §11 flags as needing re-verification. A continuation token is therefore
 # anchored to the most recent fully-qualified path seen at or before its line.
 # A THIRD spelling joins further lines of the same file with a comma
-# (`skills/tdd/SKILL.md:181, :184`); its tail elements carry no backtick before
+# (`skills/build/SKILL.md:181, :184`); its tail elements carry no backtick before
 # the colon and are anchored the same way. C3 counts that population with a
 # scanner independent of the extractor, so a regex that stops seeing the tail
 # cannot agree with its own expectation at zero.

@@ -1,14 +1,14 @@
 #!/bin/bash
 set -u
 
-# Pins the narrative-log path convention: the /zensu:tdd narrative log MUST be
+# Pins the narrative-log path convention: the /zensu:build narrative log MUST be
 # anchored to the bound project root (`zensu-log.sh --project-root`) so appends are cwd-independent.
 # Guards against regression of the relative-path bug where an append issued from a
-# subdirectory failed with: no such file or directory: .zensu/logs/..._tdd-....log
+# subdirectory failed with: no such file or directory: .zensu/logs/..._build-....log
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+SKILL="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 
 PASS=0; FAIL=0
 check() {
@@ -18,10 +18,10 @@ check() {
 }
 
 if [ ! -f "$SKILL" ]; then
-  check "L0 skills/tdd/SKILL.md exists" FAIL
+  check "L0 skills/build/SKILL.md exists" FAIL
   echo "----"; echo "test-tdd-log-path-anchor: $PASS PASS / $FAIL FAIL"; exit 1
 fi
-check "L0 skills/tdd/SKILL.md exists" PASS
+check "L0 skills/build/SKILL.md exists" PASS
 
 # L1: the Phase 2 create mkdir is anchored to the bound project root
 if grep -Fq 'mkdir -p "{project_root}/.zensu/logs"' "$SKILL"; then
@@ -31,7 +31,7 @@ else
 fi
 
 # L2: {log_file} is defined as the anchored absolute path
-if grep -Fq '`{log_file}` denotes `"{project_root}/.zensu/logs/{SESSION_TS}_tdd-{slug}.log"`' "$SKILL"; then
+if grep -Fq '`{log_file}` denotes `"{project_root}/.zensu/logs/{SESSION_TS}_build-{slug}.log"`' "$SKILL"; then
   check "L2 {log_file} defined as anchored absolute path" PASS
 else
   check "L2 {log_file} defined as anchored absolute path" FAIL
@@ -45,7 +45,7 @@ else
   check "L3 no bare-relative .zensu/logs redirect remains" PASS
 fi
 
-if grep -Fq '`{plan_file}` its sibling `"{project_root}/.zensu/plans/{SESSION_TS}_tdd-{slug}.md"`' "$SKILL"; then
+if grep -Fq '`{plan_file}` its sibling `"{project_root}/.zensu/plans/{SESSION_TS}_build-{slug}.md"`' "$SKILL"; then
   check "L4 {plan_file} defined as the anchored absolute sibling" PASS
 else
   check "L4 {plan_file} defined as the anchored absolute sibling" FAIL
@@ -92,7 +92,7 @@ else
 fi
 
 CONVERGE_PHASE0="$(awk '/^## Phase 0: Locate the plan$/{f=1;next} f&&/^## /{exit} f' "$PLUGIN_DIR/skills/converge/SKILL.md")"
-if printf '%s' "$CONVERGE_PHASE0" | grep -Fq '`"<project root>"/.zensu/plans/*_tdd-*.md`' \
+if printf '%s' "$CONVERGE_PHASE0" | grep -Fq '`"<project root>"/.zensu/plans/*_build-*.md`' \
   && printf '%s' "$CONVERGE_PHASE0" | grep -Fq '`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root`' \
   && printf '%s' "$CONVERGE_PHASE0" | grep -Fq 'ask for the plan path rather than'; then
   check "L10 /zensu:converge discovers plans under the --project-root path and asks rather than guessing" PASS
@@ -103,9 +103,9 @@ fi
 if grep -Fq 'as `cd "{project_root}" && <command>`' "$SKILL" \
   && ! grep -Fq 'cd -- "{project_root}"' "$SKILL" \
   && grep -Fq '(the Phase 4 test runs, the build, `{coverage_cmd}` and the step 5 `stat`)' "$SKILL"; then
-  check "L11 /zensu:tdd runs every project command it prescribes inside {project_root}" PASS
+  check "L11 /zensu:build runs every project command it prescribes inside {project_root}" PASS
 else
-  check "L11 /zensu:tdd runs every project command it prescribes inside {project_root}" FAIL
+  check "L11 /zensu:build runs every project command it prescribes inside {project_root}" FAIL
 fi
 
 VERIFY="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
@@ -119,13 +119,13 @@ else
   check "L12 /zensu:verify-feature --chain resolves its git root from --project-root and runs its commands there" FAIL
 fi
 
-if grep -Fq '`"{project_root}"/.zensu/plans/*_tdd-*.md`' "$SKILL" \
-  && ! grep -Fq '`{project_root}/.zensu/plans/*_tdd-*.md`' "$SKILL" \
-  && grep -Fq '`"<project root>"/.zensu/plans/*_tdd-*.md`' "$PLUGIN_DIR/skills/converge/SKILL.md" \
-  && ! grep -Fq '`<project root>/.zensu/plans/*_tdd-*.md`' "$PLUGIN_DIR/skills/converge/SKILL.md"; then
-  check "L13 the plan globs of /zensu:tdd and /zensu:converge keep the pasted root inside double quotes" PASS
+if grep -Fq '`"{project_root}"/.zensu/plans/*_build-*.md`' "$SKILL" \
+  && ! grep -Fq '`{project_root}/.zensu/plans/*_build-*.md`' "$SKILL" \
+  && grep -Fq '`"<project root>"/.zensu/plans/*_build-*.md`' "$PLUGIN_DIR/skills/converge/SKILL.md" \
+  && ! grep -Fq '`<project root>/.zensu/plans/*_build-*.md`' "$PLUGIN_DIR/skills/converge/SKILL.md"; then
+  check "L13 the plan globs of /zensu:build and /zensu:converge keep the pasted root inside double quotes" PASS
 else
-  check "L13 the plan globs of /zensu:tdd and /zensu:converge keep the pasted root inside double quotes" FAIL
+  check "L13 the plan globs of /zensu:build and /zensu:converge keep the pasted root inside double quotes" FAIL
 fi
 
 AMBIENT="$(grep -lF '${CLAUDE_PROJECT_DIR:-.}' "$PLUGIN_DIR"/skills/*/SKILL.md "$PLUGIN_DIR"/skills/*/references/*.md 2>/dev/null)"

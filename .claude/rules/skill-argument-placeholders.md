@@ -3,7 +3,7 @@ paths:
   - "skills/*/SKILL.md"
   - "skills/*/references/**"
   - "skills/*/rules/**"
-  - "skills/tdd/references/review-chain.md"
+  - "skills/build/references/review-chain.md"
   - "skills/pr-team-review/references/debate.md"
   - "tests/structure/test-skill-workflow-markers.sh"
 ---
@@ -37,7 +37,7 @@ the installed binary and run in Node, settles the edges the documentation leaves
 
 **What it cost.** Rendered through that function: `/zensu:self-review` invoked with
 `SELF-REVIEW-TICKET: rt_…` put the ticket where the reviewConvergence probe expected the plugin
-root, the probe printed `off`, and the ticket line was not appended. `/zensu:tdd` with a spec of two
+root, the probe printed `off`, and the ticket line was not appended. `/zensu:build` with a spec of two
 or more words put the spec's second word into the judge and finding-verification probes and dropped
 the spec's `ARGUMENTS:` line. `plan-review` and `pr-team-review` broke the same way from the second
 argument on, and `verify-feature` replaced the `"$12"` example of its quoting rule from the
@@ -69,7 +69,7 @@ path `zensu-log.sh --project-root` prints, because the hooks read the same keys 
 `post-review-tdd-delegate.sh` exports it from `zensu_resolve_project_dir` before it reads
 `reviewPanel`, `findingVerification` and `criticalReproduction`, and the review packet gate's
 `reviewPacketGate` and `reviewJudge`, and the `zensu-log.sh` bind exports it before
-`--external-review` reads `reviewJudge`. `/zensu:tdd` passes `{project_root}` from Phase 0.
+`--external-review` reads `reviewJudge`. `/zensu:build` passes `{project_root}` from Phase 0.
 `/zensu:plan-review` and `/zensu:pr-team-review` resolve it inline through `$(… zensu-log.sh
 --project-root)`, never from their `$REPO`: plan-review's is the working directory, which after
 `/zensu:adopt-session --reanchor` is not the bound root, and pr-team-review's is the reviewed
@@ -78,7 +78,7 @@ Finding Verification Gate off for a review published under the user's name. `/ze
 passes the `PROJECT_ROOT` its Phase 1 reads from `zensu-log.sh --project-root`.
 
 **Coupled sites.** The probes, and the checks that pin each: `skills/self-review/SKILL.md` Phase 3
-(`R25f` in `tests/structure/test-review-convergence.sh`); `skills/tdd/references/review-chain.md`
+(`R25f` in `tests/structure/test-review-convergence.sh`); `skills/build/references/review-chain.md`
 step 3 (`LC3k`, same suite, for the panel probe; `I11` in
 `tests/structure/test-incremental-review-rounds.sh` for the `hooks.aspectActivation` probe, and
 `I11c` and `I11d` run it against a project overlay), step 4b (`P3h` in
@@ -89,7 +89,7 @@ step 3 (`LC3k`, same suite, for the panel probe; `I11` in
 assignment fails it. The second run in step 4b and stage 3 of step 4c resolve their flags "the
 same way" as the probe before them, and `P3j` and `LC2k` pin that wording. The operator accounts
 are item 2 of the resolution order in `docs/configuration.md` (`P5f`) and the `{project_root}`
-paragraph of `docs/tdd-manager-workflow.md` (unpinned). `ZENSU_ROOT` is read by nothing else in
+paragraph of `docs/build-workflow.md` (unpinned). `ZENSU_ROOT` is read by nothing else in
 the plugin; pick another name if that ever changes, because the probe hands it to every child the
 sourced library starts.
 

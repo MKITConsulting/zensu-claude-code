@@ -68,7 +68,7 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 
 | Hook | Typed, slash with arguments | Task notification, subagent hand-back, `!` input, bare slash | CI-monitor event |
 |---|---|---|---|
-| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `tdd` or `direct` | silent | route field + one standing-authorization sentence, at most about 400 characters |
+| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `build` or `direct` | silent | route field + one standing-authorization sentence, at most about 400 characters |
 | `user-prompt-intent-router.sh` | keyword screen; full notice once per context generation, then a short line | silent | silent |
 | `user-prompt-zen-mode.sh` | directive once per context generation and anchor variant, then a short body | same | same |
 | `user-prompt-best-solution-first.sh` | one-line reminder | one-line reminder | one-line reminder |
@@ -97,7 +97,7 @@ typed request, a task notification whose path contains `-zensu-zensu-claude-code
 hand-back, a system-reminder plus `<bash-input>` prompt and a CI-monitor event, each kind in a fresh session and
 twice: the first prompt of the session and a repeat, with a ceiling per hook and per sum for each.
 `U9` resets the ledger with a `compact` `SessionStart` and requires the first-prompt figures again,
-and `U10` requires the decided line for a configured `tdd` or `direct` route. The reminder renders the helper command with two absolute paths, so the
+and `U10` requires the decided line for a configured `build` or `direct` route. The reminder renders the helper command with two absolute paths, so the
 suite replaces that command with a fixed placeholder before it measures; without that, the same
 tree measured 5,699 and 5,775 characters at two install depths.
 

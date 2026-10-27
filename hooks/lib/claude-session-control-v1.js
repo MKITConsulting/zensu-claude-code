@@ -161,7 +161,7 @@ const BASELINE_HEAL_NOTICE = 'Zensu: this session\'s workflow document was missi
   + 'rebuilt automatically at SessionStart. Rebuilding is a loss, not a restore: the '
   + 'rebuilt baseline reads "never active", so a review chain that was live when the '
   + 'document vanished is gone and the Stop guard will release this session without '
-  + 'asking for a reviewer. Tell the user this in your next reply, and offer /zensu:tdd '
+  + 'asking for a reviewer. Tell the user this in your next reply, and offer /zensu:build '
   + 'to re-arm if that work still needs a review. /zensu:doctor reports the same finding.';
 
 // The PUSH half of the adoption disclosure, on both channels the host offers a

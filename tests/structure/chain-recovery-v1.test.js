@@ -231,7 +231,7 @@ test('codeReviewDone with an unbindable self-review ticket gets its own shape an
 
   const unbindable = chain.classifyChain(doc({ codeReviewDone: true, reviewRound: 2 }));
   assert.equal(unbindable.shape, 'self-review-unbindable');
-  assert.match(unbindable.nextCommand, /\/zensu:tdd/);
+  assert.match(unbindable.nextCommand, /\/zensu:build/);
   assert.match(unbindable.nextCommand, /can repair that/);
   assert.notEqual(unbindable.nextCommand, chain.NEXT_COMMAND['awaiting-self-review']);
 });

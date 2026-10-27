@@ -128,7 +128,7 @@ The single-pass walk in Phase 2 is only a **seed**. A lone heuristic pass misses
 features that span modules, live behind entry points, or are only legible from
 tests, data models, or docs. Augment it — never replace it — with a parallel
 fan-out of read-only analysis lenses, then consolidate in this main thread. This
-is the house pattern already used by `/zensu:plan-review` and `/zensu:tdd` Phase 6.
+is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
 
 1. **Spawn the lenses in ONE parallel batch.** Use the `Agent` tool with
    `subagent_type: Explore`. Each agent gets: the repo path, the Phase 2 seed

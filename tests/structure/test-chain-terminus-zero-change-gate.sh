@@ -112,7 +112,7 @@ if grep -qF "reports 1 changed file(s)" "$ERR2"; then
 else
   check "G2a refusal changed-file count (err='$(cat "$ERR2" 2>/dev/null)')" FAIL
 fi
-if grep -qF -- "--claimed-review-ticket" "$ERR2" && grep -qF "/zensu:tdd" "$ERR2"; then
+if grep -qF -- "--claimed-review-ticket" "$ERR2" && grep -qF "/zensu:build" "$ERR2"; then
   check "G2b refusal names both runnable continuations" PASS
 else
   check "G2b refusal continuations (err='$(cat "$ERR2" 2>/dev/null)')" FAIL

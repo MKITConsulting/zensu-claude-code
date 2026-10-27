@@ -64,7 +64,7 @@ ESSENTIALS=(
   "P3c offers via AskUserQuestion|AskUserQuestion"
   "P3d always offers Exit|ALWAYS including **Exit**"
   "P3e delegates to /zensu:implement|/zensu:implement"
-  "P3f delegates to /zensu:tdd|(\`/zensu:implement\` / \`/zensu:tdd\`)"
+  "P3f delegates to /zensu:build|(\`/zensu:implement\` / \`/zensu:build\`)"
   "P3g delegates to /zensu:cover|/zensu:cover"
   "P3h delegates to /zensu:pr-team-review|Deep review via \`/zensu:pr-team-review\`"
   "P3i delegates to /zensu:pr-fix-findings|Fix findings via \`/zensu:pr-fix-findings\`"

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // aspect-activation-v1.js — deterministic built-in-aspect activation for the
-// /zensu:tdd review fan-out.
+// /zensu:build review fan-out.
 //
 // The panel always spawned all five perspectives regardless of what the change
 // set contained, so a documentation-only diff still paid a `security` and an

@@ -1,16 +1,16 @@
 #!/bin/bash
 # zensu-delivery-route.sh — session-scoped delivery-route switch for the two
-# ask-hooks (plan-approved-delegate.sh, user-prompt-tdd-reminder.sh). `--tdd`,
+# ask-hooks (plan-approved-delegate.sh, user-prompt-tdd-reminder.sh). `--build`,
 # `--direct` and `--auto` WRITE the session marker in the project's ephemeral state
-# directory (`{"route":"tdd"}` / `{"route":"direct"}` / `{"route":"auto"}`);
+# directory (`{"route":"build"}` / `{"route":"direct"}` / `{"route":"auto"}`);
 # `--status` reports the resolved route and where it came from.
 #
 # The marker is read by both ask-hooks on every approval and every code request,
 # through `zensu_delivery_route_resolve` in zensu-config.sh, which owns the ladder:
 #   1. an explicit preference in the user's OWN text (judged by the model from the
 #      directive — it never reaches this file)   2. this session marker
-#   3. hooks.defaultDeliveryRoute (`tdd` | `direct` | `ask`)   4. ask
-# The vocabulary is `tdd` | `direct` only. /zensu:autopilot and /zensu:pilot push
+#   3. hooks.defaultDeliveryRoute (`build` | `direct` | `ask`)   4. ask
+# The vocabulary is `build` | `direct` only. /zensu:autopilot and /zensu:pilot push
 # branches, open pull requests or mutate tracked feature state, so they stay per-plan
 # choices that neither a marker nor a config key can pre-select, and this helper
 # refuses every other verb.
@@ -54,9 +54,9 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 ROUTE_VERB="${1:-}"
 case "$ROUTE_VERB" in
-  --tdd|--direct|--auto|--status) ;;
+  --build|--direct|--auto|--status) ;;
   *)
-    echo "usage: zensu-delivery-route.sh --tdd | --direct | --auto | --status" >&2
+    echo "usage: zensu-delivery-route.sh --build | --direct | --auto | --status" >&2
     exit 2
     ;;
 esac
@@ -116,9 +116,9 @@ route_write_marker() {
 }
 
 case "$ROUTE_VERB" in
-  --tdd)
-    route_write_marker tdd
-    echo "delivery-route: tdd"
+  --build)
+    route_write_marker build
+    echo "delivery-route: build"
     ;;
   --direct)
     route_write_marker direct

@@ -229,7 +229,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
   exit 0
 fi
 
-# Bypass ledger: escapes stay free, but while a TDD session is active the
+# Bypass ledger: escapes stay free, but while a build session is active the
 # opt-out is recorded to chain state (fail-open, gate name only). Inline
 # escapes are reported by the embedded parser itself (__bypass__ marker lines
 # in INVOCATIONS) — the one code path that decides the bypass — so quoted

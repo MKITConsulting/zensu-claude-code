@@ -15,7 +15,7 @@ const evr = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-r
 
 const SESSION = `scv1_${'a'.repeat(64)}`;
 const OTHER_SESSION = `scv1_${'b'.repeat(64)}`;
-const STEM = '2026-09-29-0100_tdd-sample';
+const STEM = '2026-09-29-0100_build-sample';
 const FAKE_TOKEN = `ghp_${'Q7mZ'.repeat(9)}`;
 
 function tempDir(label) {
@@ -42,7 +42,7 @@ function project(options = {}) {
   fs.mkdirSync(path.join(root, '.zensu', 'logs'), { recursive: true });
   fs.mkdirSync(path.join(root, '.zensu', 'plans'), { recursive: true });
   fs.mkdirSync(path.join(root, '.zensu', 'state'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.zensu', 'logs', `${STEM}.log`), 'TDD STARTED\n');
+  fs.writeFileSync(path.join(root, '.zensu', 'logs', `${STEM}.log`), 'BUILD STARTED\n');
   fs.writeFileSync(path.join(root, '.zensu', 'plans', `${STEM}.md`), planText(options.rows || [
     ['AC-001', 'The dashboard lists every project'],
     ['AC-002', 'The export button downloads a CSV'],
@@ -312,7 +312,7 @@ test('the gate passes only when every active criterion passes on the current tre
   let result = gate(fixture);
   assert.equal(result.state, 'incomplete');
   assert.equal(result.passes, false);
-  assert.match(result.lines[0], /^ACCEPTANCE — incomplete \| 0\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; AC-001 missing; AC-002 missing \| plan: \.zensu\/plans\/2026-09-29-0100_tdd-sample\.md \| gate: required \| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_tdd-sample\.log$/);
+  assert.match(result.lines[0], /^ACCEPTANCE — incomplete \| 0\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; AC-001 missing; AC-002 missing \| plan: \.zensu\/plans\/2026-09-29-0100_build-sample\.md \| gate: required \| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_build-sample\.log$/);
   const green = await acceptanceRun(fixture, 'true');
   assert.equal(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'api', evidenceRun: green.id, evidenceText: 'GET /projects returned 200 with 3 rows' })).code, 0);
   assert.equal(attest(fixture, 'AC-002', 'fail').code, 0);
@@ -399,7 +399,7 @@ test('an unreadable newest record is invalid until a fresh verdict supersedes it
   fs.writeFileSync(path.join(records, `${av.newRecordId(Date.now() + 1000)}.json`), '{broken');
   const invalid = gate(fixture);
   assert.equal(invalid.state, 'invalid');
-  assert.match(invalid.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_tdd-sample\.log$/);
+  assert.match(invalid.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_build-sample\.log$/);
   assert.equal(attest(fixture, 'AC-001', 'pass', { now: () => Date.now() + 5000 }).code, 0);
   assert.equal(gate(fixture).state, 'pass');
 });
@@ -494,7 +494,7 @@ test('each refusal names only the remedy that can clear it, and every failing cr
   assert.equal(attest(fixture, 'AC-001', 'fail').code, 0);
   let result = gate(fixture);
   assert.match(result.lines[0], /AC-001 fail; AC-002 missing/);
-  assert.match(result.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_tdd-sample\.log \| fix: a criterion that fails on this tree needs a code change/);
+  assert.match(result.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_build-sample\.log \| fix: a criterion that fails on this tree needs a code change/);
   assert.equal(attest(fixture, 'AC-002').code, 0);
   result = gate(fixture);
   assert.doesNotMatch(result.lines[0], /verify-feature/);

@@ -1,4 +1,4 @@
-# tests/e2e-tdd — live full `/zensu:tdd` cycle E2E
+# tests/e2e-tdd — live full `/zensu:build` cycle E2E
 
 The heaviest suite: drives a **real** `claude --print` run through an entire feature
 implementation while the TDD hooks are active, then proves the cycle actually

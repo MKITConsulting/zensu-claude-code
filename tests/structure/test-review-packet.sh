@@ -12,7 +12,7 @@ TDD_LIB="$ROOT/hooks/lib/zensu-tdd-phase.sh"
 POSTREV="$ROOT/hooks/post-review-tdd-delegate.sh"
 . "$(dirname "$0")/lib-unit-registry.sh"
 source "$ROOT/tests/structure/lib-skill-text.sh"
-TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
+TDD_MD="$(skill_text_file "$ROOT/skills/build")"
 SELF_REVIEW="$ROOT/skills/self-review/SKILL.md"
 
 PASS=0; FAIL=0
@@ -67,7 +67,7 @@ if [ -n "$WORK" ]; then
     source "$ROOT/tests/session-control/initialize-baseline.sh" "$SID" || return 1
     SF="$(tdd_state_file "$SID")" || return 1
     mkdir -p "$PROJECT/.zensu/logs" "$PROJECT/.zensu/reviews"
-    RUN_LOG="$PROJECT/.zensu/logs/2026-10-20-0000_tdd-$SID.log"
+    RUN_LOG="$PROJECT/.zensu/logs/2026-10-20-0000_build-$SID.log"
     bash "$LOG" --tdd-begin >/dev/null 2>&1 || return 1
     bash "$LOG" --tdd-complete >/dev/null 2>&1 || return 1
     printf 'v2\n' > "$PROJECT/tracked.txt"
@@ -585,7 +585,7 @@ merged findings: none"
       (*zensu_review_panel*) [ "$out" = full ] || PROBES_OK=0 ;;
       (*) [ "$out" = off ] || PROBES_OK=0 ;;
     esac
-  done < <(grep -o 'ZENSU_ROOT="{plugin_root}"[^`]*' "$ROOT/skills/tdd/references/review-chain.md")
+  done < <(grep -o 'ZENSU_ROOT="{plugin_root}"[^`]*' "$ROOT/skills/build/references/review-chain.md")
   if [ "$PROBE_COUNT" -eq 4 ] && [ "$PROBES_OK" -eq 1 ]; then
     check "RP20 every review-chain config probe reads the project config" PASS
   else

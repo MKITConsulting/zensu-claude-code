@@ -14,7 +14,7 @@ UNIT="$ROOT/tests/structure/finding-verify-v1.test.js"
 . "$(dirname "$0")/lib-unit-registry.sh"
 
 source "$ROOT/tests/structure/lib-skill-text.sh"
-TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
+TDD_MD="$(skill_text_file "$ROOT/skills/build")"
 PR_MD="$(skill_text_file "$ROOT/skills/pr-team-review")"
 PR_RULES="$ROOT/skills/pr-team-review/rules/workflow.md"
 PLAN_MD="$ROOT/skills/plan-review/SKILL.md"
@@ -23,7 +23,7 @@ ENFORCER="$ROOT/hooks/stop-chain-enforcer.sh"
 REVIEWER="$ROOT/agents/code-reviewer.md"
 CONFIG_EX="$ROOT/config.example.json"
 CONFIG_DOC="$ROOT/docs/configuration.md"
-WORKFLOW_DOC="$ROOT/docs/tdd-manager-workflow.md"
+WORKFLOW_DOC="$ROOT/docs/build-workflow.md"
 INVENTORY="$ROOT/tests/profiles/promptfoo-local-only.v1.json"
 MARKER='[Unverified — do not fix]'
 PASS=0; FAIL=0
@@ -128,11 +128,11 @@ case "$OUT" in
   *) check "P1d unusable input degrades to a total=0 summary (got: $OUT)" FAIL ;;
 esac
 
-# ── P2 /zensu:tdd step 4c ────────────────────────────────────────────
+# ── P2 /zensu:build step 4c ────────────────────────────────────────────
 if grep -qF '4c. **Finding Verification Gate' "$TDD_MD"; then
-  check "P2a /zensu:tdd carries step 4c" PASS
+  check "P2a /zensu:build carries step 4c" PASS
 else
-  check "P2a /zensu:tdd carries step 4c" FAIL
+  check "P2a /zensu:build carries step 4c" FAIL
 fi
 JUDGE_LINE="$(grep -n '4b\. \*\*Judge second pass' "$TDD_MD" | head -1 | cut -d: -f1)"
 VERIFY_LINE="$(grep -n '4c\. \*\*Finding Verification Gate' "$TDD_MD" | head -1 | cut -d: -f1)"

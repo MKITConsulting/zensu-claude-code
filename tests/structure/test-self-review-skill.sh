@@ -188,7 +188,7 @@ else
 fi
 
 # V25 — Phase 5 checkpoints are scoped, so the full suite runs only in the Phase 6 audit
-# and again in the /zensu:tdd convergence branch. This stage's fix round is the LAST edit
+# and again in the /zensu:build convergence branch. This stage's fix round is the LAST edit
 # of the chain, so when it edits, its own re-run is the only thing standing between the
 # user and a closing verdict measured before that edit.
 if grep -qF -- 'Phase 6 **step 1 full suite**' "$SKILL_MD" \

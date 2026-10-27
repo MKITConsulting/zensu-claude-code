@@ -45,8 +45,8 @@
 //                            under the same rules
 //   ZDOC_DELIVERY_ROUTE      this session's resolved delivery route from the wrapper:
 //                            one of the five zensu_delivery_route_field spellings
-//                            (`tdd (session marker)`, `direct (session marker)`,
-//                            `tdd (hooks.defaultDeliveryRoute)`,
+//                            (`build (session marker)`, `direct (session marker)`,
+//                            `build (hooks.defaultDeliveryRoute)`,
 //                            `direct (hooks.defaultDeliveryRoute)`, `ask`), or
 //                            `unknown` (no session key or project root reached the
 //                            probe: the session is unbound, or bound with the pair
@@ -1073,7 +1073,7 @@ var SELF_PERMISSION_BAR = 'no agent may edit a settings file to widen its own pe
 // reviewer-spawn-denial-v1.js declares SPAWN_TOOL_NAMES = ['Agent', 'Task'], but
 // that set governs TRANSCRIPT tool names, not permission-rule spellings. Nothing
 // in this tree verifies `Task(...)` as a permission-RULE spelling, so it stays out
-// of THIS table, whose row asserts that every /zensu:tdd run wedges. It IS admitted
+// of THIS table, whose row asserts that every /zensu:build run wedges. It IS admitted
 // by the low-claim predicate — see `namesReviewerSpawn`, whose 'shaped' arm claims
 // only that the entry cannot be judged. Do not promote it here: what separates the
 // two tables is the strength of the claim, not the spelling.
@@ -1102,7 +1102,7 @@ function matchesAllowRule(rules) {
 }
 // A deny/ask entry that clearly means this spawn but is not one of the two
 // verified spellings. Broadening matchesDenyOrAskRule to swallow it was rejected:
-// the deny row makes a strong claim ("every /zensu:tdd run wedges at the review
+// the deny row makes a strong claim ("every /zensu:build run wedges at the review
 // step") that must not fire for an unrelated agent, and a wildcard spelling is
 // the same unverified host grammar moved onto the loud side. Reporting that the
 // entry could not be JUDGED keeps the fall-through from ending at the allow
@@ -1142,7 +1142,7 @@ function namesReviewerSpawn(rules) {
     // that was a reachable green report, not a hypothetical. It stays on the
     // low-claim side deliberately: this row says only that the entry cannot be
     // judged, which is the fail-safe direction. Never move it into
-    // matchesDenyOrAskRule — that row asserts every /zensu:tdd run wedges.
+    // matchesDenyOrAskRule — that row asserts every /zensu:build run wedges.
     if (r.indexOf('Agent(') === 0) { shaped = true; continue; }
     // The same treatment for the OTHER tool name the host uses for this spawn.
     // reviewer-spawn-denial-v1.js exports SPAWN_TOOL_NAMES = ['Agent', 'Task'], so
@@ -1297,7 +1297,7 @@ var ROW_TEXT = {
   deny: function () {
     return 'permissions: a permissions.deny entry in ~/.claude/settings.json matches the '
       + REVIEWER_AGENT + ' spawn. Deny is evaluated before ask and allow, so the review chain can never '
-      + 'spawn its reviewer and every /zensu:tdd run wedges at the review step. Remove that entry '
+      + 'spawn its reviewer and every /zensu:build run wedges at the review step. Remove that entry '
       // Self-contained on purpose. This used to point at "the refused-spawn row
       // below", but that row renders only when a refusal note exists, so the
       // reference dangled in the ordinary case. Naming the RULE instead is true
@@ -1807,12 +1807,12 @@ function deliveryRouteConfigRow(cfgReads) {
     }
   });
   if (!seen || value === 'ask') return;
-  if (value === 'tdd' || value === 'direct') {
+  if (value === 'build' || value === 'direct') {
     // The default reaches the plan-approval hook only while hooks.autoTdd is on and
     // the per-prompt reminder only while hooks.tddReminder is on — each hook exits on
     // its own flag BEFORE it resolves the route — so the row names the half that is
     // live. Read through the same merged cfgReads, never a second readJson pass.
-    var effect = value === 'tdd' ? 'takes the Zensu workflow' : 'is implemented directly, without the review chain';
+    var effect = value === 'build' ? 'takes the Zensu workflow' : 'is implemented directly, without the review chain';
     var planOff = routeReaders.planOff;
     var promptOff = routeReaders.promptOff;
     var subject = null;
@@ -1827,9 +1827,9 @@ function deliveryRouteConfigRow(cfgReads) {
       + '; a preference stated in the user\'s own message decides only that request, and /zensu:delivery-route changes the route for this session');
     return;
   }
-  var shown = safeConfigValue(value, ' is not tdd');
+  var shown = safeConfigValue(value, ' is not build');
   line(WARN, 'config: hooks.defaultDeliveryRoute=' + (shown.ok ? shown.text : '(' + FOLD_UNAVAILABLE + ')')
-    + ' is not tdd, direct or ask — the hooks read it as ask, so the delivery-route question is asked; use one of those three lowercase words');
+    + ' is not build, direct or ask — the hooks read it as ask, so the delivery-route question is asked; use one of those three lowercase words');
 }
 
 // A value from a session-writable or committed file reaches a model-relayed row. A
@@ -1875,19 +1875,19 @@ function deliveryRouteRow() {
     line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + cause);
   } else if (v === 'unjudged') {
     line(WARN, 'delivery route: could not be read — the shared config library did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. Run /zensu:delivery-route --status from the session to see what the hooks resolve');
-  } else if (planOff && promptOff && (v === 'ask' || /^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v))) {
+  } else if (planOff && promptOff && (v === 'ask' || /^(build|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v))) {
     line(OK, 'delivery route: ' + v + ' — decides nothing this session: ' + ROUTE_BOTH_READERS_OFF);
   } else if (v === 'ask') {
     var where = planOff ? 'on a code request' : (promptOff ? 'after a plan approval' : 'after a plan approval and on a code request');
     line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff
       + '; /zensu:delivery-route fixes it for this session, hooks.defaultDeliveryRoute for the project');
-  } else if (/^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v)) {
-    var dispatch = '; code changes go through /zensu:tdd';
+  } else if (/^(build|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v)) {
+    var dispatch = '; code changes go through /zensu:build';
     if (v.indexOf('direct') === 0) dispatch = '; code changes are implemented directly, without the review chain';
-    else if (planOff) dispatch = '; a code request goes through /zensu:tdd, while an approved plan is implemented directly';
-    else if (promptOff) dispatch = '; an approved plan goes through /zensu:tdd';
+    else if (planOff) dispatch = '; a code request goes through /zensu:build, while an approved plan is implemented directly';
+    else if (promptOff) dispatch = '; an approved plan goes through /zensu:build';
     line(OK, 'delivery route: ' + v + ' — the route question is not asked this session' + halfOff
-      + dispatch + '. Change it with /zensu:delivery-route (--tdd, --direct, --auto)');
+      + dispatch + '. Change it with /zensu:delivery-route (--build, --direct, --auto)');
   } else {
     var shown = safeConfigValue(v, ') — the');
     line(WARN, 'delivery route: state not recognized (' + (shown.ok ? shown.text : FOLD_UNAVAILABLE)
@@ -2602,7 +2602,7 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
       + ' (That is compatible with a spawn that WAS attempted: the caveat below reports one when'
       + ' a note records it.) Counted in turns,'
       + ' never in elapsed time, so a paused session or a powered-off machine never reaches this row.'
-      + ' The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit until its'
+      + ' The exit is the review chain: run the /zensu:build Phase 6 step 5b edit-landing audit until its'
       + ' receipt records a CLEAN verdict, and give the plan a usable `## Requirements` table, because'
       + ' while the tree is dirty the completion verb refuses a plan without that table and refuses a'
       + ' receipt that is merely present — every claimed edit has to have landed.'
@@ -2706,8 +2706,8 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
     line(WARN, 'chain: ' + foreignOpen.length + ' open chain(s) not owned by this session'
       + (ttl > 0 ? ', touched within ' + ttl + 'h' : '')
       + ' — this session cannot advance them, and they cannot be moved to this key.'
-      + ' Usually a session that ended without /zensu:tdd --chain-done, in which case the'
-      + ' state is stale and re-arming here with /zensu:tdd is the exit. It can also be a'
+      + ' Usually a session that ended without /zensu:build --chain-done, in which case the'
+      + ' state is stale and re-arming here with /zensu:build is the exit. It can also be a'
       + ' live sibling session, where nothing is wrong, or a FORK — the host minting a new'
       + ' session id mid-conversation, which leaves the work armed under the old key'
       + ' unreachable. Check whether the owning session is still running before acting: '
@@ -2937,7 +2937,7 @@ function truncatedList(rows) {
 //
 // Until this row existed /zensu:doctor carried NO Autopilot row of any kind, and
 // a nonterminal run holding the working tree was visible only in the refusal that
-// happened to name it: the --autopilot-begin refusal, the standalone /zensu:tdd
+// happened to name it: the --autopilot-begin refusal, the standalone /zensu:build
 // begin refusal, the deferred-review Stop refusal, and the stderr line the fence
 // prints when it stands down. Every one of those requires you to have TRIED the
 // thing the run blocks. Nothing answered "is a run holding this tree, and where
@@ -3522,11 +3522,11 @@ function ownerLivenessClause(dir, run, window, releaseWindow, verdict, adoptBloc
   // "also refuses" and the absent arm has no beacon to reach, so those two carry their
   // own halves on purpose and are not copies that drifted.
   var chainHalf = 'adoption is not an exit here either, because this run has a live inner'
-    + ' TDD chain and adoption refuses that with exit 3 before it reads any beacon';
+    + ' build chain and adoption refuses that with exit 3 before it reads any beacon';
   // The connective belongs to the LEAD, not to the reason: "either" presupposes a
   // preceding negative, which the absent arm's lead is not — it says the release
   // proceeds. The absent arm therefore supplies its own opener over the same reason.
-  var chainReason = 'because this run has a live inner TDD chain and adoption refuses'
+  var chainReason = 'because this run has a live inner build chain and adoption refuses'
     + ' that with exit 3 before it reads any beacon';
   // The live-inner-chain fact is read out of the run document, which is an ordinary
   // file in this session-writable directory — the same bound the age and the pointer
@@ -4008,7 +4008,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
         + ' missing check, not a verdict';
       if (adoptCause === 'chain') {
         adoptWhy = 'adoption refuses it with exit 3 before it reads any beacon, because this'
-          + ' run has a live inner TDD chain — that stage is ' + AUTOPILOT_FORGEABLE_SOURCE
+          + ' run has a live inner build chain — that stage is ' + AUTOPILOT_FORGEABLE_SOURCE
           + ' — so finishing or'
           + ' cancelling that chain in its own session is what clears it, while BLOCKING it'
           + ' does not, because the verb tests the pending stage, and repairing the beacon'
@@ -4081,8 +4081,8 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     var designates = own ? autopilotPointerDesignates(dir, run.owner, run.runId) : null;
     // BLOCKED is NOT terminal — the same line says so — and the owner's
     // `read-workspace` filters only on TERMINAL, so a BLOCKED run still refuses a
-    // second begin and a standalone /zensu:tdd. Rendering it green would print
-    // "all checks green" beside a tree that refuses /zensu:tdd.
+    // second begin and a standalone /zensu:build. Rendering it green would print
+    // "all checks green" beside a tree that refuses /zensu:build.
     // `ownerWouldAccept` is a REQUIRED conjunct of the green arm and of nothing
     // else. Without it `ordinary` rested on `autopilotRun`'s six shape gates alone,
     // so a record the owner refuses — which fails `readRunInventory` for the WHOLE
@@ -4185,7 +4185,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // an aged run is bounded by a window while this one is bounded by nothing. Saying only "unknown" beside
       // the aged arm's Nh refusal implies the opposite ordering, on the row that offers
       // the cancel. It is routed through the SHARED clause rather than inlined, so the
-      // qualifiers the other arms already carry — a disabled window, a live inner TDD
+      // qualifiers the other arms already carry — a disabled window, a live inner build
       // chain — reach this one too instead of being one arm behind forever.
       silence = 'The owning session has left no workflow document, so its liveness is unknown'
         + livenessText;
@@ -4241,7 +4241,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // rendering the opened name is what makes that true rather than argued.
       text: 'autopilot: nonterminal durable run ' + run.runId + ' at stage ' + run.stage
         + ', ' + ownership + ' — it ' + held + ', so no second Autopilot run and no standalone'
-        + ' /zensu:tdd chain may arm there.' + occupancy + ' Tracked in ' + foldPath(path.join(dir, c.name), ', with the active pointer')
+        + ' /zensu:build chain may arm there.' + occupancy + ' Tracked in ' + foldPath(path.join(dir, c.name), ', with the active pointer')
         + ', with the active pointer named for sha256 of the OWNING SESSION id, never of the'
         + ' project path. ' + silence + '. Only DONE and CANCELLED are terminal — BLOCKED is'
         + ' not — and ' + remedy + '.'
@@ -5235,7 +5235,7 @@ function baselineRebuiltRow(core, projectRoot, key, sharedRead) {
     + ', most recently at ' + when + why + '. Rebuilding is a loss, not a restore: the '
     + 'baseline reads "never active", so a review chain that was live when the document '
     + 'vanished is gone and the Stop guard releases this session without asking for a '
-    + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.' + rendered.note);
+    + 'reviewer. Re-arm with /zensu:build if that work still needs one.' + rendered.note);
 }
 
 // The PROJECT_ROOT_RESTORED provenance row, the sibling of baselineRebuiltRow above
@@ -5647,7 +5647,7 @@ function claimTopologyRow(projectRoot, ownKey) {
       : '')
     + '. The anchor is ' + (claimRootRenderable(projectRoot) ? claimRootRender(projectRoot) : '(unrenderable)')
     + '. One edit-landing audit grades ONE root, so those claims are reported rather than graded and this'
-    + ' session\'s review chain sees no diff for them — /zensu:tdd is single-root. Run the chain in the'
+    + ' session\'s review chain sees no diff for them — /zensu:build is single-root. Run the chain in the'
     + ' repository the claims name, or land the work in the anchor.');
 }
 
