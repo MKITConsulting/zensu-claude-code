@@ -201,7 +201,7 @@ make no `zensu` call at all.
 
 | Skill | What it does | Needs |
 |-------|--------------|-------|
-| `/zensu:tdd` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. Despite its name it runs without RED→GREEN by default; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
+| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys | `gh` or `glab` |
 | `/zensu:implement` | Implement a tracked feature through the Zensu workflow, then link its tests, sources and docs and create a revision | Zensu account |
 | `/zensu:pilot` | The guided route: probes a tracked feature's real state and offers the next step, one confirmed step at a time | Zensu account and a tracked feature; `gh` or `glab` for its pull request |
@@ -315,7 +315,7 @@ Nothing writes an ignore rule for you, except the `.worktree-keep` line below.
 | Path | Written by | Commit it? |
 |------|------------|------------|
 | `.zensu/config.json` | You or `/zensu:setup` | Yes, to give every clone the same settings; it overrides each developer's global file key by key |
-| `.zensu/plans/`, `.zensu/logs/*_tdd-*.log` | The Zensu workflow, one plan and one progress log per chain | Optional. Committed, they are an audit trail; absolute paths in them are redacted when they are written |
+| `.zensu/plans/`, `.zensu/logs/*_build-*.log` | The Zensu workflow, one plan and one progress log per chain | Optional. Committed, they are an audit trail; absolute paths in them are redacted when they are written |
 | `.zensu/state/` | Zensu's hooks, per session | Never. Add `.zensu/state/` to `.gitignore` |
 | `.zensu/verify-feature-runs/` | `/zensu:verify-feature`, one directory per run, removed after a clean teardown | Never |
 | `.zensu/logs/witness-*.log` | Earlier releases only | Never |
@@ -350,7 +350,7 @@ What stays behind:
 ## Zensu account and CLI
 
 The implementation workflow and the review chain need no CLI, no login, and no
-Zensu account: `/zensu:tdd`, the review-aspect panel with its auto-fix loop, and
+Zensu account: `/zensu:build`, the review-aspect panel with its auto-fix loop, and
 the progress log under `.zensu/logs/` run locally, and so does every skill
 marked "—" in the [skill tables](#skills-31). The `zensu` CLI and an
 account add the tracking layer on top — feature status, revisions, artifact
@@ -477,7 +477,7 @@ first 100 ghost-scan candidates and read only the first page of wiki lists.
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
-| [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
+| [Build workflow](docs/build-workflow.md) | The full per-step reference for the implementation workflow |
 | [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the driver for every kind of application and what each needs, consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |

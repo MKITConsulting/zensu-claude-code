@@ -69,7 +69,7 @@ digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdo
 RUN_FILE="$(autopilot_run_file "$RUN" "$PROJECT")"
 
 OUT="$(invoke "$(payload "$PLAN" "$SID_RAW")" "$PROJECT" "$CFG_OFF" "$MAIN_DATA")"
-if printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s),t=j.hookSpecificOutput.additionalContext;process.exit(j.hookSpecificOutput.hookEventName==="PostToolUse"&&t.includes("PLAN_APPROVED")&&t.includes("skill=\u0027zensu:tdd\u0027")&&!t.includes("AskUserQuestion")?0:1)}catch(_){process.exit(1)}})'; then
+if printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s),t=j.hookSpecificOutput.additionalContext;process.exit(j.hookSpecificOutput.hookEventName==="PostToolUse"&&t.includes("PLAN_APPROVED")&&t.includes("skill=\u0027zensu:build\u0027")&&!t.includes("AskUserQuestion")?0:1)}catch(_){process.exit(1)}})'; then
   check "P3 approved Autopilot plan delegates directly without a routine question" PASS
 else check "P3 approved Autopilot plan delegates directly without a routine question" FAIL; fi
 

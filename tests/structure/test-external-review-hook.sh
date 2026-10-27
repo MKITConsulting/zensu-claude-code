@@ -82,7 +82,7 @@ else
 fi
 
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_FILE="$(skill_text_file "$PLUGIN_DIR/skills/tdd")" || SKILL_FILE="$WORK/missing-skill-text"
+SKILL_FILE="$(skill_text_file "$PLUGIN_DIR/skills/build")" || SKILL_FILE="$WORK/missing-skill-text"
 if grep -qF 'and an `EXT-<n>` finding the merge kept with the anchor `-` is never neutralized either, because a missing anchor is not a hallucinated one; nothing can grade it, so retitle it `[Deferred — do not fix]` with its original severity in its text, set it to SUGGESTION so no severity mode routes it, ledger it with the anchor `-`' "$SKILL_FILE" \
   && grep -qF 'keep a finding without a `file:line` anchor in the merged list with the anchor `-`' "$SKILL_FILE"; then
   check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" PASS

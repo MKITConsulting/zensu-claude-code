@@ -162,7 +162,7 @@ fi
 printf '{}\n' > "$ZENSU_CONFIG"
 
 mkdir -p "$PROJ/.zensu/logs"
-RUN_LOG="$PROJ/.zensu/logs/2026-01-01-0000_tdd-evidence.log"
+RUN_LOG="$PROJ/.zensu/logs/2026-01-01-0000_build-evidence.log"
 : > "$RUN_LOG"
 bash "$LOG" --evidence-run --scope lint --cmd 'echo lint-ok' --log "$RUN_LOG" >/dev/null 2>&1; RC=$?
 if [ "$RC" -eq 0 ] && grep -q 'EVIDENCE RUN — scope=lint exit=0 .* | cmd: echo lint-ok$' "$RUN_LOG"; then

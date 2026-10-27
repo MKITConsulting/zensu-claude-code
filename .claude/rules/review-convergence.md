@@ -6,8 +6,8 @@ paths:
   - "agents/review-aspect.md"
   - "agents/review-judge.md"
   - "agents/code-reviewer.md"
-  - "skills/tdd/SKILL.md"
-  - "skills/tdd/references/**"
+  - "skills/build/SKILL.md"
+  - "skills/build/references/**"
   - "skills/self-review/SKILL.md"
   - "skills/reset-review-limit/SKILL.md"
   - "docs/review-severity.md"
@@ -20,7 +20,7 @@ paths:
 
 # Review Convergence (`review-ledger-v1.js` + `hooks.reviewConvergence`)
 
-The `/zensu:tdd` auto-fix loop used to re-review with a full mandate until a round had no
+The `/zensu:build` auto-fix loop used to re-review with a full mandate until a round had no
 routable finding. Measured over 471 real chains: a mean of 3.3 review rounds, 39% needing four
 or more, and in rounds two and later 51% of the rounds were suggestions-only while 5% carried a
 CRITICAL finding. The loop did not converge because nothing bounded what a LATE round may route.
@@ -51,7 +51,7 @@ and in its no-fix case (`PARK_CLAUSE`), and `/zensu:self-review` fixes it. That 
 while `hooks.selfReview` and this key are both on; otherwise `SEVERITY` falls back to `important`.
 
 **A re-review CRITICAL needs a reproduction (`hooks.criticalReproduction`, default on).**
-Stage 3 of the `/zensu:tdd` step 4c gate runs only inside the Finding Verification Gate and only
+Stage 3 of the `/zensu:build` step 4c gate runs only inside the Finding Verification Gate and only
 on a re-review: every CRITICAL finding stage 2 graded `VERIFIED` must fail a test run through the
 evidence runner with `--scope scoped` before it routes, logged as
 `FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE> <record or reason>`.
@@ -62,7 +62,7 @@ fourth annotation was rejected: both delegate arms enumerate exactly three do-no
 annotations, so a new one would route. The delegate reads the flag together with
 `findingVerification`, because stage 3 does not exist with that gate off. Coupled sites:
 `REPRODUCTION_RULE` inside `CONVERGENCE_CLAUSE` and the self-review hand-off sentence in
-`hooks/post-review-tdd-delegate.sh`, step 4c in `skills/tdd/references/review-chain.md`, the must-fix sentence in `skills/self-review/SKILL.md`, the intro of
+`hooks/post-review-tdd-delegate.sh`, step 4c in `skills/build/references/review-chain.md`, the must-fix sentence in `skills/self-review/SKILL.md`, the intro of
 `docs/review-severity.md`, the `criticalReproduction` row of `docs/configuration.md`,
 `config.example.json`, LC2 to LC2j in `tests/structure/test-review-convergence.sh`, and RP0 to
 RP5 in `evals/config-gate/test-review-convergence-directive.sh`.
@@ -125,7 +125,7 @@ ledger line is rewritten without the value, never resent with the `zensu-secret-
 
 **The severity rubric has ONE source.** `docs/review-severity.md` holds the
 `zensu:review-severity` block; `agents/review-aspect.md`, `agents/review-judge.md` and
-`agents/code-reviewer.md` carry it byte-identically, and `/zensu:tdd` step 3 prepends it to
+`agents/code-reviewer.md` carry it byte-identically, and `/zensu:build` step 3 prepends it to
 repo-persona prompts at run time. It has no second carrier, so an unreadable rubric file is
 logged as `PERSONA CARRIER UNAVAILABLE — review-severity: <reason>`. It deliberately has no
 "pre-existing defects are at most SUGGESTION" clause, because the aspect agent also serves
@@ -151,11 +151,11 @@ rendered `## Open` sentence then equals the pre-convergence one) and in
 `skills/self-review/SKILL.md` §Open (legend sentence untouched); the `--message-stdin` arm of
 `zensu-log.sh append`, which every ledger write in the clause and in self-review names, pinned
 by R16e–R16g in `tests/structure/test-artifact-redaction.sh`; the four byte-identical copies of the
-rubric tie-break; `skills/tdd/references/review-chain.md` steps 3, 4, 4b and the fix-round paragraph; the marker in `skills/reset-review-limit/SKILL.md` and `RESET` in
+rubric tie-break; `skills/build/references/review-chain.md` steps 3, 4, 4b and the fix-round paragraph; the marker in `skills/reset-review-limit/SKILL.md` and `RESET` in
 `review-round-scope-v1.js`; the judge's three ledger bullets and the code reviewer's annotation
 paragraph; the config key in `config.example.json`; and the operator accounts in
 `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`,
-`docs/tdd-manager-workflow.md` and the intro of `docs/review-severity.md`.
+`docs/build-workflow.md` and the intro of `docs/review-severity.md`.
 `tests/structure/test-review-convergence.sh` pins each of them and drives the unit file;
 `evals/config-gate/test-review-convergence-directive.sh` renders both arms at round 1 and 2 with
 the key on, both arms with it off, the `hooks.selfReview`-off variant, and the combined summary

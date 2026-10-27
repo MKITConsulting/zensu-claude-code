@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **build workflow**: the workflow skill `/zensu:tdd` is now `/zensu:build`, and the plan it
+  writes is a Zensu plan. The workflow runs in vanilla mode unless strict mode is switched on,
+  so "TDD" now names only the strict RED→GREEN discipline: `/zensu:tdd-mode`,
+  `hooks.tddImplementation` and the phase gate keep their names, and so do the helper verbs
+  `--tdd-begin` and `--tdd-complete`. There is no alias, so `/zensu:tdd` no longer exists, and
+  the rename ships as a minor release.
+- **plan and log files**: new plans and run logs are named `{SESSION_TS}_build-{slug}.md` and
+  `{SESSION_TS}_build-{slug}.log` instead of `{SESSION_TS}_tdd-{slug}`. Plans open with
+  `# Zensu Plan:`, logs open with `BUILD STARTED`, and the plan's Approach line names the mode
+  the chain runs in. Existing files keep their names. A repository whose `.gitignore`
+  re-includes logs with `!.zensu/logs/*_tdd-*.log` stops tracking new logs: replace that line
+  with `!.zensu/logs/*.log` followed by `.zensu/logs/witness-*.log`.
+- **plan template and overlay**: `templates/tdd-plan.md` is now `templates/zensu-plan.md`, so
+  a repository override moves from `.zensu/templates/tdd-plan.md` to
+  `.zensu/templates/zensu-plan.md`. The skill overlay moves from `.zensu/overlays/tdd.md` to
+  `.zensu/overlays/build.md`. A file left under an old name is no longer read.
+- **delivery route**: the route value `tdd` is now `build`: `/zensu:delivery-route --build`,
+  `hooks.defaultDeliveryRoute: "build"` and the session marker `{"route":"build"}`. The
+  `--tdd` verb is refused. A configured `tdd` reads as `ask`, and `/zensu:doctor` warns about
+  it. A session marker that still holds `tdd` decides nothing, so the route question comes
+  back once.
+- **docs**: `docs/tdd-manager-workflow.md` is now `docs/build-workflow.md`.
+
 ## [0.31.1] - 2026-10-26
 
 ### Added

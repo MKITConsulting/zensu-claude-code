@@ -22,7 +22,7 @@ contains() {
 
 HOOKS="$ROOT/hooks/hooks.json"
 source "$ROOT/tests/structure/lib-skill-text.sh"
-TDD="$(skill_text_file "$ROOT/skills/tdd")"
+TDD="$(skill_text_file "$ROOT/skills/build")"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 
 node -e '

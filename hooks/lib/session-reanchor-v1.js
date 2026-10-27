@@ -702,13 +702,13 @@ function renderReanchorVerdict(verdict, confirmed) {
   text += 'returns there after a command that leaves it, so give your own commands a leading cd into\n';
   if (unpastableRoot(verdict.targetRoot)) {
     text += 'the new worktree, with its path in single quotes. That path holds a double quote, a dollar\n';
-    text += 'sign, a backtick or a backslash, which zensu-log.sh --project-root refuses, so /zensu:tdd,\n';
+    text += 'sign, a backtick or a backslash, which zensu-log.sh --project-root refuses, so /zensu:build,\n';
     text += '/zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot run there:\n';
     text += 'move the worktree to a path without these characters before you start a chain there.\n';
   } else {
-    text += 'the new worktree. /zensu:tdd, /zensu:self-review, /zensu:converge and /zensu:verify-feature\n';
+    text += 'the new worktree. /zensu:build, /zensu:self-review, /zensu:converge and /zensu:verify-feature\n';
     text += '--chain read the anchor from zensu-log.sh --project-root and run their commands inside it,\n';
-    text += 'and --evidence-run runs there too, so a new /zensu:tdd chain can start in this session.\n';
+    text += 'and --evidence-run runs there too, so a new /zensu:build chain can start in this session.\n';
   }
   text += '/zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot still\n';
   text += 'read plans, config, overlays and templates from the start directory. The workflow\n';
@@ -756,14 +756,14 @@ function renderReanchorOutcome(outcome) {
   if (unpastableRoot(outcome.projectRoot)) {
     text += 'leading cd into the project above, with its path in single quotes. That path holds a double\n';
     text += 'quote, a dollar sign, a backtick or a backslash, which zensu-log.sh --project-root refuses,\n';
-    text += 'so /zensu:tdd, /zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot\n';
+    text += 'so /zensu:build, /zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot\n';
     text += 'run there: move the worktree to a path without these characters before you start a chain\n';
     text += 'there. /zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot\n';
     text += 'still read plans, config, overlays and templates from the start directory.\n';
   } else {
-    text += 'leading cd into the project above. /zensu:tdd, /zensu:self-review, /zensu:converge,\n';
+    text += 'leading cd into the project above. /zensu:build, /zensu:self-review, /zensu:converge,\n';
     text += '/zensu:verify-feature --chain and --evidence-run work in the project above, so a new\n';
-    text += '/zensu:tdd chain can start in this session. /zensu:plan-review, /zensu:setup,\n';
+    text += '/zensu:build chain can start in this session. /zensu:plan-review, /zensu:setup,\n';
     text += '/zensu:cover, /zensu:autopilot and /zensu:pilot still read plans, config, overlays and\n';
     text += 'templates from the start directory.\n';
   }

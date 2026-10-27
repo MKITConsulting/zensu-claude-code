@@ -58,13 +58,13 @@ const ALL_SHAPES = Object.freeze([
 const INERT_SHAPES = Object.freeze(['no-session', 'chain-closed']);
 
 const NEXT_COMMAND = Object.freeze({
-  'no-session': 'run /zensu:tdd to arm a chain',
+  'no-session': 'run /zensu:build to arm a chain',
   implementing: 'zensu-log.sh --tdd-complete once the implementation is done',
   'chain-closed': 'none — this chain already reached its terminus',
   'awaiting-self-review':
     '/zensu:self-review (or /zensu:reset-review-limit to grant another auto-fix budget)',
   'self-review-unbindable':
-    'run /zensu:tdd for the current task — codeReviewDone is set but no consumed ticket can bind the terminal self-review, and neither /zensu:self-review nor /zensu:reset-review-limit can repair that; a fresh --tdd-begin is the only exit',
+    'run /zensu:build for the current task — codeReviewDone is set but no consumed ticket can bind the terminal self-review, and neither /zensu:self-review nor /zensu:reset-review-limit can repair that; a fresh --tdd-begin is the only exit',
   'review-in-flight':
     'zensu-log.sh --code-review-done --claimed-review-ticket <the ticket from --current-review-ticket>',
   'ticket-unclaimed':
@@ -79,21 +79,21 @@ const NEXT_COMMAND = Object.freeze({
 
 const BLOCKED_RECOVERY_COMMAND = Object.freeze({
   'partial-link':
-    'run /zensu:tdd for a fresh generation — the Autopilot linkage is incomplete and cannot be repaired in place',
+    'run /zensu:build for a fresh generation — the Autopilot linkage is incomplete and cannot be repaired in place',
   'deferred-claim':
     'cancel the outstanding deferred-review claim first; recovery never rewrites a claimed generation',
   'ticket-slot':
-    'this document carries an inconsistent review-ticket slot; recovery never rewrites it, because doing so would satisfy the no-ticket review terminus. Start a fresh generation with /zensu:tdd',
+    'this document carries an inconsistent review-ticket slot; recovery never rewrites it, because doing so would satisfy the no-ticket review terminus. Start a fresh generation with /zensu:build',
   'flag-state':
-    'this generation already latched selfReviewFixed, so neither the reviewer chain nor a budget reset applies — start a fresh generation with /zensu:tdd',
+    'this generation already latched selfReviewFixed, so neither the reviewer chain nor a budget reset applies — start a fresh generation with /zensu:build',
   'claim-unknown':
-    'this document has no readable deferredReviewClaim field, so recovery cannot prove no deferred-review claim is outstanding; it refuses rather than guess — start a fresh generation with /zensu:tdd',
+    'this document has no readable deferredReviewClaim field, so recovery cannot prove no deferred-review claim is outstanding; it refuses rather than guess — start a fresh generation with /zensu:build',
   'link-shape':
-    'this document carries a rearm receipt without a complete Autopilot binding, which no writer in this plugin can produce; recovery only repairs a bound generation, so start a fresh one with /zensu:tdd',
+    'this document carries a rearm receipt without a complete Autopilot binding, which no writer in this plugin can produce; recovery only repairs a bound generation, so start a fresh one with /zensu:build',
 });
 
 const STALE_RECEIPT_CAVEAT =
-  ' (note: this chain also carries a rearm receipt that disagrees with its own document, so no FRESH ticket can be issued — finish this generation with what it already holds, or start a fresh one with /zensu:tdd; on a standalone chain a budget reset drops the receipt as a side effect, on a bound one it does not)';
+  ' (note: this chain also carries a rearm receipt that disagrees with its own document, so no FRESH ticket can be issued — finish this generation with what it already holds, or start a fresh one with /zensu:build; on a standalone chain a budget reset drops the receipt as a side effect, on a bound one it does not)';
 
 const REQUIRED_BOOLEANS = [
   'active',

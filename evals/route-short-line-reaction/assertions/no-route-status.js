@@ -2,7 +2,7 @@
 
 const { parse, firstLine } = require('../lib/envelope.js');
 
-const PREFIXES = ['Executing via /zensu:tdd', 'Skipping TDD'];
+const PREFIXES = ['Executing via /zensu:build', 'Skipping /zensu:build'];
 
 module.exports = (output) => {
   const hit = parse(output).prose.split('\n').map(firstLine).find((l) => PREFIXES.some((p) => l.startsWith(p)));

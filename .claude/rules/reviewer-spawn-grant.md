@@ -61,7 +61,7 @@ hook always exits 0; do not "harden" it into a gate.
 `hooks.reviewerSpawnAutoAllow` not exactly `false`, and set membership. **The armed-chain
 condition was specified and then REJECTED on discovery** — `plan-review-worker` and
 `pr-review-worker` are spawned by `/zensu:plan-review` and `/zensu:pr-team-review`, neither of
-which arms a TDD chain or calls `--workflow-begin`, so a chain condition would ship a grant
+which arms a build chain or calls `--workflow-begin`, so a chain condition would ship a grant
 missing two of the five. The lease alternative was rejected too: the lease is minted by skill
 prose the gate cannot verify, and this file already records that module's store layout as a
 repeated drift source. What bounds the risk is CONFINEMENT, not chain state — the grant admits
@@ -123,7 +123,7 @@ Operator-facing accounts: `docs/gates.md` §"Reviewer-Spawn Grant", the hook row
 `configuration.md#hooks-N` cross-link in `docs/architecture.md`. `test-readme-hook-count-sync`
 H2 turns red on the header count and H3 on any inconsistent reference; `docs/architecture.md`
 was outside H3's file list until this change added it, so that cross-link was the one
-occurrence nothing scanned, `docs/tdd-manager-workflow.md` §"The preventive layer", and the
+occurrence nothing scanned, `docs/build-workflow.md` §"The preventive layer", and the
 reviewer-spawn bullets in `skills/doctor/SKILL.md` — do not restate a COUNT here, because the
 next row added invalidates it; `A24` in `test-reviewer-spawn-allow.sh` is what holds the roster
 against the renderer, and its phrase list is the thing to extend when a row is added.

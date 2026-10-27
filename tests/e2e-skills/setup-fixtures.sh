@@ -156,8 +156,8 @@ function applyTax(price) {
 }
 module.exports = { applyTax, assertPriceLimit };
 EOF
-  cat > "$d/.zensu/plans/2026-01-01-0000_tdd-pricing.md" <<'EOF'
-# TDD Plan: pricing helpers
+  cat > "$d/.zensu/plans/2026-01-01-0000_build-pricing.md" <<'EOF'
+# Zensu Plan: pricing helpers
 
 ## Context
 Add tax and discount helpers to calc.js.

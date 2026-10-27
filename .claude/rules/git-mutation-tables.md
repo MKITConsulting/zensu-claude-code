@@ -329,7 +329,7 @@ transparent to the CLI gate and not to rule (C).
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
 `hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the
 predicate was already anchored: it decides `mayHoldWorkspace`, so an unanchored spelling
-reports `<project>/..bak` as a FREE workspace and lets a standalone `/zensu:tdd` chain arm
+reports `<project>/..bak` as a FREE workspace and lets a standalone `/zensu:build` chain arm
 underneath a live durable run in the same tree. W18b in
 `tests/structure/test-autopilot-state-machine.sh` pins both of its anchoring clauses and
 forbids the bare `startsWith("..")` form returning; W18 alone did not, and no fixture

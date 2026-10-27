@@ -2,16 +2,16 @@
 set -u
 
 # NOTE (0.4.0): the TDD discipline patches migrated from the deleted
-# agents/tdd-manager.md subagent into the main-thread skill skills/tdd/SKILL.md.
+# agents/tdd-manager.md subagent into the main-thread skill skills/build/SKILL.md.
 # This test now pins that content in its new home.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-AGENT="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+AGENT="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 AUTOPILOT_SKILL="$PLUGIN_DIR/skills/autopilot/SKILL.md"
 PR_TEAM_REVIEW_SKILL="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
 PR_FIX_FINDINGS_SKILL="$PLUGIN_DIR/skills/pr-fix-findings/SKILL.md"
-TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
-WORKFLOW_DOC="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
+TPL_PLAN="$PLUGIN_DIR/templates/zensu-plan.md"
+WORKFLOW_DOC="$PLUGIN_DIR/docs/build-workflow.md"
 
 PASS=0; FAIL=0
 check() {
@@ -21,12 +21,20 @@ check() {
 }
 
 if [ ! -f "$AGENT" ]; then
-  check "skills/tdd/SKILL.md exists" FAIL
+  check "skills/build/SKILL.md exists" FAIL
   echo "----"
   echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
   exit 1
 fi
-check "skills/tdd/SKILL.md exists" PASS
+check "skills/build/SKILL.md exists" PASS
+
+if grep -qF '"./skills/build"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
+  && grep -qE '^name: build$' "$PLUGIN_DIR/skills/build/SKILL.md" \
+  && grep -qxF '# /zensu:build' "$PLUGIN_DIR/skills/build/SKILL.md"; then
+  check "P0 plugin.json registers ./skills/build, its frontmatter name is build and its H1 is /zensu:build" PASS
+else
+  check "P0 plugin.json registers ./skills/build, its frontmatter name is build and its H1 is /zensu:build" FAIL
+fi
 
 # Patch 1 — 3 new Rationalization Counters
 if grep -qF 'Tool X is missing, I' "$AGENT"; then
@@ -174,9 +182,9 @@ fi
 # generated plan actually read, and they drift silently otherwise.
 
 if [ -f "$WORKFLOW_DOC" ]; then
-  check "R17-P0 docs/tdd-manager-workflow.md exists (carrier for R17-P3/P4)" PASS
+  check "R17-P0 docs/build-workflow.md exists (carrier for R17-P3/P4)" PASS
 else
-  check "R17-P0 docs/tdd-manager-workflow.md exists (carrier for R17-P3/P4)" FAIL
+  check "R17-P0 docs/build-workflow.md exists (carrier for R17-P3/P4)" FAIL
 fi
 
 if grep -qF -- '**The FULL suite is NOT run here**' "$AGENT" && grep -qF -- 'SCOPED to that phase' "$AGENT"; then

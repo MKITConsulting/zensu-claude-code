@@ -10,7 +10,7 @@ paths:
 
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
-Two reductions to what the `/zensu:tdd` review fan-out READS, both gated on a permissively
+Two reductions to what the `/zensu:build` review fan-out READS, both gated on a permissively
 read config key and both defaulting ON. They exist because the fan-out, not the round
 counter, is what the chain actually costs: **measured** on this repository's own subagent
 transcripts, one `zensu:review-aspect` agent ingests ~513k context tokens over ~40 internal
@@ -34,7 +34,7 @@ delta; that deletes the compensating control rather than a redundancy.
 decision.** The first review spawns `correctness`, `design` and `security` plus the judge; a fix
 round's re-review spawns `correctness` alone, on the round delta while
 `hooks.incrementalReviewRounds` is on, and no judge (`--panel <panel> --round <round>` of
-`aspect-activation-v1.js`, step 4b of `/zensu:tdd`, and the judge clause of every delegate arm). That drops the compensating control above knowingly: with `autoFixMaxRounds: 2`
+`aspect-activation-v1.js`, step 4b of `/zensu:build`, and the judge clause of every delegate arm). That drops the compensating control above knowingly: with `autoFixMaxRounds: 2`
 by default a chain runs up to two lean re-reviews, the last of them hands the chain to
 `/zensu:self-review`, which re-reads the whole change, and the consume-mode code-reviewer still
 reads the merge. With `hooks.selfReview: false` that whole-change read is gone (see the known
@@ -76,7 +76,7 @@ repository treats as worse than the cost it removes.
 while nothing read them, so a `false` in any config changed nothing. Each is now resolved where its
 decision is made, through `zensu_hook_enabled` against the Session Control record's project root:
 
-- **`hooks.aspectActivation` belongs to `/zensu:tdd` step 3.** Every fan-out runs there, and the
+- **`hooks.aspectActivation` belongs to `/zensu:build` step 3.** Every fan-out runs there, and the
   first review has no hook directive in front of it. A main-thread probe runs
   `zensu_hook_enabled aspectActivation` with `CLAUDE_PROJECT_DIR="{project_root}"`, in the anchored
   form `I11` pins and `I11c`/`I11d` run, and answers `on` or `off`; `{project_root}` is the path
@@ -103,7 +103,7 @@ decision is made, through `zensu_hook_enabled` against the Session Control recor
   `changed_files` while the key is on and an empty change set while it is off, so the directive and
   step 3 name the same input.
 
-**Coupled sites that move together:** the two libs and their exports; `skills/tdd/references/review-chain.md`
+**Coupled sites that move together:** the two libs and their exports; `skills/build/references/review-chain.md`
 step 3 (the activation probe and its empty-input `off` arm) and the step 10 fix-round paragraph
 (which follows the directive's round-scope clause); the `ACTIVATION_INPUT` and `ROUND_SCOPE`
 assignments of `hooks/post-review-tdd-delegate.sh` and ALL THREE severity arms that interpolate
@@ -114,7 +114,7 @@ interpolations out of the convergence clause); the two config keys in `config.ex
 keys again in `evals/route-short-line-reaction/eval-config.json`, which must switch off every key
 a hook reads (`RS5` in `test-route-short-line-eval.sh`), so the delegate's two reads put them there;
 and the operator accounts in `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`
-and `docs/tdd-manager-workflow.md`. `tests/structure/test-incremental-review-rounds.sh` pins all of
+and `docs/build-workflow.md`. `tests/structure/test-incremental-review-rounds.sh` pins all of
 it, runs the step 3 probe against a project config (`I11c`, `I11d`), renders the delegate with
 `aspectActivation` off and with `incrementalReviewRounds` off in every severity arm (`I30` to
 `I32e`) and drives both unit files;
@@ -126,7 +126,7 @@ execute at all when either file and the directory disagree.
 `/zensu:reset-review-limit` appends after a same-chain rearm, starts a new generation:
 `roundScope` counts only claims after the last marker, so restarted round numbers no longer merge
 old and new `R1-` claims. The `R<n>-` claim prefix itself is prescribed by the fix-round text
-of EVERY severity arm in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:tdd` fix-round
+of EVERY severity arm in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:build` fix-round
 paragraph, independent of `hooks.reviewConvergence`, because this key must not silently depend on
 that one. A round whose claims still lack the prefix answers `empty` — the safe direction.
 

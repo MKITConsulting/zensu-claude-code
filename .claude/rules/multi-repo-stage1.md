@@ -186,10 +186,10 @@ refuses MORE than before, which is a gate tightening inside one installation rat
 capability change to a session an older runtime is serving.
 
 **Operator-facing accounts that must move with it:** discipline patch 10 in
-`docs/tdd-manager-workflow.md`, the `ZENSU_EDIT_LANDING_GATE` row in
+`docs/build-workflow.md`, the `ZENSU_EDIT_LANDING_GATE` row in
 `docs/configuration.md`, the two-refusal lead-in of `docs/gates.md`, the topology bullets
 plus the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`, Phase 6 step 5b b)
-in `skills/tdd/references/audit.md` and step 10.1 in `references/review-chain.md`, and ALL THREE multi-repo documents —
+in `skills/build/references/audit.md` and step 10.1 in `references/review-chain.md`, and ALL THREE multi-repo documents —
 `docs/multi-repo-chains-spec.md` (its status line, the two §2 paragraphs stage 1
 superseded, the §5 heading and the pin roster at the end of §10) together with
 `docs/multi-repo-chains-overview.html` and `docs/multi-repo-chains-principle.html`, which
@@ -443,7 +443,7 @@ exit-2 cause under its existing "did not complete" contract.
   `..` refusal. **A bare RELATIVE claim is placed too, against the repository top.**
   `place_relative_claim` runs right after `unredact_claim` in both callers and joins a relative
   claim to `REPO_CANON`, the repository top that the claim contract in
-  `skills/tdd/references/execution.md` names and that the grader resolves relative claims against;
+  `skills/build/references/execution.md` names and that the grader resolves relative claims against;
   joining `PROJECT_ABS` would ask, in a session whose project root sits below the top, about a
   file the grader never reads (`X35`/`X35a`). When `absolute_claim_verdict` places the join in a
   work tree nested under the anchor (`foreign` or `undetermined` with a value under `REPO_CANON`),

@@ -14,13 +14,13 @@ description: >
 
 A wargame is a **simulated course of action**: the full route through a hard mission, fought on paper move by move, written so a cheaper mid-tier model can execute it blind — without asking a single question. A stronger model plans once; a cheaper executor runs it. **Pay for the judgment once, keep it.**
 
-This is the recon-grounded execution-planner in the Zensu flow — it sits upstream of `/zensu:tdd` (plan the route, then let vanilla implementation run it) and serves rework/audit missions on existing features. It is **not** an ideation or roadmap tool: a wargame plans a *concrete* mission, it does not invent one.
+This is the recon-grounded execution-planner in the Zensu flow — it sits upstream of `/zensu:build` (plan the route, then let vanilla implementation run it) and serves rework/audit missions on existing features. It is **not** an ideation or roadmap tool: a wargame plans a *concrete* mission, it does not invent one.
 
 The most important consequence: **when this skill runs, you PLAN the mission — you do not execute it.** Recon is read-only. The deliverable is a wargame document, not a built feature or a fixed bug. The executor comes later.
 
 ## When to Use
 
-- Before handing a hard task to a cheaper executor (or to `/zensu:tdd`) — map the route first.
+- Before handing a hard task to a cheaper executor (or to `/zensu:build`) — map the route first.
 - Reworking or auditing an existing product, site, repo, or `ZEN-XXX` feature where recon has real substrate.
 - Proving a property or invariant end to end (`/goal` mode) before trusting it.
 
