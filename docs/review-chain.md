@@ -242,7 +242,11 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   chain's turn end with one stderr line and charges no review budget. An Autopilot-bound chain is
   held instead: its Stop blocks, names the agents that still run, and does not count against the
   inner Stop budget. When the claim from a note did not complete in that Stop, both say that the
-  report arrived and its claim is pending instead. A session that owns a live Autopilot run
+  report arrived and its claim is pending instead. A Stop that is not released, such as an
+  Autopilot-bound chain's, says so at most three times for one claim and names the attempt; the
+  next one that still cannot claim it retires the record and its note, and so does any Stop whose
+  claim still fails 60 minutes after the launch, so the resume directive then runs the review
+  again. A session that owns a live Autopilot run
   without a bound chain, and a Stop that adopted a deferred review, take neither; their resume
   directive opens with a sentence naming the running agents, or the pending claim.
 

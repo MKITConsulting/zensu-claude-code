@@ -327,6 +327,7 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
       ' 2>/dev/null || exit 0
       ;;
     1) ;;
+    5) trap - EXIT; exit 0 ;;
     *) exit 0 ;;
   esac
   # And: is anyone ELSE holding the working tree right now? Arming happens once,
@@ -341,7 +342,11 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
     exit 0
   else
     PREFLIGHT_WORKSPACE_RC=$?
-    [ "$PREFLIGHT_WORKSPACE_RC" -eq 1 ] || exit 0
+    case "$PREFLIGHT_WORKSPACE_RC" in
+      1) ;;
+      5) trap - EXIT; exit 0 ;;
+      *) exit 0 ;;
+    esac
   fi
 elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
   [ "$PREFLIGHT_CONTEXT" != '{}' ] || exit 0
@@ -358,7 +363,16 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
       } catch (_) { process.exit(3); }
     ' 2>/dev/null || exit 0
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)" || exit 0
+  if PREFLIGHT_OUTER="$(autopilot_read_active_strict "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
+    PREFLIGHT_OUTER_RC=0
+  else
+    PREFLIGHT_OUTER_RC=$?
+  fi
+  case "$PREFLIGHT_OUTER_RC" in
+    0) ;;
+    5) trap - EXIT; exit 0 ;;
+    *) exit 0 ;;
+  esac
   OUTER="$PREFLIGHT_OUTER" SID="$SESSION_ID" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
     ATTEMPT="$PROMPT_AUTOPILOT_ATTEMPT" CHAIN_ID="$PROMPT_AUTOPILOT_CHAIN" \
     RETURN_STAGE="$PROMPT_AUTOPILOT_STAGE" node -e '

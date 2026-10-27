@@ -26,7 +26,7 @@ const ENVELOPE_PREFIXES = Object.freeze(['ZENSU-DELEGATED-CALLER: ', 'AUTOPILOT-
 const ENVELOPES = Object.freeze({ standalone: 2, bound: 5 });
 const RECORD_KEYS = Object.freeze(['agent_id', 'header', 'launched_at_ms', 'schema', 'session_key', 'ticket']);
 const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'session_key', 'subagent_type']);
-const ARRIVAL_KEYS = Object.freeze(['agent_id', 'arrival', 'arrived_at_ms', 'schema', 'session_key', 'ticket']);
+const ARRIVAL_KEYS = Object.freeze(['agent_id', 'arrival', 'arrived_at_ms', 'holds', 'schema', 'session_key', 'ticket']);
 const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
   .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
 const VERDICTS = Object.freeze(['claim', 'ended', 'none']);
@@ -43,6 +43,7 @@ const LIMITS = Object.freeze({
   maxFanoutEntries: 32,
   maxFanoutNames: 256,
   waitTtlMs: 60 * 60 * 1000,
+  maxArrivalHolds: 3,
   idleMs: 24 * 60 * 60 * 1000,
   clockSkewMs: 5 * 60 * 1000,
 });
@@ -131,6 +132,7 @@ function validateArrival(note, expected = {}) {
   if (typeof note.ticket !== 'string' || !TICKET_RE.test(note.ticket)) return 'arrival ticket';
   if (!ARRIVALS.includes(note.arrival)) return 'arrival kind';
   if (!Number.isSafeInteger(note.arrived_at_ms) || note.arrived_at_ms < 0) return 'arrival time';
+  if (!Number.isSafeInteger(note.holds) || note.holds < 0) return 'arrival holds';
   return null;
 }
 
@@ -593,6 +595,7 @@ function noteArrival(payload, options, limits = LIMITS) {
         ticket: loaded.record.ticket,
         arrival: scan.arrival,
         arrived_at_ms: options.now === undefined ? Date.now() : options.now,
+        holds: 0,
       };
       try {
         writeFileAtomic(locations.arrivals, recordFileName(sessionKey), `${JSON.stringify(note)}\n`);
@@ -658,6 +661,40 @@ function retireRecord(options, limits = LIMITS) {
   if (loaded.record.agent_id !== options.agentId) return { retired: false, reason: 'other-agent' };
   if (!consumeRecord(file, loaded.text, limits)) return { retired: false, reason: 'consumed-elsewhere' };
   return { retired: true };
+}
+
+function deferArrival(options, limits = LIMITS) {
+  const sessionKey = requireSessionKey(options.sessionKey);
+  const now = options.now === undefined ? Date.now() : options.now;
+  const held = options.held === true;
+  let locations;
+  try {
+    locations = storeLocations(options.pluginData);
+  } catch {
+    return { deferred: false, reason: 'store' };
+  }
+  const file = path.join(locations.records, recordFileName(sessionKey));
+  const loaded = loadRecord(file, sessionKey, limits);
+  const arrival = heldArrival(locations, sessionKey, loaded.record, limits);
+  if (!loaded.record) return { deferred: false, reason: loaded.reason };
+  if (!arrival.note) return { deferred: false, reason: 'no-arrival' };
+  const holds = arrival.note.holds + (held ? 1 : 0);
+  let spent = null;
+  if (now - loaded.record.launched_at_ms >= limits.waitTtlMs) spent = 'expired';
+  else if (holds > limits.maxArrivalHolds) spent = 'holds';
+  if (spent) {
+    dropArrival(arrival.file, arrival.loaded, limits);
+    consumeRecord(file, loaded.text, limits);
+    return { deferred: false, reason: spent, spent: true };
+  }
+  if (held) {
+    try {
+      writeFileAtomic(locations.arrivals, recordFileName(sessionKey), `${JSON.stringify({ ...arrival.note, holds })}\n`);
+    } catch {
+      return { deferred: false, reason: 'write' };
+    }
+  }
+  return { deferred: true, held, holds, maxHolds: limits.maxArrivalHolds };
 }
 
 function consumeWait(locations, sessionKey, options, limits, now) {
@@ -754,6 +791,11 @@ function arriveLine(result) {
     : `idle reason=${result.reason} retired=${result.retired || 0}`;
 }
 
+function deferLine(result) {
+  if (result.deferred) return result.held ? `hold count=${result.holds} of=${result.maxHolds}` : 'release';
+  return result.spent ? `spent reason=${result.reason}` : `idle reason=${result.reason}`;
+}
+
 function readStdin(maxBytes) {
   const raw = fs.readFileSync(0);
   if (raw.length > maxBytes) return null;
@@ -778,6 +820,7 @@ function envOptions(env) {
     envelope: env.ZENSU_BR_ENVELOPE,
     agentId: env.ZENSU_BR_AGENT,
     recovery: env.ZENSU_BR_RECOVERY === '1',
+    held: env.ZENSU_BR_HELD === '1',
   };
 }
 
@@ -830,6 +873,16 @@ function main(argv, env = process.env, io = {}) {
     write(`${retireLine(result)}\n`);
     return 0;
   }
+  if (mode === 'defer') {
+    let result;
+    try {
+      result = deferArrival(envOptions(env));
+    } catch {
+      result = { deferred: false, reason: 'fault' };
+    }
+    write(`${deferLine(result)}\n`);
+    return 0;
+  }
   if (mode === 'wait') {
     let result;
     try {
@@ -840,7 +893,7 @@ function main(argv, env = process.env, io = {}) {
     write(`${waitLine(result)}\n`);
     return 0;
   }
-  process.stderr.write('usage: background-review-v1.js record|fanout|arrive|match|retire|wait\n');
+  process.stderr.write('usage: background-review-v1.js record|fanout|arrive|match|retire|defer|wait\n');
   return 2;
 }
 
@@ -876,12 +929,14 @@ module.exports = {
   noteArrival,
   matchArrival,
   retireRecord,
+  deferArrival,
   waitVerdict,
   matchLine,
   recordLine,
   waitLine,
   retireLine,
   arriveLine,
+  deferLine,
   main,
 };
 

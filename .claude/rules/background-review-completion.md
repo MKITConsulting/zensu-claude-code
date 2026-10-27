@@ -106,9 +106,16 @@ completes the claim from that note.
    budget charge. An Autopilot-bound chain's Stop is held: it blocks, names the running agents,
    and skips the inner Stop budget increment. An owned Autopilot run without a bound chain and an
    adopted deferred review take neither; their resume reason is led by one sentence naming the
-   running agents. When the recovery left record and note in place, the release, the hold and
-   that sentence say instead that the report arrived and its claim is pending
-   (`BACKGROUND_REVIEW_ARRIVED_LEAD`).
+   running agents. When the recovery left record and note in place, the Stop hook runs
+   `background-review-v1.js defer` once, with `ZENSU_BR_HELD=1` when that Stop will not be
+   released (an Autopilot-bound chain, an owned Autopilot run or an adopted deferred review).
+   `defer` retires record and note when the record is older than the wait bound; on a held Stop
+   it raises the note's `holds` count and retires both once the count would pass
+   `LIMITS.maxArrivalHolds`. It prints `hold count=<n> of=<max>`, `release`,
+   `spent reason=<expired|holds>` or `idle reason=<r>`. Only `hold` and `release` make the
+   release, the hold and that sentence say that the report arrived and its claim is pending
+   (`BACKGROUND_REVIEW_ARRIVED_LEAD`), and after `hold` they name the attempt. After `spent` the
+   Stop takes the plain resume directive, whose fresh ticket runs the review again.
 
 ## Decisions
 
@@ -138,7 +145,10 @@ completes the claim from that note.
   note whose record is gone or names another agent or ticket is removed by the next `arrive` or
   `match`. The notification used to retire the record on a failed or killed claim, so that the
   next Stop would not wait for a reviewer that had already reported; the note's recovery path
-  answers that Stop now.
+  answers that Stop now. A preflight that could not read the Autopilot state, where
+  `autopilot_read_active_strict` or `autopilot_read_workspace` answers 5 for a lease, storage or
+  path fault, clears the EXIT trap like a kill and keeps both; every other preflight refusal
+  still retires them (`.claude/rules/autopilot-active-read.md`).
 - **The prompt hook is registered with `"timeout": 180`, and its claim deadline comes from the
   same number.** The 30 s default is the measured cause. 180 is a judgement: the incident replay
   of the 89-child claim took 162 s at load about 200. `BR_HOOK_TIMEOUT` in the hook spells the
@@ -181,6 +191,19 @@ completes the claim from that note.
   blocks as before but skips `autopilot_increment_inner_stop_budget_capped` while a record or entry
   is fresh. The hold costs one turn per Stop the model attempts, bounded by the wait bound; PR #483
   made the same trade for the Autopilot stage budget while review seats run.
+- **A Stop that is not released waits for an arrived claim at most `LIMITS.maxArrivalHolds` (3)
+  times, and never past the wait bound.** A bound chain gets no prompt between its Stops, and on a
+  loaded host every recovery defers at its deadline, so the arrived hold used to loop on free
+  Stops until the wait bound, after which the arrived prefix of the resume reason replaced the
+  re-review with "end your turn again" until the inner budget moved the run to `BLOCKED`. The
+  note's `holds` field persists the count across Stops: `arrive` writes 0, `retire`,
+  stale-ticket and a new launch remove it with the note. The fourth such Stop retires the pair
+  and orders the review again, which is what an arrival that never claimed got before the note
+  existed, and a recovery that still fails past the wait bound does the same for every chain. A
+  released Stop counts nothing, because the next prompt still claims with the prompt hook's
+  budget. 3 is a judgement. Rejected: a `zensu-log.sh` verb the hold would name, run under the
+  Bash tool's timeout, which would be a claim entry point no hook payload binds to the main
+  thread and would hand back the routing directive as tool output.
 - **Fan-out entries carry no ticket and no chain binding.** The Stop hook consults them only on the
   path where it would block for an armed review chain, so an entry from an earlier chain of the
   same session can release a Stop for at most the wait bound.
@@ -200,11 +223,12 @@ completes the claim from that note.
   list of `zensu-tdd-phase.sh` beside `_ZENSU_TDD_CHAIN_RECOVERY`.
 - The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, the
   `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix of the
-  `arrive` line by the prompt hook's `case`, and the `source` field of the `match` claim line by
-  the delegate's verdict parse.
+  `arrive` line by the prompt hook's `case`, the `source` field of the `match` claim line by
+  the delegate's verdict parse, and the `hold count= of=` and `release` lines of `defer` by
+  `background_review_recover`.
 - `--background-arrival` and `--background-recovery` are the delegate's two background modes; the
-  Stop hook is the only caller of the second. `ZENSU_BR_CLAIM_BY` and `ZENSU_BR_RECOVERY` are read
-  by the delegate and `envOptions` respectively.
+  Stop hook is the only caller of the second. `ZENSU_BR_CLAIM_BY` is read by the delegate, and
+  `ZENSU_BR_RECOVERY` and `ZENSU_BR_HELD` by `envOptions`.
 - `BR_HOOK_TIMEOUT` and `BR_CLAIM_MARGIN` in the prompt hook, the registration in
   `hooks/hooks.json` (`BR1`, `BR1e`), and `BACKGROUND_REVIEW_CLAIM_MARGIN` in the Stop hook.
 - The fan-out types are `FANOUT_TYPES` in the module and the `case` in the delegate's PostToolUse
@@ -223,7 +247,9 @@ completes the claim from that note.
   claim-field parse's `node` calls: `BR9d` and `BR9d2` a refusal through a hand-back and
   through a completion notification, which retires record and note, `BR9e` the forwarder and the
   kept pair, `BR9f` to `BR9h` a
-  failed claim, the arrived release and the Stop claim, `BR14c` the bound hold, `BR16` and `BR17`
+  failed claim, the arrived release and the Stop claim, `BR9i` an unreadable Autopilot store that
+  keeps the pair, `BR14c` the bound hold and its attempt, `BR14d` the hold limit, `BR14e` a failed
+  claim past the wait bound, `BR14f` a bound hand-back under a held project lease, `BR16` and `BR17`
   a host-style cancel (TERM to the process group and its descendants, KILL 1.5 s later) and the
   Stop that completes the claim once, `BR17b` the typed prompt that completes it after a second
   cancel, `BR18` to `BR18c` the deferral, the cross-session cost and
@@ -245,7 +271,10 @@ completes the claim from that note.
 - **Repo-local review personas are not recorded.** Their subagent types are repo-authored, so a turn
   end while only a persona runs blocks and charges the budget as before.
 - **An Autopilot-bound chain's hold costs turns.** Each held Stop is one more model turn until the
-  report arrives; the bound caps it, the budget does not.
+  report arrives, and at most `LIMITS.maxArrivalHolds` more once it has arrived and cannot be
+  claimed; the wait bound and that count cap it, the budget does not.
+- **`defer` runs under the fixed 5 s of `zensu_run_bounded`.** A `defer` that misses it counts
+  nothing and the Stop takes the running-review hold, which the wait bound still caps.
 - **A notification that says no report was delivered** still claims the ticket; the lead sentence
   tells the main thread to ask the reviewer for its report with `SendMessage` first.
 - **A kill after the ticket CAS still loses the directive.** The claim has landed, the delegate dies
@@ -259,8 +288,10 @@ completes the claim from that note.
   `arrive`, which answers `idle` for a note that is not its own (`BR18b`). A note normally lives
   for seconds; a session whose bind keeps failing keeps its pair until the 24-hour sweep.
 - **The Stop recovery runs under the Stop deadline** (45 s by default). On a loaded host it defers
-  and the release says the claim is pending; the next prompt then claims with the prompt hook's
-  larger budget. Measured on 2026-10-27 at a load of about 100 to 150: one recovery Stop under
+  and the release says the claim is pending; a standalone chain's next prompt then claims with the
+  prompt hook's larger budget. An Autopilot-bound chain gets no prompt, so under sustained load its
+  `LIMITS.maxArrivalHolds` held Stops all defer, the pair is retired and the review runs again: an
+  arrived report costs that chain a re-review. Measured on 2026-10-27 at a load of about 100 to 150: one recovery Stop under
   the 75 s maximum took 42 s, and in a full suite run both recovery Stops of `BR17` deferred. So
   `recover_until_claimed` lets `BR9h` and `BR17` meet up to three deferring Stops before the
   claim, and each of them must release with record, note and ticket intact.
@@ -279,9 +310,10 @@ completes the claim from that note.
 ## Version: `patch`
 
 Walked against `.claude/rules/runtime-lineage.md` entry by entry: no context-record or
-workflow-state field; the record and fan-out key sets are unchanged, and the arrival note's key set
-is strict but ships for the first time, so no released reader or writer predates it, and a later
-change to it is a `minor`. No hook is added, removed or renamed and no matcher changes: the prompt
+workflow-state field; the record and fan-out key sets are unchanged, and the arrival note's key set,
+`holds` included, is strict but ships for the first time, so no released reader or writer predates
+it, and a later change to it is a `minor`. The `defer` verb is new with the note and has no caller
+outside this tree. No hook is added, removed or renamed and no matcher changes: the prompt
 hook's registration gains a `timeout`, which is neither. The prompt hook still returns only
 `additionalContext`, and the Stop hook's recovery emits a block it already emitted, with another
 reason. The claim still runs through the existing ticket transition, so a runtime of the same

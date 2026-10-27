@@ -584,7 +584,7 @@ test('arrive notes a completed arrival of the pending consume reviewer once, at 
   const file = arrivalPath(f);
   const note = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.deepEqual(Object.keys(note).sort(), [...br.ARRIVAL_KEYS].sort());
-  assert.deepEqual(note, { schema: br.SCHEMA, session_key: SESSION, agent_id: AGENT, ticket: TICKET, arrival: 'handback', arrived_at_ms: BASE });
+  assert.deepEqual(note, { schema: br.SCHEMA, session_key: SESSION, agent_id: AGENT, ticket: TICKET, arrival: 'handback', arrived_at_ms: BASE, holds: 0 });
   assert.equal(br.validateArrival(note, { sessionKey: SESSION }), null);
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   const text = fs.readFileSync(file, 'utf8');
@@ -713,8 +713,52 @@ test('the CLI answers arrive from the payload session and match reads ZENSU_BR_R
   assert.equal(JSON.parse(run(['match'], stop).stdout).reason, 'prompt');
 });
 
+test('defer counts the Stops that hold a pending claim, and a spent count or an expired record retires the pair', () => {
+  const f = fixture();
+  const max = br.LIMITS.maxArrivalHolds;
+  recorded(f);
+  assert.deepEqual(br.deferArrival(options(f, { held: true })), { deferred: false, reason: 'no-arrival' });
+  assert.equal(fs.existsSync(recordPath(f)), true);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  const released = br.deferArrival(options(f));
+  assert.deepEqual(released, { deferred: true, held: false, holds: 0, maxHolds: max });
+  assert.equal(br.deferLine(released), 'release');
+  for (let count = 1; count <= max; count += 1) {
+    const result = br.deferArrival(options(f, { held: true }));
+    assert.deepEqual(result, { deferred: true, held: true, holds: count, maxHolds: max });
+    assert.equal(br.deferLine(result), `hold count=${count} of=${max}`);
+    const note = JSON.parse(fs.readFileSync(arrivalPath(f), 'utf8'));
+    assert.equal(note.holds, count);
+    assert.equal(br.validateArrival(note, { sessionKey: SESSION }), null);
+  }
+  assert.equal(br.deferLine(br.deferArrival(options(f))), 'release');
+  const spent = br.deferArrival(options(f, { held: true }));
+  assert.deepEqual(spent, { deferred: false, reason: 'holds', spent: true });
+  assert.equal(br.deferLine(spent), 'spent reason=holds');
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.equal(fs.existsSync(recordPath(f)), false);
+  assert.deepEqual(br.deferArrival(options(f, { held: true })), { deferred: false, reason: 'absent' });
+  recorded(f);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  assert.equal(br.deferArrival(options(f, { now: BASE + br.LIMITS.waitTtlMs - 1 })).deferred, true);
+  const expired = br.deferArrival(options(f, { now: BASE + br.LIMITS.waitTtlMs }));
+  assert.deepEqual(expired, { deferred: false, reason: 'expired', spent: true });
+  assert.equal(br.deferLine(expired), 'spent reason=expired');
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.equal(fs.existsSync(recordPath(f)), false);
+  assert.equal(br.deferLine({ deferred: false, reason: 'store' }), 'idle reason=store');
+  const now = Date.now();
+  recorded(f, { now });
+  br.noteArrival(arrivalPrompt(handback()), options(f, { now }));
+  const env = { ...process.env, ZENSU_BR_PLUGIN_DATA: f.data, ZENSU_BR_SESSION_KEY: SESSION };
+  const run = (extra = {}) => spawnSync(process.execPath, [MODULE, 'defer'], { env: { ...env, ...extra }, input: '', encoding: 'utf8' });
+  assert.equal(run({ ZENSU_BR_HELD: '1' }).stdout, `hold count=1 of=${max}\n`);
+  assert.equal(run().stdout, 'release\n');
+  assert.equal(run({ ZENSU_BR_SESSION_KEY: 'not-a-key' }).stdout, 'idle reason=fault\n');
+});
+
 test('validateArrival rejects a foreign shape', () => {
-  const note = { schema: br.SCHEMA, session_key: SESSION, agent_id: AGENT, ticket: TICKET, arrival: 'handback', arrived_at_ms: BASE };
+  const note = { schema: br.SCHEMA, session_key: SESSION, agent_id: AGENT, ticket: TICKET, arrival: 'handback', arrived_at_ms: BASE, holds: 0 };
   assert.equal(br.validateArrival(note, { sessionKey: SESSION }), null);
   assert.equal(br.validateArrival({ ...note, extra: 1 }), 'arrival keys');
   assert.equal(br.validateArrival({ ...note, schema: 'other' }), 'arrival schema');
@@ -723,4 +767,9 @@ test('validateArrival rejects a foreign shape', () => {
   assert.equal(br.validateArrival({ ...note, ticket: 'bad ticket' }), 'arrival ticket');
   assert.equal(br.validateArrival({ ...note, arrival: 'ended' }), 'arrival kind');
   assert.equal(br.validateArrival({ ...note, arrived_at_ms: -1 }), 'arrival time');
+  assert.equal(br.validateArrival({ ...note, holds: -1 }), 'arrival holds');
+  assert.equal(br.validateArrival({ ...note, holds: 1.5 }), 'arrival holds');
+  const { holds, ...withoutHolds } = note;
+  assert.equal(holds, 0);
+  assert.equal(br.validateArrival(withoutHolds), 'arrival keys');
 });

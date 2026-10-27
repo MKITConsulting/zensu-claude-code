@@ -808,10 +808,12 @@ background_review_subject() {
 BACKGROUND_REVIEW_CLAIM_MARGIN=20
 BACKGROUND_REVIEW_ARRIVED=false
 BACKGROUND_REVIEW_DIRECTIVE=""
-BACKGROUND_REVIEW_ARRIVED_LEAD="The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop, so the claim stays pending and completes at the next Stop or prompt, together with the routing directive."
+BACKGROUND_REVIEW_ARRIVED_PENDING="The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop, so the claim stays pending: the next Stop or prompt retries it and, once it succeeds, hands you the routing directive."
+BACKGROUND_REVIEW_ARRIVED_LEAD=""
 background_review_recover() {
-  local store record note limit claim_by directive
+  local store record note limit claim_by directive held data exclusions verdict word count of
   BACKGROUND_REVIEW_ARRIVED=false
+  BACKGROUND_REVIEW_ARRIVED_LEAD=""
   BACKGROUND_REVIEW_DIRECTIVE=""
   zensu_session_key_canonical "$SESSION_ID" || return 1
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
@@ -833,9 +835,28 @@ background_review_recover() {
     BACKGROUND_REVIEW_DIRECTIVE="$directive"
     return 0
   fi
-  if [ -f "$note" ] && [ ! -L "$note" ] && [ -f "$record" ] && [ ! -L "$record" ]; then
-    BACKGROUND_REVIEW_ARRIVED=true
+  [ -f "$note" ] && [ ! -L "$note" ] && [ -f "$record" ] && [ ! -L "$record" ] || return 1
+  held=""
+  if [ "$OUTER_PRESENT" != false ] || [ "$DEFERRED_ADOPTED" != false ] || [ -n "$INNER_BOUND_RUN" ]; then
+    held=1
   fi
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_BR_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  verdict="$(MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_BR_PLUGIN_DATA="$data" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
+    ZENSU_BR_HELD="$held" zensu_run_bounded node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" defer </dev/null 2>/dev/null)" || return 1
+  read -r word count of <<<"$verdict"
+  case "$word" in
+    hold)
+      count="${count#count=}"
+      of="${of#of=}"
+      case "$count" in ''|*[!0-9]*) return 1 ;; esac
+      case "$of" in ''|*[!0-9]*) return 1 ;; esac
+      BACKGROUND_REVIEW_ARRIVED_LEAD="${BACKGROUND_REVIEW_ARRIVED_PENDING} This Stop is claim attempt ${count} of ${of}: once those are spent, the next Stop that still cannot claim it drops the claim, and the review sequence runs again."
+      ;;
+    release) BACKGROUND_REVIEW_ARRIVED_LEAD="$BACKGROUND_REVIEW_ARRIVED_PENDING" ;;
+    *) return 1 ;;
+  esac
+  BACKGROUND_REVIEW_ARRIVED=true
   return 1
 }
 
@@ -1883,7 +1904,7 @@ case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
 INNER_CAP_BLOCKED=false
 if [ "$BACKGROUND_REVIEW_PENDING" = "true" ] && [ -n "$INNER_BOUND_RUN" ] && [ "$BACKGROUND_REVIEW_ARRIVED" = "true" ]; then
-  emit_block "Zensu review-chain Stop held. ${BACKGROUND_REVIEW_ARRIVED_LEAD} This Autopilot-bound chain keeps its turn while that claim is pending, so this Stop does not count against the inner Stop budget of ${CAP}. Do NOT classify or fix anything, do NOT spawn another reviewer and do NOT re-run the review fan-out: end your turn again, and that Stop completes the claim and hands you the routing directive."
+  emit_block "Zensu review-chain Stop held. ${BACKGROUND_REVIEW_ARRIVED_LEAD} This Autopilot-bound chain keeps its turn while that claim is pending, so this Stop does not count against the inner Stop budget of ${CAP}. Do NOT classify or fix anything, do NOT spawn another reviewer and do NOT re-run the review fan-out: end your turn again, and the next Stop retries the claim."
   exit 0
 fi
 if [ "$BACKGROUND_REVIEW_PENDING" = "true" ] && [ -n "$INNER_BOUND_RUN" ]; then
