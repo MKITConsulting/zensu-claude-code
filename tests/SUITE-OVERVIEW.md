@@ -414,7 +414,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 |---|---|---|---|---|
 | `session-control/session-control-core-v1.test.js` | 227 | darwin 2, linux 5, root 5, win32 22 | `session-control/run.sh` | Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification. |
 | `structure/acceptance-verify-v1.test.js` | 26 | – | `test-acceptance-gate.sh` | Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention. |
-| `structure/ai-work-capture.test.js` | 8 | – | `test-ai-work-capture.sh` | AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions. |
+| `structure/ai-work-capture.test.js` | 10 | – | `test-ai-work-capture.sh` | AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions. |
 | `structure/aspect-activation-v1.test.js` | 21 | – | `test-incremental-review-rounds.sh` | Review-aspect activation: which review perspectives a round activates for a given change. |
 | `structure/background-review-v1.test.js` | 24 | win32 1 | `test-background-review.sh` | Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival match that claims or retires, the Stop wait verdict and the idle sweeps. |
 | `structure/chain-recovery-v1.test.js` | 21 | – | `test-chain-recover.sh` | The chain shape lattice and the rearm-receipt predicate. |
