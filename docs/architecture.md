@@ -181,18 +181,24 @@ all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
 the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
-on every prompt with no de-bounce, and eight hooks are registered on it. Three of them send their
+on every prompt with no de-bounce, and nine hooks are registered on it. Three of them send their
 full text only once per context generation and a short line after that, through the prompt
 ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
 `tests/structure/test-user-prompt-budget.sh` drives every one of them on five prompt kinds — a
 typed request, a background-task notification, a subagent hand-back, a shell input behind a
 system reminder, and a CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
-each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
+each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Five hooks emit text on an ordinary turn:
 `user-prompt-tdd-reminder.sh` (about 5.0 K characters strict and 5.5 K vanilla plus the paths of
 the helper command it renders, on the first typed request or slash command with arguments of a
 generation while no chain is armed, about 2.4 K on later ones, a decided line of about 1.4 to 1.5 K on
 every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,131 characters, then 1,102 later in the generation, only when such
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
+`user-prompt-context-auto-load.sh` (on a typed task prompt that names no feature key, the
+candidates of one context search behind 1,773 characters of instructions, about 9.7 K with five
+candidates whose titles and excerpts fill their 200- and 1,200-character limits, or a
+387-character notice when the search is unavailable; on a prompt that names exactly one key,
+that feature's context package, up to 24,000 bytes of JSON behind about 1.8 K; it keeps no
+ledger, so every such prompt pays again),
 `user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above once per generation and about 1.4 K after
 that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (474
 characters, on every prompt kind for the same reason). Three emit
@@ -205,11 +211,14 @@ pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **11.2 K characters on the first prompt of a generation and 5.5 K on every later
+costs about **11.6 K characters on the first prompt of a generation and 5.8 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
-shell input about 3.6 K, then 1.9 K (4.0 K, then 2.2 K for a CI-monitor event). The generation also receives this
-hook's 1,938-character block once at `SessionStart`, so its first turn costs about 13.2 K in all,
-0.7 K more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
+shell input about 3.6 K, then 1.9 K (4.0 K, then 2.2 K for a CI-monitor event). The typed figures
+carry the 387-character context notice that the suite's failing CLI stub produces; a search that
+returns five full candidates raises them to about 20.9 K and 15.1 K. The generation also receives this
+hook's 1,938-character block once at `SessionStart`, so its first turn costs about 13.6 K in all,
+1.1 K more than one turn did before the ledger, 0.4 K of it for the context notice, which that turn
+did not carry; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather
 than on the fan-out figure.
