@@ -533,4 +533,4 @@ security and design context. The context board records these API retrievals by p
 
 ## Automatic feature context
 
-An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. Disable with `hooks.contextAutoLoad: false`. See [automatic context](docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
+An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. The automatic package presents `layers` first and keeps `related_layers` as a separate bounded metadata index with reasons and directed paths. Choose additional sources for a specific task question; never bulk-fetch either group. Disable with `hooks.contextAutoLoad: false`. See [automatic context](docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
