@@ -3,15 +3,17 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { REVIEWER_TYPES } = require('./claude-principal-v1.js');
+const { PRINCIPALS, REVIEWER_TYPES, classifyPreToolPayload } = require('./claude-principal-v1.js');
 const { ensurePrivateDirectory } = require('./review-evidence-lease-v1.js');
 const { REVIEWER_SUBAGENT_TYPE } = require('./reviewer-spawn-denial-v1.js');
 const { claimableTicket } = require('./review-ticket-state-v1.js');
+const { sessionKey: canonicalSessionKey } = require('./session-control-core-v1.js');
 
 const SCHEMA = 'background-review-v1';
 const STORE_SEGMENTS = Object.freeze(['background-review', 'v1']);
 const RECORDS_SEGMENT = 'records';
 const FANOUT_SEGMENT = 'fanout';
+const ARRIVALS_SEGMENT = 'arrivals';
 const SESSION_KEY_RE = /^scv1_[0-9a-f]{64}$/;
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
 const FANOUT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}\.json$/;
@@ -24,6 +26,7 @@ const ENVELOPE_PREFIXES = Object.freeze(['ZENSU-DELEGATED-CALLER: ', 'AUTOPILOT-
 const ENVELOPES = Object.freeze({ standalone: 2, bound: 5 });
 const RECORD_KEYS = Object.freeze(['agent_id', 'header', 'launched_at_ms', 'schema', 'session_key', 'ticket']);
 const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'session_key', 'subagent_type']);
+const ARRIVAL_KEYS = Object.freeze(['agent_id', 'arrival', 'arrived_at_ms', 'holds', 'schema', 'session_key', 'ticket']);
 const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
   .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
 const VERDICTS = Object.freeze(['claim', 'ended', 'none']);
@@ -40,6 +43,7 @@ const LIMITS = Object.freeze({
   maxFanoutEntries: 32,
   maxFanoutNames: 256,
   waitTtlMs: 60 * 60 * 1000,
+  maxArrivalHolds: 3,
   idleMs: 24 * 60 * 60 * 1000,
   clockSkewMs: 5 * 60 * 1000,
 });
@@ -119,6 +123,19 @@ function validateFanout(entry, expected = {}) {
   return null;
 }
 
+function validateArrival(note, expected = {}) {
+  if (!exactKeys(note, ARRIVAL_KEYS)) return 'arrival keys';
+  if (note.schema !== SCHEMA) return 'arrival schema';
+  if (typeof note.session_key !== 'string' || !SESSION_KEY_RE.test(note.session_key)) return 'arrival session key';
+  if (expected.sessionKey !== undefined && note.session_key !== expected.sessionKey) return 'arrival session mismatch';
+  if (typeof note.agent_id !== 'string' || !AGENT_ID_RE.test(note.agent_id)) return 'arrival agent id';
+  if (typeof note.ticket !== 'string' || !TICKET_RE.test(note.ticket)) return 'arrival ticket';
+  if (!ARRIVALS.includes(note.arrival)) return 'arrival kind';
+  if (!Number.isSafeInteger(note.arrived_at_ms) || note.arrived_at_ms < 0) return 'arrival time';
+  if (!Number.isSafeInteger(note.holds) || note.holds < 0) return 'arrival holds';
+  return null;
+}
+
 function storeLocations(pluginData) {
   let root;
   try {
@@ -130,6 +147,7 @@ function storeLocations(pluginData) {
     root,
     records: ensurePrivateDirectory(root, [RECORDS_SEGMENT]),
     fanout: ensurePrivateDirectory(root, [FANOUT_SEGMENT]),
+    arrivals: ensurePrivateDirectory(root, [ARRIVALS_SEGMENT]),
   };
 }
 
@@ -318,7 +336,10 @@ function recordLaunch(payload, options, limits = LIMITS) {
   }
   const name = recordFileName(sessionKey);
   sweepIdle(locations.records, name, limits, now);
+  sweepIdle(locations.arrivals, name, limits, now);
   sweepIdleFanout(locations.fanout, sessionKey, limits, now);
+  const note = arrivalFile(locations, sessionKey);
+  dropArrival(note, loadArrival(note, sessionKey, limits), limits);
   try {
     writeFileAtomic(locations.records, name, `${JSON.stringify(record)}\n`);
   } catch {
@@ -402,6 +423,7 @@ function recordFanout(payload, options, limits = LIMITS) {
     return { recorded: false, reason: 'store' };
   }
   sweepIdle(locations.records, recordFileName(sessionKey), limits, now);
+  sweepIdle(locations.arrivals, recordFileName(sessionKey), limits, now);
   sweepIdleFanout(locations.fanout, sessionKey, limits, now);
   const fresh = pruneFanout(fanoutEntries(directory, sessionKey, limits), limits, now);
   if (!fresh.some((item) => item.entry.agent_id === agentId) && fresh.length >= limits.maxFanoutEntries) {
@@ -481,6 +503,44 @@ function consumeRecord(file, expectedText, limits = LIMITS) {
   return false;
 }
 
+function arrivalFile(locations, sessionKey) {
+  return path.join(locations.arrivals, recordFileName(sessionKey));
+}
+
+function loadArrival(file, sessionKey, limits = LIMITS) {
+  const loaded = readBoundedFile(file, limits.maxRecordBytes);
+  if (loaded.invalid) return { note: null, reason: loaded.invalid };
+  let note;
+  try {
+    note = JSON.parse(loaded.text);
+  } catch {
+    return { note: null, reason: 'unparseable', text: loaded.text };
+  }
+  if (validateArrival(note, { sessionKey })) return { note: null, reason: 'invalid', text: loaded.text };
+  return { note, text: loaded.text };
+}
+
+function dropArrival(file, loaded, limits = LIMITS) {
+  return typeof loaded.text === 'string' ? consumeRecord(file, loaded.text, limits) : false;
+}
+
+function heldArrival(locations, sessionKey, record, limits = LIMITS) {
+  const file = arrivalFile(locations, sessionKey);
+  const loaded = loadArrival(file, sessionKey, limits);
+  if (loaded.note && record && loaded.note.agent_id === record.agent_id && loaded.note.ticket === record.ticket) {
+    return { file, loaded, note: loaded.note };
+  }
+  dropArrival(file, loaded, limits);
+  return { file, loaded, note: null };
+}
+
+function retireArrival(locations, sessionKey, agentId, limits = LIMITS) {
+  const file = arrivalFile(locations, sessionKey);
+  const loaded = loadArrival(file, sessionKey, limits);
+  if (loaded.note && loaded.note.agent_id !== agentId) return false;
+  return dropArrival(file, loaded, limits);
+}
+
 function retireFanoutArrivals(locations, sessionKey, lines, limits = LIMITS) {
   const directory = fanoutDirectory(locations, sessionKey);
   if (!directory) return 0;
@@ -496,9 +556,66 @@ function none(reason, retired = 0) {
   return { verdict: 'none', reason, retired };
 }
 
+function idle(reason, retired = 0) {
+  return { pending: false, reason, retired };
+}
+
+function arrivalSessionKey(payload) {
+  try {
+    const key = canonicalSessionKey(payload.session_id);
+    return SESSION_KEY_RE.test(key) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+function noteArrival(payload, options, limits = LIMITS) {
+  if (!isPlainObject(payload) || typeof payload.prompt !== 'string') return idle('prompt');
+  if (payload.hook_event_name !== 'UserPromptSubmit' || classifyPreToolPayload(payload) !== PRINCIPALS.MAIN) {
+    return idle('principal');
+  }
+  const sessionKey = arrivalSessionKey(payload);
+  if (!sessionKey) return idle('session');
+  let locations;
+  try {
+    locations = storeLocations(options.pluginData);
+  } catch {
+    return idle('store');
+  }
+  const lines = promptLines(payload.prompt);
+  const retired = retireFanoutArrivals(locations, sessionKey, lines, limits);
+  const loaded = loadRecord(path.join(locations.records, recordFileName(sessionKey)), sessionKey, limits);
+  const held = heldArrival(locations, sessionKey, loaded.record, limits);
+  if (!loaded.record) return idle(loaded.reason, retired);
+  const agentId = loaded.record.agent_id;
+  const scan = scanLines(lines, agentId);
+  if (scan.arrival && scan.status === COMPLETED_STATUS) {
+    if (!held.note) {
+      const note = {
+        schema: SCHEMA,
+        session_key: sessionKey,
+        agent_id: agentId,
+        ticket: loaded.record.ticket,
+        arrival: scan.arrival,
+        arrived_at_ms: options.now === undefined ? Date.now() : options.now,
+        holds: 0,
+      };
+      try {
+        writeFileAtomic(locations.arrivals, recordFileName(sessionKey), `${JSON.stringify(note)}\n`);
+      } catch { }
+    }
+    return { pending: true, agentId, source: 'prompt', retired };
+  }
+  if (held.note) return { pending: true, agentId, source: 'note', retired };
+  if (scan.arrival) return { pending: true, agentId, source: 'prompt', retired };
+  return idle('no-arrival', retired);
+}
+
 function matchArrival(payload, options, limits = LIMITS) {
   const sessionKey = requireSessionKey(options.sessionKey);
-  const prompt = isPlainObject(payload) && typeof payload.prompt === 'string' ? payload.prompt : null;
+  const recovery = options.recovery === true;
+  let prompt = isPlainObject(payload) && typeof payload.prompt === 'string' ? payload.prompt : null;
+  if (recovery) prompt = '';
   if (prompt === null) return none('prompt');
   let locations;
   try {
@@ -510,15 +627,20 @@ function matchArrival(payload, options, limits = LIMITS) {
   const retired = retireFanoutArrivals(locations, sessionKey, lines, limits);
   const file = path.join(locations.records, recordFileName(sessionKey));
   const loaded = loadRecord(file, sessionKey, limits);
+  const held = heldArrival(locations, sessionKey, loaded.record, limits);
   if (!loaded.record) return none(loaded.reason, retired);
   const scan = scanLines(lines, loaded.record.agent_id);
-  if (!scan.arrival) return none('no-arrival', retired);
+  if (!scan.arrival && !held.note) return none('no-arrival', retired);
   if (issuedTicket(options.stateFile, sessionKey, limits) !== loaded.record.ticket) {
+    if (held.note) dropArrival(held.file, held.loaded, limits);
     consumeRecord(file, loaded.text, limits);
     return none('stale-ticket', retired);
   }
-  if (scan.status === COMPLETED_STATUS) {
-    return { verdict: 'claim', arrival: scan.arrival, record: loaded.record, retired };
+  if (scan.arrival && scan.status === COMPLETED_STATUS) {
+    return { verdict: 'claim', arrival: scan.arrival, source: 'prompt', record: loaded.record, retired };
+  }
+  if (held.note) {
+    return { verdict: 'claim', arrival: held.note.arrival, source: 'note', record: loaded.record, retired };
   }
   if (!consumeRecord(file, loaded.text, limits)) return none('consumed-elsewhere', retired);
   return { verdict: 'ended', status: scan.status, record: loaded.record, retired };
@@ -535,12 +657,47 @@ function retireRecord(options, limits = LIMITS) {
   } catch {
     return { retired: false, reason: 'store' };
   }
+  retireArrival(locations, sessionKey, options.agentId, limits);
   const file = path.join(locations.records, recordFileName(sessionKey));
   const loaded = loadRecord(file, sessionKey, limits);
   if (!loaded.record) return { retired: false, reason: loaded.reason };
   if (loaded.record.agent_id !== options.agentId) return { retired: false, reason: 'other-agent' };
   if (!consumeRecord(file, loaded.text, limits)) return { retired: false, reason: 'consumed-elsewhere' };
   return { retired: true };
+}
+
+function deferArrival(options, limits = LIMITS) {
+  const sessionKey = requireSessionKey(options.sessionKey);
+  const now = options.now === undefined ? Date.now() : options.now;
+  const held = options.held === true;
+  let locations;
+  try {
+    locations = storeLocations(options.pluginData);
+  } catch {
+    return { deferred: false, reason: 'store' };
+  }
+  const file = path.join(locations.records, recordFileName(sessionKey));
+  const loaded = loadRecord(file, sessionKey, limits);
+  const arrival = heldArrival(locations, sessionKey, loaded.record, limits);
+  if (!loaded.record) return { deferred: false, reason: loaded.reason };
+  if (!arrival.note) return { deferred: false, reason: 'no-arrival' };
+  const holds = arrival.note.holds + (held ? 1 : 0);
+  let spent = null;
+  if (now - loaded.record.launched_at_ms >= limits.waitTtlMs) spent = 'expired';
+  else if (holds > limits.maxArrivalHolds) spent = 'holds';
+  if (spent) {
+    dropArrival(arrival.file, arrival.loaded, limits);
+    consumeRecord(file, loaded.text, limits);
+    return { deferred: false, reason: spent, spent: true };
+  }
+  if (held) {
+    try {
+      writeFileAtomic(locations.arrivals, recordFileName(sessionKey), `${JSON.stringify({ ...arrival.note, holds })}\n`);
+    } catch {
+      return { deferred: false, reason: 'write' };
+    }
+  }
+  return { deferred: true, held, holds, maxHolds: limits.maxArrivalHolds };
 }
 
 function consumeWait(locations, sessionKey, options, limits, now) {
@@ -596,6 +753,7 @@ function matchLine(result) {
     return JSON.stringify({
       verdict: 'claim',
       arrival: result.arrival,
+      source: result.source,
       agentId: result.record.agent_id,
       ticket: result.record.ticket,
       prompt: result.record.header.join('\n'),
@@ -630,6 +788,17 @@ function retireLine(result) {
   return result.retired ? 'retired' : `kept reason=${result.reason}`;
 }
 
+function arriveLine(result) {
+  return result.pending
+    ? `pending agent=${result.agentId} source=${result.source} retired=${result.retired}`
+    : `idle reason=${result.reason} retired=${result.retired || 0}`;
+}
+
+function deferLine(result) {
+  if (result.deferred) return result.held ? `hold count=${result.holds} of=${result.maxHolds}` : 'release';
+  return result.spent ? `spent reason=${result.reason}` : `idle reason=${result.reason}`;
+}
+
 function readStdin(maxBytes) {
   const raw = fs.readFileSync(0);
   if (raw.length > maxBytes) return null;
@@ -653,6 +822,8 @@ function envOptions(env) {
     stateFile: env.ZENSU_BR_STATE_FILE,
     envelope: env.ZENSU_BR_ENVELOPE,
     agentId: env.ZENSU_BR_AGENT,
+    recovery: env.ZENSU_BR_RECOVERY === '1',
+    held: env.ZENSU_BR_HELD === '1',
   };
 }
 
@@ -672,6 +843,17 @@ function main(argv, env = process.env, io = {}) {
     }
     write(`${recordLine(result)}\n`);
     return result.recorded ? 0 : 3;
+  }
+  if (mode === 'arrive') {
+    let result;
+    try {
+      const payload = parsePayload(readInput(LIMITS.maxPayloadBytes));
+      result = payload ? noteArrival(payload, envOptions(env)) : idle('payload');
+    } catch {
+      result = idle('fault');
+    }
+    write(`${arriveLine(result)}\n`);
+    return 0;
   }
   if (mode === 'match') {
     let result;
@@ -694,6 +876,16 @@ function main(argv, env = process.env, io = {}) {
     write(`${retireLine(result)}\n`);
     return 0;
   }
+  if (mode === 'defer') {
+    let result;
+    try {
+      result = deferArrival(envOptions(env));
+    } catch {
+      result = { deferred: false, reason: 'fault' };
+    }
+    write(`${deferLine(result)}\n`);
+    return 0;
+  }
   if (mode === 'wait') {
     let result;
     try {
@@ -704,7 +896,7 @@ function main(argv, env = process.env, io = {}) {
     write(`${waitLine(result)}\n`);
     return 0;
   }
-  process.stderr.write('usage: background-review-v1.js record|fanout|match|retire|wait\n');
+  process.stderr.write('usage: background-review-v1.js record|fanout|arrive|match|retire|defer|wait\n');
   return 2;
 }
 
@@ -713,8 +905,10 @@ module.exports = {
   STORE_SEGMENTS,
   RECORDS_SEGMENT,
   FANOUT_SEGMENT,
+  ARRIVALS_SEGMENT,
   RECORD_KEYS,
   FANOUT_KEYS,
+  ARRIVAL_KEYS,
   FANOUT_TYPES,
   VERDICTS,
   ARRIVALS,
@@ -726,6 +920,7 @@ module.exports = {
   ttlMinutes,
   validateRecord,
   validateFanout,
+  validateArrival,
   headerProblem,
   storeLocations,
   issuedTicket,
@@ -734,13 +929,17 @@ module.exports = {
   recordFanout,
   scanPrompt,
   consumeRecord,
+  noteArrival,
   matchArrival,
   retireRecord,
+  deferArrival,
   waitVerdict,
   matchLine,
   recordLine,
   waitLine,
   retireLine,
+  arriveLine,
+  deferLine,
   main,
 };
 
