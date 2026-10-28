@@ -304,7 +304,8 @@
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-review-handback.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-review-handback.sh\"",
+            "timeout": 180
           }
         ]
       }

@@ -221,19 +221,24 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
 - **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
   the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
   without a `node` child unless the prompt carries one of the two markers and the store holds a
-  pending record or entry. A fan-out agent's arrival retires its entry. The consume reviewer's
-  arrival claims the ticket once, through the claim the foreground path uses, and returns that
-  path's routing directive as context of the prompt. A hand-back retires the record only after
-  the claim, so a hand-back the host abandons halfway, or whose claim fails, leaves the record
-  for the notification that follows. The notification is the last arrival, so it retires the
-  record whether its claim succeeds, fails or is killed, and the next Stop no longer waits for a
-  reviewer that has already reported. A frame counts only on a line of its own at column zero that the host's `[Subagent hand-back]`
-  line follows, because the host indents every line of a report it forwards. A notification with
-  another status, such as `failed`, ends the consume record without a claim and asks for a
-  re-spawn with the same ticket. While `hooks.reviewPacketGate` is on, the gate checks the
-  consume reviewer's arrival once more before the claim, against the digest it recorded at the
-  launch and with the report the hand-back carries; a refusal keeps the ticket unconsumed, ends
-  the record and names the re-spawn.
+  pending record or entry, or the store holds an arrival note. Its first `node` child,
+  `background-review-v1.js arrive`, retires every fan-out entry the prompt names and, for a
+  completed arrival of the session's pending consume reviewer, writes an arrival note under
+  `arrivals/` before anything is claimed. It does either only for a prompt of the main thread: a
+  payload that names a subagent (`agent_id` or `agent_type`) or another hook event changes
+  nothing. Only an arrival the consume record still waits for starts the post-review hook, which
+  claims the ticket once, through the claim the foreground path uses, and returns that path's
+  routing directive as context of the prompt. Record and note are retired together right after the
+  claim and on every deliberate refusal. A claim that fails,
+  or that a kill of the hook cuts off, keeps both, so the notification, the next Stop or the next
+  prompt completes it. A frame counts only on a line of its own at column zero that the host's
+  `[Subagent hand-back]` line follows, because the host indents every line of a report it
+  forwards. A notification with another status, such as `failed`, ends the consume record without
+  a claim and asks for a re-spawn with the same ticket, unless a note already records the
+  completed report. While `hooks.reviewPacketGate` is on, the gate checks the consume reviewer's
+  arrival once more before the claim, against the digest it recorded at the launch and with the
+  report the hand-back carries; a refusal keeps the ticket unconsumed, retires the record and its
+  note and names the re-spawn.
 - **Panel and judges under the packet gate.** While `hooks.reviewPacketGate` is on, a
   `zensu:review-aspect`, `zensu:review-judge` or `zensu-review-*` launch is recorded in the gate's
   store with its agent id and its packet digest. It counts as no run and never as a failed judge,
@@ -242,13 +247,30 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   app sends no hand-back, so those launches never complete, and the consume check refuses with a
   hint to wait for them or to ask the user whether to set the key to `false`
   ([gates.md](gates.md#review-packet-gate)).
-- **Stop.** While a consume record younger than 60 minutes still matches the issued ticket, or a
-  fan-out entry younger than 60 minutes exists, the Stop guard releases a standalone chain's turn
-  end with one stderr line and charges no review budget. An Autopilot-bound chain is held instead:
-  its Stop blocks, names the agents that still run, and does not count against the inner Stop
-  budget. A session that owns a live Autopilot run without a bound chain, and a Stop that adopted
-  a deferred review, take neither; their resume directive opens with a sentence naming the
-  running agents.
+- **Claim deadline.** The prompt hook is registered with a `timeout` of 180 seconds. A
+  `UserPromptSubmit` hook without one gets 30 seconds (Claude Code 2.1.308), and one claim under
+  load took longer: the measured incident cancelled the hand-back hook at 30.1 s and its resend at
+  31.0 s, and no completion notification followed. The claim starts only while 45 of the 180
+  seconds remain; past that the prompt carries a notice that the claim completes at the next Stop
+  or prompt, and the ticket stays untouched.
+- **Stop.** A Stop whose store holds an arrival note beside the consume record first runs the
+  post-review hook in its recovery mode, which claims the ticket from the note and blocks with the
+  routing directive. It starts that claim only while the Stop has more than 20 seconds left before
+  its deadline, the Stop guard's own (45 seconds by default) or, when the hook runs without that
+  guard, its registered 90-second timeout, and stops a claim that has not reached the ticket by
+  then, so a slow claim never costs the Stop its decision. While a consume record younger than 60
+  minutes still matches the issued ticket, or a fan-out entry younger than 60 minutes exists, the
+  Stop guard releases a standalone chain's turn end with one stderr line and charges no review
+  budget. An Autopilot-bound chain is held instead: its Stop blocks, names the agents that still
+  run, and does not count against the inner Stop budget. When the claim from a note did not
+  complete in that Stop, both say that the report arrived and its claim is pending instead. A Stop
+  that is not released, such as an Autopilot-bound chain's or a standalone chain's whose wait
+  could not be read, says so at most three times for one claim and names the attempt; the
+  next one that still cannot claim it retires the record and its note, and so does any Stop whose
+  claim still fails 60 minutes after the launch, so the resume directive then runs the review
+  again. A session that owns a live Autopilot run
+  without a bound chain, and a Stop that adopted a deferred review, take neither; their resume
+  directive opens with a sentence naming the running agents, or the pending claim.
 
 **Residuals.** The arrival relies on the host firing `UserPromptSubmit` for queued prompts, as
 measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
@@ -256,9 +278,11 @@ resume directive applies again. The column-zero rule rests on the host indenting
 a peer message the host does not indent, and that names a pending agent id, could still carry a
 forged frame; that id sits only in the session's own `0600` store. A notification that says
 no report was delivered still claims the ticket, and the directive tells the main thread to ask
-the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
-runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
-post-review hook.
+the reviewer for its report with `SendMessage` first. A kill that lands after the ticket is
+consumed and before the directive is emitted still loses that directive; the claim starts only
+with the deadline's margin left, and only the claim-field parse, the record retire and the emit
+run after it. While any session's arrival note is pending, every prompt of every session in the
+plugin pays one `node` child for `arrive`.
 
 #### Custom review personas (repo-local)
 
