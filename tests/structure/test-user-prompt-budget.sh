@@ -14,6 +14,14 @@ printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
 mkdir -p "$CLAUDE_PLUGIN_DATA"
 
+# Task prose now probes context discovery. Keep this aggregate budget fixture
+# offline and deterministic even when the developer has an authenticated CLI.
+# The context suite separately exercises successful discovery and package reads.
+mkdir -p "$WORK/bin"
+printf '#!/bin/sh\nexit 1\n' > "$WORK/bin/zensu"
+chmod +x "$WORK/bin/zensu"
+export PATH="$WORK/bin:$PATH"
+
 PASS=0; FAIL=0
 check() {
   local label="$1" cond="$2"
@@ -169,6 +177,7 @@ BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-pro
 
 budget() {
   case "${3:-first}:$1:$2" in
+    *:user-prompt-context-auto-load.sh:typed) echo "300 400" ;;
     *:user-prompt-context-auto-load.sh:*) echo "0 0" ;;
     *:user-prompt-context-nudge.sh:*) echo "0 0" ;;
     first:user-prompt-intent-router.sh:typed) echo "2000 2200" ;;
@@ -190,10 +199,10 @@ budget() {
 
 total_budget() {
   case "$2:$1" in
-    first:typed) echo 11270 ;;
+    first:typed) echo 11670 ;;
     first:ci) echo 4020 ;;
     first:*) echo 3670 ;;
-    repeat:typed) echo 5470 ;;
+    repeat:typed) echo 5870 ;;
     repeat:ci) echo 2320 ;;
     *) echo 1970 ;;
   esac
