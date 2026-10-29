@@ -1,6 +1,6 @@
 #!/bin/bash
-# Pins the parallel review fan-out wiring in the /zensu:tdd review chain:
-#   skills/tdd/SKILL.md Phase 6.10 spawns the panel's zensu:review-aspect agents in ONE parallel
+# Pins the parallel review fan-out wiring in the /zensu:build review chain:
+#   skills/build/SKILL.md Phase 6.10 spawns the panel's zensu:review-aspect agents in ONE parallel
 #   batch, merges their findings in-thread, then spawns ONE thin zensu:code-reviewer in
 #   "fan-out consume mode" (marker: PRE-MERGED FINDINGS (fan-out)) so the existing
 #   post-review hook fires exactly once per round and the downstream chain is unchanged.
@@ -9,7 +9,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+SKILL_MD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 REVIEWER_MD="$PLUGIN_DIR/agents/code-reviewer.md"
 
 PASS=0; FAIL=0
@@ -29,7 +29,7 @@ for f in "$SKILL_MD" "$REVIEWER_MD"; do
 done
 check "F0 skill + code-reviewer files exist" PASS
 
-# --- skills/tdd/SKILL.md Phase 6.10: fan-out -> merge -> thin spawn ---
+# --- skills/build/SKILL.md Phase 6.10: fan-out -> merge -> thin spawn ---
 
 grep -qF 'zensu:review-aspect' "$SKILL_MD" \
   && check "F1 skill spawns zensu:review-aspect aspects" PASS || check "F1 review-aspect spawn" FAIL
@@ -74,7 +74,7 @@ fi
 grep -qF "subagent_type='zensu:code-reviewer'" "$SKILL_MD" \
   && check "F7 skill still spawns zensu:code-reviewer (hook trigger preserved)" PASS || check "F7 code-reviewer spawn preserved" FAIL
 
-# Once Autopilot has crossed its single planning gate, the delegated TDD chain
+# Once Autopilot has crossed its single planning gate, the delegated build chain
 # may report a durable BLOCK but may not open a second interactive decision.
 UNQUALIFIED_ASKS="$(SKILL_MD="$SKILL_MD" node -e '
   const fs = require("fs");

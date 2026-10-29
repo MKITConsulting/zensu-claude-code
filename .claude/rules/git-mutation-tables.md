@@ -329,14 +329,14 @@ transparent to the CLI gate and not to rule (C).
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
 `hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the
 predicate was already anchored: it decides `mayHoldWorkspace`, so an unanchored spelling
-reports `<project>/..bak` as a FREE workspace and lets a standalone `/zensu:tdd` chain arm
+reports `<project>/..bak` as a FREE workspace and lets a standalone `/zensu:build` chain arm
 underneath a live durable run in the same tree. W18b in
 `tests/structure/test-autopilot-state-machine.sh` pins both of its anchoring clauses and
 forbids the bare `startsWith("..")` form returning; W18 alone did not, and no fixture
 builds a `..`-prefixed worktree, so the revert was green from both directions — and the same
 predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
-`hooks/lib/zensu-tdd-phase.sh` (an inline `const within` inside its `node -e`
-native-path validator), with an UNANCHORED `startsWith("..")` variant in
+`hooks/lib/state-path-safety-v1.js` (the path walk that `_tdd_paths_safe` and the tdd-phase
+lease processes load), with an UNANCHORED `startsWith("..")` variant in
 `finding-verify-v1.js` that has the `..bak` defect this gate fixed.
 `skills/session-trail/scripts/trail.mjs` is NO LONGER on that list and was the FIRST
 consumer that proved the seam works; `hooks/lib/plugin-data-guard-v1.js` is the SECOND, which

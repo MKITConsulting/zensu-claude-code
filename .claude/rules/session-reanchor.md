@@ -95,13 +95,21 @@ set-aside name is `<key>.superseded-reanchor-<UTC stamp>.json`, so a second move
 with the first. Provenance, the lease sweep, the keep-anchor move and the marker move run AFTER
 the lock, and each reports its own outcome rather than failing the move.
 
-**Per-session markers move with the anchor.** `tdd-mode-<key>.json`, `delivery-route-<key>.json`
-and `zen-mode-<key>.json` live under the project root, so a marker left behind stops applying. They
-are RENAMED into the new root's state directory, replacing a stale copy of this session's own
-marker there; a marker that is not a regular file, or a `.zensu`/`.zensu/state` component that is
-not a plain directory, is left in place and reported as a `marker fault`. The three names are the
-path templates of `zensu-config.sh` and `zensu-zen-mode.sh`; a new per-session marker belongs in
-`SESSION_MARKERS` too.
+**Per-session markers move with the anchor.** `tdd-mode-<key>.json`, `delivery-route-<key>.json`,
+`full-suite-<key>.json` and `zen-mode-<key>.json` live under the project root, so a marker left
+behind stops applying. They are RENAMED into the new root's state directory, replacing a stale copy
+of this session's own marker there; a marker that is not a regular file, or a `.zensu`/`.zensu/state`
+component that is not a plain directory, is left in place and reported as a `marker fault`. The four
+names are the path templates of `zensu-config.sh` and `zensu-zen-mode.sh`, and the exported
+`SESSION_MARKERS` is the one list of them: `renderReanchorVerdict` builds its sentence from it, and
+the marker case in `session-reanchor-v1.test.js` derives the kinds from the templates of both files
+and requires them equal to it, so a template added there without joining the list fails that case.
+A template in any other file is not seen. `docs/session-control.md` names the four markers;
+`skills/adopt-session/SKILL.md` says "per-session markers" and names none. A full-suite marker left
+behind costs more than a preference: `local` wins in any rank of the full-suite ladder, so a `local`
+session choice left under the old root would let a `ci` choice of the clone or of
+`evidence.fullSuiteRunner` decide the next chain. `E9j` in `test-session-reanchor.sh` reads the
+moved marker through `zensu_full_suite_marker_state`, the reader the full-suite policy consumes.
 
 **Provenance is a history VALUE, reserved in both guard bodies.** `PROJECT_ROOT_REANCHORED` and
 the `project-root-reanchored: ` reason prefix sit beside the other reserved pairs in
@@ -167,7 +175,7 @@ The re-anchor runs only in a bound session, the recognizer admits it in no shape
 `zensu_resolve_project_dir` — writes nothing, and refuses any argument with exit 2. The host keeps
 the Bash tool in the session's start directory, and `CLAUDE_PROJECT_DIR` is unset there, so a path
 a skill builds from `${CLAUDE_PROJECT_DIR:-.}` names the previous root after a move while every
-`--*` verb binds the new one. `/zensu:tdd` therefore reads `{project_root}` once in Phase 0 and
+`--*` verb binds the new one. `/zensu:build` therefore reads `{project_root}` once in Phase 0 and
 derives `{log_file}`, `{plan_file}`, `BASELINE_SHA`, the edit-landing `--project`, the step 10.1
 plan bound, `TOP`, the plan template and the persona directory from it, and it runs every project
 command it prescribes — test runs, checkpoints, the build, coverage and the step 5 `stat` — as
@@ -180,7 +188,7 @@ recorded `down` included, and the three `--tdd-complete` refusal remedies name i
 ambient spelling. Every `cd` into the root is spelled without `--`: the root is absolute, and
 `bash-source-write-parse.js` takes the token after `cd` as the directory, an accepted gap its header
 names, so `cd -- "<root>"` would scope rules (B) and (C) to `<cwd>/--`. Every plan glob keeps the
-root inside double quotes (`"{project_root}"/.zensu/plans/*_tdd-*.md`), because the verb refuses
+root inside double quotes (`"{project_root}"/.zensu/plans/*_build-*.md`), because the verb refuses
 none of the characters a glob or word splitting acts on.
 
 **The skills paste the root into double-quoted shell source, so the verb refuses a root it cannot
@@ -212,7 +220,7 @@ rule keeps a session recorded in a subdirectory able to run its suite from the w
 
 `test-tdd-log-path-anchor.sh` L8 fails when any `skills/*/SKILL.md` spells
 `${CLAUDE_PROJECT_DIR:-.}`, and `test-session-reanchor.sh` E10 runs the chain from the start
-directory after a move with the spans it EXTRACTS from `skills/tdd/SKILL.md` and its references,
+directory after a move with the spans it EXTRACTS from `skills/build/SKILL.md` and its references,
 `skills/self-review/SKILL.md` and `skills/verify-feature/SKILL.md`. Rewording the `{log_file}` or
 `{plan_file}` definition, the Phase 0, Phase 2, step 5b a) or step 10.1 command, the Phase 1 `cd`
 rule, the Phase 6 step 1 evidence run, self-review's root derivation or verify-feature's git root
@@ -238,14 +246,14 @@ own workspace fences, and a fresh session started in the target has the same rea
 the session's start directory and the Bash tool returns there, so a command the user runs outside
 the skills named above needs a `cd` into the new anchor, and what other skills read through the
 working directory — `/zensu:plan-review`'s plan and persona discovery, `/zensu:setup`'s
-project-local config target, the load-time overlays of `/zensu:tdd` and `/zensu:cover`, the
+project-local config target, the load-time overlays of `/zensu:build` and `/zensu:cover`, the
 templates of `/zensu:autopilot` and `/zensu:pilot`, and the checkout `/zensu:autopilot` opens its
 pull request from — still comes from the start directory's worktree of the same repository; the
 source-write gate reads its project-level `hooks.bashWriteGate` opt-in through the host's
 `CLAUDE_PROJECT_DIR`, ahead of its bind, so after a move the start worktree's
 `.zensu/config.json` still decides whether the gate runs; a
 project whose root holds a double quote, a dollar sign, a backtick or a backslash cannot run
-`/zensu:tdd`, because `--project-root` refuses it; open work under the old root must reach its end
+`/zensu:build`, because `--project-root` refuses it; open work under the old root must reach its end
 first;
 `/zensu:doctor` has no row for a session working outside its anchor; Windows is unmeasured, since
 the suite is in `ciStructureTests` but in no Windows CI profile; the ports (`zensu-codex`,

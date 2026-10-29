@@ -116,6 +116,13 @@ LARGE_SUB="$PROJECT/large-subagent.json"
 large_payload "$LARGE_MAIN"
 large_payload "$LARGE_SUB" general-purpose
 
+run "B48 capture start in direct mode" "zensu ai-work start --id goal --title agreed" '' ALLOW
+run "B48b capture submit in direct mode" "zensu ai-work submit goal --event-id event" '' ALLOW
+run "B48c capture start denied to child" "zensu ai-work start --id goal --title agreed" general-purpose DENY
+run "B48d capture submit denied to child" "zensu ai-work submit goal --event-id event" general-purpose DENY
+run "B48e capture does not allow chained mutation" "zensu ai-work start --id goal --title agreed && zensu security classify f1" '' DENY
+run "B48f capture reads remain reads" "zensu ai-work context && zensu ai-work get goal" '' ALLOW
+
 run "B5 read (features get)"                "zensu features get f1"                                      '' ALLOW
 run "B6 freelance mutation (classify)"      "zensu security classify f1 --classification confidential"   '' DENY
 run "B7 neutral zensu-plm has no mutation exemption" "zensu security classify f1"                    zensu-plm DENY
@@ -253,6 +260,14 @@ else
   check "B50 workflow read once per run (decision:node-spawns one=$SPAWNS_ONE three=$SPAWNS_THREE)" FAIL
 fi
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+
+B52_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat > \"\$f\" <<'ZENSU_TEXT_END'" \
+  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'zensu link docs f1 \' \
+  '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content "$(cat "$f")"')"
+tdd_workflow_begin gate-test "link_docs" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+run "B52 the skills' free-text form (a quoted heredoc into a temporary file, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+run "B52b the same free-text form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
 
 # B9 env escape; B10 default-on; B11 explicit false
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"

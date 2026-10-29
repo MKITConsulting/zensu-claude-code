@@ -37,9 +37,10 @@ It is `claude-principal-v1.js`'s `REVIEWER_TYPES` ∪ `EVIDENCE_WORKER_TYPES` �
 classifier `SubagentStart` uses to inject `reviewer-readonly-v1` and `evidence-worker-v1` —
 restricted to the plugin-scoped `zensu:` spellings. Adding a confined agent there reaches this grant with no edit
 here, and CLAUDE.md's standing "grep before renaming `zensu:code-reviewer`" instruction keeps
-holding. **One narrowing is deliberate and load-bearing:** `REVIEWER_TYPES` also carries the
-BARE names (`code-reviewer`, …) so `--agents` fixtures and same-named PROJECT agents get the
-read-only principal. Those are not our files — a project may define `code-reviewer` with
+holding. **One narrowing is deliberate and load-bearing:** `REVIEWER_TYPES` carries the
+BARE names (`code-reviewer`, …) only under the `--agents` evaluation opt-in
+`ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=1`, so eval fixtures get the read-only principal while
+a same-named PROJECT agent stays an ordinary neutral child. Those are not our files — a project may define `code-reviewer` with
 `tools: Bash`, and the principal classification is prompt-level policy while `tools:`
 frontmatter is what the harness enforces. Granting a bare name would hand a project-authored
 agent a classifier-free spawn. **That scope reservation is an UNVERIFIED premise** — nothing in
@@ -60,7 +61,7 @@ hook always exits 0; do not "harden" it into a gate.
 `hooks.reviewerSpawnAutoAllow` not exactly `false`, and set membership. **The armed-chain
 condition was specified and then REJECTED on discovery** — `plan-review-worker` and
 `pr-review-worker` are spawned by `/zensu:plan-review` and `/zensu:pr-team-review`, neither of
-which arms a TDD chain or calls `--workflow-begin`, so a chain condition would ship a grant
+which arms a build chain or calls `--workflow-begin`, so a chain condition would ship a grant
 missing two of the five. The lease alternative was rejected too: the lease is minted by skill
 prose the gate cannot verify, and this file already records that module's store layout as a
 repeated drift source. What bounds the risk is CONFINEMENT, not chain state — the grant admits
@@ -122,7 +123,7 @@ Operator-facing accounts: `docs/gates.md` §"Reviewer-Spawn Grant", the hook row
 `configuration.md#hooks-N` cross-link in `docs/architecture.md`. `test-readme-hook-count-sync`
 H2 turns red on the header count and H3 on any inconsistent reference; `docs/architecture.md`
 was outside H3's file list until this change added it, so that cross-link was the one
-occurrence nothing scanned, `docs/tdd-manager-workflow.md` §"The preventive layer", and the
+occurrence nothing scanned, `docs/build-workflow.md` §"The preventive layer", and the
 reviewer-spawn bullets in `skills/doctor/SKILL.md` — do not restate a COUNT here, because the
 next row added invalidates it; `A24` in `test-reviewer-spawn-allow.sh` is what holds the roster
 against the renderer, and its phrase list is the thing to extend when a row is added.

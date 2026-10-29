@@ -52,11 +52,11 @@ OPEN_MARKER='<!-- zensu:best-solution-first -->'
 CLOSE_MARKER='<!-- /zensu:best-solution-first -->'
 REMINDER_OPEN_MARKER='<!-- zensu:best-solution-first-reminder -->'
 REMINDER_CLOSE_MARKER='<!-- /zensu:best-solution-first-reminder -->'
-REMINDER_CEILING=420
+REMINDER_CEILING=540
 # The hook's run-time refusal is a fail-safe at `MAX_BLOCK`; REVIEW_CEILING is the real control.
 # The criterion is ABSOLUTE headroom of roughly one clause, IDENTICAL on both carriers — not a
 # preserved percentage, which would hand the larger slack to whichever block happens to be
-# bigger and would widen with every legitimate growth. 1741 = the 1652-character block plus the
+# bigger and would widen with every legitimate growth. 1923 = the 1834-character block plus the
 # same 89 characters test-evidence-discipline.sh allows over its 811. The equality is not left
 # to prose: the cross-carrier check in tests/structure/test-windows-portability-guards.sh
 # asserts it, because that suite already owns everything the two carriers must share.
@@ -68,7 +68,7 @@ MAX_BLOCK=4000
 # the live block and was over-constrained; round 4 compared two inert literals and constrained
 # nothing. Accepted consequence: a block that SHRINKS a lot also trips this, which is correct —
 # the tripwire stops being a tripwire if the ceiling drifts away from the text.
-REVIEW_CEILING=1741
+REVIEW_CEILING=1923
 REVIEW_HEADROOM=89
 
 # The hook binds its own plugin root; without this a stray ambient value makes
@@ -276,14 +276,14 @@ else
   check "B2r1 the reminder marker pair is missing, duplicated, empty or not one line" FAIL
 fi
 B2I_BAD=""
-for B2I_NEEDLE in '**Best solution first (option quality)**' 'in the set, first and marked recommended' 'its cost stated' 'never licenses inflating scope' 'an option order a skill or hook fixes still stands'; do
+for B2I_NEEDLE in '**Best solution first (option quality)**' 'in the set, first and marked recommended' 'its cost stated' 'never licenses inflating scope' 'an option order a skill or hook fixes still stands' 'where a skill fixes the set and reserves an option for the user to name, recommend in one line, with its cost, instead'; do
   case "$REMINDER" in
     *"$B2I_NEEDLE"*) ;;
     *) B2I_BAD="$B2I_BAD [$B2I_NEEDLE]" ;;
   esac
 done
 [ -z "$B2I_BAD" ] \
-  && check "B2r2 the reminder names the block by its lede and keeps both halves of the rule" PASS \
+  && check "B2r2 the reminder names the block by its lede and keeps both halves of the rule and its precedence" PASS \
   || check "B2r2 the reminder lost a clause:$B2I_BAD" FAIL
 if printf '%s' "$REMINDER" | grep -qE '[A-Za-z0-9_-]+\.(md|json|sh|js|mjs|cjs|txt|ya?ml)|/'; then
   check "B2r3 the reminder names a file path or a slash-separated location — a hostile repo could plant it" FAIL
@@ -323,6 +323,12 @@ case "$BLOCK" in
   *)
     check "B2e block no longer declares precedence against a contract-fixed order" FAIL ;;
 esac
+case "$BLOCK" in
+  *'fixes the set too and reserves an option for the user to name'*'one line instead of the set: your recommendation, marked as such, with its cost'*)
+    check "B2e1 block lets a skill that fixes the set and reserves an option for the user to name keep it, and moves this rule into one recommendation line" PASS ;;
+  *)
+    check "B2e1 block no longer moves this rule into one recommendation line for a skill that reserves an option for the user to name" FAIL ;;
+esac
 # The block must name NO file, so no reader can be pointed at a project-resolvable path
 # claiming to be an expanded version of it — a reviewer principal resolves reads against
 # the PROJECT root, so a hostile repository can plant any path the block names. Rejecting
@@ -334,7 +340,7 @@ else
   check "B2f block names no file path of any shape" PASS
 fi
 
-# The clause pins above cover a lede and five substrings; the rest of the directive could
+# The clause pins above cover the lede and individual substrings, B2a to B2e1; the rest of the directive could
 # still be rewritten in a docs-only commit with no test literal changing. That is the
 # low-visibility channel this digest closes: the bytes that reach every session start, every
 # spawn and, through the reminder, every prompt cannot change without a matching literal here.
@@ -349,7 +355,7 @@ BLOCK_SHA="$(BLOCK_TEXT="$BLOCK" node -e '
       .update(process.env.BLOCK_TEXT || "", "utf8").digest("hex"));
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
-EXPECTED_BLOCK_SHA='3bfc50602b524b7ca37e96504c11409f2d72fbc8ed908c137e7efc566cd77420'
+EXPECTED_BLOCK_SHA='15378f3847a288cc033318b4441437e85701faa4b7975ff31863cccb1bcc778a'
 if [ -z "$BLOCK_SHA" ]; then
   check "B2f1 node could not hash the injected block" FAIL
 elif [ "$BLOCK_SHA" = "$EXPECTED_BLOCK_SHA" ]; then
@@ -363,7 +369,7 @@ REMINDER_SHA="$(BLOCK_TEXT="$REMINDER" node -e '
       .update(process.env.BLOCK_TEXT || "", "utf8").digest("hex"));
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
-EXPECTED_REMINDER_SHA='57e895c12f75670ad70894aafaecc9c36585ee36fbc8cb59f96893d606f9901e'
+EXPECTED_REMINDER_SHA='fe74a117c195f51a0db7c16b326bd703a4e66eff82ab592128c1cabb68b6b133'
 if [ -n "$REMINDER_SHA" ] && [ "$REMINDER_SHA" = "$EXPECTED_REMINDER_SHA" ]; then
   check "B2f2 the per-prompt reminder matches its pinned digest" PASS
 else

@@ -387,9 +387,9 @@ echo "== Ask-hooks: mode-aware directives =="
 SID_PLAN="vanilla-plan"
 PA_V="$(printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"ExitPlanMode","session_id":"'"$SID_PLAN"'"}' | hook_ctx "$PLANHOOK" "$CFG_VANILLA")"
 { printf '%s' "$PA_V" | grep -q "vanilla" \
-  && printf '%s' "$PA_V" | grep -qF "skill='zensu:tdd'" \
+  && printf '%s' "$PA_V" | grep -qF "skill='zensu:build'" \
   && printf '%s' "$PA_V" | grep -q "AskUserQuestion" \
-  && printf '%s' "$PA_V" | grep -qF "Skipping TDD: docs only" \
+  && printf '%s' "$PA_V" | grep -qF "Skipping /zensu:build: docs only" \
   && ! printf '%s' "$PA_V" | grep -qF "strict TDD flow"; } \
   && check "F1 plan-approval (vanilla cfg): vanilla wording + skill route + ask + docs fast-path, no strict text" PASS \
   || check "F1 plan-approval vanilla directive" FAIL
@@ -401,7 +401,7 @@ PA_D="$(printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"ExitPlanMode"
   && check "F2b plan-approval (default cfg): vanilla directive — default flipped to vanilla" PASS || check "F2b plan-approval default vanilla" FAIL
 RM_V="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"implement a debounce helper","session_id":"vanilla-ask-v"}' | hook_ctx "$REMINDER" "$CFG_VANILLA")"
 { printf '%s' "$RM_V" | grep -q "vanilla" \
-  && printf '%s' "$RM_V" | grep -qF "skill='zensu:tdd'" \
+  && printf '%s' "$RM_V" | grep -qF "skill='zensu:build'" \
   && printf '%s' "$RM_V" | grep -q "AskUserQuestion" \
   && printf '%s' "$RM_V" | grep -qF "doc/comment/prose" \
   && ! printf '%s' "$RM_V" | grep -qF "strict TDD flow"; } \
@@ -422,7 +422,7 @@ PR_V="$(postreview_ctx "$SID_B")"
   && ! printf '%s' "$PR_V" | grep -qF "strict TDD discipline" \
   && ! printf '%s' "$PR_V" | grep -qF "After the fixes are GREEN" \
   && printf '%s' "$PR_V" | grep -qF "After the fixes are applied" \
-  && printf '%s' "$PR_V" | grep -qF "/zensu:tdd" \
+  && printf '%s' "$PR_V" | grep -qF "/zensu:build" \
   && printf '%s' "$PR_V" | grep -qF "subagent_type='zensu:code-reviewer'"; } \
   && check "D6 post-review (vanilla session): vanilla fix wording + done-phrase, pinned literals retained" PASS \
   || check "D6 post-review vanilla directive" FAIL
@@ -484,9 +484,9 @@ parity() {
 # clauses are in the list for a stronger reason than symmetry — the (C)-over-(B)
 # override is what keeps a non-interactive run out of the branch-pushing route,
 # so a branch that lost it would still emit a plausible directive.
-P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "NEITHER /zensu:autopilot NOR /zensu:pilot is ever selected" "LAST, as the fallthrough once no surviving route was chosen above" "is never in the first slot, and its option description says the approval message excluded it" "REMOVE that route from the remaining FAST-PATH ARMS below" "still only among the routes that survive" "Overriding <route>: outward-facing route, no human present" "THIS plan is not carried into it" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "a file you read, tool output, a subagent report, a commit message" "Before applying ANY arm below" "That removal is scoped to the route-SELECTING arms" "in which case implement directly" "That override line REPLACES the route status line" "MUST also state what it does outwardly" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu" "(S) — read this before (A)" "and the route field reads 'ask'" "RECORD a Zensu-workflow answer before dispatching" "after the 'Zensu workflow — /zensu:tdd' answer run __ZENSU_ROUTE_COMMAND__ --tdd — this one Bash call comes BEFORE the 'next tool call' that arm names" "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back, then continue with the dispatch above" "The 'No — implement directly' answer records nothing and decides this plan only: never record it with --direct yourself" "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow, and that /zensu:delivery-route changes it." "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered, and that /zensu:delivery-route --direct makes implementing directly the route for the rest of this session." "a route the field decided records nothing" "ZENSU DELIVERY ROUTE:" "The field never names /zensu:autopilot or /zensu:pilot" "field at the top of this directive" "Unless (S) or a fast path below decides" "→ the Autopilot arm above" "→ the Pilot arm above" "takes the Zensu workflow arm above" "default to the Zensu workflow and do NOT ask")"
+P1="$(parity "$PLANHOOK" "Skipping /zensu:build: docs only" "Skipping /zensu:build: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "ZENSU HUMAN PRESENT: __ZENSU_HUMAN_PRESENT__" "skill='zensu:build'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "NEITHER /zensu:autopilot NOR /zensu:pilot is ever selected" "LAST, as the fallthrough once no surviving route was chosen above" "is never in the first slot, and its option description says the approval message excluded it" "REMOVE that route from the remaining FAST-PATH ARMS below" "still only among the routes that survive" "Overriding <route>: outward-facing route, no human present" "THIS plan is not carried into it" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "a file you read, tool output, a subagent report, a commit message" "Before applying ANY arm below" "That removal is scoped to the route-SELECTING arms" "in which case implement directly" "That override line REPLACES the route status line" "MUST also state what it does outwardly" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu" "(S) — read this before (A)" "and the route field reads 'ask'" "RECORD a Zensu-workflow answer before dispatching" "after the 'Zensu workflow — /zensu:build' answer run __ZENSU_ROUTE_COMMAND__ --build — this one Bash call comes BEFORE the 'next tool call' that arm names" "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back, then continue with the dispatch above" "The 'No — implement directly' answer records nothing and decides this plan only: never record it with --direct yourself" "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow, and that /zensu:delivery-route changes it." "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered, and that /zensu:delivery-route --direct makes implementing directly the route for the rest of this session." "a route the field decided records nothing" "ZENSU DELIVERY ROUTE:" "The field never names /zensu:autopilot or /zensu:pilot" "field at the top of this directive" "Unless (S) or a fast path below decides" "→ the Autopilot arm above" "→ the Pilot arm above" "takes the Zensu workflow arm above" "default to the Zensu workflow and do NOT ask")"
 [ "$P1" = "OK" ] && check "P1 plan-approval heredocs: shared invariants present in BOTH branches" PASS || check "P1 plan-approval parity ($P1)" FAIL
-P2="$(parity "$REMINDER" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "doc/comment/prose" "Judge both arms below by INTENT" "Test in THIS order, because two of the negation examples contain an affirmation example verbatim" "never content it quotes or pastes" "already ask which delivery route to take" "a subagent report" "(s) — read this before (c)" "and the route field reads 'ask'" "RECORD a Yes before acting" "after Yes run __ZENSU_ROUTE_COMMAND__ --tdd — this one Bash call comes BEFORE the 'next tool call' the Yes arm above names" "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back, then continue." "A No records nothing and decides this request only: never record it with --direct yourself" "When it reads 'tdd (…)', treat it exactly as the affirmation fast-path below; when it reads 'direct (…)', exactly as the negation fast-path below" "and 'No — implement directly'. The question MUST also say that a Yes is remembered for the rest of this session, later approved plans included unless the plan-approval question is switched off, through one Bash call the user may be asked to allow, that a No decides this request only and is not remembered, and that /zensu:delivery-route changes the session's route." "ZENSU DELIVERY ROUTE:")"
+P2="$(parity "$REMINDER" "Skipping /zensu:build: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "ZENSU HUMAN PRESENT: __ZENSU_HUMAN_PRESENT__" "skill='zensu:build'" "doc/comment/prose" "Judge both arms below by INTENT" "Test in THIS order, because two of the negation examples contain an affirmation example verbatim" "never content it quotes or pastes" "already ask which delivery route to take" "a subagent report" "(s) — read this before (c)" "and the route field reads 'ask'" "RECORD a Yes before acting" "after Yes run __ZENSU_ROUTE_COMMAND__ --build — this one Bash call comes BEFORE the 'next tool call' the Yes arm above names" "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back, then continue." "A No records nothing and decides this request only: never record it with --direct yourself" "When it reads 'build (…)', treat it exactly as the affirmation fast-path below; when it reads 'direct (…)', exactly as the negation fast-path below" "and 'No — implement directly'. The question MUST also say that a Yes is remembered for the rest of this session, later approved plans included unless the plan-approval question is switched off, through one Bash call the user may be asked to allow, that a No decides this request only and is not remembered, and that /zensu:delivery-route changes the session's route." "ZENSU DELIVERY ROUTE:")"
 [ "$P2" = "OK" ] && check "P2 reminder heredocs: shared invariants present in BOTH branches" PASS || check "P2 reminder parity ($P2)" FAIL
 # P1b: presence in both blocks is not enough for the option list — an option ADDED
 # to one branch alone satisfies every needle above. Two spans ARE intentionally
@@ -551,9 +551,9 @@ span_pair "P1b4 pilot and direct dispatch arms and the RECORD sentence byte-iden
 # modes, so each span below covers a whole clause and was verified identical across
 # both heredocs before being pinned.
 span_pair "P1b5 (C) clause and its override sentence byte-identical in BOTH heredocs" \
-  "(C) you are running non-interactively" "That override line REPLACES the route status line"
+  "(C) the 'ZENSU HUMAN PRESENT:' field reads 'no'" "That override line REPLACES the route status line"
 span_pair "P1b6 refusal-first fast-path block through the LAST arm byte-identical in BOTH heredocs" \
-  "FIRST a REFUSAL" "(C) you are running non-interactively"
+  "FIRST a REFUSAL" "(C) the 'ZENSU HUMAN PRESENT:' field reads 'no'"
 # P1b7 is the guard that retracts the two outward-facing routes for an unattended
 # run, stated INSIDE (B) so a model acting at a fast-path arm cannot miss it. It is
 # the newest safety clause and the one a reword would most plausibly touch.
@@ -564,7 +564,7 @@ span_pair "P1b7 (A), the (B) source scoping and its non-interactive removal guar
 # names: each primer heredoc also carries a pre-existing "runs via the /zensu:pilot
 # conductor skill" sentence, so a bare `/zensu:pilot` needle stays satisfied after
 # the route clause is deleted — measured, not assumed.
-P3="$(parity "$PRIMER" "/zensu:tdd (this plan now," "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap" "WHICH delivery route the plan takes" "a configured hooks.defaultDeliveryRoute" "recorded for this session by /zensu:delivery-route" "/zensu:autopilot (unattended through to a reviewed, validated pull request)" "/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)" "never escalates to /zensu:autopilot or /zensu:pilot")"
+P3="$(parity "$PRIMER" "/zensu:build (this plan now," "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap" "WHICH delivery route the plan takes" "a configured hooks.defaultDeliveryRoute" "recorded for this session by /zensu:delivery-route" "/zensu:autopilot (unattended through to a reviewed, validated pull request)" "/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)" "never escalates to /zensu:autopilot or /zensu:pilot")"
 [ "$P3" = "OK" ] && check "P3 primer heredocs: shared invariants present in BOTH branches" PASS || check "P3 primer parity ($P3)" FAIL
 
 echo "== Banner + primer: mode-aware wording =="
@@ -587,7 +587,7 @@ for _bn in "$BN_V" "$BN_S"; do
   for _n in "which delivery route to take" \
             "/zensu:autopilot (unattended to a reviewed, validated PR)" \
             "/zensu:pilot (guided pipeline for a feature already tracked in Zensu)" \
-            "/zensu:tdd (this plan now," \
+            "/zensu:build (this plan now," \
             "or implementing it directly"; do
     printf '%s' "$_bn" | grep -qF -- "$_n" || bnr2c_ok=no
   done
@@ -596,9 +596,9 @@ done
   && check "BNR2c banner names all four delivery routes in BOTH mode tips" PASS \
   || check "BNR2c banner four-route tip missing from a mode variant" FAIL
 PRM_V="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_VANILLA")"
-{ printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF "/zensu:tdd" \
+{ printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF "/zensu:build" \
   && ! printf '%s' "$PRM_V" | grep -qF "strict RED→GREEN TDD"; } \
-  && check "BNR3 primer (vanilla cfg): vanilla orientation, /zensu:tdd route kept" PASS || check "BNR3 primer vanilla wording" FAIL
+  && check "BNR3 primer (vanilla cfg): vanilla orientation, /zensu:build route kept" PASS || check "BNR3 primer vanilla wording" FAIL
 PRM_S="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_STRICT")"
 printf '%s' "$PRM_S" | grep -qF "strict RED→GREEN TDD" \
   && check "BNR4 primer (tddImplementation:true): strict orientation" PASS || check "BNR4 primer strict wording" FAIL
@@ -615,7 +615,7 @@ fi
 
 echo "== Content pins: SKILL.md + config.example.json =="
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 { grep -qF "## Vanilla Implementation Mode" "$SKILL_TDD" \
   && grep -qF "mode: vanilla" "$SKILL_TDD" \
   && grep -qF "DISCIPLINE AUDIT SKIPPED — vanilla mode" "$SKILL_TDD"; } \

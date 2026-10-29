@@ -12,7 +12,7 @@ set -u
 # TWO HARNESS TRAPS ARE LOAD-BEARING HERE, both learned by measurement:
 #
 #   1. EVERY payload must carry `cwd`. Without it pre-reviewer-capability-gate.sh
-#      answers `reviewer-capability-v1 deny: tool cwd is unavailable or unsafe`
+#      answers `Zensu capability gate (reviewer-capability-v1) deny: tool cwd is unavailable or unsafe`
 #      (hooks/lib/reviewer-capability-v1.js) for EVERY destination, so a
 #      three-hook check would report a containment that is not there and the
 #      suite would pass for the wrong reason.
@@ -870,7 +870,7 @@ esac
 # enumerated only one. It printed nothing, so on this matcher a moved or
 # unreadable plugin directory refused every write with an empty stderr.
 #
-# It is pinned at SOURCE rather than driven: triggering it needs `dirname "$0"/..`
+# It is pinned at SOURCE rather than driven: triggering it needs the cd into `${0%/*}/..`
 # to fail for a script the suite just invoked by that same path, which no fixture
 # can arrange without also making the invocation itself fail. The control below is
 # what keeps the pin from going vacuous — it fires the same extraction at the

@@ -506,7 +506,7 @@ gap below rather than a lineage break.
   `.claude/rules/session-reanchor.md`) does NOT fix this case while the chain is armed: it refuses
   `workflow-in-progress` until the chain reaches its terminus, because that evidence is bound to
   the old root. After that it can move the anchor into the nested worktree, and a new chain can
-  start in the same session: `/zensu:tdd` and the skills it hands off to read the anchor from
+  start in the same session: `/zensu:build` and the skills it hands off to read the anchor from
   `zensu-log.sh --project-root` and run their commands there, and `--evidence-run` follows it.
 - **The feature engages only for a session that STARTED inside `.claude/worktrees/<name>`.** The
   record root and the SessionStart `cwd` are what the three verbs key on, so a session that starts

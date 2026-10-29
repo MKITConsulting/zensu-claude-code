@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(case "$0" in (*/*) cd "${0%/*}/.." ;; (*) cd .. ;; esac && pwd -P)" || exit 2
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
     echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
@@ -77,7 +77,7 @@ source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
 
 STATE_FILE=$(tdd_state_file "$SESSION_ID")
 
-# Bypass ledger: the escape stays free, but while a TDD session is active the
+# Bypass ledger: the escape stays free, but while a build session is active the
 # opt-out is recorded to chain state so the chain-end summary can surface it.
 if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
   tdd_record_bypass "$SESSION_ID" ZENSU_TDD_GATE 2>/dev/null || true
@@ -105,12 +105,12 @@ deny_invalid_state() {
   exit 0
 }
 
-# Activation: the gate enforces only while a main-thread TDD session is active
+# Activation: the gate enforces only while a main-thread build session is active
 # for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). When no
 # active chain-state exists the hook is a silent pass-through — normal editing in
 # the main thread, other subagents, and plain CLI are never gated. This replaces
 # the legacy CLAUDE_AGENT_TYPE=zensu:tdd-manager scoping that only worked while
-# TDD ran in a subagent.
+# the workflow ran in a subagent.
 STATE_STATUS="$(tdd_state_status "$STATE_FILE")"
 if [ "$STATE_STATUS" = "missing" ]; then
   ACTIVATION_STATUS="$(tdd_activation_status "$SESSION_ID")"

@@ -6,7 +6,7 @@
 # the review chain consumes comes from git, so such a claim reaches no reviewer,
 # and the suite stays green because it was green before the edit.
 #
-# The recipe used to live as prose in skills/tdd/SKILL.md, re-implemented from
+# The recipe used to live as prose in skills/build/SKILL.md, re-implemented from
 # scratch on every run and testable only by grepping for its own wording. It now
 # lives in hooks/lib/zensu-edit-landing.sh, so this suite DRIVES it against
 # hermetic git fixtures. What remains pinned in the skill is only what a model
@@ -15,7 +15,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh"
 
 T_PASS=0; T_FAIL=0
@@ -489,7 +489,7 @@ else
 fi
 
 echo "== A rendered root is screened before it reaches a verdict line =="
-# These two verdict lines are MODEL-READ: skills/tdd/SKILL.md step 5b b) tells the
+# These two verdict lines are MODEL-READ: skills/build/SKILL.md step 5b b) tells the
 # model to copy every non-`EDIT LANDED` line verbatim into the run log, the final
 # report and the CHAIN-END SUMMARY, and step 10.2c puts the close marker into the
 # REVIEW PACKET. A directory name carrying ` : ` therefore forges a `label : value`
@@ -741,7 +741,7 @@ fi
 
 echo "== The strict-mode step 8 summary line is not a claim =="
 # `*"WIRED"*` also matched `TDD COMPLETE — … | Integration: 1 WIRED | …`, which
-# skills/tdd/SKILL.md step 8 logs BEFORE --tdd-complete runs. That counted the
+# skills/build/SKILL.md step 8 logs BEFORE --tdd-complete runs. That counted the
 # summary as an ungradeable claim, so every audit re-run after step 8 wrote
 # `clean: false` — and once the terminus read the VERDICT, the refusal's own
 # remedy could never clear it. A bare claim is `<step> WIRED …` and nothing else.
@@ -1404,7 +1404,7 @@ check "X21b a newline-bearing foreign root is refused rather than split" "$(verd
 # foreign-claim remedy. The doctor's topology bullets stated no such bound
 # either, so row-absence read as a clean topology. The two HTML docs already
 # carry it; the two skills did not.
-TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 DOC_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 grep -qF 'UNVERIFIED (undetermined root)' "$TDD_SKILL"
 check "X22 step 5b b) names the undetermined-root verdict this library emits" "$(verdict $?)"
@@ -1731,6 +1731,47 @@ check "X33e --inventory counts the files named under every dash spelling" "$(ver
 OUT_DS_C="$(LC_ALL=C bash "$LIB" --log "$MR/dash.log" --project "$MR/anchor" --receipt - 2>&1)"
 printf '%s' "$OUT_DS_C" | grep -qF 'claims=5 '
 check "X33f the dash spellings match the same way under LC_ALL=C" "$(verdict $?)"
+
+echo "== --change-set prints the union the audit grades against =="
+CS="$WORK/change-set"
+new_repo "$CS"
+printf 'v1\n' > "$CS/kept.txt"
+printf 'v1\n' > "$CS/edited.txt"
+printf 'v1\n' > "$CS/committed.txt"
+printf 'ignored.txt\n' > "$CS/.gitignore"
+G "$CS" add -A >/dev/null 2>&1; G "$CS" commit -qm base >/dev/null 2>&1
+CS_BASE="$(G "$CS" rev-parse HEAD)"
+printf 'v2\n' > "$CS/committed.txt"
+G "$CS" commit -qam mid >/dev/null 2>&1
+printf 'v2\n' > "$CS/edited.txt"
+printf 'new\n' > "$CS/fresh.txt"
+printf 'noise\n' > "$CS/ignored.txt"
+CS_OUT="$(bash "$LIB" --change-set --project "$CS" --baseline "$CS_BASE" 2>"$WORK/cs.err")"; CS_RC=$?
+[ "$CS_RC" -eq 0 ] && [ "$CS_OUT" = "$(printf 'committed.txt\nedited.txt\nfresh.txt')" ]
+check "CS1 --change-set lists the worktree diff, the untracked files and the baseline range, sorted, and never an ignored or unchanged file" "$(verdict $?)"
+CS_NOBASE="$(bash "$LIB" --change-set --project "$CS" 2>/dev/null)"
+[ "$CS_NOBASE" = "$(printf 'edited.txt\nfresh.txt')" ]
+check "CS1-control without --baseline the committed range is not part of the union" "$(verdict $?)"
+cs_refuses() { bash "$LIB" --change-set --project "$CS" "$@" >/dev/null 2>&1; [ "$?" -eq 2 ]; }
+CS_REFUSED=0
+cs_refuses --log "$CS/none.log" || CS_REFUSED=1
+cs_refuses --receipt - || CS_REFUSED=1
+cs_refuses --session s || CS_REFUSED=1
+cs_refuses --session-epoch 1 || CS_REFUSED=1
+cs_refuses --dirty-before "$CS/none" || CS_REFUSED=1
+cs_refuses --inventory || CS_REFUSED=1
+[ "$CS_REFUSED" -eq 0 ]
+check "CS2 --change-set refuses every operand that grades, writes or reads a run log, exit 2" "$(verdict $?)"
+[ ! -e "$CS/.zensu" ]
+check "CS3 --change-set writes no receipt and no state directory" "$(verdict $?)"
+CS_PLAIN="$WORK/change-set-plain"
+mkdir -p "$CS_PLAIN"
+CS_PLAIN_OUT="$(bash "$LIB" --change-set --project "$CS_PLAIN" 2>"$WORK/cs-plain.err")"; CS_PLAIN_RC=$?
+[ "$CS_PLAIN_RC" -eq 3 ] && [ -z "$CS_PLAIN_OUT" ] && grep -qF 'needs a git work tree' "$WORK/cs-plain.err"
+check "CS4 outside a git work tree --change-set exits 3 with no list" "$(verdict $?)"
+CS_GF_OUT="$(foreign_owner bash "$LIB" --change-set --project "$GF" 2>"$WORK/cs-gf.err")"; CS_GF_RC=$?
+[ "$CS_GF_RC" -eq 2 ] && [ -z "$CS_GF_OUT" ] && grep -qiF 'dubious ownership' "$WORK/cs-gf.err"
+check "CS5 a git refusal is a fault for --change-set: exit 2, no list, git's message on stderr" "$(verdict $?)"
 
 rm -f "$SKILL_TDD" "$TDD_SKILL"
 echo "----"

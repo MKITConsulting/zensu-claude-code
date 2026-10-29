@@ -1,5 +1,5 @@
 #!/bin/bash
-# zensu-plan-requirements.sh — is a TDD plan's `## Requirements` table usable?
+# zensu-plan-requirements.sh — is a Zensu plan's `## Requirements` table usable?
 #
 # `/zensu:converge` anchors its whole flow-back audit on that table. Without it
 # the skill takes its "legacy stop" and reports nothing, and in `/zensu:autopilot`
@@ -8,7 +8,7 @@
 # mandatory gate into a silent no-op. The failure mode is invisible from both
 # ends: converge exits cleanly and the chain closes green.
 #
-# The table was required by prose only (`skills/tdd/references/planning.md` Phase 2 step 1b),
+# The table was required by prose only (`skills/build/references/planning.md` Phase 2 step 1b),
 # and the sole check was the Phase 6 step 6c coverage cross-check, which is
 # warning level and skips silently when the table is absent. Prose cannot be
 # unit-tested and cannot be gated on; a library can be both. `--tdd-complete`
@@ -32,14 +32,14 @@
 # row, and a brace-anywhere rule would reject the very requirement that describes
 # this check.
 #
-# Deprecated rows still count. The never-recycle rule in `skills/tdd/references/planning.md`
+# Deprecated rows still count. The never-recycle rule in `skills/build/references/planning.md`
 # keeps a dropped requirement's row in place, and such a plan has a real
 # requirements history for converge to audit against.
 #
 # Usage:
 #   zensu-plan-requirements.sh [--list] --plan <path>
 #
-#   --plan  the TDD plan document to judge (required)
+#   --plan  the Zensu plan document to judge (required)
 #
 # Exit: 0 the table is present and filled; 2 usage error or unreadable plan;
 # 3 no `## Requirements` section; 4 the section exists but is not usable — either
@@ -120,7 +120,7 @@ AWK_OUT="$(awk -v list="$LIST" '
   # `#`, not a space, so a step subsection stays inside the table it belongs to.
   !fence && /^##?[[:space:]]/ { in_section = 0 }
   # The Requirement column is located from the header row rather than assumed to
-  # be the second one: the repo-override contract in skills/tdd/references/planning.md pins that
+  # be the second one: the repo-override contract in skills/build/references/planning.md pins that
   # an override keeps the section and its columns, never their ORDER, so a
   # positional read would report a compliant re-ordered table as empty. Split index
   # 3 — the second VISIBLE column, since a leading pipe makes index 1 empty — stays

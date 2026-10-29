@@ -59,8 +59,9 @@ the early exit releases past it.
 (`set -m`), with stdin, stdout and stderr in a private `mktemp -d` directory. The watchdog is a
 second job in a process group of its own: at the deadline it marks the directory and sends
 `SIGKILL` to the worker's group. A decision already written is forwarded and stands; otherwise
-the Stop is RELEASED with a stderr notice. `SIGTERM`, `SIGINT` or `SIGHUP` to the supervisor
-kills both groups at once.
+the Stop is RELEASED with a stderr notice, and the supervisor writes the same text as a
+`systemMessage` because the worker's stdout file is empty. `SIGTERM`, `SIGINT` or `SIGHUP` to
+the supervisor kills both groups at once.
 
 - **Neither group is the host's, and that is what keeps the bound.** A hook shares the Claude
   Code CLI's process group, and the incident ended with the host reaping that group. When the
@@ -81,6 +82,35 @@ kills both groups at once.
   (green run 36556263889, session setup included), and a deadline near that figure would
   silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
   Linux armed Stop.
+
+**User-visible notices (`stop_notice` + `emit_stop_notices`).** Claude Code shows the stderr of
+an exit-0 Stop hook to nobody (read from the host binary; `.claude/rules/autopilot-run-scope.md`
+records the measurement). Every release, cap and nudge notice of the hook goes through
+`stop_notice`, which writes the line to stderr for the transcript and appends it to
+`STOP_NOTICES`. The EXIT trap `emit_stop_notices` writes the collected lines as ONE
+`{"systemMessage": …}` object, and only while nothing else reached stdout: a host that reads two
+JSON objects parses neither, so a second object would cost the block decision itself.
+
+- **Every stdout writer sets `DECISION_EMITTED`**: `emit_block`, the five literal emitters and the
+  three inline blocks of the inner-state snapshot. `emit_block` carries the notices collected
+  before it on the same object, `decision` first. A notice written after a block stays on stderr;
+  the nudge and both background-wait releases already return on `DECISION_EMITTED`.
+- **The supervisor writes only into an empty stdout.** Its deadline release becomes a
+  `systemMessage` only when the worker's stdout file is empty, and a worker killed at the deadline
+  never ran its trap, so the two never both write.
+- **Values reach `node` on stdin**, the block reason and the notices separated by a NUL, never
+  through the environment, which MSYS rewrites when a value looks like a path.
+- **Not routed:** the three stderr lines that precede a block (its reason is what the user sees),
+  the informational re-bind line, and the library's fence stand-down line, which would repeat at
+  every turn end of a steady state.
+- **Cost:** one `node` child per Stop that carries a notice and no block.
+- **Pins:** `E1b`/`E3c` in `test-stop-enforcer-escapes.sh`; `L1b`, `L4`, `L20`, `L22` and `L27`
+  here; `C5c`, `C27a`, `C27c`, `C28a` and the source count `C32pre` in
+  `test-impl-stop-counter.sh`; `X13` in `test-external-review-hook.sh`; `BR11` in
+  `test-background-review.sh`; `S3b` (the merge) and `S10` in `test-autopilot-stop-enforcer.sh`;
+  the release rows and the `stop_notice` anchor of `AC-C19` in `test-versioned-plugin-upgrade.sh`.
+- **Version: `patch`.** No hook added or re-matched and no `permissionDecision`; the decision a
+  Stop emits is unchanged, and only advisory output joins stdout.
 
 **One resolution per run (`zensu_memoize_project_dir` + the canonical-key shortcut).** Measured
 on `dc9f0ff8` with a classifying `node` shim, an armed Stop spawned **96** `node` children: 28
@@ -138,10 +168,18 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   bind functions unset it (`L36`, `L49`). A variable or a file that a model-side Bash command
   could set is never a pre-verified binding; `CONTROL_BINDINGS` needs no new entry for that
   reason.
-- **Opt-in, Stop hook only.** Only the Stop hook calls `zensu_memoize_project_dir`. Every other
-  entry point verifies on every call, as before. `zensu-log.sh` is a candidate, not a caller. A
-  future caller may memoize only after its last bind, and only in a process that runs no record
-  writer.
+- **Opt-in, two callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
+  `zensu_memoize_project_dir`, each right after its only bind. Every other entry point verifies on
+  every call, as before. `zensu-log.sh` is a candidate, not a caller. A further caller may memoize
+  only after its last bind, and only in a process that runs no record writer. The delegate meets
+  both: its one bind precedes the memo, and what it writes afterwards is the workflow document's
+  ticket claim and the background-review store, never the context record. Measured with the
+  counting shim on one background hand-back claim through the real prompt hook: 89 `node` children
+  without the memo, 35 of them root verifications, and 55 with it, one of them a root
+  verification. The shipped path, which also runs `arrive` first, spawned 56 in `BR4b` on
+  2026-10-27, three of them after the claim returned: the record retire, the claim-field parse
+  and the emit. `BR4b` in `tests/structure/test-background-review.sh`
+  pins the single verification (`.claude/rules/background-review-completion.md`).
 - **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
   once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The
   digest was never a defence there, because a changed tree includes the code that checks it.
@@ -158,7 +196,8 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every
-  caller that does not memoize; on the Stop path the memo answers instead.
+  caller that does not memoize; on the Stop path and in the post-review delegate the memo answers
+  instead.
 - **Port.** Host half only; `session-control-core-v1.js` is unchanged. `zensu-codex`,
   `zensu-kiro` and `zensu-antigravity` were NOT included. A port that adopts the memo must take
   the `_ZENSU_PROJECT_DIR_MEMO` unset in both bind functions with it, or a re-bind keeps a stale
@@ -168,16 +207,89 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   that the resolver refuses. A cache file: poisonable. Memoizing `_tdd_paths_safe`: it is the
   per-operation symlink check and must see every swap.
 
+**Lease checks inside the lock process (`hooks/lib/state-path-safety-v1.js`).** `_tdd_locked_run`
+used to spawn a storage walk before the lease, the acquisition, a token walk, a storage re-walk and
+the release: six `node` children per lease on bash 3.2 and three on bash 4+. The walk now lives in
+`state-path-safety-v1.js` and runs inside the process that takes the lease, before the acquisition
+and again after it. A lease costs two children on bash 3.2 (acquire with checks, release by token)
+and one on bash 4+ (the keeper); `P9` in `tests/structure/test-tdd-no-flock-external-lease.sh`
+pins both counts.
+
+- **Order of observations.** The post-acquisition walk is the last full walk before the callback.
+  Between it and the callback only builtins run: the leaf re-check `_tdd_paths_leaf_safe` (`[ -L ]`,
+  `-e`, `-f`, `-d`, no command substitution) and, on bash 3.2, the token read with `read` plus one
+  `rm` of the token file. That `rm` stays before the callback on purpose: after the release it
+  would leave the token file behind whenever the deadline kills the worker mid-callback, and the
+  walk-to-use window is dominated anyway by the callback's own `node` start. `_tdd_paths_safe` is
+  still never memoized.
+- **Fail-closed load.** Every caller loads the module with `require` and accepts only
+  `pathsSafeArgv(...) === true`, so a missing, truncated or inert module refuses.
+  `_tdd_paths_safe_check` carries the module path in the environment (`PATH_SAFETY`, mechanism 2
+  of `test-msys-special-plugin-module-boundaries.sh`) and the rendered anchors and operands in
+  argv under `MSYS2_ARG_CONV_EXCL='*'`. The module has no CLI and reads neither `process.env` nor
+  `process.argv`. The lease processes take the module path in argv beside the control core's,
+  which travelled that way before.
+- **Exit codes and lines.** The bash 3.2 acquirer exits 64 when a check fails before the
+  acquisition (silent return 1), 65 when the storage is unsafe after it and the lease was released
+  in-process (silent return 1), and 66 when that release failed (`lock release failed`, return 1).
+  The keeper writes `UNSAFE` (nothing held, silent return 1) or `UNSAFE-HELD` (callback skipped,
+  normal `RELEASE`, silent return 1). The keeper still releases in-process, so the win32 holder
+  marker behaves as before.
+- **Pins.** `P7` plants a hard-linked `.lock` (link count 2, which only the module refuses) after
+  `tests/structure/fixtures/lease-acquire-entry-preload.js` proves the contender is inside
+  `acquireExternalProcessLock`; `P8` plants it before any acquisition and requires that the
+  acquisition never started. Removing either walk turns the matching check red on bash 3.2 and on
+  bash 5.2. `tests/structure/state-path-safety-v1.test.js` covers the refusals no shell leaf test
+  sees, and the canary loads the module from a plugin root with whitespace and an apostrophe.
+
+**Further cuts on the armed path.** Each removes a process whose observation is repeated, or moves
+it into an adjacent process with no filesystem change in between.
+
+- The reviewer-note lease is skipped when the probe verdict is neither `blocked` nor `clear`,
+  because the callback then does nothing. `reviewer_denial_note_acts` is the one predicate for the
+  guard and the callback, and the probe stays outside the lease. A status the callback learns to
+  act on must join that predicate.
+- `_tdd_atomic_replace_regular` walks its source and target as the first statement of its replace
+  process; exit 64 maps to return 1, every other status passes through.
+- The `read-active` worker derives the owner pointer from the digest rule the writers use through
+  `_autopilot_active_path`, so the Stop path no longer spawns a hashing child.
+- `zensu_hook_principal` takes an optional payload field and then prints the principal, a newline
+  and that field. The Stop hook decides on the text before the first newline and reads
+  `transcript_path` from the rest, which replaces `read_field`.
+- `tdd_chain_snapshot <file> <session> stop-fields` prints the eight Stop fields from the snapshot
+  process. The field order lives in two places, that projection and the two `read` lists in the
+  hook. `inner_flags_ok` refuses a line whose four flags are not exactly `true` or `false`, the
+  check the removed `JSON.parse` used to give; a projection fault exits 64, which the adoption site
+  maps to its own refusal.
+
+Measured with the latency suite's counting shim (`L30`), the armed Stop went from 51 `node`
+children before the lease folding to 35 after it and 29 with these cuts on macOS bash 3.2, and
+from 31 to 26 on Linux bash 5.2 (`node:20-bookworm`). `L30` allows 32 on bash 3.2 and 30 on
+bash 4+, so reverting these cuts fails it on both.
+
+**Not taken, and why.** Two hunt candidates duplicated cuts above. Handing the idle probe's chain
+fields to the hook was judged unsound as specified, because it removed the only check that acts on
+a read failure at that site. Merging two Autopilot config reads and computing the terminal-stage
+bit in the outer parse save nothing on a measured path. Running the project-root check inside the
+pre-lock storage process and moving the dispatcher's under-lock storage check into the
+`read-active` worker would each save one child on the armed path, but both change the status
+mapping that separates "no run" (which relaxes the guard) from a fault (5) and need their own
+review. Folding the routing re-check after the budget increment (the exact-match comparison and,
+when it fails, the mismatch classifier) into the fresh snapshot process would save one more child.
+Three judges found it sound, because both processes read only their pipe and the hook's own
+expected values, but it turns a parse failure there from a release into a block, a decision change
+that needs its own pin. The deferred-review adoption path keeps its own candidates for a later change, and folds
+inside the stop-budget and handoff critical sections were not fully judged.
+
 **Known gaps.**
 - A deadline release writes no bypass-ledger entry (the write needs the lease under the load
   that caused the deadline) and renders no ledger line. It is INDUCIBLE — by loading the machine,
   or by lowering `ZENSU_STOP_DEADLINE_SECONDS` in the Claude Code environment — the same class as
   the other inducible releases this hook records.
-- The armed path still spawns 51 `node` children on macOS with bash 3.2 (`L30`, measured after
-  the resume directive gained its `zensu_review_panel` read; the 38 on Linux with bash 5.2
-  predates that read), so at a load in the high hundreds it can still reach the deadline. The
-  largest remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on
-  bash 3.2) and the config reads (5).
+- The armed path still spawns 29 `node` children on macOS with bash 3.2 and 26 on Linux with
+  bash 5.2 (`L30`). At 1.3–1.7 s per child under load 100–150 that is about 38–50 s on bash 3.2,
+  so the 45 s deadline can still release an armed Stop on a heavily loaded Mac. These counts were
+  not broken down by group. The deferred-review adoption path was not re-measured.
 - A durable Autopilot Stop that reaches the stage budget spawns one more `node` child,
   `hooks/lib/review-evidence-hook-v1.js wait`, whose contract `.claude/rules/work-order-mode.md`
   owns. It runs through `zensu_run_bounded`, answers from one `lstat` when the session has no
@@ -226,4 +338,6 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
 matcher change, no `permissionDecision`; the knob is an environment variable, not a config key.
 The per-run memo and the canonical-key shortcut persist nothing and add no hook, matcher, knob
 or config key. Routing the denial-note name through `zensu_session_key_canonical` changes no
-persisted shape: a canonical key yields the same file name as before.
+persisted shape: a canonical key yields the same file name as before. The lease checks, exit codes 64–66 and the
+keeper lines are internal to `_tdd_locked_run`, and the third arguments of `tdd_chain_snapshot`
+and `zensu_hook_principal` are optional, so every two-argument caller sees what it saw before.

@@ -49,7 +49,7 @@
 # (`git mv` is covered by rule (C) when it escapes the session root).
 set -u
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(case "$0" in (*/*) cd "${0%/*}/.." ;; (*) cd .. ;; esac && pwd -P)" || exit 2
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
     echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
@@ -248,7 +248,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   exit 0
 fi
 
-# Bypass ledger: escapes stay free, but while a TDD session is active the
+# Bypass ledger: escapes stay free, but while a build session is active the
 # opt-out is recorded to chain state (fail-open, gate name only). Inline
 # escapes are reported by the parser itself (__bypass__ markers) — the ONE
 # code path that decides the bypass — so quoted spellings and mixed commands

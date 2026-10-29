@@ -37,7 +37,7 @@ export CLAUDE_PROJECT_DIR="$WPROJ"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SID"
 mkdir -p "$WPROJ/.zensu/logs"
-RLOG="$WPROJ/.zensu/logs/2026-01-01-0000_tdd-style.log"
+RLOG="$WPROJ/.zensu/logs/2026-01-01-0000_build-style.log"
 : > "$RLOG"
 (cd "$WPROJ" && env CLAUDE_PROJECT_DIR="$WPROJ" ZENSU_CONFIG="$CFG_NONE" \
   bash "$LOG" --evidence-run --scope lint --cmd 'true' --log "$RLOG" >/dev/null 2>&1)
@@ -60,7 +60,7 @@ export CLAUDE_PROJECT_DIR="$WPROJ2"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SID2"
 mkdir -p "$WPROJ2/.zensu/logs"
-RLOG2="$WPROJ2/.zensu/logs/2026-01-01-0000_tdd-style.log"
+RLOG2="$WPROJ2/.zensu/logs/2026-01-01-0000_build-style.log"
 : > "$RLOG2"
 (cd "$WPROJ2" && env CLAUDE_PROJECT_DIR="$WPROJ2" ZENSU_CONFIG="$CFG_WALL" \
   bash "$LOG" --evidence-run --scope lint --cmd 'true' --log "$RLOG2" >/dev/null 2>&1)

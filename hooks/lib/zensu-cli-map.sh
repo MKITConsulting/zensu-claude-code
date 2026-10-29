@@ -98,9 +98,16 @@ zensu_cli_to_tool() {
     "doc claude-md-context")    echo "get_claude_md" ;;
     "doc gen-context")          echo "get_doc_generation_context" ;;
     # knowledge
+    "knowledge context-pack")   echo "get_context_pack" ;;
+    "knowledge context-search") echo "search_knowledge" ;;
     "knowledge search")         echo "search_knowledge" ;;
     "knowledge get")            echo "get_knowledge_item" ;;
     "knowledge sources")        echo "list_knowledge_sources" ;;
+    # AI work capture (reports, never human decisions)
+    "ai-work context")          echo "get_ai_work_capture_context" ;;
+    "ai-work get")              echo "get_ai_work_capture" ;;
+    "ai-work start")            echo "start_ai_work_capture" ;;
+    "ai-work submit")           echo "submit_ai_work_result" ;;
     # pulse
     "pulse start")              echo "pulse_start_session" ;;
     "pulse end")                echo "pulse_end_session" ;;

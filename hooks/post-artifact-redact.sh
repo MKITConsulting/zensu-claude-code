@@ -2,8 +2,8 @@
 set -u
 
 # PostToolUse redactor for the two .zensu run artifacts consuming repos commit:
-# the plan `.zensu/plans/{ts}_tdd-{slug}.md` and the narrative log
-# `.zensu/logs/{ts}_tdd-{slug}.log`.
+# the plan `.zensu/plans/{ts}_build-{slug}.md` and the narrative log
+# `.zensu/logs/{ts}_build-{slug}.log`.
 #
 # `zensu-log.sh append` is the WRITER-side chokepoint and does the real work.
 # This hook is the net under it, and it exists because the two artifacts are
@@ -63,7 +63,7 @@ set -u
 # `.zensu` substring, and a net that the one spelling it exists to catch can
 # evade is not a net.
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(case "$0" in (*/*) cd "${0%/*}/.." ;; (*) cd .. ;; esac && pwd -P)" || exit 2
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
     echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
@@ -107,8 +107,7 @@ fi
 # file name, guard the result, and carry it in an environment variable. Handing
 # `node` a raw MSYS spelling would make `require()` fail on a Git Bash root, and
 # the load-failure branch below would then silently skip every redaction.
-ZENSU_REDACT_LIB_DIR="$(bash "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-host-path.sh" \
-  "$CLAUDE_PLUGIN_ROOT/hooks/lib")" || ZENSU_REDACT_LIB_DIR=""
+ZENSU_REDACT_LIB_DIR="$(zensu_host_path "$CLAUDE_PLUGIN_ROOT/hooks/lib")" || ZENSU_REDACT_LIB_DIR=""
 REDACT_LIB="$ZENSU_REDACT_LIB_DIR/zensu-artifact-redact-v1.js"
 if [ -z "$ZENSU_REDACT_LIB_DIR" ] || [ ! -f "$REDACT_LIB" ] || [ -L "$REDACT_LIB" ]; then
   echo "zensu: artifact redactor unavailable (module path unresolvable)" >&2

@@ -1,8 +1,8 @@
 # Review Severity Rubric
 
-This file is the single source of the severity scale every `/zensu:tdd` reviewer uses. The
+This file is the single source of the severity scale every `/zensu:build` reviewer uses. The
 delimited block below is carried verbatim by `agents/review-aspect.md`,
-`agents/review-judge.md` and `agents/code-reviewer.md`, and `/zensu:tdd` step 3 prepends it,
+`agents/review-judge.md` and `agents/code-reviewer.md`, and `/zensu:build` step 3 prepends it,
 read at run time from this file, to every repo-custom persona spawn prompt.
 
 The scale decides what the auto-fix loop routes. By default (`hooks.autoFixSeverity: critical`) only CRITICAL findings route;
@@ -12,12 +12,25 @@ too. Under `important` and `all`, while `hooks.reviewConvergence` is enabled (th
 CRITICAL findings and the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass
 edited, and defers everything else; with `hooks.selfReview` off it keeps every IMPORTANT finding routable, under
 `critical` as well (see [configuration.md](configuration.md)). While `hooks.criticalReproduction` is enabled (the default),
-a CRITICAL finding of a re-review routes only when a failing test reproduces it; see `/zensu:tdd`
+a CRITICAL finding of a re-review routes only when a failing test reproduces it; see `/zensu:build`
 step 4c stage 3. An undefined scale let every reviewer promote its own
 taste to IMPORTANT, and every such finding opened another full review round.
 
-`/zensu:pr-team-review` keeps its own P1/P2/P3 scale for forge comments. The two scales answer
-the same question in different vocabularies; they are not mechanically mapped.
+`/zensu:pr-team-review` keeps its own P1/P2/P3 scale for forge comments, and `/zensu:plan-review`
+rates a plan's findings as blockers and improvements. The scales answer the same question in
+different vocabularies, and nothing converts one into another; the table is a reading guide,
+row by row, for anyone who meets more than one of them.
+
+| Meaning | `/zensu:build` review chain | `/zensu:pr-team-review` | `/zensu:plan-review` |
+|---------|---------------------------|-------------------------|----------------------|
+| Must change before the merge, or before the plan is implemented | **CRITICAL** | **P1**, published as 🔴 Blocking | **blocker** (P1) |
+| Should change, does not block on its own | **IMPORTANT** | **P2**, published as 🟡 Should fix | **improvement** (P2) |
+| Optional | **SUGGESTION** | **P3**, a nit in the collapsed nits block, never an inline comment | a nit, listed under improvements |
+
+The rows do not line up exactly. The PR review counts idiom as P2, while this rubric never rates
+idiom above SUGGESTION. A plan review has no separate optional tier: its nits go into the
+improvements list. Only this rubric decides what the auto-fix loop of a `/zensu:build` chain
+routes.
 
 A defect reachable only through a mode the code still supports (a fallback connection, a flag, an
 environment variable, a deployment option) is still a finding. `agents/review-aspect.md` and

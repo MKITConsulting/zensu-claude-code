@@ -42,7 +42,7 @@ Six sites, all single-root.
 
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
-`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:144-151`), and
+`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:148-155`), and
 `pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
 while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
@@ -102,13 +102,13 @@ at all, and `pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:633` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:639` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:594-596` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:600-602` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
-**Claims are repo-root-relative.** `skills/tdd/references/execution.md:9, :12` requires every logged
+**Claims are repo-root-relative.** `skills/build/references/execution.md:9, :12` requires every logged
 `WIRED — files:` / `IMPL completed — files:` list to be relative to
 `git rev-parse --show-toplevel`. Across two roots `src/foo.ts` is ambiguous.
 
@@ -160,6 +160,10 @@ it touched, and a review that sees the relation between roots.
 **Code root** — an additional git work tree, declared at arming time, that this
 chain may write to and must audit and review: a worktree nested under the anchor, a
 symlinked sibling or a plain sibling. Never carries state.
+
+**Folder anchor** — an anchor that git places outside every work tree: a plain folder,
+usually one that holds several repositories side by side, in which the session was started.
+It carries state like any other anchor and has no change set of its own (§6.5).
 
 **Label** — the slug a code root is declared under. A file in a code root is
 spelled `@<label>/<path>`, relative to that root's top (§6.1).
@@ -405,7 +409,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:291`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:296`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming
@@ -502,7 +506,7 @@ symbol rather than by line, because the stage-2 pull requests move most of these
 | Stop probe | The hook's one git probe, the implementing-phase nudge `zensu_impl_stop_nudge`, asks only the anchor's `git status` today; it counts the union inside the existing Stop deadline, a timeout counting as `unavailable`. The zero-change check itself is the terminus count of the row above, and the texts that describe it, `INNER_ZERO_CHANGE_NOTE` and the resume directive's `git diff --name-only HEAD` wording, stop naming the anchor's `git diff` alone. | `hooks/stop-chain-enforcer.sh` |
 | Full suite and CI deferral | `--evidence-run --root <label>` runs in that root's top, and a record keeps deriving its root from its `cwd`, so no strict key set changes. Each declared root gets its own tree and fingerprint, and the verdict is computed per root instead of letting the newest full record pick the root. A code root's own `.zensu/config.json` contributes `evidence.fullSuiteCommand` and the runner keys only; the gate mode and every `hooks.*` key stay with the anchor. The gate requires, for the anchor and for every code root whose change count — commits since the baseline included — is non-zero, a green full record on that root's tree or a CI-deferral verdict from that root's own ladder: its clone record, its remote and workflows, and a snapshot per root in a file of its own, `<session key>.<root digest>.json` beside the anchor's `<session key>.json`, whose `projectRoot` names that root, so `SNAPSHOT_KEYS` is unchanged. Each exempted root is disclosed on its own line, and Phase 0 refreshes the CI policy per root path before arming. The close step the post-review directive renders names one `--evidence-run --root <label>` per changed code root beside the anchor's run, each with the scope its own root's ladder decides: the full suite where that root runs it locally, the affected-suite run where its CI runs it. `CLOSE_SUITE_STEP` is `FULL_SUITE_STEP` under the local runner and `AFFECTED_SUITE_STEP` under CI, and `CLOSE_PASS_SUITE_CI` names `AFFECTED_SUITE_STEP` directly, so the four change together; one anchor run would leave the per-root gate refusing the first close. | `hooks/lib/evidence-run-v1.js`, `hooks/lib/full-suite-policy-v1.js`, `hooks/lib/ci-contract-v1.js`, `hooks/post-review-tdd-delegate.sh` |
 | Acceptance verification | Freshness and `hasChanges` bind to the union tree — the anchor's tree plus each code root's — so an edit in any root makes a record stale. | `hooks/lib/acceptance-verify-v1.js` |
-| Review packet | `changed_files` carries the `@<label>/` paths `--change-set` prints, and a new optional `code_roots` field carries one `<label> <absolute path>` entry per line. A packet without it has no code roots and is never `REVIEW PACKET INVALID`, so a single-root packet stays as it is today, the shape that let the optional `findings_ledger` field ship as a `patch` (`agents/review-judge.md`). The reviewer agents resolve labels through it and cite `@<label>/<path>:<line>`. | `skills/tdd/references/review-chain.md`, `agents/review-aspect.md`, `agents/review-judge.md`, `agents/code-reviewer.md` |
+| Review packet | `changed_files` carries the `@<label>/` paths `--change-set` prints, and a new optional `code_roots` field carries one `<label> <absolute path>` entry per line. A packet without it has no code roots and is never `REVIEW PACKET INVALID`, so a single-root packet stays as it is today, the shape that let the optional `findings_ledger` field ship as a `patch` (`agents/review-judge.md`). The reviewer agents resolve labels through it and cite `@<label>/<path>:<line>`. | `skills/build/references/review-chain.md`, `agents/review-aspect.md`, `agents/review-judge.md`, `agents/code-reviewer.md` |
 | Capability confinement | A reviewer may read inside every declared root, read from the bound workflow document. The PLM profile `zensu-plm-readonly-v1` gets the same reads, because its `readOnlyViolation` runs the same `protectedAccessViolation`. Every declared root's `.zensu` joins the protected list of reviewers, the PLM profile and neutral subagents, and a path with a `.zensu` segment below the anchor is refused to all three whatever the list says, as is one below a declared root (§7.2). | `hooks/lib/reviewer-capability-v1.js` |
 | `crossrepo` perspective | Spawned only when the chain has code roots (§7), with labels stripped before a path is classified. The reviewer contract names it: `agents/review-aspect.md` lists seven perspectives with one checklist line each and `agents/code-reviewer.md` carries checklist lines of its own, so both gain a `crossrepo` entry. The Stop enforcer's resume directive appends it for a chain with code roots, outside the two `REVIEW_PERSPECTIVES` literals that T60 and T61 of `tests/structure/test-stop-enforcer-self-review-routing.sh` pin against the activation module, so both keep pinning the single-root panels. | `hooks/lib/aspect-activation-v1.js`, `agents/review-aspect.md`, `agents/code-reviewer.md`, `hooks/stop-chain-enforcer.sh` |
 | Finding verification and ledger | An absolute, `~` or symlink spelling of a path inside a declared root is mapped to `@<label>/`, so a real code-root finding is never neutralized as `out-of-root`; ledger anchors must use `@<label>/`. | `hooks/lib/finding-verify-v1.js`, `hooks/lib/review-ledger-v1.js` |
@@ -529,7 +533,7 @@ the list from an inherited or a command environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2831`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2839`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -546,7 +550,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5019`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5027`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -565,6 +569,89 @@ Two properties stay as they are, deliberately:
   session is reachable only via `--all` or from the anchor. This is pre-existing
   behavior that multi-repo makes more consequential; this proposal does not
   change it and must not claim to.
+
+### 6.5 The folder anchor — ADDED 2026-10-24
+
+A session started in a folder that holds several repositories, rather than in one of them, is
+anchored on a folder anchor (§4). The classification takes the narrow split every git reader of
+the chain already shares: only git's own answer that the path lies outside every work tree
+makes a folder anchor — the `unknown` of `_zensu_unqualified_change_count` in
+`hooks/lib/zensu-log.sh`, `NO_WORK_TREE_RE` in `hooks/lib/evidence-run-v1.js` and the `IN_GIT`
+probe of `hooks/lib/zensu-edit-landing.sh`. Any other git failure stays a fault, because a
+`safe.directory` refusal on a real repository would otherwise pass for a folder.
+
+**What it costs today.** Read at the cited sites on 2026-10-24, after a session started in such
+a folder could not close a chain that changed files of one repository below it:
+
+- The audit has no change set to grade a claim against. A claim into a work tree below the
+  folder grades `UNVERIFIED (foreign root)` through `nested_worktree_of`, and `grade_claim`
+  grades any other claim `PENDING PREDICATE` or `UNVERIFIED`, so the receipt is never clean.
+  `--tdd-complete` reads the anchor's `unknown` count as zero, arms on the logged claim all the
+  same (§5) and refuses. The chain closes only through `ZENSU_EDIT_LANDING_GATE=off`.
+- Nothing says so before the terminus. The `--tdd-begin` branch of `hooks/lib/zensu-log.sh`
+  never asks git about the anchor, and `zensu_impl_stop_nudge` in `hooks/stop-chain-enforcer.sh`
+  returns without counting when `git status` finds no repository.
+- `/zensu:adopt-session --reanchor` refuses with `recorded-root-not-in-a-worktree`
+  (`verdictUnguarded` in `hooks/lib/session-reanchor-v1.js`), because it proves a move through
+  a shared git common directory, and a folder has none.
+- The full-suite gate answers `not-applicable` for the anchor. An acceptance record never goes
+  stale, because the anchor has no tree to bind it to and `hooks/lib/acceptance-verify-v1.js`
+  then takes the newest verdict as tree-unverified. The external review import answers
+  `layout=nested-in-folder` for a review root in any repository below the folder
+  (`hooks/lib/external-review-v1.js`).
+
+Until stage 2 ships, the working answer is §3.1's: one session per repository the work changes,
+started in that repository.
+
+**Stage 2 accepts a folder anchor and needs few rules of its own.** The anchor keeps what §3
+gives it, and each repository below it that a chain changes is declared with `--code-root`.
+§6.2 already admits such a root, because it is its own work-tree top under the anchor. The
+rules below state what follows for a folder; none of them changes a chain whose anchor is a
+work tree.
+
+- **Exclusivity counts no ancestor.** Folders like this are where several sessions start side by
+  side. A root is refused when another live chain declared an overlapping root, or when another
+  live session's working directory, recorded root or keep anchor lies inside the root's tree
+  (§6.2). A live session anchored on the same folder, or on any other ancestor of the root, does
+  not overlap it; otherwise a folder that hosts a second session could declare no root at all.
+  The residual is the one §11 question 4 names: such a neighbour can still write into a declared
+  root, and the chain then counts those edits as its own, which the audit and the review surface
+  rather than hide.
+- **Arming discloses a folder anchor.** When `--tdd-begin` arms a chain on a folder anchor
+  without a `--code-root`, it prints one line on stderr: the anchor has no change set, a file
+  claim outside every declared root can never land, and `--tdd-complete` refuses a chain that
+  logs one. Until PR E its remedy is a session started in the repository the work changes; from
+  PR E on it names `--code-root`. It is a disclosure, not a refusal, because a chain that claims
+  no file still closes on a folder anchor. It reads no code roots and depends on no switch, so
+  it may ship ahead of PR B as a `patch`.
+- **Every file claim carries its label.** An unprefixed claim can never land in a folder anchor:
+  it grades `UNVERIFIED (respell)` (§6.3) when it resolves into a declared root, and keeps
+  today's `PENDING PREDICATE` or `UNVERIFIED` otherwise. A file of the folder itself, outside
+  every repository, cannot be audited by any chain; a change there belongs in a repository or
+  outside the chain.
+- **The count and the exclusions need no special case.** The anchor's count answers `unknown`,
+  a changed code root makes the union non-zero (§6.3), and a union of clean roots stays the
+  anchor's `unknown`, which `--tdd-complete` reads as zero. Any other git failure on the anchor
+  answers `unavailable` and makes the union `unavailable`, as it does for an anchor inside a
+  work tree. A folder anchor has no diff, no untracked listing and no tree fingerprint, so its
+  exclusion set is empty, and computing it is no fault.
+- **Evidence comes from the roots (PR C).** The anchor's full-suite verdict stays
+  `not-applicable`, so the gate requires a record for each changed code root and none for the
+  anchor, and the close step renders no anchor run beside the per-root runs. Acceptance
+  freshness binds to the trees of the code roots alone, which gives a folder anchor the
+  staleness check it lacks today.
+- **One repository is not a cross-repository change (PR D).** `crossrepo` reads the relation
+  between roots, and a folder anchor holds no code under review. On a folder anchor a chain
+  therefore counts as multi-root for the activation, and for the resume directive that appends
+  `crossrepo`, only when it declares two or more code roots; with one, the panel reviews that
+  root as it reviews any single root. The external review import answers `reason=multi-root`
+  even then, a named bound (§11).
+- **Re-anchoring stays refused (PR E).** `--reanchor` keeps refusing a folder anchor, and PR E
+  makes the text of its `recorded-root-not-in-a-worktree` refusal name the code-root route.
+  Whether it should instead move such a session into one repository below the folder is open
+  (§11, question 9).
+- **The doctor names it (PR B).** The topology row says when the anchor is a folder anchor, so a
+  foreign-root warning there reads as a root still to declare.
 
 ## 7. Stage 3 — Cross-repo review (minor) — REDESIGNED 2026-10-21 as a review perspective, NOT BUILT
 
@@ -599,7 +686,7 @@ A cheaper first move exists and is not blocked on any of it — see §7.4.
 
 ### 7.1 Why it is mode-independent
 
-`skills/tdd/references/modes.md:7` lists the whole review chain — fan-out, judge second
+`skills/build/references/modes.md:7` lists the whole review chain — fan-out, judge second
 pass, Finding Verification Gate, the consuming reviewer, the self-review terminus
 — among what runs exactly as written in vanilla. A reviewer reports a finding; it
 does not demand a Characterization test. That demand is precisely why the
@@ -673,12 +760,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/tdd/references/audit.md:61`) and runs in vanilla
-(`skills/tdd/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
+Drift Audit does the same (`skills/build/references/audit.md:61`) and runs in vanilla
+(`skills/build/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/tdd/references/audit.md:67`), which is a test vanilla cannot be made to produce.
+(`skills/build/references/audit.md:67`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/tdd/references/audit.md:69`), AND reword the finding
+level as step 6c already is (`skills/build/references/audit.md:69`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no
@@ -905,6 +992,15 @@ Per pull request, so that each one carries its own pins (§9).
   fails a string rule as well; the Edit gate's state-file hardening refuses every root's
   `.zensu/state`, and a nested root under a directory named `test` does not turn its files into
   test paths.
+- A folder anchor (§6.5): arming accepts a work tree nested under it and is not refused for a
+  live session anchored on the same folder; an `@<label>/` claim lands; an unprefixed claim that
+  resolves into the root grades `UNVERIFIED (respell)`, and one naming a file of the folder
+  outside every root grades `UNVERIFIED`; the union is non-zero for a changed root and the
+  anchor's `unknown` for clean roots; the exclusion set is empty without a fault; a git failure
+  on the anchor other than the no-work-tree answer makes the union `unavailable`;
+  `zensu_impl_stop_nudge` sees a change in a code root; and the doctor row names the folder
+  anchor. Unless the disclosure shipped earlier, `--tdd-begin` prints it on a folder anchor
+  without a `--code-root` and stays silent on an anchor inside a work tree.
 - `--tdd-begin --code-root` refuses while `CODE_ROOTS_ENABLED` is false.
 - The doctor row lists the declared roots and still warns about an undeclared foreign one.
 - The status literal of the three documents moves to
@@ -927,6 +1023,9 @@ Per pull request, so that each one carries its own pins (§9).
 - A code root's own configuration contributes `evidence.fullSuiteCommand` and the runner keys
   only.
 - An edit in a code root makes an acceptance record stale.
+- On a folder anchor the gate requires a record for each changed code root and none for the
+  anchor, the close step renders no anchor run, and an edit in a code root makes an acceptance
+  record stale although the anchor has no tree.
 
 **PR D — review side and session-trail.**
 
@@ -945,14 +1044,19 @@ Per pull request, so that each one carries its own pins (§9).
   persona activation never matches a labeled path, and self-review enumerates through
   `--change-set`.
 - `trail.mjs` renders per-root git state, and the resume line still names the anchor.
+- On a folder anchor `crossrepo` spawns with two code roots and not with one, the resume
+  directive follows the same rule, and the import answers `reason=multi-root` for one root.
 
 **PR E — enable.**
 
 - Arming with two roots succeeds and writes the field, and one whole chain over an anchor and two
   roots — a worktree nested under the anchor and a symlinked sibling — is run live to its
   terminus once.
-- `templates/tdd-plan.md` gains the `## Code roots` table with labels only and its authoring
-  rule names it, `skills/tdd/references/planning.md` tells the model to fill it with exactly the
+- One chain over a folder anchor and two repositories below it is run live to its terminus once,
+  and both the `recorded-root-not-in-a-worktree` refusal and the folder-anchor disclosure name
+  `--code-root`.
+- `templates/zensu-plan.md` gains the `## Code roots` table with labels only and its authoring
+  rule names it, `skills/build/references/planning.md` tells the model to fill it with exactly the
   labels `--code-roots` prints, and a structure test pins the table and the rule.
 - The status literal of the three documents moves from `stages 2 and 3 are REDESIGNED, NOT ENABLED`
   to `stages 2 and 3 are IMPLEMENTED`, together with X7 of
@@ -1024,6 +1128,17 @@ hides that it was ever open.
    holds, so the nested topology needs no carve-out in the predicate.
 8. **Does `code_roots` on the Session Control record cost a `SCHEMA_VERSION` bump?** MOOT: the
    redesign adds no field to the record (§6.1).
+9. **May `--reanchor` move a session from a folder anchor into one repository below it?** OPEN,
+   raised by the field case of 2026-10-24 (§6.5). It would serve the single-repository case with
+   an ordinary single-root chain: no label in any claim, the external review import intact and
+   no `crossrepo` question. The move only narrows: the target lies inside the recorded folder, so
+   every path it keeps in reach was in reach before, and that containment would stand in for the
+   shared git common directory a folder cannot offer. Against it: the re-anchor refuses open
+   work, so it helps only before a chain is armed, which is the moment the arming disclosure of
+   §6.5 reaches; its ladder was written for sibling worktrees of one repository, and a main
+   checkout that holds registered worktrees of its own meets the rung that refuses a target
+   containing one; and it is a second route beside code roots, which already cover the single
+   repository at the cost of the label.
 
 **Named bounds of the redesign**, recorded here so that none is mistaken for an oversight:
 
@@ -1052,6 +1167,11 @@ hides that it was ever open.
   documented prerequisite. Nested roots sit inside the session directory.
 - Multi-repo Autopilot and pilot pull requests, a multi-root external-review import and ports to
   the other hosts are out of scope.
+- A file of a folder anchor outside every repository cannot be audited by any chain, and a live
+  session anchored on the same folder can write into a declared root without being refused
+  (§6.5).
+- A folder anchor with one code root still runs the aspect panel on its first review, because
+  the import refuses every chain with code roots (§6.5).
 
 ### Citations to re-verify
 

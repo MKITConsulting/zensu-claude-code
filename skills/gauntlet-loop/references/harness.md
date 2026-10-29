@@ -86,12 +86,14 @@ State the property, not the grant list — "no write tool, no spawn" — and alw
 "inspect only, change nothing" in the packet, because an instruction is what removes
 intent while a grant only removes reach.
 
-**Inside the Zensu plugin an `Explore` critic runs commands only through a guarded
-`Bash`.** The `.*` PreToolUse capability gate denies every other command-execution
-tool, and every MCP tool outside a short read-only list, to a neutral
-`host-profile-v1` child. It admits `Bash` only for a child that reports its
-`agent_type`, only while `hooks.subagentShell` is not `false`, and only past a guard
-that prevents accidents and is not a sandbox. `Explore` is such a child *while the
+**Inside the Zensu plugin the guard covers only an `Explore` critic's `Bash`.** The
+`.*` PreToolUse capability gate denies the other shell aliases, `PowerShell`, a
+`Monitor` command and an MCP tool whose name marks it as running commands to a
+neutral `host-profile-v1` child, because Zensu's command gates see only Bash and
+PowerShell commands, and otherwise blocks only what reaches Zensu's own state; an
+MCP tool that runs commands under another name passes. It admits `Bash` only for a child that
+reports its `agent_type`, only while `hooks.subagentShell` is not `false`, and only
+past a guard that prevents accidents and is not a sandbox. `Explore` is such a child *while the
 host reports its `agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin"
 states why this plugin cannot establish that it always does, and that bound applies
 here unchanged. The lead still runs the build, the tests, the dev server and the
@@ -116,8 +118,8 @@ be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
 The packet handed to a critic contains the goal, the frozen bar, house rules,
 the candidate, the reference, redacted gate output and the lead's capture of every
 inspection-recipe step, as redacted output or as files the critic can `Read`,
-because a critic here holds no browser, preview or simulator tool and the lead's one
-measurement is what every critic judges against. It contains no builder transcript,
+because the lead's one measurement is what every critic judges against; the packet
+forbids a critic any browser, preview or simulator tool it may hold. It contains no builder transcript,
 no rationale, no "we tried X because Y", and no hint about which way the lead is
 leaning.
 
@@ -157,7 +159,7 @@ Never grade a summary. The tools that make real inspection cheap:
 - **Files, images, PDFs, notebooks:** `Read`.
 
 Inside the Zensu plugin every one of these except `Read` is **lead-only** — a
-subagent's browser, preview and simulator tools are denied, its shell is at most a
+subagent may hold browser, preview and simulator tools, but its shell is at most a
 guarded `Bash` that can be off or refuse, and the frozen measurement is the lead's.
 Run them yourself and put the redacted output in the packet: the redaction rule in
 [SKILL.md](../SKILL.md) is unconditional and the packet is one of the paths it
@@ -186,11 +188,17 @@ Do not schedule short wakeups to poll subagents — a finished subagent
 re-invokes the lead on its own. Use a long fallback (1200 s+) so the run
 survives a hung agent.
 
-**There is no `/goal` command in Claude Code.** If a `/goal` or `/wargame` skill
-is installed, it is a *planning* step that produces the goal contract, invariants
-and evidence bar; run it before the gauntlet and feed its output into the charter
-as the frozen bar. The gauntlet is the execution loop, not the planner. In this
-plugin that planner is `/zensu:wargame`, which also handles `/goal` contracts. Its
+**Claude Code's own `/goal` command is a stop condition, not a planner.**
+`/goal <condition>` (and `/goal clear`) sets a goal that Claude checks before
+stopping and keeps the session working until a separate evaluator confirms the
+condition is met; it writes no plan, invariants or evidence bar. A message that
+starts with `/goal` runs that host command, so it never reaches a skill as text.
+The *planning* step is `/zensu:wargame`: it produces the goal contract, invariants
+and evidence bar, and a mission passed to it that opens with `/goal`
+(`/zensu:wargame /goal …`) selects its goal-contract mode. Run it before the
+gauntlet and feed its output into the charter as the frozen bar. The gauntlet is
+the execution loop, not the planner, and a host `/goal` condition can at most
+mirror the charter's stop conditions, never replace them. The planner's
 four contract parts — objective and exhaustiveness, invariants to prove or break,
 evidence bar, convergence loop — map onto the charter's goal, hard gates, inspection
 protocol and stop conditions, and its `RECON NEEDED` flags name the assumptions the

@@ -25,7 +25,7 @@
 # load it would always fall back to the hand-rolled append in zensu_directive_substitute.
 _ZENSU_DIRECTIVE_MSYS_ENV_READY=false
 _ZENSU_DIRECTIVE_MSYS_ENV=''
-if _ZENSU_DIRECTIVE_MSYS_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/zensu-msys-env.sh" \
+if _ZENSU_DIRECTIVE_MSYS_ENV="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)/zensu-msys-env.sh" \
   && [ -f "$_ZENSU_DIRECTIVE_MSYS_ENV" ] && [ ! -L "$_ZENSU_DIRECTIVE_MSYS_ENV" ]; then
   unset -f zensu_msys_env_exclusions 2>/dev/null || true
   # shellcheck disable=SC1090

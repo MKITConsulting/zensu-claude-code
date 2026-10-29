@@ -182,7 +182,7 @@ worktree-deletion wedge; a port that takes neither drifts from this core.
 
 Operator-facing accounts that must move with the predicates: the "Unbindable sessions"
 table in `docs/session-control.md`, the Stop-binding section of
-`docs/tdd-manager-workflow.md`, and the
+`docs/build-workflow.md`, and the
 binding rows in `skills/doctor/SKILL.md`.
 `tests/structure/test-orphaned-project-root.sh` pins the predicate truth table, the
 capability gate, every hook on the shell matcher, the Edit gate and the doctor rows;

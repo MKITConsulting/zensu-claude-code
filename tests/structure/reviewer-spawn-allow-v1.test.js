@@ -91,12 +91,23 @@ test('the set is exactly the plugin-scoped confined principals', () => {
 });
 
 test('bare agent names are never granted, only the plugin-scoped spellings', () => {
-  const bare = [...principal.REVIEWER_TYPES].filter((n) => !n.startsWith(allow.PLUGIN_SCOPE));
-  assert.ok(bare.length > 0, 'the principal module still carries bare fixture names');
-  for (const name of bare) {
+  const carried = [...principal.REVIEWER_TYPES].filter((n) => !n.startsWith(allow.PLUGIN_SCOPE));
+  assert.deepStrictEqual(carried, [], 'without the evaluation opt-in the principal module carries no bare name');
+  for (const name of ['code-reviewer', 'review-aspect', 'review-judge', 'zensu-plm']) {
     assert.strictEqual(allow.isConfinedReviewer(name), false);
     assert.strictEqual(allow.decide(spawnPayload(name)), '');
   }
+  const optedIn = require('node:child_process').spawnSync(process.execPath, ['-e', [
+    `const p = require(${JSON.stringify(path.join(LIB, 'claude-principal-v1.js'))});`,
+    `const a = require(${JSON.stringify(path.join(LIB, 'reviewer-spawn-allow-v1.js'))});`,
+    "const bare = [...p.REVIEWER_TYPES, ...p.PLM_TYPES].filter((n) => !n.startsWith('zensu:')).sort();",
+    'process.stdout.write(JSON.stringify({ bare, granted: bare.filter((n) => a.isConfinedReviewer(n)) }));',
+  ].join('\n')], { env: { ...process.env, ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES: '1' }, encoding: 'utf8' });
+  assert.strictEqual(optedIn.status, 0, optedIn.stderr);
+  assert.deepStrictEqual(JSON.parse(optedIn.stdout), {
+    bare: ['code-reviewer', 'review-aspect', 'review-judge', 'zensu-plm'],
+    granted: [],
+  });
 });
 
 test('every PLM identity is excluded', () => {

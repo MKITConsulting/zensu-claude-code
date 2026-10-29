@@ -68,10 +68,10 @@ else
 fi
 
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 SELF_REVIEW_SKILL="$PLUGIN_DIR/skills/self-review/SKILL.md"
 VERIFY_SKILL="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
-PLAN_TEMPLATE="$PLUGIN_DIR/templates/tdd-plan.md"
+PLAN_TEMPLATE="$PLUGIN_DIR/templates/zensu-plan.md"
 if grep -qF '6d. **Live Acceptance Verification**' "$TDD_SKILL" \
   && grep -qF -- '--acceptance-status --log {log_file}' "$TDD_SKILL" \
   && grep -qF 'the step 6d `ACCEPTANCE STATUS` lines' "$TDD_SKILL" \
@@ -117,7 +117,7 @@ printf 'v1\n' > "$PROJ/tracked.txt"
 git -C "$PROJ" add .gitignore tracked.txt
 git -C "$PROJ" -c commit.gpgsign=false commit -qm baseline
 
-STEM="2026-01-01-0101_tdd-acceptance-fixture"
+STEM="2026-01-01-0101_build-acceptance-fixture"
 PLAN_REL=".zensu/plans/$STEM.md"
 RUN_LOG="./.zensu/logs/$STEM.log"
 FAKE_TOKEN="ghp_$(printf 'Q7mZ%.0s' 1 2 3 4 5 6 7 8 9)"
@@ -331,7 +331,7 @@ EVIDENCE
   [ $? -eq 1 ] && grep -qF 'the evidence text on stdin is empty' "$WORK/rerr" || A5_OK=0
   printf 'logged in with %s and saw the value\n' "$FAKE_TOKEN" | acc_record AC-002 pass browser ""
   [ $? -eq 1 ] && grep -qF 'the evidence text matches a secret pattern' "$WORK/rerr" || A5_OK=0
-  acc_record AC-002 pass browser "" "./.zensu/logs/2026-01-01-0101_tdd-other.log" <<'EVIDENCE'
+  acc_record AC-002 pass browser "" "./.zensu/logs/2026-01-01-0101_build-other.log" <<'EVIDENCE'
 opened the page
 EVIDENCE
   [ $? -eq 1 ] && grep -qF "but this chain's edit-landing receipt records .zensu/logs/$STEM.log" "$WORK/rerr" || A5_OK=0

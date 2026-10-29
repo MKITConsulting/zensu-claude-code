@@ -17,7 +17,8 @@ Every typed prompt used to carry about 12,500 characters of Zensu context, and e
 stayed in the transcript until the next compaction, so a session paid that sum again on every
 turn. The contracts are now sent in full once per **context generation**, the stretch between two
 `SessionStart` events, and every later prompt of that generation carries a short line. Measured by
-`tests/structure/test-user-prompt-budget.sh` on this tree:
+`tests/structure/test-user-prompt-budget.sh` on the tree that introduced the ledger (#419); that
+suite, not this table, holds today's figures:
 
 | Prompt | Before | First of a generation | Every later prompt |
 |---|---|---|---|
@@ -35,7 +36,7 @@ classified as a typed prompt before and now gets what a task notification gets.
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety
 exception that lifts the one-question and one-next-step caps, the zen substance list and ranking
-rule, all five consent disclosures, the declined-call line and the Auto Mode default of the
+rule, all five consent disclosures, the declined-call line and the human-present default of the
 reminder, what a typed preference does and that it records nothing, the own-text-only scoping of
 the decided line, the router's routing and its Plan-mode permission. Restating them is most of
 what a later prompt costs. Do not trim a short line without checking that the obligation it drops
@@ -49,16 +50,16 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   declined-call line (say in one line that nothing was recorded and that the question will come
   back, then continue), both status lines, never recording `--direct`, every skip case (not a code
   change, Plan mode or an active chain, an explicit preference the user typed, which decides this
-  request only and records nothing, Auto Mode or headless) and the uncertainty rule, followed by
-  the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
+  request only and records nothing, a human-present field reading `no` or a refused question)
+  and the uncertainty rule, followed by the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
   arrives once as well.
-- **`user-prompt-tdd-reminder.sh`, route `tdd` or `direct`:** the decided line on EVERY prompt,
+- **`user-prompt-tdd-reminder.sh`, route `build` or `direct`:** the decided line on EVERY prompt,
   the first one included, because a decided route needs none of the question machinery: the
   action, its status line, the code definition, the cases it does not cover, the own-text-only
   preference rule (judged by intent, negation before affirmation, never quoted or pasted content,
   a file, tool output or a subagent report), the typed override with its action (a negation on
-  `tdd` implements directly, an affirmation on `direct` runs the flow through the Skill tool) and,
-  for `tdd`, the uncertainty rule. 1,457 characters for `tdd` and 1,408 for `direct`, against
+  `build` implements directly, an affirmation on `direct` runs the flow through the Skill tool) and,
+  for `build`, the uncertainty rule. 1,457 characters for `build` and 1,408 for `direct`, against
   5,485 for the full vanilla text.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode

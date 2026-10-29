@@ -53,10 +53,10 @@ Slash form: `/zensu:cover [<target>] [--flag=value ...]`.
   `/zensu:autopilot --cover` to turn the acceptance criteria autopilot validates **live and
   throwaway** into **committed** end-to-end tests in the same PR.
 
-This is a coverage skill for code that **already exists** — it is NOT `/zensu:tdd`. TDD is
+This is a coverage skill for code that **already exists** — it is NOT `/zensu:build`. TDD is
 red-first for code you are about to write; `/zensu:cover` is green-first for code that is
-already there. If the behavior does not exist yet, use `/zensu:tdd` or `/zensu:autopilot`.
-When both run over the same change (autopilot runs `/zensu:tdd` at step 1 and `/zensu:cover` at
+already there. If the behavior does not exist yet, use `/zensu:build` or `/zensu:autopilot`.
+When both run over the same change (autopilot runs `/zensu:build` at step 1 and `/zensu:cover` at
 step 6b), they are complementary, not competing: cover's **no-duplication** heuristic subtracts
 the coverage tdd's per-step tests already produced and fills only the remaining gap.
 
@@ -113,8 +113,9 @@ For each plan item, in the project's own idiom:
      production here.**
 
 Only test **authoring** (step 1) may fan out: parallel workflows or agents may write the tests
-of independent items across layers. A worker holds at most a guarded `Bash` (the guard prevents
-accidents and is not a sandbox), none when `hooks.subagentShell` is `false`, and the main thread owns every run whose result counts as
+of independent items across layers. A worker's only guarded shell is `Bash` (the guard prevents
+accidents and is not a sandbox), none when `hooks.subagentShell` is `false`, while an MCP tool that
+runs commands under a name the gate does not recognize is not judged, and the main thread owns every run whose result counts as
 evidence, so it runs every authored test, the RED/GREEN triage and any executed mutation check
 itself, and runs them one at a time where the probe reports a shared test DB or a fixed port.
 
@@ -123,15 +124,15 @@ itself, and runs them one at a time where the probe reports a shared test DB or 
 1. Run the target suite green (except intentional `xfail` bug flags).
 2. Apply the `rules/quality.md` gate: determinism, isolation, no over-mocking, meaningful
    assertions.
-3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn one
+3. **Reuse the Zensu review chain** exactly like `/zensu:build`'s review stage — spawn one
    `zensu:review-aspect` agent per perspective of the configured panel in one parallel batch
    (lean, the default: `correctness` with its test checks emphasized, `design`, `security`;
    `hooks.reviewPanel: full`: `conventions`, `bugs`, `architecture`, `tests` (emphasized),
    `security`) over the changed test files, merge their findings in this thread, consolidate
    through a single `zensu:code-reviewer` spawn, and fix the findings in-thread. Give each
    `zensu:review-aspect` spawn and the `zensu:code-reviewer` spawn the same `REVIEW PACKET v1`
-   that `/zensu:tdd` step 10.2c defines
-   (`${CLAUDE_PLUGIN_ROOT}/skills/tdd/references/review-chain.md`), including its rule for a
+   that `/zensu:build` step 10.2c defines
+   (`${CLAUDE_PLUGIN_ROOT}/skills/build/references/review-chain.md`), including its rule for a
    review that did not run Phase 6. This skill fills these fields:
    - `requirements_baseline`: the `AC-###` IDs resolved under `--from-acs`, each deprecated
      one marked as such, else `none`.

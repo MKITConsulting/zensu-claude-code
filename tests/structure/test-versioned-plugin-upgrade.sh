@@ -1593,6 +1593,16 @@ ADOPT_STOP_PAYLOAD="$(EVENT=Stop SESSION="$ADOPT_SESSION" CWD="$PROJECT" node -e
     cwd: process.env.CWD,
   }));
 ')"
+stop_notice_only() {
+  OUT_FILE="$1" ERR_FILE="$2" node -e '
+    const fs = require("node:fs");
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(process.env.OUT_FILE, "utf8")); } catch (_) { process.exit(1); }
+    if (!parsed || Object.keys(parsed).join() !== "systemMessage" || typeof parsed.systemMessage !== "string") process.exit(1);
+    const stderrLines = fs.readFileSync(process.env.ERR_FILE, "utf8").split("\n");
+    process.exit(parsed.systemMessage.split("\n").every((line) => stderrLines.includes(line)) ? 0 : 1);
+  ' 2>/dev/null
+}
 STOP_OUT="$TMP/adopt-stop.out"
 STOP_ERR="$TMP/adopt-stop.err"
 printf '%s' "$ADOPT_STOP_PAYLOAD" \
@@ -1603,7 +1613,7 @@ printf '%s' "$ADOPT_STOP_PAYLOAD" \
 # completion was proven" also appear in the two opt-out releases (ZENSU_CHAIN=off,
 # hooks.chainEnforcer=false), which read the ambient environment — so on a host
 # with either set this check would have gone green while the new branch was dead.
-if [ ! -s "$STOP_OUT" ] \
+if stop_notice_only "$STOP_OUT" "$STOP_ERR" \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$STOP_ERR" \
     && grep -qF 'it was REFUSED: opted-out' "$STOP_ERR" \
     && grep -qF '/zensu:adopt-session --confirm' "$STOP_ERR" \
@@ -3369,7 +3379,7 @@ EOF
       CLAUDE_PROJECT_DIR="$PROJECT" HOME="$PRUNED_STOP_HOME" ZENSU_CONFIG="$TMP/no-such-config.json" \
       bash "$PRUNED_SUCCESSOR/hooks/stop-chain-enforcer.sh" >"$PRUNED_STOP_CONTROL" 2>/dev/null || true
   pruned_restore
-  if [ "$PRUNED_STOP_RC" = 0 ] && [ ! -s "$PRUNED_STOP_OUT" ] \
+  if [ "$PRUNED_STOP_RC" = 0 ] && stop_notice_only "$PRUNED_STOP_OUT" "$PRUNED_STOP_ERR" \
       && grep -qF 'removed from the plugin cache' "$PRUNED_STOP_ERR" \
       && grep -qF 'it was REFUSED: opted-out' "$PRUNED_STOP_ERR" \
       && grep -qF 'version 0.17.0' "$PRUNED_STOP_ERR" \
@@ -3769,7 +3779,7 @@ if printf '%s' "$GONE_START" \
       `# discriminator for that arm is the sentence AC-C19 already treats as arm 3.` \
       && ! grep -qF 'The recorded project root still EXISTS' "$GONE_STOP_ERR" \
       && ! grep -qF 'nothing is claimed about the workflow document either way' "$GONE_STOP_ERR" \
-      && [ ! -s "$GONE_STOP_OUT" ]; then
+      && stop_notice_only "$GONE_STOP_OUT" "$GONE_STOP_ERR"; then
     check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived" PASS
   else
     check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived" FAIL
@@ -3982,12 +3992,12 @@ fi
 # satisfy the pin.
 STOP_LADDER="$ROOT/hooks/stop-chain-enforcer.sh"
 stop_arm_count() {
-  grep -c "^ *echo \"zensu chain-enforcer: releasing Stop.*$1" "$STOP_LADDER" 2>/dev/null || true
+  grep -c "^ *stop_notice \"zensu chain-enforcer: releasing Stop.*$1" "$STOP_LADDER" 2>/dev/null || true
 }
 STOP_ARM_GONE="$(stop_arm_count 'this is not a deferral')"
 STOP_ARM_NEUTRAL="$(stop_arm_count 'nothing is claimed about the workflow document either way')"
 STOP_ARM_DEFER="$(stop_arm_count 'The recorded project root still EXISTS')"
-STOP_NEUTRAL_TEXT="$(grep "^ *echo \"zensu chain-enforcer: releasing Stop.*nothing is claimed about the workflow document either way" "$STOP_LADDER" 2>/dev/null | head -1)"
+STOP_NEUTRAL_TEXT="$(grep "^ *stop_notice \"zensu chain-enforcer: releasing Stop.*nothing is claimed about the workflow document either way" "$STOP_LADDER" 2>/dev/null | head -1)"
 DOCTOR_LADDER="$ROOT/hooks/lib/zensu-doctor.sh"
 # Anchored the same way the Stop arms are. A bare substring match was satisfied by
 # the explanatory COMMENTS alone, so deleting the export left the renderer's
@@ -6058,7 +6068,7 @@ if auto_session_start "$AUTO_STOP_OFF_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
       CLAUDE_PROJECT_DIR="$PROJECT" HOME="$AUTO_STOP_HOME" ZENSU_CONFIG="$OPT_OUT_CONFIG" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/stop-chain-enforcer.sh" >"$AUTO_STOP_OFF_OUT" 2>"$AUTO_STOP_OFF_ERR" \
     || AUTO_STOP_OFF_RC=$?
-  if [ "$AUTO_STOP_OFF_RC" = 0 ] && [ ! -s "$AUTO_STOP_OFF_OUT" ] \
+  if [ "$AUTO_STOP_OFF_RC" = 0 ] && stop_notice_only "$AUTO_STOP_OFF_OUT" "$AUTO_STOP_OFF_ERR" \
       && grep -qF 'it was REFUSED: opted-out' "$AUTO_STOP_OFF_ERR" \
       && grep -qF 'hooks.sessionAutoAdopt' "$AUTO_STOP_OFF_ERR" \
       && grep -qF 'The recorded project root still EXISTS' "$AUTO_STOP_OFF_ERR" \
@@ -6131,7 +6141,7 @@ if auto_session_start "$AUTO_GONE_SESSION" "$AUTO_GONE_PROJECT" "$SYNTHETIC_CAND
       && [ "$(auto_record_version "$AUTO_GONE_RECORD")" = 0.18.0 ] \
       && [ "$(node -p 'require(process.argv[1]).project_root' "$AUTO_GONE_RECORD" 2>/dev/null)" = "$AUTO_GONE_ROOT_BEFORE" ] \
       && [ ! -e "$AUTO_GONE_PROJECT" ] \
-      && [ "$AUTO_GONE_STOP_RC" = 0 ] && [ ! -s "$AUTO_GONE_STOP_OUT" ] \
+      && [ "$AUTO_GONE_STOP_RC" = 0 ] && stop_notice_only "$AUTO_GONE_STOP_OUT" "$AUTO_GONE_STOP_ERR" \
       && grep -qF 'no longer exists' "$AUTO_GONE_STOP_ERR" \
       && ! grep -qF 'declares an incompatible lineage' "$AUTO_GONE_STOP_ERR"; then
     check "AUTO-11 a gone-root record adopts on the first hook contact, announces it with the orphan clause and the restore, keeps its absent anchor, still denies Edit on the orphaned-root scope without blaming the adoption (the refusal mode answers nothing), and Stop takes the orphan release" PASS

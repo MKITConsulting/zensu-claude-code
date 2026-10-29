@@ -360,6 +360,7 @@ printf '{"hooks":{"worktreeKeep":false}}' > "$STATE_DIR/keep-off.json"
 anchors_digest() { cat "$A/.zensu/state/worktree-anchor-$KEY.json" "$B/.zensu/state/worktree-anchor-$KEY.json" 2>/dev/null | cksum; }
 ANCHORS_BEFORE="$(anchors_digest)"
 printf '{"mode":"strict"}\n' > "$B/.zensu/state/tdd-mode-$KEY.json"
+printf '{"runner":"local"}\n' > "$B/.zensu/state/full-suite-$KEY.json"
 RA_ZENSU_CONFIG="$STATE_DIR/keep-off.json"
 reanchor_from "$A" "$CONFIG" --confirm
 RA_ZENSU_CONFIG=""
@@ -377,18 +378,25 @@ row_is "worktree keep" "disabled" && check "E9d hooks.worktreeKeep false reaches
 expect_eq "E9e with worktree keep off neither keep anchor changed" "$ANCHORS_BEFORE" "$(anchors_digest)"
 expect_eq "E9f one superseded record per move" "2" "$(ls "$DATA/session-control/v1/records" | grep -c "^$KEY\.superseded-reanchor-")"
 expect_eq "E9g two PROJECT_ROOT_REANCHORED entries under each root" "2 2" "$(history_count "$A") $(history_count "$B")"
-row_is "session markers" "moved (tdd-mode)" && check "E9h the report names the moved tdd-mode marker" PASS \
-  || check "E9h the report names the moved tdd-mode marker" FAIL
+row_is "session markers" "moved (tdd-mode, full-suite)" && check "E9h the report names the moved tdd-mode and full-suite markers" PASS \
+  || check "E9h the report names the moved tdd-mode and full-suite markers" FAIL
 MODE="$(CFG="$PLUGIN_DIR/hooks/lib/zensu-config.sh" bash -c 'source "$CFG" >/dev/null 2>&1 && zensu_tdd_mode_override "$1" "$2"' _ "$A" "$KEY" 2>/dev/null)"
 if [ "$MODE" = "strict" ] && [ ! -e "$B/.zensu/state/tdd-mode-$KEY.json" ]; then
   check "E9i the session's /zensu:tdd-mode choice is read under the new anchor and left nowhere else" PASS
 else
   check "E9i tdd-mode marker after the move (mode='$MODE')" FAIL
 fi
+FS_NEW="$(CFG="$PLUGIN_DIR/hooks/lib/zensu-config.sh" bash -c 'source "$CFG" >/dev/null 2>&1 && zensu_full_suite_marker_state "$1" "$2"' _ "$A" "$KEY" 2>/dev/null)"
+FS_OLD="$(CFG="$PLUGIN_DIR/hooks/lib/zensu-config.sh" bash -c 'source "$CFG" >/dev/null 2>&1 && zensu_full_suite_marker_state "$1" "$2"' _ "$B" "$KEY" 2>/dev/null)"
+if [ "$FS_NEW" = "local" ] && [ "$FS_OLD" = "none" ]; then
+  check "E9j the session's /zensu:full-suite choice is read under the new anchor and left nowhere else" PASS
+else
+  check "E9j full-suite marker after the move (new='$FS_NEW' old='$FS_OLD')" FAIL
+fi
 
-echo "=== E10: a /zensu:tdd chain in the new anchor, driven from the start directory ==="
+echo "=== E10: a /zensu:build chain in the new anchor, driven from the start directory ==="
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 SKILL_SR="$PLUGIN_DIR/skills/self-review/SKILL.md"
 SKILL_VF="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
 span_in() {
@@ -416,8 +424,8 @@ spans_agree() {
 }
 E10_TS="2026-09-30-0000"
 E10_SLUG="reanchor-e2e"
-E10_LOG_DEF="$(skill_span '/.zensu/logs/{SESSION_TS}_tdd-{slug}.log')"
-E10_PLAN_DEF="$(skill_span '/.zensu/plans/{SESSION_TS}_tdd-{slug}.md')"
+E10_LOG_DEF="$(skill_span '/.zensu/logs/{SESSION_TS}_build-{slug}.log')"
+E10_PLAN_DEF="$(skill_span '/.zensu/plans/{SESSION_TS}_build-{slug}.md')"
 E10_ROOT_CMD="$(skill_span 'zensu-log.sh" --project-root')"
 E10_BASE_CMD="$(skill_span 'BASELINE_SHA=$(git -C')"
 E10_BEGIN="$(skill_span 'hooks/lib/zensu-log.sh" --tdd-begin' '--tdd-begin')"
@@ -533,15 +541,15 @@ E10_PLAN_PATH="$(render '{plan_file}')"; E10_PLAN_PATH="${E10_PLAN_PATH#\"}"; E1
 case "$E10_PLAN_PATH" in
   ("$B"/.zensu/plans/*)
     mkdir -p "$(dirname "$E10_PLAN_PATH")"
-    printf '# TDD Plan: re-anchor end to end\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The chain completes in the new anchor | spec |\n' > "$E10_PLAN_PATH"
+    printf '# Zensu Plan: re-anchor end to end\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The chain completes in the new anchor | spec |\n' > "$E10_PLAN_PATH"
     ;;
   (*) check "E10 the rendered {plan_file} lies under the new anchor (got '$E10_PLAN_PATH')" FAIL ;;
 esac
 E10_RECIPE_RUN="$(render "$E10_RECIPE")"
 from_start "$E10_RECIPE_RUN"
-if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_RECIPE_RUN" && [ "$E10_LOG_PATH" = "$B/.zensu/logs/${E10_TS}_tdd-${E10_SLUG}.log" ] \
-  && grep -qF 'TDD STARTED — re-anchor end to end' "$E10_LOG_PATH" 2>/dev/null \
-  && [ ! -e "$A/.zensu/logs/${E10_TS}_tdd-${E10_SLUG}.log" ]; then
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_RECIPE_RUN" && [ "$E10_LOG_PATH" = "$B/.zensu/logs/${E10_TS}_build-${E10_SLUG}.log" ] \
+  && grep -qF 'BUILD STARTED — re-anchor end to end' "$E10_LOG_PATH" 2>/dev/null \
+  && [ ! -e "$A/.zensu/logs/${E10_TS}_build-${E10_SLUG}.log" ]; then
   check "E10i the Phase 2 log recipe creates the run log under the new anchor and nothing under the start directory" PASS
 else
   e10_fail "E10i Phase 2 log recipe (log '$E10_LOG_PATH')"

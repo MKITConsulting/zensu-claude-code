@@ -60,16 +60,22 @@ a bare `missing` would not tell the user why the choice did not hold.
 **Stores.** `$CLAUDE_PLUGIN_DATA/ci-contract/v1/` holds the cache, `clones/` and `snapshots/`,
 and sits in both protected-root lists of `hooks/lib/reviewer-capability-v1.js`. The session
 marker `.zensu/state/full-suite-<session key>.json` goes through `zensu_write_session_marker`,
-like the delivery-route marker. A Bash redirect from the main thread can still forge any of
-them, the documented residual of every plugin store.
+like the delivery-route marker, and `SESSION_MARKERS` in `hooks/lib/session-reanchor-v1.js` moves
+it to the new root on `/zensu:adopt-session --reanchor`. Renaming its path template therefore moves
+that list as well, which the marker case in `tests/structure/session-reanchor-v1.test.js` enforces
+by deriving the kinds from the templates, and the path `docs/configuration.md` §"Full Suite in CI"
+names, plus the literals in `test-full-suite-ci.sh` and the two re-anchor suites. The chain snapshot
+does not move: the re-anchor refuses while a chain holds open work, and the next `--tdd-begin`
+writes a new one. A Bash redirect from the main thread can still
+forge any of them, the documented residual of every plugin store.
 
 **Tests.** `CI=true` resolves `local`, so `test-full-suite-ci.sh` unsets the CI variables and
 the unit file passes a clean environment. `gh` is a PATH shim that answers canned JSON. The
 suite drives real chains to `deferred-ci`, through a mid-chain switch in both directions, and
 through the helper's repo and session verbs.
 
-**Coupled sites that move together:** `skills/tdd/SKILL.md` Phase 0 step 2 and the section
-"Full Suite in CI (mode-gated deltas)" in `skills/tdd/references/modes.md`; the CI fix-round
+**Coupled sites that move together:** `skills/build/SKILL.md` Phase 0 step 2 and the section
+"Full Suite in CI (mode-gated deltas)" in `skills/build/references/modes.md`; the CI fix-round
 paragraph and the legend in `skills/self-review/SKILL.md`; `CLOSE_PASS_SUITE_CI`,
 `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP`, `FULL_SUITE_ROUND_NOTE` and the `deferred-ci` legend
 entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.sh` counts
@@ -77,7 +83,7 @@ entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.
 `test-full-suite-ci.sh` C10, C22 and C23 refuse it in a CI chain's directives, so the CI variant
 must not add one; `docs/configuration.md` §"Full Suite in CI" and
 its three keys; `docs/gates.md` CI mode; discipline patch 12 in
-`docs/tdd-manager-workflow.md`; `config.example.json`; the README skills table and count; the
+`docs/build-workflow.md`; `config.example.json`; the README skills table and count; the
 skills list in `.claude-plugin/plugin.json`.
 
 **Version: `patch`.** No hook added, removed or renamed, no matcher change, no

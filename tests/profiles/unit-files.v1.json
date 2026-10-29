@@ -2,7 +2,12 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 226, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
+      "path": "tests/structure/ai-work-capture.test.js", "registered": 10,
+      "runs": [{ "driver": "tests/structure/test-ai-work-capture.sh" }],
+      "summary": "AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions."
+    },
+    {
+      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 227, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
       "runs": [{ "driver": "tests/session-control/run.sh" }],
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
@@ -15,6 +20,11 @@
       "path": "tests/structure/aspect-activation-v1.test.js", "registered": 21,
       "runs": [{ "driver": "tests/structure/test-incremental-review-rounds.sh" }],
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
+    },
+    {
+      "path": "tests/structure/background-review-v1.test.js", "registered": 33, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
     },
     {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
@@ -67,13 +77,13 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 23,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 30,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
       ],
       "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
-      "summary": "The session-trail linked-session reader: the family walk, the kinds, the start decisions and calls, the saved presets, the unread reports and the task-chip proposals."
+      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports and the task-chip proposals."
     },
     {
       "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
@@ -149,6 +159,11 @@
       "summary": "Delta-scoped review rounds: which files and findings a fix round reviews."
     },
     {
+      "path": "tests/structure/round-prepare-v1.test.js", "registered": 41,
+      "runs": [{ "driver": "tests/structure/test-round-prepare.sh" }],
+      "summary": "Fix-round bookkeeping: the claim-label grammar, the round-start content snapshot, landing attribution, the fixed ledger lines and the packet files."
+    },
+    {
       "path": "tests/structure/reviewer-spawn-allow-v1.test.js", "registered": 20,
       "runs": [{ "driver": "tests/structure/test-reviewer-spawn-allow.sh" }],
       "summary": "The reviewer-spawn grant: the derived agent set, its silence on every non-grant path and the one-definition scan."
@@ -199,9 +214,14 @@
       "summary": "Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason."
     },
     {
-      "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 26, "skips": {"win32": 2},
+      "path": "tests/structure/state-path-safety-v1.test.js", "registered": 13, "skips": {"root": 1, "win32": 2},
+      "runs": [{ "driver": "tests/structure/test-tdd-state-path-safety.sh" }],
+      "summary": "The state path walk the tdd-phase lease processes and _tdd_paths_safe share: link, kind and link-count refusals, unreadable components, trusted-root and fallback anchors, and malformed requests."
+    },
+    {
+      "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 27, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-reviewer-capability-gate.sh" }],
-      "summary": "The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings."
+      "summary": "The subagent shell guard: the accident rules, the shell parser and command walker, the mention scan for other tools, the config layers that withdraw the grant, and Windows spellings."
     },
     {
       "path": "tests/structure/unit-registry.test.js", "registered": 30,

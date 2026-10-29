@@ -49,7 +49,7 @@ const AUTOPILOT_READER_FAULTS = Object.freeze({
   97: 'the Autopilot state library did not load',
 });
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
-const SESSION_MARKERS = Object.freeze(['tdd-mode', 'delivery-route', 'zen-mode']);
+const SESSION_MARKERS = Object.freeze(['tdd-mode', 'delivery-route', 'full-suite', 'zen-mode']);
 const MAX_REGISTRY_ENTRIES = 1024;
 const MAX_REGISTRY_BYTES = 65536;
 const MAX_RECORD_BYTES = 1024 * 1024;
@@ -703,20 +703,20 @@ function renderReanchorVerdict(verdict, confirmed) {
   text += 'returns there after a command that leaves it, so give your own commands a leading cd into\n';
   if (unpastableRoot(verdict.targetRoot)) {
     text += 'the new worktree, with its path in single quotes. That path holds a double quote, a dollar\n';
-    text += 'sign, a backtick or a backslash, which zensu-log.sh --project-root refuses, so /zensu:tdd,\n';
+    text += 'sign, a backtick or a backslash, which zensu-log.sh --project-root refuses, so /zensu:build,\n';
     text += '/zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot run there:\n';
     text += 'move the worktree to a path without these characters before you start a chain there.\n';
   } else {
-    text += 'the new worktree. /zensu:tdd, /zensu:self-review, /zensu:converge and /zensu:verify-feature\n';
+    text += 'the new worktree. /zensu:build, /zensu:self-review, /zensu:converge and /zensu:verify-feature\n';
     text += '--chain read the anchor from zensu-log.sh --project-root and run their commands inside it,\n';
-    text += 'and --evidence-run runs there too, so a new /zensu:tdd chain can start in this session.\n';
+    text += 'and --evidence-run runs there too, so a new /zensu:build chain can start in this session.\n';
   }
   text += '/zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot still\n';
   text += 'read plans, config, overlays and templates from the start directory. The source-write\n';
   text += 'gate reads its project-level hooks.bashWriteGate opt-in there too. The workflow\n';
   text += 'document under the recorded root stays where it is; review-evidence leases bound to it\n';
-  text += 'are set aside, and this session\'s tdd-mode, delivery-route and zen-mode markers move\n';
-  text += 'with the anchor.\n';
+  text += `are set aside, and this session's ${SESSION_MARKERS.slice(0, -1).join(', ')} and ${SESSION_MARKERS[SESSION_MARKERS.length - 1]}\n`;
+  text += 'markers move with the anchor.\n';
   text += '\nNothing has been changed. Run the same command with --confirm to move the anchor.\n';
   return { text, code: 0, proceed: false };
 }
@@ -758,15 +758,15 @@ function renderReanchorOutcome(outcome) {
   if (unpastableRoot(outcome.projectRoot)) {
     text += 'leading cd into the project above, with its path in single quotes. That path holds a double\n';
     text += 'quote, a dollar sign, a backtick or a backslash, which zensu-log.sh --project-root refuses,\n';
-    text += 'so /zensu:tdd, /zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot\n';
+    text += 'so /zensu:build, /zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot\n';
     text += 'run there: move the worktree to a path without these characters before you start a chain\n';
     text += 'there. /zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot\n';
     text += 'still read plans, config, overlays and templates from the start directory.\n';
     text += 'The source-write gate reads its project-level hooks.bashWriteGate opt-in there too.\n';
   } else {
-    text += 'leading cd into the project above. /zensu:tdd, /zensu:self-review, /zensu:converge,\n';
+    text += 'leading cd into the project above. /zensu:build, /zensu:self-review, /zensu:converge,\n';
     text += '/zensu:verify-feature --chain and --evidence-run work in the project above, so a new\n';
-    text += '/zensu:tdd chain can start in this session. /zensu:plan-review, /zensu:setup,\n';
+    text += '/zensu:build chain can start in this session. /zensu:plan-review, /zensu:setup,\n';
     text += '/zensu:cover, /zensu:autopilot and /zensu:pilot still read plans, config, overlays and\n';
     text += 'templates from the start directory. The source-write gate reads its project-level\n';
     text += 'hooks.bashWriteGate opt-in there too.\n';
@@ -824,6 +824,7 @@ module.exports = {
   REANCHOR_REMEDY,
   REANCHOR_HISTORY_PHASE,
   REANCHOR_HISTORY_REASON_PREFIX,
+  SESSION_MARKERS,
   worktreeIdentity,
   registeredWorktrees,
   owningWorktree,

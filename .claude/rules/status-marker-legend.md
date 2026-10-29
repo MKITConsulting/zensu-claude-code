@@ -67,7 +67,7 @@ reintroducing under the fix the exact census failure this file records for the
 
 1. `hooks/post-review-tdd-delegate.sh` — the `COMBINED_SUMMARY_DIRECTIVE` string.
 2. `skills/self-review/SKILL.md` §"### Final report" — the second renderer.
-3. `docs/tdd-manager-workflow.md` §"Chain-end combined summary" — the operator account.
+3. `docs/build-workflow.md` §"Chain-end combined summary" — the operator account.
 4. `templates/pr-body.md` — the AC `Status` column.
 5. `templates/autopilot-pr-body.md` — the same column, autopilot's variant.
 6. `skills/autopilot/SKILL.md` — the step-3 PR-body renderer, which restates the whole

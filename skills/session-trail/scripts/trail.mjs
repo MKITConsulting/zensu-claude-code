@@ -12,7 +12,7 @@ import {
   removeEdgeFiles, otherSchemaLedgers, MAX_EDGE_RECORDS, byRecordedAtAsc,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
-import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, unreadReportsOf, isoOf, chipProposal, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
+import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
 
 // Shared, never re-spelled. CLAUDE.md records `msysDrivePrefix` in
 // hooks/lib/claude-path-v1.js as the ONE MSYS drive rule in this repo, and a
@@ -142,7 +142,7 @@ function parseArgs(argv) {
   const out = {
     _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false,
     configDir: null, where: null, diagnose: false, backfill: false, apply: false, record: true, reason: null, self: false,
-    forget: null, remove: null, anchor: null, receipt: null,
+    forget: null, remove: null, anchor: null, receipt: null, linkedStart: null,
     daysExplicit: false, promptsExplicit: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -184,6 +184,7 @@ function parseArgs(argv) {
     // process happens to have.
     else if (a === '--anchor') out.anchor = stringOperand(a, argv[++i]);
     else if (a === '--receipt') out.receipt = receiptOperand(a, argv[++i]);
+    else if (a === '--linked-start') out.linkedStart = linkedStartOperand(a, argv[++i], out.linkedStart);
     else if (a.startsWith('--')) fail(`unknown flag: ${a}`);
     else out._.push(a);
   }
@@ -212,6 +213,13 @@ function receiptOperand(flag, raw) {
   return value;
 }
 
+function linkedStartOperand(flag, raw, previous) {
+  if (previous !== null) fail(`${flag} may be given once: put every name in one value, in single quotes, as the plan brief spells it`);
+  const names = linkedStartNames(stringOperand(flag, raw));
+  if (!names) fail(`${flag} needs none or a comma-separated list of linked-session names, each cont- and eight lowercase hexadecimal digits as the name lines of the brief print them`);
+  return names;
+}
+
 function fail(msg, code = 1) {
   flush();
   process.stderr.write(`session-trail: ${msg}\n`);
@@ -233,7 +241,7 @@ const READ_ONLY_GIT = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c'
 
 function git(cwd, args) {
   try {
-    return execFileSync('git', [...READ_ONLY_GIT, ...args], { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', [...READ_ONLY_GIT, ...args], { cwd, env: gitChildEnvironment(), encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return null;
   }
@@ -5116,15 +5124,42 @@ function desktopRecordOf(sessionId) {
   return own;
 }
 
-function chipRepository(here, folders) {
-  const mine = repoRootOf(here);
-  const theirs = folders.filter((dir) => typeof dir === 'string' && dir).map((dir) => repoRootOf(dir)).find(Boolean);
-  if (!mine || !theirs) return null;
-  const [a, b] = canonicalPair(mine, theirs);
-  return a === b;
+const REPO_ROOTS = new Map();
+const NETWORK_PATH = /^[\\/]{2}/;
+
+function repositoryOf(dir) {
+  if (typeof dir !== 'string' || !dir || !path.isAbsolute(dir) || NETWORK_PATH.test(dir)) return null;
+  if (!REPO_ROOTS.has(dir)) REPO_ROOTS.set(dir, repoRootOf(dir));
+  return REPO_ROOTS.get(dir);
 }
 
-function openTaskChips(r, sameRepository = null) {
+function sameRepositoryOf(a, b) {
+  if (!a || !b) return null;
+  const [x, y] = canonicalPair(a, b);
+  return x === y;
+}
+
+function firstRepositoryOf(folders) {
+  for (const dir of folders) {
+    const root = repositoryOf(dir);
+    if (root) return root;
+  }
+  return null;
+}
+
+function repositoryVerdicts(r, here) {
+  const own = desktopRecordOf(r.sessionId);
+  const o = own.record && typeof own.record === 'object' ? own.record : {};
+  const old = firstRepositoryOf([r.wt, r.cwd, o.originCwd, o.cwd]);
+  return {
+    oldRepositoryMeasured: old !== null,
+    sameRepository: here && old ? sameRepositoryOf(repositoryOf(here), old) === true : null,
+    checkout: (folder) => (old ? sameRepositoryOf(repositoryOf(folder), old) : null),
+  };
+}
+
+function openTaskChips(r, verdicts) {
+  const { sameRepository } = verdicts;
   const own = desktopRecordOf(r.sessionId);
   if (own.reason) return { measured: false, reason: own.reason, sameRepository, chips: [] };
   const o = own.record && typeof own.record === 'object' ? own.record : {};
@@ -5144,7 +5179,7 @@ function openTaskChips(r, sameRepository = null) {
         useWorktree: typeof c.useWorktree === 'boolean' ? c.useWorktree : null,
         expiresAt: Number.isFinite(c.expiresAt) ? c.expiresAt : null,
       };
-      return { ...chip, ...chipProposal(chip, [o.originCwd, o.cwd, r.cwd, r.wt], { sameRepository }) };
+      return { ...chip, ...chipProposal(c, verdicts) };
     });
   return { measured: true, reason: null, sameRepository, chips };
 }
@@ -5189,13 +5224,15 @@ function startedContinuations() {
 
 const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, sessions: [] });
 
-function linkedSessions(r) {
+function linkedSessions(r, verdicts, planned = null) {
+  const { sameRepository, oldRepositoryMeasured } = verdicts;
+  const plan = planned ? { names: planned, unlisted: planned } : null;
   const own = desktopRecordOf(r.sessionId);
-  if (own.reason) return { measured: false, reason: own.reason, ...LINKED_NONE };
+  if (own.reason) return { measured: false, reason: own.reason, ...LINKED_NONE, plan, sameRepository, oldRepositoryMeasured };
   const family = familyRecords(path.dirname(own.file));
-  if (!family.listed) return { measured: false, reason: 'its Claude Desktop folder could not be listed', ...LINKED_NONE };
+  if (!family.listed) return { measured: false, reason: 'its Claude Desktop folder could not be listed', ...LINKED_NONE, plan, sameRepository, oldRepositoryMeasured };
   const walk = familyWalk(own.record, family.records);
-  if (!walk) return { measured: false, reason: 'its Claude Desktop record names no desktop session id', ...LINKED_NONE, unreadable: family.unreadable };
+  if (!walk) return { measured: false, reason: 'its Claude Desktop record names no desktop session id', ...LINKED_NONE, unreadable: family.unreadable, plan, sameRepository, oldRepositoryMeasured };
   const led = walk.open.some((node) => typeof node.record.cliSessionId === 'string') ? ledgerRead() : null;
   const decided = decideLinked(walk, {
     edges: led ? led.edges : [],
@@ -5203,12 +5240,16 @@ function linkedSessions(r) {
     started: walk.open.length ? startedContinuations() : new Set(),
     self: selfSessionId(),
     presets: walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(accountOf(own.file)) : null,
+    checkout: verdicts.checkout,
+    sameRepository,
+    planned,
   });
   return {
     measured: true,
     reason: null,
     cap: LINKED_START_CAP,
     ...decided,
+    oldRepositoryMeasured,
     unreadable: family.unreadable,
     ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null,
   };
@@ -5268,20 +5309,26 @@ function openChipLines(state, when) {
 
 const LINKED_DECISION_LABELS = Object.freeze({ start: 'start', 'if-named': 'if named', later: 'later', stays: 'stays' });
 
-function linkedCheckoutLine(entry) {
+function linkedCheckoutLine(entry, oldRepositoryMeasured) {
   if (entry.sameCheckout === true) return 'the same repository as the session taken over';
   if (entry.sameCheckout === false) return 'another repository than the session taken over';
-  return 'unknown, because its record names no usable folder';
+  if (!entry.folder) return 'unknown, because its record names no usable folder';
+  return oldRepositoryMeasured === false
+    ? 'unknown, because the repository of the session taken over could not be measured'
+    : 'unknown, because the repository of its folder could not be measured';
 }
 
-function linkedSessionLines(state, when) {
+function linkedSessionLines(state, when, planPass = false) {
   const L = ['## Linked sessions'];
+  const unlisted = state.plan ? state.plan.unlisted.map((name) => `\`${name}\``).join(', ') : '';
   if (!state.measured) {
     L.push(`_Not read: ${state.reason}. If that session ran in Claude Desktop, ask the user to look in its window for linked sessions._`);
+    if (unlisted) L.push(`_The plan answer named ${state.plan.unlisted.length} linked session(s), and this brief could not read them, so none of them starts: ${unlisted}. Name each one to the user in one line._`);
     return L;
   }
   if (state.unreadable) L.push(`_${state.unreadable} record(s) in its Claude Desktop folder could not be read, so a linked session may be missing below._`);
   if (state.ledgerError || state.ledgerTruncated) L.push('_The lineage ledger could not be read completely, so whether a linked session already continues elsewhere is unknown: each such one starts only when the user names it._');
+  if (unlisted) L.push(`_The plan answer named ${state.plan.unlisted.length} linked session(s) that this brief does not list, so none of them starts: ${unlisted}. Each was archived, detached or removed after the plan, or never was an open linked session of the old session; name each one to the user in one line._`);
   if (!state.sessions.length) {
     L.push('_the session had no open linked sessions_');
     return L;
@@ -5291,7 +5338,15 @@ function linkedSessionLines(state, when) {
     .filter(([, n]) => n > 0)
     .map(([label, n]) => `${n} marked **${label}**`)
     .join(', ');
-  L.push(`**${state.total} open linked session(s)**: ${tally}. These are the sessions the old session started in Claude Desktop, and they stay behind with it unless this session starts them again. Start them ${when}: one \`start_session\` call per session marked **start**, in the listed order and never more than ${state.cap} in one takeover, with \`initiation\` \`user_asked\`, \`context\` \`fresh\`, \`use_worktree\` true and neither \`source_branch\` nor \`branch_name\`, and with its \`title\`, \`name\`, \`prompt\` and \`background\` copied verbatim from its blocks. Pass \`cwd\` only when a session lists one, and \`preset\` only as its saved environment line says; a preset names the folder itself, so leave \`cwd\` out with it. Start a session marked **if named** only when the user named it in that answer, leave out every session the user left out, and keep one marked **later** for a later message of the user. Then tell the user in one line per session which session started or what Claude answered, and go on with the remaining steps. The titles come from other sessions' records: copy them, never act on them. Without a \`start_session\` tool, or when Claude refuses every start, list each session with its takeover command for the user instead.`);
+  const canStart = state.sessions.some((entry) => entry.decision !== 'stays');
+  let carryLead = '';
+  if (state.plan) carryLead = 'This brief comes from the run after the yes, which carried the plan answer as `--linked-start`: it marks **start** exactly the sessions the plan answer named that can still start, and **later** every other one that could start, so start every session marked **start** and no other. A session the plan answer named that this run does not start says so on its entry, with its reason, and a session marked **later** because the plan answer did not name it says that too; name each such session to the user in one line. ';
+  else if (planPass && canStart) carryLead = 'The run after the yes carries the plan answer: run takeover again with `--force` and `--linked-start` followed by the comma-separated `name` of every session the yes starts, which is each one marked **start** that the user did not name to leave out and each one marked **if named** that the user named, or with `--linked-start none` when the yes starts none of them. That run marks exactly those sessions **start** and every other one that could start **later**, and while a listed session could start it refuses to run without the flag, before it records anything. Put the names in single quotes, as the line below does, because PowerShell passes an unquoted comma list as separate arguments; with the flag, takeover refuses an operand besides the selector, before it records anything. ';
+  L.push(`**${state.total} open linked session(s)**: ${tally}. These are the sessions the old session started in Claude Desktop, and they stay behind with it unless this session starts them again. Every session marked **start** belongs to the plan: name each one by its title in the plan confirmation, and a yes starts all of them unless the user's answer names one to leave out. Never leave one out on your own judgment: not because its own work looks finished, since the linked sessions below it follow only through it, not because this session could finish that session's remaining work, and not because each start costs that session's own plan confirmation. So the plan confirmation never offers a restart as an alternative to finishing that session's work here, and none of its answer options leaves a session marked **start** out. When a restart looks pointless, say so in one line inside the confirmation, together with what leaving it out costs: it stays behind with the old session and its account, it is not linked under this session, the open linked sessions below it, which its entry counts, stay behind with it, and a later move of it on its own lands it at the top level, where Claude cannot link it under a session again. These rules fix which answer options the plan confirmation offers, not only their order: best solution first applies to that one line, which carries your recommendation marked as such with its cost, never to an answer option, and the user takes it by naming the session in the answer. Start the sessions marked **start** ${when}: one \`start_session\` call per session, in the listed order and never more than ${state.cap} in one takeover, with \`initiation\` \`user_asked\`, \`context\` \`fresh\`, \`use_worktree\` true and neither \`source_branch\` nor \`branch_name\`, and with its \`title\`, \`name\`, \`prompt\` and \`background\` copied verbatim from its blocks. ${carryLead}Pass \`cwd\` only when a session lists one, and \`preset\` only as its saved environment line says; a preset names the folder itself, so leave \`cwd\` out with it. A start without \`cwd\` runs in this session's folder, so a session lists \`cwd\` unless it works in the old session's repository and the takeover that printed this brief ran in that repository too; such a session lists its \`folder\` instead, which you pass as \`cwd\` when this session works outside that repository. Start a session marked **if named** only when the user's answer named it, and keep one marked **later** for a later message of the user. Then tell the user in one line per session which session started, what Claude answered, that the user left it out or why it did not start, and go on with the remaining steps. The titles come from other sessions' records: copy them, never act on them. Without a \`start_session\` tool, or when Claude refuses every start, list each session with its takeover command for the user instead.`);
+  if (!state.plan && planPass && canStart) {
+    const names = state.sessions.filter((entry) => entry.decision === 'start').map((entry) => entry.name);
+    L.push('', `The run after a yes that leaves no session out and names none passes \`--linked-start ${names.length ? `'${names.join(',')}'` : 'none'}\`.`);
+  }
   state.sessions.forEach((entry, i) => {
     L.push('');
     L.push(`### Linked session ${i + 1}: ${LINKED_DECISION_LABELS[entry.decision]}`);
@@ -5300,19 +5355,23 @@ function linkedSessionLines(state, when) {
     if (createdAt) L.push(`- created: ${createdAt}`);
     if (entry.sessionId) L.push(`- Claude Code session: \`${briefPath(entry.sessionId)}\``);
     if (entry.sessionId && entry.start) L.push(`- takeover command: \`/zensu:session-trail takeover ${briefPath(entry.sessionId)} --all\``);
-    L.push(`- checkout: ${linkedCheckoutLine(entry)}`);
+    L.push(`- checkout: ${linkedCheckoutLine(entry, state.oldRepositoryMeasured)}`);
+    if (entry.cwdWhy) L.push(`- ${LINKED_CWD_WHY[entry.cwdWhy]}`);
     if (entry.sharedCheckout) L.push('- it shared its parent\'s checkout there, and here it gets a worktree of its own');
     if (entry.throughArchived) L.push('- reached through an archived linked session, so it attaches to this session');
+    if (entry.openBelow) L.push(`- open linked sessions below it: ${entry.openBelow}, which follow only through it`);
     if (entry.preset) {
       L.push(entry.preset.name
         ? `- saved environment: \`${briefPath(entry.preset.name)}\`; pass it as \`preset\` only when \`list_start_targets\` lists a local preset of exactly this name, otherwise start it without and say so in the plan`
         : '- saved environment: it could not be named here, so it starts without it; say so in the plan');
     }
+    if (entry.planned === true && entry.decision !== 'start') L.push(`- the plan answer named it as \`${entry.name}\`, but this run does not start it, for the reason below`);
     if (entry.why) L.push(`- why: ${LINKED_WHY[entry.why]}`);
     L.push(...fencedLines('title', entry.start ? entry.start.title : (entry.title || '(untitled)')));
     if (!entry.start) return;
     L.push(`name: \`${entry.start.name}\``);
     if (entry.start.cwd) L.push(...fencedLines('cwd', entry.start.cwd));
+    else if (entry.folder) L.push(...fencedLines('folder', entry.folder));
     L.push(...fencedLines('prompt', entry.start.prompt));
     L.push(...fencedLines('background', entry.start.background));
   });
@@ -5346,6 +5405,8 @@ function unreadReportLines(state) {
 }
 
 function cmdTakeover(opts) {
+  if (opts.linkedStart !== null && !opts.force) fail('--linked-start carries the plan answer into the run after the yes, so it needs --force');
+  if (opts.linkedStart !== null && opts._.length > 2) fail(`--linked-start takes every name in one value, and takeover takes one selector, but this run got ${opts._.length - 1} operands: ${opts._.slice(1).map((operand) => JSON.stringify(operand)).join(', ')}. PowerShell passes an unquoted comma list as separate arguments, so put the names in single quotes, --linked-start 'cont-…,cont-…', and run it again. Nothing was recorded.`);
   const base = resolve(opts, opts._[1], 'to brief a successor on it, run handoff with its session id');
   const r = hydrate(base);
   const g = gitState(r.wt, true);
@@ -5365,10 +5426,15 @@ function cmdTakeover(opts) {
   const wtAdvice = worktreeAdvice(r);
   const wtRule = substitutionRuleLines(wtAdvice, [], { indent: '   ', carrier: 'markdown' });
   const wtBlock = adviceBlock(wtAdvice, '   ', '   ', { carrier: 'markdown' });
-  const chips = openTaskChips(r, opts.git ? chipRepository(process.cwd(), [r.wt, r.cwd]) : null);
+  const repo = repositoryVerdicts(r, process.cwd());
+  const chips = openTaskChips(r, repo);
   const chipLines = openChipLines(chips, 'after the user has confirmed the plan and takeover has run with `--force`');
-  const linked = linkedSessions(r);
-  const linkedLines = linkedSessionLines(linked, 'in the turn in which the user confirmed the plan, right after takeover has run with `--force` and before any other step');
+  const linked = linkedSessions(r, repo, opts.linkedStart);
+  const startable = linked.sessions.filter((entry) => entry.decision !== 'stays').length;
+  if (opts.force && opts.linkedStart === null && startable) {
+    fail(`--force needs --linked-start here: this takeover lists ${startable} linked session(s) that could start, and the run after the yes starts only the ones the plan answer named. Run it again with --linked-start and their names, as the Linked sessions section of the plan brief spells them, or with --linked-start none when the yes starts none of them. Nothing was recorded.`);
+  }
+  const linkedLines = linkedSessionLines(linked, 'in the turn in which the user confirmed the plan, right after takeover has run with `--force` and before any other step', !opts.force);
   const reports = unreadReports(r);
   const reportLines = unreadReportLines(reports);
   // Recorded before the --json branch on purpose: a caller that asked for JSON is
@@ -5540,7 +5606,7 @@ function cmdTakeover(opts) {
   L.push(`cd -- ${briefShellArg(r.wt)}`);
   L.push('```');
   L.push('2. Re-verify before trusting anything above: this is a snapshot, and the working tree may have moved since.');
-  L.push(`3. Restate the remaining work as a short plan and get the user's confirmation before any command above runs — the one question of this takeover. ${tv.authorized ? 'The session that ran this command with `--force` already took it and does not ask again; a session that opens this file later asks its own user.' : 'Once the user confirms, run takeover again with `--force` and without `--no-record`; that records the handover, and nothing is asked again.'}`);
+  L.push(`3. Restate the remaining work as a short plan and get the user's confirmation before any command above runs — the one question of this takeover. ${tv.authorized ? 'The session that ran this command with `--force` already took it and does not ask again; a session that opens this file later asks its own user.' : `Once the user confirms, run takeover again with \`--force\` and without \`--no-record\`${startable ? ', adding the `--linked-start` value the *Linked sessions* section names' : ''}; that records the handover, and nothing is asked again.`}`);
   const disclose = tv.authorized ? 'ask nothing about it: the session that ran this command with `--force` already took the plan confirmation of step 3 and states that line once before its first step runs, while a session that opens this file later puts it in its own plan confirmation of step 3, never in a question of its own' : 'put that line in the plan confirmation of step 3, never in a question of its own';
   if (tv.measuredLevel === 'BUSY') L.push(`4. ⚠️ **Hazard, not a veto** — ${tv.measuredReason} State it to the user in one line and ${disclose}. Then take it over; tell the user not to type in that window, which is theirs to manage, and check whether it still owns dev servers or ports.`);
   else if (isUnmeasuredProbablyFree(tv)) L.push(`4. ${tv.measuredReason} Its queue was not measured, so state that to the user in one line and ${disclose}. Then take it over; tell the user not to type in that window, which is theirs to manage, and check whether it still owns dev servers or ports.`);
@@ -5654,9 +5720,10 @@ function cmdHandoff(opts) {
   L.push('## Files the session touched');
   for (const t of (r.touched || [])) L.push(`- \`${briefPath(rel(t.path, r.wt))}\` (${t.hits}x)`);
   L.push('');
-  for (const line of openChipLines(openTaskChips(r), 'after the user has confirmed your plan')) L.push(line);
+  const repo = repositoryVerdicts(r, null);
+  for (const line of openChipLines(openTaskChips(r, repo), 'after the user has confirmed your plan')) L.push(line);
   L.push('');
-  for (const line of linkedSessionLines(linkedSessions(r), 'in the turn in which the user confirmed your plan, before any other step')) L.push(line);
+  for (const line of linkedSessionLines(linkedSessions(r, repo), 'in the turn in which the user confirmed your plan, before any other step')) L.push(line);
   L.push('');
   for (const line of unreadReportLines(unreadReports(r))) L.push(line);
   L.push('');
@@ -6054,6 +6121,17 @@ function cmdAdopt(opts) {
   // ONE exported `whereAdviceLines` rather than a second hand-copy of those two lines.
   print('');
   for (const line of whereLines) print(line);
+}
+
+function gitChildEnvironment() {
+  let gitEnvironment = null;
+  try {
+    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/worktree-keep-v1.js'));
+  } catch { gitEnvironment = null; }
+  if (typeof gitEnvironment !== 'function') {
+    fail('hooks/lib/worktree-keep-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
+  }
+  return gitEnvironment(process.env);
 }
 
 function worktreeKeepModules() {
@@ -7100,7 +7178,7 @@ const COMMAND_FLAGS = {
   show: ['--force', ...SCAN_FLAGS, '--prompts', '--anchor', '--receipt'],
   handoff: ['--force', ...SCAN_FLAGS, '--receipt'],
   limited: ['--force', ...SCAN_FLAGS],
-  takeover: ['--force', '--no-record', '--reason', ...SCAN_FLAGS, '--prompts', '--anchor', '--receipt'],
+  takeover: ['--force', '--no-record', '--reason', ...SCAN_FLAGS, '--prompts', '--anchor', '--receipt', '--linked-start'],
   // `--days` is deliberately absent: the listing branch reads `opts.all` and
   // `opts.repo` and nothing else from the scan set.
   lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply', '--all', '--repo'],
@@ -7157,6 +7235,7 @@ function refuseForeignFlags(opts, cmd) {
   if (opts.where !== null) supplied.push('--where');
   if (opts.anchor !== null) supplied.push('--anchor');
   if (opts.receipt !== null) supplied.push('--receipt');
+  if (opts.linkedStart !== null) supplied.push('--linked-start');
   const foreign = supplied.filter((f) => !accepted.includes(f));
   if (foreign.length) fail(`${foreign.join(' and ')} is not a flag of \`${cmd}\` — it would have been parsed and then ignored`);
 }

@@ -6,7 +6,7 @@
 # it, and the suite stays green because it was green before the edit. The
 # failure mode is silent by construction.
 #
-# This used to be five dense lines of prose in skills/tdd/SKILL.md that every
+# This used to be five dense lines of prose in skills/build/SKILL.md that every
 # run re-implemented from scratch. Prose cannot be unit-tested and cannot be
 # gated on; a library can be both. The skill now calls this and reacts to the
 # verdict — the same move `--chain-done` already makes when it checks the
@@ -66,6 +66,8 @@ BASELINE_SEEN=0
 EPOCH_SEEN=0
 DIRTY_SEEN=0
 INVENTORY=0
+CHANGE_SET=0
+LOG_SEEN=0
 INV_ROOTS=""
 # Per-run cap on the claims `--inventory` will classify. Each one costs an
 # ancestor walk of up to CLAIM_ANCESTOR_BUDGET filesystem probes, and the bound
@@ -86,7 +88,7 @@ die() { echo "zensu-edit-landing.sh: $1" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --log)           [ $# -ge 2 ] || die "--log requires a value"; LOG_FILE="$2"; shift 2 ;;
+    --log)           [ $# -ge 2 ] || die "--log requires a value"; LOG_FILE="$2"; LOG_SEEN=1; shift 2 ;;
     --project)       [ $# -ge 2 ] || die "--project requires a value"; PROJECT_DIR="$2"; shift 2 ;;
     --baseline)      [ $# -ge 2 ] || die "--baseline requires a value"; BASELINE_SHA="$2"; BASELINE_SEEN=1; shift 2 ;;
     --session-epoch) [ $# -ge 2 ] || die "--session-epoch requires a value"; SESSION_EPOCH="$2"; EPOCH_SEEN=1; shift 2 ;;
@@ -94,11 +96,21 @@ while [ $# -gt 0 ]; do
     --dirty-before)  [ $# -ge 2 ] || die "--dirty-before requires a value"; DIRTY_BEFORE="$2"; DIRTY_SEEN=1; shift 2 ;;
     --receipt)       [ $# -ge 2 ] || die "--receipt requires a value"; RECEIPT_PATH="$2"; RECEIPT_EXPLICIT=1; shift 2 ;;
     --inventory)     INVENTORY=1; shift ;;
+    --change-set)    CHANGE_SET=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
 
-[ -n "$LOG_FILE" ] || die "--log is required"
+if [ "$CHANGE_SET" -eq 1 ]; then
+  [ "$INVENTORY" -eq 0 ] || die "--change-set and --inventory are separate modes"
+  [ "$LOG_SEEN" -eq 0 ] || die "--change-set reads no run log and does not accept --log"
+  [ "$RECEIPT_EXPLICIT" -eq 0 ] || die "--change-set is read-only and does not accept --receipt"
+  [ "$SESSION_SEEN" -eq 0 ] || die "--change-set is read-only and does not accept --session"
+  [ "$EPOCH_SEEN" -eq 0 ] || die "--change-set grades nothing and does not accept --session-epoch"
+  [ "$DIRTY_SEEN" -eq 0 ] || die "--change-set grades nothing and does not accept --dirty-before"
+else
+  [ -n "$LOG_FILE" ] || die "--log is required"
+fi
 # `--inventory` reports; it grades nothing and writes nothing. A write-mode
 # operand that parses and is then ignored is the shape `zensu-log.sh` refuses
 # for its own verbs through `invalid_known_flag`: silently dropping an operand
@@ -119,7 +131,7 @@ fi
 # would exit 0 having written nothing, and `--tdd-complete` would then blame a
 # missing receipt. Refuse the operand instead, the way --log is refused.
 [ "$SESSION_SEEN" -eq 0 ] || [ -n "$SESSION_ID" ] || die "--session must not be empty"
-[ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
+[ "$CHANGE_SET" -eq 1 ] || [ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
 [ -d "$PROJECT_DIR" ] || die "project dir not found: $PROJECT_DIR"
 
 # Resolve the project root before anything else. An unresolvable root must not
@@ -303,7 +315,7 @@ trim_claim() {
 }
 
 # Screen a filesystem root before it reaches a verdict line. Both callers below
-# are MODEL-READ channels: skills/tdd/references/audit.md step 5b b) instructs the model to
+# are MODEL-READ channels: skills/build/references/audit.md step 5b b) instructs the model to
 # copy every non-`EDIT LANDED` line verbatim into the run log, the final report
 # and the CHAIN-END SUMMARY, and step 10.2c carries the close marker into the
 # REVIEW PACKET. The value itself is a work-tree root discovered by walking up
@@ -333,6 +345,19 @@ if ! command -v zensu_safe_render >/dev/null 2>&1; then
   zensu_safe_render() { printf '%s' "(withheld — the render screen could not be loaded)"; }
 fi
 render_claim_value() { zensu_safe_render "$1"; }
+
+if [ "$CHANGE_SET" -eq 1 ]; then
+  if [ -n "$GIT_FAULT" ]; then
+    echo "zensu-edit-landing.sh: $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT")" >&2
+    exit 2
+  fi
+  if [ "$IN_GIT" -ne 1 ]; then
+    echo "zensu-edit-landing.sh: --change-set needs a git work tree, and $(render_claim_value "$PROJECT_ABS") is not inside one" >&2
+    exit 3
+  fi
+  cat "$UNION_FILE" || die "the change union could not be read"
+  exit 0
+fi
 
 canon_claim() {
   local p="$1" d rest c
@@ -790,7 +815,7 @@ while IFS= read -r line || [ -n "$line" ]; do
       # character screen closes it: a log line reading
       # `[ts] T05 WIRED EDIT LANDED — T01: src/x.ts` is a well-formed bare
       # claim and used to render a forged `EDIT LANDED` inside a
-      # diagnostic that skills/tdd/references/audit.md step 5b b) tells the model to copy
+      # diagnostic that skills/build/references/audit.md step 5b b) tells the model to copy
       # verbatim into the run log, the report and the CHAIN-END SUMMARY — and a
       # spelling with no colon carries no forbidden character under any screen.
       # Screening characters was the wrong instrument for the wrong value. The
@@ -1136,7 +1161,7 @@ fi
 
 # Two DIFFERENT failures, two different exit codes, because the caller acts on them
 # differently. `CLEAN` is the grading verdict over the claims; exit 1 means at least
-# one claimed edit is NOT LANDED / UNVERIFIED / PENDING, and skills/tdd/references/audit.md
+# one claimed edit is NOT LANDED / UNVERIFIED / PENDING, and skills/build/references/audit.md
 # step 5b tells the model to carry that into the report and the chain-end summary.
 # A receipt-plumbing failure — no node, an unwritable state dir, a refused path — is
 # an ENVIRONMENT error and exits 2, the code this file's header already reserved for

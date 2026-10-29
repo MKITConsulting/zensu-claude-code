@@ -186,7 +186,7 @@ its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
 `adoptContext` result; `PRUNED_NOTE` / `PRUNED_EXPLANATION` and the reworded
 `record-unreadable` remedy in `session-adopt-report-v1.js`; and the operator
 accounts in `docs/session-control.md` §"Unbindable sessions",
-`docs/tdd-manager-workflow.md`'s Stop-binding paragraphs, `skills/doctor/SKILL.md`,
+`docs/build-workflow.md`'s Stop-binding paragraphs, `skills/doctor/SKILL.md`,
 `skills/adopt-session/SKILL.md` — and the `stop-chain-enforcer.sh` row in
 `docs/configuration.md`, which states the COUNT of released bind failures and is the
 one carrier this change originally left behind, saying three where the hook's own
@@ -312,7 +312,7 @@ the root and a later bind takes the deferral arm instead. The same standard gove
 mirror of it — `docs/session-control.md`, both doctor rows, the adoption report's
 pre-confirm paragraph and its no-workflow-document NOTE, the two SKILL files
 (`skills/doctor/SKILL.md`, `skills/adopt-session/SKILL.md`), and the two operator docs
-(`docs/tdd-manager-workflow.md` §"When the session binding itself cannot be resolved",
+(`docs/build-workflow.md` §"When the session binding itself cannot be resolved",
 `docs/operations.md`'s combined-state troubleshooting row). The roster has now been
 wrong TWICE in the same way — each time it was extended, the newly named members
 turned out to be carrying the forbidden spelling already, and the members added the

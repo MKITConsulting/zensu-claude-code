@@ -73,7 +73,7 @@
 # containment rule a fifth time.
 set -u
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || {
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(case "$0" in (*/*) cd "${0%/*}/.." ;; (*) cd .. ;; esac && pwd -P)" || {
   echo "zensu: plugin-data guard cannot resolve its own plugin root" >&2
   exit 2
 }

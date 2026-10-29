@@ -506,13 +506,13 @@ else check "R15-control a two-argument CALL (not the definition) is present" FAI
 
 # ONE list, read by the scan AND by the needle below it. The needle used to hand-copy
 # it and had already drifted: `skills/adopt-session/SKILL.md` was listed twice while
-# `docs/tdd-manager-workflow.md` and `skills/doctor/SKILL.md` were absent — so the row
+# `docs/build-workflow.md` and `skills/doctor/SKILL.md` were absent — so the row
 # that exists to prove the cost claim still occurs SOMEWHERE was reading a different
 # set of carriers from the row that checks every carrier's qualifier.
 R6J_CARRIERS="docs/gates.md
 docs/operations.md
 docs/session-control.md
-docs/tdd-manager-workflow.md
+docs/build-workflow.md
 skills/adopt-session/SKILL.md
 skills/doctor/SKILL.md"
 R6J_FAIL=""
@@ -1016,6 +1016,9 @@ r8_toctou_sentence() {
     source "$SESSION_SH" || exit 9
     ARM="$(sed -n "/if \[ -n \"\${ZENSU_PROJECT_ROOT:-}\" \] \&\& \[ ! -d /,/^  fi\$/p" "$STOPHOOK")"
     case "$ARM" in "") printf "NO-SLICE"; exit 0 ;; esac
+    NOTICE="$(sed -n "/^stop_notice() {/,/^}\$/p" "$STOPHOOK")"
+    case "$NOTICE" in "") printf "NO-NOTICE"; exit 0 ;; esac
+    eval "$NOTICE"
     ZENSU_PROJECT_ROOT="$R8T_VALUE"
     eval "$ARM"
   ' 2>&1 >/dev/null

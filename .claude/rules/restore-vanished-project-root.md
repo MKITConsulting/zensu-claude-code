@@ -143,7 +143,7 @@ section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
 state bullets this feature added (the RE-CREATED row, its not-checked arm, and the `Session state`
 bullet of §"What it checks", which reads as a complete inventory of the block and therefore goes
 stale silently) — `docs/session-control.md` §"Unbindable sessions", `docs/gates.md`,
-`docs/operations.md` and `docs/tdd-manager-workflow.md`. That bullet list is TIGHT: every other
+`docs/operations.md` and `docs/build-workflow.md`. That bullet list is TIGHT: every other
 bullet in the block follows its predecessor with no blank line, and the two blanks this feature
 introduced were the only ones — one of them silently load-bearing for a slice terminator in
 `test-doctor.sh`, which is why that slice now ends on the next bullet instead.

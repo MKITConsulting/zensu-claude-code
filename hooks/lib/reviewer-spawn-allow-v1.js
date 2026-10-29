@@ -39,7 +39,7 @@
 // calls are permission-checked separately. An armed-chain condition was specified
 // and then rejected on discovery — `plan-review-worker` and `pr-review-worker` are
 // spawned by `/zensu:plan-review` and `/zensu:pr-team-review`, neither of which arms
-// a TDD chain or calls `--workflow-begin`, so that condition would have shipped a
+// a build chain or calls `--workflow-begin`, so that condition would have shipped a
 // grant missing two of the five. `zensu:zensu-plm` is EXCLUDED for the STRUCTURAL
 // reason and that one only: `PLM_TYPES` is a separate classification returning
 // `PRINCIPALS.HOST`, and it is never fed to `pluginScoped` below. Do NOT restate this
@@ -54,12 +54,12 @@
 // instruction to grep before renaming `zensu:code-reviewer` keeps holding.
 //
 // ONE NARROWING IS DELIBERATE: only the PLUGIN-SCOPED `zensu:` spellings are
-// granted. REVIEWER_TYPES also carries the bare names (`code-reviewer`, …) so that
-// `--agents` fixtures and same-named PROJECT agents still receive the read-only
-// principal. Those are not our files: a project may define its own `code-reviewer`
-// with `tools: Bash`, and the principal classification is prompt-level policy while
-// `tools:` frontmatter is what the harness actually enforces. Granting a bare name
-// would hand a project-authored agent a classifier-free spawn.
+// granted. REVIEWER_TYPES carries the bare names (`code-reviewer`, …) only under the
+// `--agents` evaluation opt-in, and they are never our files: a project may define its
+// own `code-reviewer` with `tools: Bash`, and the principal classification is
+// prompt-level policy while `tools:` frontmatter is what the harness actually
+// enforces. Granting a bare name would hand a project-authored agent a classifier-free
+// spawn.
 //
 // THE PREMISE UNDER THAT NARROWING IS UNVERIFIED, and saying so is the point. It
 // assumes the host reserves the `zensu:` scope to the plugin — that a project-authored

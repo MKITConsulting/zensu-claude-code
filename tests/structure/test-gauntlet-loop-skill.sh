@@ -18,7 +18,7 @@ set -u
 #
 # G8-G11 and G15 pin six load-bearing runtime claims the skill's "Inside the Zensu
 # plugin" section makes. Two review rounds found FALSE claims there — that an
-# active TDD chain gates a spawned builder's edits, and that a code-reviewer
+# active build chain gates a spawned builder's edits, and that a code-reviewer
 # spawn consumes a review ticket — and prose that is wrong about a gate is
 # worse than prose that is silent, because the model acts on it. Each check
 # asserts the skill's claim against the hook that decides it, so a change to
@@ -476,20 +476,30 @@ esac
 
 # ── G15: the containment bullet states the bound the gate actually keeps ─────
 G15_MISS=""
-grep -qF 'const HOST_PROFILE_TOOLS = new Set([' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-allowlist"
-grep -qF 'const HOST_PROFILE_MCP_READ_TOOLS = new Set([' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-mcp-allowlist"
+grep -qF 'const KNOWN_TOOLS = new Set([' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-known-tools"
+grep -qF 'shellGuard.inputMention(payload, trusted)' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-mention-scan"
+grep -qF 'if (tool === POWERSHELL_TOOL) {' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-powershell-deny"
+grep -qF 'if (tool === MONITOR_TOOL && !isMonitorStream(payload.tool_input)) {' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-monitor-command-deny"
+grep -qF 'if (runsCommands(tool)) {' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-command-runner-deny"
 grep -qE 'mcp__\.\*zensu' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-zensu-read-branch"
 # The agent_type premise is decided HERE, not in the capability module. Without this
 # conjunct PRINCIPAL_LIB was existence-gated by G0 and asserted against by nothing.
 grep -qF 'if (!hasAgentId && !hasAgentType) return PRINCIPALS.MAIN;' "$PRINCIPAL_LIB" \
   || G15_MISS="$G15_MISS module-main-fallthrough"
-flat_has 'It is an ALLOWLIST plus a guarded `Bash`, not a denylist' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-allowlist-shape"
-flat_has 'Every other MCP tool is denied too' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-mcp-bound"
-grep -qF 'neutral agent is denied browser tools of a foreign server keyed playwright' "$CAPABILITY_GATE_TEST" \
-  || G15_MISS="$G15_MISS sibling-browser-deny-row"
+flat_has 'not an allowlist, so a tool a later host adds is admitted the day it ships' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-denylist-shape"
+flat_has "a \`Monitor\` command and a command-execution tool from an MCP server, such as \`ctx_execute\`, because Zensu's command gates see only Bash and PowerShell commands" "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-command-runner-bound"
+flat_has 'such as `ctx_execute`, is admitted unless its input names that state' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-mcp-admit"
+flat_has 'and a `Monitor` command passes the same guard' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-guarded-monitor"
+flat_has 'It is an ALLOWLIST plus a guarded `Bash`' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-allowlist-shape"
+flat_has 'Every other MCP tool is denied too' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-mcp-bound"
+grep -qF 'neutral agent may use browser tools of a foreign server keyed playwright' "$CAPABILITY_GATE_TEST" \
+  || G15_MISS="$G15_MISS sibling-browser-allow-row"
+grep -qF 'neutral agent cannot run code through context-mode ctx_execute, which no Zensu command gate sees' "$CAPABILITY_GATE_TEST" \
+  || G15_MISS="$G15_MISS sibling-command-runner-row"
+grep -qF 'neutral agent cannot name .zensu in a context-mode search' "$CAPABILITY_GATE_TEST" \
+  || G15_MISS="$G15_MISS sibling-mention-row"
 flat_has 'a six-name DENYLIST' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-denylist-shape"
 flat_has 'five-name DENYLIST' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-five-name-denylist"
-flat_has 'from a non-Zensu server is not denied' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-mcp-residue"
 # The anchor spans the CONDITION and the CONSEQUENCE. The first version matched
 # only the hinge between them, so inverting the premise left it green — the exact
 # defect this file exists to prevent, committed inside the fix for it.
@@ -511,7 +521,7 @@ flat_has 'keeps its nested-spawn capability' "$SKILL_FLAT" || G15_MISS="$G15_MIS
 flat_has 'THREE things fall outside it' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-residue-arity"
 flat_has 'TWO things fall outside it' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-residue-arity"
 if [ -z "$G15_MISS" ]; then
-  check "G15 skill states the allowlist-plus-guarded-Bash bound and the nested spawn it still admits" PASS
+  check "G15 skill states the Zensu-state bound, the guarded shell and the nested spawn it still admits" PASS
 else
   check "G15 containment claim is unbounded —$G15_MISS" FAIL
 fi

@@ -20,7 +20,8 @@
 # ONE exception to "this file only reads config": the session-marker helpers that
 # follow `zensu_tdd_strict_enabled` also read TWO session-scoped markers under
 # `<project>/.zensu/state/` — the tdd-mode marker and the delivery-route marker. Every
-# config getter spawns node through `_zensu_config_node`; the getters after the marker
+# config getter spawns node through `_zensu_config_node`, except where `_zensu_config_key_unset`
+# proves the key absent; the getters after the marker
 # section do too. Beyond those config reads, an auditor asking "what in
 # the marker section opens something" must get exactly these names and no others:
 # `zensu_tdd_mode_state_linked` (the `-L` probes, shared by both marker pairs) and
@@ -79,9 +80,28 @@ _zensu_config_json() {
   _zensu_config_node -e "$_ZENSU_CFG_JS"' process.stdout.write(JSON.stringify(cfg()))' 2>/dev/null || echo '{}'
 }
 
+_ZENSU_CONFIG_PRECHECK_BYTES=16384
+_zensu_config_key_unset() {
+  local key="${1:-}" candidate content LC_ALL=C
+  [ -n "$key" ] && [ -z "${ZENSU_CONFIG:-}" ] || return 1
+  for candidate in "${HOME:-}/.zensu/config.json" ${CLAUDE_PROJECT_DIR:+"$CLAUDE_PROJECT_DIR/.zensu/config.json"}; do
+    if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
+      continue
+    fi
+    [ -f "$candidate" ] && [ -r "$candidate" ] || return 1
+    content=""
+    IFS= read -r -n "$_ZENSU_CONFIG_PRECHECK_BYTES" -d '' content 2>/dev/null < "$candidate" || true
+    [ "${#content}" -lt "$_ZENSU_CONFIG_PRECHECK_BYTES" ] || return 1
+    [ -n "$content" ] || [ ! -s "$candidate" ] || return 1
+    case "$content" in *"\"$key\""*|*\\*) return 1 ;; esac
+  done
+  return 0
+}
+
 zensu_hook_enabled() {
   local key="$1"
   command -v node >/dev/null 2>&1 || return 0   # node missing → fall back to enabled
+  _zensu_config_key_unset "$key" && return 0
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===false?"0":"1")' "$key" 2>/dev/null)
   [ -z "$val" ] && return 0                      # any other failure → enabled
@@ -141,6 +161,7 @@ zensu_tdd_strict_enabled() {
 zensu_hook_opted_in() {
   local key="$1"
   command -v node >/dev/null 2>&1 || return 1
+  _zensu_config_key_unset "$key" && return 1
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===true?"1":"0")' "$key" 2>/dev/null)
   [ "$val" = "1" ]
@@ -236,7 +257,7 @@ _zensu_marker_one_line_value() {
   # A NUL byte is translated to \001 inside the same open, before the bytes reach the
   # substitution. Bash drops NULs from `$(...)` output, so an untranslated NUL made
   # `${#body}` undercount the 513-byte read: a file padded with NULs passed the ceiling
-  # with its tail unexamined, and `{"route":"tdd"}<NUL>` read as `tdd`. Translated, every
+  # with its tail unexamined, and `{"route":"build"}<NUL>` read as `build`. Translated, every
   # byte counts toward the ceiling and a \001 fails the whole-line match. `tr` gets
   # `LC_ALL=C` of its own for the reason the `sed` below does, and because BSD `tr`
   # refuses an invalid byte sequence in a UTF-8 locale. The redirect failure (an
@@ -306,8 +327,8 @@ zensu_tdd_strict_effective() {
 # Session-scoped DELIVERY ROUTE — the answer to the question both ask-hooks
 # (plan-approved-delegate.sh, user-prompt-tdd-reminder.sh) would otherwise put to the
 # user on every approval and every code request. hooks/lib/zensu-delivery-route.sh
-# writes the marker for /zensu:delivery-route, and the model writes `tdd` right after the
-# user answers the question with the Zensu workflow. The vocabulary is `tdd` | `direct` only: /zensu:autopilot
+# writes the marker for /zensu:delivery-route, and the model writes `build` right after the
+# user answers the question with the Zensu workflow. The vocabulary is `build` | `direct` only: /zensu:autopilot
 # and /zensu:pilot push branches, open pull requests or mutate tracked feature state,
 # so they stay per-plan choices that neither a marker nor a config key can pre-select.
 # The path template lives HERE and the writer sources it, for the reason the tdd-mode
@@ -319,7 +340,7 @@ zensu_delivery_route_marker_path() {
   printf '%s\n' "$project_dir/.zensu/state/delivery-route-$session_key.json"
 }
 
-# `tdd` / `direct` / `released` (a present `{"route":"auto"}`) / `none` (absent,
+# `build` / `direct` / `released` (a present `{"route":"auto"}`) / `none` (absent,
 # symlinked, unreadable, oversized, or not a marker this plugin wrote).
 zensu_delivery_route_marker_state() {
   local project_dir="${1:-}" session_key="${2:-}" marker
@@ -330,14 +351,14 @@ zensu_delivery_route_marker_state() {
     return 0
   fi
   case "$(_zensu_marker_one_line_value "$marker" route)" in
-    (tdd)    echo "tdd" ;;
+    (build)  echo "build" ;;
     (direct) echo "direct" ;;
     (auto)   echo "released" ;;
     (*)      echo "none" ;;
   esac
 }
 
-# hooks.defaultDeliveryRoute, read PERMISSIVELY: `tdd` or `direct` verbatim, and `ask`
+# hooks.defaultDeliveryRoute, read PERMISSIVELY: `build` or `direct` verbatim, and `ask`
 # for everything else — absent, the explicit `ask`, an empty string, a quoted or
 # capitalized spelling, a boolean, or a host without node. An unknown value never
 # selects a route; it only keeps the question. With a PROJECT_DIR argument the project
@@ -353,9 +374,9 @@ zensu_default_delivery_route() {
   else
     root="${CLAUDE_PROJECT_DIR:-}"
   fi
-  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var s=j.hooks&&j.hooks.defaultDeliveryRoute;console.log(s==="tdd"||s==="direct"?s:"ask")' 2>/dev/null)
+  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var s=j.hooks&&j.hooks.defaultDeliveryRoute;console.log(s==="build"||s==="direct"?s:"ask")' 2>/dev/null)
   case "$val" in
-    (tdd|direct) echo "$val" ;;
+    (build|direct) echo "$val" ;;
     (*)          echo "ask" ;;
   esac
 }
@@ -367,18 +388,18 @@ zensu_default_delivery_route() {
 # caller passes: the marker lives there, and the config overlay is read from there
 # rather than from the ambient CLAUDE_PROJECT_DIR, so no caller can pair a recorded
 # session's marker with another tree's config. No root means no decision: `ask`.
-# Prints `<route>\t<source>` with route ∈ tdd|direct|ask and source ∈
+# Prints `<route>\t<source>` with route ∈ build|direct|ask and source ∈
 # session|config|none.
 zensu_delivery_route_resolve() {
   local project_dir="${1:-}" session_key="${2:-}" route
   [ -n "$project_dir" ] || { printf 'ask\tnone\n'; return 0; }
   route="$(zensu_delivery_route_marker_state "$project_dir" "$session_key")"
   case "$route" in
-    (tdd|direct) printf '%s\t%s\n' "$route" session; return 0 ;;
+    (build|direct) printf '%s\t%s\n' "$route" session; return 0 ;;
   esac
   route="$(zensu_default_delivery_route "$project_dir")"
   case "$route" in
-    (tdd|direct) printf '%s\t%s\n' "$route" config; return 0 ;;
+    (build|direct) printf '%s\t%s\n' "$route" config; return 0 ;;
   esac
   printf 'ask\tnone\n'
 }

@@ -2094,6 +2094,7 @@ function recordReaderRefusals(options) {
 // would move where this module itself resolves every workflow document.
 const WORKFLOW_STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
 const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
+const ZENSU_GITIGNORE_BODY = '/state/\n/logs/witness-*.log\n';
 
 const ADOPTION_REFUSALS = {
   RECORD_UNREADABLE: 'record-unreadable',
@@ -3845,20 +3846,34 @@ function renderHostContext(contextInput) {
     `project_root=${JSON.stringify(context.project_root)}`,
     `runtime_digest=${context.runtime_digest}`,
     'principal=host-profile-v1.',
-    'Within this agent definition and Claude Code host permissions, the Zensu capability gate admits only Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, apply_patch, LSP, WebFetch, WebSearch, ToolSearch, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, Agent, SendMessage, AskUserQuestion, StructuredOutput, ReportFindings, and SubagentHandback, plus the MCP tools mcp__plugin_context7_context7__resolve-library-id and mcp__plugin_context7_context7__query-docs and read-only Zensu MCP tools; it denies every other tool but Bash, so every shell alias, Monitor and every other MCP tool are unavailable. A named neutral agent may run Bash behind an accident guard unless hooks.subagentShell is false; the guard prevents accidents and is not a sandbox, and an unnamed agent, a zensu-review-* persona and a read-only Zensu agent hold no shell.',
+    'Within this agent definition and Claude Code host permissions, the Zensu capability gate admits every tool except what reaches Zensu\'s own state or runs commands outside Bash: Session Control and workflow paths, the project\'s .zensu directory, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell, every shell alias other than Bash, a Monitor command and a tool whose name marks it as running commands or code; a tool whose inputs the gate does not know may not name the installed plugin, its private data, the session record, a Zensu configuration layer or a .zensu directory anywhere in its input. A named neutral agent may run Bash commands behind an accident guard unless hooks.subagentShell is false; the guard prevents accidents and is not a sandbox, and an unnamed agent, a zensu-review-* persona and a read-only Zensu agent hold no shell.',
     'Grep and Glob must name a concrete safe subtree; an omitted path or project/plugin/plugin-data ancestor is denied because it could traverse protected state.',
     'Session selectors are not authority: this neutral agent must not access Session Control or workflow-root state, claim main-v1, or mutate Zensu workflow state.',
   ].join(' ');
 }
 
+function writeZensuGitignore(zensuDirectory) {
+  try {
+    fs.writeFileSync(path.join(zensuDirectory, '.gitignore'), ZENSU_GITIGNORE_BODY, { flag: 'wx', mode: 0o644 });
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 function workflowStateDirectory(projectRootInput) {
+  const projectRoot = canonicalDirectory(projectRootInput, 'project root');
+  const zensuDirectory = path.join(projectRoot, WORKFLOW_STATE_SEGMENTS[0]);
+  const zensuIsNew = !fs.existsSync(zensuDirectory);
   // Reduced over the segment list rather than destructured: a third segment must
   // not be silently dropped here while adoptionWorkflowStatePath's spread picks
   // it up, which is exactly the split the shared constant exists to prevent.
-  return WORKFLOW_STATE_SEGMENTS.reduce(
+  const stateDirectory = WORKFLOW_STATE_SEGMENTS.reduce(
     (parent, segment) => ensureDescendantDirectory(parent, path.join(parent, segment)),
-    canonicalDirectory(projectRootInput, 'project root'),
+    projectRoot,
   );
+  if (zensuIsNew) writeZensuGitignore(zensuDirectory);
+  return stateDirectory;
 }
 
 function resolveWorkflowStateDirectory(options) {
@@ -6109,6 +6124,7 @@ module.exports = {
   // directory, which is the opposite of what a read-only pre-check wants.
   WORKFLOW_STATE_SEGMENTS,
   WORKFLOW_STATE_PREFIX,
+  ZENSU_GITIGNORE_BODY,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,

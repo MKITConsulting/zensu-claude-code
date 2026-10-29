@@ -160,6 +160,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-ai-work.sh\""
+          },
+          {
+            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\""
           },
           {
@@ -242,6 +246,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-ai-work-capture.sh\"",
+            "timeout": 90
+          },
+          {
+            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh\"",
             "timeout": 90
           },
@@ -256,6 +265,11 @@
     "UserPromptSubmit": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-auto-load.sh\"",
+            "timeout": 12
+          },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh\""
@@ -287,6 +301,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-session-hub-receipt.sh\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-review-handback.sh\"",
+            "timeout": 180
           }
         ]
       }
@@ -303,5 +322,7 @@
       }
     ]
   },
-  "modules": ["./usage-feed.ts"]
+  "modules": [
+    "./usage-feed.ts"
+  ]
 }

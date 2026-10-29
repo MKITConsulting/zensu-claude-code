@@ -403,6 +403,11 @@
       </ol>
     </details>
   </figure>
+
+  <p class="sub">The anchor need not be a repository. A session started in a plain folder that
+  holds several repositories has a folder anchor: it keeps the session's state but has no change
+  set of its own, so every file a chain changes there must sit in a declared code root. Section
+  6.5 of the specification states the rules.</p>
 </section>
 
 <section>
@@ -428,7 +433,7 @@
           <code>src/foo.ts</code> is ambiguous; a claim that reaches a declared root under any other
           spelling grades <code>UNVERIFIED (respell)</code>. The receipt keeps its schema and its
           shape, with <code>clean</code> judged over the union.</td>
-          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/references/execution.md:9</td>
+          <td class="where mono">zensu-edit-landing.sh<br>skills/build/references/execution.md:9</td>
         </tr>
         <tr>
           <th scope="row"><strong>Review packet</strong><span class="tag flat inline">stage 2</span></th>
@@ -465,7 +470,7 @@
           whatever the list says. The pattern rule is unchanged, and a root is searched like the anchor: through a
           subdirectory other than <code>.zensu</code>, because the traversal check refuses a search
           root that contains a protected directory.</td>
-          <td class="where mono">reviewer-capability-v1.js:633<br>reviewer-capability-v1.js:595-597</td>
+          <td class="where mono">reviewer-capability-v1.js:638<br>reviewer-capability-v1.js:600-602</td>
         </tr>
       </tbody>
     </table>
@@ -548,7 +553,7 @@
     <strong>Why this perspective is mode-independent.</strong>
     <p>The review chain runs in full under vanilla — fan-out, judge second pass, Finding
     Verification Gate, the consuming reviewer and the self-review terminus are all listed among what
-    runs “exactly as written” (<span class="mono">skills/tdd/references/modes.md:7</span>). The decisive difference
+    runs “exactly as written” (<span class="mono">skills/build/references/modes.md:7</span>). The decisive difference
     from the mechanical audit: a reviewer <em>reports</em> a finding, it does not <em>demand</em> a
     characterization test. That demand is precisely why the Cross-Layer audit cannot run in
     vanilla.</p>
@@ -588,7 +593,7 @@
     paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
     two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
     so it reports the unpaired literal without demanding the pairing.</p>
-    <p class="src">skills/tdd/references/audit.md:67 · skills/tdd/references/audit.md:69</p>
+    <p class="src">skills/build/references/audit.md:67 · skills/build/references/audit.md:69</p>
     <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
     specification carries the same proposal in §7.4.</p>
   </div>
@@ -608,7 +613,7 @@
       anchor is clean while the changed files sit in the satellites, so a takeover brief would claim
       no uncommitted changes for a session with a dirty tree in two other repositories — the same
       silent green as section 2, relocated into the handover path.</p>
-      <p class="src">trail.mjs:2831</p>
+      <p class="src">trail.mjs:2839</p>
     </div>
     <div class="card">
       <span class="tag warn">Discovery</span>
@@ -624,7 +629,7 @@
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd -- ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:5019</p>
+      <p class="src">trail.mjs:5027</p>
     </div>
   </div>
 

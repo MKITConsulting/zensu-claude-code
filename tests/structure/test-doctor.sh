@@ -1397,7 +1397,7 @@ esac
 # session that ended without --chain-done, so naming the fork first and opening with
 # "nothing is wrong here" described the rare case and dismissed the common one.
 case "$OUT" in
-  *'Usually a session that ended without /zensu:tdd --chain-done'*'It can also be a'*'live sibling'*'or a FORK'*)
+  *'Usually a session that ended without /zensu:build --chain-done'*'It can also be a'*'live sibling'*'or a FORK'*)
     check "P1mj1 the row names the abandoned chain before the fork" PASS ;;
   *) check "P1mj1 the row names the abandoned chain before the fork (got: $OUT)" FAIL ;;
 esac
@@ -1721,7 +1721,7 @@ fi
 PARKED_DOC_OK=1
 grep -qF -- 'turns at `implementing`' "$REPORT" || PARKED_DOC_OK=0
 grep -qF -- 'turns at `implementing`' "$SKILL_MD" || PARKED_DOC_OK=0
-grep -qF -- 'Implementing-phase turn counter' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+grep -qF -- 'Implementing-phase turn counter' "$PLUGIN_DIR/docs/build-workflow.md" \
   || PARKED_DOC_OK=0
 [ "$PARKED_DOC_OK" -eq 1 ] \
   && check "P1mt2 the implementing-turns row wording is emitted AND documented in the skill and the docs" PASS \
@@ -2715,7 +2715,7 @@ case "$(run_report_home "$H_WILD_GRANT")" in *"$UNVERIFIED_ROW"*)
   check "P1bk2 an Agent(*) deny beside the recommended allow rule is still reported" PASS ;;
   *) check "P1bk2 Agent(*) deny silenced by the grant it outranks" FAIL ;; esac
 # An `Agent(` prefix must not be treated as a VERIFIED spelling — the deny row makes a
-# strong claim ("every /zensu:tdd run wedges") and must keep firing only on the two
+# strong claim ("every /zensu:build run wedges") and must keep firing only on the two
 # spellings that were checked against a live permission decision.
 absent_row "P1bk3 an Agent(*) deny does not fire the loud deny row" "$H_WILD_DENY" 'Deny is evaluated before ask and allow'
 # The same gap on the other tool name. `Task(zensu:code-reviewer)` already matched by
@@ -4995,7 +4995,7 @@ else
 fi
 
 # P1nkc / P1nkd — adoption's PENDING-STAGE refusal sits ABOVE its whole liveness
-# block (`fail(3, "run has a live inner TDD chain")`), so for such a run adoption is
+# block (`fail(3, "run has a live inner build chain")`), so for such a run adoption is
 # not an exit at any window value and against any beacon. The release worker already
 # branches on exactly this and withholds the adopt route from its own exit-7 message;
 # the row that ROUTES a user to `/zensu:autopilot-adopt` must not contradict it.
@@ -5013,13 +5013,13 @@ AP_CHAINLIVE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
 # remedy on this same pending stage, so the row that ROUTES a user to the verb must not
 # disagree with the verb that declines.
 if printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'a release refuses while that is under 3h' \
-  && printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'live inner TDD chain' \
+  && printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'live inner build chain' \
   && printf '%s' "$AP_CHAINLIVE_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF '/zensu:autopilot-release' \
   && ! printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'adoption does not,' \
   && ! printf '%s' "$AP_CHAINLIVE_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF '/zensu:autopilot-adopt'; then
-  check "P1nkc a run with a live inner TDD chain withholds the adoption half and the adopt remedy, and still offers the release" PASS
+  check "P1nkc a run with a live inner build chain withholds the adoption half and the adopt remedy, and still offers the release" PASS
 else
   check "P1nkc live-inner-chain adoption half (got: $AP_CHAINLIVE_OUT)" FAIL
 fi
@@ -5069,7 +5069,7 @@ fi
 # down, which is false for a run adoption refuses with exit 3 before it reads anything.
 rm -f "$AP_STATE"/tdd-phase-*.json
 AP_CHAINABSENT_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
-if printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'live inner TDD chain' \
+if printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'live inner build chain' \
   && ! printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'both verbs stand down'; then
   check "P1nke an absent beacon plus a live inner chain withholds the both-verbs stand-down" PASS
 else
@@ -5084,7 +5084,7 @@ fi
 printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
   AP_CHAINFUTURE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
-  if printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'live inner TDD chain' \
+  if printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'live inner build chain' \
     && ! printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'adoption permits'; then
     check "P1nkg a future-dated beacon plus a live inner chain withholds the adoption-permits claim" PASS
   else
@@ -5149,7 +5149,7 @@ if printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'before it reads any beacon' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both verbs abort on this beacon' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both abort on this run' \
   && printf '%s' "$AP_E2CHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
-    | grep -qF 'live inner TDD chain' \
+    | grep -qF 'live inner build chain' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF '/zensu:autopilot-adopt'; then
   check "P1nkj an unreadable beacon plus a live inner chain names the chain as adoption's blocker, never a beacon abort" PASS
@@ -5286,7 +5286,7 @@ printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
   AP_FUTCHAIN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
   if printf '%s' "$AP_FUTCHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
-      | grep -qF 'live inner TDD chain' \
+      | grep -qF 'live inner build chain' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'neither guided verb is on offer here' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'a release refuses this run with exit 7 while that stamp is in the future' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'finishing or cancelling that chain in its own session is what clears it' \
@@ -5446,7 +5446,7 @@ for AP_PHRASE in \
   'could not be read, so whether the run is ordinary' \
   'NOT a complete' \
   'both verbs stand down' \
-  'live inner TDD chain' \
+  'live inner build chain' \
   'autopilotOwnerActivityTtlHours is 0'
 do
   printf '%s' "$AP_DRIFT_OUT" | grep -qF "$AP_PHRASE" || {
@@ -5460,7 +5460,7 @@ do
     # two-sided check into a one-sided one for no reason. Its own positive check is
     # P1nk5, which the earlier wording of this comment did not name.
     case "$AP_PHRASE" in
-      'durable run document(s) that could not be read'|'owned by THIS session'|'ordinary run in progress'|'the run is BLOCKED, which is NOT terminal'|'no active pointer designates it'|'could not be read, so whether the run is ordinary'|'NOT a complete'|'live inner TDD chain'|'autopilotOwnerActivityTtlHours is 0') ;;
+      'durable run document(s) that could not be read'|'owned by THIS session'|'ordinary run in progress'|'the run is BLOCKED, which is NOT terminal'|'no active pointer designates it'|'could not be read, so whether the run is ordinary'|'NOT a complete'|'live inner build chain'|'autopilotOwnerActivityTtlHours is 0') ;;
       *) AP_DRIFT_OK=false ;;
     esac
   }
@@ -7646,7 +7646,7 @@ case "$P6_REBUILT" in
     # row: a reader who takes "rebuilt" for "restored" never goes looking for the
     # chain that is gone.
     case "$P6_REBUILT" in
-      *'loss, not a restore'*'/zensu:tdd'*)
+      *'loss, not a restore'*'/zensu:build'*)
         check "P6r a rebuilt own document renders the provenance row with its cost and remedy" PASS ;;
       *) check "P6r rebuilt row omits the cost or the remedy (got: $P6_REBUILT)" FAIL ;;
     esac ;;
@@ -10581,6 +10581,55 @@ if [ -z "$ZC_ROW_MISSING" ] && grep -qF 'read `references/zensu-cli.md`' "$SKILL
   check "P8z15 every zensu CLI row phrase is emitted by the report and documented in skills/doctor/references/zensu-cli.md, which the skill names" PASS
 else
   check "P8z15 every zensu CLI row phrase is emitted by the report and documented in skills/doctor/references/zensu-cli.md, which the skill names (missing:$ZC_ROW_MISSING)" FAIL
+fi
+SA_OFF_CFG="$SBOX/subagent-shell-off.json"
+SA_BAD_CFG="$SBOX/subagent-shell-bad.json"
+printf '%s\n' '{"hooks":{"subagentShell":false}}' > "$SA_OFF_CFG"
+printf '%s\n' '{"hooks":' > "$SA_BAD_CFG"
+SA_ON="$(run_report "$PLUGIN_DIR" - "$EMPTY_PROJECT")"
+SA_OFF="$(run_report "$PLUGIN_DIR" "$SA_OFF_CFG" "$EMPTY_PROJECT")"
+SA_BAD="$(run_report "$PLUGIN_DIR" "$SA_BAD_CFG" "$EMPTY_PROJECT")"
+case "$SA_ON" in
+  *"✅  subagents: a neutral subagent may use every tool except what reaches Zensu's own state"*"A named neutral subagent may run Bash commands behind an accident guard, which prevents accidents and is not a sandbox"*)
+    check "P8sa1 the subagents row states the Zensu-state boundary and the guarded shell" PASS ;;
+  *) check "P8sa1 the subagents row states the Zensu-state boundary and the guarded shell" FAIL ;;
+esac
+case "$SA_OFF" in
+  *"✅  subagents: a neutral subagent may use every tool except"*"The subagent shell is off (hooks.subagentShell=false)"*)
+    check "P8sa2 hooks.subagentShell=false renders the boundary with the shell switched off" PASS ;;
+  *) check "P8sa2 hooks.subagentShell=false renders the boundary with the shell switched off" FAIL ;;
+esac
+case "$SA_BAD" in
+  *"⚠️  subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false"*)
+    check "P8sa3 an unreadable config layer renders the withdrawn shell as a warning" PASS ;;
+  *) check "P8sa3 an unreadable config layer renders the withdrawn shell as a warning" FAIL ;;
+esac
+SA_PLUG="$SBOX/subagent-plug"
+mkdir -p "$SA_PLUG/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js" "$SA_PLUG/hooks/lib/reviewer-capability-v1.js"
+SA_BROKEN="$(run_report "$SA_PLUG" - "$EMPTY_PROJECT")"
+SA_PREDATES="$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")"
+case "$SA_BROKEN" in
+  *"⚠️  subagents: the capability gate is installed but its shell-guard module hooks/lib/subagent-shell-guard-v1.js"*)
+    case "$SA_PREDATES" in
+      *"subagents:"*) check "P8sa4 a plugin root without the capability gate must render no subagents row" FAIL ;;
+      *) check "P8sa4 a missing shell-guard module beside the gate warns, and a root without the gate stays silent" PASS ;;
+    esac ;;
+  *) check "P8sa4 a missing shell-guard module beside the gate must warn" FAIL ;;
+esac
+SA_REF="$PLUGIN_DIR/skills/doctor/references/coexistence.md"
+SA_ROW_MISSING=""
+for SA_ROW in 'a neutral subagent may use every tool except what reaches Zensu' \
+  'A named neutral subagent may run Bash commands behind an accident guard' \
+  'The subagent shell is off (hooks.subagentShell=false)' \
+  'subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false' \
+  'subagents: the capability gate is installed but its shell-guard module'; do
+  grep -qF -- "$SA_ROW" "$REPORT" && grep -qF -- "$SA_ROW" "$SA_REF" || SA_ROW_MISSING="$SA_ROW_MISSING [$SA_ROW]"
+done
+if [ -z "$SA_ROW_MISSING" ] && grep -qF 'read `references/coexistence.md`' "$SKILL_MD"; then
+  check "P8sa5 every subagents row phrase is emitted by the report and documented in skills/doctor/references/coexistence.md, which the skill names" PASS
+else
+  check "P8sa5 every subagents row phrase is emitted by the report and documented in skills/doctor/references/coexistence.md, which the skill names (missing:$SA_ROW_MISSING)" FAIL
 fi
 rm -rf "$SBOX"
 echo "----"

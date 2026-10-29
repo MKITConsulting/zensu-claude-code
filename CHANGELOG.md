@@ -7,44 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Upgrade notes
-
-- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
-  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
-  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
-  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
-  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
-  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
-  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
-  bound session's project config, never the reviewed repository's.
-- **session-trail task chips**: a takeover now carries the old session's open task chips over as
-  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
-  session is released, each chip the brief marks **propose** gets one `start_session` call with
-  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
-  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
-  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
-  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
-  the old session's checkout is marked **list** and named to the user, because a proposal cannot
-  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
-  listed for the user. A takeover run from another repository than the old session's marks every
-  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
-  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
-  longer carried, and a carried one leaves the cards after a week unless it is started.
-  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
-  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
-  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
-- **work-order session tools**: in a work-order session the gate now denies every Claude Desktop
-  session tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
-  `read_widget_context`, which neither start nor move work, so
-  `mcp__ccd_session__hand_off_to_session`,
-  `mcp__ccd_session__move_to_cloud` and any session tool a later Claude Desktop adds are denied
-  beside `spawn_task` and `start_session`. It also denies `mcp__ccd_session_mgmt__send_message`.
-  Each deny names `zensu work followup <order>`. A hand-off moves the current task into a new
-  session, a move to the cloud pushes the branch past `zensu-work-order.sh --push`, continues the
-  session in the cloud and archives it here, and a message asks another session to take work up,
-  so each took the order's work out of its lease. The operator account now names the routes the
-  gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
-  pull request.
 - **CLI write-gate `--api-url`**: the `zensu` CLI write-gate now reads the target backend the way
   the CLI does. It reads the one-word `--api-url=<url>` beside the two-word `--api-url <url>`, so
   a mutation such as `zensu --api-url=http://localhost:8090 security classify f1` is no longer
@@ -94,6 +56,205 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside a quoted string is read the same way, so a commit message such as
   `-m "x; Zensu features create y"` is now denied like its lowercase spelling, and the deny names
   the remedy: write such a message to a file and pass it with `-F`.
+
+## [0.33.1] - 2026-10-29
+
+### Added
+
+- **review**: Bundle fix-round bookkeeping into one round-prepare verb (#530)
+
+### Changed
+
+- **hooks**: Start fewer processes around every tool call (#531)
+- **context**: Describe the discovery path of the context auto-load hook (#532)
+
+### Fixed
+
+- **best-solution-first**: Let a skill fix the option set and keep the recommendation in one line (#526)
+- **session-trail**: Carry the plan answer's linked sessions into the run after the yes (#525)
+- **background-review**: Survive a host-cancelled hand-back claim (#522)
+
+### Upgrade notes
+
+- **Fix-round bookkeeping in one call**: a routed fix round of the review chain now prepares
+  its re-review with `zensu-log.sh --round-prepare`. The call re-runs the edit-landing audit,
+  decides from a snapshot taken when the round began whether each claimed edit landed in this
+  round, writes the `fixed` ledger lines for the findings those claims name, and prints the
+  files and aspects for the re-review. The first review records that snapshot with
+  `--round 0`, and the self-review fix round uses `--round self-review`. Nothing to configure.
+
+## [0.33.0] - 2026-10-28
+
+### Added
+
+- **context**: Automatically discover context for task descriptions
+- **capture**: Preserve plugin origin and explicit run purpose (#527)
+
+### Changed
+
+- **context**: Budget task discovery notices without live CLI calls
+
+## [0.32.0] - 2026-10-28
+
+### Changed
+
+- Rename /zensu:tdd to /zensu:build and TDD Plan to Zensu Plan (#520)
+
+### Fixed
+
+- **context**: Prioritize relevant evidence and preserve related sources (#523)
+
+### Upgrade notes
+
+- **build workflow**: the workflow skill `/zensu:tdd` is now `/zensu:build`, and the plan it
+  writes is a Zensu plan. The workflow runs in vanilla mode unless strict mode is switched on,
+  so "TDD" now names only the strict RED→GREEN discipline: `/zensu:tdd-mode`,
+  `hooks.tddImplementation` and the phase gate keep their names, and so do the helper verbs
+  `--tdd-begin` and `--tdd-complete`. There is no alias, so `/zensu:tdd` no longer exists, and
+  the rename ships as a minor release.
+- **plan and log files**: new plans and run logs are named `{SESSION_TS}_build-{slug}.md` and
+  `{SESSION_TS}_build-{slug}.log` instead of `{SESSION_TS}_tdd-{slug}`. Plans open with
+  `# Zensu Plan:`, logs open with `BUILD STARTED`, and the plan's Approach line names the mode
+  the chain runs in. Existing files keep their names. A repository whose `.gitignore`
+  re-includes logs with `!.zensu/logs/*_tdd-*.log` stops tracking new logs: replace that line
+  with `!.zensu/logs/*.log` followed by `.zensu/logs/witness-*.log`.
+- **plan template and overlay**: `templates/tdd-plan.md` is now `templates/zensu-plan.md`, so
+  a repository override moves from `.zensu/templates/tdd-plan.md` to
+  `.zensu/templates/zensu-plan.md`. The skill overlay moves from `.zensu/overlays/tdd.md` to
+  `.zensu/overlays/build.md`. A file left under an old name is no longer read.
+- **delivery route**: the route value `tdd` is now `build`: `/zensu:delivery-route --build`,
+  `hooks.defaultDeliveryRoute: "build"` and the session marker `{"route":"build"}`. The
+  `--tdd` verb is refused. A configured `tdd` reads as `ask`, and `/zensu:doctor` warns about
+  it. A session marker that still holds `tdd` decides nothing, so the route question comes
+  back once.
+- **docs**: `docs/tdd-manager-workflow.md` is now `docs/build-workflow.md`.
+
+## [0.31.1] - 2026-10-26
+
+### Added
+
+- **context**: Load tracked feature context automatically (#518)
+
+### Fixed
+
+- **brand**: Preserve white fan backing on dark backgrounds (#517)
+- **session-trail**: Keep every linked session marked start in the takeover plan (#512)
+
+## [0.31.0] - 2026-10-26
+
+### Added
+
+- **knowledge**: Retain agent retrieval receipts and correlate source reads
+
+### Fixed
+
+- **session-control**: Move the full-suite marker on --reanchor (#510)
+
+## [0.30.1] - 2026-10-25
+
+### Added
+
+- **context**: Load and hydrate linked feature evidence (#504)
+
+### Fixed
+
+- **hooks**: Read who can answer the route question from the host, not from Auto Mode (#508)
+- **session-control**: Ignore local Zensu state in the projects it creates (#507)
+- **hooks**: Name a missing node and show Stop notices to the user (#506)
+- **skills**: Keep free text off the command line, read plugin docs from the plugin root, ask before publishing reviews (#505)
+
+## [0.30.0] - 2026-10-24
+
+### Added
+
+- **ai-work**: Capture authenticated work and committed result versions (#498)
+- **tdd**: Give every step task a short name (#500)
+
+### Changed
+
+- **multi-repo**: Specify the folder anchor for stage 2 (#499)
+
+### Upgrade notes
+
+- **tdd task labels**: every step task `/zensu:tdd` creates now carries a short name after its
+  tag, such as `S1 [impl] Config parser`, shortened from the step's `Description` in the plan's
+  Steps table. The user reads the task list without the plan open, and a bare `S1 [impl]` named
+  nothing they could recognize. The in-progress text names the step as well
+  (`Implementing S1: Config parser`). Strict and vanilla mode and the integration `[wire]` task
+  follow the same rule.
+- **wiki publishing**: `/zensu:implement` and `/zensu:docs` now change a wiki page that already
+  exists with `zensu wiki update <page-id>` instead of creating it again. Both look the page up
+  first, through the `wikiPageId` of the feature's linked doc in `zensu doc gen-context` or the
+  page's `path` in `zensu wiki list --json`, and `/zensu:implement` updates the page that a
+  refused `zensu wiki create` names. A re-run of `/zensu:implement` relied on `wiki create`
+  updating the existing page, which a create-only `wiki create` refuses, and a re-run of
+  `/zensu:docs` passed `--content` to `zensu link docs`, which never changes an existing page,
+  so the page kept its old text. Both skills now declare `update_wiki_page` in their workflow
+  window.
+
+## [0.29.0] - 2026-10-23
+
+### Added
+
+- **review-chain**: Consume the review ticket from a background consume-mode reviewer (#490)
+- **session-trail**: Decide the same checkout by repository identity (#487)
+- **session-trail**: Carry task chips over as start_session proposals (#466)
+
+### Changed
+
+- **ci**: Re-budget the Windows reviewer-capability-gate cap against nine measured runs (#493)
+- **stop**: Cut the armed Stop's remaining node spawns (#492)
+- **multi-repo**: Redesign stages 2 and 3 around declared code roots (#491)
+- **changelog**: List #478 and #481 in the 0.28.0 notes and move #480's note to Unreleased (#489)
+
+### Fixed
+
+- **review-chain**: Derive the background-review fan-out types from the principal module (#495)
+- **review-chain**: Replace #490's background ticket claim with launch records (#494)
+- **work-order,autopilot**: Wait on in-flight review seats in both Stop budgets (#483)
+- **review-chain**: Resolve aspectActivation and incrementalReviewRounds (#472)
+- **work-order**: Deny every non-inert Claude Desktop session tool (#486)
+- **secret-scan**: Exempt the plugin's own team-review operation key from the entropy rule (#479)
+- **review-chain**: Read the project config in the tdd, plan-review and pr-team-review flag probes (#480)
+
+### Upgrade notes
+
+- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
+  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
+  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
+  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
+  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
+  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
+  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
+  bound session's project config, never the reviewed repository's.
+- **session-trail task chips**: a takeover now carries the old session's open task chips over as
+  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
+  session is released, each chip the brief marks **propose** gets one `start_session` call with
+  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
+  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
+  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
+  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
+  the old session's checkout is marked **list** and named to the user, because a proposal cannot
+  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
+  listed for the user. A takeover run from another repository than the old session's marks every
+  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
+  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
+  longer carried, and a carried one leaves the cards after a week unless it is started.
+  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
+  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
+  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+- **work-order session tools**: in a work-order session the gate now denies every Claude Desktop
+  session tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
+  `read_widget_context`, which neither start nor move work, so
+  `mcp__ccd_session__hand_off_to_session`,
+  `mcp__ccd_session__move_to_cloud` and any session tool a later Claude Desktop adds are denied
+  beside `spawn_task` and `start_session`. It also denies `mcp__ccd_session_mgmt__send_message`.
+  Each deny names `zensu work followup <order>`. A hand-off moves the current task into a new
+  session, a move to the cloud pushes the branch past `zensu-work-order.sh --push`, continues the
+  session in the cloud and archives it here, and a message asks another session to take work up,
+  so each took the order's work out of its lease. The operator account now names the routes the
+  gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
+  pull request.
 - **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
   while its team review runs. A change in one of the session's review evidence leases (a seat
   bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
@@ -107,6 +268,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seat is in flight, at the latest 3600 seconds after the lease was created, every Stop counts
   again. A lease store the hook cannot read, or cannot read within five seconds where `timeout` or
   `gtimeout` is installed, counts the Stop as before.
+- **session-trail same checkout**: both briefs now decide whether a task chip's folder or a
+  linked session's folder belongs to the old session by its git repository, measured with
+  `git rev-parse --git-common-dir`, instead of by path nesting. A worktree of the old repository
+  anywhere on disk counts as the same checkout, while a repository nested inside the old checkout
+  and every folder below a session rooted in a broad folder such as the home directory no longer
+  do. A chip whose folder cannot be measured is marked **list** with the new `why`
+  `folder-unmeasured`. A linked session started without `cwd` runs in the folder of the session
+  that starts it, so a start now leaves `cwd` out only when the linked session works in the old
+  session's repository and `takeover` measured that it runs there too; from another repository
+  or from a folder in no repository, and in every handoff brief, each start passes its own
+  folder, and a linked session without a usable folder waits for the user to name it (`why`
+  `place`). The takeover brief names the folder of every start it leaves without `cwd`, so a
+  session that opens a written brief from elsewhere passes it. A folder that opens with two
+  separators, such as a Windows network path, is never measured. A chip whose folder carries a
+  control character is marked **list** with the new `why` `folder-unsafe` and is never measured,
+  because the brief shows only its cleaned spelling, which is another folder. Every git call of
+  the skill now clears `GIT_DIR`, `GIT_COMMON_DIR` and the other git discovery and config
+  variables, so an exported one no longer makes every folder answer one repository. When no
+  folder of the old session can be measured, no chip or linked-session folder is measured
+  either, and the checkout line of a linked session names the old session's repository as the
+  side that could not be measured. `takeover --json` adds `sameRepository` and
+  `oldRepositoryMeasured` to `linkedSessions` and `cwdWhy`, the reason a start carries or leaves
+  out `cwd`, to each of its entries, and `--no-git` no longer skips the repository check of
+  `takeover`.
 
 ## [0.28.0] - 2026-10-21
 

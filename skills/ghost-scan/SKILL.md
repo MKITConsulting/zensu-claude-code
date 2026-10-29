@@ -59,7 +59,7 @@ Execute these phases in order. Present results to the user after each phase and 
    - **Source files:** `*.go`, `*.ts`, `*.tsx`, `*.py`, `*.java`, `*.rs` (excluding test files)
    - **Doc files:** `README*`, `docs/**/*.md`, `*.rst`, `CHANGELOG*`
 4. Group files by module/package and extract feature candidates
-5. **Populate each candidate's three detection arrays — `detectedSourceFiles`, `detectedTestFiles`, `detectedDocFiles`.** These arrays are the *only* data the scan apply uses to link artifacts — it links exactly what you pass, so an empty array links zero. Never leave `detectedTestFiles` empty by omission: an empty array must mean "globbed and found none," not "skipped." Note: `detectedDocFiles` links **existing** doc files in the repo (READMEs, `docs/*.md`) — it does not generate new documentation. Authoring new wiki docs for discovered features is a separate, code-grounded task: see `docs/documentation-guide.md` (read the source, never dump feature metadata).
+5. **Populate each candidate's three detection arrays — `detectedSourceFiles`, `detectedTestFiles`, `detectedDocFiles`.** These arrays are the *only* data the scan apply uses to link artifacts — it links exactly what you pass, so an empty array links zero. Never leave `detectedTestFiles` empty by omission: an empty array must mean "globbed and found none," not "skipped." Note: `detectedDocFiles` links **existing** doc files in the repo (READMEs, `docs/*.md`) — it does not generate new documentation. Authoring new wiki docs for discovered features is a separate, code-grounded task: see the plugin's `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` (read the source, never dump feature metadata).
 6. **Tests are co-located — glob them per candidate.** Tests live in the same directories as a feature's source files. For each candidate, after collecting `detectedSourceFiles`, glob the test-file patterns from step 3 within those same directories *and* their sibling test dirs (`test/`, `tests/`, `__tests__/`, `spec/`, `specs/`), and assign every match to that candidate's `detectedTestFiles`. A capability feature spanning multiple modules collects tests from all of its source dirs.
 7. **Docs are co-located too — glob them per candidate.** Apply the same rigor to docs as to tests: for each candidate, glob the doc-file patterns from step 3 (`README*`, `docs/**/*.md`, `*.rst`, `CHANGELOG*`) in the candidate's source dirs and the repo root, and assign every match to `detectedDocFiles`. Linking existing docs is first-class scan data, not a bonus — an empty `detectedDocFiles` must mean "globbed and found none," not "skipped."
 8. **For large repos (>500 files):** Scan only top-level modules, max 3 directory levels deep. Ask the user if a deeper subdirectory scan is desired. Still glob the test and doc dirs at each scanned level — capping breadth must not silently drop tests or docs.
@@ -84,7 +84,7 @@ Execute these phases in order. Present results to the user after each phase and 
 **Doc-file completeness (treat like the test-file rule, not a bonus):**
 - Every candidate MUST have its co-located docs detected (Phase 2, step 7). Populate `detectedDocFiles` with the same rigor as `detectedTestFiles` — the scan apply links exactly what you pass, so an omitted array links zero docs.
 - An empty `detectedDocFiles` is acceptable ONLY after globbing the candidate's source dirs + repo root confirms genuinely zero docs — never as a default for "didn't look."
-- `detectedDocFiles` links **existing** docs only (READMEs, `docs/*.md`). It never generates new documentation — authoring docs for a feature with zero docs is a separate task flagged in Phase 6 (see `docs/documentation-guide.md`).
+- `detectedDocFiles` links **existing** docs only (READMEs, `docs/*.md`). It never generates new documentation — authoring docs for a feature with zero docs is a separate task flagged in Phase 6.
 
 **Never create candidates for:**
 - CI/CD configuration (`.github/`, `.gitlab-ci.yml`, `Jenkinsfile`)
@@ -96,21 +96,9 @@ Execute these phases in order. Present results to the user after each phase and 
 
 #### Confidence Score Heuristic
 
-Confidence scores are heuristic estimates, not ML predictions. Use them to prioritize review, not as ground truth.
-
-| Tier | Range | Criteria |
-|------|-------|----------|
-| High | >= 0.7 | Dedicated tests + clear module boundary (own package) |
-| Medium | 0.4-0.7 | Either tests OR docs present, or clear boundary without tests |
-| Low | < 0.4 | No tests, no docs, unclear boundary |
-
-Building blocks:
-- Dedicated test files: +0.3
-- Documentation present: +0.2
-- Clear directory boundary (own package/module, >= 3 source files): +0.3
-- README mention or config reference: +0.2
-- Single file / unclear boundary: -0.2
-- Utils/helpers/infrastructure code: -0.3
+Before you assign the first `confidenceScore`, read the tiers and building blocks in
+`references/confidence-score.md` of this skill's directory. A score prioritizes review; it is
+no ground truth.
 
 #### Security Classification
 
@@ -140,7 +128,7 @@ The single-pass walk in Phase 2 is only a **seed**. A lone heuristic pass misses
 features that span modules, live behind entry points, or are only legible from
 tests, data models, or docs. Augment it — never replace it — with a parallel
 fan-out of read-only analysis lenses, then consolidate in this main thread. This
-is the house pattern already used by `/zensu:plan-review` and `/zensu:tdd` Phase 6.
+is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
 
 1. **Spawn the lenses in ONE parallel batch.** Use the `Agent` tool with
    `subagent_type: Explore`. Each agent gets: the repo path, the Phase 2 seed
@@ -191,7 +179,18 @@ is the house pattern already used by `/zensu:plan-review` and `/zensu:tdd` Phase
 
 ### Phase 3: Create Ghost Scan
 
-1. Run `zensu ghost scan --product <product-id> --repo-url <url> --branch <branch> --candidates '<json>'`. Each candidate carries its three detection arrays — populate all of them, and never omit `detectedTestFiles` or `detectedDocFiles`:
+1. Never paste the candidates' JSON into the command line: a single quote ends at an apostrophe, and double quotes run backtick spans and expand `$NAME`. zensu-cli reads `--candidates` from no file or stdin, so write the JSON through a quoted heredoc (another delimiter if it holds that line):
+
+   ```bash
+   f="$(mktemp)" || exit 1
+   trap 'rm -f "$f"' EXIT
+   cat > "$f" <<'ZENSU_TEXT_END'
+   <candidates-json>
+   ZENSU_TEXT_END
+   zensu ghost scan --product <product-id> --repo-url <url> --branch <branch> --candidates "$(cat "$f")"
+   ```
+
+   Each candidate carries its three detection arrays — populate all of them, and never omit `detectedTestFiles` or `detectedDocFiles`:
 
    ```json
    {
@@ -305,8 +304,7 @@ Discipline: ground every step in code, prefer ≥2 components per journey, and h
    created, and journey-health weak links from Phase 5.
 3. **Doc-gap report.** List the created/enriched features with zero docs (empty
    `detectedDocFiles`). Recommend `/zensu:implement` to author code-grounded docs
-   for them — ghost-scan links existing docs but never generates new ones
-   (`docs/documentation-guide.md`).
+   for them — ghost-scan links existing docs but never generates new ones.
 4. Recommend next steps:
    - `/zensu:implement` for feature implementation
    - `/zensu:security-review` for a deep security review (threat model, pentest, data-sensitivity, auth/encryption posture) — the scan already set and persisted each feature's baseline `securityClassification` at apply, so this is the follow-up that hardens it, not where classification first happens
