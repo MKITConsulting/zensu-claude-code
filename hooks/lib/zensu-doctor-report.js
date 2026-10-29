@@ -538,18 +538,43 @@ function pluginBlock() {
     line(BAD, 'hooks.json: ' + (hj.missing ? 'missing' : jsonFailure(hj)));
     return;
   }
+  var registration = null;
+  try { registration = require('./hook-registration-v1.js'); } catch (_error) { registration = null; }
   var wired = {};
+  var dispatched = false;
   var events = (hj.data && hj.data.hooks) || {};
   Object.keys(events).forEach(function (ev) {
     var matchers = events[ev] || [];
     matchers.forEach(function (m) {
       (m && m.hooks || []).forEach(function (h) {
-        var cmd = (h && typeof h.command === 'string') ? h.command : '';
-        var mm = cmd.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
-        if (mm) wired[mm[1]] = true;
+        if (registration && registration.dispatcherEvent(h) !== null) dispatched = true;
+        var entries = registration
+          ? registration.hookEntries(h, ev)
+          : [{ command: (h && typeof h.command === 'string') ? h.command : '' }];
+        entries.forEach(function (entry) {
+          var mm = entry.command.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
+          if (mm) wired[mm[1]] = true;
+        });
       });
     });
   });
+  if (!registration) {
+    line(WARN, 'hooks wiring: hooks/lib/hook-registration-v1.js could not be loaded, so the checks the dispatcher runs are not counted as wired; reinstall the plugin');
+  }
+  if (dispatched) {
+    var dispatcherFile = path.join(dir, registration.DISPATCHER_MODULE);
+    var dispatcherStat = null;
+    try { dispatcherStat = fs.lstatSync(dispatcherFile); } catch (_error) { dispatcherStat = null; }
+    if (!dispatcherStat || !dispatcherStat.isFile()) {
+      line(BAD, 'hooks wiring: hooks.json starts ' + registration.DISPATCHER_MODULE + ' for every tool call, but it is missing on disk or not a regular file — every tool call is blocked; reinstall the plugin');
+    }
+    var missingBodies = registration.DISPATCHED_CHECKS.filter(function (check) {
+      return check.body !== null && !fs.existsSync(path.join(dir, 'hooks', check.body));
+    }).map(function (check) { return 'hooks/' + check.body; });
+    if (missingBodies.length) {
+      line(BAD, 'hooks wiring: ' + missingBodies.length + ' check(s) the dispatcher runs are missing on disk — ' + missingBodies.join(', '));
+    }
+  }
   var onDisk = {};
   try {
     fs.readdirSync(path.join(dir, 'hooks')).forEach(function (f) {
