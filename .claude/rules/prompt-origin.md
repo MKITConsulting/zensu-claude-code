@@ -76,6 +76,7 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 | `user-prompt-worktree-keep.sh` | notice only | notice only | notice only |
 | `user-prompt-session-hub-receipt.sh` | silent; writes a receipt only for the Session Hub's exact takeover command | silent | silent |
 | `user-prompt-review-handback.sh` | silent, with no `node` child while no arrival note is pending; while one is, one `node` child (`arrive`), and the review's routing directive when the note is this session's | silent, with no `node` child while no background review is pending in the plugin's store; the hand-back or completion notification of a pending consume reviewer carries the review's routing directive (`.claude/rules/background-review-completion.md`) | silent, with the same arrival-note exception as a typed prompt |
+| `user-prompt-context-auto-load.sh` | exactly one distinct key in typed prose or in a raw `/name` command's arguments: that feature's context package; typed prose with no key, at least 8 characters and two words: the candidates of one discovery search, which sends up to 2,000 characters of that prose to the Zensu backend; a failed read: an unavailability notice, 387 characters for discovery and 378 plus the key's length for a key; two or more keys, a slash command's prose arguments, the `<command-name>` spelling and a prompt behind a leading `<system-reminder>`: silent | silent, no CLI call | silent, no CLI call |
 
 `.claude/rules/prompt-ledger.md` owns the once-per-generation mechanism. Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
 CI event is user-visible, so its shape and its option set still matter. The reminder's CI note, its decided
@@ -86,6 +87,15 @@ parity helper in `tests/structure/test-tdd-vanilla-mode.sh` refuses a third bloc
 The router drops, before the keyword match, every whitespace token containing `/` or `\` (paths,
 URLs, `owner/repo`), every `zensu:<name>` skill name, and the operand of `--repo` or `--repo=`.
 `-R` is not dropped: other tools use it for unrelated operands.
+
+The context auto-load hook does not call `zensu_prompt_origin`: `promptText` and `taskQuery` in
+`hooks/lib/context-auto-load-v1.js` screen the prompt themselves. They drop a payload whose
+`origin` carries a kind other than `human`, and every prompt that opens with `<`, `!` or the
+`Another Claude session sent a message:` line, so a typed prompt behind a leading
+`<system-reminder>` stays silent here although the classifier strips the reminder and calls the
+rest typed. The hook keeps no ledger, so every qualifying prompt reads again. The budget suite
+puts a `zensu` stub that exits 1 first on `PATH`, so the typed figure it holds this hook to, 300
+to 400 characters, is the 387-character discovery notice; every other kind must stay at 0.
 
 ## The budget suite
 
