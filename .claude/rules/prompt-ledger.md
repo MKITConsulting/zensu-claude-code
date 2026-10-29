@@ -17,7 +17,8 @@ Every typed prompt used to carry about 12,500 characters of Zensu context, and e
 stayed in the transcript until the next compaction, so a session paid that sum again on every
 turn. The contracts are now sent in full once per **context generation**, the stretch between two
 `SessionStart` events, and every later prompt of that generation carries a short line. Measured by
-`tests/structure/test-user-prompt-budget.sh` on this tree:
+`tests/structure/test-user-prompt-budget.sh` on the tree that introduced the ledger (#419); that
+suite, not this table, holds today's figures:
 
 | Prompt | Before | First of a generation | Every later prompt |
 |---|---|---|---|
