@@ -9,6 +9,7 @@ paths:
   - "hooks/hooks.json"
   - "tests/structure/test-hook-process-budget.sh"
   - "tests/structure/test-secret-scan-gate.sh"
+  - "tests/structure/test-msys-runtime-boundaries.sh"
 ---
 
 # Hook Process Budget (`tests/structure/test-hook-process-budget.sh`)
@@ -39,6 +40,12 @@ against Windows executables.
   `msysDrivePrefix` in `claude-path-v1.js` applies, and is accepted only when `cd -P` of the result
   lands on the same canonical directory. Every other path, an MSYS mount such as `/tmp` included,
   goes through `cygpath -am` and the round-trip checks as before.
+- The `cygpath` refusal checks in `tests/structure/test-msys-runtime-boundaries.sh` source the file
+  and stub `_zensu_host_path_drive` to decline, so they reach that branch whatever spelling the
+  host gives a temporary directory. A fixture with a drive spelling takes the fast path, which runs
+  no `cygpath` and accepts it; a plain `/tmp` fixture failed this check on the Windows runner of run
+  40851239372. The same stub drives one real `cygpath -am` render on Git Bash. A rename of
+  `_zensu_host_path_drive` needs the same rename there.
 - Each loader unsets the three function names before it sources the file, because bash imports
   exported functions from the environment, and fails closed when `zensu_host_path` is undefined
   afterwards: the capability gate exits 2, `zensu-tdd-phase.sh` returns 2 and `zensu-session.sh`

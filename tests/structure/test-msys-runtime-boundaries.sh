@@ -235,52 +235,57 @@ else
   check "temporary review workspace is rendered in a native-Node-readable spelling" FAIL
 fi
 
-HOST_NEGATIVE_OK=true
+HOST_CANONICAL="$(cd -P -- "$HOST_FIXTURE" && pwd -P)"
+HOST_CYGPATH_BRANCH='source "$1" || exit 3
+_zensu_host_path_drive() { _ZENSU_HOST_PATH_DRIVE=""; return 1; }
+_zensu_host_path_render "$2"'
+HOST_NEGATIVE_FAULTS=""
+host_rejects() {
+  local label="$1" rc
+  shift
+  "$@" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || HOST_NEGATIVE_FAULTS="$HOST_NEGATIVE_FAULTS $label:$rc"
+}
+host_cygpath_branch() {
+  (
+    cd -- "$HOST_FIXTURE" || exit 3
+    OSTYPE=msys PATH="$FAKE_BIN" /bin/bash -c "$HOST_CYGPATH_BRANCH" _ "$HOST_PATH" "$HOST_FIXTURE"
+  )
+}
 touch "$HOST_FIXTURE/not-a-directory"
-bash "$HOST_PATH" "$HOST_FIXTURE/missing" >/dev/null 2>&1 && HOST_NEGATIVE_OK=false
-bash "$HOST_PATH" "$HOST_FIXTURE/not-a-directory" >/dev/null 2>&1 && HOST_NEGATIVE_OK=false
+host_rejects missing bash "$HOST_PATH" "$HOST_FIXTURE/missing"
+host_rejects non-directory bash "$HOST_PATH" "$HOST_FIXTURE/not-a-directory"
 if ln -s "$HOST_FIXTURE" "$HOST_FIXTURE/directory-alias" 2>/dev/null; then
-  bash "$HOST_PATH" "$HOST_FIXTURE/directory-alias" >/dev/null 2>&1 && HOST_NEGATIVE_OK=false
+  host_rejects alias bash "$HOST_PATH" "$HOST_FIXTURE/directory-alias"
 fi
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) HOST_MOUNT_FIXTURE="$(mktemp -d /tmp/zensu-host-path-mount-XXXXXX)" ;;
-  *) HOST_MOUNT_FIXTURE="$HOST_FIXTURE" ;;
-esac
-HOST_MOUNT_CANONICAL="$(cd -P -- "$HOST_MOUNT_FIXTURE" && pwd -P)"
 FAKE_BIN="$HOST_FIXTURE/fake-bin"
 mkdir -p "$FAKE_BIN"
-OSTYPE=msys PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_MOUNT_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
+host_rejects no-cygpath host_cygpath_branch
 printf '%s\n' '#!/bin/sh' 'exit 7' > "$FAKE_BIN/cygpath"
 chmod +x "$FAKE_BIN/cygpath"
-OSTYPE=msys PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_MOUNT_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
+host_rejects cygpath-failure host_cygpath_branch
 printf '%s\n' '#!/bin/sh' 'printf "%s\\n" /tmp/ambiguous' > "$FAKE_BIN/cygpath"
 chmod +x "$FAKE_BIN/cygpath"
-OSTYPE=msys PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_MOUNT_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
-mkdir -p "$HOST_MOUNT_FIXTURE/C:/attacker-controlled"
+host_rejects mount-spelling host_cygpath_branch
+mkdir -p "$HOST_FIXTURE/C:/attacker-controlled"
 printf '%s\n' '#!/bin/sh' 'printf "%s\\n" C:/attacker-controlled' > "$FAKE_BIN/cygpath"
 chmod +x "$FAKE_BIN/cygpath"
-(
-  cd "$HOST_MOUNT_FIXTURE" || exit 1
-  OSTYPE=msys PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_MOUNT_FIXTURE" >/dev/null 2>&1
-) && HOST_NEGATIVE_OK=false
+host_rejects relative-drive host_cygpath_branch
 printf '%s\n' '#!/bin/sh' 'printf "%s\\n" C:/first C:/second' > "$FAKE_BIN/cygpath"
 chmod +x "$FAKE_BIN/cygpath"
-OSTYPE=msys PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_MOUNT_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
-if [ "$HOST_NEGATIVE_OK" = true ]; then
+host_rejects two-lines host_cygpath_branch
+if [ -z "$HOST_NEGATIVE_FAULTS" ]; then
   check "host-path producer rejects missing, non-directory, aliased, unavailable, and malformed inputs" PASS
 else
-  check "host-path producer rejects missing, non-directory, aliased, unavailable, and malformed inputs" FAIL
+  check "host-path producer rejects missing, non-directory, aliased, unavailable, and malformed inputs (not exit 2:$HOST_NEGATIVE_FAULTS; fixture $HOST_CANONICAL)" FAIL
 fi
 
 printf '%s\n' '#!/bin/sh' 'printf "%s\\n" MSYS_NT-10.0' > "$FAKE_BIN/uname"
 chmod +x "$FAKE_BIN/uname"
 printf '%s\n' '#!/bin/sh' 'exit 7' > "$FAKE_BIN/cygpath"
 chmod +x "$FAKE_BIN/cygpath"
-if [ "$(OSTYPE=linux-gnu PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_MOUNT_FIXTURE" 2>/dev/null)" = "$HOST_MOUNT_CANONICAL" ]; then
+if [ "$(OSTYPE=linux-gnu PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" 2>/dev/null)" = "$HOST_CANONICAL" ]; then
   check "host-path platform detection reads OSTYPE and runs neither uname nor cygpath off MSYS" PASS
 else
   check "host-path platform detection reads OSTYPE and runs neither uname nor cygpath off MSYS" FAIL
@@ -325,12 +330,18 @@ case "$(uname -s)" in
     else
       check "MSYS drive fast path is exercised where the checkout has a drive spelling" PASS
     fi
+    HOST_CYGPATH_EXPECTED="$(cygpath -am "$HOST_CANONICAL" 2>/dev/null)"
+    HOST_CYGPATH_RENDERED="$(OSTYPE=msys /bin/bash -c "$HOST_CYGPATH_BRANCH" _ "$HOST_PATH" "$HOST_FIXTURE" 2>/dev/null)"
+    if [ -n "$HOST_CYGPATH_EXPECTED" ] && [ "$HOST_CYGPATH_RENDERED" = "$HOST_CYGPATH_EXPECTED" ]; then
+      check "MSYS cygpath branch renders like cygpath -am once the drive fast path declines" PASS
+    else
+      check "MSYS cygpath branch renders like cygpath -am once the drive fast path declines" FAIL
+    fi
     ;;
   *)
     check "MSYS drive fast path is exercised on the Windows CI runner" PASS
     ;;
 esac
-[ "$HOST_MOUNT_FIXTURE" = "$HOST_FIXTURE" ] || rm -rf -- "$HOST_MOUNT_FIXTURE"
 rm -rf -- "$HOST_FIXTURE"
 
 case "$(uname -s)" in
