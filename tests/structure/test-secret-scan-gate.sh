@@ -471,6 +471,102 @@ else
 fi
 rm -f "$TMPD/shim/_probe" 2>/dev/null
 
+SCAN_SHIM="$TMPD/scan-shim"
+mkdir -p "$SCAN_SHIM"
+cat > "$SCAN_SHIM/node" <<'SHIM'
+#!/bin/bash
+for a in "$@"; do
+  case "$a" in *secret-scan-decide.js*) printf x >> "$SCAN_MARK" ;; esac
+done
+exec "$REAL_NODE_BIN" "$@"
+SHIM
+chmod +x "$SCAN_SHIM/node" 2>/dev/null
+printf '#!/bin/bash\necho SHIMOK\n' > "$SCAN_SHIM/_probe"
+chmod +x "$SCAN_SHIM/_probe" 2>/dev/null
+scan_run() {
+  local payload="$1"
+  rm -f "$TMPD/scan.mark"
+  SCAN_OUT="$(run_hook "$payload" SCAN_MARK="$TMPD/scan.mark" REAL_NODE_BIN="$REAL_NODE_DIR/node" \
+    PATH="$SCAN_SHIM:$REAL_NODE_DIR:/usr/bin:/bin")"
+  [ -f "$TMPD/scan.mark" ] && SCAN_STARTED=yes || SCAN_STARTED=no
+}
+raw_payload() {
+  printf ' {"hook_event_name":"PreToolUse","session_id":"secret-scan-test","cwd":%s,%s}' \
+    "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$TMPD")" "$1"
+}
+SCAN_TOKEN_TAIL=123456789012345678901234567890123456
+SCAN_TOKEN="ghp_${SCAN_TOKEN_TAIL}"
+if [ "$(PATH="$SCAN_SHIM:/usr/bin:/bin" _probe 2>/dev/null)" = "SHIMOK" ]; then
+  CHANNEL_MISSES=""
+  channel_row() {
+    case "$1" in
+      redirect) printf '%s' "printf %s $SCAN_TOKEN > creds.env" ;;
+      tee) printf '%s' "printf %s $SCAN_TOKEN | tee creds.env" ;;
+      'sed -i') printf '%s' "sed -i s/x/$SCAN_TOKEN/ creds.env" ;;
+      'dd of=') printf '%s' "printf %s $SCAN_TOKEN | dd of=creds.env" ;;
+      heredoc) printf '%s' "python3 - <<EOF"$'\n'"print('$SCAN_TOKEN')"$'\n'"EOF" ;;
+    esac
+  }
+  cat > "$TMPD/channel-labels.js" <<'NODE'
+const source = require('fs').readFileSync(process.argv[2], 'utf8');
+const body = /\nfunction detectChannels\([^)]*\) \{\n([\s\S]*?)\n\}\n/.exec(source);
+if (body) process.stdout.write(Array.from(body[1].matchAll(/found\.add\("([^"]+)"\)/g), (m) => m[1]).join('\n'));
+NODE
+  CHANNEL_LABELS="$(node "$TMPD/channel-labels.js" "$PARSER")"
+  CHANNEL_NL=$'\n'
+  CHANNEL_ROWS=0
+  while IFS= read -r channel_label; do
+    [ -n "$channel_label" ] || continue
+    channel_command="$(channel_row "$channel_label")"
+    if [ -z "$channel_command" ]; then
+      CHANNEL_MISSES="$CHANNEL_MISSES [$channel_label:no-row]"
+      continue
+    fi
+    channel_detected="$(detect "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$channel_command")")"
+    case "$CHANNEL_NL$channel_detected$CHANNEL_NL" in
+      *"$CHANNEL_NL$channel_label$CHANNEL_NL"*) ;;
+      *) CHANNEL_MISSES="$CHANNEL_MISSES [$channel_label:row-not-detected]"; continue ;;
+    esac
+    CHANNEL_ROWS=$((CHANNEL_ROWS + 1))
+    scan_run "$(bash_payload "$channel_command")"
+    if [ "$SCAN_STARTED" != yes ] || ! is_deny "$SCAN_OUT"; then
+      CHANNEL_MISSES="$CHANNEL_MISSES [$channel_label:$SCAN_STARTED]"
+    fi
+  done <<EOF
+$CHANNEL_LABELS
+EOF
+  [ "$CHANNEL_ROWS" -gt 0 ] || CHANNEL_MISSES="$CHANNEL_MISSES [no-detectChannels-label-read]"
+  SCAN_ESCAPED_REDIRECT="$(printf '\134u003e')"
+  SCAN_ESCAPED_PAYLOAD="$(raw_payload '"tool_name":"Bash","tool_input":{"command":"printf %s '"$SCAN_TOKEN"' '"$SCAN_ESCAPED_REDIRECT"' creds.env"}')"
+  case "$SCAN_ESCAPED_PAYLOAD" in
+    *'>'*) CHANNEL_MISSES="$CHANNEL_MISSES [unicode-redirect:fixture-holds-a-plain-redirect]" ;;
+    *)
+      scan_run "$SCAN_ESCAPED_PAYLOAD"
+      if [ "$SCAN_STARTED" != yes ] || ! is_deny "$SCAN_OUT"; then CHANNEL_MISSES="$CHANNEL_MISSES [unicode-redirect:$SCAN_STARTED]"; fi
+      ;;
+  esac
+  scan_run "$(raw_payload '"tool_name":"Bash","tool_input":{"command":"Set-Content creds.env '"$SCAN_TOKEN"'"},"tool_name":"PowerShell"')"
+  if [ "$SCAN_STARTED" != yes ] || ! is_deny "$SCAN_OUT"; then CHANNEL_MISSES="$CHANNEL_MISSES [duplicate-tool-name:$SCAN_STARTED]"; fi
+  [ -z "$CHANNEL_MISSES" ] \
+    && check "F13b every channel detectChannels reports ($CHANNEL_ROWS), a unicode-escaped redirect and a duplicated tool_name still reach the scanner and deny" PASS \
+    || check "F13b a write channel skipped the scanner or allowed a token:$CHANNEL_MISSES" FAIL
+  case "$TMPD" in
+    *'>'*|*'<<'*|*tee*|*of=*|*'\u'*|*sed*-i*)
+      check "F13c a channel-less Bash call skips the scanner (skipped: the fixture path holds a channel token)" PASS
+      ;;
+    *)
+      scan_run "$(bash_payload "gh auth status --hostname $SCAN_TOKEN")"
+      [ "$SCAN_STARTED" = no ] && [ -z "$SCAN_OUT" ] \
+        && check "F13c a channel-less Bash call is allowed without starting the scanner" PASS \
+        || check "F13c channel-less Bash call (scanner started: $SCAN_STARTED, got '$SCAN_OUT')" FAIL
+      ;;
+  esac
+else
+  check "F13b write channels reach the scanner (skipped: FS ignores exec bit)" PASS
+  check "F13c a channel-less Bash call skips the scanner (skipped: FS ignores exec bit)" PASS
+fi
+rm -f "$SCAN_SHIM/_probe" 2>/dev/null
+
 # --- unregistered session (the 0.17.0 upgrade state) -----------------------
 # This hook matches Bash as well as Edit/Write, and it denied on the session bind
 # BEFORE inspecting anything — so on a session Session Control never registered it

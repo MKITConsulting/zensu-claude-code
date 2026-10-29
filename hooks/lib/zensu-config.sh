@@ -18,7 +18,8 @@
 # ONE exception to "this file only reads config": the session-marker helpers that
 # follow `zensu_tdd_strict_enabled` also read TWO session-scoped markers under
 # `<project>/.zensu/state/` — the tdd-mode marker and the delivery-route marker. Every
-# config getter spawns node through `_zensu_config_node`; the getters after the marker
+# config getter spawns node through `_zensu_config_node`, except where `_zensu_config_key_unset`
+# proves the key absent; the getters after the marker
 # section do too. Beyond those config reads, an auditor asking "what in
 # the marker section opens something" must get exactly these names and no others:
 # `zensu_tdd_mode_state_linked` (the `-L` probes, shared by both marker pairs) and
@@ -77,9 +78,28 @@ _zensu_config_json() {
   _zensu_config_node -e "$_ZENSU_CFG_JS"' process.stdout.write(JSON.stringify(cfg()))' 2>/dev/null || echo '{}'
 }
 
+_ZENSU_CONFIG_PRECHECK_BYTES=16384
+_zensu_config_key_unset() {
+  local key="${1:-}" candidate content LC_ALL=C
+  [ -n "$key" ] && [ -z "${ZENSU_CONFIG:-}" ] || return 1
+  for candidate in "${HOME:-}/.zensu/config.json" ${CLAUDE_PROJECT_DIR:+"$CLAUDE_PROJECT_DIR/.zensu/config.json"}; do
+    if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
+      continue
+    fi
+    [ -f "$candidate" ] && [ -r "$candidate" ] || return 1
+    content=""
+    IFS= read -r -n "$_ZENSU_CONFIG_PRECHECK_BYTES" -d '' content 2>/dev/null < "$candidate" || true
+    [ "${#content}" -lt "$_ZENSU_CONFIG_PRECHECK_BYTES" ] || return 1
+    [ -n "$content" ] || [ ! -s "$candidate" ] || return 1
+    case "$content" in *"\"$key\""*|*\\*) return 1 ;; esac
+  done
+  return 0
+}
+
 zensu_hook_enabled() {
   local key="$1"
   command -v node >/dev/null 2>&1 || return 0   # node missing → fall back to enabled
+  _zensu_config_key_unset "$key" && return 0
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===false?"0":"1")' "$key" 2>/dev/null)
   [ -z "$val" ] && return 0                      # any other failure → enabled
@@ -139,6 +159,7 @@ zensu_tdd_strict_enabled() {
 zensu_hook_opted_in() {
   local key="$1"
   command -v node >/dev/null 2>&1 || return 1
+  _zensu_config_key_unset "$key" && return 1
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===true?"1":"0")' "$key" 2>/dev/null)
   [ "$val" = "1" ]
