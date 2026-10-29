@@ -1779,6 +1779,56 @@ SB_CTRL="$(env -u CLAUDE_PLUGIN_DATA CLAUDE_CODE_SESSION_ID="$SB_SID" \
 { [ "$SB_CTRL_RC" -ne 2 ] && printf '%s' "$SB_CTRL" | grep -qF 'STANDALONE AUDIT'; }
 check "ES2-control without the plugin data the gate looks only at the audited project, which holds no chain (rc=$SB_CTRL_RC)" "$(verdict $?)"
 
+echo "== --change-set prints the union the audit grades against =="
+CS="$WORK/change-set"
+new_repo "$CS"
+printf 'v1\n' > "$CS/kept.txt"
+printf 'v1\n' > "$CS/edited.txt"
+printf 'v1\n' > "$CS/committed.txt"
+printf 'ignored.txt\n' > "$CS/.gitignore"
+G "$CS" add -A >/dev/null 2>&1; G "$CS" commit -qm base >/dev/null 2>&1
+CS_BASE="$(G "$CS" rev-parse HEAD)"
+printf 'v2\n' > "$CS/committed.txt"
+G "$CS" commit -qam mid >/dev/null 2>&1
+printf 'v2\n' > "$CS/edited.txt"
+printf 'new\n' > "$CS/fresh.txt"
+printf 'noise\n' > "$CS/ignored.txt"
+CS_OUT="$(bash "$LIB" --change-set --project "$CS" --baseline "$CS_BASE" 2>"$WORK/cs.err")"; CS_RC=$?
+[ "$CS_RC" -eq 0 ] && [ "$CS_OUT" = "$(printf 'committed.txt\nedited.txt\nfresh.txt')" ]
+check "CS1 --change-set lists the worktree diff, the untracked files and the baseline range, sorted, and never an ignored or unchanged file" "$(verdict $?)"
+CS_NOBASE="$(bash "$LIB" --change-set --project "$CS" 2>/dev/null)"
+[ "$CS_NOBASE" = "$(printf 'edited.txt\nfresh.txt')" ]
+check "CS1-control without --baseline the committed range is not part of the union" "$(verdict $?)"
+cs_refuses() { bash "$LIB" --change-set --project "$CS" "$@" >/dev/null 2>&1; [ "$?" -eq 2 ]; }
+CS_REFUSED=0
+cs_refuses --log "$CS/none.log" || CS_REFUSED=1
+cs_refuses --receipt - || CS_REFUSED=1
+cs_refuses --session s || CS_REFUSED=1
+cs_refuses --session-epoch 1 || CS_REFUSED=1
+cs_refuses --dirty-before "$CS/none" || CS_REFUSED=1
+cs_refuses --inventory || CS_REFUSED=1
+cs_refuses --check-receipt || CS_REFUSED=1
+cs_refuses --predicates "$CS/none" || CS_REFUSED=1
+cs_refuses --allow-unclean || CS_REFUSED=1
+[ "$CS_REFUSED" -eq 0 ]
+check "CS2 --change-set refuses every operand that grades, writes or reads a run log, exit 2" "$(verdict $?)"
+[ ! -e "$CS/.zensu" ]
+check "CS3 --change-set writes no receipt and no state directory" "$(verdict $?)"
+CS_PLAIN="$WORK/change-set-plain"
+mkdir -p "$CS_PLAIN"
+CS_PLAIN_OUT="$(bash "$LIB" --change-set --project "$CS_PLAIN" 2>"$WORK/cs-plain.err")"; CS_PLAIN_RC=$?
+[ "$CS_PLAIN_RC" -eq 3 ] && [ -z "$CS_PLAIN_OUT" ] && grep -qF 'needs a git work tree' "$WORK/cs-plain.err"
+check "CS4 outside a git work tree --change-set exits 3 with no list" "$(verdict $?)"
+CS_GF_OUT="$(foreign_owner bash "$LIB" --change-set --project "$GF" 2>"$WORK/cs-gf.err")"; CS_GF_RC=$?
+[ "$CS_GF_RC" -eq 2 ] && [ -z "$CS_GF_OUT" ] && grep -qiF 'dubious ownership' "$WORK/cs-gf.err"
+check "CS5 a git refusal is a fault for --change-set: exit 2, no list, git's message on stderr" "$(verdict $?)"
+CS_BOUND_OUT="$(CLAUDE_CODE_SESSION_ID="$SB_SID" CLAUDE_PLUGIN_DATA="$SB_DATA" \
+  bash "$LIB" --change-set --project "$CS" 2>"$WORK/cs-bound.err")"; CS_BOUND_RC=$?
+[ "$CS_BOUND_RC" -eq 0 ] && [ "$CS_BOUND_OUT" = "$(printf 'edited.txt\nfresh.txt')" ] \
+  && ! grep -qF 'AUDIT SESSION REQUIRED' "$WORK/cs-bound.err" && ! grep -qF 'STANDALONE AUDIT' "$WORK/cs-bound.err" \
+  && [ ! -e "$CS/.zensu" ]
+check "CS6 under the session of an armed chain --change-set still lists the union, passes no session gate and writes nothing (rc=$CS_BOUND_RC)" "$(verdict $?)"
+
 rm -f "$SKILL_TDD" "$TDD_SKILL"
 echo "----"
 unit_check_done "ESz every unit file the registry gives this suite was graded"

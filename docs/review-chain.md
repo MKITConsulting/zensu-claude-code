@@ -201,6 +201,89 @@ thread names, but the run record and the journal sit in the session's own projec
 which the main thread can write: a deliberate write there can still forge a result, as for
 every plugin store, and a count that disagrees with the journal only degrades the import.
 
+#### Fix-round bookkeeping
+
+A routed fix round prepares its re-review with one call,
+`zensu-log.sh --round-prepare --round <n> --log <run log>`, after it logged its
+`R<n>-<step> IMPL completed — files:` claims. Step 10.2 runs `--round 0` once before the first
+fan-out, and `/zensu:self-review` runs `--round self-review` for its one fix round. Every call of
+a chain passes the `--baseline` its round-0 call passed. The verb:
+
+- runs the Phase 6 step 5b edit-landing audit under the round's start marker;
+- judges every claim of the round against a content snapshot taken when the round began, so a
+  file that was already uncommitted before the round counts as landed only when this round
+  changed it, and a claim whose file did not change stops the round with exit 1;
+- appends a `fixed` ledger line for each open finding a landed claim names by its label
+  (`R<n>-F<k>`, `R<n>-R<j>-F<k>` for an earlier finding, `SR-R<j>-F<k>` in the self-review, and
+  the `G<g>:` form of an entry carried from an earlier generation, such as `SR-G1:R<j>-F<k>`);
+- prints the panel's `changed_files` (the round's own delta while
+  `hooks.incrementalReviewRounds` is on and the delta is established, the whole diff
+  otherwise), the judge's full `judge_changed_files`, the aspects to spawn, the open ledger
+  entries and the path of a round diff, and logs every skipped aspect. A
+  `changed_files (round-delta):` line goes on the `review_scope:` line after each aspect's
+  canonical `REVIEW PACKET v1`, and any other reason means no `review_scope:` line; the packet
+  itself keeps the full cumulative change set `review-packet-v1.js create` renders, for the
+  judge as for every aspect.
+
+Exit 0 means the round is prepared. Exit 1 means a claim of this round did not land in this
+round: no `fixed` line is written, and the same round runs again once the claim is landed or
+withdrawn. Exit 2 is a refused argument or a failed step. A refused argument prints its usage
+error on stderr and changes nothing. A failed step prints `ROUND PREPARE STOPPED — <step>: <cause>`
+and then a `ROUND PREPARE FALLBACK` line for the case the verb cannot run at all, outside git or
+without node: run the step 5b audit yourself,
+append each `fixed` line after re-reading its fix, and give the re-review the whole diff. An
+audit that graded the claims but could not write its receipt is such a stop: the verb attributes
+no claim, writes no `fixed` line and keeps the snapshot, so the round runs again once the cause
+its `RECEIPT REFUSED` line names is fixed.
+
+Without a usable round-start snapshot the round is reported as unattributable and no `fixed`
+line is written, because the verb cannot tell this round's edits from earlier ones. A snapshot is
+usable only for the run log, the review generation and the `--baseline` that recorded it:
+another chain's snapshot, one recorded before a `REVIEW BUDGET RESET`, or one taken with another
+`--baseline` is refused, so the first fix round after a reset is unattributable. The self-review
+round starts from the snapshot of the chain's last fix round as the run log shows it, never from
+an older one. A claim also stays unresolved when its file's digest names no content (a directory,
+or a file over the size bound or past the hash bound), when it names a new file and the snapshot
+was cut at its record bound, or when two labels of the round claim the same changed file. A label
+claimed both before and after the last reset is judged by the files it claimed after it: a
+verdict for a file it claimed only before the reset belongs to the earlier claim, and one that
+names no file stays unresolved. The verb lists unresolved labels under `unresolved_claims`, and a
+`fixed` line for one is written by hand only after its fix was re-read.
+
+The verb reads claims with the audit's own grammar: a label of at most five words before the
+`IMPL completed — files:` or `WIRED — files:` marker, written with any of the three dashes, and a
+file the run-log writer spelled `<project>/…` counts as the same file. Round 0 logs
+`ROUND PREPARE — round 0 recorded the round-start snapshot`, which marks where round 1 begins. A
+claim logged since the round began without the round's prefix (`R<n>-` or `SR-`) is listed under
+`unprefixed_claims`, because no `fixed` line can name its finding.
+
+A claim that cannot land is withdrawn by logging `CLAIM WITHDRAWN — <label>: <file>` after it, or
+`CLAIM WITHDRAWN — <label>` for all of its files, which is the only form for a claim the audit
+lists with no file. The round then passes, the claim gets no `fixed` line and its finding stays
+open. A claimed file restored to its committed content in the round counts as landed, although
+the audit reports `EDIT NOT LANDED` for it. The verdict lines of earlier claims, the audit tally,
+one `ROUND LANDING` line per claim and any `ROUND LEDGER UNAVAILABLE` line go to the run log and
+to the caller.
+
+The verb reads the ledger the way `/zensu:self-review` does. A `partial` read writes `fixed`
+lines only for the entries it could read and says so in a `ledger_note:` line, and a ledger that
+cannot be read prints `ROUND LEDGER UNAVAILABLE` and writes no `fixed` line. With
+`hooks.reviewConvergence` off the verb reads no ledger and prints
+`open_ledger: off (hooks.reviewConvergence is off); no fixed line was written` in every fix round,
+so `fixed: none` never reads as a ledger that was consulted.
+
+The packet lists and the round diff leave out every path inside a `.zensu` directory, at any
+depth, and every changed path that only your own global git excludes file ignores
+(`core.excludesFile`, by default `~/.config/git/ignore`); a `user_ignored:` line counts the
+second kind. The edit-landing audit grades claims without that file, so the snapshot in
+`.zensu/state/` still records a sha256 digest of such a path.
+
+A changed file is evidence that an edit happened, not that a finding is fixed. Only
+`hooks.reviewPanel: full` re-checks a `fixed` entry, through the judge's `[NOT FIXED]` tag: the
+lean panel's re-review reads the edit but not the ledger, and `/zensu:self-review` takes no
+`fixed` entry as a candidate. A `fixed` line written for an edit that missed its finding therefore
+stays closed unless a later review raises the defect again.
+
 #### Background review agents
 
 A host may start every `Agent` spawn in the background: the Claude desktop app does, and its

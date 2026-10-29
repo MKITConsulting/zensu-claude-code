@@ -114,8 +114,8 @@ esac
 # --- Directive carriers ------------------------------------------------------
 check "I8 build skill names the round-scope helper" "$(grep_ok "$TDD_MD" 'review-round-scope-v1.js')"
 check "I9 build skill names the aspect-activation helper" "$(grep_ok "$TDD_MD" 'aspect-activation-v1.js')"
-check "I10 build skill narrows only when the directive says the key is on" "$(grep_ok "$TDD_MD" 'when the post-review directive says `hooks.incrementalReviewRounds is on`')"
-check "I10a build skill keeps the whole diff when the directive says the key is off" "$(grep_ok "$TDD_MD" 'when it says `hooks.incrementalReviewRounds is off`, the packet keeps the WHOLE diff, and you never resolve the key yourself')"
+check "I10 build skill takes the narrowed list from --round-prepare and never resolves the key itself" "$(grep_ok "$TDD_MD" 'and never resolve `hooks.incrementalReviewRounds` yourself: when the `changed_files` line `--round-prepare` printed reads `changed_files (round-delta):`, name its paths on a `review_scope:` line')"
+check "I10a build skill keeps the whole diff when the key is off" "$(grep_ok "$TDD_MD" 'and with the key off, the packet keeps the WHOLE diff')"
 ACTIVATION_PROBE='ZENSU_ROOT="{plugin_root}" CLAUDE_PROJECT_DIR="{project_root}" bash -c '\''source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled aspectActivation && echo on || echo off'\'
 check "I11 build skill resolves hooks.aspectActivation through the anchored probe" "$(grep_ok "$TDD_MD" "$ACTIVATION_PROBE")"
 check "I11a build skill pipes an empty change set while activation is off" "$(grep_ok "$TDD_MD" 'on `off` pipe an empty change set')"
@@ -221,14 +221,14 @@ wait
 DEFAULTS="$(context_of defaults)" && check "I30 the default render is valid PostToolUse context" PASS \
   || check "I30 the default render is valid PostToolUse context" FAIL
 check "I30a the default fix round activates over this round's changed_files" "$(has "$DEFAULTS" "aspect-activation-v1.js --panel lean --round re answers spawn for this round's changed_files)")"
-check "I30b the default fix round names the round delta on a review_scope line" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: name THIS round's delta, resolved via hooks/lib/review-round-scope-v1.js, on a 'review_scope:' line after each aspect's block")"
+check "I30b the default fix round names the --round-prepare round delta on a review_scope line" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: name THIS round's delta, the --round-prepare changed_files line, scoped via hooks/lib/review-round-scope-v1.js, on a 'review_scope:' line after each aspect's block")"
 check "I30c the default fix round keeps the round delta on" "$(lacks "$DEFAULTS" 'hooks.incrementalReviewRounds is off')"
 check "I30d the default fix round keeps activation on" "$(lacks "$DEFAULTS" 'hooks.aspectActivation is off')"
 ACT_OFF="$(context_of activation-off)" && check "I31 the activation-off render is valid PostToolUse context" PASS \
   || check "I31 the activation-off render is valid PostToolUse context" FAIL
 check "I31a activation off re-reviews over an empty change set" "$(has "$ACT_OFF" 'aspect-activation-v1.js --panel lean --round re answers spawn for an empty change set, because hooks.aspectActivation is off)')"
 check "I31b activation off never activates over the round's changed_files" "$(lacks "$ACT_OFF" "answers spawn for this round's changed_files")"
-check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" 'hooks.incrementalReviewRounds is on: name THIS round')"
+check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" "hooks.incrementalReviewRounds is on: name THIS round's delta, the --round-prepare changed_files line")"
 for name in rounds-off-project rounds-off-important rounds-off-all; do
   case "$name" in
     (rounds-off-project) status_line="'Fixing critical findings in-thread, then re-reviewing (round 1/2)'" ;;

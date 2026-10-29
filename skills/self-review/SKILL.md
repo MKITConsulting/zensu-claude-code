@@ -185,8 +185,9 @@ reason. A `parked` or `routed-unfixed` candidate the region still supports is a 
 whatever the must-fix bar above says: fix it in the one fix round below, and keep it in
 `## Open` only for a named blocker — the one fix round already spent, or a fix that needs a
 product decision. Fix every other must-fix the same way, or keep it in `## Open` with the
-reason it stays open. After a fix lands, append the same `FINDING LEDGER` line, with its id
-exactly as listed and the state `fixed`, through
+reason it stays open. `--round-prepare` (below) writes the `fixed` line of a landed fix; for
+one it lists under `unresolved_claims`, re-read the fix, then append the same `FINDING LEDGER`
+line, with its id exactly as listed and the state `fixed`, through
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --log <run-log> --message-stdin`
 fed by a heredoc whose delimiter is quoted, never through `--message`, so no finding text is
 shell-expanded and the report no longer lists it as open. When the log's secret scan refuses
@@ -252,25 +253,19 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   metadata one and log `FULL SUITE COMMAND MISMATCH — metadata={a} log={b}` into
   `## Open`. When nothing yields a command, log `FULL SUITE UNRESOLVED — {reason}`,
   carry it into `## Open` and claim NO test verdict. The runner's own summary line
-  is this run's verdict. Then
-  invoke the `/zensu:build` Phase 6 step 5b **Edit Landing Audit** UNCHANGED —
-  when that procedure is not in your context, `Read` it from
-  `${CLAUDE_PLUGIN_ROOT}/skills/build/references/audit.md`, whose `{plugin_root}` is
-  `${CLAUDE_PLUGIN_ROOT}`; re-invoking the `/zensu:build` skill is forbidden below —
-  writing its mandatory start marker as `EDIT LANDING AUDIT STARTED — round
-  self-review` (a label disjoint from `phase6` and `fix-{N}`, so its
-  round-scoped window covers exactly this round's claims). Forced cold by the
-  Stop hook, omit `--baseline`, `--session-epoch` and `--dirty-before` when they
-  are not in your context: the receipt's persisted scope supplies them, so never
-  pass a value of your own making. A mechanical or bulk replacement that matched
-  nothing would otherwise leave the chain unnoticed, and the terminus checks this
-  receipt again, so run the audit after this round's LAST edit. There is no second
-  fix round: answer a `PENDING PREDICATE` with the proof of step 5b b), which
-  edits nothing; for an unlanded claim log `CLAIM WITHDRAWN — {step_id}: {file}`
-  and carry every `EDIT NOT LANDED` line into the CHAIN-END SUMMARY verbatim. A
-  withdrawal never clears the receipt, so the terminus keeps the chain open:
-  carry its refusal into your report, stop, and leave `ZENSU_EDIT_LANDING_GATE`
-  to the user. Then set the latch with
+  is this run's verdict. Label each fix `SR-<ledger id>` (`SR-R2-F1`) and, after this
+  round's LAST edit, run
+  `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --round-prepare --round self-review --log <run-log>`,
+  with `--baseline` and `--session-epoch` only from Phase 0 values you hold, else the
+  receipt's scope supplies them (re-invoking the `/zensu:build` skill is forbidden below).
+  It runs the `/zensu:build` Phase 6 step 5b Edit Landing Audit under the marker
+  `EDIT LANDING AUDIT STARTED — round self-review` and appends a `fixed` line for each
+  candidate whose claim landed, so a replacement that matched nothing cannot go unnoticed.
+  Exit 1 names a claim that did not land: answer a `PENDING PREDICATE` with the proof of
+  step 5b b); otherwise log `CLAIM WITHDRAWN — {step_id}[: {file}]`, carry every
+  `EDIT NOT LANDED` line into the CHAIN-END SUMMARY verbatim and stop: a withdrawal never
+  clears the receipt the terminus checks, and `ZENSU_EDIT_LANDING_GATE` stays with the
+  user. Then set the latch with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
   `/zensu:self-review` (pass 2 to confirm). The pass-2 invocation MUST carry the
   same captured `SELF-REVIEW-TICKET: <review-ticket>` line again and, for a

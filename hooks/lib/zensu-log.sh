@@ -643,6 +643,201 @@ case "${1:-}" in
     printf '%s\n' "$session_val"
     exit 0
     ;;
+  --round-prepare)
+    _rp_round=""
+    _rp_log=""
+    _rp_baseline=""
+    _rp_epoch=""
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --round|--log|--baseline|--session-epoch)
+          if [ $# -lt 2 ]; then
+            echo "zensu-log.sh --round-prepare: $1 requires a value" >&2
+            exit 2
+          fi
+          case "$1" in
+            --round) _rp_round="$2" ;;
+            --log) _rp_log="$2" ;;
+            --baseline) _rp_baseline="$2" ;;
+            --session-epoch) _rp_epoch="$2" ;;
+          esac
+          shift 2 ;;
+        *) echo "zensu-log.sh --round-prepare: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    case "$_rp_round" in
+      0|self-review) ;;
+      ''|0*|*[!0-9]*)
+        echo "zensu-log.sh --round-prepare: --round must be 0, a fix round number or self-review" >&2
+        exit 2 ;;
+    esac
+    if [ "${#_rp_round}" -gt 6 ] && [ "$_rp_round" != "self-review" ]; then
+      echo "zensu-log.sh --round-prepare: --round must be 0, a fix round number or self-review" >&2
+      exit 2
+    fi
+    case "$_rp_epoch" in
+      *[!0-9]*) echo "zensu-log.sh --round-prepare: --session-epoch must be a number of seconds" >&2; exit 2 ;;
+    esac
+    case "$_rp_baseline" in
+      *[!0-9a-f]*) echo "zensu-log.sh --round-prepare: --baseline must be a commit id" >&2; exit 2 ;;
+    esac
+    _rp_root="${CLAUDE_PROJECT_DIR:-}"
+    case "$_rp_log" in
+      "$_rp_root"/.zensu/logs/*.log) ;;
+      *) echo "zensu-log.sh --round-prepare: --log must name this session's run log inside $_rp_root/.zensu/logs" >&2; exit 2 ;;
+    esac
+    case "${_rp_log#"$_rp_root"/.zensu/logs/}" in
+      */*) echo "zensu-log.sh --round-prepare: --log must name a file directly inside $_rp_root/.zensu/logs" >&2; exit 2 ;;
+    esac
+    if [ -L "$_rp_root/.zensu" ] || [ -L "$_rp_root/.zensu/logs" ] || [ -L "$_rp_log" ] || [ ! -f "$_rp_log" ]; then
+      echo "zensu-log.sh --round-prepare: the run log is not a regular file inside $_rp_root/.zensu/logs" >&2
+      exit 2
+    fi
+    _rp_fallback() {
+      echo "ROUND PREPARE FALLBACK — the round's bookkeeping did not run: resolve the cause above and run the verb again; where it cannot run, outside git or without node, run the Phase 6 step 5b audit yourself, append each fixed ledger line by hand after re-reading its fix, and give the re-review the whole diff"
+    }
+    _rp_stop() {
+      echo "ROUND PREPARE STOPPED — $1"
+      _rp_fallback
+      exit 2
+    }
+    command -v node >/dev/null 2>&1 || _rp_stop "node: the verb needs node and found none"
+    _rp_top="$(_tc_git -C "$_rp_root" rev-parse --show-toplevel 2>/dev/null)"
+    if [ -z "$_rp_top" ] || [ ! -d "$_rp_top" ]; then
+      _rp_stop "work-tree: $_rp_root is not inside a git work tree"
+    fi
+    _rp_tmp="$(mktemp -d)" || _rp_stop "temp: no temporary directory"
+    trap 'rm -rf "$_rp_tmp"' EXIT
+    _rp_append() {
+      if [ -n "$_rp_epoch" ]; then
+        printf '%s' "$1" | bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --log "$_rp_log" --message-stdin --start "$_rp_epoch"
+      else
+        printf '%s' "$1" | bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --log "$_rp_log" --message-stdin
+      fi
+    }
+    if [ -n "$_rp_baseline" ]; then
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --change-set --project "$_rp_root" --baseline "$_rp_baseline" \
+        > "$_rp_tmp/changes" 2> "$_rp_tmp/changes.err"
+    else
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --change-set --project "$_rp_root" \
+        > "$_rp_tmp/changes" 2> "$_rp_tmp/changes.err"
+    fi
+    _rp_rc=$?
+    if [ "$_rp_rc" -ne 0 ]; then
+      _rp_stop "change-set: the change set could not be listed (exit $_rp_rc): $(head -n 1 "$_rp_tmp/changes.err")"
+    fi
+    _tc_git -C "$_rp_top" check-ignore --stdin < "$_rp_tmp/changes" > "$_rp_tmp/ignored" 2> "$_rp_tmp/ignored.err"
+    _rp_rc=$?
+    if [ "$_rp_rc" -gt 1 ]; then
+      _rp_stop "ignore-check: git check-ignore could not read the change set (exit $_rp_rc): $(head -n 1 "$_rp_tmp/ignored.err")"
+    fi
+    _rp_lib="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)" \
+      || _rp_stop "plugin-lib: the plugin library path could not be rendered"
+    _rp_top_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_top" 2>/dev/null)" \
+      || _rp_stop "work-tree: the work tree path could not be rendered"
+    _rp_state_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_root/.zensu/state" 2>/dev/null)" \
+      || _rp_stop "state: $_rp_root/.zensu/state is missing or unusable"
+    _rp_logs_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_root/.zensu/logs" 2>/dev/null)" \
+      || _rp_stop "log: the run log path could not be rendered"
+    _rp_tmp_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_tmp" 2>/dev/null)" \
+      || _rp_stop "temp: the temporary directory could not be rendered"
+    _rp_incremental=off
+    zensu_hook_enabled incrementalReviewRounds && _rp_incremental=on
+    _rp_activation=off
+    zensu_hook_enabled aspectActivation && _rp_activation=on
+    _rp_convergence=off
+    zensu_hook_enabled reviewConvergence && _rp_convergence=on
+    _rp_panel="$(zensu_review_panel)"
+    _rp_node() {
+      MSYS2_ENV_CONV_EXCL="$(zensu_msys_env_exclusions ZENSU_RP_LIB ZENSU_RP_TOP ZENSU_RP_LOG ZENSU_RP_SNAPSHOT ZENSU_RP_CHANGES ZENSU_RP_AUDIT ZENSU_RP_IGNORED 2>/dev/null || printf '%s' "${MSYS2_ENV_CONV_EXCL:-}")" \
+      ZENSU_RP_LIB="$_rp_lib/round-prepare-v1.js" \
+      ZENSU_RP_MODE="$2" \
+      ZENSU_RP_ROUND="$_rp_round" \
+      ZENSU_RP_TOP="$_rp_top_native" \
+      ZENSU_RP_LOG="$_rp_logs_native/$(basename -- "$_rp_log")" \
+      ZENSU_RP_SNAPSHOT="$_rp_state_native/round-snapshot-${ZENSU_SESSION_KEY:-unbound}.json" \
+      ZENSU_RP_CHANGES="$_rp_tmp_native/changes" \
+      ZENSU_RP_AUDIT="$1" \
+      ZENSU_RP_IGNORED="$_rp_tmp_native/ignored" \
+      ZENSU_RP_BASELINE="$_rp_baseline" \
+      ZENSU_RP_INCREMENTAL="$_rp_incremental" \
+      ZENSU_RP_ACTIVATION="$_rp_activation" \
+      ZENSU_RP_CONVERGENCE="$_rp_convergence" \
+      ZENSU_RP_PANEL="$_rp_panel" \
+        node -e 'let m; try { m = require(process.env.ZENSU_RP_LIB); } catch (e) { process.stderr.write("round-prepare: the module could not be loaded\n"); process.exit(2); } let r; try { r = m.cliMain([process.env.ZENSU_RP_MODE], process.env); } catch (e) { r = { code: 2, stdout: "", stderr: "round-prepare: internal error\n" }; } if (r.stdout) process.stdout.write(r.stdout); if (r.stderr) process.stderr.write(r.stderr); process.exitCode = r.code;'
+    }
+    _rp_audit_native=""
+    if [ "$_rp_round" != "0" ]; then
+      _rp_dirty=""
+      _rp_node "" start-paths > "$_rp_tmp/dirty" 2>/dev/null
+      _rp_rc=$?
+      case "$_rp_rc" in
+        0) _rp_dirty="$_rp_tmp/dirty" ;;
+        3) ;;
+        *) _rp_stop "snapshot: the round-start snapshot could not be read (exit $_rp_rc)" ;;
+      esac
+      _rp_label="fix-$_rp_round"
+      [ "$_rp_round" = "self-review" ] && _rp_label="self-review"
+      _rp_append "EDIT LANDING AUDIT STARTED — round $_rp_label" \
+        || _rp_stop "log: the audit start marker could not be appended"
+      set -- --log "$_rp_log" --project "$_rp_root" --session "${ZENSU_SESSION_KEY:-}"
+      [ -n "$_rp_baseline" ] && set -- "$@" --baseline "$_rp_baseline"
+      [ -n "$_rp_epoch" ] && set -- "$@" --session-epoch "$_rp_epoch"
+      [ -n "$_rp_dirty" ] && set -- "$@" --dirty-before "$_rp_dirty"
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" "$@" > "$_rp_tmp/audit" 2>&1
+      _rp_rc=$?
+      if [ "$_rp_rc" -ne 0 ] && [ "$_rp_rc" -ne 1 ]; then
+        while IFS= read -r _rp_line; do
+          [ -n "$_rp_line" ] && _rp_append "$_rp_line"
+        done < "$_rp_tmp/audit"
+        cat "$_rp_tmp/audit"
+        _rp_stop "edit-landing: the audit exited $_rp_rc, so it could not grade the claims or could not write its receipt; resolve the lines above, then run the verb again"
+      fi
+      _rp_audit_native="$_rp_tmp_native/audit"
+    fi
+    _rp_node "$_rp_audit_native" prepare > "$_rp_tmp/result" 2> "$_rp_tmp/result.err"
+    _rp_rc=$?
+    if [ "$_rp_rc" -ne 0 ] || ! grep -q '^status ' "$_rp_tmp/result"; then
+      _rp_stop "prepare: the round-prepare module failed (exit $_rp_rc): $(head -n 1 "$_rp_tmp/result.err")"
+    fi
+    _rp_status="$(sed -n 's/^status //p' "$_rp_tmp/result" | tail -n 1)"
+    : > "$_rp_tmp/diff-paths"
+    while IFS= read -r _rp_line; do
+      case "$_rp_line" in
+        "log "*)
+          _rp_append "${_rp_line#log }" \
+            || _rp_stop "log: a run-log line could not be appended: ${_rp_line#log }" ;;
+        "diff "*) printf '%s\n' "${_rp_line#diff }" >> "$_rp_tmp/diff-paths" ;;
+      esac
+    done < "$_rp_tmp/result"
+    sed -n 's/^out //p' "$_rp_tmp/result"
+    if [ "$_rp_status" = "ok" ] && [ -s "$_rp_tmp/diff-paths" ]; then
+      _rp_diff="$_rp_root/.zensu/state/round-diff-${ZENSU_SESSION_KEY:-unbound}.patch"
+      _rp_base="HEAD"
+      [ -n "$_rp_baseline" ] && _rp_base="$_rp_baseline"
+      if [ -L "$_rp_diff" ]; then
+        echo "round_diff: not written — $_rp_diff is a symbolic link"
+      elif _tc_git -C "$_rp_top" rev-parse --verify --quiet "$_rp_base^{commit}" >/dev/null 2>&1; then
+        : > "$_rp_diff"
+        while IFS= read -r _rp_path; do
+          if _tc_git -C "$_rp_top" ls-files --error-unmatch -- "$_rp_path" >/dev/null 2>&1; then
+            _tc_git -C "$_rp_top" -c core.quotePath=false --literal-pathspecs diff "$_rp_base" -- "$_rp_path" >> "$_rp_diff" 2>/dev/null
+          elif [ -f "$_rp_top/$_rp_path" ] && [ ! -L "$_rp_top/$_rp_path" ]; then
+            (cd "$_rp_top" && _tc_git -c core.quotePath=false diff --no-index -- /dev/null "$_rp_path") >> "$_rp_diff" 2>/dev/null
+          fi
+        done < "$_rp_tmp/diff-paths"
+        echo "round_diff: $_rp_diff ($(wc -c < "$_rp_diff" | tr -d ' ') bytes, against $_rp_base)"
+      else
+        echo "round_diff: not written — $_rp_base names no commit"
+      fi
+    fi
+    case "$_rp_status" in
+      ok) echo "ROUND PREPARE — round $_rp_round prepared"; exit 0 ;;
+      stopped) exit 1 ;;
+      *) _rp_fallback; exit 2 ;;
+    esac
+    ;;
   --project-root)
     if [ "$#" -ne 1 ]; then
       echo "zensu-log.sh --project-root: takes no arguments" >&2

@@ -77,6 +77,8 @@ SCOPE_DIR=""
 CLAIM_INDEX=0
 BARE_WIRED=0
 INVENTORY=0
+CHANGE_SET=0
+LOG_SEEN=0
 INV_ROOTS=""
 # Per-run cap on the claims `--inventory` will classify. Each one costs an
 # ancestor walk of up to CLAIM_ANCESTOR_BUDGET filesystem probes, and the bound
@@ -97,7 +99,7 @@ die() { echo "zensu-edit-landing.sh: $1" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --log)           [ $# -ge 2 ] || die "--log requires a value"; LOG_FILE="$2"; shift 2 ;;
+    --log)           [ $# -ge 2 ] || die "--log requires a value"; LOG_FILE="$2"; LOG_SEEN=1; shift 2 ;;
     --project)       [ $# -ge 2 ] || die "--project requires a value"; PROJECT_DIR="$2"; shift 2 ;;
     --baseline)      [ $# -ge 2 ] || die "--baseline requires a value"; BASELINE_SHA="$2"; BASELINE_SEEN=1; shift 2 ;;
     --session-epoch) [ $# -ge 2 ] || die "--session-epoch requires a value"; SESSION_EPOCH="$2"; EPOCH_SEEN=1; shift 2 ;;
@@ -108,12 +110,14 @@ while [ $# -gt 0 ]; do
     --inventory)     INVENTORY=1; shift ;;
     --check-receipt) CHECK_RECEIPT=1; shift ;;
     --allow-unclean) ALLOW_UNCLEAN=1; shift ;;
+    --change-set)    CHANGE_SET=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
 
 if [ "$CHECK_RECEIPT" -eq 1 ]; then
   [ "$INVENTORY" -eq 0 ] || die "--check-receipt and --inventory are separate modes"
+  [ "$CHANGE_SET" -eq 0 ] || die "--check-receipt and --change-set are separate modes"
   [ -z "$LOG_FILE" ] || die "--check-receipt reads the run log its receipt names and does not accept --log"
   [ "$SESSION_SEEN" -eq 1 ] && [ -n "$SESSION_ID" ] || die "--check-receipt requires a non-empty --session"
   [ "$RECEIPT_EXPLICIT" -eq 0 ] || die "--check-receipt reads the session receipt and does not accept --receipt"
@@ -121,6 +125,15 @@ if [ "$CHECK_RECEIPT" -eq 1 ]; then
   [ "$EPOCH_SEEN" -eq 0 ] || die "--check-receipt grades nothing and does not accept --session-epoch"
   [ "$DIRTY_SEEN" -eq 0 ] || die "--check-receipt grades nothing and does not accept --dirty-before"
   [ "$PREDICATES_SEEN" -eq 0 ] || die "--check-receipt grades nothing and does not accept --predicates"
+elif [ "$CHANGE_SET" -eq 1 ]; then
+  [ "$INVENTORY" -eq 0 ] || die "--change-set and --inventory are separate modes"
+  [ "$LOG_SEEN" -eq 0 ] || die "--change-set reads no run log and does not accept --log"
+  [ "$RECEIPT_EXPLICIT" -eq 0 ] || die "--change-set is read-only and does not accept --receipt"
+  [ "$SESSION_SEEN" -eq 0 ] || die "--change-set is read-only and does not accept --session"
+  [ "$EPOCH_SEEN" -eq 0 ] || die "--change-set grades nothing and does not accept --session-epoch"
+  [ "$DIRTY_SEEN" -eq 0 ] || die "--change-set grades nothing and does not accept --dirty-before"
+  [ "$PREDICATES_SEEN" -eq 0 ] || die "--change-set grades nothing and does not accept --predicates"
+  [ "$ALLOW_UNCLEAN" -eq 0 ] || die "--allow-unclean applies only to --check-receipt"
 else
   [ -n "$LOG_FILE" ] || die "--log is required"
   [ "$ALLOW_UNCLEAN" -eq 0 ] || die "--allow-unclean applies only to --check-receipt"
@@ -147,7 +160,7 @@ fi
 # would exit 0 having written nothing, and `--tdd-complete` would then blame a
 # missing receipt. Refuse the operand instead, the way --log is refused.
 [ "$SESSION_SEEN" -eq 0 ] || [ -n "$SESSION_ID" ] || die "--session must not be empty"
-[ "$CHECK_RECEIPT" -eq 1 ] || [ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
+[ "$CHECK_RECEIPT" -eq 1 ] || [ "$CHANGE_SET" -eq 1 ] || [ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
 [ -d "$PROJECT_DIR" ] || die "project dir not found: $PROJECT_DIR"
 
 # Resolve the project root before anything else. An unresolvable root must not
@@ -236,7 +249,7 @@ if [ "$CHECK_RECEIPT" -eq 1 ]; then
   fi
 fi
 
-if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && [ "$SESSION_SEEN" -eq 0 ]; then
+if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && [ "$CHANGE_SET" -eq 0 ] && [ "$SESSION_SEEN" -eq 0 ]; then
   if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && command -v node >/dev/null 2>&1 && el_receipt_lib_present; then
     GATE_ROOT="$PROJECT_ABS"
     GATE_SESSION="$CLAUDE_CODE_SESSION_ID"
@@ -382,7 +395,7 @@ trap 'cleanup; exit 143' TERM
 
 receipt_note() { RECEIPT_NOTES="${RECEIPT_NOTES}$1"$'\n'; }
 
-if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && { [ "$RECEIPT_EXPLICIT" -eq 0 ] || [ "$RECEIPT_PATH" != "-" ]; }; then
+if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && [ "$CHANGE_SET" -eq 0 ] && { [ "$RECEIPT_EXPLICIT" -eq 0 ] || [ "$RECEIPT_PATH" != "-" ]; }; then
   if [ -z "$RECEIPT_PATH" ] && [ -n "$SESSION_ID" ]; then
     RECEIPT_PATH="$(el_receipt_path "$RECEIPT_KEY")"
   fi
@@ -443,7 +456,7 @@ if [ "$BASELINE_SEEN" -eq 1 ] && [ -n "$BASELINE_SHA" ] && [ -z "$GIT_FAULT" ]; 
   fi
 fi
 
-if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ]; then
+if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && [ "$CHANGE_SET" -eq 0 ]; then
   if ! command -v node >/dev/null 2>&1; then
     [ "$PREDICATES_SEEN" -eq 0 ] || die "--predicates needs node to verify its proofs"
   elif ! el_receipt_lib_present; then
@@ -543,6 +556,19 @@ trim_claim() {
   p="${p%"${p##*[![:space:]]}"}"
   printf '%s' "$p"
 }
+
+if [ "$CHANGE_SET" -eq 1 ]; then
+  if [ -n "$GIT_FAULT" ]; then
+    echo "zensu-edit-landing.sh: $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT")" >&2
+    exit 2
+  fi
+  if [ "$IN_GIT" -ne 1 ]; then
+    echo "zensu-edit-landing.sh: --change-set needs a git work tree, and $(render_claim_value "$PROJECT_ABS") is not inside one" >&2
+    exit 3
+  fi
+  cat "$UNION_FILE" || die "the change union could not be read"
+  exit 0
+fi
 
 canon_claim() {
   local p="$1" d rest c
