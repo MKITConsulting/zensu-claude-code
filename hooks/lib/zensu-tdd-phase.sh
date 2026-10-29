@@ -164,6 +164,73 @@ tdd_edit_landing_receipt() {
   printf '%s\n' "$(dirname "$state_file")/edit-landing-${key}.json"
 }
 
+_tdd_retire_receipt_critical() {
+  local receipt="$1" dest
+  # THREE states, not two. Absent is success — there is nothing to
+  # retire. Present and a plain file is the work. Present and NOT a
+  # plain file (a symlink, which is exactly what the terminus refuses
+  # to read, or a directory) is a FAILURE: an earlier spelling folded
+  # it into the absent case and returned 0, so the disclosure below
+  # never fired and the object survived into the next generation while
+  # this verb reported it retired. That the terminus happens to refuse
+  # a symlinked receipt anyway is a downstream guard this function does
+  # not know about, so it cannot be this function's contract.
+  if [ ! -e "$receipt" ] && [ ! -L "$receipt" ]; then
+    return 0
+  fi
+  if [ ! -f "$receipt" ] || [ -L "$receipt" ]; then
+    return 1
+  fi
+  # No fixed-name fallback. The retired spelling was
+  # `|| dest="${receipt}.superseded"`, which reinstated a PREDICTABLE
+  # name: the `mv -f` could then overwrite an earlier generation's
+  # record, and the cleanup `rm -f "$dest"` below could UNLINK one this
+  # call never created — both against the "renamed, never unlinked"
+  # invariant this verb states. It bought nothing either: a directory
+  # where `mktemp` cannot create a sibling is one where the `mv` would
+  # fail anyway. ACCEPTED CHANGE OF FAILURE MODE, recorded rather than
+  # discovered later: on a host with no `mktemp` at all every
+  # `--tdd-begin` now emits the disclosure below instead of silently
+  # using the fixed name. That is the fail-loud direction and the tree
+  # already hard-depends on `mktemp` elsewhere.
+  dest="$(mktemp "${receipt}.superseded-XXXXXX" 2>/dev/null)" || return 1
+  mv -f "$receipt" "$dest" 2>/dev/null && return 0
+  # Only ever the empty temp THIS call created.
+  rm -f "$dest" 2>/dev/null
+  return 1
+}
+
+tdd_retire_edit_landing_receipt() {
+  local session_id="${1:-}" receipt state_file
+  receipt="$(tdd_edit_landing_receipt "$session_id")" || return 0
+  # `-e || -L` and NOT `-f && ! -L`: the narrower guard skipped the call
+  # entirely for a symlinked receipt, so the function's own three-state
+  # verdict was unreachable and the disclosure could never fire for the
+  # one shape the terminus refuses to read. Presence is the question
+  # here; WHAT is present is the function's to judge.
+  [ -e "$receipt" ] || [ -L "$receipt" ] || return 0
+  state_file="$(tdd_state_file "$session_id")" || state_file=""
+  # The lease is an IMPROVEMENT, never a precondition: the audit
+  # publishes with `mktemp` + `mv -f` and this renames, so a concurrent
+  # publish could otherwise be lost — but a mutex that cannot be taken
+  # must not stop a chain arming. A non-zero result here is a lease
+  # fault OR a real failure, and the unlocked retry is what tells them
+  # apart: the callback returns 0 immediately when the file is already
+  # gone.
+  if [ -n "$state_file" ] && _tdd_locked_run "$state_file" _tdd_retire_receipt_critical "$receipt"; then
+    return 0
+  fi
+  _tdd_retire_receipt_critical "$receipt"
+}
+
+tdd_review_gate_reset() {
+  local session_id="${1:-}" root="${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" lib
+  [ -n "$root" ] && command -v node >/dev/null 2>&1 || return 1
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js"
+  lib="$(_tdd_native_path "$lib" 2>/dev/null || printf '%s' "$lib")"
+  node "$lib" reset --root "$root" --session "$session_id" >/dev/null 2>&1
+}
+
 _tdd_bound_project_root() {
   local state_file="${1:-}" session_id="${2:-}" expected project_root native_project_root
   [ -n "$state_file" ] && [ -n "$session_id" ] || return 1
@@ -2640,6 +2707,7 @@ _tdd_read_validated_state() {
 
       if (mode === "status") emit("valid");
       else if (mode === "flag") emit("valid", state[arg] === true ? "true" : "false");
+      else if (mode === "deferred") emit("valid", typeof state.deferredReviewClaim === "string" && state.deferredReviewClaim !== "" ? "true" : "false");
       else if (mode === "phase") emit("valid", state.phase === undefined ? "UNINITIALIZED" : state.phase);
       else if (mode === "step") emit("valid", state.step_id === undefined ? "" : state.step_id);
       else if (mode === "counter") {
@@ -2707,6 +2775,19 @@ tdd_chain_done()        { tdd_get_flag "${1:-}" chainDone; }
 tdd_code_review_done()  { tdd_get_flag "${1:-}" codeReviewDone; }
 tdd_self_review_fixed() { tdd_get_flag "${1:-}" selfReviewFixed; }
 zensu_workflow_active()  { tdd_get_flag "${1:-}" workflowActive; }
+
+tdd_deferred_review_generation() {
+  local result status value
+  result="$(_tdd_read_validated_state "${1:-}" deferred)"
+  status="${result%%$'\n'*}"
+  case "$status" in
+    missing) echo "false"; return 0 ;;
+    valid) ;;
+    *) echo "invalid"; return 0 ;;
+  esac
+  value="${result#*$'\n'}"
+  case "$value" in true|false) echo "$value" ;; *) echo "invalid" ;; esac
+}
 
 tdd_get_counter() {
   local state_file="${1:-}" key="${2:-}" result status value
@@ -3871,7 +3952,14 @@ tdd_seed_deferred_review() {
   # A deferred review is a fresh, already-implemented chain generation. Reuse
   # the atomic begin transaction so ticket/flags, round counter, and Stop budget
   # are reset together even when the previous generation already terminated.
-  tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim"
+  tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim" || return $?
+  if ! tdd_retire_edit_landing_receipt "$session_id"; then
+    echo "[zensu-tdd-phase] deferred-review seed: RECEIPT RETIREMENT UNRESOLVED — the previous generation's edit-landing receipt could not be retired ($(tdd_edit_landing_receipt "$session_id" 2>/dev/null)). It records a verdict about ANOTHER generation's run log, and this deferred review's --chain-done may accept it as its own. Move or delete that file before closing the chain." >&2
+  fi
+  if ! tdd_review_gate_reset "$session_id"; then
+    echo "[zensu-tdd-phase] deferred-review seed: REVIEW GATE RESET UNAVAILABLE — the previous generation's review packets and reviewer records could not be removed; this deferred review's rounds still compare against packets created after this point." >&2
+  fi
+  return 0
 }
 
 # Git Bash serializes exported functions into the Windows process environment.
@@ -3885,7 +3973,7 @@ case "${OSTYPE:-}" in
     # must never fall back to an inherited ZENSU_* module path.
     export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY _ZENSU_TDD_PATH_SAFETY _ZENSU_TDD_TICKET_STATE
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_leaf_safe _tdd_paths_safe_argv _tdd_paths_safe_check _tdd_paths_safe _tdd_path_safe _tdd_state_storage_argv _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_zero_change_ticket _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows zensu_workflow_tools tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file tdd_edit_landing_receipt _tdd_retire_receipt_critical tdd_retire_edit_landing_receipt tdd_review_gate_reset _tdd_bound_project_root _tdd_native_project_path _tdd_paths_leaf_safe _tdd_paths_safe_argv _tdd_paths_safe_check _tdd_paths_safe _tdd_path_safe _tdd_state_storage_argv _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_zero_change_ticket _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active tdd_deferred_review_generation zensu_workflow_allows zensu_workflow_tools tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

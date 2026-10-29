@@ -177,7 +177,7 @@ fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export ZENSU_CONFIG="$WORK/config.json"
-printf '%s\n' '{"hooks":{"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
+printf '%s\n' '{"hooks":{"autoFixMaxRounds":5,"reviewPacketGate":false}}' > "$ZENSU_CONFIG"
 unset CLAUDE_PLUGIN_DATA ZENSU_PROJECT_ROOT ZENSU_SESSION_CONTEXT ZENSU_SESSION_KEY \
   CLAUDE_AGENT_TYPE ZENSU_CHAIN 2>/dev/null || true
 export ZENSU_TEST_PLUGIN_DATA="$WORK/plugin-data"
@@ -1065,12 +1065,12 @@ M_ARRIVAL_OUT="$(counted_prompt "$M_RAW" "$(handback_text "$M_ASPECT")" "$WORK/f
 M_NOTE_OUT="$(counted_prompt "$M_RAW" "$(notification_text "$M_JUDGE" completed)" "$WORK/fanout-notification.calls")"
 M_AFTER_OUT="$(stop_payload "$M_RAW" | bash "$STOP" 2>"$WORK/fanout-after.err")"
 if [ -z "$M_ARRIVAL_OUT" ] && [ -z "$M_NOTE_OUT" ] && [ ! -e "$(fanout_file "$M" "$M_ASPECT")" ] && [ ! -e "$(fanout_file "$M" "$M_JUDGE")" ] \
-  && [ "$(node_calls "$WORK/fanout-handback.calls")" = 1 ] && [ "$(node_calls "$WORK/fanout-notification.calls")" = 1 ] \
+  && [ "$(node_calls "$WORK/fanout-handback.calls")" -gt 1 ] && [ "$(node_calls "$WORK/fanout-notification.calls")" = 1 ] \
   && [ "$(printf '%s' "$M_AFTER_OUT" | decision)" = block ] && ! grep -qF 'still running' "$WORK/fanout-after.err" \
   && [ "$(stop_count "$M")" = "$((M_COUNT + 1))" ]; then
-  check "BR12c each fan-out agent's hand-back or notification retires its entry through the arrive child alone, without output or delegate, and the next Stop blocks as before" PASS
+  check "BR12c a fan-out agent's hand-back retires its entry and starts the delegate for the review packet gate, its notification retires the entry through the arrive child alone, neither prints anything, and the next Stop blocks as before" PASS
 else
-  check "BR12c fan-out arrival (handback=$M_ARRIVAL_OUT notification=$M_NOTE_OUT stop=$(printf '%s' "$M_AFTER_OUT" | head -c 300) count=$(stop_count "$M"))" FAIL
+  check "BR12c fan-out arrival (handback=$M_ARRIVAL_OUT notification=$M_NOTE_OUT node=$(node_calls "$WORK/fanout-handback.calls")/$(node_calls "$WORK/fanout-notification.calls") stop=$(printf '%s' "$M_AFTER_OUT" | head -c 300) count=$(stop_count "$M"))" FAIL
 fi
 
 PROBE_DATA="$WORK/probe-data"

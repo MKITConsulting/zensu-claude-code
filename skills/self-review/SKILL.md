@@ -40,18 +40,13 @@ survived; step 1 below adds what the worktree shows.
 
 ## What This Skill Does
 
-1. Lists the files you changed this session (conversation context + the
-   `/zensu:build` Phase 6 step 5b b) enumeration run UNCHANGED — a bare
-   `git diff` omits new untracked files, which would leave them unreviewed
-   here too).
+1. Lists this session's changed files from context and the canonical change set.
 2. Re-reviews each change across seven dimensions against the project conventions.
-3. Emits a Positive / Improvements / Risks reflection.
-3b. Re-verifies every active acceptance criterion on the tree that ships through
-   `/zensu:verify-feature --chain` when review rounds made its records stale.
-4. Takes at most ONE fix round under the still-active TDD phase-gate if a must-fix
-   risk surfaces — without re-running the code-reviewer.
-5. Owns the chain terminus: runs the standalone or exact Autopilot-bound
-   `--chain-done` form for the current generation and renders the final report.
+3. Emits a Positive / Improvements / Risks reflection and re-verifies acceptance
+   criteria whose records the review rounds made stale.
+4. Takes at most ONE fix round, never re-running the code-reviewer.
+5. Closes the current generation through its `--chain-done` form and renders the
+   final report.
 
 ## Generation guard
 
@@ -61,6 +56,11 @@ anything else. It is the generation token for every state mutation in this
 skill. If the line is missing, malformed, or ambiguous, do not run
 `--self-review-fixed` or `--chain-done`; report that the self-review handoff is
 unbound and let the Stop hook reconstruct the current handoff.
+
+**A closed generation is report-only.** Before reading project files, run
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-status`.
+On `"shape":"chain-closed"`, render the final report from this conversation,
+mark each verdict it no longer holds as unverified, and run nothing else.
 
 An Autopilot-bound handoff MUST additionally include exactly one complete
 official three-line envelope, with each line occurring exactly once:
@@ -103,27 +103,24 @@ finalizing the current chain.
 ## Phase 1: List Changed Files
 
 List every file you changed or created in this session. You know these from
-context — no parsing needed. Cross-check by running the `/zensu:build`
-Phase 6 step 5b b) enumeration UNCHANGED — resolve the bound project root with
+context — no parsing needed. Cross-check with the canonical change set —
+resolve the bound project root with
 `PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)"`
 and `TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"` HERE, never from
 the working directory, which after `/zensu:adopt-session --reanchor` is no longer
 the bound root, and require `[ -n "$PROJECT_ROOT" ] && [ -n "$TOP" ] && [ -d "$TOP" ]`
 before ANY `git -C "$TOP"` (an empty value makes `git -C ""` enumerate whatever
-repo the cwd happens to be; an unresolvable root takes 5b's no-work-tree branch,
-never an unanchored run) —
-then use `git -C "$TOP" -c core.quotePath=false diff --name-only HEAD` plus
-`git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard`
-(without `core.quotePath=false` git C-quotes non-ASCII paths and no fixed-string
-comparison can match them), with 5b's unborn-HEAD
-form where HEAD does not exist yet AND its `[ -n "$BASELINE_SHA" ]`-guarded
-`git -C "$TOP" diff --name-only "$BASELINE_SHA"..HEAD` extension when this
-session committed mid-run — without that branch a mid-run commit empties both
-commands and this stage would skip itself as "no changes". If the union comes
-back empty while your own context names files you changed (the cold-start +
-mid-run-commit case, where no `BASELINE_SHA` survives), do NOT take the
-no-changes branch: review the files from context and say so in the summary.
-This catches files you created but never staged.
+repo the cwd happens to be) — then run
+`node "$ROOT/hooks/lib/review-packet-v1.js" changes --root "$PROJECT_ROOT" --baseline "${BASELINE_SHA:-}"`
+and take its `changed_files`: tracked changes against HEAD, the commits since the
+baseline, untracked non-ignored files and, on an unborn HEAD, every cached file
+(`kind: explicit-no-git` means the root is outside git). Never re-spell a subset
+of it with ad-hoc `git` listings, which a mid-run commit empties, so this stage
+would skip itself as "no changes". If the list comes back empty while your own
+context names files you changed (the cold-start + mid-run-commit case, where no
+`BASELINE_SHA` survives), do NOT take the no-changes branch: review the files
+from context and say so in the summary. This catches files you created but never
+staged.
 
 If there are NO changes this session, close only the verified generation. For a
 standalone handoff run
@@ -256,18 +253,19 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   metadata one and log `FULL SUITE COMMAND MISMATCH — metadata={a} log={b}` into
   `## Open`. When nothing yields a command, log `FULL SUITE UNRESOLVED — {reason}`,
   carry it into `## Open` and claim NO test verdict. The runner's own summary line
-  is this run's verdict. Label each fix `SR-<ledger id>` (`SR-R2-F1`), then run
+  is this run's verdict. Label each fix `SR-<ledger id>` (`SR-R2-F1`) and, after this
+  round's LAST edit, run
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --round-prepare --round self-review --log <run-log>`,
-  adding `--baseline` and `--session-epoch` with the Phase 0 values when you hold them
-  (re-invoking the `/zensu:build` skill is forbidden below). It runs the `/zensu:build`
-  Phase 6 step 5b Edit Landing Audit under the marker `EDIT LANDING AUDIT STARTED — round
-  self-review`, judges each claim against the snapshot of the round's start and appends a
-  `fixed` line for each candidate whose claim landed. A mechanical or bulk replacement
-  that matched nothing would otherwise go unnoticed. Exit 1 names a claim that
-  did not land; this stage gets no second fix round, so the only terminus remedy is
-  `CLAIM WITHDRAWN — {step_id}[: {file}]` plus carrying every
-  `EDIT NOT LANDED` line into the CHAIN-END SUMMARY verbatim; never close the
-  chain as if the claim had landed. Then set the latch with
+  with `--baseline` and `--session-epoch` only from Phase 0 values you hold, else the
+  receipt's scope supplies them (re-invoking the `/zensu:build` skill is forbidden below).
+  It runs the `/zensu:build` Phase 6 step 5b Edit Landing Audit under the marker
+  `EDIT LANDING AUDIT STARTED — round self-review` and appends a `fixed` line for each
+  candidate whose claim landed, so a replacement that matched nothing cannot go unnoticed.
+  Exit 1 names a claim that did not land: answer a `PENDING PREDICATE` with the proof of
+  step 5b b); otherwise log `CLAIM WITHDRAWN — {step_id}[: {file}]`, carry every
+  `EDIT NOT LANDED` line into the CHAIN-END SUMMARY verbatim and stop: a withdrawal never
+  clears the receipt the terminus checks, and `ZENSU_EDIT_LANDING_GATE` stays with the
+  user. Then set the latch with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
   `/zensu:self-review` (pass 2 to confirm). The pass-2 invocation MUST carry the
   same captured `SELF-REVIEW-TICKET: <review-ticket>` line again and, for a
@@ -280,7 +278,7 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   - re-invoke the whole `/zensu:build` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record — in CI mode on a missing, red, running, interrupted or stale local test run, and it passes as `deferred-ci` with a second `FULL SUITE — CI contract` line. On such a refusal the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. It applies the acceptance gate as well: it prints `ACCEPTANCE — <state> | …` lines and refuses while any active criterion lacks a `pass` on the current tree; on that refusal follow the remedy the line names: a `run:` segment means run `/zensu:verify-feature --chain` with the log it names, then this step again; a `fix:` segment means a criterion fails on this tree and needs the one fix round; an `add:` or `restore:` segment, or a refusal with no remedy, goes into your report and to the user. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave `ZENSU_FULL_SUITE_GATE` to the user. The same holds for a criterion that is still `fail` or `partial` after the spent round: carry the `ACCEPTANCE — …` refusal into your report, stop, and leave `ZENSU_ACCEPTANCE_GATE` to the user. Any other failure is stale: stop and do not render a successful final report.
+  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record — in CI mode on a missing, red, running, interrupted or stale local test run, and it passes as `deferred-ci` with a second `FULL SUITE — CI contract` line. On such a refusal the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. An `EDIT LANDING RECEIPT STALE — …` line means the receipt no longer describes this chain: run the audit its `Run:` line names, with a proof for every pending claim, then this step again. It applies the acceptance gate as well: it prints `ACCEPTANCE — <state> | …` lines and refuses while any active criterion lacks a `pass` on the current tree; on that refusal follow the remedy the line names: a `run:` segment means run `/zensu:verify-feature --chain` with the log it names, then this step again; a `fix:` segment means a criterion fails on this tree and needs the one fix round; an `add:` or `restore:` segment, or a refusal with no remedy, goes into your report and to the user. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave `ZENSU_FULL_SUITE_GATE` to the user. The same holds for a criterion that is still `fail` or `partial` after the spent round: carry the `ACCEPTANCE — …` refusal into your report, stop, and leave `ZENSU_ACCEPTANCE_GATE` to the user. Any other failure is stale: stop and do not render a successful final report.
   2. **Carry the full-suite verdict.** Copy every `FULL SUITE — …` line the terminus
      printed — the verdict, plus the `flaky` line and the gate-mode disclosure when
      present — into the `Full suite` verdict cell verbatim. Copy every `ACCEPTANCE — …`

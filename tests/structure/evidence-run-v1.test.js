@@ -288,6 +288,28 @@ test('the untracked bound disables fingerprinting with a reason', () => {
   const result = evr.computeTree(root, tempDir('scratch'), { ...evr.LIMITS, untrackedMaxFiles: 1 });
   assert.equal(result.tree, null);
   assert.match(result.reason, /more than 1 untracked files/);
+  assert.equal(result.limited, true);
+});
+
+test('the untracked byte bound disables fingerprinting as a size limit, not as a git failure', () => {
+  const root = gitRepo();
+  fs.writeFileSync(path.join(root, 'big.txt'), 'x'.repeat(4096));
+  const limited = evr.computeTree(root, tempDir('scratch'), { ...evr.LIMITS, untrackedMaxBytes: 1024 });
+  assert.equal(limited.tree, null);
+  assert.match(limited.reason, /^untracked files exceed /);
+  assert.equal(limited.limited, true);
+  const control = evr.computeTree(root, tempDir('scratch'));
+  assert.match(String(control.tree), /^[0-9a-f]{40,64}$/);
+  assert.notEqual(control.limited, true);
+});
+
+test('computeTree applies the git timeout its limits carry', () => {
+  const root = gitRepo();
+  const control = evr.computeTree(root, tempDir('scratch'));
+  assert.match(String(control.tree), /^[0-9a-f]{40,64}$/);
+  const bounded = evr.computeTree(root, tempDir('scratch'), { ...evr.LIMITS, gitTimeoutMs: 1 });
+  assert.equal(bounded.tree, null);
+  assert.notEqual(bounded.limited, true);
 });
 
 test('changed paths between two trees are listed', () => {

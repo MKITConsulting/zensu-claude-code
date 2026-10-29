@@ -68,10 +68,18 @@ claim to verify. When a channel exists but does not resolve, the verb DISCLOSES
 
 **The claim grammar has ONE owner.** `zensu-edit-landing.sh` already extracted
 `IMPL completed — files:` / `WIRED — files:` claims for grading; `--inventory` reports
-the same extraction read-only — `claimed-files=<n>` plus one `foreign-root<TAB><root>` line per
-distinct non-anchor root — without a change set, a verdict or a receipt. Its two
-consumers are the terminus (for `_tc_armed`) and the doctor row. **The wire format is a
-parsed contract:** the terminus reads `claimed-files=` with `sed -n 's/^claimed-files=//p'` and the
+the same extraction read-only — `claimed-files=<n>`, `bare-wired=<n>` and one
+`foreign-root<TAB><root>` line per distinct non-anchor root — without a change set, a verdict or a
+receipt. Its three
+consumers are `--tdd-complete` (for `_tc_armed`), the terminal edit-landing gate at `--chain-done`
+(`_zensu_receipt_claims_nothing`, which exempts a zero-change chain whose receipt records
+`claims: 0` only on a completed inventory reporting `claimed-files=0` and `bare-wired=0`, so it
+arms where `--tdd-complete` arms and also on a bare `WIRED` entry logged after the audit, which
+the receipt never graded; an inventory that did not complete arms it when its partial count is
+positive and otherwise refuses with its own cause, which is stricter than `--tdd-complete`, where
+an inventory that answered nothing leaves the requirement on the change set alone, because the
+terminus is the last point at which a claim logged after the audit can be caught) and the doctor row. **The wire format is a
+parsed contract:** both `zensu-log.sh` readers read `claimed-files=` with `sed -n 's/^claimed-files=//p'` and the
 doctor splits on the first TAB and matches the literal `foreign-root`.
 **The key is `claimed-files=` and NOT `claims`, because the receipt carries a field of
 that name holding a DIFFERENT quantity** — this one counts named FILES, the receipt's own
@@ -111,9 +119,13 @@ backtick-quoted marker. `review-round-scope-v1.js` anchors its `CLAIM` regex at 
 position; `X29`–`X33` in `tests/structure/test-edit-landing-audit.sh` pin the grammar.
 **`claimed-files=` deliberately counts LESS than the audit's own `CLAIM_COUNT`:** a bare
 `<step> WIRED` entry with no `files:` list is a claim to the GRADER (reported
-`UNVERIFIED`) and is NOT one here: it names no file, and arming the terminus on it would
-wedge a zero-change chain whose audit can then only ever report it again. An empty file
-list and a `WIRED (verified, no change)` line count as claims in neither.
+`UNVERIFIED`) and is NOT one here: it names no file, and arming `--tdd-complete` on it would
+wedge a zero-change chain whose audit can then only ever report it again. The terminal gate
+reads the separate `bare-wired=` count instead, because its exemption trusts a `claims: 0`
+receipt: a bare entry logged after that audit would otherwise close a chain the receipt never
+graded, while one logged before it already refuses there as an unverified claim (`E11b2`,
+`E11c` in `tests/structure/test-terminal-edit-landing-gate.sh`). An empty file list and a
+`WIRED (verified, no change)` line count as claims in neither.
 
 **An absolute claim is judged by where it RESOLVES.** `absolute_claim_verdict`
 canonicalizes the claim's nearest existing ancestor before comparing it with the audited
@@ -263,17 +275,17 @@ reads. Comparison uses the raw values; rendering uses a copy with no control byt
 backtick and a bounded length — the same treatment the doctor's topology row gives a
 claim root.
 
-**TWO standing fixes are named here, and the first is HALF taken.** The receipt FILENAME has
-one accessor, `tdd_edit_landing_receipt` beside `tdd_state_file` in `zensu-tdd-phase.sh`, and
-`--tdd-begin`, `--tdd-complete` and the acceptance transport (`_zensu_avr_prepare`) call it.
-Three sites still hand-derive the name, with no pin: the writer in `zensu-edit-landing.sh`, and
-TWO in the doctor renderer (`claimTopologyRow`'s join and `someClaimReceiptPresent`'s
-`/^edit-landing-.+\.json$/`). The failure is silent in the dangerous direction: a rename that
-updates the accessor and the writer leaves the regex matching nothing, and the no-key topology
-row then goes quiet and reads as a clean topology, while `SCH1` pins only the SCHEMA spellings.
-The writer can call the accessor; the doctor renderer is JavaScript and needs a pin instead. Take
-either at the next change that touches one of the three sites or adds another one. And ONE
-artifact still has TWO readers inside
+**TWO standing fixes are named here, and the first is TAKEN.** The receipt FILENAME has one
+spelling per language. Shell: `tdd_edit_landing_receipt` beside `tdd_state_file` in
+`zensu-tdd-phase.sh`, which `--tdd-begin`, `--tdd-complete` and the acceptance transport
+(`_zensu_avr_prepare`) call, and `el_receipt_path` in `zensu-edit-landing.sh`, which the writer,
+`--check-receipt` and the scope source call. JavaScript: `receiptFile` and `RECEIPT_NAME_RE` in
+`edit-landing-receipt-v1.js`, which `boundLog`, `review-packet-v1.js` and both doctor sites
+(`claimTopologyRow` and `someClaimReceiptPresent`) use; the doctor also reads the receipt through
+that module's `readBoundedJson` at `MAX_RECEIPT_BYTES`, because a receipt that carries its audit
+scope outgrew the 4 KiB note reader. `RP19` in `tests/structure/test-review-packet.sh` compares the
+writer's file with `tdd_edit_landing_receipt`, `receiptFile` and the packet's `receiptPath`, so a
+rename that misses one fails there. And ONE artifact still has TWO readers inside
 `--tdd-complete`: `_tc_receipt_verdict`'s hardened descriptor-side read, and the requirements
 gate's own read a hundred lines below it, which re-parses the same session-writable file with
 a window in between. **State what that second reader IS, because an earlier revision of this
@@ -327,8 +339,10 @@ failed command under `LC_ALL=C` through `_el_git` and keeps git's first message 
 localized git otherwise turns a root outside git into a fault. The rule covers every later git
 call on the grading path too: `--show-toplevel`; a HEAD probe exiting anything but 0, or 1 for an
 unborn branch; a `--baseline` probe that does the same (it is peeled with `^{commit}`, so a
-baseline naming no commit stays a skipped hint and never reaches a failing `diff`); and any
-listing that exits non-zero. `union_add` captures each listing before it appends, so git's status
+baseline naming no commit stays a skipped hint and never reaches a failing `diff`, and the same
+peel runs before the audit scope is bound, so `auditScope.baseline` holds a full commit id or
+nothing and the review packet's baseline check accepts what the audit persisted; `M2b` and `G8a`
+pin both); and any listing that exits non-zero. `union_add` captures each listing before it appends, so git's status
 and the write's status are no longer one status, and a failed append dies with its own message.
 Each one is a fault because reading it any other way grades claims: a refusal read as "not a git
 work tree" grades every claim `UNVERIFIED` or `PENDING PREDICATE`, an aborted HEAD probe read as
@@ -342,13 +356,17 @@ green), and a failed listing grades a landed edit `EDIT NOT LANDED`. **Decided p
   skips, so step 5b b) copies it into the run log without it being re-read as a claim.
 - **Exit status 2.** Exit 1 stays a verdict about claims; a git fault is the environment class 2
   already carries.
-- **No receipt, and the earlier one is removed.** A fault writes nothing that could read as a
-  graded audit, and it REMOVES the file at the destination it would have written, an explicit
-  `--receipt` included: an earlier round's `clean: true` receipt would otherwise stand in for an
-  audit that could not run once git recovers. A removal that fails is `RECEIPT REFUSED`, and the
-  old file then still stands. `--tdd-complete` refuses on its own count while the fault lasts and
-  with "no edit-landing receipt" after git recovers, and both send the author to fix git or re-run
-  the audit.
+- **No clean receipt, and the one at the destination is marked nonclean.** A fault writes
+  nothing that could read as a graded audit. The receipt at the destination it would have
+  written, an explicit `--receipt` included, is the earlier round's or the checkpoint this run
+  wrote before grading; it is rewritten with `clean: false` and an `auditFailure` cause, and its
+  `auditScope` stays. An earlier round's `clean: true` receipt would otherwise stand in for an
+  audit that could not run once git recovers, and removing the file, which an earlier revision
+  did, threw away the dirty set and the pending claims the retry needs. A mark that fails is
+  `RECEIPT REFUSED`, and the old file then still stands. `--tdd-complete` refuses on its own
+  count while the fault lasts and on the nonclean verdict after git recovers, `--chain-done`
+  refuses with `the latest audit did not complete`, and all three send the author to fix git and
+  re-run the audit, which continues the preserved scope.
 - **`--inventory` exits 2 and still prints `claimed-files=`.** Absolute claims are classified
   against `REPO_CANON`, which git's `--show-toplevel` decides, so a fault prints no `foreign-root`
   line and names the fault on stderr. Counting needs no git, and `--tdd-complete` arms on that
@@ -371,9 +389,11 @@ was removed reads `not a git repository` and grades as outside git; a corrupt br
 HEAD probe exit 1 like an unborn branch; `check-ignore` is not classified, because it runs per
 claim and a claim spelled outside the repository is what makes it exit 128; Windows is
 unmeasured, and the suite runs there only on the weekly Windows Safety structure shard.
-**Version: `patch`**: no schema field, strict key set, hook, matcher, config key or attestation
-moves; the receipt keeps its shape and is absent in one more state, and `--inventory` gains an
-exit-2 cause under its existing "did not complete" contract.
+**Version: `patch`** when it shipped: no schema field, strict key set, hook, matcher, config key or
+attestation moved, and `--inventory` gained an exit-2 cause under its existing "did not complete"
+contract. The audit-scope change since then marks the receipt instead of removing it and adds the
+`auditScope` and `auditFailure` fields; no released reader of the receipt checks its key set, so
+the added fields break none of them.
 
 
 **Known gaps, accepted and named:**

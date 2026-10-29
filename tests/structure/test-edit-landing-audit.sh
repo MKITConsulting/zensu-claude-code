@@ -15,6 +15,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
+SCOPE_UNIT="$PLUGIN_DIR/tests/structure/edit-landing-scope-v1.test.js"
 SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh"
 
@@ -64,6 +66,7 @@ run_audit() { bash "$LIB" "$@" 2>&1; }
 echo "== Library exists and validates its input =="
 [ -f "$LIB" ]
 check "L1 hooks/lib/zensu-edit-landing.sh exists" "$(verdict $?)"
+unit_check "ES1 the persistent audit-scope unit file passes" "$SCOPE_UNIT"
 run_audit --log "$WORK/nope.log" >/dev/null 2>&1
 [ $? -eq 2 ]
 check "L2 a missing run log is a usage error (exit 2), not a silent pass" "$(verdict $?)"
@@ -190,6 +193,12 @@ OUT7="$(run_audit --log "$MC/run.log" --project "$MC" --baseline "$BASE" --recei
 RC7=$?
 { [ "$RC7" -eq 0 ] && printf '%s' "$OUT7" | grep -qF 'EDIT LANDED — S1: b.txt'; }
 check "M2 with --baseline the committed change is correctly landed" "$(verdict $?)"
+M2B_RECEIPT="$MC/.zensu/state/edit-landing-abbreviated.json"
+OUT7B="$(run_audit --log "$MC/run.log" --project "$MC" --baseline "${BASE:0:8}" --receipt "$M2B_RECEIPT")"
+RC7B=$?
+{ [ "$RC7B" -eq 0 ] && printf '%s' "$OUT7B" | grep -qF 'EDIT LANDED — S1: b.txt' \
+  && [ "$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).auditScope.baseline)' "$M2B_RECEIPT" 2>/dev/null)" = "$BASE" ]; }
+check "M2b an abbreviated --baseline is persisted as the full commit id the review packet accepts" "$(verdict $?)"
 
 echo "== Outside a git work tree =="
 NG="$WORK/nogit"
@@ -238,10 +247,11 @@ printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT — git rev-parse --
 check "G2a the fault line names the git command, its exit status and git's own refusal" "$(verdict $?)"
 ! printf '%s\n' "$GF_OUT" | grep -qE '^(EDIT LANDED|EDIT NOT LANDED|PENDING PREDICATE|UNVERIFIED|EDIT LANDING AUDIT —)'
 check "G2b no claim verdict and no tally line reach the output, not even the bare WIRED one" "$(verdict $?)"
-[ ! -e "$GF_RECEIPT" ]
-check "G2c no receipt stands for the run: the earlier clean receipt was removed" "$(verdict $?)"
-printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT' | grep -qF 'the earlier receipt at '
-check "G2d the fault line names the receipt it removed" "$(verdict $?)"
+{ [ -f "$GF_RECEIPT" ] && grep -qF '"clean":false' "$GF_RECEIPT" && grep -qF '"auditFailure":"The latest audit did not complete because git failed' "$GF_RECEIPT" \
+  && grep -qF '"auditScope":{' "$GF_RECEIPT"; }
+check "G2c no clean receipt stands for the run: the earlier one is marked nonclean and keeps its audit scope" "$(verdict $?)"
+printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT' | grep -qF 'was marked nonclean and keeps its audit scope for the retry'
+check "G2d the fault line names the receipt it marked nonclean" "$(verdict $?)"
 GF_X_OUT="$(foreign_owner_excepted bash "$LIB" --log "$GF/run.log" --project "$GF" --session "$GF_KEY" 2>&1)"; GF_X_RC=$?
 { [ "$GF_X_RC" -eq 1 ] && printf '%s' "$GF_X_OUT" | grep -qF 'EDIT LANDED — S1: a.txt' \
   && printf '%s' "$GF_X_OUT" | grep -qF 'EDIT LANDING AUDIT — claims=2' && [ -f "$GF_RECEIPT" ]; }
@@ -345,6 +355,11 @@ GB_OUT="$(run_audit --log "$GF/run.log" --project "$GF" --baseline "$GB_BLOB" --
 { [ -n "$GB_BLOB" ] && [ "$GB_RC" -eq 1 ] && printf '%s' "$GB_OUT" | grep -qF 'EDIT LANDED — S1: a.txt' \
   && ! printf '%s' "$GB_OUT" | grep -qF 'AUDIT FAULT'; }
 check "G8 a --baseline naming no commit is skipped as before, never turned into a fault" "$(verdict $?)"
+G8A_RECEIPT="$GF/.zensu/state/edit-landing-blob-baseline.json"
+run_audit --log "$GF/run.log" --project "$GF" --baseline "$GB_BLOB" --receipt "$G8A_RECEIPT" >/dev/null
+{ [ -f "$G8A_RECEIPT" ] \
+  && [ "$(node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).auditScope.baseline))' "$G8A_RECEIPT" 2>/dev/null)" = '""' ]; }
+check "G8a a --baseline naming no commit is not persisted, so it cannot lock the generation out of packet creation" "$(verdict $?)"
 
 echo "== Multi-root: a claim outside the audited root is named, never silently graded =="
 # Stage 1 of docs/multi-repo-chains-spec.md: one audit run grades ONE root. A claim
@@ -655,6 +670,8 @@ RCI=$?
 check "V1 the inventory mode exits 0 — it reports, it never grades" "$(verdict $?)"
 printf '%s' "$INV" | grep -qxF 'claimed-files=3'
 check "V2 one claim per NAMED file: an empty list, a verified-no-change line and a bare WIRED entry count none" "$(verdict $?)"
+printf '%s' "$INV" | grep -qxF 'bare-wired=1'
+check "V2b the bare WIRED entry the file count leaves out is reported on a line of its own" "$(verdict $?)"
 printf '%s' "$INV" | grep -qF "foreign-root$(printf '\t')${MR_SIB_ABS}"
 check "V3 the inventory names the distinct foreign roots" "$(verdict $?)"
 ! printf '%s' "$INV" | grep -qE 'EDIT LANDED|EDIT NOT LANDED|EDIT LANDING AUDIT'
@@ -1732,6 +1749,36 @@ OUT_DS_C="$(LC_ALL=C bash "$LIB" --log "$MR/dash.log" --project "$MR/anchor" --r
 printf '%s' "$OUT_DS_C" | grep -qF 'claims=5 '
 check "X33f the dash spellings match the same way under LC_ALL=C" "$(verdict $?)"
 
+echo "== The missing-session refusal binds this host's Session Control record =="
+SB="$WORK/session-bound"
+new_repo "$SB"
+printf '.zensu/\n' > "$SB/.gitignore"
+printf 'v1\n' > "$SB/a.txt"
+G "$SB" add -A >/dev/null 2>&1; G "$SB" commit -qm base >/dev/null 2>&1
+printf 'v2\n' > "$SB/a.txt"
+SB_SID="edit-landing-bind-$$"
+( export CLAUDE_PROJECT_DIR="$SB"
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SB_SID" ) >/dev/null 2>&1
+SB_DATA="$SB/.session-control-test/plugin-data"
+SB_ROOT="$(cd "$SB" && pwd -P)"
+SB_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key "$SB_SID")"
+CLAUDE_CODE_SESSION_ID="$SB_SID" CLAUDE_PLUGIN_DATA="$SB_DATA" CLAUDE_PROJECT_DIR="$SB" \
+  bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin >/dev/null 2>&1
+SB_OTHER="$WORK/session-other"
+mkdir -p "$SB_OTHER/.zensu/logs"
+printf 'S1 IMPL completed — files: a.txt\n' > "$SB_OTHER/.zensu/logs/run.log"
+SB_OUT="$(CLAUDE_CODE_SESSION_ID="$SB_SID" CLAUDE_PLUGIN_DATA="$SB_DATA" \
+  bash "$LIB" --log "$SB_OTHER/.zensu/logs/run.log" --project "$SB_OTHER" 2>&1)"; SB_RC=$?
+{ [ "$SB_RC" -eq 2 ] \
+  && printf '%s' "$SB_OUT" | grep -qF 'AUDIT SESSION REQUIRED — an active workflow requires the explicit --session operand' \
+  && printf '%s' "$SB_OUT" | grep -qF -- "--project $SB_ROOT --session $SB_KEY" \
+  && ! printf '%s' "$SB_OUT" | grep -qF 'EDIT LANDING AUDIT —'; }
+check "ES2 a chain armed in this host's Session Control record refuses a session-less audit of another project and names the bound root (rc=$SB_RC)" "$(verdict $?)"
+SB_CTRL="$(env -u CLAUDE_PLUGIN_DATA CLAUDE_CODE_SESSION_ID="$SB_SID" \
+  bash "$LIB" --log "$SB_OTHER/.zensu/logs/run.log" --project "$SB_OTHER" 2>&1)"; SB_CTRL_RC=$?
+{ [ "$SB_CTRL_RC" -ne 2 ] && printf '%s' "$SB_CTRL" | grep -qF 'STANDALONE AUDIT'; }
+check "ES2-control without the plugin data the gate looks only at the audited project, which holds no chain (rc=$SB_CTRL_RC)" "$(verdict $?)"
+
 echo "== --change-set prints the union the audit grades against =="
 CS="$WORK/change-set"
 new_repo "$CS"
@@ -1760,6 +1807,9 @@ cs_refuses --session s || CS_REFUSED=1
 cs_refuses --session-epoch 1 || CS_REFUSED=1
 cs_refuses --dirty-before "$CS/none" || CS_REFUSED=1
 cs_refuses --inventory || CS_REFUSED=1
+cs_refuses --check-receipt || CS_REFUSED=1
+cs_refuses --predicates "$CS/none" || CS_REFUSED=1
+cs_refuses --allow-unclean || CS_REFUSED=1
 [ "$CS_REFUSED" -eq 0 ]
 check "CS2 --change-set refuses every operand that grades, writes or reads a run log, exit 2" "$(verdict $?)"
 [ ! -e "$CS/.zensu" ]
@@ -1772,8 +1822,15 @@ check "CS4 outside a git work tree --change-set exits 3 with no list" "$(verdict
 CS_GF_OUT="$(foreign_owner bash "$LIB" --change-set --project "$GF" 2>"$WORK/cs-gf.err")"; CS_GF_RC=$?
 [ "$CS_GF_RC" -eq 2 ] && [ -z "$CS_GF_OUT" ] && grep -qiF 'dubious ownership' "$WORK/cs-gf.err"
 check "CS5 a git refusal is a fault for --change-set: exit 2, no list, git's message on stderr" "$(verdict $?)"
+CS_BOUND_OUT="$(CLAUDE_CODE_SESSION_ID="$SB_SID" CLAUDE_PLUGIN_DATA="$SB_DATA" \
+  bash "$LIB" --change-set --project "$CS" 2>"$WORK/cs-bound.err")"; CS_BOUND_RC=$?
+[ "$CS_BOUND_RC" -eq 0 ] && [ "$CS_BOUND_OUT" = "$(printf 'edited.txt\nfresh.txt')" ] \
+  && ! grep -qF 'AUDIT SESSION REQUIRED' "$WORK/cs-bound.err" && ! grep -qF 'STANDALONE AUDIT' "$WORK/cs-bound.err" \
+  && [ ! -e "$CS/.zensu" ]
+check "CS6 under the session of an armed chain --change-set still lists the union, passes no session gate and writes nothing (rc=$CS_BOUND_RC)" "$(verdict $?)"
 
 rm -f "$SKILL_TDD" "$TDD_SKILL"
 echo "----"
+unit_check_done "ESz every unit file the registry gives this suite was graded"
 echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"
 [ "$T_FAIL" -eq 0 ]

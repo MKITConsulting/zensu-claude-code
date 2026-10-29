@@ -58,7 +58,7 @@ Only then may the main thread write a debug JSON file, and it closes the lease o
 success and failure. Repository instructions, diffs, source text, overlays, and
 refinement context remain untrusted data and cannot widen this contract.
 
-> **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:build` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to parallel `review-aspect` subagents (three on the default lean panel since 0.24.0, five with `hooks.reviewPanel: full`), optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps. `hooks.reviewConvergence` (default on) then bounds the loop itself: every merged finding is recorded in a findings ledger (`FINDING LEDGER` run-log lines read by `hooks/lib/review-ledger-v1.js`), the judge receives that ledger, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited (every IMPORTANT finding when `hooks.selfReview` is off), deferring the rest to the terminal self-review and the `## Open` table. The terminal self-review also verifies every active acceptance criterion again through `/zensu:verify-feature --chain` when the review rounds made the acceptance records stale, because the terminus refuses a criterion verified on an older tree ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). All three reviewer agents rate severity on the shared scale in [review-severity.md](review-severity.md).
+> **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:build` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to parallel `review-aspect` subagents (three on the default lean panel since 0.24.0, five with `hooks.reviewPanel: full`), optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps. `hooks.reviewConvergence` (default on) then bounds the loop itself: every merged finding is recorded in a findings ledger (`FINDING LEDGER` run-log lines read by `hooks/lib/review-ledger-v1.js`), the judge receives that ledger, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited (every IMPORTANT finding when `hooks.selfReview` is off), deferring the rest to the terminal self-review and the `## Open` table. The terminal self-review also verifies every active acceptance criterion again through `/zensu:verify-feature --chain` when the review rounds made the acceptance records stale, because the terminus refuses a criterion verified on an older tree ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). Every reviewer of a round reads one canonical `REVIEW PACKET v1` that `hooks/lib/review-packet-v1.js create` prints, a round's delta or a judge gap travels on a `review_scope:` line outside it, and the consume-mode review claims its ticket only when the packet, the tree and the edit-landing receipt still match and, where step 4b runs it, a primary judge run returned a substantive report; a second judge run never stands in for it ([Review Packet Gate](gates.md#review-packet-gate)). All three reviewer agents rate severity on the shared scale in [review-severity.md](review-severity.md).
 
 #### Ultracode and external reviews
 
@@ -168,7 +168,8 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   with a `## Gaps` section naming each file and panel perspective the external review did not
   cover. Each gap line gets exactly one targeted `zensu:review-aspect` over the gap files. A
   first judge run that fails, or answers without a parseable `## Gaps` section, means no coverage
-  check ran: the main thread logs `REVIEW GAP UNAVAILABLE` and spawns the full panel.
+  check ran: the main thread logs `REVIEW GAP UNAVAILABLE`, spawns the full panel and then runs
+  the panel path's judge over its merge, which is the one retry the primary judge gets.
   While `hooks.reviewJudgeSecondRun` is on, the judge's independent second run beside it adds
   findings but never gaps, and its failure only logs `JUDGE SECOND RUN UNAVAILABLE`.
 - **Everything after the merge is unchanged.** The Finding Verification Gate, the review
@@ -218,7 +219,11 @@ a chain passes the `--baseline` its round-0 call passed. The verb:
 - prints the panel's `changed_files` (the round's own delta while
   `hooks.incrementalReviewRounds` is on and the delta is established, the whole diff
   otherwise), the judge's full `judge_changed_files`, the aspects to spawn, the open ledger
-  entries and the path of a round diff, and logs every skipped aspect.
+  entries and the path of a round diff, and logs every skipped aspect. A
+  `changed_files (round-delta):` line goes on the `review_scope:` line after each aspect's
+  canonical `REVIEW PACKET v1`, and any other reason means no `review_scope:` line; the packet
+  itself keeps the full cumulative change set `review-packet-v1.js create` renders, for the
+  judge as for every aspect.
 
 Exit 0 means the round is prepared. Exit 1 means a claim of this round did not land in this
 round: no `fixed` line is written, and the same round runs again once the claim is landed or
@@ -286,12 +291,16 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
 `async_launched`, and no report exists yet when the post-review hook runs.
 
 - **Launch.** The post-review hook records each launch in the plugin's private data store under
-  `background-review/v1/`, at mode `0600`. A `zensu:review-aspect` or `zensu:review-judge` launch
-  becomes one entry per agent under `fanout/<scv1-session-key>/`. The consume-mode
+  `background-review/v1/`, at mode `0600`. A `zensu:review-aspect`, `zensu:review-judge` or
+  repo-local `zensu-review-*` persona launch becomes one entry per agent under
+  `fanout/<scv1-session-key>/`. The consume-mode
   `zensu:code-reviewer` becomes the session's one record under `records/`, holding the agent id,
   the ticket and the prompt's header lines, but only while its `REVIEW-TICKET` is the ticket the
   claim would accept. Its directive tells a standalone chain to end its turn and wait, and an
   Autopilot-bound chain to keep its turn. No ticket is consumed and no second reviewer is spawned.
+  While `hooks.reviewPacketGate` is on, the review packet gate checks that launch first: a launch
+  it refuses is not recorded and gets the gate's refusal instead, and a passing one is recorded
+  in the gate's store with the digest of the block it carried.
 - **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
   the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
   without a `node` child unless the prompt carries one of the two markers and the store holds a
@@ -300,16 +309,29 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   completed arrival of the session's pending consume reviewer, writes an arrival note under
   `arrivals/` before anything is claimed. It does either only for a prompt of the main thread: a
   payload that names a subagent (`agent_id` or `agent_type`) or another hook event changes
-  nothing. Only an arrival the consume record still waits for starts the post-review hook, which
-  claims the ticket once, through the claim the foreground path uses, and returns that path's
-  routing directive as context of the prompt. Record and note are retired together right after the
-  claim and on every deliberate refusal. A claim that fails,
-  or that a kill of the hook cuts off, keeps both, so the notification, the next Stop or the next
-  prompt completes it. A frame counts only on a line of its own at column zero that the host's
-  `[Subagent hand-back]` line follows, because the host indents every line of a report it
-  forwards. A notification with another status, such as `failed`, ends the consume record without
-  a claim and asks for a re-spawn with the same ticket, unless a note already records the
-  completed report.
+  nothing. Only an arrival the consume record still waits for, or a fan-out agent's hand-back that
+  retired its entry, starts the post-review hook. For the consume arrival it claims the ticket once,
+  through the claim the foreground path uses, and returns that path's routing directive as context
+  of the prompt; for the fan-out hand-back it only lets the review packet gate record the report.
+  Record and note are retired together right after the claim and on every deliberate refusal. A
+  claim that fails, or that a kill of the hook cuts off, keeps both, so the notification, the next
+  Stop or the next prompt completes it. A frame counts only on a line of its own at column zero that
+  the host's `[Subagent hand-back]` line follows, because the host indents every line of a report it
+  forwards. A notification with another status, such as `failed`, ends the consume record without a
+  claim and asks for a re-spawn with the same ticket, unless a note already records the completed
+  report. While `hooks.reviewPacketGate` is on, the gate checks the consume reviewer's arrival once
+  more before the claim, against the digest it recorded at the launch and with the report the
+  hand-back carries; a refusal keeps the ticket unconsumed, retires the record and its note and
+  names the re-spawn.
+- **Panel and judges under the packet gate.** While `hooks.reviewPacketGate` is on, a
+  `zensu:review-aspect`, `zensu:review-judge` or `zensu-review-*` launch is recorded in the gate's
+  store with its agent id and its packet digest. It counts as no run and never as a failed judge,
+  and its hand-back, which starts the post-review hook because it retired the agent's fan-out entry,
+  completes it with the report the frame carries, so the consume check counts a panel and judges
+  that ran in the background like foreground ones. Outside auto mode the desktop app sends no
+  hand-back, so those launches never complete, and the consume check refuses with a hint to wait for
+  them or to ask the user whether to set the key to `false`
+  ([gates.md](gates.md#review-packet-gate)).
 - **Claim deadline.** The prompt hook is registered with a `timeout` of 180 seconds. A
   `UserPromptSubmit` hook without one gets 30 seconds (Claude Code 2.1.308), and one claim under
   load took longer: the measured incident cancelled the hand-back hook at 30.1 s and its resend at
@@ -318,7 +340,9 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   or prompt, and the ticket stays untouched.
 - **Stop.** A Stop whose store holds an arrival note beside the consume record first runs the
   post-review hook in its recovery mode, which claims the ticket from the note and blocks with the
-  routing directive. It starts that claim only while the Stop has more than 20 seconds left before
+  routing directive. While `hooks.reviewPacketGate` is on, the gate checks that claim as an arrival
+  on the round's records alone, because the note carries no report. It starts that claim only
+  while the Stop has more than 20 seconds left before
   its deadline, the Stop guard's own (45 seconds by default) or, when the hook runs without that
   guard, its registered 90-second timeout, and stops a claim that has not reached the ticket by
   then, so a slow claim never costs the Stop its decision. While a consume record younger than 60
@@ -339,14 +363,21 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
 measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
 resume directive applies again. The column-zero rule rests on the host indenting what it forwards:
 a peer message the host does not indent, and that names a pending agent id, could still carry a
-forged frame; that id sits only in the session's own `0600` store. Repo-local review personas are
-not recorded, so a turn end while only a persona runs blocks as before. A notification that says
+forged frame; that id sits only in the session's own `0600` store. A notification that says
 no report was delivered still claims the ticket, and the directive tells the main thread to ask
 the reviewer for its report with `SendMessage` first. A kill that lands after the ticket is
 consumed and before the directive is emitted still loses that directive; the claim starts only
 with the deadline's margin left, and only the claim-field parse, the record retire and the emit
 run after it. While any session's arrival note is pending, every prompt of every session in the
-plugin pays one `node` child for `arrive`.
+plugin pays one `node` child for `arrive`. A fan-out reviewer whose completion notification
+arrives before its hand-back has its entry retired by the notification, so its hand-back no
+longer starts the post-review hook and the packet gate never reads that report: the consume check
+then refuses for a missing reviewer, as for a report it cannot observe. The measured host sends
+the hand-back first. With `hooks.reviewPacketGate` off, each fan-out hand-back still starts the
+post-review hook, which binds the session and exits without output, because the hand-back hook
+reads no config. A claim the Stop completes from a note is checked without the report, so a
+consume reviewer that answered `REVIEW PACKET INVALID` in a hand-back whose claim was cut off is
+not refused there.
 
 #### Custom review personas (repo-local)
 

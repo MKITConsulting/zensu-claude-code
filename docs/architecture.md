@@ -206,7 +206,8 @@ only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its t
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
 `user-prompt-review-handback.sh` only for the hand-back or completion notification of a pending
 background reviewer, or for a later prompt of a session whose claim was cut off, where it carries
-the review's routing directive; it exits before any `node` child on a prompt that carries neither
+the review's routing directive, and, with the review packet gate on, for the gate's advice on a
+background panel reviewer's report; it exits before any `node` child on a prompt that carries neither
 marker while no arrival note is pending, and on one that does while no background review is
 pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's

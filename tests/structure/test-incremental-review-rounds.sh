@@ -30,6 +30,7 @@ CONFIG_EX="$ROOT/config.example.json"
 CONFIG_DOC="$ROOT/docs/configuration.md"
 CHAIN_DOC="$ROOT/docs/review-chain.md"
 WORKFLOW_DOC="$ROOT/docs/build-workflow.md"
+ASPECT_MD="$ROOT/agents/review-aspect.md"
 
 PASS=0; FAIL=0
 check() {
@@ -40,7 +41,7 @@ check() {
 grep_ok() { grep -qF -- "$2" "$1" && echo PASS || echo FAIL; }
 
 for f in "$SCOPE_LIB" "$ASPECT_LIB" "$SCOPE_UNIT" "$ASPECT_UNIT" "$TDD_MD" \
-         "$DELEGATE" "$CONFIG_EX" "$CONFIG_DOC" "$CHAIN_DOC" "$WORKFLOW_DOC"; do
+         "$DELEGATE" "$CONFIG_EX" "$CONFIG_DOC" "$CHAIN_DOC" "$WORKFLOW_DOC" "$ASPECT_MD"; do
   if [ ! -f "$f" ]; then
     check "I0 required file exists: $f" FAIL
     echo "----"
@@ -113,7 +114,7 @@ esac
 # --- Directive carriers ------------------------------------------------------
 check "I8 build skill names the round-scope helper" "$(grep_ok "$TDD_MD" 'review-round-scope-v1.js')"
 check "I9 build skill names the aspect-activation helper" "$(grep_ok "$TDD_MD" 'aspect-activation-v1.js')"
-check "I10 build skill takes the narrowed list from --round-prepare and never resolves the key itself" "$(grep_ok "$TDD_MD" 'rebuild REVIEW PACKET v1 with the `changed_files` line `--round-prepare` printed, and never resolve `hooks.incrementalReviewRounds` yourself')"
+check "I10 build skill takes the narrowed list from --round-prepare and never resolves the key itself" "$(grep_ok "$TDD_MD" 'and never resolve `hooks.incrementalReviewRounds` yourself: when the `changed_files` line `--round-prepare` printed reads `changed_files (round-delta):`, name its paths on a `review_scope:` line')"
 check "I10a build skill keeps the whole diff when the key is off" "$(grep_ok "$TDD_MD" 'and with the key off, the packet keeps the WHOLE diff')"
 ACTIVATION_PROBE='ZENSU_ROOT="{plugin_root}" CLAUDE_PROJECT_DIR="{project_root}" bash -c '\''source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled aspectActivation && echo on || echo off'\'
 check "I11 build skill resolves hooks.aspectActivation through the anchored probe" "$(grep_ok "$TDD_MD" "$ACTIVATION_PROBE")"
@@ -167,6 +168,7 @@ esac
 check "I17g the round-scope helper path is quoted beside the ledger helper" "$(grep_ok "$DELEGATE" 'SCOPE_HELPER_Q="$(printf '"'"'%q'"'"' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-round-scope-v1.js")"')"
 check "I17h the convergence clause names the round-scope helper whatever the round scope says" "$(grep_ok "$DELEGATE" 'run the round-scope helper, node ${SCOPE_HELPER_Q} --log {log_file} --root \"\$TOP\", with --round ${NEXT} and node ${LEDGER_HELPER_Q}')"
 check "I17e the disabled round scope keeps the whole diff" "$(grep_ok "$DELEGATE" "ROUND_SCOPE=\"hooks.incrementalReviewRounds is off, so THIS round's packet keeps the whole diff")"
+check "I17i a review_scope line narrows the aspect's own read in step 1" "$(grep_ok "$ASPECT_MD" '1. Read governing `CLAUDE.md` files and every listed changed file, or, when a `review_scope:` line is present, only the paths it lists plus what they reference.')"
 
 BASELINE="$ROOT/tests/session-control/initialize-baseline.sh"
 LOG_WRITER="$ROOT/hooks/lib/zensu-log.sh"
@@ -219,14 +221,14 @@ wait
 DEFAULTS="$(context_of defaults)" && check "I30 the default render is valid PostToolUse context" PASS \
   || check "I30 the default render is valid PostToolUse context" FAIL
 check "I30a the default fix round activates over this round's changed_files" "$(has "$DEFAULTS" "aspect-activation-v1.js --panel lean --round re answers spawn for this round's changed_files)")"
-check "I30b the default fix round narrows to the round delta" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: THIS round's packet changed_files is the --round-prepare changed_files line, scoped to the round delta via hooks/lib/review-round-scope-v1.js")"
+check "I30b the default fix round names the --round-prepare round delta on a review_scope line" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: name THIS round's delta, the --round-prepare changed_files line, scoped via hooks/lib/review-round-scope-v1.js, on a 'review_scope:' line after each aspect's block")"
 check "I30c the default fix round keeps the round delta on" "$(lacks "$DEFAULTS" 'hooks.incrementalReviewRounds is off')"
 check "I30d the default fix round keeps activation on" "$(lacks "$DEFAULTS" 'hooks.aspectActivation is off')"
 ACT_OFF="$(context_of activation-off)" && check "I31 the activation-off render is valid PostToolUse context" PASS \
   || check "I31 the activation-off render is valid PostToolUse context" FAIL
 check "I31a activation off re-reviews over an empty change set" "$(has "$ACT_OFF" 'aspect-activation-v1.js --panel lean --round re answers spawn for an empty change set, because hooks.aspectActivation is off)')"
 check "I31b activation off never activates over the round's changed_files" "$(lacks "$ACT_OFF" "answers spawn for this round's changed_files")"
-check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" "hooks.incrementalReviewRounds is on: THIS round's packet changed_files is the --round-prepare changed_files line")"
+check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" "hooks.incrementalReviewRounds is on: name THIS round's delta, the --round-prepare changed_files line")"
 for name in rounds-off-project rounds-off-important rounds-off-all; do
   case "$name" in
     (rounds-off-project) status_line="'Fixing critical findings in-thread, then re-reviewing (round 1/2)'" ;;
@@ -238,7 +240,7 @@ for name in rounds-off-project rounds-off-important rounds-off-all; do
   check "I32a $name renders its own severity arm" "$(has "$ROUNDS_OFF" "$status_line")"
   check "I32b $name keeps the whole diff for every agent" "$(has "$ROUNDS_OFF" "hooks.incrementalReviewRounds is off, so THIS round's packet keeps the whole diff as changed_files for the zensu:review-aspect agents and the zensu:review-judge alike")"
   check "I32c $name still names the round-scope helper for convergence" "$(has "$ROUNDS_OFF" 'hooks/lib/review-round-scope-v1.js --log {log_file} --root "$TOP", with --round 1 and node ')"
-  check "I32e $name never narrows to the round delta" "$(lacks "$ROUNDS_OFF" 'to the round delta')"
+  check "I32e $name never names the round delta" "$(lacks "$ROUNDS_OFF" "THIS round's delta")"
   check "I32f $name never carries the narrowing trigger" "$(lacks "$ROUNDS_OFF" 'hooks.incrementalReviewRounds is on')"
   check "I32d $name still activates over the round's changed_files" "$(has "$ROUNDS_OFF" "answers spawn for this round's changed_files)")"
 done

@@ -156,18 +156,20 @@ review_to_done() {
   SF="$(tdd_state_file "$sid")"
 }
 
+audit_receipt() {
+  bash "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" --log "$2/.zensu/logs/$STEM.log" --project "$2" \
+    --session "$1" >/dev/null 2>&1
+}
+
 arm() {
-  local sid="$1" rp
+  local sid="$1"
   export CLAUDE_PROJECT_DIR="$PROJ"
   cd "$PROJ" || return 1
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
   bash "$LOG" --tdd-begin >/dev/null 2>&1 || return 1
   write_plan "$PROJ"
   printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/$STEM.log"
-  rp="$(tdd_edit_landing_receipt "$sid")" || return 1
-  mkdir -p "$(dirname "$rp")"
-  printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
-    "$sid" "$STEM" > "$rp"
+  audit_receipt "$sid" "$PROJ" || return 1
   bash "$LOG" --tdd-complete --plan "./$PLAN_REL" >/dev/null 2>&1 || return 1
   review_to_done "$sid"
 }
@@ -208,7 +210,7 @@ bound_project() {
 }
 
 bound_arm() {
-  local sid="$1" project="$2" run="$3" chain="$4" validate="$5" rp
+  local sid="$1" project="$2" run="$3" chain="$4" validate="$5"
   export CLAUDE_PROJECT_DIR="$project"
   cd "$project" || return 1
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
@@ -218,10 +220,7 @@ bound_arm() {
     --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
   write_plan "$project"
   printf 'S1 IMPL completed — files: tracked.txt\n' > "$project/.zensu/logs/$STEM.log"
-  rp="$(tdd_edit_landing_receipt "$sid")" || return 1
-  mkdir -p "$(dirname "$rp")"
-  printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
-    "$sid" "$STEM" > "$rp"
+  audit_receipt "$sid" "$project" || return 1
   bash "$LOG" --tdd-complete --session "$sid" --plan "./$PLAN_REL" --autopilot-run "$run" \
     --autopilot-attempt 1 --chain-id "$chain" >/dev/null 2>&1 || return 1
   SF="$(tdd_state_file "$sid")"
@@ -497,6 +496,44 @@ EVIDENCE
   fi
 else
   check "A12 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+if arm "acc-shared"; then
+  observe 'printf ok'
+  SHARED_RUN="$RUN_ID"
+  acc_record AC-001 pass cli "$SHARED_RUN" <<'EVIDENCE'
+the shared check asserted the AC-001 case and exited 0
+EVIDENCE
+  RC_ONE=$?
+  acc_record AC-002 pass api "$SHARED_RUN" <<'EVIDENCE'
+the same check asserted the AC-002 case and exited 0
+EVIDENCE
+  RC_TWO=$?
+  acc_status; RC_ST=$?
+  if [ -n "$SHARED_RUN" ] && [ "$RC_ONE" -eq 0 ] && [ "$RC_TWO" -eq 0 ] && [ "$RC_ST" -eq 0 ] \
+    && grep -q "| 2/2 active criteria pass$" "$WORK/sout"; then
+    check "A12a one observed acceptance run backs two separately recorded criteria on an unchanged tree" PASS
+  else
+    check "A12a one run for two criteria (run=$SHARED_RUN one=$RC_ONE two=$RC_TWO status=$RC_ST)" FAIL
+    cat "$WORK/sout"; ERR
+  fi
+  printf 'v3\n' > "$PROJ/tracked.txt"
+  acc_status; RC_ST=$?
+  STALE_OUT="$(cat "$WORK/sout")"
+  acc_record AC-002 pass api "$SHARED_RUN" <<'EVIDENCE'
+the earlier shared check, cited again after the tree changed
+EVIDENCE
+  RC_CITE=$?
+  if [ "$RC_ST" -eq 1 ] && printf '%s\n' "$STALE_OUT" | grep -q "| 0/2 active criteria pass" \
+    && [ "$RC_CITE" -eq 1 ] && grep -qF "evidence run $SHARED_RUN measured another tree than the current one" "$WORK/rerr"; then
+    check "A12b after an edit the shared run backs neither criterion and cannot be cited again" PASS
+  else
+    check "A12b shared run after an edit (status=$RC_ST cite=$RC_CITE)" FAIL
+    printf '%s\n' "$STALE_OUT"; ERR
+  fi
+  printf 'v2\n' > "$PROJ/tracked.txt"
+else
+  check "A12a arm a ticket-bound chain with a receipt" FAIL
 fi
 
 if arm "acc-escape"; then

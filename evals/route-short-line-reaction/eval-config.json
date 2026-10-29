@@ -15,6 +15,7 @@
     "pulseSession": false,
     "reviewConvergence": false,
     "reviewJudge": false,
+    "reviewPacketGate": false,
     "reviewSpawnScopeSentence": false,
     "secretScan": false,
     "selfReview": false,

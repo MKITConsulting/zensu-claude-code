@@ -6115,6 +6115,7 @@ module.exports = {
   SCHEMA,
   SCHEMA_VERSION,
   WORKFLOW_SCHEMA,
+  MAX_JSON_BYTES,
   ATTESTATION_SCHEMA,
   // The workflow-document LAYOUT, exported so a caller that must judge the file
   // before this module opens it does not re-spell the path. `workflowStateFile`

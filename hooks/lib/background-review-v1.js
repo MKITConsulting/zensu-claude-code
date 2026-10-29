@@ -29,6 +29,7 @@ const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'sess
 const ARRIVAL_KEYS = Object.freeze(['agent_id', 'arrival', 'arrived_at_ms', 'holds', 'schema', 'session_key', 'ticket']);
 const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
   .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
+const PERSONA_TYPE_RE = /^zensu-review-[A-Za-z0-9_-]+$/;
 const VERDICTS = Object.freeze(['claim', 'ended', 'none']);
 const ARRIVALS = Object.freeze(['handback', 'notification']);
 const WAIT_KINDS = Object.freeze(['consume', 'fanout']);
@@ -111,6 +112,10 @@ function validateRecord(record, expected = {}, limits = LIMITS) {
   return headerProblem(record.header, record.ticket, limits);
 }
 
+function fanoutType(type) {
+  return FANOUT_TYPES.includes(type) || (typeof type === 'string' && PERSONA_TYPE_RE.test(type));
+}
+
 function validateFanout(entry, expected = {}) {
   if (!exactKeys(entry, FANOUT_KEYS)) return 'fanout keys';
   if (entry.schema !== SCHEMA) return 'fanout schema';
@@ -118,7 +123,7 @@ function validateFanout(entry, expected = {}) {
   if (expected.sessionKey !== undefined && entry.session_key !== expected.sessionKey) return 'fanout session mismatch';
   if (typeof entry.agent_id !== 'string' || !AGENT_ID_RE.test(entry.agent_id)) return 'fanout agent id';
   if (expected.agentId !== undefined && entry.agent_id !== expected.agentId) return 'fanout agent mismatch';
-  if (!FANOUT_TYPES.includes(entry.subagent_type)) return 'fanout subagent type';
+  if (!fanoutType(entry.subagent_type)) return 'fanout subagent type';
   if (!Number.isSafeInteger(entry.launched_at_ms) || entry.launched_at_ms < 0) return 'fanout launch time';
   return null;
 }
@@ -401,7 +406,7 @@ function recordFanout(payload, options, limits = LIMITS) {
   const sessionKey = requireSessionKey(options.sessionKey);
   if (!isPlainObject(payload)) return { recorded: false, reason: 'payload' };
   const input = isPlainObject(payload.tool_input) ? payload.tool_input : {};
-  if (!FANOUT_TYPES.includes(input.subagent_type)) return { recorded: false, reason: 'subagent-type' };
+  if (!fanoutType(input.subagent_type)) return { recorded: false, reason: 'subagent-type' };
   const response = payload.tool_response;
   if (!isPlainObject(response) || response.status !== ASYNC_STATUS) return { recorded: false, reason: 'not-async' };
   const agentId = launchAgentId(response);
@@ -482,6 +487,24 @@ function scanLines(lines, agentId) {
 function scanPrompt(prompt, agentId) {
   if (typeof prompt !== 'string') return { arrival: null };
   return scanLines(promptLines(prompt), agentId);
+}
+
+function handbackReports(prompt) {
+  if (typeof prompt !== 'string') return [];
+  const lines = promptLines(prompt);
+  const reports = [];
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    const open = /^<agent-message from="([^"]*)">$/.exec(lines[index]);
+    if (!open || !AGENT_ID_RE.test(open[1]) || !lines[index + 1].startsWith(HANDBACK_FRAME_LINE)) continue;
+    const close = lines.indexOf('</agent-message>', index + 2);
+    const body = lines.slice(index + 2, close === -1 ? lines.length : close);
+    const indent = (line) => /^ */.exec(line)[0].length;
+    const widths = body.filter((line) => line.trim() !== '').map(indent);
+    const strip = widths.length ? Math.min(...widths) : 0;
+    reports.push({ agentId: open[1], report: body.map((line) => line.slice(Math.min(strip, indent(line)))).join('\n') });
+    index = close === -1 ? lines.length : close;
+  }
+  return reports;
 }
 
 function consumeRecord(file, expectedText, limits = LIMITS) {
@@ -910,11 +933,13 @@ module.exports = {
   FANOUT_KEYS,
   ARRIVAL_KEYS,
   FANOUT_TYPES,
+  PERSONA_TYPE_RE,
   VERDICTS,
   ARRIVALS,
   WAIT_KINDS,
   ENVELOPES,
   LIMITS,
+  AGENT_ID_RE,
   BackgroundReviewError,
   limitsWith,
   ttlMinutes,
@@ -928,6 +953,7 @@ module.exports = {
   recordLaunch,
   recordFanout,
   scanPrompt,
+  handbackReports,
   consumeRecord,
   noteArrival,
   matchArrival,

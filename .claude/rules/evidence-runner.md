@@ -51,7 +51,23 @@ Never exclude `.zensu` with a `:(exclude)` pathspec on `add`: once `.zensu/` is
 gitignored, which is the normal case, `add` fails with "paths are ignored" and every
 tree came out unverified. Git runs with the `_tc_git` scrub list and `LC_ALL=C`, because
 its reason text reaches committed run-log lines. Over 20000 untracked files or 512 MiB,
-or on a git failure, the record carries no tree and names the reason.
+or on a git failure, the record carries no tree and names the reason. The two size limits also
+answer `limited: true`, so the edit-landing receipt and the review packet can seal such a tree as
+unverified with its reason (`TREE UNVERIFIED — …`) while a git failure stays a fault there. `computeTree` takes an
+options argument whose `workflowStateAtEveryDepth: true` excludes the plugin's own workflow
+artifacts under a `.zensu` directory at any depth: the entries `WORKFLOW_ARTIFACTS` names
+(`state`, `logs`, `plans`, `reviews`, `verify-feature-runs` and `hook-events.log`), through
+`:(exclude,glob)**/.zensu/<name>` and `**/.zensu/<name>/**` pathspecs on the untracked listing and
+their `:(glob)` forms on the `git rm --cached`, never through a pathspec on `add`. The
+edit-landing receipt and the review packet pass it, because a project root nested below the
+repository top writes its run log and its state into `<project>/.zensu/`, which the top-level
+`.zensu` exclusion does not reach, so every log append and packet write would otherwise make the
+receipt and the packet stale. Everything else under `.zensu`, such as `config.json`, an overlay or
+a PR-body template, stays in their tree, so an edit to the project's Zensu configuration stales
+the receipt and is reviewed like any other change. The review packet's change set drops the same
+entries through `excluded()`, which reads `WORKFLOW_ARTIFACTS`, so the two lists cannot drift. The
+evidence runner, the external-review import and the acceptance gate keep the default, which
+excludes the whole top-level `.zensu`.
 
 **The copy keeps the real index's atime and mtime.** git trusts a stat match only when the
 entry's mtime is older than the index file's own mtime (the racy-git check), so a copy with a
@@ -133,9 +149,10 @@ time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
 (`.claude/rules/multi-repo-stage1.md`). A change to the split here moves both copies too.
 `workTreeTop` reads the same `NO_WORK_TREE_RE` for the external-review root rule and also
 places a root outside git when no `git` binary exists (`.claude/rules/external-review-import.md`).
-`computeTree` takes an optional list of root-relative paths it drops beside `.zensu`, matched
-literally; only the external review passes one, the `.zensu` of a session whose project root
-lies below the top level it fingerprints, and every runner caller keeps its fingerprint.
+The same options argument of `computeTree` takes `excluded`, a list of root-relative paths it
+drops beside `.zensu`, matched literally; only the external review passes one, the `.zensu` of a
+session whose project root lies below the top level it fingerprints, and every runner caller
+keeps its fingerprint.
 `gitEnvironment` also drops the pathspec-mode variables in `GIT_PATHSPEC_ENV`
 (`GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS`, `GIT_ICASE_PATHSPECS`):
 an inherited `GIT_LITERAL_PATHSPECS` reads that list's `:(exclude,literal)` magic as a file name

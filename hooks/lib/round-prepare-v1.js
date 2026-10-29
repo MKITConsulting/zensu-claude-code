@@ -42,8 +42,8 @@ const FINDING_ID = /^(?:G[1-9][0-9]{0,5}:)?R([1-9][0-9]{0,5})-F([1-9][0-9]{0,4})
 const LOCAL_ID = /^F[1-9][0-9]{0,4}$/;
 const FIXABLE_STATES = new Set(["routed-unfixed", "parked", "deferred"]);
 const OPEN_STATES = new Set(["routed-unfixed", "parked", "deferred"]);
-const VERDICT = /^(EDIT LANDED|EDIT NOT LANDED|PENDING PREDICATE|UNVERIFIED(?: \([a-z -]+\))?) — (.+)$/;
-const DIRTY_TAIL = " was already dirty before this round";
+const VERDICT = /^(EDIT LANDED(?: \(verified predicate or unchanged prior certification\))?|EDIT NOT LANDED|PENDING PREDICATE|UNVERIFIED(?: \([a-z -]+\))?) — (.+)$/;
+const DIRTY_TAILS = Object.freeze([" was already dirty before this claim", " was already dirty before this round"]);
 const NOT_LANDED_HEAD = "claimed ";
 const NOT_LANDED_TAIL = ", git shows no change";
 const BARE_WIRED = /^a WIRED entry at run-log line [0-9]+ \(step (.+)\) names no files: list and cannot be graded$/;
@@ -97,7 +97,7 @@ function parseAuditLine(line) {
   if (cut < 1) return null;
   const step = body.slice(0, cut);
   const rest = body.slice(cut + 2);
-  if (head === "EDIT LANDED") return { kind: "landed", step, file: rest, line: text };
+  if (head.startsWith("EDIT LANDED")) return { kind: "landed", step, file: rest, line: text };
   if (head === "EDIT NOT LANDED") {
     let file = null;
     if (rest.startsWith(NOT_LANDED_HEAD) && rest.endsWith(NOT_LANDED_TAIL)) {
@@ -105,8 +105,10 @@ function parseAuditLine(line) {
     }
     return { kind: "not-landed", step, file, line: text };
   }
-  const dirty = rest.indexOf(DIRTY_TAIL);
-  if (dirty > 0) return { kind: "pending", step, file: rest.slice(0, dirty), line: text };
+  for (const tail of DIRTY_TAILS) {
+    const dirty = rest.indexOf(tail);
+    if (dirty > 0) return { kind: "pending", step, file: rest.slice(0, dirty), line: text };
+  }
   return { kind: "pending-outside-git", step, file: null, line: text };
 }
 

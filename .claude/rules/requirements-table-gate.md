@@ -96,8 +96,8 @@ git aborts, a failed listing) refuses with exit 1 before either gate runs, and t
 this gate and its ledger record out of scope, and leave the receipt gate and its record armed
 only by a logged claim. Two alternatives were rejected. Arming both gates on `unavailable`: the
 edit-landing audit reports the same refusal as `EDIT LANDING AUDIT FAULT`, exits 2, writes no
-receipt and removes an earlier one (`.claude/rules/multi-repo-stage1.md`), so the receipt gate
-would refuse with "no edit-landing receipt" and name the audit, not git, as the thing to run.
+clean receipt and marks the one at its destination nonclean (`.claude/rules/multi-repo-stage1.md`),
+so the receipt gate would refuse on that verdict and name the audit, not git, as the thing to run.
 Refusing whatever the
 switches say: with both gates off the count decides only the two ledger records, and a ledger
 record must not change a completion decision. So with BOTH `ZENSU_EDIT_LANDING_GATE=off` and
@@ -219,17 +219,19 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   their controls cover that instead, one behavioural injection probe per config channel, so a
   third channel needs a third probe rather than a bigger numeral. `_tc_git` sits at file scope,
   above the verb dispatch, and every change count in `zensu-log.sh` runs through it inside
-  `_zensu_unqualified_change_count`, which four callers share — `--tdd-complete`, the
-  `--chain-done` zero-change terminus, the unqualified `--code-review-done` mark, and the
+  `_zensu_unqualified_change_count`, which five callers share — `--tdd-complete`, the
+  `--chain-done` zero-change terminus, the unqualified `--code-review-done` mark, the
   ticket-bound `--chain-done` when its ticket is one the Stop hook minted for a chain no reviewer
-  saw (prefix `zc_`, see `.claude/rules/chain-shape-rearm-receipt.md`). `Z6` in
+  saw (prefix `zc_`, see `.claude/rules/chain-shape-rearm-receipt.md`), and the terminal
+  edit-landing gate, whose count decides whether a missing or zero-claim receipt exempts the
+  chain. `Z6` in
   `tests/structure/test-requirements-table-gate.sh` pins the file-scope definition, the verb's
   one call of the helper and the helper's three scope calls. In
   `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G11` drives an inherited
   `GIT_DIR` and an excludes file injected through `GIT_CONFIG_COUNT` and through
   `GIT_CONFIG_PARAMETERS` against both unqualified verbs, `G12` and `G12c` a failed listing, and
   `G13` fails on a bare `git -C` outside comments and `_tc_git` calls and requires the helper's
-  three `$CLAUDE_PROJECT_DIR` call sites plus the one `--tdd-complete` call on `_tc_root`.
+  four `$CLAUDE_PROJECT_DIR` call sites plus the one `--tdd-complete` call on `_tc_root`.
 - **The shared change count reads only three git answers as "not evaluable".**
   `_zensu_unqualified_change_count` prints `unknown`, which every caller reads as not evaluable,
   for a host without `git`, for a root git reports as outside a work tree (`rev-parse

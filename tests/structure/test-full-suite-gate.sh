@@ -153,7 +153,7 @@ fi
 if arm "fsg-stale" "$PROJ"; then
   run_full --cmd 'true'
   printf 'edited\n' > "$PROJ/tracked.txt"
-  chain_done; RC=$?
+  ZENSU_EDIT_LANDING_GATE=off chain_done; RC=$?
   if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
     && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree (record er1_[0-9_a-f]*); files changed since: tracked.txt | ' "$WORK/err"; then
     check "F5 an edit after the green run refuses as stale and lists the path" PASS
@@ -162,7 +162,7 @@ if arm "fsg-stale" "$PROJ"; then
     ERR
   fi
   run_full --cmd 'true' --if-stale
-  chain_done; RC=$?
+  ZENSU_EDIT_LANDING_GATE=off chain_done; RC=$?
   if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -q '^FULL SUITE — pass | ' "$WORK/err"; then
     check "F6 --if-stale re-runs the stale suite and the terminus then closes" PASS
   else
