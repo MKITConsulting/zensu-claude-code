@@ -384,7 +384,7 @@ done
   || check "H17 the prefilter library joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" FAIL
 H17D_OK=1
 for _vc_hook in "$PRE_HOOK" "$POST_HOOK"; do
-  grep -qF 'source "$(dirname "$0")/lib/zensu-browser-consent-prefilter.sh"' "$_vc_hook" || H17D_OK=0
+  grep -qF 'source "$_ZENSU_HOOK_DIR/lib/zensu-browser-consent-prefilter.sh"' "$_vc_hook" || H17D_OK=0
   grep -qF 'zensu_browser_consent_marked "$INPUT"' "$_vc_hook" || H17D_OK=0
   if grep -q 'nocasematch\|_zensu_pair\|PLAYWRIGHT_CLI_SESSION' "$_vc_hook"; then H17D_OK=0; fi
   [ "$(grep -c 'LC_ALL=C sed\|LC_ALL=C tr -d' "$_vc_hook")" = "1" ] || H17D_OK=0

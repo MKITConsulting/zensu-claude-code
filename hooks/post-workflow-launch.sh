@@ -4,7 +4,7 @@ set -u
 INPUT=""
 IFS= read -r -d '' INPUT || true
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd -P)" || exit 0
+ROOT="$(case "$0" in (*/*) CDPATH= cd -- "${0%/*}/.." ;; (*) CDPATH= cd -- .. ;; esac 2>/dev/null && pwd -P)" || exit 0
 POLICY="$ROOT/hooks/lib/external-review-v1.js"
 [ -f "$POLICY" ] && [ ! -L "$POLICY" ] || exit 0
 command -v node >/dev/null 2>&1 || exit 0

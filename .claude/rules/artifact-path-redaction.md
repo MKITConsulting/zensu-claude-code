@@ -101,9 +101,9 @@ invariant is soundness — everything it renders is true — not completeness, s
 of this makes a rendered entry false.
 
 **`hooks.secretScan:false` does NOT disable this scan.** Only the env escapes do.
-The divergence is deliberate: `zensu_hook_enabled` spawns `node` per call and
-`append` runs once per log line, so consulting the config here would put a process
-spawn on the hottest path in the workflow. Recorded rather than left for someone to
+The divergence is deliberate: `zensu_hook_enabled` spawns `node` whenever a config file
+names the key and `append` runs once per log line, so consulting the config here would put a
+process spawn on the hottest path in the workflow. Recorded rather than left for someone to
 discover from a refusal naming a variable the config row never mentions.
 
 **TWO WRITERS apply it, and the second exists because the first cannot be
