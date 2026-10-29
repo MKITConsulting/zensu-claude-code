@@ -99,6 +99,20 @@ test("audit verdict lines parse into kind, step and file", () => {
   );
   assert.equal(pending.kind, "pending");
   assert.equal(pending.file, "src/b.js");
+  const claimPending = lib.parseAuditLine(
+    "PENDING PREDICATE — R1-F6: src/w.js was already dirty before this claim or was audited earlier in this generation; union membership is not evidence — supply a current literal/hash proof with --predicates"
+  );
+  assert.equal(claimPending.kind, "pending");
+  assert.equal(claimPending.file, "src/w.js");
+  assert.deepEqual(
+    lib.parseAuditLine("EDIT LANDED (verified predicate or unchanged prior certification) — R1-F5: src/v.js"),
+    {
+      kind: "landed",
+      step: "R1-F5",
+      file: "src/v.js",
+      line: "EDIT LANDED (verified predicate or unchanged prior certification) — R1-F5: src/v.js",
+    }
+  );
   const outside = lib.parseAuditLine(
     "PENDING PREDICATE — R1-F3: src/b.js mtime is newer than session start, but this is not a git work tree — re-read the target predicate"
   );
