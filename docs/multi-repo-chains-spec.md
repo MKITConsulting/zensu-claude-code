@@ -43,7 +43,7 @@ Six sites, all single-root.
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
 `zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:148-155`), and
-`pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
+`hooks/checks/pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
 while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
@@ -89,20 +89,20 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 
 **The write gate confines Bash writes while it is opted in, the edit gate does not confine
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:885`) and rule (C) at the same predicate
-for git targets (`:931`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:780`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
+(`hooks/lib/bash-source-write-parse.js:901`) and rule (C) at the same predicate
+for git targets (`:947`), with `projectRoot` taken from the passed
+`CLAUDE_PROJECT_DIR` (`:796`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
 opted in. Neither of
 the two other hooks on the `Bash` matcher confines a path to the project root, so
 neither needs changing: `pre-bash-zensu-gate.sh` carries no project-root reference
-at all, and `pre-write-secret-scan.sh:85` references one only through the
+at all, and `hooks/checks/pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:639` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:641` refuses any
 reviewer path input outside the root with `file access must remain inside the
 immutable project root`, and `:600-602` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository

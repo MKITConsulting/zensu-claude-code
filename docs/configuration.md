@@ -50,6 +50,27 @@ defaults are the supported configuration.
 | `user-prompt-session-hub-receipt.sh` | UserPromptSubmit | `sessionHubReceipt` | Session Hub receipt. Acts only on a prompt that is exactly `/zensu:session-trail takeover <session id> --all --receipt <32 lowercase hex characters>`, typed raw or in the command-tag form, which the Zensu Session Hub types when it hands a session to another account. It then writes `<config root>/zensu/session-hub/v1/receipts/<token>.json` (mode 0600, in directories of mode 0700, never replacing an existing file) holding the schema version, the kind, the token, the hook event, the plugin version and the time, and removes receipts and stale temporary files older than seven days while it examines at most 512 entries. The record names no session, path or account. The hook prints nothing and exits 0 on every path, so it never blocks or changes the prompt, and it writes only while `skills/session-trail/SKILL.md` and `skills/session-trail/scripts/trail.mjs` exist. The Session Hub reads the one file whose token it typed to confirm that the plugin in the receiving session received the command. Main principal only. See [session-trail disclosure](../skills/session-trail/references/disclosure.md). |
 | `session-end-worktree-keep.sh` | SessionEnd | `worktreeKeep` (+ `worktreeKeepIdleHours`) | Worktree keep, end half. Ages this session's anchor (stale at once, kept as the branch baseline until twice its idle window, so a takeover before a resume is still disclosed), removes an own anchor it cannot validate when it is a regular file (a symlink, a non-file or a broken `.zensu/state` component stays in place), and reconciles the marker. With `worktreeKeep` off it runs the release pass instead. Whether the desktop app delivers `SessionEnd` when it stops a session's process is unverified; the sibling sweep at the next SessionStart bounds what a missed end leaves behind. |
 
+Nine of these rows run in one process per tool call and event. `hooks/hooks.json` registers the
+hook dispatcher, `hooks/lib/hook-dispatch-v1.js`, for `PreToolUse` and `PostToolUse` on every tool,
+in exec form (`"command": "node"`, with the module path and `pre` or `post` as `args`) and with a
+60-second timeout. On `PreToolUse` it sets `"onFailure": "block"`, so a dispatcher that cannot
+start, times out or fails blocks the call instead of letting it through. Its check registry,
+`DISPATCHED_CHECKS` in `hooks/lib/hook-registration-v1.js`, keeps the matcher, the order and the
+failure policy of each row: `pre-reviewer-capability-gate.sh`, `pre-bash-zensu-gate.sh`,
+`pre-bash-source-write-gate.sh`, `pre-write-secret-scan.sh`, `pre-browser-navigation-consent.sh`
+and `pre-work-order-gate.sh` before a tool runs, and `post-artifact-redact.sh`,
+`post-browser-navigation-consent.sh` and `post-work-order.sh` after it. The Event column of those
+rows names the tools a check runs for; the dispatcher reads each matcher with the host's own
+matcher rule, so a `Bash|PowerShell` check never runs for `Read`. The checks run one after
+another, the capability check first, and their outputs combine as the host combines several
+hooks: deny over defer over ask over allow, the reasons of the winning decision and every
+additional context joined in registry order, the context kept to at most 10,000 characters. The
+capability check, the source-write gate and the browser consent gate on a marked call fail
+closed; the others fail open, as they did as separate hooks. Each script stays an entry point
+that runs only its own check, and `pre-write-secret-scan.sh` and `post-artifact-redact.sh` stay
+registered directly on their `Edit`/`Write` groups. The dispatcher decides most calls in its own
+process and starts a check's bash body under `hooks/checks/` only for the inputs that need it.
+
 The plugin also carries one hooks module, `hooks/usage-feed.ts`, which `hooks/hooks.json` names
 under `modules`. It is not a hook script, is not counted above and has no config flag: after each
 turn that got a response from Claude, it writes the session's rate-limit reading for the Zensu

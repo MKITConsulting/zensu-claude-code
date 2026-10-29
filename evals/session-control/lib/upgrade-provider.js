@@ -628,6 +628,15 @@ function createTraceBoundary(
   );
   if (realBashProbe.status !== 0) fail('cannot resolve the real Bash runtime');
   const realBash = fs.realpathSync.native(realBashProbe.stdout.trim());
+  const realNodeProbe = boundedSync(
+    'bash',
+    ['--noprofile', '--norc', '-c', 'command -v node'],
+    { encoding: 'utf8', env: credentialFreeEnvironment() },
+    'Node runtime probe',
+    PROBE_TIMEOUT_MS,
+  );
+  if (realNodeProbe.status !== 0) fail('cannot resolve the real Node runtime');
+  const realNode = fs.realpathSync.native(realNodeProbe.stdout.trim());
   const bin = path.join(control, 'trace-bin');
   const logger = path.join(control, 'trace-append.js');
   fs.mkdirSync(bin, { mode: 0o700 });
@@ -654,7 +663,7 @@ function createTraceBoundary(
     .filter((entry) => entry && path.resolve(entry) !== path.resolve(bin))
     .join(path.delimiter);
   const directCommand = '/usr/bin/true';
-  const containedCommand = [
+  const containment = [
     '/usr/bin/bwrap',
     '--unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts --unshare-cgroup',
     '--die-with-parent --new-session',
@@ -676,8 +685,9 @@ function createTraceBoundary(
     '--setenv CLAUDE_PLUGIN_ROOT "$plugin_root"',
     `--setenv CLAUDE_PLUGIN_DATA ${shellQuote(pluginData)}`,
     `--setenv CLAUDE_PROJECT_DIR ${shellQuote(projectRoot)}`,
-    `-- ${shellQuote(realBash)} "$@"`,
   ].join(' ');
+  const containedBash = `${containment} -- ${shellQuote(realBash)} "$@"`;
+  const containedNode = `${containment} -- ${shellQuote(realNode)} "$@"`;
   fs.writeFileSync(wrapper, `#!/bin/bash
 set +e
 target="\${1:-}"
@@ -694,13 +704,41 @@ invocation=""
 if [ "$is_hook" -eq 1 ]; then
   invocation="$(${shellQuote(process.execPath)} ${shellQuote(logger)} start ${shellQuote(trace)} unused "$target")" || exit 125
 fi
-${testMode ? directCommand : containedCommand}
+${testMode ? directCommand : containedBash}
 status=$?
 ${testMode ? `if [ "\${ZENSU_UPGRADE_SELFTEST_FAULT:-}" = nonzero-hook ] && [ "$is_hook" -eq 1 ]; then
   status=7
 fi` : ''}
 if [ "$is_hook" -eq 1 ]; then
   ${shellQuote(process.execPath)} ${shellQuote(logger)} end ${shellQuote(trace)} "$invocation" "$target" "$status" || exit 125
+fi
+exit "$status"
+`, { mode: 0o700 });
+  fs.writeFileSync(path.join(bin, 'node'), `#!/bin/bash
+set +e
+target="\${1:-}"
+plugin_root="\${CLAUDE_PLUGIN_ROOT:-}"
+case "$plugin_root" in
+  ${shellQuote(cacheBase)}/*) ;;
+  *) exec ${shellQuote(realNode)} "$@" ;;
+esac
+hook=""
+if [ "$#" -eq 2 ] && [ "$target" = "$plugin_root/hooks/lib/hook-dispatch-v1.js" ]; then
+  case "$2" in
+    pre|post) hook="$target:$2" ;;
+  esac
+fi
+invocation=""
+if [ -n "$hook" ]; then
+  invocation="$(${shellQuote(process.execPath)} ${shellQuote(logger)} start ${shellQuote(trace)} unused "$hook")" || exit 125
+fi
+${testMode ? directCommand : containedNode}
+status=$?
+${testMode ? `if [ "\${ZENSU_UPGRADE_SELFTEST_FAULT:-}" = nonzero-hook ] && [ -n "$hook" ]; then
+  status=7
+fi` : ''}
+if [ -n "$hook" ]; then
+  ${shellQuote(process.execPath)} ${shellQuote(logger)} end ${shellQuote(trace)} "$invocation" "$hook" "$status" || exit 125
 fi
 exit "$status"
 `, { mode: 0o700 });
@@ -1981,10 +2019,10 @@ async function main() {
     requireTraceScope(delta, candidateRoot, 'fresh candidate');
     const expectedHookCounts = new Map();
     for (const name of [
-      ...capturedCandidateHooks.observedExpectedHooks.SessionStart,
-      ...capturedCandidateHooks.observedExpectedHooks.Stop,
-      ...capturedCandidateHooks.observedExpectedHooks.PreToolUse.Read,
-      ...capturedCandidateHooks.observedExpectedHooks.PreToolUse.Bash,
+      ...capturedCandidateHooks.observedHookProcesses.SessionStart,
+      ...capturedCandidateHooks.observedHookProcesses.Stop,
+      ...capturedCandidateHooks.observedHookProcesses.PreToolUse.Read,
+      ...capturedCandidateHooks.observedHookProcesses.PreToolUse.Bash,
     ]) expectedHookCounts.set(name, (expectedHookCounts.get(name) || 0) + 1);
     for (const [name, count] of expectedHookCounts) {
       requireTrace(delta, candidateRoot, name, count, 'fresh candidate Read/Bash PreToolUse');

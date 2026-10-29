@@ -919,6 +919,7 @@ module.exports = {
   // its wrapper discards stderr; it discloses on its own systemMessage.
   bindAndDisclose,
   writeAdoptionOperatorLine,
+  writeServedSweepLine,
   performedAdoption,
   orphanedProjectRootSession,
   resolveFreshHookProject,

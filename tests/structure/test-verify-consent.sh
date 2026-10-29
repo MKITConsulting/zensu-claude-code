@@ -4,6 +4,8 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PRE_HOOK="$PLUGIN_DIR/hooks/pre-browser-navigation-consent.sh"
 POST_HOOK="$PLUGIN_DIR/hooks/post-browser-navigation-consent.sh"
+PRE_BODY="$PLUGIN_DIR/hooks/checks/pre-browser-navigation-consent.sh"
+POST_BODY="$PLUGIN_DIR/hooks/checks/post-browser-navigation-consent.sh"
 MODULE="$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"
 FLOOR="$PLUGIN_DIR/hooks/lib/verify-navigation-floor-v1.js"
 PREFILTER_LIB="$PLUGIN_DIR/hooks/lib/zensu-browser-consent-prefilter.sh"
@@ -62,10 +64,11 @@ MATCHER="$(node -e 'process.stdout.write(String(require(process.argv[1]).CONSENT
 [ "$MATCHER" = "Bash|PowerShell" ] && check "V3 the module's CONSENT_MATCHER is Bash|PowerShell" PASS \
   || check "V3 the module's CONSENT_MATCHER is Bash|PowerShell (got: ${MATCHER:-<none>})" FAIL
 if node -e '
-  const [file, matcher] = process.argv.slice(1);
+  const [file, matcher, registrationModule] = process.argv.slice(1);
   const doc = JSON.parse(require("fs").readFileSync(file, "utf8"));
-  const matchers = (event, name) => (doc.hooks[event] || []).flatMap((group) => (group.hooks || [])
-    .filter((hook) => String(hook.command || "").includes("/hooks/" + name)).map(() => group.matcher));
+  const reg = require(registrationModule);
+  const matchers = (event, name) => (reg.registeredHooks(doc, event) || [])
+    .filter((hook) => hook.command.includes("/hooks/" + name)).map((hook) => hook.matcher);
   const pre = matchers("PreToolUse", "pre-browser-navigation-consent.sh");
   const post = matchers("PostToolUse", "post-browser-navigation-consent.sh");
   if (pre.length !== 1 || post.length !== 1) process.exit(1);
@@ -76,7 +79,7 @@ if node -e '
     if (event !== "PostToolUse") stray += matchers(event, "post-browser-navigation-consent.sh").length;
   }
   process.exit(stray ? 3 : 0);
-' "$HOOKS_JSON" "$MATCHER" 2>/dev/null; then
+' "$HOOKS_JSON" "$MATCHER" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
   check "V4 hooks.json registers each hook exactly once, on the module's matcher and its own event" PASS
 else
   check "V4 hooks.json registers each hook exactly once, on the module's matcher and its own event" FAIL
@@ -121,8 +124,8 @@ else
   check "V8b-control the scan above read the real module, which keeps the recipe resolver for /zensu:doctor and never calls it" FAIL
 fi
 if [ -r "$PRE_HOOK" ] && [ -r "$POST_HOOK" ] \
-  && ! grep -qE 'runtime\.yaml|autopilot\.yaml' "$PRE_HOOK" \
-  && ! grep -qE 'runtime\.yaml|autopilot\.yaml' "$POST_HOOK"; then
+  && ! grep -qE 'runtime\.yaml|autopilot\.yaml' "$PRE_HOOK" "$PRE_BODY" \
+  && ! grep -qE 'runtime\.yaml|autopilot\.yaml' "$POST_HOOK" "$POST_BODY"; then
   check "V8c neither hook spells either half of the recipe ladder" PASS
 else
   check "V8c neither hook spells either half of the recipe ladder" FAIL
@@ -137,10 +140,10 @@ else
   check "V8a positive control: the V9/V10 patterns match a file that carries them" FAIL
 fi
 V9_READABLE=1
-for _vc_file in "$PRE_HOOK" "$POST_HOOK" "$MODULE"; do
+for _vc_file in "$PRE_HOOK" "$POST_HOOK" "$PRE_BODY" "$POST_BODY" "$MODULE"; do
   [ -r "$_vc_file" ] || V9_READABLE=0
 done
-if [ "$V9_READABLE" -eq 1 ] && ! grep -qE "$FLAG_RE" "$PRE_HOOK" "$POST_HOOK" "$MODULE"; then
+if [ "$V9_READABLE" -eq 1 ] && ! grep -qE "$FLAG_RE" "$PRE_HOOK" "$POST_HOOK" "$PRE_BODY" "$POST_BODY" "$MODULE"; then
   check "V9 the pair reads no config flag and teaches no gate-disable prefix" PASS
 else
   check "V9 the pair reads no config flag and teaches no gate-disable prefix" FAIL
@@ -383,7 +386,7 @@ done
   && check "H17 the prefilter library joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" PASS \
   || check "H17 the prefilter library joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" FAIL
 H17D_OK=1
-for _vc_hook in "$PRE_HOOK" "$POST_HOOK"; do
+for _vc_hook in "$PRE_BODY" "$POST_BODY"; do
   grep -qF 'source "$_ZENSU_HOOK_DIR/lib/zensu-browser-consent-prefilter.sh"' "$_vc_hook" || H17D_OK=0
   grep -qF 'zensu_browser_consent_marked "$INPUT"' "$_vc_hook" || H17D_OK=0
   if grep -q 'nocasematch\|_zensu_pair\|PLAYWRIGHT_CLI_SESSION' "$_vc_hook"; then H17D_OK=0; fi
@@ -930,8 +933,9 @@ CLAUDE_PLUGIN_ROOT="$PROJ" bash "$PRE_HOOK" < "$PROJ/mismatch-pre.json" >/dev/nu
 
 NOMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nomod.XXXXXX")"
 remember_tmp "$NOMOD_ROOT"
-mkdir -p "$NOMOD_ROOT/hooks/lib"
+mkdir -p "$NOMOD_ROOT/hooks/lib" "$NOMOD_ROOT/hooks/checks"
 cp "$PRE_HOOK" "$NOMOD_ROOT/hooks/"
+cp "$PRE_BODY" "$NOMOD_ROOT/hooks/checks/"
 cp "$PREFILTER_LIB" "$NOMOD_ROOT/hooks/lib/"
 NOMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$NOMOD_ROOT" bash "$NOMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
 case "$NOMOD_DENY" in
@@ -941,8 +945,9 @@ case "$NOMOD_DENY" in
 esac
 SYMMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-symmod.XXXXXX")"
 remember_tmp "$SYMMOD_ROOT"
-mkdir -p "$SYMMOD_ROOT/hooks/lib"
+mkdir -p "$SYMMOD_ROOT/hooks/lib" "$SYMMOD_ROOT/hooks/checks"
 cp "$PRE_HOOK" "$SYMMOD_ROOT/hooks/"
+cp "$PRE_BODY" "$SYMMOD_ROOT/hooks/checks/"
 cp "$PREFILTER_LIB" "$SYMMOD_ROOT/hooks/lib/"
 ln -s "$MODULE" "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js"
 if [ -L "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js" ]; then
@@ -957,8 +962,9 @@ else
 fi
 BADMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-badmod.XXXXXX")"
 remember_tmp "$BADMOD_ROOT"
-mkdir -p "$BADMOD_ROOT/hooks/lib"
+mkdir -p "$BADMOD_ROOT/hooks/lib" "$BADMOD_ROOT/hooks/checks"
 cp "$PRE_HOOK" "$BADMOD_ROOT/hooks/"
+cp "$PRE_BODY" "$BADMOD_ROOT/hooks/checks/"
 cp "$PREFILTER_LIB" "$BADMOD_ROOT/hooks/lib/"
 printf 'throw new Error("module load fault");\n' > "$BADMOD_ROOT/hooks/lib/verify-consent-v1.js"
 BADMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$BADMOD_ROOT" bash "$BADMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
@@ -981,8 +987,9 @@ done
 # satisfied the record-count assertions just as well as one that worked. This reads both.
 NOMODP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nomodp.XXXXXX")"
 remember_tmp "$NOMODP_ROOT"
-mkdir -p "$NOMODP_ROOT/hooks/lib"
+mkdir -p "$NOMODP_ROOT/hooks/lib" "$NOMODP_ROOT/hooks/checks"
 cp "$POST_HOOK" "$NOMODP_ROOT/hooks/"
+cp "$POST_BODY" "$NOMODP_ROOT/hooks/checks/"
 cp "$PREFILTER_LIB" "$NOMODP_ROOT/hooks/lib/"
 POST_SKIP_RC=0
 POST_SKIP_OUT="$(CLAUDE_PLUGIN_ROOT="$NOMODP_ROOT" bash "$NOMODP_ROOT/hooks/post-browser-navigation-consent.sh" < "$PROJ/mismatch-post.json" 2>&1 >/dev/null)" \
@@ -1413,14 +1420,14 @@ if [ "$VERSION_MEMBERS" = "cliVersion.BINARY_NAMES cliVersion.PACKAGE_NAME cliVe
   && [ "$(grep -o 'cliVersion' "$MODULE" | wc -l | tr -d ' ')" = "4" ] \
   && [ "$(grep -c 'playwright-cli-version' "$MODULE")" = "1" ] \
   && grep -qF "const cliVersion = require('./playwright-cli-version-v1.js');" "$MODULE" \
-  && ! grep -q 'playwright-cli-version' "$PRE_HOOK" "$POST_HOOK" "$PREFILTER_LIB"; then
+  && ! grep -q 'playwright-cli-version' "$PRE_HOOK" "$POST_HOOK" "$PRE_BODY" "$POST_BODY" "$PREFILTER_LIB"; then
   check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME and binaryNames from the version module, so the gate never reads the installed version" PASS
 else
   check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME and binaryNames from the version module, so the gate never reads the installed version (members:$VERSION_MEMBERS)" FAIL
 fi
 HOOK_DENY_MISSING=""
 for literal in 'Zensu browser consent gate denied the playwright-cli call: %s' 'deny "prefilter library unavailable"' 'deny "node unavailable"' 'deny "decision module absent or symlinked"' 'deny "decision module failed"'; do
-  grep -qF -- "$literal" "$PRE_HOOK" || HOOK_DENY_MISSING="$HOOK_DENY_MISSING [$literal]"
+  grep -qF -- "$literal" "$PRE_BODY" || HOOK_DENY_MISSING="$HOOK_DENY_MISSING [$literal]"
 done
 if [ -z "$HOOK_DENY_MISSING" ]; then
   check "V63-control the pre hook still prints the deny prefix and the four plugin-integrity reasons the troubleshooting row quotes" PASS

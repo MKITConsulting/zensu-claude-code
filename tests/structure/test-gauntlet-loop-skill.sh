@@ -260,12 +260,10 @@ COMMAND_TOOL_ARITY="$(printf '%s' "$COMMAND_TOOLS_DECL" | grep -o "'[A-Za-z_][A-
 # every conjunct above true while the central containment claim went false.
 G8_REGISTERED="$(node -e '
 const h = require(process.argv[1]);
-const pre = (h.hooks && h.hooks.PreToolUse) || [];
-const entry = pre.find((e) => e.matcher === ".*");
-const hit = entry && (entry.hooks || []).some(
-  (x) => typeof x.command === "string" && x.command.includes("pre-reviewer-capability-gate.sh"));
+const pre = require(process.argv[2]).registeredHooks(h, "PreToolUse") || [];
+const hit = pre.some((x) => x.matcher === ".*" && x.command.includes("pre-reviewer-capability-gate.sh"));
 process.stdout.write(hit ? "yes" : "no");
-' "$HOOKS_JSON" 2>/dev/null)"
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null)"
 [ "$G8_REGISTERED" = yes ] || G8_MISS="$G8_MISS manifest-registration"
 flat_has 'a builder or critic that reports its `agent_type` may hold a guarded `Bash` unless `hooks.subagentShell` is `false`' "$SKILL_FLAT" \
   || G8_MISS="$G8_MISS skill-claim"
