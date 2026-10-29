@@ -276,7 +276,7 @@ zen_prompt_and_anchor() {
       if (process.env.ZEN_ANCHOR_SKIP === "1") {
         // The parent already saw that this project has no `.zensu/state`, so no
         // chain can be armed here. Not a fault: it is the ordinary state of every
-        // project that never ran /zensu:tdd, and it discloses nothing for the same
+        // project that never ran /zensu:build, and it discloses nothing for the same
         // reason an absent document does not.
         fault = "";
       } else if (!root || !key) {

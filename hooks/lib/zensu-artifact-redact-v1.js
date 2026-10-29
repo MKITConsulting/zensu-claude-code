@@ -2,8 +2,8 @@
 // zensu-artifact-redact-v1.js — the single source of truth for what makes a
 // .zensu run artifact safe to commit.
 //
-// Consuming repos commit `.zensu/plans/{ts}_tdd-{slug}.md` and
-// `.zensu/logs/{ts}_tdd-{slug}.log` as an audit trail. A scan of ~27k committed
+// Consuming repos commit `.zensu/plans/{ts}_build-{slug}.md` and
+// `.zensu/logs/{ts}_build-{slug}.log` as an audit trail. A scan of ~27k committed
 // log lines across four such repos found no credential values and ~436 lines
 // carrying an absolute developer path — `/Users/<name>/…` — which entered
 // mostly through the `cmd="…"` field of CHECKPOINT/AUDIT lines, because that
@@ -62,7 +62,7 @@
 // home segment; neither can see it anywhere else. That is a refusal to guess, not
 // an oversight: a name has no pattern, and a regex that tried would either miss
 // most of them or eat ordinary words out of the audit trail. The authoring rules
-// in `skills/tdd/references/planning.md` carry this half, and they have to. Both roots are matched in their given AND `realpath` spellings,
+// in `skills/build/references/planning.md` carry this half, and they have to. Both roots are matched in their given AND `realpath` spellings,
 // which closes the one alias that shows up on every macOS run (`/var/folders/…`
 // against `/private/var/folders/…`).
 //
@@ -444,7 +444,7 @@ function replaceEncodedSpellings(text, spellings, placeholder, end) {
 // loads the artifact to ask the question, and `SWEEP_MAX_TARGETS` is what bounds
 // that. And the short-circuit only fires for text containing NONE of the three
 // residual literals — two of which, `home` and `root`, are ordinary English
-// words. A TDD narrative log for this repository says "project root" and "repo
+// words. A workflow log for this repository says "project root" and "repo
 // root" constantly, and any artifact a residual rule has already touched contains
 // `<home>`, whose substring is `home`. Those texts admit and run every pass
 // anyway. The reliable saving is on artifacts that mention none of the three;

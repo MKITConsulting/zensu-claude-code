@@ -64,7 +64,7 @@ ESSENTIALS=(
   "P3c offers via AskUserQuestion|AskUserQuestion"
   "P3d always offers Exit|ALWAYS including **Exit**"
   "P3e delegates to /zensu:implement|/zensu:implement"
-  "P3f delegates to /zensu:tdd|(\`/zensu:implement\` / \`/zensu:tdd\`)"
+  "P3f delegates to /zensu:build|(\`/zensu:implement\` / \`/zensu:build\`)"
   "P3g delegates to /zensu:cover|/zensu:cover"
   "P3h delegates to /zensu:pr-team-review|Deep review via \`/zensu:pr-team-review\`"
   "P3i delegates to /zensu:pr-fix-findings|Fix findings via \`/zensu:pr-fix-findings\`"
@@ -119,7 +119,7 @@ DRIVER_PINS=(
   "P3ao the testing transition keys on review presence|| PR has a review, \`changesRequested\` false, 0 unresolved threads, status \`in-progress\` | Transition \`testing\` (confirm) |"
   "P3ap the branch is pushed before the PR opens|push the branch to the remote it tracks, else \`origin\` (\`git push -u <remote> <branch>\`), and only after the push succeeded open the PR"
   "P3aq a merged or closed PR branch is never pushed to|never push to the branch of a merged or closed PR"
-  "P3ar requested changes take their content from the user and end with a re-review request|ask the user which changes on the PR (the card's link) are still open, then run \`/zensu:tdd\` with them as the spec · once they are pushed, ask the reviewer to review again"
+  "P3ar requested changes take their content from the user and end with a re-review request|ask the user which changes on the PR (the card's link) are still open, then run \`/zensu:build\` with them as the spec · once they are pushed, ask the reviewer to review again"
 )
 for entry in "${DRIVER_PINS[@]}"; do
   label="${entry%%|*}"; needle="${entry#*|}"

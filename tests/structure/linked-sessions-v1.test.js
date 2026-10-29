@@ -89,6 +89,41 @@ test('a detached linked session and everything below it is never listed', () => 
   assert.equal(walk.archived, 0);
 });
 
+test('each open linked session counts the open sessions below it that would follow through it: every level, through archived ones, never into a detached one or one its continuation keeps, and once each', () => {
+  const under = (n, parent, extra = {}, from = {}) => ({ ...child(n, extra), spawnedFrom: { sessionId: run(parent), taskId: `task_${n}`, title: `below ${parent}`, sideSession: true, ...from } });
+  const records = [
+    child(1),
+    under(11, 1),
+    under(12, 11),
+    under(11, 12),
+    under(13, 1, { isArchived: true }),
+    under(14, 13),
+    under(15, 1, { lineageDetached: true }),
+    under(16, 15),
+    under(17, 1, { isArchived: true, lineageDetached: true }),
+    under(18, 17),
+    child(2),
+    under(21, 2, {}, { btw: true }),
+    under(22, 21),
+    under(23, 2, { sshConfig: { host: 'box' } }),
+    under(24, 2, { cliSessionId: 'not-a-session-id' }),
+    under(25, 2),
+    under(26, 25),
+    under(27, 2),
+    child(3, { isArchived: true }),
+    under(31, 3),
+    under(32, 31, { isArchived: true }),
+  ];
+  const edges = [{ confidence: 'confirmed', from: { sessionId: cli(25) }, to: { sessionId: 'd1d1d1d1-0000-4000-8000-000000000025' } }];
+  const walk = mod.familyWalk(root(), records);
+  assert.deepEqual(walk.open.map((node) => node.run), [run(1), run(2), run(31)]);
+  assert.deepEqual([run(1), run(2), run(31)].map((r) => walk.openBelow(r)), [3, 7, 0]);
+  const state = decide(records, { edges });
+  assert.deepEqual(state.sessions.map((entry) => [entry.run, entry.openBelow, entry.decision, entry.why]), [[run(1), 3, 'start', null], [run(2), 1, 'start', null], [run(31), 0, 'start', null]]);
+  const bare = mod.decideLinked({ rootRun: ROOT_RUN, open: [{ run: run(9), record: child(9), throughArchived: false }], archived: 0, detached: 0 });
+  assert.equal(bare.sessions[0].openBelow, 0);
+});
+
 test('side and task-chip sessions start, a user fork only when named, and a btw never', () => {
   const state = decide([
     child(1),
@@ -134,6 +169,65 @@ test('at most eight sessions start, in creation order, and the rest wait for a l
   assert.equal(decide(records, { cap: 2 }).sessions.filter((entry) => entry.decision === 'start').length, 2);
 });
 
+test('the plan names are none or a comma-separated list of cont- handles, kept once each in order, and anything else is refused', () => {
+  assert.deepEqual(mod.linkedStartNames('none'), []);
+  assert.deepEqual(mod.linkedStartNames('cont-0000000a'), ['cont-0000000a']);
+  assert.deepEqual(mod.linkedStartNames('cont-0000000b,cont-0000000a,cont-0000000b'), ['cont-0000000b', 'cont-0000000a']);
+  for (const bad of ['', 'NONE', 'None', 'none,cont-0000000a', 'cont-0000000A', 'cont-000000a', 'cont-0000000aa', 'cont-0000000a,', ',cont-0000000a', 'cont-0000000a, cont-0000000b', 'cont-0000000a cont-0000000b', 'cont-0000000a-2', 'local_0000000a-1111-4111-8111-00000000000a', null, undefined, 7, ['cont-0000000a']]) {
+    assert.equal(mod.linkedStartNames(bad), null, String(bad));
+  }
+});
+
+test('a carried plan starts exactly the sessions it names that can start, a named fork and a named session without a folder included, and marks every other one that could start later', () => {
+  const edges = [{ confidence: 'confirmed', from: { sessionId: cli(7) }, to: { sessionId: 'd1d1d1d1-0000-4000-8000-000000000007' } }];
+  const records = [
+    child(1),
+    child(2),
+    child(3, {}, { userFork: true }),
+    child(4, { originCwd: 'relative/path' }),
+    child(5, {}, { userFork: true, btw: true }),
+    child(6, { sshConfig: { host: 'box' } }),
+    child(7),
+    child(8, {}, { sideSession: undefined }),
+    child(9, {}, { userFork: true }),
+  ];
+  const plain = decide(records, { edges });
+  assert.deepEqual(plain.sessions.map((entry) => [entry.decision, entry.why, entry.planned]), [['start', null, null], ['start', null, null], ['if-named', 'fork', null], ['if-named', 'place', null], ['stays', 'btw', null], ['stays', 'ssh', null], ['stays', 'continued', null], ['start', null, null], ['if-named', 'fork', null]]);
+  assert.equal(plain.plan, null);
+  const names = ['cont-00000001', 'cont-00000003', 'cont-00000004', 'cont-00000005', 'cont-00000007'];
+  const carried = decide(records, { edges, planned: names });
+  assert.deepEqual(carried.sessions.map((entry) => [entry.decision, entry.why, entry.planned]), [['start', null, true], ['later', 'unplanned', false], ['start', null, true], ['start', null, true], ['stays', 'btw', true], ['stays', 'ssh', false], ['stays', 'continued', true], ['later', 'unplanned', false], ['later', 'unplanned', false]]);
+  assert.deepEqual(carried.plan, { names, unlisted: [] });
+  const byName = Object.fromEntries(carried.sessions.map((entry) => [entry.name, entry]));
+  assert.ok(byName['cont-00000002'].start, 'a session the plan did not name keeps its start call for a later message');
+  assert.equal(byName['cont-00000004'].start.cwd, undefined);
+  assert.match(mod.LINKED_WHY.unplanned, /did not name it, so it starts only when the user asks for it in a later message/);
+  assert.deepEqual(decide(records, { edges, planned: [] }).sessions.filter((entry) => entry.decision === 'start'), []);
+});
+
+test('a carried plan counts its starts against the cap in creation order, so a named session past the cap waits as cap and an unnamed one never takes a free place', () => {
+  const records = Array.from({ length: 11 }, (_, i) => child(i + 1, { createdAt: 5000 - i }));
+  const names = records.slice(0, 10).map((record) => mod.continuationName(record.sessionId));
+  const state = decide(records, { planned: names });
+  assert.deepEqual(state.sessions.map((entry) => entry.run), records.slice().reverse().map((record) => record.sessionId));
+  assert.deepEqual(state.sessions.map((entry) => [entry.decision, entry.why]), [['later', 'unplanned'], ...Array(8).fill(['start', null]), ['later', 'cap'], ['later', 'cap']]);
+  assert.deepEqual(decide(records, { planned: names.slice(0, 3) }).sessions.filter((entry) => entry.decision === 'start').map((entry) => entry.name), [names[2], names[1], names[0]]);
+  assert.equal(decide(records, { planned: names, cap: 2 }).sessions.filter((entry) => entry.decision === 'start').length, 2);
+});
+
+test('the names a carried plan holds that no listed session has are reported, and the open child of a planned session archived since the plan waits as unplanned', () => {
+  const records = [
+    child(1),
+    child(2, { isArchived: true }),
+    { ...child(21), createdAt: 900, spawnedFrom: { sessionId: run(2), taskId: 'task_21', title: 'below', sideSession: true } },
+    child(3, { lineageDetached: true }),
+  ];
+  const state = decide(records, { planned: ['cont-00000001', 'cont-00000002', 'cont-00000003', 'cont-0000abcd'] });
+  assert.deepEqual(state.sessions.map((entry) => [entry.name, entry.decision, entry.why, entry.throughArchived]), [['cont-00000021', 'later', 'unplanned', true], ['cont-00000001', 'start', null, false]]);
+  assert.deepEqual(state.plan.unlisted, ['cont-00000002', 'cont-00000003', 'cont-0000abcd']);
+  assert.deepEqual(decide(records, { planned: ['cont-00000001'], max: 0 }).plan, { names: ['cont-00000001'], unlisted: ['cont-00000001'] });
+});
+
 test('sessions that cannot or must not be continued stay, each with its reason', () => {
   const state = decide([
     child(1, { cliSessionId: 'not-a-session-id' }),
@@ -144,7 +238,7 @@ test('sessions that cannot or must not be continued stay, each with its reason',
   ], { self: cli(3), started: new Set(['cont-00000004']) });
   const got = state.sessions.map((entry) => [entry.decision, entry.why, entry.start === null]);
   assert.deepEqual(got, [['stays', 'no-session-id', true], ['stays', 'ssh', true], ['stays', 'self', true], ['stays', 'started', true], ['start', null, false]]);
-  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'place', 'fork', 'ledger-unread', 'cap']) {
+  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'place', 'fork', 'ledger-unread', 'cap', 'unplanned']) {
     assert.ok(mod.LINKED_WHY[why], why);
   }
 });

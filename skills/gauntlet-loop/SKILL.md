@@ -71,7 +71,7 @@ closes none.
   output into the packet: the shell can be off, and the guard can refuse. A critic is
   handed that evidence; it never reproduces it. Plan the charter's inspection protocol
   around that, or the first critic round returns nothing.
-- **An active `/zensu:tdd` chain binds the LEAD ONLY.** The PreToolUse
+- **An active `/zensu:build` chain binds the LEAD ONLY.** The PreToolUse
   phase-gate returns early unless the principal is `main-v1`
   (`hooks/pre-edit-tdd-reminder.sh`), and no spawn the
   host identifies as a subagent is `main-v1` — a builder or critic is
@@ -94,8 +94,8 @@ closes none.
 - **Charter approval is intercepted under the shipped default.**
   `plan-approved-delegate.sh` fires on
   `ExitPlanMode` and directs the main thread to ask which delivery route the plan
-  takes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, or implementing directly —
-  before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER `/zensu:tdd`
+  takes — `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`, or implementing directly —
+  before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER `/zensu:build`
   yes/no question on every prompt while no chain is active — it offers neither
   `/zensu:autopilot` nor `/zensu:pilot`, and when no human can answer it, the
   fast-path runs the workflow without asking. Approving a gauntlet charter through
@@ -123,8 +123,8 @@ closes none.
   `zensu:zensu-plm`. On top of that the reviewer types hard-refuse any spawn that is
   not a complete `REVIEW PACKET v1`, `review-aspect` accepts only seven fixed
   perspectives, and their traversal is capability-restricted. Use `Explore` for a
-  gauntlet critic. A `zensu:code-reviewer` spawn made outside the TDD chain's own header
-  protocol is a no-op, not a stolen ticket — it simply does nothing.
+  gauntlet critic. A `zensu:code-reviewer` spawn made outside the chain's own header
+  protocol is a no-op, not a stolen ticket — it does nothing.
 - **Zensu CLI mutations stay in the main thread.** A builder or critic subagent never
   runs them, and never runs a Zensu workflow skill on the lead's behalf.
 
@@ -225,7 +225,7 @@ rules for expensive tools or external services.
 **Get the charter approved before spawning anything.**
 Approve it with `AskUserQuestion`. Do NOT reach for plan mode: `ExitPlanMode` is
 intercepted by `plan-approved-delegate.sh`, which asks which delivery route to take
-and hands the mission to whichever is chosen — `/zensu:autopilot`, `/zensu:tdd`,
+and hands the mission to whichever is chosen — `/zensu:autopilot`, `/zensu:build`,
 `/zensu:pilot`, or implementing directly, or the route this session already recorded — see "Inside the Zensu plugin" above. Take that hand-off only as a
 deliberate decision, never as the default route to an approval. A long unattended
 run started from a misread goal burns the whole budget.

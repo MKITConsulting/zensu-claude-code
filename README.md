@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.30.1-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.33.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -201,7 +201,7 @@ make no `zensu` call at all.
 
 | Skill | What it does | Needs |
 |-------|--------------|-------|
-| `/zensu:tdd` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. Despite its name it runs without RED→GREEN by default; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
+| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys | `gh` or `glab` |
 | `/zensu:implement` | Implement a tracked feature through the Zensu workflow, then link its tests, sources and docs and create a revision | Zensu account |
 | `/zensu:pilot` | The guided route: probes a tracked feature's real state and offers the next step, one confirmed step at a time | Zensu account and a tracked feature; `gh` or `glab` for its pull request |
@@ -298,7 +298,7 @@ Not every hook can be turned off:
 
 | | Hooks | How |
 |-|-------|-----|
-| **Switched off by a config key** | The banner and primer, the pulse banner, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
+| **Switched off by a config key** | The banner and primer, the pulse banner, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, automatic feature context, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
 | **Off unless you opt in** | The source-write gate's checks of Bash writes | `hooks.bashWriteGate: true` |
 | **Bypassed only through the environment** | The TDD phase gate | `ZENSU_TDD_GATE=off` in the environment Claude Code starts with |
 | **Always on while the plugin is enabled** | Session Control and the capability gate that confines subagents (`hooks.subagentShell: false` only withdraws their `Bash`), the Session Control check inside the source-write gate, evidence discipline, the plugin-data guard, the browser consent gate and its recorder, the artifact path redactor, the prompt-ledger reset, Autopilot resume context, the review-evidence hooks, the work-order hooks (inert outside a work-order session), the background-review hand-back and both automatic work-capture hooks | Disable the plugin ([Turn Zensu off or remove it](#turn-zensu-off-or-remove-it)) |
@@ -315,7 +315,7 @@ Nothing writes an ignore rule for you, except the `.worktree-keep` line below.
 | Path | Written by | Commit it? |
 |------|------------|------------|
 | `.zensu/config.json` | You or `/zensu:setup` | Yes, to give every clone the same settings; it overrides each developer's global file key by key |
-| `.zensu/plans/`, `.zensu/logs/*_tdd-*.log` | The Zensu workflow, one plan and one progress log per chain | Optional. Committed, they are an audit trail; absolute paths in them are redacted when they are written |
+| `.zensu/plans/`, `.zensu/logs/*_build-*.log` | The Zensu workflow, one plan and one progress log per chain | Optional. Committed, they are an audit trail; absolute paths in them are redacted when they are written |
 | `.zensu/state/` | Zensu's hooks, per session | Never. Add `.zensu/state/` to `.gitignore` |
 | `.zensu/verify-feature-runs/` | `/zensu:verify-feature`, one directory per run, removed after a clean teardown | Never |
 | `.zensu/logs/witness-*.log` | Earlier releases only | Never |
@@ -350,7 +350,7 @@ What stays behind:
 ## Zensu account and CLI
 
 The implementation workflow and the review chain need no CLI, no login, and no
-Zensu account: `/zensu:tdd`, the review-aspect panel with its auto-fix loop, and
+Zensu account: `/zensu:build`, the review-aspect panel with its auto-fix loop, and
 the progress log under `.zensu/logs/` run locally, and so does every skill
 marked "—" in the [skill tables](#skills-31). The `zensu` CLI and an
 account add the tracking layer on top — feature status, revisions, artifact
@@ -477,7 +477,7 @@ first 100 ghost-scan candidates and read only the first page of wiki lists.
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
-| [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
+| [Build workflow](docs/build-workflow.md) | The full per-step reference for the implementation workflow |
 | [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the driver for every kind of application and what each needs, consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
@@ -530,3 +530,15 @@ the missing capability instead of silently falling back. See the
 [context procedure](skills/implement/references/knowledge-context.md)
 for truncation, access failures and evidence handoff. These reads supplement feature,
 security and design context. The context board records these API retrievals by package `load_id`, declared agent and server time. Local file reads and model comprehension are not recorded.
+
+## Automatic feature context
+
+An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. The automatic package presents `layers` first and keeps `related_layers` as a separate bounded metadata index with reasons and directed paths. Choose additional sources for a specific task question; never bulk-fetch either group. Disable with `hooks.contextAutoLoad: false`. See [automatic context](docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
+
+Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. See the automatic-context documentation for transmitted task text, limits and host support.
+AI work capture declares this plugin's source/version and a work/test purpose.
+Use `--run-kind test` for explicit validation or demo goals; ordinary product work
+with tests remains work. Test runs are hidden from default My work/Organization
+metrics; billing credits remain separately unfiltered. Update the backend and
+CLI to the metadata-capable contract before installing this reporter update.
+See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.

@@ -14,7 +14,7 @@ check() {
 }
 
 # Post-0.4.0 trust model: the gate activates ONLY on chain-state (active=true,
-# set by /zensu:tdd --tdd-begin). CLAUDE_AGENT_TYPE is IGNORED — it neither
+# set by /zensu:build --tdd-begin). CLAUDE_AGENT_TYPE is IGNORED — it neither
 # activates nor bypasses the gate, and a forged payload subagent_type is
 # likewise irrelevant. This replaces the legacy env-trust model where
 # CLAUDE_AGENT_TYPE=zensu:tdd-manager turned the gate on.

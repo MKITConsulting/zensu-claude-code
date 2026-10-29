@@ -108,7 +108,7 @@ could see it: counting turns ended while `implementing` with a changed worktree,
 wall time. Not addressed here — a turn counter is a workflow-state field and therefore
 a MINOR release under §"Runtime Lineage".
 
-**Residual carriers, stated rather than closed.** KNOWN BOUND 1: `skills/tdd/references/review-chain.md`
+**Residual carriers, stated rather than closed.** KNOWN BOUND 1: `skills/build/references/review-chain.md`
 (Phase 6 step 10) orders the FIRST spawn of every chain before any hook directive exists, so a
 session that withholds the very first fan-out learns this only after one blocked Stop —
 one turn, not a wedge. KNOWN BOUND 2: `hooks/lib/chain-recovery-v1.js`'s `NEXT_COMMAND`
@@ -141,7 +141,7 @@ the absence of the ledger claim from both doc carriers (T56), the second excepti
 T40: occurrence counts for both the constant and the clause, no consumer redeclaration, a
 single-line plain-assignment form with no `:-`, no borrowed branch discriminator, and a
 hand-copy scan over FIVE roots — `hooks/`, `skills/`, `docs/`, `agents/` and `templates/`,
-with `tests/` carved out because the suite legitimately holds the needle. `docs/tdd-manager-workflow.md` §"The review-spawn scope sentence" is the operator
+with `tests/` carved out because the suite legitimately holds the needle. `docs/build-workflow.md` §"The review-spawn scope sentence" is the operator
 account; P3a-P3f in `tests/structure/test-post-review-self-review-handoff.sh` pin the
 fix-round site on its emitted context.
 
@@ -157,7 +157,7 @@ states, so classify it in that `case` in the same commit), and the `reviewSpawnS
 in `config.example.json` — that file is advertised as carrying every flag, and T55 pins this
 one there. **Operator-facing accounts:** the `reviewSpawnScopeSentence` row in
 `docs/configuration.md` and §"The review-spawn scope sentence" in
-`docs/tdd-manager-workflow.md`.
+`docs/build-workflow.md`.
 
 **Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
 workflow-state schema field, no strict key set (`zensu_hook_enabled` is the PERMISSIVE

@@ -37,12 +37,12 @@ fi
 # Behavioral check via git check-ignore (the real guarantee).
 cd "$PLUGIN_DIR" 2>/dev/null || true
 if git rev-parse --git-dir >/dev/null 2>&1; then
-  if git check-ignore -q ".zensu/plans/2026-01-01-0000_tdd-foo.md"; then
+  if git check-ignore -q ".zensu/plans/2026-01-01-0000_build-foo.md"; then
     check "G4 git check-ignore: a plan file IS ignored" PASS
   else
     check "G4 git check-ignore: a plan file IS ignored" FAIL
   fi
-  if git check-ignore -q ".zensu/logs/2026-01-01-0000_tdd-foo.log"; then
+  if git check-ignore -q ".zensu/logs/2026-01-01-0000_build-foo.log"; then
     check "G5 git check-ignore: a narrative log IS ignored" PASS
   else
     check "G5 git check-ignore: a narrative log IS ignored" FAIL

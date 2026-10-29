@@ -63,7 +63,7 @@ fi
 # silently skipping every check below while run-all.sh scores a false PASS).
 ESSENTIALS=(
   "P4a one interactive planning gate|the ONLY interactive gate"
-  "P4b implements via /zensu:tdd|/zensu:tdd"
+  "P4b implements via /zensu:build|/zensu:build"
   "P4c team review via /zensu:pr-team-review|/zensu:pr-team-review"
   "P4d fixes via /zensu:pr-fix-findings|/zensu:pr-fix-findings"
   "P4e team review runs ONCE, not in the loop|ONCE"

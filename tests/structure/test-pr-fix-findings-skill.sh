@@ -58,7 +58,7 @@ fi
 
 if has "$SKILL" 'complete paginated thread fetch' \
    && has "$SKILL" 'fail closed on pagination' \
-   && has "$SKILL" 'one aggregate bound `/zensu:tdd` fix run' \
+   && has "$SKILL" 'one aggregate bound `/zensu:build` fix run' \
    && has "$SKILL" 'AUTOPILOT-RUN: <runId>' \
    && has "$SKILL" 'serially in the main task' \
    && has "$SKILL" 'no parallel editing agents or editing worktrees'; then

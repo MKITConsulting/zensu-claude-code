@@ -267,6 +267,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-auto-load.sh\"",
+            "timeout": 12
+          },
+          {
+            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh\""
           },
           {
@@ -299,7 +304,8 @@
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-review-handback.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-review-handback.sh\"",
+            "timeout": 180
           }
         ]
       }
@@ -316,5 +322,7 @@
       }
     ]
   },
-  "modules": ["./usage-feed.ts"]
+  "modules": [
+    "./usage-feed.ts"
+  ]
 }

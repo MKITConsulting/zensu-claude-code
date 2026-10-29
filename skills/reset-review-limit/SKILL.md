@@ -194,7 +194,7 @@ Because round numbers restart at 1, mark the chain's run log so the round-scope
 and findings-ledger helpers stop mixing old rounds with new ones. After the marker
 the ledger's report read still lists every earlier open entry, under a `G<g>:`
 prefix naming the generation it came from. Use the run log
-path the `/zensu:tdd` chain you just re-armed has been writing to; never search for
+path the `/zensu:build` chain you just re-armed has been writing to; never search for
 a log file. When that path is not known in this session, skip the marker. The
 helpers then fail open: the round-scope delta only widens, the ledger's routing read
 answers `degraded` so the next review routes as before, and its report read answers
@@ -211,7 +211,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" append --log "<run log of
 For a durable rearm, read official status again. `TDD_RUNNING` means the same
 chain was rearmed and its next reviewer completion starts at round 1.
 `AWAIT_TDD` means the central composite retired and resumed the exhausted
-generation; invoke `/zensu:tdd` with the exact `AUTOPILOT-RUN: <runId>` binding.
+generation; invoke `/zensu:build` with the exact `AUTOPILOT-RUN: <runId>` binding.
 That flow must start `ATTEMPT + 1` through the bound `--tdd-begin` form with a
 fresh chain id. The new begin clears the old rearm receipt. Any other status is
 a verification failure; do not invent a recovery event.

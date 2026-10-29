@@ -108,7 +108,7 @@ immutable project root`, and `:600-602` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
-**Claims are repo-root-relative.** `skills/tdd/references/execution.md:9, :12` requires every logged
+**Claims are repo-root-relative.** `skills/build/references/execution.md:9, :12` requires every logged
 `WIRED — files:` / `IMPL completed — files:` list to be relative to
 `git rev-parse --show-toplevel`. Across two roots `src/foo.ts` is ambiguous.
 
@@ -504,7 +504,7 @@ symbol rather than by line, because the stage-2 pull requests move most of these
 | Stop probe | The hook's one git probe, the implementing-phase nudge `zensu_impl_stop_nudge`, asks only the anchor's `git status` today; it counts the union inside the existing Stop deadline, a timeout counting as `unavailable`. The zero-change check itself is the terminus count of the row above, and the texts that describe it, `INNER_ZERO_CHANGE_NOTE` and the resume directive's `git diff --name-only HEAD` wording, stop naming the anchor's `git diff` alone. | `hooks/stop-chain-enforcer.sh` |
 | Full suite and CI deferral | `--evidence-run --root <label>` runs in that root's top, and a record keeps deriving its root from its `cwd`, so no strict key set changes. Each declared root gets its own tree and fingerprint, and the verdict is computed per root instead of letting the newest full record pick the root. A code root's own `.zensu/config.json` contributes `evidence.fullSuiteCommand` and the runner keys only; the gate mode and every `hooks.*` key stay with the anchor. The gate requires, for the anchor and for every code root whose change count — commits since the baseline included — is non-zero, a green full record on that root's tree or a CI-deferral verdict from that root's own ladder: its clone record, its remote and workflows, and a snapshot per root in a file of its own, `<session key>.<root digest>.json` beside the anchor's `<session key>.json`, whose `projectRoot` names that root, so `SNAPSHOT_KEYS` is unchanged. Each exempted root is disclosed on its own line, and Phase 0 refreshes the CI policy per root path before arming. The close step the post-review directive renders names one `--evidence-run --root <label>` per changed code root beside the anchor's run, each with the scope its own root's ladder decides: the full suite where that root runs it locally, the affected-suite run where its CI runs it. `CLOSE_SUITE_STEP` is `FULL_SUITE_STEP` under the local runner and `AFFECTED_SUITE_STEP` under CI, and `CLOSE_PASS_SUITE_CI` names `AFFECTED_SUITE_STEP` directly, so the four change together; one anchor run would leave the per-root gate refusing the first close. | `hooks/lib/evidence-run-v1.js`, `hooks/lib/full-suite-policy-v1.js`, `hooks/lib/ci-contract-v1.js`, `hooks/post-review-tdd-delegate.sh` |
 | Acceptance verification | Freshness and `hasChanges` bind to the union tree — the anchor's tree plus each code root's — so an edit in any root makes a record stale. | `hooks/lib/acceptance-verify-v1.js` |
-| Review packet | `changed_files` carries the `@<label>/` paths `--change-set` prints, and a new optional `code_roots` field carries one `<label> <absolute path>` entry per line. A packet without it has no code roots and is never `REVIEW PACKET INVALID`, so a single-root packet stays as it is today, the shape that let the optional `findings_ledger` field ship as a `patch` (`agents/review-judge.md`). The reviewer agents resolve labels through it and cite `@<label>/<path>:<line>`. | `skills/tdd/references/review-chain.md`, `agents/review-aspect.md`, `agents/review-judge.md`, `agents/code-reviewer.md` |
+| Review packet | `changed_files` carries the `@<label>/` paths `--change-set` prints, and a new optional `code_roots` field carries one `<label> <absolute path>` entry per line. A packet without it has no code roots and is never `REVIEW PACKET INVALID`, so a single-root packet stays as it is today, the shape that let the optional `findings_ledger` field ship as a `patch` (`agents/review-judge.md`). The reviewer agents resolve labels through it and cite `@<label>/<path>:<line>`. | `skills/build/references/review-chain.md`, `agents/review-aspect.md`, `agents/review-judge.md`, `agents/code-reviewer.md` |
 | Capability confinement | A reviewer may read inside every declared root, read from the bound workflow document. The PLM profile `zensu-plm-readonly-v1` gets the same reads, because its `readOnlyViolation` runs the same `protectedAccessViolation`. Every declared root's `.zensu` joins the protected list of reviewers, the PLM profile and neutral subagents, and a path with a `.zensu` segment below the anchor is refused to all three whatever the list says, as is one below a declared root (§7.2). | `hooks/lib/reviewer-capability-v1.js` |
 | `crossrepo` perspective | Spawned only when the chain has code roots (§7), with labels stripped before a path is classified. The reviewer contract names it: `agents/review-aspect.md` lists seven perspectives with one checklist line each and `agents/code-reviewer.md` carries checklist lines of its own, so both gain a `crossrepo` entry. The Stop enforcer's resume directive appends it for a chain with code roots, outside the two `REVIEW_PERSPECTIVES` literals that T60 and T61 of `tests/structure/test-stop-enforcer-self-review-routing.sh` pin against the activation module, so both keep pinning the single-root panels. | `hooks/lib/aspect-activation-v1.js`, `agents/review-aspect.md`, `agents/code-reviewer.md`, `hooks/stop-chain-enforcer.sh` |
 | Finding verification and ledger | An absolute, `~` or symlink spelling of a path inside a declared root is mapped to `@<label>/`, so a real code-root finding is never neutralized as `out-of-root`; ledger anchors must use `@<label>/`. | `hooks/lib/finding-verify-v1.js`, `hooks/lib/review-ledger-v1.js` |
@@ -531,7 +531,7 @@ the list from an inherited or a command environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2831`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2839`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -548,7 +548,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5019`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5027`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -684,7 +684,7 @@ A cheaper first move exists and is not blocked on any of it — see §7.4.
 
 ### 7.1 Why it is mode-independent
 
-`skills/tdd/references/modes.md:7` lists the whole review chain — fan-out, judge second
+`skills/build/references/modes.md:7` lists the whole review chain — fan-out, judge second
 pass, Finding Verification Gate, the consuming reviewer, the self-review terminus
 — among what runs exactly as written in vanilla. A reviewer reports a finding; it
 does not demand a Characterization test. That demand is precisely why the
@@ -758,12 +758,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/tdd/references/audit.md:61`) and runs in vanilla
-(`skills/tdd/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
+Drift Audit does the same (`skills/build/references/audit.md:61`) and runs in vanilla
+(`skills/build/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/tdd/references/audit.md:67`), which is a test vanilla cannot be made to produce.
+(`skills/build/references/audit.md:67`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/tdd/references/audit.md:69`), AND reword the finding
+level as step 6c already is (`skills/build/references/audit.md:69`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no
@@ -1051,8 +1051,8 @@ Per pull request, so that each one carries its own pins (§9).
 - One chain over a folder anchor and two repositories below it is run live to its terminus once,
   and both the `recorded-root-not-in-a-worktree` refusal and the folder-anchor disclosure name
   `--code-root`.
-- `templates/tdd-plan.md` gains the `## Code roots` table with labels only and its authoring
-  rule names it, `skills/tdd/references/planning.md` tells the model to fill it with exactly the
+- `templates/zensu-plan.md` gains the `## Code roots` table with labels only and its authoring
+  rule names it, `skills/build/references/planning.md` tells the model to fill it with exactly the
   labels `--code-roots` prints, and a structure test pins the table and the rule.
 - The status literal of the three documents moves from `stages 2 and 3 are REDESIGNED, NOT ENABLED`
   to `stages 2 and 3 are IMPLEMENTED`, together with X7 of
