@@ -434,12 +434,13 @@ REVIEW_LAUNCH_STATUS="$(node -e '
 ' <<<"$REVIEW_INPUT" 2>/dev/null)"
 review_gate_check() {
   zensu_hook_enabled reviewPacketGate || return 0
-  local judge=off panel rc=0 lib verdict show
+  local judge=off panel rc=0 lib verdict show event="$HOOK_EVENT"
+  [ "$event" = Stop ] && event=UserPromptSubmit
   zensu_hook_enabled reviewJudge && judge=on
   panel="$(zensu_review_panel)"
   lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
   lib="$(bash "$lib/zensu-host-path.sh" "$lib" 2>/dev/null || printf '%s' "$lib")"
-  verdict="$(node "$lib/review-gate-v1.js" check --event "$HOOK_EVENT" ${ARRIVAL_AGENT:+--agent "$ARRIVAL_AGENT"} \
+  verdict="$(node "$lib/review-gate-v1.js" check --event "$event" ${ARRIVAL_AGENT:+--agent "$ARRIVAL_AGENT"} \
     --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$SESSION_ID" \
     --judge "$judge" --panel "$panel" --ticket "$REVIEW_TICKET" <<<"$INPUT" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] && return 0

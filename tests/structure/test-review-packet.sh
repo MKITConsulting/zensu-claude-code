@@ -572,6 +572,46 @@ merged findings: none"
     check "RP30 arm a review chain" FAIL
   fi
 
+  STOP_HOOK="$ROOT/hooks/stop-chain-enforcer.sh"
+  new_project "$WORK/p-recovery"
+  if arm_review "rp-recovery" "$WORK/p-recovery"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    agent_payload zensu:review-aspect "perspective: correctness
+$PACKET" "## Aspect: correctness
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    agent_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" "## Aspect: judge
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    launch_payload zensu:code-reviewer "$CONSUME" consumerec1 | bash "$POSTREV" >/dev/null 2>&1
+    handback_payload consumerec1 "# Code Review Report
+
+- Verdict: PASS" | ZENSU_BR_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" node "$ROOT/hooks/lib/background-review-v1.js" arrive >"$WORK/arrive" 2>&1
+    : > "$WORK/stop"
+    ATTEMPT=0
+    while [ "$ATTEMPT" -lt 4 ] && [ "$(state_field reviewTicketConsumed)" = "false" ]; do
+      ATTEMPT=$((ATTEMPT + 1))
+      SID_VALUE="$SID" node -e 'process.stdout.write(JSON.stringify({ hook_event_name: "Stop", session_id: process.env.SID_VALUE }))' \
+        | ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP_HOOK" >"$WORK/stop" 2>/dev/null
+    done
+    if grep -qF "pending agent=consumerec1 source=prompt" "$WORK/arrive" \
+      && grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent consumerec1) delivered its report earlier in this conversation as its hand-back" "$WORK/stop" \
+      && ! grep -qF "REVIEW INCOMPLETE" "$WORK/stop" && [ "$(consume_record)" = absent ] \
+      && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ]; then
+      check "RP31 with the gate on, a Stop completes a cut-off hand-back's claim from its arrival note on the round's records" PASS
+    else
+      check "RP31 Stop recovery claim (arrive=$(cat "$WORK/arrive") attempts=$ATTEMPT record=$(consume_record) consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/stop"
+    fi
+  else
+    check "RP31 arm a review chain" FAIL
+  fi
+
   echo "== The review chain's config probes read the project config =="
   PROBE_PROJECT="$WORK/p-probe"
   mkdir -p "$PROBE_PROJECT/.zensu" "$WORK/probe-home"

@@ -42,6 +42,9 @@ BR_ARRIVAL="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BR_EXCLUSIONS" ZENSU_
   node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" arrive 2>/dev/null)" || exit 0
 case "$BR_ARRIVAL" in
   "pending agent="*) ;;
+  "idle reason="*" retired="[1-9]*)
+    case "$INPUT" in *'<agent-message from='*) ;; *) exit 0 ;; esac
+    ;;
   *) exit 0 ;;
 esac
 ZENSU_BR_CLAIM_BY="$(( $(date +%s) - SECONDS + BR_HOOK_TIMEOUT - BR_CLAIM_MARGIN ))"

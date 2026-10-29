@@ -1191,7 +1191,9 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   reviewer and leaves the ticket unconsumed. While background launches of the round have sent
   no hand-back, the refusals for a missing reviewer and a missing primary judge say to wait for
   them, and, where the host delivers no hand-back the hook can read, as outside auto mode, to ask
-  the user whether to set `hooks.reviewPacketGate` to `false`.
+  the user whether to set `hooks.reviewPacketGate` to `false`. A claim the Stop guard completes
+  from an arrival note, after the hook that received the hand-back was cut off, is checked as an
+  arrival on the round's records alone, because the note carries no report.
 - **Only the live ticket is judged.** The hook hands the gate the consume prompt's review ticket.
   A completion whose ticket is not the chain's live, unconsumed ticket, or that arrives after the
   code review was marked done, passes the gate as `not-current-ticket`; the ticket claim after it

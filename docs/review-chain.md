@@ -226,26 +226,28 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   completed arrival of the session's pending consume reviewer, writes an arrival note under
   `arrivals/` before anything is claimed. It does either only for a prompt of the main thread: a
   payload that names a subagent (`agent_id` or `agent_type`) or another hook event changes
-  nothing. Only an arrival the consume record still waits for starts the post-review hook, which
-  claims the ticket once, through the claim the foreground path uses, and returns that path's
-  routing directive as context of the prompt. Record and note are retired together right after the
-  claim and on every deliberate refusal. A claim that fails,
-  or that a kill of the hook cuts off, keeps both, so the notification, the next Stop or the next
-  prompt completes it. A frame counts only on a line of its own at column zero that the host's
-  `[Subagent hand-back]` line follows, because the host indents every line of a report it
-  forwards. A notification with another status, such as `failed`, ends the consume record without
-  a claim and asks for a re-spawn with the same ticket, unless a note already records the
-  completed report. While `hooks.reviewPacketGate` is on, the gate checks the consume reviewer's
-  arrival once more before the claim, against the digest it recorded at the launch and with the
-  report the hand-back carries; a refusal keeps the ticket unconsumed, retires the record and its
-  note and names the re-spawn.
+  nothing. Only an arrival the consume record still waits for, or a fan-out agent's hand-back that
+  retired its entry, starts the post-review hook. For the consume arrival it claims the ticket once,
+  through the claim the foreground path uses, and returns that path's routing directive as context
+  of the prompt; for the fan-out hand-back it only lets the review packet gate record the report.
+  Record and note are retired together right after the claim and on every deliberate refusal. A
+  claim that fails, or that a kill of the hook cuts off, keeps both, so the notification, the next
+  Stop or the next prompt completes it. A frame counts only on a line of its own at column zero that
+  the host's `[Subagent hand-back]` line follows, because the host indents every line of a report it
+  forwards. A notification with another status, such as `failed`, ends the consume record without a
+  claim and asks for a re-spawn with the same ticket, unless a note already records the completed
+  report. While `hooks.reviewPacketGate` is on, the gate checks the consume reviewer's arrival once
+  more before the claim, against the digest it recorded at the launch and with the report the
+  hand-back carries; a refusal keeps the ticket unconsumed, retires the record and its note and
+  names the re-spawn.
 - **Panel and judges under the packet gate.** While `hooks.reviewPacketGate` is on, a
   `zensu:review-aspect`, `zensu:review-judge` or `zensu-review-*` launch is recorded in the gate's
   store with its agent id and its packet digest. It counts as no run and never as a failed judge,
-  and its hand-back completes it with the report the frame carries, so the consume check counts a
-  panel and judges that ran in the background like foreground ones. Outside auto mode the desktop
-  app sends no hand-back, so those launches never complete, and the consume check refuses with a
-  hint to wait for them or to ask the user whether to set the key to `false`
+  and its hand-back, which starts the post-review hook because it retired the agent's fan-out entry,
+  completes it with the report the frame carries, so the consume check counts a panel and judges
+  that ran in the background like foreground ones. Outside auto mode the desktop app sends no
+  hand-back, so those launches never complete, and the consume check refuses with a hint to wait for
+  them or to ask the user whether to set the key to `false`
   ([gates.md](gates.md#review-packet-gate)).
 - **Claim deadline.** The prompt hook is registered with a `timeout` of 180 seconds. A
   `UserPromptSubmit` hook without one gets 30 seconds (Claude Code 2.1.308), and one claim under
@@ -255,7 +257,9 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   or prompt, and the ticket stays untouched.
 - **Stop.** A Stop whose store holds an arrival note beside the consume record first runs the
   post-review hook in its recovery mode, which claims the ticket from the note and blocks with the
-  routing directive. It starts that claim only while the Stop has more than 20 seconds left before
+  routing directive. While `hooks.reviewPacketGate` is on, the gate checks that claim as an arrival
+  on the round's records alone, because the note carries no report. It starts that claim only
+  while the Stop has more than 20 seconds left before
   its deadline, the Stop guard's own (45 seconds by default) or, when the hook runs without that
   guard, its registered 90-second timeout, and stops a claim that has not reached the ticket by
   then, so a slow claim never costs the Stop its decision. While a consume record younger than 60
@@ -282,7 +286,15 @@ the reviewer for its report with `SendMessage` first. A kill that lands after th
 consumed and before the directive is emitted still loses that directive; the claim starts only
 with the deadline's margin left, and only the claim-field parse, the record retire and the emit
 run after it. While any session's arrival note is pending, every prompt of every session in the
-plugin pays one `node` child for `arrive`.
+plugin pays one `node` child for `arrive`. A fan-out reviewer whose completion notification
+arrives before its hand-back has its entry retired by the notification, so its hand-back no
+longer starts the post-review hook and the packet gate never reads that report: the consume check
+then refuses for a missing reviewer, as for a report it cannot observe. The measured host sends
+the hand-back first. With `hooks.reviewPacketGate` off, each fan-out hand-back still starts the
+post-review hook, which binds the session and exits without output, because the hand-back hook
+reads no config. A claim the Stop completes from a note is checked without the report, so a
+consume reviewer that answered `REVIEW PACKET INVALID` in a hand-back whose claim was cut off is
+not refused there.
 
 #### Custom review personas (repo-local)
 

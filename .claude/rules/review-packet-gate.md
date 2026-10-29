@@ -104,18 +104,20 @@ failed every primary judge on that host, and ignoring it refused every consume r
 because no reviewer had ever reported. So `recordObservation` stores a launch record (role, type,
 packet digest and agent id, `identity: null`, `valid: null`) that `checkConsume` never counts as
 a run, and `recordHandback`, which the delegate's arrival branch runs as `record --event
-UserPromptSubmit` right after `match`, completes the latest launch of that agent in the round
-with the report `handbackReports` in `hooks/lib/background-review-v1.js` de-indents from the
-frame. A second completion for one agent is ignored, so a repeated delivery of a failed judge's
-hand-back never reads as the second failure. The consume-mode reviewer is checked at its launch
-with the launch prompt, before `background-review-v1.js record`, and a passing check writes a
-`consume` record with the agent id and the block's digest. Its arrival is checked again with
-`check --event UserPromptSubmit --agent <id>`, which takes the digest from that record and the
-report from that agent's frame, so a notification-only arrival is judged on the round's records
-alone. Every answer goes out in the arrival's own event, because a `UserPromptSubmit` hook that
-names `PostToolUse` answers nothing. A refused arrival leaves through the delegate's EXIT trap,
-which retires the background record, so the next Stop does not wait for a reviewer that has
-already reported.
+UserPromptSubmit` right after `match`, and which the prompt hook starts for a fan-out reviewer's
+hand-back once `arrive` retired that agent's entry, completes the latest launch of that agent in
+the round with the report `handbackReports` in `hooks/lib/background-review-v1.js` de-indents from
+the frame. A second completion for one agent is ignored, so a repeated delivery of a failed judge's
+hand-back never reads as the second failure. The consume-mode reviewer is checked at its launch with
+the launch prompt, before `background-review-v1.js record`, and a passing check writes a `consume`
+record with the agent id and the block's digest. Its arrival is checked again with `check --event
+UserPromptSubmit --agent <id>`, which takes the digest from that record and the report from that
+agent's frame, so a notification-only arrival is judged on the round's records alone, and so is a
+claim the Stop recovery completes from an arrival note, which `review_gate_check` checks with the
+same event because the gate accepts no `Stop`. Every answer goes out in the arrival's own event,
+because a `UserPromptSubmit` hook that names `PostToolUse` answers nothing. A refused arrival leaves
+through the delegate's EXIT trap, which retires the background record, so the next Stop does not
+wait for a reviewer that has already reported.
 
 **Unobservable reports fail closed.** Outside auto mode the desktop app sends no hand-back, and
 the notification it sends there was never measured, so the gate reads no report from it. Every
@@ -196,7 +198,7 @@ branch's `record` call in `hooks/post-review-tdd-delegate.sh`, which runs before
 `ARRIVAL_MATCH` exit, so a fan-out reviewer's hand-back is recorded while no consume record
 exists; `"reviewPacketGate":false` in `tests/structure/test-background-review.sh`, whose
 fixtures carry no canonical packet; and the panel bullet of §"Background review agents" in
-`docs/review-chain.md`. `RP24` to `RP26a`, `RP28a`, `RP28b`, `RP30` and `RP30a` in
+`docs/review-chain.md`. `RP24` to `RP26a`, `RP28a`, `RP28b`, `RP30`, `RP30a` and `RP31` in
 `tests/structure/test-review-packet.sh` drive it through the shipped hooks, and `RP29` drives the
 hook's fallback for a gate that cannot check.
 
@@ -223,6 +225,12 @@ the record's `agentId` field and `consume` role ship with the record schema's fi
   measured host sends each hand-back as its own prompt.
 - While the key is on, every arrival the prompt hook passes on pays one more `node` start for the
   gate's record read.
+- A claim the Stop recovery completes from a hand-back note is checked without the report, because
+  the note carries none: a consume reviewer that answered `REVIEW PACKET INVALID` in a hand-back
+  whose claim was cut off is not refused there.
+- A fan-out reviewer whose completion notification arrives before its hand-back has its entry
+  retired by the notification, so the hand-back starts no delegate and its report is never
+  recorded; the consume check then refuses for a missing reviewer.
 - The hand-back shape is the one measured in the desktop app in auto mode; no live desktop run of
   a background panel through the gate exists.
 - Windows is unmeasured: `tests/structure/test-review-packet.sh` runs in `ciStructureTests` only.

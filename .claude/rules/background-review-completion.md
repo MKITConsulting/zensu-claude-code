@@ -87,23 +87,28 @@ completes the claim from that note.
    consume reviewer, writes the arrival note `arrivals/<scv1-key>.json` (exact key set, `0600`,
    temp file then rename) before anything is claimed. It prints
    `pending agent=<id> source=<prompt|note> retired=<n>` or `idle reason=<r> retired=<n>`, and the
-   hook starts the delegate with `--background-arrival` only on `pending`, passing
-   `ZENSU_BR_CLAIM_BY`. The delegate binds and runs `match`. For the consume record `match`
-   answers `claim` on the prompt's own completed arrival, and otherwise on a note naming the
-   record's agent and ticket, WITHOUT retiring either, and names the source; a note outranks a
-   later notification with another status. It answers `ended` on such a notification without a
-   note (record retired), and `stale-ticket` when the claim would no longer accept the record's
-   ticket (record and note retired). On a claim the delegate re-runs the header, envelope and
-   preflight checks on the STORED header, claims through `tdd_consume_review_ticket_context`,
-   retires record and note (`retire`), and emits the routing directive as `UserPromptSubmit`
-   context with one lead sentence per arrival kind and source.
+   hook starts the delegate with `--background-arrival`, passing `ZENSU_BR_CLAIM_BY`, on `pending`
+   and on an `idle` line with `retired=` of at least 1 for a prompt that carries a hand-back
+   frame, so that the review packet gate records a fan-out reviewer's report; `match` then answers
+   `none`, and the delegate prints only the gate's advice. The delegate binds and runs `match`.
+   For the consume record `match` answers `claim` on the prompt's own completed arrival, and
+   otherwise on a note naming the record's agent and ticket, WITHOUT retiring either, and names the
+   source; a note outranks a later notification with another status. It answers `ended` on such a
+   notification without a note (record retired), and `stale-ticket` when the claim would no longer
+   accept the record's ticket (record and note retired). On a claim the delegate re-runs the header,
+   envelope and preflight checks on the STORED header, claims through
+   `tdd_consume_review_ticket_context`, retires record and note (`retire`), and emits the routing
+   directive as `UserPromptSubmit` context with one lead sentence per arrival kind and source.
 3. **Stop.** Before the wait, `background_review_recover` in `stop-chain-enforcer.sh` checks in
    bash for the session's arrival note beside its consume record. With both present, and only
    while the Stop has more than `BACKGROUND_REVIEW_CLAIM_MARGIN` seconds left before its deadline,
    it runs the delegate with `--background-recovery` as a background child under a watchdog that
    sends it `TERM` one second past that point. The delegate's `match` reads only the note
    (`ZENSU_BR_RECOVERY=1`), and a directive it prints becomes the block reason, ahead of
-   `outer_finish`. `background_review_wait` asks `wait` while a record or a fan-out entry exists.
+   `outer_finish`. With `hooks.reviewPacketGate` on, `review_gate_check` passes `UserPromptSubmit`
+   as the event there, because the gate accepts only that and `PostToolUse`, and the gate judges
+   the claim on the round's records alone, as for a notification-only arrival.
+   `background_review_wait` asks `wait` while a record or a fan-out entry exists.
    A consume record younger than the bound that still matches the issued ticket, or any fan-out
    entry younger than the bound, releases a standalone chain's Stop with one stderr line and no
    budget charge. An Autopilot-bound chain's Stop is held: it blocks, names the running agents,
@@ -234,13 +239,20 @@ completes the claim from that note.
 - **Fan-out entries carry no ticket and no chain binding.** The Stop hook consults them only on the
   path where it would block for an armed review chain, so an entry from an earlier chain of the
   same session can release a Stop for at most the wait bound.
-- **A repo persona's launch is a fan-out entry too.** Without one, the prompt hook passed a
-  persona's hand-back on only while a built-in reviewer was still pending, so a persona that
-  reported last stayed a launch record without an identity in the review packet gate, which
-  neither counts nor blocks, and a persona launched with another block was caught only by the
-  advice its launch received. Its type is repo-authored, but the main thread spawned it, so the
+- **A repo persona's launch is a fan-out entry too.** Without one, `arrive` retires nothing for a
+  persona's hand-back, so the prompt hook does not start the delegate for it, the persona's
+  launch record stays without an identity in the review packet gate, which neither counts nor
+  blocks, and a persona launched with another block is caught only by the advice its launch
+  received. Its type is repo-authored, but the main thread spawned it, so the
   entry gives the repository no lever the spawn did not already have: like a built-in reviewer's
   entry, it releases a standalone Stop for at most the wait bound.
+- **A fan-out reviewer's hand-back starts the delegate.** The review packet gate completes a
+  background reviewer's launch record from its hand-back in the delegate's arrival branch, so a
+  prompt hook that started the delegate only for the consume reviewer left every background
+  panel and judge without a run, and with the gate on every consume review on this host was
+  refused. A notification carries no report, so it starts nothing. The hook reads no config,
+  because `zensu_hook_enabled` costs a `node` child and needs the bound project root, so with the
+  gate off that run binds, matches and exits silently.
 - **The re-spawn sentence keeps `run_in_background: false` only where the Agent tool offers that
   parameter**, in the three severity arms of the delegate, the Stop resume reason and steps 10 and 5
   of `skills/build/references/review-chain.md`.
@@ -258,17 +270,22 @@ completes the claim from that note.
 - With `hooks.reviewPacketGate` on, the delegate's arrival branch runs the gate's `record --event
   UserPromptSubmit` after `match` and before the `ARRIVAL_MATCH` exit, so a failed `match` sets
   `ARRIVAL_MATCH` empty instead of ending the branch, and `review_gate_check` runs at the consume
-  launch before `record` and at the arrival before the claim. `tests/structure/test-background-review.sh`
+  launch before `record` and at the arrival before the claim, the Stop recovery's included, where
+  it maps `Stop` to `UserPromptSubmit`. The prompt hook's `idle … retired=` arm starts that branch
+  for a fan-out reviewer's hand-back (`BR12c`). `tests/structure/test-background-review.sh`
   turns the gate off in its config, because its fixtures carry no canonical packet, so `RP28b`,
   `RP30` and `RP30a` in `tests/structure/test-review-packet.sh` drive the advice exit, an ended
-  notification and a claim from the completion notification alone with the gate on.
+  notification and a claim from the completion notification alone with the gate on, `RP24a` and
+  `RP28b` the fan-out hand-backs the gate records, and `RP31` a Stop that completes a cut-off
+  hand-back's claim from its note.
 - The claim predicate is `review-ticket-state-v1.js`; `_ZENSU_TDD_TICKET_STATE` is in the export
   list of `zensu-tdd-phase.sh` beside `_ZENSU_TDD_CHAIN_RECOVERY`.
 - The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, the
-  `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix of the
-  `arrive` line by the prompt hook's `case`, the `source` field of the `match` claim line by
-  the delegate's verdict parse, and the `hold count= of=` and `release` lines of `defer` by
-  `background_review_defer`, which `background_review_recover` and the resume reason call.
+  `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix and the
+  `idle reason= retired=` form of the `arrive` line by the prompt hook's `case`, the `source` field
+  of the `match` claim line by the delegate's verdict parse, and the `hold count= of=` and `release`
+  lines of `defer` by `background_review_defer`, which `background_review_recover` and the resume
+  reason call.
 - `--background-arrival` and `--background-recovery` are the delegate's two background modes; the
   Stop hook is the only caller of the second. `ZENSU_BR_CLAIM_BY` is read by the delegate, and
   `ZENSU_BR_RECOVERY` and `ZENSU_BR_HELD` by `envOptions`.
@@ -337,6 +354,9 @@ completes the claim from that note.
   post-review hook has the same window.
 - **A kill before `arrive` wrote the note** leaves only the record, as before this change: a
   standalone Stop then waits out the bound, unless a later arrival names the reviewer again.
+- **A fan-out notification that arrives before its hand-back** retires the entry, so the
+  hand-back starts no delegate and the packet gate never reads that report; the consume check then
+  refuses for a missing reviewer. The measured host sends the hand-back first.
 - **Another session's note costs every prompt one `node` child.** The prefilter cannot derive the
   session key in bash, so while any session holds a note, each prompt of every session runs
   `arrive`, which answers `idle` for a note that is not its own (`BR18b`). A note normally lives
