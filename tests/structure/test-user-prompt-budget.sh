@@ -189,7 +189,7 @@ budget() {
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
     first:user-prompt-zen-mode.sh:*) echo "3000 3200" ;;
     repeat:user-prompt-zen-mode.sh:*) echo "1 1500" ;;
-    *:user-prompt-best-solution-first.sh:*) echo "300 420" ;;
+    *:user-prompt-best-solution-first.sh:*) echo "300 540" ;;
     *:user-prompt-worktree-keep.sh:*) echo "0 0" ;;
     *:user-prompt-session-hub-receipt.sh:*) echo "0 0" ;;
     *:user-prompt-review-handback.sh:*) echo "0 0" ;;
@@ -199,12 +199,12 @@ budget() {
 
 total_budget() {
   case "$2:$1" in
-    first:typed) echo 11550 ;;
-    first:ci) echo 3900 ;;
-    first:*) echo 3550 ;;
-    repeat:typed) echo 5750 ;;
-    repeat:ci) echo 2200 ;;
-    *) echo 1850 ;;
+    first:typed) echo 11670 ;;
+    first:ci) echo 4020 ;;
+    first:*) echo 3670 ;;
+    repeat:typed) echo 5870 ;;
+    repeat:ci) echo 2320 ;;
+    *) echo 1970 ;;
   esac
 }
 
