@@ -57,6 +57,7 @@
     "test-gitignore-zensu.sh",
     "test-harness-launcher.sh",
     "test-hook-payload-stdin.sh",
+    "test-hook-process-budget.sh",
     "test-immutable-marketplace-release.sh",
     "test-impl-stop-counter.sh",
     "test-incremental-review-rounds.sh",

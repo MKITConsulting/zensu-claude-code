@@ -27,7 +27,7 @@
 # discipline nudge that keeps real-looking credentials out of files.
 set -u
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(case "$0" in (*/*) cd "${0%/*}/.." ;; (*) cd .. ;; esac && pwd -P)" || exit 2
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
     echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
@@ -116,11 +116,22 @@ zensu_hook_enabled secretScan || exit 0
 # path that decides the bypass (heredoc-stripped, segment-leading env prefix,
 # write-channel commands only) — so a heredoc body, a channel-less command, or
 # an argument merely mentioning the escape never produces a ledger entry.
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-
-[ "${ZENSU_SECRET_SCAN:-}" = "off" ] && { tdd_record_bypass_payload "$INPUT" ZENSU_SECRET_SCAN 2>/dev/null || true; exit 0; }
+[ "${ZENSU_SECRET_SCAN:-}" = "off" ] && {
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+  tdd_record_bypass_payload "$INPUT" ZENSU_SECRET_SCAN 2>/dev/null || true
+  exit 0
+}
 
 [ -z "$INPUT" ] && exit 0
+
+case "$INPUT" in
+  *'"tool_name":"Bash"'*)
+    case "$INPUT" in
+      *'>'*|*'<<'*|*tee*|*of=*|*'\u'*|*sed*-i*|*'"tool_name"'*'"tool_name"'*) ;;
+      *) exit 0 ;;
+    esac
+    ;;
+esac
 
 VERDICT="$(
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
@@ -132,6 +143,7 @@ if [ "$NODE_RC" -ne 0 ]; then
   exit 0
 fi
 if [ "$VERDICT" = "__bypass__:ZENSU_SECRET_SCAN" ]; then
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
   tdd_record_bypass_payload "$INPUT" ZENSU_SECRET_SCAN 2>/dev/null || true
   exit 0
 fi

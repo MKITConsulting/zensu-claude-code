@@ -9,7 +9,8 @@ deny() {
 
 { INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 ZENSU_CONSENT_PREFILTER=missing
-if source "$(dirname "$0")/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null \
+case "$0" in */*) _ZENSU_HOOK_DIR="${0%/*}" ;; *) _ZENSU_HOOK_DIR=. ;; esac
+if source "$_ZENSU_HOOK_DIR/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null \
   && declare -F zensu_browser_consent_marked >/dev/null 2>&1; then
   zensu_browser_consent_marked "$INPUT" || exit 0
   ZENSU_CONSENT_PREFILTER=loaded
@@ -28,7 +29,7 @@ else
   unset _zensu_scan
 fi
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || {
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$_ZENSU_HOOK_DIR/.." && pwd -P)" || {
   echo "zensu: browser consent gate cannot resolve its own plugin root" >&2
   exit 2
 }
@@ -43,7 +44,7 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT _ZENSU_HOOK_DIR
 
 if source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh" 2>/dev/null && zensu_doctor_allowed "$INPUT"; then
   exit 0
