@@ -7,7 +7,8 @@ skip() {
 }
 
 INPUT="$(cat 2>/dev/null || true)"
-if ! source "$(dirname "$0")/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null \
+case "$0" in */*) _ZENSU_HOOK_DIR="${0%/*}" ;; *) _ZENSU_HOOK_DIR=. ;; esac
+if ! source "$_ZENSU_HOOK_DIR/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null \
   || ! declare -F zensu_browser_consent_marked >/dev/null 2>&1; then
   _zensu_scan="$(printf '%s' "$INPUT" | LC_ALL=C sed 's/\\[nrt]//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\\`" 2>/dev/null)" || _zensu_scan=""
   case "$_zensu_scan $INPUT" in
@@ -17,7 +18,7 @@ if ! source "$(dirname "$0")/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null
 fi
 zensu_browser_consent_marked "$INPUT" || exit 0
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" \
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$_ZENSU_HOOK_DIR/.." && pwd -P)" \
   || skip "plugin root unresolved"
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" \
@@ -27,7 +28,7 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT _ZENSU_HOOK_DIR
 
 command -v node >/dev/null 2>&1 || skip "node unavailable"
 MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"
