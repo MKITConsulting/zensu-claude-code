@@ -318,8 +318,10 @@ clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has
 unverified regardless of how many checks passed before it.
 
 **Program names are read as a case-insensitive file system resolves them.** `programName(word,
-isWindows)` keeps the part after the last `/` (on win32 also after the last `\`), drops a `.exe`
-suffix in any case and folds with `toUpperCase().toLowerCase()`, on every platform: macOS and
+isWindows)` delegates to `programName(value, platform, fold)` in `hooks/lib/claude-path-v1.js`
+with the policy `"always"`, which keeps the part after the last `/` (on win32 also after the last
+`\`), drops a `.exe` suffix in any case and folds with `toUpperCase().toLowerCase()`, on every
+platform; `"platform"` folds only on darwin and win32 and any other value leaves the case: macOS and
 Windows resolve `GIT`, `git.exe` or `ENV` as the lowercase program, and the parser cannot know the
 file system of each `PATH` directory. `WRAP` matches on it in `detectControlMutation` and in the
 rule loop, and a folded `program` decides `git`, `sed` and `dd`. The tee channel folds only in
@@ -330,26 +332,73 @@ tee write. In `detectControlMutation`, `cmd0` keeps the written basename for the
 runs any other spelling as an external program, which cannot change the shell's variables; an
 over-deny there is the safe direction. The rule loop is stricter, because its `cmd0` moves the
 tracked cwd (`cd`) and carries `GIT_DIR`/`GIT_WORK_TREE` (`export`, `declare -x`, `typeset -x`),
-and a wrong move is an allow: `cmd0` is the word as written only when it holds no `/` and every
-wrapper skipped before it is exactly `command`, `builtin` or `time` (`SHELL_WRAP`), the three that
-keep a builtin in the current shell, and empty otherwise. Folding the wrapper skip without that
+and a wrong move is an allow: `cmd0` is the word after quote removal only when it holds no `/`
+and every wrapper skipped before it is exactly `command` or `builtin` (`SHELL_WRAP`), the two
+builtins that keep a builtin in the current shell, or the unquoted `time` keyword at the start of
+the command, and empty otherwise. A quoted `\time` or a `time` after an assignment is the external
+program, so it leaves the cwd. Folding the wrapper skip without that
 rule let `ENV cd /tmp; sed -i … src/app.rs` pass rule (A), and lowercase `env cd`, `sudo cd` and
 `/usr/bin/cd` already moved the tracked cwd on the base. `detectChannels` matches `tee`, `sed -i`
 and `dd of=` with the `iu` flags, an optional `.exe` and an optional closing quote, after a
-backslash, a quote, `(` or a backtick as well as the earlier boundaries, so the always-on
+backslash, a quote, `(` or a backtick as well as the earlier boundaries, and a second pass reads
+each command's program word through `commandWords`, so the always-on
 `CLAUDE_ENV_FILE` deny and the secret scan's Bash trigger (`hooks/lib/secret-scan-decide.js` scans
-a Bash command only when the detector reports a channel) both read those spellings. BSD sed's `-I`
-edits in place like `-i` and counts in both readers. The shell's quote removal is NOT applied to a
-program word: `unquote` strips only leading and trailing quotes, so a backslash or a quote inside
-the word (`\git`, `g'i't`, `\env`, `\export`) is read as written, as on the base. On POSIX those
-spellings pass the always-on check and every rule; on win32 the backslash cut reads `\git` and
-`\env` as `git` and `env`, while `g'i't` and `\export` pass there too. W265 pins `g'i't`, and
-`docs/gates.md` names the gap. The env-file PATH comparison in `commandRefersToControlPath`
-lowercases only a drive-letter target, so on a case-insensitive POSIX volume a case-variant
-literal spelling of the env file is not refused (W74 pins that ALLOW). Other gates read program
-names with code of their own (`commandName` in `subagent-shell-guard-v1.js`, which folds only on
-darwin and win32 and reads quote-removed words, `commandBase` in `powershell-command-v1.js`,
-`commandName` in `work-order-v1.js`); nothing compares them with this one. Pins: the program-name
+a Bash command only when the detector reports a channel) both read those spellings and the
+quote-removed ones. BSD sed's `-I`, `--in-place` (and its abbreviations) and an option cluster
+that holds `i` or `I` before an `e` or `f` edit in place like `-i`, in both readers (`sedInPlace`
+for rule (A)); `-l` is read as a flag, because BSD sed takes no operand for it.
+
+**Every word is read after the shell's quote removal, and the command word past each wrapper's own
+options.** `segmentWords` splits a lexer segment on unquoted whitespace and removes quotes the way
+bash does: a backslash, single and double quotes anywhere in the word, `$'…'` with the escapes
+bash 3.2 decodes (measured: `\u` included, an unknown escape keeps its backslash, a NUL ends the
+quoted part), and `$"…"` as double quotes. An expansion stays in the value verbatim, so the
+`UNEXPANDED` rules still see it. An unquoted `<` or `>` ends the word and starts an operator token,
+and `splitRedirects` takes the operators and their targets out of the word list, so redirections
+before or between the words no longer hide the command word and `x>file` writes `file`.
+`joinContinuations` joins a backslash-newline before lexing, except after a line in which a `#`
+starts a word, because bash does not continue a comment. `lex()` keeps an `&` that is part of a
+redirection operator (`2>&1`, `&>`), which used to reset the tracked cwd as if the command had been
+backgrounded. `commandWords` skips the unquoted reserved words in `RESERVED_WORDS`, reads the
+assignment words of `SHELL_ASSIGNMENT` (`NAME=`, `NAME+=`, `NAME[i]=`; only a plain `NAME=` feeds
+`GIT_*` and the escape prefixes), then each `WRAP` name with the options `WRAPPER_OPTIONS` lists for
+it, long options by unique prefix as getopt reads them, and the quote-removed `NAME=value` words
+`env` and `sudo` take (the other wrappers keep the base's over-read). Its `ops` record `env -i`,
+`env -`, `exec -c` (clear), `env -u` (unset), `env -C` and `sudo -D` (chdir) and every wrapper
+assignment in order; `env -S` splices its split string back into the argument list, at most
+`MAX_SPLITS` times. The Session Control check refuses a protected name in any assignment, an unset
+op of one as removal, `export -n`/`declare +x`/`typeset +x` of one as removal and `printf -vNAME`
+as a rebind; a full clear alone is NOT refused, because it names no input and `model-bind` refuses
+a missing `CLAUDE_CODE_SESSION_ID`. The rule loop runs git with `-C <dir>` for each chdir op, so
+`gitTargets` judges an unexpanded one as it judges an unexpanded `-C`, resolves tee, `sed -i` and
+`dd of=` operands against that directory (a relative operand under an unexpanded one is not
+judged), and folds the ops over the carried and inline `GIT_*` values. W265 and W267-W323 in the
+gate suite, F8c and D10-D14 in `tests/structure/test-secret-scan-gate.sh`, and the reader cases of
+`git-repo-escape.test.js` pin it. **Known residuals, all stated in `docs/gates.md`:** zsh's
+readings (an unknown `$'…'` escape, `$"…"`, `=cmd`, `noglob`, `nocorrect`, `-`) are not applied,
+although the Bash tool runs zsh where that is the user's shell (measured on macOS); a program word
+built at run time, aliases and functions; builtins that assign by other means (`let`, `getopts`,
+`mapfile`, `wait -p`, `coproc NAME`, namerefs, arithmetic); wrappers outside `WRAP`; and a `;`, `&`
+or `|` inside quotes, because `lex()` still splits there.
+
+**The env-file path comparison folds on every platform.** `controlPathNamespace` and
+`commandRefersToControlPath` pass both sides through `foldPath` (NFC, then
+`toUpperCase().toLowerCase()`), because APFS resolves letter case and normalization variants of one
+name to the same file (measured) and the parser cannot know the volume behind `CLAUDE_ENV_FILE`;
+`wordsReferToControlPath` adds the quote-removed words, so `/Users/R\unner/…` matches as well. A
+false refusal needs a write to a different file whose path folds to the env file's, which on a
+case-sensitive volume is the only cost. W74 pins the case fold, W308 the decomposed spelling and
+W318 the quote-removed path.
+
+**One program-name helper, four readers.** `programName` in `claude-path-v1.js` is the shared total
+helper. The parser uses it; `commandName` in `subagent-shell-guard-v1.js` (the policy
+`"platform"`, without the win32 backslash cut), `commandName` in `work-order-v1.js` (no fold, no
+`.exe` strip) and `commandBase` in `powershell-command-v1.js` (PowerShell's own resolution, which
+cuts both separators everywhere and strips module qualifiers and more extensions) still carry code
+of their own, because the unpushed branches `claude/jolly-diffie-7523da` and
+`claude/work-order-name-case` rewrite exactly those functions. The unit case `the program-name
+readers of the gates, compared over one corpus` pins each difference, so moving a reader onto the
+helper changes a pinned line rather than a verdict nobody sees. Pins: the program-name
 cases of `tests/structure/git-repo-escape.test.js`, W235-W266 in
 `tests/structure/test-bash-source-write-gate.sh` and F8b in
 `tests/structure/test-secret-scan-gate.sh`. **Version: `minor`** — the always-on Session Control

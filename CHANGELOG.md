@@ -23,8 +23,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `printf` keep their case, because the shell runs any other spelling as an external program,
   and the gate now moves its tracked directory only for a `cd` the shell itself runs: `env cd`,
   `sudo cd` and `/usr/bin/cd` no longer move it, so a write after them is judged where it really
-  lands. A backslash or a quote inside a program word (`\git`, `g'i't`) is still read as written,
-  as `docs/gates.md` §"Source-Write Gate" records.
+  lands.
+- **source-write gate shell reading**: `hooks/pre-bash-source-write-gate.sh` now reads a command
+  the way bash runs it. Every word is read after the shell's quote removal (a backslash or quotes
+  inside the word, `$'…'` with bash's escapes decoded, `$"…"` as double quotes), a backslash-newline
+  continues the line, a redirection splits off the word it is glued to, and each wrapper's own
+  options (`env -i`, `-u`, `-C`, `-S`, `--`, `sudo -u`, `nice -n`, `time -p`, `command -p`,
+  `exec -c`) are read as that wrapper reads them. The Session Control check, which runs whatever
+  `hooks.bashWriteGate` says, now refuses `\env CLAUDE_CODE_SESSION_ID=… …`, `e'n'v …`,
+  `\export ZENSU_SESSION_KEY=…`, `env -i CLAUDE_CODE_SESSION_ID=… …`, `env -- …`,
+  `env "CLAUDE_CODE_SESSION_ID=…" …`, `NAME+=…`, `NAME[i]=…`, `printf -vNAME` and a rebind behind a
+  reserved word (`if`, `{`, `!` …) or a leading redirection; it refuses `\unset`, `env -u`,
+  `export -n` and `declare +x` of a protected input as removal, reads `t'e'e`, `s\ed -i`,
+  `sed --in-place` and `sed -ni` into `CLAUDE_ENV_FILE` as writes, and compares a literal path to
+  that file with letter case and Unicode normalization folded on every platform, so a case or NFD
+  variant of it on macOS is no longer let through. `env -i` alone stays allowed. The secret scan
+  reads those write spellings as writes too. With the gate opted in, rules (A), (B) and (C) read
+  `\git`, `g'i't`, `\cd`, `sudo -u me git …`, `nice -n 10 git …`, `env -C <dir> git …`,
+  `env "GIT_WORK_TREE=…" git …`, `for … do git …`, `sed -ni` and `sed --in-place` as bash runs
+  them, keep the directory a `cd` moved to across `2>&1`, and leave it where it was after a quoted
+  `\time cd`. A command that used one of these spellings to pass is now refused, and
+  `docs/gates.md` §"Source-Write Gate" lists what the reader still leaves alone. The program-name
+  reading moved into `programName` in `hooks/lib/claude-path-v1.js`, with the fold policy as a
+  parameter.
 - **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
   `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
   root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks

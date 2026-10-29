@@ -232,23 +232,48 @@ resolve a program name in any letter case by default, Windows also with `.exe`, 
 `GIT`, `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE`, `DD of=` and a wrapper such as `ENV` or `Sudo`
 like their lowercase spelling, on every platform, and on Windows also behind a path written with
 backslashes. A path to `tee` in command position counts like `tee`, while elsewhere in a command
-only the word `tee` itself does, so `grep -n TEE src/app.rs` stays a read; BSD sed's `-I` counts as
-in-place like `-i`. Shell builtins keep their case: the shell runs any other spelling of `cd`,
+only the word `tee` itself does, so `grep -n TEE src/app.rs` stays a read; BSD sed's `-I`,
+`--in-place` and an option cluster that holds `i`, such as `-ni` or `-Ei`, count as in place like
+`-i`. Shell builtins keep their case: the shell runs any other spelling of `cd`,
 `export`, `unset`, `read` or `printf` as an external program, which cannot change the shell's
 directory or variables. For the same reason the gate moves its tracked directory only for a `cd`
-the shell itself runs: the bare word, alone or behind `command`, `builtin` or `time`. `env cd`,
-`ENV cd`, `sudo cd` and `/usr/bin/cd` run a separate program and leave the directory where it was.
+the shell itself runs: the bare word, alone, behind `command` or `builtin`, or behind the `time`
+keyword at the start of the command. `env cd`, `ENV cd`, `sudo cd`, `/usr/bin/cd` and a quoted
+`\time cd` run a separate program and leave the directory where it was.
 The Session Control check reads wrappers and the `tee`, `sed -i` and `dd of=` channels the same
 way, also right after a quote, `(` or a backtick, so `ENV CLAUDE_CODE_SESSION_ID=…`,
 `TEE "$CLAUDE_ENV_FILE"` or `(tee "$CLAUDE_ENV_FILE")` is refused whatever `hooks.bashWriteGate`
 says, and the secret scan reads a Bash command spelled that way as a write.
 
-One spelling class is still read as written: a backslash or a quote inside a program word, such as
-`\git`, `g'i't`, `\env` or `\export`. The shell removes those characters before it looks the
-program up, the gate does not, so on macOS and Linux these spellings pass the Session Control check
-and every rule. On Windows the backslash cut reads `\git` and `\env` as `git` and `env`.
-`tests/structure/test-bash-source-write-gate.sh` pins the gap (W265), so closing it is a deliberate
-change.
+**Words are read after the shell's quote removal, and each wrapper with its own options.** Before
+a word is matched, the gate removes quotes the way bash does: a backslash and single or double
+quotes anywhere inside the word, `$'…'` with bash's escapes decoded, and `$"…"` as double quotes.
+So `\git`, `g'i't`, `\env`, `e'n'v`, `$'\x65nv'`, `\export`, `\unset`, `t'e'e` and `s\ed -i` count
+like their plain spelling, and `\cd ../sibling` moves the tracked directory. A backslash-newline
+continues the line, except after a line that may hold a comment, and a redirection splits off the
+word it is glued to, as in `printf x>src/app.rs`. Each wrapper's own options are read the way that
+wrapper reads them (`env -i`, `-u`, `-C`, `-S` and `--`, `sudo -u` and `-D`, `nice -n`, `time -p`,
+`command -p`, `exec -c` and `-a`), so they no longer end the scan: `env -i CLAUDE_CODE_SESSION_ID=… …`
+is a rebind, `env -u ZENSU_SESSION_KEY …` is refused as removal like `unset`, and `env -C <dir> git …`
+runs git in that directory. A quoted assignment after `env` or `sudo`, as in
+`env "GIT_WORK_TREE=…" git add -A`, is read as one, while a quoted leading assignment stays a
+command word, as it is to bash. The assignment forms `NAME+=…` and `NAME[i]=…`, `printf -vNAME`,
+`export -n` and `declare +x` count too, and neither the reserved words `!`, `{`, `}`, `if`, `then`,
+`else`, `elif`, `fi`, `do`, `done`, `while` and `until` nor a redirection before the command word
+hide it any more. `env -i` on its own is not refused: it names no protected input, and the
+model-side binder (`model-bind` in `hooks/lib/claude-hook-session-v1.js`) refuses a missing
+`CLAUDE_CODE_SESSION_ID`. A literal path to `CLAUDE_ENV_FILE` is
+compared with letter case and Unicode normalization folded on every platform, as macOS and Windows
+resolve it by default. `tests/structure/test-bash-source-write-gate.sh` pins each spelling (W265,
+W74 and W267 to W323).
+
+**What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
+differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and
+`-`; where the Bash tool runs zsh, the gate still reads those spellings the bash way, so they pass.
+A program word the shell builds at run time (`$GIT`, `$(…)`), an alias or a function, a builtin
+that assigns a variable by other means (`let`, `getopts`, `mapfile`, `wait -p`, `coproc NAME`, a
+nameref, arithmetic), a wrapper outside the list (`timeout`, `xargs`, `stdbuf`) and a `;`, `&` or
+`|` inside quotes, which still splits the command, are not followed either.
 
 **While the gate is enabled, the expected *legitimate* hit of rule (C) is a cross-worktree takeover.**
 At its default (off) nothing on this page refuses the commit or a `git worktree move` out of a

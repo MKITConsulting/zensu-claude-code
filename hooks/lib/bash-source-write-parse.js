@@ -50,18 +50,18 @@
 // drops only that candidate, so a literal `-C ../sibling` beside it still denies.
 // `path.resolve` would otherwise splice the literal `$REPO` under the cwd and call
 // it in-project.
-// Rule (C) also anchors on `program`, and the wrapper skip advances over WRAP names
-// and VAR=val only, so a wrapper's OWN flag or a shell keyword hides the verb:
-// `sudo -u me git …`, `nice -n 10 git …`, `for f in a b; do git …; done`. That is
+// Rule (C) also anchors on `program`, and the command reader sees through the WRAP
+// names, their own options and the reserved words before a command, so a wrapper
+// outside WRAP or the coproc keyword hides the verb: `timeout 5 git …`,
+// `xargs git …`, `coproc git …`. That is
 // pre-existing (`sed -i` and `dd` share the anchor) and is not the drifted-cwd
 // incident rule (C) exists for, so it is accepted rather than closed. A linked
 // worktree's admin dir may likewise ride along on an in-project --work-tree even
 // when it belongs to a FOREIGN repo — lexically the two are indistinguishable.
-// Two more come from the shared lexer and bind rules (B) and (C) alike: `cd`
-// tracking reads the token right after `cd`, so `cd -- ../sibling` and
+// One more comes from the shared reader and binds rules (B) and (C) alike: `cd`
+// tracking reads the word right after `cd`, so `cd -- ../sibling` and
 // `cd -P ../sibling` move the cwd to `<proj>/--` and `<proj>/-P` instead of the
-// sibling; and tokens split on whitespace, so a quoted path containing a space
-// (`git -C "/foo bar" add .`) leaves a fragment where the subcommand should be.
+// sibling.
 // Finally, `worktree remove|move` given a bare worktree NAME rather than a path
 // is unjudgeable — git resolves the name against a worktree list this parser
 // deliberately never reads — so that spelling passes.
@@ -83,13 +83,14 @@ const fs = require("fs");
 const { execFileSync } = require("child_process");
 // The ONLY sibling require in this file, and a deliberate one: the MSYS drive
 // rule has to be identical to the one the session-control path boundary applies,
-// and a shared total function is the way to guarantee that instead of a
-// hand-copy held by a lockstep pin. The module is 52 lines, side-effect-free, and
-// already required by four peers in this directory. If it were missing the parser
+// and the program-name reading to the one the other gates are to share, so a
+// shared total function is the way to guarantee that instead of a hand-copy held
+// by a lockstep pin. The module is side-effect-free and already required by its
+// peers in this directory. If it were missing the parser
 // would fail to load and its hook would deny — the fail-closed direction, and the
 // same posture tests/structure/test-msys-runtime-boundaries.sh already pins for
 // the sibling MSYS helper.
-const { msysDrivePrefix } = require("./claude-path-v1.js");
+const { msysDrivePrefix, programName: sharedProgramName } = require("./claude-path-v1.js");
 
 const SRC = new Set(
   "rs ts tsx js jsx mjs cjs py java kt kts go rb c cc cpp cxx h hh hpp cs php swift scala vue svelte".split(" ")
@@ -98,7 +99,58 @@ const SRC = new Set(
 // Transparent command wrappers — skipped so `env sed -i …` / `sudo dd of=…`
 // still resolve to the real verb (mirrors pre-bash-zensu-gate.sh).
 const WRAP = new Set("command builtin exec env sudo nohup nice time".split(" "));
-const SHELL_WRAP = new Set(["command", "builtin", "time"]);
+const SHELL_WRAP = new Set(["command", "builtin"]);
+const RESERVED_WORDS = new Set("! { } if then else elif fi do done while until".split(" "));
+const SHELL_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?(\+?)=/;
+const MAX_SPLITS = 8;
+const WRAPPER_OPTIONS = Object.assign(Object.create(null), {
+  env: {
+    flags: "0iv",
+    operands: "uCSPLU",
+    optional: "",
+    long: {
+      "ignore-environment": 0, null: 0, debug: 0, help: 0, version: 0, "list-signal-handling": 0,
+      unset: 1, chdir: 1, "split-string": 1, "block-signal": 2, "default-signal": 2, "ignore-signal": 2
+    },
+    effects: {
+      i: "clear", "ignore-environment": "clear", u: "unset", unset: "unset",
+      C: "chdir", chdir: "chdir", S: "split", "split-string": "split"
+    }
+  },
+  sudo: {
+    flags: "AbBEeHiKklNnPSsVv",
+    operands: "aCcDgpRrTtUu",
+    optional: "h",
+    long: {
+      askpass: 0, background: 0, bell: 0, edit: 0, "set-home": 0, help: 0, login: 0, "remove-timestamp": 0,
+      "reset-timestamp": 0, list: 0, "non-interactive": 0, "preserve-groups": 0, stdin: 0, shell: 0, version: 0,
+      validate: 0, "close-from": 1, chdir: 1, group: 1, host: 1, prompt: 1, chroot: 1, role: 1, type: 1,
+      "command-timeout": 1, "other-user": 1, user: 1, "preserve-env": 2
+    },
+    effects: { D: "chdir", chdir: "chdir" }
+  },
+  nice: { flags: "", operands: "n", optional: "", long: { adjustment: 1, help: 0, version: 0 }, effects: {} },
+  nohup: { flags: "", operands: "", optional: "", long: { help: 0, version: 0 }, effects: {} },
+  time: {
+    flags: "ahlpqv",
+    operands: "fo",
+    optional: "",
+    long: { format: 1, output: 1, append: 0, portability: 0, quiet: 0, verbose: 0, help: 0, version: 0 },
+    effects: {}
+  },
+  command: { flags: "pvV", operands: "", optional: "", long: {}, effects: {} },
+  builtin: { flags: "", operands: "", optional: "", long: {}, effects: {} },
+  exec: { flags: "cl", operands: "a", optional: "", long: {}, effects: { c: "clear" } }
+});
+const SED_LONG_OPTIONS = {
+  "in-place": 2, expression: 1, file: 1, "line-length": 1, "follow-symlinks": 0, "null-data": 0,
+  "zero-terminated": 0, posix: 0, quiet: 0, silent: 0, "regexp-extended": 0, separate: 0, sandbox: 0,
+  unbuffered: 0, debug: 0, help: 0, version: 0
+};
+const ANSI_C_ESCAPES = Object.assign(Object.create(null), {
+  a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v",
+  "\\": "\\", "'": "'", "\"": "\"", "?": "?"
+});
 
 // Git subcommands that rewrite a repository's index or working tree. Rule (C)
 // denies these ONLY when the target repository escapes the session root, so the
@@ -301,9 +353,284 @@ function unquote(t) {
 }
 
 function programName(word, isWindows = IS_WINDOWS) {
-  const value = String(word || "");
-  const cut = isWindows ? Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\")) : value.lastIndexOf("/");
-  return value.slice(cut + 1).replace(/\.exe$/i, "").toUpperCase().toLowerCase();
+  return sharedProgramName(String(word || ""), isWindows ? "win32" : "posix", "always");
+}
+
+function ansiC(text, start) {
+  let value = "";
+  let cut = false;
+  let i = start;
+  while (i < text.length && text[i] !== "'") {
+    let ch = text[i];
+    let next = i + 1;
+    if (ch === "\\" && i + 1 < text.length) {
+      const c = text[i + 1];
+      const rest = text.slice(i + 2);
+      next = i + 2;
+      let m = null;
+      if (ANSI_C_ESCAPES[c] !== undefined) {
+        ch = ANSI_C_ESCAPES[c];
+      } else if (/[0-7]/.test(c)) {
+        m = /^[0-7]{0,2}/.exec(rest);
+        ch = String.fromCharCode(parseInt(c + m[0], 8) & 0xff);
+        next += m[0].length;
+      } else if (c === "x" && (m = /^[0-9A-Fa-f]{1,2}/.exec(rest))) {
+        ch = String.fromCharCode(parseInt(m[0], 16));
+        next += m[0].length;
+      } else if ((c === "u" || c === "U") && (m = (c === "u" ? /^[0-9A-Fa-f]{1,4}/ : /^[0-9A-Fa-f]{1,8}/).exec(rest))
+        && parseInt(m[0], 16) <= 0x10ffff) {
+        ch = String.fromCodePoint(parseInt(m[0], 16));
+        next += m[0].length;
+      } else if (c === "c" && rest.length > 0) {
+        ch = String.fromCharCode(rest.charCodeAt(0) & 0x1f);
+        next += 1;
+      } else {
+        ch = "\\" + c;
+      }
+    }
+    if (ch.indexOf("\0") !== -1) {
+      value += cut ? "" : ch.slice(0, ch.indexOf("\0"));
+      cut = true;
+    } else if (!cut) {
+      value += ch;
+    }
+    i = next;
+  }
+  return { value, end: i };
+}
+
+function redirectOperator(text, i) {
+  const two = text.substr(i, 2);
+  if (text.substr(i, 3) === "<<<") return "<<<";
+  if (two === "<<") return text[i + 2] === "-" ? "<<-" : "<<";
+  if ([">>", ">|", ">&", "<>", "<&"].indexOf(two) !== -1) return two;
+  return text[i];
+}
+
+function segmentWords(text) {
+  const words = [];
+  const n = text.length;
+  let word = null;
+  let i = 0;
+  const close = (to) => {
+    if (word) words.push({ raw: text.slice(word.start, to), value: word.value });
+    word = null;
+  };
+  while (i < n) {
+    const c = text[i];
+    if (/\s/.test(c)) {
+      close(i);
+      i++;
+      continue;
+    }
+    if (c === ">" || c === "<") {
+      const fd = word !== null && /^(?:\d+|&)$/.test(text.slice(word.start, i));
+      const start = fd ? word.start : i;
+      if (fd) word = null;
+      else close(i);
+      i += redirectOperator(text, i).length;
+      const raw = text.slice(start, i);
+      words.push({ raw, value: raw, op: raw.replace(/^\d+/, "") });
+      continue;
+    }
+    if (!word) word = { start: i, value: "" };
+    if (c === "\\") {
+      word.value += i + 1 < n ? text[i + 1] : c;
+      i += 2;
+    } else if (c === "'") {
+      const end = text.indexOf("'", i + 1);
+      word.value += text.slice(i + 1, end === -1 ? n : end);
+      i = end === -1 ? n : end + 1;
+    } else if (c === "$" && text[i + 1] === "'") {
+      const decoded = ansiC(text, i + 2);
+      word.value += decoded.value;
+      i = decoded.end + 1;
+    } else if (c === "\"" || (c === "$" && text[i + 1] === "\"")) {
+      let k = i + (c === "$" ? 2 : 1);
+      while (k < n && text[k] !== "\"") {
+        if (text[k] === "\\" && k + 1 < n && "$`\"\\\n".indexOf(text[k + 1]) !== -1) {
+          word.value += text[k + 1];
+          k += 2;
+        } else {
+          word.value += text[k];
+          k++;
+        }
+      }
+      i = k + 1;
+    } else if (c === "$" && text[i + 1] === "{") {
+      const end = text.indexOf("}", i + 2);
+      const stop = end === -1 ? n : end + 1;
+      word.value += text.slice(i, stop);
+      i = stop;
+    } else {
+      word.value += c;
+      i++;
+    }
+  }
+  close(Math.min(i, n));
+  return words;
+}
+
+function joinContinuations(text) {
+  const out = [];
+  let joined = "";
+  for (const line of text.split("\n")) {
+    const tail = /\\+$/.exec(line);
+    if (tail && tail[0].length % 2 === 1 && !/(^|[\s;&|()])#/.test(joined + line)) {
+      joined += line.slice(0, -1);
+      continue;
+    }
+    out.push(joined + line);
+    joined = "";
+  }
+  if (joined) out.push(joined);
+  return out.join("\n");
+}
+
+function commandText(cmd) {
+  return joinContinuations(stripHeredocs(cmd))
+    .replace(/>\|/g, ">")
+    .replace(/(\d*)(>>?)&(?=\s*[^\s0-9&|;<>(\-])/g, "$1$2");
+}
+
+function splitRedirects(segment) {
+  const words = [];
+  const writes = [];
+  for (let k = 0; k < segment.length; k++) {
+    const w = segment[k];
+    if (!w.op) {
+      words.push(w);
+      continue;
+    }
+    const target = k + 1 < segment.length && !segment[k + 1].op ? segment[k + 1] : null;
+    if (target) k++;
+    if (target && /^(?:&?>>?|>\|)$/.test(w.op)) writes.push(target);
+  }
+  return { words, writes };
+}
+
+function longOption(table, given) {
+  const names = Object.keys(table);
+  if (names.indexOf(given) !== -1) return given;
+  const hits = names.filter((name) => name.startsWith(given));
+  return given !== "" && hits.length === 1 ? hits[0] : null;
+}
+
+function wrapperArguments(name, words, start, out) {
+  const spec = WRAPPER_OPTIONS[name];
+  const apply = (key, value, at) => {
+    const kind = Object.prototype.hasOwnProperty.call(spec.effects, key) ? spec.effects[key] : "";
+    if (kind === "clear") out.ops.push({ kind });
+    else if (value === undefined) return;
+    else if (kind === "unset" || kind === "chdir") out.ops.push({ kind, name: value });
+    else if (kind === "split" && out.splits++ < MAX_SPLITS) {
+      words.splice(at, 0, ...segmentWords(value).filter((w) => !w.op));
+    }
+  };
+  let i = start;
+  while (i < words.length) {
+    const word = words[i].value;
+    if (word === "--") {
+      i++;
+      break;
+    }
+    if (name === "env" && word === "-") {
+      out.ops.push({ kind: "clear" });
+      i++;
+      continue;
+    }
+    if (name === "nice" && /^-\d+$/.test(word)) {
+      i++;
+      continue;
+    }
+    if (word.length < 2 || word[0] !== "-") break;
+    const found = [];
+    let used = 1;
+    if (word[1] === "-") {
+      const eq = word.indexOf("=");
+      const key = longOption(spec.long, eq === -1 ? word.slice(2) : word.slice(2, eq));
+      let value = eq === -1 ? undefined : word.slice(eq + 1);
+      if (key !== null && spec.long[key] === 1 && value === undefined && i + 1 < words.length) {
+        value = words[i + 1].value;
+        used = 2;
+      }
+      if (key !== null) found.push([key, value]);
+    } else {
+      for (let k = 1; k < word.length; k++) {
+        const letter = word[k];
+        if (spec.operands.indexOf(letter) !== -1 || (spec.optional.indexOf(letter) !== -1 && k + 1 < word.length)) {
+          let value = word.slice(k + 1);
+          if (value === "" && i + 1 < words.length) {
+            value = words[i + 1].value;
+            used = 2;
+          }
+          found.push([letter, value === "" ? undefined : value]);
+          break;
+        }
+        found.push([letter, undefined]);
+      }
+    }
+    i += used;
+    for (const [key, value] of found) apply(key, value, i);
+  }
+  while (i < words.length && words[i].value.indexOf("=") > 0) {
+    const value = words[i].value;
+    out.ops.push({ kind: "set", name: value.slice(0, value.indexOf("=")), value: value.slice(value.indexOf("=") + 1) });
+    i++;
+  }
+  return i;
+}
+
+function commandWords(segment) {
+  const words = segment.slice();
+  const out = { words, index: 0, word: "", leading: [], ops: [], inShell: true, splits: 0 };
+  let i = 0;
+  for (;;) {
+    while (i < words.length && RESERVED_WORDS.has(words[i].raw)) i++;
+    if (i < words.length && words[i].raw === "time") {
+      i++;
+      while (i < words.length && words[i].raw === "-p") i++;
+      continue;
+    }
+    break;
+  }
+  while (i < words.length) {
+    const m = SHELL_ASSIGNMENT.exec(words[i].raw);
+    if (!m) break;
+    const value = segmentWords(words[i].raw.slice(m[0].length)).map((w) => w.value).join("");
+    out.leading.push({ name: m[1], plain: !m[2] && !m[3], value });
+    i++;
+  }
+  while (i < words.length && WRAP.has(programName(words[i].value))) {
+    if (!SHELL_WRAP.has(words[i].value)) out.inShell = false;
+    i = wrapperArguments(programName(words[i].value), words, i + 1, out);
+  }
+  out.index = i;
+  out.word = i < words.length ? words[i].value : "";
+  return out;
+}
+
+function sedInPlace(args) {
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (a === "--") return false;
+    if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      const key = longOption(SED_LONG_OPTIONS, eq === -1 ? a.slice(2) : a.slice(2, eq));
+      if (key === "in-place") return true;
+      if (key !== null && SED_LONG_OPTIONS[key] === 1 && eq === -1) k++;
+      continue;
+    }
+    if (a.length < 2 || a[0] !== "-") continue;
+    for (let c = 1; c < a.length; c++) {
+      if (a[c] === "i" || a[c] === "I") return true;
+      if (a[c] === "e" || a[c] === "f") {
+        if (c === a.length - 1) k++;
+        break;
+      }
+    }
+  }
+  return false;
 }
 
 // Absoluteness probe for a RAW spelling. A tilde only resolves to a fixed
@@ -474,6 +801,7 @@ function lex(s) {
     if (c === ")") { flush(); if (depth > 0) { ev.push({ t: "leave" }); depth--; } continue; }
     if (c === "`") { flush(); continue; }
     if (two === "&&" || two === "||") { flush(); i++; continue; }
+    if (c === "&" && (s[i - 1] === ">" || s[i - 1] === "<" || s[i + 1] === ">")) { buf += c; continue; }
     // `|` and `&` put the next command in a subshell, so an `export` or `cd`
     // does NOT carry across them; `;` and newline do carry.
     if (c === "|" || c === "&") { flush(); ev.push({ t: "reset" }); continue; }
@@ -492,9 +820,11 @@ function lex(s) {
 // it only widens what gets scanned; fd dups (2>&1, >&2, >&-) are NOT channels.
 // Default mode is byte-identical.
 //
-// This is a TEXT matcher with no operand resolution and no quote awareness, so
-// it reports `redirect` for `git commit -m "fix: A -> B"` and `tee` for a commit
-// message containing that word. Any consumer that DENIES on a hit refuses those.
+// Its patterns are a TEXT matcher with no operand resolution and no quote
+// awareness, so they report `redirect` for `git commit -m "fix: A -> B"` and `tee`
+// for a commit message containing that word; a second pass reads each command's
+// program word through commandWords, after the shell's quote removal. Any
+// consumer that DENIES on a hit refuses those.
 //
 // TWO consumers, and only one of them scans:
 //   - pre-write-secret-scan.sh SCANS on a hit, so over-detection is safe there.
@@ -519,9 +849,18 @@ function detectChannels(cmd) {
   const VERB = "(^|\\s|;|\\||&|/|\\\\|\\(|`|'|\")";
   if (REDIR.test(collapsed)) found.add("redirect");
   if (new RegExp(VERB + "tee(\\.exe)?['\"]?(\\s|$)", "iu").test(cmd)) found.add("tee");
-  if (new RegExp(VERB + "sed(\\.exe)?['\"]?\\s+(-[A-Za-z]*\\s+)*-i", "iu").test(cmd)) found.add("sed -i");
+  if (new RegExp(VERB + "sed(\\.exe)?['\"]?\\s+(-\\S*\\s+)*(-[A-Za-z]*i|--i)", "iu").test(cmd)) found.add("sed -i");
   if (new RegExp(VERB + "dd(\\.exe)?['\"]?\\s+[^\\n]*of=", "iu").test(cmd)) found.add("dd of=");
   if (/(?<!<)<<(?!<)[-~]?\s*['"]?[A-Za-z_]/.test(cmd)) found.add("heredoc");
+  for (const event of lex(commandText(cmd))) {
+    if (event.t !== "seg") continue;
+    const read = commandWords(splitRedirects(segmentWords(event.text)).words);
+    const program = programName(read.word);
+    const args = read.words.slice(read.index + 1).map((w) => w.value);
+    if (program === "tee") found.add("tee");
+    if (program === "sed" && sedInPlace(args)) found.add("sed -i");
+    if (program === "dd" && args.some((a) => a.startsWith("of="))) found.add("dd of=");
+  }
   return Array.from(found).join("\n");
 }
 
@@ -535,9 +874,13 @@ const CONTROL_BINDINGS = new Set([
   "ZENSU_PROJECT_ROOT"
 ]);
 
-function bindingFromAssignment(raw) {
-  const m = unquote(raw).match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+function bindingFromAssignment(word) {
+  const m = SHELL_ASSIGNMENT.exec(word);
   return m && CONTROL_BINDINGS.has(m[1]) ? m[1] : "";
+}
+
+function foldPath(value) {
+  return value.normalize("NFC").toUpperCase().toLowerCase();
 }
 
 // Git Bash and native Windows processes can spell the same absolute path in
@@ -553,28 +896,26 @@ function controlPathNamespace(value) {
   let normalized = value.replace(/\\/g, "/");
   normalized = normalized.replace(/^\/\/\?\/([A-Za-z]:\/)/, "$1");
   normalized = normalized.replace(/^\/([A-Za-z])(?=\/)/, "$1:");
-  if (!/^[A-Za-z]:\//.test(normalized)) return normalized;
-  const drive = normalized.slice(0, 2).toLowerCase();
+  if (!/^[A-Za-z]:\//.test(normalized)) return foldPath(normalized);
+  const drive = normalized.slice(0, 2);
   const tail = path.posix.normalize("/" + normalized.slice(3));
-  return (drive + tail).toLowerCase();
+  return foldPath(drive + tail);
 }
 
 function commandRefersToControlPath(cmd, envFile) {
   const target = controlPathNamespace(envFile);
   if (!target) return false;
-  const windowsDriveTarget = /^[a-z]:\//.test(target);
 
   // Normalize drive-root spellings wherever a shell token may begin. Keeping
   // token boundaries in the comparison prevents `.claude-env.backup` from
   // being mistaken for the protected file while still covering glued redirects
   // such as `>>/d/work/.claude-env` and quoted paths containing spaces.
-  let normalizedCommand = cmd
+  // Letter case and Unicode normalization are folded on every platform: macOS
+  // and Windows resolve both by default, and the parser cannot know the volume
+  // that holds the env file.
+  const normalizedCommand = foldPath(cmd
     .replace(/\\/g, "/")
-    .replace(/(^|[\s"'`=<>|&;(])\/([A-Za-z])(?=\/)/g, "$1$2:");
-  // Drive-letter paths are case-insensitive; POSIX paths are not. Lowercase
-  // only for the Windows namespace so the existing Unix exact-path behavior
-  // remains case-sensitive.
-  if (windowsDriveTarget) normalizedCommand = normalizedCommand.toLowerCase();
+    .replace(/(^|[\s"'`=<>|&;(])\/([A-Za-z])(?=\/)/g, "$1$2:"));
   let offset = 0;
   while (offset <= normalizedCommand.length - target.length) {
     const index = normalizedCommand.indexOf(target, offset);
@@ -590,6 +931,12 @@ function commandRefersToControlPath(cmd, envFile) {
   return false;
 }
 
+function wordsReferToControlPath(cmd, envFile) {
+  const target = controlPathNamespace(envFile);
+  return !!target && lex(commandText(cmd)).some((event) => event.t === "seg"
+    && segmentWords(event.text).some((w) => !w.op && controlPathNamespace(w.value) === target));
+}
+
 // Claude's host session selector and Zensu's helper-private bindings must not
 // be rebound by a model-issued Bash call. Likewise, model commands may not
 // write CLAUDE_ENV_FILE and poison later Bash environments. This check is
@@ -601,51 +948,47 @@ function detectControlMutation(cmd) {
   // command that writes through $CLAUDE_ENV_FILE must stay denied even if the
   // ambient value is missing, native Windows, or otherwise uncomparable.
   const refersToEnvFile = /\$\{?CLAUDE_ENV_FILE\}?/.test(cmd)
-    || commandRefersToControlPath(cmd, envFile);
+    || commandRefersToControlPath(cmd, envFile)
+    || wordsReferToControlPath(cmd, envFile);
   if (refersToEnvFile && detectChannels(cmd)) {
     return "Blocked a Bash write to CLAUDE_ENV_FILE. Model commands must not alter the environment inherited by later Claude Code Bash calls.";
   }
 
-  for (const event of lex(stripHeredocs(cmd))) {
+  const rebind = (name) => "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+  const removal = (name) => "Blocked removal of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+  for (const event of lex(commandText(cmd))) {
     if (event.t !== "seg") continue;
-    const toks = event.text.trim().split(/\s+/).filter(Boolean);
-    if (!toks.length) continue;
-    let i = 0;
-    while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
-      const name = bindingFromAssignment(toks[i]);
-      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
-      i++;
-    }
-    while (i < toks.length && WRAP.has(programName(unquote(toks[i])))) {
-      i++;
-      while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
-        const name = bindingFromAssignment(toks[i]);
-        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
-        i++;
-      }
-    }
-    if (i >= toks.length) continue;
-    const cmd0 = unquote(toks[i]).split("/").pop();
-    const args = toks.slice(i + 1).map(unquote);
+    const read = commandWords(splitRedirects(segmentWords(event.text)).words);
+    const set = read.leading.concat(read.ops.filter((op) => op.kind === "set"))
+      .find((assignment) => CONTROL_BINDINGS.has(assignment.name));
+    if (set) return rebind(set.name);
+    const unset = read.ops.find((op) => op.kind === "unset" && CONTROL_BINDINGS.has(op.name));
+    if (unset) return removal(unset.name);
+    if (read.index >= read.words.length) continue;
+    const cmd0 = read.word.split("/").pop();
+    const args = read.words.slice(read.index + 1).map((w) => w.value);
     if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
       for (const arg of args) {
         const name = bindingFromAssignment(arg);
-        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+        if (name) return rebind(name);
       }
+      const unexports = cmd0 === "export" ? args.some((a) => /^-[A-Za-z]*n/.test(a)) : args.some((a) => /^\+[A-Za-z]*x/.test(a));
+      const name = unexports ? args.find((arg) => CONTROL_BINDINGS.has(arg)) : undefined;
+      if (name) return removal(name);
     }
     if (cmd0 === "unset") {
       const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
-      if (name) return "Blocked removal of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+      if (name) return removal(name);
     }
     if (cmd0 === "printf") {
-      const vi = args.indexOf("-v");
-      if (vi !== -1 && CONTROL_BINDINGS.has(args[vi + 1])) {
-        return "Blocked a Bash rebind of protected Session Control input " + args[vi + 1] + ". Start a fresh Claude Code session instead.";
+      for (let k = 0; k < args.length; k++) {
+        const name = args[k] === "-v" ? args[k + 1] : /^-v./.test(args[k]) ? args[k].slice(2) : undefined;
+        if (name !== undefined && CONTROL_BINDINGS.has(name)) return rebind(name);
       }
     }
     if (cmd0 === "read") {
       const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
-      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+      if (name) return rebind(name);
     }
   }
   return "";
@@ -877,8 +1220,9 @@ function main() {
     }
   }
 
-  function decide(raw, channel) {
-    const p = abspath(unquote(raw));
+  function decide(value, channel, base) {
+    if (base === null && !path.isAbsolute(msysToDrive(expand(value), IS_WINDOWS))) return "";
+    const p = resolveFrom(base === null || base === undefined ? curdir : base, value);
     if (!SRC.has(extOf(p))) return "";
     if (isTemp(p)) return "";
     // BSWG_MODE=targets — report the RESOLVED write operand instead of judging
@@ -985,8 +1329,6 @@ function main() {
     );
   }
 
-  const REDIR = /^(&|\d*)(>>?)(\|?)(.*)$/; // >  >>  &>  2>  >|  (and glued target)
-
   // Bound the work: a crafted command with thousands of `>> a.rs >> b.rs …`
   // targets would otherwise fan out into thousands of synchronous git calls.
   const MAX_TARGETS = 200;
@@ -997,7 +1339,7 @@ function main() {
   const DEADLINE = Date.now() + 20000;
 
   // Bypass-ledger markers: when an inline env prefix (unquoted OR quoted —
-  // envp values are unquote()d below) suppresses this gate for a segment, the
+  // envp values are read after quote removal) suppresses this gate for a segment, the
   // fact is reported to the caller as `__bypass__\t<VAR>` lines — but only
   // when no deny reason wins. Detection thereby shares the ONE code path that
   // decides the bypass, instead of a shell-side textual re-parse.
@@ -1017,9 +1359,7 @@ function main() {
   let segCwd = curdir;
   let segEnv = {};
   let carryEnv = {};
-  const pre = stripHeredocs(cmd)
-    .replace(/>\|/g, ">")
-    .replace(/(\d*)(>>?)&(?=\s*[^\s0-9&|;<>(\-])/g, "$1$2");
+  const pre = commandText(cmd);
   for (const e of lex(pre)) {
     // The env carry is scoped exactly like the cwd: a binding made inside `( … )`
     // dies with the subshell and must not deny a later in-project command.
@@ -1033,47 +1373,31 @@ function main() {
       continue;
     }
 
-    const toks = e.text.trim().split(/\s+/).filter(Boolean);
-    if (!toks.length) continue;
+    const split = splitRedirects(segmentWords(e.text));
+    if (!split.words.length && !split.writes.length) continue;
     segCwd = curdir;
     segEnv = Object.assign({}, carryEnv);
 
-    let i = 0;
-    const envp = {};
-    while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
-      const a = toks[i];
-      const eq = a.indexOf("=");
-      envp[a.slice(0, eq)] = unquote(a.slice(eq + 1));
-      i++;
-    }
-    const rest = toks.slice(i).filter((t) => t !== "");
-    if (!rest.length) continue;
-
     // Skip transparent wrappers (env/sudo/command/exec/…) and env's VAR=val args
     // so a wrapped program still resolves to its real verb for the program gates.
-    // `env VAR=val git …` carries its assignments here rather than in envp. They
+    // `env VAR=val git …` carries its assignments in read.ops rather than in envp. They
     // are collected separately so rule (C) can read GIT_DIR/GIT_WORK_TREE off both
     // spellings without widening which prefixes count as an escape hatch.
-    let ci = 0;
-    let inShell = true;
-    const wrapEnv = {};
-    while (ci < rest.length && WRAP.has(programName(unquote(rest[ci])))) {
-      if (!SHELL_WRAP.has(unquote(rest[ci]))) inShell = false;
-      ci++;
-      while (ci < rest.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[ci])) {
-        const eq = rest[ci].indexOf("=");
-        wrapEnv[rest[ci].slice(0, eq)] = unquote(rest[ci].slice(eq + 1));
-        ci++;
-      }
+    const read = commandWords(split.words);
+    const envp = {};
+    for (const assignment of read.leading) {
+      if (assignment.plain) envp[assignment.name] = assignment.value;
     }
-    const word = ci < rest.length ? unquote(rest[ci]) : "";
-    const cmd0 = inShell && word.indexOf("/") === -1 ? word : "";
+    if (read.index >= read.words.length && !split.writes.length) continue;
+    const word = read.word;
+    const cmd0 = read.inShell && word.indexOf("/") === -1 ? word : "";
     const program = programName(word);
+    const args = read.words.slice(read.index + 1).map((w) => w.value);
 
     // `cd` updates the scoped cwd BEFORE the escape-hatch check — an escaped
     // segment may still change the directory for the commands that follow it.
-    if (cmd0 === "cd" && rest[ci + 1] !== undefined) {
-      curdir = abspath(unquote(rest[ci + 1]));
+    if (cmd0 === "cd" && args[0] !== undefined) {
+      curdir = abspath(args[0]);
       continue;
     }
     if (envp.ZENSU_BASH_WRITE_GATE === "off" || envp.ZENSU_MCP_GATE === "off") {
@@ -1089,16 +1413,11 @@ function main() {
     // does. Harvest and then FALL THROUGH — a redirect in the same segment is still
     // a write channel rules (A)/(B) must see.
     if (cmd0 === "export"
-      || (["declare", "typeset"].indexOf(cmd0) !== -1 && rest.indexOf("-x") !== -1)) {
-      for (const raw of rest.slice(ci + 1)) {
-        // Unquote AFTER the split, as the option and inline-prefix paths do:
-        // unquoting the whole token first leaves `GIT_WORK_TREE="/sib"` as
-        // `"/sib`, which is not absolute and resolves back inside the project.
-        const eq = unquote(raw).indexOf("=") >= 0 ? raw.replace(/^['"]/, "").indexOf("=") : -1;
-        if (eq <= 0) continue;
-        const bare = raw.replace(/^['"]/, "");
-        const name = unquote(bare.slice(0, eq));
-        if (name === "GIT_DIR" || name === "GIT_WORK_TREE") carryEnv[name] = unquote(bare.slice(eq + 1));
+      || (["declare", "typeset"].indexOf(cmd0) !== -1 && args.some((a) => /^-[A-Za-z]*x/.test(a)))) {
+      for (const arg of args) {
+        const eq = arg.indexOf("=");
+        const name = eq > 0 ? arg.slice(0, eq) : "";
+        if (name === "GIT_DIR" || name === "GIT_WORK_TREE") carryEnv[name] = arg.slice(eq + 1);
       }
     }
 
@@ -1109,47 +1428,38 @@ function main() {
     // root that cannot be realpath'd (it was DELETED — the state this mode exists
     // for) now stays in the unresolved namespace while the payload cwd resolves,
     // and every git verb in the user's own tree would read as an escape.
+    const dirs = read.ops.filter((op) => op.kind === "chdir").map((op) => op.name);
     if (program === "git" && !targetsOnly) {
-      const pick = (k) => {
-        if (wrapEnv[k] !== undefined) return wrapEnv[k];
-        if (envp[k] !== undefined) return envp[k];
-        return carryEnv[k];
-      };
-      const g = decideGit(rest.slice(ci + 1), {
-        GIT_DIR: pick("GIT_DIR"),
-        GIT_WORK_TREE: pick("GIT_WORK_TREE")
+      let gitEnv = Object.assign({}, carryEnv, envp);
+      for (const op of read.ops) {
+        if (op.kind === "clear") gitEnv = {};
+        else if (op.kind === "unset") delete gitEnv[op.name];
+        else if (op.kind === "set") gitEnv[op.name] = op.value;
+      }
+      const g = decideGit(dirs.flatMap((dir) => ["-C", dir]).concat(args), {
+        GIT_DIR: gitEnv.GIT_DIR,
+        GIT_WORK_TREE: gitEnv.GIT_WORK_TREE
       });
       if (g) return g;
     }
 
-    const targets = [];
-    for (let k = 0; k < rest.length; k++) {
-      const m = rest[k].match(REDIR);
-      if (m) {
-        if (m[4]) targets.push([m[4], "redirect"]);
-        else if (rest[k + 1] !== undefined) { targets.push([rest[k + 1], "redirect"]); k++; }
-      }
-    }
-    const teeIdx = program === "tee" ? ci : rest.findIndex((t) => unquote(t) === "tee");
+    const runDir = dirs.some((dir) => UNEXPANDED.test(dir)) ? null : dirs.reduce((base, dir) => resolveFrom(base, dir), curdir);
+    const targets = split.writes.map((w) => [w.value, "redirect", curdir]);
+    const teeIdx = program === "tee" ? read.index : read.words.findIndex((w) => w.value === "tee");
     if (teeIdx !== -1) {
-      for (let k = teeIdx + 1; k < rest.length; k++) {
-        const t = rest[k];
-        if (t.charAt(0) === "-") continue;            // flag
-        const rm = t.match(REDIR);
-        if (rm) { if (!rm[4]) k++; continue; }         // skip a redirect operator (+ its operand)
-        targets.push([t, "tee"]);
+      const base = program === "tee" ? runDir : curdir;
+      for (const w of read.words.slice(teeIdx + 1)) {
+        if (w.value.charAt(0) !== "-") targets.push([w.value, "tee", base]);
       }
     }
-    if (program === "sed" && rest.some((t) => /^-[iI]/.test(unquote(t)))) {
-      for (const t of rest) {
-        const u = unquote(t);
-        if (u.charAt(0) !== "-" && SRC.has(extOf(abspath(u)))) targets.push([t, "sed -i"]);
+    if (program === "sed" && sedInPlace(args)) {
+      for (const a of args) {
+        if (a.charAt(0) !== "-" && SRC.has(extOf(a))) targets.push([a, "sed -i", runDir]);
       }
     }
     if (program === "dd") {
-      for (const t of rest) {
-        const m = t.match(/^of=(.+)$/);
-        if (m) targets.push([m[1], "dd of="]);
+      for (const a of args) {
+        if (/^of=./.test(a)) targets.push([a.slice(3), "dd of=", runDir]);
       }
     }
 
@@ -1167,7 +1477,7 @@ function main() {
       if (targetsOnly && ++evaluated > MAX_TARGETS) {
         return "WRITE-TARGET (unevaluated: target budget exceeded)";
       }
-      const r = decide(targets[x][0], targets[x][1]);
+      const r = decide(targets[x][0], targets[x][1], targets[x][2]);
       if (r) return r;
     }
   }
@@ -1188,6 +1498,11 @@ if (require.main === module) {
     gitTargets,
     msysToDrive,
     programName,
+    segmentWords,
+    joinContinuations,
+    splitRedirects,
+    commandWords,
+    sedInPlace,
     within,
     isUnsafeTempEntry,
     splitTempList,

@@ -501,11 +501,11 @@ run "W71 protected path prefix is not an exact CLAUDE_ENV_FILE match" \
 run "W72 symbolic CLAUDE_ENV_FILE reference is independent of native path parsing" \
   'printf x >> "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_ON" \
   'D:\a\zensu-claude-code\session\.claude-env'
-run "W73 POSIX CLAUDE_ENV_FILE comparison remains case-sensitive and exact" \
+run "W73 POSIX CLAUDE_ENV_FILE exact path" \
   "printf x >> /Users/Runner/Session/.claude-env" DENY "$PROJ" "$CFG_ON" \
   '/Users/Runner/Session/.claude-env'
-run "W74 POSIX CLAUDE_ENV_FILE does not fold case" \
-  "printf x >> /users/runner/session/.claude-env" ALLOW "$PROJ" "$CFG_ON" \
+run "W74 a POSIX CLAUDE_ENV_FILE path folds letter case, as a case-insensitive volume resolves it" \
+  "printf x >> /users/runner/session/.claude-env" DENY "$PROJ" "$CFG_OFF" \
   '/Users/Runner/Session/.claude-env'
 run "W75 direct host session-id assignment" "CLAUDE_CODE_SESSION_ID=other env" DENY
 run "W76 exported host session-id rebind" "export CLAUDE_CODE_SESSION_ID=other" DENY
@@ -543,7 +543,7 @@ run "W261 grep naming a tee directory before a tracked file is no tee write" "gr
 run "W262 an uppercase tee in a subshell into CLAUDE_ENV_FILE" 'echo x | (TEE "$CLAUDE_ENV_FILE")' DENY "$PROJ" "$CFG_OFF"
 run "W263 sed -i in a command substitution on CLAUDE_ENV_FILE" 'x=$(SED -i s/a/b/ "$CLAUDE_ENV_FILE")' DENY "$PROJ" "$CFG_OFF"
 run "W264 a quoted tee into CLAUDE_ENV_FILE" 'echo x | "tee" "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
-run "W265 a quote inside the program word is read as written, the known quote-removal gap" "g'i't -C $SIB add ." ALLOW
+run "W265 a quote inside the program word is removed as bash removes it" "g'i't -C $SIB add ." DENY
 
 WIN32_PRELOAD="$WORKROOT/win32-platform.js"
 printf '%s\n' 'Object.defineProperty(process, "platform", { value: "win32" });' > "$WIN32_PRELOAD"
@@ -567,6 +567,75 @@ HOST_WANT=allow
 { [ "$WIN32_READ" = deny ] && [ "$HOST_READ" = "$HOST_WANT" ]; } \
   && check "W266 the rule loop reads a backslash path to git.exe as git on win32 only" PASS \
   || check "W266 win32 program path reading (win32=$WIN32_READ host=$HOST_READ host-is-win32=$HOST_WIN32)" FAIL
+
+run "W267 a backslash before the env wrapper is removed, so the host session-id rebind is refused" "\\env CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W268 quotes inside the env wrapper word are removed" "e'n'v CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W269 a backslash before export is removed, so the builtin rebinds" "\\export ZENSU_SESSION_KEY=x" DENY "$PROJ" "$CFG_OFF"
+run "W270 a backslash before unset is removed, so the builtin removes" "\\unset ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W271 an ANSI-C quoted env wrapper is decoded" "\$'\\x65nv' CLAUDE_CODE_SESSION_ID=x true" DENY "$PROJ" "$CFG_OFF"
+run "W272 a locale-quoted env wrapper is read as double quotes" "\$\"env\" CLAUDE_CODE_SESSION_ID=x true" DENY "$PROJ" "$CFG_OFF"
+run "W273 a backslash before git is removed, so rule (C) judges git -C sibling add" "\\git -C $SIB add ." DENY
+run "W274 a backslash before cd is removed, so git add after it is judged in the sibling" "\\cd ../sibling && git add ." DENY
+run "W275 a quoted git read in the sibling still passes" "'git' -C $SIB status" ALLOW
+LC_UNSET="$(printf 'unset \\\nZENSU_SESSION_KEY')"
+run "W276 a backslash-newline continues the line, so the unset after it is refused" "$LC_UNSET" DENY "$PROJ" "$CFG_OFF"
+LC_GIT="$(printf 'git -C %s \\\nadd .' "$SIB")"
+run "W277 a backslash-newline inside git -C sibling add keeps the verb on its command" "$LC_GIT" DENY
+LC_COMMENT="$(printf '# note \\\nunset ZENSU_SESSION_KEY')"
+run "W278 a comment line that ends in a backslash does not swallow the unset on the next line" "$LC_COMMENT" DENY "$PROJ" "$CFG_OFF"
+run "W279 env -i does not end the protected-assignment scan" "env -i CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W280 env -- does not end the protected-assignment scan" "env -- CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W281 sudo's own -u operand does not end the scan" "sudo -u root ZENSU_PROJECT_ROOT=/x true" DENY "$PROJ" "$CFG_OFF"
+run "W282 nice -n before env does not end the scan" "nice -n 5 env ZENSU_SESSION_KEY=x true" DENY "$PROJ" "$CFG_OFF"
+run "W283 env -S splits its string into further env arguments" "env -S 'CLAUDE_CODE_SESSION_ID=x bash' x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W284 env -u of a protected input is refused" "env -u ZENSU_SESSION_KEY bash x.sh" DENY "$PROJ" "$CFG_OFF"
+REASON_ENV_UNSET="$(payload "env --unset=CLAUDE_CODE_SESSION_ID bash x.sh" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_OFF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+printf '%s' "$REASON_ENV_UNSET" | grep -qF 'Blocked removal of protected Session Control input CLAUDE_CODE_SESSION_ID.' \
+  && check "W285 env --unset of a protected input is refused as removal, like unset" PASS \
+  || check "W285 env --unset removal reason (got '$REASON_ENV_UNSET')" FAIL
+run "W286 env -i alone rebinds nothing and stays allowed" "env -i PATH=/usr/bin bash x.sh" ALLOW "$PROJ" "$CFG_OFF"
+run "W287 env -u of an unprotected name stays allowed" "env -u FOO bash x.sh" ALLOW "$PROJ" "$CFG_OFF"
+run "W288 sudo -u before git -C sibling add no longer hides the verb" "sudo -u me git -C $SIB add ." DENY
+run "W289 nice -n before git -C sibling add no longer hides the verb" "nice -n 10 git -C $SIB add ." DENY
+run "W290 env -C runs git in the sibling" "env -C $SIB git add ." DENY
+run "W291 env -i before a git read in the sibling stays allowed" "env -i git -C $SIB status" ALLOW
+run "W292 a double-quoted assignment after env is read as one" "env \"CLAUDE_CODE_SESSION_ID=x\" bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W293 a single-quoted assignment after an uppercase ENV is read as one" "ENV 'ZENSU_SESSION_KEY=x' true" DENY "$PROJ" "$CFG_OFF"
+run "W294 a quoted GIT_WORK_TREE after env still names the sibling for rule (C)" "env \"GIT_WORK_TREE=$SIB\" git add -A" DENY
+run "W295 a quoted leading assignment is a command word to bash, not an assignment" "\"CLAUDE_CODE_SESSION_ID=x\" true" ALLOW "$PROJ" "$CFG_OFF"
+run "W296 an append assignment rebinds the host session id" "CLAUDE_CODE_SESSION_ID+=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W297 an indexed assignment rebinds a Session Control input" "ZENSU_SESSION_KEY[0]=x" DENY "$PROJ" "$CFG_OFF"
+run "W298 export of an append assignment rebinds" "export ZENSU_SESSION_KEY+=x" DENY "$PROJ" "$CFG_OFF"
+run "W299 printf -v with the name attached rebinds" "printf -vZENSU_SESSION_KEY x" DENY "$PROJ" "$CFG_OFF"
+run "W300 export -n removes a Session Control input from the environment" "export -n ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W301 declare +x removes a Session Control input from the environment" "declare +x ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W302 declare -x of a Session Control input without a value stays allowed" "declare -x ZENSU_SESSION_KEY" ALLOW "$PROJ" "$CFG_OFF"
+run "W303 an if before export does not hide the rebind" "if export ZENSU_SESSION_KEY=x; then :; fi" DENY "$PROJ" "$CFG_OFF"
+run "W304 a brace group before unset does not hide the removal" "{ unset ZENSU_SESSION_KEY; }" DENY "$PROJ" "$CFG_OFF"
+run "W305 a pipeline negation before an assignment does not hide the rebind" "! CLAUDE_CODE_SESSION_ID=x true" DENY "$PROJ" "$CFG_OFF"
+run "W306 a leading redirection before export does not hide the rebind" "2>/dev/null export ZENSU_SESSION_KEY=x" DENY "$PROJ" "$CFG_OFF"
+run "W307 a for loop's do no longer hides git -C sibling add" "for f in a; do git -C $SIB add .; done" DENY
+ENV_NFC="$(printf '/Users/R\303\274nner/Session/.claude-env')"
+CMD_NFD="$(printf 'printf x >> /Users/Ru\314\210nner/Session/.claude-env')"
+run "W308 a decomposed spelling of the env-file path is the same file" "$CMD_NFD" DENY "$PROJ" "$CFG_OFF" "$ENV_NFC"
+run "W309 sed -ni edits in place" "sed -ni s/x/y/ src/app.rs" DENY
+run "W310 sed --in-place edits in place" "sed --in-place s/x/y/ src/app.rs" DENY
+run "W311 sed -i with an attached suffix after another option edits in place" "sed -E -i.bak s/x/y/ src/app.rs" DENY
+run "W312 sed -n -e p reads the tracked file" "sed -n -e p src/app.rs" ALLOW
+run "W313 sed --in-place on CLAUDE_ENV_FILE is refused whatever the opt-in says" 'sed --in-place s/a/b/ "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W314 quotes inside tee are removed, so a tee into CLAUDE_ENV_FILE is refused" 'echo x | t'"'"'e'"'"'e "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W315 a backslash before tee is removed" 'echo x | \tee "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W316 a backslash inside sed is removed" 's\ed -i s/a/b/ "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W317 quotes inside dd are removed" '"d"d of="$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W318 a backslash inside a literal env-file path is removed" 'printf x >> /Users/R\unner/Session/.claude-env' DENY "$PROJ" "$CFG_OFF" \
+  '/Users/Runner/Session/.claude-env'
+run "W319 a redirection glued to a word still writes the tracked file" "printf x>src/app.rs" DENY
+run "W320 2>&1 after cd ../sibling keeps the cwd it moved to" "cd ../sibling 2>&1 && printf x > src/lib.rs" DENY
+run "W321 the time keyword keeps cd in the shell" "time cd ../sibling; git add ." DENY
+run "W322 a quoted time is the external program, so its cd leaves the cwd" "\\time cd ../sibling; git add ." ALLOW
+run "W323 a leading redirection does not hide git -C sibling add" ">/dev/null git -C $SIB add ." DENY
 
 # The mandatory control parser is a trust boundary. A selective runtime failure
 # must deny before config and escape hatches instead of falling through.
@@ -1110,10 +1179,9 @@ tee >(proc) realfile
 without quote awareness
 exported by the user's shell before Claude
 the whole command is recorded UNRESOLVED
-a shell keyword hides the verb
+outside WRAP or the coproc keyword hides the verb
 ride along on an in-project --work-tree
 move the cwd to
-tokens split on whitespace
 bare worktree NAME
 assumes the MSYS mount convention
 clamps at the drive root

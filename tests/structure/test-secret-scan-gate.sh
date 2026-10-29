@@ -273,6 +273,18 @@ OUT="$(detect '"git status && ls"')"
 OUT="$(detect '"M=\"<!-- marker -->\""')"
 case "$OUT" in *redirect*) check "D9 detect: a quoted --> still reads as a redirect (the deny path keeps its over-detection)" PASS;; *) check "D9 detect: quoted --> (got: $OUT)" FAIL;; esac
 
+json_cmd() { node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$1"; }
+OUT="$(detect "$(json_cmd "echo x | t'e'e out.txt")")"
+case "$OUT" in *tee*) check "D10 detect: quotes inside tee are removed" PASS;; *) check "D10 detect: t'e'e (got: $OUT)" FAIL;; esac
+OUT="$(detect "$(json_cmd 's\ed -ni s/a/b/ f.txt')")"
+case "$OUT" in *"sed -i"*) check "D11 detect: a backslash inside sed and an -ni cluster read as sed -i" PASS;; *) check "D11 detect: s-backslash-ed -ni (got: $OUT)" FAIL;; esac
+OUT="$(detect "$(json_cmd 'sed --in-place s/a/b/ f.txt')")"
+case "$OUT" in *"sed -i"*) check "D12 detect: sed --in-place" PASS;; *) check "D12 detect: --in-place (got: $OUT)" FAIL;; esac
+OUT="$(detect "$(json_cmd '"d"d of=f.bin')")"
+case "$OUT" in *"dd of="*) check "D13 detect: quotes inside dd are removed" PASS;; *) check "D13 detect: quoted dd of= (got: $OUT)" FAIL;; esac
+OUT="$(detect "$(json_cmd 'sed -n -e p f.txt')")"
+[ -z "$OUT" ] && check "D14 detect: sed -n -e p is no channel" PASS || check "D14 detect: sed -n -e p (got: $OUT)" FAIL
+
 # F — hook functional cases. Hermetic: ZENSU_CONFIG temp override, ambient
 # ZENSU_SECRET_SCAN/BSWG_MODE neutralized (empty is not "off"); extra env
 # pairs after the fixed ones win (env last-assignment semantics).
@@ -361,6 +373,9 @@ OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"echo ghp_''1234567
 
 OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"echo ghp_''123456789012345678901234567890123456 | TEE creds.env"}}')"
 case "$OUT" in *"$DENY"*github-token*) check "F8b an uppercase TEE is a write channel, so the scan runs -> deny (rule named)" PASS;; *) check "F8b uppercase TEE write channel (got '$OUT')" FAIL;; esac
+
+OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"echo ghp_''123456789012345678901234567890123456 | t'"'"'e'"'"'e creds.env"}}')"
+case "$OUT" in *"$DENY"*github-token*) check "F8c quotes inside tee are removed, so the scan runs -> deny (rule named)" PASS;; *) check "F8c quoted tee write channel (got '$OUT')" FAIL;; esac
 
 OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}')"
 case "$OUT" in *"$DENY"*github-token*"A PowerShell command is scanned as a whole"*) check "F8p PowerShell write with GitHub token -> deny (rule and whole-text scope named)" PASS;; *) check "F8p PowerShell write with GitHub token (got '$OUT')" FAIL;; esac
