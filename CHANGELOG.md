@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Fix-round bookkeeping in one call**: a routed fix round of the review chain now prepares
+  its re-review with `zensu-log.sh --round-prepare`. The call re-runs the edit-landing audit,
+  decides from a snapshot taken when the round began whether each claimed edit landed in this
+  round, writes the `fixed` ledger lines for the findings those claims name, and prints the
+  files and aspects for the re-review. The first review records that snapshot with
+  `--round 0`, and the self-review fix round uses `--round self-review`. Nothing to configure.
+
 ## [0.33.0] - 2026-10-28
 
 ### Added

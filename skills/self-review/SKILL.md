@@ -188,8 +188,9 @@ reason. A `parked` or `routed-unfixed` candidate the region still supports is a 
 whatever the must-fix bar above says: fix it in the one fix round below, and keep it in
 `## Open` only for a named blocker — the one fix round already spent, or a fix that needs a
 product decision. Fix every other must-fix the same way, or keep it in `## Open` with the
-reason it stays open. After a fix lands, append the same `FINDING LEDGER` line, with its id
-exactly as listed and the state `fixed`, through
+reason it stays open. `--round-prepare` (below) writes the `fixed` line of a landed fix; for
+one it lists under `unresolved_claims`, re-read the fix, then append the same `FINDING LEDGER`
+line, with its id exactly as listed and the state `fixed`, through
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --log <run-log> --message-stdin`
 fed by a heredoc whose delimiter is quoted, never through `--message`, so no finding text is
 shell-expanded and the report no longer lists it as open. When the log's secret scan refuses
@@ -255,23 +256,16 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   metadata one and log `FULL SUITE COMMAND MISMATCH — metadata={a} log={b}` into
   `## Open`. When nothing yields a command, log `FULL SUITE UNRESOLVED — {reason}`,
   carry it into `## Open` and claim NO test verdict. The runner's own summary line
-  is this run's verdict. Then
-  invoke the `/zensu:build` Phase 6 step 5b **Edit Landing Audit** UNCHANGED —
-  when that procedure is not in your context, `Read` it from
-  `${CLAUDE_PLUGIN_ROOT}/skills/build/references/audit.md`, whose `{plugin_root}` is
-  `${CLAUDE_PLUGIN_ROOT}`; re-invoking the `/zensu:build` skill is forbidden below —
-  writing its mandatory start marker as `EDIT LANDING AUDIT STARTED — round
-  self-review` (a label disjoint from `phase6` and `fix-{N}`, so its
-  round-scoped window covers exactly this round's claims). Re-derive the inputs here — this stage can be forced cold by the
-  Stop hook, so resolve `TOP` yourself and, when this session committed mid-run
-  but no `BASELINE_SHA` is available, take the audit's documented
-  `PENDING PREDICATE (no session baseline)` branch — clearable by a passing
-  step (d) predicate re-read, NOT the terminal `UNVERIFIED` — rather than
-  widening the enumeration. With no mid-run commit the ordinary union applies
-  and nothing degrades. A mechanical or bulk replacement
-  that matched nothing would otherwise leave the chain unnoticed. This stage
-  gets no second fix round, so the only terminus remedy for an unlanded claim
-  is `CLAIM WITHDRAWN — {step_id}: {file}` plus carrying every
+  is this run's verdict. Label each fix `SR-<ledger id>` (`SR-R2-F1`), then run
+  `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --round-prepare --round self-review --log <run-log>`,
+  adding `--baseline` and `--session-epoch` with the Phase 0 values when you hold them
+  (re-invoking the `/zensu:build` skill is forbidden below). It runs the `/zensu:build`
+  Phase 6 step 5b Edit Landing Audit under the marker `EDIT LANDING AUDIT STARTED — round
+  self-review`, judges each claim against the snapshot of the round's start and appends a
+  `fixed` line for each candidate whose claim landed. A mechanical or bulk replacement
+  that matched nothing would otherwise go unnoticed. Exit 1 names a claim that
+  did not land; this stage gets no second fix round, so the only terminus remedy is
+  `CLAIM WITHDRAWN — {step_id}[: {file}]` plus carrying every
   `EDIT NOT LANDED` line into the CHAIN-END SUMMARY verbatim; never close the
   chain as if the claim had landed. Then set the latch with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
