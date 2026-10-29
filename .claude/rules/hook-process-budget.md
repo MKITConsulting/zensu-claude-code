@@ -7,26 +7,101 @@ paths:
   - "hooks/pre-write-secret-scan.sh"
   - "hooks/lib/bash-source-write-parse.js"
   - "hooks/hooks.json"
+  - "hooks/lib/hook-dispatch-v1.js"
+  - "hooks/lib/hook-registration-v1.js"
+  - "hooks/lib/zensu-hook-dispatch.sh"
+  - "hooks/checks/**"
+  - "tests/structure/hook-dispatch-v1.test.js"
   - "tests/structure/test-hook-process-budget.sh"
+  - "evals/session-control/lib/upgrade-hook-contract.js"
+  - "evals/session-control/lib/upgrade-provider.js"
   - "tests/structure/test-secret-scan-gate.sh"
   - "tests/structure/test-msys-runtime-boundaries.sh"
 ---
 
 # Hook Process Budget (`tests/structure/test-hook-process-budget.sh`)
 
-Git Bash for Windows pays a full process creation for every program a hook starts and for every
-`$(...)` subshell. Measured with the budget suite on macOS (bash 3.2) and on Linux (bash 5.2),
-the hooks around one Bash call started 56 programs before this change and start 18 now, 8 of
-them `node`; a Read call went from 11 to 1, an Edit call from 122 to 41 (33 `node`).
+Git Bash for Windows pays a full process creation for every hook process the host starts, every
+program a hook starts and every `$(...)` subshell. Measured with the budget suite on macOS
+(bash 3.2), in an armed session:
 
-**The suite counts every program a hook starts through `PATH`.** It writes a shim for every
-executable name on the runner's `PATH`, runs every registration `hooks.json` holds for a Bash, a
-Read and an Edit payload in an armed session with `PATH` set to the shim directory alone, and
-compares the totals with `budget()`. A program started by an absolute path is not counted. The
-budgets are the measured totals, so a hook that starts one more program fails `B3`; lower the
-budget when a change removes one. On Git Bash the suite skips: the budgets are calibrated on
+| Call | Before stage 1 | After stage 1 | After stage 2 |
+|---|---|---|---|
+| Bash | 56 programs | 9 hook processes, 18 programs (8 `node`) | 2 hook processes, 0 programs |
+| Read | 11 programs | 3 hook processes, 1 program (1 `node`) | 2 hook processes, 0 programs |
+| Edit | 122 programs | 7 hook processes, 41 programs (33 `node`) | 6 hook processes, 34 programs (28 `node`) |
+
+**The suite counts every hook process and every program a hook starts through `PATH`.** It
+writes a shim for every executable name on the runner's `PATH`, runs every registration
+`hooks.json` holds for a Bash, a Read and an Edit payload in an armed session with `PATH` set to
+the shim directory alone, counts each registration it runs as one hook process (a dispatcher
+registration as one `node` process), and compares the three totals with `budget()`. A program
+started by an absolute path is not counted. The budgets are the measured totals, so a hook that
+starts one more process fails `B3`; lower the budget when a change removes one. On Git Bash the suite skips: the budgets are calibrated on
 POSIX hosts, and its counting shims, which wrap every `PATH` program by name, were never run
 against Windows executables.
+
+## The dispatcher (`hooks/lib/hook-dispatch-v1.js`)
+
+- **Registration.** `hooks/hooks.json` registers it once for `PreToolUse` and once for
+  `PostToolUse`, on the group matcher `.*`, in exec form: `"command": "node"` and `"args":
+  ["${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-dispatch-v1.js", "pre"]` (or `"post"`), `"timeout": 60`,
+  and `"onFailure": "block"` on `PreToolUse` only. The supported host floor, Claude Code 2.1.296,
+  reads both keys: its hook schema describes `args` as exec form spawned without a shell, with
+  `${CLAUDE_PLUGIN_ROOT}` substituted per element, and `onFailure: "block"` as counting a failed
+  start, a timeout, an exit other than 0 or 2 or invalid output as exit 2 (read from the 2.1.296
+  binary, not executed). On a host that ignored `args`, `node` would read the payload as a
+  program and every gate would fail open, so never ship exec form above the supported floor.
+  `onFailure` is ignored on `Stop`-like events and for async hooks; `PostToolUse` does not set it,
+  so a failing post dispatcher is a non-blocking hook error and its checks fail open.
+- **The check registry** is `DISPATCHED_CHECKS` in `hooks/lib/hook-registration-v1.js`: one frozen
+  `{ event, name, matcher, script, body, failure }` per check, in the order the nine registrations
+  had, the capability check first. `matcher` is the original host matcher string, evaluated with
+  `hostMatcherCovers`, so a `Bash|PowerShell` check never runs for `Read`. `script` names the
+  entry point under `hooks/`, `body` the old hook body under `hooks/checks/` (`null` for the
+  capability and redact checks, which run in-process only), and `failure` the policy.
+- **Sequential, one budget.** Checks run one after another inside one 55 s budget under the
+  60 s registration timeout; a delegated body gets the rest of that budget, at least 1 s. This
+  removes the sibling race of separate hook processes and costs a slow check's time to the
+  checks behind it.
+- **Failure policy per check.** The capability check, the source-write gate and the browser
+  consent gate on a marked call fail closed: exit 2 with the check's message. The CLI gate, the
+  secret scan, the work-order checks, the redact sweep and the consent recorder fail open with a
+  stderr line, as the separate hooks did.
+- **Aggregation like the host.** deny > defer > ask > allow; the reasons of the winning decision
+  join in registry order; `additionalContext` joins in registry order, capped at 10,000
+  characters with the capability check's text first; `systemMessage`, `decision: "block"`,
+  `continue: false` and `suppressOutput` are all kept. A single output passes through unchanged.
+- **Hybrid execution.** Fast paths run in-process; a rare input delegates to the check's bash
+  body with the raw payload on stdin, the original environment and the hook's working directory.
+  On win32 the body runs under Git Bash, found through `SHELL`, `CLAUDE_CODE_GIT_BASH_PATH`, the
+  Program Files installs and the directory of `git`; without one, the check fails by its policy.
+- **Pre-check copies.** `secretScanSkipsBash` is a hand copy of the shell pre-check in
+  `hooks/checks/pre-write-secret-scan.sh` (§"Secret-scan pre-check"). `consentMarked` decides
+  whether a consent body runs and must mark every payload the prefilter library marks
+  (`.claude/rules/browser-consent-gate.md`). The unit file holds both.
+- **Entry points stay.** Each old `hooks/<name>.sh` is a wrapper that runs
+  `hook-dispatch-v1.js <pre|post> --only <check>` through `hooks/lib/zensu-hook-dispatch.sh`,
+  which runs the named check whatever its matcher and reproduces the old hook's output and exit
+  status. Without `node` a wrapper with a body runs it directly, as the old hook behaved, the
+  capability wrapper refuses with exit 2 and names `node`, and the redact wrapper writes its old
+  stderr note and allows. The capability wrapper keeps the guarded capture
+  (`zensu_hook_dispatch_guarded`), so a dispatcher that cannot start still refuses with exit 2
+  and a one-line reason. `pre-write-secret-scan.sh` and
+  `post-artifact-redact.sh` stay registered directly on their `Edit`/`Write` groups.
+- **One registration reader.** `registration()`, `hookEntries` and `registeredHooks` in
+  `hook-registration-v1.js` expand a dispatcher entry into one virtual
+  `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<script>"` entry per check, carrying the check's matcher, so the
+  consent readiness probe, the doctor's wiring row, `shell-tool-coverage-v1.js` and the suites that
+  enumerate hooks keep their answers. `dispatcherEvent` recognizes only the canonical exec form.
+- **The evaluator reads the registry as data.** `evals/session-control/lib/upgrade-hook-contract.js`
+  loads `DISPATCHED_CHECKS` in a `vm` context whose `require` throws, validates every entry's key
+  set and order, accepts a dispatcher entry only in its canonical exec form on the `.*` group,
+  attests the dispatcher, the registry, every entry point and every body, and reports
+  `observedHookProcesses` (`hook-dispatch-v1.js:pre` for a dispatched event). The live provider
+  traces the dispatcher through its own `node` shim, contains it in the same Bubblewrap profile as
+  a Bash hook and counts processes, not scripts. `test-doctor.sh` P2n exempts both readers of
+  exec-form `args`.
 
 ## `zensu_host_path`
 
@@ -75,7 +150,10 @@ unicode-escaped key among them, and `C2` holds that the decided states start no 
 
 ## Secret-scan pre-check
 
-`pre-write-secret-scan.sh` still binds first. For a payload whose only unescaped `"tool_name"` is
+For a bound session the dispatcher decides a Bash payload in-process through
+`secretScanSkipsBash`; the shell copy below runs in `hooks/checks/pre-write-secret-scan.sh` when
+the dispatcher delegates (no binding) or `node` is missing. Both copies carry the same token list,
+and a channel added to `detectChannels` adds its token to both. The body still binds first. For a payload whose only unescaped `"tool_name"` is
 `"Bash"`, it exits before the scanner when the raw payload holds none of `>`, `<<`, `tee`,
 `of=`, `\u`, or `sed` followed later by `-i`. That token list is a superset of what
 `detectChannels` in `bash-source-write-parse.js` can report, and it is a COPY: a channel added to
@@ -91,9 +169,9 @@ token the pre-check lacks, fails there. `zensu-tdd-phase.sh` is sourced only to 
 - Hooks keep reading stdin with `cat`: `read -d ''` keeps a trailing newline that `$(cat)`
   strips, and it reads a pipe one byte per system call.
 - The browser consent prefilter keeps its `sed | tr` pass (`.claude/rules/browser-consent-gate.md`).
-- `post-artifact-redact.sh` still starts four `node` processes per call, and
-  `pre-edit-tdd-reminder.sh` starts 25 for one Edit in an armed session.
-- One dispatcher process per event changes hook registrations and is a `minor`.
+- The `Edit`/`Write`/`NotebookEdit` and `Agent`/`Task` groups keep their registrations, so an Edit
+  call still starts 6 hook processes and 34 programs, most of them in `pre-edit-tdd-reminder.sh`.
+  Folding those groups into the dispatcher is the follow-up.
 - Every hook registered on `PreToolUse` or `PostToolUse`, and every library such a hook
   sources, finds its own directory without starting `dirname`. `zensu-autopilot-state.sh`
   keeps one only in the default it uses when `CLAUDE_PLUGIN_ROOT` is unset, which no hook
@@ -107,14 +185,25 @@ token the pre-check lacks, fails there. `zensu-tdd-phase.sh` is sourced only to 
   stays, for example in `pre-edit-tdd-reminder.sh`, `post-review-tdd-delegate.sh`,
   `zensu-config.sh` and `zensu-tdd-phase.sh`.
 
-**Version: `patch`.** No schema field, strict key set, hook registration, matcher, config key or
-attestation moves, and every allow and deny for a tool-call payload is unchanged. Two failure
-modes change, both toward fewer denies: the capability gate no longer needs a writable `TMPDIR`,
+**Version: stage 2 is `minor`.** It removes nine registrations, adds a decision-capable hook on
+`.*` and changes the matchers the host evaluates, each a breaking change under
+`.claude/rules/runtime-lineage.md`. Every allow and deny for a tool-call payload is meant to be
+unchanged; the failure modes that change are a missing `node`, which the host now reports as a
+failed start of the dispatcher, and a dispatcher fault, which blocks every `PreToolUse` call.
+
+**Stage 1 was `patch`.** No schema field, strict key set, hook registration, matcher, config key or
+attestation moved, and every allow and deny for a tool-call payload was unchanged. Two failure
+modes changed, both toward fewer denies: the capability gate no longer needs a writable `TMPDIR`,
 so an unwritable one no longer denies every tool call (pinned in
 `tests/structure/test-reviewer-capability-gate.sh`), and the host-path helper no longer runs
 `uname`, so a missing or failing `uname` no longer makes it refuse
 (`tests/structure/test-msys-runtime-boundaries.sh` retired that case).
 
 **Known gaps:** Windows is unmeasured: the suite skips on Git Bash, and the blocking Windows
-shards have no room for it. A single-letter directory at the MSYS installation root, which a
+shards have no room for it, so the Git Bash lookup of the delegates has run only in unit form.
+The live upgrade eval was not run for stage 2: it needs a real Claude Code, credentials and
+Linux Bubblewrap. Its `node` shim and process counts ran in the local provider selftest in test
+mode, and the contained dispatcher runs in the CI sandbox job's integration test. Wall time is
+unmeasured: sequential checks can take longer than the slowest of nine parallel hooks when
+several delegate. A single-letter directory at the MSYS installation root, which a
 drive letter can shadow, is not told apart from that drive by the drive fast path.

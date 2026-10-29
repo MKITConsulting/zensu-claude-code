@@ -182,6 +182,9 @@ HOOK_ARGS_READER="$(
     ! -path '*/node_modules/*' ! -path '*/results/*' -print \
     | while IFS= read -r reader; do
         if [ "$reader" != "$PLUGIN_DIR/tests/structure/test-doctor.sh" ] \
+          && [ "$reader" != "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" ] \
+          && [ "$reader" != "$PLUGIN_DIR/evals/session-control/lib/upgrade-hook-contract.js" ] \
+          && [ "$reader" != "$PLUGIN_DIR/evals/session-control/tests/upgrade-provider-selftest.js" ] \
           && grep -qF 'hooks.json' "$reader" \
           && hook_args_tolerated "$reader"; then
           printf '%s\n' "${reader#$PLUGIN_DIR/}"
@@ -190,9 +193,9 @@ HOOK_ARGS_READER="$(
       done
 )"
 if [ -z "$HOOK_ARGS_READER" ]; then
-  check "P2n all hook-manifest readers parse only the documented command field" PASS
+  check "P2n only hooks/lib/hook-registration-v1.js, the evaluator-owned upgrade contract and the fake host of the provider selftest read the args of an exec-form entry" PASS
 else
-  check "P2n undocumented hook args tolerance remains in $HOOK_ARGS_READER" FAIL
+  check "P2n a hook-manifest reader other than hooks/lib/hook-registration-v1.js, the evaluator-owned upgrade contract and the fake host of the provider selftest reads exec-form args: $HOOK_ARGS_READER" FAIL
 fi
 HOOK_ARGS_DIR="$(mktemp -d 2>/dev/null)" || HOOK_ARGS_DIR=""
 if [ -n "$HOOK_ARGS_DIR" ]; then
@@ -524,13 +527,16 @@ VF_NOREC_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-norec.XXXXXX")" || exit
 cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_NOREC_ROOT/" 2>/dev/null
 node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const recorder = "/hooks/post-browser-navigation-consent.sh";
-  const before = JSON.stringify(registry).includes(recorder);
+  const registers = (hook) => reg.hookEntries(hook, "PostToolUse").some((entry) => entry.command.includes(recorder));
+  const registered = () => (reg.registeredHooks(registry, "PostToolUse") || []).some((entry) => entry.command.includes(recorder));
+  const before = registered();
   registry.hooks.PostToolUse = (registry.hooks.PostToolUse || []).filter(
-    (group) => !(group.hooks || []).some(
-      (hook) => typeof hook.command === "string" && hook.command.includes(recorder)));
-  if (!before || JSON.stringify(registry).includes(recorder)) process.exit(1);
+    (group) => !(group.hooks || []).some(registers));
+  if (!before || registered()) process.exit(1);
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
 ' "$VF_NOREC_ROOT/hooks/hooks.json" \
   && check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" PASS \
@@ -554,13 +560,15 @@ case "$(vf_copy_doctor "$VF_VALID_POLICY")" in
 esac
 node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const gate = "/hooks/pre-browser-navigation-consent.sh";
   const moved = [];
   for (const group of registry.hooks.PreToolUse || []) {
     const kept = [];
     for (const hook of group.hooks || []) {
-      if (typeof hook.command === "string" && hook.command.includes(gate)) moved.push(hook);
+      if (reg.hookEntries(hook, "PreToolUse").some((entry) => entry.command.includes(gate))) moved.push(hook);
       else kept.push(hook);
     }
     group.hooks = kept;
@@ -677,11 +685,13 @@ vf_reg_doctor() {
 }
 if node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const gate = "/hooks/pre-browser-navigation-consent.sh";
   let widened = 0;
   for (const group of registry.hooks.PreToolUse || []) {
-    if (group.matcher === "Bash|PowerShell" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
+    if ((group.hooks || []).some((hook) => reg.hookEntries(hook, "PreToolUse").some((entry) => entry.command.includes(gate)))) {
       group.matcher = "Bash|PowerShell|Read";
       widened += 1;
     }
@@ -689,9 +699,9 @@ if node -e '
   if (widened !== 1) process.exit(1);
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
 ' "$VF_REG_ROOT/hooks/hooks.json"; then
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" PASS
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on Bash|PowerShell|Read" PASS
 else
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" FAIL
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on Bash|PowerShell|Read" FAIL
 fi
 case "$(vf_reg_doctor)" in
   *'not registered on a matcher that covers Bash and PowerShell'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
@@ -701,11 +711,13 @@ esac
 cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
 if node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const recorder = "/hooks/post-browser-navigation-consent.sh";
   let broken = 0;
   for (const group of registry.hooks.PostToolUse || []) {
-    if ((group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(recorder))) {
+    if ((group.hooks || []).some((hook) => reg.hookEntries(hook, "PostToolUse").some((entry) => entry.command.includes(recorder)))) {
       group.matcher = "(";
       broken += 1;
     }
@@ -732,11 +744,13 @@ vf_reg_matchers() {
   cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
   node -e '
     const fs = require("node:fs");
+    const path = require("node:path");
     const [file, gateMatcher, recorderMatcher] = process.argv.slice(1);
+    const reg = require(path.join(path.dirname(file), "lib", "hook-registration-v1.js"));
     const registry = JSON.parse(fs.readFileSync(file, "utf8"));
-    const names = (group, hook) => (group.hooks || []).some((entry) => typeof entry.command === "string" && entry.command.includes(hook));
-    const gates = (registry.hooks.PreToolUse || []).filter((group) => names(group, "/hooks/pre-browser-navigation-consent.sh"));
-    const recorders = (registry.hooks.PostToolUse || []).filter((group) => names(group, "/hooks/post-browser-navigation-consent.sh"));
+    const names = (group, event, hook) => (group.hooks || []).some((entry) => reg.hookEntries(entry, event).some((found) => found.command.includes(hook)));
+    const gates = (registry.hooks.PreToolUse || []).filter((group) => names(group, "PreToolUse", "/hooks/pre-browser-navigation-consent.sh"));
+    const recorders = (registry.hooks.PostToolUse || []).filter((group) => names(group, "PostToolUse", "/hooks/post-browser-navigation-consent.sh"));
     if (gates.length !== 1 || recorders.length !== 1) process.exit(1);
     if (gateMatcher !== "keep") gates[0].matcher = gateMatcher;
     if (recorderMatcher !== "keep") recorders[0].matcher = recorderMatcher;
