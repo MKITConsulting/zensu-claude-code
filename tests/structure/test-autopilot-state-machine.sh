@@ -1720,20 +1720,23 @@ if [ "$GATE_ROOTS_READY" = true ]; then
   GATE_WA="$(cd -P "$GATE_P/.claude/worktrees/wa" && pwd -P)" || GATE_ROOTS_READY=false
   GATE_OWN="$(cd -P "$GATE_OWN" && pwd -P)" || GATE_ROOTS_READY=false
   GATE_LOOSE="$(cd -P "$GATE_LOOSE" && pwd -P)" || GATE_ROOTS_READY=false
+  GATE_WA_TOP="$(bash "$HOST_PATH" "$GATE_WA")" || GATE_ROOTS_READY=false
+  GATE_OWN_TOP="$(bash "$HOST_PATH" "$GATE_OWN")" || GATE_ROOTS_READY=false
+  GATE_LOOSE_TOP="$(bash "$HOST_PATH" "$GATE_LOOSE")" || GATE_ROOTS_READY=false
 fi
 if [ "$GATE_ROOTS_READY" = true ]; then
-  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots wa "$GATE_WA")" ) >/dev/null 2>"$GATE_ROOT_HELD_ERR"
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots wa "$GATE_WA_TOP")" ) >/dev/null 2>"$GATE_ROOT_HELD_ERR"
   GATE_ROOT_HELD_RC=$?
   ( cd "$GATE_OWN" && autopilot_begin_run run_gate_own session_gate_own "$GATE_OWN" false true "" ) >/dev/null 2>&1
   GATE_OWN_HOLD_RC=$?
-  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots own "$GATE_OWN")" ) >/dev/null 2>"$GATE_ROOT_OWN_ERR"
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots own "$GATE_OWN_TOP")" ) >/dev/null 2>"$GATE_ROOT_OWN_ERR"
   GATE_ROOT_OWN_RC=$?
-  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots loose "$GATE_LOOSE")" ) >/dev/null 2>"$GATE_ROOT_LOOSE_ERR"
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots loose "$GATE_LOOSE_TOP")" ) >/dev/null 2>"$GATE_ROOT_LOOSE_ERR"
   GATE_ROOT_LOOSE_RC=$?
 fi
 
 if [ "$GATE_ROOTS_READY" = true ] && [ "$GATE_HOLD_RC" -eq 0 ] && [ "$GATE_ROOT_HELD_RC" -eq 4 ] \
-  && grep -qF -- "code root $GATE_WA is held by a durable Autopilot run of this project" "$GATE_ROOT_HELD_ERR" \
+  && grep -qF -- "code root $GATE_WA_TOP is held by a durable Autopilot run of this project" "$GATE_ROOT_HELD_ERR" \
   && grep -qF -- 'run_gate_holder' "$GATE_ROOT_HELD_ERR" \
   && ! grep -qF -- '--confirm' "$GATE_ROOT_HELD_ERR"; then
   check "W14c a standalone chain may not declare a code root that a durable run of its own project holds" PASS
@@ -1742,7 +1745,7 @@ else
 fi
 
 if [ "$GATE_ROOTS_READY" = true ] && [ "$GATE_OWN_HOLD_RC" -eq 0 ] && [ "$GATE_ROOT_OWN_RC" -eq 4 ] \
-  && grep -qF -- "code root $GATE_OWN is held by a durable Autopilot run anchored in it" "$GATE_ROOT_OWN_ERR" \
+  && grep -qF -- "code root $GATE_OWN_TOP is held by a durable Autopilot run anchored in it" "$GATE_ROOT_OWN_ERR" \
   && grep -qF -- 'run_gate_own' "$GATE_ROOT_OWN_ERR"; then
   check "W14d a standalone chain may not declare a code root that a durable run anchored in that root holds" PASS
 else
@@ -1766,12 +1769,13 @@ printf '99' > "$GATE_BOUND_RCF"
 if [ "$GATE_ROOTS_READY" = true ]; then
   mkdir -p "$GATE_BP" "$GATE_BOUND_ROOT/.zensu/state"
   if git -C "$GATE_BP" init -q >/dev/null 2>&1 && git -C "$GATE_BOUND_ROOT" init -q >/dev/null 2>&1 \
-    && GATE_BOUND_ROOT="$(cd -P "$GATE_BOUND_ROOT" && pwd -P)"; then
+    && GATE_BOUND_ROOT="$(cd -P "$GATE_BOUND_ROOT" && pwd -P)" \
+    && GATE_BOUND_TOP="$(bash "$HOST_PATH" "$GATE_BOUND_ROOT")"; then
     (
       export CLAUDE_PROJECT_DIR="$GATE_BP"
       source "$BASELINE" w14f-bound-root >/dev/null 2>&1 || exit 1
       cd "$GATE_BP" || exit 1
-      autopilot_begin_standalone_tdd "$GATE_BP" w14f-bound-root false "$(gate_code_roots bound "$GATE_BOUND_ROOT")" >/dev/null 2>"$GATE_BOUND_ERR"
+      autopilot_begin_standalone_tdd "$GATE_BP" w14f-bound-root false "$(gate_code_roots bound "$GATE_BOUND_TOP")" >/dev/null 2>"$GATE_BOUND_ERR"
       printf '%s' "$?" > "$GATE_BOUND_RCF"
     )
   fi
