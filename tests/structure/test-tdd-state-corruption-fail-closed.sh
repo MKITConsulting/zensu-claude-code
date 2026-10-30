@@ -95,13 +95,30 @@ exec "$REAL_NODE_BIN" "$@"
 SHIM
 chmod +x "$CLASSIFIER_SHIM_DIR/node"
 CLASSIFIER_FAILURE_OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Edit","session_id":"'"$SID"'","tool_input":{"file_path":"src/app.js"}}' | \
-  PATH="$CLASSIFIER_SHIM_DIR:$PATH" REAL_NODE_BIN="$REAL_NODE_BIN" bash "$GATE" 2>/dev/null)"
+  PATH="$CLASSIFIER_SHIM_DIR:$PATH" REAL_NODE_BIN="$REAL_NODE_BIN" bash "$PLUGIN_DIR/hooks/checks/pre-edit-tdd-reminder.sh" 2>/dev/null)"
 if [ "$(gate_decision "$SID")" = "allow" ] \
   && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -q '"permissionDecision":"deny"' \
   && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -q 'existing session-state file is invalid or unreadable'; then
   check "path-classifier execution failure blocks an otherwise allowed edit" PASS
 else
   check "path-classifier execution failure blocks an otherwise allowed edit" FAIL
+fi
+CLASSIFIER_FAULT="$WORK/classifier-fault.js"
+cat > "$CLASSIFIER_FAULT" <<'PRELOAD'
+const Module = require('module');
+const load = Module._load;
+Module._load = function loadWithClassifierFault(request, ...rest) {
+  if (String(request).endsWith('edit-path-class-v1.js')) throw new Error('classifier fault');
+  return load.call(this, request, ...rest);
+};
+PRELOAD
+DISPATCHED_FAULT_OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Edit","session_id":"'"$SID"'","tool_input":{"file_path":"src/app.js"}}' | \
+  NODE_OPTIONS="--require $CLASSIFIER_FAULT" bash "$GATE" 2>/dev/null)"
+if printf '%s' "$DISPATCHED_FAULT_OUT" | grep -q '"permissionDecision":"deny"' \
+  && printf '%s' "$DISPATCHED_FAULT_OUT" | grep -q 'existing session-state file is invalid or unreadable'; then
+  check "a classifier that throws in the dispatcher reaches the body's refusal" PASS
+else
+  check "a classifier that throws in the dispatcher reaches the body's refusal" FAIL
 fi
 
 bash "$LOG" --tdd-complete --session "$SID" >/dev/null 2>&1

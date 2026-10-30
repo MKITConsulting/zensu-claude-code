@@ -10,7 +10,11 @@ paths:
   - "hooks/lib/reviewer-capability-v1.js"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/pre-bash-source-write-gate.sh"
+  - "hooks/checks/pre-bash-source-write-gate.sh"
   - "hooks/pre-edit-tdd-reminder.sh"
+  - "hooks/checks/pre-edit-tdd-reminder.sh"
+  - "hooks/lib/edit-path-class-v1.js"
+  - "hooks/lib/hook-dispatch-v1.js"
   - "hooks/stop-chain-enforcer.sh"
   - "docs/multi-repo-chains-*"
   - "tests/structure/code-roots-v1.test.js"
@@ -104,7 +108,14 @@ segment below the anchor or below a declared root (`zensuBelowRoot`) and every d
 nested `.zensu` trees all the same. The Edit gate refuses every root's `.zensu/state` and
 classifies a test path relative to the root that owns it (`tdd_is_test_path`'s second
 argument). Only a list the reader accepts names an owning root; a rejected or disabled list
-classifies relative to the anchor, as a single-root chain does.
+classifies relative to the anchor, as a single-root chain does. Both halves live in
+`hooks/lib/edit-path-class-v1.js`: `editPathClass` takes the workflow document as its third
+argument and classes every raw list entry's `.zensu/state` as `state`, and
+`owningRootRelative` names the owning root. The body runs the module as a program, and the
+dispatcher's in-process allow for a vanilla chain (`editGateAllows` in
+`hooks/lib/hook-dispatch-v1.js`) passes the document it already read. Without that argument
+the fast path would allow a vanilla chain's write into a root's `.zensu/state` before the body
+ran; `E1b` in `tests/structure/test-code-roots.sh` drives that case through the real hook.
 
 **Coupled sites.** The status literal `stages 2 and 3 are REDESIGNED, NOT ENABLED` in all three
 multi-repo documents and X7 of `tests/structure/test-multi-repo-doc-consistency.sh`; the

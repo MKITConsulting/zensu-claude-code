@@ -92,7 +92,7 @@ paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (
 (`hooks/lib/bash-source-write-parse.js:960`), whose union is the project root alone until a
 code root is declared, and rule (C) at the same predicate for git targets (`:1006`), with
 `projectRoot` taken from the passed `CLAUDE_PROJECT_DIR` (`:831`).
-`hooks/pre-edit-tdd-reminder.sh:132-188` resolves a
+`hooks/checks/pre-edit-tdd-reminder.sh:132-152` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
@@ -357,11 +357,12 @@ The three candidates above are not equally priced, and the price is not the one
 macOS, by driving the real hooks over synthetic payloads with a real Session
 Control session.
 
-**Three PreToolUse hooks govern a `Write`, not two.** `hooks/hooks.json:5`
-registers the hook dispatcher on the `.*` matcher (`hooks/hooks.json:9`), whose
-first check is the capability gate of `pre-reviewer-capability-gate.sh`, beside
+**Three PreToolUse hooks governed a `Write` when this was measured, not two:** the
+capability gate of `pre-reviewer-capability-gate.sh` on the `.*` matcher, and
 `pre-edit-tdd-reminder.sh` and `pre-write-secret-scan.sh` on `Edit|Write|MultiEdit`.
-A deny from any one of them wins, so all three were driven. Three destinations were
+All three now run as checks of the one hook dispatcher that `hooks/hooks.json:5`
+registers on the `.*` matcher (`hooks/hooks.json:9`), together with the other checks
+of its registry. A deny from any one of them wins, so all three were driven. Three destinations were
 used — a file inside the project, a file inside `CLAUDE_PLUGIN_DATA`, and a file in
 an unrelated directory — in three chain states.
 
@@ -422,7 +423,7 @@ candidate whose price did not rise.
 chain at `UNINITIALIZED` denies all three destinations, but with the phase
 wording and for the unrelated directory too: that is TDD discipline, not
 containment, and it lifts at `RED_WRITE` and `REFACTOR`
-(`hooks/pre-edit-tdd-reminder.sh:234, :247`). Reading that deny as a boundary is the
+(`hooks/checks/pre-edit-tdd-reminder.sh:198, :211`). Reading that deny as a boundary is the
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
@@ -530,7 +531,7 @@ symbol rather than by line, because the stage-2 pull requests move most of these
 | External review import | A chain with code roots answers `status=unavailable reason=multi-root` at the import and at `--external-review --stage` and `--tree` alike, so step 3 stages no template workflow whose result the import would refuse, and the panel runs. | `hooks/lib/external-review-v1.js`, `hooks/lib/zensu-log.sh` |
 | Self-review | Enumerates through `--change-set`, and its rule to stay in the current worktree admits the declared roots. | `skills/self-review/SKILL.md` |
 | Persona activation | Labeled paths are filtered out, so a persona of the anchor never half-matches another repository's code. | `hooks/lib/persona-activation.js` |
-| Edit gate | The state-file hardening covers every root's `.zensu/state`, and a test path is classified relative to the top of the root that owns it. | `hooks/pre-edit-tdd-reminder.sh`, `tdd_is_test_path` in `hooks/lib/zensu-tdd-phase.sh` |
+| Edit gate | The state-file hardening covers every root's `.zensu/state`, and a test path is classified relative to the top of the root that owns it. | `hooks/checks/pre-edit-tdd-reminder.sh`, `hooks/lib/edit-path-class-v1.js`, `tdd_is_test_path` in `hooks/lib/zensu-tdd-phase.sh` |
 | Write gate (opt-in) | While `hooks.bashWriteGate` is `true`, rules (B) and (C) accept a path inside any declared root, and `TEMP_SAFE` rejects a temp entry that contains any member of the union. Rule (A)'s `tracked()` probe, which runs `git ls-files --error-unmatch` and `rev-parse` with neither the read-only prefix nor the scrub today, takes both from `git-read-only-v1` for a path inside a code root. | `hooks/lib/bash-source-write-parse.js`, `hooks/pre-bash-source-write-gate.sh` |
 | Doctor | The topology row lists the declared roots and warns only about undeclared foreign ones. | `claimTopologyRow` in `hooks/lib/zensu-doctor-report.js` |
 | Session-trail | `gitState` runs once per root (§6.4). | `skills/session-trail/scripts/trail.mjs` |

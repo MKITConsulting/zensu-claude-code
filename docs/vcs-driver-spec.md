@@ -1,6 +1,6 @@
 # Spec: VCS Driver (GitHub + GitLab)
 
-Status: **implemented** — Phases 1–4 shipped (see §6 "Implementation status").
+Status: **implemented** — Phases 1–5 shipped (see §6 "Implementation status").
 
 ## 1. What it does
 
@@ -145,12 +145,15 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 | Op | Consumed by | GitHub | GitLab |
 |----|-------------|--------|--------|
 | `detect` | all | remote+probe | remote+probe |
-| `locate_pr(branch\|num)` | fix, autopilot | `gh pr view` | `glab mr view --output json` |
+| `conventions(repo)` | autopilot, pilot, fix, cover, implement | tracked files + `git log` | tracked files + `git log` |
+| `locate_pr(branch\|num)` | fix, autopilot, pilot | `gh pr view` | `glab mr view --output json` |
+| `review_summary(id)` | pilot | `gh pr view -R <repo-id> <n> --json reviewDecision,latestReviews` | `GET …/merge_requests/:iid/approvals` + `GET …/merge_requests/:iid` (`detailed_merge_status`) |
+| `review_markers(id)` | pilot, work-order review import | the `zensu-review:v1` first-part markers of the PR's reviews (GraphQL) | the same markers in the MR's notes and discussions |
 | `pr_state(id)` | all (pre-push guard) | `gh pr view <n> --json state,mergedAt` | `glab mr view <iid> --output json` → `.state` |
 | `fetch_pr_ref(id)` | team-review | `git fetch origin pull/<n>/head` | `git fetch origin merge-requests/<iid>/head` |
 | `scout_pr(num?)` | team-review | `gh pr view [<n>] --json number,url,state,title,body,headRefName,baseRefName,author,labels` | `glab mr view [<iid>] --output json` |
 | `diff_refs(id)` | team-review | `gh pr view <n> --json headRefOid` (head SHA only) | MR `diff_refs` (`base_sha`/`start_sha`/`head_sha`) via `glab api …/merge_requests/:iid` |
-| `open_pr(title,body,base,head)` | autopilot | `gh pr create` | `glab mr create` |
+| `open_pr(title,body,base,head)` | autopilot, pilot | `gh pr create` | `glab mr create` |
 | `fetch_threads(id)` | fix | GraphQL `reviewThreads` | REST `GET …/merge_requests/:iid/discussions` (keep `resolvable && !resolved`) |
 | `fetch_inline_comments(id)` | fix | `gh api …/pulls/<n>/comments --paginate` | discussions (same call as above) |
 | `post_review(id, payload)` | team-review | 1× `gh api -X POST …/pulls/<n>/reviews --input` | 1× summary note + N× inline discussions (see §7) |
@@ -162,12 +165,19 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 vcs:
   provider: auto        # auto | github | gitlab
   apiBase: auto         # auto | https://gitlab.example.com/api/v4  (overrides probe for self-hosted)
-  prBase: main
+  prBase: auto          # auto (the remote's default branch, else main) | <branch>
   remote: origin        # which remote detection reads
+  commitStyle: auto     # auto | conventional | <a description of the style>
+  attribution: auto     # auto | none | <the exact trailer line to add>
+  language: auto        # auto | <language of commit and PR prose>
+  prTemplate: auto      # auto | none | <path of the template to use as the PR body skeleton>
+  worktreeOnly: true    # false lets autopilot build in the session's clean checkout
 ```
 
 `auto` runs the ladder; explicit values short-circuit it (and let CI pin the
-forge without a probe).
+forge without a probe). For the convention keys, `auto` means "follow what
+`--conventions` reports for this repository"; the precedence and every value are
+specified in `skills/autopilot/rules/conventions.md`.
 
 ### Step 4 — Wire the three skills to the driver
 
@@ -247,6 +257,49 @@ forge without a probe).
     `PROVIDER`/`REPOID`/`CLIREADY`, `cliReady=false` stop, `unknown` ask); Phase 1 step 3 opens the
     PR/MR via `--open-pr` (run from `$REPO`); the Critical-Conventions pre-push guard uses `--pr-state`.
     Pins: `test-autopilot-skill.sh` (P11a-g). Never auto-merge/approve preserved.
+- **Phase 5 — DONE**: repository conventions and `pilot` wired to the driver.
+  - `--conventions [--repo DIR] [--provider P] [--template PATH]` → one JSON line from
+    `hooks/lib/repo-conventions-v1.js`: `provider`, `prTemplate` (the template the forge pre-fills:
+    GitHub's `pull_request_template.md|.txt` in `.github/`, the root, then `docs/`, any letter case;
+    GitLab's `.gitlab/merge_request_templates/Default.md`), `prTemplates` (every template found,
+    `PULL_REQUEST_TEMPLATE/` directories included), `commitlint` (config files, and `package.json`
+    when it carries a `commitlint` key), `ref` and `defaultBranch` (the remote's default branch the
+    sample was read from, else `HEAD`), `subjects` (the 20 newest non-merge subjects),
+    `conventionalShare`, `trailers` (how many of those commits carry `Co-authored-by`,
+    `Signed-off-by`, `Assisted-by`), and the `contributing`, `agents` and `claude` paths. Only files
+    git tracks and that are regular files reached through no symlink count. `--template` checks a
+    configured template the same way, and also that its path is relative to the top level, holds
+    only letters, digits, `.`, `_`, `-` and `/`, and names a `.md` or `.txt` file of at most 64 KiB;
+    `prTemplate` then names it, else it is `null` and `prTemplateRefused` says why (the forge's
+    template takes the same checks without `--template`). `overrides` lists the
+    `.zensu/templates/*.md` files that are plain files of at most 64 KiB, tracked or not. The skills
+    read a PR template or an override only from these fields (`skills/autopilot/rules/conventions.md`
+    §4), so a symlinked or untracked template is never read into a PR body through them. No
+    language heuristic: the model judges language and attribution from these data.
+    A default branch or remote whose name holds anything but letters, digits, `.`, `_`, `-` and `/`,
+    or a segment starting with `-`, reads as unknown (`defaultBranch` `null`, the sample from
+    `HEAD`), and such a template name is left out of `prTemplates`, because the skills retype these
+    values into shell commands. `defaultBranch` is the clone's own `refs/remotes/<remote>/HEAD`,
+    which a rename on the forge leaves stale, so the skills confirm it with `git ls-remote` before
+    they use it (`skills/autopilot/rules/conventions.md` §5).
+    Without `--provider` the verb runs the `--detect` ladder first. Tests: the unit file
+    `tests/structure/repo-conventions-v1.test.js`, driven by `test-vcs-detect.sh` (C1-C8).
+  - `--review-summary --provider <p> [--repo-id R] <id>` → `{reviewed, approved, changesRequested}`.
+    GitHub reads `reviewDecision` and `latestReviews`, pinned with `-R` to the repository a given
+    `--repo-id` names, as `--fetch-threads` pins it; GitLab reads the approvals endpoint and the
+    MR's `detailed_merge_status`, and requires `--repo-id`. GitLab's `approved` is true on Enterprise
+    Edition when no approval rule applies even with nobody approving, so `approved` also needs a
+    non-empty `approved_by`. The GitLab answer is a mapping, not a 1:1 equivalent of `reviewDecision`:
+    a review that only left discussions reads as not reviewed (its threads still count through
+    `--fetch-threads`). Dry-printable; tests R1-R17 in `test-vcs-pr-ops.sh`.
+  - `--locate-pr` without a number exits **3** when the forge CLI reports that the current branch has
+    no PR/MR (`no pull requests found for branch` from `gh`, `no open merge request available for`
+    from `glab`), so "no PR yet" is told apart from an error; every other failure exits 1 with the
+    forge CLI's message on stderr. Existing callers treat any status other than 0 as "not located".
+    Tests L1-L6 in `test-vcs-pr-ops.sh`.
+  - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
+    `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
+    `--open-pr`.
 
 ---
 

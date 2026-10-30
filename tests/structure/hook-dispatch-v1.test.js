@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
@@ -13,6 +14,9 @@ const registration = require(path.join(PLUGIN, 'hooks', 'lib', 'hook-registratio
 
 const SHELL_PRE = ['reviewer-capability', 'zensu-cli-gate', 'source-write-gate', 'secret-scan', 'browser-consent', 'work-order-gate'];
 const SHELL_POST = ['artifact-redact', 'browser-consent-recorder', 'work-order-post'];
+const EDIT_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard', 'tdd-edit-gate', 'secret-scan-write'];
+const NOTEBOOK_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard-notebook', 'secret-scan-notebook'];
+const SPAWN_PRE = ['reviewer-capability', 'work-order-gate', 'reviewer-spawn-allow'];
 
 const names = (event, tool) => dispatch.selectChecks(event, tool).map((check) => check.name);
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -24,7 +28,99 @@ const bashPayload = (command) => JSON.stringify({ hook_event_name: 'PreToolUse',
 test('a Read call runs only the capability and work-order checks, never a check registered for the shell tools', () => {
   assert.deepEqual(names('PreToolUse', 'Read'), ['reviewer-capability', 'work-order-gate']);
   assert.deepEqual(names('PostToolUse', 'Read'), ['work-order-post']);
-  assert.deepEqual(names('PreToolUse', 'Edit'), ['reviewer-capability', 'work-order-gate']);
+});
+
+test('a file-tool call runs its original group in registration order, and NotebookEdit keeps its own group', () => {
+  for (const tool of ['Edit', 'Write', 'MultiEdit']) {
+    assert.deepEqual(names('PreToolUse', tool), EDIT_PRE);
+    assert.deepEqual(names('PostToolUse', tool), ['work-order-post', 'artifact-redact-write']);
+  }
+  assert.deepEqual(names('PreToolUse', 'NotebookEdit'), NOTEBOOK_PRE);
+  assert.deepEqual(names('PostToolUse', 'NotebookEdit'), ['work-order-post']);
+});
+
+test('a spawn call reaches the grant behind every check that can deny or ask, and no other tool reaches it', () => {
+  for (const tool of ['Agent', 'Task']) assert.deepEqual(names('PreToolUse', tool), SPAWN_PRE);
+  for (const tool of ['Bash', 'PowerShell', 'Read', 'Edit', 'NotebookEdit']) {
+    assert.equal(names('PreToolUse', tool).includes('reviewer-spawn-allow'), false, tool);
+  }
+  const grant = JSON.parse(require(path.join(PLUGIN, 'hooks', 'lib', 'reviewer-spawn-allow-v1.js')).decide(JSON.stringify({
+    tool_name: 'Agent', tool_input: { subagent_type: 'zensu:code-reviewer' },
+  })));
+  assert.equal(grant.hookSpecificOutput.permissionDecision, 'allow');
+  for (const rival of ['deny', 'ask', 'defer']) {
+    for (const outputs of [[pre(rival, 'rival'), grant], [grant, pre(rival, 'rival')]]) {
+      assert.deepEqual(dispatch.aggregate(outputs, 'PreToolUse'), pre(rival, 'rival'));
+    }
+  }
+});
+
+test('the spawn grant needs every library the old hook sourced, and a symlink only where that hook refused one', () => {
+  const lib = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-grant-libs-')));
+  const sourced = ['zensu-agent-context.sh', 'zensu-session.sh', 'zensu-host-path.sh', 'zensu-config.sh'];
+  const guarded = ['zensu-msys-env.sh', 'claude-principal-v1.js', 'reviewer-spawn-allow-v1.js'];
+  try {
+    for (const name of [...sourced, ...guarded]) fs.writeFileSync(path.join(lib, name), 'x');
+    assert.equal(dispatch.spawnGrantLibrariesPresent(lib), true);
+    for (const name of [...sourced, ...guarded]) {
+      fs.rmSync(path.join(lib, name));
+      assert.equal(dispatch.spawnGrantLibrariesPresent(lib), false, name);
+      fs.writeFileSync(path.join(lib, name), 'x');
+    }
+    if (process.platform !== 'win32') {
+      fs.writeFileSync(path.join(lib, 'target'), 'x');
+      for (const [name, expected] of [[sourced[0], true], [guarded[0], false]]) {
+        fs.rmSync(path.join(lib, name));
+        fs.symlinkSync(path.join(lib, 'target'), path.join(lib, name));
+        assert.equal(dispatch.spawnGrantLibrariesPresent(lib), expected, name);
+        fs.rmSync(path.join(lib, name));
+        fs.writeFileSync(path.join(lib, name), 'x');
+      }
+    }
+  } finally {
+    fs.rmSync(lib, { recursive: true, force: true });
+  }
+  assert.equal(dispatch.spawnGrantLibrariesPresent(path.join(PLUGIN, 'hooks', 'lib')), true);
+});
+
+test('the registry readers still answer one virtual entry per original group, with the dispatcher timeout', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8'));
+  const entries = (event, script) => registration.registeredHooks(manifest, event)
+    .filter((entry) => entry.command.endsWith(`/hooks/${script}"`))
+    .map((entry) => `${entry.matcher}=${entry.timeout}`);
+  assert.deepEqual(entries('PreToolUse', 'pre-write-plugin-data-guard.sh'), ['Edit|Write|MultiEdit=60', 'NotebookEdit=60']);
+  assert.deepEqual(entries('PreToolUse', 'pre-edit-tdd-reminder.sh'), ['Edit|Write|MultiEdit=60']);
+  assert.deepEqual(entries('PreToolUse', 'pre-write-secret-scan.sh'), ['Bash|PowerShell=60', 'Edit|Write|MultiEdit=60', 'NotebookEdit=60']);
+  assert.deepEqual(entries('PreToolUse', 'pre-agent-reviewer-allow.sh'), ['Agent|Task=60']);
+  assert.deepEqual(entries('PostToolUse', 'post-artifact-redact.sh'), ['Bash|PowerShell=60', 'Edit|Write|MultiEdit=60']);
+});
+
+test('the edit path class names the state directory, any .zensu path and everything else, through a symlink too', () => {
+  const { editPathClass } = require(path.join(PLUGIN, 'hooks', 'lib', 'edit-path-class-v1.js'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-edit-class-')));
+  try {
+    const state = path.join(root, '.zensu', 'state');
+    fs.mkdirSync(state, { recursive: true });
+    fs.mkdirSync(path.join(root, 'src'));
+    assert.equal(editPathClass(path.join(state, 'tdd-phase-x.json'), state), 'state');
+    assert.equal(editPathClass(path.join(root, 'src', '..', '.zensu', 'state', 'new.json'), state), 'state');
+    assert.equal(editPathClass(path.join(root, '.zensu', 'plans', 'p.md'), state), 'zensu');
+    assert.equal(editPathClass(path.join(root, '.zensu'), state), 'zensu');
+    assert.equal(editPathClass(path.join(root, 'src', 'app.js'), state), 'other');
+    const codeRoot = path.join(root, 'sibling');
+    fs.mkdirSync(path.join(codeRoot, '.zensu', 'state'), { recursive: true });
+    const document = { codeRoots: [{ label: 'app', path: codeRoot, top: codeRoot }] };
+    assert.equal(editPathClass(path.join(codeRoot, '.zensu', 'state', 'x.json'), state), 'zensu');
+    assert.equal(editPathClass(path.join(codeRoot, '.zensu', 'state', 'x.json'), state, document), 'state');
+    assert.equal(editPathClass(path.join(codeRoot, 'src', 'app.js'), state, document), 'other');
+    assert.equal(editPathClass(path.join(codeRoot, '.zensu', 'state', 'x.json'), state, { codeRoots: 'broken' }), 'zensu');
+    if (process.platform !== 'win32') {
+      fs.symlinkSync(state, path.join(root, 'src', 'link'));
+      assert.equal(editPathClass(path.join(root, 'src', 'link', 'tdd-phase-x.json'), state), 'state');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a Bash or PowerShell call runs every shell check in registry order, the capability check first', () => {
@@ -34,7 +130,7 @@ test('a Bash or PowerShell call runs every shell check in registry order, the ca
   }
 });
 
-test('every check names a wrapper that dispatches exactly that check and falls back to the body the registry names', () => {
+test('every entry point dispatches the first check that names it and falls back to the body the registry names', () => {
   const seen = new Set();
   for (const check of dispatch.REGISTRY) {
     const key = `${check.event}:${check.name}`;
@@ -42,7 +138,10 @@ test('every check names a wrapper that dispatches exactly that check and falls b
     seen.add(key);
     const wrapper = fs.readFileSync(path.join(PLUGIN, 'hooks', check.script), 'utf8');
     const event = check.event === 'PreToolUse' ? 'pre' : 'post';
-    assert.match(wrapper, new RegExp(`zensu_hook_dispatch(?:_guarded)? ${event} ${escaped(check.name)} `), check.script);
+    const first = dispatch.REGISTRY.find((other) => other.event === check.event && other.script === check.script);
+    assert.equal(check.body, first.body, check.name);
+    assert.equal(check.failure, first.failure, check.name);
+    assert.match(wrapper, new RegExp(`zensu_hook_dispatch(?:_guarded)? ${event} ${escaped(first.name)} `), check.script);
     if (check.body === null) continue;
     assert.equal(fs.lstatSync(path.join(PLUGIN, 'hooks', check.body)).isFile(), true, check.body);
     assert.match(wrapper, new RegExp(`"\\$_zensu_hooks/${escaped(check.body)}"`), check.script);
@@ -52,7 +151,7 @@ test('every check names a wrapper that dispatches exactly that check and falls b
 
 test('every check matcher has one host reading, and only the capability, source-write and consent checks fail closed', () => {
   for (const check of dispatch.REGISTRY) {
-    for (const tool of ['Bash', 'PowerShell', 'Read', 'Edit', 'Agent']) {
+    for (const tool of ['Bash', 'PowerShell', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task']) {
       assert.notEqual(registration.hostMatcherCovers(check.matcher, tool), registration.REGISTRATION.UNKNOWN, check.name);
     }
   }
@@ -61,7 +160,7 @@ test('every check matcher has one host reading, and only the capability, source-
     ['reviewer-capability', 'source-write-gate', 'browser-consent'],
   );
   assert.deepEqual(dispatch.REGISTRY.filter((check) => check.failure !== 'closed').map((check) => check.failure),
-    Array(6).fill('open'));
+    Array(13).fill('open'));
 });
 
 test('hooks.json starts one dispatcher per tool event in exec form on every tool, blocking on failure before a tool runs', () => {
@@ -78,6 +177,8 @@ test('hooks.json starts one dispatcher per tool event in exec form on every tool
     assert.equal(found[0].hook.timeout, 60);
     assert.equal(found[0].hook.onFailure, event === 'PreToolUse' ? 'block' : undefined);
   }
+  assert.deepEqual(manifest.hooks.PreToolUse.map((group) => group.matcher), ['.*']);
+  assert.deepEqual(manifest.hooks.PostToolUse.map((group) => group.matcher), ['ExitPlanMode', 'Agent|Task', 'Workflow', '.*']);
 });
 
 test('the dispatcher refuses an unknown event, a check of another event and a stray argument before it reads stdin', () => {

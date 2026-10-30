@@ -78,7 +78,7 @@
 // confinement claim as bounding what the CHILD may do, never as bounding the call.
 //
 // SPAWN_TOOL_NAMES is imported from the denial module and re-encoded a THIRD time as
-// the `Agent|Task` matcher in hooks/hooks.json. A member added there without widening
+// the `Agent|Task` matcher in DISPATCHED_CHECKS. A member added there without widening
 // the matcher leaves the grant inert for that tool with every check green.
 //
 // This module NEVER denies. Every path that is not a grant returns a verdict whose

@@ -597,6 +597,31 @@ edit_unrooted_case() {
 }
 edit_unrooted_case cr-edit-rejected "$PLUGIN_ON" "app:bad" "E4 a list the judge rejects still protects the root's .zensu/state and classifies its files relative to the anchor"
 edit_unrooted_case cr-edit-disabled "$ROOT" app "E5 with the switch off the list still protects the root's .zensu/state and classifies its files relative to the anchor"
+edit_vanilla_case() {
+  local sid="$1" plugin="$2" project root
+  project="$WORK/projects/$sid"; mkrepo "$project"; printf '.zensu/\n.session-control-test/\n' > "$project/.gitignore"; commit_all "$project" ignore
+  root="$SRC/$sid"; mkrepo "$root"; mkdir -p "$root/src" "$root/.zensu/state"
+  bind_session "$sid" "$plugin" "$project"
+  bash "$plugin/hooks/lib/zensu-log.sh" --tdd-begin --session "$sid" >/dev/null 2>&1
+  inject_roots "$(state_file_of "$sid")" app "$root"
+  VANILLA_ARMED="$(node -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String(d.active === true && d.vanilla === true))' "$(state_file_of "$sid")" 2>/dev/null)"
+  VANILLA_STATE_OUT="$(edit_out_via "$plugin" "$sid" "$root/.zensu/state/forged.json")"
+  VANILLA_SRC_OUT="$(edit_out_via "$plugin" "$sid" "$root/src/main.js")"
+}
+PLUGIN_FASTPATH="$WORK/plugin-fastpath"
+cp -R "$PLUGIN_ON" "$PLUGIN_FASTPATH"
+perl -pi -e 's/editPathClass\(absolute, stateDirectory, state\)/editPathClass(absolute, stateDirectory)/' "$PLUGIN_FASTPATH/hooks/lib/hook-dispatch-v1.js"
+edit_vanilla_case cr-edit-vanilla "$PLUGIN_ON"
+[ "$VANILLA_ARMED" = true ] \
+  && printf '%s' "$VANILLA_STATE_OUT" | grep -q '"permissionDecision":"deny"' \
+  && printf '%s' "$VANILLA_STATE_OUT" | grep -qF 'session-state files' \
+  && ! printf '%s' "$VANILLA_SRC_OUT" | grep -q '"permissionDecision":"deny"'
+check "E1b a vanilla chain's in-process edit allow still refuses a declared root's .zensu/state (armed=$VANILLA_ARMED)" "$(verdict $?)"
+edit_vanilla_case cr-edit-vanilla-mutant "$PLUGIN_FASTPATH"
+grep -qF 'editPathClass(absolute, stateDirectory) !== ' "$PLUGIN_FASTPATH/hooks/lib/hook-dispatch-v1.js" \
+  && [ "$VANILLA_ARMED" = true ] \
+  && ! printf '%s' "$VANILLA_STATE_OUT" | grep -q '"permissionDecision":"deny"'
+check "E1b-control a dispatcher that does not pass the workflow document lets that write through, so E1b measures the fast path" "$(verdict $?)"
 
 echo "=== reviewer and neutral profiles: protected .zensu of every root ==="
 GATE_JS="$WORK/gate-check.js"

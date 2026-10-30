@@ -15,51 +15,6 @@
             "onFailure": "block"
           }
         ]
-      },
-      {
-        "matcher": "Agent|Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-agent-reviewer-allow.sh\"",
-            "timeout": 60
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\"",
-            "timeout": 60
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh\"",
-            "timeout": 60
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-secret-scan.sh\"",
-            "timeout": 60
-          }
-        ]
-      },
-      {
-        "matcher": "NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\"",
-            "timeout": 60
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-secret-scan.sh\"",
-            "timeout": 60
-          }
-        ]
       }
     ],
     "PostToolUse": [
@@ -102,15 +57,6 @@
               "post"
             ],
             "timeout": 60
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-artifact-redact.sh\""
           }
         ]
       }

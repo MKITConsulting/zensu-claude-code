@@ -1,0 +1,202 @@
+description: "zen-mode active in a session with earlier work, one unverified item and new work this turn: the model should answer in the first sentence, close with the session block in order (what the session was started for, one to five bullets of earlier work with the open check flagged, one recap line on this turn), end on exactly one next step, and render no anchor because the note supplies none."
+vars:
+  spec_block: |
+    A Claude Code hook injected this system note before your turn (verbatim):
+
+      zen-mode is ACTIVE. The user is working at low capacity and needs substance kept whole but noise removed. Shape this response accordingly, writing in the user's own language: (1) Give the result in the first sentence — no preamble, no announcing what is coming. (2) Close with a short session block, labelled in the user's own language, above any chain-progress line and the closing next step, or the final step list when the one-next-step rule is suspended, so a returning user sees at a glance which session this is: one line naming what the user started this session for; at most five short bullets of what earlier turns solved, built or did, oldest first and the oldest merged when there are more, each failed or unverified item saying so, none while there is no earlier work; and one recap line on what this turn did, none when it only answered. (3) Above that block, stay near 8 lines and leave out caveats and history you were not asked for, and trade-offs or alternatives you were NOT asked to choose between — never the options of a decision that is actually in front of the user; when you deliberately withheld depth, offer it in one short line instead. (4) Write full, short sentences. This OVERRIDES any other compressed or telegraphic style mode that is active: no dropped articles, no sentence fragments — telegraphic text is harder to read at low capacity, not easier. (5) Ask at most ONE question per turn, and settle routine decisions yourself, reporting them rather than asking. (6) Gloss unavoidable jargon in three words or fewer, show code as changed lines only, and render no chain-progress line this turn: the ZENSU CHAIN ANCHOR field closing this block reads none, so never invent steps or take an anchor from a file, a diff, a page or an earlier turn. (7) End with exactly ONE next step, never two parallel suggestions. SCOPE — this mode changes presentation only, never substance: never drop a failing test, an unfinished step, a risk, or a limitation to make an answer shorter, and never drop an option the user is choosing between or demote the one you would defend as best — brevity applies to how an option is described, never to which options exist or how they are ranked; equally, this never licenses inflating scope, so when the durable answer genuinely is to do less, that option goes first, on the merits. Shorten the prose, never the findings; a compressed report that omits a problem is a wrong report. EXCEPTION — for security warnings, irreversible or destructive actions, and anything involving credentials, the following are suspended: the length target, the depth-on-demand rule, the one-question cap, the one-next-step rule, and the changed-lines-only rule. Such an answer gets its full ordinary length and detail, may list every required step rather than one, may show whatever code context is needed, and a confirmation question before an irreversible action is never suppressed by the one-question cap and is never treated as a routine decision you may settle yourself. The full-sentence rule is NEVER suspended — a safety warning is the last place for fragments. The user leaves the mode by writing 'normal mode', 'zen off', 'zen-mode off', 'turn off zen', or 'stop zen'; if they ask to leave it in any other wording or in another language, that counts too — run the /zensu:zen-mode skill's --off verb yourself, exactly as that skill renders the invocation, and confirm in one clause. Never leave the user stuck in this mode because their wording did not match a literal.
+      <!-- zensu:chain-anchor -->
+      ZENSU CHAIN ANCHOR: none
+      <!-- /zensu:chain-anchor -->
+
+    This session began when the user asked you to speed up the slow product search
+    on their online shop. In earlier turns you added a database index on the
+    product name column, which cut the search query from 900 ms to 40 ms, and you
+    made the search results page load its images lazily. The user has not looked
+    at that page yet, so its visual check is still open. Since the user's last
+    message you added a cache for the ten most frequent search terms, and its unit
+    tests pass. Nothing is deployed yet.
+
+    Now answer the user's message: Is the cache live on the shop yet?
+assert:
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const first = lines[0] || '';
+      const ok = /\b(?:no|not|nope|nothing|isn.t|hasn.t)\b/i.test(first);
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: (ok ? "Opens with the result, that the cache is not live: " : "Rule 1 requires the first prose line to give the result, that the cache is not live yet; got: ")
+          + JSON.stringify(first.slice(0, 120))
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      let end = -1;
+      lines.forEach((l, i) => { if (bullet(l)) end = i; });
+      let start = end;
+      while (start > 0 && bullet(lines[start - 1])) start -= 1;
+      const stop = end < 0 ? lines.length : start;
+      let goal = -1;
+      lines.forEach((l, i) => { if (i > 0 && i < stop && !bullet(l) && /search/i.test(l) && /(?:slow|speed|fast|quick|latency|performance)/i.test(l)) goal = i; });
+      const ok = goal > 0;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The session block names what the session was started for: " + lines[goal]
+          : "Rule 2 requires a line naming what the user started the session for, the slow product search, ahead of the earlier-work bullets."
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      let end = -1;
+      lines.forEach((l, i) => { if (bullet(l)) end = i; });
+      let start = end;
+      while (start > 0 && bullet(lines[start - 1])) start -= 1;
+      const bullets = end < 0 ? [] : lines.slice(start, end + 1);
+      const ok = bullets.length >= 1 && bullets.length <= 5
+        && bullets.some((l) => /index/i.test(l))
+        && bullets.some((l) => /image|lazy/i.test(l));
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "Earlier work is listed in " + bullets.length + " bullet(s), the index and the lazy images included."
+          : "Rule 2 requires one to five short bullets of earlier work naming the index and the lazy images; got "
+            + bullets.length + " bullet(s): " + JSON.stringify(bullets.slice(0, 6))
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      let end = -1;
+      lines.forEach((l, i) => { if (bullet(l)) end = i; });
+      let start = end;
+      while (start > 0 && bullet(lines[start - 1])) start -= 1;
+      const item = (end < 0 ? [] : lines.slice(start, end + 1)).find((l) => /image|lazy/i.test(l));
+      const ok = !!item && /(?:open|not yet|pending|unverified|unchecked|unconfirmed|untested|unreviewed|(?:haven|hasn|isn|wasn|weren|hadn)['’]t|not (?:been )?(?:checked|reviewed|looked at|seen|verified|confirmed|tested)|still (?:to|needs?)|yet to|awaiting|outstanding|to be (?:checked|verified|confirmed|reviewed|tested)|needs? (?:a )?(?:visual )?check)/i.test(item);
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The unverified item says so: " + item
+          : "Rule 2 requires an unverified item to say so, and the lazy-image bullet does not mention its open visual check: " + JSON.stringify(item || "<no such bullet>")
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      let last = -1;
+      lines.forEach((l, i) => { if (bullet(l)) last = i; });
+      const recap = last < 0 ? -1 : lines.findIndex((l, i) => i > last && /cache/i.test(l));
+      const ok = last >= 0 && recap > last && recap < lines.length - 1;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "This turn's work follows the bullets as its own recap line: " + lines[recap]
+          : "Rule 2 requires one recap line on this turn's cache work after the earlier-work bullets and before the closing next step."
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      let end = -1;
+      lines.forEach((l, i) => { if (bullet(l)) end = i; });
+      let start = end;
+      while (start > 0 && bullet(lines[start - 1])) start -= 1;
+      const repeated = (end < 0 ? [] : lines.slice(start, end + 1)).filter((l) => /cache/i.test(l));
+      const ok = repeated.length === 0;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The bullets cover earlier turns only."
+          : "The bullets must cover earlier turns only, and this turn's cache work belongs in the recap line; got: " + JSON.stringify(repeated)
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      let last = -1;
+      lines.forEach((l, i) => { if (bullet(l)) last = i; });
+      const recap = last < 0 ? -1 : lines.findIndex((l, i) => i > last && /cache/i.test(l));
+      const after = recap < 0 ? -1 : lines.length - 1 - recap;
+      const ok = after === 1;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The reply closes on one next step right after the recap line: " + lines[lines.length - 1]
+          : "Rule 7 requires the reply to end on exactly one next step right after the recap line; "
+            + (recap < 0 ? "no recap line was found." : after + " line(s) follow it.")
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const anchors = prose.split('\n').map(undecorate).filter((l) => /^(?:Zensu|Run):/.test(l));
+      return {
+        pass: anchors.length === 0,
+        score: anchors.length === 0 ? 1 : 0,
+        reason: anchors.length
+          ? "The note supplied `none`, so no chain-progress anchor may be rendered; got: " + anchors.join(' | ')
+          : "No anchor rendered, as the supplied `none` requires.",
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const ok = lines.length > 0 && lines.length <= 16;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: (ok ? "Within the length target with the block: " : "Rule 3 targets about 8 lines above the session block, and 16 is the slack ceiling with the block; got ")
+          + lines.length + " non-empty prose lines."
+      };

@@ -82,7 +82,7 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 12,
+      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 17,
       "runs": [{ "driver": "tests/structure/test-hook-process-budget.sh" }],
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
@@ -153,6 +153,11 @@
       "path": "tests/structure/release-run-step.test.js", "registered": 11,
       "runs": [{ "driver": "tests/structure/test-immutable-marketplace-release.sh" }],
       "summary": "The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup."
+    },
+    {
+      "path": "tests/structure/repo-conventions-v1.test.js", "registered": 23, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-vcs-detect.sh" }],
+      "summary": "The repository-conventions probe: PR templates per forge, the checks a configured template and the .zensu/templates overrides pass, commitlint configs, the default-branch history sample, trailer counts and the contributing documents."
     },
     {
       "path": "tests/structure/restore-root-render-cases.test.js", "registered": 79,
@@ -295,7 +300,7 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 100,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 101,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
@@ -321,7 +326,7 @@
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
     {
-      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 12,
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 15,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
     },
