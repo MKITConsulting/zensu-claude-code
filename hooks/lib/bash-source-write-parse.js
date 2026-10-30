@@ -721,6 +721,27 @@ function readFrame(input) {
   return { payload: body.subarray(size).toString("utf8"), document };
 }
 
+function payloadFields(raw) {
+  try {
+    const j = JSON.parse(raw || "{}");
+    return {
+      cmd: j.tool_input && typeof j.tool_input.command === "string" ? j.tool_input.command : "",
+      cwd0: typeof j.cwd === "string" ? j.cwd : "",
+      tool: typeof j.tool_name === "string" ? j.tool_name : "",
+      child: [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "")
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function controlVerdict(raw) {
+  const fields = payloadFields(raw);
+  if (!fields || !fields.cmd) return "";
+  if (fields.tool === "PowerShell") return powershellVerdict(fields.cmd, "control", fields.child);
+  return detectControlMutation(fields.cmd);
+}
+
 function main() {
   let cmd = "";
   let cwd0 = "";
@@ -745,17 +766,12 @@ function main() {
     raw = framed.payload;
     frameDocument = framed.document;
   }
-  let tool = "";
-  let child = false;
-  try {
-    const j = JSON.parse(raw || "{}");
-    if (j.tool_input && typeof j.tool_input.command === "string") cmd = j.tool_input.command;
-    if (typeof j.cwd === "string") cwd0 = j.cwd;
-    if (typeof j.tool_name === "string") tool = j.tool_name;
-    child = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
-  } catch (e) {
-    return "";
-  }
+  const fields = payloadFields(raw);
+  if (!fields) return "";
+  cmd = fields.cmd;
+  cwd0 = fields.cwd0;
+  const tool = fields.tool;
+  const child = fields.child;
   if (!cmd) return "";
   if (process.env.BSWG_MODE === "detect") return detectChannels(cmd);
   if (tool === "PowerShell") return powershellVerdict(cmd, process.env.BSWG_MODE || "", child);
@@ -1229,6 +1245,7 @@ function main() {
   module.exports = {
     OPT_IN_NOTE,
     FRAME_DOCUMENT_MAX,
+    controlVerdict,
     detectChannels,
     detectControlMutation,
     stripHeredocs,

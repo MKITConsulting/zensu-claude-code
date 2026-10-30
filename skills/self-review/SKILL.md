@@ -103,23 +103,19 @@ finalizing the current chain.
 ## Phase 1: List Changed Files
 
 List every file you changed or created in this session. You know these from
-context — no parsing needed. Cross-check by running the `/zensu:build`
-Phase 6 step 5b b) enumeration UNCHANGED — resolve the bound project root with
-`PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)"`
-and `TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"` HERE, never from
-the working directory, which after `/zensu:adopt-session --reanchor` is no longer
-the bound root, and require `[ -n "$PROJECT_ROOT" ] && [ -n "$TOP" ] && [ -d "$TOP" ]`
-before ANY `git -C "$TOP"` (an empty value makes `git -C ""` enumerate whatever
-repo the cwd happens to be; an unresolvable root takes 5b's no-work-tree branch,
-never an unanchored run) —
-then use `git -C "$TOP" -c core.quotePath=false diff --name-only HEAD` plus
-`git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard`
-(without `core.quotePath=false` git C-quotes non-ASCII paths and no fixed-string
-comparison can match them), with 5b's unborn-HEAD
-form where HEAD does not exist yet AND its `[ -n "$BASELINE_SHA" ]`-guarded
-`git -C "$TOP" diff --name-only "$BASELINE_SHA"..HEAD` extension when this
-session committed mid-run — without that branch a mid-run commit empties both
-commands and this stage would skip itself as "no changes". If the union comes
+context — no parsing needed. Cross-check against the library that owns the
+`/zensu:build` step 5b enumeration — resolve the bound project root with
+`PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)"`,
+`TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"` and the chain's work tree
+`WT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --chain-work-tree)"`
+HERE, never from the working directory, which after `/zensu:adopt-session --reanchor`
+is no longer the bound root, and require `[ -n "$PROJECT_ROOT" ] && [ -n "$TOP" ] && [ -d "$TOP" ] && [ -n "$WT" ] && [ -d "$WT" ]`
+(an unresolvable root, or exit 3 below for a project outside git, takes 5b's
+no-work-tree branch, never an unanchored run) — then run
+`bash "$ROOT/hooks/lib/zensu-edit-landing.sh" --change-set --project "$PROJECT_ROOT" --work-tree "$WT" ${BASELINE_SHA:+--baseline "$BASELINE_SHA"}`.
+It prints one path per line relative to `$WT`, the tree the chain's code changes
+land in (an Autopilot run's own worktree, else `$TOP`), and covers an unborn HEAD,
+untracked files and, with the baseline, a mid-run commit. If it comes
 back empty while your own context names files you changed (the cold-start +
 mid-run-commit case, where no `BASELINE_SHA` survives), do NOT take the
 no-changes branch: review the files from context and say so in the summary.
@@ -228,9 +224,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
   Run every test, build or other project command of this round as
-  `cd "<project root>" && <command>`, where `<project root>` is the path `--project-root`
-  printed in Phase 1: the Bash tool returns to the session's start directory, which after
-  `/zensu:adopt-session --reanchor` is not the bound root. `--evidence-run` needs no prefix.
+  `cd "<project dir>" && <command>`, where `<project dir>` is what the Phase 1
+  `--chain-work-tree` call prints with `--project-dir` added: the Bash tool returns to
+  the start directory, and a bound chain works in its worktree. `--evidence-run` needs
+  no prefix.
   Then log `{step_id} IMPL completed — files: {list}` for the fixes and re-run
   the `/zensu:build` Phase 6 **step 1 full suite** over the amended tree through the
   evidence runner:

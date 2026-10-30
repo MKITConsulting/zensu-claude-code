@@ -194,7 +194,7 @@ function announce(text, options) {
   if (options && options.model === true) {
     output.hookSpecificOutput = { hookEventName: 'PreToolUse', additionalContext: text };
   }
-  process.stdout.write(`${JSON.stringify(output)}\n`);
+  emit(output);
 }
 
 function servedSweepNotice(servedSweep) {
@@ -267,11 +267,13 @@ function deny(reason, systemMessage) {
     },
   };
   if (typeof systemMessage === 'string' && systemMessage !== '') output.systemMessage = systemMessage;
-  process.stdout.write(`${JSON.stringify(output)}\n`);
+  emit(output);
 }
 
-function parsePayload() {
-  const raw = fs.readFileSync(0);
+let emit = (output) => process.stdout.write(`${JSON.stringify(output)}\n`);
+
+function parsePayload(input) {
+  const raw = input === undefined ? fs.readFileSync(0) : input;
   if (raw.length === 0 || raw.length > MAX_PAYLOAD_BYTES) {
     throw new Error('trusted hook payload is empty or too large');
   }
@@ -431,12 +433,12 @@ function zensuBelowRoot(trusted, candidate) {
   });
 }
 
-function revalidateSessionContext(payload) {
+function revalidateSessionContext(payload, bind) {
   // Opts into the automatic adoption: a record the version numbers refuse but
   // adoptableRecord admits is re-minted by the binder before the strict re-read,
   // and `binding.adoption` (spread into the trusted context below) carries the
   // verdict so the allow path can announce it once.
-  const binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
+  const binding = bind ? bind() : hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
   // Two checks run AFTER the bind and either can throw — a missing workflow
   // baseline is the ordinary case, and it coincides with a plugin update whenever
   // a worktree was deleted and re-created. The error they throw knows nothing
@@ -889,10 +891,10 @@ function readOnlyViolation(payload, trusted, profile) {
   return violation ? `${profile} ${violation}` : null;
 }
 
-function main() {
+function main(options = {}) {
   let payload;
   try {
-    payload = parsePayload();
+    payload = parsePayload(options.raw);
   } catch (error) {
     deny(error.message);
     return;
@@ -903,7 +905,7 @@ function main() {
     // SubagentStart cannot block tool execution. Therefore this first all-tool
     // hook revalidates every wrapper-exported field and the current runtime
     // digest before any principal-specific capability decision is considered.
-    trusted = revalidateSessionContext(payload);
+    trusted = revalidateSessionContext(payload, options.bind);
   } catch (error) {
     // The adoption this bind PERFORMED, if any: the binder's own test, so the gate
     // and the binder cannot disagree about what counts as performed. Every deny
@@ -1215,9 +1217,22 @@ function judgePrincipal(payload, bound, principal) {
 // lock timeout or a fault inside the adoption — so each was held by a source regex
 // that a changed predicate BODY stayed green under. Requiring the file must not run
 // the gate, which reads stdin.
+function evaluate(raw, bind) {
+  const previous = emit;
+  let output = null;
+  emit = (value) => { output = value; };
+  try {
+    main({ raw, bind });
+  } finally {
+    emit = previous;
+  }
+  return output;
+}
+
 if (require.main === module) main();
 
 module.exports = {
+  evaluate,
   safeRefusal,
   safeVersion,
   adoptionAttempt,

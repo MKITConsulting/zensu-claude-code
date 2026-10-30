@@ -1101,7 +1101,7 @@ RW_DIR="$(mktemp -d)"
 RW_BIN="$RW_DIR/bin"
 mkdir -p "$RW_BIN"
 cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
-  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" "$RW_BIN/"
+  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" "$PLUGIN_DIR/hooks/lib/edit-landing-claims-v1.js" "$RW_BIN/"
 # A real repo with a real landed change, so the GRADING verdict is clean and the
 # exit code below can only be about receipt plumbing.
 RW_PROJ="$RW_DIR/proj"
@@ -1152,7 +1152,7 @@ else
 fi
 RW_BARE="$RW_DIR/bare"
 mkdir -p "$RW_BARE"
-cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$RW_BARE/"
+cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$PLUGIN_DIR/hooks/lib/edit-landing-claims-v1.js" "$RW_BARE/"
 RW_BARE_KEY="scv1_$(printf 'd%.0s' $(seq 64))"
 RW_BARE_OUT="$(/bin/bash "$RW_BARE/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session "$RW_BARE_KEY" 2>&1)"

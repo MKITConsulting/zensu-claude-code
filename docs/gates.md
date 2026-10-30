@@ -2,9 +2,13 @@
 
 Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
-receipt — whose VERDICT is what is judged, not its existence, and which a logged
-claim arms even when the anchor's tree is clean (discipline patch 10 in
-[build-workflow.md](build-workflow.md))
+receipt — whose VERDICT is what is judged, not its existence, which a logged
+claim arms even when the anchor's tree is clean, and which must have graded the
+chain's own work tree: the anchor's git top level, or the worktree below it that a
+bound Autopilot run drives, recorded in the receipt as `workTree` and counted beside
+the anchor's change set (discipline patch 10 in
+[build-workflow.md](build-workflow.md); a claim the audit cannot grade as written is
+settled by the `CLAIM CORRECTED` line its verdict names, never by an escape)
 and §Requirements-Table Gate below, which has its own section here — and TWO
 terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
 Eight of the ten are
@@ -43,9 +47,10 @@ command is the report and the manual retry for a refusal. The full account is in
 
 Claude Code has two shell tools, `Bash` and `PowerShell`. The PowerShell tool is on by default on
 Windows for claude.ai and Console accounts, and opt-in elsewhere through
-`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu hook that reads a shell command is registered on
-the `Bash|PowerShell` matcher, and each one judges a PowerShell command or refuses what it cannot
-judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu check that reads a shell command runs on the
+`Bash|PowerShell` matcher as a check of the hook dispatcher (see
+[Configuration](configuration.md)), and each one judges a PowerShell command or refuses what it
+cannot judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
 analyzer, `hooks/lib/powershell-command-v1.js`. Claude Code falls back to Windows PowerShell 5.1
 when PowerShell 7 is not installed, and the two decode the string escapes `` `e `` and `` `u{…} ``
 differently, so the analyzer reads such a string both ways and a verdict holds only when it holds
@@ -496,7 +501,7 @@ chain states.
 ## Browser Consent Gate
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
-(`post-browser-navigation-consent.sh`), both registered on the `Bash|PowerShell` matcher. A
+(`post-browser-navigation-consent.sh`), both run by the hook dispatcher on the `Bash|PowerShell` matcher. A
 PowerShell call that names `playwright-cli` and a `zensu-verify-*` session is refused, so run
 those calls through the Bash tool. It is refused in every spelling the shared PowerShell analyzer
 decodes, a backtick or Unicode escape and joined string literals included, so the prefilter
@@ -1131,10 +1136,20 @@ reads the newest record, never a claim in the run log.
   fingerprint combines the project tree and that work tree, so an edit on either side makes the
   record stale, and a changed path in the nested tree is listed with its location, for example
   `.claude/worktrees/wt/a.txt`. Any other directory keeps the project root's fingerprint, and so
-  does an `acceptance` run. The terminus derives the directory from the newest full-suite
-  record's command and cwd, and `--if-stale` from its own run. In CI mode every run is compared
-  with the current tree of its own directory, and the verdict reads `stale` while the directory
-  of the newest finished run has no run on its current tree.
+  does an `acceptance` run of a standalone chain. The terminus derives the directory from the
+  newest full-suite record's command and cwd, and `--if-stale` from its own run. In CI mode every
+  run is compared with the current tree of its own directory, and the verdict reads `stale` while
+  the directory of the newest finished run has no run on its current tree.
+- **A chain bound to an Autopilot run that drives a worktree.** When the run's workspace is a
+  worktree nested below the anchor (`<anchor>/.claude/worktrees/<name>`), the chain's code lands
+  there, so the gate follows it. `--evidence-run` keeps a cwd inside that worktree and otherwise
+  runs the command in the worktree's directory for the project root and says so; `zensu-log.sh
+  --chain-work-tree --project-dir` prints that directory. The terminus, `--if-stale` and the CI
+  verdict compare every record with the combined fingerprint of the project and that worktree,
+  whatever directory a record names, so a run that measured only the anchor reads `stale` and a
+  changed path is listed as `.claude/worktrees/<name>/…`. When the worktree cannot be resolved,
+  `--evidence-run` exits `2` without running the command, and the terminus reads `unavailable`
+  with the resolver's cause and keeps the chain open.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
   unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A
@@ -1187,9 +1202,10 @@ reads the newest record, never a claim in the run log.
   stop a model that forges a record on purpose. It measures only the tree the suite ran in: a
   suite reached through anything but the cwd or a leading literal `cd` (a manifest path,
   `git -C`, a script that changes directory) keeps the project root's fingerprint, and so does
-  a work tree outside the project root's own work tree. When git cannot resolve the work tree
-  of the run directory, the verdict reads `pass-tree-unverified` rather than falling back to the
-  project root.
+  a work tree outside the project root's own work tree. A bound chain's terminus measures its
+  run's worktree instead, so such a run reads `stale` there. When git cannot resolve the work
+  tree of the run directory, the verdict reads `pass-tree-unverified` rather than falling back to
+  the project root.
 
 ## Acceptance Verification Gate
 
@@ -1222,7 +1238,12 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   one `ACCEPTANCE — AC-001 pass | driver=… | tree=… | record=…` line to the run log.
 - **What it reads.** Records live in `$CLAUDE_PLUGIN_DATA/acceptance-verify/v1/records/<session
   key>/`. Each one carries the tree fingerprint the full-suite gate uses (`.zensu` excluded) and a
-  digest of the criterion text. The plan is the one named by this session's edit-landing receipt.
+  digest of the criterion text. For a chain bound to an Autopilot run that drives a worktree
+  nested below the anchor, that fingerprint, and the one an `--evidence-run --scope acceptance`
+  run records, is the combined fingerprint of the project and that worktree, so an edit in the
+  worktree makes every record `stale`; when the worktree cannot be resolved, both verbs and the
+  acceptance run exit `2` and name the cause. The plan is the one named by this session's
+  edit-landing receipt.
   `zensu-log.sh --acceptance-status --log <run log>` prints every criterion's state on the
   current tree and exits 0 only when all active criteria pass. Its summary line carries the same
   remedy segments as a refusal.

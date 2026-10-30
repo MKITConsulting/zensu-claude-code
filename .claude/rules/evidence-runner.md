@@ -30,7 +30,10 @@ child environment drops `CHILD_SCRUBBED_ENV` and every `ZENSU_EVR_*` name, and g
 caller's `CLAUDE_PROJECT_DIR` back from the snapshot `zensu-log.sh` takes BEFORE its bind
 block, because the bind overwrites that variable. A new binding the verb exports must
 join `CHILD_SCRUBBED_ENV`, or the suite under test sees it; `test-evidence-run.sh` E7
-pins the current set.
+pins the current set. The verb never loads `zensu-tdd-phase.sh` in its own process: that
+library exports its module paths and more than a hundred functions on every non-Windows host,
+so the work-tree lookup loads it inside a subshell, and E22 and E23 pin that none of them
+reaches a suite.
 
 **The command runs where the fingerprint looks.** `runDirectory` keeps the caller's working
 directory when it lies in the git work tree of the bound project root, and otherwise runs the
@@ -44,6 +47,36 @@ tested. The same-work-tree arm keeps a session recorded in a subdirectory able t
 from the worktree top. `test-evidence-run.sh` E8, E8b and E8c pin the three directions, and the
 unit case `a working directory outside the work tree of the project root runs the command in the
 project root` pins both arms, the `<root>-x` prefix sibling and a caller outside git.
+
+**A chain bound to an Autopilot run that drives a worktree follows that worktree.** When the
+chain's run records a `workspaceRoot` nested below the anchor, the chain's code lands there.
+`zensu-log.sh` asks the one resolver, `_zensu_chain_work_tree`, through `_zensu_bound_work_tree`,
+and hands the module the worktree's top as `ZENSU_EVR_WORK_TREE` and its directory for the
+project root as `ZENSU_EVR_WORK_DIR`. `_zensu_chain_project_dir` derives that directory with
+`git rev-parse --show-prefix`, so a session recorded in a subdirectory gets the same subdirectory
+inside the worktree. `runDirectory` then takes the work directory as its home: a cwd in the
+worktree's work tree is kept, any other cwd is replaced by the work directory and the notice names
+the bound chain. The verdict measures `fingerprintRoot(workTree)` whatever directory the newest
+record names, in local mode and in `decideCi` alike, so a run that measured only the anchor reads
+`stale`, and an `acceptance` run takes the same combined fingerprint. `--if-stale` judges
+freshness against that tree too, in both scopes, so a command that leaves the worktree never
+skips a run the terminus would read as `stale`. Every `--evidence-run` and both acceptance verbs
+read the workflow document once, a standalone chain's included, and ask the resolver only when
+it carries an Autopilot binding whose chain is still open (`active` and not `chainDone`), so a
+standalone chain, and every call after a bound chain's terminus, runs its command where it ran
+before. The lookup runs in a subshell and hands its answer back through files in the transport
+directory. A binding the resolver cannot answer is a FAULT and never falls back to the anchor,
+and so are a workflow document that cannot be read, which `--chain-work-tree` refuses the same
+way, and a phase library that does not load: `--evidence-run` and both acceptance verbs exit 2
+before anything runs, and the bound terminus, which hands the lookup the linkage it already
+validated instead of reading the document a second time, writes the cause into the transport
+file `work-tree-fault`, which the verdict reads as `unavailable`. A worktree that cannot be
+fingerprinted is measured only against the records whose run directory lies in it, so a green
+run in the anchor never passes there as `pass-tree-unverified`. `_evr_work_tree`,
+`_evr_work_dir` and `_avr_work_tree` start empty like `_evr_dir`, so a variable inherited from
+the caller never points a standalone chain at a work tree.
+`zensu-log.sh --chain-work-tree --project-dir` prints the work directory, the path the skills'
+`cd` rule uses. No state file and no second resolver were added.
 
 **The tree fingerprint never touches the real index.** It copies the index, runs
 `git add -A -- .` and then `git rm -r --cached .zensu` on the copy, and writes the tree.
@@ -105,8 +138,10 @@ always fills `options.cwd` with the project root. `decideCi` compares every reco
 current tree of its own root, and reads `stale` when the root of the newest finished run has no
 record on its current tree, so a current run at the project root cannot hide a stale one in the
 worktree the chain works in. A record fingerprinted at the project root reads `stale` against a
-combined fingerprint, never `pass`. An `acceptance` run keeps the project-root fingerprint,
-because `acceptance-verify-v1.js` compares it with `computeTree(projectRoot)`. Known gaps: only
+combined fingerprint, never `pass`. An `acceptance` run of a standalone chain keeps the
+project-root fingerprint, because `acceptance-verify-v1.js` compares it with
+`computeTree(projectRoot)`; a bound chain's takes its worktree's combined fingerprint, which
+`chainTree` in that module computes the same way. Known gaps: only
 a leading `cd` moves the directory, so a suite reached any other way (`--manifest-path`,
 `git -C`, `pushd`, an assignment or a command before the `cd`, a script that changes directory)
 keeps the project-root fingerprint; and a work tree outside the project root's own work tree is
@@ -196,8 +231,30 @@ the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S1
 `tests/structure/test-post-review-tdd-scope.sh`, the `MR` checks in
 `evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in
 `tests/structure/test-full-suite-ci.sh`, and the `evidence-run-v1.test.js` entry in
-`tests/profiles/unit-files.v1.json`.
+`tests/profiles/unit-files.v1.json`. The bound work tree moves with `_zensu_bound_work_tree`,
+`_zensu_chain_project_dir` and `--chain-work-tree --project-dir` in `zensu-log.sh`, `chainTree`
+in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in
+`skills/build/references/planning.md` and of Phase 4 in `skills/self-review/SKILL.md` (`L9b` and
+`L11` in `test-tdd-log-path-anchor.sh`, `E10g1` and `E10l` in `test-session-reanchor.sh`), E13
+to E24 in `test-evidence-run.sh`, F20 to F24 in `test-full-suite-gate.sh`, A29 to A31 in
+`test-acceptance-gate.sh`, and the bound cases of `evidence-run-v1.test.js`, the `--if-stale`
+one and the worktree that cannot be fingerprinted included.
+
+**Version of the bound work tree: `patch`.** Walked against `.claude/rules/runtime-lineage.md`:
+no record field and no strict key set moves. A full or scoped record still carries the `cwd`
+`runDirectory` kept, and every reader, a released one included, derives the fingerprint root
+from `cwd` and `command`, so it reads a bound chain's records against the same combined tree. An
+acceptance record's `tree` holds a combined id only for a bound chain, whose terminus answers
+`not-checked` without reading records, and a released reader would read such a record as stale,
+never as a pass. No hook, matcher, config key or attestation moves, and `--project-dir` is a new
+flag on a read-only verb whose only callers are skills of the same installation.
 
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when
-both trees exist.
+both trees exist. A bound chain whose `workspaceRoot` the resolver refuses (a tree outside the
+anchor, a clone, a submodule) can record no run at all, where it used to run in the anchor;
+`--tdd-complete` already refuses such a chain, so the refusal only arrives earlier. The bound
+work tree is unmeasured on Windows: none of the three suites that drive it is in a blocking
+Windows profile. `--chain-work-tree`, `--round-prepare` and `--tdd-complete` still read the
+Autopilot linkage with their own copies of the lookup, and `zensu-log.sh`, not the modules,
+words the work-tree refusal of `--evidence-run` and the acceptance verbs.

@@ -531,18 +531,43 @@ function pluginBlock() {
     line(BAD, 'hooks.json: ' + (hj.missing ? 'missing' : jsonFailure(hj)));
     return;
   }
+  var registration = null;
+  try { registration = require('./hook-registration-v1.js'); } catch (_error) { registration = null; }
   var wired = {};
+  var dispatched = false;
   var events = (hj.data && hj.data.hooks) || {};
   Object.keys(events).forEach(function (ev) {
     var matchers = events[ev] || [];
     matchers.forEach(function (m) {
       (m && m.hooks || []).forEach(function (h) {
-        var cmd = (h && typeof h.command === 'string') ? h.command : '';
-        var mm = cmd.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
-        if (mm) wired[mm[1]] = true;
+        if (registration && registration.dispatcherEvent(h) !== null) dispatched = true;
+        var entries = registration
+          ? registration.hookEntries(h, ev)
+          : [{ command: (h && typeof h.command === 'string') ? h.command : '' }];
+        entries.forEach(function (entry) {
+          var mm = entry.command.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
+          if (mm) wired[mm[1]] = true;
+        });
       });
     });
   });
+  if (!registration) {
+    line(WARN, 'hooks wiring: hooks/lib/hook-registration-v1.js could not be loaded, so the checks the dispatcher runs are not counted as wired; reinstall the plugin');
+  }
+  if (dispatched) {
+    var dispatcherFile = path.join(dir, registration.DISPATCHER_MODULE);
+    var dispatcherStat = null;
+    try { dispatcherStat = fs.lstatSync(dispatcherFile); } catch (_error) { dispatcherStat = null; }
+    if (!dispatcherStat || !dispatcherStat.isFile()) {
+      line(BAD, 'hooks wiring: hooks.json starts ' + registration.DISPATCHER_MODULE + ' for every tool call, but it is missing on disk or not a regular file — every tool call is blocked; reinstall the plugin');
+    }
+    var missingBodies = registration.DISPATCHED_CHECKS.filter(function (check) {
+      return check.body !== null && !fs.existsSync(path.join(dir, 'hooks', check.body));
+    }).map(function (check) { return 'hooks/' + check.body; });
+    if (missingBodies.length) {
+      line(BAD, 'hooks wiring: ' + missingBodies.length + ' check(s) the dispatcher runs are missing on disk — ' + missingBodies.join(', '));
+    }
+  }
   var onDisk = {};
   try {
     fs.readdirSync(path.join(dir, 'hooks')).forEach(function (f) {
@@ -5463,7 +5488,7 @@ function auditedRunLog(projectRoot, value) {
 // runs it, answering a typed result the row renders. It refuses a symlinked or
 // non-plain-file library rather than executing it, and the ENOENT branch below states why
 // an absent command is a damaged tree rather than an uninstalled feature.
-function claimInventory(logFile, projectRoot, workflowFile) {
+function claimInventory(logFile, projectRoot, workTree, workflowFile) {
   var lib = path.join(pluginDir(), 'hooks', 'lib', 'zensu-edit-landing.sh');
   try {
     var st = fs.lstatSync(lib);
@@ -5489,6 +5514,7 @@ function claimInventory(logFile, projectRoot, workflowFile) {
   var r;
   try {
     var inventoryArgs = [lib, '--inventory', '--log', logFile, '--project', projectRoot];
+    if (workTree) inventoryArgs.push('--work-tree', workTree);
     if (workflowFile) inventoryArgs.push('--workflow', workflowFile);
     r = require('child_process').spawnSync('bash',
       inventoryArgs,
@@ -5614,7 +5640,13 @@ function claimTopologyRow(projectRoot, ownKey) {
   }
   if (!audited.path) return;
   var logFile = audited.path;
-  var inventory = claimInventory(logFile, projectRoot,
+  var workTree = auditedWorkTree(projectRoot, parsed);
+  if (workTree.reason) {
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
+      + workTree.reason + '. That is a missing check, not an all-clear.');
+    return;
+  }
+  var inventory = claimInventory(logFile, projectRoot, workTree.path,
     declared && declared.status === 'ok' ? declared.workflowFile : '');
   if (inventory === null) return;
   if (!inventory.ok) {
@@ -5630,17 +5662,21 @@ function claimTopologyRow(projectRoot, ownKey) {
   if (inventory.roots.length === 0) return;
   var named = claimRootSafeNames(inventory.roots);
   var withheld = inventory.roots.length - named.length;
+  var gradedRoot = workTree.path ? 'the chain\'s work tree' : 'the anchor';
   line(WARN, 'topology: this session\'s audited run log claims edits under '
-    + inventory.roots.length + ' root(s) that are not the anchor'
+    + inventory.roots.length + ' root(s) that are not ' + gradedRoot
     + (named.length ? ': ' + named.join(', ') : '')
     + (withheld > 0
       ? (named.length ? ', and ' : ' (') + withheld + ' name(s) withheld: they carry characters this row cannot render'
         + (named.length ? '' : ')')
       : '')
     + '. The anchor is ' + (claimRootRenderable(projectRoot) ? claimRootRender(projectRoot) : '(unrenderable)')
+    + (workTree.path
+      ? ', and the chain\'s work tree is ' + (claimRootRenderable(workTree.path) ? claimRootRender(workTree.path) : '(unrenderable)')
+      : '')
     + '. One edit-landing audit grades ONE root, so those claims are reported rather than graded and this'
     + ' session\'s review chain sees no diff for them — /zensu:build is single-root. Run the chain in the'
-    + ' repository the claims name, or land the work in the anchor.');
+    + ' repository the claims name, or land the work in ' + gradedRoot + '.');
 }
 
 // The RUNTIME_ADOPTED provenance row, and the surface other carriers had already
@@ -6041,6 +6077,26 @@ function declaredCodeRootsRow(declared) {
   line(WARN, 'topology: the workflow document declares code roots, and they are ignored — '
     + (reason || 'the list could not be judged') + '. The chain counts and audits the anchor alone; '
     + 're-arm the chain to replace the list.');
+}
+
+function auditedWorkTree(projectRoot, parsed) {
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'workTree')) return {};
+  var value = parsed.workTree;
+  if (typeof value !== 'string' || value === '' || CONTROL_BYTE_RE.test(value)
+    || path.isAbsolute(value) || value.split(/[\\/]/).indexOf('..') !== -1) {
+    return { reason: 'the receipt names a work tree this row cannot use' };
+  }
+  try {
+    var root = fs.realpathSync.native(projectRoot);
+    var resolved = fs.realpathSync.native(path.resolve(projectRoot, value));
+    var rel = path.relative(root, resolved);
+    if (rel === '' || rel === '..' || rel.indexOf('..' + path.sep) === 0 || path.isAbsolute(rel)) {
+      return { reason: 'the receipt names a work tree outside this project root' };
+    }
+    return { path: resolved };
+  } catch (e) {
+    return { reason: 'the work tree the receipt names could not be resolved' };
+  }
 }
 
 function main() {

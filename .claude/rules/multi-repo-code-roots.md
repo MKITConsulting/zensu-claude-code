@@ -123,6 +123,14 @@ the unit-file registry entry and the `ciStructureTests` member of the driver sui
   `.zensu/state` deny but no phase classification.
 - `canon_claim` compares spellings without case folding, so on darwin a claim spelled with
   another letter case than the recorded top does not respell.
+- A glob claim spelled `@<label>/…` expands over the anchor's listing plus the union, so it
+  matches only the changed files of that root; one that matches none grades
+  `UNVERIFIED (pattern claim)`. A brace claim expands and grades each member as usual.
+- A chain that declares code roots never works in an Autopilot work tree, because the arming
+  refuses `--code-root` beside the binding flags. The audit still reads the roots beside
+  `--work-tree`, and `--tdd-complete` and the doctor row hand both to one inventory call, so a
+  hand-made document that carries both gets the anchor's exclude pathspecs applied inside the
+  work tree. `--work-tree-check` refuses `--workflow`, because it reads no workflow document.
 - Windows is unmeasured: the driver suite skips native Windows before grading.
 
 **Version: `minor`.** A strict key set (the reader's `ENTRY_KEYS`), a workflow-state field

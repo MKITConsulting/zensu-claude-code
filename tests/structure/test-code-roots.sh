@@ -231,6 +231,11 @@ printf '%s\n' "$INV_ON" | grep -qxF "foreign-root	$FOREIGN" \
   && ! printf '%s\n' "$INV_ON" | grep -qxF "foreign-root	$APP" \
   && printf '%s\n' "$INV_OFF" | grep -qxF "foreign-root	$APP"
 check "A15 the inventory stops reporting a declared root as foreign and keeps an undeclared one" "$(verdict $?)"
+WTC_OUT="$(bash "$EL_ON" --work-tree-check "$ANCHOR" --project "$ANCHOR" --workflow "$DOC" 2>&1)"; WTC_RC=$?
+WTC_CONTROL="$(bash "$EL_ON" --work-tree-check "$ANCHOR" --project "$ANCHOR" 2>&1)"; WTC_CONTROL_RC=$?
+[ "$WTC_RC" -eq 2 ] && printf '%s\n' "$WTC_OUT" | grep -qF 'does not accept --workflow' \
+  && [ "$WTC_CONTROL_RC" -eq 0 ] && [ "$WTC_CONTROL" = "anchor	$(cd "$ANCHOR" && pwd -P)" ]
+check "A15b the work-tree check refuses a --workflow it would ignore, and answers without one" "$(verdict $?)"
 
 echo "=== parity: the module and the shell recipes ==="
 PAR="$SRC/parity"
@@ -775,7 +780,7 @@ node -e '
 ' "$BH_BIG_STATE" 4194304
 B13="$(bh_run "echo x > $BH_ROOT/big.js")"
 B14="$(bh_run "echo x > $BH_PROJECT/big.js")"
-BH_MAX_HOOK="$(sed -n 's/^BSWG_FRAME_DOCUMENT_MAX=\([0-9][0-9]*\)$/\1/p' "$ROOT/hooks/pre-bash-source-write-gate.sh")"
+BH_MAX_HOOK="$(sed -n 's/^BSWG_FRAME_DOCUMENT_MAX=\([0-9][0-9]*\)$/\1/p' "$ROOT/hooks/checks/pre-bash-source-write-gate.sh")"
 BH_MAX_PARSER="$(node -e 'process.stdout.write(String(require(process.argv[1]).FRAME_DOCUMENT_MAX))' "$ROOT/hooks/lib/bash-source-write-parse.js")"
 printf '%s' "$B13" | grep -qF 'OUTSIDE this session' && [ -z "$B14" ] \
   && [ -n "$BH_MAX_HOOK" ] && [ "$BH_MAX_HOOK" = "$BH_MAX_PARSER" ]

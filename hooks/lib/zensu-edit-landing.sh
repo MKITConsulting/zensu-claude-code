@@ -70,6 +70,9 @@ CHANGE_SET=0
 LOG_SEEN=0
 WORKFLOW_DOC=""
 INV_ROOTS=""
+WORK_TREE=""
+WORK_TREE_SEEN=0
+WORK_TREE_CHECK=0
 # Per-run cap on the claims `--inventory` will classify. Each one costs an
 # ancestor walk of up to CLAIM_ANCESTOR_BUDGET filesystem probes, and the bound
 # above this child DIFFERS PER CONSUMER — state it conditionally, the way
@@ -87,6 +90,38 @@ INV_CLAIM_BUDGET=2000
 
 die() { echo "zensu-edit-landing.sh: $1" >&2; exit 2; }
 
+# Screen a filesystem root before it reaches a verdict line. Both callers below
+# are MODEL-READ channels: skills/build/references/audit.md step 5b b) instructs the model to
+# copy every non-`EDIT LANDED` line verbatim into the run log, the final report
+# and the CHAIN-END SUMMARY, and step 10.2c carries the close marker into the
+# REVIEW PACKET. The value itself is a work-tree root discovered by walking up
+# from a path a session-writable run log named, so it is attacker-influenced by
+# this file's own account of that directory.
+#
+# The screen lives in hooks/lib/zensu-safe-render.sh and is SOURCED, not copied.
+# It was two near-duplicates — this one and `_tc_render_stem` in zensu-log.sh —
+# documented as carrying the same rules while already divergent on the
+# empty-value arm, and both wrong in the same two ways. That library's header
+# carries the rules, the escape/withhold split and the locale pin; do not
+# restate them here, because a second statement of a rule is how the pair
+# drifted in the first place.
+#
+# `render_claim_value` is the local NAME, and it is value-neutral on purpose:
+# the retired `render_claim_root` described a filesystem root while the function
+# screens step ids, repo-relative paths and a work-tree root across every emit.
+_EL_SAFE_RENDER_LIB="$(dirname "$0")/zensu-safe-render.sh"
+if [ -f "$_EL_SAFE_RENDER_LIB" ] && [ ! -L "$_EL_SAFE_RENDER_LIB" ] && [ -r "$_EL_SAFE_RENDER_LIB" ]; then
+  # shellcheck source=hooks/lib/zensu-safe-render.sh
+  . "$_EL_SAFE_RENDER_LIB"
+fi
+if ! command -v zensu_safe_render >/dev/null 2>&1; then
+  # Fail CLOSED on a missing screen. Rendering raw would put an unscreened
+  # author-written value into a verdict a model relays, which is the one
+  # outcome the screen exists to prevent; a withheld value costs a name.
+  zensu_safe_render() { printf '%s' "(withheld — the render screen could not be loaded)"; }
+fi
+render_claim_value() { zensu_safe_render "$1"; }
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --log)           [ $# -ge 2 ] || die "--log requires a value"; LOG_FILE="$2"; LOG_SEEN=1; shift 2 ;;
@@ -99,11 +134,24 @@ while [ $# -gt 0 ]; do
     --inventory)     INVENTORY=1; shift ;;
     --change-set)    CHANGE_SET=1; shift ;;
     --workflow)      [ $# -ge 2 ] || die "--workflow requires a value"; WORKFLOW_DOC="$2"; [ -n "$2" ] || die "--workflow must not be empty"; shift 2 ;;
+    --work-tree)     [ $# -ge 2 ] || die "--work-tree requires a value"; WORK_TREE="$2"; WORK_TREE_SEEN=1; shift 2 ;;
+    --work-tree-check) [ $# -ge 2 ] || die "--work-tree-check requires a value"; WORK_TREE="$2"; WORK_TREE_CHECK=1; shift 2 ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
 
-if [ "$CHANGE_SET" -eq 1 ]; then
+if [ "$WORK_TREE_CHECK" -eq 1 ]; then
+  [ "$WORK_TREE_SEEN" -eq 0 ] || die "--work-tree-check checks a work tree and does not accept --work-tree"
+  [ "$INVENTORY" -eq 0 ] || die "--work-tree-check and --inventory are separate modes"
+  [ "$CHANGE_SET" -eq 0 ] || die "--work-tree-check and --change-set are separate modes"
+  [ "$LOG_SEEN" -eq 0 ] || die "--work-tree-check reads no run log and does not accept --log"
+  [ "$RECEIPT_EXPLICIT" -eq 0 ] || die "--work-tree-check is read-only and does not accept --receipt"
+  [ "$SESSION_SEEN" -eq 0 ] || die "--work-tree-check is read-only and does not accept --session"
+  [ "$BASELINE_SEEN" -eq 0 ] || die "--work-tree-check grades nothing and does not accept --baseline"
+  [ "$EPOCH_SEEN" -eq 0 ] || die "--work-tree-check grades nothing and does not accept --session-epoch"
+  [ "$DIRTY_SEEN" -eq 0 ] || die "--work-tree-check grades nothing and does not accept --dirty-before"
+  [ -z "$WORKFLOW_DOC" ] || die "--work-tree-check reads no workflow document and does not accept --workflow"
+elif [ "$CHANGE_SET" -eq 1 ]; then
   [ "$INVENTORY" -eq 0 ] || die "--change-set and --inventory are separate modes"
   [ "$LOG_SEEN" -eq 0 ] || die "--change-set reads no run log and does not accept --log"
   [ "$RECEIPT_EXPLICIT" -eq 0 ] || die "--change-set is read-only and does not accept --receipt"
@@ -133,7 +181,11 @@ fi
 # would exit 0 having written nothing, and `--tdd-complete` would then blame a
 # missing receipt. Refuse the operand instead, the way --log is refused.
 [ "$SESSION_SEEN" -eq 0 ] || [ -n "$SESSION_ID" ] || die "--session must not be empty"
-[ "$CHANGE_SET" -eq 1 ] || [ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
+if [ "$WORK_TREE_SEEN" -eq 1 ] || [ "$WORK_TREE_CHECK" -eq 1 ]; then
+  [ -n "$WORK_TREE" ] || die "the work tree must not be empty"
+  [ -d "$WORK_TREE" ] || die "work tree not found: $(render_claim_value "$WORK_TREE")"
+fi
+[ "$CHANGE_SET" -eq 1 ] || [ "$WORK_TREE_CHECK" -eq 1 ] || [ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
 [ -d "$PROJECT_DIR" ] || die "project dir not found: $PROJECT_DIR"
 
 # Resolve the project root before anything else. An unresolvable root must not
@@ -241,6 +293,67 @@ if [ "$IN_GIT" -eq 1 ]; then
 fi
 REPO_CANON="$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)" || REPO_CANON="$REPO_ROOT"
 [ -n "$REPO_CANON" ] || REPO_CANON="$REPO_ROOT"
+
+ANCHOR_ROOT="$REPO_ROOT"
+ANCHOR_CANON="$REPO_CANON"
+WORK_TREE_REL=""
+
+work_tree_common_dir() {
+  local dir
+  dir="$(_el_git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [ -n "$dir" ] || return 1
+  (cd "$dir" 2>/dev/null && pwd -P)
+}
+
+work_tree_refused() {
+  die "work tree refused — $(render_claim_value "$WORK_TREE_CANON") $1"
+}
+
+if [ "$WORK_TREE_SEEN" -eq 1 ] || [ "$WORK_TREE_CHECK" -eq 1 ]; then
+  WORK_TREE_CANON="$(cd "$WORK_TREE" 2>/dev/null && pwd -P)" || die "cannot resolve work tree: $(render_claim_value "$WORK_TREE")"
+  if [ "$WORK_TREE_CHECK" -eq 1 ] && [ -n "$GIT_FAULT" ]; then
+    die "the work tree $(render_claim_value "$WORK_TREE_CANON") could not be checked: $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the anchor $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT")"
+  fi
+  if [ "$WORK_TREE_CANON" != "$REPO_CANON" ] && [ "$WORK_TREE_CANON" != "$PROJECT_ABS" ] && [ -z "$GIT_FAULT" ]; then
+    [ "$IN_GIT" -eq 1 ] \
+      || work_tree_refused "is not the project root $(render_claim_value "$PROJECT_ABS"), which is not inside a git work tree and so has no other work tree"
+    case "$WORK_TREE_CANON" in
+      "$PROJECT_ABS"/*) ;;
+      *) work_tree_refused "does not lie below the project root $(render_claim_value "$PROJECT_ABS")" ;;
+    esac
+    case "$WORK_TREE_CANON" in
+      *[$'\t\n\r']*) work_tree_refused "has a tab or a line break in its name, which no claim and no receipt can carry" ;;
+    esac
+    WORK_TREE_TOP="$(_el_git -C "$WORK_TREE_CANON" rev-parse --show-toplevel 2>/dev/null)"
+    WORK_TREE_RC=$?
+    if [ "$WORK_TREE_RC" -ne 0 ]; then
+      git_fault "$WORK_TREE_RC" "$WORK_TREE_CANON" rev-parse --show-toplevel
+      work_tree_refused "is not inside a git work tree: $(render_claim_value "$GIT_FAULT")"
+    fi
+    if [ -n "$WORK_TREE_TOP" ]; then
+      WORK_TREE_TOP="$(cd "$WORK_TREE_TOP" 2>/dev/null && pwd -P)" || WORK_TREE_TOP=""
+    fi
+    [ "$WORK_TREE_TOP" = "$WORK_TREE_CANON" ] \
+      || work_tree_refused "is not the top of a work tree: git places it in the tree whose top is $(render_claim_value "${WORK_TREE_TOP:-a directory it could not resolve}")"
+    ANCHOR_COMMON="$(work_tree_common_dir "$REPO_ROOT")" || ANCHOR_COMMON=""
+    WORK_TREE_COMMON="$(work_tree_common_dir "$WORK_TREE_CANON")" || WORK_TREE_COMMON=""
+    { [ -n "$ANCHOR_COMMON" ] && [ -n "$WORK_TREE_COMMON" ]; } \
+      || work_tree_refused "could not be compared with the anchor, because git named no common directory for one of the two trees"
+    [ "$WORK_TREE_COMMON" = "$ANCHOR_COMMON" ] \
+      || work_tree_refused "belongs to another repository: its git common directory $(render_claim_value "$WORK_TREE_COMMON") is not the anchor's $(render_claim_value "$ANCHOR_COMMON"), as for a clone or a submodule"
+    REPO_ROOT="$WORK_TREE_CANON"
+    REPO_CANON="$WORK_TREE_CANON"
+    WORK_TREE_REL="${WORK_TREE_CANON#"$PROJECT_ABS"/}"
+  fi
+  if [ "$WORK_TREE_CHECK" -eq 1 ]; then
+    if [ -n "$WORK_TREE_REL" ]; then
+      printf 'work-tree\t%s\n' "$REPO_CANON"
+    else
+      printf 'anchor\t%s\n' "$REPO_CANON"
+    fi
+    exit 0
+  fi
+fi
 
 code_root_field() {
   local wanted="$1" field="$2" label root_path root_top
@@ -428,7 +541,7 @@ fi
 # Anchored with -C so the current working directory cannot narrow it: `ls-files`
 # is cwd-scoped and would silently drop everything outside a subdirectory.
 UNION_FILE="$(mktemp)" || die "mktemp failed"
-cleanup() { rm -f "${UNION_FILE:-}" "${CLAIMS_FILE:-}" "${tmp_receipt:-}" "${INV_ROOTS:-}" 2>/dev/null; return 0; }
+cleanup() { rm -f "${UNION_FILE:-}" "${CLAIMS_FILE:-}" "${LISTING_FILE:-}" "${tmp_receipt:-}" "${INV_ROOTS:-}" 2>/dev/null; return 0; }
 # A bash trap handler that RETURNS resumes the script, so `trap cleanup ... TERM`
 # made the caller's deadline unenforceable: `spawnSync`'s default killSignal is
 # SIGTERM, and the doctor bounds this child at 5 s. Worse, `cleanup` unlinks
@@ -513,38 +626,6 @@ trim_claim() {
   p="${p%"${p##*[![:space:]]}"}"
   printf '%s' "$p"
 }
-
-# Screen a filesystem root before it reaches a verdict line. Both callers below
-# are MODEL-READ channels: skills/build/references/audit.md step 5b b) instructs the model to
-# copy every non-`EDIT LANDED` line verbatim into the run log, the final report
-# and the CHAIN-END SUMMARY, and step 10.2c carries the close marker into the
-# REVIEW PACKET. The value itself is a work-tree root discovered by walking up
-# from a path a session-writable run log named, so it is attacker-influenced by
-# this file's own account of that directory.
-#
-# The screen lives in hooks/lib/zensu-safe-render.sh and is SOURCED, not copied.
-# It was two near-duplicates — this one and `_tc_render_stem` in zensu-log.sh —
-# documented as carrying the same rules while already divergent on the
-# empty-value arm, and both wrong in the same two ways. That library's header
-# carries the rules, the escape/withhold split and the locale pin; do not
-# restate them here, because a second statement of a rule is how the pair
-# drifted in the first place.
-#
-# `render_claim_value` is the local NAME, and it is value-neutral on purpose:
-# the retired `render_claim_root` described a filesystem root while the function
-# screens step ids, repo-relative paths and a work-tree root across every emit.
-_EL_SAFE_RENDER_LIB="$(dirname "$0")/zensu-safe-render.sh"
-if [ -f "$_EL_SAFE_RENDER_LIB" ] && [ ! -L "$_EL_SAFE_RENDER_LIB" ] && [ -r "$_EL_SAFE_RENDER_LIB" ]; then
-  # shellcheck source=hooks/lib/zensu-safe-render.sh
-  . "$_EL_SAFE_RENDER_LIB"
-fi
-if ! command -v zensu_safe_render >/dev/null 2>&1; then
-  # Fail CLOSED on a missing screen. Rendering raw would put an unscreened
-  # author-written value into a verdict a model relays, which is the one
-  # outcome the screen exists to prevent; a withheld value costs a name.
-  zensu_safe_render() { printf '%s' "(withheld — the render screen could not be loaded)"; }
-fi
-render_claim_value() { zensu_safe_render "$1"; }
 
 if [ "$CHANGE_SET" -eq 1 ]; then
   if [ -n "$GIT_FAULT" ]; then
@@ -786,7 +867,7 @@ unredact_claim() {
 }
 
 relative_claim_may_nest() {
-  local dir="$REPO_CANON" rest="$1" seg
+  local dir="$1" rest="$2" seg
   while :; do
     case "$rest" in
       */*) ;;
@@ -804,27 +885,32 @@ relative_claim_may_nest() {
 }
 
 place_relative_claim() {
-  local p="$1" verdict
+  local p="$1" verdict base="$REPO_CANON"
   PLACED_CLAIM="$p"
   PLACED_VERDICT=""
   case "$p" in
     /*) return 0 ;;
   esac
-  relative_claim_may_nest "$p" || return 0
-  verdict="$(absolute_claim_verdict "$REPO_CANON/$p")"
+  if ! relative_claim_may_nest "$REPO_CANON" "$p"; then
+    [ -n "$WORK_TREE_REL" ] || return 0
+    { [ ! -e "$REPO_CANON/$p" ] && [ ! -L "$REPO_CANON/$p" ]; } || return 0
+    relative_claim_may_nest "$ANCHOR_CANON" "$p" || return 0
+    base="$ANCHOR_CANON"
+  fi
+  verdict="$(absolute_claim_verdict "$base/$p")"
   case "${verdict%%$'\t'*}:${verdict#*$'\t'}" in
-    in-root:*|unrooted:*) return 0 ;;
-    foreign:"$REPO_CANON"/*|undetermined:"$REPO_CANON"/*) ;;
-    foreign:*|undetermined:*) return 0 ;;
+    in-root:*|unrooted:*) [ "$base" != "$REPO_CANON" ] || return 0 ;;
+    foreign:"$base"/*|undetermined:"$base"/*) ;;
+    foreign:*|undetermined:*) [ "$base" != "$REPO_CANON" ] || return 0 ;;
   esac
-  PLACED_CLAIM="$REPO_CANON/$p"
+  PLACED_CLAIM="$base/$p"
   PLACED_VERDICT="$verdict"
 }
 
 # Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
 # nothing when it cannot be resolved unambiguously.
 normalize_claim() {
-  local raw="$1" p verdict kind respelled
+  local raw="$1" p verdict kind respelled placed=0
   p="$(trim_claim "$raw")"
   [ -n "$p" ] || return 1
   if [ "$CR_COUNT" -gt 0 ]; then
@@ -887,6 +973,7 @@ normalize_claim() {
           ;;
         in-root)
           p="${verdict#*$'\t'}"
+          placed=1
           ;;
         *)
           return 1
@@ -900,8 +987,8 @@ normalize_claim() {
     printf '%s' "$p"; return 0
   fi
   # A bare basename resolves only when exactly one union entry ends in it.
-  case "$p" in
-    */*) printf '%s' "$p"; return 0 ;;
+  case "$placed:$p" in
+    1:*|*/*) printf '%s' "$p"; return 0 ;;
   esac
   local matches count
   matches="$(grep -E "(^|/)$(printf '%s' "$p" | sed 's/[][\.*^$+?(){}|/]/\\&/g')$" "$UNION_FILE" 2>/dev/null)"
@@ -987,110 +1074,159 @@ grade_claim() {
   emit "EDIT NOT LANDED — $(render_claim_value "${step}"): claimed $(render_claim_value "${resolved}"), git shows no change"
 }
 
-CLAIM_LABEL_TOKEN_BUDGET=5
+CLAIMS_LIB="$(dirname "$0")/edit-landing-claims-v1.js"
+CLAIM_FAULT=""
+LISTING_FILE=""
 
-claim_label() {
-  local rest="$1" tok count=0
-  CLAIM_LABEL=""
-  case "$rest" in
-    *[\'\"\|]*) return 1 ;;
-  esac
-  while :; do
-    rest="${rest#"${rest%%[![:space:]]*}"}"
-    [ -n "$rest" ] || return 0
-    [ "$count" -lt "$CLAIM_LABEL_TOKEN_BUDGET" ] || return 1
-    tok="${rest%%[[:space:]]*}"
-    rest="${rest#"$tok"}"
-    CLAIM_LABEL="${CLAIM_LABEL:+$CLAIM_LABEL }$tok"
-    count=$((count + 1))
-  done
+claim_rows() {
+  node "$CLAIMS_LIB" rows --log "$LOG_FILE" --root "$REPO_ROOT" --project "$PROJECT_ABS" "$@" > "$CLAIMS_FILE" 2>/dev/null
 }
 
-# Read the log. A claim opens with a short step label directly followed by its marker.
-LOG_LINE_NO=0
-while IFS= read -r line || [ -n "$line" ]; do
-  LOG_LINE_NO=$((LOG_LINE_NO + 1))
-  entry="${line#"${line%%[![:space:]]*}"}"
-  case "$entry" in
-    \[*\]*) entry="${entry#*\]}"; entry="${entry#"${entry%%[![:space:]]*}"}" ;;
-  esac
-  case "$entry" in
-    'EDIT LANDED '*|'EDIT NOT LANDED '*|'EDIT LANDING AUDIT '*|'PENDING PREDICATE '*|'UNVERIFIED '*|'RECEIPT REFUSED '*) continue ;;
-  esac
-  marker=""
-  claim_lead=""
-  for candidate in "IMPL completed — files:" "IMPL completed – files:" "IMPL completed - files:" \
-                   "WIRED — files:" "WIRED – files:" "WIRED - files:" "WIRED (verified, no change)"; do
-    case "$entry" in
-      *"$candidate"*)
-        lead="${entry%%"$candidate"*}"
-        if [ -z "$marker" ] || [ "${#lead}" -lt "${#claim_lead}" ]; then
-          marker="$candidate"
-          claim_lead="$lead"
-        fi
-        ;;
+if ! command -v node >/dev/null 2>&1; then
+  CLAIM_FAULT="could not run because node is unavailable"
+elif [ ! -f "$CLAIMS_LIB" ] || [ -L "$CLAIMS_LIB" ] || [ ! -r "$CLAIMS_LIB" ]; then
+  CLAIM_FAULT="could not run because edit-landing-claims-v1.js is missing beside this library"
+elif [ "$INVENTORY" -eq 1 ] || [ "$IN_GIT" -ne 1 ] || [ -n "$GIT_FAULT" ]; then
+  claim_rows || CLAIM_FAULT="could not read the run log"
+elif ! claim_rows --changed "$UNION_FILE" --on-demand; then
+  CLAIM_FAULT="could not read the run log"
+elif [ "$(head -n 1 "$CLAIMS_FILE" 2>/dev/null)" = "N" ]; then
+  LISTING_FILE="$(mktemp)" || die "mktemp failed"
+  _el_git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard -- > "$LISTING_FILE" 2>/dev/null
+  LISTING_RC=$?
+  if [ "$LISTING_RC" -ne 0 ]; then
+    git_fault "$LISTING_RC" "$REPO_ROOT" ls-files --cached --others --exclude-standard --
+  else
+    claim_rows --changed "$UNION_FILE" --paths "$LISTING_FILE" || CLAIM_FAULT="could not read the run log"
+  fi
+fi
+if [ -z "$CLAIM_FAULT" ] && [ -f "$CLAIMS_FILE" ] \
+   && ! awk -F'\t' '$1 !~ /^[GMPTWVRI]$/ { bad = 1 } END { exit bad }' "$CLAIMS_FILE"; then
+  CLAIM_FAULT="returned a row kind this library does not grade"
+fi
+
+render_list() {
+  local rest="$1" item out=""
+  while [ -n "$rest" ]; do
+    item="${rest%%$'\t'*}"
+    out="${out:+$out, }$(render_claim_value "$item")"
+    case "$rest" in
+      *$'\t'*) rest="${rest#*$'\t'}" ;;
+      *) rest="" ;;
     esac
   done
-  if [ -n "$marker" ] && claim_label "$claim_lead"; then
-    step="${CLAIM_LABEL:-(none)}"
-  else
-    step="${entry%%[[:space:]]*}"
-    marker="${entry#"$step"}"
-    marker="${marker#"${marker%%[![:space:]]*}"}"
-    case "$marker" in
-      WIRED*) marker="WIRED" ;;
-      *) continue ;;
+  printf '%s' "$out"
+}
+
+glob_literal_prefix() {
+  local rest="$1" seg out="" lead=""
+  case "$rest" in
+    /*) lead="/"; rest="${rest#/}" ;;
+  esac
+  while [ -n "$rest" ]; do
+    seg="${rest%%/*}"
+    case "$seg" in
+      *[*?]*) break ;;
+    esac
+    out="${out:+$out/}$seg"
+    case "$rest" in
+      */*) rest="${rest#*/}" ;;
+      *) rest="" ;;
+    esac
+  done
+  [ -n "$out" ] && printf '%s%s' "$lead" "$out"
+  return 0
+}
+
+grade_malformed() {
+  local line="$1" step="$2" class="$3" rest="$4" value complete="0" cands shown head form lbl pat root prefix
+  case "$rest" in
+    *$'\t'*) value="${rest%%$'\t'*}"; rest="${rest#*$'\t'}" ;;
+    *) value="$rest"; rest="" ;;
+  esac
+  if [ -n "$rest" ]; then
+    case "$rest" in
+      *$'\t'*) complete="${rest%%$'\t'*}"; rest="${rest#*$'\t'}" ;;
+      *) complete="$rest"; rest="" ;;
     esac
   fi
-  case "$marker" in
-    "WIRED (verified, no change)")
-      # Contract: a step that verified an existing wiring instead of changing
-      # one. Exempt, and counted so the receipt shows it was used.
-      EXEMPT_VERIFIED=$((EXEMPT_VERIFIED + 1))
-      continue
+  CLAIM_COUNT=$((CLAIM_COUNT + 1))
+  UNVERIFIED=$((UNVERIFIED + 1))
+  shown="$(render_claim_value "$step")"
+  lbl="$shown"
+  [ "$shown" = "$step" ] || lbl="<the label of run-log line ${line}, copied exactly>"
+  pat="$(render_claim_value "$value")"
+  [ "$pat" = "$value" ] || pat="<the entry as run-log line ${line} spells it>"
+  head="the files: entry \"$(render_claim_value "$value")\" on run-log line ${line}"
+  form="CLAIM CORRECTED — ${lbl} (line ${line}): <path>, … | not claimed: <entry>, …"
+  case "$class" in
+    prose)
+      cands="$(render_list "$rest")"
+      if [ "$complete" = "1" ] && [ -n "$cands" ] && [ "$lbl" = "$step" ] && [ "$cands" = "${rest//$'\t'/, }" ]; then
+        emit "UNVERIFIED (malformed claim) — ${shown}: ${head} is not one path per comma-separated item. To grade the paths it names, append: CLAIM CORRECTED — ${shown} (line ${line}): ${cands}"
+      elif [ -n "$cands" ]; then
+        emit "UNVERIFIED (malformed claim) — ${shown}: ${head} is not one path per comma-separated item. Append a correction that accounts for every path it names (${cands}), each spelled exactly as run-log line ${line} spells it, and for every part that claims no file, in the form ${form}"
+      else
+        emit "UNVERIFIED (malformed claim) — ${shown}: ${head} names no path. Append a correction in the form ${form}: a listed path must be named by the entry, and a part that claims no file goes under not claimed:"
+      fi
       ;;
-    WIRED)
-      [ "$INVENTORY" -eq 1 ] && continue
-      [ -z "$GIT_FAULT" ] || continue
-      UNVERIFIED=$((UNVERIFIED + 1))
-      CLAIM_COUNT=$((CLAIM_COUNT + 1))
-      # The LINE NUMBER, never the line. This value is wholly author-written and
-      # shares a NAMESPACE with this file's own verdict vocabulary, so no
-      # character screen closes it: a log line reading
-      # `[ts] T05 WIRED EDIT LANDED — T01: src/x.ts` is a well-formed bare
-      # claim and used to render a forged `EDIT LANDED` inside a
-      # diagnostic that skills/build/references/audit.md step 5b b) tells the model to copy
-      # verbatim into the run log, the report and the CHAIN-END SUMMARY — and a
-      # spelling with no colon carries no forbidden character under any screen.
-      # Screening characters was the wrong instrument for the wrong value. The
-      # number identifies the entry precisely and carries zero author bytes.
-      # The step id is kept and SCREENED. It is the one token in the line that
-      # is bounded by the step-id split above, and dropping it would cost
-      # the reader the only thing that says WHICH step is unverifiable — the
-      # line number says where, the step id says what.
-      emit "UNVERIFIED — a WIRED entry at run-log line ${LOG_LINE_NO} (step $(render_claim_value "${step}")) names no files: list and cannot be graded"
-      continue
+    pattern)
+      emit "UNVERIFIED (pattern claim) — ${shown}: ${head} is a brace pattern this audit cannot expand. Log the files it stands for on a new claim line and account for this entry in a correction in the form ${form}"
       ;;
-    *" files:")
-      files="${entry#*"$marker"}"
+    glob-none)
+      root=""
+      prefix="$(glob_literal_prefix "$value")"
+      if [ -n "$prefix" ]; then
+        root="$(normalize_claim "$prefix")"
+        [ "$?" -eq 3 ] || root=""
+      fi
+      if [ -n "$root" ]; then
+        emit "UNVERIFIED (foreign root) — ${shown}: ${head} is a pattern outside the audited root $(render_claim_value "$REPO_ROOT") — it belongs to $(render_claim_value "$root"). One audit run grades ONE root, so it cannot expand the pattern; account for it under not claimed: CLAIM CORRECTED — ${lbl} (line ${line}): | not claimed: ${pat}"
+      else
+        emit "UNVERIFIED (pattern claim) — ${shown}: ${head} matches no tracked, untracked or changed file. Append a correction that lists the files it meant, each matching the pattern: CLAIM CORRECTED — ${lbl} (line ${line}): <path>, …"
+      fi
       ;;
-    *) continue ;;
+    glob-over)
+      emit "UNVERIFIED (pattern claim) — ${shown}: ${head} matches too many files to grade one by one. Append a correction that lists the files the step changed and names the pattern under not claimed: CLAIM CORRECTED — ${lbl} (line ${line}): <path>, … | not claimed: ${pat}"
+      ;;
+    *)
+      emit "UNVERIFIED (pattern claim) — ${shown}: ${head} is a glob, and outside a git work tree there is no file listing to expand it against"
+      ;;
   esac
-  # Commentary after ' | ' is not part of the file list.
-  files="${files%%|*}"
-  printf '%s\n' "$files" | tr ',' '\n' | while IFS= read -r one; do
-    printf '%s\t%s\n' "$step" "$one"
-  done >> "$CLAIMS_FILE" || die "a claim could not be recorded"
-done < "$LOG_FILE"
+}
+
+ignored_reason() {
+  case "$1" in
+    malformed-line) printf '%s' "it does not read CLAIM CORRECTED — <label> (line <N>): <path>, … [| not claimed: <entry>, …]" ;;
+    target-not-earlier) printf '%s' "the line it names is not an earlier line of this run log" ;;
+    target-not-a-claim) printf '%s' "the line it names holds no files: claim" ;;
+    label-mismatch) printf '%s' "its label is not the label of the claim on the line it names" ;;
+    nothing-to-correct) printf '%s' "the claim it names holds only paths, which are graded as written" ;;
+    malformed-entry) printf '%s' "an entry it lists is not one path" ;;
+    not-a-candidate) printf '%s' "it names an entry the corrected claim does not name" ;;
+    duplicate-entry) printf '%s' "it names one entry twice" ;;
+    incomplete) printf '%s' "it leaves a path the corrected claim names unaccounted for" ;;
+    superseded) printf '%s' "a later correction of the same line replaces it" ;;
+    *) printf '%s' "it could not be checked" ;;
+  esac
+}
 
 if [ "$INVENTORY" -eq 1 ]; then
+  if [ -n "$CLAIM_FAULT" ]; then
+    echo "zensu-edit-landing.sh: --inventory did not complete — the claim reader ${CLAIM_FAULT}. The claimed-file count is unknown; treat this as 'did not complete', never as 'no claims'." >&2
+    exit 2
+  fi
   INV_CLAIMS=0
   INV_FAULT=""
   [ -z "$GIT_FAULT" ] \
     || INV_FAULT="$(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT") ($(render_claim_value "$GIT_FAULT")), so the anchor every absolute claim is placed against is unknown"
   INV_ROOTS="$(mktemp)" || die "mktemp failed"
   INV_COUNT=0
-  while IFS="$(printf '\t')" read -r step raw; do
+  while IFS="$(printf '\t')" read -r kind _ _ raw _; do
+    case "$kind" in
+      G|M|P) ;;
+      *) continue ;;
+    esac
     [ -n "${raw// /}" ] || continue
     [ "$INV_COUNT" -lt "$INV_CLAIM_BUDGET" ] || break
     INV_COUNT=$((INV_COUNT + 1))
@@ -1099,7 +1235,13 @@ if [ "$INVENTORY" -eq 1 ]; then
   if [ "$IN_GIT" -eq 0 ] && [ -z "$GIT_FAULT" ] && command -v git >/dev/null 2>&1; then
     printf 'anchor\tfolder\n'
   fi
-  while IFS="$(printf '\t')" read -r step raw; do
+  while IFS="$(printf '\t')" read -r kind _ step raw rest; do
+    case "$kind:$raw" in
+      G:*) ;;
+      P:*) raw="$(glob_literal_prefix "$raw")" ;;
+      M:glob-none) raw="$(glob_literal_prefix "${rest%%$'\t'*}")" ;;
+      *) continue ;;
+    esac
     [ -n "${raw// /}" ] || continue
     if [ "$INV_CLAIMS" -ge "$INV_CLAIM_BUDGET" ]; then
       # FIRST fault wins, at every site. These are set inside a loop and no arm
@@ -1197,11 +1339,27 @@ if [ "$INVENTORY" -eq 1 ]; then
   exit 0
 fi
 
-# The pipeline above runs in a subshell, so grade in the parent to keep counters.
-if [ -z "$GIT_FAULT" ]; then
-  while IFS="$(printf '\t')" read -r step raw; do
-    [ -n "${raw// /}" ] || continue
-    grade_claim "$step" "$raw"
+if [ -z "$GIT_FAULT" ] && [ -z "$CLAIM_FAULT" ]; then
+  [ -z "$WORK_TREE_REL" ] \
+    || emit "EDIT LANDING AUDIT ROOT — graded the chain's work tree $(render_claim_value "$REPO_ROOT"), not the anchor $(render_claim_value "$ANCHOR_ROOT"): a relative claim is read against the work tree"
+  while IFS="$(printf '\t')" read -r kind line step raw rest; do
+    case "$kind" in
+      G)
+        [ -n "${raw// /}" ] || continue
+        grade_claim "$step" "$raw"
+        ;;
+      M) grade_malformed "$line" "$step" "$raw" "$rest" ;;
+      P) grade_malformed "$line" "$step" "unlisted" "$raw" ;;
+      W)
+        UNVERIFIED=$((UNVERIFIED + 1))
+        CLAIM_COUNT=$((CLAIM_COUNT + 1))
+        emit "UNVERIFIED — a WIRED entry at run-log line ${line} (step $(render_claim_value "${step}")) names no files: list and cannot be graded"
+        ;;
+      V) EXEMPT_VERIFIED=$((EXEMPT_VERIFIED + 1)) ;;
+      T) ;;
+      R) emit "CLAIM RETRACTED — $(render_claim_value "${step}") (line ${raw}, correction line ${line}): $(render_claim_value "${rest}")" ;;
+      I) emit "CLAIM CORRECTION IGNORED — line ${line}: $(ignored_reason "${step}")" ;;
+    esac
   done < "$CLAIMS_FILE"
 fi
 
@@ -1209,14 +1367,14 @@ CLEAN=1
 [ "$NOT_LANDED" -gt 0 ] && CLEAN=0
 [ "$UNVERIFIED" -gt 0 ] && CLEAN=0
 [ "$PENDING" -gt 0 ] && CLEAN=0
-if [ -n "$GIT_FAULT" ]; then
+if [ -n "$GIT_FAULT" ] || [ -n "$CLAIM_FAULT" ]; then
   CLEAN=0
 elif [ "$CLAIM_COUNT" -eq 0 ]; then
   CLEAN=0
   emit "UNVERIFIED (no claims logged) — the run log holds no IMPL/WIRED files: entry, so nothing could be audited"
 fi
 
-[ -n "$GIT_FAULT" ] \
+[ -n "$GIT_FAULT" ] || [ -n "$CLAIM_FAULT" ] \
   || emit "EDIT LANDING AUDIT — claims=${CLAIM_COUNT} landed=${LANDED} not_landed=${NOT_LANDED} unverified=${UNVERIFIED} pending=${PENDING} exempt_ignored=${EXEMPT_IGNORED} exempt_verified=${EXEMPT_VERIFIED}"
 
 # ── Receipt ──────────────────────────────────────────────────────────────────
@@ -1297,7 +1455,7 @@ else
       RECEIPT_PATH=""; RECEIPT_FAILED=1
       ;;
   esac
-  if [ -n "$RECEIPT_PATH" ] && [ -n "$GIT_FAULT" ]; then
+  if [ -n "$RECEIPT_PATH" ] && { [ -n "$GIT_FAULT" ] || [ -n "$CLAIM_FAULT" ]; }; then
     if [ -e "$RECEIPT_PATH" ] || [ -L "$RECEIPT_PATH" ]; then
       rm -f "$RECEIPT_PATH" 2>/dev/null
       if [ -e "$RECEIPT_PATH" ] || [ -L "$RECEIPT_PATH" ]; then
@@ -1352,7 +1510,7 @@ else
         "$PROJECT_ABS"/*) LOG_ABS="${LOG_ABS#"$PROJECT_ABS"/}" ;;
       esac
       if command -v node >/dev/null 2>&1; then
-        ZEL_SESSION="$SESSION_ID" ZEL_LOG="$LOG_ABS" ZEL_CLAIMS="$CLAIM_COUNT" \
+        ZEL_SESSION="$SESSION_ID" ZEL_LOG="$LOG_ABS" ZEL_WORK_TREE="$WORK_TREE_REL" ZEL_CLAIMS="$CLAIM_COUNT" \
         ZEL_LANDED="$LANDED" ZEL_NOT="$NOT_LANDED" ZEL_UNVERIFIED="$UNVERIFIED" \
         ZEL_PENDING="$PENDING" ZEL_EXI="$EXEMPT_IGNORED" ZEL_EXV="$EXEMPT_VERIFIED" \
         ZEL_CLEAN="$([ "$CLEAN" -eq 1 ] && echo true || echo false)" \
@@ -1376,6 +1534,7 @@ else
             schema: "edit-landing-v2",
             session: e.ZEL_SESSION,
             log: e.ZEL_LOG,
+            ...(e.ZEL_WORK_TREE ? { workTree: e.ZEL_WORK_TREE } : {}),
             claims: Number(e.ZEL_CLAIMS),
             landed: Number(e.ZEL_LANDED),
             notLanded: Number(e.ZEL_NOT),
@@ -1404,6 +1563,12 @@ if [ -n "$GIT_FAULT" ]; then
   RETIRED_CLAUSE=""
   [ -z "$RECEIPT_RETIRED" ] || RETIRED_CLAUSE="; the earlier receipt at $(render_claim_value "$RECEIPT_RETIRED") was removed"
   emit "EDIT LANDING AUDIT FAULT — $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT"). This is a git fault, not a verdict about any claim: no claim was graded and no receipt was written${RETIRED_CLAUSE}. Resolve the git error, then re-run the audit."
+  exit 2
+fi
+if [ -n "$CLAIM_FAULT" ]; then
+  RETIRED_CLAUSE=""
+  [ -z "$RECEIPT_RETIRED" ] || RETIRED_CLAUSE="; the earlier receipt at $(render_claim_value "$RECEIPT_RETIRED") was removed"
+  emit "EDIT LANDING AUDIT FAULT — the claim reader ${CLAIM_FAULT}. This is not a verdict about any claim: no claim was graded and no receipt was written${RETIRED_CLAUSE}. Make node and edit-landing-claims-v1.js available beside this library, then re-run the audit."
   exit 2
 fi
 

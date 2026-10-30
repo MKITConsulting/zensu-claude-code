@@ -57,12 +57,17 @@ plugin never deletes it automatically.
 
 ## Platform Support
 
-Every hook is registered as `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh"` and
-runs a bash script that also calls standard POSIX tools such as `sed` and `awk`.
-Keep `node` on the `PATH` of the environment that starts Claude Code, on every
-platform: without it, the capability gate that runs before every tool call
-refuses each call with `zensu: reviewer capability gate unavailable`, and many
-other hooks skip their checks.
+Every hook but one is registered as `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh"`
+and runs a bash script that also calls standard POSIX tools such as `sed` and
+`awk`. The exception is the hook dispatcher, which runs nine checks around every
+tool call in one process: it is registered in exec form, `"command": "node"` with
+the module path as its first argument, so Claude Code starts `node` directly,
+without a shell. When a check needs its bash body, the dispatcher starts it with
+Git Bash on Windows, found the way Claude Code finds it. Keep `node` on the
+`PATH` of the environment that starts Claude Code, on every platform: without it,
+Claude Code cannot start the dispatcher, and because its `PreToolUse`
+registration sets `"onFailure": "block"`, every tool call is refused with Claude
+Code's own error about the failed start; many other hooks skip their checks.
 
 | Platform | Status |
 |----------|--------|
@@ -118,7 +123,7 @@ week. No CI job starts Claude Code itself, none runs on macOS, and none uses WSL
 | `zensu` CLI not found, or older than 0.10.0 | Install zensu-cli 0.10.0 or later with `brew install --cask mkitconsulting/tap/zensu` (upgrade: `brew upgrade --cask zensu`), `curl -fsSL https://zensu.dev/install.sh \| sh`, or on Windows `irm https://zensu.dev/install.ps1 \| iex`, and ensure it is on `PATH` — the session banner and `/zensu:doctor` warn when it is missing or older |
 | Backend unreachable / `zensu` command errors | Verify network connectivity to `https://api.zensu.dev` (or your self-hosted `ZENSU_API_URL` — see [Self-hosting](../README.md#self-hosting)), and that `zensu auth status` shows a logged-in session |
 | Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and re-run `echo "$ZENSU_API_KEY" \| zensu auth login --with-token -` — see [API Key (CI/CD)](../README.md#api-key-cicd) |
-| Hook errors on Windows, or a Zensu gate that does not fire there | Run Claude Code inside WSL, or install Git for Windows so that Claude Code runs the hooks through Git Bash; if it cannot find Git Bash, set `CLAUDE_CODE_GIT_BASH_PATH`. When a Zensu gate refuses a PowerShell command, run it through the Bash tool, or set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` to keep Claude on the Bash tool. Make sure your shell profile prints nothing: Git Bash sources it for hook commands too, and output ahead of a hook's JSON makes Claude Code ignore that JSON decision. If every tool call is refused with `zensu: reviewer capability gate unavailable`, check that `node` is on the `PATH` of the environment that starts Claude Code. See [Platform Support](#platform-support). |
+| Hook errors on Windows, or a Zensu gate that does not fire there | Run Claude Code inside WSL, or install Git for Windows so that Claude Code runs the hooks through Git Bash; if it cannot find Git Bash, set `CLAUDE_CODE_GIT_BASH_PATH`. When a Zensu gate refuses a PowerShell command, run it through the Bash tool, or set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` to keep Claude on the Bash tool. Make sure your shell profile prints nothing: Git Bash sources it for hook commands too, and output ahead of a hook's JSON makes Claude Code ignore that JSON decision. If every tool call is refused because Claude Code cannot start `node`, or with `zensu: reviewer capability gate unavailable`, check that `node` is on the `PATH` of the environment that starts Claude Code. See [Platform Support](#platform-support). |
 | Planning agent cannot mutate Zensu state | Expected: `zensu:zensu-plm` receives neutral `host-profile-v1` context but its agent definition exposes only `Read`/`Grep`/`Glob`, and the enforcement gate adds nothing beyond them except the host's `SubagentHandback` report tool and the workflow result tool `StructuredOutput`. Return to the top-level interactive thread and invoke the matching `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, or `/zensu:security-review` skill there. If even the interactive thread is neutral, run `/zensu:doctor` and compare the installed Claude Code version with the pinned supported version; a host/runtime mismatch requires updating or restoring the supported host, then starting a fresh session. |
 | OAuth login not opening | Check your default browser settings |
 | Review chain will not advance (`--review-ticket` refuses, `--current-review-ticket` reports nothing, `/zensu:reset-review-limit` not applicable) | Run `zensu-log.sh --chain-status` (or `/zensu:doctor`) to read the chain shape and its supported next command. Only a receipt that disagrees with its own workflow document is a true wedge; `/zensu:recover-chain`, from the session that owns the chain, repairs exactly that and nothing else. Never arm a fresh chain to work around a lock or commit failure — those report their own message and leave the budget intact. |

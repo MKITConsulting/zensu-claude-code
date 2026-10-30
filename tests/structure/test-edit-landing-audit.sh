@@ -17,6 +17,8 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
 SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh"
+CLAIMS_UNIT="$PLUGIN_DIR/tests/structure/edit-landing-claims-v1.test.js"
+source "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 T_PASS=0; T_FAIL=0
 check() {
@@ -31,6 +33,8 @@ cleanup() { [ -n "${WORK:-}" ] && rm -rf "$WORK"; return 0; }
 trap cleanup EXIT INT TERM
 WORK="$(mktemp -d)" || exit 1
 [ -n "$WORK" ] && [ -d "$WORK" ] || exit 1
+CLAIMS_MODULE="$PLUGIN_DIR/hooks/lib/edit-landing-claims-v1.js"
+cp "$CLAIMS_MODULE" "$WORK/" || exit 1
 
 audit_block() {
   awk '/^5b\. \*\*Edit Landing Audit\*\*/{inb=1; print; next}
@@ -70,6 +74,7 @@ check "L2 a missing run log is a usage error (exit 2), not a silent pass" "$(ver
 run_audit --bogus >/dev/null 2>&1
 [ $? -eq 2 ]
 check "L3 an unknown argument is rejected" "$(verdict $?)"
+unit_check "L4 the claim-grammar unit file passes" "$CLAIMS_UNIT"
 
 echo "== Grading against a hermetic git fixture =="
 R="$WORK/repo"
@@ -352,6 +357,7 @@ echo "== Multi-root: a claim outside the audited root is named, never silently g
 # which names neither the topology nor the repository the work actually landed in.
 MR="$WORK/multiroot"
 mkdir -p "$MR"
+cp "$CLAIMS_MODULE" "$MR/" || exit 1
 new_repo "$MR/anchor"
 printf 'v1\n' > "$MR/anchor/src.txt"
 G "$MR/anchor" add -A >/dev/null 2>&1; G "$MR/anchor" commit -qm base >/dev/null 2>&1
@@ -781,7 +787,9 @@ check "S3 the audit declares it runs in both modes" "$(verdict $?)"
 # reaction — which is how `(no work tree)` reached zero occurrences under skills/
 # and docs/ while `(foreign root)` had one.
 for marker in 'EDIT NOT LANDED' 'PENDING PREDICATE' 'UNVERIFIED' \
-              'UNVERIFIED (foreign root)' 'UNVERIFIED (no work tree)' 'EDIT LANDING AUDIT FAULT'; do
+              'UNVERIFIED (foreign root)' 'UNVERIFIED (no work tree)' 'EDIT LANDING AUDIT FAULT' \
+              'UNVERIFIED (pattern claim)' 'UNVERIFIED (malformed claim)' 'CLAIM CORRECTED —' \
+              'CLAIM RETRACTED —' 'CLAIM CORRECTION IGNORED —' 'EDIT LANDING AUDIT ROOT —'; do
   printf '%s' "$BLOCK" | grep -qF "$marker"
   check "S4 the skill tells the model how to react to $marker" "$(verdict $?)"
 done
@@ -805,8 +813,10 @@ printf '%s' "$BLOCK" | grep -qF -- '--project "{project_root}"'
 check "S12 the audit anchors --project on the bound project root, never the working directory" "$(verdict $?)"
 
 echo "== Skill: surrounding contract intact =="
-grep -qF 'BASELINE_SHA=$(git -C "{project_root}" rev-parse --verify --quiet HEAD)' "$SKILL_TDD"
-check "P1 Phase 0 still captures the baseline SHA the library consumes, from the bound project root" "$(verdict $?)"
+grep -qF 'BASELINE_SHA=$(git -C "{work_tree}" rev-parse --verify --quiet HEAD)' "$SKILL_TDD"
+check "P1 Phase 0 still captures the baseline SHA the library consumes, from the chain's work tree" "$(verdict $?)"
+printf '%s' "$BLOCK" | grep -qF -- '--project "{project_root}" --work-tree "{work_tree}"'
+check "P1a step 5b grades the chain's work tree and keeps the receipt under the bound project root" "$(verdict $?)"
 grep -F 'On routed findings' "$SKILL_TDD" | grep -qF 'Edit Landing Audit'
 check "P2 every review-fix round re-runs the audit over that round's claims" "$(verdict $?)"
 grep -qF 'Mechanical or bulk replacement — confirm by RE-READING the result, never by the test run.' "$SKILL_TDD"
@@ -1110,17 +1120,17 @@ printf '%s\n' "[10:00:36] S62 IMPL completed — files: $MAL_SLASH" > "$DN_DIR/m
 OUT_MDOT="$(run_audit --log "$DN_DIR/malformed-dot.log" --project "$NRD_A" --receipt -)"
 run_audit --inventory --log "$DN_DIR/malformed-dot.log" --project "$NRD_A" >/dev/null 2>&1
 RC_INV_MDOT=$?
-{ printf '%s' "$OUT_MDOT" | grep -qF 'EDIT NOT LANDED — S61:' \
+{ printf '%s' "$OUT_MDOT" | grep -qF 'UNVERIFIED (malformed claim) — S61:' \
   && ! printf '%s' "$OUT_MDOT" | grep -qF 'UNVERIFIED (undetermined root) — S61:' \
   && [ "$RC_INV_MDOT" -eq 0 ]; }
-check "X39 a malformed list of ./-spelled paths stops at its first missing component: EDIT NOT LANDED, and --inventory completes" "$(verdict $?)"
+check "X39 a space-separated list of ./-spelled paths is one malformed claim that never walks to the ancestor budget, and --inventory completes" "$(verdict $?)"
 OUT_MSL="$(run_audit --log "$DN_DIR/malformed-slash.log" --project "$NRD_A" --receipt -)"
 run_audit --inventory --log "$DN_DIR/malformed-slash.log" --project "$NRD_A" >/dev/null 2>&1
 RC_INV_MSL=$?
-{ printf '%s' "$OUT_MSL" | grep -qF 'EDIT NOT LANDED — S62:' \
+{ printf '%s' "$OUT_MSL" | grep -qF 'UNVERIFIED (malformed claim) — S62:' \
   && ! printf '%s' "$OUT_MSL" | grep -qF 'UNVERIFIED (undetermined root) — S62:' \
   && [ "$RC_INV_MSL" -eq 0 ]; }
-check "X39a the same list spelled with empty segments stops there too: EDIT NOT LANDED, and --inventory completes" "$(verdict $?)"
+check "X39a the same list spelled with empty segments is one malformed claim too, and --inventory completes" "$(verdict $?)"
 KILL_DIR="$WORK/inventory-kill"
 KILL_A="$KILL_DIR/anchor"
 mkdir -p "$KILL_DIR/stub"
@@ -1363,8 +1373,9 @@ check "X20c the same run names the fault rather than printing a short clean list
 # The CLAIMS append is a `while … done >> file` compound, so a redirect that
 # cannot be opened does give the compound a non-zero status — there it is
 # checkable and must be checked.
-grep -qE '^[[:space:]]*done >> "\$CLAIMS_FILE" \|\| die' "$LIB"
-check "X21 the claims-file append refuses rather than dropping a claim" "$(verdict $?)"
+grep -qE '^[[:space:]]*node "\$CLAIMS_LIB" rows .*> "\$CLAIMS_FILE"' "$LIB" \
+  && [ "$(grep -cE 'claim_rows .*\|\| CLAIM_FAULT=' "$LIB")" -ge 2 ]
+check "X21 the claim rows are written by one checked call, and a failed write is a claim fault rather than a dropped claim" "$(verdict $?)"
 [ "$(grep -cE '>>[[:space:]]*"\$(UNION_FILE|CLAIMS_FILE)"' "$LIB")" -gt 0 ]
 check "X21-control the append scan found append sites at all" "$(verdict $?)"
 grep -qF 'the change union file went missing' "$LIB"
@@ -1773,6 +1784,282 @@ CS_GF_OUT="$(foreign_owner bash "$LIB" --change-set --project "$GF" 2>"$WORK/cs-
 [ "$CS_GF_RC" -eq 2 ] && [ -z "$CS_GF_OUT" ] && grep -qiF 'dubious ownership' "$WORK/cs-gf.err"
 check "CS5 a git refusal is a fault for --change-set: exit 2, no list, git's message on stderr" "$(verdict $?)"
 
+echo "== The chain's work tree: a worktree of the anchor's repository below the project root =="
+WTA="$WORK/wt-anchor"
+mkdir -p "$WTA/locales/fr"
+G "$WTA" init -q >/dev/null 2>&1
+printf '.claude/worktrees/\n.zensu/\n' > "$WTA/.gitignore"
+printf 'base\n' > "$WTA/b.txt"
+printf 'base\n' > "$WTA/c.txt"
+printf '{}\n' > "$WTA/locales/fr/settings.json"
+G "$WTA" add .gitignore b.txt c.txt locales/fr/settings.json && G "$WTA" commit -q -m init
+G "$WTA" worktree add -q .claude/worktrees/wt -b wt-branch >/dev/null 2>&1
+WTA_CANON="$(cd "$WTA" && pwd -P)"
+WTW="$WTA_CANON/.claude/worktrees/wt"
+printf 'new\n' > "$WTW/a.txt"
+printf 'changed\n' > "$WTW/b.txt"
+printf 'anchor-change\n' > "$WTA/b.txt"
+mkdir -p "$WTW/locales/en" "$WTW/locales/de" "$WTA/.zensu/logs" "$WTA/.zensu/state"
+for loc in en de; do printf '{"a":1}\n' > "$WTW/locales/$loc/settings.json"; printf '{}\n' > "$WTW/locales/$loc/ghost.json"; done
+cat > "$WTA/.zensu/logs/run.log" <<'EOF'
+[10:00:00] S1 IMPL completed — files: a.txt, b.txt
+[10:00:01] S2 IMPL completed — files: c.txt
+[10:00:02] S3 IMPL completed — files: <project>/b.txt
+[10:00:03] S4 IMPL completed — files: <project>/.claude/worktrees/wt/a.txt
+EOF
+[ -f "$WTW/.git" ]
+check "WT0 the fixture holds a linked worktree below the anchor" "$(verdict $?)"
+WT_OUT="$(run_audit --log "$WTA/.zensu/logs/run.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/wt.json")"; WT_RC=$?
+{ [ "$WT_RC" -eq 1 ] && printf '%s\n' "$WT_OUT" | grep -qxF 'EDIT LANDED — S1: a.txt' \
+  && printf '%s\n' "$WT_OUT" | grep -qxF 'EDIT LANDED — S1: b.txt' \
+  && printf '%s\n' "$WT_OUT" | grep -qxF 'EDIT LANDED — S4: a.txt'; }
+check "WT1 relative and <project>-spelled claims into the work tree grade against its change set" "$(verdict $?)"
+printf '%s\n' "$WT_OUT" | grep -qxF 'EDIT NOT LANDED — S2: claimed c.txt, git shows no change'
+check "WT2 an unchanged file of the work tree is EDIT NOT LANDED" "$(verdict $?)"
+printf '%s\n' "$WT_OUT" | grep -F 'UNVERIFIED (foreign root) — S3:' | grep -qF 'resolves outside the audited root'
+check "WT3 a claim naming the anchor's own copy of a file is foreign to the chain's work tree" "$(verdict $?)"
+printf '%s\n' "$WT_OUT" | head -n1 | grep -qF "EDIT LANDING AUDIT ROOT — graded the chain's work tree"
+check "WT4 the audit states which tree it graded, before any verdict" "$(verdict $?)"
+{ grep -qF '"workTree":".claude/worktrees/wt"' "$WTA/.zensu/state/wt.json" \
+  && grep -qF '"log":".zensu/logs/run.log"' "$WTA/.zensu/state/wt.json"; }
+check "WT5 the receipt stays under the project root and names the graded tree as workTree" "$(verdict $?)"
+WT_ANCHOR_OUT="$(run_audit --log "$WTA/.zensu/logs/run.log" --project "$WTA_CANON" --receipt "$WTA/.zensu/state/anchor.json")"
+{ ! grep -qF 'workTree' "$WTA/.zensu/state/anchor.json" \
+  && ! printf '%s\n' "$WT_ANCHOR_OUT" | grep -qF 'EDIT LANDING AUDIT ROOT' \
+  && printf '%s\n' "$WT_ANCHOR_OUT" | grep -qxF 'EDIT LANDED — S3: b.txt'; }
+check "WT6 without --work-tree the anchor is graded as before and the receipt carries no workTree" "$(verdict $?)"
+WT_INV="$(bash "$LIB" --inventory --log "$WTA/.zensu/logs/run.log" --project "$WTA_CANON" --work-tree "$WTW" 2>/dev/null)"
+{ printf '%s\n' "$WT_INV" | grep -qxF 'claimed-files=5' \
+  && printf '%s\n' "$WT_INV" | grep -qxF "$(printf 'foreign-root\t%s' "$WTA_CANON")"; }
+check "WT7 the inventory of a work-tree chain names the anchor as the foreign root" "$(verdict $?)"
+WT_CS="$(bash "$LIB" --change-set --project "$WTA_CANON" --work-tree "$WTW" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')"
+[ "$WT_CS" = "a.txt b.txt locales/de/ghost.json locales/de/settings.json locales/en/ghost.json locales/en/settings.json " ]
+check "WT8 --change-set --work-tree lists the work tree's own change set, relative to it (got '$WT_CS')" "$(verdict $?)"
+WT_CHK="$(bash "$LIB" --work-tree-check "$WTW" --project "$WTA_CANON" 2>/dev/null)"; WT_CHK_RC=$?
+WT_CHK_A="$(bash "$LIB" --work-tree-check "$WTA_CANON" --project "$WTA_CANON" 2>/dev/null)"; WT_CHK_A_RC=$?
+{ [ "$WT_CHK_RC" -eq 0 ] && [ "$WT_CHK" = "$(printf 'work-tree\t%s' "$WTW")" ] \
+  && [ "$WT_CHK_A_RC" -eq 0 ] && [ "$WT_CHK_A" = "$(printf 'anchor\t%s' "$WTA_CANON")" ]; }
+check "WT9 --work-tree-check answers work-tree for the worktree and anchor for the anchor's top" "$(verdict $?)"
+mkdir -p "$WTA/sub"
+G "$WTA" clone -q "$WTA_CANON" "$WTA_CANON/.claude/clone" >/dev/null 2>&1
+G "$WTA" worktree add -q "$WORK/wt-outside" -b wt-outside >/dev/null 2>&1
+wt_refuses() {
+  local dir="$1" needle="$2" err rc
+  err="$(bash "$LIB" --work-tree-check "$dir" --project "$WTA_CANON" 2>&1 >/dev/null)"; rc=$?
+  [ "$rc" -eq 2 ] && printf '%s' "$err" | grep -qF -- "$needle"
+}
+WT_REFUSED=0
+wt_refuses "" 'must not be empty' || WT_REFUSED=1
+wt_refuses "$WTA_CANON/sub" 'is not the top of a work tree' || WT_REFUSED=1
+wt_refuses "$WTA_CANON/.claude/clone" 'belongs to another repository' || WT_REFUSED=1
+wt_refuses "$WORK/wt-outside" 'does not lie below the project root' || WT_REFUSED=1
+wt_refuses "$WTA_CANON/.git" 'is not inside a git work tree' || WT_REFUSED=1
+[ "$WT_REFUSED" -eq 0 ]
+check "WT10 an empty value, a subdirectory, a clone, a worktree outside the project and .git are refused with exit 2" "$(verdict $?)"
+WT_LOG_ERR="$(bash "$LIB" --work-tree-check "$WTW" --project "$WTA_CANON" --log "$WTA/.zensu/logs/run.log" 2>&1 >/dev/null)"; WT_LOG_RC=$?
+{ [ "$WT_LOG_RC" -eq 2 ] && printf '%s' "$WT_LOG_ERR" | grep -qF 'reads no run log'; }
+check "WT11 --work-tree-check is read-only and refuses a run log" "$(verdict $?)"
+printf '%s\n' '[10:00:00] S5 IMPL completed — files: locales/{en,de}/settings.json, locales/*/ghost.json' > "$WTA/.zensu/logs/ref.log"
+WT_REF_OUT="$(run_audit --log "$WTA/.zensu/logs/ref.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/ref.json")"; WT_REF_RC=$?
+{ [ "$WT_REF_RC" -eq 0 ] && grep -qF '"clean":true' "$WTA/.zensu/state/ref.json" \
+  && printf '%s\n' "$WT_REF_OUT" | grep -qxF 'EDIT LANDED — S5: locales/en/settings.json' \
+  && printf '%s\n' "$WT_REF_OUT" | grep -qxF 'EDIT LANDED — S5: locales/de/ghost.json' \
+  && ! printf '%s\n' "$WT_REF_OUT" | grep -qF 'UNVERIFIED'; }
+check "WT12 the reference shape, brace and glob claims in a nested Autopilot workspace, grades clean with no correction" "$(verdict $?)"
+printf '%s\n' '[10:00:00] S6 IMPL completed — files: locales/*/settings.json' > "$WTA/.zensu/logs/glob.log"
+WT_GLOB_OUT="$(run_audit --log "$WTA/.zensu/logs/glob.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/glob.json")"; WT_GLOB_RC=$?
+printf '%s\n' '[10:00:01] CLAIM CORRECTED — S6 (line 1): locales/en/settings.json, locales/de/settings.json | not claimed: locales/fr/settings.json' >> "$WTA/.zensu/logs/glob.log"
+WT_FIX_OUT="$(run_audit --log "$WTA/.zensu/logs/glob.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/glob.json")"; WT_FIX_RC=$?
+{ [ "$WT_GLOB_RC" -eq 1 ] && printf '%s\n' "$WT_GLOB_OUT" | grep -qF 'locales/fr/settings.json' \
+  && [ "$WT_FIX_RC" -eq 0 ] && grep -qF '"clean":true' "$WTA/.zensu/state/glob.json" \
+  && printf '%s\n' "$WT_FIX_OUT" | grep -qxF 'CLAIM RETRACTED — S6 (line 1, correction line 2): locales/fr/settings.json'; }
+check "WT13 an over-broad glob is unclean until a correction narrows it, and the retraction is disclosed" "$(verdict $?)"
+G "$WTA" worktree add -q .claude/worktrees/sib -b sib-branch >/dev/null 2>&1
+cat > "$WTA/.zensu/logs/prefix.log" <<'EOF'
+[10:00:00] P1 IMPL completed — files: .claude/worktrees/wt/a.txt
+[10:00:01] P2 IMPL completed — files: .claude/worktrees/wt/c.txt
+[10:00:02] P3 IMPL completed — files: .claude/worktrees/sib/x.txt
+EOF
+WT_PRE_OUT="$(run_audit --log "$WTA/.zensu/logs/prefix.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/prefix.json")"; WT_PRE_RC=$?
+{ [ "$WT_PRE_RC" -eq 1 ] && printf '%s\n' "$WT_PRE_OUT" | grep -qxF 'EDIT LANDED — P1: a.txt' \
+  && printf '%s\n' "$WT_PRE_OUT" | grep -qxF 'EDIT NOT LANDED — P2: claimed c.txt, git shows no change'; }
+check "WT14 a work-tree claim spelled from the anchor's top grades against the work tree, landed or not" "$(verdict $?)"
+{ printf '%s\n' "$WT_PRE_OUT" | grep -qF 'UNVERIFIED (foreign root) — P3: ' \
+  && ! printf '%s\n' "$WT_PRE_OUT" | grep -qF 'untracked-by-design'; }
+check "WT15 a claim into a sibling worktree is foreign, and no prefixed claim passes as untracked by design" "$(verdict $?)"
+WT_PRE_INV="$(bash "$LIB" --inventory --log "$WTA/.zensu/logs/prefix.log" --project "$WTA_CANON" --work-tree "$WTW" 2>/dev/null)"
+{ printf '%s\n' "$WT_PRE_INV" | grep -qxF "$(printf 'foreign-root\t%s' "$WTA_CANON/.claude/worktrees/sib")" \
+  && [ "$(printf '%s\n' "$WT_PRE_INV" | grep -c '^foreign-root')" -eq 1 ]; }
+check "WT16 the inventory of a work-tree chain places the same claims and names only the sibling as foreign" "$(verdict $?)"
+G "$WTA" worktree remove --force .claude/worktrees/sib >/dev/null 2>&1
+printf '%s\n' '[10:00:00] S7 IMPL completed — files: locales/*/missing.json' > "$WTA/.zensu/logs/nomatch.log"
+PC_OUT="$(run_audit --log "$WTA/.zensu/logs/nomatch.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/nomatch.json")"; PC_RC=$?
+{ [ "$PC_RC" -eq 1 ] && printf '%s\n' "$PC_OUT" | grep -qF 'UNVERIFIED (pattern claim) — S7: ' \
+  && printf '%s\n' "$PC_OUT" | grep -qF 'matches no tracked, untracked or changed file' \
+  && grep -qF '"clean":false' "$WTA/.zensu/state/nomatch.json"; }
+check "PC1 a glob that matches nothing is UNVERIFIED (pattern claim) and leaves the receipt unclean" "$(verdict $?)"
+cat > "$WTA/.zensu/logs/fix.log" <<'EOF'
+[10:00:00] S8 IMPL completed — files: a.txt b.txt
+[10:00:01] CLAIM CORRECTED — S8 (line 1): a.txt
+[10:00:02] S9 IMPL completed — files: a.txt c.txt
+[10:00:03] CLAIM CORRECTED — S9 (line 3): a.txt, c.txt
+EOF
+FX_OUT="$(run_audit --log "$WTA/.zensu/logs/fix.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/fix.json")"; FX_RC=$?
+{ [ "$FX_RC" -eq 1 ] \
+  && printf '%s\n' "$FX_OUT" | grep -qxF 'CLAIM CORRECTION IGNORED — line 2: it leaves a path the corrected claim names unaccounted for' \
+  && printf '%s\n' "$FX_OUT" | grep -qF 'UNVERIFIED (malformed claim) — S8: '; }
+check "IG1 an incomplete correction is ignored with its fixed reason, and the claim it names stays malformed" "$(verdict $?)"
+{ printf '%s\n' "$FX_OUT" | grep -qxF 'EDIT LANDED — S9: a.txt' \
+  && printf '%s\n' "$FX_OUT" | grep -qxF 'EDIT NOT LANDED — S9: claimed c.txt, git shows no change' \
+  && ! printf '%s\n' "$FX_OUT" | grep -qF 'UNVERIFIED (malformed claim) — S9:'; }
+check "UL1 a valid correction retires its prose token and grades every listed path, so an unlanded one is EDIT NOT LANDED" "$(verdict $?)"
+printf '%s\n' "$FX_OUT" | grep -qxF 'UNVERIFIED (malformed claim) — S8: the files: entry "a.txt b.txt" on run-log line 1 is not one path per comma-separated item. To grade the paths it names, append: CLAIM CORRECTED — S8 (line 1): a.txt, b.txt'
+check "MC1 a space-separated entry is UNVERIFIED (malformed claim) naming its candidates and the exact correction to append" "$(verdict $?)"
+printf '%s\n' '[10:00:00] S12 IMPL completed — files: n{1..300}.txt' > "$WTA/.zensu/logs/wide.log"
+PW_OUT="$(run_audit --log "$WTA/.zensu/logs/wide.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/wide.json")"; PW_RC=$?
+{ [ "$PW_RC" -eq 1 ] \
+  && printf '%s\n' "$PW_OUT" | grep -qxF 'UNVERIFIED (pattern claim) — S12: the files: entry "n{1..300}.txt" on run-log line 1 is a brace pattern this audit cannot expand. Log the files it stands for on a new claim line and account for this entry in a correction in the form CLAIM CORRECTED — S12 (line 1): <path>, … | not claimed: <entry>, …' \
+  && ! printf '%s\n' "$PW_OUT" | grep -qF 'malformed claim'; }
+check "PC2 a brace group past the expansion budget is UNVERIFIED (pattern claim) with the correction form, never a malformed claim" "$(verdict $?)"
+mkdir -p "$WTW/many"
+PM_I=0
+while [ "$PM_I" -lt 501 ]; do PM_I=$((PM_I + 1)); : > "$WTW/many/f$PM_I.txt"; done
+printf '%s\n' '[10:00:00] S13 IMPL completed — files: many/*.txt' > "$WTA/.zensu/logs/many.log"
+PM_OUT="$(run_audit --log "$WTA/.zensu/logs/many.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/many.json")"; PM_RC=$?
+{ [ "$PM_RC" -eq 1 ] \
+  && printf '%s\n' "$PM_OUT" | grep -qF 'UNVERIFIED (pattern claim) — S13: the files: entry "many/*.txt" on run-log line 1 matches too many files to grade one by one' \
+  && ! printf '%s\n' "$PM_OUT" | grep -qF 'EDIT LANDED — S13:'; }
+check "PC3 a glob with more matches than the audit grades one by one is UNVERIFIED (pattern claim) and grades none of them" "$(verdict $?)"
+CF_DIR="$WORK/claim-fault"
+mkdir -p "$CF_DIR" && cp "$LIB" "$PLUGIN_DIR/hooks/lib/zensu-safe-render.sh" "$CF_DIR/"
+printf '%s\n' '{"schema":"edit-landing-v2","clean":true}' > "$WTA/.zensu/state/fault.json"
+CF_OUT="$(bash "$CF_DIR/zensu-edit-landing.sh" --log "$WTA/.zensu/logs/ref.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/fault.json" 2>&1)"; CF_RC=$?
+{ [ "$CF_RC" -eq 2 ] \
+  && printf '%s\n' "$CF_OUT" | grep -qF 'EDIT LANDING AUDIT FAULT — the claim reader could not run because edit-landing-claims-v1.js is missing beside this library' \
+  && ! printf '%s\n' "$CF_OUT" | grep -qE '^(EDIT LANDING AUDIT —|EDIT LANDED|EDIT NOT LANDED|UNVERIFIED)' \
+  && [ ! -e "$WTA/.zensu/state/fault.json" ]; }
+check "CF1 a claim read that cannot run is an audit fault: exit 2, no verdict, no tally, the earlier receipt removed" "$(verdict $?)"
+mkdir -p "$WTW/sub" "$WORK/outside-ext"
+printf 'x\n' > "$WTW/sub/only.txt"
+ln -s "$WORK/outside-ext" "$WTW/ext"
+cat > "$WTA/.zensu/logs/q.log" <<'EOF'
+[10:00:00] Q1 IMPL completed — files: .claude/worktrees/wt/only.txt
+[10:00:01] Q2 IMPL completed — files: .claude/worktrees/wt/ext/x.md
+EOF
+WT_Q_OUT="$(run_audit --log "$WTA/.zensu/logs/q.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt -)"
+printf '%s\n' "$WT_Q_OUT" | grep -qxF 'EDIT NOT LANDED — Q1: claimed only.txt, git shows no change'
+check "WT17 a placed claim of an absent top-level file is EDIT NOT LANDED and never resolves to a same-named file deeper in the tree" "$(verdict $?)"
+{ printf '%s\n' "$WT_Q_OUT" | grep -qF 'UNVERIFIED (no work tree) — Q2: ' \
+  && ! printf '%s\n' "$WT_Q_OUT" | grep -qF 'untracked-by-design'; }
+check "WT18 a placed claim that leaves every work tree through a symlink is UNVERIFIED, never exempt as untracked by design" "$(verdict $?)"
+rm -f "$WTW/ext" "$WTW/sub/only.txt"
+FG="$WORK/fg"
+mkdir -p "$FG/src"
+new_repo "$FG"
+printf 'x\n' > "$FG/src/a.ts"
+FG_CANON="$(cd "$FG" && pwd -P)"
+printf '%s\n' "[10:00:00] S21 IMPL completed — files: $FG_CANON/src/*.ts" > "$WTA/.zensu/logs/fglob.log"
+FG_OUT="$(run_audit --log "$WTA/.zensu/logs/fglob.log" --project "$WTA_CANON" --receipt -)"
+FG_INV="$(bash "$LIB" --inventory --log "$WTA/.zensu/logs/fglob.log" --project "$WTA_CANON" 2>/dev/null)"
+{ printf '%s\n' "$FG_OUT" | grep -qF 'UNVERIFIED (foreign root) — S21: ' \
+  && printf '%s\n' "$FG_OUT" | grep -qF "it belongs to $FG_CANON" \
+  && printf '%s\n' "$FG_INV" | grep -qxF "$(printf 'foreign-root\t%s' "$FG_CANON")"; }
+check "PC4 a glob under another repository is UNVERIFIED (foreign root) naming that root, and the inventory names it too" "$(verdict $?)"
+CF2_DIR="$WORK/claim-kind"
+mkdir -p "$CF2_DIR" && cp "$LIB" "$PLUGIN_DIR/hooks/lib/zensu-safe-render.sh" "$CF2_DIR/"
+sed 's/rows\.push(\["V", number\])/rows.push(["Z", number])/' "$PLUGIN_DIR/hooks/lib/edit-landing-claims-v1.js" > "$CF2_DIR/edit-landing-claims-v1.js"
+printf '%s\n' '[10:00:00] S22 WIRED (verified, no change)' > "$WTA/.zensu/logs/kind.log"
+CF2_OUT="$(bash "$CF2_DIR/zensu-edit-landing.sh" --log "$WTA/.zensu/logs/kind.log" --project "$WTA_CANON" --receipt - 2>&1)"; CF2_RC=$?
+{ [ "$CF2_RC" -eq 2 ] && grep -qF 'rows.push(["Z", number])' "$CF2_DIR/edit-landing-claims-v1.js" \
+  && printf '%s\n' "$CF2_OUT" | grep -qF 'EDIT LANDING AUDIT FAULT — the claim reader returned a row kind this library does not grade' \
+  && ! printf '%s\n' "$CF2_OUT" | grep -qE '^EDIT LANDING AUDIT —'; }
+check "CF2 a claim row of a kind the grader does not know is an audit fault, never a clean tally" "$(verdict $?)"
+CF_KINDS="$(node -e 'process.stdout.write(require(process.argv[1]).ROW_KINDS.filter((kind) => kind !== "N").join(""))' "$PLUGIN_DIR/hooks/lib/edit-landing-claims-v1.js")"
+CF_ARMS=0
+for kind in $(printf '%s' "$CF_KINDS" | sed 's/./& /g'); do grep -qE "^      ${kind}\)" "$LIB" || CF_ARMS=1; done
+{ [ -n "$CF_KINDS" ] && grep -qF "/^[${CF_KINDS}]\$/" "$LIB" && [ "$CF_ARMS" -eq 0 ]; }
+check "CF3 every row kind the claim module emits for grading has an arm in the grader and a place in its row check" "$(verdict $?)"
+
+echo "== The run-log writer refuses a files claim the grader cannot grade =="
+APW="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+APP="$WORK/append-proj"
+mkdir -p "$APP/.zensu/logs" "$APP/src/pages"
+new_repo "$APP"
+printf 'x\n' > "$APP/src/pages/[...slug].astro"
+printf 'x\n' > "$APP/a{b,c}.txt"
+APP_LOG="$APP/.zensu/logs/append.log"
+app_append() { ( cd "$APP" && CLAUDE_PROJECT_DIR="$APP" bash "$APW" append --log "$APP_LOG" "$@" ) 2>&1; }
+app_append --truncate --message "BUILD STARTED — writer fixture" >/dev/null
+APP_BASE="$(cat "$APP_LOG")"
+app_unchanged() { [ -n "$APP_BASE" ] && [ "$(cat "$APP_LOG")" = "$APP_BASE" ]; }
+AP_OUT="$(app_append --message "S1 IMPL completed — files: locales/{en,de}/a.json")"; AP_RC=$?
+{ [ "$AP_RC" -eq 2 ] && app_unchanged \
+  && printf '%s\n' "$AP_OUT" | grep -qF 'Write instead: S1 IMPL completed — files: locales/en/a.json, locales/de/a.json'; }
+check "AP1 append refuses a brace claim with exit 2, writes nothing and prints the expanded line" "$(verdict $?)"
+AP_OUT="$(app_append --message "S2 IMPL completed — files: locales/*/ghost.json")"; AP_RC=$?
+{ [ "$AP_RC" -eq 2 ] && app_unchanged && printf '%s\n' "$AP_OUT" | grep -qF '"locales/*/ghost.json" (glob)'; }
+check "AP2 append refuses a glob claim with exit 2 and writes nothing" "$(verdict $?)"
+AP_OUT="$(app_append --message "S3 IMPL completed — files: src/a.ts src/b.ts")"; AP_RC=$?
+{ [ "$AP_RC" -eq 2 ] && app_unchanged \
+  && printf '%s\n' "$AP_OUT" | grep -qF 'Write instead: S3 IMPL completed — files: src/a.ts, src/b.ts'; }
+check "AP3 append refuses a space-separated list and prints it comma-separated" "$(verdict $?)"
+AP_OUT="$(printf '%s\n' 'S4 IMPL completed — files: locales/{en,de}/a.json' \
+  | ( cd "$APP" && CLAUDE_PROJECT_DIR="$APP" bash "$APW" append --log "$APP_LOG" --message-stdin ) 2>&1)"; AP_RC=$?
+{ [ "$AP_RC" -eq 2 ] && app_unchanged && printf '%s\n' "$AP_OUT" | grep -qF 'Nothing was written'; }
+check "AP4 --message-stdin is refused alike" "$(verdict $?)"
+AP_OUT="$(app_append --message "CLAIM CORRECTED — S9 (line 99): src/a.ts")"; AP_RC=$?
+{ [ "$AP_RC" -eq 2 ] && app_unchanged && printf '%s\n' "$AP_OUT" | grep -qF 'refused (malformed-correction: target-not-earlier)'; }
+check "AP5 append refuses a correction that names no earlier line" "$(verdict $?)"
+app_append --message "S6 IMPL completed — files: src/pages/[...slug].astro" >/dev/null; AP_R1=$?
+app_append --message "S7 IMPL completed — files: a{b,c}.txt" >/dev/null; AP_R2=$?
+app_append --message "S8 IMPL completed — files: src/a.ts, src/b.ts | commentary {x,y} *" >/dev/null; AP_R3=$?
+{ [ "$AP_R1" -eq 0 ] && [ "$AP_R2" -eq 0 ] && [ "$AP_R3" -eq 0 ] \
+  && grep -qF 'S6 IMPL completed — files: src/pages/[...slug].astro' "$APP_LOG" \
+  && grep -qF 'S7 IMPL completed — files: a{b,c}.txt' "$APP_LOG" \
+  && grep -qF 'S8 IMPL completed — files: src/a.ts, src/b.ts | commentary {x,y} *' "$APP_LOG"; }
+check "AP6 a bracketed path, a token that exists as written and commentary after ' | ' are written" "$(verdict $?)"
+printf '%s\n' 'S10 IMPL completed — files: src/c.ts src/d.ts' >> "$APP_LOG"
+AP_LINE="$(wc -l < "$APP_LOG" | tr -d ' ')"
+app_append --message "CLAIM CORRECTED — S10 (line ${AP_LINE}): src/c.ts, src/d.ts" >/dev/null; AP_RC=$?
+{ [ "$AP_RC" -eq 0 ] && grep -qF "CLAIM CORRECTED — S10 (line ${AP_LINE}): src/c.ts, src/d.ts" "$APP_LOG"; }
+check "AP7 a correction of an earlier prose claim is written" "$(verdict $?)"
+AP_PLUG="$WORK/append-plugin/hooks/lib"
+mkdir -p "$AP_PLUG" && cp -R "$PLUGIN_DIR/hooks/lib/." "$AP_PLUG/" && rm -f "$AP_PLUG/edit-landing-claims-v1.js"
+AP_OUT="$( ( cd "$APP" && CLAUDE_PROJECT_DIR="$APP" bash "$AP_PLUG/zensu-log.sh" append --log "$APP_LOG" \
+  --message "S11 IMPL completed — files: locales/{en,de}/b.json" ) 2>&1)"; AP_RC=$?
+{ [ "$AP_RC" -eq 0 ] && printf '%s\n' "$AP_OUT" | grep -qF 'the claim checker is missing' \
+  && grep -qF 'S11 IMPL completed — files: locales/{en,de}/b.json' "$APP_LOG"; }
+check "AP8 without the claim module append fails open: it writes the line and says it went unchecked" "$(verdict $?)"
+printf 'new\n' > "$APP/mc2a.txt"
+printf 'new\n' > "$APP/mc2b.txt"
+printf '%s\n' '[10:00:00] Step 3: IMPL completed — files: mc2a.txt mc2b.txt' >> "$APP_LOG"
+MC2_LINE="$(grep -c '' "$APP_LOG")"
+MC2_OUT="$(run_audit --log "$APP_LOG" --project "$APP" --receipt -)"
+{ printf '%s\n' "$MC2_OUT" | grep -qE '^UNVERIFIED \(malformed claim\) — Step 3.u003a: the files: entry "mc2a\.txt mc2b\.txt"' \
+  && printf '%s\n' "$MC2_OUT" | grep -qF "CLAIM CORRECTED — <the label of run-log line ${MC2_LINE}, copied exactly> (line ${MC2_LINE})" \
+  && ! printf '%s\n' "$MC2_OUT" | grep -qF 'append: CLAIM CORRECTED — Step 3'; }
+check "MC2 a label the output screen rewrites gets the correction form with the label to copy, never a pre-filled line the checker refuses" "$(verdict $?)"
+AP_OUT="$(app_append --message "CLAIM CORRECTED — Step 3: (line ${MC2_LINE}): mc2a.txt, mc2b.txt")"; AP_RC=$?
+MC3_OUT="$(run_audit --log "$APP_LOG" --project "$APP" --receipt -)"
+{ [ "$AP_RC" -eq 0 ] && printf '%s\n' "$MC3_OUT" | grep -qE '^EDIT LANDED — Step 3.u003a: mc2a\.txt$' \
+  && printf '%s\n' "$MC3_OUT" | grep -qE '^EDIT LANDED — Step 3.u003a: mc2b\.txt$'; }
+check "MC3 the correction written with the label exactly as logged passes the writer and grades every path it lists" "$(verdict $?)"
+if mkfifo "$APP/.zensu/logs/fifo.log" 2>/dev/null; then
+  ( cd "$APP" && CLAUDE_PROJECT_DIR="$APP" bash "$APW" append --log "$APP/.zensu/logs/fifo.log" --message "S1 note" >/dev/null 2>&1 ) &
+  AP9_PID=$!
+  AP9_I=0
+  while kill -0 "$AP9_PID" 2>/dev/null && [ "$AP9_I" -lt 100 ]; do sleep 0.1; AP9_I=$((AP9_I + 1)); done
+  AP9_BLOCKED=0
+  if kill -0 "$AP9_PID" 2>/dev/null; then AP9_BLOCKED=1; : > "$APP/.zensu/logs/fifo.log"; fi
+  wait "$AP9_PID" 2>/dev/null
+  [ "$AP9_BLOCKED" -eq 0 ]
+  check "AP9 a FIFO planted at the run log makes the writer refuse instead of blocking in its claim check" "$(verdict $?)"
+  rm -f "$APP/.zensu/logs/fifo.log"
+else
+  check "AP9 SKIPPED — this host cannot create a FIFO" PASS
+fi
+
+unit_check_done "L99 every unit file the registry gives this suite was graded"
 rm -f "$SKILL_TDD" "$TDD_SKILL"
 echo "----"
 echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"

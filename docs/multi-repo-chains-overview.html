@@ -291,7 +291,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:1257 · zensu-log.sh:1977</p>
+      <p class="src">zensu-edit-landing.sh:1415 · zensu-log.sh:2214</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -299,7 +299,7 @@
       <p>While the opt-in write gate is on, its rule (B) denies a Bash source write outside the root.
       The edit gate only classifies a path as <code>state</code>, <code>zensu</code> or
       <code>other</code> and does not confine it. With the gate on, the topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:944 · hooks/pre-edit-tdd-reminder.sh:132-188</p>
+      <p class="src">bash-source-write-parse.js:960 · hooks/pre-edit-tdd-reminder.sh:132-188</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass — superseded by stage 1</span>
@@ -314,7 +314,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus now counts the same way. A chain that
       claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1988 · zensu-log.sh:1944-2032 · zensu-log.sh:130-131</p>
+      <p class="src">zensu-log.sh:2225 · zensu-log.sh:2181-2299 · zensu-log.sh:130-131</p>
     </div>
   </div>
 </section>
@@ -448,7 +448,7 @@
           <code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B) and
           rule (C), and the temp carve-out stops exempting a temp entry that contains a code root. At
           its default the gate judges nothing.</td>
-          <td class="where mono">bash-source-write-parse.js:944<br>bash-source-write-parse.js:990</td>
+          <td class="where mono">bash-source-write-parse.js:960<br>bash-source-write-parse.js:1006</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
@@ -458,7 +458,7 @@
           <code>unavailable</code>, any non-zero root makes it non-zero, and a code root never
           answers <code>unknown</code>. Otherwise a clean anchor still closes an empty chain. Stage
           1, item 2 already arms <code>--tdd-complete</code> on a logged claim.</td>
-          <td class="where mono">zensu-log.sh:2026<br>zensu-log.sh:130-131</td>
+          <td class="where mono">zensu-log.sh:2276<br>zensu-log.sh:130-131</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 2</span></th>
@@ -470,7 +470,7 @@
           whatever the list says. The pattern rule is unchanged, and a root is searched like the anchor: through a
           subdirectory other than <code>.zensu</code>, because the traversal check refuses a search
           root that contains a protected directory.</td>
-          <td class="where mono">reviewer-capability-v1.js:667<br>reviewer-capability-v1.js:628-630</td>
+          <td class="where mono">reviewer-capability-v1.js:669<br>reviewer-capability-v1.js:630-632</td>
         </tr>
       </tbody>
     </table>

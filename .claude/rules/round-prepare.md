@@ -227,6 +227,9 @@ entry, the `ciStructureTests` member and the regenerated overview; `docs/review-
 - A chain whose workflow document declares code roots stops the verb with `ROUND PREPARE
   STOPPED — code-roots`: the snapshot, the attribution and the round diff cover the anchor alone
   (`.claude/rules/multi-repo-code-roots.md`).
+- `VERDICT` reads no `EDIT LANDED (untracked-by-design)` line, so a fix claim whose every file the
+  audit exempts as untracked by design gets no `ROUND LANDING` line and no `fixed` line from the
+  verb; that `fixed` line stays manual.
 - Windows is unmeasured: the suite is a `ciStructureTests` member and runs on the weekly Windows
   Safety structure shard only.
 
