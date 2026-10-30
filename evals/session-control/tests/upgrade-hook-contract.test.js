@@ -12,9 +12,21 @@ const {
   captureEvaluatorOwnedHookContract,
   injectCandidateHookContractFaultForTest,
   loadCanonicalHookConfig,
+  loadDispatchedChecks,
   matchingHookBasenames,
+  matchingHookProcesses,
   verifyCapturedHookContract,
 } = require('../lib/upgrade-hook-contract.js');
+
+const PLUGIN_ROOT = path.resolve(__dirname, '..', '..', '..');
+const DISPATCHER_ARGUMENT = '${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-dispatch-v1.js';
+const DISPATCHED_CHECKS = [
+  ['PreToolUse', 'reviewer-capability', '.*', 'pre-reviewer-capability-gate.sh', null, 'closed'],
+  ['PreToolUse', 'zensu-cli-gate', 'Bash|PowerShell', 'pre-bash-zensu-gate.sh', 'checks/pre-bash-zensu-gate.sh', 'open'],
+  ['PreToolUse', 'source-write-gate', 'Bash|PowerShell', 'pre-bash-source-write-gate.sh', 'checks/pre-bash-source-write-gate.sh', 'closed'],
+  ['PreToolUse', 'secret-scan', 'Bash|PowerShell', 'pre-write-secret-scan.sh', 'checks/pre-write-secret-scan.sh', 'open'],
+  ['PostToolUse', 'tool-audit', 'Write|Edit', 'post-tool-audit.sh', 'checks/post-tool-audit.sh', 'open'],
+].map(([event, name, matcher, script, body, failure]) => ({ event, name, matcher, script, body, failure }));
 
 const HOOK_NAMES = [
   'pre-bash-source-write-gate.sh',
@@ -91,6 +103,44 @@ function fixture(preToolCommand = command('pre-reviewer-capability-gate.sh'), ba
     },
   }));
   return root;
+}
+
+function dispatcherHook(flag) {
+  const entry = { type: 'command', command: 'node', args: [DISPATCHER_ARGUMENT, flag], timeout: 60 };
+  if (flag === 'pre') entry.onFailure = 'block';
+  return entry;
+}
+
+function registrySource(checks) {
+  return `'use strict';\n\nmodule.exports = { DISPATCHED_CHECKS: ${JSON.stringify(checks)} };\n`;
+}
+
+function writeRegistry(root, source) {
+  fs.writeFileSync(path.join(root, 'hooks', 'lib', 'hook-registration-v1.js'), source, { mode: 0o600 });
+}
+
+function dispatchedFixture(checks = DISPATCHED_CHECKS) {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, 'hooks', 'lib'), { mode: 0o700 });
+  fs.mkdirSync(path.join(root, 'hooks', 'checks'), { mode: 0o700 });
+  fs.writeFileSync(path.join(root, 'hooks', 'lib', 'hook-dispatch-v1.js'), "'use strict';\n", { mode: 0o600 });
+  for (const check of checks) {
+    if (check.body !== null) {
+      fs.writeFileSync(path.join(root, 'hooks', check.body), '#!/bin/bash\nexit 0\n', { mode: 0o700 });
+    }
+  }
+  writeRegistry(root, registrySource(checks));
+  rewriteConfig(root, (config) => {
+    config.hooks.PreToolUse = [{ matcher: '.*', hooks: [dispatcherHook('pre')] }];
+    config.hooks.PostToolUse = [{ matcher: '.*', hooks: [dispatcherHook('post')] }];
+  });
+  return root;
+}
+
+function replaceAndRestore(file) {
+  const original = fs.readFileSync(file);
+  fs.writeFileSync(file, '#!/bin/bash\nexit 61\n');
+  fs.writeFileSync(file, original);
 }
 
 function removeFixture(root) {
@@ -605,6 +655,43 @@ test('applies every evaluator-owned hook-contract selftest fault only in test mo
       }
     }
 
+    const dispatchedCases = [
+      ['hook-contract-remove-read', /PreToolUse Read is missing a required hook/],
+      ['hook-contract-remove-bash', /PreToolUse Bash is missing a required hook/],
+      ['hook-contract-reorder-bash', /PreToolUse Bash required hook order is invalid/],
+      ['hook-contract-duplicate-bash', /PreToolUse Bash contains a duplicate hook/],
+      ['hook-contract-remove-session-start', /SessionStart is missing a required hook/],
+      ['hook-contract-remove-stop', /hook group configuration is invalid/],
+    ];
+    for (const [fault, expected] of dispatchedCases) {
+      const root = dispatchedFixture();
+      try {
+        assert.equal(injectCandidateHookContractFaultForTest(root, fault), true, `${fault} on the dispatcher`);
+        assert.throws(() => captureEvaluatorOwnedHookContract(root), expected, `${fault} on the dispatcher`);
+      } finally {
+        removeFixture(root);
+      }
+    }
+
+    const withoutGate = DISPATCHED_CHECKS.filter((check) => check.name !== 'zensu-cli-gate');
+    for (const fault of ['hook-contract-remove-bash', 'hook-contract-reorder-bash', 'hook-contract-duplicate-bash']) {
+      const dispatched = dispatchedFixture(withoutGate);
+      const direct = fixture();
+      try {
+        rewriteConfig(direct, (config) => { config.hooks.PreToolUse.splice(1, 1); });
+        for (const root of [dispatched, direct]) {
+          assert.throws(
+            () => injectCandidateHookContractFaultForTest(root, fault),
+            /hook-contract selftest target is missing/,
+            fault,
+          );
+        }
+      } finally {
+        removeFixture(dispatched);
+        removeFixture(direct);
+      }
+    }
+
     const root = fixture();
     try {
       assert.throws(
@@ -634,6 +721,187 @@ test('does not mutate hook configuration when hook-contract test mode is disable
   } finally {
     if (previous === undefined) delete process.env.ZENSU_UPGRADE_TEST_MODE;
     else process.env.ZENSU_UPGRADE_TEST_MODE = previous;
+    removeFixture(root);
+  }
+});
+
+test('captures a dispatched configuration through the check registry the evaluator reads itself', () => {
+  const root = dispatchedFixture();
+  try {
+    const contract = captureEvaluatorOwnedHookContract(root);
+    assert.deepEqual(contract.dispatchedChecks, DISPATCHED_CHECKS);
+    assert.equal(Object.isFrozen(contract.dispatchedChecks[0]), true);
+    assert.deepEqual(contract.observedExpectedHooks.PreToolUse, {
+      Read: ['pre-reviewer-capability-gate.sh'],
+      Bash: [
+        'pre-reviewer-capability-gate.sh',
+        'pre-bash-zensu-gate.sh',
+        'pre-bash-source-write-gate.sh',
+        'pre-write-secret-scan.sh',
+      ],
+    });
+    assert.deepEqual(contract.observedHookProcesses, {
+      PreToolUse: { Read: ['hook-dispatch-v1.js:pre'], Bash: ['hook-dispatch-v1.js:pre'] },
+      SessionStart: ['session-start-session-control.sh', 'session-start-banner.sh'],
+      Stop: ['stop-chain-enforcer.sh'],
+    });
+    assert.deepEqual(matchingHookProcesses(contract.config, 'PostToolUse', 'Read'), ['hook-dispatch-v1.js:post']);
+    assert.deepEqual(matchingHookBasenames(contract.config, 'PostToolUse', 'Edit', contract.dispatchedChecks), [
+      'post-tool-audit.sh',
+    ]);
+    assert.deepEqual(matchingHookBasenames(contract.config, 'PostToolUse', 'Read', contract.dispatchedChecks), []);
+    assert.deepEqual(contract.hookIntegrity.map(({ basename }) => basename), [
+      ...HOOK_NAMES,
+      'checks/post-tool-audit.sh',
+      'checks/pre-bash-source-write-gate.sh',
+      'checks/pre-bash-zensu-gate.sh',
+      'checks/pre-write-secret-scan.sh',
+      'hooks.json',
+      'lib/hook-dispatch-v1.js',
+      'lib/hook-registration-v1.js',
+    ].sort());
+    assert.equal(verifyCapturedHookContract(root, contract), true);
+    assert.throws(
+      () => verifyCapturedHookContract(root, Object.freeze({
+        ...contract,
+        dispatchedChecks: [...contract.dispatchedChecks],
+      })),
+      /captured contract is invalid/,
+    );
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('rejects a changed check registry and a replaced dispatcher, registry or check body after capture', () => {
+  const cases = [
+    ['registry content', (root) => {
+      writeRegistry(root, registrySource(DISPATCHED_CHECKS.map(
+        (check) => (check.name === 'zensu-cli-gate' ? { ...check, matcher: 'Read' } : check),
+      )));
+    }, /dispatcher check registry changed after capture/],
+    ['registry file', (root) => {
+      replaceAndRestore(path.join(root, 'hooks', 'lib', 'hook-registration-v1.js'));
+    }, /hook target changed after capture/],
+    ['dispatcher file', (root) => {
+      replaceAndRestore(path.join(root, 'hooks', 'lib', 'hook-dispatch-v1.js'));
+    }, /hook target changed after capture/],
+    ['check body', (root) => {
+      replaceAndRestore(path.join(root, 'hooks', 'checks', 'pre-bash-zensu-gate.sh'));
+    }, /hook target changed after capture/],
+  ];
+  for (const [label, tamper, expected] of cases) {
+    const root = dispatchedFixture();
+    try {
+      const contract = captureEvaluatorOwnedHookContract(root);
+      tamper(root);
+      assert.throws(() => verifyCapturedHookContract(root, contract), expected, label);
+    } finally {
+      removeFixture(root);
+    }
+  }
+});
+
+test('refuses a check registry it cannot read without running candidate code, or whose entries are malformed', () => {
+  const valid = DISPATCHED_CHECKS[1];
+  const { failure: _failure, ...withoutFailure } = valid;
+  const unsafe = [
+    ['missing', (root) => { fs.rmSync(path.join(root, 'hooks', 'lib', 'hook-registration-v1.js')); }],
+    ['require', (root) => { writeRegistry(root, "'use strict';\nrequire('node:fs');\n"); }],
+    ['syntax', (root) => { writeRegistry(root, 'module.exports = {'); }],
+    ['absent export', (root) => { writeRegistry(root, 'module.exports = {};\n'); }],
+  ];
+  for (const [label, mutate] of unsafe) {
+    const root = dispatchedFixture();
+    try {
+      mutate(root);
+      assert.throws(() => loadDispatchedChecks(root), /dispatcher check registry is unsafe/, label);
+    } finally {
+      removeFixture(root);
+    }
+  }
+  const invalid = [
+    ['not an array', {}],
+    ['empty', []],
+    ['null entry', [null]],
+    ['array entry', [[]]],
+    ['extra key', [{ ...valid, extra: true }]],
+    ['missing key', [withoutFailure]],
+    ['key order', [{ name: valid.name, ...valid }]],
+    ['event', [{ ...valid, event: 'Stop' }]],
+    ['name', [{ ...valid, name: 'Zensu Gate' }]],
+    ['duplicate', [valid, { ...valid }]],
+    ['empty matcher', [{ ...valid, matcher: '' }]],
+    ['matcher type', [{ ...valid, matcher: 1 }]],
+    ['matcher expression', [{ ...valid, matcher: '[' }]],
+    ['script', [{ ...valid, script: '../escape.sh' }]],
+    ['body', [{ ...valid, body: 'lib/escape.sh' }]],
+    ['failure', [{ ...valid, failure: 'maybe' }]],
+  ];
+  for (const [label, checks] of invalid) {
+    const root = dispatchedFixture();
+    try {
+      writeRegistry(root, registrySource(checks));
+      assert.throws(() => loadDispatchedChecks(root), /dispatcher check registry is invalid/, label);
+    } finally {
+      removeFixture(root);
+    }
+  }
+});
+
+test('accepts the dispatcher only in its canonical exec form on the tool events', () => {
+  const pre = (config) => config.hooks.PreToolUse[0].hooks[0];
+  const cases = [
+    ['argument count', (config) => { pre(config).args.push('extra'); }, /hook command is not the canonical dispatcher/],
+    ['module path', (config) => {
+      pre(config).args[0] = '${CLAUDE_PLUGIN_ROOT}/hooks/lib/other.js';
+    }, /hook command is not the canonical dispatcher/],
+    ['event flag', (config) => { pre(config).args[1] = 'post'; }, /hook command is not the canonical dispatcher/],
+    ['argument type', (config) => { pre(config).args = 'pre'; }, /hook command is not the canonical dispatcher/],
+    ['lifecycle event', (config) => {
+      config.hooks.Stop[0].hooks.push(dispatcherHook('pre'));
+    }, /hook command is not the canonical dispatcher/],
+    ['group matcher', (config) => { config.hooks.PreToolUse[0].matcher = 'Bash'; }, /hook entry is invalid/],
+    ['missing block', (config) => { delete pre(config).onFailure; }, /hook entry is invalid/],
+    ['post block', (config) => { config.hooks.PostToolUse[0].hooks[0].onFailure = 'block'; }, /hook entry is invalid/],
+    ['extension key', (config) => { pre(config).env = {}; }, /hook entry is invalid/],
+  ];
+  for (const [label, mutate, expected] of cases) {
+    const root = dispatchedFixture();
+    try {
+      rewriteConfig(root, mutate);
+      assert.throws(() => loadCanonicalHookConfig(root), expected, label);
+    } finally {
+      removeFixture(root);
+    }
+  }
+  const root = dispatchedFixture();
+  try {
+    fs.rmSync(path.join(root, 'hooks', 'lib', 'hook-dispatch-v1.js'));
+    assert.throws(() => loadCanonicalHookConfig(root), /hook target is unsafe/);
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('captures the hooks directory this repository ships, its registry read as data', () => {
+  const root = fixture();
+  try {
+    fs.rmSync(path.join(root, 'hooks'), { recursive: true, force: true });
+    fs.cpSync(path.join(PLUGIN_ROOT, 'hooks'), path.join(root, 'hooks'), { recursive: true });
+    const shipped = require(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'hook-registration-v1.js')).DISPATCHED_CHECKS;
+    assert.deepEqual(loadDispatchedChecks(root), JSON.parse(JSON.stringify(shipped)));
+    const contract = captureEvaluatorOwnedHookContract(root);
+    assert.deepEqual(contract.observedHookProcesses.PreToolUse, {
+      Read: ['hook-dispatch-v1.js:pre'],
+      Bash: ['hook-dispatch-v1.js:pre'],
+    });
+    assert.deepEqual(
+      contract.observedExpectedHooks.PreToolUse.Bash.slice(0, 4),
+      EVALUATOR_REQUIRED_HOOKS.PreToolUse.Bash,
+    );
+    assert.equal(verifyCapturedHookContract(root, contract), true);
+  } finally {
     removeFixture(root);
   }
 });

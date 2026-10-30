@@ -128,7 +128,7 @@ of them are new: `zensu_doctor_invocation`'s own "five
 classes" sentence in `zensu-session.sh` (NOT `zensu_doctor_allowed`, whose comment
 carries no count at all — an entry that names the wrong symbol sends a maintainer
 looking at the wrong function), the admission comment in
-`hooks/pre-bash-source-write-gate.sh`, and the "at most `--confirm`" clause in
+`hooks/checks/pre-bash-source-write-gate.sh`, and the "at most `--confirm`" clause in
 `hooks/pre-write-secret-scan.sh`, which is an ARGUMENT claim rather than a class
 count and went stale for the same reason. Before changing the write classes, run
 `grep -rnE 'classes|--confirm' hooks/ docs/ skills/ tests/` and judge every hit.

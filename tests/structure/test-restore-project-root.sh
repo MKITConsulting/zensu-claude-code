@@ -1469,7 +1469,7 @@ if grep -qF 'Confirm with the user before adding `--confirm`' "$SKILL_ADOPT"; th
   check "R8m  the skill carries a consent step for the restore" PASS
 else check "R8m  the skill carries a consent step for the restore" FAIL; fi
 # The write denies that relax this state above the router carry the remedy themselves.
-SWGATE="$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"
+SWGATE="$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"
 # PER DENY, not file-wide: a file-wide count is satisfied by the write-class comment
 # and cannot see a deny that omits the repair. Every emit_deny whose text NAMES the
 # orphaned state must name the repair; the one on the BOUND path must not, because a

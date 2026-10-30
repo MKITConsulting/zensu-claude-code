@@ -2,6 +2,8 @@
 paths:
   - "hooks/lib/bash-source-write-parse.js"
   - "hooks/pre-bash-source-write-gate.sh"
+  - "hooks/checks/pre-bash-source-write-gate.sh"
+  - "hooks/checks/pre-bash-zensu-gate.sh"
   - "hooks/lib/zensu-config.sh"
   - "hooks/lib/claude-path-v1.js"
   - "tests/structure/test-bash-source-write-gate.sh"
@@ -62,7 +64,7 @@ shape is re-encoded only as the W153 probe path.
 silently disabling rule (C) for that spelling with the whole suite green.
 
 **Documentation is machine-enforced in two places that pull in opposite directions.**
-The hook header in `hooks/pre-bash-source-write-gate.sh` must NAME `GIT_MUTATIONS`
+The hook header in `hooks/checks/pre-bash-source-write-gate.sh` must NAME `GIT_MUTATIONS`
 and `GIT_READONLY_FORMS` and re-author neither — W165 fails if a gated verb is
 enumerated there. The parser header must NAME every accepted gap — W192 matches each
 gap's distinguishing clause, not a bare keyword. Both pins also require the "not a
@@ -218,7 +220,7 @@ assertion would stay green, and the real defect would have moved out of view. Th
 argv half is why the gate suite must hand a raw MSYS spelling to `node` over stdin
 rather than as an argument — W121b silently skipped itself on Windows for exactly
 that reason, reporting "spellings coincide" while testing nothing.
-`hooks/pre-bash-source-write-gate.sh` exempts
+`hooks/checks/pre-bash-source-write-gate.sh` exempts
 `CLAUDE_ENV_FILE` from that same conversion by hand (`MSYS2_ENV_CONV_EXCL`), which is
 why `controlPathNamespace` exists for that one variable and why it cannot be reused
 here: it returns a lowercased forward-slash namespace, not `path.resolve`'s.
@@ -321,7 +323,7 @@ unverified regardless of how many checks passed before it.
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 `cmd0` anchoring depends on — is hand-duplicated as a JS literal in
-`hooks/pre-bash-zensu-gate.sh`, where it drives that gate's token scan. The CLI gate also
+`hooks/checks/pre-bash-zensu-gate.sh`, where it drives that gate's token scan. The CLI gate also
 unwraps through `WRAPPERS` in `hooks/lib/subagent-shell-guard-v1.js`, a larger set, and gates
 what either reading finds, so `timeout`, `xargs` or `stdbuf` in front of a command is
 transparent to the CLI gate and not to rule (C).

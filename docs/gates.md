@@ -2,9 +2,13 @@
 
 Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
-receipt — whose VERDICT is what is judged, not its existence, and which a logged
-claim arms even when the anchor's tree is clean (discipline patch 10 in
-[build-workflow.md](build-workflow.md))
+receipt — whose VERDICT is what is judged, not its existence, which a logged
+claim arms even when the anchor's tree is clean, and which must have graded the
+chain's own work tree: the anchor's git top level, or the worktree below it that a
+bound Autopilot run drives, recorded in the receipt as `workTree` and counted beside
+the anchor's change set (discipline patch 10 in
+[build-workflow.md](build-workflow.md); a claim the audit cannot grade as written is
+settled by the `CLAIM CORRECTED` line its verdict names, never by an escape)
 and §Requirements-Table Gate below, which has its own section here — and TWO
 terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
 Eight of the ten are
@@ -43,9 +47,10 @@ command is the report and the manual retry for a refusal. The full account is in
 
 Claude Code has two shell tools, `Bash` and `PowerShell`. The PowerShell tool is on by default on
 Windows for claude.ai and Console accounts, and opt-in elsewhere through
-`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu hook that reads a shell command is registered on
-the `Bash|PowerShell` matcher, and each one judges a PowerShell command or refuses what it cannot
-judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu check that reads a shell command runs on the
+`Bash|PowerShell` matcher as a check of the hook dispatcher (see
+[Configuration](configuration.md)), and each one judges a PowerShell command or refuses what it
+cannot judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
 analyzer, `hooks/lib/powershell-command-v1.js`. Claude Code falls back to Windows PowerShell 5.1
 when PowerShell 7 is not installed, and the two decode the string escapes `` `e `` and `` `u{…} ``
 differently, so the analyzer reads such a string both ways and a verdict holds only when it holds
@@ -549,7 +554,7 @@ chain states.
 ## Browser Consent Gate
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
-(`post-browser-navigation-consent.sh`), both registered on the `Bash|PowerShell` matcher. A
+(`post-browser-navigation-consent.sh`), both run by the hook dispatcher on the `Bash|PowerShell` matcher. A
 PowerShell call that names `playwright-cli` and a `zensu-verify-*` session is refused, so run
 those calls through the Bash tool. It is refused in every spelling the shared PowerShell analyzer
 decodes, a backtick or Unicode escape and joined string literals included, so the prefilter

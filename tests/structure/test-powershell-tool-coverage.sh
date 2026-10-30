@@ -95,7 +95,7 @@ EOF
 grep -qF 'require("./powershell-command-v1.js")' "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" \
   && check "PC5a the source-write parser loads the analyzer from its own hooks/lib" PASS \
   || check "PC5a the source-write parser loads the analyzer from its own hooks/lib" FAIL
-grep -qF 'ZPS=./powershell-command-v1.js' "$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh" \
+grep -qF 'ZPS=./powershell-command-v1.js' "$PLUGIN_DIR/hooks/checks/pre-bash-zensu-gate.sh" \
   && check "PC5b the CLI gate loads the analyzer from its own hooks/lib" PASS \
   || check "PC5b the CLI gate loads the analyzer from its own hooks/lib" FAIL
 grep -qF "require('./powershell-command-v1.js').spellings(" "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" \

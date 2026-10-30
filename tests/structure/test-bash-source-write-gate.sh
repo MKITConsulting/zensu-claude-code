@@ -7,6 +7,8 @@ set -u
 # ambient HOME into the gate, not a sandbox, so it cannot stand in for one.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"
+HOOK_BODY="$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"
+DISPATCHER="$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"
 PARSER="$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 
@@ -197,23 +199,25 @@ reason() {
 node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const reg=require(process.argv[2]);
-  const pres=(h.hooks&&h.hooks.PreToolUse)||[];
+  const hooks=reg.registeredHooks(h,"PreToolUse")||[];
   const covers=(e,tool)=>reg.hostMatcherCovers(e.matcher,tool)===reg.REGISTRATION.REGISTERED;
-  const ok=pres.some(e=>covers(e,"Bash") && covers(e,"PowerShell") && !covers(e,"Read") && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"") && z.timeout===60));
+  const ok=hooks.some(e=>covers(e,"Bash") && covers(e,"PowerShell") && !covers(e,"Read") && /pre-bash-source-write-gate\.sh/.test(e.command) && e.timeout===60);
   process.exit(ok?0:1);
 ' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null \
   && check "W4 registered on a PreToolUse matcher covering Bash and PowerShell with timeout 60" PASS || check "W4 registered on a PreToolUse matcher covering Bash and PowerShell with timeout 60" FAIL
 
-{ grep -qF 'zensu_hook_opted_in bashWriteGate || exit 0' "$HOOK" \
-  && ! grep -qF 'zensu_hook_enabled bashWriteGate' "$HOOK"; } \
+{ grep -qF 'zensu_hook_opted_in bashWriteGate || exit 0' "$HOOK_BODY" \
+  && ! grep -qF 'zensu_hook_enabled bashWriteGate' "$HOOK_BODY" \
+  && grep -qF "configHookOptedIn('bashWriteGate'" "$DISPATCHER" \
+  && ! grep -qF "configHookEnabled('bashWriteGate'" "$DISPATCHER"; } \
   && check "W5 config-gated via zensu_hook_opted_in bashWriteGate (opt-in, default off)" PASS \
   || check "W5 config-gated via zensu_hook_opted_in bashWriteGate (opt-in, default off)" FAIL
 
-HOOK_OPT_IN_NOTE="$(sed -n 's/^OPT_IN_NOTE="\(.*\)"$/\1/p' "$HOOK")"
+HOOK_OPT_IN_NOTE="$(sed -n 's/^OPT_IN_NOTE="\(.*\)"$/\1/p' "$HOOK_BODY")"
 PARSER_OPT_IN_NOTE="$(node -e 'process.stdout.write(String(require(process.argv[1]).OPT_IN_NOTE).trim())' \
   "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
 { [ -n "$HOOK_OPT_IN_NOTE" ] && [ "$HOOK_OPT_IN_NOTE" = "$PARSER_OPT_IN_NOTE" ] \
-  && [ "$(grep -cF '${OPT_IN_NOTE}' "$HOOK")" -eq 4 ]; } \
+  && [ "$(grep -cF '${OPT_IN_NOTE}' "$HOOK_BODY")" -eq 4 ]; } \
   && check "W5b the hook's OPT_IN_NOTE equals the parser's exported note and reaches the four hook-side denies that interpolate it" PASS \
   || check "W5b hook note '$HOOK_OPT_IN_NOTE' vs parser note '$PARSER_OPT_IN_NOTE'" FAIL
 
@@ -516,18 +520,20 @@ run "W79 host session-id rebind ignores bashWriteGate:false" \
 
 # The mandatory control parser is a trust boundary. A selective runtime failure
 # must deny before config and escape hatches instead of falling through.
-REAL_NODE="$(command -v node)"
-CONTROL_FAIL_BIN="$WORKROOT/control-fail-bin"
-mkdir -p "$CONTROL_FAIL_BIN"
+CONTROL_FAIL_PRELOAD="$WORKROOT/control-fail.js"
 printf '%s\n' \
-  '#!/bin/bash' \
-  'if [ "${BSWG_MODE:-}" = "control" ]; then exit 23; fi' \
-  'exec "${ZENSU_TEST_REAL_NODE:?}" "$@"' \
-  > "$CONTROL_FAIL_BIN/node"
-chmod +x "$CONTROL_FAIL_BIN/node"
+  "if (process.env.BSWG_MODE === 'control') process.exit(23);" \
+  "const Module = require('module');" \
+  "const load = Module._load;" \
+  "Module._load = function (request) {" \
+  "  const loaded = load.apply(this, arguments);" \
+  "  if (!/bash-source-write-parse\\.js\$/.test(request) || !loaded || typeof loaded.controlVerdict !== 'function') return loaded;" \
+  "  return Object.assign({}, loaded, { controlVerdict() { throw new Error('control parser failure'); } });" \
+  "};" \
+  > "$CONTROL_FAIL_PRELOAD"
 OUT_CONTROL_FAIL="$(payload 'git status' | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
   -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
-  PATH="$CONTROL_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$REAL_NODE" \
+  NODE_OPTIONS="--require=$CONTROL_FAIL_PRELOAD" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$PROJ/.claude-env" \
   ZENSU_CONFIG="$CFG_OFF" ZENSU_BASH_WRITE_GATE=off \
   bash "$HOOK" 2>/dev/null | classify)"
@@ -1027,7 +1033,7 @@ VERB_CTRL="$(payload "git -C $SIB status" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
 # The hook header must POINT at the tables rather than re-author them; an
 # enumeration there is prose that silently drifts from the code.
-HEADER_BLOCK="$(sed -n '1,60p' "$HOOK")"
+HEADER_BLOCK="$(sed -n '1,60p' "$HOOK_BODY")"
 HEADER_ENUM=""
 for v in $GIT_VERBS; do
   case "$v" in mv|worktree) continue ;; esac
@@ -1298,7 +1304,7 @@ NARROWED_CALLERS="$( {
   grep -rlF 'zensu_emit_hook_session_deny narrowed' "$PLUGIN_DIR/hooks"
   grep -rlE 'zensu_emit_named_bind_deny "\$[A-Za-z_][A-Za-z0-9_]*" narrowed' "$PLUGIN_DIR/hooks"
 } 2>/dev/null | sort -u)"
-NARROWED_EXPECTED="$(printf '%s\n%s\n' "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" "$PLUGIN_DIR/hooks/pre-write-secret-scan.sh" | sort)"
+NARROWED_EXPECTED="$(printf '%s\n%s\n' "$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh" "$PLUGIN_DIR/hooks/checks/pre-write-secret-scan.sh" | sort)"
 [ "$NARROWED_CALLERS" = "$NARROWED_EXPECTED" ] \
   && check "W97 only the two predicate-filtering gates use the narrowed deny scope" PASS \
   || check "W97 narrowed-scope callers (got '$NARROWED_CALLERS')" FAIL
