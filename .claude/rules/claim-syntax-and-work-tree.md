@@ -180,6 +180,16 @@ it to the inventory, so a clean work-tree receipt no longer sits beside a foreig
 `finding-verify --root "$TOP"`, and skips the external review import when `{work_tree}` is not
 `$TOP`, because the import's root rule refuses a nested work tree. `/zensu:self-review` Phase 1
 enumerates through the same `--change-set` call instead of its own copy of the recipe.
+`/zensu:build` Phase 1 step 3 and `/zensu:self-review` Phase 4 run every project command as
+`cd "<project dir>" && …`, where the directory is what `--chain-work-tree --project-dir` prints:
+the project root, or the bound worktree's directory for it.
+
+**Evidence and acceptance.** The evidence runner and the acceptance gate consume the same
+resolver. For a bound chain `--evidence-run` runs in the worktree, and the full-suite verdict, the
+acceptance runs and the acceptance records measure the combined tree of the project and the
+worktree (`.claude/rules/evidence-runner.md`). A worktree the resolver cannot answer refuses
+`--evidence-run` and both acceptance verbs with exit 2, and the bound terminus reads the
+full-suite verdict `unavailable`.
 
 ## Coupled sites
 
@@ -204,12 +214,6 @@ import-layout paragraph of `docs/review-chain.md`, and §5 of `docs/multi-repo-c
 
 ## Known gaps
 
-- **The evidence runner and the acceptance gate do not follow the work tree.** `runDirectory` in
-  `evidence-run-v1.js` moves a working directory inside a nested work tree back to the project
-  root, so the `--chain-done` full suite of such a chain runs in the anchor unless its command
-  opens with a literal `cd`, and acceptance records fingerprint the project root alone. The
-  project commands `/zensu:build` and `/zensu:self-review` prescribe as `cd "{project_root}" && …`
-  run in the anchor too. This is the first follow-up and consumes the same resolver.
 - A file inside a work tree whose name holds whitespace or pattern characters cannot be claimed;
   the census found none.
 - A claim on an ignored path grades `EDIT LANDED (untracked-by-design)` whether or not the file

@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 26,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 29,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
     },
@@ -52,7 +52,7 @@
       "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 80, "skips": {"win32": 3},
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 89, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },

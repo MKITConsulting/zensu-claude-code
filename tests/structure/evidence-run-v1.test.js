@@ -1094,3 +1094,140 @@ test('an acceptance run keeps the project-root fingerprint the acceptance gate b
   assert.equal(record.tree_end, evr.computeTree(root, tempDir('scratch')).tree);
 });
 
+test('with a bound work tree the run directory keeps a cwd inside it and moves any other cwd to the work directory', () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const other = nestedRepository(root, 'nested-repo');
+  assert.deepEqual(evr.runDirectory(root, path.join(tree, 'sub'), evr.LIMITS, tree), { cwd: path.join(tree, 'sub'), moved: false });
+  assert.deepEqual(evr.runDirectory(root, root, evr.LIMITS, tree), { cwd: tree, moved: true });
+  assert.deepEqual(evr.runDirectory(root, other, evr.LIMITS, tree), { cwd: tree, moved: true });
+  assert.deepEqual(evr.runDirectory(root, path.join(root, 'sub'), evr.LIMITS, path.join(tree, 'sub')), { cwd: path.join(tree, 'sub'), moved: true });
+  assert.deepEqual(evr.runDirectory(root, '', evr.LIMITS, tree), { cwd: tree, moved: false });
+  assert.deepEqual(evr.runDirectory(root, tree), { cwd: root, moved: true });
+  assert.deepEqual(evr.runDirectory(root, path.join(root, 'sub'), evr.LIMITS, null), { cwd: path.join(root, 'sub'), moved: false });
+});
+
+test('a run bound to a work tree that starts outside it runs there, says so and fingerprints the project with the work tree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  const result = await runIn(root, data, { cwd: root, command: PRINT_CWD, workTree: tree, workDirectory: tree });
+  assert.ok(result.stdout.split('\n').includes(tree), result.stdout);
+  assert.match(result.stderr, /the working directory is not in the work tree of this Autopilot-bound chain, so the command runs in /);
+  const [record] = recordsOf(data);
+  assert.equal(record.cwd, tree);
+  assert.equal(record.tree_end, evr.computeFingerprint(root, tree, tempDir('scratch')).tree);
+  const inside = await runIn(root, data, { cwd: path.join(tree, 'sub'), command: PRINT_CWD, workTree: tree, workDirectory: tree });
+  assert.ok(inside.stdout.split('\n').includes(path.join(tree, 'sub')), inside.stdout);
+  assert.doesNotMatch(inside.stderr, /so the command runs in/);
+});
+
+test('a bound verdict measures the work tree, not the root of the newest record', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { command: 'true' });
+  assert.equal(verdictFor(root, data).state, 'pass');
+  assert.equal(verdictFor(root, data, { workTree: tree }).state, 'stale');
+  await runIn(root, data, { command: 'true', workTree: tree, workDirectory: tree });
+  const pass = verdictFor(root, data, { workTree: tree });
+  assert.equal(pass.state, 'pass');
+  assert.match(pass.lines[0], /exit 0 on the current tree [0-9a-f]{12} of the project and \.claude\/worktrees\/wt \(record /);
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  const stale = verdictFor(root, data, { workTree: tree });
+  assert.equal(stale.state, 'stale');
+  assert.match(stale.lines[0], /files changed since: \.claude\/worktrees\/wt\/a\.txt/);
+});
+
+test('in CI mode a bound verdict compares every test run with the work tree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { scope: 'scoped', command: 'true' });
+  assert.equal(verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY }).state, 'deferred-ci');
+  assert.equal(verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY, workTree: tree }).state, 'stale');
+  await runIn(root, data, { scope: 'scoped', command: 'true', workTree: tree, workDirectory: tree });
+  const deferred = verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY, workTree: tree });
+  assert.equal(deferred.state, 'deferred-ci');
+  assert.match(deferred.lines[0], /on the current tree [0-9a-f]{12} of the project and \.claude\/worktrees\/wt exited 0/);
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  assert.equal(verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY, workTree: tree }).state, 'stale');
+});
+
+test('a bound --if-stale run measures the work tree even when its command leaves it', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  const away = `cd ${evr.shellQuote(root)} && true`;
+  for (const scope of ['full', 'scoped']) {
+    await runIn(root, data, { scope, command: away });
+    const plain = await runIn(root, data, { scope, command: away, ifStale: true });
+    assert.match(plain.stdout, /skipped \(--if-stale\)/, `${scope}: ${plain.stdout}`);
+    const bound = await runIn(root, data, { scope, command: away, ifStale: true, workTree: tree, workDirectory: tree });
+    assert.doesNotMatch(bound.stdout, /skipped \(--if-stale\)/, `${scope}: ${bound.stdout}`);
+  }
+});
+
+test('a bound verdict whose work tree could not be resolved is unavailable and names the cause', async () => {
+  const root = gitRepo();
+  const data = pluginData();
+  await runIn(root, data, { command: 'true' });
+  const result = verdictFor(root, data, { workTreeFault: 'the record of the bound Autopilot run r1 could not be read' });
+  assert.equal(result.state, 'unavailable');
+  assert.equal(result.passes, false);
+  assert.match(result.lines[0], /^FULL SUITE — unavailable \| the work tree of this Autopilot-bound chain could not be resolved \(the record of the bound Autopilot run r1 could not be read\), so no run can be bound to it \| cmd: none recorded \| gate: required$/);
+  assert.equal(verdictFor(root, data, { gateMode: 'advisory', workTreeFault: 'gone' }).passes, true);
+  assert.equal(verdictFor(root, data, { escape: true, workTreeFault: 'gone' }).state, 'escaped');
+  const ci = verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY, workTreeFault: 'gone' });
+  assert.equal(ci.state, 'unavailable');
+  assert.match(ci.lines[0], /could not be resolved \(gone\), so no run can be bound to it/);
+});
+
+test('a bound verdict whose work tree cannot be fingerprinted passes only on a run in that work tree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const limits = { untrackedMaxFiles: 0 };
+  fs.writeFileSync(path.join(tree, 'untracked.txt'), 'x\n');
+  const data = pluginData();
+  await runIn(root, data, { command: 'true' });
+  const anchored = verdictFor(root, data, { workTree: tree, limits });
+  assert.equal(anchored.state, 'missing');
+  assert.equal(anchored.passes, false);
+  await runIn(root, data, { command: 'true', workTree: tree, workDirectory: tree, limits });
+  const inTree = verdictFor(root, data, { workTree: tree, limits });
+  assert.equal(inTree.state, 'pass-tree-unverified');
+  assert.match(inTree.lines[0], /work tree: more than 0 untracked files\), so freshness is unverified/);
+  const ciData = pluginData();
+  await runIn(root, ciData, { scope: 'scoped', command: 'true' });
+  assert.equal(verdictFor(root, ciData, { ciPolicy: NESTED_CI_POLICY, workTree: tree, limits }).state, 'missing');
+  await runIn(root, ciData, { scope: 'scoped', command: 'true', workTree: tree, workDirectory: tree, limits });
+  assert.equal(verdictFor(root, ciData, { ciPolicy: NESTED_CI_POLICY, workTree: tree, limits }).state, 'deferred-ci');
+});
+
+test('an acceptance run bound to a work tree fingerprints the project with the work tree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { scope: 'acceptance', command: 'true', workTree: tree, workDirectory: tree });
+  const [record] = recordsOf(data);
+  assert.equal(record.cwd, tree);
+  assert.equal(record.tree_end, evr.computeFingerprint(root, tree, tempDir('scratch')).tree);
+});
+
+test('the verdict CLI reads the work tree and its fault from the transport', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { command: 'true' });
+  const env = { ...process.env, ZENSU_EVR_PLUGIN_DATA: data, ZENSU_EVR_SESSION_KEY: SESSION, ZENSU_EVR_PROJECT_ROOT: root, ZENSU_EVR_CWD: '' };
+  const transport = tempDir('transport');
+  const bound = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env: { ...env, ZENSU_EVR_DIR: transport, ZENSU_EVR_WORK_TREE: tree }, encoding: 'utf8' });
+  assert.equal(bound.status, 1, bound.stderr);
+  assert.equal(fs.readFileSync(path.join(transport, 'verdict-state'), 'utf8'), 'stale');
+  const faulty = tempDir('transport');
+  fs.writeFileSync(path.join(faulty, 'work-tree-fault'), 'the run record is gone');
+  const fault = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env: { ...env, ZENSU_EVR_DIR: faulty }, encoding: 'utf8' });
+  assert.equal(fault.status, 2, fault.stderr);
+  assert.match(fault.stderr, /could not be resolved \(the run record is gone\)/);
+});
+

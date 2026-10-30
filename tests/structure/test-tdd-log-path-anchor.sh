@@ -88,10 +88,12 @@ else
 fi
 
 SELF_REVIEW_FIX="$(awk '/^## Phase 4: Fix Round or Finalize$/{f=1;next} f&&/^## /{exit} f' "$SELF_REVIEW")"
-if printf '%s' "$SELF_REVIEW_FIX" | grep -Fq '`cd "<project root>" && <command>`, where `<project root>` is the path `--project-root`'; then
-  check "L9b the /zensu:self-review fix round runs its project commands inside the bound root" PASS
+SELF_REVIEW_FIX_FLAT="$(printf '%s' "$SELF_REVIEW_FIX" | tr '\n' ' ' | sed 's/  */ /g')"
+if printf '%s' "$SELF_REVIEW_FIX_FLAT" | grep -Fq '`cd "<project dir>" && <command>`, where `<project dir>` is what the Phase 1 `--chain-work-tree` call prints with `--project-dir` added' \
+  && ! printf '%s' "$SELF_REVIEW_FIX_FLAT" | grep -Fq 'cd "<project root>"'; then
+  check "L9b the /zensu:self-review fix round runs its project commands in the directory --chain-work-tree --project-dir prints" PASS
 else
-  check "L9b the /zensu:self-review fix round runs its project commands inside the bound root" FAIL
+  check "L9b the /zensu:self-review fix round runs its project commands in the directory --chain-work-tree --project-dir prints" FAIL
 fi
 
 CONVERGE_PHASE0="$(awk '/^## Phase 0: Locate the plan$/{f=1;next} f&&/^## /{exit} f' "$PLUGIN_DIR/skills/converge/SKILL.md")"
@@ -103,12 +105,14 @@ else
   check "L10 /zensu:converge discovers plans under the --project-root path and asks rather than guessing" FAIL
 fi
 
-if grep -Fq 'as `cd "{project_root}" && <command>`' "$SKILL" \
+if grep -Fq 'as `cd "{project_dir}" && <command>`, where `{project_dir}` is the path `CLAUDE_PLUGIN_DATA="{plugin_data}" bash "{plugin_root}/hooks/lib/zensu-log.sh" --chain-work-tree --project-dir` prints' "$SKILL" \
+  && ! grep -Fq 'cd "{project_root}" &&' "$SKILL" \
   && ! grep -Fq 'cd -- "{project_root}"' "$SKILL" \
+  && ! grep -Fq 'cd -- "{project_dir}"' "$SKILL" \
   && grep -Fq '(the Phase 4 test runs, the build, `{coverage_cmd}` and the step 5 `stat`)' "$SKILL"; then
-  check "L11 /zensu:build runs every project command it prescribes inside {project_root}" PASS
+  check "L11 /zensu:build runs every project command it prescribes in the directory --chain-work-tree --project-dir prints" PASS
 else
-  check "L11 /zensu:build runs every project command it prescribes inside {project_root}" FAIL
+  check "L11 /zensu:build runs every project command it prescribes in the directory --chain-work-tree --project-dir prints" FAIL
 fi
 
 VERIFY="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
