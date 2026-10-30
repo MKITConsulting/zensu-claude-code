@@ -149,6 +149,11 @@
       "summary": "The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup."
     },
     {
+      "path": "tests/structure/repo-conventions-v1.test.js", "registered": 23, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-vcs-detect.sh" }],
+      "summary": "The repository-conventions probe: PR templates per forge, the checks a configured template and the .zensu/templates overrides pass, commitlint configs, the default-branch history sample, trailer counts and the contributing documents."
+    },
+    {
       "path": "tests/structure/restore-root-render-cases.test.js", "registered": 79,
       "runs": [{ "driver": "tests/structure/test-restore-project-root.sh" }],
       "summary": "Restoring a vanished recorded project root: the verdict, restore and outcome renderers and their refusal arms."
@@ -289,7 +294,7 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 100,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 101,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."

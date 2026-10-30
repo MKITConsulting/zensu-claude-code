@@ -26,6 +26,20 @@ is exactly the harm this rule exists to prevent, whether or not the file is
 tracked here. Every tracked file must be English-only, and so must every
 artifact the plugin emits.
 
+**Third clarification — prose written into a consuming repository.** A commit
+message, a pull request title and body, and a review or thread reply that Zensu
+writes into a consuming repository belong to that repository, not to the plugin,
+so they follow that repository's language. `skills/autopilot/rules/conventions.md`
+holds the precedence: a `vcs.language` value, then what the repository's own
+commits, PR template and contributing documents show, then the user's own
+instruction. "Every artifact the plugin emits" above means the plugin's own files
+and output; this text is the repository's. Zensu's own artifacts stay English in every repository:
+`.zensu/plans/`, `.zensu/logs/`, run logs, review packets, and the section
+headings Zensu appends to a pull request body, such as `## Acceptance criteria`
+and `## Verification`, with the ids, status words and audit label inside them that
+tools read back. This repository's own commits and pull requests stay
+English, because English is this repository's language.
+
 **Carve-out — verbatim user-utterance match literals.** Hook directive strings
 — and verbatim citations of those literals in structure-test pins, in
 README/CHANGELOG feature descriptions, and in this carve-out — may contain
