@@ -46,11 +46,11 @@ bash -n "$HOOK" 2>/dev/null && check "A2 bash -n syntax check passes" PASS || ch
 # ── A3 registration, matcher included ────────────────────────────────
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const hit=(h.hooks.PreToolUse||[]).find(e=>(e.hooks||[])
-    .some(z=>/pre-agent-reviewer-allow\.sh/.test(z.command||"")));
+  const hit=(require(process.argv[2]).registeredHooks(h,"PreToolUse")||[])
+    .find(z=>/pre-agent-reviewer-allow\.sh/.test(z.command||""));
   if(!hit) process.exit(1);
   process.exit(hit.matcher==="Agent|Task"?0:2);
-' "$HOOKS_JSON" 2>/dev/null; then
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
   check "A3 registered in hooks.json PreToolUse on matcher Agent|Task" PASS
 else
   check "A3 registered in hooks.json PreToolUse on matcher Agent|Task" FAIL
@@ -413,16 +413,15 @@ esac
 A29_BAD=""
 A29_HOOKS="$(node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const reg=require(process.argv[2]);
   const out=[];
-  for (const g of (h.hooks.PreToolUse||[])) {
-    if (!new RegExp(g.matcher || ".*").test("Agent")) continue;
-    for (const e of (g.hooks||[])) {
-      const m=/hooks\/([A-Za-z0-9._-]+\.sh)/.exec(e.command||"");
-      if (m) out.push(m[1]);
-    }
+  for (const e of (reg.registeredHooks(h,"PreToolUse")||[])) {
+    if (reg.hostMatcherCovers(e.matcher,"Agent")!==reg.REGISTRATION.REGISTERED) continue;
+    const m=/hooks\/([A-Za-z0-9._-]+\.sh)/.exec(e.command||"");
+    if (m) out.push(m[1]);
   }
   process.stdout.write([...new Set(out)].join(" "));
-' "$HOOKS_JSON" 2>/dev/null)"
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null)"
 for hk in $A29_HOOKS; do
   [ "$hk" = "pre-agent-reviewer-allow.sh" ] && continue
   HK_OUT="$(node -e '
@@ -448,12 +447,13 @@ fi
 # ── A30 the hook reads the flag through the FAIL-CLOSED helper ───────────────
 # A14/A15 pass identically under either reader, so without this pair the whole FR-001
 # decision could be reverted with every check green.
-if grep -qF 'zensu_hook_enabled_strict reviewerSpawnAutoAllow' "$HOOK"; then
-  check "A30 the hook reads the flag through zensu_hook_enabled_strict" PASS
+DISPATCHER="$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"
+if grep -qF "configHookEnabledStrict('reviewerSpawnAutoAllow'" "$DISPATCHER"; then
+  check "A30 the check reads the flag through configHookEnabledStrict" PASS
 else
-  check "A30 the hook reads the flag through zensu_hook_enabled_strict" FAIL
+  check "A30 the check reads the flag through configHookEnabledStrict" FAIL
 fi
-if grep -qE '(^|[^_])zensu_hook_enabled reviewerSpawnAutoAllow' "$HOOK"; then
+if grep -qF "configHookEnabled('reviewerSpawnAutoAllow'" "$DISPATCHER"; then
   check "A30a the permissive reader is not used on this key" FAIL
 else
   check "A30a the permissive reader is not used on this key" PASS
@@ -727,10 +727,10 @@ A39_ERR="$(printf 'x\000y' \
 # shell holds the first with no ceiling at all. Pinned at source because the memory bound
 # is not observable from the outside, and the sibling technique already exists in
 # hooks/lib/zensu-config.sh.
-if grep -qE 'head -c' "$HOOK"; then
-  check "A39a the hook caps its stdin read at the shell boundary" PASS
+if grep -qF 'context.raw.subarray(0, limit + 1)' "$DISPATCHER"; then
+  check "A39a the check caps its payload copy one byte over the module's limit" PASS
 else
-  check "A39a the hook caps its stdin read at the shell boundary" FAIL
+  check "A39a the check caps its payload copy one byte over the module's limit" FAIL
 fi
 
 # ── A40 the cheapest condition runs before the ones that cost processes ──────
@@ -739,10 +739,11 @@ fi
 # because there is nothing observable to assert: an ordinary Agent spawn that names no
 # confined reviewer must not pay a principal read, a Session Control bind and two node
 # starts to be refused by a check that reads stdin alone.
-A40_DEC="$(grep -n 'node ./reviewer-spawn-allow-v1.js' "$HOOK" | head -1 | cut -d: -f1)"
-A40_BIND="$(grep -n 'zensu_bind_hook_session' "$HOOK" | head -1 | cut -d: -f1)"
-A40_PRIN="$(grep -n 'zensu_hook_is_main_principal' "$HOOK" | head -1 | cut -d: -f1)"
-A40_CFG="$(grep -n 'zensu_hook_enabled_strict' "$HOOK" | head -1 | cut -d: -f1)"
+A40_BODY="$(awk '/^function runSpawnGrant/,/^}$/' "$DISPATCHER")"
+A40_DEC="$(printf '%s\n' "$A40_BODY" | grep -n "decide(spawnPayload" | head -1 | cut -d: -f1)"
+A40_BIND="$(printf '%s\n' "$A40_BODY" | grep -n 'shellBinding(context' | head -1 | cut -d: -f1)"
+A40_PRIN="$(printf '%s\n' "$A40_BODY" | grep -n 'mainPrincipal(context.input' | head -1 | cut -d: -f1)"
+A40_CFG="$(printf '%s\n' "$A40_BODY" | grep -n 'configHookEnabledStrict' | head -1 | cut -d: -f1)"
 if [ -n "$A40_DEC" ] && [ -n "$A40_BIND" ] && [ -n "$A40_PRIN" ] && [ -n "$A40_CFG" ] \
    && [ "$A40_DEC" -lt "$A40_BIND" ] && [ "$A40_DEC" -lt "$A40_PRIN" ] \
    && [ "$A40_DEC" -lt "$A40_CFG" ]; then

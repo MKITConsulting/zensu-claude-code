@@ -91,7 +91,7 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
 (`hooks/lib/bash-source-write-parse.js:901`) and rule (C) at the same predicate
 for git targets (`:947`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:796`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
+`CLAUDE_PROJECT_DIR` (`:796`). `hooks/checks/pre-edit-tdd-reminder.sh:132-147` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
@@ -421,7 +421,7 @@ candidate whose price did not rise.
 chain at `UNINITIALIZED` denies all three destinations, but with the phase
 wording and for the unrelated directory too: that is TDD discipline, not
 containment, and it lifts at `RED_WRITE` and `REFACTOR`
-(`hooks/pre-edit-tdd-reminder.sh:206, :219`). Reading that deny as a boundary is the
+(`hooks/checks/pre-edit-tdd-reminder.sh:193, :206`). Reading that deny as a boundary is the
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`

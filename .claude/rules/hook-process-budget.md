@@ -5,6 +5,11 @@ paths:
   - "hooks/lib/zensu-session.sh"
   - "hooks/pre-reviewer-capability-gate.sh"
   - "hooks/pre-write-secret-scan.sh"
+  - "hooks/pre-edit-tdd-reminder.sh"
+  - "hooks/pre-write-plugin-data-guard.sh"
+  - "hooks/pre-agent-reviewer-allow.sh"
+  - "hooks/post-artifact-redact.sh"
+  - "hooks/lib/edit-path-class-v1.js"
   - "hooks/lib/bash-source-write-parse.js"
   - "hooks/hooks.json"
   - "hooks/lib/hook-dispatch-v1.js"
@@ -25,11 +30,22 @@ Git Bash for Windows pays a full process creation for every hook process the hos
 program a hook starts and every `$(...)` subshell. Measured with the budget suite on macOS
 (bash 3.2), in an armed session:
 
-| Call | Before stage 1 | After stage 1 | After stage 2 |
-|---|---|---|---|
-| Bash | 56 programs | 9 hook processes, 18 programs (8 `node`) | 2 hook processes, 0 programs |
-| Read | 11 programs | 3 hook processes, 1 program (1 `node`) | 2 hook processes, 0 programs |
-| Edit | 122 programs | 7 hook processes, 41 programs (33 `node`) | 6 hook processes, 34 programs (28 `node`) |
+| Call | Before stage 1 | After stage 1 | After stage 2 | After stage 3 |
+|---|---|---|---|---|
+| Bash | 56 programs | 9 hook processes, 18 programs (8 `node`) | 2 hook processes, 0 programs | unchanged |
+| Read | 11 programs | 3 hook processes, 1 program (1 `node`) | 2 hook processes, 0 programs | unchanged |
+| Edit | 122 programs | 7 hook processes, 41 programs (33 `node`) | 6 hook processes, 34 programs (28 `node`) | 2 hook processes, 0 programs |
+| NotebookEdit | | | 4 hook processes, 3 programs (2 `node`) | 2 hook processes, 0 programs |
+| Agent | | | 4 hook processes, 11 programs (9 `node`) | 3 hook processes, 6 programs (5 `node`) |
+
+Stage 3 was measured with the suite's armed vanilla fixture. A strict chain, a deny and a bind failure
+still run the edit gate's body. `B4` holds a strict chain's count: 2 hook processes and 59 programs (40
+`node`), against 6 hook processes and 62 programs (43 `node`) before stage 3. The groups left out,
+measured the same way: `ExitPlanMode` 3 hook
+processes and 31 programs (21 `node`), `Workflow` 3 and 2 (1 `node`), and the `Agent` row above,
+whose 6 programs are `post-review-tdd-delegate.sh`. Those three fire per plan, per workflow and per
+subagent rather than per ordinary tool call, and most of their work is the body itself, so folding
+one saves its one hook process.
 
 **The suite counts every hook process and every program a hook starts through `PATH`.** It
 writes a shim for every executable name on the runner's `PATH`, runs every registration
@@ -57,17 +73,35 @@ against Windows executables.
 - **The check registry** is `DISPATCHED_CHECKS` in `hooks/lib/hook-registration-v1.js`: one frozen
   `{ event, name, matcher, script, body, failure }` per check, in the order the nine registrations
   had, the capability check first. `matcher` is the original host matcher string, evaluated with
-  `hostMatcherCovers`, so a `Bash|PowerShell` check never runs for `Read`. `script` names the
-  entry point under `hooks/`, `body` the old hook body under `hooks/checks/` (`null` for the
-  capability and redact checks, which run in-process only), and `failure` the policy.
+  `hostMatcherCovers`, so a `Bash|PowerShell` check never runs for `Read` and an
+  `Edit|Write|MultiEdit` check never runs for `NotebookEdit`, which an unanchored regular expression
+  would select. `script` names the entry point under `hooks/`, `body` the old hook body under
+  `hooks/checks/` (`null` for the capability, redact, data-guard and spawn-grant checks, which run
+  in-process only), and `failure` the policy. A hook that had several registrations has one entry
+  per original group, under its own `name` and with the same `script`, `body` and `failure`
+  (`secret-scan`, `secret-scan-write`, `secret-scan-notebook`), and its entry point dispatches the
+  first of them. The registry is one key set: a further key is a strict-key-set change.
 - **Sequential, one budget.** Checks run one after another inside one 55 s budget under the
   60 s registration timeout; a delegated body gets the rest of that budget, at least 1 s. This
   removes the sibling race of separate hook processes and costs a slow check's time to the
   checks behind it.
 - **Failure policy per check.** The capability check, the source-write gate and the browser
   consent gate on a marked call fail closed: exit 2 with the check's message. The CLI gate, the
-  secret scan, the work-order checks, the redact sweep and the consent recorder fail open with a
-  stderr line, as the separate hooks did.
+  secret scan, the work-order checks, the redact sweep, the consent recorder, the data guard and the
+  edit gate fail open with a stderr line, as the separate hooks did: a host treated their crash or
+  timeout as a non-blocking error. The edit gate's own fail-closed decisions are denies of its body,
+  not this policy. The spawn grant fails silent.
+- **The edit gate allows in-process and decides nothing else** (`editGateAllows`). It answers true
+  only for a child principal, another tool, a bound session with a valid document and no active
+  chain, or an active vanilla chain and a target that `editPathClass` does not class as state. A
+  strict chain, a bind failure, a missing or invalid document, a missing shell library,
+  `ZENSU_TDD_GATE=off`, an unrenderable path and any exception run `hooks/checks/pre-edit-tdd-reminder.sh`,
+  so every deny and the bypass ledger stay the body's. `hooks/lib/edit-path-class-v1.js` is the one path
+  classifier: the body runs it as a program and the dispatcher requires it. `D1` in the budget suite
+  compares the body and the check byte for byte over the states it drives.
+- **The data guard's caller directory.** A full dispatcher run anchors a relative target at
+  its own working directory, and only an `--only` run reads `ZENSU_GUARD_CALLER_CWD`, which the wrapper
+  exports unconditionally before its `cd -P`. `G47` pins that an inherited value decides nothing.
 - **Aggregation like the host.** deny > defer > ask > allow; the reasons of the winning decision
   join in registry order; `additionalContext` joins in registry order, capped at 10,000
   characters with the capability check's text first; `systemMessage`, `decision: "block"`,
@@ -84,11 +118,10 @@ against Windows executables.
   `hook-dispatch-v1.js <pre|post> --only <check>` through `hooks/lib/zensu-hook-dispatch.sh`,
   which runs the named check whatever its matcher and reproduces the old hook's output and exit
   status. Without `node` a wrapper with a body runs it directly, as the old hook behaved, the
-  capability wrapper refuses with exit 2 and names `node`, and the redact wrapper writes its old
-  stderr note and allows. The capability wrapper keeps the guarded capture
+  capability wrapper refuses with exit 2 and names `node`, the redact and data-guard wrappers write
+  their stderr notes and allow, and the spawn-grant wrapper exits 0 without a word. The capability wrapper keeps the guarded capture
   (`zensu_hook_dispatch_guarded`), so a dispatcher that cannot start still refuses with exit 2
-  and a one-line reason. `pre-write-secret-scan.sh` and
-  `post-artifact-redact.sh` stay registered directly on their `Edit`/`Write` groups.
+  and a one-line reason.
 - **One registration reader.** `registration()`, `hookEntries` and `registeredHooks` in
   `hook-registration-v1.js` expand a dispatcher entry into one virtual
   `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<script>"` entry per check, carrying the check's matcher, so the
@@ -169,9 +202,8 @@ token the pre-check lacks, fails there. `zensu-tdd-phase.sh` is sourced only to 
 - Hooks keep reading stdin with `cat`: `read -d ''` keeps a trailing newline that `$(cat)`
   strips, and it reads a pipe one byte per system call.
 - The browser consent prefilter keeps its `sed | tr` pass (`.claude/rules/browser-consent-gate.md`).
-- The `Edit`/`Write`/`NotebookEdit` and `Agent`/`Task` groups keep their registrations, so an Edit
-  call still starts 6 hook processes and 34 programs, most of them in `pre-edit-tdd-reminder.sh`.
-  Folding those groups into the dispatcher is the follow-up.
+- `ExitPlanMode`, `Workflow` and the `Agent|Task` PostToolUse delegate keep their registrations, for
+  the reason under the table above.
 - Every hook registered on `PreToolUse` or `PostToolUse`, and every library such a hook
   sources, finds its own directory without starting `dirname`. `zensu-autopilot-state.sh`
   keeps one only in the default it uses when `CLAUDE_PLUGIN_ROOT` is unset, which no hook
@@ -184,6 +216,20 @@ token the pre-check lacks, fails there. `zensu-tdd-phase.sh` is sourced only to 
 - A `dirname` of a state or marker path is not a hook finding its own directory, so it
   stays, for example in `pre-edit-tdd-reminder.sh`, `post-review-tdd-delegate.sh`,
   `zensu-config.sh` and `zensu-tdd-phase.sh`.
+
+**Version: stage 3 is `minor`.** It removes seven registrations and changes the matchers the host
+evaluates for the edit, notebook and spawn groups, and the data-guard, edit-gate and grant
+decisions now run in a process whose fault blocks the call. Every allow, deny, ask and context for
+a tool-call payload is meant to be unchanged. Failure modes that change:
+
+- the checks share one 55 s budget. An edit-gate body that runs past what is left of it fails open
+  with a stderr line, so a strict-chain deny is lost where the separate hook still had its own 60 s,
+  and the secret scan behind it runs with at least 1 s. Only a strict chain, a deny or a bind failure
+  starts that body;
+- the in-process checks have no deadline of their own. A hang in the data guard's walk, the secret
+  scan or the workflow read reaches the 60 s registration timeout, which `onFailure: "block"` turns
+  into a refusal of the call, where the separate hook's timeout let the call through;
+- on win32 the edit-gate body needs the Git Bash lookup of the delegates. Without one it fails open.
 
 **Version: stage 2 is `minor`.** It removes nine registrations, adds a decision-capable hook on
 `.*` and changes the matchers the host evaluates, each a breaking change under
@@ -199,8 +245,13 @@ so an unwritable one no longer denies every tool call (pinned in
 `uname`, so a missing or failing `uname` no longer makes it refuse
 (`tests/structure/test-msys-runtime-boundaries.sh` retired that case).
 
-**Known gaps:** Windows is unmeasured: the suite skips on Git Bash, and the blocking Windows
+**Known gaps:** The spawn grant's `spawnGrantLibrariesPresent` and the two line-break refusals are hand
+copies of what the old shell path did through `source`, `zensu_msys_env_exclusions` and
+`_zensu_config_native_path`; `C1d`, `D5c` and the unit case hold them. Windows is unmeasured: the suite skips on Git Bash, and the blocking Windows
 shards have no room for it, so the Git Bash lookup of the delegates has run only in unit form.
+Stage 3 started before the stage 2 release and before a green Windows Safety run on the dispatcher.
+On win32 a target spelled with a leading slash or backslash runs the edit gate's body, because only
+`cygpath` can render an MSYS mount.
 The live upgrade eval was not run for stage 2: it needs a real Claude Code, credentials and
 Linux Bubblewrap. Its `node` shim and process counts ran in the local provider selftest in test
 mode, and the contained dispatcher runs in the CI sandbox job's integration test. Wall time is

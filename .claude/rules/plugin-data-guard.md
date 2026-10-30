@@ -6,11 +6,12 @@ paths:
   - "tests/structure/plugin-data-guard-v1.test.js"
 ---
 
-# Plugin-Data Guard (`hooks/pre-write-plugin-data-guard.sh` + `plugin-data-guard-v1.js`)
+# Plugin-Data Guard (`runDataGuard` in `hook-dispatch-v1.js` + `plugin-data-guard-v1.js`)
 
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
-A PreToolUse gate on `Edit|Write|MultiEdit` AND `NotebookEdit` that denies a file-mutating
+A PreToolUse check of the hook dispatcher, in-process and with two registry entries
+(`plugin-data-guard` on `Edit|Write|MultiEdit`, `plugin-data-guard-notebook` on `NotebookEdit`), that denies a file-mutating
 call whose resolved target lies inside `CLAUDE_PLUGIN_DATA` — the store holding the immutable
 Session Control records and the review-evidence leases.
 
@@ -21,7 +22,7 @@ vanilla chain, and a strict chain at `RED_WRITE`. Enumerate that matcher from `h
 before claiming a count: the `.*` capability gate matches `Write` too, and missing it is the
 exact mistake §"Relaxable Bind Failures" already records twice.
 
-**A hook of its own, not a branch in `pre-edit-tdd-reminder.sh`.** That hook returns early
+**A check of its own, not a branch in `pre-edit-tdd-reminder.sh`.** That hook returns early
 while no chain is armed, which is precisely the state in which the store is read.
 
 **ELEVEN RESIDUALS, and the guarantee is false without them.** (1) The **Bash channel is not
@@ -41,9 +42,9 @@ resolves with a WEAKER walk, so "superset" describes the roots and never the enf
 swapped in between is followed — a property of the hook shape that no PreToolUse gate can remove,
 and the reason this is a control rather than a guarantee. (8) COMPOSING 1 AND 6: this gate's own
 decision module sits inside that unprotected plugin root, so one ungated main-thread `Edit` — or
-anything holding `Bash`, by residual 1 — removes or replaces it and the wrapper then declines.
+anything holding `Bash`, by residual 1 — removes or replaces it and the dispatcher then declines.
 Neither parent residual states it on its own, which is why it is listed rather than left to be
-composed by the reader. It is DISCLOSED, not silent: the wrapper's stderr note is what separates
+composed by the reader. It is DISCLOSED, not silent: the dispatcher's stderr note is what separates
 "the gate did not run" from a clean allow. (9) THE MIRROR OF 3: a symlink INSIDE the
 store whose target is outside is judged by its resolved location and ALLOWED — both
 resolution paths agree on it — so one `ln -s` planted through residual 1's channel
@@ -64,8 +65,7 @@ case for a session whose cwd is a worktree, the valve carves out the harness roo
 the session writes elsewhere, and `overArmUnchecked` stays false because the root DID
 resolve. Binding the record here would put a session lookup on every `Edit`. State the carriers precisely rather
 than as a uniform count: all eleven sit in the module header, `docs/gates.md` and the
-`docs/configuration.md` row; the hook header carries residuals 1 and 2 and delegates the rest to
-the module header.
+`docs/configuration.md` row; the entry point, now a wrapper, carries none.
 
 **THE NET DELTA IS THE MAIN THREAD ONLY, and the measurement sentence must say so.**
 `hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a file-tool write
@@ -105,9 +105,12 @@ payload with no path field — which is what a renamed or restructured host fiel
 here. The set is `SILENT_FAULT_IS_A_LIE` and it has FOUR members; every carrier of this sentence
 said three. A FIFTH note is not a fault: `overArmUnchecked` reports an armed decision taken
 without a project root, so the over-arm valve could not be evaluated. THREE further faults are outside the
-MODULE's reach, because the wrapper returns before `node` runs: a missing `node`, a `hooks/lib`
-its `cd -P` cannot enter, and a `plugin-data-guard-v1.js` that is absent or symlinked. They are
-NOT SILENT — the wrapper writes its own stderr note at each, and so does its exit-2 plugin-root
+MODULE's reach, because it is never loaded: a missing `node` and a `hooks/lib` the entry point
+cannot enter, each noted by `hooks/pre-write-plugin-data-guard.sh`, and a
+`plugin-data-guard-v1.js` that is absent or symlinked, noted by `runDataGuard`. The registered
+dispatcher that cannot start because `node` is missing blocks the call instead; only a direct run of
+the entry point writes that note. They are
+NOT SILENT — each writes its own stderr note, and so do the exit-2 plugin-root
 branches — self-resolution failure and inherited-root mismatch, two distinct messages, so name
 them in the plural. Say "cannot carry the module's TYPED reason", never "cannot carry a note": the earlier
 wording named a structural limit where there was a choice, and `cannot` is the word that stops the
@@ -118,7 +121,8 @@ next maintainer from fixing it. What is genuinely structural is only that the mo
 and nothing here lands a bypass-ledger entry: there is no gate escape to record.
 
 **Coupled sites that move together:** `ZENSU_GUARD_CALLER_CWD`, exported by the wrapper before
-its `cd -P` and read by the module's CLI entry point — named in three places — the wrapper, the module's CLI entry point and the
+its `cd -P` and read by the module's CLI entry point and, only for an `--only` run, by
+`runDataGuard`, which otherwise anchors at the hook's working directory (`G47`) — named in four places — the wrapper, the module's CLI entry point, `runDataGuard` and the
 `pre-write-plugin-data-guard.sh` row in `docs/configuration.md` — and PINNED by `G44`, which
 derives the name from the wrapper's own export and fails on a one-sided rename. Without that pin a
 rename re-anchors every relative target in the plugin tree and fails only for relative spellings,
@@ -135,8 +139,8 @@ their FAULT CONTRACTS are opposite, the sibling throwing into a consumer that DE
 walk swallows into one that ALLOWS. One shared resolver has to serve both directions. A
 one shared module is the standing fix; the sliced lockstep pin is what exists today — a divergence between them is a principal-dependent
 verdict on one boundary, not merely duplicated code; §"Git Mutation Tables"'s seam-consumer
-paragraph, which names this module as the second consumer; both matcher groups in
-`hooks/hooks.json` ↔ the module's
+paragraph, which names this module as the second consumer; both matcher entries in
+`DISPATCHED_CHECKS` ↔ the module's
 `WRITE_TOOLS` (pinned by G14/G14a, which compare the registered matchers' tool names against
 the exported set — a matcher widened alone yields a hook that runs and allows with no signal);
 the hook count in `docs/configuration.md` plus every `#hooks-N` anchor, INCLUDING the one in
