@@ -41,11 +41,11 @@ The authoritative per-gate roster is the "Unbindable sessions" table in
 carries one column per state; keep exactly one roster and do not duplicate it here. Two
 properties are easy to get wrong and cost the whole feature:
 
-- **A deny from ANY hook on a matcher wins.** `hooks.json` registers four PreToolUse
-  hooks on the `Bash|PowerShell` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
+- **A deny from ANY hook on a matcher wins.** The hook dispatcher runs four PreToolUse
+  checks on the `Bash|PowerShell` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
   `pre-write-secret-scan.sh`, `pre-browser-navigation-consent.sh`) and one on `.*`
-  (`pre-reviewer-capability-gate.sh` via `reviewer-capability-v1.js`), and all five can
-  deny. O21a enumerates the matcher, so a hook added there changes this roster. The consent gate exits before its bind for every command
+  (`pre-reviewer-capability-gate.sh` via `reviewer-capability-v1.js`), all five can
+  deny, and its aggregation lets any one deny win as the host does across hooks. O21a enumerates the matcher, so a hook added there changes this roster. The consent gate exits before its bind for every command
   that carries no `playwright-cli` marker and admits the recognized `/zensu:doctor` and adoption
   commands through `zensu_doctor_allowed` before its module runs, so on a POSIX host with `node`
   it never stands between a session and the doctor — the recognizer refuses on win32; it denies a `zensu-verify-*` call and a command that merely mentions

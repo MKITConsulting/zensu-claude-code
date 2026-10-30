@@ -8,7 +8,7 @@ zensu_work_order_hook() {
     gate|post|stop|bound) ;;
     *) return 0 ;;
   esac
-  root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P)" || return 0
+  root="$(case "${BASH_SOURCE[0]}" in (*/*) CDPATH= cd -- "${BASH_SOURCE[0]%/*}/../.." ;; (*) CDPATH= cd -- ../.. ;; esac 2>/dev/null && pwd -P)" || return 0
   module="$root/hooks/lib/work-order-v1.js"
   session_lib="$root/hooks/lib/zensu-session.sh"
   [ -f "$module" ] && [ ! -L "$module" ] || return 0

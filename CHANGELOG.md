@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-10-29
+
+### Added
+
+- **review**: Bundle fix-round bookkeeping into one round-prepare verb (#530)
+
+### Changed
+
+- **hooks**: Start fewer processes around every tool call (#531)
+- **context**: Describe the discovery path of the context auto-load hook (#532)
+
+### Fixed
+
+- **best-solution-first**: Let a skill fix the option set and keep the recommendation in one line (#526)
+- **session-trail**: Carry the plan answer's linked sessions into the run after the yes (#525)
+- **background-review**: Survive a host-cancelled hand-back claim (#522)
+
 ### Upgrade notes
 
 - **Fix-round bookkeeping in one call**: a routed fix round of the review chain now prepares

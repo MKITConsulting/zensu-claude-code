@@ -266,6 +266,17 @@ test("landing in a round compares each dirty claimed file with the round-start s
   assert.equal(result.otherPending, 1);
   assert.ok(result.carried.includes("EDIT NOT LANDED — S2: claimed docs/gone.md, git shows no change"));
   assert.ok(!result.carried.some((line) => line.startsWith("EDIT LANDED")));
+  const notices = lib.resolveLanding({
+    auditLines: [
+      "CLAIM RETRACTED — R1-F3 (line 4, correction line 9): docs/x.md",
+      "CLAIM CORRECTION IGNORED — line 10: it names one entry twice",
+      "EDIT LANDING AUDIT ROOT — graded the chain work tree .claude/worktrees/w",
+    ],
+    round,
+    start,
+    current,
+  });
+  assert.equal(notices.carried.length, 3);
 });
 
 test("without a round-start snapshot no claim of the round counts as landed", () => {
@@ -549,6 +560,65 @@ test("a fix round attributes its landed claims, writes fixed lines and the next 
   assert.equal(read.doc.rounds["1"].files["a.js"], sha("one fixed"));
 });
 
+test("a work tree below the anchor prints the reviewer lists with its prefix and activates aspects on the unprefixed paths", () => {
+  const p = project();
+  const wt = path.join(p.top, ".claude", "worktrees", "docs");
+  fs.mkdirSync(path.join(wt, "src"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "src", "a.js"), "one");
+  fs.writeFileSync(p.changes, "src/a.js\n");
+  writeLog(p, ["S1 IMPL completed — files: src/a.js"]);
+  const extra = { top: wt, anchor: p.top, prefix: ".claude/worktrees/docs", panel: "full" };
+  assert.equal(lib.prepare(input(p, "0", extra)).status, "ok");
+  fs.writeFileSync(path.join(wt, "src", "a.js"), "one fixed");
+  writeLog(p, ["S1 IMPL completed — files: src/a.js", "R1-F1 IMPL completed — files: src/a.js"]);
+  fs.writeFileSync(
+    p.audit,
+    [
+      pendingLine("S1", "src/a.js"),
+      pendingLine("R1-F1", "src/a.js"),
+      "EDIT LANDING AUDIT — claims=2 landed=0 not_landed=0 unverified=0 pending=2 exempt_ignored=0 exempt_verified=0",
+    ].join("\n") + "\n"
+  );
+  const result = lib.prepare(input(p, "1", extra));
+  assert.equal(result.status, "ok");
+  assert.ok(result.out.includes("ROUND LANDING — R1-F1: landed (files=1 changed=1 unchanged=0 unresolved=0 failed=0)"));
+  assert.ok(result.out.some((line) => line.startsWith("changed_files (") && line.endsWith(": .claude/worktrees/docs/src/a.js")));
+  assert.ok(result.out.includes("judge_changed_files: .claude/worktrees/docs/src/a.js"));
+  const spawn = result.out.find((line) => line.startsWith("spawn:")) || "";
+  assert.ok(spawn.includes("security"), spawn);
+  assert.ok(!result.log.some((line) => line.includes("documentation-only-changeset")));
+  assert.deepEqual(result.diff, ["src/a.js"]);
+  const refused = lib.prepare(input(p, "1", Object.assign({}, extra, { prefix: "../outside" })));
+  assert.equal(refused.status, "refused");
+});
+
+test("a fix-round claim spelled with the work-tree prefix lands, keeps one prefix in the reviewer lists and diffs the work-tree path", () => {
+  const p = project();
+  const wt = path.join(p.top, ".claude", "worktrees", "docs");
+  fs.mkdirSync(path.join(wt, "src"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "src", "a.js"), "one");
+  fs.writeFileSync(p.changes, "src/a.js\n");
+  writeLog(p, ["S1 IMPL completed — files: src/a.js"]);
+  const extra = { top: wt, anchor: p.top, prefix: ".claude/worktrees/docs", panel: "full" };
+  assert.equal(lib.prepare(input(p, "0", extra)).status, "ok");
+  fs.writeFileSync(path.join(wt, "src", "a.js"), "one fixed");
+  writeLog(p, ["S1 IMPL completed — files: src/a.js", "R1-F1 IMPL completed — files: .claude/worktrees/docs/src/a.js"]);
+  fs.writeFileSync(
+    p.audit,
+    [
+      pendingLine("S1", "src/a.js"),
+      pendingLine("R1-F1", "src/a.js"),
+      "EDIT LANDING AUDIT — claims=2 landed=0 not_landed=0 unverified=0 pending=2 exempt_ignored=0 exempt_verified=0",
+    ].join("\n") + "\n"
+  );
+  const result = lib.prepare(input(p, "1", extra));
+  assert.equal(result.status, "ok");
+  assert.ok(result.out.includes("ROUND LANDING — R1-F1: landed (files=1 changed=1 unchanged=0 unresolved=0 failed=0)"));
+  assert.ok(result.out.some((line) => line.startsWith("changed_files (") && line.endsWith(": .claude/worktrees/docs/src/a.js")));
+  assert.ok(!result.out.some((line) => line.includes(".claude/worktrees/docs/.claude/worktrees/docs")));
+  assert.deepEqual(result.diff, ["src/a.js"]);
+});
+
 test("a round whose claim left its file unchanged stops and keeps the round-start snapshot", () => {
   const p = project();
   fs.writeFileSync(path.join(p.top, "a.js"), "one");
@@ -812,7 +882,9 @@ test("the convergence key off skips the ledger and says so", () => {
 test("the claim grammar is the audit's: up to five label tokens, three dash spellings and the bare WIRED form", () => {
   assert.deepEqual(lib.claimOf("R2-Step 3 IMPL completed — files: ./a.js, <project>/b.js | note"), { label: "R2-Step 3", files: ["a.js", "b.js"] });
   assert.deepEqual(lib.claimOf("[10:00] R1-F1 IMPL completed - files: c.js"), { label: "R1-F1", files: ["c.js"] });
-  assert.deepEqual(lib.claimOf("R1-F1 WIRED – files: d.js e.js"), { label: "R1-F1", files: ["d.js", "e.js"] });
+  assert.deepEqual(lib.claimOf("R1-F1 WIRED – files: d.js e.js"), { label: "R1-F1", files: [] });
+  assert.deepEqual(lib.claimOf("R1-F2 IMPL completed — files: l/{en,de}/s.json, x/*.js, y.js"), { label: "R1-F2", files: ["l/en/s.json", "l/de/s.json", "y.js"] });
+  assert.equal(lib.claimOf("CLAIM CORRECTED — R1-F1 (line 3): a.js"), null);
   assert.deepEqual(lib.claimOf("S1 WIRED (verified, no change)"), { label: "S1", files: [] });
   assert.deepEqual(lib.claimOf("R1-W WIRED"), { label: "R1-W", files: [] });
   assert.deepEqual(lib.claimOf("IMPL completed — files: x.js"), { label: "(none)", files: ["x.js"] });

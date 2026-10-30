@@ -870,7 +870,7 @@ esac
 # enumerated only one. It printed nothing, so on this matcher a moved or
 # unreadable plugin directory refused every write with an empty stderr.
 #
-# It is pinned at SOURCE rather than driven: triggering it needs `dirname "$0"/..`
+# It is pinned at SOURCE rather than driven: triggering it needs the cd into `${0%/*}/..`
 # to fail for a script the suite just invoked by that same path, which no fixture
 # can arrange without also making the invocation itself fail. The control below is
 # what keeps the pin from going vacuous — it fires the same extraction at the
@@ -909,7 +909,7 @@ if grep -qE "$ESCAPE_RE" "$GUARD" "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js
 else
   check "G12 the guard teaches no ZENSU_*=off escape" PASS
 fi
-if grep -qE "$ESCAPE_RE" "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"; then
+if grep -qE "$ESCAPE_RE" "$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"; then
   check "G12-control the escape pattern matches a file that does carry one" PASS
 else
   check "G12-control the escape pattern matches a file that does carry one" FAIL
