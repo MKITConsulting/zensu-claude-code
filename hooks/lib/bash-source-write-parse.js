@@ -81,7 +81,7 @@
 const path = require("path");
 const fs = require("fs");
 const { execFileSync } = require("child_process");
-// The ONLY sibling require in this file, and a deliberate one: the MSYS drive
+// The ONLY eager sibling require in this file, and a deliberate one: the MSYS drive
 // rule has to be identical to the one the session-control path boundary applies,
 // and a shared total function is the way to guarantee that instead of a
 // hand-copy held by a lockstep pin. The module is 52 lines, side-effect-free, and
@@ -695,6 +695,32 @@ function powershellVerdict(cmd, mode, child) {
     "provably read-only. Run it through the Bash tool, or change files with Edit or Write." + OPT_IN_NOTE;
 }
 
+const FRAME_HEAD = "ZENSU-BSWG-FRAME-V1 ";
+const FRAME_DOCUMENT_MAX = 4 * 1024 * 1024;
+
+function readFrame(input) {
+  const head = Buffer.from(FRAME_HEAD, "utf8");
+  if (input.length < head.length || !input.subarray(0, head.length).equals(head)) {
+    return { payload: input.toString("utf8"), document: null };
+  }
+  const newline = input.indexOf(10, head.length);
+  const sizeText = newline < 0 ? "" : input.subarray(head.length, newline).toString("utf8");
+  const size = /^[0-9]{1,8}$/.test(sizeText) ? Number(sizeText) : -1;
+  if (size < 0 || size > FRAME_DOCUMENT_MAX || newline + 1 + size > input.length) {
+    return { payload: "", document: null, broken: true };
+  }
+  const body = input.subarray(newline + 1);
+  let document = null;
+  if (size > 0) {
+    try {
+      document = JSON.parse(body.subarray(0, size).toString("utf8"));
+    } catch (e) {
+      document = null;
+    }
+  }
+  return { payload: body.subarray(size).toString("utf8"), document };
+}
+
 function payloadFields(raw) {
   try {
     const j = JSON.parse(raw || "{}");
@@ -728,8 +754,17 @@ function main() {
   // The env branch remains for tests/structure/test-secret-scan-gate.sh, whose
   // detect() helper supplies the payload with no stdin redirect.
   let raw = process.env.PAYLOAD;
+  let frameDocument = null;
   if (raw === undefined || raw === "") {
-    try { raw = fs.readFileSync(0, "utf8"); } catch (e) { raw = ""; }
+    let input;
+    try { input = fs.readFileSync(0); } catch (e) { input = Buffer.alloc(0); }
+    const framed = readFrame(input);
+    if (framed.broken) {
+      process.exitCode = 1;
+      return "";
+    }
+    raw = framed.payload;
+    frameDocument = framed.document;
   }
   const fields = payloadFields(raw);
   if (!fields) return "";
@@ -795,6 +830,26 @@ function main() {
   }
   const projectRoot = canonical(process.env.CLAUDE_PROJECT_DIR || cwd0 || process.cwd());
   let curdir = cwd0 ? canonical(cwd0) : projectRoot;
+  let codeRootTops = [];
+  if (frameDocument) {
+    try {
+      const codeRoots = require("./code-roots-v1.js");
+      const read = codeRoots.declaresLiveRoots(frameDocument)
+        ? codeRoots.readCodeRoots(frameDocument, {
+          anchor: projectRoot,
+          pluginData: process.env.CLAUDE_PLUGIN_DATA || "",
+          claudeConfigDir: process.env.CLAUDE_CONFIG_DIR || "",
+        })
+        : { status: "absent" };
+      if (read.status === "ok") codeRootTops = read.roots.map((root) => canonical(root.top));
+    } catch (e) {
+      codeRootTops = [];
+    }
+  }
+  const unionRoots = [projectRoot].concat(codeRootTops);
+  const inUnion = (p) => unionRoots.some((root) => within(root, p));
+  const containsUnionMember = (t) => unionRoots.some((root) => within(t, root));
+  const inCodeRoot = (p) => codeRootTops.some((root) => within(root, p));
 
   // Temp roots are exempt from the (B) escape rule. ZENSU_BSWGATE_TEMP_DIRS (a
   // colon-separated list) overrides the default set when present — an advanced
@@ -820,7 +875,7 @@ function main() {
   // A temp root that CONTAINS the project would exempt the project itself and
   // switch all three rules off — with no bypass-ledger entry, unlike the
   // documented escape hatches. `/` as an entry is the degenerate case.
-  const TEMP_SAFE = () => TEMP.filter((t) => !within(t, projectRoot));
+  const TEMP_SAFE = () => TEMP.filter((t) => !containsUnionMember(t));
   // The canonical spellings are computed ONCE, on the first isTemp call the raw
   // list does not satisfy — which in practice means the first in-project
   // candidate, since those are under no temp root either. Replacing the raw list
@@ -854,7 +909,7 @@ function main() {
       // above in its raw spelling and only widens once canonical() resolves it,
       // switching rules (B) and (C) off for every path with no ledger entry.
       TEMP_REAL = safe.map(canonical).filter((t, i, a) =>
-        t !== safe[i] && a.indexOf(t) === i && !isUnsafeTempEntry(t, path) && !within(t, projectRoot));
+        t !== safe[i] && a.indexOf(t) === i && !isUnsafeTempEntry(t, path) && !containsUnionMember(t));
     }
     return TEMP_REAL.some((t) => p === t || within(t, p));
   }
@@ -870,14 +925,18 @@ function main() {
   // cannot be reinterpreted as a flag.
   function tracked(p) {
     const dir = path.dirname(p);
-    const opts = { stdio: "ignore", timeout: 2000 };
+    const readOnly = inCodeRoot(p) ? require("./git-read-only-v1.js") : null;
+    const opts = readOnly
+      ? { stdio: "ignore", timeout: 2000, env: readOnly.gitEnvironment() }
+      : { stdio: "ignore", timeout: 2000 };
+    const args = (rest) => (readOnly ? readOnly.READ_ONLY_GIT.concat(rest) : rest);
     try {
-      execFileSync("git", ["-C", dir, "ls-files", "--error-unmatch", "--", p], opts);
+      execFileSync("git", args(["-C", dir, "ls-files", "--error-unmatch", "--", p]), opts);
       return true;
     } catch (e1) {
       if (bail(e1)) return false;
       try {
-        execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], opts);
+        execFileSync("git", args(["-C", dir, "rev-parse", "--is-inside-work-tree"]), opts);
         return false;
       } catch (e2) {
         if (bail(e2)) return false;
@@ -898,7 +957,7 @@ function main() {
     // needs an operand, not a channel token: detectChannels matches text, so
     // it reports `redirect` for `git commit -m "fix: A -> B"`.
     if (targetsOnly) return "WRITE-TARGET " + p + " (via " + channel + ")";
-    if (!within(projectRoot, p)) {
+    if (!inUnion(p)) {
       return (
         "Blocked a Bash write to a source file OUTSIDE this session's worktree/project root (" +
         p +
@@ -944,7 +1003,7 @@ function main() {
     // one resolves identically for every possible expansion — `worktree remove
     // --force /abs/foreign/wt` destroys that tree whatever `-C "$REPO"` becomes.
     const judgeable = t.unresolved ? ((p) => t.absolute.indexOf(p) !== -1) : (() => true);
-    const escapes = (p) => !isTemp(p) && !within(projectRoot, p);
+    const escapes = (p) => !isTemp(p) && !inUnion(p);
     const workTrees = t.workTrees.slice();
     const gitDirs = t.gitDirs.slice();
     // Env-sourced designations obey the same UNEXPANDED contract as their flag
@@ -960,7 +1019,7 @@ function main() {
     // permanently outside the session root — so an explicitly in-project work tree
     // makes the accompanying git dir a false positive, not an escape. Without a
     // work tree a foreign git dir still receives the commit, so it stays a candidate.
-    const workTreeInProject = workTrees.length > 0 && workTrees.every((w) => within(projectRoot, w));
+    const workTreeInProject = workTrees.length > 0 && workTrees.every((w) => inUnion(w));
     // `worktree remove|move` never touches the addressed repository's own working
     // tree — only its worktree bookkeeping and the tree named as an operand. So it
     // is judged on that operand INSTEAD of on `repo`: removing a scratch worktree
@@ -1179,14 +1238,13 @@ function main() {
   return bypassMarkers();
 }
 
-if (require.main === module) {
-  process.stdout.write(main());
-} else {
+{
   // Copies, not the live tables. Object.freeze does NOT protect a Set — its
   // entries live in an internal slot, so a frozen Set still accepts .delete()
   // and an in-process consumer could neuter rule (C) for that process.
   module.exports = {
     OPT_IN_NOTE,
+    FRAME_DOCUMENT_MAX,
     controlVerdict,
     detectChannels,
     detectControlMutation,
@@ -1200,4 +1258,8 @@ if (require.main === module) {
     GIT_OPTS_WITH_OPERAND: Object.freeze(Array.from(GIT_OPTS_WITH_OPERAND)),
     GIT_READONLY_FORMS: Object.freeze(Object.keys(GIT_READONLY_FORMS))
   };
+}
+
+if (require.main === module) {
+  process.stdout.write(main());
 }

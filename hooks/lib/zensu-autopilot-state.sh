@@ -3737,7 +3737,7 @@ _autopilot_publish_workspace_refusal() {
 # unlike the deferred-review fences below, this one refuses UNCONDITIONALLY on a
 # hold, because arming a chain under a foreign run is the harm itself.
 _autopilot_begin_standalone_tdd_critical() {
-  local root="$1" session_id="$2" vanilla="$3" workspace="${4:-}"
+  local root="$1" session_id="$2" vanilla="$3" workspace="${4:-}" code_roots="${5:-}"
   local read_rc holder
   [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
   # The preference is forwarded here for the same reason the deferred-review
@@ -3763,7 +3763,84 @@ _autopilot_begin_standalone_tdd_critical() {
     1) ;;
     *) return "$read_rc" ;;
   esac
-  tdd_begin_session "$session_id" "$vanilla" false false ""
+  if [ -n "$code_roots" ]; then
+    _autopilot_code_roots_free "$root" "$session_id" "$code_roots" || return $?
+  fi
+  tdd_begin_session "$session_id" "$vanilla" false false "" "" "" "" "" "$code_roots"
+}
+
+_autopilot_code_root_tops() {
+  printf '%s' "${1:-}" | node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", chunk => { input += chunk; });
+    process.stdin.on("end", () => {
+      try {
+        const roots = JSON.parse(input);
+        if (!Array.isArray(roots) || roots.length === 0) process.exit(1);
+        const tops = roots.map(entry => entry && entry.top);
+        if (!tops.every(top => typeof top === "string" && top !== "" && !/[\r\n]/.test(top))) process.exit(1);
+        process.stdout.write(tops.join("\n") + "\n");
+      } catch (error) {
+        process.exit(1);
+      }
+    });
+  '
+}
+
+_autopilot_code_roots_free() {
+  local root="$1" session_id="$2" code_roots="$3" tops top holder read_rc ready_rc
+  tops="$(_autopilot_code_root_tops "$code_roots")" || return 2
+  while IFS= read -r top; do
+    [ -n "$top" ] || continue
+    if holder="$(_autopilot_read_workspace_critical "$root" "$top" "$session_id" 2>/dev/null)"; then
+      read_rc=0
+    else
+      read_rc=$?
+    fi
+    case "$read_rc" in
+      0)
+        printf 'zensu-log.sh --tdd-begin: code root %s is held by a durable Autopilot run of this project\n' "$top" >&2
+        _autopilot_publish_workspace_refusal "$holder" "$session_id" model
+        return 4
+        ;;
+      1) ;;
+      *) return "$read_rc" ;;
+    esac
+    _autopilot_read_storage_ready "$top"
+    ready_rc=$?
+    case "$ready_rc" in
+      0) ;;
+      1) continue ;;
+      *)
+        printf 'zensu-log.sh --tdd-begin: the Autopilot state of code root %s could not be read safely\n' "$top" >&2
+        return 2
+        ;;
+    esac
+    if holder="$(
+      unset ZENSU_PROJECT_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT
+      _autopilot_read_workspace_critical "$top" "$top" "$session_id" 2>/dev/null
+    )"; then
+      read_rc=0
+    else
+      read_rc=$?
+    fi
+    case "$read_rc" in
+      0)
+        printf 'zensu-log.sh --tdd-begin: code root %s is held by a durable Autopilot run anchored in it\n' "$top" >&2
+        _autopilot_publish_workspace_refusal "$holder" "$session_id" model
+        return 4
+        ;;
+      1) ;;
+      *)
+        printf 'zensu-log.sh --tdd-begin: the Autopilot state of code root %s could not be read\n' "$top" >&2
+        return "$read_rc"
+        ;;
+    esac
+  done <<EOF
+$tops
+EOF
+  return 0
 }
 
 # Owner-INDEPENDENT occupancy, for a caller that must not act underneath ANOTHER
@@ -3959,16 +4036,17 @@ autopilot_workspace_hold_report() {
 
 autopilot_begin_standalone_tdd() {
   ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT=""
-  local root session_id="${2:-}" vanilla="${3:-false}" workspace
-  [ "$#" -eq 3 ] || return 3
+  local root session_id="${2:-}" vanilla="${3:-false}" code_roots="${4:-}" workspace
+  [ "$#" -eq 4 ] || return 3
   [ -n "$session_id" ] && [ "${#session_id}" -le 128 ] || return 3
   case "$session_id" in *[!A-Za-z0-9_-]*) return 3 ;; esac
   case "$vanilla" in true|false) ;; *) return 3 ;; esac
+  case "$code_roots" in (''|\[*\]) ;; (*) return 3 ;; esac
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   workspace="$(_autopilot_session_workspace "$root")" || return 2
   _autopilot_prepare_storage "$root" || return 2
   _autopilot_locked_run "$root" "" _autopilot_begin_standalone_tdd_critical \
-    "$root" "$session_id" "$vanilla" "$workspace"
+    "$root" "$session_id" "$vanilla" "$workspace" "$code_roots"
 }
 
 # The holder's owner, or a non-zero status when the record cannot be read. The

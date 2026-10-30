@@ -656,8 +656,9 @@ HELPER_BODY="$(awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG")"
 if [ -z "$BARE_GIT_LOG" ] \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" diff --name-only HEAD' \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" ls-files --others --exclude-standard' \
-  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 3 ] \
-  && [ "$(grep -cF '_zensu_unqualified_change_count "$_tc_root"' "$LOG")" -eq 1 ]; then
+  && [ "$(grep -cF '_zensu_union_change_count "$CLAUDE_PROJECT_DIR" "$session_val"' "$LOG")" -eq 3 ] \
+  && [ "$(grep -cF '_zensu_union_change_count "$_tc_root" "$session_val"' "$LOG")" -eq 1 ] \
+  && awk '/^_zensu_union_change_count\(\) \{/,/^}/' "$LOG" | grep -qF '_zensu_unqualified_change_count "$root" ${excluded[@]+"${excluded[@]}"}'; then
   check "G13 both unqualified verbs, the minted-ticket terminus and --tdd-complete count through one scrubbed helper and no bare git -C remains" PASS
 else
   check "G13 shared scrubbed helper (bare='$BARE_GIT_LOG')" FAIL
