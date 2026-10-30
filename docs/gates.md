@@ -294,7 +294,9 @@ written directly before the parenthesis, and enters every command substitution, 
 double quotes, in the body of a heredoc whose delimiter is unquoted or in bash 5.3's `${ …; }`. It
 takes a reserved word only where the shell does: `time` with one `-p` and one `--` only at the
 start of a pipeline, a compound command after `coproc NAME`, `then`, `do` or `}` right after
-`[[ … ]]`, and neither `[[` nor `case` after a leading redirection or inside a `case` pattern. It
+`[[ … ]]`, neither `[[` nor `case` inside a `case` pattern, and `[[`, `case` and `{` after a
+leading redirection both as bash reads them there, as plain words, and as zsh reads them, as
+reserved words. It
 reads the command a second time with its line continuations joined, the way the shell's input
 reader joins them before it reads a word or a heredoc delimiter: outside single quotes and comments,
 not in a quoted-delimiter heredoc body, and in an unquoted body before it compares a line with the
@@ -328,7 +330,7 @@ stays allowed; the word reader and the whitespace reading above keep only the re
 before. A `<<` inside `${…}` or `$[…]` no longer starts a heredoc and a `$"…"` delimiter ends where
 the shell ends it, so no reading drops the lines after them. A command nested more than 64 levels
 deep, or one whose reading would exceed a work bound proportional to its length, is refused with
-its own reason. W382 to W551 pin each spelling and the commands that stay allowed.
+its own reason. W382 to W554 pin each spelling and the commands that stay allowed.
 
 **What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
 differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and

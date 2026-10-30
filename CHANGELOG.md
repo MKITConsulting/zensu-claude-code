@@ -88,8 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extended-pattern operand of `[[ … ]]`, `then`, `do` or `}` right after `]]`, a comment inside
   `[[ … ]]` or an array literal, a line continuation after `$` or inside a heredoc delimiter or
   delimiter line but not inside a comment or a quoted-delimiter heredoc body, and a heredoc
-  delimiter holding a no-break space; it opens no `[[` or `case` after a leading redirection or
-  inside a `case` pattern.
+  delimiter holding a no-break space; it opens no `[[` or `case` inside a `case` pattern, and it
+  reads `[[`, `case` and `{` after a leading redirection both the bash way, as plain words, and
+  the zsh way, as reserved words.
   A command that used one of these spellings to pass is now refused; `docs/gates.md`
   §"Source-Write Gate" lists what the check still leaves alone.
 - **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and

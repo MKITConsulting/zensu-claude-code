@@ -894,10 +894,10 @@ run "W518 time after a pipe is the external program, so a case word after it ope
 run "W519 a second -p after time is the command word, so a case word after it opens nothing" 'time -p -p case x in; (( ZENSU_SESSION_KEY = 1 )); bash x.sh' DENY "$PROJ" "$CFG_OFF"
 run "W520 a case word that opens nothing does not hide later commands" 'time -p -p case x; let ZENSU_SESSION_KEY=1; bash x.sh' DENY "$PROJ" "$CFG_OFF"
 run "W521 a [[ word in a case pattern opens no conditional" 'case x in [[ | x) ;; esac; (( ZENSU_SESSION_KEY = 1 )); bash x.sh; echo ]]' DENY "$PROJ" "$CFG_OFF"
-run "W522 a [[ word after a leading redirection opens no conditional" '>f [[ x; (( ZENSU_SESSION_KEY = 1 )); bash x.sh; echo ]]' DENY "$PROJ" "$CFG_OFF"
+run "W522 bash opens no conditional at a [[ word after a leading redirection" '>f [[ x; (( ZENSU_SESSION_KEY = 1 )); bash x.sh; echo ]]' DENY "$PROJ" "$CFG_OFF"
 LC_REDIRECT_COND="$(printf '>f [[ x\n(( ZENSU_SESSION_KEY = 1 ))\nbash x.sh')"
 run "W523 a [[ word after a leading redirection does not swallow the next lines" "$LC_REDIRECT_COND" DENY "$PROJ" "$CFG_OFF"
-run "W524 a case word after a leading redirection opens nothing" '>f case x in; (( ZENSU_SESSION_KEY = 1 )); bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W524 bash opens no case at a case word after a leading redirection" '>f case x in; (( ZENSU_SESSION_KEY = 1 )); bash x.sh' DENY "$PROJ" "$CFG_OFF"
 LC_COMMENT_JOIN="$(printf '# \\\n: $\\\n(( ZENSU_SESSION_KEY = 1 )); bash x.sh')"
 run "W525 a comment ending in a backslash does not continue onto the next line" "$LC_COMMENT_JOIN" DENY "$PROJ" "$CFG_OFF"
 LC_QUOTED_BODY_JOIN="$(printf 'cat <<%sEOF%s\nx\\\nEOF\n: $\\\n(( ZENSU_SESSION_KEY = 1 )); bash x.sh' "'" "'")"
@@ -930,6 +930,9 @@ run "W549 an unset -m pattern that matches no protected input stays allowed" "un
 LC_WIDE_SUBSCRIPTS="$(printf 'a[;%.0s' $(seq 1 20000))"
 run "W550 unclosed subscripts across a long command exhaust the work bound" "$LC_WIDE_SUBSCRIPTS" DENY "$PROJ" "$CFG_OFF"
 run "W551 ordinary declarations, subscripts, test -v and a coproc group stay allowed" "local x=\"\$v\"; printf '%s=%s\n' ZENSU_SESSION_KEY \"\$ZENSU_SESSION_KEY\"; typeset -i count=0; echo \$PATH[0]; test -v HOME; coproc mycat { cat; }" ALLOW "$PROJ" "$CFG_OFF"
+run "W552 zsh opens a conditional after a leading redirection, so its -eq operand assigns" ">/dev/null [[ 1 -eq ZENSU_SESSION_KEY=1 ]]; bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W553 zsh opens a conditional after a descriptor redirection, so its -lt operand assigns" "2>/dev/null [[ ZENSU_SESSION_KEY=1 -lt 2 ]]; bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W554 a conditional and a group after a leading redirection stay allowed" ">/dev/null [[ -n \$x ]] && echo ok; 2>/dev/null { echo a; echo b; }" ALLOW "$PROJ" "$CFG_OFF"
 
 # The mandatory control parser is a trust boundary. A selective runtime failure
 # must deny before config and escape hatches instead of falling through.

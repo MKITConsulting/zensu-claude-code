@@ -1943,7 +1943,7 @@ function shellFinding(source, bashQuotes) {
         return k;
       }
     };
-    const atCommand = () => !redirected && commandStart() === words.length;
+    const atCommand = () => !(redirected && bashQuotes) && commandStart() === words.length;
     const assignPos = () => {
       for (let k = commandStart(); k < words.length; k++) {
         if (!SHELL_ASSIGNMENT.test(words[k].raw)) return DECLARATION_WORDS.has(words[k].value);

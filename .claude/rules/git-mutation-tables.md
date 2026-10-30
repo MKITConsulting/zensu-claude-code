@@ -411,8 +411,10 @@ before `]]` and returns to command position, so `then`, `do` or `}` right after 
 `case` pattern. Command position follows the shell: `commandStart`, which `atCommand` and
 `assignPos` share, skips `coproc` and a `time` keyword with at most one `-p` and then at most one
 `--`, and reads `time` as the keyword only at the start of a pipeline (`piped`) and never after
-`coproc`; `atCommand` is false after a leading redirection (`redirected`), so neither `[[` nor
-`case` opens there or inside a `case` pattern; after `coproc NAME` a `COPROC_BODIES` word, a brace
+`coproc`; `atCommand` is false after a leading redirection (`redirected`) only in the bash quote
+reading, because bash reads `[[`, `case` and `{` there as plain words while zsh 5.9 opens them
+(measured), and neither reading opens `[[` or `case` inside a `case` pattern; after `coproc NAME`
+a `COPROC_BODIES` word, a brace
 group or a subshell, also with NAME glued to the parenthesis, is read as its compound command, and
 a protected NAME there is held as a rebind (`held`) until the scan returns. `commandWords` skips
 `time --` too. The scanner enters every `$(…)`, backtick, `<(…)`, zsh `=(…)` and bash 5.3's
@@ -458,7 +460,7 @@ rule loop runs git
 with `-C <dir>` for each chdir op, so `gitTargets` judges an unexpanded one as it judges an
 unexpanded `-C`, resolves tee, `sed -i` and `dd of=` operands against that directory (a relative
 operand under an unexpanded one is not judged, and targets mode reports it as a write target), and
-folds the ops over the carried and inline `GIT_*` values. W265 and W267-W551 in the
+folds the ops over the carried and inline `GIT_*` values. W265 and W267-W554 in the
 gate suite, F8c and D10-D14 in `tests/structure/test-secret-scan-gate.sh`, and the reader cases of
 `git-repo-escape.test.js` pin it. **Known residuals, all stated in `docs/gates.md`:** zsh's other
 readings (an unknown `$'…'` escape, `$"…"`, `=cmd`, `noglob`, `nocorrect`, `-`) are not applied,
