@@ -80,8 +80,9 @@ already rely on:
   descriptions on top.
   [Architecture](docs/architecture.md#context-added-to-every-session) says how
   this was measured and breaks it down per hook.
-- **zen-mode is on by default.** Replies open with a one-line recap, put the
-  result first, stay near eight lines and end with one next step. Say "zen off"
+- **zen-mode is on by default.** Replies put the result first, stay near eight
+  lines and close with a short session block: what you started the session for,
+  what it has done so far and what this turn did, then one next step. Say "zen off"
   or run `/zensu:zen-mode --off` to leave it for the session; set
   `hooks.zenModeDefault: false` to make it opt-in again.
 - **Claude asks which delivery route to take.** After you approve a plan, Zensu
