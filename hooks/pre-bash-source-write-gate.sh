@@ -74,6 +74,9 @@ esac
 # Drain stdin before any early exit so an upstream writer never sees a broken
 # pipe (mirrors pre-bash-zensu-gate.sh's ordering).
 { INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
+BSWG_NL=$'\n'
+BSWG_EMPTY_FRAME="ZENSU-BSWG-FRAME-V1 0${BSWG_NL}"
+BSWG_FRAME_DOCUMENT_MAX=4194304
 
 emit_deny() {
   REASON="$1" node -e '
@@ -93,7 +96,7 @@ emit_deny() {
 if ! CONTROL_REASON="$(
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
   MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
-    BSWG_MODE=control PAYLOAD= node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
+    BSWG_MODE=control PAYLOAD= node ./bash-source-write-parse.js 2>/dev/null <<<"${BSWG_EMPTY_FRAME}${INPUT}"
 )"; then
   emit_deny "Zensu could not validate protected Session Control bindings; retry in a fresh session."
   exit 0
@@ -217,7 +220,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # to run still denies, so a crash cannot degrade into a blanket allow.
     if ! UNBOUND_TARGETS="$(
       cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
-      BSWG_MODE=targets PAYLOAD= node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
+      BSWG_MODE=targets PAYLOAD= node ./bash-source-write-parse.js 2>/dev/null <<<"${BSWG_EMPTY_FRAME}${INPUT}"
     )"; then
       emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause. ${OPT_IN_NOTE}"
       exit 0
@@ -236,7 +239,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   if ! UNBOUND_REASON="$(
     cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
     BSWG_MODE= PAYLOAD= BSWG_REANCHOR= CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
-      node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
+      node ./bash-source-write-parse.js 2>/dev/null <<<"${BSWG_EMPTY_FRAME}${INPUT}"
   )"; then
     emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause. ${OPT_IN_NOTE}"
     exit 0
@@ -272,10 +275,29 @@ fi
 
 # The other two parser calls in this file honor their exit status; this one used
 # to discard it, so a crashed or killed parser allowed the command unchecked.
+BSWG_FRAME="$BSWG_EMPTY_FRAME"
+BSWG_DOCUMENT=""
+BSWG_STATE=""
+zensu_session_key_canonical "${ZENSU_SESSION_KEY:-}" \
+  && BSWG_STATE="${ZENSU_PROJECT_ROOT%/}/.zensu/state/tdd-phase-${ZENSU_SESSION_KEY}.json"
+if [ -n "$BSWG_STATE" ] && [ -f "$BSWG_STATE" ] && [ ! -L "$BSWG_STATE" ]; then
+  IFS= read -r -d '' BSWG_DOCUMENT < "$BSWG_STATE" 2>/dev/null
+  case "$BSWG_DOCUMENT" in
+    (*'"codeRoots"'*)
+      BSWG_LC_SET="${LC_ALL+set}"
+      BSWG_LC="${LC_ALL-}"
+      LC_ALL=C
+      BSWG_SIZE=${#BSWG_DOCUMENT}
+      if [ -n "$BSWG_LC_SET" ]; then LC_ALL="$BSWG_LC"; else unset LC_ALL; fi
+      [ "$BSWG_SIZE" -le "$BSWG_FRAME_DOCUMENT_MAX" ] \
+        && BSWG_FRAME="ZENSU-BSWG-FRAME-V1 ${BSWG_SIZE}${BSWG_NL}${BSWG_DOCUMENT}"
+      ;;
+  esac
+fi
 if ! REASON="$(
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
   BSWG_MODE= PAYLOAD= BSWG_REANCHOR=1 CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
-    node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
+    node ./bash-source-write-parse.js 2>/dev/null <<<"${BSWG_FRAME}${INPUT}"
 )"; then
   emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. This gate is opt-in, and switching it off is decided BEFORE the parser runs, so that still works here: ask the user to set hooks.bashWriteGate to false in the Zensu config layer that enables it — a project .zensu/config.json overrides ~/.zensu/config.json, and ZENSU_CONFIG, when set, replaces both."
   exit 0

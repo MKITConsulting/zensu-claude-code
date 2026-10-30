@@ -35,12 +35,12 @@ fi
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
-# FP and SD cross the classifier boundary only after explicit native-path
-# conversion. Exclude both from Git Bash's heuristic environment conversion so
+# FP, SD, WF, CR and AN cross the classifier boundary only after explicit native-path
+# conversion. Exclude all five from Git Bash's heuristic environment conversion so
 # dot segments and drive spellings cannot be reinterpreted a second time. The
 # rendered log command is opaque data at the same native Node boundary.
 _ZENSU_MSYS2_ENV_CONV_EXCL="$(
-  zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD
+  zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD WF CR AN
 )" || {
   zensu_emit_hook_session_deny
   exit 0
@@ -136,8 +136,10 @@ case "$FILE_PATH" in
 esac
 NATIVE_FILE_PATH="$(_tdd_native_path "$FILE_PATH_SHELL")" || deny_invalid_state
 NATIVE_STATE_DIR="$(_tdd_native_project_path "$(dirname "$STATE_FILE")")" || deny_invalid_state
+NATIVE_STATE_FILE="$(_tdd_native_path "$STATE_FILE")" || deny_invalid_state
+NATIVE_CODE_ROOTS_LIB="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/code-roots-v1.js")" || deny_invalid_state
 if ! PATH_CLASS="$(MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
-  FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e '
+  FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" WF="$NATIVE_STATE_FILE" CR="$NATIVE_CODE_ROOTS_LIB" AN="${ZENSU_PROJECT_ROOT:-}" node -e '
   const path = require("path");
   const fs = require("fs");
   const lownorm = p => path.posix.normalize(String(p).replace(/\\/g, "/")).toLowerCase();
@@ -148,12 +150,38 @@ if ! PATH_CLASS="$(MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
   };
   const fAbs = lownorm(realfile(path.resolve(process.env.FP || "")));
   const sAbs = lownorm(realdir(path.resolve(process.env.SD || ""))) + "/";
-  if (fAbs.indexOf(sAbs) === 0) { console.log("state"); }
+  let roots = [];
+  let owners = [];
+  try {
+    const doc = JSON.parse(fs.readFileSync(process.env.WF || "", "utf8"));
+    if (doc && Array.isArray(doc.codeRoots)) {
+      roots = doc.codeRoots
+        .flatMap((entry) => (entry && typeof entry === "object" ? [entry.top, entry.path] : []))
+        .filter((value) => typeof value === "string" && path.isAbsolute(value));
+      try {
+        const read = require(process.env.CR || "").readCodeRoots(doc, {
+          anchor: process.env.AN || "",
+          pluginData: process.env.CLAUDE_PLUGIN_DATA || "",
+          claudeConfigDir: process.env.CLAUDE_CONFIG_DIR || "",
+        });
+        if (read.status === "ok") owners = read.roots.map((root) => root.top);
+      } catch (_) {}
+    }
+  } catch (_) {}
+  const rootStates = roots.map((root) => lownorm(realdir(path.join(root, ".zensu", "state"))) + "/");
+  const fReal = realfile(path.resolve(process.env.FP || ""));
+  const owner = owners.map(realdir).find((root) => lownorm(fReal).indexOf(lownorm(root) + "/") === 0);
+  if (fAbs.indexOf(sAbs) === 0 || rootStates.some((state) => fAbs.indexOf(state) === 0)) { console.log("state"); }
   else if (fAbs.indexOf("/.zensu/") >= 0 || fAbs.endsWith("/.zensu")) { console.log("zensu"); }
+  else if (owner) { console.log("other\t" + path.relative(owner, fReal).split(path.sep).join("/")); }
   else { console.log("other"); }
 ' 2>/dev/null)"; then
   deny_invalid_state
 fi
+ROOT_RELATIVE=""
+case "$PATH_CLASS" in
+  (other$'\t'*) ROOT_RELATIVE="${PATH_CLASS#other$'\t'}"; PATH_CLASS=other ;;
+esac
 case "$PATH_CLASS" in
   state|zensu|other) ;;
   *) deny_invalid_state ;;
@@ -198,7 +226,7 @@ fi
 
 PHASE=$(tdd_phase "$STATE_FILE")
 STEP=$(tdd_step "$STATE_FILE")
-IS_TEST_PATH=$(tdd_is_test_path "$FILE_PATH")
+IS_TEST_PATH=$(tdd_is_test_path "$FILE_PATH" "$ROOT_RELATIVE")
 RED_FAIL_FOR_STEP=$(tdd_has_red_fail "$STATE_FILE" "$STEP")
 
 decide_allow() {

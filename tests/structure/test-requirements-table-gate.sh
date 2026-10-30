@@ -506,7 +506,7 @@ DEF_LN="$(grep -nF '_tc_git() { (' "$LOG" | cut -d: -f1)"
     | grep -qF 'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE'
 Z6DEF=$?
 Z6_HELPER="$(awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG")"
-[ "$(awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -c '_zensu_unqualified_change_count "\$_tc_root"')" -eq 1 ] \
+[ "$(awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -c '_zensu_union_change_count "\$_tc_root" "\$session_val"')" -eq 1 ] \
   && printf '%s\n' "$Z6_HELPER" | grep -qF '_tc_git -C "$root" rev-parse --verify --quiet HEAD' \
   && printf '%s\n' "$Z6_HELPER" | grep -qF '_tc_git -C "$root" diff --name-only HEAD' \
   && printf '%s\n' "$Z6_HELPER" | grep -qF '_tc_git -C "$root" ls-files --others --exclude-standard'

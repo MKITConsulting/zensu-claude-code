@@ -224,6 +224,9 @@ entry, the `ciStructureTests` member and the regenerated overview; `docs/review-
   pending, so the audit exits 1 rather than 2 whenever its receipt is refused there.
 - The round diff compares with `--baseline` when given and with `HEAD` otherwise, renders an
   untracked file with `git diff --no-index`, and leaves out a file deleted in the round.
+- A chain whose workflow document declares code roots stops the verb with `ROUND PREPARE
+  STOPPED — code-roots`: the snapshot, the attribution and the round diff cover the anchor alone
+  (`.claude/rules/multi-repo-code-roots.md`).
 - Windows is unmeasured: the suite is a `ciStructureTests` member and runs on the weekly Windows
   Safety structure shard only.
 

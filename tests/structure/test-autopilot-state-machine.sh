@@ -1650,9 +1650,9 @@ GATE_FREE_ERR="$ROOT/standalone-gate-free.txt"
 if [ "$GATE_READY" = true ]; then
   ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_run run_gate_holder session_gate_holder "$GATE_P" false true "" ) >/dev/null 2>&1
   GATE_HOLD_RC=$?
-  ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_other false ) >/dev/null 2>"$GATE_ERR"
+  ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_other false "" ) >/dev/null 2>"$GATE_ERR"
   GATE_HELD_RC=$?
-  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_free false ) >/dev/null 2>"$GATE_FREE_ERR"
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_free false "" ) >/dev/null 2>"$GATE_FREE_ERR"
   GATE_FREE_RC=$?
 fi
 
@@ -1697,6 +1697,94 @@ else
   check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/past-the-gate)" FAIL
 fi
 
+gate_code_roots() {
+  printf '[{"label":"%s","path":"%s","top":"%s","commonDir":"%s/.git","baseline":"unborn"}]' "$1" "$2" "$2" "$2"
+}
+GATE_ROOTS_READY="$GATE_READY"
+GATE_OWN="$ROOT/standalone-gate-own-root"
+GATE_LOOSE="$ROOT/standalone-gate-loose-root"
+GATE_ROOT_HELD_ERR="$ROOT/standalone-gate-root-held.txt"
+GATE_ROOT_OWN_ERR="$ROOT/standalone-gate-root-own.txt"
+GATE_ROOT_LOOSE_ERR="$ROOT/standalone-gate-root-loose.txt"
+: > "$GATE_ROOT_HELD_ERR"
+: > "$GATE_ROOT_OWN_ERR"
+: > "$GATE_ROOT_LOOSE_ERR"
+GATE_ROOT_HELD_RC=0
+GATE_OWN_HOLD_RC=1
+GATE_ROOT_OWN_RC=0
+GATE_ROOT_LOOSE_RC=4
+if [ "$GATE_ROOTS_READY" = true ]; then
+  mkdir -p "$GATE_OWN" "$GATE_LOOSE"
+  git -C "$GATE_OWN" init -q >/dev/null 2>&1 || GATE_ROOTS_READY=false
+  git -C "$GATE_LOOSE" init -q >/dev/null 2>&1 || GATE_ROOTS_READY=false
+  GATE_WA="$(cd -P "$GATE_P/.claude/worktrees/wa" && pwd -P)" || GATE_ROOTS_READY=false
+  GATE_OWN="$(cd -P "$GATE_OWN" && pwd -P)" || GATE_ROOTS_READY=false
+  GATE_LOOSE="$(cd -P "$GATE_LOOSE" && pwd -P)" || GATE_ROOTS_READY=false
+fi
+if [ "$GATE_ROOTS_READY" = true ]; then
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots wa "$GATE_WA")" ) >/dev/null 2>"$GATE_ROOT_HELD_ERR"
+  GATE_ROOT_HELD_RC=$?
+  ( cd "$GATE_OWN" && autopilot_begin_run run_gate_own session_gate_own "$GATE_OWN" false true "" ) >/dev/null 2>&1
+  GATE_OWN_HOLD_RC=$?
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots own "$GATE_OWN")" ) >/dev/null 2>"$GATE_ROOT_OWN_ERR"
+  GATE_ROOT_OWN_RC=$?
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_roots false "$(gate_code_roots loose "$GATE_LOOSE")" ) >/dev/null 2>"$GATE_ROOT_LOOSE_ERR"
+  GATE_ROOT_LOOSE_RC=$?
+fi
+
+if [ "$GATE_ROOTS_READY" = true ] && [ "$GATE_HOLD_RC" -eq 0 ] && [ "$GATE_ROOT_HELD_RC" -eq 4 ] \
+  && grep -qF -- "code root $GATE_WA is held by a durable Autopilot run of this project" "$GATE_ROOT_HELD_ERR" \
+  && grep -qF -- 'run_gate_holder' "$GATE_ROOT_HELD_ERR" \
+  && ! grep -qF -- '--confirm' "$GATE_ROOT_HELD_ERR"; then
+  check "W14c a standalone chain may not declare a code root that a durable run of its own project holds" PASS
+else
+  check "W14c a code root held by this project's durable run must refuse (ready=$GATE_ROOTS_READY hold=$GATE_HOLD_RC refusal=$GATE_ROOT_HELD_RC, want 0/4)" FAIL
+fi
+
+if [ "$GATE_ROOTS_READY" = true ] && [ "$GATE_OWN_HOLD_RC" -eq 0 ] && [ "$GATE_ROOT_OWN_RC" -eq 4 ] \
+  && grep -qF -- "code root $GATE_OWN is held by a durable Autopilot run anchored in it" "$GATE_ROOT_OWN_ERR" \
+  && grep -qF -- 'run_gate_own' "$GATE_ROOT_OWN_ERR"; then
+  check "W14d a standalone chain may not declare a code root that a durable run anchored in that root holds" PASS
+else
+  check "W14d a code root held by its own durable run must refuse (ready=$GATE_ROOTS_READY hold=$GATE_OWN_HOLD_RC refusal=$GATE_ROOT_OWN_RC, want 0/4)" FAIL
+fi
+
+if [ "$GATE_ROOTS_READY" = true ] \
+  && [ "$GATE_ROOT_LOOSE_RC" -ne 4 ] && [ "$GATE_ROOT_LOOSE_RC" -ne 3 ] && [ "$GATE_ROOT_LOOSE_RC" -ne 2 ] \
+  && ! grep -qF -- 'is held by a durable Autopilot run' "$GATE_ROOT_LOOSE_ERR"; then
+  check "W14e a code root no durable run holds passes the code-root fence" PASS
+else
+  check "W14e a free code root must pass the code-root fence (ready=$GATE_ROOTS_READY rc=$GATE_ROOT_LOOSE_RC, want past-the-gate)" FAIL
+fi
+
+GATE_BP="$ROOT/standalone-gate-bound-project"
+GATE_BOUND_ROOT="$ROOT/standalone-gate-bound-root"
+GATE_BOUND_RCF="$ROOT/standalone-gate-bound.rc"
+GATE_BOUND_ERR="$ROOT/standalone-gate-bound.err"
+: > "$GATE_BOUND_ERR"
+printf '99' > "$GATE_BOUND_RCF"
+if [ "$GATE_ROOTS_READY" = true ]; then
+  mkdir -p "$GATE_BP" "$GATE_BOUND_ROOT/.zensu/state"
+  if git -C "$GATE_BP" init -q >/dev/null 2>&1 && git -C "$GATE_BOUND_ROOT" init -q >/dev/null 2>&1 \
+    && GATE_BOUND_ROOT="$(cd -P "$GATE_BOUND_ROOT" && pwd -P)"; then
+    (
+      export CLAUDE_PROJECT_DIR="$GATE_BP"
+      source "$BASELINE" w14f-bound-root >/dev/null 2>&1 || exit 1
+      cd "$GATE_BP" || exit 1
+      autopilot_begin_standalone_tdd "$GATE_BP" w14f-bound-root false "$(gate_code_roots bound "$GATE_BOUND_ROOT")" >/dev/null 2>"$GATE_BOUND_ERR"
+      printf '%s' "$?" > "$GATE_BOUND_RCF"
+    )
+  fi
+fi
+GATE_BOUND_RC="$(cat "$GATE_BOUND_RCF" 2>/dev/null || echo 99)"
+if [ "$GATE_ROOTS_READY" = true ] \
+  && [ "$GATE_BOUND_RC" -ne 99 ] && [ "$GATE_BOUND_RC" -ne 4 ] && [ "$GATE_BOUND_RC" -ne 3 ] && [ "$GATE_BOUND_RC" -ne 2 ] \
+  && ! grep -qF -- 'could not be read' "$GATE_BOUND_ERR"; then
+  check "W14f in a bound session a code root outside the anchor that holds Autopilot storage passes the code-root fence" PASS
+else
+  check "W14f a bound session must read a sibling code root's Autopilot state (rc=$GATE_BOUND_RC, want past-the-gate; $(head -n 1 "$GATE_BOUND_ERR" 2>/dev/null))" FAIL
+fi
+
 GATE_SUBDIR_RC=0
 GATE_SUBDIR_WROTE=unknown
 if [ "$GATE_READY" = true ]; then
@@ -1732,7 +1820,7 @@ if [ "$GATE_READY" = true ] && [ "$GATE_HOLD_RC" -eq 0 ]; then
     fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
   ' </dev/null >/dev/null 2>&1; then
     GATE_LEGACY_STRIPPED=true
-    ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_legacy false ) >/dev/null 2>&1
+    ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_legacy false "" ) >/dev/null 2>&1
     GATE_LEGACY_RC=$?
   fi
 fi
@@ -1759,7 +1847,7 @@ if [ "$GATE_LEGACY_STRIPPED" = true ]; then
     process.stdout.write(typeof value === "string" && value.length > 0 ? "present" : "absent");
   ' </dev/null 2>/dev/null)"
   [ -n "$GATE_UPGRADE_KEY" ] || GATE_UPGRADE_KEY=absent
-  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_after false ) >/dev/null 2>&1
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_after false "" ) >/dev/null 2>&1
   GATE_AFTER_RC=$?
 fi
 # The upgrade is asserted through its consequence, not through a path string:

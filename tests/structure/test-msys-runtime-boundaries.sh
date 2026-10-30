@@ -496,12 +496,12 @@ else
   check "free-form hook messages bypass MSYS argv and environment path conversion" FAIL
 fi
 
-if grep -qF 'zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD' "$PRE_EDIT" \
+if grep -qF 'zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD WF CR AN' "$PRE_EDIT" \
     && [ "$(grep -cF 'MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL"' "$PRE_EDIT")" -eq 3 ] \
-    && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e' "$PRE_EDIT"; then
-  check "native pre-edit classifier protects FP and SD from MSYS environment conversion" PASS
+    && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" WF="$NATIVE_STATE_FILE" CR="$NATIVE_CODE_ROOTS_LIB" AN="${ZENSU_PROJECT_ROOT:-}" node -e' "$PRE_EDIT"; then
+  check "native pre-edit classifier protects FP, SD, WF, CR and AN from MSYS environment conversion" PASS
 else
-  check "native pre-edit classifier protects FP and SD from MSYS environment conversion" FAIL
+  check "native pre-edit classifier protects FP, SD, WF, CR and AN from MSYS environment conversion" FAIL
 fi
 
 if (

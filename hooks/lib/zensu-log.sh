@@ -95,9 +95,20 @@ _tc_git() { (
   git "$@"
 ); }
 
+_tc_git_magic() { (
+  unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+  _tc_git "$@"
+); }
+
 _zensu_unqualified_change_count() {
-  local root="${1:-}" inside inside_err tracked untracked
+  local root="${1:-}" inside inside_err tracked untracked name excluded_count=0
+  local -a excluded=()
   [ -n "$root" ] || { printf 'unavailable'; return 0; }
+  shift
+  for name in "$@"; do
+    excluded+=(":(exclude,top,literal)$name")
+    excluded_count=$((excluded_count + 1))
+  done
   command -v git >/dev/null 2>&1 || { printf 'unknown'; return 0; }
   if inside="$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)"; then
     [ "$inside" = "true" ] || { printf 'unknown'; return 0; }
@@ -115,9 +126,200 @@ _zensu_unqualified_change_count() {
     (1) printf 'unknown'; return 0 ;;
     (*) printf 'unavailable'; return 0 ;;
   esac
-  tracked="$(_tc_git -C "$root" diff --name-only HEAD 2>/dev/null)" || { printf 'unavailable'; return 0; }
-  untracked="$(_tc_git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" || { printf 'unavailable'; return 0; }
+  if [ "$excluded_count" -eq 0 ]; then
+    tracked="$(_tc_git -C "$root" diff --name-only HEAD 2>/dev/null)" || { printf 'unavailable'; return 0; }
+    untracked="$(_tc_git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" || { printf 'unavailable'; return 0; }
+  else
+    tracked="$(_tc_git_magic -C "$root" diff --name-only HEAD -- "${excluded[@]}" 2>/dev/null)" || { printf 'unavailable'; return 0; }
+    untracked="$(_tc_git_magic -C "$root" ls-files --others --exclude-standard -- "${excluded[@]}" 2>/dev/null)" || { printf 'unavailable'; return 0; }
+  fi
   printf '%s\n%s\n' "$tracked" "$untracked" | awk 'length($0) > 0 && !seen[$0]++ { n++ } END { print n + 0 }'
+}
+
+_zensu_code_roots_node() {
+  local lib
+  command -v node >/dev/null 2>&1 || return 2
+  lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/code-roots-v1.js")" || return 2
+  MSYS2_ARG_CONV_EXCL='*' node "$lib" "$@"
+}
+
+_zensu_code_roots_document() {
+  local document
+  document="$(tdd_state_file "${1:-}" 2>/dev/null)" || return 1
+  [ -f "$document" ] && [ ! -L "$document" ] || return 1
+  grep -qF '"codeRoots"' "$document" 2>/dev/null || return 1
+  _tdd_native_path "$document"
+}
+
+_zensu_code_roots_report() {
+  local verb="$1" root="$2" session="$3" document native_root native_data rc
+  document="$(_zensu_code_roots_document "$session")" || return 1
+  native_root="$(_tdd_native_path "$root")" || return 2
+  native_data="$(_tdd_native_path "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || native_data=""
+  if [ -n "$native_data" ]; then
+    _zensu_code_roots_node "$verb" --anchor "$native_root" --workflow "$document" --plugin-data "$native_data"
+  else
+    _zensu_code_roots_node "$verb" --anchor "$native_root" --workflow "$document"
+  fi
+  rc=$?
+  [ "$rc" -ne 1 ] || rc=3
+  return "$rc"
+}
+
+_zensu_union_change_count() {
+  local root="${1:-}" session="${2:-}" report report_rc kind first second third fourth fifth
+  local anchor_count roots_total=0 unavailable=0
+  local -a excluded=()
+  report="$(_zensu_code_roots_report count "$root" "$session" 2>/dev/null)"
+  report_rc=$?
+  if [ "$report_rc" -eq 1 ]; then
+    _zensu_unqualified_change_count "$root"
+    return 0
+  fi
+  if [ "$report_rc" -ne 0 ]; then
+    echo "zensu-log.sh: the declared code roots could not be counted, so the change count is unavailable" >&2
+    printf 'unavailable'
+    return 0
+  fi
+  while IFS="$(printf '\t')" read -r kind first second third fourth fifth; do
+    case "$kind" in
+      (status)
+        case "$first" in
+          (ok) ;;
+          (absent)
+            _zensu_unqualified_change_count "$root"
+            return 0
+            ;;
+          (*)
+            echo "zensu-log.sh: the declared code roots are ignored and the change count covers the anchor alone — ${second:-the code-root list is not usable}" >&2
+            _zensu_unqualified_change_count "$root"
+            return 0
+            ;;
+        esac
+        ;;
+      (exclude) excluded+=("$first") ;;
+      (anchor-fault)
+        echo "zensu-log.sh: the anchor's code-root exclusions could not be listed — $first exited $second: $third" >&2
+        unavailable=1
+        ;;
+      (count)
+        case "$second" in
+          (unavailable)
+            echo "zensu-log.sh: code root $first could not be counted — $third exited $fourth: $fifth" >&2
+            unavailable=1
+            ;;
+          (''|*[!0-9]*) unavailable=1 ;;
+          (*) roots_total=$((roots_total + second)) ;;
+        esac
+        ;;
+    esac
+  done <<ZENSU_CODE_ROOTS_REPORT
+$report
+ZENSU_CODE_ROOTS_REPORT
+  anchor_count="$(_zensu_unqualified_change_count "$root" ${excluded[@]+"${excluded[@]}"})"
+  if [ "$unavailable" -eq 1 ] || [ "$anchor_count" = unavailable ]; then
+    printf 'unavailable'
+    return 0
+  fi
+  case "$anchor_count" in
+    (''|*[!0-9]*) [ "$roots_total" -gt 0 ] && printf '%s' "$roots_total" || printf '%s' "$anchor_count" ;;
+    (*) printf '%s' "$((anchor_count + roots_total))" ;;
+  esac
+}
+
+_zensu_folder_anchor() {
+  local root="${1:-}" inside
+  [ -n "$root" ] || return 1
+  command -v git >/dev/null 2>&1 || return 1
+  if inside="$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)"; then
+    [ "$inside" != "true" ]
+    return
+  fi
+  case "$(LC_ALL=C _tc_git -C "$root" rev-parse --is-inside-work-tree 2>&1 >/dev/null)" in
+    (*[Nn]"ot a git repository"*) return 0 ;;
+    (*) return 1 ;;
+  esac
+}
+
+_zensu_code_roots_arm() {
+  local session="$1" native_root native_data armed rc
+  shift
+  native_root="$(_tdd_native_path "${CLAUDE_PROJECT_DIR:-.}")" || native_root=""
+  if [ -z "$native_root" ]; then
+    echo "zensu-log.sh --tdd-begin: the project root could not be resolved, so no code root was declared" >&2
+    return 2
+  fi
+  native_data="$(_tdd_native_path "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || native_data=""
+  if [ -n "$native_data" ]; then
+    armed="$(_zensu_code_roots_node arm --anchor "$native_root" --session "$session" --plugin-data "$native_data" "$@" 2>&1)"
+  else
+    armed="$(_zensu_code_roots_node arm --anchor "$native_root" --session "$session" "$@" 2>&1)"
+  fi
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    case "$armed" in
+      (*$'\n'*|*$'\r'*) ;;
+      (\[*\]) printf '%s' "$armed"; return 0 ;;
+    esac
+    echo "zensu-log.sh --tdd-begin: the code-root validator answered no usable list, so no code root was declared" >&2
+    return 2
+  fi
+  if [ -z "$armed" ]; then
+    echo "zensu-log.sh --tdd-begin: the code-root validator could not run, so no code root was declared" >&2
+  else
+    printf 'zensu-log.sh --tdd-begin: %s\n' "$armed" >&2
+  fi
+  return 2
+}
+
+_zensu_print_code_roots() {
+  local root="$1" session="$2" report rc kind first second
+  report="$(_zensu_code_roots_report read "$root" "$session" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -ne 1 ] || return 0
+  if [ "$rc" -ne 0 ]; then
+    echo "zensu-log.sh --code-roots: the declared code roots could not be read" >&2
+    return 2
+  fi
+  while IFS="$(printf '\t')" read -r kind first second; do
+    case "$kind" in
+      (status)
+        case "$first" in
+          (ok|absent) ;;
+          (*) echo "zensu-log.sh --code-roots: the declared code roots are ignored — ${second:-the code-root list is not usable}" >&2 ;;
+        esac
+        ;;
+      (root) printf '%s %s\n' "$first" "${second%%$'\t'*}" ;;
+    esac
+  done <<ZENSU_CODE_ROOTS_LIST
+$report
+ZENSU_CODE_ROOTS_LIST
+}
+
+_zensu_print_change_set() {
+  local root="$1" session="$2" baseline="$3" document anchor_top listing rc roots
+  local -a args=(--change-set --project "$root")
+  [ -z "$baseline" ] || args+=(--baseline "$baseline")
+  if document="$(_zensu_code_roots_document "$session")"; then
+    args+=(--workflow "$document")
+  else
+    document=""
+  fi
+  listing="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" "${args[@]}")"
+  rc=$?
+  case "$rc" in
+    (0|3) ;;
+    (*) echo "zensu-log.sh --change-set: the change set could not be listed (exit $rc)" >&2; return 2 ;;
+  esac
+  anchor_top="$(_tc_git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || anchor_top="$root"
+  [ -n "$anchor_top" ] || anchor_top="$root"
+  printf 'root\t-\t%s\n' "$anchor_top"
+  if [ -n "$document" ]; then
+    roots="$(_zensu_print_code_roots "$root" "$session")" || return 2
+    [ -z "$roots" ] || printf '%s\n' "$roots" | awk '{ label = $1; sub(/^[^ ]+ /, ""); printf "root\t%s\t%s\n", label, $0 }'
+  fi
+  [ "$rc" -eq 0 ] || return 0
+  [ -z "$listing" ] || printf '%s\n' "$listing" | awk 'length($0) > 0 { printf "file\t%s\n", $0 }'
 }
 
 _zensu_evr_prepare() {
@@ -599,6 +801,11 @@ case "${1:-}" in
       exit 2
     }
     command -v node >/dev/null 2>&1 || _rp_stop "node: the verb needs node and found none"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    _rp_code_roots="$(_zensu_print_code_roots "$_rp_root" "${ZENSU_SESSION_KEY:-}" 2>/dev/null)" \
+      || _rp_stop "code-roots: the declared code roots of this chain could not be read"
+    [ -z "$_rp_code_roots" ] \
+      || _rp_stop "code-roots: this chain declares code roots, and the round snapshot, the landing attribution and the round diff cover the anchor alone"
     _rp_top="$(_tc_git -C "$_rp_root" rev-parse --show-toplevel 2>/dev/null)"
     if [ -z "$_rp_top" ] || [ ! -d "$_rp_top" ]; then
       _rp_stop "work-tree: $_rp_root is not inside a git work tree"
@@ -1369,6 +1576,34 @@ case "${1:-}" in
     fi
     exit "$adopt_rc"
     ;;
+  --code-roots|--change-set)
+    cr_verb="$1"
+    cr_baseline=""
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --baseline)
+          [ "$cr_verb" = "--change-set" ] || { echo "zensu-log.sh $cr_verb: option is not valid for this verb" >&2; exit 2; }
+          [ $# -ge 2 ] && [ -n "$2" ] || { echo "zensu-log.sh $cr_verb: --baseline requires a commit id" >&2; exit 2; }
+          cr_baseline="$2"; shift 2 ;;
+        *) echo "zensu-log.sh $cr_verb: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    case "$cr_baseline" in
+      (*[!0123456789abcdef]*) echo "zensu-log.sh $cr_verb: --baseline must be a commit id" >&2; exit 2 ;;
+    esac
+    if ! cr_session="$(zensu_resolve_session_id)" || [ -z "$cr_session" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    if [ "$cr_verb" = "--code-roots" ]; then
+      _zensu_print_code_roots "${CLAUDE_PROJECT_DIR:-.}" "$cr_session"
+    else
+      _zensu_print_change_set "${CLAUDE_PROJECT_DIR:-.}" "$cr_session" "$cr_baseline"
+    fi
+    exit $?
+    ;;
   --tdd-begin|--tdd-complete|--review-ticket|--current-review-ticket|--review-rearm|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--chain-status|--chain-recover|--workflow-begin|--workflow-end)
     verb="$1"
     session_val=""
@@ -1392,9 +1627,14 @@ case "${1:-}" in
     seen_outcome=false
     seen_tdd_mode=false
     seen_plan=false
+    seen_code_root=false
+    code_root_args=()
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
+        --code-root|--code-root-baseline)
+          [ $# -ge 2 ] || { echo "zensu-log.sh $verb: missing $1 value" >&2; exit 2; }
+          seen_code_root=true; code_root_args+=("$1" "$2"); shift 2 ;;
         --session)
           [ "$seen_session" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --session" >&2; exit 2; }
           seen_session=true; session_val="$2"; shift 2 ;;
@@ -1477,6 +1717,7 @@ case "${1:-}" in
     # added later inherits the refusal rather than silently accepting a flag only
     # --tdd-complete can act on.
     [ "$seen_plan" = false ] || [ "$verb" = "--tdd-complete" ] || invalid_known_flag=true
+    [ "$seen_code_root" = false ] || [ "$verb" = "--tdd-begin" ] || invalid_known_flag=true
     case "$verb" in
       --tdd-begin|--tdd-complete)
         [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
@@ -1569,6 +1810,14 @@ case "${1:-}" in
               exit 2
             }
         fi
+        begin_code_roots=""
+        if [ "$seen_code_root" = true ]; then
+          if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
+            echo "zensu-log.sh --tdd-begin: --code-root and --code-root-baseline are refused together with the Autopilot binding flags, because a multi-repo Autopilot run is out of scope" >&2
+            exit 2
+          fi
+          begin_code_roots="$(_zensu_code_roots_arm "$session_val" "${code_root_args[@]}")" || exit 2
+        fi
         if [ -n "$autopilot_run_val" ]; then
           source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
           start_event_id="$(autopilot_chain_event_id start "$chain_id_val")" || {
@@ -1586,7 +1835,7 @@ case "${1:-}" in
           # preflight read.
           source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
           autopilot_begin_standalone_tdd "${CLAUDE_PROJECT_DIR:-.}" \
-            "$session_val" "$begin_vanilla"
+            "$session_val" "$begin_vanilla" "$begin_code_roots"
           tdd_begin_rc=$?
         fi
         if [ "$tdd_begin_rc" -eq 0 ]; then
@@ -1675,6 +1924,9 @@ case "${1:-}" in
           fi
           if ! zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot >/dev/null 2>&1; then
             echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
+          fi
+          if [ -z "$begin_code_roots" ] && _zensu_folder_anchor "${CLAUDE_PROJECT_DIR:-.}"; then
+            echo "zensu-log.sh --tdd-begin: FOLDER ANCHOR — the project root lies outside every git work tree, so this chain has no change set: a file claim outside every declared code root can never land, and --tdd-complete refuses a chain that logs one. Start a session in the repository the work changes." >&2
           fi
           zensu_external_review_wait_reset "$session_val"
           if [ "$begin_vanilla" = "true" ]; then
@@ -1771,7 +2023,7 @@ case "${1:-}" in
         # Builtins in a subshell, not `env`: `env` is an external binary, and if it
         # cannot be resolved every scope call fails, which refuses this verb on a
         # repository git itself would read.
-        _tc_changes="$(_zensu_unqualified_change_count "$_tc_root")"
+        _tc_changes="$(_zensu_union_change_count "$_tc_root" "$session_val")"
         [ "$_tc_changes" = unknown ] && _tc_changes=0
         if [ "$_tc_changes" = unavailable ] \
            && ! { [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ]; }; then
@@ -1932,8 +2184,12 @@ case "${1:-}" in
                 # shellcheck source=/dev/null
                 . "$_tc_bounded_lib" 2>/dev/null || true
               fi
+              _tc_inv_args=(--inventory --log "$_tc_run_log" --project "$_tc_root")
+              if _tc_inv_workflow="$(_zensu_code_roots_document "$session_val")"; then
+                _tc_inv_args+=(--workflow "$_tc_inv_workflow")
+              fi
               if command -v zensu_run_bounded >/dev/null 2>&1; then
-                _tc_inventory="$(zensu_run_bounded bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
+                _tc_inventory="$(zensu_run_bounded bash "$_tc_el_lib" "${_tc_inv_args[@]}" 2>/dev/null)"
               else
                 # DISCLOSED, not silent. This block already sets and reports
                 # `library-unavailable` for its sibling file, and an absent
@@ -1943,7 +2199,7 @@ case "${1:-}" in
                 # Running it anyway is still right (losing the claim channel
                 # would silently disarm the gate), but saying nothing was not.
                 echo "zensu-log.sh --tdd-complete: CLAIM INVENTORY UNBOUNDED — the shared watchdog ladder (${_tc_bounded_lib:-<path unresolved>}) could not be loaded, so the claim inventory ran with no deadline. A child that never returns cannot be interrupted here and this verb would not complete." >&2
-                _tc_inventory="$(bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
+                _tc_inventory="$(bash "$_tc_el_lib" "${_tc_inv_args[@]}" 2>/dev/null)"
               fi
               _tc_inventory_rc=$?
               # The count is read on BOTH arms. A child that could not complete
@@ -2583,7 +2839,7 @@ case "${1:-}" in
               _avg_lines=""
               chain_change_count=""
               if _tdd_zero_change_ticket "$claimed_ticket_val"; then
-                chain_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
+                chain_change_count="$(_zensu_union_change_count "$CLAUDE_PROJECT_DIR" "$session_val")"
               fi
               case "$chain_change_count" in
                 (''|0|unknown)
@@ -2611,7 +2867,7 @@ case "${1:-}" in
               [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
               [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
             else
-              chain_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
+              chain_change_count="$(_zensu_union_change_count "$CLAUDE_PROJECT_DIR" "$session_val")"
               tdd_mark_unclaimed_review "$session_val" chainDone "$chain_change_count" || {
                 chain_done_rc=$?
                 [ "$chain_done_rc" -eq 4 ] || {
@@ -2686,7 +2942,7 @@ case "${1:-}" in
         if [ "$claimed_ticket_seen" = "true" ]; then
           tdd_mark_review_converged "$session_val" "$claimed_ticket_val" codeReviewDone
         else
-          review_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
+          review_change_count="$(_zensu_union_change_count "$CLAUDE_PROJECT_DIR" "$session_val")"
           tdd_mark_unclaimed_review "$session_val" codeReviewDone "$review_change_count" || {
             review_done_rc=$?
             [ "$review_done_rc" -eq 4 ] || {
