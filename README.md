@@ -9,6 +9,10 @@
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
+<a href="https://zensu.dev/claude-code/#explain"><img src="https://zensu.dev/claude-code/cc-explainer-v1.webp" alt="Watch: Zensu for Claude Code, explained in three minutes" width="720"></a>
+
+*[Watch the three-minute explainer](https://zensu.dev/claude-code/#explain) with sound, captions and a transcript. The workflow it shows uses fictional data.*
+
 Zensu plans the feature with you, implements it, and then puts the result
 through a review panel that has to cite real file and line numbers for every
 finding. What ships is tracked as a feature, not as a pile of commits, so your
