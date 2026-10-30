@@ -356,25 +356,49 @@ quoted part), and `$"…"` as double quotes. An expansion stays in the value ver
 `UNEXPANDED` rules still see it. An unquoted `<` or `>` ends the word and starts an operator token,
 and `splitRedirects` takes the operators and their targets out of the word list, so redirections
 before or between the words no longer hide the command word and `x>file` writes `file`.
-`joinContinuations` joins a backslash-newline before lexing, except after a line in which a `#`
-starts a word, because bash does not continue a comment. `lex()` keeps an `&` that is part of a
-redirection operator (`2>&1`, `&>`), which used to reset the tracked cwd as if the command had been
-backgrounded. `commandWords` skips the unquoted reserved words in `RESERVED_WORDS`, reads the
-assignment words of `SHELL_ASSIGNMENT` (`NAME=`, `NAME+=`, `NAME[i]=`; only a plain `NAME=` feeds
+`logicalText` builds each logical line in one pass: `scanLine` carries the quote state across
+physical lines, so a newline inside quotes stays in the word and a backslash-newline outside single
+quotes is removed, except after a `#` that starts a word outside quotes, because bash does not
+continue a comment (`joinContinuations` is that join alone). `heredocDelimiters` then finds every
+unquoted `<<` and `<<-` of the logical line outside comments and arithmetic, with the whole
+quote-removed word as the delimiter, and `skipHeredocs` drops each body up to its exact delimiter
+line, leading tabs stripped for `<<-`; `stripHeredocs` runs the same scanner per physical line.
+`lex()` keeps an `&` that is part of a redirection operator (`2>&1`, `&>`, an `&>` glued to a
+word) and the `|` of `>|` and `>&|` in the segment, so neither resets the tracked cwd as a
+background or a pipe would, but not after an escaped `\<` or `\>`, which bash reads as a word
+character. `redirectOperator` reads zsh's `>>|`, `>>&`, `&>|`, `&>>|`, `>&|` and `>!` whole, and
+`splitRedirects` reads every output operator as a write except a `>&` or `>>&` whose target is a
+descriptor number or `-`, plus `n<>` on a descriptor other than 0, so no text rewrite runs before
+the reader; only `detectChannels` keeps the base's text collapse, for its channel test. `ansiC`
+finds the end of `$'…'` before it decodes, so a `\c` before the closing quote does not swallow it,
+`braceEnd` ends a `${…}` at its matching brace across nested quotes and `${`, and `$$` is one unit,
+inside a nested string too. bash nests a single quote inside a double-quoted `${…}` and zsh reads
+it as a character, so `readings` reads every segment both ways (`bashQuotes`), the Session Control
+check and `detectChannels` judge both, and `main()` runs its rule loop (`scan`) a second time when
+the two readings split a segment differently. `commandWords` skips the unquoted reserved words in
+`RESERVED_WORDS`, reads the assignment words of `SHELL_ASSIGNMENT` (`NAME=`, `NAME+=`, `NAME[i]=`; only a plain `NAME=` feeds
 `GIT_*` and the escape prefixes), then each `WRAP` name with the options `WRAPPER_OPTIONS` lists for
 it, long options by unique prefix as getopt reads them, and the quote-removed `NAME=value` words
 `env` and `sudo` take (the other wrappers keep the base's over-read). Its `ops` record `env -i`,
 `env -`, `exec -c` (clear), `env -u` (unset), `env -C` and `sudo -D` (chdir) and every wrapper
-assignment in order; `env -S` splices its split string back into the argument list, at most
-`MAX_SPLITS` times. The Session Control check refuses a protected name in any assignment, an unset
-op of one as removal, `export -n`/`declare +x`/`typeset +x` of one as removal and `printf -vNAME`
-as a rebind; a full clear alone is NOT refused, because it names no input and `model-bind` refuses
-a missing `CLAUDE_CODE_SESSION_ID`. The rule loop runs git with `-C <dir>` for each chdir op, so
-`gitTargets` judges an unexpanded one as it judges an unexpanded `-C`, resolves tee, `sed -i` and
-`dd of=` operands against that directory (a relative operand under an unexpanded one is not
-judged), and folds the ops over the carried and inline `GIT_*` values. W265 and W267-W323 in the
+assignment in order; `env -S` splices its split string back into the argument list, split by
+`envSplit` the way env splits it (`\_` separates, `\c` stops, a `#` starts a comment), at most
+`MAX_SPLITS` times, and a further `-S` sets `overflow`, which the Session Control check refuses.
+That check refuses a protected name in any assignment, an unset op of one as removal,
+`export -n`/`declare +x`/`typeset +x` and `-a`/`-A` of one as removal, `printf -vNAME`, a `for`,
+`select` or `foreach` loop name and a `{NAME}` redirection as a rebind, and reads a subscript as its
+name (`protectedName`); a full clear alone is NOT refused, because it names no input and
+`model-bind` refuses a missing `CLAUDE_CODE_SESSION_ID`. `detectControlMutation` refuses when either
+`readControlMutation` (this reader) or `wordSplitControlMutation` (a port of the earlier
+whitespace reading) finds a rebind or a removal, with `builtinControlMutation` as the one builtin
+table both share, so the always-on check refuses at least what the base refused; drop the second
+reading and every spelling the new reader misreads becomes an allow. The rule loop runs git
+with `-C <dir>` for each chdir op, so `gitTargets` judges an unexpanded one as it judges an
+unexpanded `-C`, resolves tee, `sed -i` and `dd of=` operands against that directory (a relative
+operand under an unexpanded one is not judged, and targets mode reports it as a write target), and
+folds the ops over the carried and inline `GIT_*` values. W265 and W267-W381 in the
 gate suite, F8c and D10-D14 in `tests/structure/test-secret-scan-gate.sh`, and the reader cases of
-`git-repo-escape.test.js` pin it. **Known residuals, all stated in `docs/gates.md`:** zsh's
+`git-repo-escape.test.js` pin it. **Known residuals, all stated in `docs/gates.md`:** zsh's other
 readings (an unknown `$'…'` escape, `$"…"`, `=cmd`, `noglob`, `nocorrect`, `-`) are not applied,
 although the Bash tool runs zsh where that is the user's shell (measured on macOS); a program word
 built at run time, aliases and functions; builtins that assign by other means (`let`, `getopts`,
@@ -412,7 +436,13 @@ paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 `hooks/pre-bash-zensu-gate.sh`, where it drives that gate's token scan. The CLI gate also
 unwraps through `WRAPPERS` in `hooks/lib/subagent-shell-guard-v1.js`, a larger set, and gates
 what either reading finds, so `timeout`, `xargs` or `stdbuf` in front of a command is
-transparent to the CLI gate and not to rule (C).
+transparent to the CLI gate and not to rule (C). The same guard restates the parser's shell
+grammar (`RESERVED_WORDS`, `ASSIGNMENT_RE` for `SHELL_ASSIGNMENT`, `DIRECTORY_WRAPPERS` for
+`SHELL_WRAP`, `WRAPPERS` for `WRAPPER_OPTIONS`); `WRAP` itself is derived from the keys of
+`WRAPPER_OPTIONS`, so a wrapper never lacks its option table. The unit case `the shell readers of
+the source-write parser and the subagent shell guard, compared over one corpus` pins where the two
+readers agree and their three differences (`env -S`, `sudo -h` and the guard's extra wrappers), so
+a change to either table moves a pinned line.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
 `hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the

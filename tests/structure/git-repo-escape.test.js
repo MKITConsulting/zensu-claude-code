@@ -589,6 +589,10 @@ test("segmentWords removes quotes the way bash does and keeps an expansion visib
   assert.deepStrictEqual(values("\"$REPO\" '$REPO' ${A:-x y} trail\\"), ["$REPO", "$REPO", "${A:-x y}", "trail\\"]);
   assert.deepStrictEqual(values("'open rest of it"), ["open rest of it"]);
   assert.deepStrictEqual(values("$\"git\" $\"a b\""), ["git", "a b"]);
+  assert.deepStrictEqual(values("${x:-'}'} ${x:-\"}\"} ${a:-${b:-}} next"), ["${x:-'}'}", "${x:-\"}\"}", "${a:-${b:-}}", "next"]);
+  assert.deepStrictEqual(values("A=\"${x:-\"'\"}\" \"${a:-${b:-\"}\"}}\" next"), ["A=${x:-\"'\"}", "${a:-${b:-\"}\"}}", "next"]);
+  assert.deepStrictEqual(values("$$'\\' $${'}' \"$$'\" $$ next"), ["$$\\", "$${}", "$$'", "$$", "next"]);
+  assert.deepStrictEqual(values("${x:-\"$${\"} \"${x:-\"$${\"}\" next"), ["${x:-\"$${\"}", "${x:-\"$${\"}", "next"]);
 });
 
 test("segmentWords decodes $'...' with bash's escapes, keeps an unknown escape and ends the quoted part at a NUL", () => {
@@ -596,6 +600,7 @@ test("segmentWords decodes $'...' with bash's escapes, keeps an unknown escape a
   assert.deepStrictEqual(values("$'\\x67it' $'\\147it' $'\\u0067it' $'\\U00000067it' $'g\\'it'"), ["git", "git", "git", "git", "g'it"]);
   assert.deepStrictEqual(values("$'a\\tb' $'\\e' $'\\cA' $'\\q' $'\\x'"), ["a\tb", "\x1b", "\x01", "\\q", "\\x"]);
   assert.deepStrictEqual(values("$'a\\0b'c $'g\\x00x'it"), ["ac", "git"]);
+  assert.deepStrictEqual(values("$'\\c' next $'\\c\\\\' next"), ["\\c", "next", "\x1c", "next"]);
 });
 
 test("segmentWords splits redirection operators off the words around them", () => {
@@ -605,6 +610,10 @@ test("segmentWords splits redirection operators off the words around them", () =
     ["echo", "op:2>", "/dev/null", "op:&>", "log.txt", "op:2>&", "1", "op:<", "in", "op:>>", "out"]);
   assert.deepStrictEqual(shape("cat <<EOF <<<word <<-X &>>all"), ["cat", "op:<<", "EOF", "op:<<<", "word", "op:<<-", "X", "op:&>>", "all"]);
   assert.deepStrictEqual(shape("echo '>' \\> \">\" a>"), ["echo", ">", ">", ">", "a", "op:>"]);
+  assert.deepStrictEqual(shape("unset X&>/dev/null a&>>b \\&>c"), ["unset", "X", "op:&>", "/dev/null", "a", "op:&>>", "b", "&", "op:>", "c"]);
+  assert.deepStrictEqual(shape("echo >>|a >>&b &>|c &>>|d >&|e >!f {fd}>g"),
+    ["echo", "op:>>|", "a", "op:>>&", "b", "op:&>|", "c", "op:&>>|", "d", "op:>&|", "e", "op:>!", "f", "op:{fd}>", "g"]);
+  assert.strictEqual(segmentWords("{ZENSU_SESSION_KEY}>x")[0].fdName, "ZENSU_SESSION_KEY");
 });
 
 test("splitRedirects keeps the program's words and reports only the targets that are written", () => {
@@ -612,6 +621,10 @@ test("splitRedirects keeps the program's words and reports only the targets that
   assert.deepStrictEqual(split.words.map((w) => w.value), ["tee", "a.rs", "cat", "d.rs"]);
   assert.deepStrictEqual(split.writes.map((w) => w.value), ["/dev/null", "b.rs", "c.rs"]);
   assert.deepStrictEqual(splitRedirects(segmentWords("echo x >")).writes, []);
+  assert.deepStrictEqual(splitRedirects(segmentWords("echo \"it's\" >&a.rs 2>&1 >&- >& 2 1>&b.rs >|c.rs")).writes.map((w) => w.value),
+    ["a.rs", "b.rs", "c.rs"]);
+  assert.deepStrictEqual(splitRedirects(segmentWords("echo x >>|a.rs >>&b.rs &>|c.rs &>>|d.rs >!e.rs 1<>f.rs 0<>g.rs <>h.rs >>&2 {fd}>i.rs")).writes.map((w) => w.value),
+    ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "i.rs"]);
 });
 
 test("joinContinuations joins a backslash-newline but not after a comment or an escaped backslash", () => {
@@ -621,6 +634,10 @@ test("joinContinuations joins a backslash-newline but not after a comment or an 
   assert.strictEqual(joinContinuations("ls; # note \\\nunset X"), "ls; # note \\\nunset X");
   assert.strictEqual(joinContinuations("echo a\\\\\nunset X"), "echo a\\\\\nunset X");
   assert.strictEqual(joinContinuations("echo $#\\\nx"), "echo $#x");
+  assert.strictEqual(joinContinuations("unset \" #\" \\\nX"), "unset \" #\" X");
+  assert.strictEqual(joinContinuations("echo a\\ #b \\\nc"), "echo a\\ #b c");
+  assert.strictEqual(joinContinuations("echo 'a\\\nb' \\\nc"), "echo 'a\\\nb' c");
+  assert.strictEqual(joinContinuations("a \\\n".repeat(20000) + "b"), "a ".repeat(20000) + "b");
 });
 
 test("commandWords skips reserved words, the time keyword and assignment words before the program word", () => {
@@ -675,6 +692,12 @@ test("commandWords reads each wrapper's own options before the assignments it ta
   assert.strictEqual(read("exec -c -a name cmd").word, "cmd");
   assert.strictEqual(read("nohup sudo -u x env A=1 nice -n 1 cmd").word, "cmd");
   assert.strictEqual(read("ENV -i \"$'\\x41'=1\" cmd").word, "cmd");
+  assert.deepStrictEqual(read("env -S 'A=1\\_B=2 cmd' x").ops, [set("A", "1"), set("B", "2")]);
+  assert.strictEqual(read("env -S 'A=1\\_B=2 cmd' x").word, "cmd");
+  assert.deepStrictEqual(read("env -S '\"A=x\\_y\" cmd' z").ops, [set("A", "x y")]);
+  assert.strictEqual(read("env -S 'cmd \\c ignored' x").word, "cmd");
+  assert.strictEqual(read("env " + "-S -v ".repeat(8) + "-S 'A=1 cmd' x").overflow, true);
+  assert.strictEqual(read("env " + "-S -v ".repeat(7) + "-S 'A=1 cmd' x").word, "cmd");
 });
 
 test("sedInPlace reads --in-place, its abbreviations and an option cluster that holds i or I", () => {
@@ -696,6 +719,7 @@ test("detectChannels reads tee, sed -i and dd of= after quote removal and sed's 
     assert.ok(has(cmd, "sed -i"), cmd);
   }
   for (const cmd of ["\"d\"d of=f", "d\\d of=f", "env dd of=f"]) assert.ok(has(cmd, "dd of="), cmd);
+  assert.ok(has("echo x | tee&>/dev/null out.txt", "tee"));
   for (const cmd of ["sed -n -e p f", "sed -e i f", "echo t'e'e", "grep -n tee f.txt"]) {
     assert.ok(!has(cmd, "sed -i") && !has(cmd, "dd of="), cmd);
   }
@@ -725,7 +749,24 @@ test("the Session Control check reads a word after quote removal, through every 
     "if export ZENSU_SESSION_KEY=x; then :; fi": "ZENSU_SESSION_KEY",
     "! CLAUDE_CODE_SESSION_ID=x true": "CLAUDE_CODE_SESSION_ID",
     "2>/dev/null export ZENSU_SESSION_KEY=x": "ZENSU_SESSION_KEY",
-    "export \\\nZENSU_SESSION_KEY=x": "ZENSU_SESSION_KEY"
+    "export \\\nZENSU_SESSION_KEY=x": "ZENSU_SESSION_KEY",
+    "export $'\\c' ZENSU_SESSION_KEY=x": "ZENSU_SESSION_KEY",
+    "export $'\\c\\\\' CLAUDE_CODE_SESSION_ID=x; bash x.sh": "CLAUDE_CODE_SESSION_ID",
+    "export ${x:-'}'} ZENSU_SESSION_KEY=x": "ZENSU_SESSION_KEY",
+    "export \"${x:-\"'\"}\" ZENSU_SESSION_KEY=x": "ZENSU_SESSION_KEY",
+    "A=\"${x:-\"'\"}\" CLAUDE_CODE_SESSION_ID=x bash x.sh": "CLAUDE_CODE_SESSION_ID",
+    "true \\<& CLAUDE_CODE_SESSION_ID=x bash x.sh": "CLAUDE_CODE_SESSION_ID",
+    "echo \\>| ZENSU_SESSION_KEY=x bash x.sh": "ZENSU_SESSION_KEY",
+    "printf -v ZENSU_SESSION_KEY&>/dev/null x": "ZENSU_SESSION_KEY",
+    "env&>/dev/null CLAUDE_CODE_SESSION_ID=x bash x.sh": "CLAUDE_CODE_SESSION_ID",
+    "export $$'\\' CLAUDE_CODE_SESSION_ID=x; bash x.sh": "CLAUDE_CODE_SESSION_ID",
+    "cat <<EOF \\\nx\nEOF\nCLAUDE_CODE_SESSION_ID=x bash x.sh": "CLAUDE_CODE_SESSION_ID",
+    "for ZENSU_SESSION_KEY in x; do bash x.sh; done": "ZENSU_SESSION_KEY",
+    "select CLAUDE_CODE_SESSION_ID in a b; do :; done": "CLAUDE_CODE_SESSION_ID",
+    "read 'ZENSU_SESSION_KEY[1]'": "ZENSU_SESSION_KEY",
+    "printf -v 'ZENSU_SESSION_KEY[0]' x": "ZENSU_SESSION_KEY",
+    "{ZENSU_SESSION_KEY}>/dev/null true": "ZENSU_SESSION_KEY",
+    "env -S 'A=1\\_CLAUDE_CODE_SESSION_ID=x' node x.js": "CLAUDE_CODE_SESSION_ID"
   };
   for (const [cmd, name] of Object.entries(rebinds)) {
     const m = rebind.exec(detectControlMutation(cmd));
@@ -741,7 +782,26 @@ test("the Session Control check reads a word after quote removal, through every 
     "env -uZENSU_RUNTIME_DIGEST bash x.sh": "ZENSU_RUNTIME_DIGEST",
     "export -n ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
     "declare +x ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
-    "{ unset ZENSU_SESSION_KEY; }": "ZENSU_SESSION_KEY"
+    "{ unset ZENSU_SESSION_KEY; }": "ZENSU_SESSION_KEY",
+    "unset $'\\c' ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "unset ${x:-'}'} ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "unset \"${x:-\"'\"}\" ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "echo \\<& unset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "echo \\>& unset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "unset ZENSU_SESSION_KEY&>/dev/null": "ZENSU_SESSION_KEY",
+    "unset $$'\\' ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "unset $${'}' ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "cat <<EOF \\\nx\nEOF\nunset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "cat <<EOF \\\nEOF\nunset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "unset 'ZENSU_SESSION_KEY[0]'": "ZENSU_SESSION_KEY",
+    "declare -a ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "local -A CLAUDE_CODE_SESSION_ID": "CLAUDE_CODE_SESSION_ID",
+    "A=\"${x:-'\"'}\" env -u ZENSU_SESSION_KEY bash x.sh": "ZENSU_SESSION_KEY",
+    "echo '<<X'\nunset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "n=$((1<<bits))\nunset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "cat <<EOF-1\nx\nEOF-1\nunset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "# note <<EOF\nunset ZENSU_SESSION_KEY": "ZENSU_SESSION_KEY",
+    "unset \" #\" \\\nZENSU_SESSION_KEY": "ZENSU_SESSION_KEY"
   };
   for (const [cmd, name] of Object.entries(removals)) {
     const m = removal.exec(detectControlMutation(cmd));
@@ -749,9 +809,14 @@ test("the Session Control check reads a word after quote removal, through every 
     assert.strictEqual(m[1], name, cmd);
   }
   for (const cmd of ["env -i PATH=/usr/bin bash x.sh", "env -u FOO bash x.sh", "\"CLAUDE_CODE_SESSION_ID=x\" true", "declare -x ZENSU_SESSION_KEY",
-    "export -n FOO", "\\EXPORT ZENSU_SESSION_KEY=x", "git commit -m \"unset ZENSU_SESSION_KEY\"", "exec -c bash x.sh"]) {
+    "export -n FOO", "\\EXPORT ZENSU_SESSION_KEY=x", "git commit -m \"unset ZENSU_SESSION_KEY\"", "exec -c bash x.sh",
+    "echo \"${x:-'}'}\" ZENSU_SESSION_KEY", "echo \\<& ls", "cat <<EOF \\\nx\nEOF\nls",
+    "for f in a b; do echo $f; done", "unset 'FOO[0]'", "declare -a FOO", "{fd}>/dev/null true",
+    "cat <<'E O F'\nunset ZENSU_SESSION_KEY\nE O F", "cat <<-EOF\n\tunset ZENSU_SESSION_KEY\n\tEOF"]) {
     assert.strictEqual(detectControlMutation(cmd), "", cmd);
   }
+  assert.match(detectControlMutation("env " + "-S -v ".repeat(8) + "-S 'CLAUDE_CODE_SESSION_ID=x bash' x.sh"),
+    /^Blocked a Bash command with more than 8 env -S split strings/);
 });
 
 test("the env-file path comparison folds letter case and Unicode normalization on every platform", () => {
@@ -817,4 +882,45 @@ test("the program-name readers of the gates, compared over one corpus", () => {
     assert.strictEqual(powershell.normalizeCommandName(spelling), "git", `powershell ${spelling}`);
   }
   assert.strictEqual(powershell.normalizeCommandName("g'i't"), "g'i't");
+});
+
+test("the shell readers of the source-write parser and the subagent shell guard, compared over one corpus", () => {
+  const guard = require(path.join(LIB, "subagent-shell-guard-v1.js"));
+  const parserReads = (text) => programName(commandWords(segmentWords(text)).word, false);
+  const guardReads = (text) => guard.commandInvocations(text, { platform: "linux" })[0].name;
+  const agree = ["if", "!", "{", "while", "until", "do", "A=1", "A+=1", "A[0]=1", "command", "builtin", "env -u X", "env -C /x",
+    "sudo -u root", "sudo -D /x", "nice -n 5", "nohup", "time -p", "exec -a n"];
+  for (const prefix of agree) {
+    assert.strictEqual(parserReads(prefix + " git status"), "git", `parser ${prefix}`);
+    assert.strictEqual(guardReads(prefix + " git status"), "git", `guard ${prefix}`);
+  }
+  const differ = {
+    "env -S \"A=1 git\" status": ["git", "status"],
+    "sudo -h host git status": ["host", "git"],
+    "timeout 5 git status": ["timeout", "git"],
+    "xargs git status": ["xargs", "git"],
+    "stdbuf -o0 git status": ["stdbuf", "git"],
+    "doas git status": ["doas", "git"],
+    "caffeinate -w 1 git status": ["caffeinate", "git"],
+    "flock /tmp/l git status": ["flock", "git"]
+  };
+  for (const [text, [parser, shellGuard]] of Object.entries(differ)) {
+    assert.strictEqual(parserReads(text), parser, `parser ${text}`);
+    assert.strictEqual(guardReads(text), shellGuard, `guard ${text}`);
+  }
+});
+
+test("targets mode reports a relative write operand under a directory named at run time", () => {
+  const { spawnSync } = require("node:child_process");
+  const run = (command) => spawnSync(process.execPath, [path.join(LIB, "bash-source-write-parse.js")], {
+    env: Object.assign({}, process.env, {
+      BSWG_MODE: "targets",
+      PAYLOAD: JSON.stringify({ tool_input: { command }, cwd: require("node:os").tmpdir() })
+    }),
+    encoding: "utf8"
+  }).stdout;
+  assert.match(run("env -C \"$D\" tee src/app.rs"), /^WRITE-TARGET src\/app\.rs \(via tee, under a directory named at run time\)/);
+  assert.match(run("sudo -D \"$D\" sed -i s/a/b/ src/app.rs"), /^WRITE-TARGET src\/app\.rs \(via sed -i, under a directory named at run time\)/);
+  assert.match(run("env -C \"$D\" dd of=src/app.rs"), /^WRITE-TARGET src\/app\.rs \(via dd of=, under a directory named at run time\)/);
+  assert.strictEqual(run("env -C \"$D\" tee notes.txt"), "");
 });

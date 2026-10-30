@@ -250,22 +250,41 @@ a word is matched, the gate removes quotes the way bash does: a backslash and si
 quotes anywhere inside the word, `$'…'` with bash's escapes decoded, and `$"…"` as double quotes.
 So `\git`, `g'i't`, `\env`, `e'n'v`, `$'\x65nv'`, `\export`, `\unset`, `t'e'e` and `s\ed -i` count
 like their plain spelling, and `\cd ../sibling` moves the tracked directory. A backslash-newline
-continues the line, except after a line that may hold a comment, and a redirection splits off the
-word it is glued to, as in `printf x>src/app.rs`. Each wrapper's own options are read the way that
+continues the line and a newline inside quotes stays in the word, except after a `#` that starts a
+comment outside quotes. A heredoc is found on the joined line with its whole quote-removed
+delimiter word, outside quotes, comments and arithmetic, several per line, and its body ends on
+the exact delimiter line (tabs stripped for `<<-`), so `echo '<<X'`, `$((1<<2))` or `cat <<EOF-1`
+no longer hide the lines after them. A redirection splits off the word it is glued to, as in
+`printf x>src/app.rs` or `unset X&>/dev/null`; `>|` and `>&file` write their file after any quoted
+word, zsh's `>>|`, `>>&`, `&>|`, `&>>|`, `>&|` and `>!` write theirs, and so does `n<>file` on a
+descriptor other than 0, while an escaped `\<` or `\>` stays part of its word. `$'…'` ends where
+bash ends it, `\c` included, a `${…}` expansion ends at its matching brace even when it holds quotes
+or a nested `${…}`, and `$$` is one unit, also inside a string within `${…}`, so a quote inside one
+of them does not shift the words after it. bash reads a single quote inside a double-quoted `${…}`
+as quoting and zsh as a character, so each command is judged under both readings. Each wrapper's
+own options are read the way that
 wrapper reads them (`env -i`, `-u`, `-C`, `-S` and `--`, `sudo -u` and `-D`, `nice -n`, `time -p`,
 `command -p`, `exec -c` and `-a`), so they no longer end the scan: `env -i CLAUDE_CODE_SESSION_ID=… …`
 is a rebind, `env -u ZENSU_SESSION_KEY …` is refused as removal like `unset`, and `env -C <dir> git …`
-runs git in that directory. A quoted assignment after `env` or `sudo`, as in
+runs git in that directory; a relative operand under an `env -C` directory named at run time is
+reported as a write target where the session has no project root. `env -S` strings are split as
+env splits them (`\_` separates, `\c` stops, `#` starts a comment), and more than eight nested
+`-S` strings are refused. A quoted assignment after `env` or `sudo`, as in
 `env "GIT_WORK_TREE=…" git add -A`, is read as one, while a quoted leading assignment stays a
 command word, as it is to bash. The assignment forms `NAME+=…` and `NAME[i]=…`, `printf -vNAME`,
-`export -n` and `declare +x` count too, and neither the reserved words `!`, `{`, `}`, `if`, `then`,
+`export -n`, `declare +x`, `declare -a`, a `for`, `select` or `foreach` loop name, a `{NAME}`
+redirection and a subscript such as `unset 'NAME[0]'` count too, and neither the reserved words
+`!`, `{`, `}`, `if`, `then`,
 `else`, `elif`, `fi`, `do`, `done`, `while` and `until` nor a redirection before the command word
 hide it any more. `env -i` on its own is not refused: it names no protected input, and the
 model-side binder (`model-bind` in `hooks/lib/claude-hook-session-v1.js`) refuses a missing
 `CLAUDE_CODE_SESSION_ID`. A literal path to `CLAUDE_ENV_FILE` is
 compared with letter case and Unicode normalization folded on every platform, as macOS and Windows
-resolve it by default. `tests/structure/test-bash-source-write-gate.sh` pins each spelling (W265,
-W74 and W267 to W323).
+resolve it by default. The Session Control check also reads every command a second time the way it
+did before this reader, split on whitespace with the quotes stripped, and refuses when either
+reading finds a rebind or a removal, so a spelling the word reader gets wrong is still refused
+wherever the earlier reading refused it. `tests/structure/test-bash-source-write-gate.sh` pins each
+spelling (W265, W74 and W267 to W381).
 
 **What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
 differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and

@@ -636,6 +636,76 @@ run "W320 2>&1 after cd ../sibling keeps the cwd it moved to" "cd ../sibling 2>&
 run "W321 the time keyword keeps cd in the shell" "time cd ../sibling; git add ." DENY
 run "W322 a quoted time is the external program, so its cd leaves the cwd" "\\time cd ../sibling; git add ." ALLOW
 run "W323 a leading redirection does not hide git -C sibling add" ">/dev/null git -C $SIB add ." DENY
+run "W324 a \\c at the end of \$'...' ends there, so the unset after it is refused" "unset \$'\\c' ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W325 \\c pairs with an escaped backslash, so the export after it is refused" "export \$'\\c\\\\' CLAUDE_CODE_SESSION_ID=x; bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W326 a quoted brace inside \${...} does not end it, so the unset after it is refused" "unset \${x:-'}'} ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W327 a nested quote inside a double-quoted \${...} does not end the string" "export \"\${x:-\"'\"}\" ZENSU_SESSION_KEY=x" DENY "$PROJ" "$CFG_OFF"
+run "W328 the same nested quote before a leading assignment" "A=\"\${x:-\"'\"}\" CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W329 an escaped < before & is a word, so the & still ends the command" "true \\<& CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W330 an escaped > before | is a word, so the pipe still ends the command" "echo \\>| ZENSU_SESSION_KEY=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W331 an &> glued to the name splits off, so the unset is refused" "unset ZENSU_SESSION_KEY&>/dev/null" DENY "$PROJ" "$CFG_OFF"
+run "W332 an &> glued to env splits off, so the wrapper is read" "env&>/dev/null CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W333 an &> glued to tee splits off, so the write to CLAUDE_ENV_FILE is refused" 'echo x | tee&>/dev/null "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W334 \$\$ is one unit, so its ' opens a plain single quote" "unset \$\$'\\' ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W335 \$\$ is one unit, so its { opens no expansion" "unset \$\${'}' ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+LC_HEREDOC="$(printf 'cat <<EOF \\\nx\nEOF\nunset ZENSU_SESSION_KEY')"
+run "W336 a heredoc opener continued by a backslash-newline starts its body after the joined line" "$LC_HEREDOC" DENY "$PROJ" "$CFG_OFF"
+LC_HEREDOC_BODY="$(printf 'cat <<EOF \\\nEOF\nunset ZENSU_SESSION_KEY')"
+run "W337 the whitespace reading still refuses the unset that the word reader places in the body" "$LC_HEREDOC_BODY" DENY "$PROJ" "$CFG_OFF"
+run "W338 a quoted brace inside \${...} does not hide the tee operand after it" "echo x | tee \${x:-'}'} src/app.rs" DENY
+run "W339 an escaped < before & does not hide git -C sibling add" "true \\<& git -C $SIB add ." DENY
+run "W340 an &> glued to git splits off, so rule (C) reads the verb" "git&>/dev/null -C $SIB add ." DENY
+LC_HEREDOC_GIT="$(printf 'cat <<EOF \\\nx\nEOF\ngit -C %s add .' "$SIB")"
+run "W341 a heredoc opener continued by a backslash-newline does not hide the git line after the body" "$LC_HEREDOC_GIT" DENY
+run "W342 an expansion holding a quoted brace stays a plain argument" "echo \"\${x:-'}'}\" ZENSU_SESSION_KEY" ALLOW "$PROJ" "$CFG_OFF"
+run "W343 an escaped < before & with a harmless command after it stays allowed" "echo \\<& ls" ALLOW "$PROJ" "$CFG_OFF"
+LC_HEREDOC_LS="$(printf 'cat <<EOF \\\nx\nEOF\nls')"
+run "W344 a continued heredoc opener with a harmless line after the body stays allowed" "$LC_HEREDOC_LS" ALLOW "$PROJ" "$CFG_OFF"
+run "W345 a >& after a quoted apostrophe still writes the file it names" "echo \"it's\" >&src/app.rs" DENY
+run "W346 a >| after a quoted apostrophe still writes the file it names" "echo \"it's\" >|src/app.rs" DENY
+run "W347 \$\$ inside a string inside \${...} is one unit, so the tee operand after it is read" "echo x | tee \${x:-\"\$\${\"} src/app.rs" DENY
+run "W348 the same inside a double-quoted \${...}" "echo x | tee \"\${x:-\"\$\${\"}\" src/app.rs" DENY
+run "W349 a >& to a descriptor after a quoted apostrophe stays allowed" "echo \"it's\" >&2" ALLOW
+run "W350 bash nests a single quote inside a double-quoted \${...}, so the tee operand after it is read" "echo x | tee \"\${x:-'\"'}\" src/app.rs" DENY
+run "W351 the same nested quote does not hide env -u of a protected input" "A=\"\${x:-'\"'}\" env -u ZENSU_SESSION_KEY bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W352 zsh's >>| appends to the file it names" "echo x >>| src/app.rs" DENY
+run "W353 zsh's >>& appends to the file it names" "echo x >>& src/app.rs" DENY
+run "W354 zsh's &>| writes the file it names" "echo x &>| src/app.rs" DENY
+run "W355 zsh's &>>| appends to the file it names" "echo x &>>| src/app.rs" DENY
+LC_QUOTED_HEREDOC="$(printf "echo '<<X'\nunset ZENSU_SESSION_KEY")"
+run "W356 a quoted << opens no heredoc, so the unset on the next line is refused" "$LC_QUOTED_HEREDOC" DENY "$PROJ" "$CFG_OFF"
+LC_ARITH_SHIFT="$(printf 'n=$((1<<bits))\nunset ZENSU_SESSION_KEY')"
+run "W357 an arithmetic shift opens no heredoc, so the unset on the next line is refused" "$LC_ARITH_SHIFT" DENY "$PROJ" "$CFG_OFF"
+LC_QUOTED_HASH="$(printf 'unset " #" \\\nZENSU_SESSION_KEY')"
+run "W358 a quoted # starts no comment, so the backslash-newline still joins the unset" "$LC_QUOTED_HASH" DENY "$PROJ" "$CFG_OFF"
+run "W359 a for loop assigns its name, so a protected loop variable is a rebind" "for ZENSU_SESSION_KEY in x; do bash x.sh; done" DENY "$PROJ" "$CFG_OFF"
+run "W360 unset of index 0 removes a protected scalar" "unset 'ZENSU_SESSION_KEY[0]'" DENY "$PROJ" "$CFG_OFF"
+run "W361 a {NAME} redirection assigns the descriptor number to NAME" "{ZENSU_SESSION_KEY}>/dev/null true" DENY "$PROJ" "$CFG_OFF"
+run "W362 declare -a turns a protected input into an array, which is not exported" "declare -a ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+LC_DASHED_DELIM="$(printf 'cat <<EOF-1\nx\nEOF-1\nunset ZENSU_SESSION_KEY')"
+run "W363 a heredoc delimiter is the whole word, so the unset after EOF-1 is refused" "$LC_DASHED_DELIM" DENY "$PROJ" "$CFG_OFF"
+run "W364 zsh's >&| writes the file it names" "echo x >&|src/app.rs" DENY
+run "W365 a read-write redirection on descriptor 1 writes the file" "echo x 1<>src/app.rs" DENY
+run "W366 a read-write redirection on standard input writes nothing" "cat 0<>src/app.rs" ALLOW
+LC_COMMENT_HEREDOC="$(printf '# note <<EOF\nunset ZENSU_SESSION_KEY')"
+run "W367 a << inside a comment opens no heredoc, so the unset on the next line is refused" "$LC_COMMENT_HEREDOC" DENY "$PROJ" "$CFG_OFF"
+run "W368 read into a subscript of a protected input is a rebind" "read 'ZENSU_SESSION_KEY[1]'" DENY "$PROJ" "$CFG_OFF"
+run "W369 env -S splits at \\_ as env does, so the second assignment is read" "env -S 'A=1\\_CLAUDE_CODE_SESSION_ID=x' node x.js" DENY "$PROJ" "$CFG_OFF"
+run "W370 more env -S split strings than the check reads is refused" "env -S -v -S -v -S -v -S -v -S -v -S -v -S -v -S -v -S 'CLAUDE_CODE_SESSION_ID=x bash' x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W371 env -C moves the directory tee writes in" "env -C ../sibling tee src/lib.rs" DENY
+run "W372 sudo -D moves the directory sed -i edits in" "sudo -D ../sibling sed -i s/a/b/ src/lib.rs" DENY
+run "W373 env -C moves the directory dd of= writes in" "env -C ../sibling dd of=src/lib.rs" DENY
+run "W374 an assignment after env -i reaches git" "env -i GIT_WORK_TREE=$SIB git add -A" DENY
+run "W375 env -i clears a leading assignment before git runs" "GIT_WORK_TREE=$SIB env -i git add -A" ALLOW
+run "W376 env -u drops a leading assignment before git runs" "GIT_WORK_TREE=$SIB env -u GIT_WORK_TREE git add -A" ALLOW
+run "W377 a for loop over another name stays allowed" "for f in a b; do echo \$f; done" ALLOW "$PROJ" "$CFG_OFF"
+run "W378 declare -a and a {NAME} redirection of other names stay allowed" "declare -a FOO; {fd}>/dev/null true" ALLOW "$PROJ" "$CFG_OFF"
+LC_QUOTED_DELIM="$(printf "cat <<'E O F'\nunset ZENSU_SESSION_KEY\nE O F")"
+run "W379 a quoted delimiter with spaces ends its body, which bash does not run" "$LC_QUOTED_DELIM" ALLOW "$PROJ" "$CFG_OFF"
+LC_TAB_DELIM="$(printf 'cat <<-EOF\n\tunset ZENSU_SESSION_KEY\n\tEOF')"
+run "W380 <<- strips leading tabs from the delimiter line" "$LC_TAB_DELIM" ALLOW "$PROJ" "$CFG_OFF"
+LC_QUOTED_HASH_OK="$(printf 'echo "a #b" \\\nok')"
+run "W381 a quoted # with a harmless continued line stays allowed" "$LC_QUOTED_HASH_OK" ALLOW "$PROJ" "$CFG_OFF"
 
 # The mandatory control parser is a trust boundary. A selective runtime failure
 # must deny before config and escape hatches instead of falling through.

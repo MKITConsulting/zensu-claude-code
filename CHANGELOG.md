@@ -37,12 +37,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `export -n` and `declare +x` of a protected input as removal, reads `t'e'e`, `s\ed -i`,
   `sed --in-place` and `sed -ni` into `CLAUDE_ENV_FILE` as writes, and compares a literal path to
   that file with letter case and Unicode normalization folded on every platform, so a case or NFD
-  variant of it on macOS is no longer let through. `env -i` alone stays allowed. The secret scan
+  variant of it on macOS is no longer let through. `env -i` alone stays allowed. It reads a `\c`
+  before the closing quote of `$'…'`, a `${…}` that holds quotes or a nested `${…}`, `$$`, an `&>`
+  glued to a word, `>|` or `>&file` after a quoted word, an escaped `\<` or `\>`, a heredoc opened
+  on a continued line, a quoted `<<`, `#` or arithmetic shift and a heredoc delimiter such as
+  `EOF-1` as bash does, judges a single quote inside a double-quoted `${…}` both the bash and the
+  zsh way, splits `env -S` strings as env does and refuses more than eight nested ones, and refuses
+  a protected `for`, `select` or `foreach` loop name, a `{NAME}` redirection, `declare -a`/`-A` and
+  a subscript such as `unset 'NAME[0]'`; it still refuses every rebind or removal the earlier
+  whitespace reading found, so a spelling the new reader gets wrong is not let through either. The
+  secret scan
   reads those write spellings as writes too. With the gate opted in, rules (A), (B) and (C) read
   `\git`, `g'i't`, `\cd`, `sudo -u me git …`, `nice -n 10 git …`, `env -C <dir> git …`,
   `env "GIT_WORK_TREE=…" git …`, `for … do git …`, `sed -ni` and `sed --in-place` as bash runs
-  them, keep the directory a `cd` moved to across `2>&1`, and leave it where it was after a quoted
-  `\time cd`. A command that used one of these spellings to pass is now refused, and
+  them, read zsh's `>>|`, `>>&`, `&>|`, `&>>|`, `>&|` and `>!` and a read-write `n<>file` as
+  writes, keep the directory a `cd` moved to across `2>&1`, and leave it where it was after a quoted
+  `\time cd`; without a project root, a relative write under `env -C "$DIR"` is reported as a write
+  target. A command that used one of these spellings to pass is now refused, and
   `docs/gates.md` §"Source-Write Gate" lists what the reader still leaves alone. The program-name
   reading moved into `programName` in `hooks/lib/claude-path-v1.js`, with the fold policy as a
   parameter.

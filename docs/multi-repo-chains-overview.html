@@ -299,7 +299,7 @@
       <p>While the opt-in write gate is on, its rule (B) denies a Bash source write outside the root.
       The edit gate only classifies a path as <code>state</code>, <code>zensu</code> or
       <code>other</code> and does not confine it. With the gate on, the topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:1236 · hooks/pre-edit-tdd-reminder.sh:132-160</p>
+      <p class="src">bash-source-write-parse.js:1563 · hooks/pre-edit-tdd-reminder.sh:132-160</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass — superseded by stage 1</span>
@@ -443,7 +443,7 @@
           <code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B) and
           rule (C), and the temp carve-out stops exempting a temp entry that contains a code root. At
           its default the gate judges nothing.</td>
-          <td class="where mono">bash-source-write-parse.js:1236<br>bash-source-write-parse.js:1282</td>
+          <td class="where mono">bash-source-write-parse.js:1563<br>bash-source-write-parse.js:1609</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
