@@ -111,7 +111,7 @@ That gate replaced a witness that logged every Bash call and a cross-check that 
 ## Best Solution First
 
 A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
-`hooks/user-prompt-zen-mode.sh` injects a ~4.2 KB always-on contract on the same
+`hooks/user-prompt-zen-mode.sh` injects a ~3.6 to 4.9 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
 block. It is named here so the next reader does not conclude it was overlooked.
 
@@ -165,7 +165,7 @@ suite to keep it honest. Driving the hook directly, the block
 injection is **1938 characters / 1946 bytes** of `additionalContext`, identical on the
 `SessionStart` and `SubagentStart` legs, and the prompt leg's reminder is 474 characters. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects about 3.1 K characters on the same prompt channel while no chain is armed and about 4.4 K
+injects about 3.6 K characters on the same prompt channel while no chain is armed and about 4.9 K
 while one is, because its rule 6 shrinks to one sentence when the anchor reads `none`. `Z30` and
 `Z30b` in `tests/structure/test-zen-mode.sh` hold the two variants under declared ceilings, but
 they read the hook and never open this document, so the numbers written here are hand-derived
@@ -199,8 +199,8 @@ candidates whose titles and excerpts fill their 200- and 1,200-character limits,
 387-character notice when the search is unavailable; on a prompt that names exactly one key,
 that feature's context package, up to 24,000 bytes of JSON behind about 1.8 K; it keeps no
 ledger, so every such prompt pays again),
-`user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above once per generation and about 1.4 K after
-that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (474
+`user-prompt-zen-mode.sh` (the 3.6 K or 4.9 K above once per generation and about 1.7 K after
+that with no chain armed or 2.1 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (474
 characters, on every prompt kind for the same reason). Three emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold,
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
@@ -212,13 +212,13 @@ pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **11.6 K characters on the first prompt of a generation and 5.8 K on every later
+costs about **12.1 K characters on the first prompt of a generation and 6.2 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
-shell input about 3.6 K, then 1.9 K (4.0 K, then 2.2 K for a CI-monitor event). The typed figures
+shell input about 4.1 K, then 2.2 K (4.4 K, then 2.6 K for a CI-monitor event). The typed figures
 carry the 387-character context notice that the suite's failing CLI stub produces; a search that
-returns five full candidates raises them to about 20.9 K and 15.1 K. The generation also receives this
-hook's 1,938-character block once at `SessionStart`, so its first turn costs about 13.6 K in all,
-1.1 K more than one turn did before the ledger, 0.4 K of it for the context notice, which that turn
+returns five full candidates raises them to about 21.4 K and 15.5 K. The generation also receives this
+hook's 1,938-character block once at `SessionStart`, so its first turn costs about 14.1 K in all,
+1.6 K more than one turn did before the ledger, 0.4 K of it for the context notice, which that turn
 did not carry; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather

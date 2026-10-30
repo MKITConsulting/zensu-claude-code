@@ -476,7 +476,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/workflow-dispatch-inputs.test.js` | 24 | – | `test-workflow-dispatch-inputs.sh` | Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable. |
 | `structure/worktree-advice-v1.test.js` | 66 | win32 2 | `test-session-trail-verdict.sh` | The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative. |
 | `structure/worktree-keep-v1.test.js` | 101 | – | `test-worktree-keep.sh` | Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement. |
-| `structure/zen-anchor-assertions.test.js` | 12 | – | `test-zen-mode.sh` | The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector. |
+| `structure/zen-anchor-assertions.test.js` | 15 | – | `test-zen-mode.sh` | The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector. |
 | `structure/zen-anchor-v1.test.js` | 25 | – | `test-zen-mode.sh` | The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain. |
 | `structure/zensu-cli-version-v1.test.js` | 14 | win32 8 | `test-doctor.sh` | The zensu-cli version floor: the version line, the floor comparison, and a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does. |
 | `structure/zensu-doctor-invocation.test.js` | 27 | – | `test-versioned-plugin-upgrade.sh` | The /zensu:doctor invocation allowlist. |
