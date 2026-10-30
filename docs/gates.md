@@ -2,9 +2,13 @@
 
 Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
-receipt — whose VERDICT is what is judged, not its existence, and which a logged
-claim arms even when the anchor's tree is clean (discipline patch 10 in
-[build-workflow.md](build-workflow.md))
+receipt — whose VERDICT is what is judged, not its existence, which a logged
+claim arms even when the anchor's tree is clean, and which must have graded the
+chain's own work tree: the anchor's git top level, or the worktree below it that a
+bound Autopilot run drives, recorded in the receipt as `workTree` and counted beside
+the anchor's change set (discipline patch 10 in
+[build-workflow.md](build-workflow.md); a claim the audit cannot grade as written is
+settled by the `CLAIM CORRECTED` line its verdict names, never by an escape)
 and §Requirements-Table Gate below, which has its own section here — and TWO
 terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
 Eight of the ten are

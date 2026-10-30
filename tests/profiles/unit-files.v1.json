@@ -47,6 +47,11 @@
       "summary": "The deferred-review claim case table."
     },
     {
+      "path": "tests/structure/edit-landing-claims-v1.test.js", "registered": 27,
+      "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
+      "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
+    },
+    {
       "path": "tests/structure/evidence-run-v1.test.js", "registered": 80, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
@@ -159,12 +164,12 @@
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
     },
     {
-      "path": "tests/structure/review-round-scope-v1.test.js", "registered": 24,
+      "path": "tests/structure/review-round-scope-v1.test.js", "registered": 26,
       "runs": [{ "driver": "tests/structure/test-incremental-review-rounds.sh" }],
       "summary": "Delta-scoped review rounds: which files and findings a fix round reviews."
     },
     {
-      "path": "tests/structure/round-prepare-v1.test.js", "registered": 41,
+      "path": "tests/structure/round-prepare-v1.test.js", "registered": 43,
       "runs": [{ "driver": "tests/structure/test-round-prepare.sh" }],
       "summary": "Fix-round bookkeeping: the claim-label grammar, the round-start content snapshot, landing attribution, the fixed ledger lines and the packet files."
     },
