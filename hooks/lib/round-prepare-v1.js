@@ -7,6 +7,7 @@ const crypto = require("node:crypto");
 const ledgerLib = require(path.join(__dirname, "review-ledger-v1.js"));
 const scopeLib = require(path.join(__dirname, "review-round-scope-v1.js"));
 const activationLib = require(path.join(__dirname, "aspect-activation-v1.js"));
+const claimsLib = require(path.join(__dirname, "edit-landing-claims-v1.js"));
 
 const SCHEMA = "round-snapshot-v1";
 const LIMITS = Object.freeze({
@@ -20,17 +21,6 @@ const LIMITS = Object.freeze({
 const UNHASHED = "unhashed";
 const NON_CONTENT = new Set([UNHASHED, "directory"]);
 const FAILED_OUTCOMES = new Set(["not-landed", "unverified", "unchanged"]);
-const CLAIM_MARKERS = Object.freeze([
-  "IMPL completed — files:",
-  "IMPL completed – files:",
-  "IMPL completed - files:",
-  "WIRED — files:",
-  "WIRED – files:",
-  "WIRED - files:",
-  "WIRED (verified, no change)",
-]);
-const VERDICT_HEADS = Object.freeze(["EDIT LANDED ", "EDIT NOT LANDED ", "EDIT LANDING AUDIT ", "PENDING PREDICATE ", "UNVERIFIED ", "RECEIPT REFUSED "]);
-const LABEL_TOKEN_BUDGET = 5;
 const PROJECT_PREFIX = "<project>/";
 const FIX_LABEL = /^R([1-9][0-9]{0,5})(?:-|$)/;
 const AUDIT_START = /^\s*(?:\[[^\]]*\]\s*)?EDIT LANDING AUDIT STARTED — round fix-([1-9][0-9]{0,5})\s*$/;
@@ -49,6 +39,7 @@ const NOT_LANDED_TAIL = ", git shows no change";
 const BARE_WIRED = /^a WIRED entry at run-log line [0-9]+ \(step (.+)\) names no files: list and cannot be graded$/;
 const STATE_DIRECTORY = ".zensu";
 const AUDIT_CLOSE = /^(EDIT LANDING AUDIT — |RECEIPT REFUSED — )/;
+const AUDIT_NOTICE = /^(CLAIM RETRACTED|CLAIM CORRECTION IGNORED|EDIT LANDING AUDIT ROOT) — /;
 const RECEIPT_REFUSED = /^RECEIPT REFUSED — /;
 
 function parseRound(value) {
@@ -169,42 +160,32 @@ function reviewable(rel) {
   return !String(rel).split(/[\\/]/).includes(STATE_DIRECTORY);
 }
 
-function normalizeClaimFile(entry) {
+function normalizeClaimFile(entry, prefix) {
   let rel = String(entry).trim();
   if (rel.startsWith(PROJECT_PREFIX)) rel = rel.slice(PROJECT_PREFIX.length);
   while (rel.startsWith("./")) rel = rel.slice(2);
-  return rel;
+  return stripPrefix(rel, prefix);
 }
 
-function claimOf(line) {
-  let entry = String(line == null ? "" : line).replace(/^\s+/, "");
-  if (entry.startsWith("[")) {
-    const close = entry.indexOf("]");
-    if (close > 0) entry = entry.slice(close + 1).replace(/^\s+/, "");
-  }
-  if (VERDICT_HEADS.some((head) => entry.startsWith(head))) return null;
-  let marker = null;
-  let at = -1;
-  for (const candidate of CLAIM_MARKERS) {
-    const found = entry.indexOf(candidate);
-    if (found >= 0 && (at < 0 || found < at)) {
-      marker = candidate;
-      at = found;
+function stripPrefix(rel, prefix) {
+  return prefix && rel.startsWith(prefix + "/") ? rel.slice(prefix.length + 1) : rel;
+}
+
+function claimOf(line, prefix) {
+  const claim = claimsLib.claimLine(String(line == null ? "" : line).replace(/\r$/, ""));
+  if (!claim) return null;
+  if (claim.kind !== "files") return { label: claim.label, files: [] };
+  const files = [];
+  for (const token of claimsLib.splitFiles(claim.text)) {
+    const kind = claimsLib.tokenClass(token);
+    if (kind === "path") files.push(normalizeClaimFile(token, prefix));
+    if (kind === "brace") {
+      for (const member of claimsLib.expandBraces(token)) {
+        if (claimsLib.tokenClass(member) === "path") files.push(normalizeClaimFile(member, prefix));
+      }
     }
   }
-  if (marker !== null) {
-    const lead = entry.slice(0, at);
-    const tokens = lead.split(/\s+/).filter((token) => token !== "");
-    if (!/['"|]/.test(lead) && tokens.length <= LABEL_TOKEN_BUDGET) {
-      const files = marker.endsWith("files:")
-        ? entry.slice(at + marker.length).split("|")[0].split(/[,\s]+/).map(normalizeClaimFile).filter((rel) => rel !== "")
-        : [];
-      return { label: tokens.length ? tokens.join(" ") : "(none)", files };
-    }
-  }
-  const step = entry.split(/\s/, 1)[0];
-  if (step === "" || !entry.slice(step.length).replace(/^\s+/, "").startsWith("WIRED")) return null;
-  return { label: step, files: [] };
+  return { label: claim.label, files: files.filter((rel) => rel !== "") };
 }
 
 function digestFiles(root, paths) {
@@ -275,7 +256,7 @@ function readSnapshot(file, top) {
   return { ok: true, doc };
 }
 
-function chainOf(logFile) {
+function chainOf(logFile, prefix) {
   const lines = logFile ? readLines(logFile) : [];
   let resetIndex = -1;
   let generation = 0;
@@ -294,7 +275,7 @@ function chainOf(logFile) {
   let roundZero = -1;
   let lastFixRound = 0;
   lines.forEach((line, index) => {
-    const claim = claimOf(line);
+    const claim = claimOf(line, prefix);
     if (claim) {
       if (index < resetIndex) {
         preReset.add(claim.label);
@@ -462,7 +443,10 @@ function resolveLanding(options) {
   let otherPending = 0;
   for (const raw of options.auditLines || []) {
     const parsed = parseAuditLine(raw);
-    if (!parsed) continue;
+    if (!parsed) {
+      if (AUDIT_NOTICE.test(String(raw))) carried.push(String(raw).replace(/\r$/, ""));
+      continue;
+    }
     const named = parsed.step !== null && labelInRound(parsed.step, round);
     const earlierGeneration = named && chain.preReset.has(parsed.step);
     const bothSides = earlierGeneration && chain.postClaims.has(parsed.step);
@@ -568,12 +552,13 @@ function packetFiles(options) {
   const changeSet = uniqueSorted((options.changeSet || []).filter(keep));
   const openPaths = [];
   for (const entry of options.openEntries || []) {
-    const rel = anchorPath(entry.anchor);
+    const anchored = anchorPath(entry.anchor);
+    const rel = anchored ? stripPrefix(anchored, options.prefix || "") : null;
     if (rel && keep(rel)) openPaths.push(rel);
   }
   const scope = options.scope;
   if (options.incremental && scope && scope.status === "ok") {
-    const delta = scope.files.filter(keep);
+    const delta = scope.files.map((rel) => stripPrefix(rel, options.prefix || "")).filter(keep);
     return { panel: uniqueSorted(delta.concat(openPaths)), judge: changeSet, narrowed: true, reason: "round-delta" };
   }
   const reason = options.incremental ? "scope-" + (scope ? scope.status : "unavailable") : "incremental-off";
@@ -599,8 +584,12 @@ function prepare(input) {
   const out = [];
   const log = [];
   if (!round) return { status: "refused", log, out: ["ROUND PREPARE REFUSED — --round must be 0, a fix round number or self-review"], diff: [] };
+  const prefix = String(input.prefix || "").replace(/\/+$/, "");
+  if (prefix && !safeRelative(prefix)) return { status: "refused", log, out: ["ROUND PREPARE REFUSED — the work-tree prefix is not a relative path below the anchor"], diff: [] };
+  const anchorRoot = input.anchor || input.top;
+  const spelled = (rel) => (prefix ? prefix + "/" + rel : rel);
   const changeSet = readLines(input.changeSetFile);
-  const chain = chainOf(input.log);
+  const chain = chainOf(input.log, prefix);
   const snapshotRead = readSnapshot(input.snapshotFile, input.top);
   const baseline = input.baseline || "";
   const start = resolveStart(snapshotRead, round, chain, baseline);
@@ -682,7 +671,7 @@ function prepare(input) {
   let fixed = { lines: [], fixedIds: [], notes: [], usable: false, ledgerStatus: "off" };
   let report = null;
   if (input.convergence) {
-    report = ledgerLib.ledgerState({ log: input.log, root: input.top, report: true });
+    report = ledgerLib.ledgerState({ log: input.log, root: anchorRoot, report: true });
     fixed = fixedLines({ round, ledger: report, steps: landing.steps });
     for (const line of fixed.lines) log.push(line);
     if (!fixed.usable) {
@@ -705,15 +694,15 @@ function prepare(input) {
     out.push("open_ledger: " + (report.status === "ok" || report.status === "partial" ? openEntries.length + " open" : report.status + " (" + report.reason + ")"));
     for (const entry of openEntries) out.push("open " + entry.id + " " + entry.state + " " + entry.severity + " " + entry.anchor + " | " + entry.summary);
   }
-  const scope = input.incremental ? scopeLib.roundScope({ log: input.log, round: round.number, root: input.top }) : null;
+  const scope = input.incremental ? scopeLib.roundScope({ log: input.log, round: round.number, root: anchorRoot }) : null;
   const ignored = readLines(input.ignoredFile);
-  const files = packetFiles({ changeSet, openEntries, scope, incremental: input.incremental, ignored });
+  const files = packetFiles({ changeSet, openEntries, scope, incremental: input.incremental, ignored, prefix });
   const hidden = changeSet.filter((rel) => ignored.includes(rel)).length;
   if (hidden) out.push("user_ignored: " + hidden + " changed path(s) your own git excludes ignore are left out of the packet lists and the round diff");
   const activation = activationFor(files.panel, { activation: input.activation, panel: input.panel });
   for (const skipped of activation.skipped) log.push("ASPECT SKIPPED — " + skipped.aspect + " (" + skipped.reason + ")");
-  out.push("changed_files (" + files.reason + "): " + (files.panel.length ? files.panel.join(", ") : "none"));
-  out.push("judge_changed_files: " + (files.judge.length ? files.judge.join(", ") : "none"));
+  out.push("changed_files (" + files.reason + "): " + (files.panel.length ? files.panel.map(spelled).join(", ") : "none"));
+  out.push("judge_changed_files: " + (files.judge.length ? files.judge.map(spelled).join(", ") : "none"));
   out.push("spawn: " + (activation.spawn.length ? activation.spawn.join(", ") : "none"));
   return finish("ok", files.panel);
 }
@@ -739,6 +728,8 @@ function inputFromEnvironment(env) {
   return {
     round: env.ZENSU_RP_ROUND,
     top: env.ZENSU_RP_TOP,
+    anchor: env.ZENSU_RP_ANCHOR || "",
+    prefix: env.ZENSU_RP_PATH_PREFIX || "",
     log: env.ZENSU_RP_LOG,
     snapshotFile: env.ZENSU_RP_SNAPSHOT,
     changeSetFile: env.ZENSU_RP_CHANGES,

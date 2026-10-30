@@ -6,10 +6,10 @@ Read this before the first Phase 4 cycle. In vanilla mode Phase 4 is replaced as
 
 For each Feature/Bug-Fix step, the log file MUST contain three entries with these EXACT prefixes:
   1. `{step_id} RED {test_name} — FAIL: {reason}` (after Phase 4 A)
-  2. `{step_id} IMPL completed — files: {list}` (after Phase 4 B) — same typing as the `WIRED` form below: `{list}` is a comma-separated list of repo-root-relative paths, and any commentary goes after a ` | ` separator, never inline in the list
+  2. `{step_id} IMPL completed — files: {list}` (after Phase 4 B) — same typing as the `WIRED` form below: `{list}` is a comma-separated list of paths relative to `{work_tree}`, and any commentary goes after a ` | ` separator, never inline in the list
   3. `{step_id} GREEN — PASS ({attempts} attempts, {test_count} tests)` (after Phase 4 C)
 
-Integration/`[W]` steps log ONE entry: `{step_id} WIRED — files: {list} | {description}`, where `{list}` is a comma-separated list of paths relative to the REPO ROOT (`git rev-parse --show-toplevel`), not to a nested project dir, and every path the step actually changed appears in it. When the step's contract was to VERIFY an existing wiring rather than change a file, log `{step_id} WIRED (verified, no change) — {file}: {what was verified}` instead, so the Phase 6 Edit Landing Audit can tell a deliberate verification from an edit that never landed.
+Integration/`[W]` steps log ONE entry: `{step_id} WIRED — files: {list} | {description}`, where `{list}` is a comma-separated list of paths relative to the chain's work tree `{work_tree}` (Phase 0 step 3: the repository top level, or the bound Autopilot run's worktree), not to a nested project dir, and every path the step actually changed appears in it. Name one file per item: `zensu-log.sh append` refuses a brace group, a glob or a space-separated list in a files list, writes nothing, and prints the line to log instead wherever it can derive one. When the step's contract was to VERIFY an existing wiring rather than change a file, log `{step_id} WIRED (verified, no change) — {file}: {what was verified}` instead, so the Phase 6 Edit Landing Audit can tell a deliberate verification from an edit that never landed.
 
 When you merge multiple Feature steps (per Principle 2), each constituent step keeps its own RED + GREEN entries — only the IMPL entry may be combined. Missing entries are a TDD compliance violation that Phase 6 audit MUST flag.
 

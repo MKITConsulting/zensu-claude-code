@@ -224,6 +224,9 @@ entry, the `ciStructureTests` member and the regenerated overview; `docs/review-
   pending, so the audit exits 1 rather than 2 whenever its receipt is refused there.
 - The round diff compares with `--baseline` when given and with `HEAD` otherwise, renders an
   untracked file with `git diff --no-index`, and leaves out a file deleted in the round.
+- `VERDICT` reads no `EDIT LANDED (untracked-by-design)` line, so a fix claim whose every file the
+  audit exempts as untracked by design gets no `ROUND LANDING` line and no `fixed` line from the
+  verb; that `fixed` line stays manual.
 - Windows is unmeasured: the suite is a `ciStructureTests` member and runs on the weekly Windows
   Safety structure shard only.
 

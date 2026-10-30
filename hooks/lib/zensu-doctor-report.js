@@ -5488,7 +5488,7 @@ function auditedRunLog(projectRoot, value) {
 // runs it, answering a typed result the row renders. It refuses a symlinked or
 // non-plain-file library rather than executing it, and the ENOENT branch below states why
 // an absent command is a damaged tree rather than an uninstalled feature.
-function claimInventory(logFile, projectRoot) {
+function claimInventory(logFile, projectRoot, workTree) {
   var lib = path.join(pluginDir(), 'hooks', 'lib', 'zensu-edit-landing.sh');
   try {
     var st = fs.lstatSync(lib);
@@ -5514,7 +5514,7 @@ function claimInventory(logFile, projectRoot) {
   var r;
   try {
     r = require('child_process').spawnSync('bash',
-      [lib, '--inventory', '--log', logFile, '--project', projectRoot],
+      [lib, '--inventory', '--log', logFile, '--project', projectRoot].concat(workTree ? ['--work-tree', workTree] : []),
       { encoding: 'utf8', timeout: CLAIM_INVENTORY_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
   } catch (e) {
     return { ok: false, reason: 'the inventory command could not be started' };
@@ -5633,7 +5633,13 @@ function claimTopologyRow(projectRoot, ownKey) {
   }
   if (!audited.path) return;
   var logFile = audited.path;
-  var inventory = claimInventory(logFile, projectRoot);
+  var workTree = auditedWorkTree(projectRoot, parsed);
+  if (workTree.reason) {
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
+      + workTree.reason + '. That is a missing check, not an all-clear.');
+    return;
+  }
+  var inventory = claimInventory(logFile, projectRoot, workTree.path);
   if (inventory === null) return;
   if (!inventory.ok) {
     line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
@@ -5643,17 +5649,21 @@ function claimTopologyRow(projectRoot, ownKey) {
   if (inventory.roots.length === 0) return;
   var named = claimRootSafeNames(inventory.roots);
   var withheld = inventory.roots.length - named.length;
+  var gradedRoot = workTree.path ? 'the chain\'s work tree' : 'the anchor';
   line(WARN, 'topology: this session\'s audited run log claims edits under '
-    + inventory.roots.length + ' root(s) that are not the anchor'
+    + inventory.roots.length + ' root(s) that are not ' + gradedRoot
     + (named.length ? ': ' + named.join(', ') : '')
     + (withheld > 0
       ? (named.length ? ', and ' : ' (') + withheld + ' name(s) withheld: they carry characters this row cannot render'
         + (named.length ? '' : ')')
       : '')
     + '. The anchor is ' + (claimRootRenderable(projectRoot) ? claimRootRender(projectRoot) : '(unrenderable)')
+    + (workTree.path
+      ? ', and the chain\'s work tree is ' + (claimRootRenderable(workTree.path) ? claimRootRender(workTree.path) : '(unrenderable)')
+      : '')
     + '. One edit-landing audit grades ONE root, so those claims are reported rather than graded and this'
     + ' session\'s review chain sees no diff for them — /zensu:build is single-root. Run the chain in the'
-    + ' repository the claims name, or land the work in the anchor.');
+    + ' repository the claims name, or land the work in ' + gradedRoot + '.');
 }
 
 // The RUNTIME_ADOPTED provenance row, and the surface other carriers had already
@@ -6005,6 +6015,26 @@ function stateBlock(nowMs) {
       line(OK, 'state: pending-review.json present and within its ' + ttl + 'h TTL');
     }
   } catch (e) { /* no pending-review marker */ }
+}
+
+function auditedWorkTree(projectRoot, parsed) {
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'workTree')) return {};
+  var value = parsed.workTree;
+  if (typeof value !== 'string' || value === '' || CONTROL_BYTE_RE.test(value)
+    || path.isAbsolute(value) || value.split(/[\\/]/).indexOf('..') !== -1) {
+    return { reason: 'the receipt names a work tree this row cannot use' };
+  }
+  try {
+    var root = fs.realpathSync.native(projectRoot);
+    var resolved = fs.realpathSync.native(path.resolve(projectRoot, value));
+    var rel = path.relative(root, resolved);
+    if (rel === '' || rel === '..' || rel.indexOf('..' + path.sep) === 0 || path.isAbsolute(rel)) {
+      return { reason: 'the receipt names a work tree outside this project root' };
+    }
+    return { path: resolved };
+  } catch (e) {
+    return { reason: 'the work tree the receipt names could not be resolved' };
+  }
 }
 
 function main() {
