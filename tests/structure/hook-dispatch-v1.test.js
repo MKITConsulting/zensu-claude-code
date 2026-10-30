@@ -159,3 +159,24 @@ test('the consent pre-check marks the playwright spellings the prefilter marks a
   assert.equal(dispatch.consentMarked(powershell('Get-ChildItem -Recurse')), false);
   assert.equal(dispatch.consentMarked(bashPayload('git status --short')), false);
 });
+
+test('the CLI-gate pre-check reads the zensu name in every spelling the gate body reads and leaves other calls to pass unread', () => {
+  for (const command of [
+    'zensu security classify f1',
+    'ZENSU security classify f1',
+    'Zensu.exe security classify f1',
+    '/opt/homebrew/bin/ZENSU security classify f1',
+    'zen\u017fu security classify f1',
+    'z\\ensu security classify f1',
+    'zen""su security classify f1',
+    "zen$''su security classify f1",
+    'zen\\\nsu security classify f1',
+    '"C:\\Program Files\\Zensu\\zensu.exe" security classify f1',
+    'ls # x\\\nZEN\\\nSU security classify f1',
+  ]) {
+    assert.equal(dispatch.zensuNamed(command), true, command);
+  }
+  for (const command of ['git status --short', 'ls .zensu/plans', 'bash hooks/lib/zensu-log.sh --project-root', 'cat dev.zensu/README.md']) {
+    assert.equal(dispatch.zensuNamed(command), false, command);
+  }
+});

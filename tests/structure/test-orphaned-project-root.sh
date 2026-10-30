@@ -22,6 +22,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 BINDER="$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 BASH_GATE="$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"
+BASH_GATE_BODY="$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"
 EDIT_GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 DOCTOR="$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"
 
@@ -753,7 +754,7 @@ if [ "$O29G_STATUS" -eq 0 ] && [ "$(printf '%s' "$O29G_OUT" | decision)" = "allo
 else
   check "O29g oversized read-only payload refused (status $O29G_STATUS, output '$(printf '%s' "$O29G_OUT" | cut -c1-160)')" FAIL
 fi
-O29G2_BAD="$(GATE_SRC="$BASH_GATE" node -e '
+O29G2_BAD="$(GATE_SRC="$BASH_GATE_BODY" node -e '
   const lines = require("fs").readFileSync(process.env.GATE_SRC, "utf8").split("\n");
   let sites = 0;
   const bad = [];
@@ -789,7 +790,7 @@ else
   check "O29h oversized no-anchor deny (status $O29H_STATUS, reason length ${O29H_REASON_LEN:-0}, output '$(printf '%s' "$O29H_OUT" | cut -c1-160)')" FAIL
 fi
 rm -f "$O29H_PAYLOAD_FILE"
-O29G3_BODY="$(awk '/^emit_deny\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$BASH_GATE")"
+O29G3_BODY="$(awk '/^emit_deny\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$BASH_GATE_BODY")"
 if [ -n "$O29G3_BODY" ] && printf '%s' "$O29G3_BODY" | grep -qF 'readFileSync(0' \
   && ! printf '%s' "$O29G3_BODY" | grep -qE 'REASON=|process\.env'; then
   check "O29g3 emit_deny reads its reason on stdin and never through the environment" PASS

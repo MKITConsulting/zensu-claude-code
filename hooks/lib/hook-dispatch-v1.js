@@ -15,7 +15,7 @@ const BUDGET_MS = 55000;
 const MIN_DELEGATE_MS = 1000;
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const BINDER_EVENTS = new Set(['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit']);
-const ZENSU_WORD = /(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/;
+const ZENSU_WORD = /(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/iu;
 const PAIR = '\u0001';
 const ROOT_MISMATCH = 'zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin';
 const CAPABILITY_LEAD = 'zensu: reviewer capability gate unavailable: ';
@@ -316,6 +316,20 @@ function runCapability(context) {
   }));
 }
 
+function joinContinuations(text) {
+  return text.replace(/\\([\s\S])/g, (pair, next) => (next === '\n' ? '' : pair));
+}
+
+function withoutQuotes(text) {
+  return text.replace(/\$(?=["'])/g, '').replace(/[\\"']/g, '');
+}
+
+function zensuNamed(command) {
+  const uncommented = command.replace(/(^|[\s;&|(])#[^\n]*/g, (comment, lead) => lead);
+  return [command, withoutQuotes(joinContinuations(command)), withoutQuotes(command), withoutQuotes(joinContinuations(uncommented))]
+    .some((text) => ZENSU_WORD.test(text));
+}
+
 function runCliGate(context, check) {
   const failure = rootFailure(context);
   if (failure) return failure;
@@ -328,7 +342,7 @@ function runCliGate(context, check) {
   } catch (_error) {
     return silent();
   }
-  if (!command || (!powershell && !ZENSU_WORD.test(command))) return silent();
+  if (!command || (!powershell && !zensuNamed(command))) return silent();
   return delegate(context, check);
 }
 
@@ -745,6 +759,7 @@ module.exports = {
   consentMarked,
   secretScanSkipsBash,
   selectChecks,
+  zensuNamed,
 };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
