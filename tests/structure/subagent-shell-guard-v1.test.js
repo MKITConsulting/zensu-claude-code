@@ -558,6 +558,14 @@ test('the command walker finds every simple command the shell would run', () => 
       .find((invocation) => invocation.name === 'zensu').environment.ZENSU_MCP_GATE,
     'off',
   );
+  const names = (command, options) => guard.commandInvocations(command, options).map((invocation) => invocation.name);
+  assert.deepEqual(names('ENV ZENSU features get f1', { platform: 'linux' }), ['ENV']);
+  assert.deepEqual(names('ENV ZENSU features get f1', { platform: 'linux', foldNames: true }), ['zensu']);
+  assert.deepEqual(names('EVAL "ZENSU features get f1"', { platform: 'linux', foldNames: true }), ['zensu']);
+  assert.deepEqual(names(`ENV ZEN${String.fromCodePoint(0x17f)}U features get f1`, { platform: 'linux', foldNames: true }), ['zensu']);
+  assert.deepEqual(names("'C:\\tools\\ZENSU.EXE' features get f1", { platform: 'win32' }), ['zensu']);
+  assert.deepEqual(names('"C:\\\\tools\\\\zensu.exe" features get f1', { platform: 'win32' }), ['zensu']);
+  assert.deepEqual(names("'C:\\tools\\zensu.exe' features get f1", { platform: 'linux' }), ['C:\\tools\\zensu']);
 });
 
 test('the parser stays linear on adversarial input', () => {
@@ -775,6 +783,7 @@ test('Windows spellings reach the same rules', () => {
   assert.equal(reason('rm -rf C:\\Users\\dev\\work'), guard.REASONS.projectRoot);
   assert.equal(reason('type .ZENSU\\state\\x.json'), guard.REASONS.workflowDirectory);
   assert.equal(reason('git.exe clean -fd'), 'the command runs a git operation that removes or reverts work (git clean)');
+  assert.equal(reason("'C:\\Program Files\\Git\\cmd\\git.exe' clean -fd"), 'the command runs a git operation that removes or reverts work (git clean)');
   assert.equal(reason('ls src'), null);
   const rootOn = (drive) => ({
     realpathSync: {

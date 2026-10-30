@@ -21,9 +21,9 @@ backs `zensu_tdd_strict_enabled`, so the opt-in rule has one implementation. The
 Control rebind check (`BSWG_MODE=control`) sits ABOVE that config check and runs regardless,
 because it is a trust boundary rather than a convention — keep that order. The config check
 in turn sits ABOVE the bind, so at the default the no-anchor deny of the two relaxed bind
-states does not run either, and a project `.zensu/config.json` opt-in cannot reach it: that
-file lives under the project root the relaxed state has lost, so only a `~/.zensu/config.json`
-or `ZENSU_CONFIG` opt-in does. A foreign record is still refused at the default, by the
+states does not run either, and a project `.zensu/config.json` opt-in cannot reach it: the
+opt-in is read through `CLAUDE_PROJECT_DIR` ahead of the bind, and that deny runs only when that
+directory is unusable, so only a `~/.zensu/config.json` or `ZENSU_CONFIG` opt-in does. A foreign record is still refused at the default, by the
 all-tool capability gate rather than here. The default flipped
 on measured evidence: a seeded sample of 156 transcripts from September 2026 held 27 denies in
 11 sessions, none of which stopped a real mistake, while 14 blocked intended work (takeover

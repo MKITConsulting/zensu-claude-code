@@ -14,7 +14,10 @@
 # (how an agent *gains* the context the gate wants), the explicit per-command
 # `ZENSU_MCP_GATE=off` prefix of a main-thread command, or a write whose target backend
 # (`--api-url` flag / `ZENSU_API_URL` env) is localhost — a throwaway dev/test DB
-# where the dedup/journey/classification conventions are meaningless.
+# where the dedup/journey/classification conventions are meaningless. A --help/-h or
+# localhost call the parse reads as one, without the inline prefix, leaves before the
+# bind; a read or a prefixed call passes only once the session binds, and a PowerShell
+# call it cannot judge is denied.
 #
 # This is a convention-nudge, not an airtight boundary: once the CLI's OAuth
 # token is cached on disk an agent can curl the API directly. The gate enforces
@@ -58,7 +61,13 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     sub = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
     ps = j.tool_name === "PowerShell";
   } catch (_) { process.exit(0); }
-  if (!cmd || (!ps && !/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/.test(cmd))) process.exit(0);
+  const joinLines = (text) => text.replace(/\\([\s\S])/g, (pair, next) => (next === "\n" ? "" : pair));
+  const strip = (text) => text.replace(/\x24(?=[\x22\x27])/g, "").replace(/[\\\x22\x27]/g, "");
+  const joined = joinLines(cmd);
+  const plain = strip(joined);
+  const NAMED = /(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/iu;
+  const candidates = [cmd, plain, strip(cmd), strip(joinLines(cmd.replace(/(^|[\s;&|\x28])#[^\n]*/g, (comment, lead) => lead)))];
+  if (!cmd || (!ps && !candidates.some((text) => NAMED.test(text)))) process.exit(0);
   let cap = 0;
   try { cap = require(process.env.ZBIND).MAX_PAYLOAD_BYTES; } catch (_) {}
   if (!ps && Number.isSafeInteger(cap) && cap > 0 && size > cap) {
@@ -78,22 +87,63 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     while (end > start && (value.charCodeAt(end - 1) === 34 || value.charCodeAt(end - 1) === 39)) end -= 1;
     return value.slice(start, end);
   }
-  function isLocalUrl(u) {
-    u = String(u || "").toLowerCase();
-    const s = u.indexOf("://");
-    if (s !== -1) u = u.slice(s + 3);
-    let h = u;
-    for (let ci = 0; ci < u.length; ci++) {
-      const c = u.charAt(ci);
-      if (c === ":" || c === "/") { h = u.slice(0, ci); break; }
+  const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
+  const LOCAL_START = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?![^:\/?#])/i;
+  function isLocalUrl(value) {
+    let v = String(value || "");
+    const cut = v.search(/[\u0000\u0001\x24]/);
+    if (cut !== -1) {
+      v = v.slice(0, cut);
+      if (!/[\/?#]/.test(v.replace(/^https?:\/\//i, ""))) return false;
     }
-    return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "::1" || h === "[::1]";
+    if (!LOCAL_START.test(v) || /[^\x21-\x7e]|\\/.test(v)) return false;
+    let url = null;
+    try { url = new URL(/^https?:\/\//i.test(v) ? v : "http://" + v); } catch (_) { return false; }
+    return url.username === "" && url.password === "" && LOCAL_HOSTS.has(url.hostname);
   }
   function takesNextWord(t) {
     return t.indexOf("=") === -1 && (t.length === 2 || t.charAt(1) === "-");
   }
   function isDynamic(t) {
     return t.indexOf("\u0001") !== -1 || t.indexOf("\x24") !== -1;
+  }
+  function runTime(t) {
+    return isDynamic(t) || t.indexOf(OPQ) !== -1;
+  }
+  function shellWords(tokens) {
+    const out = [];
+    let open = "", word = null;
+    for (const token of tokens) {
+      if (word === null && token.charAt(0) === "#") break;
+      word = word === null ? token : word + " " + token;
+      for (let k = 0; k < token.length; k++) {
+        const ch = token.charAt(k);
+        if (open === "\x27") { if (ch === "\x27") open = ""; }
+        else if (ch === "\\") k++;
+        else if (open !== "") { if (ch === open) open = ""; }
+        else if (ch === "\x22" || ch === "\x27") open = ch;
+      }
+      if (open === "") { out.push(word); word = null; }
+    }
+    if (word !== null) out.push(word);
+    return out;
+  }
+  function backendLocal(rest, invocation, whole) {
+    const exact = ps || invocation.exact === true, raw = exact ? rest : shellWords(rest);
+    const words = exact ? raw : raw.map(unquoted), end = words.indexOf("--"), dyn = raw.findIndex(runTime);
+    if (psHidden && dyn !== -1) return false;
+    const read = whole && dyn === -1;
+    let sure = false;
+    for (let i = 0; i < words.length; i++) {
+      const one = words[i].startsWith("--api-url=");
+      if (!one && words[i] !== "--api-url") continue;
+      if (!(one ? read && isLocalUrl(exact ? words[i].slice(10) : unquoted(words[i].slice(10))) : isLocalUrl(words[i + 1]))) return false;
+      const before = i > 0 ? words[i - 1] : "";
+      if ((end === -1 || i < end) && (dyn === -1 || i < dyn) && !(before.length > 1 && before.charAt(0) === "-" && before.indexOf("=") === -1)) sure = true;
+    }
+    if (sure) return true;
+    if (Object.prototype.hasOwnProperty.call(invocation.envp, "ZENSU_API_URL")) return !envAppended && isLocalUrl(invocation.envp.ZENSU_API_URL);
+    return !envNamed && isLocalUrl(process.env.ZAPI);
   }
   function dynamicReadings(c) {
     if (!c.rest.some(isDynamic)) return [];
@@ -102,11 +152,11 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       if (isDynamic(c.rest[i])) { i++; continue; }
       consumed.push(c.rest[i]);
     }
-    return [{ envp: c.envp, rest: skipped }, { envp: c.envp, rest: consumed }];
+    return [{ envp: c.envp, rest: skipped, derived: true }, { envp: c.envp, rest: consumed, derived: true }];
   }
   function tokenInvocations() {
     const found = [];
-    const norm = cmd.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                      // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
+    const norm = joined.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                      // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
     for (const seg of norm.split(/\|\||&&|[;|\n&]/)) {
       const toks = seg.trim().split(/\s+/).filter(Boolean);
       let i = 0, base = "";
@@ -118,9 +168,9 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
           i++;
         }
         if (i >= toks.length) break;
-        const t = unquoted(toks[i].replace(/^\\/, ""));                           // strip a leading backslash and any wrapping quote chars
+        const t = strip(toks[i]).toUpperCase().toLowerCase();
         if (WRAP.has(t)) { i++; continue; }                                        // skip transparent wrappers (command/env/sudo/…)
-        base = t.split("/").pop(); break;                                           // resolved command basename
+        base = t.split("/").pop().replace(/\.exe(?![\s\S])/, ""); break;          // resolved command basename
       }
       if (base !== "zensu") continue;                                              // command basename must be zensu
       found.push({ envp, rest: toks.slice(i + 1) });
@@ -135,13 +185,27 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     return found.invocations;
   }
   let invocations = ps ? psInvocations() : tokenInvocations();
+  let modeled = -1;
   if (!ps) try {
-    invocations = require(process.env.ZGUARD).commandInvocations(cmd, { platform: process.platform })
-      .filter((c) => c.name === "zensu")
-      .map((c) => ({ envp: c.environment, rest: c.words }))
-      .concat(invocations);
+    const guard = require(process.env.ZGUARD);
+    const walk = (platform) => guard.commandInvocations(cmd, { platform, foldNames: true })
+      .filter((c) => (process.platform === "win32" ? c.name.slice(c.name.lastIndexOf("\\") + 1) : c.name) === "zensu")
+      .map((c) => ({ envp: c.environment, rest: c.words, exact: true }));
+    const walked = walk(process.platform), posix = process.platform === "win32" ? walk("linux") : [];
+    modeled = walked.length;
+    invocations = walked.concat(posix, invocations);
   } catch (_) {}
-  invocations = invocations.concat(...invocations.map(dynamicReadings));
+  const apiNames = (text) => (text.match(/--api-url/gi) || []).length;
+  const psHidden = ps && (/(?:^|\s)--%(?!\S)/.test(cmd) || apiNames(cmd.replace(/\x60/g, "")) > invocations.reduce((n, c) => n + apiNames(c.rest.join(" ")), 0));
+  let named = plain.replace(/\x60/g, "");
+  if (ps) try { named += "\n" + require(process.env.ZPS || "").spellings(cmd); } catch (_) {}
+  const envNamed = /ZENSU_API_URL/i.test(named);
+  const envAppended = /(?:^|[^A-Za-z0-9_])ZENSU_API_URL\+=/.test(cmd);
+  invocations = invocations.concat(invocations.flatMap(dynamicReadings));
+  const oneWordTrusted = !/[\x24\x60{*?[\r]/.test(cmd)
+    && !/(?:^|[^A-Za-z0-9_.-])(?:xargs|watch)(?![A-Za-z0-9_-])/iu.test(plain)
+    && !(process.platform === "win32" && cmd.indexOf("\\") !== -1)
+    && (ps || modeled === (plain.match(new RegExp(NAMED.source, "giu")) || []).length);
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
@@ -149,11 +213,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       continue;
     }
     if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
-    let apiUrl = envp.ZENSU_API_URL || "";
-    const ai = rest.indexOf("--api-url");
-    if (ai !== -1 && typeof rest[ai + 1] === "string") apiUrl = unquoted(rest[ai + 1]);
-    if (!apiUrl) apiUrl = process.env.ZAPI || "";
-    if (isLocalUrl(apiUrl)) continue;                                              // localhost/dev backend → conventions moot, not the tracked product
+    if (backendLocal(rest, invocation, oneWordTrusted && !invocation.derived)) continue;   // localhost/dev backend → conventions moot, not the tracked product
     let noun = "", k = 0;
     for (; k < rest.length; k++) {
       const t = rest[k];
@@ -178,8 +238,10 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     if (ps && third.indexOf(OPQ) !== -1 && GROUPS.has(noun + "\t" + verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
     out.add(noun + "\t" + verb + "\t" + third.split(OPQ).join(""));
   }
+  if (modeled === 0 && invocations.every((c) => !c.exact) && [...out].some((line) => line.indexOf("__") !== 0)) out.add("__textonly__");
   process.stdout.write([...out].join("\n"));
 ' 2>/dev/null)"
+PARSE_STATUS=$?
 
 field() {
   printf '%s' "$INPUT" | F="$1" node -e '
@@ -195,7 +257,7 @@ field() {
 # (fail-open, mirroring the MCP gate's empty/non-JSON behaviour). Inline
 # bypasses still parse as __bypass__ marker lines, so a bypassed zensu segment
 # never lands in this hot-path exit.
-[ -z "$INVOCATIONS" ] && exit 0
+[ -z "$INVOCATIONS" ] && [ "$PARSE_STATUS" -eq 0 ] && exit 0
 
 # Config-disabled gate has no decision point — nothing to bypass, nothing to
 # ledger (kept ahead of the marker/escape handling so all Bash gates share the
@@ -250,7 +312,7 @@ record_bypass_markers() {
 }
 
 # Only markers, no real invocation left → allow.
-[ -z "$INVOCATIONS" ] && { record_bypass_markers; exit 0; }
+[ -z "$INVOCATIONS" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh"
@@ -328,18 +390,22 @@ done <<EOF
 $INVOCATIONS
 EOF
 
-[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && { record_bypass_markers; exit 0; }
+[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
-if [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
+if [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
+elif [ "$PARSE_STATUS" -ne 0 ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+elif [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ -n "$UNJUDGED" ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
 elif [ "$IS_SUBAGENT" = true ]; then
   REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window, and the per-command gate escape is a deliberate one-off for the main thread, never a route for a subagent. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
 elif [ "$TOOL_NAME" = PowerShell ]; then
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. A PowerShell command has no inline gate escape; writes targeting a localhost backend (--api-url, or ZENSU_API_URL in the session environment) and --help are never gated."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. A PowerShell command has no inline gate escape. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL in the session environment."
 else
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline); writes targeting a localhost backend (--api-url/ZENSU_API_URL) and --help are never gated."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline). --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL, as an inline prefix of the call or in the session environment."
 fi
 
 if zensu_is_human_decision_tool "$DENY_TOOL"; then
@@ -357,6 +423,10 @@ elif zensu_is_work_order_tool "$DENY_TOOL"; then
     REASON="$REASON A subagent never sends it: report what you need to the main thread instead."
   fi
 fi
+
+case "$INVOCATIONS" in
+  (*__textonly__*) REASON="$REASON The shell model finds no zensu call in this command, so the call was read from text after a separator, such as a quoted message, an ssh string or a heredoc line; if no call is meant, pass that text through a file instead (git commit -F <file>, gh pr create --body-file <file>)." ;;
+esac
 
 REASON="$REASON" node -e '
   process.stdout.write(JSON.stringify({

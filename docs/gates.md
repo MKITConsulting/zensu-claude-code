@@ -92,7 +92,9 @@ updating features, security classifications, tiers, journeys and their steps, re
 work orders, work plans, …) run directly on the main thread is **denied by default** — it must
 run inside a skill that declared its work, so "freelance" writes cannot bypass the dedup,
 user-journey, baseline-revision and security-review conventions the skills enforce. Reads and
-telemetry are always allowed. A command that records a decision the person makes — creating,
+telemetry are allowed in a session that binds, except a PowerShell call the analyzer cannot judge
+(see [Shell Tools](#shell-tools)); the gate binds before it classifies, so when the Session Control
+binding fails it denies every call it parses, reads included. A command that records a decision the person makes — creating,
 approving, requeuing, cancelling or confirming the merge of a work order, pushing, approving,
 finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing its
 follow-ups, answering or overturning a question, setting the automation policy and adding,
@@ -118,9 +120,29 @@ also one inside a parameter or arithmetic expansion. The gate's own token scan s
 separators such as `;`, `&&`, `|` and a line break, whatever the quoting, and keeps every
 invocation it found before. So a call that follows `&&` inside an `ssh` or `su -c` command string
 is gated, and a line inside a heredoc fed to `cat` that names a mutation is still denied. A search
-pattern that names a mutation passes unless a separator precedes the name inside it. When the
-module cannot load, the token scan runs alone. A command name assembled from variables, a call
-made from interpreter code and a `find -exec` command are not seen, and a call that `ssh`, `su`,
+pattern that names a mutation passes unless a separator precedes the name inside it. Both
+readings take the command name the way a case-insensitive file system resolves it, on every
+platform: its basename in any letter case, folded the way Unicode folds case, with quotes,
+backslashes and the `$` in front of an ANSI-C or locale string (`$'…'`, `$"…"`) removed and an
+optional `.exe`, so `ZENSU`, `Zensu.exe`, `/opt/homebrew/bin/ZENSU`, `z\ensu`, `zen$''su` and
+`zenſu`, whose long s the file system folds to `s`, count as `zensu`. Both join a line
+continuation inside the name the way the shell does, and the shell model reads a wrapper or a
+shell such as `ENV`, `XARGS` or `BASH` the same way and, on Windows, a path to the CLI written
+with backslashes, quoted or not. The token scan reads prose after a separator the same way too,
+so a commit message that reads `x; Zensu features create y` and a heredoc line that starts with
+`Zensu features create` are denied like their lowercase spelling; when only the token scan finds
+a call, the deny says so and names the file remedy (`git commit -F <file>`,
+`gh pr create --body-file <file>`). Neither reading counts a noun or verb in another letter case,
+because zensu-cli rejects it. The readings err toward a call: the text readings drop a backslash or
+a line continuation inside single quotes that the shell keeps (`'z\ensu'`), and the fold reads a
+dotless `ı` as `i`, as NTFS does and APFS does not, so such a command can be denied although it
+runs no CLI. When the module cannot load, the token scan runs alone and also
+misses a Windows path to the CLI written with backslashes. A command name assembled from
+variables or from an empty command substitution, a parameter default, a brace sequence, zsh's `=`
+expansion or a glob (`${X:-zensu}`, `zen$()su`, `{z..z}ensu`, `=zensu`, `/opt/homebrew/bin/zens?`),
+spelled with ANSI-C numeric escapes (`$'\x7a'ensu`) or as an ANSI-C string around a Windows path
+(`$'C:\…\zensu.exe'`), a `zensu.cmd` or `zensu.bat` shim named with its extension, a call that `trap` runs or that `hash -p` binds to another name, a call made from
+interpreter code and a `find -exec` command are not seen, and a call that `ssh`, `su`,
 `docker exec` or `kubectl exec` runs is seen only when a separator precedes it in the command
 text. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
 is cached on disk an agent could `curl` the backend directly; the gate enforces the workflow
@@ -129,9 +151,11 @@ the MCP write-gate it replaced).
 
 The gate classifies each distinct invocation once, however many of the two readings find it, and
 reads the session's declared workflow tools at most once per call. Both readings take time linear in
-the length of the command. A Bash call that names `zensu` and whose hook payload exceeds the session
+the length of the command. A Bash call that names `zensu`, in any letter case or with quotes or backslashes inside the name, and whose hook payload exceeds the session
 binder's limit (`MAX_PAYLOAD_BYTES` in `hooks/lib/claude-hook-session-v1.js`, 1 MiB) is denied before
-either reading runs, with a reason that names the payload's size and the limit. A PowerShell call
+either reading runs, with a reason that names the payload's size and the limit. A Bash call that
+names `zensu` and that the gate's parser fails to read is denied too, with a reason that asks to
+run each `zensu` call as a command of its own, rather than let through unread. A PowerShell call
 goes through the PowerShell analyzer instead; when the analyzer reports a `zensu` call or a construct
 it cannot judge, the failed bind names the size through the shared bind-deny ladder. The all-tool
 capability gate already denies every payload over that limit, so the decision does not change; the
@@ -140,7 +164,7 @@ way, through the same ladder.
 
 ```mermaid
 flowchart TD
-    A["zensu CLI command<br/>(Bash or PowerShell, main thread)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
+    A["zensu CLI command the gate can judge<br/>(Bash or PowerShell, main thread, bound session)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off (env or inline)<br/>or hooks.mcpGate=false<br/>or localhost backend?"}
     C -->|"yes (escape hatch)"| ALLOW
@@ -164,17 +188,46 @@ disables the gate for a deliberate one-off — honored both as a session env and
 (`ZENSU_MCP_GATE=off zensu …`). The inline prefix works on the main thread only: the gate
 ignores it on a subagent's command, and a PowerShell command has none. A PowerShell command is
 read by the shared analyzer, which finds a literal `zensu` call in every spelling PowerShell runs
-it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh -Command`) and
-denies one it cannot read: a call another command starts, a noun or verb built at run time, an
+it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh -Command`), reads
+its noun and verb in any letter case, and denies one it cannot read: a call another command starts, a noun or verb built at run time, an
 argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
 cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
-*real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
-(`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
-meaningless. A subagent's mutation is denied even while a window is open, because a child never
+*real tracked product*), so for a call it can judge it never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
+is **localhost** — a throwaway dev/test DB where the conventions are meaningless. It reads that backend the way
+the CLI does: from every `--api-url` flag, given as two words (`--api-url <url>`) or as one (`--api-url=<url>`),
+and from `ZENSU_API_URL` as an inline prefix or in the hook's own environment. The call is local only when every
+`--api-url` word names a local backend, since the CLI takes the last one, and when none of them is certain to reach
+the CLI as the flag, `ZENSU_API_URL` must name a local backend too. A word after a `--` or after a word built at
+run time, or right after a word that starts with `-` and holds no `=`, is not certain, because it may be that
+word's value or a positional argument, and a word built at run time may itself be a `--`. With no `--api-url` word
+at all `ZENSU_API_URL` decides alone: its inline assignment, even when it is empty, because it replaces the variable
+for that call, but never an inline `ZENSU_API_URL+=`, which appends to it; else the hook's own environment, but only
+while the command does not name `ZENSU_API_URL` anywhere, quoted or escaped included, since an earlier assignment,
+an `export`, an `unset` or a PowerShell `$env:` write changes what the CLI receives. A value is local when a URL
+parser reads `localhost`, `127.0.0.1`, `0.0.0.0` or `[::1]` as its host, the value spells that host right after an
+optional `http://` or `https://`, and it carries no user name or password and only printable ASCII without a
+backslash. A part the shell expands at run time may follow only where the literal text before it already ends the
+host with `/`, `?` or `#` (`"http://localhost:8090/$PREFIX"`), because a run-time port or host part such as
+`localhost:$PORT` can expand to `8090@api.zensu.dev`. A two-word flag with no word after it is never local. The
+one-word spelling is local only in a call the gate reads in full: as the CLI receives the word, and in a command
+that holds no `$`, backtick, brace, carriage return, glob character (`*`, `?`, `[`), `xargs` or `watch`, on Windows
+no backslash, no word the shell or PowerShell builds at run time (a process substitution, an empty PowerShell
+argument or a splat), and no more words that name `zensu`, in any letter case, than the shell model finds calls:
+a call inside an `ssh` string, any call while that model cannot load, and also a title, an `echo` argument or a
+path segment such as `~/src/Zensu` count, so such a local call needs the two-word spelling. On Windows the gate also reads a Bash command as a POSIX shell does, so an escaped
+`\--api-url` or `\--` counts there. A PowerShell call that holds a word built at run time is not local while the
+command also holds the stop-parsing token `--%` or a `--api-url` the analyzer cannot read as a word, such as
+`--api-url=$u`. The gate cannot tell where a call runs: one only the token scan finds, such as a call inside an `ssh`
+string, still counts as local when it names `localhost`, although there `localhost` is the host the string reaches.
+In a Bash command a `--help` or `-h` word right after a word the shell expands at run time is read as that word's
+value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
+brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
 report the operation to the main thread, which runs it through the matching skill. In a bound
 work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
-gate, which allows them there ([Work-order mode](work-order-mode.md)). Every other mutation
+gate, which allows them there ([Work-order mode](work-order-mode.md)). That gate reads the CLI
+name only as `zensu`, in lowercase and without `.exe`, so in such a session on macOS and Windows a
+`work ask` or `work followup` spelled another way is checked by neither gate. Every other mutation
 follows the ordinary rules in that session, where `/zensu:work` opens no window, and the deny of a
 person's decision points to a work-order question instead of a user. A work-order protocol command
 denied anywhere else gets a reason that names the worker and the `/zensu:work` helper, and a
@@ -208,8 +261,8 @@ When enabled, the gate denies a write through one of those channels to a source-
 
 - **(A) Clobber** — the target already **exists and is git-tracked** inside the project (a raw
   shell overwrite of real tracked source), or
-- **(B) Escape** — the resolved path lands **outside the session root** (`CLAUDE_PROJECT_DIR`, else
-  the command's cwd) — a sibling or main checkout. Relative targets resolve against a cwd that
+- **(B) Escape** — the resolved path lands **outside the session root** (the recorded Session
+  Control project root, or the host's `CLAUDE_PROJECT_DIR` in a relaxed unbound session) — a sibling or main checkout. Relative targets resolve against a cwd that
   **tracks `cd` across the command**, so `cd ../main && printf … >> src/x.rs` is caught. (B) fires
   even for a new file, since writing fresh source into another checkout is the breach.
 
@@ -244,8 +297,8 @@ session that was handed over; what still keys on the anchor is the review chain,
 subagents read only inside the recorded project root. A session that continues
 work started in a worktree its own anchor does **not contain** (see `/zensu:session-trail`) can edit
 files and run tests there — on the main thread no Edit-matcher hook compares a path against the
-project root, and the all-tool capability gate that does compare exempts the main principal — but its
-first `git add`/`git commit` denies, because the session root is minted at SessionStart and only
+project root, and the all-tool capability gate that does compare exempts the main principal — but with
+the gate enabled its first `git add`/`git commit` denies, because the session root is minted at SessionStart and only
 the verified move below re-anchors it. Containment is the test, so this does **not** cover a nested worktree: with
 `git worktree add .claude/worktrees/<name>` every worktree sits inside the main checkout and a session
 anchored there commits in all of them. The blocked shapes are a sibling worktree, another repository,
@@ -924,9 +977,10 @@ gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four 
 
 The ordinary shape after `git worktree remove`: the Session Control record is readable, this
 installation may serve it, and the directory it records as `project_root` is gone.
-`readOrphanedProjectRootContext` waives exactly that one existence check, so reads and the
-read-only diagnostics keep working — while `Edit`, `Write` and `MultiEdit` deny, and so does a
-Bash write while the opt-in source-write gate is on, because the workflow document lived under
+`readOrphanedProjectRootContext` waives exactly that one existence check, so reads other than a
+`zensu` CLI call, whose gate binds before it classifies, and the read-only diagnostics keep
+working — while `Edit`, `Write` and `MultiEdit` deny, and so does a
+Bash write the source-write gate can attribute while that opt-in gate is on and no usable `CLAUDE_PROJECT_DIR` remains, because the workflow document lived under
 that root and no write can be attributed to a project that is not there. It IS a relaxable bind failure, and the table in
 [Session Control](session-control.md#unbindable-sessions) carries the per-gate roster.
 

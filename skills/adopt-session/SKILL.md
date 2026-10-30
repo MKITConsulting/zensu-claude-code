@@ -76,9 +76,9 @@ all" would be wrong about the lease store.
 A fourth state belongs here and binds perfectly well: the session has moved on to
 work in a DIFFERENT worktree of the same repository — typically one it created itself
 with `git worktree add` — while its record still names the worktree it started in.
-Every Zensu gate anchors on that recorded root, so `git add` in the worktree the session
-really works in is denied as a write "OUTSIDE this session's worktree/project root", and
-the deny names `/zensu:adopt-session --reanchor`. That is the `--reanchor` mode below.
+Zensu anchors on that recorded root, so with the opt-in source-write gate on, `git add`
+where the session works is denied as a write "OUTSIDE this session's
+worktree/project root", and the deny names `/zensu:adopt-session --reanchor`. That is the `--reanchor` mode below.
 
 ## Do NOT Use For
 
@@ -191,12 +191,12 @@ lived under that root and is not reachable from this record; if it was moved rat
 than deleted, its state still exists there.
 
 The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
-in the ordinary orphaned-project-root state, so Bash and the read-only
-diagnostics work again while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that
-WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
-announcing an unqualified success, or the user walks straight into a deny they
-were just told was fixed. The adoption never re-creates the deleted directory —
-`--restore-root` is the mode that does, and it is a SEPARATE run.
+in the ordinary orphaned-project-root state, so Bash (except a `zensu` CLI call) and the
+diagnostics work again while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write
+the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
+announcing an unqualified success, or the user meets a deny they
+were told was fixed. Adoption never re-creates the deleted directory;
+`--restore-root --confirm` does, in a SEPARATE run.
 
 ### `--restore-root` — re-creating a vanished recorded project root
 
@@ -536,8 +536,8 @@ row, and read it before you describe the outcome. When the recorded project root
 exists the session is bound from the next tool call onward — do not tell the user to
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
 that is the expected result rather than a failed repair: the lineage break is cleared,
-Bash and the read-only diagnostics work again, and `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash
-command that WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created. Say which of the two happened; never report the second as an
+Bash (except a `zensu` CLI call) and the read-only diagnostics work again, while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash
+write the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. Say which of the two happened; never report the second as an
 unqualified success.
 
 ## Invocation Constraints
@@ -570,6 +570,6 @@ directory that is gone and there is nothing to rebuild into. Report that NOTE;
 do not upgrade it to the rebuild recommendation, which is for the other shape.
 After a successful adoption, do not tell the user to restart — and when the
 recorded project root was gone, say that Edit, Write and MultiEdit stay denied,
-and so does any Bash command the source-write gate can attribute as a write
-while that opt-in gate is on (`hooks.bashWriteGate: true`), until it is re-created — read-only Bash and the diagnostics do run — rather than
-reporting an unqualified success.
+as does any Bash write the opted-in source-write gate attributes with no usable
+`CLAUDE_PROJECT_DIR` left, until it is re-created, and that Bash (except a `zensu` CLI call) and
+diagnostics run, rather than reporting an unqualified success.

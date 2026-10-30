@@ -450,6 +450,21 @@ if [ "$(r6_consent_verdict "$R6_EMPTY_PROBE")" = "FAIL-EMPTY" ]; then
   check "R6a2-control an empty slice is refused rather than reported clean" PASS
 else check "R6a2-control an empty slice is refused rather than reported clean" FAIL; fi
 rm -f "$R6_EMPTY_PROBE"
+r6a4_quotes_consent() {
+  tr '\n\t' '  ' < "$1" | tr -s ' ' | grep -qE -- '--restore-root --confirm|--confirm --restore-root'
+}
+DOCTOR_SKILL_MD="$PLUGIN_DIR/skills/doctor/SKILL.md"
+if [ -s "$DOCTOR_SKILL_MD" ] && ! r6a4_quotes_consent "$DOCTOR_SKILL_MD"; then
+  check "R6a4 skills/doctor/SKILL.md quotes no complete restore consent invocation, in either order or across a line break" PASS
+else check "R6a4 skills/doctor/SKILL.md quotes the complete restore consent invocation, or is missing" FAIL; fi
+R6_SKILL_PROBE="$STATE_DIR/r6a4-skill-probe.md"
+printf 'run `/zensu:adopt-session --confirm --restore-root` now\n' > "$R6_SKILL_PROBE"
+R6A4_REVERSED=FAIL; r6a4_quotes_consent "$R6_SKILL_PROBE" && R6A4_REVERSED=PASS
+check "R6a4-control the needle finds the reversed argument order" "$R6A4_REVERSED"
+printf 'run `/zensu:adopt-session --restore-root\n  --confirm` now\n' > "$R6_SKILL_PROBE"
+R6A4_WRAPPED=FAIL; r6a4_quotes_consent "$R6_SKILL_PROBE" && R6A4_WRAPPED=PASS
+check "R6a4-control2 the needle finds an invocation wrapped across a line break" "$R6A4_WRAPPED"
+rm -f "$R6_SKILL_PROBE"
 if grep -qF -- 're-create exactly that directory to resume' "$REPORT_JS"; then
   check "R6b  the incomplete remedy is gone from the doctor row" FAIL
 else check "R6b  the incomplete remedy is gone from the doctor row" PASS; fi

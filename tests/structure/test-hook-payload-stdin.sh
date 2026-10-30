@@ -44,17 +44,17 @@ else
 fi
 
 EXPECTED_FILES=0
-for f in "$PLUGIN_DIR"/hooks/*.sh "$PLUGIN_DIR"/hooks/lib/*.sh; do
+for f in "$PLUGIN_DIR"/hooks/*.sh "$PLUGIN_DIR"/hooks/checks/*.sh "$PLUGIN_DIR"/hooks/lib/*.sh; do
   [ -f "$f" ] && EXPECTED_FILES=$((EXPECTED_FILES+1))
 done
 SCANNED="$(sed -n 's/^scanned \([0-9][0-9]*\) shell file.*/\1/p' "$TMP/real.err")"
 if [ "$EXPECTED_FILES" -gt 0 ] && [ "$SCANNED" = "$EXPECTED_FILES" ]; then
-  check "H2 the scan read all $EXPECTED_FILES shell files under hooks/ and hooks/lib/" PASS
+  check "H2 the scan read all $EXPECTED_FILES shell files under hooks/, hooks/checks/ and hooks/lib/" PASS
 else
-  check "H2 the scan read ${SCANNED:-no} of $EXPECTED_FILES shell files under hooks/ and hooks/lib/" FAIL
+  check "H2 the scan read ${SCANNED:-no} of $EXPECTED_FILES shell files under hooks/, hooks/checks/ and hooks/lib/" FAIL
 fi
 
-STDIN_HOOKS="$( { grep -lE '[A-Za-z_]+="?\$\( *(\{ *)?(cat|head)([ );]|$)' "$PLUGIN_DIR"/hooks/*.sh; grep -lF "read -r -d ''" "$PLUGIN_DIR"/hooks/*.sh; } 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+STDIN_HOOKS="$( { grep -lE '[A-Za-z_]+="?\$\( *(\{ *)?(cat|head)([ );]|$)' "$PLUGIN_DIR"/hooks/*.sh "$PLUGIN_DIR"/hooks/checks/*.sh; grep -lF "read -r -d ''" "$PLUGIN_DIR"/hooks/*.sh "$PLUGIN_DIR"/hooks/checks/*.sh; } 2>/dev/null | sort -u | wc -l | tr -d ' ')"
 SOURCE_HOOKS="$(sed -n 's/.* in \([0-9][0-9]*\) hook script(s);.*/\1/p' "$TMP/real.err")"
 FUNCTIONS="$(sed -n 's/.*; payload functions \([0-9][0-9]*\);.*/\1/p' "$TMP/real.err")"
 if [ "$STDIN_HOOKS" -gt 0 ] && [ "$SOURCE_HOOKS" = "$STDIN_HOOKS" ] && [ "${FUNCTIONS:-0}" -gt 0 ]; then

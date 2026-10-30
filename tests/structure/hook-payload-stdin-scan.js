@@ -883,7 +883,7 @@ function analyze(files) {
 
 function hookFiles(root) {
   const files = [];
-  for (const dir of ['hooks', 'hooks/lib']) {
+  for (const dir of ['hooks', 'hooks/checks', 'hooks/lib']) {
     let entries = [];
     try {
       entries = fs.readdirSync(path.join(root, dir), { withFileTypes: true });

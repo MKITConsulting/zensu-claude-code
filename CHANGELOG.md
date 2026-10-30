@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **CLI write-gate `--api-url`**: the `zensu` CLI write-gate now reads the target backend the way
+  the CLI does. It reads the one-word `--api-url=<url>` beside the two-word `--api-url <url>`, so
+  a mutation such as `zensu --api-url=http://localhost:8090 security classify f1` is no longer
+  denied as a freelance one; the one-word spelling counts only where the gate reads the call in
+  full, so a command with a `$`, backtick, brace, carriage return, glob character, `xargs`,
+  `watch`, a word built at run time such as a process substitution, on Windows a backslash, or a
+  `zensu` call the shell model cannot find keeps the deny. `http://[::1]` now counts as local in
+  the two-word spelling and in `ZENSU_API_URL`. The gate now denies these calls, which the
+  released gate let through as local:
+  - a remote `--api-url` beside a local one, in either order and spelling, because the CLI takes
+    the last; on Windows this includes an escaped `\--api-url`, and an escaped `\--` counts as a
+    `--`;
+  - a local `--api-url` that may be another word's value or a positional argument: after a `--`
+    or after a word built at run time anywhere before it, or right after a word that starts with
+    `-` and holds no `=` (`--json --api-url http://localhost:8090`), unless `ZENSU_API_URL` is
+    local too;
+  - a local one-word `--api-url=<url>` in a call the gate cannot read in full, even beside a local
+    `ZENSU_API_URL`, because the flag overrides the variable;
+  - a remote one-word `--api-url=<url>` over a local `ZENSU_API_URL`, and in PowerShell a flag the
+    analyzer cannot read (`--api-url=$u`, or one after the stop-parsing token `--%`);
+  - an empty inline `ZENSU_API_URL=` over a local value in the hook's environment, an inline
+    `ZENSU_API_URL+=`, which appends to the variable, and the hook's local value in a command that
+    names `ZENSU_API_URL` in any word, a title included, such as an earlier assignment, an
+    `export`, an `unset` or a PowerShell `$env:` write;
+  - a two-word `--api-url` without a value;
+  - a value whose host a URL parser reads as remote (`http://localhost:8090@api.zensu.dev`), that
+    carries another scheme or a backslash, or that the shell completes at run time before its host
+    ends (`http://localhost:$PORT`).
+
+  A value that names a loopback host only once a URL parser normalizes it (`http://127.1:8090`)
+  stays denied. When a local call is denied, spell the URL literally and either put the two-word
+  `--api-url <url>` right after `zensu`, or drop the flag and set a local `ZENSU_API_URL`. The
+  one-word spelling stays local only while no other word of the command names `zensu` in any
+  letter case, a title, an `echo` argument or a path such as `~/src/Zensu` included.
+- **CLI write-gate command name**: the `zensu` CLI write-gate now reads the command name the way a
+  case-insensitive file system resolves it, on every platform. A Bash call spelled `ZENSU`,
+  `Zensu`, `zenſu` or `/opt/homebrew/bin/ZENSU` runs the CLI on macOS and Windows, `ZENSU.EXE`
+  and a Windows path written with backslashes on Windows, and one with quotes, backslashes, an
+  ANSI-C or locale string or a line continuation inside the name (`z\ensu`, `zen""su`,
+  `zen$''su`) on every platform; the released gate let such a call through ungated unless the
+  command also named `zensu` plainly. It is now gated like `zensu`, also behind a wrapper or a
+  shell spelled in any letter case (`ENV`, `XARGS`, `BASH -c`), and after `&&` inside an `ssh`
+  string too. In a Bash call a noun or verb in another letter case is still not read as a
+  mutation, because zensu-cli rejects it. A command that names `zensu` but that the gate's parser
+  cannot read is now denied instead of let through, and on Windows the subagent accident guard
+  reads a program named by a path written with backslashes. Upgrade note: prose after a separator
+  inside a quoted string is read the same way, so a commit message such as
+  `-m "x; Zensu features create y"` is now denied like its lowercase spelling, and the deny names
+  the remedy: write such a message to a file and pass it with `-F`.
+
 ## [0.33.1] - 2026-10-29
 
 ### Added

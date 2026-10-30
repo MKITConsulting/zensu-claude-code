@@ -159,3 +159,65 @@ test('the consent pre-check marks the playwright spellings the prefilter marks a
   assert.equal(dispatch.consentMarked(powershell('Get-ChildItem -Recurse')), false);
   assert.equal(dispatch.consentMarked(bashPayload('git status --short')), false);
 });
+
+test('the CLI-gate pre-check reads the zensu name in every spelling the gate body reads and leaves other calls to pass unread', () => {
+  for (const command of [
+    'zensu security classify f1',
+    'ZENSU security classify f1',
+    'Zensu.exe security classify f1',
+    '/opt/homebrew/bin/ZENSU security classify f1',
+    'zen\u017fu security classify f1',
+    'z\\ensu security classify f1',
+    'zen""su security classify f1',
+    "zen$''su security classify f1",
+    'zen\\\nsu security classify f1',
+    '"C:\\Program Files\\Zensu\\zensu.exe" security classify f1',
+    'ls # x\\\nZEN\\\nSU security classify f1',
+    'echo "a #b" && zen\\\nsu features create --product p --title t',
+    '(true)# c\\\nzen""su security classify f1',
+  ]) {
+    assert.equal(dispatch.zensuNamed(command), true, command);
+  }
+  for (const command of ['git status --short', 'ls .zensu/plans', 'bash hooks/lib/zensu-log.sh --project-root', 'cat dev.zensu/README.md']) {
+    assert.equal(dispatch.zensuNamed(command), false, command);
+  }
+});
+
+test('the CLI-gate pre-check answers exactly as the gate body early exit on every command of a generated corpus', () => {
+  const body = fs.readFileSync(path.join(PLUGIN, 'hooks', 'checks', 'pre-bash-zensu-gate.sh'), 'utf8').split('\n');
+  const start = body.findIndex((line) => line.startsWith('  const joinLines = '));
+  const end = body.findIndex((line) => line.startsWith('  const candidates = '));
+  assert.ok(start !== -1 && end > start, 'the early exit of hooks/checks/pre-bash-zensu-gate.sh was not found');
+  const bodyNamed = new Function('cmd', `${body.slice(start, end + 1).join('\n')}\nreturn candidates.some((text) => NAMED.test(text));`);
+  const parts = [
+    'zensu', 'ZEN', 'SU', 'zen', 'su', 'z', 'e', 'n', 's', 'u', '\u017f', '\\', '\n', '\\\n', '"', "'", '""', "$''", '$',
+    '#', ' #', '# c', ' ', ';', '&&', '(', ')', '(true)', 'echo "a #b"', 'x', '.', '-', '/',
+  ];
+  let seed = 7;
+  const next = () => {
+    seed = (seed * 48271) % 2147483647;
+    return seed;
+  };
+  const corpus = [];
+  const prefixes = ['', ' ', 'x', '.', '/opt/', 'echo "a #b" && ', 'echo "a #b"; ', '(true)# c\\\n', 'ls # x\\\n', 'x\\\n', 'echo \\\\\n', "echo 'a\\\n'; "];
+  const names = ['zensu', 'ZENSU', 'zenſu', 'ZEN""SU', "zen$''su", 'z\\ensu', 'zen\\\nsu', 'ZEN\\\nSU', 'zen""\\\nsu', '\\ZENSU'];
+  const suffixes = ['', ' security classify f1', '.exe x', '-log.sh', '_x', '/x', '\n'];
+  for (const prefix of prefixes) {
+    for (const name of names) {
+      for (const suffix of suffixes) corpus.push(prefix + name + suffix);
+    }
+  }
+  for (let i = 0; i < 20000; i += 1) {
+    let command = '';
+    const length = 1 + (next() % 12);
+    for (let k = 0; k < length; k += 1) command += parts[next() % parts.length];
+    corpus.push(command);
+  }
+  let named = 0;
+  for (const command of corpus) {
+    const expected = bodyNamed(command);
+    assert.equal(dispatch.zensuNamed(command), expected, JSON.stringify(command));
+    if (expected) named += 1;
+  }
+  assert.ok(named > 0 && named < corpus.length, `the corpus names zensu in ${named} of ${corpus.length} commands`);
+});

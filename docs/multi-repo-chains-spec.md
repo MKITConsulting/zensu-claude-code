@@ -396,8 +396,10 @@ occurrences of `CLAUDE_PLUGIN_DATA` or `.zensu`, and CLAUDE.md §"Plugin-Data Gu
 records the uncovered Bash channel as that guard's own first residual. **This was
 NOT re-measured behaviorally, and the reason is this section's own trap one field
 over:** a synthetic payload carrying no session id makes the gate fail closed on
-the binding, so the deny it returns says nothing about containment. Re-measure it
-with a real bound session before writing precondition 1, exactly as the paragraph
+the binding while `hooks.bashWriteGate` is `true`, and at the default the gate
+allows it before any bind, so neither answer says anything about containment.
+Re-measure it with a real bound session and the gate opted in, or through the
+always-on control pass, before writing precondition 1, exactly as the paragraph
 below requires a `cwd`.
 
 **The ordering is a requirement, not a preference.** The gate first, then the
@@ -870,7 +872,9 @@ be the first field read out of the workflow document that grants a capability. I
 any longer (§8), so a prose control is proportionate here, as it is for `vanilla`.
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`, `ZENSU_EDIT_LANDING_GATE=off`) are
-unchanged and keep landing their bypass-ledger entries. Nothing here adds a new escape.
+unchanged and keep landing their bypass-ledger entries while a chain is active in a bound
+session — for the source-write gate, only while `hooks.bashWriteGate` is `true` as well. Nothing
+here adds a new escape.
 
 ## 9. Versioning
 

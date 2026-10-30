@@ -515,10 +515,9 @@ whether browser verification is enforced, not only when a row is red.
   described above probes the recorded root and reports what is there now, so relay
   the row's own sentence rather than this forecast once the repair has run.
   Otherwise start a fresh session. If the directory was MOVED rather than deleted,
-  moving it back is better than re-creating it, because its state is still there. Meanwhile the session can be diagnosed but
-  not edited — this read-only report runs, `Stop` is released rather than wedged,
-  and `Edit`, `Write` and `MultiEdit` stay denied because nothing can anchor a write to a
-  project, and so does any Bash command that WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`). Do NOT report this row as a missing record.
+  moving it back is better than re-creating it, because its state is still there. Meanwhile the session can be diagnosed — this read-only report runs, `Stop` is released rather than wedged,
+  and a `zensu` CLI call, `Edit`, `Write` and `MultiEdit` stay denied because no project
+  anchors the session, as does any Bash write the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left. Do NOT report this row as a missing record.
 - **A plugin upgrade is normally NOT a binding failure any more.** A record binds
   to any executing installation whose declared version is a compatible lineage of
   the recorded one — strict `X.Y.Z`, equal major, equal minor while major is `0`,
@@ -556,13 +555,13 @@ whether browser verification is enforced, not only when a row is red.
   fresh session is the only way forward, and `executing-runtime-older` means the
   running installation is a downgrade, so the newer version has to be
   re-installed.
-  Adoption re-binds the session from the next tool call onward — do NOT tell the
+  Adoption re-binds the session from the next tool call on — do NOT tell the
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
-  clears the lineage break while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that WRITES while the
-  opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created. This row is reachable in that state — the doctor
-  falls back to it whenever the third-fact probe cannot answer — so offering the
-  remedy without the clause would promise something this check did not establish.
+  clears the lineage break while a `zensu` CLI call, `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes with no
+  usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. This row is reachable in that state — the doctor
+  falls back to it when the third-fact probe cannot answer — so the remedy
+  without the clause would promise what this check did not establish.
 - **❌ binding: this session's Session Control record is readable, but BOTH the
   recorded project root … is gone and the running Zensu installation declares an
   incompatible lineage** → both of the two rows above at once, and it is its own
@@ -581,11 +580,11 @@ whether browser verification is enforced, not only when a row is red.
   retries by hand — that is the
   difference from the plain orphaned row, which the running installation already
   serves and which adoption refuses as `already-served`. State the limit whenever you offer
-  the repair: adoption clears the LINEAGE break, so Bash and this
-  diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that WRITES
-  while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created by
-  `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
-  requires the running installation to SERVE the record, which is exactly what the
+  the repair: adoption clears the LINEAGE break, so Bash (except a `zensu` CLI call) and this
+  diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes
+  with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created by the repair
+  `/zensu:adopt-session --restore-root` reports, confirmed by the user AFTER the adoption:
+  it needs this installation to SERVE the record, which the
   adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under
   that directory and is not reachable from this record, so no chain state is
   reachable and no later `Stop` can enforce it while that directory is missing —
@@ -898,7 +897,7 @@ whether browser verification is enforced, not only when a row is red.
   `/zensu:build` to re-arm if that work still needs a review.
 - **⚠️ state: this session's recorded project root was RE-CREATED** → the history
   carries the reserved `PROJECT_ROOT_RESTORED` provenance entry, so the directory this
-  session is anchored to was planted by `/zensu:adopt-session --restore-root --confirm`
+  session is anchored to was planted by the `/zensu:adopt-session --restore-root` repair
   rather than being the one that was there before. It renders BESIDE the REBUILT row
   above, not instead of it: that one is about the workflow document, this one about the
   directory, and the restore writes both. Relay it with its cost — the repair restores

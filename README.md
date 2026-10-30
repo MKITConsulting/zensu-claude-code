@@ -32,8 +32,9 @@ CLI and a Zensu account ([which skills need what](#skills-31)).
 - **Findings you can trust.** Every finding is graded against the real source
   before anyone acts on it. What does not hold up is marked, not silently fixed.
 - **Guardrails around the agent.** Gates stop it from committing a secret or
-  mutating tracked product data outside a workflow, and an opt-in gate keeps it
-  from writing into a sibling checkout. Those gates have a documented escape
+  mutating tracked product data outside a workflow, and an opt-in gate refuses raw
+  Bash writes that clobber tracked source or put source files into a sibling
+  checkout, and git mutations aimed at one. Those gates have a documented escape
   hatch; the gates that protect Zensu's own state and the browser consent gate
   have none ([Configuration](#configuration)).
 - **Features, not commits.** Security profiles, user journeys, tiers, and
