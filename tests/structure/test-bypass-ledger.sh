@@ -143,7 +143,7 @@ else
 fi
 
 # P3 — recording call sites route through the shared recorder, fail-open
-SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN lib/zensu-log.sh:ZENSU_FULL_SUITE_GATE lib/zensu-log.sh:ZENSU_ACCEPTANCE_GATE"
+SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE checks/pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE checks/pre-bash-source-write-gate.sh:ZENSU_MCP_GATE checks/pre-bash-zensu-gate.sh:ZENSU_MCP_GATE checks/pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN lib/zensu-log.sh:ZENSU_FULL_SUITE_GATE lib/zensu-log.sh:ZENSU_ACCEPTANCE_GATE"
 for entry in $SITES; do
   hook_file="${entry%%:*}"; gate_name="${entry#*:}"
   hf="$PLUGIN_DIR/hooks/$hook_file"
@@ -153,7 +153,7 @@ for entry in $SITES; do
     check "P3 $hook_file records $gate_name via the shared recorder" FAIL
   fi
 done
-for hook_file in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-bash-zensu-gate.sh pre-write-secret-scan.sh stop-chain-enforcer.sh; do
+for hook_file in pre-edit-tdd-reminder.sh checks/pre-bash-source-write-gate.sh checks/pre-bash-zensu-gate.sh checks/pre-write-secret-scan.sh stop-chain-enforcer.sh; do
   hf="$PLUGIN_DIR/hooks/$hook_file"
   if [ -f "$hf" ] && grep -qE 'tdd_record_bypass(_payload)? .*2>/dev/null \|\| true' "$hf"; then
     check "P3 $hook_file records fail-open" PASS
@@ -168,17 +168,18 @@ if grep -qF '__bypass__\t' "$PARSE_JS" && grep -qF 'bypassMarkers' "$PARSE_JS"; 
 else
   check "P3m1 source-write parser emits __bypass__ markers" FAIL
 fi
-if grep -qF '__bypass__*)' "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"; then
+if grep -qF '__bypass__*)' "$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"; then
   check "P3m2 source-write gate consumes the parser markers" PASS
 else
   check "P3m2 source-write gate consumes the parser markers" FAIL
 fi
-if grep -qF '__bypass__\tZENSU_MCP_GATE' "$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh" && grep -qF '$1=="__bypass__"' "$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh"; then
+if grep -qF '__bypass__\tZENSU_MCP_GATE' "$PLUGIN_DIR/hooks/checks/pre-bash-zensu-gate.sh" && grep -qF '$1=="__bypass__"' "$PLUGIN_DIR/hooks/checks/pre-bash-zensu-gate.sh"; then
   check "P3m3 zensu gate parser emits and the hook consumes __bypass__ markers" PASS
 else
   check "P3m3 zensu gate parser emits and the hook consumes __bypass__ markers" FAIL
 fi
-if grep -qF '__bypass__:ZENSU_SECRET_SCAN' "$DECIDE_JS" && grep -qF '__bypass__:ZENSU_SECRET_SCAN' "$PLUGIN_DIR/hooks/pre-write-secret-scan.sh"; then
+if grep -qF '__bypass__:ZENSU_SECRET_SCAN' "$DECIDE_JS" && grep -qF '__bypass__:ZENSU_SECRET_SCAN' "$PLUGIN_DIR/hooks/checks/pre-write-secret-scan.sh" \
+  && grep -qF "'__bypass__:ZENSU_SECRET_SCAN'" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"; then
   check "P3m4 secret-scan decider reports the inline bypass as a verdict" PASS
 else
   check "P3m4 secret-scan decider reports the inline bypass as a verdict" FAIL

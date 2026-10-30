@@ -961,9 +961,20 @@ bash_matcher_hooks() {
   # string equality rather than to "matches everything".
   HOOKS_FILE="$1" node -e '
     const fs = require("node:fs");
+    const path = require("node:path");
     const config = JSON.parse(fs.readFileSync(process.env.HOOKS_FILE, "utf8"));
+    let registered = null;
+    try {
+      registered = require(path.join(path.dirname(process.env.HOOKS_FILE), "lib", "hook-registration-v1.js")).registeredHooks;
+    } catch {
+      registered = null;
+    }
+    const entries = typeof registered === "function"
+      ? registered(config, "PreToolUse") || []
+      : (config.hooks?.PreToolUse || []).flatMap((group) => (group.hooks || [])
+        .map((hook) => ({ command: String(hook.command || ""), matcher: group.matcher })));
     const names = new Set();
-    for (const entry of config.hooks?.PreToolUse || []) {
+    for (const entry of entries) {
       let matches = false;
       try {
         matches = new RegExp(`^(?:${entry.matcher ?? ".*"})$`).test("Bash");
@@ -971,10 +982,8 @@ bash_matcher_hooks() {
         matches = entry.matcher === "Bash";
       }
       if (!matches) continue;
-      for (const hook of entry.hooks || []) {
-        const found = /hooks\/([A-Za-z0-9._-]+\.sh)/.exec(String(hook.command || ""));
-        if (found) names.add(found[1]);
-      }
+      const found = /hooks\/([A-Za-z0-9._-]+\.sh)/.exec(entry.command);
+      if (found) names.add(found[1]);
     }
     process.stdout.write([...names].sort().join("\n"));
   '

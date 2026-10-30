@@ -54,10 +54,13 @@ fi
 PHASE0="$(awk '/^## Phase 0: Pre-flight$/{f=1;next} f&&/^## /{exit} f' "$SKILL")"
 if printf '%s' "$PHASE0" | grep -Fq 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root` prints it' \
   && printf '%s' "$PHASE0" | grep -Fq 'Keep the printed absolute path as `{project_root}`' \
-  && printf '%s' "$PHASE0" | grep -Fq 'BASELINE_SHA=$(git -C "{project_root}" rev-parse --verify --quiet HEAD)'; then
-  check "L5 Phase 0 reads {project_root} from --project-root and takes the baseline from it" PASS
+  && printf '%s' "$PHASE0" | grep -Fq 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-work-tree)"' \
+  && printf '%s' "$PHASE0" | grep -Fq 'Keep the printed path as `{work_tree}`' \
+  && printf '%s' "$PHASE0" | grep -Fq 'BASELINE_SHA=$(git -C "{work_tree}" rev-parse --verify --quiet HEAD)' \
+  && ! printf '%s' "$PHASE0" | grep -Fq 'BASELINE_SHA=$(git -C "{project_root}"'; then
+  check "L5 Phase 0 reads {project_root} from --project-root, {work_tree} from --chain-work-tree, and takes the baseline from the work tree" PASS
 else
-  check "L5 Phase 0 reads {project_root} from --project-root and takes the baseline from it" FAIL
+  check "L5 Phase 0 reads {project_root} from --project-root, {work_tree} from --chain-work-tree, and takes the baseline from the work tree" FAIL
 fi
 
 if grep -Fq 'CLAUDE_PROJECT_DIR="{project_root}" CLAUDE_PLUGIN_DATA="{plugin_data}" bash "{plugin_root}/hooks/lib/zensu-log.sh" append --truncate --log {log_file}' "$SKILL"; then

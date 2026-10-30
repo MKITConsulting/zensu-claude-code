@@ -24,6 +24,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG_HELPER="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 REDACT="$PLUGIN_DIR/hooks/lib/zensu-artifact-redact-v1.js"
 ARTIFACT_HOOK="$PLUGIN_DIR/hooks/post-artifact-redact.sh"
+DISPATCHER="$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 
@@ -145,11 +146,10 @@ fi
 if grep -qF 'post-artifact-redact.sh' "$HOOKS_JSON" 2>/dev/null \
   && node -e '
     const j = require(process.argv[1]);
-    const post = (j.hooks && j.hooks.PostToolUse) || [];
-    const on = m => post.some(e => e.matcher === m
-      && (e.hooks || []).some(h => String(h.command || "").includes("post-artifact-redact.sh")));
+    const post = require(process.argv[2]).registeredHooks(j, "PostToolUse") || [];
+    const on = m => post.some(e => e.matcher === m && e.command.includes("post-artifact-redact.sh"));
     process.exit((on("Edit|Write|MultiEdit") && on("Bash|PowerShell")) ? 0 : 1);
-  ' "$HOOKS_JSON" 2>/dev/null; then
+  ' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
   check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash|PowerShell" PASS
 else
   check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash|PowerShell" FAIL
@@ -540,7 +540,7 @@ fi
 # be paired with the positive that the module's own seam is what runs.
 # Comment lines are stripped: a comment may legitimately NAME `.zensu/logs` while
 # explaining the containment, and only executable text can re-spell a layout.
-HOOK_PROGRAM="$(awk '/^  node -e /,0' "$ARTIFACT_HOOK" | grep -v '^[[:space:]]*//')"
+HOOK_PROGRAM="$(awk '/^function sweepArtifacts\(/,/^}/' "$DISPATCHER" | grep -v '^[[:space:]]*//')"
 if [ -n "$HOOK_PROGRAM" ] \
   && ! printf '%s' "$HOOK_PROGRAM" | grep -qF '.zensu' \
   && ! printf '%s' "$HOOK_PROGRAM" | grep -qF 'plans' \
@@ -1079,7 +1079,7 @@ fi
 # containment bound rather than the root set. Both spellings are pinned at a
 # count of exactly 1 so a second, contradicting occurrence fails too.
 R51_UNION="$(printf '%s' "$HOOK_PROGRAM" \
-  | grep -cF 'projectRoot: [project, process.env.CLAUDE_PROJECT_DIR || ""].filter(Boolean)')"
+  | grep -cF "projectRoot: [project, process.env.CLAUDE_PROJECT_DIR || ''].filter(Boolean)")"
 R51_BOUND="$(printf '%s' "$HOOK_PROGRAM" | grep -cF 'expectedRoot: project,')"
 if [ "$R51_UNION" -eq 1 ] && [ "$R51_BOUND" -eq 1 ]; then
   check "R51 the sweep unions CLAUDE_PROJECT_DIR into projectRoot and leaves expectedRoot the record root" PASS

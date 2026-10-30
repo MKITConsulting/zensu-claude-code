@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.33.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.33.1-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -116,9 +116,10 @@ already rely on:
   or set `ZENSU_FULL_SUITE_GATE=off` or `ZENSU_ACCEPTANCE_GATE=off` for one
   closing step; those two escapes are recorded in the chain's bypass ledger.
   `/zensu:full-suite` moves the full suite to a verified CI pipeline instead.
-- **`node` must be on `PATH`.** The capability gate runs on every tool call and
-  needs `node`. Without it every tool call is refused with only
-  `zensu: reviewer capability gate unavailable`, which does not name `node`.
+- **`node` must be on `PATH`.** Claude Code starts the hook dispatcher, which
+  runs the capability gate before every tool call, as `node` itself. Without
+  `node` the dispatcher cannot start, and its registration makes Claude Code
+  refuse every tool call with its own error about the failed start.
 
 ## Install
 

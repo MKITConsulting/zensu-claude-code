@@ -3,6 +3,7 @@ paths:
   - "hooks/lib/subagent-shell-guard-v1.js"
   - "hooks/lib/reviewer-capability-v1.js"
   - "hooks/pre-bash-zensu-gate.sh"
+  - "hooks/checks/pre-bash-zensu-gate.sh"
   - "tests/structure/subagent-shell-guard-v1.test.js"
   - "tests/structure/test-reviewer-capability-gate.sh"
   - "skills/gauntlet-loop/SKILL.md"
@@ -257,7 +258,7 @@ grows past 64 directories is denied (`directories`).
   environment, selector and helper commands, the two documented obfuscation gaps as allowed, the
   tools admitted outside Zensu state, the `Monitor` and command-tool denies, the mention denies
   and the PowerShell deny.
-- `commandInvocations`: `hooks/pre-bash-zensu-gate.sh` requires it by path, B38 in
+- `commandInvocations`: `hooks/checks/pre-bash-zensu-gate.sh` requires it by path, B38 in
   `tests/structure/test-bash-zensu-gate.sh` drives it, B39a-B39c drive the token scan alone
   through a bound plugin copy without the module, P5n3 in `tests/structure/test-bypass-ledger.sh`
   pins the line-break guard, and the walker test in `subagent-shell-guard-v1.test.js` pins what

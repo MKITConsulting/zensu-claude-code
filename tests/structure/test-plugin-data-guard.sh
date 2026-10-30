@@ -909,7 +909,7 @@ if grep -qE "$ESCAPE_RE" "$GUARD" "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js
 else
   check "G12 the guard teaches no ZENSU_*=off escape" PASS
 fi
-if grep -qE "$ESCAPE_RE" "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"; then
+if grep -qE "$ESCAPE_RE" "$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"; then
   check "G12-control the escape pattern matches a file that does carry one" PASS
 else
   check "G12-control the escape pattern matches a file that does carry one" FAIL

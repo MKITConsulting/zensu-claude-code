@@ -138,7 +138,11 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   link (`zensu-log.sh` resolves symbolic links in the path's ancestors first), and
   `undetermined` when git cannot answer. A chain reviews one root, so for the first three the
   aspect panel reviews this change, and a workflow review of the other work tree imports only in
-  a session started in it. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
+  a session started in it. An Autopilot-bound chain whose work tree is the run's own worktree
+  below the anchor is that layout as well, so step 3 of the build's review chain skips the import
+  for it without asking and logs `EXTERNAL REVIEW SKIPPED — the chain's work tree lies below the
+  anchor`; its packet names each changed file with the worktree's location below the anchor as a
+  prefix, so the panel reads the worktree's copy. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
   with that root, `unresolved-project-root` points at `/zensu:doctor`, and `undetermined` names
   git's fault in `detail=`: for the review root it asks for the same re-run, because only that
   root imports whatever the fault hid, and for the project root it asks for the fault to be
@@ -208,6 +212,12 @@ A routed fix round prepares its re-review with one call,
 fan-out, and `/zensu:self-review` runs `--round self-review` for its one fix round. Every call of
 a chain passes the `--baseline` its round-0 call passed. The verb:
 
+- resolves the chain's work tree as `zensu-log.sh --chain-work-tree` does — the git top level, or
+  the worktree below the anchor that a bound Autopilot run drives — and takes the change set, the
+  audit, the snapshot and the round diff from it, and the ledger, the run log and the round scope
+  from the anchor's top level; when the two differ, every path it prints for a reviewer carries
+  the work tree's location below the anchor as a prefix, the diff headers included, while aspect
+  activation reads the paths without it;
 - runs the Phase 6 step 5b edit-landing audit under the round's start marker;
 - judges every claim of the round against a content snapshot taken when the round began, so a
   file that was already uncommitted before the round counts as landed only when this round

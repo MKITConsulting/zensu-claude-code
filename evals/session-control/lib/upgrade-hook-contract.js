@@ -4,9 +4,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const vm = require('node:vm');
 const { readStableRegularFile } = require('./safe-file-read.js');
 
 const CANONICAL_COMMAND = /^bash "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/([A-Za-z0-9._-]+\.sh)"$/;
+const DISPATCHER_ARGUMENT = '${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-dispatch-v1.js';
+const DISPATCHER_TARGET = 'lib/hook-dispatch-v1.js';
+const DISPATCHER_REGISTRY = 'lib/hook-registration-v1.js';
+const DISPATCH_FLAGS = Object.freeze({ PreToolUse: 'pre', PostToolUse: 'post' });
+const HOOK_TARGET = /^(?:[A-Za-z0-9._-]+\.sh|lib\/[A-Za-z0-9._-]+\.js|checks\/[A-Za-z0-9._-]+\.sh)$/;
 const EVALUATOR_REQUIRED_HOOKS = deepFreeze({
   PreToolUse: {
     Read: [
@@ -123,6 +129,69 @@ function canonicalHookBasename(command) {
   return match[1];
 }
 
+function dispatcherFlag(event, hook) {
+  if (hook.command !== 'node') return null;
+  if (!Object.prototype.hasOwnProperty.call(DISPATCH_FLAGS, event)
+      || !Array.isArray(hook.args) || hook.args.length !== 2
+      || hook.args[0] !== DISPATCHER_ARGUMENT || hook.args[1] !== DISPATCH_FLAGS[event]) {
+    throw contractError('hook command is not the canonical dispatcher');
+  }
+  return hook.args[1];
+}
+
+function hookProcessName(event, hook) {
+  const flag = dispatcherFlag(event, hook);
+  return flag === null ? canonicalHookBasename(hook.command) : `hook-dispatch-v1.js:${flag}`;
+}
+
+function loadDispatchedChecks(root) {
+  let source;
+  try {
+    source = readStableRegularFile(path.join(root, 'hooks', DISPATCHER_REGISTRY), {
+      minBytes: 1,
+      maxBytes: 1024 * 1024,
+    }).buffer.toString('utf8');
+  } catch (_error) {
+    throw contractError('dispatcher check registry is unsafe');
+  }
+  const module = { exports: {} };
+  let checks;
+  try {
+    vm.runInNewContext(source, {
+      module,
+      exports: module.exports,
+      require: () => { throw new Error('require refused'); },
+    }, { timeout: 1000 });
+    checks = JSON.parse(JSON.stringify(module.exports.DISPATCHED_CHECKS));
+  } catch (_error) {
+    throw contractError('dispatcher check registry is unsafe');
+  }
+  if (!Array.isArray(checks) || checks.length === 0) throw contractError('dispatcher check registry is invalid');
+  const names = new Set();
+  for (const check of checks) {
+    const valid = Boolean(check) && typeof check === 'object' && !Array.isArray(check)
+      && JSON.stringify(Object.keys(check)) === JSON.stringify(['event', 'name', 'matcher', 'script', 'body', 'failure'])
+      && Object.prototype.hasOwnProperty.call(DISPATCH_FLAGS, check.event)
+      && typeof check.name === 'string' && /^[a-z][a-z-]*$/.test(check.name)
+      && !names.has(`${check.event}:${check.name}`)
+      && typeof check.matcher === 'string' && check.matcher !== ''
+      && typeof check.script === 'string' && /^[A-Za-z0-9._-]+\.sh$/.test(check.script)
+      && (check.body === null || (typeof check.body === 'string' && /^checks\/[A-Za-z0-9._-]+\.sh$/.test(check.body)))
+      && ['open', 'closed'].includes(check.failure);
+    if (!valid) throw contractError('dispatcher check registry is invalid');
+    try { new RegExp(check.matcher); }
+    catch (_error) { throw contractError('dispatcher check registry is invalid'); }
+    names.add(`${check.event}:${check.name}`);
+  }
+  return deepFreeze(checks);
+}
+
+function configDispatches(config) {
+  return Object.entries(config?.hooks || {}).some(([event, groups]) => (groups || []).some(
+    (group) => (group.hooks || []).some((hook) => dispatcherFlag(event, hook) !== null),
+  ));
+}
+
 function loadCanonicalHookConfig(rootInput) {
   const root = canonicalPluginRoot(rootInput);
   let config;
@@ -162,12 +231,18 @@ function loadCanonicalHookConfig(rootInput) {
       for (const hook of group.hooks) {
         if (!hook || typeof hook !== 'object' || Array.isArray(hook)
             || hook.type !== 'command'
-            || Object.keys(hook).some((key) => !['command', 'timeout', 'type'].includes(key))
             || (hook.timeout !== undefined
               && (!Number.isFinite(hook.timeout) || hook.timeout <= 0))) {
           throw contractError('hook entry is invalid');
         }
-        const basename = canonicalHookBasename(hook.command);
+        const dispatched = dispatcherFlag(event, hook) !== null;
+        const allowed = dispatched ? ['args', 'command', 'onFailure', 'timeout', 'type'] : ['command', 'timeout', 'type'];
+        if (Object.keys(hook).some((key) => !allowed.includes(key))
+            || (dispatched && (group.matcher !== '.*'
+              || hook.onFailure !== (event === 'PreToolUse' ? 'block' : undefined)))) {
+          throw contractError('hook entry is invalid');
+        }
+        const basename = dispatched ? DISPATCHER_TARGET : canonicalHookBasename(hook.command);
         const target = path.join(hookRoot, basename);
         try {
           const stat = fs.lstatSync(target);
@@ -184,23 +259,51 @@ function loadCanonicalHookConfig(rootInput) {
   return config;
 }
 
-function matchingHookBasenames(config, event, toolName) {
+function matchingHookBasenames(config, event, toolName, checks = []) {
   const basenames = [];
   for (const group of config?.hooks?.[event] || []) {
     let matches = true;
     if (toolName !== undefined) matches = new RegExp(group.matcher || '.*').test(toolName);
     if (!matches) continue;
-    for (const hook of group.hooks || []) basenames.push(canonicalHookBasename(hook.command));
+    for (const hook of group.hooks || []) {
+      if (dispatcherFlag(event, hook) === null) {
+        basenames.push(canonicalHookBasename(hook.command));
+        continue;
+      }
+      for (const check of checks) {
+        if (check.event === event && (toolName === undefined || new RegExp(check.matcher).test(toolName))) {
+          basenames.push(check.script);
+        }
+      }
+    }
   }
   return basenames;
 }
 
-function configuredHookBasenames(config) {
+function matchingHookProcesses(config, event, toolName) {
+  const names = [];
+  for (const group of config?.hooks?.[event] || []) {
+    if (toolName !== undefined && !new RegExp(group.matcher || '.*').test(toolName)) continue;
+    for (const hook of group.hooks || []) names.push(hookProcessName(event, hook));
+  }
+  return names;
+}
+
+function configuredHookBasenames(config, checks = []) {
   const basenames = new Set(['hooks.json']);
-  for (const groups of Object.values(config?.hooks || {})) {
+  for (const [event, groups] of Object.entries(config?.hooks || {})) {
     for (const group of groups || []) {
       for (const hook of group.hooks || []) {
-        basenames.add(canonicalHookBasename(hook.command));
+        if (dispatcherFlag(event, hook) === null) {
+          basenames.add(canonicalHookBasename(hook.command));
+          continue;
+        }
+        basenames.add(DISPATCHER_TARGET);
+        basenames.add(DISPATCHER_REGISTRY);
+        for (const check of checks) {
+          basenames.add(check.script);
+          if (check.body !== null) basenames.add(check.body);
+        }
       }
     }
   }
@@ -234,7 +337,7 @@ function sameBigIntFileIdentity(left, right) {
 }
 
 function captureHookIntegrity(root, basename) {
-  if (basename !== 'hooks.json' && !/^[A-Za-z0-9._-]+\.sh$/.test(basename)) {
+  if (basename !== 'hooks.json' && !HOOK_TARGET.test(basename)) {
     throw contractError('hook target integrity is unsafe');
   }
   const hookRoot = path.join(root, 'hooks');
@@ -281,6 +384,7 @@ function capturedContractIsValid(contract) {
       || !Array.isArray(contract.hookIntegrity) || !Object.isFrozen(contract.hookIntegrity)
       || !contract.directoryIntegrity || typeof contract.directoryIntegrity !== 'object'
       || !Object.isFrozen(contract.directoryIntegrity)
+      || !Array.isArray(contract.dispatchedChecks) || !Object.isFrozen(contract.dispatchedChecks)
       || contract.requiredHooks !== EVALUATOR_REQUIRED_HOOKS) {
     return false;
   }
@@ -304,7 +408,7 @@ function capturedContractIsValid(contract) {
   }
   if (contract.directoryIntegrity.pluginRoot.canonicalPath !== contract.pluginRoot) return false;
   let expectedBasenames;
-  try { expectedBasenames = configuredHookBasenames(contract.config); }
+  try { expectedBasenames = configuredHookBasenames(contract.config, contract.dispatchedChecks); }
   catch (_error) { return false; }
   if (JSON.stringify(contract.hookIntegrity.map((entry) => entry?.basename))
       !== JSON.stringify(expectedBasenames)) return false;
@@ -338,6 +442,10 @@ function verifyCapturedHookContract(rootInput, contract) {
   if (JSON.stringify(currentConfig) !== JSON.stringify(contract.config)) {
     throw contractError('hook configuration changed after capture');
   }
+  const currentChecks = configDispatches(currentConfig) ? loadDispatchedChecks(root) : [];
+  if (JSON.stringify(currentChecks) !== JSON.stringify(contract.dispatchedChecks)) {
+    throw contractError('dispatcher check registry changed after capture');
+  }
   const currentIntegrity = [];
   for (const { basename } of contract.hookIntegrity) {
     assertDirectoryIntegrity(root, contract.directoryIntegrity);
@@ -356,13 +464,23 @@ function captureEvaluatorOwnedHookContract(rootInput) {
   assertDirectoryIntegrity(root, directoryIntegrity);
   const config = loadCanonicalHookConfig(root);
   assertDirectoryIntegrity(root, directoryIntegrity);
+  const dispatchedChecks = configDispatches(config) ? loadDispatchedChecks(root) : deepFreeze([]);
+  assertDirectoryIntegrity(root, directoryIntegrity);
   const observedExpectedHooks = {
     PreToolUse: {
-      Read: matchingHookBasenames(config, 'PreToolUse', 'Read'),
-      Bash: matchingHookBasenames(config, 'PreToolUse', 'Bash'),
+      Read: matchingHookBasenames(config, 'PreToolUse', 'Read', dispatchedChecks),
+      Bash: matchingHookBasenames(config, 'PreToolUse', 'Bash', dispatchedChecks),
     },
     SessionStart: matchingHookBasenames(config, 'SessionStart'),
     Stop: matchingHookBasenames(config, 'Stop'),
+  };
+  const observedHookProcesses = {
+    PreToolUse: {
+      Read: matchingHookProcesses(config, 'PreToolUse', 'Read'),
+      Bash: matchingHookProcesses(config, 'PreToolUse', 'Bash'),
+    },
+    SessionStart: matchingHookProcesses(config, 'SessionStart'),
+    Stop: matchingHookProcesses(config, 'Stop'),
   };
 
   for (const toolName of ['Read', 'Bash']) {
@@ -381,7 +499,7 @@ function captureEvaluatorOwnedHookContract(rootInput) {
   }
 
   const hookIntegrity = [];
-  for (const basename of configuredHookBasenames(config)) {
+  for (const basename of configuredHookBasenames(config, dispatchedChecks)) {
     assertDirectoryIntegrity(root, directoryIntegrity);
     hookIntegrity.push(captureHookIntegrity(root, basename));
     assertDirectoryIntegrity(root, directoryIntegrity);
@@ -390,15 +508,16 @@ function captureEvaluatorOwnedHookContract(rootInput) {
   return deepFreeze({
     config,
     directoryIntegrity,
+    dispatchedChecks,
     hookIntegrity,
     pluginRoot: root,
     requiredHooks: EVALUATOR_REQUIRED_HOOKS,
     observedExpectedHooks,
+    observedHookProcesses,
   });
 }
 
-function writeFaultedHookConfig(root, config) {
-  const file = path.join(root, 'hooks', 'hooks.json');
+function writeFaultedFile(file, serialized) {
   let descriptor;
   try {
     const before = fs.lstatSync(file, { bigint: true });
@@ -409,7 +528,6 @@ function writeFaultedHookConfig(root, config) {
         || before.dev !== opened.dev || before.ino !== opened.ino) {
       throw new Error('unsafe hook configuration target');
     }
-    const serialized = Buffer.from(`${JSON.stringify(config)}\n`, 'utf8');
     fs.ftruncateSync(descriptor, 0);
     let offset = 0;
     while (offset < serialized.length) {
@@ -442,26 +560,41 @@ function injectCandidateHookContractFaultForTest(rootInput, fault) {
   const root = canonicalPluginRoot(rootInput);
   const config = loadCanonicalHookConfig(root);
   const groups = config.hooks;
+  const checks = configDispatches(config)
+    ? JSON.parse(JSON.stringify(loadDispatchedChecks(root)))
+    : null;
+  const directBasename = (event, hook) => (
+    dispatcherFlag(event, hook) === null ? canonicalHookBasename(hook.command) : null
+  );
   const remove = (event, basename) => {
     let removed = 0;
     for (const group of groups[event] || []) {
       group.hooks = group.hooks.filter((hook) => {
-        const matches = canonicalHookBasename(hook.command) === basename;
+        const matches = directBasename(event, hook) === basename;
         if (matches) removed += 1;
         return !matches;
       });
     }
+    if (checks) {
+      const kept = checks.filter((check) => check.event !== event || check.script !== basename);
+      removed += checks.length - kept.length;
+      checks.splice(0, checks.length, ...kept);
+    }
     if (removed === 0) throw contractError('hook-contract selftest target is missing');
   };
-  const bashGroup = () => {
+  const bashEntries = () => {
+    if (checks) {
+      return {
+        entries: checks,
+        basename: (check) => (check.event === 'PreToolUse' ? check.script : null),
+      };
+    }
     const group = (groups.PreToolUse || []).find(({ matcher, hooks }) => (
       String(matcher || '').split('|').includes('Bash')
-      && hooks.some(
-        (hook) => canonicalHookBasename(hook.command) === 'pre-bash-zensu-gate.sh',
-      )
+      && hooks.some((hook) => directBasename('PreToolUse', hook) === 'pre-bash-zensu-gate.sh')
     ));
     if (!group) throw contractError('hook-contract selftest target is missing');
-    return group;
+    return { entries: group.hooks, basename: (hook) => directBasename('PreToolUse', hook) };
   };
 
   if (fault === 'hook-contract-remove-read') {
@@ -469,24 +602,18 @@ function injectCandidateHookContractFaultForTest(rootInput, fault) {
   } else if (fault === 'hook-contract-remove-bash') {
     remove('PreToolUse', 'pre-bash-zensu-gate.sh');
   } else if (fault === 'hook-contract-reorder-bash') {
-    const hooks = bashGroup().hooks;
-    const first = hooks.findIndex(
-      (hook) => canonicalHookBasename(hook.command) === 'pre-bash-zensu-gate.sh',
-    );
-    const second = hooks.findIndex(
-      (hook) => canonicalHookBasename(hook.command) === 'pre-bash-source-write-gate.sh',
-    );
+    const { entries, basename } = bashEntries();
+    const first = entries.findIndex((entry) => basename(entry) === 'pre-bash-zensu-gate.sh');
+    const second = entries.findIndex((entry) => basename(entry) === 'pre-bash-source-write-gate.sh');
     if (first === -1 || second === -1) {
       throw contractError('hook-contract selftest target is missing');
     }
-    [hooks[first], hooks[second]] = [hooks[second], hooks[first]];
+    [entries[first], entries[second]] = [entries[second], entries[first]];
   } else if (fault === 'hook-contract-duplicate-bash') {
-    const hooks = bashGroup().hooks;
-    const source = hooks.find(
-      (hook) => canonicalHookBasename(hook.command) === 'pre-bash-zensu-gate.sh',
-    );
+    const { entries, basename } = bashEntries();
+    const source = entries.find((entry) => basename(entry) === 'pre-bash-zensu-gate.sh');
     if (!source) throw contractError('hook-contract selftest target is missing');
-    hooks.push({ ...source });
+    entries.push(checks ? { ...source, name: `${source.name}-duplicate` } : { ...source });
   } else if (fault === 'hook-contract-remove-session-start') {
     remove('SessionStart', 'session-start-session-control.sh');
   } else if (fault === 'hook-contract-remove-stop') {
@@ -494,7 +621,16 @@ function injectCandidateHookContractFaultForTest(rootInput, fault) {
   } else {
     throw contractError('unknown evaluator-owned hook-contract selftest fault');
   }
-  writeFaultedHookConfig(root, config);
+  writeFaultedFile(
+    path.join(root, 'hooks', 'hooks.json'),
+    Buffer.from(`${JSON.stringify(config)}\n`, 'utf8'),
+  );
+  if (checks) {
+    writeFaultedFile(
+      path.join(root, 'hooks', DISPATCHER_REGISTRY),
+      Buffer.from(`'use strict';\n\nmodule.exports = { DISPATCHED_CHECKS: ${JSON.stringify(checks)} };\n`, 'utf8'),
+    );
+  }
   return true;
 }
 
@@ -504,6 +640,8 @@ module.exports = {
   captureEvaluatorOwnedHookContract,
   injectCandidateHookContractFaultForTest,
   loadCanonicalHookConfig,
+  loadDispatchedChecks,
   matchingHookBasenames,
+  matchingHookProcesses,
   verifyCapturedHookContract,
 };

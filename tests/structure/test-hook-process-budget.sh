@@ -17,14 +17,19 @@ finish() {
   exit
 }
 
+. "$(dirname "$0")/lib-unit-registry.sh"
+unit_check "B9 the dispatcher unit file passes" "$PLUGIN_DIR/tests/structure/hook-dispatch-v1.test.js"
+
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     check "B0 the process-start budgets are calibrated on POSIX hosts; Git Bash is not measured (skipped)" PASS
+    unit_check_done "B9z every unit file the registry gives this suite was graded"
     finish
     ;;
 esac
 
 REAL_BASH="$(command -v bash)"
+REAL_NODE="$(command -v node)"
 command -v node >/dev/null 2>&1 || { check "node is available" FAIL; finish; }
 command -v git >/dev/null 2>&1 || { check "git is available" FAIL; finish; }
 
@@ -107,7 +112,7 @@ roster() {
   node - "$HOOKS_JSON" "$REGISTRATION_LIB" "$1" "$2" <<'NODE'
 const fs = require('fs');
 const [manifestFile, registrationFile, event, tool] = process.argv.slice(2);
-const { hostMatcherCovers, REGISTRATION } = require(registrationFile);
+const { hostMatcherCovers, REGISTRATION, dispatcherEvent } = require(registrationFile);
 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
 const out = [];
 for (const group of manifest.hooks[event] || []) {
@@ -115,6 +120,11 @@ for (const group of manifest.hooks[event] || []) {
   if (covers === REGISTRATION.UNKNOWN) { out.push('unknown-matcher'); continue; }
   if (covers !== REGISTRATION.REGISTERED) continue;
   for (const hook of group.hooks || []) {
+    const dispatched = dispatcherEvent(hook);
+    if (dispatched !== null) {
+      out.push(dispatched === event ? 'dispatch:' + (event === 'PreToolUse' ? 'pre' : 'post') : 'dispatch-event-mismatch');
+      continue;
+    }
     const m = /hooks\/([A-Za-z0-9._-]+\.sh)"?$/.exec(hook.command || '');
     out.push(m ? m[1] : 'unparseable-command');
   }
@@ -126,10 +136,14 @@ NODE
 count_hook() {
   local hook="$1" body="$2" log="$TMP/count.log"
   : > "$log"
+  case "$hook" in
+    (dispatch:*) set -- "$REAL_NODE" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" "${hook#dispatch:}" ;;
+    (*) set -- "$REAL_BASH" "$PLUGIN_DIR/hooks/$hook" ;;
+  esac
   printf '%s' "$body" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
     -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_SESSION_ADOPTED \
     PATH="$SHIMS" ZENSU_BUDGET_LOG="$log" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
-    "$REAL_BASH" "$PLUGIN_DIR/hooks/$hook" >"$TMP/count.out" 2>/dev/null
+    "$@" >"$TMP/count.out" 2>/dev/null
   HOOK_RC=$?
   HOOK_STARTS="$(wc -l < "$log" | tr -d ' ')"
   HOOK_NODES="$(grep -cx node "$log")"
@@ -146,9 +160,9 @@ EDIT_RESPONSE='{"filePath":"x","oldString":"x","newString":"y"}'
 
 budget() {
   case "$1" in
-    Bash) echo "18 8" ;;
-    Read) echo "1 1" ;;
-    Edit) echo "41 33" ;;
+    Bash) echo "2 0 0" ;;
+    Read) echo "2 0 0" ;;
+    Edit) echo "6 34 28" ;;
   esac
 }
 
@@ -160,12 +174,14 @@ for TOOL in Bash Read Edit; do
   esac
   TOTAL=0
   NODES=0
+  REGISTERED=0
   BAD=""
   for EVENT in PreToolUse PostToolUse; do
     if [ "$EVENT" = PreToolUse ]; then BODY="$(payload "$EVENT" "$TOOL" "$INPUT")"
     else BODY="$(payload "$EVENT" "$TOOL" "$INPUT" "$RESPONSE")"; fi
     for HOOK in $(roster "$EVENT" "$TOOL"); do
       case "$HOOK" in unknown-matcher|unparseable-command) BAD="$BAD $EVENT:$HOOK"; continue ;; esac
+      REGISTERED=$((REGISTERED + 1))
       count_hook "$HOOK" "$BODY"
       case "$HOOK_OUTPUT" in *'"permissionDecision":"deny"'*) BAD="$BAD $HOOK:denied" ;; esac
       [ "$HOOK_RC" -eq 0 ] || BAD="$BAD $HOOK:rc=$HOOK_RC"
@@ -179,13 +195,13 @@ for TOOL in Bash Read Edit; do
   else
     check "B2-$TOOL a hook registered for a $TOOL call failed or denied:$BAD" FAIL
   fi
-  read -r LIMIT NODE_LIMIT <<EOF
+  read -r HOOK_LIMIT LIMIT NODE_LIMIT <<EOF
 $(budget "$TOOL")
 EOF
-  if [ "$TOTAL" -le "$LIMIT" ] && [ "$NODES" -le "$NODE_LIMIT" ]; then
-    check "B3-$TOOL a $TOOL call starts $TOTAL programs through PATH (budget $LIMIT), $NODES of them node (budget $NODE_LIMIT)" PASS
+  if [ "$REGISTERED" -le "$HOOK_LIMIT" ] && [ "$TOTAL" -le "$LIMIT" ] && [ "$NODES" -le "$NODE_LIMIT" ]; then
+    check "B3-$TOOL a $TOOL call starts $REGISTERED hook processes (budget $HOOK_LIMIT), which start $TOTAL programs through PATH (budget $LIMIT), $NODES of them node (budget $NODE_LIMIT)" PASS
   else
-    check "B3-$TOOL a $TOOL call starts $TOTAL programs (budget $LIMIT), $NODES node (budget $NODE_LIMIT)" FAIL
+    check "B3-$TOOL a $TOOL call starts $REGISTERED hook processes (budget $HOOK_LIMIT), $TOTAL programs (budget $LIMIT), $NODES node (budget $NODE_LIMIT)" FAIL
   fi
 done
 
@@ -207,6 +223,7 @@ put() {
 }
 CONFIG_MISMATCH=""
 CONFIG_NODE_MISMATCH=""
+CONFIG_DISPATCH_MISMATCH=""
 CONFIG_CASES=0
 config_case() {
   local label="$1" expect_decided="$2" home="$3" override="${4:-}" result
@@ -226,12 +243,20 @@ config_case() {
     if [ -z "$val" ] || [ "$val" = 1 ]; then ref_enabled=0; else ref_enabled=1; fi
     val="$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===true?"1":"0")' probeKey 2>/dev/null)"
     if [ "$val" = 1 ]; then ref_opted=0; else ref_opted=1; fi
-    printf '%s %s %s %s %s' "$enabled" "$opted" "$nodes" "$ref_enabled" "$ref_opted"
+    disp="$(node -e '
+      const d = require(process.argv[1]);
+      process.stdout.write((d.configHookEnabled("probeKey", process.env, process.cwd()) ? "0" : "1")
+        + " " + (d.configHookOptedIn("probeKey", process.env, process.cwd()) ? "0" : "1"));
+    ' "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" 2>/dev/null)"
+    printf '%s %s %s %s %s %s' "$enabled" "$opted" "$nodes" "$ref_enabled" "$ref_opted" "${disp:-x x}"
   )"
   CONFIG_CASES=$((CONFIG_CASES + 1))
   set -- $result
   if [ "$1" != "$4" ] || [ "$2" != "$5" ]; then
     CONFIG_MISMATCH="$CONFIG_MISMATCH [$label: enabled $1/$4 opted $2/$5]"
+  fi
+  if [ "${6:-x}" != "$4" ] || [ "${7:-x}" != "$5" ]; then
+    CONFIG_DISPATCH_MISMATCH="$CONFIG_DISPATCH_MISMATCH [$label: enabled ${6:-x}/$4 opted ${7:-x}/$5]"
   fi
   case "$expect_decided:$3" in
     yes:0|no:[1-9]*|any:*) ;;
@@ -294,6 +319,11 @@ if [ -z "$CONFIG_MISMATCH" ]; then
   check "C1 zensu_hook_enabled and zensu_hook_opted_in answer like the node reader in all $CONFIG_CASES config cases" PASS
 else
   check "C1 the shell pre-check disagrees with the node reader:$CONFIG_MISMATCH" FAIL
+fi
+if [ -z "$CONFIG_DISPATCH_MISMATCH" ]; then
+  check "C1b the dispatcher's config reader answers like the node reader in all $CONFIG_CASES config cases" PASS
+else
+  check "C1b the dispatcher's config reader disagrees with the node reader:$CONFIG_DISPATCH_MISMATCH" FAIL
 fi
 if [ -z "$CONFIG_NODE_MISMATCH" ]; then
   check "C2 the config getters start no node when no candidate file names the key, and defer to node when one does or is longer than the pre-check reads" PASS
@@ -386,11 +416,21 @@ const fs = require('fs');
 const path = require('path');
 const [pluginDir, controlFile] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'hooks/hooks.json'), 'utf8'));
+const { dispatcherEvent } = require(path.join(pluginDir, 'hooks/lib/hook-registration-v1.js'));
+const { REGISTRY } = require(path.join(pluginDir, 'hooks/lib/hook-dispatch-v1.js'));
 const out = [];
 const queue = [];
 for (const event of ['PreToolUse', 'PostToolUse']) {
   for (const group of manifest.hooks[event] || []) {
     for (const hook of group.hooks || []) {
+      if (dispatcherEvent(hook) === event) {
+        for (const check of REGISTRY) {
+          if (check.event !== event) continue;
+          queue.push('hooks/' + check.script);
+          if (check.body !== null) queue.push('hooks/' + check.body);
+        }
+        continue;
+      }
       const m = /hooks\/([A-Za-z0-9._-]+\.sh)"?$/.exec(hook.command || '');
       if (m) queue.push('hooks/' + m[1]);
       else out.push('unresolved ' + event + ' command ' + (hook.command || ''));
@@ -453,4 +493,5 @@ case "$(printf '%s\n' "$SCAN_OUT" | grep '^control ')" in
   *) check "S1b the scan reported no control result" FAIL ;;
 esac
 
+unit_check_done "B9z every unit file the registry gives this suite was graded"
 finish

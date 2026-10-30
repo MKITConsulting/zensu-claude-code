@@ -43,7 +43,7 @@ Six sites, all single-root.
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
 `zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:148-155`), and
-`pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
+`hooks/checks/pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
 while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
@@ -53,7 +53,7 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1536`) and counts through the shared helper (`:1574`),
+(`hooks/lib/zensu-log.sh:1840`) and counts through the shared helper (`:1891`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -63,11 +63,11 @@ variable names for the audit in a multi-root topology, and what the fallback mea
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:90`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:241-266`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:984`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:127`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:365-405`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:1166`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1525`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1829`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -89,20 +89,20 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 
 **The write gate confines Bash writes while it is opted in, the edit gate does not confine
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:885`) and rule (C) at the same predicate
-for git targets (`:931`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:780`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
+(`hooks/lib/bash-source-write-parse.js:901`) and rule (C) at the same predicate
+for git targets (`:947`), with `projectRoot` taken from the passed
+`CLAUDE_PROJECT_DIR` (`:796`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
 opted in. Neither of
 the two other hooks on the `Bash` matcher confines a path to the project root, so
 neither needs changing: `pre-bash-zensu-gate.sh` carries no project-root reference
-at all, and `pre-write-secret-scan.sh:85` references one only through the
+at all, and `hooks/checks/pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:639` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:641` refuses any
 reviewer path input outside the root with `file access must remain inside the
 immutable project root`, and `:600-602` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
@@ -222,6 +222,22 @@ receipt that records a failure, and the document no longer claims a detection it
 cannot perform. One gap remains open by construction and is named rather than
 implied: a relative claim that collides with a same-named file in the anchor can
 still grade as landed, and only the §6.1 label closes it.
+
+**Two refinements landed on 2026-10-29, and neither adds a second root.** First, the claim
+grammar has one owner, `hooks/lib/edit-landing-claims-v1.js`: a files list splits only at commas
+outside `{…}` and `(…)`, a brace group is expanded and every member graded, a glob is graded
+through the tracked, untracked and changed files it matches, and an entry the audit cannot grade
+is settled by an audited `CLAIM CORRECTED` line, while a literal claimed path is never retired.
+`zensu-log.sh append` refuses brace, glob and prose entries when a claim is logged. Second, the
+chain's work tree: an Autopilot run that drives a worktree of the anchor's own repository below
+the anchor (`workspaceRoot`) has that worktree graded, counted at `--tdd-complete`, reviewed and
+baselined, through `zensu-log.sh --chain-work-tree` and the library's `--work-tree`, which accept
+only a worktree with the anchor's git common directory, strictly below the project root, at its
+own top level. That is still one code root per chain — the anchor's own repository — so it is
+neither the §6.1 label nor a relaxation of item 3: a claim into any other work tree nested under
+the anchor keeps grading `UNVERIFIED (foreign root)`, and in such a chain a claim naming the
+anchor's own copy of a file grades the same way. The evidence runner and the acceptance gate do
+not follow the work tree yet; `.claude/rules/claim-syntax-and-work-tree.md` records that bound.
 
 ## 6. Stage 2 — Declared code roots (minor) — REDESIGNED 2026-10-21, NOT BUILT
 
