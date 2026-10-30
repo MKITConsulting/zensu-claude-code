@@ -144,7 +144,7 @@ See [skills/build/SKILL.md](../skills/build/SKILL.md) and its [references](../sk
 
 ## 4. Per-Step TDD-FSM
 
-Inside Phase 4, each step cycles through a small state machine. The PreToolUse hook ([hooks/pre-edit-tdd-reminder.sh](../hooks/pre-edit-tdd-reminder.sh)) reads the current phase from the state file and allows or denies Edit/Write/MultiEdit tool calls based on it.
+Inside Phase 4, each step cycles through a small state machine. The PreToolUse hook ([hooks/checks/pre-edit-tdd-reminder.sh](../hooks/checks/pre-edit-tdd-reminder.sh)) reads the current phase from the state file and allows or denies Edit/Write/MultiEdit tool calls based on it.
 
 ```mermaid
 stateDiagram-v2
@@ -742,7 +742,7 @@ are intentionally not part of the state transaction.
 ## See Also
 
 - [skills/build/SKILL.md](../skills/build/SKILL.md) — canonical main-thread workflow skill
-- [hooks/pre-edit-tdd-reminder.sh](../hooks/pre-edit-tdd-reminder.sh) — gate enforcement
+- [hooks/checks/pre-edit-tdd-reminder.sh](../hooks/checks/pre-edit-tdd-reminder.sh) — gate enforcement
 - [hooks/lib/zensu-tdd-phase.sh](../hooks/lib/zensu-tdd-phase.sh) — state file I/O
 - [hooks/lib/zensu-log.sh](../hooks/lib/zensu-log.sh) — log + phase helper CLI
 - [hooks/hooks.json](../hooks/hooks.json) — hook registrations

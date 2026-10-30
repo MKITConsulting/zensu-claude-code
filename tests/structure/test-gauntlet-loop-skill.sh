@@ -49,7 +49,7 @@ README_MD="$PLUGIN_DIR/README.md"
 CAPABILITY_LIB="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
 SHELL_GUARD_LIB="$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js"
 PRINCIPAL_LIB="$PLUGIN_DIR/hooks/lib/claude-principal-v1.js"
-EDIT_GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
+EDIT_GATE="$PLUGIN_DIR/hooks/checks/pre-edit-tdd-reminder.sh"
 REVIEW_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 # Sibling suite, read as EVIDENCE rather than as a test: G15's nested-spawn residue is

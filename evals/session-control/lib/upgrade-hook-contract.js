@@ -259,19 +259,23 @@ function loadCanonicalHookConfig(rootInput) {
   return config;
 }
 
+function matcherSelects(matcher, toolName) {
+  if (toolName === undefined) return true;
+  if (typeof matcher === 'string' && /^[A-Za-z0-9_|]+$/.test(matcher)) return matcher.split('|').includes(toolName);
+  return new RegExp(matcher || '.*').test(toolName);
+}
+
 function matchingHookBasenames(config, event, toolName, checks = []) {
   const basenames = [];
   for (const group of config?.hooks?.[event] || []) {
-    let matches = true;
-    if (toolName !== undefined) matches = new RegExp(group.matcher || '.*').test(toolName);
-    if (!matches) continue;
+    if (!matcherSelects(group.matcher, toolName)) continue;
     for (const hook of group.hooks || []) {
       if (dispatcherFlag(event, hook) === null) {
         basenames.push(canonicalHookBasename(hook.command));
         continue;
       }
       for (const check of checks) {
-        if (check.event === event && (toolName === undefined || new RegExp(check.matcher).test(toolName))) {
+        if (check.event === event && matcherSelects(check.matcher, toolName)) {
           basenames.push(check.script);
         }
       }
@@ -283,7 +287,7 @@ function matchingHookBasenames(config, event, toolName, checks = []) {
 function matchingHookProcesses(config, event, toolName) {
   const names = [];
   for (const group of config?.hooks?.[event] || []) {
-    if (toolName !== undefined && !new RegExp(group.matcher || '.*').test(toolName)) continue;
+    if (!matcherSelects(group.matcher, toolName)) continue;
     for (const hook of group.hooks || []) names.push(hookProcessName(event, hook));
   }
   return names;

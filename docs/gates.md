@@ -336,7 +336,7 @@ with `ZENSU_SECRET_SCAN=off` (env, or inline for Bash); disable via `hooks.secre
 ## Reviewer-Spawn Grant
 
 The one entry in this file that **opens** rather than closes. `pre-agent-reviewer-allow.sh` is a
-PreToolUse hook on the `Agent|Task` matcher that returns `permissionDecision: "allow"` for Zensu's
+PreToolUse check of the hook dispatcher on the `Agent|Task` matcher that returns `permissionDecision: "allow"` for Zensu's
 own capability-confined reviewer subagents, which short-circuits the host permission pipeline
 **before** the auto-mode classifier is consulted.
 
@@ -345,10 +345,11 @@ executes, so no PreToolUse or PostToolUse hook observes it, and the Stop chain-e
 instruction that cannot succeed until its cap releases the guard.
 `hooks/lib/reviewer-spawn-denial-v1.js` diagnoses that state after the fact; this hook prevents it.
 
-- **It can only grant or stay silent.** It never emits deny or ask, and every failure path is a
-  silent `exit 0` — the opposite of the fail-closed direction the gates above take. A non-zero exit
+- **It can only grant or stay silent.** It never emits deny or ask, and every failure path of the
+  check stays silent — the opposite of the fail-closed direction the gates above take. A non-zero exit
   from a PreToolUse hook blocks the tool call, so a fail-closed grant hook would break every Agent
-  spawn in the session, including the reviewer it exists to admit.
+  spawn in the session, including the reviewer it exists to admit. A fault of the dispatcher process
+  itself still blocks, as it does for every tool.
 - **Four conditions, all required.** The main principal; a bound Session Control record;
   `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
 - **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
@@ -381,8 +382,9 @@ instruction that cannot succeed until its cap releases the guard.
   confinement the frontmatter provides. Read that confinement as bounding what the CHILD may
   do, never as bounding the call.
 - **Three host limits bound it**, and none is a defect to be fixed by widening the grant: a
-  `permissions.deny` or `permissions.ask` rule still overrides it; another hook on the same matcher
-  returning deny or ask outranks it (the host ranks deny > ask > allow); and an SDK session
+  `permissions.deny` or `permissions.ask` rule still overrides it; another hook on the same matcher,
+  or another check of the dispatcher,
+  returning deny or ask outranks it (the host and the dispatcher both rank deny > ask > allow); and an SDK session
   supplying `canUseTool` forces the full pipeline.
 - **It is disclosed in both states.** The SessionStart banner names the grant while it is on, and a
   `/zensu:doctor` row reports it either way — that row is not silenceable by the flag. A capability
@@ -460,7 +462,7 @@ precedent for a control with no switch.
 exit 2, and a resolution that hits an internal bound refuses with its own reason
 (`target-resolution-truncated`): the walk gave up before it finished, so "outside" is a claim it
 did not earn, and answering it once allowed a spelling that lands in the store. No legitimate input
-reaches a bound, so that refusal costs an adversarial spelling and nothing else. A missing `node`, an
+reaches a bound, so that refusal costs an adversarial spelling and nothing else. An
 absent, empty or unresolvable `CLAUDE_PLUGIN_DATA`, an unparseable payload, or a module that will
 not load returns *allow*. The first of those two exceptions is the plugin-root check every sibling gate
 carries: a mismatched inherited `CLAUDE_PLUGIN_ROOT` still refuses with exit 2, and on this matcher that
@@ -470,13 +472,15 @@ load fault), an unusable `CLAUDE_PLUGIN_DATA` — the one that turns the control
 and would otherwise render byte-identical to a clean allow — and a payload with **no path field**,
 which is what a renamed or restructured host field looks like from here. A fifth note is not a
 fault at all: when the caller supplies no project root the over-arm valve cannot be evaluated, and
-an armed decision says so rather than skipping the check in silence. Three further faults are outside the
-module's reach, because the shell wrapper returns before `node` runs: a missing `node`, a
-`hooks/lib` its `cd -P` cannot enter, and a `plugin-data-guard-v1.js` that is absent or is a
-symlink. They are **not silent** — the wrapper writes its own stderr note at each of the three,
-naming the cause and the consequence, and at both of its exit-2 plugin-root branches
-(self-resolution failure and inherited-root mismatch) as well. What cannot reach them is the module's *typed* reason, which
-is a limit on the channel and never on whether the operator is told. Denying there would block ordinary in-project
+an armed decision says so rather than skipping the check in silence. Two further faults are outside the
+module's reach. A `plugin-data-guard-v1.js` that is absent or is a symlink is **not silent**: the hook
+dispatcher writes a stderr note naming the cause and the consequence, and allows, as it refuses with a
+note at both exit-2 plugin-root branches (self-resolution failure and inherited-root mismatch). A missing
+`node` is a failed start of the dispatcher, so `"onFailure": "block"` refuses the call. The entry point
+`hooks/pre-write-plugin-data-guard.sh` is no longer what the host runs; run directly, it writes its own note
+and allows when `node` is missing or it cannot reach `hooks/lib`. What cannot reach these faults is the
+module's *typed* reason, which is a limit on the channel and never on whether the operator is told. Denying
+on an absent module would block ordinary in-project
 writes, which is strictly worse than the hole this closes. Containment is not re-implemented:
 `within` and `msysToDrive` come from `hooks/lib/bash-source-write-parse.js`, and the decision
 lives in `hooks/lib/plugin-data-guard-v1.js`.
