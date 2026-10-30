@@ -53,7 +53,7 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1840`) and counts through the shared helper (`:1891`),
+(`hooks/lib/zensu-log.sh:1974`) and counts through the shared helper (`:2025`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -67,7 +67,7 @@ when it is unset, is an open question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:365-405`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:1166`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1829`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1963`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -236,8 +236,10 @@ only a worktree with the anchor's git common directory, strictly below the proje
 own top level. That is still one code root per chain — the anchor's own repository — so it is
 neither the §6.1 label nor a relaxation of item 3: a claim into any other work tree nested under
 the anchor keeps grading `UNVERIFIED (foreign root)`, and in such a chain a claim naming the
-anchor's own copy of a file grades the same way. The evidence runner and the acceptance gate do
-not follow the work tree yet; `.claude/rules/claim-syntax-and-work-tree.md` records that bound.
+anchor's own copy of a file grades the same way. The evidence runner and the acceptance gate
+follow the same work tree: such a chain's `--evidence-run` runs there, and its full-suite verdict,
+acceptance runs and acceptance records measure the combined tree of the project and the worktree
+(`.claude/rules/evidence-runner.md`).
 
 ## 6. Stage 2 — Declared code roots (minor) — REDESIGNED 2026-10-21, NOT BUILT
 

@@ -418,7 +418,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | Unit file | Registered | Skips | Driven by | Summary |
 |---|---|---|---|---|
 | `session-control/session-control-core-v1.test.js` | 227 | darwin 2, linux 5, root 5, win32 22 | `session-control/run.sh` | Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification. |
-| `structure/acceptance-verify-v1.test.js` | 26 | – | `test-acceptance-gate.sh` | Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention. |
+| `structure/acceptance-verify-v1.test.js` | 29 | – | `test-acceptance-gate.sh` | Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention. |
 | `structure/ai-work-capture.test.js` | 10 | – | `test-ai-work-capture.sh` | AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions. |
 | `structure/aspect-activation-v1.test.js` | 21 | – | `test-incremental-review-rounds.sh` | Review-aspect activation: which review perspectives a round activates for a given change. |
 | `structure/background-review-v1.test.js` | 33 | win32 2 | `test-background-review.sh` | Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps. |
@@ -427,7 +427,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/clock-shift-v1.test.js` | 19 | – | `test-clock-shift.sh` | The shifted-clock preload and runner that the scheduled clock-shift pass uses. |
 | `structure/deferred-review-claim-cases.test.js` | 11 | – | `test-windows-ci-contract.sh` (metadata, all) | The deferred-review claim case table. |
 | `structure/edit-landing-claims-v1.test.js` | 27 | – | `test-edit-landing-audit.sh` | The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check. |
-| `structure/evidence-run-v1.test.js` | 80 | win32 3 | `test-evidence-run.sh` | The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory. |
+| `structure/evidence-run-v1.test.js` | 89 | win32 3 | `test-evidence-run.sh` | The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory. |
 | `structure/external-review-v1.test.js` | 47 | win32 5 | `test-external-review-hook.sh` | External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, the freshness check against changed files, and the review root bound to the session's work tree with every other layout named. |
 | `structure/finding-verify-v1.test.js` | 28 | – | `test-finding-verification.sh` | The finding-verification grading module. |
 | `structure/fixture-mutation-watch.test.js` | 19 | – | `test-eval-harness-units.sh` | Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends. |

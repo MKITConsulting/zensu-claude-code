@@ -161,6 +161,18 @@ if arm "fsg-stale" "$PROJ"; then
     check "F5 an edit after the green run refuses as stale (rc=$RC)" FAIL
     ERR
   fi
+  BADGIT="$WORK/bad-gitfile"
+  mkdir -p "$BADGIT"
+  printf 'garbage\n' > "$BADGIT/.git"
+  _evr_work_tree="$BADGIT" _evr_work_dir="$BADGIT" _avr_work_tree="$BADGIT" \
+    bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree (record er1_[0-9_a-f]*); files changed since: tracked.txt | ' "$WORK/err"; then
+    check "F24 work-tree variables inherited from the caller leave the standalone verdict unchanged" PASS
+  else
+    check "F24 work-tree variables inherited from the caller leave the standalone verdict unchanged (rc=$RC)" FAIL
+    ERR
+  fi
   run_full --cmd 'true' --if-stale
   chain_done; RC=$?
   if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -q '^FULL SUITE — pass | ' "$WORK/err"; then
@@ -376,6 +388,100 @@ if [ -n "$NESTED_HOST" ] && arm "fsg-cd" "$PROJ"; then
   fi
 else
   check "F18 arm a ticket-bound chain for a cd into a nested worktree" FAIL
+fi
+
+echo "== A chain bound to an Autopilot run that drives a worktree below the anchor =="
+source "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+APPROVED_SHA="$(printf 'a%.0s' $(seq 1 64))"
+WSTEM="2026-01-01-0202_build-bound-worktree"
+BOUND="$WORK/bound"
+mkdir -p "$BOUND"
+git -C "$BOUND" init -q
+git -C "$BOUND" config user.email t@example.invalid
+git -C "$BOUND" config user.name tester
+printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$BOUND/.gitignore"
+printf 'baseline\n' > "$BOUND/tracked.txt"
+git -C "$BOUND" add .gitignore tracked.txt
+git -C "$BOUND" -c commit.gpgsign=false commit -qm baseline
+git -C "$BOUND" worktree add -q "$BOUND/.claude/worktrees/wt" -b wt-bound 2>/dev/null
+BWT="$(cd -P "$BOUND/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
+BOUND_HOST="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$BOUND" 2>/dev/null)"
+bound_arm_wt() {
+  local sid="$1" run="$2" chain="$3" rp
+  export CLAUDE_PROJECT_DIR="$BOUND"
+  cd "$BOUND" || return 1
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$BOUND" false true "$BWT" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" "plan-$run" PLAN_APPROVED "{\"approvedPlanSha256\":\"$APPROVED_SHA\"}" "$BOUND" >/dev/null 2>&1 || return 1
+  bash "$LOG" --tdd-begin --session "$sid" --autopilot-run "$run" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
+  mkdir -p "$BOUND/.zensu/plans" "$BOUND/.zensu/logs"
+  printf '# Fixture plan\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | the worktree file changed | spec |\n' \
+    > "$BOUND/.zensu/plans/$WSTEM.md"
+  printf 'S1 IMPL completed — files: tracked.txt\n' > "$BOUND/.zensu/logs/$WSTEM.log"
+  rp="$(tdd_edit_landing_receipt "$sid")" || return 1
+  mkdir -p "$(dirname "$rp")"
+  printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true,"workTree":".claude/worktrees/wt"}\n' \
+    "$sid" "$WSTEM" > "$rp"
+  bash "$LOG" --tdd-complete --session "$sid" --plan "$BOUND/.zensu/plans/$WSTEM.md" --autopilot-run "$run" \
+    --autopilot-attempt 1 --chain-id "$chain" >/dev/null 2>"$WORK/complete.err" || return 1
+  SF="$(tdd_state_file "$sid")"
+}
+bound_done_wt() {
+  bash "$LOG" --chain-done --session fsg-bound-wt --autopilot-run fsg_run --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id fsg-chain --outcome pass >"$WORK/out" 2>"$WORK/err"
+}
+printf 'changed in the worktree\n' > "$BWT/tracked.txt"
+if [ -n "$BWT" ] && [ -n "$BOUND_HOST" ] && bound_arm_wt fsg-bound-wt fsg_run fsg-chain; then
+  run_full --cmd "cd '$BOUND_HOST' && true"
+  bound_done_wt; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree of the project and \.claude/worktrees/wt (record er1_[0-9_a-f]*); ' "$WORK/err"; then
+    check "F20 for a bound chain a green run that measured only the anchor reads stale, because the terminus measures the run's worktree" PASS
+  else
+    check "F20 for a bound chain a run that measured only the anchor reads stale (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+
+  bash "$LOG" --evidence-run --scope full --cmd 'pwd -P' >"$WORK/bound-full.out" 2>"$WORK/bound-full.err"; RC_RUN=$?
+  printf 'edited again in the worktree\n' > "$BWT/tracked.txt"
+  bound_done_wt; RC=$?
+  if [ "$RC_RUN" -eq 0 ] && grep -qxF "$BWT" "$WORK/bound-full.out" \
+    && grep -qF "so the command runs in $BWT" "$WORK/bound-full.err" \
+    && [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree of the project and \.claude/worktrees/wt (record er1_[0-9_a-f]*); files changed since: \.claude/worktrees/wt/tracked\.txt | ' "$WORK/err"; then
+    check "F21 a run from the anchor runs in the worktree, and an edit there makes it stale with the worktree path listed" PASS
+  else
+    check "F21 a run from the anchor runs in the worktree and an edit there makes it stale (run=$RC_RUN rc=$RC)" FAIL
+    cat "$WORK/bound-full.out" "$WORK/bound-full.err"
+    ERR
+  fi
+
+  BOUND_RUN_FILE="$(autopilot_run_file fsg_run "$BOUND")"
+  cp "$BOUND_RUN_FILE" "$WORK/fsg-run.pre"
+  BAD_WS="$BOUND" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS + "/missing-worktree"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$BOUND_RUN_FILE"
+  bound_done_wt; RC=$?
+  cp "$WORK/fsg-run.pre" "$BOUND_RUN_FILE"
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -q '^FULL SUITE — unavailable | the work tree of this Autopilot-bound chain could not be resolved (.*), so no run can be bound to it | cmd: none recorded | gate: required$' "$WORK/err"; then
+    check "F22 a bound chain whose worktree cannot be resolved is refused as unavailable and stays open" PASS
+  else
+    check "F22 a bound chain whose worktree cannot be resolved is refused as unavailable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+
+  run_full --cmd 'pwd -P' --if-stale
+  bound_done_wt; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] \
+    && grep -q '^FULL SUITE — pass | exit 0 on the current tree [0-9a-f]\{12\} of the project and \.claude/worktrees/wt (record er1_' "$WORK/err"; then
+    check "F23 --if-stale re-runs the suite in the worktree and the bound terminus then closes on it" PASS
+  else
+    check "F23 --if-stale re-runs the suite in the worktree and the bound terminus closes (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "F20 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL
+  cat "$WORK/complete.err" 2>/dev/null
 fi
 
 GATES_DOC="$PLUGIN_DIR/docs/gates.md"
