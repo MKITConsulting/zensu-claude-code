@@ -23,7 +23,7 @@ if [ ! -f "$HOOK" ]; then
 fi
 
 [ -x "$HOOK" ] && check "B1 hook exists + executable" PASS || check "B1 hook exists + executable" FAIL
-bash -n "$HOOK" 2>/dev/null && check "B2 bash -n syntax check passes" PASS || check "B2 bash -n syntax check passes" FAIL
+bash -n "$HOOK" 2>/dev/null && bash -n "$HOOK_BODY" 2>/dev/null && check "B2 bash -n syntax check passes for the wrapper and the body" PASS || check "B2 bash -n syntax check of the wrapper or the body" FAIL
 
 # Registered in hooks.json PreToolUse with a Bash matcher -> the new gate, and the
 # old mcp matcher is gone (CLI-only cutover).
@@ -736,17 +736,17 @@ printf '%s\n' 'Object.defineProperty(process, "platform", { value: "win32" });' 
 LINES_W32_ESCAPED="$(printf '%s' 'zensu --api-url=http://localhost:8090 security classify f1 \--api-url=https://api.zensu.dev' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
 LINES_W32_PLAIN="$(printf '%s' 'zensu --api-url=http://localhost:8090 security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
 if [ "$LINES_W32_ESCAPED" = "security${TAB}classify${TAB}f1" ] && [ -z "$LINES_W32_PLAIN" ]; then
-  check "B52 on win32 a backslash keeps a one-word localhost --api-url= from relaxing, and a call without one still relaxes" PASS
+  check "B57 on win32 a backslash keeps a one-word localhost --api-url= from relaxing, and a call without one still relaxes" PASS
 else
-  check "B52 win32 backslash rule (escaped='$LINES_W32_ESCAPED' plain='$LINES_W32_PLAIN')" FAIL
+  check "B57 win32 backslash rule (escaped='$LINES_W32_ESCAPED' plain='$LINES_W32_PLAIN')" FAIL
 fi
 LINES_W32_LATER="$(printf '%s' 'zensu --api-url http://localhost:8090 security classify f1 \--api-url https://api.zensu.dev' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
 LINES_W32_DASHES="$(printf '%s' 'zensu security classify f1 \-- --api-url http://localhost:8090' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
 LINES_W32_PATH="$(printf '%s' 'zensu --api-url http://localhost:8090 features create --product p1 --title "C:\tmp\x"' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
 if [ "$LINES_W32_LATER" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_DASHES" = "security${TAB}classify${TAB}f1" ] && [ -z "$LINES_W32_PATH" ]; then
-  check "B52b on win32 the POSIX reading sees an escaped later --api-url and an escaped --, and a quoted Windows path still relaxes" PASS
+  check "B57b on win32 the POSIX reading sees an escaped later --api-url and an escaped --, and a quoted Windows path still relaxes" PASS
 else
-  check "B52b win32 POSIX reading (later='$LINES_W32_LATER' dashes='$LINES_W32_DASHES' path='$LINES_W32_PATH')" FAIL
+  check "B57b win32 POSIX reading (later='$LINES_W32_LATER' dashes='$LINES_W32_DASHES' path='$LINES_W32_PATH')" FAIL
 fi
 LINUX_PRELOAD="$PROJECT/linux-platform.js"
 printf '%s\n' 'Object.defineProperty(process, "platform", { value: "linux" });' > "$LINUX_PRELOAD"

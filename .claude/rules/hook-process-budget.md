@@ -83,7 +83,8 @@ against Windows executables.
   runs and is a hand copy of the early exit at the top of that body's inline script (`NAMED` over
   `candidates`, `.claude/rules/cli-command-classification.md`): a narrower copy lets a call
   spelled `ZENSU`, `zen""su` or across a line continuation through with no check at all. The
-  unit file holds all three.
+  unit file holds all three, and it compares `zensuNamed` over a generated corpus with the early
+  exit it reads out of the body by its `joinLines` and `candidates` lines.
 - **Entry points stay.** Each old `hooks/<name>.sh` is a wrapper that runs
   `hook-dispatch-v1.js <pre|post> --only <check>` through `hooks/lib/zensu-hook-dispatch.sh`,
   which runs the named check whatever its matcher and reproduces the old hook's output and exit

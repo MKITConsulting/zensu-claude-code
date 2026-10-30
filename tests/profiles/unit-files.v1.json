@@ -82,7 +82,7 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 13,
+      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 14,
       "runs": [{ "driver": "tests/structure/test-hook-process-budget.sh" }],
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },

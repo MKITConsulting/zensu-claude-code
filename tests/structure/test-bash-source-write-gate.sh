@@ -26,7 +26,7 @@ fi
 
 # ── Structure pins ───────────────────────────────────────────────────
 [ -x "$HOOK" ] && check "W1 hook exists + executable" PASS || check "W1 hook exists + executable" FAIL
-bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 hook bash -n syntax" FAIL
+bash -n "$HOOK" 2>/dev/null && bash -n "$HOOK_BODY" 2>/dev/null && check "W2 hook bash -n syntax for the wrapper and the body" PASS || check "W2 hook bash -n syntax of the wrapper or the body" FAIL
 { [ -f "$PARSER" ] && node --check "$PARSER" 2>/dev/null; } \
   && check "W3 parser exists + node --check" PASS || check "W3 parser exists + node --check" FAIL
 
