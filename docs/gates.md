@@ -286,13 +286,66 @@ reading finds a rebind or a removal, so a spelling the word reader gets wrong is
 wherever the earlier reading refused it. `tests/structure/test-bash-source-write-gate.sh` pins each
 spelling (W265, W74 and W267 to W381).
 
+**Assignments by other means.** A third reading walks each command the way the shell reads it: it
+keeps quotes, `$'…'` and `$"…"` whole, starts a comment only where a word starts, also inside
+`[[ … ]]` and an array literal, follows heredocs, `case` patterns, `[[ … ]]` with its regex and
+extended-pattern operands, and `(( … ))`, also when a reserved word such as `if`, `while` or `in` is
+written directly before the parenthesis, and enters every command substitution, also one inside
+double quotes, in the body of a heredoc whose delimiter is unquoted or in bash 5.3's `${ …; }`. It
+takes a reserved word only where the shell does: `time` with one `-p` and one `--` only at the
+start of a pipeline, a compound command after `coproc NAME`, `then`, `do` or `}` right after
+`[[ … ]]`, and neither `[[` nor `case` after a leading redirection or inside a `case` pattern. It
+reads the command a second time with its line continuations joined, the way the shell's input
+reader joins them before it reads a word or a heredoc delimiter: outside single quotes and comments,
+not in a quoted-delimiter heredoc body, and in an unquoted body before it compares a line with the
+delimiter. It judges each command it
+finds there and refuses a protected input that a builtin, an arithmetic context or an expansion
+assigns: the name operand of `getopts`, `mapfile`/`readarray`, `wait -p`, `coproc NAME`, `printf -v`
+and zsh's `print -v` in any option cluster, a name attached to its option as in `wait -pNAME`,
+`read -raNAME` or zsh's `set -ANAME`, zsh's `set -A`/`set +A`, `integer`, `float`, `vared`, `getln`
+and `read 'NAME?prompt'`, zsh's `typeset -T` tie, a `typeset -i`, `-E`, `-F` or case and width
+option that converts a protected value, an assignment word or wrapper in the simple command after
+`coproc`, bash 5.3's `compgen -V` and zsh's `unset -m` pattern that matches a protected input; an
+arithmetic assignment (`=`, a compound `op=`, `++`, `--`) in `let`, `(( … ))`, `for (( … ))`,
+`$(( … ))`, `$[ … ]`, any operand of `-eq` and its siblings in `[[ … ]]`, also after `&&` or `||`
+and inside a group, zsh's `repeat`, `shift`, `return`, `break` and `continue` operands, and a
+subscript, nested or holding blanks, of an assignment word, a declaration operand, an array-literal
+element such as `a=([i]=v)`, a name operand, the `-v` operand of `[[`, `[` and `test`, zsh's
+brace-less `$NAME[…]` or a `${…}` expansion; the offset of a `${…}`
+expansion, `$0` and `$@` included; and the expansions `${NAME=…}`, `${NAME:=…}` and zsh's
+`${NAME::=…}`, also behind zsh's flags and its `=`, `~`, `^` and `+` modifiers. Every nameref
+(`declare -n`, `typeset -n`, `local -n`) is refused, because the check cannot follow it to the
+variable it names, and so is a name built at run time where that spelling has no common use: an
+`env -S` string whose `${VAR}` reaches `env` (single-quoted or escaped) in an option, assignment
+or command position, an arithmetic lvalue such as `$N = 1`, zsh's `${(P)…}` assignment, an option
+the shell builds at run time in front of a protected name (`declare $o r=NAME`) and an `unset -m`
+pattern this check cannot translate. A heredoc body is read as the shell expands
+it, with its line continuations removed, and a `$((` that does not close with `))` is read as the
+command substitution the shell makes of it. Text inside single quotes, a comment or a
+quoted-delimiter heredoc stays unread, and these refusals apply only to commands this reading
+finds, so quoted text that merely names `declare -n` or `mapfile`, a commit message for example,
+stays allowed; the word reader and the whitespace reading above keep only the refusals they had
+before. A `<<` inside `${…}` or `$[…]` no longer starts a heredoc and a `$"…"` delimiter ends where
+the shell ends it, so no reading drops the lines after them. A command nested more than 64 levels
+deep, or one whose reading would exceed a work bound proportional to its length, is refused with
+its own reason. W382 to W551 pin each spelling and the commands that stay allowed.
+
 **What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
 differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and
 `-`; where the Bash tool runs zsh, the gate still reads those spellings the bash way, so they pass.
-A program word the shell builds at run time (`$GIT`, `$(…)`), an alias or a function, a builtin
-that assigns a variable by other means (`let`, `getopts`, `mapfile`, `wait -p`, `coproc NAME`, a
-nameref, arithmetic), a wrapper outside the list (`timeout`, `xargs`, `stdbuf`) and a `;`, `&` or
-`|` inside quotes, which still splits the command, are not followed either.
+A variable name the shell builds at run time in a builtin or wrapper operand (`export "$N=…"`,
+`export $(cat .env | xargs)`, `unset "$v"`) stays allowed, because loading an environment file that
+way is common and `source` reaches the same assignments. A program word the shell builds at run
+time (`$GIT`, `$(…)`), an alias or a function, code the shell builds or stores to run later
+(`eval`, `trap`, `bash -c`, `source`, a script file, a `mapfile -C` callback), arithmetic that
+reaches a name through another variable's value (`x='NAME=1'; (( x ))`) or an integer attribute
+(`declare -i`), zsh's numeric `printf` arguments and module builtins (`zparseopts`, `strftime -s`,
+`zstat -A`) and a wrapper outside the list (`timeout`, `xargs`, `stdbuf`) are not followed either.
+The third reading is a hand-written approximation of the shell grammar, and a construct it misreads
+can hide the commands after it, so a spelling outside the pinned rows may still pass. The word
+reader and the whitespace reading still split
+a command at a `;`, `&` or `|` inside quotes, so quoted text that spells a protected assignment can
+be refused there.
 
 **While the gate is enabled, the expected *legitimate* hit of rule (C) is a cross-worktree takeover.**
 At its default (off) nothing on this page refuses the commit or a `git worktree move` out of a

@@ -57,6 +57,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/gates.md` §"Source-Write Gate" lists what the reader still leaves alone. The program-name
   reading moved into `programName` in `hooks/lib/claude-path-v1.js`, with the fold policy as a
   parameter.
+- **Session Control assignments by other means**: the Session Control check of
+  `hooks/pre-bash-source-write-gate.sh`, which runs whatever `hooks.bashWriteGate` says, now refuses
+  a protected input that a builtin, arithmetic or an expansion assigns, where it let each of these
+  through before: `getopts`, `mapfile`/`readarray`, `wait -p`, `coproc NAME`, zsh's `print -v`,
+  `set -A`, `integer`, `float`, `vared`, `getln` and `read 'NAME?prompt'`, and a name attached to
+  its option as in `wait -pNAME`, `read -aNAME` or zsh's `set -ANAME`; zsh's `typeset -T` tie, a
+  `typeset -i`, `-E`, `-F` or other option that converts a protected value, zsh's `unset -m`
+  pattern, bash 5.3's `compgen -V` and an assignment in the simple command after `coproc`; `let`,
+  `(( … ))`, `for (( … ))`, `$(( … ))`, `$[ … ]`, any operand of `-eq` and its siblings in
+  `[[ … ]]`, zsh's `repeat`, `shift`, `return`, `break` and `continue` operands, an array
+  subscript, nested or holding blanks, an array-literal element such as `a=([i]=v)`, the subscript
+  of a `-v NAME[…]` operand of `[[`, `[` and `test`, and zsh's brace-less `$NAME[…]`; the offset of
+  `${…}`, `$0` and `$@` included; and `${NAME=…}`, `${NAME:=…}` and zsh's `${NAME::=…}`, also
+  behind zsh's flags and modifiers. It refuses every nameref (`declare -n`, `typeset -n`,
+  `local -n`), an `env -S` string whose `${VAR}` reaches `env` unexpanded and builds a name, an
+  arithmetic lvalue such as `$N = 1`, zsh's `${(P)…}` assignment and an option built at run time
+  in front of a protected name (`declare $o NAME`), and it now reads the body of a heredoc whose
+  delimiter is unquoted and bash 5.3's `${ …; }`, where a `$(…)` or backtick command runs and an
+  expansion assigns. These refusals come from a new reading that follows the
+  shell's grammar: quoted text that only names a builtin, such as a commit message about
+  `declare -n`, stays allowed, and so do single-quoted text, a comment, a quoted-delimiter heredoc
+  body and a name the shell builds in a builtin operand, as in `export $(cat .env | xargs)` or
+  `unset "$v"`. A `<<` inside `${…}` or `$[…]` and a `$"…"` heredoc delimiter no longer hide the
+  lines after them, and a command nested more than 64 levels deep, or one whose reading would
+  exceed a work bound proportional to its length, is refused with its own reason. The reading also
+  follows `if((`, `while((`, `for((`, `if(` and `in(` written without a blank, `time`, `time -p`,
+  `time --` and `coproc` before a command, `time` as the keyword only at the start of a pipeline,
+  a compound command after `coproc NAME`, `esac` as a pattern word after `|`, a regex or
+  extended-pattern operand of `[[ … ]]`, `then`, `do` or `}` right after `]]`, a comment inside
+  `[[ … ]]` or an array literal, a line continuation after `$` or inside a heredoc delimiter or
+  delimiter line but not inside a comment or a quoted-delimiter heredoc body, and a heredoc
+  delimiter holding a no-break space; it opens no `[[` or `case` after a leading redirection or
+  inside a `case` pattern.
+  A command that used one of these spellings to pass is now refused; `docs/gates.md`
+  §"Source-Write Gate" lists what the check still leaves alone.
 - **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
   `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
   root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks

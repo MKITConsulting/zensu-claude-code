@@ -653,10 +653,10 @@ test("commandWords skips reserved words, the time keyword and assignment words b
   assert.strictEqual(read("\\command cd /tmp").inShell, true);
   assert.strictEqual(read("env cd /tmp").inShell, false);
   assert.deepStrictEqual(read("A=1 B+=2 C[0]=3 D=\"x y\" cmd").leading, [
-    { name: "A", plain: true, value: "1" },
-    { name: "B", plain: false, value: "2" },
-    { name: "C", plain: false, value: "3" },
-    { name: "D", plain: true, value: "x y" }
+    { name: "A", plain: true, value: "1", subscript: "" },
+    { name: "B", plain: false, value: "2", subscript: "" },
+    { name: "C", plain: false, value: "3", subscript: "0" },
+    { name: "D", plain: true, value: "x y", subscript: "" }
   ]);
   assert.strictEqual(read("\"A=1\" cmd").word, "A=1");
   assert.deepStrictEqual(read("\"A=1\" cmd").leading, []);

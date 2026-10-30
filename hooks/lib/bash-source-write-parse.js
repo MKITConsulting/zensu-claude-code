@@ -562,27 +562,33 @@ function scanLine(line, quote, edge) {
 
 function heredocWord(line, start) {
   let value = "";
+  let quoted = false;
   let k = start;
-  while (k < line.length && !/[\s;&|()<>]/.test(line[k])) {
+  while (k < line.length && !/[ \t\n;&|()<>]/.test(line[k])) {
     const c = line[k];
     if (c === "\\") {
       value += line[k + 1] || "";
       k += 2;
+      quoted = true;
     } else if (c === "$" && line[k + 1] === "'") {
       const decoded = ansiC(line, k + 2);
       value += decoded.value;
       k = decoded.end + 1;
+      quoted = true;
+    } else if (c === "$" && line[k + 1] === "\"") {
+      k++;
     } else if (c === "'" || c === "\"") {
       const close = line.indexOf(c, k + 1);
       const end = close === -1 ? line.length : close;
       value += line.slice(k + 1, end);
       k = end + 1;
+      quoted = true;
     } else {
       value += c;
       k++;
     }
   }
-  return { value, end: Math.min(k, line.length) };
+  return { value, end: Math.min(k, line.length), quoted };
 }
 
 function heredocDelimiters(line) {
@@ -618,6 +624,12 @@ function heredocDelimiters(line) {
       continue;
     }
     if (c === "#" && boundary) break;
+    if (c === "$" && (line[k + 1] === "{" || line[k + 1] === "[")) {
+      k = (line[k + 1] === "{" ? braceEnd(line, k, false, false) : bracketEnd(line, k + 1)) - 1;
+      boundary = false;
+      dollar = false;
+      continue;
+    }
     if (line.startsWith("((", k)) {
       depth++;
       k++;
@@ -634,7 +646,7 @@ function heredocDelimiters(line) {
       if (tabs) j++;
       while (line[j] === " " || line[j] === "\t") j++;
       const word = heredocWord(line, j);
-      if (word.end > j) docs.push({ delim: word.value, tabs });
+      if (word.end > j) docs.push({ delim: word.value, tabs, quoted: word.quoted });
       k = Math.max(word.end, j) - 1;
       boundary = false;
       dollar = false;
@@ -657,7 +669,20 @@ function skipHeredocs(lines, i, docs) {
   return next;
 }
 
-function logicalText(text, skipBodies) {
+function keepHeredocs(lines, i, docs, out) {
+  let next = i;
+  for (const doc of docs) {
+    while (next < lines.length) {
+      let line = lines[next++];
+      while (!doc.quoted && /(?:^|[^\\])(?:\\\\)*\\$/.test(line) && next < lines.length) line = line.slice(0, -1) + lines[next++];
+      out.push(line);
+      if ((doc.tabs ? line.replace(/^\t+/, "") : line) === doc.delim) break;
+    }
+  }
+  return next;
+}
+
+function logicalText(text, skipBodies, keepBodies) {
   const lines = text.split("\n");
   const out = [];
   let i = 0;
@@ -686,12 +711,17 @@ function logicalText(text, skipBodies) {
     const logical = parts.join("");
     out.push(logical);
     if (skipBodies) i = skipHeredocs(lines, i, heredocDelimiters(logical));
+    else if (keepBodies) i = keepHeredocs(lines, i, heredocDelimiters(logical), out);
   }
   return out.join("\n");
 }
 
 function joinContinuations(text) {
   return logicalText(text, false);
+}
+
+function joinedText(text) {
+  return logicalText(text, false, true);
 }
 
 function commandText(cmd) {
@@ -729,7 +759,7 @@ function envSplit(text) {
   let value = null;
   let quote = "";
   const finish = () => {
-    if (value !== null) words.push({ raw: value, value });
+    if (value !== null) words.push({ raw: value, value, split: true });
     value = null;
   };
   for (let k = 0; k < text.length; k++) {
@@ -776,12 +806,15 @@ function envSplit(text) {
 function wrapperArguments(name, words, start, out) {
   const spec = WRAPPER_OPTIONS[name];
   if (!spec) return start;
-  const apply = (key, value, at) => {
+  const apply = (key, value, at, source) => {
     const kind = Object.prototype.hasOwnProperty.call(spec.effects, key) ? spec.effects[key] : "";
     if (kind === "clear") out.ops.push({ kind });
     else if (value === undefined) return;
     else if (kind === "unset" || kind === "chdir") out.ops.push({ kind, name: value });
-    else if (kind === "split" && out.splits++ < MAX_SPLITS) words.splice(at, 0, ...envSplit(value));
+    else if (kind === "split" && out.splits++ < MAX_SPLITS) {
+      const literal = Boolean(source && (source.split || /['\\]/.test(source.raw)));
+      words.splice(at, 0, ...envSplit(value).map((w) => Object.assign(w, { literal })));
+    }
     else if (kind === "split") out.overflow = true;
   };
   let i = start;
@@ -807,46 +840,52 @@ function wrapperArguments(name, words, start, out) {
       const eq = word.indexOf("=");
       const key = longOption(spec.long, eq === -1 ? word.slice(2) : word.slice(2, eq));
       let value = eq === -1 ? undefined : word.slice(eq + 1);
+      let source = words[i];
       if (key !== null && spec.long[key] === 1 && value === undefined && i + 1 < words.length) {
         value = words[i + 1].value;
+        source = words[i + 1];
         used = 2;
       }
-      if (key !== null) found.push([key, value]);
+      if (key !== null) found.push([key, value, source]);
     } else {
       for (let k = 1; k < word.length; k++) {
         const letter = word[k];
         if (spec.operands.indexOf(letter) !== -1 || (spec.optional.indexOf(letter) !== -1 && k + 1 < word.length)) {
           let value = word.slice(k + 1);
+          let source = words[i];
           if (value === "" && i + 1 < words.length) {
             value = words[i + 1].value;
+            source = words[i + 1];
             used = 2;
           }
-          found.push([letter, value === "" ? undefined : value]);
+          found.push([letter, value === "" ? undefined : value, source]);
           break;
         }
         found.push([letter, undefined]);
       }
     }
     i += used;
-    for (const [key, value] of found) apply(key, value, i);
+    for (const [key, value, source] of found) apply(key, value, i, source);
   }
   while (i < words.length && words[i].value.indexOf("=") > 0) {
     const value = words[i].value;
     out.ops.push({ kind: "set", name: value.slice(0, value.indexOf("=")), value: value.slice(value.indexOf("=") + 1) });
     i++;
   }
+  const named = (value) => value[0] === "-" || value.indexOf("=") <= 0 ? value : value.slice(0, value.indexOf("="));
+  if (words.slice(start, i + 1).some((w) => w.split && w.literal && named(w.value).indexOf("${") !== -1)) out.dynamic = true;
   return i;
 }
 
 function commandWords(segment) {
   const words = segment.slice();
-  const out = { words, index: 0, word: "", leading: [], ops: [], inShell: true, splits: 0, overflow: false };
+  const out = { words, index: 0, word: "", leading: [], ops: [], inShell: true, splits: 0, overflow: false, dynamic: false };
   let i = 0;
   for (;;) {
     while (i < words.length && RESERVED_WORDS.has(words[i].raw)) i++;
     if (i < words.length && words[i].raw === "time") {
       i++;
-      while (i < words.length && words[i].raw === "-p") i++;
+      while (i < words.length && (words[i].raw === "-p" || words[i].raw === "--")) i++;
       continue;
     }
     break;
@@ -855,7 +894,7 @@ function commandWords(segment) {
     const m = SHELL_ASSIGNMENT.exec(words[i].raw);
     if (!m) break;
     const value = segmentWords(words[i].raw.slice(m[0].length)).map((w) => w.value).join("");
-    out.leading.push({ name: m[1], plain: !m[2] && !m[3], value });
+    out.leading.push({ name: m[1], plain: !m[2] && !m[3], value, subscript: m[2] ? m[2].slice(1, -1) : "" });
     i++;
   }
   while (i < words.length && WRAP.has(programName(words[i].value))) {
@@ -1217,10 +1256,19 @@ function detectControlMutation(cmd) {
     return "Blocked a Bash write to CLAUDE_ENV_FILE. Model commands must not alter the environment inherited by later Claude Code Bash calls.";
   }
 
-  const found = readControlMutation(cmd) || wordSplitControlMutation(cmd);
+  const found = controlFinding(cmd);
   if (!found) return "";
   if (found.kind === "unread") {
     return "Blocked a Bash command with more than " + MAX_SPLITS + " env -S split strings, which this check does not read. Write the command without nesting env -S.";
+  }
+  if (found.kind === "dynamic") {
+    return "Blocked a Bash command that builds the name of a variable it assigns or removes at run time, which this check cannot read. Write the variable name literally.";
+  }
+  if (found.kind === "nameref") {
+    return "Blocked a Bash nameref declaration, which this check cannot follow to the variable it names. Assign the variable by its literal name instead.";
+  }
+  if (found.kind === "deep") {
+    return "Blocked a Bash command nested deeper than this check reads. Write the command with fewer nested substitutions.";
   }
   return found.kind === "removal"
     ? "Blocked removal of protected Session Control input " + found.name + ". Start a fresh Claude Code session instead."
@@ -1241,7 +1289,7 @@ function readControlMutation(cmd) {
     if (read.index >= read.words.length) continue;
     const cmd0 = read.word.split("/").pop();
     const args = read.words.slice(read.index + 1).map((w) => w.value);
-    const found = builtinControlMutation(cmd0, args, bindingFromAssignment);
+    const found = baseControlMutation(cmd0, args, bindingFromAssignment);
     if (found) return found;
   }
   return null;
@@ -1270,13 +1318,13 @@ function wordSplitControlMutation(cmd) {
       if (assignments()) return { kind: "rebind", name };
     }
     if (i >= toks.length) continue;
-    const found = builtinControlMutation(unquote(toks[i]).split("/").pop(), toks.slice(i + 1).map(unquote), plainBinding);
+    const found = baseControlMutation(unquote(toks[i]).split("/").pop(), toks.slice(i + 1).map(unquote), plainBinding);
     if (found) return found;
   }
   return null;
 }
 
-function builtinControlMutation(cmd0, args, binding) {
+function baseControlMutation(cmd0, args, binding) {
   if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
     for (const arg of args) {
       const name = binding(arg);
@@ -1312,9 +1360,856 @@ function builtinControlMutation(cmd0, args, binding) {
   return null;
 }
 
+function builtinControlMutation(cmd0, args) {
+  const base = baseControlMutation(cmd0, args, bindingFromAssignment);
+  if (base) return base;
+  if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
+    if (["declare", "typeset", "local"].includes(cmd0) && args.some((a) => /^-[A-Za-z]*n/.test(a))) {
+      return { kind: "nameref", name: "" };
+    }
+    const found = args.map(subscriptFinding).find(Boolean);
+    if (found) return found;
+    const converts = ["declare", "typeset", "local"].includes(cmd0) && args.some((a) => /^-[A-Za-z0-9]*[TiEFluLRZ]/.test(a));
+    const name = converts ? args.filter((a) => !/^[-+]/.test(a)).map(protectedName).find(Boolean) : "";
+    if (name) return { kind: "rebind", name };
+  }
+  if (OPTION_BUILTINS.has(cmd0)) {
+    let built = false;
+    for (let k = 0; k < args.length && /^[-+$`]/.test(args[k]); k++) built = built || /[$`]/.test(args[k]);
+    if (built && args.some((a) => protectedName(a) || protectedName(a.slice(a.indexOf("=") + 1)))) return { kind: "dynamic", name: "" };
+  }
+  const operands = (list, kind) => list.map((arg) => operandFinding(arg, kind)).find(Boolean) || null;
+  if (cmd0 === "integer" || cmd0 === "float") {
+    const found = operands(args.filter((a) => !/^[-+]/.test(a)).map((a) => a.replace(/=[\s\S]*$/, "")), "rebind");
+    if (found) return found;
+  }
+  if (cmd0 === "unset") {
+    const found = args.some((a) => /^-[A-Za-z]*m/.test(a))
+      ? args.filter((a) => !/^-/.test(a)).map(patternFinding).find(Boolean)
+      : operands(args, "removal");
+    if (found) return found;
+  }
+  if (cmd0 === "test" || cmd0 === "[") {
+    for (let k = 0; k + 1 < args.length; k++) {
+      const found = args[k] === "-v" ? subscriptFinding(args[k + 1]) : null;
+      if (found) return found;
+    }
+  }
+  const nameOption = cmd0 === "printf" || cmd0 === "print" ? "v" : cmd0 === "wait" ? "p" : cmd0 === "read" ? "a" : cmd0 === "compgen" ? "V" : "";
+  if (nameOption) {
+    const option = new RegExp("^-[A-Za-z]*?" + nameOption + "([\\s\\S]*)$");
+    for (let k = 0; k < args.length; k++) {
+      const m = option.exec(args[k]);
+      const found = m ? operandFinding(m[1] || args[k + 1] || "", cmd0 === "compgen" ? "removal" : "rebind") : null;
+      if (found) return found;
+    }
+  }
+  if (cmd0 === "set") {
+    for (let k = 0; k < args.length; k++) {
+      const m = /^[-+][A-Za-z]*?A([\s\S]*)$/.exec(args[k]);
+      const found = m ? operandFinding(m[1] || args[k + 1] || "", "rebind") : null;
+      if (found) return found;
+    }
+  }
+  if (["read", "getopts", "mapfile", "readarray", "wait", "vared", "getln"].includes(cmd0)) {
+    const found = operands(cmd0 === "read" ? args.map((a) => a.replace(/\?[\s\S]*$/, "")) : args, "rebind");
+    if (found) return found;
+  }
+  if (["let", "repeat", "shift", "return", "break", "continue"].includes(cmd0)) {
+    const found = args.map((a) => arithmeticFinding(a)).find(Boolean);
+    if (found) return found;
+  }
+  return null;
+}
+
+function patternFinding(pattern) {
+  let source = "";
+  for (let k = 0; k < pattern.length; k++) {
+    const c = pattern[k];
+    if (c === "*") source += "[\\s\\S]*";
+    else if (c === "?") source += "[\\s\\S]";
+    else if (c === "(" || c === ")" || c === "|") source += c === "(" ? "(?:" : c;
+    else if (c === "[") {
+      const close = pattern.indexOf("]", k + 2);
+      if (close === -1) return { kind: "dynamic", name: "" };
+      source += "[" + pattern.slice(k + 1, close).replace(/^[!^]/, "^").replace(/\\/g, "\\\\") + "]";
+      k = close;
+    } else if (/[A-Za-z0-9_]/.test(c)) source += c;
+    else return { kind: "dynamic", name: "" };
+  }
+  let matcher;
+  try {
+    matcher = new RegExp("^(?:" + source + ")$");
+  } catch (_) {
+    return { kind: "dynamic", name: "" };
+  }
+  const name = Array.from(CONTROL_BINDINGS).find((binding) => matcher.test(binding));
+  return name ? { kind: "removal", name } : null;
+}
+
 function protectedName(arg) {
   const name = arg.replace(/\[.*$/, "");
   return CONTROL_BINDINGS.has(name) ? name : "";
+}
+
+function subscriptFinding(operand) {
+  const m = /^[A-Za-z_][A-Za-z0-9_]*\[([^\]]*)\]/.exec(operand);
+  return m ? arithmeticFinding(m[1]) : null;
+}
+
+function operandFinding(operand, kind) {
+  const name = protectedName(operand);
+  return name ? { kind, name } : subscriptFinding(operand);
+}
+
+const ARITH_OPERATOR = /\s*(?:(?:\*\*|<<|>>|&&|\|\||\^\^|[-+*/%&^|])?=(?!=)|\+\+|--)/y;
+
+function arithmeticReference(text, k) {
+  if (text[k] === "`") {
+    const close = text.indexOf("`", k + 1);
+    return close === -1 ? text.length : close + 1;
+  }
+  const open = text[k + 1];
+  if (open === "{" || open === "(") {
+    let depth = 0;
+    for (let j = k + 1; j < text.length; j++) {
+      if (text[j] === open) depth++;
+      else if (text[j] === (open === "{" ? "}" : ")") && --depth === 0) return j + 1;
+    }
+    return text.length;
+  }
+  PARAMETER_REFERENCE.lastIndex = k + 1;
+  const m = PARAMETER_REFERENCE.exec(text);
+  return k + 1 + (m ? m[0].length : 0);
+}
+
+function arithmeticFinding(expr, depth = 0) {
+  if (depth > MAX_NESTING) return { kind: "deep", name: "" };
+  const text = expr.replace(/["']/g, "");
+  const end = bracketPairs(text);
+  for (let k = 0; k < text.length;) {
+    const start = k;
+    let name = "";
+    if (/[A-Za-z_]/.test(text[k]) && !/[A-Za-z0-9_$]/.test(text[k - 1] || "")) {
+      while (k < text.length && /[A-Za-z0-9_]/.test(text[k])) k++;
+      name = text.slice(start, k);
+    } else if (text[k] === "$" || text[k] === "`") {
+      k = arithmeticReference(text, k);
+    } else {
+      k++;
+      continue;
+    }
+    let open = k;
+    while (/\s/.test(text[open] || "")) open++;
+    const close = text[open] === "[" ? end(open) : k;
+    let before = start - 1;
+    while (before > 0 && /\s/.test(text[before])) before--;
+    ARITH_OPERATOR.lastIndex = close;
+    if (ARITH_OPERATOR.test(text) || (before > 0 && /^(?:\+\+|--)$/.test(text.slice(before - 1, before + 1)))) {
+      if (!name) return { kind: "dynamic", name: "" };
+      if (CONTROL_BINDINGS.has(name)) return { kind: "rebind", name };
+    }
+    const inner = close > k ? arithmeticFinding(text.slice(open + 1, Math.max(open + 1, close - 1)), depth + 1) : null;
+    if (inner) return inner;
+    k = close;
+  }
+  return null;
+}
+
+const MAX_NESTING = 64;
+const PAREN_HEADS = new Set("! if then else elif do while until for time coproc".split(" "));
+const COPROC_BODIES = new Set("case if while until for select".split(" "));
+const OPTION_BUILTINS = new Set("export readonly declare typeset local printf print wait set compgen read".split(" "));
+const PARAMETER_REFERENCE = /[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-]/y;
+const DECLARATION_WORDS = new Set("export readonly declare typeset local integer float".split(" "));
+
+function cooked(text) {
+  return text.replace(/\\([\s\S])/g, (pair, c) => (c === "\n" ? "" : pair));
+}
+
+function bracketEnd(text, start) {
+  let depth = 0;
+  for (let k = start; k < text.length; k++) {
+    const c = text[k];
+    if (c === "\\") {
+      k++;
+    } else if (c === "'" || c === "\"") {
+      const close = text.indexOf(c, k + 1);
+      if (close === -1) return text.length;
+      k = close;
+    } else if (c === "[") {
+      depth++;
+    } else if (c === "]" && --depth === 0) {
+      return k + 1;
+    }
+  }
+  return text.length;
+}
+
+function bracketPairs(text) {
+  const pairs = new Map();
+  const open = [];
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k];
+    if (c === "\\") {
+      k++;
+    } else if (c === "'" || c === "\"") {
+      const close = text.indexOf(c, k + 1);
+      if (close === -1) break;
+      k = close;
+    } else if (c === "[") {
+      open.push(k);
+    } else if (c === "]" && open.length) {
+      pairs.set(open.pop(), k + 1);
+    }
+  }
+  return (k) => pairs.get(k) || text.length;
+}
+
+function zshFlagsEnd(body) {
+  const pairs = { "(": ")", "[": "]", "{": "}", "<": ">" };
+  for (let k = 1; k < body.length; k++) {
+    if (body[k] === ")") return k;
+    if ("jlrsZ_Ig".indexOf(body[k]) === -1 || k + 1 >= body.length || /[A-Za-z0-9)]/.test(body[k + 1])) continue;
+    const open = body[k + 1];
+    const close = pairs[open] || open;
+    k++;
+    while (body[k] === open) {
+      const end = body.indexOf(close, k + 1);
+      if (end === -1) return -1;
+      k = end + 1;
+    }
+    k--;
+  }
+  return -1;
+}
+
+function parameterFinding(body) {
+  let k = 0;
+  let flags = "";
+  if (body[0] === "(") {
+    const close = zshFlagsEnd(body);
+    if (close === -1) return arithmeticFinding(body);
+    flags = body.slice(1, close);
+    k = close + 1;
+  }
+  const m = /^([#!^=~+]*)([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])/.exec(body.slice(k));
+  if (!m) return /^[$`"]/.test(body.slice(k)) ? null : arithmeticFinding(body);
+  let end = k + m[0].length;
+  let subscript = "";
+  if (body[end] === "[") {
+    const close = bracketEnd(body, end);
+    subscript = body.slice(end + 1, Math.max(end + 1, close - 1));
+    end = close;
+  }
+  const rest = body.slice(end);
+  if (/^:{0,2}=/.test(rest)) {
+    if (flags.indexOf("P") !== -1 || m[1].indexOf("!") !== -1) return { kind: "dynamic", name: "" };
+    if (CONTROL_BINDINGS.has(m[2])) return { kind: "rebind", name: m[2] };
+  }
+  const offset = /^:(?![-=?+:#%/^,~])/.test(rest) ? rest.slice(1) : "";
+  return (subscript ? arithmeticFinding(subscript) : null) || (offset ? arithmeticFinding(offset) : null);
+}
+
+function arrayFinding(literal) {
+  const end = bracketPairs(literal);
+  for (let k = 0; k < literal.length; k++) {
+    if (literal[k] !== "[" || (k > 0 && !/\s/.test(literal[k - 1]))) continue;
+    const close = end(k);
+    const found = literal[close] === "=" || literal.startsWith("+=", close)
+      ? arithmeticFinding(literal.slice(k + 1, Math.max(k + 1, close - 1)))
+      : null;
+    if (found) return found;
+    k = Math.max(k, close - 1);
+  }
+  return null;
+}
+
+function conditionalFinding(tokens) {
+  for (let k = 0; k < tokens.length; k++) {
+    const raw = tokens[k].raw;
+    const found = /^-(?:eq|ne|lt|le|gt|ge)$/.test(raw)
+      ? arithmeticFinding(k > 0 ? tokens[k - 1].value : "") || arithmeticFinding(k + 1 < tokens.length ? tokens[k + 1].value : "")
+      : raw === "-v" && k + 1 < tokens.length ? subscriptFinding(tokens[k + 1].value) : null;
+    if (found) return found;
+  }
+  return null;
+}
+
+function commandFinding(words) {
+  if (!words.length) return null;
+  const read = commandWords(words);
+  if (read.overflow) return { kind: "unread", name: "" };
+  if (read.dynamic) return { kind: "dynamic", name: "" };
+  const set = read.leading.concat(read.ops.filter((op) => op.kind === "set"))
+    .find((assignment) => CONTROL_BINDINGS.has(assignment.name));
+  if (set) return { kind: "rebind", name: set.name };
+  const indexed = read.leading.map((assignment) => arithmeticFinding(assignment.subscript)).find(Boolean);
+  if (indexed) return indexed;
+  const unset = read.ops.find((op) => op.kind === "unset" && CONTROL_BINDINGS.has(op.name));
+  if (unset) return { kind: "removal", name: unset.name };
+  if (read.index >= read.words.length) return null;
+  const cmd0 = read.word.split("/").pop();
+  if (cmd0 === "coproc") {
+    const rest = read.words.slice(read.index + 1);
+    const name = rest.length ? protectedName(rest[0].value) : "";
+    return name ? { kind: "rebind", name } : commandFinding(rest);
+  }
+  return builtinControlMutation(cmd0, read.words.slice(read.index + 1).map((w) => w.value));
+}
+
+function shellFinding(source, bashQuotes) {
+  const deep = { kind: "deep", name: "" };
+  const limit = 32 * source.length + 65536;
+  let steps = 0;
+  const spent = (n) => (steps += n) > limit;
+
+  function part(text, k, depth) {
+    const c = text[k];
+    const next = text[k + 1];
+    if (c === "\\") return { end: k + 2, value: next === undefined ? "" : next, found: null };
+    if (c === "'") {
+      const close = text.indexOf("'", k + 1);
+      const end = close === -1 ? text.length : close;
+      return { end: Math.min(end + 1, text.length), value: text.slice(k + 1, end), found: null };
+    }
+    if (c === "$" && next === "'") {
+      const decoded = ansiC(text, k + 2);
+      return { end: Math.min(decoded.end + 1, text.length), value: decoded.value, found: null };
+    }
+    if (c === "\"" || (c === "$" && next === "\"")) return double(text, k + (c === "$" ? 2 : 1), depth);
+    if (c === "$" || c === "`") {
+      const read = c === "$" ? dollar(text, k, false, depth) : backtick(text, k, false, depth);
+      return { end: read.end, value: text.slice(k, read.end), found: read.found };
+    }
+    return { end: k + 1, value: c, found: null };
+  }
+
+  function double(text, start, depth) {
+    let value = "";
+    let k = start;
+    while (k < text.length && text[k] !== "\"") {
+      if (spent(1)) return { end: text.length, value, found: deep };
+      const c = text[k];
+      if (c === "\\") {
+        const next = text[k + 1];
+        if (next !== "\n") value += next !== undefined && "$`\"\\".indexOf(next) !== -1 ? next : c + (next || "");
+        k += 2;
+      } else if (c === "$" || c === "`") {
+        const read = c === "$" ? dollar(text, k, true, depth) : backtick(text, k, true, depth);
+        if (read.found) return { end: text.length, value, found: read.found };
+        value += text.slice(k, read.end);
+        k = read.end;
+      } else {
+        value += c;
+        k++;
+      }
+    }
+    return { end: Math.min(k + 1, text.length), value, found: null };
+  }
+
+  function dollar(text, k, quoted, depth) {
+    const next = text[k + 1];
+    if (next === "(" && text[k + 2] === "(") {
+      const read = arithmetic(text, k + 3, quoted, depth + 1);
+      if (read) return read;
+    }
+    if (next === "(") {
+      const read = commands(text, k + 2, ")", depth + 1);
+      return { end: Math.min(read.end + 1, text.length), found: read.found };
+    }
+    if (next === "{" && /[\s|]/.test(text[k + 2] || "")) {
+      const read = commands(text, k + (text[k + 2] === "|" ? 3 : 2), "}", depth + 1);
+      return { end: Math.min(read.end + 1, text.length), found: read.found };
+    }
+    if (next === "{") {
+      const end = braceEnd(text, k, quoted, bashQuotes);
+      if (spent(end - k)) return { end: text.length, found: deep };
+      const body = text.slice(k + 2, text[end - 1] === "}" ? end - 1 : end);
+      return { end, found: parameterFinding(cooked(body)) || expansions(body, depth + 1) };
+    }
+    if (next === "[") {
+      const close = bracketEnd(text, k + 1);
+      if (spent(close - k)) return { end: text.length, found: deep };
+      const inner = text.slice(k + 2, Math.max(k + 2, close - 1));
+      return { end: close, found: arithmeticFinding(cooked(inner)) || expansions(inner, depth + 1) };
+    }
+    PARAMETER_REFERENCE.lastIndex = k + 1;
+    const m = PARAMETER_REFERENCE.exec(text);
+    const end = k + 1 + (m ? m[0].length : 0);
+    if (!m || text[end] !== "[") return { end, found: null };
+    const close = bracketEnd(text, end);
+    if (spent(close - end)) return { end: text.length, found: deep };
+    const inner = text.slice(end + 1, Math.max(end + 1, close - 1));
+    return { end, found: text[close - 1] === "]" ? arithmeticFinding(cooked(inner)) : null };
+  }
+
+  function arithmetic(text, start, quoted, depth) {
+    if (depth > MAX_NESTING) return { end: text.length, found: deep };
+    let level = 0;
+    let found = null;
+    for (let k = start; k < text.length;) {
+      if (spent(1)) return { end: text.length, found: deep };
+      const c = text[k];
+      if (c === "\\") {
+        k += 2;
+      } else if (c === "'") {
+        const close = text.indexOf("'", k + 1);
+        k = close === -1 ? text.length : close + 1;
+      } else if (c === "\"" || c === "$" || c === "`") {
+        const read = c === "\"" ? double(text, k + 1, depth) : c === "$" ? dollar(text, k, quoted, depth) : backtick(text, k, quoted, depth);
+        found = found || read.found;
+        k = read.end;
+      } else if (c === "(") {
+        level++;
+        k++;
+      } else if (c !== ")") {
+        k++;
+      } else if (level > 0) {
+        level--;
+        k++;
+      } else {
+        return text[k + 1] === ")" ? { end: k + 2, found: found || arithmeticFinding(cooked(text.slice(start, k))) } : null;
+      }
+    }
+    return null;
+  }
+
+  function backtick(text, k, quoted, depth) {
+    let end = k + 1;
+    while (end < text.length && text[end] !== "`") end += text[end] === "\\" ? 2 : 1;
+    end = Math.min(end, text.length);
+    if (spent(end - k)) return { end: text.length, found: deep };
+    const inner = text.slice(k + 1, end).replace(quoted ? /\\([$`\\"])/g : /\\([$`\\])/g, "$1");
+    return { end: Math.min(end + 1, text.length), found: commands(inner, 0, "", depth + 1).found };
+  }
+
+  function expansions(text, depth) {
+    if (depth > MAX_NESTING) return deep;
+    for (let k = 0; k < text.length;) {
+      if (spent(1)) return deep;
+      const c = text[k];
+      if (c === "\\") {
+        k += 2;
+      } else if (c === "$" || c === "`") {
+        const read = c === "$" ? dollar(text, k, true, depth) : backtick(text, k, true, depth);
+        if (read.found) return read.found;
+        k = read.end;
+      } else {
+        k++;
+      }
+    }
+    return null;
+  }
+
+  function bodies(text, start, docs, depth) {
+    let k = start;
+    for (const doc of docs) {
+      let line = k;
+      while (line < text.length) {
+        const stop = text.indexOf("\n", line);
+        const end = stop === -1 ? text.length : stop;
+        const raw = text.slice(line, end);
+        if ((doc.tabs ? raw.replace(/^\t+/, "") : raw) === doc.delim) break;
+        line = end + 1;
+      }
+      if (spent(Math.min(line, text.length) - k)) return { end: text.length, found: deep };
+      const found = doc.quoted ? null : expansions(cooked(text.slice(k, Math.min(line, text.length))), depth + 1);
+      if (found) return { end: text.length, found };
+      if (line >= text.length) return { end: text.length, found: null };
+      const stop = text.indexOf("\n", line);
+      k = stop === -1 ? text.length : stop + 1;
+    }
+    return { end: k, found: null };
+  }
+
+  function parenWord(text, start, depth, comments) {
+    let level = 0;
+    let kept = "";
+    for (let k = start; k < text.length;) {
+      if (spent(1)) return { end: text.length, found: deep, kept };
+      const c = text[k];
+      if (comments && c === "#" && /[\s(]/.test(text[k - 1])) {
+        const stop = text.indexOf("\n", k);
+        k = stop === -1 ? text.length : stop;
+      } else if (c === "(" || c === ")") {
+        level += c === "(" ? 1 : -1;
+        k++;
+        if (level === 0) return { end: k, found: null, kept };
+        kept += c;
+      } else if ("\\'\"$`".indexOf(c) !== -1) {
+        const read = part(text, k, depth);
+        if (read.found) return { end: text.length, found: read.found, kept };
+        kept += text.slice(k, read.end);
+        k = read.end;
+      } else {
+        kept += c;
+        k++;
+      }
+    }
+    return { end: text.length, found: null, kept };
+  }
+
+  function conditional(text, start, depth) {
+    if (depth > MAX_NESTING) return { end: text.length, found: deep };
+    const tokens = [];
+    let word = null;
+    let fallback = null;
+    let newline = -1;
+    for (let k = start; k < text.length;) {
+      if (spent(1)) return { end: text.length, found: deep };
+      const c = text[k];
+      if (c === "\\" && text[k + 1] === "\n") {
+        k += 2;
+        continue;
+      }
+      if (c === "#" && !word) {
+        const stop = text.indexOf("\n", k);
+        k = stop === -1 ? text.length : stop;
+        continue;
+      }
+      const regex = tokens.length > 0 && tokens[tokens.length - 1].raw === "=~";
+      if (c === "(" && (word ? regex || /[@!+*?]$/.test(text.slice(word.start, k)) : regex)) {
+        if (!word) word = { start: k, value: "" };
+        const read = parenWord(text, k, depth);
+        if (read.found) return { end: text.length, found: read.found };
+        word.value += text.slice(k, read.end);
+        k = read.end;
+        continue;
+      }
+      if (c === "|" && word && regex) {
+        word.value += c;
+        k++;
+        continue;
+      }
+      if (/\s/.test(c) || "()<>;&|".indexOf(c) !== -1) {
+        if (word) tokens.push({ raw: text.slice(word.start, k), value: word.value });
+        word = null;
+        if (tokens.length && tokens[tokens.length - 1].raw === "]]") return { end: k, found: conditionalFinding(tokens), broken: fallback ? fallback.end : -1 };
+        if (/\s/.test(c)) {
+          if (c === "\n" && newline === -1) newline = k;
+          k++;
+        } else if ((c === "&" || c === "|") && text[k + 1] === c) {
+          tokens.push({ raw: c + c, value: c + c });
+          k += 2;
+        } else {
+          if ("()<>".indexOf(c) === -1 && !fallback) fallback = { end: k, tokens: tokens.slice() };
+          tokens.push({ raw: c, value: c });
+          k++;
+        }
+        continue;
+      }
+      if (!word) word = { start: k, value: "" };
+      const read = part(text, k, depth);
+      if (read.found) return { end: text.length, found: read.found };
+      word.value += read.value;
+      k = read.end;
+    }
+    if (word) tokens.push({ raw: text.slice(word.start), value: word.value });
+    if (tokens.length && tokens[tokens.length - 1].raw === "]]") return { end: text.length, found: conditionalFinding(tokens), broken: fallback ? fallback.end : -1 };
+    if (fallback) return { end: fallback.end, found: conditionalFinding(fallback.tokens), broken: -1 };
+    return { end: text.length, found: conditionalFinding(tokens), broken: newline };
+  }
+
+  function commands(text, start, closer, depth) {
+    if (depth > MAX_NESTING) return { end: text.length, found: deep };
+    const stack = [];
+    let words = [];
+    let word = null;
+    let target = false;
+    let piped = false;
+    let redirected = false;
+    let held = null;
+    let docs = [];
+    const top = () => stack[stack.length - 1];
+    const inCase = (state) => top() !== undefined && top().kind === "case" && top().state === state;
+    const commandStart = () => {
+      let k = 0;
+      let timed = piped;
+      for (;;) {
+        while (k < words.length && RESERVED_WORDS.has(words[k].raw)) k++;
+        if (k < words.length && words[k].raw === "coproc") {
+          k++;
+          timed = true;
+          continue;
+        }
+        if (!timed && k < words.length && words[k].raw === "time") {
+          k++;
+          timed = true;
+          if (k < words.length && words[k].raw === "-p") k++;
+          if (k < words.length && words[k].raw === "--") k++;
+          continue;
+        }
+        return k;
+      }
+    };
+    const atCommand = () => !redirected && commandStart() === words.length;
+    const assignPos = () => {
+      for (let k = commandStart(); k < words.length; k++) {
+        if (!SHELL_ASSIGNMENT.test(words[k].raw)) return DECLARATION_WORDS.has(words[k].value);
+      }
+      return true;
+    };
+    const coprocName = () => words.length >= 2 && words[words.length - 2].raw === "coproc"
+      && commandStart() === words.length - 1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(words[words.length - 1].raw);
+    const closeWord = (to) => {
+      if (!word) return;
+      const w = { raw: text.slice(word.start, to), value: word.value };
+      word = null;
+      if (target) {
+        target = false;
+        return;
+      }
+      if (inCase("pattern")) {
+        const alternative = top().alternative;
+        top().alternative = false;
+        if (w.raw === "esac" && !alternative) stack.pop();
+        return;
+      }
+      if (atCommand() && w.raw === "esac" && inCase("body")) {
+        stack.pop();
+        return;
+      }
+      if (coprocName() && COPROC_BODIES.has(w.raw)) {
+        const name = words[words.length - 1].raw;
+        if (CONTROL_BINDINGS.has(name)) held = { kind: "rebind", name };
+        words = [];
+      }
+      if (atCommand() && w.raw === "case") stack.push({ kind: "case", state: "head" });
+      words.push(w);
+      if (inCase("head") && words.length >= 3 && w.raw === "in") {
+        top().state = "pattern";
+        words = [];
+      }
+      if (words.length === 2 && words[0].raw === "function") words = [];
+    };
+    const finish = (to) => {
+      closeWord(to);
+      target = false;
+      redirected = false;
+      if (inCase("head")) return null;
+      const found = commandFinding(words);
+      words = [];
+      return found;
+    };
+    let i = start;
+    while (i < text.length) {
+      if (held) return { end: text.length, found: held };
+      if (spent(1)) return { end: text.length, found: deep };
+      const c = text[i];
+      const next = text[i + 1];
+      if (c === "\\" && next === "\n") {
+        i += 2;
+        continue;
+      }
+      if (c === " " || c === "\t") {
+        closeWord(i);
+        i++;
+        continue;
+      }
+      if (c === "#" && !word) {
+        const stop = text.indexOf("\n", i);
+        i = stop === -1 ? text.length : stop;
+        continue;
+      }
+      if (!word && (c === "{" || c === "}") && !inCase("pattern") && (i + 1 >= text.length || /[\s;&|()<>]/.test(next))) {
+        if (c === "{" && (atCommand() || coprocName())) {
+          const found = atCommand() ? null : finish(i);
+          if (found) return { end: text.length, found };
+          stack.push({ kind: "group" });
+          piped = false;
+          words.push({ raw: c, value: c });
+          i++;
+          continue;
+        }
+        if (c === "}" && atCommand() && top() && top().kind === "group") {
+          stack.pop();
+          words.push({ raw: c, value: c });
+          i++;
+          continue;
+        }
+        if (c === "}" && atCommand() && closer === "}") return { end: i, found: finish(i) || held };
+      }
+      if (c === "[" && next === "[" && !word && !inCase("pattern") && (atCommand() || coprocName()) && /\s/.test(text[i + 2] || "")) {
+        const read = conditional(text, i + 2, depth + 1);
+        if (read.found) return { end: text.length, found: read.found };
+        const prior = (read.broken === -1 ? null : commands(text, read.broken, closer, depth + 1).found) || commandFinding(words);
+        if (prior) return { end: text.length, found: prior };
+        words = [];
+        i = read.end;
+        continue;
+      }
+      if (c === "(" && !word) {
+        if (inCase("pattern")) {
+          top().alternative = true;
+          i++;
+          continue;
+        }
+        const read = next === "(" ? arithmetic(text, i + 2, false, depth + 1) : null;
+        if (read && read.found) return { end: text.length, found: read.found };
+        if (read) {
+          i = read.end;
+          continue;
+        }
+        if (!atCommand()) {
+          let j = i + 1;
+          while (text[j] === " " || text[j] === "\t") j++;
+          if (text[j] === ")") {
+            words = [];
+            i = j + 1;
+            continue;
+          }
+        }
+        const found = finish(i);
+        if (found) return { end: text.length, found };
+        stack.push({ kind: "paren" });
+        piped = false;
+        i++;
+        continue;
+      }
+      if (c === ")") {
+        closeWord(i);
+        if (inCase("pattern")) {
+          top().state = "body";
+          words = [];
+          piped = false;
+          i++;
+          continue;
+        }
+        let at = stack.length - 1;
+        while (at >= 0 && stack[at].kind !== "paren") at--;
+        const paren = at >= 0;
+        if (paren) stack.length = at;
+        const found = finish(i);
+        if (!paren && closer === ")") return { end: i, found: found || held };
+        if (found) return { end: text.length, found };
+        i++;
+        continue;
+      }
+      if ((c === "<" || c === ">") && next === "(") {
+        const read = commands(text, i + 2, ")", depth + 1);
+        if (read.found) return { end: text.length, found: read.found };
+        if (!word) word = { start: i, value: "" };
+        word.value += text.slice(i, Math.min(read.end + 1, text.length));
+        i = Math.min(read.end + 1, text.length);
+        continue;
+      }
+      if (c === "<" || c === ">" || (c === "&" && next === ">")) {
+        if (word) {
+          const prefix = text.slice(word.start, i);
+          const fd = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(prefix);
+          if (fd && CONTROL_BINDINGS.has(fd[1])) return { end: text.length, found: { kind: "rebind", name: fd[1] } };
+          if (fd || /^\d+$/.test(prefix)) word = null;
+          else closeWord(i);
+        }
+        if (commandStart() === words.length) redirected = true;
+        const op = redirectOperator(text, i);
+        i += op.length;
+        if (op === "<<" || op === "<<-") {
+          let j = i;
+          while (text[j] === " " || text[j] === "\t") j++;
+          const doc = heredocWord(text, j);
+          if (doc.end > j) docs.push({ delim: doc.value, tabs: op === "<<-", quoted: doc.quoted });
+          i = Math.max(doc.end, j);
+        } else {
+          target = true;
+        }
+        continue;
+      }
+      if (c === ";" || c === "&" || c === "|" || c === "\n") {
+        if ((c === "|" && next !== "|" && inCase("pattern")) || (c === "\n" && inCase("head"))) {
+          closeWord(i);
+          if (c === "|" && inCase("pattern")) top().alternative = true;
+          i++;
+          continue;
+        }
+        if (c !== "\n" && inCase("head")) stack.pop();
+        const found = finish(i);
+        if (found) return { end: text.length, found };
+        piped = c === "|" && next !== "|";
+        if (c === ";" && (next === ";" || next === "&")) {
+          i += next === ";" && text[i + 2] === "&" ? 3 : 2;
+          let at = stack.length - 1;
+          while (at >= 0 && stack[at].kind !== "case") at--;
+          if (at >= 0) {
+            stack.length = at + 1;
+            Object.assign(top(), { state: "pattern", alternative: false });
+          }
+          continue;
+        }
+        if ((c === "&" && next === "&") || (c === "|" && (next === "|" || next === "&"))) {
+          i += 2;
+          continue;
+        }
+        i++;
+        if (c === "\n" && docs.length) {
+          const read = bodies(text, i, docs, depth);
+          docs = [];
+          if (read.found) return { end: text.length, found: read.found };
+          i = read.end;
+        }
+        continue;
+      }
+      if (c === "(" && word) {
+        const prefix = text.slice(word.start, i);
+        const coprocHead = words.length > 0 && words[words.length - 1].raw === "coproc" && atCommand() && /^[A-Za-z_][A-Za-z0-9_]*$/.test(prefix);
+        if (word.value === prefix && !inCase("pattern") && ((atCommand() && PAREN_HEADS.has(prefix)) || (prefix === "in" && inCase("head")) || coprocHead)) {
+          closeWord(i);
+          continue;
+        }
+        let j = i + 1;
+        while (text[j] === " " || text[j] === "\t") j++;
+        if (text[j] === ")" && prefix.indexOf("=") === -1 && (atCommand() || (words.length === 1 && words[0].raw === "function"))) {
+          word = null;
+          words = [];
+          i = j + 1;
+          continue;
+        }
+        const literal = /^[A-Za-z_][A-Za-z0-9_]*\+?=$/.test(prefix);
+        const read = prefix === "=" ? commands(text, i + 1, ")", depth + 1) : parenWord(text, i, depth, literal);
+        if (read.found) return { end: text.length, found: read.found };
+        const end = prefix === "=" ? Math.min(read.end + 1, text.length) : read.end;
+        const found = literal ? arrayFinding(cooked(read.kept.slice(1))) : null;
+        if (found) return { end: text.length, found };
+        word.value += text.slice(i, end);
+        i = end;
+        continue;
+      }
+      if (c === "[" && word && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text.slice(word.start, i)) && assignPos()) {
+        const close = bracketEnd(text, i);
+        if (spent(close - i)) return { end: text.length, found: deep };
+        if (text[close] === "=" || text.startsWith("+=", close)) {
+          const name = text.slice(word.start, i);
+          const inner = text.slice(i + 1, Math.max(i + 1, close - 1));
+          const found = CONTROL_BINDINGS.has(name) ? { kind: "rebind", name } : arithmeticFinding(cooked(inner)) || expansions(inner, depth + 1);
+          if (found) return { end: text.length, found };
+          word.value += text.slice(i, close);
+          i = close;
+          continue;
+        }
+      }
+      if (!word) word = { start: i, value: "" };
+      const read = part(text, i, depth);
+      if (read.found) return { end: text.length, found: read.found };
+      word.value += read.value;
+      i = read.end;
+    }
+    const found = finish(text.length);
+    return { end: text.length, found: held || found };
+  }
+
+  return commands(source, 0, "", 0).found;
+}
+
+function shellControlMutation(cmd) {
+  const found = shellFinding(cmd, false) || shellFinding(cmd, true);
+  if (found || cmd.indexOf("\\\n") === -1) return found;
+  const joined = joinedText(cmd);
+  return shellFinding(joined, false) || shellFinding(joined, true);
+}
+
+function controlFinding(cmd) {
+  return readControlMutation(cmd) || wordSplitControlMutation(cmd) || shellControlMutation(cmd);
 }
 
 const POWERSHELL_CONTROL_MAIN =

@@ -388,22 +388,91 @@ That check refuses a protected name in any assignment, an unset op of one as rem
 `export -n`/`declare +x`/`typeset +x` and `-a`/`-A` of one as removal, `printf -vNAME`, a `for`,
 `select` or `foreach` loop name and a `{NAME}` redirection as a rebind, and reads a subscript as its
 name (`protectedName`); a full clear alone is NOT refused, because it names no input and
-`model-bind` refuses a missing `CLAUDE_CODE_SESSION_ID`. `detectControlMutation` refuses when either
-`readControlMutation` (this reader) or `wordSplitControlMutation` (a port of the earlier
-whitespace reading) finds a rebind or a removal, with `builtinControlMutation` as the one builtin
-table both share, so the always-on check refuses at least what the base refused; drop the second
-reading and every spelling the new reader misreads becomes an allow. The rule loop runs git
+`model-bind` refuses a missing `CLAUDE_CODE_SESSION_ID`. `detectControlMutation` refuses when any of
+three readings in `controlFinding` finds a rebind or a removal: `readControlMutation` (this
+reader) and `wordSplitControlMutation` (a port of the earlier whitespace reading), which both apply
+`baseControlMutation`, the rows the base had, so the always-on check refuses at least what the
+base refused (drop the second reading and every spelling the new reader misreads becomes an
+allow); and `shellControlMutation`, which runs `shellFinding` under both quote readings.
+`shellFinding` follows shell grammar instead of splitting: it keeps quotes, `$'…'` and `$"…"`
+whole, starts a comment only where a word starts, also inside `[[ … ]]` and an array literal
+(`parenWord` drops it from the text `arrayFinding` reads), reads each heredoc at the end of its line
+(an unquoted body through `expansions` after `cooked` removes its line continuations, a quoted one
+not at all), tracks `case` patterns (`esac` after `|` or a leading `(` stays a pattern word; a
+separator pops a `case` head that never reached `in`, and `;;`, `;&` or `;;&` unwinds to the
+nearest `case`), `{ }` groups (only where `{` is the reserved word: command position or after
+`coproc NAME`; a `)` unwinds everything down to its subshell), subshells, function definitions,
+`[[ … ]]` (`conditional`, reading a regex operand of `=~` and an extended pattern as one word with
+its parentheses and `|`, and ending only at `]]`, or where the old reading ended when no `]]`
+follows; it also returns `broken`, the old reading's end before a later `]]` or the first newline
+when neither follows, and the scanner reads the commands from there as well, then judges the words
+before `]]` and returns to command position, so `then`, `do` or `}` right after it are read) and
+`(( … ))`, also after a `PAREN_HEADS` word written directly before the parenthesis outside a
+`case` pattern. Command position follows the shell: `commandStart`, which `atCommand` and
+`assignPos` share, skips `coproc` and a `time` keyword with at most one `-p` and then at most one
+`--`, and reads `time` as the keyword only at the start of a pipeline (`piped`) and never after
+`coproc`; `atCommand` is false after a leading redirection (`redirected`), so neither `[[` nor
+`case` opens there or inside a `case` pattern; after `coproc NAME` a `COPROC_BODIES` word, a brace
+group or a subshell, also with NAME glued to the parenthesis, is read as its compound command, and
+a protected NAME there is held as a rebind (`held`) until the scan returns. `commandWords` skips
+`time --` too. The scanner enters every `$(…)`, backtick, `<(…)`, zsh `=(…)` and bash 5.3's
+`${ …; }` and `${| …; }` as commands, also inside double quotes and heredoc bodies, and reads zsh's
+brace-less `$NAME[…]` subscript as arithmetic. `shellControlMutation` reads a command that holds a
+line continuation a second time through `joinedText`, which joins a backslash-newline only where
+the shell's input reader does: outside single quotes and comments, never in a quoted-delimiter
+heredoc body, and in an unquoted body before the line is compared with its delimiter
+(`keepHeredocs`), so a lookahead, a heredoc delimiter or a delimiter line split by a continuation
+reads as the shell joins it. `heredocWord` ends a delimiter only at a shell blank or operator, so a
+no-break space stays inside it. Each simple command it finds goes through
+`commandWords` and `builtinControlMutation` (`commandFinding`), so the rows this change added,
+`nameref` included, run only on commands found outside quotes, and quoted text that names
+`declare -n` stays allowed. `builtinControlMutation` is `baseControlMutation` plus the name
+operands of `getopts`, `mapfile`/`readarray`, `wait`, `vared`, `getln`, `set ±A` (attached or
+not), `integer`/`float` and zsh's `read NAME?prompt` (`operandFinding`), the operand of
+`printf`/`print -v`, `wait -p`, `read -a` and bash 5.3's `compgen -V` in any option cluster,
+attached or not (`nameOption`), the arithmetic of `let` and of zsh's `repeat`, `shift`, `return`,
+`break` and `continue`, the subscript of every declaration operand and of a `test` or `[` `-v`
+operand (`subscriptFinding`), a protected operand of a `declare`, `typeset` or `local` whose
+options convert the value (a cluster holding `T`, `i`, `E`, `F`, `l`, `u`, `L`, `R` or `Z`) as a
+rebind, a protected name that zsh's `unset -m` pattern matches (`patternFinding`, which translates
+the glob and refuses one it cannot translate as `dynamic`), an option word built at run time in
+front of a protected operand of an `OPTION_BUILTINS` command as `dynamic`, and
+`declare`/`typeset`/`local -n` as `nameref`. `commandFinding` reads `coproc` itself: a protected
+first operand is a rebind, and otherwise the simple command after it is judged.
+The scanner hands each `$((…))`, `((…))`, `$[…]`, assignment-word subscript (bracket-matched across
+blanks, also in a declaration operand), array-literal element subscript (`arrayFinding`) and
+`-eq`-family operand to `arithmeticFinding`, which bracket-matches nested subscripts, and each
+`${…}` body to `parameterFinding`, which parses zsh's flags (`zshFlagsEnd`), the `=`, `~`, `^` and
+`+` prefixes and the special parameters, and falls back to `arithmeticFinding` on a body it cannot
+parse. A `$((` that does not close with `))` is read again as a command substitution. A name built
+at run time is refused as `dynamic` only where that spelling has no common use: an `env -S` word
+(`split`) whose `${` reaches `env` unexpanded (`literal`: the split string came from a split word
+or its written spelling holds a single quote or a backslash) and sits in an option, assignment or
+command position sets `dynamic` on the command reader, and so do an arithmetic lvalue spelled with `$` and zsh's `${(P)…}` assignment; a
+shell-built operand stays allowed, because `export $(cat .env | xargs)` is a common idiom and
+`source` reaches the same assignments. Nesting past `MAX_NESTING` (64), or a reading past a budget
+of 32 steps per character plus 65,536, returns `deep`, refused with its own reason; the budget
+bounds the re-reading of a `$((` as a substitution. `heredocDelimiters` skips `${…}` and `$[…]`, and
+`heredocWord` reads `$"…"` as a quoted word, so neither hides later lines from any reading. The
+rule loop runs git
 with `-C <dir>` for each chdir op, so `gitTargets` judges an unexpanded one as it judges an
 unexpanded `-C`, resolves tee, `sed -i` and `dd of=` operands against that directory (a relative
 operand under an unexpanded one is not judged, and targets mode reports it as a write target), and
-folds the ops over the carried and inline `GIT_*` values. W265 and W267-W381 in the
+folds the ops over the carried and inline `GIT_*` values. W265 and W267-W551 in the
 gate suite, F8c and D10-D14 in `tests/structure/test-secret-scan-gate.sh`, and the reader cases of
 `git-repo-escape.test.js` pin it. **Known residuals, all stated in `docs/gates.md`:** zsh's other
 readings (an unknown `$'…'` escape, `$"…"`, `=cmd`, `noglob`, `nocorrect`, `-`) are not applied,
 although the Bash tool runs zsh where that is the user's shell (measured on macOS); a program word
-built at run time, aliases and functions; builtins that assign by other means (`let`, `getopts`,
-`mapfile`, `wait -p`, `coproc NAME`, namerefs, arithmetic); wrappers outside `WRAP`; and a `;`, `&`
-or `|` inside quotes, because `lex()` still splits there.
+built at run time, aliases and functions; a variable name the shell builds at run time in a
+builtin or wrapper operand; code built or stored at run time (`eval`, `trap`, `bash -c`, `source`,
+a script file, a `mapfile -C` callback); arithmetic through another variable's value or an integer
+attribute; zsh's numeric `printf` arguments and module builtins; and wrappers outside `WRAP`. The
+third reading is a hand-written approximation of the shell grammar, and a construct it misreads
+can hide the commands after it, so every misreading is an allow. `lex()` still splits at a `;`, `&` or `|` inside quotes, so the two base
+readers can refuse quoted text that spells a protected assignment. `[ … -eq … ]` and `test -eq`
+evaluate no arithmetic in bash 5 or zsh 5.9 (measured), so those operands are not read; the
+`-v NAME[…]` operand of `[[`, `[` and `test` does evaluate its subscript in bash 5.3 (measured),
+and `subscriptFinding` reads it.
 
 **The env-file path comparison folds on every platform.** `controlPathNamespace` and
 `commandRefersToControlPath` pass both sides through `foldPath` (NFC, then
