@@ -256,7 +256,7 @@ CFG_DEFAULT="$T/no-such-config.json"
 CFG_NOREMIND="$T/cfg-noremind.json"
 CFG_TDD="$T/cfg-tdd.json"
 printf '%s' '{"hooks":{"tddReminder":false}}' > "$CFG_NOREMIND"
-printf '%s' '{"hooks":{"defaultDeliveryRoute":"tdd"}}' > "$CFG_TDD"
+printf '%s' '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$CFG_TDD"
 export ZENSU_CONFIG="$CFG_DEFAULT"
 
 git_q() {
@@ -357,24 +357,24 @@ last_field() { printf '%s' "$1" | grep -o 'ZENSU DELIVERY ROUTE: [^<]*' | tail -
 LEAD="$(bash -c 'source "$0"; printf "%s" "${ZENSU_LINKED_BRIEF_LEAD:-}"' "$DIRECTIVE_LIB" 2>/dev/null)"
 lead_count() { [ -n "$LEAD" ] || { echo 0; return; }; printf '%s' "$1" | grep -oF "$LEAD" | grep -c . || true; }
 opens_with_lead() { [ -n "$LEAD" ] && [ "${1#"$LEAD "}" != "$1" ]; }
-INHERITED='ZENSU DELIVERY ROUTE: tdd (inherited from parent session)'
+INHERITED='ZENSU DELIVERY ROUTE: build (inherited from parent session)'
 ASK='ZENSU DELIVERY ROUTE: ask'
 
 [ -n "$LEAD" ] && check "L4 zensu-directive.sh defines the brief lead" PASS \
   || check "L4 ZENSU_LINKED_BRIEF_LEAD is empty or missing" FAIL
 case "$LEAD" in
-  (*"brief another session wrote"*"not the user's own text"*"'/zensu:tdd'"*"'no tdd'"*"decides nothing"*)
+  (*"brief another session wrote"*"not the user's own text"*"'/zensu:build'"*"'no tdd'"*"decides nothing"*)
     check "L5 the lead says the prompt is another session's brief and that a route preference in it decides nothing in either direction" PASS ;;
   (*) check "L5 lead wording ($LEAD)" FAIL ;;
 esac
 
-echo "== AC-001, AC-004, AC-005, AC-006: a linked session inherits tdd =="
+echo "== AC-001, AC-004, AC-005, AC-006: a linked session inherits build =="
 if ! session "$REPO" ""; then
   check "L0 the parent session's Session Control record could be registered" FAIL
   finish; exit
 fi
 P_CLI="$CLI"; P_HOST="$HOST"
-route "$P_CLI" "$REPO" --tdd >/dev/null
+route "$P_CLI" "$REPO" --build >/dev/null
 session "$WT" "$P_HOST"; C_CLI="$CLI"; C_HOST="$HOST"
 : > "$TRACE"
 A1="$(remind "$WT" "$C_CLI" "$C_HOST" "no tdd: add a parser to foo.js")"
@@ -382,11 +382,11 @@ A1_RUNS="$(resolver_runs)"
 : > "$TRACE"
 A2="$(remind "$WT" "$C_CLI" "$C_HOST" "add a function to foo.js")"
 A2_RUNS="$(resolver_runs)"
-if [ "$(last_field "$A1")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$C_CLI")" = tdd ] \
+if [ "$(last_field "$A1")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$C_CLI")" = build ] \
   && [ "$(linked_state "$WT" "$C_CLI")" = linked ] \
   && printf '%s' "$A1" | grep -qF 'route decided by the field below' \
   && ! printf '%s' "$A1" | grep -qF 'AskUserQuestion'; then
-  check "L6 a session started from a parent that recorded tdd opens with the inherited route and is not asked" PASS
+  check "L6 a session started from a parent that recorded build opens with the inherited route and is not asked" PASS
 else
   check "L6 inheritance (field='$(last_field "$A1")' inherited=$(inherited_state "$WT" "$C_CLI") linked=$(linked_state "$WT" "$C_CLI"))" FAIL
 fi
@@ -402,7 +402,7 @@ fi
 
 session "$REPO" "$C_HOST"; G_CLI="$CLI"; G_HOST="$HOST"
 B1="$(remind "$REPO" "$G_CLI" "$G_HOST" "add a function to foo.js")"
-{ [ "$(last_field "$B1")" = "$INHERITED" ] && [ "$(inherited_state "$REPO" "$G_CLI")" = tdd ]; } \
+{ [ "$(last_field "$B1")" = "$INHERITED" ] && [ "$(inherited_state "$REPO" "$G_CLI")" = build ]; } \
   && check "L10 a session two levels down inherits through its parent's inherited route" PASS \
   || check "L10 two-level inheritance (field='$(last_field "$B1")')" FAIL
 
@@ -421,15 +421,15 @@ parent_case() {
   marker="$(lib zensu_delivery_route_marker_path "$REPO" "$(key_of "$PC_CLI")")"
   case "$1" in
     (direct) route "$PC_CLI" "$REPO" --direct >/dev/null ;;
-    (released) route "$PC_CLI" "$REPO" --tdd >/dev/null; route "$PC_CLI" "$REPO" --auto >/dev/null ;;
+    (released) route "$PC_CLI" "$REPO" --build >/dev/null; route "$PC_CLI" "$REPO" --auto >/dev/null ;;
     (none) : ;;
-    (garbage) mkdir -p "$REPO/.zensu/state"; printf '%s' '{"route":"tdd' > "$marker" ;;
+    (garbage) mkdir -p "$REPO/.zensu/state"; printf '%s' '{"route":"build' > "$marker" ;;
     (symlink)
-      mkdir -p "$REPO/.zensu/state"; printf '%s\n' '{"route":"tdd"}' > "$T/tdd-target.json"
-      ln -s "$T/tdd-target.json" "$marker" 2>/dev/null || return 2 ;;
+      mkdir -p "$REPO/.zensu/state"; printf '%s\n' '{"route":"build"}' > "$T/build-target.json"
+      ln -s "$T/build-target.json" "$marker" 2>/dev/null || return 2 ;;
     (direct-over-inherited)
       route "$PC_CLI" "$REPO" --direct >/dev/null
-      printf '%s\n' '{"route":"tdd"}' > "$(lib zensu_inherited_route_marker_path "$REPO" "$(key_of "$PC_CLI")")" ;;
+      printf '%s\n' '{"route":"build"}' > "$(lib zensu_inherited_route_marker_path "$REPO" "$(key_of "$PC_CLI")")" ;;
   esac
   session "$WT" "$PC_HOST" || return 1
   PCASE_OUT="$(remind "$WT" "$CLI" "$HOST" "add a function to foo.js")"
@@ -449,7 +449,7 @@ for state in direct released none garbage symlink direct-over-inherited; do
   fi
 done
 [ -z "$L12_BAD" ] \
-  && check "L12 a parent's direct, released, absent, unreadable or symlinked marker, and a direct over an inherited tdd, pass nothing on, while the brief note still applies" PASS \
+  && check "L12 a parent's direct, released, absent, unreadable or symlinked marker, and a direct over an inherited build, pass nothing on, while the brief note still applies" PASS \
   || check "L12 parent states:$L12_BAD" FAIL
 
 parent_case none
@@ -463,7 +463,7 @@ fi
 
 repo_case() {
   session "$1" "" || return 1
-  route "$CLI" "$1" --tdd >/dev/null
+  route "$CLI" "$1" --build >/dev/null
   local parent="$HOST"
   session "$WT" "$parent" || return 1
   RCASE_OUT="$(remind "$WT" "$CLI" "$HOST" "add a function to foo.js")"
@@ -471,7 +471,7 @@ repo_case() {
 }
 repo_case "$FOREIGN"
 { [ "$(last_field "$RCASE_OUT")" = "$ASK" ] && [ "$RCASE_INHERITED" = none ] && opens_with_lead "$RCASE_OUT"; } \
-  && check "L14 a parent that recorded tdd in another repository passes nothing on" PASS \
+  && check "L14 a parent that recorded build in another repository passes nothing on" PASS \
   || check "L14 foreign repository (field='$(last_field "$RCASE_OUT")' inherited=$RCASE_INHERITED)" FAIL
 repo_case "$NOGIT"
 { [ "$(last_field "$RCASE_OUT")" = "$ASK" ] && [ "$RCASE_INHERITED" = none ]; } \
@@ -496,7 +496,7 @@ PARENT_NOUUID="$(remind "$WT" "$CLI" "$HOST" "add a function to foo.js")"
 GONE="$T/gone-root"
 mkdir -p "$GONE"
 session "$GONE" ""
-route "$CLI" "$GONE" --tdd >/dev/null
+route "$CLI" "$GONE" --build >/dev/null
 GONE_PARENT="$HOST"
 rm -rf "$GONE"
 session "$WT" "$GONE_PARENT"
@@ -583,7 +583,7 @@ HOOK_HOME="$HOME"
 
 parent_case none
 CFG_OUT="$(remind "$WT" "$CLI" "$HOST" "add a function to foo.js" "$CFG_TDD")"
-{ [ "$(last_field "$CFG_OUT")" = "ZENSU DELIVERY ROUTE: tdd (hooks.defaultDeliveryRoute)" ] \
+{ [ "$(last_field "$CFG_OUT")" = "ZENSU DELIVERY ROUTE: build (hooks.defaultDeliveryRoute)" ] \
   && [ "$(inherited_state "$WT" "$CLI")" = none ]; } \
   && check "L20 a linked session that inherits nothing still takes the configured default" PASS \
   || check "L20 configured default (field='$(last_field "$CFG_OUT")')" FAIL
@@ -638,10 +638,10 @@ session "$WT" "$P_HOST"; H_CLI="$CLI"; H_HOST="$HOST"
 remind "$WT" "$H_CLI" "$H_HOST" "add a function to foo.js" >/dev/null
 H_STATUS="$(route "$H_CLI" "$WT" --status)"
 H_DOCTOR="$(CLAUDE_CODE_SESSION_ID="$H_CLI" CLAUDE_PROJECT_DIR="$WT" ZENSU_CONFIG="$CFG_DEFAULT" bash "$DOCTOR" 2>/dev/null)"
-[ "$H_STATUS" = "tdd (inherited from parent session)" ] \
+[ "$H_STATUS" = "build (inherited from parent session)" ] \
   && check "L24 /zensu:delivery-route --status names the inherited source" PASS \
   || check "L24 --status ($H_STATUS)" FAIL
-printf '%s' "$H_DOCTOR" | grep -F 'delivery route: tdd (inherited from parent session)' | grep -qF '✅' \
+printf '%s' "$H_DOCTOR" | grep -F 'delivery route: build (inherited from parent session)' | grep -qF '✅' \
   && check "L25 the /zensu:doctor session row names the inherited source, green" PASS \
   || check "L25 doctor row ($(printf '%s' "$H_DOCTOR" | grep -o 'delivery route: [^—]*' | head -1))" FAIL
 route "$H_CLI" "$WT" --direct >/dev/null
@@ -654,7 +654,7 @@ H_AUTO_STATUS="$(route "$H_CLI" "$WT" --status)"
   && check "L26 the linked session's own marker outranks the inherited route" PASS \
   || check "L26 own marker over inherited (field='$H_DIRECT_FIELD' status='$H_DIRECT_STATUS')" FAIL
 { [ "$H_AUTO_FIELD" = "$ASK" ] && [ "$H_AUTO_STATUS" = "ask (default, session choice released)" ] \
-  && [ "$(inherited_state "$WT" "$H_CLI")" = tdd ]; } \
+  && [ "$(inherited_state "$WT" "$H_CLI")" = build ]; } \
   && check "L27 --auto in the linked session releases the inherited route too, back to the question" PASS \
   || check "L27 release (field='$H_AUTO_FIELD' status='$H_AUTO_STATUS')" FAIL
 
@@ -712,7 +712,7 @@ echo "== R1-F13: a plugin data root reached through a symlinked parent =="
 if ln -s "$T" "$T/alias-root" 2>/dev/null; then
   session "$WT" "$P_HOST"; S_CLI="$CLI"; S_HOST="$HOST"
   S_OUT="$(export CLAUDE_PLUGIN_DATA="$T/alias-root/plugin-data"; remind "$WT" "$S_CLI" "$S_HOST" "add a function to foo.js")"
-  { [ "$(last_field "$S_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$S_CLI")" = tdd ]; } \
+  { [ "$(last_field "$S_OUT")" = "$INHERITED" ] && [ "$(inherited_state "$WT" "$S_CLI")" = build ]; } \
     && check "L33 a CLAUDE_PLUGIN_DATA reached through a symlinked parent directory still finds the parent's record and inherits" PASS \
     || check "L33 aliased plugin data (field='$(last_field "$S_OUT")' inherited=$(inherited_state "$WT" "$S_CLI"))" FAIL
 else
@@ -774,7 +774,7 @@ fi
 
 echo "== R1-F5: which prompt origins carry the brief note =="
 session "$WT" "$P_HOST"; SL_CLI="$CLI"; SL_HOST="$HOST"
-SL_OUT="$(remind "$WT" "$SL_CLI" "$SL_HOST" "/zensu:tdd add a parser to foo.js")"
+SL_OUT="$(remind "$WT" "$SL_CLI" "$SL_HOST" "/zensu:build add a parser to foo.js")"
 { opens_with_lead "$SL_OUT" && [ "$(lead_count "$SL_OUT")" = 1 ] && [ "$(last_field "$SL_OUT")" = "$INHERITED" ]; } \
   && check "L38 a brief that is a slash command with arguments opens with the brief note once" PASS \
   || check "L38 slash-command brief (lead=$(lead_count "$SL_OUT") field='$(last_field "$SL_OUT")')" FAIL

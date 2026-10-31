@@ -4,6 +4,8 @@ Status: approved in chat on 2026-10-18 and implemented on branch `claude/zensu-w
 Target repository: `zensu-claude-code`, base `main` at `986843f5` (0.27.0).
 Builds on: `.claude/rules/session-delivery-route.md` (the route ladder) and `.claude/rules/prompt-origin.md`
 (prompt classes).
+Naming: since #520 (0.32.0) the route this record calls `tdd` is `build`, and `/zensu:tdd` is `/zensu:build`.
+The shipped code, tests and rule use the new names; this record keeps the names of its time.
 
 ## 1. Problem
 

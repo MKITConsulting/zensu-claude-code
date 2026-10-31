@@ -152,7 +152,7 @@ _zensu_evr_prepare() {
   printf '%s' "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" > "$_evr_dir/full-suite-marker"
   printf '%s' "$(zensu_evidence_ci_config_json)" > "$_evr_dir/ci-config.json"
   _evr_msys_excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_DIR ZENSU_EVR_PLUGIN_DATA \
-    ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
+    ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH ZENSU_EVR_WORK_TREE ZENSU_EVR_WORK_DIR)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
 }
 
@@ -164,6 +164,8 @@ _zensu_evr_node() {
   ZENSU_EVR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
   ZENSU_EVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
   ZENSU_EVR_CWD="${_evr_cwd:-}" \
+  ZENSU_EVR_WORK_TREE="${_evr_work_tree:-}" \
+  ZENSU_EVR_WORK_DIR="${_evr_work_dir:-}" \
   ZENSU_EVR_SCOPE="${_evr_scope:-}" \
   ZENSU_EVR_SHOW="${_evr_show:-tail}" \
   ZENSU_EVR_IF_STALE="${_evr_if_stale:-0}" \
@@ -182,7 +184,7 @@ _zensu_full_suite_ticket_matches() {
 }
 
 _zensu_full_suite_gate() {
-  local session="$1" rc=0
+  local session="$1" bound="${2:-}" rc=0
   _fsg_lines=""
   _evr_escape=0
   [ "${ZENSU_FULL_SUITE_GATE:-on}" = "off" ] && _evr_escape=1
@@ -193,6 +195,9 @@ _zensu_full_suite_gate() {
     fi
     [ "$(zensu_evidence_full_suite_gate)" = "advisory" ] && return 0
     return 1
+  fi
+  if [ "$bound" = "bound" ] && ! _zensu_evr_work_tree "$session" "${3:-}"; then
+    printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault"
   fi
   _fsg_lines="$(_zensu_evr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || rc=$?
   if [ "$(cat "$_evr_dir/verdict-state" 2>/dev/null)" = "escaped" ]; then
@@ -261,7 +266,7 @@ _zensu_avr_prepare() {
   printf '%s' "$(zensu_evidence_acceptance_gate)" > "$_avr_dir/gate-mode"
   _avr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _avr_bash="bash"
   _avr_msys_excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_DIR ZENSU_AVR_PLUGIN_DATA \
-    ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
+    ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH ZENSU_AVR_WORK_TREE)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
 }
 
@@ -272,6 +277,7 @@ _zensu_avr_node() {
   ZENSU_AVR_PLUGIN_DATA="$_avr_data" \
   ZENSU_AVR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
   ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
+  ZENSU_AVR_WORK_TREE="${_avr_work_tree:-}" \
   ZENSU_AVR_RECEIPT="$_avr_receipt" \
   ZENSU_AVR_LOG="${_avr_log:-}" \
   ZENSU_AVR_AC="${_avr_ac:-}" \
@@ -295,6 +301,139 @@ _zensu_autopilot_validate_option() {
     || return 0
   run_json="$(autopilot_read_run "${1:-}" 2>/dev/null)" || return 0
   ZENSU_AVR_RUN_JSON="$run_json" node -e 'try { const state = JSON.parse(process.env.ZENSU_AVR_RUN_JSON); const value = state && state.options ? state.options.validate : undefined; process.stdout.write(value === true ? "on" : value === false ? "off" : ""); } catch (_) {}' 2>/dev/null || true
+}
+
+_zensu_chain_work_tree() {
+  local ctx="${1:-}" root="${2:-}" run_id run_json candidate verdict
+  [ -n "$root" ] || { echo "the project root is unavailable" >&2; return 2; }
+  candidate="$root"
+  if [ -n "$ctx" ] && [ "$ctx" != '{}' ]; then
+    run_id="$(ZENSU_CWT_CTX="$ctx" node -e 'try { const c = JSON.parse(process.env.ZENSU_CWT_CTX); if (c && typeof c.runId === "string") process.stdout.write(c.runId); } catch (_) {}' 2>/dev/null)"
+    [ -n "$run_id" ] || { echo "the chain's Autopilot binding names no run" >&2; return 2; }
+    command -v autopilot_read_run >/dev/null 2>&1 \
+      || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" 2>/dev/null \
+      || { echo "the Autopilot state library could not be loaded" >&2; return 2; }
+    run_json="$(autopilot_read_run "$run_id" "$root" 2>/dev/null)" \
+      || { echo "the record of the bound Autopilot run $run_id could not be read" >&2; return 2; }
+    candidate="$(ZENSU_CWT_RUN="$run_json" node -e 'let s; try { s = JSON.parse(process.env.ZENSU_CWT_RUN); } catch (_) { process.exit(3); } if (!s || typeof s !== "object" || Array.isArray(s)) process.exit(3); if (!Object.prototype.hasOwnProperty.call(s, "workspaceRoot")) process.exit(0); if (typeof s.workspaceRoot !== "string" || s.workspaceRoot === "") process.exit(3); process.stdout.write(s.workspaceRoot);' 2>/dev/null)" \
+      || { echo "the record of the bound Autopilot run $run_id carries no usable workspaceRoot" >&2; return 2; }
+    [ -n "$candidate" ] || candidate="$root"
+  fi
+  verdict="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --work-tree-check "$candidate" --project "$root")" \
+    || return 2
+  case "$verdict" in
+    (anchor$'\t'?*|work-tree$'\t'?*) printf '%s\n' "$verdict" ;;
+    (*) echo "the work-tree check answered no work tree" >&2; return 2 ;;
+  esac
+}
+
+_zensu_chain_project_dir() {
+  local line="${1:-}" root="${2:-}" dir prefix
+  case "$line" in
+    (anchor$'\t'?*) printf '%s\n' "$root"; return 0 ;;
+    (work-tree$'\t'?*) dir="${line#*$'\t'}" ;;
+    (*) echo "the work-tree check answered no work tree" >&2; return 2 ;;
+  esac
+  prefix="$(_tc_git -C "$root" rev-parse --show-prefix 2>/dev/null)" \
+    || { echo "git could not place the project root inside its repository" >&2; return 2; }
+  prefix="${prefix%/}"
+  [ -z "$prefix" ] || dir="$dir/$prefix"
+  [ -d "$dir" ] || { echo "the chain's work tree has no directory $dir for the project root" >&2; return 2; }
+  printf '%s\n' "$dir"
+}
+
+_zensu_bound_work_tree_lookup() {
+  local session="$1" scratch="$2" given="$3" ctx="$4" state open line dir unknown
+  unknown="this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"
+  if [ "$given" != "given" ]; then
+    command -v tdd_autopilot_context >/dev/null 2>&1 \
+      || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh" 2>/dev/null \
+      || { printf '%s' "the phase library could not be loaded, so whether this chain is bound to an Autopilot worktree is unknown" > "$scratch/bwt-fault"; return 0; }
+    state="$(tdd_state_file "$session" 2>/dev/null)" || state=""
+    if [ -z "$state" ]; then
+      printf '%s' "the current session's workflow path is unavailable" > "$scratch/bwt-fault"
+      return 0
+    fi
+    ctx='{}'
+    if [ -e "$state" ] || [ -L "$state" ]; then
+      ctx="$(tdd_autopilot_context "$state" "$session" 2>/dev/null)" || { printf '%s' "$unknown" > "$scratch/bwt-fault"; return 0; }
+    fi
+    case "$ctx" in
+      (''|'{}') : > "$scratch/bwt-standalone"; return 0 ;;
+    esac
+    open="$(ZENSU_BWT_CTX="$ctx" node -e 'let c; try { c = JSON.parse(process.env.ZENSU_BWT_CTX); } catch (_) { process.exit(0); } if (!c || typeof c.active !== "boolean" || typeof c.chainDone !== "boolean") process.exit(0); process.stdout.write(c.active && !c.chainDone ? "open" : "closed");' 2>/dev/null)"
+    case "$open" in
+      (open) ;;
+      (closed) : > "$scratch/bwt-standalone"; return 0 ;;
+      (*) printf '%s' "$unknown" > "$scratch/bwt-fault"; return 0 ;;
+    esac
+  else
+    case "$ctx" in
+      (''|'{}') printf '%s' "the bound chain's Autopilot linkage is empty" > "$scratch/bwt-fault"; return 0 ;;
+    esac
+  fi
+  if ! line="$(_zensu_chain_work_tree "$ctx" "$CLAUDE_PROJECT_DIR" 2>"$scratch/work-tree.err")"; then
+    awk 'NF' "$scratch/work-tree.err" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' > "$scratch/bwt-fault"
+    [ -s "$scratch/bwt-fault" ] || printf '%s' "the work-tree resolver named no cause" > "$scratch/bwt-fault"
+    return 0
+  fi
+  case "$line" in
+    (work-tree$'\t'?*) ;;
+    (*) : > "$scratch/bwt-standalone"; return 0 ;;
+  esac
+  if ! dir="$(_zensu_chain_project_dir "$line" "$CLAUDE_PROJECT_DIR" 2>"$scratch/work-tree.err")"; then
+    awk 'NF' "$scratch/work-tree.err" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' > "$scratch/bwt-fault"
+    [ -s "$scratch/bwt-fault" ] || printf '%s' "the chain's project directory could not be resolved" > "$scratch/bwt-fault"
+    return 0
+  fi
+  printf '%s' "${line#*$'\t'}" > "$scratch/bwt-tree"
+  printf '%s' "$dir" > "$scratch/bwt-dir"
+}
+
+_zensu_bound_work_tree() {
+  local session="${1:-}" scratch="${2:-}"
+  _bwt_tree=""
+  _bwt_dir=""
+  _bwt_fault=""
+  [ -n "$session" ] && [ -n "$scratch" ] || return 0
+  rm -f "$scratch/bwt-standalone" "$scratch/bwt-tree" "$scratch/bwt-dir" "$scratch/bwt-fault"
+  ( _zensu_bound_work_tree_lookup "$session" "$scratch" "${3+given}" "${3-}" )
+  if [ -f "$scratch/bwt-fault" ]; then
+    _bwt_fault="$(cat "$scratch/bwt-fault" 2>/dev/null)"
+    [ -n "$_bwt_fault" ] || _bwt_fault="the work-tree lookup named no cause"
+  elif [ -f "$scratch/bwt-tree" ] && [ -f "$scratch/bwt-dir" ]; then
+    _bwt_tree="$(cat "$scratch/bwt-tree")"
+    _bwt_dir="$(cat "$scratch/bwt-dir")"
+  elif [ ! -f "$scratch/bwt-standalone" ]; then
+    _bwt_fault="the work-tree lookup did not finish"
+  fi
+  return 0
+}
+
+_zensu_evr_work_tree() {
+  _evr_work_tree=""
+  _evr_work_dir=""
+  _zensu_bound_work_tree "${1:-}" "$_evr_dir" ${2+"$2"}
+  [ -z "$_bwt_fault" ] || return 1
+  [ -n "$_bwt_tree" ] || return 0
+  _evr_work_tree="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_bwt_tree")" \
+    && _evr_work_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_bwt_dir")" \
+    && return 0
+  _evr_work_tree=""
+  _evr_work_dir=""
+  _bwt_fault="its path cannot be handed to node"
+  return 1
+}
+
+_zensu_avr_work_tree() {
+  _avr_work_tree=""
+  _zensu_bound_work_tree "${1:-}" "$_avr_dir"
+  [ -z "$_bwt_fault" ] || return 1
+  [ -n "$_bwt_tree" ] || return 0
+  _avr_work_tree="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_bwt_tree")" && return 0
+  _avr_work_tree=""
+  _bwt_fault="its path cannot be handed to node"
+  return 1
 }
 
 _zensu_acceptance_gate() {
@@ -329,6 +468,9 @@ _zensu_acceptance_gate() {
 
 _evr_dir=""
 _avr_dir=""
+_evr_work_tree=""
+_evr_work_dir=""
+_avr_work_tree=""
 
 case "${1:-}" in
   --evidence-run)
@@ -362,6 +504,10 @@ case "${1:-}" in
       *) echo "zensu-log.sh --evidence-run: --show must be tail or all" >&2; exit 2 ;;
     esac
     _zensu_evr_prepare "zensu-log.sh --evidence-run" || exit 2
+    if ! _zensu_evr_work_tree "$(zensu_resolve_session_id 2>/dev/null)"; then
+      echo "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: $_bwt_fault" >&2
+      exit 2
+    fi
     _evr_cwd="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$PWD" 2>/dev/null)" || _evr_cwd=""
     _evr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _evr_bash="bash"
     if [ "$evr_cmd_seen" = true ]; then
@@ -508,6 +654,10 @@ case "${1:-}" in
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     _zensu_avr_prepare "zensu-log.sh $avr_verb" "$avr_session" || exit 2
+    if ! _zensu_avr_work_tree "$avr_session"; then
+      echo "zensu-log.sh $avr_verb: the chain's work tree could not be determined, so no acceptance record can be bound to it: $_bwt_fault" >&2
+      exit 2
+    fi
     if [ "$avr_verb" = "--acceptance-status" ]; then
       _zensu_avr_node "zensu-log.sh --acceptance-status" status
       exit $?
@@ -539,6 +689,232 @@ case "${1:-}" in
     printf '%s\n' "$session_val"
     exit 0
     ;;
+  --round-prepare)
+    _rp_round=""
+    _rp_log=""
+    _rp_baseline=""
+    _rp_epoch=""
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --round|--log|--baseline|--session-epoch)
+          if [ $# -lt 2 ]; then
+            echo "zensu-log.sh --round-prepare: $1 requires a value" >&2
+            exit 2
+          fi
+          case "$1" in
+            --round) _rp_round="$2" ;;
+            --log) _rp_log="$2" ;;
+            --baseline) _rp_baseline="$2" ;;
+            --session-epoch) _rp_epoch="$2" ;;
+          esac
+          shift 2 ;;
+        *) echo "zensu-log.sh --round-prepare: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    case "$_rp_round" in
+      0|self-review) ;;
+      ''|0*|*[!0-9]*)
+        echo "zensu-log.sh --round-prepare: --round must be 0, a fix round number or self-review" >&2
+        exit 2 ;;
+    esac
+    if [ "${#_rp_round}" -gt 6 ] && [ "$_rp_round" != "self-review" ]; then
+      echo "zensu-log.sh --round-prepare: --round must be 0, a fix round number or self-review" >&2
+      exit 2
+    fi
+    case "$_rp_epoch" in
+      *[!0-9]*) echo "zensu-log.sh --round-prepare: --session-epoch must be a number of seconds" >&2; exit 2 ;;
+    esac
+    case "$_rp_baseline" in
+      *[!0-9a-f]*) echo "zensu-log.sh --round-prepare: --baseline must be a commit id" >&2; exit 2 ;;
+    esac
+    _rp_root="${CLAUDE_PROJECT_DIR:-}"
+    case "$_rp_log" in
+      "$_rp_root"/.zensu/logs/*.log) ;;
+      *) echo "zensu-log.sh --round-prepare: --log must name this session's run log inside $_rp_root/.zensu/logs" >&2; exit 2 ;;
+    esac
+    case "${_rp_log#"$_rp_root"/.zensu/logs/}" in
+      */*) echo "zensu-log.sh --round-prepare: --log must name a file directly inside $_rp_root/.zensu/logs" >&2; exit 2 ;;
+    esac
+    if [ -L "$_rp_root/.zensu" ] || [ -L "$_rp_root/.zensu/logs" ] || [ -L "$_rp_log" ] || [ ! -f "$_rp_log" ]; then
+      echo "zensu-log.sh --round-prepare: the run log is not a regular file inside $_rp_root/.zensu/logs" >&2
+      exit 2
+    fi
+    _rp_fallback() {
+      echo "ROUND PREPARE FALLBACK — the round's bookkeeping did not run: resolve the cause above and run the verb again; where it cannot run, outside git or without node, run the Phase 6 step 5b audit yourself, append each fixed ledger line by hand after re-reading its fix, and give the re-review the whole diff"
+    }
+    _rp_stop() {
+      echo "ROUND PREPARE STOPPED — $1"
+      _rp_fallback
+      exit 2
+    }
+    command -v node >/dev/null 2>&1 || _rp_stop "node: the verb needs node and found none"
+    _rp_top="$(_tc_git -C "$_rp_root" rev-parse --show-toplevel 2>/dev/null)"
+    if [ -z "$_rp_top" ] || [ ! -d "$_rp_top" ]; then
+      _rp_stop "work-tree: $_rp_root is not inside a git work tree"
+    fi
+    _rp_tmp="$(mktemp -d)" || _rp_stop "temp: no temporary directory"
+    trap 'rm -rf "$_rp_tmp"' EXIT
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    _rp_ctx='{}'
+    _rp_state="$(tdd_state_file "${ZENSU_SESSION_KEY:-}" 2>/dev/null)" || _rp_state=""
+    if [ -n "$_rp_state" ] && { [ -e "$_rp_state" ] || [ -L "$_rp_state" ]; }; then
+      _rp_ctx="$(tdd_autopilot_context "$_rp_state" "${ZENSU_SESSION_KEY:-}" 2>/dev/null)" \
+        || _rp_stop "chain: the chain's Autopilot linkage could not be read"
+    fi
+    _rp_wt="$_rp_top"
+    _rp_prefix=""
+    if [ "$_rp_ctx" != '{}' ]; then
+      _rp_wt_line="$(_zensu_chain_work_tree "$_rp_ctx" "$_rp_root" 2> "$_rp_tmp/work-tree.err")" \
+        || _rp_stop "work-tree: the chain's work tree could not be resolved: $(head -n 1 "$_rp_tmp/work-tree.err")"
+      case "$_rp_wt_line" in
+        (work-tree$'\t'?*)
+          _rp_wt="${_rp_wt_line#*$'\t'}"
+          _rp_top_canon="$(cd "$_rp_top" 2>/dev/null && pwd -P)" || _rp_top_canon=""
+          case "$_rp_wt" in
+            ("$_rp_top_canon"/?*) _rp_prefix="${_rp_wt#"$_rp_top_canon"/}" ;;
+            (*) _rp_stop "work-tree: the chain's work tree does not lie below the anchor's work-tree top" ;;
+          esac
+          ;;
+      esac
+    fi
+    _rp_append() {
+      if [ -n "$_rp_epoch" ]; then
+        printf '%s' "$1" | bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --log "$_rp_log" --message-stdin --start "$_rp_epoch"
+      else
+        printf '%s' "$1" | bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --log "$_rp_log" --message-stdin
+      fi
+    }
+    if [ -n "$_rp_baseline" ]; then
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --change-set --project "$_rp_root" --baseline "$_rp_baseline" \
+        ${_rp_prefix:+--work-tree "$_rp_wt"} > "$_rp_tmp/changes" 2> "$_rp_tmp/changes.err"
+    else
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --change-set --project "$_rp_root" \
+        ${_rp_prefix:+--work-tree "$_rp_wt"} > "$_rp_tmp/changes" 2> "$_rp_tmp/changes.err"
+    fi
+    _rp_rc=$?
+    if [ "$_rp_rc" -ne 0 ]; then
+      _rp_stop "change-set: the change set could not be listed (exit $_rp_rc): $(head -n 1 "$_rp_tmp/changes.err")"
+    fi
+    _tc_git -C "$_rp_wt" check-ignore --stdin < "$_rp_tmp/changes" > "$_rp_tmp/ignored" 2> "$_rp_tmp/ignored.err"
+    _rp_rc=$?
+    if [ "$_rp_rc" -gt 1 ]; then
+      _rp_stop "ignore-check: git check-ignore could not read the change set (exit $_rp_rc): $(head -n 1 "$_rp_tmp/ignored.err")"
+    fi
+    _rp_lib="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)" \
+      || _rp_stop "plugin-lib: the plugin library path could not be rendered"
+    _rp_top_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_wt" 2>/dev/null)" \
+      || _rp_stop "work-tree: the work tree path could not be rendered"
+    _rp_anchor_native="$_rp_top_native"
+    if [ -n "$_rp_prefix" ]; then
+      _rp_anchor_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_top" 2>/dev/null)" \
+        || _rp_stop "work-tree: the anchor's work-tree top could not be rendered"
+    fi
+    _rp_state_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_root/.zensu/state" 2>/dev/null)" \
+      || _rp_stop "state: $_rp_root/.zensu/state is missing or unusable"
+    _rp_logs_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_root/.zensu/logs" 2>/dev/null)" \
+      || _rp_stop "log: the run log path could not be rendered"
+    _rp_tmp_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_rp_tmp" 2>/dev/null)" \
+      || _rp_stop "temp: the temporary directory could not be rendered"
+    _rp_incremental=off
+    zensu_hook_enabled incrementalReviewRounds && _rp_incremental=on
+    _rp_activation=off
+    zensu_hook_enabled aspectActivation && _rp_activation=on
+    _rp_convergence=off
+    zensu_hook_enabled reviewConvergence && _rp_convergence=on
+    _rp_panel="$(zensu_review_panel)"
+    _rp_node() {
+      MSYS2_ENV_CONV_EXCL="$(zensu_msys_env_exclusions ZENSU_RP_LIB ZENSU_RP_TOP ZENSU_RP_ANCHOR ZENSU_RP_PATH_PREFIX ZENSU_RP_LOG ZENSU_RP_SNAPSHOT ZENSU_RP_CHANGES ZENSU_RP_AUDIT ZENSU_RP_IGNORED 2>/dev/null || printf '%s' "${MSYS2_ENV_CONV_EXCL:-}")" \
+      ZENSU_RP_LIB="$_rp_lib/round-prepare-v1.js" \
+      ZENSU_RP_MODE="$2" \
+      ZENSU_RP_ROUND="$_rp_round" \
+      ZENSU_RP_TOP="$_rp_top_native" \
+      ZENSU_RP_ANCHOR="$_rp_anchor_native" \
+      ZENSU_RP_PATH_PREFIX="$_rp_prefix" \
+      ZENSU_RP_LOG="$_rp_logs_native/$(basename -- "$_rp_log")" \
+      ZENSU_RP_SNAPSHOT="$_rp_state_native/round-snapshot-${ZENSU_SESSION_KEY:-unbound}.json" \
+      ZENSU_RP_CHANGES="$_rp_tmp_native/changes" \
+      ZENSU_RP_AUDIT="$1" \
+      ZENSU_RP_IGNORED="$_rp_tmp_native/ignored" \
+      ZENSU_RP_BASELINE="$_rp_baseline" \
+      ZENSU_RP_INCREMENTAL="$_rp_incremental" \
+      ZENSU_RP_ACTIVATION="$_rp_activation" \
+      ZENSU_RP_CONVERGENCE="$_rp_convergence" \
+      ZENSU_RP_PANEL="$_rp_panel" \
+        node -e 'let m; try { m = require(process.env.ZENSU_RP_LIB); } catch (e) { process.stderr.write("round-prepare: the module could not be loaded\n"); process.exit(2); } let r; try { r = m.cliMain([process.env.ZENSU_RP_MODE], process.env); } catch (e) { r = { code: 2, stdout: "", stderr: "round-prepare: internal error\n" }; } if (r.stdout) process.stdout.write(r.stdout); if (r.stderr) process.stderr.write(r.stderr); process.exitCode = r.code;'
+    }
+    _rp_audit_native=""
+    if [ "$_rp_round" != "0" ]; then
+      _rp_dirty=""
+      _rp_node "" start-paths > "$_rp_tmp/dirty" 2>/dev/null
+      _rp_rc=$?
+      case "$_rp_rc" in
+        0) _rp_dirty="$_rp_tmp/dirty" ;;
+        3) ;;
+        *) _rp_stop "snapshot: the round-start snapshot could not be read (exit $_rp_rc)" ;;
+      esac
+      _rp_label="fix-$_rp_round"
+      [ "$_rp_round" = "self-review" ] && _rp_label="self-review"
+      _rp_append "EDIT LANDING AUDIT STARTED — round $_rp_label" \
+        || _rp_stop "log: the audit start marker could not be appended"
+      set -- --log "$_rp_log" --project "$_rp_root" --session "${ZENSU_SESSION_KEY:-}"
+      [ -n "$_rp_baseline" ] && set -- "$@" --baseline "$_rp_baseline"
+      [ -n "$_rp_epoch" ] && set -- "$@" --session-epoch "$_rp_epoch"
+      [ -n "$_rp_dirty" ] && set -- "$@" --dirty-before "$_rp_dirty"
+      [ -n "$_rp_prefix" ] && set -- "$@" --work-tree "$_rp_wt"
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" "$@" > "$_rp_tmp/audit" 2>&1
+      _rp_rc=$?
+      if [ "$_rp_rc" -ne 0 ] && [ "$_rp_rc" -ne 1 ]; then
+        while IFS= read -r _rp_line; do
+          [ -n "$_rp_line" ] && _rp_append "$_rp_line"
+        done < "$_rp_tmp/audit"
+        cat "$_rp_tmp/audit"
+        _rp_stop "edit-landing: the audit exited $_rp_rc, so it could not grade the claims or could not write its receipt; resolve the lines above, then run the verb again"
+      fi
+      _rp_audit_native="$_rp_tmp_native/audit"
+    fi
+    _rp_node "$_rp_audit_native" prepare > "$_rp_tmp/result" 2> "$_rp_tmp/result.err"
+    _rp_rc=$?
+    if [ "$_rp_rc" -ne 0 ] || ! grep -q '^status ' "$_rp_tmp/result"; then
+      _rp_stop "prepare: the round-prepare module failed (exit $_rp_rc): $(head -n 1 "$_rp_tmp/result.err")"
+    fi
+    _rp_status="$(sed -n 's/^status //p' "$_rp_tmp/result" | tail -n 1)"
+    : > "$_rp_tmp/diff-paths"
+    while IFS= read -r _rp_line; do
+      case "$_rp_line" in
+        "log "*)
+          _rp_append "${_rp_line#log }" \
+            || _rp_stop "log: a run-log line could not be appended: ${_rp_line#log }" ;;
+        "diff "*) printf '%s\n' "${_rp_line#diff }" >> "$_rp_tmp/diff-paths" ;;
+      esac
+    done < "$_rp_tmp/result"
+    sed -n 's/^out //p' "$_rp_tmp/result"
+    if [ "$_rp_status" = "ok" ] && [ -s "$_rp_tmp/diff-paths" ]; then
+      _rp_diff="$_rp_root/.zensu/state/round-diff-${ZENSU_SESSION_KEY:-unbound}.patch"
+      _rp_base="HEAD"
+      [ -n "$_rp_baseline" ] && _rp_base="$_rp_baseline"
+      if [ -L "$_rp_diff" ]; then
+        echo "round_diff: not written — $_rp_diff is a symbolic link"
+      elif _tc_git -C "$_rp_wt" rev-parse --verify --quiet "$_rp_base^{commit}" >/dev/null 2>&1; then
+        : > "$_rp_diff"
+        while IFS= read -r _rp_path; do
+          if _tc_git -C "$_rp_wt" ls-files --error-unmatch -- "$_rp_path" >/dev/null 2>&1; then
+            _tc_git -C "$_rp_wt" -c core.quotePath=false --literal-pathspecs diff ${_rp_prefix:+"--src-prefix=a/$_rp_prefix/" "--dst-prefix=b/$_rp_prefix/"} "$_rp_base" -- "$_rp_path" >> "$_rp_diff" 2>/dev/null
+          elif [ -f "$_rp_wt/$_rp_path" ] && [ ! -L "$_rp_wt/$_rp_path" ]; then
+            (cd "$_rp_wt" && _tc_git -c core.quotePath=false diff --no-index ${_rp_prefix:+"--src-prefix=a/$_rp_prefix/" "--dst-prefix=b/$_rp_prefix/"} -- /dev/null "$_rp_path") >> "$_rp_diff" 2>/dev/null
+          fi
+        done < "$_rp_tmp/diff-paths"
+        echo "round_diff: $_rp_diff ($(wc -c < "$_rp_diff" | tr -d ' ') bytes, against $_rp_base)"
+      else
+        echo "round_diff: not written — $_rp_base names no commit"
+      fi
+    fi
+    case "$_rp_status" in
+      ok) echo "ROUND PREPARE — round $_rp_round prepared"; exit 0 ;;
+      stopped) exit 1 ;;
+      *) _rp_fallback; exit 2 ;;
+    esac
+    ;;
   --project-root)
     if [ "$#" -ne 1 ]; then
       echo "zensu-log.sh --project-root: takes no arguments" >&2
@@ -551,6 +927,63 @@ case "${1:-}" in
         ;;
     esac
     printf '%s\n' "$CLAUDE_PROJECT_DIR"
+    exit 0
+    ;;
+  --chain-work-tree)
+    cwt_session=""
+    cwt_project_dir=false
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --session)
+          if [ $# -lt 2 ]; then
+            echo "zensu-log.sh --chain-work-tree: --session requires a value" >&2
+            exit 2
+          fi
+          cwt_session="$2"
+          shift 2 ;;
+        --project-dir) cwt_project_dir=true; shift ;;
+        *) echo "zensu-log.sh --chain-work-tree: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    if [ -z "$cwt_session" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --chain-work-tree}"
+    fi
+    if ! cwt_session="$(zensu_resolve_session_id "$cwt_session")" || [ -z "$cwt_session" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    cwt_state="$(tdd_state_file "$cwt_session")" || cwt_state=""
+    if [ -z "$cwt_state" ]; then
+      echo "zensu-log.sh --chain-work-tree: current-session workflow path unavailable" >&2
+      exit 2
+    fi
+    cwt_ctx='{}'
+    if [ -e "$cwt_state" ] || [ -L "$cwt_state" ]; then
+      cwt_ctx="$(tdd_autopilot_context "$cwt_state" "$cwt_session" 2>/dev/null)" || {
+        echo "zensu-log.sh --chain-work-tree: corrupt or incomplete Autopilot linkage" >&2
+        exit 2
+      }
+    fi
+    cwt_line="$(_zensu_chain_work_tree "$cwt_ctx" "$CLAUDE_PROJECT_DIR")" || {
+      echo "zensu-log.sh --chain-work-tree: the chain's work tree could not be resolved; the line above names the cause" >&2
+      exit 2
+    }
+    cwt_path="${cwt_line#*$'\t'}"
+    if [ "$cwt_project_dir" = true ]; then
+      cwt_path="$(_zensu_chain_project_dir "$cwt_line" "$CLAUDE_PROJECT_DIR")" || {
+        echo "zensu-log.sh --chain-work-tree: the chain's project directory could not be resolved; the line above names the cause" >&2
+        exit 2
+      }
+    fi
+    case "$cwt_path" in
+      (*'"'*|*'$'*|*'`'*|*'\'*)
+        echo "zensu-log.sh --chain-work-tree: the chain's work tree contains a double quote, a dollar sign, a backtick or a backslash, and Zensu skills paste this path into double-quoted shell commands; move the work tree to a path without these characters" >&2
+        exit 2
+        ;;
+    esac
+    printf '%s\n' "$cwt_path"
     exit 0
     ;;
   --phase)
@@ -929,7 +1362,7 @@ case "${1:-}" in
     # SESSION id rather than of the project.
     #
     # The exit code and stdout are UNCHANGED, and the reason is the SKILLS, not a
-    # hook: `skills/{autopilot,autopilot-release,tdd,pr-team-review,pr-fix-findings,
+    # hook: `skills/{autopilot,autopilot-release,build,pr-team-review,pr-fix-findings,
     # self-review,reset-review-limit}` all run this verb and parse its stdout as
     # JSON, several of them failing closed on a mismatch. An earlier wording here
     # named `session-start-autopilot-resume.sh` instead, which does not call this
@@ -1277,7 +1710,7 @@ case "${1:-}" in
     # matrix below is not what it reads, and this line's placement is a readability
     # choice, not a constraint.
     [ "$seen_tdd_mode" = false ] || [ "$verb" = "--tdd-begin" ] || invalid_known_flag=true
-    # --plan names the session's TDD plan for the requirements-table gate below,
+    # --plan names the session's Zensu plan for the requirements-table gate below,
     # and belongs to exactly ONE verb for the same reason --tdd-mode does: a verb
     # added later inherits the refusal rather than silently accepting a flag only
     # --tdd-complete can act on.
@@ -1576,11 +2009,41 @@ case "${1:-}" in
         # Builtins in a subshell, not `env`: `env` is an external binary, and if it
         # cannot be resolved every scope call fails, which refuses this verb on a
         # repository git itself would read.
+        _tc_wt=""
+        _tc_wt_flag=""
+        _tc_wt_fault=0
+        if [ "$complete_ctx" != '{}' ]; then
+          if _tc_wt_line="$(_zensu_chain_work_tree "$complete_ctx" "$_tc_root")"; then
+            case "$_tc_wt_line" in
+              (work-tree$'\t'?*) _tc_wt="${_tc_wt_line#*$'\t'}" ;;
+            esac
+          else
+            _tc_wt_fault=1
+          fi
+        fi
+        [ -z "$_tc_wt" ] || _tc_wt_flag=' --work-tree "<the path zensu-log.sh --chain-work-tree prints>"'
         _tc_changes="$(_zensu_unqualified_change_count "$_tc_root")"
         [ "$_tc_changes" = unknown ] && _tc_changes=0
+        if [ "$_tc_wt_fault" -eq 1 ] \
+           && ! { [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ]; }; then
+          echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the work tree of this Autopilot-bound chain could not be resolved (the line above names the cause), and the edit-landing receipt gate and the requirements-table gate measure this chain's changes in that tree. Resolve the cause, then run --tdd-complete again." >&2
+          exit 1
+        fi
+        if [ -n "$_tc_wt" ]; then
+          _tc_wt_changes="$(_zensu_unqualified_change_count "$_tc_wt")"
+          [ "$_tc_wt_changes" = unknown ] && _tc_wt_changes=0
+          case "$_tc_changes:$_tc_wt_changes" in
+            (unavailable:*|*:unavailable) _tc_changes=unavailable ;;
+            (*) _tc_changes=$((_tc_changes + _tc_wt_changes)) ;;
+          esac
+        fi
         if [ "$_tc_changes" = unavailable ] \
            && ! { [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ]; }; then
-          echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — git could not list this worktree's changes against HEAD, and that count decides whether the edit-landing receipt gate and the requirements-table gate apply to this chain. Run git diff --name-only HEAD in the project root to see the git error and resolve it, then run --tdd-complete again." >&2
+          if [ -n "$_tc_wt" ]; then
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — git could not list the changes of the project root or of this chain's work tree against HEAD, and that count decides whether the edit-landing receipt gate and the requirements-table gate apply to this chain. Run git diff --name-only HEAD in the project root and in the path zensu-log.sh --chain-work-tree prints to see the git error and resolve it, then run --tdd-complete again." >&2
+          else
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — git could not list this worktree's changes against HEAD, and that count decides whether the edit-landing receipt gate and the requirements-table gate apply to this chain. Run git diff --name-only HEAD in the project root to see the git error and resolve it, then run --tdd-complete again." >&2
+          fi
           exit 1
         fi
         _tc_receipt_verdict() {
@@ -1589,6 +2052,7 @@ case "${1:-}" in
             let out = "unparseable";
             let claims = "0";
             let log = "";
+            let workTree = "";
             let fd = -1;
             try {
               const p = process.env.ZENSU_TC_RECEIPT;
@@ -1640,6 +2104,9 @@ case "${1:-}" in
                       claims = "?";
                     }
                     if (typeof j.log === "string") log = j.log;
+                    if (Object.prototype.hasOwnProperty.call(j, "workTree")) {
+                      workTree = typeof j.workTree === "string" && j.workTree !== "" && !/[\u0000-\u001f\u007f]/.test(j.workTree) ? j.workTree : "?";
+                    }
                   }
                 }
               }
@@ -1653,8 +2120,8 @@ case "${1:-}" in
               out = (e && e.code) ? "unreadable" : "unparseable";
             }
             finally { if (fd >= 0) { try { fs.closeSync(fd); } catch (e2) {} } }
-            process.stdout.write(out + "\t" + claims + "\t" + log);
-          ' 2>/dev/null || printf 'unavailable\t0\t'
+            process.stdout.write(out + "\t" + claims + "\t" + workTree + "\t" + log);
+          ' 2>/dev/null || printf 'unavailable\t0\t\t'
         }
         _tc_armed=0
         [ "$_tc_changes" != 0 ] && _tc_armed=1
@@ -1662,11 +2129,14 @@ case "${1:-}" in
         _tc_receipt_claims=0
         _tc_receipt_claims_bad=0
         _tc_receipt_log=""
+        _tc_receipt_work_tree=""
         if [ -f "$_tc_receipt" ] && [ ! -L "$_tc_receipt" ]; then
           _tc_receipt_read="$(_tc_receipt_verdict "$_tc_receipt")"
           _tc_receipt_state="${_tc_receipt_read%%$'\t'*}"
           _tc_receipt_rest="${_tc_receipt_read#*$'\t'}"
           _tc_receipt_claims="${_tc_receipt_rest%%$'\t'*}"
+          _tc_receipt_rest="${_tc_receipt_rest#*$'\t'}"
+          _tc_receipt_work_tree="${_tc_receipt_rest%%$'\t'*}"
           _tc_receipt_log="${_tc_receipt_rest#*$'\t'}"
           # `?` is the reader's unreadable-count marker; anything else non-numeric
           # is a wire-format fault. Both mean the same thing to this gate — the
@@ -1738,7 +2208,7 @@ case "${1:-}" in
                 . "$_tc_bounded_lib" 2>/dev/null || true
               fi
               if command -v zensu_run_bounded >/dev/null 2>&1; then
-                _tc_inventory="$(zensu_run_bounded bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
+                _tc_inventory="$(zensu_run_bounded bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" ${_tc_wt:+--work-tree "$_tc_wt"} 2>/dev/null)"
               else
                 # DISCLOSED, not silent. This block already sets and reports
                 # `library-unavailable` for its sibling file, and an absent
@@ -1748,7 +2218,7 @@ case "${1:-}" in
                 # Running it anyway is still right (losing the claim channel
                 # would silently disarm the gate), but saying nothing was not.
                 echo "zensu-log.sh --tdd-complete: CLAIM INVENTORY UNBOUNDED — the shared watchdog ladder (${_tc_bounded_lib:-<path unresolved>}) could not be loaded, so the claim inventory ran with no deadline. A child that never returns cannot be interrupted here and this verb would not complete." >&2
-                _tc_inventory="$(bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
+                _tc_inventory="$(bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" ${_tc_wt:+--work-tree "$_tc_wt"} 2>/dev/null)"
               fi
               _tc_inventory_rc=$?
               # The count is read on BOTH arms. A child that could not complete
@@ -1836,9 +2306,31 @@ case "${1:-}" in
           # is a file the session can write, so it bounds accidents, not intent.
           if [ ! -f "$_tc_receipt" ] || [ -L "$_tc_receipt" ]; then
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session (a symlink at that path is refused rather than followed, so it does not count as one). A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
-            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"" >&2
+            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"${_tc_wt_flag}" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
+          fi
+          if [ "$_tc_receipt_state" = "clean" ]; then
+            _tc_tree_refusal=""
+            if [ -n "$_tc_wt" ]; then
+              _tc_receipt_tree_abs=""
+              case "$_tc_receipt_work_tree" in
+                (''|'?'|/*|..|../*|*/..|*/../*) ;;
+                (*) _tc_receipt_tree_abs="$(cd "$_tc_root/$_tc_receipt_work_tree" 2>/dev/null && pwd -P)" || _tc_receipt_tree_abs="" ;;
+              esac
+              if [ -z "$_tc_receipt_work_tree" ]; then
+                _tc_tree_refusal="graded the anchor's own change set, but this Autopilot-bound chain works in its own work tree (the path zensu-log.sh --chain-work-tree prints), so that clean verdict proves nothing about this chain's claims. Re-run the Phase 6 step 5b audit over the chain's work tree:"
+              elif [ -z "$_tc_receipt_tree_abs" ] || [ "$_tc_receipt_tree_abs" != "$(cd "$_tc_wt" 2>/dev/null && pwd -P)" ]; then
+                _tc_tree_refusal="names a work tree that is not this Autopilot-bound chain's work tree (the path zensu-log.sh --chain-work-tree prints), or one that could not be read, so that clean verdict proves nothing about this chain's claims. Re-run the Phase 6 step 5b audit over the chain's work tree:"
+              fi
+            elif [ -n "$_tc_receipt_work_tree" ]; then
+              _tc_tree_refusal="graded a work tree other than the anchor, but this chain works in the anchor itself, so that clean verdict proves nothing about this chain's claims. Re-run the Phase 6 step 5b audit without --work-tree:"
+            fi
+            if [ -n "$_tc_tree_refusal" ]; then
+              echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session ${_tc_tree_refusal}" >&2
+              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"${_tc_wt_flag}" >&2
+              exit 1
+            fi
           fi
           if [ "$_tc_receipt_state" = "clean" ] && [ -n "${_tc_run_log:-}" ] && [ -n "${_tc_receipt_log:-}" ]; then
             # Separator-blind, and NOT `basename`: an `edit-landing-v1` receipt
@@ -1888,7 +2380,7 @@ case "${1:-}" in
               # `.zensu/logs`, so rendering it raw inside a double-quoted
               # command the model is told to run was the one unscreened value
               # left in this refusal.
-              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log \"$(_tc_render_stem "${_tc_run_log:-}")\" --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"" >&2
+              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log \"$(_tc_render_stem "${_tc_run_log:-}")\" --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"${_tc_wt_flag}" >&2
               exit 1
             fi
           fi
@@ -1931,7 +2423,7 @@ case "${1:-}" in
             case "$_tc_receipt_state" in
               unclean)
                 _tc_verdict_text="records a FAILED audit (\`clean: false\`) — a claimed edit did not land, or nothing gradeable was claimed"
-                _tc_remedy_text="The only in-chain clearance is to LAND the claimed edit at the path the claim names and re-run the audit — the run log is append-only and the grader retires no claim, so withdrawing one in prose does not clear this, and re-landing foreign-root work in the anchor does not retire the claim that named the other root."
+                _tc_remedy_text="The in-chain clearance is to LAND the claimed edit at the path the claim names and re-run the audit — the run log is append-only and a claimed path is never retired, so withdrawing one in prose does not clear this, and re-landing foreign-root work in the anchor does not retire the claim that named the other root. Only an entry the audit reported as a malformed or pattern claim takes the CLAIM CORRECTED line its verdict names."
                 ;;
               no-verdict)
                 _tc_verdict_text="records no verdict: its \`clean\` field is absent or is not a boolean, so it proves nothing about the claimed edits"
@@ -1955,7 +2447,7 @@ case "${1:-}" in
                 ;;
             esac
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session ${_tc_verdict_text}. Only a receipt recording \`clean: true\` establishes that the claimed edits landed; the audit writes the receipt BEFORE its own exit status, so its presence alone proves nothing. ${_tc_remedy_text} Re-run the Phase 6 step 5b audit:" >&2
-            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"" >&2
+            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"${_tc_wt_flag}" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
           fi
@@ -1974,7 +2466,7 @@ case "${1:-}" in
         # the plan's `## Requirements` table. Without a usable one it takes its
         # legacy stop and reports nothing — and /zensu:autopilot's CONVERGE stage,
         # the ONLY edge into OPEN_PR, then passes on an audit that examined
-        # nothing. Prose asked for the table (skills/tdd/references/planning.md Phase 2 step 1b)
+        # nothing. Prose asked for the table (skills/build/references/planning.md Phase 2 step 1b)
         # and the only check was the warning-level step 6c, which skips silently
         # when the table is absent; measured across real projects a third of plans
         # carried none. Same move as the receipt gate above: make the obligation a
@@ -2005,7 +2497,7 @@ case "${1:-}" in
           fi
           if [ -f "$_tc_receipt" ] && command -v node >/dev/null 2>&1; then
             # Derive from the receipt's own record of the run log it audited. The
-            # plan and the log are created from one {SESSION_TS}_tdd-{slug} stem,
+            # plan and the log are created from one {SESSION_TS}_build-{slug} stem,
             # so .zensu/logs/<stem>.log names .zensu/plans/<stem>.md. Deriving
             # through the receipt — rather than taking the newest plan by mtime,
             # as /zensu:converge does — is what anchors this gate to THIS session,
@@ -2172,7 +2664,7 @@ case "${1:-}" in
             case "$_rq_rc" in
               0) ;;
               3|4)
-                echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's TDD plan carries no usable \`## Requirements\` table, so /zensu:converge would audit nothing and still close clean:" >&2
+                echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's Zensu plan carries no usable \`## Requirements\` table, so /zensu:converge would audit nothing and still close clean:" >&2
                 echo "  ${_rq_verdict}" >&2
                 echo "Fill the table with AC-###/FR-### rows per Phase 2 step 1b, then re-run. Pass --plan <path> when the plan is not the run log's sibling under .zensu/plans/." >&2
                 echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
@@ -2407,9 +2899,9 @@ case "${1:-}" in
                   exit "$chain_done_rc"
                 }
                 if [ "$chain_change_count" = "unavailable" ]; then
-                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. The chain's review is reopened: run git diff --name-only HEAD in the project root to see the git error and resolve it, then resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. The chain's review is reopened: run git diff --name-only HEAD in the project root to see the git error and resolve it, then resume the /zensu:build Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
                 else
-                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but the worktree reports ${chain_change_count} changed file(s). The chain's review is reopened: resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but the worktree reports ${chain_change_count} changed file(s). The chain's review is reopened: resume the /zensu:build Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
                 fi
                 exit 1
               }
@@ -2426,7 +2918,7 @@ case "${1:-}" in
                 if [ "$chain_change_count" = "unavailable" ]; then
                   echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but git could not list this worktree's changes against HEAD, so that claim cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or review the changes through the zensu:code-reviewer chain and close with --claimed-review-ticket." >&2
                 else
-                  echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:tdd for a fresh guarded chain. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+                  echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:build for a fresh guarded chain. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
                 fi
                 exit 1
               }
@@ -2463,7 +2955,7 @@ case "${1:-}" in
           pass)
             if [ "$claimed_ticket_seen" != "true" ] \
               || _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
-              _zensu_full_suite_gate "$session_val" || exit 1
+              _zensu_full_suite_gate "$session_val" bound "$autopilot_ctx" || exit 1
               _zensu_acceptance_gate "$session_val" 1 "$(_zensu_autopilot_validate_option "$done_run")" || exit 1
             fi
             ;;
@@ -2499,9 +2991,9 @@ case "${1:-}" in
               exit "$review_done_rc"
             }
             if [ "$review_change_count" = "unavailable" ]; then
-              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or resume the /zensu:tdd Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
+              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or resume the /zensu:build Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
             else
-              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but it reports ${review_change_count} changed file(s). Resume the /zensu:tdd Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but it reports ${review_change_count} changed file(s). Resume the /zensu:build Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
             fi
             exit 1
           }
@@ -2722,6 +3214,11 @@ case "$cmd" in
       echo "zensu-log.sh append: the credential scanner is missing or is a symlink; the line will be written unscanned" >&2
       secret_lib=""
     fi
+    claims_lib="$redact_lib_dir/edit-landing-claims-v1.js"
+    if [ ! -f "$claims_lib" ] || [ -L "$claims_lib" ]; then
+      echo "zensu-log.sh append: the claim checker is missing or is a symlink; the line will be written unchecked" >&2
+      claims_lib=""
+    fi
     if [ -z "$redact_lib_dir" ] || [ ! -f "$redact_lib" ] || [ -L "$redact_lib" ]; then
       echo "zensu-log.sh append: the artifact redactor is missing — refusing to write an unredacted log line" >&2
       exit 2
@@ -2772,13 +3269,14 @@ case "$cmd" in
     # append/truncate primitive on any file on the same filesystem. The module
     # opens with O_NOFOLLOW and judges the DESCRIPTOR, so the object checked is
     # the object written.
-    if ! printf '%s' "$msg_val" \
+    printf '%s' "$msg_val" \
       | ZENSU_REDACT_LIB="$redact_lib" \
         ZENSU_APPEND_LOG="$log_val" \
         ZENSU_APPEND_PREFIX="$(_zensu_log_timestamp_prefix "$start_val")" \
         ZENSU_APPEND_TRUNCATE="$truncate_val" \
         ZENSU_APPEND_PROJECT="${CLAUDE_PROJECT_DIR:-}" \
         ZENSU_SECRET_PATTERNS="$secret_lib" \
+        ZENSU_CLAIMS_LIB="$claims_lib" \
         node -e '
         // Wrapped in a function because `node -e` evaluates at true top level,
         // where `return` is a syntax error.
@@ -2816,7 +3314,7 @@ case "$cmd" in
           // SCOPED TO `replace`, and the scope was MEASURED rather than assumed.
           // Applying cwd-or-ancestor to every mode denies a working and ordinary
           // call shape: an absolute --log issued from an unrelated cwd, which is
-          // how five checks in the suite, and the log commands of the TDD chains
+          // how five checks in the suite, and the log commands of the build chains
           // in this repo, invoke the verb. An unbound append adds a line to a
           // foreign audit log; an unbound --truncate DESTROYS one, and only the
           // second is worth denying that shape over.
@@ -2923,6 +3421,57 @@ case "$cmd" in
                 "zensu-log.sh append: credential scan unavailable; the line was written unscanned\n");
             }
           }
+          if (process.env.ZENSU_CLAIMS_LIB) {
+            let claims = null;
+            try {
+              claims = require(process.env.ZENSU_CLAIMS_LIB);
+            } catch (_) {
+              process.stderr.write("zensu-log.sh append: the claim checker could not be loaded; the line was written unchecked\n");
+            }
+            if (claims) {
+              const shown = (value) => JSON.stringify(String(value).replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 200));
+              let logLines = [];
+              if (process.env.ZENSU_APPEND_TRUNCATE !== "1") {
+                let fd = -1;
+                try {
+                  fd = fs.openSync(log, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+                  const stat = fs.fstatSync(fd);
+                  if (!stat.isFile() || stat.nlink !== 1 || stat.size > 16777216) throw new Error("unsafe run log");
+                  logLines = fs.readFileSync(fd, "utf8").split("\n").map((entry) => entry.replace(/\r$/, ""));
+                  if (logLines.length && logLines[logLines.length - 1] === "") logLines.pop();
+                } catch (_) {
+                  logLines = undefined;
+                } finally {
+                  if (fd >= 0) fs.closeSync(fd);
+                }
+              }
+              const messageLines = message.split("\n");
+              const checkRoots = expected ? [expected, target.projectRoot] : [target.projectRoot];
+              for (const [index, messageLine] of messageLines.entries()) {
+                const verdict = claims.appendCheck(messageLine, {
+                  roots: checkRoots,
+                  logLines: logLines && logLines.concat(messageLines.slice(0, index)),
+                });
+                if (verdict.ok) continue;
+                if (verdict.kind === "correction") {
+                  process.stderr.write("zensu-log.sh append: refused (malformed-correction: " + verdict.reason + ")"
+                    + " — a correction reads CLAIM CORRECTED — <label> (line <N>): <path>, … [| not claimed: <entry>, …]"
+                    + " and names an earlier files: claim of that label that holds a pattern or prose. Nothing was written.\n");
+                } else {
+                  const names = { brace: "brace pattern", glob: "glob", prose: "words, not one path", pattern: "pattern" };
+                  const listed = verdict.offending.map((item) => shown(item.token) + " (" + (names[item.kind] || item.kind) + ")").join(", ");
+                  const fix = verdict.fix && messageLines.length === 1
+                    ? " Write instead: " + verdict.fix
+                    : " List the files the step changed, comma-separated, and put any commentary after \" | \".";
+                  process.stderr.write("zensu-log.sh append: refused (malformed-claim) — a files: list takes comma-separated paths"
+                    + " relative to the chain work tree, each one path, with any commentary after \" | \". Not one path each: "
+                    + listed + ". Nothing was written." + fix + "\n");
+                }
+                process.exitCode = 3;
+                return;
+              }
+            }
+          }
           const roots = expected ? [expected, target.projectRoot] : target.projectRoot;
           const line = (process.env.ZENSU_APPEND_PREFIX || "")
             + mod.redact(message, { projectRoot: roots, home: mod.defaultHome() }) + "\n";
@@ -2932,7 +3481,12 @@ case "$cmd" in
           });
           if (!result.written) { refuse(result.reason); }
         }());
-        '; then
+        '
+    append_rc=$?
+    if [ "$append_rc" -eq 3 ]; then
+      exit 2
+    fi
+    if [ "$append_rc" -ne 0 ]; then
       echo "zensu-log.sh append: refusing to write — the log path is not a .zensu artifact of this project, is not a plain unlinked file, or redaction failed" >&2
       exit 2
     fi

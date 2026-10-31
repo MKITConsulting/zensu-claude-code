@@ -827,6 +827,20 @@ FAIL_CLOSED_STDERR="$(cat "$TMP/fail-closed.stderr")"
 [ -z "$FAIL_CLOSED_STDOUT" ] && check "launcher failure suppresses child stdout" PASS || check "launcher failure suppresses child stdout" FAIL
 [ "$FAIL_CLOSED_STDERR" = 'zensu: reviewer capability gate unavailable: the policy check exited with status 127' ] && check "launcher failure emits only a sanitized diagnostic that names the exit status" PASS || check "launcher failure emits only a sanitized diagnostic that names the exit status (got '$FAIL_CLOSED_STDERR')" FAIL
 
+GATE_TMPDIR="$RAW_TMP/gate-tmpdir"
+mkdir -p "$GATE_TMPDIR"
+GATE_TMP_OUT="$(payload - Write '{"file_path":"x"}' | TMPDIR="$GATE_TMPDIR" gate_env "$PLUGIN" "$PLUGIN_DATA")"
+GATE_TMP_STATUS=$?
+GATE_NO_TMP_OUT="$(payload - Write '{"file_path":"x"}' | TMPDIR="$RAW_TMP/no-such-tmpdir" gate_env "$PLUGIN" "$PLUGIN_DATA")"
+GATE_NO_TMP_STATUS=$?
+DENIED_UNDER_NO_TMP="$(payload zensu:code-reviewer Write '{"file_path":"x"}' | TMPDIR="$RAW_TMP/no-such-tmpdir" decision)"
+if [ "$GATE_TMP_STATUS" -eq 0 ] && [ -z "$GATE_TMP_OUT" ] && [ -z "$(ls -A "$GATE_TMPDIR")" ] \
+    && [ "$GATE_NO_TMP_STATUS" -eq 0 ] && [ -z "$GATE_NO_TMP_OUT" ] && [ "$DENIED_UNDER_NO_TMP" = deny ]; then
+  check "the gate decides without a temporary file, so a missing TMPDIR changes no decision" PASS
+else
+  check "the gate decides without a temporary file (status=$GATE_TMP_STATUS/$GATE_NO_TMP_STATUS reviewer=$DENIED_UNDER_NO_TMP)" FAIL
+fi
+
 WRONG_ROOT="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=wrong-root decision)"
 [ "$WRONG_ROOT" = deny ] && check "PreToolUse plugin-root mismatch denies before capability evaluation" PASS || check "PreToolUse plugin-root mismatch denies before capability evaluation" FAIL
 
@@ -1142,9 +1156,9 @@ unit_check_done "every unit file the registry gives this suite was graded"
 
 SANDBOX_MISSING=""
 for text in docs/configuration.md docs/session-control.md docs/gates.md docs/review-chain.md \
-  docs/tdd-manager-workflow.md docs/session-control-release-gate.md evals/session-control/README.md \
+  docs/build-workflow.md docs/session-control-release-gate.md evals/session-control/README.md \
   skills/gauntlet-loop/SKILL.md skills/gauntlet-loop/references/harness.md skills/ghost-scan/SKILL.md \
-  skills/cover/SKILL.md skills/docs/SKILL.md skills/tdd/SKILL.md \
+  skills/cover/SKILL.md skills/docs/SKILL.md skills/build/SKILL.md \
   skills/session-trail/references/limits.md skills/session-trail/references/takeover.md; do
   grep -qE 'not a sandbox|no sandbox' "$PLUGIN/$text" || SANDBOX_MISSING="$SANDBOX_MISSING $text"
 done

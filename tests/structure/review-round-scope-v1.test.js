@@ -242,3 +242,25 @@ test('the reset marker matches only at line start and readLog is exported', () =
   assert.ok(!scope.RESET.test('note: REVIEW BUDGET RESET mentioned mid-line'));
   assert.equal(typeof scope.readLog, 'function');
 });
+
+test('a brace claim widens to its members and a pattern or prose token degrades the round', () => {
+  const brace = scope.roundScope({ text: 'R1-S1 IMPL completed — files: l/{en,de}/s.json, t.ts', round: 1 });
+  assert.equal(brace.status, 'ok');
+  assert.deepEqual(brace.files, ['l/de/s.json', 'l/en/s.json', 't.ts']);
+  for (const files of ['l/*/g.json', 'src/a.ts src/b.ts', 'src/a.ts (new)']) {
+    const r = scope.roundScope({ text: 'R1-S1 IMPL completed — files: ' + files, round: 1 });
+    assert.equal(r.status, 'degraded', files);
+    assert.equal(r.reason, 'malformed-claim', files);
+  }
+});
+
+test('a path prefix spells every delta path the way the reviewers read it', () => {
+  const r = scope.roundScope({ text: 'R1-S1 IMPL completed — files: src/a.ts', round: 1, prefix: '.claude/worktrees/w/' });
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.files, ['.claude/worktrees/w/src/a.ts']);
+  assert.equal(scope.roundScope({ text: 'R1-S1 IMPL completed — files: a.ts', round: 1, prefix: '../out' }).reason, 'bad-prefix');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'round-scope-prefix-'));
+  const log = path.join(dir, 'run.log');
+  fs.writeFileSync(log, 'R1-S1 IMPL completed — files: b.ts\n');
+  assert.equal(scope.cliMain(['--round', '1', '--log', log, '--path-prefix', 'w']), 'file w/b.ts\nsummary status=ok round=1 files=1 claims=1');
+});

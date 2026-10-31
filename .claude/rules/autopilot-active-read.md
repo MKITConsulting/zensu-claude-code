@@ -100,10 +100,19 @@ the lenient verb is never mistaken for an oversight. The verdicts:
   `O2d` holds the lease over an own run (the unchanged hook claimed the ticket and routed the
   review) and requires the lease helper's own exit 0, `O2e` holds it for a session without a
   run and `O2g` for one whose own run is `CANCELLED`, and both require the claim and the
-  routing, and `O2f` plants unsafe storage.
-- **`post-review-tdd-delegate.sh`, the bound preflight — lenient, deliberately.** Its
-  `|| exit 0` ends the hook before the claim on every non-zero status, so 1 and 5 already
-  share one closed consequence.
+  routing, and `O2f` plants unsafe storage. On a background arrival the hook has armed an EXIT
+  trap that retires record and arrival note on every refusal, so 5 there clears that trap before
+  the hook ends: a lease, storage or path fault keeps the pair for the next Stop or prompt rather
+  than retiring an arrived report. `BR9i` in `tests/structure/test-background-review.sh` plants
+  unsafe storage under a hand-back and requires the pair kept and the next prompt's claim.
+- **`post-review-tdd-delegate.sh`, the bound preflight — strict.** Its `|| exit 0` ended the
+  hook before the claim on every non-zero status, so 1 and 5 shared one closed consequence until
+  the background arrival path armed that EXIT trap: a lease fault read as 1 then retired an
+  arrived report as if the claim had been refused, and the next bound Stop ordered a full
+  re-review. 5 now clears the trap before the hook ends, and every other non-zero status still
+  ends it, retiring the pair on an arrival. `BR14f` holds the real project lease through a bound
+  hand-back and requires record, note and ticket kept; it needs no time bound, because a
+  lease-free run claims the ticket, which the check refuses.
 - **`zensu-log.sh --autopilot-status` — strict.** Exit 1 is the documented "no active durable
   run": `/zensu:reset-review-limit` routes its standalone branch on it, `/zensu:self-review`
   reads it as "no owned `TDD_RUNNING` status", and the rc-1 disclosure asserts that this
@@ -191,9 +200,14 @@ The callers, judged by the same test:
   be proven safely" block stays for every other status. `S16g` drives it through the same
   runtime with `ZENSU_AUTOPILOT=off` and requires the run record unchanged; the unchanged hook
   released.
-- **`post-review-tdd-delegate.sh`, the standalone workspace preflight — no edit.** It already
-  treats every status other than 1 as held, so the verb's 5 ends the hook before the claim and
-  the ticket stays unconsumed; the missing piece was the verb. `O2h` in
+- **`post-review-tdd-delegate.sh`, the standalone workspace preflight — 5 keeps an arrived
+  report.** It already treated every status other than 1 as held, so the verb's 5 ends the hook
+  before the claim and the ticket stays unconsumed; the missing piece was the verb. On a
+  background arrival 5 also clears the EXIT trap, as the owner-scoped arm does, while a proven
+  holder (0) or an inconsistent inventory (2) still retires the pair. `BR9k` in
+  `tests/structure/test-background-review.sh` holds the lease over a background hand-back in a
+  tree another session's run holds and requires the pair and the ticket kept, then requires a
+  lease-free prompt, whose workspace read answers 0, to retire both. `O2h` in
   `tests/structure/test-post-review-outer-ownership-root.sh` holds the lease for the whole hook
   while a foreign run holds the tree and this session owns none, so the owner-scoped look
   answers 1 and the workspace read decides; the unchanged hook claimed the ticket and routed the
@@ -261,4 +275,8 @@ the strictest class of every commit since the previous tag, including the re-anc
 change stacks on. The in-place separation of the reconcile and the workspace read is `patch` on
 the same walk: two library verbs answer 5 where they answered 1 or 2, every caller of both ships
 in the same tree as the verbs, no hook, matcher, key set, schema field, config key or attestation
-moves, and the two new Stop arms block where the old ones blocked or released.
+moves, and the two new Stop arms block where the old ones blocked or released. The arrival-path
+arms of the post-review delegate are `patch` on the same walk: the bound preflight's switch to the
+strict verb ends the hook before the claim on every status it ended it on before, and the three
+5 arms keep a record and a note that a refusal used to retire, with no hook, matcher, key set or
+schema field moved.

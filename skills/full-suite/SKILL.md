@@ -24,7 +24,7 @@ user decide.
 
 ## What the choice does
 
-With CI runs in effect, `/zensu:tdd` never runs the full suite locally: Phase 6 runs the
+With CI runs in effect, `/zensu:build` never runs the full suite locally: Phase 6 runs the
 tests affected by the change through the evidence runner, `--evidence-run --scope full`
 refuses, and the chain terminus passes as `FULL SUITE — deferred-ci` when every local
 test run on the current tree is green. The full suite then runs in CI once a pull
@@ -33,7 +33,7 @@ request is opened or updated. A red pull-request pipeline is possible and accept
 CI runs take effect only while the plugin has VERIFIED the pipeline: a workflow under
 `.github/workflows/` triggers on `pull_request`, and a job that looks like a test run
 concluded success or failure in a recent pull-request run. The verification is cached
-for 24 hours and refreshed at the start of every `/zensu:tdd` chain. Without it the
+for 24 hours and refreshed at the start of every `/zensu:build` chain. Without it the
 chain runs the full suite locally, exactly as before, and the policy line names the
 reason. Only GitHub.com repositories are supported.
 

@@ -83,8 +83,10 @@ for bucket in "Positive" "Improvements" "Risks"; do
 done
 
 # Terminal-stage mechanics.
-grep -qF 'git -C "$TOP" -c core.quotePath=false diff --name-only HEAD' "$SKILL_MD" && grep -qF 'git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard' "$SKILL_MD" \
-  && check "V7 lists session changes via the repo-root-anchored diff + untracked union" PASS || check "V7 anchored changed-file union" FAIL
+grep -qF 'zensu-edit-landing.sh" --change-set --project "$PROJECT_ROOT" --work-tree "$WT" ${BASELINE_SHA:+--baseline "$BASELINE_SHA"}' "$SKILL_MD" \
+  && grep -qF 'WT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --chain-work-tree)"' "$SKILL_MD" \
+  && ! grep -qF 'ls-files --others --exclude-standard' "$SKILL_MD" \
+  && check "V7 lists session changes through the library's change set of the chain's work tree" PASS || check "V7 change set of the chain's work tree" FAIL
 grep -qF 'selfReviewFixed' "$SKILL_MD" && check "V8 references selfReviewFixed latch" PASS || check "V8 selfReviewFixed latch" FAIL
 grep -qF -- '--self-review-fixed' "$SKILL_MD" && check "V9 sets latch via --self-review-fixed marker" PASS || check "V9 --self-review-fixed marker" FAIL
 grep -qF -- '--chain-done' "$SKILL_MD" && check "V10 finalizes via --chain-done (owns terminus)" PASS || check "V10 --chain-done finalize" FAIL
@@ -179,7 +181,7 @@ else
 fi
 
 # V25 — Phase 5 checkpoints are scoped, so the full suite runs only in the Phase 6 audit
-# and again in the /zensu:tdd convergence branch. This stage's fix round is the LAST edit
+# and again in the /zensu:build convergence branch. This stage's fix round is the LAST edit
 # of the chain, so when it edits, its own re-run is the only thing standing between the
 # user and a closing verdict measured before that edit.
 if grep -qF -- 'Phase 6 **step 1 full suite**' "$SKILL_MD" \

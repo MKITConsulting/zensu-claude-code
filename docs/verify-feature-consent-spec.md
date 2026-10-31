@@ -382,7 +382,7 @@ session can write.
 7. **Docs.** `docs/verify-feature.md` (operator how-to: consent flow, setup, attach,
    policy for CI/desktop, the residuals), README docs-index row and skill-table wording,
    `docs/configuration.md` hook rows and count, `docs/gates.md` gate count and a
-   §Consent Gate section, `docs/architecture.md` anchors, `docs/tdd-manager-workflow.md`
+   §Consent Gate section, `docs/architecture.md` anchors, `docs/build-workflow.md`
    cross-reference. Default: the residuals in §6.5 appear verbatim in `docs/gates.md`.
 8. **Suites.** `tests/structure/test-verify-consent.sh` (hook pair end to end with a stub
    payload, memory shape refusals, floor denials, matcher pin), the module's

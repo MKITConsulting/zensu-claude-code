@@ -23,7 +23,7 @@ PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 EXAMPLE_CONFIG="$PLUGIN_DIR/config.example.json"
 SKILL="$PLUGIN_DIR/skills/autopilot-adopt/SKILL.md"
 DOC_CONFIG="$PLUGIN_DIR/docs/configuration.md"
-DOC_WORKFLOW="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
+DOC_WORKFLOW="$PLUGIN_DIR/docs/build-workflow.md"
 SUITE_OVERVIEW="$PLUGIN_DIR/tests/SUITE-OVERVIEW.md"
 
 PASS=0; FAIL=0
@@ -467,7 +467,7 @@ else
   check "B6c fixture could not build a future-beacon run" FAIL
 fi
 
-# --- B5 a live inner TDD chain is refused, exit 3 (AC-004) -------------------
+# --- B5 a live inner build chain is refused, exit 3 (AC-004) -------------------
 # Its own run and its own tree, because reaching TDD_RUNNING is a one-way trip
 # and the main fixture is still needed at PLANNING.
 TDDP="$TMP/tddrun"; mkdir -p "$TDDP"
@@ -495,11 +495,11 @@ if autopilot_begin_run adopt_tdd_run "$TDD_OWNER" "$TDDP" >/dev/null 2>&1 \
     # record and gets the same exit 3. Advising it sent the reader to an action that
     # cannot clear the refusal.
     if [ "$B5_RC" -eq 3 ] && [ "$(digest "$TDD_RUN_FILE")" = "$BEFORE_B5" ] \
-      && grep -qF 'live inner TDD chain' "$TMP/b5.err" \
+      && grep -qF 'live inner build chain' "$TMP/b5.err" \
       && grep -qF 'blocking that chain does not make the run adoptable' "$TMP/b5.err" \
       && grep -qF '/zensu:autopilot-release' "$TMP/b5.err" \
       && ! grep -qF 'finish or block that chain before adopting' "$TMP/b5.err"; then
-      check "B5 a run with a live inner TDD chain is refused with exit 3" PASS
+      check "B5 a run with a live inner build chain is refused with exit 3" PASS
     else
       check "B5 TDD_RUNNING refusal (rc=$B5_RC, expected 3)" FAIL
     fi
@@ -1120,7 +1120,7 @@ if autopilot_begin_run adopt_blk_run "$BLK_OWNER" "$BLKP" >/dev/null 2>&1 \
     run_verb "$BLKP" adopt_blk_taker --autopilot-adopt --run adopt_blk_run --confirm \
       >/dev/null 2>"$TMP/b18.err"
     B18_RC=$?
-    if [ "$B18_RC" -eq 3 ] && grep -qF 'live inner TDD chain' "$TMP/b18.err" \
+    if [ "$B18_RC" -eq 3 ] && grep -qF 'live inner build chain' "$TMP/b18.err" \
       && grep -qF 'blocking that chain does not make the run adoptable' "$TMP/b18.err" \
       && [ "$(digest "$BLK_RUN_FILE")" = "$BEFORE_B18" ]; then
       check "B18 a run blocked out of TDD_RUNNING is refused on its pending stage" PASS
@@ -1131,7 +1131,7 @@ if autopilot_begin_run adopt_blk_run "$BLK_OWNER" "$BLKP" >/dev/null 2>&1 \
     check "B18 fixture could not reach BLOCKED with blocked.from TDD_RUNNING" FAIL
   fi
 else
-  check "B18 fixture could not build a blocked TDD run" FAIL
+  check "B18 fixture could not build a blocked build run" FAIL
 fi
 
 # --- B19 the already-owner path repairs a missing pointer --------------------
@@ -1322,7 +1322,7 @@ b34_arm() {
     [ "$rc" -eq 0 ] && [ -f "$ptr" ] || ok=false
   else
     [ "$rc" -eq 3 ] && [ ! -e "$ptr" ] || ok=false
-    grep -qF 'its inner TDD chain is driven by another session' "$err" || ok=false
+    grep -qF 'its inner build chain is driven by another session' "$err" || ok=false
   fi
   B34_DETAIL="$B34_DETAIL $arm:rc=$rc,pointer=$( [ -e "$ptr" ] && echo present || echo absent)"
   [ "$ok" = true ]

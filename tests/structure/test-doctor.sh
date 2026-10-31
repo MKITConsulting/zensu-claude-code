@@ -182,6 +182,9 @@ HOOK_ARGS_READER="$(
     ! -path '*/node_modules/*' ! -path '*/results/*' -print \
     | while IFS= read -r reader; do
         if [ "$reader" != "$PLUGIN_DIR/tests/structure/test-doctor.sh" ] \
+          && [ "$reader" != "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" ] \
+          && [ "$reader" != "$PLUGIN_DIR/evals/session-control/lib/upgrade-hook-contract.js" ] \
+          && [ "$reader" != "$PLUGIN_DIR/evals/session-control/tests/upgrade-provider-selftest.js" ] \
           && grep -qF 'hooks.json' "$reader" \
           && hook_args_tolerated "$reader"; then
           printf '%s\n' "${reader#$PLUGIN_DIR/}"
@@ -190,9 +193,9 @@ HOOK_ARGS_READER="$(
       done
 )"
 if [ -z "$HOOK_ARGS_READER" ]; then
-  check "P2n all hook-manifest readers parse only the documented command field" PASS
+  check "P2n only hooks/lib/hook-registration-v1.js, the evaluator-owned upgrade contract and the fake host of the provider selftest read the args of an exec-form entry" PASS
 else
-  check "P2n undocumented hook args tolerance remains in $HOOK_ARGS_READER" FAIL
+  check "P2n a hook-manifest reader other than hooks/lib/hook-registration-v1.js, the evaluator-owned upgrade contract and the fake host of the provider selftest reads exec-form args: $HOOK_ARGS_READER" FAIL
 fi
 HOOK_ARGS_DIR="$(mktemp -d 2>/dev/null)" || HOOK_ARGS_DIR=""
 if [ -n "$HOOK_ARGS_DIR" ]; then
@@ -524,13 +527,16 @@ VF_NOREC_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-norec.XXXXXX")" || exit
 cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_NOREC_ROOT/" 2>/dev/null
 node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const recorder = "/hooks/post-browser-navigation-consent.sh";
-  const before = JSON.stringify(registry).includes(recorder);
+  const registers = (hook) => reg.hookEntries(hook, "PostToolUse").some((entry) => entry.command.includes(recorder));
+  const registered = () => (reg.registeredHooks(registry, "PostToolUse") || []).some((entry) => entry.command.includes(recorder));
+  const before = registered();
   registry.hooks.PostToolUse = (registry.hooks.PostToolUse || []).filter(
-    (group) => !(group.hooks || []).some(
-      (hook) => typeof hook.command === "string" && hook.command.includes(recorder)));
-  if (!before || JSON.stringify(registry).includes(recorder)) process.exit(1);
+    (group) => !(group.hooks || []).some(registers));
+  if (!before || registered()) process.exit(1);
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
 ' "$VF_NOREC_ROOT/hooks/hooks.json" \
   && check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" PASS \
@@ -554,13 +560,15 @@ case "$(vf_copy_doctor "$VF_VALID_POLICY")" in
 esac
 node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const gate = "/hooks/pre-browser-navigation-consent.sh";
   const moved = [];
   for (const group of registry.hooks.PreToolUse || []) {
     const kept = [];
     for (const hook of group.hooks || []) {
-      if (typeof hook.command === "string" && hook.command.includes(gate)) moved.push(hook);
+      if (reg.hookEntries(hook, "PreToolUse").some((entry) => entry.command.includes(gate))) moved.push(hook);
       else kept.push(hook);
     }
     group.hooks = kept;
@@ -677,11 +685,13 @@ vf_reg_doctor() {
 }
 if node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const gate = "/hooks/pre-browser-navigation-consent.sh";
   let widened = 0;
   for (const group of registry.hooks.PreToolUse || []) {
-    if (group.matcher === "Bash|PowerShell" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
+    if ((group.hooks || []).some((hook) => reg.hookEntries(hook, "PreToolUse").some((entry) => entry.command.includes(gate)))) {
       group.matcher = "Bash|PowerShell|Read";
       widened += 1;
     }
@@ -689,9 +699,9 @@ if node -e '
   if (widened !== 1) process.exit(1);
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
 ' "$VF_REG_ROOT/hooks/hooks.json"; then
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" PASS
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on Bash|PowerShell|Read" PASS
 else
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" FAIL
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on Bash|PowerShell|Read" FAIL
 fi
 case "$(vf_reg_doctor)" in
   *'not registered on a matcher that covers Bash and PowerShell'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
@@ -701,11 +711,13 @@ esac
 cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
 if node -e '
   const fs = require("node:fs");
+  const path = require("node:path");
+  const reg = require(path.join(path.dirname(process.argv[1]), "lib", "hook-registration-v1.js"));
   const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const recorder = "/hooks/post-browser-navigation-consent.sh";
   let broken = 0;
   for (const group of registry.hooks.PostToolUse || []) {
-    if ((group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(recorder))) {
+    if ((group.hooks || []).some((hook) => reg.hookEntries(hook, "PostToolUse").some((entry) => entry.command.includes(recorder)))) {
       group.matcher = "(";
       broken += 1;
     }
@@ -732,11 +744,13 @@ vf_reg_matchers() {
   cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
   node -e '
     const fs = require("node:fs");
+    const path = require("node:path");
     const [file, gateMatcher, recorderMatcher] = process.argv.slice(1);
+    const reg = require(path.join(path.dirname(file), "lib", "hook-registration-v1.js"));
     const registry = JSON.parse(fs.readFileSync(file, "utf8"));
-    const names = (group, hook) => (group.hooks || []).some((entry) => typeof entry.command === "string" && entry.command.includes(hook));
-    const gates = (registry.hooks.PreToolUse || []).filter((group) => names(group, "/hooks/pre-browser-navigation-consent.sh"));
-    const recorders = (registry.hooks.PostToolUse || []).filter((group) => names(group, "/hooks/post-browser-navigation-consent.sh"));
+    const names = (group, event, hook) => (group.hooks || []).some((entry) => reg.hookEntries(entry, event).some((found) => found.command.includes(hook)));
+    const gates = (registry.hooks.PreToolUse || []).filter((group) => names(group, "PreToolUse", "/hooks/pre-browser-navigation-consent.sh"));
+    const recorders = (registry.hooks.PostToolUse || []).filter((group) => names(group, "PostToolUse", "/hooks/post-browser-navigation-consent.sh"));
     if (gates.length !== 1 || recorders.length !== 1) process.exit(1);
     if (gateMatcher !== "keep") gates[0].matcher = gateMatcher;
     if (recorderMatcher !== "keep") recorders[0].matcher = recorderMatcher;
@@ -1397,7 +1411,7 @@ esac
 # session that ended without --chain-done, so naming the fork first and opening with
 # "nothing is wrong here" described the rare case and dismissed the common one.
 case "$OUT" in
-  *'Usually a session that ended without /zensu:tdd --chain-done'*'It can also be a'*'live sibling'*'or a FORK'*)
+  *'Usually a session that ended without /zensu:build --chain-done'*'It can also be a'*'live sibling'*'or a FORK'*)
     check "P1mj1 the row names the abandoned chain before the fork" PASS ;;
   *) check "P1mj1 the row names the abandoned chain before the fork (got: $OUT)" FAIL ;;
 esac
@@ -1721,7 +1735,7 @@ fi
 PARKED_DOC_OK=1
 grep -qF -- 'turns at `implementing`' "$REPORT" || PARKED_DOC_OK=0
 grep -qF -- 'turns at `implementing`' "$SKILL_MD" || PARKED_DOC_OK=0
-grep -qF -- 'Implementing-phase turn counter' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+grep -qF -- 'Implementing-phase turn counter' "$PLUGIN_DIR/docs/build-workflow.md" \
   || PARKED_DOC_OK=0
 [ "$PARKED_DOC_OK" -eq 1 ] \
   && check "P1mt2 the implementing-turns row wording is emitted AND documented in the skill and the docs" PASS \
@@ -2715,7 +2729,7 @@ case "$(run_report_home "$H_WILD_GRANT")" in *"$UNVERIFIED_ROW"*)
   check "P1bk2 an Agent(*) deny beside the recommended allow rule is still reported" PASS ;;
   *) check "P1bk2 Agent(*) deny silenced by the grant it outranks" FAIL ;; esac
 # An `Agent(` prefix must not be treated as a VERIFIED spelling — the deny row makes a
-# strong claim ("every /zensu:tdd run wedges") and must keep firing only on the two
+# strong claim ("every /zensu:build run wedges") and must keep firing only on the two
 # spellings that were checked against a live permission decision.
 absent_row "P1bk3 an Agent(*) deny does not fire the loud deny row" "$H_WILD_DENY" 'Deny is evaluated before ask and allow'
 # The same gap on the other tool name. `Task(zensu:code-reviewer)` already matched by
@@ -4990,7 +5004,7 @@ else
 fi
 
 # P1nkc / P1nkd — adoption's PENDING-STAGE refusal sits ABOVE its whole liveness
-# block (`fail(3, "run has a live inner TDD chain")`), so for such a run adoption is
+# block (`fail(3, "run has a live inner build chain")`), so for such a run adoption is
 # not an exit at any window value and against any beacon. The release worker already
 # branches on exactly this and withholds the adopt route from its own exit-7 message;
 # the row that ROUTES a user to `/zensu:autopilot-adopt` must not contradict it.
@@ -5008,13 +5022,13 @@ AP_CHAINLIVE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
 # remedy on this same pending stage, so the row that ROUTES a user to the verb must not
 # disagree with the verb that declines.
 if printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'a release refuses while that is under 3h' \
-  && printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'live inner TDD chain' \
+  && printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'live inner build chain' \
   && printf '%s' "$AP_CHAINLIVE_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF '/zensu:autopilot-release' \
   && ! printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'adoption does not,' \
   && ! printf '%s' "$AP_CHAINLIVE_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF '/zensu:autopilot-adopt'; then
-  check "P1nkc a run with a live inner TDD chain withholds the adoption half and the adopt remedy, and still offers the release" PASS
+  check "P1nkc a run with a live inner build chain withholds the adoption half and the adopt remedy, and still offers the release" PASS
 else
   check "P1nkc live-inner-chain adoption half (got: $AP_CHAINLIVE_OUT)" FAIL
 fi
@@ -5064,7 +5078,7 @@ fi
 # down, which is false for a run adoption refuses with exit 3 before it reads anything.
 rm -f "$AP_STATE"/tdd-phase-*.json
 AP_CHAINABSENT_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
-if printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'live inner TDD chain' \
+if printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'live inner build chain' \
   && ! printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'both verbs stand down'; then
   check "P1nke an absent beacon plus a live inner chain withholds the both-verbs stand-down" PASS
 else
@@ -5079,7 +5093,7 @@ fi
 printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
   AP_CHAINFUTURE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
-  if printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'live inner TDD chain' \
+  if printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'live inner build chain' \
     && ! printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'adoption permits'; then
     check "P1nkg a future-dated beacon plus a live inner chain withholds the adoption-permits claim" PASS
   else
@@ -5144,7 +5158,7 @@ if printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'before it reads any beacon' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both verbs abort on this beacon' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both abort on this run' \
   && printf '%s' "$AP_E2CHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
-    | grep -qF 'live inner TDD chain' \
+    | grep -qF 'live inner build chain' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF '/zensu:autopilot-adopt'; then
   check "P1nkj an unreadable beacon plus a live inner chain names the chain as adoption's blocker, never a beacon abort" PASS
@@ -5281,7 +5295,7 @@ printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
   AP_FUTCHAIN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
   if printf '%s' "$AP_FUTCHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
-      | grep -qF 'live inner TDD chain' \
+      | grep -qF 'live inner build chain' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'neither guided verb is on offer here' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'a release refuses this run with exit 7 while that stamp is in the future' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'finishing or cancelling that chain in its own session is what clears it' \
@@ -5441,7 +5455,7 @@ for AP_PHRASE in \
   'could not be read, so whether the run is ordinary' \
   'NOT a complete' \
   'both verbs stand down' \
-  'live inner TDD chain' \
+  'live inner build chain' \
   'autopilotOwnerActivityTtlHours is 0'
 do
   printf '%s' "$AP_DRIFT_OUT" | grep -qF "$AP_PHRASE" || {
@@ -5455,7 +5469,7 @@ do
     # two-sided check into a one-sided one for no reason. Its own positive check is
     # P1nk5, which the earlier wording of this comment did not name.
     case "$AP_PHRASE" in
-      'durable run document(s) that could not be read'|'owned by THIS session'|'ordinary run in progress'|'the run is BLOCKED, which is NOT terminal'|'no active pointer designates it'|'could not be read, so whether the run is ordinary'|'NOT a complete'|'live inner TDD chain'|'autopilotOwnerActivityTtlHours is 0') ;;
+      'durable run document(s) that could not be read'|'owned by THIS session'|'ordinary run in progress'|'the run is BLOCKED, which is NOT terminal'|'no active pointer designates it'|'could not be read, so whether the run is ordinary'|'NOT a complete'|'live inner build chain'|'autopilotOwnerActivityTtlHours is 0') ;;
       *) AP_DRIFT_OK=false ;;
     esac
   }
@@ -7641,7 +7655,7 @@ case "$P6_REBUILT" in
     # row: a reader who takes "rebuilt" for "restored" never goes looking for the
     # chain that is gone.
     case "$P6_REBUILT" in
-      *'loss, not a restore'*'/zensu:tdd'*)
+      *'loss, not a restore'*'/zensu:build'*)
         check "P6r a rebuilt own document renders the provenance row with its cost and remedy" PASS ;;
       *) check "P6r rebuilt row omits the cost or the remedy (got: $P6_REBUILT)" FAIL ;;
     esac ;;
@@ -9274,6 +9288,49 @@ else
     *) check "P1tp2 an anchor-only claim renders NO topology row" PASS ;;
   esac
 fi
+TOPO_WTP="$SBOX/topo-wt-project"
+mkdir -p "$TOPO_WTP/.zensu/state" "$TOPO_WTP/.zensu/logs"
+git init -q --template= "$TOPO_WTP" >/dev/null 2>&1
+printf '.claude/worktrees/\n.zensu/\n' > "$TOPO_WTP/.gitignore"
+git -C "$TOPO_WTP" add .gitignore >/dev/null 2>&1
+git -C "$TOPO_WTP" -c user.email=t@example.invalid -c user.name=zensu-test -c commit.gpgsign=false \
+  -c core.hooksPath=/dev/null commit -qm base >/dev/null 2>&1
+git -C "$TOPO_WTP" worktree add -q "$TOPO_WTP/.claude/worktrees/run" -b topo-run >/dev/null 2>&1
+printf 'v1\n' > "$TOPO_WTP/.claude/worktrees/run/new.ts"
+printf 'S1 IMPL completed — files: new.ts\nS2 IMPL completed — files: <project>/.claude/worktrees/run/new.ts\n' > "$TOPO_WTP/.zensu/logs/run.log"
+TOPO_WT_RECEIPT="$TOPO_WTP/.zensu/state/edit-landing-$TOPO_KEY.json"
+run_report_topo_wt() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_WTP" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$TOPO_KEY" ZDOC_SESSION_PROJECT_ROOT="$TOPO_WTP" \
+    node "$REPORT" 2>/dev/null
+}
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","workTree":".claude/worktrees/run","claims":1,"clean":true}\n' \
+  > "$TOPO_WT_RECEIPT"
+TOPO_WT_OUT="$(run_report_topo_wt)"
+if ! topo_rendered "$TOPO_WT_OUT"; then
+  check "P1tpw the work-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_WT_OUT" in
+    *'topology:'*) check "P1tpw a clean receipt whose workTree names the run's worktree renders NO topology row" FAIL ;;
+    *) check "P1tpw a clean receipt whose workTree names the run's worktree renders NO topology row" PASS ;;
+  esac
+fi
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_WT_RECEIPT"
+case "$(run_report_topo_wt)" in
+  *"⚠️  topology: this session's audited run log claims edits under"*'.claude/worktrees/run'*)
+    check "P1tpw1 the same claim against an anchor-graded receipt still names the nested worktree, so workTree is what silences it" PASS ;;
+  *) check "P1tpw1 the same claim against an anchor-graded receipt still names the nested worktree, so workTree is what silences it" FAIL ;;
+esac
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","workTree":"../elsewhere","claims":1,"clean":true}\n' \
+  > "$TOPO_WT_RECEIPT"
+case "$(run_report_topo_wt)" in
+  *"⚠️  topology: this session's claims were NOT checked against the anchor — the receipt names a work tree this row cannot use"*)
+    check "P1tpw2 a workTree that climbs out of the project root renders a missing-check row, never silence" PASS ;;
+  *) check "P1tpw2 a workTree that climbs out of the project root renders a missing-check row, never silence" FAIL ;;
+esac
 # A log the receipt names OUTSIDE the project's own .zensu/logs/ is refused rather
 # than read: the receipt is an ordinary file this session can write. The OUTSIDE
 # log must carry the foreign claim, or the containment guard is not what keeps the

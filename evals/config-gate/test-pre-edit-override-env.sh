@@ -21,7 +21,7 @@ trap cleanup EXIT
 
 # 0.4.0+: the gate activates on chain-state (active=true), not CLAUDE_AGENT_TYPE.
 # Mark the session active (UNINITIALIZED phase) so the ZENSU_TDD_GATE override
-# cases below exercise a genuinely-active gate — as /zensu:tdd --tdd-begin would.
+# cases below exercise a genuinely-active gate — as /zensu:build --tdd-begin would.
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 # shellcheck disable=SC1090
 source "$BASELINE" s-override-1

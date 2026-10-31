@@ -78,10 +78,10 @@
 //   8. COMPOSING 1 AND 6: this gate's own decision module lives inside the
 //      unprotected plugin root. One ungated main-thread `Edit` — or anything
 //      holding `Bash`, by residual 1 — removes or replaces
-//      `plugin-data-guard-v1.js`, and the wrapper then declines for the rest of
+//      `plugin-data-guard-v1.js`, and the dispatcher then declines for the rest of
 //      the session. Neither parent residual says this on its own, which is why
 //      it is listed rather than left for the reader to compose. It is DISCLOSED
-//      rather than silent: the wrapper's stderr note is the only thing that
+//      rather than silent: the dispatcher's stderr note is the only thing that
 //      separates "the gate did not run" from a clean allow, and `G11i` pins it.
 //   9. THE MIRROR OF 3: a symlink INSIDE the store whose target is outside is
 //      judged by its resolved location and ALLOWED. Both resolution paths agree
@@ -143,10 +143,10 @@
 // sentence said three. A FIFTH note is not a fault — `overArmUnchecked` reports
 // that an armed decision was taken without a project root, so the over-arm valve
 // could not be evaluated. THREE
-// further faults cannot be reached from HERE at all, because the shell wrapper
+// further faults cannot be reached from HERE at all, because the caller
 // returns before `node` runs: a missing `node`, a `hooks/lib` its `cd -P` cannot
 // enter, and a `plugin-data-guard-v1.js` that is absent or is a symlink. They are
-// NOT SILENT. The wrapper writes its own stderr note at each of the three, and at
+// NOT SILENT. The caller writes its own stderr note at each of the three, and at
 // both of its exit-2 plugin-root branches as well (self-resolution failure and
 // inherited-root mismatch — two distinct messages, so name them in the plural). What cannot reach them is this module's
 // TYPED reason — a limit on the channel, never on whether the operator is told.
@@ -614,9 +614,59 @@ function payloadFromRaw(raw, accumulationFailed) {
   }
 }
 
+// What a host reports for one verdict: the stderr notes, in order, and the decision.
+function hostOutcome(verdict) {
+  const notes = [];
+  // The over-arm valve could not be evaluated. The verdict stands either way
+  // — this is a disclosure, not a decision — but a gate armed on an unchecked
+  // store is exactly what an operator has to be told about, because the state
+  // it guards against has no in-session escape.
+  // SCOPED to the verdicts the valve could have flipped. Attached to OUTSIDE it
+  // fired on every ordinary allowed write for the whole session, which is the
+  // "trains the operator to ignore the channel" defect the SCOPED_IN_PROJECT
+  // reason was introduced to remove, reappearing one line over.
+  if (verdict.overArmUnchecked
+    && (verdict.reason === REASONS.DENY || verdict.reason === REASONS.TRUNCATED)) {
+    notes.push(
+      "zensu: plugin-data guard armed without a project root — "
+      + "the over-arm check was not performed (set CLAUDE_PROJECT_DIR)\n",
+    );
+  }
+  if (!verdict.deny) {
+    // The CARVE-OUT is disclosed too, and it is the only weakened-boundary state
+    // that had no signal at all: the strictly safer state (the valve could not be
+    // evaluated, so the gate denies everything in the store) printed a line while
+    // the permissive one — valve evaluated, a subtree actively carved out — was
+    // byte-identical to a clean allow. It gets its OWN sentence rather than the
+    // "did not run" one, because the guard did run and is still enforcing.
+    if (verdict.reason === REASONS.SCOPED_IN_PROJECT) {
+      notes.push(
+        "zensu: plugin-data guard carved out the project — the store "
+        + String(verdict.store) + " contains or equals the project root, so "
+        + "in-project targets are allowed and everything else in the store is "
+        + "still denied\n",
+      );
+    }
+    if (SILENT_FAULT_IS_A_LIE.has(verdict.reason)) {
+      notes.push("zensu: plugin-data guard did not run (" + describe(verdict) + ")\n");
+    }
+    return { notes, output: null };
+  }
+  return {
+    notes,
+    output: {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: denyReason(verdict),
+      },
+    },
+  };
+}
+
 module.exports = {
   decide, denyReason, describe, REASONS, WRITE_TOOLS, PATH_FIELDS, resolveTargetPath, targetsOf,
-  SILENT_FAULT_IS_A_LIE, payloadFromRaw,
+  SILENT_FAULT_IS_A_LIE, payloadFromRaw, hostOutcome,
 };
 
 if (require.main === module) {
@@ -685,52 +735,13 @@ if (require.main === module) {
         cwd: process.env.ZENSU_GUARD_CALLER_CWD || "",
         projectRoot: process.env.CLAUDE_PROJECT_DIR || "",
       });
-      // The over-arm valve could not be evaluated. The verdict stands either way
-      // — this is a disclosure, not a decision — but a gate armed on an unchecked
-      // store is exactly what an operator has to be told about, because the state
-      // it guards against has no in-session escape.
-      // SCOPED to the verdicts the valve could have flipped. Attached to OUTSIDE it
-    // fired on every ordinary allowed write for the whole session, which is the
-    // "trains the operator to ignore the channel" defect the SCOPED_IN_PROJECT
-    // reason was introduced to remove, reappearing one line over.
-    if (verdict.overArmUnchecked
-      && (verdict.reason === REASONS.DENY || verdict.reason === REASONS.TRUNCATED)) {
-        process.stderr.write(
-          "zensu: plugin-data guard armed without a project root — "
-          + "the over-arm check was not performed (set CLAUDE_PROJECT_DIR)\n",
-        );
-      }
-      if (!verdict.deny) {
-        // The CARVE-OUT is disclosed too, and it is the only weakened-boundary state
-    // that had no signal at all: the strictly safer state (the valve could not be
-    // evaluated, so the gate denies everything in the store) printed a line while
-    // the permissive one — valve evaluated, a subtree actively carved out — was
-    // byte-identical to a clean allow. It gets its OWN sentence rather than the
-    // "did not run" one, because the guard did run and is still enforcing.
-    if (verdict.reason === REASONS.SCOPED_IN_PROJECT) {
-      process.stderr.write(
-        "zensu: plugin-data guard carved out the project — the store "
-        + String(verdict.store) + " contains or equals the project root, so "
-        + "in-project targets are allowed and everything else in the store is "
-        + "still denied\n",
-      );
-    }
-    if (SILENT_FAULT_IS_A_LIE.has(verdict.reason)) {
-          process.stderr.write("zensu: plugin-data guard did not run (" + describe(verdict) + ")\n");
-        }
-        return;
-      }
+      const outcome = hostOutcome(verdict);
+      for (const note of outcome.notes) process.stderr.write(note);
       // No process.exit() after this write. stdout is the decision channel and a
       // pipe is asynchronous on darwin; exiting from the write's own turn can
       // truncate the payload, and a truncated deny is read as an allow. Let the
       // stream drain and the process end on its own — the exit code is already 0.
-      process.stdout.write(JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: denyReason(verdict),
-        },
-      }));
+      if (outcome.output) process.stdout.write(JSON.stringify(outcome.output));
   };
   process.stdin.on("error", () => { accumulationFailed = true; raw = ""; finalize(); });
   process.stdin.on("end", finalize);

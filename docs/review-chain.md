@@ -8,8 +8,8 @@ skeletons they anchor on.
 | Agent | Role | How It Works |
 |-------|------|--------------|
 | **zensu-plm** | Read-only planning analyst | Explains and decomposes Zensu lifecycle work. It receives neutral context but exposes only `Read`, `Grep`, and `Glob`; the matching skill performs mutations in the interactive main thread. |
-| **code-reviewer** | Quality Review | Consolidates the review. Standalone: walks 5 specialist perspectives (conventions, bugs, architecture, tests, security) in a single READ-ONLY agent. In the `/zensu:tdd` chain: runs in **fan-out consume mode**, emitting the report the main thread merged from the parallel `review-aspect` panel — three perspectives by default, five with `hooks.reviewPanel: full` (no re-read, no build/test). |
-| **review-aspect** | Single-Perspective Review | READ-ONLY reviewer scoped to ONE perspective. The `/zensu:tdd` chain spawns one per perspective of the panel in a single parallel batch — `correctness`, `design` and `security` by default (`hooks.reviewPanel: lean`, whose fix-round re-reviews spawn `correctness` alone), or `conventions`, `bugs`, `architecture`, `tests` and `security` with `hooks.reviewPanel: full` — then merges their findings in the main thread. Runs zero build/test commands — the suite already ran in the Phase 6 audit. |
+| **code-reviewer** | Quality Review | Consolidates the review. Standalone: walks 5 specialist perspectives (conventions, bugs, architecture, tests, security) in a single READ-ONLY agent. In the `/zensu:build` chain: runs in **fan-out consume mode**, emitting the report the main thread merged from the parallel `review-aspect` panel — three perspectives by default, five with `hooks.reviewPanel: full` (no re-read, no build/test). |
+| **review-aspect** | Single-Perspective Review | READ-ONLY reviewer scoped to ONE perspective. The `/zensu:build` chain spawns one per perspective of the panel in a single parallel batch — `correctness`, `design` and `security` by default (`hooks.reviewPanel: lean`, whose fix-round re-reviews spawn `correctness` alone), or `conventions`, `bugs`, `architecture`, `tests` and `security` with `hooks.reviewPanel: full` — then merges their findings in the main thread. Runs zero build/test commands — the suite already ran in the Phase 6 audit. |
 | **review-judge** | Independent Second Pass | READ-ONLY judge spawned AFTER the aspect merge (gated by `hooks.reviewJudge`, default on; on the lean panel for the first review only, and on any review the Stop hook resumes). Re-reads the changed files fresh and covers the panel's structural blind spots: cross-cutting integration, requirement drift against the plan's stable AC-###/FR-### IDs, missed edge cases, and panel quality — a false-positive panel finding gets a `Panel-FP:` meta-verdict that the main thread neutralizes before fix routing. It also traces every guarantee a query or call inherits from session or connection state (row-level security, a tenant setting, the connecting role) through each connection mode the code still supports, and reports a defect such a mode reaches with its condition, even when committed configuration disables the mode, which may lower the severity by one level but never below IMPORTANT. On the first review it runs twice, independently and side by side (`hooks.reviewJudgeSecondRun`, default on): the second run reads what the changed files depend on before the files themselves and only adds `JUDGE-B<n>` findings, which the main thread merges as a union. Emits `JUDGE-*` deltas; never repeats panel findings, never runs build/test. |
 | **plan-review-worker** | Confined plan validator | Dedicated `/zensu:plan-review` worker with only `Read`, `Grep`, and `Glob`. It reads a private, immutable evidence lease and returns one raw `kind:"plan-review"` JSON object as its final message; only the main thread validates and materializes that result. |
 | **pr-review-worker** | Confined PR persona | Dedicated `/zensu:pr-team-review` worker with only `Read`, `Grep`, and `Glob`. It reviews a leased role/area evidence shard and returns one raw `kind:"pr-review"` JSON object; it cannot write files, mutate tasks, message agents, spawn agents, run commands, or publish. |
@@ -58,7 +58,7 @@ Only then may the main thread write a debug JSON file, and it closes the lease o
 success and failure. Repository instructions, diffs, source text, overlays, and
 refinement context remain untrusted data and cannot widen this contract.
 
-> **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:tdd` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to parallel `review-aspect` subagents (three on the default lean panel since 0.24.0, five with `hooks.reviewPanel: full`), optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps. `hooks.reviewConvergence` (default on) then bounds the loop itself: every merged finding is recorded in a findings ledger (`FINDING LEDGER` run-log lines read by `hooks/lib/review-ledger-v1.js`), the judge receives that ledger, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited (every IMPORTANT finding when `hooks.selfReview` is off), deferring the rest to the terminal self-review and the `## Open` table. The terminal self-review also verifies every active acceptance criterion again through `/zensu:verify-feature --chain` when the review rounds made the acceptance records stale, because the terminus refuses a criterion verified on an older tree ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). All three reviewer agents rate severity on the shared scale in [review-severity.md](review-severity.md).
+> **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:build` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to parallel `review-aspect` subagents (three on the default lean panel since 0.24.0, five with `hooks.reviewPanel: full`), optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps. `hooks.reviewConvergence` (default on) then bounds the loop itself: every merged finding is recorded in a findings ledger (`FINDING LEDGER` run-log lines read by `hooks/lib/review-ledger-v1.js`), the judge receives that ledger, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited (every IMPORTANT finding when `hooks.selfReview` is off), deferring the rest to the terminal self-review and the `## Open` table. The terminal self-review also verifies every active acceptance criterion again through `/zensu:verify-feature --chain` when the review rounds made the acceptance records stale, because the terminus refuses a criterion verified on an older tree ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). All three reviewer agents rate severity on the shared scale in [review-severity.md](review-severity.md).
 
 #### Ultracode and external reviews
 
@@ -107,7 +107,7 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   chain's merge and judge do that work. It always returns `zensu-review-result/v1`: the tree,
   the lenses, the ceiling, the agent counts, the `dropped` list and every finding with its
   verification state (`upheld`, `refuted` or `unverified`) and votes.
-- **Import on the first review.** In `/zensu:tdd` Phase 6.10 step 3, with `hooks.reviewJudge`
+- **Import on the first review.** In `/zensu:build` Phase 6.10 step 3, with `hooks.reviewJudge`
   on, the main thread pipes the review's change set into
   `zensu-log.sh --external-review --root <top> --result <output-file>`, where the output file
   is the one the workflow's completion notification names. The file name only selects the
@@ -138,7 +138,11 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   link (`zensu-log.sh` resolves symbolic links in the path's ancestors first), and
   `undetermined` when git cannot answer. A chain reviews one root, so for the first three the
   aspect panel reviews this change, and a workflow review of the other work tree imports only in
-  a session started in it. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
+  a session started in it. An Autopilot-bound chain whose work tree is the run's own worktree
+  below the anchor is that layout as well, so step 3 of the build's review chain skips the import
+  for it without asking and logs `EXTERNAL REVIEW SKIPPED — the chain's work tree lies below the
+  anchor`; its packet names each changed file with the worktree's location below the anchor as a
+  prefix, so the panel reads the worktree's copy. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
   with that root, `unresolved-project-root` points at `/zensu:doctor`, and `undetermined` names
   git's fault in `detail=`: for the review root it asks for the same re-run, because only that
   root imports whatever the fault hid, and for the project root it asks for the fault to be
@@ -200,6 +204,91 @@ thread names, but the run record and the journal sit in the session's own projec
 which the main thread can write: a deliberate write there can still forge a result, as for
 every plugin store, and a count that disagrees with the journal only degrades the import.
 
+#### Fix-round bookkeeping
+
+A routed fix round prepares its re-review with one call,
+`zensu-log.sh --round-prepare --round <n> --log <run log>`, after it logged its
+`R<n>-<step> IMPL completed — files:` claims. Step 10.2 runs `--round 0` once before the first
+fan-out, and `/zensu:self-review` runs `--round self-review` for its one fix round. Every call of
+a chain passes the `--baseline` its round-0 call passed. The verb:
+
+- resolves the chain's work tree as `zensu-log.sh --chain-work-tree` does — the git top level, or
+  the worktree below the anchor that a bound Autopilot run drives — and takes the change set, the
+  audit, the snapshot and the round diff from it, and the ledger, the run log and the round scope
+  from the anchor's top level; when the two differ, every path it prints for a reviewer carries
+  the work tree's location below the anchor as a prefix, the diff headers included, while aspect
+  activation reads the paths without it;
+- runs the Phase 6 step 5b edit-landing audit under the round's start marker;
+- judges every claim of the round against a content snapshot taken when the round began, so a
+  file that was already uncommitted before the round counts as landed only when this round
+  changed it, and a claim whose file did not change stops the round with exit 1;
+- appends a `fixed` ledger line for each open finding a landed claim names by its label
+  (`R<n>-F<k>`, `R<n>-R<j>-F<k>` for an earlier finding, `SR-R<j>-F<k>` in the self-review, and
+  the `G<g>:` form of an entry carried from an earlier generation, such as `SR-G1:R<j>-F<k>`);
+- prints the panel's `changed_files` (the round's own delta while
+  `hooks.incrementalReviewRounds` is on and the delta is established, the whole diff
+  otherwise), the judge's full `judge_changed_files`, the aspects to spawn, the open ledger
+  entries and the path of a round diff, and logs every skipped aspect.
+
+Exit 0 means the round is prepared. Exit 1 means a claim of this round did not land in this
+round: no `fixed` line is written, and the same round runs again once the claim is landed or
+withdrawn. Exit 2 is a refused argument or a failed step. A refused argument prints its usage
+error on stderr and changes nothing. A failed step prints `ROUND PREPARE STOPPED — <step>: <cause>`
+and then a `ROUND PREPARE FALLBACK` line for the case the verb cannot run at all, outside git or
+without node: run the step 5b audit yourself,
+append each `fixed` line after re-reading its fix, and give the re-review the whole diff. An
+audit that graded the claims but could not write its receipt is such a stop: the verb attributes
+no claim, writes no `fixed` line and keeps the snapshot, so the round runs again once the cause
+its `RECEIPT REFUSED` line names is fixed.
+
+Without a usable round-start snapshot the round is reported as unattributable and no `fixed`
+line is written, because the verb cannot tell this round's edits from earlier ones. A snapshot is
+usable only for the run log, the review generation and the `--baseline` that recorded it:
+another chain's snapshot, one recorded before a `REVIEW BUDGET RESET`, or one taken with another
+`--baseline` is refused, so the first fix round after a reset is unattributable. The self-review
+round starts from the snapshot of the chain's last fix round as the run log shows it, never from
+an older one. A claim also stays unresolved when its file's digest names no content (a directory,
+or a file over the size bound or past the hash bound), when it names a new file and the snapshot
+was cut at its record bound, or when two labels of the round claim the same changed file. A label
+claimed both before and after the last reset is judged by the files it claimed after it: a
+verdict for a file it claimed only before the reset belongs to the earlier claim, and one that
+names no file stays unresolved. The verb lists unresolved labels under `unresolved_claims`, and a
+`fixed` line for one is written by hand only after its fix was re-read.
+
+The verb reads claims with the audit's own grammar: a label of at most five words before the
+`IMPL completed — files:` or `WIRED — files:` marker, written with any of the three dashes, and a
+file the run-log writer spelled `<project>/…` counts as the same file. Round 0 logs
+`ROUND PREPARE — round 0 recorded the round-start snapshot`, which marks where round 1 begins. A
+claim logged since the round began without the round's prefix (`R<n>-` or `SR-`) is listed under
+`unprefixed_claims`, because no `fixed` line can name its finding.
+
+A claim that cannot land is withdrawn by logging `CLAIM WITHDRAWN — <label>: <file>` after it, or
+`CLAIM WITHDRAWN — <label>` for all of its files, which is the only form for a claim the audit
+lists with no file. The round then passes, the claim gets no `fixed` line and its finding stays
+open. A claimed file restored to its committed content in the round counts as landed, although
+the audit reports `EDIT NOT LANDED` for it. The verdict lines of earlier claims, the audit tally,
+one `ROUND LANDING` line per claim and any `ROUND LEDGER UNAVAILABLE` line go to the run log and
+to the caller.
+
+The verb reads the ledger the way `/zensu:self-review` does. A `partial` read writes `fixed`
+lines only for the entries it could read and says so in a `ledger_note:` line, and a ledger that
+cannot be read prints `ROUND LEDGER UNAVAILABLE` and writes no `fixed` line. With
+`hooks.reviewConvergence` off the verb reads no ledger and prints
+`open_ledger: off (hooks.reviewConvergence is off); no fixed line was written` in every fix round,
+so `fixed: none` never reads as a ledger that was consulted.
+
+The packet lists and the round diff leave out every path inside a `.zensu` directory, at any
+depth, and every changed path that only your own global git excludes file ignores
+(`core.excludesFile`, by default `~/.config/git/ignore`); a `user_ignored:` line counts the
+second kind. The edit-landing audit grades claims without that file, so the snapshot in
+`.zensu/state/` still records a sha256 digest of such a path.
+
+A changed file is evidence that an edit happened, not that a finding is fixed. Only
+`hooks.reviewPanel: full` re-checks a `fixed` entry, through the judge's `[NOT FIXED]` tag: the
+lean panel's re-review reads the edit but not the ledger, and `/zensu:self-review` takes no
+`fixed` entry as a candidate. A `fixed` line written for an edit that missed its finding therefore
+stays closed unless a later review raises the defect again.
+
 #### Background review agents
 
 A host may start every `Agent` spawn in the background: the Claude desktop app does, and its
@@ -216,23 +305,45 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
 - **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
   the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
   without a `node` child unless the prompt carries one of the two markers and the store holds a
-  pending record or entry. A fan-out agent's arrival retires its entry. The consume reviewer's
-  arrival claims the ticket once, through the claim the foreground path uses, and returns that
-  path's routing directive as context of the prompt. A hand-back retires the record only after
-  the claim, so a hand-back the host abandons halfway, or whose claim fails, leaves the record
-  for the notification that follows. The notification is the last arrival, so it retires the
-  record whether its claim succeeds, fails or is killed, and the next Stop no longer waits for a
-  reviewer that has already reported. A frame counts only on a line of its own at column zero that the host's `[Subagent hand-back]`
-  line follows, because the host indents every line of a report it forwards. A notification with
-  another status, such as `failed`, ends the consume record without a claim and asks for a
-  re-spawn with the same ticket.
-- **Stop.** While a consume record younger than 60 minutes still matches the issued ticket, or a
-  fan-out entry younger than 60 minutes exists, the Stop guard releases a standalone chain's turn
-  end with one stderr line and charges no review budget. An Autopilot-bound chain is held instead:
-  its Stop blocks, names the agents that still run, and does not count against the inner Stop
-  budget. A session that owns a live Autopilot run without a bound chain, and a Stop that adopted
-  a deferred review, take neither; their resume directive opens with a sentence naming the
-  running agents.
+  pending record or entry, or the store holds an arrival note. Its first `node` child,
+  `background-review-v1.js arrive`, retires every fan-out entry the prompt names and, for a
+  completed arrival of the session's pending consume reviewer, writes an arrival note under
+  `arrivals/` before anything is claimed. It does either only for a prompt of the main thread: a
+  payload that names a subagent (`agent_id` or `agent_type`) or another hook event changes
+  nothing. Only an arrival the consume record still waits for starts the post-review hook, which
+  claims the ticket once, through the claim the foreground path uses, and returns that path's
+  routing directive as context of the prompt. Record and note are retired together right after the
+  claim and on every deliberate refusal. A claim that fails,
+  or that a kill of the hook cuts off, keeps both, so the notification, the next Stop or the next
+  prompt completes it. A frame counts only on a line of its own at column zero that the host's
+  `[Subagent hand-back]` line follows, because the host indents every line of a report it
+  forwards. A notification with another status, such as `failed`, ends the consume record without
+  a claim and asks for a re-spawn with the same ticket, unless a note already records the
+  completed report.
+- **Claim deadline.** The prompt hook is registered with a `timeout` of 180 seconds. A
+  `UserPromptSubmit` hook without one gets 30 seconds (Claude Code 2.1.308), and one claim under
+  load took longer: the measured incident cancelled the hand-back hook at 30.1 s and its resend at
+  31.0 s, and no completion notification followed. The claim starts only while 45 of the 180
+  seconds remain; past that the prompt carries a notice that the claim completes at the next Stop
+  or prompt, and the ticket stays untouched.
+- **Stop.** A Stop whose store holds an arrival note beside the consume record first runs the
+  post-review hook in its recovery mode, which claims the ticket from the note and blocks with the
+  routing directive. It starts that claim only while the Stop has more than 20 seconds left before
+  its deadline, the Stop guard's own (45 seconds by default) or, when the hook runs without that
+  guard, its registered 90-second timeout, and stops a claim that has not reached the ticket by
+  then, so a slow claim never costs the Stop its decision. While a consume record younger than 60
+  minutes still matches the issued ticket, or a fan-out entry younger than 60 minutes exists, the
+  Stop guard releases a standalone chain's turn end with one stderr line and charges no review
+  budget. An Autopilot-bound chain is held instead: its Stop blocks, names the agents that still
+  run, and does not count against the inner Stop budget. When the claim from a note did not
+  complete in that Stop, both say that the report arrived and its claim is pending instead. A Stop
+  that is not released, such as an Autopilot-bound chain's or a standalone chain's whose wait
+  could not be read, says so at most three times for one claim and names the attempt; the
+  next one that still cannot claim it retires the record and its note, and so does any Stop whose
+  claim still fails 60 minutes after the launch, so the resume directive then runs the review
+  again. A session that owns a live Autopilot run
+  without a bound chain, and a Stop that adopted a deferred review, take neither; their resume
+  directive opens with a sentence naming the running agents, or the pending claim.
 
 **Residuals.** The arrival relies on the host firing `UserPromptSubmit` for queued prompts, as
 measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
@@ -241,24 +352,26 @@ a peer message the host does not indent, and that names a pending agent id, coul
 forged frame; that id sits only in the session's own `0600` store. Repo-local review personas are
 not recorded, so a turn end while only a persona runs blocks as before. A notification that says
 no report was delivered still claims the ticket, and the directive tells the main thread to ask
-the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
-runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
-post-review hook.
+the reviewer for its report with `SendMessage` first. A kill that lands after the ticket is
+consumed and before the directive is emitted still loses that directive; the claim starts only
+with the deadline's margin left, and only the claim-field parse, the record retire and the emit
+run after it. While any session's arrival note is pending, every prompt of every session in the
+plugin pays one `node` child for `arrive`.
 
 #### Custom review personas (repo-local)
 
-Projects extend the review panel without forking the plugin: drop agent definitions at `.claude/agents/zensu-review-*.md` (standard agent frontmatter + body prompt; Claude Code registers them at session start — a file added mid-session is not yet spawnable and gets logged as `PERSONA SKIPPED — <name> (not registered)`). The frontmatter `name:` must equal the filename stem and match `zensu-review-[A-Za-z0-9_-]+` — anything else is skipped as malformed. An optional `activation:` field holds comma-separated glob patterns (items may be quoted) matched against the changed-file paths — `**` crosses directory separators on segment boundaries (`"**/domain/**"` matches `src/domain/x.ts` but not `src/subdomain/x.ts`), `*`/`?` stay within one segment, and a pattern without `/` also matches the basename. Project-agnostic examples: `"**/domain/**"` (DDD rules), `"**/*.tf"` (infrastructure), `"**/*.component.ts"` (frontend components). A persona with no `activation:` field always joins; one whose globs match nothing is skipped AND named in the run log (`PERSONA SKIPPED — <name> (no activation match)`) — never silently omitted; malformed files (bad frontmatter, name/stem mismatch, symlinks) are skipped with a log line and never abort the chain. Extra personas are capped at five per run — glob-matched personas take slots before always-join ones (relevance wins), each group lexicographic; overflow is logged as dropped. **Output contract:** a persona reports exactly like a built-in aspect — `## Aspect: <persona-name>` header with `- [SEVERITY] file:line — finding` bullets — except every finding is prefixed with the persona's uppercased `<NAME>-<n>` ID for provenance. **Trust boundary:** a persona file is a repo-controlled prompt at the same trust level as any `.claude/agents` definition or a checked-in `CLAUDE.md` — the read-only/no-build contract is carried by the spawn prompt and the persona's own `tools:` frontmatter, not by promotion to the built-in reviewer principal. Custom personas stay neutral `host-profile-v1`: the all-tool gate prevents Session Control/workflow-root access and `main-v1` impersonation, but their ordinary host tools remain governed by their own frontmatter. Audit `zensu-review-*.md` files in third-party repos before running `/zensu:tdd` or `/zensu:plan-review` (both spawn personas from the local working checkout; `/zensu:pr-team-review` is base-scoped). Matching is decided deterministically by `hooks/lib/persona-activation.js` (changed files on stdin, personas dir as argv; verdict lines `spawn`/`skip`/`drop`).
+Projects extend the review panel without forking the plugin: drop agent definitions at `.claude/agents/zensu-review-*.md` (standard agent frontmatter + body prompt; Claude Code registers them at session start — a file added mid-session is not yet spawnable and gets logged as `PERSONA SKIPPED — <name> (not registered)`). The frontmatter `name:` must equal the filename stem and match `zensu-review-[A-Za-z0-9_-]+` — anything else is skipped as malformed. An optional `activation:` field holds comma-separated glob patterns (items may be quoted) matched against the changed-file paths — `**` crosses directory separators on segment boundaries (`"**/domain/**"` matches `src/domain/x.ts` but not `src/subdomain/x.ts`), `*`/`?` stay within one segment, and a pattern without `/` also matches the basename. Project-agnostic examples: `"**/domain/**"` (DDD rules), `"**/*.tf"` (infrastructure), `"**/*.component.ts"` (frontend components). A persona with no `activation:` field always joins; one whose globs match nothing is skipped AND named in the run log (`PERSONA SKIPPED — <name> (no activation match)`) — never silently omitted; malformed files (bad frontmatter, name/stem mismatch, symlinks) are skipped with a log line and never abort the chain. Extra personas are capped at five per run — glob-matched personas take slots before always-join ones (relevance wins), each group lexicographic; overflow is logged as dropped. **Output contract:** a persona reports exactly like a built-in aspect — `## Aspect: <persona-name>` header with `- [SEVERITY] file:line — finding` bullets — except every finding is prefixed with the persona's uppercased `<NAME>-<n>` ID for provenance. **Trust boundary:** a persona file is a repo-controlled prompt at the same trust level as any `.claude/agents` definition or a checked-in `CLAUDE.md` — the read-only/no-build contract is carried by the spawn prompt and the persona's own `tools:` frontmatter, not by promotion to the built-in reviewer principal. Custom personas stay neutral `host-profile-v1`: the all-tool gate prevents Session Control/workflow-root access and `main-v1` impersonation, but their ordinary host tools remain governed by their own frontmatter. Audit `zensu-review-*.md` files in third-party repos before running `/zensu:build` or `/zensu:plan-review` (both spawn personas from the local working checkout; `/zensu:pr-team-review` is base-scoped). Matching is decided deterministically by `hooks/lib/persona-activation.js` (changed files on stdin, personas dir as argv; verdict lines `spawn`/`skip`/`drop`).
 
 Here, “ordinary host tools” means every tool their frontmatter grants except what
 reaches Zensu's own state or runs commands outside `Bash`: neutral personas are
 denied every shell/command alias, `PowerShell`, a `Monitor` command, a tool whose
 name marks it as running commands, and `Bash`, regardless of their frontmatter.
-**Three consumers, one file.** The same `.claude/agents/zensu-review-*.md` persona feeds three review flows: `/zensu:tdd`'s Phase 6 fan-out, `/zensu:pr-team-review`'s cast, and `/zensu:plan-review`'s cast. A persona file declares only the *concern* (its body) plus its *activation globs* (frontmatter) and stays **output-format-agnostic**; each flow injects its own output contract at spawn — `/zensu:tdd` wants the `## Aspect: <persona-name>` markdown above, while the two team-review skills want structured JSON (`$WORKDIR/<name>.json` per their shared schema). A body that hardcodes one format still runs under the others (the injected contract wins), but keeping the body format-neutral lets one file serve all three. **Trust boundary for PR review:** `/zensu:pr-team-review` reviews an untrusted PR head, so it discovers personas from the reviewed repo's **base checkout** (`$REPO/.claude/agents`), never the PR-head worktree — a PR cannot introduce its own reviewer. `/zensu:plan-review` and `/zensu:tdd` run against the trusted local working checkout and discover from its git toplevel.
+**Three consumers, one file.** The same `.claude/agents/zensu-review-*.md` persona feeds three review flows: `/zensu:build`'s Phase 6 fan-out, `/zensu:pr-team-review`'s cast, and `/zensu:plan-review`'s cast. A persona file declares only the *concern* (its body) plus its *activation globs* (frontmatter) and stays **output-format-agnostic**; each flow injects its own output contract at spawn — `/zensu:build` wants the `## Aspect: <persona-name>` markdown above, while the two team-review skills want structured JSON (`$WORKDIR/<name>.json` per their shared schema). A body that hardcodes one format still runs under the others (the injected contract wins), but keeping the body format-neutral lets one file serve all three. **Trust boundary for PR review:** `/zensu:pr-team-review` reviews an untrusted PR head, so it discovers personas from the reviewed repo's **base checkout** (`$REPO/.claude/agents`), never the PR-head worktree — a PR cannot introduce its own reviewer. `/zensu:plan-review` and `/zensu:build` run against the trusted local working checkout and discover from its git toplevel.
 **Inline anchors.** When `/zensu:pr-team-review` publishes, every inline comment anchor is pre-validated against the diff by `hooks/lib/valid-diff-lines.js`, with nearest-line remap, so a finding whose line is not commentable is relocated rather than lost.
 
 #### Skill overlays (additive-only)
 
-Three skills carry an overlay anchor (`<!-- zensu:overlay <name> -->`): `tdd`, `cover`, and `pr-team-review`. A repo drops team guidance at `.zensu/overlays/<name>.md` (resolved at the git toplevel of the working checkout, worktree-aware, same anchor as templates and personas) and the skill injects it at that point. The contract is **additive-only**: an overlay may ADD conventions, extra checks, and stack particularities; it can NEVER disable, replace, weaken, or reorder the skill's mandatory phases (discipline gates, evidence audits, review chain, chain terminus) — on any conflict the skill text wins and the run surfaces one line naming the ignored overlay directive. Missing or empty file = no-op. **Trust boundary:** overlays are repo-controlled prompts at the same trust level as `.claude/agents` personas or a checked-in `CLAUDE.md` — the additive-only rule is carried by the skill instruction, not enforced by code; audit `.zensu/overlays/` in third-party repos before running. Example overlay (`.zensu/overlays/tdd.md`):
+Three skills carry an overlay anchor (`<!-- zensu:overlay <name> -->`): `build`, `cover`, and `pr-team-review`. A repo drops team guidance at `.zensu/overlays/<name>.md` (resolved at the git toplevel of the working checkout, worktree-aware, same anchor as templates and personas) and the skill injects it at that point. The contract is **additive-only**: an overlay may ADD conventions, extra checks, and stack particularities; it can NEVER disable, replace, weaken, or reorder the skill's mandatory phases (discipline gates, evidence audits, review chain, chain terminus) — on any conflict the skill text wins and the run surfaces one line naming the ignored overlay directive. Missing or empty file = no-op. **Trust boundary:** overlays are repo-controlled prompts at the same trust level as `.claude/agents` personas or a checked-in `CLAUDE.md` — the additive-only rule is carried by the skill instruction, not enforced by code; audit `.zensu/overlays/` in third-party repos before running. Example overlay (`.zensu/overlays/build.md`):
 
 ```markdown
 - Team convention: every new module gets an ADR reference in its header.
@@ -271,16 +384,24 @@ Four artifact skeletons ship as plugin defaults under `templates/` and resolve w
 
 | Template | Consumer | Mandatory sections |
 |----------|----------|--------------------|
-| `tdd-plan.md` | `/zensu:tdd` Phase 2 | `## Requirements` (ID/Covers), `## Preconditions`, `## Cross-Layer Value Flow Pairings`, Status Legend, Steps table with Status+Covers, `## Final Verification` |
+| `zensu-plan.md` | `/zensu:build` Phase 2 | `## Requirements` (ID/Covers), `## Preconditions`, `## Cross-Layer Value Flow Pairings`, Status Legend, Steps table with Status+Covers, `## Final Verification` |
 | `autopilot-spec.md` | `/zensu:autopilot` Phase 0.C | numbered stable `AC-###` criteria, out-of-scope section, resolved recipe |
 | `autopilot-pr-body.md` | `/zensu:autopilot` step 3 | per-AC checklist table (deprecated rows kept) whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix, `Gates bypassed during build:` audit line |
 | `pr-body.md` | `/zensu:pilot` "Commit + open PR" (shared default for any PR opener) | `## Acceptance criteria` table filled from the feature's `## Requirements` rows, with a stub-row fallback, whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix |
+
+The two PR-body templates come last in the order `skills/autopilot/rules/conventions.md` §4 sets:
+
+1. `.zensu/templates/<name>.md` replaces everything, as above, when the `overrides` field of `zensu-vcs.sh --conventions` lists it: a plain file of at most 64 KiB, reached through no symlink.
+2. Without an override, the repository's own PR template is the skeleton, as `zensu-vcs.sh --conventions` reports it in `prTemplate`: the one `vcs.prTemplate` names, passed as `--template`, or with `auto` the one the forge pre-fills a new pull request with (`pull_request_template.md` under `.github/`, the root or `docs/` on GitHub, `.gitlab/merge_request_templates/Default.md` on GitLab). A template in a `PULL_REQUEST_TEMPLATE/` directory is listed in `prTemplates` but is never chosen on its own. Its sections are filled in the repository's language, and Zensu appends its `## Acceptance criteria` section; `/zensu:autopilot` also appends `## Verification` with the `Gates bypassed during build:` line. `vcs.prTemplate: none` skips this step, and a template the probe refuses (`prTemplateRefused`) is never read.
+3. Without either, the plugin template above is the body.
+
+The Acceptance criteria table is never missing: every step carries it, with the template's stub row when no usable `## Requirements` table exists. The section headings Zensu appends stay English, and so do the `AC-###`/`FR-###` ids, the status words and the `Gates bypassed during build:` label inside them, because tools read them back.
 
 #### Code Reviewer — 5 Sequential Specialist Perspectives
 
 The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task` tools) that walks five perspectives in order:
 
-> In the `/zensu:tdd` review chain (since 0.6.0) the review is fanned out to parallel `review-aspect` subagents and merged in the main thread — by default the lean panel of `correctness`, `design` and `security`, or these five perspectives with `hooks.reviewPanel: full`; the sequential walk described here is what a direct standalone `code-reviewer` invocation does.
+> In the `/zensu:build` review chain (since 0.6.0) the review is fanned out to parallel `review-aspect` subagents and merged in the main thread — by default the lean panel of `correctness`, `design` and `security`, or these five perspectives with `hooks.reviewPanel: full`; the sequential walk described here is what a direct standalone `code-reviewer` invocation does.
 
 | Reviewer | Scope |
 |----------|-------|

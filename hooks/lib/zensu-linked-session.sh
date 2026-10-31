@@ -1,6 +1,6 @@
 #!/bin/bash
 
-_ZENSU_LINKED_SESSION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+_ZENSU_LINKED_SESSION_LIB_DIR="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)"
 declare -F zensu_linked_session_state >/dev/null 2>&1 \
   || source "$_ZENSU_LINKED_SESSION_LIB_DIR/zensu-config.sh"
 declare -F zensu_write_session_marker >/dev/null 2>&1 \
@@ -19,11 +19,11 @@ _zensu_linked_session_cache_writable() {
   [ -w "$state_dir" ] && [ -x "$state_dir" ]
 }
 
-_zensu_linked_parent_route_is_tdd() {
+_zensu_linked_parent_route_is_build() {
   local parent_root="$1" parent_key="$2"
   case "$(zensu_delivery_route_marker_state "$parent_root" "$parent_key")" in
-    (tdd) return 0 ;;
-    (none) [ "$(zensu_inherited_route_state "$parent_root" "$parent_key")" = tdd ] ;;
+    (build) return 0 ;;
+    (none) [ "$(zensu_inherited_route_state "$parent_root" "$parent_key")" = build ] ;;
     (*) return 1 ;;
   esac
 }
@@ -57,9 +57,9 @@ zensu_linked_session_resolve() {
   case "$kind" in
     (linked)
       if [ "$repository" = same ] && [ "$parent_root" != - ] && [ "$parent_key" != - ] \
-        && _zensu_linked_parent_route_is_tdd "$parent_root" "$parent_key"; then
+        && _zensu_linked_parent_route_is_build "$parent_root" "$parent_key"; then
         inherited="$(zensu_inherited_route_marker_path "$project_dir" "$session_key")" \
-          && _zensu_linked_session_write "$project_dir" "$inherited" '{"route":"tdd"}'
+          && _zensu_linked_session_write "$project_dir" "$inherited" '{"route":"build"}'
       fi
       _zensu_linked_session_write "$project_dir" "$marker" '{"state":"linked"}'
       if [ "$(zensu_linked_session_state "$project_dir" "$session_key")" != linked ]; then

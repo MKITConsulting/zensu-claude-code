@@ -2,9 +2,13 @@
 
 Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
-receipt — whose VERDICT is what is judged, not its existence, and which a logged
-claim arms even when the anchor's tree is clean (discipline patch 10 in
-[tdd-manager-workflow.md](tdd-manager-workflow.md))
+receipt — whose VERDICT is what is judged, not its existence, which a logged
+claim arms even when the anchor's tree is clean, and which must have graded the
+chain's own work tree: the anchor's git top level, or the worktree below it that a
+bound Autopilot run drives, recorded in the receipt as `workTree` and counted beside
+the anchor's change set (discipline patch 10 in
+[build-workflow.md](build-workflow.md); a claim the audit cannot grade as written is
+settled by the `CLAIM CORRECTED` line its verdict names, never by an escape)
 and §Requirements-Table Gate below, which has its own section here — and TWO
 terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
 Eight of the ten are
@@ -43,9 +47,10 @@ command is the report and the manual retry for a refusal. The full account is in
 
 Claude Code has two shell tools, `Bash` and `PowerShell`. The PowerShell tool is on by default on
 Windows for claude.ai and Console accounts, and opt-in elsewhere through
-`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu hook that reads a shell command is registered on
-the `Bash|PowerShell` matcher, and each one judges a PowerShell command or refuses what it cannot
-judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu check that reads a shell command runs on the
+`Bash|PowerShell` matcher as a check of the hook dispatcher (see
+[Configuration](configuration.md)), and each one judges a PowerShell command or refuses what it
+cannot judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
 analyzer, `hooks/lib/powershell-command-v1.js`. Claude Code falls back to Windows PowerShell 5.1
 when PowerShell 7 is not installed, and the two decode the string escapes `` `e `` and `` `u{…} ``
 differently, so the analyzer reads such a string both ways and a verdict holds only when it holds
@@ -331,7 +336,7 @@ with `ZENSU_SECRET_SCAN=off` (env, or inline for Bash); disable via `hooks.secre
 ## Reviewer-Spawn Grant
 
 The one entry in this file that **opens** rather than closes. `pre-agent-reviewer-allow.sh` is a
-PreToolUse hook on the `Agent|Task` matcher that returns `permissionDecision: "allow"` for Zensu's
+PreToolUse check of the hook dispatcher on the `Agent|Task` matcher that returns `permissionDecision: "allow"` for Zensu's
 own capability-confined reviewer subagents, which short-circuits the host permission pipeline
 **before** the auto-mode classifier is consulted.
 
@@ -340,10 +345,11 @@ executes, so no PreToolUse or PostToolUse hook observes it, and the Stop chain-e
 instruction that cannot succeed until its cap releases the guard.
 `hooks/lib/reviewer-spawn-denial-v1.js` diagnoses that state after the fact; this hook prevents it.
 
-- **It can only grant or stay silent.** It never emits deny or ask, and every failure path is a
-  silent `exit 0` — the opposite of the fail-closed direction the gates above take. A non-zero exit
+- **It can only grant or stay silent.** It never emits deny or ask, and every failure path of the
+  check stays silent — the opposite of the fail-closed direction the gates above take. A non-zero exit
   from a PreToolUse hook blocks the tool call, so a fail-closed grant hook would break every Agent
-  spawn in the session, including the reviewer it exists to admit.
+  spawn in the session, including the reviewer it exists to admit. A fault of the dispatcher process
+  itself still blocks, as it does for every tool.
 - **Four conditions, all required.** The main principal; a bound Session Control record;
   `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
 - **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
@@ -376,8 +382,9 @@ instruction that cannot succeed until its cap releases the guard.
   confinement the frontmatter provides. Read that confinement as bounding what the CHILD may
   do, never as bounding the call.
 - **Three host limits bound it**, and none is a defect to be fixed by widening the grant: a
-  `permissions.deny` or `permissions.ask` rule still overrides it; another hook on the same matcher
-  returning deny or ask outranks it (the host ranks deny > ask > allow); and an SDK session
+  `permissions.deny` or `permissions.ask` rule still overrides it; another hook on the same matcher,
+  or another check of the dispatcher,
+  returning deny or ask outranks it (the host and the dispatcher both rank deny > ask > allow); and an SDK session
   supplying `canUseTool` forces the full pipeline.
 - **It is disclosed in both states.** The SessionStart banner names the grant while it is on, and a
   `/zensu:doctor` row reports it either way — that row is not silenceable by the flag. A capability
@@ -455,7 +462,7 @@ precedent for a control with no switch.
 exit 2, and a resolution that hits an internal bound refuses with its own reason
 (`target-resolution-truncated`): the walk gave up before it finished, so "outside" is a claim it
 did not earn, and answering it once allowed a spelling that lands in the store. No legitimate input
-reaches a bound, so that refusal costs an adversarial spelling and nothing else. A missing `node`, an
+reaches a bound, so that refusal costs an adversarial spelling and nothing else. An
 absent, empty or unresolvable `CLAUDE_PLUGIN_DATA`, an unparseable payload, or a module that will
 not load returns *allow*. The first of those two exceptions is the plugin-root check every sibling gate
 carries: a mismatched inherited `CLAUDE_PLUGIN_ROOT` still refuses with exit 2, and on this matcher that
@@ -465,13 +472,15 @@ load fault), an unusable `CLAUDE_PLUGIN_DATA` — the one that turns the control
 and would otherwise render byte-identical to a clean allow — and a payload with **no path field**,
 which is what a renamed or restructured host field looks like from here. A fifth note is not a
 fault at all: when the caller supplies no project root the over-arm valve cannot be evaluated, and
-an armed decision says so rather than skipping the check in silence. Three further faults are outside the
-module's reach, because the shell wrapper returns before `node` runs: a missing `node`, a
-`hooks/lib` its `cd -P` cannot enter, and a `plugin-data-guard-v1.js` that is absent or is a
-symlink. They are **not silent** — the wrapper writes its own stderr note at each of the three,
-naming the cause and the consequence, and at both of its exit-2 plugin-root branches
-(self-resolution failure and inherited-root mismatch) as well. What cannot reach them is the module's *typed* reason, which
-is a limit on the channel and never on whether the operator is told. Denying there would block ordinary in-project
+an armed decision says so rather than skipping the check in silence. Two further faults are outside the
+module's reach. A `plugin-data-guard-v1.js` that is absent or is a symlink is **not silent**: the hook
+dispatcher writes a stderr note naming the cause and the consequence, and allows, as it refuses with a
+note at both exit-2 plugin-root branches (self-resolution failure and inherited-root mismatch). A missing
+`node` is a failed start of the dispatcher, so `"onFailure": "block"` refuses the call. The entry point
+`hooks/pre-write-plugin-data-guard.sh` is no longer what the host runs; run directly, it writes its own note
+and allows when `node` is missing or it cannot reach `hooks/lib`. What cannot reach these faults is the
+module's *typed* reason, which is a limit on the channel and never on whether the operator is told. Denying
+on an absent module would block ordinary in-project
 writes, which is strictly worse than the hole this closes. Containment is not re-implemented:
 `within` and `msysToDrive` come from `hooks/lib/bash-source-write-parse.js`, and the decision
 lives in `hooks/lib/plugin-data-guard-v1.js`.
@@ -496,7 +505,7 @@ chain states.
 ## Browser Consent Gate
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
-(`post-browser-navigation-consent.sh`), both registered on the `Bash|PowerShell` matcher. A
+(`post-browser-navigation-consent.sh`), both run by the hook dispatcher on the `Bash|PowerShell` matcher. A
 PowerShell call that names `playwright-cli` and a `zensu-verify-*` session is refused, so run
 those calls through the Bash tool. It is refused in every spelling the shared PowerShell analyzer
 decodes, a backtick or Unicode escape and joined string literals included, so the prefilter
@@ -1031,7 +1040,7 @@ the same call with an existing one.
 
 ## TDD Phase Gate
 
-Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
+Unlike prompt-based TDD ("please write tests first"), the `/zensu:build` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
 
 - **Phase declaration.** Before any edit, the main agent declares the current TDD phase through the top-level Skill command template `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>`. Claude renders both native plugin placeholders in top-level Skill/Agent content. The helper then uses the host-exposed `CLAUDE_CODE_SESSION_ID` only inside that Bash process to validate the exact immutable record and derive its internal selectors; it never trusts an ambient plugin-private selector. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
 - **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
@@ -1043,7 +1052,7 @@ Additional features: dependency graph for independent-step sequencing, 3-retry I
 ## Requirements-Table Gate
 
 `--tdd-complete` carries two preconditions, and both are refusals rather than reminders. The
-first is the Phase 6 step 5b edit-landing receipt. The second is this one: the session's TDD
+first is the Phase 6 step 5b edit-landing receipt. The second is this one: the session's Zensu
 plan must carry a usable `## Requirements` table.
 
 - **Why it is a gate.** [`/zensu:converge`](../skills/converge/SKILL.md) anchors its flow-back
@@ -1131,10 +1140,20 @@ reads the newest record, never a claim in the run log.
   fingerprint combines the project tree and that work tree, so an edit on either side makes the
   record stale, and a changed path in the nested tree is listed with its location, for example
   `.claude/worktrees/wt/a.txt`. Any other directory keeps the project root's fingerprint, and so
-  does an `acceptance` run. The terminus derives the directory from the newest full-suite
-  record's command and cwd, and `--if-stale` from its own run. In CI mode every run is compared
-  with the current tree of its own directory, and the verdict reads `stale` while the directory
-  of the newest finished run has no run on its current tree.
+  does an `acceptance` run of a standalone chain. The terminus derives the directory from the
+  newest full-suite record's command and cwd, and `--if-stale` from its own run. In CI mode every
+  run is compared with the current tree of its own directory, and the verdict reads `stale` while
+  the directory of the newest finished run has no run on its current tree.
+- **A chain bound to an Autopilot run that drives a worktree.** When the run's workspace is a
+  worktree nested below the anchor (`<anchor>/.claude/worktrees/<name>`), the chain's code lands
+  there, so the gate follows it. `--evidence-run` keeps a cwd inside that worktree and otherwise
+  runs the command in the worktree's directory for the project root and says so; `zensu-log.sh
+  --chain-work-tree --project-dir` prints that directory. The terminus, `--if-stale` and the CI
+  verdict compare every record with the combined fingerprint of the project and that worktree,
+  whatever directory a record names, so a run that measured only the anchor reads `stale` and a
+  changed path is listed as `.claude/worktrees/<name>/…`. When the worktree cannot be resolved,
+  `--evidence-run` exits `2` without running the command, and the terminus reads `unavailable`
+  with the resolver's cause and keeps the chain open.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
   unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A
@@ -1187,9 +1206,10 @@ reads the newest record, never a claim in the run log.
   stop a model that forges a record on purpose. It measures only the tree the suite ran in: a
   suite reached through anything but the cwd or a leading literal `cd` (a manifest path,
   `git -C`, a script that changes directory) keeps the project root's fingerprint, and so does
-  a work tree outside the project root's own work tree. When git cannot resolve the work tree
-  of the run directory, the verdict reads `pass-tree-unverified` rather than falling back to the
-  project root.
+  a work tree outside the project root's own work tree. A bound chain's terminus measures its
+  run's worktree instead, so such a run reads `stale` there. When git cannot resolve the work
+  tree of the run directory, the verdict reads `pass-tree-unverified` rather than falling back to
+  the project root.
 
 ## Acceptance Verification Gate
 
@@ -1198,7 +1218,7 @@ verified live on the tree that ships. The one exception is a max-rounds close wi
 `hooks.selfReview` off, described under **Where it applies**. A criterion is an `AC-###` row of
 the plan's `## Requirements` table whose Requirement cell does not start with `(deprecated)`,
 `[deprecated]` or the word `deprecated` followed by a separator. `FR-###` rows are not verified
-live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before the review, and
+live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before the review, and
 `/zensu:self-review` runs it again when review rounds made the records stale.
 
 - **How a verdict is recorded.** `zensu-log.sh --acceptance-record --ac <id> --verdict
@@ -1222,7 +1242,12 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   one `ACCEPTANCE — AC-001 pass | driver=… | tree=… | record=…` line to the run log.
 - **What it reads.** Records live in `$CLAUDE_PLUGIN_DATA/acceptance-verify/v1/records/<session
   key>/`. Each one carries the tree fingerprint the full-suite gate uses (`.zensu` excluded) and a
-  digest of the criterion text. The plan is the one named by this session's edit-landing receipt.
+  digest of the criterion text. For a chain bound to an Autopilot run that drives a worktree
+  nested below the anchor, that fingerprint, and the one an `--evidence-run --scope acceptance`
+  run records, is the combined fingerprint of the project and that worktree, so an edit in the
+  worktree makes every record `stale`; when the worktree cannot be resolved, both verbs and the
+  acceptance run exit `2` and name the cause. The plan is the one named by this session's
+  edit-landing receipt.
   `zensu-log.sh --acceptance-status --log <run log>` prints every criterion's state on the
   current tree and exits 0 only when all active criteria pass. Its summary line carries the same
   remedy segments as a refusal.
@@ -1272,4 +1297,4 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   nobody verified, or one verified before a later edit; it does not stop a model that forges a
   record on purpose.
 
-**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-14, four-channel logging.
+**Full workflow reference:** [docs/build-workflow.md](build-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-14, four-channel logging.

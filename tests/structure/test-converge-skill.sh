@@ -11,7 +11,7 @@ set -u
 # business-rule vs implementation-detail flow-back split; next-free-stable-ID
 # allocation; the legacy-plan clean stop; plugin.json registration; README
 # skills-table row + header count consistency (header N == table rows); the
-# tdd chain-end offer; the autopilot pre-PR report-only bullet; the zensu-help
+# build chain-end offer; the autopilot pre-PR report-only bullet; the zensu-help
 # routing row; each of the three chain-end carriers of that offer, region-scoped
 # where the region matters — the self-review `## Open` section (the carrier a
 # Stop-hook-forced terminal stage still sees), the tdd step-10 bullet, and the
@@ -25,10 +25,10 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_MD="$PLUGIN_DIR/skills/converge/SKILL.md"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 SELF_REVIEW_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
 POST_REVIEW_HOOK="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-WORKFLOW_DOC="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
+WORKFLOW_DOC="$PLUGIN_DIR/docs/build-workflow.md"
 AUTOPILOT_MD="$PLUGIN_DIR/skills/autopilot/SKILL.md"
 HELP_MD="$PLUGIN_DIR/skills/zensu-help/SKILL.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"

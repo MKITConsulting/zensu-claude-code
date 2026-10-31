@@ -357,21 +357,16 @@ fi
 # pre-write-secret-scan.sh. Enumerate the matcher from hooks.json rather than
 # hardcoding a list, so a hook added later is covered without editing this test.
 BASH_MATCHER_HOOKS="$(node -e '
-  const hooks = require(process.argv[1] + "/hooks/hooks.json").hooks || {};
+  const reg = require(process.argv[1] + "/hooks/lib/hook-registration-v1.js");
   const out = [];
-  for (const matcher of hooks.PreToolUse || []) {
+  for (const entry of reg.registeredHooks(require(process.argv[1] + "/hooks/hooks.json"), "PreToolUse") || []) {
     // A GLOBAL matcher fires on Bash too. Excluding it here would leave the
     // capability gate — the one that decides before every other gate — out of
     // the enumeration, so a new global gate added later would be uncovered:
     // exactly the blind spot that let pre-write-secret-scan.sh stay closed.
-    const pattern = matcher.matcher === undefined ? "" : String(matcher.matcher);
-    const global = pattern === "" || pattern === ".*" || pattern === "*";
-    if (!global && !/Bash/.test(pattern)) continue;
-    for (const entry of matcher.hooks || []) {
-      const command = String(entry.command || "");
-      const found = command.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);
-      if (found) out.push(found[1]);
-    }
+    if (entry.matcher !== null && reg.hostMatcherCovers(entry.matcher, "Bash") === reg.REGISTRATION.UNREGISTERED) continue;
+    const found = entry.command.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);
+    if (found) out.push(found[1]);
   }
   process.stdout.write([...new Set(out)].join("\n"));
 ' "$PLUGIN_DIR" 2>/dev/null)"
@@ -771,7 +766,7 @@ edit_payload() {
 # is exactly how two assertions in this file passed for the wrong reason during
 # development.
 #
-# The healthy fixture DOES have an active TDD session (`arm` runs --tdd-begin).
+# The healthy fixture DOES have an active build session (`arm` runs --tdd-begin).
 # Its Edit passes because vanilla mode makes the phase gate pass through, so the
 # control's precondition is `hooks.tddImplementation=false` — pinned explicitly
 # here rather than inherited from the shipped default, which could flip and turn

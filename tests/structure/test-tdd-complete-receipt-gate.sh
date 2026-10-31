@@ -58,7 +58,7 @@ git -C "$PROJ" -c user.email=t@example.invalid -c user.name=zensu-test \
 for SID in gate-refuse gate-accept gate-escape gate-integration gate-clean-tree \
            gate-clean-claim gate-clean-noclaim gate-clean-empty gate-clean-unresolved \
            gate-clean-receipt gate-verdict gate-clean-noclaim-receipt gate-budget-claim gate-nolog gate-symlink-receipt gate-plain-receipt \
-           gate-stem-bind gate-retire gate-claims-type gate-armed-log gate-git-refused; do
+           gate-stem-bind gate-retire gate-claims-type gate-armed-log gate-git-refused gate-wt-standalone; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -161,7 +161,7 @@ clean_arm() {
   fi
   return 0
 }
-printf 'TDD STARTED — claim fixture\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — claim fixture\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/clean-claim.log"
 clean_arm gate-clean-claim
 CC_ERR="$(bash "$LOG" --tdd-complete --session gate-clean-claim \
@@ -171,7 +171,7 @@ CC_RC=$?
 check "Z1 a clean anchor whose run log carries a claim is GATED" "$(verdict $?)"
 printf '%s' "$CC_ERR" | grep -qF 'no edit-landing receipt'
 check "Z2 the claim-armed refusal is the receipt refusal, naming the audit that produces it" "$(verdict $?)"
-printf 'TDD STARTED — no claim fixture\nCHECKPOINT — cmd="true" exit=0 result="PASS"\n' \
+printf 'BUILD STARTED — no claim fixture\nCHECKPOINT — cmd="true" exit=0 result="PASS"\n' \
   > "$PROJ/.zensu/logs/clean-noclaim.log"
 clean_arm gate-clean-noclaim
 CC_ERR="$(bash "$LOG" --tdd-complete --session gate-clean-noclaim \
@@ -234,9 +234,9 @@ check "Z10a the disclosure names the claim channel rather than the run log" "$(v
 # JUDGE-3 — a receipt is evidence about ONE run log. `--tdd-begin` retires the
 # previous generation's, and a receipt naming a DIFFERENT log is refused rather
 # than accepted as this chain's clean verdict.
-printf 'TDD STARTED — other generation\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — other generation\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/other-gen.log"
-printf 'TDD STARTED — stem fixture\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — stem fixture\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/stem-bind.log"
 clean_arm gate-stem-bind
 mkdir -p "$(dirname "$(receipt_for gate-stem-bind)")"
@@ -560,7 +560,7 @@ bash "$LOG" --tdd-begin --session gate-armed-log >/dev/null 2>&1
 # must pass so the only thing left to observe is the run-log channel.
 mkdir -p "$PROJ/.zensu/plans"
 cat > "$PROJ/.zensu/plans/never-written.md" <<'PLANEOF'
-# TDD Plan: armed-log fixture
+# Zensu Plan: armed-log fixture
 
 ## Requirements
 | ID | Requirement | Source |
@@ -761,7 +761,7 @@ Z12_DEEP="$PROJ/.zensu/deep"; Z12_I=0
 while [ "$Z12_I" -lt 70 ]; do Z12_DEEP="$Z12_DEEP/d"; Z12_I=$((Z12_I+1)); done
 mkdir -p "$Z12_DEEP"
 printf 'x\n' > "$Z12_DEEP/f.txt"
-printf 'TDD STARTED — budget fixture\nS1 IMPL completed — files: tracked.txt\nS2 IMPL completed — files: %s/f.txt\n' "$Z12_DEEP" \
+printf 'BUILD STARTED — budget fixture\nS1 IMPL completed — files: tracked.txt\nS2 IMPL completed — files: %s/f.txt\n' "$Z12_DEEP" \
   > "$PROJ/.zensu/logs/budget-claim.log"
 clean_arm gate-budget-claim
 CC_ERR="$(bash "$LOG" --tdd-complete --session gate-budget-claim \
@@ -797,7 +797,7 @@ check "Z12b-control a completable inventory arms and emits no incompleteness lin
 # word, which is the exact shape both disclosures exist to remove: a skipped
 # check reading like a passed one. The receipt is a file in `.zensu/state/`, so
 # dropping one field is the cheapest way to reach it.
-printf 'TDD STARTED — nolog fixture\nS1 IMPL completed — files: tracked.txt\n' \
+printf 'BUILD STARTED — nolog fixture\nS1 IMPL completed — files: tracked.txt\n' \
   > "$PROJ/.zensu/logs/nolog.log"
 clean_arm gate-nolog
 mkdir -p "$(dirname "$(receipt_for gate-nolog)")"
@@ -905,6 +905,199 @@ grep -qF 'discards the whole answer' "$LOG"
 check "Z16 the terminus records why it reads a truncated inventory differently" "$(verdict $?)"
 grep -qF 'discards the whole answer' "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js"
 check "Z16a the doctor side carries the same note, so neither is aligned to the other" "$(verdict $?)"
+
+echo "== A work-tree receipt on a chain that works in the anchor =="
+WA_SID=gate-wt-standalone
+WA_STEM="2026-10-29-0001_build-wt-standalone"
+cat > "$PROJ/.zensu/plans/$WA_STEM.md" <<'PLAN'
+# Standalone work-tree fixture plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | the tracked file changed | spec |
+PLAN
+printf '%s\n' '[10:00:00] S1 IMPL completed — files: tracked.txt' > "$PROJ/.zensu/logs/$WA_STEM.log"
+clean_arm "$WA_SID"
+WA_RECEIPT="$(receipt_for "$WA_SID")"
+mkdir -p "$(dirname "$WA_RECEIPT")"
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/%s.log","claims":1,"clean":true,"workTree":".claude/worktrees/wt"}\n' \
+  "$WA_STEM" > "$WA_RECEIPT"
+WA_ERR="$(bash "$LOG" --tdd-complete --session "$WA_SID" --plan "$PROJ/.zensu/plans/$WA_STEM.md" 2>&1 >/dev/null)"; WA_RC=$?
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/%s.log","claims":1,"clean":true}\n' \
+  "$WA_STEM" > "$WA_RECEIPT"
+bash "$LOG" --tdd-complete --session "$WA_SID" --plan "$PROJ/.zensu/plans/$WA_STEM.md" >/dev/null 2>&1; WA_CTL_RC=$?
+{ [ "$WA_RC" -ne 0 ] && [ "$WA_CTL_RC" -eq 0 ] \
+  && printf '%s' "$WA_ERR" | grep -qF 'graded a work tree other than the anchor, but this chain works in the anchor itself'; }
+check "WA1 a standalone chain refuses a receipt that graded a work tree and completes on the same receipt without it (rc=$WA_RC/$WA_CTL_RC)" "$(verdict $?)"
+
+echo "== A bound chain whose Autopilot run drives a worktree below the anchor =="
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+cd "$PROJ" || exit 1
+printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$PROJ/.gitignore"
+git -C "$PROJ" -c user.email=t@example.invalid -c user.name=zensu-test -c commit.gpgsign=false \
+  -c core.hooksPath=/dev/null add .gitignore >/dev/null 2>&1
+git -C "$PROJ" -c user.email=t@example.invalid -c user.name=zensu-test -c commit.gpgsign=false \
+  -c core.hooksPath=/dev/null commit -qm ignore-worktrees >/dev/null 2>&1
+git -C "$PROJ" worktree add -q "$PROJ/.claude/worktrees/wt" -b wt-bound >/dev/null 2>&1
+WTB="$(cd "$PROJ/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
+PROJ_CANON="$(cd "$PROJ" && pwd -P)"
+mkdir -p "$WTB/locales/en" "$WTB/locales/de"
+printf '{}\n' > "$WTB/locales/en/settings.json"
+printf '{}\n' > "$WTB/locales/de/settings.json"
+printf '{}\n' > "$WTB/locales/en/ghost.json"
+printf '{}\n' > "$WTB/locales/de/ghost.json"
+SID_WT=gate-wt-bound
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID_WT"
+activate_session "$SID_WT"
+WT_KEY="$(basename "$(tdd_state_file "$SID_WT")")"; WT_KEY="${WT_KEY#tdd-phase-}"; WT_KEY="${WT_KEY%.json}"
+WT_STANDALONE="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"
+autopilot_begin_run wt_run "$WT_KEY" "$PROJ" false true "$WTB" >/dev/null 2>&1; WTB_BEGIN=$?
+autopilot_apply_event wt_run plan-wt_run PLAN_APPROVED \
+  "{\"approvedPlanSha256\":\"$(printf 'a%.0s' $(seq 1 64))\"}" "$PROJ" >/dev/null 2>&1; WTB_PLAN=$?
+bash "$LOG" --tdd-begin --session "$SID_WT" --autopilot-run wt_run --autopilot-attempt 1 \
+  --autopilot-return-stage GATES --chain-id wt-chain >/dev/null 2>&1; WTB_ARM=$?
+{ [ -n "$WTB" ] && [ "$WTB_BEGIN" -eq 0 ] && [ "$WTB_PLAN" -eq 0 ] && [ "$WTB_ARM" -eq 0 ]; }
+check "WB0 an Autopilot run records the nested worktree as its workspace and arms a bound chain" "$(verdict $?)"
+[ "$WT_STANDALONE" = "$PROJ_CANON" ]
+check "WB1 before the binding, --chain-work-tree answers the anchor's top level (got '$WT_STANDALONE')" "$(verdict $?)"
+WT_BOUND="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"; WT_BOUND_RC=$?
+{ [ "$WT_BOUND_RC" -eq 0 ] && [ "$WT_BOUND" = "$WTB" ]; }
+check "WB2 for the bound chain --chain-work-tree answers the run's own worktree (got '$WT_BOUND')" "$(verdict $?)"
+WT_STEM="2026-10-29-0000_build-wt-bound"
+mkdir -p "$PROJ/.zensu/plans" "$PROJ/.zensu/logs"
+cat > "$PROJ/.zensu/plans/$WT_STEM.md" <<'PLAN'
+# Work-tree fixture plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | both locale files exist in the run's worktree | spec |
+PLAN
+printf '%s\n' '[10:00:00] S1 IMPL completed — files: locales/{en,de}/settings.json, locales/*/ghost.json' > "$PROJ/.zensu/logs/$WT_STEM.log"
+WT_RECEIPT="$(receipt_for "$SID_WT")"
+mkdir -p "$(dirname "$WT_RECEIPT")"
+printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":2,"landed":2,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
+  "$SID_WT" "$WT_STEM" > "$WT_RECEIPT"
+WT_ANCHOR_ERR="$(bash "$LOG" --tdd-complete --session "$SID_WT" --plan "$PROJ/.zensu/plans/$WT_STEM.md" \
+  --autopilot-run wt_run --autopilot-attempt 1 --chain-id wt-chain 2>&1 >/dev/null)"; WT_ANCHOR_RC=$?
+{ [ "$WT_ANCHOR_RC" -ne 0 ] && printf '%s' "$WT_ANCHOR_ERR" | grep -qF "graded the anchor's own change set" \
+  && printf '%s' "$WT_ANCHOR_ERR" | grep -qF -- '--work-tree'; }
+check "WB3 a clean receipt the audit wrote for the anchor is refused for a work-tree chain, with a --work-tree remedy" "$(verdict $?)"
+wt_receipt() {
+  printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":2,"landed":2,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true%s}\n' \
+    "$SID_WT" "$WT_STEM" "$1" > "$WT_RECEIPT"
+}
+wt_complete() {
+  bash "$LOG" --tdd-complete --session "$SID_WT" --plan "$PROJ/.zensu/plans/$WT_STEM.md" \
+    --autopilot-run wt_run --autopilot-attempt 1 --chain-id wt-chain 2>&1 >/dev/null
+}
+WT_TREE_REMEDY='--work-tree "<the path zensu-log.sh --chain-work-tree prints>"'
+wt_receipt ',"workTree":7'
+WT_UNREAD_ERR="$(wt_complete)"; WT_UNREAD_RC=$?
+wt_receipt ',"workTree":".claude/worktrees"'
+WT_OTHER_ERR="$(wt_complete)"; WT_OTHER_RC=$?
+{ [ "$WT_UNREAD_RC" -ne 0 ] && [ "$WT_OTHER_RC" -ne 0 ] \
+  && printf '%s' "$WT_UNREAD_ERR" | grep -qF "names a work tree that is not this Autopilot-bound chain's work tree" \
+  && printf '%s' "$WT_OTHER_ERR" | grep -qF "names a work tree that is not this Autopilot-bound chain's work tree" \
+  && printf '%s' "$WT_UNREAD_ERR" | grep -qF -- "$WT_TREE_REMEDY" \
+  && printf '%s' "$WT_OTHER_ERR" | grep -qF -- "$WT_TREE_REMEDY"; }
+check "WB13 a clean receipt naming an unreadable or another work tree is refused for the bound chain, with a --work-tree remedy" "$(verdict $?)"
+WT_RUN_FILE="$(autopilot_run_file wt_run "$PROJ_CANON")"
+WT_RUN_PRE="$PROJ_CANON/.zensu/wt-run.pre"
+cp "$WT_RUN_FILE" "$WT_RUN_PRE"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); delete s.workspaceRoot; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE"
+wt_receipt ',"workTree":".claude/worktrees/wt"'
+WT_ANCHORED_ERR="$(wt_complete)"; WT_ANCHORED_RC=$?
+cp "$WT_RUN_PRE" "$WT_RUN_FILE"
+WT_ANCHORED_REMEDY="$(printf '%s\n' "$WT_ANCHORED_ERR" | grep -F 'zensu-edit-landing.sh')"
+{ [ "$WT_ANCHORED_RC" -ne 0 ] \
+  && printf '%s' "$WT_ANCHORED_ERR" | grep -qF 'graded a work tree other than the anchor, but this chain works in the anchor itself' \
+  && [ -n "$WT_ANCHORED_REMEDY" ] && ! printf '%s' "$WT_ANCHORED_REMEDY" | grep -qF -- '--work-tree'; }
+check "WB14 a work-tree receipt is refused once the run record resolves the chain to the anchor, and its remedy drops --work-tree" "$(verdict $?)"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.argv[2]; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE" "$PROJ_CANON/.claude/worktrees/gone"
+WT_GONE_ERR="$(wt_complete)"; WT_GONE_RC=$?
+cp "$WT_RUN_PRE" "$WT_RUN_FILE"
+{ [ "$WT_GONE_RC" -ne 0 ] \
+  && printf '%s' "$WT_GONE_ERR" | grep -qF 'the work tree of this Autopilot-bound chain could not be resolved' \
+  && printf '%s' "$WT_GONE_ERR" | grep -qF 'work tree not found'; }
+check "WB15 a workspaceRoot that names no work tree refuses --tdd-complete and names the resolver's cause" "$(verdict $?)"
+WT_INDEX="$(git -C "$WTB" rev-parse --path-format=absolute --git-path index 2>/dev/null)"
+WT_INDEX_PRE="$PROJ_CANON/.zensu/wt-index.pre"
+cp -p "$WT_INDEX" "$WT_INDEX_PRE"
+printf 'not an index\n' > "$WT_INDEX"
+git -C "$WTB" diff --name-only HEAD >/dev/null 2>&1; WT_INDEX_GIT_RC=$?
+WT_INDEX_ERR="$(wt_complete)"; WT_INDEX_RC=$?
+cp -p "$WT_INDEX_PRE" "$WT_INDEX"
+{ [ -n "$WT_INDEX" ] && [ "$WT_INDEX_GIT_RC" -ne 0 ] && [ "$WT_INDEX_RC" -ne 0 ] \
+  && printf '%s' "$WT_INDEX_ERR" | grep -qF "git could not list the changes of the project root or of this chain's work tree" \
+  && printf '%s' "$WT_INDEX_ERR" | grep -qF 'zensu-log.sh --chain-work-tree prints'; }
+check "WB16 a work tree git cannot list refuses --tdd-complete instead of counting it as unchanged" "$(verdict $?)"
+wt_receipt ''
+bash "$LIB" --log "$PROJ/.zensu/logs/$WT_STEM.log" --project "$PROJ" --work-tree "$WTB" \
+  --session "$SID_WT" >"$PROJ/wt-audit.out" 2>&1; WT_AUDIT_RC=$?
+{ [ "$WT_AUDIT_RC" -eq 0 ] && grep -qF '"workTree":".claude/worktrees/wt"' "$WT_RECEIPT" \
+  && grep -qF '"clean":true' "$WT_RECEIPT"; }
+check "WB4 the audit over the run's worktree grades the brace and glob claims clean and records workTree in this session's receipt" "$(verdict $?)"
+WT_DONE_ERR="$(bash "$LOG" --tdd-complete --session "$SID_WT" --plan "$PROJ/.zensu/plans/$WT_STEM.md" \
+  --autopilot-run wt_run --autopilot-attempt 1 --chain-id wt-chain 2>&1 >/dev/null)"; WT_DONE_RC=$?
+[ "$WT_DONE_RC" -eq 0 ]
+check "WB5 the reference shape completes --tdd-complete without a bypass (rc=$WT_DONE_RC)" "$(verdict $?)"
+[ "$WT_DONE_RC" -eq 0 ] || printf '%s\n' "$WT_DONE_ERR" | head -6 | sed 's/^/        /'
+grep -qF '_zensu_unqualified_change_count "$_tc_wt"' "$LOG"
+check "WB6 --tdd-complete counts the bound work tree through the shared change-count helper" "$(verdict $?)"
+WT_LOG_FILE="$PROJ_CANON/.zensu/logs/$WT_STEM.log"
+WT_BASE_SHA="$(git -C "$WTB" rev-parse HEAD 2>/dev/null)"
+WT_RP0="$(bash "$LOG" --round-prepare --round 0 --log "$WT_LOG_FILE" --baseline "$WT_BASE_SHA" 2>&1)"; WT_RP0_RC=$?
+WT_SNAP="$PROJ_CANON/.zensu/state/round-snapshot-$WT_KEY.json"
+{ [ "$WT_RP0_RC" -eq 0 ] \
+  && grep -qF 'ROUND PREPARE — round 0 recorded the round-start snapshot (4 changed files)' "$WT_LOG_FILE" \
+  && node -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(d.top === process.argv[2] ? 0 : 1)' "$WT_SNAP" "$WTB"; }
+check "WB7 round 0 of the bound chain snapshots the run's worktree and logs into the anchor's run log" "$(verdict $?)"
+[ "$WT_RP0_RC" -eq 0 ] || printf '%s\n' "$WT_RP0" | head -6 | sed 's/^/        /'
+printf '{"a":1}\n' > "$WTB/locales/en/settings.json"
+printf '%s\n' '[10:01:00] R1-F1 IMPL completed — files: locales/en/settings.json' >> "$WT_LOG_FILE"
+WT_RP1="$(bash "$LOG" --round-prepare --round 1 --log "$WT_LOG_FILE" --baseline "$WT_BASE_SHA" 2>&1)"; WT_RP1_RC=$?
+WT_DIFF="$PROJ_CANON/.zensu/state/round-diff-$WT_KEY.patch"
+{ [ "$WT_RP1_RC" -eq 0 ] \
+  && printf '%s\n' "$WT_RP1" | grep -qxF 'ROUND LANDING — R1-F1: landed (files=1 changed=1 unchanged=0 unresolved=0 failed=0)' \
+  && printf '%s\n' "$WT_RP1" | grep -E '^changed_files \(' | grep -qF '.claude/worktrees/wt/locales/en/settings.json' \
+  && printf '%s\n' "$WT_RP1" | grep -E '^judge_changed_files: ' | grep -qF '.claude/worktrees/wt/locales/en/settings.json' \
+  && grep -qF 'b/.claude/worktrees/wt/locales/en/settings.json' "$WT_DIFF" \
+  && grep -qF 'EDIT LANDING AUDIT STARTED — round fix-1' "$WT_LOG_FILE" \
+  && grep -qF '"workTree":".claude/worktrees/wt"' "$WT_RECEIPT"; }
+check "WB8 a fix round of the bound chain grades its claim in the run's worktree and prints the reviewer lists and the diff with the worktree prefix" "$(verdict $?)"
+[ "$WT_RP1_RC" -eq 0 ] || printf '%s\n' "$WT_RP1" | head -8 | sed 's/^/        /'
+WT_CRD_ERR="$(bash "$LOG" --code-review-done --session "$SID_WT" 2>&1 >/dev/null)"; WT_CRD_RC=$?
+WT_CD_ERR="$(bash "$LOG" --chain-done --session "$SID_WT" 2>&1 >/dev/null)"; WT_CD_RC=$?
+{ [ "$WT_CRD_RC" -ne 0 ] && [ "$WT_CD_RC" -ne 0 ] \
+  && printf '%s' "$WT_CD_ERR" | grep -qF 'bound chain requires --autopilot-run, --autopilot-attempt, and --chain-id'; }
+check "WB9 the unqualified --code-review-done and --chain-done refuse the bound chain, so --tdd-complete holds its only change count" "$(verdict $?)"
+source "$PLUGIN_DIR/tests/structure/lib-autopilot-lease.sh"
+WT_RUN_FILE="$(autopilot_run_file wt_run "$PROJ_CANON")"
+WT_RUN_SAVED="$PROJ_CANON/wt-run.saved"
+cp "$WT_RUN_FILE" "$WT_RUN_SAVED"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); delete s.workspaceRoot; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE"
+WT_LEGACY="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>&1)"; WT_LEGACY_RC=$?
+{ [ "$WT_LEGACY_RC" -eq 0 ] && [ "$WT_LEGACY" = "$PROJ_CANON" ]; }
+check "WB10 a legacy run record without workspaceRoot resolves the chain's work tree to the anchor's top (got '$WT_LEGACY')" "$(verdict $?)"
+WT_OUTSIDE_PARENT="$(mktemp -d)"
+git -C "$PROJ_CANON" worktree add -q "$WT_OUTSIDE_PARENT/outside" -b wt-run-outside >/dev/null 2>&1
+WT_OUTSIDE="$(cd "$WT_OUTSIDE_PARENT/outside" 2>/dev/null && pwd -P)"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.argv[2]; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE" "$WT_OUTSIDE"
+WT_FAULT_ERR="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>&1 >/dev/null)"; WT_FAULT_RC=$?
+{ [ -n "$WT_OUTSIDE" ] && [ "$WT_FAULT_RC" -ne 0 ] && printf '%s' "$WT_FAULT_ERR" | grep -qF 'does not lie below the project root'; }; WT_FAULT_OK=$?
+check "WB11 a workspaceRoot outside the project root fails the resolver with the topology reason instead of falling back to the anchor" "$(verdict $WT_FAULT_OK)"
+[ "$WT_FAULT_OK" -eq 0 ] || printf '%s\n' "rc=$WT_FAULT_RC $WT_FAULT_ERR" | head -3 | sed 's/^/        /'
+cp "$WT_RUN_SAVED" "$WT_RUN_FILE"
+rm -rf "$WT_OUTSIDE_PARENT"
+WT_LEASE_START="$(date +%s)"
+WT_LEASED="$(with_autopilot_lease "$PROJ_CANON" bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"; WT_LEASED_RC=$?
+WT_LEASE_SECS=$(( $(date +%s) - WT_LEASE_START ))
+{ [ "$WT_LEASED_RC" -eq 0 ] && [ "$WT_LEASED" = "$WTB" ] && [ "$WT_LEASE_SECS" -lt 8 ]; }
+check "WB12 the resolver answers while another process holds the project lease, so it takes none (${WT_LEASE_SECS}s)" "$(verdict $?)"
 
 echo "----"
 echo "test-tdd-complete-receipt-gate: $T_PASS PASS / $T_FAIL FAIL"

@@ -15,7 +15,7 @@ const evr = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-r
 
 const SESSION = `scv1_${'a'.repeat(64)}`;
 const OTHER_SESSION = `scv1_${'b'.repeat(64)}`;
-const STEM = '2026-09-29-0100_tdd-sample';
+const STEM = '2026-09-29-0100_build-sample';
 const FAKE_TOKEN = `ghp_${'Q7mZ'.repeat(9)}`;
 
 function tempDir(label) {
@@ -42,7 +42,7 @@ function project(options = {}) {
   fs.mkdirSync(path.join(root, '.zensu', 'logs'), { recursive: true });
   fs.mkdirSync(path.join(root, '.zensu', 'plans'), { recursive: true });
   fs.mkdirSync(path.join(root, '.zensu', 'state'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.zensu', 'logs', `${STEM}.log`), 'TDD STARTED\n');
+  fs.writeFileSync(path.join(root, '.zensu', 'logs', `${STEM}.log`), 'BUILD STARTED\n');
   fs.writeFileSync(path.join(root, '.zensu', 'plans', `${STEM}.md`), planText(options.rows || [
     ['AC-001', 'The dashboard lists every project'],
     ['AC-002', 'The export button downloads a CSV'],
@@ -71,7 +71,7 @@ function attest(fixture, ac, verdict = 'pass', overrides = {}) {
   return av.record(base(fixture, { ac, verdict, driver: 'browser', evidenceText: `Opened the page for ${ac}; the snapshot and the screenshot show it`, ...overrides }));
 }
 
-async function acceptanceRun(fixture, command) {
+async function acceptanceRun(fixture, command, extra = {}) {
   const sink = { text: '', write(chunk) { sink.text += String(chunk); return true; } };
   const code = await evr.run({
     pluginData: fixture.data,
@@ -85,6 +85,7 @@ async function acceptanceRun(fixture, command) {
     env: process.env,
     stdout: sink,
     stderr: sink,
+    ...extra,
   });
   const directory = path.join(fixture.data, 'evidence-run', 'v1', 'records', SESSION);
   const newest = fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort().pop();
@@ -312,7 +313,7 @@ test('the gate passes only when every active criterion passes on the current tre
   let result = gate(fixture);
   assert.equal(result.state, 'incomplete');
   assert.equal(result.passes, false);
-  assert.match(result.lines[0], /^ACCEPTANCE — incomplete \| 0\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; AC-001 missing; AC-002 missing \| plan: \.zensu\/plans\/2026-09-29-0100_tdd-sample\.md \| gate: required \| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_tdd-sample\.log$/);
+  assert.match(result.lines[0], /^ACCEPTANCE — incomplete \| 0\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; AC-001 missing; AC-002 missing \| plan: \.zensu\/plans\/2026-09-29-0100_build-sample\.md \| gate: required \| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_build-sample\.log$/);
   const green = await acceptanceRun(fixture, 'true');
   assert.equal(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'api', evidenceRun: green.id, evidenceText: 'GET /projects returned 200 with 3 rows' })).code, 0);
   assert.equal(attest(fixture, 'AC-002', 'fail').code, 0);
@@ -399,7 +400,7 @@ test('an unreadable newest record is invalid until a fresh verdict supersedes it
   fs.writeFileSync(path.join(records, `${av.newRecordId(Date.now() + 1000)}.json`), '{broken');
   const invalid = gate(fixture);
   assert.equal(invalid.state, 'invalid');
-  assert.match(invalid.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_tdd-sample\.log$/);
+  assert.match(invalid.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_build-sample\.log$/);
   assert.equal(attest(fixture, 'AC-001', 'pass', { now: () => Date.now() + 5000 }).code, 0);
   assert.equal(gate(fixture).state, 'pass');
 });
@@ -494,7 +495,7 @@ test('each refusal names only the remedy that can clear it, and every failing cr
   assert.equal(attest(fixture, 'AC-001', 'fail').code, 0);
   let result = gate(fixture);
   assert.match(result.lines[0], /AC-001 fail; AC-002 missing/);
-  assert.match(result.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_tdd-sample\.log \| fix: a criterion that fails on this tree needs a code change/);
+  assert.match(result.lines[0], /\| run: \/zensu:verify-feature --chain --log \.zensu\/logs\/2026-09-29-0100_build-sample\.log \| fix: a criterion that fails on this tree needs a code change/);
   assert.equal(attest(fixture, 'AC-002').code, 0);
   result = gate(fixture);
   assert.doesNotMatch(result.lines[0], /verify-feature/);
@@ -556,4 +557,59 @@ test('the CLI transports the verdict and the record', () => {
   assert.match(fs.readFileSync(path.join(transport, 'run-log-line'), 'utf8'), /^ACCEPTANCE — AC-001 pass/);
   const usage = childProcess.spawnSync(process.execPath, [LIB, 'nonsense'], { env, encoding: 'utf8' });
   assert.equal(usage.status, 2);
+});
+
+function boundWorktree(fixture) {
+  fs.writeFileSync(path.join(fixture.root, '.gitignore'), '.zensu/\n.claude/worktrees/\n');
+  sh(fixture.root, 'git add .gitignore && git commit -q -m ignore-worktrees');
+  sh(fixture.root, 'git worktree add -q .claude/worktrees/wt -b wt');
+  return fs.realpathSync(path.join(fixture.root, '.claude', 'worktrees', 'wt'));
+}
+
+test('with a work tree the records, the status and the stale listing bind the project and the work tree together', () => {
+  const fixture = project();
+  const tree = boundWorktree(fixture);
+  const scratch = tempDir('scratch');
+  const recorded = attest(fixture, 'AC-001', 'pass', { workTree: tree });
+  assert.equal(recorded.code, 0, recorded.error);
+  assert.equal(recorded.record.tree, evr.computeFingerprint(fixture.root, tree, scratch).tree);
+  assert.notEqual(recorded.record.tree, evr.computeTree(fixture.root, scratch).tree);
+  assert.equal(attest(fixture, 'AC-002', 'pass', { workTree: tree }).code, 0);
+  assert.equal(av.status(base(fixture, { workTree: tree })).code, 0);
+  assert.match(av.status(base(fixture)).lines.join('\n'), /AC-001 stale \(files changed since it was verified\) \|/);
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  const rows = av.status(base(fixture, { workTree: tree }));
+  assert.equal(rows.code, 1);
+  assert.match(rows.lines.join('\n'), /AC-001 stale \(files changed since it was verified: \.claude\/worktrees\/wt\/a\.txt\)/);
+});
+
+test('with a work tree a cited acceptance run must have measured the project with the work tree', async () => {
+  const fixture = project();
+  const tree = boundWorktree(fixture);
+  const plain = await acceptanceRun(fixture, 'true');
+  assert.match(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: plain.id, evidenceText: 'ran it', workTree: tree })).error, /another tree/);
+  const bound = await acceptanceRun(fixture, 'true', { workTree: tree, workDirectory: tree });
+  const passed = av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: bound.id, evidenceText: 'ran it', workTree: tree }));
+  assert.equal(passed.code, 0, passed.error);
+  assert.match(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: bound.id, evidenceText: 'ran it' })).error, /another tree/);
+});
+
+test('the CLI hands the work tree to the status', () => {
+  const fixture = project();
+  const tree = boundWorktree(fixture);
+  assert.equal(attest(fixture, 'AC-001', 'pass', { workTree: tree }).code, 0);
+  assert.equal(attest(fixture, 'AC-002', 'pass', { workTree: tree }).code, 0);
+  const env = {
+    ...process.env,
+    ZENSU_AVR_DIR: tempDir('transport'),
+    ZENSU_AVR_PLUGIN_DATA: fixture.data,
+    ZENSU_AVR_SESSION_KEY: SESSION,
+    ZENSU_AVR_PROJECT_ROOT: fixture.root,
+    ZENSU_AVR_RECEIPT: fixture.receiptPath,
+    ZENSU_AVR_LOG: fixture.logPath,
+  };
+  const bound = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env: { ...env, ZENSU_AVR_WORK_TREE: tree }, encoding: 'utf8' });
+  assert.equal(bound.status, 0, bound.stdout + bound.stderr);
+  const plain = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
+  assert.equal(plain.status, 1, plain.stdout + plain.stderr);
 });

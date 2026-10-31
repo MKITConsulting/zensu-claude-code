@@ -25,7 +25,7 @@ Slash form: `/zensu:autopilot <feature in plain words> [--flag=value ...]`.
 |---|---|---|---|
 | `<feature>` | yes | — | The feature to build, in plain language. The only thing most users type. |
 | `--driver=<name>` | no | auto (probe) | `browser`/`api`/`cli`/`library`/`async`/`iac`/`mobile`/`desktop`/`custom`. |
-| `--base=<branch>` | no | `main` | PR base branch. |
+| `--base=<branch>` | no | `vcs.prBase` | PR base branch (`rules/conventions.md` §5). |
 | `--no-validate` | no | off | Skip Phase 1 step 6 (live validation). Ship a reviewed+tested PR only. Degrades — note it. |
 | `--config=<path>` | no | `.zensu/autopilot.yaml` | Project recipe file (see `rules/config.md`). |
 | `--cover` | no | off | After the validate loop goes green, persist the validated ACs as **durable committed tests** via `/zensu:cover --from-acs` (Phase 1 step 6b). |
@@ -37,9 +37,8 @@ If `<feature>` is missing, ask via `AskUserQuestion` in Phase 0 (the one place a
 
 - A git repository. The skill works **in a worktree only** — if the session is on the
   origin checkout it creates one first (see Critical Conventions).
-- The detected forge's CLI authenticated — `gh` (GitHub, `gh auth status`) **or** `glab`
-  (GitLab, `glab auth status`) — for opening the PR/MR + the review steps. The driver's
-  `--detect` (Step 0 + Phase 0.B) resolves which forge and whether its CLI is ready.
+- The detected forge's CLI authenticated, `gh` or `glab`, for the PR/MR and the review steps
+  (Phase 0.A.1 checks it).
 - Everything else — how to boot, gate, authenticate, and validate the project — the
   skill **discovers and verifies itself** in Phase 0. No config to hand-write.
 
@@ -66,10 +65,7 @@ ROOT="${CLAUDE_PLUGIN_ROOT}"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 ```
 
-Forge **detection is repo-scoped**, so it runs inside Phase 0.B once the worktree/repo root is
-resolved (`bash "$VCS" --detect --repo "$REPO"`) — not here. Carry `PROVIDER` and `CLIREADY`
-from that detect forward to the PR-open (Phase 1 step 3) and the pre-push guard. (`--detect`
-also emits `repo=`, but autopilot's own driver ops are cwd-inferred, so it needs no repo-id.)
+Forge detection is repo-scoped, so it runs in Phase 0.A.1, not here.
 
 ## Durable run protocol (mandatory)
 
@@ -128,9 +124,9 @@ file it was not given, so the marker has to travel inside the plan itself:
 ```
 
 The plan-approval hook verifies the marker, owner session, and plan SHA-256, applies
-`PLAN_APPROVED`, and delegates directly to `/zensu:tdd` without another question. Pass the
+`PLAN_APPROVED`, and delegates to `/zensu:build` without another question. Pass the
 approved spec plus the exact line `AUTOPILOT-RUN: <RUN_ID>` to every initial or fix-loop
-`/zensu:tdd` invocation. The TDD skill reads the durable attempt/return stage, creates a
+`/zensu:build` invocation. That skill reads the durable attempt/return stage, creates a
 fresh chain id, and uses the bound `--tdd-begin` form; its guarded `--chain-done` returns to
 that exact stage. Never start an unbound TDD generation during an active run.
 
@@ -258,7 +254,7 @@ progress view. If neither tool can be loaded, say so once and skip the tasks.
 **0.A — Worktree.** If `git rev-parse --show-toplevel` is the origin checkout (not a
 worktree under `.claude/worktrees/`), create one and continue inside it
 (`git worktree add .claude/worktrees/<slug> -b <branch> <base>`). Never build on the
-origin checkout. See Critical Conventions.
+origin checkout. `<base>` is the base `rules/conventions.md` §5 resolves first.
 
 **0.A.1 — Forge detect.** With the repo root `$REPO` resolved, detect the forge ONCE via the
 Step 0 driver and carry the result forward to every git-host op:
@@ -273,6 +269,8 @@ CLIREADY="$(printf '%s\n' "$DETECT" | sed -n 's/^cliReady=//p')"
   the user to install/authenticate it — GitHub: `gh auth login`; GitLab: `glab auth login`
   (install `glab` first if missing, e.g. `brew install glab`). Do NOT fall back to the other forge.
 - `PROVIDER=unknown` → ask the user (this is the planning gate) which forge / remote to target.
+- Then run `bash "$VCS" --conventions --repo "$REPO" --provider "$PROVIDER"`: every commit
+  and all PR text below follow `rules/conventions.md`.
 
 **0.B — Probe (self-setup).** Resolve the four seams the run needs — **boot**, **gates**,
 **auth**, **validate** — by the resolution order in `rules/probe.md`:
@@ -332,26 +330,26 @@ the plan content you pass to `ExitPlanMode`. Do not proceed if either operation 
 Keep that order: an `ExitPlanMode` approval that finds no durable run at `PLANNING`
 falls through to the standalone plan-approval directive, which asks the four-route question
 while no delivery route is decided, and once one is recorded or configured
-sends this spec to `/zensu:tdd` or implements it directly without asking.
+sends this spec to `/zensu:build` or implements it directly without asking.
 
 ### Phase 1 — Build  (autonomous, ZERO questions) — strictly ordered
 
 Run these in order. Implement **via the Zensu workflow** throughout.
 
-1. **Implement** — invoke `/zensu:tdd` (vanilla mode) with the spec + ACs and the exact
+1. **Implement** — invoke `/zensu:build` (vanilla) with the spec + ACs and the exact
    `AUTOPILOT-RUN: <RUN_ID>` line as the feature
    specification. Let the built-in review chain run and address what it raises.
    Stay in the worktree.
-   (Vanilla `/zensu:tdd` may ship thin coverage — `/zensu:cover` on the diff hardens the
+   (Vanilla `/zensu:build` may ship thin coverage — `/zensu:cover` on the diff hardens the
    durable test net; opt in with `--cover`, applied in step 6b below.)
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
    before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
    Persist `GATES_PASSED` with the tested head SHA; on failure persist `GATES_FAILED`, then
-   run the bound `/zensu:tdd` fix attempt and return here.
+   run the bound `/zensu:build` fix attempt and return here.
 2b. **Converge (report-only)** — run `/zensu:converge <session-plan-path>` (always the
    session plan, never mtime-resolved — scoped fix runs write newer plans): a
    `contradicts` finding on an active AC **blocks the PR open** until fixed via
-   `/zensu:tdd` (vanilla, scoped); after each fix re-run the converge report against the
+   `/zensu:build` (vanilla, scoped); after each fix re-run the converge report against the
    SAME session plan — if `contradicts` persists after 2 fix attempts, treat it as a
    stop-the-world blocker per The one rule (halt + report). `missing`/`partial`
    findings feed the step-6 validate loop; with `--no-validate`, `missing` on an
@@ -359,7 +357,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    PR body's per-AC table. Flow-back edit proposals are reported only — never
    auto-applied in this non-interactive run. Persist `CONVERGENCE_PASSED` before PR open;
    each contradiction uses `CONVERGENCE_FAILED` and the bound TDD return path.
-3. **Open the PR** — commit (Conventional Commits, no watermark), push, then open the PR/MR
+3. **Open the PR** — commit (`rules/conventions.md`), push, then open the PR/MR
    against `--base` **through the driver** (run from `$REPO` so `gh`/`glab` resolve the host;
    GitHub → `gh pr create`, GitLab → `glab mr create` with `--source-branch`/`--target-branch`,
    the driver picks per `$PROVIDER` and returns the PR/MR URL):
@@ -376,20 +374,21 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    Persist `PR_OPEN_REQUESTED` with a deterministic operation key before calling the driver;
    after success persist `PR_OPENED` with that same key, PR number/URL, and current head.
    `$HEAD` is the worktree's feature branch (already pushed above), `$BASE` the `--base` arg
-   (default `main`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open (auth
+   (default `vcs.prBase`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open (auth
    expired, an MR already exists on the branch, a push race) is a **stop-the-world blocker**
    (The one rule) — halt and report; never run step 4+ against a PR/MR that was not created.
 
-   Render the body (`$BODY_FILE`, English title + body) from the resolved template
-   (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
-   exists, else `$ROOT/templates/autopilot-pr-body.md` under the validated session plugin root): it carries a per-AC checklist table keyed
+   Render the title and body (`$BODY_FILE`) in the order of `rules/conventions.md` §4:
+   `$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when `overrides`
+   lists it, else the probe's `prTemplate` with Zensu's sections appended, else
+   `$ROOT/templates/autopilot-pr-body.md` under the validated session plugin root. Its AC section carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
    (deprecated rows stay listed with status `⚪ deprecated`, no evidence; status filled in after
    step 6). Every `Status` cell carries a leading marker — 🟢 pass, 🟡 partial, 🟡 unvalidated,
    🔴 fail, ⚪ deprecated — prefixing the word rather than replacing it; ⚪ is bound to
    provenance, so use it only for a row the spec already marks deprecated. The body also carries one audit line
    `Gates bypassed during build: <list|none|UNREADABLE — …>`
-   from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
+   from the bypass ledger: after EVERY `/zensu:build` chain of this run (the initial one and
    each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
    and union the non-`none` entries. **Check its exit status, not just its output.** On a
    non-zero exit the verb did not read a ledger: exit 3 prints an `UNREADABLE — …` line on
@@ -425,7 +424,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
       never-recycle rule).
    b. Every non-deprecated AC passes + gates green → persist `VALIDATION_PASSED` and
       **exit the loop**.
-   c. Anything off → persist `VALIDATION_FAILED`, fix it through `/zensu:tdd` (vanilla,
+   c. Anything off → persist `VALIDATION_FAILED`, fix it through `/zensu:build` (vanilla,
       scoped to the failing AC(s), carrying `AUTOPILOT-RUN: <RUN_ID>`),
       re-run the step-2 gates, push to update the PR, then go back to (a).
    d. Repeat (a)–(c) until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.
@@ -502,6 +501,7 @@ worst case               → still a reviewed, tested PR — minus the live proo
 - `rules/config.md` — `.zensu/autopilot.yaml` schema, a concrete worked instance, and the
   login-script prerequisite a project supplies.
 - `rules/work-order.md` — work-order mode: branch, plan file, spec binding, push and PR helpers.
+- `rules/conventions.md` — the repository's commit style, language, attribution and PR body order.
 
 ## Critical Conventions
 
@@ -516,7 +516,7 @@ worst case               → still a reviewed, tested PR — minus the live proo
 - **Never push to a merged/closed branch.** Re-check `bash "$VCS" --pr-state --provider "$PROVIDER" <n>`
   immediately before every push; if it returns `MERGED`/`CLOSED`, branch off `origin/<base>` and
   open a fresh PR/MR.
-- **English PR + commits.** Conventional Commits. No AI watermark / co-author trailer.
+- **The repository's conventions.** Commits and PR text follow `rules/conventions.md`.
 - **iac never against prod.** Default plan/dry-run + kind/localstack/throwaway target;
   `apply` only to a disposable environment (see `rules/drivers.md`).
 - **Review runs once.** `/zensu:pr-team-review` is the single mid-point pass; the tail loop

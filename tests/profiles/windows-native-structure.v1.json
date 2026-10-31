@@ -13,6 +13,7 @@
     "tests/structure/test-autopilot-state-machine.sh",
     "tests/structure/test-bash-source-write-gate.sh",
     "tests/structure/test-best-solution-first.sh",
+    "tests/structure/test-context-auto-load.sh",
     "tests/structure/test-file-exists-replacement.sh",
     "tests/structure/test-msys-runtime-boundaries.sh",
     "tests/structure/test-plan-payload-fallback.sh",
@@ -133,6 +134,10 @@
     {
       "path": "tests/structure/test-work-order-takeover.sh",
       "reason": "Work-order mode is unverified on native Windows and the suite skips there: its fake zensu is a shell script on PATH, and the runtime starts zensu through Node without a shell, which cannot run such a script on that host."
+    },
+    {
+      "path": "tests/structure/test-hook-process-budget.sh",
+      "reason": "The only native-Windows marker is the platform guard that skips the suite on Git Bash: the process-start budgets are calibrated on POSIX hosts, and its counting shims, which wrap every PATH program by name, were never run against Windows executables. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it and passes through that skip."
     }
   ]
 }

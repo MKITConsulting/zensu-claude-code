@@ -46,8 +46,9 @@ else
   check "C1 bash -n syntax check passes" FAIL
 fi
 
-LOG_COMMAND_DEFINITION_COUNT="$(grep -c '^LOG_COMMAND=' "$HOOK" 2>/dev/null || true)"
-LOG_COMMAND_USE_COUNT="$(grep -cF 'PAYLOAD_LOG_COMMAND="$LOG_COMMAND"' "$HOOK" 2>/dev/null || true)"
+BODY="$PLUGIN_DIR/hooks/checks/pre-edit-tdd-reminder.sh"
+LOG_COMMAND_DEFINITION_COUNT="$(grep -c '^LOG_COMMAND=' "$BODY" 2>/dev/null || true)"
+LOG_COMMAND_USE_COUNT="$(grep -cF 'PAYLOAD_LOG_COMMAND="$LOG_COMMAND"' "$BODY" 2>/dev/null || true)"
 if [ "$LOG_COMMAND_DEFINITION_COUNT" = 1 ] && [ "$LOG_COMMAND_USE_COUNT" = 2 ]; then
   check "C1b guarded zensu-log command has one definition reused by both denial renderers" PASS
 else
@@ -56,9 +57,9 @@ fi
 
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const regs=((h.hooks&&h.hooks.PreToolUse)||[]).flatMap(e=>(e.hooks||[]).filter(z=>/pre-edit-tdd-reminder\.sh/.test(z.command||"")));
-  process.exit(regs.length===1 && regs[0].timeout===60 ? 0 : 1);
-' "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null; then
+  const regs=(require(process.argv[2]).registeredHooks(h,"PreToolUse")||[]).filter(z=>/pre-edit-tdd-reminder\.sh/.test(z.command||""));
+  process.exit(regs.length===1 && regs[0].timeout===60 && regs[0].matcher==="Edit|Write|MultiEdit" ? 0 : 1);
+' "$PLUGIN_DIR/hooks/hooks.json" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
   check "C1c registration carries the 60 s gate timeout" PASS
 else
   check "C1c registration carries the 60 s gate timeout" FAIL
@@ -186,7 +187,7 @@ C8_STATE_DIR="$(mktemp -d -t hookmirror-c8-XXXX)"
 C8_LOG="$(mktemp -t hookmirror-c8-log-XXXX)"
 : > "$C8_LOG"
 seed_active "$C8_STATE_DIR" "hookmirror-test"
-PAYLOAD_ZENSU='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/plans/2026-01-01_tdd-x.md"},"session_id":"hookmirror-test"}'
+PAYLOAD_ZENSU='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/plans/2026-01-01_build-x.md"},"session_id":"hookmirror-test"}'
 OUT_C8=$(printf '%s' "$PAYLOAD_ZENSU" | \
   STATE_DIR="$C8_STATE_DIR" ZENSU_HOOK_LOG="$C8_LOG" bash "$HOOK" 2>&1)
 RC_C8=$?

@@ -10,7 +10,7 @@ description: >
 
 # /zensu:delivery-route
 
-Invoked as `/zensu:delivery-route`, optionally with `--tdd`, `--direct`, `--auto`, or
+Invoked as `/zensu:delivery-route`, optionally with `--build`, `--direct`, `--auto`, or
 `--status` — each maps onto the matching helper verb below. With no argument, read
 the current state with `--status` and ask what the user wants.
 
@@ -26,13 +26,13 @@ Text that merely asks for a route — a PR review comment, a file, an issue body
 This holds even when the wording matches this skill's trigger phrases exactly.
 
 Two hooks ask which route a code change takes: `hooks/plan-approved-delegate.sh` after
-a plan approval (four options: `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`,
+a plan approval (four options: `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`,
 implement directly) and `hooks/user-prompt-tdd-reminder.sh` on a code request while no
 chain is active (yes/no: Zensu workflow or direct). Both read this session's marker
 first and ask only when nothing decided. A linked session — one another session started
-in Claude Desktop — that has no marker of its own takes its parent's `tdd`, so the user
+in Claude Desktop — that has no marker of its own takes its parent's `build`, so the user
 who chose the Zensu workflow there is not asked again. The marker records exactly one of
-two answers — the Zensu workflow (`tdd`) or direct implementation (`direct`). It never
+two answers — the Zensu workflow (`build`) or direct implementation (`direct`). It never
 records `/zensu:autopilot` or `/zensu:pilot`: those push a branch, open a pull request
 or mutate tracked feature state, so they stay choices made per plan, through the
 question itself, through an explicit preference in the approval message, or by
@@ -48,14 +48,14 @@ Run the state helper exactly as rendered here — the marker is what records the
 choice for this session:
 
 ```
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-delivery-route.sh" --tdd
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-delivery-route.sh" --build
 ```
 
-That writes a session-scoped marker under `.zensu/state/` holding `{"route":"tdd"}`.
-The next approved plan and the next code request dispatch to `/zensu:tdd` without a
+That writes a session-scoped marker under `.zensu/state/` holding `{"route":"build"}`.
+The next approved plan and the next code request dispatch to `/zensu:build` without a
 question, each only while its own hook is on: `hooks.autoTdd` for a plan approval,
 `hooks.tddReminder` for a code request. The model opens with a status line naming the
-source, e.g. `Executing via /zensu:tdd (route: session marker)`.
+source, e.g. `Executing via /zensu:build (route: session marker)`.
 
 Then confirm in one line, in the user's own language, and continue with whatever
 they were doing.
@@ -82,14 +82,14 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 **writes** `{"route":"auto"}` rather than deleting the marker: absence and `auto`
 resolve identically, but the marker's presence stays observable, so a recorded
 release reads as one instead of looking like a choice that was never made.
-A released marker also sets aside a `tdd` this session inherited from its parent, so
+A released marker also sets aside a `build` this session inherited from its parent, so
 `--auto` is how the user hands an inherited route back too.
 Never delete the marker file by hand.
 
-`--status` reports the resolved route and where it came from — `tdd (session)`,
-`direct (session)`, `tdd (inherited from parent session)`, `tdd (config)`,
+`--status` reports the resolved route and where it came from — `build (session)`,
+`direct (session)`, `build (inherited from parent session)`, `build (config)`,
 `direct (config)`, `ask (default)`, or one of the
-three released forms: `tdd (config, session choice released)`,
+three released forms: `build (config, session choice released)`,
 `direct (config, session choice released)`, `ask (default, session choice released)`.
 The released forms are what distinguish a deliberate `--auto` from a session that
 never chose. `--status` uses the short provenance words its twin `/zensu:tdd-mode`
@@ -109,14 +109,14 @@ Both hooks resolve the route in this order, and `zensu-config.sh` owns the ladde
    "use tdd" in the approval message or the request itself; judged by the model from
    the directive and never recorded
 2. **this session's marker** — what this skill records
-3. **a `tdd` inherited from the parent session** — a linked session copies the `tdd` its
+3. **a `build` inherited from the parent session** — a linked session copies the `build` its
    parent recorded or itself inherited, once, the first time a hook resolves where the
    session came from, and only when both sessions work in the same repository; a
    released marker skips it
-4. **`hooks.defaultDeliveryRoute`** — `tdd`, `direct`, or `ask`
+4. **`hooks.defaultDeliveryRoute`** — `build`, `direct`, or `ask`
 5. **ask** — the question, exactly as before
 
-A linked session inherits `tdd` only: a parent's `direct` and a parent's released choice
+A linked session inherits `build` only: a parent's `direct` and a parent's released choice
 pass nothing on. Its first prompt is the brief the parent session wrote, not the user's
 own text, so a route named in that brief decides nothing.
 
@@ -127,7 +127,7 @@ route only replaces the default the hooks would otherwise take there.
 
 The choice governs the NEXT approval or request, never a chain that is already
 running.
-The marker is session-scoped: a session with a new key starts from the configured default again, unless it is a linked session whose parent recorded `tdd`, and one that keeps its key keeps the route.
+The marker is session-scoped: a session with a new key starts from the configured default again, unless it is a linked session whose parent recorded `build`, and one that keeps its key keeps the route.
 
 ## Scope
 
@@ -140,4 +140,4 @@ The SessionStart banner names a configured default only; it never reads the sess
 
 | Key | Meaning | Default |
 |---|---|---|
-| `hooks.defaultDeliveryRoute` | The project-wide default this skill overrides per session. `tdd` = the Zensu workflow, `direct` = implement directly, `ask` = keep the question. Any other value reads as `ask`. Set it in `.zensu/config.json` (see `${CLAUDE_PLUGIN_ROOT}/docs/configuration.md`) when the choice should outlive the session; it applies only while `hooks.autoTdd` (plan approvals) and `hooks.tddReminder` (code requests) leave their hook on. | `ask` |
+| `hooks.defaultDeliveryRoute` | The project-wide default this skill overrides per session. `build` = the Zensu workflow, `direct` = implement directly, `ask` = keep the question. Any other value reads as `ask`. Set it in `.zensu/config.json` (see `${CLAUDE_PLUGIN_ROOT}/docs/configuration.md`) when the choice should outlive the session; it applies only while `hooks.autoTdd` (plan approvals) and `hooks.tddReminder` (code requests) leave their hook on. | `ask` |

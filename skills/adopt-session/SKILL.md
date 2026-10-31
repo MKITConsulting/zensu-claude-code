@@ -312,12 +312,12 @@ markers to the new worktree, and, while
 writes one in the new one. The move takes effect from the next tool call for the
 source-write gate, the reviewers and the `zensu-log.sh` verbs. The host does not move: it
 keeps this session's start directory, and the Bash tool returns there after a command that
-leaves it, so give your own commands — a build, a test run, `git` — a `cd` into the new
-anchor. `/zensu:tdd`, `/zensu:self-review`, `/zensu:converge` and
+leaves it, so give your commands — a build, a test run, `git` — a `cd` into the new
+anchor. `/zensu:build`, `/zensu:self-review`, `/zensu:converge` and
 `/zensu:verify-feature --chain` read the anchor from `zensu-log.sh --project-root` and run
 their own commands inside it, and `--evidence-run` runs there too, so their plan, run log,
 baseline, edit-landing audit, test runs and acceptance checks follow the move, and a new
-`/zensu:tdd` chain can start in this session — unless the new anchor's path holds a double
+`/zensu:build` chain can start in this session — unless the new anchor's path holds a double
 quote, a dollar sign, a backtick or a backslash, which `--project-root` refuses; the report
 then says so instead of promising a chain. `/zensu:plan-review`, `/zensu:setup`,
 `/zensu:cover`, `/zensu:autopilot` and `/zensu:pilot` still read plans, config, overlays and

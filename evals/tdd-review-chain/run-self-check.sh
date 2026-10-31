@@ -41,9 +41,9 @@ if [ -n "$IMPL_TMP" ] && [ -d "$IMPL_TMP" ]; then
   printf 'test\n' > "$IMPL_TMP/ok/src/WidgetTest.java"
   sleep 1
   printf 'impl\n' > "$IMPL_TMP/ok/src/Widget.java"
-  LOGF="$IMPL_TMP/2026-01-01-0000_tdd-widget.log"
+  LOGF="$IMPL_TMP/2026-01-01-0000_build-widget.log"
   {
-    printf '[00:00:00] TDD STARTED — Widget | steps: 1\n'
+    printf '[00:00:00] BUILD STARTED — Widget | steps: 1\n'
     printf '[00:00:01] EXECUTION STARTED\n'
     printf '[00:00:02] BE-1 RED WidgetTest — FAIL: class Widget does not exist\n'
     printf '[00:00:03] BE-1 IMPL completed — files: src/Widget.java | extracted the parser\n'
@@ -57,7 +57,7 @@ if [ -n "$IMPL_TMP" ] && [ -d "$IMPL_TMP" ]; then
   printf 'impl\n' > "$IMPL_TMP/after/src/Widget.java"
   sleep 1
   printf 'test\n' > "$IMPL_TMP/after/src/WidgetTest.java"
-  LOGF_AFTER="$IMPL_TMP/2026-01-01-0001_tdd-widget-after.log"
+  LOGF_AFTER="$IMPL_TMP/2026-01-01-0001_build-widget-after.log"
   cp "$LOGF" "$LOGF_AFTER"
   AFTER_OUT="$(bash "$COMPLIANCE" --log "$LOGF_AFTER" --impl-dir "$IMPL_TMP/after" 2>&1)"
   AFTER_RC=$?

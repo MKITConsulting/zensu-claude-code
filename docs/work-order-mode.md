@@ -33,8 +33,9 @@ its interactive planning gate, and no `zensu work` command runs.
    not the plan-approval gate, binds the plan: `zensu-work-order.sh --bind-spec` reports `planning`
    and `implementing`, and only after Zensu accepted `implementing` records the internal event
    `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. When the order needs a plan approval,
-   `--plan-approval` commits and pushes the plan file, attaches it to the order as the plan artifact
-   and asks for the approval, which ends the session. A later attempt binds the approved plan and
+   `--plan-approval` commits the plan file with the message the session wrote in the repository's
+   own commit conventions (`--message-file <absolute path>`), pushes it, attaches it to the order
+   as the plan artifact and asks for the approval, which ends the session. A later attempt binds the approved plan and
    blocks the order with `worker_error` when the plan file on the branch differs from it.
 3. Every push goes through `zensu-work-order.sh --push`, which renews the lease first, pushes with
    `--force-with-lease` against the head Zensu recorded for the order and reports the new head. The

@@ -53,8 +53,8 @@ export ZENSU_CONFIG="$TMP_CFG"
 OUT_ENABLED="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-exitplanmode.json" 2>/dev/null)"
 
 case "$OUT_ENABLED" in
-  *"skill='zensu:tdd'"*) check "autoTdd=true: routes to skill='zensu:tdd' (main thread)" PASS ;;
-  *)                     check "autoTdd=true: routes to skill='zensu:tdd' (main thread)" FAIL ;;
+  *"skill='zensu:build'"*) check "autoTdd=true: routes to skill='zensu:build' (main thread)" PASS ;;
+  *)                     check "autoTdd=true: routes to skill='zensu:build' (main thread)" FAIL ;;
 esac
 
 case "$OUT_ENABLED" in
@@ -69,8 +69,8 @@ export ZENSU_CONFIG="$NOTHING_CFG"
 OUT_DEFAULT="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-exitplanmode.json" 2>/dev/null)"
 
 case "$OUT_DEFAULT" in
-  *"skill='zensu:tdd'"*) check "no config (default): routes to skill='zensu:tdd' (enabled)" PASS ;;
-  *)                     check "no config (default): routes to skill='zensu:tdd' (enabled)" FAIL ;;
+  *"skill='zensu:build'"*) check "no config (default): routes to skill='zensu:build' (enabled)" PASS ;;
+  *)                     check "no config (default): routes to skill='zensu:build' (enabled)" FAIL ;;
 esac
 
 echo "----"

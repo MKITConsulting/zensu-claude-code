@@ -31,7 +31,7 @@ or the config key.
 The mechanism is a session marker plus a config key; the question itself is unchanged
 (`.claude/rules/plan-approval-delivery-route.md`). The measured
 reason: across this machine's transcripts from 12 June to 20 September 2026 the question was
-asked 835 times in 539 sessions, and a session marker plus a configured `tdd` default would have
+asked 835 times in 539 sessions, and a session marker plus a configured `build` default would have
 removed 488 of the 678 decisive answers. Before this, the only switch was `autoTdd:false`, which
 removes the workflow together with the question.
 
@@ -42,10 +42,10 @@ removes the workflow together with the question.
 1. an explicit preference in the user's OWN text — fast-path (B) of the plan directive, the
    reminder's negation-then-affirmation arms — judged by the model and never recorded;
 2. the session marker `<project>/.zensu/state/delivery-route-<session-key>.json`
-   (`{"route":"tdd"|"direct"}`; `{"route":"auto"}` is a recorded release and falls through);
+   (`{"route":"build"|"direct"}`; `{"route":"auto"}` is a recorded release and falls through);
 3. the inherited route `<project>/.zensu/state/inherited-route-<session-key>.json`
-   (`{"route":"tdd"}` only), which a released own marker skips (§"Linked sessions inherit `tdd`");
-4. `hooks.defaultDeliveryRoute` ∈ `tdd | direct | ask`;
+   (`{"route":"build"}` only), which a released own marker skips (§"Linked sessions inherit `build`");
+4. `hooks.defaultDeliveryRoute` ∈ `build | direct | ask`;
 5. ask.
 
 `zensu_delivery_route_resolve <root> <key>` answers `route<TAB>source`,
@@ -69,12 +69,12 @@ same hooks stay harness-anchored on purpose; moving them is its own change with 
 
 ## The vocabulary bound is the safety property
 
-The vocabulary is `tdd | direct` and nothing wider. `/zensu:autopilot` pushes a branch and opens
+The vocabulary is `build | direct` and nothing wider. `/zensu:autopilot` pushes a branch and opens
 a pull request; `/zensu:pilot` commits, opens a pull request and mutates tracked feature state.
 A committed `.zensu/config.json` must never pre-select either for every clone, and a marker must
 never make a later approval take an outward-facing step the user did not choose for that plan.
 The helper `hooks/lib/zensu-delivery-route.sh` refuses every verb except
-`--tdd | --direct | --auto | --status`, the config reader answers `ask` for any other value, and
+`--build | --direct | --auto | --status`, the config reader answers `ask` for any other value, and
 clause (C)'s bar on the two routes in a headless run is byte-identical: a decided route replaces
 only the DEFAULT that (C) names. The `D13` slices in `tests/structure/test-plan-approved-delegate.sh`
 hold that; the new directive text sits outside the (B) and (C) slices.
@@ -84,7 +84,7 @@ hold that; the new directive text sits outside the (B) and (C) slices.
 The user, through `/zensu:delivery-route` (the twin of `/zensu:tdd-mode`, with the same "only
 the user changes it" injection rule, carried in the skill's description as well as its body);
 and the model, immediately after the user answers the question with the Zensu workflow — the
-RECORD sentence in both directives tells it to run the rendered helper command with `--tdd`
+RECORD sentence in both directives tells it to run the rendered helper command with `--build`
 before dispatching, and names that one Bash call as coming BEFORE the "next tool call" the
 workflow arm names, so the two orders cannot be read as a conflict. If the user declines that
 call's permission prompt, the model says in one line that nothing was recorded and that the
@@ -100,8 +100,8 @@ option LABELS are unchanged, because `evals/plan-approval-hook` selects by label
 **Only the fail-safe answer is recorded automatically.** The reminder asks per request and the
 plan gate per plan, but both read one marker. A recorded `direct` would let one quick "No" to the
 reminder skip the review chain AND the four-route question for a later, possibly large, approved
-plan, with only the model's status line as notice. A recorded `tdd` adds the review chain rather
-than removing it. So the model records only `tdd`, and `direct` becomes session-wide only through
+plan, with only the model's status line as notice. A recorded `build` adds the review chain rather
+than removing it. So the model records only `build`, and `direct` becomes session-wide only through
 the user's explicit `/zensu:delivery-route --direct` or `hooks.defaultDeliveryRoute`. Recording
 provenance, or keeping a separate record per question, was rejected: either splits the one ladder
 the two hooks share, and treating a foreign record as a mere recommendation would undo the (S)
@@ -154,11 +154,11 @@ module, CommonJS, TypeScript and JSON files, and requires R8k's reason for it. A
 another way, such as a path joined from the bare stem in node, or written by another tool such as
 `tee`, still escapes it.
 
-## Linked sessions inherit `tdd`
+## Linked sessions inherit `build`
 
 A session another Claude Desktop session started (`start_session`, fresh or forked context) has its
 own CLI session id and key, so the parent's marker never reached it: over 424 linked sessions
-measured on 2026-10-18, none opened with a decided route, the 6 whose parent had recorded `tdd`
+measured on 2026-10-18, none opened with a decided route, the 6 whose parent had recorded the workflow route
 included. Its first prompt is the brief the parent wrote, and it arrives as `typed`, so a route
 named in a brief acted as the user's own preference. The measurements and decisions are in
 `docs/superpowers/specs/2026-10-18-linked-session-route-design.md`.
@@ -198,13 +198,13 @@ it writable and searchable before the module starts, because an answer that cann
 start the module again on every prompt. `zensu_linked_session_pending` answers the same cheap questions without a
 process, so a caller that would have to start one only to read the payload session id asks it first:
 the plan gate reads that id once, where its Autopilot branch already reads it, and calls the resolver
-only while the lineage is pending. On `linked`, a same-repository parent whose own marker reads `tdd`, or whose own
-marker is absent and whose inherited marker reads `tdd`, makes it write `inherited-route-<key>.json`
+only while the lineage is pending. On `linked`, a same-repository parent whose own marker reads `build`, or whose own
+marker is absent and whose inherited marker reads `build`, makes it write `inherited-route-<key>.json`
 before the linked marker. The parent's markers are read through `zensu_delivery_route_marker_state`
 and `zensu_inherited_route_state`, so each format keeps one reader. Every fault falls back to the
 ladder without the inherited rank.
 
-**Only `tdd` is inherited**, by the rule in §"Two writers": an inherited `tdd` adds the review chain
+**Only `build` is inherited**, by the rule in §"Two writers": an inherited `build` adds the review chain
 and never removes it. A parent's `direct`, a released parent marker and a configured default pass
 nothing on. The answer is a snapshot: later changes in the parent do not move the child. The
 inherited rank sits below the own marker and above the config key, because it is a choice the user
@@ -247,7 +247,7 @@ the directive is never routed to silence, and it puts the brief lead right after
 `additionalContext` opener, in either spelling the hooks emit, so the note survives the fallback;
 the primer emits nothing, as before. The reminder's other
 three shapes are `printf` literals through the same wrapper, never a third heredoc: the CI note, the
-decided line it sends on every prompt while the field reads `tdd` or `direct`, and the short line it
+decided line it sends on every prompt while the field reads `build` or `direct`, and the short line it
 sends on a later `ask` prompt of a context generation that already received the full text
 (`.claude/rules/prompt-ledger.md`). The CI note and the decided line never carry the record command;
 the short line does, through the same placeholder, so a Yes can be recorded even when the full text
@@ -255,7 +255,7 @@ is no longer in context.
 
 ## Disclosure, five surfaces
 
-The directive field, the status line the model opens with (`Executing via /zensu:tdd (route:
+The directive field, the status line the model opens with (`Executing via /zensu:build (route:
 session marker)`), the SessionStart banner line for a configured default, the `--status` verb,
 and two `/zensu:doctor` rows.
 
@@ -275,8 +275,8 @@ and two `/zensu:doctor` rows.
   `delivery route:` row is fed by the wrapper probe `ZDOC_DELIVERY_ROUTE`, which runs only for a
   `bound` session and renders a missing-check row otherwise. Both rows name a switched-off
   reader (`hooks.autoTdd=false`, `hooks.tddReminder=false`), because each hook exits on its own
-  flag before it resolves the route, and a `tdd` session row then names the one half that still
-  dispatches to `/zensu:tdd` rather than claiming every code change does (R18g). An unknown config value renders as written — a string once,
+  flag before it resolves the route, and a `build` session row then names the one half that still
+  dispatches to `/zensu:build` rather than claiming every code change does (R18g). An unknown config value renders as written — a string once,
   never re-quoted — bounded to 40 characters with a `…` marker, folded through `foldSlot`, and
   the load-failure arm renders `FOLD_UNAVAILABLE` inside the call site's own parentheses.
 - **One wording, two carriers.** The three switched-off-half literals and the message-preference
@@ -341,7 +341,7 @@ route: a route change moves only the field, and every shape of the reminder carr
 - `skills/delivery-route/SKILL.md`, its `plugin.json` entry and the README row and counts;
   `config.example.json`; the `defaultDeliveryRoute` row and the hook rows in
   `docs/configuration.md`; the Layer 2 edge label in `docs/architecture.md` (the `D17` needle
-  stays contiguous); the first `## When to Use` bullet of `skills/tdd/SKILL.md`; both interception paragraphs of
+  stays contiguous); the first `## When to Use` bullet of `skills/build/SKILL.md`; both interception paragraphs of
   `skills/gauntlet-loop/SKILL.md`.
 - The doctor probe in `zensu-doctor.sh`, the two renderer rows and the shared literals in
   `zensu-doctor-report.js`, and their `skills/doctor/SKILL.md` bullets.
@@ -360,8 +360,8 @@ route: a route change moves only the field, and every shape of the reminder carr
 - `evals/plan-approval-hook/`: `route_recorded` in the runner grades `T2.9` on the marker the
   helper writes, through `zensu_delivery_route_marker_path` and
   `zensu_delivery_route_marker_state` rather than a copy of either, the expect script's
-  `record_prompt_ok` keys on the helper's file name and its `--tdd` verb and its result arm on the
-  helper's `delivery-route: tdd` line, and `route_fixture` pins `ask` on top of the effective
+  `record_prompt_ok` keys on the helper's file name and its `--build` verb and its result arm on the
+  helper's `delivery-route: build` line, and `route_fixture` pins `ask` on top of the effective
   config. `D38`-`D41` in `tests/structure/test-plan-approved-delegate.sh` grade the fixture, the
   guard, the `T2.9` grading and `strip_ansi`, because the eval never runs in CI.
 
@@ -387,7 +387,7 @@ ignores both files and asks, which is the fail-safe direction.
   `/zensu:autopilot` and `/zensu:pilot` are reachable only by naming them in the approval message.
   Whether to ask anyway when the plan's own ranking would put Autopilot or Pilot first is an open
   product decision.
-- The project overlay wins per key, so a committed `direct` overrides a user's global `tdd` for
+- The project overlay wins per key, so a committed `direct` overrides a user's global `build` for
   every clone — the exposure a committed `autoTdd:false` already has. The banner is silent on
   `resume|compact`, so a resumed session sees the default only in the directive field and the
   doctor row.
@@ -397,8 +397,8 @@ ignores both files and asks, which is the fail-safe direction.
   implemented.
 - A session that approves a plan carrying ANOTHER session's `<!-- zensu-autopilot:<run> -->`
   marker takes the standalone branch, because that run is invisible to its owner-scoped read
-  (`.claude/rules/autopilot-run-scope.md`). A recorded `tdd`, an explicitly recorded `direct`, or
-  a configured default then dispatches the plan without the four-route question: `tdd` meets the
+  (`.claude/rules/autopilot-run-scope.md`). A recorded `build`, an explicitly recorded `direct`, or
+  a configured default then dispatches the plan without the four-route question: `build` meets the
   standalone `--tdd-begin` workspace fence, and `direct` meets none. Forcing `ask` whenever a foreign durable run exists
   would cancel the feature for every project with an Autopilot run in a sibling worktree, so it is
   not done. The scoped fix is the payload-evaluator verdict the retained exit-6
@@ -409,7 +409,7 @@ ignores both files and asks, which is the fail-safe direction.
 - An Autopilot planning approval that falls through to the standalone branch, because
   `skills/autopilot/SKILL.md` Phase 0.D ran `ExitPlanMode` before `--autopilot-begin`, meets a
   recorded or configured route like any other plan: the field sends the Autopilot spec to
-  `/zensu:tdd` or implements it directly without the question, where an `ask` field re-asks it.
+  `/zensu:build` or implements it directly without the question, where an `ask` field re-asks it.
   The guard is running `--autopilot-begin` before `ExitPlanMode`. Phase 0.D states that order and
   this consequence, and `D16` in `tests/structure/test-autopilot-durable-skill.sh` pins both as
   text; nothing observes the order a model actually takes
@@ -464,7 +464,7 @@ ignores both files and asks, which is the fail-safe direction.
   example, leaves the answer uncached, so the module starts again on the next prompt. The test
   covers the read-only and the foreign-owned directory, the common cases.
 - The desktop records and the parent's markers are ordinary user-writable files. A forged lineage
-  can add the workflow, because only `tdd` is inherited; drop the brief note, which is the
+  can add the workflow, because only `build` is inherited; drop the brief note, which is the
   behavior from before inheritance; or mark a prompt the user typed as another session's brief,
   so a route preference in that one prompt decides nothing and the field answers. Under a field
   that reads `direct` (the own marker or `hooks.defaultDeliveryRoute`) that removes review: a
@@ -503,7 +503,7 @@ ignores both files and asks, which is the fail-safe direction.
   it, which the desktop's save after each result makes likely but which was not observed live.
 - A linked session that is already running when the release carrying this arrives resolves its
   lineage on its first prompt under the new runtime. It gets no brief note, because its
-  `completedTurns` is set, but it can start inheriting `tdd` mid-session, which the field discloses.
+  `completedTurns` is set, but it can start inheriting `build` mid-session, which the field discloses.
 - A new CLI session id under the same desktop session resolves again under the new key. It gets no
   note, but it inherits from the parent's CURRENT markers rather than the snapshot the old key took,
   and a desktop that has not yet written the new `cliSessionId` answers `cli-session-mismatch`, a

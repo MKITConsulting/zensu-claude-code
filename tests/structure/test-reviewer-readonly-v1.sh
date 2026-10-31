@@ -22,13 +22,13 @@ contains() {
 
 HOOKS="$ROOT/hooks/hooks.json"
 source "$ROOT/tests/structure/lib-skill-text.sh"
-TDD="$(skill_text_file "$ROOT/skills/tdd")"
+TDD="$(skill_text_file "$ROOT/skills/build")"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 
 node -e '
-  const h = require(process.argv[1]).hooks.PreToolUse;
-  if (h[0]?.matcher !== ".*" || !h[0]?.hooks?.[0]?.command?.includes("pre-reviewer-capability-gate.sh")) process.exit(1);
-' "$HOOKS" && check "reviewer gate is the first PreToolUse hook" PASS || check "reviewer gate is the first PreToolUse hook" FAIL
+  const h = require(process.argv[2]).registeredHooks(require(process.argv[1]), "PreToolUse") || [];
+  if (h[0]?.matcher !== ".*" || !h[0]?.command.includes("pre-reviewer-capability-gate.sh")) process.exit(1);
+' "$HOOKS" "$ROOT/hooks/lib/hook-registration-v1.js" && check "reviewer gate is the first PreToolUse hook" PASS || check "reviewer gate is the first PreToolUse hook" FAIL
 
 for file in "$ROOT/agents/code-reviewer.md" "$ROOT/agents/review-aspect.md" "$ROOT/agents/review-judge.md"; do
   FRONTMATTER="$(awk 'NR == 1 { next } /^---$/ { exit } { print }' "$file")"

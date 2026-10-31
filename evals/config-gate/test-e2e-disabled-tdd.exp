@@ -30,7 +30,7 @@ expect {
     send_user "\n>>> UNEXPECTED: tdd-manager delegation acknowledged despite autoTdd=false\n"
     exit 1
   }
-  -re "Skipping TDD|Delegating to" {
+  -re "Skipping /zensu:build|Delegating to" {
     send_user "\n>>> mention of delegation activity logged for analyst review\n"
   }
   timeout {

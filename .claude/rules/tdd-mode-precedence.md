@@ -103,10 +103,10 @@ deliberately a SECOND call, because that duplication is the TOCTOU defense and c
 two would remove it. A new marker value lands in the reader, in the reduction, and in
 `--status`'s label set. Then `skills/pr-fix-findings/SKILL.md` step 4, which restates the
 ranks its fix chains follow and strips every `TDD-MODE:` line, the `TDD-MODE:` parser
-(`skills/tdd/SKILL.md` Phase 0 + Mandatory command protocol step 1), that same skill's
+(`skills/build/SKILL.md` Phase 0 + Mandatory command protocol step 1), that same skill's
 §"Vanilla Implementation Mode" in `references/modes.md`, which states the ladder a THIRD time for the model,
 `skills/tdd-mode/SKILL.md`, `docs/configuration.md` (the `tddImplementation` row),
-`docs/gates.md` §Activation, `docs/tdd-manager-workflow.md` §Vanilla implementation mode,
+`docs/gates.md` §Activation, `docs/build-workflow.md` §Vanilla implementation mode,
 and `docs/architecture.md`. A site left behind does not fail closed — it leaves a stale
 rank list the model reads while the helper resolves a different one.
 

@@ -74,8 +74,8 @@ the unit file passes a clean environment. `gh` is a PATH shim that answers canne
 suite drives real chains to `deferred-ci`, through a mid-chain switch in both directions, and
 through the helper's repo and session verbs.
 
-**Coupled sites that move together:** `skills/tdd/SKILL.md` Phase 0 step 2 and the section
-"Full Suite in CI (mode-gated deltas)" in `skills/tdd/references/modes.md`; the CI fix-round
+**Coupled sites that move together:** `skills/build/SKILL.md` Phase 0 step 2 and the section
+"Full Suite in CI (mode-gated deltas)" in `skills/build/references/modes.md`; the CI fix-round
 paragraph and the legend in `skills/self-review/SKILL.md`; `CLOSE_PASS_SUITE_CI`,
 `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP`, `FULL_SUITE_ROUND_NOTE` and the `deferred-ci` legend
 entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.sh` counts
@@ -83,7 +83,7 @@ entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.
 `test-full-suite-ci.sh` C10, C22 and C23 refuse it in a CI chain's directives, so the CI variant
 must not add one; `docs/configuration.md` §"Full Suite in CI" and
 its three keys; `docs/gates.md` CI mode; discipline patch 12 in
-`docs/tdd-manager-workflow.md`; `config.example.json`; the README skills table and count; the
+`docs/build-workflow.md`; `config.example.json`; the README skills table and count; the
 skills list in `.claude-plugin/plugin.json`.
 
 **R8k reads these modules too.** R8k in `tests/structure/test-delivery-route.sh` fails any file

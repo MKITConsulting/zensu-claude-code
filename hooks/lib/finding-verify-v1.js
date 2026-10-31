@@ -2,7 +2,7 @@
 // finding-verify-v1.js — deterministic anchor grader for fan-out review findings.
 //
 // Every Zensu review fan-out merges N agent findings lists and then acts on them:
-// auto-fix rounds (/zensu:tdd), a published forge review (/zensu:pr-team-review),
+// auto-fix rounds (/zensu:build), a published forge review (/zensu:pr-team-review),
 // a verdict report (/zensu:plan-review). This lib is stage 1 of the verification
 // gate that sits between "an agent said it" and "we act on it". It is model-free
 // by construction, so it is the floor that cannot itself hallucinate: it only
@@ -32,7 +32,7 @@
 //   - [CRITICAL] src/a.ts:42 — issue. Evidence: ... Fix: ...
 //
 // Findings are matched by the FIRST path:line token on the line, never by format,
-// so the same lib serves the /zensu:tdd aspect text, pr-team-review's JSON-derived
+// so the same lib serves the /zensu:build aspect text, pr-team-review's JSON-derived
 // anchors, and plan-review's code references — each caller emits one line per
 // finding and matches results back by index.
 //

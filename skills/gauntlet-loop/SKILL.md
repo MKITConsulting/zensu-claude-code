@@ -71,7 +71,7 @@ closes none.
   output into the packet: the shell can be off, and the guard can refuse. A critic is
   handed that evidence; it never reproduces it. Plan the charter's inspection protocol
   around that, or the first critic round returns nothing.
-- **An active `/zensu:tdd` chain binds the LEAD ONLY.** The PreToolUse
+- **An active `/zensu:build` chain binds the LEAD ONLY.** The PreToolUse
   phase-gate returns early unless the principal is `main-v1`
   (`hooks/pre-edit-tdd-reminder.sh`), and no spawn the
   host identifies as a subagent is `main-v1` — a builder or critic is
@@ -94,15 +94,15 @@ closes none.
 - **Charter approval is intercepted under the shipped default.**
   `plan-approved-delegate.sh` fires on
   `ExitPlanMode` and directs the main thread to ask which delivery route the plan
-  takes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, or implementing directly —
-  before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER `/zensu:tdd`
+  takes — `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`, or implementing directly —
+  before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER `/zensu:build`
   yes/no question on every prompt while no chain is active — it offers neither
   `/zensu:autopilot` nor `/zensu:pilot`, and when no human can answer it, the
   fast-path runs the workflow without asking. Approving a gauntlet charter through
   plan mode therefore hands the mission to a different skill. Decide that question
   deliberately before the loop starts, or approve the charter with `AskUserQuestion`
   instead. (Both hooks are config-gated — `autoTdd` and `tddReminder` — and both
-  default on, so assume the interception unless the project turned one off. A route recorded via `/zensu:delivery-route`, inherited from a parent session or set in `hooks.defaultDeliveryRoute` answers the question without asking but still hands the mission to that route.)
+  default on, so assume the interception unless the project turned one off. A route from `/zensu:delivery-route`, a parent session or `hooks.defaultDeliveryRoute` answers the question without asking but still hands the mission to that route.)
 - **`/zensu:wargame` is the planner, this is the execution loop.** Wargame mandates
   reusing the Zensu review chain as its verification cohort for code missions; this
   loop deliberately does not. The reason is NOT the `Bash` its critics may hold and
@@ -123,7 +123,7 @@ closes none.
   `zensu:zensu-plm`. On top of that the reviewer types hard-refuse any spawn that is
   not a complete `REVIEW PACKET v1`, `review-aspect` accepts only seven fixed
   perspectives, and their traversal is capability-restricted. Use `Explore` for a
-  gauntlet critic. A `zensu:code-reviewer` spawn made outside the TDD chain's own header
+  gauntlet critic. A `zensu:code-reviewer` spawn made outside the chain's own header
   protocol is a no-op, not a stolen ticket.
 - **Zensu CLI mutations stay in the main thread.** A builder or critic subagent never
   runs them, and never runs a Zensu workflow skill on the lead's behalf.
@@ -225,7 +225,7 @@ rules for expensive tools or external services.
 **Get the charter approved before spawning anything.**
 Approve it with `AskUserQuestion`. Do NOT reach for plan mode: `ExitPlanMode` is
 intercepted by `plan-approved-delegate.sh`, which asks which delivery route to take
-and hands the mission to whichever is chosen — `/zensu:autopilot`, `/zensu:tdd`,
+and hands the mission to whichever is chosen — `/zensu:autopilot`, `/zensu:build`,
 `/zensu:pilot`, or implementing directly, or the route this session already recorded or inherited — see "Inside the Zensu plugin" above. Take that hand-off only as a
 deliberate decision, never as the default route to an approval. A long unattended
 run started from a misread goal burns the whole budget.
