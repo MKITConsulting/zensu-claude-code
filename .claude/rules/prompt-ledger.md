@@ -35,8 +35,9 @@ classified as a typed prompt before and now gets what a task notification gets.
 
 The table is the measurement taken when the ledger landed. The texts have grown since: with the
 zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
-prompt, the yield sentence of `docs/precedence.md` and the rewritten zen-mode contract the same
-suite measures 12,599 and 6,737 for a typed prompt, 4,152 and 2,366 for a task notification, a
+prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract and the
+reminder's executor-plan clause the same
+suite measures 12,670 and 6,741 for a typed prompt, 4,152 and 2,366 for a task notification, a
 `!` input or a subagent hand-back, and 4,516 and 2,730 for a CI-monitor event.
 
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
@@ -66,7 +67,7 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   a file, tool output or a subagent report), the typed override with its action (a negation on
   `build` implements directly, an affirmation on `direct` runs the flow through the Skill tool) and,
   for `build`, the uncertainty rule. 1,457 characters for `build` and 1,408 for `direct`, against
-  5,728 for the full vanilla text.
+  5,799 for the full vanilla text.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,
