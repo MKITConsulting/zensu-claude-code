@@ -809,7 +809,7 @@ foreign_plan_payload() {
 }
 CTX_FOREIGN_ASK="$(export CLAUDE_CODE_ENTRYPOINT=cli; foreign_plan_payload "$S_P" | hook_ctx "$PLANHOOK")"
 printf '%s\n' '{"route":"build"}' > "$MARKER_P"
-CTX_FOREIGN_BUILD="$(foreign_plan_payload "$S_P" | hook_ctx "$PLANHOOK")"
+CTX_FOREIGN_BUILD="$(export CLAUDE_CODE_ENTRYPOINT=cli; foreign_plan_payload "$S_P" | hook_ctx "$PLANHOOK")"
 rm -f "$MARKER_P"
 { printf '%s' "$CTX_FOREIGN_ASK" | grep -qF 'names its own executor, superpowers:executing-plans' \
   && ! printf '%s' "$CTX_FOREIGN_ASK" | grep -qF 'AskUserQuestion' \
@@ -1367,7 +1367,7 @@ DR_S="$(doctor_rows "$CFG_DEFAULT" 'build (session marker)')"; DR_A="$(doctor_ro
 { printf '%s' "$DR_U" | grep -F 'delivery route: not checked' | grep -qF '⚠️' \
   && printf '%s' "$DR_J" | grep -F 'delivery route: could not be read' | grep -qF '⚠️' \
   && printf '%s' "$DR_S" | grep -F 'delivery route: build (session marker)' | grep -qF '✅' \
-  && printf '%s' "$DR_A" | grep -F 'delivery route: ask — the route question is asked after a plan approval and on a code request' | grep -qF '✅' \
+  && printf '%s' "$DR_A" | grep -F 'delivery route: ask — the route question is asked after a plan approval and on a code request, and an approved plan that names its own executor gets a notice instead;' | grep -qF '✅' \
   && printf '%s' "$DR_W" | grep -F 'delivery route: state not recognized (weird) — the wrapper' | grep -qF '⚠️' \
   && ! printf '%s' "$DR_S$DR_A" | grep -F 'delivery route:' | grep -qF 'half is off'; } \
   && check "R18a the doctor session-state row renders every wrapper state, and never green for a missing check" PASS \
@@ -1380,12 +1380,13 @@ DR_S_NOPLAN="$(doctor_rows "$STATE_DIR/cfg-autotdd-off.json" 'build (session mar
 DR_A_NOPROMPT="$(doctor_rows "$CFG_NOREMIND" ask)"
 DR_S_NOPROMPT="$(doctor_rows "$CFG_NOREMIND" 'build (session marker)')"
 DR_S_OFF="$(doctor_rows "$STATE_DIR/cfg-direct-off.json" 'build (session marker)')"
-{ printf '%s' "$DR_A_NOPLAN" | grep -F 'delivery route: ask — the route question is asked on a code request (the plan-approval half is off: hooks.autoTdd=false)' | grep -qF '✅' \
+{ printf '%s' "$DR_A_NOPLAN" | grep -F 'delivery route: ask — the route question is asked on a code request (the plan-approval half is off: hooks.autoTdd=false);' | grep -qF '✅' \
+  && ! printf '%s' "$DR_A_NOPLAN" | grep -qF 'names its own executor' \
   && printf '%s' "$DR_S_NOPLAN" | grep -F 'delivery route: build (session marker) — the route question is not asked this session (the plan-approval half is off: hooks.autoTdd=false); a code request goes through /zensu:build, while an approved plan is implemented directly.' | grep -qF '✅' \
   && ! printf '%s' "$DR_S_NOPLAN" | grep -qF '; code changes go through /zensu:build' \
   && printf '%s' "$DR_S_NOPROMPT" | grep -F 'delivery route: build (session marker) — the route question is not asked this session (the code-request half is off: hooks.tddReminder=false); an approved plan goes through /zensu:build.' | grep -qF '✅' \
   && ! printf '%s' "$DR_S_NOPROMPT" | grep -qF '; code changes go through /zensu:build' \
-  && printf '%s' "$DR_A_NOPROMPT" | grep -F 'delivery route: ask — the route question is asked after a plan approval (the code-request half is off: hooks.tddReminder=false)' | grep -qF '✅' \
+  && printf '%s' "$DR_A_NOPROMPT" | grep -F 'delivery route: ask — the route question is asked after a plan approval (the code-request half is off: hooks.tddReminder=false), and an approved plan that names its own executor gets a notice instead;' | grep -qF '✅' \
   && printf '%s' "$DR_S_OFF" | grep -qF 'delivery route: build (session marker) — decides nothing this session: both readers are off'; } \
   && check "R18g the session row names the switched-off half, and says a route decides nothing with both readers off" PASS \
   || check "R18g flag-qualified session row (ask-noplan='$(printf '%s' "$DR_A_NOPLAN" | grep -F 'delivery route:' | head -c 160)')" FAIL
