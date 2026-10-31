@@ -667,29 +667,29 @@ if [ -z "$ZDOC_ZEN_MODE" ]; then
   if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
     ZDOC_ZEN_MODE=unknown
   elif command -v zensu_zen_mode_default_on >/dev/null 2>&1 && [ -f "$DIR/zensu-zen-shared.sh" ] \
-    && . "$DIR/zensu-zen-shared.sh" 2>/dev/null && command -v zen_marker_shape_fault >/dev/null 2>&1; then
+    && . "$DIR/zensu-zen-shared.sh" 2>/dev/null && command -v zen_mode_resolve >/dev/null 2>&1; then
     ZDOC_ZEN_ROOT="$(cd -P -- "$ZDOC_SESSION_PROJECT_ROOT" 2>/dev/null && pwd -P)"
-    ZDOC_ZEN_MARKER="$ZDOC_ZEN_ROOT/.zensu/state/zen-mode-$ZDOC_SESSION_KEY.json"
     if [ -z "$ZDOC_ZEN_ROOT" ]; then
       ZDOC_ZEN_MODE=unjudged
     elif ! zensu_hook_enabled zenMode; then
       ZDOC_ZEN_MODE="off (hooks.zenMode=false)"
-    elif zen_marker_shape_fault "$ZDOC_ZEN_ROOT/.zensu" "$ZDOC_ZEN_ROOT/.zensu/state" "$ZDOC_ZEN_MARKER" >/dev/null; then
-      ZDOC_ZEN_MODE="off (unreadable state)"
-    elif [ -f "$ZDOC_ZEN_MARKER" ]; then
-      if zen_marker_active "$ZDOC_ZEN_MARKER"; then
-        ZDOC_ZEN_MODE="on (session marker)"
-      elif grep -q '"active"[[:space:]]*:[[:space:]]*false' "$ZDOC_ZEN_MARKER" 2>/dev/null; then
-        ZDOC_ZEN_MODE="off (session marker)"
-      else
-        ZDOC_ZEN_MODE="off (unreadable state)"
-      fi
-    elif zen_path_untraversable "$ZDOC_ZEN_MARKER" "$ZDOC_ZEN_ROOT"; then
-      ZDOC_ZEN_MODE="off (unreadable state)"
-    elif zensu_zen_mode_default_on; then
-      ZDOC_ZEN_MODE="on (hooks.zenModeDefault)"
+    elif zen_mode_resolve "$ZDOC_ZEN_ROOT" "$ZDOC_SESSION_KEY"; then
+      case "$ZEN_MODE_SOURCE" in
+        (marker) ZDOC_ZEN_MODE="on (session marker)" ;;
+        (default) ZDOC_ZEN_MODE="on (hooks.zenModeDefault)" ;;
+        (*) ZDOC_ZEN_MODE=unjudged ;;
+      esac
     else
-      ZDOC_ZEN_MODE="off (hooks.zenModeDefault)"
+      case "$ZEN_MODE_SOURCE" in
+        (marker)
+          if zen_marker_inactive "$ZEN_MARKER_PATH"; then
+            ZDOC_ZEN_MODE="off (session marker)"
+          else
+            ZDOC_ZEN_MODE="off (unreadable state)"
+          fi ;;
+        (default) ZDOC_ZEN_MODE="off (hooks.zenModeDefault)" ;;
+        (*) ZDOC_ZEN_MODE="off (unreadable state)" ;;
+      esac
     fi
   else
     ZDOC_ZEN_MODE=unjudged

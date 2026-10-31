@@ -84,8 +84,8 @@ switch to the effective mode, the vanilla branches may not assert
 Moving together with the ladder: `zensu_tdd_mode_marker_path` / `zensu_tdd_mode_state_linked`
 / `zensu_tdd_mode_marker_state` / `zensu_tdd_mode_override` / `zensu_tdd_strict_effective`
 (the single path template and parse — the writer sources
-them rather than re-spelling, unlike zen-mode, whose template is hand-copied into its
-reader hook). `zensu_tdd_mode_marker_state` owns the marker VOCABULARY —
+them rather than re-spelling, as zen-mode's hook, helper and doctor probe source
+`zen_marker_path` and `zen_mode_resolve` from `hooks/lib/zensu-zen-shared.sh`). `zensu_tdd_mode_marker_state` owns the marker VOCABULARY —
 `strict|vanilla|released|none`, four values, where `released` is a present `{"mode":"auto"}`
 and `none` is absence-or-unreadable — and it is the only owner of that vocabulary, while the
 PARSE is `_zensu_marker_one_line_value`, ONE bounded reader shared with the delivery-route

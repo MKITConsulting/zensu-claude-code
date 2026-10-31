@@ -3,6 +3,7 @@ paths:
   - "hooks/user-prompt-zen-mode.sh"
   - "hooks/lib/zen-anchor-v1.js"
   - "hooks/lib/zensu-zen-mode.sh"
+  - "hooks/lib/zensu-zen-shared.sh"
   - "skills/zen-mode/**"
   - "evals/zen-mode-reaction/**"
   - "tests/structure/test-zen-mode.sh"
@@ -370,6 +371,23 @@ because the shared reader's `O_NONBLOCK` produces the identical observable — `
 ORDER instead, since the guard's second job is preventing a per-prompt `mkdir` of
 `.zensu/state`. `Z32e` was byte-identical to two fail-open checks and now requires SILENCE on
 stderr; `Z19b` discarded the regex FLAGS, so an added `i` widened the shipped reader invisibly.
+
+**THREE READERS, ONE LADDER.** The hook, `zensu-zen-mode.sh --status` and the `/zensu:doctor`
+zen-mode probe each spelled the state ladder (marker shape, recorded choice, untraversable path,
+configured default) and the marker path template themselves, so a rung added to one reader left
+the others answering differently about one state. `zen_mode_resolve` in
+`hooks/lib/zensu-zen-shared.sh` owns the ladder and `zen_marker_path` the template. The resolver
+sets `ZEN_MODE_SOURCE` (`shape`, `marker`, `untraversable` or `default`) and, for a shape fault,
+the reason in `ZEN_MODE_WHY`; each reader keeps its own consequence. The hook exits with its
+stderr line, `--status` prints `on` or `off` with the cause on stderr, and the doctor renders its
+row, asking `zen_marker_inactive` to tell a recorded `{"active":false}` from a marker that records
+no choice. Each reader also keeps its own `hooks.zenMode` check, because the hook reads it before
+any expensive step and a second read inside the resolver would cost a `node` start on a config
+that names the key. The resolver adds no process to the hook's path: an active marker still costs
+one `grep`. `Z109` in `tests/structure/test-zen-mode.sh` pins the one owner of the template, of
+the inactive question and of the ladder, and that each reader resolves through it exactly once;
+`Z50`, `Z80` item 8, `Z89` and `Z95` read the ladder and its comments in the library, and the
+`Z107` family still drives the doctor row and `--status` against each other on every rung.
 
 **TWO WRITERS LAND THAT MARKER, and hardening one of them left the guarantee false.**
 `hooks/lib/zensu-zen-mode.sh` is the OUT-OF-BAND remedy, and the hook NAMES it in the sentence

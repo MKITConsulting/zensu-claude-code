@@ -88,21 +88,26 @@ grep -qF 'zensu_hook_enabled zenMode' "$HOOK" \
 # Z7b the session default is read through the dedicated getter, never folded into
 # zensu_hook_enabled — that helper answers "may this hook run at all", which is a
 # different question with a different marker consequence
-if grep -qF 'zensu_zen_mode_default_on' "$HOOK" \
+if grep -qF 'zen_mode_resolve' "$HOOK" \
+  && grep -qE '^  zensu_zen_mode_default_on$' "$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh" \
   && grep -qF 'zensu_zen_mode_default_on' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
-  && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$HOOK"; then
+  && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$HOOK" \
+  && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"; then
   check "Z7b session default resolved via zensu_zen_mode_default_on (hooks.zenModeDefault)" PASS
 else
   check "Z7b session default getter missing or folded into zensu_hook_enabled" FAIL
 fi
 
 # Z8 marker lives under the gitignored ephemeral state dir. The directory and the
-# file stem are matched separately because both files now build the path in two
-# steps — the state dir is needed on its own for the symlink guard and the mkdir.
+# file stem are matched separately: both files still need the state dir on its own
+# for the symlink guard and the mkdir, while the stem lives in the shared library,
+# which builds the path for both.
 Z8_BAD=""
+Z8_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+grep -qF '/.zensu/state/zen-mode-' "$Z8_LIB" || Z8_BAD="$Z8_BAD $(basename "$Z8_LIB"):marker-stem"
 for F8 in "$HOOK" "$HELPER"; do
   grep -qF '.zensu/state' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):state-dir"
-  grep -qF '/zen-mode-' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):marker-stem"
+  grep -qF 'ZEN_MARKER_PATH' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):marker-path-not-from-the-owner"
 done
 [ -z "$Z8_BAD" ] && check "Z8 marker path is .zensu/state/zen-mode-<session> (gitignored, ephemeral)" PASS \
   || check "Z8 marker path wrong:$Z8_BAD" FAIL
@@ -2130,20 +2135,24 @@ Z50_BAD=""
 # caught a deletion and never a one-sided addition; Z89 owns the single-owner
 # property and drives the predicate itself, and what is left here is that each
 # reader still consults it with its own three paths.
-printf '%s' "$Z50_HOOK_SRC" \
-  | grep -qF 'zen_marker_shape_fault "$ZEN_ROOT/.zensu" "$ZEN_STATE_DIR" "$MARKER"' \
-  || Z50_BAD="$Z50_BAD hook:does-not-consult-the-shared-shape-rule"
+Z50_ZEN_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+Z50_LIB_SRC="$(grep -vE '^[[:space:]]*(#|//)' "$Z50_ZEN_LIB")"
+[ -n "$Z50_LIB_SRC" ] || Z50_BAD="$Z50_BAD lib:source-slice-is-empty"
+printf '%s' "$Z50_HOOK_SRC" | grep -qE '^if ! zen_mode_resolve "\$ZEN_ROOT" "\$ZENSU_SESSION_KEY"; then$' \
+  || Z50_BAD="$Z50_BAD hook:does-not-take-the-shared-resolver"
+printf '%s' "$Z50_LIB_SRC" \
+  | grep -qF 'zen_marker_shape_fault "$1/.zensu" "$1/.zensu/state" "$ZEN_MARKER_PATH"' \
+  || Z50_BAD="$Z50_BAD lib:resolver-does-not-consult-the-shared-shape-rule"
 # (c) a non-traversable state directory does not fall through to the default.
 # THE WALK, not a named pair. Naming components has been wrong twice here, so
 # what is pinned is that the ladder consults a predicate which walks them.
 # THE PREDICATE IS SHARED, so it is asserted where it LIVES and consumed where
 # it is used. Both readers of the marker call one implementation in
-# `zensu-session.sh`; a private copy in either is the drift this replaces.
-Z50_ZEN_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+# `zensu-zen-shared.sh`; a private copy in either is the drift this replaces.
 grep -qE '^zen_path_untraversable\(\) \{' "$Z50_ZEN_LIB" \
   || Z50_BAD="$Z50_BAD lib:no-untraversable-predicate"
-printf '%s' "$Z50_HOOK_SRC" | grep -qE '^elif zen_path_untraversable ' \
-  || Z50_BAD="$Z50_BAD hook:untraversable-predicate-not-in-ladder"
+printf '%s' "$Z50_LIB_SRC" | grep -qE '^  if zen_path_untraversable "\$ZEN_MARKER_PATH" "\$1"; then$' \
+  || Z50_BAD="$Z50_BAD lib:untraversable-predicate-not-in-ladder"
 # (d) the marker is PUBLISHED BY RENAME, never truncated in place.
 # ANCHORED ON A CALL POSITION. The comment strip removes full-line SHELL
 # comments only, so a `// renameSync` inside either embedded node program
@@ -2174,8 +2183,8 @@ else
     || Z50_BAD="$Z50_BAD oob:write-not-rename"
   printf '%s' "$Z50_OOB_SRC" | grep -qE '>[[:space:]]*"\$(MARKER|ZEN_MARKER)"' \
     && Z50_BAD="$Z50_BAD oob:truncating-redirect-returned"
-  printf '%s' "$Z50_OOB_SRC" | grep -qE 'zen_path_untraversable ' \
-    || Z50_BAD="$Z50_BAD oob:no-untraversable-arm"
+  printf '%s' "$Z50_OOB_SRC" | grep -qE 'zen_mode_resolve "\$_zensu_status_root" "\$_zensu_status_key"' \
+    || Z50_BAD="$Z50_BAD oob:status-does-not-take-the-shared-resolver"
 fi
 if [ -z "$Z50_BAD" ]; then
   check "Z50 both marker writers carry the component guard, the non-regular arm and a rename landing" PASS
@@ -3477,12 +3486,13 @@ grep -qF "$Z80_TIMEOUT10 sibling entries" "$HOOK" \
 # FLATTENED, because the sentence is line-wrapped across the comment prefix and a
 # line-scoped needle here would be the very defect this arm grades: the splice put
 # an unrelated paragraph BETWEEN the two halves of one sentence.
-Z80_FLAT="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$HOOK" | tr '\n' ' ' | tr -s ' ')"
+Z80_LADDER="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+Z80_FLAT="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$Z80_LADDER" | tr '\n' ' ' | tr -s ' ')"
 printf '%s' "$Z80_FLAT" | grep -qF 'the fall-through then took the configured default' \
   || Z80_BAD="$Z80_BAD untraversable-comment-still-spliced"
-grep -qF "including this arm" "$HOOK" \
-  && grep -qF 'BOTH COMPONENTS are tested, exactly as the symlink arm above tests both' "$HOOK" \
-  && grep -qF 'walks EVERY component' "$HOOK" \
+grep -qF "including this arm" "$Z80_LADDER" \
+  && grep -qF 'BOTH COMPONENTS are tested, exactly as the symlink arm above tests both' "$Z80_LADDER" \
+  && grep -qF 'walks EVERY component' "$Z80_LADDER" \
   || Z80_BAD="$Z80_BAD untraversable-comment-names-the-wrong-mechanism"
 
 if [ -z "$Z80_BAD" ]; then
@@ -3791,7 +3801,7 @@ rm -rf "$P84"
 # header forbids.
 #
 # The seam was already there: the THIRD arm of the same ladder,
-# `zen_path_untraversable`, lives in `hooks/lib/zensu-session.sh`, and BOTH files
+# `zen_path_untraversable`, lives in `hooks/lib/zensu-zen-shared.sh`, and BOTH files
 # source that library. The predicate belongs beside it, parameterized on the three
 # paths rather than reading either file`s globals, so each caller applies its own
 # consequence - the hook resolves OFF, `--on`/`--off` refuse with exit 2, and
@@ -3803,7 +3813,8 @@ grep -qE '^zen_marker_shape_fault\(\)' "$Z89_LIB" \
 grep -qE '^zen_marker_shape_fault\(\)' "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" \
   && Z89_BAD="$Z89_BAD helper-keeps-a-private-copy"
 # The hook must CALL it rather than spell the ladder inline.
-grep -qF 'zen_marker_shape_fault' "$HOOK" \
+grep -qE '^if ! zen_mode_resolve ' "$HOOK" \
+  && grep -qF 'zen_marker_shape_fault "$1/.zensu" "$1/.zensu/state" "$ZEN_MARKER_PATH"' "$Z89_LIB" \
   || Z89_BAD="$Z89_BAD hook-does-not-call-the-shared-predicate"
 Z89_FLAT="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$HOOK" | tr '\n' ' ' | tr -s ' ')"
 printf '%s' "$Z89_FLAT" | grep -qE '\[ -L "\$ZEN_ROOT/\.zensu" \] \|\| \[ -L "\$ZEN_STATE_DIR" \]' \
@@ -4355,8 +4366,8 @@ fi
 # TWO PROPERTIES, one check, because they are one refactor. First, blast radius:
 # `zensu-session.sh` is the Session Control binding library and is sourced by
 # every stateful gate in the tree, so a syntax fault introduced while editing a
-# PRESENTATION feature fails every PreToolUse Bash gate CLOSED. The two
-# predicates have exactly two callers, both zen. Second, the `active` question
+# PRESENTATION feature fails every PreToolUse Bash gate CLOSED. The
+# predicates have three callers, the hook, the helper and the doctor probe. Second, the `active` question
 # was spelled THREE times by hand - the resolution ladder, the off-write
 # verification, and the helper`s `--status` - with nothing comparing them, so a
 # one-sided widening would make the verification report COULD NOT BE DEACTIVATED
@@ -4369,7 +4380,8 @@ fi
 Z95_BAD=""
 Z95_SHARED="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
 [ -f "$Z95_SHARED" ] || Z95_BAD="$Z95_BAD no-zensu-zen-shared.sh"
-for Z95_FN in zen_marker_shape_fault zen_path_untraversable zen_marker_active; do
+for Z95_FN in zen_marker_shape_fault zen_path_untraversable zen_marker_active zen_marker_inactive \
+  zen_marker_path zen_mode_resolve; do
   grep -qE "^$Z95_FN\(\) \{" "$Z95_SHARED" 2>/dev/null \
     || Z95_BAD="$Z95_BAD $Z95_FN-not-in-the-zen-library"
   grep -qE "^$Z95_FN\(\) \{" "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
@@ -4385,14 +4397,40 @@ elif [ "$Z95_SPELLINGS" != "$Z95_SHARED" ]; then
 fi
 # and all three former sites must go through the owner
 Z95_CALLS="$(grep -c 'zen_marker_active' "$HOOK" 2>/dev/null || echo 0)"
-[ "${Z95_CALLS:-0}" -ge 2 ] \
-  || Z95_BAD="$Z95_BAD hook-calls-zen_marker_active-${Z95_CALLS:-0}-times-want-2"
-grep -q 'zen_marker_active' "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" \
-  || Z95_BAD="$Z95_BAD status-verb-does-not-call-zen_marker_active"
+[ "${Z95_CALLS:-0}" -ge 1 ] \
+  || Z95_BAD="$Z95_BAD hook-calls-zen_marker_active-${Z95_CALLS:-0}-times-want-1"
+grep -qE '^if ! zen_mode_resolve ' "$HOOK" \
+  || Z95_BAD="$Z95_BAD hook-does-not-resolve-through-the-owner"
+grep -qE '^    zen_marker_active "\$ZEN_MARKER_PATH"$' "$Z95_SHARED" \
+  || Z95_BAD="$Z95_BAD resolver-does-not-ask-the-owner"
+grep -q 'zen_mode_resolve' "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" \
+  || Z95_BAD="$Z95_BAD status-verb-does-not-resolve-through-the-owner"
 if [ -z "$Z95_BAD" ]; then
   check "Z95 the zen predicates live in a zen-only library and the active question has one owner" PASS
 else
   check "Z95 zen-only state predicates still sit in the binding library, or the active question is hand-copied:$Z95_BAD" FAIL
+fi
+
+Z109_BAD=""
+Z109_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+Z109_TEMPLATES="$(grep -rlE 'zen-mode-\$' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"
+[ "$Z109_TEMPLATES" = "$Z109_LIB" ] \
+  || Z109_BAD="$Z109_BAD marker-template-in<$(printf '%s' "$Z109_TEMPLATES" | tr '\n' ' ')>"
+Z109_INACTIVE="$(grep -rlF '"active"[[:space:]]*:[[:space:]]*false' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"
+[ "$Z109_INACTIVE" = "$Z109_LIB" ] \
+  || Z109_BAD="$Z109_BAD inactive-pattern-in<$(printf '%s' "$Z109_INACTIVE" | tr '\n' ' ')>"
+for Z109_READER in "$HOOK" "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"; do
+  Z109_SRC="$(grep -vE '^[[:space:]]*#' "$Z109_READER")"
+  [ -n "$Z109_SRC" ] || Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-source-slice-is-empty"
+  Z109_N="$(printf '%s\n' "$Z109_SRC" | grep -c 'zen_mode_resolve "')"
+  [ "$Z109_N" = 1 ] || Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-resolves-${Z109_N}-times-want-1"
+  printf '%s\n' "$Z109_SRC" | grep -qF 'zen_path_untraversable' \
+    && Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-keeps-its-own-ladder"
+done
+if [ -z "$Z109_BAD" ]; then
+  check "Z109 the marker path, the inactive question and the state ladder each have one owner, and the hook, --status and the doctor probe resolve through it once each" PASS
+else
+  check "Z109 a zen-mode reader keeps its own copy of the ladder or the marker path:$Z109_BAD" FAIL
 fi
 
 # Z96 the anchor field is DELIMITED, and the off-verb is not named by a bare
