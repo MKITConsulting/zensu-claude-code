@@ -72,6 +72,11 @@
       "summary": "Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends."
     },
     {
+      "path": "tests/structure/foreign-executor-v1.test.js", "registered": 13,
+      "runs": [{ "driver": "tests/structure/test-plan-approved-delegate.sh" }],
+      "summary": "The plan-approval notice for a plan that names another plugin's executor: the narrow classifier, the notice text and the origin-first payload decision."
+    },
+    {
       "path": "tests/structure/full-suite-ci-v1.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-full-suite-ci.sh" }],
       "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict."
@@ -101,9 +106,9 @@
       "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
     },
     {
-      "path": "tests/structure/plan-payload-v1.test.js", "registered": 20,
+      "path": "tests/structure/plan-payload-v1.test.js", "registered": 22,
       "runs": [{ "driver": "tests/structure/test-plan-payload-fallback.sh" }],
-      "summary": "The plan-source precedence table, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
+      "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
     },
     {
       "path": "tests/structure/playwright-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 12},

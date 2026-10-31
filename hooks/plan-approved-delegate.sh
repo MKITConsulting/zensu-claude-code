@@ -152,6 +152,27 @@ emit_autopilot_blocked() {
   '
 }
 
+plan_payload_load() {
+  # zensu-host-path.sh renders a DIRECTORY in the native spelling; the file
+  # name is appended after conversion, the same shape zensu-tdd-phase.sh uses
+  # for its node code-load path. Guard the spelling that is actually loaded,
+  # and include readability: a module that is present but unreadable would
+  # otherwise throw inside node and surface as a payload fault.
+  PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+    "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
+  PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
+  if [ -z "$PLAN_PAYLOAD_LIB" ] \
+    || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
+    return 1
+  fi
+  # zensu_msys_env_exclusions is the shipped single source for this list; it
+  # appends the exact-name selector and preserves a dominant standalone '*'.
+  # Resolve it into a variable first: a failing command substitution inside a
+  # command's assignment prefix takes the whole invocation down, and the plan
+  # gate would report that as a payload fault.
+  PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+}
+
 # Autopilot takes precedence over hooks.autoTdd: its contract already received
 # the user's one interactive approval. Absence (rc 1) falls through to the
 # standalone behavior; corruption (rc 2+) is a visible, fail-closed blocker.
@@ -291,25 +312,10 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     # operator is handed PLAN_EVALUATION_UNAVAILABLE — "the payload itself was
     # never judged" — pointing at a payload that was never the problem. Same shape
     # as the AUTOPILOT_STATE_LIB and SESSION_LIB guards above.
-    # zensu-host-path.sh renders a DIRECTORY in the native spelling; the file
-    # name is appended after conversion, the same shape zensu-tdd-phase.sh uses
-    # for its node code-load path. Guard the spelling that is actually loaded,
-    # and include readability: a module that is present but unreadable would
-    # otherwise throw inside node and surface as a payload fault.
-    PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
-      "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
-    PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
-    if [ -z "$PLAN_PAYLOAD_LIB" ] \
-      || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
+    plan_payload_load || {
       emit_autopilot_runtime_blocked
       exit 0
-    fi
-    # zensu_msys_env_exclusions is the shipped single source for this list; it
-    # appends the exact-name selector and preserves a dominant standalone '*'.
-    # Resolve it into a variable first: a failing command substitution inside a
-    # command's assignment prefix takes the whole invocation down, and the plan
-    # gate would report that as a payload fault.
-    PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+    }
     PLAN_META="$(printf '%s' "$INPUT" | ACTIVE_RUN="$ACTIVE_RUN" ACTIVE_OWNER="$ACTIVE_OWNER" \
       ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" \
       MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
@@ -323,14 +329,15 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       // 17 is the module-load fault. It is deliberately NOT a BLOCK_CODE: the
       // shell routes it to emit_autopilot_runtime_blocked, so a broken install
       // never reports "the payload itself was never judged".
-      let resolveApprovedPlan,REASONS,SOURCES;
+      let resolveApprovedPlan,responseOrigin,REASONS,SOURCES;
       try {
-        ({resolveApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+        ({resolveApprovedPlan,responseOrigin,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
       } catch (_) { process.exit(17); }
       // Destructuring a module with the wrong exports does not throw — it yields
       // undefined, and the next statement would throw OUTSIDE this guard, exit 1,
       // and land on the very receipt 17 exists to avoid. Validate the shape here.
-      if (typeof resolveApprovedPlan!=="function" || typeof REASONS!=="object" || !REASONS
+      if (typeof resolveApprovedPlan!=="function" || typeof responseOrigin!=="function"
+        || typeof REASONS!=="object" || !REASONS
         || Array.isArray(REASONS) || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(17);
       const EXITS={};
       EXITS[REASONS.MISSING]=3;
@@ -341,6 +348,8 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       EXITS[REASONS.TOO_LARGE]=13;
       EXITS[REASONS.SYMLINK]=14;
       EXITS[REASONS.FIELD_TYPE]=15;
+      EXITS[REASONS.AGENT_ORIGIN]=18;
+      EXITS[REASONS.ORIGIN_TYPE]=19;
       let raw="";
       process.stdin.setEncoding("utf8");
       process.stdin.on("data",c=>raw+=c);
@@ -354,19 +363,9 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
         // Caller origin, decided BEFORE any source is read and AFTER ownership,
         // so an unauthorized caller still learns nothing about the response
-        // shape. Only the top-level interactive session may approve a durable
-        // run: Session Control grants main-v1 there and reviewer/neutral
-        // profiles to every child, but that is an ABSENCE-based check, and this
-        // is the positive assertion the harness itself supplies. The test is
-        // strict ===, so a renamed or dropped field changes nothing here.
-        const origin=input.tool_response;
-        if (origin && typeof origin==="object" && !Array.isArray(origin)) {
-          // Wrong type is refused rather than read as falsy: an isAgent of "false"
-          // or 0 would otherwise approve an agent-originated plan by coercion.
-          if (origin.isAgent!==undefined && origin.isAgent!==null
-            && typeof origin.isAgent!=="boolean") process.exit(19);
-          if (origin.isAgent===true) process.exit(18);
-        }
+        // shape.
+        const origin=responseOrigin(input);
+        if (!origin.ok) process.exit(EXITS[origin.reason]||9);
         const resolved=resolveApprovedPlan(input,SOURCES);
         // The source travels with every refusal: a bad tool_input.planFilePath is
         // a path the tool call named, a bad tool_response.filePath is one the
@@ -483,54 +482,21 @@ emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_CO
 
 foreign_executor_notice() {
   if [ "$ROUTE_FIELD" = ask ] && [ "$HUMAN_PRESENT" = yes ]; then
-    PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
-      "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
-    PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
-    if [ -z "$PLAN_PAYLOAD_LIB" ] \
-      || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
-      return 0
-    fi
-    PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+    plan_payload_load || return 0
     printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
       PLAN_PAYLOAD_LIB="$PLAN_PAYLOAD_LIB" node -e '
-      let resolveApprovedPlan,REASONS,SOURCES;
+      let reader,foreign;
       try {
-        ({resolveApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+        reader=require(process.env.PLAN_PAYLOAD_LIB);
+        foreign=require(require("path").join(require("path").dirname(process.env.PLAN_PAYLOAD_LIB),"foreign-executor-v1.js"));
       } catch (_) { process.exit(0); }
-      if (typeof resolveApprovedPlan!=="function" || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(0);
+      if (!foreign || typeof foreign.noticeForPayload!=="function") process.exit(0);
       let raw="";
       process.stdin.setEncoding("utf8");
       process.stdin.on("data",c=>raw+=c);
       process.stdin.on("end",()=>{ try {
-        const input=JSON.parse(raw||"{}");
-        if (!input || input.tool_name!=="ExitPlanMode") return;
-        const resolved=resolveApprovedPlan(input,SOURCES);
-        if (!resolved || !resolved.ok || typeof resolved.plan!=="string") return;
-        if (/(?:^|[^A-Za-z0-9_])zensu:[a-z]/i.test(resolved.plan)) return;
-        const ref=/(^|[^A-Za-z0-9_.:\/@-])(\/?)([a-z][a-z0-9_-]{0,63}):([a-z][a-z0-9_-]{0,63})(?![A-Za-z0-9_:\/@-])/g;
-        let foreign="";
-        let fence="";
-        for (const row of resolved.plan.split(/\r?\n/)) {
-          const f=/^(?:\s*(?:>|[-*+]|\d+[.)]))*\s*(`{3,}|~{3,})(.*)$/.exec(row);
-          if (fence) {
-            if (f && f[1][0]===fence[0] && f[1].length>=fence.length && !f[2].trim()) fence="";
-            continue;
-          }
-          if (f && !(f[1][0]==="`" && f[2].includes("`"))) { fence=f[1]; continue; }
-          const line=row.replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g," ").replace(/"[^"]*"|\u201c[^\u201d]*\u201d|\u2018[^\u2019]*\u2019/g," ");
-          const carries=/REQUIRED SUB-SKILL/i.test(line)
-            || (/\b(?:execut|implement)/i.test(line) && /\b(?:this|the)\s+plan\b/i.test(line));
-          if (!carries || /\b(?:not|cannot|never|no|nor|without|instead|avoid|rather|except|unless)\b|n[\x27\u2019]t\b/i.test(line)) continue;
-          for (const m of line.matchAll(ref)) {
-            const lead=line.slice(0,m.index+m[1].length);
-            const invoked=m[2]==="/"
-              || (/skill/i.test(line) && /\b(?:use|using|via|with|invoke|run)\s+(?:the\s+)?$/i.test(lead));
-            if (invoked && !foreign) foreign=m[3]+":"+m[4];
-          }
-        }
-        if (!foreign) return;
-        const msg="Zensu delivery route: the approved plan names its own executor, "+foreign+", so Zensu asks no delivery-route question for it. Carry the plan out the way it says, with the executor it names. Open your reply with one short line saying that Zensu asked no route question because the plan names "+foreign+", and that /zensu:build runs this plan under the Zensu workflow, with its evidence audits and review chain, instead. The user\x27s own approval message still wins when it asks for a route rather than only naming one, and a route it refuses is never taken: /zensu:build or the Zensu workflow runs skill=\x27zensu:build\x27 with the approved plan content as the feature specification, /zensu:autopilot runs skill=\x27zensu:autopilot\x27 with that content as the feature description, and /zensu:pilot runs skill=\x27zensu:pilot\x27 naming the tracked feature the plan belongs to.";
-        process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
+        const msg=foreign.noticeForPayload(JSON.parse(raw||"{}"),reader);
+        if (typeof msg==="string" && msg) process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
       } catch (_) {} });
     ' 2>/dev/null
   fi

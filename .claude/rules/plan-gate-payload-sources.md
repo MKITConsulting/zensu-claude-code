@@ -69,7 +69,10 @@ back to the identically named BLOCK_CODE, which no behavioral case can observe.
 `tool_response.isAgent === true` refuses as `PLAN_RESPONSE_AGENT_ORIGIN_REJECTED`, and a
 present non-boolean refuses as `PLAN_RESPONSE_ORIGIN_TYPE_REJECTED` rather than being read as
 falsy — `"false"` and `0` are both truthy-adjacent spellings that would otherwise approve an
-agent-originated plan by coercion. This is a POSITIVE assertion layered on Session Control's
+agent-originated plan by coercion. `responseOrigin` in the module owns that rule, and its two
+refusals are module `REASONS` (`AGENT_ORIGIN`, `ORIGIN_TYPE`), so F11d grades the exit-18 and
+exit-19 hop as well, and F45d holds the line order of the hook's `responseOrigin(input)` call. The
+standalone executor notice applies the same rule (`.claude/rules/plan-approval-delivery-route.md`). This is a POSITIVE assertion layered on Session Control's
 absence-based principal check, which grants `main-v1` only to the top-level thread; it is free
 to make because the harness supplies the field. Two orderings are load-bearing and pinned:
 it runs AFTER the owner and stage checks, so an unauthorized caller still learns nothing about
@@ -86,7 +89,10 @@ trees and are coverage, not bites: F47/F47a (a plugin missing the reader module 
 payload was judged — with a restored-module positive control), F48 (the module path reaches
 node through the environment, never argv, matched against a closed allowlist of line forms
 because the evaluator spans ~90 lines and a line-scoped grep would miss an argv token appended
-below it), and F49/F49a (a hard link refused through both carriers).
+below it), and F49/F49a (a hard link refused through both carriers). The loader is one
+function, `plan_payload_load`, which the durable branch and the executor notice both call: F48b
+pins one definition, one directory render and the two calls, and F48's allowlist also covers the
+line that loads `foreign-executor-v1.js` beside the reader.
 
 **`PLAN_STAGE_MISMATCH` (exit 7) is unreachable and deliberately left so.** The shell `case`
 already filters the active document to `PLANNING|AWAIT_TDD`, and the evaluator re-reads
