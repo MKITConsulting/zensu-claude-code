@@ -45,7 +45,7 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
   app-managed worktree carries the desktop-pool keep marker, still sits on its recorded branch
   and holds a nested repository that keeps the marker after the session ends; any reviewer
   spawn the host permission layer refused; any claim this session audited against a root that
-  is not the anchor; this session's recorded delivery route; and an expired pending review.
+  is not the anchor; this session's recorded delivery route and zen-mode state; and an expired pending review.
 
 The only write is an explicit, user-confirmed cleanup of one expired `pending-review.json`;
 CAS workflow documents are never deleted.
@@ -271,15 +271,15 @@ classifier will refuse a spawn, not only when the whole table is green.
   the file is the sole config source; with a global and a project config the row instead says
   `the other config source still applies`, and you must not upgrade that to `defaults apply`.
 - **❌ config: … cannot say what the config loader gets from it** → an explicit REFUSAL to
-  make a loader verdict. The doctor could not read the file, and for this class it also cannot
-  infer what the loader does — a FIFO, for instance, would block the loader rather than make it
+  make a loader verdict. The doctor could not read the file, and for this class it cannot
+  infer what the loader does — a FIFO would block the loader rather than make it
   fall back. Report the file as unreadable by the check; do not tell the user it is ignored.
 - **⚠️ config: … is larger than … bytes** → a MISSING CHECK, never a verdict about the
   config. The row says the doctor `declined to read it`: the file is over its own memory
   bound, so it did not
-  parse it and cannot judge it. Say explicitly that the config loader has no size limit,
-  so the file is not skipped for its size — but do not tell the user it is applied, or
-  that it is ignored: neither is knowable from a row that never read the file.
+  parse it and cannot judge it. Say that the config loader has no size limit,
+  so the file is not skipped for its size — but do not tell the user it is applied or
+  ignored: neither is knowable from a row that never read the file.
 - **✅ config: hooks.defaultDeliveryRoute=build / =direct** → the project configured a default
   delivery route, so the route question is skipped wherever its reader is on: `build` sends an
   approved plan or a code request through the Zensu workflow, `direct` implements it
@@ -298,7 +298,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   the question is still asked. The value is shown as
   written — a string without added quotes, anything else in its JSON spelling — cut at
   40 characters with a trailing `…`. Fix the value: one of the three lowercase words.
-- **subagents:** rows → read `references/coexistence.md`.
+- **subagents:** and **zen-mode** rows → read `references/coexistence.md`.
 - **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
   not be opened, is not a regular file, is too large, or was read incompletely.
 - **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are

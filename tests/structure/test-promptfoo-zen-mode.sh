@@ -285,8 +285,11 @@ done
 PREC_BAD=""
 grep -qiF 'caveman' "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD no-competing-mode"
 grep -qF 'articles' "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD no-article-density-assert"
-grep -qF 'OVERRIDES' "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD no-precedence-clause"
-[ -z "$PREC_BAD" ] && check "P10 precedence scenario pits a compression mode against zen-mode and grades it" PASS \
+grep -qF "The user's own instructions outrank this mode" "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD no-precedence-clause"
+grep -qF 'The user turned the first one on' "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD mode-not-user-chosen"
+grep -qF 'ratio < 0.03' "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD user-style-not-graded-as-winner"
+! grep -qF 'OVERRIDES' "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD retired-override-clause"
+[ -z "$PREC_BAD" ] && check "P10 precedence scenario pits a style mode the user chose against zen-mode and grades the user's style as the winner" PASS \
   || check "P10 precedence scenario:$PREC_BAD" FAIL
 
 [ -x "$WRAPPER" ] && check "P11 referenced provider script exists and is executable" PASS \

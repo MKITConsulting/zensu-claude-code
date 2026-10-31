@@ -375,3 +375,51 @@ the interception paragraph of `skills/gauntlet-loop/SKILL.md`; and
 
 Version: `patch`. One library added and two `additionalContext` texts changed; no hook, matcher, key
 set, schema field, config key or attestation moves, and neither hook returns a `permissionDecision`.
+
+## A plan that names its own executor (`foreign_executor_notice`)
+
+A plan written for another plugin names the skill that carries it out, for example
+`REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.` While
+the route field reads `ask`, the standalone branch reads the approved plan through
+`resolveApprovedPlan` (the reader the durable branch uses, with the same F48 transport forms in
+`tests/structure/test-plan-payload-fallback.sh`) and asks no route question when the plan names
+a `<plugin>:<skill>` outside the `zensu:` namespace. It prints one notice instead: carry the plan
+out with that skill, say in one line that Zensu asked no route question, and name `/zensu:build` as
+the way to run the plan under the Zensu workflow. The approval message still wins as it does under
+(B): a request, not a mere mention, for `/zensu:build` or the Zensu workflow, `/zensu:autopilot` or
+`/zensu:pilot` dispatches that route with the input its arm names, and a refused route is never
+taken. Offering the two outward-facing routes there is safe because the notice fires only while
+the field reads `yes`, the one value under which (B) keeps them. The notice is a `printf` of a JSON object built
+in node, never a third heredoc, so `R12` and the parity helper still count two.
+
+The detection is narrow on purpose, because a false positive costs the route question for a plan
+that wanted it, while a false negative only asks the question as before. Fenced code blocks, inline code and
+quoted text are removed first. A line then counts when it carries `REQUIRED SUB-SKILL`, or an
+execute or implement verb together with "this plan" or "the plan", and no negation such as
+"not", "never" or "don't". A name on such a line counts when it is a slash command, or when it
+follows "use", "using", "with", "via", "run" or "invoke" on a line that mentions a skill. A plan
+that names a `zensu:` skill anywhere keeps the question: that scan reads the raw plan, fences and
+quotes included, because only the foreign match has to be narrow. A session whose
+`ZENSU HUMAN PRESENT:` field does not read `yes` keeps it too, because the notice hands the plan
+to a skill this hook cannot judge against the outward-facing criterion of (C). So does every
+fault: a module that does not load, a payload that is not `ExitPlanMode`, a plan the reader
+refuses. A recorded or configured route never reaches the check, so it still dispatches. The
+notice carries no `ZENSU DELIVERY ROUTE:` field, no `AskUserQuestion` and none of the `D13` words.
+
+Pinned by `D46` to `D46e` in `tests/structure/test-plan-approved-delegate.sh`: the notice through
+both carriers and for a slash command, a configured route that still dispatches, the
+fail-toward-the-question cases with a `zensu:` skill in three forms and on a line that carries
+nothing, quoted, fenced and negated names (fences nested in a list or a blockquote, longer
+fences, an inner fence with an info string, double-backtick spans and typographic quotes) with a
+header after a closed fence as the control, the human-present gate, and in `D46e` a reader
+module that is missing, throws or exports no reader, plus a payload from another tool, over a
+copied plugin root whose unmodified run gives the notice. `D46c2` keeps the function ASCII-only,
+because its node program travels in argv. A symlinked reader never reaches the hook: Session
+Control rejects a runtime symlink when the session registers, so the hook's `-L` guard is
+defense in depth and has no fixture. `d46_ctx` pins the `cli` entrypoint, because CI runs with
+none, which reads `unknown`. `R12g` in `tests/structure/test-delivery-route.sh` pins it too and covers a
+session marker that still dispatches. Operator accounts: `docs/precedence.md` and the
+`plan-approved-delegate.sh` row of `docs/configuration.md`.
+
+Version: `patch`. The hook still emits only `additionalContext`, no hook, matcher, key set,
+schema field, config key or attestation moves, and the one new behaviour asks less, never more.

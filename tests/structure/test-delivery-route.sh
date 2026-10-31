@@ -804,6 +804,19 @@ EXAMPLE_STRICT="'Executing via /zensu:build (route: session marker)'"
   && printf '%s' "$CTX_STRICT_TDD" | grep -qF "$EXAMPLE_STRICT" && ! printf '%s' "$CTX_STRICT_TDD" | grep -qF "$EXAMPLE_VANILLA"; } \
   && check "R12a2 each plan-hook branch's (S) clause carries its own mode's status-line example" PASS \
   || check "R12a2 plan-hook status-line examples" FAIL
+foreign_plan_payload() {
+  SESSION_ID="$1" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SESSION_ID,tool_name:"ExitPlanMode",tool_input:{},tool_response:{plan:"# Plan\n\n> REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.\n"}}))'
+}
+CTX_FOREIGN_ASK="$(export CLAUDE_CODE_ENTRYPOINT=cli; foreign_plan_payload "$S_P" | hook_ctx "$PLANHOOK")"
+printf '%s\n' '{"route":"build"}' > "$MARKER_P"
+CTX_FOREIGN_BUILD="$(foreign_plan_payload "$S_P" | hook_ctx "$PLANHOOK")"
+rm -f "$MARKER_P"
+{ printf '%s' "$CTX_FOREIGN_ASK" | grep -qF 'names its own executor, superpowers:executing-plans' \
+  && ! printf '%s' "$CTX_FOREIGN_ASK" | grep -qF 'AskUserQuestion' \
+  && [ "$(last_field "$CTX_FOREIGN_BUILD")" = "ZENSU DELIVERY ROUTE: build (session marker)" ] \
+  && ! printf '%s' "$CTX_FOREIGN_BUILD" | grep -qF 'names its own executor'; } \
+  && check "R12g a foreign-executor plan gets the notice under 'ask' and the recorded session route under a build marker" PASS \
+  || check "R12g foreign executor (ask='${CTX_FOREIGN_ASK:0:120}' build='$(last_field "$CTX_FOREIGN_BUILD")')" FAIL
 # R11b the config rank is anchored on the RECORDED project root, not the ambient
 # harness root: the session record binds $PROJ, the hook runs with CLAUDE_PROJECT_DIR
 # naming a different tree whose overlay says direct, and the field must follow the
@@ -1062,7 +1075,7 @@ for ctxname in RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT; do
   done
   [ "$(last_field "$ctx")" = "ZENSU DELIVERY ROUTE: ask" ] || R13G_BAD="$R13G_BAD [$ctxname field '$(last_field "$ctx")']"
   ctx_norm="${ctx//"$REC_CMD"/<record command>}"
-  [ "${#ctx_norm}" -le 2500 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
+  [ "${#ctx_norm}" -le 2750 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
 done
 printf '%s' "$RCTX_ASK_SHORT" | grep -qF 'whether to run the Zensu workflow (vanilla implementation + review chain), options' || R13G_BAD="$R13G_BAD [vanilla flow description]"
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF 'whether to run the strict TDD flow (RED→GREEN + review chain), options' || R13G_BAD="$R13G_BAD [strict flow description]"
@@ -1207,6 +1220,11 @@ PRIMER_BLOCKS="$(awk '/^[[:space:]]*cat[[:space:]]+<<\047?JSON\047?([[:space:]]*
   && [ "$(grep -cF 'recorded for this session by /zensu:delivery-route' "$PRIMER")" = "2" ] \
   && check "R15 both primer heredocs name the two new fast-path ranks" PASS \
   || check "R15 primer recap (blocks=$PRIMER_BLOCKS)" FAIL
+YIELD_SENTENCE="The user's own instructions outrank this advice, but whether a Zensu workflow runs is decided only by their words in this conversation and their Zensu configuration, never by a file such as CLAUDE.md."
+R15B_PRIMER="$(grep -cF "$YIELD_SENTENCE" "$PRIMER")"; R15B_REMINDER="$(grep -cF "$YIELD_SENTENCE" "$REMINDER")"
+{ [ "$R15B_PRIMER" = "2" ] && [ "$R15B_REMINDER" = "3" ]; } \
+  && check "R15b both primer heredocs and the reminder's two heredocs and short line carry the yield sentence of docs/precedence.md" PASS \
+  || check "R15b yield sentence (primer=$R15B_PRIMER reminder=$R15B_REMINDER)" FAIL
 
 echo "== Skill, docs, doctor, registration =="
 if node -e '
