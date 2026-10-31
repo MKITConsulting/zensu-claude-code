@@ -1,4 +1,4 @@
-description: "zen-mode model-reaction eval (contract compliance, precedence over a compression mode, the never-compress safety carve-out, the rule-6 chain-progress anchor, that anchor's failed-and-omitted half, the closing session block in a session with earlier work and on a first turn that only answers, and the short body every later prompt of a context generation carries, graded standing alone on contract compliance, the safety carve-out, the anchor and both session blocks). Grades how the model REACTS to the injected zen-mode contract."
+description: "zen-mode model-reaction eval (contract compliance, a compression mode the user chose outranking it, the never-compress safety carve-out, the rule-6 chain-progress anchor, that anchor's failed-and-omitted half, the closing session block in a session with earlier work and on a first turn that only answers, and the short body every later prompt of a context generation carries, graded standing alone on contract compliance, the safety carve-out, the anchor and both session blocks). Grades how the model REACTS to the injected zen-mode contract."
 
 providers:
   - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'

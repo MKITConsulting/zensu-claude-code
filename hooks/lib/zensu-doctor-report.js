@@ -1756,6 +1756,7 @@ function configBlock() {
   ruleCarrierRows(cfgReads);
   deliveryRouteConfigRow(cfgReads);
   subagentBoundaryRow(cfgReads);
+  zenModeConfigRow(cfgReads);
 }
 
 var SUBAGENT_BOUNDARY = 'a neutral subagent may use every tool except what reaches Zensu\'s own state or runs commands outside Bash: the capability gate denies it Session Control and workflow paths, .zensu/, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell, the shell aliases, Monitor commands and tools whose name marks them as running commands or code, and a tool whose inputs the gate does not know may not name that state; every other limit is your own permission rules';
@@ -1865,6 +1866,21 @@ function safeConfigValue(value, followedBy) {
   return { text: slot.ok ? slot.text + cut : '', ok: slot.ok };
 }
 
+// The tail names the cause the binding verdict gives. `unknown` prints no binding
+// row at all, and a `bound` verdict whose key/root pair failed the wrapper's shape
+// check prints the valid-record row, so pointing at "the binding row above" is
+// right only for the other verdicts.
+function unboundSessionCause() {
+  var binding = String(env.ZDOC_BINDING || '');
+  if (binding === '' || binding === 'unknown') {
+    return 'this report ran without CLAUDE_CODE_SESSION_ID or CLAUDE_PLUGIN_DATA, so no session could be bound; run /zensu:doctor inside the session to check it';
+  }
+  if (binding === 'bound') {
+    return 'the session is bound, but its recorded session key or project root failed the report\'s shape check and was withheld';
+  }
+  return 'read the binding row above';
+}
+
 // The bound session's recorded delivery route, resolved by the wrapper through the
 // same zensu-config.sh ladder both ask-hooks use (ZDOC_DELIVERY_ROUTE). A route that
 // is fixed is ordinary, disclosed state, so it renders OK; what must never render
@@ -1880,18 +1896,7 @@ function deliveryRouteRow() {
   if (planOff && !promptOff) halfOff = ' (' + ROUTE_PLAN_HALF_OFF + ')';
   else if (promptOff && !planOff) halfOff = ' (' + ROUTE_PROMPT_HALF_OFF + ')';
   if (v === 'unknown') {
-    // The tail names the cause the binding verdict gives. `unknown` prints no binding
-    // row at all, and a `bound` verdict whose key/root pair failed the wrapper's shape
-    // check prints the valid-record row, so pointing at "the binding row above" is
-    // right only for the other verdicts.
-    var binding = String(env.ZDOC_BINDING || '');
-    var cause = 'read the binding row above';
-    if (binding === '' || binding === 'unknown') {
-      cause = 'this report ran without CLAUDE_CODE_SESSION_ID or CLAUDE_PLUGIN_DATA, so no session could be bound; run /zensu:doctor inside the session to check it';
-    } else if (binding === 'bound') {
-      cause = 'the session is bound, but its recorded session key or project root failed the report\'s shape check and was withheld';
-    }
-    line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + cause);
+    line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
   } else if (v === 'unjudged') {
     line(WARN, 'delivery route: could not be read — the shared config library did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. Run /zensu:delivery-route --status from the session to see what the hooks resolve');
   } else if (planOff && promptOff && (v === 'ask' || /^(?:(?:build|direct) \((?:session marker|hooks\.defaultDeliveryRoute)\)|build \(inherited from parent session\))$/.test(v))) {
@@ -1910,6 +1915,53 @@ function deliveryRouteRow() {
   } else {
     var shown = safeConfigValue(v, ') — the');
     line(WARN, 'delivery route: state not recognized (' + (shown.ok ? shown.text : FOLD_UNAVAILABLE)
+      + ') — the wrapper reported a state this report has no row for; a missing check rather than an all-clear');
+  }
+}
+
+var ZEN_YIELD = 'the user\'s own CLAUDE.md, output style or a style mode they chose outranks it';
+
+function zenModeInstalled() {
+  try {
+    return fs.lstatSync(path.join(pluginDir(), 'hooks', 'user-prompt-zen-mode.sh')).isFile();
+  } catch (e) {
+    return false;
+  }
+}
+
+function zenModeConfigRow(cfgReads) {
+  if (!zenModeInstalled()) return;
+  if (hookFlagDisabled(cfgReads, 'zenMode')) {
+    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the zen-mode hook is switched off, so no prompt receives the low-noise contract');
+  } else if (hookFlagDisabled(cfgReads, 'zenModeDefault')) {
+    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode');
+  } else {
+    line(OK, 'zen-mode default: on (hooks.zenModeDefault) — every session gets low-noise answers, and ' + ZEN_YIELD
+      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in');
+  }
+}
+
+function zenModeRow() {
+  var v = String(env.ZDOC_ZEN_MODE || '');
+  if (v === '' || !zenModeInstalled()) return;
+  if (v === 'unknown') {
+    line(WARN, 'zen-mode: not checked — no bound session key or recorded project root was available, so this session\'s zen-mode marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
+  } else if (v === 'unjudged') {
+    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session, shows what the hook resolves');
+  } else if (v === 'on (session marker)' || v === 'on (hooks.zenModeDefault)') {
+    line(OK, 'zen-mode: ' + v + ' — every prompt of this session gets the low-noise contract, and ' + ZEN_YIELD
+      + '; "zen off" leaves it for this session');
+  } else if (v === 'off (session marker)') {
+    line(OK, 'zen-mode: off (session marker) — this session left the mode; /zensu:zen-mode turns it back on');
+  } else if (v === 'off (hooks.zenModeDefault)') {
+    line(OK, 'zen-mode: off (hooks.zenModeDefault) — the mode is opt-in here; /zensu:zen-mode turns it on for this session');
+  } else if (v === 'off (hooks.zenMode=false)') {
+    line(OK, 'zen-mode: off (hooks.zenMode=false) — the zen-mode hook is switched off, so no prompt receives the contract');
+  } else if (v === 'off (unreadable state)') {
+    line(WARN, 'zen-mode: off (unreadable state) — the session marker or a directory above it is a symlink, is not a regular file or cannot be searched, or the marker cannot be read or records no choice, so the hook resolves the mode off whatever was recorded; /zensu:zen-mode replaces a marker that cannot be read or records no choice, while a link, a stray entry or a directory\'s permissions need a repair by hand first');
+  } else {
+    var shown = safeConfigValue(v, ') — the');
+    line(WARN, 'zen-mode: state not recognized (' + (shown.ok ? shown.text : FOLD_UNAVAILABLE)
       + ') — the wrapper reported a state this report has no row for; a missing check rather than an all-clear');
   }
 }
@@ -5752,6 +5804,7 @@ function stateBlock(nowMs) {
   // the marker AND the config key, so a project with no `.zensu/state` yet still has
   // an answer (config or `ask`), and the ENOENT return below must not swallow it.
   deliveryRouteRow();
+  zenModeRow();
   var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');
   // ONE renderer for the own-document verdict, called from BOTH the ENOENT branch

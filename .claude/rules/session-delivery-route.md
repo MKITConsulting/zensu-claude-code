@@ -46,7 +46,8 @@ removes the workflow together with the question.
 3. the inherited route `<project>/.zensu/state/inherited-route-<session-key>.json`
    (`{"route":"build"}` only), which a released own marker skips (§"Linked sessions inherit `build`");
 4. `hooks.defaultDeliveryRoute` ∈ `build | direct | ask`;
-5. ask.
+5. ask. Under `ask` the plan gate asks no question for a plan that names its own executor; it
+   prints a notice instead (`.claude/rules/plan-approval-delivery-route.md`).
 
 `zensu_delivery_route_resolve <root> <key>` answers `route<TAB>source`,
 `zensu_delivery_route_field` renders the ONE spelling both directives and the doctor carry, and

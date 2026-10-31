@@ -63,7 +63,7 @@ if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] \
   || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
   || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
   || [ -z "${ZDOC_WORKTREE_KEEP_IDLE_HOURS:-}" ] || [ -z "${ZDOC_WORKTREE_KEEP:-}" ] \
-  || [ -z "${ZDOC_DELIVERY_ROUTE:-}" ]; } \
+  || [ -z "${ZDOC_DELIVERY_ROUTE:-}" ] || [ -z "${ZDOC_ZEN_MODE:-}" ]; } \
   && [ -f "$DIR/zensu-config.sh" ]; then
   # shellcheck source=/dev/null
   . "$DIR/zensu-config.sh" 2>/dev/null || true
@@ -662,12 +662,45 @@ if [ -z "$ZDOC_DELIVERY_ROUTE" ]; then
     ZDOC_DELIVERY_ROUTE=unjudged
   fi
 fi
+ZDOC_ZEN_MODE="${ZDOC_ZEN_MODE:-}"
+if [ -z "$ZDOC_ZEN_MODE" ]; then
+  if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
+    ZDOC_ZEN_MODE=unknown
+  elif command -v zensu_zen_mode_default_on >/dev/null 2>&1 && [ -f "$DIR/zensu-zen-shared.sh" ] \
+    && . "$DIR/zensu-zen-shared.sh" 2>/dev/null && command -v zen_marker_shape_fault >/dev/null 2>&1; then
+    ZDOC_ZEN_ROOT="$(cd -P -- "$ZDOC_SESSION_PROJECT_ROOT" 2>/dev/null && pwd -P)"
+    ZDOC_ZEN_MARKER="$ZDOC_ZEN_ROOT/.zensu/state/zen-mode-$ZDOC_SESSION_KEY.json"
+    if [ -z "$ZDOC_ZEN_ROOT" ]; then
+      ZDOC_ZEN_MODE=unjudged
+    elif ! zensu_hook_enabled zenMode; then
+      ZDOC_ZEN_MODE="off (hooks.zenMode=false)"
+    elif zen_marker_shape_fault "$ZDOC_ZEN_ROOT/.zensu" "$ZDOC_ZEN_ROOT/.zensu/state" "$ZDOC_ZEN_MARKER" >/dev/null; then
+      ZDOC_ZEN_MODE="off (unreadable state)"
+    elif [ -f "$ZDOC_ZEN_MARKER" ]; then
+      if zen_marker_active "$ZDOC_ZEN_MARKER"; then
+        ZDOC_ZEN_MODE="on (session marker)"
+      elif grep -q '"active"[[:space:]]*:[[:space:]]*false' "$ZDOC_ZEN_MARKER" 2>/dev/null; then
+        ZDOC_ZEN_MODE="off (session marker)"
+      else
+        ZDOC_ZEN_MODE="off (unreadable state)"
+      fi
+    elif zen_path_untraversable "$ZDOC_ZEN_MARKER" "$ZDOC_ZEN_ROOT"; then
+      ZDOC_ZEN_MODE="off (unreadable state)"
+    elif zensu_zen_mode_default_on; then
+      ZDOC_ZEN_MODE="on (hooks.zenModeDefault)"
+    else
+      ZDOC_ZEN_MODE="off (hooks.zenModeDefault)"
+    fi
+  else
+    ZDOC_ZEN_MODE=unjudged
+  fi
+fi
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
   ZDOC_BINDING_ROOT_UNKNOWN \
   ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION \
   ZDOC_PLAYWRIGHT_SOURCE ZDOC_PLAYWRIGHT_OWNER
-export ZDOC_DELIVERY_ROUTE
+export ZDOC_DELIVERY_ROUTE ZDOC_ZEN_MODE
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

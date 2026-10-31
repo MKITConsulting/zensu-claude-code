@@ -239,7 +239,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config | — |
 | `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session | — |
-| `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default; `--off` leaves it for the session | — |
+| `/zensu:zen-mode` | Low-noise responses: result first, a session recap, one next step. On by default; your own CLAUDE.md, output style or style mode outranks it, and `--off` leaves it for the session | — |
 
 #### Setup, help and other sessions
 
