@@ -2000,6 +2000,7 @@ test('cancels an owned deferred claim in release-only mode with one durable stat
 test('cancels an owned deferred claim in reset mode to an idle audited state', () => {
   const f = deferredFixture({ ownerSession: 'reset-cancellation' });
   const owner = seedDeferredOwner(f, {
+    codeRoots: [{ label: 'lib', path: '/zf/lib', top: '/zf/lib', commonDir: '/zf/lib/.git', baseline: 'unborn' }],
     workflowActive: true,
     workflowTools: ['Bash'],
     bypasses: ['unit-bypass'],
@@ -2050,6 +2051,7 @@ test('cancels an owned deferred claim in reset mode to an idle audited state', (
   assert.equal(state.deferredReviewCancellation.mode, 'reset');
   assert.equal(state.deferredReviewCancellation.sourceRevision, owner.revision);
   assert.equal(state.deferredReviewCancellation.resultRevision, owner.revision + 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'codeRoots'), false);
 });
 
 test('owner-only reset cancels an assigned unseeded claim and recovers its prepared receipt', async () => {
@@ -3614,7 +3616,8 @@ test('retirement revalidates live owners and fresh handoff leases before CAS', (
 
 test('retires a foreign deferred owner with one exact CAS and is idempotent', () => {
   const f = deferredFixture();
-  const owner = seedDeferredOwner(f);
+  const codeRoots = [{ label: 'lib', path: '/zf/lib', top: '/zf/lib', commonDir: '/zf/lib/.git', baseline: 'unborn' }];
+  const owner = seedDeferredOwner(f, { codeRoots });
   const prepared = preparedTransfer(f, owner.revision);
   writeDeferredClaim(f, {
     ownerPid: 2147483647,
@@ -3624,6 +3627,7 @@ test('retires a foreign deferred owner with one exact CAS and is idempotent', ()
   const retired = core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision));
   assert.equal(retired.revision, owner.revision + 1);
   assert.equal(retired.last_event, 'deferred-review-transfer');
+  assert.deepEqual(retired.codeRoots, codeRoots);
   assert.deepEqual({
     active: retired.active,
     implComplete: retired.implComplete,

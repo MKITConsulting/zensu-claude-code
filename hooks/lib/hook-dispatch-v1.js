@@ -524,7 +524,7 @@ function editGateAllows(context) {
   if (/[\0\r\n]/.test(spelled)) return false;
   if (process.platform === 'win32' && /^[\\/]/.test(spelled)) return false;
   const absolute = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(spelled) ? spelled : `${project}/${spelled}`;
-  return require('./edit-path-class-v1.js').editPathClass(absolute, stateDirectory) !== 'state';
+  return require('./edit-path-class-v1.js').editPathClass(absolute, stateDirectory, state) !== 'state';
 }
 
 function runEditGate(context, check) {

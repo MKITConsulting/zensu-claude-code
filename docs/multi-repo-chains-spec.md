@@ -1,6 +1,6 @@
 # Multi-Repo Chains — Anchor and Declared Code Roots
 
-**Status: stage 1 is IMPLEMENTED; stages 2 and 3 are REDESIGNED, NOT BUILT.** Stage 1 ships in
+**Status: stage 1 is IMPLEMENTED; stages 2 and 3 are REDESIGNED, NOT ENABLED.** Stage 1 ships in
 `hooks/lib/zensu-log.sh` (the terminus judges the receipt's verdict and arms the
 requirement on a logged claim), `hooks/lib/zensu-edit-landing.sh` (a claim resolving
 outside the audited root fails the audit and names the foreign root, plus the
@@ -42,8 +42,8 @@ Six sites, all single-root.
 
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
-`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:148-155`), and
-`hooks/checks/pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
+`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:151-158`), and
+`hooks/checks/pre-bash-source-write-gate.sh:267-274` refuses an empty recorded root outright,
 while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
@@ -53,9 +53,9 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1974`) and counts through the shared helper (`:2025`),
+(`hooks/lib/zensu-log.sh:2225`) and counts through the shared helper (`:2276`),
 which runs every `git` call with the discovery and config-injection variables unset
-(`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
+(`:89`, `:130-131`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
 `CLAUDE_PROJECT_DIR` that `zensu-log.sh` re-exports from `zensu_resolve_project_dir()`
 before any verb runs, so the `.` fallback never applies there. Which root the ambient
@@ -63,11 +63,11 @@ variable names for the audit in a multi-root topology, and what the fallback mea
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:127`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:365-405`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:1166`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:128`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:543-572`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:1415`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1963`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2214`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -88,10 +88,11 @@ zero-change terminus is unchanged by item 2: it still refuses on the change coun
 alone, which it now takes through the same scrubbed wrapper — see the paragraph above.
 
 **The write gate confines Bash writes while it is opted in, the edit gate does not confine
-paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:901`) and rule (C) at the same predicate
-for git targets (`:947`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:796`). `hooks/checks/pre-edit-tdd-reminder.sh:132-147` resolves a
+paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!inUnion(p)`
+(`hooks/lib/bash-source-write-parse.js:960`), whose union is the project root alone until a
+code root is declared, and rule (C) at the same predicate for git targets (`:1006`), with
+`projectRoot` taken from the passed `CLAUDE_PROJECT_DIR` (`:831`).
+`hooks/checks/pre-edit-tdd-reminder.sh:132-152` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
@@ -102,9 +103,9 @@ at all, and `hooks/checks/pre-write-secret-scan.sh:85` references one only throu
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:641` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:670` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:600-602` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:630-632` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
@@ -356,13 +357,14 @@ The three candidates above are not equally priced, and the price is not the one
 macOS, by driving the real hooks over synthetic payloads with a real Session
 Control session.
 
-**Three PreToolUse hooks govern a `Write`, not two.** `hooks/hooks.json:5`
-registers `pre-reviewer-capability-gate.sh` on the `.*` matcher
-(`hooks/hooks.json:9`), beside `pre-edit-tdd-reminder.sh` and
-`pre-write-secret-scan.sh` on `Edit|Write|MultiEdit`. A deny from any one of them
-wins, so all three were driven. Three destinations were used — a file inside the
-project, a file inside `CLAUDE_PLUGIN_DATA`, and a file in an unrelated directory
-— in three chain states.
+**Three PreToolUse hooks governed a `Write` when this was measured, not two:** the
+capability gate of `pre-reviewer-capability-gate.sh` on the `.*` matcher, and
+`pre-edit-tdd-reminder.sh` and `pre-write-secret-scan.sh` on `Edit|Write|MultiEdit`.
+All three now run as checks of the one hook dispatcher that `hooks/hooks.json:5`
+registers on the `.*` matcher (`hooks/hooks.json:9`), together with the other checks
+of its registry. A deny from any one of them wins, so all three were driven. Three destinations were
+used — a file inside the project, a file inside `CLAUDE_PLUGIN_DATA`, and a file in
+an unrelated directory — in three chain states.
 
 | Chain state | inside project | inside plugin data | unrelated directory |
 |---|---|---|---|
@@ -421,11 +423,11 @@ candidate whose price did not rise.
 chain at `UNINITIALIZED` denies all three destinations, but with the phase
 wording and for the unrelated directory too: that is TDD discipline, not
 containment, and it lifts at `RED_WRITE` and `REFACTOR`
-(`hooks/checks/pre-edit-tdd-reminder.sh:193, :206`). Reading that deny as a boundary is the
+(`hooks/checks/pre-edit-tdd-reminder.sh:198, :211`). Reading that deny as a boundary is the
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:296`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:298`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming
@@ -529,7 +531,7 @@ symbol rather than by line, because the stage-2 pull requests move most of these
 | External review import | A chain with code roots answers `status=unavailable reason=multi-root` at the import and at `--external-review --stage` and `--tree` alike, so step 3 stages no template workflow whose result the import would refuse, and the panel runs. | `hooks/lib/external-review-v1.js`, `hooks/lib/zensu-log.sh` |
 | Self-review | Enumerates through `--change-set`, and its rule to stay in the current worktree admits the declared roots. | `skills/self-review/SKILL.md` |
 | Persona activation | Labeled paths are filtered out, so a persona of the anchor never half-matches another repository's code. | `hooks/lib/persona-activation.js` |
-| Edit gate | The state-file hardening covers every root's `.zensu/state`, and a test path is classified relative to the top of the root that owns it. | `hooks/pre-edit-tdd-reminder.sh`, `tdd_is_test_path` in `hooks/lib/zensu-tdd-phase.sh` |
+| Edit gate | The state-file hardening covers every root's `.zensu/state`, and a test path is classified relative to the top of the root that owns it. | `hooks/checks/pre-edit-tdd-reminder.sh`, `hooks/lib/edit-path-class-v1.js`, `tdd_is_test_path` in `hooks/lib/zensu-tdd-phase.sh` |
 | Write gate (opt-in) | While `hooks.bashWriteGate` is `true`, rules (B) and (C) accept a path inside any declared root, and `TEMP_SAFE` rejects a temp entry that contains any member of the union. Rule (A)'s `tracked()` probe, which runs `git ls-files --error-unmatch` and `rev-parse` with neither the read-only prefix nor the scrub today, takes both from `git-read-only-v1` for a path inside a code root. | `hooks/lib/bash-source-write-parse.js`, `hooks/pre-bash-source-write-gate.sh` |
 | Doctor | The topology row lists the declared roots and warns only about undeclared foreign ones. | `claimTopologyRow` in `hooks/lib/zensu-doctor-report.js` |
 | Session-trail | `gitState` runs once per root (§6.4). | `skills/session-trail/scripts/trail.mjs` |
@@ -591,10 +593,11 @@ Two properties stay as they are, deliberately:
 A session started in a folder that holds several repositories, rather than in one of them, is
 anchored on a folder anchor (§4). The classification takes the narrow split every git reader of
 the chain already shares: only git's own answer that the path lies outside every work tree
-makes a folder anchor — the `unknown` of `_zensu_unqualified_change_count` in
-`hooks/lib/zensu-log.sh`, `NO_WORK_TREE_RE` in `hooks/lib/evidence-run-v1.js` and the `IN_GIT`
-probe of `hooks/lib/zensu-edit-landing.sh`. Any other git failure stays a fault, because a
-`safe.directory` refusal on a real repository would otherwise pass for a folder.
+makes a folder anchor — `_zensu_folder_anchor` in `hooks/lib/zensu-log.sh`, `NO_WORK_TREE_RE`
+in `hooks/lib/evidence-run-v1.js` and the `IN_GIT` probe of `hooks/lib/zensu-edit-landing.sh`.
+The `unknown` of `_zensu_unqualified_change_count` does not decide it, because that helper also
+answers `unknown` for an unborn branch inside a work tree. Any other git failure stays a fault,
+because a `safe.directory` refusal on a real repository would otherwise pass for a folder.
 
 **What it costs today.** Read at the cited sites on 2026-10-24, after a session started in such
 a folder could not close a chain that changed files of one repository below it:

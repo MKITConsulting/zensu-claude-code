@@ -5540,7 +5540,7 @@ function auditedRunLog(projectRoot, value) {
 // runs it, answering a typed result the row renders. It refuses a symlinked or
 // non-plain-file library rather than executing it, and the ENOENT branch below states why
 // an absent command is a damaged tree rather than an uninstalled feature.
-function claimInventory(logFile, projectRoot, workTree) {
+function claimInventory(logFile, projectRoot, workTree, workflowFile) {
   var lib = path.join(pluginDir(), 'hooks', 'lib', 'zensu-edit-landing.sh');
   try {
     var st = fs.lstatSync(lib);
@@ -5565,8 +5565,11 @@ function claimInventory(logFile, projectRoot, workTree) {
   }
   var r;
   try {
+    var inventoryArgs = [lib, '--inventory', '--log', logFile, '--project', projectRoot];
+    if (workTree) inventoryArgs.push('--work-tree', workTree);
+    if (workflowFile) inventoryArgs.push('--workflow', workflowFile);
     r = require('child_process').spawnSync('bash',
-      [lib, '--inventory', '--log', logFile, '--project', projectRoot].concat(workTree ? ['--work-tree', workTree] : []),
+      inventoryArgs,
       { encoding: 'utf8', timeout: CLAIM_INVENTORY_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
   } catch (e) {
     return { ok: false, reason: 'the inventory command could not be started' };
@@ -5592,8 +5595,10 @@ function claimInventory(logFile, projectRoot, workTree) {
   // `claimed-files=` and discloses when it is absent.
   var roots = [];
   var seenCount = false;
+  var folder = false;
   r.stdout.split('\n').forEach(function (l) {
     if (l.indexOf('claimed-files=') === 0) { seenCount = true; return; }
+    if (l === 'anchor\tfolder') { folder = true; return; }
     var i = l.indexOf('\t');
     if (i === -1 || l.slice(0, i) !== 'foreign-root') return;
     var value = l.slice(i + 1);
@@ -5602,7 +5607,7 @@ function claimInventory(logFile, projectRoot, workTree) {
   if (!seenCount) {
     return { ok: false, reason: 'the inventory command answered in a format this runtime does not recognise' };
   }
-  return { ok: true, roots: roots };
+  return { ok: true, roots: roots, folder: folder };
 }
 
 // A receipt exists in this project's state directory, whoever wrote it. Used
@@ -5662,6 +5667,8 @@ function claimTopologyRow(projectRoot, ownKey) {
     }
     return;
   }
+  var declared = declaredCodeRoots(projectRoot, ownKey);
+  declaredCodeRootsRow(declared);
   var receipt = path.join(projectRoot, '.zensu', 'state', 'edit-landing-' + ownKey + '.json');
   var parsed = readNoteJson(receipt);
   if (parsed === NOTE_MISSING) return;
@@ -5691,12 +5698,18 @@ function claimTopologyRow(projectRoot, ownKey) {
       + workTree.reason + '. That is a missing check, not an all-clear.');
     return;
   }
-  var inventory = claimInventory(logFile, projectRoot, workTree.path);
+  var inventory = claimInventory(logFile, projectRoot, workTree.path,
+    declared && declared.status === 'ok' ? declared.workflowFile : '');
   if (inventory === null) return;
   if (!inventory.ok) {
     line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
       + inventory.reason + '. That is a missing check, not an all-clear.');
     return;
+  }
+  if (inventory.folder) {
+    line(OK, 'topology: the anchor is a folder anchor — it lies outside every git work tree, so it '
+      + 'has no change set of its own, and a repository a claim names below it is a foreign root '
+      + 'unless the chain declares it as a code root.');
   }
   if (inventory.roots.length === 0) return;
   var named = claimRootSafeNames(inventory.roots);
@@ -6068,6 +6081,55 @@ function stateBlock(nowMs) {
       line(OK, 'state: pending-review.json present and within its ' + ttl + 'h TTL');
     }
   } catch (e) { /* no pending-review marker */ }
+}
+
+function declaredCodeRoots(projectRoot, ownKey) {
+  var workflowFile = path.join(projectRoot, '.zensu', 'state', 'tdd-phase-' + ownKey + '.json');
+  var core;
+  var codeRoots;
+  try {
+    core = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
+    codeRoots = require(path.join(pluginDir(), 'hooks', 'lib', 'code-roots-v1.js'));
+  } catch (e) {
+    return null;
+  }
+  var read = sharedWorkflowRead(core, projectRoot, ownKey, null);
+  if (!read.state || typeof read.state !== 'object'
+      || !Object.prototype.hasOwnProperty.call(read.state, 'codeRoots')) return null;
+  var verdict;
+  try {
+    verdict = codeRoots.readCodeRoots(read.state, {
+      anchor: projectRoot,
+      pluginData: env.CLAUDE_PLUGIN_DATA || '',
+      claudeConfigDir: env.CLAUDE_CONFIG_DIR || '',
+    });
+  } catch (e) {
+    return { status: 'unreadable', roots: [], reason: 'the code-root list could not be judged', workflowFile: workflowFile };
+  }
+  return { status: verdict.status, roots: verdict.roots, reason: verdict.reason, workflowFile: workflowFile };
+}
+
+function declaredCodeRootsRow(declared) {
+  if (!declared) return;
+  if (declared.status === 'ok') {
+    var listed = declared.roots.filter(function (root) { return claimRootRenderable(root.path); })
+      .map(function (root) { return '`@' + root.label + '/` ' + claimRootRender(root.path); });
+    var withheldRoots = declared.roots.length - listed.length;
+    line(OK, 'topology: this chain declares ' + declared.roots.length + ' code root'
+      + (declared.roots.length === 1 ? '' : 's') + (listed.length ? ': ' + listed.join(', ') : '')
+      + (withheldRoots ? ' (' + withheldRoots + ' withheld, its path is not safe to render)' : '')
+      + '. Their claims are spelled @<label>/<path> and graded against that root.');
+    return;
+  }
+  var reason = String(declared.reason || '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029`]/g, '?');
+  if (declared.status === 'disabled') {
+    line(OK, 'topology: the workflow document declares code roots, and this build ignores them — '
+      + reason + '. The chain counts and audits the anchor alone.');
+    return;
+  }
+  line(WARN, 'topology: the workflow document declares code roots, and they are ignored — '
+    + (reason || 'the list could not be judged') + '. The chain counts and audits the anchor alone; '
+    + 're-arm the chain to replace the list.');
 }
 
 function auditedWorkTree(projectRoot, parsed) {

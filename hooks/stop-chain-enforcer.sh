@@ -1683,6 +1683,21 @@ zensu_autopilot_link_args() {
 # a log there unconditionally, so without it every chain reads as dirty from its
 # second turn onward in any repository that tracks those artifacts, and the probe
 # would stop discriminating at all.
+zensu_impl_code_root_changes() {
+  local document="" native_root native_state report
+  [ -n "${STATE_FILE:-}" ] && [ -f "$STATE_FILE" ] && [ ! -L "$STATE_FILE" ] || return 0
+  IFS= read -r -d '' document < "$STATE_FILE" 2>/dev/null
+  case "$document" in
+    (*'"codeRoots"'*) ;;
+    (*) return 0 ;;
+  esac
+  command -v node >/dev/null 2>&1 || return 0
+  native_root="$(_tdd_native_path "$PROJECT_ROOT")" || return 0
+  native_state="$(_tdd_native_path "$STATE_FILE")" || return 0
+  report="$(zensu_run_bounded node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/code-roots-v1.js" count --anchor "$native_root" --workflow "$native_state" 2>/dev/null </dev/null)" || return 0
+  printf '%s\n' "$report" | awk -F '\t' '$1 == "count" && $3 ~ /^[0-9]+$/ && $3 > 0 { print "code root " $2; exit }'
+}
+
 zensu_impl_stop_nudge() {
   local threshold count changed complete_cmd nudge_denial_attempt status_cmd probe_rc
   # This runs AFTER outer_finish, which can emit a decision:"block" for a durable
@@ -1737,10 +1752,12 @@ zensu_impl_stop_nudge() {
     case "$probe_rc" in
       124|137|143)
         stop_notice "Zensu review chain: the worktree probe for the implementing-phase turn counter was interrupted by its watchdog, so this turn was neither counted nor reported on. That is not the same as a clean tree. Stop is not blocked."
+        return 0
         ;;
     esac
-    return 0
+    changed=""
   fi
+  [ -n "$changed" ] || changed="$(zensu_impl_code_root_changes)"
   [ -n "$changed" ] || return 0
   # Rendered for the same reason `complete_cmd` is, and stated here because the
   # counter-failure arms below shipped a BARE `zensu-log.sh --chain-status`: a flag
@@ -2134,7 +2151,7 @@ PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
 INNER_BOUND_ARGS=""
 INNER_ZERO_CHANGE_ARGS=""
-INNER_ZERO_CHANGE_NOTE=" That terminus verifies the claim before it closes anything: it refuses while 'git diff --name-only HEAD' or an untracked non-ignored file still reports a changed file, so it can never stand in for a review of real changes."
+INNER_ZERO_CHANGE_NOTE=" That terminus verifies the claim before it closes anything: it refuses while 'git diff --name-only HEAD' or an untracked non-ignored file still reports a changed file in the anchor or in any code root the chain declared, a commit since a code root's baseline included, so it can never stand in for a review of real changes."
 INNER_SELF_REVIEW_ENVELOPE=" "
 INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>'"
 INNER_REVIEW_SUFFIX=", followed by"
@@ -2296,7 +2313,7 @@ else
     full) REVIEW_PERSPECTIVES="conventions, bugs, architecture, tests, security" ;;
     *) REVIEW_PANEL="lean"; REVIEW_PERSPECTIVES="correctness, design, security" ;;
   esac
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread build session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:build Phase 6 review sequence where it left off: build the step 10.2c REVIEW PACKET v1 over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, fan out one zensu:review-aspect agent per perspective of the ${REVIEW_PANEL} review panel (${REVIEW_PERSPECTIVES}), plus the repo-local personas step 10.2b selects, each given that packet, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default; on the first review together with its independent second run in the same tool message while hooks.reviewJudgeSecondRun is enabled), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' (with run_in_background: false where the Agent tool offers that parameter; a background run is routed when its report arrives), ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the complete REVIEW PACKET v1 and then the merged findings. On the first review, and only while hooks.reviewJudge is enabled, take the Phase 6.10 step 3 import path when a finished Workflow run of the plugin's review template (templates/workflows/zensu-review-v1.js) covered this change: it runs zensu-log.sh --external-review, and only an ok or degraded answer replaces the panel's aspect agents, after which it always runs the zensu:review-judge and spawns one aspect per GAP line the judge names; every other answer leaves the panel fan-out as stated, and the rest of this sequence stays as stated either way. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread build session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:build Phase 6 review sequence where it left off: build the step 10.2c REVIEW PACKET v1 over the change set step 10.2 enumerates, which includes untracked files, mid-run commits and the changes of every declared code root that 'git diff --name-only HEAD' in the anchor does not list, fan out one zensu:review-aspect agent per perspective of the ${REVIEW_PANEL} review panel (${REVIEW_PERSPECTIVES}), plus the repo-local personas step 10.2b selects, each given that packet, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default; on the first review together with its independent second run in the same tool message while hooks.reviewJudgeSecondRun is enabled), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' (with run_in_background: false where the Agent tool offers that parameter; a background run is routed when its report arrives), ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the complete REVIEW PACKET v1 and then the merged findings. On the first review, and only while hooks.reviewJudge is enabled, take the Phase 6.10 step 3 import path when a finished Workflow run of the plugin's review template (templates/workflows/zensu-review-v1.js) covered this change: it runs zensu-log.sh --external-review, and only an ok or degraded answer replaces the panel's aspect agents, after which it always runs the zensu:review-judge and spawns one aspect per GAP line the judge names; every other answer leaves the panel fan-out as stated, and the rest of this sequence stays as stated either way. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
   REASON="${REASON} ${STATE_LEGEND} ${INNER_RESUME_CLOSER}"
   if [ "$BACKGROUND_REVIEW_ARRIVED" = "true" ] && [ "$BACKGROUND_REVIEW_HOLD_COUNTED" != "true" ]; then
     background_review_defer 1 || true

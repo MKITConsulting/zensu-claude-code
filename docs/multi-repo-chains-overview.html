@@ -182,7 +182,7 @@
   <p class="lede">How a Zensu chain could span several repositories without giving up the one
   trusted project root — and how a review sitting on top of it can see contract breaks between
   those roots.</p>
-  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are REDESIGNED, NOT BUILT.</strong> Stage 1
+  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are REDESIGNED, NOT ENABLED.</strong> Stage 1
   ships the detect-and-refuse half: the terminus judges the edit-landing receipt's verdict, a logged
   claim arms that requirement even when the anchor's tree is clean, a claim resolving outside the
   audited root fails the audit and names the foreign root, and <code>/zensu:doctor</code> carries a
@@ -291,7 +291,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:1166 · zensu-log.sh:1963</p>
+      <p class="src">zensu-edit-landing.sh:1415 · zensu-log.sh:2214</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -299,7 +299,7 @@
       <p>While the opt-in write gate is on, its rule (B) denies a Bash source write outside the root.
       The edit gate only classifies a path as <code>state</code>, <code>zensu</code> or
       <code>other</code> and does not confine it. With the gate on, the topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:901 · hooks/checks/pre-edit-tdd-reminder.sh:132-147</p>
+      <p class="src">bash-source-write-parse.js:960 · hooks/checks/pre-edit-tdd-reminder.sh:132-152</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass — superseded by stage 1</span>
@@ -314,7 +314,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus now counts the same way. A chain that
       claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1974 · zensu-log.sh:98-121 · zensu-log.sh:118-119</p>
+      <p class="src">zensu-log.sh:2225 · zensu-log.sh:2181-2299 · zensu-log.sh:130-131</p>
     </div>
   </div>
 </section>
@@ -448,7 +448,7 @@
           <code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B) and
           rule (C), and the temp carve-out stops exempting a temp entry that contains a code root. At
           its default the gate judges nothing.</td>
-          <td class="where mono">bash-source-write-parse.js:901<br>bash-source-write-parse.js:947</td>
+          <td class="where mono">bash-source-write-parse.js:960<br>bash-source-write-parse.js:1006</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
@@ -458,7 +458,7 @@
           <code>unavailable</code>, any non-zero root makes it non-zero, and a code root never
           answers <code>unknown</code>. Otherwise a clean anchor still closes an empty chain. Stage
           1, item 2 already arms <code>--tdd-complete</code> on a logged claim.</td>
-          <td class="where mono">zensu-log.sh:98<br>zensu-log.sh:118-119</td>
+          <td class="where mono">zensu-log.sh:2276<br>zensu-log.sh:130-131</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 2</span></th>
@@ -470,7 +470,7 @@
           whatever the list says. The pattern rule is unchanged, and a root is searched like the anchor: through a
           subdirectory other than <code>.zensu</code>, because the traversal check refuses a search
           root that contains a protected directory.</td>
-          <td class="where mono">reviewer-capability-v1.js:638<br>reviewer-capability-v1.js:600-602</td>
+          <td class="where mono">reviewer-capability-v1.js:669<br>reviewer-capability-v1.js:630-632</td>
         </tr>
       </tbody>
     </table>
@@ -747,7 +747,7 @@
   revision disclosed: the four callers of the change count were read, and the chain shape was read
   in <code>chainShape</code> rather than taken from the repository conventions. The figure of
   roughly eight <code>classifyChain</code> consumers in section&nbsp;5 still comes from those
-  conventions. Proposal — stage 1 is implemented, and stages 2 and 3 are REDESIGNED, NOT BUILT:
+  conventions. Proposal — stage 1 is implemented, and stages 2 and 3 are REDESIGNED, NOT ENABLED:
   they ship in five pull requests behind a dark-launch switch. Companion documents:
   <a href="multi-repo-chains-spec.md">the specification</a> and
   <a href="multi-repo-chains-principle.html">the principle page</a>.

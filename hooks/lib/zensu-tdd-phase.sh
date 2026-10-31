@@ -379,15 +379,16 @@ _tdd_atomic_replace_regular() {
 }
 
 tdd_is_test_path() {
-  local path="${1:-}"
+  local path="${1:-}" shape="${2:-}"
   [ -z "$path" ] && { echo "false"; return 0; }
+  [ -n "$shape" ] || shape="$path"
 
   if [ -L "$path" ]; then
     echo "false"; return 0
   fi
 
   local lower
-  lower=$(echo "$path" | tr '[:upper:]' '[:lower:]')
+  lower=$(echo "$shape" | tr '[:upper:]' '[:lower:]')
 
   case "$lower" in
     */test/*|*/tests/*|*/__tests__/*|*/spec/*|*/specs/*)
@@ -397,7 +398,7 @@ tdd_is_test_path() {
   esac
 
   local base
-  base=$(basename "$path")
+  base=$(basename "$shape")
 
   case "$base" in
     test_*|*_test.*|*_tests.*|*.test.*|*.tests.*|*.spec.*|*.specs.*|*_spec.*|*_specs.*)
@@ -1059,6 +1060,7 @@ _tdd_write_clear_critical() {
       s.deferredReviewClaim = ""; s.stopBlockCount = 0;
       delete s.implStopCount;
       delete s.reviewRearm;
+      delete s.codeRoots;
       delete s.autopilotRunId; delete s.autopilotAttempt;
       delete s.autopilotReturnStage; delete s.chainId; delete s.chainOutcome;
       s.phase = "UNINITIALIZED"; s.step_id = ""; s.history = [];
@@ -1096,7 +1098,7 @@ _tdd_clear_standalone_session_critical() {
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
       s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
-      s.phase="UNINITIALIZED";s.step_id="";s.history=[];
+      delete s.codeRoots;s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
     });
   ' 2>/dev/null
@@ -1135,7 +1137,7 @@ _tdd_clear_autopilot_session_critical() {
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
       s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
-      delete s.autopilotRunId;delete s.autopilotAttempt;delete s.autopilotReturnStage;
+      delete s.codeRoots;delete s.autopilotRunId;delete s.autopilotAttempt;delete s.autopilotReturnStage;
       delete s.chainId;delete s.chainOutcome;s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
     });
@@ -1197,10 +1199,10 @@ _tdd_begin_session_critical() {
   local state_file="$1" session_id="$2" vanilla="$3" impl_complete="$4"
   local require_deferred_eligible="$5" deferred_claim="$6"
   local autopilot_run_id="${7:-}" autopilot_attempt="${8:-}"
-  local autopilot_return_stage="${9:-}" chain_id="${10:-}"
+  local autopilot_return_stage="${9:-}" chain_id="${10:-}" code_roots="${11:-}"
   CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" \
-    SID="$session_id" VANILLA="$vanilla" \
+    SID="$session_id" VANILLA="$vanilla" CODE_ROOTS="$code_roots" \
       IMPL_COMPLETE="$impl_complete" REQUIRE_DEFERRED_ELIGIBLE="$require_deferred_eligible" \
       DEFERRED_CLAIM="$deferred_claim" AUTOPILOT_RUN_ID="$autopilot_run_id" \
       AUTOPILOT_ATTEMPT="$autopilot_attempt" AUTOPILOT_RETURN_STAGE="$autopilot_return_stage" \
@@ -1240,6 +1242,13 @@ _tdd_begin_session_critical() {
       delete s.implStopCount;
       s.bypasses = [];
       delete s.reviewRearm;
+      if (process.env.CODE_ROOTS) {
+        const declared = JSON.parse(process.env.CODE_ROOTS);
+        if (!Array.isArray(declared) || declared.length === 0) throw new Error("code roots must be a non-empty list");
+        s.codeRoots = declared;
+      } else {
+        delete s.codeRoots;
+      }
       if (process.env.AUTOPILOT_RUN_ID) {
         s.autopilotRunId = process.env.AUTOPILOT_RUN_ID;
         s.autopilotAttempt = Number.parseInt(process.env.AUTOPILOT_ATTEMPT, 10);
@@ -1266,7 +1275,7 @@ tdd_begin_session() {
   local supplied_session="${1:-}" session_id vanilla="${2:-false}" impl_complete="${3:-false}"
   local require_deferred_eligible="${4:-false}" deferred_claim="${5:-}"
   local autopilot_run_id="${6:-}" autopilot_attempt="${7:-}"
-  local autopilot_return_stage="${8:-}" chain_id="${9:-}" state_file
+  local autopilot_return_stage="${8:-}" chain_id="${9:-}" code_roots="${10:-}" state_file
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
   case "$vanilla" in true|false) ;; *) return 1 ;; esac
@@ -1288,12 +1297,17 @@ tdd_begin_session() {
     case "$chain_id" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
     [ "${#chain_id}" -le 128 ] || return 1
   fi
+  if [ -n "$code_roots" ]; then
+    [ -z "$autopilot_run_id$deferred_claim" ] || return 1
+    case "$code_roots" in (\[*\]) ;; (*) return 1 ;; esac
+    case "$code_roots" in (*$'\n'*|*$'\r'*) return 1 ;; esac
+  fi
   command -v node >/dev/null 2>&1 || return 1
   state_file="$(tdd_state_file "$session_id")" || return 1
   [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
   _tdd_begin_session_critical "$state_file" "$session_id" "$vanilla" "$impl_complete" \
     "$require_deferred_eligible" "$deferred_claim" \
-    "$autopilot_run_id" "$autopilot_attempt" "$autopilot_return_stage" "$chain_id"
+    "$autopilot_run_id" "$autopilot_attempt" "$autopilot_return_stage" "$chain_id" "$code_roots"
 }
 
 # Emit the exact outer-run linkage for this TDD generation as a compact JSON

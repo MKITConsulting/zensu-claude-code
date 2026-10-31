@@ -199,7 +199,7 @@ superseded, the §5 heading and the pin roster at the end of §10) together with
 `docs/multi-repo-chains-overview.html` and `docs/multi-repo-chains-principle.html`, which
 carry the same status lede and the same superseded facts in their own words. Naming the
 spec alone was wrong and produced real drift: `test-multi-repo-doc-consistency.sh` X7
-requires the literal `stages 2 and 3 are REDESIGNED, NOT BUILT` in all three and forbids the
+requires the literal `stages 2 and 3 are REDESIGNED, NOT ENABLED` in all three and forbids the
 retired `stages 2 and 3 are BLOCKED`, so a status reword is a
 deliberate three-file edit, and the overview's finding cards restate terminus behaviour
 that §2 now marks superseded.
