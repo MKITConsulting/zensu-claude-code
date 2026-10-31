@@ -7,7 +7,7 @@ HOST_PATH="$ROOT/hooks/lib/zensu-host-path.sh"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
 POST_REVIEW="$ROOT/hooks/post-review-tdd-delegate.sh"
 STOP_ENFORCER="$ROOT/hooks/stop-chain-enforcer.sh"
-PRE_EDIT="$ROOT/hooks/pre-edit-tdd-reminder.sh"
+PRE_EDIT="$ROOT/hooks/checks/pre-edit-tdd-reminder.sh"
 BANNER="$ROOT/hooks/session-start-banner.sh"
 AGENT_CONTEXT="$ROOT/hooks/lib/zensu-agent-context.sh"
 SESSION_BINDING="$ROOT/hooks/lib/zensu-session.sh"
@@ -235,49 +235,113 @@ else
   check "temporary review workspace is rendered in a native-Node-readable spelling" FAIL
 fi
 
-HOST_NEGATIVE_OK=true
+HOST_CANONICAL="$(cd -P -- "$HOST_FIXTURE" && pwd -P)"
+HOST_CYGPATH_BRANCH='source "$1" || exit 3
+_zensu_host_path_drive() { _ZENSU_HOST_PATH_DRIVE=""; return 1; }
+_zensu_host_path_render "$2"'
+HOST_NEGATIVE_FAULTS=""
+host_rejects() {
+  local label="$1" rc
+  shift
+  "$@" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || HOST_NEGATIVE_FAULTS="$HOST_NEGATIVE_FAULTS $label:$rc"
+}
+host_cygpath_branch() {
+  (
+    cd -- "$HOST_FIXTURE" || exit 3
+    OSTYPE=msys PATH="$FAKE_BIN" /bin/bash -c "$HOST_CYGPATH_BRANCH" _ "$HOST_PATH" "$HOST_FIXTURE"
+  )
+}
 touch "$HOST_FIXTURE/not-a-directory"
-bash "$HOST_PATH" "$HOST_FIXTURE/missing" >/dev/null 2>&1 && HOST_NEGATIVE_OK=false
-bash "$HOST_PATH" "$HOST_FIXTURE/not-a-directory" >/dev/null 2>&1 && HOST_NEGATIVE_OK=false
+host_rejects missing bash "$HOST_PATH" "$HOST_FIXTURE/missing"
+host_rejects non-directory bash "$HOST_PATH" "$HOST_FIXTURE/not-a-directory"
 if ln -s "$HOST_FIXTURE" "$HOST_FIXTURE/directory-alias" 2>/dev/null; then
-  bash "$HOST_PATH" "$HOST_FIXTURE/directory-alias" >/dev/null 2>&1 && HOST_NEGATIVE_OK=false
+  host_rejects alias bash "$HOST_PATH" "$HOST_FIXTURE/directory-alias"
 fi
 FAKE_BIN="$HOST_FIXTURE/fake-bin"
 mkdir -p "$FAKE_BIN"
-printf '%s\n' '#!/bin/sh' 'printf "%s\\n" MSYS_NT-10.0' > "$FAKE_BIN/uname"
-chmod +x "$FAKE_BIN/uname"
-PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
-printf '%s\n' '#!/bin/sh' 'exit 7' > "$FAKE_BIN/uname"
-chmod +x "$FAKE_BIN/uname"
-PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
+host_rejects no-cygpath host_cygpath_branch
+printf '%s\n' '#!/bin/sh' 'exit 7' > "$FAKE_BIN/cygpath"
+chmod +x "$FAKE_BIN/cygpath"
+host_rejects cygpath-failure host_cygpath_branch
+printf '%s\n' '#!/bin/sh' 'printf "%s\\n" /tmp/ambiguous' > "$FAKE_BIN/cygpath"
+chmod +x "$FAKE_BIN/cygpath"
+host_rejects mount-spelling host_cygpath_branch
+mkdir -p "$HOST_FIXTURE/C:/attacker-controlled"
+printf '%s\n' '#!/bin/sh' 'printf "%s\\n" C:/attacker-controlled' > "$FAKE_BIN/cygpath"
+chmod +x "$FAKE_BIN/cygpath"
+host_rejects relative-drive host_cygpath_branch
+printf '%s\n' '#!/bin/sh' 'printf "%s\\n" C:/first C:/second' > "$FAKE_BIN/cygpath"
+chmod +x "$FAKE_BIN/cygpath"
+host_rejects two-lines host_cygpath_branch
+if [ -z "$HOST_NEGATIVE_FAULTS" ]; then
+  check "host-path producer rejects missing, non-directory, aliased, unavailable, and malformed inputs" PASS
+else
+  check "host-path producer rejects missing, non-directory, aliased, unavailable, and malformed inputs (not exit 2:$HOST_NEGATIVE_FAULTS; fixture $HOST_CANONICAL)" FAIL
+fi
+
 printf '%s\n' '#!/bin/sh' 'printf "%s\\n" MSYS_NT-10.0' > "$FAKE_BIN/uname"
 chmod +x "$FAKE_BIN/uname"
 printf '%s\n' '#!/bin/sh' 'exit 7' > "$FAKE_BIN/cygpath"
 chmod +x "$FAKE_BIN/cygpath"
-PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
-printf '%s\n' '#!/bin/sh' 'printf "%s\\n" /tmp/ambiguous' > "$FAKE_BIN/cygpath"
-chmod +x "$FAKE_BIN/cygpath"
-PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
-mkdir -p "$HOST_FIXTURE/C:/attacker-controlled"
-printf '%s\n' '#!/bin/sh' 'printf "%s\\n" C:/attacker-controlled' > "$FAKE_BIN/cygpath"
-chmod +x "$FAKE_BIN/cygpath"
-(
-  cd "$HOST_FIXTURE" || exit 1
-  PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" >/dev/null 2>&1
-) && HOST_NEGATIVE_OK=false
-printf '%s\n' '#!/bin/sh' 'printf "%s\\n" C:/first C:/second' > "$FAKE_BIN/cygpath"
-chmod +x "$FAKE_BIN/cygpath"
-PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" >/dev/null 2>&1 \
-  && HOST_NEGATIVE_OK=false
-if [ "$HOST_NEGATIVE_OK" = true ]; then
-  check "host-path producer rejects missing, non-directory, aliased, unavailable, and malformed inputs" PASS
+if [ "$(OSTYPE=linux-gnu PATH="$FAKE_BIN" /bin/bash "$HOST_PATH" "$HOST_FIXTURE" 2>/dev/null)" = "$HOST_CANONICAL" ]; then
+  check "host-path platform detection reads OSTYPE and runs neither uname nor cygpath off MSYS" PASS
 else
-  check "host-path producer rejects missing, non-directory, aliased, unavailable, and malformed inputs" FAIL
+  check "host-path platform detection reads OSTYPE and runs neither uname nor cygpath off MSYS" FAIL
 fi
+
+if (
+  source "$HOST_PATH" || exit 1
+  for pair in "/c|C:/" "/d/a/x y|D:/a/x y" "/Z/a|Z:/a" "/q/|Q:/"; do
+    _zensu_host_path_drive "${pair%%|*}" || exit 1
+    [ "$_ZENSU_HOST_PATH_DRIVE" = "${pair#*|}" ] || exit 1
+  done
+  for candidate in /cc/x //server/share c/x / "" /1/x /-/x; do
+    if _zensu_host_path_drive "$candidate"; then exit 1; fi
+  done
+  [ "$(zensu_host_path "$HOST_FIXTURE")" = "$HOST_RENDERED" ] || exit 1
+) && /bin/bash -c '
+  source "$1" || exit 1
+  before="$PWD"
+  zensu_host_path "$2" >/dev/null 2>&1
+  [ "$?" -eq 2 ] && [ "$PWD" = "$before" ]
+' _ "$HOST_PATH" "$HOST_FIXTURE"; then
+  check "sourced host-path function spells MSYS drives like the shared rule and refuses a top-level call that would move the caller" PASS
+else
+  check "sourced host-path function spells MSYS drives like the shared rule and refuses a top-level call that would move the caller" FAIL
+fi
+
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    HOST_DRIVE_DIR="$(cd -P -- "$ROOT" && pwd -P)"
+    if ( source "$HOST_PATH" && _zensu_host_path_drive "$HOST_DRIVE_DIR" ); then
+      HOST_DRIVE_EXPECTED="$(cygpath -am "$HOST_DRIVE_DIR")"
+      printf '%s\n' '#!/bin/sh' ': > "$0.called"' 'exit 7' > "$FAKE_BIN/cygpath"
+      chmod +x "$FAKE_BIN/cygpath"
+      rm -f -- "$FAKE_BIN/cygpath.called"
+      HOST_DRIVE_RENDERED="$(PATH="$FAKE_BIN:$PATH" bash "$HOST_PATH" "$HOST_DRIVE_DIR" 2>/dev/null)"
+      if [ -n "$HOST_DRIVE_EXPECTED" ] && [ "$HOST_DRIVE_RENDERED" = "$HOST_DRIVE_EXPECTED" ] \
+          && [ ! -e "$FAKE_BIN/cygpath.called" ]; then
+        check "MSYS drive path renders like cygpath -am without running cygpath" PASS
+      else
+        check "MSYS drive path renders like cygpath -am without running cygpath" FAIL
+      fi
+    else
+      check "MSYS drive fast path is exercised where the checkout has a drive spelling" PASS
+    fi
+    HOST_CYGPATH_EXPECTED="$(cygpath -am "$HOST_CANONICAL" 2>/dev/null)"
+    HOST_CYGPATH_RENDERED="$(OSTYPE=msys /bin/bash -c "$HOST_CYGPATH_BRANCH" _ "$HOST_PATH" "$HOST_FIXTURE" 2>/dev/null)"
+    if [ -n "$HOST_CYGPATH_EXPECTED" ] && [ "$HOST_CYGPATH_RENDERED" = "$HOST_CYGPATH_EXPECTED" ]; then
+      check "MSYS cygpath branch renders like cygpath -am once the drive fast path declines" PASS
+    else
+      check "MSYS cygpath branch renders like cygpath -am once the drive fast path declines" FAIL
+    fi
+    ;;
+  *)
+    check "MSYS drive fast path is exercised on the Windows CI runner" PASS
+    ;;
+esac
 rm -rf -- "$HOST_FIXTURE"
 
 case "$(uname -s)" in
@@ -434,7 +498,7 @@ fi
 
 if grep -qF 'zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD' "$PRE_EDIT" \
     && [ "$(grep -cF 'MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL"' "$PRE_EDIT")" -eq 3 ] \
-    && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e' "$PRE_EDIT"; then
+    && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node ./edit-path-class-v1.js' "$PRE_EDIT"; then
   check "native pre-edit classifier protects FP and SD from MSYS environment conversion" PASS
 else
   check "native pre-edit classifier protects FP and SD from MSYS environment conversion" FAIL
@@ -473,7 +537,8 @@ if [ "$_ZENSU_BINDER_CALLS" -eq "$_ZENSU_BINDER_RELATIVE" ] \
     && [ "$(grep -cF 'node ./session-control-core-v1.js session-key' "$SESSION_BINDING")" -eq 2 ] \
     && grep -qF 'require("./session-control-core-v1.js")' "$SESSION_BINDING" \
     && ! grep -qF 'CLAUDE_PLUGIN_ROOT="$ZENSU_CLAUDE_PLUGIN_ROOT"' "$SESSION_BINDING" \
-    && grep -qF '_ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(bash "$_ZENSU_TDD_HOST_PATH" "$CLAUDE_PLUGIN_ROOT")"' "$PHASE" \
+    && grep -qF 'source "$_ZENSU_TDD_HOST_PATH" && declare -F zensu_host_path' "$PHASE" \
+    && grep -qF '_ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(zensu_host_path "$CLAUDE_PLUGIN_ROOT")"' "$PHASE" \
     && grep -qF '_ZENSU_TDD_CONTROL_CORE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"' "$PHASE" \
     && ! grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}' "$PHASE" \
     && ! grep -qF 'CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"' "$PHASE" \

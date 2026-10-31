@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-10-29
+
+### Added
+
+- **review**: Bundle fix-round bookkeeping into one round-prepare verb (#530)
+
+### Changed
+
+- **hooks**: Start fewer processes around every tool call (#531)
+- **context**: Describe the discovery path of the context auto-load hook (#532)
+
+### Fixed
+
+- **best-solution-first**: Let a skill fix the option set and keep the recommendation in one line (#526)
+- **session-trail**: Carry the plan answer's linked sessions into the run after the yes (#525)
+- **background-review**: Survive a host-cancelled hand-back claim (#522)
+
+### Upgrade notes
+
+- **Fix-round bookkeeping in one call**: a routed fix round of the review chain now prepares
+  its re-review with `zensu-log.sh --round-prepare`. The call re-runs the edit-landing audit,
+  decides from a snapshot taken when the round began whether each claimed edit landed in this
+  round, writes the `fixed` ledger lines for the findings those claims name, and prints the
+  files and aspects for the re-review. The first review records that snapshot with
+  `--round 0`, and the self-review fix round uses `--round self-review`. Nothing to configure.
+
+## [0.33.0] - 2026-10-28
+
+### Added
+
+- **context**: Automatically discover context for task descriptions
+- **capture**: Preserve plugin origin and explicit run purpose (#527)
+
+### Changed
+
+- **context**: Budget task discovery notices without live CLI calls
+
+## [0.32.0] - 2026-10-28
+
+### Changed
+
+- Rename /zensu:tdd to /zensu:build and TDD Plan to Zensu Plan (#520)
+
+### Fixed
+
+- **context**: Prioritize relevant evidence and preserve related sources (#523)
+
+### Upgrade notes
+
+- **build workflow**: the workflow skill `/zensu:tdd` is now `/zensu:build`, and the plan it
+  writes is a Zensu plan. The workflow runs in vanilla mode unless strict mode is switched on,
+  so "TDD" now names only the strict RED→GREEN discipline: `/zensu:tdd-mode`,
+  `hooks.tddImplementation` and the phase gate keep their names, and so do the helper verbs
+  `--tdd-begin` and `--tdd-complete`. There is no alias, so `/zensu:tdd` no longer exists, and
+  the rename ships as a minor release.
+- **plan and log files**: new plans and run logs are named `{SESSION_TS}_build-{slug}.md` and
+  `{SESSION_TS}_build-{slug}.log` instead of `{SESSION_TS}_tdd-{slug}`. Plans open with
+  `# Zensu Plan:`, logs open with `BUILD STARTED`, and the plan's Approach line names the mode
+  the chain runs in. Existing files keep their names. A repository whose `.gitignore`
+  re-includes logs with `!.zensu/logs/*_tdd-*.log` stops tracking new logs: replace that line
+  with `!.zensu/logs/*.log` followed by `.zensu/logs/witness-*.log`.
+- **plan template and overlay**: `templates/tdd-plan.md` is now `templates/zensu-plan.md`, so
+  a repository override moves from `.zensu/templates/tdd-plan.md` to
+  `.zensu/templates/zensu-plan.md`. The skill overlay moves from `.zensu/overlays/tdd.md` to
+  `.zensu/overlays/build.md`. A file left under an old name is no longer read.
+- **delivery route**: the route value `tdd` is now `build`: `/zensu:delivery-route --build`,
+  `hooks.defaultDeliveryRoute: "build"` and the session marker `{"route":"build"}`. The
+  `--tdd` verb is refused. A configured `tdd` reads as `ask`, and `/zensu:doctor` warns about
+  it. A session marker that still holds `tdd` decides nothing, so the route question comes
+  back once.
+- **docs**: `docs/tdd-manager-workflow.md` is now `docs/build-workflow.md`.
+
+## [0.31.1] - 2026-10-26
+
+### Added
+
+- **context**: Load tracked feature context automatically (#518)
+
+### Fixed
+
+- **brand**: Preserve white fan backing on dark backgrounds (#517)
+- **session-trail**: Keep every linked session marked start in the takeover plan (#512)
+
+## [0.31.0] - 2026-10-26
+
+### Added
+
+- **knowledge**: Retain agent retrieval receipts and correlate source reads
+
+### Fixed
+
+- **session-control**: Move the full-suite marker on --reanchor (#510)
+
 ## [0.30.1] - 2026-10-25
 
 ### Added

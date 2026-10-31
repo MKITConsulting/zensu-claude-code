@@ -8,7 +8,7 @@ want to install and run it.
 
 ```
 Planning              →  Implementation  →  Tracking
-main-thread skills       /zensu:tdd         Zensu Dashboard
+main-thread skills       /zensu:build         Zensu Dashboard
 /zensu:bootstrap         code-reviewer      (Web UI)
 /zensu:ghost-scan        auto-fix loop
 /zensu:implement         (main thread)
@@ -16,7 +16,7 @@ main-thread skills       /zensu:tdd         Zensu Dashboard
 
 **Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
-**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:tdd` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only, and on any review the Stop hook resumes) → consume-mode code-reviewer → auto-fix loop → self-review.
+**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:build` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only, and on any review the Stop hook resumes) → consume-mode code-reviewer → auto-fix loop → self-review.
 
 **Layer 3 — Tracking (HOW is progress tracked?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
@@ -39,8 +39,8 @@ flowchart TD
 
     subgraph Implementation["Layer 2: Implementation"]
         C -->|"/zensu:implement"| D["Load Feature Context"]
-        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"ask which delivery route;<br/>only the /zensu:tdd route is drawn<br/>(a /zensu:delivery-route marker or hooks.defaultDeliveryRoute answers first)"| E
-        D --> E["/zensu:tdd skill<br/>(main thread)"]
+        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"ask which delivery route;<br/>only the /zensu:build route is drawn<br/>(a /zensu:delivery-route marker or hooks.defaultDeliveryRoute answers first)"| E
+        D --> E["/zensu:build skill<br/>(main thread)"]
         E --> MODE{"mode at --tdd-begin:<br/>/zensu:tdd-mode session choice ><br/>--tdd-mode caller default ><br/>hooks.tddImplementation"}
         MODE -->|"resolved: vanilla (default)<br/>no RED→GREEN, gate passes through"| VAN["IMPL — write code directly<br/>(tests at discretion)"]
         MODE -->|"resolved: strict"| RED["RED — write failing test"]
@@ -102,7 +102,7 @@ It is the only **advisory, context-injecting** hook without a config flag — `h
 
 `tests/structure/test-evidence-discipline.sh` keeps the three carriers honest: the condensed block is extracted from between the canonical file's markers and must appear **verbatim** in every agent and every skill, so a newly added surface that omits it fails the suite instead of shipping without the rule. Anti-vacuity is pinned too — extraction hard-aborts rather than degrading to an empty pattern, the carrier predicate is exercised against missing, paraphrased and unterminated fixtures, and the content assertions run against the hook's *emitted* context rather than its source text.
 
-One reviewer is not a plugin file and so cannot be a carrier: a **repo-custom review persona** (`.claude/agents/zensu-review-*.md`) is authored by the repository under review. `/zensu:pr-team-review` and `/zensu:plan-review` are covered by construction — they spawn a custom seat *as* one of the confined plugin workers, which carries the block like any agent. `/zensu:tdd` is the one path that spawns a custom persona under its own `subagent_type`, so its fan-out prepends the canonical block to that spawn prompt, read from the canonical file at run time rather than duplicated. The suite pins all of it, including the premise: if either other skill ever starts spawning custom seats under their own type, that path loses its carrier the same silent way, and the check fails.
+One reviewer is not a plugin file and so cannot be a carrier: a **repo-custom review persona** (`.claude/agents/zensu-review-*.md`) is authored by the repository under review. `/zensu:pr-team-review` and `/zensu:plan-review` are covered by construction — they spawn a custom seat *as* one of the confined plugin workers, which carries the block like any agent. `/zensu:build` is the one path that spawns a custom persona under its own `subagent_type`, so its fan-out prepends the canonical block to that spawn prompt, read from the canonical file at run time rather than duplicated. The suite pins all of it, including the premise: if either other skill ever starts spawning custom seats under their own type, that path loses its carrier the same silent way, and the check fails.
 
 The prose is the floor, not the ceiling. Where the discipline can be enforced by machinery it already is — the [full-suite gate](gates.md#full-suite-gate) closes a reviewed chain only on a suite run the plugin executed and recorded itself, the [acceptance verification gate](gates.md#acceptance-verification-gate) closes it only when every active acceptance criterion was verified live on the tree that ships, with exit-code checks run by the plugin itself, REVIEW PACKET v1 makes reviewers reject an evidence-less spawn rather than review from imagination, `/zensu:verify-feature` reports `PARTIAL` instead of inferring an outcome, and `/zensu:wargame` marks an unsettled assumption `RECON NEEDED` with the check that settles it. When extending the plugin, prefer a check that fails closed over a sentence asking the model to be careful.
 
@@ -111,7 +111,7 @@ That gate replaced a witness that logged every Bash call and a cross-check that 
 ## Best Solution First
 
 A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
-`hooks/user-prompt-zen-mode.sh` injects a ~4.5 KB always-on contract on the same
+`hooks/user-prompt-zen-mode.sh` injects a ~3.7 to 5.0 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
 block. It is named here so the next reader does not conclude it was overlooked.
 
@@ -149,30 +149,30 @@ Three things differ from evidence discipline, each deliberate:
 
 The **flag** exists because this rule governs how a decision is *presented*, not whether a claim is *true*; a project may reasonably turn it off, and one that does still receives evidence discipline. The consequence to keep in view is that the project-local config wins per key, so a repository can silence the main-thread injection for whoever opens it — acceptable for a presentation rule. It cannot silence the subagents reviewing it, because the `SubagentStart` leg ignores the flag; evidence discipline goes further and reads no configuration at all.
 
-The **per-prompt** reminder, on top of `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. The full block arrives once per context generation; the reminder keeps the rule's two halves and its precedence on every prompt at about a fifth of the block's length. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
+The **per-prompt** reminder, on top of `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. The full block arrives once per context generation; the reminder keeps the rule's two halves and its precedence on every prompt at about a quarter of the block's length. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
 
 **What it costs, measured rather than asserted — and exactly one of these figures is
 enforced.** `C6` in `tests/structure/test-evidence-discipline.sh` derives an emitted length
 from a hook and greps this paragraph for it. Name the figure, because the referent is easy to
 get backwards: what `C6` pins is the **939-character** figure stated below for
-`session-start-evidence-discipline.sh`, not the 1756/1764 headline for this hook — a grep of
-`tests/` for either of those two numbers returns nothing, and the per-turn total derived from
-the 1756-character half is unpinned with them. Every OTHER number here — the sibling's emitted length, the
+`session-start-evidence-discipline.sh`, not the 1938/1946 headline for this hook — no check in
+`tests/` reads either of those two numbers, and the per-turn total derived from
+the 1938-character half is unpinned with them. Every OTHER number here — the sibling's emitted length, the
 KB estimates and the per-turn totals — is hand-computed and illustrative: they were correct
 when written, nothing re-derives them, and a change to any input silently ages them. Read them
 as an order of magnitude, not as a measurement, and do not add a new figure here expecting the
 suite to keep it honest. Driving the hook directly, the block
-injection is **1756 characters / 1764 bytes** of `additionalContext`, identical on the
-`SessionStart` and `SubagentStart` legs, and the prompt leg's reminder is 354 characters. For scale,
+injection is **1938 characters / 1946 bytes** of `additionalContext`, identical on the
+`SessionStart` and `SubagentStart` legs, and the prompt leg's reminder is 474 characters. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects about 3.2 K characters on the same prompt channel while no chain is armed and about 4.5 K
+injects about 3.7 K characters on the same prompt channel while no chain is armed and about 5.0 K
 while one is, because its rule 6 shrinks to one sentence when the anchor reads `none`. `Z30` and
 `Z30b` in `tests/structure/test-zen-mode.sh` hold the two variants under declared ceilings, but
 they read the hook and never open this document, so the numbers written here are hand-derived
 like every other one below, and age the same way. `C6` above stays the only figure a check reads
-out of this paragraph. A full-panel `/zensu:tdd` review round
+out of this paragraph. A full-panel `/zensu:build` review round
 (`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge (two on the first review by default) and a code-reviewer, so
-the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
+the `SubagentStart` leg adds about **at least** 13 KB across one fan-out; the default lean panel
 spawns three aspects and runs the judge on the first review only (twice side by side while `hooks.reviewJudgeSecondRun` is on) and on any review the Stop hook resumes — more with repo-custom personas, and again per auto-fix
 round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
 with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
@@ -181,35 +181,45 @@ all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
 the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
-on every prompt with no de-bounce, and eight hooks are registered on it. Three of them send their
+on every prompt with no de-bounce, and nine hooks are registered on it. Three of them send their
 full text only once per context generation and a short line after that, through the prompt
 ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
 `tests/structure/test-user-prompt-budget.sh` drives every one of them on five prompt kinds — a
 typed request, a background-task notification, a subagent hand-back, a shell input behind a
 system reminder, and a CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
-each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
+each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Five hooks emit text on an ordinary turn:
 `user-prompt-tdd-reminder.sh` (about 5.2 K characters strict and 5.7 K vanilla plus the paths of
 the helper command it renders, on the first typed request or slash command with arguments of a
 generation while no chain is armed, about 2.7 K on later ones, a decided line of about 1.4 to 1.5 K on
 every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,332 characters, then 1,303 later in the generation, only when such
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
-`user-prompt-zen-mode.sh` (the 3.2 K or 4.5 K above once per generation and about 1.5 K after
-that with no chain armed or 1.9 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
+`user-prompt-context-auto-load.sh` (on a typed task prompt that names no feature key, the
+candidates of one context search behind 1,773 characters of instructions, about 9.7 K with five
+candidates whose titles and excerpts fill their 200- and 1,200-character limits, or a
+387-character notice when the search is unavailable; on a prompt that names exactly one key,
+that feature's context package, up to 24,000 bytes of JSON behind about 1.8 K; it keeps no
+ledger, so every such prompt pays again),
+`user-prompt-zen-mode.sh` (the 3.7 K or 5.0 K above once per generation and about 1.9 K after
+that with no chain armed or 2.2 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (474
 characters, on every prompt kind for the same reason). Three emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold,
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
 `user-prompt-review-handback.sh` only for the hand-back or completion notification of a pending
-background reviewer, where it carries the review's routing directive; it exits before any `node`
-child on a prompt that carries neither marker, and on one that does while no background review is
+background reviewer, or for a later prompt of a session whose claim was cut off, where it carries
+the review's routing directive; it exits before any `node` child on a prompt that carries neither
+marker while no arrival note is pending, and on one that does while no background review is
 pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **11.6 K characters on the first prompt of a generation and 5.9 K on every later
+costs about **12.6 K characters on the first prompt of a generation and 6.7 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
-shell input about 3.5 K, then 1.9 K (3.9 K, then 2.3 K for a CI-monitor event). The generation also receives this
-hook's 1,756-character block once at `SessionStart`, so its first turn costs about 13.4 K in all,
-more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
+shell input about 4.2 K, then 2.4 K (4.5 K, then 2.7 K for a CI-monitor event). The typed figures
+carry the 387-character context notice that the suite's failing CLI stub produces; a search that
+returns five full candidates raises them to about 21.9 K and 16.0 K. The generation also receives this
+hook's 1,938-character block once at `SessionStart`, so its first turn costs about 14.5 K in all,
+2.0 K more than one turn did before the ledger, 0.4 K of it for the context notice, which that turn
+did not carry; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather
 than on the fan-out figure.
@@ -262,7 +272,7 @@ Still open, and narrower: the row reports the carrier this plugin root ships, so
 sibling install — which `servesRecordedRuntime` permits — is diagnosed through the executing tree
 rather than the recorded one. That is the same limit the tamper-evidence sentence above states.
 
-Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
+Finally, the rule yields where another contract already fixes an order or the option set. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. A skill whose contract fixes the set as well and reserves an option for the user to name keeps that set too — the plan confirmation of a `/zensu:session-trail` takeover offers no answer option that leaves a linked session marked start out, and the user leaves one out by naming it — and the rule then governs one line beside the choice: the recommendation, marked as such, with its cost. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
 
 ## Context Added to Every Session
 
@@ -274,9 +284,9 @@ characters.
 
 | When | Zensu text the model receives | Where it comes from |
 |------|-------------------------------|---------------------|
-| Fresh session start | 7,997 to 8,344 in most sessions, up to 11,744 | evidence discipline (939), the `[zensu-session-context]` line (about 430, it carries paths), the best-solution-first block (1,756), the orientation primer (about 2,700) and the model's copy of the banner (about 2,200 to 2,700; the same lines reach you as a system message) |
-| First prompt of a context generation: the first prompt of a session and the first after `/compact` or `/clear` | 9,367, or 11,699 when the prompt names a planning keyword | the best-solution-first reminder (354), the full zen-mode contract (3,195), the full delivery-route reminder (5,818) and, for a planning keyword, the intent router (2,332) |
-| Every later prompt | 1,897 to 5,864 | the reminder (354), the short zen-mode line (1,543), the short delivery-route line (2,733) when the reminder answers that prompt, and the hooks that speak only on a condition |
+| Fresh session start | 7,487 to 7,834 in most sessions, up to 11,234 | evidence discipline (939), the `[zensu-session-context]` line (about 430, it carries paths), the best-solution-first block (1,756), the orientation primer (about 2,500) and the model's copy of the banner (about 1,900 to 2,400; the same lines reach you as a system message) |
+| First prompt of a context generation: the first prompt of a session and the first after `/compact` or `/clear` | 9,088, or 11,219 when the prompt names a planning keyword | the best-solution-first reminder (354), the full zen-mode contract (3,117), the full delivery-route reminder (5,617) and, for a planning keyword, the intent router (2,131) |
+| Every later prompt | 1,751 to 5,253 | the reminder (354), the short zen-mode line (1,397), the short delivery-route line (2,532) when the reminder answers that prompt, and the hooks that speak only on a condition |
 
 Automatic work capture landed after 0.29.0, so the census does not contain it: driving
 `hooks/session-start-ai-work.sh` directly, its primer adds about 760 characters, depending on
@@ -332,7 +342,7 @@ on it. What the suite enforces is the 9,000-character ceiling, never the host's 
 ```
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-1    → Load context, plan implementation
-3. /zensu:tdd                → The Zensu workflow, run by /zensu:implement in the main thread (vanilla; opt-in strict RED→GREEN)
+3. /zensu:build                → The Zensu workflow, run by /zensu:implement in the main thread (vanilla; opt-in strict RED→GREEN)
 4. review chain              → 3 or 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-enforced)
 5. auto-fix loop             → Critical findings fixed in-thread (Important ones too under hooks.autoFixSeverity important or all, otherwise parked for the self-review), then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off); with hooks.criticalReproduction a re-review CRITICAL routes only when a failing test reproduces it
 6. /zensu:implement (steps 4-8) → Link tests, sources and docs, create a revision, validate
@@ -363,7 +373,7 @@ No separate skill — the agent runs ghost-scan, then creates the remainder as p
 
 ```
 1. Plan mode, approve the plan → Zensu asks which delivery route to take
-2. Zensu workflow (/zensu:tdd) → Implement, verify every acceptance criterion, then the Stop-enforced review chain
+2. Zensu workflow (/zensu:build) → Implement, verify every acceptance criterion, then the Stop-enforced review chain
 ```
 
 `zensu:code-reviewer` is not a standalone reviewer: spawned without the REVIEW PACKET v1
@@ -374,13 +384,13 @@ change is an open pull request.
 ## Graceful Degradation
 
 The Zensu workflow and its review chain work **without a Zensu account**. No `zensu` CLI needed for:
-- `/zensu:tdd` orchestration (vanilla by default; strict RED→GREEN when configured or switched per session)
+- `/zensu:build` orchestration (vanilla by default; strict RED→GREEN when configured or switched per session)
 - Code review (3 or 5 parallel specialist aspects → optional judge → consume-mode reviewer)
-- Progress logging (`.zensu/logs/`) and planning (`.zensu/plans/`) — the log is path-redacted at write time and the plan by a best-effort main-thread PostToolUse pass, so a consuming repo can commit them as an audit trail; see [tdd-manager-workflow.md](tdd-manager-workflow.md#publication-safety-of-the-plan-and-log)
+- Progress logging (`.zensu/logs/`) and planning (`.zensu/plans/`) — the log is path-redacted at write time and the plan by a best-effort main-thread PostToolUse pass, so a consuming repo can commit them as an audit trail; see [build-workflow.md](build-workflow.md#publication-safety-of-the-plan-and-log)
 
-`/zensu:tdd` itself makes no `zensu` call, so a chain it closes leaves nothing in Zensu. The
+`/zensu:build` itself makes no `zensu` call, so a chain it closes leaves nothing in Zensu. The
 tracking happens only in the skills that call the CLI, once it is installed and authenticated:
-- `/zensu:implement` runs `/zensu:tdd` and then, in its own later steps, links tests and sources (`zensu link test`, `zensu link source`), publishes and links docs, creates a revision (`zensu features revision`) and validates the release gate (`zensu security validate`)
+- `/zensu:implement` runs `/zensu:build` and then, in its own later steps, links tests and sources (`zensu link test`, `zensu link source`), publishes and links docs, creates a revision (`zensu features revision`) and validates the release gate (`zensu security validate`)
 - `/zensu:pilot` updates feature status (`zensu features status`) as it moves a tracked feature along
 - `/zensu:security-review` records the review and its findings (`zensu security review`)
 - `/zensu:docs` publishes code-grounded documentation and updates the docs score (`zensu link docs`)

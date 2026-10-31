@@ -826,7 +826,9 @@ TMP_ROOTS="$TMP_ROOTS$FAKE
 "
 mkdir -p "$FAKE/hooks/lib"
 cp "$GUARD" "$FAKE/hooks/" 2>/dev/null
-cp "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" "$FAKE/hooks/lib/" 2>/dev/null
+for DISPATCH_FILE in zensu-hook-dispatch.sh hook-dispatch-v1.js hook-registration-v1.js claude-path-v1.js plugin-data-guard-v1.js; do
+  cp "$PLUGIN_DIR/hooks/lib/$DISPATCH_FILE" "$FAKE/hooks/lib/" 2>/dev/null
+done
 G11g="$(payload Write file_path "$STORE/planted.json" "$SID" "$PROJ" \
   | CLAUDE_PLUGIN_ROOT="$FAKE" bash "$FAKE/hooks/pre-write-plugin-data-guard.sh" 2>/dev/null)"
 G11gE="$(payload Write file_path "$STORE/planted.json" "$SID" "$PROJ" \
@@ -847,6 +849,9 @@ TMP_ROOTS="$TMP_ROOTS$FAKE2
 "
 mkdir -p "$FAKE2/hooks/lib"
 cp "$GUARD" "$FAKE2/hooks/" 2>/dev/null
+for DISPATCH_FILE in zensu-hook-dispatch.sh hook-dispatch-v1.js hook-registration-v1.js claude-path-v1.js; do
+  cp "$PLUGIN_DIR/hooks/lib/$DISPATCH_FILE" "$FAKE2/hooks/lib/" 2>/dev/null
+done
 G11i="$(payload Write file_path "$STORE/planted.json" "$SID" "$PROJ" \
   | CLAUDE_PLUGIN_ROOT="$FAKE2" bash "$FAKE2/hooks/pre-write-plugin-data-guard.sh" 2>&1)"
 # It allows — the fault direction is unchanged — but it does NOT do so silently.
@@ -870,12 +875,12 @@ esac
 # enumerated only one. It printed nothing, so on this matcher a moved or
 # unreadable plugin directory refused every write with an empty stderr.
 #
-# It is pinned at SOURCE rather than driven: triggering it needs `dirname "$0"/..`
+# It is pinned at SOURCE rather than driven: triggering it needs the cd into `${0%/*}/..`
 # to fail for a script the suite just invoked by that same path, which no fixture
 # can arrange without also making the invocation itself fail. The control below is
 # what keeps the pin from going vacuous — it fires the same extraction at the
 # identity branch, which is driven end to end by G26/G26a.
-G33="$(awk '/_ZENSU_EXECUTED_PLUGIN_ROOT=/,/^fi$/' "$GUARD")"
+G33="$(awk '/^function runDataGuard/,/^}$/' "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"; grep -n 'const ROOT_MISMATCH' "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js")"
 case "$G33" in
   *"cannot resolve its own plugin root"*)
     check "G33 the plugin-root resolution failure names its cause before exit 2" PASS ;;
@@ -890,7 +895,7 @@ esac
 # The two remaining silent exits. Both are structurally undriveable from a suite
 # that itself requires node and a real hooks/lib, so they are pinned at source
 # with the same control discipline.
-G34="$(grep -c 'plugin-data guard did not run' "$GUARD")"
+G34="$(cat "$GUARD" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" | grep -c 'plugin-data guard did not run')"
 [ "${G34:-0}" -ge 3 ] \
   && check "G34 all three allowing early exits carry a note ($G34 found)" PASS \
   || check "G34 all three allowing early exits carry a note (only ${G34:-0})" FAIL
@@ -909,7 +914,7 @@ if grep -qE "$ESCAPE_RE" "$GUARD" "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js
 else
   check "G12 the guard teaches no ZENSU_*=off escape" PASS
 fi
-if grep -qE "$ESCAPE_RE" "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"; then
+if grep -qE "$ESCAPE_RE" "$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"; then
   check "G12-control the escape pattern matches a file that does carry one" PASS
 else
   check "G12-control the escape pattern matches a file that does carry one" FAIL
@@ -941,10 +946,8 @@ REG="$(node -e '
   const j = require(process.argv[1]);
   const guard = require(process.argv[2]);
   const want = "pre-write-plugin-data-guard.sh";
-  const matchers = [];
-  for (const group of j.hooks.PreToolUse || []) {
-    if ((group.hooks || []).some((h) => h.command.includes(want))) matchers.push(group.matcher);
-  }
+  const registered = require(path.join(path.dirname(process.argv[2]), "hook-registration-v1.js")).registeredHooks(j, "PreToolUse") || [];
+  const matchers = registered.filter((h) => h.command.includes(want)).map((h) => h.matcher);
   const selected = new Set(matchers.flatMap((m) => m.split("|")));
   const gated = [...guard.WRITE_TOOLS].sort().join(",");
   console.log(matchers.length + " " + [...selected].sort().join(",") + " " + gated);
@@ -1178,16 +1181,11 @@ esac
 G43="$(node -e '
   const fs = require("fs");
   const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  const found = [];
-  for (const g of j.hooks.PreToolUse || []) {
-    for (const h of g.hooks || []) {
-      if (h.command.includes("pre-write-plugin-data-guard.sh")) {
-        found.push(g.matcher + "=" + (typeof h.timeout === "number" ? h.timeout : "none"));
-      }
-    }
-  }
+  const found = (require(process.argv[2]).registeredHooks(j, "PreToolUse") || [])
+    .filter((h) => h.command.includes("pre-write-plugin-data-guard.sh"))
+    .map((h) => h.matcher + "=" + (typeof h.timeout === "number" ? h.timeout : "none"));
   console.log(found.length === 0 ? "NONE" : found.sort().join(" "));
-' "$PLUGIN_DIR/hooks/hooks.json")"
+' "$PLUGIN_DIR/hooks/hooks.json" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js")"
 case "$G43" in
   *none*|NONE) check "G43 both registrations carry an explicit timeout (got $G43)" FAIL ;;
   *) check "G43 both registrations carry an explicit timeout ($G43)" PASS ;;
@@ -1213,6 +1211,18 @@ case "$G44" in
   OK:*) check "G44 the wrapper exports the caller-cwd name the module reads (${G44#OK:})" PASS ;;
   *) check "G44 the wrapper exports the caller-cwd name the module reads (got $G44)" FAIL ;;
 esac
+G47="$(cd "$(dirname "$STORE")" && no_cwd_payload "$G37_REL" \
+  | ZENSU_GUARD_CALLER_CWD="$OUTSIDE" node "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" pre 2>/dev/null)"
+case "$G47" in
+  *Plugin-Data-Guard*) check "G47 the dispatcher anchors a relative target at its own cwd, whatever caller cwd it inherits" PASS ;;
+  *) check "G47 the dispatcher anchors a relative target at its own cwd, whatever caller cwd it inherits (got '$G47')" FAIL ;;
+esac
+G47C="$(cd "$OUTSIDE" && no_cwd_payload "$G37_REL" \
+  | ZENSU_GUARD_CALLER_CWD="$(dirname "$STORE")" node "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" pre 2>/dev/null)"
+case "$G47C" in
+  *Plugin-Data-Guard*) check "G47-control an inherited caller cwd cannot turn an outside target into a store target (got '$G47C')" FAIL ;;
+  *) check "G47-control an inherited caller cwd cannot turn an outside target into a store target" PASS ;;
+esac
 
 # TWO FLOORS, and the split is the point. `exit 0` also accepts a file that
 # registered no checks at all — an early `continue`, a deleted block or a
@@ -1232,7 +1242,7 @@ esac
 # case-INSENSITIVE volume. The executed floor tolerates all twelve, because a
 # host can legitimately lack every premise at once.
 MAX_SKIPPABLE=12
-EXPECTED_CHECKS=112
+EXPECTED_CHECKS=114
 EXECUTED_FLOOR=$((EXPECTED_CHECKS - MAX_SKIPPABLE))
 EXECUTED=$((PASS + FAIL))
 TOTAL=$((PASS + FAIL + SKIPPED))

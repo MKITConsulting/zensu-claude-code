@@ -1,7 +1,7 @@
 ---
 name: zen-mode
 description: >
-  [Zensu] Low-noise answers: recap first, result first, one next step. Use
+  [Zensu] Low-noise answers: result first, a session recap, one next step. Use
   when the user says "zen mode", "I'm tired", "keep it simple", "low energy"
   or "less detail", or /zensu:zen-mode.
 ---
@@ -86,15 +86,36 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 Apply all of these while the mode is active. Write in the user's own language —
 the rules are recorded in English, the answer follows the user.
 
-1. **Recap first.** Open with one short line covering what happened since the
-   user's last message. Omit the line entirely when nothing happened.
-2. **Result first.** State the outcome in the first sentence after the recap. No
-   preamble, no announcing what is about to come.
-3. **Depth on demand.** Leave out trade-offs, alternatives, caveats, and history
-   unless the user asked for them. When you deliberately withheld depth, close
-   with a short offer instead of delivering it unasked.
-4. **Stay short.** Aim for roughly eight lines. Go longer only when the user asks
-   or when rule 9 requires it.
+1. **Result first.** State the outcome in the first sentence. No preamble, no
+   announcing what is about to come.
+2. **Close with a session block.** End every answer with a short block, labelled
+   in the user's own language, that tells a returning reader at a glance which
+   session this is and what it has done. It sits above the chain-progress anchor
+   of rule 6, when one is supplied, and above the closing next step of rule 5,
+   or the final step list when rule 9 suspends rule 5, and holds three parts in
+   this order:
+   - one line naming what the user started this session for;
+   - at most five short bullets of what EARLIER turns solved, built or did,
+     oldest first, the oldest merged when there are more, each failed or
+     unverified item saying so, and none while there is no earlier work;
+   - one recap line on what THIS turn did, omitted when the turn only answered.
+
+   The bullets cover earlier turns and the recap line covers this turn, so the
+   two never repeat each other, and the recap no longer opens the answer.
+
+   ```
+   Session: You asked me to speed up the slow product search.
+   - I added an index on the product name column.
+   - I made the result images load lazily, and their visual check is still open.
+   Last: I cached the ten most frequent search terms.
+   Next step: Deploy the cache to staging.
+   ```
+3. **Depth on demand.** Above the session block, leave out trade-offs,
+   alternatives, caveats, and history unless the user asked for them. When you
+   deliberately withheld depth, offer it in one short line instead of delivering
+   it unasked.
+4. **Stay short.** Aim for roughly eight lines above the session block. Go longer
+   only when the user asks or when rule 9 requires it.
 5. **One next step.** End with exactly one clear next action, never two parallel
    suggestions.
 6. **Anchor multi-step work.** Carry a one-line chain-progress anchor through

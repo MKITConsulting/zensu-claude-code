@@ -501,8 +501,11 @@ from `, and anchor work that spans several turns` through `counter beside them.`
 sentence, by the same parameter expansion and with no process. A literal that loses either anchor
 emits the full clause with `none`, the safe direction. `Z30` in
 `tests/structure/test-zen-mode.sh` measures the armed variant (the static literal with the
-LONGEST producible token substituted: 4525 characters, ceiling 4600) and `Z30b` fires the hook
-with no chain armed and measures the none variant (3195, ceiling 3200). Both measure through
+LONGEST producible token substituted: 5008 characters, ceiling 5100) and `Z30b` fires the hook
+with no chain armed and measures the none variant (3678, ceiling 3770). Both variants grew by 483
+characters when rules (1) to (3) became the result-first rule and the closing session block, and by
+78 more when the lead turned neutral and rules (4) and (5) gained the precedence and question-set
+clauses. Both measure through
 `node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
 code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
 directions: growth past the ceiling fails, and so does a shrink further below it than the

@@ -17,11 +17,14 @@ Rules:
 ```yaml
 version: 1
 
-vcs:
+vcs:                        # every key is read permissively; conventions.md holds the rules
   provider: github          # github | gitlab
-  prBase: main
-  commitStyle: conventional
-  worktreeOnly: true
+  prBase: auto              # auto (the remote's default branch, else main) | <branch>
+  commitStyle: auto         # auto | conventional | <description of the commit style>
+  attribution: auto         # auto | none | <exact trailer line, e.g. "Assisted-by: Claude Code">
+  language: auto            # auto | <language of commit messages and pull request prose>
+  prTemplate: auto          # auto | none | <path of the PR template used as the body skeleton>
+  worktreeOnly: true        # true (autopilot always builds in its own worktree; false is ignored)
 
 services:                   # ordered bring-up; each waits on `ready` before the next
   - name: db
@@ -98,6 +101,16 @@ validate:
     containsPersonalData: false   # must be literal false (declared-safe)
     containsSecrets: false        # must be literal false (declared-safe)
 ```
+
+### `vcs` — the repository's conventions
+
+`provider` names the forge. The other keys decide how Zensu writes into the repository, and
+every Zensu skill that commits or writes pull request text reads them, not only Autopilot.
+`commitStyle`, `attribution`, `language` and `prTemplate` default to `auto`: follow what
+`zensu-vcs.sh --conventions` reports for the repository. A value other than `auto` wins over
+that finding, and the finding wins over the user's own instruction; Zensu adds no rule of its
+own. `prBase` defaults to the remote's default branch, and `worktreeOnly` cannot turn off
+Autopilot's own worktree. `conventions.md` states every value and the pull request body order.
 
 ### Driver blocks and recipe inputs
 

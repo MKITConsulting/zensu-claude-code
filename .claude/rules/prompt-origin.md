@@ -68,14 +68,15 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 
 | Hook | Typed, slash with arguments | Task notification, subagent hand-back, `!` input, bare slash | CI-monitor event |
 |---|---|---|---|
-| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `tdd` or `direct` | silent | route field + one standing-authorization sentence, at most about 400 characters |
+| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `build` or `direct` | silent | route field + one standing-authorization sentence, at most about 400 characters |
 | `user-prompt-intent-router.sh` | keyword screen; full notice once per context generation, then a short line | silent | silent |
 | `user-prompt-zen-mode.sh` | directive once per context generation and anchor variant, then a short body | same | same |
 | `user-prompt-best-solution-first.sh` | one-line reminder | one-line reminder | one-line reminder |
 | `user-prompt-context-nudge.sh` | once per band | once per band | once per band |
 | `user-prompt-worktree-keep.sh` | notice only | notice only | notice only |
 | `user-prompt-session-hub-receipt.sh` | silent; writes a receipt only for the Session Hub's exact takeover command | silent | silent |
-| `user-prompt-review-handback.sh` | silent, with no `node` child | silent, with no `node` child while no background review is pending in the plugin's store; the hand-back or completion notification of a pending consume reviewer carries the review's routing directive (`.claude/rules/background-review-completion.md`) | silent |
+| `user-prompt-review-handback.sh` | silent, with no `node` child while no arrival note is pending; while one is, one `node` child (`arrive`), and the review's routing directive when the note is this session's | silent, with no `node` child while no background review is pending in the plugin's store; the hand-back or completion notification of a pending consume reviewer carries the review's routing directive (`.claude/rules/background-review-completion.md`) | silent, with the same arrival-note exception as a typed prompt |
+| `user-prompt-context-auto-load.sh` | exactly one distinct key in typed prose or in a raw `/name` command's arguments: that feature's context package; typed prose with no key, at least 8 characters and two words: the candidates of one discovery search, which sends up to 2,000 characters of that prose to the Zensu backend; a failed read: an unavailability notice, 387 characters for discovery and 378 plus the key's length for a key; two or more keys, a slash command's prose arguments, the `<command-name>` spelling and a prompt behind a leading `<system-reminder>`: silent | silent, no CLI call | silent, no CLI call |
 
 `.claude/rules/prompt-ledger.md` owns the once-per-generation mechanism. Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
 CI event is user-visible, so its shape and its option set still matter. The reminder's CI note, its decided
@@ -87,6 +88,15 @@ The router drops, before the keyword match, every whitespace token containing `/
 URLs, `owner/repo`), every `zensu:<name>` skill name, and the operand of `--repo` or `--repo=`.
 `-R` is not dropped: other tools use it for unrelated operands.
 
+The context auto-load hook does not call `zensu_prompt_origin`: `promptText` and `taskQuery` in
+`hooks/lib/context-auto-load-v1.js` screen the prompt themselves. They drop a payload whose
+`origin` carries a kind other than `human`, and every prompt that opens with `<`, `!` or the
+`Another Claude session sent a message:` line, so a typed prompt behind a leading
+`<system-reminder>` stays silent here although the classifier strips the reminder and calls the
+rest typed. The hook keeps no ledger, so every qualifying prompt reads again. The budget suite
+puts a `zensu` stub that exits 1 first on `PATH`, so the typed figure it holds this hook to, 300
+to 400 characters, is the 387-character discovery notice; every other kind must stay at 0.
+
 ## The budget suite
 
 `tests/structure/test-user-prompt-budget.sh` derives its roster from the `UserPromptSubmit`
@@ -97,7 +107,7 @@ typed request, a task notification whose path contains `-zensu-zensu-claude-code
 hand-back, a system-reminder plus `<bash-input>` prompt and a CI-monitor event, each kind in a fresh session and
 twice: the first prompt of the session and a repeat, with a ceiling per hook and per sum for each.
 `U9` resets the ledger with a `compact` `SessionStart` and requires the first-prompt figures again,
-and `U10` requires the decided line for a configured `tdd` or `direct` route. The reminder renders the helper command with two absolute paths, so the
+and `U10` requires the decided line for a configured `build` or `direct` route. The reminder renders the helper command with two absolute paths, so the
 suite replaces that command with a fixed placeholder before it measures; without that, the same
 tree measured 5,699 and 5,775 characters at two install depths.
 

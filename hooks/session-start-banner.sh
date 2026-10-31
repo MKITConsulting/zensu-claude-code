@@ -144,7 +144,7 @@ else
   _ZENSU_ROUTE_DEFAULT="$(zensu_default_delivery_route)"
 fi
 case "$_ZENSU_ROUTE_DEFAULT" in
-  tdd|direct) _ZENSU_ROUTE_QUESTION_LIVE=no ;;
+  build|direct) _ZENSU_ROUTE_QUESTION_LIVE=no ;;
 esac
 
 # The DISCLOSURE that the consent question is switched off sits ABOVE the
@@ -157,7 +157,7 @@ esac
 # there would be false. The enabled-state tip below is an ordinary usage hint and
 # stays under the gate.
 if ! zensu_hook_enabled autoTdd; then
-  echo "zensu: Tip — use Claude Code Plan mode for code changes. The delivery-route question is off (hooks.autoTdd=false), so an approved plan is implemented directly; invoke /zensu:tdd, /zensu:autopilot or /zensu:pilot yourself to pick a route."
+  echo "zensu: Tip — use Claude Code Plan mode for code changes. The delivery-route question is off (hooks.autoTdd=false), so an approved plan is implemented directly; invoke /zensu:build, /zensu:autopilot or /zensu:pilot yourself to pick a route."
 fi
 # Same placement, same reason: a configured default route silences the question
 # from a file that travels inside the checkout, so the disclosure must not be
@@ -166,8 +166,8 @@ fi
 # hooks.tddReminder is on — each hook exits on its own flag BEFORE it resolves the
 # route — so the line names the half that is live instead of promising both.
 case "$_ZENSU_ROUTE_DEFAULT" in
-  tdd|direct)
-    if [ "$_ZENSU_ROUTE_DEFAULT" = tdd ]; then
+  build|direct)
+    if [ "$_ZENSU_ROUTE_DEFAULT" = build ]; then
       _ZENSU_ROUTE_EFFECT="takes the Zensu workflow"
     else
       _ZENSU_ROUTE_EFFECT="is implemented directly"
@@ -217,14 +217,14 @@ echo "zensu: Zensu PLM v${VERSION} active — features as first-class citizens."
 if zensu_tdd_strict_enabled; then
   echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
   if [ "$_ZENSU_ROUTE_QUESTION_LIVE" = yes ]; then
-    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:tdd (this plan now, RED→GREEN + review chain, edits TDD-gate-enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
+    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:build (this plan now, RED→GREEN + review chain, edits TDD-gate-enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
   else
     echo "zensu: Tip — use Claude Code Plan mode for code changes."
   fi
 else
   echo "zensu: Flow — track features → implement (vanilla mode, TDD discipline off via hooks.tddImplementation=false) → review chain → dashboard."
   if [ "$_ZENSU_ROUTE_QUESTION_LIVE" = yes ]; then
-    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:tdd (this plan now, vanilla implementation with the evidence audits + review chain enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
+    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:build (this plan now, vanilla implementation with the evidence audits + review chain enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
   else
     echo "zensu: Tip — use Claude Code Plan mode for code changes."
   fi
@@ -232,7 +232,7 @@ fi
 if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-zen-mode.sh" ] && zensu_hook_enabled zenMode && zensu_zen_mode_default_on; then
   echo "zensu: zen-mode — on by default: answers lead with the result, keep the substance whole and end with one next step; your own CLAUDE.md, output style or a style mode you chose outranks it. Say \"zen off\" to leave it for this session, or set hooks.zenModeDefault=false in ~/.zensu/config.json to make it opt-in."
 fi
-echo "zensu: Skills —/zensu:bootstrap · /zensu:ghost-scan · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
+echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:build · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
 _ZENSU_CLI_PROBE=""
 if command -v node >/dev/null 2>&1; then
   _ZENSU_CLI_PROBE="$(cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null && node -e 'process.exitCode = require("./zensu-cli-version-v1.js").cliMain(["--lookup"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" || _ZENSU_CLI_PROBE=""

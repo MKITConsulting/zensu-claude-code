@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.30.1",
+  "version": "0.33.1",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -43,7 +43,7 @@
     "./skills/security-review",
     "./skills/session-trail",
     "./skills/setup",
-    "./skills/tdd",
+    "./skills/build",
     "./skills/tdd-mode",
     "./skills/verify-feature",
     "./skills/wargame",

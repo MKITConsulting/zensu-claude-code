@@ -99,6 +99,7 @@ zensu_cli_to_tool() {
     "doc gen-context")          echo "get_doc_generation_context" ;;
     # knowledge
     "knowledge context-pack")   echo "get_context_pack" ;;
+    "knowledge context-search") echo "search_knowledge" ;;
     "knowledge search")         echo "search_knowledge" ;;
     "knowledge get")            echo "get_knowledge_item" ;;
     "knowledge sources")        echo "list_knowledge_sources" ;;

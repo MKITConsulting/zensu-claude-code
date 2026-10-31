@@ -14,6 +14,14 @@ printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
 mkdir -p "$CLAUDE_PLUGIN_DATA"
 
+# Task prose now probes context discovery. Keep this aggregate budget fixture
+# offline and deterministic even when the developer has an authenticated CLI.
+# The context suite separately exercises successful discovery and package reads.
+mkdir -p "$WORK/bin"
+printf '#!/bin/sh\nexit 1\n' > "$WORK/bin/zensu"
+chmod +x "$WORK/bin/zensu"
+export PATH="$WORK/bin:$PATH"
+
 PASS=0; FAIL=0
 check() {
   local label="$1" cond="$2"
@@ -110,7 +118,7 @@ fi
 PROJ="$WORK/project"
 mkdir -p "$PROJ"
 CFG_ROUTE_TDD="$WORK/route-tdd.json"
-printf '%s' '{"hooks":{"defaultDeliveryRoute":"tdd"}}' > "$CFG_ROUTE_TDD"
+printf '%s' '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$CFG_ROUTE_TDD"
 CFG_ROUTE_DIRECT="$WORK/route-direct.json"
 printf '%s' '{"hooks":{"defaultDeliveryRoute":"direct"}}' > "$CFG_ROUTE_DIRECT"
 SESSION_SEQ=0
@@ -165,10 +173,12 @@ ROSTER="$(node -e '
   process.stdout.write(out.join("\n"));
 ' "$HOOKS_JSON" 2>/dev/null)"
 
-BUDGETED="user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-review-handback.sh"
+BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-review-handback.sh"
 
 budget() {
   case "${3:-first}:$1:$2" in
+    *:user-prompt-context-auto-load.sh:typed) echo "300 400" ;;
+    *:user-prompt-context-auto-load.sh:*) echo "0 0" ;;
     *:user-prompt-context-nudge.sh:*) echo "0 0" ;;
     first:user-prompt-intent-router.sh:typed) echo "2000 2400" ;;
     repeat:user-prompt-intent-router.sh:typed) echo "1 1400" ;;
@@ -177,9 +187,9 @@ budget() {
     repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2750" ;;
     *:user-prompt-tdd-reminder.sh:ci) echo "300 400" ;;
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
-    first:user-prompt-zen-mode.sh:*) echo "3000 3300" ;;
-    repeat:user-prompt-zen-mode.sh:*) echo "1 1650" ;;
-    *:user-prompt-best-solution-first.sh:*) echo "300 420" ;;
+    first:user-prompt-zen-mode.sh:*) echo "3400 3770" ;;
+    repeat:user-prompt-zen-mode.sh:*) echo "1 1990" ;;
+    *:user-prompt-best-solution-first.sh:*) echo "300 540" ;;
     *:user-prompt-worktree-keep.sh:*) echo "0 0" ;;
     *:user-prompt-session-hub-receipt.sh:*) echo "0 0" ;;
     *:user-prompt-review-handback.sh:*) echo "0 0" ;;
@@ -189,12 +199,12 @@ budget() {
 
 total_budget() {
   case "$2:$1" in
-    first:typed) echo 11650 ;;
-    first:ci) echo 3950 ;;
-    first:*) echo 3600 ;;
-    repeat:typed) echo 5900 ;;
-    repeat:ci) echo 2300 ;;
-    *) echo 1950 ;;
+    first:typed) echo 12650 ;;
+    first:ci) echo 4560 ;;
+    first:*) echo 4200 ;;
+    repeat:typed) echo 6780 ;;
+    repeat:ci) echo 2770 ;;
+    *) echo 2410 ;;
   esac
 }
 

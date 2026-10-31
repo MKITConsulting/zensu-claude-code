@@ -9,7 +9,7 @@ paths:
   - "tests/structure/reviewer-spawn-allow-v1.test.js"
 ---
 
-# Reviewer-Spawn Grant (`hooks/pre-agent-reviewer-allow.sh` + `reviewer-spawn-allow-v1.js`)
+# Reviewer-Spawn Grant (`runSpawnGrant` in `hook-dispatch-v1.js` + `reviewer-spawn-allow-v1.js`)
 
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
@@ -50,18 +50,31 @@ is a separate classification returning `HOST` and is never fed to `pluginScoped`
 that as "no `tools:` line" — `agents/zensu-plm.md` declares `tools: Read, Grep, Glob`, so that
 reason is false and its natural repair is to widen the set.
 
-**THE HOOK CAN ONLY GRANT OR STAY SILENT**, and every failure path is a silent `exit 0` — the
-OPPOSITE of the fail-closed direction every other gate takes. A non-zero exit from a PreToolUse
-hook BLOCKS the call, so a fail-closed grant hook would break every Agent spawn in the session,
-including the reviewer it exists to admit. Even the inherited-plugin-root mismatch, which every
-sibling hook answers with `exit 2`, reports on stderr and then declines. `A16` pins that the
-hook always exits 0; do not "harden" it into a gate.
+**THE CHECK CAN ONLY GRANT OR STAY SILENT**, and every failure path stays silent — the
+OPPOSITE of the fail-closed direction every other gate takes. It runs in-process in the hook
+dispatcher (`reviewer-spawn-allow` in `DISPATCHED_CHECKS`, on `Agent|Task`, behind the checks that
+can deny), so a blocking exit there would break every Agent spawn in the session, including the
+reviewer it exists to admit. Even the inherited-plugin-root mismatch, which every sibling answers
+with `exit 2`, reports on stderr and then declines when `hooks/pre-agent-reviewer-allow.sh` runs
+the check alone. Under the full dispatcher the capability check blocks that state first, and the
+aggregation lets any deny, defer or ask outrank the grant. `A16` pins that the entry point always
+exits 0; do not "harden" it into a gate.
+
+**The order of the four conditions is a cost order, and the shell body is gone.** The decider
+runs first because it reads the payload alone and rejects nearly every spawn; the principal, the
+bind and the config read follow. `A40` pins that order inside `runSpawnGrant`. The payload copy
+is the first `MAX_PAYLOAD_BYTES + 1` bytes with NUL bytes removed, what the shell's `head -c` and
+command substitution produced. `configHookEnabledStrict` is a hand copy of `_ZENSU_STRICT_JS` plus the line-break refusal of
+`_zensu_config_native_path`; `C1c` and `C1d` in `tests/structure/test-hook-process-budget.sh` hold the
+two equal. A line break in `MSYS2_ENV_CONV_EXCL` fails the bind as `zensu_msys_env_exclusions` did
+(`D5c`), and `spawnGrantLibrariesPresent` withholds the grant for a missing library the old hook
+sourced, so a damaged installation gets no grant.
 
 **Four conditions, all required:** main principal, a bound Session Control record,
 `hooks.reviewerSpawnAutoAllow` not exactly `false`, and set membership. **The armed-chain
 condition was specified and then REJECTED on discovery** — `plan-review-worker` and
 `pr-review-worker` are spawned by `/zensu:plan-review` and `/zensu:pr-team-review`, neither of
-which arms a TDD chain or calls `--workflow-begin`, so a chain condition would ship a grant
+which arms a build chain or calls `--workflow-begin`, so a chain condition would ship a grant
 missing two of the five. The lease alternative was rejected too: the lease is minted by skill
 prose the gate cannot verify, and this file already records that module's store layout as a
 repeated drift source. What bounds the risk is CONFINEMENT, not chain state — the grant admits
@@ -98,7 +111,8 @@ of every session an older runtime is still serving, exactly as a matcher change 
 **`minor`** release. The config key alone would have been a `patch`; the hook is what decides it.
 
 Moving together: `hooks/pre-agent-reviewer-allow.sh`, `hooks/lib/reviewer-spawn-allow-v1.js`,
-the `Agent|Task` entry in `hooks/hooks.json`, `reviewerSpawnAutoAllowDisabled` /
+`runSpawnGrant` and `configHookEnabledStrict` in `hooks/lib/hook-dispatch-v1.js`, the
+`reviewer-spawn-allow` entry in `DISPATCHED_CHECKS`, `reviewerSpawnAutoAllowDisabled` /
 `reviewerSpawnHookWired` / `reviewerSpawnGrantRows` / `ROW_LEVEL` / the
 `auto-exposure-granted` verdict AND the `grantActive` conjunct on the `automode-prose` branch
 in `hooks/lib/zensu-doctor-report.js`, `zensu_hook_enabled_strict` in
@@ -106,7 +120,7 @@ in `hooks/lib/zensu-doctor-report.js`, `zensu_hook_enabled_strict` in
 `reviewerSpawnAutoAllow` entry in `config.example.json` — that file is advertised as carrying
 every flag and five sibling suites pin their own there. **The tool-name domain is a THIRD
 coupling:** `SPAWN_TOOL_NAMES` is imported from `reviewer-spawn-denial-v1.js` and re-encoded as
-the `hooks.json` matcher, so a member added in that module without widening the matcher leaves
+the `DISPATCHED_CHECKS` matcher, so a member added in that module without widening the matcher leaves
 the grant inert for that tool with every check green. **`reviewerSpawnHookWired` reads
 `hooks.json` through the shared `hooks/lib/hook-registration-v1.js`**, under `READINGS.REGEX`,
 which compiles every matcher as an unanchored regular expression. That is not the host's
@@ -123,7 +137,7 @@ Operator-facing accounts: `docs/gates.md` §"Reviewer-Spawn Grant", the hook row
 `configuration.md#hooks-N` cross-link in `docs/architecture.md`. `test-readme-hook-count-sync`
 H2 turns red on the header count and H3 on any inconsistent reference; `docs/architecture.md`
 was outside H3's file list until this change added it, so that cross-link was the one
-occurrence nothing scanned, `docs/tdd-manager-workflow.md` §"The preventive layer", and the
+occurrence nothing scanned, `docs/build-workflow.md` §"The preventive layer", and the
 reviewer-spawn bullets in `skills/doctor/SKILL.md` — do not restate a COUNT here, because the
 next row added invalidates it; `A24` in `test-reviewer-spawn-allow.sh` is what holds the roster
 against the renderer, and its phrase list is the thing to extend when a row is added.

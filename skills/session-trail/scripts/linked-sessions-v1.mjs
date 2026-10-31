@@ -11,6 +11,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const RUN_ID = new RegExp(`^local_${UUID}$`);
 const CLI_SESSION_ID = new RegExp(`^${UUID}$`);
 const CONTINUATION_NAME = /^(cont-[0-9a-f]{8})(?:-[0-9]+)?$/;
+const PLAN_NAME = /^cont-[0-9a-f]{8}$/;
 const UNSAFE_VALUE = /[\u0000-\u001f\u007f-\u009f\p{Zl}\p{Zp}]/u;
 const MAX_ENVIRONMENT_ID = 128;
 
@@ -32,6 +33,7 @@ export const LINKED_WHY = Object.freeze({
   fork: 'a user fork starts only when the user names it in the plan answer',
   'ledger-unread': 'the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer',
   cap: `more than ${LINKED_START_CAP} linked sessions qualify, so it starts only when the user asks for it in a later message`,
+  unplanned: 'the plan answer did not name it, so it starts only when the user asks for it in a later message',
 });
 
 export const LINKED_CWD_WHY = Object.freeze({
@@ -106,6 +108,13 @@ export function continuationName(run) {
   return id ? `cont-${id.slice('local_'.length, 'local_'.length + 8)}` : null;
 }
 
+export function linkedStartNames(value) {
+  if (typeof value !== 'string') return null;
+  if (value === 'none') return [];
+  const names = value.split(',');
+  return names.every((name) => PLAN_NAME.test(name)) ? [...new Set(names)] : null;
+}
+
 function cutTitle(text) {
   const chars = Array.from(text);
   return chars.length <= START_TITLE_MAX ? text : `${chars.slice(0, START_TITLE_MAX - 1).join('')}…`;
@@ -171,6 +180,14 @@ function byCreation(a, b) {
   return a.run < b.run ? -1 : 1;
 }
 
+function isDetached(record) {
+  return record.lineageDetached === true;
+}
+
+function isArchived(record) {
+  return record.isArchived === true;
+}
+
 export function familyWalk(root, records) {
   const rootRun = runIdOf(root && typeof root === 'object' ? root.sessionId : null);
   if (!rootRun) return null;
@@ -186,6 +203,23 @@ export function familyWalk(root, records) {
     children.get(parent).push({ run, record });
   }
   const below = (run) => (children.get(run) || []).slice().sort(byCreation);
+  const openBelow = (run, follows = () => true) => {
+    const visited = new Set([rootRun, run]);
+    const queue = (children.get(run) || []).slice();
+    let count = 0;
+    while (queue.length) {
+      const node = queue.shift();
+      if (visited.has(node.run)) continue;
+      visited.add(node.run);
+      if (isDetached(node.record)) continue;
+      if (!isArchived(node.record)) {
+        if (!follows(node)) continue;
+        count += 1;
+      }
+      queue.push(...(children.get(node.run) || []));
+    }
+    return count;
+  };
   const seen = new Set([rootRun]);
   const open = [];
   let archived = 0;
@@ -195,11 +229,11 @@ export function familyWalk(root, records) {
     const node = pending.shift();
     if (seen.has(node.run)) continue;
     seen.add(node.run);
-    if (node.record.lineageDetached === true) {
+    if (isDetached(node.record)) {
       detached += 1;
       continue;
     }
-    if (node.record.isArchived === true) {
+    if (isArchived(node.record)) {
       archived += 1;
       for (const child of below(node.run)) pending.push({ ...child, throughArchived: true });
       continue;
@@ -207,7 +241,7 @@ export function familyWalk(root, records) {
     open.push(node);
   }
   open.sort(byCreation);
-  return { rootRun, open, archived, detached };
+  return { rootRun, open, archived, detached, openBelow };
 }
 
 function entryOf(node, checkout) {
@@ -267,39 +301,49 @@ export function decideLinked(walk, options = {}) {
   const max = Number.isInteger(options.max) && options.max >= 0 ? options.max : LINKED_LIST_MAX;
   const checkout = typeof options.checkout === 'function' ? options.checkout : null;
   const sameRepository = options.sameRepository === true || options.sameRepository === false ? options.sameRepository : null;
+  const planned = Array.isArray(options.planned) ? new Set(options.planned) : null;
   const confirmed = new Set();
   for (const edge of edges) {
     if (edge && edge.confidence === 'confirmed' && edge.from && typeof edge.from.sessionId === 'string') confirmed.add(edge.from.sessionId);
   }
-  let starts = 0;
-  const sessions = walk.open.map((node, index) => {
-    const entry = entryOf(node, index < max ? checkout : null);
+  const factsOf = (node, nodeCheckout) => {
+    const entry = entryOf(node, nodeCheckout);
     const ids = [entry.sessionId, ...entry.priorSessionIds].filter(Boolean);
     const preset = entry.environment ? presetOf(presets, entry.environment) : null;
     const continued = ids.some((id) => confirmed.has(id)) ? true : (ledgerComplete ? false : null);
-    let decision = 'stays';
-    let why = null;
-    if (!entry.sessionId) why = 'no-session-id';
-    else if (self && ids.includes(self)) why = 'self';
-    else if (entry.kind === 'btw') why = 'btw';
-    else if (entry.ssh || (preset && preset.kind === 'ssh')) why = 'ssh';
-    else if (continued === true) why = 'continued';
-    else if (started.has(entry.name)) why = 'started';
-    else if (!entry.folder) {
-      decision = 'if-named';
-      why = 'place';
-    } else if (entry.kind === 'fork') {
-      decision = 'if-named';
-      why = 'fork';
-    } else if (continued === null) {
-      decision = 'if-named';
-      why = 'ledger-unread';
-    } else if (starts < cap) {
-      decision = 'start';
-      starts += 1;
-    } else {
-      decision = 'later';
-      why = 'cap';
+    return { entry, ids, preset, continued };
+  };
+  const keptWhy = ({ entry, ids, preset, continued }) => {
+    if (!entry.sessionId) return 'no-session-id';
+    if (self && ids.includes(self)) return 'self';
+    if (entry.kind === 'btw') return 'btw';
+    if (entry.ssh || (preset && preset.kind === 'ssh')) return 'ssh';
+    if (continued === true) return 'continued';
+    if (started.has(entry.name)) return 'started';
+    return null;
+  };
+  const follows = (node) => keptWhy(factsOf(node, null)) === null;
+  let starts = 0;
+  const sessions = walk.open.map((node, index) => {
+    const facts = factsOf(node, index < max ? checkout : null);
+    const { entry, preset, continued } = facts;
+    let why = keptWhy(facts);
+    let decision = why ? 'stays' : null;
+    if (!decision) {
+      const conditional = !entry.folder ? 'place' : (entry.kind === 'fork' ? 'fork' : (continued === null ? 'ledger-unread' : null));
+      if (planned && !planned.has(entry.name)) {
+        decision = 'later';
+        why = 'unplanned';
+      } else if (!planned && conditional) {
+        decision = 'if-named';
+        why = conditional;
+      } else if (starts < cap) {
+        decision = 'start';
+        starts += 1;
+      } else {
+        decision = 'later';
+        why = 'cap';
+      }
     }
     const cwdWhy = decision === 'stays' ? null : cwdWhyOf(entry, sameRepository);
     return {
@@ -310,25 +354,29 @@ export function decideLinked(walk, options = {}) {
       title: entry.title,
       createdAt: entry.createdAt,
       throughArchived: entry.throughArchived,
+      openBelow: typeof walk.openBelow === 'function' ? walk.openBelow(node.run, follows) : 0,
       folder: entry.folder,
       sameCheckout: entry.sameCheckout,
       sharedCheckout: entry.sharedCheckout,
       preset,
       ssh: entry.ssh,
       continued,
+      planned: planned ? planned.has(entry.name) : null,
       decision,
       why,
       cwdWhy,
       start: decision === 'stays' ? null : startCall(entry, cwdWhy),
     };
   });
+  const listed = sessions.slice(0, max);
   return {
     sameRepository,
     total: sessions.length,
     truncated: sessions.length > max,
     archived: walk.archived,
     detached: walk.detached,
-    sessions: sessions.slice(0, max),
+    plan: planned ? { names: [...planned], unlisted: [...planned].filter((name) => !listed.some((entry) => entry.name === name)) } : null,
+    sessions: listed,
   };
 }
 

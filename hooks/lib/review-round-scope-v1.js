@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // review-round-scope-v1.js — deterministic round-delta extractor for the
-// /zensu:tdd auto-fix loop.
+// /zensu:build auto-fix loop.
 //
 // Phase 6 step 10 used to re-review the WHOLE diff on every auto-fix round. An
 // aspect agent re-reading a file that has not changed since the previous round
@@ -46,6 +46,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const claimsLib = require(path.join(__dirname, "edit-landing-claims-v1.js"));
 
 const FILE_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_FILES = 500;
@@ -67,11 +68,21 @@ function claimRound(line) {
   return { round, files: m[2] };
 }
 
-function splitFiles(blob) {
-  return String(blob == null ? "" : blob)
-    .split(/[,\s]+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== "");
+function claimFiles(blob) {
+  const files = [];
+  for (const token of claimsLib.splitFiles(blob)) {
+    const kind = claimsLib.tokenClass(token);
+    if (kind === "path") {
+      files.push(token);
+      continue;
+    }
+    if (kind !== "brace") return null;
+    for (const member of claimsLib.expandBraces(token)) {
+      if (claimsLib.tokenClass(member) !== "path") return null;
+      files.push(member);
+    }
+  }
+  return files;
 }
 
 function safeRelativePath(candidate) {
@@ -148,26 +159,41 @@ function roundScope(options) {
     text = read.text;
   }
 
+  let prefix = "";
+  if (typeof opts.prefix === "string" && opts.prefix !== "") {
+    prefix = safeRelativePath(opts.prefix.replace(/\/+$/, ""));
+    if (prefix === null) {
+      return { status: "degraded", reason: "bad-prefix", round, files: [], claims: 0, dropped: 0 };
+    }
+  }
+
   const seen = new Set();
   const files = [];
   let claims = 0;
   let dropped = 0;
+  let malformed = false;
   for (const line of text.split("\n")) {
     if (RESET.test(line)) {
       seen.clear();
       files.length = 0;
       claims = 0;
       dropped = 0;
+      malformed = false;
       continue;
     }
     const claim = claimRound(line);
     if (!claim || claim.round !== round) continue;
     claims += 1;
-    const all = splitFiles(claim.files);
+    const all = claimFiles(claim.files);
+    if (all === null) {
+      malformed = true;
+      continue;
+    }
     if (all.length > MAX_CLAIM_FILES) dropped += all.length - MAX_CLAIM_FILES;
     const entries = all.slice(0, MAX_CLAIM_FILES);
     for (const entry of entries) {
-      const rel = safeRelativePath(entry);
+      let rel = safeRelativePath(entry);
+      if (rel !== null && prefix && !rel.startsWith(prefix + "/")) rel = prefix + "/" + rel;
       if (rel === null || seen.has(rel)) continue;
       if (files.length >= MAX_FILES) {
         dropped += 1;
@@ -179,6 +205,9 @@ function roundScope(options) {
   }
 
   files.sort();
+  if (malformed) {
+    return { status: "degraded", reason: "malformed-claim", round, files, claims, dropped };
+  }
   if (dropped > 0) {
     return { status: "degraded", reason: "truncated", round, files, claims, dropped };
   }
@@ -209,6 +238,7 @@ function parseArgs(argv) {
   let log = "";
   let root = "";
   let round = 0;
+  let prefix = "";
   for (let i = 0; i < argv.length; i++) {
     const arg = String(argv[i]);
     const next = argv[i + 1] === undefined ? "" : String(argv[i + 1]);
@@ -221,14 +251,17 @@ function parseArgs(argv) {
     } else if (arg === "--round") {
       round = Number(next);
       i++;
+    } else if (arg === "--path-prefix") {
+      prefix = next;
+      i++;
     }
   }
-  return { log, root, round };
+  return { log, root, round, prefix };
 }
 
 function cliMain(argv) {
-  const { log, root, round } = parseArgs(Array.isArray(argv) ? argv : []);
-  return render(roundScope({ log, root, round }));
+  const { log, root, round, prefix } = parseArgs(Array.isArray(argv) ? argv : []);
+  return render(roundScope({ log, root, round, prefix }));
 }
 
 if (require.main === module) {

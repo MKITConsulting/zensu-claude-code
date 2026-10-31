@@ -13,9 +13,9 @@ can prove the contract is *obeyed*.
 
 ## Scenarios
 
-- **`contract-compliance.yaml`** — an ordinary follow-up after work happened. The reply must open with a
-  recap line, answer in the first sentence after it, stay within roughly a dozen lines, spend at most one
-  question, and volunteer no trade-offs.
+- **`contract-compliance.yaml`** — an ordinary follow-up after work happened. The reply must answer in the
+  first sentence rather than open with a recap label, stay within roughly a dozen lines, spend at most
+  one question, and volunteer no trade-offs.
 - **`precedence-over-compression.yaml`** — a telegraphic caveman-style directive the user turned on is
   active at the same time. The user's own style mode outranks zen-mode, so the reply drops articles the
   way that mode asks while the technical substance survives unchanged. This is the one scenario that can only be graded live: a static test can pin the
@@ -36,8 +36,19 @@ can prove the contract is *obeyed*.
   The reply must mark the failed step `✗` and never a tick, leave the deliberately dropped step OFF
   the line rather than marking it failed, and still say in prose what went wrong — the mark governs
   the position only, and a compressed report that omits a problem is a wrong report.
-- **`short-contract-compliance.yaml`, `short-safety-carve-out.yaml` and `short-anchor-multi-step.yaml`** —
-  the same three tasks under the short body that replaces the full contract on every later prompt of a
+- **`session-block.yaml`** — a session with earlier work, one unverified item and new work in this turn.
+  The reply must answer in the first sentence and close with the session block in its order: a line
+  naming what the session was started for, one to five bullets of earlier work with the open visual check
+  flagged, one recap line on this turn's work that no bullet repeats, then exactly one next step, all
+  within sixteen lines and with no anchor, because the note supplies `none`. The block's bullets are
+  the last run of bullet lines in the reply, so an answer above the block may use bullets of its own.
+- **`session-block-first-turn.yaml`** — the first message of a session, which only asks a question. The
+  reply must answer in the first sentence and close with a session block of one line naming what the
+  session was started for, with no earlier-work bullet and no recap line, followed directly by exactly
+  one next step and with no anchor.
+- **`short-contract-compliance.yaml`, `short-safety-carve-out.yaml`, `short-anchor-multi-step.yaml`,
+  `short-session-block.yaml` and `short-session-block-first-turn.yaml`** — the same five tasks under the
+  short body that replaces the full contract on every later prompt of a
   context generation (see [`.claude/rules/prompt-ledger.md`](../../.claude/rules/prompt-ledger.md)). No
   full contract precedes it here, so each scenario grades whether the short body carries the behaviour
   by itself, the worst case of a long context in which the full contract has faded. Each carries the
@@ -46,11 +57,13 @@ can prove the contract is *obeyed*.
 
 **The graders themselves are unit-tested.** Every javascript assertion body in this directory is
 extracted and COMPILED by `tests/structure/zen-anchor-assertions.test.js`, driven from
-`tests/structure/test-zen-mode.sh` (which CI does run). Sixteen of the twenty-three in the five full-contract
-scenarios are also RUN against canned replies and pinned to a pass/fail vector: both anchor scenarios
-and this suite's safety carve-out. The seven in `contract-compliance.yaml` and `precedence-over-compression.yaml`
+`tests/structure/test-zen-mode.sh` (which CI does run). Thirty-one of the thirty-seven in the seven
+full-contract scenarios are also RUN against canned replies: twenty-nine are pinned to a pass/fail
+vector in both anchor scenarios, this suite's safety carve-out and both session-block scenarios, and
+focused tests drive two in `contract-compliance.yaml`, its supplied-none grader and its first-line
+grader. The six others in `contract-compliance.yaml` and `precedence-over-compression.yaml`
 reach the compile check only, which cannot see a logic defect — say "compile-checked", never
-"tested", of those. The sixteen graders of the three `short-` scenarios are byte-identical copies of
+"tested", of those. The thirty graders of the five `short-` scenarios are byte-identical copies of
 their twins' graders, and the unit file fails when a copy diverges, so each copy is exactly as tested,
 or as merely compile-checked, as its original. That closes the gap this suite's
 local-only status would otherwise leave: before it, a logically broken grader satisfied every

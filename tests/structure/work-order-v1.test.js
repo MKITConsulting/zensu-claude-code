@@ -1289,6 +1289,46 @@ test('a plan link Zensu refuses as invalid_url is dropped, and the artifact goes
   assert.equal(box.fake().order.blocked_kind, 'plan_approval');
 });
 
+test('the plan commit takes the message of --message-file, keeps the fixed subject without one, and refuses the flag without an absolute path', () => {
+  const planned = () => {
+    const box = sandbox();
+    const context = startedContext(box, { policy: { plan_approval: 'required', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 } });
+    const git = gitProject(box);
+    wo.markerRun(context, RUN);
+    writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+    fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+    fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget list.\n');
+    return { box, context, git };
+  };
+  const written = planned();
+  const message = path.join(written.box.root, 'plan-commit.txt');
+  fs.writeFileSync(message, 'Add the widget list plan\n\nRefs: WID-7\n');
+  const approved = spawnSync(process.execPath, [MODULE, 'plan-approval', '--message-file', message], {
+    env: { ...written.box.env, WO_PROJECT_ROOT: written.box.project, WO_SESSION_KEY: written.box.sessionKey },
+    encoding: 'utf8',
+  });
+  assert.equal(approved.status, wo.EXIT.OK, approved.stderr);
+  assert.equal(written.git('log', '-1', '--format=%B', '--', `.zensu/plans/${ORDER}.md`).trim(), 'Add the widget list plan\n\nRefs: WID-7');
+  assert.equal(written.box.fake().order.blocked_kind, 'plan_approval');
+
+  const fixed = planned();
+  const result = wo.planApproval(fixed.context, { env: fixed.box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  assert.equal(fixed.git('log', '-1', '--format=%s', '--', `.zensu/plans/${ORDER}.md`).trim(), `docs(plan): add the implementation plan of work order ${ORDER.slice(0, 8)}`);
+
+  const bare = planned();
+  const refused = spawnSync(process.execPath, [MODULE, 'plan-approval', '--message-file'], {
+    env: { ...bare.box.env, WO_PROJECT_ROOT: bare.box.project, WO_SESSION_KEY: bare.box.sessionKey },
+    encoding: 'utf8',
+  });
+  assert.equal(refused.status, wo.EXIT.USAGE, refused.stderr);
+  assert.match(refused.stderr, /--message-file needs the absolute path of the commit message file/);
+  const relative = wo.planApproval(bare.context, { env: bare.box.env, messageFile: 'plan-commit.txt' });
+  assert.equal(relative.exit, wo.EXIT.USAGE, relative.message);
+  assert.match(relative.message, /needs the absolute path/);
+  assert.equal(bare.git('log', '--format=%s').trim(), 'init');
+});
+
 test('the approved plan is the last plan artifact of the attempt whose plan the last approval of the spec hash approved', () => {
   const spec = 'b'.repeat(64);
   const events = [

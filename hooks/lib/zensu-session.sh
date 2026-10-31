@@ -7,7 +7,8 @@ _ZENSU_SESSION_MSYS_ENV_READY=false
 _ZENSU_SESSION_LIB_DIR=''
 _ZENSU_SESSION_MSYS_ENV=''
 unset -f zensu_msys_env_exclusions 2>/dev/null || true
-if _ZENSU_SESSION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"; then
+unset -f zensu_host_path _zensu_host_path_render _zensu_host_path_drive 2>/dev/null || true
+if _ZENSU_SESSION_LIB_DIR="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)"; then
   _ZENSU_SESSION_MSYS_ENV="$_ZENSU_SESSION_LIB_DIR/zensu-msys-env.sh"
   if [ -f "$_ZENSU_SESSION_MSYS_ENV" ] && [ ! -L "$_ZENSU_SESSION_MSYS_ENV" ]; then
     # shellcheck disable=SC1090
@@ -16,6 +17,7 @@ if _ZENSU_SESSION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"; th
       _ZENSU_SESSION_MSYS_ENV_READY=true
     fi
   fi
+  source "$_ZENSU_SESSION_LIB_DIR/zensu-host-path.sh" 2>/dev/null || true
 fi
 if [ "$_ZENSU_SESSION_MSYS_ENV_READY" != true ]; then
   # Keep every public session function available to its caller. Stateful hooks
@@ -23,6 +25,7 @@ if [ "$_ZENSU_SESSION_MSYS_ENV_READY" != true ]; then
   # missing, symlinked, or otherwise unsafe to source.
   zensu_msys_env_exclusions() { return 1; }
 fi
+declare -F zensu_host_path >/dev/null 2>&1 || zensu_host_path() { return 2; }
 export -f zensu_msys_env_exclusions 2>/dev/null || true
 unset _ZENSU_SESSION_LIB_DIR _ZENSU_SESSION_MSYS_ENV _ZENSU_SESSION_MSYS_ENV_READY
 
@@ -34,12 +37,12 @@ zensu_bind_hook_session() {
     ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED _ZENSU_PROJECT_DIR_MEMO
   [ -n "$payload" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
   binder="$lib_dir/claude-hook-session-v1.js"
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  native_plugin_root="$(zensu_host_path "$plugin_root")" || return 1
+  native_plugin_data="$(zensu_host_path "${CLAUDE_PLUGIN_DATA:-}")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
   # Native Windows Node cannot reliably consume an MSYS module path when the
@@ -74,12 +77,12 @@ zensu_bind_model_session() {
   [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
   binder="$lib_dir/claude-hook-session-v1.js"
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  native_plugin_root="$(zensu_host_path "$plugin_root")" || return 1
+  native_plugin_data="$(zensu_host_path "$CLAUDE_PLUGIN_DATA")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
   bindings="$(
@@ -116,12 +119,12 @@ zensu_session_unregistered() {
   local msys_env_exclusions
   [ -n "$payload" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
   binder="$lib_dir/claude-hook-session-v1.js"
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  native_plugin_root="$(zensu_host_path "$plugin_root")" || return 1
+  native_plugin_data="$(zensu_host_path "${CLAUDE_PLUGIN_DATA:-}")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
   (
@@ -154,12 +157,12 @@ zensu_session_orphaned_project_root() {
   local msys_env_exclusions
   [ -n "$payload" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
   binder="$lib_dir/claude-hook-session-v1.js"
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  native_plugin_root="$(zensu_host_path "$plugin_root")" || return 1
+  native_plugin_data="$(zensu_host_path "${CLAUDE_PLUGIN_DATA:-}")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
   (
@@ -184,12 +187,12 @@ zensu_session_orphaned_project_root_model() {
   [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
   binder="$lib_dir/claude-hook-session-v1.js"
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  native_plugin_root="$(zensu_host_path "$plugin_root")" || return 1
+  native_plugin_data="$(zensu_host_path "$CLAUDE_PLUGIN_DATA")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
   (
@@ -234,12 +237,12 @@ _zensu_session_binder_mode() {
       ;;
   esac
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
   binder="$lib_dir/claude-hook-session-v1.js"
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  native_plugin_root="$(zensu_host_path "$plugin_root")" || return 1
+  native_plugin_data="$(zensu_host_path "${CLAUDE_PLUGIN_DATA:-}")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
   # ONE invocation, with the MODE choosing what stands on stdin. Two subshells —
@@ -481,7 +484,7 @@ zensu_emit_named_bind_deny() {
 # `main` (losing the remedy is the wrong message, an unusable one only a worse one).
 _zensu_load_agent_context() {
   local lib_dir context_lib
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   context_lib="$lib_dir/zensu-agent-context.sh"
   [ -r "$context_lib" ] && [ ! -L "$context_lib" ] || return 1
   # shellcheck disable=SC1090
@@ -616,7 +619,7 @@ zensu_doctor_invocation() {
   local lib_dir recognizer
   [ -n "$payload" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   recognizer="$lib_dir/zensu-doctor-invocation.js"
   [ -f "$recognizer" ] && [ ! -L "$recognizer" ] || return 1
   (
@@ -1099,7 +1102,7 @@ zensu_resolve_session_id() {
   fi
   [ -n "$raw" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   core="$lib_dir/session-control-core-v1.js"
   [ -f "$core" ] || return 1
   if zensu_session_key_canonical "$raw"; then
@@ -1135,7 +1138,7 @@ zensu_resolve_project_dir() {
   [ ! -L "$candidate" ] && [ -d "$candidate" ] || return 1
   [ ! -L "$context_file" ] && [ -f "$context_file" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   core="$lib_dir/session-control-core-v1.js"
   [ -f "$core" ] || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions PROJECT_CANDIDATE CONTEXT_FILE)" \

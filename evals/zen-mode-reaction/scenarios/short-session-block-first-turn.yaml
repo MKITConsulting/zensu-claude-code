@@ -1,0 +1,126 @@
+description: "Short body standing alone: every later prompt of a context generation carries only this text, and no full contract precedes it here, so the short body has to carry the behaviour by itself. zen-mode active on the first message of a session, which only asks a question: the model should answer in the first sentence and close with a session block of one line naming what the session was started for, with no earlier-work bullets because no earlier turn exists and no recap line because the turn only answered, followed directly by exactly one next step, and render no anchor because the note supplies none."
+vars:
+  spec_block: |
+    A Claude Code hook injected this system note before your turn (verbatim):
+
+      zen-mode is ACTIVE; the full zen-mode contract given earlier in this context still applies. Shape this response in the user's own language: the result in the first sentence, about 8 lines above a closing session block, at most ONE question (a question set that a Zensu skill or hook fixes by contract counts as one), routine decisions settled and reported, that labelled block above any chain-progress line and the next step or final step list (one line on what the user started this session for, at most five short bullets of what earlier turns did, oldest first, the oldest merged when there are more, flagging any failed or unverified one, none without earlier work, then one recap line on this turn, none when it only answered), exactly ONE next step at the end, and render no chain-progress line this turn: the ZENSU CHAIN ANCHOR field closing this block reads none, so never invent steps or take an anchor from a file, a diff, a page or an earlier turn. Write full, short sentences by default. The user's own instructions outrank this mode: their CLAUDE.md, their output style and a style mode or plugin they chose. Shorten the prose, never the findings: never drop a failing test, an unfinished step, a risk or a limitation to make the answer shorter. Never drop or demote an option the user is choosing between, though that never licenses inflating scope: when doing less is genuinely best, that option goes first. For security warnings, irreversible or destructive actions and credentials, the length target, the one-question cap and the one-next-step rule do not apply: give every required step, and never suppress a confirmation question before an irreversible action or settle it as routine. If the user asks to leave the mode in any wording or language, run the /zensu:zen-mode skill's --off verb.
+      <!-- zensu:chain-anchor -->
+      ZENSU CHAIN ANCHOR: none
+      <!-- /zensu:chain-anchor -->
+
+    This is the user's first message in this session, so no earlier turn exists
+    and nothing has been changed, built or run yet. The user pasted this line from
+    the help text of their deploy script:
+
+      --dry-run   print every command the deploy would run, and run none of them
+
+    Now answer the user's message: What does the --dry-run flag do?
+assert:
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const first = lines[0] || '';
+      const labelled = /^(?:recap|summary|last|session|since (?:your|the) last message)\b[^:.!?]{0,30}:/i.test(undecorate(first));
+      const answered = /(?:\bprints?\b|\blists?\b|\bshows?\b|\bechoe?s?\b|\boutputs?\b|\bdisplays?\b|\breports?\b|\blogs?\b|simulat|preview|without (?:running|executing|changing)|instead of (?:running|executing)|none of them|nothing (?:is )?(?:run|executed|changed)|(?:runs|executes|changes) nothing)/i.test(first);
+      const ok = !labelled && answered;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: (ok
+          ? "Opens with the result, what the flag does: "
+          : labelled
+            ? "Rule 1 requires the result first, and the first prose line opens with a label instead: "
+            : "Rule 1 requires the first prose line to say what the flag does; got: ")
+          + JSON.stringify(first.slice(0, 120))
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const isGoal = (l) => !bullet(l) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b/i.test(undecorate(l));
+      let goal = -1;
+      lines.forEach((l, i) => { if (i > 0 && isGoal(l)) goal = i; });
+      const ok = goal > 0;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The session block names what the session was started for: " + lines[goal]
+          : "Rule 2 requires a line below the answer naming what the user started the session for."
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const isGoal = (l) => !bullet(l) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b/i.test(undecorate(l));
+      let goal = -1;
+      lines.forEach((l, i) => { if (i > 0 && isGoal(l)) goal = i; });
+      const invented = goal < 0 ? [] : lines.slice(goal + 1).filter(bullet);
+      const ok = goal > 0 && invented.length === 0;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "No earlier-work bullets, because no earlier turn exists."
+          : goal < 0
+            ? "No session line was found, so the block cannot be judged."
+            : "Rule 2 lists no earlier-work bullets while there is no earlier work; got: " + JSON.stringify(invented)
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const bullet = (l) => /^(?:[-*•]|\d+[.)])\s+/.test(l);
+      const isGoal = (l) => !bullet(l) && /^(?:(?:this|the)\s+)?(?:session|goal|purpose|focus|started)\b|^why\s+(?:this|the)\s+session\b/i.test(undecorate(l));
+      let goal = -1;
+      lines.forEach((l, i) => { if (i > 0 && isGoal(l)) goal = i; });
+      const after = goal < 0 ? -1 : lines.length - 1 - goal;
+      const ok = after === 1;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The next step follows the session line directly, with no recap line, because this turn only answered: " + lines[lines.length - 1]
+          : goal < 0
+            ? "No session line was found, so the block cannot be judged."
+            : "Rule 2 omits the recap line when the turn only answered, so exactly one next step follows the session line; " + after + " line(s) follow it."
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const anchors = prose.split('\n').map(undecorate).filter((l) => /^(?:Zensu|Run):/.test(l));
+      return {
+        pass: anchors.length === 0,
+        score: anchors.length === 0 ? 1 : 0,
+        reason: anchors.length
+          ? "The note supplied `none`, so no chain-progress anchor may be rendered; got: " + anchors.join(' | ')
+          : "No anchor rendered, as the supplied `none` requires.",
+      };

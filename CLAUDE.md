@@ -31,6 +31,12 @@ user-utterance literals in hook directives (for example `'kein tdd'`), and eval
 grader alternations matched against model prose whose language the product does not
 control. Details: `.claude/rules/language.md`.
 
+A third clarification draws the line for consuming repositories. The commit messages,
+pull request text and review replies Zensu writes into a consuming repository follow
+that repository's language (`skills/autopilot/rules/conventions.md`). Zensu's own
+artifacts stay English there: `.zensu/plans/`, `.zensu/logs/`, run logs, and the
+section headings it appends to a pull request body.
+
 ## Version Bumps
 
 **Every plugin version bump MUST update `.claude-plugin/plugin.json`, the
@@ -110,13 +116,13 @@ A `gh pr list --head <branch>` check is not sufficient — it does not distingui
 
 This applies to AI agents and humans alike. The `/create-pr` slash command's "PR already exists for this branch" guard does NOT cover the merged-branch case. "I just rebased ten minutes ago" is not a substitute for the check — re-run it every push.
 
-**Every plugin-opened PR body carries an Acceptance Criteria table.** The shared, repo-overridable template is `templates/pr-body.md` (resolution: `.zensu/templates/pr-body.md` at the working-tree toplevel, else `${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md`). Its `## Acceptance criteria` table takes one row per stable `AC-###`/`FR-###` id read from the feature's TDD plan `## Requirements` table via `hooks/lib/zensu-plan-requirements.sh` (exit 0 = usable); when no usable table exists the template's single stub row stays in place — never ship an empty table. Both PR openers honor this: `/zensu:pilot` renders `pr-body.md`, and `/zensu:autopilot` uses its richer `autopilot-pr-body.md` variant (the same table plus the build-time bypass-ledger audit line).
+**Every plugin-opened PR body carries an Acceptance Criteria table.** The shared, repo-overridable template is `templates/pr-body.md` (resolution, `skills/autopilot/rules/conventions.md` §4: `.zensu/templates/pr-body.md` at the working-tree toplevel replaces everything; else the target repository's own PR template is the skeleton and Zensu appends its `## Acceptance criteria` section; else `${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md`). Its `## Acceptance criteria` table takes one row per stable `AC-###`/`FR-###` id read from the feature's Zensu plan `## Requirements` table via `hooks/lib/zensu-plan-requirements.sh` (exit 0 = usable); when no usable table exists the template's single stub row stays in place — never ship an empty table. Both PR openers honor this: `/zensu:pilot` renders `pr-body.md`, and `/zensu:autopilot` uses its richer `autopilot-pr-body.md` variant (the same table plus the build-time bypass-ledger audit line).
 
 ## Subsystem Rules
 
 Each entry names the section title, what it covers, and its rule file.
 
-- **Language** — the English-only rule in full, and its two carve-outs for non-English match literals: `.claude/rules/language.md`
+- **Language** — the English-only rule in full, its two carve-outs for non-English match literals, and the line between Zensu's artifacts and a consuming repository's prose: `.claude/rules/language.md`
 - **Artifact Path Redaction (`hooks/lib/zensu-artifact-redact-v1.js`)** — what makes committed `.zensu` plans and logs publishable: `.claude/rules/artifact-path-redaction.md`
 - **TDD Mode Precedence (`hooks/lib/zensu-config.sh` + `zensu-log.sh --tdd-begin`)** — the four-rank strict/vanilla ladder: `.claude/rules/tdd-mode-precedence.md`
 - **Requirements-Table Gate (`hooks/lib/zensu-plan-requirements.sh`)** — why `--tdd-complete` refuses a plan without a usable `## Requirements` table: `.claude/rules/requirements-table-gate.md`
@@ -136,6 +142,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Autopilot Lease Row (`leaseRow` in `hooks/lib/zensu-doctor-report.js`)** — the read-only `/zensu:doctor` rows for the Autopilot project lease and its recovery sentinel, rendered from the core's `inspectExternalProcessLock`: `.claude/rules/autopilot-lease-row.md`
 - **Implementing-Phase Turn Counter (`hooks/stop-chain-enforcer.sh` + `zensu-tdd-phase.sh`)** — the `implStopCount` nudge and the shared watchdog ladder: `.claude/rules/implementing-phase-turn-counter.md`
 - **Stop Hook Latency (`hooks/lib/zensu-stop-deadline.sh` + `hooks/lib/stop-idle-probe-v1.js`)** — the early exit for a Stop with nothing to enforce, the whole-hook deadline and why it releases, and the once-per-run project-root memo and canonical-key shortcut in `hooks/lib/zensu-session.sh`: `.claude/rules/stop-latency.md`
+- **Hook Process Budget (`hooks/lib/hook-dispatch-v1.js` + `tests/structure/test-hook-process-budget.sh`)** — the one dispatcher process per tool event, its check registry, exec-form registration and aggregation, the per-call process budgets, the sourced host-path function, the config pre-check and the secret-scan copies of the `detectChannels` tokens: `.claude/rules/hook-process-budget.md`
 - **Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)** — the two bind failures that relax, and the vanished-cwd case that must not: `.claude/rules/relaxable-bind-failures.md`
 - **Reviewer Capability Gate: Host Report Tool (`hooks/lib/reviewer-capability-v1.js`)** — why reviewers and the PLM may call `SubagentHandback`, and why the evidence workers may not: `.claude/rules/reviewer-capability-gate.md`
 - **Git Mutation Tables (`hooks/lib/bash-source-write-parse.js`)** — why the Bash source-write gate is opt-in, rule (C) and its Windows namespace: `.claude/rules/git-mutation-tables.md`
@@ -171,11 +178,13 @@ Each entry names the section title, what it covers, and its rule file.
 - **Skill Text Budget (`tests/structure/test-skill-text-budget.sh`)** — the body and description caps for every skill, the shrink-only allowlist, and how the host builds its skill listing: `.claude/rules/skill-text-budget.md`
 - **Unit-File Registry (`tests/profiles/unit-files.v1.json` + `tests/structure/lib-unit-registry.js`)** — the one owner of every unit file's count, skip ceilings, guards and drivers, the preflight census and the generated overview regions: `.claude/rules/unit-file-registry.md`
 - **Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)** — delta-scoped fix rounds and aspect activation: `.claude/rules/incremental-review-rounds.md`
+- **Fix-Round Bookkeeping (`round-prepare-v1.js` + `zensu-log.sh --round-prepare`)** — the one call that audits a fix round, attributes its claims against a round-start snapshot, writes the `fixed` ledger lines and prints the re-review lists: `.claude/rules/round-prepare.md`
 - **Review Convergence (`review-ledger-v1.js` + `hooks.reviewConvergence`)** — the findings ledger, the shared severity rubric and round-aware routing of the auto-fix loop: `.claude/rules/review-convergence.md`
 - **External Review Import (`external-review-v1.js` + `post-workflow-launch.sh`)** — importing a finished workflow review on the first review, the judge's gap list and the Stop guard's workflow wait: `.claude/rules/external-review-import.md`
 - **Background Review Completion (`hooks/lib/background-review-v1.js` + `user-prompt-review-handback.sh`)** — recording the review agents the host runs in the background, claiming the consume reviewer's ticket from its hand-back or completion notification, and the Stop wait and hold: `.claude/rules/background-review-completion.md`
 - **Cross-Cutting Review (`hooks.reviewJudgeSecondRun` + the inherited-guarantee check)** — the first review's independent second judge run, the connection-mode check for inherited guarantees and the rule for deployment-dependent defects: `.claude/rules/cross-cutting-review.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
+- **Claim Syntax and the Chain's Work Tree (`edit-landing-claims-v1.js` + `--work-tree`)** — brace, glob and prose claims, audited corrections, and grading an Autopilot run's own worktree below the anchor: `.claude/rules/claim-syntax-and-work-tree.md`
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
 - **Verification Drivers (`skills/verify-feature/rules/drivers.md` + `verify-run-resources.js`)** — the nine drivers, why only the browser is gated, and the run-resource helper's identity rules: `.claude/rules/verify-feature-drivers.md`
 - **PowerShell Tool Coverage (`hooks/lib/powershell-command-v1.js` + `shell-tool-coverage-v1.js`)** — how each shell hook judges or refuses a command from Claude Code's PowerShell tool, the shared analyzer and its residuals, when the host runs that tool, and the banner line and doctor row: `.claude/rules/powershell-tool-coverage.md`

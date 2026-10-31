@@ -655,7 +655,7 @@ if [ -z "$ZDOC_DELIVERY_ROUTE" ]; then
       ZDOC_DELIVERY_ROUTE="$(zensu_delivery_route_field "$ZDOC_ROUTE_ROOT" "$ZDOC_SESSION_KEY" 2>/dev/null)"
     fi
     case "$ZDOC_DELIVERY_ROUTE" in
-      ("tdd (session marker)"|"direct (session marker)"|"tdd (hooks.defaultDeliveryRoute)"|"direct (hooks.defaultDeliveryRoute)"|ask) ;;
+      ("build (session marker)"|"direct (session marker)"|"build (hooks.defaultDeliveryRoute)"|"direct (hooks.defaultDeliveryRoute)"|ask) ;;
       (*) ZDOC_DELIVERY_ROUTE=unjudged ;;
     esac
   else

@@ -2,10 +2,10 @@
 # Pins plan-approved-delegate.sh (PostToolUse:ExitPlanMode) behavioral output:
 #   default (autoTdd on) -> emits SessionStart-style additionalContext JSON that
 #     directs the MAIN thread to ASK the user ONE AskUserQuestion naming four
-#     mutually exclusive delivery routes — /zensu:autopilot, /zensu:tdd,
+#     mutually exclusive delivery routes — /zensu:autopilot, /zensu:build,
 #     /zensu:pilot, implement directly — ordered so the route fitting the plan
 #     leads and 'implement directly' never does, with the 'Executing via
-#     /zensu:tdd' / 'Skipping TDD' status-line contract and the doc-only
+#     /zensu:build' / 'Skipping /zensu:build' status-line contract and the doc-only
 #     (README/CHANGELOG/markdown) escape exception. Every route assertion is
 #     graded in BOTH emitted heredocs (strict and vanilla), because the two are
 #     hand-maintained and a one-sided edit is the drift these checks exist for.
@@ -17,7 +17,7 @@
 # expect+API) — it proves the hook's emitted directive without spawning a session.
 # CARRIERS OUTSIDE THIS SUITE'S NAMESAKE, because an edit to any of them reddens a
 # suite named for a different file and nothing there points back here:
-#   docs/configuration.md, docs/architecture.md, README.md, skills/tdd/SKILL.md,
+#   docs/configuration.md, docs/architecture.md, README.md, skills/build/SKILL.md,
 #     skills/gauntlet-loop/SKILL.md            -> D17 (route-question prose)
 #   hooks/session-start-banner.sh              -> D26, D27 (the autoTdd flag arm and
 #     the off-state disclosure), D29, D30 (the node and delegate-hook arms of the
@@ -87,17 +87,17 @@ else
   check "D2 emits valid PostToolUse additionalContext JSON on default (autoTdd on)" FAIL
 fi
 
-# D3 directive routes to the /zensu:tdd Skill in the main thread
-if printf '%s' "$OUT" | grep -qF "skill='zensu:tdd'"; then
-  check "D3 directive names skill='zensu:tdd' (main-thread routing)" PASS
+# D3 directive routes to the /zensu:build Skill in the main thread
+if printf '%s' "$OUT" | grep -qF "skill='zensu:build'"; then
+  check "D3 directive names skill='zensu:build' (main-thread routing)" PASS
 else
-  check "D3 directive names skill='zensu:tdd'" FAIL
+  check "D3 directive names skill='zensu:build'" FAIL
 fi
 
-# D4 status-line contract present (Executing via /zensu:tdd | Skipping TDD)
-if printf '%s' "$OUT" | grep -qF 'Executing via /zensu:tdd' \
-   && printf '%s' "$OUT" | grep -qF 'Skipping TDD'; then
-  check "D4 status-line contract present (Executing via /zensu:tdd | Skipping TDD)" PASS
+# D4 status-line contract present (Executing via /zensu:build | Skipping /zensu:build)
+if printf '%s' "$OUT" | grep -qF 'Executing via /zensu:build' \
+   && printf '%s' "$OUT" | grep -qF 'Skipping /zensu:build'; then
+  check "D4 status-line contract present (Executing via /zensu:build | Skipping /zensu:build)" PASS
 else
   check "D4 status-line contract present" FAIL
 fi
@@ -177,12 +177,12 @@ both_have() {
 
 # D9 all three delegating routes name the skill they hand off to
 both_have "D9 directive names all three delivery skills" \
-  "skill='zensu:autopilot'" "skill='zensu:tdd'" "skill='zensu:pilot'"
+  "skill='zensu:autopilot'" "skill='zensu:build'" "skill='zensu:pilot'"
 
 # D10 every one of the four routes carries its own status line
 both_have "D10 four route status lines present" \
   'Executing via /zensu:autopilot' 'Executing via /zensu:pilot' \
-  'Executing via /zensu:tdd' 'Skipping TDD: user declined'
+  'Executing via /zensu:build' 'Skipping /zensu:build: user declined'
 
 # D11 the option-ordering rule, including the clause that keeps the do-nothing
 # route out of the first slot
@@ -357,7 +357,7 @@ else
 fi
 
 # D21 the refusal-removal rule is scoped. It applies to all three routes including
-# /zensu:tdd, and the LAST implement-directly arm is one of the arms below it and
+# /zensu:build, and the LAST implement-directly arm is one of the arms below it and
 # keys on exactly that refusal — so an unscoped removal silently retires the
 # shipped `no tdd` / `kein tdd` fast path. Both readings were defensible, which is
 # the defect: a directive a model can read two ways has no contract.
@@ -413,7 +413,7 @@ both_have "D15 pilot option states its zensu-CLI and tracked-feature prerequisit
 # act-on-the-answer paragraph, so without this one an option could be deleted
 # from the question while the routing prose kept every check green.
 both_have "D16 all four option labels present in the question" \
-  "(1) 'Autopilot — /zensu:autopilot'" "(2) 'Zensu workflow — /zensu:tdd'" \
+  "(1) 'Autopilot — /zensu:autopilot'" "(2) 'Zensu workflow — /zensu:build'" \
   "(3) 'Pilot — /zensu:pilot'" "(4) 'No — implement directly'" \
   'carrying exactly these four mutually exclusive options and no others'
 
@@ -439,9 +439,9 @@ d17_carrier() { # $1 repo-relative file, $2.. clauses that must ALL be present
   done
 }
 d17_carrier docs/configuration.md 'naming the four mutually exclusive delivery routes'
-d17_carrier docs/architecture.md 'ask which delivery route;<br/>only the /zensu:tdd route is drawn'
+d17_carrier docs/architecture.md 'ask which delivery route;<br/>only the /zensu:build route is drawn'
 d17_carrier README.md 'Autopilot to a reviewed pull request, the Zensu workflow with its review chain'
-d17_carrier skills/tdd/SKILL.md '`/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly'
+d17_carrier skills/build/SKILL.md '`/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly'
 d17_carrier skills/gauntlet-loop/SKILL.md 'hands the mission to whichever is chosen' 'it offers neither'
 # An empty roster must FAIL rather than report a clean sweep: deleting the
 # d17_carrier calls leaves D17_MISSING empty and would otherwise pass. Same rule
@@ -572,7 +572,7 @@ fi
 if [ ! -f "$EVAL_RUNNER" ]; then
   check "D19 eval runner exists" FAIL
 elif grep -qF 'No — implement directly' "$EVAL_RUNNER" \
-  && grep -qF 'Zensu workflow — /zensu:tdd' "$EVAL_RUNNER" \
+  && grep -qF 'Zensu workflow — /zensu:build' "$EVAL_RUNNER" \
   && ! grep -qF '"$(contains "$CODE_OUT" "implement directly")"' "$EVAL_RUNNER"; then
   check "D19 the eval grades rendered option labels, not a bare phrase" PASS
 else
@@ -692,29 +692,29 @@ else
 if {[catch {source [lindex $argv 0]} err]} { puts "cannot load the guard: $err"; exit 0 }
 set E "\x1b"
 set cases [list \
-  1 "⏺ Bash(CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-delivery-route.sh --tdd)\n╭─╮\n│ Bash command │\n│ CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-deliv│\n│ ery-route.sh${E}\[25G--tdd │\n│ Record the route │\n Do you want to proceed" \
-  1 "${E}\[38;5;246mzensu-delivery-route.sh${E}\[39m${E}\[2C--tdd\n ${E}\[38;5;246mRecord${E}\[8Gthe route${E}\[39m\n Do${E}\[4Gyou want to proceed" \
-  1 "bash \"/p/zensu-delivery-route.sh\" --tdd\n Do you want to proceed" \
-  1 "bash /p/zensu-delivery-route.sh --tdd\n${E}\]0;route title\x07 Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd && rm -rf x\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd; echo hi\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd | tee /tmp/x\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd \$(id)\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd `id`\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd > /tmp/x\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd < /dev/tcp/h/80\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd <(id)\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd >(id)\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd =(id)\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd *(e:'touch /tmp/p':)\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd *(+id)\n Do you want to proceed" \
+  1 "⏺ Bash(CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-delivery-route.sh --build)\n╭─╮\n│ Bash command │\n│ CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-deliv│\n│ ery-route.sh${E}\[25G--build │\n│ Record the route │\n Do you want to proceed" \
+  1 "${E}\[38;5;246mzensu-delivery-route.sh${E}\[39m${E}\[2C--build\n ${E}\[38;5;246mRecord${E}\[8Gthe route${E}\[39m\n Do${E}\[4Gyou want to proceed" \
+  1 "bash \"/p/zensu-delivery-route.sh\" --build\n Do you want to proceed" \
+  1 "bash /p/zensu-delivery-route.sh --build\n${E}\]0;route title\x07 Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build && rm -rf x\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build; echo hi\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build | tee /tmp/x\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build \$(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build `id`\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build > /tmp/x\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build < /dev/tcp/h/80\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build <(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build >(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build =(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build *(e:'touch /tmp/p':)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build *(+id)\n Do you want to proceed" \
   0 "bash /p/zensu-delivery-route.sh --direct\n Do you want to proceed" \
-  0 "bash /p/zensu-delivery-route.sh --tdd-x\n Do you want to proceed" \
-  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n ⎿ delivery-route: tdd\n Bash(bash /p/zensu-log.sh --tdd-begin)\n Do you want to proceed" \
-  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n ⎿ delivery-route: tdd\n Do you want to proceed" \
-  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n Bash(ls)\n Do you want to proceed" \
-  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n Skill(zensu:tdd)\n Do you want to proceed" \
-  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n Read(/etc/hosts)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --build-x\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --build)\n ⎿ delivery-route: build\n Bash(bash /p/zensu-log.sh --tdd-begin)\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --build)\n ⎿ delivery-route: build\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --build)\n Bash(ls)\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --build)\n Skill(zensu:build)\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --build)\n Read(/etc/hosts)\n Do you want to proceed" \
   0 "Bash(ls -la)\n Do you want to proceed" \
 ]
 set bad 0
@@ -725,7 +725,7 @@ puts "cases=[expr {[llength $cases] / 2}] mismatches=$bad"
 TCL
   D39_OUT="$(tclsh "$TMP_DIR/record-guard-cases.tcl" "$TMP_DIR/record-guard.tcl" 2>&1 | head -1)"
   if [ "$D39_OUT" = "cases=24 mismatches=0" ]; then
-    check "D39 record_prompt_ok approves the helper's --tdd call and refuses a chained, redirected, substituted, glob-qualified, other-verb or later-prompt tail after the helper's last mention; text before that mention is not graded" PASS
+    check "D39 record_prompt_ok approves the helper's --build call and refuses a chained, redirected, substituted, glob-qualified, other-verb or later-prompt tail after the helper's last mention; text before that mention is not graded" PASS
   else
     check "D39 eval record-prompt guard drifted (${D39_OUT:-no output})" FAIL
   fi
@@ -759,17 +759,17 @@ else
 if {[catch {source [lindex $argv 0]} err] || ![info exists GAP]} { puts "cannot load GAP"; exit 0 }
 set E "\x1b"
 set cases [list \
-  1 "Executing${E}\[11Gvia${E}\[15G/zensu:tdd" \
-  1 "Executing${E}\[2Cvia${E}\[C/zensu:tdd" \
-  1 "Executing via /zensu:tdd" \
-  1 "Executingvia/zensu:tdd" \
-  1 "Executing \t${E}\[12Gvia /zensu:tdd" \
-  0 "Executing-via /zensu:tdd" \
-  0 "Executing x via /zensu:tdd" \
+  1 "Executing${E}\[11Gvia${E}\[15G/zensu:build" \
+  1 "Executing${E}\[2Cvia${E}\[C/zensu:build" \
+  1 "Executing via /zensu:build" \
+  1 "Executingvia/zensu:build" \
+  1 "Executing \t${E}\[12Gvia /zensu:build" \
+  0 "Executing-via /zensu:build" \
+  0 "Executing x via /zensu:build" \
 ]
 set bad 0
 foreach {want text} $cases {
-  if {[regexp -- "^Executing${GAP}via${GAP}/zensu:tdd\$" $text] != $want} { incr bad }
+  if {[regexp -- "^Executing${GAP}via${GAP}/zensu:build\$" $text] != $want} { incr bad }
 }
 puts "cases=[expr {[llength $cases] / 2}] mismatches=$bad"
 TCL
@@ -784,9 +784,9 @@ fi
 
 # D40 T2.9 grades the session marker the helper writes, not the transcript, which
 # also carries whatever the model writes. route_recorded is extracted by text and
-# run against a project whose state directory first holds nothing, then a `tdd`
+# run against a project whose state directory first holds nothing, then a `build`
 # marker older than the stamp, a newer `direct` marker and a newer symlink to a
-# `tdd` file — all refused — and last a newer regular `tdd` marker, which passes.
+# `build` file — all refused — and last a newer regular `build` marker, which passes.
 # The fixture paths come from the owner's template, so a runner that stops following
 # it turns D40 red. The runner must write the stamp before the Test 2 run and grade
 # T2.9 with it.
@@ -807,19 +807,19 @@ else
   : > "$D40_STAMP"
   touch -t 202001010000 "$D40_STAMP"
   D40_EMPTY="$(d40_grade)"
-  printf '%s\n' '{"route":"tdd"}' > "$D40_M_OLD"
+  printf '%s\n' '{"route":"build"}' > "$D40_M_OLD"
   touch -t 201901010000 "$D40_M_OLD"
   D40_OLD="$(d40_grade)"
   printf '%s\n' '{"route":"direct"}' > "$D40_M_DIRECT"
   D40_DIRECT="$(d40_grade)"
-  printf '%s\n' '{"route":"tdd"}' > "$TMP_DIR/d40-link-target.json"
+  printf '%s\n' '{"route":"build"}' > "$TMP_DIR/d40-link-target.json"
   D40_LINK=unbuilt
   if ln -s "$TMP_DIR/d40-link-target.json" "$D40_M_LINK" 2>/dev/null \
     && [ -L "$D40_M_LINK" ]; then
     D40_LINK="$(d40_grade)"
     rm -f "$D40_M_LINK"
   fi
-  printf '%s\n' '{"route":"tdd"}' > "$D40_M_NEW"
+  printf '%s\n' '{"route":"build"}' > "$D40_M_NEW"
   D40_NEW="$(d40_grade)"
   D40_STAMPED="$(grep -nF ': > "$ROUTE_STAMP"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
   D40_RUN2="$(grep -nF 'run_bounded 360 "$EVAL_DIR/test-code-plan.exp"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
@@ -828,9 +828,9 @@ else
     && [ -n "$D40_STAMPED" ] && [ -n "$D40_RUN2" ] && [ "$D40_STAMPED" -lt "$D40_RUN2" ] \
     && grep -qF '"$(route_recorded "$PLUGIN_DIR" "$PLUGIN_DIR" "$ROUTE_STAMP")"' "$EVAL_RUNNER"; then
     if [ "$D40_LINK" = unbuilt ]; then
-      check "D40 T2.9 grades a newer regular tdd marker and refuses none, an older one and direct (the symlink case could not be built here)" PASS
+      check "D40 T2.9 grades a newer regular build marker and refuses none, an older one and direct (the symlink case could not be built here)" PASS
     else
-      check "D40 T2.9 grades a newer regular tdd marker and refuses none, an older one, direct and a symlink" PASS
+      check "D40 T2.9 grades a newer regular build marker and refuses none, an older one, direct and a symlink" PASS
     fi
   else
     check "D40 eval T2.9 grading drifted (empty=$D40_EMPTY old=$D40_OLD direct=$D40_DIRECT link=$D40_LINK new=$D40_NEW marker=${D40_M_NEW:-unresolved} stamp=${D40_STAMPED:-absent} run2=${D40_RUN2:-absent})" FAIL
@@ -967,7 +967,7 @@ fi
 # is recorded there too: the definitions must stay single-line and at column 0.
 EVAL_FN="$TMP_DIR/eval-helpers.sh"
 EMPTY_FILE="$TMP_DIR/transcript-empty.log"; : > "$EMPTY_FILE"
-FULL_FILE="$TMP_DIR/transcript-full.log"; printf 'Executing via /zensu:tdd\n' > "$FULL_FILE"
+FULL_FILE="$TMP_DIR/transcript-full.log"; printf 'Executing via /zensu:build\n' > "$FULL_FILE"
 if [ ! -f "$EVAL_RUNNER" ]; then
   check "D31 eval runner exists" FAIL
   check "D32 eval runner exists" FAIL
@@ -1004,7 +1004,7 @@ else
     # shellcheck disable=SC1090
     D32_EMPTY="$(. "$EVAL_FN"; not_contains "$EMPTY_FILE" 'Executing via /zensu:autopilot')"
     # shellcheck disable=SC1090
-    D32_HIT="$(. "$EVAL_FN"; not_contains "$FULL_FILE" 'Executing via /zensu:tdd')"
+    D32_HIT="$(. "$EVAL_FN"; not_contains "$FULL_FILE" 'Executing via /zensu:build')"
     if [ "$D32_EMPTY" = PASS ] && [ "$D32_HIT" = FAIL ]; then
       check "D32 not_contains() is satisfied by an empty transcript — the premise the gate exists for" PASS
     else
@@ -1034,18 +1034,18 @@ else
       check "D41 strip_ansi leaves part of an escape behind or respells the ESC byte (param=$D41_PARAM bare=$D41_BARE private=$D41_PRIVATE printf=$D41_SPELLED)" FAIL
     fi
     GAP_FILE="$TMP_DIR/transcript-gap.log"
-    printf 'Executing\033[11Gvia\033[15G/zensu:tdd\nExecuting\033[2Cvia\033[1C/zensu:autopilot\nNo\033[5G—\033[7Gimplement directly\nZensu\033[7Gworkflow —/zensu:tdd\nExecuting-via /zensu:direct\n' > "$GAP_FILE"
+    printf 'Executing\033[11Gvia\033[15G/zensu:build\nExecuting\033[2Cvia\033[1C/zensu:autopilot\nNo\033[5G—\033[7Gimplement directly\nZensu\033[7Gworkflow —/zensu:build\nExecuting-via /zensu:direct\n' > "$GAP_FILE"
     D42_GOT="$(. "$EVAL_FN"
-      printf '%s ' "$(contains "$GAP_FILE" 'Executing via /zensu:tdd')" \
+      printf '%s ' "$(contains "$GAP_FILE" 'Executing via /zensu:build')" \
         "$(not_contains "$GAP_FILE" 'Executing via /zensu:autopilot')" \
         "$(contains "$GAP_FILE" 'No — implement directly')" \
-        "$(contains "$GAP_FILE" 'Zensu workflow — /zensu:tdd')" \
+        "$(contains "$GAP_FILE" 'Zensu workflow — /zensu:build')" \
         "$(not_contains "$GAP_FILE" 'Executing via /zensu:pilot')" \
         "$(contains "$GAP_FILE" 'Executing via /zensu:direct')")"
     if [ "$D42_GOT" = "PASS FAIL PASS PASS PASS FAIL " ]; then
       check "D42 contains/not_contains read a needle's space as blanks or none, so an escape-drawn or missing space matches, an absence check sees such a phrase, and no other character bridges two words" PASS
     else
-      check "D42 eval needle gap drifted (tdd absence label missing pilot hyphen: got '$D42_GOT', want 'PASS FAIL PASS PASS PASS FAIL ')" FAIL
+      check "D42 eval needle gap drifted (build absence label missing pilot hyphen: got '$D42_GOT', want 'PASS FAIL PASS PASS PASS FAIL ')" FAIL
     fi
   fi
 fi
@@ -1108,7 +1108,7 @@ both_have "D34 both branches carry the (S) clause, the ask conjunct and the work
   "(S) — read this before (A)" \
   "and the route field reads 'ask'" \
   "RECORD a Zensu-workflow answer before dispatching" \
-  "after the 'Zensu workflow — /zensu:tdd' answer run" \
+  "after the 'Zensu workflow — /zensu:build' answer run" \
   "The 'No — implement directly' answer records nothing and decides this plan only" \
   "this one Bash call comes BEFORE the 'next tool call' that arm names" \
   "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back" \
@@ -1140,7 +1140,7 @@ else
 fi
 # D36 a configured default is rendered into BOTH branches with its source named,
 # and the RECORD sentence carries the record command exactly as rendered, bound to
-# `--tdd`, the one verb an answer records.
+# `--build`, the one verb an answer records.
 CFG_ROUTE="$TMP_DIR/route-direct.json"
 printf '{"hooks":{"defaultDeliveryRoute":"direct"}}' > "$CFG_ROUTE"
 OUT_ROUTE="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
@@ -1159,7 +1159,7 @@ if [ -n "$OUT_ROUTE" ] && [ -n "$OUT_ROUTE_STRICT" ] \
    && printf '%s' "$OUT_ROUTE_STRICT" | grep -qF 'ZENSU DELIVERY ROUTE: direct (hooks.defaultDeliveryRoute)' \
    && printf '%s' "$OUT_ROUTE_STRICT" | grep -qF 'strict TDD flow' \
    && ! printf '%s' "$OUT_ROUTE" | grep -qF 'strict TDD flow' \
-   && printf '%s' "$D36_CTX" | grep -qF "after the 'Zensu workflow — /zensu:tdd' answer run $D_REC_CMD --tdd — this one Bash call" \
+   && printf '%s' "$D36_CTX" | grep -qF "after the 'Zensu workflow — /zensu:build' answer run $D_REC_CMD --build — this one Bash call" \
    && ! printf '%s' "$D36_CTX" | grep -qF -- "$D_REC_CMD --direct" \
    && ! printf '%s' "$OUT_ROUTE" | grep -qF '__ZENSU_ROUTE_COMMAND__'; then
   check "D36 hooks.defaultDeliveryRoute=direct renders its field in both branches and the exact record command bound to the workflow answer only" PASS
@@ -1190,7 +1190,7 @@ process.stdin.on("end", () => {
   const needles = [
     "ZENSU DELIVERY ROUTE: direct (hooks.defaultDeliveryRoute)",
     "(1) 'Autopilot — /zensu:autopilot'",
-    "(2) 'Zensu workflow — /zensu:tdd'",
+    "(2) 'Zensu workflow — /zensu:build'",
     "(3) 'Pilot — /zensu:pilot'",
     "(4) 'No — implement directly'",
   ];
@@ -1225,8 +1225,8 @@ done
   && check "D45 the directive carries the human-present field right below the route field, read from the host entrypoint and the payload permission mode" PASS \
   || check "D45 human-present field:$D45_BAD" FAIL
 
-D46_CFG_TDD="$TMP_DIR/d46-route-tdd.json"
-printf '{"hooks":{"defaultDeliveryRoute":"tdd"}}' > "$D46_CFG_TDD"
+D46_CFG_BUILD="$TMP_DIR/d46-route-build.json"
+printf '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$D46_CFG_BUILD"
 D46_SP='# Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -1246,7 +1246,7 @@ d46_ctx() {
 }
 d46_notice() {
   printf '%s' "$1" | grep -qF "the approved plan names its own executor, $2, so Zensu asks no delivery-route question for it" \
-    && printf '%s' "$1" | grep -qF '/zensu:tdd runs this plan under the Zensu workflow' \
+    && printf '%s' "$1" | grep -qF '/zensu:build runs this plan under the Zensu workflow' \
     && ! printf '%s' "$1" | grep -qF 'AskUserQuestion' \
     && ! printf '%s' "$1" | grep -qF 'ZENSU DELIVERY ROUTE:' \
     && ! printf '%s' "$1" | grep -qiE 'non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b' \
@@ -1258,20 +1258,20 @@ D46_RESPONSE="$(d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
 D46_SLASH="$(d46_ctx response 'Execute this plan with /gsd:execute-phase, one phase at a time.' "$ZENSU_CONFIG")"
 { d46_notice "$D46_INPUT" superpowers:executing-plans && d46_notice "$D46_RESPONSE" superpowers:executing-plans \
   && d46_notice "$D46_SLASH" gsd:execute-phase; } \
-  && check "D46 a plan naming its own executor gets the short notice naming that skill and /zensu:tdd as the way back, with no route question, through the live tool_response carrier too" PASS \
+  && check "D46 a plan naming its own executor gets the short notice naming that skill and /zensu:build as the way back, with no route question, through the live tool_response carrier too" PASS \
   || check "D46 foreign executor notice (input='${D46_INPUT:0:160}' response='${D46_RESPONSE:0:160}' slash='${D46_SLASH:0:160}')" FAIL
-D46_TDD="$(d46_ctx response "$D46_SP" "$D46_CFG_TDD")"
-{ printf '%s' "$D46_TDD" | grep -qF 'ZENSU DELIVERY ROUTE: tdd (hooks.defaultDeliveryRoute)' \
-  && ! printf '%s' "$D46_TDD" | grep -qF 'names its own executor'; } \
+D46_BUILD="$(d46_ctx response "$D46_SP" "$D46_CFG_BUILD")"
+{ printf '%s' "$D46_BUILD" | grep -qF 'ZENSU DELIVERY ROUTE: build (hooks.defaultDeliveryRoute)' \
+  && ! printf '%s' "$D46_BUILD" | grep -qF 'names its own executor'; } \
   && check "D46a a decided route still dispatches a plan that names its own executor" PASS \
-  || check "D46a decided route with a foreign executor ('${D46_TDD:0:200}')" FAIL
+  || check "D46a decided route with a foreign executor ('${D46_BUILD:0:200}')" FAIL
 D46_OWN="$(d46_ctx response "$D46_SP
-Execute this plan via /zensu:tdd when the user asks for the review chain." "$ZENSU_CONFIG")"
+Execute this plan via /zensu:build when the user asks for the review chain." "$ZENSU_CONFIG")"
 D46_MENTION="$(d46_ctx response '1. Implement superpowers:brainstorming skill improvements
 2. Implement the plan using key:value pairs' "$ZENSU_CONFIG")"
 D46_NONE="$(d46_ctx none '' "$ZENSU_CONFIG")"
 D46_OWN_BAD=""
-for d46_own in 'Execute this plan with `zensu:tdd`.' 'Execute this plan with zensu:tdd.' 'Afterwards run /zensu:tdd so the change gets the review chain.'; do
+for d46_own in 'Execute this plan with `zensu:build`.' 'Execute this plan with zensu:build.' 'Afterwards run /zensu:build so the change gets the review chain.'; do
   d46_asks "$(d46_ctx response "$D46_SP
 $d46_own" "$ZENSU_CONFIG")" || D46_OWN_BAD="$D46_OWN_BAD [$d46_own]"
 done
@@ -1407,7 +1407,7 @@ else
       || check "D46e a reader fault or another tool's payload dropped the route question:$D46E_BAD" FAIL
   fi
 fi
-rm -f "$D46_CFG_TDD"
+rm -f "$D46_CFG_BUILD"
 
 echo "----"
 echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

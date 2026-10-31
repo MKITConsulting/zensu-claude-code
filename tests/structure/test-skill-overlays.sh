@@ -2,7 +2,7 @@
 set -u
 
 # Structure test for additive-only repo skill overlays. Pins per supporting
-# skill (tdd, cover, pr-team-review): the anchor comment exists exactly once,
+# skill (build, cover, pr-team-review): the anchor comment exists exactly once,
 # the injection instruction (overlays path, additive-only wording,
 # never-disable list, conflict-wins + surfaced line, missing/empty no-op) and
 # the trust-boundary sentence sit at the anchor. Pins the README section
@@ -12,7 +12,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 COVER_MD="$PLUGIN_DIR/skills/cover/SKILL.md"
 PRTR_MD="$(skill_text_file "$PLUGIN_DIR/skills/pr-team-review")"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
@@ -69,7 +69,7 @@ overlay_pins() {
     check "P1 $key no-op + trust boundary at the anchor" FAIL
   fi
 }
-overlay_pins tdd "$TDD_MD"
+overlay_pins build "$TDD_MD"
 overlay_pins cover "$COVER_MD"
 overlay_pins pr-team-review "$PRTR_MD"
 
@@ -84,7 +84,7 @@ if grep -qF 'NEVER disable, replace, weaken, or reorder' "$REVIEW_DOC" && grep -
 else
   check "P2b docs/review-chain.md states additive-only + trust boundary" FAIL
 fi
-if grep -qF '.zensu/overlays/tdd.md' "$REVIEW_DOC" && grep -qF 'Team convention:' "$REVIEW_DOC"; then
+if grep -qF '.zensu/overlays/build.md' "$REVIEW_DOC" && grep -qF 'Team convention:' "$REVIEW_DOC"; then
   check "P2c docs/review-chain.md carries an example overlay" PASS
 else
   check "P2c docs/review-chain.md carries an example overlay" FAIL

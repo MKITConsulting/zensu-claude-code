@@ -1,5 +1,5 @@
 #!/bin/bash
-# --tdd-complete refuses when the session's TDD plan has no usable Requirements table.
+# --tdd-complete refuses when the session's Zensu plan has no usable Requirements table.
 #
 # /zensu:converge anchors its whole flow-back audit on that table. Without one it
 # takes its documented legacy stop and reports nothing — and in /zensu:autopilot
@@ -71,7 +71,7 @@ unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN \
 echo "== FR-001: the library judges a plan on its own =="
 FIX="$(mktemp -d)" || exit 1
 cat > "$FIX/filled.md" <<'PLAN'
-# TDD Plan: filled
+# Zensu Plan: filled
 
 ## Requirements
 | ID | Requirement | Source |
@@ -82,7 +82,7 @@ cat > "$FIX/filled.md" <<'PLAN'
 ## Preconditions
 PLAN
 cat > "$FIX/placeholder.md" <<'PLAN'
-# TDD Plan: placeholder
+# Zensu Plan: placeholder
 
 ## Requirements
 | ID | Requirement | Source |
@@ -93,7 +93,7 @@ cat > "$FIX/placeholder.md" <<'PLAN'
 ## Preconditions
 PLAN
 cat > "$FIX/none.md" <<'PLAN'
-# TDD Plan: none
+# Zensu Plan: none
 
 ## Steps
 | Step | Type |
@@ -103,7 +103,7 @@ PLAN
 # describes this very check reads "...still carries {placeholder} braces", and a
 # brace-anywhere rule would reject it.
 cat > "$FIX/quotes-braces.md" <<'PLAN'
-# TDD Plan: quotes braces
+# Zensu Plan: quotes braces
 
 ## Requirements
 | ID | Requirement | Source |
@@ -116,7 +116,7 @@ PLAN
 # space. A section-end rule that fired on it would drop every row written below
 # a step subsection.
 cat > "$FIX/rows-after-subheading.md" <<'PLAN'
-# TDD Plan: subheading
+# Zensu Plan: subheading
 
 ## Requirements
 ### Group A
@@ -128,7 +128,7 @@ cat > "$FIX/rows-after-subheading.md" <<'PLAN'
 PLAN
 # Rows that sit OUTSIDE the section are not the section's rows.
 cat > "$FIX/rows-outside.md" <<'PLAN'
-# TDD Plan: outside
+# Zensu Plan: outside
 
 ## Requirements
 | ID | Requirement | Source |
@@ -158,7 +158,7 @@ bash "$REQ" --plan "$FIX/rows-after-subheading.md" >/dev/null 2>&1
 check "L7 a '### ' subheading does not close the Requirements section" "$(verdict $?)"
 
 cat > "$FIX/list.md" <<'PLAN'
-# TDD Plan: list
+# Zensu Plan: list
 
 ## Requirements
 | ID | Requirement | Source |
@@ -218,7 +218,7 @@ check "L10 a CRLF plan is judged the same as an LF plan" "$(verdict $?)"
 # whole suite green. In the re-ordered shape the fallback (split index 3) holds
 # the ID cell, so a placeholder table would score as FILLED without the rules.
 cat > "$FIX/reordered.md" <<'PLAN'
-# TDD Plan: reordered
+# Zensu Plan: reordered
 
 ## Requirements
 | Requirement | ID | Source |
@@ -228,7 +228,7 @@ cat > "$FIX/reordered.md" <<'PLAN'
 ## Preconditions
 PLAN
 cat > "$FIX/reordered-placeholder.md" <<'PLAN'
-# TDD Plan: reordered placeholder
+# Zensu Plan: reordered placeholder
 
 ## Requirements
 | Requirement | ID | Source |
@@ -265,7 +265,7 @@ fi
 # ILLUSTRATES the table (this repo's own docs do) reads as having a real one,
 # and an H2 quoted inside a fence closes a real section. Both directions silent.
 cat > "$FIX/fenced-only.md" <<'PLAN'
-# TDD Plan: fenced only
+# Zensu Plan: fenced only
 
 ## Steps
 Example of the shape a plan must carry:
@@ -278,7 +278,7 @@ Example of the shape a plan must carry:
 ```
 PLAN
 cat > "$FIX/fenced-inside.md" <<'PLAN'
-# TDD Plan: fenced inside
+# Zensu Plan: fenced inside
 
 ## Requirements
 | ID | Requirement | Source |
@@ -300,7 +300,7 @@ OUT_L17="$(bash "$REQ" --plan "$FIX/fenced-inside.md" 2>/dev/null)"
 check "L17 a fenced block after the table neither closes it nor adds rows" "$(verdict $?)"
 # The documented fallback (split index 3) when no header row is recognizable.
 cat > "$FIX/no-header.md" <<'PLAN'
-# TDD Plan: no header
+# Zensu Plan: no header
 
 ## Requirements
 | AC-001 | a real requirement with no header row above it | spec |
@@ -308,7 +308,7 @@ cat > "$FIX/no-header.md" <<'PLAN'
 ## Preconditions
 PLAN
 cat > "$FIX/fence-unterminated.md" <<'PLAN'
-# TDD Plan: unterminated
+# Zensu Plan: unterminated
 
 ## Context
 ```
@@ -338,14 +338,14 @@ check "L15 the library's size cap equals plan-payload-v1.js's exported PLAN_FILE
 # with "the section holds 0 AC/FR row(s)" — an author staring at filled rows, whose
 # only offered remedy was the env switch. The shipped template writes bare ids, so
 # this never bit the default path; it bit hand-written tables and the repo overrides
-# skills/tdd/SKILL.md explicitly permits.
+# skills/build/SKILL.md explicitly permits.
 mkdir -p "$FIX"
 # printf, NOT an unquoted heredoc: one of the fixtures is a code-span id (`FR-001`),
 # and an unquoted heredoc runs backticks as command substitution — the fixture would
 # silently become an empty cell and the check would pass for the wrong reason.
 write_rows() {
   printf '%s\n' \
-    "# TDD Plan: $1" \
+    "# Zensu Plan: $1" \
     '' \
     '## Requirements' \
     '| ID | Requirement | Source |' \
@@ -367,7 +367,7 @@ check "L20 a decorated id cell (bold, suffix, list, link, code) is still a recog
 # A cell that merely MENTIONS an id inside prose is not an id cell, or every Steps
 # table row would be counted as a requirement.
 cat > "$FIX/deco-prose.md" <<'PLAN'
-# TDD Plan: prose
+# Zensu Plan: prose
 
 ## Requirements
 | ID | Requirement | Source |
@@ -385,7 +385,7 @@ check "L20b a cell that only MENTIONS an id in prose is not an id cell" "$(verdi
 # table scored as filled. L12 covers the case where a header IS locatable; this is
 # the one where none is, which is exactly where the guess used to be silent.
 cat > "$FIX/idcol-fallback.md" <<'PLAN'
-# TDD Plan: idcol
+# Zensu Plan: idcol
 
 ## Requirements
 | Criterion | ID |
@@ -397,7 +397,7 @@ bash "$REQ" --plan "$FIX/idcol-fallback.md" >/dev/null 2>&1
 check "L21 an all-placeholder table whose id sits at the fallback index is EMPTY, not filled" "$(verdict $?)"
 # Positive control: the same shape with the requirement actually written in.
 cat > "$FIX/idcol-filled.md" <<'PLAN'
-# TDD Plan: idcol filled
+# Zensu Plan: idcol filled
 
 ## Requirements
 | Criterion | ID |
@@ -425,14 +425,14 @@ check "L22c UNRECOGNIZED keeps exit 4, so no caller contract moved" "$(verdict $
 # then ends with odd parity: the heading is read as fenced and the run dies at exit 2
 # with "unterminated code fence" against a complete table. `## Context` holds
 # {Spec verbatim}, so a spec that demonstrates a fence is the obvious trigger.
-printf '%s\n' '# TDD Plan: nested' '' '## Context' '~~~' '```' 'a nested example' '```' '~~~' '' \
+printf '%s\n' '# Zensu Plan: nested' '' '## Context' '~~~' '```' 'a nested example' '```' '~~~' '' \
   '## Requirements' '| ID | Requirement | Source |' '|----|-------------|--------|' \
   '| AC-001 | a real requirement | spec |' > "$FIX/nested-fence.md"
 bash "$REQ" --plan "$FIX/nested-fence.md" >/dev/null 2>&1
 check "L23 a fence nested inside another fence does not flip parity (no false unterminated-fence refusal)" "$(verdict $?)"
 # The guard must not weaken L16/L19: a fence that is genuinely open is still a parse
 # failure, and a table that lives only inside a fence is still not a table.
-printf '%s\n' '# TDD Plan: still open' '' '## Requirements' '```' '| AC-001 | x | spec |' > "$FIX/still-open.md"
+printf '%s\n' '# Zensu Plan: still open' '' '## Requirements' '```' '| AC-001 | x | spec |' > "$FIX/still-open.md"
 bash "$REQ" --plan "$FIX/still-open.md" >/dev/null 2>&1
 [ $? -eq 2 ]
 check "L23b a genuinely unterminated fence is still exit 2" "$(verdict $?)"
@@ -636,7 +636,7 @@ activate_session "$SID_M"
 # instead of letting it surface as twenty unrelated failures.
 [ "$(zensu_resolve_project_dir 2>/dev/null)" = "$PROJ_REAL" ]
 check "R0pre the record's project root is the canonical spelling receipt_for bounds against" "$(verdict $?)"
-stage "$SID_M" "2026-01-01-0101_tdd-missing" "$BODIES/none.md"
+stage "$SID_M" "2026-01-01-0101_build-missing" "$BODIES/none.md"
 ERR_M="$(bash "$LOG" --tdd-complete --session "$SID_M" 2>&1 >/dev/null)"
 RC_M=$?
 [ "$RC_M" -ne 0 ]
@@ -647,7 +647,7 @@ printf '%s' "$ERR_M" | grep -qF '/zensu:converge'
 check "M3 the refusal explains what the table is for, not just that it failed" "$(verdict $?)"
 printf '%s' "$ERR_M" | grep -qF 'ZENSU_REQUIREMENTS_GATE=off'
 check "M4 the refusal documents the escape hatch instead of hiding it" "$(verdict $?)"
-printf '%s' "$ERR_M" | grep -qF '2026-01-01-0101_tdd-missing.md'
+printf '%s' "$ERR_M" | grep -qF '2026-01-01-0101_build-missing.md'
 check "M5 the refusal names the plan path it judged" "$(verdict $?)"
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_M")" implComplete)" != "true" ]
 check "M6 a refused completion leaves implComplete unset" "$(verdict $?)"
@@ -655,7 +655,7 @@ check "M6 a refused completion leaves implComplete unset" "$(verdict $?)"
 echo "== AC-002: placeholder-only table =="
 SID_P="rq-placeholder"
 activate_session "$SID_P"
-stage "$SID_P" "2026-01-01-0202_tdd-placeholder" "$BODIES/placeholder.md"
+stage "$SID_P" "2026-01-01-0202_build-placeholder" "$BODIES/placeholder.md"
 ERR_P="$(bash "$LOG" --tdd-complete --session "$SID_P" 2>&1 >/dev/null)"
 RC_P=$?
 # A bare non-zero status cannot tell THIS refusal from the session-state refusal,
@@ -669,7 +669,7 @@ check "P2 the placeholder refusal leaves implComplete unset" "$(verdict $?)"
 echo "== AC-003 / AC-005: a filled table, resolved through the receipt =="
 SID_F="rq-filled"
 activate_session "$SID_F"
-stage "$SID_F" "2026-01-01-0303_tdd-filled" "$BODIES/filled.md"
+stage "$SID_F" "2026-01-01-0303_build-filled" "$BODIES/filled.md"
 bash "$LOG" --tdd-complete --session "$SID_F" >/dev/null 2>&1
 [ $? -eq 0 ]
 check "D1 completion is accepted when the derived plan carries a filled table" "$(verdict $?)"
@@ -696,8 +696,8 @@ activate_session "$SID_X"
 # The flag names the session's OWN plan, whose body is unusable: if the flag were
 # ignored the derived sibling is the same file, so the discriminator is the
 # verdict text, not merely a non-zero status.
-stage "$SID_X" "2026-01-01-0404_tdd-explicit" "$BODIES/none.md"
-ERR_X="$(bash "$LOG" --tdd-complete --session "$SID_X" --plan "$PROJ/.zensu/plans/2026-01-01-0404_tdd-explicit.md" 2>&1 >/dev/null)"
+stage "$SID_X" "2026-01-01-0404_build-explicit" "$BODIES/none.md"
+ERR_X="$(bash "$LOG" --tdd-complete --session "$SID_X" --plan "$PROJ/.zensu/plans/2026-01-01-0404_build-explicit.md" 2>&1 >/dev/null)"
 RC_X=$?
 [ "$RC_X" -ne 0 ] && printf '%s' "$ERR_X" | grep -qF 'PLAN REQUIREMENTS MISSING'
 check "X1 an explicit --plan is judged by this gate" "$(verdict $?)"
@@ -705,15 +705,15 @@ check "X1 an explicit --plan is judged by this gate" "$(verdict $?)"
 # the skill teaches the project-relative spelling, and this channel is fail-closed.
 SID_XR="rq-explicit-relative"
 activate_session "$SID_XR"
-stage "$SID_XR" "2026-01-01-0909_tdd-relative" "$BODIES/filled.md"
-( cd / && bash "$LOG" --tdd-complete --session "$SID_XR" --plan ".zensu/plans/2026-01-01-0909_tdd-relative.md" >/dev/null 2>&1 )
+stage "$SID_XR" "2026-01-01-0909_build-relative" "$BODIES/filled.md"
+( cd / && bash "$LOG" --tdd-complete --session "$SID_XR" --plan ".zensu/plans/2026-01-01-0909_build-relative.md" >/dev/null 2>&1 )
 [ $? -eq 0 ]
 check "X1b a project-relative --plan resolves from a foreign cwd" "$(verdict $?)"
 # A --plan outside the project's own plans directory is refused: without this the
 # flag silently defeats the session anchoring the derivation exists to provide.
 SID_XO="rq-explicit-outside"
 activate_session "$SID_XO"
-stage "$SID_XO" "2026-01-01-1010_tdd-outside" "$BODIES/filled.md"
+stage "$SID_XO" "2026-01-01-1010_build-outside" "$BODIES/filled.md"
 OUTSIDE="$(mktemp -d)/foreign.md"; cp "$BODIES/filled.md" "$OUTSIDE"
 ERR_XO="$(bash "$LOG" --tdd-complete --session "$SID_XO" --plan "$OUTSIDE" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_XO" | grep -qF 'outside'
@@ -722,16 +722,16 @@ rm -rf "$(dirname "$OUTSIDE")"
 # A plan under .zensu/plans/ but from another session is refused on the stem.
 SID_XS="rq-explicit-stem"
 activate_session "$SID_XS"
-stage "$SID_XS" "2026-01-01-1111_tdd-stem" "$BODIES/filled.md"
-cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2020-01-01-0000_tdd-someone-else.md"
-ERR_XS="$(bash "$LOG" --tdd-complete --session "$SID_XS" --plan "$PROJ/.zensu/plans/2020-01-01-0000_tdd-someone-else.md" 2>&1 >/dev/null)"
+stage "$SID_XS" "2026-01-01-1111_build-stem" "$BODIES/filled.md"
+cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2020-01-01-0000_build-someone-else.md"
+ERR_XS="$(bash "$LOG" --tdd-complete --session "$SID_XS" --plan "$PROJ/.zensu/plans/2020-01-01-0000_build-someone-else.md" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_XS" | grep -qF 'run log sibling'
 check "X1d a stale plan from another session cannot satisfy the gate through --plan" "$(verdict $?)"
 SID_XA="rq-explicit-absent"
 activate_session "$SID_XA"
-stage "$SID_XA" "2026-01-01-0505_tdd-explicit-absent" "$BODIES/filled.md"
-rm -f "$PROJ/.zensu/plans/2026-01-01-0505_tdd-explicit-absent.md"
-ERR_XA="$(bash "$LOG" --tdd-complete --session "$SID_XA" --plan "$PROJ/.zensu/plans/2026-01-01-0505_tdd-explicit-absent.md" 2>&1 >/dev/null)"
+stage "$SID_XA" "2026-01-01-0505_build-explicit-absent" "$BODIES/filled.md"
+rm -f "$PROJ/.zensu/plans/2026-01-01-0505_build-explicit-absent.md"
+ERR_XA="$(bash "$LOG" --tdd-complete --session "$SID_XA" --plan "$PROJ/.zensu/plans/2026-01-01-0505_build-explicit-absent.md" 2>&1 >/dev/null)"
 RC_XA=$?
 [ "$RC_XA" -ne 0 ] && printf '%s' "$ERR_XA" | grep -qF 'could not judge the plan'
 check "X2 an explicit --plan that names nothing refuses, and does NOT claim the table was read" "$(verdict $?)"
@@ -753,7 +753,7 @@ check "X4 an empty --plan is a usage error, not a plan-content verdict" "$(verdi
 echo "== AC-006: the escape hatch, and its independence =="
 SID_E="rq-escape"
 activate_session "$SID_E"
-stage "$SID_E" "2026-01-01-0606_tdd-escape" "$BODIES/none.md"
+stage "$SID_E" "2026-01-01-0606_build-escape" "$BODIES/none.md"
 ZENSU_REQUIREMENTS_GATE=off bash "$LOG" --tdd-complete --session "$SID_E" >/dev/null 2>&1
 [ $? -eq 0 ]
 check "E1 ZENSU_REQUIREMENTS_GATE=off bypasses the gate for an exempted session" "$(verdict $?)"
@@ -768,9 +768,9 @@ check "E5 taking this gate's escape records a real ledger entry" "$(verdict $?)"
 # requirements table as well.
 SID_L="rq-landing-off"
 activate_session "$SID_L"
-stage "$SID_L" "2026-01-01-0707_tdd-landing-off" "$BODIES/none.md"
+stage "$SID_L" "2026-01-01-0707_build-landing-off" "$BODIES/none.md"
 ERR_L="$(ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --tdd-complete --session "$SID_L" \
-  --plan "$PROJ/.zensu/plans/2026-01-01-0707_tdd-landing-off.md" 2>&1 >/dev/null)"
+  --plan "$PROJ/.zensu/plans/2026-01-01-0707_build-landing-off.md" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_L" | grep -qF 'PLAN REQUIREMENTS MISSING'
 check "E2 ZENSU_EDIT_LANDING_GATE=off does NOT disable the requirements gate" "$(verdict $?)"
 # The converse: this gate's own switch must not disarm the edit-landing one.
@@ -797,7 +797,7 @@ check "E4 both escape names are in the bypass-ledger ALLOWLIST assignment" "$(ve
 # skipped, while both docs promise the recording unconditionally.
 SID_BOTH="rq-both-off"
 activate_session "$SID_BOTH"
-stage "$SID_BOTH" "2026-01-01-2121_tdd-both-off" "$BODIES/none.md"
+stage "$SID_BOTH" "2026-01-01-2121_build-both-off" "$BODIES/none.md"
 ZENSU_EDIT_LANDING_GATE=off ZENSU_REQUIREMENTS_GATE=off bash "$LOG" --tdd-complete --session "$SID_BOTH" >/dev/null 2>&1
 BYPASSES_BOTH="$(tdd_bypasses "$(tdd_state_file "$SID_BOTH")" 2>/dev/null)"
 printf '%s' "$BYPASSES_BOTH" | grep -qF 'ZENSU_REQUIREMENTS_GATE' \
@@ -811,9 +811,9 @@ SID_SU="rq-stem-unchecked"
 activate_session "$SID_SU"
 bash "$LOG" --tdd-begin --session "$SID_SU" >/dev/null 2>&1
 mkdir -p "$PROJ/.zensu/plans"
-cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2019-01-01-0000_tdd-stale-but-filled.md"
+cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2019-01-01-0000_build-stale-but-filled.md"
 ERR_SU="$(ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --tdd-complete --session "$SID_SU" \
-  --plan "$PROJ/.zensu/plans/2019-01-01-0000_tdd-stale-but-filled.md" 2>&1 >/dev/null)"
+  --plan "$PROJ/.zensu/plans/2019-01-01-0000_build-stale-but-filled.md" 2>&1 >/dev/null)"
 [ $? -eq 0 ] && printf '%s' "$ERR_SU" | grep -qF 'REQUIREMENTS GATE STEM UNCHECKED'
 check "E7 with the receipt gate off the stem bound is dropped AND disclosed" "$(verdict $?)"
 
@@ -836,7 +836,7 @@ RG_RC=$?
 check "RG0 real git refuses this suite's project as owned by another user" "$(verdict $?)"
 SID_RG="rq-git-refused"
 activate_session "$SID_RG"
-stage "$SID_RG" "2026-01-01-2323_tdd-git-refused" "$BODIES/none.md"
+stage "$SID_RG" "2026-01-01-2323_build-git-refused" "$BODIES/none.md"
 ERR_RG="$(foreign_owner bash "$LOG" --tdd-complete --session "$SID_RG" 2>&1 >/dev/null)"
 RC_RG=$?
 [ "$RC_RG" -eq 1 ] && printf '%s' "$ERR_RG" | grep -qF 'git could not list this worktree' \
@@ -891,8 +891,8 @@ check "N1b it names the derived-but-missing cause, not the generic one" "$(verdi
 # A relative `log` is re-anchored on the project rather than on the caller's cwd.
 SID_NR="rq-relative-log"
 activate_session "$SID_NR"
-stage "$SID_NR" "2026-01-01-1212_tdd-relative-log" "$BODIES/none.md"
-printf '{"schema":"edit-landing-v1","session":"%s","log":".zensu/logs/2026-01-01-1212_tdd-relative-log.log","clean":true}\n' \
+stage "$SID_NR" "2026-01-01-1212_build-relative-log" "$BODIES/none.md"
+printf '{"schema":"edit-landing-v1","session":"%s","log":".zensu/logs/2026-01-01-1212_build-relative-log.log","clean":true}\n' \
   "$SID_NR" > "$(receipt_for "$SID_NR")"
 ERR_NR="$(bash "$LOG" --tdd-complete --session "$SID_NR" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_NR" | grep -qF 'PLAN REQUIREMENTS MISSING'
@@ -901,9 +901,9 @@ check "N2 a relative log path in the receipt still derives the plan" "$(verdict 
 # check is what stops a receipt from aiming the read anywhere on the host.
 SID_NO="rq-outside-log"
 activate_session "$SID_NO"
-stage "$SID_NO" "2026-01-01-1313_tdd-outside-log" "$BODIES/none.md"
+stage "$SID_NO" "2026-01-01-1313_build-outside-log" "$BODIES/none.md"
 printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","clean":true}\n' \
-  "$SID_NO" "/tmp/elsewhere/.zensu/logs/2026-01-01-1313_tdd-outside-log.log" > "$(receipt_for "$SID_NO")"
+  "$SID_NO" "/tmp/elsewhere/.zensu/logs/2026-01-01-1313_build-outside-log.log" > "$(receipt_for "$SID_NO")"
 # The discriminator is the in-project same-stem plan `stage` already wrote: a gate
 # that resolved the foreign log would derive THAT plan (the derived path is always
 # project-rooted) and refuse. The needle is the cause-specific half of the split
@@ -922,9 +922,9 @@ check "N3 a log path outside the project's .zensu/logs derives nothing" "$(verdi
 # verdict's ABSENCE is what still proves the receipt was not mined.
 SID_NS="rq-wrong-schema"
 activate_session "$SID_NS"
-stage "$SID_NS" "2026-01-01-1414_tdd-wrong-schema" "$BODIES/none.md"
+stage "$SID_NS" "2026-01-01-1414_build-wrong-schema" "$BODIES/none.md"
 printf '{"schema":"something-else","log":"%s"}\n' \
-  "$PROJ/.zensu/logs/2026-01-01-1414_tdd-wrong-schema.log" > "$(receipt_for "$SID_NS")"
+  "$PROJ/.zensu/logs/2026-01-01-1414_build-wrong-schema.log" > "$(receipt_for "$SID_NS")"
 ERR_NS="$(bash "$LOG" --tdd-complete --session "$SID_NS" 2>&1 >/dev/null)"
 [ $? -ne 0 ] \
   && printf '%s' "$ERR_NS" | grep -qF 'carries a schema this runtime does not know' \
@@ -935,7 +935,7 @@ check "N4 a receipt with a foreign schema is refused on its verdict, not mined f
 # runtime that reached the table gate would say so.
 SID_NM="rq-malformed"
 activate_session "$SID_NM"
-stage "$SID_NM" "2026-01-01-1515_tdd-malformed" "$BODIES/none.md"
+stage "$SID_NM" "2026-01-01-1515_build-malformed" "$BODIES/none.md"
 printf '{"schema":"edit-landing-v1","log":"broken\n' > "$(receipt_for "$SID_NM")"
 ERR_NM="$(bash "$LOG" --tdd-complete --session "$SID_NM" 2>&1 >/dev/null)"
 [ $? -ne 0 ] \
@@ -949,7 +949,7 @@ echo "== AC-004: the not-gated states, driven through the real verb =="
 # refuse here — the shape mirrors test-chain-terminus-zero-change-gate.sh.
 SID_G1="rq-clean-tree"
 activate_session "$SID_G1"
-stage "$SID_G1" "2026-01-01-1616_tdd-clean-tree" "$BODIES/none.md"
+stage "$SID_G1" "2026-01-01-1616_build-clean-tree" "$BODIES/none.md"
 git -C "$PROJ" -c user.email=t@example.invalid -c user.name=zensu-test \
   -c commit.gpgsign=false -c core.hooksPath=/dev/null add -A >/dev/null 2>&1
 git -C "$PROJ" -c user.email=t@example.invalid -c user.name=zensu-test \
@@ -975,12 +975,12 @@ echo "== Directory-level symlink guards and the unconditional stem bound =="
 # would leave every other check green.
 SID_SP="rq-symlink-plans"
 activate_session "$SID_SP"
-stage "$SID_SP" "2026-01-01-1818_tdd-symlink-plans" "$BODIES/filled.md"
+stage "$SID_SP" "2026-01-01-1818_build-symlink-plans" "$BODIES/filled.md"
 REALPLANS="$PROJ/.zensu/plans"
 ALTPLANS="$PROJ/.zensu/plans-real"
 mv "$REALPLANS" "$ALTPLANS" && ln -s "$ALTPLANS" "$REALPLANS" 2>/dev/null
 if [ -L "$REALPLANS" ] && [ -n "$(readlink "$REALPLANS")" ]; then
-  ERR_SP="$(bash "$LOG" --tdd-complete --session "$SID_SP" --plan "$REALPLANS/2026-01-01-1818_tdd-symlink-plans.md" 2>&1 >/dev/null)"
+  ERR_SP="$(bash "$LOG" --tdd-complete --session "$SID_SP" --plan "$REALPLANS/2026-01-01-1818_build-symlink-plans.md" 2>&1 >/dev/null)"
   [ $? -ne 0 ] && printf '%s' "$ERR_SP" | grep -qF 'is a symlink'
   check "SL1 a symlinked .zensu/plans is refused, not resolved through" "$(verdict $?)"
 else
@@ -1000,7 +1000,7 @@ rm -f "$REALPLANS" 2>/dev/null; mv "$ALTPLANS" "$REALPLANS" 2>/dev/null
 # be rejected by the containment check instead and prove nothing about the lstat.
 SID_SLG="rq-symlink-logs"
 activate_session "$SID_SLG"
-stage "$SID_SLG" "2026-01-01-1919_tdd-symlink-logs" "$BODIES/none.md"
+stage "$SID_SLG" "2026-01-01-1919_build-symlink-logs" "$BODIES/none.md"
 REALLOGS="$PROJ/.zensu/logs"
 ALTLOGS="$PROJ/.zensu/logs-real"
 mv "$REALLOGS" "$ALTLOGS" && ln -s "$ALTLOGS" "$REALLOGS" 2>/dev/null
@@ -1019,10 +1019,10 @@ SID_NS2="rq-no-stem"
 activate_session "$SID_NS2"
 bash "$LOG" --tdd-begin --session "$SID_NS2" >/dev/null 2>&1
 mkdir -p "$PROJ/.zensu/plans"
-cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2020-02-02-0000_tdd-old-but-filled.md"
+cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2020-02-02-0000_build-old-but-filled.md"
 RP_NS2="$(receipt_for "$SID_NS2")"; mkdir -p "$(dirname "$RP_NS2")"
 printf '{"schema":"edit-landing-v1","session":"%s","log":"/outside/.zensu/logs/x.log","clean":true}\n' "$SID_NS2" > "$RP_NS2"
-ERR_NS2="$(bash "$LOG" --tdd-complete --session "$SID_NS2" --plan "$PROJ/.zensu/plans/2020-02-02-0000_tdd-old-but-filled.md" 2>&1 >/dev/null)"
+ERR_NS2="$(bash "$LOG" --tdd-complete --session "$SID_NS2" --plan "$PROJ/.zensu/plans/2020-02-02-0000_build-old-but-filled.md" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_NS2" | grep -qF 'no run-log stem could be derived'
 check "SB1 an explicit --plan with no derivable stem is REFUSED, not accepted on the directory bound" "$(verdict $?)"
 
@@ -1034,7 +1034,7 @@ SID_W="rq-writer-seam"
 activate_session "$SID_W"
 bash "$LOG" --tdd-begin --session "$SID_W" >/dev/null 2>&1
 mkdir -p "$PROJ/.zensu/logs" "$PROJ/.zensu/plans"
-W_STEM="2026-01-01-2020_tdd-writer-seam"
+W_STEM="2026-01-01-2020_build-writer-seam"
 printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/${W_STEM}.log"
 cp "$BODIES/none.md" "$PROJ/.zensu/plans/${W_STEM}.md"
 bash "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" --log "$PROJ/.zensu/logs/${W_STEM}.log" \
@@ -1062,7 +1062,7 @@ check "WS1c the writer stamps edit-landing-v2, so the log domain is named not in
 SID_V1="rq-legacy-v1"
 activate_session "$SID_V1"
 bash "$LOG" --tdd-begin --session "$SID_V1" >/dev/null 2>&1
-V1_STEM="2026-01-01-2121_tdd-legacy-v1"
+V1_STEM="2026-01-01-2121_build-legacy-v1"
 mkdir -p "$PROJ/.zensu/logs" "$PROJ/.zensu/plans"
 printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/${V1_STEM}.log"
 cp "$BODIES/none.md" "$PROJ/.zensu/plans/${V1_STEM}.md"
@@ -1101,7 +1101,7 @@ RW_DIR="$(mktemp -d)"
 RW_BIN="$RW_DIR/bin"
 mkdir -p "$RW_BIN"
 cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
-  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" "$RW_BIN/"
+  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" "$PLUGIN_DIR/hooks/lib/edit-landing-claims-v1.js" "$RW_BIN/"
 # A real repo with a real landed change, so the GRADING verdict is clean and the
 # exit code below can only be about receipt plumbing.
 RW_PROJ="$RW_DIR/proj"
@@ -1152,7 +1152,7 @@ else
 fi
 RW_BARE="$RW_DIR/bare"
 mkdir -p "$RW_BARE"
-cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$RW_BARE/"
+cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$PLUGIN_DIR/hooks/lib/edit-landing-claims-v1.js" "$RW_BARE/"
 RW_BARE_KEY="scv1_$(printf 'd%.0s' $(seq 64))"
 RW_BARE_OUT="$(/bin/bash "$RW_BARE/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session "$RW_BARE_KEY" 2>&1)"

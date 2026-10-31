@@ -17,7 +17,7 @@ the key or escape of each hook.
   CLI write gate, the browser consent gate and the work-order gates. See [gates.md](gates.md).
 - **Evidence discipline.** An agent states only what it observed in this session. See
   [evidence-discipline.md](evidence-discipline.md).
-- **An armed review chain.** Once `/zensu:tdd` has marked its implementation complete, the
+- **An armed review chain.** Once `/zensu:build` has marked its implementation complete, the
   Stop hook refuses to end the turn until the review chain closes, up to
   `autoFixMaxRounds + 3` times. See [review-chain.md](review-chain.md).
 
@@ -70,9 +70,9 @@ slash command or introduced by "use", "using", "with", "via", "run" or "invoke" 
 mentions a skill. A name inside a fenced code block, inline code or quotation marks does not
 count, and neither does a line that carries a negation such as "do not". When it finds one, it
 asks no delivery-route question. It tells the model to carry the plan out with that skill and
-to say in one line that Zensu asked no route question and that `/zensu:tdd` runs the plan
+to say in one line that Zensu asked no route question and that `/zensu:build` runs the plan
 under the Zensu workflow instead. The user's approval message still wins when it asks for a
-route rather than only naming one: `/zensu:tdd` or the Zensu workflow, `/zensu:autopilot` or
+route rather than only naming one: `/zensu:build` or the Zensu workflow, `/zensu:autopilot` or
 `/zensu:pilot`. A route that message refuses is never taken.
 
 Every doubt resolves toward the question: a route the session recorded or configured still

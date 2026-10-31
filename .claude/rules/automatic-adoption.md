@@ -279,7 +279,7 @@ grep is the rule.
 Every surface below states what the automatic path does, and each moves with it:
 `docs/session-control.md` "Unbindable sessions" (the adoption paragraph, including its
 binding-hook roster and its disclosure channels, and the `.*` gate row of the per-gate
-table), `docs/gates.md`, `docs/tdd-manager-workflow.md`, `docs/operations.md`, the
+table), `docs/gates.md`, `docs/build-workflow.md`, `docs/operations.md`, the
 `hooks.sessionAutoAdopt` and Stop-hook rows of `docs/configuration.md`,
 `config.example.json`, `README.md`, `skills/adopt-session/SKILL.md` (the entry-level
 tokens and the deny after an adoption that landed) and `skills/doctor/SKILL.md` (the

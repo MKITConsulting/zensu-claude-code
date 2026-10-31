@@ -127,6 +127,15 @@ else
   check "P12 plugin.json skills[] contains './skills/cover'" FAIL
 fi
 
+pin "P13a SKILL.md authors in the session's checkout" "$SKILL_MD" "**The session's checkout.** Author where the session runs"
+pin "P13b SKILL.md mirrors the language and style of the repository's tests" "$SKILL_MD" "follow the language and style of the repository's existing tests"
+pin "P13c SKILL.md routes commit and PR text through the conventions contract" "$SKILL_MD" '${CLAUDE_PLUGIN_ROOT}/skills/autopilot/rules/conventions.md'
+if grep -rqE 'Worktree only|worktree only|English only|\.claude/worktrees' "$SKILL_DIR"; then
+  check "P13d skill enforces neither a .claude/worktrees worktree nor English" FAIL
+else
+  check "P13d skill enforces neither a .claude/worktrees worktree nor English" PASS
+fi
+
 echo "----"
 echo "test-cover-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

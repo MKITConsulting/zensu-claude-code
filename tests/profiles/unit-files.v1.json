@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/structure/ai-work-capture.test.js", "registered": 8,
+      "path": "tests/structure/ai-work-capture.test.js", "registered": 10,
       "runs": [{ "driver": "tests/structure/test-ai-work-capture.sh" }],
       "summary": "AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions."
     },
@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 26,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 29,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
     },
@@ -22,9 +22,9 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
-      "path": "tests/structure/background-review-v1.test.js", "registered": 24, "skips": {"win32": 1},
+      "path": "tests/structure/background-review-v1.test.js", "registered": 33, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
-      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival match that claims or retires, the Stop wait verdict and the idle sweeps."
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
     },
     {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
@@ -47,7 +47,12 @@
       "summary": "The deferred-review claim case table."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 80, "skips": {"win32": 3},
+      "path": "tests/structure/edit-landing-claims-v1.test.js", "registered": 27,
+      "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
+      "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
+    },
+    {
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 89, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -77,13 +82,18 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 25,
+      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 17,
+      "runs": [{ "driver": "tests/structure/test-hook-process-budget.sh" }],
+      "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
+    },
+    {
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 30,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
       ],
       "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
-      "summary": "The session-trail linked-session reader: the family walk, the kinds, the start decisions and calls, the saved presets, the unread reports and the task-chip proposals."
+      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports and the task-chip proposals."
     },
     {
       "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
@@ -139,6 +149,11 @@
       "summary": "The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup."
     },
     {
+      "path": "tests/structure/repo-conventions-v1.test.js", "registered": 23, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-vcs-detect.sh" }],
+      "summary": "The repository-conventions probe: PR templates per forge, the checks a configured template and the .zensu/templates overrides pass, commitlint configs, the default-branch history sample, trailer counts and the contributing documents."
+    },
+    {
       "path": "tests/structure/restore-root-render-cases.test.js", "registered": 79,
       "runs": [{ "driver": "tests/structure/test-restore-project-root.sh" }],
       "summary": "Restoring a vanished recorded project root: the verdict, restore and outcome renderers and their refusal arms."
@@ -154,9 +169,14 @@
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
     },
     {
-      "path": "tests/structure/review-round-scope-v1.test.js", "registered": 24,
+      "path": "tests/structure/review-round-scope-v1.test.js", "registered": 26,
       "runs": [{ "driver": "tests/structure/test-incremental-review-rounds.sh" }],
       "summary": "Delta-scoped review rounds: which files and findings a fix round reviews."
+    },
+    {
+      "path": "tests/structure/round-prepare-v1.test.js", "registered": 43,
+      "runs": [{ "driver": "tests/structure/test-round-prepare.sh" }],
+      "summary": "Fix-round bookkeeping: the claim-label grammar, the round-start content snapshot, landing attribution, the fixed ledger lines and the packet files."
     },
     {
       "path": "tests/structure/reviewer-spawn-allow-v1.test.js", "registered": 20,
@@ -274,7 +294,7 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 100,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 101,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
@@ -300,7 +320,7 @@
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
     {
-      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 12,
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 15,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
     },
