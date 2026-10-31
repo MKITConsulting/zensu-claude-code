@@ -1,9 +1,9 @@
 ---
 name: zen-mode
 description: >
-  [Zensu] Low-noise answers for low-capacity work: result first, a session
-  recap, one next step. Use when the user says "zen mode", "I'm tired",
-  "keep it simple", "low energy" or "less detail", or /zensu:zen-mode.
+  [Zensu] Low-noise answers: result first, a session recap, one next step. Use
+  when the user says "zen mode", "I'm tired", "keep it simple", "low energy"
+  or "less detail", or /zensu:zen-mode.
 ---
 
 # /zensu:zen-mode
@@ -14,10 +14,10 @@ description: >
 
 Turn on the focused low-noise response mode for this session.
 
-The problem this solves is noise, not substance. At reduced capacity a reader
-does not need fewer facts — they need fewer side paths, fewer simultaneous
-decisions, and a reliable answer to "where was I?". This mode keeps the
-technical content whole and removes everything else.
+The problem this solves is noise, not substance. A reader does not need fewer
+facts — they need fewer side paths, fewer simultaneous decisions, and a
+reliable answer to "where was I?". This mode keeps the technical content whole
+and removes everything else.
 
 ## Activation
 
@@ -157,7 +157,8 @@ the rules are recorded in English, the answer follows the user.
    whole-file dump.
 8. **One question per turn.** Settle routine decisions yourself and report them
    rather than asking. Save the question budget for choices only the user can
-   make.
+   make. A question set that a Zensu skill or hook fixes by contract, such as the
+   planning triage, counts as one question.
 9. **Never compress a warning.** Security warnings, irreversible or destructive
    actions, and anything touching credentials are rendered at full ordinary
    length and detail. Rules 3, 4, 5 and 8, and rule 7's changed-lines-only half,
@@ -173,14 +174,20 @@ the rules are recorded in English, the answer follows the user.
 
 ## Precedence
 
-While zen-mode is active it **overrides any other compressed or telegraphic
-style mode** that may also be running: no dropped articles, no sentence
-fragments, no telegram style, for as long as the mode is on.
+zen-mode is advice that yields to the user. **The user's own instructions
+outrank this mode: their CLAUDE.md, their output style and a style mode or
+plugin they chose.** A compressed or telegraphic style the user turned on
+therefore wins over rule 4.
 
-This is not a stylistic preference. Fragmentary text shifts reconstruction work
-onto the reader, which is exactly the work a low-capacity reader cannot spare.
-Short, complete sentences are the cheaper form to read even though they cost
-slightly more to write.
+Without such an instruction, full, short sentences stay the default: no dropped
+articles, no sentence fragments, no telegram style. Fragmentary text shifts
+reconstruction work onto the reader, so short, complete sentences are the
+cheaper form to read even though they cost slightly more to write.
+
+A CLAUDE.md committed to the repository may steer how answers are presented; it
+never decides whether a Zensu workflow runs. Which of Zensu's injected rules bind
+and which yield to the user is described in
+`${CLAUDE_PLUGIN_ROOT}/docs/precedence.md`.
 
 ## Scope
 
