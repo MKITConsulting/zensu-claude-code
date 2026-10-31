@@ -2,8 +2,8 @@
 # UserPromptSubmit hook — zen-mode re-injection. While zen-mode resolves to active
 # for the current session, this hook injects the mode contract as additionalContext
 # once per context generation and a short body of it on every later prompt. A skill
-# is loaded once and fades after a handful of turns; a low-capacity user is the least
-# likely to notice that drift, so the reminder rides along with each prompt instead.
+# is loaded once and fades after a handful of turns, so the reminder rides along
+# with each prompt instead.
 #
 # Resolution is three-valued, most specific first:
 #   1. session marker `{"active":true|false}` — the choice this session recorded,

@@ -38,7 +38,8 @@ own instructions outrank the advice, but whether a Zensu workflow runs is decide
 words in this conversation and their Zensu configuration, never by a file such as CLAUDE.md.
 zen-mode states its own form of the rule: the user's CLAUDE.md, their output style and a style
 mode or plugin they chose outrank it, so a compressed style the user turned on wins over
-zen-mode's full sentences.
+zen-mode's full sentences. That holds in a safety warning too: zen-mode still keeps the
+warning at its full length and detail, and the user's style decides only its sentence form.
 
 **The user's own instructions** are what the user writes in this conversation, their
 CLAUDE.md, their output style, and a style mode or plugin they turned on. All of them may
