@@ -106,6 +106,7 @@ zensu_cli_to_tool() {
     # AI work capture (reports, never human decisions)
     "ai-work context")          echo "get_ai_work_capture_context" ;;
     "ai-work get")              echo "get_ai_work_capture" ;;
+    "ai-work bind")             echo "bind_ai_work_product" ;;
     "ai-work start")            echo "start_ai_work_capture" ;;
     "ai-work submit")           echo "submit_ai_work_result" ;;
     # pulse

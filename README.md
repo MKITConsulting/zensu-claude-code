@@ -548,3 +548,13 @@ with tests remains work. Test runs are hidden from default My work/Organization
 metrics; billing credits remain separately unfiltered. Update the backend and
 CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
+
+### Confirmed product scope for AI work
+
+Automatic AI-work capture now requires a product explicitly confirmed by the user
+via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
+skip capture while coding continues. Cross-product work requires explicit intent
+and a reason for each goal; it is never an automatic fallback. Existing unassigned
+entries remain in the separate Unassigned view with their history and acceptance.
+Upgrade the product-scope backend and CLI before the plugin. See the shipped
+`docs/ai-work-capture.md` for identity checks and legacy receipt handling.
