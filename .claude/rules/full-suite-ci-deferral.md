@@ -86,6 +86,13 @@ its three keys; `docs/gates.md` CI mode; discipline patch 12 in
 `docs/build-workflow.md`; `config.example.json`; the README skills table and count; the
 skills list in `.claude-plugin/plugin.json`.
 
+**R8k reads these modules too.** R8k in `tests/structure/test-delivery-route.sh` fails any file
+under `hooks/` other than `zensu-config.sh` that spells a marker stem, `full-suite` included,
+followed by `-` and then a character that is not a letter or digit, or by the end of the line,
+because that is how a marker leaf is spelled outside the shared writer. A name in these modules
+that is not the session marker keeps a letter after that dash, as `full-suite-clone-v1` and
+`full-suite-snapshot-v1` do.
+
 **Version: `patch`.** No hook added, removed or renamed, no matcher change, no
 `permissionDecision`, `RECORD_KEYS` unchanged, verdict states never persisted, and the config
 keys read permissively. The marker is the same class as the delivery-route marker.
