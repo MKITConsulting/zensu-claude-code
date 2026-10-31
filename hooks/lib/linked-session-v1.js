@@ -71,10 +71,15 @@ function turnOf(record) {
   return completed === undefined || completed === null || completed === 0 ? TURNS.FIRST : TURNS.LATER;
 }
 
-function realDirectory(target) {
+function writableOnlyByCaller(stat) {
+  if (process.platform !== 'win32' && (stat.mode & 0o022) !== 0) return false;
+  return typeof process.getuid !== 'function' || stat.uid === process.getuid();
+}
+
+function realDirectory(target, accept = () => true) {
   try {
     const stat = fs.lstatSync(target);
-    return !stat.isSymbolicLink() && stat.isDirectory();
+    return !stat.isSymbolicLink() && stat.isDirectory() && accept(stat);
   } catch (_) {
     return false;
   }
@@ -107,7 +112,7 @@ function sessionDirectory(platform, env, account, organization) {
   for (const store of storeCandidates(platform, env)) {
     const accountDir = path.join(store, account);
     const organizationDir = path.join(accountDir, organization);
-    if (realDirectory(store) && realDirectory(accountDir) && realDirectory(organizationDir)) {
+    if ([store, accountDir, organizationDir].every((directory) => realDirectory(directory, writableOnlyByCaller))) {
       return organizationDir;
     }
   }
@@ -130,7 +135,9 @@ function readBoundedFile(file, maxBytes) {
   } catch (error) {
     return { state: error && error.code === 'ENOENT' ? 'missing' : 'refused' };
   }
-  if (stat.isSymbolicLink() || !stat.isFile() || stat.size > maxBytes) return { state: 'refused' };
+  if (stat.isSymbolicLink() || !stat.isFile() || stat.size > maxBytes || !writableOnlyByCaller(stat)) {
+    return { state: 'refused' };
+  }
   let fd;
   try {
     fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
@@ -139,7 +146,7 @@ function readBoundedFile(file, maxBytes) {
   }
   try {
     const opened = fs.fstatSync(fd);
-    if (!opened.isFile() || opened.size > maxBytes) return { state: 'refused' };
+    if (!opened.isFile() || opened.size > maxBytes || !writableOnlyByCaller(opened)) return { state: 'refused' };
     const buffer = Buffer.alloc(opened.size + 1);
     let length = 0;
     let againBudget = READ_AGAIN_BUDGET;
