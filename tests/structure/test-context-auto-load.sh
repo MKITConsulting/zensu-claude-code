@@ -178,12 +178,6 @@ try {
     assert(r.context.includes('may already have recorded a server receipt'));
     assert(!r.context.includes('<zensu-context-data>'));
   });
-  check('native host registration leaves time for the bounded failure notice', () => {
-    const registrations=JSON.parse(fs.readFileSync(path.join(root,'hooks/hooks.json'),'utf8')).hooks.UserPromptSubmit;
-    const hook=registrations.flatMap(group=>group.hooks||[]).find(h=>h.command?.includes('user-prompt-context-auto-load.sh'));
-    assert(hook);
-    assert(hook.timeout*1000>=core.BUDGET_MS+5000);
-  });
   check('receipt validation requires identity, time, layers and depth', () => {
     assert(core.receipt(pack));
     for(const [key,value] of [['load_id',''],['load_id','00000000-0000-0000-0000-000000000000'],['feature_id','no'],['loaded_at','no'],['max_depth',6],['truncated',null],['layers',[]],['layers',{build:'bad'}]]) assert(!core.receipt({...pack,[key]:value}), key);

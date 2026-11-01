@@ -223,6 +223,25 @@ else
   check "U5 budget roster out of step with hooks.json:$ROSTER_BAD" FAIL
 fi
 
+if node - "$PLUGIN_DIR" <<'NODE'
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const { registeredHooks } = require(path.join(root, 'hooks/lib/hook-registration-v1.js'));
+const { BUDGET_MS } = require(path.join(root, 'hooks/lib/context-auto-load-v1.js'));
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'hooks/hooks.json'), 'utf8'));
+const hook = registeredHooks(manifest, 'UserPromptSubmit')
+  .find(entry => entry.command.includes('user-prompt-context-auto-load.sh'));
+assert(hook);
+assert(hook.timeout * 1000 >= BUDGET_MS + 5000);
+NODE
+then
+  check "U5a native context hook leaves time for the bounded failure notice" PASS
+else
+  check "U5a native context hook leaves time for the bounded failure notice" FAIL
+fi
+
 measure_prompt() {
   local kind="$1" phase="$2" prompt="$3" hook limits min max len
   SUM=0
