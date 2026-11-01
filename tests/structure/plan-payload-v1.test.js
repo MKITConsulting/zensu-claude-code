@@ -282,7 +282,6 @@ test("a resolved file source carries the bytes, a resolved text source does not"
 test("responseOrigin refuses an agent origin and a non-boolean isAgent, and accepts every other shape", () => {
   for (const payload of [
     { tool_response: { isAgent: false, hasTaskTool: true } },
-    { tool_response: { isAgent: null } },
     { tool_response: { plan: "# no origin field" } },
     { tool_response: "Your plan has been saved" },
     { tool_response: [{ isAgent: true }] },
@@ -295,7 +294,7 @@ test("responseOrigin refuses an agent origin and a non-boolean isAgent, and acce
   const agent = responseOrigin({ tool_response: { isAgent: true } });
   assert.strictEqual(agent.ok, false);
   assert.strictEqual(agent.reason, REASONS.AGENT_ORIGIN);
-  for (const value of ["false", "true", 0, 1, {}, []]) {
+  for (const value of ["false", "true", 0, 1, {}, [], null]) {
     const drifted = responseOrigin({ tool_response: { isAgent: value } });
     assert.strictEqual(drifted.ok, false, JSON.stringify(value));
     assert.strictEqual(drifted.reason, REASONS.ORIGIN_TYPE, JSON.stringify(value));

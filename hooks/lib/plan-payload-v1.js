@@ -181,7 +181,7 @@ const responseOrigin = (payload) => {
   const response = payload && payload.tool_response;
   if (!response || typeof response !== "object" || Array.isArray(response)) return { ok: true };
   const flag = response.isAgent;
-  if (flag !== undefined && flag !== null && typeof flag !== "boolean") return refuse(REASONS.ORIGIN_TYPE, "");
+  if (flag !== undefined && typeof flag !== "boolean") return refuse(REASONS.ORIGIN_TYPE, "");
   if (flag === true) return refuse(REASONS.AGENT_ORIGIN, "");
   return { ok: true };
 };

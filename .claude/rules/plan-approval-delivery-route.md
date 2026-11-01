@@ -425,7 +425,8 @@ header after a closed fence as the control, the human-present gate, in `D46e` a 
 that is missing, throws or exports no reader and a classifier module that is missing, throws,
 exports no decision or answers with something other than a string, plus a payload from another
 tool, over a copied plugin root whose unmodified run gives the notice, and in `D46f` an
-agent-origin response and a non-boolean `isAgent`, with `isAgent: false` as the control.
+agent-origin response and a non-boolean `isAgent`, a string and `null`, with `isAgent: false`
+as the control.
 `tests/structure/foreign-executor-v1.test.js`, driven by `D1a`, pins the classifier, the notice
 text and the payload decision, including that the origin is judged before the reader's walk, and
 `test-msys-special-plugin-module-boundaries.sh` loads the module beside the reader from a plugin

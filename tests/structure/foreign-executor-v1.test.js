@@ -108,7 +108,7 @@ test("an ExitPlanMode payload from the main session gets the notice through the 
 
 test("an agent-origin response and a non-boolean isAgent keep the route question", () => {
   assert.strictEqual(noticeForPayload(payload({ plan: PLAN, isAgent: true }), reader), "");
-  for (const drifted of ["false", "true", 0, 1, {}]) {
+  for (const drifted of ["false", "true", 0, 1, {}, [], null]) {
     assert.strictEqual(noticeForPayload(payload({ plan: PLAN, isAgent: drifted }), reader), "", JSON.stringify(drifted));
   }
 });

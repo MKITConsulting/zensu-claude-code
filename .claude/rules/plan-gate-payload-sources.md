@@ -67,9 +67,10 @@ back to the identically named BLOCK_CODE, which no behavioral case can observe.
 
 **The response also declares WHO called, and that is judged before any source is read.**
 `tool_response.isAgent === true` refuses as `PLAN_RESPONSE_AGENT_ORIGIN_REJECTED`, and a
-present non-boolean refuses as `PLAN_RESPONSE_ORIGIN_TYPE_REJECTED` rather than being read as
-falsy — `"false"` and `0` are both truthy-adjacent spellings that would otherwise approve an
-agent-originated plan by coercion. `responseOrigin` in the module owns that rule, and its two
+present non-boolean, `null` included, refuses as `PLAN_RESPONSE_ORIGIN_TYPE_REJECTED` rather
+than being read as falsy — `"false"` and `0` are both truthy-adjacent spellings that would
+otherwise approve an agent-originated plan by coercion, and only an absent field means the
+response claims no origin. `responseOrigin` in the module owns that rule, and its two
 refusals are module `REASONS` (`AGENT_ORIGIN`, `ORIGIN_TYPE`), so F11d grades the exit-18 and
 exit-19 hop as well, and F45d holds the line order of the hook's `responseOrigin(input)` call. The
 standalone executor notice applies the same rule (`.claude/rules/plan-approval-delivery-route.md`). This is a POSITIVE assertion layered on Session Control's
@@ -81,7 +82,8 @@ a caller who may not approve. F45/F45a are the bites — measured against the pr
 which APPROVES both shapes — and F45b is the positive control that the same builder with
 `isAgent: false` still approves. Each of the four owns a separate armed run: sharing one let an
 approval in an earlier case push the run past `PLANNING`, and every later case then failed on
-the transition instead of on what it was about.
+the transition instead of on what it was about. F45a sends `"false"` and then `null` to its one
+run, which is safe because a refusal leaves the run unchanged and F45a's digest check holds that.
 
 **Three checks pin behavior this gate already had and never exercised**, so they pass in both
 trees and are coverage, not bites: F47/F47a (a plugin missing the reader module refuses as

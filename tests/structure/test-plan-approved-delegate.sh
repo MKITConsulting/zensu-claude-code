@@ -1367,10 +1367,11 @@ D46D_DESKTOP="$(d46_ctx response "$D46_SP" "$ZENSU_CONFIG" claude-desktop)"
   || check "D46d human-present gate:$D46D_BAD (desktop='${D46D_DESKTOP:0:160}')" FAIL
 D46F_AGENT="$(D46_ORIGIN=true d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
 D46F_DRIFT="$(D46_ORIGIN='"false"' d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
+D46F_NULL="$(D46_ORIGIN=null d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
 D46F_MAIN="$(D46_ORIGIN=false d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
-{ d46_asks "$D46F_AGENT" && d46_asks "$D46F_DRIFT" && d46_notice "$D46F_MAIN" superpowers:executing-plans; } \
-  && check "D46f a response that declares an agent origin, or an isAgent that is not a boolean, keeps the route question, and isAgent false still gets the notice" PASS \
-  || check "D46f caller origin (agent='${D46F_AGENT:0:120}' drift='${D46F_DRIFT:0:120}' main='${D46F_MAIN:0:120}')" FAIL
+{ d46_asks "$D46F_AGENT" && d46_asks "$D46F_DRIFT" && d46_asks "$D46F_NULL" && d46_notice "$D46F_MAIN" superpowers:executing-plans; } \
+  && check "D46f a response that declares an agent origin, or an isAgent that is not a boolean, null included, keeps the route question, and isAgent false still gets the notice" PASS \
+  || check "D46f caller origin (agent='${D46F_AGENT:0:120}' drift='${D46F_DRIFT:0:120}' null='${D46F_NULL:0:120}' main='${D46F_MAIN:0:120}')" FAIL
 D46E_ROOT="$TMP_DIR/d46e-plugin"
 D46E_LIB="$D46E_ROOT/hooks/lib/plan-payload-v1.js"
 D46E_EXECUTOR="$D46E_ROOT/hooks/lib/foreign-executor-v1.js"

@@ -1005,12 +1005,18 @@ OUT45A="$(invoke "$(payload_response_origin origintype_session '"false"' \
   '# Coerced origin
 
 <!-- zensu-autopilot:origintype_run -->')" "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
+OUT45A_NULL="$(invoke "$(payload_response_origin origintype_session null \
+  '# Null origin
+
+<!-- zensu-autopilot:origintype_run -->')" "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
 if printf '%s' "$OUT45A" | grep -qF 'code=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED' \
   && ! printf '%s' "$OUT45A" | grep -qF 'PLAN_APPROVED' \
+  && printf '%s' "$OUT45A_NULL" | grep -qF 'code=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED' \
+  && ! printf '%s' "$OUT45A_NULL" | grep -qF 'PLAN_APPROVED' \
   && [ "$(digest "$ARMED_RUN_FILE")" = "$ORIGIN_TYPE_BEFORE" ]; then
-  check "F45a a non-boolean isAgent is refused, never coerced to a human caller" PASS
+  check "F45a a non-boolean isAgent, null included, is refused, never coerced to a human caller" PASS
 else
-  check "F45a origin type drift (out='$(printf '%s' "$OUT45A" | head -c 200)')" FAIL
+  check "F45a origin type drift (out='$(printf '%s' "$OUT45A" | head -c 200)' null='$(printf '%s' "$OUT45A_NULL" | head -c 200)')" FAIL
 fi
 
 # Positive control: the SAME builder with isAgent false approves. Without it F45
