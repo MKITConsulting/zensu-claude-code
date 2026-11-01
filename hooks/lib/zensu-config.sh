@@ -503,8 +503,13 @@ zensu_evidence_acceptance_gate() {
 # untouched, while this one only supplies the value used when no marker exists.
 zensu_zen_mode_default_on() {
   command -v node >/dev/null 2>&1 || return 0
-  local val
-  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.zenModeDefault===false?"0":"1")' 2>/dev/null)
+  local root val
+  if [ "$#" -gt 0 ]; then
+    root="$1"
+  else
+    root="${CLAUDE_PROJECT_DIR:-}"
+  fi
+  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.zenModeDefault===false?"0":"1")' 2>/dev/null)
   [ -z "$val" ] && return 0
   [ "$val" = "1" ]
 }

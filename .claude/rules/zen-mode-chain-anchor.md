@@ -389,6 +389,16 @@ the inactive question and of the ladder, and that each reader resolves through i
 `Z50`, `Z80` item 8, `Z89` and `Z95` read the ladder and its comments in the library, and the
 `Z107` family still drives the doctor row and `--status` against each other on every rung.
 
+**The default rung reads the config overlay under the root the reader passes**, through
+`zensu_zen_mode_default_on <root>`, as `zensu_default_delivery_route` does for the route. Read
+from the ambient `CLAUDE_PROJECT_DIR` instead, it paired the recorded root's marker with another
+tree's overlay: `--status` from a Bash tool without that variable answered `on` for a project whose
+overlay sets `zenModeDefault: false`, and the doctor and the hook did the same under a harness root
+other than the recorded one. `Z107e` drives all three. The `hooks.zenMode` checks stay
+harness-anchored, as `autoTdd` and its siblings do in the delivery-route hooks; moving them is its
+own change. The SessionStart banner keeps the argument-free form, because it discloses the
+configured default rather than a session's resolution.
+
 **TWO WRITERS LAND THAT MARKER, and hardening one of them left the guarantee false.**
 `hooks/lib/zensu-zen-mode.sh` is the OUT-OF-BAND remedy, and the hook NAMES it in the sentence
 it prints when the in-band `zen off` escape is unavailable — so for exactly the corrupt marker

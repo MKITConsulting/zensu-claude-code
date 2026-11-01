@@ -89,7 +89,7 @@ grep -qF 'zensu_hook_enabled zenMode' "$HOOK" \
 # zensu_hook_enabled — that helper answers "may this hook run at all", which is a
 # different question with a different marker consequence
 if grep -qF 'zen_mode_resolve' "$HOOK" \
-  && grep -qE '^  zensu_zen_mode_default_on$' "$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh" \
+  && grep -qE '^  zensu_zen_mode_default_on "\$1"$' "$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh" \
   && grep -qF 'zensu_zen_mode_default_on' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
   && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$HOOK" \
   && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"; then
@@ -4964,6 +4964,40 @@ rm -rf "$P107D"
 [ -z "$Z107D_BAD" ] \
   && check "Z107d the /zensu:doctor session row is never green for a check it could not make: an unbound session, a directory at the marker path, and a mode-000 state directory, .zensu or project root" PASS \
   || check "Z107d zen-mode session row for a missing check:$Z107D_BAD" FAIL
+
+P107E="$(mktemp -d -t zenmode-XXXXXX)"; S107E="z107e-$$"
+Q107E="$(mktemp -d -t zenmode-XXXXXX)"
+new_session "$P107E" "$S107E"
+mkdir -p "$P107E/.zensu"
+printf '%s' '{"hooks":{"zenModeDefault":false}}' > "$P107E/.zensu/config.json"
+z107e_status() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107E" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG \
+    bash "$HELPER" --status 2>/dev/null
+}
+z107e_hook() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$S107E" "$1" \
+    | HOME="$Z107_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$Q107E" env -u ZENSU_CONFIG \
+      bash "$HOOK" 2>/dev/null | classify
+}
+Z107E_BAD=""
+Z107E_ST="$(z107e_status)"
+[ "$Z107E_ST" = off ] || Z107E_BAD="$Z107E_BAD [status without CLAUDE_PROJECT_DIR='$Z107E_ST']"
+Z107E_ROW="$(doctor_zen "$Q107E" "$S107E" "")"
+[ "$Z107E_ROW" = "zen-mode: off (hooks.zenModeDefault)" ] || Z107E_BAD="$Z107E_BAD [doctor under another CLAUDE_PROJECT_DIR='$Z107E_ROW']"
+Z107E_HOOK="$(z107e_hook "first prompt")"
+[ "$Z107E_HOOK" = EMPTY ] || Z107E_BAD="$Z107E_BAD [hook under another CLAUDE_PROJECT_DIR='$Z107E_HOOK']"
+rm -f "$P107E/.zensu/config.json"
+Z107E_ST="$(z107e_status)"
+[ "$Z107E_ST" = on ] || Z107E_BAD="$Z107E_BAD [control without the overlay: status='$Z107E_ST']"
+Z107E_ROW="$(doctor_zen "$Q107E" "$S107E" "")"
+[ "$Z107E_ROW" = "zen-mode: on (hooks.zenModeDefault)" ] || Z107E_BAD="$Z107E_BAD [control without the overlay: doctor='$Z107E_ROW']"
+Z107E_HOOK="$(z107e_hook "second prompt")"
+[ "$Z107E_HOOK" = "UserPromptSubmit|ON" ] || Z107E_BAD="$Z107E_BAD [control without the overlay: hook='$Z107E_HOOK']"
+rm -rf "$P107E" "$Q107E"
+[ -z "$Z107E_BAD" ] \
+  && check "Z107e the default rung reads the project overlay under the session's recorded root: --status without CLAUDE_PROJECT_DIR and the doctor row and the hook under another CLAUDE_PROJECT_DIR resolve the overlay's off, and on once it is removed" PASS \
+  || check "Z107e default rung not read under the recorded root:$Z107E_BAD" FAIL
 
 P108="$(mktemp -d -t zenmode-XXXXXX)"; S108="z108-$$"
 new_session "$P108" "$S108"

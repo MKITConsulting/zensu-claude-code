@@ -175,5 +175,5 @@ zen_mode_resolve() {
     return 1
   fi
   ZEN_MODE_SOURCE=default
-  zensu_zen_mode_default_on
+  zensu_zen_mode_default_on "$1"
 }
