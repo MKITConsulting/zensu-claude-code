@@ -63,6 +63,7 @@
     "test-incremental-review-rounds.sh",
     "test-intent-router-hook.sh",
     "test-knowledge-context.sh",
+    "test-linked-session-route.sh",
     "test-context-auto-load.sh",
     "test-msys-runtime-boundaries.sh",
     "test-msys-special-plugin-module-boundaries.sh",

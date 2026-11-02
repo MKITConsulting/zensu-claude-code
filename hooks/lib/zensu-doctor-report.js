@@ -44,8 +44,9 @@
 //   ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS  the release's own owner-liveness window,
 //                            under the same rules
 //   ZDOC_DELIVERY_ROUTE      this session's resolved delivery route from the wrapper:
-//                            one of the five zensu_delivery_route_field spellings
+//                            one of the six zensu_delivery_route_field spellings
 //                            (`build (session marker)`, `direct (session marker)`,
+//                            `build (inherited from parent session)`,
 //                            `build (hooks.defaultDeliveryRoute)`,
 //                            `direct (hooks.defaultDeliveryRoute)`, `ask`), or
 //                            `unknown` (no session key or project root reached the
@@ -1898,13 +1899,13 @@ function deliveryRouteRow() {
     line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
   } else if (v === 'unjudged') {
     line(WARN, 'delivery route: could not be read — the shared config library did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. Run /zensu:delivery-route --status from the session to see what the hooks resolve');
-  } else if (planOff && promptOff && (v === 'ask' || /^(build|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v))) {
+  } else if (planOff && promptOff && (v === 'ask' || /^(?:(?:build|direct) \((?:session marker|hooks\.defaultDeliveryRoute)\)|build \(inherited from parent session\))$/.test(v))) {
     line(OK, 'delivery route: ' + v + ' — decides nothing this session: ' + ROUTE_BOTH_READERS_OFF);
   } else if (v === 'ask') {
     var where = planOff ? 'on a code request' : (promptOff ? 'after a plan approval' : 'after a plan approval and on a code request');
     line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff
       + '; /zensu:delivery-route fixes it for this session, hooks.defaultDeliveryRoute for the project');
-  } else if (/^(build|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v)) {
+  } else if (/^(?:(?:build|direct) \((?:session marker|hooks\.defaultDeliveryRoute)\)|build \(inherited from parent session\))$/.test(v)) {
     var dispatch = '; code changes go through /zensu:build';
     if (v.indexOf('direct') === 0) dispatch = '; code changes are implemented directly, without the review chain';
     else if (planOff) dispatch = '; a code request goes through /zensu:build, while an approved plan is implemented directly';

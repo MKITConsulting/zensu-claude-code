@@ -169,6 +169,8 @@ Pilot for a feature already tracked in Zensu, or implementing it directly.
 Answer the route question with the Zensu workflow once: the session remembers that answer (a
 direct, Autopilot or Pilot answer decides only that plan or request), and
 `/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes either route without asking.
+A session that this one starts in Claude Desktop on the same repository takes that Zensu-workflow
+answer over too.
 
 **One feature, hands off** — `/zensu:autopilot` takes a plain-language idea to a
 validated pull request: one planning gate, then plan → build → review → fix →
