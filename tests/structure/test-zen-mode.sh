@@ -2141,7 +2141,7 @@ Z50_LIB_SRC="$(grep -vE '^[[:space:]]*(#|//)' "$Z50_ZEN_LIB")"
 printf '%s' "$Z50_HOOK_SRC" | grep -qE '^if ! zen_mode_resolve "\$ZEN_ROOT" "\$ZENSU_SESSION_KEY"; then$' \
   || Z50_BAD="$Z50_BAD hook:does-not-take-the-shared-resolver"
 printf '%s' "$Z50_LIB_SRC" \
-  | grep -qF 'zen_marker_shape_fault "$1/.zensu" "$1/.zensu/state" "$ZEN_MARKER_PATH"' \
+  | grep -qF 'zen_marker_shape_fault "$ZEN_ZENSU_DIR" "$ZEN_STATE_DIR" "$ZEN_MARKER_PATH"' \
   || Z50_BAD="$Z50_BAD lib:resolver-does-not-consult-the-shared-shape-rule"
 # (c) a non-traversable state directory does not fall through to the default.
 # THE WALK, not a named pair. Naming components has been wrong twice here, so
@@ -3814,7 +3814,7 @@ grep -qE '^zen_marker_shape_fault\(\)' "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh"
   && Z89_BAD="$Z89_BAD helper-keeps-a-private-copy"
 # The hook must CALL it rather than spell the ladder inline.
 grep -qE '^if ! zen_mode_resolve ' "$HOOK" \
-  && grep -qF 'zen_marker_shape_fault "$1/.zensu" "$1/.zensu/state" "$ZEN_MARKER_PATH"' "$Z89_LIB" \
+  && grep -qF 'zen_marker_shape_fault "$ZEN_ZENSU_DIR" "$ZEN_STATE_DIR" "$ZEN_MARKER_PATH"' "$Z89_LIB" \
   || Z89_BAD="$Z89_BAD hook-does-not-call-the-shared-predicate"
 Z89_FLAT="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$HOOK" | tr '\n' ' ' | tr -s ' ')"
 printf '%s' "$Z89_FLAT" | grep -qE '\[ -L "\$ZEN_ROOT/\.zensu" \] \|\| \[ -L "\$ZEN_STATE_DIR" \]' \
@@ -4419,6 +4419,12 @@ Z109_TEMPLATES="$(grep -rlE 'zen-mode-\$' "$PLUGIN_DIR/hooks" 2>/dev/null | sort
 Z109_INACTIVE="$(grep -rlF '"active"[[:space:]]*:[[:space:]]*false' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"
 [ "$Z109_INACTIVE" = "$Z109_LIB" ] \
   || Z109_BAD="$Z109_BAD inactive-pattern-in<$(printf '%s' "$Z109_INACTIVE" | tr '\n' ' ')>"
+Z109_FN="$(awk '/^zen_marker_path\(\) \{/,/^\}$/' "$Z109_LIB")"
+{ printf '%s\n' "$Z109_FN" | grep -qF 'ZEN_STATE_DIR="${ZEN_MARKER_PATH%/*}"' \
+    && printf '%s\n' "$Z109_FN" | grep -qF 'ZEN_ZENSU_DIR="${ZEN_STATE_DIR%/*}"'; } \
+  || Z109_BAD="$Z109_BAD marker-directories-not-derived-from-the-template"
+grep -vE '^[[:space:]]*#' "$Z109_LIB" | grep -qE '\.zensu(/state)?"' \
+  && Z109_BAD="$Z109_BAD library-spells-a-marker-directory-outside-the-template"
 for Z109_READER in "$HOOK" "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"; do
   Z109_SRC="$(grep -vE '^[[:space:]]*#' "$Z109_READER")"
   [ -n "$Z109_SRC" ] || Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-source-slice-is-empty"
@@ -4426,11 +4432,39 @@ for Z109_READER in "$HOOK" "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" "$PLUGIN_DI
   [ "$Z109_N" = 1 ] || Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-resolves-${Z109_N}-times-want-1"
   printf '%s\n' "$Z109_SRC" | grep -qF 'zen_path_untraversable' \
     && Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-keeps-its-own-ladder"
+  printf '%s\n' "$Z109_SRC" | grep -vE '^[[:space:]]*//' | grep -qE 'ZEN_(STATE|ZENSU)_DIR=|\.zensu(/state)?"' \
+    && Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-spells-a-marker-directory"
 done
 if [ -z "$Z109_BAD" ]; then
-  check "Z109 the marker path, the inactive question and the state ladder each have one owner, and the hook, --status and the doctor probe resolve through it once each" PASS
+  check "Z109 the marker path and its directories, the inactive question and the state ladder each have one owner, and the hook, --status and the doctor probe resolve through it once each" PASS
 else
-  check "Z109 a zen-mode reader keeps its own copy of the ladder or the marker path:$Z109_BAD" FAIL
+  check "Z109 a zen-mode reader keeps its own copy of the ladder, the marker path or a marker directory:$Z109_BAD" FAIL
+fi
+
+Z110_BAD=""
+Z110_SHARED="a style the user chose may set a safety warning's sentence form, never its length or detail"
+Z110_FULL="$(HOOK="$HOOK" node -e '
+  const hook = require("fs").readFileSync(process.env.HOOK, "utf8");
+  const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
+    .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
+  process.stdout.write(blocks.find((s) => s.startsWith("zen-mode is ACTIVE. It asks")) || "");
+' 2>/dev/null)"
+Z110_SKILL="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
+Z110_PRECEDENCE="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/precedence.md" | tr -s ' ')"
+[ -n "$Z110_FULL" ] || Z110_BAD="$Z110_BAD hook:full-directive-not-found"
+for Z110_NAME in hook skill precedence; do
+  case "$Z110_NAME" in
+    (hook) Z110_TEXT="$Z110_FULL" ;;
+    (skill) Z110_TEXT="$Z110_SKILL" ;;
+    (precedence) Z110_TEXT="$Z110_PRECEDENCE" ;;
+  esac
+  printf '%s' "$Z110_TEXT" | grep -qiF -- "$Z110_SHARED" || Z110_BAD="$Z110_BAD $Z110_NAME:missing-the-shared-sentence"
+  printf '%s' "$Z110_TEXT" | grep -qiF -- 'last place for fragments' && Z110_BAD="$Z110_BAD $Z110_NAME:keeps-the-retired-rationale"
+done
+if [ -z "$Z110_BAD" ]; then
+  check "Z110 the skill, docs/precedence.md and the full directive share one sentence on what a style the user chose sets in a safety warning, and none keeps the retired rationale" PASS
+else
+  check "Z110 the safety-warning precedence wording diverges across its carriers:$Z110_BAD" FAIL
 fi
 
 # Z96 the anchor field is DELIMITED, and the off-verb is not named by a bare
