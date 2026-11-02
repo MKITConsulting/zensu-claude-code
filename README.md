@@ -92,6 +92,9 @@ already rely on:
 - **Claude asks which delivery route to take.** After you approve a plan, Zensu
   has Claude ask whether to use Autopilot, the Zensu workflow or Pilot, or to
   implement directly; on a direct code request it asks whether to use the Zensu
+  workflow. A plan that names its own executor, such as another plugin's
+  `superpowers:executing-plans`, gets a short notice instead: Claude carries it
+  out with that skill and names `/zensu:build` as the way to use the Zensu
   workflow. `/zensu:delivery-route` or
   `hooks.defaultDeliveryRoute` answers it ahead of time; `hooks.autoTdd: false`
   and `hooks.tddReminder: false` switch the two questions off.
@@ -166,6 +169,7 @@ The first two need no Zensu account.
 **Just this change** — describe what you want and approve the plan. Zensu asks
 which delivery route to take: Autopilot to a reviewed pull request, the Zensu workflow with its review chain,
 Pilot for a feature already tracked in Zensu, or implementing it directly.
+A plan that names another plugin's executor gets a notice instead of the question.
 Answer the route question with the Zensu workflow once: the session remembers that answer (a
 direct, Autopilot or Pilot answer decides only that plan or request), and
 `/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes either route without asking.

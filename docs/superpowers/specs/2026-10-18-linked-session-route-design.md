@@ -143,7 +143,14 @@ The abort condition, a failed R1 or R2, did not occur. Its fallback, a scan of t
   after its `lstat` is refused at once, and a desktop record is read only up to 8 MiB, a Session Control record up to
   1 MiB. A read that keeps answering would-block (`EAGAIN`, which POSIX leaves possible for a regular file on some
   network and FUSE mounts) is retried 16 times, 1 ms apart, and then counts as unreadable (review round 1, R1-F5 and
-  R1-F14). Faults on the own side answer `none`, which is final, except a missing
+  R1-F14). Off Windows, the three directories and every record must belong to the hook's own uid and carry no group or
+  other write bit, a record judged on its `lstat` and again on the opened descriptor: the rule of
+  `privateRecordsDirectory` with `0o022` for its `0o077`, because the store directory measured 0755 (2026-10-31, macOS:
+  account directories 0700 or 0755, organization directories 0700, all 4058 records 0600, each owned by the user). A
+  refused Session Control record of the parent answers `linked` without a parent root, as a refused desktop record of
+  the parent does, and a refused store directory skips that candidate. The check reads no access-control
+  list, and it never judges the parent's project root (chain 4 review, R1-F1). Faults on the own side answer `none`,
+  which is final, except a missing
   or unreadable own record, which answers `unresolved` and is retried once. Faults on the parent's side answer
   `linked` without a parent root: the session is still linked, so the brief note applies, and nothing is inherited.
 - **D4 — Parent root: the parent's Session Control record (default).** The parent key is `sessionKey` of the parent's
@@ -249,9 +256,9 @@ The result, case by case:
   the inheritance; each parent state that must not be inherited; the foreign and the non-git parent root; a parent
   record that is missing or names no UUID; a parent whose recorded root was removed or that has no Session Control
   record; a binding mismatch; malformed ids; a session named as its own parent; a missing store; symlinked
-  components; an oversized or unparsable record; the store candidates per platform; the two-level case; an own record
-  without `cliSessionId`; the configured default; the own marker
-  outranking; the `--auto` release; the note on exactly one prompt and only in a linked session, as one opening
+  components; a store directory or record that another account owns or can write; an oversized or unparsable record;
+  the store candidates per platform; the two-level case; an own record without `cliSessionId`; the configured default;
+  the own marker outranking; the `--auto` release; the note on exactly one prompt and only in a linked session, as one opening
   sentence that leaves the full reminder otherwise byte-identical; the retry and its bound; the plan gate with the
   reminder switched off; and resolver processes counted through a `node` shim on `PATH`, including a terminal
   session, without the variables, that starts none.
@@ -295,11 +302,14 @@ The result, case by case:
   on 2026-10-25: the brief keeps deciding nothing in either direction, and this residual is accepted, for the
   accidental paths among the bounds below as well: after a first turn that ended in an error, `completedTurns` is
   still absent, so the user's own next prompt is taken for the brief once more. Every path ends the same way: one
-  prompt, a note that names the requested route, and the route question under an `ask` field. In the default
-  per-user store only a deliberate actor with the user's own write access forges these records, and the plugin
-  guards against accidents, not against such an actor; a `ZENSU_CCD_STORE` that names a directory another account
-  can write extends the residual to that account, because the resolver checks no owner or mode there. A fork the
-  user starts is not resolved as linked (§5), so no prompt typed there is taken for a brief.
+  prompt, a note that names the requested route, and the route question under an `ask` field. In the desktop store
+  only a deliberate actor with the user's own write access forges these records, and the plugin guards against
+  accidents, not against such an actor: off Windows the resolver refuses a directory or record of the store that
+  another account owns or that grants group or other write (D3), so a `ZENSU_CCD_STORE` naming a shared directory
+  answers `none` instead of extending the residual to another account. The check reads the owner and the mode bits
+  only, so write access granted through an access-control list still extends it, and so does any store another
+  account can write on Windows, where neither is judged. A fork the user starts is not resolved as linked (§5), so no
+  prompt typed there is taken for a brief.
 - **This adds a cross-session read to a hook.** On the first prompt the hook reads two desktop records, one Session
   Control record and one or two markers of another session, read-only, and keeps nothing but the two one-line markers
   of D9. Nothing leaves the machine. `docs/configuration.md` names the read.
