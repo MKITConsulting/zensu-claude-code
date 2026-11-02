@@ -175,10 +175,23 @@ session-trail at is the store this module reads; a relative value names no store
 hook's working directory is not the user's. Binding checks: the shape of
 each id; the store, account and organization directories real directories; each record a regular
 file opened without following a link and without blocking, at most 8 MiB, a read that keeps
-answering would-block retried 16 times 1 ms apart and then read as unreadable; the own record's
-`sessionId` equal to the host
+answering would-block retried 16 times 1 ms apart and then read as unreadable; off Windows, those
+three directories and every record the module reads owned by the hook's own uid with no group or
+other write bit (`writableOnlyByCaller`, a record judged on its `lstat` and again on the opened
+descriptor); the own record's `sessionId` equal to the host
 id; its `cliSessionId`, when present, equal to the payload's `session_id`; a parent id other than
-the own one. The parent's project root comes from the parent's Session Control record (`sessionKey`
+the own one. A directory that fails the owner and mode check skips its store candidate, so the
+session answers `none` (`no-session-store`) when no other candidate passes; an own record that
+fails answers `none` (`own-record-refused`), a parent record `linked` without a parent root
+(`parent-record-unavailable`), and the parent's Session Control record `linked` without a parent
+root (`parent-context-unavailable`). The check is the rule of `privateRecordsDirectory` with
+`0o022` for its `0o077`, because the store directory measured 0755: on 2026-10-31 on macOS,
+`claude-code-sessions` 0755, the account directories 0700 (nine) or 0755 (one), the organization
+directories 0700 (all 39) and the records 0600 (all 4058), each owned by the user. A group write
+bit is refused even where the group holds the user alone, as under the umask 002 of a
+user-private-group setup; such a session loses the inheritance and the brief note, so it behaves
+as it did before inheritance. The check never judges the parent's project root. The parent's
+project root comes from the parent's Session Control record (`sessionKey`
 of the parent's `cliSessionId`, read through `privateRecordsDirectory` after `CLAUDE_PLUGIN_DATA` is
 canonicalized by the binder's own `canonicalDirectory`, as `resolveHookSession` does, at most 1 MiB,
 schema and version equal to the core's `SCHEMA` and `SCHEMA_VERSION`, its `host` equal to `claude`,
@@ -315,7 +328,9 @@ route: a route change moves only the field, and every shape of the reminder carr
   the anchor and holds `linked-session` back when `inherited-route` did not move; `storeCandidates`
   in the resolver and `ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, which apply
   one `ZENSU_CCD_STORE` rule, so a change to either side's override moves both, together with
-  `.claude/rules/session-lineage-ledger.md`, which states that rule for session-trail;
+  `.claude/rules/session-lineage-ledger.md`, which states that rule for session-trail, while the
+  owner and mode check stays the resolver's alone, so session-trail still reads a store the
+  resolver refuses;
   `ZENSU_LINKED_BRIEF_LEAD` and the `ZENSU_DIRECTIVE_LEAD` name in `zensu-directive.sh`; the
   closed spelling list in the doctor probe of `zensu-doctor.sh` and the two source regexes in
   `zensu-doctor-report.js`, which accept `inherited from parent session`.
@@ -375,7 +390,9 @@ is read permissively, no attestation change, and both hooks still emit only `add
 The linked-session inheritance is `patch` on the same walk: two new one-line files in
 `.zensu/state`, read permissively, one new source spelling that only the model and the doctor
 read, no config key, and the helper keeps its four verbs. An older runtime of the same lineage
-ignores both files and asks, which is the fail-safe direction.
+ignores both files and asks, which is the fail-safe direction. The resolver's owner and mode check
+is `patch` as well: no kind, reason or field changes, and it only turns a resolution into an
+existing `none`, `parent-record-unavailable` or `parent-context-unavailable` answer.
 
 ## Known bounds
 
@@ -476,12 +493,15 @@ ignores both files and asks, which is the fail-safe direction.
   nothing in either direction and this residual is accepted, for the accidental paths below as
   well: after a first turn that ended in an error, `completedTurns` is still absent, so the user's
   own next prompt is taken for the brief once more. Every path ends the same way: one prompt, a
-  note that names the requested route, and the route question under an `ask` field. In the default
-  per-user store only a deliberate actor with the user's own write access forges these files, and
-  the plugin guards against accidents, not against such an actor; a `ZENSU_CCD_STORE` that names a
-  directory another account can write extends the residual to that account, because the resolver
-  checks no owner or mode there. A fork the user starts is not resolved as linked, so no prompt
-  typed there is taken for a brief.
+  note that names the requested route, and the route question under an `ask` field. In the desktop
+  store only a deliberate actor with the user's own write access forges these records, and the
+  plugin guards against accidents, not against such an actor: off Windows the resolver refuses a
+  store, account or organization directory and a record that another account owns or that grants
+  group or other write, so a `ZENSU_CCD_STORE` naming a shared directory answers `none` instead of
+  extending the residual to another account. The check reads the owner and the mode bits only: a
+  directory or record another account can write through an access-control list still extends it,
+  and on Windows, where neither is judged, so does any store another account can write. A fork the
+  user starts is not resolved as linked, so no prompt typed there is taken for a brief.
 - A brief that is a bare slash command is skipped by the reminder, like every bare slash command,
   so the lineage resolves on the next typed prompt. That prompt carries no brief note once the slash
   command's turn completed and raised `completedTurns`; after a turn that ended in an error, the
