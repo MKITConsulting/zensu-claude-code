@@ -9288,6 +9288,49 @@ else
     *) check "P1tp2 an anchor-only claim renders NO topology row" PASS ;;
   esac
 fi
+TOPO_WTP="$SBOX/topo-wt-project"
+mkdir -p "$TOPO_WTP/.zensu/state" "$TOPO_WTP/.zensu/logs"
+git init -q --template= "$TOPO_WTP" >/dev/null 2>&1
+printf '.claude/worktrees/\n.zensu/\n' > "$TOPO_WTP/.gitignore"
+git -C "$TOPO_WTP" add .gitignore >/dev/null 2>&1
+git -C "$TOPO_WTP" -c user.email=t@example.invalid -c user.name=zensu-test -c commit.gpgsign=false \
+  -c core.hooksPath=/dev/null commit -qm base >/dev/null 2>&1
+git -C "$TOPO_WTP" worktree add -q "$TOPO_WTP/.claude/worktrees/run" -b topo-run >/dev/null 2>&1
+printf 'v1\n' > "$TOPO_WTP/.claude/worktrees/run/new.ts"
+printf 'S1 IMPL completed — files: new.ts\nS2 IMPL completed — files: <project>/.claude/worktrees/run/new.ts\n' > "$TOPO_WTP/.zensu/logs/run.log"
+TOPO_WT_RECEIPT="$TOPO_WTP/.zensu/state/edit-landing-$TOPO_KEY.json"
+run_report_topo_wt() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_WTP" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$TOPO_KEY" ZDOC_SESSION_PROJECT_ROOT="$TOPO_WTP" \
+    node "$REPORT" 2>/dev/null
+}
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","workTree":".claude/worktrees/run","claims":1,"clean":true}\n' \
+  > "$TOPO_WT_RECEIPT"
+TOPO_WT_OUT="$(run_report_topo_wt)"
+if ! topo_rendered "$TOPO_WT_OUT"; then
+  check "P1tpw the work-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_WT_OUT" in
+    *'topology:'*) check "P1tpw a clean receipt whose workTree names the run's worktree renders NO topology row" FAIL ;;
+    *) check "P1tpw a clean receipt whose workTree names the run's worktree renders NO topology row" PASS ;;
+  esac
+fi
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_WT_RECEIPT"
+case "$(run_report_topo_wt)" in
+  *"⚠️  topology: this session's audited run log claims edits under"*'.claude/worktrees/run'*)
+    check "P1tpw1 the same claim against an anchor-graded receipt still names the nested worktree, so workTree is what silences it" PASS ;;
+  *) check "P1tpw1 the same claim against an anchor-graded receipt still names the nested worktree, so workTree is what silences it" FAIL ;;
+esac
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","workTree":"../elsewhere","claims":1,"clean":true}\n' \
+  > "$TOPO_WT_RECEIPT"
+case "$(run_report_topo_wt)" in
+  *"⚠️  topology: this session's claims were NOT checked against the anchor — the receipt names a work tree this row cannot use"*)
+    check "P1tpw2 a workTree that climbs out of the project root renders a missing-check row, never silence" PASS ;;
+  *) check "P1tpw2 a workTree that climbs out of the project root renders a missing-check row, never silence" FAIL ;;
+esac
 # A log the receipt names OUTSIDE the project's own .zensu/logs/ is refused rather
 # than read: the receipt is an ordinary file this session can write. The OUTSIDE
 # log must carry the foreign claim, or the containment guard is not what keeps the

@@ -197,7 +197,7 @@ if command -v node >/dev/null 2>&1; then
     try {
       registered = (fs.readFileSync(process.env.CFG, "utf8").match(/file:\/\/scenarios\/[^\s]+\.yaml/g) || []).length;
     } catch (_) { process.stdout.write("config-unreadable"); process.exit(0); }
-    if (registered < 8) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
+    if (registered < 12) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
     if (scenarios.length < registered) {
       process.stdout.write("directory-has-" + scenarios.length + "-scenarios-but-config-registers-" + registered);
       process.exit(0);

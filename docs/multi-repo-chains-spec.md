@@ -53,7 +53,7 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1791`) and counts through the shared helper (`:1829`),
+(`hooks/lib/zensu-log.sh:2029`) and counts through the shared helper (`:2080`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -63,11 +63,11 @@ variable names for the audit in a multi-root topology, and what the fallback mea
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:56`, flag at `:103`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:496-536`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:205`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:56`, flag at `:139`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:593-633`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:229`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1780`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2018`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -91,7 +91,7 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
 (`hooks/lib/bash-source-write-parse.js:901`) and rule (C) at the same predicate
 for git targets (`:947`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:796`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
+`CLAUDE_PROJECT_DIR` (`:796`). `hooks/checks/pre-edit-tdd-reminder.sh:132-147` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
@@ -222,6 +222,24 @@ receipt that records a failure, and the document no longer claims a detection it
 cannot perform. One gap remains open by construction and is named rather than
 implied: a relative claim that collides with a same-named file in the anchor can
 still grade as landed, and only the §6.1 label closes it.
+
+**Two refinements landed on 2026-10-29, and neither adds a second root.** First, the claim
+grammar has one owner, `hooks/lib/edit-landing-claims-v1.js`: a files list splits only at commas
+outside `{…}` and `(…)`, a brace group is expanded and every member graded, a glob is graded
+through the tracked, untracked and changed files it matches, and an entry the audit cannot grade
+is settled by an audited `CLAIM CORRECTED` line, while a literal claimed path is never retired.
+`zensu-log.sh append` refuses brace, glob and prose entries when a claim is logged. Second, the
+chain's work tree: an Autopilot run that drives a worktree of the anchor's own repository below
+the anchor (`workspaceRoot`) has that worktree graded, counted at `--tdd-complete`, reviewed and
+baselined, through `zensu-log.sh --chain-work-tree` and the library's `--work-tree`, which accept
+only a worktree with the anchor's git common directory, strictly below the project root, at its
+own top level. That is still one code root per chain — the anchor's own repository — so it is
+neither the §6.1 label nor a relaxation of item 3: a claim into any other work tree nested under
+the anchor keeps grading `UNVERIFIED (foreign root)`, and in such a chain a claim naming the
+anchor's own copy of a file grades the same way. The evidence runner and the acceptance gate
+follow the same work tree: such a chain's `--evidence-run` runs there, and its full-suite verdict,
+acceptance runs and acceptance records measure the combined tree of the project and the worktree
+(`.claude/rules/evidence-runner.md`).
 
 ## 6. Stage 2 — Declared code roots (minor) — REDESIGNED 2026-10-21, NOT BUILT
 
@@ -403,7 +421,7 @@ candidate whose price did not rise.
 chain at `UNINITIALIZED` denies all three destinations, but with the phase
 wording and for the unrelated directory too: that is TDD discipline, not
 containment, and it lifts at `RED_WRITE` and `REFACTOR`
-(`hooks/pre-edit-tdd-reminder.sh:206, :219`). Reading that deny as a boundary is the
+(`hooks/checks/pre-edit-tdd-reminder.sh:193, :206`). Reading that deny as a boundary is the
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
@@ -758,12 +776,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/build/references/audit.md:61`) and runs in vanilla
+Drift Audit does the same (`skills/build/references/audit.md:63`) and runs in vanilla
 (`skills/build/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/build/references/audit.md:67`), which is a test vanilla cannot be made to produce.
+(`skills/build/references/audit.md:69`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/build/references/audit.md:69`), AND reword the finding
+level as step 6c already is (`skills/build/references/audit.md:71`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no

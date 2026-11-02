@@ -28,6 +28,8 @@ const GIT_TIMEOUT_MS = 10000;
 const UNRESOLVED_COUNTERS = Object.freeze(['pending', 'notLanded', 'unverified']);
 const CHECKPOINT_FAILURE = 'The current audit has not completed. Re-run it; its cumulative scope is preserved.';
 const GIT_FAILURE = 'The latest audit did not complete because git failed. Re-run the audit once git works again; its cumulative scope is preserved.';
+const CLAIM_FAILURE = 'The latest audit did not complete because the claim reader failed. Re-run the audit once node and edit-landing-claims-v1.js work again; its cumulative scope is preserved.';
+const SCOPE_BASELINE_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 const RECOVERY_GUIDANCE = 'Keep the original --baseline, --session-epoch and --dirty-before inputs or omit them so the persisted scope supplies them, and add --predicates with current literal/hash proofs where a claim is PENDING. Use --inventory for read-only inspection.';
 
 class AuditScopeError extends Error {}
@@ -352,9 +354,6 @@ function prepareScope(options) {
     }
   }
   const priorClaimRoot = previous ? (previous.claimRoot === null ? null : (previous.claimRoot || previous.root)) : undefined;
-  if (!options.gitFault && typeof priorClaimRoot === 'string' && priorClaimRoot !== claimRoot) {
-    auditFail('the audited repository root changed since the previous audit');
-  }
   const prefix = logPrefix(log, previous && previous.logPrefix);
   const inherited = (name, flag, supplied) => {
     const persisted = previous && typeof previous[name] === 'string' ? previous[name] : '';
@@ -364,6 +363,10 @@ function prepareScope(options) {
     }
     return supplied;
   };
+  const baseline = inherited('baseline', '--baseline', options.baseline);
+  const epoch = inherited('epoch', '--session-epoch', options.epoch);
+  const rerootedFrom = !options.gitFault && typeof priorClaimRoot === 'string' && priorClaimRoot !== claimRoot ? priorClaimRoot : null;
+  if (rerootedFrom !== null) previous = null;
   const dirty = new Set(previous && Array.isArray(previous.dirty) ? previous.dirty : []);
   if (options.dirty !== undefined) {
     if (!options.dirty) auditFail('--dirty-before requires an existing file');
@@ -377,12 +380,13 @@ function prepareScope(options) {
     claimRoot: options.gitFault ? (previous ? priorClaimRoot : null) : claimRoot,
     log,
     sessionKey,
-    baseline: inherited('baseline', '--baseline', options.baseline),
-    epoch: inherited('epoch', '--session-epoch', options.epoch),
+    baseline,
+    epoch,
     dirty: [...dirty].sort(),
     logPrefix: prefix,
     previous,
     legacyUnresolved,
+    rerootedFrom,
   };
 }
 
@@ -456,12 +460,13 @@ function persistedScope(scope) {
   };
   delete value.previous;
   delete value.legacyUnresolved;
+  delete value.rerootedFrom;
   delete value.certified;
   delete value.proved;
   return value;
 }
 
-function checkpointScope(scope, receiptPath, session) {
+function checkpointScope(scope, receiptPath, session, workTree) {
   if (!receiptPath || receiptPath === '-') return;
   const auditScope = persistedScope(scope);
   const claims = auditScope.claims.length;
@@ -469,6 +474,7 @@ function checkpointScope(scope, receiptPath, session) {
     schema: 'edit-landing-v2',
     session: session || '',
     log: scopeLogValue(scope.root, scope.log),
+    ...(workTree ? { workTree } : {}),
     claims,
     landed: 0,
     notLanded: 0,
@@ -564,16 +570,26 @@ function verifyPredicates(root, file, claims, snapshots, observedFiles, baseline
   return proved;
 }
 
+function priorClaimsOf(previous, claims) {
+  if (!Array.isArray(previous.claims) || !previous.claims.every((claim) => claim && typeof claim === 'object')) {
+    auditFail('the claims the previous audit recorded were rewritten or removed from the run log');
+  }
+  const unused = new Map();
+  previous.claims.forEach((claim, index) => {
+    const key = `${claim.step}\0${claim.raw}`;
+    if (!unused.has(key)) unused.set(key, []);
+    unused.get(key).push(index);
+  });
+  return claims.map((claim) => {
+    const queue = unused.get(`${claim.step}\0${claim.raw}`);
+    return queue && queue.length > 0 ? previous.claims[queue.shift()] : undefined;
+  });
+}
+
 function prepareClaims(scope, manifest, predicates) {
   const claims = parseManifest(manifest);
   const old = scope.previous;
-  if (old) {
-    const priorClaims = Array.isArray(old.claims) ? old.claims : null;
-    if (!priorClaims || priorClaims.length > claims.length || priorClaims.some((claim, index) => claim.step !== claims[index].step
-        || claim.raw !== claims[index].raw)) {
-      auditFail('the claims the previous audit recorded were rewritten or removed from the run log');
-    }
-  }
+  const priors = old ? priorClaimsOf(old, claims) : [];
   const claimRoot = scope.claimRoot || scope.root;
   const snapshots = Object.create(null);
   const budget = { remaining: LIMITS.snapshotBytes };
@@ -591,7 +607,7 @@ function prepareClaims(scope, manifest, predicates) {
   if (old) {
     for (let index = 0; index < claims.length; index++) {
       const claim = claims[index];
-      const prior = old.claims[index];
+      const prior = priors[index];
       if (!claim.path) continue;
       const moved = Boolean(prior) && prior.path !== claim.path;
       if (moved) dirty.add(claim.path);
@@ -667,12 +683,19 @@ function gradedBareWired(scope) {
   return Number.isSafeInteger(scope.bareWired) && scope.bareWired >= 0 ? scope.bareWired : 0;
 }
 
-function failedReceipt(file) {
+function failedReceipt(file, cause) {
   const loaded = readBoundedJson(file, MAX_RECEIPT_BYTES);
   if (loaded.absent || loaded.invalid || !loaded.value || typeof loaded.value !== 'object' || Array.isArray(loaded.value)) {
     auditFail('the earlier receipt could not be read, so its audit scope could not be preserved');
   }
-  return { ...loaded.value, clean: false, auditFailure: GIT_FAILURE };
+  return { ...loaded.value, clean: false, auditFailure: cause === 'claims' ? CLAIM_FAILURE : GIT_FAILURE };
+}
+
+function gradedRoot(root, receipt) {
+  if (receipt.workTree === undefined) return root;
+  const workTree = claimPath(receipt.workTree);
+  if (workTree === null) auditFail('the receipt names a work tree that is not a path inside the project');
+  return path.join(root, ...workTree.split('/'));
 }
 
 function receiptFresh(options) {
@@ -713,7 +736,7 @@ function receiptFresh(options) {
     auditFail('the receipt is not clean; resolve its pending, unverified or unlanded claims');
   }
   const claimRoot = scope.claimRoot || scope.root;
-  if (currentClaimRoot(root) !== claimRoot) auditFail('the audited repository root changed after the receipt; re-run the audit');
+  if (currentClaimRoot(gradedRoot(root, receipt)) !== claimRoot) auditFail('the audited repository root changed after the receipt; re-run the audit');
   const budget = { remaining: LIMITS.snapshotBytes };
   for (const [file, old] of Object.entries(scope.snapshots || {})) {
     if (!same(old, snapshot(claimRoot, file, budget))) auditFail('a claimed file changed after the receipt; re-run the audit with current predicate proofs');
@@ -755,6 +778,7 @@ function sessionGate(options) {
 function writeScopeFlags(dir, scope) {
   fs.writeFileSync(path.join(dir, 'baseline'), scope.baseline || '');
   fs.writeFileSync(path.join(dir, 'epoch'), scope.epoch || '');
+  fs.writeFileSync(path.join(dir, 'rerooted-from'), scope.rerootedFrom || '');
   for (const field of ['dirty', 'certified', 'proved']) {
     const values = scope[field] || [];
     fs.writeFileSync(path.join(dir, field), values.length ? `${values.join('\n')}\n` : '');
@@ -843,6 +867,17 @@ function main(argv, env = process.env, stdout = process.stdout, stderr = process
       stdout.write(String(receipt.claims));
       return EXIT.ok;
     }
+    if (verb === 'check-context') {
+      const loaded = readBoundedJson(env.ZENSU_ELR_RECEIPT || '', MAX_RECEIPT_BYTES);
+      const receipt = loaded.value;
+      if (!receipt || typeof receipt !== 'object' || !Object.prototype.hasOwnProperty.call(RECEIPT_SCHEMAS, receipt.schema)) return EXIT.none;
+      const workTree = receipt.workTree === undefined ? '' : claimPath(receipt.workTree);
+      if (workTree === null) return EXIT.none;
+      const scope = receipt.auditScope;
+      const baseline = scope && typeof scope === 'object' && typeof scope.baseline === 'string' && SCOPE_BASELINE_RE.test(scope.baseline) ? scope.baseline : '';
+      stdout.write(`${workTree}\t${baseline}`);
+      return EXIT.ok;
+    }
     if (verb === 'tree-note') {
       const loaded = readBoundedJson(env.ZENSU_ELR_RECEIPT || '', MAX_RECEIPT_BYTES);
       if (!loaded.value || typeof loaded.value !== 'object') return EXIT.none;
@@ -877,7 +912,7 @@ function main(argv, env = process.env, stdout = process.stdout, stderr = process
           auditFail('an active workflow requires the receipt-producing audit; drop --receipt - (use --inventory for read-only inspection)');
         }
       }
-      if (env.ZEL_CHECKPOINT === '1') checkpointScope(scope, env.ZEL_RECEIPT || '', env.ZEL_SESSION || '');
+      if (env.ZEL_CHECKPOINT === '1') checkpointScope(scope, env.ZEL_RECEIPT || '', env.ZEL_SESSION || '', env.ZEL_WORK_TREE || '');
       writeScopeState(env.ZEL_SCOPE_DIR, scope);
       return EXIT.ok;
     }
@@ -892,11 +927,11 @@ function main(argv, env = process.env, stdout = process.stdout, stderr = process
       return EXIT.ok;
     }
     if (verb === 'failed') {
-      stdout.write(`${JSON.stringify(failedReceipt(env.ZENSU_ELR_RECEIPT))}\n`);
+      stdout.write(`${JSON.stringify(failedReceipt(env.ZENSU_ELR_RECEIPT, env.ZENSU_ELR_FAILURE))}\n`);
       return EXIT.ok;
     }
     if (verb === 'fresh') return freshVerb(env, stdout, stderr);
-    stderr.write('usage: edit-landing-receipt-v1.js receipt-log|receipt-claims|tree-note|session-gate|scope-prepare|scope-claims|scope-finish|failed|fresh\n');
+    stderr.write('usage: edit-landing-receipt-v1.js receipt-log|receipt-claims|check-context|tree-note|session-gate|scope-prepare|scope-claims|scope-finish|failed|fresh\n');
     return EXIT.usage;
   } catch (error) {
     const message = error instanceof AuditScopeError ? error.message : `unexpected audit failure (${error && error.message ? error.message : error})`;

@@ -900,6 +900,27 @@ test('captures the hooks directory this repository ships, its registry read as d
       contract.observedExpectedHooks.PreToolUse.Bash.slice(0, 4),
       EVALUATOR_REQUIRED_HOOKS.PreToolUse.Bash,
     );
+    const shippedHooks = (event, tool) => matchingHookBasenames(contract.config, event, tool, contract.dispatchedChecks);
+    assert.deepEqual(shippedHooks('PreToolUse', 'Edit'), [
+      'pre-reviewer-capability-gate.sh',
+      'pre-work-order-gate.sh',
+      'pre-write-plugin-data-guard.sh',
+      'pre-edit-tdd-reminder.sh',
+      'pre-write-secret-scan.sh',
+    ]);
+    assert.deepEqual(shippedHooks('PreToolUse', 'NotebookEdit'), [
+      'pre-reviewer-capability-gate.sh',
+      'pre-work-order-gate.sh',
+      'pre-write-plugin-data-guard.sh',
+      'pre-write-secret-scan.sh',
+    ]);
+    assert.deepEqual(shippedHooks('PreToolUse', 'Agent'), [
+      'pre-reviewer-capability-gate.sh',
+      'pre-work-order-gate.sh',
+      'pre-agent-reviewer-allow.sh',
+    ]);
+    assert.deepEqual(matchingHookProcesses(contract.config, 'PreToolUse', 'Edit'), ['hook-dispatch-v1.js:pre']);
+    assert.deepEqual(matchingHookProcesses(contract.config, 'PostToolUse', 'Edit'), ['hook-dispatch-v1.js:post']);
     assert.equal(verifyCapturedHookContract(root, contract), true);
   } finally {
     removeFixture(root);

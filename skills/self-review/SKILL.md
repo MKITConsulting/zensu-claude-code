@@ -103,24 +103,20 @@ finalizing the current chain.
 ## Phase 1: List Changed Files
 
 List every file you changed or created in this session. You know these from
-context — no parsing needed. Cross-check with the canonical change set —
-resolve the bound project root with
-`PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)"`
-and `TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"` HERE, never from
-the working directory, which after `/zensu:adopt-session --reanchor` is no longer
-the bound root, and require `[ -n "$PROJECT_ROOT" ] && [ -n "$TOP" ] && [ -d "$TOP" ]`
-before ANY `git -C "$TOP"` (an empty value makes `git -C ""` enumerate whatever
-repo the cwd happens to be) — then run
-`node "$ROOT/hooks/lib/review-packet-v1.js" changes --root "$PROJECT_ROOT" --baseline "${BASELINE_SHA:-}"`
-and take its `changed_files`: tracked changes against HEAD, the commits since the
-baseline, untracked non-ignored files and, on an unborn HEAD, every cached file
-(`kind: explicit-no-git` means the root is outside git). Never re-spell a subset
-of it with ad-hoc `git` listings, which a mid-run commit empties, so this stage
-would skip itself as "no changes". If the list comes back empty while your own
-context names files you changed (the cold-start + mid-run-commit case, where no
-`BASELINE_SHA` survives), do NOT take the no-changes branch: review the files
-from context and say so in the summary. This catches files you created but never
-staged.
+context — no parsing needed. Cross-check with the canonical change set — resolve
+`PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)"`,
+`TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"` and
+`WT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --chain-work-tree)"`
+HERE, never from the working directory, which after `/zensu:adopt-session --reanchor`
+is no longer the bound root, and require `[ -n "$PROJECT_ROOT" ] && [ -n "$TOP" ] && [ -d "$TOP" ] && [ -n "$WT" ] && [ -d "$WT" ]`
+(an unresolvable root, or a project outside git, takes 5b's no-work-tree branch,
+never an unanchored run) — then run
+`node "$ROOT/hooks/lib/review-packet-v1.js" changes --root "$WT" --baseline "${BASELINE_SHA:-}"`
+and take its `changed_files`, relative to `$WT` (an Autopilot run's own worktree, else
+`$TOP`). Never re-spell a subset of it with ad-hoc `git` listings, which a mid-run
+commit empties. If it comes back empty while your context names files you changed (the
+cold-start + mid-run-commit case, where no `BASELINE_SHA` survives), do NOT take the
+no-changes branch: review the files from context and say so in the summary.
 
 If there are NO changes this session, close only the verified generation. For a
 standalone handoff run
@@ -225,9 +221,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
   Run every test, build or other project command of this round as
-  `cd "<project root>" && <command>`, where `<project root>` is the path `--project-root`
-  printed in Phase 1: the Bash tool returns to the session's start directory, which after
-  `/zensu:adopt-session --reanchor` is not the bound root. `--evidence-run` needs no prefix.
+  `cd "<project dir>" && <command>`, where `<project dir>` is what the Phase 1
+  `--chain-work-tree` call prints with `--project-dir` added: the Bash tool returns to
+  the start directory, and a bound chain works in its worktree. `--evidence-run` needs
+  no prefix.
   Then log `{step_id} IMPL completed — files: {list}` for the fixes and re-run
   the `/zensu:build` Phase 6 **step 1 full suite** over the amended tree through the
   evidence runner:

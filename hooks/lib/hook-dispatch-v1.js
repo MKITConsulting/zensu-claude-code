@@ -19,6 +19,30 @@ const ZENSU_WORD = /(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/;
 const PAIR = '\u0001';
 const ROOT_MISMATCH = 'zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin';
 const CAPABILITY_LEAD = 'zensu: reviewer capability gate unavailable: ';
+const EDIT_GATE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+const EDIT_GATE_LIBRARIES = Object.freeze([
+  'zensu-agent-context.sh',
+  'zensu-session.sh',
+  'zensu-msys-env.sh',
+  'zensu-host-path.sh',
+  'zensu-config.sh',
+  'zensu-tdd-phase.sh',
+  'claude-principal-v1.js',
+  'session-control-core-v1.js',
+  'state-path-safety-v1.js',
+  'edit-path-class-v1.js',
+]);
+const SPAWN_GRANT_SOURCED = Object.freeze([
+  'zensu-agent-context.sh',
+  'zensu-session.sh',
+  'zensu-host-path.sh',
+  'zensu-config.sh',
+]);
+const SPAWN_GRANT_GUARDED = Object.freeze([
+  'zensu-msys-env.sh',
+  'claude-principal-v1.js',
+  'reviewer-spawn-allow-v1.js',
+]);
 
 const REGISTRY = DISPATCHED_CHECKS;
 
@@ -144,6 +168,40 @@ function configHookOptedIn(key, environment, base) {
   }
 }
 
+function configHookEnabledStrict(key, environment, base) {
+  const inputs = [environment.ZENSU_CONFIG, environment.HOME, environment.CLAUDE_PROJECT_DIR];
+  if (inputs.some((value) => /[\r\n]/.test(value || ''))) return false;
+  const at = (value) => path.resolve(base, msysDrivePrefix(value));
+  const candidates = environment.ZENSU_CONFIG
+    ? [environment.ZENSU_CONFIG]
+    : [
+      environment.HOME ? `${environment.HOME}/.zensu/config.json` : '',
+      environment.CLAUDE_PROJECT_DIR ? `${environment.CLAUDE_PROJECT_DIR}/.zensu/config.json` : '',
+    ].filter(Boolean);
+  if (candidates.length === 0) return false;
+  for (const candidate of candidates) {
+    const file = at(candidate);
+    try {
+      fs.statSync(file);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      return false;
+    }
+    let value;
+    try {
+      value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (_error) {
+      return false;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const hooks = value.hooks;
+    if (hooks === undefined) continue;
+    if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return false;
+    if (hooks[key] === false) return false;
+  }
+  return true;
+}
+
 function libraryScan(text) {
   const scan = text
     .replace(/\\\\/g, PAIR)
@@ -215,12 +273,13 @@ function sessionBinding(context) {
   return context.binding;
 }
 
-function shellBinding(context) {
+function shellBinding(context, options = {}) {
+  if (/[\r\n]/.test(context.environment.MSYS2_ENV_CONV_EXCL || '')) return null;
   if (!binderPayloadValid(context.input)) return null;
   if (!regularFile(path.join(LIB_DIR, 'claude-hook-session-v1.js'))) return null;
   const outcome = sessionBinding(context);
   const hookSession = require('./claude-hook-session-v1.js');
-  if (!context.disclosed) {
+  if (!context.disclosed && !options.quiet) {
     context.disclosed = true;
     const source = outcome.error || outcome.value;
     const performed = outcome.error ? hookSession.performedAdoption(outcome.error) : (outcome.value.adoption || null);
@@ -423,6 +482,93 @@ function mainPrincipal(input, eventName) {
   }
 }
 
+function runDataGuard(context) {
+  const root = context.root;
+  if (root.executing === null) return blocked('zensu: plugin-data guard cannot resolve its own plugin root');
+  const failure = rootFailure(context);
+  if (failure) return failure;
+  if (!regularFile(path.join(LIB_DIR, 'plugin-data-guard-v1.js'))) {
+    process.stderr.write('zensu: plugin-data guard did not run (decision module absent or symlinked) — writes into the plugin data store are unguarded\n');
+    return silent();
+  }
+  const guard = require('./plugin-data-guard-v1.js');
+  const environment = context.environment;
+  const outcome = guard.hostOutcome(guard.decide({
+    payload: guard.payloadFromRaw(`${context.input}\n`, false),
+    pluginData: environment.CLAUDE_PLUGIN_DATA || '',
+    cwd: context.only ? environment.ZENSU_GUARD_CALLER_CWD || '' : context.hookCwd,
+    projectRoot: environment.CLAUDE_PROJECT_DIR || '',
+  }));
+  for (const note of outcome.notes) process.stderr.write(note);
+  return emitted(outcome.output);
+}
+
+function editGateAllows(context) {
+  if (!EDIT_GATE_LIBRARIES.every((name) => regularFile(path.join(LIB_DIR, name)))) return false;
+  if (!mainPrincipal(context.input, 'PreToolUse')) return true;
+  const binding = shellBinding(context);
+  if (binding === null) return false;
+  const payload = JSON.parse(context.input);
+  if (!EDIT_GATE_TOOLS.has(payload.tool_name)) return true;
+  if (context.environment.ZENSU_TDD_GATE === 'off') return false;
+  const project = boundProjectDir(binding);
+  if (project === null) return false;
+  const stateDirectory = path.join(project, '.zensu', 'state');
+  if (!regularFile(path.join(stateDirectory, `tdd-phase-${binding.sessionKey}.json`))) return false;
+  const core = require('./session-control-core-v1.js');
+  const state = core.readWorkflowState({ projectRoot: project, sessionId: binding.sessionKey });
+  if (state.active !== true) return true;
+  if (state.vanilla !== true) return false;
+  const input = payload.tool_input;
+  const spelled = input && typeof input === 'object' && typeof input.file_path === 'string' ? input.file_path : '';
+  if (/[\0\r\n]/.test(spelled)) return false;
+  if (process.platform === 'win32' && /^[\\/]/.test(spelled)) return false;
+  const absolute = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(spelled) ? spelled : `${project}/${spelled}`;
+  return require('./edit-path-class-v1.js').editPathClass(absolute, stateDirectory) !== 'state';
+}
+
+function runEditGate(context, check) {
+  const failure = rootFailure(context);
+  if (failure) return failure;
+  let allowed = false;
+  try {
+    allowed = editGateAllows(context);
+  } catch (_error) {
+    allowed = false;
+  }
+  return allowed ? silent() : delegate(context, check);
+}
+
+function spawnGrantLibrariesPresent(directory) {
+  return SPAWN_GRANT_SOURCED.every((name) => regularTarget(path.join(directory, name)))
+    && SPAWN_GRANT_GUARDED.every((name) => regularFile(path.join(directory, name)));
+}
+
+function spawnPayload(context) {
+  const { MAX_PAYLOAD_BYTES: limit } = require('./reviewer-spawn-allow-v1.js');
+  return context.raw.subarray(0, limit + 1).toString('utf8').replace(/\0/g, '');
+}
+
+function runSpawnGrant(context) {
+  const root = context.root;
+  if (root.declared === 'unreadable' || root.declared === 'mismatch') {
+    process.stderr.write(`${ROOT_MISMATCH}\n`);
+    return silent();
+  }
+  if (root.executing === null) return silent();
+  try {
+    if (!spawnGrantLibrariesPresent(LIB_DIR)) return silent();
+    const decision = require('./reviewer-spawn-allow-v1.js').decide(spawnPayload(context));
+    if (decision === '') return silent();
+    if (!mainPrincipal(context.input, 'PreToolUse')) return silent();
+    if (shellBinding(context, { quiet: true }) === null) return silent();
+    if (!configHookEnabledStrict('reviewerSpawnAutoAllow', context.environment, context.hookCwd)) return silent();
+    return emitted(JSON.parse(decision));
+  } catch (_error) {
+    return silent();
+  }
+}
+
 function sweepArtifacts(mod, project, input) {
   let job;
   try {
@@ -508,9 +654,16 @@ const RUNNERS = Object.freeze({
   'secret-scan': runSecretScan,
   'browser-consent': runConsent,
   'work-order-gate': runWorkOrder,
+  'reviewer-spawn-allow': runSpawnGrant,
+  'plugin-data-guard': runDataGuard,
+  'tdd-edit-gate': runEditGate,
+  'secret-scan-write': runSecretScan,
+  'plugin-data-guard-notebook': runDataGuard,
+  'secret-scan-notebook': runSecretScan,
   'artifact-redact': runRedact,
   'browser-consent-recorder': runConsent,
   'work-order-post': runWorkOrder,
+  'artifact-redact-write': runRedact,
 });
 
 function selectChecks(eventName, tool) {
@@ -583,7 +736,7 @@ function aggregate(outputs, eventName) {
   return Object.keys(result).length ? result : null;
 }
 
-function buildContext(raw, eventName, environment, hookCwd) {
+function buildContext(raw, eventName, environment, hookCwd, only) {
   const text = raw.toString('utf8');
   const input = shellInput(text);
   let parsed;
@@ -602,6 +755,7 @@ function buildContext(raw, eventName, environment, hookCwd) {
     eventName,
     environment,
     hookCwd,
+    only,
     root,
     data: { ok: dataValue !== null, value: dataValue },
     deadline: Date.now() + BUDGET_MS,
@@ -727,7 +881,7 @@ function main(argv) {
     raw = Buffer.alloc(0);
   }
   const environment = Object.assign({}, process.env);
-  const context = buildContext(raw, eventName, environment, hookCwd);
+  const context = buildContext(raw, eventName, environment, hookCwd, only !== null);
   prepareProcessEnvironment(context);
   if (only) return runOnly(context, only);
   const outcome = runAll(context);
@@ -741,10 +895,12 @@ module.exports = {
   REGISTRY,
   aggregate,
   configHookEnabled,
+  configHookEnabledStrict,
   configHookOptedIn,
   consentMarked,
   secretScanSkipsBash,
   selectChecks,
+  spawnGrantLibrariesPresent,
 };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

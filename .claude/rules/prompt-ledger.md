@@ -73,8 +73,8 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   anti-inflation counterweight, the safety exception (the length, one-question and one-next-step
   limits lifted, a confirmation before an irreversible action never suppressed or settled as
   routine) and the field. The armed variant also places the anchor above the final step list when
-  the one-next-step rule is lifted. The none body is 1,397 characters; `Z105` holds the armed body,
-  measured with the longest anchor the module can produce, under 1,800. The
+  the one-next-step rule is lifted. The none body is 1,746 characters; `Z105` holds the armed body,
+  measured with the longest anchor the module can produce, under 2,170. The
   trust-only-the-markers clause lives in the armed variant only, exactly as in the full text, because
   the none swap replaces that span. The short body keeps the classify lead `zen-mode is ACTIVE`,
   both markers, the placeholder and the `ZEN_ANCHOR_RULE_OPEN`/`ZEN_ANCHOR_RULE_CLOSE` span, so the
@@ -132,7 +132,7 @@ exists, and every record whose key directory is gone. It emits nothing.
   zen texts until the next prompt. That gap existed before; best-solution-first is now back at
   once through its `SessionStart` leg.
 - **Fade is unmeasured, and the short shapes have evals for part of their range.** The hooks
-  were written on the premise that a rule given once fades. Three `short-` scenarios in
+  were written on the premise that a rule given once fades. Five `short-` scenarios in
   `evals/zen-mode-reaction/` embed the zen-mode short body with no full contract before it, which
   is the worst case of fade, in both anchor variants. `evals/route-short-line-reaction/` delivers
   the reminder's vanilla-mode ask short line, its two decided lines with

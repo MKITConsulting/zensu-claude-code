@@ -83,8 +83,10 @@ for bucket in "Positive" "Improvements" "Risks"; do
 done
 
 # Terminal-stage mechanics.
-grep -qF 'node "$ROOT/hooks/lib/review-packet-v1.js" changes --root "$PROJECT_ROOT" --baseline "${BASELINE_SHA:-}"' "$SKILL_MD" && grep -qF 'Never re-spell a subset' "$SKILL_MD" \
-  && check "V7 lists session changes through the canonical change set of review-packet-v1.js" PASS || check "V7 canonical change set" FAIL
+grep -qF 'node "$ROOT/hooks/lib/review-packet-v1.js" changes --root "$WT" --baseline "${BASELINE_SHA:-}"' "$SKILL_MD" && grep -qF 'Never re-spell a subset' "$SKILL_MD" \
+  && grep -qF 'WT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --chain-work-tree)"' "$SKILL_MD" \
+  && ! grep -qF 'ls-files --others --exclude-standard' "$SKILL_MD" \
+  && check "V7 lists session changes through the canonical change set of the chain's work tree" PASS || check "V7 canonical change set of the chain's work tree" FAIL
 grep -qF 'selfReviewFixed' "$SKILL_MD" && check "V8 references selfReviewFixed latch" PASS || check "V8 selfReviewFixed latch" FAIL
 grep -qF -- '--self-review-fixed' "$SKILL_MD" && check "V9 sets latch via --self-review-fixed marker" PASS || check "V9 --self-review-fixed marker" FAIL
 grep -qF -- '--chain-done' "$SKILL_MD" && check "V10 finalizes via --chain-done (owns terminus)" PASS || check "V10 --chain-done finalize" FAIL

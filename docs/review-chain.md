@@ -138,7 +138,11 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   link (`zensu-log.sh` resolves symbolic links in the path's ancestors first), and
   `undetermined` when git cannot answer. A chain reviews one root, so for the first three the
   aspect panel reviews this change, and a workflow review of the other work tree imports only in
-  a session started in it. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
+  a session started in it. An Autopilot-bound chain whose work tree is the run's own worktree
+  below the anchor is that layout as well, so step 3 of the build's review chain skips the import
+  for it without asking and logs `EXTERNAL REVIEW SKIPPED — the chain's work tree lies below the
+  anchor`; its packet names each changed file with the worktree's location below the anchor as a
+  prefix, so the panel reads the worktree's copy. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
   with that root, `unresolved-project-root` points at `/zensu:doctor`, and `undetermined` names
   git's fault in `detail=`: for the review root it asks for the same re-run, because only that
   root imports whatever the fault hid, and for the project root it asks for the fault to be
@@ -209,6 +213,12 @@ A routed fix round prepares its re-review with one call,
 fan-out, and `/zensu:self-review` runs `--round self-review` for its one fix round. Every call of
 a chain passes the `--baseline` its round-0 call passed. The verb:
 
+- resolves the chain's work tree as `zensu-log.sh --chain-work-tree` does — the git top level, or
+  the worktree below the anchor that a bound Autopilot run drives — and takes the change set, the
+  audit, the snapshot and the round diff from it, and the ledger, the run log and the round scope
+  from the anchor's top level; when the two differ, every path it prints for a reviewer carries
+  the work tree's location below the anchor as a prefix, the diff headers included, while aspect
+  activation reads the paths without it;
 - runs the Phase 6 step 5b edit-landing audit under the round's start marker;
 - judges every claim of the round against a content snapshot taken when the round began, so a
   file that was already uncommitted before the round counts as landed only when this round
@@ -409,6 +419,14 @@ Four artifact skeletons ship as plugin defaults under `templates/` and resolve w
 | `autopilot-spec.md` | `/zensu:autopilot` Phase 0.C | numbered stable `AC-###` criteria, out-of-scope section, resolved recipe |
 | `autopilot-pr-body.md` | `/zensu:autopilot` step 3 | per-AC checklist table (deprecated rows kept) whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix, `Gates bypassed during build:` audit line |
 | `pr-body.md` | `/zensu:pilot` "Commit + open PR" (shared default for any PR opener) | `## Acceptance criteria` table filled from the feature's `## Requirements` rows, with a stub-row fallback, whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix |
+
+The two PR-body templates come last in the order `skills/autopilot/rules/conventions.md` §4 sets:
+
+1. `.zensu/templates/<name>.md` replaces everything, as above, when the `overrides` field of `zensu-vcs.sh --conventions` lists it: a plain file of at most 64 KiB, reached through no symlink.
+2. Without an override, the repository's own PR template is the skeleton, as `zensu-vcs.sh --conventions` reports it in `prTemplate`: the one `vcs.prTemplate` names, passed as `--template`, or with `auto` the one the forge pre-fills a new pull request with (`pull_request_template.md` under `.github/`, the root or `docs/` on GitHub, `.gitlab/merge_request_templates/Default.md` on GitLab). A template in a `PULL_REQUEST_TEMPLATE/` directory is listed in `prTemplates` but is never chosen on its own. Its sections are filled in the repository's language, and Zensu appends its `## Acceptance criteria` section; `/zensu:autopilot` also appends `## Verification` with the `Gates bypassed during build:` line. `vcs.prTemplate: none` skips this step, and a template the probe refuses (`prTemplateRefused`) is never read.
+3. Without either, the plugin template above is the body.
+
+The Acceptance criteria table is never missing: every step carries it, with the template's stub row when no usable `## Requirements` table exists. The section headings Zensu appends stay English, and so do the `AC-###`/`FR-###` ids, the status words and the `Gates bypassed during build:` label inside them, because tools read them back.
 
 #### Code Reviewer — 5 Sequential Specialist Perspectives
 

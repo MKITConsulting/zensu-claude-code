@@ -427,26 +427,30 @@ E10_SLUG="reanchor-e2e"
 E10_LOG_DEF="$(skill_span '/.zensu/logs/{SESSION_TS}_build-{slug}.log')"
 E10_PLAN_DEF="$(skill_span '/.zensu/plans/{SESSION_TS}_build-{slug}.md')"
 E10_ROOT_CMD="$(skill_span 'zensu-log.sh" --project-root')"
+E10_WT_CMD="$(skill_span 'zensu-log.sh" --chain-work-tree')"
+E10_PD_CMD="$(skill_span 'zensu-log.sh" --chain-work-tree --project-dir')"
 E10_BASE_CMD="$(skill_span 'BASELINE_SHA=$(git -C')"
 E10_BEGIN="$(skill_span 'hooks/lib/zensu-log.sh" --tdd-begin' '--tdd-begin')"
 E10_RECIPE="$(skill_span 'append --truncate --log {log_file}')"
 E10_AUDIT="$(skill_span 'zensu-edit-landing.sh" --log {log_file}')"
 E10_COMPLETE="$(skill_span 'zensu-log.sh" --tdd-complete --plan {plan_file}' '{plan_file}' '10. **Close implementation')"
 E10_COMPLETE_AGREE="$(spans_agree 'zensu-log.sh" --tdd-complete --plan {plan_file}' '{plan_file}')"
-E10_CD="$(skill_span 'cd "{project_root}" && ' '<command>')"
+E10_CD="$(skill_span 'cd "{project_dir}" && ' '<command>')"
 E10_EVR="$(skill_span "--evidence-run --scope full --cmd '{full_test_cmd}' --log {log_file}")"
 E10_SR_ROOT="$(span_in "$SKILL_SR" 'PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA=' '--project-root)"')"
 E10_SR_TOP="$(span_in "$SKILL_SR" 'TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"')"
 E10_VF_ROOT="$(span_in "$SKILL_VF" 'GIT_ROOT="$(git -C "$ANCHOR" rev-parse --show-toplevel)"')"
-if [ -n "$E10_LOG_DEF" ] && [ -n "$E10_PLAN_DEF" ] && [ -n "$E10_ROOT_CMD" ] && [ -n "$E10_BASE_CMD" ] \
+if [ -n "$E10_LOG_DEF" ] && [ -n "$E10_PLAN_DEF" ] && [ -n "$E10_ROOT_CMD" ] && [ -n "$E10_WT_CMD" ] && [ -n "$E10_PD_CMD" ] && [ -n "$E10_BASE_CMD" ] \
   && [ -n "$E10_BEGIN" ] && [ -n "$E10_RECIPE" ] && [ -n "$E10_AUDIT" ] && [ -n "$E10_COMPLETE" ] \
   && [ "${E10_COMPLETE_AGREE:-0}" -ge 2 ] && [ -n "$E10_CD" ] && [ -n "$E10_EVR" ] \
   && [ -n "$E10_SR_ROOT" ] && [ -n "$E10_SR_TOP" ] && [ -n "$E10_VF_ROOT" ]; then
   check "E10a every path and command the chain needs is extracted from the tdd, self-review and verify-feature skills" PASS
 else
-  check "E10a extraction (log='$E10_LOG_DEF' plan='$E10_PLAN_DEF' root='$E10_ROOT_CMD' base='$E10_BASE_CMD' begin='$E10_BEGIN' recipe='$E10_RECIPE' audit='$E10_AUDIT' complete='$E10_COMPLETE' agree='$E10_COMPLETE_AGREE' cd='$E10_CD' evr='$E10_EVR' sr-root='$E10_SR_ROOT' sr-top='$E10_SR_TOP' vf-root='$E10_VF_ROOT')" FAIL
+  check "E10a extraction (log='$E10_LOG_DEF' plan='$E10_PLAN_DEF' root='$E10_ROOT_CMD' wt='$E10_WT_CMD' pd='$E10_PD_CMD' base='$E10_BASE_CMD' begin='$E10_BEGIN' recipe='$E10_RECIPE' audit='$E10_AUDIT' complete='$E10_COMPLETE' agree='$E10_COMPLETE_AGREE' cd='$E10_CD' evr='$E10_EVR' sr-root='$E10_SR_ROOT' sr-top='$E10_SR_TOP' vf-root='$E10_VF_ROOT')" FAIL
 fi
 E10_ROOT=""
+E10_WT=""
+E10_PD=""
 render() {
   local c="$1"
   c="${c//\{log_file\}/$E10_LOG_DEF}"
@@ -459,11 +463,13 @@ render() {
   c="${c//\{N\}/1}"
   c="${c//\{plugin_root\}/$PLUGIN_DIR}"
   c="${c//\{plugin_data\}/$DATA}"
+  c="${c//\{work_tree\}/$E10_WT}"
+  c="${c//\{project_dir\}/$E10_PD}"
   printf '%s' "$c"
 }
 unrendered() {
   case "$1" in
-    (*'{log_file}'*|*'{plugin_root}'*|*'{plugin_data}'*|*'{plan_file}'*|*'{project_root}'*|*'{SESSION_TS}'*|*'{slug}'*|*'{session_id}'*|*'{title}'*|*'{N}'*|*'{full_test_cmd}'*|*'<command>'*) return 0 ;;
+    (*'{log_file}'*|*'{plugin_root}'*|*'{plugin_data}'*|*'{plan_file}'*|*'{project_root}'*|*'{work_tree}'*|*'{project_dir}'*|*'{SESSION_TS}'*|*'{slug}'*|*'{session_id}'*|*'{title}'*|*'{N}'*|*'{full_test_cmd}'*|*'<command>'*) return 0 ;;
     (*) return 1 ;;
   esac
 }
@@ -517,6 +523,21 @@ else
   check "E10f unbound --project-root (rc=$E10F_RC out='$E10F_OUT')" FAIL
 fi
 
+from_start "$E10_WT_CMD"
+E10_WT="$E10_OUT"
+if [ "$E10_RC" -eq 0 ] && [ -n "$E10_WT" ] && [ "$E10_WT" = "$B" ]; then
+  check "E10g0 the skill's work-tree read prints the new anchor's top level, not the start directory" PASS
+else
+  e10_fail "E10g0 work-tree read (printed '$E10_WT', new anchor '$B')"
+fi
+E10_PD_RUN="$(render "$E10_PD_CMD")"
+from_start "$E10_PD_RUN"
+E10_PD="$E10_OUT"
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_PD_RUN" && [ -n "$E10_PD" ] && [ "$E10_PD" = "$B" ]; then
+  check "E10g1 the Phase 1 project-directory read prints the new anchor for a chain that works in it" PASS
+else
+  e10_fail "E10g1 project-directory read (printed '$E10_PD', new anchor '$B')"
+fi
 E10_BASE_RUN="$(render "$E10_BASE_CMD")"
 from_start "$E10_BASE_RUN; printf '%s' \"\$BASELINE_SHA\""
 E10_BASE="$E10_OUT"

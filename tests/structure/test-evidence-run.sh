@@ -193,5 +193,176 @@ else
   check "E12 an unknown scope, an unknown argument and a missing --cmd are usage errors ($RC_SCOPE/$RC_ARG/$RC_CMD)" FAIL
 fi
 
+OUT_PD="$(bash "$LOG" --chain-work-tree --project-dir 2>/dev/null)"; RC_PD=$?
+OUT_PR="$(bash "$LOG" --project-root 2>/dev/null)"
+if [ "$RC_PD" -eq 0 ] && [ -n "$OUT_PD" ] && [ "$OUT_PD" = "$OUT_PR" ]; then
+  check "E13 without an Autopilot binding --chain-work-tree --project-dir prints the project root --project-root prints" PASS
+else
+  check "E13 without an Autopilot binding --chain-work-tree --project-dir prints the project root (rc=$RC_PD got '$OUT_PD' want '$OUT_PR')" FAIL
+fi
+
+LIB_PROBE='echo "core=${_ZENSU_TDD_CONTROL_CORE-unset} fn=$(declare -F tdd_state_file >/dev/null 2>&1 && echo set || echo unset)"'
+OUT_LIB="$(bash "$LOG" --evidence-run --scope scoped --cmd "$LIB_PROBE" 2>/dev/null)"; RC_LIB=$?
+if [ "$RC_LIB" -eq 0 ] && printf '%s\n' "$OUT_LIB" | grep -qxF "core=unset fn=unset"; then
+  check "E22 the suite of a standalone chain inherits none of the phase library's exports" PASS
+else
+  check "E22 the suite of a standalone chain inherits none of the phase library's exports (rc=$RC_LIB)" FAIL
+  printf '%s\n' "$OUT_LIB"
+fi
+
+echo "== A chain bound to an Autopilot run that drives a worktree below the anchor =="
+source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+source "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+APPROVED_SHA="$(printf 'a%.0s' $(seq 1 64))"
+bound_repo() {
+  mkdir -p "$1/pkg"
+  git -C "$1" init -q
+  git -C "$1" config user.email t@example.invalid
+  git -C "$1" config user.name tester
+  printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$1/.gitignore"
+  printf '.claude/worktrees/\n' > "$1/pkg/.gitignore"
+  printf 'baseline\n' > "$1/tracked.txt"
+  printf 'package\n' > "$1/pkg/inside.txt"
+  git -C "$1" add .gitignore tracked.txt pkg/.gitignore pkg/inside.txt
+  git -C "$1" -c commit.gpgsign=false commit -qm baseline
+}
+bound_arm() {
+  local sid="$1" project="$2" run="$3" chain="$4" workspace="$5"
+  export CLAUDE_PROJECT_DIR="$project"
+  cd "$project" || return 1
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$project" false true "$workspace" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" "plan-$run" PLAN_APPROVED "{\"approvedPlanSha256\":\"$APPROVED_SHA\"}" "$project" >/dev/null 2>&1 || return 1
+  bash "$LOG" --tdd-begin --session "$sid" --autopilot-run "$run" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1
+}
+record_count() { ls "$ZENSU_TEST_PLUGIN_DATA/evidence-run/v1/records/${ZENSU_SESSION_KEY:-missing}" 2>/dev/null | grep -c '\.json$'; }
+
+BOUND="$WORK/bound"
+bound_repo "$BOUND"
+BOUND="$(cd -P "$BOUND" && pwd -P)"
+git -C "$BOUND" worktree add -q "$BOUND/.claude/worktrees/wt" -b wt-bound >/dev/null 2>&1
+BWT="$(cd -P "$BOUND/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
+if [ -n "$BWT" ] && bound_arm evidence-run-bound "$BOUND" er_run er-chain "$BWT"; then
+  check "E14 an Autopilot run that drives a worktree below the anchor arms a bound chain" PASS
+else
+  check "E14 an Autopilot run that drives a worktree below the anchor arms a bound chain" FAIL
+fi
+
+OUT_PD="$(bash "$LOG" --chain-work-tree --project-dir 2>/dev/null)"; RC_PD=$?
+OUT_WT="$(bash "$LOG" --chain-work-tree 2>/dev/null)"
+if [ "$RC_PD" -eq 0 ] && [ "$OUT_PD" = "$BWT" ] && [ "$OUT_WT" = "$BWT" ]; then
+  check "E15 for the bound chain --chain-work-tree --project-dir prints the run's worktree" PASS
+else
+  check "E15 for the bound chain --chain-work-tree --project-dir prints the run's worktree (rc=$RC_PD got '$OUT_PD' / '$OUT_WT')" FAIL
+fi
+
+OUT_B="$(cd "$BOUND" && bash "$LOG" --evidence-run --scope scoped --cmd 'pwd -P' 2>"$WORK/e16.err")"; RC_B=$?
+if [ "$RC_B" -eq 0 ] && printf '%s\n' "$OUT_B" | grep -qxF "$BWT" \
+  && ! printf '%s\n' "$OUT_B" | grep -qxF "$BOUND" \
+  && grep -qF "the working directory is not in the work tree of this Autopilot-bound chain, so the command runs in $BWT" "$WORK/e16.err"; then
+  check "E16 from the anchor the bound chain's suite runs in its worktree and says so" PASS
+else
+  check "E16 from the anchor the bound chain's suite runs in its worktree and says so (rc=$RC_B)" FAIL
+  printf '%s\n' "$OUT_B" | tail -3; cat "$WORK/e16.err"
+fi
+
+OUT_IN="$(cd "$BWT/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd 'pwd -P' 2>"$WORK/e17.err")"; RC_IN=$?
+INNER_B="$BOUND/inner-repo"
+mkdir -p "$INNER_B"
+git -C "$INNER_B" init -q
+OUT_NEST="$(cd "$INNER_B" && bash "$LOG" --evidence-run --scope scoped --cmd 'pwd -P' 2>"$WORK/e17b.err")"; RC_NEST=$?
+rm -rf "$INNER_B"
+if [ "$RC_IN" -eq 0 ] && printf '%s\n' "$OUT_IN" | grep -qxF "$BWT/pkg" && ! grep -qF 'so the command runs in' "$WORK/e17.err" \
+  && [ "$RC_NEST" -eq 0 ] && printf '%s\n' "$OUT_NEST" | grep -qxF "$BWT" \
+  && grep -qF "so the command runs in $BWT" "$WORK/e17b.err"; then
+  check "E17 a cwd inside the worktree is kept, and one in another repository nested in the anchor moves to the worktree" PASS
+else
+  check "E17 a cwd inside the worktree is kept, and one in another repository nested in the anchor moves to the worktree (rc=$RC_IN/$RC_NEST)" FAIL
+fi
+
+(cd "$BOUND" && bash "$LOG" --evidence-run --scope scoped --cmd 'true' >/dev/null 2>&1)
+SKIP_OUT="$(cd "$BOUND" && bash "$LOG" --evidence-run --scope scoped --cmd 'true' --if-stale 2>/dev/null)"
+BEFORE_B="$(record_count)"
+printf 'edited in the worktree\n' > "$BWT/tracked.txt"
+(cd "$BOUND" && bash "$LOG" --evidence-run --scope scoped --cmd 'true' --if-stale >/dev/null 2>&1)
+AFTER_B="$(record_count)"
+git -C "$BWT" checkout -q -- tracked.txt
+if printf '%s' "$SKIP_OUT" | grep -qF 'skipped (--if-stale)' && [ "$AFTER_B" -eq $((BEFORE_B + 1)) ]; then
+  check "E18 the bound run's record covers the worktree: --if-stale skips it until an edit there" PASS
+else
+  check "E18 the bound run's record covers the worktree (before=$BEFORE_B after=$AFTER_B)" FAIL
+fi
+
+BOUND_RUN_FILE="$(autopilot_run_file er_run "$BOUND")"
+cp "$BOUND_RUN_FILE" "$WORK/bound-run.pre"
+BAD_WS="$BOUND/pkg" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$BOUND_RUN_FILE"
+BEFORE_F="$(record_count)"
+FAULT_ERR="$(cd "$BOUND" && bash "$LOG" --evidence-run --scope scoped --cmd 'true' 2>&1 >/dev/null)"; RC_F=$?
+AFTER_F="$(record_count)"
+bash "$LOG" --chain-work-tree --project-dir >/dev/null 2>&1; RC_FPD=$?
+cp "$WORK/bound-run.pre" "$BOUND_RUN_FILE"
+if [ "$RC_F" -eq 2 ] && [ "$AFTER_F" -eq "$BEFORE_F" ] && [ "$RC_FPD" -eq 2 ] \
+  && printf '%s' "$FAULT_ERR" | grep -qF "the chain's work tree could not be determined, so the command was not run: "; then
+  check "E19 a bound chain whose worktree cannot be resolved refuses the run with exit 2 and writes no record" PASS
+else
+  check "E19 a bound chain whose worktree cannot be resolved refuses the run (rc=$RC_F/$RC_FPD before=$BEFORE_F after=$AFTER_F)" FAIL
+  printf '%s\n' "$FAULT_ERR"
+fi
+
+SUBREPO="$WORK/subrepo"
+bound_repo "$SUBREPO"
+SUBREPO="$(cd -P "$SUBREPO" && pwd -P)"
+git -C "$SUBREPO" worktree add -q "$SUBREPO/pkg/.claude/worktrees/wt" -b wt-sub >/dev/null 2>&1
+SWT="$(cd -P "$SUBREPO/pkg/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
+if [ -n "$SWT" ] && bound_arm evidence-run-subdir "$SUBREPO/pkg" er_sub er-sub-chain "$SWT"; then
+  OUT_SPD="$(bash "$LOG" --chain-work-tree --project-dir 2>/dev/null)"
+  OUT_SWT="$(bash "$LOG" --chain-work-tree 2>/dev/null)"
+  OUT_SRUN="$(cd "$SUBREPO/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd 'pwd -P' 2>/dev/null)"; RC_SRUN=$?
+  if [ "$OUT_SPD" = "$SWT/pkg" ] && [ "$OUT_SWT" = "$SWT" ] && [ "$RC_SRUN" -eq 0 ] \
+    && printf '%s\n' "$OUT_SRUN" | grep -qxF "$SWT/pkg"; then
+    check "E20 a session bound to a subdirectory runs its suite in the matching subdirectory of the worktree" PASS
+  else
+    check "E20 a session bound to a subdirectory runs in the worktree's subdirectory (dir='$OUT_SPD' tree='$OUT_SWT' rc=$RC_SRUN)" FAIL
+  fi
+else
+  check "E20 arm a chain bound to a subdirectory whose run drives a worktree below it" FAIL
+fi
+
+SUB_STATE="$(tdd_state_file evidence-run-subdir)"
+cp "$SUB_STATE" "$WORK/sub-state.pre"
+printf '{"not":"a workflow document"}\n' > "$SUB_STATE"
+BEFORE_L="$(record_count)"
+LINK_ERR="$(cd "$SUBREPO/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd 'true' 2>&1 >/dev/null)"; RC_L=$?
+AFTER_L="$(record_count)"
+cp "$WORK/sub-state.pre" "$SUB_STATE"
+if [ "$RC_L" -eq 2 ] && [ "$AFTER_L" -eq "$BEFORE_L" ] \
+  && printf '%s' "$LINK_ERR" | grep -qF "the chain's work tree could not be determined, so the command was not run: this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"; then
+  check "E21 a workflow document whose Autopilot linkage cannot be read refuses the run instead of falling back to the anchor" PASS
+else
+  check "E21 an unreadable Autopilot linkage refuses the run (rc=$RC_L before=$BEFORE_L after=$AFTER_L)" FAIL
+  printf '%s\n' "$LINK_ERR"
+fi
+
+OUT_BLIB="$(cd "$SUBREPO/pkg" && unset -f tdd_state_file tdd_autopilot_context && unset _ZENSU_TDD_CONTROL_CORE && bash "$LOG" --evidence-run --scope scoped --cmd "$LIB_PROBE" 2>/dev/null)"; RC_BLIB=$?
+if [ "$RC_BLIB" -eq 0 ] && printf '%s\n' "$OUT_BLIB" | grep -qxF "core=unset fn=unset"; then
+  check "E23 the suite of a bound chain inherits none of the phase library's exports" PASS
+else
+  check "E23 the suite of a bound chain inherits none of the phase library's exports (rc=$RC_BLIB)" FAIL
+  printf '%s\n' "$OUT_BLIB"
+fi
+
+cp "$SUB_STATE" "$WORK/sub-state.open"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.implComplete = true; s.chainDone = true; s.chainOutcome = "pass"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$SUB_STATE"
+OUT_DONE="$(cd "$SUBREPO/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd 'pwd -P' 2>"$WORK/e24.err")"; RC_DONE=$?
+cp "$WORK/sub-state.open" "$SUB_STATE"
+if [ "$RC_DONE" -eq 0 ] && printf '%s\n' "$OUT_DONE" | grep -qxF "$SUBREPO/pkg" && ! grep -qF 'so the command runs in' "$WORK/e24.err"; then
+  check "E24 once the bound chain is done, --evidence-run runs in the anchor again" PASS
+else
+  check "E24 once the bound chain is done, --evidence-run runs in the anchor again (rc=$RC_DONE)" FAIL
+  printf '%s\n' "$OUT_DONE"
+  cat "$WORK/e24.err"
+fi
+
 unit_check_done "E1z every unit file the registry gives this suite was graded"
 finish

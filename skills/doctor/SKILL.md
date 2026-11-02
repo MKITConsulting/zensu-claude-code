@@ -819,13 +819,12 @@ whether browser verification is enforced, not only when a row is red.
 - **autopilot lease:** rows (✅ or ⚠️) → read `references/autopilot-lease.md` before you relay
   any of them, and follow it. Never delete a lease artifact and never offer to.
 - **⚠️ topology: this session's audited run log claims edits under `<N>` root(s)
-  that are not the anchor** → the chain logged edits in another repository. Every
-  other row in this block can be green beside it: the anchor's own tree is clean,
-  its workflow document is healthy, and the review chain saw no diff for work that
-  really happened. Relay the roots the row names and the anchor beside them, and say
-  what is NOT covered — one edit-landing audit grades ONE root, so those claims were
-  reported rather than graded, and `/zensu:build` is single-root. The remedy is to run
-  the chain in the repository the claims name, or to land the work in the anchor.
+  that are not the anchor** (work-tree chain: **not the chain's work tree**) → the
+  chain logged edits outside the graded tree: another repository, or for a work-tree
+  chain often the anchor. Every other row in this block can be green beside it.
+  Relay the roots the row names and the graded tree beside them, and say what is NOT covered — one edit-landing audit grades ONE root, so those
+  claims were reported rather than graded. The remedy is to run the chain in the
+  repository the claims name, or to land the work in the graded tree.
   Do NOT suggest re-running the audit against the foreign root: its receipt would
   land where this session's terminus never reads it.
 - **⚠️ topology: this session's claims were NOT checked against the anchor** → a
@@ -834,7 +833,7 @@ whether browser verification is enforced, not only when a row is red.
   the receipt names that lies outside this project's `.zensu/logs/` or is not a
   plain file, an inventory command that is absent from the plugin tree, one that
   did not complete, and one that answered in a format this runtime does not
-  recognise, and — since the round that split it — no bound session key at all,
+  recognise, a receipt whose `workTree` is invalid or outside this project, and no bound session key at all,
   where the receipt cannot even be located. **Relay the cause the row itself
   prints** — do not say the inventory command failed, because in the common case
   it never ran. Say plainly that the check is missing rather than reporting the

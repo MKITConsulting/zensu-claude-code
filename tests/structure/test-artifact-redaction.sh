@@ -143,8 +143,7 @@ else
   check "R0b hooks/post-artifact-redact.sh exists and parses" FAIL
 fi
 
-if grep -qF 'post-artifact-redact.sh' "$HOOKS_JSON" 2>/dev/null \
-  && node -e '
+if node -e '
     const j = require(process.argv[1]);
     const post = require(process.argv[2]).registeredHooks(j, "PostToolUse") || [];
     const on = m => post.some(e => e.matcher === m && e.command.includes("post-artifact-redact.sh"));

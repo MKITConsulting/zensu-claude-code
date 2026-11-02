@@ -179,10 +179,13 @@ a skill builds from `${CLAUDE_PROJECT_DIR:-.}` names the previous root after a m
 derives `{log_file}`, `{plan_file}`, `BASELINE_SHA`, the edit-landing `--project`, the step 10.1
 plan bound, `TOP`, the plan template and the persona directory from it, and it runs every project
 command it prescribes — test runs, checkpoints, the build, coverage and the step 5 `stat` — as
-`cd "{project_root}" && …`. Phase 2's `--truncate` carries `CLAUDE_PROJECT_DIR="{project_root}"`,
-because `append` without that variable binds a destructive write to the working directory, which
-is the previous root after a move. `/zensu:self-review` derives `TOP` and its ledger root from the
-verb and runs its fix round's commands in it, `/zensu:converge` discovers plans under it,
+`cd "{project_dir}" && …`, where `{project_dir}` is what `zensu-log.sh --chain-work-tree
+--project-dir` prints: `{project_root}` itself, or the bound Autopilot worktree's directory for it
+(`.claude/rules/evidence-runner.md`). Phase 2's `--truncate` carries
+`CLAUDE_PROJECT_DIR="{project_root}"`, because `append` without that variable binds a destructive
+write to the working directory, which is the previous root after a move. `/zensu:self-review`
+derives `TOP` and its ledger root from the verb and runs its fix round's commands in that project
+directory, `/zensu:converge` discovers plans under the verb's root,
 `/zensu:verify-feature --chain` resolves its git root from it and runs its commands there, a
 recorded `down` included, and the three `--tdd-complete` refusal remedies name it instead of the
 ambient spelling. Every `cd` into the root is spelled without `--`: the root is absolute, and
@@ -216,7 +219,9 @@ because a nested worktree, an embedded clone or a submodule inside the root is a
 that the fingerprint does not measure; path containment decides only for a root outside git. The
 tree fingerprint and the verdict were always bound to the record's root, so a run from the previous
 worktree would have certified the new tree with a suite that tested the old one. The same-work-tree
-rule keeps a session recorded in a subdirectory able to run its suite from the worktree top.
+rule keeps a session recorded in a subdirectory able to run its suite from the worktree top. A
+chain bound to an Autopilot run that drives a worktree nested below the anchor runs in that
+worktree instead, and its verdict measures it (`.claude/rules/evidence-runner.md`).
 
 `test-tdd-log-path-anchor.sh` L8 fails when any `skills/*/SKILL.md` spells
 `${CLAUDE_PROJECT_DIR:-.}`, and `test-session-reanchor.sh` E10 runs the chain from the start

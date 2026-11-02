@@ -665,7 +665,12 @@ test('a claim whose path resolution moved is graded again instead of aborting th
   const lost = helper.prepareClaims(scope, s.write('lost', manifestOf([['T01', raw, '']])), '');
   assert.deepEqual(lost.certified, []);
   assert.deepEqual(helper.prepareClaims(scope, s.write('same', manifestOf([['T01', raw, 'a.js']])), '').certified, [1]);
-  assert.throws(() => helper.prepareClaims(scope, s.write('rewritten', manifestOf([['T01', 'T01 IMPL completed — files: b.js', 'b.js']])), ''),
+  const rewritten = helper.prepareClaims(scope, s.write('rewritten', manifestOf([['T01', 'T01 IMPL completed — files: b.js', 'b.js']])), '');
+  assert.deepEqual(rewritten.certified, [], 'a claim the reader spells differently is graded as a new claim');
+  s.write('c.js', 'v1\n');
+  const reordered = helper.prepareClaims(scope, s.write('reordered', manifestOf([['T00', 'T00 IMPL completed — files: c.js', 'c.js'], ['T01', raw, 'a.js']])), '');
+  assert.deepEqual(reordered.certified, [2], 'a claim keeps its certification wherever the reader now places it');
+  assert.throws(() => helper.prepareClaims({ ...scope, previous: { ...scope.previous, claims: 'none' } }, s.write('broken', manifestOf([['T01', raw, 'a.js']])), ''),
     /were rewritten or removed from the run log/);
 });
 

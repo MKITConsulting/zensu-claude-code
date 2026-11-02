@@ -11,9 +11,16 @@ const DISPATCHED_CHECKS = Object.freeze([
   Object.freeze({ event: 'PreToolUse', name: 'secret-scan', matcher: 'Bash|PowerShell', script: 'pre-write-secret-scan.sh', body: 'checks/pre-write-secret-scan.sh', failure: 'open' }),
   Object.freeze({ event: 'PreToolUse', name: 'browser-consent', matcher: 'Bash|PowerShell', script: 'pre-browser-navigation-consent.sh', body: 'checks/pre-browser-navigation-consent.sh', failure: 'closed' }),
   Object.freeze({ event: 'PreToolUse', name: 'work-order-gate', matcher: '.*', script: 'pre-work-order-gate.sh', body: 'checks/pre-work-order-gate.sh', failure: 'open' }),
+  Object.freeze({ event: 'PreToolUse', name: 'reviewer-spawn-allow', matcher: 'Agent|Task', script: 'pre-agent-reviewer-allow.sh', body: null, failure: 'open' }),
+  Object.freeze({ event: 'PreToolUse', name: 'plugin-data-guard', matcher: 'Edit|Write|MultiEdit', script: 'pre-write-plugin-data-guard.sh', body: null, failure: 'open' }),
+  Object.freeze({ event: 'PreToolUse', name: 'tdd-edit-gate', matcher: 'Edit|Write|MultiEdit', script: 'pre-edit-tdd-reminder.sh', body: 'checks/pre-edit-tdd-reminder.sh', failure: 'open' }),
+  Object.freeze({ event: 'PreToolUse', name: 'secret-scan-write', matcher: 'Edit|Write|MultiEdit', script: 'pre-write-secret-scan.sh', body: 'checks/pre-write-secret-scan.sh', failure: 'open' }),
+  Object.freeze({ event: 'PreToolUse', name: 'plugin-data-guard-notebook', matcher: 'NotebookEdit', script: 'pre-write-plugin-data-guard.sh', body: null, failure: 'open' }),
+  Object.freeze({ event: 'PreToolUse', name: 'secret-scan-notebook', matcher: 'NotebookEdit', script: 'pre-write-secret-scan.sh', body: 'checks/pre-write-secret-scan.sh', failure: 'open' }),
   Object.freeze({ event: 'PostToolUse', name: 'artifact-redact', matcher: 'Bash|PowerShell', script: 'post-artifact-redact.sh', body: null, failure: 'open' }),
   Object.freeze({ event: 'PostToolUse', name: 'browser-consent-recorder', matcher: 'Bash|PowerShell', script: 'post-browser-navigation-consent.sh', body: 'checks/post-browser-navigation-consent.sh', failure: 'open' }),
   Object.freeze({ event: 'PostToolUse', name: 'work-order-post', matcher: '.*', script: 'post-work-order.sh', body: 'checks/post-work-order.sh', failure: 'open' }),
+  Object.freeze({ event: 'PostToolUse', name: 'artifact-redact-write', matcher: 'Edit|Write|MultiEdit', script: 'post-artifact-redact.sh', body: null, failure: 'open' }),
 ]);
 
 function hostMatcherCovers(matcher, tool) {

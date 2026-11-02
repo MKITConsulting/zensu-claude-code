@@ -162,6 +162,9 @@ doing the work by hand, which is the failure this contract exists to prevent.
      asking.
    - Otherwise carry `provider` and `repo` forward; pass `--provider <provider>` and
      `--repo-id <repo>` to every driver op below so detection runs only once.
+   - Read the repository's conventions once with
+     `bash "$VCS" --conventions --provider <provider>`: every commit and every thread
+     reply below follows `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/rules/conventions.md`.
 
 1. **Locate the PR/MR.**
    - `bash "$VCS" --locate-pr --provider <provider> [$ARGUMENTS]` → JSON
@@ -214,8 +217,8 @@ doing the work by hand, which is the failure this contract exists to prevent.
      (`bash "$VCS" --pr-state --provider <provider> <id>` → `OPEN`) before pushing. In
      delegated mode also re-read `--diff-refs` and require its head SHA to equal the fresh
      durable PR head.
-   - Commit with a Conventional Commit message referencing the addressed comments,
-     push to the PR branch. Clean commit messages — no watermark / co-author lines.
+   - Commit in the repository's commit style, language and attribution practice
+     (`conventions.md` §3), referencing the addressed comments, and push to the PR branch.
    - The push is not a checkpoint. Continue straight into step 6 in the same turn —
      a successful push is the middle of the procedure, never a place to hand back.
 
@@ -224,6 +227,7 @@ doing the work by hand, which is the failure this contract exists to prevent.
      `bash "$VCS" --resolve-thread --provider <provider> --repo-id <repo> --reply "<one-line note + commit SHA>" <id> <threadId> <replyTo>`
      — this replies to the thread and resolves it (GitHub: reply to the `replyTo`
      comment + resolve the `threadId`; GitLab: the single discussion id serves as both).
+     Write the note in the language the conventions name.
    - Resolving is part of the fix, not a follow-up: every thread you addressed in this
      run gets its reply and its resolve call before you report. A pushed-but-unresolved
      thread is unfinished work, never a delivered result.
