@@ -1132,7 +1132,7 @@ consume-mode review does not advance the chain without a substantive primary jud
 step 4b requires one. Two helpers and the post-review hook carry it.
 
 - **The packet.** `hooks/lib/review-packet-v1.js create --root <project root> --session <key>
-  --input <json> [--baseline <sha>]` refuses unless the session's chain is active,
+  --input <json> [--baseline <sha>] [--work-tree <dir>]` refuses unless the session's chain is active,
   implementation-complete and not yet closed. It runs `zensu-edit-landing.sh --check-receipt
   --allow-unclean`, so a receipt the tree has outgrown is refused with the audit command to run,
   while a receipt that records unlanded, pending or unverified claims is carried rather than
@@ -1153,7 +1153,11 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   With a receipt, the change set is taken
   against the baseline the edit-landing audit recorded, and a `--baseline` that differs from it is
   refused; the `change_set:` line names where the baseline came from (`baseline_source=receipt`,
-  `argument` or `none`). A tree the fingerprint cannot measure, such as one with more than 20000
+  `argument` or `none`). A chain that works in an Autopilot worktree below the anchor is reviewed
+  in that tree: with a receipt the packet takes the work tree the audit graded and refuses a
+  `--work-tree` naming another one, without one it takes a `--work-tree` the audit's topology
+  check accepts, and every listed path carries the work tree's location below the anchor as a
+  prefix, with a `work_tree:` line naming the measured tree. A tree the fingerprint cannot measure, such as one with more than 20000
   untracked files, is bound by its reason and shown as `tree=unverified (<reason>)`. The
   model-written fields may take 192 KiB together (`shorten its summaries` otherwise) and the
   changed-file list 1 MiB (`review a change this large in smaller chains`), so a large change set

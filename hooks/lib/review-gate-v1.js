@@ -350,7 +350,8 @@ function checkConsume(options) {
     }
     return consumeRefusal(`the consume prompt's packet differs from review round ${round}'s canonical packet at packet line ${packets.firstDifference(canonical.text, supplied.text)}`, respawnConsume);
   }
-  const now = packets.currentScope(root, canonical.scope.baseline || '', canonical.scope.kind === 'git' ? undefined : canonical.scope.changedFiles);
+  const now = packets.currentScope(root, canonical.scope.baseline || '', canonical.scope.kind === 'git' ? undefined : canonical.scope.changedFiles,
+    canonical.scope.workTree || '');
   const drift = packets.scopeDifference(canonical.scope, now);
   if (drift) {
     return consumeRefusal(`${drift} since review round ${round}'s packet was created`, `re-run the step 5b edit-landing audit, run ${commands.create} again, ${rerun}`);

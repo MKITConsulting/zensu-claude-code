@@ -47,6 +47,18 @@ best effort, never a symlink or a hard-linked file), and `finding-verify-v1.js -
 findings file it graded the same way: both inputs carry model-written text, `.zensu/` is often
 committed, and the ignore recipe in `docs/build-workflow.md` names `.zensu/reviews/`.
 
+**The packet follows the chain's work tree.** An Autopilot-bound chain that works in a worktree
+below the anchor grades that tree, so its packet must list that tree's change set, or the panel
+reviews the anchor's. With a receipt, `create` takes the work tree the audit graded from the
+receipt's `workTree`, and a `--work-tree` that names another directory is refused, the rule the
+baseline follows; without a receipt (`escaped`, `none`) it takes `--work-tree`, which
+`zensu-edit-landing.sh --work-tree-check` must accept, because the resolver needs the session
+binding a `node` call does not carry. The measured tree is the work tree: `head`, the baseline
+range and the fingerprint come from it, every `changed_files` entry carries the work tree's
+location below the anchor's top level as a prefix, `repository_root:` stays the anchor's top and a
+`work_tree:` line names the measured tree. The record stores `workTree`, and the consume check
+measures the same tree again, refusing with `the chain's work tree changed` when it moved.
+
 **Three receipt modes, chosen by `create` from the workflow document.** `receipt`: the step 5b
 receipt is checked through `--check-receipt --allow-unclean`, and its digest is bound into the
 packet record; the receipt line carries its counters, plus ` audit=incomplete` when the latest

@@ -180,7 +180,7 @@
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
     },
     {
-      "path": "tests/structure/review-packet-v1.test.js", "registered": 31,
+      "path": "tests/structure/review-packet-v1.test.js", "registered": 33,
       "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
       "summary": "The canonical review change set and the immutable per-round review packet."
     },

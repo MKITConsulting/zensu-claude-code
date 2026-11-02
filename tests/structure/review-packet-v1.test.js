@@ -610,3 +610,64 @@ test('create removes its input from a project review directory and keeps every o
     assert.equal(fs.existsSync(victim), true, 'a symlinked ancestor followed by .. never reaches a file outside the project');
   }
 });
+
+function linkedWorkTree(c) {
+  fs.appendFileSync(path.join(c.root, '.gitignore'), '.claude/worktrees/\n');
+  c.git(c.root, 'add', '.gitignore');
+  c.git(c.root, 'commit', '-qm', 'ignore worktrees');
+  const relative = '.claude/worktrees/run';
+  const tree = path.join(c.root, '.claude', 'worktrees', 'run');
+  c.git(c.root, 'worktree', 'add', '-q', '-b', 'run', tree);
+  fs.writeFileSync(path.join(tree, 'tracked.txt'), 'v2\n');
+  fs.writeFileSync(path.join(c.root, 'staged.txt'), 'anchor\n');
+  return { relative, tree };
+}
+
+test('create follows the work tree the edit-landing receipt records and spells its paths from the anchor', (t) => {
+  const c = chain(t);
+  const { relative, tree } = linkedWorkTree(c);
+  fs.writeFileSync(path.join(tree, 'added.js'), 'new\n');
+  writeReceipt(c.root, c.session, { workTree: relative });
+  const { record } = c.create({ now: () => 1000 });
+  const lines = record.text.split('\n');
+  assert.ok(lines.includes(`repository_root: ${c.root}`), record.text);
+  assert.ok(lines.includes(`work_tree: ${tree}`), record.text);
+  assert.equal(record.scope.workTree, relative);
+  assert.deepEqual(record.scope.changedFiles, [`${relative}/added.js`, `${relative}/tracked.txt`]);
+  assert.ok(lines.includes(`- ${relative}/added.js`) && !lines.includes('- staged.txt'), 'the anchor\'s own change is not this chain\'s');
+  assert.equal(c.create({ workTree: tree, now: () => 2000 }).record.sha256, record.sha256);
+  assert.throws(() => c.create({ workTree: c.root }), /--work-tree differs from the work tree the edit-landing audit graded/);
+  assert.equal(packets.scopeDifference(record.scope, packets.currentScope(c.root, '', undefined, relative)), null);
+  assert.equal(packets.scopeDifference(record.scope, packets.currentScope(c.root, '', undefined)), "the chain's work tree changed");
+  fs.writeFileSync(path.join(tree, 'tracked.txt'), 'v3\n');
+  assert.equal(packets.scopeDifference(record.scope, packets.currentScope(c.root, '', undefined, relative)), 'the working tree changed');
+  for (const bad of ['../outside', path.join(c.base, 'abs'), 'a//b', './run']) {
+    assert.throws(() => packets.currentScope(c.root, '', undefined, bad), /is not a normalized path inside the project/, bad);
+  }
+  assert.throws(() => packets.currentScope(c.root, '', undefined, 'pkg'), /is not the top of a git work tree/);
+  writeReceipt(c.root, c.session, { workTree: '../elsewhere' });
+  assert.throws(() => c.create(), /names a work tree that is not a path inside the project/);
+});
+
+test('create checks a --work-tree no receipt binds and refuses one the edit-landing audit did not grade', (t) => {
+  const c = chain(t);
+  const { relative, tree } = linkedWorkTree(c);
+  assert.throws(() => c.create({ workTree: tree }), /the edit-landing audit graded the anchor, not --work-tree/);
+  const anchored = c.create({ workTree: c.root, now: () => 1000 }).record;
+  assert.equal(anchored.scope.workTree, undefined);
+  assert.deepEqual(anchored.scope.changedFiles, ['staged.txt']);
+  const asked = [];
+  const escaped = c.create({
+    env: { ZENSU_EDIT_LANDING_GATE: 'off' },
+    workTree: tree,
+    now: () => 2000,
+    checkWorkTree: (root, directory) => { asked.push([root, directory]); return 'work-tree'; },
+  }).record;
+  assert.deepEqual(asked, [[c.root, tree]]);
+  assert.equal(escaped.receiptMode, 'escaped');
+  assert.equal(escaped.scope.workTree, relative);
+  assert.deepEqual(escaped.scope.changedFiles, [`${relative}/tracked.txt`]);
+  const refusal = () => { throw new packets.ReviewPacketError('work tree refused — it belongs to another repository'); };
+  assert.throws(() => c.create({ env: { ZENSU_EDIT_LANDING_GATE: 'off' }, workTree: tree, checkWorkTree: refusal }), /belongs to another repository/);
+  assert.throws(() => c.create({ workTree: path.join(c.base, 'missing') }), /--work-tree cannot be resolved/);
+});

@@ -302,8 +302,40 @@ function snapshotFiles(root, files) {
   return entries;
 }
 
-function currentScope(root, baseline, explicitFiles) {
-  const changes = collectChanges({ root, baseline });
+function workTreeRelative(value) {
+  if (typeof value !== 'string' || value === '' || CONTROL_RE.test(value) || value.includes('\\') || path.posix.isAbsolute(value)
+      || path.posix.normalize(value) !== value || value.split('/').some((part) => ['', '.', '..'].includes(part))) {
+    return null;
+  }
+  return value;
+}
+
+function anchorTop(root) {
+  const top = git(root, ['rev-parse', '--show-toplevel'], { absentRepository: true, absentGit: true });
+  return top.absent ? root : fs.realpathSync(top.stdout.trim());
+}
+
+function workTreeRoot(root, workTree) {
+  if (workTreeRelative(workTree) === null) fail("the chain's work tree is not a normalized path inside the project");
+  let resolved;
+  try {
+    resolved = fs.realpathSync(path.join(root, ...workTree.split('/')));
+  } catch (error) {
+    fail(`the chain's work tree ${workTree} cannot be resolved (${error.code || error.message})`);
+  }
+  const inside = path.relative(root, resolved);
+  if (inside === '' || inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside)) {
+    fail(`the chain's work tree ${workTree} does not lie below the project root`);
+  }
+  return resolved;
+}
+
+function currentScope(root, baseline, explicitFiles, workTree = '') {
+  const measured = workTree ? workTreeRoot(root, workTree) : root;
+  const changes = collectChanges({ root: measured, baseline });
+  if (workTree && (changes.kind !== 'git' || changes.root !== measured)) {
+    fail(`the chain's work tree ${workTree} is not the top of a git work tree`);
+  }
   if (changes.kind === 'git') {
     if (explicitFiles !== undefined) fail('a project inside git takes its changed files from git; remove changed_files from the --input file');
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-review-tree-'));
@@ -325,6 +357,13 @@ function currentScope(root, baseline, explicitFiles) {
       tree: result.tree || null,
     };
     if (!result.tree) scope.treeReason = String(result.reason || 'the tree could not be fingerprinted');
+    if (workTree) {
+      const top = anchorTop(root);
+      const prefix = path.relative(top, changes.root).split(path.sep).join('/');
+      scope.workTree = workTree;
+      scope.repositoryRoot = top;
+      scope.changedFiles = changes.changed_files.map((file) => `${prefix}/${file}`);
+    }
     return scope;
   }
   const snapshot = snapshotFiles(changes.root, explicitFiles);
@@ -340,6 +379,7 @@ function currentScope(root, baseline, explicitFiles) {
 
 function scopeDifference(stored, now) {
   if (!stored || stored.kind !== now.kind) return 'the project is no longer the same kind of change set';
+  if ((stored.workTree || '') !== (now.workTree || '')) return "the chain's work tree changed";
   if (stored.root !== now.root) return 'the repository root changed';
   if (stored.head !== now.head) return 'HEAD moved';
   if (stored.baseline !== now.baseline) return 'the baseline changed';
@@ -405,6 +445,55 @@ function packetBaseline(mode, receipt, supplied) {
   return { baseline: '', source: 'none' };
 }
 
+function packetWorkTree(root, mode, receipt, supplied, check) {
+  const recorded = mode === 'receipt' && receipt && receipt.value ? receipt.value.workTree : undefined;
+  let argument = null;
+  if (typeof supplied === 'string' && supplied !== '') {
+    try {
+      argument = fs.realpathSync(supplied);
+    } catch (error) {
+      fail(`--work-tree cannot be resolved (${error.code || error.message})`);
+    }
+  }
+  if (recorded !== undefined) {
+    if (workTreeRelative(recorded) === null) fail('the edit-landing receipt names a work tree that is not a path inside the project; re-run the step 5b audit');
+    if (argument !== null && argument !== workTreeRoot(root, recorded)) {
+      fail(`--work-tree differs from the work tree the edit-landing audit graded (${recorded}); omit --work-tree, and the packet takes the audit's work tree`);
+    }
+    return recorded;
+  }
+  if (argument === null || argument === root || argument === anchorTop(root)) return '';
+  if (mode === 'receipt') {
+    fail('the edit-landing audit graded the anchor, not --work-tree; re-run the step 5b audit with --work-tree, or omit --work-tree');
+  }
+  if (check(root, argument) === 'anchor') return '';
+  const relative = path.relative(root, argument).split(path.sep).join('/');
+  if (workTreeRelative(relative) === null) fail("the chain's work tree does not lie below the project root");
+  return relative;
+}
+
+function checkWorkTree(root, workTree) {
+  const result = childProcess.spawnSync('bash', [path.join(__dirname, 'zensu-edit-landing.sh'), '--work-tree-check', workTree,
+    '--project', root], {
+    env: process.env,
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    timeout: RECEIPT_CHECK_TIMEOUT_MS,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error) fail(`the chain's work tree could not be checked (${result.error.code || result.error.message})`);
+  if (result.status !== 0) {
+    const text = String(result.stderr || '').trim().split('\n').filter(Boolean).slice(0, 4).join(' ');
+    fail(text || `the work-tree check exited ${result.status}`);
+  }
+  const line = String(result.stdout || '').replace(/\r?\n$/, '');
+  const tab = line.indexOf('\t');
+  const kind = tab === -1 ? '' : line.slice(0, tab);
+  if (kind !== 'anchor' && kind !== 'work-tree') fail('the work-tree check gave no answer');
+  return kind;
+}
+
 function checkReceipt(root, session) {
   const result = childProcess.spawnSync('bash', [path.join(__dirname, 'zensu-edit-landing.sh'), '--check-receipt',
     '--allow-unclean', '--project', root, '--session', session], {
@@ -466,7 +555,8 @@ function renderPacket({ round, projectRoot, scope, fields, receipt, receiptMode:
     'policy: reviewer-readonly-v1',
     `review_round: ${round}`,
     `project_root: ${projectRoot}`,
-    `repository_root: ${scope.root}`,
+    `repository_root: ${scope.repositoryRoot || scope.root}`,
+    ...(scope.workTree ? [`work_tree: ${scope.root}`] : []),
     scope.kind === 'git'
       ? `change_set: kind=git head=${scope.head || 'unborn'} baseline=${scope.baseline || 'none'}`
         + ` baseline_source=${BASELINE_SOURCES.includes(scope.baselineSource) ? scope.baselineSource : 'none'}`
@@ -525,9 +615,12 @@ function createPacket(options = {}) {
     (options.checkReceipt || checkReceipt)(projectRoot, options.session);
     receipt = readReceipt(projectRoot, options.session);
   }
+  const workTree = packetWorkTree(projectRoot, mode, receipt, options.workTree, options.checkWorkTree || checkWorkTree);
   const baseline = packetBaseline(mode, receipt, options.baseline);
-  const scope = currentScope(projectRoot, baseline.baseline, input.changed_files);
-  if (CONTROL_RE.test(scope.root)) fail('the repository root contains a control character, which the packet cannot carry');
+  const scope = currentScope(projectRoot, baseline.baseline, input.changed_files, workTree);
+  if (CONTROL_RE.test(scope.root) || CONTROL_RE.test(scope.repositoryRoot || '')) {
+    fail('the repository root contains a control character, which the packet cannot carry');
+  }
   if (scope.kind === 'git') scope.baselineSource = baseline.source;
   const listBytes = Buffer.byteLength(scope.changedFiles.map(pathLine).join('\n'));
   if (listBytes > LIMITS.changedListBytes) {
@@ -617,8 +710,14 @@ function main(argv, stdout = process.stdout, stderr = process.stderr) {
       return 0;
     }
     if (verb === 'create') {
-      const flags = parseFlags(args, ['--root', '--session', '--input', '--baseline']);
-      const result = createPacket({ root: flags['--root'], session: flags['--session'], input: flags['--input'], baseline: flags['--baseline'] });
+      const flags = parseFlags(args, ['--root', '--session', '--input', '--baseline', '--work-tree']);
+      const result = createPacket({
+        root: flags['--root'],
+        session: flags['--session'],
+        input: flags['--input'],
+        baseline: flags['--baseline'],
+        workTree: flags['--work-tree'],
+      });
       removeConsumedInput(flags['--input'], flags['--root']);
       stdout.write(packetReport(result.unchanged ? 'REVIEW PACKET UNCHANGED' : 'REVIEW PACKET CREATED', result.record));
       return 0;
@@ -628,7 +727,7 @@ function main(argv, stdout = process.stdout, stderr = process.stderr) {
       stdout.write(packetReport('REVIEW PACKET', showPacket({ root: flags['--root'], session: flags['--session'] }).record));
       return 0;
     }
-    fail('usage: review-packet-v1.js changes --root <dir> [--baseline <sha>] | create --root <dir> --session <id> --input <json> [--baseline <sha>] | show --root <dir> --session <id>');
+    fail('usage: review-packet-v1.js changes --root <dir> [--baseline <sha>] | create --root <dir> --session <id> --input <json> [--baseline <sha>] [--work-tree <dir>] | show --root <dir> --session <id>');
   } catch (error) {
     stderr.write(`review-packet-v1: ${error instanceof ReviewPacketError ? error.message : `unexpected failure (${error.message})`}\n`);
     return 2;
@@ -662,6 +761,8 @@ module.exports = {
   readReceipt,
   receiptLine,
   packetBaseline,
+  packetWorkTree,
+  checkWorkTree,
   checkReceipt,
   readInput,
   renderPacket,
