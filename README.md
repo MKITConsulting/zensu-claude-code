@@ -5,9 +5,13 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.33.1-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.34.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
+
+https://github.com/user-attachments/assets/f00ec61d-5252-4c43-a3fb-535104d16e7a
+
+*Zensu for Claude Code, explained in three minutes, with sound and captions. The workflow it shows uses fictional data. A transcript is on [zensu.dev](https://zensu.dev/claude-code/#explain).*
 
 Zensu plans the feature with you, implements it, and then puts the result
 through a review panel that has to cite real file and line numbers for every
@@ -165,6 +169,8 @@ Pilot for a feature already tracked in Zensu, or implementing it directly.
 Answer the route question with the Zensu workflow once: the session remembers that answer (a
 direct, Autopilot or Pilot answer decides only that plan or request), and
 `/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes either route without asking.
+A session that this one starts in Claude Desktop on the same repository takes that Zensu-workflow
+answer over too.
 
 **One feature, hands off** — `/zensu:autopilot` takes a plain-language idea to a
 validated pull request: one planning gate, then plan → build → review → fix →
@@ -233,7 +239,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config | — |
 | `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session | — |
-| `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default; `--off` leaves it for the session | — |
+| `/zensu:zen-mode` | Low-noise responses: result first, a session recap, one next step. On by default; your own CLAUDE.md, output style or style mode outranks it, and `--off` leaves it for the session | — |
 
 #### Setup, help and other sessions
 
@@ -537,10 +543,20 @@ security and design context. The context board records these API retrievals by p
 
 An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. The automatic package presents `layers` first and keeps `related_layers` as a separate bounded metadata index with reasons and directed paths. Choose additional sources for a specific task question; never bulk-fetch either group. Disable with `hooks.contextAutoLoad: false`. See [automatic context](docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
 
-Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. See the automatic-context documentation for transmitted task text, limits and host support.
+Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. Capability checks and retrieval share a twenty-second deadline; timeout notices identify the failed operation. See the automatic-context documentation for transmitted task text, limits and host support.
 AI work capture declares this plugin's source/version and a work/test purpose.
 Use `--run-kind test` for explicit validation or demo goals; ordinary product work
 with tests remains work. Test runs are hidden from default My work/Organization
 metrics; billing credits remain separately unfiltered. Update the backend and
 CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
+
+### Confirmed product scope for AI work
+
+Automatic AI-work capture now requires a product explicitly confirmed by the user
+via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
+skip capture while coding continues. Cross-product work requires explicit intent
+and a reason for each goal; it is never an automatic fallback. Existing unassigned
+entries remain in the separate Unassigned view with their history and acceptance.
+Upgrade the product-scope backend and CLI before the plugin. See the shipped
+`docs/ai-work-capture.md` for identity checks and legacy receipt handling.

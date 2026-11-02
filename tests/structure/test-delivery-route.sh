@@ -7,7 +7,7 @@
 #
 # The ladder both hooks apply is:
 #   explicit preference in the user's own text  >  session marker  >
-#   hooks.defaultDeliveryRoute  >  ask
+#   inherited build (test-linked-session-route.sh)  >  hooks.defaultDeliveryRoute  >  ask
 # The first rank is judged by the model from the directive and never reaches the
 # library, so this suite pins ranks 2-4 behaviourally and rank 1's WORDING in the
 # directive. Fail-safety is pinned in the other direction: an absent, malformed,
@@ -28,6 +28,8 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$PLUGIN_DIR/hooks/lib/zensu-delivery-route.sh"
 TDD_MODE_HELPER="$PLUGIN_DIR/hooks/lib/zensu-tdd-mode.sh"
+LINKED_HELPER="$PLUGIN_DIR/hooks/lib/zensu-linked-session.sh"
+FULL_SUITE_HELPER="$PLUGIN_DIR/hooks/lib/zensu-full-suite.sh"
 CONFIG_LIB="$PLUGIN_DIR/hooks/lib/zensu-config.sh"
 DIRECTIVE_LIB="$PLUGIN_DIR/hooks/lib/zensu-directive.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
@@ -490,12 +492,107 @@ if [ -f "$MARKER_LIB" ] && bash -n "$MARKER_LIB" 2>/dev/null; then
 else
   R8K_BAD="$R8K_BAD [hooks/lib/zensu-marker-write.sh missing or not valid bash]"
 fi
-for r8k_helper in "$HELPER" "$TDD_MODE_HELPER"; do
-  grep -qF 'hooks/lib/zensu-marker-write.sh' "$r8k_helper" || R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") does not source the library]"
-  grep -v '^[[:space:]]*#' "$r8k_helper" | grep -qE 'mktemp|mv -f' && R8K_BAD="$R8K_BAD [$(basename "$r8k_helper") keeps its own write sequence]"
+r8k_scan() {
+  local root="$1" config="$2" helper code pairs name stem funcs stems file
+  R8K_SCAN_BAD=""
+  R8K_SCAN_HELPERS="$(find "$root" -type f -name '*.sh' -exec grep -lE '^[^#]*zensu_write_session_marker [a-z-]+\.sh ' {} + 2>/dev/null)"
+  while IFS= read -r helper; do
+    [ -n "$helper" ] || continue
+    grep -qE 'source "[^"]*/zensu-marker-write\.sh"' "$helper" || R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$helper") does not source the library]"
+    code="$(grep -v '^[[:space:]]*#' "$helper")"
+    printf '%s\n' "$code" | grep -qE 'mktemp|mv -f' && R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$helper") keeps its own write sequence]"
+    printf '%s\n' "$code" | grep -qE "[0-9]*>>?[[:space:]]*[\"']?[\$]" && R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$helper") redirects into a path of its own]"
+  done <<R8K_LIST
+$R8K_SCAN_HELPERS
+R8K_LIST
+  code="$(grep -v '^[[:space:]]*#' "$config" 2>/dev/null)"
+  pairs="$(printf '%s\n' "$code" | awk '
+    /^zensu_[a-z_]+_marker_path\(\)/ { if (name != "") print name, (stem == "" ? "-" : stem); name = $0; sub(/\(\).*/, "", name); stem = ""; next }
+    name != "" && /^}/ { print name, (stem == "" ? "-" : stem); name = ""; next }
+    name != "" && stem == "" && match($0, /\/\.zensu\/state\/[a-z-]+-\$session_key\.json/) { stem = substr($0, RSTART, RLENGTH); sub(/^\/\.zensu\/state\//, "", stem); sub(/-\$session_key\.json$/, "", stem) }
+    END { if (name != "") print name, (stem == "" ? "-" : stem) }
+  ')"
+  if [ -z "$pairs" ]; then
+    R8K_SCAN_BAD="$R8K_SCAN_BAD [no marker-path function or marker leaf could be read from zensu-config.sh]"
+    return 0
+  fi
+  while read -r name stem; do
+    [ "$stem" = "-" ] && R8K_SCAN_BAD="$R8K_SCAN_BAD [$name spells no marker leaf R8k can read]"
+  done <<R8K_PAIRS
+$pairs
+R8K_PAIRS
+  [ "$(printf '%s\n' "$code" | grep -cE '(^|[[:space:]])(function[[:space:]]+)?zensu_[a-z_]+_marker_path[[:space:]]*(\(\)|\{)')" = "$(printf '%s\n' "$pairs" | grep -c .)" ] \
+    || R8K_SCAN_BAD="$R8K_SCAN_BAD [a marker-path function is defined in a spelling R8k cannot read]"
+  [ "$(printf '%s\n' "$code" | grep -cE '/\.zensu/state/[a-z-]+-')" = "$(printf '%s\n' "$pairs" | grep -vc ' -$')" ] \
+    || R8K_SCAN_BAD="$R8K_SCAN_BAD [a marker leaf template sits outside the form R8k reads]"
+  funcs="$(printf '%s\n' "$pairs" | awk '{ print $1 }' | paste -s -d '|' -)"
+  stems="$(printf '%s\n' "$pairs" | awk '$2 != "-" { print $2 }' | paste -s -d '|' -)"
+  while IFS= read -r file; do
+    [ -n "$file" ] && [ "$file" != "$config" ] || continue
+    case "$file" in
+      (*.sh)
+        code="$(grep -v '^[[:space:]]*#' "$file")"
+        if printf '%s\n' "$code" | grep -qE "(^|[^a-z_])($funcs)([^a-z_]|\$)"; then
+          printf '%s\n' "$R8K_SCAN_HELPERS" | grep -qxF "$file" || R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$file") reaches a marker path without zensu_write_session_marker]"
+        fi ;;
+      (*.js|*.mjs|*.cjs|*.ts) code="$(grep -vE '^[[:space:]]*//' "$file")" ;;
+      (*) code="$(cat "$file")" ;;
+    esac
+    [ -n "$stems" ] && printf '%s\n' "$code" | grep -qE "($stems)-([^[:alnum:]]|\$)" && R8K_SCAN_BAD="$R8K_SCAN_BAD [$(basename "$file") spells a marker leaf of its own]"
+  done <<R8K_FILES
+$(find "$root" -type f ! -name '*.orig' ! -name '*.rej' ! -name '*~' ! -name '.*.sw?' | LC_ALL=C sort)
+R8K_FILES
+  return 0
+}
+r8k_scan "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/hooks/lib/zensu-config.sh"
+R8K_BAD="$R8K_BAD$R8K_SCAN_BAD"
+for r8k_known in "$HELPER" "$TDD_MODE_HELPER" "$LINKED_HELPER" "$FULL_SUITE_HELPER"; do
+  printf '%s\n' "$R8K_SCAN_HELPERS" | grep -qxF "$r8k_known" || R8K_BAD="$R8K_BAD [$(basename "$r8k_known") is not among the callers of zensu_write_session_marker]"
 done
-[ -z "$R8K_BAD" ] && check "R8k both marker helpers write through the one sequence in hooks/lib/zensu-marker-write.sh" PASS \
+[ -z "$R8K_BAD" ] && check "R8k every marker helper writes through the one sequence in hooks/lib/zensu-marker-write.sh, no other shell file under hooks/ reaches a marker path, and no other file there of any type spells a marker leaf" PASS \
   || check "R8k shared marker writer:$R8K_BAD" FAIL
+R8K_FIX="$STATE_DIR/r8k-tree"
+rm -rf "$R8K_FIX"
+mkdir -p "$R8K_FIX/hooks/lib" "$R8K_FIX/brace/lib" "$R8K_FIX/spaced/lib"
+cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$R8K_FIX/hooks/lib/zensu-config.sh"
+printf '%s\n' '#!/bin/bash' 'm="$(zensu_delivery_route_marker_path "$1" "$2")"' 'printf x > "$m"' > "$R8K_FIX/hooks/lib/zensu-bypass.sh"
+printf '%s\n' '#!/bin/bash' 'printf x > "$root/.zensu/state/full-suite-$key.json"' > "$R8K_FIX/hooks/user-prompt-bypass.sh"
+printf '%s\n' '#!/bin/bash' '# zensu_linked_session_marker_path names linked-session-$key.json' 'true' > "$R8K_FIX/hooks/lib/zensu-comment-only.sh"
+printf '%s\n' '#!/bin/bash' 'source "$LIB/zensu-marker-write.sh"' 'zensu_write_session_marker zensu-redirect.sh "$a" "$b" "$c"' 'printf x > "$m"' > "$R8K_FIX/hooks/lib/zensu-redirect.sh"
+printf '%s\n' '#!/bin/bash' 'source "$LIB/zensu-marker-write.sh"' 'USAGE="usage: zensu-quiet.sh --on|--off [--file <path>]"' 'zensu_write_session_marker zensu-quiet.sh "$a" "$b" "$c" >/dev/null 2>&1 || printf "%s\n" "$USAGE" >&2' > "$R8K_FIX/hooks/lib/zensu-quiet.sh"
+printf '%s\n' 'const file = `${root}/.zensu/state/inherited-route-${key}.json`;' > "$R8K_FIX/hooks/lib/route-bypass.js"
+printf '%s\n' "export const leaf = (key) => 'linked-session-' + key + '.json';" > "$R8K_FIX/hooks/lib/leaf-bypass.mjs"
+printf '%s\n' 'const leaf = "full-suite-" + key + ".json";' > "$R8K_FIX/hooks/lib/dq-bypass.cjs"
+printf '%s\n' 'const leaf: string = `tdd-mode-` + key;' > "$R8K_FIX/hooks/lib/bt-bypass.ts"
+printf '%s\n' '{ "leaf": ".zensu/state/delivery-route-" }' > "$R8K_FIX/hooks/route-leaf.json"
+printf '%s\n' '#!/bin/bash' "printf -v m '%s/.zensu/state/linked-session-%s.json' \"\$root\" \"\$key\"" 'printf x > "$m"' > "$R8K_FIX/hooks/lib/zensu-format.sh"
+printf '%s\n' '#!/bin/bash' 'p=$root/.zensu/state/inherited-route-' 'printf x > "$p$key.json"' > "$R8K_FIX/hooks/lib/zensu-eol.sh"
+printf '%s\n' '/* c8 ignore next */ const f = `${root}/.zensu/state/full-suite-${key}.json`;' > "$R8K_FIX/hooks/lib/c8-bypass.js"
+printf '%s\n' "const leaf = 'linked-session-' + key;" "module.exports = (dir) => require('path').join(dir, leaf + '.json');" > "$R8K_FIX/hooks/lib/split-leaf.js"
+printf '%s\n' '// reads tdd-mode-${key}.json through zensu-config.sh' 'module.exports = {};' > "$R8K_FIX/hooks/lib/comment-only.js"
+printf '%s\n' '// the shell helper writes delivery-route-${key}.json' 'export {};' > "$R8K_FIX/hooks/lib/comment-only.ts"
+cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$R8K_FIX/hooks/lib/zensu-config.sh.orig"
+r8k_scan "$R8K_FIX/hooks" "$R8K_FIX/hooks/lib/zensu-config.sh"
+R8K2_PLANTED="$R8K_SCAN_BAD"
+sed 's/delivery-route-\$session_key\.json/delivery-route-${session_key}.json/' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" > "$R8K_FIX/brace/lib/zensu-config.sh"
+r8k_scan "$R8K_FIX/brace" "$R8K_FIX/brace/lib/zensu-config.sh"
+R8K2_BRACE="$R8K_SCAN_BAD"
+sed 's/^zensu_full_suite_marker_path() {/zensu_full_suite_marker_path () {/' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" > "$R8K_FIX/spaced/lib/zensu-config.sh"
+r8k_scan "$R8K_FIX/spaced" "$R8K_FIX/spaced/lib/zensu-config.sh"
+R8K2_SPACED="$R8K_SCAN_BAD"
+rm -rf "$R8K_FIX"
+R8K2_BAD=""
+case "$R8K2_PLANTED" in (*"[zensu-bypass.sh reaches a marker path without zensu_write_session_marker]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a library helper reaching a marker path without the writer passed]" ;; esac
+case "$R8K2_PLANTED" in (*"[user-prompt-bypass.sh spells a marker leaf of its own]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a hook spelling a marker leaf passed]" ;; esac
+case "$R8K2_PLANTED" in (*"[zensu-redirect.sh redirects into a path of its own]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a writer caller redirecting into a path of its own passed]" ;; esac
+for r8k2_leaf in route-bypass.js leaf-bypass.mjs dq-bypass.cjs bt-bypass.ts route-leaf.json zensu-format.sh zensu-eol.sh c8-bypass.js split-leaf.js; do
+  case "$R8K2_PLANTED" in (*"[$r8k2_leaf spells a marker leaf of its own]"*) ;; (*) R8K2_BAD="$R8K2_BAD [the leaf planted in $r8k2_leaf passed]" ;; esac
+done
+case "$R8K2_PLANTED" in (*zensu-comment-only.sh*|*zensu-quiet.sh*|*comment-only.js*|*comment-only.ts*|*zensu-config.sh.orig*) R8K2_BAD="$R8K2_BAD [a comment-only mention, an editor leftover or a null redirect was refused: $R8K2_PLANTED]" ;; esac
+case "$R8K2_BRACE" in (*"[zensu_delivery_route_marker_path spells no marker leaf R8k can read]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a template spelled with braces passed: $R8K2_BRACE]" ;; esac
+case "$R8K2_SPACED" in (*"[a marker-path function is defined in a spelling R8k cannot read]"*) ;; (*) R8K2_BAD="$R8K2_BAD [a definition with a space before its parentheses passed: $R8K2_SPACED]" ;; esac
+[ -z "$R8K2_BAD" ] && check "R8k2 R8k fails on planted bypasses (a helper reaching a marker path without the writer, a leaf spelled in shell, JavaScript, module, CommonJS, TypeScript or JSON through a variable, a template literal, either quote, a backtick, a printf format, the line end, code behind a block comment or a split suffix, a writer caller redirecting into a path of its own, a template or definition it cannot read) and passes comment-only mentions, an editor leftover and null or descriptor redirects" PASS \
+  || check "R8k2 planted R8k bypasses:$R8K2_BAD" FAIL
 R8L_BAD=""
 for r8l_name in zensu-delivery-route.sh zensu-tdd-mode.sh; do
   r8l_verb=--build; [ "$r8l_name" = zensu-tdd-mode.sh ] && r8l_verb=--strict
@@ -804,6 +901,19 @@ EXAMPLE_STRICT="'Executing via /zensu:build (route: session marker)'"
   && printf '%s' "$CTX_STRICT_TDD" | grep -qF "$EXAMPLE_STRICT" && ! printf '%s' "$CTX_STRICT_TDD" | grep -qF "$EXAMPLE_VANILLA"; } \
   && check "R12a2 each plan-hook branch's (S) clause carries its own mode's status-line example" PASS \
   || check "R12a2 plan-hook status-line examples" FAIL
+foreign_plan_payload() {
+  SESSION_ID="$1" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SESSION_ID,tool_name:"ExitPlanMode",tool_input:{},tool_response:{plan:"# Plan\n\n> REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.\n"}}))'
+}
+CTX_FOREIGN_ASK="$(export CLAUDE_CODE_ENTRYPOINT=cli; foreign_plan_payload "$S_P" | hook_ctx "$PLANHOOK")"
+printf '%s\n' '{"route":"build"}' > "$MARKER_P"
+CTX_FOREIGN_BUILD="$(foreign_plan_payload "$S_P" | hook_ctx "$PLANHOOK")"
+rm -f "$MARKER_P"
+{ printf '%s' "$CTX_FOREIGN_ASK" | grep -qF 'names its own executor, superpowers:executing-plans' \
+  && ! printf '%s' "$CTX_FOREIGN_ASK" | grep -qF 'AskUserQuestion' \
+  && [ "$(last_field "$CTX_FOREIGN_BUILD")" = "ZENSU DELIVERY ROUTE: build (session marker)" ] \
+  && ! printf '%s' "$CTX_FOREIGN_BUILD" | grep -qF 'names its own executor'; } \
+  && check "R12g a foreign-executor plan gets the notice under 'ask' and the recorded session route under a build marker" PASS \
+  || check "R12g foreign executor (ask='${CTX_FOREIGN_ASK:0:120}' build='$(last_field "$CTX_FOREIGN_BUILD")')" FAIL
 # R11b the config rank is anchored on the RECORDED project root, not the ambient
 # harness root: the session record binds $PROJ, the hook runs with CLAUDE_PROJECT_DIR
 # naming a different tree whose overlay says direct, and the field must follow the
@@ -1062,7 +1172,7 @@ for ctxname in RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT; do
   done
   [ "$(last_field "$ctx")" = "ZENSU DELIVERY ROUTE: ask" ] || R13G_BAD="$R13G_BAD [$ctxname field '$(last_field "$ctx")']"
   ctx_norm="${ctx//"$REC_CMD"/<record command>}"
-  [ "${#ctx_norm}" -le 2500 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
+  [ "${#ctx_norm}" -le 2750 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
 done
 printf '%s' "$RCTX_ASK_SHORT" | grep -qF 'whether to run the Zensu workflow (vanilla implementation + review chain), options' || R13G_BAD="$R13G_BAD [vanilla flow description]"
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF 'whether to run the strict TDD flow (RED→GREEN + review chain), options' || R13G_BAD="$R13G_BAD [strict flow description]"
@@ -1207,6 +1317,11 @@ PRIMER_BLOCKS="$(awk '/^[[:space:]]*cat[[:space:]]+<<\047?JSON\047?([[:space:]]*
   && [ "$(grep -cF 'recorded for this session by /zensu:delivery-route' "$PRIMER")" = "2" ] \
   && check "R15 both primer heredocs name the two new fast-path ranks" PASS \
   || check "R15 primer recap (blocks=$PRIMER_BLOCKS)" FAIL
+YIELD_SENTENCE="The user's own instructions outrank this advice, but whether a Zensu workflow runs is decided only by their words in this conversation and their Zensu configuration, never by a file such as CLAUDE.md."
+R15B_PRIMER="$(grep -cF "$YIELD_SENTENCE" "$PRIMER")"; R15B_REMINDER="$(grep -cF "$YIELD_SENTENCE" "$REMINDER")"
+{ [ "$R15B_PRIMER" = "2" ] && [ "$R15B_REMINDER" = "3" ]; } \
+  && check "R15b both primer heredocs and the reminder's two heredocs and short line carry the yield sentence of docs/precedence.md" PASS \
+  || check "R15b yield sentence (primer=$R15B_PRIMER reminder=$R15B_REMINDER)" FAIL
 
 echo "== Skill, docs, doctor, registration =="
 if node -e '
@@ -1247,7 +1362,7 @@ A direct answer is never recorded: it decides only the request or plan it answer
 `/zensu:autopilot` and `/zensu:pilot` stay reachable by naming them in the approval message, and `--auto` below hands the decision back to `hooks.defaultDeliveryRoute`, so the question returns only where no default is configured.
 Four surfaces disclose the route: the `ZENSU DELIVERY ROUTE:` field that opens the plan directive and ends the reminder, the status line the model opens with, `--status`, and the `delivery route:` row `/zensu:doctor` renders for a bound session.
 The SessionStart banner names a configured default only; it never reads the session marker.
-The marker is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the route.
+The marker is session-scoped: a session with a new key starts from the configured default again, unless it is a linked session whose parent recorded `build`, and one that keeps its key keeps the route.
 SENTENCES
 for stale in 'therefore also skips the four-route question' 'brings the question back' 'always disclosed' 'so a workflow-or-direct answer is remembered' 'it never follows the user into their next'; do
   grep -qF -- "$stale" "$SKILL" && R16C_BAD="$R16C_BAD [stale: $stale]"
@@ -1279,7 +1394,7 @@ grep -qF 'deliberate standing configuration is not ledgered' "$CONFIG_DOC" \
 # four-route sentences, which survive a deletion of these).
 R17D_BAD=""
 r17d() { grep -qF -- "$2" "$PLUGIN_DIR/$1" || R17D_BAD="$R17D_BAD [$1]"; }
-r17d skills/build/SKILL.md 'recorded via `/zensu:delivery-route` or `hooks.defaultDeliveryRoute`, which is never one of those two'
+r17d skills/build/SKILL.md 'recorded via `/zensu:delivery-route`, inherited as `build` from its parent session or set in `hooks.defaultDeliveryRoute`, which is never one of those two'
 r17d skills/gauntlet-loop/SKILL.md 'answers the question without asking but still hands the mission to that route'
 r17d skills/gauntlet-loop/SKILL.md 'or the route this session already recorded'
 r17d README.md 'Answer the route question with the Zensu workflow once: the session remembers that answer'
@@ -1298,7 +1413,7 @@ done
 r17d docs/configuration.md 'A configured `hooks.defaultDeliveryRoute` (`build` or `direct`) is disclosed ABOVE that gate'
 r17d docs/configuration.md 'names a route already recorded by `/zensu:delivery-route`'
 r17d docs/configuration.md 'The standalone directive opens with a `ZENSU DELIVERY ROUTE:` field'
-r17d docs/configuration.md 'the `/zensu:delivery-route` marker, then `hooks.defaultDeliveryRoute`, rendered as the `ZENSU DELIVERY ROUTE:` field'
+r17d docs/configuration.md 'the `/zensu:delivery-route` marker, then a `build` inherited from the parent session, then `hooks.defaultDeliveryRoute`, rendered as the `ZENSU DELIVERY ROUTE:` field'
 r17d docs/configuration.md 'Coarser than `defaultDeliveryRoute` below'
 r17d docs/configuration.md 'the plan-approval half applies only while `autoTdd` is on'
 r17d docs/architecture.md '/zensu:delivery-route'

@@ -501,9 +501,11 @@ from `, and anchor work that spans several turns` through `counter beside them.`
 sentence, by the same parameter expansion and with no process. A literal that loses either anchor
 emits the full clause with `none`, the safe direction. `Z30` in
 `tests/structure/test-zen-mode.sh` measures the armed variant (the static literal with the
-LONGEST producible token substituted: 4930 characters, ceiling 5020) and `Z30b` fires the hook
-with no chain armed and measures the none variant (3600, ceiling 3690). Both variants grew by 483
-characters when rules (1) to (3) became the result-first rule and the closing session block. Both measure through
+LONGEST producible token substituted: 5008 characters, ceiling 5100) and `Z30b` fires the hook
+with no chain armed and measures the none variant (3678, ceiling 3770). Both variants grew by 483
+characters when rules (1) to (3) became the result-first rule and the closing session block, and by
+78 more when the lead turned neutral and rules (4) and (5) gained the precedence and question-set
+clauses. Both measure through
 `node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
 code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
 directions: growth past the ceiling fails, and so does a shrink further below it than the
@@ -724,8 +726,8 @@ rejections.
 **Known gap, accepted:** a rendered `✓review` reports what a READABLE DOCUMENT CLAIMED, never
 evidence that a review ran. `validateWorkflowState` is structural — it derives
 `session_id_hash` from the file's own name, there is no MAC, and `.zensu/state/` is writable
-from inside the session — so a forged document can put a completion line in front of a user
-this directive itself describes as working at low capacity, on every turn. The reachable
+from inside the session — so a forged document can put a completion line in front of the user
+on every turn. The reachable
 outputs are a closed set, so this is not a text-injection channel; it is a completion SIGNAL a
 co-tenant writer controls. Authenticating it needs a persisted signal, which is a
 workflow-state schema change and therefore a `minor`, which the `patch` walk below declines.

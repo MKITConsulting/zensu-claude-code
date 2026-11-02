@@ -1225,6 +1225,190 @@ done
   && check "D45 the directive carries the human-present field right below the route field, read from the host entrypoint and the payload permission mode" PASS \
   || check "D45 human-present field:$D45_BAD" FAIL
 
+D46_CFG_BUILD="$TMP_DIR/d46-route-build.json"
+printf '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$D46_CFG_BUILD"
+D46_SP='# Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+1. add a function'
+d46_ctx() {
+  local d46_entry="${4-cli}"
+  SESSION_ID="$SESSION_ID" CARRIER="$1" PLAN="$2" MODE="${5:-}" TOOL="${D46_TOOL:-ExitPlanMode}" node -e '
+    const p={hook_event_name:"PostToolUse",session_id:process.env.SESSION_ID,tool_name:process.env.TOOL};
+    if (process.env.MODE) p.permission_mode=process.env.MODE;
+    if (process.env.CARRIER==="input") p.tool_input={plan:process.env.PLAN};
+    else if (process.env.CARRIER==="response") { p.tool_input={}; p.tool_response={plan:process.env.PLAN}; }
+    else p.tool_input={};
+    process.stdout.write(JSON.stringify(p));' \
+  | env -u CLAUDE_CODE_ENTRYPOINT ${d46_entry:+CLAUDE_CODE_ENTRYPOINT="$d46_entry"} ZENSU_CONFIG="$3" bash "$HOOK" 2>/dev/null \
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){process.stdout.write("unparseable")}})'
+}
+d46_notice() {
+  printf '%s' "$1" | grep -qF "the approved plan names its own executor, $2, so Zensu asks no delivery-route question for it" \
+    && printf '%s' "$1" | grep -qF '/zensu:build runs this plan under the Zensu workflow' \
+    && ! printf '%s' "$1" | grep -qF 'AskUserQuestion' \
+    && ! printf '%s' "$1" | grep -qF 'ZENSU DELIVERY ROUTE:' \
+    && ! printf '%s' "$1" | grep -qiE 'non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b' \
+    && [ "${#1}" -le 1200 ]
+}
+d46_asks() { printf '%s' "$1" | grep -qF 'ZENSU DELIVERY ROUTE: ask' && printf '%s' "$1" | grep -qF 'AskUserQuestion' && ! printf '%s' "$1" | grep -qF 'names its own executor'; }
+D46_INPUT="$(d46_ctx input "$D46_SP" "$ZENSU_CONFIG")"
+D46_RESPONSE="$(d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
+D46_SLASH="$(d46_ctx response 'Execute this plan with /gsd:execute-phase, one phase at a time.' "$ZENSU_CONFIG")"
+{ d46_notice "$D46_INPUT" superpowers:executing-plans && d46_notice "$D46_RESPONSE" superpowers:executing-plans \
+  && d46_notice "$D46_SLASH" gsd:execute-phase; } \
+  && check "D46 a plan naming its own executor gets the short notice naming that skill and /zensu:build as the way back, with no route question, through the live tool_response carrier too" PASS \
+  || check "D46 foreign executor notice (input='${D46_INPUT:0:160}' response='${D46_RESPONSE:0:160}' slash='${D46_SLASH:0:160}')" FAIL
+D46_BUILD="$(d46_ctx response "$D46_SP" "$D46_CFG_BUILD")"
+{ printf '%s' "$D46_BUILD" | grep -qF 'ZENSU DELIVERY ROUTE: build (hooks.defaultDeliveryRoute)' \
+  && ! printf '%s' "$D46_BUILD" | grep -qF 'names its own executor'; } \
+  && check "D46a a decided route still dispatches a plan that names its own executor" PASS \
+  || check "D46a decided route with a foreign executor ('${D46_BUILD:0:200}')" FAIL
+D46_OWN="$(d46_ctx response "$D46_SP
+Execute this plan via /zensu:build when the user asks for the review chain." "$ZENSU_CONFIG")"
+D46_MENTION="$(d46_ctx response '1. Implement superpowers:brainstorming skill improvements
+2. Implement the plan using key:value pairs' "$ZENSU_CONFIG")"
+D46_NONE="$(d46_ctx none '' "$ZENSU_CONFIG")"
+D46_OWN_BAD=""
+for d46_own in 'Execute this plan with `zensu:build`.' 'Execute this plan with zensu:build.' 'Afterwards run /zensu:build so the change gets the review chain.'; do
+  d46_asks "$(d46_ctx response "$D46_SP
+$d46_own" "$ZENSU_CONFIG")" || D46_OWN_BAD="$D46_OWN_BAD [$d46_own]"
+done
+{ d46_asks "$D46_OWN" && d46_asks "$D46_MENTION" && d46_asks "$D46_NONE" && [ -z "$D46_OWN_BAD" ]; } \
+  && check "D46b a plan that also names a zensu: skill anywhere and in any form, a skill only mentioned, and an unreadable plan all keep the route question" PASS \
+  || check "D46b fail-toward-question cases (own='${D46_OWN:0:120}' mention='${D46_MENTION:0:120}' none='${D46_NONE:0:120}' own forms:$D46_OWN_BAD)" FAIL
+D46C_BAD=""
+D46_LDQ=$'\342\200\234'
+D46_RDQ=$'\342\200\235'
+for d46c_plan in '# Plan
+
+1. Keep the example `REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan` in docs/precedence.md.' '# Plan
+
+```
+REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan
+```' '# Plan
+
+Do not use the superpowers:executing-plans skill to implement this plan.' '# Plan
+
+1. Document the header "REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan" in the README.' "# Plan
+
+1. Document the header ${D46_LDQ}REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan${D46_RDQ} in the README." '# Plan
+
+1. Keep ``REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan`` in the docs.' '# Plan
+
+1. Document the header:
+     ```markdown
+     > REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan.
+     ```' '# Plan
+
+> ```
+> REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan
+> ```' '# Plan
+
+```markdown
+```text
+REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan
+```
+```' '# Plan
+
+````markdown
+```text
+REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan
+```
+````'; do
+  d46_asks "$(d46_ctx response "$d46c_plan" "$ZENSU_CONFIG")" || D46C_BAD="$D46C_BAD [${d46c_plan:8:60}]"
+done
+D46C_AFTER="$(d46_ctx response '# Plan
+
+```
+npm test
+```
+
+> REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan.' "$ZENSU_CONFIG")"
+D46C_LIST="$(d46_ctx response '# Plan
+
+1. Run the tests:
+   ```bash
+   npm test
+   ```
+
+REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan.' "$ZENSU_CONFIG")"
+{ [ -z "$D46C_BAD" ] && d46_notice "$D46C_AFTER" superpowers:executing-plans && d46_notice "$D46C_LIST" superpowers:executing-plans; } \
+  && check "D46c a plan that only quotes, fences or negates another plugin's executor keeps the route question, in nested, quoted and longer fences and in double-backtick and typographic quotes too, and a header after a closed fence still gets the notice" PASS \
+  || check "D46c quoted, fenced or negated executor:$D46C_BAD (after fence='${D46C_AFTER:0:160}' after list fence='${D46C_LIST:0:160}')" FAIL
+D46C2="$(HOOK_FILE="$HOOK" node -e '
+  const s=require("fs").readFileSync(process.env.HOOK_FILE,"utf8");
+  const a=s.indexOf("foreign_executor_notice() {"), b=a<0?-1:s.indexOf("\n}\n",a);
+  if (a<0 || b<0) { process.stdout.write("UNFOUND"); process.exit(0); }
+  const body=s.slice(a,b), m=/[^\x00-\x7f]/.exec(body);
+  process.stdout.write(m ? "NONASCII "+JSON.stringify(body.slice(Math.max(0,m.index-40),m.index+8)) : "OK");' 2>/dev/null)"
+case "$D46C2" in
+  (OK) check "D46c2 the foreign-executor function is ASCII only, so its node program reaches argv without a literal non-ASCII character" PASS ;;
+  (UNFOUND) check "D46c2 foreign_executor_notice was not found in the plan hook" FAIL ;;
+  (*) check "D46c2 the foreign-executor function carries a literal non-ASCII character, which reaches node's argv: ${D46C2:-no output}" FAIL ;;
+esac
+D46D_BAD=""
+for d46d_case in "sdk-cli:" "cli:dontAsk" ":"; do
+  d46d_entry="${d46d_case%%:*}"; d46d_mode="${d46d_case#*:}"
+  d46_asks "$(d46_ctx response "$D46_SP" "$ZENSU_CONFIG" "$d46d_entry" "$d46d_mode")" \
+    || D46D_BAD="$D46D_BAD [${d46d_entry:-unset}/${d46d_mode:-none}]"
+done
+D46D_DESKTOP="$(d46_ctx response "$D46_SP" "$ZENSU_CONFIG" claude-desktop)"
+{ [ -z "$D46D_BAD" ] && d46_notice "$D46D_DESKTOP" superpowers:executing-plans; } \
+  && check "D46d the notice needs a human present: an unattended run (sdk-cli entrypoint, dontAsk mode) and an unknown host keep the route question, and the desktop app gets the notice" PASS \
+  || check "D46d human-present gate:$D46D_BAD (desktop='${D46D_DESKTOP:0:160}')" FAIL
+D46E_ROOT="$TMP_DIR/d46e-plugin"
+D46E_LIB="$D46E_ROOT/hooks/lib/plan-payload-v1.js"
+mkdir -p "$D46E_ROOT"
+cp -R "$PLUGIN_DIR/.claude-plugin" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/agents" "$PLUGIN_DIR/skills" \
+  "$PLUGIN_DIR/scripts" "$D46E_ROOT/" 2>/dev/null
+d46e_ctx() {
+  (
+    mkdir -p "$TMP_DIR/d46e-project-$1"
+    export CLAUDE_PLUGIN_ROOT="$D46E_ROOT" CLAUDE_PROJECT_DIR="$TMP_DIR/d46e-project-$1" \
+      ZENSU_TEST_PLUGIN_DATA="$TMP_DIR/d46e-data/$1"
+    source "$BASELINE" "d46e-$1" "$D46E_ROOT" >/dev/null 2>&1 || { printf 'UNSEALED'; exit 0; }
+    HOOK="$D46E_ROOT/hooks/plan-approved-delegate.sh"
+    SESSION_ID="d46e-$1"
+    d46_ctx response "$D46_SP" "$ZENSU_CONFIG"
+  )
+}
+D46E_BAD=""; D46E_RAN=""
+d46e_variant() {
+  local d46e_got
+  d46e_got="$(d46e_ctx "$1")"
+  if [ "$d46e_got" = UNSEALED ]; then
+    skip "D46e the $1 variant could not be sealed on this host and was NOT exercised"
+  else
+    D46E_RAN="$D46E_RAN $1"
+    d46_asks "$d46e_got" || D46E_BAD="$D46E_BAD [$1: ${d46e_got:0:100}]"
+  fi
+}
+if [ ! -f "$D46E_LIB" ] || [ ! -f "$D46E_ROOT/hooks/plan-approved-delegate.sh" ]; then
+  skip "D46e the copied plugin root could not be built and the reader faults were NOT exercised"
+else
+  D46E_CONTROL="$(d46e_ctx control)"
+  if [ "$D46E_CONTROL" = UNSEALED ]; then
+    skip "D46e the copied plugin root could not be sealed on this host and the reader faults were NOT exercised"
+  elif ! d46_notice "$D46E_CONTROL" superpowers:executing-plans; then
+    check "D46e the unmodified copied root gives no notice, so a reader fault there proves nothing ('${D46E_CONTROL:0:160}')" FAIL
+  else
+    printf '%s\n' 'module.exports={SOURCES:[{carrier:"tool_response",field:"plan",kind:"text",label:"tool_response.plan",live:true}]};' > "$D46E_LIB"
+    d46e_variant no-export
+    printf '%s\n' 'throw new Error("plan reader unavailable");' > "$D46E_LIB"
+    d46e_variant throwing
+    rm -f "$D46E_LIB"
+    d46e_variant missing
+    D46E_TOOL="$(D46_TOOL=Write d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
+    d46_asks "$D46E_TOOL" || D46E_BAD="$D46E_BAD [other tool: ${D46E_TOOL:0:100}]"
+    [ -z "$D46E_BAD" ] \
+      && check "D46e a plan reader that cannot be used ($D46E_RAN ) and a payload from another tool keep the route question, while the same copied root unmodified gives the notice" PASS \
+      || check "D46e a reader fault or another tool's payload dropped the route question:$D46E_BAD" FAIL
+  fi
+fi
+rm -f "$D46_CFG_BUILD"
+
 echo "----"
 echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
 [ "$FAIL" -eq 0 ]

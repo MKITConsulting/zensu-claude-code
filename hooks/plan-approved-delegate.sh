@@ -3,7 +3,8 @@
 # planning gate and therefore delegates straight into its bound TDD attempt.
 # Standalone plans keep the autoTdd ask-first directive, which now opens with a
 # `ZENSU DELIVERY ROUTE:` field — this session's already-decided route (the
-# /zensu:delivery-route marker or hooks.defaultDeliveryRoute), resolved at the
+# /zensu:delivery-route marker, a build route a linked session inherited from its parent, or
+# hooks.defaultDeliveryRoute), resolved at the
 # emission site near the end of this file; the block comment above the two
 # heredocs there records the mechanism.
 set -u
@@ -165,7 +166,8 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
   AUTOPILOT_OWNER=""
   if [ -r "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh" ]; then
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-    AUTOPILOT_OWNER="$(zensu_resolve_session_id "$(read_field session_id)" 2>/dev/null)" \
+    RAW_SESSION_ID="$(read_field session_id)"
+    AUTOPILOT_OWNER="$(zensu_resolve_session_id "$RAW_SESSION_ID" 2>/dev/null)" \
       || AUTOPILOT_OWNER=""
   fi
   # The existence hint alone cannot distinguish "this project is mid-run" from
@@ -459,19 +461,26 @@ fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled autoTdd || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-directive.sh"
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" ] \
+  && source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" \
+  && declare -F zensu_linked_session_resolve zensu_linked_session_pending >/dev/null 2>&1 \
+  && zensu_linked_session_pending "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}"; then
+  zensu_linked_session_resolve "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}" "${RAW_SESSION_ID-$(read_field session_id)}" >/dev/null
+fi
 
 # The session's already-decided DELIVERY ROUTE, resolved once here and handed to
 # the model as the `ZENSU DELIVERY ROUTE:` field the directive opens with: `build` or
-# `direct` with its source (the /zensu:delivery-route session marker, or
-# hooks.defaultDeliveryRoute), or `ask`. zensu-config.sh owns the ladder and the
+# `direct` with its source (the /zensu:delivery-route session marker, a build route inherited
+# from a linked session's parent, or hooks.defaultDeliveryRoute), or `ask`.
+# zensu-config.sh owns the ladder and the
 # spelling, so the reminder hook and /zensu:doctor render the same words, and
 # zensu-directive.sh owns the record command and the placeholder substitution. The
 # two heredocs below stay QUOTED
 # and stay TWO — the parity pins count them — and are piped through the substitution
-# rather than interpolated. The resolver reads BOTH ranks, the marker and the config
-# overlay, under the RECORDED project root it is handed — the root the helper's
-# `--status` and the /zensu:doctor probe pass too — so the ambient harness value,
-# which can name a different tree in a worktree session, never reaches the route.
+# rather than interpolated. The resolver reads its three ranks (own marker, inherited
+# route, config overlay) under the RECORDED project root it is handed — the root the
+# helper's `--status` and the /zensu:doctor probe pass too — so the ambient harness
+# value, which can name a different tree in a worktree session, never reaches the route.
 # `autoTdd` above and `tddImplementation` below deliberately still read the harness
 # value — moving those keys is its own change, because their pins assume the harness
 # root.
@@ -480,6 +489,66 @@ ROUTE_COMMAND="$(zensu_delivery_route_record_command)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-human-present.sh"
 HUMAN_PRESENT="$(zensu_human_present "$INPUT")"
 emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_COMMAND" | zensu_human_present_substitute "$HUMAN_PRESENT"; }
+
+foreign_executor_notice() {
+  if [ "$ROUTE_FIELD" = ask ] && [ "$HUMAN_PRESENT" = yes ]; then
+    PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+      "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
+    PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
+    if [ -z "$PLAN_PAYLOAD_LIB" ] \
+      || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
+      return 0
+    fi
+    PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+    printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
+      PLAN_PAYLOAD_LIB="$PLAN_PAYLOAD_LIB" node -e '
+      let resolveApprovedPlan,REASONS,SOURCES;
+      try {
+        ({resolveApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+      } catch (_) { process.exit(0); }
+      if (typeof resolveApprovedPlan!=="function" || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(0);
+      let raw="";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data",c=>raw+=c);
+      process.stdin.on("end",()=>{ try {
+        const input=JSON.parse(raw||"{}");
+        if (!input || input.tool_name!=="ExitPlanMode") return;
+        const resolved=resolveApprovedPlan(input,SOURCES);
+        if (!resolved || !resolved.ok || typeof resolved.plan!=="string") return;
+        if (/(?:^|[^A-Za-z0-9_])zensu:[a-z]/i.test(resolved.plan)) return;
+        const ref=/(^|[^A-Za-z0-9_.:\/@-])(\/?)([a-z][a-z0-9_-]{0,63}):([a-z][a-z0-9_-]{0,63})(?![A-Za-z0-9_:\/@-])/g;
+        let foreign="";
+        let fence="";
+        for (const row of resolved.plan.split(/\r?\n/)) {
+          const f=/^(?:\s*(?:>|[-*+]|\d+[.)]))*\s*(`{3,}|~{3,})(.*)$/.exec(row);
+          if (fence) {
+            if (f && f[1][0]===fence[0] && f[1].length>=fence.length && !f[2].trim()) fence="";
+            continue;
+          }
+          if (f && !(f[1][0]==="`" && f[2].includes("`"))) { fence=f[1]; continue; }
+          const line=row.replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g," ").replace(/"[^"]*"|\u201c[^\u201d]*\u201d|\u2018[^\u2019]*\u2019/g," ");
+          const carries=/REQUIRED SUB-SKILL/i.test(line)
+            || (/\b(?:execut|implement)/i.test(line) && /\b(?:this|the)\s+plan\b/i.test(line));
+          if (!carries || /\b(?:not|cannot|never|no|nor|without|instead|avoid|rather|except|unless)\b|n[\x27\u2019]t\b/i.test(line)) continue;
+          for (const m of line.matchAll(ref)) {
+            const lead=line.slice(0,m.index+m[1].length);
+            const invoked=m[2]==="/"
+              || (/skill/i.test(line) && /\b(?:use|using|via|with|invoke|run)\s+(?:the\s+)?$/i.test(lead));
+            if (invoked && !foreign) foreign=m[3]+":"+m[4];
+          }
+        }
+        if (!foreign) return;
+        const msg="Zensu delivery route: the approved plan names its own executor, "+foreign+", so Zensu asks no delivery-route question for it. Carry the plan out the way it says, with the executor it names. Open your reply with one short line saying that Zensu asked no route question because the plan names "+foreign+", and that /zensu:build runs this plan under the Zensu workflow, with its evidence audits and review chain, instead. The user\x27s own approval message still wins when it asks for a route rather than only naming one, and a route it refuses is never taken: /zensu:build or the Zensu workflow runs skill=\x27zensu:build\x27 with the approved plan content as the feature specification, /zensu:autopilot runs skill=\x27zensu:autopilot\x27 with that content as the feature description, and /zensu:pilot runs skill=\x27zensu:pilot\x27 naming the tracked feature the plan belongs to.";
+        process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
+      } catch (_) {} });
+    ' 2>/dev/null
+  fi
+}
+FOREIGN_EXECUTOR_NOTICE="$(foreign_executor_notice)"
+if [ -n "$FOREIGN_EXECUTOR_NOTICE" ]; then
+  printf '%s\n' "$FOREIGN_EXECUTOR_NOTICE"
+  exit 0
+fi
 
 # The EFFECTIVE mode, not the configured one: a /zensu:tdd-mode session choice
 # outranks hooks.tddImplementation at `--tdd-begin`, so the directive must name the

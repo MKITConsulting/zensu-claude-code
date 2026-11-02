@@ -174,7 +174,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-auto-load.sh\"",
-            "timeout": 12
+            "timeout": 30
           },
           {
             "type": "command",

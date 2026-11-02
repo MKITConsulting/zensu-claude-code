@@ -684,6 +684,8 @@ test('performReanchor moves this session\'s markers, replaces a stale copy and l
   const stateB = path.join(f.b, '.zensu', 'state');
   fs.writeFileSync(path.join(stateA, `tdd-mode-${f.key}.json`), '{"mode":"strict"}\n');
   fs.writeFileSync(path.join(stateA, `delivery-route-${f.key}.json`), '{"route":"build"}\n');
+  fs.writeFileSync(path.join(stateA, `inherited-route-${f.key}.json`), '{"route":"build"}\n');
+  fs.writeFileSync(path.join(stateA, `linked-session-${f.key}.json`), '{"state":"linked"}\n');
   fs.writeFileSync(path.join(stateA, `full-suite-${f.key}.json`), '{"runner":"local"}\n');
   fs.symlinkSync(path.join(f.base, 'elsewhere.json'), path.join(stateA, `zen-mode-${f.key}.json`));
   fs.mkdirSync(stateB, { recursive: true });
@@ -691,18 +693,42 @@ test('performReanchor moves this session\'s markers, replaces a stale copy and l
   fs.writeFileSync(path.join(stateB, `full-suite-${f.key}.json`), '{"runner":"ci"}\n');
   const outcome = reanchor.performReanchor(f.request());
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
-  assert.deepEqual(outcome.markers.moved, ['tdd-mode', 'delivery-route', 'full-suite']);
+  assert.deepEqual(outcome.markers.moved, ['tdd-mode', 'delivery-route', 'inherited-route', 'linked-session', 'full-suite']);
   assert.deepEqual(outcome.markers.faults, ['zen-mode: the marker is not a regular file']);
   assert.equal(fs.readFileSync(path.join(stateB, `tdd-mode-${f.key}.json`), 'utf8'), '{"mode":"strict"}\n');
   assert.equal(fs.readFileSync(path.join(stateB, `delivery-route-${f.key}.json`), 'utf8'), '{"route":"build"}\n');
+  assert.equal(fs.readFileSync(path.join(stateB, `inherited-route-${f.key}.json`), 'utf8'), '{"route":"build"}\n');
+  assert.equal(fs.readFileSync(path.join(stateB, `linked-session-${f.key}.json`), 'utf8'), '{"state":"linked"}\n');
   assert.equal(fs.readFileSync(path.join(stateB, `full-suite-${f.key}.json`), 'utf8'), '{"runner":"local"}\n');
   assert.equal(fs.existsSync(path.join(stateA, `tdd-mode-${f.key}.json`)), false);
+  assert.equal(fs.existsSync(path.join(stateA, `inherited-route-${f.key}.json`)), false);
+  assert.equal(fs.existsSync(path.join(stateA, `linked-session-${f.key}.json`)), false);
   assert.equal(fs.existsSync(path.join(stateA, `full-suite-${f.key}.json`)), false);
   assert.equal(fs.lstatSync(path.join(stateA, `zen-mode-${f.key}.json`)).isSymbolicLink(), true);
   const rendered = reanchor.renderReanchorOutcome(outcome);
-  assert.match(rendered.text, /session markers +: moved \(tdd-mode, delivery-route, full-suite\)/);
+  assert.match(rendered.text, /session markers +: moved \(tdd-mode, delivery-route, inherited-route, linked-session, full-suite\)/);
   assert.match(rendered.text, /^  marker fault +: .*zen-mode.*the marker is not a regular file/m);
   assert.match(rendered.text, /Set that preference again from here/);
+});
+
+test('performReanchor holds the linked-session marker back when the inherited-route marker cannot move', (t) => {
+  const f = fixture(t);
+  const stateA = path.join(f.a, '.zensu', 'state');
+  const stateB = path.join(f.b, '.zensu', 'state');
+  fs.writeFileSync(path.join(stateA, `inherited-route-${f.key}.json`), '{"route":"build"}\n');
+  fs.writeFileSync(path.join(stateA, `linked-session-${f.key}.json`), '{"state":"linked"}\n');
+  fs.mkdirSync(path.join(stateB, `inherited-route-${f.key}.json`), { recursive: true });
+  const outcome = reanchor.performReanchor(f.request());
+  assert.equal(outcome.ok, true, JSON.stringify(outcome));
+  assert.deepEqual(outcome.markers.moved, []);
+  assert.deepEqual(outcome.markers.faults, [
+    'inherited-route: the marker is not a regular file',
+    'linked-session: held back because the inherited-route marker did not move',
+  ]);
+  assert.equal(fs.readFileSync(path.join(stateA, `linked-session-${f.key}.json`), 'utf8'), '{"state":"linked"}\n');
+  assert.equal(fs.existsSync(path.join(stateB, `linked-session-${f.key}.json`)), false);
+  const rendered = reanchor.renderReanchorOutcome(outcome);
+  assert.match(rendered.text, /^  marker fault +: .*linked-session.*held back because the inherited-route marker did not move/m);
 });
 
 test('the report lists the uncommitted paths of the new anchor', (t) => {
@@ -877,7 +903,7 @@ test('the verdict renderer names both roots and the uncommitted paths before --c
   assert.match(report.text, /\/zensu:converge and \/zensu:verify-feature\n--chain read the anchor from zensu-log\.sh --project-root and run their commands inside it,\n/);
   assert.match(report.text, /and --evidence-run runs there too, so a new \/zensu:build chain can start in this session\.\n/);
   assert.match(report.text, /\/zensu:plan-review, \/zensu:setup, \/zensu:cover, \/zensu:autopilot and \/zensu:pilot still\nread plans, config, overlays and templates from the start directory\./);
-  assert.match(report.text, /are set aside, and this session's tdd-mode, delivery-route, full-suite and zen-mode\nmarkers move with the anchor\.\n/);
+  assert.match(report.text, /are set aside, and this session's tdd-mode, delivery-route, inherited-route, linked-session, full-suite and zen-mode\nmarkers move with the anchor\.\n/);
   assert.doesNotMatch(report.text, /fresh session/);
   assert.doesNotMatch(report.text, /cannot run there/);
   const unpastable = reanchor.renderReanchorVerdict({ ...verdict, targetRoot: '/work/re$po/b' }, false).text;

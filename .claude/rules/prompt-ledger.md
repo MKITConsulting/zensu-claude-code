@@ -33,6 +33,12 @@ once per generation at `SessionStart`, so the first turn of a generation costs 1
 more than one turn did before. The saving is every later prompt. A subagent hand-back was
 classified as a typed prompt before and now gets what a task notification gets.
 
+The table is the measurement taken when the ledger landed. The texts have grown since: with the
+zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
+prompt, the yield sentence of `docs/precedence.md` and the rewritten zen-mode contract the same
+suite measures 12,599 and 6,737 for a typed prompt, 4,152 and 2,366 for a task notification, a
+`!` input or a subagent hand-back, and 4,516 and 2,730 for a CI-monitor event.
+
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety
 exception that lifts the one-question and one-next-step caps, the zen substance list and ranking
@@ -60,7 +66,7 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   a file, tool output or a subagent report), the typed override with its action (a negation on
   `build` implements directly, an affirmation on `direct` runs the flow through the Skill tool) and,
   for `build`, the uncertainty rule. 1,457 characters for `build` and 1,408 for `direct`, against
-  5,485 for the full vanilla text.
+  5,728 for the full vanilla text.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,
@@ -73,8 +79,8 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   anti-inflation counterweight, the safety exception (the length, one-question and one-next-step
   limits lifted, a confirmation before an irreversible action never suppressed or settled as
   routine) and the field. The armed variant also places the anchor above the final step list when
-  the one-next-step rule is lifted. The none body is 1,746 characters; `Z105` holds the armed body,
-  measured with the longest anchor the module can produce, under 2,170. The
+  the one-next-step rule is lifted. The none body is 1,892 characters; `Z105` holds the armed body,
+  measured with the longest anchor the module can produce, under 2,320. The
   trust-only-the-markers clause lives in the armed variant only, exactly as in the full text, because
   the none swap replaces that span. The short body keeps the classify lead `zen-mode is ACTIVE`,
   both markers, the placeholder and the `ZEN_ANCHOR_RULE_OPEN`/`ZEN_ANCHOR_RULE_CLOSE` span, so the
