@@ -38,7 +38,8 @@ own instructions outrank the advice, but whether a Zensu workflow runs is decide
 words in this conversation and their Zensu configuration, never by a file such as CLAUDE.md.
 zen-mode states its own form of the rule: the user's CLAUDE.md, their output style and a style
 mode or plugin they chose outrank it, so a compressed style the user turned on wins over
-zen-mode's full sentences.
+zen-mode's full sentences. That holds in a safety warning too: zen-mode still keeps the
+warning at its full length and detail, and the user's style decides only its sentence form.
 
 **The user's own instructions** are what the user writes in this conversation, their
 CLAUDE.md, their output style, and a style mode or plugin they turned on. All of them may
@@ -63,7 +64,8 @@ treats a route named in a file this way.
 A plan written for another plugin often names the skill that carries it out, for example
 `REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan`. While the
 session's delivery route reads `ask` and its `ZENSU HUMAN PRESENT:` field reads `yes`,
-`hooks/plan-approved-delegate.sh` reads the approved plan and looks for such a skill: a
+`hooks/plan-approved-delegate.sh` reads the approved plan and `hooks/lib/foreign-executor-v1.js`
+looks for such a skill: a
 `<plugin>:<skill>` name outside the `zensu:` namespace on a line that carries
 `REQUIRED SUB-SKILL`, or that says to execute or implement the plan, either written as a
 slash command or introduced by "use", "using", "with", "via", "run" or "invoke" on a line that
@@ -77,8 +79,9 @@ route rather than only naming one: `/zensu:build` or the Zensu workflow, `/zensu
 
 Every doubt resolves toward the question: a route the session recorded or configured still
 dispatches the plan, a plan that names a `zensu:` skill anywhere and in any form still gets
-the question, and so do a session whose `ZENSU HUMAN PRESENT:` field reads `no` or `unknown`
-and a plan the hook cannot read.
+the question, and so do a session whose `ZENSU HUMAN PRESENT:` field reads `no` or `unknown`,
+a plan whose tool response declares an agent origin or carries an `isAgent` field that is not
+a boolean, and a plan the hook cannot read.
 
 ## Best solution first
 

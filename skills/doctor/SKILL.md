@@ -856,11 +856,11 @@ whether browser verification is enforced, not only when a row is red.
   evidence audits this session; say so. A **half is off** parenthetical means one reader is
   off, so the route decides only the other half; for `build` the clause after it names which
   change still reaches `/zensu:build`.
-- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is
-  on — the row names the half it is asked on when one flag is off.
+- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is on, a plan
+  naming its own executor gets a notice, and the row names the half.
 - **✅ delivery route: … — decides nothing this session** → both readers are off
   (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so neither hook asks or dispatches
-  on a route; whatever the row names has no effect until a reader is turned back on.
+  on a route; the named route has no effect until a reader is back on.
 - **⚠️ delivery route: not checked / could not be read / state not recognized** → a
   MISSING CHECK, never a verdict. **Not checked:** no bound session key or recorded project
   root was available; the row names the cause — no `CLAUDE_CODE_SESSION_ID` or

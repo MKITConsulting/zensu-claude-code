@@ -2,8 +2,8 @@
 # UserPromptSubmit hook — zen-mode re-injection. While zen-mode resolves to active
 # for the current session, this hook injects the mode contract as additionalContext
 # once per context generation and a short body of it on every later prompt. A skill
-# is loaded once and fades after a handful of turns; a low-capacity user is the least
-# likely to notice that drift, so the reminder rides along with each prompt instead.
+# is loaded once and fades after a handful of turns, so the reminder rides along
+# with each prompt instead.
 #
 # Resolution is three-valued, most specific first:
 #   1. session marker `{"active":true|false}` — the choice this session recorded,
@@ -393,7 +393,6 @@ ZEN_ROOT="$(zensu_resolve_project_dir)" || exit 0
 [ -n "$ZEN_ROOT" ] || exit 0
 
 ZEN_STATE_DIR="$ZEN_ROOT/.zensu/state"
-MARKER="$ZEN_STATE_DIR/zen-mode-${ZENSU_SESSION_KEY}.json"
 
 # A PROJECT WITH NO STATE DIRECTORY PAYS NOTHING FOR THE ANCHOR. The three
 # `require`s land before the workflow document is even `lstat`ed, and
@@ -411,86 +410,33 @@ ZEN_ANCHOR_SKIP=0
 
 # Resolve before the prompt is ever read, so a session whose mode is off keeps
 # paying nothing for prompt extraction.
-# A PRESENT-BUT-NOT-REGULAR marker resolves to OFF, and that arm is not tidiness.
-# Without it a FIFO planted here is neither a symlink nor a regular file, so both
-# tests above are false and control falls through to the CONFIGURED DEFAULT, which
-# ships TRUE — so unreadable state IMPOSED the mode, which is the exact opposite of
-# what the header above this file promises. Worse, it then reached the off-phrase
-# write below, and a shell redirect opens a FIFO with no reader BLOCKING: the one
-# in-band way out of the mode wedged the session on a path the user cannot see.
-# That is the same blocking class this change closed at the shared reader, one
-# marker over. `-e` is what distinguishes a present non-regular file from an absent
-# one; the `-L` arm above already took every symlink, including a dangling one.
-# THE SHARED PREDICATE, from `hooks/lib/zensu-session.sh`, which this file already
-# sources for `zen_path_untraversable` - the third arm of the same ladder. The two
-# symlink and non-regular rules were spelled here AND in the out-of-band writer,
-# with nothing comparing them, so a rule added to one left the other honouring a
-# marker its twin refuses. The CONSEQUENCE stays per caller: here it resolves the
-# mode OFF, because unreadable state must never impose it.
-if ZEN_SHAPE_WHY="$(zen_marker_shape_fault "$ZEN_ROOT/.zensu" "$ZEN_STATE_DIR" "$MARKER")"; then
-  # CAPTURED, NOT DISCARDED, and the capture is the whole point. The predicate
-  # returns its reason on STDOUT, which here is the hook`s own JSON decision
-  # channel - so the value cannot simply be let through, it has to land in a
-  # variable first. It used to go to /dev/null, and the mode then deactivated
-  # with nothing on any channel: `.zensu/state/` is writable from inside any
-  # session in the project and no gate covers it while the chain is inactive, so
-  # one `mkfifo` at the marker turned the user`s chosen mode off on every prompt
-  # for the rest of the session, silently. The sibling writer already prints this
-  # same cause on every verb, so the only surface naming it was a `--status` run
-  # the user has no reason to make. This file`s own header says every fault
-  # discloses under a named class, because a silent failure is a lie.
-  echo "zensu: zen-mode resolved OFF ($ZEN_SHAPE_WHY)" >&2
+if ! zen_mode_resolve "$ZEN_ROOT" "$ZENSU_SESSION_KEY"; then
+  case "$ZEN_MODE_SOURCE" in
+    (shape)
+      # CAPTURED, NOT DISCARDED, and the capture is the whole point. The predicate
+      # returns its reason on STDOUT, which here is the hook`s own JSON decision
+      # channel - so the value cannot simply be let through, it has to land in a
+      # variable first. It used to go to /dev/null, and the mode then deactivated
+      # with nothing on any channel: `.zensu/state/` is writable from inside any
+      # session in the project and no gate covers it while the chain is inactive, so
+      # one `mkfifo` at the marker turned the user`s chosen mode off on every prompt
+      # for the rest of the session, silently. The sibling writer already prints this
+      # same cause on every verb, so the only surface naming it was a `--status` run
+      # the user has no reason to make. This file`s own header says every fault
+      # discloses under a named class, because a silent failure is a lie.
+      echo "zensu: zen-mode resolved OFF ($ZEN_MODE_WHY)" >&2
+      ;;
+    (untraversable)
+      # IT DISCLOSES, for the same reason the shape arm above does. This arm is
+      # reachable by a `chmod` inside the project - cheaper than the `mkfifo` that
+      # reaches the arm above - and deactivating on it in silence leaves the user with
+      # no way to learn the mode is off, let alone why.
+      echo "zensu: zen-mode resolved OFF (a component of the state path is not traversable)" >&2
+      ;;
+  esac
   exit 0
-elif [ -f "$MARKER" ]; then
-  # ACCEPTED RESIDUAL, stated here rather than left to be rediscovered, and named
-  # at the HIGHER-TRAFFIC of the two marker reads: this one runs on every prompt
-  # while the mode is on, where the off-write read-back runs only on an off phrase.
-  # `zen_marker_active` RE-RESOLVES the path after the three type tests above,
-  # follows a symlink, and opens a FIFO BLOCKING. The persistent plant is closed by
-  # the arms above; the RACED one is not - anything with write access to
-  # `.zensu/state/`, which is in-session by construction, can rename a FIFO or a
-  # symlink into place between the tests and this read. What bounds it is the
-  # `"timeout": 20` on the registration, and losing that turn loses the whole
-  # directive. DELIBERATELY NOT wrapped in `zensu_run_bounded` either: this is the
-  # hottest path in the plugin, and the shared ladder's own deadline plus the child
-  # would approach the registration timeout rather than stay under it. The strongest
-  # fix is a single bounded child that opens with `O_NOFOLLOW|O_NONBLOCK` and reads
-  # from that descriptor, which is what `readRegularFileSnapshot` already does one
-  # directory over - deliberately NOT taken, because it puts a `node` spawn on that
-  # same hottest path, on every prompt of every zen-mode session, which is the cost
-  # the state-directory probe above exists to remove. What HAS been taken is the
-  # other half: the marker primitive is now shared with
-  # `hooks/lib/zensu-zen-mode.sh` through `hooks/lib/zensu-zen-shared.sh`, so the
-  # two readers can no longer disagree about what an active marker is. The symlink
-  # variant leaks a read rather than a write: the off-phrase writer re-`lstat`s and
-  # refuses a non-regular target.
-  zen_marker_active "$MARKER" || exit 0
-elif zen_path_untraversable "$MARKER" "$ZEN_ROOT"; then
-  # A NON-TRAVERSABLE state directory is not an absent marker. Every test above
-  # uses lstat or stat, all of them fail with EACCES, and the fall-through then
-  # took the configured default, which ships TRUE - so a marker recording
-  # `{"active":false}` was ignored and the mode was re-imposed on every prompt.
-  #
-  # BOTH COMPONENTS are tested, exactly as the symlink arm above tests both. The
-  # first spelling covered the leaf only, so an unsearchable `.zensu` made every
-  # test in the ladder - including this arm`s own `[ -d ]` - fail for EACCES, and
-  # control reached the default again. The leaf-only arm could not fire in the
-  # very case that reaches it from one component up. `zen_path_untraversable`
-  # walks EVERY component from the ceiling down and owns the `[ -d ]` test; this
-  # arm supplies the ceiling and reads the verdict.
-  # The ladder already knows the right answer one arm up: an unreadable MARKER
-  # resolves OFF. Only the unreadable DIRECTORY fell the wrong way, against the
-  # invariant the header of this file states.
-  #
-  # IT DISCLOSES, for the same reason the shape arm above does. This arm is
-  # reachable by a `chmod` inside the project - cheaper than the `mkfifo` that
-  # reaches the arm above - and deactivating on it in silence leaves the user with
-  # no way to learn the mode is off, let alone why.
-  echo "zensu: zen-mode resolved OFF (a component of the state path is not traversable)" >&2
-  exit 0
-else
-  zensu_zen_mode_default_on || exit 0
 fi
+MARKER="$ZEN_MARKER_PATH"
 
 # THE PARENT IS THE GUARANTOR of the disclosure, because it is the only layer
 # that observes every outcome. The child owns the classes `Z46_DECLARED` enumerates, but its writer

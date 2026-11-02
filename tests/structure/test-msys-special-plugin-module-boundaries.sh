@@ -448,6 +448,19 @@ if [ -n "$PLAN_LIB" ] && [ -f "$PLAN_LIB" ] && [ -r "$PLAN_LIB" ] && [ ! -L "$PL
 else
   check "plan-gate module converts and loads from the special plugin root" FAIL
 fi
+EXECUTOR_LIB="${PLAN_LIB_DIR:+$PLAN_LIB_DIR/foreign-executor-v1.js}"
+if [ -n "$PLAN_LIB" ] && [ -f "$PLAN_LIB" ] && [ -n "$EXECUTOR_LIB" ] && [ -f "$EXECUTOR_LIB" ] \
+  && PLAN_PAYLOAD_LIB="$PLAN_LIB" node -e '
+    const reader=require(process.env.PLAN_PAYLOAD_LIB);
+    const foreign=require(require("path").join(require("path").dirname(process.env.PLAN_PAYLOAD_LIB),"foreign-executor-v1.js"));
+    const plan="REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan.";
+    const notice=foreign.noticeForPayload({tool_name:"ExitPlanMode",tool_response:{plan}},reader);
+    process.exit(typeof notice==="string" && notice.includes("names its own executor, superpowers:executing-plans,") ? 0 : 1);
+  ' 2>/dev/null; then
+  check "plan-gate executor module loads beside the reader from the special plugin root" PASS
+else
+  check "plan-gate executor module loads beside the reader from the special plugin root" FAIL
+fi
 
 # The artifact redactor is the second module carried this way, and it is the one
 # with a SIBLING require (`./claude-path-v1.js`) — so a conversion that produced a

@@ -19,7 +19,7 @@ const nodePath = require("node:path");
 const modulePath = process.env.ZENSU_PLAN_PAYLOAD_UNIT_TARGET
   || nodePath.join(__dirname, "..", "..", "hooks", "lib", "plan-payload-v1.js");
 const {
-  resolveApprovedPlan, readPlanFile, platformNoFollow,
+  resolveApprovedPlan, responseOrigin, readPlanFile, platformNoFollow,
   LSTAT_PRECHECK_MODE, PLAN_FILE_MAX_BYTES, REASONS, SOURCES,
 } = require(modulePath);
 
@@ -277,4 +277,37 @@ test("a resolved file source carries the bytes, a resolved text source does not"
 
   const fromText = resolveApprovedPlan({ tool_response: { plan: "# transported" } });
   assert.strictEqual(fromText.buffer, null, "a transported plan has no file bytes to bind");
+});
+
+test("responseOrigin refuses an agent origin and a non-boolean isAgent, and accepts every other shape", () => {
+  for (const payload of [
+    { tool_response: { isAgent: false, hasTaskTool: true } },
+    { tool_response: { plan: "# no origin field" } },
+    { tool_response: "Your plan has been saved" },
+    { tool_response: [{ isAgent: true }] },
+    { tool_input: { isAgent: true } },
+    {},
+    null,
+  ]) {
+    assert.deepStrictEqual(responseOrigin(payload), { ok: true }, JSON.stringify(payload));
+  }
+  const agent = responseOrigin({ tool_response: { isAgent: true } });
+  assert.strictEqual(agent.ok, false);
+  assert.strictEqual(agent.reason, REASONS.AGENT_ORIGIN);
+  for (const value of ["false", "true", 0, 1, {}, [], null]) {
+    const drifted = responseOrigin({ tool_response: { isAgent: value } });
+    assert.strictEqual(drifted.ok, false, JSON.stringify(value));
+    assert.strictEqual(drifted.reason, REASONS.ORIGIN_TYPE, JSON.stringify(value));
+  }
+});
+
+test("responseOrigin judges the caller without reading any plan source", () => {
+  const source = responseOrigin.toString();
+  assert.strictEqual(source.includes("readPlanFile"), false, "the origin verdict opens no file");
+  assert.strictEqual(source.includes("resolveApprovedPlan"), false, "the origin verdict walks no source");
+  assert.strictEqual(
+    responseOrigin({ tool_response: { isAgent: true, filePath: "relative/plan.md" } }).reason,
+    REASONS.AGENT_ORIGIN,
+    "a path the walk would refuse never decides the origin verdict",
+  );
 });

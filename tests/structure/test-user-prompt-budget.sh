@@ -183,7 +183,7 @@ budget() {
     first:user-prompt-intent-router.sh:typed) echo "2000 2400" ;;
     repeat:user-prompt-intent-router.sh:typed) echo "1 1400" ;;
     *:user-prompt-intent-router.sh:*) echo "0 0" ;;
-    first:user-prompt-tdd-reminder.sh:typed) echo "4500 5800" ;;
+    first:user-prompt-tdd-reminder.sh:typed) echo "4500 5870" ;;
     repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2750" ;;
     *:user-prompt-tdd-reminder.sh:ci) echo "300 400" ;;
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
@@ -199,7 +199,7 @@ budget() {
 
 total_budget() {
   case "$2:$1" in
-    first:typed) echo 12650 ;;
+    first:typed) echo 12720 ;;
     first:ci) echo 4560 ;;
     first:*) echo 4200 ;;
     repeat:typed) echo 6780 ;;
