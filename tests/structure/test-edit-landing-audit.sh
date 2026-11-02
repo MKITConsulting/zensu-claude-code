@@ -1987,14 +1987,18 @@ PM_OUT="$(run_audit --log "$WTA/.zensu/logs/many.log" --project "$WTA_CANON" --w
   && ! printf '%s\n' "$PM_OUT" | grep -qF 'EDIT LANDED — S13:'; }
 check "PC3 a glob with more matches than the audit grades one by one is UNVERIFIED (pattern claim) and grades none of them" "$(verdict $?)"
 CF_DIR="$WORK/claim-fault"
-mkdir -p "$CF_DIR" && cp "$LIB" "$PLUGIN_DIR/hooks/lib/zensu-safe-render.sh" "$CF_DIR/"
+mkdir -p "$CF_DIR" && cp "$LIB" "$PLUGIN_DIR/hooks/lib/zensu-safe-render.sh" "$PLUGIN_DIR/hooks/lib/edit-landing-receipt-v1.js" \
+  "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$PLUGIN_DIR/hooks/lib/evidence-run-v1.js" "$CF_DIR/"
 printf '%s\n' '{"schema":"edit-landing-v2","clean":true}' > "$WTA/.zensu/state/fault.json"
 CF_OUT="$(bash "$CF_DIR/zensu-edit-landing.sh" --log "$WTA/.zensu/logs/ref.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/fault.json" 2>&1)"; CF_RC=$?
 { [ "$CF_RC" -eq 2 ] \
   && printf '%s\n' "$CF_OUT" | grep -qF 'EDIT LANDING AUDIT FAULT — the claim reader could not run because edit-landing-claims-v1.js is missing beside this library' \
+  && printf '%s\n' "$CF_OUT" | grep -qF 'was marked nonclean and keeps its audit scope for the retry' \
   && ! printf '%s\n' "$CF_OUT" | grep -qE '^(EDIT LANDING AUDIT —|EDIT LANDED|EDIT NOT LANDED|UNVERIFIED)' \
-  && [ ! -e "$WTA/.zensu/state/fault.json" ]; }
-check "CF1 a claim read that cannot run is an audit fault: exit 2, no verdict, no tally, the earlier receipt removed" "$(verdict $?)"
+  && grep -qF '"clean":false' "$WTA/.zensu/state/fault.json" \
+  && grep -qF '"auditFailure":"The latest audit did not complete because the claim reader failed.' "$WTA/.zensu/state/fault.json" \
+  && grep -qF '"auditScope":{' "$WTA/.zensu/state/fault.json"; }
+check "CF1 a claim read that cannot run is an audit fault: exit 2, no verdict, no tally, the earlier receipt marked nonclean with its scope kept" "$(verdict $?)"
 mkdir -p "$WTW/sub" "$WORK/outside-ext"
 printf 'x\n' > "$WTW/sub/only.txt"
 ln -s "$WORK/outside-ext" "$WTW/ext"
