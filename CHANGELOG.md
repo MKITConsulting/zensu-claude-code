@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **ai-work**: Require explicit product scope for capture (#542)
+
+## [0.33.2] - 2026-11-02
+
+### Added
+
 - **hooks**: Let a linked session inherit its parent's tdd route (#497)
 - **vcs**: Follow the target repository's conventions in commits and PRs (#515)
 - **zen-mode**: Close every answer with a session block (#537)
