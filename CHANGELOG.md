@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit product scope for capture (#542)
+
 ## [0.33.2] - 2026-11-02
 
 ### Added
