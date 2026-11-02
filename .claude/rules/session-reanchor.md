@@ -101,7 +101,7 @@ the lock, and each reports its own outcome rather than failing the move.
 RENAMED into the new root's state directory, replacing a stale copy of this session's own marker
 there; a marker that is not a regular file, or a `.zensu`/`.zensu/state` component that is not a
 plain directory, is left in place and reported as a `marker fault`. The six names are the path
-templates of `zensu-config.sh` and `zensu-zen-mode.sh`, and the exported `SESSION_MARKERS` is the
+templates of `zensu-config.sh` and `zensu-zen-shared.sh`, and the exported `SESSION_MARKERS` is the
 one list of them: `renderReanchorVerdict` builds its sentence from it, and the marker case in
 `session-reanchor-v1.test.js` derives the kinds from the templates of both files and requires them
 equal to it, so a template added there without joining the list fails that case. A template in any
