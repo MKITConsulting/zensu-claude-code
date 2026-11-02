@@ -428,7 +428,7 @@ bound_arm_wt() {
   SF="$(tdd_state_file "$sid")"
 }
 bound_done_wt() {
-  bash "$LOG" --chain-done --session fsg-bound-wt --autopilot-run fsg_run --autopilot-attempt 1 \
+  ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --chain-done --session fsg-bound-wt --autopilot-run fsg_run --autopilot-attempt 1 \
     --autopilot-return-stage GATES --chain-id fsg-chain --outcome pass >"$WORK/out" 2>"$WORK/err"
 }
 printf 'changed in the worktree\n' > "$BWT/tracked.txt"
