@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+umask 022
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 REMINDER="$PLUGIN_DIR/hooks/user-prompt-tdd-reminder.sh"
@@ -158,17 +159,25 @@ L3F_INNER='
     fs.mkdirSync(desk, { recursive: true });
     const own = path.join(desk, host + ".json");
     cp.execFileSync("mkfifo", [own]);
+    const standIn = path.join(scratch, "stand-in.json");
+    fs.writeFileSync(standIn, "{}", { mode: 0o600 });
     const realLstat = fs.lstatSync;
-    const regular = realLstat(process.argv[1]);
+    const realOpen = fs.openSync;
+    const regular = realLstat(standIn);
     let hits = 0;
+    let opens = 0;
     fs.lstatSync = (target, ...rest) => {
       if (target !== own) return realLstat(target, ...rest);
       hits += 1;
       return regular;
     };
+    fs.openSync = (target, ...rest) => {
+      if (target === own) opens += 1;
+      return realOpen(target, ...rest);
+    };
     const env = { CLAUDE_CODE_HOST_SESSION_ID: host, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: path.join(scratch, "store") };
     const v = m.resolveLinkedSession({ env, sessionId: "55555555-5555-4555-8555-555555555555", pluginData: scratch });
-    process.stdout.write(v.kind + "/" + v.reason + "/" + (hits > 0 ? "stubbed" : "unstubbed"));
+    process.stdout.write(v.kind + "/" + v.reason + "/" + (hits > 0 ? "stubbed" : "unstubbed") + "/" + (opens > 0 ? "opened" : "unopened"));
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -177,8 +186,8 @@ L3F_OUT="$(node -e '
   const r = require("child_process").spawnSync(process.execPath, ["-e", process.argv[1], process.argv[2]], { encoding: "utf8", timeout: 20000 });
   process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "blocked" : String(r.status) + ":" + r.stdout);
 ' "$L3F_INNER" "$RESOLVER" 2>/dev/null)"
-[ "$L3F_OUT" = "0:none/own-record-refused/stubbed" ] \
-  && check "L3f a desktop record swapped for a FIFO after its lstat, which the stub saw, is refused at once instead of blocking the open" PASS \
+[ "$L3F_OUT" = "0:none/own-record-refused/stubbed/opened" ] \
+  && check "L3f a desktop record swapped for a FIFO after its lstat, which the stub saw, is opened without blocking and refused on the descriptor" PASS \
   || check "L3f FIFO swapped in after lstat ($L3F_OUT)" FAIL
 L3G_OUT="$(node -e '
   const fs = require("fs");
@@ -235,6 +244,197 @@ L3G_WANT="$(printf '%s\n' 'linked/resolved/root/stubbed' 'unresolved/own-record-
 [ "$L3G_OUT" = "$L3G_WANT" ] \
   && check "L3g a read that answers would-block is retried: three EAGAIN answers still resolve, and one that never ends leaves the session unresolved for its one retry instead of refusing it for good" PASS \
   || check "L3g would-block reads ($(printf '%s' "$L3G_OUT" | tr '\n' ';'))" FAIL
+L3H_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const core = require(process.argv[2]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-owner-")));
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const childHost = "local_33333333-3333-4333-8333-333333333333";
+    const parentHost = "local_44444444-4444-4444-8444-444444444444";
+    const childCli = "55555555-5555-4555-8555-555555555555";
+    const parentCli = "66666666-6666-4666-8666-666666666666";
+    const store = path.join(scratch, "store");
+    const accountDir = path.join(store, account);
+    const desk = path.join(accountDir, organization);
+    fs.mkdirSync(desk, { recursive: true });
+    const own = path.join(desk, childHost + ".json");
+    const parent = path.join(desk, parentHost + ".json");
+    fs.writeFileSync(parent, JSON.stringify({ sessionId: parentHost, cliSessionId: parentCli }));
+    fs.writeFileSync(own, JSON.stringify({ sessionId: childHost, cliSessionId: childCli, spawnedFrom: { sessionId: parentHost } }));
+    const records = path.join(scratch, "records");
+    const root = path.join(scratch, "root");
+    fs.mkdirSync(records);
+    fs.mkdirSync(root);
+    const record = path.join(records, core.sessionKey(parentCli) + ".json");
+    fs.writeFileSync(record, JSON.stringify({ schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, host: "claude", session_id_hash: core.sessionIdHash(parentCli), project_root: root }));
+    const env = { CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: store };
+    const realLstat = fs.lstatSync;
+    const realFstat = fs.fstatSync;
+    const realOpen = fs.openSync;
+    const foreign = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 });
+    const resolve = () => {
+      const v = m.resolveLinkedSession({ env, sessionId: childCli, pluginData: scratch, deps: { recordsDirectory: () => records } });
+      return v.kind + "/" + v.reason + "/" + (v.parentRoot === root ? "root" : "-");
+    };
+    const withMode = (target, bits) => {
+      const before = realLstat(target).mode & 0o7777;
+      fs.chmodSync(target, before | bits);
+      try {
+        return resolve();
+      } finally {
+        fs.chmodSync(target, before);
+      }
+    };
+    const withForeignLstat = (target) => {
+      let hits = 0;
+      fs.lstatSync = (file, ...rest) => {
+        const stat = realLstat(file, ...rest);
+        if (file !== target) return stat;
+        hits += 1;
+        return foreign(stat);
+      };
+      try {
+        return resolve() + "/" + (hits > 0 ? "stubbed" : "unstubbed");
+      } finally {
+        fs.lstatSync = realLstat;
+      }
+    };
+    const withForeignDescriptor = (target) => {
+      const descriptors = new Set();
+      let hits = 0;
+      fs.openSync = (file, ...rest) => {
+        const fd = realOpen(file, ...rest);
+        if (file === target) descriptors.add(fd);
+        return fd;
+      };
+      fs.fstatSync = (fd, ...rest) => {
+        const stat = realFstat(fd, ...rest);
+        if (!descriptors.has(fd)) return stat;
+        hits += 1;
+        return foreign(stat);
+      };
+      try {
+        return resolve() + "/" + (hits > 0 ? "stubbed" : "unstubbed");
+      } finally {
+        fs.openSync = realOpen;
+        fs.fstatSync = realFstat;
+      }
+    };
+    process.stdout.write([
+      resolve(),
+      withMode(store, 0o020),
+      withMode(store, 0o002),
+      withMode(accountDir, 0o020),
+      withMode(desk, 0o002),
+      withMode(own, 0o020),
+      withMode(own, 0o002),
+      withMode(parent, 0o020),
+      withMode(parent, 0o002),
+      withMode(root, 0o022),
+      withForeignLstat(store),
+      withForeignLstat(accountDir),
+      withForeignLstat(desk),
+      withForeignLstat(own),
+      withForeignLstat(parent),
+      withForeignDescriptor(own),
+      withForeignDescriptor(parent),
+      withMode(record, 0o020),
+      withMode(record, 0o002),
+      withForeignLstat(record),
+      withForeignDescriptor(record),
+      resolve(),
+    ].join("\n"));
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" "$CORE" 2>/dev/null)"
+L3H_WANT="$(printf '%s\n' 'linked/resolved/root' \
+  'none/no-session-store/-' 'none/no-session-store/-' 'none/no-session-store/-' 'none/no-session-store/-' \
+  'none/own-record-refused/-' 'none/own-record-refused/-' \
+  'linked/parent-record-unavailable/-' 'linked/parent-record-unavailable/-' \
+  'linked/resolved/root' \
+  'none/no-session-store/-/stubbed' 'none/no-session-store/-/stubbed' 'none/no-session-store/-/stubbed' \
+  'none/own-record-refused/-/stubbed' 'linked/parent-record-unavailable/-/stubbed' \
+  'none/own-record-refused/-/stubbed' 'linked/parent-record-unavailable/-/stubbed' \
+  'linked/parent-context-unavailable/-' 'linked/parent-context-unavailable/-' \
+  'linked/parent-context-unavailable/-/stubbed' 'linked/parent-context-unavailable/-/stubbed' \
+  'linked/resolved/root')"
+[ "$L3H_OUT" = "$L3H_WANT" ] \
+  && check "L3h a store, account or organization directory, an own or parent desktop record and the parent's Session Control record that grant group or other write, or that another account owns, even only on the opened descriptor, answer the existing outcomes, while a group-writable parent root and the private store still resolve" PASS \
+  || check "L3h owner and mode ($(printf '%s' "$L3H_OUT" | tr '\n' ';'))" FAIL
+L3I_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const core = require(process.argv[2]);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-win32-")));
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const getuid = process.getuid;
+  const realLstat = fs.lstatSync;
+  const realFstat = fs.fstatSync;
+  try {
+    const account = "11111111-1111-4111-8111-111111111111";
+    const organization = "22222222-2222-4222-8222-222222222222";
+    const childHost = "local_33333333-3333-4333-8333-333333333333";
+    const parentHost = "local_44444444-4444-4444-8444-444444444444";
+    const childCli = "55555555-5555-4555-8555-555555555555";
+    const parentCli = "66666666-6666-4666-8666-666666666666";
+    const store = path.join(scratch, "store");
+    const accountDir = path.join(store, account);
+    const desk = path.join(accountDir, organization);
+    fs.mkdirSync(desk, { recursive: true });
+    const own = path.join(desk, childHost + ".json");
+    const parent = path.join(desk, parentHost + ".json");
+    fs.writeFileSync(parent, JSON.stringify({ sessionId: parentHost, cliSessionId: parentCli }));
+    fs.writeFileSync(own, JSON.stringify({ sessionId: childHost, cliSessionId: childCli, spawnedFrom: { sessionId: parentHost } }));
+    const records = path.join(scratch, "records");
+    const root = path.join(scratch, "root");
+    fs.mkdirSync(records);
+    fs.mkdirSync(root);
+    const record = path.join(records, core.sessionKey(parentCli) + ".json");
+    fs.writeFileSync(record, JSON.stringify({ schema: core.SCHEMA, schema_version: core.SCHEMA_VERSION, host: "claude", session_id_hash: core.sessionIdHash(parentCli), project_root: root }));
+    for (const directory of [store, accountDir, desk]) fs.chmodSync(directory, 0o777);
+    for (const file of [own, parent, record]) fs.chmodSync(file, 0o666);
+    const env = { CLAUDE_CODE_HOST_SESSION_ID: childHost, CLAUDE_CODE_ACCOUNT_UUID: account, CLAUDE_CODE_ORGANIZATION_UUID: organization, ZENSU_CCD_STORE: store };
+    const foreign = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: stat.uid + 1 });
+    let hits = 0;
+    fs.lstatSync = (...args) => {
+      hits += 1;
+      return foreign(realLstat(...args));
+    };
+    fs.fstatSync = (...args) => {
+      hits += 1;
+      return foreign(realFstat(...args));
+    };
+    const resolve = () => {
+      const v = m.resolveLinkedSession({ env, platform: "linux", sessionId: childCli, pluginData: scratch, deps: { recordsDirectory: () => records } });
+      return v.kind + "/" + v.reason + "/" + (v.parentRoot === root ? "root" : "-");
+    };
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    process.getuid = undefined;
+    const windows = resolve();
+    Object.defineProperty(process, "platform", platform);
+    process.getuid = getuid;
+    const posix = resolve();
+    process.stdout.write([windows, posix, hits > 0 ? "stubbed" : "unstubbed"].join("\n"));
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    process.getuid = getuid;
+    fs.lstatSync = realLstat;
+    fs.fstatSync = realFstat;
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+' "$RESOLVER" "$CORE" 2>/dev/null)"
+L3I_WANT="$(printf '%s\n' 'linked/resolved/root' 'none/no-session-store/-' 'stubbed')"
+[ "$L3I_OUT" = "$L3I_WANT" ] \
+  && check "L3i with the host reported as win32 and no process.getuid, a world-writable store and records another account owns still resolve as before, and the same store refuses once the POSIX host is restored" PASS \
+  || check "L3i win32 arm ($(printf '%s' "$L3I_OUT" | tr '\n' ';'))" FAIL
 
 T="$(mktemp -d 2>/dev/null)" || T=""
 if [ -z "$T" ] || [ ! -d "$T" ]; then
@@ -817,5 +1017,40 @@ U_RUNS="$(resolver_runs)"
   && [ "$U_RUNS" = 1 ] && [ "$(lead_count "$U_PLAN")" = 0 ]; } \
   && check "L42 with the reminder off, the plan gate retries an unresolved lineage once, links it and dispatches on the inherited route" PASS \
   || check "L42 plan gate retry (linked=$(linked_state "$WT" "$U_CLI") runs=$U_RUNS)" FAIL
+
+echo "== Owner and mode: a desktop store another account can write is never read =="
+session "$WT" "$P_HOST"; GW_CLI="$CLI"; GW_HOST="$HOST"
+chmod g+w "$STORE"
+GW_OUT="$(export ZENSU_CCD_STORE="$STORE"; HOOK_HOME="$T/home-without-store"; remind "$WT" "$GW_CLI" "$GW_HOST" "add a function to foo.js")"
+chmod g-w "$STORE"
+session "$WT" "$P_HOST"; GP_CLI="$CLI"; GP_HOST="$HOST"
+GP_OUT="$(export ZENSU_CCD_STORE="$STORE"; HOOK_HOME="$T/home-without-store"; remind "$WT" "$GP_CLI" "$GP_HOST" "add a function to foo.js")"
+{ [ "$(last_field "$GW_OUT")" = "$ASK" ] && [ "$(linked_state "$WT" "$GW_CLI")" = none ] \
+  && [ "$(inherited_state "$WT" "$GW_CLI")" = none ] && [ "$(lead_count "$GW_OUT")" = 0 ] \
+  && [ "$(last_field "$GP_OUT")" = "$INHERITED" ] && [ "$(linked_state "$WT" "$GP_CLI")" = linked ]; } \
+  && check "L43 ZENSU_CCD_STORE naming a group-writable store answers none, with no note and nothing inherited, and the same store made private again inherits" PASS \
+  || check "L43 group-writable store (field='$(last_field "$GW_OUT")' linked=$(linked_state "$WT" "$GW_CLI") lead=$(lead_count "$GW_OUT") private='$(last_field "$GP_OUT")')" FAIL
+if [ "$(id -u)" != 0 ]; then
+  check "L44 desktop records another account owns (this host cannot create one: the suite does not run as root)" SKIP
+elif ! session "$WT" "$P_HOST"; then
+  check "L44 the root-run linked session's Session Control record could be registered" FAIL
+elif ! chown 65534 "$DESK/$HOST.json" 2>/dev/null; then
+  check "L44 desktop records another account owns (this host refuses a chown to another uid)" SKIP
+else
+  FO_CLI="$CLI"; FO_HOST="$HOST"
+  FO_OUT="$(remind "$WT" "$FO_CLI" "$FO_HOST" "add a function to foo.js")"
+  session "$WT" "$P_HOST"; FP_CLI="$CLI"; FP_HOST="$HOST"
+  chown 65534 "$DESK/$P_HOST.json"
+  FP_OUT="$(remind "$WT" "$FP_CLI" "$FP_HOST" "add a function to foo.js")"
+  chown "$(id -u)" "$DESK/$P_HOST.json"
+  session "$WT" "$P_HOST"; FR_CLI="$CLI"; FR_HOST="$HOST"
+  FR_OUT="$(remind "$WT" "$FR_CLI" "$FR_HOST" "add a function to foo.js")"
+  { [ "$(last_field "$FO_OUT")" = "$ASK" ] && [ "$(linked_state "$WT" "$FO_CLI")" = none ] && [ "$(lead_count "$FO_OUT")" = 0 ] \
+    && [ "$(last_field "$FP_OUT")" = "$ASK" ] && [ "$(linked_state "$WT" "$FP_CLI")" = linked ] \
+    && [ "$(inherited_state "$WT" "$FP_CLI")" = none ] && opens_with_lead "$FP_OUT" \
+    && [ "$(last_field "$FR_OUT")" = "$INHERITED" ]; } \
+    && check "L44 an own desktop record another account owns answers none, a parent record another account owns leaves the session linked, noted and uninherited, and the parent record back in the caller's hands passes build on again" PASS \
+    || check "L44 foreign-owned records (own='$(last_field "$FO_OUT")' linked=$(linked_state "$WT" "$FO_CLI") parent='$(last_field "$FP_OUT")' linked=$(linked_state "$WT" "$FP_CLI") restored='$(last_field "$FR_OUT")')" FAIL
+fi
 
 finish
