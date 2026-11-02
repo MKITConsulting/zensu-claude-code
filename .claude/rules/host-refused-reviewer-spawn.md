@@ -110,7 +110,7 @@ Ten things are coupled and must move together:
   `reviewer-spawn-denial-v1.js` cross-checks `DENIAL_MARKERS_SOURCE_BUILD` against
   its module header; P1bd1 pins the order clause. Its rows are held in step with
   `skills/doctor/SKILL.md` by P1be, the same drift pin P1qr applies to the reactive
-  rows — `docs/tdd-manager-workflow.md` §"The proactive counterpart, before any
+  rows — `docs/build-workflow.md` §"The proactive counterpart, before any
   chain wedges" is the third account and is NOT covered by that pin.
 - **Every row that INSTRUCTS a settings edit carries `SELF_PERMISSION_BAR`**, and
   all SIX call sites consume it — the exposure row, the reactive refused-spawn row,
@@ -189,7 +189,7 @@ Ten things are coupled and must move together:
   could-not-judge bullet and the unreadable-entry bullet write their own remedy in their own
   words. They are excluded because each accompanies a row whose wording the model is sent to
   read, so a reword of that row is what a maintainer notices; the refused-spawn bullet is a
-  member because it stands in for a string the model never sees rendered. `docs/tdd-manager-workflow.md` is
+  member because it stands in for a string the model never sees rendered. `docs/build-workflow.md` is
   narrative and outside the class. Without that discriminator the class grows until it stops
   being checkable, which is what an earlier wording of this paragraph did. P1be and P1qr each pin a doctor copy against
   the skill, and the routing suite pins the enforcer copy against itself — nothing
@@ -210,7 +210,7 @@ Ten things are coupled and must move together:
   A host with no per-user permission-rule file at all DROPS the check rather than
   repointing it — there is nothing to read. The accounts a port also owns are
   `skills/doctor/SKILL.md`'s `⚠️`/`✅ permissions:` bullets and its green-summary bound,
-  `docs/tdd-manager-workflow.md` §"The proactive counterpart", and the bullet above.
+  `docs/build-workflow.md` §"The proactive counterpart", and the bullet above.
   P1bh requires every suite that NAMES either doctor file to sandbox HOME or to
   carry an explicit `# zensu-doctor-home-exempt:` sentence — deliberately blunt,
   because its first version tried to recognise an execution and missed the one
@@ -574,11 +574,11 @@ reason — that row is read by the model too, so "user-facing" does not make it 
 Only the docs carry the fuller form.
 
 **Operator-facing accounts that must move with the markers, the block reason, and
-the note:** the host-refusal paragraph in `docs/tdd-manager-workflow.md`, the
+the note:** the host-refusal paragraph in `docs/build-workflow.md`, the
 refused-spawn row in `skills/doctor/SKILL.md`, and the `stop-chain-enforcer.sh` row
 in `docs/configuration.md`. The PROACTIVE check has three of its own, listed here
 so a maintainer navigating by this paragraph reaches them: §"The proactive
-counterpart, before any chain wedges" in `docs/tdd-manager-workflow.md`, the
+counterpart, before any chain wedges" in `docs/build-workflow.md`, the
 `⚠️`/`✅ permissions:` bullets plus the green-summary bound in `skills/doctor/SKILL.md`,
 and the two bullets above.
 
@@ -625,7 +625,7 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   leaving the verdict `none` and routing byte-identical — the correct fail-open
   direction for a diagnostic, and indistinguishable from "no refusal happened". The
   module first shipped in **v0.18.2**; a session on 0.18.1 or earlier gets the ordinary
-  `Resume the /zensu:tdd Phase 6 review sequence` directive on every Stop until the cap
+  `Resume the /zensu:build Phase 6 review sequence` directive on every Stop until the cap
   releases, and `/zensu:doctor` stays silent because no note is ever minted. Measured
   2026-08-22: three classifier-refused `zensu:code-reviewer` spawns, seven Stop
   interceptions, zero notes — and the shipped scanner run against that same transcript
@@ -640,9 +640,9 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   two earlier refusals scroll out of the window and the arm sanctions a retry again.
   Closing it means carrying the count in per-session state. The code comment beside the
   arm in `stop-chain-enforcer.sh` and the `**Known gap:**` clause in
-  `docs/tdd-manager-workflow.md`'s host-refusal paragraph are the other two carriers.
+  `docs/build-workflow.md`'s host-refusal paragraph are the other two carriers.
 - The verdict has no chain-generation lower bound. After a cap release and a fresh
-  `/zensu:tdd`, the newest reviewer result in the transcript is still the old refusal,
+  `/zensu:build`, the newest reviewer result in the transcript is still the old refusal,
   so the branch fires again before any new spawn is attempted. The reason text handles
   it by sanctioning exactly ONE further attempt when the user says they applied the
   rule; a generation bound (an arming ordinal in `options`) is the real fix and is not

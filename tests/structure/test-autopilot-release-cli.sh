@@ -503,7 +503,7 @@ if autopilot_begin_run release_tdd_run "$TDD_OWNER" "$A_TDD" >/dev/null 2>&1 \
     grep -qF '/zensu:autopilot-adopt' "$TMP/a17.err" && A17_OK=false
     grep -qF 'adopt the run with' "$TMP/a17.err" && A17_OK=false
     if [ "$A17_OK" = true ]; then
-      check "A17 the exit-7 remedy names no adoption route for a live inner TDD chain either" PASS
+      check "A17 the exit-7 remedy names no adoption route for a live inner build chain either" PASS
     else
       check "A17 exit-7 remedy at TDD_RUNNING (rc=$A17_RC, stderr=$(tr -d '\n' < "$TMP/a17.err" | cut -c1-140))" FAIL
     fi

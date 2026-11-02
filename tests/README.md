@@ -117,7 +117,7 @@ command takes unit files as arguments for a local check, for example
 | `tests/e2e/` | live | `code-reviewer` agent anti-loop guardrails |
 | `tests/e2e-plm/` | live | `zensu-plm` agent workflow + MCP tool sequencing |
 | `tests/e2e-skills/` | live | `zensu-help` · `plan-review` · `self-review` skills + `review-aspect` agent |
-| `tests/e2e-tdd/` | live | full `/zensu:tdd` cycle (RED→GREEN→review→self-review→done), real `node --test` |
+| `tests/e2e-tdd/` | live | full `/zensu:build` cycle (RED→GREEN→review→self-review→done), real `node --test` |
 | `tests/e2e-context-nudge/` | live | `user-prompt-context-nudge.sh` parsing a real `claude --print` session transcript (read→occupancy→threshold→`/compact` proposal) |
 | `tests/structure/test-tdd-full-cycle.sh` | deterministic | the same full cycle driven through the hooks (no API) |
 
@@ -166,7 +166,7 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
 The promptfoo/expect harnesses under `evals/tdd-manager/`, `evals/tdd-manager-pretool/`,
 and `evals/tdd-review-chain/` still target the pre-0.4.0 `zensu:tdd-manager` subagent
 (removed when TDD moved to the main thread). They are not part of the deterministic
-suite or `run-all.sh`; rewriting them to the main-thread `/zensu:tdd` model is pending.
+suite or `run-all.sh`; rewriting them to the main-thread `/zensu:build` model is pending.
 
 The automatic-context core contract runs first on `windows-shard-1` with a
 60-second cap. It uses one Node process and injected CLI execution; the POSIX

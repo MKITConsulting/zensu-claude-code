@@ -11,6 +11,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const RUN_ID = new RegExp(`^local_${UUID}$`);
 const CLI_SESSION_ID = new RegExp(`^${UUID}$`);
 const CONTINUATION_NAME = /^(cont-[0-9a-f]{8})(?:-[0-9]+)?$/;
+const PLAN_NAME = /^cont-[0-9a-f]{8}$/;
 const UNSAFE_VALUE = /[\u0000-\u001f\u007f-\u009f\p{Zl}\p{Zp}]/u;
 const MAX_ENVIRONMENT_ID = 128;
 
@@ -32,6 +33,7 @@ export const LINKED_WHY = Object.freeze({
   fork: 'a user fork starts only when the user names it in the plan answer',
   'ledger-unread': 'the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer',
   cap: `more than ${LINKED_START_CAP} linked sessions qualify, so it starts only when the user asks for it in a later message`,
+  unplanned: 'the plan answer did not name it, so it starts only when the user asks for it in a later message',
 });
 
 export const LINKED_CWD_WHY = Object.freeze({
@@ -104,6 +106,13 @@ export function linkedKind(spawnedFrom) {
 export function continuationName(run) {
   const id = runIdOf(run);
   return id ? `cont-${id.slice('local_'.length, 'local_'.length + 8)}` : null;
+}
+
+export function linkedStartNames(value) {
+  if (typeof value !== 'string') return null;
+  if (value === 'none') return [];
+  const names = value.split(',');
+  return names.every((name) => PLAN_NAME.test(name)) ? [...new Set(names)] : null;
 }
 
 function cutTitle(text) {
@@ -292,6 +301,7 @@ export function decideLinked(walk, options = {}) {
   const max = Number.isInteger(options.max) && options.max >= 0 ? options.max : LINKED_LIST_MAX;
   const checkout = typeof options.checkout === 'function' ? options.checkout : null;
   const sameRepository = options.sameRepository === true || options.sameRepository === false ? options.sameRepository : null;
+  const planned = Array.isArray(options.planned) ? new Set(options.planned) : null;
   const confirmed = new Set();
   for (const edge of edges) {
     if (edge && edge.confidence === 'confirmed' && edge.from && typeof edge.from.sessionId === 'string') confirmed.add(edge.from.sessionId);
@@ -320,15 +330,13 @@ export function decideLinked(walk, options = {}) {
     let why = keptWhy(facts);
     let decision = why ? 'stays' : null;
     if (!decision) {
-      if (!entry.folder) {
+      const conditional = !entry.folder ? 'place' : (entry.kind === 'fork' ? 'fork' : (continued === null ? 'ledger-unread' : null));
+      if (planned && !planned.has(entry.name)) {
+        decision = 'later';
+        why = 'unplanned';
+      } else if (!planned && conditional) {
         decision = 'if-named';
-        why = 'place';
-      } else if (entry.kind === 'fork') {
-        decision = 'if-named';
-        why = 'fork';
-      } else if (continued === null) {
-        decision = 'if-named';
-        why = 'ledger-unread';
+        why = conditional;
       } else if (starts < cap) {
         decision = 'start';
         starts += 1;
@@ -353,19 +361,22 @@ export function decideLinked(walk, options = {}) {
       preset,
       ssh: entry.ssh,
       continued,
+      planned: planned ? planned.has(entry.name) : null,
       decision,
       why,
       cwdWhy,
       start: decision === 'stays' ? null : startCall(entry, cwdWhy),
     };
   });
+  const listed = sessions.slice(0, max);
   return {
     sameRepository,
     total: sessions.length,
     truncated: sessions.length > max,
     archived: walk.archived,
     detached: walk.detached,
-    sessions: sessions.slice(0, max),
+    plan: planned ? { names: [...planned], unlisted: [...planned].filter((name) => !listed.some((entry) => entry.name === name)) } : null,
+    sessions: listed,
   };
 }
 

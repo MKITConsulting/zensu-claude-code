@@ -22,8 +22,9 @@ paths:
 
 # PowerShell Tool Coverage (`hooks/lib/powershell-command-v1.js` + `shell-tool-coverage-v1.js`)
 
-Claude Code has two shell tools, `Bash` and `PowerShell`. Both shell groups of `hooks/hooks.json`
-match `Bash|PowerShell`, so every hook that reads a shell command also sees a PowerShell command.
+Claude Code has two shell tools, `Bash` and `PowerShell`. Every check of the hook dispatcher that
+reads a shell command carries the `Bash|PowerShell` matcher in `DISPATCHED_CHECKS`
+(`hooks/lib/hook-registration-v1.js`), so it also sees a PowerShell command.
 Each one judges PowerShell text where the judgment is exact and refuses what it cannot judge. **No
 gate lets PowerShell text it cannot judge pass in silence**; a refusal tells the main thread to use
 the Bash tool (or Edit and Write) and a subagent to report to the main thread.
@@ -125,8 +126,9 @@ shell is refused.
 
 ## Steering and diagnostics
 
-`shellCoverage(manifest)` walks the tool events through `hostMatcherCovers`, the one reader of the
-host's matcher rule. While the tool may run and gaps exist, the banner warns above the
+`shellCoverage(manifest)` walks the tool events through `hookEntries` and `entryMatcherCovers`,
+which read a dispatcher registration as its checks and every matcher through `hostMatcherCovers`, the
+one reader of the host's matcher rule. While the tool may run and gaps exist, the banner warns above the
 `hooks.sessionBanner` gate and the doctor's `shell tools:` row warns; a gap while the tool is off
 or absent is reported without a warning. Without gaps, the banner prints `STEER` below the gate
 while the tool may run, and the row checks the analyzer only then: it is green only when
@@ -135,9 +137,11 @@ green row would be a false all-clear.
 
 ## Coupled sites
 
-- The matcher spelling: both groups in `hooks/hooks.json`, `CONSENT_MATCHER` and `CONSENT_TOOLS`,
-  B3, W4, P1, P1b, R0c, V3, the `registered_check` of `tests/e2e-source-write-gate/run.sh`, P1vl7, and
-  `bashGroup` in `evals/session-control/lib/upgrade-hook-contract.js`. Matcher reads go through
+- The matcher spelling: the shell checks of `DISPATCHED_CHECKS`, `CONSENT_MATCHER` and
+  `CONSENT_TOOLS`, B3, W4, P1, P1b, R0c, V3, the `registered_check` of
+  `tests/e2e-source-write-gate/run.sh`, P1vl7, `tests/structure/hook-dispatch-v1.test.js`, and
+  `bashEntries` in `evals/session-control/lib/upgrade-hook-contract.js` with the synthetic
+  registries of its unit file and of `upgrade-provider-selftest.js`. Matcher reads go through
   `hostMatcherCovers`; never compare the matcher string.
 - The sibling loads: `bash-source-write-parse.js` requires the analyzer lazily and only for a
   PowerShell payload; `pre-bash-zensu-gate.sh` loads it through `cd -P` into its own `hooks/lib`

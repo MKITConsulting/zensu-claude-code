@@ -1150,7 +1150,7 @@ if node -e '
   const ctx = (out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext) || "";
   process.exit(ctx.includes("rebuilt automatically at SessionStart")
     && ctx.includes("loss, not a restore")
-    && ctx.includes("/zensu:tdd")
+    && ctx.includes("/zensu:build")
     && ctx.includes("/zensu:doctor") ? 0 : 1);
 ' "$TMP/heal.out"; then
   check "the self-heal discloses the rebuild on the emitted SessionStart context" PASS

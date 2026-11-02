@@ -195,7 +195,7 @@ run_test "$EVAL_DIR/test-changelog-coverage.sh"          "test-changelog-coverag
 run_test "$EVAL_DIR/test-changelog-round3-accuracy.sh"   "test-changelog-round3-accuracy.sh"
 
 echo "" | tee -a "$REPORT"
-echo "▸ Main-thread TDD chain smoke test (0.4.0 migration)" | tee -a "$REPORT"
+echo "▸ Main-thread build chain smoke test (0.4.0 migration)" | tee -a "$REPORT"
 
 run_test "$PLUGIN_DIR/tests/structure/test-smoke-main-thread-chain.sh" "test-smoke-main-thread-chain.sh"
 

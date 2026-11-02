@@ -74,8 +74,8 @@ the unit file passes a clean environment. `gh` is a PATH shim that answers canne
 suite drives real chains to `deferred-ci`, through a mid-chain switch in both directions, and
 through the helper's repo and session verbs.
 
-**Coupled sites that move together:** `skills/tdd/SKILL.md` Phase 0 step 2 and the section
-"Full Suite in CI (mode-gated deltas)" in `skills/tdd/references/modes.md`; the CI fix-round
+**Coupled sites that move together:** `skills/build/SKILL.md` Phase 0 step 2 and the section
+"Full Suite in CI (mode-gated deltas)" in `skills/build/references/modes.md`; the CI fix-round
 paragraph and the legend in `skills/self-review/SKILL.md`; `CLOSE_PASS_SUITE_CI`,
 `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP`, `FULL_SUITE_ROUND_NOTE` and the `deferred-ci` legend
 entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.sh` counts
@@ -83,8 +83,15 @@ entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.
 `test-full-suite-ci.sh` C10, C22 and C23 refuse it in a CI chain's directives, so the CI variant
 must not add one; `docs/configuration.md` §"Full Suite in CI" and
 its three keys; `docs/gates.md` CI mode; discipline patch 12 in
-`docs/tdd-manager-workflow.md`; `config.example.json`; the README skills table and count; the
+`docs/build-workflow.md`; `config.example.json`; the README skills table and count; the
 skills list in `.claude-plugin/plugin.json`.
+
+**R8k reads these modules too.** R8k in `tests/structure/test-delivery-route.sh` fails any file
+under `hooks/` other than `zensu-config.sh` that spells a marker stem, `full-suite` included,
+followed by `-` and then a character that is not a letter or digit, or by the end of the line,
+because that is how a marker leaf is spelled outside the shared writer. A name in these modules
+that is not the session marker keeps a letter after that dash, as `full-suite-clone-v1` and
+`full-suite-snapshot-v1` do.
 
 **Version: `patch`.** No hook added, removed or renamed, no matcher change, no
 `permissionDecision`, `RECORD_KEYS` unchanged, verdict states never persisted, and the config

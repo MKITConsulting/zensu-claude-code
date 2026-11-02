@@ -78,6 +78,10 @@ function fanoutPath(f, agentId, key = SESSION) {
   return path.join(f.data, ...br.STORE_SEGMENTS, br.FANOUT_SEGMENT, key, `${agentId}.json`);
 }
 
+function arrivalPath(f, key = SESSION) {
+  return path.join(f.data, ...br.STORE_SEGMENTS, br.ARRIVALS_SEGMENT, `${key}.json`);
+}
+
 function standalonePrompt(ticket = TICKET) {
   return ['PRE-MERGED FINDINGS (fan-out)', `REVIEW-TICKET: ${ticket}`, 'REVIEW PACKET v1', 'changed_files: hooks/a.sh'].join('\n');
 }
@@ -136,6 +140,10 @@ function notification(agentId = AGENT, status = 'completed') {
 
 function prompt(text) {
   return { hook_event_name: 'UserPromptSubmit', session_id: 'background-review-unit-session', prompt: text };
+}
+
+function arrivalPrompt(text, sessionId = SESSION) {
+  return { hook_event_name: 'UserPromptSubmit', session_id: sessionId, prompt: text };
 }
 
 function recorded(f, extra = {}) {
@@ -250,6 +258,7 @@ test('a hand-back from the pending reviewer claims without retiring the record, 
   assert.deepEqual(JSON.parse(br.matchLine(first)), {
     verdict: 'claim',
     arrival: 'handback',
+    source: 'prompt',
     agentId: AGENT,
     ticket: TICKET,
     prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${TICKET}`,
@@ -564,4 +573,209 @@ test('validateRecord and validateFanout reject a foreign shape', () => {
   assert.equal(br.validateFanout(entry, { agentId: JUDGE_AGENT }), 'fanout agent mismatch');
   assert.equal(br.validateFanout(entry, { sessionKey: OTHER_SESSION }), 'fanout session mismatch');
   assert.equal(br.validateFanout({ ...entry, launched_at_ms: 1.5 }), 'fanout launch time');
+});
+
+test('arrive notes a completed arrival of the pending consume reviewer once, at 0600 with an exact key set', () => {
+  const f = fixture();
+  recorded(f);
+  const first = br.noteArrival(arrivalPrompt(handback()), options(f));
+  assert.deepEqual(first, { pending: true, agentId: AGENT, source: 'prompt', retired: 0 });
+  assert.equal(br.arriveLine(first), `pending agent=${AGENT} source=prompt retired=0`);
+  const file = arrivalPath(f);
+  const note = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(Object.keys(note).sort(), [...br.ARRIVAL_KEYS].sort());
+  assert.deepEqual(note, { schema: br.SCHEMA, session_key: SESSION, agent_id: AGENT, ticket: TICKET, arrival: 'handback', arrived_at_ms: BASE, holds: 0 });
+  assert.equal(br.validateArrival(note, { sessionKey: SESSION }), null);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const text = fs.readFileSync(file, 'utf8');
+  const again = br.noteArrival(arrivalPrompt(notification()), options(f, { now: BASE + MINUTE }));
+  assert.deepEqual(again, { pending: true, agentId: AGENT, source: 'prompt', retired: 0 });
+  assert.equal(fs.readFileSync(file, 'utf8'), text);
+  assert.deepEqual(br.noteArrival(arrivalPrompt('please review the change'), options(f)), { pending: true, agentId: AGENT, source: 'note', retired: 0 });
+  assert.equal(fs.existsSync(recordPath(f)), true);
+});
+
+test('arrive stays idle on a payload that is not the main thread\'s prompt or without a pending arrival, and retires every fan-out entry the prompt names', () => {
+  const f = fixture();
+  assert.deepEqual(br.noteArrival(arrivalPrompt(handback()), options(f)), { pending: false, reason: 'absent', retired: 0 });
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  recorded(f);
+  const subagent = { agent_id: OTHER_AGENT, agent_type: 'general-purpose' };
+  assert.deepEqual(br.noteArrival({ ...arrivalPrompt(handback()), ...subagent }, options(f)), { pending: false, reason: 'principal', retired: 0 });
+  assert.deepEqual(br.noteArrival({ ...arrivalPrompt(handback(ASPECT_AGENT)), agent_type: 'general-purpose' }, options(f)), { pending: false, reason: 'principal', retired: 0 });
+  assert.deepEqual(br.noteArrival({ ...arrivalPrompt(handback()), hook_event_name: 'Stop' }, options(f)), { pending: false, reason: 'principal', retired: 0 });
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.deepEqual(br.noteArrival(arrivalPrompt('please review the change'), options(f)), { pending: false, reason: 'no-arrival', retired: 0 });
+  assert.deepEqual(br.noteArrival(arrivalPrompt(handback(OTHER_AGENT)), options(f)), { pending: false, reason: 'no-arrival', retired: 0 });
+  assert.deepEqual(br.noteArrival(arrivalPrompt(handback(ASPECT_AGENT)), options(f)), { pending: false, reason: 'no-arrival', retired: 1 });
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
+  assert.deepEqual(br.noteArrival(arrivalPrompt(handback(), OTHER_SESSION), options(f)), { pending: false, reason: 'absent', retired: 0 });
+  assert.deepEqual(br.noteArrival({ hook_event_name: 'UserPromptSubmit', session_id: SESSION }, options(f)), { pending: false, reason: 'prompt', retired: 0 });
+  assert.deepEqual(br.noteArrival({ hook_event_name: 'UserPromptSubmit', prompt: handback() }, options(f)), { pending: false, reason: 'session', retired: 0 });
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  const ended = br.noteArrival(arrivalPrompt(notification(AGENT, 'failed')), options(f));
+  assert.deepEqual(ended, { pending: true, agentId: AGENT, source: 'prompt', retired: 0 });
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.equal(br.arriveLine({ pending: false, reason: 'no-arrival', retired: 0 }), 'idle reason=no-arrival retired=0');
+});
+
+test('match claims from a held note when the prompt carries no arrival of its own, and the prompt arrival goes first', () => {
+  const f = fixture();
+  recorded(f);
+  assert.deepEqual(br.matchArrival(prompt(handback()), options(f, { recovery: true })), { verdict: 'none', reason: 'no-arrival', retired: 0 });
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  const fromNote = br.matchArrival(prompt('please review the change'), options(f));
+  assert.equal(fromNote.verdict, 'claim');
+  assert.equal(fromNote.source, 'note');
+  assert.equal(fromNote.arrival, 'handback');
+  assert.equal(JSON.parse(br.matchLine(fromNote)).source, 'note');
+  const fromPrompt = br.matchArrival(prompt(notification()), options(f));
+  assert.equal(fromPrompt.source, 'prompt');
+  assert.equal(fromPrompt.arrival, 'notification');
+  const outranked = br.matchArrival(prompt(notification(AGENT, 'failed')), options(f));
+  assert.equal(outranked.verdict, 'claim');
+  assert.equal(outranked.source, 'note');
+  const recovered = br.matchArrival({ hook_event_name: 'Stop', session_id: SESSION }, options(f, { recovery: true }));
+  assert.equal(recovered.verdict, 'claim');
+  assert.equal(recovered.source, 'note');
+  assert.deepEqual(br.matchArrival({ hook_event_name: 'Stop', session_id: SESSION }, options(f)), { verdict: 'none', reason: 'prompt', retired: 0 });
+  assert.equal(fs.existsSync(recordPath(f)), true);
+  assert.equal(fs.existsSync(arrivalPath(f)), true);
+});
+
+test('retire and a stale ticket remove the note together with the record', () => {
+  const f = fixture();
+  recorded(f);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  assert.deepEqual(br.retireRecord(options(f, { agentId: OTHER_AGENT })), { retired: false, reason: 'other-agent' });
+  assert.equal(fs.existsSync(arrivalPath(f)), true);
+  assert.deepEqual(br.retireRecord(options(f, { agentId: AGENT })), { retired: true });
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.equal(fs.existsSync(recordPath(f)), false);
+  recorded(f);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  writeState(f.stateFile, { reviewTicketConsumed: true, reviewRound: 1 });
+  assert.deepEqual(br.matchArrival(prompt('please review the change'), options(f)), { verdict: 'none', reason: 'stale-ticket', retired: 0 });
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.equal(fs.existsSync(recordPath(f)), false);
+});
+
+test('a note without its record, for another agent or ticket, or of a foreign shape is removed, and a new launch drops the old note', () => {
+  const f = fixture();
+  recorded(f);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  const file = arrivalPath(f);
+  const note = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.unlinkSync(recordPath(f));
+  assert.deepEqual(br.noteArrival(arrivalPrompt('please review the change'), options(f)), { pending: false, reason: 'absent', retired: 0 });
+  assert.equal(fs.existsSync(file), false);
+  recorded(f);
+  for (const variant of [{ ...note, agent_id: OTHER_AGENT }, { ...note, ticket: OTHER_TICKET }, { ...note, extra: 1 }, 'not json']) {
+    fs.writeFileSync(file, typeof variant === 'string' ? variant : JSON.stringify(variant));
+    const label = JSON.stringify(variant);
+    assert.deepEqual(br.matchArrival(prompt('please review the change'), options(f)), { verdict: 'none', reason: 'no-arrival', retired: 0 }, label);
+    assert.equal(fs.existsSync(file), false, label);
+  }
+  fs.writeFileSync(file, JSON.stringify(note));
+  recorded(f, { agentId: OTHER_AGENT });
+  assert.equal(fs.existsSync(file), false);
+});
+
+test('recording sweeps idle notes of other sessions, and a symlinked note never claims', { skip: process.platform === 'win32' }, () => {
+  const f = fixture();
+  recorded(f);
+  const arrivals = path.dirname(arrivalPath(f));
+  const idle = path.join(arrivals, `${OTHER_SESSION}.json`);
+  fs.writeFileSync(idle, '{}');
+  const old = new Date(BASE - 25 * 60 * MINUTE);
+  fs.utimesSync(idle, old, old);
+  recorded(f);
+  assert.equal(fs.existsSync(idle), false);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  const file = arrivalPath(f);
+  const real = path.join(arrivals, 'elsewhere.json');
+  fs.renameSync(file, real);
+  fs.symlinkSync(real, file);
+  assert.deepEqual(br.matchArrival(prompt('please review the change'), options(f)), { verdict: 'none', reason: 'no-arrival', retired: 0 });
+  assert.equal(fs.lstatSync(file).isSymbolicLink(), true);
+});
+
+test('the CLI answers arrive from the payload session and match reads ZENSU_BR_RECOVERY', () => {
+  const f = fixture();
+  recorded(f);
+  const env = { ...process.env, ZENSU_BR_PLUGIN_DATA: f.data, ZENSU_BR_SESSION_KEY: SESSION, ZENSU_BR_STATE_FILE: f.stateFile };
+  const run = (args, input, extra = {}) => spawnSync(process.execPath, [MODULE, ...args], { env: { ...env, ...extra }, input, encoding: 'utf8' });
+  const quiet = run(['arrive'], JSON.stringify(arrivalPrompt('a typed prompt')));
+  assert.equal(quiet.status, 0);
+  assert.equal(quiet.stdout, 'idle reason=no-arrival retired=0\n');
+  const pending = run(['arrive'], JSON.stringify(arrivalPrompt(handback())));
+  assert.equal(pending.status, 0);
+  assert.equal(pending.stdout, `pending agent=${AGENT} source=prompt retired=0\n`);
+  assert.equal(fs.existsSync(arrivalPath(f)), true);
+  assert.equal(run(['arrive'], 'not json').stdout, 'idle reason=payload retired=0\n');
+  const stop = JSON.stringify({ hook_event_name: 'Stop', session_id: SESSION });
+  assert.equal(JSON.parse(run(['match'], stop, { ZENSU_BR_RECOVERY: '1' }).stdout).source, 'note');
+  assert.equal(JSON.parse(run(['match'], stop).stdout).reason, 'prompt');
+});
+
+test('defer counts the Stops that hold a pending claim, and a spent count or an expired record retires the pair', () => {
+  const f = fixture();
+  const max = br.LIMITS.maxArrivalHolds;
+  recorded(f);
+  assert.deepEqual(br.deferArrival(options(f, { held: true })), { deferred: false, reason: 'no-arrival' });
+  assert.equal(fs.existsSync(recordPath(f)), true);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  const released = br.deferArrival(options(f));
+  assert.deepEqual(released, { deferred: true, held: false, holds: 0, maxHolds: max });
+  assert.equal(br.deferLine(released), 'release');
+  for (let count = 1; count <= max; count += 1) {
+    const result = br.deferArrival(options(f, { held: true }));
+    assert.deepEqual(result, { deferred: true, held: true, holds: count, maxHolds: max });
+    assert.equal(br.deferLine(result), `hold count=${count} of=${max}`);
+    const note = JSON.parse(fs.readFileSync(arrivalPath(f), 'utf8'));
+    assert.equal(note.holds, count);
+    assert.equal(br.validateArrival(note, { sessionKey: SESSION }), null);
+  }
+  assert.equal(br.deferLine(br.deferArrival(options(f))), 'release');
+  const spent = br.deferArrival(options(f, { held: true }));
+  assert.deepEqual(spent, { deferred: false, reason: 'holds', spent: true });
+  assert.equal(br.deferLine(spent), 'spent reason=holds');
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.equal(fs.existsSync(recordPath(f)), false);
+  assert.deepEqual(br.deferArrival(options(f, { held: true })), { deferred: false, reason: 'absent' });
+  recorded(f);
+  br.noteArrival(arrivalPrompt(handback()), options(f));
+  assert.equal(br.deferArrival(options(f, { now: BASE + br.LIMITS.waitTtlMs - 1 })).deferred, true);
+  const expired = br.deferArrival(options(f, { now: BASE + br.LIMITS.waitTtlMs }));
+  assert.deepEqual(expired, { deferred: false, reason: 'expired', spent: true });
+  assert.equal(br.deferLine(expired), 'spent reason=expired');
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+  assert.equal(fs.existsSync(recordPath(f)), false);
+  assert.equal(br.deferLine({ deferred: false, reason: 'store' }), 'idle reason=store');
+  const now = Date.now();
+  recorded(f, { now });
+  br.noteArrival(arrivalPrompt(handback()), options(f, { now }));
+  const env = { ...process.env, ZENSU_BR_PLUGIN_DATA: f.data, ZENSU_BR_SESSION_KEY: SESSION };
+  const run = (extra = {}) => spawnSync(process.execPath, [MODULE, 'defer'], { env: { ...env, ...extra }, input: '', encoding: 'utf8' });
+  assert.equal(run({ ZENSU_BR_HELD: '1' }).stdout, `hold count=1 of=${max}\n`);
+  assert.equal(run().stdout, 'release\n');
+  assert.equal(run({ ZENSU_BR_SESSION_KEY: 'not-a-key' }).stdout, 'idle reason=fault\n');
+});
+
+test('validateArrival rejects a foreign shape', () => {
+  const note = { schema: br.SCHEMA, session_key: SESSION, agent_id: AGENT, ticket: TICKET, arrival: 'handback', arrived_at_ms: BASE, holds: 0 };
+  assert.equal(br.validateArrival(note, { sessionKey: SESSION }), null);
+  assert.equal(br.validateArrival({ ...note, extra: 1 }), 'arrival keys');
+  assert.equal(br.validateArrival({ ...note, schema: 'other' }), 'arrival schema');
+  assert.equal(br.validateArrival(note, { sessionKey: OTHER_SESSION }), 'arrival session mismatch');
+  assert.equal(br.validateArrival({ ...note, agent_id: '../x' }), 'arrival agent id');
+  assert.equal(br.validateArrival({ ...note, ticket: 'bad ticket' }), 'arrival ticket');
+  assert.equal(br.validateArrival({ ...note, arrival: 'ended' }), 'arrival kind');
+  assert.equal(br.validateArrival({ ...note, arrived_at_ms: -1 }), 'arrival time');
+  assert.equal(br.validateArrival({ ...note, holds: -1 }), 'arrival holds');
+  assert.equal(br.validateArrival({ ...note, holds: 1.5 }), 'arrival holds');
+  const { holds, ...withoutHolds } = note;
+  assert.equal(holds, 0);
+  assert.equal(br.validateArrival(withoutHolds), 'arrival keys');
 });

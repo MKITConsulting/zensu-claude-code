@@ -1,4 +1,4 @@
-# TDD Plan: {Feature Title}
+# Zensu Plan: {Feature Title}
 
 <!--
 Authoring rules — this file is written to be COMMITTED. Consuming repos keep
@@ -12,7 +12,7 @@ Authoring rules — this file is written to be COMMITTED. Consuming repos keep
 
 ## Context
 {Spec verbatim}
-**Approach**: Strict Red/Green TDD | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
+**Approach**: {"Strict Red/Green TDD" or "Vanilla implementation (strict TDD discipline not in effect for this chain)"} | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
 
 ## Requirements
 | ID | Requirement | Source |

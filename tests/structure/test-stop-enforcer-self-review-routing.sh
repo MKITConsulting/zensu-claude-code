@@ -5,7 +5,7 @@
 #   chainDone                                 -> allow (self-review owns the terminus)
 #   selfReview later disabled + codeReviewDone -> still force the frozen self-review handoff
 #   codeReviewDone + unbindable consumed ticket -> block on the repair branch, never a terminus,
-#                                                and a recovery that can actually bind (/zensu:tdd,
+#                                                and a recovery that can actually bind (/zensu:build,
 #                                                not /zensu:reset-review-limit)
 #   !codeReviewDone + the host refused the spawn -> block naming the permission layer and the
 #                                                permissions.allow rule, never repeating the
@@ -289,7 +289,7 @@ else
 fi
 if printf '%s' "$REASON6" | grep -qF '/zensu:reset-review-limit cannot repair this state' \
   && printf '%s' "$REASON6" | grep -qF 'rebinds a RETAINED consumed ticket' \
-  && printf '%s' "$REASON6" | grep -qF 'Re-enter /zensu:tdd for the current task' \
+  && printf '%s' "$REASON6" | grep -qF 'Re-enter /zensu:build for the current task' \
   && printf '%s' "$REASON6" | grep -qF "resets this session's review ticket, round counter, and chain flags"; then
   check "T12 repair branch names a recovery that can actually bind (not reset-review-limit)" PASS
 else
@@ -337,7 +337,7 @@ REASON7="$(printf '%s' "$OUT7" | reason)"
 if [ "$(printf '%s' "$OUT7" | decision)" = "block" ] \
   && printf '%s' "$REASON7" | grep -qF 'refused by the HOST permission layer, not by a Zensu gate' \
   && printf '%s' "$REASON7" | grep -qF 'auto mode classifier' \
-  && ! printf '%s' "$REASON7" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence'; then
+  && ! printf '%s' "$REASON7" | grep -qF 'Resume the /zensu:build Phase 6 review sequence'; then
   check "T13 host-refused reviewer spawn -> diagnose the permission layer, not repeat the spawn" PASS
 else
   check "T13 host-refused reviewer spawn -> diagnose the permission layer, not repeat the spawn" FAIL
@@ -396,7 +396,7 @@ OUT8="$(stop_run '{"session_id":"'"$SID7_RAW"'","transcript_path":"'"$TRANSCRIPT
 REASON8="$(printf '%s' "$OUT8" | reason)"
 if [ "$PRE18" = "present" ] \
   && [ "$(printf '%s' "$OUT8" | decision)" = "block" ] \
-  && printf '%s' "$REASON8" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON8" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && ! printf '%s' "$REASON8" | grep -qF 'refused by the HOST permission layer' \
   && [ ! -f "$SIDECAR7" ]; then
   check "T18 a later successful spawn restores the ordinary directive and clears the sidecar" PASS
@@ -408,9 +408,9 @@ OUT9="$(stop_run '{"session_id":"'"$SID7_RAW"'","transcript_path":"'"$TRANSCRIPT
 REASON9="$(printf '%s' "$OUT9" | reason)"
 OUT10="$(stop_run '{"session_id":"'"$SID7_RAW"'"}')"
 REASON10="$(printf '%s' "$OUT10" | reason)"
-if printf '%s' "$REASON9" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+if printf '%s' "$REASON9" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && ! printf '%s' "$REASON9" | grep -qF 'refused by the HOST permission layer' \
-  && printf '%s' "$REASON10" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON10" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && ! printf '%s' "$REASON10" | grep -qF 'refused by the HOST permission layer'; then
   check "T19 quoted prose and a payload without transcript_path both keep the ordinary directive" PASS
 else
@@ -449,7 +449,7 @@ QUOTING_EOF
 # would destroy it on every such Stop with the rest of this suite green.
 OUT11b="$(stop_run '{"session_id":"'"$SID7_RAW"'","transcript_path":"'"$STATE_DIR"'/no-such-transcript.jsonl"}')"
 REASON11b="$(printf '%s' "$OUT11b" | reason)"
-if printf '%s' "$REASON11b" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+if printf '%s' "$REASON11b" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && [ -f "$SIDECAR7" ]; then
   check "T21a an unreadable transcript keeps the ordinary directive and leaves the note standing" PASS
 else
@@ -460,7 +460,7 @@ PRE22="absent"; [ -f "$SIDECAR7" ] && PRE22="present"
 OUT12="$(stop_run '{"session_id":"'"$SID7_RAW"'","transcript_path":"'"$TRANSCRIPT_QUOTING"'"}')"
 REASON12="$(printf '%s' "$OUT12" | reason)"
 if [ "$PRE22" = "present" ] \
-  && printf '%s' "$REASON12" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON12" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && ! printf '%s' "$REASON12" | grep -qF 'refused by the HOST permission layer' \
   && [ ! -f "$SIDECAR7" ]; then
   check "T22 a successful reviewer result quoting the denial literal is not a refusal" PASS
@@ -503,7 +503,7 @@ if [ "$(printf '%s' "$OUT7B" | decision)" = "block" ] \
   && printf '%s' "$REASON7B" | grep -qF 'refused by the HOST permission layer, not by a Zensu gate' \
   && printf '%s' "$REASON7B" | grep -qF 'auto mode classifier' \
   && printf '%s' "$REASON7B" | grep -qF '"Agent(zensu:code-reviewer)" to permissions.allow' \
-  && ! printf '%s' "$REASON7B" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence'; then
+  && ! printf '%s' "$REASON7B" | grep -qF 'Resume the /zensu:build Phase 6 review sequence'; then
   check "T36 the real 2.1.237 host refusal routes to the denial branch" PASS
 else
   check "T36 the real 2.1.237 host refusal routes to the denial branch" FAIL
@@ -548,7 +548,7 @@ fi
 # T38-T41 pin ZENSU_REVIEW_SPAWN_IN_SCOPE (T41 covers the operator account that
 # names it). Without them the sentence is invisible to
 # every check in this file: each reason assertion greps ONE clause, and the resume
-# discriminator ('Resume the /zensu:tdd Phase 6 review sequence') survives the
+# discriminator ('Resume the /zensu:build Phase 6 review sequence') survives the
 # sentence's removal, so deleting it changed no verdict. T39's negative is the arm
 # that matters — the host-refusal branch must NOT carry it, and T37's own negative
 # needle cannot see that because the exhausted arm never held the phrase it greps.
@@ -653,7 +653,7 @@ IN_SCOPE_CLAUSE_DELEGATE="$(occ '${IN_SCOPE_CLAUSE}' "$IN_SCOPE_DELEGATE_FILE")"
 # The scanned roots are enumerated at the scan itself, a few lines below.
 IN_SCOPE_REDECL="$(( $(grep -cE '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$STOP" || true) + $(grep -cE '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_DELEGATE_FILE" || true) ))"
 # `agents/` and `templates/` were silently out of scope, and both ship model-facing
-# prose in this repo (agents/*.md frontmatter and bodies, templates/tdd-plan.md,
+# prose in this repo (agents/*.md frontmatter and bodies, templates/zensu-plan.md,
 # templates/pr-body.md, templates/autopilot-pr-body.md) — the file class most likely to
 # attract a verbatim copy of a directive paragraph.
 # `tests/` stays carved out: this file legitimately holds the needle.
@@ -675,7 +675,7 @@ if [ "$IN_SCOPE_DEF" = "1" ] && [ "$IN_SCOPE_STOP" = "1" ] && [ "$IN_SCOPE_DELEG
   && printf '%s' "$IN_SCOPE_LINE" | grep -qF 'a host permission refusal is still a refusal."' \
   && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF ':-' \
   && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF 'refused by the HOST permission layer' \
-  && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence'; then
+  && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF 'Resume the /zensu:build Phase 6 review sequence'; then
   check "T40 one owner, three consumers, no redeclaration or hand-copy, and no borrowed discriminator" PASS
 else
   # Ten conjuncts under one label told the reader nothing about WHICH failed — a
@@ -693,7 +693,7 @@ fi
 # coupling. Each needle is distinctive enough to survive a reword of its surrounding
 # paragraph and specific enough to fail on deletion.
 if grep -qF 'scroll out and the sanction' "$STOP" \
-  && grep -qF 'the withdrawal is scoped to the scanned transcript tail' "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; then
+  && grep -qF 'the withdrawal is scoped to the scanned transcript tail' "$PLUGIN_DIR/docs/build-workflow.md"; then
   check "T49 both carriers of the windowed-REVIEWER_DENIALS bound are still present" PASS
 else
   check "T49 both carriers of the windowed-REVIEWER_DENIALS bound are still present" FAIL
@@ -712,7 +712,7 @@ fi
 # an error whose text matched no known refusal literal — withholds now, because that
 # is the only verdict in which a refusal was actually observed.
 if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
-  && printf '%s' "$REASON11b" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON11b" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && printf '%s' "$REASON11b" | grep -qF "$IN_SCOPE_NEEDLE"; then
   check "T50 an unreadable transcript renders the scope sentence, like every other could-not-look state" PASS
 else
@@ -774,7 +774,7 @@ if grep -qF 'reviewSpawnScopeSentence' "$PLUGIN_DIR/docs/configuration.md" \
   && grep -qF 'disables the whole guard' "$PLUGIN_DIR/docs/configuration.md" \
   && grep -qF 'a bypass-ledger entry' "$PLUGIN_DIR/docs/configuration.md" \
   && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/docs/configuration.md" \
-  && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+  && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/docs/build-workflow.md" \
   && ! grep -qF "$LEDGER_FALSE_CLAIM" "$0"; then
   check "T56 no carrier claims a config-disabled gate lands a bypass-ledger entry" PASS
 else
@@ -787,8 +787,8 @@ fi
 # Anchored on the POSITIVE account's own heading, not on the identifier alone: the
 # identifier also appears in the host-refusal paragraph's omission clause, so a bare
 # name grep survives deletion of the paragraph this check exists to protect.
-if grep -qF '**The review-spawn scope sentence.**' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
-  && grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE' "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; then
+if grep -qF '**The review-spawn scope sentence.**' "$PLUGIN_DIR/docs/build-workflow.md" \
+  && grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE' "$PLUGIN_DIR/docs/build-workflow.md"; then
   check "T41 the operator account still carries the positive paragraph and names the constant" PASS
 else
   check "T41 the operator account still carries the positive paragraph and names the constant" FAIL
@@ -824,7 +824,7 @@ REASON_ERRORED="$(printf '%s' "$OUT_ERRORED" | reason)"
 # in the owner, the resume discriminator (proving this really is the resume branch),
 # and the absence of the host-refusal text (proving the probe did NOT say `blocked`).
 if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
-  && printf '%s' "$REASON_ERRORED" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON_ERRORED" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && ! printf '%s' "$REASON_ERRORED" | grep -qF 'refused by the HOST permission layer' \
   && ! printf '%s' "$REASON_ERRORED" | grep -qF "$IN_SCOPE_NEEDLE"; then
   check "T42 an unclassifiable refusal keeps the resume directive but withholds the scope sentence" PASS
@@ -923,7 +923,7 @@ printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' >"$CFG_NO_SCOPE"
 OUT_NOSCOPE="$(stop_run '{"session_id":"'"$SID7B_RAW"'","transcript_path":"'"$TRANSCRIPT_CLEAR"'"}' "$CFG_NO_SCOPE")"
 REASON_NOSCOPE="$(printf '%s' "$OUT_NOSCOPE" | reason)"
 if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
-  && printf '%s' "$REASON_NOSCOPE" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON_NOSCOPE" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && ! printf '%s' "$REASON_NOSCOPE" | grep -qF "$IN_SCOPE_NEEDLE" \
   && printf '%s' "$REASON_NOSCOPE" | grep -qF 'Only valid exception:' \
   && printf '%s' "$REASON_NOSCOPE" | grep -qF 'including the single exception it explicitly states' \
@@ -1060,7 +1060,7 @@ if [ -n "$FULL_PANEL_LIST" ] && [ -n "$LEAN_PANEL_LIST" ] \
 else
   check "T61 the record root's hooks.reviewPanel selects the resume directive's panel, the ambient root's does not" FAIL
 fi
-if printf '%s' "$T59_RECORD_OUT" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+if printf '%s' "$T59_RECORD_OUT" | grep -qF 'Resume the /zensu:build Phase 6 review sequence' \
   && ! printf '%s' "$T59_RECORD_OUT" | grep -qF "$IN_SCOPE_NEEDLE" \
   && printf '%s' "$T59_AMBIENT_OUT" | grep -qF "$IN_SCOPE_NEEDLE"; then
   check "T59 the record root's config overlay governs the flag, the ambient root's does not" PASS

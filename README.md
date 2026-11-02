@@ -5,9 +5,13 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.31.1-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.34.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
+
+https://github.com/user-attachments/assets/f00ec61d-5252-4c43-a3fb-535104d16e7a
+
+*Zensu for Claude Code, explained in three minutes, with sound and captions. The workflow it shows uses fictional data. A transcript is on [zensu.dev](https://zensu.dev/claude-code/#explain).*
 
 Zensu plans the feature with you, implements it, and then puts the result
 through a review panel that has to cite real file and line numbers for every
@@ -80,13 +84,17 @@ already rely on:
   descriptions on top.
   [Architecture](docs/architecture.md#context-added-to-every-session) says how
   this was measured and breaks it down per hook.
-- **zen-mode is on by default.** Replies open with a one-line recap, put the
-  result first, stay near eight lines and end with one next step. Say "zen off"
+- **zen-mode is on by default.** Replies put the result first, stay near eight
+  lines and close with a short session block: what you started the session for,
+  what it has done so far and what this turn did, then one next step. Say "zen off"
   or run `/zensu:zen-mode --off` to leave it for the session; set
   `hooks.zenModeDefault: false` to make it opt-in again.
 - **Claude asks which delivery route to take.** After you approve a plan, Zensu
   has Claude ask whether to use Autopilot, the Zensu workflow or Pilot, or to
   implement directly; on a direct code request it asks whether to use the Zensu
+  workflow. A plan that names its own executor, such as another plugin's
+  `superpowers:executing-plans`, gets a short notice instead: Claude carries it
+  out with that skill and names `/zensu:build` as the way to use the Zensu
   workflow. `/zensu:delivery-route` or
   `hooks.defaultDeliveryRoute` answers it ahead of time; `hooks.autoTdd: false`
   and `hooks.tddReminder: false` switch the two questions off.
@@ -116,9 +124,10 @@ already rely on:
   or set `ZENSU_FULL_SUITE_GATE=off` or `ZENSU_ACCEPTANCE_GATE=off` for one
   closing step; those two escapes are recorded in the chain's bypass ledger.
   `/zensu:full-suite` moves the full suite to a verified CI pipeline instead.
-- **`node` must be on `PATH`.** The capability gate runs on every tool call and
-  needs `node`. Without it every tool call is refused with only
-  `zensu: reviewer capability gate unavailable`, which does not name `node`.
+- **`node` must be on `PATH`.** Claude Code starts the hook dispatcher, which
+  runs the capability gate before every tool call, as `node` itself. Without
+  `node` the dispatcher cannot start, and its registration makes Claude Code
+  refuse every tool call with its own error about the failed start.
 
 ## Install
 
@@ -160,9 +169,12 @@ The first two need no Zensu account.
 **Just this change** — describe what you want and approve the plan. Zensu asks
 which delivery route to take: Autopilot to a reviewed pull request, the Zensu workflow with its review chain,
 Pilot for a feature already tracked in Zensu, or implementing it directly.
+A plan that names another plugin's executor gets a notice instead of the question.
 Answer the route question with the Zensu workflow once: the session remembers that answer (a
 direct, Autopilot or Pilot answer decides only that plan or request), and
 `/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes either route without asking.
+A session that this one starts in Claude Desktop on the same repository takes that Zensu-workflow
+answer over too.
 
 **One feature, hands off** — `/zensu:autopilot` takes a plain-language idea to a
 validated pull request: one planning gate, then plan → build → review → fix →
@@ -201,7 +213,7 @@ make no `zensu` call at all.
 
 | Skill | What it does | Needs |
 |-------|--------------|-------|
-| `/zensu:tdd` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. Despite its name it runs without RED→GREEN by default; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
+| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys | `gh` or `glab` |
 | `/zensu:implement` | Implement a tracked feature through the Zensu workflow, then link its tests, sources and docs and create a revision | Zensu account |
 | `/zensu:pilot` | The guided route: probes a tracked feature's real state and offers the next step, one confirmed step at a time | Zensu account and a tracked feature; `gh` or `glab` for its pull request |
@@ -231,7 +243,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config | — |
 | `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session | — |
-| `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default; `--off` leaves it for the session | — |
+| `/zensu:zen-mode` | Low-noise responses: result first, a session recap, one next step. On by default; your own CLAUDE.md, output style or style mode outranks it, and `--off` leaves it for the session | — |
 
 #### Setup, help and other sessions
 
@@ -315,7 +327,7 @@ Nothing writes an ignore rule for you, except the `.worktree-keep` line below.
 | Path | Written by | Commit it? |
 |------|------------|------------|
 | `.zensu/config.json` | You or `/zensu:setup` | Yes, to give every clone the same settings; it overrides each developer's global file key by key |
-| `.zensu/plans/`, `.zensu/logs/*_tdd-*.log` | The Zensu workflow, one plan and one progress log per chain | Optional. Committed, they are an audit trail; absolute paths in them are redacted when they are written |
+| `.zensu/plans/`, `.zensu/logs/*_build-*.log` | The Zensu workflow, one plan and one progress log per chain | Optional. Committed, they are an audit trail; absolute paths in them are redacted when they are written |
 | `.zensu/state/` | Zensu's hooks, per session | Never. Add `.zensu/state/` to `.gitignore` |
 | `.zensu/verify-feature-runs/` | `/zensu:verify-feature`, one directory per run, removed after a clean teardown | Never |
 | `.zensu/logs/witness-*.log` | Earlier releases only | Never |
@@ -350,7 +362,7 @@ What stays behind:
 ## Zensu account and CLI
 
 The implementation workflow and the review chain need no CLI, no login, and no
-Zensu account: `/zensu:tdd`, the review-aspect panel with its auto-fix loop, and
+Zensu account: `/zensu:build`, the review-aspect panel with its auto-fix loop, and
 the progress log under `.zensu/logs/` run locally, and so does every skill
 marked "—" in the [skill tables](#skills-31). The `zensu` CLI and an
 account add the tracking layer on top — feature status, revisions, artifact
@@ -477,7 +489,7 @@ first 100 ghost-scan candidates and read only the first page of wiki lists.
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
-| [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
+| [Build workflow](docs/build-workflow.md) | The full per-step reference for the implementation workflow |
 | [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the driver for every kind of application and what each needs, consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
@@ -533,4 +545,22 @@ security and design context. The context board records these API retrievals by p
 
 ## Automatic feature context
 
-An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. Disable with `hooks.contextAutoLoad: false`. See [automatic context](docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
+An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. The automatic package presents `layers` first and keeps `related_layers` as a separate bounded metadata index with reasons and directed paths. Choose additional sources for a specific task question; never bulk-fetch either group. Disable with `hooks.contextAutoLoad: false`. See [automatic context](docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
+
+Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. Capability checks and retrieval share a twenty-second deadline; timeout notices identify the failed operation. See the automatic-context documentation for transmitted task text, limits and host support.
+AI work capture declares this plugin's source/version and a work/test purpose.
+Use `--run-kind test` for explicit validation or demo goals; ordinary product work
+with tests remains work. Test runs are hidden from default My work/Organization
+metrics; billing credits remain separately unfiltered. Update the backend and
+CLI to the metadata-capable contract before installing this reporter update.
+See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
+
+### Confirmed product scope for AI work
+
+Automatic AI-work capture now requires a product explicitly confirmed by the user
+via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
+skip capture while coding continues. Cross-product work requires explicit intent
+and a reason for each goal; it is never an automatic fallback. Existing unassigned
+entries remain in the separate Unassigned view with their history and acceptance.
+Upgrade the product-scope backend and CLI before the plugin. See the shipped
+`docs/ai-work-capture.md` for identity checks and legacy receipt handling.

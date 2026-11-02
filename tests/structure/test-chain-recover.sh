@@ -444,7 +444,7 @@ RECOVER_RC=$?
   || check "T23 an incomplete Autopilot linkage is diagnosed and refused (linkage=$(status_field linkage) rc=$RECOVER_RC)" FAIL
 
 case "$RECOVER_ERR" in
-  *"refused (partial-link)."*"wedged but not recoverable"*"/zensu:tdd"*)
+  *"refused (partial-link)."*"wedged but not recoverable"*"/zensu:build"*)
     check "T24 the blocked refusal says the chain IS wedged and names a real next step" PASS ;;
   *)
     check "T24 the blocked refusal says the chain IS wedged and names a real next step (got: $RECOVER_ERR)" FAIL ;;
@@ -697,7 +697,7 @@ new_chain "chain-recover-doctor-deadend"
 seed 's.codeReviewDone=true;s.reviewRound=2;' || true
 DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
-  *"self-review-unbindable"*"at a dead end"*"/zensu:tdd"*)
+  *"self-review-unbindable"*"at a dead end"*"/zensu:build"*)
     check "T35b doctor raises a dead-end chain as its own warning row with the fresh-generation remedy" PASS ;;
   *)
     check "T35b doctor raises a dead-end chain as its own warning row" FAIL ;;

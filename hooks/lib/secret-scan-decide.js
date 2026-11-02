@@ -45,6 +45,10 @@ function main() {
     process.stderr.write("zensu secret-scan: stdin read failed, failing open\n");
     return "";
   }
+  return decide(raw);
+}
+
+function decide(raw) {
   let j;
   try {
     j = JSON.parse(raw || "{}");
@@ -105,4 +109,8 @@ function main() {
   return Array.from(rules).join(", ");
 }
 
-process.stdout.write(main());
+if (require.main === module) {
+  process.stdout.write(main());
+} else {
+  module.exports = { decide, pathExempt };
+}

@@ -3,8 +3,10 @@ paths:
   - "hooks/plan-approved-delegate.sh"
   - "hooks/user-prompt-tdd-reminder.sh"
   - "hooks/lib/zensu-human-present.sh"
+  - "hooks/lib/foreign-executor-v1.js"
   - "evals/plan-approval-hook/**"
   - "tests/structure/test-plan-approved-delegate.sh"
+  - "tests/structure/foreign-executor-v1.test.js"
 ---
 
 # Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)
@@ -12,8 +14,8 @@ paths:
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The STANDALONE branch of the plan gate asks ONE `AskUserQuestion` naming four mutually
-exclusive delivery routes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, and implementing
-directly. It replaced a yes/no question about `/zensu:tdd` alone, which left the plugin's other
+exclusive delivery routes — `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`, and implementing
+directly. It replaced a yes/no question about `/zensu:build` alone, which left the plugin's other
 two delivery routes invisible at the one moment they are relevant.
 
 A Zensu-workflow answer is remembered for the rest of the session, a configured default answers
@@ -36,7 +38,7 @@ heredocs. Version `patch`: the hook still emits only `additionalContext`.
 
 **The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
 `<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
-TDD/workflow question": Autopilot has spent its single planning gate by then, and a second
+route or workflow question": Autopilot has spent its single planning gate by then, and a second
 question there would break that contract.
 
 **Two prerequisites are stated INSIDE the options rather than gating them, and the reason is
@@ -44,7 +46,7 @@ that a hook cannot check either cheaply.** `/zensu:autopilot` owns its own Phase
 in its own `ExitPlanMode`, so choosing it after an approval costs a SECOND approval round for
 the spec, the `AC-###` list and the probed recipe — and it needs an authenticated forge CLI.
 `/zensu:pilot` needs an authenticated `zensu` CLI plus a feature ALREADY tracked in Zensu; its
-own skill sends ad-hoc work to `/zensu:tdd` instead. Both options are offered unconditionally
+own skill sends ad-hoc work to `/zensu:build` instead. Both options are offered unconditionally
 and carry their cost in their own description. The ground is NOT that probing is expensive —
 `hooks/session-start-banner.sh` already runs `command -v zensu`, so the PRESENCE half is cheap.
 It is that a conditional option set would make the gate's own "exactly these four mutually
@@ -106,7 +108,7 @@ Then `D9pre` and `D9`-`D33` in
 the default config resolves to the vanilla one and a single capture would grade only one heredoc;
 that suite ALSO grades carriers outside the hook, and the roster is an ENUMERATION rather than a
 count because a count there was wrong on the day it was written: `D17` five prose carriers
-(`docs/configuration.md`, `docs/architecture.md`, `README.md`, `skills/tdd/SKILL.md`,
+(`docs/configuration.md`, `docs/architecture.md`, `README.md`, `skills/build/SKILL.md`,
 `skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`/`D38`-`D43`
 the local-only eval in `evals/plan-approval-hook/` and its README (which nothing graded before, so
 its two ABSENCE assertions reported the outward-facing safety property green whenever the driven
@@ -181,7 +183,7 @@ and Autopilot's planning gate falls through to the standalone directive. While t
 reads `ask`, that directive re-asks the four-route question with `/zensu:autopilot` still on it —
 an approval loop that did not exist before the four-route question made `/zensu:autopilot`
 reachable from this gate. With a recorded or configured route it asks nothing and sends the
-Autopilot spec to `/zensu:tdd` or implements it directly (`.claude/rules/session-delivery-route.md`).
+Autopilot spec to `/zensu:build` or implements it directly (`.claude/rules/session-delivery-route.md`).
 `tests/structure/test-pilot-skill.sh` is on
 it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
 so the primer edit turned a CI-run suite red. It is a per-heredoc assertion now, and the needle is
@@ -204,7 +206,7 @@ described the old yes/no question became false at once: the `plan-approved-deleg
 one recording that the two ask-hooks no longer share one wording; BOTH branches of `hooks/session-start-primer.sh` (whose own `P3`
 parity needles now carry the route literals) and BOTH tips in `hooks/session-start-banner.sh`,
 which is the ONLY user-visible surface and was the one the whole review panel missed; the "When
-to Use" bullet in `skills/tdd/SKILL.md`; the two interception paragraphs in
+to Use" bullet in `skills/build/SKILL.md`; the two interception paragraphs in
 `skills/gauntlet-loop/SKILL.md`; the Layer 2 Mermaid edge in `docs/architecture.md`; the "Just
 this change" paragraph in `README.md` — BOTH the "Just this change" paragraph and the "A plan you approve
 first" bullet; `evals/plan-approval-hook/` — whose expect script must
@@ -291,7 +293,7 @@ the branch push is unattended once the plan is approved. Pilot meets it too, and
 revision of this paragraph said the opposite — that Pilot "has no unattended outward-facing step
 to guard" — which is false: it offers a commit and a pull request and it mutates tracked feature
 state, and the confirm that guards each transition IS an `AskUserQuestion` answer, exactly the
-control a headless run cannot supply. `/zensu:tdd` meets neither half and stays selectable.
+control a headless run cannot supply. `/zensu:build` meets neither half and stays selectable.
 
 **Known gaps, accepted and named:** the four routes are prose the model follows, not a gate, so
 nothing enforces that the question is asked or that the ordering rule is honoured. The SEAM is
@@ -369,9 +371,72 @@ Coupled sites: both heredocs of both hooks and the reminder's short line; `B_GUA
 needle of `D13`; the `P1` and `P2` needles and the `P1b5` and `P1b6` spans in
 `tests/structure/test-tdd-vanilla-mode.sh`; `R12D`, `R13b` and `R13g` in
 `tests/structure/test-delivery-route.sh`; `C12` in `tests/structure/test-tdd-reminder-hook.sh`; the
-fast-path recap in both primer heredocs; the first `## When to Use` bullet of `skills/tdd/SKILL.md`;
+fast-path recap in both primer heredocs; the first `## When to Use` bullet of `skills/build/SKILL.md`;
 the interception paragraph of `skills/gauntlet-loop/SKILL.md`; and
 `evals/route-short-line-reaction/scenarios/ask-headless-code-change.yaml`.
 
 Version: `patch`. One library added and two `additionalContext` texts changed; no hook, matcher, key
 set, schema field, config key or attestation moves, and neither hook returns a `permissionDecision`.
+
+## A plan that names its own executor (`foreign_executor_notice`)
+
+A plan written for another plugin names the skill that carries it out, for example
+`REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.` While
+the route field reads `ask`, the standalone branch reads the approved plan through
+`resolveApprovedPlan`, the reader the durable branch uses, loaded by `plan_payload_load`, the one
+loader both branches call (`F48` and `F48b` in `tests/structure/test-plan-payload-fallback.sh`).
+It hands the payload and that reader to `noticeForPayload` in `hooks/lib/foreign-executor-v1.js`,
+which the node program loads from the same rendered directory, and asks no route question when
+the plan names a `<plugin>:<skill>` outside the `zensu:` namespace. The module takes the reader
+as an argument and opens no file itself, so its unit file drives it with a fake reader as well
+as the real one. It prints one notice instead: carry the plan
+out with that skill, say in one line that Zensu asked no route question, and name `/zensu:build` as
+the way to run the plan under the Zensu workflow. The approval message still wins as it does under
+(B): a request, not a mere mention, for `/zensu:build` or the Zensu workflow, `/zensu:autopilot` or
+`/zensu:pilot` dispatches that route with the input its arm names, and a refused route is never
+taken. Offering the two outward-facing routes there is safe because the notice fires only while
+the field reads `yes`, the one value under which (B) keeps them. The notice is a `printf` of a JSON object built
+in node, never a third heredoc, so `R12` and the parity helper still count two.
+
+The detection is narrow on purpose, because a false positive costs the route question for a plan
+that wanted it, while a false negative only asks the question as before. Fenced code blocks, inline code and
+quoted text are removed first. A line then counts when it carries `REQUIRED SUB-SKILL`, or an
+execute or implement verb together with "this plan" or "the plan", and no negation such as
+"not", "never" or "don't". A name on such a line counts when it is a slash command, or when it
+follows "use", "using", "with", "via", "run" or "invoke" on a line that mentions a skill. A plan
+that names a `zensu:` skill anywhere keeps the question: that scan reads the raw plan, fences and
+quotes included, because only the foreign match has to be narrow. A session whose
+`ZENSU HUMAN PRESENT:` field does not read `yes` keeps it too, because the notice hands the plan
+to a skill this hook cannot judge against the outward-facing criterion of (C). So does a tool
+response that declares an agent origin or carries an `isAgent` that is not a boolean:
+`responseOrigin` in `hooks/lib/plan-payload-v1.js` owns that rule for both branches, the durable
+branch maps its two `REASONS` to exits 18 and 19, and the notice judges it before any plan source
+is read. So does every fault: a reader or classifier module that does not load, a payload that is
+not `ExitPlanMode`, a plan the reader refuses. A recorded or configured route never reaches the
+check, so it still dispatches. The
+notice carries no `ZENSU DELIVERY ROUTE:` field, no `AskUserQuestion` and none of the `D13` words.
+
+Pinned by `D46` to `D46f` in `tests/structure/test-plan-approved-delegate.sh`: the notice through
+both carriers and for a slash command, a configured route that still dispatches, the
+fail-toward-the-question cases with a `zensu:` skill in three forms and on a line that carries
+nothing, quoted, fenced and negated names (fences nested in a list or a blockquote, longer
+fences, an inner fence with an info string, double-backtick spans and typographic quotes) with a
+header after a closed fence as the control, the human-present gate, in `D46e` a reader module
+that is missing, throws or exports no reader and a classifier module that is missing, throws,
+exports no decision or answers with something other than a string, plus a payload from another
+tool, over a copied plugin root whose unmodified run gives the notice, and in `D46f` an
+agent-origin response and a non-boolean `isAgent`, a string and `null`, with `isAgent: false`
+as the control.
+`tests/structure/foreign-executor-v1.test.js`, driven by `D1a`, pins the classifier, the notice
+text and the payload decision, including that the origin is judged before the reader's walk, and
+`test-msys-special-plugin-module-boundaries.sh` loads the module beside the reader from a plugin
+root with whitespace and an apostrophe. `D46c2` keeps the function ASCII-only,
+because its node program travels in argv. A symlinked reader never reaches the hook: Session
+Control rejects a runtime symlink when the session registers, so the hook's `-L` guard is
+defense in depth and has no fixture. `d46_ctx` pins the `cli` entrypoint, because CI runs with
+none, which reads `unknown`. `R12g` in `tests/structure/test-delivery-route.sh` pins it too and covers a
+session marker that still dispatches. Operator accounts: `docs/precedence.md` and the
+`plan-approved-delegate.sh` row of `docs/configuration.md`.
+
+Version: `patch`. The hook still emits only `additionalContext`, no hook, matcher, key set,
+schema field, config key or attestation moves, and the one new behaviour asks less, never more.

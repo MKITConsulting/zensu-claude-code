@@ -905,6 +905,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  canonicalDirectory,
   MAX_PAYLOAD_BYTES,
   privateRecordsDirectory,
   // Exported so the ADOPTION path can apply the same rule every argv mode in this
@@ -919,6 +920,7 @@ module.exports = {
   // its wrapper discards stderr; it discloses on its own systemMessage.
   bindAndDisclose,
   writeAdoptionOperatorLine,
+  writeServedSweepLine,
   performedAdoption,
   orphanedProjectRootSession,
   resolveFreshHookProject,

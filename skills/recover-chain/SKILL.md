@@ -104,7 +104,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --chain-status
 
 Exit codes: `0` a report was printed, `1` this session has no chain state, `2` the
 state is unreadable, foreign, or unsafe (or the module/node is unavailable). On `1`
-there is nothing to recover — arm a chain with `/zensu:tdd`. On `2` stop: a foreign
+there is nothing to recover — arm a chain with `/zensu:build`. On `2` stop: a foreign
 `session_id_hash`, a corrupt document, or a symlinked state file is not repairable in
 place, and the honest next step is a fresh session or `--tdd-reset`, not a forced write.
 
@@ -113,7 +113,7 @@ the user verbatim before doing anything else:
 
 | `shape` | Meaning | Supported next step |
 |---------|---------|---------------------|
-| `no-session` | No chain is armed | `/zensu:tdd` |
+| `no-session` | No chain is armed | `/zensu:build` |
 | `implementing` | Armed, implementation not marked complete | `--tdd-complete` (the report renders the bound form when the chain is Autopilot-bound) |
 | `ready-for-review` | Idle chain, ready for a reviewer | `--review-ticket`, then spawn `zensu:code-reviewer` |
 | `ticket-unclaimed` | A ticket is outstanding and unconsumed | let that reviewer finish, or issue a fresh ticket and re-spawn |
@@ -122,7 +122,7 @@ the user verbatim before doing anything else:
 | `review-in-flight` | A ticket is claimed, the round is open | the ticket-bound terminus `--code-review-done --claimed-review-ticket` |
 | `awaiting-self-review` | `codeReviewDone` is set | `/zensu:self-review` (or `/zensu:reset-review-limit`) |
 | `chain-closed` | Terminus already written | nothing |
-| `self-review-unbindable` | `codeReviewDone` is set but no consumed ticket can bind the self-review | a fresh generation via `/zensu:tdd` |
+| `self-review-unbindable` | `codeReviewDone` is set but no consumed ticket can bind the self-review | a fresh generation via `/zensu:build` |
 | `wedged-stale-rearm` | A receipt that disagrees with its document blocks every future ticket | `--chain-recover` |
 
 Only the last shape is recoverable, and only when `recoverable` is `true`.
@@ -167,7 +167,7 @@ unwritable store, a module that fails to load under the lock, and a commit whose
 is unconfirmed all report `2` with their own message. (A module that is missing or
 tampered with never reaches this code at all — the runtime digest rejects the session
 binding first, with its own `runtime digest mismatch` error.) That distinction matters — the remedy for `1` is
-`/zensu:tdd`, which starts a fresh generation and zeroes the review budget, so it must
+`/zensu:build`, which starts a fresh generation and zeroes the review budget, so it must
 never be applied to a chain that merely failed to take its lock. When a message says
 the outcome could not be confirmed, re-run `--chain-status` and believe what it reports.
 
@@ -214,7 +214,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --chain-status
 
 The shape MUST now be a non-wedged one (normally `ready-for-review`) and
 `rearmReceipt` MUST be `none`. Then resume the normal chain: issue a fresh ticket with
-`--review-ticket` and spawn `zensu:code-reviewer` with it, exactly as `/zensu:tdd`
+`--review-ticket` and spawn `zensu:code-reviewer` with it, exactly as `/zensu:build`
 Phase 6 does. Do not pre-issue that ticket from this skill.
 
 The report also carries `revision`, `lastEvent` and `recoveries`, so a repair stays

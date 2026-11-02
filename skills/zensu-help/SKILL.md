@@ -46,7 +46,7 @@ None. This skill answers from embedded knowledge and the plugin's own canonical 
 ## Three Layers (embedded — architecture overview)
 
 1. **Planning** (main-thread skills) — `/zensu:bootstrap` (greenfield: a plan/vision doc, no code yet) or `/zensu:ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built, then create the plan's not-yet-built items as `planned` features. The interactive agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built?
-2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + read-only reviewer panel) — vanilla implementation is the default; setting `hooks.tddImplementation:true` enables strict RED→IMPL→GREEN FSM-gated edits. Both modes keep the Phase 5/6 evidence audits and review chain: parallel `zensu:review-aspect` agents (three by default, five with `hooks.reviewPanel: full`), the optional `zensu:review-judge` second pass (default on; on the lean panel for the first review only, and on any review the `Stop` hook resumes), then one consume-mode `zensu:code-reviewer`, an auto-fix loop, and terminal self-review, all backed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 implementation runs in the main agent rather than a `tdd-manager` subagent.
+2. **Implementation** (`/zensu:build` skill in the MAIN thread + read-only reviewer panel) — vanilla implementation is the default; setting `hooks.tddImplementation:true` enables strict RED→IMPL→GREEN FSM-gated edits. Both modes keep the Phase 5/6 evidence audits and review chain: parallel `zensu:review-aspect` agents (three by default, five with `hooks.reviewPanel: full`), the optional `zensu:review-judge` second pass (default on; on the lean panel for the first review only, and on any review the `Stop` hook resumes), then one consume-mode `zensu:code-reviewer`, an auto-fix loop, and terminal self-review, all backed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 implementation runs in the main agent rather than a `tdd-manager` subagent.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
 ## Agents (embedded — one-liners)
@@ -56,7 +56,7 @@ None. This skill answers from embedded knowledge and the plugin's own canonical 
 - `review-judge` — optional READ-ONLY second pass over the merged panel findings; enabled by default.
 - `code-reviewer` — one READ-ONLY consume-mode subagent that consolidates the panel + judge findings and triggers the auto-fix hook.
 
-Implementation is NOT delegated to a subagent: `/zensu:tdd` runs in the main thread, in vanilla mode by default or with strict RED→IMPL→GREEN discipline when configured. The completeness/evidence audits and reviewer chain run in both modes.
+Implementation is NOT delegated to a subagent: `/zensu:build` runs in the main thread, in vanilla mode by default or with strict RED→IMPL→GREEN discipline when configured. The completeness/evidence audits and reviewer chain run in both modes.
 
 ## Topic Routing (live read for volatile facts)
 
@@ -73,7 +73,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | The write gates (CLI write-gate, source-write gate, secret scan, TDD phase gate) | `${CLAUDE_PLUGIN_ROOT}/docs/gates.md` |
 | Subagent safety, Session Control principals, unbindable sessions | `${CLAUDE_PLUGIN_ROOT}/docs/session-control.md` |
 | The review agents, custom repo personas, skill overlays, templates | `${CLAUDE_PLUGIN_ROOT}/docs/review-chain.md` |
-| TDD FSM details, phase transitions, gate logic, four-channel logging | `${CLAUDE_PLUGIN_ROOT}/docs/tdd-manager-workflow.md` |
+| TDD FSM details, phase transitions, gate logic, four-channel logging | `${CLAUDE_PLUGIN_ROOT}/docs/build-workflow.md` |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md` |
 | Evidence discipline / anti-hallucination rule, the three carriers, why the injector has no opt-out flag, why the block names no file | `${CLAUDE_PLUGIN_ROOT}/docs/evidence-discipline.md` + `${CLAUDE_PLUGIN_ROOT}/docs/architecture.md` § Evidence Discipline |
 | Hook scripts (what each does, when it fires) | `${CLAUDE_PLUGIN_ROOT}/docs/configuration.md` § Hooks table + `${CLAUDE_PLUGIN_ROOT}/hooks/<script>.sh` source |
@@ -84,7 +84,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | A review chain that will not advance: `--review-ticket` refuses, no ticket to claim, `/zensu:reset-review-limit` not applicable; chain shapes and the guarded escape hatch | `${CLAUDE_PLUGIN_ROOT}/skills/recover-chain/SKILL.md` (`/zensu:recover-chain` — `zensu-log.sh --chain-status` diagnoses, `--chain-recover` repairs only a receipt that disagrees with its own document) |
 | Every stateful tool started failing closed right after a plugin update; `/zensu:doctor` reports an incompatible lineage | `${CLAUDE_PLUGIN_ROOT}/skills/adopt-session/SKILL.md` (`/zensu:adopt-session` — reports first, `--confirm` adopts the record in place) |
 | Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `${CLAUDE_PLUGIN_ROOT}/skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |
-| Live feature/worktree/preview verification of any application (web, API, CLI, library, worker, infrastructure, iOS/Android simulator or emulator, desktop), drivers, local vs remote mode, browser evidence, playwright-cli | `${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/SKILL.md` + `${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/rules/*.md` (`/zensu:verify-feature` — report-only live proof; its `--chain` mode verifies every acceptance criterion of a `/zensu:tdd` chain for the terminus gate in `${CLAUDE_PLUGIN_ROOT}/docs/gates.md` § Acceptance Verification Gate) + `${CLAUDE_PLUGIN_ROOT}/docs/verify-feature.md` (running it standalone: the launch-time navigation policy, the local-mode recipe, remote mode) |
+| Live feature/worktree/preview verification of any application (web, API, CLI, library, worker, infrastructure, iOS/Android simulator or emulator, desktop), drivers, local vs remote mode, browser evidence, playwright-cli | `${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/SKILL.md` + `${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/rules/*.md` (`/zensu:verify-feature` — report-only live proof; its `--chain` mode verifies every acceptance criterion of a `/zensu:build` chain for the terminus gate in `${CLAUDE_PLUGIN_ROOT}/docs/gates.md` § Acceptance Verification Gate) + `${CLAUDE_PLUGIN_ROOT}/docs/verify-feature.md` (running it standalone: the launch-time navigation policy, the local-mode recipe, remote mode) |
 | Durable unit/integration/E2E test authoring for existing code | `${CLAUDE_PLUGIN_ROOT}/skills/cover/SKILL.md` (`/zensu:cover` — committed regression net) |
 | Workflow step order (new product / existing codebase / quick feature) | `${CLAUDE_PLUGIN_ROOT}/docs/architecture.md` § Typical Workflows |
 | Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `${CLAUDE_PLUGIN_ROOT}/agents/zensu-plm.md` § Decision Rules + `${CLAUDE_PLUGIN_ROOT}/docs/architecture.md` § Typical Workflows |
@@ -96,7 +96,7 @@ Before answering questions in the right column, `Read` the source file in the le
 
 ## Response Style
 
-- Cite each source by the path you read and its line, such as `${CLAUDE_PLUGIN_ROOT}/README.md:200` or `${CLAUDE_PLUGIN_ROOT}/docs/tdd-manager-workflow.md:12`.
+- Cite each source by the path you read and its line, such as `${CLAUDE_PLUGIN_ROOT}/README.md:200` or `${CLAUDE_PLUGIN_ROOT}/docs/build-workflow.md:12`.
 - If the embedded glossary fully answers it → answer directly, no Read needed.
 - If a routed source applies → Read first, quote facts verbatim, cite.
 - Never invent tool names, hook names, config flags, or version numbers — verify via Read.

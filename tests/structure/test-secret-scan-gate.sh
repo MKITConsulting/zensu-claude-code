@@ -33,6 +33,9 @@ ENGINE="$PLUGIN_DIR/hooks/lib/secret-patterns.js"
 DECIDE="$PLUGIN_DIR/hooks/lib/secret-scan-decide.js"
 PARSER="$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
+HOOK_BODY="$PLUGIN_DIR/hooks/checks/pre-write-secret-scan.sh"
+DISPATCHER="$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"
+REGISTRATION_LIB="$PLUGIN_DIR/hooks/lib/hook-registration-v1.js"
 CONFIG_DOC="$PLUGIN_DIR/docs/configuration.md"
 GATES_DOC="$PLUGIN_DIR/docs/gates.md"
 
@@ -67,25 +70,17 @@ fi
 # P1 — structural wiring: one entry under each expected PreToolUse matcher
 WIRING="$(node -e '
   const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-  const groups = (h.hooks && h.hooks.PreToolUse) || [];
-  const has = (m) => groups.some((g) =>
-    g.matcher === m &&
-    (g.hooks || []).some((x) => typeof x.command === "string" && x.command.indexOf("pre-write-secret-scan.sh") !== -1)
-  );
+  const hooks = require(process.argv[2]).registeredHooks(h, "PreToolUse") || [];
+  const has = (m) => hooks.some((x) => x.matcher === m && x.command.indexOf("pre-write-secret-scan.sh") !== -1);
   process.stdout.write([has("Edit|Write|MultiEdit"), has("NotebookEdit"), has("Bash|PowerShell")].join(","));
-' "$HOOKS_JSON" 2>/dev/null)"
+' "$HOOKS_JSON" "$REGISTRATION_LIB" 2>/dev/null)"
 TIMEOUTS="$(node -e '
   const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-  const found = [];
-  for (const g of (h.hooks && h.hooks.PreToolUse) || []) {
-    for (const x of g.hooks || []) {
-      if (typeof x.command === "string" && x.command.indexOf("pre-write-secret-scan.sh") !== -1) {
-        found.push(g.matcher + "=" + (typeof x.timeout === "number" ? x.timeout : "none"));
-      }
-    }
-  }
+  const found = (require(process.argv[2]).registeredHooks(h, "PreToolUse") || [])
+    .filter((x) => x.command.indexOf("pre-write-secret-scan.sh") !== -1)
+    .map((x) => x.matcher + "=" + (typeof x.timeout === "number" ? x.timeout : "none"));
   process.stdout.write(found.sort().join(" "));
-' "$HOOKS_JSON" 2>/dev/null)"
+' "$HOOKS_JSON" "$REGISTRATION_LIB" 2>/dev/null)"
 if [ "$TIMEOUTS" = "Bash|PowerShell=60 Edit|Write|MultiEdit=60 NotebookEdit=60" ]; then
   check "P1b every registration carries the 60 s gate timeout ($TIMEOUTS)" PASS
 else
@@ -98,21 +93,23 @@ else
 fi
 
 # P2 — SoT references: hook delegates to decide.js; decide.js uses engine + parser
-if grep -qF 'secret-scan-decide.js' "$HOOK" && grep -qF 'secret-patterns.js' "$DECIDE" && grep -qF 'bash-source-write-parse.js' "$DECIDE"; then
+if grep -qF 'secret-scan-decide.js' "$HOOK_BODY" && grep -qF "require('./secret-scan-decide.js')" "$DISPATCHER" \
+  && grep -qF 'secret-patterns.js' "$DECIDE" && grep -qF 'bash-source-write-parse.js' "$DECIDE"; then
   check "P2 hook -> decide.js -> engine + shared parser (SoT chain)" PASS
 else
   check "P2 hook -> decide.js -> engine + shared parser (SoT chain)" FAIL
 fi
 
 # P3 — config flag + env bypass honored
-if grep -qF 'zensu_hook_enabled secretScan' "$HOOK" && grep -qF 'ZENSU_SECRET_SCAN' "$HOOK"; then
+if grep -qF 'zensu_hook_enabled secretScan' "$HOOK_BODY" && grep -qF 'ZENSU_SECRET_SCAN' "$HOOK_BODY" \
+  && grep -qF "configHookEnabled('secretScan'" "$DISPATCHER" && grep -qF 'ZENSU_SECRET_SCAN' "$DISPATCHER"; then
   check "P3 hook honors hooks.secretScan config + ZENSU_SECRET_SCAN env" PASS
 else
   check "P3 hook honors hooks.secretScan config + ZENSU_SECRET_SCAN env" FAIL
 fi
 
 # P4 — fail-open documented; inline Bash escape hatch documented
-if grep -qiF 'FAIL OPEN' "$HOOK" && grep -qF 'failing open' "$HOOK"; then
+if grep -qiF 'FAIL OPEN' "$HOOK_BODY" && grep -qF 'failing open' "$HOOK_BODY" && grep -qF 'failing open' "$DISPATCHER"; then
   check "P4a fail-open behavior documented + implemented in the hook" PASS
 else
   check "P4a fail-open behavior documented + implemented in the hook" FAIL
@@ -129,7 +126,7 @@ if grep -qF 'detectChannels' "$PARSER" && grep -qF 'detectChannels' "$DECIDE"; t
 else
   check "P5a write-channel detection reuses the shared parser (detectChannels)" FAIL
 fi
-if grep -qF 'BSWG_MODE= PAYLOAD=' "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"; then
+if grep -qF 'BSWG_MODE= PAYLOAD=' "$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"; then
   check "P5b source-write gate pins BSWG_MODE= at its call site" PASS
 else
   check "P5b source-write gate pins BSWG_MODE= at its call site" FAIL
@@ -447,29 +444,109 @@ fi
 OUT="$(run_hook "$(bash_payload "$OPKEY_CMD; GH_TOKEN=\"f8Zk2pQ9xL4mNv7wRs3TuY6bE1cD5gHj\" gh auth status")")"
 case "$OUT" in *"$DENY"*high-entropy-assignment*) check "F12f a real secret in the same command as the operation key still denies" PASS;; *) check "F12f secret beside the operation key (got '$OUT')" FAIL;; esac
 
-mkdir -p "$TMPD/shim"
-cat > "$TMPD/shim/node" <<'SHIM'
-#!/bin/bash
-for a in "$@"; do
-  case "$a" in *secret-scan-decide.js*) exit 1;; esac
-done
-exec "$REAL_NODE_BIN" "$@"
-SHIM
-chmod +x "$TMPD/shim/node" 2>/dev/null
-REAL_NODE_DIR="$(dirname "$(command -v node)")"
-# Effectiveness probe: this case needs a chmod +x'd script to be executable by
-# bare name off PATH. Filesystems that ignore the Unix exec bit (Windows
-# git-bash, some mounts) can't simulate the node shim, so skip rather than fail.
-printf '#!/bin/bash\necho SHIMOK\n' > "$TMPD/shim/_probe"
-chmod +x "$TMPD/shim/_probe" 2>/dev/null
-if [ "$(PATH="$TMPD/shim:/usr/bin:/bin" _probe 2>/dev/null)" = "SHIMOK" ]; then
-  OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' \
-    REAL_NODE_BIN="$REAL_NODE_DIR/node" PATH="$TMPD/shim:$REAL_NODE_DIR:/usr/bin:/bin")"
-  [ -z "$OUT" ] && check "F13 scanner crash (node shim rc=1) -> fail-open allow" PASS || check "F13 scanner crash (node shim rc=1) -> fail-open allow" FAIL
-else
-  check "F13 scanner crash -> fail-open allow (skipped: FS ignores exec bit)" PASS
-fi
-rm -f "$TMPD/shim/_probe" 2>/dev/null
+cat > "$TMPD/scan-crash.js" <<'NODE'
+const Module = require('module');
+if (/secret-scan-decide\.js$/.test(process.argv[1] || '')) process.exit(1);
+const load = Module._load;
+Module._load = function (request) {
+  const loaded = load.apply(this, arguments);
+  if (!/secret-scan-decide\.js$/.test(request) || !loaded || typeof loaded.decide !== 'function') return loaded;
+  return Object.assign({}, loaded, { decide() { throw new Error('scanner crash'); } });
+};
+NODE
+OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' \
+  NODE_OPTIONS="--require=$TMPD/scan-crash.js")"
+[ -z "$OUT" ] && check "F13 a scanner crash, in the dispatcher or in its own process, fails open" PASS \
+  || check "F13 a scanner crash, in the dispatcher or in its own process, fails open (got '$OUT')" FAIL
+
+cat > "$TMPD/scan-mark.js" <<'NODE'
+const fs = require('fs');
+const Module = require('module');
+const mark = () => fs.appendFileSync(process.env.SCAN_MARK, 'x');
+if (/secret-scan-decide\.js$/.test(process.argv[1] || '')) mark();
+const load = Module._load;
+Module._load = function (request) {
+  const loaded = load.apply(this, arguments);
+  if (!/secret-scan-decide\.js$/.test(request) || !loaded || typeof loaded.decide !== 'function') return loaded;
+  return Object.assign({}, loaded, { decide(...input) { mark(); return loaded.decide(...input); } });
+};
+NODE
+scan_run() {
+  local payload="$1"
+  rm -f "$TMPD/scan.mark"
+  SCAN_OUT="$(run_hook "$payload" SCAN_MARK="$TMPD/scan.mark" NODE_OPTIONS="--require=$TMPD/scan-mark.js")"
+  [ -f "$TMPD/scan.mark" ] && SCAN_STARTED=yes || SCAN_STARTED=no
+}
+raw_payload() {
+  printf ' {"hook_event_name":"PreToolUse","session_id":"secret-scan-test","cwd":%s,%s}' \
+    "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$TMPD")" "$1"
+}
+SCAN_TOKEN_TAIL=123456789012345678901234567890123456
+SCAN_TOKEN="ghp_${SCAN_TOKEN_TAIL}"
+CHANNEL_MISSES=""
+channel_row() {
+  case "$1" in
+    redirect) printf '%s' "printf %s $SCAN_TOKEN > creds.env" ;;
+    tee) printf '%s' "printf %s $SCAN_TOKEN | tee creds.env" ;;
+    'sed -i') printf '%s' "sed -i s/x/$SCAN_TOKEN/ creds.env" ;;
+    'dd of=') printf '%s' "printf %s $SCAN_TOKEN | dd of=creds.env" ;;
+    heredoc) printf '%s' "python3 - <<EOF"$'\n'"print('$SCAN_TOKEN')"$'\n'"EOF" ;;
+  esac
+}
+cat > "$TMPD/channel-labels.js" <<'NODE'
+const source = require('fs').readFileSync(process.argv[2], 'utf8');
+const body = /\nfunction detectChannels\([^)]*\) \{\n([\s\S]*?)\n\}\n/.exec(source);
+if (body) process.stdout.write(Array.from(body[1].matchAll(/found\.add\("([^"]+)"\)/g), (m) => m[1]).join('\n'));
+NODE
+CHANNEL_LABELS="$(node "$TMPD/channel-labels.js" "$PARSER")"
+CHANNEL_NL=$'\n'
+CHANNEL_ROWS=0
+while IFS= read -r channel_label; do
+  [ -n "$channel_label" ] || continue
+  channel_command="$(channel_row "$channel_label")"
+  if [ -z "$channel_command" ]; then
+    CHANNEL_MISSES="$CHANNEL_MISSES [$channel_label:no-row]"
+    continue
+  fi
+  channel_detected="$(detect "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$channel_command")")"
+  case "$CHANNEL_NL$channel_detected$CHANNEL_NL" in
+    *"$CHANNEL_NL$channel_label$CHANNEL_NL"*) ;;
+    *) CHANNEL_MISSES="$CHANNEL_MISSES [$channel_label:row-not-detected]"; continue ;;
+  esac
+  CHANNEL_ROWS=$((CHANNEL_ROWS + 1))
+  scan_run "$(bash_payload "$channel_command")"
+  if [ "$SCAN_STARTED" != yes ] || ! is_deny "$SCAN_OUT"; then
+    CHANNEL_MISSES="$CHANNEL_MISSES [$channel_label:$SCAN_STARTED]"
+  fi
+done <<EOF
+$CHANNEL_LABELS
+EOF
+[ "$CHANNEL_ROWS" -gt 0 ] || CHANNEL_MISSES="$CHANNEL_MISSES [no-detectChannels-label-read]"
+SCAN_ESCAPED_REDIRECT="$(printf '\134u003e')"
+SCAN_ESCAPED_PAYLOAD="$(raw_payload '"tool_name":"Bash","tool_input":{"command":"printf %s '"$SCAN_TOKEN"' '"$SCAN_ESCAPED_REDIRECT"' creds.env"}')"
+case "$SCAN_ESCAPED_PAYLOAD" in
+  *'>'*) CHANNEL_MISSES="$CHANNEL_MISSES [unicode-redirect:fixture-holds-a-plain-redirect]" ;;
+  *)
+    scan_run "$SCAN_ESCAPED_PAYLOAD"
+    if [ "$SCAN_STARTED" != yes ] || ! is_deny "$SCAN_OUT"; then CHANNEL_MISSES="$CHANNEL_MISSES [unicode-redirect:$SCAN_STARTED]"; fi
+    ;;
+esac
+scan_run "$(raw_payload '"tool_name":"Bash","tool_input":{"command":"Set-Content creds.env '"$SCAN_TOKEN"'"},"tool_name":"PowerShell"')"
+if [ "$SCAN_STARTED" != yes ] || ! is_deny "$SCAN_OUT"; then CHANNEL_MISSES="$CHANNEL_MISSES [duplicate-tool-name:$SCAN_STARTED]"; fi
+[ -z "$CHANNEL_MISSES" ] \
+  && check "F13b every channel detectChannels reports ($CHANNEL_ROWS), a unicode-escaped redirect and a duplicated tool_name still reach the scanner and deny" PASS \
+  || check "F13b a write channel skipped the scanner or allowed a token:$CHANNEL_MISSES" FAIL
+case "$TMPD" in
+  *'>'*|*'<<'*|*tee*|*of=*|*'\u'*|*sed*-i*)
+    check "F13c a channel-less Bash call skips the scanner (skipped: the fixture path holds a channel token)" PASS
+    ;;
+  *)
+    scan_run "$(bash_payload "gh auth status --hostname $SCAN_TOKEN")"
+    [ "$SCAN_STARTED" = no ] && [ -z "$SCAN_OUT" ] \
+      && check "F13c a channel-less Bash call is allowed without starting the scanner" PASS \
+      || check "F13c channel-less Bash call (scanner started: $SCAN_STARTED, got '$SCAN_OUT')" FAIL
+    ;;
+esac
 
 # --- unregistered session (the 0.17.0 upgrade state) -----------------------
 # This hook matches Bash as well as Edit/Write, and it denied on the session bind

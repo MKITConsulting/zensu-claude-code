@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // persona-activation.js — repo-local review-persona activation for the
-// /zensu:tdd review fan-out. Owned and consumed by the tdd skill's Phase 6
+// /zensu:build review fan-out. Owned and consumed by the build skill's Phase 6
 // step-10 fan-out (no hook consumer).
 //
 // Projects extend the review panel by dropping agent definitions at

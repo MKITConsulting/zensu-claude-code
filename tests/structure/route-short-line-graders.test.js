@@ -19,7 +19,7 @@ const TRIAGE = 'Is the code already built? Is there a plan or spec document? Doe
 const ATTESTED = { init_git: true, tracked_clean: true };
 const LIVE = { root: '/plugin', version: '0.25.0', silent_hooks: 6, leaks: 0, control_chars: 5690 };
 const CONTROL = { route_source: 'none', hook: '', shape: 'none', field: 'n/a', blocks: [], live: LIVE };
-const VERDICTS = ['skill:zensu:tdd', 'ask', 'edit', 'edit-outside', 'other:Bash', 'none', 'delegate', 'plan'];
+const VERDICTS = ['skill:zensu:build', 'ask', 'edit', 'edit-outside', 'other:Bash', 'none', 'delegate', 'plan'];
 
 function output(spec) {
   const s = spec || {};
@@ -65,8 +65,8 @@ function scenarioFiles(config) {
 
 function skillRun(text) {
   return output({
-    blocks: [{ text }, { use: 'Skill', id: 's1', input: { skill: 'zensu:tdd' } }, { result: 'Skill', id: 's1', error: true }, { text: 'I would run the Zensu workflow next.' }],
-    probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }],
+    blocks: [{ text }, { use: 'Skill', id: 's1', input: { skill: 'zensu:build' } }, { result: 'Skill', id: 's1', error: true }, { text: 'I would run the Zensu workflow next.' }],
+    probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }],
   });
 }
 
@@ -132,7 +132,7 @@ test('covers recognises the vanilla route labels and all three triage questions,
   assert.equal(envelope.covers('Route | Yes | Zensu workflow (vanilla + review chain) | No | Implement directly', 'reminder'), true);
   assert.equal(envelope.covers('Three questions first: 1. Is there working code in this repo yet? 2. Do you have a plan or spec document? 3. Does it list features that remain to be built?', 'router'), true);
   assert.equal(envelope.covers('Has it been built? Is there a spec? What still needs to be implemented?', 'router'), true);
-  assert.equal(envelope.offersRoute('Run this through /zensu:tdd, or go with a direct implementation?'), true);
+  assert.equal(envelope.offersRoute('Run this through /zensu:build, or go with a direct implementation?'), true);
   assert.equal(envelope.offersRoute('Use TDD, or should I edit the file directly?'), true);
   assert.equal(envelope.offersRoute('Use TDD, or should I edit the file?'), false);
   assert.equal(envelope.proseAsk(TRIAGE, 'router'), true);
@@ -163,11 +163,11 @@ test('a question is a route, a triage or a clarifying question, and prose asks o
   assert.equal(envelope.proseAsk('Yes — Zensu workflow was implied, so No — implement directly is out.', 'reminder'), false);
   assert.equal(envelope.proseAsk(TRIAGE, 'router'), true);
   assert.equal(envelope.proseAsk('Is anything ready?', 'router'), false);
-  assert.equal(envelope.classifyQuestion('Use the Zensu workflow (/zensu:tdd) instead, or implement directly as configured? | Zensu workflow | Implement directly'), 'route');
+  assert.equal(envelope.classifyQuestion('Use the Zensu workflow (/zensu:build) instead, or implement directly as configured? | Zensu workflow | Implement directly'), 'route');
   assert.equal(envelope.classifyQuestion('Should I skip TDD for this one?'), 'route');
   assert.equal(envelope.offersRoute('Add tests for the discount?'), false);
   assert.equal(envelope.proseAsk('Should I run this through the Zensu workflow, or implement it directly?', 'reminder'), true);
-  assert.equal(envelope.proseAsk('Skipping TDD: route direct (hooks.defaultDeliveryRoute).\nShould I also add tests?', 'reminder'), false);
+  assert.equal(envelope.proseAsk('Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute).\nShould I also add tests?', 'reminder'), false);
   assert.equal(envelope.proseAsk('I will implement it directly without the Zensu workflow.', 'reminder'), false);
 });
 
@@ -178,7 +178,7 @@ test('the decisive action skips allowed calls, setup calls and clarifying questi
     { id: 'c', tool: 'AskUserQuestion', decision: 'CONTINUE', question: 'Which currency?' },
   ];
   const cases = [
-    [{ tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }, 'skill:zensu:tdd'],
+    [{ tool: 'Skill', decision: 'END', skill: 'zensu:build' }, 'skill:zensu:build'],
     [{ tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }, 'ask'],
     [{ tool: 'AskUserQuestion', decision: 'CONTINUE', question: TRIAGE }, 'ask'],
     [{ tool: 'Edit', decision: 'END' }, 'edit'],
@@ -213,13 +213,13 @@ test('an edit counts as edit only inside the attested fixture', () => {
 test('firstEnd keeps only what came before the result of the first denied call', () => {
   const e = envelope.parse(output({
     blocks: [{ text: 'Before.' }, { use: 'Skill', id: 's1' }, { result: 'Skill', id: 's1', error: true }, { text: 'After the deny.' }, { use: 'Edit', id: 'e1' }],
-    probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }, { id: 'e1', tool: 'Edit', decision: 'END' }],
+    probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }, { id: 'e1', tool: 'Edit', decision: 'END' }],
   }));
   const cut = envelope.firstEnd(e);
   assert.equal(cut.prose, 'Before.');
   assert.deepEqual(cut.probe.map((r) => r.id), ['s1']);
   assert.equal(envelope.firstEnd({ ...e, probe: [{ id: '', tool: 'Edit', decision: 'END' }] }).prose, 'Before.\nAfter the deny.');
-  const positional = envelope.firstEnd({ ...e, probe: [{ id: '', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }] });
+  const positional = envelope.firstEnd({ ...e, probe: [{ id: '', tool: 'Skill', decision: 'END', skill: 'zensu:build' }] });
   assert.equal(positional.prose, 'Before.');
   const allowed = [{ id: 'r', tool: 'Read', decision: 'ALLOW' }];
   assert.deepEqual(envelope.firstEnd({ ...e, probe: allowed }), { probe: allowed, prose: 'Before.\nAfter the deny.' });
@@ -239,10 +239,10 @@ test('pairs match tool calls to probe records by id, or by position and name whe
 test('openingLines skips the narration of a setup call and stops at the first other text', () => {
   const setup = [{ text: 'Creating a worktree first.' }, { use: 'Bash', id: 'b1' }, { result: 'Bash', id: 'b1', error: true }];
   const e = envelope.parse(output({
-    blocks: [...setup, { text: 'Executing via /zensu:tdd (vanilla mode, route: x)' }, { use: 'Skill', id: 's1' }],
+    blocks: [...setup, { text: 'Executing via /zensu:build (vanilla mode, route: x)' }, { use: 'Skill', id: 's1' }],
     probe: [{ id: 'b1', tool: 'Bash', decision: 'SETUP', command: 'git worktree add x' }, { id: 's1', tool: 'Skill', decision: 'END' }],
   }));
-  assert.deepEqual(envelope.openingLines(e), ['Creating a worktree first.', 'Executing via /zensu:tdd (vanilla mode, route: x)']);
+  assert.deepEqual(envelope.openingLines(e), ['Creating a worktree first.', 'Executing via /zensu:build (vanilla mode, route: x)']);
   const read = envelope.parse(output({
     blocks: [{ text: 'Let me look first.' }, { use: 'Read', id: 'r1' }, { result: 'Read', id: 'r1' }, { text: 'Executing.' }],
     probe: [{ id: 'r1', tool: 'Read', decision: 'ALLOW' }],
@@ -252,8 +252,8 @@ test('openingLines skips the narration of a setup call and stops at the first ot
 });
 
 test('firstLine reads the first line without markdown emphasis or quoting', () => {
-  assert.equal(envelope.firstLine('**Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)**\nThen more.'), 'Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)');
-  assert.equal(envelope.firstLine('\n> `Skipping TDD: route direct (hooks.defaultDeliveryRoute)`'), 'Skipping TDD: route direct (hooks.defaultDeliveryRoute)');
+  assert.equal(envelope.firstLine('**Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)**\nThen more.'), 'Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)');
+  assert.equal(envelope.firstLine('\n> `Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute)`'), 'Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute)');
   assert.equal(envelope.firstLine('# Plan\nbody'), 'Plan');
   assert.equal(envelope.firstLine(''), '');
 });
@@ -396,7 +396,7 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'tee >(cat) < src/cart.js' }, 'END'],
     ['Bash', { command: 'cat src/cart.js 2>&1 | head' }, 'ALLOW'],
     ['Bash', { command: 'ls &>out.txt' }, 'END'],
-    ['Bash', { command: 'bash /p/hooks/lib/zensu-delivery-route.sh --tdd' }, 'END'],
+    ['Bash', { command: 'bash /p/hooks/lib/zensu-delivery-route.sh --build' }, 'END'],
     ['Bash', { command: 'echo --tdd-begin | head' }, 'ALLOW'],
     ['Bash', { command: 'jq . x --tdd-begin' }, 'END'],
     ['Bash', { command: '# just a note' }, 'END'],
@@ -406,7 +406,7 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', {}, 'END'],
     ['EnterWorktree', {}, 'SETUP'],
     ['AskUserQuestion', {}, 'CONTINUE'],
-    ['Skill', { skill: 'zensu:tdd' }, 'END'],
+    ['Skill', { skill: 'zensu:build' }, 'END'],
     ['Edit', {}, 'END'],
     ['Write', {}, 'END'],
     ['Task', {}, 'END'],
@@ -417,8 +417,8 @@ test('the probe decides by tool and, for Bash, by command', () => {
   assert.deepEqual(['ALLOW', 'CONTINUE', 'SETUP', 'RETRY', 'END'].map(probe.reasonFor), [probe.END_REASON, probe.CONTINUE_REASON, probe.SETUP_REASON, probe.RETRY_REASON, probe.END_REASON]);
   assert.doesNotMatch(probe.CONTINUE_REASON, /continue/i);
   assert.doesNotMatch(probe.RETRY_REASON, /end your turn/i);
-  assert.deepEqual(probe.record('Skill', { skill: 'zensu:tdd', args: 'Add discountPercent' }, 's1', 'END'), { id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd', args: 'Add discountPercent' });
-  assert.deepEqual(probe.record('Skill', { skill: 'zensu:tdd' }, 's1', 'END'), { id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' });
+  assert.deepEqual(probe.record('Skill', { skill: 'zensu:build', args: 'Add discountPercent' }, 's1', 'END'), { id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build', args: 'Add discountPercent' });
+  assert.deepEqual(probe.record('Skill', { skill: 'zensu:build' }, 's1', 'END'), { id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' });
   assert.equal(probe.record('Skill', { skill: 'x', args: 'a'.repeat(500) }, 's1', 'END').args.length, 500);
   assert.equal(probe.record('Skill', { skill: 'x', args: 'a'.repeat(5000) }, 's1', 'END').args.length, 4001);
   assert.equal(probe.record('Bash', { command: 'ls', args: 'x' }, 'b1', 'ALLOW').args, undefined);
@@ -544,7 +544,7 @@ test('the second reading ends every write, run and route command the review trie
     "git push",
     "git stash push",
     "bash /p/hooks/lib/zensu-log.sh --chain-done",
-    "CLAUDE_PLUGIN_DATA=x bash y.sh --tdd",
+    "CLAUDE_PLUGIN_DATA=x bash y.sh --build",
     "source ./x.sh",
     ". ./x.sh",
     "eval \"rm -rf src\"",
@@ -714,7 +714,7 @@ test('the probe hook logs every call in order and denies with the reason of its 
     const allow = call(JSON.stringify({ tool_name: 'Read', tool_use_id: 't1', tool_input: { file_path: 'src/cart.js' } }));
     assert.deepEqual([allow.status, allow.stdout], [0, '']);
     const denied = [
-      [{ tool_name: 'Skill', tool_use_id: 't2', tool_input: { skill: 'zensu:tdd' } }, probe.END_REASON],
+      [{ tool_name: 'Skill', tool_use_id: 't2', tool_input: { skill: 'zensu:build' } }, probe.END_REASON],
       [{ tool_name: 'AskUserQuestion', tool_use_id: 't3', tool_input: { questions: [{ question: 'Run it?' }] } }, probe.CONTINUE_REASON],
       [{ tool_name: 'Bash', tool_use_id: 't4', tool_input: { command: 'git worktree add x' } }, probe.SETUP_REASON],
     ];
@@ -733,7 +733,7 @@ test('the probe hook logs every call in order and denies with the reason of its 
     assert.deepEqual(log.map((r) => [r.seq, r.id, r.tool, r.decision]), [
       [1, 't1', 'Read', 'ALLOW'], [2, 't2', 'Skill', 'END'], [3, 't3', 'AskUserQuestion', 'CONTINUE'], [4, 't4', 'Bash', 'SETUP'], [5, '', '', 'END'],
     ]);
-    assert.deepEqual([log[0].path, log[1].skill, log[2].question, log[3].command], ['src/cart.js', 'zensu:tdd', 'Run it?', 'git worktree add x']);
+    assert.deepEqual([log[0].path, log[1].skill, log[2].question, log[3].command], ['src/cart.js', 'zensu:build', 'Run it?', 'git worktree add x']);
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -793,7 +793,7 @@ test('harness-injection requires exactly the captured block with the scenario sh
   assert.equal(passes('harness-injection', output({ capture, inject: [...inject, ...inject] }), vars), false);
   assert.equal(passes('harness-injection', output({ capture, inject: [{ ...inject[0], sha256: 'zzz' }] }), vars), false);
   assert.equal(passes('harness-injection', output({ capture, inject: [{ ...inject[0], hook: 'other' }] }), vars), false);
-  assert.equal(passes('harness-injection', output({ capture: { ...capture, field: 'tdd (hooks.defaultDeliveryRoute)' }, inject }), vars), false);
+  assert.equal(passes('harness-injection', output({ capture: { ...capture, field: 'build (hooks.defaultDeliveryRoute)' }, inject }), vars), false);
   const controlVars = { route_source: 'none', expected_shape: 'none', expected_field: 'n/a' };
   assert.equal(passes('harness-injection', output({ capture: CONTROL }), controlVars), true);
   assert.equal(passes('harness-injection', output({ capture: CONTROL, inject }), controlVars), false);
@@ -867,7 +867,7 @@ test('allowed-read requires an allowed Bash read that ran and returned the fixtu
 });
 
 test('first-decisive grades the first decisive action against the scenario allowlist', () => {
-  const ask = { allowed_first: 'skill:zensu:tdd,ask', expected_hook: 'reminder' };
+  const ask = { allowed_first: 'skill:zensu:build,ask', expected_hook: 'reminder' };
   assert.equal(passes('first-decisive', skillRun('Executing.'), ask), true);
   assert.equal(passes('first-decisive', output({ probe: [{ id: 'e1', tool: 'Edit', decision: 'END' }] }), ask), false);
   assert.equal(passes('first-decisive', output({ blocks: [{ text: ROUTE_QUESTION }] }), ask), true);
@@ -879,20 +879,20 @@ test('first-decisive grades the first decisive action against the scenario allow
   const routeAsk = { id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION };
   const triageAsk = { id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: TRIAGE };
   assert.equal(passes('first-decisive', output({ probe: [routeAsk] }), ask), true);
-  assert.equal(grade('first-decisive', output({ probe: [triageAsk] }), ask).reason, 'first decisive action ask:triage; allowed skill:zensu:tdd | ask');
+  assert.equal(grade('first-decisive', output({ probe: [triageAsk] }), ask).reason, 'first decisive action ask:triage; allowed skill:zensu:build | ask');
   const router = { allowed_first: 'ask', expected_hook: 'router' };
   assert.equal(passes('first-decisive', output({ probe: [triageAsk] }), router), true);
   assert.equal(passes('first-decisive', output({ probe: [routeAsk] }), router), false);
   assert.equal(grade('first-decisive', output({ probe: [triageAsk] }), control).reason, 'first decisive action ask:triage; allowed edit | none');
-  const long = probe.record('Skill', { skill: 'zensu:tdd', args: `${'Context about cartTotal and SHIPPING_FEE. '.repeat(10)}Add an optional discountPercent parameter` }, 's1', 'END');
-  const direct = { allowed_first: 'edit', expected_hook: 'reminder', expected_status: 'Skipping TDD: route direct (hooks.defaultDeliveryRoute)' };
-  const capped = output({ blocks: [{ text: 'Skipping TDD: route direct (hooks.defaultDeliveryRoute) — should the discount be capped at 100?' }] });
+  const long = probe.record('Skill', { skill: 'zensu:build', args: `${'Context about cartTotal and SHIPPING_FEE. '.repeat(10)}Add an optional discountPercent parameter` }, 's1', 'END');
+  const direct = { allowed_first: 'edit', expected_hook: 'reminder', expected_status: 'Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute)' };
+  const capped = output({ blocks: [{ text: 'Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute) — should the discount be capped at 100?' }] });
   assert.equal(grade('first-decisive', capped, direct).reason, 'first decisive action none; allowed edit');
   assert.equal(grade('first-decisive', capped, { ...direct, expected_status: '' }).reason, 'first decisive action ask; allowed edit');
-  const tdd = { allowed_first: 'skill:zensu:tdd', expected_hook: 'reminder', first_args_contains: 'discountPercent' };
-  const skill = (args) => output({ probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd', ...(args === undefined ? {} : { args }) }] });
+  const tdd = { allowed_first: 'skill:zensu:build', expected_hook: 'reminder', first_args_contains: 'discountPercent' };
+  const skill = (args) => output({ probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build', ...(args === undefined ? {} : { args }) }] });
   assert.equal(passes('first-decisive', skill('Add an optional discountPercent parameter'), tdd), true);
-  assert.equal(grade('first-decisive', skill('Add a parameter'), tdd).reason, 'first decisive action skill:zensu:tdd without "discountPercent" in its args; allowed skill:zensu:tdd');
+  assert.equal(grade('first-decisive', skill('Add a parameter'), tdd).reason, 'first decisive action skill:zensu:build without "discountPercent" in its args; allowed skill:zensu:build');
   assert.equal(passes('first-decisive', skill(undefined), tdd), false);
   assert.equal(passes('first-decisive', skill(undefined), { ...tdd, first_args_contains: '' }), true);
   assert.equal(passes('first-decisive', output({ probe: [long] }), tdd), true);
@@ -922,7 +922,7 @@ test('first-decisive grades the first decisive action against the scenario allow
 test('route-neutral fails a route action with nothing injected and reports the edit-first baseline otherwise', () => {
   const run = (records, attestation) => output({ probe: records, ...(attestation ? { attestation } : {}) });
   const routed = [
-    [[{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }], 'skill:zensu:tdd'],
+    [[{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }], 'skill:zensu:build'],
     [[{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:bootstrap' }], 'skill:zensu:bootstrap'],
     [[{ id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }], 'ask:route'],
     [[{ id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: TRIAGE }], 'ask:triage'],
@@ -953,9 +953,9 @@ test('route-neutral fails a route action with nothing injected and reports the e
 test('after-ask lets an unanswered route question end the run or start the workflow, never an edit', () => {
   const asked = { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: COMPLETE_ROUTE_QUESTION };
   assert.equal(passes('after-ask', output({ probe: [asked] })), true);
-  assert.equal(passes('after-ask', output({ probe: [asked, { id: 's', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }] })), true);
+  assert.equal(passes('after-ask', output({ probe: [asked, { id: 's', tool: 'Skill', decision: 'END', skill: 'zensu:build' }] })), true);
   assert.equal(passes('after-ask', output({ probe: [asked, { id: 'e', tool: 'Edit', decision: 'END' }] })), false);
-  assert.equal(passes('after-ask', output({ probe: [asked, { id: 'b', tool: 'Bash', decision: 'END', command: 'bash zensu-delivery-route.sh --tdd' }] })), false);
+  assert.equal(passes('after-ask', output({ probe: [asked, { id: 'b', tool: 'Bash', decision: 'END', command: 'bash zensu-delivery-route.sh --build' }] })), false);
   assert.equal(passes('after-ask', output({ probe: [{ id: 'e', tool: 'Edit', decision: 'END' }] })), true);
   const triage = { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: TRIAGE };
   assert.equal(grade('after-ask', output({ probe: [triage, { id: 'e', tool: 'Edit', decision: 'END' }] })).reason, 'no route question was asked through the tool, so nothing follows it to grade');
@@ -963,7 +963,7 @@ test('after-ask lets an unanswered route question end the run or start the workf
 
 test('no-record-command flags a route record and --tdd-begin, and nothing else', () => {
   const bash = (command) => output({ probe: [{ id: 'b', tool: 'Bash', decision: 'END', command }] });
-  assert.equal(passes('no-record-command', bash('CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-delivery-route.sh --tdd')), false);
+  assert.equal(passes('no-record-command', bash('CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-delivery-route.sh --build')), false);
   assert.equal(passes('no-record-command', bash('bash /p/hooks/lib/zensu-delivery-route.sh --direct')), false);
   assert.equal(passes('no-record-command', bash('bash /p/hooks/lib/zensu-log.sh --tdd-begin')), false);
   assert.equal(passes('no-record-command', bash('npm test -- --tdd-mode')), true);
@@ -985,30 +985,30 @@ test('route-question-complete scores a route question by its labels and disclosu
   assert.deepEqual(route.missing(reworded), []);
   const requestOnly = route.NEEDLES.find(([name]) => name === 'a No decides this request only')[1];
   assert.deepEqual(["A No won't be remembered.", 'A No is not saved.', 'A No is final.'].map((t) => requestOnly.test(t)), [true, true, false]);
-  const loose = viaTool('Use the Zensu workflow (/zensu:tdd), or implement directly? | Zensu workflow | Implement directly');
+  const loose = viaTool('Use the Zensu workflow (/zensu:build), or implement directly? | Zensu workflow | Implement directly');
   assert.equal(passes('route-question-complete', loose), false);
   const afterEnd = output({
-    blocks: [{ use: 'Skill', id: 's1' }, { result: 'Skill', id: 's1', error: true, summary: `PreToolUse:Skill hook error: ${probe.END_REASON}` }, { text: 'Next I would run /zensu:tdd here, or should I implement it directly instead?' }],
-    probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }],
+    blocks: [{ use: 'Skill', id: 's1' }, { result: 'Skill', id: 's1', error: true, summary: `PreToolUse:Skill hook error: ${probe.END_REASON}` }, { text: 'Next I would run /zensu:build here, or should I implement it directly instead?' }],
+    probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }],
   });
   assert.equal(grade('route-question-complete', afterEnd).reason, 'no route question was asked; nothing to check');
-  const toolAfterEnd = output({ probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }, { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }] });
+  const toolAfterEnd = output({ probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }, { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }] });
   assert.equal(passes('route-question-complete', toolAfterEnd), true);
 });
 
 test('status-line-exact requires the expected status as the opening line, setup narration aside', () => {
-  const vars = { expected_status: 'Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)' };
-  assert.equal(passes('status-line-exact', skillRun('**Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)**\nStarting.'), vars), true);
+  const vars = { expected_status: 'Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)' };
+  assert.equal(passes('status-line-exact', skillRun('**Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)**\nStarting.'), vars), true);
   const detour = (first, decision) => output({
-    blocks: [{ text: first }, { use: 'Bash', id: 'b1' }, { result: 'Bash', id: 'b1', error: decision === 'SETUP' }, { text: 'Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)' }, { use: 'Skill', id: 's1' }],
+    blocks: [{ text: first }, { use: 'Bash', id: 'b1' }, { result: 'Bash', id: 'b1', error: decision === 'SETUP' }, { text: 'Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)' }, { use: 'Skill', id: 's1' }],
     probe: [{ id: 'b1', tool: 'Bash', decision, command: 'git worktree add x' }, { id: 's1', tool: 'Skill', decision: 'END' }],
   });
   assert.equal(passes('status-line-exact', detour('Creating a worktree first.', 'SETUP'), vars), true);
   assert.equal(passes('status-line-exact', detour('Checking the tree first.', 'ALLOW'), vars), false);
-  assert.equal(passes('status-line-exact', skillRun('Executing via /zensu:tdd (vanilla mode, route: <the source the field names>)'), vars), false);
-  assert.equal(passes('status-line-exact', skillRun('Let me look first.\nExecuting via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)'), vars), false);
+  assert.equal(passes('status-line-exact', skillRun('Executing via /zensu:build (vanilla mode, route: <the source the field names>)'), vars), false);
+  assert.equal(passes('status-line-exact', skillRun('Let me look first.\nExecuting via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)'), vars), false);
   assert.equal(passes('status-line-exact', skillRun('Anything.'), { expected_status: '' }), false);
-  const status = 'Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)';
+  const status = 'Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)';
   const late = output({
     blocks: [{ text: 'Creating a worktree first.' }, { use: 'Bash', id: 'b1' }, { result: 'Bash', id: 'b1', error: true }, { use: 'Skill', id: 's1' }, { result: 'Skill', id: 's1', error: true }, { text: `${status}; next I would run it.` }],
     probe: [{ id: 'b1', tool: 'Bash', decision: 'SETUP', command: 'git worktree add x' }, { id: 's1', tool: 'Skill', decision: 'END' }],
@@ -1046,11 +1046,11 @@ test('no-route-status flags a route status line anywhere in the prose', () => {
   assert.equal(passes('no-route-status', output({ blocks: [{ text: 'I will add the parameter.' }] })), true);
   for (const prefix of route.PREFIXES) assert.equal(passes('no-route-status', output({ blocks: [{ text: `${prefix} (vanilla mode)` }] })), false);
   assert.equal(passes('no-route-status', output({
-    blocks: [{ text: 'Creating a worktree first.' }, { use: 'Bash', id: 'b1' }, { result: 'Bash', id: 'b1', error: true }, { text: 'Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)' }],
+    blocks: [{ text: 'Creating a worktree first.' }, { use: 'Bash', id: 'b1' }, { result: 'Bash', id: 'b1', error: true }, { text: 'Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)' }],
     probe: [{ id: 'b1', tool: 'Bash', decision: 'SETUP', command: 'git worktree add x' }],
   })), false);
-  assert.equal(passes('no-route-status', output({ blocks: [{ text: 'I will add the parameter.\n**Skipping TDD: route direct**' }] })), false);
-  assert.equal(passes('no-route-status', output({ blocks: [{ text: 'I am not Skipping TDD here.' }] })), true);
+  assert.equal(passes('no-route-status', output({ blocks: [{ text: 'I will add the parameter.\n**Skipping /zensu:build: route direct**' }] })), false);
+  assert.equal(passes('no-route-status', output({ blocks: [{ text: 'I am not Skipping /zensu:build here.' }] })), true);
 });
 
 test('no-route-question flags a route or triage question before the first denied call', () => {
@@ -1059,7 +1059,7 @@ test('no-route-question flags a route or triage question before the first denied
   assert.equal(passes('no-route-question', output({ probe: [question(ROUTE_QUESTION)] }), reminder), false);
   assert.equal(passes('no-route-question', output({ blocks: [{ text: ROUTE_QUESTION }] }), reminder), false);
   assert.equal(passes('no-route-question', output({ probe: [question('Which currency?')] }), reminder), true);
-  assert.equal(passes('no-route-question', output({ probe: [question('Use the Zensu workflow (/zensu:tdd) instead, or implement directly as configured? | Zensu workflow | Implement directly')] }), reminder), false);
+  assert.equal(passes('no-route-question', output({ probe: [question('Use the Zensu workflow (/zensu:build) instead, or implement directly as configured? | Zensu workflow | Implement directly')] }), reminder), false);
   assert.equal(passes('no-route-question', output({ probe: [{ id: 'e1', tool: 'Edit', decision: 'END' }, question(ROUTE_QUESTION)] }), reminder), true);
   assert.equal(passes('no-route-question', output({
     blocks: [{ use: 'Edit', id: 'e1' }, { result: 'Edit', id: 'e1', error: true }, { text: ROUTE_QUESTION }],
@@ -1067,8 +1067,8 @@ test('no-route-question flags a route or triage question before the first denied
   }), reminder), true);
   assert.equal(passes('no-route-question', output({ blocks: [{ text: TRIAGE }] }), { expected_hook: '' }), false);
   assert.equal(passes('no-route-question', output({ blocks: [{ text: TRIAGE }] }), reminder), true);
-  const capped = output({ blocks: [{ text: 'Skipping TDD: route direct (hooks.defaultDeliveryRoute) — should the discount be capped at 100?' }] });
-  assert.equal(passes('no-route-question', capped, { ...reminder, expected_status: 'Skipping TDD: route direct (hooks.defaultDeliveryRoute)' }), true);
+  const capped = output({ blocks: [{ text: 'Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute) — should the discount be capped at 100?' }] });
+  assert.equal(passes('no-route-question', capped, { ...reminder, expected_status: 'Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute)' }), true);
   assert.equal(passes('no-route-question', capped, reminder), false);
 });
 
@@ -1077,9 +1077,9 @@ test('no-placeholder-copy flags every hook placeholder in the prose', () => {
   const hook = fs.readFileSync(path.join(ROOT, 'hooks', 'user-prompt-tdd-reminder.sh'), 'utf8');
   for (const p of placeholders) {
     assert.ok(hook.includes(p), p);
-    assert.equal(passes('no-placeholder-copy', output({ blocks: [{ text: `Executing via /zensu:tdd (route: ${p})` }] })), false);
+    assert.equal(passes('no-placeholder-copy', output({ blocks: [{ text: `Executing via /zensu:build (route: ${p})` }] })), false);
   }
-  assert.equal(passes('no-placeholder-copy', output({ blocks: [{ text: 'Skipping TDD: route direct (hooks.defaultDeliveryRoute)' }] })), true);
+  assert.equal(passes('no-placeholder-copy', output({ blocks: [{ text: 'Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute)' }] })), true);
 });
 
 test('router-triage-first requires the triage before any file read or search, setup excepted', () => {

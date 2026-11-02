@@ -14,6 +14,14 @@ printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
 mkdir -p "$CLAUDE_PLUGIN_DATA"
 
+# Task prose now probes context discovery. Keep this aggregate budget fixture
+# offline and deterministic even when the developer has an authenticated CLI.
+# The context suite separately exercises successful discovery and package reads.
+mkdir -p "$WORK/bin"
+printf '#!/bin/sh\nexit 1\n' > "$WORK/bin/zensu"
+chmod +x "$WORK/bin/zensu"
+export PATH="$WORK/bin:$PATH"
+
 PASS=0; FAIL=0
 check() {
   local label="$1" cond="$2"
@@ -110,7 +118,7 @@ fi
 PROJ="$WORK/project"
 mkdir -p "$PROJ"
 CFG_ROUTE_TDD="$WORK/route-tdd.json"
-printf '%s' '{"hooks":{"defaultDeliveryRoute":"tdd"}}' > "$CFG_ROUTE_TDD"
+printf '%s' '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$CFG_ROUTE_TDD"
 CFG_ROUTE_DIRECT="$WORK/route-direct.json"
 printf '%s' '{"hooks":{"defaultDeliveryRoute":"direct"}}' > "$CFG_ROUTE_DIRECT"
 SESSION_SEQ=0
@@ -169,18 +177,19 @@ BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-pro
 
 budget() {
   case "${3:-first}:$1:$2" in
+    *:user-prompt-context-auto-load.sh:typed) echo "300 400" ;;
     *:user-prompt-context-auto-load.sh:*) echo "0 0" ;;
     *:user-prompt-context-nudge.sh:*) echo "0 0" ;;
-    first:user-prompt-intent-router.sh:typed) echo "2000 2200" ;;
-    repeat:user-prompt-intent-router.sh:typed) echo "1 1200" ;;
+    first:user-prompt-intent-router.sh:typed) echo "2000 2400" ;;
+    repeat:user-prompt-intent-router.sh:typed) echo "1 1400" ;;
     *:user-prompt-intent-router.sh:*) echo "0 0" ;;
-    first:user-prompt-tdd-reminder.sh:typed) echo "4500 5600" ;;
-    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2500" ;;
+    first:user-prompt-tdd-reminder.sh:typed) echo "4500 5870" ;;
+    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2750" ;;
     *:user-prompt-tdd-reminder.sh:ci) echo "300 400" ;;
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
-    first:user-prompt-zen-mode.sh:*) echo "3000 3200" ;;
-    repeat:user-prompt-zen-mode.sh:*) echo "1 1500" ;;
-    *:user-prompt-best-solution-first.sh:*) echo "300 420" ;;
+    first:user-prompt-zen-mode.sh:*) echo "3400 3770" ;;
+    repeat:user-prompt-zen-mode.sh:*) echo "1 1990" ;;
+    *:user-prompt-best-solution-first.sh:*) echo "300 540" ;;
     *:user-prompt-worktree-keep.sh:*) echo "0 0" ;;
     *:user-prompt-session-hub-receipt.sh:*) echo "0 0" ;;
     *:user-prompt-review-handback.sh:*) echo "0 0" ;;
@@ -190,12 +199,12 @@ budget() {
 
 total_budget() {
   case "$2:$1" in
-    first:typed) echo 11150 ;;
-    first:ci) echo 3900 ;;
-    first:*) echo 3550 ;;
-    repeat:typed) echo 5350 ;;
-    repeat:ci) echo 2200 ;;
-    *) echo 1850 ;;
+    first:typed) echo 12720 ;;
+    first:ci) echo 4560 ;;
+    first:*) echo 4200 ;;
+    repeat:typed) echo 6780 ;;
+    repeat:ci) echo 2770 ;;
+    *) echo 2410 ;;
   esac
 }
 
@@ -212,6 +221,25 @@ if [ -z "$ROSTER_BAD" ]; then
   check "U5 every UserPromptSubmit entry in hooks.json has a declared budget, and every budget names a registered hook" PASS
 else
   check "U5 budget roster out of step with hooks.json:$ROSTER_BAD" FAIL
+fi
+
+if node - "$PLUGIN_DIR" <<'NODE'
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const { registeredHooks } = require(path.join(root, 'hooks/lib/hook-registration-v1.js'));
+const { BUDGET_MS } = require(path.join(root, 'hooks/lib/context-auto-load-v1.js'));
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'hooks/hooks.json'), 'utf8'));
+const hook = registeredHooks(manifest, 'UserPromptSubmit')
+  .find(entry => entry.command.includes('user-prompt-context-auto-load.sh'));
+assert(hook);
+assert(hook.timeout * 1000 >= BUDGET_MS + 5000);
+NODE
+then
+  check "U5a native context hook leaves time for the bounded failure notice" PASS
+else
+  check "U5a native context hook leaves time for the bounded failure notice" FAIL
 fi
 
 measure_prompt() {

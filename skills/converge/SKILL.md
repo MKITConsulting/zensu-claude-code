@@ -1,7 +1,7 @@
 ---
 name: converge
 description: >
-  [Zensu] Audit the code against the newest TDD plan's Requirements table and
+  [Zensu] Audit the code against the newest Zensu plan's Requirements table and
   propose spec or plan edits. Use when the user asks to "converge" or to check
   for spec drift, or via /zensu:converge.
 ---
@@ -25,7 +25,7 @@ after explicit user confirmation via AskUserQuestion. In non-interactive runs
 ## When to Use
 
 - Standalone, anytime: "audit the code against the plan", "spec drift check".
-- Offered at the end of a `/zensu:tdd` chain when the plan carries a
+- Offered at the end of a `/zensu:build` chain when the plan carries a
   `## Requirements` table (optional follow-up, never blocking).
 - `/zensu:autopilot` runs it report-only before opening the PR: a `contradicts`
   finding on an active AC blocks the PR open until fixed; `missing`/`partial`
@@ -40,7 +40,7 @@ after explicit user confirmation via AskUserQuestion. In non-interactive runs
 ## Phase 0: Locate the plan
 
 1. Plan doc: use the path argument when given; otherwise the newest
-   `"<project root>"/.zensu/plans/*_tdd-*.md` by mtime, where `<project root>` is
+   `"<project root>"/.zensu/plans/*_build-*.md` by mtime, where `<project root>` is
    the path
    `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root`
    prints: the root this session's Session Control record is bound to, which
@@ -107,7 +107,7 @@ For every `unrequested` finding decide what it is:
    edit the plan artifact. **Never auto-apply. Non-interactive run → skip the
    question entirely and end report-only.** If interactivity is undeclared and
    AskUserQuestion is unavailable or errors, treat the run as non-interactive.
-4. **Evidence line:** when a tdd run log exists for the audited plan, append one
+4. **Evidence line:** when a build run log exists for the audited plan, append one
    line `CONVERGE — verdict: {converged|N findings} | plan: {path}` to it (the
    only write allowed without confirmation — it is an append-only log line).
 5. Zero findings and full coverage → verdict **converged** (say so in one line).

@@ -1,7 +1,7 @@
 ---
 paths:
   - "hooks/lib/zensu-plan-requirements.sh"
-  - "templates/tdd-plan.md"
+  - "templates/zensu-plan.md"
   - "tests/structure/test-requirements-table-gate.sh"
   - "tests/structure/test-tdd-complete-receipt-gate.sh"
 ---
@@ -33,7 +33,7 @@ pins the columns and never their ORDER.
 Mandatory-command-protocol one — they must not disagree); otherwise the gate reads the
 edit-landing receipt's `log` field and substitutes `.zensu/logs/<stem>.log` →
 `.zensu/plans/<stem>.md`, because both artifacts are created from one
-`{SESSION_TS}_tdd-{slug}` stem. The derivation binds the receipt's `schema` discriminator and
+`{SESSION_TS}_build-{slug}` stem. The derivation binds the receipt's `schema` discriminator and
 requires the `log` to resolve INSIDE the project's own `.zensu/logs/`; the explicit flag must
 resolve inside `.zensu/plans/` and carry the same stem — and with no derivable stem the flag is
 REFUSED rather than falling through to the directory bound alone, EXCEPT when
@@ -47,9 +47,9 @@ one filled row would satisfy the gate — and a receipt is an ordinary file the 
 write. Every comparison canonicalizes both sides (`realpath` / `cd … && pwd -P`): on macOS a
 temp root is spelled `/var/…` by the caller and `/private/var/…` by the kernel, and a raw
 string compare there rejects the session's own plan. Four things must therefore move
-together: the stem convention in Phase 2 of `skills/tdd/references/planning.md`, the receipt's `log` field and
+together: the stem convention in Phase 2 of `skills/build/references/planning.md`, the receipt's `log` field and
 its JSON ENCODING in `hooks/lib/zensu-edit-landing.sh`, the substitution in `zensu-log.sh`,
-`templates/tdd-plan.md` — whose `{acceptance criterion — machine-checkable}` / `{functional requirement}` cells are exactly what the placeholder-stripping rule keys on, so changing that placeholder syntax makes the gate misjudge — and `{plan_file}`'s definition beside `{log_file}` in Principle 3 — which Phase 2 step 1 now
+`templates/zensu-plan.md` — whose `{acceptance criterion — machine-checkable}` / `{functional requirement}` cells are exactly what the placeholder-stripping rule keys on, so changing that placeholder syntax makes the gate misjudge — and `{plan_file}`'s definition beside `{log_file}` in Principle 3 — which Phase 2 step 1 now
 WRITES, so producer and consumer share one spelling. The receipt's `log` is JSON-ENCODED and
 persisted PROJECT-ANCHORED, so the reader never has to guess a root. One of these IS pinned and
 it is easy to miss: `tests/structure/test-autopilot-durable-skill.sh` D9 hardcodes the bound
@@ -141,9 +141,9 @@ written against the decoded message finds nothing.
 **The `## Requirements` shape has SEVEN readers, not two**, and all five beside this library
 and `/zensu:converge` are model-executed and PRESENCE-ONLY, so every one of them accepts a
 placeholder-only table this library refuses: `skills/self-review/SKILL.md` twice (the per-AC
-table in the chain-end summary, and the converge offer it renders), and the tdd skill
+table in the chain-end summary, and the converge offer it renders), and the build skill
 three times (Phase 6 step 6c's "If the plan has no `## Requirements` table (legacy plan), skip
-silently" in `skills/tdd/references/audit.md`; the step-10 converge offer in
+silently" in `skills/build/references/audit.md`; the step-10 converge offer in
 `references/review-chain.md`, which this thread renders when `hooks.selfReview` is disabled; and
 the vanilla-mode statement in `references/modes.md` that the table and the `Covers` mapping stay
 binding).
@@ -183,7 +183,7 @@ CONTAINMENT rather than by spelling.
 Operator-facing accounts that must move with it: `docs/gates.md` §"Requirements-Table Gate",
 the `ZENSU_REQUIREMENTS_GATE` and `ZENSU_EDIT_LANDING_GATE` rows plus the visible-opt-outs
 enumeration in `docs/configuration.md`, and discipline patch 11 in
-`docs/tdd-manager-workflow.md`.
+`docs/build-workflow.md`.
 
 **Known gaps, accepted and named:**
 

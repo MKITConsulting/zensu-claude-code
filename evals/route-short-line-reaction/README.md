@@ -6,7 +6,7 @@ context generation (see [`.claude/rules/prompt-ledger.md`](../../.claude/rules/p
 - the ask short line of [`hooks/user-prompt-tdd-reminder.sh`](../../hooks/user-prompt-tdd-reminder.sh)
   in vanilla implementation mode, while the route field reads `ask`;
 - the two decided lines of the same hook, while `hooks.defaultDeliveryRoute` decides the route
-  (`tdd` and `direct`);
+  (`build` and `direct`);
 - the short planning notice of [`hooks/user-prompt-intent-router.sh`](../../hooks/user-prompt-intent-router.sh).
 
 Each scenario delivers ONE of these lines ALONE, with no full text before it. That is the worst case
@@ -36,12 +36,12 @@ covered here.
   the Zensu workflow through the Skill tool without asking, as the line's headless clause says, or
   asks a complete route question. It never edits first and never records a route itself. After an
   unanswered route question it runs the workflow or stops.
-- **`decided-tdd-code-change.yaml`** — the decided `tdd` line. The reply begins with
-  `Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)` and runs the workflow
+- **`decided-tdd-code-change.yaml`** — the decided `build` line. The reply begins with
+  `Executing via /zensu:build (vanilla mode, route: hooks.defaultDeliveryRoute)` and runs the workflow
   through the Skill tool with the request as its argument, with no route question and no record
   command.
 - **`decided-direct-code-change.yaml`** — the decided `direct` line. The reply begins with
-  `Skipping TDD: route direct (hooks.defaultDeliveryRoute)` and implements in this thread: its first
+  `Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute)` and implements in this thread: its first
   decisive action is an edit, a scratch file or a check it runs (`edit`, `edit-outside` or
   `other:Bash`), never a route action, a question or nothing, with no Skill call and no
   `--tdd-begin`. Whether that action is an edit of the fixture is read against the control's
@@ -68,7 +68,7 @@ source (`route-eval-source: <source>`); the rest is the user message.
 
 1. It finds the user-scoped install of the Zensu runtime through `installed_plugins.json` in
    `CLAUDE_CONFIG_DIR`, or `~/.claude` when that is unset, and requires `zensu@zensu` to be enabled,
-   because the Skill tool resolves `zensu:tdd` from the installed plugin.
+   because the Skill tool resolves `zensu:build` from the installed plugin.
 2. It checks that runtime for silence: [`lib/capture-injections.sh`](lib/capture-injections.sh)
    fires every `UserPromptSubmit` hook of the installed `hooks.json` twice under
    [`eval-config.json`](eval-config.json) with the scenario's message, and requires no output and
@@ -103,7 +103,7 @@ The probe answers each call with one of five decisions:
 | `SETUP` | `EnterWorktree`, and a Bash command that runs `git worktree`, `git branch`, `checkout` or `switch`, listings included and also behind `--no-pager`, beside nothing but allowed parts | denied with "work in the current directory"; not decisive |
 | `CONTINUE` | `AskUserQuestion` | denied with "no person can answer"; decisive when it is a route or triage question |
 | `RETRY` | a Bash command the probe cannot prove read-only that shows no write, execution or route signal: an unlisted program, a loop, a `$` expansion or substitution, a line break, an unparsable quote, or a flag that waits, such as `tail -f` or `--watch`; at most three per run | denied with "use plain read commands"; not decisive |
-| `END` | every Bash command with a signal (a write or execution program, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a worktree or branch command included once the first reading has failed, `--tdd`, `--direct` or `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
+| `END` | every Bash command with a signal (a write or execution program, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a worktree or branch command included once the first reading has failed, `zensu-delivery-route.sh --build` or `--direct`, `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
 
 The probe reads a Bash command twice. The first reading proves it read-only or setup: it splits
 the command at `&&`, `||`, `|`, `;` and parentheses, outside quotes only. A quoted string counts

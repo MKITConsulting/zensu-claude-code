@@ -15,7 +15,7 @@ const SETUP_COMMAND = /^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(worktree|checkout|s
 const QUOTED_META = /[;&|<>()$`\\]/;
 const SED_READ = /^sed\s+-n\s+\d+(,\d+)?p(\s+[^\s-]\S*)*$/;
 const WRITE_FLAG = /^(--output|--ext-diff|--pre|--test-reporter-destination|--test-update-snapshots|--write|--fix|--in-place)(=|$)|^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/;
-const ROUTE_FLAG = /(^|\s)--(direct|tdd|tdd-begin)(\s|$)/;
+const ROUTE_FLAG = /zensu-delivery-route\.sh["']?\s+--(?:direct|build)(?=\s|$)|(?:^|\s)--tdd-begin(?=\s|$)/;
 const MUTATION = /(^|[\s;&|/])zensu(?:\s+--?[\w-]+(?:=\S+)?)*\s+(?:[a-z][\w-]*\s+)?(create|update|delete|set|add|remove|link|import|move)\b/;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=/;
 const SUBST = '\u0001';
@@ -462,6 +462,7 @@ module.exports = {
   RUN_PROGRAMS,
   GIT_READS,
   MUTATION,
+  ROUTE_FLAG,
   END_REASON,
   RETRY_REASON,
   CONTINUE_REASON,

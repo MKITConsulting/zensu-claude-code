@@ -1,7 +1,7 @@
 #!/bin/bash
 # --tdd-begin chain-flag lifecycle — hermetic walk (no live claude, no API).
 #
-# Proves the Stop-hook review-chain backstop re-arms for EVERY /zensu:tdd chain
+# Proves the Stop-hook review-chain backstop re-arms for EVERY /zensu:build chain
 # in a session, not just the first: a completed chain leaves chainDone=true in
 # the per-session state, and before this fix a second --tdd-begin never cleared
 # it, so stop-chain-enforcer released on the stale flag for every later chain

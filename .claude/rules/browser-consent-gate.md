@@ -7,6 +7,9 @@ paths:
   - "hooks/lib/zensu-browser-consent-prefilter.sh"
   - "hooks/pre-browser-navigation-consent.sh"
   - "hooks/post-browser-navigation-consent.sh"
+  - "hooks/checks/pre-browser-navigation-consent.sh"
+  - "hooks/checks/post-browser-navigation-consent.sh"
+  - "hooks/lib/hook-dispatch-v1.js"
   - "scripts/verify-browser-config.js"
   - "skills/verify-feature/**"
   - "skills/doctor/**"
@@ -37,10 +40,21 @@ started for every session that loaded the plugin, and each start materialized a 
 of several hundred megabytes whether or not a browser was ever opened — that cost is the whole
 reason for this design, so do not reintroduce a plugin-scoped MCP server to "restore" a control.
 
-The controls the MCP-era capability broker held moved into two places: a PreToolUse/PostToolUse pair on the `Bash|PowerShell`
-matcher (`hooks/pre-browser-navigation-consent.sh`, `hooks/post-browser-navigation-consent.sh`, both
-thin wrappers around `hooks/lib/verify-consent-v1.js` modes `pre`/`post`), and the per-run config
+The controls the MCP-era capability broker held moved into two places: a PreToolUse/PostToolUse pair of
+hook-dispatcher checks on the `Bash|PowerShell` matcher (`browser-consent` and
+`browser-consent-recorder`, whose bodies `hooks/checks/pre-browser-navigation-consent.sh` and
+`hooks/checks/post-browser-navigation-consent.sh` are thin wrappers around
+`hooks/lib/verify-consent-v1.js` modes `pre`/`post`; the entry points `hooks/pre-browser-navigation-consent.sh`
+and `hooks/post-browser-navigation-consent.sh` run only their own check), and the per-run config
 file the browser is opened with, written by `scripts/verify-browser-config.js`.
+
+**The dispatcher decides first whether a body runs at all.** `consentMarked` in
+`hooks/lib/hook-dispatch-v1.js` starts the check body only for a payload it marks, so it is a third
+copy of the marker test beside the library and `commandMarkers`. It must mark every payload the
+library marks, and it is broader on purpose: either marker alone, in the raw payload, in the
+library's normalization or in the fallback's, and for a PowerShell payload also `wright`,
+`verify` or `u{`. A narrower `consentMarked` lets a gated call through with no check at all.
+The consent case of `tests/structure/hook-dispatch-v1.test.js` holds the spellings it must mark.
 
 **A PowerShell call is refused, not judged.** The lexer reads Bash, so a PowerShell call that
 carries both markers denies with `POWERSHELL_NOT_JUDGED`, which names the Bash tool and the Grep
@@ -61,7 +75,7 @@ and the skill's instruction to use only the printed session is prose, not a boun
 
 **The order of judgement is the contract.**
 
-1. **Prefilter, in ONE sourced library, before `node` starts:** both wrappers source
+1. **Prefilter, in ONE sourced library, before the module's `node` starts:** both check bodies source
    `hooks/lib/zensu-browser-consent-prefilter.sh` and call its `zensu_browser_consent_marked`. It
    normalizes the payload with ONE `LC_ALL=C sed` pass that first pairs every JSON-escaped
    backslash — so an escaped backslash before `n` is never read as a line break — and then joins
@@ -408,7 +422,7 @@ announces a prompt rather than a capability the plugin hands itself.
   (`.claude/rules/zensu-cli-floor.md`). The unit case `the PATH walk decides as the playwright-cli
   probe walk does over the same fixtures` in `tests/structure/zensu-cli-version-v1.test.js`
   compares the two on POSIX, so a change to this walk changes that copy in the same commit.
-- `CONSENT_MATCHER` (`'Bash|PowerShell'`) and `CONSENT_TOOLS` ↔ both registrations in `hooks/hooks.json` ↔
+- `CONSENT_MATCHER` (`'Bash|PowerShell'`) and `CONSENT_TOOLS` ↔ both consent checks in `DISPATCHED_CHECKS` ↔
   `consentHookRegistered`/`consentRecorderRegistered` and their `REGISTRATION` answers ↔ the
   doctor's `unavailable` reasons in `hooks/lib/zensu-doctor.sh` ↔ the `❌ verify-feature: cannot
   start (…)` bullet in `skills/doctor/SKILL.md`, which must name every cause those reasons carry

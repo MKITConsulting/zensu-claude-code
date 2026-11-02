@@ -1,7 +1,7 @@
 # Plan-Approval Hook E2E Eval
 
 End-to-end tests for the `PostToolUse` hook on `ExitPlanMode` that asks which
-delivery route an approved plan takes — `/zensu:autopilot`, `/zensu:tdd`,
+delivery route an approved plan takes — `/zensu:autopilot`, `/zensu:build`,
 `/zensu:pilot`, or implementing directly — and routes to the chosen skill in the
 main thread.
 
@@ -10,7 +10,7 @@ main thread.
 | Scenario | Expected behavior |
 |----------|-------------------|
 | Doc-only plan approved | Hook fires; Claude takes the docs-only escape-hatch and asks nothing |
-| Code-change plan approved | Hook fires; Claude asks the four-route question; selecting the Zensu-workflow option by LABEL records the answer (`delivery-route: tdd`) and routes to `/zensu:tdd` |
+| Code-change plan approved | Hook fires; Claude asks the four-route question; selecting the Zensu-workflow option by LABEL records the answer (`delivery-route: build`) and routes to `/zensu:build` |
 | Plan rejected | Hook does NOT fire (verified separately — `-p` mode auto-denies) |
 
 ## Why expect
@@ -42,7 +42,7 @@ Test 2 answers at most one Bash permission prompt, the one for the command that
 records the route answer, and declines every other prompt. A prompt declined before
 the helper ran fails `T2.9`; one declined after it ends the wait before the status
 line, so `T2.4` fails. The script approves only when the text from the helper's name
-to the prompt's question starts with the `--tdd` verb and holds none of `;`, `&`,
+to the prompt's question starts with the `--build` verb and holds none of `;`, `&`,
 `|`, backtick, `<`, `>` or `(`, so a chained, piped, redirected or substituted
 command is refused, and so is a zsh glob qualifier such as `*(e:…:)` or a later tool
 call. The price of refusing every `(` is that a prompt whose description holds a
@@ -76,13 +76,13 @@ Claude spends in plan-mode research. Don't run in CI without a generous budget.
   empirically by running `claude -p --permission-mode plan` (auto-denies, no
   hook fire — see `debug-positive.log` from manual exploration).
 - Test 2 waits, within one 240 s budget, until the TUI capture shows both the
-  `Executing via /zensu:tdd` status line and the helper's `delivery-route: tdd`
+  `Executing via /zensu:build` status line and the helper's `delivery-route: build`
   tool-result line, in either order, and then ends the session. It measures the
   routing signal (`T2.4`) and the recorded answer (`T2.9`), not the completed run.
   `T2.9` reads the session marker the helper writes under the plugin root, newer than
   a stamp the runner writes first, rather than the transcript; the runner leaves
   every marker in place, and a live session you run in the same checkout that records
-  `tdd` during the eval can satisfy `T2.9` too. Selection is by option
+  `build` during the eval can satisfy `T2.9` too. Selection is by option
   LABEL; whether the host consumes a typed label as a selector is UNVERIFIED here. A
   mis-selected route IS a named failure: `T2.7` and `T2.8` assert that
   `Executing via /zensu:autopilot` and `Executing via /zensu:pilot` are absent. Both

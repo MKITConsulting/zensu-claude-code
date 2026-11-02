@@ -346,7 +346,7 @@ positive on that ground.
 
 **Operator-facing accounts that must move with it:** the `implStopNudgeAfter` row AND the
 `stop-chain-enforcer.sh` row in `docs/configuration.md`, discipline patch 13 in
-`docs/tdd-manager-workflow.md` (plus the patch RANGE in `docs/gates.md`, which is a separate
+`docs/build-workflow.md` (plus the patch RANGE in `docs/gates.md`, which is a separate
 file and drifts silently — but NOT that file's "bounded-counter enumeration and Mermaid node
 label", which this roster named and which do not exist there: a grep for `implStopCount`,
 `implStopNudgeAfter` or any counter enumeration in `docs/gates.md` returns nothing, so the

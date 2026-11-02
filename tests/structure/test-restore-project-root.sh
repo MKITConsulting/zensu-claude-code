@@ -491,13 +491,13 @@ else check "R15-control a two-argument CALL (not the definition) is present" FAI
 
 # ONE list, read by the scan AND by the needle below it. The needle used to hand-copy
 # it and had already drifted: `skills/adopt-session/SKILL.md` was listed twice while
-# `docs/tdd-manager-workflow.md` and `skills/doctor/SKILL.md` were absent — so the row
+# `docs/build-workflow.md` and `skills/doctor/SKILL.md` were absent — so the row
 # that exists to prove the cost claim still occurs SOMEWHERE was reading a different
 # set of carriers from the row that checks every carrier's qualifier.
 R6J_CARRIERS="docs/gates.md
 docs/operations.md
 docs/session-control.md
-docs/tdd-manager-workflow.md
+docs/build-workflow.md
 skills/adopt-session/SKILL.md
 skills/doctor/SKILL.md"
 R6J_FAIL=""
@@ -1454,7 +1454,7 @@ if grep -qF 'Confirm with the user before adding `--confirm`' "$SKILL_ADOPT"; th
   check "R8m  the skill carries a consent step for the restore" PASS
 else check "R8m  the skill carries a consent step for the restore" FAIL; fi
 # The write denies that relax this state above the router carry the remedy themselves.
-SWGATE="$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"
+SWGATE="$PLUGIN_DIR/hooks/checks/pre-bash-source-write-gate.sh"
 # PER DENY, not file-wide: a file-wide count is satisfied by the write-class comment
 # and cannot see a deny that omits the repair. Every emit_deny whose text NAMES the
 # orphaned state must name the repair; the one on the BOUND path must not, because a

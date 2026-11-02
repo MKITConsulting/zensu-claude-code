@@ -23,13 +23,15 @@ for artifact in "$HELPER" "$HOST_PATH" "$START" "$STOP" "$GATE" \
   [ -f "$artifact" ] && check "artifact exists: ${artifact#$PLUGIN/}" PASS \
     || check "artifact exists: ${artifact#$PLUGIN/}" FAIL
 done
-if PLUGIN_MANIFEST="$PLUGIN/.claude-plugin/plugin.json" HOOK_MANIFEST="$PLUGIN/hooks/hooks.json" node -e '
+if PLUGIN_MANIFEST="$PLUGIN/.claude-plugin/plugin.json" HOOK_MANIFEST="$PLUGIN/hooks/hooks.json" \
+  REGISTRATION_LIB="$PLUGIN/hooks/lib/hook-registration-v1.js" node -e '
   const plugin=require(process.env.PLUGIN_MANIFEST);
-  const hooks=require(process.env.HOOK_MANIFEST).hooks;
+  const manifest=require(process.env.HOOK_MANIFEST);
+  const hooks=manifest.hooks;
   const agents=new Set(plugin.agents);
   if (!agents.has("./agents/plan-review-worker.md") || !agents.has("./agents/pr-review-worker.md")) process.exit(1);
   const commands=[
-    ...hooks.PreToolUse.flatMap(g=>g.hooks).filter(h=>h.command.includes("pre-reviewer-capability-gate")),
+    ...require(process.env.REGISTRATION_LIB).registeredHooks(manifest,"PreToolUse").filter(h=>h.command.includes("pre-reviewer-capability-gate")),
     ...hooks.SubagentStart.flatMap(g=>g.hooks).filter(h=>h.command.includes("review-evidence-subagent-start")),
     ...hooks.SubagentStop.flatMap(g=>g.hooks).filter(h=>h.command.includes("review-evidence-subagent-stop")),
   ];

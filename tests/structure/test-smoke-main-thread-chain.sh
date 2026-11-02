@@ -152,7 +152,7 @@ postrev_ctx() {
 bash "$LOG" --tdd-begin --session "$SID_R" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID_R" >/dev/null
 CTX="$(postrev_ctx)"
-echo "$CTX" | grep -q "/zensu:tdd" && check "4a routes findings in-thread (/zensu:tdd)" PASS || check "4a in-thread routing" FAIL
+echo "$CTX" | grep -q "/zensu:build" && check "4a routes findings in-thread (/zensu:build)" PASS || check "4a in-thread routing" FAIL
 echo "$CTX" | grep -q "subagent_type='zensu:tdd-manager'" && check "4b must NOT spawn tdd-manager subagent" FAIL || check "4b no tdd-manager spawn" PASS
 echo "$CTX" | grep -q "subagent_type='zensu:code-reviewer'" && check "4c re-verify via code-reviewer" PASS || check "4c re-verify reviewer" FAIL
 RCOUNT="$(tdd_get_counter "$SF" reviewRound)"
@@ -177,7 +177,7 @@ node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   && check "5a hooks.json registers Stop -> stop-chain-enforcer.sh" PASS || check "5a Stop registered" FAIL
 node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const a=(h.hooks.PostToolUse||[]).find(x=>x.matcher==="Agent|Task");if(!a)process.exit(1);const bad=a.hooks.some(x=>typeof x.command==="string"&&/post-tdd-review-delegate/.test(x.command));process.exit(bad?1:0)' "$HOOKS_JSON" \
   && check "5b Agent|Task matcher exists and no longer references post-tdd-review-delegate.sh" PASS || check "5b post-tdd-review deregistered" FAIL
-grep -qF "skill='zensu:tdd'" "$PLANHOOK" && check "5c plan-approved-delegate invokes /zensu:tdd skill" PASS || check "5c plan-approved skill invoke" FAIL
+grep -qF "skill='zensu:build'" "$PLANHOOK" && check "5c plan-approved-delegate invokes /zensu:build skill" PASS || check "5c plan-approved skill invoke" FAIL
 grep -qF "subagent_type='zensu:tdd-manager'" "$PLANHOOK" && check "5d plan-approved must NOT spawn tdd-manager subagent" FAIL || check "5d plan-approved no subagent spawn" PASS
 
 echo "----"

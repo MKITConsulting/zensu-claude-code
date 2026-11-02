@@ -16,7 +16,7 @@ const org = 'f72c484b-204d-4157-9326-93e02e1e02e1';
 function fixture(t) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-work-capture-'));
   fs.mkdirSync(path.join(workspace, '.git'));
-  const options = { workspace, session, task: 'goal-1', title: 'Implement agreed goal', criteria: 'spec-v1' };
+  const options = { source: 'claude_code', sourceVersion: '1.2.3', workspace, session, task: 'goal-1', title: 'Implement agreed goal', criteria: 'spec-v1' };
   const state = { apiUrl: 'https://api.example.test', actor, head: 'a'.repeat(40), dirty: '', unit: null, submits: [], calls: [], failResponse: false };
   const previous = cp.spawnSync;
   cp.spawnSync = (command, args, opts) => {
@@ -29,10 +29,10 @@ function fixture(t) {
       state.calls.push(args);
       const flag = (key) => args[args.indexOf(key) + 1];
       switch (args[1]) {
-        case 'context': value = { apiUrl: state.apiUrl }; break;
+        case 'context': value = { apiUrl: state.apiUrl, ready: !state.unbound, workScope: args.includes('--cross-product') ? 'cross_product' : state.unbound ? 'unassigned' : 'product', productId: args.includes('--cross-product') ? undefined : (state.product || other), reportingUserId: state.actor, organizationId: org }; break;
         case 'start':
           if (state.unit && state.unit.actor !== state.actor) return { status: 1, stderr: 'secret server body' };
-          state.unit ??= { id: flag('--id'), actor: state.actor, version: 1, result: null, decision: null };
+          state.unit ??= { id: flag('--id'), workScope: args.includes('--product') ? 'product' : 'cross_product', productId: args.includes('--product') ? flag('--product') : null, crossProductReason: args.includes('--cross-product-reason') ? flag('--cross-product-reason') : '', actor: state.actor, source: flag('--source'), sourceVersion: flag('--source-version'), runKind: flag('--run-kind'), version: 1, result: null, decision: null };
           value = { id: state.unit.id }; break;
         case 'get':
           value = { ...state.unit, reportingUserId: state.actor, organizationId: org,
@@ -140,3 +140,56 @@ test('the hook and primer are registered, with no session-start capture writes',
   const oversized = call('hook', 'x'.repeat(1024 * 1024 + 1));
   assert.equal(oversized.status, 0); assert.match(oversized.stdout, /capture incomplete/);
 });
+
+test('freezes the declared origin and test purpose across retries and checkpoints', (t) => {
+  const { options, state, file } = fixture(t);
+  options['run-kind'] = 'test';
+  capture.begin(options);
+  const metadata = JSON.parse(fs.readFileSync(file)).metadata;
+  assert.equal(metadata.runKind, 'test');
+  assert.equal(metadata.source, options.source);
+  assert.ok(metadata.sourceVersion);
+  assert.throws(() => capture.begin({ ...options, 'run-kind': 'work' }), /run purpose/);
+  assert.throws(() => capture.begin({ ...options, 'run-kind': 'demo' }), /Run kind/);
+  // A plugin upgrade must not rewrite the origin of an already declared task.
+  capture.begin({ ...options, sourceVersion: '9.9.9' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).metadata, metadata);
+  state.unit.runKind = 'work'; // a human correction is allowed without changing the original receipt
+  state.head = 'd'.repeat(40); capture.checkpoint(options);
+  const declarations = state.calls.filter(a => a[1] === 'start');
+  assert.ok(declarations.every(a => a[a.indexOf('--run-kind')+1] === 'test'));
+  state.unit.source = 'wrong';
+  assert.throws(() => capture.checkpoint(options), /metadata was not confirmed/);
+});
+test('legacy receipts are replayed without invented source or purpose', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const s = JSON.parse(fs.readFileSync(file)); delete s.metadata;
+  fs.writeFileSync(file, JSON.stringify(s));
+  state.unit.source = 'unknown'; state.unit.runKind = 'unknown';
+  capture.begin(options);
+  assert.ok(state.calls.filter(a => a[1] === 'start').at(-1).includes('--legacy-metadata'));
+  assert.equal(JSON.parse(fs.readFileSync(file)).metadata, undefined);
+  assert.throws(() => capture.begin({ ...options, 'run-kind': 'test' }), /run purpose/);
+});
+
+test('unbound work is skipped without declaration or receipt; cross-product requires explicit intent', (t) => {
+  const { options, state, file } = fixture(t); state.unbound = true;
+  assert.equal(capture.begin(options).status, 'skipped_unassigned');
+  assert.equal(state.unit, null); assert.equal(fs.existsSync(file), false);
+  assert.throws(() => capture.begin({ ...options, 'cross-product-reason': ' ' }), /explicit/);
+  state.unbound = false;
+  const cross = { ...options, 'cross-product-reason': 'Shared infrastructure for two products' };
+  assert.equal(capture.begin(cross).status, 'recording');
+  assert.equal(state.unit.productId, null); assert.equal(state.unit.crossProductReason, cross['cross-product-reason']);
+  assert.throws(() => capture.begin(options), /product scope/);
+  state.head = 'e'.repeat(40); assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+ });
+test('changed product and legacy unscoped receipts never submit automatically', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'e'.repeat(40);
+  state.product = org; assert.throws(() => capture.checkpoint(options), /scope/);
+  state.product = other; state.unit.productId = org; assert.throws(() => capture.checkpoint(options), /scope/);
+  state.unit.productId = other;
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope; fs.writeFileSync(file, JSON.stringify(receipt));
+  assert.throws(() => capture.checkpoint(options), /Legacy capture/); assert.equal(state.submits.length, 0);
+ });

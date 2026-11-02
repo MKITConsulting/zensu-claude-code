@@ -58,7 +58,7 @@ parameter currently has no production caller at all — S7h2 guards it for the n
 parameter, not a line number. Do NOT restate this as "there is deliberately no public
 wrapper": that sentence stood here while the delegate was already calling one, and
 it now contradicts the rc=4 account below in the same section. Owner-scoping that second group would let a
-standalone `/zensu:tdd` chain arm underneath another session's durable run in the same tree.
+standalone `/zensu:build` chain arm underneath another session's durable run in the same tree.
 The team-review identity check is a THIRD shape: it resolves the owner from the RUN record
 and then asks the first question, because the pointer that must still designate that run is
 its owner's, not the attesting caller's.
@@ -167,7 +167,7 @@ the stderr one is read by a human. A foreign holder whose PENDING stage is `TDD_
 adoptable and takes its own text on both audiences: the adopt verb refuses that run with exit 3
 before it reads any beacon, so a refusal offering adoption there sends the reader to a verb that
 declines. That text says adoption is not an exit for this run, states that the session driving its
-inner TDD chain may still be running, and leaves only the release — the guided form for the model,
+inner build chain may still be running, and leaves only the release — the guided form for the model,
 the audited one for the operator. The pending stage is what decides it — `blocked.from` for a
 BLOCKED record and the literal stage otherwise, the same test the adopt worker applies — and the
 `begin` worker's twin of this sentence carries the same arm; S7v and S7m are the pins.
@@ -468,7 +468,7 @@ gates are different processes: a session that begins a run from the project root
 reaches a gate from a worktree BELOW it produces two different keys for one branch. `contains`
 answers "held" whenever either tree contains the other, which also covers the git-failure
 fallback — that path yields the project root while a working resolve yields the repository
-toplevel above it. Equality alone reported such a pair as free, and a standalone `/zensu:tdd`
+toplevel above it. Equality alone reported such a pair as free, and a standalone `/zensu:build`
 chain then armed underneath a live durable run.
 
 **The FORWARD direction is the one that is not solved, and concurrency makes it normal.**
@@ -799,9 +799,9 @@ still covers only the LEGACY pointer by name.
   reaches the owner comparison, because the run is invisible to its owner-scoped read; it takes
   the standalone branch, and is asked the four-route delivery question, which now carries
   `/zensu:autopilot` and `/zensu:pilot` beside it (see §"Plan-Approval Delivery Route"), only
-  while its route field reads `ask`. A `tdd` recorded for that session, a `direct` the user
+  while its route field reads `ask`. A `build` recorded for that session, a `direct` the user
   recorded explicitly with `/zensu:delivery-route --direct`, or a default configured in
-  `hooks.defaultDeliveryRoute` (§"Session Delivery Route") dispatches without asking: `tdd`
+  `hooks.defaultDeliveryRoute` (§"Session Delivery Route") dispatches without asking: `build`
   then meets the standalone `--tdd-begin` workspace fence, and `direct` meets no fence, so direct
   edits can land in a working tree the foreign run holds. The run's own state is not mutated —
   the foreign run is not touched and no binding is created — but on the `direct` path the
@@ -824,7 +824,7 @@ still covers only the LEGACY pointer by name.
   `skills/autopilot/SKILL.md` Phase 0.D creates the run with `--autopilot-begin` immediately
   before `ExitPlanMode`. Reversed, the approval finds no run at `PLANNING` and falls through to
   the standalone directive, which asks the four-route question while the route field reads `ask`
-  and otherwise sends the Autopilot spec to `/zensu:tdd` or implements it directly without
+  and otherwise sends the Autopilot spec to `/zensu:build` or implements it directly without
   asking (§"Session Delivery Route"). `D16` in `tests/structure/test-autopilot-durable-skill.sh`
   pins the Phase 0.D sentence and that consequence as text; nothing observes the order a model
   actually takes.
@@ -1171,7 +1171,7 @@ cross-version mixing arises.
 
 - **`--autopilot-status` discloses the hold on stderr**, keeping its exit 1 and its stdout
   unchanged because SEVEN skills run this verb and parse that stdout as JSON —
-  `autopilot`, `autopilot-release`, `tdd`, `pr-team-review`, `pr-fix-findings`, `self-review` and
+  `autopilot`, `autopilot-release`, `build`, `pr-team-review`, `pr-fix-findings`, `self-review` and
   `reset-review-limit` — several of them failing closed on a mismatch. An earlier wording named
   `session-start-autopilot-resume.sh` here, which calls the LIBRARY's `autopilot_read_active`
   directly and never runs this CLI verb, so the rule was right and its stated cause was not. It renders through the PUBLIC
@@ -1331,7 +1331,7 @@ pointer spellings, `hooks/lib/zensu-log.sh` (the `--workspace` flag, the owner-a
 `--autopilot-status`, and the `--autopilot-release` verb with its derived event id),
 `skills/autopilot/SKILL.md`, `skills/autopilot-release/SKILL.md`, and the plugin manifest's
 skill list. Operator-facing accounts that must move with it: `README.md`'s skill table,
-`docs/tdd-manager-workflow.md` §"Autopilot run scope", the `session-start-autopilot-resume.sh`
+`docs/build-workflow.md` §"Autopilot run scope", the `session-start-autopilot-resume.sh`
 row in `docs/configuration.md`, and — easy to miss, because the roster named only the resume
 row while the deferred-review fence account lives elsewhere — the `stop-chain-enforcer.sh`
 row in `docs/configuration.md` — and its `pendingReviewTtlHours` row, the ONLY written statement

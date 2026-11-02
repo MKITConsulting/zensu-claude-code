@@ -1059,7 +1059,7 @@ for s7v_render in "$S7V_RUNNING" "$S7V_BLOCKED"; do
   printf '%s' "$s7v_render" | grep -qF '/zensu:autopilot-release to cancel it' || S7V_OK=0
   # The CONDITION, not just the refusal: the holder may still be a live session driving
   # that chain, which is what makes cancelling it the consequential choice.
-  printf '%s' "$s7v_render" | grep -qF 'its inner TDD chain is live and the session driving it may still be running' || S7V_OK=0
+  printf '%s' "$s7v_render" | grep -qF 'its inner build chain is live and the session driving it may still be running' || S7V_OK=0
 done
 # The operator form withholds the audited adopt invocation for the same reason, and
 # keeps the release one, which is still reachable.
@@ -1724,7 +1724,7 @@ CLAUDE_PROJECT_DIR="$P7S" bash "$LOG" --tdd-begin --session later_standalone >/d
 CLAUDE_PROJECT_DIR="$P7S" bash "$LOG" --tdd-complete --session later_standalone >/dev/null
 OUT9S="$(invoke "$P7S" later_standalone)"
 if [ "$(printf '%s' "$OUT9S" | decision)" = block ] && printf '%s' "$OUT9S" | grep -qF 'zensu:code-reviewer'; then
-  check "S9c old terminal pointer cannot bypass a later standalone TDD chain" PASS
+  check "S9c old terminal pointer cannot bypass a later standalone build chain" PASS
 else check "S9c old terminal does not bypass standalone inner chain" FAIL; fi
 
 CLAUDE_PROJECT_DIR="$P7S" bash "$LOG" --pending-review --files 'src/pending.ts' \

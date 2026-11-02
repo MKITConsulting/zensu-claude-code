@@ -74,7 +74,7 @@ fired() {
         const j=JSON.parse(s);
         const o=j.hookSpecificOutput||{};
         const ac=o.additionalContext||"";
-        const ok=(o.hookEventName==="UserPromptSubmit")&&/zensu:tdd/.test(ac)&&/AskUserQuestion/.test(ac);
+        const ok=(o.hookEventName==="UserPromptSubmit")&&/zensu:build/.test(ac)&&/AskUserQuestion/.test(ac);
         process.stdout.write(ok?"FIRED":"NOMATCH");
       }catch(_){process.stdout.write("BADJSON");}
     });
@@ -112,7 +112,7 @@ OUT9="$(payload "implement a debounce helper" "s9" "$P9" | env CLAUDE_PLUGIN_ROO
 [ "$OUT9" = "EMPTY" ] && check "C9 hooks.tddReminder:false -> silent (opt-out honored)" PASS || check "C9 disabled silent (got '$OUT9')" FAIL
 rm -rf "$P9"
 
-# C10 — an active TDD session -> silent (the TDD flow owns the reminder there).
+# C10 — an active build session -> silent (the build flow owns the reminder there).
 P10="$(mktemp -d -t tddrem-XXXXXX)"
 OUT10="$(
   export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P10" ZENSU_CONFIG="$NO_CONFIG"
@@ -122,7 +122,7 @@ OUT10="$(
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin --session s10 >/dev/null 2>&1
   payload "add validation to the parser" "s10" "$P10" | bash "$HOOK" 2>/dev/null | fired
 )"
-[ "$OUT10" = "EMPTY" ] && check "C10 active TDD session -> silent" PASS || check "C10 active-session silence (got '$OUT10')" FAIL
+[ "$OUT10" = "EMPTY" ] && check "C10 active build session -> silent" PASS || check "C10 active-session silence (got '$OUT10')" FAIL
 rm -rf "$P10"
 
 # C11 — config.example.json registers the flag.
@@ -174,9 +174,9 @@ for KIND13 in reviewer plm neutral partial; do
     bash "$HOOK" 2>/dev/null)"
 done
 if [ -z "$OUT13" ]; then
-  check "C13 reviewer/PLM/neutral/partial principals receive no TDD reminder" PASS
+  check "C13 reviewer/PLM/neutral/partial principals receive no workflow reminder" PASS
 else
-  check "C13 non-main principals receive no TDD reminder" FAIL
+  check "C13 non-main principals receive no workflow reminder" FAIL
 fi
 rm -rf "$P13"
 
@@ -193,7 +193,7 @@ for PROMPT14 in \
   [ -n "$PAYLOAD14" ] || OUT14="${OUT14}[no-payload-$N14]"
   OUT14="${OUT14}$(printf '%s' "$PAYLOAD14" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
 done
-OUT14B="$(payload "/zensu:tdd add a retry helper" "s14-args" "$P14" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
+OUT14B="$(payload "/zensu:build add a retry helper" "s14-args" "$P14" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
 if [ -z "$OUT14" ] && [ "$OUT14B" = "FIRED" ]; then
   check "C14 task notifications, subagent hand-backs, shell inputs and argument-less slash commands get no reminder; a slash command with arguments does" PASS
 else

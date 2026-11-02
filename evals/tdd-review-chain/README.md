@@ -2,7 +2,7 @@
 
 This deterministic suite pins the current review-chain architecture:
 
-- `/zensu:tdd` implements and fixes in the top-level interactive thread;
+- `/zensu:build` implements and fixes in the top-level interactive thread;
 - neutral workers may return read-only analysis packets but never implement;
 - `zensu:code-reviewer` completion routes findings back into that main thread;
 - the `Stop` event runs only `stop-chain-enforcer.sh`, the bounded backstop for

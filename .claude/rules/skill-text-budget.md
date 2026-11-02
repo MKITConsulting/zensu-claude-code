@@ -51,7 +51,7 @@ read the `skill_listing` attachment, which every session transcript records.
 A description names what the skill does and when to use it, nothing more. The account of
 each route, refusal and state lives in the body, where the skill is read once it runs.
 
-**This suite replaced the 433-line cap on `skills/tdd/SKILL.md`**, which five suites
+**This suite replaced the 433-line cap on `skills/build/SKILL.md`**, which five suites
 pinned as one constant (`X22c`, `R24`, `P3e`, `P3d` and an unlabelled check in
 `test-tdd-manager-patches.sh`). Rule files now say "the file may not grow" where they used
 to cite that cap.
@@ -60,7 +60,7 @@ to cite that cap.
 substitutes `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}` in a `SKILL.md` body only. A
 reference is read with `Read` and keeps them literal, and the Bash tool has neither variable
 set, so a command copied from a reference would run against `/hooks/…`. A reference therefore
-names a placeholder the rendered router resolves: `skills/tdd/` spells `{plugin_root}` and
+names a placeholder the rendered router resolves: `skills/build/` spells `{plugin_root}` and
 `{plugin_data}`, which its Phase 0 step 1 defines; `skills/session-trail/` names the tool
 command of its router; `skills/pr-team-review/` spells `<absolute-plugin-root>` in `rules/`
 and `<absolute-plugin-data>` in `references/`, which its Step 0 defines, and the shell blocks
@@ -76,7 +76,7 @@ concatenation, so a Zensu mutation moved into a reference still needs the workfl
 The model resolves a relative path against its working directory, which is the user's project:
 a bare `docs/configuration.md` reads that project's own file of the same name, or nothing. So
 a `SKILL.md` body names a plugin doc as `${CLAUDE_PLUGIN_ROOT}/docs/…`, and a reference or rule
-file names it through its router's placeholder: `{plugin_root}/docs/…` in `skills/tdd/`,
+file names it through its router's placeholder: `{plugin_root}/docs/…` in `skills/build/`,
 `<absolute-plugin-root>/docs/…` in `skills/pr-team-review/`, `skills/session-trail/` and
 `skills/work/`, whose routers each carry one sentence defining it, and `$ROOT/docs/…` in
 `skills/autopilot/`, whose router sets `ROOT="${CLAUDE_PLUGIN_ROOT}"`. `B8` derives the plugin
@@ -89,7 +89,7 @@ A path that names no plugin doc, such as a project's `docs/*.md` glob or the doc
 every source absolute), and the router check is a substring test, so a router that mentions
 its placeholder without defining it passes.
 
-**Split so far:** `skills/session-trail/`, `skills/tdd/`, `skills/pr-team-review/` and the
+**Split so far:** `skills/session-trail/`, `skills/build/`, `skills/pr-team-review/` and the
 confidence heuristic of `skills/ghost-scan/` (`references/confidence-score.md`, moved to make
 room for the free-text file form of `.claude/rules/skill-argument-placeholders.md`). Each
 split lowers or removes its allowlist entry and re-points the suites that slice the moved

@@ -36,8 +36,8 @@ Slash form: `/zensu:cover [<target>] [--flag=value ...]`.
 
 ## Prerequisites
 
-- A git repository. The skill works **in a worktree only** — if the session is on the
-  origin checkout it creates one first (see Critical Conventions).
+- A git repository. The skill writes the tests in the session's checkout (see Critical
+  Conventions).
 - A test runner for each layer it will touch. The probe detects it; if a layer has none,
   the skill says so and degrades that layer rather than inventing a framework.
 - `gh` CLI authenticated only when `<target>` is a PR number.
@@ -53,10 +53,10 @@ Slash form: `/zensu:cover [<target>] [--flag=value ...]`.
   `/zensu:autopilot --cover` to turn the acceptance criteria autopilot validates **live and
   throwaway** into **committed** end-to-end tests in the same PR.
 
-This is a coverage skill for code that **already exists** — it is NOT `/zensu:tdd`. TDD is
+This is a coverage skill for code that **already exists** — it is NOT `/zensu:build`. TDD is
 red-first for code you are about to write; `/zensu:cover` is green-first for code that is
-already there. If the behavior does not exist yet, use `/zensu:tdd` or `/zensu:autopilot`.
-When both run over the same change (autopilot runs `/zensu:tdd` at step 1 and `/zensu:cover` at
+already there. If the behavior does not exist yet, use `/zensu:build` or `/zensu:autopilot`.
+When both run over the same change (autopilot runs `/zensu:build` at step 1 and `/zensu:cover` at
 step 6b), they are complementary, not competing: cover's **no-duplication** heuristic subtracts
 the coverage tdd's per-step tests already produced and fills only the remaining gap.
 
@@ -69,9 +69,9 @@ Four phases. Track each as a task with `TaskCreate`/`TaskUpdate` so the user has
 
 ### Phase 0 — Scope & Probe  (interactive ONLY if scope/framework is ambiguous)
 
-**0.A — Worktree.** If `git rev-parse --show-toplevel` is the origin checkout (not a
-worktree under `.claude/worktrees/`), create one and continue inside it. Never author on the
-origin checkout. See Critical Conventions.
+**0.A — Checkout.** Author in the session's checkout as it stands: create no worktree and
+switch no branch. Uncommitted changes the tests do not belong to stay untouched, and the
+report names them. See Critical Conventions.
 
 **0.B — Resolve `<target>`.** Precedence: explicit `<target>` arg → else the default
 `git diff <base>...HEAD` (the working change). A feature id resolves via
@@ -124,15 +124,15 @@ itself, and runs them one at a time where the probe reports a shared test DB or 
 1. Run the target suite green (except intentional `xfail` bug flags).
 2. Apply the `rules/quality.md` gate: determinism, isolation, no over-mocking, meaningful
    assertions.
-3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn one
+3. **Reuse the Zensu review chain** exactly like `/zensu:build`'s review stage — spawn one
    `zensu:review-aspect` agent per perspective of the configured panel in one parallel batch
    (lean, the default: `correctness` with its test checks emphasized, `design`, `security`;
    `hooks.reviewPanel: full`: `conventions`, `bugs`, `architecture`, `tests` (emphasized),
    `security`) over the changed test files, merge their findings in this thread, consolidate
    through a single `zensu:code-reviewer` spawn, and fix the findings in-thread. Give each
    `zensu:review-aspect` spawn and the `zensu:code-reviewer` spawn the same `REVIEW PACKET v1`
-   that `/zensu:tdd` step 10.2c defines
-   (`${CLAUDE_PLUGIN_ROOT}/skills/tdd/references/review-chain.md`), including its rule for a
+   that `/zensu:build` step 10.2c defines
+   (`${CLAUDE_PLUGIN_ROOT}/skills/build/references/review-chain.md`), including its rule for a
    review that did not run Phase 6. This skill fills these fields:
    - `requirements_baseline`: the `AC-###` IDs resolved under `--from-acs`, each deprecated
      one marked as such, else `none`.
@@ -186,7 +186,8 @@ Governed by five heuristics: **lowest-faithful-level**, **pyramid budget**,
 
 ## Critical Conventions
 
-- **Worktree only.** Author in a worktree, never the origin checkout.
+- **The session's checkout.** Author where the session runs; the skill creates no worktree
+  and switches no branch.
 - **Green-first, report-only.** Tests target existing code and must pass on first run. A real
   bug is reported (as `xfail`/skip), never silently fixed — coverage and bug-fixing stay
   separate reviewable acts.
@@ -197,7 +198,11 @@ Governed by five heuristics: **lowest-faithful-level**, **pyramid budget**,
 - **Credential-blind E2E.** When an end-to-end test needs a session, load it from a
   login-script artifact by path (Playwright `storageState`, a bearer-token file); never place
   a real secret in context. Same rule as autopilot's `rules/auth.md`.
-- **English only.** All authored tests, comments, and docs are English.
+- **The repository's language and style.** Authored tests, their names, comments and docs
+  follow the language and style of the repository's existing tests. A commit or PR text
+  follows `${CLAUDE_PLUGIN_ROOT}/skills/autopilot/rules/conventions.md`, whose data
+  `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-vcs.sh" --conventions --repo "$(git rev-parse --show-toplevel)"`
+  prints.
 
 ## Next step
 

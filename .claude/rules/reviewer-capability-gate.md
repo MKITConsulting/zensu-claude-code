@@ -164,7 +164,7 @@ a plugin root without the capability gate.
   capability-gate and `subagentShell` rows of `docs/configuration.md`, the principal item and
   §"Security boundary" of `docs/session-control.md`, the reviewer-boundary paragraph and the
   custom-persona note in `docs/review-chain.md`, the two neutral-child paragraphs in
-  `docs/tdd-manager-workflow.md`, the neutral item in `docs/session-control-release-gate.md`,
+  `docs/build-workflow.md`, the neutral item in `docs/session-control-release-gate.md`,
   `skills/gauntlet-loop/references/harness.md` and `evals/session-control/README.md`.
 - **Known gaps.** The mention scan reads text: a name assembled at run time and code read from a
   file pass it. The command-tool rule reads only the tool's name, so a tool that runs commands

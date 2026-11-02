@@ -7,4 +7,4 @@
 # It is a report/gate, not an executor.
 (plan|amendment|finding|blocker|recommend)
 # plan-review must NEVER trigger the TDD implementation workflow.
-!Executing via /zensu:tdd
+!Executing via /zensu:build

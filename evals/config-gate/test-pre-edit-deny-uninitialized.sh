@@ -28,7 +28,7 @@ cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 # 0.4.0+: the gate activates on chain-state (active=true), not CLAUDE_AGENT_TYPE.
-# Mark the session active with no phase written (UNINITIALIZED), as /zensu:tdd
+# Mark the session active with no phase written (UNINITIALIZED), as /zensu:build
 # --tdd-begin would before any RED test exists.
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 # shellcheck disable=SC1090

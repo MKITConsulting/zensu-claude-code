@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" \
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/../.." ;; (*) cd ../.. ;; esac && pwd -P)" \
   || { return 2 2>/dev/null || exit 2; }
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
@@ -21,7 +21,10 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 # only from this canonically verified executing root, never from ambient
 # ZENSU_* bindings. Data paths are translated explicitly at each Node boundary.
 _ZENSU_TDD_HOST_PATH="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh"
-_ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(bash "$_ZENSU_TDD_HOST_PATH" "$CLAUDE_PLUGIN_ROOT")" \
+unset -f zensu_host_path _zensu_host_path_render _zensu_host_path_drive 2>/dev/null || true
+source "$_ZENSU_TDD_HOST_PATH" && declare -F zensu_host_path >/dev/null 2>&1 \
+  || { return 2 2>/dev/null || exit 2; }
+_ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(zensu_host_path "$CLAUDE_PLUGIN_ROOT")" \
   || { return 2 2>/dev/null || exit 2; }
 _ZENSU_TDD_CONTROL_CORE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
 [ -f "$_ZENSU_TDD_CONTROL_CORE" ] && [ ! -L "$_ZENSU_TDD_CONTROL_CORE" ] \
@@ -2598,7 +2601,7 @@ _tdd_read_validated_state() {
     || { echo "invalid"; return 0; }
   native_state_file="$(_tdd_native_project_path "$state_file")" \
     || { echo "invalid"; return 0; }
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" \
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" \
     || { echo "invalid"; return 0; }
   [ -f "$lib_dir/session-control-core-v1.js" ] \
     && [ ! -L "$lib_dir/session-control-core-v1.js" ] \
@@ -2888,7 +2891,7 @@ ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this se
 # changed worktree, never wall time. Not addressed here; a turn counter is a
 # workflow-state field and therefore a MINOR release under §"Runtime Lineage".
 #
-# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/references/review-chain.md`
+# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/build/references/review-chain.md`
 # (Phase 6 step 10), before any hook directive exists, and that carrier deliberately does not
 # repeat this text — the skill body is in context only because the workflow was
 # invoked, and a third unpinned copy is the drift class CLAUDE.md warns about. So a

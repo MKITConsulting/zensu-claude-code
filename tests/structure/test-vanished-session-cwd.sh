@@ -133,14 +133,13 @@ if (command === 'payload') {
   if (!Object.prototype.hasOwnProperty.call(CWD_SHAPES, shape)) process.exit(4);
   process.stdout.write(buildPayload(tool, CWD_SHAPES[shape], agentType));
 } else if (command === 'registrations') {
-  const hooks = require(path.join(rest[0], 'hooks', 'hooks.json')).hooks || {};
+  const registration = require(path.join(rest[0], 'hooks', 'lib', 'hook-registration-v1.js'));
+  const manifest = require(path.join(rest[0], 'hooks', 'hooks.json'));
   const rows = [];
-  for (const matcher of hooks.PreToolUse || []) {
-    const pattern = matcher.matcher === undefined ? '' : String(matcher.matcher);
-    for (const entry of matcher.hooks || []) {
-      const found = String(entry.command || '').match(/hooks\/([A-Za-z0-9._-]+\.sh)/);
-      if (found) rows.push(pattern + '\t' + found[1]);
-    }
+  for (const entry of registration.registeredHooks(manifest, 'PreToolUse') || []) {
+    const pattern = entry.matcher === undefined ? '' : String(entry.matcher);
+    const found = String(entry.command || '').match(/hooks\/([A-Za-z0-9._-]+\.sh)/);
+    if (found) rows.push(pattern + '\t' + found[1]);
   }
   process.stdout.write([...new Set(rows)].join('\n'));
 } else if (command === 'match') {

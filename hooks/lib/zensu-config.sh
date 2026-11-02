@@ -16,25 +16,28 @@
 # for an opt-in key read through `zensu_hook_opted_in`.
 #
 # ONE exception to "this file only reads config": the session-marker helpers that
-# follow `zensu_tdd_strict_enabled` also read TWO session-scoped markers under
-# `<project>/.zensu/state/` — the tdd-mode marker and the delivery-route marker. Every
-# config getter spawns node through `_zensu_config_node`; the getters after the marker
-# section do too. Beyond those config reads, an auditor asking "what in
-# the marker section opens something" must get exactly these names and no others:
-# `zensu_tdd_mode_state_linked` (the `-L` probes, shared by both marker pairs) and
-# `_zensu_marker_one_line_value` (the ONE bounded read behind both marker readers).
-# `zensu_default_delivery_route` is one more config getter. `zensu_tdd_mode_marker_path`
-# / `zensu_delivery_route_marker_path` only spell a path, `zensu_tdd_mode_marker_state`
-# / `zensu_delivery_route_marker_state` only map what the shared reader returned onto
-# their own vocabularies, and `zensu_tdd_mode_override` / `zensu_tdd_strict_effective` /
-# `zensu_delivery_route_resolve` / `zensu_delivery_route_field` /
-# `zensu_delivery_route_status_line` only reduce those answers. The marker reads are
-# node-free and outside the merge machinery above. Rendering a value INTO a hook
-# directive is not a read of anything and lives in `hooks/lib/zensu-directive.sh`. The
-# marker section lives here so each writer (`hooks/lib/zensu-tdd-mode.sh`,
-# `hooks/lib/zensu-delivery-route.sh`) and every reader share ONE path template and
-# ONE parse; zen-mode hand-copies its template into its reader hook, and that is the
-# drift this placement avoids.
+# follow `zensu_tdd_strict_enabled`, and `zensu_full_suite_marker_state` further down,
+# also read FIVE session-scoped markers under `<project>/.zensu/state/` — the tdd-mode,
+# delivery-route, inherited-route, linked-session and full-suite markers. Every config
+# getter, before and after the marker section, spawns node through `_zensu_config_node`,
+# except where `_zensu_config_key_unset` proves the key absent.
+# Beyond those config reads, an auditor asking "what in the marker section opens
+# something" must get exactly these names and no others: `zensu_tdd_mode_state_linked`
+# (the `-L` probes, shared by every marker) and `_zensu_marker_one_line_value` (the ONE
+# bounded read behind every marker reader). `zensu_default_delivery_route` is one more
+# config getter. `zensu_tdd_mode_marker_path` / `zensu_delivery_route_marker_path` /
+# `zensu_inherited_route_marker_path` / `zensu_linked_session_marker_path` /
+# `zensu_full_suite_marker_path` only spell a path, `zensu_tdd_mode_marker_state` /
+# `zensu_delivery_route_marker_state` / `zensu_inherited_route_state` /
+# `zensu_linked_session_state` / `zensu_full_suite_marker_state` only map the shared
+# reader's answer onto their own vocabularies, and `zensu_tdd_mode_override` /
+# `zensu_tdd_strict_effective` / `zensu_delivery_route_resolve` /
+# `zensu_delivery_route_field` / `zensu_delivery_route_status_line` only reduce those
+# answers. The marker reads are node-free and outside the merge machinery above, and
+# rendering a value INTO a directive reads nothing and lives in zensu-directive.sh. Each
+# writer (`zensu-tdd-mode.sh`, `zensu-delivery-route.sh`, `zensu-linked-session.sh`,
+# `zensu-full-suite.sh`) and every reader share ONE path template and ONE parse from
+# here; zen-mode hand-copies its template into its reader hook, the drift this avoids.
 #
 # _ZENSU_CFG_JS holds the shared reader/merge/select JS. It uses only
 # double-quoted JS string literals so each getter can embed it inside a
@@ -77,9 +80,28 @@ _zensu_config_json() {
   _zensu_config_node -e "$_ZENSU_CFG_JS"' process.stdout.write(JSON.stringify(cfg()))' 2>/dev/null || echo '{}'
 }
 
+_ZENSU_CONFIG_PRECHECK_BYTES=16384
+_zensu_config_key_unset() {
+  local key="${1:-}" candidate content LC_ALL=C
+  [ -n "$key" ] && [ -z "${ZENSU_CONFIG:-}" ] || return 1
+  for candidate in "${HOME:-}/.zensu/config.json" ${CLAUDE_PROJECT_DIR:+"$CLAUDE_PROJECT_DIR/.zensu/config.json"}; do
+    if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
+      continue
+    fi
+    [ -f "$candidate" ] && [ -r "$candidate" ] || return 1
+    content=""
+    IFS= read -r -n "$_ZENSU_CONFIG_PRECHECK_BYTES" -d '' content 2>/dev/null < "$candidate" || true
+    [ "${#content}" -lt "$_ZENSU_CONFIG_PRECHECK_BYTES" ] || return 1
+    [ -n "$content" ] || [ ! -s "$candidate" ] || return 1
+    case "$content" in *"\"$key\""*|*\\*) return 1 ;; esac
+  done
+  return 0
+}
+
 zensu_hook_enabled() {
   local key="$1"
   command -v node >/dev/null 2>&1 || return 0   # node missing → fall back to enabled
+  _zensu_config_key_unset "$key" && return 0
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===false?"0":"1")' "$key" 2>/dev/null)
   [ -z "$val" ] && return 0                      # any other failure → enabled
@@ -139,6 +161,7 @@ zensu_tdd_strict_enabled() {
 zensu_hook_opted_in() {
   local key="$1"
   command -v node >/dev/null 2>&1 || return 1
+  _zensu_config_key_unset "$key" && return 1
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===true?"1":"0")' "$key" 2>/dev/null)
   [ "$val" = "1" ]
@@ -167,13 +190,12 @@ zensu_tdd_mode_marker_path() {
   printf '%s\n' "$project_dir/.zensu/state/tdd-mode-$session_key.json"
 }
 
-# The symlink refusal, spelled ONCE, for BOTH session markers this file owns: the
-# tdd-mode pair (reader `zensu_tdd_mode_marker_state`, helper zensu-tdd-mode.sh) and
-# the delivery-route pair (reader `zensu_delivery_route_marker_state`, helper
-# zensu-delivery-route.sh). Both helpers write through `zensu_write_session_marker`
-# in zensu-marker-write.sh, the one writer that calls this guard. The name predates
-# the second pair and is kept because every caller spells it — read it as "marker
-# state linked". Each reader and the writer guard the same three components —
+# The symlink refusal, spelled ONCE, for EVERY session marker this file owns: each of
+# the five readers calls it, and every marker helper writes through
+# `zensu_write_session_marker` in zensu-marker-write.sh, the one writer that calls it.
+# The name predates every marker after the tdd-mode one and is kept because every
+# caller spells it — read it as "marker state linked". Each reader and the writer
+# guard the same three components —
 # `.zensu`, the state directory, the marker leaf — and the writer additionally guards
 # its `mktemp` temp leaf, which is what the optional third argument is for. It lives
 # here beside the path templates for the same reason they do: hand-synced copies of
@@ -194,8 +216,8 @@ zensu_tdd_mode_state_linked() {
   return 1
 }
 
-# The ONE bounded reader behind both session markers this file owns — the tdd-mode
-# marker (`{"mode":"<value>"}`) and the delivery-route marker (`{"route":"<value>"}`).
+# The ONE bounded reader behind every session marker this file owns, each a one-key
+# object `{"<key>":"<value>"}` whose key is `mode`, `route`, `state` or `runner`.
 # It echoes the lowercase VALUE when the file holds exactly that one line (plus
 # trailing whitespace) and nothing else, and echoes nothing otherwise; the callers
 # map the value onto their own vocabulary and treat an empty answer as `none`.
@@ -217,7 +239,7 @@ zensu_tdd_mode_state_linked() {
 # tolerated; any other content is not.
 #
 # Bound the bytes that are actually CONSUMED, in ONE open. A writer's own output is
-# at most 21 bytes, so a small ceiling refuses nothing legitimate. This used to be a
+# at most 23 bytes, so a small ceiling refuses nothing legitimate. This used to be a
 # `wc -c` pass followed by a separate `$(cat)` drain — two opens, so a marker that
 # GREW between them passed the ceiling and was then slurped unbounded into a shell
 # variable, on a path that runs on every prompt. `head -c` caps the read itself, so
@@ -234,7 +256,7 @@ _zensu_marker_one_line_value() {
   # A NUL byte is translated to \001 inside the same open, before the bytes reach the
   # substitution. Bash drops NULs from `$(...)` output, so an untranslated NUL made
   # `${#body}` undercount the 513-byte read: a file padded with NULs passed the ceiling
-  # with its tail unexamined, and `{"route":"tdd"}<NUL>` read as `tdd`. Translated, every
+  # with its tail unexamined, and `{"route":"build"}<NUL>` read as `build`. Translated, every
   # byte counts toward the ceiling and a \001 fails the whole-line match. `tr` gets
   # `LC_ALL=C` of its own for the reason the `sed` below does, and because BSD `tr`
   # refuses an invalid byte sequence in a UTF-8 locale. The redirect failure (an
@@ -304,8 +326,8 @@ zensu_tdd_strict_effective() {
 # Session-scoped DELIVERY ROUTE — the answer to the question both ask-hooks
 # (plan-approved-delegate.sh, user-prompt-tdd-reminder.sh) would otherwise put to the
 # user on every approval and every code request. hooks/lib/zensu-delivery-route.sh
-# writes the marker for /zensu:delivery-route, and the model writes `tdd` right after the
-# user answers the question with the Zensu workflow. The vocabulary is `tdd` | `direct` only: /zensu:autopilot
+# writes the marker for /zensu:delivery-route, and the model writes `build` right after the
+# user answers the question with the Zensu workflow. The vocabulary is `build` | `direct` only: /zensu:autopilot
 # and /zensu:pilot push branches, open pull requests or mutate tracked feature state,
 # so they stay per-plan choices that neither a marker nor a config key can pre-select.
 # The path template lives HERE and the writer sources it, for the reason the tdd-mode
@@ -317,7 +339,7 @@ zensu_delivery_route_marker_path() {
   printf '%s\n' "$project_dir/.zensu/state/delivery-route-$session_key.json"
 }
 
-# `tdd` / `direct` / `released` (a present `{"route":"auto"}`) / `none` (absent,
+# `build` / `direct` / `released` (a present `{"route":"auto"}`) / `none` (absent,
 # symlinked, unreadable, oversized, or not a marker this plugin wrote).
 zensu_delivery_route_marker_state() {
   local project_dir="${1:-}" session_key="${2:-}" marker
@@ -328,14 +350,59 @@ zensu_delivery_route_marker_state() {
     return 0
   fi
   case "$(_zensu_marker_one_line_value "$marker" route)" in
-    (tdd)    echo "tdd" ;;
+    (build)  echo "build" ;;
     (direct) echo "direct" ;;
     (auto)   echo "released" ;;
     (*)      echo "none" ;;
   esac
 }
 
-# hooks.defaultDeliveryRoute, read PERMISSIVELY: `tdd` or `direct` verbatim, and `ask`
+zensu_inherited_route_marker_path() {
+  local project_dir="${1:-}" session_key="${2:-}"
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1
+  printf '%s\n' "$project_dir/.zensu/state/inherited-route-$session_key.json"
+}
+
+zensu_inherited_route_state() {
+  local project_dir="${1:-}" session_key="${2:-}" marker
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "none"; return 0; }
+  marker="$(zensu_inherited_route_marker_path "$project_dir" "$session_key")" || { echo "none"; return 0; }
+  if zensu_tdd_mode_state_linked "$project_dir" "$marker" || [ ! -f "$marker" ]; then
+    echo "none"
+    return 0
+  fi
+  case "$(_zensu_marker_one_line_value "$marker" route)" in
+    (build) echo "build" ;;
+    (*)     echo "none" ;;
+  esac
+}
+
+zensu_linked_session_marker_path() {
+  local project_dir="${1:-}" session_key="${2:-}"
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1
+  printf '%s\n' "$project_dir/.zensu/state/linked-session-$session_key.json"
+}
+
+zensu_linked_session_state() {
+  local project_dir="${1:-}" session_key="${2:-}" marker
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "absent"; return 0; }
+  marker="$(zensu_linked_session_marker_path "$project_dir" "$session_key")" || { echo "absent"; return 0; }
+  if zensu_tdd_mode_state_linked "$project_dir" "$marker"; then
+    echo "none"
+    return 0
+  fi
+  if [ ! -e "$marker" ]; then
+    echo "absent"
+    return 0
+  fi
+  case "$(_zensu_marker_one_line_value "$marker" state)" in
+    (linked)     echo "linked" ;;
+    (unresolved) echo "unresolved" ;;
+    (*)          echo "none" ;;
+  esac
+}
+
+# hooks.defaultDeliveryRoute, read PERMISSIVELY: `build` or `direct` verbatim, and `ask`
 # for everything else — absent, the explicit `ask`, an empty string, a quoted or
 # capitalized spelling, a boolean, or a host without node. An unknown value never
 # selects a route; it only keeps the question. With a PROJECT_DIR argument the project
@@ -351,32 +418,37 @@ zensu_default_delivery_route() {
   else
     root="${CLAUDE_PROJECT_DIR:-}"
   fi
-  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var s=j.hooks&&j.hooks.defaultDeliveryRoute;console.log(s==="tdd"||s==="direct"?s:"ask")' 2>/dev/null)
+  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var s=j.hooks&&j.hooks.defaultDeliveryRoute;console.log(s==="build"||s==="direct"?s:"ask")' 2>/dev/null)
   case "$val" in
-    (tdd|direct) echo "$val" ;;
+    (build|direct) echo "$val" ;;
     (*)          echo "ask" ;;
   esac
 }
 
 # The ladder both ask-hooks, `--status` and the /zensu:doctor row resolve: the session
-# marker outranks the config key, and neither outranks an explicit preference in the
+# marker outranks a `build` a linked session inherited from its parent, which a released
+# marker skips, and both outrank the config key; none outranks an explicit preference in the
 # user's own text — that rank is judged by the model from the directive, so it never
-# reaches this function. Both mechanical ranks are read under the ONE project root the
-# caller passes: the marker lives there, and the config overlay is read from there
+# reaches this function. The mechanical ranks are read under the ONE project root the
+# caller passes: the markers live there, and the config overlay is read from there
 # rather than from the ambient CLAUDE_PROJECT_DIR, so no caller can pair a recorded
 # session's marker with another tree's config. No root means no decision: `ask`.
-# Prints `<route>\t<source>` with route ∈ tdd|direct|ask and source ∈
-# session|config|none.
+# Prints `<route>\t<source>` with route ∈ build|direct|ask and source ∈
+# session|inherited|config|none.
 zensu_delivery_route_resolve() {
   local project_dir="${1:-}" session_key="${2:-}" route
   [ -n "$project_dir" ] || { printf 'ask\tnone\n'; return 0; }
   route="$(zensu_delivery_route_marker_state "$project_dir" "$session_key")"
   case "$route" in
-    (tdd|direct) printf '%s\t%s\n' "$route" session; return 0 ;;
+    (build|direct) printf '%s\t%s\n' "$route" session; return 0 ;;
   esac
+  if [ "$route" != released ] && [ "$(zensu_inherited_route_state "$project_dir" "$session_key")" = build ]; then
+    printf 'build\tinherited\n'
+    return 0
+  fi
   route="$(zensu_default_delivery_route "$project_dir")"
   case "$route" in
-    (tdd|direct) printf '%s\t%s\n' "$route" config; return 0 ;;
+    (build|direct) printf '%s\t%s\n' "$route" config; return 0 ;;
   esac
   printf 'ask\tnone\n'
 }
@@ -394,8 +466,9 @@ zensu_delivery_route_status_line() {
     released=", session choice released"
   fi
   case "$source" in
-    (session) printf '%s (session)\n' "$route" ;;
-    (config)  printf '%s (config%s)\n' "$route" "$released" ;;
+    (session)   printf '%s (session)\n' "$route" ;;
+    (inherited) printf '%s (inherited from parent session)\n' "$route" ;;
+    (config)    printf '%s (config%s)\n' "$route" "$released" ;;
     (*)       printf 'ask (default%s)\n' "$released" ;;
   esac
 }
@@ -408,8 +481,9 @@ zensu_delivery_route_field() {
   route="${pair%%$'\t'*}"
   source="${pair#*$'\t'}"
   case "$source" in
-    (session) printf '%s (session marker)\n' "$route" ;;
-    (config)  printf '%s (hooks.defaultDeliveryRoute)\n' "$route" ;;
+    (session)   printf '%s (session marker)\n' "$route" ;;
+    (inherited) printf '%s (inherited from parent session)\n' "$route" ;;
+    (config)    printf '%s (hooks.defaultDeliveryRoute)\n' "$route" ;;
     (*)       printf 'ask\n' ;;
   esac
 }
@@ -482,8 +556,13 @@ zensu_evidence_acceptance_gate() {
 # untouched, while this one only supplies the value used when no marker exists.
 zensu_zen_mode_default_on() {
   command -v node >/dev/null 2>&1 || return 0
-  local val
-  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.zenModeDefault===false?"0":"1")' 2>/dev/null)
+  local root val
+  if [ "$#" -gt 0 ]; then
+    root="$1"
+  else
+    root="${CLAUDE_PROJECT_DIR:-}"
+  fi
+  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.zenModeDefault===false?"0":"1")' 2>/dev/null)
   [ -z "$val" ] && return 0
   [ "$val" = "1" ]
 }

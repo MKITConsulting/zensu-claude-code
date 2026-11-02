@@ -18,7 +18,7 @@ the current state with `--status` and ask what the user wants.
 
 Record the strict/vanilla choice for THIS session.
 
-The mode decides how `/zensu:tdd` implements: **strict** writes a failing test
+The mode decides how `/zensu:build` implements: **strict** writes a failing test
 first and drives every step through RED → IMPL → GREEN under the PreToolUse
 phase-gate; **vanilla** implements directly, with tests at the agent's discretion.
 Both keep everything else — the plan, the evidence audits, the review chain, and
@@ -39,7 +39,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 ```
 
 That writes a session-scoped marker under `.zensu/state/` holding
-`{"mode":"strict"}`. The next `/zensu:tdd` run arms strict and echoes
+`{"mode":"strict"}`. The next `/zensu:build` run arms strict and echoes
 `mode: strict` at `--tdd-begin`. That includes the fix chains
 `/zensu:pr-fix-findings` runs, which carry no mode of their own.
 

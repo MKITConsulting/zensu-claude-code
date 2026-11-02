@@ -18,7 +18,7 @@ set -u
 #
 # G8-G11 and G15 pin six load-bearing runtime claims the skill's "Inside the Zensu
 # plugin" section makes. Two review rounds found FALSE claims there — that an
-# active TDD chain gates a spawned builder's edits, and that a code-reviewer
+# active build chain gates a spawned builder's edits, and that a code-reviewer
 # spawn consumes a review ticket — and prose that is wrong about a gate is
 # worse than prose that is silent, because the model acts on it. Each check
 # asserts the skill's claim against the hook that decides it, so a change to
@@ -49,7 +49,7 @@ README_MD="$PLUGIN_DIR/README.md"
 CAPABILITY_LIB="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
 SHELL_GUARD_LIB="$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js"
 PRINCIPAL_LIB="$PLUGIN_DIR/hooks/lib/claude-principal-v1.js"
-EDIT_GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
+EDIT_GATE="$PLUGIN_DIR/hooks/checks/pre-edit-tdd-reminder.sh"
 REVIEW_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 # Sibling suite, read as EVIDENCE rather than as a test: G15's nested-spawn residue is
@@ -260,12 +260,10 @@ COMMAND_TOOL_ARITY="$(printf '%s' "$COMMAND_TOOLS_DECL" | grep -o "'[A-Za-z_][A-
 # every conjunct above true while the central containment claim went false.
 G8_REGISTERED="$(node -e '
 const h = require(process.argv[1]);
-const pre = (h.hooks && h.hooks.PreToolUse) || [];
-const entry = pre.find((e) => e.matcher === ".*");
-const hit = entry && (entry.hooks || []).some(
-  (x) => typeof x.command === "string" && x.command.includes("pre-reviewer-capability-gate.sh"));
+const pre = require(process.argv[2]).registeredHooks(h, "PreToolUse") || [];
+const hit = pre.some((x) => x.matcher === ".*" && x.command.includes("pre-reviewer-capability-gate.sh"));
 process.stdout.write(hit ? "yes" : "no");
-' "$HOOKS_JSON" 2>/dev/null)"
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null)"
 [ "$G8_REGISTERED" = yes ] || G8_MISS="$G8_MISS manifest-registration"
 flat_has 'a builder or critic that reports its `agent_type` may hold a guarded `Bash` unless `hooks.subagentShell` is `false`' "$SKILL_FLAT" \
   || G8_MISS="$G8_MISS skill-claim"

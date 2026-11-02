@@ -1,4 +1,4 @@
-[14:08:31] TDD STARTED — Example feature with bulk-shortcut RED | steps: 3
+[14:08:31] BUILD STARTED — Example feature with bulk-shortcut RED | steps: 3
 [14:08:33] EXECUTION STARTED
 [14:10:45] BE-1..3 RED ValueObjectTests — FAIL: all value-object classes missing (combined RED for steps BE-1, BE-2, BE-3)
 [14:10:48] BE-1 IMPL completed — files: QuoteId.java

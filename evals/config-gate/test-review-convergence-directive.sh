@@ -209,7 +209,7 @@ check "RP0 the default budget routes a fix round after the first review" "$(has 
 ONE3="$(context_of "$TMP_DIR/one-round/round-3.json")"
 check "RP0b the default budget routes a second fix round" "$(has "$ONE2" "'Fixing critical findings in-thread, then re-reviewing (round 2/2)' (case C)")"
 check "RP0c the default budget hands the third review over at max rounds" "$(has "$ONE3" 'max 2 rounds reached')"
-check "RP1 the default clause gates a re-review CRITICAL on a reproduction" "$(has "$ONE1" 'routes only after /zensu:tdd step 4c stage 3 reproduced it')"
+check "RP1 the default clause gates a re-review CRITICAL on a reproduction" "$(has "$ONE1" 'routes only after /zensu:build step 4c stage 3 reproduced it')"
 check "RP2 the default hand-off names the reproduction rule for self-review" "$(has "$ONE3" 'is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
 check "RP3 criticalReproduction off drops the rule from the clause" "$(lacks "$RPOFF1" 'FINDING REPRODUCTION')"
 check "RP4 criticalReproduction off drops the rule from the hand-off" "$(lacks "$RPOFF2" 'FINDING REPRODUCTION')"

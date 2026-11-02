@@ -4,7 +4,7 @@ set -u
 # Guards the "Hooks (N)" sync convention: the header count in the hook
 # reference (docs/configuration.md), every `Hooks (N)`/`#hooks-N` reference in
 # it or in README.md, and the number of hook scripts actually registered in
-# hooks.json must agree. Catches the drift where a hook is added (header
+# hooks.json, directly or as a check of hooks/lib/hook-dispatch-v1.js, must agree. Catches the drift where a hook is added (header
 # bumped) but the prose count / intra-doc anchor is left stale.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -24,16 +24,14 @@ HDR_N="$(grep -oE '^### Hooks \([0-9]+\)' "$HOOKS_DOC" | grep -oE '[0-9]+' | hea
 
 REG_N="$(node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const reg=require(process.argv[2]);
   const s=new Set();
-  const walk=(o)=>{
-    if(Array.isArray(o)){o.forEach(walk);return;}
-    if(o&&typeof o==="object"){
-      if(typeof o.command==="string"){const m=o.command.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);if(m)s.add(m[1]);}
-      Object.values(o).forEach(walk);
-    }
-  };
-  walk(h); process.stdout.write(String(s.size));
-' "$HOOKS_JSON" 2>/dev/null)"
+  for(const event of Object.keys(h.hooks||{})){
+    const entries=reg.registeredHooks(h,event)||[];
+    for(const e of entries){const m=e.command.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);if(m)s.add(m[1]);}
+  }
+  process.stdout.write(String(s.size));
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null)"
 
 [ -n "$HDR_N" ] && [ "$HDR_N" = "$REG_N" ] \
   && check "H2 header count ($HDR_N) == registered hook scripts ($REG_N)" PASS \

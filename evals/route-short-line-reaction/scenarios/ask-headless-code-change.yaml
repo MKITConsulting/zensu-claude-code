@@ -5,7 +5,7 @@ vars:
   expected_hook: reminder
   expected_shape: ask-short
   expected_field: ask
-  allowed_first: skill:zensu:tdd,ask
+  allowed_first: skill:zensu:build,ask
   anchor_clause: "If the ZENSU HUMAN PRESENT field below reads no or AskUserQuestion is refused, run the Zensu workflow without asking; the field, not auto mode, decides."
 assert:
   - type: javascript

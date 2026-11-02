@@ -1456,7 +1456,7 @@ C39_PHRASE="$(printf '%s\n' "$C39_ALL" | head -1)"
   || check "C39pre the emitted threshold-gated clause was located, so the comparison is not vacuous" FAIL
 C39_NORM="$(printf '%s' "$C39_PHRASE" | tr -s '[:space:]' ' ' | tr 'A-Z' 'a-z')"
 C39_MISS=""
-for c39f in "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; do
+for c39f in "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN_DIR/docs/build-workflow.md"; do
   c39n="$(basename "$c39f")"
   if [ ! -r "$c39f" ]; then C39_MISS="$C39_MISS unreadable:$c39n"; continue; fi
   # POSITIVE, per OCCURRENCE rather than per file. Containment clears a carrier on one hit,

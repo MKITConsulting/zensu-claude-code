@@ -283,3 +283,5 @@ Never condense the context metadata straight into a wiki page — that is the fo
 ## Automatic context
 
 The main thread reuses a supplied automatic package and its `load_id` for the same feature and task. Otherwise it loads the tracked package with the host agent label and retains its receipt. Relevant item reads use that exact `--context-load` value. Ask the main thread for missing context; this rule does not broaden a read-only agent's tool permissions.
+
+Read `layers` first and keep `related_layers` separate. Inspect `relevance`, `reason` and the directed `path`; sharing a source does not establish a dependency. Request additional item contents only for a specific unresolved task question, explain why they are needed, and retain the same `load_id`. Do not bulk-fetch either group. Check graph/display truncation and shown/returned counts. Legacy packages without `related_layers` require an explicit relevance assessment.

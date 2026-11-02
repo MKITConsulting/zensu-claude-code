@@ -8,7 +8,7 @@ zensu_hook_principal() {
   local payload="${1:-}" expected_event="${2:-}" field="${3:-}" lib_dir principal_lib
   [ -n "$expected_event" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  lib_dir="$(case "${BASH_SOURCE[0]}" in (*/*) cd "${BASH_SOURCE[0]%/*}/" ;; esac && pwd -P)" || return 1
   principal_lib="$lib_dir/claude-principal-v1.js"
   [ -f "$principal_lib" ] && [ ! -L "$principal_lib" ] || return 1
   (

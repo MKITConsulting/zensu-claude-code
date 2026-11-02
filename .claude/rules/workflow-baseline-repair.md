@@ -310,7 +310,7 @@ new one — the shape it refuses is byte-identical.
 **The first creation of `.zensu/` also writes `.zensu/.gitignore`.** `workflowStateDirectory` in
 `hooks/lib/session-control-core-v1.js` writes `ZENSU_GITIGNORE_BODY` (`/state/` and
 `/logs/witness-*.log`) with an exclusive create when that call itself created `.zensu`, so a
-consuming project keeps session state and witness logs out of git while its plans and TDD logs
+consuming project keeps session state and witness logs out of git while its plans and build logs
 stay committable, and the project's root `.gitignore` is never touched. A `.zensu` that already
 existed, a `.gitignore` the project wrote there and one the user deleted are left alone, and a
 failed write never fails the state directory. The evidence runner's tree fingerprint is

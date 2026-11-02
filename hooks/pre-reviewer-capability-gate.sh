@@ -1,51 +1,16 @@
 #!/bin/bash
-set -uo pipefail
-
-fail_closed() {
-  printf 'zensu: reviewer capability gate unavailable: %s\n' "$1" >&2
-  exit 2
-}
-
-fail_closed_after_drain() {
-  cat >/dev/null 2>&1 || true
-  fail_closed "$1"
-}
-
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)" \
-  || fail_closed "cannot resolve the directory of this hook"
-PLUGIN_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd -P)" \
-  || fail_closed "cannot resolve the plugin root above this hook"
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  DECLARED_PLUGIN_ROOT="$(CDPATH= cd -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" \
-    || fail_closed_after_drain "CLAUDE_PLUGIN_ROOT names no readable directory; start a fresh Claude Code session"
-  [ "$DECLARED_PLUGIN_ROOT" = "$PLUGIN_ROOT" ] \
-    || fail_closed_after_drain "CLAUDE_PLUGIN_ROOT names another plugin installation than the one running this hook; start a fresh Claude Code session"
+case "$0" in (*/*) _zensu_hooks="${0%/*}" ;; (*) _zensu_hooks=. ;; esac
+_zensu_lead='zensu: reviewer capability gate unavailable: '
+if command -v node >/dev/null 2>&1; then
+  if source "$_zensu_hooks/lib/zensu-hook-dispatch.sh" 2>/dev/null && declare -F zensu_hook_dispatch_guarded >/dev/null 2>&1; then
+    zensu_hook_dispatch_guarded pre reviewer-capability "$_zensu_hooks" "$_zensu_lead"
+    exit
+  fi
+  _zensu_reason="the dispatcher hooks/lib/hook-dispatch-v1.js cannot be started; reinstall the plugin"
+else
+  _zensu_root="$(CDPATH= cd -- "$_zensu_hooks/.." 2>/dev/null && pwd -P)"
+  _zensu_reason="node was not found on the PATH that Claude Code was started with, and Zensu blocks every tool call until node is available. Install Node.js or put it on that PATH, then restart Claude Code (see Requirements in $_zensu_root/README.md), or disable the Zensu plugin"
 fi
-POLICY="$SCRIPT_DIR/lib/reviewer-capability-v1.js"
-[ -f "$POLICY" ] || fail_closed "the policy module hooks/lib/reviewer-capability-v1.js is missing; reinstall the plugin"
-NODE_MISSING="node was not found on the PATH that Claude Code was started with, and Zensu blocks every tool call until node is available. Install Node.js or put it on that PATH, then restart Claude Code (see Requirements in $PLUGIN_ROOT/README.md), or disable the Zensu plugin"
-NODE="$(command -v node 2>/dev/null)" || fail_closed_after_drain "$NODE_MISSING"
-[ -n "$NODE" ] || fail_closed_after_drain "$NODE_MISSING"
-NATIVE_PLUGIN_ROOT="$(bash "$SCRIPT_DIR/lib/zensu-host-path.sh" "$PLUGIN_ROOT")" \
-  || fail_closed_after_drain "cannot convert the plugin root into a path node can open"
-NATIVE_PLUGIN_DATA="$(bash "$SCRIPT_DIR/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" \
-  || fail_closed_after_drain "cannot convert CLAUDE_PLUGIN_DATA into a path node can open"
-TEMP_FAILURE="cannot create a private temporary file under ${TMPDIR:-/tmp}"
-OUTPUT="$(mktemp "${TMPDIR:-/tmp}/zensu-reviewer-gate.XXXXXX" 2>/dev/null)" || fail_closed "$TEMP_FAILURE"
-ERROR_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/zensu-reviewer-gate-error.XXXXXX" 2>/dev/null)" || {
-  rm -f "$OUTPUT"
-  fail_closed "$TEMP_FAILURE"
-}
-chmod 600 "$OUTPUT" "$ERROR_OUTPUT" 2>/dev/null || {
-  rm -f "$OUTPUT" "$ERROR_OUTPUT"
-  fail_closed "$TEMP_FAILURE"
-}
-trap 'rm -f "$OUTPUT" "$ERROR_OUTPUT"' EXIT HUP INT TERM
-
-(cd -P -- "$SCRIPT_DIR/lib" \
-  && CLAUDE_PLUGIN_ROOT="$NATIVE_PLUGIN_ROOT" CLAUDE_PLUGIN_DATA="$NATIVE_PLUGIN_DATA" \
-    "$NODE" ./reviewer-capability-v1.js) >"$OUTPUT" 2>"$ERROR_OUTPUT"
-STATUS=$?
-[ "$STATUS" -eq 0 ] || fail_closed "the policy check exited with status $STATUS"
-cat "$OUTPUT" || fail_closed "cannot read the policy result"
-exit 0
+cat >/dev/null 2>&1 || true
+printf '%s%s\n' "$_zensu_lead" "$_zensu_reason" >&2
+exit 2

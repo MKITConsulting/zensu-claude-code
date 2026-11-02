@@ -117,7 +117,7 @@ RUN_TASKS='[{"id":"run1","type":"shell","status":"running","description":"E2E re
 AWAIT_RUN=$'The E2E run is still going.\nZENSU-AWAIT: run1'
 RELEASE_NOTE='releasing this Stop while the background task(s) this turn waits for still run (run1)'
 HINT_LEAD="STOP intercepted by zensu chain-enforcer. This session's review chain is still armed"
-RESUME='Resume the /zensu:tdd Phase 6 review sequence'
+RESUME='Resume the /zensu:build Phase 6 review sequence'
 
 STOP_PROJECT="$WORK/stop-project"
 mkdir -p "$STOP_PROJECT"

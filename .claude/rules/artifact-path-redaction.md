@@ -2,6 +2,7 @@
 paths:
   - "hooks/lib/zensu-artifact-redact-v1.js"
   - "hooks/post-artifact-redact.sh"
+  - "hooks/lib/hook-dispatch-v1.js"
   - "tests/structure/test-artifact-redaction.sh"
 ---
 
@@ -9,8 +10,8 @@ paths:
 
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
-Consuming repos commit `.zensu/plans/{ts}_tdd-{slug}.md` and
-`.zensu/logs/{ts}_tdd-{slug}.log` as an audit trail and may later open-source the
+Consuming repos commit `.zensu/plans/{ts}_build-{slug}.md` and
+`.zensu/logs/{ts}_build-{slug}.log` as an audit trail and may later open-source the
 repository. A scan of ~27k committed log lines across four such repos found **no
 credential values** and ~436 lines carrying an absolute developer path, almost all
 inside the `cmd="…"` field of CHECKPOINT/AUDIT lines. The module is the single
@@ -101,14 +102,15 @@ invariant is soundness — everything it renders is true — not completeness, s
 of this makes a rendered entry false.
 
 **`hooks.secretScan:false` does NOT disable this scan.** Only the env escapes do.
-The divergence is deliberate: `zensu_hook_enabled` spawns `node` per call and
-`append` runs once per log line, so consulting the config here would put a process
-spawn on the hottest path in the workflow. Recorded rather than left for someone to
+The divergence is deliberate: `zensu_hook_enabled` spawns `node` whenever a config file
+names the key and `append` runs once per log line, so consulting the config here would put a
+process spawn on the hottest path in the workflow. Recorded rather than left for someone to
 discover from a refusal naming a variable the config row never mentions.
 
 **TWO WRITERS apply it, and the second exists because the first cannot be
 enough:** `zensu-log.sh append` (the narrative log, at write time) and
-`hooks/post-artifact-redact.sh` (a bounded sweep on BOTH registered matchers,
+the redact check of `hooks/lib/hook-dispatch-v1.js`, which the dispatcher runs after a shell
+call and `hooks/post-artifact-redact.sh` runs after a write (a bounded sweep on BOTH matchers,
 plus the named `file_path` on the write matchers). Both artifacts are
 MODEL-authored, so a guarantee that holds only while the model follows a recipe is
 not a guarantee.
@@ -159,19 +161,19 @@ form, so it carries none of the `..bak` defect, and it is unreachable from a uni
 for the same reason the requirements-gate copies are.
 
 **Coupled sites that move together:** the module's `ARTIFACT_BUCKETS` / `ARTIFACT_DIR`,
-which are module-INTERNAL — `post-artifact-redact.sh` consumes the layout TRANSITIVELY,
+which are module-INTERNAL — the redact check consumes the layout TRANSITIVELY,
 by calling `sweepTargets` and `redactFile` rather than joining
 `.zensu/plans` and `.zensu/logs` itself, and it never imported either constant; an
 earlier revision of this clause said it consumed them directly, and the module header
 now records the same correction. `SWEEP_WINDOW_SECONDS` and `SWEEP_MAX_TARGETS` are
-NAMED in the hook's own header prose and imported by nothing — it calls
+imported by nothing — the redact check calls
 `mod.sweepTargets(project)` with no options and the module defaults apply internally —
-so that coupling is documentation-only and breaks SILENTLY, which is the same trap the
+so every prose copy of their values is documentation-only and breaks SILENTLY, which is the same trap the
 module header now records in its own words;
 the `Edit|Write|MultiEdit`
-matcher spelling in FIVE places — `hooks/hooks.json`, `docs/configuration.md`,
-`docs/tdd-manager-workflow.md`, R0c, and the JS disjunction in
-`hooks/post-artifact-redact.sh` that actually selects the branch, which is the one
+matcher spelling in FIVE places — `DISPATCHED_CHECKS` (`artifact-redact-write`), `docs/configuration.md`,
+`docs/build-workflow.md`, R0c, and the `writeTool` disjunction in
+`sweepArtifacts` of `hooks/lib/hook-dispatch-v1.js` that actually selects the branch, which is the one
 a `NotebookEdit` added to the matcher would silently miss; the hook
 count in `docs/configuration.md` (header, prose, and the `#hooks-N` anchor in
 `docs/architecture.md` — the anchor was outside H3's file list until the reviewer-spawn
@@ -195,7 +197,7 @@ consumer re-spells any part of it, because a renamed reason would otherwise make
 the hook shout about every ordinary Write, and an implicit residual class already
 made a routine race report as the worst outcome the hook can produce.
 
-**Operator-facing accounts that must move with it:** `docs/tdd-manager-workflow.md`
+**Operator-facing accounts that must move with it:** `docs/build-workflow.md`
 §"Publication safety of the plan and log" (which carries the narrative, including
 the `SWEEP_WINDOW_SECONDS` value as prose), the `post-artifact-redact.sh` row in
 `docs/configuration.md`, which is the ONE row
@@ -206,9 +208,9 @@ same value twice more and breaks LOUDLY rather than silently, which is why it is
 here and not in the silent-coupling paragraph below — and raising the cap to the
 fixture count or above does not merely fail it, it destroys its discrimination, because
 the capped and uncapped arms then agree. A new cap needs a fixture count above it. Then
-`docs/tdd-manager-workflow.md`'s §1 artifact paragraph and its writer table,
+`docs/build-workflow.md`'s §1 artifact paragraph and its writer table,
 `docs/architecture.md`'s Graceful-Degradation bullet and its flagless-hook list,
-`skills/tdd/SKILL.md` Principle 3, Phase 2 in `skills/tdd/references/planning.md`, and `templates/tdd-plan.md`.
+`skills/build/SKILL.md` Principle 3, Phase 2 in `skills/build/references/planning.md`, and `templates/zensu-plan.md`.
 
 **Test-side couplings, which break silently rather than loudly:** the manifest
 entry in `tests/profiles/promptfoo-local-only.v1.json` (`run-all.sh` refuses to
@@ -331,6 +333,6 @@ on its `--truncate` call, so the shipped destructive write IS bound; every other
 caller that omits the variable still is not.
 An env var the caller sets is not an authority; what constrains the destructive
 mode is the module; and nothing here recognizes a customer name or an internal hostname, which is why the English-only + repo-root-relative authoring rules
-ship in `templates/tdd-plan.md` and Phase 2 of `skills/tdd/references/planning.md` alongside the code.
+ship in `templates/zensu-plan.md` and Phase 2 of `skills/build/references/planning.md` alongside the code.
 `tests/structure/test-artifact-redaction.sh` pins the rules, every writer and every
 refusal.

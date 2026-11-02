@@ -29,7 +29,7 @@ expect {
   -re "Delegating to zensu:tdd-manager|spawn.*tdd-manager subagent" {
     send_user "\n>>> POSITIVE: tdd-manager delegation acknowledged (default config)\n"
   }
-  -re "Skipping TDD" {
+  -re "Skipping /zensu:build" {
     send_user "\n>>> ESCAPE-HATCH (unexpected for code change with default config)\n"
     exit 1
   }

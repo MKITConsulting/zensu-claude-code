@@ -124,12 +124,12 @@ RED_STEPS=$(extract_steps_for "RED")
 IMPL_STEPS=$(grep -E "^${STEP_ID_RE} IMPL completed — files: " "$TMP_BODY" | awk '{print $1}' | sort -u)
 GREEN_STEPS=$(extract_steps_for "GREEN")
 
-# Grammar guard: if the log carries TDD-manager markers (TDD STARTED /
+# Grammar guard: if the log carries TDD-manager markers (BUILD STARTED /
 # EXECUTION STARTED / TDD COMPLETE / CHECKPOINT) but no step-id matched
 # the uppercase grammar STEP_ID_RE, the log most likely uses a wrong prefix
 # convention (e.g. lowercase `be-1` instead of `BE-1`). Without this guard
 # the previous behavior was a silent exit 0, defeating the entire audit.
-if grep -qE '^(TDD STARTED|EXECUTION STARTED|TDD COMPLETE|CHECKPOINT)' "$TMP_BODY"; then
+if grep -qE '^(BUILD STARTED|EXECUTION STARTED|TDD COMPLETE|CHECKPOINT)' "$TMP_BODY"; then
   if [ -z "$RED_STEPS" ] && [ -z "$IMPL_STEPS" ] && [ -z "$GREEN_STEPS" ]; then
     echo "VIOLATION: no step entries detected — log may use wrong prefix grammar (expected uppercase step-ids like BE-1, S1)" >&2
     exit 1
