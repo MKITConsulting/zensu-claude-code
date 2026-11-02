@@ -15,7 +15,8 @@
 # phrasings like 'no tdd-manager' that this hook does not, and this hook matches
 # 'ohne tdd' that the plan hook does not — so neither is a superset of the other.
 # Both hooks consult the same session DELIVERY ROUTE first — the marker
-# /zensu:delivery-route writes, then hooks.defaultDeliveryRoute, resolved by
+# /zensu:delivery-route writes, then a build route a linked session inherited from its
+# parent, then hooks.defaultDeliveryRoute, resolved by
 # zensu-config.sh — and ask only when that field reads `ask`; an explicit preference
 # in the user's own text still outranks it. After a Yes the model records the route
 # through the rendered helper command; a No decides only that request.
@@ -72,6 +73,7 @@ SESSION_ID="$(printf '%s' "$INPUT" | node -e '
     process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
+RAW_SESSION_ID="$SESSION_ID"
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
@@ -80,7 +82,7 @@ STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 # The project dir is resolved through Session Control rather than read from
 # ZENSU_PROJECT_ROOT, for the same reason user-prompt-zen-mode.sh resolves it: the
 # exported root can carry a different spelling on Git Bash and would then miss the
-# marker. Both session markers below are keyed on it.
+# marker. Every session marker below is keyed on it.
 ROUTE_PROJECT="$(zensu_resolve_project_dir 2>/dev/null)"
 
 # The session's already-decided DELIVERY ROUTE, resolved once and handed to the
@@ -90,16 +92,26 @@ ROUTE_PROJECT="$(zensu_resolve_project_dir 2>/dev/null)"
 # the two directives cannot answer differently.
 # The heredocs stay QUOTED and stay TWO (the parity pins count them) and are piped
 # through the substitution rather than interpolated.
-# The resolver reads BOTH ranks under the RECORDED project root it is handed, the root
-# the helper's `--status` and the /zensu:doctor probe pass too, and answers `ask` when
-# that root could not be resolved (an empty ROUTE_PROJECT), so a failed resolve never
-# lets the global config alone pick a route. `tddReminder` above and
-# `tddImplementation` below still read the ambient harness value on purpose — see the
-# plan-approval hook's emission site.
+# The resolver reads its three ranks (own marker, inherited route, config overlay)
+# under the RECORDED project root it is handed, the root the helper's `--status` and
+# the /zensu:doctor probe pass too, and answers `ask` when that root could not be
+# resolved (an empty ROUTE_PROJECT), so a failed resolve never lets the global config
+# alone pick a route. `tddReminder` above and `tddImplementation` below still read the
+# ambient harness value on purpose — see the plan-approval hook's emission site.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-directive.sh"
+LINKED_SESSION=none
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" ] \
+  && source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" \
+  && declare -F zensu_linked_session_resolve >/dev/null 2>&1; then
+  LINKED_SESSION="$(zensu_linked_session_resolve "$ROUTE_PROJECT" "${ZENSU_SESSION_KEY:-}" "$RAW_SESSION_ID")"
+fi
+ROUTE_LEAD=''
+case "$PROMPT_ORIGIN" in
+  (typed|slash-command-args) [ "$LINKED_SESSION" = fresh-linked ] && ROUTE_LEAD="${ZENSU_LINKED_BRIEF_LEAD:-}" ;;
+esac
 ROUTE_FIELD="$(zensu_delivery_route_field "$ROUTE_PROJECT" "${ZENSU_SESSION_KEY:-}")"
 ROUTE_COMMAND="$(zensu_delivery_route_record_command)"
-emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_COMMAND" | zensu_human_present_substitute "$HUMAN_PRESENT"; }
+emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_COMMAND" "$ROUTE_LEAD" | zensu_human_present_substitute "$HUMAN_PRESENT"; }
 
 if [ "$PROMPT_ORIGIN" = "ci-monitor-event" ]; then
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"Zensu workflow reminder: this prompt is a CI-monitor event, and its standing authorization to fix, commit and push answers the Zensu workflow question for changes within the scope of that pull request, so do not ask before editing, and follow the route below when it names one. <!-- zensu:delivery-route -->\nZENSU DELIVERY ROUTE: __ZENSU_DELIVERY_ROUTE__\n<!-- /zensu:delivery-route -->"}}' | emit_route_context

@@ -29,8 +29,10 @@ Two hooks ask which route a code change takes: `hooks/plan-approved-delegate.sh`
 a plan approval (four options: `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`,
 implement directly) and `hooks/user-prompt-tdd-reminder.sh` on a code request while no
 chain is active (yes/no: Zensu workflow or direct). Both read this session's marker
-first and ask only when nothing decided. The marker records exactly one of two
-answers — the Zensu workflow (`build`) or direct implementation (`direct`). It never
+first and ask only when nothing decided. A linked session — one another session started
+in Claude Desktop — that has no marker of its own takes its parent's `build`, so the user
+who chose the Zensu workflow there is not asked again. The marker records exactly one of
+two answers — the Zensu workflow (`build`) or direct implementation (`direct`). It never
 records `/zensu:autopilot` or `/zensu:pilot`: those push a branch, open a pull request
 or mutate tracked feature state, so they stay choices made per plan, through the
 question itself, through an explicit preference in the approval message, or by
@@ -80,16 +82,20 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 **writes** `{"route":"auto"}` rather than deleting the marker: absence and `auto`
 resolve identically, but the marker's presence stays observable, so a recorded
 release reads as one instead of looking like a choice that was never made.
+A released marker also sets aside a `build` this session inherited from its parent, so
+`--auto` is how the user hands an inherited route back too.
 Never delete the marker file by hand.
 
 `--status` reports the resolved route and where it came from — `build (session)`,
-`direct (session)`, `build (config)`, `direct (config)`, `ask (default)`, or one of the
+`direct (session)`, `build (inherited from parent session)`, `build (config)`,
+`direct (config)`, `ask (default)`, or one of the
 three released forms: `build (config, session choice released)`,
 `direct (config, session choice released)`, `ask (default, session choice released)`.
 The released forms are what distinguish a deliberate `--auto` from a session that
 never chose. `--status` uses the short provenance words its twin `/zensu:tdd-mode`
-uses; the directive field and the `/zensu:doctor` row spell the same source in full
-(`(session marker)`, `(hooks.defaultDeliveryRoute)`).
+uses, except for the inherited source, which every surface spells in full; the directive
+field and the `/zensu:doctor` row spell every source in full (`(session marker)`,
+`(inherited from parent session)`, `(hooks.defaultDeliveryRoute)`).
 
 ```
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-delivery-route.sh" --status
@@ -103,8 +109,16 @@ Both hooks resolve the route in this order, and `zensu-config.sh` owns the ladde
    "use tdd" in the approval message or the request itself; judged by the model from
    the directive and never recorded
 2. **this session's marker** — what this skill records
-3. **`hooks.defaultDeliveryRoute`** — `build`, `direct`, or `ask`
-4. **ask** — the question, exactly as before
+3. **a `build` inherited from the parent session** — a linked session copies the `build` its
+   parent recorded or itself inherited, once, the first time a hook resolves where the
+   session came from, and only when both sessions work in the same repository; a
+   released marker skips it
+4. **`hooks.defaultDeliveryRoute`** — `build`, `direct`, or `ask`
+5. **ask** — the question, exactly as before
+
+A linked session inherits `build` only: a parent's `direct` and a parent's released choice
+pass nothing on. Its first prompt is the brief the parent session wrote, not the user's
+own text, so a route named in that brief decides nothing.
 
 Neither the marker nor the config key can name `/zensu:autopilot` or `/zensu:pilot`.
 The helper refuses every verb but the four above, and the hooks read any other config
@@ -113,7 +127,7 @@ route only replaces the default the hooks would otherwise take there.
 
 The choice governs the NEXT approval or request, never a chain that is already
 running.
-The marker is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the route.
+The marker is session-scoped: a session with a new key starts from the configured default again, unless it is a linked session whose parent recorded `build`, and one that keeps its key keeps the route.
 
 ## Scope
 
