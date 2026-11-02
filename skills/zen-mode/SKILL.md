@@ -177,7 +177,9 @@ the rules are recorded in English, the answer follows the user.
 zen-mode is advice that yields to the user. **The user's own instructions
 outrank this mode: their CLAUDE.md, their output style and a style mode or
 plugin they chose.** A compressed or telegraphic style the user turned on
-therefore wins over rule 4.
+therefore wins over the full-sentence default below. That holds in a safety
+warning as well: rule 9 keeps the warning at its full length and detail, and the
+user's own style decides only its sentence form.
 
 Without such an instruction, full, short sentences stay the default: no dropped
 articles, no sentence fragments, no telegram style. Fragmentary text shifts

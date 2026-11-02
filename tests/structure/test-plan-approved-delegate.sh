@@ -56,6 +56,9 @@ if bash -n "$HOOK" 2>/dev/null; then
 else
   check "D1 bash -n syntax check passes" FAIL
 fi
+. "$(dirname "$0")/lib-unit-registry.sh"
+ZENSU_FOREIGN_EXECUTOR_UNIT_TARGET="$PLUGIN_DIR/hooks/lib/foreign-executor-v1.js" \
+  unit_check "D1a the foreign-executor module unit file passes" "$PLUGIN_DIR/tests/structure/foreign-executor-v1.test.js"
 
 TMP_DIR="$(mktemp -d)" && [ -n "$TMP_DIR" ] || { echo "mktemp -d failed" >&2; exit 1; }
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -1234,11 +1237,15 @@ D46_SP='# Plan
 1. add a function'
 d46_ctx() {
   local d46_entry="${4-cli}"
-  SESSION_ID="$SESSION_ID" CARRIER="$1" PLAN="$2" MODE="${5:-}" TOOL="${D46_TOOL:-ExitPlanMode}" node -e '
+  SESSION_ID="$SESSION_ID" CARRIER="$1" PLAN="$2" MODE="${5:-}" TOOL="${D46_TOOL:-ExitPlanMode}" \
+    ORIGIN="${D46_ORIGIN-}" node -e '
     const p={hook_event_name:"PostToolUse",session_id:process.env.SESSION_ID,tool_name:process.env.TOOL};
     if (process.env.MODE) p.permission_mode=process.env.MODE;
     if (process.env.CARRIER==="input") p.tool_input={plan:process.env.PLAN};
-    else if (process.env.CARRIER==="response") { p.tool_input={}; p.tool_response={plan:process.env.PLAN}; }
+    else if (process.env.CARRIER==="response") {
+      p.tool_input={}; p.tool_response={plan:process.env.PLAN};
+      if (process.env.ORIGIN) p.tool_response.isAgent=JSON.parse(process.env.ORIGIN);
+    }
     else p.tool_input={};
     process.stdout.write(JSON.stringify(p));' \
   | env -u CLAUDE_CODE_ENTRYPOINT ${d46_entry:+CLAUDE_CODE_ENTRYPOINT="$d46_entry"} ZENSU_CONFIG="$3" bash "$HOOK" 2>/dev/null \
@@ -1358,8 +1365,16 @@ D46D_DESKTOP="$(d46_ctx response "$D46_SP" "$ZENSU_CONFIG" claude-desktop)"
 { [ -z "$D46D_BAD" ] && d46_notice "$D46D_DESKTOP" superpowers:executing-plans; } \
   && check "D46d the notice needs a human present: an unattended run (sdk-cli entrypoint, dontAsk mode) and an unknown host keep the route question, and the desktop app gets the notice" PASS \
   || check "D46d human-present gate:$D46D_BAD (desktop='${D46D_DESKTOP:0:160}')" FAIL
+D46F_AGENT="$(D46_ORIGIN=true d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
+D46F_DRIFT="$(D46_ORIGIN='"false"' d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
+D46F_NULL="$(D46_ORIGIN=null d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
+D46F_MAIN="$(D46_ORIGIN=false d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
+{ d46_asks "$D46F_AGENT" && d46_asks "$D46F_DRIFT" && d46_asks "$D46F_NULL" && d46_notice "$D46F_MAIN" superpowers:executing-plans; } \
+  && check "D46f a response that declares an agent origin, or an isAgent that is not a boolean, null included, keeps the route question, and isAgent false still gets the notice" PASS \
+  || check "D46f caller origin (agent='${D46F_AGENT:0:120}' drift='${D46F_DRIFT:0:120}' null='${D46F_NULL:0:120}' main='${D46F_MAIN:0:120}')" FAIL
 D46E_ROOT="$TMP_DIR/d46e-plugin"
 D46E_LIB="$D46E_ROOT/hooks/lib/plan-payload-v1.js"
+D46E_EXECUTOR="$D46E_ROOT/hooks/lib/foreign-executor-v1.js"
 mkdir -p "$D46E_ROOT"
 cp -R "$PLUGIN_DIR/.claude-plugin" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/agents" "$PLUGIN_DIR/skills" \
   "$PLUGIN_DIR/scripts" "$D46E_ROOT/" 2>/dev/null
@@ -1385,7 +1400,7 @@ d46e_variant() {
     d46_asks "$d46e_got" || D46E_BAD="$D46E_BAD [$1: ${d46e_got:0:100}]"
   fi
 }
-if [ ! -f "$D46E_LIB" ] || [ ! -f "$D46E_ROOT/hooks/plan-approved-delegate.sh" ]; then
+if [ ! -f "$D46E_LIB" ] || [ ! -f "$D46E_EXECUTOR" ] || [ ! -f "$D46E_ROOT/hooks/plan-approved-delegate.sh" ]; then
   skip "D46e the copied plugin root could not be built and the reader faults were NOT exercised"
 else
   D46E_CONTROL="$(d46e_ctx control)"
@@ -1400,14 +1415,24 @@ else
     d46e_variant throwing
     rm -f "$D46E_LIB"
     d46e_variant missing
+    cp "$PLUGIN_DIR/hooks/lib/plan-payload-v1.js" "$D46E_LIB"
+    printf '%s\n' 'module.exports={noticeText:()=>"unused"};' > "$D46E_EXECUTOR"
+    d46e_variant exec-no-export
+    printf '%s\n' 'module.exports={noticeForPayload:()=>({additionalContext:"x"})};' > "$D46E_EXECUTOR"
+    d46e_variant exec-non-string
+    printf '%s\n' 'throw new Error("classifier unavailable");' > "$D46E_EXECUTOR"
+    d46e_variant exec-throwing
+    rm -f "$D46E_EXECUTOR"
+    d46e_variant exec-missing
     D46E_TOOL="$(D46_TOOL=Write d46_ctx response "$D46_SP" "$ZENSU_CONFIG")"
     d46_asks "$D46E_TOOL" || D46E_BAD="$D46E_BAD [other tool: ${D46E_TOOL:0:100}]"
     [ -z "$D46E_BAD" ] \
-      && check "D46e a plan reader that cannot be used ($D46E_RAN ) and a payload from another tool keep the route question, while the same copied root unmodified gives the notice" PASS \
-      || check "D46e a reader fault or another tool's payload dropped the route question:$D46E_BAD" FAIL
+      && check "D46e a plan reader or classifier module that cannot be used ($D46E_RAN ) and a payload from another tool keep the route question, while the same copied root unmodified gives the notice" PASS \
+      || check "D46e a reader or classifier fault or another tool's payload dropped the route question:$D46E_BAD" FAIL
   fi
 fi
 rm -f "$D46_CFG_BUILD"
+unit_check_done "D46z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

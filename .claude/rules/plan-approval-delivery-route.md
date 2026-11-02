@@ -3,8 +3,10 @@ paths:
   - "hooks/plan-approved-delegate.sh"
   - "hooks/user-prompt-tdd-reminder.sh"
   - "hooks/lib/zensu-human-present.sh"
+  - "hooks/lib/foreign-executor-v1.js"
   - "evals/plan-approval-hook/**"
   - "tests/structure/test-plan-approved-delegate.sh"
+  - "tests/structure/foreign-executor-v1.test.js"
 ---
 
 # Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)
@@ -381,9 +383,13 @@ set, schema field, config key or attestation moves, and neither hook returns a `
 A plan written for another plugin names the skill that carries it out, for example
 `REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.` While
 the route field reads `ask`, the standalone branch reads the approved plan through
-`resolveApprovedPlan` (the reader the durable branch uses, with the same F48 transport forms in
-`tests/structure/test-plan-payload-fallback.sh`) and asks no route question when the plan names
-a `<plugin>:<skill>` outside the `zensu:` namespace. It prints one notice instead: carry the plan
+`resolveApprovedPlan`, the reader the durable branch uses, loaded by `plan_payload_load`, the one
+loader both branches call (`F48` and `F48b` in `tests/structure/test-plan-payload-fallback.sh`).
+It hands the payload and that reader to `noticeForPayload` in `hooks/lib/foreign-executor-v1.js`,
+which the node program loads from the same rendered directory, and asks no route question when
+the plan names a `<plugin>:<skill>` outside the `zensu:` namespace. The module takes the reader
+as an argument and opens no file itself, so its unit file drives it with a fake reader as well
+as the real one. It prints one notice instead: carry the plan
 out with that skill, say in one line that Zensu asked no route question, and name `/zensu:build` as
 the way to run the plan under the Zensu workflow. The approval message still wins as it does under
 (B): a request, not a mere mention, for `/zensu:build` or the Zensu workflow, `/zensu:autopilot` or
@@ -401,19 +407,30 @@ follows "use", "using", "with", "via", "run" or "invoke" on a line that mentions
 that names a `zensu:` skill anywhere keeps the question: that scan reads the raw plan, fences and
 quotes included, because only the foreign match has to be narrow. A session whose
 `ZENSU HUMAN PRESENT:` field does not read `yes` keeps it too, because the notice hands the plan
-to a skill this hook cannot judge against the outward-facing criterion of (C). So does every
-fault: a module that does not load, a payload that is not `ExitPlanMode`, a plan the reader
-refuses. A recorded or configured route never reaches the check, so it still dispatches. The
+to a skill this hook cannot judge against the outward-facing criterion of (C). So does a tool
+response that declares an agent origin or carries an `isAgent` that is not a boolean:
+`responseOrigin` in `hooks/lib/plan-payload-v1.js` owns that rule for both branches, the durable
+branch maps its two `REASONS` to exits 18 and 19, and the notice judges it before any plan source
+is read. So does every fault: a reader or classifier module that does not load, a payload that is
+not `ExitPlanMode`, a plan the reader refuses. A recorded or configured route never reaches the
+check, so it still dispatches. The
 notice carries no `ZENSU DELIVERY ROUTE:` field, no `AskUserQuestion` and none of the `D13` words.
 
-Pinned by `D46` to `D46e` in `tests/structure/test-plan-approved-delegate.sh`: the notice through
+Pinned by `D46` to `D46f` in `tests/structure/test-plan-approved-delegate.sh`: the notice through
 both carriers and for a slash command, a configured route that still dispatches, the
 fail-toward-the-question cases with a `zensu:` skill in three forms and on a line that carries
 nothing, quoted, fenced and negated names (fences nested in a list or a blockquote, longer
 fences, an inner fence with an info string, double-backtick spans and typographic quotes) with a
-header after a closed fence as the control, the human-present gate, and in `D46e` a reader
-module that is missing, throws or exports no reader, plus a payload from another tool, over a
-copied plugin root whose unmodified run gives the notice. `D46c2` keeps the function ASCII-only,
+header after a closed fence as the control, the human-present gate, in `D46e` a reader module
+that is missing, throws or exports no reader and a classifier module that is missing, throws,
+exports no decision or answers with something other than a string, plus a payload from another
+tool, over a copied plugin root whose unmodified run gives the notice, and in `D46f` an
+agent-origin response and a non-boolean `isAgent`, a string and `null`, with `isAgent: false`
+as the control.
+`tests/structure/foreign-executor-v1.test.js`, driven by `D1a`, pins the classifier, the notice
+text and the payload decision, including that the origin is judged before the reader's walk, and
+`test-msys-special-plugin-module-boundaries.sh` loads the module beside the reader from a plugin
+root with whitespace and an apostrophe. `D46c2` keeps the function ASCII-only,
 because its node program travels in argv. A symlinked reader never reaches the hook: Session
 Control rejects a runtime symlink when the session registers, so the hook's `-L` guard is
 defense in depth and has no fixture. `d46_ctx` pins the `cli` entrypoint, because CI runs with

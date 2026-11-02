@@ -1903,7 +1903,8 @@ function deliveryRouteRow() {
     line(OK, 'delivery route: ' + v + ' — decides nothing this session: ' + ROUTE_BOTH_READERS_OFF);
   } else if (v === 'ask') {
     var where = planOff ? 'on a code request' : (promptOff ? 'after a plan approval' : 'after a plan approval and on a code request');
-    line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff
+    var executorPlan = planOff ? '' : ', and an approved plan that names its own executor gets a notice instead';
+    line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff + executorPlan
       + '; /zensu:delivery-route fixes it for this session, hooks.defaultDeliveryRoute for the project');
   } else if (/^(?:(?:build|direct) \((?:session marker|hooks\.defaultDeliveryRoute)\)|build \(inherited from parent session\))$/.test(v)) {
     var dispatch = '; code changes go through /zensu:build';

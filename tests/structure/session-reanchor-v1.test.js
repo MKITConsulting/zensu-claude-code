@@ -677,7 +677,7 @@ test('performReanchor moves this session\'s markers, replaces a stale copy and l
   const templateKinds = (file, pattern) => [...fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', file), 'utf8').matchAll(pattern)].map((match) => match[1]);
   assert.deepEqual([
     ...templateKinds('zensu-config.sh', /\/\.zensu\/state\/([a-z][a-z0-9-]*)-\$session_key\.json/g),
-    ...templateKinds('zensu-zen-mode.sh', /\$ZEN_STATE_DIR\/([a-z][a-z0-9-]*)-\$_zensu_sid\.json/g),
+    ...templateKinds('zensu-zen-shared.sh', /\$1\/\.zensu\/state\/([a-z][a-z0-9-]*)-\$2\.json/g),
   ].sort(), [...reanchor.SESSION_MARKERS].sort());
   const f = fixture(t);
   const stateA = path.join(f.a, '.zensu', 'state');
