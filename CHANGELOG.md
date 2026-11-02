@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit feature scope for captured goals (#548)
+
+### Fixed
+
+- **hooks**: Refuse a linked-session desktop store other accounts can write (#545)
+- **zen-mode,plan-gate**: Settle the review follow-ups deferred by #516 (#543)
+
 ## [0.34.0] - 2026-11-02
 
 ### Added
