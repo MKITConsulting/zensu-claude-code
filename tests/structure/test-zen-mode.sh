@@ -98,15 +98,15 @@ else
   check "Z7b session default getter missing or folded into zensu_hook_enabled" FAIL
 fi
 
-# Z8 marker lives under the gitignored ephemeral state dir. The directory and the
-# file stem are matched separately: both files still need the state dir on its own
-# for the symlink guard and the mkdir, while the stem lives in the shared library,
-# which builds the path for both.
+# Z8 marker lives under the gitignored ephemeral state dir. The file stem and both
+# directories live in the shared library, which builds them for both files; each
+# file still needs the state dir on its own for the symlink guard and the mkdir,
+# and takes it from the library as `ZEN_STATE_DIR` rather than spelling it.
 Z8_BAD=""
 Z8_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
 grep -qF '/.zensu/state/zen-mode-' "$Z8_LIB" || Z8_BAD="$Z8_BAD $(basename "$Z8_LIB"):marker-stem"
 for F8 in "$HOOK" "$HELPER"; do
-  grep -qF '.zensu/state' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):state-dir"
+  grep -vE '^[[:space:]]*#' "$F8" | grep -qF '"$ZEN_STATE_DIR"' || Z8_BAD="$Z8_BAD $(basename "$F8"):state-dir-not-from-the-owner"
   grep -qF 'ZEN_MARKER_PATH' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):marker-path-not-from-the-owner"
 done
 [ -z "$Z8_BAD" ] && check "Z8 marker path is .zensu/state/zen-mode-<session> (gitignored, ephemeral)" PASS \
@@ -4420,6 +4420,7 @@ Z109_INACTIVE="$(grep -rlF '"active"[[:space:]]*:[[:space:]]*false' "$PLUGIN_DIR
 [ "$Z109_INACTIVE" = "$Z109_LIB" ] \
   || Z109_BAD="$Z109_BAD inactive-pattern-in<$(printf '%s' "$Z109_INACTIVE" | tr '\n' ' ')>"
 Z109_FN="$(awk '/^zen_marker_path\(\) \{/,/^\}$/' "$Z109_LIB")"
+[ -n "$Z109_FN" ] || Z109_BAD="$Z109_BAD zen_marker_path-slice-is-empty"
 { printf '%s\n' "$Z109_FN" | grep -qF 'ZEN_STATE_DIR="${ZEN_MARKER_PATH%/*}"' \
     && printf '%s\n' "$Z109_FN" | grep -qF 'ZEN_ZENSU_DIR="${ZEN_STATE_DIR%/*}"'; } \
   || Z109_BAD="$Z109_BAD marker-directories-not-derived-from-the-template"
@@ -4447,7 +4448,8 @@ Z110_FULL="$(HOOK="$HOOK" node -e '
   const hook = require("fs").readFileSync(process.env.HOOK, "utf8");
   const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
     .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
-  process.stdout.write(blocks.find((s) => s.startsWith("zen-mode is ACTIVE. It asks")) || "");
+  const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
+  process.stdout.write(active === undefined ? "" : active);
 ' 2>/dev/null)"
 Z110_SKILL="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
 Z110_PRECEDENCE="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/precedence.md" | tr -s ' ')"

@@ -35,10 +35,10 @@ classified as a typed prompt before and now gets what a task notification gets.
 
 The table is the measurement taken when the ledger landed. The texts have grown since: with the
 zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
-prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract and the
-reminder's executor-plan clause the same
-suite measures 12,670 and 6,741 for a typed prompt, 4,152 and 2,366 for a task notification, a
-`!` input or a subagent hand-back, and 4,516 and 2,730 for a CI-monitor event.
+prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
+reminder's executor-plan clause and the zen-mode safety-warning sentence the same
+suite measures 12,641 and 6,670 for a typed prompt, 4,194 and 2,366 for a task notification, a
+`!` input or a subagent hand-back, and 4,558 and 2,730 for a CI-monitor event.
 
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety
