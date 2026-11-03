@@ -2166,6 +2166,7 @@ case "${1:-}" in
             echo "zensu-log.sh --tdd-begin: FOLDER ANCHOR — the project root lies outside every git work tree, so this chain has no change set: a file claim outside every declared code root can never land, and --tdd-complete refuses a chain that logs one. Start a session in the repository the work changes." >&2
           fi
           zensu_external_review_wait_reset "$session_val"
+          zensu_stop_background_wait_reset "$session_val"
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else

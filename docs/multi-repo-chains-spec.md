@@ -53,7 +53,7 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:2225`) and counts through the shared helper (`:2276`),
+(`hooks/lib/zensu-log.sh:2226`) and counts through the shared helper (`:2277`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:130-131`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -67,7 +67,7 @@ when it is unset, is an open question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:543-572`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:1415`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:2214`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2215`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -400,8 +400,10 @@ occurrences of `CLAUDE_PLUGIN_DATA` or `.zensu`, and CLAUDE.md §"Plugin-Data Gu
 records the uncovered Bash channel as that guard's own first residual. **This was
 NOT re-measured behaviorally, and the reason is this section's own trap one field
 over:** a synthetic payload carrying no session id makes the gate fail closed on
-the binding, so the deny it returns says nothing about containment. Re-measure it
-with a real bound session before writing precondition 1, exactly as the paragraph
+the binding while `hooks.bashWriteGate` is `true`, and at the default the gate
+allows it before any bind, so neither answer says anything about containment.
+Re-measure it with a real bound session and the gate opted in, or through the
+always-on control pass, before writing precondition 1, exactly as the paragraph
 below requires a `cwd`.
 
 **The ordering is a requirement, not a preference.** The gate first, then the
@@ -896,7 +898,9 @@ be the first field read out of the workflow document that grants a capability. I
 any longer (§8), so a prose control is proportionate here, as it is for `vanilla`.
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`, `ZENSU_EDIT_LANDING_GATE=off`) are
-unchanged and keep landing their bypass-ledger entries. Nothing here adds a new escape.
+unchanged and keep landing their bypass-ledger entries while a chain is active in a bound
+session — for the source-write gate, only while `hooks.bashWriteGate` is `true` as well. Nothing
+here adds a new escape.
 
 ## 9. Versioning
 
