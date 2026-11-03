@@ -499,12 +499,13 @@ case-sensitive volume is the only cost. W74 pins the case fold, W308 the decompo
 W318 the quote-removed path.
 
 **One program-name helper, four readers.** `programName` in `claude-path-v1.js` is the shared total
-helper. The parser uses it; `commandName` in `subagent-shell-guard-v1.js` (the policy
-`"platform"`, without the win32 backslash cut), `commandName` in `work-order-v1.js` (no fold, no
-`.exe` strip) and `commandBase` in `powershell-command-v1.js` (PowerShell's own resolution, which
-cuts both separators everywhere and strips module qualifiers and more extensions) still carry code
-of their own, because the unpushed branches `claude/jolly-diffie-7523da` and
-`claude/work-order-name-case` rewrite exactly those functions. The unit case `the program-name
+helper. The parser uses it; `commandName` in `subagent-shell-guard-v1.js`, `commandName` in
+`work-order-v1.js` (no fold, no `.exe` strip) and `commandBase` in `powershell-command-v1.js`
+(PowerShell's own resolution, which cuts both separators everywhere and strips module qualifiers
+and more extensions) still carry code of their own. Since #536 the shell guard's copy reads every
+spelling as the helper does, with the policy `"platform"` and with `"always"` under its
+`foldNames` option, so it could call the helper outright; the work-order copy waits for the
+unpushed branch `claude/work-order-name-case`, which rewrites that function. The unit case `the program-name
 readers of the gates, compared over one corpus` pins each difference, so moving a reader onto the
 helper changes a pinned line rather than a verdict nobody sees. Pins: the program-name
 cases of `tests/structure/git-repo-escape.test.js`, W235-W266 in

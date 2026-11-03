@@ -872,8 +872,9 @@ test("the program-name readers of the gates, compared over one corpus", () => {
       const parser = programName(commandWords(segmentWords(spelling + " push")).word, platform === "win32");
       assert.strictEqual(parser, shared(word, platform, "always"), `parser ${spelling} ${platform}`);
       const guardName = guard.commandInvocations(spelling + " push", { platform })[0].name;
-      const guardCutsBackslash = !(platform === "win32" && word.includes("\\"));
-      assert.strictEqual(guardName === shared(word, platform, "platform"), guardCutsBackslash, `guard ${spelling} ${platform}`);
+      assert.strictEqual(guardName, shared(word, platform, "platform"), `guard ${spelling} ${platform}`);
+      const foldedName = guard.commandInvocations(spelling + " push", { platform, foldNames: true })[0].name;
+      assert.strictEqual(foldedName, shared(word, platform, "always"), `guard foldNames ${spelling} ${platform}`);
     }
     const workOrderReadsGit = workOrder.analyzeBash(spelling + " push").deny !== null;
     assert.strictEqual(workOrderReadsGit, word.split("/").pop() === "git", `work order ${spelling}`);
