@@ -168,8 +168,8 @@ caller owns the run AND that session's pointer still designates it, the run's le
 exhausted, or the derived event id collides with an existing entry; `5` the durable write could
 not be staged or replaced; `6` the run does not hold the working tree you are standing in. The
 refusal NAMES both trees — the one you are in and the one the run holds — so move to the named
-tree, or to one that contains it or is contained by it, since occupancy is containment in either
-direction and only a sibling worktree is refused; `7` the owning
+tree, or to one that contains it or is contained by it, since the release scope is containment in
+either direction and only a sibling worktree is refused; `7` the owning
 session still looks active, so releasing it would end a live run. On `1` or `5`, report the code
 and stop — neither is repaired by retrying the release. On `7`, do not retry, and READ THE MESSAGE — the code
 covers two different situations and only one of them resolves by waiting. If it says the owning

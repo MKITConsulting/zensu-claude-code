@@ -398,8 +398,10 @@ occurrences of `CLAUDE_PLUGIN_DATA` or `.zensu`, and CLAUDE.md §"Plugin-Data Gu
 records the uncovered Bash channel as that guard's own first residual. **This was
 NOT re-measured behaviorally, and the reason is this section's own trap one field
 over:** a synthetic payload carrying no session id makes the gate fail closed on
-the binding, so the deny it returns says nothing about containment. Re-measure it
-with a real bound session before writing precondition 1, exactly as the paragraph
+the binding while `hooks.bashWriteGate` is `true`, and at the default the gate
+allows it before any bind, so neither answer says anything about containment.
+Re-measure it with a real bound session and the gate opted in, or through the
+always-on control pass, before writing precondition 1, exactly as the paragraph
 below requires a `cwd`.
 
 **The ordering is a requirement, not a preference.** The gate first, then the
@@ -633,6 +635,27 @@ work tree.
   The residual is the one §11 question 4 names: such a neighbour can still write into a declared
   root, and the chain then counts those edits as its own, which the audit and the review surface
   rather than hide.
+- **The Autopilot occupancy fence counts no ancestor either, and it ships ahead of PR B as a
+  `patch`.** A durable Autopilot run records the git work tree it drives, and the occupancy
+  checks compared that tree with the caller's by path containment in both directions, so a
+  session on a folder anchor collided with every run below the folder, and a run begun from the
+  folder held every repository below it. `occupiesWorkspace` in the worker of
+  `hooks/lib/zensu-autopilot-state.sh` lets a pair in which exactly one key lies outside every
+  git work tree overlap only when the two keys are equal. The `--autopilot-begin` holder check
+  takes it, and so does the workspace read behind the standalone `--tdd-begin` fence, both
+  deferred-review fences, the post-review preflight and the `--autopilot-status` hold report.
+  Adoption and release keep plain containment, so a session on the folder anchor still reaches
+  its run below. Each key is classified by a filesystem walk for a `.git` entry at or above it,
+  not by git's answer, and a key the walk cannot classify keeps containment. When git fails, the
+  caller is keyed on the nearest directory between its working directory and the project root
+  that carries a `.git` entry instead of the folder, so a git fault never frees a repository
+  below the folder, and that key scopes adoption and release as well. A standalone
+  `--tdd-begin` also refuses while the caller's own open chain is bound to its own nonterminal
+  run, which the fence no longer sees across the folder line. Occupancy is checked when a chain
+  or a run is armed, never on a write, so a session on the folder anchor can still edit a
+  repository whose run is live, and stage 1 (§5) sees such an edit only at `--tdd-complete`. It
+  reads no code roots and depends on no switch. The S17 family in
+  `tests/structure/test-autopilot-stop-enforcer.sh` pins it.
 - **Arming discloses a folder anchor.** When `--tdd-begin` arms a chain on a folder anchor
   without a `--code-root`, it prints one line on stderr: the anchor has no change set, a file
   claim outside every declared root can never land, and `--tdd-complete` refuses a chain that
@@ -872,7 +895,9 @@ be the first field read out of the workflow document that grants a capability. I
 any longer (§8), so a prose control is proportionate here, as it is for `vanilla`.
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`, `ZENSU_EDIT_LANDING_GATE=off`) are
-unchanged and keep landing their bypass-ledger entries. Nothing here adds a new escape.
+unchanged and keep landing their bypass-ledger entries while a chain is active in a bound
+session — for the source-write gate, only while `hooks.bashWriteGate` is `true` as well. Nothing
+here adds a new escape.
 
 ## 9. Versioning
 

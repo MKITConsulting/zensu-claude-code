@@ -23,8 +23,10 @@ _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLA
 This one answers "it serves it fine and the DIRECTORY the record anchors is gone" — the
 ordinary shape after `git worktree remove`, which one machine measured at
 **498 of 657** archived worktree-sessions. There `readContext` throws,
-`readOrphanedProjectRootContext` succeeds, reads still work, and `Edit`, `Write` and `MultiEdit`
-deny — a Bash write too, but only while the opt-in source-write gate is on.
+`readOrphanedProjectRootContext` succeeds, reads other than a `zensu` CLI call still work, and `Edit`,
+`Write` and `MultiEdit` deny, as does every Bash write the source-write gate can attribute while that
+opt-in gate is on and no usable `CLAUDE_PROJECT_DIR` remains; with one left, the gate judges a Bash
+write against that directory instead.
 
 **The destination is carried FROM the record and never from an argument, and that is the whole
 safety argument.** `CLAUDE.md` records that re-anchoring a record to a CALLER-NAMED directory
@@ -592,10 +594,8 @@ records against itself: `zensu-session.sh`'s `orphaned-project-root` scope (`R7g
 NO command at all and is pinned by `R8l2` to keep it that way, and the four
 `pre-bash-source-write-gate.sh` write denies, which comply today and are held to it by
 NOTHING — `R8n` asserts only that each names `--restore-root`, never that it omits
-`--confirm`. `skills/doctor/SKILL.md` is on the rule and
-is **UNPINNED** — no suite greps it for this — so check it by hand, and note that the
-hand-check was SKIPPED the first round this was written, which is how that file kept a
-retired framing for a round. The deny scopes, the capability gate's deny, the
+`--confirm`. `skills/doctor/SKILL.md` is on the rule and `R6a4` fails when it quotes the
+complete invocation in either argument order, also across a line break. The deny scopes, the capability gate's deny, the
 `/zensu:doctor` rows and `skills/doctor/SKILL.md` all name
 `/zensu:adopt-session --restore-root` alone; the operator stderr channel in
 `stop-chain-enforcer.sh` keeps the full spelling on its stderr OPERATOR channel, and

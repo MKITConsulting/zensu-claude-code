@@ -2122,4 +2122,164 @@ if [ "$HELD16G" = true ] && [ "$RELEASED16G" = true ] \
   check "S16g a lease taken after the initial read denies the Autopilot escape instead of releasing it unaudited" PASS
 else check "S16g lease at the escape reconcile (held=$HELD16G released=$RELEASED16G out=$(printf '%s' "$OUT16G" | context))" FAIL; fi
 
+P17="$TMP/folder-anchor"; mkdir -p "$P17"; P17="$(cd "$P17" && pwd -P)"
+A17="$P17/repo-a"; B17="$P17/repo-b"
+WT1_17="$A17/.claude/worktrees/wt1"; WT2_17="$A17/.claude/worktrees/wt2"
+P17R="$TMP/folder-anchor-root"; mkdir -p "$P17R"; P17R="$(cd "$P17R" && pwd -P)"
+C17="$P17R/repo-c"; D17="$P17R/repo-d"
+s17_repo() {
+  mkdir -p "$1" && ( cd "$1" && git init -q . \
+    && git -c user.email=a@b -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m base ) >/dev/null 2>&1
+}
+s17_read() { ( cd "$1" && autopilot_read_workspace "$2" >/dev/null 2>&1 ); echo "$?"; }
+S17_READY=1
+command -v git >/dev/null 2>&1 || S17_READY=0
+if [ "$S17_READY" -eq 1 ]; then
+  { s17_repo "$A17" && s17_repo "$B17" && s17_repo "$C17" && s17_repo "$D17"; } || S17_READY=0
+  ( cd "$A17" && git worktree add -q -b wt1 "$WT1_17" && git worktree add -q -b wt2 "$WT2_17" ) >/dev/null 2>&1 || S17_READY=0
+  mkdir -p "$A17/src/deep"
+fi
+[ -d "$WT1_17" ] && [ -d "$WT2_17" ] || S17_READY=0
+if ( cd "$P17" && git rev-parse --show-toplevel ) >/dev/null 2>&1 \
+  || ( cd "$P17R" && git rev-parse --show-toplevel ) >/dev/null 2>&1; then
+  S17_READY=0
+fi
+if [ "$S17_READY" -ne 1 ]; then
+  check "S17 folder-anchor fixture needs git, usable worktrees and a temp folder outside every git work tree — environment, not product" FAIL
+else
+  activate_session "$P17" s17_owner || exit 1
+  autopilot_begin_run folder_run "$ZENSU_SESSION_KEY" "$P17" false true "$WT1_17" >/dev/null
+  RF17="$(autopilot_run_file folder_run "$P17")"
+  S17_PREMISE=1
+  field_ok "$RF17" 'typeof j.workspaceRoot==="string" && j.workspaceRoot!==j.projectRoot' || S17_PREMISE=0
+  BEFORE17="$(digest "$RF17")"
+  R17_F="$(s17_read "$P17" "$P17")"; R17_B="$(s17_read "$B17" "$P17")"; R17_W2="$(s17_read "$WT2_17" "$P17")"
+  R17_A="$(s17_read "$A17" "$P17")"; R17_W1="$(s17_read "$WT1_17" "$P17")"
+  if [ "$S17_PREMISE" -eq 1 ] && [ "$R17_F" = 1 ] && [ "$R17_B" = 1 ] && [ "$R17_W2" = 1 ]; then
+    check "S17a a run in a worktree below a folder holds neither the folder nor a sibling repository nor a sibling worktree" PASS
+  else check "S17a folder, sibling repository and sibling worktree must read free (premise=$S17_PREMISE folder=$R17_F sibling=$R17_B wt2=$R17_W2, want 1/1/1)" FAIL; fi
+  if [ "$S17_PREMISE" -eq 1 ] && [ "$R17_A" = 0 ] && [ "$R17_W1" = 0 ]; then
+    check "S17b the run still holds its own worktree and the main checkout that contains it" PASS
+  else check "S17b own worktree and containing main checkout must read held (premise=$S17_PREMISE main=$R17_A own=$R17_W1, want 0/0)" FAIL; fi
+
+  activate_session "$P17R" s17_root_owner || exit 1
+  ( cd "$P17R" && autopilot_begin_run root_run "$ZENSU_SESSION_KEY" "$P17R" ) >/dev/null
+  RF17R="$(autopilot_run_file root_run "$P17R")"
+  S17R_PREMISE=1
+  field_ok "$RF17R" 'typeof j.workspaceRoot==="string" && j.workspaceRoot===j.projectRoot' || S17R_PREMISE=0
+  R17_C="$(s17_read "$C17" "$P17R")"; R17_D="$(s17_read "$D17" "$P17R")"; R17_R="$(s17_read "$P17R" "$P17R")"
+  if [ "$S17R_PREMISE" -eq 1 ] && [ "$R17_C" = 1 ] && [ "$R17_D" = 1 ] && [ "$R17_R" = 0 ]; then
+    check "S17c a run begun from the folder itself holds the folder and none of the repositories below it" PASS
+  else check "S17c folder-keyed run must hold only the folder (premise=$S17R_PREMISE repo-c=$R17_C repo-d=$R17_D folder=$R17_R, want 1/1/0)" FAIL; fi
+
+  activate_session "$P17" s17_reader || exit 1
+  S17_STUB="$TMP/s17-failing-git"; mkdir -p "$S17_STUB"
+  printf '#!/bin/sh\necho "fatal: detected dubious ownership in repository" >&2\nexit 128\n' > "$S17_STUB/git"
+  chmod +x "$S17_STUB/git"
+  S17F_PREMISE=1
+  ( cd "$A17" && PATH="$S17_STUB:$PATH" git rev-parse --show-toplevel ) >/dev/null 2>&1 && S17F_PREMISE=0
+  R17_FA="$(PATH="$S17_STUB:$PATH" s17_read "$A17" "$P17")"
+  R17_FS="$(PATH="$S17_STUB:$PATH" s17_read "$A17/src/deep" "$P17")"
+  R17_FF="$(PATH="$S17_STUB:$PATH" s17_read "$P17" "$P17")"
+  if [ "$S17F_PREMISE" -eq 1 ] && [ "$R17_FA" = 0 ] && [ "$R17_FS" = 0 ] && [ "$R17_FF" = 1 ]; then
+    check "S17d a git fault inside a repository below the folder keys the caller on that repository, never on the folder" PASS
+  else check "S17d failing git must keep the repository held and the folder free (premise=$S17F_PREMISE repo=$R17_FA subdir=$R17_FS folder=$R17_FF, want 0/0/1)" FAIL; fi
+
+  activate_session "$P17" s17_adopter || exit 1
+  OUT17E="$(cd "$P17" && CLAUDE_PROJECT_DIR="$P17" bash "$LOG" --autopilot-adopt --run folder_run 2>&1)"; RC17E=$?
+  OUT17EB="$(cd "$B17" && CLAUDE_PROJECT_DIR="$P17" bash "$LOG" --autopilot-adopt --run folder_run 2>&1)"; RC17EB=$?
+  if [ "$RC17E" -ne 6 ] && ! printf '%s' "$OUT17E" | grep -qF "does not hold the caller's working tree" \
+    && [ "$RC17EB" -eq 6 ] && printf '%s' "$OUT17EB" | grep -qF "does not hold the caller's working tree" \
+    && [ "$BEFORE17" = "$(digest "$RF17")" ]; then
+    check "S17e adoption from the folder still reaches the run below, while a sibling repository is refused" PASS
+  else check "S17e adoption relation must stay broad (folder rc=$RC17E sibling rc=$RC17EB, want not-6/6)" FAIL; fi
+
+  activate_session "$P17" s17_owner || exit 1
+  CLAUDE_PROJECT_DIR="$P17" bash "$LOG" --pending-review --files 'repo-a/src/folder.ts' \
+    --summary 'review queued in the folder' >/dev/null
+  PF17="$P17/.zensu/state/pending-review.json"
+  S17S_PREMISE=0; [ -f "$PF17" ] && S17S_PREMISE=1
+  OUT17F="$(invoke "$P17" s17_foreign)"
+  if [ "$S17S_PREMISE" -eq 1 ] && ! printf '%s' "$OUT17F" | grep -qF 'holds this working tree' \
+    && ! printf '%s' "$OUT17F" | grep -qF 'folder_run' && [ -e "${PF17}.claim" ]; then
+    check "S17f a Stop in the folder adopts a queued deferred review while a run lives in a worktree below" PASS
+  else check "S17f folder Stop must adopt the deferred review rather than refuse (premise=$S17S_PREMISE decision=$(printf '%s' "$OUT17F" | decision) claim=$( [ -e "${PF17}.claim" ] && echo minted || echo none))" FAIL; fi
+
+  activate_session "$P17" s17_standalone || exit 1
+  S17G_ERR="$TMP/s17-standalone.err"
+  ( cd "$P17" && autopilot_begin_standalone_tdd "$P17" "$ZENSU_SESSION_KEY" false ) >/dev/null 2>"$S17G_ERR"
+  RC17G=$?
+  TF17G="$(tdd_state_file "$ZENSU_SESSION_KEY")"
+  if [ "$RC17G" -eq 0 ] && field_ok "$TF17G" 'j.active===true && j.chainDone===false && j.autopilotRunId===undefined' \
+    && ! grep -qF -- 'workspace held by nonterminal run' "$S17G_ERR" \
+    && ! grep -qF -- 'holds this working tree' "$S17G_ERR"; then
+    check "S17g a standalone chain arms from the folder while a run lives in a worktree below" PASS
+  else check "S17g standalone begin must arm from the folder (rc=$RC17G, want 0 with an armed workflow document)" FAIL; fi
+
+  activate_session "$P17" s17_bound || exit 1
+  autopilot_begin_run bound_run "$ZENSU_SESSION_KEY" "$P17" false true "$B17" >/dev/null
+  autopilot_apply_event bound_run plan-s17-bound PLAN_APPROVED "{\"approvedPlanSha256\":\"$SHA\"}" "$P17" >/dev/null
+  CLAUDE_PROJECT_DIR="$P17" bash "$LOG" --tdd-begin --session s17_bound --autopilot-run bound_run \
+    --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id chain-s17-bound >/dev/null 2>&1
+  TF17H="$(tdd_state_file "$ZENSU_SESSION_KEY")"
+  RF17H="$(autopilot_run_file bound_run "$P17")"
+  S17H_PREMISE=1
+  field_ok "$RF17H" 'j.stage==="TDD_RUNNING" && j.tdd.chainId==="chain-s17-bound"' || S17H_PREMISE=0
+  field_ok "$TF17H" 'j.autopilotRunId==="bound_run" && j.active===true && j.chainDone===false' || S17H_PREMISE=0
+  S17H_ERR="$TMP/s17-bound-standalone.err"
+  ( cd "$P17" && autopilot_begin_standalone_tdd "$P17" "$ZENSU_SESSION_KEY" false ) >/dev/null 2>"$S17H_ERR"
+  RC17H=$?
+  if [ "$S17H_PREMISE" -eq 1 ] && [ "$RC17H" -eq 4 ] \
+    && grep -qF -- 'own Autopilot run bound_run (stage TDD_RUNNING)' "$S17H_ERR" \
+    && field_ok "$TF17H" 'j.autopilotRunId==="bound_run" && j.chainId==="chain-s17-bound" && j.active===true'; then
+    check "S17h a standalone begin from the folder refuses to erase the open binding of its own run in a repository below" PASS
+  else check "S17h own-run binding must survive a standalone begin across the folder line (premise=$S17H_PREMISE rc=$RC17H, want 4 and the binding intact)" FAIL; fi
+
+  activate_session "$P17" s17_folder_begin || exit 1
+  ( cd "$P17" && autopilot_begin_run folder_begin_run "$ZENSU_SESSION_KEY" "$P17" ) >/dev/null 2>&1
+  RC17I_F=$?
+  RF17I="$(autopilot_run_file folder_begin_run "$P17")"
+  activate_session "$P17R" s17_repo_begin || exit 1
+  ( cd "$C17" && autopilot_begin_run repo_begin_run "$ZENSU_SESSION_KEY" "$P17R" ) >/dev/null 2>&1
+  RC17I_C=$?
+  RF17IC="$(autopilot_run_file repo_begin_run "$P17R")"
+  activate_session "$P17" s17_tree_begin || exit 1
+  S17I_ERR="$TMP/s17-tree-begin.err"
+  ( cd "$WT1_17" && autopilot_begin_run tree_begin_run "$ZENSU_SESSION_KEY" "$P17" ) >/dev/null 2>"$S17I_ERR"
+  RC17I_W=$?
+  if [ "$RC17I_F" -eq 0 ] && field_ok "$RF17I" 'j.workspaceRoot===j.projectRoot' \
+    && [ "$RC17I_C" -eq 0 ] && field_ok "$RF17IC" 'j.workspaceRoot!==j.projectRoot' \
+    && [ "$RC17I_W" -eq 4 ] && grep -qF -- 'folder_run' "$S17I_ERR"; then
+    check "S17i --autopilot-begin crosses the folder line in both directions, while the same tree is still refused" PASS
+  else check "S17i begin holder check must follow the folder rule (folder rc=$RC17I_F repo rc=$RC17I_C same-tree rc=$RC17I_W, want 0/0/4)" FAIL; fi
+
+  P17N="$TMP/folder-nested"; mkdir -p "$P17N/notes" "$P17N/other"; P17N="$(cd "$P17N" && pwd -P)"
+  activate_session "$P17N" s17_notes_owner || exit 1
+  autopilot_begin_run notes_run "$ZENSU_SESSION_KEY" "$P17N" false true "$P17N/notes" >/dev/null
+  RF17N="$(autopilot_run_file notes_run "$P17N")"
+  S17N_PREMISE=1
+  field_ok "$RF17N" 'j.workspaceRoot!==j.projectRoot && j.workspaceRoot.endsWith("notes")' || S17N_PREMISE=0
+  ( cd "$P17N" && git rev-parse --show-toplevel ) >/dev/null 2>&1 && S17N_PREMISE=0
+  R17_NF="$(s17_read "$P17N" "$P17N")"
+  R17_NO="$( ( cd "$P17N" && autopilot_read_workspace "$P17N" "$P17N/other" >/dev/null 2>&1 ); echo "$?" )"
+  activate_session "$P17N" s17_notes_second || exit 1
+  ( cd "$P17N" && autopilot_begin_run notes_second "$ZENSU_SESSION_KEY" "$P17N" ) >/dev/null 2>&1
+  RC17N_B=$?
+  if [ "$S17N_PREMISE" -eq 1 ] && [ "$R17_NF" = 0 ] && [ "$R17_NO" = 1 ] && [ "$RC17N_B" -eq 4 ]; then
+    check "S17j two nested folders outside every git work tree still compare by containment" PASS
+  else check "S17j a folder-folder pair must keep containment (premise=$S17N_PREMISE folder=$R17_NF sibling=$R17_NO second-begin rc=$RC17N_B, want 0/1/4)" FAIL; fi
+
+  chmod 000 "$P17N/notes" 2>/dev/null
+  if [ "$(id -u)" = "0" ] || [ -x "$P17N/notes" ]; then
+    chmod 755 "$P17N/notes" 2>/dev/null
+    echo "  SKIP  S17k this host can still search a mode-000 directory, so the lstat fault arm of insideWorkTree cannot be reached"
+  else
+    R17_NX="$(s17_read "$P17N" "$P17N")"
+    chmod 755 "$P17N/notes" 2>/dev/null
+    if [ "$S17N_PREMISE" -eq 1 ] && [ "$R17_NX" = 0 ]; then
+      check "S17k a key whose .git probe faults still overlaps the folder that contains it" PASS
+    else check "S17k an lstat fault on a folder key must keep the containing folder held (premise=$S17N_PREMISE folder=$R17_NX, want 0)" FAIL; fi
+  fi
+fi
+
 echo "----"; echo "test-autopilot-stop-enforcer: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

@@ -94,7 +94,9 @@ because the evaluator spans ~90 lines and a line-scoped grep would miss an argv 
 below it), and F49/F49a (a hard link refused through both carriers). The loader is one
 function, `plan_payload_load`, which the durable branch and the executor notice both call: F48b
 pins one definition, one directory render and the two calls, and F48's allowlist also covers the
-line that loads `foreign-executor-v1.js` beside the reader.
+line that loads `foreign-executor-v1.js` beside the reader. Both module paths pass one guard,
+`plan_module_loadable`, whose `-f`/`-L`/`-r` body F48b pins with its two calls and the absence of
+an inline copy, and the notice path applies it to the classifier before node loads it.
 
 **`PLAN_STAGE_MISMATCH` (exit 7) is unreachable and deliberately left so.** The shell `case`
 already filters the active document to `PLANNING|AWAIT_TDD`, and the evaluator re-reads
