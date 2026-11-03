@@ -5,6 +5,8 @@ paths:
   - "hooks/lib/hook-registration-v1.js"
   - "hooks/hooks.json"
   - "hooks/pre-bash-zensu-gate.sh"
+  - "hooks/checks/pre-bash-zensu-gate.sh"
+  - "hooks/lib/zensu-cli-words-v1.js"
   - "hooks/lib/bash-source-write-parse.js"
   - "hooks/lib/secret-scan-decide.js"
   - "hooks/pre-write-secret-scan.sh"
@@ -27,7 +29,9 @@ reads a shell command carries the `Bash|PowerShell` matcher in `DISPATCHED_CHECK
 (`hooks/lib/hook-registration-v1.js`), so it also sees a PowerShell command.
 Each one judges PowerShell text where the judgment is exact and refuses what it cannot judge. **No
 gate lets PowerShell text it cannot judge pass in silence**; a refusal tells the main thread to use
-the Bash tool (or Edit and Write) and a subagent to report to the main thread.
+the Bash tool (or Edit and Write) and a subagent to report to the main thread. The one exception is
+the CLI write-gate while `hooks/lib/zensu-cli-words-v1.js` cannot load: the Bash tool fails the same
+way, so that refusal tells the main thread to reinstall the plugin (`B58h`, `B58l`, `B58n`).
 
 ## When the host runs the PowerShell tool
 
@@ -113,7 +117,7 @@ shell is refused.
 
 | Hook | PowerShell disposition |
 |---|---|
-| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, a group subcommand holding it (`GROUPS`), or an analyzer that fails to load while the text names `zensu` denies. No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B48f). |
+| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, a group subcommand holding it (`isGroup` of `hooks/lib/zensu-cli-words-v1.js`), or an analyzer that fails to load while the text names `zensu` denies. When `hooks/lib/zensu-cli-words-v1.js` cannot load, every `zensu` call that holds a word that could name a subcommand, but `--help` and a localhost backend, denies, reads and unjudged calls included, with that module's reason instead of the Bash-tool advice (B58h, B58l). No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B48f). |
 | `pre-bash-source-write-gate.sh`, control mode | `controlVerdict`, always on. |
 | same, rules (A)/(B)/(C) | `readOnlyVerdict` while `hooks.bashWriteGate` is on; the deny ends with `OPT_IN_NOTE`. |
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |
@@ -161,7 +165,8 @@ green row would be a false all-clear.
   checks on a non-Windows host that each `UNIX_ALIASES` entry exists there.
 - The consent prefilter's PowerShell arm and its `tr -d` set, which now strips backticks, and
   `strippedText` in the consent module move together; the hook fallbacks strip backticks too.
-- `OPAQUE_ARGUMENT` and the `__unjudged__` line between the gate's inline node and its shell side.
+- `OPAQUE_ARGUMENT` and the `__unjudged__` and `__unreadable__` lines between the gate's inline node
+  and its shell side.
 - The disposition table in `tests/structure/test-powershell-tool-coverage.sh`: PC3 fails for a
   hook on a shell matcher without a row, PC4 for a row whose suite lost its PowerShell case.
 - `STEER`, `REMEDY` and the operator prose in `docs/gates.md` §"Shell Tools", the hook rows of

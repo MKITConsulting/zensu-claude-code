@@ -1663,7 +1663,7 @@ const SESSION_WORK_VERBS = new Set(['get', 'events', 'ask', 'followup']);
 const ORDER_FILE_WORK_VERBS = new Set(['list', 'questions']);
 const HELPER_WORK_VERBS = new Set(['event', 'heartbeat']);
 const HUMAN_PLAN_VERBS = new Set(['push', 'approve', 'finalize', 'abandon', 'confirm-merge', 'followup']);
-const WORK_VERB_ALIASES = new Map([['repos', 'repositories']]);
+const ZENSU_WORD_READER = 'hooks/lib/zensu-cli-words-v1.js';
 const TOKEN_EXPANSION_RE = /\$\{?[!#]?ZENSU_SESSION_TOKEN(?![A-Za-z0-9_])/;
 const PROCESS_ENVIRONMENT_RE = /\/proc\/[^/\s]+\/environ(?![A-Za-z0-9_])/;
 const MAX_SHELL_DEPTH = 4;
@@ -1687,6 +1687,19 @@ function gitOperandOptions() {
   } catch (_) {
     return new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
   }
+}
+
+function zensuWordReader() {
+  try {
+    const reader = require('./zensu-cli-words-v1.js');
+    return [reader.commandWords, reader.commandNoun, reader.commandVerb, reader.isGroup].every((f) => typeof f === 'function') ? reader : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function couldNameSubcommand(word) {
+  return word !== '' && !word.startsWith('-') && !/^[0-9]*[<>]/.test(word) && /[^0-9]/.test(word) && !word.includes('/');
 }
 
 function matchingParen(text, open, reading = 'posix') {
@@ -2002,21 +2015,6 @@ function plainWords(args, operandOptions = new Set()) {
   return plain;
 }
 
-function zensuCommandWords(args) {
-  const words = [];
-  for (let index = 0; index < args.length && words.length < 3; index += 1) {
-    const word = args[index];
-    if (word === '--') break;
-    if (word === '') continue;
-    if (word.startsWith('-')) {
-      if (!word.includes('=') && (word.length === 2 || word[1] === '-')) index += 1;
-      continue;
-    }
-    words.push(word);
-  }
-  return words;
-}
-
 function gitSubcommand(args) {
   const operands = gitOperandOptions();
   for (let index = 0; index < args.length; index += 1) {
@@ -2169,8 +2167,15 @@ function analyzeBash(command, depth = 0) {
         result.deny = bashFinding('token-host', 'it passes --api-url to zensu');
         return result;
       }
-      const [noun, named, third] = zensuCommandWords(args);
-      const verb = noun === 'work' ? (WORK_VERB_ALIASES.get(named) || named) : named;
+      const reader = zensuWordReader();
+      if (!reader) {
+        if (!args.some(couldNameSubcommand)) continue;
+        result.deny = bashFinding('reader', ZENSU_WORD_READER);
+        return result;
+      }
+      const [first, named, third] = reader.commandWords(args);
+      const noun = reader.commandNoun(first);
+      const verb = reader.commandVerb(noun, named);
       if (noun === 'auth') {
         result.deny = bashFinding('auth', null);
         return result;
@@ -2180,7 +2185,7 @@ function analyzeBash(command, depth = 0) {
           result.deny = bashFinding('helper-verb', `zensu work ${verb}`);
           return result;
         }
-        const scoped = (verb === 'policy' || verb === 'repositories') && third ? ` ${third}` : '';
+        const scoped = reader.isGroup(noun, verb) && third ? ` ${third}` : '';
         if (ORDER_FILE_WORK_VERBS.has(verb) || (verb === 'policy' && third === 'get') || (verb === 'repositories' && third === 'list')) {
           result.deny = bashFinding('order-file', `zensu work ${verb}${scoped}`);
           return result;
@@ -2191,7 +2196,7 @@ function analyzeBash(command, depth = 0) {
         }
       }
       if (noun === 'plan' && HUMAN_PLAN_VERBS.has(verb)) {
-        const scoped = verb === 'followup' && third ? ` ${third}` : '';
+        const scoped = reader.isGroup(noun, verb) && third ? ` ${third}` : '';
         result.deny = bashFinding('human-gate', `zensu plan ${verb}${scoped}`);
         return result;
       }
@@ -2231,6 +2236,8 @@ function gateReason(orderId, finding) {
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run any more. Run zensu-work-order.sh --finish once and end the session.`;
     case 'powershell':
       return `${lead} The PowerShell tool is not available here, because this gate judges Bash commands only. Run the command through the Bash tool.`;
+    case 'reader':
+      return `${lead} The gate cannot judge a zensu command, because ${finding.detail}, which finds the noun and the verb of a zensu call, could not be loaded: the plugin installation is incomplete. Run no zensu command directly in this session; the work-order helpers still work.`;
     case 'lease-refused':
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run until a lease renewal succeeds. Run zensu-work-order.sh --renew --force and follow its exit code: after exit 0 run the command again, after exit 4 or 6 run zensu-work-order.sh --finish once and end the session, and after exit 7 follow the exit table of /zensu:work.`;
     default:

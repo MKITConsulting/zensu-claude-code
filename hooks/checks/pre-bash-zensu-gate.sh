@@ -51,7 +51,7 @@ command -v node >/dev/null 2>&1 || exit 0
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; else ZPS=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
+INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; ZCW=./zensu-cli-words-v1.js; else ZPS=; ZCW=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZCW="$ZCW" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
   let cmd = "", sub = false, ps = false, size = 0;
   try {
     const raw = require("fs").readFileSync(0);
@@ -74,18 +74,26 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     process.stdout.write("__oversized__\t" + size + "\t" + cap);
     process.exit(0);
   }
-  const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",mock:"mocks",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
-  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys mocks design link ghost wiki doc knowledge pulse ai-work work plan meta org auth product feature subfeature roadmaps tier sec journey mock docs kb wiki-pages".split(" "));
-  const GROUPS = new Set(["work\tpolicy", "work\trepositories", "work\trepos", "plan\tfollowup"]);
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = new Set();
   const OPQ = String.fromCharCode(0);
   const UNJ = "__unjudged__\t";
+  const UNR = "__unreadable__\t";
+  let reader = null;
+  try {
+    const loaded = require(process.env.ZCW || "");
+    if ([loaded.commandWords, loaded.commandNoun, loaded.commandVerb, loaded.isGroup].every((f) => typeof f === "function")) reader = loaded;
+  } catch (_) {}
   function unquoted(value) {
     let start = 0, end = value.length;
     while (start < end && (value.charCodeAt(start) === 34 || value.charCodeAt(start) === 39)) start += 1;
     while (end > start && (value.charCodeAt(end - 1) === 34 || value.charCodeAt(end - 1) === 39)) end -= 1;
     return value.slice(start, end);
+  }
+  function couldNameSubcommand(word) {
+    const w = unquoted(word);
+    if (w.indexOf(OPQ) !== -1) return true;
+    return w !== "" && w[0] !== "-" && !/^[0-9]*[<>]/.test(w) && /[^0-9]/.test(w) && w.indexOf("/") === -1;
   }
   const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
   const LOCAL_START = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?![^:\/?#])/i;
@@ -100,9 +108,6 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     let url = null;
     try { url = new URL(/^https?:\/\//i.test(v) ? v : "http://" + v); } catch (_) { return false; }
     return url.username === "" && url.password === "" && LOCAL_HOSTS.has(url.hostname);
-  }
-  function takesNextWord(t) {
-    return t.indexOf("=") === -1 && (t.length === 2 || t.charAt(1) === "-");
   }
   function isDynamic(t) {
     return t.indexOf("\u0001") !== -1 || t.indexOf("\x24") !== -1;
@@ -214,30 +219,17 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     }
     if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
     if (backendLocal(rest, invocation, oneWordTrusted && !invocation.derived)) continue;   // localhost/dev backend → conventions moot, not the tracked product
-    let noun = "", k = 0;
-    for (; k < rest.length; k++) {
-      const t = rest[k];
-      if (t === "--") break;
-      if (t === "") continue;
-      if (t.charAt(0) === "-") { if (takesNextWord(t)) k++; continue; }
-      if (NOUNS.has(t)) { noun = ALIAS[t] || t; }
-      break;                                                                       // first non-flag token decides
-    }
-    if (ps && typeof rest[k] === "string" && rest[k].indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
+    if (!reader) { if (rest.some(couldNameSubcommand)) out.add(UNR + "the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded"); continue; }
+    const found = reader.commandWords(rest), first = found[0] || "";
+    if (ps && first.indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
+    const noun = reader.commandNoun(first);
     if (!noun) continue;
-    const words = [];
-    for (let m = k + 1; m < rest.length && words.length < 2; m++) {
-      const t = rest[m];
-      if (t === "--") break;
-      if (t === "") continue;
-      if (t.charAt(0) === "-") { if (takesNextWord(t)) m++; continue; }
-      words.push(t.split(/[\t\r\n]/)[0]);
-    }
-    const verb = words[0] || "", third = words[1] || "";
+    const verb = (found[1] || "").split(/[\t\r\n]/)[0], third = (found[2] || "").split(/[\t\r\n]/)[0];
     if (ps && verb.indexOf(OPQ) !== -1) { out.add(UNJ + "the verb of a zensu call is built at run time"); continue; }
-    if (ps && third.indexOf(OPQ) !== -1 && GROUPS.has(noun + "\t" + verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
-    out.add(noun + "\t" + verb + "\t" + third.split(OPQ).join(""));
+    if (ps && third.indexOf(OPQ) !== -1 && reader.isGroup(noun, verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
+    out.add(noun + "\t" + reader.commandVerb(noun, verb) + "\t" + third.split(OPQ).join(""));
   }
+  if (!reader && [...out].some((line) => line.startsWith(UNJ))) out.add(UNR + "the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded");
   if (modeled === 0 && invocations.every((c) => !c.exact) && [...out].some((line) => line.indexOf("__") !== 0)) out.add("__textonly__");
   process.stdout.write([...out].join("\n"));
 ' 2>/dev/null)"
@@ -330,6 +322,7 @@ if [ -n "$AGENT_ID" ] || [ -n "$AGENT_TYPE" ]; then
   IS_SUBAGENT=true
 fi
 UNJUDGED="$(printf '%s\n' "$INVOCATIONS" | awk -F'\t' '$1=="__unjudged__"{print $2; exit}')"
+UNREADABLE="$(printf '%s\n' "$INVOCATIONS" | awk -F'\t' '$1=="__unreadable__"{print $2; exit}')"
 
 # Returns 0 (allowed) only when the current hook payload session (or, when the
 # payload omitted it, the exact exported Session Control key) owns a workflow
@@ -390,12 +383,16 @@ done <<EOF
 $INVOCATIONS
 EOF
 
-[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
+[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ -z "$UNREADABLE" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
 if [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ "$PARSE_STATUS" -ne 0 ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+elif [ -n "$UNREADABLE" ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNREADABLE}, so the gate cannot tell a read from a mutation. Do not retry this command. Report the operation you need to the main thread."
+elif [ -n "$UNREADABLE" ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNREADABLE}, so the gate cannot tell a read from a mutation. The plugin installation is incomplete; reinstall the plugin and start a new session. --help is never gated, and neither is a write the gate can read as going to a localhost backend."
 elif [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ -n "$UNJUDGED" ]; then

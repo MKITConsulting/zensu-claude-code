@@ -2096,6 +2096,47 @@ test('the Bash analysis stays linear on a long shell flag', () => {
   }
 });
 
+test('the Bash analysis denies every zensu call that can name a subcommand when the word reader cannot load, and judges the rest as before', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wo-reader-')));
+  try {
+    fs.copyFileSync(MODULE, path.join(root, 'work-order-v1.js'));
+    const lone = require(path.join(root, 'work-order-v1.js'));
+    for (const command of ['zensu work get 1234', 'zensu plan status p1', 'zensu features list', 'zensu --x y auth login', 'zensu 2>/dev/null work get 1234', 'zensu --version 2>/dev/null plan approve p1']) {
+      const analysis = lone.analyzeBash(command);
+      assert.ok(analysis.deny, command);
+      assert.equal(analysis.deny.code, 'reader', command);
+      assert.equal(analysis.deny.detail, 'hooks/lib/zensu-cli-words-v1.js', command);
+      assert.notEqual((wo.analyzeBash(command).deny || {}).code, 'reader', command);
+    }
+    const { NOUNS, NOUN_ALIASES } = require(path.join(path.dirname(MODULE), 'zensu-cli-words-v1.js'));
+    for (const noun of [...NOUNS, ...Object.keys(NOUN_ALIASES)]) assert.equal((lone.analyzeBash(`zensu ${noun} x`).deny || {}).code, 'reader', noun);
+    assert.equal(lone.analyzeBash('zensu --api-url https://h work get 1').deny.code, 'token-host');
+    assert.equal(lone.analyzeBash('git push').deny.code, 'push');
+    assert.equal(lone.analyzeBash('git status').deny, null);
+    for (const command of ['command -v zensu', 'zensu', 'zensu --version', "zensu '' --json", 'command -v zensu >/dev/null 2>&1', 'zensu --version 2>/dev/null', 'zensu --version >/dev/null 2>&1', 'zensu --version 2>&1']) {
+      assert.equal(lone.analyzeBash(command).deny, null, command);
+      assert.equal(wo.analyzeBash(command).deny, null, command);
+    }
+    const decided = lone.gateDecision({ marker: { orderId: ORDER } }, { tool_name: 'Bash', tool_input: { command: 'zensu work get 1234' } });
+    assert.equal(decided.code, 'reader');
+    assert.match(decided.reason, /could not be loaded/);
+    assert.match(decided.reason, /hooks\/lib\/zensu-cli-words-v1\.js/);
+    assert.match(decided.reason, /plugin installation is incomplete/);
+    const words = path.join(path.dirname(MODULE), 'zensu-cli-words-v1.js');
+    for (const missing of ['commandWords', 'commandNoun', 'commandVerb', 'isGroup']) {
+      const dir = path.join(root, missing);
+      fs.mkdirSync(dir);
+      fs.copyFileSync(MODULE, path.join(dir, 'work-order-v1.js'));
+      fs.writeFileSync(path.join(dir, 'zensu-cli-words-v1.js'), `const real = { ...require(${JSON.stringify(words)}) };\ndelete real.${missing};\nmodule.exports = real;\n`);
+      const partial = require(path.join(dir, 'work-order-v1.js'));
+      assert.equal(partial.analyzeBash('zensu work policy set p1').deny.code, 'reader', missing);
+    }
+    assert.equal(wo.analyzeBash('zensu work policy set p1').deny.code, 'human-gate');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the gate is inert outside work-order mode and denies prompts, chips and raw pushes inside it', () => {
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);

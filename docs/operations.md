@@ -98,7 +98,8 @@ share one hook, the [secret scan](gates.md#secret-scan), the
 [browser consent gate](gates.md#browser-consent-gate), the path redaction that
 runs after a shell command and the work-order gate each judge a PowerShell
 command or refuse it, and every refusal names the Bash tool, which stays
-available. [Shell Tools](gates.md#shell-tools) says what each gate does with a
+available, except the CLI write-gate's refusal while its word reader cannot load, which names the
+reinstall. [Shell Tools](gates.md#shell-tools) says what each gate does with a
 PowerShell command. The same holds wherever the PowerShell tool is turned on,
 including macOS, Linux and WSL, where it is opt-in.
 
