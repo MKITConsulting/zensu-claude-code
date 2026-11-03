@@ -217,14 +217,14 @@ echo "zensu: Zensu PLM v${VERSION} active — features as first-class citizens."
 if zensu_tdd_strict_enabled; then
   echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
   if [ "$_ZENSU_ROUTE_QUESTION_LIVE" = yes ]; then
-    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:build (this plan now, RED→GREEN + review chain, edits TDD-gate-enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
+    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:build (this plan now, RED→GREEN + review chain, edits TDD-gate-enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly; an approved plan that names its own executor gets a notice instead of the question."
   else
     echo "zensu: Tip — use Claude Code Plan mode for code changes."
   fi
 else
   echo "zensu: Flow — track features → implement (vanilla mode, TDD discipline off via hooks.tddImplementation=false) → review chain → dashboard."
   if [ "$_ZENSU_ROUTE_QUESTION_LIVE" = yes ]; then
-    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:build (this plan now, vanilla implementation with the evidence audits + review chain enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
+    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:build (this plan now, vanilla implementation with the evidence audits + review chain enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly; an approved plan that names its own executor gets a notice instead of the question."
   else
     echo "zensu: Tip — use Claude Code Plan mode for code changes."
   fi

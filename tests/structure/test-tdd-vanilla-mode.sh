@@ -588,13 +588,14 @@ for _bn in "$BN_V" "$BN_S"; do
             "/zensu:autopilot (unattended to a reviewed, validated PR)" \
             "/zensu:pilot (guided pipeline for a feature already tracked in Zensu)" \
             "/zensu:build (this plan now," \
-            "or implementing it directly"; do
+            "or implementing it directly" \
+            "an approved plan that names its own executor gets a notice instead of the question"; do
     printf '%s' "$_bn" | grep -qF -- "$_n" || bnr2c_ok=no
   done
 done
 [ "$bnr2c_ok" = yes ] \
-  && check "BNR2c banner names all four delivery routes in BOTH mode tips" PASS \
-  || check "BNR2c banner four-route tip missing from a mode variant" FAIL
+  && check "BNR2c banner names all four delivery routes and the executor-plan notice in BOTH mode tips" PASS \
+  || check "BNR2c banner four-route tip or executor-plan notice missing from a mode variant" FAIL
 PRM_V="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_VANILLA")"
 { printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF "/zensu:build" \
   && ! printf '%s' "$PRM_V" | grep -qF "strict RED→GREEN TDD"; } \

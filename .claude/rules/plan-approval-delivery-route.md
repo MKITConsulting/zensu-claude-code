@@ -431,12 +431,20 @@ as the control.
 text and the payload decision, including that the origin is judged before the reader's walk, and
 `test-msys-special-plugin-module-boundaries.sh` loads the module beside the reader from a plugin
 root with whitespace and an apostrophe. `D46c2` keeps the function ASCII-only,
-because its node program travels in argv. A symlinked reader never reaches the hook: Session
+because its node program travels in argv. A symlinked module never reaches the hook: Session
 Control rejects a runtime symlink when the session registers, so the hook's `-L` guard is
-defense in depth and has no fixture. `d46_ctx` pins the `cli` entrypoint, because CI runs with
+defense in depth. One predicate, `plan_module_loadable`, holds the `-f`/`-L`/`-r` guard for the
+reader and the classifier, and `F48b` pins its one body and its two calls. The reader's arm has no
+fixture. `D46g` drives the classifier's through the extracted notice function rather than a sealed
+plugin copy, because Session Control refuses a runtime symlink at registration and the runtime
+digest covers `hooks/`. A regular module is the control, and a symlinked, a missing and an
+unreadable one must each give no notice. Only the symlinked case bites the guard: node already
+refuses the other two. `d46_ctx` pins the `cli` entrypoint, because CI runs with
 none, which reads `unknown`. `R12g` in `tests/structure/test-delivery-route.sh` pins it too and covers a
-session marker that still dispatches. Operator accounts: `docs/precedence.md` and the
-`plan-approved-delegate.sh` row of `docs/configuration.md`.
+session marker that still dispatches. Operator accounts: `docs/precedence.md`, the
+`plan-approved-delegate.sh` and `session-start-banner.sh` rows of `docs/configuration.md`, and
+both route tips of `hooks/session-start-banner.sh`, which `BNR2c` holds to the notice clause in
+both mode variants.
 
 Version: `patch`. The hook still emits only `additionalContext`, no hook, matcher, key set,
 schema field, config key or attestation moves, and the one new behaviour asks less, never more.

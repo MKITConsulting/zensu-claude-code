@@ -316,7 +316,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # ZENSU_SAFE_DISPLAY_PATH_RE — but this release is the COMBINED state, where
       # the remedy is an adoption before any restore, so the path is not the fact
       # the reader needs. Naming /zensu:doctor keeps this message about the order.
-      stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and running /zensu:adopt-session --restore-root AFTER the adoption reports whether it can be re-created — it writes nothing — with /zensu:adopt-session --restore-root --confirm as the remedy (that repair requires the running installation to SERVE the record, which the adoption is what establishes), and it re-creates the directory AND rebuilds the workflow document in one step where a bare mkdir leaves the second half missing. With no readable workflow document the schema-equality check that normally authorises a takeover is NOT performed, and a document rebuilt by the restore is checked only when it is first read, not here. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory."
+      stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and running /zensu:adopt-session --restore-root AFTER the adoption reports whether it can be re-created — it writes nothing — with /zensu:adopt-session --restore-root --confirm as the remedy (that repair requires the running installation to SERVE the record, which the adoption is what establishes), and it re-creates the directory AND rebuilds the workflow document in one step where a bare mkdir leaves the second half missing. With no readable workflow document the schema-equality check that normally authorises a takeover is NOT performed, and a document rebuilt by the restore is checked only when it is first read, not here. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, Bash and the read-only diagnostics work again, except a zensu CLI call, whose gate needs a binding, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory."
       exit 0
     fi
     if [ -n "$ZENSU_ROOT_STATE_UNRESOLVED" ] \
@@ -805,6 +805,48 @@ background_review_subject() {
   fi
 }
 
+stop_background_wait() {
+  local lib data verdict verdict_head exclusions pending claim blocks
+  STOP_WAIT_VERDICT=""
+  STOP_WAIT_TEXT=""
+  case "$INPUT" in
+    *'"background_tasks":[{'*|*'"background_tasks": [{'*) ;;
+    *) return 1 ;;
+  esac
+  [ "$OUTER_PRESENT" = false ] || return 1
+  [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/stop-background-wait-v1.js"
+  [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled backgroundTaskWait ) || return 1
+  if reviewer_spawn_denied; then return 1; fi
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  case "${CAP:-}" in ''|*[!0-9]*) return 1 ;; esac
+  blocks="$(tdd_get_counter "$STATE_FILE" stopBlockCount)"
+  case "$blocks" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$blocks" -lt "$CAP" ] || return 1
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_SBW_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_SBW_PLUGIN_DATA="$data" \
+    ZENSU_SBW_SESSION_KEY="$SESSION_ID" zensu_run_bounded node "$lib" stop-wait 2>/dev/null)" || return 1
+  verdict_head="${verdict%%$'\n'*}"
+  case "$verdict" in
+    *$'\n'*) STOP_WAIT_TEXT="${verdict#*$'\n'}" ;;
+    *) return 1 ;;
+  esac
+  case "$STOP_WAIT_TEXT" in
+    ''|*$'\n'*) STOP_WAIT_TEXT=""; return 1 ;;
+  esac
+  case "$verdict_head" in
+    'wait release='*) STOP_WAIT_VERDICT=wait ;;
+    'hint tasks='*) STOP_WAIT_VERDICT=hint ;;
+    *) STOP_WAIT_TEXT=""; return 1 ;;
+  esac
+  return 0
+}
 BACKGROUND_REVIEW_CLAIM_MARGIN=20
 BACKGROUND_REVIEW_HOOK_TIMEOUT=90
 BACKGROUND_REVIEW_ARRIVED=false
@@ -1568,9 +1610,10 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
       # first adoption after the hold clears removes it -- a leak, not a wedge.
       6) ;;
       4)
-        # A nonterminal durable run holds this working tree. The occupancy
-        # comparison is CONTAINMENT in both directions, so the holder may be a
-        # run driving a worktree nested below this tree -- or above it. The hold
+        # A nonterminal durable run holds this working tree. Occupancy is
+        # CONTAINMENT in both directions unless exactly one key is a folder
+        # outside every git work tree, so the holder may be a run driving a
+        # worktree nested below this tree -- or above it. The hold
         # therefore persists for as long as that run stays nonterminal, and the
         # previous wording ("retry Stop") prescribed a retry that could never
         # succeed. Name the holder instead.
@@ -1931,6 +1974,19 @@ fi
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
+
+if stop_background_wait; then
+  if [ "$STOP_WAIT_VERDICT" = "hint" ]; then
+    emit_block "$STOP_WAIT_TEXT"
+    exit 0
+  fi
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    stop_notice "$STOP_WAIT_TEXT"
+  fi
+  exit 0
+fi
+
 INNER_CAP_BLOCKED=false
 if [ "$BACKGROUND_REVIEW_PENDING" = "true" ] && [ -n "$INNER_BOUND_RUN" ] && [ "$BACKGROUND_REVIEW_ARRIVED" = "true" ]; then
   emit_block "Zensu review-chain Stop held. ${BACKGROUND_REVIEW_ARRIVED_LEAD} This Autopilot-bound chain keeps its turn while that claim is pending, so this Stop does not count against the inner Stop budget of ${CAP}. Do NOT classify or fix anything, do NOT spawn another reviewer and do NOT re-run the review fan-out: end your turn again, and the next Stop retries the claim."

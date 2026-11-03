@@ -1431,6 +1431,58 @@ else
       || check "D46e a reader or classifier fault or another tool's payload dropped the route question:$D46E_BAD" FAIL
   fi
 fi
+D46G_DIR="$TMP_DIR/d46g"
+D46G_EXEC="$D46G_DIR/lib/foreign-executor-v1.js"
+mkdir -p "$D46G_DIR/lib" "$D46G_DIR/elsewhere"
+D46G_FNS="$(HOOK_FILE="$HOOK" node -e '
+  const s=require("fs").readFileSync(process.env.HOOK_FILE,"utf8");
+  const pick=(name)=>{ const a=s.indexOf("\n"+name+"() {\n"); const b=a<0?-1:s.indexOf("\n}\n",a+1); return a<0||b<0?"":s.slice(a+1,b+3); };
+  const g=pick("plan_module_loadable"), f=pick("foreign_executor_notice");
+  process.stdout.write(g&&f?g+f:"");' 2>/dev/null)"
+D46G_INPUT="$(PLAN="$D46_SP" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:"d46g",tool_name:"ExitPlanMode",tool_input:{},tool_response:{plan:process.env.PLAN}}))')"
+d46g_notice() {
+  (
+    eval "$D46G_FNS"
+    plan_payload_load() { PLAN_PAYLOAD_DIR="$D46G_DIR/lib"; PLAN_PAYLOAD_LIB="$D46G_DIR/lib/plan-payload-v1.js"; PLAN_MSYS_EXCL=""; }
+    ROUTE_FIELD=ask HUMAN_PRESENT=yes INPUT="$D46G_INPUT"
+    foreign_executor_notice
+  ) 2>/dev/null
+}
+D46G_BAD=""; D46G_RAN=""
+if [ -z "$D46G_FNS" ]; then
+  check "D46g plan_module_loadable or foreign_executor_notice was not found in the plan hook" FAIL
+else
+  cp "$PLUGIN_DIR/hooks/lib/plan-payload-v1.js" "$D46G_DIR/lib/plan-payload-v1.js"
+  cp "$PLUGIN_DIR/hooks/lib/foreign-executor-v1.js" "$D46G_EXEC"
+  cp "$PLUGIN_DIR/hooks/lib/foreign-executor-v1.js" "$D46G_DIR/elsewhere/foreign-executor-v1.js"
+  D46G_CONTROL="$(d46g_notice)"
+  if ! printf '%s' "$D46G_CONTROL" | grep -qF 'names its own executor, superpowers:executing-plans'; then
+    check "D46g the extracted notice function gives no notice over a regular classifier module, so a refusal there proves nothing ('${D46G_CONTROL:0:160}')" FAIL
+  else
+    rm -f "$D46G_EXEC"
+    if node -e 'require("fs").symlinkSync(process.argv[1],process.argv[2])' "$D46G_DIR/elsewhere/foreign-executor-v1.js" "$D46G_EXEC" 2>/dev/null && [ -L "$D46G_EXEC" ]; then
+      D46G_RAN="$D46G_RAN symlinked"
+      [ -z "$(d46g_notice)" ] || D46G_BAD="$D46G_BAD symlinked"
+    else
+      skip "D46g a symlinked classifier module could not be created on this host and was NOT exercised"
+    fi
+    rm -f "$D46G_EXEC"
+    D46G_RAN="$D46G_RAN missing"
+    [ -z "$(d46g_notice)" ] || D46G_BAD="$D46G_BAD missing"
+    cp "$PLUGIN_DIR/hooks/lib/foreign-executor-v1.js" "$D46G_EXEC"
+    chmod 000 "$D46G_EXEC"
+    if [ ! -r "$D46G_EXEC" ]; then
+      D46G_RAN="$D46G_RAN unreadable"
+      [ -z "$(d46g_notice)" ] || D46G_BAD="$D46G_BAD unreadable"
+    else
+      skip "D46g an unreadable classifier module cannot be made on this host and was NOT exercised"
+    fi
+    chmod 644 "$D46G_EXEC"
+    [ -z "$D46G_BAD" ] \
+      && check "D46g a classifier module that is ($D46G_RAN ) gets no notice, so the plan falls through to the route question, while a regular module gives the notice" PASS \
+      || check "D46g the executor notice loaded a classifier module the guard should refuse:$D46G_BAD" FAIL
+  fi
+fi
 rm -f "$D46_CFG_BUILD"
 unit_check_done "D46z every unit file the registry gives this suite was graded"
 

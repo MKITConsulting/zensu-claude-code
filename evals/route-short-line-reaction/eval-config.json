@@ -3,6 +3,7 @@
     "aspectActivation": false,
     "autoFix": false,
     "autopilotEnforcer": false,
+    "backgroundTaskWait": false,
     "bestSolutionFirst": false,
     "chainEnforcer": false,
     "contextAutoLoad": false,

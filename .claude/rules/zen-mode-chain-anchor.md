@@ -376,7 +376,10 @@ stderr; `Z19b` discarded the regex FLAGS, so an added `i` widened the shipped re
 zen-mode probe each spelled the state ladder (marker shape, recorded choice, untraversable path,
 configured default) and the marker path template themselves, so a rung added to one reader left
 the others answering differently about one state. `zen_mode_resolve` in
-`hooks/lib/zensu-zen-shared.sh` owns the ladder and `zen_marker_path` the template. The resolver
+`hooks/lib/zensu-zen-shared.sh` owns the ladder and `zen_marker_path` the template, from which
+it derives `ZEN_STATE_DIR` and `ZEN_ZENSU_DIR` by parameter expansion, so the shape arm, both
+writers and the hook's anchor-skip probe read the marker directories without spelling them. The
+template stays a literal because the re-anchor marker case parses it. The resolver
 sets `ZEN_MODE_SOURCE` (`shape`, `marker`, `untraversable` or `default`) and, for a shape fault,
 the reason in `ZEN_MODE_WHY`; each reader keeps its own consequence. The hook exits with its
 stderr line, `--status` prints `on` or `off` with the cause on stderr, and the doctor renders its
@@ -384,8 +387,9 @@ row, asking `zen_marker_inactive` to tell a recorded `{"active":false}` from a m
 no choice. Each reader also keeps its own `hooks.zenMode` check, because the hook reads it before
 any expensive step and a second read inside the resolver would cost a `node` start on a config
 that names the key. The resolver adds no process to the hook's path: an active marker still costs
-one `grep`. `Z109` in `tests/structure/test-zen-mode.sh` pins the one owner of the template, of
-the inactive question and of the ladder, and that each reader resolves through it exactly once;
+one `grep`. `Z109` in `tests/structure/test-zen-mode.sh` pins the one owner of the template and
+its derived directories, of the inactive question and of the ladder, that no reader and no other
+line of the library spells a marker directory, and that each reader resolves through it exactly once;
 `Z50`, `Z80` item 8, `Z89` and `Z95` read the ladder and its comments in the library, and the
 `Z107` family still drives the doctor row and `--status` against each other on every rung.
 
@@ -529,11 +533,12 @@ from `, and anchor work that spans several turns` through `counter beside them.`
 sentence, by the same parameter expansion and with no process. A literal that loses either anchor
 emits the full clause with `none`, the safe direction. `Z30` in
 `tests/structure/test-zen-mode.sh` measures the armed variant (the static literal with the
-LONGEST producible token substituted: 5008 characters, ceiling 5100) and `Z30b` fires the hook
-with no chain armed and measures the none variant (3678, ceiling 3770). Both variants grew by 483
-characters when rules (1) to (3) became the result-first rule and the closing session block, and by
+LONGEST producible token substituted: 5050 characters, ceiling 5100) and `Z30b` fires the hook
+with no chain armed and measures the none variant (3720, ceiling 3770). Both variants grew by 483
+characters when rules (1) to (3) became the result-first rule and the closing session block, by
 78 more when the lead turned neutral and rules (4) and (5) gained the precedence and question-set
-clauses. Both measure through
+clauses, and by 42 more when the carve-out's last sentence took the safety-warning wording that
+`Z110` pins across the skill, `docs/precedence.md` and this directive. Both measure through
 `node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
 code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
 directions: growth past the ceiling fails, and so does a shrink further below it than the

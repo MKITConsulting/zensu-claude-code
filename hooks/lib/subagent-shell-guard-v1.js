@@ -996,8 +996,10 @@ function commandStart(words) {
   return index;
 }
 
-function commandName(value, platform) {
-  return foldCase(value.slice(value.lastIndexOf('/') + 1).replace(/\.exe$/i, ''), platform);
+function commandName(value, platform, fold = false) {
+  const cut = platform === 'win32' ? Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\')) : value.lastIndexOf('/');
+  const name = value.slice(cut + 1).replace(/\.exe$/i, '');
+  return fold ? name.toUpperCase().toLowerCase() : foldCase(name, platform);
 }
 
 function commandWord(item, platform) {
@@ -1672,13 +1674,14 @@ function assignmentsOf(words) {
 function commandInvocations(text, options = {}) {
   const platform = options.platform || process.platform;
   const parsing = { platform, home: options.home || '', root: options.root || '' };
+  const fold = options.foldNames === true;
   const commands = [];
   const visitWords = (words, item, inherited, depth) => {
     if (depth > MAX_DEPTH) return;
     const start = commandStart(words);
     const environment = { ...inherited, ...assignmentsOf(words.slice(0, start)) };
     if (start >= words.length) return;
-    const name = commandName(words[start].value, platform);
+    const name = commandName(words[start].value, platform, fold);
     const rest = words.slice(start + 1);
     if (name === 'eval') {
       visitScript(rest.map((word) => word.value).join(' '), environment, depth + 1);

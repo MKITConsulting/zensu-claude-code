@@ -1970,6 +1970,7 @@ case "${1:-}" in
           zensu_external_review_wait_reset "$session_val"
           _zensu_review_gate_reset "--tdd-begin" "$session_val" \
             "the previous generation's review packets and reviewer records could not be removed; this chain's review rounds still compare against packets created after this point."
+          zensu_stop_background_wait_reset "$session_val"
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
