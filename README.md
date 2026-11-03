@@ -555,6 +555,12 @@ metrics; billing credits remain separately unfiltered. Update the backend and
 CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
 
+Blocked legacy capture receipts are preserved byte-for-byte in a private local
+archive before a new explicitly scoped goal replaces them. The CLI command
+`zensu ai-work recover --session <capture-key>` inspects that session's receipts;
+archival and restoration require an exact receipt digest and `--confirm`.
+Recovery is offline, preserves pending event IDs, and never submits or accepts work.
+
 ### Confirmed product scope for AI work
 
 Each captured objective also requires an explicitly selected `--feature <uuid>`.
