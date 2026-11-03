@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-03
+
+### Added
+
+- **ai-work**: Recover pending captures and preflight explicit scope (#553)
+- **ai-work**: Require explicit feature scope for captured goals (#548)
+
+### Fixed
+
+- **hooks**: Correct opt-in gate texts and harden the CLI write-gate (#536)
+- **zen-mode,plan-gate**: Settle the follow-ups #543 left open (#549)
+- **autopilot**: Stop a non-git folder from holding every repository below it (#552)
+- **hooks**: Refuse a linked-session desktop store other accounts can write (#545)
+- **zen-mode,plan-gate**: Settle the review follow-ups deferred by #516 (#543)
+
 - **CLI write-gate `--api-url`**: the `zensu` CLI write-gate now reads the target backend the way
   the CLI does. It reads the one-word `--api-url=<url>` beside the two-word `--api-url <url>`, so
   a mutation such as `zensu --api-url=http://localhost:8090 security classify f1` is no longer
