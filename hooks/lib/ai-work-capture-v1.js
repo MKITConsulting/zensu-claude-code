@@ -198,7 +198,8 @@ function checkpoint(options) {
     start(s, root);
     let d = detail(s, root);
     let reviewDetails;
-    if (options['review-file']) {
+    if (Object.hasOwn(options, 'review-file')) {
+      if (typeof options['review-file'] !== 'string' || options['review-file'] === '') throw new Error('Unsafe review file');
       const input = path.resolve(root, options['review-file']);
       const st = fs.lstatSync(input);
       if (!st.isFile() || st.isSymbolicLink() || st.size > 32768) throw new Error('Unsafe review file');

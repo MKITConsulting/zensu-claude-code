@@ -638,6 +638,15 @@ test('optional empty strings match the typed CLI and server representation', (t)
 });
 
 
+test('an explicit empty review path never falls back to metadata-only capture', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  assert.throws(() => capture.checkpoint({ ...options, 'review-file': '' }), /Unsafe review file/);
+  assert.equal(state.submits.length, 0);
+  assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+  assert.equal(state.submits.length, 1);
+  assert.equal(Object.hasOwn(state.submits[0], 'reviewDetails'), false);
+});
 test('unsafe artifact URLs are rejected before a submission becomes pending', (t) => {
   const { options, state, file } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
   const review = reviewFixture(options);
