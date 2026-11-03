@@ -3890,6 +3890,11 @@ printf '{"hooks":{"reviewerSpawnPermissionCheck":"false"}}\n' > "$CFG_PERMQ"
 case "$( HOME="$H_EXPOSED"; run_report "$SBOX/plug" "$CFG_PERMQ" "$EMPTY_PROJECT" )" in *'permission mode "auto" is set'*)
   check "P1bz2 a quoted \"false\" does not disable the check" PASS ;;
   *) check "P1bz2 a quoted \"false\" wrongly disabled the check" FAIL ;; esac
+if node -e 'process.exit(require(process.argv[1]).hooks.reviewerSpawnPermissionCheck === true ? 0 : 1)' "$PLUGIN_DIR/config.example.json" 2>/dev/null; then
+  check "P1bz3 config.example.json ships hooks.reviewerSpawnPermissionCheck: true" PASS
+else
+  check "P1bz3 config.example.json is missing hooks.reviewerSpawnPermissionCheck: true" FAIL
+fi
 PERM_ROWS="$EXPOSED_OUT$DENY_OUT$ASK_OUT$AM_OUT$BAD_OUT$UNJ_OUT$SHAPE_OUT$QUIET_OUT$NOHOME_OUT$SHORT_OUT$THROW_OUT$DENY_OBJ_OUT$OTHER_AGENT_OUT$AMA_SPLIT_OUT$PERMOFF_OUT"
 PERM_UNEMITTED=""; PERM_DRIFT=""
 while IFS= read -r perm_phrase; do

@@ -12,10 +12,10 @@
 # either:
 #   (A) the file already exists and is git-tracked inside the project (clobbering
 #       real tracked source), or
-#   (B) the resolved path escapes the session root (CLAUDE_PROJECT_DIR / cwd) into
-#       a sibling or main checkout — the cross-session contamination vector.
-# Relative targets resolve against a cwd that tracks `cd` across the command, so
-# `cd ../main && printf ... >> src/x.rs` is caught by (B).
+#   (B) the resolved path escapes the session root (the recorded project root, or,
+#       in a relaxed unbound session, the host's CLAUDE_PROJECT_DIR while it resolves)
+#       into a sibling or main checkout, the cross-session contamination vector.
+#       Relative targets track each `cd`, so `cd ../main && printf ... >> src/x.rs` hits (B).
 #
 # (C) closes the same contamination vector for git itself, which reaches it
 # without naming a write target at all: a working-tree-mutating subcommand whose
@@ -76,15 +76,15 @@ esac
 { INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 
 emit_deny() {
-  REASON="$1" node -e '
+  printf '%s' "$1" | node -e '
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: process.env.REASON
+        permissionDecisionReason: require("fs").readFileSync(0, "utf8")
       }
     }));
-  '
+  ' 2>/dev/null || printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the source-write gate could not render its reason, so this command is refused rather than allowed unchecked."}}'
   echo
 }
 
@@ -193,8 +193,8 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # No anchor to judge a write against. Deny WRITES — but only writes: this
     # branch used to deny every Bash command unconditionally, which put the
     # diagnostic back behind the defect it reports. In the orphaned state
-    # CLAUDE_PROJECT_DIR is, by construction, the directory that is gone (the
-    # record's project_root was minted from the SessionStart cwd), and in the
+    # CLAUDE_PROJECT_DIR is usually the directory that is gone (the record's root is
+    # minted from the SessionStart cwd, which is normally the host's), and in the
     # no-record state it may simply be unset — so this branch is the NORMAL
     # case for both relaxed states, not an edge case.
     #
@@ -205,11 +205,11 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # state this branch exists to make usable. `targets` runs the full default
     # parse, applies the same source-extension and temp-root filters, and
     # answers only with operands it actually resolved; it needs no project root
-    # because it skips exactly the two rules that would consult one. The one
+    # because it skips exactly the two rules that would consult one. Its
     # non-operand answer is a synthetic `WRITE-TARGET (unevaluated: …)` when the
-    # parser's target budget is exhausted — this branch treats it as a deny, the
-    # same way it treats a parser that cannot run at all, and it reaches the
-    # user verbatim in the message below.
+    # target budget is exhausted or a PowerShell command is not provably read-only;
+    # this branch denies it, as it denies when the parser cannot run at all, and it
+    # reaches the user verbatim in the message below.
     #
     # Because it is the default parse, the inline ZENSU_BASH_WRITE_GATE=off /
     # ZENSU_MCP_GATE=off escapes still surface as __bypass__ markers here, so
@@ -225,7 +225,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     case "$UNBOUND_TARGETS" in
       ''|__bypass__*) exit 0 ;;
     esac
-    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. ${OPT_IN_NOTE}"
+    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only Bash commands still run unless the zensu CLI gate finds a zensu call in them, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. ${OPT_IN_NOTE}"
     exit 0
   fi
   # An unparseable envelope is a different failure: with no readable command
@@ -277,7 +277,7 @@ if ! REASON="$(
   BSWG_MODE= PAYLOAD= BSWG_REANCHOR=1 CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
     node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
 )"; then
-  emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. This gate is opt-in, and switching it off is decided BEFORE the parser runs, so that still works here: ask the user to set hooks.bashWriteGate to false in the Zensu config layer that enables it — a project .zensu/config.json overrides ~/.zensu/config.json, and ZENSU_CONFIG, when set, replaces both."
+  emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. This gate is opt-in, and switching it off is decided BEFORE the parser runs, so that still works here: ask the user to set hooks.bashWriteGate to false in the Zensu config layer that enables it — the .zensu/config.json under the host's project directory overrides ~/.zensu/config.json, and ZENSU_CONFIG, when set, replaces both."
   exit 0
 fi
 case "$REASON" in

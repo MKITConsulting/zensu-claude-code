@@ -26,7 +26,7 @@ fi
 
 # ── Structure pins ───────────────────────────────────────────────────
 [ -x "$HOOK" ] && check "W1 hook exists + executable" PASS || check "W1 hook exists + executable" FAIL
-bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 hook bash -n syntax" FAIL
+bash -n "$HOOK" 2>/dev/null && bash -n "$HOOK_BODY" 2>/dev/null && check "W2 hook bash -n syntax for the wrapper and the body" PASS || check "W2 hook bash -n syntax of the wrapper or the body" FAIL
 { [ -f "$PARSER" ] && node --check "$PARSER" 2>/dev/null; } \
   && check "W3 parser exists + node --check" PASS || check "W3 parser exists + node --check" FAIL
 
@@ -297,10 +297,10 @@ mkdir -p "$PROJ/src" "$PROJ/build" "$SIB/src" "$FAKETMP"
     && printf 'pub fn x(){}\n' > src/lib.rs && git add src/lib.rs && git commit -qm init
 ) >/dev/null 2>&1
 
-CFG_ON="$(mktemp -t bswgate-on-XXXXXX)";     printf '%s' '{"hooks":{"bashWriteGate":true}}'   > "$CFG_ON"
-CFG_OFF="$(mktemp -t bswgate-off-XXXXXX)";   printf '%s' '{"hooks":{"bashWriteGate":false}}'  > "$CFG_OFF"
-CFG_UNSET="$(mktemp -t bswgate-unset-XXXXXX)"; printf '%s' '{"hooks":{}}'                     > "$CFG_UNSET"
-CFG_QUOTED="$(mktemp -t bswgate-quoted-XXXXXX)"; printf '%s' '{"hooks":{"bashWriteGate":"true"}}' > "$CFG_QUOTED"
+CFG_ON="$WORKROOT/cfg-on.json";         printf '%s' '{"hooks":{"bashWriteGate":true}}'   > "$CFG_ON"
+CFG_OFF="$WORKROOT/cfg-off.json";       printf '%s' '{"hooks":{"bashWriteGate":false}}'  > "$CFG_OFF"
+CFG_UNSET="$WORKROOT/cfg-unset.json";   printf '%s' '{"hooks":{}}'                     > "$CFG_UNSET"
+CFG_QUOTED="$WORKROOT/cfg-quoted.json"; printf '%s' '{"hooks":{"bashWriteGate":"true"}}' > "$CFG_QUOTED"
 export CLAUDE_PROJECT_DIR="$PROJ"
 export ZENSU_TEST_PLUGIN_DATA="$WORKROOT/plugin-data"
 # shellcheck disable=SC1091
@@ -1407,6 +1407,18 @@ WP_UNBOUND_READ="$(payload "Get-ChildItem -Recurse" "$PROJ" PowerShell | env -u 
 { printf '%s' "$WP_UNBOUND" | grep -qF 'WRITE-TARGET (unevaluated: a PowerShell command this check cannot prove read-only' && [ -z "$WP_UNBOUND_READ" ]; } \
   && check "WP16 unbound without CLAUDE_PROJECT_DIR a PowerShell write denies and a PowerShell read passes" PASS \
   || check "WP16 unbound PowerShell (write='$WP_UNBOUND' read='$WP_UNBOUND_READ')" FAIL
+WP_UNBOUND_GIT="$(payload "git status" "$PROJ" PowerShell | env -u CLAUDE_PROJECT_DIR \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+WP_UNBOUND_GIT_BASH="$(payload "git status" "$PROJ" | env -u CLAUDE_PROJECT_DIR \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+WP_UNBOUND_GIT_REASON="$(printf '%s' "$WP_UNBOUND_GIT" | reason)"
+{ printf '%s' "$WP_UNBOUND_GIT_REASON" | grep -qF 'run a read-only command through the Bash tool' \
+  && printf '%s' "$WP_UNBOUND_GIT_REASON" | grep -qF 'Read-only Bash commands still run' \
+  && [ -z "$WP_UNBOUND_GIT_BASH" ]; } \
+  && check "WP16b unbound, a PowerShell read it cannot prove read-only is sent to the Bash tool, where it passes" PASS \
+  || check "WP16b unbound PowerShell read remedy (ps='$WP_UNBOUND_GIT_REASON' bash='$WP_UNBOUND_GIT_BASH')" FAIL
 WP_COPY="$WORKROOT/powershell-module-missing"
 mkdir -p "$WP_COPY"
 cp -R "$PLUGIN_DIR/hooks" "$WP_COPY/hooks"
@@ -1424,7 +1436,6 @@ WP_MISSING_BASH="$(payload "ls" "$PROJ" | env CLAUDE_PLUGIN_ROOT="$WP_COPY" CLAU
   || check "WP17 analyzer-less copy (powershell='$WP_MISSING' bash='$WP_MISSING_BASH')" FAIL
 rm -rf "$WP_COPY"
 
-rm -f "$CFG_ON" "$CFG_OFF" "$CFG_UNSET" "$CFG_QUOTED"
 
 unit_check_done "W3z every unit file the registry gives this suite was graded"
 echo "----"
