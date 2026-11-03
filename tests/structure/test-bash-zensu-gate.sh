@@ -61,6 +61,9 @@ grep -qF 'zensu-mcp-tools.sh' "$HOOK_BODY" && grep -qF 'zensu-cli-map.sh' "$HOOK
   && check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" PASS \
   || check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" FAIL
 
+. "$(dirname "$0")/lib-unit-registry.sh"
+unit_check "B58 the backend reading unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-backend-v1.test.js"
+
 # Build a PreToolUse Bash payload carrying tool_input.command.
 payload() {
   CMD="$1" AT="${2:-}" SID="${3:-gate-test}" TOOL="${4:-Bash}" node -e '
@@ -580,47 +583,10 @@ envrun() {
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
 run "B53a --api-url localhost, then --api-url prod -> DENY" "zensu --api-url http://localhost:8090 --api-url https://api.zensu.dev security classify f1" '' DENY
-run "B53b --api-url localhost, then --api-url=prod -> DENY" "zensu --api-url http://localhost:8090 security classify f1 --api-url=https://api.zensu.dev" '' DENY
-run "B53c --api-url localhost after -- -> DENY" "zensu security classify f1 -- --api-url http://localhost:8090" '' DENY
-run "B53c2 --api-url localhost after -- and a positional word -> DENY" "zensu security classify f1 -- extra --api-url http://localhost:8090" '' DENY
-run "B53d --api-url localhost after -- beside an inline localhost ZENSU_API_URL -> ALLOW" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 -- --api-url http://localhost:8090" '' ALLOW
 run "B53e two local two-word values -> ALLOW" "zensu --api-url http://localhost:8090 --api-url http://127.0.0.1:8090 security classify f1" '' ALLOW
-run "B53f --api-url=prod over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu --api-url=https://api.zensu.dev security classify f1" '' DENY
-envrun "B53g --api-url=prod over the hook's localhost ZENSU_API_URL" "zensu --api-url=https://api.zensu.dev security classify f1" http://localhost:8090 DENY
-run "B53h --api-url=localhost in a call not read in full, over an inline localhost ZENSU_API_URL -> DENY" 'ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --api-url=http://localhost:8090 $X' '' DENY
-envrun "B53i an empty inline ZENSU_API_URL over the hook's localhost one" "ZENSU_API_URL= zensu security classify f1" http://localhost:8090 DENY
-envrun "B53j an inline localhost ZENSU_API_URL over the hook's prod one" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1" https://api.zensu.dev ALLOW
-run "B53k --api-url localhost as the value of --title -> DENY" "zensu features create --product p1 --title --api-url http://localhost:8090" '' DENY
-run "B53l --api-url localhost as the value of --title beside an inline localhost ZENSU_API_URL -> ALLOW" "ZENSU_API_URL=http://localhost:8090 zensu features create --product p1 --title --api-url http://localhost:8090" '' ALLOW
-run "B53m --api-url prod right after a flag without a value, over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --json --api-url https://api.zensu.dev" '' DENY
-run "B53n --api-url=prod right after a flag without a value, over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --json --api-url=https://api.zensu.dev" '' DENY
-run "B53o --api-url localhost right after a flag without a value -> DENY" "zensu security classify f1 --json --api-url http://localhost:8090" '' DENY
-run "B53q --api-url with userinfo before a remote host -> DENY" "zensu --api-url http://localhost:8090@api.zensu.dev security classify f1" '' DENY
-run "B53q2 --api-url localhost with a user name -> DENY" "zensu --api-url http://localhost:x@localhost:8090 security classify f1" '' DENY
-run "B53r inline ZENSU_API_URL with userinfo before a remote host -> DENY" "ZENSU_API_URL=http://localhost:8090@api.zensu.dev zensu security classify f1" '' DENY
-envrun "B53s the hook's ZENSU_API_URL with userinfo before a remote host" "zensu security classify f1" http://localhost:8090@api.zensu.dev DENY
-run "B53t --api-url [::1] -> ALLOW" "zensu --api-url 'http://[::1]:8090' security classify f1" '' ALLOW
-run "B53u --api-url 127.1, which only a URL parser reads as loopback -> DENY" "zensu --api-url http://127.1:8090 security classify f1" '' DENY
-run "B53v --api-url localhost with a backslash -> DENY" "zensu --api-url 'http://localhost:8090\\@api.zensu.dev' security classify f1" '' DENY
-run "B53w --api-url without a value beside an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --api-url" '' DENY
-run "B53x --api-url localhost with an ftp scheme -> DENY" "zensu --api-url ftp://localhost:8090 security classify f1" '' DENY
-envrun "B53y the hook's ZENSU_API_URL [::1]" "zensu security classify f1" 'http://[::1]:8090' ALLOW
-run "B53z --api-url uppercase LOCALHOST -> ALLOW" "zensu --api-url HTTP://LOCALHOST:8090 security classify f1" '' ALLOW
 run "B54a --api-url localhost beside a quoted title naming --api-url -> ALLOW" 'zensu --api-url http://localhost:8090 features create --product p1 --title "Fix --api-url parsing"' '' ALLOW
-run "B54b --api-url localhost after a quoted title holding -- -> ALLOW" 'zensu features create --product p1 --title "Phase 1 -- login" --api-url http://localhost:8090' '' ALLOW
-run "B54c --api-url localhost after a quoted title ending in a dash word -> ALLOW" 'zensu features create --product p1 --title "use -v" --api-url http://localhost:8090' '' ALLOW
-run "B54d --api-url localhost beside a comment naming a remote one -> ALLOW" 'zensu --api-url http://localhost:8090 security classify f1 # --api-url https://api.zensu.dev' '' ALLOW
-run "B54e a quote-glued --api-url fragment inside an ssh string -> DENY" "ssh deploy@host \"cd /srv && zensu features create --product p1 --title x' '--api-url http://localhost:8090\"" '' DENY
-run "B54f --api-url localhost behind a run-time word further ahead -> DENY" 'zensu security classify f1 $X y --api-url http://localhost:8090' '' DENY
-run "B54g --api-url localhost with a run-time port -> DENY" 'zensu --api-url http://localhost:$PORT security classify f1' '' DENY
-run "B54h inline ZENSU_API_URL localhost with a run-time port -> DENY" 'ZENSU_API_URL=http://localhost:${PORT} zensu security classify f1' '' DENY
 run "B54i --api-url localhost with a run-time path part -> ALLOW" 'zensu --api-url "http://localhost:8090/$PREFIX" features create --product p1 --title t' '' ALLOW
-run "B54j --api-url https localhost -> ALLOW" "zensu --api-url https://localhost:8443 security classify f1" '' ALLOW
 envrun "B54k a remote ZENSU_API_URL assigned in an earlier command over the hook's localhost one" "ZENSU_API_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
-envrun "B54l a remote ZENSU_API_URL exported in an earlier command over the hook's localhost one" "export ZENSU_API_URL=https://api.zensu.dev && zensu security classify f1" http://localhost:8090 DENY
-envrun "B54m an inline += that appends localhost to the hook's remote ZENSU_API_URL" "ZENSU_API_URL+=localhost:8090 zensu security classify f1" https://api.zensu.dev/ DENY
-envrun "B54n a remote ZENSU_API_URL exported through a quoted name over the hook's localhost one" "export ZENSU_API\"\"_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
-envrun "B54o the hook's localhost ZENSU_API_URL in a command that names it only in a title" "zensu features create --product p1 --title 'set ZENSU_API_URL'" http://localhost:8090 DENY
 envrun "B54p the hook's localhost ZENSU_API_URL in a command that never names it" "zensu features create --product p1 --title t" http://localhost:8090 ALLOW
 run "B55a uppercase CLI name" "ZENSU security classify f1" '' DENY
 run "B55b capitalized CLI name" "Zensu features create --product p1 --title t" '' DENY
@@ -695,7 +661,7 @@ parser_lines() {
   node -e '
     const fs = require("fs");
     const { spawnSync } = require("child_process");
-    const [hook, binder, guard, preload] = process.argv.slice(1);
+    const [hook, binder, guard, preload, backend] = process.argv.slice(1);
     const source = fs.readFileSync(hook, "utf8");
     const begin = source.indexOf("INVOCATIONS=");
     const open = begin < 0 ? -1 : source.indexOf("node -e \x27", begin);
@@ -707,11 +673,11 @@ parser_lines() {
       encoding: "utf8",
       timeout: 15000,
       maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, ZAPI: "", ZGUARD: guard, ZBIND: binder },
+      env: { ...process.env, ZAPI: "", ZGUARD: guard, ZBIND: binder, ZBACKEND: backend },
     });
     if (run.error || run.status !== 0) { process.stdout.write("NO-ANSWER " + (run.error ? run.error.code : run.status)); process.exit(0); }
     process.stdout.write(run.stdout);
-  ' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}" "${2:-}"
+  ' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}" "${2:-}" "$PLUGIN_DIR/hooks/lib/zensu-cli-backend-v1.js"
 }
 TAB="$(printf '\t')"
 LINES_ONE="$(printf '%s' 'zensu features get f1' | parser_lines)"
@@ -1061,9 +1027,7 @@ psrun "B40o7 PowerShell --api-url localhost, then --api-url prod" "zensu --api-u
 psrun "B40o8 PowerShell --api-url localhost after a run-time argument" "zensu features create --product p1 --title \$t --api-url http://localhost:8090" '' DENY
 psrun "B40o9 PowerShell --api-url localhost after --" "zensu security classify f1 -- --api-url http://localhost:8090" '' DENY
 envrun "B40o10 PowerShell --api-url=prod over the hook's localhost ZENSU_API_URL" "zensu --api-url=https://api.zensu.dev security classify f1" http://localhost:8090 DENY PowerShell
-envrun "B40o11 PowerShell --api-url= with a run-time value over the hook's localhost ZENSU_API_URL" "zensu --api-url=\$u security classify f1" http://localhost:8090 DENY PowerShell
 envrun "B40o12 PowerShell stop-parsing token ahead of a remote --api-url over the hook's localhost ZENSU_API_URL" "zensu security classify f1 --% --api-url https://api.zensu.dev" http://localhost:8090 DENY PowerShell
-envrun "B40o13 PowerShell env: assignment of a remote value over the hook's localhost ZENSU_API_URL" "\$env:ZENSU_API_URL = 'https://api.zensu.dev'; zensu security classify f1" http://localhost:8090 DENY PowerShell
 psrun "B40o14 PowerShell --api-url localhost right after zensu beside a run-time title" "zensu --api-url http://localhost:8090 features create --product p1 --title \$t" '' ALLOW
 envrun "B40o15 PowerShell Set-Item of a joined env: name over the hook's localhost ZENSU_API_URL" "Set-Item -Path ('env:ZENSU_API' + '_URL') -Value https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY PowerShell
 psrun "B40p PowerShell --help"                            "zensu security classify f1 --help"                             '' ALLOW
@@ -1147,6 +1111,32 @@ if [ "$PS_BOUND" = "BOUND" ] && printf '%s' "$PS_FB_BASH_DENY" | grep -qF "maps 
 else
   check "B41c analyzer-less Bash verdicts (bound='$PS_BOUND' deny='$PS_FB_BASH_DENY' read='$PS_FB_BASH_READ')" FAIL
 fi
+cp "$PLUGIN_DIR/hooks/lib/powershell-command-v1.js" "$PS_ROOT/hooks/lib/powershell-command-v1.js"
+rm -f "$PS_ROOT/hooks/lib/zensu-cli-backend-v1.js"
+BE_OUT="$(
+  export CLAUDE_PROJECT_DIR="$PS_BASE/project"
+  ZENSU_TEST_PLUGIN_DATA="$PS_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" backend-missing-gate "$PS_ROOT" || exit 1
+  printf 'BOUND\n'
+  for spec in 'Bash|zensu features get f1' 'Bash|git status --short' 'PowerShell|Get-ChildItem -Recurse' 'PowerShell|zensu features get f1'; do
+    payload "${spec#*|}" '' backend-missing-gate "${spec%%|*}" | env CLAUDE_PLUGIN_ROOT="$PS_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$PS_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
+    printf '\n<<%s>>\n' "$spec"
+  done
+)"
+BE_BOUND="$(printf '%s\n' "$BE_OUT" | sed -n '1p')"
+BE_BASH_READ="$(printf '%s\n' "$BE_OUT" | sed -n '2p')"
+BE_BASH_PLAIN="$(printf '%s\n' "$BE_OUT" | sed -n '4p')"
+BE_PS_PLAIN="$(printf '%s\n' "$BE_OUT" | sed -n '6p')"
+BE_PS_READ="$(printf '%s\n' "$BE_OUT" | sed -n '8p')"
+if [ "$BE_BOUND" = "BOUND" ] && [ ! -e "$PS_ROOT/hooks/lib/zensu-cli-backend-v1.js" ] \
+   && printf '%s' "$BE_BASH_READ" | grep -qF 'could not read it' \
+   && printf '%s' "$BE_PS_READ" | grep -qF 'could not read it'; then
+  check "B59a without the backend module a Bash and a PowerShell command naming zensu deny as unreadable" PASS
+else
+  check "B59a backend-less zensu commands (bound='$BE_BOUND' bash='$BE_BASH_READ' ps='$BE_PS_READ')" FAIL
+fi
+[ "$BE_BOUND" = "BOUND" ] && [ -z "$BE_BASH_PLAIN" ] && [ -z "$BE_PS_PLAIN" ] \
+  && check "B59b without the backend module a Bash and a PowerShell command without zensu pass" PASS \
+  || check "B59b backend-less plain commands (bound='$BE_BOUND' bash='$BE_BASH_PLAIN' ps='$BE_PS_PLAIN')" FAIL
 rm -rf "$PS_BASE"
 psrun "B41d PowerShell group subcommand built at run time"   "zensu work policy \$sub"                                     '' DENY
 psrun "B41e PowerShell read whose argument is built at run time" "zensu features get \$id"                                    '' ALLOW
@@ -1154,6 +1144,7 @@ psrun "B41e PowerShell read whose argument is built at run time" "zensu features
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
 rm -rf "$PROJECT"
 
+unit_check_done "B58z every unit file the registry gives this suite was graded"
 echo "----"
 echo "test-bash-zensu-gate: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

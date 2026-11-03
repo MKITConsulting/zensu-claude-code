@@ -219,6 +219,7 @@ path segment such as `~/src/Zensu` count, so such a local call needs the two-wor
 command also holds the stop-parsing token `--%` or a `--api-url` the analyzer cannot read as a word, such as
 `--api-url=$u`. The gate cannot tell where a call runs: one only the token scan finds, such as a call inside an `ssh`
 string, still counts as local when it names `localhost`, although there `localhost` is the host the string reaches.
+This backend reading lives in `hooks/lib/zensu-cli-backend-v1.js`, which the gate loads from its own plugin directory and a unit file pins rule by rule; when that module cannot load, the gate denies every command that names `zensu` as unreadable, and a command that names none never loads it.
 In a Bash command a `--help` or `-h` word right after a word the shell expands at run time is read as that word's
 value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
