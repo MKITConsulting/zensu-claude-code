@@ -168,3 +168,23 @@ Requires a CLI supporting the `ai-work start --source --source-version --run-kin
 flags and a backend supporting run metadata. Upgrade backend and CLI before the
 plugin. Missing support is an incomplete capture, never a silent fallback. The
 internal `--legacy-metadata` flag only replays pre-metadata receipts unchanged.
+
+## Check scope before implementation
+
+Use the same native helper and session/workspace arguments shown above, replacing
+`begin` with `preflight` and omitting task/title/criteria. Confirmed per-goal feature
+or exception flags are optional for this read-only check. It checks CLI
+capabilities before requesting context and returns a precise prerequisite status.
+Ask once for missing product/feature confirmation early, reuse a valid product
+binding, and continue coding if scope is unavailable. Do not create placeholder
+work or infer consent from discovery.
+
+If reporting was explicitly declined, call the same native helper with `pause`
+instead, without goal flags. This is local only; it preserves pending receipts,
+suppresses preflight/context and Stop submissions, and asks no scope questions.
+Only an explicitly authorized, confirmed `begin` clears this pause after success.
+A failed or incompatible begin keeps the pause. CLI capability checks run again
+before begin/checkpoint writes, so a later downgrade cannot drop required flags.
+
+See [CLI installation and updates](cli-install-update.md), including `zensu update`,
+the fallback for older versions, PATH diagnostics and all preflight statuses.
