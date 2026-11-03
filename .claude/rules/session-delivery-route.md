@@ -6,6 +6,7 @@ paths:
   - "hooks/lib/zensu-tdd-mode.sh"
   - "hooks/lib/zensu-marker-write.sh"
   - "hooks/lib/linked-session-v1.js"
+  - "hooks/lib/desktop-store-read-v1.js"
   - "hooks/lib/zensu-linked-session.sh"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
@@ -178,7 +179,8 @@ file opened without following a link and without blocking, at most 8 MiB, a read
 answering would-block retried 16 times 1 ms apart and then read as unreadable; off Windows, those
 three directories and every record the module reads owned by the hook's own uid with no group or
 other write bit (`writableOnlyByCaller`, a record judged on its `lstat` and again on the opened
-descriptor); the own record's `sessionId` equal to the host
+descriptor), the rule and the bounded reader both living in `hooks/lib/desktop-store-read-v1.js`,
+which session-trail applies to its own store reads too; the own record's `sessionId` equal to the host
 id; its `cliSessionId`, when present, equal to the payload's `session_id`; a parent id other than
 the own one. A directory that fails the owner and mode check skips its store candidate, so the
 session answers `none` (`no-session-store`) when no other candidate passes; an own record that
@@ -190,7 +192,9 @@ root (`parent-context-unavailable`). The check is the rule of `privateRecordsDir
 directories 0700 (all 39) and the records 0600 (all 4058), each owned by the user. A group write
 bit is refused even where the group holds the user alone, as under the umask 002 of a
 user-private-group setup; such a session loses the inheritance and the brief note, so it behaves
-as it did before inheritance. The check never judges the parent's project root. The parent's
+as it did before inheritance. The check never judges the parent's project root, whose
+`realDirectory` call passes `anyOwnerOrMode`: `realDirectory` has no default policy and throws a
+`TypeError` for a call that names none. The parent's
 project root comes from the parent's Session Control record (`sessionKey`
 of the parent's `cliSessionId`, read through `privateRecordsDirectory` after `CLAUDE_PLUGIN_DATA` is
 canonicalized by the binder's own `canonicalDirectory`, as `resolveHookSession` does, at most 1 MiB,
@@ -328,9 +332,15 @@ route: a route change moves only the field, and every shape of the reminder carr
   the anchor and holds `linked-session` back when `inherited-route` did not move; `storeCandidates`
   in the resolver and `ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, which apply
   one `ZENSU_CCD_STORE` rule, so a change to either side's override moves both, together with
-  `.claude/rules/session-lineage-ledger.md`, which states that rule for session-trail, while the
-  owner and mode check stays the resolver's alone, so session-trail still reads a store the
-  resolver refuses;
+  `.claude/rules/session-lineage-ledger.md`, which states that rule for session-trail;
+  `hooks/lib/desktop-store-read-v1.js`, the one owner of `writableOnlyByCaller`, `anyOwnerOrMode`,
+  `realDirectory` with its required policy, `ownedRegularFile` and the bounded record reader, which
+  the resolver and `trail.mjs` both load, so a change to the rule moves both readers, and
+  `.claude/rules/session-trail-targeted-lookup.md` names session-trail's side; `L3j` and `L3k` in
+  `test-linked-session-route.sh` fail when either reader defines a copy, as a function or as a
+  `const`, `let` or `var` binding, or when a `realDirectory` call names a policy other than
+  `writableOnlyByCaller` or `anyOwnerOrMode` or is spelled in a form the pin cannot read, and `L3l` when the
+  reader stops reusing the scratch buffer session-trail passes or the resolver starts passing one;
   `ZENSU_LINKED_BRIEF_LEAD` and the `ZENSU_DIRECTIVE_LEAD` name in `zensu-directive.sh`; the
   closed spelling list in the doctor probe of `zensu-doctor.sh` and the two source regexes in
   `zensu-doctor-report.js`, which accept `inherited from parent session`.
@@ -392,7 +402,8 @@ The linked-session inheritance is `patch` on the same walk: two new one-line fil
 read, no config key, and the helper keeps its four verbs. An older runtime of the same lineage
 ignores both files and asks, which is the fail-safe direction. The resolver's owner and mode check
 is `patch` as well: no kind, reason or field changes, and it only turns a resolution into an
-existing `none`, `parent-record-unavailable` or `parent-context-unavailable` answer.
+existing `none`, `parent-record-unavailable` or `parent-context-unavailable` answer. Moving the check
+into `hooks/lib/desktop-store-read-v1.js` changes none of its answers.
 
 ## Known bounds
 

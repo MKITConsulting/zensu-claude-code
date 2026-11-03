@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+umask 022
 
 # Behavioural contract for the session-trail TAKEOVER verdict (V*) AND for the
 # WRITES anchor (W*, under their own banner below) — two contracts, one file,
@@ -2607,7 +2608,7 @@ mutant_path() { # <tag> -> path to place the mutated trail.mjs at
   local d="$FAKE/mut-$1/skills/session-trail/scripts"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
   cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
+  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
 
@@ -5624,7 +5625,7 @@ else
     local d="$FAKE/cmut-$1/skills/session-trail/scripts"
     mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
     cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
+    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     printf '%s' "$d/trail.mjs"
   }
@@ -8774,6 +8775,231 @@ else
   [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')" = "$FK_BIG_WT:$FK_BIG_WT" ] || FK_BAD="$FK_BAD wt-cwd=$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')"
   [ "$(wr_json "$FK_OUT" 'o.cwdLast + ":" + o.branch')" = "$FK_BIG_WT/.claude/worktrees/nested:claude/nested" ] || FK_BAD="$FK_BAD last=$(wr_json "$FK_OUT" 'o.cwdLast + ":" + o.branch')"
   [ -z "$FK_BAD" ] && check "FK9 a fork past the full-read limit, whose first own record lies in the unread middle and spans more than one read chunk, resolves to that record's worktree, not to the nested worktree its tail shows or to its parent's" PASS || check "FK9 large fork:$FK_BAD" FAIL
+fi
+
+OM_PLATFORM="$(node -p process.platform 2>/dev/null)"
+if [ "$OM_PLATFORM" = win32 ]; then
+  skip "OM the desktop-store owner and mode check is not judged on Windows, so its pins run on POSIX hosts only"
+else
+  OM_STORE_REFUSED='the Claude Desktop session store was refused: another account owns it or can write it, it is a symbolic link or not a directory, or it could not be inspected'
+  OM_RECORDS_REFUSED='Claude Desktop holds no readable record for this session, and some of its store entries were refused: another account owns them or can write them, they are symbolic links, of the wrong file type or larger than 8 MiB, or they could not be opened or read'
+  OM_HOME="$FAKE/om-home"
+  OM_CFG="$OM_HOME/.claude"
+  OM_STORE="$OM_HOME/store"
+  OM_ACCT="$OM_STORE/acct-om"
+  OM_ORG="$OM_ACCT/org-om"
+  OM_SID=6d6d6d01-0000-4000-8000-0000000000d1
+  OM_REC="$OM_ORG/local_7e7e7e01-0000-4000-8000-0000000000e1.json"
+  mkdir -p "$OM_ORG" "$OM_HOME/elsewhere"
+  chmod 755 "$OM_STORE"
+  chmod 700 "$OM_ACCT" "$OM_ORG"
+  node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, record] = process.argv.slice(1);
+const cwd = path.join(home, "work", "wt-om");
+fs.mkdirSync(cwd, { recursive: true });
+const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type: "custom-title", customTitle: "om fixture", sessionId: sid }),
+  JSON.stringify({ type: "user", message: { role: "user", content: "start om fixture" }, cwd, gitBranch: "branch-om", isSidechain: false, timestamp: iso, sessionId: sid }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd, gitBranch: "branch-om", isSidechain: false, timestamp: iso, sessionId: sid }),
+].join("\n") + "\n");
+fs.writeFileSync(record, JSON.stringify({ sessionId: "local_7e7e7e01-0000-4000-8000-0000000000e1", cliSessionId: sid, isArchived: false, title: "om record", model: "fixture-model", backgroundTaskSuggestions: [{ id: "chip-om", title: "om chip", prompt: "follow up on the om fixture", createdAt: Date.now() }] }));
+' "$OM_HOME" "$OM_SID" "$OM_REC" 2>/dev/null
+  chmod 600 "$OM_REC"
+  cat > "$OM_HOME/om-owner.mjs" <<'OMOWNER'
+import fs from 'node:fs';
+const target = process.env.OM_FOREIGN_PATH || '';
+const mode = process.env.OM_FOREIGN_MODE || '';
+const uid = typeof process.getuid === 'function' ? process.getuid() + 1 : 1;
+const foreign = (stat) => new Proxy(stat, { get(t, k) { if (k === 'uid') return uid; const v = Reflect.get(t, k); return typeof v === 'function' ? v.bind(t) : v; } });
+const realLstat = fs.lstatSync;
+fs.lstatSync = function lstatAsForeign(p, ...rest) { const s = realLstat.call(this, p, ...rest); return mode === 'lstat' && String(p) === target ? foreign(s) : s; };
+const opened = new Set();
+const realOpen = fs.openSync;
+fs.openSync = function openTracked(p, ...rest) { const fd = realOpen.call(this, p, ...rest); if (String(p) === target) opened.add(fd); return fd; };
+const realFstat = fs.fstatSync;
+fs.fstatSync = function fstatAsForeign(fd, ...rest) { const s = realFstat.call(this, fd, ...rest); return mode === 'fstat' && opened.has(fd) ? foreign(s) : s; };
+const realClose = fs.closeSync;
+fs.closeSync = function closeTracked(fd, ...rest) { opened.delete(fd); return realClose.call(this, fd, ...rest); };
+OMOWNER
+  OM_OWNER_URL="$(node -e 'process.stdout.write(require("node:url").pathToFileURL(process.argv[1]).href)' "$OM_HOME/om-owner.mjs")"
+  omrun() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_HOST_SESSION_ID HOME="$OM_HOME" USERPROFILE="$OM_HOME" ZENSU_CCD_STORE="$OM_STORE" node "$@"; }
+  om_show() { omrun "$@" "$TRAIL_MJS" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>/dev/null; }
+  om_app() { wr_json "$1" '(o.app && o.app.title ? o.app.title : "none") + ":" + (o.skipped > 0 ? "skipped" : "clean")'; }
+  om_chips() { omrun "$TRAIL_MJS" takeover "$OM_SID" --all --no-record --no-git --json --config-dir "$OM_CFG" 2>/dev/null | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { const o = JSON.parse(s).openChips; process.stdout.write(`${o.measured}:${o.reason}`); } catch { process.stdout.write("unparseable"); }
+});
+'; }
+
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "om record:clean" ] \
+    && check "OM0 a store whose directories and record belong to this uid with no group or other write bit is read as before (control)" PASS \
+    || check "OM0 private store control: $OM_GOT" FAIL
+
+  OM_BAD=""
+  chmod 664 "$OM_REC"
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD record-664=$OM_GOT"
+  OM_CHIPS="$(om_chips)"
+  [ "$OM_CHIPS" = "false:$OM_RECORDS_REFUSED" ] || OM_BAD="$OM_BAD record-664-brief=$OM_CHIPS"
+  chmod 600 "$OM_REC"
+  chmod 770 "$OM_ORG"
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD org-770=$OM_GOT"
+  chmod 700 "$OM_ORG"
+  chmod 707 "$OM_ACCT"
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD account-707=$OM_GOT"
+  chmod 700 "$OM_ACCT"
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "om record:clean" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM1 a record that grants group write, and an organization or account directory that grants group or other write, are skipped and counted, and the brief says entries were refused rather than that no record exists" PASS \
+    || check "OM1 group and other write:$OM_BAD" FAIL
+
+  OM_BAD=""
+  chmod 775 "$OM_STORE"
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD show=$OM_GOT"
+  OM_DIAG="$(omrun "$TRAIL_MJS" lineage --diagnose --json --config-dir "$OM_CFG" 2>/dev/null)"
+  [ "$(wr_json "$OM_DIAG" 'String(o.store) + ":" + o.probes.map((p) => p.exists + "/" + p.refused).join(",")')" = "null:true/true" ] || OM_BAD="$OM_BAD diagnose-json=$(wr_json "$OM_DIAG" 'JSON.stringify(o.probes)')"
+  OM_DIAG_TEXT="$(omrun "$TRAIL_MJS" lineage --diagnose --config-dir "$OM_CFG" 2>/dev/null)"
+  printf '%s\n' "$OM_DIAG_TEXT" | grep -qE '^  REFUSED ZENSU_CCD_STORE' || OM_BAD="$OM_BAD diagnose-text"
+  printf '%s\n' "$OM_DIAG_TEXT" | grep -qF '(chmod go-w on it). Pointing ZENSU_CCD_STORE at the same directory does not help' || OM_BAD="$OM_BAD diagnose-remedy"
+  if printf '%s\n' "$OM_DIAG_TEXT" | grep -qF 'point ZENSU_CCD_STORE at its'; then OM_BAD="$OM_BAD diagnose-override-advice"; fi
+  OM_CHIPS="$(om_chips)"
+  [ "$OM_CHIPS" = "false:$OM_STORE_REFUSED" ] || OM_BAD="$OM_BAD brief=$OM_CHIPS"
+  chmod 755 "$OM_STORE"
+  [ -z "$OM_BAD" ] \
+    && check "OM2 a group-writable store is refused as a whole and counted as skipped: show reads no record, lineage --diagnose marks it REFUSED with a null store and names the permission fix rather than the override, and the brief says the store was refused" PASS \
+    || check "OM2 refused store:$OM_BAD" FAIL
+
+  OM_BAD=""
+  mv "$OM_REC" "$OM_HOME/elsewhere/record.json"
+  ln -s "$OM_HOME/elsewhere/record.json" "$OM_REC"
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD symlink=$OM_GOT"
+  rm -f "$OM_REC"
+  mv "$OM_HOME/elsewhere/record.json" "$OM_REC"
+  mv "$OM_ORG" "$OM_HOME/elsewhere/org-om"
+  ln -s "$OM_HOME/elsewhere/org-om" "$OM_ORG"
+  OM_GOT="$(om_app "$(om_show)")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD org-symlink=$OM_GOT"
+  rm -f "$OM_ORG"
+  mv "$OM_HOME/elsewhere/org-om" "$OM_ORG"
+  OM_FIFO="$OM_ORG/local_fifo.json"
+  if mkfifo "$OM_FIFO" 2>/dev/null; then
+    OM_GOT="$(omrun -e '
+const { spawnSync } = require("node:child_process");
+const r = spawnSync(process.execPath, process.argv.slice(1), { encoding: "utf8", timeout: 30000, env: process.env });
+process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "TIMEOUT" : String(r.stdout));
+' "$TRAIL_MJS" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>/dev/null)"
+    [ "$OM_GOT" = "TIMEOUT" ] && OM_BAD="$OM_BAD fifo=TIMEOUT" || { [ "$(om_app "$OM_GOT")" = "om record:skipped" ] || OM_BAD="$OM_BAD fifo=$(om_app "$OM_GOT")"; }
+    rm -f "$OM_FIFO"
+  else
+    OM_BAD="$OM_BAD mkfifo-failed"
+  fi
+  [ -z "$OM_BAD" ] \
+    && check "OM3 a local_*.json that is a symbolic link, an organization folder that is one, and a local_*.json FIFO are skipped and counted: show follows no link, never blocks on the FIFO, and still reads the regular record beside it" PASS \
+    || check "OM3 non-regular entries:$OM_BAD" FAIL
+
+  OM_BAD=""
+  OM_GOT="$(om_app "$(OM_FOREIGN_PATH="$OM_REC" OM_FOREIGN_MODE=lstat om_show --import "$OM_OWNER_URL")")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD lstat=$OM_GOT"
+  OM_GOT="$(om_app "$(OM_FOREIGN_PATH="$OM_REC" OM_FOREIGN_MODE=fstat om_show --import "$OM_OWNER_URL")")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD fstat=$OM_GOT"
+  OM_GOT="$(om_app "$(OM_FOREIGN_PATH="$OM_REC" OM_FOREIGN_MODE=none om_show --import "$OM_OWNER_URL")")"
+  [ "$OM_GOT" = "om record:clean" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM4 a record another uid owns is refused when its lstat says so and again when only the opened descriptor says so, and the same stub reporting the caller's own uid reads it (control)" PASS \
+    || check "OM4 foreign owner:$OM_BAD" FAIL
+
+  OM_SB="$FAKE/om-sandbox"
+  mkdir -p "$OM_SB/skills/session-trail/scripts" "$OM_SB/hooks/lib"
+  cp "$TRAIL_MJS" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
+  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
+  OM_BAD=""
+  OM_OUT="$(omrun "$OM_SB/skills/session-trail/scripts/trail.mjs" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>&1)"
+  OM_RC=$?
+  [ "$OM_RC" -ne 0 ] || OM_BAD="$OM_BAD exit=0"
+  case "$OM_OUT" in *"hooks/lib/desktop-store-read-v1.js could not be loaded"*"the plugin tree is incomplete"*) ;; *) OM_BAD="$OM_BAD diagnostic=$(printf '%s' "$OM_OUT" | head -c 200)" ;; esac
+  OM_OUT="$(env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_HOST_SESSION_ID HOME="$OM_HOME" USERPROFILE="$OM_HOME" ZENSU_CCD_STORE="$OM_HOME/no-store" node "$OM_SB/skills/session-trail/scripts/trail.mjs" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>/dev/null)"
+  OM_RC=$?
+  [ "$OM_RC" -eq 0 ] && [ "$(om_app "$OM_OUT")" = "none:clean" ] || OM_BAD="$OM_BAD no-store-control=$OM_RC:$(om_app "$OM_OUT")"
+  [ -z "$OM_BAD" ] \
+    && check "OM5 a tree without hooks/lib/desktop-store-read-v1.js refuses to read an existing store with the plugin-tree-incomplete diagnostic, and still runs where no store exists, because the module loads only for a store candidate that exists" PASS \
+    || check "OM5 missing store-read module:$OM_BAD" FAIL
+
+  OM_PRESETS="$LS_HOME/Library/Application Support/Claude/ccd-session-presets.json"
+  om6_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om6.json" 2>/dev/null
+    ls_eval "$LS_HOME/om6.json" 'String(pick(10).preset && pick(10).preset.name) + ":" + o.skipped'
+  }
+  OM_BAD=""
+  OM6_BASE="$(om6_take)"
+  OM6_SKIPPED="${OM6_BASE##*:}"
+  [ "${OM6_BASE%:*}" = "Env Fixture" ] || OM_BAD="$OM_BAD base=$OM6_BASE"
+  chmod 664 "$OM_PRESETS"
+  OM_GOT="$(om6_take)"
+  [ "$OM_GOT" = "null:$((OM6_SKIPPED + 1))" ] || OM_BAD="$OM_BAD group-write=$OM_GOT"
+  chmod 644 "$OM_PRESETS"
+  mv "$OM_PRESETS" "$LS_HOME/presets-target.json"
+  ln -s "$LS_HOME/presets-target.json" "$OM_PRESETS"
+  OM_GOT="$(om6_take)"
+  [ "$OM_GOT" = "null:$((OM6_SKIPPED + 1))" ] || OM_BAD="$OM_BAD symlink=$OM_GOT"
+  rm -f "$OM_PRESETS"
+  mv "$LS_HOME/presets-target.json" "$OM_PRESETS"
+  OM_GOT="$(om6_take)"
+  [ "$OM_GOT" = "$OM6_BASE" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM6 a ccd-session-presets.json that grants group write, or that is a symbolic link, is refused and counted once, so the brief names no saved environment for the linked session started from it; the same file made private names it again (control)" PASS \
+    || check "OM6 refused presets file:$OM_BAD" FAIL
+
+  OM_FB="$FAKE/om-fallback"
+  OM_FB_MAC="$OM_FB/Library/Application Support/Claude/claude-code-sessions"
+  OM_FB_LINUX="$OM_FB/.config/Claude/claude-code-sessions"
+  mkdir -p "$OM_FB_MAC/acct-om/org-om" "$OM_FB_LINUX"
+  cp "$OM_REC" "$OM_FB_MAC/acct-om/org-om/"
+  chmod 700 "$OM_FB_MAC/acct-om" "$OM_FB_MAC/acct-om/org-om"
+  chmod 600 "$OM_FB_MAC/acct-om/org-om/$(basename "$OM_REC")"
+  chmod 755 "$OM_FB_LINUX"
+  omfb() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_HOST_SESSION_ID -u ZENSU_CCD_STORE -u XDG_CONFIG_HOME -u APPDATA -u LOCALAPPDATA HOME="$OM_FB" USERPROFILE="$OM_FB" node "$TRAIL_MJS" "$@" --config-dir "$OM_CFG" 2>/dev/null; }
+  OM_BAD=""
+  chmod 775 "$OM_FB_MAC"
+  OM_DIAG="$(omfb lineage --diagnose --json)"
+  [ "$(wr_json "$OM_DIAG" '(o.store ? o.store.dir : "none") + ":" + o.probes[0].refused')" = "$OM_FB_LINUX:true" ] || OM_BAD="$OM_BAD diagnose=$(wr_json "$OM_DIAG" 'JSON.stringify(o.store)')"
+  OM_GOT="$(om_app "$(omfb show "$OM_SID" --all --no-git --json)")"
+  [ "$OM_GOT" = "none:skipped" ] || OM_BAD="$OM_BAD show=$OM_GOT"
+  OM_TAKE="$(omfb takeover "$OM_SID" --all --no-record --no-git --json)"
+  [ "$(wr_json "$OM_TAKE" 'o.openChips.measured + ":" + o.openChips.reason + "|" + o.linkedSessions.reason')" = "false:$OM_RECORDS_REFUSED|$OM_RECORDS_REFUSED" ] || OM_BAD="$OM_BAD brief=$(wr_json "$OM_TAKE" 'o.openChips.reason')"
+  chmod 755 "$OM_FB_MAC"
+  OM_GOT="$(om_app "$(omfb show "$OM_SID" --all --no-git --json)")"
+  [ "$OM_GOT" = "om record:clean" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM7 when a refused store candidate is passed over for a later one that holds no record of the session, the refusal is counted and the brief says entries were refused, not that the record is missing; the same store made private wins again (control)" PASS \
+    || check "OM7 refused candidate before a fallback store:$OM_BAD" FAIL
+
+  OM_BAD=""
+  OM_FB_REC="$OM_FB_MAC/acct-om/org-om/$(basename "$OM_REC")"
+  chmod 775 "$OM_FB_LINUX"
+  [ "$(wr_json "$(omfb lineage --diagnose --json)" 'o.store.dir + ":" + o.probes.some((p) => p.refused && p.dir === "'"$OM_FB_LINUX"'")')" = "$OM_FB_MAC:true" ] || OM_BAD="$OM_BAD diagnose"
+  OM_GOT="$(om_app "$(omfb show "$OM_SID" --all --no-git --json)")"
+  [ "$OM_GOT" = "om record:clean" ] || OM_BAD="$OM_BAD record=$OM_GOT"
+  mv "$OM_FB_REC" "$OM_FB/record-aside.json"
+  OM_GOT="$(om_app "$(omfb show "$OM_SID" --all --no-git --json)")"
+  [ "$OM_GOT" = "none:clean" ] || OM_BAD="$OM_BAD missing=$OM_GOT"
+  OM_TAKE="$(omfb takeover "$OM_SID" --all --no-record --no-git --json)"
+  [ "$(wr_json "$OM_TAKE" 'o.openChips.reason + "|" + o.linkedSessions.reason')" = "Claude Desktop holds no record for this session|Claude Desktop holds no record for this session" ] || OM_BAD="$OM_BAD brief=$(wr_json "$OM_TAKE" 'o.openChips.reason')"
+  mv "$OM_FB/record-aside.json" "$OM_FB_REC"
+  chmod 755 "$OM_FB_LINUX"
+  [ -z "$OM_BAD" ] \
+    && check "OM7b a refused store candidate listed after the store that wins is never read and never counted: lineage --diagnose still marks it REFUSED, show stays clean, and a session absent from the winning store keeps the missing-record wording" PASS \
+    || check "OM7b refused candidate after the winning store:$OM_BAD" FAIL
 fi
 
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
