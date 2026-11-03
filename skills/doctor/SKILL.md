@@ -45,7 +45,7 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
   app-managed worktree carries the desktop-pool keep marker, still sits on its recorded branch
   and holds a nested repository that keeps the marker after the session ends; any reviewer
   spawn the host permission layer refused; any claim this session audited against a root that
-  is not the anchor; this session's recorded delivery route; and an expired pending review.
+  is not the anchor; this session's recorded delivery route and zen-mode state; and an expired pending review.
 
 The only write is an explicit, user-confirmed cleanup of one expired `pending-review.json`;
 CAS workflow documents are never deleted.
@@ -271,15 +271,15 @@ classifier will refuse a spawn, not only when the whole table is green.
   the file is the sole config source; with a global and a project config the row instead says
   `the other config source still applies`, and you must not upgrade that to `defaults apply`.
 - **❌ config: … cannot say what the config loader gets from it** → an explicit REFUSAL to
-  make a loader verdict. The doctor could not read the file, and for this class it also cannot
-  infer what the loader does — a FIFO, for instance, would block the loader rather than make it
+  make a loader verdict. The doctor could not read the file, and for this class it cannot
+  infer what the loader does — a FIFO would block the loader rather than make it
   fall back. Report the file as unreadable by the check; do not tell the user it is ignored.
 - **⚠️ config: … is larger than … bytes** → a MISSING CHECK, never a verdict about the
   config. The row says the doctor `declined to read it`: the file is over its own memory
   bound, so it did not
-  parse it and cannot judge it. Say explicitly that the config loader has no size limit,
-  so the file is not skipped for its size — but do not tell the user it is applied, or
-  that it is ignored: neither is knowable from a row that never read the file.
+  parse it and cannot judge it. Say that the config loader has no size limit,
+  so the file is not skipped for its size — but do not tell the user it is applied or
+  ignored: neither is knowable from a row that never read the file.
 - **✅ config: hooks.defaultDeliveryRoute=build / =direct** → the project configured a default
   delivery route, so the route question is skipped wherever its reader is on: `build` sends an
   approved plan or a code request through the Zensu workflow, `direct` implements it
@@ -298,7 +298,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   the question is still asked. The value is shown as
   written — a string without added quotes, anything else in its JSON spelling — cut at
   40 characters with a trailing `…`. Fix the value: one of the three lowercase words.
-- **subagents:** rows → read `references/coexistence.md`.
+- **subagents:** and **zen-mode** rows → read `references/coexistence.md`.
 - **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
   not be opened, is not a regular file, is too large, or was read incompletely.
 - **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are
@@ -845,31 +845,31 @@ whether browser verification is enforced, not only when a row is red.
   outside every home — `/opt`, `/srv`, `/builds` — reach the row. Say
   WHICH HALF is live when you relay a silent topology; never report it
   as proof that the chain stayed in one repository.
-- **✅ delivery route: build (session marker) / direct (session marker) / build (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
-  session's delivery route is already decided, so the plan-approval hook and the
-  per-prompt reminder dispatch without the route question. Green because it is disclosed,
-  ordinary state — relay the value AND its source verbatim, and name both ways to
-  change it: `/zensu:delivery-route` (`--build`, `--direct`, `--auto`) for the session,
-  `hooks.defaultDeliveryRoute` for the project. A `direct` route means code changes skip
-  the review chain and the evidence audits for this session; say so. A **half is off**
-  parenthetical means one reader is switched off, so the route decides only the other
-  half; for a `build` route the clause after it names which change still reaches
-  `/zensu:build`.
-- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is
-  on — the row names the half it is asked on when one flag is off.
+- **✅ delivery route: build (session marker) / direct (session marker) / build (inherited from parent session) / build or direct (hooks.defaultDeliveryRoute)** → the
+  route is decided, so the plan-approval hook and the per-prompt reminder dispatch
+  without asking. Green because it is disclosed, ordinary state — relay the value AND its
+  source verbatim, and name both ways to change it: `/zensu:delivery-route` (`--build`,
+  `--direct`, `--auto`) for the session, `hooks.defaultDeliveryRoute` for the project.
+  An inherited `build` is the parent's recorded choice, copied when this session began;
+  `--auto` releases it. With `direct`, code changes skip the review chain and the
+  evidence audits this session; say so. A **half is off** parenthetical means one reader is
+  off, so the route decides only the other half; for `build` the clause after it names which
+  change still reaches `/zensu:build`.
+- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is on, a plan
+  naming its own executor gets a notice, and the row names the half.
 - **✅ delivery route: … — decides nothing this session** → both readers are off
   (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so neither hook asks or dispatches
-  on a route; whatever the row names has no effect until a reader is turned back on.
+  on a route; the named route has no effect until a reader is back on.
 - **⚠️ delivery route: not checked / could not be read / state not recognized** → a
   MISSING CHECK, never a verdict. **Not checked:** no bound session key or recorded project
-  root was available, and the row names which cause applies — the report ran without
-  `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PLUGIN_DATA` (there is no binding row then — run
-  `/zensu:doctor` inside the session), the session is bound but its recorded key or project
-  root failed the shape check (the binding row above is the valid-record one), or any other
-  binding verdict (read the binding row). **Could not be read:** the shared config library
-  did not answer, or the recorded project root could not be entered. **State not
-  recognized:** the wrapper reported a word this report has no row for. Point at
-  `/zensu:delivery-route --status` from the session for the hooks' own answer.
+  root was available; the row names the cause — no `CLAUDE_CODE_SESSION_ID` or
+  `CLAUDE_PLUGIN_DATA` (no binding row then — run `/zensu:doctor` inside the session), a
+  bound session whose recorded key or project root failed the shape check (the binding row
+  above is the valid-record one), or another binding verdict (read the binding row).
+  **Could not be read:** the shared config library did not answer, or the recorded project
+  root could not be entered. **State not recognized:** the wrapper reported a word this
+  report has no row for. Point at `/zensu:delivery-route --status` from the session for the
+  hooks' own answer.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because

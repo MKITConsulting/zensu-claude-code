@@ -103,6 +103,16 @@ fails "O7 open-pr requires --body-file"  --open-pr --provider github --base main
 fails "O8 open-pr requires --title"      --open-pr --provider github --base main --head feat --body-file "$OPBF"
 rm -f "$OPBF"
 
+eq    "R1 review-summary github argv" "$(argv --review-summary --provider github 42)" "gh pr view --json reviewDecision,latestReviews -- 42"
+eq    "R1b review-summary github pins the repository given as --repo-id" "$(argv --review-summary --provider github --repo-id acme/widgets 42)" "gh pr view -R acme/widgets --json reviewDecision,latestReviews -- 42"
+eq    "R2 review-summary gitlab argv reads the approvals, then the MR" "$(argv --review-summary --provider gitlab --repo-id grp%2Fproj 7)" "glab api projects/grp%2Fproj/merge_requests/7/approvals
+glab api projects/grp%2Fproj/merge_requests/7"
+fails "R3 review-summary requires --provider"         --review-summary 42
+fails "R4 review-summary gitlab requires a valid repo-id" --review-summary --provider gitlab 7
+fails "R4b review-summary github refuses an invalid repo-id" --review-summary --provider github --repo-id 'acme/widgets;id' 42
+fails "R5 review-summary rejects a non-numeric id"    --review-summary --provider github 'x?y'
+fails "R5b review-summary unknown provider"           --review-summary --provider bogus 42
+
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
 
@@ -234,6 +244,29 @@ else
   check "N13m one GitLab note ID cannot belong to two discussions" PASS
 fi
 
+rs() { { printf '%s' "$2"; printf '\0'; printf '%s' "${3:-}"; } | _zensu_vcs_normalize_review_summary "$1"; }
+eq "R6 github approved decision" "$(rs github '{"reviewDecision":"APPROVED","latestReviews":[{"state":"COMMENTED"},{"state":"APPROVED"}]}')" '{"reviewed":true,"approved":true,"changesRequested":false}'
+eq "R7 github changes requested" "$(rs github '{"reviewDecision":"CHANGES_REQUESTED","latestReviews":[{"state":"CHANGES_REQUESTED"}]}')" '{"reviewed":true,"approved":false,"changesRequested":true}'
+eq "R8 github review required and no review yet" "$(rs github '{"reviewDecision":"REVIEW_REQUIRED","latestReviews":[]}')" '{"reviewed":false,"approved":false,"changesRequested":false}'
+eq "R9 github without branch protection counts an approval" "$(rs github '{"reviewDecision":"","latestReviews":[{"state":"APPROVED"}]}')" '{"reviewed":true,"approved":true,"changesRequested":false}'
+eq "R10 github approval that does not satisfy the rules is reviewed, not approved" "$(rs github '{"reviewDecision":"REVIEW_REQUIRED","latestReviews":[{"state":"COMMENTED"},{"state":"APPROVED"}]}')" '{"reviewed":true,"approved":false,"changesRequested":false}'
+eq "R11 github dismissed or pending reviews are no review" "$(rs github '{"reviewDecision":null,"latestReviews":[{"state":"DISMISSED"},{"state":"PENDING"}]}')" '{"reviewed":false,"approved":false,"changesRequested":false}'
+eq "R12 github open change request without protection" "$(rs github '{"reviewDecision":"","latestReviews":[{"state":"APPROVED"},{"state":"CHANGES_REQUESTED"}]}')" '{"reviewed":true,"approved":false,"changesRequested":true}'
+eq "R13 gitlab approved by one reviewer" "$(rs gitlab '{"approved":true,"approved_by":[{"user":{"username":"a"}}]}' '{"detailed_merge_status":"mergeable"}')" '{"reviewed":true,"approved":true,"changesRequested":false}'
+eq "R14 gitlab rules satisfied by nobody is not an approval" "$(rs gitlab '{"approved":true,"approved_by":[]}' '{"detailed_merge_status":"mergeable"}')" '{"reviewed":false,"approved":false,"changesRequested":false}'
+eq "R15 gitlab requested changes" "$(rs gitlab '{"approved":false,"approved_by":[]}' '{"detailed_merge_status":"requested_changes"}')" '{"reviewed":true,"approved":false,"changesRequested":true}'
+eq "R16 gitlab approval short of the rules" "$(rs gitlab '{"approved":false,"approved_by":[{"user":{"username":"a"}}]}' '{}')" '{"reviewed":true,"approved":false,"changesRequested":false}'
+R_BAD=""
+rs github 'not json' >/dev/null 2>&1 && R_BAD="$R_BAD github-malformed"
+rs github '{"reviewDecision":"APPROVED","latestReviews":{}}' >/dev/null 2>&1 && R_BAD="$R_BAD github-reviews-shape"
+rs github '{"reviewDecision":"APPROVED","latestReviews":[{"state":1}]}' >/dev/null 2>&1 && R_BAD="$R_BAD github-state-type"
+rs gitlab '{"approved":"yes","approved_by":[]}' '{}' >/dev/null 2>&1 && R_BAD="$R_BAD gitlab-approved-type"
+rs gitlab '{"approved":true,"approved_by":[]}' '' >/dev/null 2>&1 && R_BAD="$R_BAD gitlab-missing-mr"
+rs gitlab '{"approved":true,"approved_by":[]}' '{"detailed_merge_status":3}' >/dev/null 2>&1 && R_BAD="$R_BAD gitlab-status-type"
+rs bogus '{}' >/dev/null 2>&1 && R_BAD="$R_BAD unknown-provider"
+[ -z "$R_BAD" ] && check "R17 review-summary normalizer fails closed on malformed input" PASS \
+  || check "R17 review-summary normalizer accepted malformed input:$R_BAD" FAIL
+
 ( export ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1; _zensu_vcs_dry ) && check "N14a dry: both set -> dry" PASS || check "N14a dry: both set -> dry" FAIL
 ( export ZENSU_VCS_PRINT_ARGV=1; _zensu_vcs_dry ) && check "N14b dry: TEST unset -> NOT dry" FAIL || check "N14b dry: TEST unset -> NOT dry" PASS
 ( export ZENSU_VCS_TEST=1; _zensu_vcs_dry ) && check "N14c dry: PRINT unset -> NOT dry" FAIL || check "N14c dry: PRINT unset -> NOT dry" PASS
@@ -255,7 +288,34 @@ producer_failure "N15 pr-state preserves CLI failure after valid JSON" _zensu_vc
 producer_failure "N16 locate-pr preserves CLI failure after valid JSON" _zensu_vcs_locate_pr --provider github 42
 producer_failure "N17 scout-pr preserves CLI failure after valid JSON" _zensu_vcs_scout_pr --provider github 42
 producer_failure "N18 diff-refs preserves CLI failure after valid JSON" _zensu_vcs_diff_refs --provider github 42
+producer_failure "N19 review-summary preserves CLI failure after valid JSON" _zensu_vcs_review_summary --provider github 42
 rm -rf "$PIPE_WORK"
+
+NOPR_WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-nopr.XXXXXXXX")"
+cat > "$NOPR_WORK/gh" <<'FAKE'
+#!/bin/bash
+printf 'no pull requests found for branch "feat"\n' >&2
+exit 1
+FAKE
+cat > "$NOPR_WORK/glab" <<'FAKE'
+#!/bin/bash
+printf 'no open merge request available for "feat"\n' >&2
+exit 1
+FAKE
+chmod +x "$NOPR_WORK/gh" "$NOPR_WORK/glab"
+locate_rc() { PATH="$NOPR_WORK:$PATH" bash "$LIB" --locate-pr "$@" >/dev/null 2>&1; printf '%s' "$?"; }
+eq "L1 github: no PR for the current branch exits 3"  "$(locate_rc --provider github)" "3"
+eq "L2 gitlab: no MR for the current branch exits 3"  "$(locate_rc --provider gitlab)" "3"
+eq "L3 a not-found for an explicit number stays exit 1" "$(locate_rc --provider github 42)" "1"
+eq "L4 the other forge's not-found wording is an error" "$(cp "$NOPR_WORK/glab" "$NOPR_WORK/gh"; locate_rc --provider github)" "1"
+cat > "$NOPR_WORK/gh" <<'FAKE'
+#!/bin/bash
+printf 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n' >&2
+exit 1
+FAKE
+eq  "L5 any other failure stays exit 1" "$(locate_rc --provider github)" "1"
+has "L6 the error names the forge CLI's message on stderr" "$(PATH="$NOPR_WORK:$PATH" bash "$LIB" --locate-pr --provider github 2>&1 >/dev/null)" "locate-pr failed (rc=1): HTTP 401: Bad credentials"
+rm -rf "$NOPR_WORK"
 
 echo "----"
 echo "test-vcs-pr-ops: $PASS PASS / $FAIL FAIL"

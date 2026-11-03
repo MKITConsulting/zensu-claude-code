@@ -57,6 +57,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-m "x; Zensu features create y"` is now denied like its lowercase spelling, and the deny names
   the remedy: write such a message to a file and pass it with `-F`.
 
+## [0.34.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit product scope for capture (#542)
+
+## [0.33.2] - 2026-11-02
+
+### Added
+
+- **hooks**: Let a linked session inherit its parent's tdd route (#497)
+- **vcs**: Follow the target repository's conventions in commits and PRs (#515)
+- **zen-mode**: Close every answer with a session block (#537)
+
+### Changed
+
+- **readme**: Embed the Claude Code explainer video (#541)
+- **hooks**: Fold the edit, notebook and spawn hook groups into the dispatcher (#538)
+- **hooks**: Run the tool-call hooks in one dispatcher process per event (#534)
+
+### Fixed
+
+- **context**: Allow bounded discovery to finish before host timeout (#544)
+- **zen-mode,hooks**: Defuse zen-mode and document a two-tier precedence (#516)
+- **evidence-run**: Follow an Autopilot chain's work tree in the evidence runner and acceptance gate (#539)
+- **edit-landing**: Grade pattern claims and the Autopilot work tree (#535)
+
 ## [0.33.1] - 2026-10-29
 
 ### Added

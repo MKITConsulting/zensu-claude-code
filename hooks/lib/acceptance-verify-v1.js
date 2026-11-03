@@ -394,6 +394,14 @@ function hasChanges(root, limits = LIMITS) {
   return { known: true, changed: String(result.stdout || '').length > 0 };
 }
 
+function chainTree(options, scratchDirectory) {
+  if (typeof options.workTree !== 'string' || options.workTree === '') {
+    return { root: options.projectRoot, tree: evidenceRun.computeTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS) };
+  }
+  const root = evidenceRun.fingerprintRoot(options.workTree, options.projectRoot, evidenceRun.LIMITS);
+  return { root, tree: evidenceRun.computeFingerprint(options.projectRoot, root, scratchDirectory, evidenceRun.LIMITS) };
+}
+
 function citedRun(options, runId, currentTree) {
   if (!EVIDENCE_RUN_RE.test(runId)) return { error: `--evidence-run ${JSON.stringify(runId)} is not an evidence-run record id` };
   let locations;
@@ -490,7 +498,7 @@ function record(options) {
   } catch (error) {
     return { code: 2, error: error.message };
   }
-  const currentTree = evidenceRun.computeTree(options.projectRoot, locations.scratch, evidenceRun.LIMITS);
+  const currentTree = chainTree(options, locations.scratch).tree;
   const runId = typeof options.evidenceRun === 'string' && options.evidenceRun !== '' ? options.evidenceRun : null;
   const observed = OBSERVED_DRIVERS.includes(options.driver) || EARLIER_OBSERVED_DRIVERS.includes(options.driver);
   if (observed && !runId && options.verdict !== 'partial') {
@@ -540,7 +548,7 @@ function record(options) {
   return { code: 0, record: entry, line: recordLine(entry, options.projectRoot, limits), disclosures: chain.disclosures };
 }
 
-function evaluate(criteria, entries, currentTree, projectRoot, limits = LIMITS) {
+function evaluate(criteria, entries, currentTree, projectRoot, limits = LIMITS, treeRoot = projectRoot) {
   const byCriterion = new Map();
   for (const entry of entries) {
     if (!byCriterion.has(entry.record.ac)) byCriterion.set(entry.record.ac, []);
@@ -566,7 +574,7 @@ function evaluate(criteria, entries, currentTree, projectRoot, limits = LIMITS) 
     const onTree = matching.filter((entry) => entry.tree === currentTree.tree);
     if (onTree.length === 0) {
       const last = matching[matching.length - 1];
-      const paths = last.tree ? evidenceRun.changedPaths(projectRoot, last.tree, currentTree.tree, { ...evidenceRun.LIMITS, listedPaths: limits.listedPaths }) : null;
+      const paths = last.tree ? evidenceRun.fingerprintChanges(projectRoot, treeRoot, last.tree, currentTree.tree, { ...evidenceRun.LIMITS, listedPaths: limits.listedPaths }) : null;
       const listed = paths && paths.length > 0
         ? `: ${paths.slice(0, limits.listedPaths).map((entry) => display(entry, projectRoot, limits)).join(', ')}${paths.length > limits.listedPaths ? ', …' : ''}`
         : '';
@@ -620,9 +628,9 @@ function assess(options) {
   if (newestInvalid) {
     return { outcome: 'invalid', reason: `the newest acceptance record cannot be trusted (${newestInvalid.id}: ${newestInvalid.invalid}); verify again`, chain };
   }
-  const currentTree = evidenceRun.computeTree(options.projectRoot, locations.scratch, evidenceRun.LIMITS);
-  const rows = evaluate(criteria.criteria, valid, currentTree, options.projectRoot, limits);
-  return { outcome: 'evaluated', rows, currentTree, chain };
+  const current = chainTree(options, locations.scratch);
+  const rows = evaluate(criteria.criteria, valid, current.tree, options.projectRoot, limits, current.root);
+  return { outcome: 'evaluated', rows, currentTree: current.tree, chain };
 }
 
 function countKinds(rows) {
@@ -835,6 +843,7 @@ function transportOptions(env) {
     pluginData: env.ZENSU_AVR_PLUGIN_DATA,
     sessionKey: env.ZENSU_AVR_SESSION_KEY,
     projectRoot: env.ZENSU_AVR_PROJECT_ROOT,
+    workTree: env.ZENSU_AVR_WORK_TREE || '',
     receiptPath: env.ZENSU_AVR_RECEIPT || '',
     logPath: env.ZENSU_AVR_LOG || '',
     ac: env.ZENSU_AVR_AC,

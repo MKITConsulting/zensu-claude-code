@@ -154,17 +154,19 @@ the model, in place of a still-pending automatic answer, and tells it that the a
 longer holds.
 
 `--plan-approval` needs the order at `planning` with `plan_approval = required`. It commits the plan
-file when it is new or changed, pushes through the push verb, and sends an artifact event of kind
-`plan` with the path, the commit, a one-line summary behind a fixed `Implementation plan.` prefix
-with no markup, tags, brackets or quotes and, for a GitHub or GitLab repository, the blob link built
-from the `host/owner/name` Zensu stores. When Zensu refuses the summary as prose, the artifact goes
-once more with the summary `Implementation plan for this work order.` instead; when it refuses the
-link with `invalid_url`, for example because the repository name reads like a secret, the artifact
-goes once more without the link. Both resends keep the `client_event_id`, because a refused event
-stores nothing. The helper then sends `--blocked plan_approval`; Zensu ends the session on that block, and
-the helper records a successful outcome. When Zensu answers the block with
-`plan_approval_not_required`, the order's policy approves plans itself: the helper exits 8, and the
-session continues with `--bind-spec`.
+file when it is new or changed, with the message in the file whose absolute path `--message-file`
+names, else with a fixed `docs(plan):` subject. It pushes through the push verb and sends an
+artifact event of kind `plan` with the path, the commit, a one-line summary behind a fixed
+`Implementation plan.` prefix with no markup, tags, brackets or quotes and, for a GitHub or GitLab
+repository, the blob link built from the `host/owner/name` Zensu stores. When Zensu refuses the
+summary as prose, the artifact goes once more with the summary
+`Implementation plan for this work order.` instead; when it refuses the link with `invalid_url`,
+for example because the repository name reads like a secret, the artifact goes once more without
+the link. Both resends keep the `client_event_id`, because a refused event stores nothing. The
+helper then sends `--blocked plan_approval`; Zensu ends the session on that block, and the helper
+records a successful outcome. When Zensu answers the block with `plan_approval_not_required`, the
+order's policy approves plans itself: the helper exits 8, and the session continues with
+`--bind-spec`.
 
 ## Work-order hooks
 

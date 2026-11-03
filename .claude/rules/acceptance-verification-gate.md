@@ -140,11 +140,19 @@ read is the half a later `minor` needs to start storing it.
   chain whose review rounds change code verifies twice, three times when self-review's fix round
   edits too. Scoping records to the paths a criterion touches is not possible without a
   per-criterion path map nobody maintains.
-- **The fingerprint is the project root's alone.** An `--evidence-run --scope acceptance` run
-  whose command starts with `cd` into a nested worktree is still bound to the project tree,
-  because `acceptance-verify-v1.js` compares records with `computeTree(projectRoot)`. An edit in
-  that worktree after the run leaves the record current. The full-suite gate follows the nested
-  work tree for `full` and `scoped` runs (`.claude/rules/evidence-runner.md`).
+- **A standalone chain's fingerprint is the project root's alone.** An
+  `--evidence-run --scope acceptance` run whose command starts with `cd` into a nested worktree is
+  still bound to the project tree, because `chainTree` in `acceptance-verify-v1.js` compares a
+  standalone chain's records with `computeTree(projectRoot)`. An edit in that worktree after the
+  run leaves the record current. The full-suite gate follows the nested work tree for `full` and
+  `scoped` runs (`.claude/rules/evidence-runner.md`). A chain bound to an Autopilot run whose
+  `workspaceRoot` is a worktree nested below the anchor is not this gap: `zensu-log.sh` passes
+  that worktree as `ZENSU_AVR_WORK_TREE`, so its records, its status and the acceptance runs it
+  cites bind the combined tree of the project and the worktree, and an edit there makes them
+  stale. A worktree the resolver cannot answer makes both verbs exit 2 with the cause. Its
+  terminus still answers `not-checked`, because VALIDATE verifies the run's criteria
+  (`A29` to `A31` in `test-acceptance-gate.sh`; **version `patch`**, walked in
+  `.claude/rules/evidence-runner.md`).
 - **Consent prompts need a person**, as in §"Browser Consent Gate": Auto mode was measured to
   reach the user, and bypass permissions and `dontAsk` deny a remote origin outside a policy. How
   a headless or SDK run resolves the prompt is unmeasured, and the gate cannot tell a person from a

@@ -224,9 +224,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
   Run every test, build or other project command of this round as
-  `cd "<project root>" && <command>`, where `<project root>` is the path `--project-root`
-  printed in Phase 1: the Bash tool returns to the session's start directory, which after
-  `/zensu:adopt-session --reanchor` is not the bound root. `--evidence-run` needs no prefix.
+  `cd "<project dir>" && <command>`, where `<project dir>` is what the Phase 1
+  `--chain-work-tree` call prints with `--project-dir` added: the Bash tool returns to
+  the start directory, and a bound chain works in its worktree. `--evidence-run` needs
+  no prefix.
   Then log `{step_id} IMPL completed — files: {list}` for the fixes and re-run
   the `/zensu:build` Phase 6 **step 1 full suite** over the amended tree through the
   evidence runner:

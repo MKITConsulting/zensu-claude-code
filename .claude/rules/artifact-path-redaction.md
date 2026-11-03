@@ -171,7 +171,7 @@ imported by nothing — the redact check calls
 so every prose copy of their values is documentation-only and breaks SILENTLY, which is the same trap the
 module header now records in its own words;
 the `Edit|Write|MultiEdit`
-matcher spelling in FIVE places — `hooks/hooks.json`, `docs/configuration.md`,
+matcher spelling in FIVE places — `DISPATCHED_CHECKS` (`artifact-redact-write`), `docs/configuration.md`,
 `docs/build-workflow.md`, R0c, and the `writeTool` disjunction in
 `sweepArtifacts` of `hooks/lib/hook-dispatch-v1.js` that actually selects the branch, which is the one
 a `NotebookEdit` added to the matcher would silently miss; the hook

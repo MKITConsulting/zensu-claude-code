@@ -143,7 +143,7 @@ else
 fi
 
 # P3 — recording call sites route through the shared recorder, fail-open
-SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE checks/pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE checks/pre-bash-source-write-gate.sh:ZENSU_MCP_GATE checks/pre-bash-zensu-gate.sh:ZENSU_MCP_GATE checks/pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN lib/zensu-log.sh:ZENSU_FULL_SUITE_GATE lib/zensu-log.sh:ZENSU_ACCEPTANCE_GATE"
+SITES="checks/pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE checks/pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE checks/pre-bash-source-write-gate.sh:ZENSU_MCP_GATE checks/pre-bash-zensu-gate.sh:ZENSU_MCP_GATE checks/pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN lib/zensu-log.sh:ZENSU_FULL_SUITE_GATE lib/zensu-log.sh:ZENSU_ACCEPTANCE_GATE"
 for entry in $SITES; do
   hook_file="${entry%%:*}"; gate_name="${entry#*:}"
   hf="$PLUGIN_DIR/hooks/$hook_file"
@@ -153,7 +153,7 @@ for entry in $SITES; do
     check "P3 $hook_file records $gate_name via the shared recorder" FAIL
   fi
 done
-for hook_file in pre-edit-tdd-reminder.sh checks/pre-bash-source-write-gate.sh checks/pre-bash-zensu-gate.sh checks/pre-write-secret-scan.sh stop-chain-enforcer.sh; do
+for hook_file in checks/pre-edit-tdd-reminder.sh checks/pre-bash-source-write-gate.sh checks/pre-bash-zensu-gate.sh checks/pre-write-secret-scan.sh stop-chain-enforcer.sh; do
   hf="$PLUGIN_DIR/hooks/$hook_file"
   if [ -f "$hf" ] && grep -qE 'tdd_record_bypass(_payload)? .*2>/dev/null \|\| true' "$hf"; then
     check "P3 $hook_file records fail-open" PASS

@@ -96,20 +96,27 @@ with the first. Provenance, the lease sweep, the keep-anchor move and the marker
 the lock, and each reports its own outcome rather than failing the move.
 
 **Per-session markers move with the anchor.** `tdd-mode-<key>.json`, `delivery-route-<key>.json`,
-`full-suite-<key>.json` and `zen-mode-<key>.json` live under the project root, so a marker left
-behind stops applying. They are RENAMED into the new root's state directory, replacing a stale copy
-of this session's own marker there; a marker that is not a regular file, or a `.zensu`/`.zensu/state`
-component that is not a plain directory, is left in place and reported as a `marker fault`. The four
-names are the path templates of `zensu-config.sh` and `zensu-zen-mode.sh`, and the exported
-`SESSION_MARKERS` is the one list of them: `renderReanchorVerdict` builds its sentence from it, and
-the marker case in `session-reanchor-v1.test.js` derives the kinds from the templates of both files
-and requires them equal to it, so a template added there without joining the list fails that case.
-A template in any other file is not seen. `docs/session-control.md` names the four markers;
-`skills/adopt-session/SKILL.md` says "per-session markers" and names none. A full-suite marker left
-behind costs more than a preference: `local` wins in any rank of the full-suite ladder, so a `local`
-session choice left under the old root would let a `ci` choice of the clone or of
-`evidence.fullSuiteRunner` decide the next chain. `E9j` in `test-session-reanchor.sh` reads the
-moved marker through `zensu_full_suite_marker_state`, the reader the full-suite policy consumes.
+`inherited-route-<key>.json`, `linked-session-<key>.json`, `full-suite-<key>.json` and
+`zen-mode-<key>.json` live under the project root, so a marker left behind stops applying. They are
+RENAMED into the new root's state directory, replacing a stale copy of this session's own marker
+there; a marker that is not a regular file, or a `.zensu`/`.zensu/state` component that is not a
+plain directory, is left in place and reported as a `marker fault`. The six names are the path
+templates of `zensu-config.sh` and `zensu-zen-shared.sh`, and the exported `SESSION_MARKERS` is the
+one list of them: `renderReanchorVerdict` builds its sentence from it, and the marker case in
+`session-reanchor-v1.test.js` derives the kinds from the templates of both files and requires them
+equal to it, so a template added there without joining the list fails that case. A template in any
+other file is not seen. `docs/session-control.md` names the six markers;
+`skills/adopt-session/SKILL.md` says "per-session markers" and names none. `inherited-route` moves
+before `linked-session`: a linked marker that arrives without its inherited marker makes every
+later ask-hook run answer from the cache without the route, while an inherited marker that arrives
+alone only makes the next run resolve the lineage once more. For the same reason the linked marker
+stays under the old root, reported as a `marker fault` that says it was held back, whenever an
+inherited marker was there and did not move, so an interruption between the two renames and a fault
+on the inherited marker alone end the same way. A full-suite marker left behind costs more than a
+preference: `local` wins in any rank of the full-suite ladder, so a `local` session choice left
+under the old root would let a `ci` choice of the clone or of `evidence.fullSuiteRunner` decide the
+next chain. `E9j` in `test-session-reanchor.sh` reads the moved marker through
+`zensu_full_suite_marker_state`, the reader the full-suite policy consumes.
 
 **Provenance is a history VALUE, reserved in both guard bodies.** `PROJECT_ROOT_REANCHORED` and
 the `project-root-reanchored: ` reason prefix sit beside the other reserved pairs in
@@ -179,10 +186,13 @@ a skill builds from `${CLAUDE_PROJECT_DIR:-.}` names the previous root after a m
 derives `{log_file}`, `{plan_file}`, `BASELINE_SHA`, the edit-landing `--project`, the step 10.1
 plan bound, `TOP`, the plan template and the persona directory from it, and it runs every project
 command it prescribes — test runs, checkpoints, the build, coverage and the step 5 `stat` — as
-`cd "{project_root}" && …`. Phase 2's `--truncate` carries `CLAUDE_PROJECT_DIR="{project_root}"`,
-because `append` without that variable binds a destructive write to the working directory, which
-is the previous root after a move. `/zensu:self-review` derives `TOP` and its ledger root from the
-verb and runs its fix round's commands in it, `/zensu:converge` discovers plans under it,
+`cd "{project_dir}" && …`, where `{project_dir}` is what `zensu-log.sh --chain-work-tree
+--project-dir` prints: `{project_root}` itself, or the bound Autopilot worktree's directory for it
+(`.claude/rules/evidence-runner.md`). Phase 2's `--truncate` carries
+`CLAUDE_PROJECT_DIR="{project_root}"`, because `append` without that variable binds a destructive
+write to the working directory, which is the previous root after a move. `/zensu:self-review`
+derives `TOP` and its ledger root from the verb and runs its fix round's commands in that project
+directory, `/zensu:converge` discovers plans under the verb's root,
 `/zensu:verify-feature --chain` resolves its git root from it and runs its commands there, a
 recorded `down` included, and the three `--tdd-complete` refusal remedies name it instead of the
 ambient spelling. Every `cd` into the root is spelled without `--`: the root is absolute, and
@@ -216,7 +226,9 @@ because a nested worktree, an embedded clone or a submodule inside the root is a
 that the fingerprint does not measure; path containment decides only for a root outside git. The
 tree fingerprint and the verdict were always bound to the record's root, so a run from the previous
 worktree would have certified the new tree with a suite that tested the old one. The same-work-tree
-rule keeps a session recorded in a subdirectory able to run its suite from the worktree top.
+rule keeps a session recorded in a subdirectory able to run its suite from the worktree top. A
+chain bound to an Autopilot run that drives a worktree nested below the anchor runs in that
+worktree instead, and its verdict measures it (`.claude/rules/evidence-runner.md`).
 
 `test-tdd-log-path-anchor.sh` L8 fails when any `skills/*/SKILL.md` spells
 `${CLAUDE_PROJECT_DIR:-.}`, and `test-session-reanchor.sh` E10 runs the chain from the start

@@ -777,5 +777,19 @@ else
   check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" FAIL
 fi
 
+REPO_CONVENTIONS="$ROOT/hooks/lib/repo-conventions-v1.js"
+if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$REPO_CONVENTIONS")" -eq 1 ] \
+  && [ "$(grep -cF 'return Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$REPO_CONVENTIONS")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(' "$REPO_CONVENTIONS")" -eq 1 ] \
+  && grep -qF 'fd = fs.openSync(file, fs.constants.O_RDONLY | noFollowFlag() | nonBlockFlag());' "$REPO_CONVENTIONS" \
+  && grep -qF 'if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > maxBytes) return null;' "$REPO_CONVENTIONS" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$REPO_CONVENTIONS" \
+  && ! grep -qF 'fs.constants.O_NONBLOCK || 0' "$REPO_CONVENTIONS" \
+  && ! grep -qF 'fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW' "$REPO_CONVENTIONS"; then
+  check "the repository-conventions probe opens plain files with a Windows-safe flag and checks the descriptor's identity" PASS
+else
+  check "the repository-conventions probe opens plain files with a Windows-safe flag and checks the descriptor's identity" FAIL
+fi
+
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

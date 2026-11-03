@@ -642,6 +642,95 @@ if bound_arm "acc-bound-escape" "$BOUND_ESC" acc_run_esc acc-chain-esc true; the
 else
   check "A28 arm an Autopilot-bound chain for the escape case" FAIL
 fi
+
+echo "== A chain bound to an Autopilot run that drives a worktree below the anchor =="
+BOUND_WT="$WORK/bound-worktree"
+mkdir -p "$BOUND_WT"
+git -C "$BOUND_WT" init -q
+git -C "$BOUND_WT" config user.email t@example.invalid
+git -C "$BOUND_WT" config user.name tester
+printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$BOUND_WT/.gitignore"
+printf 'v1\n' > "$BOUND_WT/tracked.txt"
+git -C "$BOUND_WT" add .gitignore tracked.txt
+git -C "$BOUND_WT" -c commit.gpgsign=false commit -qm baseline
+git -C "$BOUND_WT" worktree add -q "$BOUND_WT/.claude/worktrees/wt" -b wt-bound 2>/dev/null
+BWT="$(cd -P "$BOUND_WT/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
+bound_begin_wt() {
+  local sid="$1" run="$2" chain="$3" rp
+  export CLAUDE_PROJECT_DIR="$BOUND_WT"
+  cd "$BOUND_WT" || return 1
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$BOUND_WT" false true "$BWT" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" "plan-$run" PLAN_APPROVED "{\"approvedPlanSha256\":\"$APPROVED_SHA\"}" "$BOUND_WT" >/dev/null 2>&1 || return 1
+  bash "$LOG" --tdd-begin --session "$sid" --autopilot-run "$run" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
+  write_plan "$BOUND_WT"
+  printf 'S1 IMPL completed — files: tracked.txt\n' > "$BOUND_WT/.zensu/logs/$STEM.log"
+  rp="$(tdd_edit_landing_receipt "$sid")" || return 1
+  mkdir -p "$(dirname "$rp")"
+  printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true,"workTree":".claude/worktrees/wt"}\n' \
+    "$sid" "$STEM" > "$rp"
+}
+printf 'v2\n' > "$BWT/tracked.txt"
+if [ -n "$BWT" ] && bound_begin_wt "acc-bound-wt" acc_run_wt acc-chain-wt; then
+  observe 'pwd -P'
+  WT_RUN="$RUN_ID"
+  acc_record AC-001 pass cli "$WT_RUN" <<'EVIDENCE'
+the fixture command printed the worktree
+EVIDENCE
+  RC_REC1=$?
+  acc_record AC-002 pass browser "" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_REC2=$?
+  acc_status; RC=$?
+  if [ -n "$WT_RUN" ] && grep -qxF "$BWT" "$WORK/eout" \
+    && grep -qF "so the command runs in $BWT" "$WORK/eerr" \
+    && [ "$RC_REC1" -eq 0 ] && [ "$RC_REC2" -eq 0 ] \
+    && [ "$RC" -eq 0 ] && grep -q "| 2/2 active criteria pass$" "$WORK/sout"; then
+    check "A29 for a chain bound to a worktree below the anchor an acceptance run from the anchor runs in the worktree, and records on its tree pass" PASS
+  else
+    check "A29 for a bound worktree chain an acceptance run runs in the worktree and its records pass (run=$WT_RUN rec=$RC_REC1/$RC_REC2 rc=$RC)" FAIL
+    cat "$WORK/eout" "$WORK/eerr" "$WORK/sout" "$WORK/serr"
+    ERR
+  fi
+
+  printf 'v3\n' > "$BWT/tracked.txt"
+  acc_status; RC=$?
+  if [ "$RC" -eq 1 ] \
+    && grep -q "^AC-001 stale (files changed since it was verified: \.claude/worktrees/wt/tracked\.txt) | cli observed $WT_RUN | " "$WORK/sout" \
+    && grep -q '^AC-002 stale (files changed since it was verified: \.claude/worktrees/wt/tracked\.txt) | browser attested | ' "$WORK/sout"; then
+    check "A30 an edit in the worktree makes every acceptance record of the bound chain stale and names the worktree path" PASS
+  else
+    check "A30 an edit in the worktree makes every acceptance record of the bound chain stale (rc=$RC)" FAIL
+    cat "$WORK/sout" "$WORK/serr"
+  fi
+
+  WT_RUN_FILE="$(autopilot_run_file acc_run_wt "$BOUND_WT")"
+  cp "$WT_RUN_FILE" "$WORK/acc-run-wt.pre"
+  BAD_WS="$BOUND_WT" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS + "/missing-worktree"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE"
+  bash "$LOG" --evidence-run --scope acceptance --cmd "touch '$WORK/fault-ran'" --log "$RUN_LOG" >"$WORK/eout" 2>"$WORK/eerr"; RC_RUN=$?
+  acc_status; RC_ST=$?
+  acc_record AC-001 pass cli "$WT_RUN" <<'EVIDENCE'
+the fixture command printed the worktree
+EVIDENCE
+  RC_REC=$?
+  cp "$WORK/acc-run-wt.pre" "$WT_RUN_FILE"
+  if [ "$RC_RUN" -eq 2 ] && [ ! -e "$WORK/fault-ran" ] \
+    && grep -qF "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: " "$WORK/eerr" \
+    && [ "$RC_ST" -eq 2 ] \
+    && grep -qF "zensu-log.sh --acceptance-status: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/serr" \
+    && [ "$RC_REC" -eq 2 ] \
+    && grep -qF "zensu-log.sh --acceptance-record: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/rerr" \
+    && grep -qF 'work tree not found' "$WORK/serr"; then
+    check "A31 a bound chain whose worktree cannot be resolved refuses the acceptance run and both acceptance verbs with exit 2 and the cause" PASS
+  else
+    check "A31 a bound chain whose worktree cannot be resolved refuses with exit 2 (run=$RC_RUN status=$RC_ST record=$RC_REC)" FAIL
+    cat "$WORK/eerr" "$WORK/serr" "$WORK/rerr"
+  fi
+else
+  check "A29 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL
+fi
 cd "$PROJ" || exit 1
 
 git -C "$PROJ" checkout -q -- tracked.txt

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/structure/ai-work-capture.test.js", "registered": 10,
+      "path": "tests/structure/ai-work-capture.test.js", "registered": 16,
       "runs": [{ "driver": "tests/structure/test-ai-work-capture.sh" }],
       "summary": "AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions."
     },
@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 26,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 29,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
     },
@@ -52,7 +52,7 @@
       "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 80, "skips": {"win32": 3},
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 89, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -72,6 +72,11 @@
       "summary": "Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends."
     },
     {
+      "path": "tests/structure/foreign-executor-v1.test.js", "registered": 13,
+      "runs": [{ "driver": "tests/structure/test-plan-approved-delegate.sh" }],
+      "summary": "The plan-approval notice for a plan that names another plugin's executor: the narrow classifier, the notice text and the origin-first payload decision."
+    },
+    {
       "path": "tests/structure/full-suite-ci-v1.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-full-suite-ci.sh" }],
       "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict."
@@ -82,7 +87,7 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 14,
+      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 19,
       "runs": [{ "driver": "tests/structure/test-hook-process-budget.sh" }],
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
@@ -101,9 +106,9 @@
       "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
     },
     {
-      "path": "tests/structure/plan-payload-v1.test.js", "registered": 20,
+      "path": "tests/structure/plan-payload-v1.test.js", "registered": 22,
       "runs": [{ "driver": "tests/structure/test-plan-payload-fallback.sh" }],
-      "summary": "The plan-source precedence table, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
+      "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
     },
     {
       "path": "tests/structure/playwright-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 12},
@@ -147,6 +152,11 @@
       "path": "tests/structure/release-run-step.test.js", "registered": 11,
       "runs": [{ "driver": "tests/structure/test-immutable-marketplace-release.sh" }],
       "summary": "The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup."
+    },
+    {
+      "path": "tests/structure/repo-conventions-v1.test.js", "registered": 23, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-vcs-detect.sh" }],
+      "summary": "The repository-conventions probe: PR templates per forge, the checks a configured template and the .zensu/templates overrides pass, commitlint configs, the default-branch history sample, trailer counts and the contributing documents."
     },
     {
       "path": "tests/structure/restore-root-render-cases.test.js", "registered": 79,
@@ -219,7 +229,7 @@
       "summary": "The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk."
     },
     {
-      "path": "tests/structure/session-reanchor-v1.test.js", "registered": 67, "skips": {"win32": 1},
+      "path": "tests/structure/session-reanchor-v1.test.js", "registered": 68, "skips": {"win32": 1},
       "runs": [{ "driver": "tests/structure/test-session-reanchor.sh" }],
       "summary": "Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason."
     },
@@ -289,7 +299,7 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 100,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 101,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
@@ -315,7 +325,7 @@
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
     {
-      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 12,
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 15,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
     },

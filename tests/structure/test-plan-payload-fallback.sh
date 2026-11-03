@@ -1005,12 +1005,18 @@ OUT45A="$(invoke "$(payload_response_origin origintype_session '"false"' \
   '# Coerced origin
 
 <!-- zensu-autopilot:origintype_run -->')" "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
+OUT45A_NULL="$(invoke "$(payload_response_origin origintype_session null \
+  '# Null origin
+
+<!-- zensu-autopilot:origintype_run -->')" "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
 if printf '%s' "$OUT45A" | grep -qF 'code=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED' \
   && ! printf '%s' "$OUT45A" | grep -qF 'PLAN_APPROVED' \
+  && printf '%s' "$OUT45A_NULL" | grep -qF 'code=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED' \
+  && ! printf '%s' "$OUT45A_NULL" | grep -qF 'PLAN_APPROVED' \
   && [ "$(digest "$ARMED_RUN_FILE")" = "$ORIGIN_TYPE_BEFORE" ]; then
-  check "F45a a non-boolean isAgent is refused, never coerced to a human caller" PASS
+  check "F45a a non-boolean isAgent, null included, is refused, never coerced to a human caller" PASS
 else
-  check "F45a origin type drift (out='$(printf '%s' "$OUT45A" | head -c 200)')" FAIL
+  check "F45a origin type drift (out='$(printf '%s' "$OUT45A" | head -c 200)' null='$(printf '%s' "$OUT45A_NULL" | head -c 200)')" FAIL
 fi
 
 # Positive control: the SAME builder with isAgent false approves. Without it F45
@@ -1057,7 +1063,7 @@ fi
 # comment claims that order; this is what keeps the claim checkable.
 HOOK_SRC="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 OWNER_LINE="$(grep -n 'ACTIVE_OWNER!==process.env.SESSION_ID' "$HOOK_SRC" | head -1 | cut -d: -f1)"
-ORIGIN_LINE="$(grep -n 'origin.isAgent===true' "$HOOK_SRC" | head -1 | cut -d: -f1)"
+ORIGIN_LINE="$(grep -nF 'const origin=responseOrigin(input);' "$HOOK_SRC" | head -1 | cut -d: -f1)"
 # The second ordering the same comment claims: the origin verdict is decided
 # BEFORE any payload source is read. No behavioural case can observe it either,
 # because every fixture that reaches the evaluator carries a valid plan.
@@ -1107,17 +1113,19 @@ TRANSPORT_VERDICT="$(HOOK="$HOOK" node -e '
     try {
       const lines=require("fs").readFileSync(process.env.HOOK,"utf8").split("\n");
       const allowed=[
-        /^    PLAN_PAYLOAD_DIR="\$\(bash "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/lib\/zensu-host-path\.sh" \\$/,
-        /^    PLAN_PAYLOAD_LIB="\$\{PLAN_PAYLOAD_DIR:\+\$\{PLAN_PAYLOAD_DIR\}\/plan-payload-v1\.js\}"$/,
-        /^    if \[ -z "\$PLAN_PAYLOAD_LIB" \] \\$/,
-        /^      \|\| \[ ! -f "\$PLAN_PAYLOAD_LIB" \] \|\| \[ -L "\$PLAN_PAYLOAD_LIB" \] \|\| \[ ! -r "\$PLAN_PAYLOAD_LIB" \]; then$/,
-        /^    PLAN_MSYS_EXCL="\$\(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB\)" \|\| PLAN_MSYS_EXCL="\$\{MSYS2_ENV_CONV_EXCL:-\}"$/,
+        /^  PLAN_PAYLOAD_DIR="\$\(bash "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/lib\/zensu-host-path\.sh" \\$/,
+        /^  PLAN_PAYLOAD_LIB="\$\{PLAN_PAYLOAD_DIR:\+\$\{PLAN_PAYLOAD_DIR\}\/plan-payload-v1\.js\}"$/,
+        /^  if \[ -z "\$PLAN_PAYLOAD_LIB" \] \\$/,
+        /^    \|\| \[ ! -f "\$PLAN_PAYLOAD_LIB" \] \|\| \[ -L "\$PLAN_PAYLOAD_LIB" \] \|\| \[ ! -r "\$PLAN_PAYLOAD_LIB" \]; then$/,
+        /^  PLAN_MSYS_EXCL="\$\(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB\)" \|\| PLAN_MSYS_EXCL="\$\{MSYS2_ENV_CONV_EXCL:-\}"$/,
         /^      PLAN_PAYLOAD_LIB="\$PLAN_PAYLOAD_LIB" node -e .$/,
-        /^        \(\{resolveApprovedPlan,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/
+        /^        \(\{resolveApprovedPlan,responseOrigin,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/,
+        /^        reader=require\(process\.env\.PLAN_PAYLOAD_LIB\);$/,
+        /^        foreign=require\(require\("path"\)\.join\(require\("path"\)\.dirname\(process\.env\.PLAN_PAYLOAD_LIB\),"foreign-executor-v1\.js"\)\);$/
       ];
       const offenders=[];
       lines.forEach((line,index)=>{
-        if (!/PLAN_PAYLOAD_LIB|PLAN_PAYLOAD_DIR|plan-payload-v1\.js/.test(line)) return;
+        if (!/PLAN_PAYLOAD_LIB|PLAN_PAYLOAD_DIR|plan-payload-v1\.js|foreign-executor-v1\.js/.test(line)) return;
         // Shell comments AND the JS line comments inside the evaluator: both name
         // the module in prose, and the header there is required by F11c.
         if (/^\s*(#|\/\/)/.test(line)) return;
@@ -1136,6 +1144,16 @@ if [ "$TRANSPORT_VERDICT" = ok ]; then
   check "F48 the reader module is preflighted and transported through the environment" PASS
 else
   check "F48 reader module transport or preflight is not wired ($TRANSPORT_VERDICT)" FAIL
+fi
+LOADER_RENDERS="$(grep -cF 'hooks/lib/zensu-host-path.sh" \' "$HOOK")"
+LOADER_DEFINITIONS="$(grep -cE '^plan_payload_load\(\) \{$' "$HOOK")"
+LOADER_DURABLE_CALLS="$(grep -cE '^    plan_payload_load \|\| \{$' "$HOOK")"
+LOADER_NOTICE_CALLS="$(grep -cE '^    plan_payload_load \|\| return 0$' "$HOOK")"
+if [ "$LOADER_RENDERS" = 1 ] && [ "$LOADER_DEFINITIONS" = 1 ] \
+  && [ "$LOADER_DURABLE_CALLS" = 1 ] && [ "$LOADER_NOTICE_CALLS" = 1 ]; then
+  check "F48b the reader loader is spelled once and serves the durable branch and the executor notice" PASS
+else
+  check "F48b reader loader (renders=$LOADER_RENDERS definitions=$LOADER_DEFINITIONS durable=$LOADER_DURABLE_CALLS notice=$LOADER_NOTICE_CALLS)" FAIL
 fi
 
 # --- F12 outside Autopilot the payload shape must not change the routing ---

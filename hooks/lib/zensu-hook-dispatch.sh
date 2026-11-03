@@ -40,6 +40,7 @@ zensu_hook_dispatch() {
   case "${OSTYPE:-}" in
     (msys*|cygwin*|mingw*|MSYS*|CYGWIN*|MINGW*) _zensu_dispatch_msys_environment "$hooks" ;;
   esac
+  [ -f "$hooks/lib/hook-dispatch-v1.js" ] || return 1
   CDPATH= cd -P -- "$hooks/lib" 2>/dev/null || return 1
   exec node ./hook-dispatch-v1.js "$event" --only "$check"
 }

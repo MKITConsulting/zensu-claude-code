@@ -3,7 +3,8 @@
 # planning gate and therefore delegates straight into its bound TDD attempt.
 # Standalone plans keep the autoTdd ask-first directive, which now opens with a
 # `ZENSU DELIVERY ROUTE:` field — this session's already-decided route (the
-# /zensu:delivery-route marker or hooks.defaultDeliveryRoute), resolved at the
+# /zensu:delivery-route marker, a build route a linked session inherited from its parent, or
+# hooks.defaultDeliveryRoute), resolved at the
 # emission site near the end of this file; the block comment above the two
 # heredocs there records the mechanism.
 set -u
@@ -152,6 +153,27 @@ emit_autopilot_blocked() {
   '
 }
 
+plan_payload_load() {
+  # zensu-host-path.sh renders a DIRECTORY in the native spelling; the file
+  # name is appended after conversion, the same shape zensu-tdd-phase.sh uses
+  # for its node code-load path. Guard the spelling that is actually loaded,
+  # and include readability: a module that is present but unreadable would
+  # otherwise throw inside node and surface as a payload fault.
+  PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+    "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
+  PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
+  if [ -z "$PLAN_PAYLOAD_LIB" ] \
+    || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
+    return 1
+  fi
+  # zensu_msys_env_exclusions is the shipped single source for this list; it
+  # appends the exact-name selector and preserves a dominant standalone '*'.
+  # Resolve it into a variable first: a failing command substitution inside a
+  # command's assignment prefix takes the whole invocation down, and the plan
+  # gate would report that as a payload fault.
+  PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+}
+
 # Autopilot takes precedence over hooks.autoTdd: its contract already received
 # the user's one interactive approval. Absence (rc 1) falls through to the
 # standalone behavior; corruption (rc 2+) is a visible, fail-closed blocker.
@@ -165,7 +187,8 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
   AUTOPILOT_OWNER=""
   if [ -r "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh" ]; then
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-    AUTOPILOT_OWNER="$(zensu_resolve_session_id "$(read_field session_id)" 2>/dev/null)" \
+    RAW_SESSION_ID="$(read_field session_id)"
+    AUTOPILOT_OWNER="$(zensu_resolve_session_id "$RAW_SESSION_ID" 2>/dev/null)" \
       || AUTOPILOT_OWNER=""
   fi
   # The existence hint alone cannot distinguish "this project is mid-run" from
@@ -291,25 +314,10 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     # operator is handed PLAN_EVALUATION_UNAVAILABLE — "the payload itself was
     # never judged" — pointing at a payload that was never the problem. Same shape
     # as the AUTOPILOT_STATE_LIB and SESSION_LIB guards above.
-    # zensu-host-path.sh renders a DIRECTORY in the native spelling; the file
-    # name is appended after conversion, the same shape zensu-tdd-phase.sh uses
-    # for its node code-load path. Guard the spelling that is actually loaded,
-    # and include readability: a module that is present but unreadable would
-    # otherwise throw inside node and surface as a payload fault.
-    PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
-      "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
-    PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
-    if [ -z "$PLAN_PAYLOAD_LIB" ] \
-      || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
+    plan_payload_load || {
       emit_autopilot_runtime_blocked
       exit 0
-    fi
-    # zensu_msys_env_exclusions is the shipped single source for this list; it
-    # appends the exact-name selector and preserves a dominant standalone '*'.
-    # Resolve it into a variable first: a failing command substitution inside a
-    # command's assignment prefix takes the whole invocation down, and the plan
-    # gate would report that as a payload fault.
-    PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+    }
     PLAN_META="$(printf '%s' "$INPUT" | ACTIVE_RUN="$ACTIVE_RUN" ACTIVE_OWNER="$ACTIVE_OWNER" \
       ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" \
       MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
@@ -323,14 +331,15 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       // 17 is the module-load fault. It is deliberately NOT a BLOCK_CODE: the
       // shell routes it to emit_autopilot_runtime_blocked, so a broken install
       // never reports "the payload itself was never judged".
-      let resolveApprovedPlan,REASONS,SOURCES;
+      let resolveApprovedPlan,responseOrigin,REASONS,SOURCES;
       try {
-        ({resolveApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+        ({resolveApprovedPlan,responseOrigin,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
       } catch (_) { process.exit(17); }
       // Destructuring a module with the wrong exports does not throw — it yields
       // undefined, and the next statement would throw OUTSIDE this guard, exit 1,
       // and land on the very receipt 17 exists to avoid. Validate the shape here.
-      if (typeof resolveApprovedPlan!=="function" || typeof REASONS!=="object" || !REASONS
+      if (typeof resolveApprovedPlan!=="function" || typeof responseOrigin!=="function"
+        || typeof REASONS!=="object" || !REASONS
         || Array.isArray(REASONS) || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(17);
       const EXITS={};
       EXITS[REASONS.MISSING]=3;
@@ -341,6 +350,8 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       EXITS[REASONS.TOO_LARGE]=13;
       EXITS[REASONS.SYMLINK]=14;
       EXITS[REASONS.FIELD_TYPE]=15;
+      EXITS[REASONS.AGENT_ORIGIN]=18;
+      EXITS[REASONS.ORIGIN_TYPE]=19;
       let raw="";
       process.stdin.setEncoding("utf8");
       process.stdin.on("data",c=>raw+=c);
@@ -354,19 +365,9 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
         // Caller origin, decided BEFORE any source is read and AFTER ownership,
         // so an unauthorized caller still learns nothing about the response
-        // shape. Only the top-level interactive session may approve a durable
-        // run: Session Control grants main-v1 there and reviewer/neutral
-        // profiles to every child, but that is an ABSENCE-based check, and this
-        // is the positive assertion the harness itself supplies. The test is
-        // strict ===, so a renamed or dropped field changes nothing here.
-        const origin=input.tool_response;
-        if (origin && typeof origin==="object" && !Array.isArray(origin)) {
-          // Wrong type is refused rather than read as falsy: an isAgent of "false"
-          // or 0 would otherwise approve an agent-originated plan by coercion.
-          if (origin.isAgent!==undefined && origin.isAgent!==null
-            && typeof origin.isAgent!=="boolean") process.exit(19);
-          if (origin.isAgent===true) process.exit(18);
-        }
+        // shape.
+        const origin=responseOrigin(input);
+        if (!origin.ok) process.exit(EXITS[origin.reason]||9);
         const resolved=resolveApprovedPlan(input,SOURCES);
         // The source travels with every refusal: a bad tool_input.planFilePath is
         // a path the tool call named, a bad tool_response.filePath is one the
@@ -459,19 +460,26 @@ fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled autoTdd || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-directive.sh"
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" ] \
+  && source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" \
+  && declare -F zensu_linked_session_resolve zensu_linked_session_pending >/dev/null 2>&1 \
+  && zensu_linked_session_pending "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}"; then
+  zensu_linked_session_resolve "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}" "${RAW_SESSION_ID-$(read_field session_id)}" >/dev/null
+fi
 
 # The session's already-decided DELIVERY ROUTE, resolved once here and handed to
 # the model as the `ZENSU DELIVERY ROUTE:` field the directive opens with: `build` or
-# `direct` with its source (the /zensu:delivery-route session marker, or
-# hooks.defaultDeliveryRoute), or `ask`. zensu-config.sh owns the ladder and the
+# `direct` with its source (the /zensu:delivery-route session marker, a build route inherited
+# from a linked session's parent, or hooks.defaultDeliveryRoute), or `ask`.
+# zensu-config.sh owns the ladder and the
 # spelling, so the reminder hook and /zensu:doctor render the same words, and
 # zensu-directive.sh owns the record command and the placeholder substitution. The
 # two heredocs below stay QUOTED
 # and stay TWO — the parity pins count them — and are piped through the substitution
-# rather than interpolated. The resolver reads BOTH ranks, the marker and the config
-# overlay, under the RECORDED project root it is handed — the root the helper's
-# `--status` and the /zensu:doctor probe pass too — so the ambient harness value,
-# which can name a different tree in a worktree session, never reaches the route.
+# rather than interpolated. The resolver reads its three ranks (own marker, inherited
+# route, config overlay) under the RECORDED project root it is handed — the root the
+# helper's `--status` and the /zensu:doctor probe pass too — so the ambient harness
+# value, which can name a different tree in a worktree session, never reaches the route.
 # `autoTdd` above and `tddImplementation` below deliberately still read the harness
 # value — moving those keys is its own change, because their pins assume the harness
 # root.
@@ -480,6 +488,33 @@ ROUTE_COMMAND="$(zensu_delivery_route_record_command)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-human-present.sh"
 HUMAN_PRESENT="$(zensu_human_present "$INPUT")"
 emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_COMMAND" | zensu_human_present_substitute "$HUMAN_PRESENT"; }
+
+foreign_executor_notice() {
+  if [ "$ROUTE_FIELD" = ask ] && [ "$HUMAN_PRESENT" = yes ]; then
+    plan_payload_load || return 0
+    printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
+      PLAN_PAYLOAD_LIB="$PLAN_PAYLOAD_LIB" node -e '
+      let reader,foreign;
+      try {
+        reader=require(process.env.PLAN_PAYLOAD_LIB);
+        foreign=require(require("path").join(require("path").dirname(process.env.PLAN_PAYLOAD_LIB),"foreign-executor-v1.js"));
+      } catch (_) { process.exit(0); }
+      if (!foreign || typeof foreign.noticeForPayload!=="function") process.exit(0);
+      let raw="";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data",c=>raw+=c);
+      process.stdin.on("end",()=>{ try {
+        const msg=foreign.noticeForPayload(JSON.parse(raw||"{}"),reader);
+        if (typeof msg==="string" && msg) process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
+      } catch (_) {} });
+    ' 2>/dev/null
+  fi
+}
+FOREIGN_EXECUTOR_NOTICE="$(foreign_executor_notice)"
+if [ -n "$FOREIGN_EXECUTOR_NOTICE" ]; then
+  printf '%s\n' "$FOREIGN_EXECUTOR_NOTICE"
+  exit 0
+fi
 
 # The EFFECTIVE mode, not the configured one: a /zensu:tdd-mode session choice
 # outranks hooks.tddImplementation at `--tdd-begin`, so the directive must name the

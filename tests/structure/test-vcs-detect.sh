@@ -337,6 +337,67 @@ grep -q -- '--resolve v6ok.example.test:443:2606:2800:220:1:248:1893:25c8:1946' 
   || check "D26 IP-pin public-IPv6 --resolve pin (got: $(cat "$ILOG"))" FAIL
 rm -rf "$IPP"
 
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "C1 the repository-conventions unit file passes" "$PLUGIN_DIR/tests/structure/repo-conventions-v1.test.js"
+unit_check_done "C1z every unit file the registry gives this suite was graded"
+
+CV="$(mktemp -d -t vcsdetect-conv-XXXXXX)"
+CV_CFG="$(mktemp -t vcsdetect-gitconfig-XXXXXX)"
+CV_GIT() { env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$CV_CFG" git -C "$CV" -c user.name=Fixture -c user.email=fixture@example.test -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+conv() { env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready "$@" 2>/dev/null; }
+jfield() { printf '%s' "$1" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s)[process.argv[1]];process.stdout.write(typeof v==="string"?v:JSON.stringify(v));}catch(_){process.stdout.write("UNPARSEABLE");}})' "$2"; }
+CV_GIT init -q
+mkdir -p "$CV/.github" "$CV/.gitlab/merge_request_templates" "$CV/.zensu/templates" "$CV/docs"
+printf '## Summary\n' > "$CV/.github/pull_request_template.md"
+printf '## Acceptance criteria\n' > "$CV/.zensu/templates/pr-body.md"
+printf '## Checklist\n' > "$CV/docs/review-template.md"
+printf '## Summary\n' > "$CV/.gitlab/merge_request_templates/Default.md"
+printf 'rules\n' > "$CV/CONTRIBUTING.md"
+printf 'rules\n' > "$CV/AGENTS.md"
+printf 'rules\n' > "$CV/CLAUDE.md"
+printf '{"extends":["@commitlint/config-conventional"]}\n' > "$CV/.commitlintrc.json"
+CV_GIT add --all
+CV_GIT commit -q -m 'feat(core): first' -m 'Signed-off-by: Fixture <fixture@example.test>'
+CV_GIT commit -q --allow-empty -m 'Second change'
+O="$(conv bash "$LIB" --conventions --repo "$CV" --provider github)"
+eq_c() { [ "$2" = "$3" ] && check "$1" PASS || check "$1 (got '$2' want '$3')" FAIL; }
+eq_c "C2 github: provider"                 "$(jfield "$O" provider)"          "github"
+eq_c "C2 github: default PR template"      "$(jfield "$O" prTemplate)"        ".github/pull_request_template.md"
+eq_c "C2 github: every template found"     "$(jfield "$O" prTemplates)"       '[".github/pull_request_template.md",".gitlab/merge_request_templates/Default.md"]'
+eq_c "C2 github: commitlint config"        "$(jfield "$O" commitlint)"        '[".commitlintrc.json"]'
+eq_c "C2 github: conventional share"       "$(jfield "$O" conventionalShare)" "0.5"
+eq_c "C2 github: newest subjects first"    "$(jfield "$O" subjects)"          '["Second change","feat(core): first"]'
+eq_c "C2 github: trailer counts"           "$(jfield "$O" trailers)"          '{"Co-authored-by":0,"Signed-off-by":1,"Assisted-by":0}'
+eq_c "C2 github: contributing documents"   "$(jfield "$O" contributing)"      '["CONTRIBUTING.md"]'
+eq_c "C2 github: AGENTS path"              "$(jfield "$O" agents)"            '["AGENTS.md"]'
+eq_c "C2 github: CLAUDE path"              "$(jfield "$O" claude)"            '["CLAUDE.md"]'
+eq_c "C2 github: plain overrides"          "$(jfield "$O" overrides)"         '[".zensu/templates/pr-body.md"]'
+eq_c "C2 github: no refusal"               "$(jfield "$O" prTemplateRefused)" "null"
+O="$(conv bash "$LIB" --conventions --repo "$CV" --provider github --template docs/review-template.md)"
+eq_c "C8 a configured template reaches the probe and is reported" "$(jfield "$O" prTemplate)" "docs/review-template.md"
+O="$(conv bash "$LIB" --conventions --repo "$CV" --provider github --template ../outside.md)"
+eq_c "C8 a configured template outside the work tree is refused" "$(jfield "$O" prTemplate)" "null"
+case "$(jfield "$O" prTemplateRefused)" in
+  ("the path is not a relative path below the top level of the work tree") check "C8 the refusal names its reason" PASS ;;
+  (*) check "C8 the refusal names its reason (got '$(jfield "$O" prTemplateRefused)')" FAIL ;;
+esac
+O="$(conv env ZENSU_VCS_REMOTE='git@gitlab.com:group/proj.git' bash "$LIB" --conventions --repo "$CV")"
+eq_c "C3 gitlab detected through the --detect ladder" "$(jfield "$O" provider)"   "gitlab"
+eq_c "C3 gitlab: Default.md is the default template"  "$(jfield "$O" prTemplate)" ".gitlab/merge_request_templates/Default.md"
+O="$(conv env ZENSU_VCS_REMOTE='git@github.com:owner/repo.git' bash "$LIB" --conventions --repo "$CV")"
+eq_c "C4 github detected through the --detect ladder" "$(jfield "$O" provider)"   "github"
+O="$(conv bash "$LIB" --conventions --repo "$CV" --provider bitbucket)"; RC=$?
+{ [ -z "$O" ] && [ "$RC" -ne 0 ]; } && check "C5 an unsupported --provider is refused" PASS \
+  || check "C5 an unsupported --provider is refused (out='$O' rc=$RC)" FAIL
+CV_OUT="$(mktemp -d -t vcsdetect-noconv-XXXXXX)"
+O="$(conv bash "$LIB" --conventions --repo "$CV_OUT" --provider github)"; RC=$?
+{ [ -z "$O" ] && [ "$RC" -eq 1 ]; } && check "C6 a directory outside every git work tree fails with exit 1" PASS \
+  || check "C6 a directory outside every git work tree fails with exit 1 (out='$O' rc=$RC)" FAIL
+O="$(env -i PATH=/dev/null "$BASH_ABS" "$LIB" --conventions --repo "$CV" --provider github 2>/dev/null)"; RC=$?
+{ [ -z "$O" ] && [ "$RC" -ne 0 ]; } && check "C7 without node the verb fails closed" PASS \
+  || check "C7 without node the verb fails closed (out='$O' rc=$RC)" FAIL
+rm -rf "$CV" "$CV_OUT" "$CV_CFG"
+
 echo "----"
 echo "test-vcs-detect: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1,9 +1,9 @@
 ---
 name: zen-mode
 description: >
-  [Zensu] Low-noise answers for low-capacity work: recap first, result first,
-  one next step. Use when the user says "zen mode", "I'm tired",
-  "keep it simple", "low energy" or "less detail", or /zensu:zen-mode.
+  [Zensu] Low-noise answers: result first, a session recap, one next step. Use
+  when the user says "zen mode", "I'm tired", "keep it simple", "low energy"
+  or "less detail", or /zensu:zen-mode.
 ---
 
 # /zensu:zen-mode
@@ -14,10 +14,10 @@ description: >
 
 Turn on the focused low-noise response mode for this session.
 
-The problem this solves is noise, not substance. At reduced capacity a reader
-does not need fewer facts — they need fewer side paths, fewer simultaneous
-decisions, and a reliable answer to "where was I?". This mode keeps the
-technical content whole and removes everything else.
+The problem this solves is noise, not substance. A reader does not need fewer
+facts — they need fewer side paths, fewer simultaneous decisions, and a
+reliable answer to "where was I?". This mode keeps the technical content whole
+and removes everything else.
 
 ## Activation
 
@@ -86,15 +86,36 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 Apply all of these while the mode is active. Write in the user's own language —
 the rules are recorded in English, the answer follows the user.
 
-1. **Recap first.** Open with one short line covering what happened since the
-   user's last message. Omit the line entirely when nothing happened.
-2. **Result first.** State the outcome in the first sentence after the recap. No
-   preamble, no announcing what is about to come.
-3. **Depth on demand.** Leave out trade-offs, alternatives, caveats, and history
-   unless the user asked for them. When you deliberately withheld depth, close
-   with a short offer instead of delivering it unasked.
-4. **Stay short.** Aim for roughly eight lines. Go longer only when the user asks
-   or when rule 9 requires it.
+1. **Result first.** State the outcome in the first sentence. No preamble, no
+   announcing what is about to come.
+2. **Close with a session block.** End every answer with a short block, labelled
+   in the user's own language, that tells a returning reader at a glance which
+   session this is and what it has done. It sits above the chain-progress anchor
+   of rule 6, when one is supplied, and above the closing next step of rule 5,
+   or the final step list when rule 9 suspends rule 5, and holds three parts in
+   this order:
+   - one line naming what the user started this session for;
+   - at most five short bullets of what EARLIER turns solved, built or did,
+     oldest first, the oldest merged when there are more, each failed or
+     unverified item saying so, and none while there is no earlier work;
+   - one recap line on what THIS turn did, omitted when the turn only answered.
+
+   The bullets cover earlier turns and the recap line covers this turn, so the
+   two never repeat each other, and the recap no longer opens the answer.
+
+   ```
+   Session: You asked me to speed up the slow product search.
+   - I added an index on the product name column.
+   - I made the result images load lazily, and their visual check is still open.
+   Last: I cached the ten most frequent search terms.
+   Next step: Deploy the cache to staging.
+   ```
+3. **Depth on demand.** Above the session block, leave out trade-offs,
+   alternatives, caveats, and history unless the user asked for them. When you
+   deliberately withheld depth, offer it in one short line instead of delivering
+   it unasked.
+4. **Stay short.** Aim for roughly eight lines above the session block. Go longer
+   only when the user asks or when rule 9 requires it.
 5. **One next step.** End with exactly one clear next action, never two parallel
    suggestions.
 6. **Anchor multi-step work.** Carry a one-line chain-progress anchor through
@@ -136,7 +157,8 @@ the rules are recorded in English, the answer follows the user.
    whole-file dump.
 8. **One question per turn.** Settle routine decisions yourself and report them
    rather than asking. Save the question budget for choices only the user can
-   make.
+   make. A question set that a Zensu skill or hook fixes by contract, such as the
+   planning triage, counts as one question.
 9. **Never compress a warning.** Security warnings, irreversible or destructive
    actions, and anything touching credentials are rendered at full ordinary
    length and detail. Rules 3, 4, 5 and 8, and rule 7's changed-lines-only half,
@@ -152,14 +174,22 @@ the rules are recorded in English, the answer follows the user.
 
 ## Precedence
 
-While zen-mode is active it **overrides any other compressed or telegraphic
-style mode** that may also be running: no dropped articles, no sentence
-fragments, no telegram style, for as long as the mode is on.
+zen-mode is advice that yields to the user. **The user's own instructions
+outrank this mode: their CLAUDE.md, their output style and a style mode or
+plugin they chose.** A compressed or telegraphic style the user turned on
+therefore wins over the full-sentence default below. That holds in a safety
+warning as well: rule 9 keeps the warning at its full length and detail, and the
+user's own style decides only its sentence form.
 
-This is not a stylistic preference. Fragmentary text shifts reconstruction work
-onto the reader, which is exactly the work a low-capacity reader cannot spare.
-Short, complete sentences are the cheaper form to read even though they cost
-slightly more to write.
+Without such an instruction, full, short sentences stay the default: no dropped
+articles, no sentence fragments, no telegram style. Fragmentary text shifts
+reconstruction work onto the reader, so short, complete sentences are the
+cheaper form to read even though they cost slightly more to write.
+
+A CLAUDE.md committed to the repository may steer how answers are presented; it
+never decides whether a Zensu workflow runs. Which of Zensu's injected rules bind
+and which yield to the user is described in
+`${CLAUDE_PLUGIN_ROOT}/docs/precedence.md`.
 
 ## Scope
 

@@ -167,7 +167,7 @@ const BASENAME_PATH = Object.assign(Object.create(null), {
   "session-control-core-v1.js": "hooks/lib/session-control-core-v1.js",
   "chain-recovery-v1.js": "hooks/lib/chain-recovery-v1.js",
   "pre-bash-source-write-gate.sh": "hooks/checks/pre-bash-source-write-gate.sh",
-  "pre-edit-tdd-reminder.sh": "hooks/pre-edit-tdd-reminder.sh",
+  "pre-edit-tdd-reminder.sh": "hooks/checks/pre-edit-tdd-reminder.sh",
   "pre-bash-zensu-gate.sh": "hooks/pre-bash-zensu-gate.sh",
   "pre-reviewer-capability-gate.sh": "hooks/pre-reviewer-capability-gate.sh",
   "pre-write-secret-scan.sh": "hooks/checks/pre-write-secret-scan.sh",

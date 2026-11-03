@@ -7,7 +7,7 @@ HOST_PATH="$ROOT/hooks/lib/zensu-host-path.sh"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
 POST_REVIEW="$ROOT/hooks/post-review-tdd-delegate.sh"
 STOP_ENFORCER="$ROOT/hooks/stop-chain-enforcer.sh"
-PRE_EDIT="$ROOT/hooks/pre-edit-tdd-reminder.sh"
+PRE_EDIT="$ROOT/hooks/checks/pre-edit-tdd-reminder.sh"
 BANNER="$ROOT/hooks/session-start-banner.sh"
 AGENT_CONTEXT="$ROOT/hooks/lib/zensu-agent-context.sh"
 SESSION_BINDING="$ROOT/hooks/lib/zensu-session.sh"
@@ -498,7 +498,7 @@ fi
 
 if grep -qF 'zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD' "$PRE_EDIT" \
     && [ "$(grep -cF 'MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL"' "$PRE_EDIT")" -eq 3 ] \
-    && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e' "$PRE_EDIT"; then
+    && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node ./edit-path-class-v1.js' "$PRE_EDIT"; then
   check "native pre-edit classifier protects FP and SD from MSYS environment conversion" PASS
 else
   check "native pre-edit classifier protects FP and SD from MSYS environment conversion" FAIL

@@ -88,9 +88,11 @@ if ! _zensu_sid="$(zensu_resolve_session_id)" || [ -z "$_zensu_sid" ]; then
 fi
 
 _zensu_status_root="$_zensu_pd"
+_zensu_status_key="$_zensu_sid"
 ZEN_STATE_DIR="$_zensu_pd/.zensu/state"
 ZEN_ZENSU_DIR="$_zensu_pd/.zensu"
-ZEN_MARKER="$ZEN_STATE_DIR/zen-mode-$_zensu_sid.json"
+zen_marker_path "$_zensu_pd" "$_zensu_sid"
+ZEN_MARKER="$ZEN_MARKER_PATH"
 unset _zensu_pd _zensu_sid
 
 # THIS WRITER IS THE OUT-OF-BAND REMEDY, so it must be at least as hard as the
@@ -111,7 +113,7 @@ unset _zensu_pd _zensu_sid
 # degraded arms already print bare `off` with the cause on stderr for the same
 # reason. A WRITE is a different question - there the shape is tamper evidence and
 # still a refusal - so `--on` and `--off` keep exit 2.
-# THE PREDICATE LIVES IN `hooks/lib/zensu-session.sh`, beside the untraversable
+# THE PREDICATE LIVES IN `hooks/lib/zensu-zen-shared.sh`, beside the untraversable
 # arm of the same ladder, and this file sources it. It was spelled here AND
 # inline in the hook, with nothing comparing the two copies.
 zen_shape_fault() {  # this file`s paths, the shared rule
@@ -211,17 +213,6 @@ case "$ZEN_VERB" in
     echo "zen-mode: off"
     ;;
   --status)
-    # THE SAME PERMISSION ARM THE HOOK CARRIES, through ONE shared predicate in
-    # `zensu-session.sh`. Without it `[ -f ]` fails with EACCES on an unsearchable
-    # ancestor and this verb reported the configured default - `on` by default -
-    # for a session the hook resolves OFF and injects nothing into. Two readers of
-    # one state must not disagree, and this is the surface a user consults exactly
-    # when the mode misbehaves.
-    #
-    # IT SITS AFTER THE MARKER ARMS, matching the hook`s own order. Testing it
-    # first diverged for a process that CAN traverse a mode-000 directory (root,
-    # CAP_DAC_OVERRIDE): the hook read and honoured the marker while this verb
-    # answered "not searchable" - the disagreement the arm exists to prevent.
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
     # THE HOOK`S OWN FLAG IS CONSULTED FIRST. `zensu_zen_mode_default_on` reads
     # only `zenModeDefault` and never `hooks.zenMode`, while the hook exits on
@@ -233,33 +224,26 @@ case "$ZEN_VERB" in
     if ! zensu_hook_enabled zenMode; then
       echo "zensu-zen-mode.sh: the re-injection hook is disabled by hooks.zenMode, so no prompt receives the mode" >&2
       echo "off"
-    elif ZEN_SHAPE_WHY="$(zen_shape_fault)"; then
-      # A CORRUPT MARKER SHAPE IS `off` HERE, not a refusal. The hook resolves a
-      # symlinked state path and a present-but-non-regular marker to OFF, so
-      # exiting 2 with nothing on stdout made the two readers disagree about one
-      # state - and it did so on the surface a user reaches BECAUSE the mode is
-      # misbehaving. It sits ABOVE the `[ -f ]` arm on purpose: `-f` follows a
-      # symlink, so a link to a non-regular target would otherwise fall through
-      # to the configured default and be reported `on`.
-      echo "zensu-zen-mode.sh: $ZEN_SHAPE_WHY" >&2
-      echo "off"
-    elif [ -f "$ZEN_MARKER" ]; then
-      # A marker that is unreadable or does not spell out an active mode counts
-      # as off: an unparsable state file must never impose the mode on a user who
-      # may have just left it.
-      if zen_marker_active "$ZEN_MARKER"; then
-        echo "on"
-      else
-        echo "off"
-      fi
-    elif zen_path_untraversable "$ZEN_MARKER" "$_zensu_status_root"; then
-      # BARE `off` on stdout, reason on stderr. The verb`s contract is two words
-      # and a consumer may compare for equality, so a third stdout spelling would
-      # break it - and `skills/zen-mode/SKILL.md` states that contract.
-      echo "zensu-zen-mode.sh: the state directory is not searchable" >&2
-      echo "off"
+    elif zen_mode_resolve "$_zensu_status_root" "$_zensu_status_key"; then
+      echo "on"
     else
-      if zensu_zen_mode_default_on; then echo "on"; else echo "off"; fi
+      case "$ZEN_MODE_SOURCE" in
+        (shape)
+          # A CORRUPT MARKER SHAPE IS `off` HERE, not a refusal. The hook resolves a
+          # symlinked state path and a present-but-non-regular marker to OFF, so
+          # exiting 2 with nothing on stdout made the two readers disagree about one
+          # state - and it did so on the surface a user reaches BECAUSE the mode is
+          # misbehaving.
+          echo "zensu-zen-mode.sh: $ZEN_MODE_WHY" >&2
+          ;;
+        (untraversable)
+          # BARE `off` on stdout, reason on stderr. The verb`s contract is two words
+          # and a consumer may compare for equality, so a third stdout spelling would
+          # break it - and `skills/zen-mode/SKILL.md` states that contract.
+          echo "zensu-zen-mode.sh: the state directory is not searchable" >&2
+          ;;
+      esac
+      echo "off"
     fi
     ;;
 esac

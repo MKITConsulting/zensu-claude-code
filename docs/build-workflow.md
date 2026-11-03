@@ -42,8 +42,12 @@ the baseline commit, the claims and the change set the reviewers see — never f
 unset in the model's Bash environment on this host, and after `/zensu:adopt-session --reanchor`
 the directory the Bash tool starts in is no longer the bound root. For the same reason every
 project command the skill prescribes — test runs, checkpoints, the build, coverage and the mtime
-`stat` — runs as `cd "{project_root}" && <command>`, while `--evidence-run` needs no prefix: it
-runs its command in the bound root whenever the working directory lies outside that work tree.
+`stat` — runs as `cd "{project_dir}" && <command>`, where `{project_dir}` is what
+`zensu-log.sh --chain-work-tree --project-dir` prints: `{project_root}` itself, or, for a chain
+bound to an Autopilot run that drives a worktree, that worktree's directory for `{project_root}`,
+because the chain's code lands there. `--evidence-run` needs no prefix: it runs its command in
+that directory whenever the working directory lies outside the chain's work tree, and
+`/zensu:self-review` runs its fix round's commands the same way.
 The review chain's flag probes pass it as `CLAUDE_PROJECT_DIR` for the same reason, so they read
 the project `.zensu/config.json` of the bound root.
 The `cd` carries no `--`: the root is absolute, and the source-write gate takes the token after
@@ -144,7 +148,7 @@ See [skills/build/SKILL.md](../skills/build/SKILL.md) and its [references](../sk
 
 ## 4. Per-Step TDD-FSM
 
-Inside Phase 4, each step cycles through a small state machine. The PreToolUse hook ([hooks/pre-edit-tdd-reminder.sh](../hooks/pre-edit-tdd-reminder.sh)) reads the current phase from the state file and allows or denies Edit/Write/MultiEdit tool calls based on it.
+Inside Phase 4, each step cycles through a small state machine. The PreToolUse hook ([hooks/checks/pre-edit-tdd-reminder.sh](../hooks/checks/pre-edit-tdd-reminder.sh)) reads the current phase from the state file and allows or denies Edit/Write/MultiEdit tool calls based on it.
 
 ```mermaid
 stateDiagram-v2
@@ -742,7 +746,7 @@ are intentionally not part of the state transaction.
 ## See Also
 
 - [skills/build/SKILL.md](../skills/build/SKILL.md) — canonical main-thread workflow skill
-- [hooks/pre-edit-tdd-reminder.sh](../hooks/pre-edit-tdd-reminder.sh) — gate enforcement
+- [hooks/checks/pre-edit-tdd-reminder.sh](../hooks/checks/pre-edit-tdd-reminder.sh) — gate enforcement
 - [hooks/lib/zensu-tdd-phase.sh](../hooks/lib/zensu-tdd-phase.sh) — state file I/O
 - [hooks/lib/zensu-log.sh](../hooks/lib/zensu-log.sh) — log + phase helper CLI
 - [hooks/hooks.json](../hooks/hooks.json) — hook registrations

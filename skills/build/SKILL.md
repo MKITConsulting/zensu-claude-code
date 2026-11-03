@@ -78,7 +78,7 @@ explicitly labeled interactive paths.
 
 ## When to Use
 
-- After the user approves a plan that adds executable code, the plan-approval hook (`plan-approved-delegate.sh`) asks the user WHICH delivery route the plan takes — `/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly — and directs you here when they pick this one (or on its fast-paths: an explicit route preference in the approval message — which may also name `/zensu:autopilot` or `/zensu:pilot` — a route this session already recorded via `/zensu:delivery-route` or `hooks.defaultDeliveryRoute`, which is never one of those two, or a ZENSU HUMAN PRESENT field reading no, which defaults here and, by a clause that overrides the preference fast-path, never selects `/zensu:autopilot` or `/zensu:pilot`).
+- After the user approves a plan that adds executable code, the plan-approval hook (`plan-approved-delegate.sh`) asks the user WHICH delivery route the plan takes — `/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly — and directs you here when they pick this one (or on its fast-paths: an explicit route preference in the approval message — which may also name `/zensu:autopilot` or `/zensu:pilot` — a route this session already recorded via `/zensu:delivery-route`, inherited as `build` from its parent session or set in `hooks.defaultDeliveryRoute`, which is never one of those two, or a ZENSU HUMAN PRESENT field reading no, which defaults here and, by a clause that overrides the preference fast-path, never selects `/zensu:autopilot` or `/zensu:pilot`).
 - `/zensu:implement` Step 3 hands you a feature specification built from the Zensu feature + security context.
 - A user invokes `/zensu:build` directly with a feature spec.
 

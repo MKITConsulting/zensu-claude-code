@@ -157,20 +157,28 @@ READ_INPUT="$(node -e 'process.stdout.write(JSON.stringify({ file_path: process.
 READ_RESPONSE='{"type":"text","file":{"content":"x"}}'
 EDIT_INPUT="$(node -e 'process.stdout.write(JSON.stringify({ file_path: process.argv[1], old_string: "x", new_string: "y" }))' "$PROJ/src/app.txt")"
 EDIT_RESPONSE='{"filePath":"x","oldString":"x","newString":"y"}'
+NOTEBOOK_INPUT="$(node -e 'process.stdout.write(JSON.stringify({ notebook_path: process.argv[1], new_source: "y" }))' "$PROJ/src/app.ipynb")"
+NOTEBOOK_RESPONSE='{"new_source":"y"}'
+AGENT_INPUT='{"subagent_type":"zensu:code-reviewer","description":"review","prompt":"review"}'
+AGENT_RESPONSE='{"status":"completed","content":[]}'
 
 budget() {
   case "$1" in
     Bash) echo "2 0 0" ;;
     Read) echo "2 0 0" ;;
-    Edit) echo "6 34 28" ;;
+    Edit) echo "2 0 0" ;;
+    NotebookEdit) echo "2 0 0" ;;
+    Agent) echo "3 6 5" ;;
   esac
 }
 
-for TOOL in Bash Read Edit; do
+for TOOL in Bash Read Edit NotebookEdit Agent; do
   case "$TOOL" in
     Bash) INPUT="$BASH_INPUT"; RESPONSE="$BASH_RESPONSE" ;;
     Read) INPUT="$READ_INPUT"; RESPONSE="$READ_RESPONSE" ;;
     Edit) INPUT="$EDIT_INPUT"; RESPONSE="$EDIT_RESPONSE" ;;
+    NotebookEdit) INPUT="$NOTEBOOK_INPUT"; RESPONSE="$NOTEBOOK_RESPONSE" ;;
+    Agent) INPUT="$AGENT_INPUT"; RESPONSE="$AGENT_RESPONSE" ;;
   esac
   TOTAL=0
   NODES=0
@@ -205,6 +213,189 @@ EOF
   fi
 done
 
+body_and_check() {
+  local label="$1" body="$2"
+  shift 2
+  BODY_OUT="$(printf '%s' "$body" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_SESSION_ADOPTED CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" "$@" \
+    "$REAL_BASH" "$PLUGIN_DIR/hooks/checks/pre-edit-tdd-reminder.sh" 2>/dev/null)"
+  BODY_RC=$?
+  CHECK_OUT="$(printf '%s' "$body" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_SESSION_ADOPTED CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" "$@" \
+    "$REAL_NODE" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" pre --only tdd-edit-gate 2>/dev/null)"
+  CHECK_RC=$?
+  PARITY_CASES=$((PARITY_CASES + 1))
+  if [ "$BODY_RC" != "$CHECK_RC" ] || [ "$BODY_OUT" != "$CHECK_OUT" ]; then
+    PARITY_MISMATCH="$PARITY_MISMATCH [$label: rc $BODY_RC/$CHECK_RC, body '$BODY_OUT', check '$CHECK_OUT']"
+  fi
+  case "$BODY_OUT" in
+    *'"permissionDecision":"deny"'*) PARITY_LAST=deny ;;
+    '') PARITY_LAST=allow ;;
+    *) PARITY_LAST=other ;;
+  esac
+}
+expect_parity() {
+  local want="$1" label="$2" body="$3"
+  shift 3
+  body_and_check "$label" "$body" "$@"
+  [ "$PARITY_LAST" = "$want" ] || PARITY_MISMATCH="$PARITY_MISMATCH [$label: wanted $want, the body answered $PARITY_LAST]"
+}
+edit_body() {
+  payload PreToolUse "${2:-Edit}" "$(node -e 'process.stdout.write(JSON.stringify({ file_path: process.argv[1], old_string: "x", new_string: "y" }))' "$1")"
+}
+set_state() {
+  node -e '
+    const fs = require("fs");
+    const [file, field, value] = process.argv.slice(1);
+    const state = JSON.parse(fs.readFileSync(file, "utf8"));
+    state[field] = JSON.parse(value);
+    fs.writeFileSync(file, JSON.stringify(state));
+  ' "$STATE_FILE" "$1" "$2"
+}
+PARITY_CASES=0
+PARITY_MISMATCH=""
+SESSION_KEY="$(node -e 'process.stdout.write(require(process.argv[1]).sessionKey(process.argv[2]))' "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$SID")"
+STATE_FILE="$PROJ/.zensu/state/tdd-phase-$SESSION_KEY.json"
+cp "$STATE_FILE" "$TMP/state.saved"
+restore_state() { cp "$TMP/state.saved" "$STATE_FILE"; }
+expect_parity allow "armed vanilla, a source file" "$(edit_body "$PROJ/src/app.txt")"
+expect_parity allow "armed vanilla, a relative source file" "$(edit_body src/app.txt)"
+expect_parity allow "armed vanilla, a .zensu plan" "$(edit_body "$PROJ/.zensu/plans/p.md")"
+expect_parity deny "armed vanilla, the state file" "$(edit_body "$STATE_FILE")"
+expect_parity deny "armed vanilla, the state file through dot segments" "$(edit_body "$PROJ/src/../.zensu/state/x.json")"
+expect_parity allow "a tool outside the group" "$(edit_body "$PROJ/src/app.txt" NotebookEdit)"
+expect_parity allow "a child principal" "$(edit_body "$PROJ/.zensu/state/x.json" | node -e '
+  const o = JSON.parse(require("fs").readFileSync(0, "utf8"));
+  o.agent_id = "child";
+  o.agent_type = "zensu:review-aspect";
+  process.stdout.write(JSON.stringify(o));
+')"
+expect_parity allow "a malformed payload" "not json at all"
+expect_parity allow "no file_path" "$(payload PreToolUse Edit '{"old_string":"x"}')"
+expect_parity deny "a state path in another letter case" "$(payload PreToolUse Edit '{"file_path":".ZENSU/STATE/x.json"}')"
+expect_parity deny "a state path with backslashes" "$(payload PreToolUse Edit '{"file_path":".zensu\\state\\x.json"}')"
+expect_parity deny "a line feed in the path" "$(payload PreToolUse Edit '{"file_path":"src/a\nb.txt"}')"
+ln -s "$PROJ/.zensu/state" "$PROJ/state-link"
+expect_parity deny "a symlink into the state directory" "$(edit_body "$PROJ/state-link/x.json")"
+rm -f "$PROJ/state-link"
+set_state active '"true"'
+expect_parity deny "an active flag that is no boolean" "$(edit_body "$PROJ/src/app.txt")"
+restore_state
+set_state vanilla 1
+expect_parity deny "a vanilla flag that is no boolean" "$(edit_body "$PROJ/src/app.txt")"
+restore_state
+set_state vanilla false
+expect_parity deny "armed strict, no phase" "$(edit_body "$PROJ/src/app.txt")"
+expect_parity allow "armed strict, a .zensu plan" "$(edit_body "$PROJ/.zensu/plans/p.md")"
+set_state phase '"RED_WRITE"'
+expect_parity allow "armed strict at RED_WRITE" "$(edit_body "$PROJ/src/app.txt")"
+count_hook dispatch:pre "$(edit_body "$PROJ/src/app.txt")"
+if [ "$HOOK_RC" -eq 0 ] && [ "$HOOK_STARTS" -le 59 ] && [ "$HOOK_NODES" -le 40 ]; then
+  check "B4 an Edit in a strict chain runs the edit gate's body: $HOOK_STARTS programs (budget 59), $HOOK_NODES of them node (budget 40) ($HOOK_PROGRAMS)" PASS
+else
+  check "B4 an Edit in a strict chain: rc=$HOOK_RC, $HOOK_STARTS programs (budget 59), $HOOK_NODES node (budget 40) ($HOOK_PROGRAMS)" FAIL
+fi
+restore_state
+set_state active false
+expect_parity allow "a chain that is not active" "$(edit_body "$STATE_FILE")"
+restore_state
+printf 'not json' > "$STATE_FILE"
+expect_parity deny "a corrupt workflow document" "$(edit_body "$PROJ/src/app.txt")"
+rm -f "$STATE_FILE"
+expect_parity deny "a missing workflow document" "$(edit_body "$PROJ/src/app.txt")"
+restore_state
+BYPASS_OUT="$(printf '%s' "$(edit_body "$STATE_FILE")" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+  -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_SESSION_ADOPTED CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_TDD_GATE=off \
+  "$REAL_NODE" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" pre --only tdd-edit-gate 2>/dev/null)"
+if [ -n "$BYPASS_OUT" ] || ! grep -q '"ZENSU_TDD_GATE"' "$STATE_FILE"; then
+  PARITY_MISMATCH="$PARITY_MISMATCH [ZENSU_TDD_GATE=off did not allow and record the bypass: '$BYPASS_OUT']"
+fi
+PARITY_CASES=$((PARITY_CASES + 1))
+restore_state
+if [ -z "$PARITY_MISMATCH" ]; then
+  check "D1 the in-process edit gate answers byte for byte like its body in all $PARITY_CASES states" PASS
+else
+  check "D1 the in-process edit gate differs from its body:$PARITY_MISMATCH" FAIL
+fi
+
+dispatch_pre() {
+  printf '%s' "$1" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_SESSION_ADOPTED CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" "${@:2}" \
+    "$REAL_NODE" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" pre 2>/dev/null
+}
+STORE_TARGET="$ZENSU_TEST_PLUGIN_DATA/planted.json"
+case "$(dispatch_pre "$(edit_body "$STORE_TARGET" Write)")" in
+  *'"permissionDecision":"deny"'*Plugin-Data-Guard*|*Plugin-Data-Guard*'"permissionDecision":"deny"'*) check "D2 the dispatcher runs the data guard for a Write" PASS ;;
+  *) check "D2 the dispatcher runs the data guard for a Write" FAIL ;;
+esac
+NOTEBOOK_STORE="$(payload PreToolUse NotebookEdit "$(node -e 'process.stdout.write(JSON.stringify({ notebook_path: process.argv[1], new_source: "y" }))' "$ZENSU_TEST_PLUGIN_DATA/planted.ipynb")")"
+case "$(dispatch_pre "$NOTEBOOK_STORE")" in
+  *Plugin-Data-Guard*) check "D2b the dispatcher runs the data guard for a NotebookEdit" PASS ;;
+  *) check "D2b the dispatcher runs the data guard for a NotebookEdit" FAIL ;;
+esac
+case "$(dispatch_pre "$(edit_body "$STATE_FILE")")" in
+  *TDD-Phase-Gate*) check "D3 the dispatcher runs the edit gate for an Edit" PASS ;;
+  *) check "D3 the dispatcher runs the edit gate for an Edit" FAIL ;;
+esac
+SECRET_INPUT="$(node -e 'process.stdout.write(JSON.stringify({ file_path: process.argv[1], content: "key = \"sk_" + "live_abcdef1234567890XY\"" }))' "$PROJ/src/app.txt")"
+case "$(dispatch_pre "$(payload PreToolUse Write "$SECRET_INPUT")")" in
+  *stripe-live-key*) check "D4 the dispatcher runs the secret scan for a Write" PASS ;;
+  *) check "D4 the dispatcher runs the secret scan for a Write" FAIL ;;
+esac
+SECRET_NOTEBOOK="$(node -e 'process.stdout.write(JSON.stringify({ notebook_path: process.argv[1], new_source: "key = \"sk_" + "live_abcdef1234567890XY\"" }))' "$PROJ/src/app.ipynb")"
+case "$(dispatch_pre "$(payload PreToolUse NotebookEdit "$SECRET_NOTEBOOK")")" in
+  *stripe-live-key*) check "D4b the dispatcher runs the secret scan for a NotebookEdit" PASS ;;
+  *) check "D4b the dispatcher runs the secret scan for a NotebookEdit" FAIL ;;
+esac
+SPAWN_BODY="$(payload PreToolUse Agent "$AGENT_INPUT")"
+case "$(dispatch_pre "$SPAWN_BODY")" in
+  *'"permissionDecision":"allow"'*zensu:code-reviewer*) check "D5 the dispatcher grants a confined reviewer spawn" PASS ;;
+  *) check "D5 the dispatcher grants a confined reviewer spawn" FAIL ;;
+esac
+printf '%s' '{"hooks":{"reviewerSpawnAutoAllow":false}}' > "$TMP/grant-off.json"
+case "$(dispatch_pre "$SPAWN_BODY" ZENSU_CONFIG="$TMP/grant-off.json")" in
+  *'"permissionDecision":"allow"'*) check "D5b hooks.reviewerSpawnAutoAllow=false withdraws the grant under the dispatcher" FAIL ;;
+  *) check "D5b hooks.reviewerSpawnAutoAllow=false withdraws the grant under the dispatcher" PASS ;;
+esac
+case "$(dispatch_pre "$SPAWN_BODY" MSYS2_ENV_CONV_EXCL="$(printf 'A=\nB=')")" in
+  *'"permissionDecision":"allow"'*) check "D5c a line break in MSYS2_ENV_CONV_EXCL fails the bind, so no grant" FAIL ;;
+  *) check "D5c a line break in MSYS2_ENV_CONV_EXCL fails the bind, so no grant" PASS ;;
+esac
+
+strict_pair() {
+  (
+    env_name="$1"
+    env_value="$2"
+    unset ZENSU_CONFIG
+    export HOME="$TMP/config-home" CLAUDE_PROJECT_DIR="$TMP/config-project"
+    export "$env_name=$env_value"
+    . "$CONFIG_LIB"
+    ref="$(_zensu_config_node -e "$_ZENSU_STRICT_JS"' process.stdout.write(verdict(process.argv[1]))' probeKey 2>/dev/null)"
+    disp="$(node -e '
+      const d = require(process.argv[1]);
+      process.stdout.write(d.configHookEnabledStrict("probeKey", process.env, process.cwd()) ? "1" : "0");
+    ' "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" 2>/dev/null)"
+    printf '%s %s' "${ref:-0}" "${disp:-y}"
+  )
+}
+CR="$(printf '\r')"
+LF="$(printf '\nx')"
+LF="${LF%x}"
+STRICT_BREAK_BAD=""
+mkdir -p "$TMP/config-home" "$TMP/config-project"
+printf '%s' '{"hooks":{"probeKey":false}}' > "$TMP/strict-off.json"
+for STRICT_CASE in "ZENSU_CONFIG:$TMP/strict-off.json$LF" "ZENSU_CONFIG:$TMP/strict-off.json$CR" "HOME:$TMP/config-home$LF" "CLAUDE_PROJECT_DIR:$TMP/config-project$CR"; do
+  case "$(strict_pair "${STRICT_CASE%%:*}" "${STRICT_CASE#*:}")" in
+    '0 0') ;;
+    *) STRICT_BREAK_BAD="$STRICT_BREAK_BAD [${STRICT_CASE%%:*}: $(strict_pair "${STRICT_CASE%%:*}" "${STRICT_CASE#*:}")]" ;;
+  esac
+done
+if [ -z "$STRICT_BREAK_BAD" ]; then
+  check "C1d a line break in a strict config input withholds the grant in the dispatcher and in _ZENSU_STRICT_JS" PASS
+else
+  check "C1d the strict readers differ for a line break in a config input:$STRICT_BREAK_BAD" FAIL
+fi
+
 CONFIG_HOME="$TMP/config-home"
 CONFIG_PROJ="$TMP/config-project"
 mkdir -p "$CONFIG_HOME/.zensu" "$CONFIG_PROJ/.zensu"
@@ -224,6 +415,7 @@ put() {
 CONFIG_MISMATCH=""
 CONFIG_NODE_MISMATCH=""
 CONFIG_DISPATCH_MISMATCH=""
+CONFIG_STRICT_MISMATCH=""
 CONFIG_CASES=0
 config_case() {
   local label="$1" expect_decided="$2" home="$3" override="${4:-}" result
@@ -248,7 +440,12 @@ config_case() {
       process.stdout.write((d.configHookEnabled("probeKey", process.env, process.cwd()) ? "0" : "1")
         + " " + (d.configHookOptedIn("probeKey", process.env, process.cwd()) ? "0" : "1"));
     ' "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" 2>/dev/null)"
-    printf '%s %s %s %s %s %s' "$enabled" "$opted" "$nodes" "$ref_enabled" "$ref_opted" "${disp:-x x}"
+    strict_ref="$(_zensu_config_node -e "$_ZENSU_STRICT_JS"' process.stdout.write(verdict(process.argv[1]))' probeKey 2>/dev/null)"
+    strict_disp="$(node -e '
+      const d = require(process.argv[1]);
+      process.stdout.write(d.configHookEnabledStrict("probeKey", process.env, process.cwd()) ? "1" : "0");
+    ' "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" 2>/dev/null)"
+    printf '%s %s %s %s %s %s %s %s' "$enabled" "$opted" "$nodes" "$ref_enabled" "$ref_opted" "${disp:-x x}" "${strict_ref:-x}" "${strict_disp:-y}"
   )"
   CONFIG_CASES=$((CONFIG_CASES + 1))
   set -- $result
@@ -257,6 +454,9 @@ config_case() {
   fi
   if [ "${6:-x}" != "$4" ] || [ "${7:-x}" != "$5" ]; then
     CONFIG_DISPATCH_MISMATCH="$CONFIG_DISPATCH_MISMATCH [$label: enabled ${6:-x}/$4 opted ${7:-x}/$5]"
+  fi
+  if [ "${8:-x}" != "${9:-y}" ]; then
+    CONFIG_STRICT_MISMATCH="$CONFIG_STRICT_MISMATCH [$label: strict ${9:-y}/${8:-x}]"
   fi
   case "$expect_decided:$3" in
     yes:0|no:[1-9]*|any:*) ;;
@@ -324,6 +524,11 @@ if [ -z "$CONFIG_DISPATCH_MISMATCH" ]; then
   check "C1b the dispatcher's config reader answers like the node reader in all $CONFIG_CASES config cases" PASS
 else
   check "C1b the dispatcher's config reader disagrees with the node reader:$CONFIG_DISPATCH_MISMATCH" FAIL
+fi
+if [ -z "$CONFIG_STRICT_MISMATCH" ]; then
+  check "C1c the dispatcher's strict config reader answers like _ZENSU_STRICT_JS in all $CONFIG_CASES config cases" PASS
+else
+  check "C1c the dispatcher's strict config reader disagrees with _ZENSU_STRICT_JS:$CONFIG_STRICT_MISMATCH" FAIL
 fi
 if [ -z "$CONFIG_NODE_MISMATCH" ]; then
   check "C2 the config getters start no node when no candidate file names the key, and defer to node when one does or is longer than the pre-check reads" PASS
