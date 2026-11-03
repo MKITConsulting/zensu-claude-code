@@ -581,3 +581,12 @@ Upgrade the product-scope backend and CLI before the plugin. See the shipped
 `docs/ai-work-capture.md` for identity checks and legacy receipt handling.
 
 CLI setup and troubleshooting: [Install or update the CLI, including `zensu update` and older-version recovery](docs/cli-install-update.md).
+
+### Review context and source-system links
+
+Before handoff, the native capture helper accepts `checkpoint --review-file` with
+an explicit summary, acceptance criteria, evidence, limitations and optional
+`artifactUrl` for the exact commit. The URL is supplied deliberately, never inferred
+from a Git remote. Pending reports retain their original content for retries; a
+changed report creates a new result version without inherited acceptance.
+See [result reporting and disclosure scope](docs/ai-work-capture.md#explain-the-result-before-human-acceptance).
