@@ -124,6 +124,6 @@ assert:
       return {
         pass: ok,
         score: ok ? 1 : 0,
-        reason: (ok ? "Warning reads as ordinary prose. " : "The full-sentence rule is NEVER suspended — a safety warning is the last place for fragments. ")
+        reason: (ok ? "Warning reads as ordinary prose. " : "No style the user chose is active here, so the full-sentence rule holds and the warning must read as ordinary prose. ")
           + "articles=" + articles + " words=" + words + " ratio=" + ratio.toFixed(3)
       };

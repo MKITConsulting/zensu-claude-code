@@ -450,6 +450,7 @@ else
 fi
 EXECUTOR_LIB="${PLAN_LIB_DIR:+$PLAN_LIB_DIR/foreign-executor-v1.js}"
 if [ -n "$PLAN_LIB" ] && [ -f "$PLAN_LIB" ] && [ -n "$EXECUTOR_LIB" ] && [ -f "$EXECUTOR_LIB" ] \
+  && [ -r "$EXECUTOR_LIB" ] && [ ! -L "$EXECUTOR_LIB" ] \
   && PLAN_PAYLOAD_LIB="$PLAN_LIB" node -e '
     const reader=require(process.env.PLAN_PAYLOAD_LIB);
     const foreign=require(require("path").join(require("path").dirname(process.env.PLAN_PAYLOAD_LIB),"foreign-executor-v1.js"));

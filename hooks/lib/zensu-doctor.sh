@@ -467,8 +467,9 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # and lineage-incompatible would otherwise be reported as a plain lineage
         # break and the user would never learn their project root is gone. That
         # matters after the repair as much as before it: adoption succeeds in this
-        # state and leaves the session orphaned, where Edit, Write and any WRITING
-        # Bash command still deny — read-only Bash and this diagnostic do run.
+        # state and leaves the session orphaned, where Edit, Write, MultiEdit and a
+        # zensu CLI call still deny, as does a Bash write the opted-in source-write gate
+        # attributes with no usable CLAUDE_PROJECT_DIR left; this diagnostic does run.
         # No shape guard here, matching the orphan branch above: the printed path
         # comes from readOrphanedProjectRootContext, which rejects control
         # characters and a non-absolute value before it returns.

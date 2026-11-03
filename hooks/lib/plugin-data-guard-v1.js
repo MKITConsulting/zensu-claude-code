@@ -25,8 +25,9 @@
 //
 // SCOPE IS DELIBERATELY NARROW, and the asymmetry is accepted rather than
 // overlooked. Only the store is protected. A write anywhere else outside the
-// project root stays allowed here, even though the Bash source-write gate's
-// rule (B) denies exactly that for a shell redirect (temp roots excepted). The
+// project root stays allowed here, even though rule (B) of the opt-in Bash
+// source-write gate, while hooks.bashWriteGate is true, denies a shell redirect to
+// a source file there (temp roots excepted). The
 // wider rule would need a temp carve-out of its own and would refuse ordinary
 // work on files outside the project; closing the measured hole does not.
 //

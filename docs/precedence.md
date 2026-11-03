@@ -38,8 +38,8 @@ own instructions outrank the advice, but whether a Zensu workflow runs is decide
 words in this conversation and their Zensu configuration, never by a file such as CLAUDE.md.
 zen-mode states its own form of the rule: the user's CLAUDE.md, their output style and a style
 mode or plugin they chose outrank it, so a compressed style the user turned on wins over
-zen-mode's full sentences. That holds in a safety warning too: zen-mode still keeps the
-warning at its full length and detail, and the user's style decides only its sentence form.
+zen-mode's full sentences. A style the user chose may set a safety warning's sentence form,
+never its length or detail.
 
 **The user's own instructions** are what the user writes in this conversation, their
 CLAUDE.md, their output style, and a style mode or plugin they turned on. All of them may
@@ -81,7 +81,8 @@ Every doubt resolves toward the question: a route the session recorded or config
 dispatches the plan, a plan that names a `zensu:` skill anywhere and in any form still gets
 the question, and so do a session whose `ZENSU HUMAN PRESENT:` field reads `no` or `unknown`,
 a plan whose tool response declares an agent origin or carries an `isAgent` field that is not
-a boolean, and a plan the hook cannot read.
+a boolean, a plan the hook cannot read, and a reader or classifier module that is missing, a
+symlink or unreadable.
 
 ## Best solution first
 
