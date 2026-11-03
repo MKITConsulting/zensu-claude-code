@@ -48,6 +48,8 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/session-trail/scripts/trail.mjs" <command> [a
 
 Read `references/commands.md` before you pass a flag, resolve a selector, read `--json`, or run `--force`, `lineage --forget`, `label` or `release`.
 
+A reference is read with `Read` and is not rendered, so it spells the plugin root `<absolute-plugin-root>`: read that as `${CLAUDE_PLUGIN_ROOT}`, never as a path relative to the working directory.
+
 ## Workflows
 
 1. **Survey** — run `instances` and report by repo: pid, short session id, worktree, age, title; flag two sessions in one worktree, a session idle for days, a worktree that no longer exists.

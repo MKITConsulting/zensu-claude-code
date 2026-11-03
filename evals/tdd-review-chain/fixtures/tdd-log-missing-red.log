@@ -1,4 +1,4 @@
-[14:08:31] TDD STARTED — Example feature with missing RED entry | steps: 2
+[14:08:31] BUILD STARTED — Example feature with missing RED entry | steps: 2
 [14:08:33] EXECUTION STARTED
 [14:10:45] BE-1 RED FooTest — FAIL: class Foo does not exist
 [14:10:48] BE-1 IMPL completed — files: Foo.java

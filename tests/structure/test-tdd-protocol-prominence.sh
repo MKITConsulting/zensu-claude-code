@@ -16,10 +16,10 @@ ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$*"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$*"; }
 
 source "$ROOT/tests/structure/lib-skill-text.sh"
-SKILL="$(skill_text_file "$ROOT/skills/tdd")"
+SKILL="$(skill_text_file "$ROOT/skills/build")"
 PRIMER="$ROOT/hooks/session-start-primer.sh"
 
-# ── 1) zensu:tdd skill: mandatory command block ABOVE "## When to Use" ──────
+# ── 1) zensu:build skill: mandatory command block ABOVE "## When to Use" ──────
 TOP="$(awk '/^## When to Use/{exit} {print}' "$SKILL")"
 
 printf '%s' "$TOP" | grep -qi "command protocol" \

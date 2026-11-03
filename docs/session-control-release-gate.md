@@ -83,26 +83,29 @@ never run in GitHub Actions.
   host's `SubagentHandback` report tool and the workflow result tool
   `StructuredOutput`; it receives neither `main-v1`
   nor Session Control selectors.
-- Every other neutral `host-profile-v1` child is denied every tool outside the
-  capability gate's allowlist except `Bash` — the five other shell/command tool
-  aliases, `Monitor`, and every MCP tool outside its named read-only list,
-  command-executing MCP servers included — before command contents are
-  considered. For those tools this is a capability rule, not a token denylist.
+- Every other neutral `host-profile-v1` child may use every tool except what
+  reaches Zensu's own state or runs commands outside `Bash`. The five
+  shell/command tool aliases other than `Bash`, `PowerShell` and a `Monitor`
+  command are denied before command contents are considered; for those tools
+  this is a capability rule, not a token denylist. A tool the gate does not know
+  whose name marks it as running commands or code, command-executing MCP servers
+  such as `ctx_execute` included, is denied by that name, a heuristic over the
+  words of its name. Any other tool whose inputs the gate does not know is
+  admitted unless a path it takes reaches the installed plugin, its private data
+  or a config layer, or a string of its input names that state, the session
+  record or a `.zensu` directory; that check reads text and is no capability rule.
   `Bash` passes only for a child that reports a usable `agent_type`, and a usable
   `agent_id` whenever it reports one, and that is not a `zensu-review-*` persona,
   only while `hooks.subagentShell` grants it, and only past the accident guard in
   `hooks/lib/subagent-shell-guard-v1.js`. A refused grant denies `Bash` with the
-  command-execution reason and its cause before the command is considered, so
-  with the grant withdrawn `env`, expansion, obfuscated protected paths/helpers,
-  nested interpreters and command-executing MCP servers cannot regain command
-  execution. The guard parses the command text and is not a capability rule: `env`, selector expansions, named Zensu helpers and binders,
+  command-execution reason and its cause before the command is considered. The guard parses the command text and is not a capability rule: `env`, selector expansions, named Zensu helpers and binders,
   and protected paths are denied, while an obfuscated protected path or helper
   passes, a documented gap rather than a boundary. The guard prevents accidents
   and is not a sandbox. The `general-purpose` contract scenario pins both
   halves: the guard denies `env`, selector reads, `zensu-log.sh` and the model
   binders, and it lets `git status --short`, `sh -c true` and two obfuscated
   spellings of a `.zensu` path and a helper name through, the last two as
-  documented gaps. Allowlisted host tools remain available subject to the child
+  documented gaps. Every other tool remains available subject to the child
   definition and the remaining protected-path and mutating-Zensu checks.
 - Reviewer, PLM, and neutral `Grep`/`Glob` calls must name a concrete safe
   subtree. The gate denies both protected roots and ancestors that could
@@ -126,10 +129,9 @@ never run in GitHub Actions.
   both, so it does not establish that a live `general-purpose` child reports an
   `agent_type`; that premise stays unmeasured. Extra calls, seeded
   context, wrong marker/principal/command, reordered results, a failed Read, or
-  a successful command all fail evidence validation. `Agent` is on the neutral
-  allowlist, so a nested spawn stays governed by the child's frontmatter and
-  Claude host permissions; the legacy `Task` name and `Workflow` are outside that
-  list and denied.
+  a successful command all fail evidence validation. `Agent`, its legacy name
+  `Task` and `Workflow` are admitted, so a nested spawn stays governed by the
+  child's frontmatter and Claude host permissions.
 - The all-tool `PreToolUse` boundary treats canonical `cwd` as trusted host
   location metadata, not as a session authenticator, and resolves relative tool
   paths against the current directory even after `CwdChanged`. Session identity

@@ -44,9 +44,10 @@
 //   ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS  the release's own owner-liveness window,
 //                            under the same rules
 //   ZDOC_DELIVERY_ROUTE      this session's resolved delivery route from the wrapper:
-//                            one of the five zensu_delivery_route_field spellings
-//                            (`tdd (session marker)`, `direct (session marker)`,
-//                            `tdd (hooks.defaultDeliveryRoute)`,
+//                            one of the six zensu_delivery_route_field spellings
+//                            (`build (session marker)`, `direct (session marker)`,
+//                            `build (inherited from parent session)`,
+//                            `build (hooks.defaultDeliveryRoute)`,
 //                            `direct (hooks.defaultDeliveryRoute)`, `ask`), or
 //                            `unknown` (no session key or project root reached the
 //                            probe: the session is unbound, or bound with the pair
@@ -531,18 +532,43 @@ function pluginBlock() {
     line(BAD, 'hooks.json: ' + (hj.missing ? 'missing' : jsonFailure(hj)));
     return;
   }
+  var registration = null;
+  try { registration = require('./hook-registration-v1.js'); } catch (_error) { registration = null; }
   var wired = {};
+  var dispatched = false;
   var events = (hj.data && hj.data.hooks) || {};
   Object.keys(events).forEach(function (ev) {
     var matchers = events[ev] || [];
     matchers.forEach(function (m) {
       (m && m.hooks || []).forEach(function (h) {
-        var cmd = (h && typeof h.command === 'string') ? h.command : '';
-        var mm = cmd.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
-        if (mm) wired[mm[1]] = true;
+        if (registration && registration.dispatcherEvent(h) !== null) dispatched = true;
+        var entries = registration
+          ? registration.hookEntries(h, ev)
+          : [{ command: (h && typeof h.command === 'string') ? h.command : '' }];
+        entries.forEach(function (entry) {
+          var mm = entry.command.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
+          if (mm) wired[mm[1]] = true;
+        });
       });
     });
   });
+  if (!registration) {
+    line(WARN, 'hooks wiring: hooks/lib/hook-registration-v1.js could not be loaded, so the checks the dispatcher runs are not counted as wired; reinstall the plugin');
+  }
+  if (dispatched) {
+    var dispatcherFile = path.join(dir, registration.DISPATCHER_MODULE);
+    var dispatcherStat = null;
+    try { dispatcherStat = fs.lstatSync(dispatcherFile); } catch (_error) { dispatcherStat = null; }
+    if (!dispatcherStat || !dispatcherStat.isFile()) {
+      line(BAD, 'hooks wiring: hooks.json starts ' + registration.DISPATCHER_MODULE + ' for every tool call, but it is missing on disk or not a regular file — every tool call is blocked; reinstall the plugin');
+    }
+    var missingBodies = registration.DISPATCHED_CHECKS.filter(function (check) {
+      return check.body !== null && !fs.existsSync(path.join(dir, 'hooks', check.body));
+    }).map(function (check) { return 'hooks/' + check.body; });
+    if (missingBodies.length) {
+      line(BAD, 'hooks wiring: ' + missingBodies.length + ' check(s) the dispatcher runs are missing on disk — ' + missingBodies.join(', '));
+    }
+  }
   var onDisk = {};
   try {
     fs.readdirSync(path.join(dir, 'hooks')).forEach(function (f) {
@@ -1066,7 +1092,7 @@ var SELF_PERMISSION_BAR = 'no agent may edit a settings file to widen its own pe
 // reviewer-spawn-denial-v1.js declares SPAWN_TOOL_NAMES = ['Agent', 'Task'], but
 // that set governs TRANSCRIPT tool names, not permission-rule spellings. Nothing
 // in this tree verifies `Task(...)` as a permission-RULE spelling, so it stays out
-// of THIS table, whose row asserts that every /zensu:tdd run wedges. It IS admitted
+// of THIS table, whose row asserts that every /zensu:build run wedges. It IS admitted
 // by the low-claim predicate — see `namesReviewerSpawn`, whose 'shaped' arm claims
 // only that the entry cannot be judged. Do not promote it here: what separates the
 // two tables is the strength of the claim, not the spelling.
@@ -1095,7 +1121,7 @@ function matchesAllowRule(rules) {
 }
 // A deny/ask entry that clearly means this spawn but is not one of the two
 // verified spellings. Broadening matchesDenyOrAskRule to swallow it was rejected:
-// the deny row makes a strong claim ("every /zensu:tdd run wedges at the review
+// the deny row makes a strong claim ("every /zensu:build run wedges at the review
 // step") that must not fire for an unrelated agent, and a wildcard spelling is
 // the same unverified host grammar moved onto the loud side. Reporting that the
 // entry could not be JUDGED keeps the fall-through from ending at the allow
@@ -1135,7 +1161,7 @@ function namesReviewerSpawn(rules) {
     // that was a reachable green report, not a hypothetical. It stays on the
     // low-claim side deliberately: this row says only that the entry cannot be
     // judged, which is the fail-safe direction. Never move it into
-    // matchesDenyOrAskRule — that row asserts every /zensu:tdd run wedges.
+    // matchesDenyOrAskRule — that row asserts every /zensu:build run wedges.
     if (r.indexOf('Agent(') === 0) { shaped = true; continue; }
     // The same treatment for the OTHER tool name the host uses for this spawn.
     // reviewer-spawn-denial-v1.js exports SPAWN_TOOL_NAMES = ['Agent', 'Task'], so
@@ -1290,7 +1316,7 @@ var ROW_TEXT = {
   deny: function () {
     return 'permissions: a permissions.deny entry in ~/.claude/settings.json matches the '
       + REVIEWER_AGENT + ' spawn. Deny is evaluated before ask and allow, so the review chain can never '
-      + 'spawn its reviewer and every /zensu:tdd run wedges at the review step. Remove that entry '
+      + 'spawn its reviewer and every /zensu:build run wedges at the review step. Remove that entry '
       // Self-contained on purpose. This used to point at "the refused-spawn row
       // below", but that row renders only when a refusal note exists, so the
       // reference dangled in the ordinary case. Naming the RULE instead is true
@@ -1729,6 +1755,40 @@ function configBlock() {
   // continuation of `hooks wiring` above.
   ruleCarrierRows(cfgReads);
   deliveryRouteConfigRow(cfgReads);
+  subagentBoundaryRow(cfgReads);
+  zenModeConfigRow(cfgReads);
+}
+
+var SUBAGENT_BOUNDARY = 'a neutral subagent may use every tool except what reaches Zensu\'s own state or runs commands outside Bash: the capability gate denies it Session Control and workflow paths, .zensu/, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell, the shell aliases, Monitor commands and tools whose name marks them as running commands or code, and a tool whose inputs the gate does not know may not name that state; every other limit is your own permission rules';
+
+function subagentBoundaryRow(cfgReads) {
+  var root = pluginDir();
+  try {
+    if (!fs.lstatSync(path.join(root, 'hooks', 'lib', 'reviewer-capability-v1.js')).isFile()) return;
+  } catch (e) { return; }
+  var granted;
+  try {
+    var guardPath = path.join(root, 'hooks', 'lib', 'subagent-shell-guard-v1.js');
+    if (!fs.lstatSync(guardPath).isFile()) throw new Error('shell-guard module is not a regular file');
+    granted = require(guardPath).strictFlagEnabled('subagentShell') === true;
+  } catch (e) {
+    line(WARN, 'subagents: the capability gate is installed but its shell-guard module hooks/lib/subagent-shell-guard-v1.js, or a sibling it requires, could not be loaded, so what a subagent may run could not be judged. This is a broken installation, not a configuration choice; reinstall the plugin.');
+    return;
+  }
+  if (granted) {
+    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. A named neutral subagent may run Bash commands behind an accident guard, which prevents accidents and is not a sandbox; hooks.subagentShell=false turns that shell off.');
+    return;
+  }
+  var switchedOff = cfgReads.some(function (entry) {
+    var data = entry.r && entry.r.ok ? entry.r.data : null;
+    return Boolean(data && typeof data === 'object' && data.hooks && typeof data.hooks === 'object'
+      && data.hooks.subagentShell === false);
+  });
+  if (switchedOff) {
+    line(OK, 'subagents: ' + SUBAGENT_BOUNDARY + '. The subagent shell is off (hooks.subagentShell=false), so the gate denies every subagent Bash command.');
+    return;
+  }
+  line(WARN, 'subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false — a config layer that cannot be read, parsed or resolved, or no layer at all, withdraws it fail-closed, so the gate denies every subagent Bash command. Fix the config file the rows above name, or set HOME when no layer can be found.');
 }
 
 // The two ask-hooks each exit on their own flag BEFORE they resolve the route, so a
@@ -1767,12 +1827,12 @@ function deliveryRouteConfigRow(cfgReads) {
     }
   });
   if (!seen || value === 'ask') return;
-  if (value === 'tdd' || value === 'direct') {
+  if (value === 'build' || value === 'direct') {
     // The default reaches the plan-approval hook only while hooks.autoTdd is on and
     // the per-prompt reminder only while hooks.tddReminder is on — each hook exits on
     // its own flag BEFORE it resolves the route — so the row names the half that is
     // live. Read through the same merged cfgReads, never a second readJson pass.
-    var effect = value === 'tdd' ? 'takes the Zensu workflow' : 'is implemented directly, without the review chain';
+    var effect = value === 'build' ? 'takes the Zensu workflow' : 'is implemented directly, without the review chain';
     var planOff = routeReaders.planOff;
     var promptOff = routeReaders.promptOff;
     var subject = null;
@@ -1787,9 +1847,9 @@ function deliveryRouteConfigRow(cfgReads) {
       + '; a preference stated in the user\'s own message decides only that request, and /zensu:delivery-route changes the route for this session');
     return;
   }
-  var shown = safeConfigValue(value, ' is not tdd');
+  var shown = safeConfigValue(value, ' is not build');
   line(WARN, 'config: hooks.defaultDeliveryRoute=' + (shown.ok ? shown.text : '(' + FOLD_UNAVAILABLE + ')')
-    + ' is not tdd, direct or ask — the hooks read it as ask, so the delivery-route question is asked; use one of those three lowercase words');
+    + ' is not build, direct or ask — the hooks read it as ask, so the delivery-route question is asked; use one of those three lowercase words');
 }
 
 // A value from a session-writable or committed file reaches a model-relayed row. A
@@ -1804,6 +1864,21 @@ function safeConfigValue(value, followedBy) {
   var cut = text.length > 40 ? '…' : '';
   var slot = foldSlot(text.slice(0, 40), cut + (followedBy || ''));
   return { text: slot.ok ? slot.text + cut : '', ok: slot.ok };
+}
+
+// The tail names the cause the binding verdict gives. `unknown` prints no binding
+// row at all, and a `bound` verdict whose key/root pair failed the wrapper's shape
+// check prints the valid-record row, so pointing at "the binding row above" is
+// right only for the other verdicts.
+function unboundSessionCause() {
+  var binding = String(env.ZDOC_BINDING || '');
+  if (binding === '' || binding === 'unknown') {
+    return 'this report ran without CLAUDE_CODE_SESSION_ID or CLAUDE_PLUGIN_DATA, so no session could be bound; run /zensu:doctor inside the session to check it';
+  }
+  if (binding === 'bound') {
+    return 'the session is bound, but its recorded session key or project root failed the report\'s shape check and was withheld';
+  }
+  return 'read the binding row above';
 }
 
 // The bound session's recorded delivery route, resolved by the wrapper through the
@@ -1821,36 +1896,73 @@ function deliveryRouteRow() {
   if (planOff && !promptOff) halfOff = ' (' + ROUTE_PLAN_HALF_OFF + ')';
   else if (promptOff && !planOff) halfOff = ' (' + ROUTE_PROMPT_HALF_OFF + ')';
   if (v === 'unknown') {
-    // The tail names the cause the binding verdict gives. `unknown` prints no binding
-    // row at all, and a `bound` verdict whose key/root pair failed the wrapper's shape
-    // check prints the valid-record row, so pointing at "the binding row above" is
-    // right only for the other verdicts.
-    var binding = String(env.ZDOC_BINDING || '');
-    var cause = 'read the binding row above';
-    if (binding === '' || binding === 'unknown') {
-      cause = 'this report ran without CLAUDE_CODE_SESSION_ID or CLAUDE_PLUGIN_DATA, so no session could be bound; run /zensu:doctor inside the session to check it';
-    } else if (binding === 'bound') {
-      cause = 'the session is bound, but its recorded session key or project root failed the report\'s shape check and was withheld';
-    }
-    line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + cause);
+    line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
   } else if (v === 'unjudged') {
     line(WARN, 'delivery route: could not be read — the shared config library did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. Run /zensu:delivery-route --status from the session to see what the hooks resolve');
-  } else if (planOff && promptOff && (v === 'ask' || /^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v))) {
+  } else if (planOff && promptOff && (v === 'ask' || /^(?:(?:build|direct) \((?:session marker|hooks\.defaultDeliveryRoute)\)|build \(inherited from parent session\))$/.test(v))) {
     line(OK, 'delivery route: ' + v + ' — decides nothing this session: ' + ROUTE_BOTH_READERS_OFF);
   } else if (v === 'ask') {
     var where = planOff ? 'on a code request' : (promptOff ? 'after a plan approval' : 'after a plan approval and on a code request');
-    line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff
+    var executorPlan = planOff ? '' : ', and an approved plan that names its own executor gets a notice instead';
+    line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff + executorPlan
       + '; /zensu:delivery-route fixes it for this session, hooks.defaultDeliveryRoute for the project');
-  } else if (/^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v)) {
-    var dispatch = '; code changes go through /zensu:tdd';
+  } else if (/^(?:(?:build|direct) \((?:session marker|hooks\.defaultDeliveryRoute)\)|build \(inherited from parent session\))$/.test(v)) {
+    var dispatch = '; code changes go through /zensu:build';
     if (v.indexOf('direct') === 0) dispatch = '; code changes are implemented directly, without the review chain';
-    else if (planOff) dispatch = '; a code request goes through /zensu:tdd, while an approved plan is implemented directly';
-    else if (promptOff) dispatch = '; an approved plan goes through /zensu:tdd';
+    else if (planOff) dispatch = '; a code request goes through /zensu:build, while an approved plan is implemented directly';
+    else if (promptOff) dispatch = '; an approved plan goes through /zensu:build';
     line(OK, 'delivery route: ' + v + ' — the route question is not asked this session' + halfOff
-      + dispatch + '. Change it with /zensu:delivery-route (--tdd, --direct, --auto)');
+      + dispatch + '. Change it with /zensu:delivery-route (--build, --direct, --auto)');
   } else {
     var shown = safeConfigValue(v, ') — the');
     line(WARN, 'delivery route: state not recognized (' + (shown.ok ? shown.text : FOLD_UNAVAILABLE)
+      + ') — the wrapper reported a state this report has no row for; a missing check rather than an all-clear');
+  }
+}
+
+var ZEN_YIELD = 'the user\'s own CLAUDE.md, output style or a style mode they chose outranks it';
+
+function zenModeInstalled() {
+  try {
+    return fs.lstatSync(path.join(pluginDir(), 'hooks', 'user-prompt-zen-mode.sh')).isFile();
+  } catch (e) {
+    return false;
+  }
+}
+
+function zenModeConfigRow(cfgReads) {
+  if (!zenModeInstalled()) return;
+  if (hookFlagDisabled(cfgReads, 'zenMode')) {
+    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the zen-mode hook is switched off, so no prompt receives the low-noise contract');
+  } else if (hookFlagDisabled(cfgReads, 'zenModeDefault')) {
+    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode');
+  } else {
+    line(OK, 'zen-mode default: on (hooks.zenModeDefault) — every session gets low-noise answers, and ' + ZEN_YIELD
+      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in');
+  }
+}
+
+function zenModeRow() {
+  var v = String(env.ZDOC_ZEN_MODE || '');
+  if (v === '' || !zenModeInstalled()) return;
+  if (v === 'unknown') {
+    line(WARN, 'zen-mode: not checked — no bound session key or recorded project root was available, so this session\'s zen-mode marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
+  } else if (v === 'unjudged') {
+    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session, shows what the hook resolves');
+  } else if (v === 'on (session marker)' || v === 'on (hooks.zenModeDefault)') {
+    line(OK, 'zen-mode: ' + v + ' — every prompt of this session gets the low-noise contract, and ' + ZEN_YIELD
+      + '; "zen off" leaves it for this session');
+  } else if (v === 'off (session marker)') {
+    line(OK, 'zen-mode: off (session marker) — this session left the mode; /zensu:zen-mode turns it back on');
+  } else if (v === 'off (hooks.zenModeDefault)') {
+    line(OK, 'zen-mode: off (hooks.zenModeDefault) — the mode is opt-in here; /zensu:zen-mode turns it on for this session');
+  } else if (v === 'off (hooks.zenMode=false)') {
+    line(OK, 'zen-mode: off (hooks.zenMode=false) — the zen-mode hook is switched off, so no prompt receives the contract');
+  } else if (v === 'off (unreadable state)') {
+    line(WARN, 'zen-mode: off (unreadable state) — the session marker or a directory above it is a symlink, is not a regular file or cannot be searched, or the marker cannot be read or records no choice, so the hook resolves the mode off whatever was recorded; /zensu:zen-mode replaces a marker that cannot be read or records no choice, while a link, a stray entry or a directory\'s permissions need a repair by hand first');
+  } else {
+    var shown = safeConfigValue(v, ') — the');
+    line(WARN, 'zen-mode: state not recognized (' + (shown.ok ? shown.text : FOLD_UNAVAILABLE)
       + ') — the wrapper reported a state this report has no row for; a missing check rather than an all-clear');
   }
 }
@@ -2562,7 +2674,7 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
       + ' (That is compatible with a spawn that WAS attempted: the caveat below reports one when'
       + ' a note records it.) Counted in turns,'
       + ' never in elapsed time, so a paused session or a powered-off machine never reaches this row.'
-      + ' The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit until its'
+      + ' The exit is the review chain: run the /zensu:build Phase 6 step 5b edit-landing audit until its'
       + ' receipt records a CLEAN verdict, and give the plan a usable `## Requirements` table, because'
       + ' while the tree is dirty the completion verb refuses a plan without that table and refuses a'
       + ' receipt that is merely present — every claimed edit has to have landed.'
@@ -2666,8 +2778,8 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
     line(WARN, 'chain: ' + foreignOpen.length + ' open chain(s) not owned by this session'
       + (ttl > 0 ? ', touched within ' + ttl + 'h' : '')
       + ' — this session cannot advance them, and they cannot be moved to this key.'
-      + ' Usually a session that ended without /zensu:tdd --chain-done, in which case the'
-      + ' state is stale and re-arming here with /zensu:tdd is the exit. It can also be a'
+      + ' Usually a session that ended without /zensu:build --chain-done, in which case the'
+      + ' state is stale and re-arming here with /zensu:build is the exit. It can also be a'
       + ' live sibling session, where nothing is wrong, or a FORK — the host minting a new'
       + ' session id mid-conversation, which leaves the work armed under the old key'
       + ' unreachable. Check whether the owning session is still running before acting: '
@@ -2897,7 +3009,7 @@ function truncatedList(rows) {
 //
 // Until this row existed /zensu:doctor carried NO Autopilot row of any kind, and
 // a nonterminal run holding the working tree was visible only in the refusal that
-// happened to name it: the --autopilot-begin refusal, the standalone /zensu:tdd
+// happened to name it: the --autopilot-begin refusal, the standalone /zensu:build
 // begin refusal, the deferred-review Stop refusal, and the stderr line the fence
 // prints when it stands down. Every one of those requires you to have TRIED the
 // thing the run blocks. Nothing answered "is a run holding this tree, and where
@@ -3482,11 +3594,11 @@ function ownerLivenessClause(dir, run, window, releaseWindow, verdict, adoptBloc
   // "also refuses" and the absent arm has no beacon to reach, so those two carry their
   // own halves on purpose and are not copies that drifted.
   var chainHalf = 'adoption is not an exit here either, because this run has a live inner'
-    + ' TDD chain and adoption refuses that with exit 3 before it reads any beacon';
+    + ' build chain and adoption refuses that with exit 3 before it reads any beacon';
   // The connective belongs to the LEAD, not to the reason: "either" presupposes a
   // preceding negative, which the absent arm's lead is not — it says the release
   // proceeds. The absent arm therefore supplies its own opener over the same reason.
-  var chainReason = 'because this run has a live inner TDD chain and adoption refuses'
+  var chainReason = 'because this run has a live inner build chain and adoption refuses'
     + ' that with exit 3 before it reads any beacon';
   // The live-inner-chain fact is read out of the run document, which is an ordinary
   // file in this session-writable directory — the same bound the age and the pointer
@@ -3968,7 +4080,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
         + ' missing check, not a verdict';
       if (adoptCause === 'chain') {
         adoptWhy = 'adoption refuses it with exit 3 before it reads any beacon, because this'
-          + ' run has a live inner TDD chain — that stage is ' + AUTOPILOT_FORGEABLE_SOURCE
+          + ' run has a live inner build chain — that stage is ' + AUTOPILOT_FORGEABLE_SOURCE
           + ' — so finishing or'
           + ' cancelling that chain in its own session is what clears it, while BLOCKING it'
           + ' does not, because the verb tests the pending stage, and repairing the beacon'
@@ -4041,8 +4153,8 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     var designates = own ? autopilotPointerDesignates(dir, run.owner, run.runId) : null;
     // BLOCKED is NOT terminal — the same line says so — and the owner's
     // `read-workspace` filters only on TERMINAL, so a BLOCKED run still refuses a
-    // second begin and a standalone /zensu:tdd. Rendering it green would print
-    // "all checks green" beside a tree that refuses /zensu:tdd.
+    // second begin and a standalone /zensu:build. Rendering it green would print
+    // "all checks green" beside a tree that refuses /zensu:build.
     // `ownerWouldAccept` is a REQUIRED conjunct of the green arm and of nothing
     // else. Without it `ordinary` rested on `autopilotRun`'s six shape gates alone,
     // so a record the owner refuses — which fails `readRunInventory` for the WHOLE
@@ -4145,7 +4257,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // an aged run is bounded by a window while this one is bounded by nothing. Saying only "unknown" beside
       // the aged arm's Nh refusal implies the opposite ordering, on the row that offers
       // the cancel. It is routed through the SHARED clause rather than inlined, so the
-      // qualifiers the other arms already carry — a disabled window, a live inner TDD
+      // qualifiers the other arms already carry — a disabled window, a live inner build
       // chain — reach this one too instead of being one arm behind forever.
       silence = 'The owning session has left no workflow document, so its liveness is unknown'
         + livenessText;
@@ -4201,7 +4313,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // rendering the opened name is what makes that true rather than argued.
       text: 'autopilot: nonterminal durable run ' + run.runId + ' at stage ' + run.stage
         + ', ' + ownership + ' — it ' + held + ', so no second Autopilot run and no standalone'
-        + ' /zensu:tdd chain may arm there.' + occupancy + ' Tracked in ' + foldPath(path.join(dir, c.name), ', with the active pointer')
+        + ' /zensu:build chain may arm there.' + occupancy + ' Tracked in ' + foldPath(path.join(dir, c.name), ', with the active pointer')
         + ', with the active pointer named for sha256 of the OWNING SESSION id, never of the'
         + ' project path. ' + silence + '. Only DONE and CANCELLED are terminal — BLOCKED is'
         + ' not — and ' + remedy + '.'
@@ -5195,7 +5307,7 @@ function baselineRebuiltRow(core, projectRoot, key, sharedRead) {
     + ', most recently at ' + when + why + '. Rebuilding is a loss, not a restore: the '
     + 'baseline reads "never active", so a review chain that was live when the document '
     + 'vanished is gone and the Stop guard releases this session without asking for a '
-    + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.' + rendered.note);
+    + 'reviewer. Re-arm with /zensu:build if that work still needs one.' + rendered.note);
 }
 
 // The PROJECT_ROOT_RESTORED provenance row, the sibling of baselineRebuiltRow above
@@ -5430,7 +5542,7 @@ function auditedRunLog(projectRoot, value) {
 // runs it, answering a typed result the row renders. It refuses a symlinked or
 // non-plain-file library rather than executing it, and the ENOENT branch below states why
 // an absent command is a damaged tree rather than an uninstalled feature.
-function claimInventory(logFile, projectRoot) {
+function claimInventory(logFile, projectRoot, workTree) {
   var lib = path.join(pluginDir(), 'hooks', 'lib', 'zensu-edit-landing.sh');
   try {
     var st = fs.lstatSync(lib);
@@ -5456,7 +5568,7 @@ function claimInventory(logFile, projectRoot) {
   var r;
   try {
     r = require('child_process').spawnSync('bash',
-      [lib, '--inventory', '--log', logFile, '--project', projectRoot],
+      [lib, '--inventory', '--log', logFile, '--project', projectRoot].concat(workTree ? ['--work-tree', workTree] : []),
       { encoding: 'utf8', timeout: CLAIM_INVENTORY_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
   } catch (e) {
     return { ok: false, reason: 'the inventory command could not be started' };
@@ -5575,7 +5687,13 @@ function claimTopologyRow(projectRoot, ownKey) {
   }
   if (!audited.path) return;
   var logFile = audited.path;
-  var inventory = claimInventory(logFile, projectRoot);
+  var workTree = auditedWorkTree(projectRoot, parsed);
+  if (workTree.reason) {
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
+      + workTree.reason + '. That is a missing check, not an all-clear.');
+    return;
+  }
+  var inventory = claimInventory(logFile, projectRoot, workTree.path);
   if (inventory === null) return;
   if (!inventory.ok) {
     line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
@@ -5585,17 +5703,21 @@ function claimTopologyRow(projectRoot, ownKey) {
   if (inventory.roots.length === 0) return;
   var named = claimRootSafeNames(inventory.roots);
   var withheld = inventory.roots.length - named.length;
+  var gradedRoot = workTree.path ? 'the chain\'s work tree' : 'the anchor';
   line(WARN, 'topology: this session\'s audited run log claims edits under '
-    + inventory.roots.length + ' root(s) that are not the anchor'
+    + inventory.roots.length + ' root(s) that are not ' + gradedRoot
     + (named.length ? ': ' + named.join(', ') : '')
     + (withheld > 0
       ? (named.length ? ', and ' : ' (') + withheld + ' name(s) withheld: they carry characters this row cannot render'
         + (named.length ? '' : ')')
       : '')
     + '. The anchor is ' + (claimRootRenderable(projectRoot) ? claimRootRender(projectRoot) : '(unrenderable)')
+    + (workTree.path
+      ? ', and the chain\'s work tree is ' + (claimRootRenderable(workTree.path) ? claimRootRender(workTree.path) : '(unrenderable)')
+      : '')
     + '. One edit-landing audit grades ONE root, so those claims are reported rather than graded and this'
-    + ' session\'s review chain sees no diff for them — /zensu:tdd is single-root. Run the chain in the'
-    + ' repository the claims name, or land the work in the anchor.');
+    + ' session\'s review chain sees no diff for them — /zensu:build is single-root. Run the chain in the'
+    + ' repository the claims name, or land the work in ' + gradedRoot + '.');
 }
 
 // The RUNTIME_ADOPTED provenance row, and the surface other carriers had already
@@ -5683,6 +5805,7 @@ function stateBlock(nowMs) {
   // the marker AND the config key, so a project with no `.zensu/state` yet still has
   // an answer (config or `ask`), and the ENOENT return below must not swallow it.
   deliveryRouteRow();
+  zenModeRow();
   var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');
   // ONE renderer for the own-document verdict, called from BOTH the ENOENT branch
@@ -5817,7 +5940,7 @@ function stateBlock(nowMs) {
       + parenthesizedPath(ownFile, ')')
       + ' — while it is gone the capability gate denies every tool in this session, '
       + 'because a deleted document must never be read as "no chain was ever active". '
-      + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
+      + 'A deleted and re-created worktree loses it, since git does not track .zensu/state/. '
       + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '
       + 'and /zensu:adopt-session --confirm to rebuild it; rebuilding is a loss, not a '
       + 'restore — a review chain that was live when it vanished is gone.');
@@ -5947,6 +6070,26 @@ function stateBlock(nowMs) {
       line(OK, 'state: pending-review.json present and within its ' + ttl + 'h TTL');
     }
   } catch (e) { /* no pending-review marker */ }
+}
+
+function auditedWorkTree(projectRoot, parsed) {
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'workTree')) return {};
+  var value = parsed.workTree;
+  if (typeof value !== 'string' || value === '' || CONTROL_BYTE_RE.test(value)
+    || path.isAbsolute(value) || value.split(/[\\/]/).indexOf('..') !== -1) {
+    return { reason: 'the receipt names a work tree this row cannot use' };
+  }
+  try {
+    var root = fs.realpathSync.native(projectRoot);
+    var resolved = fs.realpathSync.native(path.resolve(projectRoot, value));
+    var rel = path.relative(root, resolved);
+    if (rel === '' || rel === '..' || rel.indexOf('..' + path.sep) === 0 || path.isAbsolute(rel)) {
+      return { reason: 'the receipt names a work tree outside this project root' };
+    }
+    return { path: resolved };
+  } catch (e) {
+    return { reason: 'the work tree the receipt names could not be resolved' };
+  }
 }
 
 function main() {

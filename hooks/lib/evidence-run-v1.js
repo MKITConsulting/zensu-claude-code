@@ -361,19 +361,20 @@ function workTree(projectRoot, limits = LIMITS) {
   return { applicable: null, reason: `git rev-parse failed: ${(stderr.trim().split('\n')[0] || `exit ${result.status}`).slice(0, 160)}` };
 }
 
-function runDirectory(projectRoot, requested, limits = LIMITS) {
-  if (!requested) return { cwd: projectRoot, moved: false };
-  const anchor = git(projectRoot, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
+function runDirectory(projectRoot, requested, limits = LIMITS, workDirectory = null) {
+  const home = typeof workDirectory === 'string' && workDirectory !== '' ? workDirectory : projectRoot;
+  if (!requested) return { cwd: home, moved: false };
+  const anchor = git(home, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
   const top = anchor.ok ? anchor.stdout.trim() : '';
   if (top !== '') {
     const here = git(requested, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
-    return here.ok && here.stdout.trim() === top ? { cwd: requested, moved: false } : { cwd: projectRoot, moved: true };
+    return here.ok && here.stdout.trim() === top ? { cwd: requested, moved: false } : { cwd: home, moved: true };
   }
-  const relative = path.relative(projectRoot, requested);
+  const relative = path.relative(home, requested);
   if (relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) {
     return { cwd: requested, moved: false };
   }
-  return { cwd: projectRoot, moved: true };
+  return { cwd: home, moved: true };
 }
 
 function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = []) {
@@ -742,7 +743,7 @@ function ciVerdict(context) {
       cause = `the newest test record cannot be trusted (${decision.entry.id}: ${decision.entry.invalid}); run the affected tests again`;
       break;
     default:
-      cause = `the evidence store could not be read (${decision.reason || 'unknown fault'})`;
+      cause = decision.cause || `the evidence store could not be read (${decision.reason || 'unknown fault'})`;
   }
   const passes = PASSING_STATES.includes(decision.state);
   if (passes) {
@@ -788,26 +789,42 @@ function verdict(options) {
   if (options.ciPolicy && options.ciPolicy.runner === 'local' && options.ciPolicy.ciRequested === true && typeof options.ciPolicy.reason === 'string') {
     lines.push(`FULL SUITE — local runner | ${screen(options.ciPolicy.reason, projectRoot, limits)} | decided by: ${screen(String(options.ciPolicy.decidedBy || 'default'), projectRoot, limits)}`);
   }
+  const boundTree = typeof options.workTree === 'string' && options.workTree !== '' ? options.workTree : null;
+  const workTreeFault = typeof options.workTreeFault === 'string' && options.workTreeFault !== '' ? options.workTreeFault : null;
   let decision;
   let currentTree = { tree: null, reason: 'not computed' };
   let treeRoot = projectRoot;
   if (scope.applicable === null) {
     decision = { state: 'unavailable', entry: null, reason: scope.reason };
+  } else if (workTreeFault) {
+    decision = {
+      state: 'unavailable',
+      entry: null,
+      cause: `the work tree of this Autopilot-bound chain could not be resolved (${screen(workTreeFault, projectRoot, limits)}), so no run can be bound to it`,
+    };
   } else {
     try {
       const locations = storeLocations(options.pluginData, options.sessionKey);
       const entries = listRecords(locations, { sessionKey: options.sessionKey, projectRoot }, limits);
       const trees = currentTrees(projectRoot, locations.scratch, limits);
+      const workRoot = boundTree ? fingerprintRoot(boundTree, projectRoot, limits) : null;
+      const workFingerprint = boundTree ? trees.treeAt(workRoot) : null;
+      if (workFingerprint && workRoot === null) throw new Error(workFingerprint.reason);
+      const measured = workFingerprint && workFingerprint.tree === null
+        ? entries.filter((entry) => entry.invalid || trees.rootOf(entry.record) === workRoot)
+        : entries;
       if (ciMode) {
-        decision = decideCi(entries, trees.of, limits);
-        treeRoot = decision.entry && decision.entry.record ? trees.rootOf(decision.entry.record) : projectRoot;
+        decision = decideCi(measured, boundTree ? () => workFingerprint : trees.of, limits);
+        if (boundTree) treeRoot = workRoot;
+        else treeRoot = decision.entry && decision.entry.record ? trees.rootOf(decision.entry.record) : projectRoot;
       } else {
         const full = entries.filter((entry) => entry.record && entry.record.scope === 'full');
-        if (typeof options.runCwd === 'string' && options.runCwd !== '') treeRoot = fingerprintRoot(options.runCwd, projectRoot, limits);
+        if (boundTree) treeRoot = workRoot;
+        else if (typeof options.runCwd === 'string' && options.runCwd !== '') treeRoot = fingerprintRoot(options.runCwd, projectRoot, limits);
         else if (full.length > 0) treeRoot = trees.rootOf(full[full.length - 1].record);
       }
       currentTree = trees.treeAt(treeRoot);
-      if (!ciMode) decision = decide(entries, currentTree, configuredCommand, limits);
+      if (!ciMode) decision = decide(measured, currentTree, configuredCommand, limits);
     } catch (error) {
       decision = { state: 'unavailable', entry: null, reason: error.message };
     }
@@ -862,7 +879,7 @@ function verdict(options) {
       cause = `the newest full-suite record cannot be trusted (${decision.entry.id}: ${decision.entry.invalid}); run the suite again`;
       break;
     default:
-      cause = `the evidence store could not be read (${decision.reason || 'unknown fault'})`;
+      cause = decision.cause || `the evidence store could not be read (${decision.reason || 'unknown fault'})`;
   }
   const passes = PASSING_STATES.includes(decision.state);
   if (passes) {
@@ -1100,11 +1117,15 @@ function run(options) {
       resolve(2);
       return;
     }
-    const where = runDirectory(projectRoot, options.cwd, limits);
+    const boundTree = typeof options.workTree === 'string' && options.workTree !== '' ? options.workTree : null;
+    const where = runDirectory(projectRoot, options.cwd, limits, boundTree ? options.workDirectory || boundTree : null);
     const suiteDirectory = commandDirectory(resolved.command, where.cwd);
-    const treeRoot = TEST_SCOPES.includes(options.scope) ? fingerprintRoot(suiteDirectory, projectRoot, limits) : projectRoot;
+    let treeRoot = projectRoot;
+    if (TEST_SCOPES.includes(options.scope)) treeRoot = fingerprintRoot(suiteDirectory, projectRoot, limits);
+    else if (options.scope === 'acceptance' && boundTree) treeRoot = fingerprintRoot(boundTree, projectRoot, limits);
     if (options.ifStale && options.scope === 'scoped') {
-      const fresh = freshScopedRecord(locations, options.sessionKey, projectRoot, resolved.command, treeRoot, limits);
+      const freshRoot = boundTree ? fingerprintRoot(boundTree, projectRoot, limits) : treeRoot;
+      const fresh = freshScopedRecord(locations, options.sessionKey, projectRoot, resolved.command, freshRoot, limits);
       if (fresh) {
         say(stdout, `zensu evidence-run: skipped (--if-stale) — the newest run of this command is green on the current tree ${shortTree(fresh.record.tree_end)} (record ${fresh.record.id})`);
         resolve(0);
@@ -1117,6 +1138,7 @@ function run(options) {
         sessionKey: options.sessionKey,
         projectRoot,
         runCwd: suiteDirectory,
+        workTree: boundTree || '',
         configuredCommand: options.configuredCommand,
         gateMode: 'required',
         remedyPrefix: options.remedyPrefix,
@@ -1134,7 +1156,9 @@ function run(options) {
     const startedAt = new Date();
     const treeStart = TREE_SCOPES.includes(options.scope) ? computeFingerprint(projectRoot, treeRoot, locations.scratch, limits) : { tree: null, reason: null };
     if (where.moved) {
-      say(stderr, `zensu evidence-run: the working directory is not in the work tree of the bound project root, so the command runs in ${projectRoot}`);
+      say(stderr, boundTree
+        ? `zensu evidence-run: the working directory is not in the work tree of this Autopilot-bound chain, so the command runs in ${where.cwd}`
+        : `zensu evidence-run: the working directory is not in the work tree of the bound project root, so the command runs in ${projectRoot}`);
     }
     const record = {
       schema: SCHEMA,
@@ -1308,6 +1332,9 @@ function transportOptions(env) {
     sessionKey: env.ZENSU_EVR_SESSION_KEY,
     projectRoot: env.ZENSU_EVR_PROJECT_ROOT,
     cwd: env.ZENSU_EVR_CWD || env.ZENSU_EVR_PROJECT_ROOT,
+    workTree: env.ZENSU_EVR_WORK_TREE || '',
+    workDirectory: env.ZENSU_EVR_WORK_DIR || '',
+    workTreeFault: readTransportFile(directory, 'work-tree-fault'),
     scope: env.ZENSU_EVR_SCOPE,
     show: env.ZENSU_EVR_SHOW === 'all' ? 'all' : 'tail',
     ifStale: env.ZENSU_EVR_IF_STALE === '1',

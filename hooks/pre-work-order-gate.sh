@@ -1,11 +1,5 @@
 #!/bin/bash
-set -u
-
-INPUT=""
-IFS= read -r -d '' INPUT || true
-[ -n "${ZENSU_SESSION_TOKEN:-}" ] || exit 0
-LIB="$(CDPATH= cd -- "$(dirname -- "$0")/lib" 2>/dev/null && pwd -P)" || exit 0
-[ -f "$LIB/zensu-work-order-hook.sh" ] && [ ! -L "$LIB/zensu-work-order-hook.sh" ] || exit 0
-source "$LIB/zensu-work-order-hook.sh" 2>/dev/null || exit 0
-zensu_work_order_hook gate "$INPUT"
-exit 0
+case "$0" in (*/*) _zensu_hooks="${0%/*}" ;; (*) _zensu_hooks=. ;; esac
+command -v node >/dev/null 2>&1 || exec "${BASH:-bash}" "$_zensu_hooks/checks/pre-work-order-gate.sh"
+source "$_zensu_hooks/lib/zensu-hook-dispatch.sh" 2>/dev/null && zensu_hook_dispatch pre work-order-gate "$_zensu_hooks"
+exec "${BASH:-bash}" "$_zensu_hooks/checks/pre-work-order-gate.sh"

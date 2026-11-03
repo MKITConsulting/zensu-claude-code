@@ -356,16 +356,16 @@ ASYNC_CONTEXT="$(printf '%s' "$OUT_ASYNC" | node -e '
   });
 ')"
 case "$ASYNC_CONTEXT" in
-  *"async_launched"*"ticket was NOT consumed"*"run_in_background: false"*) ASYNC_DIRECTIVE=yes ;;
+  *"async_launched"*"ticket was NOT consumed yet"*"wait for the report"*) ASYNC_DIRECTIVE=yes ;;
   *) ASYNC_DIRECTIVE=no ;;
 esac
 case "$ASYNC_CONTEXT" in
-  *"just finished"*) ASYNC_DIRECTIVE=no ;;
+  *"just finished"*|*"run_in_background"*) ASYNC_DIRECTIVE=no ;;
 esac
 [ "$ASYNC_DIRECTIVE" = yes ] && [ "$S8C_AFTER" = "$S8C_BEFORE" ] \
   && [ "$(ticket_consumed "$S8C")" = "false" ] && [ "$(review_round "$S8C")" = "0" ] \
-  && check "S8c a background launch keeps the ticket and asks for a foreground reviewer" PASS \
-  || check "S8c a background launch keeps the ticket and asks for a foreground reviewer (directive=$ASYNC_DIRECTIVE consumed=$(ticket_consumed "$S8C") round=$(review_round "$S8C"))" FAIL
+  && check "S8c a background launch keeps the ticket and asks the main thread to wait for the report" PASS \
+  || check "S8c a background launch keeps the ticket and asks the main thread to wait for the report (directive=$ASYNC_DIRECTIVE consumed=$(ticket_consumed "$S8C") round=$(review_round "$S8C"))" FAIL
 OUT_DONE="$(run_hook_with_status "$S8C" "$S8C_PROMPT" completed)"
 printf '%s' "$OUT_DONE" | grep -q 'just finished' \
   && [ "$(ticket_consumed "$S8C")" = "true" ] && [ "$(review_round "$S8C")" = "1" ] \

@@ -158,16 +158,29 @@ if (process.env.ZENSU_UPGRADE_SELFTEST_FAULT === 'candidate-crypto-monkeypatch')
   hook('pre-bash-source-write-gate.sh');
   hook('pre-write-secret-scan.sh');
   hook('notification-integrity-probe.sh');
+  hook('checks/pre-bash-zensu-gate.sh');
+  hook('checks/pre-bash-source-write-gate.sh');
+  hook('checks/pre-write-secret-scan.sh');
+  write('hooks/lib/hook-dispatch-v1.js', "'use strict';\n");
+  write('hooks/lib/hook-registration-v1.js', `'use strict';\n\nmodule.exports = { DISPATCHED_CHECKS: ${JSON.stringify([
+    ['reviewer-capability', '.*', 'pre-reviewer-capability-gate.sh', null, 'closed'],
+    ['zensu-cli-gate', 'Bash|PowerShell', 'pre-bash-zensu-gate.sh', 'checks/pre-bash-zensu-gate.sh', 'open'],
+    ['source-write-gate', 'Bash|PowerShell', 'pre-bash-source-write-gate.sh', 'checks/pre-bash-source-write-gate.sh', 'closed'],
+    ['secret-scan', 'Bash|PowerShell', 'pre-write-secret-scan.sh', 'checks/pre-write-secret-scan.sh', 'open'],
+  ].map(([name, matcher, script, body, failure]) => ({
+    event: 'PreToolUse', name, matcher, script, body, failure,
+  })))} };\n`);
   write('docs/records/unrelated.json', '{}\n');
   write('hooks/hooks.json', JSON.stringify({
     hooks: {
       PreToolUse: [
         { matcher: '.*', hooks: [{
-          type: 'command', command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/pre-reviewer-capability-gate.sh"',
+          type: 'command',
+          command: 'node',
+          args: ['${CLAUDE_PLUGIN_ROOT}/hooks/lib/hook-dispatch-v1.js', 'pre'],
+          timeout: 60,
+          onFailure: 'block',
         }] },
-        { matcher: 'Bash', hooks: [
-          'pre-bash-zensu-gate.sh', 'pre-bash-source-write-gate.sh', 'pre-write-secret-scan.sh',
-        ].map((name) => ({ type: 'command', command: `bash "\${CLAUDE_PLUGIN_ROOT}/hooks/${name}"` })) },
       ],
       SessionStart: [{ hooks: [
         'session-start-session-control.sh', 'session-start-pulse.sh',
@@ -272,22 +285,26 @@ process.on('exit',()=>{
   if(!linger){try{fs.unlinkSync(inUseMarker);}catch(_error){}try{fs.rmdirSync(inUseDirectory);}catch(_error){}}
 });
 const hookConfig=(root)=>JSON.parse(fs.readFileSync(path.join(root,'hooks','hooks.json'),'utf8')).hooks;
-const hookNames=(root,event,tool)=>{
-  const names=[];
+const hookCommands=(root,event,tool)=>{
+  const commands=[];
   for(const group of hookConfig(root)[event]||[]){
     if(tool!==undefined&&!new RegExp(group.matcher||'.*').test(tool))continue;
     for(const hook of group.hooks||[]){
+      if(hook.command==='node'){
+        if(!Array.isArray(hook.args)||hook.args.length!==2)process.exit(14);
+        commands.push({name:'',command:'node',args:hook.args.map((arg)=>String(arg).split('\${CLAUDE_PLUGIN_ROOT}').join(root))});
+        continue;
+      }
       const match=String(hook.command||'').match(/\\/hooks\\/([A-Za-z0-9._-]+\\.sh)/);
       if(!match)process.exit(14);
-      names.push(match[1]);
+      commands.push({name:match[1],command:'bash',args:[path.join(root,'hooks',match[1])]});
     }
   }
-  return names;
+  return commands;
 };
-const appendEvent=(root,event,tool,status=0)=>hookNames(root,event,tool).forEach((name)=>{
+const appendEvent=(root,event,tool,status=0)=>hookCommands(root,event,tool).forEach(({name,command,args})=>{
   if(fault==='diagnostic-secret-hook'&&name===diagnosticSecret+'.sh')return;
-  const target=path.join(root,'hooks',name);
-  const result=spawnSync('bash',[target],{
+  const result=spawnSync(command,args,{
     encoding:'utf8',
     input:'{}\\n',
     env:{...process.env,CLAUDE_PLUGIN_ROOT:root},

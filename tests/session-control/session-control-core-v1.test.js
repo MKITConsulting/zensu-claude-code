@@ -988,6 +988,28 @@ test('baseline initialization is idempotent and never resets an existing workflo
   assert.equal(fs.existsSync(path.join(f.pluginData, '.workflow-activations')), false);
 });
 
+test('the first creation of .zensu writes a nested .gitignore for local state and never rewrites one', () => {
+  const f = fixture();
+  register(f);
+  initialize(f);
+  const gitignore = path.join(f.projectRoot, '.zensu', '.gitignore');
+  assert.equal(fs.readFileSync(gitignore, 'utf8'), core.ZENSU_GITIGNORE_BODY);
+  assert.deepEqual(core.ZENSU_GITIGNORE_BODY.split('\n').filter(Boolean), ['/state/', '/logs/witness-*.log']);
+  fs.writeFileSync(gitignore, 'project-owned\n');
+  initialize(f);
+  assert.equal(fs.readFileSync(gitignore, 'utf8'), 'project-owned\n');
+  fs.unlinkSync(gitignore);
+  initialize(f);
+  assert.equal(fs.existsSync(gitignore), false);
+
+  const existing = fixture();
+  register(existing);
+  fs.mkdirSync(path.join(existing.projectRoot, '.zensu'));
+  initialize(existing);
+  assert.equal(fs.existsSync(path.join(existing.projectRoot, '.zensu', '.gitignore')), false);
+  assert.equal(fs.existsSync(path.join(existing.projectRoot, '.zensu', 'state')), true);
+});
+
 test('resetReviewBudget re-arms the complete review budget in one CAS revision', () => {
   const f = fixture();
   initialize(f);

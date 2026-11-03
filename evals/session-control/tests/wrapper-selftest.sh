@@ -168,7 +168,7 @@ parse_subagent_context() {
       let match;
       let parsed;
       if (kind === "host") {
-        match = text.match(/^\[zensu-host-context\] schema_version=1 host=claude project_root=("(?:\\.|[^"\\])*") runtime_digest=(sha256:[a-f0-9]{64}) principal=(host-profile-v1)\. Within this agent definition and Claude Code host permissions, the Zensu capability gate admits only Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, apply_patch, LSP, WebFetch, WebSearch, ToolSearch, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, Agent, SendMessage, AskUserQuestion, StructuredOutput, ReportFindings, and SubagentHandback, plus the MCP tools mcp__plugin_context7_context7__resolve-library-id and mcp__plugin_context7_context7__query-docs and read-only Zensu MCP tools; it denies every other tool but Bash, so every shell alias, Monitor and every other MCP tool are unavailable\. A named neutral agent may run Bash behind an accident guard unless hooks\.subagentShell is false; the guard prevents accidents and is not a sandbox, and an unnamed agent, a zensu-review-\* persona and a read-only Zensu agent hold no shell\. Grep and Glob must name a concrete safe subtree; an omitted path or project\/plugin\/plugin-data ancestor is denied because it could traverse protected state\. Session selectors are not authority: this neutral agent must not access Session Control or workflow-root state, claim main-v1, or mutate Zensu workflow state\.$/);
+        match = text.match(/^\[zensu-host-context\] schema_version=1 host=claude project_root=("(?:\\.|[^"\\])*") runtime_digest=(sha256:[a-f0-9]{64}) principal=(host-profile-v1)\. Within this agent definition and Claude Code host permissions, the Zensu capability gate admits every tool except what reaches Zensu\x27s own state or runs commands outside Bash: Session Control and workflow paths, the project\x27s \.zensu directory, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell, every shell alias other than Bash, a Monitor command and a tool whose name marks it as running commands or code; a tool whose inputs the gate does not know may not name the installed plugin, its private data, the session record, a Zensu configuration layer or a \.zensu directory anywhere in its input\. A named neutral agent may run Bash commands behind an accident guard unless hooks\.subagentShell is false; the guard prevents accidents and is not a sandbox, and an unnamed agent, a zensu-review-\* persona and a read-only Zensu agent hold no shell\. Grep and Glob must name a concrete safe subtree; an omitted path or project\/plugin\/plugin-data ancestor is denied because it could traverse protected state\. Session selectors are not authority: this neutral agent must not access Session Control or workflow-root state, claim main-v1, or mutate Zensu workflow state\.$/);
         if (!match) process.exit(5);
         parsed = { project_root: JSON.parse(match[1]), runtime_digest: match[2], principal: match[3] };
       } else if (kind === "reviewer") {
@@ -524,7 +524,7 @@ elif [ -n "$agent" ] && [ "${STUB_OMIT_REVIEWER_SPAWN:-0}" != '1' ]; then
       '{type:"assistant",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_use",id:"generic-command",name:"Bash",input:{command:$command,description:$principal}}]}}'
     command_error=true
     [ "${STUB_GENERIC_COMMAND_ALLOWED:-0}" != '1' ] || command_error=false
-    denial_reason='reviewer-capability-v1 deny: host-profile-v1 shell guard: the command prints the inherited environment. The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
+    denial_reason='Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 shell guard: the command prints the inherited environment. The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
     [ "${STUB_GENERIC_WRONG_DENIAL:-0}" != '1' ] || denial_reason='generic downstream tool failure'
     jq -cn --argjson failed "$command_error" --arg content "$denial_reason" \
       '{type:"user",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_result",tool_use_id:"generic-command",is_error:$failed,content:$content}]}}'
@@ -605,7 +605,7 @@ ZENSU_SESSION_KEY=must-not-leak"
         request.on("error", () => process.exit(1));
       ' "$SELFTEST_MUTATING_CONTROL_CANARY_URL"
     fi
-    denial_reason="reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $(printf '%s' "$attack" | jq -br .name); only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report"
+    denial_reason="Zensu capability gate (reviewer-capability-v1) deny: reviewer-readonly-v1 cannot invoke $(printf '%s' "$attack" | jq -br .name); only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report"
     [ "${STUB_GENERIC_ATTACK_ERROR:-0}" != '1' ] || denial_reason='generic downstream tool failure'
     jq -cn --argjson denied "$attack_error" --arg content "$denial_reason" \
       '{type:"user",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_result",tool_use_id:"attack-1",is_error:$denied,content:$content}]}}'

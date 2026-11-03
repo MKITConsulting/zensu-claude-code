@@ -5,6 +5,7 @@
     "autopilotEnforcer": false,
     "bestSolutionFirst": false,
     "chainEnforcer": false,
+    "contextAutoLoad": false,
     "criticalReproduction": false,
     "externalReviewImport": false,
     "findingVerification": false,

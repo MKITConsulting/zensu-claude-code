@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const { REGISTRATION, hostMatcherCovers } = require('./hook-registration-v1.js');
+const { REGISTRATION, entryMatcherCovers, hookEntries } = require('./hook-registration-v1.js');
 
 const SHELL_TOOLS = Object.freeze(['Bash', 'PowerShell']);
 const TOOL_EVENTS = Object.freeze(['PreToolUse', 'PostToolUse']);
@@ -45,10 +45,10 @@ function shellCoverage(manifest) {
     if (!Array.isArray(groups)) return null;
     for (const group of groups) {
       if (!group || !Array.isArray(group.hooks)) continue;
-      const [bash, powershell] = SHELL_TOOLS.map((tool) => hostMatcherCovers(group.matcher, tool));
-      for (const hook of group.hooks) {
-        const file = hookFile(hook && hook.command);
+      for (const hookEntry of group.hooks.flatMap((hook) => hookEntries(hook, event))) {
+        const file = hookFile(hookEntry.command);
         if (!file) continue;
+        const [bash, powershell] = SHELL_TOOLS.map((tool) => entryMatcherCovers(group.matcher, hookEntry.matcher, tool));
         const key = `${event}\t${file}`;
         const entry = seen.get(key) || {
           event,

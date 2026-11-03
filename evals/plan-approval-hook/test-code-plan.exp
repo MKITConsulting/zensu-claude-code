@@ -1,9 +1,9 @@
 #!/usr/bin/env expect -f
 # Positive test: a code-change plan should make Claude ASK which delivery route
 # to take (AskUserQuestion, four mutually exclusive options) and, when the Zensu
-# workflow is chosen, route to the /zensu:tdd skill in the main thread. We
+# workflow is chosen, route to the /zensu:build skill in the main thread. We
 # approve the plan, select the Zensu-workflow option, then assert the
-# 'Executing via /zensu:tdd' status line.
+# 'Executing via /zensu:build' status line.
 #
 # Select by LABEL, never by ordinal. The directive orders the four options by
 # what fits the plan and marks the first one recommended, so slot 1 is not a
@@ -37,7 +37,7 @@ set GAP {(?:[ \t]|\x1b\[[0-9;]*[A-Za-z])*}
 # record_prompt_ok reads the text from the LAST mention of the helper up to the
 # permission question. It first drops escape sequences and every character that is
 # not printable ASCII, because spaces, line wraps and box borders reach this script
-# in forms no pattern can follow. What is left must start with the --tdd verb and
+# in forms no pattern can follow. What is left must start with the --build verb and
 # must hold none of ; & | ` < > ( and no helper output, so a chained, piped,
 # redirected or substituted command is refused, process substitution and zsh glob
 # qualifiers included, and so is a prompt that holds a later tool call or comes
@@ -59,7 +59,7 @@ proc record_prompt_ok {text} {
   set at [string last $name $text]
   if {$at < 0} { return 0 }
   set tail [string range $text [expr {$at + [string length $name]}] end]
-  if {![regexp {^["']?--tdd(?!-)} $tail]} { return 0 }
+  if {![regexp {^["']?--build(?!-)} $tail]} { return 0 }
   if {[regexp {[;&|`<>(]|delivery-route:} $tail]} { return 0 }
   return 1
 }
@@ -84,12 +84,12 @@ expect {
 # option LABEL — typing the label selects it regardless of the slot it landed in,
 # which an ordinal cannot do once the directive reorders the four options.
 expect {
-  -re "Zensu${GAP}workflow${GAP}—${GAP}/zensu:tdd|Autopilot${GAP}—${GAP}/zensu:autopilot" {
+  -re "Zensu${GAP}workflow${GAP}—${GAP}/zensu:build|Autopilot${GAP}—${GAP}/zensu:autopilot" {
     send_user "\n>>> Delivery-route question detected — selecting the Zensu workflow by label\n"
     send "Zensu workflow\r"
   }
-  -re "Executing${GAP}via${GAP}/zensu:tdd" {
-    send_user "\n>>> Routed to /zensu:tdd before an explicit prompt match\n"
+  -re "Executing${GAP}via${GAP}/zensu:build" {
+    send_user "\n>>> Routed to /zensu:build before an explicit prompt match\n"
   }
   timeout {
     send_user "\n>>> TIMEOUT waiting for the delivery-route question\n"
@@ -109,24 +109,24 @@ expect {
   -re "Do${GAP}you${GAP}want${GAP}to${GAP}proceed" {
     if {!$answered && !$recorded && [record_prompt_ok $expect_out(buffer)]} {
       set answered 1
-      send_user "\n>>> Record command permission prompt — approving the helper's --tdd call\n"
+      send_user "\n>>> Record command permission prompt — approving the helper's --build call\n"
       send "1\r"
       exp_continue -continue_timer
     }
     send_user "\n>>> Permission prompt not recognised as the record command — declining it\n"
     send "\x1b"
   }
-  -re "⎿${GAP}delivery-route:${GAP}tdd" {
+  -re "⎿${GAP}delivery-route:${GAP}build" {
     set recorded 1
     send_user "\n>>> POSITIVE: the helper recorded the answer\n"
     if {!$dispatched} { exp_continue -continue_timer }
   }
-  -re "Executing${GAP}via${GAP}/zensu:tdd" {
+  -re "Executing${GAP}via${GAP}/zensu:build" {
     set dispatched 1
-    send_user "\n>>> POSITIVE: /zensu:tdd execution acknowledged\n"
+    send_user "\n>>> POSITIVE: /zensu:build execution acknowledged\n"
     if {!$recorded} { exp_continue -continue_timer }
   }
-  -re "Skipping${GAP}TDD" {
+  -re "Skipping${GAP}/zensu:build" {
     send_user "\n>>> UNEXPECTED skip for a code change\n"
   }
   timeout {

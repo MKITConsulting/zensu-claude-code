@@ -14,13 +14,13 @@ description: >
 
 A wargame is a **simulated course of action**: the full route through a hard mission, fought on paper move by move, written so a cheaper mid-tier model can execute it blind — without asking a single question. A stronger model plans once; a cheaper executor runs it. **Pay for the judgment once, keep it.**
 
-This is the recon-grounded execution-planner in the Zensu flow — it sits upstream of `/zensu:tdd` (plan the route, then let vanilla implementation run it) and serves rework/audit missions on existing features. It is **not** an ideation or roadmap tool: a wargame plans a *concrete* mission, it does not invent one.
+This is the recon-grounded execution-planner in the Zensu flow — it sits upstream of `/zensu:build` (plan the route, then let vanilla implementation run it) and serves rework/audit missions on existing features. It is **not** an ideation or roadmap tool: a wargame plans a *concrete* mission, it does not invent one.
 
 The most important consequence: **when this skill runs, you PLAN the mission — you do not execute it.** Recon is read-only. The deliverable is a wargame document, not a built feature or a fixed bug. The executor comes later.
 
 ## When to Use
 
-- Before handing a hard task to a cheaper executor (or to `/zensu:tdd`) — map the route first.
+- Before handing a hard task to a cheaper executor (or to `/zensu:build`) — map the route first.
 - Reworking or auditing an existing product, site, repo, or `ZEN-XXX` feature where recon has real substrate.
 - Proving a property or invariant end to end (`/goal` mode) before trusting it.
 
@@ -35,7 +35,7 @@ Skip it for blank-page ideation, vision, or roadmap work — recon starves and e
 
 Work these in order. Depth scales to the mission; the skeleton does not.
 
-**0 — Frame the mission.** Decide the mode (below). If the user opened with `/goal ...` or the mission is a proof/audit/coverage/invariant task, write the goal contract first (`references/goal-contract.md`) — it becomes the doc's header and the referee for "done." Settle the output path (see *Where output goes*).
+**0 — Frame the mission.** Decide the mode (below). If the mission opens with `/goal ...` (as in `/zensu:wargame /goal ...`; a message that itself starts with `/goal` runs Claude Code's built-in `/goal` stop-condition command instead and never reaches this skill) or the mission is a proof/audit/coverage/invariant task, write the goal contract first (`references/goal-contract.md`) — it becomes the doc's header and the referee for "done." Settle the output path (see *Where output goes*).
 
 **1 — Recon, read-only.** Read what the mission depends on before planning a single move: the repo and its core flow, the reference site, the schema, the process description, the transcripts — whatever the brief names. For a `ZEN-XXX` feature, read its current state (`zensu features get <feature-uuid>`, which takes the UUID rather than the `ZEN-XXX` id, and its linked docs/journeys) as recon input. Recon settles assumptions; what it cannot settle becomes RECON NEEDED. Never mutate anything in this phase.
 

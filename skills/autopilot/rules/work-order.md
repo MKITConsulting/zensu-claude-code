@@ -56,16 +56,23 @@ names another order.
 
 `--bind-spec` reports `planning`, checks the order's plan-approval state, reports `implementing`
 and records `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. On exit 0 continue with
-Autopilot's Phase 1 step 1, the `/zensu:tdd` run with the exact `AUTOPILOT-RUN: <RUN_ID>` line.
+Autopilot's Phase 1 step 1, the `/zensu:build` run with the exact `AUTOPILOT-RUN: <RUN_ID>` line.
 
-Exit 8 with `plan-approval-required` on stderr means a person must approve the plan first. Run:
+Exit 8 with `plan-approval-required` on stderr means a person must approve the plan first. Write
+the plan commit's message in the commit style, language and attribution practice
+`rules/conventions.md` §3 decides for this repository, then run:
 
 ```bash
-CLAUDE_PLUGIN_DATA="…" bash "$WO" --plan-approval
+MSG="$(mktemp)" || exit 1
+trap 'rm -f "$MSG"' EXIT
+cat > "$MSG" <<'ZENSU_TEXT_END'
+<plan commit message>
+ZENSU_TEXT_END
+CLAUDE_PLUGIN_DATA="…" bash "$WO" --plan-approval --message-file "$MSG"
 ```
 
-It commits `.zensu/plans/<order-id>.md` on the order branch, pushes it, attaches it to the order as
-the plan artifact with its commit and a short summary, and asks for the approval. Exit 0 ends the
+It commits `.zensu/plans/<order-id>.md` on the order branch with that message, pushes it, attaches
+it to the order as the plan artifact with its commit and a short summary, and asks for the approval. Exit 0 ends the
 session successfully; a later attempt implements the approved plan. That attempt's `--bind-spec`
 compares the plan file on the branch with the approved commit and blocks the order with
 `worker_error` when they differ, so never edit the plan file after the approval.

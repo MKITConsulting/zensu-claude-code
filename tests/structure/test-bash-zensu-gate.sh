@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh"
+HOOK_BODY="$PLUGIN_DIR/hooks/checks/pre-bash-zensu-gate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 
 PASS=0; FAIL=0
@@ -28,8 +29,9 @@ if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const reg=require(process.argv[2]);
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
+  const hooks=reg.registeredHooks(h,"PreToolUse")||[];
   const covers=(e,tool)=>reg.hostMatcherCovers(e.matcher,tool)===reg.REGISTRATION.REGISTERED;
-  const ok=pres.some(e=>covers(e,"Bash") && covers(e,"PowerShell") && !covers(e,"Read") && (e.hooks||[]).some(z=>/pre-bash-zensu-gate\.sh/.test(z.command||"")));
+  const ok=hooks.some(e=>covers(e,"Bash") && covers(e,"PowerShell") && !covers(e,"Read") && /pre-bash-zensu-gate\.sh/.test(e.command));
   const noMcp=!pres.some(e=>/mcp__plugin_zensu_zensu/.test(e.matcher||""));
   process.exit(ok && noMcp ? 0 : 1);
 ' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
@@ -40,21 +42,20 @@ fi
 
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const pres=(h.hooks&&h.hooks.PreToolUse)||[];
-  const regs=pres.flatMap(e=>(e.hooks||[]).filter(z=>/pre-bash-zensu-gate\.sh/.test(z.command||"")));
+  const regs=(require(process.argv[2]).registeredHooks(h,"PreToolUse")||[]).filter(z=>/pre-bash-zensu-gate\.sh/.test(z.command));
   process.exit(regs.length===1 && regs[0].timeout===60 ? 0 : 1);
-' "$HOOKS_JSON" 2>/dev/null; then
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
   check "B3b registration carries the 60 s gate timeout" PASS
 else
   check "B3b registration carries the 60 s gate timeout" FAIL
 fi
 
-grep -qF 'zensu_hook_enabled mcpGate' "$HOOK" \
+grep -qF 'zensu_hook_enabled mcpGate' "$HOOK_BODY" \
   && check "B4 hook config-gated via zensu_hook_enabled mcpGate (default-on)" PASS \
   || check "B4 hook config-gated via zensu_hook_enabled mcpGate (default-on)" FAIL
 
 # Reuses the classification SoT + the CLI->tool map rather than re-listing tools.
-grep -qF 'zensu-mcp-tools.sh' "$HOOK" && grep -qF 'zensu-cli-map.sh' "$HOOK" \
+grep -qF 'zensu-mcp-tools.sh' "$HOOK_BODY" && grep -qF 'zensu-cli-map.sh' "$HOOK_BODY" \
   && check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" PASS \
   || check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" FAIL
 
@@ -113,6 +114,13 @@ LARGE_MAIN="$PROJECT/large-main.json"
 LARGE_SUB="$PROJECT/large-subagent.json"
 large_payload "$LARGE_MAIN"
 large_payload "$LARGE_SUB" general-purpose
+
+run "B48 capture start in direct mode" "zensu ai-work start --id goal --title agreed" '' ALLOW
+run "B48b capture submit in direct mode" "zensu ai-work submit goal --event-id event" '' ALLOW
+run "B48c capture start denied to child" "zensu ai-work start --id goal --title agreed" general-purpose DENY
+run "B48d capture submit denied to child" "zensu ai-work submit goal --event-id event" general-purpose DENY
+run "B48e capture does not allow chained mutation" "zensu ai-work start --id goal --title agreed && zensu security classify f1" '' DENY
+run "B48f capture reads remain reads" "zensu ai-work context && zensu ai-work get goal" '' ALLOW
 
 run "B5 read (features get)"                "zensu features get f1"                                      '' ALLOW
 run "B6 freelance mutation (classify)"      "zensu security classify f1 --classification confidential"   '' DENY
@@ -233,6 +241,14 @@ else
   check "B50 workflow read once per run (decision:node-spawns one=$SPAWNS_ONE three=$SPAWNS_THREE)" FAIL
 fi
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+
+B52_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat > \"\$f\" <<'ZENSU_TEXT_END'" \
+  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'zensu link docs f1 \' \
+  '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content "$(cat "$f")"')"
+tdd_workflow_begin gate-test "link_docs" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+run "B52 the skills' free-text form (a quoted heredoc into a temporary file, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+run "B52b the same free-text form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
 
 # B9 env escape; B10 default-on; B11 explicit false
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
@@ -477,7 +493,7 @@ parser_lines() {
     });
     if (run.error || run.status !== 0) { process.stdout.write("NO-ANSWER " + (run.error ? run.error.code : run.status)); process.exit(0); }
     process.stdout.write(run.stdout);
-  ' "$HOOK" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}"
+  ' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}"
 }
 TAB="$(printf '\t')"
 LINES_ONE="$(printf '%s' 'zensu features get f1' | parser_lines)"

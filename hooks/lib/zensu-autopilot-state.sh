@@ -1577,7 +1577,7 @@ if (mode === "begin") {
       fail(4, "workspace is held by a nonterminal run whose record could not be rendered");
     }
     // The same pending-stage branch the renderer takes, and for the same reason: a
-    // holder whose inner TDD chain is live is refused by adoption with exit 3, so this
+    // holder whose inner build chain is live is refused by adoption with exit 3, so this
     // copy must not offer it either. `S7v` pins the withheld wording in both places.
     const holderPending = workspaceHolder.stage === "BLOCKED" && workspaceHolder.blocked
       ? String(workspaceHolder.blocked.from || "") : workspaceHolder.stage;
@@ -1598,7 +1598,7 @@ if (mode === "begin") {
     // from both sides: a further carrier of the same sentence, or the next change that
     // has to reword it in every carrier anyway. Keep the doctor's own copy in step too.
     fail(4, `workspace held by nonterminal run ${workspaceHolder.runId} (stage ${workspaceHolder.stage}); `
-      + `adoption is not an exit for this run, because its inner TDD chain is live and the session driving it may still be running`
+      + `adoption is not an exit for this run, because its inner build chain is live and the session driving it may still be running`
       + ` — that stage is read from the run document, which is an ordinary file any session in this project can write; `
       + `report it to the user and, only after they say yes, run /zensu:autopilot-release to cancel it`);
   }
@@ -2009,7 +2009,7 @@ if (mode === "adopt") {
     // session's id at TDD_RUNNING became this session's active run on its own say-so.
     const repairPending = state.stage === "BLOCKED" ? state.blocked.from : state.stage;
     if (repairPending === "TDD_RUNNING" && state.tdd && state.tdd.sessionId !== callerSessionId) {
-      fail(3, "the run record names this session as its owner, but its inner TDD chain is driven by another session, so its owner pointer is not reinstalled; that chain has to be finished or cancelled in its own session first");
+      fail(3, "the run record names this session as its owner, but its inner build chain is driven by another session, so its owner pointer is not reinstalled; that chain has to be finished or cancelled in its own session first");
     }
     // The repair is about to install a pointer at the caller's OWN key, so any OTHER
     // nonterminal run this caller owns is orphaned behind it: `read-active` then
@@ -2041,7 +2041,7 @@ if (mode === "adopt") {
     reportStale();
     process.exit(11);
   }
-  // An inner TDD chain is driven by `state.tdd.sessionId`'s session and this verb
+  // An inner build chain is driven by `state.tdd.sessionId`'s session and this verb
   // moves the RUN only. Refusing keeps the two from disagreeing about who owns the
   // generation, which a half-move would guarantee. The test is the PENDING stage,
   // not the literal one: BLOCK is legal from TDD_RUNNING (`STOP_TERMINAL` excludes
@@ -2056,7 +2056,7 @@ if (mode === "adopt") {
     // TDD_RUNNING preserves, so the same refusal fires again. What does clear it is the
     // chain's own session finishing or cancelling it — `tdd.sessionId` names that session
     // — and the run itself stays cancellable through the release verb.
-    fail(3, "run has a live inner TDD chain driven by another session; blocking that chain does not make the run adoptable, because this verb tests the pending stage, which a BLOCK preserves. The chain's own session has to finish or cancel it, or the whole run can be cancelled with /zensu:autopilot-release");
+    fail(3, "run has a live inner build chain driven by another session; blocking that chain does not make the run adoptable, because this verb tests the pending stage, which a BLOCK preserves. The chain's own session has to finish or cancel it, or the whole run can be cancelled with /zensu:autopilot-release");
   }
   // The caller's pointer is about to be overwritten, so a run it ALREADY owns would
   // be orphaned behind it: `read-active` refuses with exit 2 for every consumer once
@@ -3594,7 +3594,7 @@ _autopilot_workspace_refusal() {
       if (!adoptable && value.tdd && value.tdd.sessionId !== caller) {
         process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}), `
           + `whose run record names this session as its owner and names another session as the `
-          + `driver of its inner TDD chain, so reinstalling its owner pointer is refused with `
+          + `driver of its inner build chain, so reinstalling its owner pointer is refused with `
           + `exit 3; that chain has to be finished or cancelled in its own session before this `
           + `session can finish or repair that run — that stage and both session names are `
           + `${forgeableSource}, so read that run document in the autopilot: row of /zensu:doctor `
@@ -3619,7 +3619,7 @@ _autopilot_workspace_refusal() {
       // that was reached for first cannot be undone.
       if (!adoptable) {
         process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}); `
-          + `adoption is not an exit for this run, because its inner TDD chain is live and the session driving it may still be running${forgeableStage}; `
+          + `adoption is not an exit for this run, because its inner build chain is live and the session driving it may still be running${forgeableStage}; `
           + `report it to the user and, only after they say yes, run /zensu:autopilot-release to cancel it\n`);
         return;
       }
@@ -3632,7 +3632,7 @@ _autopilot_workspace_refusal() {
       // The operator form withholds the audited adopt invocation for the same reason,
       // and keeps the release one, which is the exit that remains.
       process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}); `
-        + `adoption is not an exit for this run, because its inner TDD chain is live and the session driving it may still be running${forgeableStage}; `
+        + `adoption is not an exit for this run, because its inner build chain is live and the session driving it may still be running${forgeableStage}; `
         + `ask that session to hand it over or finish it, or once it is idle cancel it with:\n`
         + `zensu-log.sh --autopilot-release --run ${runId} --confirm\n`);
       return;

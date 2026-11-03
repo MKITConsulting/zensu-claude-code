@@ -34,6 +34,19 @@ source "$TDD_LIB"
 
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 
+stop_notice_only() {
+  OUT_TEXT="$1" ERR_FILE="$2" NEEDLE="${3:-}" node -e '
+    const fs = require("node:fs");
+    let parsed;
+    try { parsed = JSON.parse(process.env.OUT_TEXT); } catch (_) { process.exit(1); }
+    if (!parsed || Object.keys(parsed).join() !== "systemMessage" || typeof parsed.systemMessage !== "string") process.exit(1);
+    const lines = parsed.systemMessage.split("\n");
+    const stderrLines = fs.readFileSync(process.env.ERR_FILE, "utf8").split("\n");
+    if (!lines.every((line) => stderrLines.includes(line))) process.exit(1);
+    process.exit(lines.some((line) => line.includes(process.env.NEEDLE)) ? 0 : 1);
+  ' 2>/dev/null
+}
+
 # Arm a session so the enforcer WOULD block: active + implComplete, chainDone=false.
 arm() {
   local sid="$1"
@@ -55,11 +68,17 @@ OUT0="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID0" | bash "$S
 # --- E1 ZENSU_CHAIN=off -> allow stop ---
 SID1="esc-chain-off"
 arm "$SID1"
-OUT1="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID1" | ZENSU_CHAIN=off bash "$STOP" 2>/dev/null)"
+ERR1="$STATE_DIR/e1.err"
+OUT1="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID1" | ZENSU_CHAIN=off bash "$STOP" 2>"$ERR1")"
 if [ -z "$OUT1" ] || [ "$(printf '%s' "$OUT1" | decision)" = "allow" ]; then
   check "E1 ZENSU_CHAIN=off -> allow stop (env escape)" PASS
 else
   check "E1 ZENSU_CHAIN=off (out=$OUT1)" FAIL
+fi
+if stop_notice_only "$OUT1" "$ERR1" 'Gates bypassed during this session: ZENSU_CHAIN'; then
+  check "E1b the released Stop shows the recorded bypass to the user as its only stdout field, systemMessage, and keeps it on stderr" PASS
+else
+  check "E1b bypass notice as systemMessage (out=$OUT1 err='$(cat "$ERR1" 2>/dev/null)')" FAIL
 fi
 
 # --- E2 hooks.chainEnforcer=false -> allow stop ---
@@ -94,6 +113,11 @@ if grep -qF 'review chain did not converge after 8 blocked Stops, the Stop cap f
   check "E3b the release notice counts the 8 Stops the cap blocks, not the releasing ninth" PASS
 else
   check "E3b release notice count (err='$(cat "$ERR3" 2>/dev/null)')" FAIL
+fi
+if stop_notice_only "$OUT3" "$ERR3" 'review chain did not converge after 8 blocked Stops'; then
+  check "E3c the cap release reaches the user as a systemMessage carrying the stderr notice, and stdout holds no decision" PASS
+else
+  check "E3c cap notice as systemMessage (out=$OUT3)" FAIL
 fi
 
 # --- E4 control: blocks within budget still block ---

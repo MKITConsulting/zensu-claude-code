@@ -25,7 +25,7 @@ trap cleanup EXIT
 
 source "$LIB"
 
-# 0.4.0+: the gate activates on chain-state (active=true), set by /zensu:tdd
+# 0.4.0+: the gate activates on chain-state (active=true), set by /zensu:build
 # --tdd-begin. Shim phase setup to also mark each session active (the legacy
 # CLAUDE_AGENT_TYPE=zensu:tdd-manager activation was removed).
 eval "$(declare -f tdd_write_phase | sed '1s/^tdd_write_phase/_zensu_orig_write_phase/')"

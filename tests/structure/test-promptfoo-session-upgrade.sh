@@ -122,9 +122,24 @@ if grep -Fq -- 'symlink: ${rel}' "$PROVIDER" || grep -Fq -- 'unsupported entry: 
 else
   check 'Provider never prints raw runtime entry paths' PASS
 fi
-contains 'Provider validates the captured Read and Bash hook multisets' \
+contains 'Provider validates the captured Read and Bash hook process multisets' \
   "$PROVIDER" \
-  '...capturedCandidateHooks.observedExpectedHooks.PreToolUse.Bash'
+  '...capturedCandidateHooks.observedHookProcesses.PreToolUse.Bash'
+contains 'Provider traces the exec-form dispatcher through its own node shim' \
+  "$PROVIDER" \
+  "fs.writeFileSync(path.join(bin, 'node'),"
+contains 'Node shim records only the canonical dispatcher with its event flag' \
+  "$PROVIDER" \
+  'if [ "$#" -eq 2 ] && [ "$target" = "$plugin_root/hooks/lib/hook-dispatch-v1.js" ]; then'
+contains 'Node shim contains every plugin-scoped node call like a Bash hook' \
+  "$PROVIDER" \
+  '${testMode ? directCommand : containedNode}'
+contains 'Node shim hands a node call outside the plugin cache to the real runtime' \
+  "$PROVIDER" \
+  '*) exec ${shellQuote(realNode)} "$@" ;;'
+contains 'Evaluator contract reads the dispatcher check registry without running it' \
+  "$HOOK_CONTRACT" \
+  "require: () => { throw new Error('require refused'); },"
 contains 'Evaluator contract owns the complete Bash gate minimum' \
   "$HOOK_CONTRACT" \
   "'pre-write-secret-scan.sh'"
@@ -415,6 +430,9 @@ contains 'Contained hook integration is opt-in outside its prepared CI job' \
 contains 'Every real contained hook invocation has a hard process timeout' \
   "$ROOT/tests/structure/test-session-control-sandbox-hook-integration.sh" \
   '/usr/bin/timeout --signal=TERM --kill-after=5s 30s'
+contains 'Contained hook integration runs the exec-form dispatcher through the node shim' \
+  "$ROOT/tests/structure/test-session-control-sandbox-hook-integration.sh" \
+  '"$BOUNDARY_NODE" "$ROOT/hooks/lib/hook-dispatch-v1.js" pre'
 contains 'Coverage gate includes the independent authority verifier' \
   "$COVERAGE" \
   'evals/session-control/lib/upgrade-independent-verifier.js'

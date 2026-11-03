@@ -21,7 +21,7 @@ check() {
   else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi
 }
 decision() {
-  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{const j=JSON.parse(s);if(j&&j.decision==="block"&&typeof j.reason==="string"){console.log("block");return}}catch(_){}console.log("invalid");process.exitCode=2});'
+  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{const j=JSON.parse(s);if(j&&j.decision==="block"&&typeof j.reason==="string"){console.log("block");return}if(j&&Object.keys(j).length===1&&typeof j.systemMessage==="string"){console.log("allow");return}}catch(_){}console.log("invalid");process.exitCode=2});'
 }
 reason() {
   node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){}});'
@@ -866,6 +866,7 @@ DECISIONS="$(OUT_DIR="$CASE_ROOT" node -e '
       if (rc !== "0") { invalid += 1; continue; }
       if (!raw) { allow += 1; continue; }
       const value = JSON.parse(raw);
+      if (value && Object.keys(value).length === 1 && typeof value.systemMessage === "string") { allow += 1; continue; }
       if (value && value.decision === "block" && typeof value.reason === "string") {
         block += 1;
         if (value.reason.startsWith("STOP intercepted by zensu chain-enforcer.")) actionable += 1;

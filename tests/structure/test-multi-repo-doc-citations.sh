@@ -39,7 +39,7 @@
 #      `done`, `else`, `then`, `do`, `{`, `}`, `)`, `;;`, a markdown table rule).
 #
 # Property 2 is what catches the two defects this test was written against:
-# `skills/tdd/SKILL.md:193` was a blank line and
+# `skills/build/SKILL.md:193` was a blank line and
 # `hooks/pre-edit-tdd-reminder.sh:161` was a bare `fi`. Neither is a wrong
 # FILE — a path-existence check alone passes both — and both were cited as
 # evidence for a claim the reader cannot then verify.
@@ -53,7 +53,7 @@
 # §11 flags as needing re-verification. A continuation token is therefore
 # anchored to the most recent fully-qualified path seen at or before its line.
 # A THIRD spelling joins further lines of the same file with a comma
-# (`skills/tdd/SKILL.md:181, :184`); its tail elements carry no backtick before
+# (`skills/build/SKILL.md:181, :184`); its tail elements carry no backtick before
 # the colon and are anchored the same way. C3 counts that population with a
 # scanner independent of the extractor, so a regex that stops seeing the tail
 # cannot agree with its own expectation at zero.
@@ -166,11 +166,11 @@ const BASENAME_PATH = Object.assign(Object.create(null), {
   "reviewer-capability-v1.js": "hooks/lib/reviewer-capability-v1.js",
   "session-control-core-v1.js": "hooks/lib/session-control-core-v1.js",
   "chain-recovery-v1.js": "hooks/lib/chain-recovery-v1.js",
-  "pre-bash-source-write-gate.sh": "hooks/pre-bash-source-write-gate.sh",
-  "pre-edit-tdd-reminder.sh": "hooks/pre-edit-tdd-reminder.sh",
+  "pre-bash-source-write-gate.sh": "hooks/checks/pre-bash-source-write-gate.sh",
+  "pre-edit-tdd-reminder.sh": "hooks/checks/pre-edit-tdd-reminder.sh",
   "pre-bash-zensu-gate.sh": "hooks/pre-bash-zensu-gate.sh",
   "pre-reviewer-capability-gate.sh": "hooks/pre-reviewer-capability-gate.sh",
-  "pre-write-secret-scan.sh": "hooks/pre-write-secret-scan.sh",
+  "pre-write-secret-scan.sh": "hooks/checks/pre-write-secret-scan.sh",
   "trail.mjs": "skills/session-trail/scripts/trail.mjs",
   "stop-chain-enforcer.sh": "hooks/stop-chain-enforcer.sh",
   "CLAUDE.md": "CLAUDE.md",

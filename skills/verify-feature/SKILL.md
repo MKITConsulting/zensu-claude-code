@@ -40,7 +40,7 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--attach=<origin>` | local only | none | Verify an app the user already runs on a loopback origin (a loopback IP or `localhost`). Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
 | `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
 | `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin and its network-only origins, for unattended runs and for hosts that keep the policy in their launch environment. |
-| `--chain --log <run log>` | no | off | Verify every active `AC-###` criterion of the running `/zensu:tdd` chain and record one verdict per criterion for its terminus gate. Local only. See §Chain mode. |
+| `--chain --log <run log>` | no | off | Verify every active `AC-###` criterion of the running `/zensu:build` chain and record one verdict per criterion for its terminus gate. Local only. See §Chain mode. |
 
 Ask one batched question for missing information that cannot be derived safely. In
 particular, ask for the remote base URL and for genuinely ambiguous acceptance criteria.
@@ -48,8 +48,8 @@ particular, ask for the remote base URL and for genuinely ambiguous acceptance c
 ## Non-negotiable boundaries
 
 - **Report only.** Do not edit application code, alter tracked tests, commit, push, or fix a
-  defect. A failed verification is useful evidence. Offer `/zensu:tdd` or
-  `/zensu:cover` afterward when appropriate.
+  defect. A failed verification is useful evidence. Offer `/zensu:build` or
+  `/zensu:cover` when appropriate.
 - **One feature, complete matrix.** Stay within the requested behavior, but exercise every
   P0 and P1 scenario the changed code exposes. Do not reduce verification to one happy path.
 - **Explicit scope stays bounded.** When the caller says the supplied acceptance criteria are
@@ -76,7 +76,7 @@ particular, ask for the remote base URL and for genuinely ambiguous acceptance c
 
 ## Chain mode (`--chain`)
 
-`/zensu:tdd` Phase 6 step 6d and `/zensu:self-review` invoke this skill with
+`/zensu:build` Phase 6 step 6d and `/zensu:self-review` invoke this skill with
 `--chain --log <run log>`, so that every acceptance criterion of the running chain is
 verified live before the chain can close. Everything above still binds. Chain mode changes
 only these points:

@@ -53,9 +53,9 @@ contracts stay in `skills/verify-feature/SKILL.md`, `skills/verify-feature/rules
 and `skills/autopilot/rules/config.md` § `validate.navigationBroker`; this page does not
 replace them.
 
-## Inside a `/zensu:tdd` chain (`--chain`)
+## Inside a `/zensu:build` chain (`--chain`)
 
-A standalone `/zensu:tdd` chain runs this skill in `--chain` mode: at Phase 6 step 6d, before
+A standalone `/zensu:build` chain runs this skill in `--chain` mode: at Phase 6 step 6d, before
 the review, and again in `/zensu:self-review` when review rounds changed the tree. In that mode
 the skill verifies every active `AC-###` criterion of the chain's plan on this worktree, with the
 cheapest driver that can observe it: the browser for a UI criterion, a simulator for a mobile

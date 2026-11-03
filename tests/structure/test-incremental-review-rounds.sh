@@ -24,12 +24,12 @@ ASPECT_UNIT="$ROOT/tests/structure/aspect-activation-v1.test.js"
 . "$(dirname "$0")/lib-unit-registry.sh"
 
 source "$ROOT/tests/structure/lib-skill-text.sh"
-TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
+TDD_MD="$(skill_text_file "$ROOT/skills/build")"
 DELEGATE="$ROOT/hooks/post-review-tdd-delegate.sh"
 CONFIG_EX="$ROOT/config.example.json"
 CONFIG_DOC="$ROOT/docs/configuration.md"
 CHAIN_DOC="$ROOT/docs/review-chain.md"
-WORKFLOW_DOC="$ROOT/docs/tdd-manager-workflow.md"
+WORKFLOW_DOC="$ROOT/docs/build-workflow.md"
 
 PASS=0; FAIL=0
 check() {
@@ -111,14 +111,14 @@ case "$OUT" in
 esac
 
 # --- Directive carriers ------------------------------------------------------
-check "I8 tdd skill names the round-scope helper" "$(grep_ok "$TDD_MD" 'review-round-scope-v1.js')"
-check "I9 tdd skill names the aspect-activation helper" "$(grep_ok "$TDD_MD" 'aspect-activation-v1.js')"
-check "I10 tdd skill narrows only when the directive says the key is on" "$(grep_ok "$TDD_MD" 'when the post-review directive says `hooks.incrementalReviewRounds is on`')"
-check "I10a tdd skill keeps the whole diff when the directive says the key is off" "$(grep_ok "$TDD_MD" 'when it says `hooks.incrementalReviewRounds is off`, the packet keeps the WHOLE diff, and you never resolve the key yourself')"
+check "I8 build skill names the round-scope helper" "$(grep_ok "$TDD_MD" 'review-round-scope-v1.js')"
+check "I9 build skill names the aspect-activation helper" "$(grep_ok "$TDD_MD" 'aspect-activation-v1.js')"
+check "I10 build skill takes the narrowed list from --round-prepare and never resolves the key itself" "$(grep_ok "$TDD_MD" 'rebuild REVIEW PACKET v1 with the `changed_files` line `--round-prepare` printed, and never resolve `hooks.incrementalReviewRounds` yourself')"
+check "I10a build skill keeps the whole diff when the key is off" "$(grep_ok "$TDD_MD" 'and with the key off, the packet keeps the WHOLE diff')"
 ACTIVATION_PROBE='ZENSU_ROOT="{plugin_root}" CLAUDE_PROJECT_DIR="{project_root}" bash -c '\''source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled aspectActivation && echo on || echo off'\'
-check "I11 tdd skill resolves hooks.aspectActivation through the anchored probe" "$(grep_ok "$TDD_MD" "$ACTIVATION_PROBE")"
-check "I11a tdd skill pipes an empty change set while activation is off" "$(grep_ok "$TDD_MD" 'on `off` pipe an empty change set')"
-check "I11b tdd skill logs that activation is off" "$(grep_ok "$TDD_MD" 'into the same command instead and log `ASPECT ACTIVATION OFF — hooks.aspectActivation`')"
+check "I11 build skill resolves hooks.aspectActivation through the anchored probe" "$(grep_ok "$TDD_MD" "$ACTIVATION_PROBE")"
+check "I11a build skill pipes an empty change set while activation is off" "$(grep_ok "$TDD_MD" 'on `off` pipe an empty change set')"
+check "I11b build skill logs that activation is off" "$(grep_ok "$TDD_MD" 'into the same command instead and log `ASPECT ACTIVATION OFF — hooks.aspectActivation`')"
 mkdir -p "$TMP/probe-off/.zensu" "$TMP/probe-on" "$TMP/probe-home"
 printf '%s\n' '{"hooks":{"aspectActivation":false}}' > "$TMP/probe-off/.zensu/config.json"
 PROBE_CMD="${ACTIVATION_PROBE//\{plugin_root\}/$ROOT}"
@@ -134,11 +134,11 @@ case "$OUT" in
     check "I11e an empty change set keeps the lean re-review shape" PASS ;;
   *) check "I11e an empty change set keeps the lean re-review shape" FAIL ;;
 esac
-check "I12 tdd skill narrows ONLY on status=ok" "$(grep_ok "$TDD_MD" 'ONLY on `status=ok`')"
-check "I13 tdd skill keeps the whole diff on empty/degraded" "$(grep_ok "$TDD_MD" 'the packet keeps the WHOLE diff')"
-check "I14 tdd skill exempts the judge from the delta" "$(grep_ok "$TDD_MD" 'ALWAYS keeps the full cumulative `changed_files`')"
-check "I15 tdd skill logs every skipped aspect" "$(grep_ok "$TDD_MD" 'ASPECT SKIPPED —')"
-check "I16 tdd skill spawns the whole panel when activation is unavailable" "$(grep_ok "$TDD_MD" 'ASPECT ACTIVATION UNAVAILABLE —')"
+check "I12 build skill narrows ONLY on status=ok" "$(grep_ok "$TDD_MD" 'ONLY on `status=ok`')"
+check "I13 build skill keeps the whole diff on empty/degraded" "$(grep_ok "$TDD_MD" 'the packet keeps the WHOLE diff')"
+check "I14 build skill exempts the judge from the delta" "$(grep_ok "$TDD_MD" 'ALWAYS keeps the full cumulative `changed_files`')"
+check "I15 build skill logs every skipped aspect" "$(grep_ok "$TDD_MD" 'ASPECT SKIPPED —')"
+check "I16 build skill spawns the whole panel when activation is unavailable" "$(grep_ok "$TDD_MD" 'ASPECT ACTIVATION UNAVAILABLE —')"
 
 # The three delegate arms are verbatim-identical by contract, so every needle must
 # appear THREE times — a one-sided edit is the failure this counts rather than greps.
@@ -219,14 +219,14 @@ wait
 DEFAULTS="$(context_of defaults)" && check "I30 the default render is valid PostToolUse context" PASS \
   || check "I30 the default render is valid PostToolUse context" FAIL
 check "I30a the default fix round activates over this round's changed_files" "$(has "$DEFAULTS" "aspect-activation-v1.js --panel lean --round re answers spawn for this round's changed_files)")"
-check "I30b the default fix round narrows to the round delta" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js")"
+check "I30b the default fix round narrows to the round delta" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: THIS round's packet changed_files is the --round-prepare changed_files line, scoped to the round delta via hooks/lib/review-round-scope-v1.js")"
 check "I30c the default fix round keeps the round delta on" "$(lacks "$DEFAULTS" 'hooks.incrementalReviewRounds is off')"
 check "I30d the default fix round keeps activation on" "$(lacks "$DEFAULTS" 'hooks.aspectActivation is off')"
 ACT_OFF="$(context_of activation-off)" && check "I31 the activation-off render is valid PostToolUse context" PASS \
   || check "I31 the activation-off render is valid PostToolUse context" FAIL
 check "I31a activation off re-reviews over an empty change set" "$(has "$ACT_OFF" 'aspect-activation-v1.js --panel lean --round re answers spawn for an empty change set, because hooks.aspectActivation is off)')"
 check "I31b activation off never activates over the round's changed_files" "$(lacks "$ACT_OFF" "answers spawn for this round's changed_files")"
-check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" 'hooks.incrementalReviewRounds is on: scope THIS round')"
+check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" "hooks.incrementalReviewRounds is on: THIS round's packet changed_files is the --round-prepare changed_files line")"
 for name in rounds-off-project rounds-off-important rounds-off-all; do
   case "$name" in
     (rounds-off-project) status_line="'Fixing critical findings in-thread, then re-reviewing (round 1/2)'" ;;
@@ -255,7 +255,7 @@ check "I23 configuration.md states the judge exclusion" "$(grep_ok "$CONFIG_DOC"
 check "I24 configuration.md states the fail-open contract" "$(grep_ok "$CONFIG_DOC" 'Fail-open by contract:')"
 check "I25 configuration.md keeps security on a tests-only change set" "$(grep_ok "$CONFIG_DOC" 'still runs on a tests-only change set')"
 check "I26 review-chain.md records both reductions" "$(grep_ok "$CHAIN_DOC" 'hooks.incrementalReviewRounds')"
-check "I27 tdd-manager-workflow.md records the per-round delta" "$(grep_ok "$WORKFLOW_DOC" 'review-round-scope-v1.js')"
+check "I27 build-workflow.md records the per-round delta" "$(grep_ok "$WORKFLOW_DOC" 'review-round-scope-v1.js')"
 
 # --- Known-gap honesty -------------------------------------------------------
 # Both reductions are bounded by a stated gap, and a doc that drops the gap while

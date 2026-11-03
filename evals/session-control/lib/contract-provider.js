@@ -6,7 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const core = require('../../../hooks/lib/session-control-core-v1.js');
-const capability = require('../../../hooks/lib/reviewer-capability-v1.js');
+const DENY_PREFIX = 'Zensu capability gate (reviewer-capability-v1) deny: ';
+const BARE_IDENTITY_OPT_IN = { ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES: '1' };
 const common = require('./attestation-common.js');
 const evidenceWorkerContract = require('./evidence-worker-contract.js');
 
@@ -64,6 +65,7 @@ function runtimeEnvironment(pluginRoot, pluginData, projectRoot, recordsDir, ses
     'ZENSU_SESSION_CONTEXT',
     'ZENSU_RUNTIME_DIGEST',
     'ZENSU_PROJECT_ROOT',
+    'ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES',
   ]) delete environment[name];
   const boundPluginRoot = context.plugin_root;
   const boundPluginData = context.plugin_data;
@@ -141,7 +143,7 @@ function provePrincipalAndPreToolContracts(options) {
   const claudeEnvSentinel = Buffer.from('contract-sentinel: do not mutate\n', 'utf8');
   fs.writeFileSync(claudeEnvFile, claudeEnvSentinel, { mode: 0o600 });
   const sessionEnvironment = { ...environment, CLAUDE_ENV_FILE: claudeEnvFile };
-  const sessionStart = (agentType, label, agentId) => {
+  const sessionStart = (agentType, label, agentId, extraEnvironment = {}) => {
     const payload = {
       hook_event_name: 'SessionStart',
       source: 'startup',
@@ -151,7 +153,7 @@ function provePrincipalAndPreToolContracts(options) {
     };
     if (agentId !== undefined) payload.agent_id = agentId;
     const output = parseHookOutput(
-      invokeRuntime(adapter, payload, sessionEnvironment),
+      invokeRuntime(adapter, payload, { ...sessionEnvironment, ...extraEnvironment }),
       `${label} SessionStart --agent`,
     );
     if (!fs.readFileSync(claudeEnvFile).equals(claudeEnvSentinel)) {
@@ -243,33 +245,36 @@ function provePrincipalAndPreToolContracts(options) {
   }
 
   if (scenario === 'bare-reviewer-types') {
-    const exactFixtures = [
-      ['zensu:code-reviewer', 'scoped'],
-      ['zensu:review-aspect', 'scoped'],
-      ['zensu:review-judge', 'scoped'],
-      ['code-reviewer', 'bare'],
-      ['review-aspect', 'bare'],
-      ['review-judge', 'bare'],
-    ];
-    for (const [agentType, identityKind] of exactFixtures) {
+    const principalOf = (agentType, label, extraEnvironment) => {
       const subagentOutput = parseHookOutput(invokeRuntime(adapter, {
         hook_event_name: 'SubagentStart',
         session_id: sessionId,
         cwd: projectRoot,
-        agent_id: `contract-${agentType}`,
+        agent_id: `contract-${agentType.replaceAll(':', '-')}`,
         agent_type: agentType,
-      }, environment), `${identityKind} reviewer ${agentType}`);
-      const sessionOutput = sessionStart(agentType, `${identityKind} reviewer ${agentType}`);
-      for (const rendered of [
-        subagentOutput.hookSpecificOutput?.additionalContext || '',
-        sessionOutput.hookSpecificOutput?.additionalContext || '',
-      ]) {
-        if (!rendered.includes('principal=reviewer-readonly-v1') || rendered.includes('principal=main-v1')) {
-          throw new Error(`${identityKind} reviewer ${agentType} received the wrong principal`);
+      }, { ...environment, ...extraEnvironment }), label);
+      const sessionOutput = sessionStart(agentType, label, undefined, extraEnvironment);
+      return [subagentOutput, sessionOutput].map((output) => output.hookSpecificOutput?.additionalContext || '');
+    };
+    for (const [agentType, extraEnvironment, expected] of [
+      ['zensu:code-reviewer', {}, 'reviewer-readonly-v1'],
+      ['zensu:review-aspect', {}, 'reviewer-readonly-v1'],
+      ['zensu:review-judge', {}, 'reviewer-readonly-v1'],
+      ['code-reviewer', {}, 'host-profile-v1'],
+      ['review-aspect', {}, 'host-profile-v1'],
+      ['review-judge', {}, 'host-profile-v1'],
+      ['code-reviewer', BARE_IDENTITY_OPT_IN, 'reviewer-readonly-v1'],
+      ['review-aspect', BARE_IDENTITY_OPT_IN, 'reviewer-readonly-v1'],
+      ['review-judge', BARE_IDENTITY_OPT_IN, 'reviewer-readonly-v1'],
+    ]) {
+      const label = `${agentType}${extraEnvironment === BARE_IDENTITY_OPT_IN ? ' under the evaluation opt-in' : ''}`;
+      for (const rendered of principalOf(agentType, label, extraEnvironment)) {
+        if (!rendered.includes(`principal=${expected}`) || rendered.includes('principal=main-v1')) {
+          throw new Error(`${label} did not receive ${expected}`);
         }
       }
     }
-    return ['Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1'];
+    return ['Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1:BareNamesNeutralWithoutEvalOptIn'];
   }
 
   if (scenario === 'unknown-neutral-profile') {
@@ -307,6 +312,7 @@ function provePrincipalAndPreToolContracts(options) {
     fs.writeFileSync(probeFile, 'plm contract probe\n', { mode: 0o600 });
     for (const agentType of ['zensu:zensu-plm', 'zensu-plm']) {
       const agentId = `contract-${agentType.replaceAll(':', '-')}`;
+      const gateEnvironment = agentType === 'zensu-plm' ? { ...environment, ...BARE_IDENTITY_OPT_IN } : environment;
       const output = parseHookOutput(invokeRuntime(adapter, {
         hook_event_name: 'SubagentStart',
         session_id: sessionId,
@@ -338,7 +344,7 @@ function provePrincipalAndPreToolContracts(options) {
           agent_type: agentType,
           tool_name: toolName,
           tool_input: toolInput,
-        }, environment), `${agentType} ${toolName} boundary`);
+        }, gateEnvironment), `${agentType} ${toolName} boundary`);
       }
       const denied = assertDenied(invokeRuntime(gate, {
         hook_event_name: 'PreToolUse',
@@ -348,12 +354,12 @@ function provePrincipalAndPreToolContracts(options) {
         agent_type: agentType,
         tool_name: 'Write',
         tool_input: { file_path: 'ATTACK.txt', content: 'attack' },
-      }, environment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report');
+      }, gateEnvironment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report');
       if (denied.hookSpecificOutput.permissionDecisionReason
-          !== 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report') {
+          !== 'Zensu capability gate (reviewer-capability-v1) deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report') {
         throw new Error(`${agentType} Write denial was not exact`);
       }
-      const exactTraversalReason = 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 traversal root may reach protected Session Control or workflow state';
+      const exactTraversalReason = 'Zensu capability gate (reviewer-capability-v1) deny: zensu-plm-readonly-v1 traversal root may reach protected Session Control or workflow state';
       for (const [label, toolName, toolInput] of [
         ['project-root Grep', 'Grep', { pattern: 'phase', path: projectRoot }],
         ['project-root Glob', 'Glob', { pattern: '**/*', path: projectRoot }],
@@ -368,7 +374,7 @@ function provePrincipalAndPreToolContracts(options) {
           agent_type: agentType,
           tool_name: toolName,
           tool_input: toolInput,
-        }, environment), `${agentType} ${label}`, 'traversal root may reach protected Session Control or workflow state');
+        }, gateEnvironment), `${agentType} ${label}`, 'traversal root may reach protected Session Control or workflow state');
         if (!remediedReason(traversalDenied.hookSpecificOutput.permissionDecisionReason, exactTraversalReason)) {
           throw new Error(`${agentType} ${label} denial was not exact`);
         }
@@ -429,7 +435,7 @@ function provePrincipalAndPreToolContracts(options) {
         'unexpected hook event',
       );
       if (eventDenied.hookSpecificOutput.permissionDecisionReason
-          !== 'reviewer-capability-v1 deny: unexpected hook event') {
+          !== 'Zensu capability gate (reviewer-capability-v1) deny: unexpected hook event') {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }
@@ -484,15 +490,13 @@ function provePrincipalAndPreToolContracts(options) {
       tool_name: 'mcp__zensu__update_feature',
       tool_input: { feature_id: 'FEATURE-1', status: 'done' },
     }, environment), 'general-purpose mutating Zensu MCP', 'outside the read allowlist');
-    const exactCommandReason = 'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools';
+    const exactCommandReason = `${DENY_PREFIX}host-profile-v1 cannot invoke command-execution tools`;
     for (const [label, toolName, toolInput] of [
       ['shell alias', 'shell', { command: 'pwd' }],
       ['exec alias', 'exec', { cmd: 'pwd' }],
       ['exec_command alias', 'exec_command', { cmd: 'pwd' }],
       ['terminal alias', 'terminal', { script: 'pwd' }],
       ['command alias', 'command', { command: 'pwd' }],
-      ['context-mode execute', 'mcp__plugin_context-mode_context-mode__ctx_execute', { language: 'shell', code: 'env' }],
-      ['terminal MCP', 'mcp__terminal__run_in_terminal', { command: 'env' }],
     ]) {
       const denied = assertDenied(invokeRuntime(gate, {
         hook_event_name: 'PreToolUse',
@@ -503,21 +507,42 @@ function provePrincipalAndPreToolContracts(options) {
         tool_name: toolName,
         tool_input: toolInput,
       }, environment), `general-purpose ${label}`, 'command-execution tools');
-      if (!remediedReason(denied.hookSpecificOutput.permissionDecisionReason, exactCommandReason)) {
+      const reason = denied.hookSpecificOutput.permissionDecisionReason;
+      if (!remediedReason(reason, exactCommandReason) || !reason.endsWith(' Report the need to the main thread instead.')) {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }
 
-    const neutralAllowance = `a neutral subagent may use only ${[...capability.HOST_PROFILE_TOOLS].join(', ')}, Bash behind an accident guard, the MCP tools ${[...capability.HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
     for (const [toolName, toolInput] of [
       ['Skill', { skill: 'zensu:doctor' }],
-      ['Monitor', { command: 'sleep 1', description: 'wait for a process' }],
+      ['Monitor', { ws: { url: 'ws://localhost:3000/events' }, description: 'watch a stream', timeout_ms: 60000 }],
       ['TaskStop', { task_id: 'contract-task' }],
       ['EnterWorktree', { name: 'contract-worktree' }],
       ['Workflow', { script: 'export const meta = { name: "contract", description: "contract" }' }],
       ['Task', { subagent_type: 'Explore', prompt: 'Inspect an ordinary code path.' }],
       ['mcp__plugin_playwright_playwright__browser_navigate', { url: 'http://localhost:3000' }],
       ['mcp__plugin_context-mode_context-mode__ctx_search', { queries: ['review'] }],
+      ['mcp__github__get_pull_request', { owner: 'example', repo: 'example', pull_number: 1 }],
+    ]) {
+      assertAllowed(invokeRuntime(gate, {
+        hook_event_name: 'PreToolUse',
+        session_id: sessionId,
+        cwd: externalCwd,
+        agent_id: agentId,
+        agent_type: agentType,
+        tool_name: toolName,
+        tool_input: toolInput,
+      }, environment), `general-purpose ${toolName} outside Zensu state`);
+    }
+
+    const commandGateTail = "Zensu's command gates see only Bash and PowerShell commands; run the command through Bash, or report the need to the main thread instead";
+    for (const [toolName, toolInput, exactReason] of [
+      ['Monitor', { command: 'sleep 1', description: 'wait for a process', timeout_ms: 60000 },
+        `${DENY_PREFIX}host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because ${commandGateTail}`],
+      ['mcp__plugin_context-mode_context-mode__ctx_execute', { language: 'shell', code: 'git status --short' },
+        `${DENY_PREFIX}host-profile-v1 cannot invoke mcp__plugin_context-mode_context-mode__ctx_execute, because its name marks it as running commands or code and ${commandGateTail}`],
+      ['mcp__terminal__run_in_terminal', { command: 'git status --short' },
+        `${DENY_PREFIX}host-profile-v1 cannot invoke mcp__terminal__run_in_terminal, because its name marks it as running commands or code and ${commandGateTail}`],
     ]) {
       const denied = assertDenied(invokeRuntime(gate, {
         hook_event_name: 'PreToolUse',
@@ -527,11 +552,48 @@ function provePrincipalAndPreToolContracts(options) {
         agent_type: agentType,
         tool_name: toolName,
         tool_input: toolInput,
-      }, environment), `general-purpose unlisted ${toolName}`, `cannot invoke ${toolName};`);
-      if (denied.hookSpecificOutput.permissionDecisionReason
-          !== `reviewer-capability-v1 deny: host-profile-v1 cannot invoke ${toolName}; ${neutralAllowance}`) {
-        throw new Error(`general-purpose unlisted ${toolName} denial was not exact`);
+      }, environment), `general-purpose ${toolName} command`, 'command gates see only Bash');
+      if (denied.hookSpecificOutput.permissionDecisionReason !== exactReason) {
+        throw new Error(`general-purpose ${toolName} command denial was not exact`);
       }
+    }
+
+    const mentionTail = ', and Zensu cannot tell what that tool does with it; report the need to the main thread instead';
+    for (const [label, toolName, toolInput, mention] of [
+      ['a search naming .zensu', 'mcp__plugin_context-mode_context-mode__ctx_search', { queries: ['cat .zensu/state/*.json'] },
+        'its input names a .zensu directory, which holds Zensu workflow state or configuration'],
+      ['a search naming plugin data', 'mcp__plugin_context-mode_context-mode__ctx_search', { queries: [`ls ${context.plugin_data}`] },
+        'its input names the private plugin data, the installed plugin, the session record or the Zensu config file'],
+      ['a file URL into .zensu', 'mcp__plugin_playwright_playwright__browser_navigate', { url: `file://${protectedPath}` },
+        'its input names a .zensu directory, which holds Zensu workflow state or configuration'],
+    ]) {
+      const denied = assertDenied(invokeRuntime(gate, {
+        hook_event_name: 'PreToolUse',
+        session_id: sessionId,
+        cwd: externalCwd,
+        agent_id: agentId,
+        agent_type: agentType,
+        tool_name: toolName,
+        tool_input: toolInput,
+      }, environment), `general-purpose ${label}`, mention);
+      if (denied.hookSpecificOutput.permissionDecisionReason
+          !== `${DENY_PREFIX}host-profile-v1 cannot invoke ${toolName} here: ${mention}${mentionTail}`) {
+        throw new Error(`general-purpose ${label} denial was not exact`);
+      }
+    }
+
+    const powershellDenied = assertDenied(invokeRuntime(gate, {
+      hook_event_name: 'PreToolUse',
+      session_id: sessionId,
+      cwd: externalCwd,
+      agent_id: agentId,
+      agent_type: agentType,
+      tool_name: 'PowerShell',
+      tool_input: { command: 'Get-ChildItem' },
+    }, environment), 'general-purpose PowerShell', 'cannot invoke PowerShell');
+    if (powershellDenied.hookSpecificOutput.permissionDecisionReason
+        !== `${DENY_PREFIX}host-profile-v1 cannot invoke PowerShell, because the Zensu accident guard reads only Bash commands; run the command through Bash, or report the need to the main thread instead`) {
+      throw new Error('general-purpose PowerShell denial was not exact');
     }
 
     const guardTail = 'The guard prevents accidents and is not a sandbox; report the need to the main thread instead.';
@@ -560,7 +622,7 @@ function provePrincipalAndPreToolContracts(options) {
         tool_input: { command },
       }, environment), `general-purpose ${label}`, 'host-profile-v1 shell guard');
       const reason = denied.hookSpecificOutput.permissionDecisionReason;
-      if (!rules.some((rule) => reason === `reviewer-capability-v1 deny: host-profile-v1 shell guard: ${guardRules[rule]}. ${guardTail}`)) {
+      if (!rules.some((rule) => reason === `${DENY_PREFIX}host-profile-v1 shell guard: ${guardRules[rule]}. ${guardTail}`)) {
         throw new Error(`general-purpose ${label} guard denial was not exact: ${reason}`);
       }
     }
@@ -585,35 +647,35 @@ function provePrincipalAndPreToolContracts(options) {
     for (const [label, cwd, toolName, toolInput, exactReason, remedied] of [
       [
         'project-root Grep ancestor', projectRoot, 'Grep', { pattern: 'phase', path: projectRoot },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'project-root Glob ancestor', projectRoot, 'Glob', { pattern: '**/*', path: projectRoot },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'implicit project cwd Grep ancestor', projectRoot, 'Grep', { pattern: 'phase' },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'implicit project cwd Glob ancestor', projectRoot, 'Glob', { pattern: '**/*' },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'plugin-data ancestor Grep', externalCwd, 'Grep', { pattern: 'session', path: pluginData },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'executed-plugin ancestor Glob', externalCwd, 'Glob', { pattern: '**/*', path: pluginRoot },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'escaping Grep glob', externalCwd, 'Grep', { pattern: 'phase', path: externalCwd, glob: '../project/.zensu/**' },
-        'reviewer-capability-v1 deny: host-profile-v1 Grep pattern may escape into protected state', false,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 Grep pattern may escape into protected state. If you cannot search another way, report the need to the main thread instead.', false,
       ],
       [
         'escaping Glob pattern', externalCwd, 'Glob', { pattern: '../project/.zensu/**', path: externalCwd },
-        'reviewer-capability-v1 deny: host-profile-v1 Glob pattern may escape into protected state', false,
+        'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 Glob pattern may escape into protected state. If you cannot search another way, report the need to the main thread instead.', false,
       ],
     ]) {
       const denied = assertDenied(invokeRuntime(gate, {
@@ -624,13 +686,13 @@ function provePrincipalAndPreToolContracts(options) {
         agent_type: agentType,
         tool_name: toolName,
         tool_input: toolInput,
-      }, environment), `general-purpose ${label}`, exactReason.replace(/^reviewer-capability-v1 deny: /, ''));
+      }, environment), `general-purpose ${label}`, exactReason.slice(DENY_PREFIX.length));
       const reason = denied.hookSpecificOutput.permissionDecisionReason;
       if (remedied ? !remediedReason(reason, exactReason) : reason !== exactReason) {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }
-    return ['Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:GuardedShell:OtherCommandAndUnlistedToolsDenied'];
+    return ['Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedBash:ZensuStateAndCommandRunnersDenied'];
   }
 
   const denyScenarios = [

@@ -2,7 +2,7 @@
 paths:
   - "agents/review-judge.md"
   - "agents/review-aspect.md"
-  - "skills/tdd/references/review-chain.md"
+  - "skills/build/references/review-chain.md"
   - "tests/structure/test-review-judge.sh"
   - "tests/structure/test-review-aspect-agent.sh"
 ---
@@ -87,7 +87,7 @@ runs after every import, so its digest and the import gate stay as they are.
 `judge_run` paragraph, no-findings heading and gap exception (`P2n`); its `Check only` bullet
 (`P2o`); step 6 of both agents (`P2p`); the Grep/Glob rule of both agents (`P2q`); the reviewJudge
 probe, which passes `{project_root}` as `CLAUDE_PROJECT_DIR` (`P3h`, `P3h2`); step 4b's early
-pointer and second-run paragraph (`P3j`); the `Work sequentially` bullet of `skills/tdd/SKILL.md`,
+pointer and second-run paragraph (`P3j`); the `Work sequentially` bullet of `skills/build/SKILL.md`,
 whose body the skill text budget bounds (`P3k`); the step-10 lead
 and step 3 (`P3l`); `config.example.json` (`P4c`); the `reviewJudge`, `reviewJudgeSecondRun` and
 `externalReviewImport` rows of `docs/configuration.md` and the judge row and import-path gap bullet

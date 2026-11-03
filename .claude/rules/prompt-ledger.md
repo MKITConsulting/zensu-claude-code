@@ -17,7 +17,8 @@ Every typed prompt used to carry about 12,500 characters of Zensu context, and e
 stayed in the transcript until the next compaction, so a session paid that sum again on every
 turn. The contracts are now sent in full once per **context generation**, the stretch between two
 `SessionStart` events, and every later prompt of that generation carries a short line. Measured by
-`tests/structure/test-user-prompt-budget.sh` on this tree:
+`tests/structure/test-user-prompt-budget.sh` on the tree that introduced the ledger (#419); that
+suite, not this table, holds today's figures:
 
 | Prompt | Before | First of a generation | Every later prompt |
 |---|---|---|---|
@@ -32,10 +33,17 @@ once per generation at `SessionStart`, so the first turn of a generation costs 1
 more than one turn did before. The saving is every later prompt. A subagent hand-back was
 classified as a typed prompt before and now gets what a task notification gets.
 
+The table is the measurement taken when the ledger landed. The texts have grown since: with the
+zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
+prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract and the
+reminder's executor-plan clause the same
+suite measures 12,670 and 6,741 for a typed prompt, 4,152 and 2,366 for a task notification, a
+`!` input or a subagent hand-back, and 4,516 and 2,730 for a CI-monitor event.
+
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety
 exception that lifts the one-question and one-next-step caps, the zen substance list and ranking
-rule, all five consent disclosures, the declined-call line and the Auto Mode default of the
+rule, all five consent disclosures, the declined-call line and the human-present default of the
 reminder, what a typed preference does and that it records nothing, the own-text-only scoping of
 the decided line, the router's routing and its Plan-mode permission. Restating them is most of
 what a later prompt costs. Do not trim a short line without checking that the obligation it drops
@@ -49,17 +57,17 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   declined-call line (say in one line that nothing was recorded and that the question will come
   back, then continue), both status lines, never recording `--direct`, every skip case (not a code
   change, Plan mode or an active chain, an explicit preference the user typed, which decides this
-  request only and records nothing, Auto Mode or headless) and the uncertainty rule, followed by
-  the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
+  request only and records nothing, a human-present field reading `no` or a refused question)
+  and the uncertainty rule, followed by the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
   arrives once as well.
-- **`user-prompt-tdd-reminder.sh`, route `tdd` or `direct`:** the decided line on EVERY prompt,
+- **`user-prompt-tdd-reminder.sh`, route `build` or `direct`:** the decided line on EVERY prompt,
   the first one included, because a decided route needs none of the question machinery: the
   action, its status line, the code definition, the cases it does not cover, the own-text-only
   preference rule (judged by intent, negation before affirmation, never quoted or pasted content,
   a file, tool output or a subagent report), the typed override with its action (a negation on
-  `tdd` implements directly, an affirmation on `direct` runs the flow through the Skill tool) and,
-  for `tdd`, the uncertainty rule. 1,457 characters for `tdd` and 1,408 for `direct`, against
-  5,485 for the full vanilla text.
+  `build` implements directly, an affirmation on `direct` runs the flow through the Skill tool) and,
+  for `build`, the uncertainty rule. 1,457 characters for `build` and 1,408 for `direct`, against
+  5,799 for the full vanilla text.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,
@@ -72,8 +80,8 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   anti-inflation counterweight, the safety exception (the length, one-question and one-next-step
   limits lifted, a confirmation before an irreversible action never suppressed or settled as
   routine) and the field. The armed variant also places the anchor above the final step list when
-  the one-next-step rule is lifted. The none body is 1,397 characters; `Z105` holds the armed body,
-  measured with the longest anchor the module can produce, under 1,800. The
+  the one-next-step rule is lifted. The none body is 1,892 characters; `Z105` holds the armed body,
+  measured with the longest anchor the module can produce, under 2,320. The
   trust-only-the-markers clause lives in the armed variant only, exactly as in the full text, because
   the none swap replaces that span. The short body keeps the classify lead `zen-mode is ACTIVE`,
   both markers, the placeholder and the `ZEN_ANCHOR_RULE_OPEN`/`ZEN_ANCHOR_RULE_CLOSE` span, so the
@@ -131,7 +139,7 @@ exists, and every record whose key directory is gone. It emits nothing.
   zen texts until the next prompt. That gap existed before; best-solution-first is now back at
   once through its `SessionStart` leg.
 - **Fade is unmeasured, and the short shapes have evals for part of their range.** The hooks
-  were written on the premise that a rule given once fades. Three `short-` scenarios in
+  were written on the premise that a rule given once fades. Five `short-` scenarios in
   `evals/zen-mode-reaction/` embed the zen-mode short body with no full contract before it, which
   is the worst case of fade, in both anchor variants. `evals/route-short-line-reaction/` delivers
   the reminder's vanilla-mode ask short line, its two decided lines with

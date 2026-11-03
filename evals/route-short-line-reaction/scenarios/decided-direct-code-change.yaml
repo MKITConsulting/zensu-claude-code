@@ -5,7 +5,7 @@ vars:
   expected_hook: reminder
   expected_shape: decided-direct
   expected_field: direct (hooks.defaultDeliveryRoute)
-  expected_status: "Skipping TDD: route direct (hooks.defaultDeliveryRoute)"
+  expected_status: "Skipping /zensu:build: route direct (hooks.defaultDeliveryRoute)"
   allowed_first: edit,edit-outside,other:Bash
   anchor_clause: "implement it directly in this main thread without asking and without --tdd-begin"
 assert:

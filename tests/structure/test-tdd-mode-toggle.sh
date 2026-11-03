@@ -35,7 +35,7 @@ PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 CONFIG_LIB="$PLUGIN_DIR/hooks/lib/zensu-config.sh"
 SKILL="$PLUGIN_DIR/skills/tdd-mode/SKILL.md"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 FIX_SKILL="$PLUGIN_DIR/skills/pr-fix-findings/SKILL.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 REMINDER="$PLUGIN_DIR/hooks/user-prompt-tdd-reminder.sh"
@@ -868,9 +868,9 @@ done
 if grep -qF 'TDD-MODE: strict' "$TDD_SKILL" && grep -qF -- '--tdd-mode strict' "$TDD_SKILL" \
   && grep -qiF 'escalation-only' "$TDD_SKILL" \
   && grep -qiF 'Ignore rather than abort' "$TDD_SKILL"; then
-  check "T25 /zensu:tdd documents the TDD-MODE carrier, the flag, and that it is escalation-only" PASS
+  check "T25 /zensu:build documents the TDD-MODE carrier, the flag, and that it is escalation-only" PASS
 else
-  check "T25 /zensu:tdd carrier contract missing" FAIL
+  check "T25 /zensu:build carrier contract missing" FAIL
 fi
 
 SKILL_BAD=""

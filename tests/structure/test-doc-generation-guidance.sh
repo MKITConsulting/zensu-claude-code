@@ -17,6 +17,7 @@ GHOST="$PLUGIN_DIR/skills/ghost-scan/SKILL.md"
 DOCS="$PLUGIN_DIR/skills/docs/SKILL.md"
 ZENSUHELP="$PLUGIN_DIR/skills/zensu-help/SKILL.md"
 READ_REF='Read `docs/documentation-guide.md`'
+READ_REF_ABS='Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`'
 
 PASS=0; FAIL=0
 check() {
@@ -77,7 +78,7 @@ check "D14 ghost-scan references the shared guide for authoring docs" \
 
 # --- explicit Read imperative + zensu-help routing ----------------------------
 check "D15 implement Step 6 has explicit Read imperative" \
-  "$(has "$IMPLEMENT" "$READ_REF")"
+  "$(has "$IMPLEMENT" "$READ_REF_ABS")"
 check "D16 zensu-plm has explicit Read imperative" \
   "$(has "$PLM" "$READ_REF")"
 check "D17 zensu-help routes documentation questions to the guide" \
@@ -87,7 +88,7 @@ check "D17 zensu-help routes documentation questions to the guide" \
 check "D18 docs skill references the shared guide" \
   "$(has "$DOCS" "docs/documentation-guide.md")"
 check "D19 docs skill has explicit Read imperative" \
-  "$(has "$DOCS" "$READ_REF")"
+  "$(has "$DOCS" "$READ_REF_ABS")"
 
 echo "----"
 echo "test-doc-generation-guidance: $PASS PASS / $FAIL FAIL"

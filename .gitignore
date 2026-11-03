@@ -49,6 +49,7 @@ tests/results/
 # Build output
 dist/
 build/
+!/skills/build/
 out/
 
 # Claude Code

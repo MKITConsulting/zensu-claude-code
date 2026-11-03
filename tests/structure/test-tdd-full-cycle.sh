@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full /zensu:tdd lifecycle — hermetic end-to-end walk (no live claude, no API).
+# Full /zensu:build lifecycle — hermetic end-to-end walk (no live claude, no API).
 #
 # Drives ONE session through the COMPLETE cycle via the real hooks/libs in the
 # real order, asserting the phase-gate, post-review routing and Stop-hook
@@ -85,7 +85,7 @@ phase_step() { model_log --phase "$1" --step "$2" >/dev/null 2>&1; }
 
 echo "== Phase 0: plan approval -> begin =="
 [ "$(gate "$PROD")" = "allow" ] && check "0a pre-begin: gate is a pass-through (no chain-state)" PASS || check "0a pre-begin pass-through" FAIL
-grep -qF "skill='zensu:tdd'" "$PLANHOOK" && check "0b plan-approved hook routes to /zensu:tdd skill" PASS || check "0b plan-approved wiring" FAIL
+grep -qF "skill='zensu:build'" "$PLANHOOK" && check "0b plan-approved hook routes to /zensu:build skill" PASS || check "0b plan-approved wiring" FAIL
 model_log --tdd-begin >/dev/null
 [ "$(gate "$PROD")" = "deny" ] && check "0c after --tdd-begin: active + UNINITIALIZED -> prod deny" PASS || check "0c begin activates gate" FAIL
 GATE_DIRECTIVE="$(printf '%s' "$PROD" | bash "$GATE" 2>/dev/null)"
@@ -151,7 +151,7 @@ CTX="$(SID_VALUE="$SID_RAW" TICKET="$REVIEW_TICKET" node -e '
     session_id: process.env.SID_VALUE
   }));
 ' | bash "$POSTREV" 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}})')"
-echo "$CTX" | grep -q "/zensu:tdd" && check "T3 post-review routes fixes in-thread (/zensu:tdd)" PASS || check "T3 in-thread routing" FAIL
+echo "$CTX" | grep -q "/zensu:build" && check "T3 post-review routes fixes in-thread (/zensu:build)" PASS || check "T3 in-thread routing" FAIL
 if printf '%s' "$CTX" | grep -qF "$EXPECTED_LOG_COMMAND" \
   && ! printf '%s' "$CTX" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT'; then
   check "T3b post-review output embeds the native per-call helper binding" PASS

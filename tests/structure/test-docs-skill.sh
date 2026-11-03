@@ -58,8 +58,8 @@ else
   check "D3 SKILL.md is workflow-wrapped (--workflow-begin + --workflow-end)" FAIL
 fi
 
-# D4 — the --tools declaration names exactly the one doc mutation the skill runs.
-pin "D4 workflow --tools declares the doc mutation" "$SKILL_MD" '--tools "link_docs"'
+# D4 — the --tools declaration names exactly the two doc mutations the skill runs.
+pin "D4 workflow --tools declares the doc mutations" "$SKILL_MD" '--tools "link_docs,update_wiki_page"'
 
 # D5 — the docs_complete contract: the three hard rules.
 pin "D5a contract: fresh (require_fresh / is_outdated)" "$SKILL_MD" "is_outdated"
@@ -81,7 +81,7 @@ pin "D7c verifies the gate via features get docs_complete" "$SKILL_MD" "zensu fe
 # D8 — code-grounding discipline: references the shared guide with the explicit
 # Read imperative, and names the forbidden metadata-dump anti-pattern.
 pin "D8a references docs/documentation-guide.md" "$SKILL_MD" "docs/documentation-guide.md"
-pin "D8b has explicit Read imperative" "$SKILL_MD" 'Read `docs/documentation-guide.md`'
+pin "D8b has explicit Read imperative at the plugin-absolute path" "$SKILL_MD" 'Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`'
 pin "D8c forbids the metadata-dump anti-pattern" "$SKILL_MD" "metadata dump"
 
 # D9 — batch fan-out is a READ-ONLY Explore pass (mutations stay on the main thread).

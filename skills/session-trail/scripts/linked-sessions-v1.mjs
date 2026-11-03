@@ -11,6 +11,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const RUN_ID = new RegExp(`^local_${UUID}$`);
 const CLI_SESSION_ID = new RegExp(`^${UUID}$`);
 const CONTINUATION_NAME = /^(cont-[0-9a-f]{8})(?:-[0-9]+)?$/;
+const PLAN_NAME = /^cont-[0-9a-f]{8}$/;
 const UNSAFE_VALUE = /[\u0000-\u001f\u007f-\u009f\p{Zl}\p{Zp}]/u;
 const MAX_ENVIRONMENT_ID = 128;
 
@@ -28,9 +29,17 @@ export const LINKED_WHY = Object.freeze({
   ssh: 'it runs over SSH, not on this Mac',
   continued: 'a confirmed lineage edge already leaves it, so it continues elsewhere',
   started: 'this session already started its continuation, which waits for its own plan confirmation',
+  place: 'its record names no usable folder, so a start cannot be placed in its repository: it starts only when the user names it in the plan answer',
   fork: 'a user fork starts only when the user names it in the plan answer',
   'ledger-unread': 'the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer',
   cap: `more than ${LINKED_START_CAP} linked sessions qualify, so it starts only when the user asks for it in a later message`,
+  unplanned: 'the plan answer did not name it, so it starts only when the user asks for it in a later message',
+});
+
+export const LINKED_CWD_WHY = Object.freeze({
+  'same-repository': 'it starts without `cwd`, because the takeover that printed this brief ran in the old session\'s repository; pass its `folder` as `cwd` when this session works outside that repository',
+  'receiver-elsewhere': 'it starts in its own folder, because the takeover that printed this brief ran outside the old session\'s repository',
+  'receiver-unmeasured': 'it starts in its own folder, because this brief did not measure the repository this session works in',
 });
 
 export const START_BACKGROUND = 'The session that started this one took over another Claude Code session and continues its work. That session had started linked sessions of its own, and this is one of them, started again so that Claude links it to the session that now continues the work. Continue only this linked session\'s own work, never the work of the session that started you.';
@@ -38,9 +47,11 @@ export const START_BACKGROUND = 'The session that started this one took over ano
 export const CHIP_BACKGROUND = 'An earlier Claude Code session proposed this task as a task chip. The session that started this one took that session\'s work over and carried the chip over unchanged, so the task below is the earlier session\'s own brief. Check the files and the state it names before you act on it, because the work may have moved on since it was written.';
 
 export const CHIP_WHY = Object.freeze({
-  folder: 'it names a folder outside the checkout of the session taken over, and a proposal cannot carry a folder',
+  folder: 'it names a folder in another repository than the session taken over, and a proposal cannot carry a folder',
+  'folder-unmeasured': 'it names a folder whose repository could not be measured against that of the session taken over, and a proposal cannot carry a folder',
+  'folder-unsafe': 'it names a folder whose recorded spelling carries control characters, so any folder shown here is a cleaned spelling that no start may pass as `cwd`, and a proposal cannot carry a folder',
   prompt: 'its prompt is empty once control characters are removed, and a proposal needs one',
-  repository: 'this session works in another repository than the session taken over, and a proposal starts in this session\'s folder',
+  repository: 'the takeover that printed this brief ran outside the repository of the session taken over, and a proposal starts in this session\'s folder',
 });
 
 const PROPOSAL_BACKGROUND = 'Background (from the session that started this one):\n';
@@ -74,10 +85,10 @@ function environmentOf(value) {
   return value;
 }
 
-function related(a, b) {
-  const x = path.resolve(a);
-  const y = path.resolve(b);
-  return x === y || x.startsWith(`${y}${path.sep}`) || y.startsWith(`${x}${path.sep}`);
+function checkoutOf(checkout, folder) {
+  if (!folder || typeof checkout !== 'function') return null;
+  const verdict = checkout(folder);
+  return verdict === true || verdict === false ? verdict : null;
 }
 
 export function isoOf(ms) {
@@ -95,6 +106,13 @@ export function linkedKind(spawnedFrom) {
 export function continuationName(run) {
   const id = runIdOf(run);
   return id ? `cont-${id.slice('local_'.length, 'local_'.length + 8)}` : null;
+}
+
+export function linkedStartNames(value) {
+  if (typeof value !== 'string') return null;
+  if (value === 'none') return [];
+  const names = value.split(',');
+  return names.every((name) => PLAN_NAME.test(name)) ? [...new Set(names)] : null;
 }
 
 function cutTitle(text) {
@@ -128,19 +146,21 @@ function proposalParts(text) {
   return background.trim().length >= PROPOSAL_BACKGROUND_MIN && prompt.trim() ? { background, prompt } : null;
 }
 
-export function chipProposal(chip, folders = [], options = {}) {
+export function chipProposal(chip, options = {}) {
   const c = chip && typeof chip === 'object' ? chip : {};
-  const cwd = recordText(c.cwd);
+  const o = options && typeof options === 'object' ? options : {};
+  const cwd = typeof c.cwd === 'string' ? c.cwd : '';
   if (cwd) {
-    const place = folderOf(cwd);
-    const anchors = (Array.isArray(folders) ? folders : []).map(folderOf).filter(Boolean);
-    if (!place || !anchors.some((anchor) => related(place, anchor))) return { proposal: null, why: 'folder' };
+    if (UNSAFE_VALUE.test(cwd)) return { proposal: null, why: 'folder-unsafe' };
+    const verdict = checkoutOf(o.checkout, folderOf(cwd));
+    if (verdict === false) return { proposal: null, why: 'folder' };
+    if (verdict !== true) return { proposal: null, why: 'folder-unmeasured' };
   }
   const text = recordText(c.prompt);
   const parts = c.context === 'fresh' ? proposalParts(text) : null;
   const prompt = parts ? parts.prompt : text;
   if (!prompt.trim()) return { proposal: null, why: 'prompt' };
-  if (options && options.sameRepository === false) return { proposal: null, why: 'repository' };
+  if (o.sameRepository === false) return { proposal: null, why: 'repository' };
   const title = cutTitle(lineText(c.title) || firstLineOf(c.tldr) || firstLineOf(prompt));
   if (c.context === 'fork') return { proposal: { initiation: 'own_initiative', context: 'fork', title, prompt }, why: null };
   const proposal = { initiation: 'own_initiative', context: 'fresh', title, prompt, background: parts ? parts.background : CHIP_BACKGROUND };
@@ -160,6 +180,14 @@ function byCreation(a, b) {
   return a.run < b.run ? -1 : 1;
 }
 
+function isDetached(record) {
+  return record.lineageDetached === true;
+}
+
+function isArchived(record) {
+  return record.isArchived === true;
+}
+
 export function familyWalk(root, records) {
   const rootRun = runIdOf(root && typeof root === 'object' ? root.sessionId : null);
   if (!rootRun) return null;
@@ -175,6 +203,23 @@ export function familyWalk(root, records) {
     children.get(parent).push({ run, record });
   }
   const below = (run) => (children.get(run) || []).slice().sort(byCreation);
+  const openBelow = (run, follows = () => true) => {
+    const visited = new Set([rootRun, run]);
+    const queue = (children.get(run) || []).slice();
+    let count = 0;
+    while (queue.length) {
+      const node = queue.shift();
+      if (visited.has(node.run)) continue;
+      visited.add(node.run);
+      if (isDetached(node.record)) continue;
+      if (!isArchived(node.record)) {
+        if (!follows(node)) continue;
+        count += 1;
+      }
+      queue.push(...(children.get(node.run) || []));
+    }
+    return count;
+  };
   const seen = new Set([rootRun]);
   const open = [];
   let archived = 0;
@@ -184,11 +229,11 @@ export function familyWalk(root, records) {
     const node = pending.shift();
     if (seen.has(node.run)) continue;
     seen.add(node.run);
-    if (node.record.lineageDetached === true) {
+    if (isDetached(node.record)) {
       detached += 1;
       continue;
     }
-    if (node.record.isArchived === true) {
+    if (isArchived(node.record)) {
       archived += 1;
       for (const child of below(node.run)) pending.push({ ...child, throughArchived: true });
       continue;
@@ -196,10 +241,10 @@ export function familyWalk(root, records) {
     open.push(node);
   }
   open.sort(byCreation);
-  return { rootRun, rootFolder: folderOf(root.originCwd), open, archived, detached };
+  return { rootRun, open, archived, detached, openBelow };
 }
 
-function entryOf(node, rootFolder) {
+function entryOf(node, checkout) {
   const { record, run, throughArchived } = node;
   const from = record.spawnedFrom;
   const folder = folderOf(record.originCwd);
@@ -213,7 +258,7 @@ function entryOf(node, rootFolder) {
     createdAt: Number.isFinite(record.createdAt) ? record.createdAt : null,
     throughArchived,
     folder,
-    sameCheckout: folder && rootFolder ? related(folder, rootFolder) : null,
+    sameCheckout: checkoutOf(checkout, folder),
     sharedCheckout: from.sharedCheckout === true,
     environment: environmentOf(record.startedFromEnvironmentId),
     ssh: record.sshConfig !== undefined && record.sshConfig !== null,
@@ -225,7 +270,13 @@ function presetOf(presets, id) {
   return { id, name: hit ? hit.name : null, kind: hit ? hit.kind : null };
 }
 
-function startCall(entry) {
+function cwdWhyOf(entry, sameRepository) {
+  if (!entry.folder || entry.sameCheckout !== true) return null;
+  if (sameRepository === true) return 'same-repository';
+  return sameRepository === false ? 'receiver-elsewhere' : 'receiver-unmeasured';
+}
+
+function startCall(entry, cwdWhy) {
   const title = startTitle(entry.title, entry.name);
   const call = {
     initiation: 'user_asked',
@@ -236,7 +287,7 @@ function startCall(entry) {
     prompt: startPrompt(entry.sessionId, title),
     background: START_BACKGROUND,
   };
-  if (entry.sameCheckout === false) call.cwd = entry.folder;
+  if (entry.folder && cwdWhy !== 'same-repository') call.cwd = entry.folder;
   return call;
 }
 
@@ -248,37 +299,53 @@ export function decideLinked(walk, options = {}) {
   const presets = options.presets instanceof Map ? options.presets : null;
   const cap = Number.isInteger(options.cap) && options.cap >= 0 ? options.cap : LINKED_START_CAP;
   const max = Number.isInteger(options.max) && options.max >= 0 ? options.max : LINKED_LIST_MAX;
+  const checkout = typeof options.checkout === 'function' ? options.checkout : null;
+  const sameRepository = options.sameRepository === true || options.sameRepository === false ? options.sameRepository : null;
+  const planned = Array.isArray(options.planned) ? new Set(options.planned) : null;
   const confirmed = new Set();
   for (const edge of edges) {
     if (edge && edge.confidence === 'confirmed' && edge.from && typeof edge.from.sessionId === 'string') confirmed.add(edge.from.sessionId);
   }
-  let starts = 0;
-  const sessions = walk.open.map((node) => {
-    const entry = entryOf(node, walk.rootFolder);
+  const factsOf = (node, nodeCheckout) => {
+    const entry = entryOf(node, nodeCheckout);
     const ids = [entry.sessionId, ...entry.priorSessionIds].filter(Boolean);
     const preset = entry.environment ? presetOf(presets, entry.environment) : null;
     const continued = ids.some((id) => confirmed.has(id)) ? true : (ledgerComplete ? false : null);
-    let decision = 'stays';
-    let why = null;
-    if (!entry.sessionId) why = 'no-session-id';
-    else if (self && ids.includes(self)) why = 'self';
-    else if (entry.kind === 'btw') why = 'btw';
-    else if (entry.ssh || (preset && preset.kind === 'ssh')) why = 'ssh';
-    else if (continued === true) why = 'continued';
-    else if (started.has(entry.name)) why = 'started';
-    else if (entry.kind === 'fork') {
-      decision = 'if-named';
-      why = 'fork';
-    } else if (continued === null) {
-      decision = 'if-named';
-      why = 'ledger-unread';
-    } else if (starts < cap) {
-      decision = 'start';
-      starts += 1;
-    } else {
-      decision = 'later';
-      why = 'cap';
+    return { entry, ids, preset, continued };
+  };
+  const keptWhy = ({ entry, ids, preset, continued }) => {
+    if (!entry.sessionId) return 'no-session-id';
+    if (self && ids.includes(self)) return 'self';
+    if (entry.kind === 'btw') return 'btw';
+    if (entry.ssh || (preset && preset.kind === 'ssh')) return 'ssh';
+    if (continued === true) return 'continued';
+    if (started.has(entry.name)) return 'started';
+    return null;
+  };
+  const follows = (node) => keptWhy(factsOf(node, null)) === null;
+  let starts = 0;
+  const sessions = walk.open.map((node, index) => {
+    const facts = factsOf(node, index < max ? checkout : null);
+    const { entry, preset, continued } = facts;
+    let why = keptWhy(facts);
+    let decision = why ? 'stays' : null;
+    if (!decision) {
+      const conditional = !entry.folder ? 'place' : (entry.kind === 'fork' ? 'fork' : (continued === null ? 'ledger-unread' : null));
+      if (planned && !planned.has(entry.name)) {
+        decision = 'later';
+        why = 'unplanned';
+      } else if (!planned && conditional) {
+        decision = 'if-named';
+        why = conditional;
+      } else if (starts < cap) {
+        decision = 'start';
+        starts += 1;
+      } else {
+        decision = 'later';
+        why = 'cap';
+      }
     }
+    const cwdWhy = decision === 'stays' ? null : cwdWhyOf(entry, sameRepository);
     return {
       run: entry.run,
       sessionId: entry.sessionId,
@@ -287,23 +354,29 @@ export function decideLinked(walk, options = {}) {
       title: entry.title,
       createdAt: entry.createdAt,
       throughArchived: entry.throughArchived,
+      openBelow: typeof walk.openBelow === 'function' ? walk.openBelow(node.run, follows) : 0,
       folder: entry.folder,
       sameCheckout: entry.sameCheckout,
       sharedCheckout: entry.sharedCheckout,
       preset,
       ssh: entry.ssh,
       continued,
+      planned: planned ? planned.has(entry.name) : null,
       decision,
       why,
-      start: decision === 'stays' ? null : startCall(entry),
+      cwdWhy,
+      start: decision === 'stays' ? null : startCall(entry, cwdWhy),
     };
   });
+  const listed = sessions.slice(0, max);
   return {
+    sameRepository,
     total: sessions.length,
     truncated: sessions.length > max,
     archived: walk.archived,
     detached: walk.detached,
-    sessions: sessions.slice(0, max),
+    plan: planned ? { names: [...planned], unlisted: [...planned].filter((name) => !listed.some((entry) => entry.name === name)) } : null,
+    sessions: listed,
   };
 }
 

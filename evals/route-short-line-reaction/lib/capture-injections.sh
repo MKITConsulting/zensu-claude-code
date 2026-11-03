@@ -98,7 +98,7 @@ capture() {
       head='Zensu workflow reminder, vanilla implementation mode (the full reminder given earlier in this context still applies): ' ;;
     tdd-config)
       hook=user-prompt-tdd-reminder.sh; shape=decided-tdd
-      cfg="$SANDBOX/tdd.json"; printf '%s' '{"hooks":{"tddImplementation":false,"defaultDeliveryRoute":"tdd"}}' > "$cfg"
+      cfg="$SANDBOX/tdd.json"; printf '%s' '{"hooks":{"tddImplementation":false,"defaultDeliveryRoute":"build"}}' > "$cfg"
       head='Zensu workflow reminder, vanilla implementation mode, route decided by the field below: ' ;;
     direct-config)
       hook=user-prompt-tdd-reminder.sh; shape=decided-direct
@@ -123,7 +123,7 @@ capture() {
   esac
   case "$shape" in
     ask-short) field="$(field_of "$second")"; [ "$field" = "ask" ] || die "the ask capture reads route field '$field'" ;;
-    decided-tdd) field="$(field_of "$second")"; [ "$field" = "tdd (hooks.defaultDeliveryRoute)" ] || die "the tdd capture reads route field '$field'" ;;
+    decided-tdd) field="$(field_of "$second")"; [ "$field" = "build (hooks.defaultDeliveryRoute)" ] || die "the tdd capture reads route field '$field'" ;;
     decided-direct) field="$(field_of "$second")"; [ "$field" = "direct (hooks.defaultDeliveryRoute)" ] || die "the direct capture reads route field '$field'" ;;
   esac
   write_capture "$out" "$source" "${hook%.sh}" "$shape" "$field" "$second"

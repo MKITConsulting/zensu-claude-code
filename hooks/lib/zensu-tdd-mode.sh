@@ -1,5 +1,5 @@
 #!/bin/bash
-# zensu-tdd-mode.sh — session-scoped strict/vanilla switch for the /zensu:tdd
+# zensu-tdd-mode.sh — session-scoped strict/vanilla switch for the /zensu:build
 # implementation discipline. `--strict`, `--vanilla` and `--auto` WRITE the
 # session marker in the project's ephemeral state directory
 # (`{"mode":"strict"}` / `{"mode":"vanilla"}` / `{"mode":"auto"}`); `--status`

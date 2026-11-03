@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pins agents/review-aspect.md: the read-only, single-perspective reviewer that the
-# /zensu:tdd review chain fans out in parallel (one spawn per perspective). It MUST be
+# /zensu:build review chain fans out in parallel (one spawn per perspective). It MUST be
 # strictly read-only — no Write/Edit/MultiEdit, no build/test execution — because five of
 # them run at once and the suite already ran once in the Phase 6 audit.
 set -u

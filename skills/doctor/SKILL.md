@@ -45,7 +45,7 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
   app-managed worktree carries the desktop-pool keep marker, still sits on its recorded branch
   and holds a nested repository that keeps the marker after the session ends; any reviewer
   spawn the host permission layer refused; any claim this session audited against a root that
-  is not the anchor; this session's recorded delivery route; and an expired pending review.
+  is not the anchor; this session's recorded delivery route and zen-mode state; and an expired pending review.
 
 The only write is an explicit, user-confirmed cleanup of one expired `pending-review.json`;
 CAS workflow documents are never deleted.
@@ -99,7 +99,7 @@ allowlist followed by one `bash <the executing plugin's zensu-doctor.sh>`.
 Anything else is refused, and the doctor goes back to being denied by the very
 defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on its
 own separate justification — it WRITES, so it cannot borrow this one; see
-[Session Control](../../docs/session-control.md) "Unbindable sessions".
+`${CLAUDE_PLUGIN_ROOT}/docs/session-control.md`, "Unbindable sessions".
 
 The root preflight lives inside `zensu-doctor.sh`, so an invalid root still prints
 the standardized doctor table fragment rather than an unformatted shell error.
@@ -271,19 +271,19 @@ classifier will refuse a spawn, not only when the whole table is green.
   the file is the sole config source; with a global and a project config the row instead says
   `the other config source still applies`, and you must not upgrade that to `defaults apply`.
 - **❌ config: … cannot say what the config loader gets from it** → an explicit REFUSAL to
-  make a loader verdict. The doctor could not read the file, and for this class it also cannot
-  infer what the loader does — a FIFO, for instance, would block the loader rather than make it
+  make a loader verdict. The doctor could not read the file, and for this class it cannot
+  infer what the loader does — a FIFO would block the loader rather than make it
   fall back. Report the file as unreadable by the check; do not tell the user it is ignored.
 - **⚠️ config: … is larger than … bytes** → a MISSING CHECK, never a verdict about the
   config. The row says the doctor `declined to read it`: the file is over its own memory
   bound, so it did not
-  parse it and cannot judge it. Say explicitly that the config loader has no size limit,
-  so the file is not skipped for its size — but do not tell the user it is applied, or
-  that it is ignored: neither is knowable from a row that never read the file.
-- **✅ config: hooks.defaultDeliveryRoute=tdd / =direct** → the project configured a default
-  delivery route, so the route question is skipped wherever its reader is on: `tdd` sends an
+  parse it and cannot judge it. Say that the config loader has no size limit,
+  so the file is not skipped for its size — but do not tell the user it is applied or
+  ignored: neither is knowable from a row that never read the file.
+- **✅ config: hooks.defaultDeliveryRoute=build / =direct** → the project configured a default
+  delivery route, so the route question is skipped wherever its reader is on: `build` sends an
   approved plan or a code request through the Zensu workflow, `direct` implements it
-  directly without the review chain. Relay the value, that a preference stated in the
+  without the review chain. Relay the value, that a preference stated in the
   user's own message decides only that request, and that `/zensu:delivery-route` changes
   the route for the session. When the
   row adds that a **half is off** (`hooks.autoTdd=false` or `hooks.tddReminder=false`),
@@ -291,14 +291,14 @@ classifier will refuse a spawn, not only when the whole table is green.
   it resolves the route; relay which half.
 - **⚠️ config: hooks.defaultDeliveryRoute=… is configured but decides nothing** → both
   readers are off (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so no hook ever
-  resolves the route and the value has no effect. Either turn a reader back on or remove
-  the key; do not tell the user the question is skipped.
-- **⚠️ config: hooks.defaultDeliveryRoute=… is not tdd, direct or ask** → the value is
-  misspelled, quoted differently, or not a string; the hooks read it permissively as `ask`,
-  so the question the user meant to switch off is still asked. The value is shown as
+  resolves the route and the value has no effect. Turn a reader back on or remove the key;
+  never say the question is skipped.
+- **⚠️ config: hooks.defaultDeliveryRoute=… is not build, direct or ask** → the value is
+  misspelled, quoted differently, or not a string; the hooks read it as `ask`, so
+  the question is still asked. The value is shown as
   written — a string without added quotes, anything else in its JSON spelling — cut at
-  40 characters with a trailing `…`. The fix is the config value itself — one of the three
-  lowercase words.
+  40 characters with a trailing `…`. Fix the value: one of the three lowercase words.
+- **subagents:** and **zen-mode** rows → read `references/coexistence.md`.
 - **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
   not be opened, is not a regular file, is too large, or was read incompletely.
 - **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are
@@ -647,8 +647,8 @@ whether browser verification is enforced, not only when a row is red.
   run **from the session that owns that chain** (the row prints its truncated
   session key) — this skill never recovers one on its behalf. When the row reads
   "wedged but not recoverable in place", repeat the blocker it names verbatim
-  instead — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
-  a fresh `/zensu:tdd` generation is the only exit. A chain that was repaired
+  instead — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies and
+  a fresh `/zensu:build` generation is the only exit. A chain that was repaired
   earlier renders `repaired N×`.
 - **⚠️ chain: open chain(s) not owned by this session** → this session is not the
   one that armed them. **Ask before diagnosing:** the row cannot tell a chain
@@ -659,7 +659,7 @@ whether browser verification is enforced, not only when a row is red.
   session id mid-conversation, carries the history over and re-fires
   `SessionStart`, so the document armed under the old key becomes unreachable and
   every later helper call answers `no-session` — the chain stops existing while
-  the user still believes it is running. Then name `/zensu:tdd` to re-arm. Either
+  the user still believes it is running. Then name `/zensu:build` to re-arm. Either
   way say plainly that the chain **cannot be moved** to this key: the row
   DIAGNOSES only, and `/zensu:adopt-session` does not apply — it repairs a lineage
   break, not a changed session id. The row is bounded by the same TTL the
@@ -719,7 +719,7 @@ whether browser verification is enforced, not only when a row is red.
   the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
 - **⚠️ autopilot: nonterminal durable run `<id>` at stage `<stage>`** → a durable
   Autopilot run is holding a git working tree, so no second Autopilot run and no
-  standalone `/zensu:tdd` chain can arm there. Relay the row's own facts and add
+  standalone `/zensu:build` chain can arm there. Relay the row's own facts and add
   nothing: the run id, the stage, whether this session owns it, the tree it holds,
   the run document's path, and how long the owner has been silent. **The remedy
   depends on ownership and the row already chose it — never substitute your own.**
@@ -741,7 +741,7 @@ whether browser verification is enforced, not only when a row is red.
   rather than reconstructing one: it is rendered from the same judgement, and it also
   carries obstacles the clause does not word, such as adoption's exit-4 refusal while
   this session owns a nonterminal run of its own. Worked examples, which are examples and not the whole set: a
-  `live inner TDD chain` means adoption refuses that run with exit 3 before it reads
+  `live inner build chain` means adoption refuses that run with exit 3 before it reads
   anything, so only the release is left; `both verbs abort on this beacon with exit 2`
   leaves neither, so report the beacon instead — and note that a release-only exit-2
   arm, an exit-7 future-dated stamp and a pointer that could not be read each narrow the
@@ -819,13 +819,12 @@ whether browser verification is enforced, not only when a row is red.
 - **autopilot lease:** rows (✅ or ⚠️) → read `references/autopilot-lease.md` before you relay
   any of them, and follow it. Never delete a lease artifact and never offer to.
 - **⚠️ topology: this session's audited run log claims edits under `<N>` root(s)
-  that are not the anchor** → the chain logged edits in another repository. Every
-  other row in this block can be green beside it: the anchor's own tree is clean,
-  its workflow document is healthy, and the review chain saw no diff for work that
-  really happened. Relay the roots the row names and the anchor beside them, and say
-  what is NOT covered — one edit-landing audit grades ONE root, so those claims were
-  reported rather than graded, and `/zensu:tdd` is single-root. The remedy is to run
-  the chain in the repository the claims name, or to land the work in the anchor.
+  that are not the anchor** (work-tree chain: **not the chain's work tree**) → the
+  chain logged edits outside the graded tree: another repository, or for a work-tree
+  chain often the anchor. Every other row in this block can be green beside it.
+  Relay the roots the row names and the graded tree beside them, and say what is NOT covered — one edit-landing audit grades ONE root, so those
+  claims were reported rather than graded. The remedy is to run the chain in the
+  repository the claims name, or to land the work in the graded tree.
   Do NOT suggest re-running the audit against the foreign root: its receipt would
   land where this session's terminus never reads it.
 - **⚠️ topology: this session's claims were NOT checked against the anchor** → a
@@ -834,7 +833,7 @@ whether browser verification is enforced, not only when a row is red.
   the receipt names that lies outside this project's `.zensu/logs/` or is not a
   plain file, an inventory command that is absent from the plugin tree, one that
   did not complete, and one that answered in a format this runtime does not
-  recognise, and — since the round that split it — no bound session key at all,
+  recognise, a receipt whose `workTree` is invalid or outside this project, and no bound session key at all,
   where the receipt cannot even be located. **Relay the cause the row itself
   prints** — do not say the inventory command failed, because in the common case
   it never ran. Say plainly that the check is missing rather than reporting the
@@ -847,35 +846,35 @@ whether browser verification is enforced, not only when a row is red.
   outside every home — `/opt`, `/srv`, `/builds` — reach the row. Say
   WHICH HALF is live when you relay a silent topology; never report it
   as proof that the chain stayed in one repository.
-- **✅ delivery route: tdd (session marker) / direct (session marker) / tdd (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
-  session's delivery route is already decided, so the plan-approval hook and the
-  per-prompt reminder dispatch without the route question. Green because it is disclosed,
-  ordinary state — relay the value AND its source verbatim, and name the two ways to
-  change it: `/zensu:delivery-route` (`--tdd`, `--direct`, `--auto`) for the session,
-  `hooks.defaultDeliveryRoute` for the project. A `direct` route means code changes skip
-  the review chain and the evidence audits for this session; say so. A **half is off**
-  parenthetical means one reader is switched off, so the route decides only the other
-  half; for a `tdd` route the clause after it says which kind of change still reaches
-  `/zensu:tdd`.
-- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is
-  on — the row names the half it is asked on when one flag is off.
+- **✅ delivery route: build (session marker) / direct (session marker) / build (inherited from parent session) / build or direct (hooks.defaultDeliveryRoute)** → the
+  route is decided, so the plan-approval hook and the per-prompt reminder dispatch
+  without asking. Green because it is disclosed, ordinary state — relay the value AND its
+  source verbatim, and name both ways to change it: `/zensu:delivery-route` (`--build`,
+  `--direct`, `--auto`) for the session, `hooks.defaultDeliveryRoute` for the project.
+  An inherited `build` is the parent's recorded choice, copied when this session began;
+  `--auto` releases it. With `direct`, code changes skip the review chain and the
+  evidence audits this session; say so. A **half is off** parenthetical means one reader is
+  off, so the route decides only the other half; for `build` the clause after it names which
+  change still reaches `/zensu:build`.
+- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is on, a plan
+  naming its own executor gets a notice, and the row names the half.
 - **✅ delivery route: … — decides nothing this session** → both readers are off
   (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so neither hook asks or dispatches
-  on a route; whatever the row names has no effect until a reader is turned back on.
+  on a route; the named route has no effect until a reader is back on.
 - **⚠️ delivery route: not checked / could not be read / state not recognized** → a
   MISSING CHECK, never a verdict. **Not checked:** no bound session key or recorded project
-  root was available, and the row names which cause applies — the report ran without
-  `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PLUGIN_DATA` (there is no binding row then — run
-  `/zensu:doctor` inside the session), the session is bound but its recorded key or project
-  root failed the shape check (the binding row above is the valid-record one), or any other
-  binding verdict (read the binding row). **Could not be read:** the shared config library
-  did not answer, or the recorded project root could not be entered. **State not
-  recognized:** the wrapper reported a word this report has no row for. Point at
-  `/zensu:delivery-route --status` from the session for the hooks' own answer.
+  root was available; the row names the cause — no `CLAUDE_CODE_SESSION_ID` or
+  `CLAUDE_PLUGIN_DATA` (no binding row then — run `/zensu:doctor` inside the session), a
+  bound session whose recorded key or project root failed the shape check (the binding row
+  above is the valid-record one), or another binding verdict (read the binding row).
+  **Could not be read:** the shared config library did not answer, or the recorded project
+  root could not be entered. **State not recognized:** the wrapper reported a word this
+  report has no row for. Point at `/zensu:delivery-route --status` from the session for the
+  hooks' own answer.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because
-  `.zensu/state/` is gitignored. Relay the path the row prints, and both halves of
+  `.zensu/state/` is not in git. Relay the path the row prints, and both halves of
   the remedy: `/zensu:adopt-session` for the diagnosis, `/zensu:adopt-session
   --confirm` to rebuild — AND that rebuilding is a loss rather than a restore, so a
   review chain that was live when the document vanished is gone. Never relay the
@@ -896,7 +895,7 @@ whether browser verification is enforced, not only when a row is red.
   reads "never active", so a review chain that was live when the document vanished is
   gone and the Stop guard now releases this session without asking for a reviewer. The
   row names the entry count, the timestamp and which state was repaired. Offer
-  `/zensu:tdd` to re-arm if that work still needs a review.
+  `/zensu:build` to re-arm if that work still needs a review.
 - **⚠️ state: this session's recorded project root was RE-CREATED** → the history
   carries the reserved `PROJECT_ROOT_RESTORED` provenance entry, so the directory this
   session is anchored to was planted by `/zensu:adopt-session --restore-root --confirm`
@@ -984,10 +983,10 @@ whether browser verification is enforced, not only when a row is red.
   spelling sits inside the session root and is a path you could write yourself, so
   reciting it beside the rule that grants the capability you just lost is the one
   thing this instruction exists to prevent. Never suggest `--chain-done` or a
-  fresh `/zensu:tdd` generation as the way past it *while the permission is still
+  fresh `/zensu:build` generation as the way past it *while the permission is still
   missing*: both would leave the change unreviewed, and a new generation hits the
-  same refusal. Once the user has applied the rule, re-entering `/zensu:tdd` is
-  exactly what the cap-release message tells them to do. The note is retired
+  same refusal. Once the user has applied the rule, re-entering `/zensu:build` is
+  what the cap-release message tells them to do. The note is retired
   automatically once a spawn succeeds or the chain closes, so a standing row means
   no reviewer has run since. A row whose kind reads `unknown` means this plugin
   root could not load the classifier module — report the refusal, not the kind.

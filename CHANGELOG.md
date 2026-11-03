@@ -93,6 +93,196 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the zsh way, as reserved words.
   A command that used one of these spellings to pass is now refused; `docs/gates.md`
   §"Source-Write Gate" lists what the check still leaves alone.
+
+## [0.34.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit product scope for capture (#542)
+
+## [0.33.2] - 2026-11-02
+
+### Added
+
+- **hooks**: Let a linked session inherit its parent's tdd route (#497)
+- **vcs**: Follow the target repository's conventions in commits and PRs (#515)
+- **zen-mode**: Close every answer with a session block (#537)
+
+### Changed
+
+- **readme**: Embed the Claude Code explainer video (#541)
+- **hooks**: Fold the edit, notebook and spawn hook groups into the dispatcher (#538)
+- **hooks**: Run the tool-call hooks in one dispatcher process per event (#534)
+
+### Fixed
+
+- **context**: Allow bounded discovery to finish before host timeout (#544)
+- **zen-mode,hooks**: Defuse zen-mode and document a two-tier precedence (#516)
+- **evidence-run**: Follow an Autopilot chain's work tree in the evidence runner and acceptance gate (#539)
+- **edit-landing**: Grade pattern claims and the Autopilot work tree (#535)
+
+## [0.33.1] - 2026-10-29
+
+### Added
+
+- **review**: Bundle fix-round bookkeeping into one round-prepare verb (#530)
+
+### Changed
+
+- **hooks**: Start fewer processes around every tool call (#531)
+- **context**: Describe the discovery path of the context auto-load hook (#532)
+
+### Fixed
+
+- **best-solution-first**: Let a skill fix the option set and keep the recommendation in one line (#526)
+- **session-trail**: Carry the plan answer's linked sessions into the run after the yes (#525)
+- **background-review**: Survive a host-cancelled hand-back claim (#522)
+
+### Upgrade notes
+
+- **Fix-round bookkeeping in one call**: a routed fix round of the review chain now prepares
+  its re-review with `zensu-log.sh --round-prepare`. The call re-runs the edit-landing audit,
+  decides from a snapshot taken when the round began whether each claimed edit landed in this
+  round, writes the `fixed` ledger lines for the findings those claims name, and prints the
+  files and aspects for the re-review. The first review records that snapshot with
+  `--round 0`, and the self-review fix round uses `--round self-review`. Nothing to configure.
+
+## [0.33.0] - 2026-10-28
+
+### Added
+
+- **context**: Automatically discover context for task descriptions
+- **capture**: Preserve plugin origin and explicit run purpose (#527)
+
+### Changed
+
+- **context**: Budget task discovery notices without live CLI calls
+
+## [0.32.0] - 2026-10-28
+
+### Changed
+
+- Rename /zensu:tdd to /zensu:build and TDD Plan to Zensu Plan (#520)
+
+### Fixed
+
+- **context**: Prioritize relevant evidence and preserve related sources (#523)
+
+### Upgrade notes
+
+- **build workflow**: the workflow skill `/zensu:tdd` is now `/zensu:build`, and the plan it
+  writes is a Zensu plan. The workflow runs in vanilla mode unless strict mode is switched on,
+  so "TDD" now names only the strict RED→GREEN discipline: `/zensu:tdd-mode`,
+  `hooks.tddImplementation` and the phase gate keep their names, and so do the helper verbs
+  `--tdd-begin` and `--tdd-complete`. There is no alias, so `/zensu:tdd` no longer exists, and
+  the rename ships as a minor release.
+- **plan and log files**: new plans and run logs are named `{SESSION_TS}_build-{slug}.md` and
+  `{SESSION_TS}_build-{slug}.log` instead of `{SESSION_TS}_tdd-{slug}`. Plans open with
+  `# Zensu Plan:`, logs open with `BUILD STARTED`, and the plan's Approach line names the mode
+  the chain runs in. Existing files keep their names. A repository whose `.gitignore`
+  re-includes logs with `!.zensu/logs/*_tdd-*.log` stops tracking new logs: replace that line
+  with `!.zensu/logs/*.log` followed by `.zensu/logs/witness-*.log`.
+- **plan template and overlay**: `templates/tdd-plan.md` is now `templates/zensu-plan.md`, so
+  a repository override moves from `.zensu/templates/tdd-plan.md` to
+  `.zensu/templates/zensu-plan.md`. The skill overlay moves from `.zensu/overlays/tdd.md` to
+  `.zensu/overlays/build.md`. A file left under an old name is no longer read.
+- **delivery route**: the route value `tdd` is now `build`: `/zensu:delivery-route --build`,
+  `hooks.defaultDeliveryRoute: "build"` and the session marker `{"route":"build"}`. The
+  `--tdd` verb is refused. A configured `tdd` reads as `ask`, and `/zensu:doctor` warns about
+  it. A session marker that still holds `tdd` decides nothing, so the route question comes
+  back once.
+- **docs**: `docs/tdd-manager-workflow.md` is now `docs/build-workflow.md`.
+
+## [0.31.1] - 2026-10-26
+
+### Added
+
+- **context**: Load tracked feature context automatically (#518)
+
+### Fixed
+
+- **brand**: Preserve white fan backing on dark backgrounds (#517)
+- **session-trail**: Keep every linked session marked start in the takeover plan (#512)
+
+## [0.31.0] - 2026-10-26
+
+### Added
+
+- **knowledge**: Retain agent retrieval receipts and correlate source reads
+
+### Fixed
+
+- **session-control**: Move the full-suite marker on --reanchor (#510)
+
+## [0.30.1] - 2026-10-25
+
+### Added
+
+- **context**: Load and hydrate linked feature evidence (#504)
+
+### Fixed
+
+- **hooks**: Read who can answer the route question from the host, not from Auto Mode (#508)
+- **session-control**: Ignore local Zensu state in the projects it creates (#507)
+- **hooks**: Name a missing node and show Stop notices to the user (#506)
+- **skills**: Keep free text off the command line, read plugin docs from the plugin root, ask before publishing reviews (#505)
+
+## [0.30.0] - 2026-10-24
+
+### Added
+
+- **ai-work**: Capture authenticated work and committed result versions (#498)
+- **tdd**: Give every step task a short name (#500)
+
+### Changed
+
+- **multi-repo**: Specify the folder anchor for stage 2 (#499)
+
+### Upgrade notes
+
+- **tdd task labels**: every step task `/zensu:tdd` creates now carries a short name after its
+  tag, such as `S1 [impl] Config parser`, shortened from the step's `Description` in the plan's
+  Steps table. The user reads the task list without the plan open, and a bare `S1 [impl]` named
+  nothing they could recognize. The in-progress text names the step as well
+  (`Implementing S1: Config parser`). Strict and vanilla mode and the integration `[wire]` task
+  follow the same rule.
+- **wiki publishing**: `/zensu:implement` and `/zensu:docs` now change a wiki page that already
+  exists with `zensu wiki update <page-id>` instead of creating it again. Both look the page up
+  first, through the `wikiPageId` of the feature's linked doc in `zensu doc gen-context` or the
+  page's `path` in `zensu wiki list --json`, and `/zensu:implement` updates the page that a
+  refused `zensu wiki create` names. A re-run of `/zensu:implement` relied on `wiki create`
+  updating the existing page, which a create-only `wiki create` refuses, and a re-run of
+  `/zensu:docs` passed `--content` to `zensu link docs`, which never changes an existing page,
+  so the page kept its old text. Both skills now declare `update_wiki_page` in their workflow
+  window.
+
+## [0.29.0] - 2026-10-23
+
+### Added
+
+- **review-chain**: Consume the review ticket from a background consume-mode reviewer (#490)
+- **session-trail**: Decide the same checkout by repository identity (#487)
+- **session-trail**: Carry task chips over as start_session proposals (#466)
+
+### Changed
+
+- **ci**: Re-budget the Windows reviewer-capability-gate cap against nine measured runs (#493)
+- **stop**: Cut the armed Stop's remaining node spawns (#492)
+- **multi-repo**: Redesign stages 2 and 3 around declared code roots (#491)
+- **changelog**: List #478 and #481 in the 0.28.0 notes and move #480's note to Unreleased (#489)
+
+### Fixed
+
+- **review-chain**: Derive the background-review fan-out types from the principal module (#495)
+- **review-chain**: Replace #490's background ticket claim with launch records (#494)
+- **work-order,autopilot**: Wait on in-flight review seats in both Stop budgets (#483)
+- **review-chain**: Resolve aspectActivation and incrementalReviewRounds (#472)
+- **work-order**: Deny every non-inert Claude Desktop session tool (#486)
+- **secret-scan**: Exempt the plugin's own team-review operation key from the entropy rule (#479)
+- **review-chain**: Read the project config in the tdd, plan-review and pr-team-review flag probes (#480)
+
+### Upgrade notes
+
 - **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
   `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
   root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
@@ -142,6 +332,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seat is in flight, at the latest 3600 seconds after the lease was created, every Stop counts
   again. A lease store the hook cannot read, or cannot read within five seconds where `timeout` or
   `gtimeout` is installed, counts the Stop as before.
+- **session-trail same checkout**: both briefs now decide whether a task chip's folder or a
+  linked session's folder belongs to the old session by its git repository, measured with
+  `git rev-parse --git-common-dir`, instead of by path nesting. A worktree of the old repository
+  anywhere on disk counts as the same checkout, while a repository nested inside the old checkout
+  and every folder below a session rooted in a broad folder such as the home directory no longer
+  do. A chip whose folder cannot be measured is marked **list** with the new `why`
+  `folder-unmeasured`. A linked session started without `cwd` runs in the folder of the session
+  that starts it, so a start now leaves `cwd` out only when the linked session works in the old
+  session's repository and `takeover` measured that it runs there too; from another repository
+  or from a folder in no repository, and in every handoff brief, each start passes its own
+  folder, and a linked session without a usable folder waits for the user to name it (`why`
+  `place`). The takeover brief names the folder of every start it leaves without `cwd`, so a
+  session that opens a written brief from elsewhere passes it. A folder that opens with two
+  separators, such as a Windows network path, is never measured. A chip whose folder carries a
+  control character is marked **list** with the new `why` `folder-unsafe` and is never measured,
+  because the brief shows only its cleaned spelling, which is another folder. Every git call of
+  the skill now clears `GIT_DIR`, `GIT_COMMON_DIR` and the other git discovery and config
+  variables, so an exported one no longer makes every folder answer one repository. When no
+  folder of the old session can be measured, no chip or linked-session folder is measured
+  either, and the checkout line of a linked session names the old session's repository as the
+  side that could not be measured. `takeover --json` adds `sameRepository` and
+  `oldRepositoryMeasured` to `linkedSessions` and `cwdWhy`, the reason a start carries or leaves
+  out `cwd`, to each of its entries, and `--no-git` no longer skips the repository check of
+  `takeover`.
 
 ## [0.28.0] - 2026-10-21
 

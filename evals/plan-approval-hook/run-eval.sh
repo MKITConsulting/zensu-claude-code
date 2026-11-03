@@ -110,7 +110,7 @@ route_fixture() { # $1: plugin root, $2: the project root the driven session run
     process.stdout.write(JSON.stringify(j) + "\n");
   '
 }
-# PASS when a delivery-route marker newer than the stamp records `tdd`. The path
+# PASS when a delivery-route marker newer than the stamp records `build`. The path
 # template and the reader are the owner's in zensu-config.sh, so the glob and the
 # verdict, symlink refusal included, follow any change there. The markers stay in
 # place, because one newer than the stamp may belong to a live session the developer
@@ -125,7 +125,7 @@ route_recorded() { # $1: plugin root, $2: project root, $3: stamp file written b
     for marker in "$pre"*"$post"; do
       [ "$marker" -nt "$3" ] || continue
       key="${marker#"$pre"}"
-      [ "$(zensu_delivery_route_marker_state "$2" "${key%"$post"}")" = tdd ] && exit 0
+      [ "$(zensu_delivery_route_marker_state "$2" "${key%"$post"}")" = build ] && exit 0
     done
     exit 1
   ' _ "$1" "$2" "$3" && echo PASS || echo FAIL
@@ -135,7 +135,7 @@ route_fixture "$PLUGIN_DIR" "$PLUGIN_DIR" > "$ROUTE_CONFIG" || { echo "cannot bu
 export ZENSU_CONFIG="$ROUTE_CONFIG"
 echo "Config: $ZENSU_CONFIG (the effective config with hooks.defaultDeliveryRoute=ask)" | tee -a "$REPORT"
 
-# ─── Test 1: Doc-only plan → escape-hatch (fast-path, NO TDD question) ──────
+# ─── Test 1: Doc-only plan → escape-hatch (fast-path, NO route question) ──────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 1: Doc-only plan (escape-hatch path)" | tee -a "$REPORT"
 DOC_OUT="$RESULTS_DIR/doc-${TIMESTAMP}.out"
@@ -150,14 +150,14 @@ check "T1.0 the driven session produced a debug log" "$DOC_RAN"
 check "T1.1 Plugin loaded hooks.json"        "$(contains "$DOC_LOG" "Loaded hooks.*plugin zensu")"
 check "T1.2 Hook fired on approval"           "$(contains "$DOC_LOG" "Hook PostToolUse:ExitPlanMode|provided additionalContext")"
 check "T1.3 ExitPlanMode tool succeeded"      "$(contains "$DOC_LOG" "tool=ExitPlanMode.*outcome=ok")"
-check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_LOG" "Skipping TDD|escape.?hatch|doc.only|README|CHANGELOG|markdown only|non-executable")"
+check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_LOG" "Skipping /zensu:build|escape.?hatch|doc.only|README|CHANGELOG|markdown only|non-executable")"
 if [ "$DOC_RAN" = PASS ]; then
   check "T1.5 No tdd-manager Agent dispatch"  "$(not_contains "$DOC_LOG" "source=agent:custom:zensu:tdd-manager")"
 else
   check "T1.5 (not graded: T1.0 did not pass — empty transcript, nothing was measured)" FAIL
 fi
 
-# ─── Test 2: Code-change plan → ask the route, then /zensu:tdd on that label ─────
+# ─── Test 2: Code-change plan → ask the route, then /zensu:build on that label ─────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 2: Code-change plan (delegation path)" | tee -a "$REPORT"
 CODE_OUT="$RESULTS_DIR/code-${TIMESTAMP}.out"
@@ -173,8 +173,8 @@ check "T2.0 the driven session produced a debug log" "$T2_0_VERDICT"
 check "T2.1 Plugin loaded hooks.json"        "$(contains "$CODE_LOG" "Loaded hooks.*plugin zensu")"
 check "T2.2 Hook fired on approval"           "$(contains "$CODE_LOG" "Hook PostToolUse:ExitPlanMode|provided additionalContext")"
 check "T2.3 ExitPlanMode tool succeeded"      "$(contains "$CODE_LOG" "tool=ExitPlanMode.*outcome=ok")"
-T2_4_VERDICT="$(contains "$CODE_OUT" "Executing via /zensu:tdd")"
-check "T2.4 /zensu:tdd skill execution indicated" "$T2_4_VERDICT"
+T2_4_VERDICT="$(contains "$CODE_OUT" "Executing via /zensu:build")"
+check "T2.4 /zensu:build skill execution indicated" "$T2_4_VERDICT"
 # T2.6 grades rendered OPTION LABELS, not the bare phrase "implement directly":
 # that substring also matches a model which SKIPPED the question and narrated its
 # intent ("I'll implement directly and then add the tests"), and this check is
@@ -183,7 +183,7 @@ check "T2.4 /zensu:tdd skill execution indicated" "$T2_4_VERDICT"
 # never types, so this still measures the rendered question rather than the
 # harness's own send_user trace.
 if [ "$(contains "$CODE_OUT" "No — implement directly")" = PASS ] \
-  && [ "$(contains "$CODE_OUT" "Zensu workflow — /zensu:tdd")" = PASS ]; then
+  && [ "$(contains "$CODE_OUT" "Zensu workflow — /zensu:build")" = PASS ]; then
   check "T2.6 the four-route question was actually asked" PASS
 else
   check "T2.6 the four-route question was actually asked" FAIL
@@ -212,7 +212,7 @@ check "T2.9 the workflow answer was recorded for the session" "$(route_recorded 
 # not_contains, which is how it escaped the first sweep — but an empty or missing
 # $CODE_LOG satisfies it exactly the same way, so it is gated on T2.0 like the rest.
 if [ "$T2_0_VERDICT" = PASS ]; then
-  check "T2.5 No doc-only escape-hatch"       "$(grep -v 'additionalContext' "$CODE_LOG" | grep -qiE 'Skipping TDD' && echo FAIL || echo PASS)"
+  check "T2.5 No doc-only escape-hatch"       "$(grep -v 'additionalContext' "$CODE_LOG" | grep -qiE 'Skipping /zensu:build' && echo FAIL || echo PASS)"
 else
   check "T2.5 (not graded: T2.0 did not pass — empty transcript, nothing was measured)" FAIL
 fi

@@ -113,8 +113,10 @@ gate_env() {
     -u ZENSU_SESSION_CONTEXT \
     -u ZENSU_RUNTIME_DIGEST \
     -u ZENSU_PROJECT_ROOT \
+    -u ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES \
     ZENSU_CONFIG="${GATE_ZENSU_CONFIG:-$TMP/absent-zensu-config.json}" \
     ${GATE_HOME:+"HOME=$GATE_HOME"} \
+    ${GATE_EVAL_BARE_IDENTITIES:+"ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=$GATE_EVAL_BARE_IDENTITIES"} \
     CLAUDE_PLUGIN_ROOT="$1" \
     CLAUDE_PLUGIN_DATA="$2" \
     bash "$GATE" 2>/dev/null
@@ -161,36 +163,47 @@ assert_case() {
   [ "$actual" = "$expected" ] && check "$label" PASS || check "$label (expected $expected, got $actual)" FAIL
 }
 
+DENY_PREFIX='Zensu capability gate (reviewer-capability-v1) deny: '
+MODULE_PREFIX="$(node -e 'process.stdout.write(require(process.argv[1]).DENY_PREFIX)' "$POLICY" 2>/dev/null)"
+[ "$MODULE_PREFIX" = "$DENY_PREFIX" ] && check "every capability deny names Zensu and the gate in its prefix" PASS \
+  || check "the capability deny prefix must name Zensu and the gate (got: ${MODULE_PREFIX:-<empty>})" FAIL
+
 assert_case "main-thread writes pass after immutable context revalidation" allow - Write '{"file_path":"x"}'
 assert_case "production hook path needs no SessionStart-exported ZENSU variables" allow arbitrary-custom Read '{"file_path":"README.md"}'
 assert_case "nested tool_input cannot impersonate a reviewer" allow - Write '{"agent_type":"code-reviewer","file_path":"x"}'
-assert_case "bare PLM subagent is denied project-local writes in depth" deny zensu-plm Write '{"file_path":"x"}'
 assert_case "scoped plugin PLM is denied project-local writes" deny zensu:zensu-plm Write '{"file_path":"x"}'
-assert_case "bare PLM remains read-only when Claude omits correlation agent_id" deny no-id:zensu-plm Write '{"file_path":"x"}'
-assert_case "bare PLM may read inside the immutable project" allow zensu-plm Read '{"file_path":"README.md"}'
-assert_case "bare PLM cannot edit project files" deny zensu-plm Edit '{"file_path":"README.md","old_string":"x","new_string":"y"}'
-assert_case "bare PLM cannot apply patches" deny zensu-plm apply_patch '{"patch":"*** Begin Patch\n*** Add File: ATTACK.txt\n+attack\n*** End Patch"}'
-assert_case "bare PLM subagent cannot invoke shell" deny zensu-plm Bash '{"command":"pwd"}'
-assert_case "bare PLM subagent cannot invoke mutating control" deny zensu-plm mcp__zensu__transition '{"state":"complete"}'
-assert_case "bare PLM may Grep a safe project subtree" allow zensu-plm Grep '{"pattern":"x","path":"src"}'
-assert_case "bare PLM cannot Grep a project ancestor of workflow state" deny zensu-plm Grep '{"pattern":"x","path":"."}'
-assert_case "bare PLM cannot Glob a project ancestor of workflow state" deny zensu-plm Glob '{"pattern":"**/*","path":"."}'
-assert_case "bare PLM cannot use host-default Grep at a protected ancestor cwd" deny zensu-plm Grep '{"pattern":"x"}'
-assert_case "bare code reviewer may use Read" allow code-reviewer Read '{"file_path":"x"}'
+assert_case "PLM remains read-only when Claude omits correlation agent_id" deny no-id:zensu:zensu-plm Write '{"file_path":"x"}'
+assert_case "PLM may read inside the immutable project" allow zensu:zensu-plm Read '{"file_path":"README.md"}'
+assert_case "PLM cannot edit project files" deny zensu:zensu-plm Edit '{"file_path":"README.md","old_string":"x","new_string":"y"}'
+assert_case "PLM cannot apply patches" deny zensu:zensu-plm apply_patch '{"patch":"*** Begin Patch\n*** Add File: ATTACK.txt\n+attack\n*** End Patch"}'
+assert_case "PLM subagent cannot invoke shell" deny zensu:zensu-plm Bash '{"command":"pwd"}'
+assert_case "PLM subagent cannot invoke mutating control" deny zensu:zensu-plm mcp__zensu__transition '{"state":"complete"}'
+assert_case "PLM may Grep a safe project subtree" allow zensu:zensu-plm Grep '{"pattern":"x","path":"src"}'
+assert_case "PLM cannot Grep a project ancestor of workflow state" deny zensu:zensu-plm Grep '{"pattern":"x","path":"."}'
+assert_case "PLM cannot Glob a project ancestor of workflow state" deny zensu:zensu-plm Glob '{"pattern":"**/*","path":"."}'
+assert_case "PLM cannot use host-default Grep at a protected ancestor cwd" deny zensu:zensu-plm Grep '{"pattern":"x"}'
 assert_case "scoped plugin code reviewer may use Read" allow zensu:code-reviewer Read '{"file_path":"x"}'
 assert_case "scoped plugin aspect reviewer remains read-only" deny zensu:review-aspect Write '{"file_path":"x"}'
 assert_case "scoped plugin judge reviewer may use Glob" allow zensu:review-judge Glob '{"pattern":"**/*","path":"src"}'
-assert_case "bare reviewer remains read-only when Claude omits correlation agent_id" deny no-id:code-reviewer Write '{"file_path":"x"}'
-assert_case "bare aspect reviewer may use project-bound Grep" allow review-aspect Grep '{"pattern":"x","path":"src"}'
-assert_case "bare judge reviewer may use project-bound Glob" allow review-judge Glob '{"pattern":"**/*","path":"src"}'
-assert_case "reviewer may Grep protected terminology in a safe subtree" allow review-aspect Grep '{"pattern":"session-control|main-v1","path":"src"}'
-assert_case "reviewer cannot Grep a project ancestor of workflow state" deny review-aspect Grep '{"pattern":"session-control|main-v1","path":"."}'
-assert_case "reviewer cannot use host-default Grep at a protected ancestor cwd" deny review-aspect Grep '{"pattern":"session-control"}'
-assert_case "reviewer cannot Glob a project ancestor of workflow state" deny review-judge Glob '{"pattern":"**/*","path":"."}'
-assert_case "reviewer cannot use host-default Glob at a protected ancestor cwd" deny review-judge Glob '{"pattern":"**/*"}'
-assert_case "reviewer Grep path filters cannot escape a safe subtree" deny review-aspect Grep '{"pattern":"session-control|main-v1","path":"src","glob":"../.zensu/**"}'
-assert_case "reviewer Glob patterns cannot escape a safe subtree" deny review-judge Glob '{"pattern":"../.zensu/**","path":"src"}'
-assert_case "reviewer view_image is denied outside the exact read trio" deny review-judge view_image '{"path":"x.png"}'
+assert_case "reviewer remains read-only when Claude omits correlation agent_id" deny no-id:zensu:code-reviewer Write '{"file_path":"x"}'
+assert_case "aspect reviewer may use project-bound Grep" allow zensu:review-aspect Grep '{"pattern":"x","path":"src"}'
+assert_case "reviewer may Grep protected terminology in a safe subtree" allow zensu:review-aspect Grep '{"pattern":"session-control|main-v1","path":"src"}'
+assert_case "reviewer cannot Grep a project ancestor of workflow state" deny zensu:review-aspect Grep '{"pattern":"session-control|main-v1","path":"."}'
+assert_case "reviewer cannot use host-default Grep at a protected ancestor cwd" deny zensu:review-aspect Grep '{"pattern":"session-control"}'
+assert_case "reviewer cannot Glob a project ancestor of workflow state" deny zensu:review-judge Glob '{"pattern":"**/*","path":"."}'
+assert_case "reviewer cannot use host-default Glob at a protected ancestor cwd" deny zensu:review-judge Glob '{"pattern":"**/*"}'
+assert_case "reviewer Grep path filters cannot escape a safe subtree" deny zensu:review-aspect Grep '{"pattern":"session-control|main-v1","path":"src","glob":"../.zensu/**"}'
+assert_case "reviewer Glob patterns cannot escape a safe subtree" deny zensu:review-judge Glob '{"pattern":"../.zensu/**","path":"src"}'
+assert_case "reviewer view_image is denied outside the exact read trio" deny zensu:review-judge view_image '{"path":"x.png"}'
+assert_case "a bare PLM name is a neutral child, not the read-only PLM" allow zensu-plm Write '{"file_path":"x"}'
+assert_case "a bare reviewer name is a neutral child, not a read-only reviewer" allow code-reviewer Write '{"file_path":"x"}'
+assert_case "a bare reviewer name without agent_id is a neutral child too" allow no-id:review-aspect Write '{"file_path":"x"}'
+assert_case "a bare reviewer name keeps the neutral guarded shell" allow review-judge Bash '{"command":"git status --short"}'
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "the evaluation opt-in makes a bare PLM name read-only" deny zensu-plm Write '{"file_path":"x"}'
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "the evaluation opt-in makes a bare reviewer name read-only" deny code-reviewer Write '{"file_path":"x"}'
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "the evaluation opt-in keeps a bare reviewer read-only without agent_id" deny no-id:review-aspect Write '{"file_path":"x"}'
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "the evaluation opt-in denies a bare judge the shell" deny review-judge Bash '{"command":"git status --short"}'
+GATE_EVAL_BARE_IDENTITIES=true assert_case "only the exact opt-in value 1 makes a bare name read-only" allow code-reviewer Write '{"file_path":"x"}'
 assert_case "unknown custom agent receives neutral normal reads" allow arbitrary-custom Read '{"file_path":"x"}'
 assert_case "neutral agent may read ordinary installed plugin documentation" allow arbitrary-custom Read "{\"file_path\":\"$PLUGIN/README.md\"}"
 assert_case "neutral agent cannot Grep a project ancestor of workflow state" deny arbitrary-custom Grep '{"pattern":"main-v1","path":"."}'
@@ -281,12 +294,15 @@ else
 fi
 assert_case "neutral report content may discuss protected architecture" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\",\"content\":\"session-control main-v1 ZENSU_SESSION_KEY\"}"
 assert_case "neutral agent keeps host task updates" allow arbitrary-custom TaskUpdate '{"taskId":"review-1","status":"completed"}'
-assert_case "neutral agent is denied an MCP tool outside the named read-only list" deny arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
+assert_case "neutral agent may call an MCP tool whose inputs the gate does not know" allow arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
 assert_case "neutral agent keeps read-only Zensu MCP tools" allow arbitrary-custom mcp__zensu__get_feature '{"feature_id":"F-1"}'
-assert_case "neutral agent is denied browser tools of a foreign server keyed playwright" deny arbitrary-custom mcp__playwright__browser_snapshot '{}'
+assert_case "neutral agent may use browser tools of a foreign server keyed playwright" allow arbitrary-custom mcp__playwright__browser_snapshot '{}'
+assert_case "neutral agent cannot point a browser at a file under .zensu" deny arbitrary-custom mcp__Claude_Browser__navigate "{\"url\":\"file://$PROJECT/.zensu/state/tdd-phase-${SESSION_KEY}.json\"}"
 assert_case "neutral nested-agent capability stays host-governed" allow arbitrary-custom Agent '{"subagent_type":"general-purpose","prompt":"review session-control and main-v1"}'
-assert_case "neutral agent cannot run code through context-mode ctx_execute" deny general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"cat .zensu/state/*.json"}'
-assert_case "neutral agent cannot run a command through a terminal MCP server" deny general-purpose mcp__terminal__run_in_terminal '{"command":"ls .zensu/state"}'
+assert_case "neutral agent cannot run code through context-mode ctx_execute, which no Zensu command gate sees" deny general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"ls src"}'
+assert_case "neutral agent may search through context-mode ctx_search" allow general-purpose mcp__plugin_context-mode_context-mode__ctx_search '{"queries":["session control"]}'
+assert_case "neutral agent cannot name .zensu in a context-mode search" deny general-purpose mcp__plugin_context-mode_context-mode__ctx_search '{"queries":["cat .zensu/state/*.json"]}'
+assert_case "neutral agent cannot run a command through a terminal MCP server" deny general-purpose mcp__terminal__run_in_terminal '{"command":"ls src"}'
 assert_case "neutral StructuredOutput may name a .zensu file in its result" allow general-purpose StructuredOutput '{"target_files":[".zensu/state/tdd-phase.json"],"summary":"inspected"}'
 assert_case "neutral Read under .zensu/state stays denied beside that StructuredOutput" deny general-purpose Read "{\"file_path\":\"$PROJECT/.zensu/state/tdd-phase-${SESSION_KEY}.json\"}"
 
@@ -304,43 +320,82 @@ HOST_PROFILE_VERDICTS="$(ZENSU_CONFIG="$TMP/absent-zensu-config.json" node -e '
     try { return gate.neutralViolation({ tool_name: tool, tool_input: input }, trusted); }
     catch (error) { return `threw ${error.message}`; }
   };
-  const host = [...gate.HOST_PROFILE_TOOLS];
-  const mcp = [...gate.HOST_PROFILE_MCP_READ_TOOLS];
-  const listed = `${host.join(" ")}|${mcp.join(" ")}|${[...gate.NON_PATH_TOOLS].join(" ")}`;
-  verdict(listed === "Read Grep Glob Edit Write MultiEdit NotebookEdit apply_patch LSP WebFetch WebSearch ToolSearch TodoWrite TaskCreate TaskGet TaskList TaskUpdate Agent SendMessage AskUserQuestion StructuredOutput ReportFindings SubagentHandback|mcp__plugin_context7_context7__resolve-library-id mcp__plugin_context7_context7__query-docs|StructuredOutput ReportFindings SubagentHandback AskUserQuestion",
-    "the host-profile-v1 allowlist, its named MCP tools and its path-free tools are exactly the reviewed sets", listed);
-  for (const tool of [...host, ...mcp]) {
-    const reason = judge(tool, { path: "src", pattern: "x" });
-    verdict(reason === null, `host-profile-v1 admits allowlisted tool ${tool}`, reason);
-  }
-  const allowance = `a neutral subagent may use only ${host.join(", ")}, the MCP tools ${mcp.join(", ")}, and read-only Zensu MCP tools`;
-  for (const tool of ["Skill", "Monitor", "Task", "TaskOutput", "TaskStop", "BashOutput", "KillShell", "CronCreate", "ScheduleWakeup", "RemoteTrigger", "Workflow", "EnterWorktree", "Artifact", "Config", "REPL", "ListMcpResourcesTool", "ReadMcpResourceTool", "NotebookRead", "subagenthandback", " Read", "MCP__zensu__get_feature", "mcp__github__get_pull_request", "mcp__context7__query-docs", "mcp__plugin_context-mode_context-mode__ctx_search", "mcp__Claude_Browser__navigate", "mcp__playwright__browser_snapshot", "mcp__ccd_session_mgmt__search_session_transcripts"]) {
-    const reason = judge(tool, { path: "src", command: "pwd", prompt: "x" });
-    verdict(reason === `host-profile-v1 cannot invoke ${tool}; ${allowance}`, `host-profile-v1 denies ${JSON.stringify(tool)} outside its allowlist and names the allowlist`, reason);
-  }
-  const shellAllowance = `a neutral subagent may use only ${host.join(", ")}, Bash behind an accident guard, the MCP tools ${mcp.join(", ")}, and read-only Zensu MCP tools`;
+  const path = require("node:path");
   const judgeAs = (type, tool, input) => {
     try { return gate.neutralViolation({ tool_name: tool, tool_input: input, agent_id: "agent-1", agent_type: type }, trusted); }
     catch (error) { return `threw ${error.message}`; }
   };
-  for (const tool of ["Monitor", "Skill", "mcp__github__get_pull_request"]) {
-    const named = judgeAs("general-purpose", tool, { path: "src", command: "pwd", prompt: "x" });
-    verdict(named === `host-profile-v1 cannot invoke ${tool}; ${shellAllowance}`, `a named neutral child denied ${JSON.stringify(tool)} is told it holds Bash behind the accident guard`, named);
-    const persona = judgeAs("zensu-review-domain", tool, { path: "src", command: "pwd", prompt: "x" });
-    verdict(persona === `host-profile-v1 cannot invoke ${tool}; ${allowance}`, `a zensu-review-* persona denied ${JSON.stringify(tool)} is not told it holds Bash`, persona);
+  const known = [...gate.KNOWN_TOOLS];
+  const listed = `${known.join(" ")}|${[...gate.NON_PATH_TOOLS].join(" ")}`;
+  verdict(listed === "Read Grep Glob Edit Write MultiEdit NotebookEdit apply_patch LSP WebFetch WebSearch ToolSearch TodoWrite TaskCreate TaskGet TaskList TaskUpdate Agent Task SendMessage AskUserQuestion StructuredOutput ReportFindings SubagentHandback Bash mcp__plugin_context7_context7__resolve-library-id mcp__plugin_context7_context7__query-docs|StructuredOutput ReportFindings SubagentHandback AskUserQuestion",
+    "the tools whose inputs the gate knows and its path-free tools are exactly the reviewed sets", listed);
+  for (const tool of [...known.filter((name) => name !== "Bash"), "Skill", "TaskOutput", "TaskStop", "CronCreate", "ScheduleWakeup", "RemoteTrigger", "Workflow", "EnterWorktree", "Artifact", "Config", "ListMcpResourcesTool", "ReadMcpResourceTool", "NotebookRead", "subagenthandback", " Read", "MCP__zensu__get_feature", "mcp__github__get_pull_request", "mcp__context7__query-docs", "mcp__plugin_context-mode_context-mode__ctx_search", "mcp__github__get_workflow_run", "mcp__github__search_code", "mcp__docs__runbook_lookup", "mcp__Claude_Browser__navigate", "mcp__playwright__browser_snapshot", "mcp__ccd_session_mgmt__search_session_transcripts"]) {
+    const reason = judge(tool, { path: "src", pattern: "x", prompt: "x" });
+    verdict(reason === null, `host-profile-v1 admits ${JSON.stringify(tool)} while its input stays clear of Zensu state`, reason);
   }
+  const commandWords = [...gate.COMMAND_NAME_WORDS].join(" ");
+  verdict(commandWords === "exec execute shell terminal command repl eval process bash powershell pwsh cmd",
+    "the words that mark a tool name as running commands are exactly the reviewed set", commandWords);
+  const commandScope = "Zensu\x27s command gates see only Bash and PowerShell commands";
+  for (const tool of ["REPL", "BashOutput", "KillShell", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__plugin_context-mode_context-mode__ctx_execute_file", "mcp__terminal__run_in_terminal", "mcp__desktop-commander__start_process", "mcp__ide__executeCode", "mcp__shell__run", "mcp__Blender__execute_blender_code"]) {
+    const unnamed = judge(tool, { path: "src", code: "ls" });
+    verdict(unnamed === `host-profile-v1 cannot invoke ${tool}, because its name marks it as running commands or code and ${commandScope}; report the need to the main thread instead`, `host-profile-v1 denies ${JSON.stringify(tool)}, whose name marks it as running commands, without pointing a child that holds no shell grant at Bash`, unnamed);
+    const named = judgeAs("general-purpose", tool, { path: "src", code: "ls" });
+    verdict(named === `host-profile-v1 cannot invoke ${tool}, because its name marks it as running commands or code and ${commandScope}; run the command through Bash, or report the need to the main thread instead`, `host-profile-v1 points a child that holds the shell grant from ${JSON.stringify(tool)} to Bash`, named);
+  }
+  const monitorDeny = `host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because ${commandScope}; `;
+  const monitorCommand = judgeAs("general-purpose", "Monitor", { command: "tail -f build.log" });
+  verdict(monitorCommand === `${monitorDeny}run the command through Bash, or report the need to the main thread instead`, "a named neutral child cannot run a Monitor command and is pointed at Bash", monitorCommand);
+  const personaMonitor = judgeAs("zensu-review-domain", "Monitor", { command: "pwd" });
+  verdict(personaMonitor === `${monitorDeny}report the need to the main thread instead`, "a zensu-review-* persona, which holds no shell grant, is not pointed at Bash", personaMonitor);
+  const stream = { ws: { url: "wss://example.test/feed" }, description: "feed", timeout_ms: 60000 };
+  const personaStream = judgeAs("zensu-review-domain", "Monitor", stream);
+  verdict(personaStream === null, "a Monitor ws stream runs no command, so every neutral child may open one", personaStream);
+  const mixed = judgeAs("general-purpose", "Monitor", { ...stream, command: "pwd" });
+  verdict(mixed === `${monitorDeny}run the command through Bash, or report the need to the main thread instead`, "a Monitor call that carries a command beside its stream is a command", mixed);
+  const shapeless = judge("Monitor", { description: "x", timeout_ms: 60000 });
+  verdict(shapeless === `${monitorDeny}report the need to the main thread instead`, "a Monitor call without a stream fails closed as a command", shapeless);
   const commandLead = "host-profile-v1 cannot invoke command-execution tools. To search the project, ";
-  for (const tool of ["shell", "exec", "exec_command", "terminal", "command", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__plugin_context-mode_context-mode__ctx_execute_file", "mcp__plugin_context-mode_context-mode__ctx_batch_execute", "mcp__terminal__run_in_terminal", "mcp__playwright__browser_run_code_unsafe", "mcp__desktop-commander__execute_command", "mcp__python__run_code"]) {
-    const reason = judge(tool, { path: "src/probe.js", code: "x", command: "pwd" });
-    verdict(typeof reason === "string" && reason.startsWith(commandLead), `host-profile-v1 gives ${tool} the command-execution deny and its search remedy`, reason);
+  for (const tool of ["shell", "exec", "exec_command", "terminal", "command"]) {
+    const reason = judge(tool, { path: "src/probe.js", command: "pwd" });
+    verdict(typeof reason === "string" && reason.startsWith(commandLead) && reason.endsWith(" Report the need to the main thread instead."), `host-profile-v1 gives the shell alias ${tool} the command-execution deny, its search remedy and the main-thread close`, reason);
   }
+  const powershell = judgeAs("general-purpose", "PowerShell", { command: "Get-ChildItem" });
+  verdict(powershell === "host-profile-v1 cannot invoke PowerShell, because the Zensu accident guard reads only Bash commands; run the command through Bash, or report the need to the main thread instead", "host-profile-v1 denies PowerShell and names Bash as the way out", powershell);
   const grantLead = "host-profile-v1 cannot invoke command-execution tools: the subagent reports no usable agent_type, so the shell grant cannot tell it from a read-only reviewer. To search the project, ";
   const unnamedBash = judge("Bash", { command: "pwd" });
   verdict(typeof unnamedBash === "string" && unnamedBash.startsWith(grantLead) && unnamedBash.endsWith(" Report the need to the main thread instead."), "host-profile-v1 refuses Bash to a child without agent_type with the grant cause, the search remedy and the main-thread close", unnamedBash);
+  const workflowMention = "its input names a .zensu directory, which holds Zensu workflow state or configuration";
+  const stateMention = "its input names the private plugin data, the installed plugin, the session record or the Zensu config file";
+  for (const [label, tool, input, mention] of [
+    ["a search query that names .zensu", "mcp__plugin_context-mode_context-mode__ctx_search", { queries: ["cat .zensu/state/*.json"] }, workflowMention],
+    ["text that names the private plugin data", "mcp__github__create_issue", { title: "x", body: `see ${pluginData}` }, stateMention],
+    ["a file URL into .zensu", "mcp__Claude_Browser__navigate", { url: `file://${projectRoot}/.zensu/state/tdd-phase.json` }, workflowMention],
+    ["text that names the installed plugin", "Skill", { skill: "x", args: `${pluginRoot}/hooks` }, stateMention],
+    ["the environment file of a process", "mcp__files__read_text_file", { target: "/proc/self/environ" }, "its input names the environment file of a process"],
+  ]) {
+    const reason = judge(tool, input);
+    verdict(reason === `host-profile-v1 cannot invoke ${tool} here: ${mention}, and Zensu cannot tell what that tool does with it; report the need to the main thread instead`, `a tool whose inputs the gate does not know is denied ${label}`, reason);
+  }
+  for (const [label, tool, input] of [
+    ["a known documentation tool may mention .zensu in its query", "mcp__plugin_context7_context7__query-docs", { libraryId: "/x/y", query: "what does .zensu/state hold" }],
+    ["a Zensu MCP read tool may mention .zensu", "mcp__zensu__get_feature", { feature_id: "F-1", note: ".zensu/state" }],
+    ["a nested Agent prompt may mention .zensu", "Agent", { subagent_type: "general-purpose", prompt: "leave .zensu/state alone" }],
+    ["the legacy Task spawn tool is known like Agent", "Task", { subagent_type: "general-purpose", prompt: "leave .zensu/state alone" }],
+  ]) {
+    const reason = judge(tool, input);
+    verdict(reason === null, label, reason);
+  }
+  const relData = path.relative(projectRoot, path.join(pluginData, "unrelated", "x.json"));
+  const relConfig = path.relative(projectRoot, process.env.ZENSU_CONFIG);
   for (const [label, tool, input, expected] of [
-    ["an admitted MCP tool still has its path inputs checked", "mcp__zensu__get_feature", { feature_id: "F-1", file_path: ".zensu/state/tdd-phase.json" }, "host-profile-v1 cannot access a protected Session Control path"],
-    ["a Zensu MCP mutation stays outside the read allowlist", "mcp__zensu__update_feature", { feature_id: "F-1" }, "host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist"],
-    ["an admitted path-taking tool still cannot name .zensu", "LSP", { operation: "hover", filePath: ".zensu/state/tdd-phase.json", line: 1, character: 1 }, "host-profile-v1 cannot access a protected Session Control path"],
+    ["an unknown tool cannot take a relative path into the private plugin data", "mcp__files__read_text_file", { path: relData }, "host-profile-v1 cannot pass a path inside the installed plugin runtime or private plugin data to mcp__files__read_text_file, because Zensu cannot tell whether that tool writes there; report the need to the main thread instead"],
+    ["Read may take the same relative path into unprotected plugin data", "Read", { file_path: relData }, null],
+    ["an unknown tool cannot take a relative path to a Zensu configuration layer", "mcp__files__read_text_file", { path: relConfig }, "host-profile-v1 cannot pass a Zensu configuration layer path to mcp__files__read_text_file, because the layers decide the subagent shell grant and Zensu cannot tell whether that tool writes there; report the need to the main thread instead"],
+    ["Read may take the same relative path to a configuration layer", "Read", { file_path: relConfig }, null],
+    ["an admitted MCP tool still has its path inputs checked", "mcp__zensu__get_feature", { feature_id: "F-1", file_path: ".zensu/state/tdd-phase.json" }, "host-profile-v1 cannot access a protected Session Control path, because it is Zensu\x27s own workflow state; report the need to the main thread instead"],
+    ["a Zensu MCP mutation stays outside the read allowlist", "mcp__zensu__update_feature", { feature_id: "F-1" }, "host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist, because Zensu mutations run on the main thread; report the need to the main thread instead"],
+    ["an admitted path-taking tool still cannot name .zensu", "LSP", { operation: "hover", filePath: ".zensu/state/tdd-phase.json", line: 1, character: 1 }, "host-profile-v1 cannot access a protected Session Control path, because it is Zensu\x27s own workflow state; report the need to the main thread instead"],
     ["neutral StructuredOutput may name .zensu under any path-like key", "StructuredOutput", { target_files: [".zensu/state/x"], root: ".zensu", file_path: ".zensu/state/y" }, null],
     ["neutral ReportFindings may cite a .zensu file", "ReportFindings", { findings: [{ file: ".zensu/state/tdd-phase.json", summary: "x" }], files: [".zensu/state/x"] }, null],
     ["neutral handback may quote a patch header into .zensu", "SubagentHandback", { message: "*** Update File: .zensu/state/tdd-phase.json\nreport" }, null],
@@ -367,39 +422,45 @@ SRC_EXAMPLE="$(native_join "$NATIVE_PROJECT" src)"
 DOCS_EXAMPLE="$(native_join "$NATIVE_PROJECT" docs)"
 SEARCH_LEAD="To search the project, call Grep or Glob with a path that names a subdirectory of the project root $NATIVE_PROJECT other than .zensu"
 COMMAND_REMEDY_REASON="$(deny_reason general-purpose shell '{"command":"grep -r session ."}')"
-if [ "$COMMAND_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
+if [ "$COMMAND_REMEDY_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path. Report the need to the main thread instead." ]; then
   check "the neutral command-tool deny names the Grep/Glob remedy and the project's searchable subdirectories" PASS
 else
   check "the neutral command-tool deny must name the Grep/Glob remedy (got: ${COMMAND_REMEDY_REASON:-<empty>})" FAIL
 fi
 UNNAMED_REMEDY_REASON="$(deny_reason ? Bash '{"command":"grep -r session ."}')"
-if [ "$UNNAMED_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools: the subagent reports no usable agent_type, so the shell grant cannot tell it from a read-only reviewer. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path. Report the need to the main thread instead." ]; then
+if [ "$UNNAMED_REMEDY_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke command-execution tools: the subagent reports no usable agent_type, so the shell grant cannot tell it from a read-only reviewer. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path. Report the need to the main thread instead." ]; then
   check "the refused shell grant names its cause, the Grep/Glob remedy and the main-thread close" PASS
 else
   check "the refused shell grant must name its cause and the remedy (got: ${UNNAMED_REMEDY_REASON:-<empty>})" FAIL
 fi
 TRAVERSAL_REMEDY_REASON="$(deny_reason general-purpose Grep '{"pattern":"phase","path":"."}')"
-if [ "$TRAVERSAL_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
+if [ "$TRAVERSAL_REMEDY_REASON" = "${DENY_PREFIX}host-profile-v1 traversal root may reach protected Session Control or workflow state. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path. If you cannot search another way, report the need to the main thread instead." ]; then
   check "the neutral traversal deny names the subdirectory remedy" PASS
 else
   check "the neutral traversal deny must name the subdirectory remedy (got: ${TRAVERSAL_REMEDY_REASON:-<empty>})" FAIL
 fi
-REVIEWER_TRAVERSAL_REASON="$(deny_reason review-aspect Glob '{"pattern":"**/*"}')"
-if [ "$REVIEWER_TRAVERSAL_REASON" = "reviewer-capability-v1 deny: reviewer-readonly-v1 traversal root may reach protected Session Control or workflow state. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
+REVIEWER_TRAVERSAL_REASON="$(deny_reason zensu:review-aspect Glob '{"pattern":"**/*"}')"
+if [ "$REVIEWER_TRAVERSAL_REASON" = "${DENY_PREFIX}reviewer-readonly-v1 traversal root may reach protected Session Control or workflow state. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
   check "the reviewer traversal deny names the same subdirectory remedy" PASS
 else
   check "the reviewer traversal deny must name the subdirectory remedy (got: ${REVIEWER_TRAVERSAL_REASON:-<empty>})" FAIL
 fi
-MCP_COMMAND_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"grep -r x ."}')"
-if [ "$MCP_COMMAND_REASON" = "$COMMAND_REMEDY_REASON" ]; then
-  check "a command-executing MCP tool gets the same command-execution deny and remedy as a shell alias" PASS
+MCP_COMMAND_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"ls src"}')"
+if [ "$MCP_COMMAND_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke mcp__plugin_context-mode_context-mode__ctx_execute, because its name marks it as running commands or code and Zensu's command gates see only Bash and PowerShell commands; run the command through Bash, or report the need to the main thread instead" ]; then
+  check "a code-running MCP tool gets the command deny through the gate, with Bash named as the way out" PASS
 else
-  check "a command-executing MCP tool must get the command-execution deny and remedy (got: ${MCP_COMMAND_REASON:-<empty>})" FAIL
+  check "a code-running MCP tool must get the command deny with Bash named as the way out (got: ${MCP_COMMAND_REASON:-<empty>})" FAIL
+fi
+MCP_MENTION_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_search '{"queries":["grep -r x .zensu"]}')"
+if [ "$MCP_MENTION_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke mcp__plugin_context-mode_context-mode__ctx_search here: its input names a .zensu directory, which holds Zensu workflow state or configuration, and Zensu cannot tell what that tool does with it; report the need to the main thread instead" ]; then
+  check "an MCP tool whose input names .zensu gets the mention deny through the gate" PASS
+else
+  check "an MCP tool whose input names .zensu must get the mention deny (got: ${MCP_MENTION_REASON:-<empty>})" FAIL
 fi
 mkdir "$PROJECT/docs"
 DEMAND_REASON="$(deny_reason general-purpose shell '{"command":"ls"}')"
 rmdir "$PROJECT/docs"
-if [ "$DEMAND_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: docs, src. For example, pass $DOCS_EXAMPLE as the path." ]; then
+if [ "$DEMAND_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: docs, src. For example, pass $DOCS_EXAMPLE as the path. Report the need to the main thread instead." ]; then
   check "the remedy lists the project's subdirectories as they exist at deny time" PASS
 else
   check "the remedy must list the subdirectories present at deny time (got: ${DEMAND_REASON:-<empty>})" FAIL
@@ -419,51 +480,53 @@ SESSION_ID="$FLAT_SESSION_ID" PROJECT="$FLAT_PROJECT" node -e '
   env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
   bash "$PLUGIN/hooks/session-start-session-control.sh" >/dev/null
 FLAT_REASON="$(PAYLOAD_SESSION_ID="$FLAT_SESSION_ID" PAYLOAD_CWD="$FLAT_PROJECT" deny_reason general-purpose shell '{"command":"ls"}')"
-if [ "$FLAT_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. To search the project, call Grep or Glob with a path that names a subdirectory of the project root $(native_real "$FLAT_PROJECT") other than .zensu; none qualifies here, so Read the files you need or name one file as the Grep path." ]; then
+if [ "$FLAT_REASON" = "${DENY_PREFIX}host-profile-v1 cannot invoke command-execution tools. To search the project, call Grep or Glob with a path that names a subdirectory of the project root $(native_real "$FLAT_PROJECT") other than .zensu; none qualifies here, so Read the files you need or name one file as the Grep path. Report the need to the main thread instead." ]; then
   check "a project root without a searchable subdirectory gets the Read fallback" PASS
 else
   check "a project root without a searchable subdirectory must get the Read fallback (got: ${FLAT_REASON:-<empty>})" FAIL
 fi
-HOST_CONTEXT_TOOLS="$(node -e '
+HOST_CONTEXT_BOUNDARY="$(node -e '
   const fs = require("node:fs");
   const core = require(process.argv[1]);
-  const gate = require(process.argv[2]);
-  const text = core.renderHostContext(JSON.parse(fs.readFileSync(process.argv[3], "utf8")));
-  const match = /admits only (.+?), plus the MCP tools (.+?) and read-only Zensu MCP tools; it denies every other tool/.exec(text);
-  if (!match) { process.stdout.write("unparsed"); process.exit(0); }
-  const host = match[1].split(/, (?:and )?/);
-  const mcp = match[2].split(" and ");
-  const same = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
-  process.stdout.write(same(host, [...gate.HOST_PROFILE_TOOLS]) && same(mcp, [...gate.HOST_PROFILE_MCP_READ_TOOLS]) ? "same" : `drift:${host.join(",")}|${mcp.join(",")}`);
-' "$PLUGIN/hooks/lib/session-control-core-v1.js" "$POLICY" "$SESSION_CONTEXT" 2>/dev/null)"
-if [ "$HOST_CONTEXT_TOOLS" = same ]; then
-  check "the neutral SubagentStart context names exactly the tools the gate admits" PASS
+  const text = core.renderHostContext(JSON.parse(fs.readFileSync(process.argv[2], "utf8")));
+  const missing = [
+    "admits every tool except what reaches Zensu\x27s own state",
+    "Zensu MCP mutations, PowerShell, every shell alias other than Bash, a Monitor command and a tool whose name marks it as running commands or code",
+    "may not name the installed plugin, its private data, the session record, a Zensu configuration layer or a .zensu directory anywhere in its input",
+    "may run Bash commands behind an accident guard unless hooks.subagentShell is false",
+    "the guard prevents accidents and is not a sandbox",
+  ].filter((phrase) => !text.includes(phrase));
+  if (/admits only/.test(text)) missing.push("an allowlist claim");
+  process.stdout.write(missing.length === 0 ? "same" : `drift:${missing.join("|")}`);
+' "$PLUGIN/hooks/lib/session-control-core-v1.js" "$SESSION_CONTEXT" 2>/dev/null)"
+if [ "$HOST_CONTEXT_BOUNDARY" = same ]; then
+  check "the neutral SubagentStart context names the Zensu-state boundary the gate enforces" PASS
 else
-  check "the neutral SubagentStart context must name exactly the admitted tools (got: ${HOST_CONTEXT_TOOLS:-<empty>})" FAIL
+  check "the neutral SubagentStart context must name the Zensu-state boundary (got: ${HOST_CONTEXT_BOUNDARY:-<empty>})" FAIL
 fi
 assert_case "missing agent_type with an agent_id is neutral" allow ? Read '{"file_path":"x"}'
 assert_case "non-host reviewer alias is neutral, not reviewer" allow zensu-review-domain Write '{"file_path":"x"}'
 assert_case "runtime reviewer path is neutral, not reviewer" allow /root/zensu_code_reviewer Write '{"file_path":"x"}'
-assert_case "reviewer Write is denied" deny code-reviewer Write '{"file_path":"x"}'
-assert_case "reviewer apply_patch is denied" deny review-aspect apply_patch '{"patch":"x"}'
-assert_case "reviewer mutating shell is denied" deny code-reviewer exec_command '{"cmd":"printf x > source.js"}'
-assert_case "reviewer shell is denied even for git diff" deny code-reviewer exec_command '{"cmd":"git diff HEAD -- src/app.js"}'
-assert_case "reviewer shell is denied even for git status" deny review-aspect Bash '{"command":"git status --short"}'
-assert_case "workflow-control shell invocation is denied" deny code-reviewer Bash '{"command":"bash hooks/lib/zensu-log.sh --chain-done"}'
-assert_case "mutating MCP/control tool is denied" deny code-reviewer mcp__zensu__transition '{"state":"complete"}'
-assert_case "nested Agent tool is denied" deny review-aspect Agent '{"subagent_type":"general-purpose"}'
-assert_case "nested collaboration spawn is denied" deny review-judge spawn_agent '{"task_name":"attack"}'
-assert_case "unknown reviewer tools fail closed" deny code-reviewer mystery_tool '{}'
+assert_case "reviewer Write is denied" deny zensu:code-reviewer Write '{"file_path":"x"}'
+assert_case "reviewer apply_patch is denied" deny zensu:review-aspect apply_patch '{"patch":"x"}'
+assert_case "reviewer mutating shell is denied" deny zensu:code-reviewer exec_command '{"cmd":"printf x > source.js"}'
+assert_case "reviewer shell is denied even for git diff" deny zensu:code-reviewer exec_command '{"cmd":"git diff HEAD -- src/app.js"}'
+assert_case "reviewer shell is denied even for git status" deny zensu:review-aspect Bash '{"command":"git status --short"}'
+assert_case "workflow-control shell invocation is denied" deny zensu:code-reviewer Bash '{"command":"bash hooks/lib/zensu-log.sh --chain-done"}'
+assert_case "mutating MCP/control tool is denied" deny zensu:code-reviewer mcp__zensu__transition '{"state":"complete"}'
+assert_case "nested Agent tool is denied" deny zensu:review-aspect Agent '{"subagent_type":"general-purpose"}'
+assert_case "nested collaboration spawn is denied" deny zensu:review-judge spawn_agent '{"task_name":"attack"}'
+assert_case "unknown reviewer tools fail closed" deny zensu:code-reviewer mystery_tool '{}'
 
 HANDBACK_REPORT='{"message":"## Review\nNo findings."}'
 VANISHED_CWD="$TMP/vanished-working-directory"
 assert_case "scoped code reviewer may deliver its report through SubagentHandback" allow zensu:code-reviewer SubagentHandback "$HANDBACK_REPORT"
 assert_case "scoped aspect reviewer may deliver its report through SubagentHandback" allow zensu:review-aspect SubagentHandback "$HANDBACK_REPORT"
 assert_case "scoped judge reviewer may deliver its report through SubagentHandback" allow zensu:review-judge SubagentHandback "$HANDBACK_REPORT"
-assert_case "bare reviewer fixture may deliver its report through SubagentHandback" allow code-reviewer SubagentHandback "$HANDBACK_REPORT"
-assert_case "bare reviewer keeps SubagentHandback when Claude omits correlation agent_id" allow no-id:review-aspect SubagentHandback "$HANDBACK_REPORT"
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "a bare reviewer fixture under the evaluation opt-in may deliver its report through SubagentHandback" allow code-reviewer SubagentHandback "$HANDBACK_REPORT"
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "a bare reviewer fixture keeps SubagentHandback when Claude omits correlation agent_id" allow no-id:review-aspect SubagentHandback "$HANDBACK_REPORT"
 assert_case "scoped PLM may deliver its report through SubagentHandback" allow zensu:zensu-plm SubagentHandback "$HANDBACK_REPORT"
-assert_case "bare PLM may deliver its report through SubagentHandback" allow zensu-plm SubagentHandback "$HANDBACK_REPORT"
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "a bare PLM fixture under the evaluation opt-in may deliver its report through SubagentHandback" allow zensu-plm SubagentHandback "$HANDBACK_REPORT"
 assert_case "reviewer report text is not policed for protected paths or patch markers" allow zensu:review-aspect SubagentHandback '{"message":"*** Update File: /etc/passwd\n.zensu/state/tdd-phase.json main-v1 session-control"}'
 assert_case "reviewer handback with an empty message is left to the host" allow zensu:code-reviewer SubagentHandback '{"message":""}'
 PAYLOAD_CWD="$VANISHED_CWD" assert_case "reviewer handback resolves no path, so a vanished cwd cannot block the report" allow zensu:code-reviewer SubagentHandback "$HANDBACK_REPORT"
@@ -478,7 +541,7 @@ assert_case "reviewer handback with a list message is denied" deny zensu:review-
 WORKFLOW_RESULT='{"findings":[{"title":"x","file":".zensu/state/tdd-phase.json","line":1}]}'
 assert_case "scoped aspect reviewer may return a workflow result through StructuredOutput" allow zensu:review-aspect StructuredOutput "$WORKFLOW_RESULT"
 assert_case "scoped judge reviewer may return a workflow result through StructuredOutput" allow zensu:review-judge StructuredOutput '{"outcome":"real"}'
-assert_case "bare reviewer fixture may return a workflow result through StructuredOutput" allow review-aspect StructuredOutput '{}'
+GATE_EVAL_BARE_IDENTITIES=1 assert_case "a bare reviewer fixture under the evaluation opt-in may return a workflow result through StructuredOutput" allow review-aspect StructuredOutput '{}'
 assert_case "scoped PLM may return a workflow result through StructuredOutput" allow zensu:zensu-plm StructuredOutput '{"answer":"x"}'
 PAYLOAD_CWD="$VANISHED_CWD" assert_case "reviewer workflow result resolves no path, so a vanished cwd cannot block it" allow zensu:review-aspect StructuredOutput '{"findings":[]}'
 assert_case "evidence worker stays on the bare read trio without StructuredOutput" deny zensu:pr-review-worker StructuredOutput '{"result":"x"}'
@@ -496,28 +559,28 @@ assert_case "neutral child keeps SubagentHandback under host governance" allow g
 HANDBACK_TAIL='only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report'
 REVIEWER_TOOL_REASON="$(deny_reason zensu:review-aspect Bash '{"command":"pwd"}')"
 case "$REVIEWER_TOOL_REASON" in
-  "reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke Bash; $HANDBACK_TAIL")
+  "${DENY_PREFIX}reviewer-readonly-v1 cannot invoke Bash; $HANDBACK_TAIL")
     check "reviewer deny names SubagentHandback and StructuredOutput as the report channels" PASS ;;
   *)
     check "reviewer deny must name SubagentHandback and StructuredOutput as the report channels (got: ${REVIEWER_TOOL_REASON:-<empty>})" FAIL ;;
 esac
 PLM_TOOL_REASON="$(deny_reason zensu:zensu-plm Write '{"file_path":"x"}')"
 case "$PLM_TOOL_REASON" in
-  "reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; $HANDBACK_TAIL")
+  "${DENY_PREFIX}zensu-plm-readonly-v1 cannot invoke Write; $HANDBACK_TAIL")
     check "PLM deny names SubagentHandback and StructuredOutput as the report channels" PASS ;;
   *)
     check "PLM deny must name SubagentHandback and StructuredOutput as the report channels (got: ${PLM_TOOL_REASON:-<empty>})" FAIL ;;
 esac
 HANDBACK_SHAPE_REASON="$(deny_reason zensu:code-reviewer SubagentHandback '{"message":"report","to":"main"}')"
 case "$HANDBACK_SHAPE_REASON" in
-  'reviewer-capability-v1 deny: reviewer-readonly-v1 may invoke SubagentHandback only with exactly one string field, message')
+  "${DENY_PREFIX}reviewer-readonly-v1 may invoke SubagentHandback only with exactly one string field, message")
     check "malformed handback deny names the one admitted input shape" PASS ;;
   *)
     check "malformed handback deny must name the admitted input shape (got: ${HANDBACK_SHAPE_REASON:-<empty>})" FAIL ;;
 esac
 WORKER_HANDBACK_REASON="$(deny_reason zensu:pr-review-worker SubagentHandback "$HANDBACK_REPORT")"
 case "$WORKER_HANDBACK_REASON" in
-  'reviewer-capability-v1 deny: evidence-worker-v1 cannot invoke SubagentHandback; only Read, Grep, and Glob are allowed')
+  "${DENY_PREFIX}evidence-worker-v1 cannot invoke SubagentHandback; only Read, Grep, and Glob are allowed")
     check "evidence worker is denied SubagentHandback by its own lease policy" PASS ;;
   *)
     check "evidence worker must be denied SubagentHandback by its lease policy (got: ${WORKER_HANDBACK_REASON:-<empty>})" FAIL ;;
@@ -541,7 +604,7 @@ for tool in "${HOST_NON_READ_TOOLS[@]}"; do
   type="${REVIEWER_ROTATION[$((SWEEP_INDEX % ${#REVIEWER_ROTATION[@]}))]}"
   SWEEP_INDEX=$((SWEEP_INDEX + 1))
   reason="$(deny_reason "$type" "$tool" "$SWEEP_INPUT")"
-  if [ "$reason" = "reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $tool; $HANDBACK_TAIL" ]; then
+  if [ "$reason" = "${DENY_PREFIX}reviewer-readonly-v1 cannot invoke $tool; $HANDBACK_TAIL" ]; then
     check "reviewer-readonly-v1 ($type) is denied host tool $tool by the read allowlist" PASS
   else
     check "reviewer-readonly-v1 ($type) must be denied host tool $tool by the read allowlist (got: ${reason:-<empty>})" FAIL
@@ -559,7 +622,7 @@ assert_case "neutral Grep cannot escape a safe subtree through its glob" deny ar
 assert_case "neutral Glob cannot escape a safe subtree through its pattern" deny arbitrary-custom Glob '{"pattern":"../.zensu/**","path":"src"}'
 PAYLOAD_CWD="$OTHER" assert_case "neutral Grep may use an omitted path in an external safe cwd" allow arbitrary-custom Grep '{"pattern":"main-v1"}'
 PAYLOAD_CWD="$OTHER" assert_case "neutral Glob may use an omitted path in an external safe cwd" allow arbitrary-custom Glob '{"pattern":"**/*"}'
-assert_case "reviewer cannot read outside the immutable project" deny code-reviewer Read '{"file_path":"/etc/passwd"}'
+assert_case "reviewer cannot read outside the immutable project" deny zensu:code-reviewer Read '{"file_path":"/etc/passwd"}'
 assert_case "neutral agent may read an external host-governed path" allow arbitrary-custom Read "{\"file_path\":\"$OTHER/existing-report.md\"}"
 PAYLOAD_CWD="$PROJECT/src/nested" assert_case "descendant cwd remains bound to the immutable project" allow arbitrary-custom Read '{"file_path":"../../README.md"}'
 case "$(uname -s)" in
@@ -568,7 +631,7 @@ case "$(uname -s)" in
     ;;
   *)
     ln -s "$OTHER" "$PROJECT/outside-link"
-    assert_case "reviewer cannot escape through a project symlink" deny review-aspect Read '{"file_path":"outside-link/secret.txt"}'
+    assert_case "reviewer cannot escape through a project symlink" deny zensu:review-aspect Read '{"file_path":"outside-link/secret.txt"}'
     assert_case "neutral agent may follow an external host-governed symlink" allow arbitrary-custom Read '{"file_path":"outside-link/secret.txt"}'
     ln -s "$PLUGIN" "$PROJECT/plugin-runtime-link"
     assert_case "neutral Write cannot mutate plugin runtime through a directory symlink" deny arbitrary-custom Write '{"file_path":"plugin-runtime-link/README.md","content":"attack"}'
@@ -583,6 +646,14 @@ case "$(uname -s)" in
     rm -f "$PROJECT/plugin-runtime-hardlink"
     ln "$PLUGIN_DATA/private-hardlink-source" "$PROJECT/plugin-data-hardlink"
     assert_case "neutral Write cannot mutate plugin data through a project hard link" deny arbitrary-custom Write '{"file_path":"plugin-data-hardlink","content":"attack"}'
+    assert_case "a tool the gate does not know cannot take a project hard link to plugin data" deny general-purpose mcp__filesystem__edit_file '{"path":"plugin-data-hardlink","edits":[]}'
+    assert_case "a tool the gate does not know keeps an ordinary nlink=1 project file" allow general-purpose mcp__filesystem__edit_file '{"path":"existing-neutral.txt","edits":[]}'
+    HARDLINK_REASON="$(deny_reason general-purpose mcp__filesystem__edit_file '{"path":"plugin-data-hardlink","edits":[]}')"
+    case "$HARDLINK_REASON" in
+      "${DENY_PREFIX}host-profile-v1 cannot pass a multiply linked file to mcp__filesystem__edit_file, because a hard link can alias Zensu's own state and Zensu cannot tell whether that tool writes there; report the need to the main thread instead")
+        check "the hard-link deny of a tool the gate does not know names the tool and the main thread" PASS ;;
+      *) check "the hard-link deny of a tool the gate does not know names the tool and the main thread (got: $HARDLINK_REASON)" FAIL ;;
+    esac
     ln -s .zensu/state/new-dir "$PROJECT/dangling-protected"
     assert_case "neutral write cannot enter protected state through a dangling symlink leaf" deny arbitrary-custom Write '{"file_path":"dangling-protected/new.txt"}'
     ;;
@@ -606,7 +677,7 @@ GATE_ZENSU_CONFIG="$SHELL_BAD_CONFIG" assert_case "an unreadable config layer wi
 GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" assert_case "hooks.subagentShell false leaves the main thread its shell" allow - Bash '{"command":"pwd"}'
 SHELL_OFF_REASON="$(GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" deny_reason general-purpose Bash '{"command":"pwd"}')"
 case "$SHELL_OFF_REASON" in
-  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools: hooks.subagentShell withdraws the subagent shell"*)
+  "${DENY_PREFIX}host-profile-v1 cannot invoke command-execution tools: hooks.subagentShell withdraws the subagent shell"*)
     check "the withdrawn grant keeps the command-tool deny literal and names the flag" PASS ;;
   *)
     check "the withdrawn grant must name hooks.subagentShell (got: ${SHELL_OFF_REASON:-<empty>})" FAIL ;;
@@ -639,38 +710,41 @@ GATE_HOME="$TMP" assert_case "the shell guard expands ~ before matching protecte
 GATE_HOME="$TMP" assert_case "the shell guard expands \$HOME before matching protected paths" deny general-purpose Bash '{"command":"ls \"$HOME/plugin-data\""}'
 CLAUDE_PROJECT_DIR="$PROJECT" GATE_HOME="$TMP" assert_case "a root-level glob passes while the project overlay lies under HOME" allow general-purpose Bash '{"command":"ls *.md"}'
 CLAUDE_PROJECT_DIR="$PROJECT" GATE_HOME="$TMP" assert_case "the project overlay under HOME keeps the project-root rule" deny general-purpose Bash '{"command":"rm -rf *"}'
-assert_case "a Monitor command is not part of the shell grant" deny general-purpose Monitor '{"command":"tail -f build.log"}'
-assert_case "a Monitor stream stays outside the allowlist" deny ? Monitor '{"ws":"wss://example.test/feed"}'
+GUARD_TAIL='The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
+MONITOR_LEAD="${DENY_PREFIX}host-profile-v1 may open a Monitor ws stream but cannot run a Monitor command, because Zensu's command gates see only Bash and PowerShell commands; "
+assert_case "a named neutral agent cannot run a Monitor command" deny general-purpose Monitor '{"command":"tail -f build.log"}'
+assert_case "a Monitor ws stream runs no command and needs no shell grant" allow ? Monitor '{"ws":{"url":"wss://example.test/feed"},"description":"feed","timeout_ms":60000}'
+assert_case "an unnamed child gets no Monitor command" deny ? Monitor '{"command":"tail -f build.log"}'
+GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" assert_case "hooks.subagentShell false leaves the Monitor command denied" deny general-purpose Monitor '{"command":"tail -f build.log"}'
 MONITOR_REASON="$(deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"
 case "$MONITOR_REASON" in
-  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke Monitor; a neutral subagent may use only "*", SubagentHandback, Bash behind an accident guard, the MCP tools "*)
-    check "a named neutral agent's Monitor command gets the allowlist deny, which names its guarded Bash" PASS ;;
+  "${MONITOR_LEAD}run the command through Bash, or report the need to the main thread instead")
+    check "a Monitor command is denied with Bash named as the way out, because no Zensu command gate sees it" PASS ;;
   *)
-    check "a Monitor command must get the allowlist deny naming the guarded Bash (got: ${MONITOR_REASON:-<empty>})" FAIL ;;
+    check "a Monitor command must be denied with Bash named as the way out (got: ${MONITOR_REASON:-<empty>})" FAIL ;;
 esac
 MONITOR_OFF_REASON="$(GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"
 case "$MONITOR_OFF_REASON" in
-  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke Monitor; a neutral subagent may use only "*", SubagentHandback, the MCP tools "*)
-    check "a withdrawn grant leaves Bash out of the allowlist deny" PASS ;;
+  "${MONITOR_LEAD}report the need to the main thread instead")
+    check "a withdrawn grant does not point a Monitor command at Bash" PASS ;;
   *)
-    check "a withdrawn grant must leave Bash out of the allowlist deny (got: ${MONITOR_OFF_REASON:-<empty>})" FAIL ;;
+    check "a withdrawn grant must not point a Monitor command at Bash (got: ${MONITOR_OFF_REASON:-<empty>})" FAIL ;;
 esac
 assert_case "PS1 a named neutral agent's PowerShell command stays outside the shell grant" deny general-purpose PowerShell '{"command":"Get-ChildItem"}'
 assert_case "PS2 a reviewer's PowerShell command is denied" deny zensu:review-aspect PowerShell '{"command":"Get-ChildItem"}'
-assert_case "PS3 the PLM's PowerShell command is denied" deny zensu-plm PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS3 the PLM's PowerShell command is denied" deny zensu:zensu-plm PowerShell '{"command":"Get-ChildItem"}'
 assert_case "PS4 an evidence worker's PowerShell command is denied" deny zensu:pr-review-worker PowerShell '{"command":"Get-ChildItem"}'
 assert_case "PS5 the main thread's PowerShell command passes the capability gate" allow - PowerShell '{"command":"Get-ChildItem"}'
 POWERSHELL_REASON="$(deny_reason general-purpose PowerShell '{"command":"Get-ChildItem"}')"
 case "$POWERSHELL_REASON" in
-  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke PowerShell; a neutral subagent may use only "*)
-    check "PS6 a named neutral agent's PowerShell command gets the allowlist deny, because the grant covers Bash alone" PASS ;;
+  "${DENY_PREFIX}host-profile-v1 cannot invoke PowerShell, because the Zensu accident guard reads only Bash commands; run the command through Bash, or report the need to the main thread instead")
+    check "PS6 a named neutral agent's PowerShell command is denied with Bash named as the way out, because the guard reads Bash alone" PASS ;;
   *)
-    check "PS6 a PowerShell command must get the allowlist deny (got: ${POWERSHELL_REASON:-<empty>})" FAIL ;;
+    check "PS6 a PowerShell command must be denied with Bash named as the way out (got: ${POWERSHELL_REASON:-<empty>})" FAIL ;;
 esac
-GUARD_TAIL='The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
 GUARD_REASON="$(deny_reason general-purpose Bash '{"command":"git clean -fdx"}')"
 case "$GUARD_REASON" in
-  "reviewer-capability-v1 deny: host-profile-v1 shell guard: the command runs a git operation that removes or reverts work (git clean). $GUARD_TAIL")
+  "${DENY_PREFIX}host-profile-v1 shell guard: the command runs a git operation that removes or reverts work (git clean). $GUARD_TAIL")
     check "the guard deny names the rule and says it is not a sandbox" PASS ;;
   *)
     check "the guard deny must name the rule and the accident-only bound (got: ${GUARD_REASON:-<empty>})" FAIL ;;
@@ -725,7 +799,7 @@ assert_case "neutral Agent calls remain governed by Claude host nesting rules" a
 assert_case "neutral agent cannot invoke mutating Zensu MCP" deny arbitrary-custom mcp__zensu__transition '{"state":"complete"}'
 assert_case "neutral agent cannot invoke set-style Zensu MCP mutation" deny arbitrary-custom mcp__plugin_zensu_zensu__set_security_classification '{"feature_id":"F-1"}'
 
-FORCED="$(payload code-reviewer Write '{"file_path":"x"}' | ZENSU_FORCE_MAIN=1 decision)"
+FORCED="$(payload zensu:code-reviewer Write '{"file_path":"x"}' | ZENSU_FORCE_MAIN=1 decision)"
 [ "$FORCED" = deny ] && check "ZENSU_FORCE_MAIN cannot bypass reviewer boundary" PASS || check "ZENSU_FORCE_MAIN cannot bypass reviewer boundary" FAIL
 
 MISSING="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=missing-context decision)"
@@ -742,16 +816,30 @@ WRONG_SESSION="$(PAYLOAD_SESSION_ID='different-session' payload arbitrary-custom
 EXTERNAL_CWD="$(PAYLOAD_CWD="$OTHER" payload arbitrary-custom Read '{"file_path":"x"}' | decision)"
 [ "$EXTERNAL_CWD" = allow ] && check "host-reported external cwd remains valid after CwdChanged" PASS || check "host-reported external cwd remains valid after CwdChanged" FAIL
 
-FAKE_BIN="$TMP/fake-bin"
+FAKE_BIN="$RAW_TMP/fake-bin"
 mkdir -p "$FAKE_BIN"
 printf '#!/bin/sh\nprintf leaked-output\nprintf "secret child diagnostic\\n" >&2\nexit 127\n' >"$FAKE_BIN/node"
 chmod +x "$FAKE_BIN/node"
-FAIL_CLOSED_STDOUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" bash "$GATE" </dev/null 2>"$TMP/fail-closed.stderr")"
+FAIL_CLOSED_STDOUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" bash "$GATE" </dev/null 2>"$TMP/fail-closed.stderr")"
 FAIL_CLOSED_STATUS=$?
 FAIL_CLOSED_STDERR="$(cat "$TMP/fail-closed.stderr")"
 [ "$FAIL_CLOSED_STATUS" -eq 2 ] && check "launcher failure exits with Claude blocking status 2" PASS || check "launcher failure exits with Claude blocking status 2 (got $FAIL_CLOSED_STATUS)" FAIL
 [ -z "$FAIL_CLOSED_STDOUT" ] && check "launcher failure suppresses child stdout" PASS || check "launcher failure suppresses child stdout" FAIL
-[ "$FAIL_CLOSED_STDERR" = 'zensu: reviewer capability gate unavailable' ] && check "launcher failure emits only a sanitized diagnostic" PASS || check "launcher failure emits only a sanitized diagnostic" FAIL
+[ "$FAIL_CLOSED_STDERR" = 'zensu: reviewer capability gate unavailable: the policy check exited with status 127' ] && check "launcher failure emits only a sanitized diagnostic that names the exit status" PASS || check "launcher failure emits only a sanitized diagnostic that names the exit status (got '$FAIL_CLOSED_STDERR')" FAIL
+
+GATE_TMPDIR="$RAW_TMP/gate-tmpdir"
+mkdir -p "$GATE_TMPDIR"
+GATE_TMP_OUT="$(payload - Write '{"file_path":"x"}' | TMPDIR="$GATE_TMPDIR" gate_env "$PLUGIN" "$PLUGIN_DATA")"
+GATE_TMP_STATUS=$?
+GATE_NO_TMP_OUT="$(payload - Write '{"file_path":"x"}' | TMPDIR="$RAW_TMP/no-such-tmpdir" gate_env "$PLUGIN" "$PLUGIN_DATA")"
+GATE_NO_TMP_STATUS=$?
+DENIED_UNDER_NO_TMP="$(payload zensu:code-reviewer Write '{"file_path":"x"}' | TMPDIR="$RAW_TMP/no-such-tmpdir" decision)"
+if [ "$GATE_TMP_STATUS" -eq 0 ] && [ -z "$GATE_TMP_OUT" ] && [ -z "$(ls -A "$GATE_TMPDIR")" ] \
+    && [ "$GATE_NO_TMP_STATUS" -eq 0 ] && [ -z "$GATE_NO_TMP_OUT" ] && [ "$DENIED_UNDER_NO_TMP" = deny ]; then
+  check "the gate decides without a temporary file, so a missing TMPDIR changes no decision" PASS
+else
+  check "the gate decides without a temporary file (status=$GATE_TMP_STATUS/$GATE_NO_TMP_STATUS reviewer=$DENIED_UNDER_NO_TMP)" FAIL
+fi
 
 WRONG_ROOT="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=wrong-root decision)"
 [ "$WRONG_ROOT" = deny ] && check "PreToolUse plugin-root mismatch denies before capability evaluation" PASS || check "PreToolUse plugin-root mismatch denies before capability evaluation" FAIL
@@ -775,10 +863,39 @@ read -r DRAIN_PRODUCER_STATUS DRAIN_HOOK_STATUS <"$DRAIN_STATUS_FILE"
 DRAIN_HOOK_MESSAGE="$(cat "$DRAIN_HOOK_ERR")"
 if [ "$DRAIN_PRODUCER_STATUS" = 0 ] && [ "$DRAIN_HOOK_STATUS" = 2 ] \
   && [ ! -s "$DRAIN_PRODUCER_ERR" ] \
-  && [ "$DRAIN_HOOK_MESSAGE" = 'zensu: reviewer capability gate unavailable' ]; then
+  && [ "$DRAIN_HOOK_MESSAGE" = 'zensu: reviewer capability gate unavailable: CLAUDE_PLUGIN_ROOT names another plugin installation than the one running this hook; start a fresh Claude Code session' ]; then
   check "plugin-root mismatch drains a large payload without producer EPIPE" PASS
 else
   check "plugin-root mismatch drains payload (producer=$DRAIN_PRODUCER_STATUS hook=$DRAIN_HOOK_STATUS)" FAIL
+fi
+
+NO_NODE_BIN="$RAW_TMP/no-node-bin"
+mkdir -p "$NO_NODE_BIN"
+for no_node_tool in dirname cat; do
+  printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$no_node_tool")" >"$NO_NODE_BIN/$no_node_tool"
+  chmod +x "$NO_NODE_BIN/$no_node_tool"
+done
+NO_NODE_BASH="$(command -v bash)"
+NO_NODE_ROOT="$(cd -P -- "$PLUGIN" && pwd -P)"
+NO_NODE_STATUS_FILE="$TMP/no-node-pipe-status"
+NO_NODE_ERR="$TMP/no-node.stderr"
+(
+  set +e
+  set -o pipefail
+  node -e 'process.stdout.write("x".repeat(2 * 1024 * 1024))' 2>/dev/null \
+    | PATH="$NO_NODE_BIN" CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+        "$NO_NODE_BASH" "$GATE" >/dev/null 2>"$NO_NODE_ERR"
+  statuses=("${PIPESTATUS[@]}")
+  printf '%s %s\n' "${statuses[0]:-missing}" "${statuses[1]:-missing}" >"$NO_NODE_STATUS_FILE"
+)
+read -r NO_NODE_PRODUCER_STATUS NO_NODE_HOOK_STATUS <"$NO_NODE_STATUS_FILE"
+NO_NODE_MESSAGE="$(cat "$NO_NODE_ERR")"
+NO_NODE_EXPECTED="zensu: reviewer capability gate unavailable: node was not found on the PATH that Claude Code was started with, and Zensu blocks every tool call until node is available. Install Node.js or put it on that PATH, then restart Claude Code (see Requirements in $NO_NODE_ROOT/README.md), or disable the Zensu plugin"
+if [ "$NO_NODE_PRODUCER_STATUS" = 0 ] && [ "$NO_NODE_HOOK_STATUS" = 2 ] \
+  && [ "$NO_NODE_MESSAGE" = "$NO_NODE_EXPECTED" ] && [ -f "$NO_NODE_ROOT/README.md" ]; then
+  check "a missing node blocks with a reason that names node, the PATH, the README Requirements and disabling the plugin, and drains the payload" PASS
+else
+  check "missing node (producer=$NO_NODE_PRODUCER_STATUS hook=$NO_NODE_HOOK_STATUS message='$NO_NODE_MESSAGE')" FAIL
 fi
 
 WRONG_DATA="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=wrong-data decision)"
@@ -1039,9 +1156,9 @@ unit_check_done "every unit file the registry gives this suite was graded"
 
 SANDBOX_MISSING=""
 for text in docs/configuration.md docs/session-control.md docs/gates.md docs/review-chain.md \
-  docs/tdd-manager-workflow.md docs/session-control-release-gate.md evals/session-control/README.md \
+  docs/build-workflow.md docs/session-control-release-gate.md evals/session-control/README.md \
   skills/gauntlet-loop/SKILL.md skills/gauntlet-loop/references/harness.md skills/ghost-scan/SKILL.md \
-  skills/cover/SKILL.md skills/docs/SKILL.md skills/tdd/SKILL.md \
+  skills/cover/SKILL.md skills/docs/SKILL.md skills/build/SKILL.md \
   skills/session-trail/references/limits.md skills/session-trail/references/takeover.md; do
   grep -qE 'not a sandbox|no sandbox' "$PLUGIN/$text" || SANDBOX_MISSING="$SANDBOX_MISSING $text"
 done

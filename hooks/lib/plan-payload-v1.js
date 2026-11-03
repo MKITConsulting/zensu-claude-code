@@ -54,6 +54,8 @@ const REASONS = {
   EMPTY: "PLAN_FILE_EMPTY",
   TOO_LARGE: "PLAN_FILE_TOO_LARGE",
   SYMLINK: "PLAN_FILE_SYMLINK_REJECTED",
+  AGENT_ORIGIN: "PLAN_RESPONSE_AGENT_ORIGIN_REJECTED",
+  ORIGIN_TYPE: "PLAN_RESPONSE_ORIGIN_TYPE_REJECTED",
 };
 
 const SOURCES = [
@@ -169,7 +171,22 @@ const resolveApprovedPlan = (payload, sources) => {
   return refuse(REASONS.MISSING, "");
 };
 
+// Only the top-level interactive session may approve a plan: Session Control
+// grants main-v1 there and reviewer/neutral profiles to every child, but that is
+// an ABSENCE-based check, and this is the positive assertion the harness itself
+// supplies. The test is strict ===, so a renamed or dropped field changes nothing
+// here. Wrong type is refused rather than read as falsy: an isAgent of "false" or
+// 0 would otherwise approve an agent-originated plan by coercion.
+const responseOrigin = (payload) => {
+  const response = payload && payload.tool_response;
+  if (!response || typeof response !== "object" || Array.isArray(response)) return { ok: true };
+  const flag = response.isAgent;
+  if (flag !== undefined && typeof flag !== "boolean") return refuse(REASONS.ORIGIN_TYPE, "");
+  if (flag === true) return refuse(REASONS.AGENT_ORIGIN, "");
+  return { ok: true };
+};
+
 module.exports = {
-  resolveApprovedPlan, readPlanFile, platformNoFollow,
+  resolveApprovedPlan, responseOrigin, readPlanFile, platformNoFollow,
   LSTAT_PRECHECK_MODE, PLAN_FILE_MAX_BYTES, REASONS, SOURCES,
 };

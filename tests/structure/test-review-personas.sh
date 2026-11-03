@@ -12,7 +12,7 @@ set -u
 # (rejected via the stem gate), non-persona files ignored, matched-before-always-join cap ordering with
 # skips not consuming slots, the 5-spawn cap boundary, wildcard-flood speed,
 # missing-dir silence, and the always-exit-0 contract. Structure: module
-# exports, the tdd SKILL.md 2b discovery + one-batch step-3 fan-out with
+# exports, the build SKILL.md 2b discovery + one-batch step-3 fan-out with
 # not-registered / discovery-unavailable handling, the README persona
 # contract (registration, name shape, trust boundary, output grammar, cap
 # policy), and the review-aspect.md note.
@@ -20,7 +20,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/persona-activation.js"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 ASPECT_MD="$PLUGIN_DIR/agents/review-aspect.md"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 PR_MD="$(skill_text_file "$PLUGIN_DIR/skills/pr-team-review")"

@@ -9,4 +9,4 @@
 (report.only|no edits|not appl)
 !Applying flow-back edit
 # converge never triggers the TDD implementation workflow.
-!Executing via /zensu:tdd
+!Executing via /zensu:build

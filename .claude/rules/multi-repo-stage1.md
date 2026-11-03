@@ -132,10 +132,14 @@ inventory loop the same way. Both dispatches — `normalize_claim`'s and the `--
 — ENUMERATE the known-silent kinds and REFUSE the residual, which is the part to keep: a naive
 catch-all faults on every ordinary in-root claim and makes `--inventory` exit 2 on every normal
 chain. A THIRD `case` reads the same answer, `place_relative_claim`'s, and it only decides whether
-a relative claim is rebuilt: it keeps `in-root`, `unrooted` and a `foreign` or `undetermined`
-value outside `REPO_CANON` relative, and rebuilds the rest, an unknown kind included, so that kind
-still reaches the absolute arm's refusal. It keys on the value being a path under `REPO_CANON`,
-so a kind whose value stops being such a path must revisit that `case` too. The product of the two budgets is NOT bounded (roughly 10^5 spawns at the maximum) and
+a relative claim is rebuilt. The base it joined is `REPO_CANON`, or the anchor's top for a
+work-tree claim the work tree does not hold (`.claude/rules/claim-syntax-and-work-tree.md`). With
+`REPO_CANON` as the base it keeps `in-root`, `unrooted` and a `foreign` or `undetermined` value
+outside the base relative, and rebuilds the rest, an unknown kind included, so that kind still
+reaches the absolute arm's refusal. With the anchor's top as the base it rebuilds every answer,
+because the relative spelling would be graded inside the work tree, whose own `.gitignore` can
+exempt it. It keys on the value being a path under the base, so a kind whose value stops being
+such a path must revisit that `case` too. The product of the two budgets is NOT bounded (roughly 10^5 spawns at the maximum) and
 the watchdog above the child has no deadline on a host without `timeout`, so a shared
 total-probe counter is the standing fix and is not taken.
 
@@ -186,10 +190,10 @@ refuses MORE than before, which is a gate tightening inside one installation rat
 capability change to a session an older runtime is serving.
 
 **Operator-facing accounts that must move with it:** discipline patch 10 in
-`docs/tdd-manager-workflow.md`, the `ZENSU_EDIT_LANDING_GATE` row in
+`docs/build-workflow.md`, the `ZENSU_EDIT_LANDING_GATE` row in
 `docs/configuration.md`, the two-refusal lead-in of `docs/gates.md`, the topology bullets
 plus the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`, Phase 6 step 5b b)
-in `skills/tdd/references/audit.md` and step 10.1 in `references/review-chain.md`, and ALL THREE multi-repo documents —
+in `skills/build/references/audit.md` and step 10.1 in `references/review-chain.md`, and ALL THREE multi-repo documents —
 `docs/multi-repo-chains-spec.md` (its status line, the two §2 paragraphs stage 1
 superseded, the §5 heading and the pin roster at the end of §10) together with
 `docs/multi-repo-chains-overview.html` and `docs/multi-repo-chains-principle.html`, which
@@ -443,7 +447,7 @@ exit-2 cause under its existing "did not complete" contract.
   `..` refusal. **A bare RELATIVE claim is placed too, against the repository top.**
   `place_relative_claim` runs right after `unredact_claim` in both callers and joins a relative
   claim to `REPO_CANON`, the repository top that the claim contract in
-  `skills/tdd/references/execution.md` names and that the grader resolves relative claims against;
+  `skills/build/references/execution.md` names and that the grader resolves relative claims against;
   joining `PROJECT_ABS` would ask, in a session whose project root sits below the top, about a
   file the grader never reads (`X35`/`X35a`). When `absolute_claim_verdict` places the join in a
   work tree nested under the anchor (`foreign` or `undetermined` with a value under `REPO_CANON`),
@@ -550,8 +554,10 @@ exit-2 cause under its existing "did not complete" contract.
   of the claim grammar was right; a subprocess is not the only way to keep one owner. **The
   standing fix is a host-neutral `edit-landing-claims-v1.js`** that the shell loads from its
   `node -e` and the doctor `require`s — the shape `rule-block-v1.js` already ships for a
-  cross-language carrier. It was not taken here because it re-authors the extraction loop the
-  checks of `test-edit-landing-audit.sh` pin; take it with its own review. No numeral here on
+  cross-language carrier. It is now HALF taken: `hooks/lib/edit-landing-claims-v1.js` owns the
+  claim grammar and the extraction, and the shell grader, `--inventory`, round-prepare, the round
+  scope and `append` read it (`.claude/rules/claim-syntax-and-work-tree.md`), while the doctor
+  row still spawns the library for its inventory rather than requiring the module. No numeral here on
   purpose — this file's own rule is that a hand-maintained count is what a driven loop cannot
   catch, and the one that stood here was stale within the change that wrote it.
 - **Windows is UNVERIFIED for all four behaviours.** None of the three suites is in

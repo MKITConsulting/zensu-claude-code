@@ -695,10 +695,10 @@ fi
 # the REPO, so no amount of plugin-side carriers puts the block in its prompt.
 # /zensu:pr-team-review and /zensu:plan-review are safe by construction: they
 # spawn custom seats AS the confined plugin workers, which C1 already pins.
-# /zensu:tdd is the one path that spawns a custom persona under its own
+# /zensu:build is the one path that spawns a custom persona under its own
 # subagent_type, so the block has to be injected into the spawn prompt there.
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 PRTR_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/pr-team-review")"
 PLANREV_SKILL="$PLUGIN_DIR/skills/plan-review/SKILL.md"
 

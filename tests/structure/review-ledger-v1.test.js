@@ -27,7 +27,7 @@ function line(id, disposition, severity, anchor, summary) {
 }
 
 const ROUND_ONE = [
-  'TDD STARTED — demo | steps: 2',
+  'BUILD STARTED — demo | steps: 2',
   line('R1-F1', 'routed', 'IMPORTANT', 'src/a.ts:12', 'missing null guard'),
   line('R1-F2', 'deferred', 'SUGGESTION', 'src/b.ts:4', 'rename helper'),
   line('R1-F3', 'neutralized', 'SUGGESTION', 'src/c.ts:9', 'judge ruled a false positive'),
@@ -260,7 +260,7 @@ test('a long summary is shortened, not rejected', () => {
 });
 
 test('a log without ledger lines answers empty', () => {
-  const r = ledger.ledgerState({ text: 'TDD STARTED — demo\nR1-S1 IMPL completed — files: a.ts' });
+  const r = ledger.ledgerState({ text: 'BUILD STARTED — demo\nR1-S1 IMPL completed — files: a.ts' });
   assert.equal(r.status, 'empty');
   assert.equal(r.reason, 'no-entries');
 });

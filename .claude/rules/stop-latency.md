@@ -59,8 +59,9 @@ the early exit releases past it.
 (`set -m`), with stdin, stdout and stderr in a private `mktemp -d` directory. The watchdog is a
 second job in a process group of its own: at the deadline it marks the directory and sends
 `SIGKILL` to the worker's group. A decision already written is forwarded and stands; otherwise
-the Stop is RELEASED with a stderr notice. `SIGTERM`, `SIGINT` or `SIGHUP` to the supervisor
-kills both groups at once.
+the Stop is RELEASED with a stderr notice, and the supervisor writes the same text as a
+`systemMessage` because the worker's stdout file is empty. `SIGTERM`, `SIGINT` or `SIGHUP` to
+the supervisor kills both groups at once.
 
 - **Neither group is the host's, and that is what keeps the bound.** A hook shares the Claude
   Code CLI's process group, and the incident ended with the host reaping that group. When the
@@ -81,6 +82,35 @@ kills both groups at once.
   (green run 36556263889, session setup included), and a deadline near that figure would
   silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
   Linux armed Stop.
+
+**User-visible notices (`stop_notice` + `emit_stop_notices`).** Claude Code shows the stderr of
+an exit-0 Stop hook to nobody (read from the host binary; `.claude/rules/autopilot-run-scope.md`
+records the measurement). Every release, cap and nudge notice of the hook goes through
+`stop_notice`, which writes the line to stderr for the transcript and appends it to
+`STOP_NOTICES`. The EXIT trap `emit_stop_notices` writes the collected lines as ONE
+`{"systemMessage": …}` object, and only while nothing else reached stdout: a host that reads two
+JSON objects parses neither, so a second object would cost the block decision itself.
+
+- **Every stdout writer sets `DECISION_EMITTED`**: `emit_block`, the five literal emitters and the
+  three inline blocks of the inner-state snapshot. `emit_block` carries the notices collected
+  before it on the same object, `decision` first. A notice written after a block stays on stderr;
+  the nudge and both background-wait releases already return on `DECISION_EMITTED`.
+- **The supervisor writes only into an empty stdout.** Its deadline release becomes a
+  `systemMessage` only when the worker's stdout file is empty, and a worker killed at the deadline
+  never ran its trap, so the two never both write.
+- **Values reach `node` on stdin**, the block reason and the notices separated by a NUL, never
+  through the environment, which MSYS rewrites when a value looks like a path.
+- **Not routed:** the three stderr lines that precede a block (its reason is what the user sees),
+  the informational re-bind line, and the library's fence stand-down line, which would repeat at
+  every turn end of a steady state.
+- **Cost:** one `node` child per Stop that carries a notice and no block.
+- **Pins:** `E1b`/`E3c` in `test-stop-enforcer-escapes.sh`; `L1b`, `L4`, `L20`, `L22` and `L27`
+  here; `C5c`, `C27a`, `C27c`, `C28a` and the source count `C32pre` in
+  `test-impl-stop-counter.sh`; `X13` in `test-external-review-hook.sh`; `BR11` in
+  `test-background-review.sh`; `S3b` (the merge) and `S10` in `test-autopilot-stop-enforcer.sh`;
+  the release rows and the `stop_notice` anchor of `AC-C19` in `test-versioned-plugin-upgrade.sh`.
+- **Version: `patch`.** No hook added or re-matched and no `permissionDecision`; the decision a
+  Stop emits is unchanged, and only advisory output joins stdout.
 
 **One resolution per run (`zensu_memoize_project_dir` + the canonical-key shortcut).** Measured
 on `dc9f0ff8` with a classifying `node` shim, an armed Stop spawned **96** `node` children: 28
@@ -138,10 +168,18 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   bind functions unset it (`L36`, `L49`). A variable or a file that a model-side Bash command
   could set is never a pre-verified binding; `CONTROL_BINDINGS` needs no new entry for that
   reason.
-- **Opt-in, Stop hook only.** Only the Stop hook calls `zensu_memoize_project_dir`. Every other
-  entry point verifies on every call, as before. `zensu-log.sh` is a candidate, not a caller. A
-  future caller may memoize only after its last bind, and only in a process that runs no record
-  writer.
+- **Opt-in, two callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
+  `zensu_memoize_project_dir`, each right after its only bind. Every other entry point verifies on
+  every call, as before. `zensu-log.sh` is a candidate, not a caller. A further caller may memoize
+  only after its last bind, and only in a process that runs no record writer. The delegate meets
+  both: its one bind precedes the memo, and what it writes afterwards is the workflow document's
+  ticket claim and the background-review store, never the context record. Measured with the
+  counting shim on one background hand-back claim through the real prompt hook: 89 `node` children
+  without the memo, 35 of them root verifications, and 55 with it, one of them a root
+  verification. The shipped path, which also runs `arrive` first, spawned 56 in `BR4b` on
+  2026-10-27, three of them after the claim returned: the record retire, the claim-field parse
+  and the emit. `BR4b` in `tests/structure/test-background-review.sh`
+  pins the single verification (`.claude/rules/background-review-completion.md`).
 - **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
   once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The
   digest was never a defence there, because a changed tree includes the code that checks it.
@@ -158,7 +196,8 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every
-  caller that does not memoize; on the Stop path the memo answers instead.
+  caller that does not memoize; on the Stop path and in the post-review delegate the memo answers
+  instead.
 - **Port.** Host half only; `session-control-core-v1.js` is unchanged. `zensu-codex`,
   `zensu-kiro` and `zensu-antigravity` were NOT included. A port that adopts the memo must take
   the `_ZENSU_PROJECT_DIR_MEMO` unset in both bind functions with it, or a re-bind keeps a stale

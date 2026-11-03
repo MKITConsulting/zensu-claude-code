@@ -5,8 +5,8 @@ paths:
   - "hooks/stop-chain-enforcer.sh"
   - "hooks/lib/zensu-log.sh"
   - "agents/review-judge.md"
-  - "skills/tdd/SKILL.md"
-  - "skills/tdd/references/review-chain.md"
+  - "skills/build/SKILL.md"
+  - "skills/build/references/review-chain.md"
   - "templates/workflows/zensu-review-v1.js"
   - "tests/structure/external-review-v1.test.js"
   - "tests/structure/test-external-review-hook.sh"
@@ -15,7 +15,7 @@ paths:
 # External Review Import (`hooks/lib/external-review-v1.js` + `post-workflow-launch.sh`)
 
 When a Claude Code workflow (an Ultracode review, for example) already reviewed the change,
-the first `/zensu:tdd` review imports it instead of running the aspect panel, and the judge
+the first `/zensu:build` review imports it instead of running the aspect panel, and the judge
 names what it left uncovered. Zensu reacts to what ran; it never starts, steers or interrupts
 a workflow, and no code reads an Ultracode or effort signal. The operator account is
 `docs/review-chain.md` §"Ultracode and external reviews".
@@ -216,13 +216,13 @@ the Stop hook's prefilter miss and `zensu-log.sh --tdd-begin` call through
 `--tdd-begin`, `X20`-`X23` the round, Autopilot and deferred-review exclusions, and `X24` the
 bound-chain exclusion by running the shipped function with stubbed collaborators. The resume reason names the panel and the import path (`X12`). The store is in both
 protected-root lists of `reviewer-capability-v1.js` (`X1a`). The Phase 6.10 text lives in
-`skills/tdd/references/review-chain.md` steps 3, 4, 4b, 4c and 5, plus the `Subagent / Claude
-Code Workflow safety` and `Work sequentially` bullets of `skills/tdd/SKILL.md`, whose body
+`skills/build/references/review-chain.md` steps 3, 4, 4b, 4c and 5, plus the `Subagent / Claude
+Code Workflow safety` and `Work sequentially` bullets of `skills/build/SKILL.md`, whose body
 `tests/structure/test-skill-text-budget.sh` bounds; step 4c defers an `EXT-<n>` finding kept
 with the anchor `-` to `## Open` instead of neutralizing or routing it (`X26`).
 `EXTERNAL REVIEW DEGRADED —` is carried into the CHAIN-END SUMMARY by
 `COMBINED_SUMMARY_DIRECTIVE` in `hooks/post-review-tdd-delegate.sh`, `skills/self-review/SKILL.md`
-§"Final report" and `docs/tdd-manager-workflow.md`; both literal loops of
+§"Final report" and `docs/build-workflow.md`; both literal loops of
 `evals/config-gate/test-post-review-combined-summary.sh` require it. The run-record layout is
 spelled in `runRecordPath` and `transcriptDirMatches`, the unit file's `workflowRun` and the
 shell suite's `write_run_record`. `agents/review-judge.md` carries the `external_review` input and `## Gaps`
@@ -237,7 +237,7 @@ root lies below the fingerprinted one (`projectStateExclusion`; `X11f` and the
 subdirectory-session unit case). The layout sentences are spelled in `ROOT_ADVICE`, in the unit
 file's `*_ADVICE` constants and in `X9d` and `X11` to `X11e` of the shell suite, and
 `docs/review-chain.md` names the layouts for the operator. Step 3 of
-`skills/tdd/references/review-chain.md` re-runs once only a `reason=root` answer whose advice
+`skills/build/references/review-chain.md` re-runs once only a `reason=root` answer whose advice
 ends in `re-run with --root set to …`, the suffix the `enclosing`, `subdirectory`,
 `unresolved-root` and review-root `undetermined` advice end in; `X27b` pins both sides, so a
 reworded suffix or step-3 sentence fails there.
@@ -246,11 +246,11 @@ The result shape is spelled twice: the object the template returns and the `RESU
 runs the template in a sandbox and validates its output with the module, so a one-sided edit
 fails there. The template's agent type and prompts move with the structured-result and
 `## Verify mode` paragraphs of `agents/review-aspect.md` and with `WORKFLOW_RESULT_TOOL` in
-`reviewer-capability-v1.js`. The template's `args` are built in step 3 of `skills/tdd/references/review-chain.md`
+`reviewer-capability-v1.js`. The template's `args` are built in step 3 of `skills/build/references/review-chain.md`
 and described in `docs/review-chain.md`; a renamed argument moves all three. The staged copy's
 location is spelled once, by `stagedTemplateName` over `core.WORKFLOW_STATE_SEGMENTS`. The
 `--stage` recipe is named in step 3, the `Subagent / Claude Code Workflow safety` bullet of
-`skills/tdd/SKILL.md`, `docs/review-chain.md`, the Workflow paragraph of
+`skills/build/SKILL.md`, `docs/review-chain.md`, the Workflow paragraph of
 `docs/session-control.md` and the `externalReviewImport` row of `docs/configuration.md`; `X27`
 pins the step-3 recipe and the `docs/review-chain.md` sentence, and `X7d`, `X9d` and `X10b`
 drive the verb, whose copy `X7` and `X7b` then launch and import. The `degraded`

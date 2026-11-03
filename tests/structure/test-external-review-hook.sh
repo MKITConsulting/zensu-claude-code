@@ -82,7 +82,7 @@ else
 fi
 
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
-SKILL_FILE="$(skill_text_file "$PLUGIN_DIR/skills/tdd")" || SKILL_FILE="$WORK/missing-skill-text"
+SKILL_FILE="$(skill_text_file "$PLUGIN_DIR/skills/build")" || SKILL_FILE="$WORK/missing-skill-text"
 if grep -qF 'and an `EXT-<n>` finding the merge kept with the anchor `-` is never neutralized either, because a missing anchor is not a hallucinated one; nothing can grade it, so retitle it `[Deferred — do not fix]` with its original severity in its text, set it to SUGGESTION so no severity mode routes it, ledger it with the anchor `-`' "$SKILL_FILE" \
   && grep -qF 'keep a finding without a `file:line` anchor in the merged list with the anchor `-`' "$SKILL_FILE"; then
   check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" PASS
@@ -486,6 +486,18 @@ else
 fi
 
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
+stop_notice_only() {
+  OUT_TEXT="$1" ERR_FILE="$2" NEEDLE="${3:-}" node -e '
+    const fs = require("node:fs");
+    let parsed;
+    try { parsed = JSON.parse(process.env.OUT_TEXT); } catch (_) { process.exit(1); }
+    if (!parsed || Object.keys(parsed).join() !== "systemMessage" || typeof parsed.systemMessage !== "string") process.exit(1);
+    const lines = parsed.systemMessage.split("\n");
+    const stderrLines = fs.readFileSync(process.env.ERR_FILE, "utf8").split("\n");
+    if (!lines.every((line) => stderrLines.includes(line))) process.exit(1);
+    process.exit(lines.some((line) => line.includes(process.env.NEEDLE)) ? 0 : 1);
+  ' 2>/dev/null
+}
 reason() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){}});'; }
 
 stop_payload() {
@@ -535,7 +547,7 @@ WAIT_KEY="$ARMED_KEY"
 BEFORE="$(stop_count "$WAIT_KEY")"
 OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/wait.err")"; RC=$?
 AFTER="$(stop_count "$WAIT_KEY")"
-if [ "$RC" -eq 0 ] && [ -z "$OUT" ] && grep -qF 'releasing this Stop while 1 background workflow(s) run (review-changes); wait 1 of 3' "$WORK/wait.err" \
+if [ "$RC" -eq 0 ] && stop_notice_only "$OUT" "$WORK/wait.err" 'releasing this Stop while 1 background workflow(s) run (review-changes); wait 1 of 3' \
   && case "$BEFORE" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$BEFORE" = "$AFTER" ]; then
   check "X13 a workflow in flight releases the Stop, names it, and charges no inner Stop budget" PASS
 else

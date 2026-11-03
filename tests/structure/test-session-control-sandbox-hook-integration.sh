@@ -39,6 +39,8 @@ SESSION_OUTPUT="$TEST_ROOT/session-start.out"
 SESSION_ERROR="$TEST_ROOT/session-start.err"
 TOOL_OUTPUT="$TEST_ROOT/pre-tool-use.out"
 TOOL_ERROR="$TEST_ROOT/pre-tool-use.err"
+DISPATCH_OUTPUT="$TEST_ROOT/dispatch.out"
+DISPATCH_ERROR="$TEST_ROOT/dispatch.err"
 
 SESSION_ID="$SESSION_ID" PROJECT="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
@@ -98,7 +100,9 @@ BOUNDARY_BIN="$(
   create_production_boundary "$CONTROL" "$ROOT" "$(dirname "$ROOT")"
 )"
 BOUNDARY_WRAPPER="$BOUNDARY_BIN/bash"
+BOUNDARY_NODE="$BOUNDARY_BIN/node"
 test -x "$BOUNDARY_WRAPPER"
+test -x "$BOUNDARY_NODE"
 
 run_contained_hook() {
   local wrapper="$1"
@@ -155,6 +159,21 @@ if [ -s "$TOOL_OUTPUT" ]; then
   ' "$TOOL_OUTPUT"
 fi
 
+env -u ZENSU_UPGRADE_TEST_MODE \
+  CLAUDE_PLUGIN_ROOT="$ROOT" \
+  /usr/bin/timeout --signal=TERM --kill-after=5s 30s \
+    "$BOUNDARY_NODE" "$ROOT/hooks/lib/hook-dispatch-v1.js" pre \
+  <"$TOOL_PAYLOAD" >"$DISPATCH_OUTPUT" 2>"$DISPATCH_ERROR"
+
+test ! -s "$DISPATCH_ERROR"
+if [ -s "$DISPATCH_OUTPUT" ]; then
+  node -e '
+    const fs = require("node:fs");
+    const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    if (value?.hookSpecificOutput?.permissionDecision === "deny") process.exit(1);
+  ' "$DISPATCH_OUTPUT"
+fi
+
 CANARY_CACHE_BASE="$HOME_DIR/canary-cache"
 CANARY_ROOT="$CANARY_CACHE_BASE/runtime"
 CANARY_CONTROL="$TEST_ROOT/canary-control"
@@ -196,7 +215,7 @@ test "$(cat "$CANARY_OUTPUT")" = BOUNDARY_ENVIRONMENT_OK
 
 TRACE_COUNT="$(find "$CONTROL" "$CANARY_CONTROL" -type f -name 'hook-trace.jsonl' \
   -exec cat {} + | wc -l | tr -d ' ')"
-test "$TRACE_COUNT" = 6
+test "$TRACE_COUNT" = 8
 
 printf '%s\n' \
   'PASS: actual hooks and environment canary run through the production Bubblewrap wrapper'

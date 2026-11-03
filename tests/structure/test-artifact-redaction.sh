@@ -3,7 +3,7 @@ set -u
 
 # Pins the publication-safety contract for the two .zensu run artifacts that
 # consuming repos commit as an audit trail: the narrative log
-# .zensu/logs/{ts}_tdd-{slug}.log and the plan .zensu/plans/{ts}_tdd-{slug}.md.
+# .zensu/logs/{ts}_build-{slug}.log and the plan .zensu/plans/{ts}_build-{slug}.md.
 #
 # Neither artifact had a writer-side chokepoint before this suite existed:
 # zensu-log.sh only ever returned the timestamp PREFIX, and the model appended
@@ -24,6 +24,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG_HELPER="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 REDACT="$PLUGIN_DIR/hooks/lib/zensu-artifact-redact-v1.js"
 ARTIFACT_HOOK="$PLUGIN_DIR/hooks/post-artifact-redact.sh"
+DISPATCHER="$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 
@@ -73,8 +74,8 @@ FOREIGN_HOME="/home/otherdev/work/thing.txt"
 LEAK_CMD="cd \"$PROJ/.claude/worktrees/wt\" && npm test"
 LEAK_TEXT="$LEAK_CMD | notes: $FAKE_HOME/notes.md, $FOREIGN_USER, $FOREIGN_HOME"
 
-LOGF="$PROJ/.zensu/logs/2026-01-01-0000_tdd-demo.log"
-PLANF="$PROJ/.zensu/plans/2026-01-01-0000_tdd-demo.md"
+LOGF="$PROJ/.zensu/logs/2026-01-01-0000_build-demo.log"
+PLANF="$PROJ/.zensu/plans/2026-01-01-0000_build-demo.md"
 
 session_key() { node "$SESSION_CORE" session-key "$1"; }
 
@@ -142,14 +143,12 @@ else
   check "R0b hooks/post-artifact-redact.sh exists and parses" FAIL
 fi
 
-if grep -qF 'post-artifact-redact.sh' "$HOOKS_JSON" 2>/dev/null \
-  && node -e '
+if node -e '
     const j = require(process.argv[1]);
-    const post = (j.hooks && j.hooks.PostToolUse) || [];
-    const on = m => post.some(e => e.matcher === m
-      && (e.hooks || []).some(h => String(h.command || "").includes("post-artifact-redact.sh")));
+    const post = require(process.argv[2]).registeredHooks(j, "PostToolUse") || [];
+    const on = m => post.some(e => e.matcher === m && e.command.includes("post-artifact-redact.sh"));
     process.exit((on("Edit|Write|MultiEdit") && on("Bash|PowerShell")) ? 0 : 1);
-  ' "$HOOKS_JSON" 2>/dev/null; then
+  ' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
   check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash|PowerShell" PASS
 else
   check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash|PowerShell" FAIL
@@ -186,7 +185,7 @@ assert_clean "plan written with the Write tool" "$PLANF" R4 R5 R6
 assert_survived "the plan body" "$PLANF" '# Plan' R6a
 
 # ── R7: a hand-rolled `printf >>` append is swept on the Bash matcher ─
-RAW_LOG="$PROJ/.zensu/logs/2026-01-01-0001_tdd-raw.log"
+RAW_LOG="$PROJ/.zensu/logs/2026-01-01-0001_build-raw.log"
 printf 'RAW %s\n' "$LEAK_TEXT" > "$RAW_LOG"
 sweep_payload() {
   printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":%s},"tool_response":{"stdout":""},"session_id":%s}' \
@@ -200,7 +199,7 @@ sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
 assert_clean "hand-rolled \`printf >>\` log" "$RAW_LOG" R7 R7b R7c
 assert_survived "the hand-rolled log line" "$RAW_LOG" 'RAW ' R7d
 
-RAW_PS_LOG="$PROJ/.zensu/logs/2026-01-01-0002_tdd-raw-ps.log"
+RAW_PS_LOG="$PROJ/.zensu/logs/2026-01-01-0002_build-raw-ps.log"
 printf 'RAWPS %s\n' "$LEAK_TEXT" > "$RAW_PS_LOG"
 printf '{"hook_event_name":"PostToolUse","tool_name":"PowerShell","tool_input":{"command":%s},"tool_response":{"stdout":""},"session_id":%s}' \
   "$(json_str 'Add-Content -Path $log -Value x')" "$(json_str "$SESSION")" \
@@ -292,7 +291,7 @@ fi
 
 # ── R12-R14: every redactFile guard, asserted on status AND shape ────
 LINK_TARGET="$WORK/real.log"
-LINK="$PROJ/.zensu/logs/2026-01-01-0004_tdd-link.log"
+LINK="$PROJ/.zensu/logs/2026-01-01-0004_build-link.log"
 printf 'LINK %s\n' "$FOREIGN_USER" > "$LINK_TARGET"
 if ln -s "$LINK_TARGET" "$LINK" 2>/dev/null \
   && [ "$(node -e 'process.stdout.write(require("fs").lstatSync(process.argv[1]).isSymbolicLink()?"y":"n")' "$LINK")" = "y" ]; then
@@ -309,8 +308,8 @@ else
   skip "R12 symlinked-artifact refusal (host did not create a real symlink)"
 fi
 
-HARD_PEER="$PROJ/.zensu/logs/2026-01-01-0005_tdd-peer.log"
-HARD_LINK="$PROJ/.zensu/logs/2026-01-01-0005_tdd-hard.log"
+HARD_PEER="$PROJ/.zensu/logs/2026-01-01-0005_build-peer.log"
+HARD_LINK="$PROJ/.zensu/logs/2026-01-01-0005_build-hard.log"
 printf 'HARD %s\n' "$FOREIGN_USER" > "$HARD_PEER"
 if ln "$HARD_PEER" "$HARD_LINK" 2>/dev/null \
   && [ "$(node -e 'process.stdout.write(String(require("fs").lstatSync(process.argv[1]).nlink))' "$HARD_LINK")" = "2" ]; then
@@ -327,7 +326,7 @@ else
   skip "R13 hard-link refusal (host did not create a hard link)"
 fi
 
-BIG="$PROJ/.zensu/logs/2026-01-01-0006_tdd-big.log"
+BIG="$PROJ/.zensu/logs/2026-01-01-0006_build-big.log"
 node -e '
   const fs = require("fs");
   const fd = fs.openSync(process.argv[1], "w");
@@ -348,24 +347,24 @@ rm -f "$BIG"
 # ── R15-R16: the `append` verb's own branches ────────────────────────
 # The FIRST write of every shipped run is `--truncate` onto a path that does not
 # exist yet, so that shape gets its own check before the pre-existing one.
-FRESH="$PROJ/.zensu/logs/2026-01-01-0006_tdd-fresh.log"
+FRESH="$PROJ/.zensu/logs/2026-01-01-0006_build-fresh.log"
 rm -f "$FRESH"
 HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append --truncate \
-  --log "$FRESH" --message "TDD STARTED — $LEAK_CMD" >/dev/null 2>&1
+  --log "$FRESH" --message "BUILD STARTED — $LEAK_CMD" >/dev/null 2>&1
 RC=$?
 if [ "$RC" -eq 0 ] && [ -f "$FRESH" ] && [ "$(wc -l < "$FRESH")" -eq 1 ] \
-  && grep -qF 'TDD STARTED' "$FRESH" && grep -qF '<project>' "$FRESH"; then
+  && grep -qF 'BUILD STARTED' "$FRESH" && grep -qF '<project>' "$FRESH"; then
   check "R14a --truncate CREATES a missing log and writes exactly one redacted line" PASS
 else
   check "R14a --truncate CREATES a missing log and writes exactly one redacted line (rc=$RC)" FAIL
 fi
 
-TRUNC="$PROJ/.zensu/logs/2026-01-01-0007_tdd-trunc.log"
+TRUNC="$PROJ/.zensu/logs/2026-01-01-0007_build-trunc.log"
 printf 'STALE LINE\n' > "$TRUNC"
 HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append --truncate \
-  --log "$TRUNC" --message "TDD STARTED — $LEAK_CMD" >/dev/null 2>&1
+  --log "$TRUNC" --message "BUILD STARTED — $LEAK_CMD" >/dev/null 2>&1
 if [ -f "$TRUNC" ] && ! grep -qF 'STALE LINE' "$TRUNC" \
-  && grep -qF 'TDD STARTED' "$TRUNC" && grep -qF '<project>' "$TRUNC"; then
+  && grep -qF 'BUILD STARTED' "$TRUNC" && grep -qF '<project>' "$TRUNC"; then
   check "R15 --truncate replaces a pre-existing log and still redacts" PASS
 else
   check "R15 --truncate replaces a pre-existing log and still redacts" FAIL
@@ -404,7 +403,7 @@ else
   check "R16d append refuses a VALUELESS --message (rc=$RC err=$R16D_ERR)" FAIL
 fi
 
-STDIN_LOG="$PROJ/.zensu/logs/2026-01-01-0060_tdd-stdin.log"
+STDIN_LOG="$PROJ/.zensu/logs/2026-01-01-0060_build-stdin.log"
 R16E_LINE='FINDING LEDGER — R1-F1 deferred IMPORTANT src/a.ts:3 | kept $(literal) and `ticks` as text'
 printf '%s\n' "$R16E_LINE" | HOME="$FAKE_HOME" bash "$LOG_HELPER" append --log "$STDIN_LOG" --message-stdin >/dev/null 2>&1
 RC=$?
@@ -433,7 +432,7 @@ else
   check "R16g append refuses --message together with --message-stdin (rc=$RC err=$R16G_ERR)" FAIL
 fi
 
-SYMLOG="$PROJ/.zensu/logs/2026-01-01-0008_tdd-sym.log"
+SYMLOG="$PROJ/.zensu/logs/2026-01-01-0008_build-sym.log"
 if ln -s "$OUTSIDE" "$SYMLOG" 2>/dev/null && [ -L "$SYMLOG" ]; then
   HOME="$FAKE_HOME" bash "$LOG_HELPER" append --log "$SYMLOG" --message "pwned2" >/dev/null 2>&1
   RC=$?
@@ -458,7 +457,7 @@ fi
 # different guarantee with a different failure mode.
 SYM_TARGET="$WORK/outside-16c.txt"
 printf 'UNTOUCHED\n' > "$SYM_TARGET"
-SYM_LOG="$PROJ/.zensu/logs/2026-01-01-0016_tdd-modsym.log"
+SYM_LOG="$PROJ/.zensu/logs/2026-01-01-0016_build-modsym.log"
 rm -f "$SYM_LOG"
 if ln -s "$SYM_TARGET" "$SYM_LOG" 2>/dev/null && [ -L "$SYM_LOG" ]; then
   OUT16C="$(node -e '
@@ -483,8 +482,8 @@ else
 fi
 
 # ── R17: the sweep's narrowings and its project binding ──────────────
-OLD_LOG="$PROJ/.zensu/logs/2026-01-01-0009_tdd-old.log"
-FOREIGN_LOG="$OTHER_PROJ/.zensu/logs/2026-01-01-0010_tdd-foreign.log"
+OLD_LOG="$PROJ/.zensu/logs/2026-01-01-0009_build-old.log"
+FOREIGN_LOG="$OTHER_PROJ/.zensu/logs/2026-01-01-0010_build-foreign.log"
 printf 'OLD %s\n' "$FOREIGN_USER" > "$OLD_LOG"
 printf 'FOREIGN %s\n' "$FOREIGN_USER" > "$FOREIGN_LOG"
 node -e '
@@ -492,7 +491,7 @@ node -e '
   const old = new Date(Date.now() - 3600 * 1000);
   fs.utimesSync(process.argv[1], old, old);
 ' "$OLD_LOG"
-SWEEP_CONTROL="$PROJ/.zensu/logs/2026-01-01-0012_tdd-control.log"
+SWEEP_CONTROL="$PROJ/.zensu/logs/2026-01-01-0012_build-control.log"
 printf 'CONTROL %s\n' "$LEAK_TEXT" > "$SWEEP_CONTROL"
 ERR17="$(sweep_payload 'echo sweep' \
   | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
@@ -519,12 +518,12 @@ fi
 ESCAPE_DIR="$WORK/escape-dir"
 LINKED_PROJ="$FAKE_HOME/IdeaProjects/linked"
 mkdir -p "$ESCAPE_DIR" "$LINKED_PROJ/.zensu"
-printf 'OUTSIDE %s\n' "$FOREIGN_USER" > "$ESCAPE_DIR/2026-01-01-0011_tdd-escape.log"
+printf 'OUTSIDE %s\n' "$FOREIGN_USER" > "$ESCAPE_DIR/2026-01-01-0011_build-escape.log"
 if ln -s "$ESCAPE_DIR" "$LINKED_PROJ/.zensu/logs" 2>/dev/null && [ -L "$LINKED_PROJ/.zensu/logs" ]; then
-  R18_ERR="$(env HOME="$FAKE_HOME" node "$REDACT" --file "$LINKED_PROJ/.zensu/logs/2026-01-01-0011_tdd-escape.log" \
+  R18_ERR="$(env HOME="$FAKE_HOME" node "$REDACT" --file "$LINKED_PROJ/.zensu/logs/2026-01-01-0011_build-escape.log" \
     --project "$LINKED_PROJ" 2>&1 >/dev/null)"
   RC=$?
-  if [ "$RC" -eq 2 ] && grep -qF "$FOREIGN_USER" "$ESCAPE_DIR/2026-01-01-0011_tdd-escape.log" \
+  if [ "$RC" -eq 2 ] && grep -qF "$FOREIGN_USER" "$ESCAPE_DIR/2026-01-01-0011_build-escape.log" \
     && printf '%s' "$R18_ERR" | grep -qF '(artifact-directory-escapes)'; then
     check "R18 a symlinked .zensu/logs directory is refused (containment is canonicalized)" PASS
   else
@@ -540,7 +539,7 @@ fi
 # be paired with the positive that the module's own seam is what runs.
 # Comment lines are stripped: a comment may legitimately NAME `.zensu/logs` while
 # explaining the containment, and only executable text can re-spell a layout.
-HOOK_PROGRAM="$(awk '/^  node -e /,0' "$ARTIFACT_HOOK" | grep -v '^[[:space:]]*//')"
+HOOK_PROGRAM="$(awk '/^function sweepArtifacts\(/,/^}/' "$DISPATCHER" | grep -v '^[[:space:]]*//')"
 if [ -n "$HOOK_PROGRAM" ] \
   && ! printf '%s' "$HOOK_PROGRAM" | grep -qF '.zensu' \
   && ! printf '%s' "$HOOK_PROGRAM" | grep -qF 'plans' \
@@ -555,7 +554,7 @@ fi
 
 # ── R21: append refuses a hard-linked destination ────────────────────
 APPEND_PEER="$WORK/append-peer.log"
-APPEND_HARD="$PROJ/.zensu/logs/2026-01-01-0013_tdd-appendhard.log"
+APPEND_HARD="$PROJ/.zensu/logs/2026-01-01-0013_build-appendhard.log"
 printf 'PEER UNTOUCHED\n' > "$APPEND_PEER"
 if ln "$APPEND_PEER" "$APPEND_HARD" 2>/dev/null \
   && [ "$(node -e 'process.stdout.write(String(require("fs").lstatSync(process.argv[1]).nlink))' "$APPEND_HARD")" = "2" ]; then
@@ -574,7 +573,7 @@ else
 fi
 
 # ── R22: expectedRoot binds a writer to ITS project ──────────────────
-FOREIGN_TARGET="$OTHER_PROJ/.zensu/logs/2026-01-01-0014_tdd-bind.log"
+FOREIGN_TARGET="$OTHER_PROJ/.zensu/logs/2026-01-01-0014_build-bind.log"
 printf 'FOREIGN UNTOUCHED\n' > "$FOREIGN_TARGET"
 HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append \
   --log "$FOREIGN_TARGET" --message "pwned-bind" >/dev/null 2>&1
@@ -603,7 +602,7 @@ else
 fi
 
 # ── R23: the hook REPORTS a refusal it cannot repair ─────────────────
-LOUD="$PROJ/.zensu/logs/2026-01-01-0015_tdd-loud.log"
+LOUD="$PROJ/.zensu/logs/2026-01-01-0015_build-loud.log"
 LOUD_PEER="$WORK/loud-peer.log"
 printf 'LOUD %s\n' "$FOREIGN_USER" > "$LOUD_PEER"
 if ln "$LOUD_PEER" "$LOUD" 2>/dev/null; then
@@ -614,7 +613,7 @@ if ln "$LOUD_PEER" "$LOUD" 2>/dev/null; then
   # `(sweep)` marks a target the sweep produced rather than one the tool named,
   # which is what lets an operator tell "the file you just wrote" from "a file in
   # this project".
-  if printf '%s\n' "$LOUD_ERR" | grep -F 'artifact left UNREDACTED (sweep) — ' | grep -qF '2026-01-01-0015_tdd-loud.log (hard-link)'; then
+  if printf '%s\n' "$LOUD_ERR" | grep -F 'artifact left UNREDACTED (sweep) — ' | grep -qF '2026-01-01-0015_build-loud.log (hard-link)'; then
     check "R23 the hook reports an artifact it left unredacted instead of skipping silently" PASS
   else
     check "R23 the hook reports an artifact it left unredacted (err=$LOUD_ERR)" FAIL
@@ -629,7 +628,7 @@ QUIET_ERR="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_
   | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
 # The paired positive: the same arrangement, on a real artifact, must still act —
 # without it this check is green whenever the hook does nothing at all.
-QUIET_CONTROL="$PROJ/.zensu/logs/2026-01-01-0017_tdd-quiet.log"
+QUIET_CONTROL="$PROJ/.zensu/logs/2026-01-01-0017_build-quiet.log"
 printf 'QUIET %s\n' "$LEAK_TEXT" > "$QUIET_CONTROL"
 printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s}' \
   "$(json_str "$QUIET_CONTROL")" "$(json_str "$SESSION")" \
@@ -645,7 +644,7 @@ else
 fi
 
 # ── R24: the two round-2 lossy branches ──────────────────────────────
-NONUTF="$PROJ/.zensu/logs/2026-01-01-0016_tdd-binary.log"
+NONUTF="$PROJ/.zensu/logs/2026-01-01-0016_build-binary.log"
 node -e '
   const fs = require("fs");
   fs.writeFileSync(process.argv[1],
@@ -675,7 +674,7 @@ else
 fi
 
 # ── R27: the log verb cannot reach a plan ────────────────────────────
-PLAN_TARGET="$PROJ/.zensu/plans/2026-01-01-0018_tdd-victim.md"
+PLAN_TARGET="$PROJ/.zensu/plans/2026-01-01-0018_build-victim.md"
 printf '# VICTIM PLAN\n' > "$PLAN_TARGET"
 R27_ERR="$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append --truncate \
   --log "$PLAN_TARGET" --message "pwned-plan" 2>&1 >/dev/null)"
@@ -689,7 +688,7 @@ else
 fi
 
 # ── R28: a relative recipe works with no CLAUDE_PROJECT_DIR ──────────
-# skills/tdd/SKILL.md Phase 2 once rendered `{log_file}` relative to the cwd
+# skills/build/SKILL.md Phase 2 once rendered `{log_file}` relative to the cwd
 # and ran `append --truncate` as the first write of every run. That variable is
 # absent from the model's Bash environment on this host, so a `--truncate` gated
 # on it would break every such caller — an earlier revision did exactly that. The
@@ -700,10 +699,10 @@ UNBOUND_DIR="$WORK/shipped/.zensu/logs"
 mkdir -p "$UNBOUND_DIR"
 ( cd "$WORK/shipped" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
   bash "$LOG_HELPER" append --truncate \
-  --log "./.zensu/logs/2026-01-01-0019_tdd-shipped.log" \
-  --message "TDD STARTED — shipped recipe" >/dev/null 2>&1 )
+  --log "./.zensu/logs/2026-01-01-0019_build-shipped.log" \
+  --message "BUILD STARTED — shipped recipe" >/dev/null 2>&1 )
 RC=$?
-if [ "$RC" -eq 0 ] && grep -qF 'TDD STARTED' "$UNBOUND_DIR/2026-01-01-0019_tdd-shipped.log"; then
+if [ "$RC" -eq 0 ] && grep -qF 'BUILD STARTED' "$UNBOUND_DIR/2026-01-01-0019_build-shipped.log"; then
   check "R28 a relative --truncate recipe works with CLAUDE_PROJECT_DIR unset" PASS
 else
   check "R28 a relative --truncate recipe works with CLAUDE_PROJECT_DIR unset (rc=$RC)" FAIL
@@ -731,14 +730,14 @@ fi
 S3_A="$WORK/xproj/a/.zensu/logs"
 S3_B="$WORK/xproj/b/.zensu/logs"
 mkdir -p "$S3_A" "$S3_B"
-printf 'PRE-EXISTING AUDIT CONTENT OF PROJECT B\n' > "$S3_B/2026-01-01-0044_tdd-b.log"
+printf 'PRE-EXISTING AUDIT CONTENT OF PROJECT B\n' > "$S3_B/2026-01-01-0044_build-b.log"
 ( cd "$WORK/xproj/a" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
   bash "$LOG_HELPER" append --truncate \
-  --log "$S3_B/2026-01-01-0044_tdd-b.log" \
+  --log "$S3_B/2026-01-01-0044_build-b.log" \
   --message "WRITTEN FROM PROJECT A" >/dev/null 2>&1 )
 RC44=$?
-if [ "$RC44" -ne 0 ] && ! grep -qF 'WRITTEN FROM PROJECT A' "$S3_B/2026-01-01-0044_tdd-b.log" \
-  && grep -qF 'PRE-EXISTING' "$S3_B/2026-01-01-0044_tdd-b.log"; then
+if [ "$RC44" -ne 0 ] && ! grep -qF 'WRITTEN FROM PROJECT A' "$S3_B/2026-01-01-0044_build-b.log" \
+  && grep -qF 'PRE-EXISTING' "$S3_B/2026-01-01-0044_build-b.log"; then
   check "R44 --truncate with no CLAUDE_PROJECT_DIR refuses a foreign project log" PASS
 else
   check "R44 --truncate with no CLAUDE_PROJECT_DIR refuses a foreign project log (rc=$RC44)" FAIL
@@ -754,7 +753,7 @@ fi
 # drifted-cwd case — and not a deliberate one, which is exactly what the comment
 # at the check now says. Pinning it means narrowing it later is a decision rather
 # than a discovery.
-S3_B_LOG="$S3_B/2026-01-01-0044_tdd-b-residual.log"
+S3_B_LOG="$S3_B/2026-01-01-0044_build-b-residual.log"
 printf 'PRE-EXISTING B CONTENT\n' > "$S3_B_LOG"
 ( cd "$WORK/xproj/b" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
   bash "$LOG_HELPER" append --truncate \
@@ -773,11 +772,11 @@ fi
 # rather than an accident, and so that the bound cannot quietly widen either.
 ( cd "$WORK/xproj/a" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
   bash "$LOG_HELPER" append \
-  --log "$S3_B/2026-01-01-0044_tdd-b.log" \
+  --log "$S3_B/2026-01-01-0044_build-b.log" \
   --message "ADDITIVE FROM PROJECT A" >/dev/null 2>&1 )
 RC44B=$?
-if [ "$RC44B" -eq 0 ] && grep -qF 'ADDITIVE FROM PROJECT A' "$S3_B/2026-01-01-0044_tdd-b.log" \
-  && grep -qF 'PRE-EXISTING' "$S3_B/2026-01-01-0044_tdd-b.log"; then
+if [ "$RC44B" -eq 0 ] && grep -qF 'ADDITIVE FROM PROJECT A' "$S3_B/2026-01-01-0044_build-b.log" \
+  && grep -qF 'PRE-EXISTING' "$S3_B/2026-01-01-0044_build-b.log"; then
   check "R44b append (additive) across projects is an accepted, documented residual" PASS
 else
   check "R44b append (additive) across projects is an accepted, documented residual (rc=$RC44B)" FAIL
@@ -791,10 +790,10 @@ S3_SUB="$WORK/xproj/a/src/deep"
 mkdir -p "$S3_SUB"
 ( cd "$S3_SUB" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
   bash "$LOG_HELPER" append --truncate \
-  --log "$S3_A/2026-01-01-0044_tdd-a.log" \
+  --log "$S3_A/2026-01-01-0044_build-a.log" \
   --message "FROM A SUBDIRECTORY" >/dev/null 2>&1 )
 RC44A=$?
-if [ "$RC44A" -eq 0 ] && grep -qF 'FROM A SUBDIRECTORY' "$S3_A/2026-01-01-0044_tdd-a.log"; then
+if [ "$RC44A" -eq 0 ] && grep -qF 'FROM A SUBDIRECTORY' "$S3_A/2026-01-01-0044_build-a.log"; then
   check "R44a append accepts a project root that is an ancestor of the cwd" PASS
 else
   check "R44a append accepts a project root that is an ancestor of the cwd (rc=$RC44A)" FAIL
@@ -815,7 +814,7 @@ OUT45="$(node -e '
   const fs = require("node:fs");
   const dir = process.argv[3];
   function run(name, stage) {
-    const p = dir + "/2026-01-01-0045_tdd-" + name + ".log";
+    const p = dir + "/2026-01-01-0045_build-" + name + ".log";
     fs.writeFileSync(p, "");
     const real = fs.writeFileSync;
     let done = false;
@@ -864,7 +863,7 @@ OUT46="$(node -e '
   const fs = require("node:fs");
   const dir = process.argv[3];
   function run(name, stage) {
-    const p = dir + "/2026-01-01-0046_tdd-" + name + ".log";
+    const p = dir + "/2026-01-01-0046_build-" + name + ".log";
     fs.writeFileSync(p, "OLD CONTENT\n");
     const real = fs.writeFileSync;
     if (stage) {
@@ -962,11 +961,11 @@ fi
 # cheap.
 SWEEP_COST="$WORK/sweepcost"
 mkdir -p "$SWEEP_COST/.zensu/logs" "$SWEEP_COST/.zensu/plans"
-: > "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-fresh.log"
-: > "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-old.log"
-mkdir -p "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-adir.log"
+: > "$SWEEP_COST/.zensu/logs/2026-01-01-0048_build-fresh.log"
+: > "$SWEEP_COST/.zensu/logs/2026-01-01-0048_build-old.log"
+mkdir -p "$SWEEP_COST/.zensu/logs/2026-01-01-0048_build-adir.log"
 : > "$SWEEP_COST/.zensu/logs/notes.txt"
-touch -t 202601010000 "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-old.log"
+touch -t 202601010000 "$SWEEP_COST/.zensu/logs/2026-01-01-0048_build-old.log"
 OUT48="$(node -e '
   const fs = require("node:fs");
   const root = require("node:path").resolve(process.argv[2]);
@@ -985,7 +984,7 @@ OUT48="$(node -e '
   }
   const bad = [];
   if (stats !== 2) bad.push("stats=" + stats);
-  if (out.length !== 1 || !out[0].endsWith("2026-01-01-0048_tdd-fresh.log")) {
+  if (out.length !== 1 || !out[0].endsWith("2026-01-01-0048_build-fresh.log")) {
     bad.push("targets=" + JSON.stringify(out));
   }
   process.stdout.write(bad.length ? bad.join(" | ") : "OK");
@@ -1016,7 +1015,7 @@ OUT49="$(node -e '
   const now = Date.now();
   const names = [];
   for (let i = 0; i < 30; i += 1) {
-    const name = "2026-01-01-00" + (i < 10 ? "0" + i : String(i)) + "_tdd-cap.log";
+    const name = "2026-01-01-00" + (i < 10 ? "0" + i : String(i)) + "_build-cap.log";
     const full = logs + "/" + name;
     fs.writeFileSync(full, "x\n");
     const stamp = (now - i * 1000) / 1000;
@@ -1048,7 +1047,7 @@ fi
 # worst shape the failure can take: every artifact ships unredacted and nothing
 # records why. The control arm uses the activated session and asserts the note is
 # ABSENT, so a hook that printed it unconditionally would fail here.
-UNBOUND_PLAN="$PROJ/.zensu/plans/2026-01-01-0050_tdd-unbound.md"
+UNBOUND_PLAN="$PROJ/.zensu/plans/2026-01-01-0050_build-unbound.md"
 printf '# Plan\nRun: cd "%s" && ls\n' "$FOREIGN_USER" > "$UNBOUND_PLAN"
 ERR50="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s}' \
   "$(json_str "$UNBOUND_PLAN")" "$(json_str "sess-never-activated-$$")" \
@@ -1079,7 +1078,7 @@ fi
 # containment bound rather than the root set. Both spellings are pinned at a
 # count of exactly 1 so a second, contradicting occurrence fails too.
 R51_UNION="$(printf '%s' "$HOOK_PROGRAM" \
-  | grep -cF 'projectRoot: [project, process.env.CLAUDE_PROJECT_DIR || ""].filter(Boolean)')"
+  | grep -cF "projectRoot: [project, process.env.CLAUDE_PROJECT_DIR || ''].filter(Boolean)")"
 R51_BOUND="$(printf '%s' "$HOOK_PROGRAM" | grep -cF 'expectedRoot: project,')"
 if [ "$R51_UNION" -eq 1 ] && [ "$R51_BOUND" -eq 1 ]; then
   check "R51 the sweep unions CLAUDE_PROJECT_DIR into projectRoot and leaves expectedRoot the record root" PASS
@@ -1099,16 +1098,16 @@ GIT_PROJ="$FAKE_HOME/IdeaProjects/gitdemo"
 mkdir -p "$GIT_PROJ/.zensu/plans" "$GIT_PROJ/.zensu/logs"
 GIT_PROJ="$(cd "$GIT_PROJ" && pwd -P)"
 GIT_LEAK="cd \"$GIT_PROJ/.claude/worktrees/wt\" && npm test | notes: $FAKE_HOME/notes.md, $FOREIGN_USER, $FOREIGN_HOME"
-GIT_CLEAN="$GIT_PROJ/.zensu/plans/2026-01-01-0062_tdd-clean.md"
-GIT_NFD="$GIT_PROJ/.zensu/plans/$(printf '2026-01-01-0062_tdd-u\314\210ber.md')"
-GIT_MODIFIED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_tdd-modified.log"
-GIT_UNTRACKED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_tdd-untracked.log"
-GIT_STAGED="$GIT_PROJ/.zensu/plans/2026-01-01-0062_tdd-staged.md"
-GIT_IGNORED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_tdd-ignored.log"
+GIT_CLEAN="$GIT_PROJ/.zensu/plans/2026-01-01-0062_build-clean.md"
+GIT_NFD="$GIT_PROJ/.zensu/plans/$(printf '2026-01-01-0062_build-u\314\210ber.md')"
+GIT_MODIFIED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_build-modified.log"
+GIT_UNTRACKED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_build-untracked.log"
+GIT_STAGED="$GIT_PROJ/.zensu/plans/2026-01-01-0062_build-staged.md"
+GIT_IGNORED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_build-ignored.log"
 printf '# Clean plan\n\nWorktree: %s\n' "$GIT_LEAK" > "$GIT_CLEAN"
 printf 'NFD %s\n' "$GIT_LEAK" > "$GIT_NFD"
 printf 'MODIFIED base\n' > "$GIT_MODIFIED"
-printf '.zensu/logs/*_tdd-ignored.log\n' > "$GIT_PROJ/.gitignore"
+printf '.zensu/logs/*_build-ignored.log\n' > "$GIT_PROJ/.gitignore"
 if git init -q --template= "$GIT_PROJ" >/dev/null 2>&1 \
   && sweep_git -C "$GIT_PROJ" add -f -- .gitignore "$GIT_CLEAN" "$GIT_NFD" "$GIT_MODIFIED" \
   && sweep_git -C "$GIT_PROJ" commit -qm base \
@@ -1214,7 +1213,7 @@ fi
 # ── R73-R77: when git cannot be asked, the sweep stays unscoped ──────
 NOGIT="$WORK/nogit"
 mkdir -p "$NOGIT/.zensu/logs"
-: > "$NOGIT/.zensu/logs/2026-01-01-0073_tdd-nogit.log"
+: > "$NOGIT/.zensu/logs/2026-01-01-0073_build-nogit.log"
 OUT73="$(node -e '
   const r = require(process.argv[1]).sweepTargets(process.argv[2], { windowSeconds: 300 });
   process.stdout.write(r.fallback + " " + r.targets.length);
@@ -1224,7 +1223,7 @@ if [ "$OUT73" = "not-a-git-repository 1" ]; then
 else
   check "R73 outside a repository the sweep keeps every in-window artifact and names the fallback (got: $OUT73)" FAIL
 fi
-NOGIT_LOG="$PROJ/.zensu/logs/2026-01-01-0074_tdd-nogit.log"
+NOGIT_LOG="$PROJ/.zensu/logs/2026-01-01-0074_build-nogit.log"
 printf 'NOGIT %s\n' "$LEAK_TEXT" > "$NOGIT_LOG"
 ERR74="$(sweep_payload 'echo nogit' \
   | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
@@ -1292,10 +1291,10 @@ mkdir -p "$CAP_PROJ/.zensu/plans" "$CAP_PROJ/.zensu/logs"
 CAP_INDEX=0
 while [ "$CAP_INDEX" -lt 30 ]; do
   printf 'CHECKOUT %s\n' "$FOREIGN_USER" \
-    > "$CAP_PROJ/.zensu/plans/2026-01-01-01$(printf '%02d' "$CAP_INDEX")_tdd-checkout.md"
+    > "$CAP_PROJ/.zensu/plans/2026-01-01-01$(printf '%02d' "$CAP_INDEX")_build-checkout.md"
   CAP_INDEX=$((CAP_INDEX + 1))
 done
-CAP_APPEND="$CAP_PROJ/.zensu/logs/2026-01-01-0078_tdd-append.log"
+CAP_APPEND="$CAP_PROJ/.zensu/logs/2026-01-01-0078_build-append.log"
 if git init -q --template= "$CAP_PROJ" >/dev/null 2>&1 \
   && sweep_git -C "$CAP_PROJ" add -f -- .zensu/plans \
   && sweep_git -C "$CAP_PROJ" commit -qm checkout; then
@@ -1354,8 +1353,8 @@ fi
 MONO="$WORK/mono"
 SUB_PROJ="$MONO/packages/app"
 mkdir -p "$SUB_PROJ/.zensu/plans" "$SUB_PROJ/.zensu/logs"
-SUB_CLEAN="$SUB_PROJ/.zensu/plans/2026-01-01-0080_tdd-clean.md"
-SUB_MODIFIED="$SUB_PROJ/.zensu/logs/2026-01-01-0080_tdd-modified.log"
+SUB_CLEAN="$SUB_PROJ/.zensu/plans/2026-01-01-0080_build-clean.md"
+SUB_MODIFIED="$SUB_PROJ/.zensu/logs/2026-01-01-0080_build-modified.log"
 printf 'SUB %s\n' "$FOREIGN_USER" > "$SUB_CLEAN"
 printf 'SUB base\n' > "$SUB_MODIFIED"
 if git init -q --template= "$MONO" >/dev/null 2>&1 \
@@ -1383,7 +1382,7 @@ fi
 
 # ── R81: an artifact git status cannot see is kept, not skipped ──────
 NEST_PROJ="$WORK/nested"
-NEST_PLAN="$NEST_PROJ/.zensu/plans/2026-01-01-0081_tdd-nested.md"
+NEST_PLAN="$NEST_PROJ/.zensu/plans/2026-01-01-0081_build-nested.md"
 mkdir -p "$NEST_PROJ/.zensu/plans"
 printf 'NESTED %s\n' "$FOREIGN_USER" > "$NEST_PLAN"
 if git init -q --template= "$NEST_PROJ" >/dev/null 2>&1 \
@@ -1430,12 +1429,12 @@ node -e 'require("node:fs").symlinkSync(process.argv[1], process.argv[2])' \
   "$PLUGIN_DIR/hooks/lib/secret-patterns.js" "$SCAN_COPY/hooks/lib/secret-patterns.js" 2>/dev/null
 if [ -L "$SCAN_COPY/hooks/lib/secret-patterns.js" ]; then
   FAKE_KEY="AKIA$(head -c 16 /dev/zero | tr '\0' 'Z')"
-  SCAN_LOG="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scan.log"
+  SCAN_LOG="$PROJ/.zensu/logs/2026-01-01-0052_build-scan.log"
   ERR52="$(HOME="$FAKE_HOME" CLAUDE_PLUGIN_ROOT="$SCAN_COPY" \
     bash "$SCAN_COPY/hooks/lib/zensu-log.sh" append \
     --log "$SCAN_LOG" --message "CHECKPOINT key=$FAKE_KEY done" 2>&1 >/dev/null)"
   RC52=$?
-  SCAN_CTL="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scanctl.log"
+  SCAN_CTL="$PROJ/.zensu/logs/2026-01-01-0052_build-scanctl.log"
   HOME="$FAKE_HOME" bash "$LOG_HELPER" append \
     --log "$SCAN_CTL" --message "CHECKPOINT key=$FAKE_KEY done" >/dev/null 2>&1
   RC52B=$?
@@ -1460,7 +1459,7 @@ fi
 #
 # The before/after pair is the discrimination: the ledger is cumulative, so
 # asserting presence alone would pass on an entry some earlier check left behind.
-SCAN_OFF_LOG="$PROJ/.zensu/logs/2026-01-01-0053_tdd-scanoff.log"
+SCAN_OFF_LOG="$PROJ/.zensu/logs/2026-01-01-0053_build-scanoff.log"
 SESSION_KEY53="$(session_key "$SESSION")"
 LEDGER_BEFORE="$(bash "$LOG_HELPER" --bypass-list --session "$SESSION" 2>/dev/null)"
 HOME="$FAKE_HOME" ZENSU_SECRET_SCAN=off ZENSU_SESSION_KEY="$SESSION_KEY53" \
@@ -1478,7 +1477,7 @@ fi
 
 # ── R54: the SHIPPED Phase 2 recipe is executed, not re-typed ────────
 # R28 asserts a hand-typed variant of the Phase 2 create command, so a flag that
-# drifts in `skills/tdd/references/planning.md` — the file every run actually reads — is
+# drifts in `skills/build/references/planning.md` — the file every run actually reads — is
 # invisible to the suite while R28 stays green against the copy in the test. This
 # arm extracts the line from the shipped skill, substitutes only the documented
 # `{curly}` placeholders, and runs it. It is deliberately anchored on the flag
@@ -1486,12 +1485,12 @@ fi
 # the extraction match nothing: an empty extraction FAILS here.
 #
 # The residue guard names the six placeholders this recipe carries.
-RECIPE_RAW="$(grep -m1 -F 'append --truncate --log {log_file}' "$PLUGIN_DIR/skills/tdd/references/planning.md")"
+RECIPE_RAW="$(grep -m1 -F 'append --truncate --log {log_file}' "$PLUGIN_DIR/skills/build/references/planning.md")"
 RECIPE_CMD="${RECIPE_RAW#2. \`}"
 RECIPE_CMD="${RECIPE_CMD%\`}"
 RECIPE_PROJ="$WORK/recipe-proj"
 mkdir -p "$RECIPE_PROJ"
-RECIPE_LOG_REL='.zensu/logs/2026-01-01-0054_tdd-recipe.log'
+RECIPE_LOG_REL='.zensu/logs/2026-01-01-0054_build-recipe.log'
 RECIPE_LOG_SPELL='"{project_root}/'"$RECIPE_LOG_REL"'"'
 RECIPE_CMD="${RECIPE_CMD//\{log_file\}/$RECIPE_LOG_SPELL}"
 RECIPE_CMD="${RECIPE_CMD//\{project_root\}/$RECIPE_PROJ}"
@@ -1508,14 +1507,14 @@ if [ -n "$RECIPE_RAW" ] && printf '%s' "$RECIPE_CMD" | grep -qF 'zensu-log.sh' \
       bash -c "$RECIPE_CMD" ) >/dev/null 2>&1
   RC54=$?
   if [ "$RC54" -eq 0 ] && [ -f "$RECIPE_PROJ/$RECIPE_LOG_REL" ] \
-    && grep -qF 'TDD STARTED — Recipe extraction | steps: 3' "$RECIPE_PROJ/$RECIPE_LOG_REL" \
+    && grep -qF 'BUILD STARTED — Recipe extraction | steps: 3' "$RECIPE_PROJ/$RECIPE_LOG_REL" \
     && [ ! -e "$WORK/$RECIPE_LOG_REL" ]; then
     check "R54 the shipped Phase 2 recipe, extracted and run from outside the project with CLAUDE_PROJECT_DIR unset, creates the run log under {project_root}" PASS
   else
     check "R54 the shipped Phase 2 recipe, extracted and run from outside the project with CLAUDE_PROJECT_DIR unset, creates the run log under {project_root} (rc=$RC54)" FAIL
   fi
 else
-  check "R54 the shipped Phase 2 recipe could be extracted from skills/tdd/references/planning.md" FAIL
+  check "R54 the shipped Phase 2 recipe could be extracted from skills/build/references/planning.md" FAIL
 fi
 
 # ── R29: the module refuses a shape it used to accept silently ───────
@@ -1538,7 +1537,7 @@ OUT30="$(env HOME="$FAKE_HOME" node -e '
   fs.writeFileSync(file, "A " + process.argv[3] + "/x B " + process.argv[4] + "/y\n");
   m.redactFile(file, { projectRoot: process.argv[3], home: "" });
   process.stdout.write(fs.readFileSync(file, "utf8").trim());
-' "$REDACT" "$PROJ/.zensu/logs/2026-01-01-0020_tdd-union.log" "$WORK/callerroot" "$PROJ" 2>/dev/null)"
+' "$REDACT" "$PROJ/.zensu/logs/2026-01-01-0020_build-union.log" "$WORK/callerroot" "$PROJ" 2>/dev/null)"
 if [ "$OUT30" = "A <project>/x B <project>/y" ]; then
   check "R30 redactFile unions the caller root with the artifact-derived root" PASS
 else
@@ -1548,8 +1547,8 @@ fi
 # ── R31: a relative artifact path resolves against the given base ────
 OUT31="$(cd "$WORK" && node -e '
   const m = require(process.argv[1]);
-  const a = m.resolveArtifactTarget(".zensu/logs/2026-01-01-0000_tdd-demo.log", undefined, process.argv[2]);
-  const b = m.resolveArtifactTarget(".zensu/logs/2026-01-01-0000_tdd-demo.log");
+  const a = m.resolveArtifactTarget(".zensu/logs/2026-01-01-0000_build-demo.log", undefined, process.argv[2]);
+  const b = m.resolveArtifactTarget(".zensu/logs/2026-01-01-0000_build-demo.log");
   process.stdout.write(String(a.ok) + ":" + String(b.ok));
 ' "$REDACT" "$PROJ" 2>/dev/null)"
 if [ "$OUT31" = "true:false" ]; then
@@ -1587,7 +1586,7 @@ OUT33B="$(env HOME="$FAKE_HOME" node -e '
   const fs = require("node:fs");
   const path = require("node:path");
   const m = require(process.argv[1]);
-  const file = path.join(process.argv[2], "2026-01-01-0021_tdd-ino.log");
+  const file = path.join(process.argv[2], "2026-01-01-0021_build-ino.log");
   fs.writeFileSync(file, "A /Users/someoneelse/work/thing.txt\n");
   const first = m.redactFile(file, { projectRoot: process.argv[3], expectedRoot: process.argv[3], home: "" });
   const second = m.redactFile(file, { projectRoot: process.argv[3], expectedRoot: process.argv[3], home: "" });
@@ -1605,9 +1604,9 @@ fi
 # SAMPLING POINTS — more chances to catch such an artifact inside its own window.
 # It extends no deadline: the cutoff is the artifact's own mtime and nothing here
 # touches it.
-STRAY="$PROJ/.zensu/logs/2026-01-01-0024_tdd-stray.log"
+STRAY="$PROJ/.zensu/logs/2026-01-01-0024_build-stray.log"
 printf 'STRAY %s\n' "$LEAK_TEXT" > "$STRAY"
-UNRELATED="$PROJ/.zensu/plans/2026-01-01-0024_tdd-unrelated.md"
+UNRELATED="$PROJ/.zensu/plans/2026-01-01-0024_build-unrelated.md"
 printf '# UNRELATED\n' > "$UNRELATED"
 printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s}' \
   "$(json_str "$UNRELATED")" "$(json_str "$SESSION")" \
@@ -1619,7 +1618,7 @@ assert_survived "the stray log line" "$STRAY" 'STRAY ' R36d
 # Every artifact the other Write arms hand over is also in the sweep set, so none
 # of them can tell the two paths apart. Backdating this one past the window makes
 # the named `file_path` the ONLY way it can be reached.
-STALE_NAMED="$PROJ/.zensu/plans/2026-01-01-0025_tdd-stale.md"
+STALE_NAMED="$PROJ/.zensu/plans/2026-01-01-0025_build-stale.md"
 printf '# STALE %s\n' "$LEAK_TEXT" > "$STALE_NAMED"
 node -e '
   const fs = require("fs");
@@ -1655,7 +1654,7 @@ fi
 rm -f "$ODD_EXT"
 
 # ── R34: a FIFO at an artifact path is refused, never hung on ─────────
-FIFO="$PROJ/.zensu/logs/2026-01-01-0023_tdd-fifo.log"
+FIFO="$PROJ/.zensu/logs/2026-01-01-0023_build-fifo.log"
 if mkfifo "$FIFO" 2>/dev/null \
   && node -e 'process.exit(require("node:fs").lstatSync(process.argv[1]).isFIFO() ? 0 : 1)' "$FIFO" 2>/dev/null; then
   R34_ERR="$(env HOME="$FAKE_HOME" node "$REDACT" --file "$FIFO" --project "$PROJ" 2>&1 >/dev/null)"
@@ -1676,13 +1675,13 @@ fi
 # shape where the dedup can be observed: without it the same refusal is emitted
 # twice, once under the caller spelling and once under the sweep one.
 DUP_PEER="$WORK/dup-peer.log"
-DUP="$PROJ/.zensu/logs/2026-01-01-0026_tdd-dup.log"
+DUP="$PROJ/.zensu/logs/2026-01-01-0026_build-dup.log"
 printf 'DUP %s\n' "$FOREIGN_USER" > "$DUP_PEER"
 if ln "$DUP_PEER" "$DUP" 2>/dev/null; then
   DUP_ERR="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s}' \
     "$(json_str "$DUP")" "$(json_str "$SESSION")" \
     | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
-  DUP_COUNT="$(printf '%s\n' "$DUP_ERR" | grep -cF '2026-01-01-0026_tdd-dup.log (')"
+  DUP_COUNT="$(printf '%s\n' "$DUP_ERR" | grep -cF '2026-01-01-0026_build-dup.log (')"
   if [ "$DUP_COUNT" -eq 1 ]; then
     check "R38 a named artifact that is also swept is reported exactly once" PASS
   else
@@ -1697,7 +1696,7 @@ fi
 # R36 explains itself by "the hook is main-principal only". Nothing observed that
 # until now, so the guard could be deleted with the whole suite green while R36's
 # stated justification quietly became false.
-SUB_STRAY="$PROJ/.zensu/logs/2026-01-01-0027_tdd-substray.log"
+SUB_STRAY="$PROJ/.zensu/logs/2026-01-01-0027_build-substray.log"
 printf 'SUBSTRAY %s\n' "$LEAK_TEXT" > "$SUB_STRAY"
 printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s,"agent_type":"zensu:code-reviewer","agent_id":"sub-1"}' \
   "$(json_str "$PLANF")" "$(json_str "$SESSION")" \
@@ -1724,7 +1723,7 @@ rm -f "$SUB_STRAY"
 # not a location, and silently redacting one would hide it from whoever has to
 # rotate it. The fixture is assembled at run time from brace expansions so this
 # file carries no matchable literal for the plugin's own secret gate.
-SECRET_LOG="$PROJ/.zensu/logs/2026-01-01-0028_tdd-secret.log"
+SECRET_LOG="$PROJ/.zensu/logs/2026-01-01-0028_build-secret.log"
 rm -f "$SECRET_LOG"
 SECRET_KEY="aws_$(printf secret)_access_key"
 SECRET_VAL="$(printf '%s' {a..z} | tr -d ' ')$(printf '%s' {0..9} | tr -d ' ')ABCD"

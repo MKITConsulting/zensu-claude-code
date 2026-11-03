@@ -12,7 +12,7 @@ paths:
 # Acceptance Verification Gate (`hooks/lib/acceptance-verify-v1.js` + `zensu-log.sh --acceptance-*` / `--chain-done`)
 
 A standalone reviewed chain closes only when every active `AC-###` criterion of its plan has a
-`pass` record on the tree that ships. Prose in `/zensu:tdd` step 6d and `/zensu:self-review`
+`pass` record on the tree that ships. Prose in `/zensu:build` step 6d and `/zensu:self-review`
 cannot guarantee that, so the guarantee is a machine gate at `--chain-done`, built like the
 full-suite gate (`.claude/rules/evidence-runner.md`). The one close it never sees is a
 max-rounds close with `hooks.selfReview` off, see §Where it applies.
@@ -106,18 +106,18 @@ bound and `not-applicable` answers, so it is ledgered only where the gate applie
 `zensu-tdd-phase.sh`; both protected-root lists in `reviewer-capability-v1.js`;
 `zensu_evidence_acceptance_gate` in `zensu-config.sh`; `SCOPES`/`TREE_SCOPES` and per-scope
 retention in `evidence-run-v1.js`; the `receipt-log` call and its exit handling in
-`--tdd-complete`; step 6d in `skills/tdd/references/audit.md`, Phase 1.5 in `references/planning.md` and step 2c in `references/review-chain.md`; the
+`--tdd-complete`; step 6d in `skills/build/references/audit.md`, Phase 1.5 in `references/planning.md` and step 2c in `references/review-chain.md`; the
 re-verification paragraph, finalize steps and the `Acceptance` row of
 `skills/self-review/SKILL.md`; `COMBINED_SUMMARY_DIRECTIVE`, `ACCEPTANCE_REVERIFY`,
 `ACCEPTANCE_REFUSAL`, `MAX_ROUNDS_VERDICTS` and the self-review-off `CLOSE_PASS` in
 `hooks/post-review-tdd-delegate.sh`; §Chain mode of `skills/verify-feature/SKILL.md`;
-`templates/tdd-plan.md` Final Verification; `ESCAPE_STEMS` in
+`templates/zensu-plan.md` Final Verification; `ESCAPE_STEMS` in
 `tests/structure/test-gauntlet-loop-skill.sh`; the escape counts in `gate-disable-prefixes.md`,
 `review-spawn-scope-sentence.md`, `docs/configuration.md` (the opt-out roster, the
 `reviewSpawnScopeSentence` row and the `ZENSU_SESSION_LINEAGE` row) and the review-spawn
-paragraph of `docs/tdd-manager-workflow.md`; `docs/gates.md` §Acceptance Verification Gate and
+paragraph of `docs/build-workflow.md`; `docs/gates.md` §Acceptance Verification Gate and
 its intro count; `docs/configuration.md` §Acceptance Verification and the escape row; discipline
-patch 14 and the chain-end summary rows in `docs/tdd-manager-workflow.md`; the verbatim-carry
+patch 14 and the chain-end summary rows in `docs/build-workflow.md`; the verbatim-carry
 list in `status-marker-legend.md`; `docs/verify-feature.md`.
 
 **Version: `minor`.** Every consumer's standalone chain now needs live verification to close,
@@ -140,11 +140,19 @@ read is the half a later `minor` needs to start storing it.
   chain whose review rounds change code verifies twice, three times when self-review's fix round
   edits too. Scoping records to the paths a criterion touches is not possible without a
   per-criterion path map nobody maintains.
-- **The fingerprint is the project root's alone.** An `--evidence-run --scope acceptance` run
-  whose command starts with `cd` into a nested worktree is still bound to the project tree,
-  because `acceptance-verify-v1.js` compares records with `computeTree(projectRoot)`. An edit in
-  that worktree after the run leaves the record current. The full-suite gate follows the nested
-  work tree for `full` and `scoped` runs (`.claude/rules/evidence-runner.md`).
+- **A standalone chain's fingerprint is the project root's alone.** An
+  `--evidence-run --scope acceptance` run whose command starts with `cd` into a nested worktree is
+  still bound to the project tree, because `chainTree` in `acceptance-verify-v1.js` compares a
+  standalone chain's records with `computeTree(projectRoot)`. An edit in that worktree after the
+  run leaves the record current. The full-suite gate follows the nested work tree for `full` and
+  `scoped` runs (`.claude/rules/evidence-runner.md`). A chain bound to an Autopilot run whose
+  `workspaceRoot` is a worktree nested below the anchor is not this gap: `zensu-log.sh` passes
+  that worktree as `ZENSU_AVR_WORK_TREE`, so its records, its status and the acceptance runs it
+  cites bind the combined tree of the project and the worktree, and an edit there makes them
+  stale. A worktree the resolver cannot answer makes both verbs exit 2 with the cause. Its
+  terminus still answers `not-checked`, because VALIDATE verifies the run's criteria
+  (`A29` to `A31` in `test-acceptance-gate.sh`; **version `patch`**, walked in
+  `.claude/rules/evidence-runner.md`).
 - **Consent prompts need a person**, as in §"Browser Consent Gate": Auto mode was measured to
   reach the user, and bypass permissions and `dontAsk` deny a remote origin outside a policy. How
   a headless or SDK run resolves the prompt is unmeasured, and the gate cannot tell a person from a

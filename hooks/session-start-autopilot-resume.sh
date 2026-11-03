@@ -215,13 +215,13 @@ const stageActions = Object.freeze({
 
 const actionText = Object.freeze({
   AWAIT_PLAN_APPROVAL: 'Wait for explicit approval of the bound plan.',
-  START_TDD: 'Start the delegated TDD or implementation chain for the current attempt.',
-  AWAIT_TDD_CHAIN: 'Resume the bound TDD chain and wait for its ticket-bound terminal outcome.',
+  START_TDD: 'Start the delegated build chain for the current attempt.',
+  AWAIT_TDD_CHAIN: 'Resume the bound build chain and wait for its ticket-bound terminal outcome.',
   RUN_GATES: 'Run the configured quality gates and persist their evidence.',
   RUN_CONVERGENCE: 'Run the convergence checks before any pull-request effect.',
   RECONCILE_PR: 'Reconcile the pull-request operation key before creating or updating a PR.',
   RECONCILE_TEAM_REVIEW: 'Reconcile the team-review operation key before publishing review output.',
-  FIX_REVIEW_FINDINGS: 'Inspect unresolved review threads and route required fixes through the bound TDD chain.',
+  FIX_REVIEW_FINDINGS: 'Inspect unresolved review threads and route required fixes through the bound build chain.',
   VALIDATE_FEATURE: 'Validate the running feature against every acceptance criterion.',
   RUN_COVERAGE: 'Run the configured coverage phase and persist its evidence.',
   DELIVER_PR: 'Verify delivery invariants and report the ready pull request without merging or deploying.',
