@@ -187,8 +187,13 @@ For a bound session the dispatcher decides a Bash payload in-process through
 `secretScanSkipsBash`; the shell copy below runs in `hooks/checks/pre-write-secret-scan.sh` when
 the dispatcher delegates (no binding) or `node` is missing. Both copies carry the same token list,
 and a channel added to `detectChannels` adds its token to both. The body still binds first. For a payload whose only unescaped `"tool_name"` is
-`"Bash"`, it exits before the scanner when the raw payload holds none of `>`, `<<`, `tee`,
-`of=`, `\u`, or `sed` followed later by `-i`. That token list is a superset of what
+`"Bash"`, it exits before the scanner when the raw payload holds none of `>`, `<<`, `\u` and
+`$'`, and the payload with every quote and backslash removed holds, in any letter case, none of
+`tee`, `of=`, or `sed` followed later by an option word that holds `i`. The quote removal and the
+case fold follow `detectChannels`, which reads a program word after the shell's quote removal
+(`t'e'e`, `\tee`) and in any case (`TEE`), and `$'` stands for a name spelled with ANSI-C
+escapes. `secretScanSkipsBash` folds case the way `programName` does; the shell copy folds ASCII
+letters only. That token list is a superset of what
 `detectChannels` in `bash-source-write-parse.js` can report, and it is a COPY: a channel added to
 `detectChannels` must add its token here in the same change, or the scanner never sees that
 channel. `F13b` in `tests/structure/test-secret-scan-gate.sh` reads every label the

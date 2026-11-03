@@ -435,10 +435,11 @@ function secretScanSkipsBash(input) {
   if (!input.includes('"tool_name":"Bash"')) return false;
   const first = input.indexOf('"tool_name"');
   const repeated = first !== -1 && input.indexOf('"tool_name"', first + '"tool_name"'.length) !== -1;
-  const sed = input.indexOf('sed');
-  const sedInPlace = sed !== -1 && input.indexOf('-i', sed + 3) !== -1;
-  return !(input.includes('>') || input.includes('<<') || input.includes('tee') || input.includes('of=')
-    || input.includes('\\u') || sedInPlace || repeated);
+  const words = input.toUpperCase().toLowerCase().replace(/['"\\]/g, '');
+  const sed = words.indexOf('sed');
+  const sedInPlace = sed !== -1 && /-\S*i/.test(words.slice(sed + 3));
+  return !(input.includes('>') || input.includes('<<') || words.includes('tee') || words.includes('of=')
+    || input.includes('\\u') || input.includes("$'") || sedInPlace || repeated);
 }
 
 function runSecretScan(context, check) {

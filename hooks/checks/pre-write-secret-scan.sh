@@ -126,9 +126,17 @@ zensu_hook_enabled secretScan || exit 0
 
 case "$INPUT" in
   *'"tool_name":"Bash"'*)
+    WORDS=${INPUT//\'/}
+    WORDS=${WORDS//\"/}
+    WORDS=${WORDS//\\/}
     case "$INPUT" in
-      *'>'*|*'<<'*|*tee*|*of=*|*'\u'*|*sed*-i*|*'"tool_name"'*'"tool_name"'*) ;;
-      *) exit 0 ;;
+      *'>'*|*'<<'*|*'\u'*|*"\$'"*|*'"tool_name"'*'"tool_name"'*) ;;
+      *)
+        case "$WORDS" in
+          *[tT][eE][eE]*|*[oO][fF]=*) ;;
+          *) [[ "$WORDS" =~ [sS][eE][dD].*-[^[:space:]]*[iI] ]] || exit 0 ;;
+        esac
+        ;;
     esac
     ;;
 esac
