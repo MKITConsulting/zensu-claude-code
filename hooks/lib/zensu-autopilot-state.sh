@@ -3831,6 +3831,9 @@ _autopilot_begin_standalone_tdd_critical() {
     1) ;;
     *) return "$read_rc" ;;
   esac
+  if [ -n "$code_roots" ]; then
+    _autopilot_code_roots_free "$root" "$session_id" "$code_roots" || return $?
+  fi
   if bound="$(_autopilot_standalone_bound_run "$root" "$session_id")"; then
     bound_rc=0
   else
@@ -3845,9 +3848,6 @@ _autopilot_begin_standalone_tdd_critical() {
     1) ;;
     *) return "$bound_rc" ;;
   esac
-  if [ -n "$code_roots" ]; then
-    _autopilot_code_roots_free "$root" "$session_id" "$code_roots" || return $?
-  fi
   tdd_begin_session "$session_id" "$vanilla" false false "" "" "" "" "" "$code_roots"
 }
 
