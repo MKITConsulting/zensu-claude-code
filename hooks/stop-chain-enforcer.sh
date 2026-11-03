@@ -1568,9 +1568,10 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
       # first adoption after the hold clears removes it -- a leak, not a wedge.
       6) ;;
       4)
-        # A nonterminal durable run holds this working tree. The occupancy
-        # comparison is CONTAINMENT in both directions, so the holder may be a
-        # run driving a worktree nested below this tree -- or above it. The hold
+        # A nonterminal durable run holds this working tree. Occupancy is
+        # CONTAINMENT in both directions unless exactly one key is a folder
+        # outside every git work tree, so the holder may be a run driving a
+        # worktree nested below this tree -- or above it. The hold
         # therefore persists for as long as that run stays nonterminal, and the
         # previous wording ("retry Stop") prescribed a retry that could never
         # succeed. Name the holder instead.

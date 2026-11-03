@@ -131,6 +131,26 @@ case "$OUT_QUIET_CONTROL" in
   *'consent mode'*) check "B11c-control the same invocation without the flag does emit the consent line" PASS ;;
   *) check "B11c-control the same invocation without the flag does emit the consent line" FAIL ;;
 esac
+ZEN_BANNER_CFG="$(mktemp "${TMPDIR:-/tmp}/zensu-banner-zen.XXXXXX")" || exit 1
+zen_banner_line() {
+  printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$1" bash "$BANNER" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{if(!s.trim())return;try{process.stdout.write(JSON.parse(s).systemMessage.split("\n").filter(l=>l.startsWith("zensu: zen-mode")).join("\n"))}catch(_){process.stdout.write("unparseable")}})'
+}
+printf '%s\n' '{}' > "$ZEN_BANNER_CFG"
+B18_ON="$(zen_banner_line "$ZEN_BANNER_CFG")"
+printf '%s\n' '{"hooks":{"zenModeDefault":false}}' > "$ZEN_BANNER_CFG"
+B18_OPT="$(zen_banner_line "$ZEN_BANNER_CFG")"
+printf '%s\n' '{"hooks":{"zenMode":false}}' > "$ZEN_BANNER_CFG"
+B18_OFF="$(zen_banner_line "$ZEN_BANNER_CFG")"
+B18_QUIET="$(zen_banner_line "$QUIET_CONFIG")"
+rm -f "$ZEN_BANNER_CFG"
+case "$B18_ON" in
+  ("zensu: zen-mode — on by default:"*"your own CLAUDE.md, output style or a style mode you chose outranks it."*'Say "zen off" to leave it for this session'*"hooks.zenModeDefault=false in ~/.zensu/config.json to make it opt-in.") B18_DEFAULT=PASS ;;
+  (*) B18_DEFAULT=FAIL ;;
+esac
+{ [ "$B18_DEFAULT" = PASS ] && [ -z "$B18_OPT" ] && [ -z "$B18_OFF" ] && [ -z "$B18_QUIET" ]; } \
+  && check "B18 the banner says zen-mode is on by default and names the way out, and stays silent when the mode is opt-in, switched off or the banner is quiet" PASS \
+  || check "B18 zen-mode banner line (on='$B18_ON' opt='$B18_OPT' off='$B18_OFF' quiet='$B18_QUIET')" FAIL
 rm -f "$QUIET_CONFIG"
 
 PS_BASE="$(mktemp -d -t zensu-banner-powershell-XXXXXX)"

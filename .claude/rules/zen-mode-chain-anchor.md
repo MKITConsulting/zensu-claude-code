@@ -3,6 +3,7 @@ paths:
   - "hooks/user-prompt-zen-mode.sh"
   - "hooks/lib/zen-anchor-v1.js"
   - "hooks/lib/zensu-zen-mode.sh"
+  - "hooks/lib/zensu-zen-shared.sh"
   - "skills/zen-mode/**"
   - "evals/zen-mode-reaction/**"
   - "tests/structure/test-zen-mode.sh"
@@ -371,6 +372,33 @@ ORDER instead, since the guard's second job is preventing a per-prompt `mkdir` o
 `.zensu/state`. `Z32e` was byte-identical to two fail-open checks and now requires SILENCE on
 stderr; `Z19b` discarded the regex FLAGS, so an added `i` widened the shipped reader invisibly.
 
+**THREE READERS, ONE LADDER.** The hook, `zensu-zen-mode.sh --status` and the `/zensu:doctor`
+zen-mode probe each spelled the state ladder (marker shape, recorded choice, untraversable path,
+configured default) and the marker path template themselves, so a rung added to one reader left
+the others answering differently about one state. `zen_mode_resolve` in
+`hooks/lib/zensu-zen-shared.sh` owns the ladder and `zen_marker_path` the template. The resolver
+sets `ZEN_MODE_SOURCE` (`shape`, `marker`, `untraversable` or `default`) and, for a shape fault,
+the reason in `ZEN_MODE_WHY`; each reader keeps its own consequence. The hook exits with its
+stderr line, `--status` prints `on` or `off` with the cause on stderr, and the doctor renders its
+row, asking `zen_marker_inactive` to tell a recorded `{"active":false}` from a marker that records
+no choice. Each reader also keeps its own `hooks.zenMode` check, because the hook reads it before
+any expensive step and a second read inside the resolver would cost a `node` start on a config
+that names the key. The resolver adds no process to the hook's path: an active marker still costs
+one `grep`. `Z109` in `tests/structure/test-zen-mode.sh` pins the one owner of the template, of
+the inactive question and of the ladder, and that each reader resolves through it exactly once;
+`Z50`, `Z80` item 8, `Z89` and `Z95` read the ladder and its comments in the library, and the
+`Z107` family still drives the doctor row and `--status` against each other on every rung.
+
+**The default rung reads the config overlay under the root the reader passes**, through
+`zensu_zen_mode_default_on <root>`, as `zensu_default_delivery_route` does for the route. Read
+from the ambient `CLAUDE_PROJECT_DIR` instead, it paired the recorded root's marker with another
+tree's overlay: `--status` from a Bash tool without that variable answered `on` for a project whose
+overlay sets `zenModeDefault: false`, and the doctor and the hook did the same under a harness root
+other than the recorded one. `Z107e` drives all three. The `hooks.zenMode` checks stay
+harness-anchored, as `autoTdd` and its siblings do in the delivery-route hooks; moving them is its
+own change. The SessionStart banner keeps the argument-free form, because it discloses the
+configured default rather than a session's resolution.
+
 **TWO WRITERS LAND THAT MARKER, and hardening one of them left the guarantee false.**
 `hooks/lib/zensu-zen-mode.sh` is the OUT-OF-BAND remedy, and the hook NAMES it in the sentence
 it prints when the in-band `zen off` escape is unavailable — so for exactly the corrupt marker
@@ -501,9 +529,11 @@ from `, and anchor work that spans several turns` through `counter beside them.`
 sentence, by the same parameter expansion and with no process. A literal that loses either anchor
 emits the full clause with `none`, the safe direction. `Z30` in
 `tests/structure/test-zen-mode.sh` measures the armed variant (the static literal with the
-LONGEST producible token substituted: 4930 characters, ceiling 5020) and `Z30b` fires the hook
-with no chain armed and measures the none variant (3600, ceiling 3690). Both variants grew by 483
-characters when rules (1) to (3) became the result-first rule and the closing session block. Both measure through
+LONGEST producible token substituted: 5008 characters, ceiling 5100) and `Z30b` fires the hook
+with no chain armed and measures the none variant (3678, ceiling 3770). Both variants grew by 483
+characters when rules (1) to (3) became the result-first rule and the closing session block, and by
+78 more when the lead turned neutral and rules (4) and (5) gained the precedence and question-set
+clauses. Both measure through
 `node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
 code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
 directions: growth past the ceiling fails, and so does a shrink further below it than the
@@ -724,8 +754,8 @@ rejections.
 **Known gap, accepted:** a rendered `✓review` reports what a READABLE DOCUMENT CLAIMED, never
 evidence that a review ran. `validateWorkflowState` is structural — it derives
 `session_id_hash` from the file's own name, there is no MAC, and `.zensu/state/` is writable
-from inside the session — so a forged document can put a completion line in front of a user
-this directive itself describes as working at low capacity, on every turn. The reachable
+from inside the session — so a forged document can put a completion line in front of the user
+on every turn. The reachable
 outputs are a closed set, so this is not a text-injection channel; it is a completion SIGNAL a
 co-tenant writer controls. Authenticating it needs a persisted signal, which is a
 workflow-state schema change and therefore a `minor`, which the `patch` walk below declines.

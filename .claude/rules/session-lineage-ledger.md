@@ -41,7 +41,10 @@ MEASURED; the Windows and Linux candidates are probed and can win — `ccdStoreC
 tries `$XDG_CONFIG_HOME/Claude` and `~/.config/Claude` there — they are UNVERIFIED, not
 unreachable. Where no candidate exists the account is `null` and the ancestry still
 groups by window. `ZENSU_CCD_STORE` overrides the probe list and is AUTHORITATIVE, and
-`lineage --diagnose` prints every candidate with its verdict.
+`lineage --diagnose` prints every candidate with its verdict. `storeCandidates` in
+`hooks/lib/linked-session-v1.js`, which resolves a linked session's parent for the delivery route,
+applies the same override rule, so a change to it here moves that function too
+(`.claude/rules/session-delivery-route.md`).
 
 **The edge's `repo` comes from the HANDED-OVER work, never from the recording
 process's cwd.** The documented takeover route runs from a window in a different repo,

@@ -88,21 +88,26 @@ grep -qF 'zensu_hook_enabled zenMode' "$HOOK" \
 # Z7b the session default is read through the dedicated getter, never folded into
 # zensu_hook_enabled — that helper answers "may this hook run at all", which is a
 # different question with a different marker consequence
-if grep -qF 'zensu_zen_mode_default_on' "$HOOK" \
+if grep -qF 'zen_mode_resolve' "$HOOK" \
+  && grep -qE '^  zensu_zen_mode_default_on "\$1"$' "$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh" \
   && grep -qF 'zensu_zen_mode_default_on' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
-  && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$HOOK"; then
+  && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$HOOK" \
+  && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"; then
   check "Z7b session default resolved via zensu_zen_mode_default_on (hooks.zenModeDefault)" PASS
 else
   check "Z7b session default getter missing or folded into zensu_hook_enabled" FAIL
 fi
 
 # Z8 marker lives under the gitignored ephemeral state dir. The directory and the
-# file stem are matched separately because both files now build the path in two
-# steps — the state dir is needed on its own for the symlink guard and the mkdir.
+# file stem are matched separately: both files still need the state dir on its own
+# for the symlink guard and the mkdir, while the stem lives in the shared library,
+# which builds the path for both.
 Z8_BAD=""
+Z8_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+grep -qF '/.zensu/state/zen-mode-' "$Z8_LIB" || Z8_BAD="$Z8_BAD $(basename "$Z8_LIB"):marker-stem"
 for F8 in "$HOOK" "$HELPER"; do
   grep -qF '.zensu/state' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):state-dir"
-  grep -qF '/zen-mode-' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):marker-stem"
+  grep -qF 'ZEN_MARKER_PATH' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):marker-path-not-from-the-owner"
 done
 [ -z "$Z8_BAD" ] && check "Z8 marker path is .zensu/state/zen-mode-<session> (gitignored, ephemeral)" PASS \
   || check "Z8 marker path wrong:$Z8_BAD" FAIL
@@ -481,7 +486,7 @@ P19="$(mktemp -d -t zenmode-XXXXXX)"; S19="z19-$$"
 new_session "$P19" "$S19"; helper "$P19" "$S19" --on >/dev/null
 RAW19="$(fire "$P19" "$S19" "do a thing")"
 MISSING19=""
-for FRAG19 in "session block" "recap" "first sentence" "OVERRIDES" "one next step" "ONE question" "chain-progress" "user's own language"; do
+for FRAG19 in "session block" "recap" "first sentence" "own instructions outrank this mode" "one next step" "ONE question" "chain-progress" "user's own language"; do
   printf '%s' "$RAW19" | grep -qiF "$FRAG19" || MISSING19="$MISSING19 '$FRAG19'"
 done
 [ -z "$MISSING19" ] && check "Z19 reminder carries session-block/recap/result-first/precedence/one-step/one-question/anchor/language rules" PASS \
@@ -1054,9 +1059,9 @@ rm -rf "$P21"
 # Prose is line-wrapped, so the clause is matched against a whitespace-normalized
 # copy — the pin survives a reflow of the paragraph.
 SKILL_FLAT="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
-if printf '%s' "$SKILL_FLAT" | grep -qiF 'overrides any other compressed or telegraphic style mode' \
+if printf '%s' "$SKILL_FLAT" | grep -qiF "The user's own instructions outrank this mode: their CLAUDE.md, their output style and a style mode or plugin they chose" \
   && printf '%s' "$SKILL_FLAT" | grep -qiF 'no sentence fragments'; then
-  check "Z22 SKILL.md states precedence over compressed/telegraphic style modes" PASS
+  check "Z22 SKILL.md states that the user's own instructions outrank zen-mode and keeps full sentences as the default" PASS
 else
   check "Z22 SKILL.md precedence clause missing" FAIL
 fi
@@ -1351,11 +1356,11 @@ zen_is_plain_number() {
 # guessable, the directive ASSERTS provenance for it, and the same literal occurs
 # in this repository`s own tree - so content read later in the same turn could
 # impersonate the field and inherit that assertion, putting a false completion
-# signal in front of a user this very directive describes as working at low
-# capacity. Second, the off-verb stopped being named by a bare relative path.
+# signal in front of the user.
+# Second, the off-verb stopped being named by a bare relative path.
 # That half made the directive SHORTER; the delimiters and the sentence naming
 # them are what cost the bytes.
-ZEN_DIRECTIVE_CEILING=5020
+ZEN_DIRECTIVE_CEILING=5100
 ZEN_DIRECTIVE_HEADROOM=95
 if ! command -v node >/dev/null 2>&1; then
   check "Z30 directive length bound did not run — node is not on PATH" FAIL
@@ -1400,7 +1405,7 @@ else
   fi
 fi
 
-ZEN_NONE_CEILING=3690
+ZEN_NONE_CEILING=3770
 ZEN_NONE_HEADROOM=95
 if command -v node >/dev/null 2>&1; then
   P30B="$(mktemp -d -t zenmode-z30b-XXXXXX)"; S30B="z30b-$$"
@@ -2130,20 +2135,24 @@ Z50_BAD=""
 # caught a deletion and never a one-sided addition; Z89 owns the single-owner
 # property and drives the predicate itself, and what is left here is that each
 # reader still consults it with its own three paths.
-printf '%s' "$Z50_HOOK_SRC" \
-  | grep -qF 'zen_marker_shape_fault "$ZEN_ROOT/.zensu" "$ZEN_STATE_DIR" "$MARKER"' \
-  || Z50_BAD="$Z50_BAD hook:does-not-consult-the-shared-shape-rule"
+Z50_ZEN_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+Z50_LIB_SRC="$(grep -vE '^[[:space:]]*(#|//)' "$Z50_ZEN_LIB")"
+[ -n "$Z50_LIB_SRC" ] || Z50_BAD="$Z50_BAD lib:source-slice-is-empty"
+printf '%s' "$Z50_HOOK_SRC" | grep -qE '^if ! zen_mode_resolve "\$ZEN_ROOT" "\$ZENSU_SESSION_KEY"; then$' \
+  || Z50_BAD="$Z50_BAD hook:does-not-take-the-shared-resolver"
+printf '%s' "$Z50_LIB_SRC" \
+  | grep -qF 'zen_marker_shape_fault "$1/.zensu" "$1/.zensu/state" "$ZEN_MARKER_PATH"' \
+  || Z50_BAD="$Z50_BAD lib:resolver-does-not-consult-the-shared-shape-rule"
 # (c) a non-traversable state directory does not fall through to the default.
 # THE WALK, not a named pair. Naming components has been wrong twice here, so
 # what is pinned is that the ladder consults a predicate which walks them.
 # THE PREDICATE IS SHARED, so it is asserted where it LIVES and consumed where
 # it is used. Both readers of the marker call one implementation in
-# `zensu-session.sh`; a private copy in either is the drift this replaces.
-Z50_ZEN_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+# `zensu-zen-shared.sh`; a private copy in either is the drift this replaces.
 grep -qE '^zen_path_untraversable\(\) \{' "$Z50_ZEN_LIB" \
   || Z50_BAD="$Z50_BAD lib:no-untraversable-predicate"
-printf '%s' "$Z50_HOOK_SRC" | grep -qE '^elif zen_path_untraversable ' \
-  || Z50_BAD="$Z50_BAD hook:untraversable-predicate-not-in-ladder"
+printf '%s' "$Z50_LIB_SRC" | grep -qE '^  if zen_path_untraversable "\$ZEN_MARKER_PATH" "\$1"; then$' \
+  || Z50_BAD="$Z50_BAD lib:untraversable-predicate-not-in-ladder"
 # (d) the marker is PUBLISHED BY RENAME, never truncated in place.
 # ANCHORED ON A CALL POSITION. The comment strip removes full-line SHELL
 # comments only, so a `// renameSync` inside either embedded node program
@@ -2174,8 +2183,8 @@ else
     || Z50_BAD="$Z50_BAD oob:write-not-rename"
   printf '%s' "$Z50_OOB_SRC" | grep -qE '>[[:space:]]*"\$(MARKER|ZEN_MARKER)"' \
     && Z50_BAD="$Z50_BAD oob:truncating-redirect-returned"
-  printf '%s' "$Z50_OOB_SRC" | grep -qE 'zen_path_untraversable ' \
-    || Z50_BAD="$Z50_BAD oob:no-untraversable-arm"
+  printf '%s' "$Z50_OOB_SRC" | grep -qE 'zen_mode_resolve "\$_zensu_status_root" "\$_zensu_status_key"' \
+    || Z50_BAD="$Z50_BAD oob:status-does-not-take-the-shared-resolver"
 fi
 if [ -z "$Z50_BAD" ]; then
   check "Z50 both marker writers carry the component guard, the non-regular arm and a rename landing" PASS
@@ -3477,12 +3486,13 @@ grep -qF "$Z80_TIMEOUT10 sibling entries" "$HOOK" \
 # FLATTENED, because the sentence is line-wrapped across the comment prefix and a
 # line-scoped needle here would be the very defect this arm grades: the splice put
 # an unrelated paragraph BETWEEN the two halves of one sentence.
-Z80_FLAT="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$HOOK" | tr '\n' ' ' | tr -s ' ')"
+Z80_LADDER="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+Z80_FLAT="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$Z80_LADDER" | tr '\n' ' ' | tr -s ' ')"
 printf '%s' "$Z80_FLAT" | grep -qF 'the fall-through then took the configured default' \
   || Z80_BAD="$Z80_BAD untraversable-comment-still-spliced"
-grep -qF "including this arm" "$HOOK" \
-  && grep -qF 'BOTH COMPONENTS are tested, exactly as the symlink arm above tests both' "$HOOK" \
-  && grep -qF 'walks EVERY component' "$HOOK" \
+grep -qF "including this arm" "$Z80_LADDER" \
+  && grep -qF 'BOTH COMPONENTS are tested, exactly as the symlink arm above tests both' "$Z80_LADDER" \
+  && grep -qF 'walks EVERY component' "$Z80_LADDER" \
   || Z80_BAD="$Z80_BAD untraversable-comment-names-the-wrong-mechanism"
 
 if [ -z "$Z80_BAD" ]; then
@@ -3791,7 +3801,7 @@ rm -rf "$P84"
 # header forbids.
 #
 # The seam was already there: the THIRD arm of the same ladder,
-# `zen_path_untraversable`, lives in `hooks/lib/zensu-session.sh`, and BOTH files
+# `zen_path_untraversable`, lives in `hooks/lib/zensu-zen-shared.sh`, and BOTH files
 # source that library. The predicate belongs beside it, parameterized on the three
 # paths rather than reading either file`s globals, so each caller applies its own
 # consequence - the hook resolves OFF, `--on`/`--off` refuse with exit 2, and
@@ -3803,7 +3813,8 @@ grep -qE '^zen_marker_shape_fault\(\)' "$Z89_LIB" \
 grep -qE '^zen_marker_shape_fault\(\)' "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" \
   && Z89_BAD="$Z89_BAD helper-keeps-a-private-copy"
 # The hook must CALL it rather than spell the ladder inline.
-grep -qF 'zen_marker_shape_fault' "$HOOK" \
+grep -qE '^if ! zen_mode_resolve ' "$HOOK" \
+  && grep -qF 'zen_marker_shape_fault "$1/.zensu" "$1/.zensu/state" "$ZEN_MARKER_PATH"' "$Z89_LIB" \
   || Z89_BAD="$Z89_BAD hook-does-not-call-the-shared-predicate"
 Z89_FLAT="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$HOOK" | tr '\n' ' ' | tr -s ' ')"
 printf '%s' "$Z89_FLAT" | grep -qE '\[ -L "\$ZEN_ROOT/\.zensu" \] \|\| \[ -L "\$ZEN_STATE_DIR" \]' \
@@ -4355,8 +4366,8 @@ fi
 # TWO PROPERTIES, one check, because they are one refactor. First, blast radius:
 # `zensu-session.sh` is the Session Control binding library and is sourced by
 # every stateful gate in the tree, so a syntax fault introduced while editing a
-# PRESENTATION feature fails every PreToolUse Bash gate CLOSED. The two
-# predicates have exactly two callers, both zen. Second, the `active` question
+# PRESENTATION feature fails every PreToolUse Bash gate CLOSED. The
+# predicates have three callers, the hook, the helper and the doctor probe. Second, the `active` question
 # was spelled THREE times by hand - the resolution ladder, the off-write
 # verification, and the helper`s `--status` - with nothing comparing them, so a
 # one-sided widening would make the verification report COULD NOT BE DEACTIVATED
@@ -4369,7 +4380,8 @@ fi
 Z95_BAD=""
 Z95_SHARED="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
 [ -f "$Z95_SHARED" ] || Z95_BAD="$Z95_BAD no-zensu-zen-shared.sh"
-for Z95_FN in zen_marker_shape_fault zen_path_untraversable zen_marker_active; do
+for Z95_FN in zen_marker_shape_fault zen_path_untraversable zen_marker_active zen_marker_inactive \
+  zen_marker_path zen_mode_resolve; do
   grep -qE "^$Z95_FN\(\) \{" "$Z95_SHARED" 2>/dev/null \
     || Z95_BAD="$Z95_BAD $Z95_FN-not-in-the-zen-library"
   grep -qE "^$Z95_FN\(\) \{" "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
@@ -4385,14 +4397,40 @@ elif [ "$Z95_SPELLINGS" != "$Z95_SHARED" ]; then
 fi
 # and all three former sites must go through the owner
 Z95_CALLS="$(grep -c 'zen_marker_active' "$HOOK" 2>/dev/null || echo 0)"
-[ "${Z95_CALLS:-0}" -ge 2 ] \
-  || Z95_BAD="$Z95_BAD hook-calls-zen_marker_active-${Z95_CALLS:-0}-times-want-2"
-grep -q 'zen_marker_active' "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" \
-  || Z95_BAD="$Z95_BAD status-verb-does-not-call-zen_marker_active"
+[ "${Z95_CALLS:-0}" -ge 1 ] \
+  || Z95_BAD="$Z95_BAD hook-calls-zen_marker_active-${Z95_CALLS:-0}-times-want-1"
+grep -qE '^if ! zen_mode_resolve ' "$HOOK" \
+  || Z95_BAD="$Z95_BAD hook-does-not-resolve-through-the-owner"
+grep -qE '^    zen_marker_active "\$ZEN_MARKER_PATH"$' "$Z95_SHARED" \
+  || Z95_BAD="$Z95_BAD resolver-does-not-ask-the-owner"
+grep -q 'zen_mode_resolve' "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" \
+  || Z95_BAD="$Z95_BAD status-verb-does-not-resolve-through-the-owner"
 if [ -z "$Z95_BAD" ]; then
   check "Z95 the zen predicates live in a zen-only library and the active question has one owner" PASS
 else
   check "Z95 zen-only state predicates still sit in the binding library, or the active question is hand-copied:$Z95_BAD" FAIL
+fi
+
+Z109_BAD=""
+Z109_LIB="$PLUGIN_DIR/hooks/lib/zensu-zen-shared.sh"
+Z109_TEMPLATES="$(grep -rlE 'zen-mode-\$' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"
+[ "$Z109_TEMPLATES" = "$Z109_LIB" ] \
+  || Z109_BAD="$Z109_BAD marker-template-in<$(printf '%s' "$Z109_TEMPLATES" | tr '\n' ' ')>"
+Z109_INACTIVE="$(grep -rlF '"active"[[:space:]]*:[[:space:]]*false' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"
+[ "$Z109_INACTIVE" = "$Z109_LIB" ] \
+  || Z109_BAD="$Z109_BAD inactive-pattern-in<$(printf '%s' "$Z109_INACTIVE" | tr '\n' ' ')>"
+for Z109_READER in "$HOOK" "$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh" "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"; do
+  Z109_SRC="$(grep -vE '^[[:space:]]*#' "$Z109_READER")"
+  [ -n "$Z109_SRC" ] || Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-source-slice-is-empty"
+  Z109_N="$(printf '%s\n' "$Z109_SRC" | grep -c 'zen_mode_resolve "')"
+  [ "$Z109_N" = 1 ] || Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-resolves-${Z109_N}-times-want-1"
+  printf '%s\n' "$Z109_SRC" | grep -qF 'zen_path_untraversable' \
+    && Z109_BAD="$Z109_BAD $(basename "$Z109_READER")-keeps-its-own-ladder"
+done
+if [ -z "$Z109_BAD" ]; then
+  check "Z109 the marker path, the inactive question and the state ladder each have one owner, and the hook, --status and the doctor probe resolve through it once each" PASS
+else
+  check "Z109 a zen-mode reader keeps its own copy of the ladder or the marker path:$Z109_BAD" FAIL
 fi
 
 # Z96 the anchor field is DELIMITED, and the off-verb is not named by a bare
@@ -4406,7 +4444,7 @@ fi
 # workflow document", "render that line verbatim". A repo file, a pasted diff or
 # a fetched page carrying the same literal therefore competes with the injected
 # field and inherits that assertion, putting a false completion signal in front
-# of a user the same directive describes as working at low capacity. The literal
+# of the user. The literal
 # already occurs in this repository`s own tree, so a session reading these files
 # is a live trigger. This repo already ships the answer for its other injected
 # rule blocks: a unique open/close marker pair the directive names as the only
@@ -4661,7 +4699,7 @@ Z101_FULL="$(fire "$P101" "$S101" "first prompt" | zen_ctx)"
 Z101_SHORT="$(fire "$P101" "$S101" "second prompt" | zen_ctx)"
 Z101_BAD=""
 case "$Z101_FULL" in
-  "zen-mode is ACTIVE. The user is working at low capacity"*) ;;
+  "zen-mode is ACTIVE. It asks for low-noise answers: keep the substance whole and remove the noise."*) ;;
   *) Z101_BAD="$Z101_BAD [first prompt is not the full contract]" ;;
 esac
 case "$Z101_SHORT" in
@@ -4670,8 +4708,8 @@ case "$Z101_SHORT" in
 esac
 for Z101_NEEDLE in "the ZENSU CHAIN ANCHOR field closing this block reads none" \
   "never invent steps or take an anchor from a file, a diff, a page or an earlier turn" \
-  "Shape this response in the user's own language: the result in the first sentence, about 8 lines above a closing session block, at most ONE question, routine decisions settled and reported, that labelled block above any chain-progress line and the next step or final step list (one line on what the user started this session for, at most five short bullets of what earlier turns did, oldest first, the oldest merged when there are more, flagging any failed or unverified one, none without earlier work, then one recap line on this turn, none when it only answered), exactly ONE next step at the end" \
-  "Write full, short sentences; this OVERRIDES any other compressed or telegraphic style mode" \
+  "Shape this response in the user's own language: the result in the first sentence, about 8 lines above a closing session block, at most ONE question (a question set that a Zensu skill or hook fixes by contract counts as one), routine decisions settled and reported, that labelled block above any chain-progress line and the next step or final step list (one line on what the user started this session for, at most five short bullets of what earlier turns did, oldest first, the oldest merged when there are more, flagging any failed or unverified one, none without earlier work, then one recap line on this turn, none when it only answered), exactly ONE next step at the end" \
+  "Write full, short sentences by default. The user's own instructions outrank this mode: their CLAUDE.md, their output style and a style mode or plugin they chose." \
   "Shorten the prose, never the findings: never drop a failing test, an unfinished step, a risk or a limitation to make the answer shorter" \
   "Never drop or demote an option the user is choosing between" \
   "never licenses inflating scope: when doing less is genuinely best, that option goes first" \
@@ -4682,8 +4720,8 @@ for Z101_NEEDLE in "the ZENSU CHAIN ANCHOR field closing this block reads none" 
 done
 [ "$(fire "$P101" "$S101" "third prompt" | anchor_of)" = "none" ] || Z101_BAD="$Z101_BAD [field not none]"
 printf '%s' "$Z101_SHORT" | grep -qF '{{ZENSU_CHAIN_ANCHOR}}' && Z101_BAD="$Z101_BAD [raw placeholder]"
-[ "${#Z101_SHORT}" -le 1840 ] && [ "${#Z101_SHORT}" -lt "${#Z101_FULL}" ] \
-  || Z101_BAD="$Z101_BAD [short ${#Z101_SHORT} vs full ${#Z101_FULL}, ceiling 1840]"
+[ "${#Z101_SHORT}" -le 1990 ] && [ "${#Z101_SHORT}" -lt "${#Z101_FULL}" ] \
+  || Z101_BAD="$Z101_BAD [short ${#Z101_SHORT} vs full ${#Z101_FULL}, ceiling 1990]"
 if [ -z "$Z101_BAD" ]; then
   check "Z101 the first ACTIVE prompt of a context generation carries the full contract and later ones a short body with every per-turn rule, the substance list, the ranking rule and its counterweight, the whole safety exception and the none field (${#Z101_FULL} then ${#Z101_SHORT} characters)" PASS
 else
@@ -4709,7 +4747,7 @@ if arm_chain "$P103" "$S103"; then
   Z103_ARMED_SHORT_OUT="$(fire "$P103" "$S103" "second armed prompt")"
   Z103_ARMED_SHORT="$(printf '%s' "$Z103_ARMED_SHORT_OUT" | zen_ctx)"
   case "$Z103_ARMED_FULL" in
-    "zen-mode is ACTIVE. The user is working at low capacity"*"for a step that finished and passed"*) ;;
+    "zen-mode is ACTIVE. It asks for low-noise answers: keep the substance whole and remove the noise."*"for a step that finished and passed"*) ;;
     *) Z103_BAD="$Z103_BAD [first armed prompt is not the full armed contract]" ;;
   esac
   case "$Z103_ARMED_SHORT" in
@@ -4740,13 +4778,13 @@ Z104="$(HOOK="$HOOK" node -e '
   const rest = short < 0 ? "" : s.slice(short, s.indexOf("\n", short));
   const open = rest.split(", and anchor work that spans several turns").length - 1;
   const close = rest.split("counter beside them.").length - 1;
-  process.stdout.write([leads.length, /^zen-mode is ACTIVE\. The user/.test(leads[0] || "") ? "full-first" : "short-first", open, close].join(":"));
+  process.stdout.write([leads.length, /^zen-mode is ACTIVE\. It asks/.test(leads[0] || "") ? "full-first" : "short-first", open, close].join(":"));
 ' 2>/dev/null)"
 [ "$Z104" = "2:full-first:1:1" ] \
   && check "Z104 the hook holds the full ACTIVE contract first and the short body second, and the short body carries the none-swap span exactly once" PASS \
   || check "Z104 ACTIVE heredoc layout is '${Z104:-unreadable}', want 2:full-first:1:1" FAIL
 
-ZEN_SHORT_ARMED_CEILING=2170
+ZEN_SHORT_ARMED_CEILING=2320
 ZEN_SHORT_ARMED_HEADROOM=95
 Z105_LEN="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" node -e '
   const fs = require("fs");
@@ -4802,6 +4840,202 @@ if [ -z "$Z106_BAD" ]; then
 else
   check "Z106 result-first or session-block rule broken:$Z106_BAD" FAIL
 fi
+
+P107="$(mktemp -d -t zenmode-XXXXXX)"; S107="z107-$$"
+new_session "$P107" "$S107"
+CFG107_HOOK_OFF="$CONTROL_TMP/z107-hook-off.json"
+Z107_HOME="$CONTROL_TMP/z107-home"
+mkdir -p "$Z107_HOME"
+printf '{"hooks":{"zenMode":false}}\n' > "$CFG107_HOOK_OFF"
+doctor_zen() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$2" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$1" ZENSU_CONFIG="$3" ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=absent \
+    ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing \
+    env -u ZDOC_ZEN_MODE bash "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh" 2>/dev/null \
+    | grep -o 'zen-mode: [a-z]* ([^)]*)' | head -1
+}
+Z107_BAD=""
+z107_case() {
+  local got status
+  got="$(doctor_zen "$P107" "$S107" "$2")"
+  status="$(helper "$P107" "$S107" --status "$2")"
+  [ "$got" = "zen-mode: $3" ] || Z107_BAD="$Z107_BAD [$1 doctor='$got']"
+  [ "${3%% *}" = "$status" ] || Z107_BAD="$Z107_BAD [$1 status='$status']"
+}
+z107_case default "$NO_CONFIG" "on (hooks.zenModeDefault)"
+z107_case default-off "$CFG_DEFAULT_OFF" "off (hooks.zenModeDefault)"
+z107_case hook-off "$CFG107_HOOK_OFF" "off (hooks.zenMode=false)"
+helper "$P107" "$S107" --on "$CFG_DEFAULT_OFF" >/dev/null
+z107_case marker-on "$CFG_DEFAULT_OFF" "on (session marker)"
+helper "$P107" "$S107" --off >/dev/null
+z107_case marker-off "$NO_CONFIG" "off (session marker)"
+if mv "$P107/.zensu/state" "$P107/.zensu/state-real" && ln -s state-real "$P107/.zensu/state"; then
+  z107_case symlinked-state "$NO_CONFIG" "off (unreadable state)"
+else
+  Z107_BAD="$Z107_BAD [symlink fixture could not be built]"
+fi
+rm -rf "$P107"
+[ -z "$Z107_BAD" ] \
+  && check "Z107 the /zensu:doctor session row and --status agree on every rung: default, opt-in, hook off, both recorded choices, an unreadable state path" PASS \
+  || check "Z107 doctor and --status disagree:$Z107_BAD" FAIL
+
+P107B="$(mktemp -d -t zenmode-XXXXXX)"; S107B="z107b-$$"
+new_session "$P107B" "$S107B"
+helper "$P107B" "$S107B" --off >/dev/null
+M107B="$(find "$P107B/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' | head -1)"
+[ -n "$M107B" ] && printf '%s\n' '{"recorded":"elsewhere"}' > "$M107B"
+Z107B_ROW="$(doctor_zen "$P107B" "$S107B" "$NO_CONFIG")"
+Z107B_STATUS="$(helper "$P107B" "$S107B" --status "$NO_CONFIG")"
+{ [ -n "$M107B" ] && [ "$Z107B_ROW" = "zen-mode: off (unreadable state)" ] && [ "$Z107B_STATUS" = off ]; } \
+  && check "Z107b a session marker that records no choice renders the unreadable-state warning, never a green row, while --status reports the off the hook resolves" PASS \
+  || check "Z107b no-choice marker (marker='$M107B' doctor='$Z107B_ROW' status='$Z107B_STATUS')" FAIL
+[ -n "$M107B" ] && printf '%s\n' '{"active":false}' > "$M107B" && chmod 000 "$M107B" 2>/dev/null
+if [ "$(id -u)" = "0" ]; then
+  skipcheck "Z107c running as root, which reads a mode-000 marker"
+elif [ -z "$M107B" ] || [ -r "$M107B" ]; then
+  skipcheck "Z107c this host lets a mode-000 file be read, so an unreadable marker cannot be planted"
+else
+  Z107C_ROW="$(doctor_zen "$P107B" "$S107B" "$NO_CONFIG")"
+  Z107C_STATUS="$(helper "$P107B" "$S107B" --status "$NO_CONFIG")"
+  { [ "$Z107C_ROW" = "zen-mode: off (unreadable state)" ] && [ "$Z107C_STATUS" = off ]; } \
+    && check "Z107c a session marker that cannot be read renders the unreadable-state warning, never the green recorded-choice row" PASS \
+    || check "Z107c unreadable marker (doctor='$Z107C_ROW' status='$Z107C_STATUS')" FAIL
+fi
+[ -n "$M107B" ] && chmod 600 "$M107B" 2>/dev/null
+rm -rf "$P107B"
+
+doctor_zen_line() {
+  HOME="$Z107_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$1" ZENSU_CONFIG="$NO_CONFIG" ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=absent \
+    ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing \
+    env -u ZDOC_ZEN_MODE -u CLAUDE_CODE_SESSION_ID ${2:+CLAUDE_CODE_SESSION_ID="$2"} \
+    bash "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh" 2>/dev/null \
+    | grep -F 'zen-mode: ' | grep -vF 'zen-mode default' | head -1
+}
+Z107D_BAD=""
+z107d_expect() {
+  case "$2" in
+    (*"✅"*) Z107D_BAD="$Z107D_BAD [$1 is green: ${2:0:100}]" ;;
+    (*"zen-mode: $3"*) ;;
+    (*) Z107D_BAD="$Z107D_BAD [$1: ${2:-no zen-mode row}]" ;;
+  esac
+}
+P107D="$(mktemp -d -t zenmode-XXXXXX)"; S107D="z107d-$$"
+new_session "$P107D" "$S107D"
+helper "$P107D" "$S107D" --off >/dev/null
+z107d_expect unbound "$(doctor_zen_line "$P107D" "")" "not checked"
+Z107D_CONTROL="$(doctor_zen_line "$P107D" "$S107D")"
+case "$Z107D_CONTROL" in
+  (*"zen-mode: off (session marker)"*) ;;
+  (*) Z107D_BAD="$Z107D_BAD [the bound control is not the recorded off row: ${Z107D_CONTROL:-no zen-mode row}]" ;;
+esac
+M107D="$(find "$P107D/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' | head -1)"
+if [ -n "$M107D" ] && rm -f "$M107D" && mkdir "$M107D"; then
+  z107d_expect marker-directory "$(doctor_zen_line "$P107D" "$S107D")" "off (unreadable state)"
+  Z107D_ST="$(helper "$P107D" "$S107D" --status)"
+  [ "$Z107D_ST" = off ] || Z107D_BAD="$Z107D_BAD [marker-directory status='$Z107D_ST']"
+  rmdir "$M107D"
+  helper "$P107D" "$S107D" --off >/dev/null
+else
+  Z107D_BAD="$Z107D_BAD [the marker-directory fixture could not be built]"
+fi
+if [ "$(id -u)" = "0" ]; then
+  skipcheck "Z107d running as root, which searches a mode-000 directory, so the unsearchable rows were NOT exercised"
+elif [ "$Z54_ENFORCED" -eq 0 ]; then
+  skipcheck "Z107d this host lets a mode-000 directory be searched, so the unsearchable rows were NOT exercised"
+else
+  for Z107D_CASE in "state|$P107D/.zensu/state|off (unreadable state)" "zensu|$P107D/.zensu|off (unreadable state)" \
+    "root|$P107D|could not be read"; do
+    Z107D_LABEL="${Z107D_CASE%%|*}"; Z107D_REST="${Z107D_CASE#*|}"
+    Z107D_DIR="${Z107D_REST%|*}"; Z107D_WANT="${Z107D_REST##*|}"
+    if chmod 000 "$Z107D_DIR" 2>/dev/null; then
+      z107d_expect "mode-000 $Z107D_LABEL" "$(doctor_zen_line "$P107D" "$S107D")" "$Z107D_WANT"
+      Z107D_ST="$(helper "$P107D" "$S107D" --status)"
+      case "$Z107D_ST" in
+        (*on*) Z107D_BAD="$Z107D_BAD [mode-000 $Z107D_LABEL status='$Z107D_ST']" ;;
+      esac
+      chmod 700 "$Z107D_DIR"
+    else
+      Z107D_BAD="$Z107D_BAD [chmod failed for $Z107D_LABEL]"
+    fi
+  done
+fi
+rm -rf "$P107D"
+[ -z "$Z107D_BAD" ] \
+  && check "Z107d the /zensu:doctor session row is never green for a check it could not make: an unbound session, a directory at the marker path, and a mode-000 state directory, .zensu or project root" PASS \
+  || check "Z107d zen-mode session row for a missing check:$Z107D_BAD" FAIL
+
+P107E="$(mktemp -d -t zenmode-XXXXXX)"; S107E="z107e-$$"
+Q107E="$(mktemp -d -t zenmode-XXXXXX)"
+new_session "$P107E" "$S107E"
+mkdir -p "$P107E/.zensu"
+printf '%s' '{"hooks":{"zenModeDefault":false}}' > "$P107E/.zensu/config.json"
+z107e_status() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107E" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG \
+    bash "$HELPER" --status 2>/dev/null
+}
+z107e_hook() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$S107E" "$1" \
+    | HOME="$Z107_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$Q107E" env -u ZENSU_CONFIG \
+      bash "$HOOK" 2>/dev/null | classify
+}
+Z107E_BAD=""
+Z107E_ST="$(z107e_status)"
+[ "$Z107E_ST" = off ] || Z107E_BAD="$Z107E_BAD [status without CLAUDE_PROJECT_DIR='$Z107E_ST']"
+Z107E_ROW="$(doctor_zen "$Q107E" "$S107E" "")"
+[ "$Z107E_ROW" = "zen-mode: off (hooks.zenModeDefault)" ] || Z107E_BAD="$Z107E_BAD [doctor under another CLAUDE_PROJECT_DIR='$Z107E_ROW']"
+Z107E_HOOK="$(z107e_hook "first prompt")"
+[ "$Z107E_HOOK" = EMPTY ] || Z107E_BAD="$Z107E_BAD [hook under another CLAUDE_PROJECT_DIR='$Z107E_HOOK']"
+rm -f "$P107E/.zensu/config.json"
+Z107E_ST="$(z107e_status)"
+[ "$Z107E_ST" = on ] || Z107E_BAD="$Z107E_BAD [control without the overlay: status='$Z107E_ST']"
+Z107E_ROW="$(doctor_zen "$Q107E" "$S107E" "")"
+[ "$Z107E_ROW" = "zen-mode: on (hooks.zenModeDefault)" ] || Z107E_BAD="$Z107E_BAD [control without the overlay: doctor='$Z107E_ROW']"
+Z107E_HOOK="$(z107e_hook "second prompt")"
+[ "$Z107E_HOOK" = "UserPromptSubmit|ON" ] || Z107E_BAD="$Z107E_BAD [control without the overlay: hook='$Z107E_HOOK']"
+rm -rf "$P107E" "$Q107E"
+[ -z "$Z107E_BAD" ] \
+  && check "Z107e the default rung reads the project overlay under the session's recorded root: --status without CLAUDE_PROJECT_DIR and the doctor row and the hook under another CLAUDE_PROJECT_DIR resolve the overlay's off, and on once it is removed" PASS \
+  || check "Z107e default rung not read under the recorded root:$Z107E_BAD" FAIL
+
+P108="$(mktemp -d -t zenmode-XXXXXX)"; S108="z108-$$"
+new_session "$P108" "$S108"
+Z108_NONE_FULL="$(fire "$P108" "$S108" "first prompt" | zen_ctx)"
+Z108_NONE_SHORT="$(fire "$P108" "$S108" "second prompt" | zen_ctx)"
+arm_chain "$P108" "$S108"
+Z108_ARMED_FULL="$(fire "$P108" "$S108" "third prompt" | zen_ctx)"
+Z108_ARMED_SHORT="$(fire "$P108" "$S108" "fourth prompt" | zen_ctx)"
+rm -rf "$P108"
+Z108_BAD="$(Z108_NONE_FULL="$Z108_NONE_FULL" Z108_NONE_SHORT="$Z108_NONE_SHORT" \
+  Z108_ARMED_FULL="$Z108_ARMED_FULL" Z108_ARMED_SHORT="$Z108_ARMED_SHORT" node -e '
+  const fs = require("fs"), path = require("path");
+  const root = process.argv[1];
+  const claim = /\b(?:low|reduced|limited)[- ]capacity\b/i;
+  const unquoted = (s) => s.replace(/"[^"\n]*"/g, "");
+  const carriers = [];
+  for (const k of ["Z108_NONE_FULL", "Z108_NONE_SHORT", "Z108_ARMED_FULL", "Z108_ARMED_SHORT"]) {
+    const v = process.env[k] || "";
+    if (!v.startsWith("zen-mode is ACTIVE")) process.stdout.write(" [" + k + ":not-emitted]");
+    else carriers.push([k, v]);
+  }
+  if (!(process.env.Z108_ARMED_FULL || "").includes("ZENSU CHAIN ANCHOR: Zensu:")) process.stdout.write(" [Z108_ARMED_FULL:not-the-armed-variant]");
+  carriers.push(["skill", fs.readFileSync(path.join(root, "skills", "zen-mode", "SKILL.md"), "utf8")]);
+  const readme = fs.readFileSync(path.join(root, "README.md"), "utf8").split("\n").filter((l) => l.startsWith("| `/zensu:zen-mode` |"));
+  if (readme.length !== 1) process.stdout.write(" [README:zen-rows=" + readme.length + "]");
+  carriers.push(["README", readme.join("\n")]);
+  const rows = fs.readFileSync(path.join(root, "docs", "configuration.md"), "utf8").split("\n")
+    .filter((l) => /^\|\s*`(?:user-prompt-zen-mode\.sh|zenModeDefault|zenMode)`\s*\|/.test(l));
+  if (rows.length !== 3) process.stdout.write(" [configuration:zen-rows=" + rows.length + "]");
+  carriers.push(["configuration", rows.join("\n")]);
+  for (const [name, text] of carriers) {
+    const m = unquoted(text).match(claim);
+    if (m) process.stdout.write(" [" + name + ":" + m[0] + "]");
+  }
+' "$PLUGIN_DIR" 2>&1)"
+[ -z "$Z108_BAD" ] \
+  && check "Z108 no zen-mode carrier claims the user works at reduced capacity: the full and short contract with and without a chain, the skill, its README row and the operator rows" PASS \
+  || check "Z108 capacity claim:$Z108_BAD" FAIL
 
 
 # The anchor fixtures are the only project directories this suite created and
