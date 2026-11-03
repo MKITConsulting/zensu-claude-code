@@ -289,7 +289,7 @@ root, so it is allowed; if the shell's real cwd on that drive is elsewhere the w
 escapes. It predates the normalizer (`D:rel` has no leading slash, so `msysToDrive` never
 sees it) and `git-repo-escape.test.js` pins the judgment so a change to it is deliberate.
 
-**The harness lies on Windows in three ways, and each one fails SILENTLY on POSIX.**
+**The harness lies on Windows in four ways, and each one fails SILENTLY on POSIX.**
 Every one of these turned a check green — or red — for a reason unrelated to the
 contract it names, and none is observable from a POSIX host:
 
@@ -310,12 +310,23 @@ contract it names, and none is observable from a POSIX host:
   or a shortcut native Node does not follow; the two directories then genuinely differ
   and DENY is CORRECT, so W167/W168 failed on a premise that did not hold. They confirm
   the link through `fs.realpathSync.native` — the same primitive `canonical()` uses.
+- **Hand the command to `node` over stdin, never through an environment variable.**
+  MSYS rewrites an environment value it takes for a path on its way into a native
+  binary, and a command that starts with a rooted path is such a value. While
+  `payload()` passed the command as `CMD`, W237 (`/usr/bin/ENV …`), W245
+  (`/usr/bin/GIT …`) and W323 (`>/dev/null git …`) allowed on Windows in run
+  41646817779 while the parser was right. W256 starts with `/usr/bin/cd` and stayed
+  green only because its second command denies by rule (A) whatever becomes of its
+  first word. W552 to W554 also start with a redirection to `/dev/null` and stayed
+  green, so a green check of that shape proves nothing about the rewrite. `payload()`
+  now pipes the command into `node`, as the host delivers it, and **W3i** pins that a
+  rooted command arrives verbatim.
 
 **The Windows timeout for this suite is a coverage boundary, not a formality.** At
 `timeoutMs: 300000` in `tests/profiles/windows-ci.v1.json` the shard killed the suite
 after roughly 210 of its checks, always mid-run at W122 — so W224, W233/W234 and
 everything after them never executed on Windows at all while the shard still reported.
-It is 600000 now. Adding checks costs Windows wall
+It is 600000 now, and run 41646817779 used 528 s of it for 605 checks. Adding checks costs Windows wall
 clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
 unverified regardless of how many checks passed before it.
 

@@ -308,9 +308,12 @@ source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" bswgate-test \
   || { check "W0 session-control baseline bootstrap" FAIL; echo "----"; echo "test-bash-source-write-gate: $PASS PASS / $FAIL FAIL"; exit 1; }
 
 payload() {
-  CMD="$1" CWD="${2:-$PROJ}" TOOL="${3:-Bash}" node -e '
-    const o={hook_event_name:"PreToolUse",tool_name:process.env.TOOL,tool_input:{command:process.env.CMD},cwd:process.env.CWD,session_id:"bswgate-test"};
-    process.stdout.write(JSON.stringify(o));
+  printf '%s' "$1" | CWD="${2:-$PROJ}" TOOL="${3:-Bash}" node -e '
+    let s=""; process.stdin.setEncoding("utf8"); process.stdin.on("data",c=>s+=c);
+    process.stdin.on("end",()=>{
+      const o={hook_event_name:"PreToolUse",tool_name:process.env.TOOL,tool_input:{command:s},cwd:process.env.CWD,session_id:"bswgate-test"};
+      process.stdout.write(JSON.stringify(o));
+    });
   '
 }
 classify() {
@@ -324,6 +327,14 @@ classify() {
     });
   '
 }
+ROOTED_SENT="/usr/bin/ENV true"
+ROOTED_GOT="$(payload "$ROOTED_SENT" | node -e '
+  let s=""; process.stdin.on("data",c=>s+=c);
+  process.stdin.on("end",()=>{ process.stdout.write(JSON.parse(s).tool_input.command); });
+')"
+[ "$ROOTED_GOT" = "$ROOTED_SENT" ] \
+  && check "W3i a command that starts with a rooted path reaches the payload unconverted" PASS \
+  || check "W3i the payload rewrote a rooted command (sent='$ROOTED_SENT' got='$ROOTED_GOT')" FAIL
 # run <label> <cmd> <expected> [cwd] [cfg] [claude-env-file]
 run() {
   local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_ON}" env_file="${6:-$PROJ/.claude-env}" home="${7:-${HOME:-}}"
