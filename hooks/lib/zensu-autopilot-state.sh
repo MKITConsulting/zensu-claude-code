@@ -247,7 +247,8 @@ _autopilot_rendered_dir() {
   printf '%s\n' "$rendered"
 }
 
-# `fallback` is what a git failure resolves to, and only the GATE path supplies
+# `fallback` is what a git failure resolves to, unless a directory between the
+# input and the fallback carries a `.git` entry, and only the GATE path supplies
 # one: it passes the project root, so a missing git binary or a non-repository
 # directory can never turn one session's key into the caller's cwd — the
 # divergence that would make an occupancy gate miss the run it exists to see.
@@ -261,7 +262,7 @@ autopilot_workspace_root() {
   # closes it, so the keeper never sees EOF and the release hangs — the failure
   # surfaces minutes later as an unrelated suite that never returns. Redirect
   # stdin, not just the output.
-  local git_bin
+  local git_bin probe
   git_bin="$(command -v git 2>/dev/null)" || git_bin=""
   if [ -n "$git_bin" ]; then
     top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
@@ -269,6 +270,20 @@ autopilot_workspace_root() {
       "$git_bin" -C "$input" rev-parse --show-toplevel 2>/dev/null </dev/null)" || top=""
   else
     top=""
+  fi
+  if [ -z "$top" ] && [ -n "$fallback" ]; then
+    probe="$input"
+    while :; do
+      case "$probe" in
+        ("$fallback"/*) ;;
+        (*) break ;;
+      esac
+      if [ -e "$probe/.git" ] || [ -L "$probe/.git" ]; then
+        top="$probe"
+        break
+      fi
+      probe="${probe%/*}"
+    done
   fi
   if [ -z "$top" ]; then
     top="${fallback:-$input}"
@@ -593,6 +608,30 @@ const mayHoldWorkspace = (state, workspaceRoot) =>
   || typeof workspaceOf(state) !== "string"
   || contains(workspaceOf(state), workspaceRoot)
   || contains(workspaceRoot, workspaceOf(state));
+const insideWorkTree = dir => {
+  let current = dir;
+  for (let depth = 0; depth < 256; depth += 1) {
+    try {
+      fs.lstatSync(path.join(current, ".git"));
+      return true;
+    } catch (error) {
+      if (!error || (error.code !== "ENOENT" && error.code !== "ENOTDIR")) return null;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+  return null;
+};
+const occupiesWorkspace = (state, workspaceRoot) => {
+  if (!mayHoldWorkspace(state, workspaceRoot)) return false;
+  const held = workspaceOf(state);
+  if (typeof held !== "string" || !path.isAbsolute(held) || !path.isAbsolute(workspaceRoot)
+    || path.relative(held, workspaceRoot) === "") return true;
+  const heldInside = insideWorkTree(held);
+  const callerInside = insideWorkTree(workspaceRoot);
+  return heldInside === null || callerInside === null || heldInside === callerInside;
+};
 const RETURN_STAGES = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
 const HEAD_UPDATE_STAGES = new Set(["FIX_FINDINGS", "VALIDATE", "COVER"]);
 const NEXT_ACTION = Object.freeze({
@@ -1462,7 +1501,7 @@ if (mode === "read-workspace") {
   if (!nonEmpty(workspaceRoot, 4096)) fail(3, "invalid workspace root");
   const inventory = readRunInventory(stateDir, expectedProjectRoot);
   const holders = inventory.filter(candidate => !TERMINAL.has(candidate.stage)
-    && mayHoldWorkspace(candidate, workspaceRoot));
+    && occupiesWorkspace(candidate, workspaceRoot));
   if (holders.length === 0) fail(1, "no nonterminal run holds this workspace");
   // The answer stays owner-INDEPENDENT: which holder is reported never changes
   // WHETHER the tree is held. The optional preference exists because a caller
@@ -1557,7 +1596,7 @@ if (mode === "begin") {
   // and replaces the project-wide one; a foreign holder is nameable, so the
   // refusal points at the command that can release it.
   const workspaceHolder = inventory.find(candidate => candidate.runId !== runId
-    && !TERMINAL.has(candidate.stage) && mayHoldWorkspace(candidate, workspaceRoot));
+    && !TERMINAL.has(candidate.stage) && occupiesWorkspace(candidate, workspaceRoot));
   if (workspaceHolder) {
     // The GUIDED form, not the runnable one: this refusal is surfaced by
     // `zensu-log.sh` as the tool result of a command a model runs, so --confirm
@@ -1790,7 +1829,7 @@ if (mode === "release") {
       ? bound(held)
       : "a tree this refusal does not render (it carries a character that must not be echoed)";
     fail(6, `run does not hold the caller's working tree ${bound(callerWorkspace)}; `
-      + `release it from the tree it holds, ${heldText} — occupancy is `
+      + `release it from the tree it holds, ${heldText} — the release scope is `
       + `containment in either direction, so a tree containing or contained by that `
       + `one also works, and only a sibling worktree is refused`);
   }
@@ -3728,6 +3767,35 @@ _autopilot_publish_workspace_refusal() {
   return 0
 }
 
+_autopilot_standalone_bound_run() {
+  local root="$1" session_id="$2" state_file key ctx run_id state
+  state_file="$(tdd_state_file "$session_id")" || return 5
+  [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
+  key="${state_file##*/}"; key="${key#tdd-phase-}"; key="${key%.json}"
+  ctx="$(tdd_autopilot_context "$state_file" "$session_id")" || return 5
+  [ "$ctx" != "{}" ] || return 1
+  run_id="$(AUTOPILOT_CTX="$ctx" node -e '
+    try {
+      const c = JSON.parse(process.env.AUTOPILOT_CTX);
+      if (c.active === true && c.chainDone !== true) process.stdout.write(String(c.runId));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null)" || return 5
+  [ -n "$run_id" ] || return 1
+  _autopilot_identifier_ok "$run_id" || return 5
+  state="$(_autopilot_node read-run "$root/.zensu/state/autopilot-run-${run_id}.json" "$run_id" "$root")" \
+    || return $?
+  printf '%s' "$state" | AUTOPILOT_CTX="$ctx" SID="$key" node -e '
+    try {
+      const s = JSON.parse(require("fs").readFileSync(0, "utf8"));
+      const c = JSON.parse(process.env.AUTOPILOT_CTX);
+      const live = s.stage !== "DONE" && s.stage !== "CANCELLED" && s.tdd
+        && s.tdd.sessionId === process.env.SID && s.tdd.chainId === c.chainId;
+      if (!live) process.exit(1);
+      process.stdout.write(`${s.runId} ${s.stage}`);
+    } catch (_) { process.exit(5); }
+  ' 2>/dev/null
+}
+
 # Starting a standalone inner generation must serialize with every durable
 # outer begin/start. The decision and inner write therefore share the canonical
 # Outer -> Inner lock order. BLOCKED is resumable and still owns the WORKSPACE;
@@ -3738,7 +3806,7 @@ _autopilot_publish_workspace_refusal() {
 # hold, because arming a chain under a foreign run is the harm itself.
 _autopilot_begin_standalone_tdd_critical() {
   local root="$1" session_id="$2" vanilla="$3" workspace="${4:-}"
-  local read_rc holder
+  local read_rc holder bound bound_rc
   [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
   # The preference is forwarded here for the same reason the deferred-review
   # fences forward it: this site RENDERS the holder to a user, and the renderer
@@ -3762,6 +3830,20 @@ _autopilot_begin_standalone_tdd_critical() {
       ;;
     1) ;;
     *) return "$read_rc" ;;
+  esac
+  if bound="$(_autopilot_standalone_bound_run "$root" "$session_id")"; then
+    bound_rc=0
+  else
+    bound_rc=$?
+  fi
+  case "$bound_rc" in
+    0)
+      printf 'own Autopilot run %s (stage %s) still drives the open build chain of this session, and a standalone --tdd-begin would erase the binding of that chain to the run; continue the bound chain instead\n' \
+        "${bound%% *}" "${bound#* }" >&2
+      return 4
+      ;;
+    1) ;;
+    *) return "$bound_rc" ;;
   esac
   tdd_begin_session "$session_id" "$vanilla" false false ""
 }
