@@ -1115,8 +1115,8 @@ TRANSPORT_VERDICT="$(HOOK="$HOOK" node -e '
       const allowed=[
         /^  PLAN_PAYLOAD_DIR="\$\(bash "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/lib\/zensu-host-path\.sh" \\$/,
         /^  PLAN_PAYLOAD_LIB="\$\{PLAN_PAYLOAD_DIR:\+\$\{PLAN_PAYLOAD_DIR\}\/plan-payload-v1\.js\}"$/,
-        /^  if \[ -z "\$PLAN_PAYLOAD_LIB" \] \\$/,
-        /^    \|\| \[ ! -f "\$PLAN_PAYLOAD_LIB" \] \|\| \[ -L "\$PLAN_PAYLOAD_LIB" \] \|\| \[ ! -r "\$PLAN_PAYLOAD_LIB" \]; then$/,
+        /^  plan_module_loadable "\$PLAN_PAYLOAD_LIB" \|\| return 1$/,
+        /^    plan_module_loadable "\$\{PLAN_PAYLOAD_DIR\}\/foreign-executor-v1\.js" \|\| return 0$/,
         /^  PLAN_MSYS_EXCL="\$\(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB\)" \|\| PLAN_MSYS_EXCL="\$\{MSYS2_ENV_CONV_EXCL:-\}"$/,
         /^      PLAN_PAYLOAD_LIB="\$PLAN_PAYLOAD_LIB" node -e .$/,
         /^        \(\{resolveApprovedPlan,responseOrigin,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/,
@@ -1149,11 +1149,16 @@ LOADER_RENDERS="$(grep -cF 'hooks/lib/zensu-host-path.sh" \' "$HOOK")"
 LOADER_DEFINITIONS="$(grep -cE '^plan_payload_load\(\) \{$' "$HOOK")"
 LOADER_DURABLE_CALLS="$(grep -cE '^    plan_payload_load \|\| \{$' "$HOOK")"
 LOADER_NOTICE_CALLS="$(grep -cE '^    plan_payload_load \|\| return 0$' "$HOOK")"
+GUARD_DEFINITIONS="$(grep -cE '^plan_module_loadable\(\) \{$' "$HOOK")"
+GUARD_BODIES="$(grep -cxF '  [ -n "$1" ] && [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ]' "$HOOK")"
+GUARD_CALLS="$(grep -cE '^ +plan_module_loadable "' "$HOOK")"
+GUARD_INLINE="$(grep -cE '\[ -L "\$(PLAN_PAYLOAD_LIB|\{?PLAN_PAYLOAD_DIR)' "$HOOK")"
 if [ "$LOADER_RENDERS" = 1 ] && [ "$LOADER_DEFINITIONS" = 1 ] \
-  && [ "$LOADER_DURABLE_CALLS" = 1 ] && [ "$LOADER_NOTICE_CALLS" = 1 ]; then
-  check "F48b the reader loader is spelled once and serves the durable branch and the executor notice" PASS
+  && [ "$LOADER_DURABLE_CALLS" = 1 ] && [ "$LOADER_NOTICE_CALLS" = 1 ] \
+  && [ "$GUARD_DEFINITIONS" = 1 ] && [ "$GUARD_BODIES" = 1 ] && [ "$GUARD_CALLS" = 2 ] && [ "$GUARD_INLINE" = 0 ]; then
+  check "F48b the reader loader is spelled once and serves the durable branch and the executor notice, and one -f/-L/-r guard serves the reader and the classifier module" PASS
 else
-  check "F48b reader loader (renders=$LOADER_RENDERS definitions=$LOADER_DEFINITIONS durable=$LOADER_DURABLE_CALLS notice=$LOADER_NOTICE_CALLS)" FAIL
+  check "F48b reader loader (renders=$LOADER_RENDERS definitions=$LOADER_DEFINITIONS durable=$LOADER_DURABLE_CALLS notice=$LOADER_NOTICE_CALLS guard-definitions=$GUARD_DEFINITIONS guard-bodies=$GUARD_BODIES guard-calls=$GUARD_CALLS inline-guards=$GUARD_INLINE)" FAIL
 fi
 
 # --- F12 outside Autopilot the payload shape must not change the routing ---

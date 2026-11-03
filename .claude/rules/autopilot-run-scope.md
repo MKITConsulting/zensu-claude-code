@@ -348,9 +348,9 @@ is a call convention inside one installation and never a persisted shape — an 
 passing three args gets its previous answer. The Stop hook denies strictly LESS than before,
 which cannot make state written by one runtime unreadable to the other; the capability rule
 in that section is about ADDING a hook that can deny, and relaxing an existing hook's deny is
-not in the list. Recorded here because this section carries FOUR `**Version.**` paragraphs: the `minor` one
+not in the list. Recorded here because this section carries FIVE `**Version.**` paragraphs: the `minor` one
 describes the ORIGINAL pointer/schema change, this one the run-scope delta, a third the run
-ADOPTION delta and a fourth the run-visibility delta. A releaser matching on the wrong one gets
+ADOPTION delta, a fourth the run-visibility delta and a fifth the folder-anchor delta. A releaser matching on the wrong one gets
 the wrong answer. The count read THREE here and in both later paragraphs while the tree already
 carried four, and the omitted one was the adoption verdict that covers a commit on this branch —
 so re-derive it with `grep -n '^\*\*Version' .claude/rules/autopilot-run-scope.md` rather than
@@ -450,6 +450,17 @@ toplevel.
 to the project root when cwd is outside it. `autopilot_begin_run` and all three occupancy
 gates call it. Two different spellings would make a gate silently miss the run it exists to
 see. `--autopilot-begin --workspace <path>` overrides it, but only for a tree that is either the session's own resolved tree or a directory under the project root; anything else refuses with rc 3. Accepted narrowing: a git worktree OUTSIDE the project root can no longer be declared.
+When git fails and the project root is the fallback, `autopilot_workspace_root` keys the caller on
+the nearest directory between its cwd and the project root that carries a `.git` entry, and on
+the project root only when none does. That is the key a working git gives a caller inside a
+repository or a worktree, so a git fault no longer widens it to the project root: inside a
+repository below a folder it keys that repository rather than the folder, which the folder rule
+below would otherwise free, and in an ordinary project a caller in a nested worktree is keyed on
+that worktree, so a run in a sibling worktree no longer holds it. The arm serves every
+`_autopilot_session_workspace` caller, so it narrows release and adoption under a git fault the
+same way. It tests the entry with `[ -e ]` and `[ -L ]` alone: it accepts a `.git` entry git
+would reject, and it passes over one it cannot stat, which then keys the caller on a directory
+above it.
 `workspaceRoot` is deliberately NOT a member of any `path_indexes` list in `_autopilot_node`:
 it is a comparison key rather than a path the worker opens, and it may legitimately sit
 outside the project root, which `_autopilot_native_project_path` rejects by design.
@@ -470,6 +481,57 @@ answers "held" whenever either tree contains the other, which also covers the gi
 fallback — that path yields the project root while a working resolve yields the repository
 toplevel above it. Equality alone reported such a pair as free, and a standalone `/zensu:build`
 chain then armed underneath a live durable run.
+
+**A folder outside every git work tree is not a work tree, so occupancy never crosses that line
+(`occupiesWorkspace`).** A project root that git places outside every work tree, a folder holding
+several repositories, falls back to itself as the key. Path containment then made it hold every
+repository below it, and made a session standing in it collide with every run below it.
+`occupiesWorkspace` keeps `mayHoldWorkspace` and adds one rule: a pair where exactly one key lies
+outside every git work tree overlaps only when the two keys are equal. Two trees and two folders
+keep the containment rule above unchanged. `insideWorkTree` decides it by a filesystem walk for a
+`.git` entry at or above the key, the technique the edit-landing audit uses, with no git process.
+An lstat error other than ENOENT/ENOTDIR, or a walk past its 256-level bound, leaves that side
+undecided, and an undecided side, a relative key and a record without a string `workspaceRoot`
+all keep the containment verdict, so every fault fails closed. The occupancy sites use it: the `read-workspace`
+worker mode, which serves the standalone `--tdd-begin` fence, both deferred-review fences, the
+post-review preflight and the `--autopilot-status` hold report, and the `begin` holder check.
+`release`, `adopt` and the exact-retry check in `begin` keep `mayHoldWorkspace`, because they ask
+whether the caller stands in or around the run's tree, and a session in the folder must still
+reach its run in a worktree below. This is §6.5's "Exclusivity counts no ancestor" of
+`docs/multi-repo-chains-spec.md` applied to the Autopilot fence.
+
+**The standalone begin also refuses to erase an own binding (`_autopilot_standalone_bound_run`).**
+Containment used to make the caller's own nonterminal run a holder of every tree around it, so
+the fence refused a standalone `--tdd-begin` that would erase the outer-run binding of that run's
+inner chain. Across the folder line the fence no longer sees that run. Inside the same lease, after
+the workspace read, the begin therefore reads the caller's own workflow document and refuses with
+exit 4 when it carries an open chain (`active` and not `chainDone`) whose run is nonterminal and
+whose record names this session and this chain id as its inner build chain. The test reads no
+tree, so it also covers the sibling-worktree layout the fence never covered. A binding whose run
+is terminal, absent or driven by another chain is stale and does not refuse; a binding that cannot
+be read refuses with the fault code rather than being read as absent.
+
+The S17 family in `tests/structure/test-autopilot-stop-enforcer.sh` pins both on a git fixture,
+and the occupancy sentence of the doctor's `autopilot:` row states the folder rule for the
+operator. Known gaps: a stray `.git` entry makes a folder read as a work tree (fail-closed); a
+`.git` removed after a run began makes that run's key read as a folder, so a work tree nested
+below that key no longer overlaps it; a run an older runtime recorded under a git fault carries the folder as its
+key, so the repository it drives reads free of it, and no reader can tell that record from a run
+begun from the folder; a session on the folder anchor is never fenced against a live run in a tree
+it edits, because occupancy is checked when a chain or a run is armed, when a deferred review is
+adopted, in the post-review preflight and in the hold report, never on a write, and the stage-1
+audit sees such edits only at `--tdd-complete`; a main checkout still holds, and is held by, a
+worktree nested inside it, because that pair is tree-tree containment (`S7i`); a home directory
+that is itself a git work tree turns every folder below it into that tree, as before; Windows is
+unverified for the S17 family, and `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not
+included.
+
+**Version for the folder-anchor delta: `patch`.** Walked against §"Runtime Lineage": no
+run-record field, no strict key set, no hook, matcher, config key or attestation moves; the
+occupancy gates refuse strictly less, and an older runtime serving a session in the same project
+keeps the old rule, which only refuses more. The own-binding refusal of the standalone begin is
+the one place that refuses more, and it is a library verb inside one installation that reads the
+workflow document and the run record without adding a field to either.
 
 **The FORWARD direction is the one that is not solved, and concurrency makes it normal.**
 `begin` writes `workspaceRoot` while still declaring `schemaVersion: 1`, so an installation
@@ -627,7 +689,7 @@ these keys existed a deployment that tuned `pendingReviewTtlHours` — including
 release's liveness check as a side effect; that tuning no longer carries over, and
 `docs/configuration.md` states what to set instead.
 
-**Version: `patch` — this is the THIRD of FOUR verdicts in this section, and each covers a
+**Version: `patch` — this is the THIRD of FIVE verdicts in this section, and each covers a
 different delta.** Walked against §"Runtime Lineage" entry by entry: no context-record or workflow-state
 schema field (the provenance entry lands in `history`, whose `step`/`phase` are shape-validated
 with no closed enum, and `workflow_state: "autopilot_adopted"` / `last_event: "autopilot-adopted"`
@@ -636,8 +698,9 @@ pass `validateWorkflowToken`); no strict key set moves (`STATE_KEYS`, `STATE_KEY
 removed or renamed and no matcher changed; both new config keys are read permissively through
 `_zensu_config_bounded_int`, never by a strict validator; no attestation change; and no
 `permissionDecision` in either direction. Adding a skill is not an entry in that list. The
-`patch` paragraph above covers the workspace-hold relaxation and the `minor` one covers the
-original pointer/schema change — three verdicts, three deltas, and none of them covers another.
+run-scope `patch` paragraph above covers the workspace-hold relaxation, the folder-anchor `patch`
+paragraph covers the folder rule and the own-binding refusal, and the `minor` one covers the
+original pointer/schema change; each verdict covers its own delta and none covers another.
 The P2 review round's changes stay inside THIS verdict rather than opening a fifth: the second
 window key (read permissively), the read-only report (a call convention that writes nothing), the
 pointer rollback, the beacon refresh (an mtime on the adopter's own existing document, never a
@@ -1151,7 +1214,7 @@ still covers only the LEGACY pointer by name.
   bounds its `sed` slice at 20 lines (re-indenting the block's closing `fi` grew the slice from
   16 lines to 166, where every conjunct matched unrelated lines below).
 
-**Version for the run-visibility delta: `patch`.** This section now carries FOUR
+**Version for the run-visibility delta: `patch`.** This section now carries FIVE
 `**Version.**` statements and a releaser matching on the wrong one gets the wrong answer, so
 this one names its own scope: the `/zensu:doctor` `autopilot:` row, the public
 `autopilot_workspace_hold_report` verb with the `--autopilot-status` disclosure that consumes it,

@@ -31,7 +31,7 @@ Each one judges PowerShell text where the judgment is exact and refuses what it 
 gate lets PowerShell text it cannot judge pass in silence**; a refusal tells the main thread to use
 the Bash tool (or Edit and Write) and a subagent to report to the main thread. The one exception is
 the CLI write-gate while `hooks/lib/zensu-cli-words-v1.js` cannot load: the Bash tool fails the same
-way, so that refusal tells the main thread to reinstall the plugin (`B53h`, `B53l`, `B53n`).
+way, so that refusal tells the main thread to reinstall the plugin (`B58h`, `B58l`, `B58n`).
 
 ## When the host runs the PowerShell tool
 
@@ -117,7 +117,7 @@ shell is refused.
 
 | Hook | PowerShell disposition |
 |---|---|
-| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, a group subcommand holding it (`isGroup` of `hooks/lib/zensu-cli-words-v1.js`), or an analyzer that fails to load while the text names `zensu` denies. When `hooks/lib/zensu-cli-words-v1.js` cannot load, every `zensu` call that holds a word that could name a subcommand, but `--help` and a localhost backend, denies, reads and unjudged calls included, with that module's reason instead of the Bash-tool advice (B53h, B53l). No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B48f). |
+| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, a group subcommand holding it (`isGroup` of `hooks/lib/zensu-cli-words-v1.js`), or an analyzer that fails to load while the text names `zensu` denies. When `hooks/lib/zensu-cli-words-v1.js` cannot load, every `zensu` call that holds a word that could name a subcommand, but `--help` and a localhost backend, denies, reads and unjudged calls included, with that module's reason instead of the Bash-tool advice (B58h, B58l). No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B48f). |
 | `pre-bash-source-write-gate.sh`, control mode | `controlVerdict`, always on. |
 | same, rules (A)/(B)/(C) | `readOnlyVerdict` while `hooks.bashWriteGate` is on; the deny ends with `OPT_IN_NOTE`. |
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |

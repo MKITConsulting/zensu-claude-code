@@ -89,8 +89,6 @@ fi
 
 _zensu_status_root="$_zensu_pd"
 _zensu_status_key="$_zensu_sid"
-ZEN_STATE_DIR="$_zensu_pd/.zensu/state"
-ZEN_ZENSU_DIR="$_zensu_pd/.zensu"
 zen_marker_path "$_zensu_pd" "$_zensu_sid"
 ZEN_MARKER="$ZEN_MARKER_PATH"
 unset _zensu_pd _zensu_sid

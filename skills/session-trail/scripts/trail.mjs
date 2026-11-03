@@ -5749,14 +5749,16 @@ function cmdHandoff(opts) {
   // adopted the source worktree in place. No arm does, so the qualifier is now the
   // definite statement below — and the ROUTE matters as much as the path: a plain
   // `--resume` re-anchors nothing (FRESH_SESSION_SOURCES excludes it), so it keeps the
-  // original session's project root and the source-write gate refuses a commit in any
-  // worktree that root does not contain. A fork arrives as `fork`, which IS a fresh
+  // original session's project root: the reviewers stay confined to it and, while the
+  // opt-in source-write gate is on, a commit in any worktree that root does not contain
+  // is refused. A fork arrives as `fork`, which IS a fresh
   // source, so its anchor is the directory it starts in — the one route that lands both
   // the own-worktree rule and the write anchor on the same directory.
   L.push('The command below `cd`s into the directory this session RECORDED, which the rule above');
   L.push('never names as the place to continue. Replace that path with the worktree YOU created,');
   L.push('and append `--fork-session`: a plain `--resume` keeps the original session\'s project');
-  L.push('root, so a commit in a worktree that root does not contain is refused, while a fork');
+  L.push('root, so the Zensu reviewers read only inside it and, while the opt-in source-write gate');
+  L.push('is on, a commit in a worktree that root does not contain is refused, while a fork');
   // The consequence of leaving it as printed depends on whether that directory is
   // still there, and asserting the present-tense one unconditionally was false in the
   // brief that ALSO prints `**MISSING**` against the same path a few lines above.

@@ -169,17 +169,15 @@ the rules are recorded in English, the answer follows the user.
    irreversible action
    is never suppressed by the one-question cap and is never a "routine decision"
    to settle yourself. **Rule 1, rule 2, rule 6 and the Precedence section below
-   are never suspended** — a safety warning is the last place for fragments.
-   Brevity there is a safety failure, not a courtesy.
+   are never suspended.** Brevity in a warning is a safety failure, not a courtesy.
 
 ## Precedence
 
 zen-mode is advice that yields to the user. **The user's own instructions
 outrank this mode: their CLAUDE.md, their output style and a style mode or
 plugin they chose.** A compressed or telegraphic style the user turned on
-therefore wins over the full-sentence default below. That holds in a safety
-warning as well: rule 9 keeps the warning at its full length and detail, and the
-user's own style decides only its sentence form.
+therefore wins over the full-sentence default below. A style the user chose may
+set a safety warning's sentence form, never its length or detail.
 
 Without such an instruction, full, short sentences stay the default: no dropped
 articles, no sentence fragments, no telegram style. Fragmentary text shifts

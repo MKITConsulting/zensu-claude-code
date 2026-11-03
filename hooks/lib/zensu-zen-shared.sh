@@ -93,6 +93,8 @@ zen_path_untraversable() {
 
 zen_marker_path() {
   ZEN_MARKER_PATH="$1/.zensu/state/zen-mode-$2.json"
+  ZEN_STATE_DIR="${ZEN_MARKER_PATH%/*}"
+  ZEN_ZENSU_DIR="${ZEN_STATE_DIR%/*}"
 }
 
 zen_marker_inactive() {
@@ -119,7 +121,7 @@ zen_mode_resolve() {
   # The shape arm sits ABOVE the `[ -f ]` arm on purpose: `-f` follows a symlink, so
   # a link to a non-regular target would otherwise fall through to the configured
   # default and be reported `on`.
-  if ZEN_MODE_WHY="$(zen_marker_shape_fault "$1/.zensu" "$1/.zensu/state" "$ZEN_MARKER_PATH")"; then
+  if ZEN_MODE_WHY="$(zen_marker_shape_fault "$ZEN_ZENSU_DIR" "$ZEN_STATE_DIR" "$ZEN_MARKER_PATH")"; then
     ZEN_MODE_SOURCE=shape
     return 1
   fi

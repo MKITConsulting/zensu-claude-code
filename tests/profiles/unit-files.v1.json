@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/structure/ai-work-capture.test.js", "registered": 12,
+      "path": "tests/structure/ai-work-capture.test.js", "registered": 30,
       "runs": [{ "driver": "tests/structure/test-ai-work-capture.sh" }],
       "summary": "AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions."
     },
@@ -87,7 +87,7 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 17,
+      "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 19,
       "runs": [{ "driver": "tests/structure/test-hook-process-budget.sh" }],
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
@@ -237,6 +237,11 @@
       "path": "tests/structure/state-path-safety-v1.test.js", "registered": 13, "skips": {"root": 1, "win32": 2},
       "runs": [{ "driver": "tests/structure/test-tdd-state-path-safety.sh" }],
       "summary": "The state path walk the tdd-phase lease processes and _tdd_paths_safe share: link, kind and link-count refusals, unreadable components, trusted-root and fallback anchors, and malformed requests."
+    },
+    {
+      "path": "tests/structure/stop-background-wait-v1.test.js", "registered": 19,
+      "runs": [{ "driver": "tests/structure/test-stop-background-wait.sh" }],
+      "summary": "The Stop guard's background wait: the measured host vocabulary, the ZENSU-AWAIT line grammar, the wait, hint and nowait verdicts, the per-task release bound, the per-generation hint bound, the store and the CLI."
     },
     {
       "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 27, "skips": {"win32": 2},

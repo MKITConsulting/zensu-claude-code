@@ -36,8 +36,9 @@ CLI and a Zensu account ([which skills need what](#skills-31)).
 - **Findings you can trust.** Every finding is graded against the real source
   before anyone acts on it. What does not hold up is marked, not silently fixed.
 - **Guardrails around the agent.** Gates stop it from committing a secret or
-  mutating tracked product data outside a workflow, and an opt-in gate keeps it
-  from writing into a sibling checkout. Those gates have a documented escape
+  mutating tracked product data outside a workflow, and an opt-in gate refuses raw
+  Bash writes that clobber tracked source or put source files into a sibling
+  checkout, and git mutations aimed at one. Those gates have a documented escape
   hatch; the gates that protect Zensu's own state and the browser consent gate
   have none ([Configuration](#configuration)).
 - **Features, not commits.** Security profiles, user journeys, tiers, and
@@ -556,7 +557,21 @@ metrics; billing credits remain separately unfiltered. Update the backend and
 CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
 
+Blocked legacy capture receipts are preserved byte-for-byte in a private local
+archive before a new explicitly scoped goal replaces them. The CLI command
+`zensu ai-work recover --session <capture-key>` inspects that session's receipts;
+archival and restoration require an exact receipt digest and `--confirm`.
+Recovery is offline, preserves pending event IDs, and never submits or accepts work.
+
 ### Confirmed product scope for AI work
+
+Each captured objective also requires an explicitly selected `--feature <uuid>`.
+Optional `--feature-revision <uuid>` must belong to that feature. Product-wide
+maintenance uses an explicit `--maintenance-reason <reason>` instead. Missing or
+rejected goal scope pauses automatic capture, including the previous goal's Stop
+hook, while development continues. Resume with an explicit valid goal. Historical
+records keep their original attribution and decisions. See the capture protocol
+for the backend → CLI → plugin upgrade order and per-goal scope rules.
 
 Automatic AI-work capture now requires a product explicitly confirmed by the user
 via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
@@ -565,3 +580,5 @@ and a reason for each goal; it is never an automatic fallback. Existing unassign
 entries remain in the separate Unassigned view with their history and acceptance.
 Upgrade the product-scope backend and CLI before the plugin. See the shipped
 `docs/ai-work-capture.md` for identity checks and legacy receipt handling.
+
+CLI setup and troubleshooting: [Install or update the CLI, including `zensu update` and older-version recovery](docs/cli-install-update.md).

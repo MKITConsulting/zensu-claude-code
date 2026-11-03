@@ -688,7 +688,7 @@ function powershellVerdict(cmd, mode, child) {
   const verdict = powershell.readOnlyVerdict(cmd);
   if (verdict.readOnly) return "";
   if (mode === "targets") {
-    return "WRITE-TARGET (unevaluated: a PowerShell command this check cannot prove read-only, because " + verdict.reason + ")";
+    return "WRITE-TARGET (unevaluated: a PowerShell command this check cannot prove read-only, because " + verdict.reason + "; run a read-only command through the Bash tool)";
   }
   return "Blocked a PowerShell command that the source-write rules cannot judge, because " + verdict.reason + ". " +
     "Rules (A), (B) and (C) read Bash commands only, so a PowerShell command passes this gate only when it is " +
@@ -755,7 +755,7 @@ function main() {
   // caller has no project root, so fail-closed is the only safe direction.
   const targetsOnly = process.env.BSWG_MODE === "targets";
   const reanchorHint = process.env.BSWG_REANCHOR === "1"
-    ? " If this session now works in that worktree for good, /zensu:adopt-session --reanchor, run from inside it, " +
+    ? " If this session now works for good in the worktree this command targets, /zensu:adopt-session --reanchor, run from inside it, " +
       "reports whether this session's anchor can move there; it refuses a worktree in which it finds another live session."
     : "";
 
