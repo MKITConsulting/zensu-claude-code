@@ -4476,8 +4476,9 @@ fi
 # The tree and the two facts the row exists to correct.
 if printf '%s' "$AP_FOREIGN_OUT" | grep -qF '/w/held-tree' \
   && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'sha256 of the OWNING SESSION id' \
-  && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'containment in BOTH'; then
-  check "P1nd the row names the held tree, the owner-session hash and the containment rule" PASS
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'containment in BOTH' \
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'A folder outside every git work tree never holds a work tree and is never held by one.'; then
+  check "P1nd the row names the held tree, the owner-session hash, the containment rule and the folder rule" PASS
 else
   check "P1nd row content (got: $AP_FOREIGN_OUT)" FAIL
 fi

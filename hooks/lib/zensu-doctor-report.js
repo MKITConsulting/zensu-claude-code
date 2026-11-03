@@ -4302,8 +4302,9 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     // name.
     var occupancy = run.workspace !== null ? ' Occupancy is decided by path containment in BOTH'
       + ' directions, not by a shared git directory, so a containing or contained tree is'
-      + ' held too and only a sibling worktree is free.'
-      + (run.workspace === '' ? ' That rule applies to a tree this row cannot print,'
+      + ' held too and only a sibling worktree is free. A folder outside every git work tree'
+      + ' never holds a work tree and is never held by one.'
+      + (run.workspace === '' ? ' Both rules apply to a tree this row cannot print,'
         + ' so resolve it from the run document named below.' : '') : '';
     rows.push({
       glyph: glyph,
