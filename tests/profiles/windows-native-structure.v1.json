@@ -138,6 +138,10 @@
     {
       "path": "tests/structure/test-hook-process-budget.sh",
       "reason": "The only native-Windows marker is the platform guard that skips the suite on Git Bash: the process-start budgets are calibrated on POSIX hosts, and its counting shims, which wrap every PATH program by name, were never run against Windows executables. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it and passes through that skip."
+    },
+    {
+      "path": "tests/structure/test-code-roots.sh",
+      "reason": "The only native-Windows marker is the platform guard that skips the suite on Git Bash before it grades anything: its fixtures need POSIX symlinks, perl -pi on a plugin copy and a git owner other than the caller, so code roots stay unmeasured on native Windows. The suite is in ciStructureTests, so the weekly Windows Safety run still executes it and passes through that skip."
     }
   ]
 }

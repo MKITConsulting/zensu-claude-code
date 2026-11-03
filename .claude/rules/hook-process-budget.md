@@ -97,7 +97,9 @@ against Windows executables.
   strict chain, a bind failure, a missing or invalid document, a missing shell library,
   `ZENSU_TDD_GATE=off`, an unrenderable path and any exception run `hooks/checks/pre-edit-tdd-reminder.sh`,
   so every deny and the bypass ledger stay the body's. `hooks/lib/edit-path-class-v1.js` is the one path
-  classifier: the body runs it as a program and the dispatcher requires it. `D1` in the budget suite
+  classifier: the body runs it as a program and the dispatcher requires it. Both hand it the workflow
+  document, so a declared code root's `.zensu/state` classes as state on both paths
+  (`.claude/rules/multi-repo-code-roots.md`). `D1` in the budget suite
   compares the body and the check byte for byte over the states it drives.
 - **The data guard's caller directory.** A full dispatcher run anchors a relative target at
   its own working directory, and only an `--only` run reads `ZENSU_GUARD_CALLER_CWD`, which the wrapper

@@ -68,6 +68,7 @@ DIRTY_SEEN=0
 INVENTORY=0
 CHANGE_SET=0
 LOG_SEEN=0
+WORKFLOW_DOC=""
 INV_ROOTS=""
 WORK_TREE=""
 WORK_TREE_SEEN=0
@@ -132,6 +133,7 @@ while [ $# -gt 0 ]; do
     --receipt)       [ $# -ge 2 ] || die "--receipt requires a value"; RECEIPT_PATH="$2"; RECEIPT_EXPLICIT=1; shift 2 ;;
     --inventory)     INVENTORY=1; shift ;;
     --change-set)    CHANGE_SET=1; shift ;;
+    --workflow)      [ $# -ge 2 ] || die "--workflow requires a value"; WORKFLOW_DOC="$2"; [ -n "$2" ] || die "--workflow must not be empty"; shift 2 ;;
     --work-tree)     [ $# -ge 2 ] || die "--work-tree requires a value"; WORK_TREE="$2"; WORK_TREE_SEEN=1; shift 2 ;;
     --work-tree-check) [ $# -ge 2 ] || die "--work-tree-check requires a value"; WORK_TREE="$2"; WORK_TREE_CHECK=1; shift 2 ;;
     *) die "unknown argument '$1'" ;;
@@ -148,6 +150,7 @@ if [ "$WORK_TREE_CHECK" -eq 1 ]; then
   [ "$BASELINE_SEEN" -eq 0 ] || die "--work-tree-check grades nothing and does not accept --baseline"
   [ "$EPOCH_SEEN" -eq 0 ] || die "--work-tree-check grades nothing and does not accept --session-epoch"
   [ "$DIRTY_SEEN" -eq 0 ] || die "--work-tree-check grades nothing and does not accept --dirty-before"
+  [ -z "$WORKFLOW_DOC" ] || die "--work-tree-check reads no workflow document and does not accept --workflow"
 elif [ "$CHANGE_SET" -eq 1 ]; then
   [ "$INVENTORY" -eq 0 ] || die "--change-set and --inventory are separate modes"
   [ "$LOG_SEEN" -eq 0 ] || die "--change-set reads no run log and does not accept --log"
@@ -247,6 +250,11 @@ PROJECT_ABS="$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P)" || die "cannot resolve 
 # lists directly, so a one-sided addition fails loudly — but note what it CANNOT
 # see: two lists that agree and are both short. `X10`/`X17` and their controls
 # are what cover that, one behavioural probe per injection channel.
+_el_git_magic() (
+  unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+  _el_git "$@"
+)
+
 _el_git() (
   unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
         GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES \
@@ -347,6 +355,188 @@ if [ "$WORK_TREE_SEEN" -eq 1 ] || [ "$WORK_TREE_CHECK" -eq 1 ]; then
   fi
 fi
 
+code_root_field() {
+  local wanted="$1" field="$2" label root_path root_top
+  while IFS="$(printf '\t')" read -r label root_path root_top; do
+    [ "$label" = "$wanted" ] || continue
+    case "$field" in
+      (2) printf '%s' "$root_path" ;;
+      (3) printf '%s' "$root_top" ;;
+    esac
+    return 0
+  done <<ZENSU_EL_ROOT_FIELD
+$CR_ROOTS
+ZENSU_EL_ROOT_FIELD
+  return 1
+}
+
+declared_spelling() {
+  local label
+  case "$1" in
+    (@*/*) ;;
+    (*) return 1 ;;
+  esac
+  label="${1%%/*}"
+  label="${label#@}"
+  [ -n "$label" ] && code_root_field "$label" 3 >/dev/null
+}
+
+code_root_claim() {
+  local label rest
+  CODE_ROOT_CLAIM=""
+  label="${1%%/*}"
+  label="${label#@}"
+  rest="${1#*/}"
+  while :; do
+    case "$rest" in
+      (./*) rest="${rest#./}" ;;
+      (*) break ;;
+    esac
+  done
+  case "$rest" in
+    (''|/*|..|../*|*/../*|*/..|*\\*) return 1 ;;
+  esac
+  CODE_ROOT_CLAIM="@${label}/${rest}"
+}
+
+code_root_respelling() {
+  local candidate="$1" label root_path root_top
+  [ -n "$candidate" ] || return 1
+  while IFS="$(printf '\t')" read -r label root_path root_top; do
+    [ -n "$label" ] || continue
+    case "$candidate" in
+      ("$root_top"/*) printf '@%s/%s' "$label" "${candidate#"$root_top"/}"; return 0 ;;
+    esac
+  done <<ZENSU_EL_RESPELL
+$CR_ROOTS
+ZENSU_EL_RESPELL
+  return 1
+}
+
+code_root_home_respelling() {
+  local claim="$1" label root_path root_top tail
+  while IFS="$(printf '\t')" read -r label root_path root_top; do
+    [ -n "$label" ] || continue
+    case "$root_top" in
+      (/Users/*/*|/home/*/*) tail="${root_top#/*/*/}" ;;
+      (/root/*) tail="${root_top#/root/}" ;;
+      (*) continue ;;
+    esac
+    case "$claim" in
+      ("<home>/$tail"/*) printf '@%s/%s' "$label" "${claim#"<home>/$tail"/}"; return 0 ;;
+    esac
+  done <<ZENSU_EL_HOME_RESPELL
+$CR_ROOTS
+ZENSU_EL_HOME_RESPELL
+  return 1
+}
+
+is_declared_top() {
+  local wanted="$1" label root_path root_top
+  while IFS="$(printf '\t')" read -r label root_path root_top; do
+    [ -n "$label" ] || continue
+    [ "$root_top" = "$wanted" ] && return 0
+  done <<ZENSU_EL_DECLARED_TOP
+$CR_ROOTS
+ZENSU_EL_DECLARED_TOP
+  return 1
+}
+
+code_root_ignored() {
+  local label top
+  label="${1%%/*}"
+  label="${label#@}"
+  top="$(code_root_field "$label" 3)" || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  node "$CR_LIB" ignored --top "$top" --path "${1#*/}" >/dev/null 2>&1
+}
+
+code_roots_enabled() {
+  if [ -z "$CR_ENABLED" ]; then
+    CR_ENABLED=no
+    if [ -f "$CR_LIB" ] && command -v node >/dev/null 2>&1 && node "$CR_LIB" enabled >/dev/null 2>&1; then
+      CR_ENABLED=yes
+    fi
+  fi
+  [ "$CR_ENABLED" = yes ]
+}
+
+CR_LIB="$(dirname "$0")/code-roots-v1.js"
+CR_DOC="$WORKFLOW_DOC"
+CR_COUNT=0
+CR_ROOTS=""
+CR_FILES=""
+CR_EXCLUDES=()
+CR_EXCLUDE_COUNT=0
+CR_ENABLED=""
+CR_SESSION_KEY=""
+if [ -z "$CR_DOC" ] && [ "$SESSION_SEEN" -eq 1 ] && [ -n "$SESSION_ID" ] && command -v node >/dev/null 2>&1; then
+  _cr_key="$(node "$(dirname "$0")/session-control-core-v1.js" session-key "$SESSION_ID" 2>/dev/null)" || _cr_key=""
+  case "${#_cr_key}:${_cr_key%%_*}:${_cr_key#scv1_}" in
+    (69:scv1:*[!0123456789abcdef]*) ;;
+    (69:scv1:*) CR_SESSION_KEY="$_cr_key"; CR_DOC="$PROJECT_ABS/.zensu/state/tdd-phase-${_cr_key}.json" ;;
+  esac
+fi
+if [ -n "$CR_DOC" ] && [ -f "$CR_DOC" ] && [ ! -L "$CR_DOC" ] && grep -qF '"codeRoots"' "$CR_DOC" 2>/dev/null; then
+  if [ "$INVENTORY" -eq 1 ]; then _cr_verb=read; else _cr_verb=enumerate; fi
+  _cr_report=""
+  _cr_rc=2
+  if [ -f "$CR_LIB" ] && command -v node >/dev/null 2>&1; then
+    if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+      _cr_report="$(node "$CR_LIB" "$_cr_verb" --anchor "$PROJECT_ABS" --workflow "$CR_DOC" --plugin-data "$CLAUDE_PLUGIN_DATA" 2>/dev/null)"
+    else
+      _cr_report="$(node "$CR_LIB" "$_cr_verb" --anchor "$PROJECT_ABS" --workflow "$CR_DOC" 2>/dev/null)"
+    fi
+    _cr_rc=$?
+  fi
+  if [ "$_cr_rc" -ne 0 ]; then
+    [ -n "$GIT_FAULT" ] || {
+      GIT_FAULT_CMD="node code-roots-v1.js ${_cr_verb}"
+      GIT_FAULT_RC="$_cr_rc"
+      GIT_FAULT_ROOT="$PROJECT_ABS"
+      GIT_FAULT="the declared code roots of the workflow document could not be read"
+    }
+  else
+    while IFS="$(printf '\t')" read -r _cr_kind _cr_a _cr_b _cr_c _cr_d; do
+      case "$_cr_kind" in
+        (status)
+          case "$_cr_a" in
+            (ok|absent) ;;
+            (*) echo "zensu-edit-landing.sh: the declared code roots are ignored and the audit grades the anchor alone — ${_cr_b:-the code-root list is not usable}" >&2 ;;
+          esac
+          ;;
+        (root)
+          CR_ROOTS="${CR_ROOTS}${_cr_a}"$'\t'"${_cr_b}"$'\t'"${_cr_c}"$'\n'
+          CR_COUNT=$((CR_COUNT + 1))
+          ;;
+        (exclude)
+          CR_EXCLUDES+=(":(exclude,top,literal)${_cr_a}")
+          CR_EXCLUDE_COUNT=$((CR_EXCLUDE_COUNT + 1))
+          ;;
+        (anchor-fault)
+          [ -n "$GIT_FAULT" ] || {
+            GIT_FAULT_CMD="$_cr_a"; GIT_FAULT_RC="$_cr_b"; GIT_FAULT_ROOT="$REPO_ROOT"; GIT_FAULT="${_cr_c:-git printed no message}"
+          }
+          ;;
+        (file)
+          CR_FILES="${CR_FILES}@${_cr_a}/${_cr_b}"$'\n'
+          ;;
+        (fault)
+          [ -n "$GIT_FAULT" ] || {
+            GIT_FAULT_CMD="$_cr_b"; GIT_FAULT_RC="$_cr_c"; GIT_FAULT_ROOT="$(code_root_field "$_cr_a" 3)"; GIT_FAULT="${_cr_d:-git printed no message}"
+            [ -n "$GIT_FAULT_ROOT" ] || GIT_FAULT_ROOT="@${_cr_a}"
+          }
+          ;;
+        (unprintable)
+          echo "zensu-edit-landing.sh: code root ${_cr_a} holds ${_cr_b} changed paths whose names carry a control character; no claim can name them, so the audit leaves them out" >&2
+          ;;
+      esac
+    done <<ZENSU_EL_CODE_ROOTS
+$_cr_report
+ZENSU_EL_CODE_ROOTS
+  fi
+fi
+
 # ── The actual change set ────────────────────────────────────────────────────
 # Anchored with -C so the current working directory cannot narrow it: `ls-files`
 # is cwd-scoped and would silently drop everything outside a subdirectory.
@@ -365,7 +555,11 @@ trap 'cleanup; exit 143' TERM
 union_add() {
   local listing rc
   [ -z "$GIT_FAULT" ] || return 0
-  listing="$(_el_git -C "$REPO_ROOT" "$@" 2>/dev/null)"
+  if [ "$CR_EXCLUDE_COUNT" -eq 0 ]; then
+    listing="$(_el_git -C "$REPO_ROOT" "$@" 2>/dev/null)"
+  else
+    listing="$(_el_git_magic -C "$REPO_ROOT" "$@" "${CR_EXCLUDES[@]}" 2>/dev/null)"
+  fi
   rc=$?
   if [ "$rc" -ne 0 ]; then
     git_fault "$rc" "$REPO_ROOT" "$@"
@@ -403,6 +597,9 @@ if [ "$INVENTORY" -eq 0 ] && [ "$IN_GIT" -eq 1 ] && [ -z "$GIT_FAULT" ]; then
   esac
   union_add ls-files --others --exclude-standard --
 fi
+if [ "$INVENTORY" -eq 0 ] && [ -z "$GIT_FAULT" ] && [ -n "$CR_FILES" ]; then
+  printf '%s' "$CR_FILES" >> "$UNION_FILE" || die "the change union could not be written"
+fi
 sort -u -o "$UNION_FILE" "$UNION_FILE" 2>/dev/null \
   || die "the change union could not be sorted"
 [ -f "$UNION_FILE" ] || die "the change union file went missing while it was being built"
@@ -415,6 +612,10 @@ was_dirty_before() {
 }
 
 is_ignored() {
+  if declared_spelling "$1"; then
+    code_root_ignored "$1"
+    return $?
+  fi
   [ "$IN_GIT" -eq 1 ] || return 1
   _el_git -C "$REPO_ROOT" check-ignore -q -- "$1" 2>/dev/null
 }
@@ -431,7 +632,7 @@ if [ "$CHANGE_SET" -eq 1 ]; then
     echo "zensu-edit-landing.sh: $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT")" >&2
     exit 2
   fi
-  if [ "$IN_GIT" -ne 1 ]; then
+  if [ "$IN_GIT" -ne 1 ] && [ "$CR_COUNT" -eq 0 ]; then
     echo "zensu-edit-landing.sh: --change-set needs a git work tree, and $(render_claim_value "$PROJECT_ABS") is not inside one" >&2
     exit 3
   fi
@@ -709,12 +910,45 @@ place_relative_claim() {
 # Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
 # nothing when it cannot be resolved unambiguously.
 normalize_claim() {
-  local raw="$1" p verdict kind placed=0
+  local raw="$1" p verdict kind respelled placed=0
   p="$(trim_claim "$raw")"
   [ -n "$p" ] || return 1
+  if [ "$CR_COUNT" -gt 0 ]; then
+    case "$p" in
+      (@*/*)
+        if declared_spelling "$p"; then
+          code_root_claim "$p" || return 1
+          printf '%s' "$CODE_ROOT_CLAIM"
+          return 0
+        fi
+        ;;
+      ('~/'*)
+        if [ -n "${HOME:-}" ] && respelled="$(code_root_respelling "$(canon_claim "$HOME/${p#\~/}")")"; then
+          printf '%s' "$respelled"
+          return 6
+        fi
+        ;;
+      ('<home>/'*)
+        if respelled="$(code_root_home_respelling "$p")"; then
+          printf '%s' "$respelled"
+          return 6
+        fi
+        ;;
+    esac
+  fi
   unredact_claim "$p" || return 1
   place_relative_claim "$UNREDACTED_CLAIM"
   p="$PLACED_CLAIM"
+  if [ "$CR_COUNT" -gt 0 ]; then
+    case "$p" in
+      (/*) respelled="$(code_root_respelling "$(canon_claim "$p")")" ;;
+      (*) respelled="$(code_root_respelling "$(canon_claim "$REPO_CANON/${p#./}")")" ;;
+    esac
+    if [ -n "$respelled" ]; then
+      printf '%s' "$respelled"
+      return 6
+    fi
+  fi
   case "$p" in
     /*)
       verdict="${PLACED_VERDICT:-$(absolute_claim_verdict "$p")}"
@@ -760,7 +994,9 @@ normalize_claim() {
   matches="$(grep -E "(^|/)$(printf '%s' "$p" | sed 's/[][\.*^$+?(){}|/]/\\&/g')$" "$UNION_FILE" 2>/dev/null)"
   count="$(printf '%s' "$matches" | grep -c . 2>/dev/null || echo 0)"
   if [ "$count" = "1" ]; then
-    printf '%s' "$matches"; return 0
+    printf '%s' "$matches"
+    declared_spelling "$matches" && return 6
+    return 0
   fi
   return 1
 }
@@ -770,9 +1006,18 @@ grade_claim() {
   CLAIM_COUNT=$((CLAIM_COUNT + 1))
   resolved="$(normalize_claim "$raw")"
   rc=$?
+  if [ "$rc" -eq 6 ]; then
+    UNVERIFIED=$((UNVERIFIED + 1))
+    emit "UNVERIFIED (respell) — $(render_claim_value "${step}"): claimed \"$(render_claim_value "$(trim_claim "$raw")")\" resolves into a declared code root; spell it $(render_claim_value "$resolved") so the audit grades it against that root's change set."
+    return
+  fi
   if [ "$rc" -eq 3 ]; then
     UNVERIFIED=$((UNVERIFIED + 1))
-    emit "UNVERIFIED (foreign root) — $(render_claim_value "${step}"): claimed \"$(render_claim_value "$(trim_claim "$raw")")\" resolves outside the audited root $(render_claim_value "$REPO_ROOT") — it belongs to $(render_claim_value "$resolved"). One audit run grades ONE root: this run can neither see that repository's change set nor write a receipt for it, so the claim is reported rather than graded."
+    if code_roots_enabled; then
+      emit "UNVERIFIED (foreign root) — $(render_claim_value "${step}"): claimed \"$(render_claim_value "$(trim_claim "$raw")")\" resolves outside the audited root $(render_claim_value "$REPO_ROOT") — it belongs to $(render_claim_value "$resolved"). One audit run grades ONE root: this run can neither see that repository's change set nor write a receipt for it, so the claim is reported rather than graded. Declare that repository with --code-root <label>=<path> and re-arm the chain; for work already committed there, add --code-root-baseline <label>=<sha> naming the commit the work started from."
+    else
+      emit "UNVERIFIED (foreign root) — $(render_claim_value "${step}"): claimed \"$(render_claim_value "$(trim_claim "$raw")")\" resolves outside the audited root $(render_claim_value "$REPO_ROOT") — it belongs to $(render_claim_value "$resolved"). One audit run grades ONE root: this run can neither see that repository's change set nor write a receipt for it, so the claim is reported rather than graded."
+    fi
     return
   fi
   if [ "$rc" -eq 5 ]; then
@@ -809,7 +1054,7 @@ grade_claim() {
     emit "EDIT LANDED (untracked-by-design) — $(render_claim_value "${resolved}")"
     return
   fi
-  if [ "$IN_GIT" -eq 0 ]; then
+  if [ "$IN_GIT" -eq 0 ] && ! declared_spelling "$resolved"; then
     # No git to ask. An mtime after session start is corroboration, never proof,
     # so it stays PENDING rather than reading as landed.
     if [ -n "$SESSION_EPOCH" ] && [ -e "$REPO_ROOT/$resolved" ]; then
@@ -987,6 +1232,9 @@ if [ "$INVENTORY" -eq 1 ]; then
     INV_COUNT=$((INV_COUNT + 1))
   done < "$CLAIMS_FILE"
   printf 'claimed-files=%s\n' "$INV_COUNT"
+  if [ "$IN_GIT" -eq 0 ] && [ -z "$GIT_FAULT" ] && command -v git >/dev/null 2>&1; then
+    printf 'anchor\tfolder\n'
+  fi
   while IFS="$(printf '\t')" read -r kind _ step raw rest; do
     case "$kind:$raw" in
       G:*) ;;
@@ -1038,6 +1286,7 @@ if [ "$INVENTORY" -eq 1 ]; then
                 [ -n "$INV_FAULT" ] || INV_FAULT="a foreign root contains a newline and cannot be carried on this wire format"
                 ;;
               *)
+                is_declared_top "${INV_VERDICT#*$'\t'}" && continue
                 printf '%s\n' "${INV_VERDICT#*$'\t'}" >> "$INV_ROOTS" 2>/dev/null \
                   || { [ -n "$INV_FAULT" ] || INV_FAULT="a foreign root could not be recorded"; }
                 ;;
@@ -1137,8 +1386,8 @@ else
     # Canonicalize through the same helper the rest of the plugin uses, so the
     # receipt lands where `--tdd-complete` looks for it. A harness session id and
     # its on-disk state key are not the same string.
-    _key=""
-    if [ -f "$(dirname "$0")/session-control-core-v1.js" ] && command -v node >/dev/null 2>&1; then
+    _key="$CR_SESSION_KEY"
+    if [ -z "$_key" ] && [ -f "$(dirname "$0")/session-control-core-v1.js" ] && command -v node >/dev/null 2>&1; then
       _key="$(node "$(dirname "$0")/session-control-core-v1.js" session-key "$SESSION_ID" 2>/dev/null)"
     fi
     # The fallback is the RAW --session operand, and it lands in a filesystem path

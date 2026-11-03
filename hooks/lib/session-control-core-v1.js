@@ -5643,6 +5643,7 @@ function resetDeferredReviewState(state) {
   state.history = [];
   delete state.reviewRearm;
   delete state.implStopCount;
+  delete state.codeRoots;
   delete state.autopilotRunId;
   delete state.autopilotAttempt;
   delete state.autopilotReturnStage;

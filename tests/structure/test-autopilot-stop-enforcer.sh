@@ -2207,7 +2207,7 @@ else
 
   activate_session "$P17" s17_standalone || exit 1
   S17G_ERR="$TMP/s17-standalone.err"
-  ( cd "$P17" && autopilot_begin_standalone_tdd "$P17" "$ZENSU_SESSION_KEY" false ) >/dev/null 2>"$S17G_ERR"
+  ( cd "$P17" && autopilot_begin_standalone_tdd "$P17" "$ZENSU_SESSION_KEY" false "" ) >/dev/null 2>"$S17G_ERR"
   RC17G=$?
   TF17G="$(tdd_state_file "$ZENSU_SESSION_KEY")"
   if [ "$RC17G" -eq 0 ] && field_ok "$TF17G" 'j.active===true && j.chainDone===false && j.autopilotRunId===undefined' \
@@ -2227,7 +2227,7 @@ else
   field_ok "$RF17H" 'j.stage==="TDD_RUNNING" && j.tdd.chainId==="chain-s17-bound"' || S17H_PREMISE=0
   field_ok "$TF17H" 'j.autopilotRunId==="bound_run" && j.active===true && j.chainDone===false' || S17H_PREMISE=0
   S17H_ERR="$TMP/s17-bound-standalone.err"
-  ( cd "$P17" && autopilot_begin_standalone_tdd "$P17" "$ZENSU_SESSION_KEY" false ) >/dev/null 2>"$S17H_ERR"
+  ( cd "$P17" && autopilot_begin_standalone_tdd "$P17" "$ZENSU_SESSION_KEY" false "" ) >/dev/null 2>"$S17H_ERR"
   RC17H=$?
   if [ "$S17H_PREMISE" -eq 1 ] && [ "$RC17H" -eq 4 ] \
     && grep -qF -- 'own Autopilot run bound_run (stage TDD_RUNNING)' "$S17H_ERR" \

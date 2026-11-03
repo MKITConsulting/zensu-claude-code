@@ -118,7 +118,7 @@ LOG_LINES="$(grep -c . "$LOG" 2>/dev/null || true)"
   && [ "${TC_WIN_LINES:-0}" -lt "${LOG_LINES:-0}" ] \
   && ! TC_WIN | grep -qF 'refusing the unqualified standalone terminus'
 check "W0 the --tdd-complete awk window is non-empty and still bounded (end anchor matches)" "$(verdict $?)"
-TC_WIN | grep -qF '_zensu_unqualified_change_count "$_tc_root"' \
+TC_WIN | grep -qF '_zensu_union_change_count "$_tc_root" "$session_val"' \
   && awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG" | grep -qF 'ls-files --others --exclude-standard'
 check "W2 the gate scopes itself on the same change set the terminus uses" "$(verdict $?)"
 # W1 above replicates the predicate WITHOUT a fallback, so it cannot see the shape that

@@ -35,12 +35,12 @@ fi
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
-# FP and SD cross the classifier boundary only after explicit native-path
-# conversion. Exclude both from Git Bash's heuristic environment conversion so
+# FP, SD, WF and AN cross the classifier boundary only after explicit native-path
+# conversion. Exclude all four from Git Bash's heuristic environment conversion so
 # dot segments and drive spellings cannot be reinterpreted a second time. The
 # rendered log command is opaque data at the same native Node boundary.
 _ZENSU_MSYS2_ENV_CONV_EXCL="$(
-  zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD
+  zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD WF AN
 )" || {
   zensu_emit_hook_session_deny
   exit 0
@@ -136,11 +136,16 @@ case "$FILE_PATH" in
 esac
 NATIVE_FILE_PATH="$(_tdd_native_path "$FILE_PATH_SHELL")" || deny_invalid_state
 NATIVE_STATE_DIR="$(_tdd_native_project_path "$(dirname "$STATE_FILE")")" || deny_invalid_state
+NATIVE_STATE_FILE="$(_tdd_native_path "$STATE_FILE")" || deny_invalid_state
 if ! PATH_CLASS="$(cd -P -- "$CLAUDE_PLUGIN_ROOT/hooks/lib" \
   && MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
-  FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node ./edit-path-class-v1.js 2>/dev/null)"; then
+  FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" WF="$NATIVE_STATE_FILE" AN="${ZENSU_PROJECT_ROOT:-}" node ./edit-path-class-v1.js 2>/dev/null)"; then
   deny_invalid_state
 fi
+ROOT_RELATIVE=""
+case "$PATH_CLASS" in
+  (other$'\t'*) ROOT_RELATIVE="${PATH_CLASS#other$'\t'}"; PATH_CLASS=other ;;
+esac
 case "$PATH_CLASS" in
   state|zensu|other) ;;
   *) deny_invalid_state ;;
@@ -185,7 +190,7 @@ fi
 
 PHASE=$(tdd_phase "$STATE_FILE")
 STEP=$(tdd_step "$STATE_FILE")
-IS_TEST_PATH=$(tdd_is_test_path "$FILE_PATH")
+IS_TEST_PATH=$(tdd_is_test_path "$FILE_PATH" "$ROOT_RELATIVE")
 RED_FAIL_FOR_STEP=$(tdd_has_red_fail "$STATE_FILE" "$STEP")
 
 decide_allow() {

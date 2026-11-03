@@ -107,6 +107,13 @@ test('the edit path class names the state directory, any .zensu path and everyth
     assert.equal(editPathClass(path.join(root, '.zensu', 'plans', 'p.md'), state), 'zensu');
     assert.equal(editPathClass(path.join(root, '.zensu'), state), 'zensu');
     assert.equal(editPathClass(path.join(root, 'src', 'app.js'), state), 'other');
+    const codeRoot = path.join(root, 'sibling');
+    fs.mkdirSync(path.join(codeRoot, '.zensu', 'state'), { recursive: true });
+    const document = { codeRoots: [{ label: 'app', path: codeRoot, top: codeRoot }] };
+    assert.equal(editPathClass(path.join(codeRoot, '.zensu', 'state', 'x.json'), state), 'zensu');
+    assert.equal(editPathClass(path.join(codeRoot, '.zensu', 'state', 'x.json'), state, document), 'state');
+    assert.equal(editPathClass(path.join(codeRoot, 'src', 'app.js'), state, document), 'other');
+    assert.equal(editPathClass(path.join(codeRoot, '.zensu', 'state', 'x.json'), state, { codeRoots: 'broken' }), 'zensu');
     if (process.platform !== 'win32') {
       fs.symlinkSync(state, path.join(root, 'src', 'link'));
       assert.equal(editPathClass(path.join(root, 'src', 'link', 'tdd-phase-x.json'), state), 'state');
