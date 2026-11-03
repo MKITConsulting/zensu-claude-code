@@ -153,6 +153,10 @@ emit_autopilot_blocked() {
   '
 }
 
+plan_module_loadable() {
+  [ -n "$1" ] && [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ]
+}
+
 plan_payload_load() {
   # zensu-host-path.sh renders a DIRECTORY in the native spelling; the file
   # name is appended after conversion, the same shape zensu-tdd-phase.sh uses
@@ -162,10 +166,7 @@ plan_payload_load() {
   PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
     "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
   PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
-  if [ -z "$PLAN_PAYLOAD_LIB" ] \
-    || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
-    return 1
-  fi
+  plan_module_loadable "$PLAN_PAYLOAD_LIB" || return 1
   # zensu_msys_env_exclusions is the shipped single source for this list; it
   # appends the exact-name selector and preserves a dominant standalone '*'.
   # Resolve it into a variable first: a failing command substitution inside a
@@ -492,6 +493,7 @@ emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_CO
 foreign_executor_notice() {
   if [ "$ROUTE_FIELD" = ask ] && [ "$HUMAN_PRESENT" = yes ]; then
     plan_payload_load || return 0
+    plan_module_loadable "${PLAN_PAYLOAD_DIR}/foreign-executor-v1.js" || return 0
     printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
       PLAN_PAYLOAD_LIB="$PLAN_PAYLOAD_LIB" node -e '
       let reader,foreign;

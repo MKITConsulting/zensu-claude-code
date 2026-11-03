@@ -1236,8 +1236,8 @@ esac
 # `main` wording for every principal.
 
 # THE ZEN-MODE STATE PREDICATES MOVED OUT, to `hooks/lib/zensu-zen-shared.sh`.
-# `zen_marker_active`, `zen_marker_shape_fault` and `zen_path_untraversable` have
-# exactly two callers, both zen-mode, while THIS file is the Session Control
+# `zen_marker_active`, `zen_marker_shape_fault` and `zen_path_untraversable` serve
+# exactly three callers, all zen-mode readers, while THIS file is the Session Control
 # binding library that every stateful gate sources — so a syntax fault introduced
 # here while editing a presentation feature failed every PreToolUse Bash gate
 # CLOSED. Blast radius is the whole argument; the reasoning that used to sit here
