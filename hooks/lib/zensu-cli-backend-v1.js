@@ -65,20 +65,19 @@ function apiNames(text) {
   return (text.match(/--api-url/gi) || []).length;
 }
 
-function spelledNames(command) {
+function spellsVariable(command) {
   try {
-    return require('./powershell-command-v1.js').spellings(command);
+    return /ZENSU_API_URL/i.test(require('./powershell-command-v1.js').spellings(command));
   } catch (_error) {
-    return '';
+    return true;
   }
 }
 
 function backendReading({ command, plain, tool, invocations, apiUrl, modeled, zensuName, platform }) {
   const ps = tool === 'PowerShell';
   const psHidden = ps && (/(?:^|\s)--%(?!\S)/.test(command)
-    || apiNames(command.replace(/`/g, '')) > invocations.reduce((n, c) => n + apiNames(c.rest.join(' ')), 0));
-  const named = ps ? `${plain.replace(/`/g, '')}\n${spelledNames(command)}` : plain.replace(/`/g, '');
-  const envNamed = /ZENSU_API_URL/i.test(named);
+    || apiNames(command.replace(/`/g, '')) > invocations.filter((c) => !c.derived).reduce((n, c) => n + apiNames(c.rest.join(' ')), 0));
+  const envNamed = /ZENSU_API_URL/i.test(plain.replace(/`/g, '')) || (ps && spellsVariable(command));
   const envAppended = /(?:^|[^A-Za-z0-9_])ZENSU_API_URL\+=/.test(command);
   const oneWordTrusted = !/[$`{*?[\r]/.test(command)
     && !/(?:^|[^A-Za-z0-9_.-])(?:xargs|watch)(?![A-Za-z0-9_-])/iu.test(plain)

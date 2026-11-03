@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -89,6 +91,9 @@ test('isLocalUrl reads a value as local only when it spells a loopback host the 
 
 test('isLocalUrl keeps a run-time part only after the literal text already ended the host', () => {
   assert.equal(backend.isLocalUrl('http://localhost:8090/$PREFIX'), true);
+  assert.equal(backend.isLocalUrl('http://localhost:8090/$P/é'), true);
+  assert.equal(backend.isLocalUrl('http://localhost:8090/$P\\x'), true);
+  assert.equal(backend.isLocalUrl('http://localhost:8090/$P x'), true);
   assert.equal(backend.isLocalUrl(`http://localhost:8090/x${OPAQUE}`), true);
   assert.equal(backend.isLocalUrl(`${LOCAL}?q=${DYNAMIC}`), true);
   assert.equal(backend.isLocalUrl(`${LOCAL}#${DYNAMIC}`), true);
@@ -192,6 +197,8 @@ test('ZENSU_API_URL decides when no occurrence is certain: its inline value, els
   assert.equal(local(`export ZENSU_API""_URL=${REMOTE}; ${command}`, call({}), { apiUrl: LOCAL }), false);
   assert.equal(local(`echo ZENSU_API\`\`_URL; ${command}`, call({}), { apiUrl: LOCAL }), false);
   assert.equal(local(`${command} --title 'set zensu_api_url'`, call({}), { apiUrl: LOCAL }), false);
+  assert.equal(powershellVerdict(`Set-Item -Path ('env:zensu_api' + '_url') -Value ${REMOTE}; ${command}`, LOCAL), 'DENY');
+  assert.equal(powershellVerdict(`Set-Item -Path ('env:zensu_web' + '_url') -Value ${REMOTE}; ${command}`, LOCAL), 'ALLOW');
 });
 
 test('a PowerShell call is read as the analyzer spells it, in lowercase, and loses a flag the analyzer cannot read', () => {
@@ -207,6 +214,31 @@ test('a PowerShell call is read as the analyzer spells it, in lowercase, and los
   assert.equal(local(quoted, token(['security', 'classify', 'f1', '--title', "it's", '--api-url', REMOTE]), { tool: 'PowerShell', modeled: -1, apiUrl: LOCAL }), false);
   const bash = 'zensu --api-url http://localhost:8090 features create --product p1 --title "$T" # --%';
   assert.equal(local(bash, exact(['--api-url', LOCAL, 'features', 'create', '--product', 'p1', '--title', DYNAMIC])), true);
+});
+
+test('a hidden PowerShell flag is counted against the calls the analyzer read, never against the readings derived from them', () => {
+  const command = "zensu --api-url http://localhost:8090 --api-url=$u features create --title '$5'";
+  const base = ps.zensuInvocations(command).invocations;
+  assert.equal(base.length, 1);
+  const copies = base.flatMap((call) => [1, 2].map(() => derived(call.rest.filter((w) => w.indexOf('$') === -1), call.envp)));
+  assert.equal(local(command, base[0], { tool: 'PowerShell', modeled: -1, invocations: base }), false);
+  assert.equal(local(command, base[0], { tool: 'PowerShell', modeled: -1, invocations: base.concat(copies) }), false);
+});
+
+test('a module that cannot load its sibling analyzer reads a PowerShell command as naming ZENSU_API_URL', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-cli-backend-'));
+  try {
+    fs.copyFileSync(path.join(LIB, 'zensu-cli-backend-v1.js'), path.join(dir, 'zensu-cli-backend-v1.js'));
+    const alone = require(path.join(dir, 'zensu-cli-backend-v1.js'));
+    const command = 'zensu security classify f1';
+    const call = exact(['security', 'classify', 'f1']);
+    const options = { command, plain: command, tool: 'PowerShell', invocations: [call], apiUrl: LOCAL, modeled: -1, zensuName: NAMED, platform: 'linux' };
+    assert.equal(backend.backendReading(options)(call), true);
+    assert.equal(alone.backendReading(options)(call), false);
+    assert.equal(alone.backendReading({ ...options, tool: 'Bash', modeled: 1 })(call), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the shell-model reading is judged on its exact words and the token-scan reading after quote removal', () => {

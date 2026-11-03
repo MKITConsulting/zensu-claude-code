@@ -61,6 +61,16 @@ grep -qF 'zensu-mcp-tools.sh' "$HOOK_BODY" && grep -qF 'zensu-cli-map.sh' "$HOOK
   && check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" PASS \
   || check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" FAIL
 
+if grep -qF 'then ZPS=./powershell-command-v1.js; ZBACKEND=./zensu-cli-backend-v1.js; else ZPS=; ZBACKEND=; fi;' "$HOOK_BODY" \
+   && [ "$(grep -o 'ZBACKEND=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
+   && [ "$(grep -o 'ZPS=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
+   && grep -qF 'require(process.env.ZBACKEND || "")' "$HOOK_BODY" \
+   && grep -qF 'require(process.env.ZPS || "")' "$HOOK_BODY"; then
+  check "B4c the body names its sibling modules relative to its own hooks/lib, set only after cd -P succeeds" PASS
+else
+  check "B4c the body names its sibling modules relative to its own hooks/lib, set only after cd -P succeeds" FAIL
+fi
+
 . "$(dirname "$0")/lib-unit-registry.sh"
 unit_check "B58 the backend reading unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-backend-v1.test.js"
 
@@ -587,6 +597,8 @@ run "B53e two local two-word values -> ALLOW" "zensu --api-url http://localhost:
 run "B54a --api-url localhost beside a quoted title naming --api-url -> ALLOW" 'zensu --api-url http://localhost:8090 features create --product p1 --title "Fix --api-url parsing"' '' ALLOW
 run "B54i --api-url localhost with a run-time path part -> ALLOW" 'zensu --api-url "http://localhost:8090/$PREFIX" features create --product p1 --title t' '' ALLOW
 envrun "B54k a remote ZENSU_API_URL assigned in an earlier command over the hook's localhost one" "ZENSU_API_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
+envrun "B54k2 a remote ZENSU_API_URL assigned across a line continuation over the hook's localhost one" "ZENSU_API\\
+_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
 envrun "B54p the hook's localhost ZENSU_API_URL in a command that never names it" "zensu features create --product p1 --title t" http://localhost:8090 ALLOW
 run "B55a uppercase CLI name" "ZENSU security classify f1" '' DENY
 run "B55b capitalized CLI name" "Zensu features create --product p1 --title t" '' DENY
@@ -1117,26 +1129,44 @@ BE_OUT="$(
   export CLAUDE_PROJECT_DIR="$PS_BASE/project"
   ZENSU_TEST_PLUGIN_DATA="$PS_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" backend-missing-gate "$PS_ROOT" || exit 1
   printf 'BOUND\n'
-  for spec in 'Bash|zensu features get f1' 'Bash|git status --short' 'PowerShell|Get-ChildItem -Recurse' 'PowerShell|zensu features get f1'; do
+  for spec in 'Bash|zensu features get f1' 'Bash|git status --short' 'PowerShell|Get-ChildItem -Recurse' 'PowerShell|zensu features get f1' 'Bash|grep -n zensu README.md' 'Bash|DATA=x bash ~/.claude/plugins/cache/zensu/zensu/0.33.2/hooks/lib/zensu-log.sh --project-root' 'PowerShell|Write-Output zensu'; do
     payload "${spec#*|}" '' backend-missing-gate "${spec%%|*}" | env CLAUDE_PLUGIN_ROOT="$PS_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$PS_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
     printf '\n<<%s>>\n' "$spec"
   done
+  payload 'zensu features get f1' general-purpose backend-missing-gate Bash | env CLAUDE_PLUGIN_ROOT="$PS_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$PS_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
+  printf '\n<<subagent>>\n'
 )"
 BE_BOUND="$(printf '%s\n' "$BE_OUT" | sed -n '1p')"
 BE_BASH_READ="$(printf '%s\n' "$BE_OUT" | sed -n '2p')"
 BE_BASH_PLAIN="$(printf '%s\n' "$BE_OUT" | sed -n '4p')"
 BE_PS_PLAIN="$(printf '%s\n' "$BE_OUT" | sed -n '6p')"
 BE_PS_READ="$(printf '%s\n' "$BE_OUT" | sed -n '8p')"
+BE_GREP="$(printf '%s\n' "$BE_OUT" | sed -n '10p')"
+BE_HELPER="$(printf '%s\n' "$BE_OUT" | sed -n '12p')"
+BE_PS_TEXT="$(printf '%s\n' "$BE_OUT" | sed -n '14p')"
+BE_CHILD="$(printf '%s\n' "$BE_OUT" | sed -n '16p')"
 if [ "$BE_BOUND" = "BOUND" ] && [ ! -e "$PS_ROOT/hooks/lib/zensu-cli-backend-v1.js" ] \
-   && printf '%s' "$BE_BASH_READ" | grep -qF 'could not read it' \
-   && printf '%s' "$BE_PS_READ" | grep -qF 'could not read it'; then
-  check "B59a without the backend module a Bash and a PowerShell command naming zensu deny as unreadable" PASS
+   && printf '%s' "$BE_BASH_READ" | grep -qF 'could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded' \
+   && printf '%s' "$BE_PS_READ" | grep -qF 'could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded' \
+   && printf '%s' "$BE_BASH_READ" | grep -qF 'Reinstall the plugin' \
+   && ! printf '%s' "$BE_BASH_READ" | grep -qF 'Reads and --help pass'; then
+  check "B59a without the backend module a Bash and a PowerShell zensu call deny as unreadable and name the module" PASS
 else
-  check "B59a backend-less zensu commands (bound='$BE_BOUND' bash='$BE_BASH_READ' ps='$BE_PS_READ')" FAIL
+  check "B59a backend-less zensu calls (bound='$BE_BOUND' bash='$BE_BASH_READ' ps='$BE_PS_READ')" FAIL
 fi
 [ "$BE_BOUND" = "BOUND" ] && [ -z "$BE_BASH_PLAIN" ] && [ -z "$BE_PS_PLAIN" ] \
   && check "B59b without the backend module a Bash and a PowerShell command without zensu pass" PASS \
   || check "B59b backend-less plain commands (bound='$BE_BOUND' bash='$BE_BASH_PLAIN' ps='$BE_PS_PLAIN')" FAIL
+[ "$BE_BOUND" = "BOUND" ] && [ -z "$BE_GREP" ] && [ -z "$BE_HELPER" ] && [ -z "$BE_PS_TEXT" ] \
+  && check "B59c without the backend module a command that names zensu without a zensu call passes, a plugin helper included" PASS \
+  || check "B59c backend-less commands naming zensu without a call (bound='$BE_BOUND' grep='$BE_GREP' helper='$BE_HELPER' ps='$BE_PS_TEXT')" FAIL
+if [ "$BE_BOUND" = "BOUND" ] && printf '%s' "$BE_CHILD" | grep -qF 'hooks/lib/zensu-cli-backend-v1.js could not be loaded' \
+   && printf '%s' "$BE_CHILD" | grep -qF 'Report the damaged installation to the main thread' \
+   && ! printf '%s' "$BE_CHILD" | grep -qF 'Reinstall the plugin'; then
+  check "B59d without the backend module a subagent zensu call denies and reports to the main thread" PASS
+else
+  check "B59d backend-less subagent zensu call (bound='$BE_BOUND' got '$(printf '%s' "$BE_CHILD" | cut -c1-160)')" FAIL
+fi
 rm -rf "$PS_BASE"
 psrun "B41d PowerShell group subcommand built at run time"   "zensu work policy \$sub"                                     '' DENY
 psrun "B41e PowerShell read whose argument is built at run time" "zensu features get \$id"                                    '' ALLOW

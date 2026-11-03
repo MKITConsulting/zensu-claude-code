@@ -335,9 +335,9 @@
       "summary": "The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain."
     },
     {
-      "path": "tests/structure/zensu-cli-backend-v1.test.js", "registered": 13,
+      "path": "tests/structure/zensu-cli-backend-v1.test.js", "registered": 15,
       "runs": [{ "driver": "tests/structure/test-bash-zensu-gate.sh" }],
-      "summary": "The CLI write-gate's backend reading: the local URL test, the shell words of the token scan, the run-time word tests, the --api-url occurrence rules, the one-word trust, the ZENSU_API_URL fallback and the PowerShell flag rules, with the gate suite's B53, B54 and B40o11 to B40o15 cases."
+      "summary": "The CLI write-gate's backend reading: the local URL test, the shell words of the token scan, the run-time word tests, the --api-url occurrence rules, the one-word trust, the ZENSU_API_URL fallback, the PowerShell flag rules and the module's fail-closed analyzer load, with the gate suite's B53, B54 and B40o11 to B40o15 cases."
     },
     {
       "path": "tests/structure/zensu-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 8},

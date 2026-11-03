@@ -81,14 +81,21 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   const out = new Set();
   const OPQ = String.fromCharCode(0);
   const UNJ = "__unjudged__\t";
+  let backend = null;
+  function lib() {
+    if (backend === null) {
+      try { backend = require(process.env.ZBACKEND || ""); } catch (_) { process.stdout.write("__nobackend__"); process.exit(3); }
+    }
+    return backend;
+  }
   function takesNextWord(t) {
     return t.indexOf("=") === -1 && (t.length === 2 || t.charAt(1) === "-");
   }
   function dynamicReadings(c) {
-    if (!c.rest.some(backend.isDynamic)) return [];
-    const skipped = c.rest.filter((t) => !backend.isDynamic(t)), consumed = [];
+    if (!c.rest.some(lib().isDynamic)) return [];
+    const skipped = c.rest.filter((t) => !lib().isDynamic(t)), consumed = [];
     for (let i = 0; i < c.rest.length; i++) {
-      if (backend.isDynamic(c.rest[i])) { i++; continue; }
+      if (lib().isDynamic(c.rest[i])) { i++; continue; }
       consumed.push(c.rest[i]);
     }
     return [{ envp: c.envp, rest: skipped, derived: true }, { envp: c.envp, rest: consumed, derived: true }];
@@ -103,7 +110,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       for (;;) {
         while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {       // capture env prefixes (VAR=val)
           const a = toks[i], eq = a.indexOf("=");
-          envp[a.slice(0, eq)] = backend.unquoted(a.slice(eq + 1));
+          envp[a.slice(0, eq)] = a.slice(eq + 1);
           i++;
         }
         if (i >= toks.length) break;
@@ -112,6 +119,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
         base = t.split("/").pop().replace(/\.exe(?![\s\S])/, ""); break;          // resolved command basename
       }
       if (base !== "zensu") continue;                                              // command basename must be zensu
+      for (const k of Object.keys(envp)) envp[k] = lib().unquoted(envp[k]);
       found.push({ envp, rest: toks.slice(i + 1) });
     }
     return found;
@@ -123,13 +131,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     if (found.unjudged) out.add(UNJ + String(found.unjudged).split(/[\t\r\n]/)[0]);
     return found.invocations;
   }
-  let invocations = ps ? psInvocations() : [];
-  if (ps && invocations.length === 0) {
-    process.stdout.write([...out].join("\n"));
-    process.exit(0);
-  }
-  const backend = require(process.env.ZBACKEND || "");
-  if (!ps) invocations = tokenInvocations();
+  let invocations = ps ? psInvocations() : tokenInvocations();
   let modeled = -1;
   if (!ps) try {
     const guard = require(process.env.ZGUARD);
@@ -140,7 +142,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     modeled = walked.length;
     invocations = walked.concat(posix, invocations);
   } catch (_) {}
-  const backendLocal = backend.backendReading({ command: cmd, plain, tool: ps ? "PowerShell" : "Bash", invocations, apiUrl: process.env.ZAPI, modeled, zensuName: NAMED, platform: process.platform });
+  const backendLocal = invocations.length === 0 ? null : lib().backendReading({ command: cmd, plain, tool: ps ? "PowerShell" : "Bash", invocations, apiUrl: process.env.ZAPI, modeled, zensuName: NAMED, platform: process.platform });
   invocations = invocations.concat(invocations.flatMap(dynamicReadings));
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
@@ -328,7 +330,11 @@ EOF
 
 [ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
-if [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
+if [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the plugin installation is damaged. Do not retry this command. Report the damaged installation to the main thread."
+elif [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the plugin installation is damaged. Until it loads, every command with a zensu call is denied, reads and --help included. Reinstall the plugin."
+elif [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ "$PARSE_STATUS" -ne 0 ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
