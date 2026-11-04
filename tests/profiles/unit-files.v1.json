@@ -82,9 +82,9 @@
       "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict."
     },
     {
-      "path": "tests/structure/git-repo-escape.test.js", "registered": 45,
+      "path": "tests/structure/git-repo-escape.test.js", "registered": 63,
       "runs": [{ "driver": "tests/structure/test-bash-source-write-gate.sh" }],
-      "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
+      "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice, plus the shell word and command reader, the program-name reading of the wrappers and its comparison with the other gates, the Session Control check and the write channels, the comparison of the shell readers with the subagent shell guard, and targets mode under a directory named at run time."
     },
     {
       "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 19,

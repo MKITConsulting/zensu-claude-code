@@ -291,6 +291,128 @@ the deny texts no longer name that prefix — they name `hooks.bashWriteGate` an
 command to the user, because the host's auto-mode classifier refuses a command that carries it.
 `tests/structure/test-bash-source-write-gate.sh` pins the behavior.
 
+**A program name counts the way a case-insensitive file system resolves it.** macOS and Windows
+resolve a program name in any letter case by default, Windows also with `.exe`, so the gate reads
+`GIT`, `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE`, `DD of=` and a wrapper such as `ENV` or `Sudo`
+like their lowercase spelling, on every platform, and on Windows also behind a path written with
+backslashes. A path to `tee` in command position counts like `tee`, while elsewhere in a command
+only the word `tee` itself does, so `grep -n TEE src/app.rs` stays a read; BSD sed's `-I`,
+`--in-place` and an option cluster that holds `i`, such as `-ni` or `-Ei`, count as in place like
+`-i`. Shell builtins keep their case: the shell runs any other spelling of `cd`,
+`export`, `unset`, `read` or `printf` as an external program, which cannot change the shell's
+directory or variables. For the same reason the gate moves its tracked directory only for a `cd`
+the shell itself runs: the bare word, alone, behind `command` or `builtin`, or behind the `time`
+keyword at the start of the command. `env cd`, `ENV cd`, `sudo cd`, `/usr/bin/cd` and a quoted
+`\time cd` run a separate program and leave the directory where it was.
+The Session Control check reads wrappers and the `tee`, `sed -i` and `dd of=` channels the same
+way, also right after a quote, `(` or a backtick, so `ENV CLAUDE_CODE_SESSION_ID=…`,
+`TEE "$CLAUDE_ENV_FILE"` or `(tee "$CLAUDE_ENV_FILE")` is refused whatever `hooks.bashWriteGate`
+says, and the secret scan reads a Bash command spelled that way as a write.
+
+**Words are read after the shell's quote removal, and each wrapper with its own options.** Before
+a word is matched, the gate removes quotes the way bash does: a backslash and single or double
+quotes anywhere inside the word, `$'…'` with bash's escapes decoded, and `$"…"` as double quotes.
+So `\git`, `g'i't`, `\env`, `e'n'v`, `$'\x65nv'`, `\export`, `\unset`, `t'e'e` and `s\ed -i` count
+like their plain spelling, and `\cd ../sibling` moves the tracked directory. A backslash-newline
+continues the line and a newline inside quotes stays in the word, except after a `#` that starts a
+comment outside quotes. A heredoc is found on the joined line with its whole quote-removed
+delimiter word, outside quotes, comments and arithmetic, several per line, and its body ends on
+the exact delimiter line (tabs stripped for `<<-`), so `echo '<<X'`, `$((1<<2))` or `cat <<EOF-1`
+no longer hide the lines after them. A redirection splits off the word it is glued to, as in
+`printf x>src/app.rs` or `unset X&>/dev/null`; `>|` and `>&file` write their file after any quoted
+word, zsh's `>>|`, `>>&`, `&>|`, `&>>|`, `>&|` and `>!` write theirs, and so does `n<>file` on a
+descriptor other than 0, while an escaped `\<` or `\>` stays part of its word. `$'…'` ends where
+bash ends it, `\c` included, a `${…}` expansion ends at its matching brace even when it holds quotes
+or a nested `${…}`, and `$$` is one unit, also inside a string within `${…}`, so a quote inside one
+of them does not shift the words after it. bash reads a single quote inside a double-quoted `${…}`
+as quoting and zsh as a character, so each command is judged under both readings. Each wrapper's
+own options are read the way that
+wrapper reads them (`env -i`, `-u`, `-C`, `-S` and `--`, `sudo -u` and `-D`, `nice -n`, `time -p`,
+`command -p`, `exec -c` and `-a`), so they no longer end the scan: `env -i CLAUDE_CODE_SESSION_ID=… …`
+is a rebind, `env -u ZENSU_SESSION_KEY …` is refused as removal like `unset`, and `env -C <dir> git …`
+runs git in that directory; a relative operand under an `env -C` directory named at run time is
+reported as a write target where the session has no project root. `env -S` strings are split as
+env splits them (`\_` separates, `\c` stops, `#` starts a comment), and more than eight nested
+`-S` strings are refused. A quoted assignment after `env` or `sudo`, as in
+`env "GIT_WORK_TREE=…" git add -A`, is read as one, while a quoted leading assignment stays a
+command word, as it is to bash. The assignment forms `NAME+=…` and `NAME[i]=…`, `printf -vNAME`,
+`export -n`, `declare +x`, `declare -a`, a `for`, `select` or `foreach` loop name, a `{NAME}`
+redirection and a subscript such as `unset 'NAME[0]'` count too, and neither the reserved words
+`!`, `{`, `}`, `if`, `then`,
+`else`, `elif`, `fi`, `do`, `done`, `while` and `until` nor a redirection before the command word
+hide it any more. `env -i` on its own is not refused: it names no protected input, and the
+model-side binder (`model-bind` in `hooks/lib/claude-hook-session-v1.js`) refuses a missing
+`CLAUDE_CODE_SESSION_ID`. A literal path to `CLAUDE_ENV_FILE` is
+compared with letter case and Unicode normalization folded on every platform, as macOS and Windows
+resolve it by default. The Session Control check also reads every command a second time the way it
+did before this reader, split on whitespace with the quotes stripped, and refuses when either
+reading finds a rebind or a removal, so a spelling the word reader gets wrong is still refused
+wherever the earlier reading refused it. `tests/structure/test-bash-source-write-gate.sh` pins each
+spelling (W265, W74 and W267 to W381).
+
+**Assignments by other means.** A third reading walks each command the way the shell reads it: it
+keeps quotes, `$'…'` and `$"…"` whole, starts a comment only where a word starts, also inside
+`[[ … ]]` and an array literal, follows heredocs, `case` patterns, `[[ … ]]` with its regex and
+extended-pattern operands, and `(( … ))`, also when a reserved word such as `if`, `while` or `in` is
+written directly before the parenthesis, and enters every command substitution, also one inside
+double quotes, in the body of a heredoc whose delimiter is unquoted or in bash 5.3's `${ …; }`. It
+takes a reserved word only where the shell does: `time` with one `-p` and one `--` only at the
+start of a pipeline, a compound command after `coproc NAME`, `then`, `do` or `}` right after
+`[[ … ]]`, neither `[[` nor `case` inside a `case` pattern, and `[[`, `case` and `{` after a
+leading redirection both as bash reads them there, as plain words, and as zsh reads them, as
+reserved words. It
+reads the command a second time with its line continuations joined, the way the shell's input
+reader joins them before it reads a word or a heredoc delimiter: outside single quotes and comments,
+not in a quoted-delimiter heredoc body, and in an unquoted body before it compares a line with the
+delimiter. It judges each command it
+finds there and refuses a protected input that a builtin, an arithmetic context or an expansion
+assigns: the name operand of `getopts`, `mapfile`/`readarray`, `wait -p`, `coproc NAME`, `printf -v`
+and zsh's `print -v` in any option cluster, a name attached to its option as in `wait -pNAME`,
+`read -raNAME` or zsh's `set -ANAME`, zsh's `set -A`/`set +A`, `integer`, `float`, `vared`, `getln`
+and `read 'NAME?prompt'`, zsh's `typeset -T` tie, a `typeset -i`, `-E`, `-F` or case and width
+option that converts a protected value, an assignment word or wrapper in the simple command after
+`coproc`, bash 5.3's `compgen -V` and zsh's `unset -m` pattern that matches a protected input; an
+arithmetic assignment (`=`, a compound `op=`, `++`, `--`) in `let`, `(( … ))`, `for (( … ))`,
+`$(( … ))`, `$[ … ]`, any operand of `-eq` and its siblings in `[[ … ]]`, also after `&&` or `||`
+and inside a group, zsh's `repeat`, `shift`, `return`, `break` and `continue` operands, and a
+subscript, nested or holding blanks, of an assignment word, a declaration operand, an array-literal
+element such as `a=([i]=v)`, a name operand, the `-v` operand of `[[`, `[` and `test`, zsh's
+brace-less `$NAME[…]` or a `${…}` expansion; the offset of a `${…}`
+expansion, `$0` and `$@` included; and the expansions `${NAME=…}`, `${NAME:=…}` and zsh's
+`${NAME::=…}`, also behind zsh's flags and its `=`, `~`, `^` and `+` modifiers. Every nameref
+(`declare -n`, `typeset -n`, `local -n`) is refused, because the check cannot follow it to the
+variable it names, and so is a name built at run time where that spelling has no common use: an
+`env -S` string whose `${VAR}` reaches `env` (single-quoted or escaped) in an option, assignment
+or command position, an arithmetic lvalue such as `$N = 1`, zsh's `${(P)…}` assignment, an option
+the shell builds at run time in front of a protected name (`declare $o r=NAME`) and an `unset -m`
+pattern this check cannot translate. A heredoc body is read as the shell expands
+it, with its line continuations removed, and a `$((` that does not close with `))` is read as the
+command substitution the shell makes of it. Text inside single quotes, a comment or a
+quoted-delimiter heredoc stays unread, and these refusals apply only to commands this reading
+finds, so quoted text that merely names `declare -n` or `mapfile`, a commit message for example,
+stays allowed; the word reader and the whitespace reading above keep only the refusals they had
+before. A `<<` inside `${…}` or `$[…]` no longer starts a heredoc and a `$"…"` delimiter ends where
+the shell ends it, so no reading drops the lines after them. A command nested more than 64 levels
+deep, or one whose reading would exceed a work bound proportional to its length, is refused with
+its own reason. W382 to W554 pin each spelling and the commands that stay allowed.
+
+**What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
+differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and
+`-`; where the Bash tool runs zsh, the gate still reads those spellings the bash way, so they pass.
+A variable name the shell builds at run time in a builtin or wrapper operand (`export "$N=…"`,
+`export $(cat .env | xargs)`, `unset "$v"`) stays allowed, because loading an environment file that
+way is common and `source` reaches the same assignments. A program word the shell builds at run
+time (`$GIT`, `$(…)`), an alias or a function, code the shell builds or stores to run later
+(`eval`, `trap`, `bash -c`, `source`, a script file, a `mapfile -C` callback), arithmetic that
+reaches a name through another variable's value (`x='NAME=1'; (( x ))`) or an integer attribute
+(`declare -i`), zsh's numeric `printf` arguments and module builtins (`zparseopts`, `strftime -s`,
+`zstat -A`) and a wrapper outside the list (`timeout`, `xargs`, `stdbuf`) are not followed either.
+The third reading is a hand-written approximation of the shell grammar, and a construct it misreads
+can hide the commands after it, so a spelling outside the pinned rows may still pass. The word
+reader and the whitespace reading still split
+a command at a `;`, `&` or `|` inside quotes, so quoted text that spells a protected assignment can
+be refused there.
+
 **While the gate is enabled, the expected *legitimate* hit of rule (C) is a cross-worktree takeover.**
 At its default (off) nothing on this page refuses the commit or a `git worktree move` out of a
 session that was handed over; what still keys on the anchor is the review chain, whose reviewer

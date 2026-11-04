@@ -289,7 +289,7 @@ root, so it is allowed; if the shell's real cwd on that drive is elsewhere the w
 escapes. It predates the normalizer (`D:rel` has no leading slash, so `msysToDrive` never
 sees it) and `git-repo-escape.test.js` pins the judgment so a change to it is deliberate.
 
-**The harness lies on Windows in three ways, and each one fails SILENTLY on POSIX.**
+**The harness lies on Windows in four ways, and each one fails SILENTLY on POSIX.**
 Every one of these turned a check green — or red — for a reason unrelated to the
 contract it names, and none is observable from a POSIX host:
 
@@ -310,23 +310,224 @@ contract it names, and none is observable from a POSIX host:
   or a shortcut native Node does not follow; the two directories then genuinely differ
   and DENY is CORRECT, so W167/W168 failed on a premise that did not hold. They confirm
   the link through `fs.realpathSync.native` — the same primitive `canonical()` uses.
+- **Hand the command to `node` over stdin, never through an environment variable.**
+  MSYS rewrites an environment value it takes for a path on its way into a native
+  binary, and a command that starts with a rooted path is such a value. While
+  `payload()` passed the command as `CMD`, W237 (`/usr/bin/ENV …`), W245
+  (`/usr/bin/GIT …`) and W323 (`>/dev/null git …`) allowed on Windows in run
+  41646817779 while the parser was right. W256 starts with `/usr/bin/cd` and stayed
+  green only because its second command denies by rule (A) whatever becomes of its
+  first word. W552 to W554 also start with a redirection to `/dev/null` and stayed
+  green, so a green check of that shape proves nothing about the rewrite. `payload()`
+  now pipes the command into `node`, as the host delivers it, and **W3i** pins that a
+  rooted command arrives verbatim.
 
 **The Windows timeout for this suite is a coverage boundary, not a formality.** At
 `timeoutMs: 300000` in `tests/profiles/windows-ci.v1.json` the shard killed the suite
 after roughly 210 of its checks, always mid-run at W122 — so W224, W233/W234 and
 everything after them never executed on Windows at all while the shard still reported.
-It is 600000 now. Adding checks costs Windows wall
+It is 600000 now, and run 41646817779 used 528 s of it for 605 checks. Adding checks costs Windows wall
 clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
 unverified regardless of how many checks passed before it.
+
+**Program names are read as a case-insensitive file system resolves them.** `programName(word,
+isWindows)` delegates to `programName(value, platform, fold)` in `hooks/lib/claude-path-v1.js`
+with the policy `"always"`, which keeps the part after the last `/` (on win32 also after the last
+`\`), drops a `.exe` suffix in any case and folds with `toUpperCase().toLowerCase()`, on every
+platform; `"platform"` folds only on darwin and win32 and any other value leaves the case: macOS and
+Windows resolve `GIT`, `git.exe` or `ENV` as the lowercase program, and the parser cannot know the
+file system of each `PATH` directory. `WRAP` matches on it in `detectControlMutation` and in the
+rule loop, and a folded `program` decides `git`, `sed` and `dd`. The tee channel folds only in
+command position (`program === "tee"`); elsewhere in the segment it stays the literal word `tee`,
+because a folded scan of every token made `grep -n TEE src/app.rs` or a `drivers/tee` operand a
+tee write. In `detectControlMutation`, `cmd0` keeps the written basename for the builtins
+(`export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `printf`, `read`), because the shell
+runs any other spelling as an external program, which cannot change the shell's variables; an
+over-deny there is the safe direction. The rule loop is stricter, because its `cmd0` moves the
+tracked cwd (`cd`) and carries `GIT_DIR`/`GIT_WORK_TREE` (`export`, `declare -x`, `typeset -x`),
+and a wrong move is an allow: `cmd0` is the word after quote removal only when it holds no `/`
+and every wrapper skipped before it is exactly `command` or `builtin` (`SHELL_WRAP`), the two
+builtins that keep a builtin in the current shell, or the unquoted `time` keyword at the start of
+the command, and empty otherwise. A quoted `\time` or a `time` after an assignment is the external
+program, so it leaves the cwd. Folding the wrapper skip without that
+rule let `ENV cd /tmp; sed -i … src/app.rs` pass rule (A), and lowercase `env cd`, `sudo cd` and
+`/usr/bin/cd` already moved the tracked cwd on the base. `detectChannels` matches `tee`, `sed -i`
+and `dd of=` with the `iu` flags, an optional `.exe` and an optional closing quote, after a
+backslash, a quote, `(` or a backtick as well as the earlier boundaries, and a second pass reads
+each command's program word through `commandWords`, so the always-on
+`CLAUDE_ENV_FILE` deny and the secret scan's Bash trigger (`hooks/lib/secret-scan-decide.js` scans
+a Bash command only when the detector reports a channel) both read those spellings and the
+quote-removed ones. BSD sed's `-I`, `--in-place` (and its abbreviations) and an option cluster
+that holds `i` or `I` before an `e` or `f` edit in place like `-i`, in both readers (`sedInPlace`
+for rule (A)); `-l` is read as a flag, because BSD sed takes no operand for it.
+
+**Every word is read after the shell's quote removal, and the command word past each wrapper's own
+options.** `segmentWords` splits a lexer segment on unquoted whitespace and removes quotes the way
+bash does: a backslash, single and double quotes anywhere in the word, `$'…'` with the escapes
+bash 3.2 decodes (measured: `\u` included, an unknown escape keeps its backslash, a NUL ends the
+quoted part), and `$"…"` as double quotes. An expansion stays in the value verbatim, so the
+`UNEXPANDED` rules still see it. An unquoted `<` or `>` ends the word and starts an operator token,
+and `splitRedirects` takes the operators and their targets out of the word list, so redirections
+before or between the words no longer hide the command word and `x>file` writes `file`.
+`logicalText` builds each logical line in one pass: `scanLine` carries the quote state across
+physical lines, so a newline inside quotes stays in the word and a backslash-newline outside single
+quotes is removed, except after a `#` that starts a word outside quotes, because bash does not
+continue a comment (`joinContinuations` is that join alone). `heredocDelimiters` then finds every
+unquoted `<<` and `<<-` of the logical line outside comments and arithmetic, with the whole
+quote-removed word as the delimiter, and `skipHeredocs` drops each body up to its exact delimiter
+line, leading tabs stripped for `<<-`; `stripHeredocs` runs the same scanner per physical line.
+`lex()` keeps an `&` that is part of a redirection operator (`2>&1`, `&>`, an `&>` glued to a
+word) and the `|` of `>|` and `>&|` in the segment, so neither resets the tracked cwd as a
+background or a pipe would, but not after an escaped `\<` or `\>`, which bash reads as a word
+character. `redirectOperator` reads zsh's `>>|`, `>>&`, `&>|`, `&>>|`, `>&|` and `>!` whole, and
+`splitRedirects` reads every output operator as a write except a `>&` or `>>&` whose target is a
+descriptor number or `-`, plus `n<>` on a descriptor other than 0, so no text rewrite runs before
+the reader; only `detectChannels` keeps the base's text collapse, for its channel test. `ansiC`
+finds the end of `$'…'` before it decodes, so a `\c` before the closing quote does not swallow it,
+`braceEnd` ends a `${…}` at its matching brace across nested quotes and `${`, and `$$` is one unit,
+inside a nested string too. bash nests a single quote inside a double-quoted `${…}` and zsh reads
+it as a character, so `readings` reads every segment both ways (`bashQuotes`), the Session Control
+check and `detectChannels` judge both, and `main()` runs its rule loop (`scan`) a second time when
+the two readings split a segment differently. `commandWords` skips the unquoted reserved words in
+`RESERVED_WORDS`, reads the assignment words of `SHELL_ASSIGNMENT` (`NAME=`, `NAME+=`, `NAME[i]=`; only a plain `NAME=` feeds
+`GIT_*` and the escape prefixes), then each `WRAP` name with the options `WRAPPER_OPTIONS` lists for
+it, long options by unique prefix as getopt reads them, and the quote-removed `NAME=value` words
+`env` and `sudo` take (the other wrappers keep the base's over-read). Its `ops` record `env -i`,
+`env -`, `exec -c` (clear), `env -u` (unset), `env -C` and `sudo -D` (chdir) and every wrapper
+assignment in order; `env -S` splices its split string back into the argument list, split by
+`envSplit` the way env splits it (`\_` separates, `\c` stops, a `#` starts a comment), at most
+`MAX_SPLITS` times, and a further `-S` sets `overflow`, which the Session Control check refuses.
+That check refuses a protected name in any assignment, an unset op of one as removal,
+`export -n`/`declare +x`/`typeset +x` and `-a`/`-A` of one as removal, `printf -vNAME`, a `for`,
+`select` or `foreach` loop name and a `{NAME}` redirection as a rebind, and reads a subscript as its
+name (`protectedName`); a full clear alone is NOT refused, because it names no input and
+`model-bind` refuses a missing `CLAUDE_CODE_SESSION_ID`. `detectControlMutation` refuses when any of
+three readings in `controlFinding` finds a rebind or a removal: `readControlMutation` (this
+reader) and `wordSplitControlMutation` (a port of the earlier whitespace reading), which both apply
+`baseControlMutation`, the rows the base had, so the always-on check refuses at least what the
+base refused (drop the second reading and every spelling the new reader misreads becomes an
+allow); and `shellControlMutation`, which runs `shellFinding` under both quote readings.
+`shellFinding` follows shell grammar instead of splitting: it keeps quotes, `$'…'` and `$"…"`
+whole, starts a comment only where a word starts, also inside `[[ … ]]` and an array literal
+(`parenWord` drops it from the text `arrayFinding` reads), reads each heredoc at the end of its line
+(an unquoted body through `expansions` after `cooked` removes its line continuations, a quoted one
+not at all), tracks `case` patterns (`esac` after `|` or a leading `(` stays a pattern word; a
+separator pops a `case` head that never reached `in`, and `;;`, `;&` or `;;&` unwinds to the
+nearest `case`), `{ }` groups (only where `{` is the reserved word: command position or after
+`coproc NAME`; a `)` unwinds everything down to its subshell), subshells, function definitions,
+`[[ … ]]` (`conditional`, reading a regex operand of `=~` and an extended pattern as one word with
+its parentheses and `|`, and ending only at `]]`, or where the old reading ended when no `]]`
+follows; it also returns `broken`, the old reading's end before a later `]]` or the first newline
+when neither follows, and the scanner reads the commands from there as well, then judges the words
+before `]]` and returns to command position, so `then`, `do` or `}` right after it are read) and
+`(( … ))`, also after a `PAREN_HEADS` word written directly before the parenthesis outside a
+`case` pattern. Command position follows the shell: `commandStart`, which `atCommand` and
+`assignPos` share, skips `coproc` and a `time` keyword with at most one `-p` and then at most one
+`--`, and reads `time` as the keyword only at the start of a pipeline (`piped`) and never after
+`coproc`; `atCommand` is false after a leading redirection (`redirected`) only in the bash quote
+reading, because bash reads `[[`, `case` and `{` there as plain words while zsh 5.9 opens them
+(measured), and neither reading opens `[[` or `case` inside a `case` pattern; after `coproc NAME`
+a `COPROC_BODIES` word, a brace
+group or a subshell, also with NAME glued to the parenthesis, is read as its compound command, and
+a protected NAME there is held as a rebind (`held`) until the scan returns. `commandWords` skips
+`time --` too. The scanner enters every `$(…)`, backtick, `<(…)`, zsh `=(…)` and bash 5.3's
+`${ …; }` and `${| …; }` as commands, also inside double quotes and heredoc bodies, and reads zsh's
+brace-less `$NAME[…]` subscript as arithmetic. `shellControlMutation` reads a command that holds a
+line continuation a second time through `joinedText`, which joins a backslash-newline only where
+the shell's input reader does: outside single quotes and comments, never in a quoted-delimiter
+heredoc body, and in an unquoted body before the line is compared with its delimiter
+(`keepHeredocs`), so a lookahead, a heredoc delimiter or a delimiter line split by a continuation
+reads as the shell joins it. `heredocWord` ends a delimiter only at a shell blank or operator, so a
+no-break space stays inside it. Each simple command it finds goes through
+`commandWords` and `builtinControlMutation` (`commandFinding`), so the rows this change added,
+`nameref` included, run only on commands found outside quotes, and quoted text that names
+`declare -n` stays allowed. `builtinControlMutation` is `baseControlMutation` plus the name
+operands of `getopts`, `mapfile`/`readarray`, `wait`, `vared`, `getln`, `set ±A` (attached or
+not), `integer`/`float` and zsh's `read NAME?prompt` (`operandFinding`), the operand of
+`printf`/`print -v`, `wait -p`, `read -a` and bash 5.3's `compgen -V` in any option cluster,
+attached or not (`nameOption`), the arithmetic of `let` and of zsh's `repeat`, `shift`, `return`,
+`break` and `continue`, the subscript of every declaration operand and of a `test` or `[` `-v`
+operand (`subscriptFinding`), a protected operand of a `declare`, `typeset` or `local` whose
+options convert the value (a cluster holding `T`, `i`, `E`, `F`, `l`, `u`, `L`, `R` or `Z`) as a
+rebind, a protected name that zsh's `unset -m` pattern matches (`patternFinding`, which translates
+the glob and refuses one it cannot translate as `dynamic`), an option word built at run time in
+front of a protected operand of an `OPTION_BUILTINS` command as `dynamic`, and
+`declare`/`typeset`/`local -n` as `nameref`. `commandFinding` reads `coproc` itself: a protected
+first operand is a rebind, and otherwise the simple command after it is judged.
+The scanner hands each `$((…))`, `((…))`, `$[…]`, assignment-word subscript (bracket-matched across
+blanks, also in a declaration operand), array-literal element subscript (`arrayFinding`) and
+`-eq`-family operand to `arithmeticFinding`, which bracket-matches nested subscripts, and each
+`${…}` body to `parameterFinding`, which parses zsh's flags (`zshFlagsEnd`), the `=`, `~`, `^` and
+`+` prefixes and the special parameters, and falls back to `arithmeticFinding` on a body it cannot
+parse. A `$((` that does not close with `))` is read again as a command substitution. A name built
+at run time is refused as `dynamic` only where that spelling has no common use: an `env -S` word
+(`split`) whose `${` reaches `env` unexpanded (`literal`: the split string came from a split word
+or its written spelling holds a single quote or a backslash) and sits in an option, assignment or
+command position sets `dynamic` on the command reader, and so do an arithmetic lvalue spelled with `$` and zsh's `${(P)…}` assignment; a
+shell-built operand stays allowed, because `export $(cat .env | xargs)` is a common idiom and
+`source` reaches the same assignments. Nesting past `MAX_NESTING` (64), or a reading past a budget
+of 32 steps per character plus 65,536, returns `deep`, refused with its own reason; the budget
+bounds the re-reading of a `$((` as a substitution. `heredocDelimiters` skips `${…}` and `$[…]`, and
+`heredocWord` reads `$"…"` as a quoted word, so neither hides later lines from any reading. The
+rule loop runs git
+with `-C <dir>` for each chdir op, so `gitTargets` judges an unexpanded one as it judges an
+unexpanded `-C`, resolves tee, `sed -i` and `dd of=` operands against that directory (a relative
+operand under an unexpanded one is not judged, and targets mode reports it as a write target), and
+folds the ops over the carried and inline `GIT_*` values. W265 and W267-W554 in the
+gate suite, F8c and D10-D14 in `tests/structure/test-secret-scan-gate.sh`, and the reader cases of
+`git-repo-escape.test.js` pin it. **Known residuals, all stated in `docs/gates.md`:** zsh's other
+readings (an unknown `$'…'` escape, `$"…"`, `=cmd`, `noglob`, `nocorrect`, `-`) are not applied,
+although the Bash tool runs zsh where that is the user's shell (measured on macOS); a program word
+built at run time, aliases and functions; a variable name the shell builds at run time in a
+builtin or wrapper operand; code built or stored at run time (`eval`, `trap`, `bash -c`, `source`,
+a script file, a `mapfile -C` callback); arithmetic through another variable's value or an integer
+attribute; zsh's numeric `printf` arguments and module builtins; and wrappers outside `WRAP`. The
+third reading is a hand-written approximation of the shell grammar, and a construct it misreads
+can hide the commands after it, so every misreading is an allow. `lex()` still splits at a `;`, `&` or `|` inside quotes, so the two base
+readers can refuse quoted text that spells a protected assignment. `[ … -eq … ]` and `test -eq`
+evaluate no arithmetic in bash 5 or zsh 5.9 (measured), so those operands are not read; the
+`-v NAME[…]` operand of `[[`, `[` and `test` does evaluate its subscript in bash 5.3 (measured),
+and `subscriptFinding` reads it.
+
+**The env-file path comparison folds on every platform.** `controlPathNamespace` and
+`commandRefersToControlPath` pass both sides through `foldPath` (NFC, then
+`toUpperCase().toLowerCase()`), because APFS resolves letter case and normalization variants of one
+name to the same file (measured) and the parser cannot know the volume behind `CLAUDE_ENV_FILE`;
+`wordsReferToControlPath` adds the quote-removed words, so `/Users/R\unner/…` matches as well. A
+false refusal needs a write to a different file whose path folds to the env file's, which on a
+case-sensitive volume is the only cost. W74 pins the case fold, W308 the decomposed spelling and
+W318 the quote-removed path.
+
+**One program-name helper, four readers.** `programName` in `claude-path-v1.js` is the shared total
+helper. The parser uses it; `commandName` in `subagent-shell-guard-v1.js`, `commandName` in
+`work-order-v1.js` (no fold, no `.exe` strip) and `commandBase` in `powershell-command-v1.js`
+(PowerShell's own resolution, which cuts both separators everywhere and strips module qualifiers
+and more extensions) still carry code of their own. Since #536 the shell guard's copy reads every
+spelling as the helper does, with the policy `"platform"` and with `"always"` under its
+`foldNames` option, so it could call the helper outright; the work-order copy waits for the
+unpushed branch `claude/work-order-name-case`, which rewrites that function. The unit case `the program-name
+readers of the gates, compared over one corpus` pins each difference, so moving a reader onto the
+helper changes a pinned line rather than a verdict nobody sees. Pins: the program-name
+cases of `tests/structure/git-repo-escape.test.js`, W235-W266 in
+`tests/structure/test-bash-source-write-gate.sh` and F8b in
+`tests/structure/test-secret-scan-gate.sh`. **Version: `minor`** — the always-on Session Control
+check refuses calls it let through, which changes the capability set of every session a newer
+installation would serve (`.claude/rules/runtime-lineage.md`).
 
 **Cross-file couplings — stated as a CRITERION, never a count**, because the count was "Three" while the list already held four: every hand-copy of a rule this parser owns, plus every PROSE assertion elsewhere that a message this parser emits says a particular thing. (The MSYS drive rule is deliberately NOT among them: it is
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
-`cmd0` anchoring depends on — is hand-duplicated as a JS literal in
+`program` anchoring depends on — is hand-duplicated as a JS literal in
 `hooks/checks/pre-bash-zensu-gate.sh`, where it drives that gate's token scan. The CLI gate also
 unwraps through `WRAPPERS` in `hooks/lib/subagent-shell-guard-v1.js`, a larger set, and gates
 what either reading finds, so `timeout`, `xargs` or `stdbuf` in front of a command is
-transparent to the CLI gate and not to rule (C).
+transparent to the CLI gate and not to rule (C). The same guard restates the parser's shell
+grammar (`RESERVED_WORDS`, `ASSIGNMENT_RE` for `SHELL_ASSIGNMENT`, `DIRECTORY_WRAPPERS` for
+`SHELL_WRAP`, `WRAPPERS` for `WRAPPER_OPTIONS`); `WRAP` itself is derived from the keys of
+`WRAPPER_OPTIONS`, so a wrapper never lacks its option table. The unit case `the shell readers of
+the source-write parser and the subagent shell guard, compared over one corpus` pins where the two
+readers agree and their three differences (`env -S`, `sudo -h` and the guard's extra wrappers), so
+a change to either table moves a pinned line.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
 `hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the

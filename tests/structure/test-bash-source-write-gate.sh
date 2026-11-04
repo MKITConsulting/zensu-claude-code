@@ -308,9 +308,12 @@ source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" bswgate-test \
   || { check "W0 session-control baseline bootstrap" FAIL; echo "----"; echo "test-bash-source-write-gate: $PASS PASS / $FAIL FAIL"; exit 1; }
 
 payload() {
-  CMD="$1" CWD="${2:-$PROJ}" TOOL="${3:-Bash}" node -e '
-    const o={hook_event_name:"PreToolUse",tool_name:process.env.TOOL,tool_input:{command:process.env.CMD},cwd:process.env.CWD,session_id:"bswgate-test"};
-    process.stdout.write(JSON.stringify(o));
+  printf '%s' "$1" | CWD="${2:-$PROJ}" TOOL="${3:-Bash}" node -e '
+    let s=""; process.stdin.setEncoding("utf8"); process.stdin.on("data",c=>s+=c);
+    process.stdin.on("end",()=>{
+      const o={hook_event_name:"PreToolUse",tool_name:process.env.TOOL,tool_input:{command:s},cwd:process.env.CWD,session_id:"bswgate-test"};
+      process.stdout.write(JSON.stringify(o));
+    });
   '
 }
 classify() {
@@ -324,6 +327,14 @@ classify() {
     });
   '
 }
+ROOTED_SENT="/usr/bin/ENV true"
+ROOTED_GOT="$(payload "$ROOTED_SENT" | node -e '
+  let s=""; process.stdin.on("data",c=>s+=c);
+  process.stdin.on("end",()=>{ process.stdout.write(JSON.parse(s).tool_input.command); });
+')"
+[ "$ROOTED_GOT" = "$ROOTED_SENT" ] \
+  && check "W3i a command that starts with a rooted path reaches the payload unconverted" PASS \
+  || check "W3i the payload rewrote a rooted command (sent='$ROOTED_SENT' got='$ROOTED_GOT')" FAIL
 # run <label> <cmd> <expected> [cwd] [cfg] [claude-env-file]
 run() {
   local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_ON}" env_file="${6:-$PROJ/.claude-env}" home="${7:-${HOME:-}}"
@@ -505,11 +516,11 @@ run "W71 protected path prefix is not an exact CLAUDE_ENV_FILE match" \
 run "W72 symbolic CLAUDE_ENV_FILE reference is independent of native path parsing" \
   'printf x >> "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_ON" \
   'D:\a\zensu-claude-code\session\.claude-env'
-run "W73 POSIX CLAUDE_ENV_FILE comparison remains case-sensitive and exact" \
+run "W73 POSIX CLAUDE_ENV_FILE exact path" \
   "printf x >> /Users/Runner/Session/.claude-env" DENY "$PROJ" "$CFG_ON" \
   '/Users/Runner/Session/.claude-env'
-run "W74 POSIX CLAUDE_ENV_FILE does not fold case" \
-  "printf x >> /users/runner/session/.claude-env" ALLOW "$PROJ" "$CFG_ON" \
+run "W74 a POSIX CLAUDE_ENV_FILE path folds letter case, as a case-insensitive volume resolves it" \
+  "printf x >> /users/runner/session/.claude-env" DENY "$PROJ" "$CFG_OFF" \
   '/Users/Runner/Session/.claude-env'
 run "W75 direct host session-id assignment" "CLAUDE_CODE_SESSION_ID=other env" DENY
 run "W76 exported host session-id rebind" "export CLAUDE_CODE_SESSION_ID=other" DENY
@@ -517,6 +528,426 @@ run "W77 unset host session-id" "unset CLAUDE_CODE_SESSION_ID" DENY
 run "W78 printf -v host session-id rebind" "printf -v CLAUDE_CODE_SESSION_ID other" DENY
 run "W79 host session-id rebind ignores bashWriteGate:false" \
   "CLAUDE_CODE_SESSION_ID=other env" DENY "$PROJ" "$CFG_OFF"
+run "W235 an uppercase env wrapper still carries a host session-id rebind" "ENV CLAUDE_CODE_SESSION_ID=other env" DENY "$PROJ" "$CFG_OFF"
+run "W236 a mixed-case sudo wrapper still carries a Session Control rebind" "Sudo ZENSU_PROJECT_ROOT=/tmp/other true" DENY "$PROJ" "$CFG_OFF"
+run "W237 an env wrapper behind a path in another case still carries a rebind" "/usr/bin/ENV ZENSU_SESSION_KEY=x true" DENY "$PROJ" "$CFG_OFF"
+run "W238 an uppercase tee into CLAUDE_ENV_FILE" 'echo x | TEE "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W239 an uppercase sed -i on CLAUDE_ENV_FILE" 'SED -i s/a/b/ "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W240 an uppercase dd of= CLAUDE_ENV_FILE" 'DD of="$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W241 an uppercase EXPORT is no builtin and rebinds nothing" "EXPORT ZENSU_SESSION_KEY=x" ALLOW "$PROJ" "$CFG_OFF"
+run "W242 an uppercase UNSET is no builtin and removes nothing" "UNSET ZENSU_SESSION_KEY" ALLOW "$PROJ" "$CFG_OFF"
+run "W243 uppercase git -C sibling add" "GIT -C $SIB add ." DENY
+run "W244 uppercase env wrapper before git -C sibling add" "ENV git -C $SIB add ." DENY
+run "W245 a path to git in another case" "/usr/bin/GIT -C $SIB add ." DENY
+run "W246 git.exe -C sibling add" "git.exe -C $SIB add ." DENY
+run "W247 an uppercase git read in the sibling still passes" "GIT -C $SIB status" ALLOW
+run "W248 uppercase sed -i on tracked .rs" "SED -i s/x/y/ src/app.rs" DENY
+run "W249 BSD sed -I on tracked .rs" "sed -I '' s/x/y/ src/app.rs" DENY
+run "W250 uppercase tee on tracked .rs" "echo x | TEE src/app.rs" DENY
+run "W251 a path to tee on tracked .rs" "echo x | /usr/bin/tee src/app.rs" DENY
+run "W252 uppercase dd of= tracked .rs" "DD of=src/app.rs" DENY
+run "W253 an uppercase CD is no builtin and keeps the cwd" "CD $SIB && git add ." ALLOW
+run "W254 an uppercase ENV runs cd outside the shell, so a write after it stays in the project" "ENV cd $FAKETMP; printf x > src/app.rs" DENY
+run "W255 a lowercase env runs cd outside the shell as well" "env cd $FAKETMP; printf x > src/app.rs" DENY
+run "W256 a cd spelled with a path is no builtin and keeps the cwd" "/usr/bin/cd $FAKETMP; printf x > src/app.rs" DENY
+run "W257 command keeps cd in the shell, so the cwd moves" "command cd $FAKETMP && printf x > src/app.rs" ALLOW
+run "W258 an uppercase ENV before cd leaves git add in the sibling cwd" "ENV cd $PROJ; git add -A" DENY "$SIB"
+run "W259 an uppercase ENV before cd leaves git add in the project" "ENV cd $SIB; git add ." ALLOW
+run "W260 grep naming TEE before a tracked file is no tee write" "grep -n TEE src/app.rs" ALLOW
+run "W261 grep naming a tee directory before a tracked file is no tee write" "grep -n x tools/tee src/app.rs" ALLOW
+run "W262 an uppercase tee in a subshell into CLAUDE_ENV_FILE" 'echo x | (TEE "$CLAUDE_ENV_FILE")' DENY "$PROJ" "$CFG_OFF"
+run "W263 sed -i in a command substitution on CLAUDE_ENV_FILE" 'x=$(SED -i s/a/b/ "$CLAUDE_ENV_FILE")' DENY "$PROJ" "$CFG_OFF"
+run "W264 a quoted tee into CLAUDE_ENV_FILE" 'echo x | "tee" "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W265 a quote inside the program word is removed as bash removes it" "g'i't -C $SIB add ." DENY
+
+WIN32_PRELOAD="$WORKROOT/win32-platform.js"
+printf '%s\n' 'Object.defineProperty(process, "platform", { value: "win32" });' > "$WIN32_PRELOAD"
+WIN32_PAYLOAD="$(payload "'C:\\Git\\cmd\\git.exe' -C $SIB add .")"
+WIN32_OUT="$(PAYLOAD="$WIN32_PAYLOAD" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" \
+  node -r "$WIN32_PRELOAD" "$PARSER" 2>/dev/null)"
+HOST_OUT="$(PAYLOAD="$WIN32_PAYLOAD" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" \
+  node "$PARSER" 2>/dev/null)"
+HOST_WIN32="$(node -e 'process.stdout.write(process.platform === "win32" ? "yes" : "no")')"
+WIN32_READ=other
+case "$WIN32_OUT" in
+  ('Blocked `git add` against a repository OUTSIDE'*) WIN32_READ=deny ;;
+esac
+HOST_READ=other
+case "$HOST_OUT" in
+  ('') HOST_READ=allow ;;
+  ('Blocked `git add` against a repository OUTSIDE'*) HOST_READ=deny ;;
+esac
+HOST_WANT=allow
+[ "$HOST_WIN32" = yes ] && HOST_WANT=deny
+{ [ "$WIN32_READ" = deny ] && [ "$HOST_READ" = "$HOST_WANT" ]; } \
+  && check "W266 the rule loop reads a backslash path to git.exe as git on win32 only" PASS \
+  || check "W266 win32 program path reading (win32=$WIN32_READ host=$HOST_READ host-is-win32=$HOST_WIN32)" FAIL
+
+run "W267 a backslash before the env wrapper is removed, so the host session-id rebind is refused" "\\env CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W268 quotes inside the env wrapper word are removed" "e'n'v CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W269 a backslash before export is removed, so the builtin rebinds" "\\export ZENSU_SESSION_KEY=x" DENY "$PROJ" "$CFG_OFF"
+run "W270 a backslash before unset is removed, so the builtin removes" "\\unset ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W271 an ANSI-C quoted env wrapper is decoded" "\$'\\x65nv' CLAUDE_CODE_SESSION_ID=x true" DENY "$PROJ" "$CFG_OFF"
+run "W272 a locale-quoted env wrapper is read as double quotes" "\$\"env\" CLAUDE_CODE_SESSION_ID=x true" DENY "$PROJ" "$CFG_OFF"
+run "W273 a backslash before git is removed, so rule (C) judges git -C sibling add" "\\git -C $SIB add ." DENY
+run "W274 a backslash before cd is removed, so git add after it is judged in the sibling" "\\cd ../sibling && git add ." DENY
+run "W275 a quoted git read in the sibling still passes" "'git' -C $SIB status" ALLOW
+LC_UNSET="$(printf 'unset \\\nZENSU_SESSION_KEY')"
+run "W276 a backslash-newline continues the line, so the unset after it is refused" "$LC_UNSET" DENY "$PROJ" "$CFG_OFF"
+LC_GIT="$(printf 'git -C %s \\\nadd .' "$SIB")"
+run "W277 a backslash-newline inside git -C sibling add keeps the verb on its command" "$LC_GIT" DENY
+LC_COMMENT="$(printf '# note \\\nunset ZENSU_SESSION_KEY')"
+run "W278 a comment line that ends in a backslash does not swallow the unset on the next line" "$LC_COMMENT" DENY "$PROJ" "$CFG_OFF"
+run "W279 env -i does not end the protected-assignment scan" "env -i CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W280 env -- does not end the protected-assignment scan" "env -- CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W281 sudo's own -u operand does not end the scan" "sudo -u root ZENSU_PROJECT_ROOT=/x true" DENY "$PROJ" "$CFG_OFF"
+run "W282 nice -n before env does not end the scan" "nice -n 5 env ZENSU_SESSION_KEY=x true" DENY "$PROJ" "$CFG_OFF"
+run "W283 env -S splits its string into further env arguments" "env -S 'CLAUDE_CODE_SESSION_ID=x bash' x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W284 env -u of a protected input is refused" "env -u ZENSU_SESSION_KEY bash x.sh" DENY "$PROJ" "$CFG_OFF"
+REASON_ENV_UNSET="$(payload "env --unset=CLAUDE_CODE_SESSION_ID bash x.sh" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_OFF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+printf '%s' "$REASON_ENV_UNSET" | grep -qF 'Blocked removal of protected Session Control input CLAUDE_CODE_SESSION_ID.' \
+  && check "W285 env --unset of a protected input is refused as removal, like unset" PASS \
+  || check "W285 env --unset removal reason (got '$REASON_ENV_UNSET')" FAIL
+run "W286 env -i alone rebinds nothing and stays allowed" "env -i PATH=/usr/bin bash x.sh" ALLOW "$PROJ" "$CFG_OFF"
+run "W287 env -u of an unprotected name stays allowed" "env -u FOO bash x.sh" ALLOW "$PROJ" "$CFG_OFF"
+run "W288 sudo -u before git -C sibling add no longer hides the verb" "sudo -u me git -C $SIB add ." DENY
+run "W289 nice -n before git -C sibling add no longer hides the verb" "nice -n 10 git -C $SIB add ." DENY
+run "W290 env -C runs git in the sibling" "env -C $SIB git add ." DENY
+run "W291 env -i before a git read in the sibling stays allowed" "env -i git -C $SIB status" ALLOW
+run "W292 a double-quoted assignment after env is read as one" "env \"CLAUDE_CODE_SESSION_ID=x\" bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W293 a single-quoted assignment after an uppercase ENV is read as one" "ENV 'ZENSU_SESSION_KEY=x' true" DENY "$PROJ" "$CFG_OFF"
+run "W294 a quoted GIT_WORK_TREE after env still names the sibling for rule (C)" "env \"GIT_WORK_TREE=$SIB\" git add -A" DENY
+run "W295 a quoted leading assignment is a command word to bash, not an assignment" "\"CLAUDE_CODE_SESSION_ID=x\" true" ALLOW "$PROJ" "$CFG_OFF"
+run "W296 an append assignment rebinds the host session id" "CLAUDE_CODE_SESSION_ID+=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W297 an indexed assignment rebinds a Session Control input" "ZENSU_SESSION_KEY[0]=x" DENY "$PROJ" "$CFG_OFF"
+run "W298 export of an append assignment rebinds" "export ZENSU_SESSION_KEY+=x" DENY "$PROJ" "$CFG_OFF"
+run "W299 printf -v with the name attached rebinds" "printf -vZENSU_SESSION_KEY x" DENY "$PROJ" "$CFG_OFF"
+run "W300 export -n removes a Session Control input from the environment" "export -n ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W301 declare +x removes a Session Control input from the environment" "declare +x ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W302 declare -x of a Session Control input without a value stays allowed" "declare -x ZENSU_SESSION_KEY" ALLOW "$PROJ" "$CFG_OFF"
+run "W303 an if before export does not hide the rebind" "if export ZENSU_SESSION_KEY=x; then :; fi" DENY "$PROJ" "$CFG_OFF"
+run "W304 a brace group before unset does not hide the removal" "{ unset ZENSU_SESSION_KEY; }" DENY "$PROJ" "$CFG_OFF"
+run "W305 a pipeline negation before an assignment does not hide the rebind" "! CLAUDE_CODE_SESSION_ID=x true" DENY "$PROJ" "$CFG_OFF"
+run "W306 a leading redirection before export does not hide the rebind" "2>/dev/null export ZENSU_SESSION_KEY=x" DENY "$PROJ" "$CFG_OFF"
+run "W307 a for loop's do no longer hides git -C sibling add" "for f in a; do git -C $SIB add .; done" DENY
+ENV_NFC="$(printf '/Users/R\303\274nner/Session/.claude-env')"
+CMD_NFD="$(printf 'printf x >> /Users/Ru\314\210nner/Session/.claude-env')"
+run "W308 a decomposed spelling of the env-file path is the same file" "$CMD_NFD" DENY "$PROJ" "$CFG_OFF" "$ENV_NFC"
+run "W309 sed -ni edits in place" "sed -ni s/x/y/ src/app.rs" DENY
+run "W310 sed --in-place edits in place" "sed --in-place s/x/y/ src/app.rs" DENY
+run "W311 sed -i with an attached suffix after another option edits in place" "sed -E -i.bak s/x/y/ src/app.rs" DENY
+run "W312 sed -n -e p reads the tracked file" "sed -n -e p src/app.rs" ALLOW
+run "W313 sed --in-place on CLAUDE_ENV_FILE is refused whatever the opt-in says" 'sed --in-place s/a/b/ "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W314 quotes inside tee are removed, so a tee into CLAUDE_ENV_FILE is refused" 'echo x | t'"'"'e'"'"'e "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W315 a backslash before tee is removed" 'echo x | \tee "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W316 a backslash inside sed is removed" 's\ed -i s/a/b/ "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W317 quotes inside dd are removed" '"d"d of="$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W318 a backslash inside a literal env-file path is removed" 'printf x >> /Users/R\unner/Session/.claude-env' DENY "$PROJ" "$CFG_OFF" \
+  '/Users/Runner/Session/.claude-env'
+run "W319 a redirection glued to a word still writes the tracked file" "printf x>src/app.rs" DENY
+run "W320 2>&1 after cd ../sibling keeps the cwd it moved to" "cd ../sibling 2>&1 && printf x > src/lib.rs" DENY
+run "W321 the time keyword keeps cd in the shell" "time cd ../sibling; git add ." DENY
+run "W322 a quoted time is the external program, so its cd leaves the cwd" "\\time cd ../sibling; git add ." ALLOW
+run "W323 a leading redirection does not hide git -C sibling add" ">/dev/null git -C $SIB add ." DENY
+run "W324 a \\c at the end of \$'...' ends there, so the unset after it is refused" "unset \$'\\c' ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W325 \\c pairs with an escaped backslash, so the export after it is refused" "export \$'\\c\\\\' CLAUDE_CODE_SESSION_ID=x; bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W326 a quoted brace inside \${...} does not end it, so the unset after it is refused" "unset \${x:-'}'} ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W327 a nested quote inside a double-quoted \${...} does not end the string" "export \"\${x:-\"'\"}\" ZENSU_SESSION_KEY=x" DENY "$PROJ" "$CFG_OFF"
+run "W328 the same nested quote before a leading assignment" "A=\"\${x:-\"'\"}\" CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W329 an escaped < before & is a word, so the & still ends the command" "true \\<& CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W330 an escaped > before | is a word, so the pipe still ends the command" "echo \\>| ZENSU_SESSION_KEY=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W331 an &> glued to the name splits off, so the unset is refused" "unset ZENSU_SESSION_KEY&>/dev/null" DENY "$PROJ" "$CFG_OFF"
+run "W332 an &> glued to env splits off, so the wrapper is read" "env&>/dev/null CLAUDE_CODE_SESSION_ID=x bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W333 an &> glued to tee splits off, so the write to CLAUDE_ENV_FILE is refused" 'echo x | tee&>/dev/null "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W334 \$\$ is one unit, so its ' opens a plain single quote" "unset \$\$'\\' ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W335 \$\$ is one unit, so its { opens no expansion" "unset \$\${'}' ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+LC_HEREDOC="$(printf 'cat <<EOF \\\nx\nEOF\nunset ZENSU_SESSION_KEY')"
+run "W336 a heredoc opener continued by a backslash-newline starts its body after the joined line" "$LC_HEREDOC" DENY "$PROJ" "$CFG_OFF"
+LC_HEREDOC_BODY="$(printf 'cat <<EOF \\\nEOF\nunset ZENSU_SESSION_KEY')"
+run "W337 the whitespace reading still refuses the unset that the word reader places in the body" "$LC_HEREDOC_BODY" DENY "$PROJ" "$CFG_OFF"
+run "W338 a quoted brace inside \${...} does not hide the tee operand after it" "echo x | tee \${x:-'}'} src/app.rs" DENY
+run "W339 an escaped < before & does not hide git -C sibling add" "true \\<& git -C $SIB add ." DENY
+run "W340 an &> glued to git splits off, so rule (C) reads the verb" "git&>/dev/null -C $SIB add ." DENY
+LC_HEREDOC_GIT="$(printf 'cat <<EOF \\\nx\nEOF\ngit -C %s add .' "$SIB")"
+run "W341 a heredoc opener continued by a backslash-newline does not hide the git line after the body" "$LC_HEREDOC_GIT" DENY
+run "W342 an expansion holding a quoted brace stays a plain argument" "echo \"\${x:-'}'}\" ZENSU_SESSION_KEY" ALLOW "$PROJ" "$CFG_OFF"
+run "W343 an escaped < before & with a harmless command after it stays allowed" "echo \\<& ls" ALLOW "$PROJ" "$CFG_OFF"
+LC_HEREDOC_LS="$(printf 'cat <<EOF \\\nx\nEOF\nls')"
+run "W344 a continued heredoc opener with a harmless line after the body stays allowed" "$LC_HEREDOC_LS" ALLOW "$PROJ" "$CFG_OFF"
+run "W345 a >& after a quoted apostrophe still writes the file it names" "echo \"it's\" >&src/app.rs" DENY
+run "W346 a >| after a quoted apostrophe still writes the file it names" "echo \"it's\" >|src/app.rs" DENY
+run "W347 \$\$ inside a string inside \${...} is one unit, so the tee operand after it is read" "echo x | tee \${x:-\"\$\${\"} src/app.rs" DENY
+run "W348 the same inside a double-quoted \${...}" "echo x | tee \"\${x:-\"\$\${\"}\" src/app.rs" DENY
+run "W349 a >& to a descriptor after a quoted apostrophe stays allowed" "echo \"it's\" >&2" ALLOW
+run "W350 bash nests a single quote inside a double-quoted \${...}, so the tee operand after it is read" "echo x | tee \"\${x:-'\"'}\" src/app.rs" DENY
+run "W351 the same nested quote does not hide env -u of a protected input" "A=\"\${x:-'\"'}\" env -u ZENSU_SESSION_KEY bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W352 zsh's >>| appends to the file it names" "echo x >>| src/app.rs" DENY
+run "W353 zsh's >>& appends to the file it names" "echo x >>& src/app.rs" DENY
+run "W354 zsh's &>| writes the file it names" "echo x &>| src/app.rs" DENY
+run "W355 zsh's &>>| appends to the file it names" "echo x &>>| src/app.rs" DENY
+LC_QUOTED_HEREDOC="$(printf "echo '<<X'\nunset ZENSU_SESSION_KEY")"
+run "W356 a quoted << opens no heredoc, so the unset on the next line is refused" "$LC_QUOTED_HEREDOC" DENY "$PROJ" "$CFG_OFF"
+LC_ARITH_SHIFT="$(printf 'n=$((1<<bits))\nunset ZENSU_SESSION_KEY')"
+run "W357 an arithmetic shift opens no heredoc, so the unset on the next line is refused" "$LC_ARITH_SHIFT" DENY "$PROJ" "$CFG_OFF"
+LC_QUOTED_HASH="$(printf 'unset " #" \\\nZENSU_SESSION_KEY')"
+run "W358 a quoted # starts no comment, so the backslash-newline still joins the unset" "$LC_QUOTED_HASH" DENY "$PROJ" "$CFG_OFF"
+run "W359 a for loop assigns its name, so a protected loop variable is a rebind" "for ZENSU_SESSION_KEY in x; do bash x.sh; done" DENY "$PROJ" "$CFG_OFF"
+run "W360 unset of index 0 removes a protected scalar" "unset 'ZENSU_SESSION_KEY[0]'" DENY "$PROJ" "$CFG_OFF"
+run "W361 a {NAME} redirection assigns the descriptor number to NAME" "{ZENSU_SESSION_KEY}>/dev/null true" DENY "$PROJ" "$CFG_OFF"
+run "W362 declare -a turns a protected input into an array, which is not exported" "declare -a ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+LC_DASHED_DELIM="$(printf 'cat <<EOF-1\nx\nEOF-1\nunset ZENSU_SESSION_KEY')"
+run "W363 a heredoc delimiter is the whole word, so the unset after EOF-1 is refused" "$LC_DASHED_DELIM" DENY "$PROJ" "$CFG_OFF"
+run "W364 zsh's >&| writes the file it names" "echo x >&|src/app.rs" DENY
+run "W365 a read-write redirection on descriptor 1 writes the file" "echo x 1<>src/app.rs" DENY
+run "W366 a read-write redirection on standard input writes nothing" "cat 0<>src/app.rs" ALLOW
+LC_COMMENT_HEREDOC="$(printf '# note <<EOF\nunset ZENSU_SESSION_KEY')"
+run "W367 a << inside a comment opens no heredoc, so the unset on the next line is refused" "$LC_COMMENT_HEREDOC" DENY "$PROJ" "$CFG_OFF"
+run "W368 read into a subscript of a protected input is a rebind" "read 'ZENSU_SESSION_KEY[1]'" DENY "$PROJ" "$CFG_OFF"
+run "W369 env -S splits at \\_ as env does, so the second assignment is read" "env -S 'A=1\\_CLAUDE_CODE_SESSION_ID=x' node x.js" DENY "$PROJ" "$CFG_OFF"
+run "W370 more env -S split strings than the check reads is refused" "env -S -v -S -v -S -v -S -v -S -v -S -v -S -v -S -v -S 'CLAUDE_CODE_SESSION_ID=x bash' x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W371 env -C moves the directory tee writes in" "env -C ../sibling tee src/lib.rs" DENY
+run "W372 sudo -D moves the directory sed -i edits in" "sudo -D ../sibling sed -i s/a/b/ src/lib.rs" DENY
+run "W373 env -C moves the directory dd of= writes in" "env -C ../sibling dd of=src/lib.rs" DENY
+run "W374 an assignment after env -i reaches git" "env -i GIT_WORK_TREE=$SIB git add -A" DENY
+run "W375 env -i clears a leading assignment before git runs" "GIT_WORK_TREE=$SIB env -i git add -A" ALLOW
+run "W376 env -u drops a leading assignment before git runs" "GIT_WORK_TREE=$SIB env -u GIT_WORK_TREE git add -A" ALLOW
+run "W377 a for loop over another name stays allowed" "for f in a b; do echo \$f; done" ALLOW "$PROJ" "$CFG_OFF"
+run "W378 declare -a and a {NAME} redirection of other names stay allowed" "declare -a FOO; {fd}>/dev/null true" ALLOW "$PROJ" "$CFG_OFF"
+LC_QUOTED_DELIM="$(printf "cat <<'E O F'\nunset ZENSU_SESSION_KEY\nE O F")"
+run "W379 a quoted delimiter with spaces ends its body, which bash does not run" "$LC_QUOTED_DELIM" ALLOW "$PROJ" "$CFG_OFF"
+LC_TAB_DELIM="$(printf 'cat <<-EOF\n\tunset ZENSU_SESSION_KEY\n\tEOF')"
+run "W380 <<- strips leading tabs from the delimiter line" "$LC_TAB_DELIM" ALLOW "$PROJ" "$CFG_OFF"
+LC_QUOTED_HASH_OK="$(printf 'echo "a #b" \\\nok')"
+run "W381 a quoted # with a harmless continued line stays allowed" "$LC_QUOTED_HASH_OK" ALLOW "$PROJ" "$CFG_OFF"
+run "W382 getopts assigns its name operand" "getopts a ZENSU_SESSION_KEY -a" DENY "$PROJ" "$CFG_OFF"
+run "W383 mapfile assigns its array operand" "mapfile ZENSU_SESSION_KEY < /dev/null" DENY "$PROJ" "$CFG_OFF"
+run "W384 readarray assigns its array operand after its own options" "readarray -t -u 3 CLAUDE_CODE_SESSION_ID" DENY "$PROJ" "$CFG_OFF"
+run "W385 wait -p assigns the variable it names" "wait -n -p ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W386 coproc NAME turns the name into an array of descriptors" "coproc ZENSU_SESSION_KEY { cat; }" DENY "$PROJ" "$CFG_OFF"
+run "W387 zsh's print -v assigns the name inside an option cluster" "print -rv ZENSU_SESSION_KEY x" DENY "$PROJ" "$CFG_OFF"
+run "W388 zsh's set -A assigns the array it names" "set -A ZENSU_PROJECT_ROOT a b" DENY "$PROJ" "$CFG_OFF"
+run "W389 zsh's set +A assigns the array it names" "set +A ZENSU_SESSION_KEY a" DENY "$PROJ" "$CFG_OFF"
+run "W390 zsh's integer assigns the name" "integer ZENSU_SESSION_KEY=5" DENY "$PROJ" "$CFG_OFF"
+run "W391 zsh's float converts the name even without a value" "float ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W392 zsh's read takes the name before ? and the prompt after it" "read 'ZENSU_SESSION_KEY?key> '" DENY "$PROJ" "$CFG_OFF"
+run "W393 zsh's vared assigns the name it edits" "vared ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W394 zsh's getln assigns the name it reads into" "getln ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W395 let assigns through arithmetic" "let ZENSU_SESSION_KEY=1" DENY "$PROJ" "$CFG_OFF"
+run "W396 let assigns through a quoted compound operator" "let \"ZENSU_SESSION_KEY += 1\"" DENY "$PROJ" "$CFG_OFF"
+run "W397 an arithmetic command assigns with spaces around =" "(( ZENSU_SESSION_KEY = 1 ))" DENY "$PROJ" "$CFG_OFF"
+run "W398 an arithmetic prefix increment assigns" "(( ++CLAUDE_CODE_SESSION_ID ))" DENY "$PROJ" "$CFG_OFF"
+run "W399 an arithmetic for loop assigns its counter" "for (( ZENSU_SESSION_KEY = 0; ZENSU_SESSION_KEY < 1; ZENSU_SESSION_KEY++ )); do :; done" DENY "$PROJ" "$CFG_OFF"
+run "W400 an arithmetic expansion inside double quotes assigns" "echo \"\$(( ZENSU_SESSION_KEY <<= 1 ))\"" DENY "$PROJ" "$CFG_OFF"
+run "W401 the \$[ ] arithmetic expansion assigns" ": \$[ ZENSU_SESSION_KEY = 1 ]" DENY "$PROJ" "$CFG_OFF"
+run "W402 an operand of [[ -eq ]] is evaluated as arithmetic" "[[ ZENSU_SESSION_KEY=5 -eq 5 ]]" DENY "$PROJ" "$CFG_OFF"
+run "W403 zsh evaluates the count of repeat as arithmetic" "repeat 'ZENSU_SESSION_KEY=1' true" DENY "$PROJ" "$CFG_OFF"
+run "W404 zsh evaluates the operand of shift as arithmetic" "shift 'ZENSU_SESSION_KEY=1'" DENY "$PROJ" "$CFG_OFF"
+run "W405 the subscript of an assignment word is evaluated as arithmetic" "a[ZENSU_SESSION_KEY=2]=x" DENY "$PROJ" "$CFG_OFF"
+run "W406 the subscript of a printf -v operand is evaluated as arithmetic" "printf -v 'a[ZENSU_SESSION_KEY=3]' x" DENY "$PROJ" "$CFG_OFF"
+run "W407 the subscript inside \${...} is evaluated as arithmetic" ": \${a[ZENSU_SESSION_KEY=1]}" DENY "$PROJ" "$CFG_OFF"
+run "W408 \${NAME:=...} assigns a protected input" ": \${ZENSU_SESSION_KEY:=x}" DENY "$PROJ" "$CFG_OFF"
+run "W409 \${NAME=...} inside double quotes assigns a protected input" "echo \"\${CLAUDE_CODE_SESSION_ID=x}\"" DENY "$PROJ" "$CFG_OFF"
+run "W410 zsh's \${NAME::=...} assigns a protected input" ": \${ZENSU_SESSION_KEY::=x}" DENY "$PROJ" "$CFG_OFF"
+run "W411 a nameref to a protected input is refused" "declare -n ref=ZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W412 a nameref without a target takes one from its first assignment" "declare -n ref; ref=ZENSU_SESSION_KEY; ref=x" DENY "$PROJ" "$CFG_OFF"
+run "W413 local -n inside an option cluster is a nameref too" "f() { local -rn r=x; }; f" DENY "$PROJ" "$CFG_OFF"
+run "W414 env -S expands \${VAR} into an assignment name" "env -S '\${N}=x bash' x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W415 env -S expands \${VAR} into the operand of -u" "env -S '-u \${N} bash' x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W416 an arithmetic lvalue built from \$N names its variable at run time" "(( \$N = 1 ))" DENY "$PROJ" "$CFG_OFF"
+run "W417 zsh's \${(P)...} assignment names its variable at run time" ": \${(P)N::=x}" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_SUBST="$(printf 'cat <<EOF\n$(ZENSU_SESSION_KEY=x bash x.sh)\nEOF')"
+run "W418 a command substitution in an unquoted heredoc body runs, so its rebind is refused" "$LC_BODY_SUBST" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_TICK="$(printf 'cat <<EOF\n`unset ZENSU_SESSION_KEY`\nEOF')"
+run "W419 a backtick substitution in an unquoted heredoc body runs, so its unset is refused" "$LC_BODY_TICK" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_ARITH="$(printf ': <<EOF\n$(( ZENSU_SESSION_KEY = 7 ))\nEOF')"
+run "W420 an arithmetic expansion in an unquoted heredoc body assigns" "$LC_BODY_ARITH" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_PARAM="$(printf 'cat <<EOF\n${ZENSU_SESSION_KEY:=x}\nEOF')"
+run "W421 an assigning expansion in an unquoted heredoc body assigns" "$LC_BODY_PARAM" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_TABS="$(printf 'cat <<-EOF\n\t$(export ZENSU_SESSION_KEY=x)\n\tEOF')"
+run "W422 a <<- body is read the same way" "$LC_BODY_TABS" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_QUOTED="$(printf 'cat <<%sEOF%s\n$(ZENSU_SESSION_KEY=x bash x.sh)\nEOF' "'" "'")"
+run "W423 a quoted-delimiter heredoc body is not expanded and stays allowed" "$LC_BODY_QUOTED" ALLOW "$PROJ" "$CFG_OFF"
+LC_BODY_TEXT="$(printf 'cat <<EOF\n\\$(ZENSU_SESSION_KEY=x bash x.sh)\nZENSU_SESSION_KEY=x is text\nEOF')"
+run "W424 an escaped substitution and plain text in an unquoted body stay allowed" "$LC_BODY_TEXT" ALLOW "$PROJ" "$CFG_OFF"
+run "W425 an arithmetic assignment inside single quotes stays allowed" "echo '\$(( ZENSU_SESSION_KEY = 1 ))'" ALLOW "$PROJ" "$CFG_OFF"
+run "W426 grep for the assignment spelling stays allowed" "grep -rn \"ZENSU_SESSION_KEY=\" hooks" ALLOW "$PROJ" "$CFG_OFF"
+run "W427 a pattern match and a default expansion stay allowed" "[[ \$l == ZENSU_SESSION_KEY=* && -n \"\${ZENSU_SESSION_KEY:-}\" ]]" ALLOW "$PROJ" "$CFG_OFF"
+run "W428 read -p and getopts with expanded operands stay allowed" "read -p \"\$prompt\" x; getopts \"\$opts\" opt" ALLOW "$PROJ" "$CFG_OFF"
+run "W429 printf of an assignment string and of the name stays allowed" "printf '%s\\n' \"ZENSU_SESSION_KEY=x\" ZENSU_SESSION_KEY" ALLOW "$PROJ" "$CFG_OFF"
+run "W430 let, an arithmetic command and \${x:=} on other names stay allowed" "let x=1; (( i++ )); : \${x:=1}" ALLOW "$PROJ" "$CFG_OFF"
+run "W431 mapfile, export PATH and an indexed assignment stay allowed" "mapfile -t lines < f; export PATH=\"\$HOME/bin:\$PATH\"; m[\$k]=v" ALLOW "$PROJ" "$CFG_OFF"
+run "W432 names the shell builds at run time stay allowed" "export \$(cat .env | xargs); unset \"\$v\"" ALLOW "$PROJ" "$CFG_OFF"
+run "W433 declare -p of a protected input and env FOO=1 stay allowed" "declare -p ZENSU_SESSION_KEY; env FOO=1 true" ALLOW "$PROJ" "$CFG_OFF"
+run "W434 env -S expanding a value or an argument stays allowed" "env -S 'A=\${HOME} bash' x.sh; env -S 'bash \${HOME}/x.sh'" ALLOW "$PROJ" "$CFG_OFF"
+LC_COMMENT_PARAM="$(printf '# ${ZENSU_SESSION_KEY:=x}\ntrue')"
+run "W435 an assigning expansion inside a comment stays allowed" "$LC_COMMENT_PARAM" ALLOW "$PROJ" "$CFG_OFF"
+REASON_NAMEREF="$(payload "declare -n ref=x" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_OFF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+printf '%s' "$REASON_NAMEREF" | grep -qF 'Blocked a Bash nameref declaration, which this check cannot follow to the variable it names.' \
+  && check "W436 every nameref is refused, with a reason that says the check cannot follow it" PASS \
+  || check "W436 nameref reason (got '$REASON_NAMEREF')" FAIL
+REASON_RUNTIME_NAME="$(payload "env -S '\${N}=x bash' x.sh" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_OFF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+printf '%s' "$REASON_RUNTIME_NAME" | grep -qF 'builds the name of a variable it assigns or removes at run time' \
+  && check "W437 a name built at run time is refused with a reason that says so" PASS \
+  || check "W437 run-time name reason (got '$REASON_RUNTIME_NAME')" FAIL
+run "W438 wait -p with the name attached to its option assigns it" "wait -n -pZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W439 read -a with the name attached inside an option cluster assigns it" "read -raZENSU_SESSION_KEY" DENY "$PROJ" "$CFG_OFF"
+run "W440 a subscript holding a nested subscript is read as arithmetic" "a[ZENSU_SESSION_KEY=b[0]]=x" DENY "$PROJ" "$CFG_OFF"
+run "W441 a subscript with blanks in an assignment word is read as arithmetic" "a[ ZENSU_SESSION_KEY=1 ]=x" DENY "$PROJ" "$CFG_OFF"
+run "W442 a declaration operand's subscript with blanks is read as arithmetic" "declare a[ ZENSU_SESSION_KEY=1 ]=x" DENY "$PROJ" "$CFG_OFF"
+LC_LOCALE_DELIM="$(printf 'cat <<$"EOF"\nEOF\nZENSU_SESSION_KEY=evil bash x.sh')"
+run "W443 a \$\"…\" heredoc delimiter ends at its quote-removed word, so the next line is read" "$LC_LOCALE_DELIM" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_JOIN_ARITH="$(printf ': <<EOF\n$(( ZENSU_SESSION_\\\nKEY = 7 ))\nEOF')"
+run "W444 a backslash-newline in an unquoted body is removed before the arithmetic is read" "$LC_BODY_JOIN_ARITH" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_JOIN_PARAM="$(printf ': <<EOF\n${ZENSU_SESSION_\\\nKEY::=evil}\nEOF')"
+run "W445 a backslash-newline in an unquoted body is removed before an assigning expansion is read" "$LC_BODY_JOIN_PARAM" DENY "$PROJ" "$CFG_OFF"
+run "W446 quoted text that names declare -n or mapfile stays allowed" "git commit -m \"Refuse namerefs (declare -n) outright\"; rg -n 'local -n|declare -n' hooks; rg -n 'x|mapfile ZENSU_SESSION_KEY' tests" ALLOW "$PROJ" "$CFG_OFF"
+run "W447 a [[ operand after && is read as arithmetic" "[[ -n x && 1 -eq ZENSU_SESSION_KEY=5 ]]" DENY "$PROJ" "$CFG_OFF"
+run "W448 a [[ operand after || is read as arithmetic" "[[ x || ZENSU_SESSION_KEY-=1 -ne 0 ]]" DENY "$PROJ" "$CFG_OFF"
+run "W449 a [[ operand inside a group is read as arithmetic" "[[ ( 5 -eq ZENSU_SESSION_KEY=5 ) ]]" DENY "$PROJ" "$CFG_OFF"
+run "W450 the substring offset of \$0 is read as arithmetic" ": \${0:ZENSU_SESSION_KEY=1}" DENY "$PROJ" "$CFG_OFF"
+run "W451 the substring offset of \$@ is read as arithmetic" ": \${@:ZENSU_SESSION_KEY=1}" DENY "$PROJ" "$CFG_OFF"
+run "W452 zsh's ::= after a = prefix modifier assigns" ": \${=ZENSU_SESSION_KEY::=evil}" DENY "$PROJ" "$CFG_OFF"
+run "W453 zsh's ::= after a flag whose argument holds ) assigns" ": \${(s.).)ZENSU_SESSION_KEY::=evil}" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_CASE="$(printf ': <<EOF\n$(case x in x) ZENSU_SESSION_KEY=x bash x.sh;; esac)\nEOF')"
+run "W454 a case pattern does not end a body substitution" "$LC_BODY_CASE" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_COMMENT="$(printf ': <<EOF\n$(# )\nZENSU_SESSION_KEY=x bash x.sh)\nEOF')"
+run "W455 a comment does not end a body substitution" "$LC_BODY_COMMENT" DENY "$PROJ" "$CFG_OFF"
+LC_COMMIT_QUOTED="$(printf 'git commit -m "$(cat <<%sEOF%s\nfix: refuse (( $N++ )) and ${ZENSU_SESSION_KEY:=x}\nEOF\n)"' "'" "'")"
+run "W456 a quoted-delimiter heredoc inside a quoted substitution stays unread" "$LC_COMMIT_QUOTED" ALLOW "$PROJ" "$CFG_OFF"
+LC_COMMIT_UNQUOTED="$(printf 'git commit -m "$(cat <<EOF\nfix: $(( ZENSU_SESSION_KEY = 1 ))\nEOF\n)"')"
+run "W457 an unquoted-delimiter heredoc inside a quoted substitution is read" "$LC_COMMIT_UNQUOTED" DENY "$PROJ" "$CFG_OFF"
+run "W458 a # right after a substitution is no comment" ": \$(:)#; (( ZENSU_SESSION_KEY = 1 ))" DENY "$PROJ" "$CFG_OFF"
+run "W459 a # inside \${…} is no comment" ": \${MSG:-see #12}; (( ZENSU_SESSION_KEY = 1 ))" DENY "$PROJ" "$CFG_OFF"
+LC_WORD_HASH_DOC="$(printf ': $(:)#x <<EOF\nit%ss $(( ZENSU_SESSION_KEY = 1 ))\nEOF' "'")"
+run "W460 a heredoc after a word holding # is still a heredoc" "$LC_WORD_HASH_DOC" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_SUBSHELL_UNSET="$(printf 'cat <<EOF\n$((unset ZENSU_SESSION_KEY; bash x.sh) )\nEOF')"
+run "W461 \$(( that does not close with )) is a command substitution in a body" "$LC_BODY_SUBSHELL_UNSET" DENY "$PROJ" "$CFG_OFF"
+LC_BODY_SUBSHELL_ENV="$(printf 'cat <<EOF\n$((env -u ZENSU_SESSION_KEY bash x.sh) )\nEOF')"
+run "W462 env -u inside such a body substitution is read" "$LC_BODY_SUBSHELL_ENV" DENY "$PROJ" "$CFG_OFF"
+run "W463 an element subscript of an array literal is read as arithmetic" "a=([ZENSU_SESSION_KEY=1]=x)" DENY "$PROJ" "$CFG_OFF"
+run "W464 an element subscript in a declare -a operand is read as arithmetic" "declare -a a=([ZENSU_SESSION_KEY=1]=x)" DENY "$PROJ" "$CFG_OFF"
+run "W465 an element subscript in a += array literal is read as arithmetic" "a+=( [ZENSU_SESSION_KEY=1]=x )" DENY "$PROJ" "$CFG_OFF"
+run "W466 an arithmetic target with a nested subscript assigns" "(( ZENSU_SESSION_KEY[a[0]] = 1 ))" DENY "$PROJ" "$CFG_OFF"
+run "W467 let increments a target with a nested subscript" "let 'ZENSU_SESSION_KEY[b[0]]++'" DENY "$PROJ" "$CFG_OFF"
+run "W468 an assigning expansion with a nested subscript assigns" ": \${ZENSU_SESSION_KEY[a[0]+1]:=x}" DENY "$PROJ" "$CFG_OFF"
+LC_BRACE_SHIFT="$(printf ': ${x:-a<<b}\nZENSU_SESSION_KEY=evil bash x.sh')"
+run "W469 a << inside \${…} is no heredoc, so the next line is read" "$LC_BRACE_SHIFT" DENY "$PROJ" "$CFG_OFF"
+LC_BRACKET_SHIFT="$(printf ': $[1<<2]\nunset ZENSU_SESSION_KEY; bash x.sh')"
+run "W470 a << inside \$[…] is no heredoc, so the next line is read" "$LC_BRACKET_SHIFT" DENY "$PROJ" "$CFG_OFF"
+run "W471 zsh set -A with the array name attached assigns it" "set -AZENSU_SESSION_KEY evil" DENY "$PROJ" "$CFG_OFF"
+run "W472 zsh set +A with the array name attached assigns it" "set +AZENSU_SESSION_KEY evil" DENY "$PROJ" "$CFG_OFF"
+LC_COMMIT_APOSTROPHE="$(printf 'git commit -m "$(cat <<%sEOF%s\nfix: don%st drop the key\nEOF\n)"; (( ZENSU_SESSION_KEY = 1 ))' "'" "'" "'")"
+run "W473 an apostrophe in a quoted heredoc message does not hide the next command" "$LC_COMMIT_APOSTROPHE" DENY "$PROJ" "$CFG_OFF"
+LC_COMMIT_NAMEREF="$(printf 'git commit -m "$(cat <<%sEOF%s\ndeclare -n, typeset -n and local -n are refused.\nEOF\n)"' "'" "'")"
+run "W474 a commit message that names declare -n stays allowed" "$LC_COMMIT_NAMEREF" ALLOW "$PROJ" "$CFG_OFF"
+LC_DEEP="$(printf '%.0s$(' $(seq 70))x$(printf '%.0s)' $(seq 70))"
+REASON_DEEP="$(payload "$LC_DEEP" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_OFF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+printf '%s' "$REASON_DEEP" | grep -qF 'Blocked a Bash command nested deeper than this check reads.' \
+  && check "W475 a command nested past the reader's depth bound is refused with a reason that says so" PASS \
+  || check "W475 nesting reason (got '$REASON_DEEP')" FAIL
+run "W476 a builtin inside a function body is read" "f() { mapfile ZENSU_SESSION_KEY; }" DENY "$PROJ" "$CFG_OFF"
+run "W477 time before an arithmetic command does not hide it" "time (( ZENSU_SESSION_KEY = 1 ))" DENY "$PROJ" "$CFG_OFF"
+run "W478 a group after coproc NAME is read as commands" "coproc X { ZENSU_SESSION_KEY=x bash x.sh; }" DENY "$PROJ" "$CFG_OFF"
+run "W479 time before [[ does not hide its operands" "time [[ 1 -eq ZENSU_SESSION_KEY=1 ]]" DENY "$PROJ" "$CFG_OFF"
+run "W480 a function definition, its call and a literal brace word stay allowed" "f() { echo hi; }; f; echo { a }" ALLOW "$PROJ" "$CFG_OFF"
+run "W481 if written directly before (( still runs the arithmetic command" 'if(( ZENSU_SESSION_KEY = 1 )); then bash x.sh; fi' DENY "$PROJ" "$CFG_OFF"
+run "W482 while written directly before (( still runs the arithmetic command" 'while(( ZENSU_SESSION_KEY = 1 )); do bash x.sh; break; done' DENY "$PROJ" "$CFG_OFF"
+run "W483 for written directly before (( is the arithmetic for loop" 'for(( ZENSU_SESSION_KEY = 1; ; )); do bash x.sh; break; done' DENY "$PROJ" "$CFG_OFF"
+run "W484 if written directly before ( still runs the subshell" 'if( getopts a ZENSU_SESSION_KEY -a; bash x.sh ); then :; fi' DENY "$PROJ" "$CFG_OFF"
+run "W485 in written directly before a case pattern's ( still opens the pattern list" 'case x in(x) getopts a ZENSU_SESSION_KEY -a; bash x.sh;; esac' DENY "$PROJ" "$CFG_OFF"
+run "W486 a brace word inside a subshell does not hide the subshell's closing paren" 'echo "$( ( echo { ); (( ZENSU_SESSION_KEY = 1 )); bash x.sh )"' DENY "$PROJ" "$CFG_OFF"
+run "W487 a brace redirect target inside a subshell does not hide the subshell's closing paren" 'echo "$( ( echo > { ); (( ZENSU_SESSION_KEY = 1 )); bash x.sh )"' DENY "$PROJ" "$CFG_OFF"
+run "W488 a case after time keeps its pattern parens inside a substitution" 'echo "$(time case x in x) (( ZENSU_SESSION_KEY = 1 )); bash x.sh;; esac)"' DENY "$PROJ" "$CFG_OFF"
+run "W489 an assignment word after time keeps its blank-spaced subscript" 'time a[ ZENSU_SESSION_KEY=1 ]=x; bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W490 esac after | in a case pattern is a pattern word" 'echo "$(case x in a|esac|*) (( ZENSU_SESSION_KEY = 1 )); bash x.sh;; esac)"' DENY "$PROJ" "$CFG_OFF"
+run "W491 a regex operand of =~ keeps its parens and | inside the conditional" 'echo "$( [[ x =~ (a|b) ]]; (( ZENSU_SESSION_KEY = 1 )); bash x.sh )"' DENY "$PROJ" "$CFG_OFF"
+run "W492 an extended pattern after == keeps its parens and | inside the conditional" 'echo "$( [[ x == @(a|b) ]]; (( ZENSU_SESSION_KEY = 1 )); bash x.sh )"' DENY "$PROJ" "$CFG_OFF"
+LC_COND_COMMENT="$(printf '[[ # ]]\n1 -eq ZENSU_SESSION_KEY=1 ]]; bash x.sh')"
+run "W493 a comment inside a conditional does not end it" "$LC_COND_COMMENT" DENY "$PROJ" "$CFG_OFF"
+LC_ARRAY_COMMENT="$(printf 'a=( # )\n[ZENSU_SESSION_KEY=1]=x ); bash x.sh')"
+run "W494 a comment inside an array literal does not end it" "$LC_ARRAY_COMMENT" DENY "$PROJ" "$CFG_OFF"
+LC_JOIN_ARITH="$(printf ': $\\\n(( ZENSU_SESSION_KEY = 1 )); bash x.sh')"
+run "W495 a backslash-newline after \$ still forms an arithmetic expansion" "$LC_JOIN_ARITH" DENY "$PROJ" "$CFG_OFF"
+LC_JOIN_PARAM="$(printf ': $\\\n{ZENSU_SESSION_KEY:=x}; bash x.sh')"
+run "W496 a backslash-newline after \$ still forms an assigning expansion" "$LC_JOIN_PARAM" DENY "$PROJ" "$CFG_OFF"
+LC_JOIN_SUBST="$(printf 'echo $\\\n(getopts a ZENSU_SESSION_KEY -a; bash x.sh)')"
+run "W497 a backslash-newline after \$ still forms a command substitution" "$LC_JOIN_SUBST" DENY "$PROJ" "$CFG_OFF"
+LC_JOIN_DELIM="$(printf 'cat <<EO\\\nF\nEOF\n(( ZENSU_SESSION_KEY = 1 )); bash x.sh')"
+run "W498 a backslash-newline inside a heredoc delimiter is removed before it is compared" "$LC_JOIN_DELIM" DENY "$PROJ" "$CFG_OFF"
+LC_JOIN_BODY="$(printf 'cat <<EOF\nE\\\nOF\n(( ZENSU_SESSION_KEY = 1 )); bash x.sh')"
+run "W499 an unquoted heredoc body line joined by a backslash-newline can end the body" "$LC_JOIN_BODY" DENY "$PROJ" "$CFG_OFF"
+run "W500 ! written directly before (( still runs the arithmetic command" '!(( ZENSU_SESSION_KEY = 1 )) || bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W501 until written directly before (( still runs the arithmetic command" 'until(( ZENSU_SESSION_KEY = 1 )); do bash x.sh; done' DENY "$PROJ" "$CFG_OFF"
+run "W502 elif written directly before (( still runs the arithmetic command" 'if false; then :; elif(( ZENSU_SESSION_KEY = 1 )); then bash x.sh; fi' DENY "$PROJ" "$CFG_OFF"
+run "W503 then written directly before (( still runs the arithmetic command" 'if true; then(( ZENSU_SESSION_KEY = 1 )); bash x.sh; fi' DENY "$PROJ" "$CFG_OFF"
+run "W504 do written directly before (( still runs the arithmetic command" 'for i in 1; do(( ZENSU_SESSION_KEY = 1 )); bash x.sh; done' DENY "$PROJ" "$CFG_OFF"
+run "W505 else written directly before (( still runs the arithmetic command" 'if false; then :; else(( ZENSU_SESSION_KEY = 1 )); bash x.sh; fi' DENY "$PROJ" "$CFG_OFF"
+run "W506 time written directly before (( still runs the arithmetic command" 'time(( ZENSU_SESSION_KEY = 1 )); bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W507 an assignment word after time -- applies to the command" 'time -- ZENSU_SESSION_KEY=1 bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W508 an assignment word after time -p -- applies to the command" 'time -p -- ZENSU_SESSION_KEY=1 bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W509 regex and extended-pattern operands of [[ stay allowed" 'v=foo; [[ $v =~ ^(foo|bar)$ ]] && echo ok; [[ $v == @(a|b) ]] || echo no' ALLOW "$PROJ" "$CFG_OFF"
+run "W510 brace words, a brace in a subshell and a brace redirect target stay allowed" 'echo { } "$( ( echo { ) )"; echo > {' ALLOW "$PROJ" "$CFG_OFF"
+run "W511 esac as a pattern word after | or ( stays allowed" 'case x in a|esac) echo y;; esac; case esac in (esac) echo z;; esac' ALLOW "$PROJ" "$CFG_OFF"
+run "W512 time with its options before a command or an arithmetic command stays allowed" 'time -p ls; time -- ls; time (( i++ ))' ALLOW "$PROJ" "$CFG_OFF"
+run "W513 reserved words written directly before (( on other names stay allowed" 'if((i < 3)); then :; fi; while((n--)); do :; done' ALLOW "$PROJ" "$CFG_OFF"
+LC_ARRAY_NOTE="$(printf 'a=( 1 # note\n2 ); echo ${a[1]}')"
+run "W514 a commented array literal stays allowed" "$LC_ARRAY_NOTE" ALLOW "$PROJ" "$CFG_OFF"
+LC_CONTINUED="$(printf 'docker run \\\n  -e FOO=1 \\\n  img')"
+run "W515 a command continued over several lines stays allowed" "$LC_CONTINUED" ALLOW "$PROJ" "$CFG_OFF"
+run "W516 a [[ word that is no command stays an argument" 'echo [[ x; ls' ALLOW "$PROJ" "$CFG_OFF"
+LC_COND_NOTE="$(printf '[[ $x == y ]] # ZENSU_SESSION_KEY=1\nls')"
+run "W517 a comment after a conditional stays unread" "$LC_COND_NOTE" ALLOW "$PROJ" "$CFG_OFF"
+run "W518 time after a pipe is the external program, so a case word after it opens nothing" 'echo | time case x in; (( ZENSU_SESSION_KEY = 1 )); bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W519 a second -p after time is the command word, so a case word after it opens nothing" 'time -p -p case x in; (( ZENSU_SESSION_KEY = 1 )); bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W520 a case word that opens nothing does not hide later commands" 'time -p -p case x; let ZENSU_SESSION_KEY=1; bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W521 a [[ word in a case pattern opens no conditional" 'case x in [[ | x) ;; esac; (( ZENSU_SESSION_KEY = 1 )); bash x.sh; echo ]]' DENY "$PROJ" "$CFG_OFF"
+run "W522 bash opens no conditional at a [[ word after a leading redirection" '>f [[ x; (( ZENSU_SESSION_KEY = 1 )); bash x.sh; echo ]]' DENY "$PROJ" "$CFG_OFF"
+LC_REDIRECT_COND="$(printf '>f [[ x\n(( ZENSU_SESSION_KEY = 1 ))\nbash x.sh')"
+run "W523 a [[ word after a leading redirection does not swallow the next lines" "$LC_REDIRECT_COND" DENY "$PROJ" "$CFG_OFF"
+run "W524 bash opens no case at a case word after a leading redirection" '>f case x in; (( ZENSU_SESSION_KEY = 1 )); bash x.sh' DENY "$PROJ" "$CFG_OFF"
+LC_COMMENT_JOIN="$(printf '# \\\n: $\\\n(( ZENSU_SESSION_KEY = 1 )); bash x.sh')"
+run "W525 a comment ending in a backslash does not continue onto the next line" "$LC_COMMENT_JOIN" DENY "$PROJ" "$CFG_OFF"
+LC_QUOTED_BODY_JOIN="$(printf 'cat <<%sEOF%s\nx\\\nEOF\n: $\\\n(( ZENSU_SESSION_KEY = 1 )); bash x.sh' "'" "'")"
+run "W526 a quoted heredoc body line ending in a backslash still ends at its delimiter" "$LC_QUOTED_BODY_JOIN" DENY "$PROJ" "$CFG_OFF"
+run "W527 a case after coproc NAME is read as the coprocess command" 'echo "$(coproc X case x in x) (( ZENSU_SESSION_KEY = 1 )); bash x.sh;; esac); wait)"' DENY "$PROJ" "$CFG_OFF"
+run "W528 a subshell written against coproc NAME is read as commands" 'coproc X(getopts a ZENSU_SESSION_KEY -a; bash x.sh); wait' DENY "$PROJ" "$CFG_OFF"
+LC_EXTGLOB_PATTERN="$(printf 'shopt -s extglob\necho "$(case x in !(a)) (( ZENSU_SESSION_KEY = 1 )); bash x.sh;; esac)"')"
+run "W529 an extended !( pattern in a case pattern list stays one pattern word" "$LC_EXTGLOB_PATTERN" DENY "$PROJ" "$CFG_OFF"
+run "W530 then right after ]] is a reserved word" 'if [[ x ]] then(( ZENSU_SESSION_KEY = 1 )); bash x.sh; fi' DENY "$PROJ" "$CFG_OFF"
+run "W531 a closing brace right after ]] ends its group" 'echo "$(case x in x) { [[ y ]] } ;& y) (( ZENSU_SESSION_KEY = 1 )); bash x.sh;; esac)"' DENY "$PROJ" "$CFG_OFF"
+run "W532 zsh's typeset -T ties a protected input to an array" 'typeset -T ZENSU_SESSION_KEY k; k=(evil)' DENY "$PROJ" "$CFG_OFF"
+run "W533 a typeset -i that converts a protected value is a rebind" 'typeset -i ZENSU_SESSION_KEY' DENY "$PROJ" "$CFG_OFF"
+run "W534 a typeset -E that converts a protected value is a rebind" 'typeset -E ZENSU_SESSION_KEY' DENY "$PROJ" "$CFG_OFF"
+run "W535 an assignment word after coproc applies to its simple command" 'coproc ZENSU_SESSION_KEY=x zensu-log.sh --x' DENY "$PROJ" "$CFG_OFF"
+run "W536 a wrapper after coproc is read as in any simple command" 'coproc env CLAUDE_CODE_SESSION_ID=x cmd' DENY "$PROJ" "$CFG_OFF"
+run "W537 zsh's brace-less \$NAME[…] subscript is read as arithmetic" ': $HOME[ZENSU_SESSION_KEY=1]' DENY "$PROJ" "$CFG_OFF"
+run "W538 the -v operand of [[ evaluates its subscript" '[[ -v a[ZENSU_SESSION_KEY=1] ]]' DENY "$PROJ" "$CFG_OFF"
+run "W539 the -v operand of test evaluates its subscript" "test -v 'a[ZENSU_SESSION_KEY=1]'" DENY "$PROJ" "$CFG_OFF"
+run "W540 a builtin inside bash 5.3's \${ …; } runs in the current shell" ': ${ mapfile ZENSU_SESSION_KEY; }' DENY "$PROJ" "$CFG_OFF"
+run "W541 a builtin inside bash 5.3's \${| …; } runs in the current shell" ': ${| getopts a ZENSU_SESSION_KEY; }' DENY "$PROJ" "$CFG_OFF"
+run "W542 an option built at run time cannot hide a nameref to a protected input" 'o=-n; declare $o r=ZENSU_SESSION_KEY; r=evil; bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W543 an option built at run time cannot hide printf -v on a protected input" 'o=-v; printf $o ZENSU_SESSION_KEY evil; bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W544 zsh evaluates the operand of break as arithmetic" "for i in 1; do break 'ZENSU_SESSION_KEY=1'; done; zensu-log.sh --x" DENY "$PROJ" "$CFG_OFF"
+run "W545 compgen -V turns a protected input into an unexported array" 'compgen -V ZENSU_SESSION_KEY -W evil; bash x.sh' DENY "$PROJ" "$CFG_OFF"
+run "W546 an env -S string the shell expands builds no name for env" 'env -S "${ENV_ARGS}" node app.js; env -S ${ENV_ARGS} node app.js' ALLOW "$PROJ" "$CFG_OFF"
+LC_NBSP_DELIM="$(printf 'cat <<EOF\302\240X\nEOF\302\240X\nZENSU_SESSION_KEY=evil zensu-log.sh --x\nEOF')"
+run "W547 a heredoc delimiter keeps a blank the shell does not split on" "$LC_NBSP_DELIM" DENY "$PROJ" "$CFG_OFF"
+run "W548 zsh's unset -m pattern that matches a protected input is a removal" "unset -m 'ZENSU_SESSION_*'" DENY "$PROJ" "$CFG_OFF"
+run "W549 an unset -m pattern that matches no protected input stays allowed" "unset -m 'FOO_*'; unset -v FOO" ALLOW "$PROJ" "$CFG_OFF"
+LC_WIDE_SUBSCRIPTS="$(printf 'a[;%.0s' $(seq 1 20000))"
+run "W550 unclosed subscripts across a long command exhaust the work bound" "$LC_WIDE_SUBSCRIPTS" DENY "$PROJ" "$CFG_OFF"
+run "W551 ordinary declarations, subscripts, test -v and a coproc group stay allowed" "local x=\"\$v\"; printf '%s=%s\n' ZENSU_SESSION_KEY \"\$ZENSU_SESSION_KEY\"; typeset -i count=0; echo \$PATH[0]; test -v HOME; coproc mycat { cat; }" ALLOW "$PROJ" "$CFG_OFF"
+run "W552 zsh opens a conditional after a leading redirection, so its -eq operand assigns" ">/dev/null [[ 1 -eq ZENSU_SESSION_KEY=1 ]]; bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W553 zsh opens a conditional after a descriptor redirection, so its -lt operand assigns" "2>/dev/null [[ ZENSU_SESSION_KEY=1 -lt 2 ]]; bash x.sh" DENY "$PROJ" "$CFG_OFF"
+run "W554 a conditional and a group after a leading redirection stay allowed" ">/dev/null [[ -n \$x ]] && echo ok; 2>/dev/null { echo a; echo b; }" ALLOW "$PROJ" "$CFG_OFF"
 
 # The mandatory control parser is a trust boundary. A selective runtime failure
 # must deny before config and escape hatches instead of falling through.
@@ -1062,10 +1493,9 @@ tee >(proc) realfile
 without quote awareness
 exported by the user's shell before Claude
 the whole command is recorded UNRESOLVED
-a shell keyword hides the verb
+outside WRAP or the coproc keyword hides the verb
 ride along on an in-project --work-tree
 move the cwd to
-tokens split on whitespace
 bare worktree NAME
 assumes the MSYS mount convention
 clamps at the drive root
