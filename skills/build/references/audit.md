@@ -14,7 +14,7 @@ Read this when the last Phase 4 step is done. Step 10 is in `references/review-c
    - If the project IS buildable, run the build. Capture exit code and the last ~30 lines of output.
    - **Build passed** (exit 0, no critical warnings): record `Build: ✓ passed`. Proceed to step 3.
    - **Build failed**: DO NOT mark Phase 6 complete. Treat the failure as a new requirement and return to Phase 2 to amend the plan with a new `[W]` integration step that fixes the build, then create a task for it (Phase 3 mechanics) and re-run Phase 4-6 after the fix. The Phase 6 "done" claim is only valid when the build is green.
-   - If the build can't run for ambient reasons (dependencies not installed, network down, unknown toolchain), record `Build: – skipped (reason)` and continue — do not block the audit on environment problems the developer must resolve. Surface the skip prominently in the final report so the developer notices.
+   - If the build can't run for ambient reasons (dependencies not restorable from the lockfile, network down, unknown toolchain), record `Build: – skipped (reason)` and continue — do not block the audit on environment problems the developer must resolve. Surface the skip prominently in the final report so the developer notices.
 3. Coverage report (changed files only):
    - If `{coverage_cmd}` is null → log `COVERAGE SKIPPED — no tool` and skip to step 4.
    - Else:
