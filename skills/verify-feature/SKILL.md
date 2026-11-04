@@ -100,10 +100,10 @@ only these points:
    id to `--driver` when you record the criterion.
    The credential-blind rules above bind every driver: never the
    autopilot `storageState` login, and never a secret in a command or in the evidence. An
-   exit-code check reaches only an unauthenticated, synthetic, loopback target and discards its
-   own output (`curl -fsS -o /dev/null http://127.0.0.1:<port>/…`, `<command> >/dev/null 2>&1`),
-   because the evidence runner prints the tail of that output to you. A criterion that needs a
-   token file, ambient credentials or a non-loopback host is `partial`.
+   exit-code check reaches only an unauthenticated, synthetic, loopback target and prints only
+   what `rules/acceptance-evidence.md` allows, because the evidence runner prints the tail of its
+   output to you; that file also says how one run backs several ACs. A criterion that needs
+   a token file, ambient credentials or a non-loopback host is `partial`.
 4. **The plugin observes every exit-code check.** Run the check through
    `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope acceptance --cmd '<check>' --log <run log>`
    and cite the `record=er1_…` id of its summary line. The check must leave the working tree
