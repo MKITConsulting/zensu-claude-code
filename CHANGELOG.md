@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-04
+
+### Added
+
+- **review-chain**: Keep audit scope across retries and gate review rounds on one canonical packet (#485)
+
+### Fixed
+
+- **build**: Scope Phase 1.5 preconditions to the dependencies it lists (#559)
+- **session-trail**: Check desktop-store owner and mode like the resolver (#551)
+- **hooks**: Read commands the way the shell does in the source-write gate (#554)
+
 ## [0.35.0] - 2026-11-03
 
 ### Added
