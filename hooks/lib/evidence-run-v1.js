@@ -1103,6 +1103,11 @@ function run(options) {
       return;
     }
     const projectRoot = options.projectRoot;
+    if (typeof options.workTreeFault === 'string' && options.workTreeFault !== '') {
+      say(stderr, `zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: ${screen(options.workTreeFault, projectRoot, limits)}`);
+      resolve(2);
+      return;
+    }
     if (options.scope === 'full' && !options.local && options.ciPolicy && options.ciPolicy.runner === 'ci') {
       say(stderr, `zensu-log.sh --evidence-run: this chain runs the full suite in CI (decided by: ${options.ciPolicy.decidedBy}), so it is not run here — this refusal is not a suite failure. Run the tests affected by the change instead with --scope scoped --cmd '<the affected tests>'. Add --local only when the user explicitly asked for a local full-suite run.`);
       say(stderr, `FULL SUITE — CI contract | ${options.ciPolicy.summary}`);

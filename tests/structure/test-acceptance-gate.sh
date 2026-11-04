@@ -719,14 +719,17 @@ EVIDENCE
   if [ "$RC_RUN" -eq 2 ] && [ ! -e "$WORK/fault-ran" ] \
     && grep -qF "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: " "$WORK/eerr" \
     && [ "$RC_ST" -eq 2 ] \
-    && grep -qF "zensu-log.sh --acceptance-status: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/serr" \
+    && grep -qF "ACCEPTANCE STATUS — unavailable | the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/sout" \
+    && grep -qF 'work tree not found' "$WORK/sout" \
     && [ "$RC_REC" -eq 2 ] \
     && grep -qF "zensu-log.sh --acceptance-record: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/rerr" \
-    && grep -qF 'work tree not found' "$WORK/serr"; then
-    check "A31 a bound chain whose worktree cannot be resolved refuses the acceptance run and both acceptance verbs with exit 2 and the cause" PASS
+    && grep -qF 'work tree not found' "$WORK/rerr" \
+    && grep -qF "the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$LIB" \
+    && ! grep -qF "the chain's work tree could not be determined" "$LOG"; then
+    check "A31 a bound chain whose worktree cannot be resolved refuses the acceptance run and both acceptance verbs with exit 2 and the cause, worded by the modules" PASS
   else
     check "A31 a bound chain whose worktree cannot be resolved refuses with exit 2 (run=$RC_RUN status=$RC_ST record=$RC_REC)" FAIL
-    cat "$WORK/eerr" "$WORK/serr" "$WORK/rerr"
+    cat "$WORK/eerr" "$WORK/sout" "$WORK/serr" "$WORK/rerr"
   fi
 else
   check "A29 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL

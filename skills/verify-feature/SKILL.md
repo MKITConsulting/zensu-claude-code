@@ -141,9 +141,8 @@ only these points:
    starts — `git`, the runtime recipe, fixtures and teardown, but never a `playwright-cli` call,
    which must stay one plain call — as `cd "<that root>" && …`, and read the recipe files
    from that root; that `cd` is the one prefix a recorded `down` may carry (Phase 2 step 3).
-   After `/zensu:adopt-session --reanchor` the Bash
-   tool still starts in the session's previous worktree, while every record binds to the
-   anchor's tree. `--evidence-run` needs no prefix: it already runs in the anchor.
+   After `/zensu:adopt-session --reanchor` the Bash tool still starts in the session's previous worktree,
+   while every record binds to the anchor's tree. `--evidence-run` needs no prefix: it runs in the chain's work tree.
 
 ## Phase 0 — Resolve scope and target
 

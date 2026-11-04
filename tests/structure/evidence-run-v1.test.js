@@ -1231,3 +1231,40 @@ test('the verdict CLI reads the work tree and its fault from the transport', asy
   assert.match(fault.stderr, /could not be resolved \(the run record is gone\)/);
 });
 
+test('a run whose work tree could not be determined refuses after its usage checks, runs nothing and names the screened cause', async () => {
+  const root = gitRepo();
+  const data = pluginData();
+  const marker = path.join(tempDir('marker'), 'ran');
+  const fault = 'work tree not found:\n`gone`';
+  const refused = await runIn(root, data, { scope: 'scoped', command: `touch ${evr.shellQuote(marker)}`, workTreeFault: fault });
+  assert.equal(refused.code, 2);
+  assert.equal(refused.stderr, "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: work tree not found: 'gone'\n");
+  assert.equal(refused.stdout, '');
+  assert.equal(refused.line, '');
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(fs.existsSync(path.join(data, 'evidence-run')), false);
+  const usage = await runIn(root, data, { scope: 'lint', workTreeFault: fault });
+  assert.equal(usage.code, 2);
+  assert.doesNotMatch(usage.stderr, /work tree could not be determined/);
+  const ci = await runIn(root, data, { scope: 'full', command: 'true', ciPolicy: NESTED_CI_POLICY, workTreeFault: fault });
+  assert.equal(ci.code, 2);
+  assert.match(ci.stderr, /the chain's work tree could not be determined, so the command was not run/);
+  assert.doesNotMatch(ci.stderr, /runs the full suite in CI/);
+  assert.equal((await runIn(root, data, { scope: 'scoped', command: 'true', workTreeFault: '' })).code, 0);
+});
+
+test('the run CLI reads the work-tree fault from the transport and runs nothing', () => {
+  const root = gitRepo();
+  const data = pluginData();
+  const transport = tempDir('transport');
+  const marker = path.join(tempDir('marker'), 'ran');
+  fs.writeFileSync(path.join(transport, 'command'), `touch ${evr.shellQuote(marker)}`);
+  fs.writeFileSync(path.join(transport, 'work-tree-fault'), 'the run record is gone');
+  const env = { ...process.env, ZENSU_EVR_DIR: transport, ZENSU_EVR_PLUGIN_DATA: data, ZENSU_EVR_SESSION_KEY: SESSION, ZENSU_EVR_PROJECT_ROOT: root, ZENSU_EVR_CWD: root, ZENSU_EVR_SCOPE: 'scoped' };
+  const refused = childProcess.spawnSync(process.execPath, [LIB, 'run'], { env, encoding: 'utf8' });
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.equal(refused.stderr, "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: the run record is gone\n");
+  assert.equal(refused.stdout, '');
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(fs.existsSync(path.join(transport, 'run-log-line')), false);
+});
