@@ -4,15 +4,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { msysDrivePrefix } = require('./claude-path-v1.js');
+const {
+  DESKTOP_RECORD_MAX_BYTES,
+  writableOnlyByCaller,
+  anyOwnerOrMode,
+  realDirectory,
+  readBoundedFile,
+} = require('./desktop-store-read-v1.js');
 
 const HOST_SESSION_RE = /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const UNSAFE_PATH_RE = /[\0\t\r\n]/;
-const DESKTOP_RECORD_MAX_BYTES = 8 * 1024 * 1024;
 const CONTEXT_RECORD_MAX_BYTES = 1024 * 1024;
 const CONTEXT_HOST = 'claude';
 const GIT_TIMEOUT_MS = 3000;
-const READ_AGAIN_BUDGET = 16;
 const STORE_SEGMENTS = Object.freeze(['Claude', 'claude-code-sessions']);
 const EMPTY_FIELD = '-';
 
@@ -71,20 +76,6 @@ function turnOf(record) {
   return completed === undefined || completed === null || completed === 0 ? TURNS.FIRST : TURNS.LATER;
 }
 
-function writableOnlyByCaller(stat) {
-  if (process.platform !== 'win32' && (stat.mode & 0o022) !== 0) return false;
-  return typeof process.getuid !== 'function' || stat.uid === process.getuid();
-}
-
-function realDirectory(target, accept = () => true) {
-  try {
-    const stat = fs.lstatSync(target);
-    return !stat.isSymbolicLink() && stat.isDirectory() && accept(stat);
-  } catch (_) {
-    return false;
-  }
-}
-
 function storeCandidates(platform, env) {
   const override = typeof env.ZENSU_CCD_STORE === 'string' ? env.ZENSU_CCD_STORE.trim() : '';
   if (override !== '') {
@@ -117,60 +108,6 @@ function sessionDirectory(platform, env, account, organization) {
     }
   }
   return null;
-}
-
-function pause(milliseconds) {
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-function readBoundedFile(file, maxBytes) {
-  let stat;
-  try {
-    stat = fs.lstatSync(file);
-  } catch (error) {
-    return { state: error && error.code === 'ENOENT' ? 'missing' : 'refused' };
-  }
-  if (stat.isSymbolicLink() || !stat.isFile() || stat.size > maxBytes || !writableOnlyByCaller(stat)) {
-    return { state: 'refused' };
-  }
-  let fd;
-  try {
-    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
-  } catch (error) {
-    return { state: error && error.code === 'ENOENT' ? 'missing' : 'refused' };
-  }
-  try {
-    const opened = fs.fstatSync(fd);
-    if (!opened.isFile() || opened.size > maxBytes || !writableOnlyByCaller(opened)) return { state: 'refused' };
-    const buffer = Buffer.alloc(opened.size + 1);
-    let length = 0;
-    let againBudget = READ_AGAIN_BUDGET;
-    for (;;) {
-      let count;
-      try {
-        count = fs.readSync(fd, buffer, length, buffer.length - length, null);
-      } catch (error) {
-        if (!error || (error.code !== 'EAGAIN' && error.code !== 'EWOULDBLOCK')) throw error;
-        if (againBudget === 0) return { state: 'changing' };
-        againBudget -= 1;
-        pause(1);
-        continue;
-      }
-      if (count === 0) break;
-      length += count;
-      if (length === buffer.length) return { state: 'changing' };
-    }
-    return { state: 'read', text: buffer.toString('utf8', 0, length) };
-  } catch (_) {
-    return { state: 'refused' };
-  } finally {
-    fs.closeSync(fd);
-  }
 }
 
 function parseObject(text) {
@@ -246,7 +183,7 @@ function readParentRoot(pluginData, expected, deps) {
     return { reason: REASONS.PARENT_CONTEXT_UNAVAILABLE };
   }
   try {
-    if (!realDirectory(root) || fs.realpathSync.native(root) !== root) {
+    if (!realDirectory(root, anyOwnerOrMode) || fs.realpathSync.native(root) !== root) {
       return { reason: REASONS.PARENT_ROOT_UNAVAILABLE };
     }
   } catch (_) {
