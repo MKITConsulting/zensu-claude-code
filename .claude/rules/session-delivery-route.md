@@ -161,7 +161,8 @@ another way, such as a path joined from the bare stem in node, or written by ano
 A session another Claude Desktop session started (`start_session`, fresh or forked context) has its
 own CLI session id and key, so the parent's marker never reached it: over 424 linked sessions
 measured on 2026-10-18, none opened with a decided route, the 6 whose parent had recorded the workflow route
-included. Its first prompt is the brief the parent wrote, and it arrives as `typed`, so a route
+included. Its first prompt is the brief the parent wrote, and the reminder answers it as a typed
+prompt (a fresh brief classifies as `session-brief`, which the reminder treats as typed), so a route
 named in a brief acted as the user's own preference. The measurements and decisions are in
 `docs/superpowers/specs/2026-10-18-linked-session-route-design.md`.
 
@@ -231,7 +232,9 @@ marker that wins. `zensu-delivery-route.sh` keeps its four verbs: only the hooks
 files.
 
 **The brief note.** Both ask-hooks resolve the lineage: the reminder on a typed, slash-with-arguments
-or CI-monitor prompt while no chain is active, and the plan gate on its standalone branch. The
+or CI-monitor prompt while no chain is active, and the plan gate on its standalone branch. A brief
+that opens with the app's `Background (from the session that started this one):` line classifies as
+`session-brief` (`.claude/rules/prompt-origin.md`), and the reminder treats it as typed here. The
 resolver answers `fresh-linked` only on the run that wrote the linked marker from absent AND only
 while the own desktop record shows no completed turn, and only the reminder then prefixes
 `ZENSU_LINKED_BRIEF_LEAD` from `hooks/lib/zensu-directive.sh` to whichever shape it emits, through

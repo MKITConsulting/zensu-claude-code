@@ -13,10 +13,11 @@
 # active mode, both resolve to OFF: unreadable state must never impose the mode on
 # a user who may have just left it.
 #
-# Deactivation is handled HERE rather than by the model: a prompt matching the
-# off-phrases writes `{"active":false}` directly, so "normal mode" still works
-# after the model has drifted. It WRITES rather than deletes on purpose — under a
-# true default, removing the marker would re-enable the mode the user just left.
+# Deactivation is handled HERE rather than by the model: the user's own prompt
+# matching the off-phrases writes `{"active":false}` directly, so "normal mode"
+# still works after the model has drifted. It WRITES rather than deletes on
+# purpose — under a true default, removing the marker would re-enable the mode the
+# user just left.
 # The marker is keyed by the resolved Session Control key, so a session with a new
 # key starts from the configured default, one that keeps its key keeps the mode,
 # and one session's choice never leaks into another.
@@ -530,7 +531,7 @@ elif [ -z "$ZEN_FIELDS" ]; then
 fi
 # THE LAST-RESORT OFF-PHRASE SCAN, over the RAW payload, in one place because it
 # is reached from two arms that lose the prompt for different reasons. It costs no
-# child and no watchdog budget: `$INPUT` is already in this shell.
+# watchdog budget, and no `node` child unless the payload carries an `origin` key.
 #
 # BOUNDED, because widening its reach re-opened its accepted false positive. The
 # raw payload carries `cwd` and `transcript_path`, so a worktree or a transcript
@@ -538,16 +539,64 @@ fi
 # never asked - and this repository`s own worktree naming makes that reachable.
 # Both values are stripped before the match.
 #
-# RESIDUAL, stated rather than implied: this is still a scan over raw JSON and not
-# over the `prompt` field, because in this branch the prompt is precisely what
-# could not be read. A future path-bearing field is not covered, and a false
-# positive still only turns off a presentation mode - while the behaviour it
-# replaces can trap the user inside one.
+# RESIDUAL, stated rather than implied: when no string `prompt` can be read out of
+# the raw text this is still a scan over raw JSON, because in this branch the prompt
+# is precisely what could not be parsed. A future path-bearing field is not covered
+# there, and a false positive still only turns off a presentation mode - while the
+# behaviour it replaces can trap the user inside one.
 # ONE ALTERNATION, held here and consumed by both recognizers. It was spelled
 # twice, byte-identically, with nothing comparing the two - so a sixth phrase
 # added to one arm would have narrowed the only in-band escape on the other with
 # every check green, the drift shape this repository already tracks for `WRAP`.
 ZEN_OFF_PHRASES='(^|[^[:alnum:]])(zen[ -]?(mode )?off|stop zen|turn off zen([ -]?mode)?)([^[:alnum:]]|$)'
+
+zen_origin_lib_load() {
+  local lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-origin.sh"
+  if [ -f "$lib" ] && [ -r "$lib" ]; then
+    source "$lib"
+  fi
+  declare -F zensu_prompt_origin >/dev/null 2>&1 || zensu_prompt_origin() { :; }
+  declare -F zensu_prompt_own_text >/dev/null 2>&1 || zensu_prompt_own_text() { printf '%s' "${1-}"; }
+}
+zen_origin_lib_load
+
+zen_origin_may_deactivate() {
+  case "$(zensu_prompt_origin "$1" "$INPUT")" in
+    typed|slash-command|slash-command-args|'') return 0 ;;
+  esac
+  return 1
+}
+
+zen_payload_prompt_text() {
+  printf '%s' "$1" | awk '
+    { buf = buf $0 "\n" }
+    END {
+      found = 0
+      while ((i = index(buf, "\"prompt\"")) > 0) {
+        buf = substr(buf, i + 8)
+        if (sub(/^[ \t\r\n]*:[ \t\r\n]*"/, "", buf)) { found = 1; break }
+      }
+      if (!found || !match(buf, /^([^"\\]|\\.)*"/)) exit 3
+      buf = substr(buf, 1, RLENGTH - 1)
+      gsub(/\\\\/, "\001", buf)
+      gsub(/\\n/, "\n", buf)
+      gsub(/\\t/, "\t", buf)
+      gsub(/\\r/, "\r", buf)
+      gsub(/\001/, "\\", buf)
+      printf "%s", buf
+    }'
+}
+
+zen_payload_own_text() {
+  local text rc=0
+  text="$(zen_payload_prompt_text "$1")" || rc=$?
+  zen_origin_may_deactivate "$text" || return 0
+  if [ "$rc" -eq 0 ]; then
+    zensu_prompt_own_text "$text"
+  else
+    printf '%s' "$1"
+  fi
+}
 
 zen_offphrase_in_payload() {
   # ESCAPE-AWARE. `"[^"]*"` stops at the first `"` BYTE, including the `"` of a
@@ -564,11 +613,11 @@ zen_offphrase_in_payload() {
   # unavailable, while the directive and the operator row advertise it
   # unqualified. Stated here rather than left to be inferred from two call sites.
   #
-  # RESIDUAL, unchanged: this is still a scan over raw JSON rather than over the
-  # `prompt` field, because in this branch the prompt is precisely what could not
-  # be read. A future path-bearing field is not covered, and a false positive
-  # still only turns off a presentation mode - while the behaviour it replaces can
-  # trap the user inside one.
+  # RESIDUAL, unchanged: when the caller reads no string `prompt`, this is still a
+  # scan over raw JSON, because in this branch the prompt is precisely what could
+  # not be parsed. A future path-bearing field is not covered there, and a false
+  # positive still only turns off a presentation mode - while the behaviour it
+  # replaces can trap the user inside one.
   printf '%s' "$1" \
     | sed -E -e 's/"cwd"[[:space:]]*:[[:space:]]*"(\\.|[^"\\])*"//g' \
              -e 's/"transcript_path"[[:space:]]*:[[:space:]]*"(\\.|[^"\\])*"//g' \
@@ -626,7 +675,7 @@ elif [ "$ZEN_LOST_PROMPT" -eq 1 ]; then
   # process. Both arms reach it now, and the disclosure below still prints:
   # finding an off phrase in the raw payload is not the same as having read the
   # prompt, and the user is told the anchor and the prompt were lost either way.
-  if zen_offphrase_in_payload "$INPUT"; then
+  if zen_offphrase_in_payload "$(zen_payload_own_text "$INPUT")"; then
     ZEN_OFF_INBAND=1
   fi
   # KEYED ON THE RECOVERY, NOT ON THE FIRST CHILD`S STATUS. Both branches above
@@ -672,15 +721,18 @@ fi
 
 ZEN_OFF=0
 if [ -n "$PROMPT" ]; then
-  # THE SHARED ALTERNATION, not a second copy of it.
-  if printf '%s' "$PROMPT" | grep -qiE "$ZEN_OFF_PHRASES"; then
-    ZEN_OFF=1
-  else
-    case "$(printf '%s' "$PROMPT" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' | tr -d '[:punct:]')" in
-      normalmode) ZEN_OFF=1 ;;
-    esac
+  if zen_origin_may_deactivate "$PROMPT"; then
+    ZEN_OWN_TEXT="$(zensu_prompt_own_text "$PROMPT")"
+    # THE SHARED ALTERNATION, not a second copy of it.
+    if printf '%s' "$ZEN_OWN_TEXT" | grep -qiE "$ZEN_OFF_PHRASES"; then
+      ZEN_OFF=1
+    else
+      case "$(printf '%s' "$ZEN_OWN_TEXT" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' | tr -d '[:punct:]')" in
+        normalmode) ZEN_OFF=1 ;;
+      esac
+    fi
   fi
-elif [ "$ZEN_OFF_INBAND" -eq 0 ]; then
+elif [ "$ZEN_LOST_PROMPT" -eq 0 ]; then
   # AN EMPTY DERIVED PROMPT REACHES THE LAST RESORT TOO, and without this arm it
   # did not. The gate further up is `ZEN_LOST_PROMPT`, which only the child`s own
   # FAILURE or an empty capture can set - but the child does neither on a
@@ -688,13 +740,13 @@ elif [ "$ZEN_OFF_INBAND" -eq 0 ]; then
   # capture is non-empty, the flag stays 0, and the whole raw-payload block is
   # skipped. The prompt is nonetheless empty here, which is the state that costs
   # the escape, so the SAME scan runs from the SAME owner rather than from a
-  # second copy. Guarded on `ZEN_OFF_INBAND` so the block above cannot pay for it
-  # twice.
+  # second copy. Guarded on `ZEN_LOST_PROMPT`, because a lost prompt has already
+  # been scanned by the block above, so no turn pays for the scan twice.
   #
   # Not a new false-positive vector: `zen_offphrase_in_payload` already strips
-  # both path-bearing fields before it looks, and a legitimately empty prompt
+  # both path-bearing fields before it looks, and a missing or non-string prompt
   # carrying an off phrase elsewhere in the payload is the case this exists for.
-  if zen_offphrase_in_payload "$INPUT"; then
+  if zen_offphrase_in_payload "$(zen_payload_own_text "$INPUT")"; then
     ZEN_OFF_INBAND=1
   fi
 fi
