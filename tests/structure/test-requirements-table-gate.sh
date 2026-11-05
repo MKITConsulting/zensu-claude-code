@@ -1095,8 +1095,10 @@ echo "== The receipt writer's own refusal arms =="
 # its first temp file and every assertion below would pass or fail for a reason
 # unrelated to its contract. The session-key fallback is guarded by
 # `[ -f "$(dirname "$0")/session-control-core-v1.js" ]`, so a copy of the script
-# WITHOUT its sibling module reaches the fallback with node still available and
-# the writer still able to write.
+# WITHOUT its sibling module reaches the fallback with node still available. The
+# copy carries no audit-scope module either, so it writes no receipt for any key:
+# RW1 and RW2 judge only how the key resolves, and no check here observes where a
+# receipt for a refused key would land.
 RW_DIR="$(mktemp -d)"
 RW_BIN="$RW_DIR/bin"
 mkdir -p "$RW_BIN"
@@ -1117,38 +1119,37 @@ printf 'v2\n' > "$RW_PROJ/tracked.txt"
 printf 'S1 IMPL completed — files: tracked.txt\n' > "$RW_DIR/run.log"
 RW_GOOD="scv1_$(printf 'a%.0s' $(seq 64))"
 
-/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
-  --project "$RW_PROJ" --session "$RW_GOOD" >/dev/null 2>&1
-[ -f "$RW_PROJ/.zensu/state/edit-landing-${RW_GOOD}.json" ]
-check "RW1 a canonical scv1 key survives the fallback and lands the receipt in the project state dir" "$(verdict $?)"
+RW_OUT_GOOD="$(/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_GOOD" 2>&1)"
+RW_GOOD_RC=$?
+{ [ "$RW_GOOD_RC" -eq 2 ] && printf '%s' "$RW_OUT_GOOD" | grep -qF 'the audit scope was not bound' \
+  && ! printf '%s' "$RW_OUT_GOOD" | grep -qF 'session key resolved empty' \
+  && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_GOOD}.json" ]; }
+check "RW1 a canonical scv1 key survives the fallback and is refused only because the copy carries no audit-scope module (rc=$RW_GOOD_RC)" "$(verdict $?)"
 RW_OUT_BAD="$(/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session 'scv1_../../escape' 2>&1)"
 printf '%s' "$RW_OUT_BAD" | grep -qF 'session key resolved empty'
 check "RW2 a non-canonical --session is refused by the anchored fallback, not turned into a path" "$(verdict $?)"
-# The whole point of the anchored shape: nothing may land outside the audited
-# project's own state dir. RW1 is the positive control that makes this meaningful
-# — an assertion that "no receipt escaped" proves nothing if none is ever written.
-[ -z "$(find "$RW_DIR" -path "$RW_PROJ/.zensu" -prune -o -name 'edit-landing-*.json' -print 2>/dev/null)" ]
-check "RW2b the refused key wrote no receipt outside the project state dir" "$(verdict $?)"
 RW_HEX63="$(printf '%063d' 0)"
 RW_WIDE="scv1_${RW_HEX63}B"
 RW_WIDE_OUT="$(LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session "$RW_WIDE" 2>&1)"
 RW_WIDE_RC=$?
 RW_LOCALE_GOOD="scv1_$(printf 'c%.0s' $(seq 64))"
-LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
-  --project "$RW_PROJ" --session "$RW_LOCALE_GOOD" >/dev/null 2>&1
+RW_LOCALE_GOOD_OUT="$(LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_LOCALE_GOOD" 2>&1)"
 RW_LOCALE_GOOD_RC=$?
 RW_RANGE="$(LC_ALL=en_US.ISO8859-1 /bin/bash -c '[[ "$1" =~ ^scv1_[0-9a-f]{64}$ ]] && printf collating || printf ascii' _ "$RW_WIDE" 2>/dev/null)"
 if [ "$RW_WIDE_RC" -eq 2 ] && printf '%s' "$RW_WIDE_OUT" | grep -qF 'session key resolved empty' \
     && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_WIDE}.json" ] \
-    && [ "$RW_LOCALE_GOOD_RC" -eq 0 ] && [ -f "$RW_PROJ/.zensu/state/edit-landing-${RW_LOCALE_GOOD}.json" ]; then
+    && [ "$RW_LOCALE_GOOD_RC" -eq 2 ] && printf '%s' "$RW_LOCALE_GOOD_OUT" | grep -qF 'the audit scope was not bound' \
+    && ! printf '%s' "$RW_LOCALE_GOOD_OUT" | grep -qF 'session key resolved empty'; then
   case "$RW_RANGE" in
     (collating) check "RW2c a locale whose bracket ranges collate does not widen the fallback's key test" PASS ;;
     (*) check "RW2c bracket ranges did not collate under en_US.ISO8859-1 in this shell, so the locale probe could not discriminate" PASS ;;
   esac
 else
-  check "RW2c under en_US.ISO8859-1 the fallback refuses scv1_ plus 63 hex plus B and still lands a canonical key (rc=$RW_WIDE_RC, control rc=$RW_LOCALE_GOOD_RC)" FAIL
+  check "RW2c under en_US.ISO8859-1 the fallback refuses scv1_ plus 63 hex plus B and still accepts a canonical key (rc=$RW_WIDE_RC, control rc=$RW_LOCALE_GOOD_RC)" FAIL
 fi
 RW_BARE="$RW_DIR/bare"
 mkdir -p "$RW_BARE"
@@ -1174,9 +1175,10 @@ check "RW2e an inherited zensu_session_key_canonical never stands in for the one
 # putting a file where the destination directory belongs while the claim itself
 # really landed.
 RW_GOOD2="scv1_$(printf 'b%.0s' $(seq 64))"
+mkdir -p "$RW_PROJ/.zensu/state"
 mv "$RW_PROJ/.zensu/state" "$RW_PROJ/.zensu/state-kept"
 : > "$RW_PROJ/.zensu/state"
-/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+/bin/bash "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session "$RW_GOOD2" >/dev/null 2>&1
 RW_RC_PLUMBING=$?
 rm -f "$RW_PROJ/.zensu/state"
@@ -1186,7 +1188,7 @@ check "RW3 a receipt-plumbing failure exits 2 (environment), not 1 (a claim did 
 # Discrimination for RW3, in BOTH directions: the same fixture with a writable
 # destination exits 0, and a genuinely unlanded claim exits 1. Without these two,
 # RW3 could be observing a fixture that always exits 2.
-/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+/bin/bash "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session "$RW_GOOD2" >/dev/null 2>&1
 [ $? -eq 0 ]
 check "RW3a the same fixture with a writable destination exits 0" "$(verdict $?)"

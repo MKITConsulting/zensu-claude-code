@@ -902,7 +902,7 @@ function currentTree(root, projectRoot) {
   let scratch = null;
   try {
     scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-xr-'));
-    return evidence.computeTree(root, scratch, undefined, projectStateExclusion(root, projectRoot));
+    return evidence.computeTree(root, scratch, undefined, { excluded: projectStateExclusion(root, projectRoot) });
   } catch {
     return { tree: null, reason: 'tree-scratch' };
   } finally {

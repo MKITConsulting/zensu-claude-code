@@ -247,6 +247,7 @@ function render(report) {
 
 function parseArgs(argv) {
   let root = "";
+  let input = null;
   for (let i = 0; i < argv.length; i++) {
     const arg = String(argv[i]);
     if (arg === "--root") {
@@ -254,14 +255,104 @@ function parseArgs(argv) {
       i++;
     } else if (arg.startsWith("--root=")) {
       root = arg.slice("--root=".length);
+    } else if (arg === "--input") {
+      input = argv[i + 1] === undefined ? "" : String(argv[i + 1]);
+      i++;
+    } else if (arg.startsWith("--input=")) {
+      input = arg.slice("--input=".length);
     }
   }
-  return { root };
+  return { root, input };
+}
+
+class InputError extends Error {}
+
+function readInputFile(file) {
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (_) {
+    throw new InputError("the finding JSON file cannot be read");
+  }
+  if (stat.isSymbolicLink()) throw new InputError("the finding JSON file is a symbolic link");
+  if (!stat.isFile()) throw new InputError("the finding JSON file is not a regular file");
+  if (stat.size > STDIN_MAX_BYTES) throw new InputError("the finding JSON file exceeds " + STDIN_MAX_BYTES + " bytes");
+  const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+  } catch (_) {
+    throw new InputError("the finding JSON file cannot be read");
+  }
+  try {
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile()) throw new InputError("the finding JSON file is not a regular file");
+    if (opened.size > STDIN_MAX_BYTES) throw new InputError("the finding JSON file exceeds " + STDIN_MAX_BYTES + " bytes");
+    const buffer = Buffer.alloc(opened.size);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const read = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+      if (read === 0) break;
+      offset += read;
+    }
+    return buffer.subarray(0, offset).toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function parseJsonInput(text) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (_) {
+    throw new InputError("the finding JSON does not parse");
+  }
+  const keys = value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : null;
+  if (!keys || keys.length !== 2 || !keys.includes("changedFiles") || !keys.includes("findings")) {
+    throw new InputError("the finding JSON must be an object with exactly changedFiles and findings");
+  }
+  if (!Array.isArray(value.changedFiles)
+      || !value.changedFiles.every((entry) => typeof entry === "string" && entry !== "" && !/[\r\n\0]/.test(entry))) {
+    throw new InputError("changedFiles must be an array of single-line paths");
+  }
+  if (!Array.isArray(value.findings) || !value.findings.every((entry) => typeof entry === "string" && entry.trim() !== "")) {
+    throw new InputError("findings must be an array of non-empty strings");
+  }
+  return { changedFiles: value.changedFiles, findings: value.findings };
+}
+
+function jsonMain(root, input, empty) {
+  const invalid = (reason) => "invalid-input " + reason + "\n" + empty;
+  if (input === "") return invalid("--input requires a file");
+  if (root === "") return invalid("--root is required");
+  try {
+    if (!fs.statSync(root).isDirectory()) return invalid("--root is not a directory");
+  } catch (_) {
+    return invalid("--root is not a directory");
+  }
+  let parsed;
+  try {
+    parsed = parseJsonInput(readInputFile(input));
+  } catch (error) {
+    return invalid(error instanceof InputError ? error.message : "the finding JSON file cannot be read");
+  }
+  let output;
+  try {
+    output = render(verifyFindings({ root, changedFiles: parsed.changedFiles, findings: parsed.findings }));
+  } catch (_) {
+    return invalid("the findings could not be graded");
+  }
+  try {
+    require("./review-packet-v1.js").removeConsumedInput(input, root);
+  } catch (_) { }
+  return output;
 }
 
 function cliMain(argv, stdinText) {
   const empty = render({ results: [], dropped: 0 });
-  const { root } = parseArgs(Array.isArray(argv) ? argv : []);
+  const { root, input } = parseArgs(Array.isArray(argv) ? argv : []);
+  if (input !== null) return jsonMain(root, input, empty);
   if (root === "") return empty;
   let parsed;
   try {
@@ -281,7 +372,9 @@ function cliMain(argv, stdinText) {
   }
 }
 
-if (require.main === module) {
+if (require.main === module && parseArgs(process.argv.slice(2)).input !== null) {
+  process.stdout.write(cliMain(process.argv.slice(2), "") + "\n");
+} else if (require.main === module) {
   let buf = "";
   let bytes = 0;
   let overflow = false;
@@ -312,6 +405,7 @@ if (require.main === module) {
 } else {
   module.exports = {
     parseInput,
+    parseJsonInput,
     extractAnchor,
     verifyFindings,
     render,

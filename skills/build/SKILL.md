@@ -68,8 +68,8 @@ below — the command sequence above is non-negotiable on every step.
 
 Autopilot has exactly one interactive gate: approval of its specification and acceptance
 criteria before this delegated build chain begins. Once an `AUTOPILOT-RUN` binding is active,
-do not open another question for a missing tool, precondition, retry decision, coverage
-decision, authentication problem, or product choice. Read fresh outer state, persist `BLOCK`
+do not open another question for a missing spec-named tool or precondition (Phase 1.5
+Scope), retry decision, coverage decision, authentication problem, or product choice. Read fresh outer state, persist `BLOCK`
 with a stable generation-specific event id through `zensu-log.sh --autopilot-event`, report
 the blocker, and stop without guessing. Use the closed codes
 `coverage-tool-decision-required`, `precondition-decision-required`, `tdd-retry-limit`, and
