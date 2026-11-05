@@ -168,9 +168,12 @@ untracked file only that file ignores, and the verb hides it from the reviewers,
 audit. A `check-ignore` exit above 1 is an exit-2 stop.
 
 **Coupled sites.** The module and its unit file; the verb arm in `zensu-log.sh` and
-`tests/structure/test-round-prepare.sh` (`RP0`–`RP14`); the `--change-set` mode and `CS1`–`CS5`
+`tests/structure/test-round-prepare.sh` (`RP0`–`RP14`); the `--change-set` mode and `CS1`–`CS6`
 in `tests/structure/test-edit-landing-audit.sh`; `claimOf`, which moves with the audit's claim
-grammar and its `X29`–`X33` pins in the same suite; the verb sentence in all three severity arms of
+grammar and its `X29`–`X33` pins in the same suite; `VERDICT` and `DIRTY_TAILS`, which read the
+audit's verdict heads and both spellings of its `PENDING PREDICATE` line, the current one and
+the one older run logs carry, so a reworded verdict line in `zensu-edit-landing.sh` moves them
+and the verdict-line unit case; the verb sentence in all three severity arms of
 `hooks/post-review-tdd-delegate.sh` and its `ROUND_SCOPE` on-variant (`I17f`, `I30b`, `I31c`);
 the `fixed`-line sentences of `CONVERGENCE_CLAUSE`, which must stay clear of the `R16` needles in
 `tests/structure/test-review-convergence.sh`; the reset marker `RESET` of
