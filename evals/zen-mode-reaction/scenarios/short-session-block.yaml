@@ -31,7 +31,7 @@ assert:
       return {
         pass: ok,
         score: ok ? 1 : 0,
-        reason: (ok ? "Opens with the result, that the cache is not live: " : "Rule 1 requires the first prose line to give the result, that the cache is not live yet; got: ")
+        reason: (ok ? "Opens with the result, that the cache is not live: " : "The result-first rule requires the first prose line to give the result, that the cache is not live yet; got: ")
           + JSON.stringify(first.slice(0, 120))
       };
   - type: javascript
@@ -56,7 +56,7 @@ assert:
         score: ok ? 1 : 0,
         reason: ok
           ? "The session block names what the session was started for: " + lines[goal]
-          : "Rule 2 requires a line naming what the user started the session for, the slow product search, ahead of the earlier-work bullets."
+          : "The session-block rule requires a line naming what the user started the session for, the slow product search, ahead of the earlier-work bullets."
       };
   - type: javascript
     value: |
@@ -80,7 +80,7 @@ assert:
         score: ok ? 1 : 0,
         reason: ok
           ? "Earlier work is listed in " + bullets.length + " bullet(s), the index and the lazy images included."
-          : "Rule 2 requires one to five short bullets of earlier work naming the index and the lazy images; got "
+          : "The session-block rule requires one to five short bullets of earlier work naming the index and the lazy images; got "
             + bullets.length + " bullet(s): " + JSON.stringify(bullets.slice(0, 6))
       };
   - type: javascript
@@ -103,7 +103,7 @@ assert:
         score: ok ? 1 : 0,
         reason: ok
           ? "The unverified item says so: " + item
-          : "Rule 2 requires an unverified item to say so, and the lazy-image bullet does not mention its open visual check: " + JSON.stringify(item || "<no such bullet>")
+          : "The session-block rule requires an unverified item to say so, and the lazy-image bullet does not mention its open visual check: " + JSON.stringify(item || "<no such bullet>")
       };
   - type: javascript
     value: |
@@ -123,7 +123,7 @@ assert:
         score: ok ? 1 : 0,
         reason: ok
           ? "This turn's work follows the bullets as its own recap line: " + lines[recap]
-          : "Rule 2 requires one recap line on this turn's cache work after the earlier-work bullets and before the closing next step."
+          : "The session-block rule requires one recap line on this turn's cache work after the earlier-work bullets and before the closing next step."
       };
   - type: javascript
     value: |
@@ -166,7 +166,7 @@ assert:
         score: ok ? 1 : 0,
         reason: ok
           ? "The reply closes on one next step right after the recap line: " + lines[lines.length - 1]
-          : "Rule 7 requires the reply to end on exactly one next step right after the recap line; "
+          : "The one-next-step rule requires the reply to end on exactly one next step right after the recap line; "
             + (recap < 0 ? "no recap line was found." : after + " line(s) follow it.")
       };
   - type: javascript
@@ -197,6 +197,6 @@ assert:
       return {
         pass: ok,
         score: ok ? 1 : 0,
-        reason: (ok ? "Within the length target with the block: " : "Rule 3 targets about 8 lines above the session block, and 16 is the slack ceiling with the block; got ")
+        reason: (ok ? "Within the length target with the block: " : "The length target is about 8 lines above the session block, and 16 is the slack ceiling with the block; got ")
           + lines.length + " non-empty prose lines."
       };
