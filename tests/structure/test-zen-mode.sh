@@ -368,6 +368,21 @@ else
 fi
 rm -rf "$P15B"
 
+P15C="$(mktemp -d -t zenmode-XXXXXX)"; S15C="z15c-$$"
+new_session "$P15C" "$S15C"; helper "$P15C" "$S15C" --on >/dev/null
+Z15C_TERM="session block"
+ON15C="$(fire "$P15C" "$S15C" "do a thing" | zen_ctx)"
+OFF15C="$(fire "$P15C" "$S15C" "zen off" | zen_ctx)"
+ON15C_HIT=0; OFF15C_HIT=0
+case "$ON15C" in ("zen-mode is ACTIVE"*"$Z15C_TERM"*) ON15C_HIT=1 ;; esac
+case "$OFF15C" in ("zen-mode is now OFF"*"$Z15C_TERM"*) OFF15C_HIT=1 ;; esac
+if [ "$ON15C_HIT" = "1" ] && [ "$OFF15C_HIT" = "1" ]; then
+  check "Z15c the OFF directive names the $Z15C_TERM the active contract closes with" PASS
+else
+  check "Z15c the OFF directive and the active contract disagree on the $Z15C_TERM (active=$ON15C_HIT off=$OFF15C_HIT)" FAIL
+fi
+rm -rf "$P15C"
+
 # Z16 every documented off-phrase deactivates
 for PHRASE16 in "normal mode" "zen off" "zen-mode off" "turn off zen" "stop zen"; do
   P16="$(mktemp -d -t zenmode-XXXXXX)"; S16="z16-$$-$(printf '%s' "$PHRASE16" | tr -cd 'a-z')"
