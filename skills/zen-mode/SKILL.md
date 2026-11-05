@@ -67,6 +67,18 @@ the failure is harmless in one direction only: deactivation can trigger
 unintentionally, activation never can, and the recovery is to run this skill
 again.
 
+**Only the user's own text deactivates.** The hook classifies each prompt by its
+origin first. A typed prompt and a slash command, with or without arguments, can
+turn the mode off. A subagent hand-back, a message from another session, a
+background-task notification, a CI-monitor event, a `!` shell input and the brief
+that starts a side session, which opens with the app's `Background (from the
+session that started this one):` line, never do, whatever text they quote. A
+forked session's first prompt carries no such line, so it counts as typed.
+In a typed prompt only the text behind its leading system reminders counts: those
+blocks carry harness text such as the worktree path or another session's report,
+so a phrase inside them leaves the mode on, while the same phrase typed after them
+turns it off, and so does the editor phrase when it is the whole text after them.
+
 **The literal list is a fast path, not the whole contract.** These phrases are
 English while the mode itself answers in the user's language, so a request to
 leave the mode in any other wording or language counts just as much. When you see

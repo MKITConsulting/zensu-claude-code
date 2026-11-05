@@ -1063,6 +1063,11 @@ SL_OUT="$(remind "$WT" "$SL_CLI" "$SL_HOST" "/zensu:build add a parser to foo.js
 { opens_with_lead "$SL_OUT" && [ "$(lead_count "$SL_OUT")" = 1 ] && [ "$(last_field "$SL_OUT")" = "$INHERITED" ]; } \
   && check "L38 a brief that is a slash command with arguments opens with the brief note once" PASS \
   || check "L38 slash-command brief (lead=$(lead_count "$SL_OUT") field='$(last_field "$SL_OUT")')" FAIL
+session "$WT" "$P_HOST"; SB_CLI="$CLI"; SB_HOST="$HOST"
+SB_OUT="$(remind "$WT" "$SB_CLI" "$SB_HOST" $'Background (from the session that started this one):\nThe parent session found a parser bug.\n\nTask:\nadd a parser to foo.js')"
+{ opens_with_lead "$SB_OUT" && [ "$(lead_count "$SB_OUT")" = 1 ] && [ "$(last_field "$SB_OUT")" = "$INHERITED" ]; } \
+  && check "L45 a brief that opens with the app's Background line, which classifies as session-brief, opens with the brief note once" PASS \
+  || check "L45 session-brief brief (lead=$(lead_count "$SB_OUT") field='$(last_field "$SB_OUT")')" FAIL
 session "$WT" "$P_HOST"; CM_CLI="$CLI"; CM_HOST="$HOST"
 CM_1="$(remind "$WT" "$CM_CLI" "$CM_HOST" "<ci-monitor-event>CI failed on pull request 1</ci-monitor-event>")"
 CM_STATE="$(linked_state "$WT" "$CM_CLI")"
