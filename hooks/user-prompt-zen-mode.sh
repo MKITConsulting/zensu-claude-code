@@ -898,7 +898,7 @@ JSON
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "zen-mode is now OFF — the user asked for it. Drop the zen-mode response shape entirely and answer in your ordinary style from this response onward. Mention the switch in one short clause, then answer the request. Do not keep the recap line or the single-next-step ending unless they genuinely help this particular answer."
+    "additionalContext": "zen-mode is now OFF — the user asked for it. Drop the zen-mode response shape entirely and answer in your ordinary style from this response onward. Mention the switch in one short clause, then answer the request. Do not keep the closing session block or the single-next-step ending unless they genuinely help this particular answer."
   }
 }
 JSON
