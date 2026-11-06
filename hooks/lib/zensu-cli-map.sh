@@ -93,6 +93,12 @@ zensu_cli_to_tool() {
     "wiki create")              echo "create_wiki_page" ;;
     "wiki update")              echo "update_wiki_page" ;;
     "wiki list")                echo "list_wiki_pages" ;;
+    "wiki images")
+      case "${3:-}" in
+        upload)                 echo "upload_wiki_image" ;;
+        policy)                 echo "get_wiki_image_policy" ;;
+        *)                      echo "" ;;
+      esac ;;
     # doc
     "doc claude-md")            echo "generate_claude_md" ;;
     "doc claude-md-context")    echo "get_claude_md" ;;
