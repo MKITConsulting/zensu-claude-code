@@ -138,16 +138,16 @@ jobs:
           # Edit only the version line (format-preserving). jq would rewrite the
           # whole file in canonical style and reformat e.g. inline arrays.
           sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' .claude-plugin/plugin.json
-          sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' .claude-plugin/marketplace.json
-          sed -i -E 's/("ref"[[:space:]]*:[[:space:]]*")v[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$TAG"'\2/' .claude-plugin/marketplace.json
+          node .github/scripts/bump-marketplace-entry.js .claude-plugin/marketplace.json zensu "$VER" "$TAG"
           sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-green#version-${VER}-green#" README.md
           echo "Bumped plugin.json, marketplace.json, README badge -> $VER; marketplace source ref -> $TAG"
           # Sanity: files stay valid JSON and carry the new version.
+          ZENSU_ENTRY='[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0]'
           test "$(jq -r .version .claude-plugin/plugin.json)" = "$VER"
-          test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$VER"
-          test "$(jq -r '.plugins[0].source.source' .claude-plugin/marketplace.json)" = github
-          test "$(jq -r '.plugins[0].source.repo' .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
-          test "$(jq -r '.plugins[0].source.ref' .claude-plugin/marketplace.json)" = "$TAG"
+          test "$(jq -r "$ZENSU_ENTRY.version" .claude-plugin/marketplace.json)" = "$VER"
+          test "$(jq -r "$ZENSU_ENTRY.source.source" .claude-plugin/marketplace.json)" = github
+          test "$(jq -r "$ZENSU_ENTRY.source.repo" .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
+          test "$(jq -r "$ZENSU_ENTRY.source.ref" .claude-plugin/marketplace.json)" = "$TAG"
 
       - name: Generate CHANGELOG section (git-cliff)
         uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
@@ -548,10 +548,11 @@ jobs:
           VER="$(jq -r '.version' .claude-plugin/plugin.json)"
           TAG="v$VER"
           [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$VER"
-          test "$(jq -r '.plugins[0].source.source' .claude-plugin/marketplace.json)" = github
-          test "$(jq -r '.plugins[0].source.repo' .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
-          test "$(jq -r '.plugins[0].source.ref' .claude-plugin/marketplace.json)" = "$TAG"
+          ZENSU_ENTRY='[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0]'
+          test "$(jq -r "$ZENSU_ENTRY.version" .claude-plugin/marketplace.json)" = "$VER"
+          test "$(jq -r "$ZENSU_ENTRY.source.source" .claude-plugin/marketplace.json)" = github
+          test "$(jq -r "$ZENSU_ENTRY.source.repo" .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
+          test "$(jq -r "$ZENSU_ENTRY.source.ref" .claude-plugin/marketplace.json)" = "$TAG"
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
             TAG_SHA="$(git rev-list -n 1 "$TAG")"
             if [ "$TAG_SHA" != "${{ github.sha }}" ]; then
@@ -684,10 +685,11 @@ jobs:
           VER="$(jq -r '.version' .claude-plugin/plugin.json)"
           TAG="v$VER"
           [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$VER"
-          test "$(jq -r '.plugins[0].source.source' .claude-plugin/marketplace.json)" = github
-          test "$(jq -r '.plugins[0].source.repo' .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
-          test "$(jq -r '.plugins[0].source.ref' .claude-plugin/marketplace.json)" = "$TAG"
+          ZENSU_ENTRY='[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0]'
+          test "$(jq -r "$ZENSU_ENTRY.version" .claude-plugin/marketplace.json)" = "$VER"
+          test "$(jq -r "$ZENSU_ENTRY.source.source" .claude-plugin/marketplace.json)" = github
+          test "$(jq -r "$ZENSU_ENTRY.source.repo" .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
+          test "$(jq -r "$ZENSU_ENTRY.source.ref" .claude-plugin/marketplace.json)" = "$TAG"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
