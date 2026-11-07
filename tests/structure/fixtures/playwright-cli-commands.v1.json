@@ -1,0 +1,221 @@
+{
+  "version": "0.1.21",
+  "source": "playwright-core/lib/tools/cli-client/help.json",
+  "commands": {
+    "attach": [
+      "cdp",
+      "config",
+      "endpoint",
+      "extension",
+      "idle-timeout",
+      "session"
+    ],
+    "check": [],
+    "clear-color-scheme": [],
+    "clear-contrast": [],
+    "clear-forced-colors": [],
+    "clear-media": [],
+    "clear-reduced-motion": [],
+    "click": [
+      "modifiers"
+    ],
+    "close": [],
+    "close-all": [],
+    "config-print": [],
+    "console": [
+      "clear"
+    ],
+    "cookie-clear": [],
+    "cookie-delete": [],
+    "cookie-get": [],
+    "cookie-list": [
+      "domain",
+      "path"
+    ],
+    "cookie-set": [
+      "domain",
+      "expires",
+      "httpOnly",
+      "path",
+      "sameSite",
+      "secure"
+    ],
+    "dblclick": [
+      "modifiers"
+    ],
+    "delete-data": [],
+    "detach": [],
+    "dialog-accept": [],
+    "dialog-dismiss": [],
+    "drag": [],
+    "drop": [
+      "data",
+      "path"
+    ],
+    "eval": [
+      "filename"
+    ],
+    "fill": [
+      "submit"
+    ],
+    "find": [
+      "regex"
+    ],
+    "generate-locator": [],
+    "go-back": [],
+    "go-forward": [],
+    "goto": [],
+    "highlight": [
+      "hide",
+      "style"
+    ],
+    "hover": [],
+    "install": [
+      "global",
+      "skills"
+    ],
+    "install-browser": [
+      "dry-run",
+      "force",
+      "list",
+      "no-shell",
+      "only-shell",
+      "with-deps"
+    ],
+    "keydown": [],
+    "keyup": [],
+    "kill-all": [],
+    "list": [
+      "all"
+    ],
+    "localstorage-clear": [],
+    "localstorage-delete": [],
+    "localstorage-get": [],
+    "localstorage-list": [],
+    "localstorage-set": [],
+    "mousedown": [],
+    "mousemove": [],
+    "mouseup": [],
+    "mousewheel": [],
+    "network-state-set": [],
+    "open": [
+      "browser",
+      "config",
+      "device",
+      "headed",
+      "idle-timeout",
+      "mobile",
+      "persistent",
+      "profile"
+    ],
+    "pause-at": [],
+    "pdf": [
+      "filename"
+    ],
+    "press": [],
+    "recording-start": [],
+    "recording-stop": [],
+    "reload": [],
+    "request": [
+      "filename"
+    ],
+    "request-body": [
+      "filename"
+    ],
+    "request-headers": [
+      "filename"
+    ],
+    "requests": [
+      "clear",
+      "filter",
+      "static"
+    ],
+    "resize": [],
+    "response-body": [
+      "filename"
+    ],
+    "response-headers": [
+      "filename"
+    ],
+    "resume": [],
+    "route": [
+      "body",
+      "content-type",
+      "header",
+      "remove-header",
+      "status"
+    ],
+    "route-list": [],
+    "run-code": [
+      "filename"
+    ],
+    "screenshot": [
+      "filename",
+      "full-page",
+      "hires",
+      "type"
+    ],
+    "select": [],
+    "sessionstorage-clear": [],
+    "sessionstorage-delete": [],
+    "sessionstorage-get": [],
+    "sessionstorage-list": [],
+    "sessionstorage-set": [],
+    "set-color-scheme": [],
+    "set-contrast": [],
+    "set-forced-colors": [],
+    "set-media": [],
+    "set-reduced-motion": [],
+    "show": [
+      "annotate",
+      "host",
+      "kill",
+      "port"
+    ],
+    "snapshot": [
+      "boxes",
+      "depth",
+      "filename"
+    ],
+    "state-load": [],
+    "state-save": [],
+    "step-over": [],
+    "tab-close": [],
+    "tab-list": [],
+    "tab-new": [],
+    "tab-select": [],
+    "tracing-start": [],
+    "tracing-stop": [],
+    "tray": [],
+    "type": [
+      "submit"
+    ],
+    "uncheck": [],
+    "unroute": [],
+    "upload": [],
+    "video-chapter": [
+      "description",
+      "duration"
+    ],
+    "video-hide-actions": [],
+    "video-show-actions": [
+      "cursor",
+      "duration",
+      "highlight-style",
+      "point-style",
+      "position",
+      "title-style"
+    ],
+    "video-start": [
+      "cursor",
+      "fps",
+      "size"
+    ],
+    "video-stop": [],
+    "webmcp-call": [
+      "frame",
+      "params"
+    ],
+    "webmcp-list": []
+  }
+}

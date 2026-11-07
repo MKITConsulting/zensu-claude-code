@@ -270,14 +270,29 @@
       "summary": "The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions."
     },
     {
-      "path": "tests/structure/verify-browser-config.test.js", "registered": 21,
+      "path": "tests/structure/verify-auth-guard-v1.test.js", "registered": 9, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
-      "summary": "The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run."
+      "summary": "The verify-auth read guard: file, search and shell calls that reach a run auth directory, its registration and its fail-closed copies."
     },
     {
-      "path": "tests/structure/verify-consent-v1.test.js", "registered": 126, "skips": {"win32": 2},
+      "path": "tests/structure/verify-auth-login-e2e.test.js", "registered": 1, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 1},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
-      "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan and every refused indirection."
+      "summary": "A recipe login script signs a real playwright-cli browser in through the consent gate, and the state is consumed unseen; skipped without the measured playwright-cli."
+    },
+    {
+      "path": "tests/structure/verify-auth-state-v1.test.js", "registered": 9,
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The signed-in browser state validator: shape and size caps, origin scope, private-file checks, the run-directory layout and the login artifact contract."
+    },
+    {
+      "path": "tests/structure/verify-browser-config.test.js", "registered": 30,
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The playwright-cli run-config helper: the isolated origin-restricted config, the address pins of a remote run and the signed-in login step."
+    },
+    {
+      "path": "tests/structure/verify-consent-v1.test.js", "registered": 135, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 3},
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan, every refused indirection and the signed-in session rules."
     },
     {
       "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 26,

@@ -692,16 +692,16 @@ if node -e '
   let widened = 0;
   for (const group of registry.hooks.PreToolUse || []) {
     if ((group.hooks || []).some((hook) => reg.hookEntries(hook, "PreToolUse").some((entry) => entry.command.includes(gate)))) {
-      group.matcher = "Bash|PowerShell|Read";
+      group.matcher = "Bash|PowerShell|Read|Grep|Glob|NotebookEdit|Edit|Write|MultiEdit|WebFetch";
       widened += 1;
     }
   }
   if (widened !== 1) process.exit(1);
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
 ' "$VF_REG_ROOT/hooks/hooks.json"; then
-  check "P1vl7-control the registration fixture puts the group that registers the consent gate on Bash|PowerShell|Read" PASS
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on a matcher wider than Bash|PowerShell" PASS
 else
-  check "P1vl7-control the registration fixture puts the group that registers the consent gate on Bash|PowerShell|Read" FAIL
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on a matcher wider than Bash|PowerShell" FAIL
 fi
 case "$(vf_reg_doctor)" in
   *'not registered on a matcher that covers Bash and PowerShell'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
@@ -788,6 +788,44 @@ case "$(vf_reg_doctor)" in
   *'❌  verify-feature: cannot start (consent hook registration in hooks/hooks.json could not be determined; consent recorder registration in hooks/hooks.json could not be determined)'*)
     check "P1vl8 an unparseable hooks.json names both registrations as unknown, not as missing" PASS ;;
   *) check "P1vl8 an unparseable hooks.json names both registrations as unknown, not as missing" FAIL ;;
+esac
+cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
+if node -e '
+  const fs = require("node:fs");
+  const file = process.argv[1];
+  const registry = JSON.parse(fs.readFileSync(file, "utf8"));
+  const command = (name) => ({ type: "command", command: "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/" + name + "\"" });
+  registry.hooks.PreToolUse = [{ matcher: "Bash|PowerShell", hooks: [command("pre-browser-navigation-consent.sh"), command("pre-verify-auth-guard.sh")] }];
+  registry.hooks.PostToolUse = [{ matcher: "Bash|PowerShell", hooks: [command("post-browser-navigation-consent.sh")] }];
+  fs.writeFileSync(file, JSON.stringify(registry, null, 2));
+' "$VF_REG_ROOT/hooks/hooks.json" \
+  && [ "$(cd -P -- "$VF_REG_ROOT" && node -e '
+    const mod = require("./hooks/lib/verify-consent-v1.js");
+    process.stdout.write([mod.consentHookRegistered(process.cwd()), mod.consentRecorderRegistered(process.cwd()), mod.authGuardRegistered(process.cwd())].join(" "));
+  ' 2>/dev/null)" = "registered registered unregistered" ]; then
+  check "P1vl11-control the guard fixture registers both consent hooks on the shell tools and the guard on the shell tools alone" PASS
+else
+  check "P1vl11-control the guard fixture registers both consent hooks on the shell tools and the guard on the shell tools alone" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (verify-auth guard not registered on a matcher that covers the file, search and shell tools)'*)
+    check "P1vl11 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" PASS ;;
+  *) check "P1vl11 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" FAIL ;;
+esac
+cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
+rm -f "$VF_REG_ROOT/hooks/pre-verify-auth-guard.sh"
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (the verify-auth read guard hook or its module missing from the plugin)'*)
+    check "P1vl12 a missing verify-auth guard hook is named as a missing file" PASS ;;
+  *) check "P1vl12 a missing verify-auth guard hook is named as a missing file" FAIL ;;
+esac
+cp "$PLUGIN_DIR/hooks/pre-verify-auth-guard.sh" "$VF_REG_ROOT/hooks/pre-verify-auth-guard.sh"
+rm -f "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js"
+ln -s "$PLUGIN_DIR/hooks/lib/verify-auth-guard-v1.js" "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js"
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (the verify-auth read guard module is a symlink, which the guard refuses)'*)
+    check "P1vl13 a symlinked verify-auth guard module is named, because the guard refuses one" PASS ;;
+  *) check "P1vl13 a symlinked verify-auth guard module is named, because the guard refuses one" FAIL ;;
 esac
 rm -rf "$VF_REG_ROOT"
 VF_PROBE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-probe.XXXXXX")" || exit 1

@@ -9,6 +9,7 @@ const principals = require('./claude-principal-v1.js');
 const { msysDrivePrefix } = require('./claude-path-v1.js');
 const hookRegistration = require('./hook-registration-v1.js');
 const cliVersion = require('./playwright-cli-version-v1.js');
+const authState = require('./verify-auth-state-v1.js');
 
 const CONSENT_MATCHER = 'Bash|PowerShell';
 const CONSENT_TOOLS = Object.freeze(['Bash', 'PowerShell']);
@@ -94,6 +95,8 @@ const ALLOWED_COMMANDS = Object.freeze({
 });
 
 const NAVIGATION_COMMANDS = Object.freeze(['open', 'goto', 'tab-new']);
+const AUTH_SESSION_PREFIX = authState.AUTH_SESSION_PREFIX;
+const AUTH_SIGNAL_COMMANDS = Object.freeze(['console', 'requests']);
 const ANSWERABLE_MODES = Object.freeze(['default', 'acceptEdits', 'auto', 'plan']);
 const CHROMIUM_BROWSERS = Object.freeze([
   'chrome', 'chrome-beta', 'chrome-canary', 'chrome-dev',
@@ -159,6 +162,11 @@ const REASONS = Object.freeze({
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
   POWERSHELL_NOT_JUDGED: 'a zensu-verify browser call runs through the Bash tool only, because this gate judges Bash command text; re-issue it as one plain playwright-cli call through the Bash tool, and to search or commit text that merely names playwright-cli and a zensu-verify session, use the Grep tool or a message file',
+  STATE_NEEDS_AUTH_SESSION: 'a run config that restores a signed-in browser state opens only on the zensu-verify-auth session the run-config helper printed with it',
+  STATE_CONSUMED: 'the signed-in state of this run config was already consumed by an earlier open or is missing; run the run-config helper with --login-recipe again for a fresh signed-in browser',
+  STATE_UNSAFE: 'the signed-in state file of this run config is not a private regular file the gate can trust; run the run-config helper with --login-recipe again in a fresh run directory',
+  STATE_INVALID: 'the signed-in state file of this run config is not storage state within the run config origins; run the run-config helper with --login-recipe again',
+  AUTH_SIGNAL_DENIED: 'is not available on a signed-in zensu-verify-auth session, because console and network output of a signed-in page can carry credentials; report that evidence plane PARTIAL',
 });
 const SHAPE_REASONS = Object.freeze([
   'NOT_PLAIN', 'ARGUMENT_UNEXPANDED', 'SESSION_UNRESOLVED', 'SESSION_UNEXPANDED', 'CLI_NOT_BARE', 'WRAPPER', 'LAUNCHER', 'ENV_ASSIGNMENT',
@@ -169,6 +177,7 @@ const FINAL_REASONS = Object.freeze([
   'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'NOT_POLICY_KIND', 'NETWORK_ONLY_NAVIGATION', 'NOT_POLICY_NETWORK_ONLY',
   'NETWORK_ONLY_NEEDS_POLICY', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
   'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED', 'POWERSHELL_NOT_JUDGED',
+  'STATE_NEEDS_AUTH_SESSION', 'STATE_CONSUMED', 'STATE_UNSAFE', 'STATE_INVALID', 'AUTH_SIGNAL_DENIED',
 ]);
 const SHAPE_MARKER = '(shape denial: re-issue this call once as one plain playwright-cli call with single-quoted literal arguments; a second denial is final)';
 const SHAPE_TEXTS = new Set(SHAPE_REASONS.map((key) => REASONS[key]));
@@ -922,7 +931,12 @@ function validRecord(record) {
     && typeof record.origin === 'string' && record.origin.length > 0
     && typeof record.route === 'string' && record.route.startsWith('/')
     && DECIDED_BY.includes(record.decidedBy)
-    && isIsoInstant(record.at);
+    && isIsoInstant(record.at)
+    && (record.restoredState === undefined || record.restoredState === true);
+}
+
+function restoredRecord(record) {
+  return record.restoredState === true;
 }
 
 function emptyMemory() {
@@ -1004,11 +1018,14 @@ function appendRecord(memoryPath, record, options = {}) {
   const current = readMemory(memoryPath);
   if (!current.ok) return { ok: false, reason: current.reason || REASONS.MEMORY_UNREADABLE };
   const records = current.records.slice();
-  if (records.some((entry) => entry.origin === record.origin && entry.route === record.route)) {
+  const restored = restoredRecord(record);
+  if (records.some((entry) => entry.origin === record.origin && entry.route === record.route && restoredRecord(entry) === restored)) {
     return { ok: true, records, duplicate: true };
   }
   if (records.length >= MAX_RECORDS) return { ok: false, reason: 'memory-full' };
-  records.push({ origin: record.origin, route: record.route, decidedBy: record.decidedBy, at: record.at });
+  const entry = { origin: record.origin, route: record.route, decidedBy: record.decidedBy, at: record.at };
+  if (restored) entry.restoredState = true;
+  records.push(entry);
   const body = `${JSON.stringify({ version: MEMORY_VERSION, records })}\n`;
   if (Buffer.byteLength(body) > MAX_MEMORY_BYTES) return { ok: false, reason: 'memory-would-exceed-read-cap' };
   const temp = path.join(allowed.stateDir, `.${path.basename(memoryPath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
@@ -1047,7 +1064,14 @@ function resolveRecipeFile(projectRoot) {
   return '';
 }
 
-function remotePromptText({ origins, session, remote }) {
+function restoredText(restored, plural) {
+  const where = plural ? 'these origins' : 'this origin';
+  if (restored === 'open') return `The browser opens signed in: its state was restored from the recipe's login script, so the model can reach every page that account can reach on ${where}.`;
+  if (restored === 'session') return `The browser session is signed in: its state was restored from the recipe's login script, so the model can reach every page that account can reach on ${where}.`;
+  return '';
+}
+
+function remotePromptText({ origins, session, remote, restored }) {
   const plural = origins.length > 1;
   const local = origins.filter((origin) => !remote.includes(origin));
   const reach = local.length > 0
@@ -1055,6 +1079,7 @@ function remotePromptText({ origins, session, remote }) {
     : `${remote.join(', ')} (remote)`;
   const lines = [];
   lines.push(`The playwright-cli browser session ${session} is about to reach ${reach}.`);
+  if (restored) lines.push(restoredText(restored, plural));
   lines.push(`Answering Yes approves ${plural ? 'these origins' : 'this origin'}: the model may then open, read and interact with (click, type, submit forms on) any page on ${plural ? 'them' : 'it'}, pages behind your own login included, and what it sees there, screenshots included, enters this conversation and the run directory.`);
   lines.push(local.length > 0
     ? `The loopback ${local.length > 1 ? 'origins stay' : 'origin stays'} approved for the rest of this Claude Code session; a remote origin is asked again every time the browser is opened.`
@@ -1064,11 +1089,12 @@ function remotePromptText({ origins, session, remote }) {
   return lines.join(' ');
 }
 
-function promptText({ origins, session, remote = [] }) {
-  if (remote.length > 0) return remotePromptText({ origins, session, remote });
+function promptText({ origins, session, remote = [], restored = '' }) {
+  if (remote.length > 0) return remotePromptText({ origins, session, remote, restored });
   const plural = origins.length > 1;
   const lines = [];
   lines.push(`The playwright-cli browser session ${session} is about to reach ${origins.join(', ')} (local loopback).`);
+  if (restored) lines.push(restoredText(restored, plural));
   lines.push(`Answering Yes approves ${plural ? 'these origins' : 'this origin'} for the rest of this Claude Code session: the model may then open, read and interact with (click, type, submit forms on) any page on ${plural ? 'them' : 'it'}, screenshots included, without asking again. Consent is per origin, never per route.`);
   lines.push(`Answer No to keep the browser away from ${plural ? 'them' : 'it'}; the run then reports PARTIAL.`);
   return lines.join(' ');
@@ -1086,7 +1112,8 @@ function runConfigShape(config, configPath) {
   if (!sameKeys(browser, ['isolated', 'launchOptions', 'contextOptions'])) return fail('the run config browser block carries unexpected keys');
   if (browser.isolated !== true) return fail('the run config must keep the browser isolated');
   if (!sameKeys(browser.launchOptions, ['args'])) return fail('the run config launchOptions carry unexpected keys');
-  if (!sameKeys(browser.contextOptions, ['serviceWorkers']) || browser.contextOptions.serviceWorkers !== 'block') {
+  const restoring = sameKeys(browser.contextOptions, ['serviceWorkers', 'storageState']);
+  if ((!restoring && !sameKeys(browser.contextOptions, ['serviceWorkers'])) || browser.contextOptions.serviceWorkers !== 'block') {
     return fail('the run config must block service workers and set nothing else on the context');
   }
   if (!sameKeys(network, ['allowedOrigins'])) return fail('the run config network block carries unexpected keys');
@@ -1141,7 +1168,15 @@ function runConfigShape(config, configPath) {
   if (config.outputDir !== path.join(configDir, RUN_OUTPUT_DIR_NAME)) {
     return fail(`the run config outputDir must be the ${RUN_OUTPUT_DIR_NAME} directory beside the config file`);
   }
-  return { ok: true, origins: origins.slice(), pins };
+  let statePath = null;
+  if (restoring) {
+    const expected = authState.statePathFor(configDir);
+    if (browser.contextOptions.storageState !== expected || !authState.runDirLayout(configDir).ok) {
+      return fail(`the run config may restore a signed-in state only from ${authState.AUTH_DIR_NAME}/${authState.STATE_FILE_NAME} beside it, inside a .zensu/${authState.RUNS_DIR_NAME} run directory`);
+    }
+    statePath = expected;
+  }
+  return { ok: true, origins: origins.slice(), pins, statePath };
 }
 
 function readRunConfig(rawPath) {
@@ -1265,6 +1300,8 @@ function judgeCall(call, context) {
   const command = args._[0];
   if (command === undefined) return { targets: [] };
   if (!Object.prototype.hasOwnProperty.call(ALLOWED_COMMANDS, command)) return { deny: `command '${command}' ${REASONS.COMMAND_DENIED}` };
+  const signedIn = authState.isAuthSession(session.value);
+  if (signedIn && AUTH_SIGNAL_COMMANDS.includes(command)) return { deny: `command '${command}' ${REASONS.AUTH_SIGNAL_DENIED}` };
   const allowedFlags = ALLOWED_COMMANDS[command];
   for (const key of flagKeys) {
     if (!allowedFlags.includes(key) && !HARMLESS_FLAGS.includes(key)) return { deny: `flag '--${key}' ${REASONS.FLAG_DENIED}` };
@@ -1273,6 +1310,7 @@ function judgeCall(call, context) {
   const positional = args._.slice(1);
   const targets = [];
   let configOrigins = [];
+  let restored = NAVIGATION_COMMANDS.includes(command) && signedIn ? 'session' : '';
   if (command === 'open') {
     if (args.browser !== undefined && !CHROMIUM_BROWSERS.includes(args.browser)) return { deny: REASONS.BROWSER_NOT_CHROMIUM };
     if (typeof args.config !== 'string') return { deny: REASONS.CONFIG_REQUIRED };
@@ -1282,6 +1320,13 @@ function judgeCall(call, context) {
     if (ambient) return { deny: `the launch environment sets ${ambient}, which overrides the run config` };
     const globalFault = globalConfigFault(context.env);
     if (globalFault) return { deny: globalFault };
+    restored = '';
+    if (config.statePath) {
+      if (!signedIn) return { deny: REASONS.STATE_NEEDS_AUTH_SESSION };
+      const checked = authState.checkStateFile(config.statePath, config.origins);
+      if (!checked.ok) return { deny: stateDenyReason(checked.fault) };
+      restored = 'open';
+    }
     configOrigins = config.origins;
     for (const origin of configOrigins) {
       const judged = judgeOrigin(origin, { navigation: false, policy: context.policy, answerable: context.answerable });
@@ -1300,7 +1345,13 @@ function judgeCall(call, context) {
     if (existing) existing.route = judged.route;
     else targets.push({ origin: judged.origin, route: judged.route, mode: judged.mode, decidedBy: judged.decidedBy });
   }
-  return { targets, session: session.value };
+  return { targets, session: session.value, restored };
+}
+
+function stateDenyReason(fault) {
+  if (fault === authState.FAULTS.MISSING) return REASONS.STATE_CONSUMED;
+  if (fault === authState.FAULTS.UNSAFE) return REASONS.STATE_UNSAFE;
+  return REASONS.STATE_INVALID;
 }
 
 function principalOf(payload) {
@@ -1331,25 +1382,32 @@ function evaluate({ command, payload, env, records, policy, platform }) {
   }
   const answerable = ANSWERABLE_MODES.includes((payload || {}).permission_mode);
   const context = { principal: principalOf(payload || {}), env: env || {}, policy, answerable };
-  const known = new Set((Array.isArray(records) ? records : []).map((entry) => entry.origin));
+  const remembered = Array.isArray(records) ? records : [];
+  const known = new Set(remembered.map((entry) => entry.origin));
+  const knownRestored = new Set(remembered.filter(restoredRecord).map((entry) => entry.origin));
   const plan = [];
   const fresh = [];
   const remote = [];
   let session = '';
+  let restoredAsk = '';
   for (const call of gated) {
     const judged = judgeCall(call, context);
     if (judged.deny) return { verdict: 'deny', reason: judged.deny };
     session = session || judged.session || '';
+    const memory = judged.restored ? knownRestored : known;
     for (const target of judged.targets) {
-      const decidedBy = target.decidedBy || (known.has(target.origin) ? 'remembered' : 'asked');
-      plan.push({ origin: target.origin, route: target.route, decidedBy });
+      const decidedBy = target.decidedBy || (memory.has(target.origin) ? 'remembered' : 'asked');
+      const entry = { origin: target.origin, route: target.route, decidedBy };
+      if (judged.restored) entry.restoredState = true;
+      plan.push(entry);
       if (decidedBy === 'asked' && !fresh.includes(target.origin)) fresh.push(target.origin);
       if (decidedBy === 'asked' && target.mode === 'remote' && !remote.includes(target.origin)) remote.push(target.origin);
+      if (decidedBy === 'asked' && judged.restored) restoredAsk = restoredAsk || judged.restored;
     }
   }
   if (!analysis.plain) return { verdict: 'deny', reason: REASONS.NOT_PLAIN };
   if (fresh.length > 0) {
-    return { verdict: 'ask', reason: REASONS.NEW_ORIGIN, plan, origins: fresh, prompt: promptText({ origins: fresh, session, remote }) };
+    return { verdict: 'ask', reason: REASONS.NEW_ORIGIN, plan, origins: fresh, prompt: promptText({ origins: fresh, session, remote, restored: restoredAsk }) };
   }
   return { verdict: 'none', plan };
 }
@@ -1422,6 +1480,17 @@ function runPost(payload, env, err) {
   if (payload.tool_name === 'PowerShell') return { ok: true, skipped: 'powershell-call' };
   const command = commandOf(payload);
   if (command === null) return { ok: true, skipped: 'not-a-bash-call' };
+  let consumed = [];
+  let result;
+  try {
+    result = recordPost(payload, command, env, err);
+  } finally {
+    consumed = consumeRestoredState(command, env);
+  }
+  return consumed.length > 0 ? Object.assign({}, result, { consumed }) : result;
+}
+
+function recordPost(payload, command, env, err) {
   const response = payload.tool_response;
   if (response && typeof response === 'object' && response.interrupted === true) return { ok: true, skipped: 'interrupted' };
   const inputs = readInputs(env);
@@ -1443,17 +1512,46 @@ function runPost(payload, env, err) {
   const at = new Date().toISOString();
   let last = { ok: true };
   for (const entry of decision.plan) {
-    const result = appendRecord(inputs.memoryPath, { origin: entry.origin, route: entry.route, decidedBy: entry.decidedBy, at }, { projectRoot: inputs.projectRoot });
-    if (!result.ok) {
-      err.write(`zensu: verify consent memory not written (${result.reason})\n`);
-      return result;
+    const record = { origin: entry.origin, route: entry.route, decidedBy: entry.decidedBy, at };
+    if (entry.restoredState === true) record.restoredState = true;
+    const appended = appendRecord(inputs.memoryPath, record, { projectRoot: inputs.projectRoot });
+    if (!appended.ok) {
+      err.write(`zensu: verify consent memory not written (${appended.reason})\n`);
+      return appended;
     }
-    last = result;
+    last = appended;
   }
   return last;
 }
 
-function hookRegistered(pluginRoot, event, hookFile) {
+function restoringOpenConfigs(command, env) {
+  const marks = commandMarkers(command, env);
+  if (!marks.cli || !marks.session || Buffer.byteLength(command) > MAX_COMMAND_BYTES) return [];
+  const configs = [];
+  for (const call of analyzeCommand(command, env).calls) {
+    if (!call.gated || call.fault || !call.args || call.args._[0] !== 'open' || typeof call.args.config !== 'string') continue;
+    const configPath = msysDrivePrefix(call.args.config);
+    if (path.isAbsolute(configPath) && !configs.includes(configPath)) configs.push(configPath);
+  }
+  return configs;
+}
+
+function consumeRestoredState(command, env) {
+  const removed = [];
+  let configs = [];
+  try {
+    configs = restoringOpenConfigs(command, env);
+  } catch (_error) {
+    return removed;
+  }
+  for (const configPath of configs) {
+    const result = authState.consumeStateFile(configPath);
+    if (result.removed) removed.push(result.file);
+  }
+  return removed;
+}
+
+function hookRegistered(pluginRoot, event, hookFile, tools = CONSENT_TOOLS) {
   const hookPath = path.join(pluginRoot, 'hooks', hookFile);
   const hooksJson = path.join(pluginRoot, 'hooks', 'hooks.json');
   try {
@@ -1470,7 +1568,7 @@ function hookRegistered(pluginRoot, event, hookFile) {
   }
   return hookRegistration.registration(manifest, {
     event,
-    tools: [...CONSENT_TOOLS],
+    tools: [...tools],
     names: (command) => command.includes(`/hooks/${hookFile}`),
     reading: hookRegistration.READINGS.HOST,
   });
@@ -1484,6 +1582,10 @@ function consentRecorderRegistered(pluginRoot) {
   return hookRegistered(pluginRoot, 'PostToolUse', CONSENT_RECORDER_FILE);
 }
 
+function authGuardRegistered(pluginRoot) {
+  return hookRegistered(pluginRoot, 'PreToolUse', authState.AUTH_GUARD_HOOK_FILE, authState.AUTH_GUARD_TOOLS);
+}
+
 function recordingStream(out) {
   const state = { emitted: false };
   return {
@@ -1495,6 +1597,8 @@ function recordingStream(out) {
 module.exports = {
   ALLOWED_COMMANDS,
   ANSWERABLE_MODES,
+  AUTH_SESSION_PREFIX,
+  AUTH_SIGNAL_COMMANDS,
   CLI_BASENAMES,
   CLI_BOOLEAN_OPTIONS,
   CLI_STRING_OPTIONS,
@@ -1529,7 +1633,9 @@ module.exports = {
   STATE_SEGMENTS,
   analyzeCommand,
   appendRecord,
+  authGuardRegistered,
   commandMarkers,
+  consumeRestoredState,
   consentHookRegistered,
   consentRecorderRegistered,
   emptyMemory,

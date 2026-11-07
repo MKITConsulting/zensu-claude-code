@@ -89,7 +89,9 @@ against Windows executables.
   consent gate on a marked call fail closed: exit 2 with the check's message. The CLI gate, the
   secret scan, the work-order checks, the redact sweep, the consent recorder, the data guard and the
   edit gate fail open with a stderr line, as the separate hooks did: a host treated their crash or
-  timeout as a non-blocking error. The edit gate's own fail-closed decisions are denies of its body,
+  timeout as a non-blocking error. The verify-auth guard fails open as well, and its own refusal of
+  a payload naming `verify-feature-runs` while its decision module is missing or broken is a deny it
+  returns, not this policy (`.claude/rules/verify-auth-guard.md`). The edit gate's own fail-closed decisions are denies of its body,
   not this policy. The spawn grant fails silent.
 - **The edit gate allows in-process and decides nothing else** (`editGateAllows`). It answers true
   only for a child principal, another tool, a bound session with a valid document and no active

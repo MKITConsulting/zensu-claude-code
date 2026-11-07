@@ -219,6 +219,14 @@ an origin outside `allowedOrigins` fails with `net::ERR_BLOCKED_BY_CLIENT` and e
 REDIRECT to another origin is NOT refused by the browser (recorded as measured in `docs/gates.md`),
 so the skill reads the `Page URL` line after every navigating call — prose, not a boundary.
 
+**Signed-in sessions are a second rule set, keyed on the session prefix.** A run config may carry
+`browser.contextOptions.storageState` only at the canonical `auth/storage-state.json` beside it.
+Such a config opens only on a `zensu-verify-auth-` session after `checkStateFile` passed,
+`console` and `requests` deny on that session, the prompt says the browser opens signed in, its
+records carry `restoredState`, and the recorder consumes the state after `open`. The helper's
+login, the read guard, the version verdict and the gaps are in
+`.claude/rules/verify-auth-guard.md`.
+
 **One floor and one policy parser.** `verify-navigation-floor-v1.js` owns origin classification and
 `parsePolicyTargets`, the full synchronous parse of `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
 (`policyContractFault` stays its top-level half). Three consumers CALL it and none re-spells it: the

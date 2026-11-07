@@ -19,6 +19,12 @@ UNIT_CONSENT="$PLUGIN_DIR/tests/structure/verify-consent-v1.test.js"
 UNIT_PORT="$PLUGIN_DIR/tests/structure/verify-free-port.test.js"
 UNIT_CONFIG="$PLUGIN_DIR/tests/structure/verify-browser-config.test.js"
 UNIT_VERSION="$PLUGIN_DIR/tests/structure/playwright-cli-version-v1.test.js"
+AUTH_STATE_MODULE="$PLUGIN_DIR/hooks/lib/verify-auth-state-v1.js"
+AUTH_GUARD_MODULE="$PLUGIN_DIR/hooks/lib/verify-auth-guard-v1.js"
+AUTH_GUARD_HOOK="$PLUGIN_DIR/hooks/pre-verify-auth-guard.sh"
+UNIT_AUTH_STATE="$PLUGIN_DIR/tests/structure/verify-auth-state-v1.test.js"
+UNIT_AUTH_GUARD="$PLUGIN_DIR/tests/structure/verify-auth-guard-v1.test.js"
+UNIT_AUTH_E2E="$PLUGIN_DIR/tests/structure/verify-auth-login-e2e.test.js"
 ESCAPE_STEMS_SUITE="$PLUGIN_DIR/tests/structure/test-gauntlet-loop-skill.sh"
 TDD_PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 SETUP_MD="$PLUGIN_DIR/skills/verify-feature/rules/setup.md"
@@ -46,19 +52,23 @@ for _vc_name in $(env | sed -n 's/^\(PLAYWRIGHT_MCP_[A-Za-z0-9_]*\)=.*/\1/p;s/^\
 done
 
 for f in "$PRE_HOOK" "$POST_HOOK" "$PREFILTER_LIB" "$MODULE" "$FLOOR" "$VERSION_MODULE" "$REGISTRATION_MODULE" \
-  "$CONFIG_HELPER" "$FREE_PORT" "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION"; do
+  "$CONFIG_HELPER" "$FREE_PORT" "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION" \
+  "$AUTH_STATE_MODULE" "$AUTH_GUARD_MODULE" "$AUTH_GUARD_HOOK" "$UNIT_AUTH_STATE" "$UNIT_AUTH_GUARD" "$UNIT_AUTH_E2E"; do
   [ -f "$f" ] && check "V0 file exists: ${f#"$PLUGIN_DIR"/}" PASS || check "V0 file exists: ${f#"$PLUGIN_DIR"/}" FAIL
 done
 [ -x "$PRE_HOOK" ] && [ -x "$POST_HOOK" ] && check "V1 both hooks are executable" PASS || check "V1 both hooks are executable" FAIL
+[ -x "$AUTH_GUARD_HOOK" ] && bash -n "$AUTH_GUARD_HOOK" 2>/dev/null && check "V1b the verify-auth guard hook is executable and passes bash -n" PASS \
+  || check "V1b the verify-auth guard hook is executable and passes bash -n" FAIL
 bash -n "$PRE_HOOK" 2>/dev/null && bash -n "$POST_HOOK" 2>/dev/null && bash -n "$PREFILTER_LIB" 2>/dev/null \
   && check "V2 bash -n passes for both hooks and the prefilter library" PASS || check "V2 bash -n passes for both hooks and the prefilter library" FAIL
 V2B_OK=1
 for f in "$MODULE" "$FLOOR" "$VERSION_MODULE" "$REGISTRATION_MODULE" "$CONFIG_HELPER" "$FREE_PORT" \
-  "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION"; do
+  "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION" \
+  "$AUTH_STATE_MODULE" "$AUTH_GUARD_MODULE" "$UNIT_AUTH_STATE" "$UNIT_AUTH_GUARD" "$UNIT_AUTH_E2E"; do
   node --check "$f" >/dev/null 2>&1 || V2B_OK=0
 done
-[ "$V2B_OK" -eq 1 ] && check "V2b node --check passes for the four modules, both helpers and the five unit files" PASS \
-  || check "V2b node --check passes for the four modules, both helpers and the five unit files" FAIL
+[ "$V2B_OK" -eq 1 ] && check "V2b node --check passes for the six modules, both helpers and the eight unit files" PASS \
+  || check "V2b node --check passes for the six modules, both helpers and the eight unit files" FAIL
 
 MATCHER="$(node -e 'process.stdout.write(String(require(process.argv[1]).CONSENT_MATCHER))' "$MODULE" 2>/dev/null)"
 [ "$MATCHER" = "Bash|PowerShell" ] && check "V3 the module's CONSENT_MATCHER is Bash|PowerShell" PASS \
@@ -101,6 +111,9 @@ unit_check "V7 the consent gate unit file passes" "$UNIT_CONSENT"
 unit_check "V7b the free-port unit file passes" "$UNIT_PORT"
 unit_check "V7c the browser-config unit file passes" "$UNIT_CONFIG"
 unit_check "V7d the cli-version unit file passes" "$UNIT_VERSION"
+unit_check "V7e the signed-in state validator unit file passes" "$UNIT_AUTH_STATE"
+unit_check "V7f the verify-auth read guard unit file passes" "$UNIT_AUTH_GUARD"
+unit_check "V7g the signed-in browser integration file passes or skips with its reason" "$UNIT_AUTH_E2E"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
   && grep -qF "'verify-navigation-floor-v1.js'" "$CONFIG_HELPER" \

@@ -64,8 +64,9 @@ particular, ask for the remote base URL and for genuinely ambiguous acceptance c
 - **Credential-blind.** Never receive, read, print, paste, or interpolate a real password,
   token, cookie, API key, or storage-state content. The browser consent gate denies every
   cookie, local/session-storage and state command on a `zensu-verify` session because they
-  expose credential material. Do not accept an auth artifact path or run a storage-state login
-  script; use visible manual browser login or report the authenticated coverage as PARTIAL.
+  expose credential material. Never accept an auth artifact path or run a login script yourself:
+  only the run-config helper runs a recipe's (§Authentication); else use visible manual
+  browser login or report the authenticated coverage as PARTIAL.
 - **Safe writes.** Local throwaway fixture creation is allowed. Remote destructive or
   externally visible actions (delete, send, publish, pay, invite) require explicit user
   confirmation even when they are part of a scenario.
@@ -98,8 +99,8 @@ only these points:
    `desktop` through their own rule files; and `api`, `cli`, `async`, `iac`, `custom` or
    `library` as one shell check that exits 0 exactly when the criterion holds. Pass the same
    id to `--driver` when you record the criterion.
-   The credential-blind rules above bind every driver: never the
-   autopilot `storageState` login, and never a secret in a command or in the evidence. An
+   The credential-blind rules above bind every driver: a `browser` row signs in only as
+   §Authentication says, and never a secret in a command or in the evidence. An
    exit-code check reaches only an unauthenticated, synthetic, loopback target and prints only
    what `rules/acceptance-evidence.md` allows, because the evidence runner prints the tail of its
    output to you; that file also says how one run backs several ACs. A criterion that needs
@@ -385,7 +386,7 @@ The redirect check from Phase 0 applies to every navigation.
 After readiness, once the base URL is final, write the run config:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DIR" --mode <local|remote> --origin "<app-origin>" [--network-only-origin "<network-only-origin>" ...]
+node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DIR" --mode <local|remote> --origin "<app-origin>" [--network-only-origin "<network-only-origin>" ...] [--login-recipe "<recipe>"]
 ```
 
 Pass one `--origin` per origin the matrix navigates — the application origin and, only when it
@@ -427,12 +428,8 @@ as `rules/browser-verification.md` section 0 describes; every other denial is fi
 ### Authentication (both modes)
 
 The browser consent gate denies every cookie, local/session-storage and storage-state command
-on a `zensu-verify` session, and `open` carries only the run config, which holds no storage
-state. This is deliberate: those commands combine state restoration with credential getters
-and exporters, so admitting them would violate the credential-blind boundary. Do not invoke
-`auth.loginScript`, accept `STORAGE_STATE`, or try to restore browser state by another tool or
-another session. A future gate may re-enable opaque state only when it admits a path-contained
-setter and hard-denies every getter/exporter.
+on a `zensu-verify` session. Never run `auth.loginScript`, read `STORAGE_STATE` or open a
+run's `auth/` directory yourself; the verify-auth read guard denies it.
 
 The evidence boundary is the ORIGIN, never the route. Before authenticating or navigating to
 any protected page—including an initial `open` or `goto`, which prints the page title and
@@ -449,10 +446,13 @@ in it is ignored.
 
 Use this order:
 
-1. **Visible manual login:** navigate a headed browser to the login page, ask the user to
+1. **Recipe login script:** when the selected recipe's `auth` block sets `mode: login-script`
+   and `artifact: storageState`, sign in through the helper's `--login-recipe` as
+   `rules/browser-verification.md` section 6 says.
+2. **Visible manual login:** navigate a headed browser to the login page, ask the user to
    enter credentials in that browser, and wait for confirmation. Never ask them to paste a
    credential into chat and never type it on their behalf.
-2. **No safe path:** skip authenticated scenarios and report PARTIAL. Token extraction or
+3. **No safe path:** skip authenticated scenarios and report PARTIAL. Token extraction or
    `localStorage.setItem(...)` injection is forbidden, including for throwaway remote users.
 
 ## Phase 3 — Drive and observe
@@ -462,7 +462,7 @@ every other row follows `rules/drivers.md` section 8.
 
 - Drive P0, then P1, then any affordable P2 rows.
 - Reset to a known state between scenarios. Use a fresh isolated context when scenario state
-  can leak; re-authenticate visibly when a fresh context is required.
+  can leak; sign in again when a fresh context is required.
 - After every meaningful interaction, take a semantic snapshot before selecting the next
   action. Prefer role/name/ref-based interactions over guessed CSS selectors.
 - Capture and actually inspect screenshots at the checkpoints named in the matrix.

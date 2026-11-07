@@ -19,6 +19,8 @@ const ZENSU_WORD = /(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/iu;
 const PAIR = '\u0001';
 const ROOT_MISMATCH = 'zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin';
 const CAPABILITY_LEAD = 'zensu: reviewer capability gate unavailable: ';
+const AUTH_GUARD_MARKER = 'verify-feature-runs';
+const AUTH_GUARD_LEAD = 'Zensu verify-auth guard: ';
 const EDIT_GATE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const EDIT_GATE_LIBRARIES = Object.freeze([
   'zensu-agent-context.sh',
@@ -518,6 +520,34 @@ function runDataGuard(context) {
   return emitted(outcome.output);
 }
 
+function authGuardMarked(input) {
+  if (typeof input !== 'string' || input === '') return false;
+  const decoded = input.replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)));
+  return [input, decoded].some((text) => text.toLowerCase().includes(AUTH_GUARD_MARKER)
+    || text.replace(/[`'"\\]/g, '').toLowerCase().includes(AUTH_GUARD_MARKER));
+}
+
+function runAuthGuard(context) {
+  const failure = rootFailure(context);
+  if (failure) return failure;
+  const marked = authGuardMarked(context.input);
+  const refuse = (cause) => (marked
+    ? emitted(denyOutput(`${AUTH_GUARD_LEAD}refused a call that names a verify-feature run directory because ${cause}; reinstall the plugin or run /zensu:doctor`))
+    : silent());
+  if (!regularFile(path.join(LIB_DIR, 'verify-auth-guard-v1.js'))) return refuse('its decision module is absent or a symlink');
+  try {
+    const guard = require('./verify-auth-guard-v1.js');
+    const verdict = guard.decide({
+      payload: context.parsed,
+      raw: context.input,
+      cwd: context.only ? context.environment.ZENSU_GUARD_CALLER_CWD || '' : context.hookCwd,
+    });
+    return verdict.deny ? emitted(guard.denyOutput(verdict)) : silent();
+  } catch (_error) {
+    return refuse('its decision module failed');
+  }
+}
+
 function editGateAllows(context) {
   if (!EDIT_GATE_LIBRARIES.every((name) => regularFile(path.join(LIB_DIR, name)))) return false;
   if (!mainPrincipal(context.input, 'PreToolUse')) return true;
@@ -675,6 +705,7 @@ const RUNNERS = Object.freeze({
   'secret-scan-write': runSecretScan,
   'plugin-data-guard-notebook': runDataGuard,
   'secret-scan-notebook': runSecretScan,
+  'verify-auth-guard': runAuthGuard,
   'artifact-redact': runRedact,
   'browser-consent-recorder': runConsent,
   'work-order-post': runWorkOrder,
@@ -909,6 +940,7 @@ function main(argv) {
 module.exports = {
   REGISTRY,
   aggregate,
+  authGuardMarked,
   configHookEnabled,
   configHookEnabledStrict,
   configHookOptedIn,

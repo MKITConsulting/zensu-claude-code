@@ -119,6 +119,7 @@ shell is refused.
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |
 | `pre-browser-navigation-consent.sh` | A call carrying both consent markers in any spelling `spellings()` decodes is refused (`POWERSHELL_NOT_JUDGED`), and a call that reaches node while the analyzer cannot load is refused too. The prefilter forwards a PowerShell payload that names `wright` and `verify` or holds `u{`, because a backtick, Unicode or concatenated spelling never names `playwright-cli` literally. |
 | `post-browser-navigation-consent.sh` | Skipped (`powershell-call`), because the pre hook refused every marked call. |
+| `pre-verify-auth-guard.sh` | Judged textually over the raw text, its backtick-free and concatenation-free forms and `spellings()`: a command that names a verify-feature run's `auth/` directory is denied as in Bash. A failed load of the analyzer falls back to the stripped forms rather than refusing. |
 | `post-artifact-redact.sh` | Parity: the sweep runs as after Bash. |
 | `pre-work-order-gate.sh` | Refused in a bound work-order session; `harness/launcher.js` starts Claude with `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`. |
 | `post-work-order.sh` | Runs for every tool; its `zensu work ask` branch reads Bash only, which the pre gate leaves as the only shell. The `postToolUpdate` PowerShell case in `work-order-v1.test.js` pins that a PowerShell ask ends nothing. |

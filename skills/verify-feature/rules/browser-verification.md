@@ -30,6 +30,8 @@ local/session-storage and state command, `delete-data`, `route` and its siblings
 `request-*` and `response-*`, `network-state-set`, `upload`, `drop`, `pdf`, recording,
 tracing and video, `attach`, `detach`, `install`, `install-browser`, `close-all`, `kill-all`,
 and the flags `--filename`, `--persistent` and `--profile`. A flag given twice is denied too.
+On a signed-in `zensu-verify-auth-…` session (section 6) `console` and `requests` are denied
+as well, and that denial is final too.
 Never re-issue a denied call under another spelling, another session name, or through another
 program — with one exception, the shape denial below. A command or flag that is not available,
 an origin outside the run config or the navigation policy, a refused or unanswerable consent
@@ -165,7 +167,8 @@ After each scenario, inspect console and network activity scoped to its actions,
 this boundary: raw `console` and `requests` output reaches the model before final-report
 redaction. Direct inspection is permitted only for a proven unauthenticated, synthetic,
 secret-free target. Contract v1 has no trusted model-visible sanitizer for authenticated
-runtime signals; skip that plane and report PARTIAL instead of running those commands. Use
+runtime signals; skip that plane and report PARTIAL instead of running those commands. On a
+signed-in `zensu-verify-auth-…` session the gate denies both. Use
 `console --clear` and `requests --clear` to scope the next scenario.
 
 - Feature-related uncaught errors, failed resource loads, or unexpected warnings fail the
@@ -187,8 +190,9 @@ runtime signals; skip that plane and report PARTIAL instead of running those com
   cached app state would contaminate the next row, `close` the session and `open` it again with
   the same run config, which starts an isolated browser. In a remote run that `open` asks the
   user again for every remote origin outside the policy.
-- Never restore browser state or accept an auth artifact. Re-authenticate visibly when a fresh
-  browser is required; otherwise report the row PARTIAL.
+- Never restore browser state yourself or accept an auth artifact. When a fresh browser is
+  required, run the run-config helper again with `--login-recipe` (section 6), which logs in
+  again, or re-authenticate visibly; otherwise report the row PARTIAL.
 - Do not screenshot credentials, tokens, personal data, or unrelated sensitive content.
 - In remote mode, stop before irreversible or externally visible mutations unless the user
   explicitly approved that exact action.
@@ -205,3 +209,60 @@ Maintain the report table while driving. For each row, capture:
 
 Run `playwright-cli -s=<session> close` even after a failed assertion or cancelled login. The
 parent skill owns the remaining process, container, and temp-dir cleanup.
+
+## 6. Signed-in runs (recipe login script)
+
+A recipe whose top-level `auth:` block sets `mode: login-script`, `artifact: storageState` and a
+`loginScript` lets a run open a browser that is already signed in to a dedicated test account.
+You never see the password, the script's output or the browser state, and you never need them.
+
+1. **Call the helper with the recipe.** Add `--login-recipe "<absolute recipe path>"` to the
+   run-config helper call, and `--auth-origin "<origin>"` only when the account signs in on
+   another of the run's origins than the first `--origin`. The run directory must be
+   `$GIT_ROOT/.zensu/verify-feature-runs/<random>`. The helper reads the `auth` block with a
+   strict reader (`key: scalar` lines only), runs `auth.loginScript` with `bash -c` in the
+   project root, in its own process group, with stdin closed, its output never shown and a
+   300 s timeout, and hands it `ZENSU_AUTH_ARTIFACT_DIR`, `ZENSU_AUTH_BASE_URL` and
+   `ZENSU_APP_ORIGIN`. The script must print exactly one line, `STORAGE_STATE=<path>`, naming a
+   regular file it wrote beneath `ZENSU_AUTH_ARTIFACT_DIR`. The helper keeps only the cookies
+   and `origins[]` entries of the run's origins, writes them owner-only to
+   `auth/storage-state.json` beside the run config, behind a `.gitignore` of `*`, and prints
+   `session=zensu-verify-auth-<id>`, the config and `login=state-restored`. It refuses unless
+   the verify-auth read guard is registered.
+2. **A failed login is final for this run.** The helper prints `login failed: <class>` —
+   `recipe`, `timeout`, `exit <code>`, `contract`, `artifact-path`, `artifact-shape` or
+   `artifact-scope` — and writes no run config. Never run the script yourself to see why: fall
+   back to visible manual login or PARTIAL, and tell the user to run the login script in their
+   own terminal to debug it.
+3. **Open on the printed session.** `open` with that config on the printed
+   `zensu-verify-auth-…` session starts the browser signed in. The gate checks the state file
+   before it admits `open` (a regular owner-only file of at most 1 MiB holding valid storage
+   state for the run config's origins only), and the consent prompt says the browser opens
+   signed in. A loopback origin is asked once per session for a signed-in `open`, even after a
+   plain approval of the same origin; a remote origin is asked at every `open`; a policy target
+   passes as before. The recorder deletes the state file once `open` ran, so a second `open` of
+   that config is denied: for a fresh browser, run the helper again, which logs in again. A
+   refused prompt or a failed `open` leaves the file until Phase 4 deletes the run directory.
+4. **What a signed-in session cannot do.** `console` and `requests` are denied, so the
+   runtime-signal plane of a signed-in row is PARTIAL. Every cookie, storage and state command
+   stays denied, as on every session. What the app renders reaches you by design, so never
+   drive pages that show credentials, API keys, tokens or session lists.
+5. **The read guard.** The verify-auth guard denies every `Read`, `Grep`, `Glob`,
+   `NotebookEdit`, `Edit`, `Write` and `MultiEdit` call that reaches
+   `.zensu/verify-feature-runs/<run>/auth/`, and every `Bash` or `PowerShell` command whose text
+   names such a path. Its denial is final; never try another tool or spelling. Phase 4 deletes
+   the run directory by its own path, which the guard admits.
+6. **Targets.** Local: a stack the recipe boots, or `--attach` with a recipe that carries the
+   `auth` block; the run's validated loopback origins are used and the recipe's `baseUrl` and
+   `appOrigin` are not compared. Remote: a hosted test environment or production; the recipe
+   must set `auth.appOrigin` equal to the first `--origin`, `auth.baseUrl`, when present, equal
+   to the auth origin, and `auth.environment` to `test` or `production`. Production is an
+   explicit opt-in of that recipe: a dedicated test account in an isolated organization with
+   synthetic data only, never the developer's own account, and a password the script resolves
+   itself, from a keychain or password manager rather than a plain environment variable,
+   because an `env` dump prints every variable.
+7. **A redirect to a login page** or to an identity provider on another origin means the state
+   did not sign in: stop driving that page, report the row PARTIAL, and fall back to visible
+   manual login in a fresh session without `--login-recipe`.
+8. **Report.** In the Consent block mark every record that carries `restoredState` as
+   signed-in, and name the signed-in rows' PARTIAL runtime-signal plane under Limitations.

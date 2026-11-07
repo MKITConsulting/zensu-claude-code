@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 'use strict';
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const dns = require('node:dns');
 const fs = require('node:fs');
 const net = require('node:net');
+const os = require('node:os');
 const path = require('node:path');
 const {
   FLOOR_REASONS,
@@ -12,6 +14,7 @@ const {
 } = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
 const consent = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-consent-v1.js'));
 const cliVersion = require(path.join(__dirname, '..', 'hooks', 'lib', 'playwright-cli-version-v1.js'));
+const authState = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-auth-state-v1.js'));
 
 const PLUGIN_ROOT = path.join(__dirname, '..');
 const PINNED_INSTALL = `npm install -g @playwright/cli@${consent.PLAYWRIGHT_CLI_SOURCE_VERSION}`;
@@ -20,13 +23,20 @@ const OUTPUT_DIR_NAME = consent.RUN_OUTPUT_DIR_NAME;
 const SESSION_PREFIX = consent.SESSION_PREFIX;
 const MAX_ORIGINS = consent.MAX_RUN_ORIGINS;
 const MODES = Object.freeze(['local', 'remote']);
-const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...] [--network-only-origin <origin> ...]';
+const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...] [--network-only-origin <origin> ...] [--login-recipe <absolute-recipe-path> [--auth-origin <origin>]]';
 const CHECK_USAGE = 'usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>';
 const POLICY_CONSENT_NOTE = 'the navigation policy in the launch environment does not name every origin checked here as a target: the permission prompt asks for the others, and a session that cannot show it (permission mode bypassPermissions or dontAsk) is denied them at open';
 const CHECK_ROLES = Object.freeze({ 'declared-safe': 'navigable', 'network-only': 'network-only' });
+const AUTH_SESSION_PREFIX = authState.AUTH_SESSION_PREFIX;
+const LOGIN_TIMEOUT_MS = 300000;
+const MAX_LOGIN_STDOUT_BYTES = 65536;
+const MAX_RECIPE_BYTES = 262144;
+const AUTH_ENVIRONMENTS = Object.freeze(['test', 'production']);
+const LOGIN_FAILURES = Object.freeze(['recipe', 'timeout', 'contract', 'artifact-path', 'artifact-shape', 'artifact-scope']);
+const LOGIN_RESTORED = 'login=state-restored';
 
 function parseArgs(argv) {
-  const options = { runDir: null, mode: null, origins: [], networkOnlyOrigins: [] };
+  const options = { runDir: null, mode: null, origins: [], networkOnlyOrigins: [], loginRecipe: null, authOrigin: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = argv[index + 1];
@@ -35,12 +45,15 @@ function parseArgs(argv) {
     else if (arg === '--mode' && options.mode === null) options.mode = value;
     else if (arg === '--origin') options.origins.push(value);
     else if (arg === '--network-only-origin') options.networkOnlyOrigins.push(value);
+    else if (arg === '--login-recipe' && options.loginRecipe === null) options.loginRecipe = value;
+    else if (arg === '--auth-origin' && options.authOrigin === null) options.authOrigin = value;
     else throw new Error(USAGE);
     index += 1;
   }
   if (!options.runDir || !MODES.includes(options.mode) || options.origins.length === 0) {
     throw new Error(USAGE);
   }
+  if (options.authOrigin !== null && options.loginRecipe === null) throw new Error(USAGE);
   if (options.origins.length + options.networkOnlyOrigins.length > MAX_ORIGINS) {
     throw new Error(`at most ${MAX_ORIGINS} origins are accepted`);
   }
@@ -95,7 +108,7 @@ async function checkPolicy(argv, env = process.env, resolver = dns.promises.look
   if (argv.length !== 3 || !MODES.includes(argv[0]) || !Object.prototype.hasOwnProperty.call(CHECK_ROLES, argv[2])) {
     throw new Error(CHECK_USAGE);
   }
-  checkReadiness(readiness, env);
+  checkReadiness(readiness, env, false);
   const [mode, rawOrigin, operand] = argv;
   const networkOnly = CHECK_ROLES[operand] === 'network-only';
   const classified = checkOrigin(rawOrigin, mode, networkOnly);
@@ -105,26 +118,265 @@ async function checkPolicy(argv, env = process.env, resolver = dns.promises.look
   return verdict.decidedBy === 'policy-mode' ? 'policy' : 'consent';
 }
 
-function sessionName(runDir) {
-  const slug = path.basename(runDir).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+function sessionName(runDir, options = {}) {
+  const prefix = options.signedIn ? AUTH_SESSION_PREFIX : SESSION_PREFIX;
+  const room = SESSION_PREFIX.length + 40 - prefix.length;
+  let slug = path.basename(runDir).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!options.signedIn && /^auth(-|$)/.test(slug)) slug = `run-${slug}`;
+  slug = slug.slice(0, room);
   if (!slug) throw new Error('run directory name yields no session name');
-  const name = `${SESSION_PREFIX}${slug}`;
+  const name = `${prefix}${slug}`;
   if (!consent.SESSION_RE.test(name)) throw new Error('run directory name yields no valid session name');
   return name;
 }
 
-function buildConfig(runDir, origins, rules) {
+function buildConfig(runDir, origins, rules, statePath = null) {
   const args = ['--no-proxy-server'];
   if (rules.length > 0) args.push(`--host-resolver-rules=${rules.join(',')}`);
+  const contextOptions = { serviceWorkers: 'block' };
+  if (statePath) contextOptions.storageState = statePath;
   return {
     browser: {
       isolated: true,
       launchOptions: { args },
-      contextOptions: { serviceWorkers: 'block' },
+      contextOptions,
     },
     network: { allowedOrigins: origins },
     outputDir: path.join(runDir, OUTPUT_DIR_NAME),
   };
+}
+
+function loginFailure(kind) {
+  const error = new Error(`login failed: ${kind}`);
+  error.loginFailure = kind;
+  return error;
+}
+
+function doubleQuoted(raw) {
+  let value = '';
+  let index = 1;
+  const simple = { '\\': '\\', '"': '"', '/': '/', t: '\t', n: '\n', r: '\r', 0: '\0' };
+  while (index < raw.length) {
+    const char = raw[index];
+    if (char === '"') return { value, rest: raw.slice(index + 1) };
+    if (char !== '\\') {
+      value += char;
+      index += 1;
+      continue;
+    }
+    const next = raw[index + 1];
+    if (Object.prototype.hasOwnProperty.call(simple, next)) {
+      value += simple[next];
+      index += 2;
+      continue;
+    }
+    const width = next === 'x' ? 2 : next === 'u' ? 4 : 0;
+    const digits = width ? raw.slice(index + 2, index + 2 + width) : '';
+    if (!width || !new RegExp(`^[0-9A-Fa-f]{${width}}$`).test(digits)) return null;
+    value += String.fromCodePoint(parseInt(digits, 16));
+    index += 2 + width;
+  }
+  return null;
+}
+
+function singleQuoted(raw) {
+  let value = '';
+  let index = 1;
+  while (index < raw.length) {
+    if (raw[index] === "'") {
+      if (raw[index + 1] === "'") {
+        value += "'";
+        index += 2;
+        continue;
+      }
+      return { value, rest: raw.slice(index + 1) };
+    }
+    value += raw[index];
+    index += 1;
+  }
+  return null;
+}
+
+function scalarValue(raw) {
+  if (raw.startsWith('"') || raw.startsWith("'")) {
+    const quoted = raw.startsWith('"') ? doubleQuoted(raw) : singleQuoted(raw);
+    if (!quoted || !/^\s*(#.*)?$/.test(quoted.rest)) return null;
+    return quoted.value;
+  }
+  if (/^[[\]{}|>&*!%@`#]/.test(raw) || /^[-?:](\s|$)/.test(raw)) return null;
+  const value = raw.replace(/\s+#.*$/, '').replace(/\s+$/, '');
+  if (value === '' || /:(\s|$)/.test(value) || /^['"]/.test(value)) return null;
+  return value;
+}
+
+function readAuthBlock(text) {
+  const lines = String(text).split(/\r?\n/);
+  let start = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^auth\s*:/.test(lines[index])) continue;
+    if (start !== -1 || !/^auth:\s*(#.*)?$/.test(lines[index])) return null;
+    start = index;
+  }
+  if (start === -1) return null;
+  const values = {};
+  let indent = null;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    if (/^[ ]*\t/.test(line)) return null;
+    const lead = line.match(/^ */)[0].length;
+    if (lead === 0) break;
+    if (indent === null) indent = lead;
+    if (lead !== indent) return null;
+    const entry = line.slice(lead).match(/^([A-Za-z_][A-Za-z0-9_-]*):(?:[ ]+(.*))?$/);
+    if (!entry || entry[2] === undefined || entry[2].trim() === '') return null;
+    const value = scalarValue(entry[2]);
+    if (value === null || Object.prototype.hasOwnProperty.call(values, entry[1])) return null;
+    values[entry[1]] = value;
+  }
+  return values;
+}
+
+function originValue(value) {
+  if (typeof value !== 'string' || value === '') return '';
+  try {
+    const parsed = new URL(value);
+    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') return '';
+    if (value !== parsed.origin && value !== `${parsed.origin}/`) return '';
+    return parsed.origin;
+  } catch (_error) {
+    return '';
+  }
+}
+
+function readLoginRecipe(file, projectRoot) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) throw loginFailure('recipe');
+  let text;
+  try {
+    const info = fs.lstatSync(file);
+    if (!info.isFile() || info.size > MAX_RECIPE_BYTES) throw loginFailure('recipe');
+    const real = fs.realpathSync.native(file);
+    if (!real.startsWith(`${projectRoot}${path.sep}`)) throw loginFailure('recipe');
+    text = fs.readFileSync(real, 'utf8');
+  } catch (_error) {
+    throw loginFailure('recipe');
+  }
+  const block = readAuthBlock(text);
+  if (!block || block.mode !== 'login-script' || block.artifact !== 'storageState' || !block.loginScript) throw loginFailure('recipe');
+  return block;
+}
+
+function signalStatus(signal) {
+  const number = os.constants.signals[signal];
+  return typeof number === 'number' ? 128 + number : 128;
+}
+
+function runLoginScript(script, options) {
+  return new Promise((resolve) => {
+    const detached = process.platform !== 'win32';
+    let child;
+    try {
+      child = childProcess.spawn(options.shell || 'bash', ['-c', script], {
+        cwd: options.cwd,
+        env: options.env,
+        detached,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+    } catch (_error) {
+      resolve({ kind: 'exit 127' });
+      return;
+    }
+    const chunks = [];
+    let size = 0;
+    let overflow = false;
+    let timedOut = false;
+    let settled = false;
+    const killGroup = () => {
+      const attempts = detached ? [() => process.kill(-child.pid, 'SIGKILL'), () => child.kill('SIGKILL')] : [() => child.kill('SIGKILL')];
+      for (const attempt of attempts) {
+        try {
+          attempt();
+          return;
+        } catch (_error) {
+          continue;
+        }
+      }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, options.timeoutMs || LOGIN_TIMEOUT_MS);
+    child.stdout.on('data', (chunk) => {
+      if (overflow) return;
+      size += chunk.length;
+      if (size > MAX_LOGIN_STDOUT_BYTES) {
+        overflow = true;
+        chunks.length = 0;
+        killGroup();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    child.on('exit', () => killGroup());
+    child.on('error', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ kind: 'exit 127' });
+    });
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (timedOut) resolve({ kind: 'timeout' });
+      else if (overflow) resolve({ kind: 'contract' });
+      else if (code !== 0) resolve({ kind: `exit ${code === null ? signalStatus(signal) : code}` });
+      else resolve({ kind: 'ok', stdout: Buffer.concat(chunks).toString('utf8') });
+    });
+  });
+}
+
+async function signIn(options, runDir, origins, env, login = {}) {
+  const layout = authState.runDirLayout(runDir);
+  if (!layout.ok) throw new Error(`with --login-recipe the run directory must be <project>/${authState.ZENSU_DIR_NAME}/${authState.RUNS_DIR_NAME}/<leaf>`);
+  const recipe = readLoginRecipe(options.loginRecipe, layout.projectRoot);
+  const appOrigin = origins[0];
+  const authOrigin = options.authOrigin === null ? appOrigin : checkOrigin(options.authOrigin, options.mode).origin;
+  if (options.mode === 'remote') {
+    if (originValue(recipe.appOrigin) !== appOrigin) throw loginFailure('recipe');
+    if (recipe.baseUrl !== undefined && originValue(recipe.baseUrl) !== authOrigin) throw loginFailure('recipe');
+    if (!AUTH_ENVIRONMENTS.includes(recipe.environment)) throw loginFailure('recipe');
+  }
+  const prepared = authState.prepareAuthDir(runDir);
+  try {
+    const outcome = await runLoginScript(recipe.loginScript, {
+      cwd: layout.projectRoot,
+      env: Object.assign({}, env, {
+        ZENSU_AUTH_ARTIFACT_DIR: prepared.artifactDir,
+        ZENSU_AUTH_BASE_URL: authOrigin,
+        ZENSU_APP_ORIGIN: appOrigin,
+      }),
+      timeoutMs: login.timeoutMs,
+      shell: login.shell,
+    });
+    if (outcome.kind !== 'ok') throw loginFailure(outcome.kind);
+    const line = authState.artifactLine(outcome.stdout);
+    if (!line.ok) throw loginFailure('contract');
+    const artifact = authState.artifactFile(line.value, prepared.artifactDir);
+    if (!artifact.ok) throw loginFailure('artifact-path');
+    const read = authState.readBounded(artifact.file);
+    if (!read.ok) throw loginFailure(read.fault === authState.FAULTS.TOO_LARGE ? 'artifact-shape' : 'artifact-path');
+    const parsed = authState.parseState(read.text);
+    if (!parsed.ok) throw loginFailure('artifact-shape');
+    const scoped = authState.scopeState(parsed.state, origins.concat(options.scopeOrigins || []));
+    if (authState.emptyState(scoped)) throw loginFailure('artifact-scope');
+    const written = authState.writeStateFile(prepared.statePath, scoped);
+    if (!written.ok) throw new Error('the signed-in state could not be written into the run directory');
+    return prepared.statePath;
+  } finally {
+    authState.removeArtifactDir(prepared.artifactDir);
+  }
 }
 
 function writeConfig(runDir, config) {
@@ -162,11 +414,15 @@ function versionRemedy(installed) {
   return install;
 }
 
-function checkReadiness(readiness, env) {
+function checkReadiness(readiness, env, signedIn) {
   const hook = consent.consentHookRegistered(readiness.pluginRoot);
   const recorder = consent.consentRecorderRegistered(readiness.pluginRoot);
   if (hook !== consent.REGISTRATION.REGISTERED || recorder !== consent.REGISTRATION.REGISTERED) {
     throw new Error(`the browser consent gate is not ready (consent hook: ${hook}; consent recorder: ${recorder}), so no run config is written; run /zensu:doctor`);
+  }
+  const guard = signedIn ? consent.authGuardRegistered(readiness.pluginRoot) : consent.REGISTRATION.REGISTERED;
+  if (guard !== consent.REGISTRATION.REGISTERED) {
+    throw new Error(`the verify-auth read guard is not ready (auth guard: ${guard}), so no signed-in run config is written; run /zensu:doctor`);
   }
   const measured = consent.PLAYWRIGHT_CLI_SOURCE_VERSION;
   const installed = readiness.installedVersion(env);
@@ -178,9 +434,9 @@ function defaultReadiness() {
   return { pluginRoot: PLUGIN_ROOT, installedVersion: (env) => cliVersion.installedVersion(env) };
 }
 
-async function run(argv, resolver = dns.promises.lookup, env = process.env, readiness = defaultReadiness()) {
+async function run(argv, resolver = dns.promises.lookup, env = process.env, readiness = defaultReadiness(), login = {}) {
   const options = parseArgs(argv);
-  checkReadiness(readiness, env);
+  checkReadiness(readiness, env, options.loginRecipe !== null);
   const runDir = checkRunDir(options.runDir);
   const policy = consent.readPolicy(env);
   const origins = [];
@@ -204,16 +460,26 @@ async function run(argv, resolver = dns.promises.lookup, env = process.env, read
   };
   for (const rawOrigin of options.origins) await admit(rawOrigin, false);
   for (const rawOrigin of options.networkOnlyOrigins) await admit(rawOrigin, true);
-  const session = sessionName(runDir);
-  const config = buildConfig(runDir, [...origins, ...networkOnlyOrigins], rules);
+  const signedIn = options.loginRecipe !== null;
+  const session = sessionName(runDir, { signedIn });
+  const statePath = signedIn
+    ? await signIn(Object.assign({}, options, { scopeOrigins: networkOnlyOrigins }), runDir, origins, env, login)
+    : null;
+  const config = buildConfig(runDir, [...origins, ...networkOnlyOrigins], rules, statePath);
   const shape = consent.runConfigShape(config, path.join(runDir, CONFIG_NAME));
   if (!shape.ok) throw new Error(shape.fault);
   const configPath = writeConfig(runDir, config);
-  return { session, configPath, origins, networkOnlyOrigins, config, mode: consentNeeded ? 'consent' : 'policy' };
+  return { session, configPath, origins, networkOnlyOrigins, config, mode: consentNeeded ? 'consent' : 'policy', login: signedIn ? 'state-restored' : null };
 }
 
 module.exports = {
+  AUTH_ENVIRONMENTS,
+  AUTH_SESSION_PREFIX,
   CONFIG_NAME,
+  LOGIN_FAILURES,
+  LOGIN_RESTORED,
+  LOGIN_TIMEOUT_MS,
+  MAX_LOGIN_STDOUT_BYTES,
   MAX_ORIGINS,
   OUTPUT_DIR_NAME,
   POLICY_CONSENT_NOTE,
@@ -223,7 +489,9 @@ module.exports = {
   checkPolicy,
   checkRunDir,
   parseArgs,
+  readAuthBlock,
   run,
+  runLoginScript,
   sessionName,
 };
 
@@ -236,6 +504,7 @@ if (require.main === module) {
       const lines = [`session=${result.session}`, `config=${result.configPath}`, `mode=${result.mode}`];
       for (const origin of result.origins) lines.push(`origin=${origin}`);
       for (const origin of result.networkOnlyOrigins) lines.push(`network-only-origin=${origin}`);
+      if (result.login) lines.push(LOGIN_RESTORED);
       return { text: `${lines.join('\n')}\n`, consentUnderPolicy: policyPresent && result.mode === 'consent' };
     });
   work.then(({ text, consentUnderPolicy }) => {
