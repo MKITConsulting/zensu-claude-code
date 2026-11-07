@@ -198,6 +198,14 @@ specified in `skills/autopilot/rules/conventions.md`.
   mismatch.
 - Extend the marker/structure guards so a skill can't call `gh`/`glab` directly
   outside the driver.
+- `tests/integration/gitlab/` — the live tier. The structure suites above replace glab
+  with a fake that encodes our model of glab and GitLab; the live suite drives the GitLab
+  verbs with the real glab builds pinned in `versions.v1.json` against a disposable GitLab
+  CE pinned by digest, and asserts what GitLab stored. `.github/workflows/gitlab-live.yml`
+  runs it for pull requests that touch the driver and nightly, and both release stages run
+  it as a gate. CI runs pinned builds only: a nightly drift check reads the release metadata
+  of newer glab and GitLab releases without running them and files their pin lines in an
+  issue. `tests/README.md` §"Live GitLab suite" holds the operator account.
 
 ### Implementation status
 
