@@ -60,7 +60,11 @@ nothas "A9d resolve gitlab not gh"       "$GLR" "gh api"
 
 GLR2="$(argv --resolve-thread --provider gitlab --repo-id grp%2Fproj --reply 'ok' 7 d1)"
 has "A9e resolve gitlab WITH reply -> notes POST" "$GLR2" "discussions/d1/notes"
-has "A9f resolve gitlab reply body"      "$GLR2" "body=ok"
+has "A9f resolve gitlab reply body travels as one JSON request" "$GLR2" '{"body":"ok"}'
+has "A9g resolve gitlab reply declares a JSON Content-Type before its stdin body" "$GLR2" "discussions/d1/notes --header Content-Type: application/json --input -"
+nothas "A9h resolve gitlab reply passes no -f field" "$GLR2" " -f "
+eq "A9i resolve gitlab posts the reply before it resolves the thread" \
+  "$(printf '%s\n' "$GLR2" | awk '/discussions\/d1\/notes/{n=NR} /resolved=true/{p=NR} END{if (n && p && n < p) print "ordered"; else print "unordered"}')" "ordered"
 
 # ---- guards (fail-loud) + resolve-no-reply + reply_to fallback ----
 fails() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -ne 0 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
