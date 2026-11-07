@@ -149,9 +149,17 @@ read is the half a later `minor` needs to start storing it.
   `workspaceRoot` is a worktree nested below the anchor is not this gap: `zensu-log.sh` passes
   that worktree as `ZENSU_AVR_WORK_TREE`, so its records, its status and the acceptance runs it
   cites bind the combined tree of the project and the worktree, and an edit there makes them
-  stale. A worktree the resolver cannot answer makes both verbs exit 2 with the cause. Its
-  terminus still answers `not-checked`, because VALIDATE verifies the run's criteria
-  (`A29` to `A31` in `test-acceptance-gate.sh`; **version `patch`**, walked in
+  stale. A worktree the shared lookup cannot answer reaches the module as the transport file
+  `work-tree-fault`, and the module words the refusal: after its usage checks `record()` exits 2
+  with `the chain's work tree could not be determined, so no acceptance record can be bound to
+  it: <cause>`, and `status()` prints the same cause as an `ACCEPTANCE STATUS — unavailable`
+  summary line with exit 2, which every consumer already reads as a summary with no remedy. An
+  empty or unreadable fault file is a fault with a fixed cause, and a fault file the shell could
+  not write stops both verbs with exit 2 and the shell's own line before the module runs, so a
+  lost cause never reads as a standalone chain (the fail-closed transport in
+  `.claude/rules/evidence-runner.md`). Its terminus still answers `not-checked`, because VALIDATE
+  verifies the run's criteria (`A29` to `A32` in `test-acceptance-gate.sh` and the work-tree
+  fault cases of `acceptance-verify-v1.test.js`; **version `patch`**, walked in
   `.claude/rules/evidence-runner.md`).
 - **Consent prompts need a person**, as in §"Browser Consent Gate": Auto mode was measured to
   reach the user, and bypass permissions and `dontAsk` deny a remote origin outside a policy. How

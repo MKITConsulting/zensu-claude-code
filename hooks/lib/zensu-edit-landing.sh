@@ -375,7 +375,7 @@ _el_git() (
         GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES \
         GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_NAMESPACE GIT_PREFIX \
         GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
-  git -c core.excludesFile=/dev/null "$@"
+  git -c core.excludesFile=/dev/null -c core.quotePath=false "$@"
 )
 
 git_fault() {

@@ -16,6 +16,7 @@ const REVIEWER_ROLES = new Map([['review-aspect', 'aspect'], ['review-judge', 'j
 const RECORD_NAME_RE = /^record-r(\d+)-(\d+)-(\d+)-([0-9a-f]{12})\.json$/;
 const PACKET_NAME_RE = /^packet-r(\d+)\.json$/;
 const DELIVERY_STUB_RE = /^This agent's report was delivered to you as a message from /;
+const UNDELIVERED_STUB_RE = /^The subagent ended without delivering a report through SubagentHandback\b/;
 const PACKET_INVALID_RE = /^REVIEW PACKET INVALID\b/m;
 const ROLES = Object.freeze(['aspect', 'persona', 'judge-primary', 'judge-second', 'consume']);
 const PACKET_STATES = Object.freeze(['ok', 'absent', 'duplicate', 'unterminated']);
@@ -23,6 +24,7 @@ const LAUNCHED = 'async_launched';
 const AGENT_ID_RE = background.AGENT_ID_RE;
 const PERSONA_RE = background.PERSONA_TYPE_RE;
 const EVENTS = Object.freeze(['PostToolUse', 'UserPromptSubmit']);
+const CONSUME_AGAIN = 'spawn zensu:code-reviewer again with the same two header lines';
 
 class ReviewGateError extends Error {}
 
@@ -57,6 +59,19 @@ function reportText(response) {
   }
   if (text.trim() === '' || DELIVERY_STUB_RE.test(text.trim())) return { text: '', source: 'none' };
   return { text, source: 'content' };
+}
+
+function deliveredReport(text) {
+  if (typeof text !== 'string' || text.trim() === '') return false;
+  return !DELIVERY_STUB_RE.test(text.trim()) && !UNDELIVERED_STUB_RE.test(text.trim());
+}
+
+function arrivedReports(prompt) {
+  const handbacks = background.handbackReports(prompt).map((frame) => ({ ...frame, source: 'handback-prompt' }));
+  const notified = background.notificationReports(prompt)
+    .filter((entry) => entry.status === 'completed' && deliveredReport(entry.report))
+    .map((entry) => ({ agentId: entry.agentId, report: entry.report, source: 'notification-prompt' }));
+  return [...handbacks, ...notified];
 }
 
 function launchedAgent(response) {
@@ -145,7 +160,7 @@ function prune(store) {
 
 function describe(record) {
   if (record.role === 'judge-primary') return 'primary zensu:review-judge';
-  if (record.role === 'judge-second') return 'second zensu:review-judge run';
+  if (record.role === 'judge-second') return 'second zensu:review-judge';
   const name = record.identity ? record.identity.slice(record.identity.indexOf(':') + 1) : '';
   return `${record.type || record.role} reviewer${name ? ` "${name}"` : ''}`;
 }
@@ -224,7 +239,7 @@ function recordObservation(options) {
 
 function recordHandback(options) {
   const payload = options.payload || {};
-  const frames = background.handbackReports(payload.prompt);
+  const frames = arrivedReports(payload.prompt);
   if (frames.length === 0) return [];
   const root = packets.canonicalRoot(options.root);
   const state = packets.chainState(root, options.session);
@@ -236,7 +251,7 @@ function recordHandback(options) {
     const launch = runs.filter((entry) => entry.status === LAUNCHED && entry.role !== 'consume').pop();
     const kind = launch ? classify(launch.type) : null;
     if (!kind || runs.some((entry) => entry.status !== LAUNCHED)) continue;
-    const report = { text: frame.report, source: 'handback-prompt' };
+    const report = { text: frame.report, source: frame.source };
     const name = heading(report.text);
     const reason = launch.role === 'judge-primary' ? judgeFailure(report, 'completed') : null;
     const store = packets.ensureStore(root, options.session);
@@ -297,12 +312,104 @@ function consumeRefusal(cause, next) {
   return { pass: false, message: `REVIEW INCOMPLETE — ${cause}. The review ticket was NOT consumed and the review chain did not advance. Next: ${next}.` };
 }
 
-function checkConsume(options) {
+function consumeSubject(options) {
   const payload = options.payload || {};
-  const arrival = options.event === 'UserPromptSubmit';
-  const input = !arrival && payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
+  if (options.event === 'UserPromptSubmit') {
+    const agent = options.agent;
+    return {
+      agent,
+      report: () => {
+        const frame = arrivedReports(payload.prompt).filter((entry) => entry.agentId === agent).pop();
+        return { text: frame ? frame.report : '', source: frame ? frame.source : 'none' };
+      },
+      packet: (records, round) => {
+        const launch = records.filter((entry) => entry.round === round && entry.role === 'consume' && entry.agentId === agent).pop();
+        return launch ? { status: launch.packet, sha256: launch.packetSha, text: null } : { status: 'absent', unchecked: true };
+      },
+      launch: null,
+    };
+  }
+  const input = payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
-  const agent = arrival ? options.agent : null;
+  const agentId = launchedAgent(payload.tool_response);
+  return {
+    agent: null,
+    report: () => reportText(payload.tool_response),
+    packet: () => packets.extractPacket(prompt),
+    launch: agentId ? { agentId, type: clip(input.subagent_type || '', 80) } : null,
+  };
+}
+
+function unreportedLaunches(ofRound, roles) {
+  return ofRound.filter((entry) => entry.status === LAUNCHED && roles.includes(entry.role) && entry.agentId
+    && !ofRound.some((other) => other.agentId === entry.agentId && other.status !== LAUNCHED)).length;
+}
+
+function waitHint(count) {
+  return count === 0 ? '' : `; ${count === 1 ? 'one background reviewer launch of this round has' : `${count} background reviewer launches of this round have`} delivered no report the hook could read yet, as a hand-back or in a completion notification, so wait for ${count === 1 ? 'it' : 'them'} first, and where the host delivers neither, ask the user whether to set hooks.reviewPacketGate to false, which reviews this project without the gate`;
+}
+
+function suppliedRefusal(supplied, canonical, round, agent, respawn) {
+  if (supplied.unchecked) {
+    return consumeRefusal(`the background consume reviewer ${agent} was not checked by the review gate at its launch`, respawn);
+  }
+  if (supplied.status !== 'ok') {
+    return consumeRefusal(`the consume prompt carries ${packetProblem(supplied.status)}`, respawn);
+  }
+  if (supplied.sha256 === canonical.sha256) return null;
+  if (supplied.text === null) {
+    return consumeRefusal(`review round ${round}'s canonical packet changed after the background consume reviewer ${agent} was launched`, respawn);
+  }
+  return consumeRefusal(`the consume prompt's packet differs from review round ${round}'s canonical packet at packet line ${packets.firstDifference(canonical.text, supplied.text)}`, respawn);
+}
+
+function treeRefusal(root, session, canonical, round, create, rerun) {
+  const scope = canonical.scope;
+  const now = packets.currentScope(root, scope.baseline || '', scope.kind === 'git' ? undefined : scope.changedFiles, scope.workTree || '');
+  const drift = packets.scopeDifference(scope, now);
+  if (drift) {
+    return consumeRefusal(`${drift} since review round ${round}'s packet was created`, `re-run the step 5b edit-landing audit, run ${create} again, ${rerun}`);
+  }
+  if (canonical.receiptMode === 'receipt') {
+    if (packets.readReceipt(root, session).sha256 !== canonical.receiptSha256) {
+      return consumeRefusal(`the edit-landing receipt changed since review round ${round}'s packet was created`, `run ${create} again, ${rerun}`);
+    }
+  } else if (canonical.receiptMode === 'none' && !packets.receiptAbsent(root, session)) {
+    return consumeRefusal(`an edit-landing receipt was written after review round ${round}'s packet recorded none`, `run ${create} again, ${rerun}`);
+  }
+  return null;
+}
+
+function reviewerRefusal(ofRound, canonical, round, show) {
+  const latest = new Map();
+  for (const entry of ofRound) if (entry.identity) latest.set(entry.identity, entry);
+  const respawn = `spawn that reviewer again with the block ${show} prints, merge its findings in place of the earlier ones, then ${CONSUME_AGAIN} and that block`;
+  for (const entry of latest.values()) {
+    if (entry.at < canonical.createdAt) {
+      return consumeRefusal(`the latest ${describe(entry)} run of review round ${round} predates the round's canonical packet`, respawn);
+    }
+    if (entry.packet !== 'ok' || entry.packetSha !== canonical.sha256) {
+      return consumeRefusal(`the latest ${describe(entry)} run of review round ${round} saw ${entry.packet !== 'ok' ? packetProblem(entry.packet) : 'another packet than the canonical one'}`, respawn);
+    }
+  }
+  if (latest.size > 0) return null;
+  return consumeRefusal(`no reviewer of review round ${round} reported on its canonical packet`, `spawn this round's reviewers with the block ${show} prints and merge their findings, then ${CONSUME_AGAIN} and that block${waitHint(unreportedLaunches(ofRound, ['aspect', 'persona', 'judge-primary', 'judge-second']))}`);
+}
+
+function judgeRefusal(options, ofRound, canonical, round) {
+  if (options.judge !== 'on' || (round !== 0 && options.panel !== 'full')) return null;
+  const primaries = primaryFailures(ofRound.filter((entry) => entry.at >= canonical.createdAt), canonical);
+  if (primaries.some((entry) => entry.valid === true)) return null;
+  const failed = primaries.filter((entry) => entry.valid === false);
+  if (failed.length >= 2) {
+    return consumeRefusal(`the primary judge failed twice on review round ${round}'s packet (${failed[failed.length - 1].reason})`,
+      'stop the review chain here, keep both results and report the chain as pending; the second judge run never substitutes for the primary');
+  }
+  return consumeRefusal(`no primary zensu:review-judge run completed a substantive report on review round ${round}'s canonical packet${failed.length ? ` (${failed[0].reason})` : ''}`,
+    `spawn the primary zensu:review-judge with that block and the merged panel findings, merge its deltas, then ${CONSUME_AGAIN} and the block; the second judge run never substitutes for it${waitHint(unreportedLaunches(ofRound, ['judge-primary']))}`);
+}
+
+function consumeVerdict(options, subject) {
   const root = packets.canonicalRoot(options.root);
   const state = packets.chainState(root, options.session);
   if (state.status !== 'ok') return { pass: false, hold: true, reason: `state-${state.status}` };
@@ -311,110 +418,54 @@ function checkConsume(options) {
     return { pass: true, reason: 'not-current-ticket' };
   }
   const commands = remedyCommands(root, options.session);
-  const consumeAgain = 'spawn zensu:code-reviewer again with the same two header lines';
-  const respawnConsume = `${consumeAgain} and the block ${commands.show} prints, copied unchanged`;
-  let report = reportText(payload.tool_response);
-  if (arrival) {
-    const frame = background.handbackReports(payload.prompt).filter((entry) => entry.agentId === agent).pop();
-    report = { text: frame ? frame.report : '', source: frame ? 'handback-prompt' : 'none' };
-  }
-  if (PACKET_INVALID_RE.test(report.text)) {
-    return consumeRefusal('the consume reviewer answered REVIEW PACKET INVALID', respawnConsume);
+  const respawn = `${CONSUME_AGAIN} and the block ${commands.show} prints, copied unchanged`;
+  if (PACKET_INVALID_RE.test(subject.report().text)) {
+    return consumeRefusal('the consume reviewer answered REVIEW PACKET INVALID', respawn);
   }
   const store = packets.storeDirectory(root, options.session);
   const listing = listStore(store);
   const round = state.round;
-  let supplied = packets.extractPacket(prompt);
-  if (arrival) {
-    const launch = listing.records.filter((entry) => entry.round === round && entry.role === 'consume' && entry.agentId === agent).pop();
-    supplied = launch ? { status: launch.packet, sha256: launch.packetSha, text: null } : { status: 'absent', unchecked: true };
-  }
-  const runs = listing.records.filter((entry) => entry.status !== LAUNCHED);
-  if (listing.packetRounds.length === 0 && runs.length === 0 && supplied.status === 'absent') {
+  const supplied = subject.packet(listing.records, round);
+  if (listing.packetRounds.length === 0 && !listing.records.some((entry) => entry.status !== LAUNCHED) && supplied.status === 'absent') {
     return { pass: true, reason: 'not-engaged' };
   }
   const canonical = packets.readPacketRecord(store, round);
-  const rerun = `spawn this round's reviewers with the block it prints and merge their findings, then ${consumeAgain} and that block`;
+  const rerun = `spawn this round's reviewers with the block it prints and merge their findings, then ${CONSUME_AGAIN} and that block`;
   if (!canonical) {
     return consumeRefusal(`review round ${round} has no canonical packet`, `run ${commands.create}, ${rerun}`);
   }
-  if (supplied.unchecked) {
-    return consumeRefusal(`the background consume reviewer ${agent} was not checked by the review gate at its launch`, respawnConsume);
-  }
-  if (supplied.status !== 'ok') {
-    return consumeRefusal(`the consume prompt carries ${packetProblem(supplied.status)}`, respawnConsume);
-  }
-  if (supplied.sha256 !== canonical.sha256) {
-    if (supplied.text === null) {
-      return consumeRefusal(`review round ${round}'s canonical packet changed after the background consume reviewer ${agent} was launched`, respawnConsume);
-    }
-    return consumeRefusal(`the consume prompt's packet differs from review round ${round}'s canonical packet at packet line ${packets.firstDifference(canonical.text, supplied.text)}`, respawnConsume);
-  }
-  const now = packets.currentScope(root, canonical.scope.baseline || '', canonical.scope.kind === 'git' ? undefined : canonical.scope.changedFiles,
-    canonical.scope.workTree || '');
-  const drift = packets.scopeDifference(canonical.scope, now);
-  if (drift) {
-    return consumeRefusal(`${drift} since review round ${round}'s packet was created`, `re-run the step 5b edit-landing audit, run ${commands.create} again, ${rerun}`);
-  }
-  if (canonical.receiptMode === 'receipt') {
-    const receipt = packets.readReceipt(root, options.session);
-    if (receipt.sha256 !== canonical.receiptSha256) {
-      return consumeRefusal(`the edit-landing receipt changed since review round ${round}'s packet was created`, `run ${commands.create} again, ${rerun}`);
-    }
-  } else if (canonical.receiptMode === 'none' && !packets.receiptAbsent(root, options.session)) {
-    return consumeRefusal(`an edit-landing receipt was written after review round ${round}'s packet recorded none`, `run ${commands.create} again, ${rerun}`);
-  }
   const ofRound = listing.records.filter((entry) => entry.round === round);
-  const unreported = (roles) => ofRound.filter((entry) => entry.status === LAUNCHED && roles.includes(entry.role) && entry.agentId
-    && !ofRound.some((other) => other.agentId === entry.agentId && other.status !== LAUNCHED)).length;
-  const waitHint = (count) => (count === 0 ? '' : `; ${count === 1 ? 'one background reviewer launch of this round has' : `${count} background reviewer launches of this round have`} sent no hand-back the hook could read yet, so wait for ${count === 1 ? 'it' : 'them'} first, and where the host delivers no hand-back, as outside auto mode, ask the user whether to set hooks.reviewPacketGate to false, which reviews this project without the gate`);
-  const latest = new Map();
-  for (const entry of ofRound) if (entry.identity) latest.set(entry.identity, entry);
-  const respawnReviewer = `spawn that reviewer again with the block ${commands.show} prints, merge its findings in place of the earlier ones, then ${consumeAgain} and that block`;
-  for (const entry of latest.values()) {
-    if (entry.at < canonical.createdAt) {
-      return consumeRefusal(`the latest ${describe(entry)} run of review round ${round} predates the round's canonical packet`, respawnReviewer);
-    }
-    if (entry.packet !== 'ok' || entry.packetSha !== canonical.sha256) {
-      return consumeRefusal(`the latest ${describe(entry)} run of review round ${round} saw ${entry.packet !== 'ok' ? packetProblem(entry.packet) : 'another packet than the canonical one'}`, respawnReviewer);
-    }
-  }
-  if (latest.size === 0) {
-    return consumeRefusal(`no reviewer of review round ${round} reported on its canonical packet`, `spawn this round's reviewers with the block ${commands.show} prints and merge their findings, then ${consumeAgain} and that block${waitHint(unreported(['aspect', 'persona', 'judge-primary', 'judge-second']))}`);
-  }
-  const recent = ofRound.filter((entry) => entry.at >= canonical.createdAt);
-  const required = options.judge === 'on' && (round === 0 || options.panel === 'full');
-  if (required) {
-    const primaries = primaryFailures(recent, canonical);
-    if (!primaries.some((entry) => entry.valid === true)) {
-      const failed = primaries.filter((entry) => entry.valid === false);
-      if (failed.length >= 2) {
-        return consumeRefusal(`the primary judge failed twice on review round ${round}'s packet (${failed[failed.length - 1].reason})`,
-          'stop the review chain here, keep both results and report the chain as pending; the second judge run never substitutes for the primary');
-      }
-      return consumeRefusal(`no primary zensu:review-judge run completed a substantive report on review round ${round}'s canonical packet${failed.length ? ` (${failed[0].reason})` : ''}`,
-        `spawn the primary zensu:review-judge with that block and the merged panel findings, merge its deltas, then ${consumeAgain} and the block; the second judge run never substitutes for it${waitHint(unreported(['judge-primary']))}`);
-    }
-  }
-  const launchAgent = arrival ? null : launchedAgent(payload.tool_response);
-  if (launchAgent) {
-    writeRecord(packets.ensureStore(root, options.session), {
-      schema: RECORD_SCHEMA,
-      round,
-      at: (options.now || Date.now)(),
-      type: clip(input.subagent_type || '', 80),
-      role: 'consume',
-      identity: null,
-      packet: supplied.status,
-      packetSha: supplied.sha256,
-      status: LAUNCHED,
-      reportSource: 'none',
-      valid: null,
-      reason: null,
-      agentId: launchAgent,
-    });
-    prune(store);
-  }
+  return suppliedRefusal(supplied, canonical, round, subject.agent, respawn)
+    || treeRefusal(root, options.session, canonical, round, commands.create, rerun)
+    || reviewerRefusal(ofRound, canonical, round, commands.show)
+    || judgeRefusal(options, ofRound, canonical, round)
+    || { pass: true, reason: 'ok', root, store, round, supplied };
+}
+
+function recordConsumeLaunch(options, verdict, launch) {
+  writeRecord(packets.ensureStore(verdict.root, options.session), {
+    schema: RECORD_SCHEMA,
+    round: verdict.round,
+    at: (options.now || Date.now)(),
+    type: launch.type,
+    role: 'consume',
+    identity: null,
+    packet: verdict.supplied.status,
+    packetSha: verdict.supplied.sha256,
+    status: LAUNCHED,
+    reportSource: 'none',
+    valid: null,
+    reason: null,
+    agentId: launch.agentId,
+  });
+  prune(verdict.store);
+}
+
+function checkConsume(options) {
+  const subject = consumeSubject(options);
+  const verdict = consumeVerdict(options, subject);
+  if (verdict.reason !== 'ok') return verdict;
+  if (subject.launch) recordConsumeLaunch(options, verdict, subject.launch);
   return { pass: true, reason: 'ok' };
 }
 

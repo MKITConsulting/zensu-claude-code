@@ -12,13 +12,13 @@ name: Release
 #   2. `prepare-commit` computes the next version, bumps the version files,
 #      generates the CHANGELOG section from the commits since the last tag
 #      (git-cliff), creates the release commit and hands it on as a git bundle.
-#      `prepare-suite` runs the deterministic suite against that exact commit in
-#      parallel shards. `prepare` then records deterministic exact-SHA runtime
-#      evidence, pushes `release/vX.Y.Z` and prints a Compare link.
+#      `prepare-suite` (sharded) and `prepare-gitlab-live` run the deterministic
+#      and the live GitLab suites against that exact commit. `prepare` records
+#      exact-SHA runtime evidence, pushes `release/vX.Y.Z`, prints a Compare link.
 #   3. Open the PR from that link, then review + squash-merge it.
 #   4. When the release commit lands on main, `publish-plan` verifies the
 #      release target and decides the gate,
-#      `publish-suite` runs the sharded suite at that exact SHA, and `publish`
+#      `publish-suite` plus `publish-gitlab-live` gate that SHA, and `publish`
 #      tags main HEAD and creates a PUBLISHED GitHub Release whose notes are the
 #      new CHANGELOG section (already reviewed in the bump PR body). The merge only
 #      publishes a catalog entry for an as-yet unavailable immutable ref.
@@ -64,7 +64,7 @@ on:
         default: false
         type: boolean
       skip_test_gate:
-        description: 'DANGER: ship WITHOUT running the suite. Evidence records gate=skipped, never passed. Requires skip_reason.'
+        description: 'DANGER: ship WITHOUT running the suite or the live GitLab suite. Evidence records gate=skipped, never passed. Requires skip_reason.'
         required: false
         default: false
         type: boolean
@@ -339,13 +339,75 @@ jobs:
             echo 'No full-suite report was produced; inspect the failed preflight step above.'
           fi
 
+  prepare-gitlab-live:
+    name: Release GitLab live check
+    needs: prepare-commit
+    if: ${{ !inputs.dry_run && !inputs.skip_test_gate }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ZENSU_GITLAB_IT_CONTAINER: zensu-gitlab-it
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-commit-${{ needs.prepare-commit.outputs.sha }}
+          path: ${{ runner.temp }}/release-commit
+
+      - name: Check out the bundled release commit
+        env:
+          EXPECTED_SHA: ${{ needs.prepare-commit.outputs.sha }}
+          RELEASE_BRANCH: ${{ needs.prepare-commit.outputs.branch }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          BUNDLE="$RUNNER_TEMP/release-commit/release.bundle"
+          git bundle verify "$BUNDLE"
+          git fetch --no-tags "$BUNDLE" "refs/heads/$RELEASE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_SHA"
+          git checkout --detach "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Run the live GitLab suite against the exact release commit
+        env:
+          EXPECTED_SHA: ${{ needs.prepare-commit.outputs.sha }}
+          ZENSU_GITLAB_IT_CACHE: ${{ runner.temp }}/gitlab-it
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          bash tests/integration/gitlab/run.sh --glab pinned --keep
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Show GitLab logs on failure
+        if: failure()
+        run: docker logs --tail 300 "$ZENSU_GITLAB_IT_CONTAINER" || true
+
+      - name: Remove the GitLab container
+        if: always()
+        env:
+          ZENSU_GITLAB_IT_CACHE: ${{ runner.temp }}/gitlab-it
+        run: bash tests/integration/gitlab/gitlab-down.sh || true
+
   prepare:
     name: Prepare release branch
-    needs: [prepare-commit, prepare-suite]
+    needs: [prepare-commit, prepare-suite, prepare-gitlab-live]
     if: >-
       ${{ !cancelled() && !inputs.dry_run && needs.prepare-commit.result == 'success'
-      && (needs.prepare-suite.result == 'success'
-      || (inputs.skip_test_gate && needs.prepare-suite.result == 'skipped')) }}
+      && ((needs.prepare-suite.result == 'success' && needs.prepare-gitlab-live.result == 'success')
+      || (inputs.skip_test_gate && needs.prepare-suite.result == 'skipped' && needs.prepare-gitlab-live.result == 'skipped')) }}
     permissions:
       contents: write
     runs-on: ubuntu-24.04
@@ -395,23 +457,24 @@ jobs:
           SKIP_TEST_GATE: ${{ inputs.skip_test_gate }}
           SKIP_REASON: ${{ inputs.skip_reason }}
           SUITE_RESULT: ${{ needs.prepare-suite.result }}
+          GITLAB_RESULT: ${{ needs.prepare-gitlab-live.result }}
         run: |
           set -euo pipefail
           EXPECTED_SHA="${{ steps.release_commit.outputs.sha }}"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          # Only the suite run is optional. The exact-SHA pin, the clean-tree
+          # Only the suite runs are optional. The exact-SHA pin, the clean-tree
           # check and the runtime digest still bind the bytes that ship, so a
           # skipped release is unverified — never unattributed.
-          if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ] && [ -n "${SKIP_REASON//[[:space:]]/}" ]; then
+          if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ] && [ "$GITLAB_RESULT" = skipped ] && [ -n "${SKIP_REASON//[[:space:]]/}" ]; then
             GATE=skipped
             GATE_REASON="$SKIP_REASON"
             echo "::warning::Deterministic release gate SKIPPED — the suite did not run against $EXPECTED_SHA. Reason: $GATE_REASON"
-          elif [ "$SKIP_TEST_GATE" != "true" ] && [ "$SUITE_RESULT" = success ]; then
+          elif [ "$SKIP_TEST_GATE" != "true" ] && [ "$SUITE_RESULT" = success ] && [ "$GITLAB_RESULT" = success ]; then
             GATE=passed
             GATE_REASON=""
           else
-            echo "::error::the release suite result ($SUITE_RESULT) does not match the gate decision (skip_test_gate: $SKIP_TEST_GATE)"
+            echo "::error::the release suite result ($SUITE_RESULT, GitLab live: $GITLAB_RESULT) does not match the gate decision (skip_test_gate: $SKIP_TEST_GATE)"
             exit 1
           fi
           EVIDENCE_DIR="$RUNNER_TEMP/deterministic-release-evidence"
@@ -657,13 +720,55 @@ jobs:
             echo 'No full-suite report was produced; inspect the failed preflight step above.'
           fi
 
+  publish-gitlab-live:
+    name: Publish GitLab live check
+    needs: publish-plan
+    if: needs.publish-plan.outputs.gate == 'run'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ZENSU_GITLAB_IT_CONTAINER: zensu-gitlab-it
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Run the live GitLab suite against the exact main SHA
+        env:
+          ZENSU_GITLAB_IT_CACHE: ${{ runner.temp }}/gitlab-it
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          bash tests/integration/gitlab/run.sh --glab pinned --keep
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Show GitLab logs on failure
+        if: failure()
+        run: docker logs --tail 300 "$ZENSU_GITLAB_IT_CONTAINER" || true
+
+      - name: Remove the GitLab container
+        if: always()
+        env:
+          ZENSU_GITLAB_IT_CACHE: ${{ runner.temp }}/gitlab-it
+        run: bash tests/integration/gitlab/gitlab-down.sh || true
+
   publish:
     name: Publish release
-    needs: [publish-plan, publish-suite]
+    needs: [publish-plan, publish-suite, publish-gitlab-live]
     if: >-
       ${{ !cancelled() && needs.publish-plan.result == 'success'
-      && ((needs.publish-plan.outputs.gate == 'run' && needs.publish-suite.result == 'success')
-      || (needs.publish-plan.outputs.gate == 'skipped' && needs.publish-suite.result == 'skipped')) }}
+      && ((needs.publish-plan.outputs.gate == 'run' && needs.publish-suite.result == 'success'
+      && needs.publish-gitlab-live.result == 'success')
+      || (needs.publish-plan.outputs.gate == 'skipped' && needs.publish-suite.result == 'skipped'
+      && needs.publish-gitlab-live.result == 'skipped')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -705,18 +810,19 @@ jobs:
           GATE_DECISION: ${{ needs.publish-plan.outputs.gate }}
           GATE_REASON: ${{ needs.publish-plan.outputs.gate_reason }}
           SUITE_RESULT: ${{ needs.publish-suite.result }}
+          GITLAB_RESULT: ${{ needs.publish-gitlab-live.result }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          if [ "$GATE_DECISION" = skipped ] && [ "$SUITE_RESULT" = skipped ] && [ -n "${GATE_REASON//[[:space:]]/}" ]; then
+          if [ "$GATE_DECISION" = skipped ] && [ "$SUITE_RESULT" = skipped ] && [ "$GITLAB_RESULT" = skipped ] && [ -n "${GATE_REASON//[[:space:]]/}" ]; then
             GATE=skipped
             echo "::warning::Deterministic publish gate SKIPPED — the suite did not run against ${{ github.sha }}. Reason: $GATE_REASON"
-          elif [ "$GATE_DECISION" = run ] && [ "$SUITE_RESULT" = success ]; then
+          elif [ "$GATE_DECISION" = run ] && [ "$SUITE_RESULT" = success ] && [ "$GITLAB_RESULT" = success ]; then
             GATE=passed
             GATE_REASON=""
           else
-            echo "::error::the publish suite result ($SUITE_RESULT) does not match the planned gate ($GATE_DECISION)"
+            echo "::error::the publish suite result ($SUITE_RESULT, GitLab live: $GITLAB_RESULT) does not match the planned gate ($GATE_DECISION)"
             exit 1
           fi
           EVIDENCE_DIR="$RUNNER_TEMP/deterministic-publish-evidence"

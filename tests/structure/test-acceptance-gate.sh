@@ -756,14 +756,38 @@ EVIDENCE
   if [ "$RC_RUN" -eq 2 ] && [ ! -e "$WORK/fault-ran" ] \
     && grep -qF "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: " "$WORK/eerr" \
     && [ "$RC_ST" -eq 2 ] \
-    && grep -qF "zensu-log.sh --acceptance-status: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/serr" \
+    && grep -qF "ACCEPTANCE STATUS — unavailable | the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/sout" \
+    && grep -qF 'work tree not found' "$WORK/sout" \
     && [ "$RC_REC" -eq 2 ] \
     && grep -qF "zensu-log.sh --acceptance-record: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/rerr" \
-    && grep -qF 'work tree not found' "$WORK/serr"; then
-    check "A31 a bound chain whose worktree cannot be resolved refuses the acceptance run and both acceptance verbs with exit 2 and the cause" PASS
+    && grep -qF 'work tree not found' "$WORK/rerr" \
+    && grep -qF "the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$LIB" \
+    && ! grep -qF "the chain's work tree could not be determined" "$LOG"; then
+    check "A31 a bound chain whose worktree cannot be resolved refuses the acceptance run and both acceptance verbs with exit 2 and the cause, worded by the modules" PASS
   else
     check "A31 a bound chain whose worktree cannot be resolved refuses with exit 2 (run=$RC_RUN status=$RC_ST record=$RC_REC)" FAIL
-    cat "$WORK/eerr" "$WORK/serr" "$WORK/rerr"
+    cat "$WORK/eerr" "$WORK/sout" "$WORK/serr" "$WORK/rerr"
+  fi
+
+  source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+  work_tree_fault_stub "$WORK/fault-stub"
+  BAD_WS="$BOUND_WT" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS + "/missing-worktree"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE"
+  PATH="$WORK/fault-stub:$PATH" bash "$LOG" --acceptance-status --log "$RUN_LOG" >"$WORK/sout" 2>"$WORK/serr"; RC_TST=$?
+  PATH="$WORK/fault-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/rout" 2>"$WORK/rerr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_TREC=$?
+  cp "$WORK/acc-run-wt.pre" "$WT_RUN_FILE"
+  if [ "$RC_TST" -eq 2 ] && [ "$RC_TREC" -eq 2 ] && [ ! -s "$WORK/sout" ] && [ ! -s "$WORK/rout" ] \
+    && grep -qF '/work-tree-fault: ' "$WORK/serr" \
+    && grep -qF "zensu-log.sh --acceptance-status: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance module did not run." "$WORK/serr" \
+    && grep -qF '/work-tree-fault: ' "$WORK/rerr" \
+    && grep -qF "zensu-log.sh --acceptance-record: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance module did not run." "$WORK/rerr" \
+    && ! grep -qF "the chain's work tree could not be determined" "$WORK/serr" "$WORK/rerr"; then
+    check "A32 a work-tree fault whose transport write fails stops both acceptance verbs with exit 2 and the shell's own line, before the module runs" PASS
+  else
+    check "A32 a work-tree fault whose transport write fails stops both acceptance verbs (status=$RC_TST record=$RC_TREC)" FAIL
+    cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr"
   fi
 else
   check "A29 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL
