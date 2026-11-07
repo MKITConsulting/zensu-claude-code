@@ -19,9 +19,19 @@ loses all three, so add new calls through the helper.
 and the other discovery and config variables of its `GIT_ENV_SCRUB` and sets
 `GIT_TERMINAL_PROMPT=0`. Measured against git 2.51.0: with `GIT_DIR` exported,
 `rev-parse --git-common-dir` answers that repository from any folder, one in no repository
-included, so every repository verdict of `takeover` would read the same repository. The list has
-one owner, that library, which requires no other file so the Session Hub companion can vendor it
-byte for byte. `hooks/lib/worktree-keep-v1.js` takes both names from it and re-exports them, so
+included, so every repository verdict of `takeover` would read the same repository. That library
+owns the list for `trail.mjs` and `worktree-keep-v1.js` and requires no other file, so the Session
+Hub companion can vendor it byte for byte. It is not the only spelling. Apart from `_tc_git`'s
+unset list in `hooks/lib/zensu-log.sh`, which the worktree-keep unit suite pins against it, no
+check holds these copies to it: `GIT_SCRUBBED_ENV` in `evidence-run-v1.js` and `GIT_ENV_SCRUB` in
+`zensu-artifact-redact-v1.js` carry the same fifteen names, `repo-conventions-v1.js` and
+`work-order-v1.js` carry nine-name lists, and `zensu-edit-landing.sh` and
+`zensu-autopilot-state.sh` clear their own sets inline. `evidence-run-v1.js` also exports a
+`gitEnvironment` of its own whose argument is an overlay applied after the scrub, where this one's
+argument is the base environment, and the `git-read-only-v1` leaf that
+`docs/multi-repo-chains-spec.md` §6.2 plans carries that overlay form. The two contracts need
+distinct names before either module replaces the other. `hooks/lib/worktree-keep-v1.js` takes
+both names from `git-environment-v1.js` and re-exports them, so
 its own git children and its exported API are unchanged. `gitChildEnvironment` fails with the
 plugin-tree-incomplete diagnostic, naming the library, when it cannot be loaded, so every sandbox
 that stages `trail.mjs` (`mutant_path`, `cont_mutant` and the `OM` sandbox in

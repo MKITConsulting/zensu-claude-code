@@ -1,6 +1,7 @@
 ---
 paths:
   - "hooks/lib/zensu-artifact-redact-v1.js"
+  - "hooks/lib/git-environment-v1.js"
   - "hooks/post-artifact-redact.sh"
   - "hooks/lib/hook-dispatch-v1.js"
   - "tests/structure/test-artifact-redaction.sh"
