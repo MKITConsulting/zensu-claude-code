@@ -33,6 +33,8 @@ Read this when Phase 0 is done. It ends with every step's tasks created, before 
 
 Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependency the spec names.
 
+**Scope.** A precondition is an item step 1 lists. Two things are never preconditions and never trigger this phase's escalation: the host's own agent tools for progress or questions (a missing progress tool follows Phase 0 step 4; a missing question tool means asking in plain prose), and restoring the repository's own declared dependencies from its committed lockfile in a fresh checkout or worktree (e.g. `npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`, `uv sync --locked`, `cargo fetch --locked`). Run such a restore as routine setup; the host's sandbox and approval policy still govern its network access. A command that changes the lockfile, adds a dependency or installs a tool is not a restore and stays under the install rule below.
+
 1. From the parsed spec (Phase 1 step 6), extract every:
    - **External CLI/tool** named by name (e.g. `promptfoo`, `docker`, `terraform`, `ffmpeg`)
    - **Secret or env var** referenced (e.g. `OPENAI_API_KEY`, `AWS_SECRET_ACCESS_KEY`)
@@ -41,7 +43,7 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
    - **Acceptance driver** each `AC-###` needs, judged as the ability to boot and drive, never as a state only the build produces: a runtime recipe or `--attach` origin plus `playwright-cli` for `browser`, an installed simulator or emulator for `mobile`, a start command for `api` or `cli` (driver ids per `skills/verify-feature/rules/drivers.md`). Phase 6 step 6d verifies EVERY active criterion on the finished tree, so a driver that cannot run leaves its criterion `partial` and blocks the chain's close. An Autopilot-bound chain skips this item, as it skips step 6d
 2. For each precondition, run the matching verification:
    - Acceptance driver: `command -v playwright-cli`, `xcrun simctl list devices available` or `emulator -list-avds`, or the recipe file or start command the driver needs
-   - CLI: `command -v X >/dev/null 2>&1`
+   - CLI: `command -v X >/dev/null 2>&1`; for a tool the repository itself declares as a dependency, verify it through the package manager after the lockfile restore instead (e.g. `pnpm exec X --version`, `npx --no-install X --version`, `uv run X --version`)
    - Env var: `[ -n "${VAR:-}" ]`
    - Endpoint: `curl -fsS --max-time 5 {url}` (only if the spec implies live use; otherwise skip)
    - Fixture: `[ -f {path} ]` or `[ -d {path} ]`
@@ -49,7 +51,7 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
 3. In delegated mode, any `missing` precondition persists `BLOCK(precondition-decision-required)` with the precondition named in the report, then stops without asking or substituting.
 4. In standalone mode, for every `missing` precondition use AskUserQuestion to present three options — **(a) install/provide it now, (b) approve a named substitution** (the user names the substitute, agent does not propose one), or **(c) mark the dependent steps `[!]` and skip**. Record the user's answer verbatim in the plan's `## Preconditions` section (Phase 2).
 5. **Standalone AskUserQuestion override**: if an earlier user instruction said "no questions" or a similar terseness preference, standalone blocking-precondition escalation always asks. This mirrors the standalone Phase 1 step 3b coverage-tool ask.
-6. In standalone mode, if the user picks (a) install, pause and wait for the user to install/provide the precondition. After confirmation, re-run the verification command from step 2. If it is still missing, ask again (loop back to step 4). The workflow does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user explicitly authorized the specific install command in the same exchange.
+6. In standalone mode, if the user picks (a) install, pause and wait for the user to install/provide the precondition. After confirmation, re-run the verification command from step 2. If it is still missing, ask again (loop back to step 4). The workflow does NOT proactively run install commands (e.g. `brew install`, `npm install <package>`) unless the user explicitly authorized the specific install command in the same exchange.
 7. In standalone mode, if the user picks (b) substitution, the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
 8. In standalone mode, if the user picks (c) skip, every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
 

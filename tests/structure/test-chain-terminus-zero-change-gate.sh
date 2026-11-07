@@ -72,12 +72,27 @@ export CLAUDE_PROJECT_DIR="$GIT_PROJ"
 SID1="terminus-clean"
 arm "$SID1"
 ERR1="$STATE_DIR/g1.err"
-bash "$LOG" --chain-done --session "$SID1" >/dev/null 2>"$ERR1"; RC1=$?
+OUT1="$STATE_DIR/g1.out"
+bash "$LOG" --chain-done --session "$SID1" >"$OUT1" 2>"$ERR1"; RC1=$?
 DONE1="$(tdd_chain_done "$(tdd_state_file "$SID1")" 2>/dev/null)"
 if [ "$RC1" -eq 0 ] && [ "$DONE1" = "true" ] && [ ! -s "$ERR1" ]; then
   check "G1 clean worktree -> unqualified terminus closes the chain" PASS
 else
   check "G1 clean worktree (rc=$RC1 chainDone=$DONE1 err='$(cat "$ERR1" 2>/dev/null)')" FAIL
+fi
+CLOSED_LINE="CHAIN CLOSED — render the final report only; this generation runs no further self-review, fix round or terminus."
+STATE1="$(tdd_state_file "$SID1")"
+BEFORE1="$(cksum < "$STATE1")"
+OUT1B="$STATE_DIR/g1b.out"
+ERR1B="$STATE_DIR/g1b.err"
+bash "$LOG" --chain-done --session "$SID1" >"$OUT1B" 2>"$ERR1B"; RC1B=$?
+STATUS1="$(bash "$LOG" --chain-status --session "$SID1" 2>/dev/null)"
+if [ "$(cat "$OUT1")" = "$CLOSED_LINE" ] && [ "$RC1B" -eq 0 ] && [ "$(cat "$OUT1B")" = "$CLOSED_LINE" ] \
+  && [ ! -s "$ERR1B" ] && [ "$(cksum < "$STATE1")" = "$BEFORE1" ] \
+  && printf '%s' "$STATUS1" | grep -qF '"shape":"chain-closed"'; then
+  check "G1d a closed generation answers report-only, and re-entering its terminus changes nothing" PASS
+else
+  check "G1d closed generation (rc=$RC1B out='$(cat "$OUT1" "$OUT1B" 2>/dev/null)' status='$STATUS1')" FAIL
 fi
 
 # --- G2 modified tracked file: refused, chain stays open ---
@@ -321,6 +336,9 @@ else
   check "G9d minted self-review ticket (ticket='$ZC14' reason='$REASON14')" FAIL
 fi
 printf 'changed\n' > "$GIT_PROJ/tracked.txt"
+GATE_STORE14="$(node -e 'const p = require(process.argv[1]); process.stdout.write(p.storeDirectory(p.canonicalRoot(process.argv[2]), process.argv[3]))' \
+  "$PLUGIN_DIR/hooks/lib/review-packet-v1.js" "$GIT_PROJ" "$SID14" 2>/dev/null)"
+[ -n "$GATE_STORE14" ] && mkdir -p "$GATE_STORE14" && printf '{}\n' > "$GATE_STORE14/record-r0-planted.json"
 ERR14="$STATE_DIR/g9e.err"
 bash "$LOG" --chain-done --session "$SID14" --claimed-review-ticket "$ZC14" >/dev/null 2>"$ERR14"; RC14=$?
 DONE14="$(tdd_chain_done "$SF14" 2>/dev/null)"
@@ -332,6 +350,11 @@ if [ "$RC14" -eq 1 ] && [ "$DONE14" = "false" ] && grep -qF "$MINTED_GATE_PHRASE
   check "G9e the minted ticket cannot close the chain over a changed tree, and the count runs ahead of the suite gates" PASS
 else
   check "G9e minted-ticket terminus on a changed tree (rc=$RC14 chainDone=$DONE14 err='$(cat "$ERR14" 2>/dev/null)')" FAIL
+fi
+if [ -n "$GATE_STORE14" ] && [ ! -e "$GATE_STORE14" ]; then
+  check "G9k the reopened review starts without the closed review's packets and reviewer records" PASS
+else
+  check "G9k review-gate store after the reopen (store='$GATE_STORE14')" FAIL
 fi
 CRD14="$(tdd_code_review_done "$SF14" 2>/dev/null)"
 SRF14="$(tdd_self_review_fixed "$SF14" 2>/dev/null)"
@@ -433,7 +456,7 @@ else
   check "G10c ticket-bound --code-review-done (rc=$RC10C codeReviewDone=$CRD10C err='$(cat "$ERR10C" 2>/dev/null)')" FAIL
 fi
 ERR10D="$STATE_DIR/g10d.err"
-ZENSU_FULL_SUITE_GATE=off ZENSU_ACCEPTANCE_GATE=off \
+ZENSU_FULL_SUITE_GATE=off ZENSU_ACCEPTANCE_GATE=off ZENSU_EDIT_LANDING_GATE=off \
   bash "$LOG" --chain-done --session "$SID10" --claimed-review-ticket "$TICKET10" >/dev/null 2>"$ERR10D"; RC10D=$?
 DONE10D="$(tdd_chain_done "$SF10" 2>/dev/null)"
 case "$TICKET10" in (rt_?*) TICKET10_SHAPE=rt ;; (*) TICKET10_SHAPE=other ;; esac
@@ -656,9 +679,9 @@ HELPER_BODY="$(awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG")"
 if [ -z "$BARE_GIT_LOG" ] \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" diff --name-only HEAD' \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" ls-files --others --exclude-standard' \
-  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 3 ] \
+  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 4 ] \
   && [ "$(grep -cF '_zensu_unqualified_change_count "$_tc_root"' "$LOG")" -eq 1 ]; then
-  check "G13 both unqualified verbs, the minted-ticket terminus and --tdd-complete count through one scrubbed helper and no bare git -C remains" PASS
+  check "G13 both unqualified verbs, the minted-ticket terminus, the terminal edit-landing gate and --tdd-complete count through one scrubbed helper and no bare git -C remains" PASS
 else
   check "G13 shared scrubbed helper (bare='$BARE_GIT_LOG')" FAIL
 fi

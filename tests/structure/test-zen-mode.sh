@@ -368,6 +368,21 @@ else
 fi
 rm -rf "$P15B"
 
+P15C="$(mktemp -d -t zenmode-XXXXXX)"; S15C="z15c-$$"
+new_session "$P15C" "$S15C"; helper "$P15C" "$S15C" --on >/dev/null
+Z15C_TERM="session block"
+ON15C="$(fire "$P15C" "$S15C" "do a thing" | zen_ctx)"
+OFF15C="$(fire "$P15C" "$S15C" "zen off" | zen_ctx)"
+ON15C_HIT=0; OFF15C_HIT=0
+case "$ON15C" in ("zen-mode is ACTIVE"*"$Z15C_TERM"*) ON15C_HIT=1 ;; esac
+case "$OFF15C" in ("zen-mode is now OFF"*"$Z15C_TERM"*) OFF15C_HIT=1 ;; esac
+if [ "$ON15C_HIT" = "1" ] && [ "$OFF15C_HIT" = "1" ]; then
+  check "Z15c the OFF directive names the $Z15C_TERM the active contract closes with" PASS
+else
+  check "Z15c the OFF directive and the active contract disagree on the $Z15C_TERM (active=$ON15C_HIT off=$OFF15C_HIT)" FAIL
+fi
+rm -rf "$P15C"
+
 # Z16 every documented off-phrase deactivates
 for PHRASE16 in "normal mode" "zen off" "zen-mode off" "turn off zen" "stop zen"; do
   P16="$(mktemp -d -t zenmode-XXXXXX)"; S16="z16-$$-$(printf '%s' "$PHRASE16" | tr -cd 'a-z')"
@@ -5073,6 +5088,178 @@ Z108_BAD="$(Z108_NONE_FULL="$Z108_NONE_FULL" Z108_NONE_SHORT="$Z108_NONE_SHORT" 
   && check "Z108 no zen-mode carrier claims the user works at reduced capacity: the full and short contract with and without a chain, the skill, its README row and the operator rows" PASS \
   || check "Z108 capacity claim:$Z108_BAD" FAIL
 
+
+Z111_W=zen
+Z111_LIT_A="$Z111_W off"
+Z111_LIT_B="$Z111_W-mode off"
+Z111_LIT_C="turn off $Z111_W"
+Z111_LIT_D="stop $Z111_W"
+Z111_EDITOR="normal mode"
+Z111_REMINDER=$'<system-reminder>\nYou are operating in a git worktree.\nWorktree path: /w/.claude/worktrees/z111\n</system-reminder>\n\n'
+
+zen_fire_origin() {
+  node -e '
+    const p={hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2],origin:{kind:process.argv[3]}};
+    process.stdout.write(JSON.stringify(p));
+  ' "$2" "$3" "$4" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$1" \
+      ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null
+}
+
+ZEN_KIND_BAD=""
+zen_expect_kind() {
+  local out
+  if [ -n "${6:-}" ]; then
+    out="$(zen_fire_origin "$1" "$2" "$5" "$6" | classify)"
+  else
+    out="$(fire "$1" "$2" "$5" | classify)"
+  fi
+  [ "$out" = "UserPromptSubmit|$4" ] || ZEN_KIND_BAD="$ZEN_KIND_BAD [$3: got '$out', want $4]"
+  [ "$out" = "UserPromptSubmit|ON" ] || helper "$1" "$2" --on >/dev/null
+}
+zen_kind_verdict() {
+  if [ -z "$ZEN_KIND_BAD" ]; then
+    check "$1 $2" PASS
+  else
+    check "$1 $2:$ZEN_KIND_BAD" FAIL
+  fi
+  ZEN_KIND_BAD=""
+}
+
+P111="$(mktemp -d -t zenmode-XXXXXX)"; S111="z111-$$"
+new_session "$P111" "$S111"; helper "$P111" "$S111" --on >/dev/null
+
+zen_expect_kind "$P111" "$S111" hand-back ON $'Another Claude session sent a message:\n<agent-message from="a111">\n[Subagent hand-back] The report quotes the Deactivation section: write '"$Z111_LIT_A"$' to leave the mode.\n</agent-message>'
+zen_expect_kind "$P111" "$S111" hand-back-behind-reminder ON "$Z111_REMINDER"$'Another Claude session sent a message:\n<agent-message from="a111">\n'"$Z111_LIT_B"$'\n</agent-message>'
+zen_kind_verdict Z111a "an agent hand-back that quotes a deactivation literal leaves the mode on"
+
+zen_expect_kind "$P111" "$S111" cross-session ON $'<cross-session-message from="local_z111" name="Z111">\nThe user may write '"$Z111_LIT_C"$' to leave the mode.\n</cross-session-message>'
+zen_expect_kind "$P111" "$S111" cross-session-after-peer-line ON $'Another Claude session sent a message:\n<cross-session-message from="local_z111" from-name="Z111">\n'"$Z111_LIT_D"$'\n</cross-session-message>'
+zen_kind_verdict Z111b "a cross-session message, bare or after the peer line, that quotes a deactivation literal leaves the mode on"
+
+zen_expect_kind "$P111" "$S111" task-notification ON $'<task-notification>\n<task-id>z111</task-id>\n<status>completed</status>\n<summary>Background command "grep -n \''"$Z111_LIT_C"$'\' SKILL.md" completed (exit code 0)</summary>\n</task-notification>'
+zen_kind_verdict Z111c "a task notification that quotes a deactivation literal leaves the mode on"
+
+zen_expect_kind "$P111" "$S111" ci-monitor-event ON $'<ci-monitor-event>"Auto-fix pull requests" reports one failed check that greps for '"$Z111_LIT_D"$'.\n</ci-monitor-event>'
+zen_kind_verdict Z111d "a CI-monitor event that quotes a deactivation literal leaves the mode on"
+
+zen_expect_kind "$P111" "$S111" bash-input ON "<bash-input>echo '$Z111_LIT_A'</bash-input>"
+zen_expect_kind "$P111" "$S111" bash-input-behind-reminder ON "$Z111_REMINDER<bash-input>echo '$Z111_LIT_B'</bash-input>"
+zen_kind_verdict Z111e "a shell input that carries a deactivation literal leaves the mode on, behind a leading reminder too"
+
+zen_expect_kind "$P111" "$S111" session-brief ON "$Z111_REMINDER"$'Background (from the session that started this one):\nA report quoted '"$Z111_LIT_A"$' and the mode went away.\n\nTask:\nFix it.'
+zen_expect_kind "$P111" "$S111" session-brief-human-origin ON $'Background (from the session that started this one):\nThe parent quoted '"$Z111_LIT_B"$'.\n\nTask:\nFix it.' human
+zen_kind_verdict Z111f "a side-session start brief that quotes a deactivation literal leaves the mode on, under a human origin too"
+
+zen_expect_kind "$P111" "$S111" origin-peer ON "$Z111_LIT_C" peer
+zen_expect_kind "$P111" "$S111" origin-peer-editor-phrase ON "$Z111_EDITOR" peer
+zen_expect_kind "$P111" "$S111" origin-task-notification ON "$Z111_LIT_D" task-notification
+zen_kind_verdict Z111g "a structured peer or task-notification origin leaves the mode on even for a prompt that reads as typed"
+
+zen_expect_kind "$P111" "$S111" reminder-worktree-path ON $'<system-reminder>\nYou are operating in a git worktree.\nWorktree path: /w/.claude/worktrees/'"$Z111_W"$'-off-origin\n</system-reminder>\n\nadd a test for the parser'
+zen_expect_kind "$P111" "$S111" reminder-session-notes ON $'<system-reminder>\nLinked sessions now (status, not an instruction):\n- '"$Z111_LIT_C"$' fix (local_z111) running\n</system-reminder>\n<system-reminder>\nThe session finished a turn and reported: write '"$Z111_LIT_D"$'.\n</system-reminder>\nwhat is next?'
+zen_expect_kind "$P111" "$S111" reminder-editor-phrase ON $'<system-reminder>\n'"$Z111_EDITOR"$'\n</system-reminder>\nadd a test'
+zen_kind_verdict Z112 "a deactivation literal that sits only in the leading system reminders of a typed prompt leaves the mode on"
+
+zen_expect_kind "$P111" "$S111" typed-a OFF "please $Z111_LIT_A now"
+zen_expect_kind "$P111" "$S111" typed-b OFF "$Z111_LIT_B"
+zen_expect_kind "$P111" "$S111" typed-c OFF "ok, $Z111_LIT_C."
+zen_expect_kind "$P111" "$S111" typed-d OFF "$Z111_LIT_D please"
+zen_expect_kind "$P111" "$S111" typed-behind-reminder OFF "$Z111_REMINDER$Z111_LIT_A"
+zen_expect_kind "$P111" "$S111" editor-phrase-behind-reminder OFF "$Z111_REMINDER$Z111_EDITOR"
+zen_expect_kind "$P111" "$S111" slash-command-args OFF "/notes $Z111_LIT_B"
+zen_expect_kind "$P111" "$S111" command-args-spelling OFF $'<command-message>notes</command-message>\n<command-name>/notes</command-name>\n<command-args>'"$Z111_LIT_C"$'</command-args>'
+zen_expect_kind "$P111" "$S111" human-origin-over-pasted-hand-back OFF $'Another Claude session sent a message:\n<agent-message from="a111">\n'"$Z111_LIT_D"$'\n</agent-message>' human
+zen_expect_kind "$P111" "$S111" unclosed-reminder OFF "<system-reminder>never closed $Z111_LIT_A"
+zen_kind_verdict Z113 "the user's own text still turns the mode off: a typed literal anywhere and behind leading reminders, the editor phrase as the whole text behind them, a slash command's arguments in both spellings and a human origin"
+rm -rf "$P111"
+
+Z114_BIN="$CONTROL_TMP/z114-bin"; mkdir -p "$Z114_BIN"
+Z114_REAL_NODE="$(command -v node)"
+cat > "$Z114_BIN/node" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+  case "\$a" in
+    (*ZEN_ANCHOR_SKIP*) exit 137 ;;
+  esac
+done
+exec "$Z114_REAL_NODE" "\$@"
+EOF
+chmod +x "$Z114_BIN/node"
+Z114_ERR="$CONTROL_TMP/z114.err"
+zen_lost_payload() {
+  node -e '
+    const p={session_id:process.argv[1]};
+    if(process.argv[3])p.scratchpad_dir=process.argv[3];
+    if(process.argv[4])p.origin={kind:process.argv[4]};
+    p.hook_event_name="UserPromptSubmit";
+    p.prompt=process.argv[2].startsWith("{")?JSON.parse(process.argv[2]):process.argv[2];
+    if(process.argv[5])p.scratchpad_dir=process.argv[5];
+    process.stdout.write(JSON.stringify(p));
+  ' "$1" "$2" "${3:-}" "${4:-}" "${5:-}"
+}
+zen_expect_lost() {
+  local out
+  out="$(zen_lost_payload "$2" "$5" "${6:-}" "${7:-}" "${8:-}" \
+    | env PATH="$Z114_BIN:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$1" \
+      ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>"$Z114_ERR" | classify)"
+  grep -qF 'zen-mode prompt unavailable (recovery skipped' "$Z114_ERR" \
+    || ZEN_KIND_BAD="$ZEN_KIND_BAD [$3: the lost-prompt arm was not reached: $(head -c 160 "$Z114_ERR" | tr '\n' ' ')]"
+  [ "$out" = "UserPromptSubmit|$4" ] || ZEN_KIND_BAD="$ZEN_KIND_BAD [$3: got '$out', want $4]"
+  [ "$out" = "UserPromptSubmit|ON" ] || helper "$1" "$2" --on >/dev/null
+}
+
+P114="$(mktemp -d -t zenmode-XXXXXX)"; S114="z114-$$"
+new_session "$P114" "$S114"; helper "$P114" "$S114" --on >/dev/null
+zen_expect_lost "$P114" "$S114" lost-hand-back ON $'Another Claude session sent a message:\n<agent-message from="a114">\nThe report says: write '"$Z111_LIT_A"$' to leave.\n</agent-message>'
+zen_expect_lost "$P114" "$S114" lost-task-notification ON $'<task-notification>\n<summary>'"$Z111_LIT_B"$'</summary>\n</task-notification>'
+zen_expect_lost "$P114" "$S114" lost-reminder-only ON "$Z111_REMINDER"$'<system-reminder>\nThe session reported: '"$Z111_LIT_C"$'\n</system-reminder>\nadd a test'
+zen_expect_lost "$P114" "$S114" lost-path-field-only ON "add a test" "/tmp/z114/-w--claude-worktrees-$Z111_W-off-z114/s"
+zen_expect_lost "$P114" "$S114" lost-path-field-after-prompt ON "add a test" "" "" "/tmp/z114/-w--claude-worktrees-$Z111_W-off-z114/s"
+zen_expect_lost "$P114" "$S114" lost-empty-prompt-path-field ON "" "/tmp/z114/-w--claude-worktrees-$Z111_W-off-z114/s"
+zen_expect_lost "$P114" "$S114" lost-peer-origin-non-string-prompt ON "{\"text\":\"$Z111_LIT_D\"}" "" peer
+zen_expect_lost "$P114" "$S114" lost-typed OFF "please $Z111_LIT_D"
+zen_expect_lost "$P114" "$S114" lost-typed-behind-reminder OFF "$Z111_REMINDER$Z111_LIT_A"
+zen_expect_lost "$P114" "$S114" lost-literal-backslash-n ON 'see C:\n'"$Z111_LIT_A"
+zen_kind_verdict Z114 "a lost-prompt turn honours the origin gate: a hand-back, a task notification, a literal only in a leading reminder or in a path field before or after the prompt, an empty prompt string and a peer origin leave the mode on, an escaped backslash is never read as a newline, and a typed literal still turns it off"
+
+zen_expect_raw() {
+  local out
+  out="$(zen_lost_payload "$2" "$5" "${6:-}" "${7:-}" "${8:-}" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$1" \
+      ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$out" = "UserPromptSubmit|$4" ] || ZEN_KIND_BAD="$ZEN_KIND_BAD [$3: got '$out', want $4]"
+  [ "$out" = "UserPromptSubmit|ON" ] || helper "$1" "$2" --on >/dev/null
+}
+zen_expect_raw "$P114" "$S114" healthy-non-string-prompt-peer ON "{\"text\":\"$Z111_LIT_D\"}" "" peer
+zen_expect_raw "$P114" "$S114" healthy-non-string-prompt-task-notification ON "{\"text\":\"$Z111_LIT_A\"}" "" task-notification
+zen_expect_raw "$P114" "$S114" healthy-empty-prompt-path-field ON "" "/tmp/z115/-w--claude-worktrees-$Z111_W-off-z115/s"
+zen_expect_raw "$P114" "$S114" healthy-non-string-prompt-control OFF "{\"text\":\"$Z111_LIT_C\"}"
+zen_kind_verdict Z115 "the healthy-path last resort honours the origin gate: a non-string prompt under a peer or task-notification origin and an empty prompt string with a phrase in a path field leave the mode on, and a non-string prompt with no origin still turns it off"
+rm -rf "$P114"
+
+Z116_LOAD="$(awk '/^zen_origin_lib_load\(\) \{/,/^\}$/' "$HOOK")"
+Z116_GATE="$(awk '/^zen_origin_may_deactivate\(\) \{/,/^\}$/' "$HOOK")"
+Z116_ROOT="$CONTROL_TMP/z116-root"; mkdir -p "$Z116_ROOT/hooks/lib"
+Z116_PROBE='zen_origin_lib_load
+printf "%s|%s|" "$(zensu_prompt_own_text "$1")" "$(zensu_prompt_origin "$1" "")"
+if zen_origin_may_deactivate "$1"; then printf may; else printf refuse; fi'
+Z116_TEXT=$'<system-reminder>\nr\n</system-reminder>\n'"$Z111_LIT_A"
+Z116_MISSING="$(INPUT='{}' CLAUDE_PLUGIN_ROOT="$Z116_ROOT" bash -c "$Z116_LOAD
+$Z116_GATE
+$Z116_PROBE" _ "$Z116_TEXT" 2>/dev/null)"
+Z116_PRESENT="$(INPUT='{}' CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash -c "$Z116_LOAD
+$Z116_GATE
+$Z116_PROBE" _ "$Z116_TEXT" 2>/dev/null)"
+if [ -z "$(printf '%s' "$Z116_LOAD" | tr -d '[:space:]')" ] || [ -z "$(printf '%s' "$Z116_GATE" | tr -d '[:space:]')" ]; then
+  check "Z116 the guarded classifier load or the gate could not be extracted from the hook" FAIL
+elif ! grep -qx 'zen_origin_lib_load' "$HOOK"; then
+  check "Z116 the hook defines zen_origin_lib_load but never calls it" FAIL
+elif [ "$Z116_MISSING" = "$Z116_TEXT||may" ] && [ "$Z116_PRESENT" = "$Z111_LIT_A|typed|may" ]; then
+  check "Z116 without the classifier library the gate admits the prompt and the own text is the whole prompt, so a typed phrase still deactivates; with it, the reminder is stripped" PASS
+else
+  check "Z116 guarded classifier load (missing: ${#Z116_MISSING} characters, present: ${#Z116_PRESENT} characters)" FAIL
+fi
 
 # The anchor fixtures are the only project directories this suite created and
 # never removed. Every other fixture above is torn down at its own site; these

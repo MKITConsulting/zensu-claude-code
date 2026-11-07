@@ -291,7 +291,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:1166 · zensu-log.sh:1963</p>
+      <p class="src">zensu-edit-landing.sh:229 · zensu-log.sh:2019</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -299,7 +299,7 @@
       <p>While the opt-in write gate is on, its rule (B) denies a Bash source write outside the root.
       The edit gate only classifies a path as <code>state</code>, <code>zensu</code> or
       <code>other</code> and does not confine it. With the gate on, the topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:901 · hooks/checks/pre-edit-tdd-reminder.sh:132-147</p>
+      <p class="src">bash-source-write-parse.js:2474 · hooks/checks/pre-edit-tdd-reminder.sh:132-147</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass — superseded by stage 1</span>
@@ -314,7 +314,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus now counts the same way. A chain that
       claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1974 · zensu-log.sh:98-121 · zensu-log.sh:118-119</p>
+      <p class="src">zensu-log.sh:2030 · zensu-log.sh:98-121 · zensu-log.sh:118-119</p>
     </div>
   </div>
 </section>
@@ -448,7 +448,7 @@
           <code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B) and
           rule (C), and the temp carve-out stops exempting a temp entry that contains a code root. At
           its default the gate judges nothing.</td>
-          <td class="where mono">bash-source-write-parse.js:901<br>bash-source-write-parse.js:947</td>
+          <td class="where mono">bash-source-write-parse.js:2474<br>bash-source-write-parse.js:2520</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
@@ -593,7 +593,7 @@
     paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
     two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
     so it reports the unpaired literal without demanding the pairing.</p>
-    <p class="src">skills/build/references/audit.md:67 · skills/build/references/audit.md:69</p>
+    <p class="src">skills/build/references/audit.md:69 · skills/build/references/audit.md:71</p>
     <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
     specification carries the same proposal in §7.4.</p>
   </div>
@@ -613,7 +613,7 @@
       anchor is clean while the changed files sit in the satellites, so a takeover brief would claim
       no uncommitted changes for a session with a dirty tree in two other repositories — the same
       silent green as section 2, relocated into the handover path.</p>
-      <p class="src">trail.mjs:2839</p>
+      <p class="src">trail.mjs:2906</p>
     </div>
     <div class="card">
       <span class="tag warn">Discovery</span>
@@ -629,7 +629,7 @@
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd -- ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:5027</p>
+      <p class="src">trail.mjs:5094</p>
     </div>
   </div>
 
