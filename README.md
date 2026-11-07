@@ -155,7 +155,7 @@ claude plugin marketplace update zensu
 claude plugin update zensu@zensu
 ```
 
-Optional, for feature tracking: install zensu-cli 0.10.0 or later with
+Optional, for feature tracking: install zensu-cli 0.18.0 or later with
 `brew install --cask mkitconsulting/tap/zensu` (upgrade with `brew upgrade --cask zensu`),
 `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
 `irm https://zensu.dev/install.ps1 | iex`, then run `zensu auth login`.
@@ -474,8 +474,8 @@ driver additionally need `playwright-cli` on `PATH`
 (`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
-Feature tracking needs zensu-cli 0.10.0 or later: older releases print only the
-first 100 ghost-scan candidates and read only the first page of wiki lists.
+Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older
+releases cannot declare a goal's feature, so AI-work capture fails.
 `zensu --version` shows the installed release, and the session banner and
 `/zensu:doctor` warn about an older one without blocking anything.
 

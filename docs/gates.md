@@ -1356,9 +1356,12 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   at once, naming the first differing line. A reviewer the host launches in the background, as
   the Claude desktop app does with every subagent, answers with status `async_launched` and no
   report: that launch is recorded with its agent id and its packet digest, counts as no run and
-  never as a failed judge, and the reviewer's hand-back, which `user-prompt-review-handback.sh`
-  passes to the hook, completes it with the report the frame carries. A second hand-back for
-  the same agent is ignored.
+  never as a failed judge, and the reviewer's hand-back, or outside auto mode its completion
+  notification, which `user-prompt-review-handback.sh` passes to the hook, completes it with the
+  report the frame or the notification's `<result>` carries. A notification completes a launch
+  only with status `completed` and a result that is not one of the host's two hand-back stubs,
+  and the gate decodes the `&lt;`, `&gt;` and `&amp;` the host writes there. A second completion
+  for the same agent is ignored.
 - **The consume refusal.** Before the hook claims a review ticket it refuses, with the ticket
   left unconsumed and the cause and remedy in `additionalContext`, when the round has no
   canonical packet, when the consume prompt's block is missing, duplicated or differs, when the
@@ -1376,12 +1379,13 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   hook already treats a malformed or foreign document. A consume-mode reviewer the host launches
   in the background is checked at its launch, and a refused launch is not recorded for its
   arrival, so nothing it reports can claim. A passing launch records the block's digest, and the
-  arrival is checked again against that digest and with the report its hand-back carries; a
+  arrival is checked again against that digest and with the report its hand-back or its
+  notification's result carries; a
   refused arrival answers in the arrival's own `UserPromptSubmit` event, ends the wait for that
-  reviewer and leaves the ticket unconsumed. While background launches of the round have sent
-  no hand-back, the refusals for a missing reviewer and a missing primary judge say to wait for
-  them, and, where the host delivers no hand-back the hook can read, as outside auto mode, to ask
-  the user whether to set `hooks.reviewPacketGate` to `false`. A claim the Stop guard completes
+  reviewer and leaves the ticket unconsumed. While background launches of the round have
+  delivered no report, as a hand-back or in a completion notification, the refusals for a missing
+  reviewer and a missing primary judge say to wait for them, and, where the host delivers neither,
+  to ask the user whether to set `hooks.reviewPacketGate` to `false`. A claim the Stop guard completes
   from an arrival note, after the hook that received the hand-back was cut off, is checked as an
   arrival on the round's records alone, because the note carries no report.
 - **Only the live ticket is judged.** The hook hands the gate the consume prompt's review ticket.
@@ -1409,9 +1413,10 @@ every plugin store; a deferred review in a session that still holds an earlier g
 receipt is judged by that receipt, because only `--tdd-begin` retires one; and the judge's report
 is read from the PostToolUse `tool_response`, whose `handbackReport` shape was measured on Claude
 Code 2.1.299, or for a background reviewer from its hand-back frame, whose shape was measured in
-the desktop app in auto mode. Outside auto mode that host sends no hand-back, so a review whose
-reviewers all ran in the background stays refused there until the key is off; no live desktop
-run of a background panel through the gate exists yet.
+the desktop app in auto mode, or, outside auto mode, from the `<result>` of its completion
+notification, whose shape was measured on Claude Code 2.1.309 and 2.1.317 in `default` mode and in
+desktop transcripts in `plan` mode; the result rests on the host escaping `<`, `>` and `&` there,
+and no live desktop run of a background panel through the gate exists yet.
 
 ## Terminal Edit-Landing Gate
 

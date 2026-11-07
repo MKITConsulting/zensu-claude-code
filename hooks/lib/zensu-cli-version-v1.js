@@ -4,8 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const MIN_VERSION = '0.10.0';
-const FLOOR_REASON = 'older releases print only the first 100 ghost-scan candidates and read only the first page of wiki lists';
+const MIN_VERSION = '0.18.0';
+const FLOOR_REASON = "older releases cannot declare a goal's feature, so AI-work capture fails";
 const INSTALL = Object.freeze({
   homebrew: 'brew install --cask mkitconsulting/tap/zensu',
   homebrewUpgrade: 'brew upgrade --cask zensu',

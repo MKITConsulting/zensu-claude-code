@@ -451,7 +451,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/repo-conventions-v1.test.js` | 23 | win32 2 | `test-vcs-detect.sh` | The repository-conventions probe: PR templates per forge, the checks a configured template and the .zensu/templates overrides pass, commitlint configs, the default-branch history sample, trailer counts and the contributing documents. |
 | `structure/restore-root-render-cases.test.js` | 79 | – | `test-restore-project-root.sh` | Restoring a vanished recorded project root: the verdict, restore and outcome renderers and their refusal arms. |
 | `structure/review-evidence-sweep-v1.test.js` | 32 | win32 6 | `test-versioned-plugin-upgrade.sh` | The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe. |
-| `structure/review-gate-v1.test.js` | 31 | – | `test-review-packet.sh` | The consume-review gate: reviewer records, canonical-packet equality, freshness and the primary-judge requirement. |
+| `structure/review-gate-v1.test.js` | 35 | – | `test-review-packet.sh` | The consume-review gate: reviewer records, background launches completed from hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement. |
 | `structure/review-ledger-v1.test.js` | 42 | – | `test-review-convergence.sh` | The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts. |
 | `structure/review-packet-v1.test.js` | 33 | – | `test-review-packet.sh` | The canonical review change set and the immutable per-round review packet. |
 | `structure/review-round-scope-v1.test.js` | 26 | – | `test-incremental-review-rounds.sh` | Delta-scoped review rounds: which files and findings a fix round reviews. |
@@ -487,7 +487,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/zen-anchor-assertions.test.js` | 16 | – | `test-zen-mode.sh` | The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector. |
 | `structure/zen-anchor-v1.test.js` | 25 | – | `test-zen-mode.sh` | The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain. |
 | `structure/zensu-cli-backend-v1.test.js` | 15 | – | `test-bash-zensu-gate.sh` | The CLI write-gate's backend reading: the local URL test, the shell words of the token scan, the run-time word tests, the --api-url occurrence rules, the one-word trust, the ZENSU_API_URL fallback, the PowerShell flag rules and the module's fail-closed analyzer load, with the gate suite's B53, B54 and B40o11 to B40o15 cases. |
-| `structure/zensu-cli-version-v1.test.js` | 14 | win32 8 | `test-doctor.sh` | The zensu-cli version floor: the version line, the floor comparison, and a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does. |
+| `structure/zensu-cli-version-v1.test.js` | 15 | win32 8 | `test-doctor.sh` | The zensu-cli version floor: the version line, the floor comparison, a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does, and the floor release's recorded ai-work help passing the capture preflight. |
 | `structure/zensu-doctor-invocation.test.js` | 27 | – | `test-versioned-plugin-upgrade.sh` | The /zensu:doctor invocation allowlist. |
 <!-- unit-registry:end section-4 -->
 
