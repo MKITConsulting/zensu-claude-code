@@ -196,7 +196,7 @@ raw output to a file there; nothing else keeps it.
 ## Known gaps
 
 - The installed `zensu` CLI must provide `zensu work`, which zensu-cli 0.8.0 is the first release
-  to carry; with an older CLI, `/zensu:work` refuses in one line that names zensu-cli 0.10.0,
+  to carry; with an older CLI, `/zensu:work` refuses in one line that names zensu-cli 0.18.0,
   the oldest release the plugin supports.
 - The gate reads command text. A command assembled at run time, such as a script the session
   wrote and then runs, an interpreter one-liner, or a spelling the gate does not know is not

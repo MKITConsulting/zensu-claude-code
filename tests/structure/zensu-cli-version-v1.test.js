@@ -35,8 +35,8 @@ function collect() {
   return { write(chunk) { text += chunk; return true; }, text: () => text };
 }
 
-test('the floor is zensu-cli 0.10.0 and the install commands are the four published ones', () => {
-  assert.equal(cli.MIN_VERSION, '0.10.0');
+test('the floor is zensu-cli 0.18.0 and the install commands are the four published ones', () => {
+  assert.equal(cli.MIN_VERSION, '0.18.0');
   assert.deepEqual(cli.INSTALL, {
     homebrew: 'brew install --cask mkitconsulting/tap/zensu',
     homebrewUpgrade: 'brew upgrade --cask zensu',
@@ -45,6 +45,31 @@ test('the floor is zensu-cli 0.10.0 and the install commands are the four publis
   });
   assert.ok(Object.isFrozen(cli.INSTALL));
   assert.match(cli.FLOOR_REASON, /^[a-z][^\n.]*[a-z]$/);
+});
+
+test('the floor release declares every flag the AI-work capture preflight requires', (t) => {
+  const recorded = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'fixtures/zensu-cli-0.18.0-ai-work-help.json'), 'utf8'));
+  assert.equal(cli.parseVersionLine(recorded.version), cli.MIN_VERSION, 're-record the fixture from the floor release whenever MIN_VERSION moves');
+  const childProcess = require('node:child_process');
+  const original = childProcess.spawnSync;
+  t.after(() => { childProcess.spawnSync = original; });
+  let omitted = '';
+  childProcess.spawnSync = (command, args) => {
+    if (command !== 'zensu') return { status: 1, stdout: '' };
+    if (args.length === 1 && args[0] === '--version') return { status: 0, stdout: `${recorded.version}\n` };
+    if (args.length === 3 && args[0] === 'ai-work' && args[2] === '--help' && Object.hasOwn(recorded.help, args[1])) {
+      const text = recorded.help[args[1]];
+      return { status: 0, stdout: omitted ? text.replace(new RegExp(`^.*--${omitted}\\s.*$`, 'm'), '') : text };
+    }
+    return { status: 1, stdout: '' };
+  };
+  const preflight = require(path.resolve(__dirname, '../../hooks/lib/ai-work-preflight-v1.js'));
+  const workspace = tempDir(t);
+  assert.deepEqual(preflight.check(workspace, 8000), { status: 'compatible', cliVersion: cli.MIN_VERSION });
+  omitted = 'maintenance-reason';
+  const refused = preflight.check(workspace, 8000);
+  assert.equal(refused.status, 'cli_incompatible');
+  assert.deepEqual(refused.missingCapabilities, ['start --maintenance-reason']);
 });
 
 test('the version is read from the first word after zensu on the version line', () => {
@@ -70,11 +95,14 @@ test('a version below the floor is old, a prerelease of the floor included, and 
   const cases = [
     ['0.9.0', 'old'],
     ['0.9.99', 'old'],
-    ['0.10.0-rc.1', 'old'],
-    ['0.10.0', 'ok'],
-    ['0.10.0+build.5', 'ok'],
-    ['0.10.1', 'ok'],
-    ['0.11.0', 'ok'],
+    ['0.10.0', 'old'],
+    ['0.17.0', 'old'],
+    ['0.17.99', 'old'],
+    ['0.18.0-rc.1', 'old'],
+    ['0.18.0', 'ok'],
+    ['0.18.0+build.5', 'ok'],
+    ['0.18.1', 'ok'],
+    ['0.20.0', 'ok'],
     ['1.0.0', 'ok'],
     ['dev', 'dev'],
     ['', 'unread'],
@@ -102,8 +130,8 @@ test('the probe runs zensu --version once with the update check switched off', {
 });
 
 test('a release at the floor is ok and a development build is dev', { skip: !POSIX }, (t) => {
-  const release = fakeZensu(t, "printf 'zensu 0.10.0 (commit abc, built now)\\n'");
-  assert.deepEqual(cli.probe({ binary: release.binary }), { state: 'ok', version: '0.10.0' });
+  const release = fakeZensu(t, "printf 'zensu 0.18.0 (commit abc, built now)\\n'");
+  assert.deepEqual(cli.probe({ binary: release.binary }), { state: 'ok', version: '0.18.0' });
   const dev = fakeZensu(t, "printf 'zensu dev (commit none, built unknown)\\n'");
   assert.deepEqual(cli.probe({ binary: dev.binary }), { state: 'dev', version: 'dev' });
 });
@@ -133,10 +161,10 @@ test('a cmd or bat shim is never run on win32', (t) => {
 });
 
 test('the lookup walks PATH and probes the first zensu it finds', { skip: !POSIX }, (t) => {
-  const { bin, binary, log } = fakeZensu(t, "printf 'zensu 0.10.2 (commit abc, built now)\\n'");
+  const { bin, binary, log } = fakeZensu(t, "printf 'zensu 0.18.2 (commit abc, built now)\\n'");
   const empty = tempDir(t);
   const found = cli.installedVersion({ PATH: `${empty}:${bin}` }, 'linux', empty);
-  assert.deepEqual(found, { state: 'ok', version: '0.10.2', binary });
+  assert.deepEqual(found, { state: 'ok', version: '0.18.2', binary });
   assert.deepEqual(calls(log), ['1|--version']);
   assert.deepEqual(cli.installedVersion({ PATH: empty }, 'linux', empty), { state: 'absent', version: '' });
 });
@@ -183,7 +211,7 @@ test('the command line answers state, version and floor, and refuses anything el
   const { binary } = fakeZensu(t, "printf 'zensu 0.9.0 (commit abc, built now)\\n'");
   const out = collect();
   assert.equal(cli.cliMain(['--binary', binary], out), true);
-  assert.equal(out.text(), 'state=old\nversion=0.9.0\nfloor=0.10.0\n');
+  assert.equal(out.text(), 'state=old\nversion=0.9.0\nfloor=0.18.0\n');
   for (const argv of [[], ['--binary'], ['--lookup', '--binary', binary], ['--execute'], ['--lookup', 'extra']]) {
     const refused = collect();
     assert.equal(cli.cliMain(argv, refused), false, argv.join(' '));

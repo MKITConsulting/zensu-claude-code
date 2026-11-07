@@ -264,6 +264,10 @@ notification_text() {
   printf '<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>toolu_01WPhqY4dh2LFbaugtAn6Kg8</tool-use-id>\n<status>%s</status>\n<summary>Agent "consume review" finished</summary>\n</task-notification>' "$1" "$2"
 }
 
+result_notification_text() {
+  printf '<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>toolu_01WPhqY4dh2LFbaugtAn6Kg8</tool-use-id>\n<status>completed</status>\n<summary>Agent "aspect review" finished</summary>\n<result>## Aspect: correctness\n- (no findings)</result>\n</task-notification>' "$1"
+}
+
 stop_payload() {
   RAW="$1" node -e 'process.stdout.write(JSON.stringify({ hook_event_name: "Stop", session_id: process.env.RAW }))'
 }
@@ -1071,6 +1075,16 @@ if [ -z "$M_ARRIVAL_OUT" ] && [ -z "$M_NOTE_OUT" ] && [ ! -e "$(fanout_file "$M"
   check "BR12c a fan-out agent's hand-back retires its entry and starts the delegate for the review packet gate, its notification retires the entry through the arrive child alone, neither prints anything, and the next Stop blocks as before" PASS
 else
   check "BR12c fan-out arrival (handback=$M_ARRIVAL_OUT notification=$M_NOTE_OUT node=$(node_calls "$WORK/fanout-handback.calls")/$(node_calls "$WORK/fanout-notification.calls") stop=$(printf '%s' "$M_AFTER_OUT" | head -c 300) count=$(stop_count "$M"))" FAIL
+fi
+
+M_NOTED=a6c8e0a2b4c6d8e0f
+aspect_payload "$M_RAW" zensu:review-aspect "$M_NOTED" | bash "$DELEGATE" >/dev/null 2>&1
+M_RESULT_OUT="$(counted_prompt "$M_RAW" "$(result_notification_text "$M_NOTED")" "$WORK/fanout-result.calls")"
+if [ -f "$WORK/fanout-result.calls" ] && [ -z "$M_RESULT_OUT" ] && [ ! -e "$(fanout_file "$M" "$M_NOTED")" ] \
+  && [ "$(node_calls "$WORK/fanout-result.calls")" -gt 1 ]; then
+  check "BR12d a fan-out agent's completion notification that carries its report in a result retires its entry, starts the delegate for the review packet gate and prints nothing" PASS
+else
+  check "BR12d fan-out result notification (out=$M_RESULT_OUT entry=$([ -e "$(fanout_file "$M" "$M_NOTED")" ] && echo present || echo absent) node=$(node_calls "$WORK/fanout-result.calls"))" FAIL
 fi
 
 PROBE_DATA="$WORK/probe-data"
