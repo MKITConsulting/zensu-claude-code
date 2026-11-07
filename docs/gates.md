@@ -1610,7 +1610,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   nested below the anchor, that fingerprint, and the one an `--evidence-run --scope acceptance`
   run records, is the combined fingerprint of the project and that worktree, so an edit in the
   worktree makes every record `stale`; when the worktree cannot be resolved, both verbs and the
-  acceptance run exit `2` and name the cause. The plan is the one named by this session's
+  acceptance run exit `2` and name the cause, and `--acceptance-status` prints it as an
+  `ACCEPTANCE STATUS — unavailable` summary line. The plan is the one named by this session's
   edit-landing receipt.
   `zensu-log.sh --acceptance-status --log <run log>` prints every criterion's state on the
   current tree and exits 0 only when all active criteria pass. Its summary line carries the same

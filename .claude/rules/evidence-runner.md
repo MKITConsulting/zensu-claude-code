@@ -60,17 +60,40 @@ the bound chain. The verdict measures `fingerprintRoot(workTree)` whatever direc
 record names, in local mode and in `decideCi` alike, so a run that measured only the anchor reads
 `stale`, and an `acceptance` run takes the same combined fingerprint. `--if-stale` judges
 freshness against that tree too, in both scopes, so a command that leaves the worktree never
-skips a run the terminus would read as `stale`. Every `--evidence-run` and both acceptance verbs
-read the workflow document once, a standalone chain's included, and ask the resolver only when
-it carries an Autopilot binding whose chain is still open (`active` and not `chainDone`), so a
-standalone chain, and every call after a bound chain's terminus, runs its command where it ran
-before. The lookup runs in a subshell and hands its answer back through files in the transport
-directory. A binding the resolver cannot answer is a FAULT and never falls back to the anchor,
-and so are a workflow document that cannot be read, which `--chain-work-tree` refuses the same
-way, and a phase library that does not load: `--evidence-run` and both acceptance verbs exit 2
-before anything runs, and the bound terminus, which hands the lookup the linkage it already
-validated instead of reading the document a second time, writes the cause into the transport
-file `work-tree-fault`, which the verdict reads as `unavailable`. A worktree that cannot be
+skips a run the terminus would read as `stale`. Every `--evidence-run`, both acceptance verbs,
+`--chain-work-tree` (with and without `--project-dir`) and `--round-prepare` read the workflow
+document once, a standalone chain's included, and ask the resolver only when it carries an
+Autopilot binding whose chain is still open (`active` and not `chainDone`), so a standalone
+chain, and every call after a bound chain's terminus, runs its command where it ran before, and
+`--chain-work-tree` then prints the anchor's top. With `hooks.selfReview` on, a bound chain stays
+open through every review and self-review round, because the bound max-rounds handoff keeps
+`chainDone` false; with it off, see the known gaps.
+`--tdd-complete` and the bound terminus hand the lookup the linkage they already validated
+instead of reading the document a second time. The lookup runs in a subshell, hands its answer
+back through files in the transport directory, and is the only place the linkage reaches the
+resolver (`WB20` in `test-tdd-complete-receipt-gate.sh`). A binding the resolver cannot answer
+is a FAULT and never falls back to the anchor, and so are a workflow document that cannot be
+read and a phase library that does not load. The lookup names the stage that failed (`library`,
+`state`, `linkage` or `work-tree`) beside its cause, so each verb keeps its own refusal:
+`--chain-work-tree` answers `current-session workflow path unavailable` and `corrupt or
+incomplete Autopilot linkage` for the document faults, `--round-prepare` stops with `chain: the
+chain's Autopilot linkage could not be read`; for every other fault `--chain-work-tree` and
+`--tdd-complete` print its cause above their own sentence, while `--round-prepare` carries it in
+its one stop line (`chain: <cause>`, or `work-tree: the chain's work tree could not be resolved:
+<cause>`). `--round-prepare` stops on an unresolvable workflow path and on a phase
+library that does not load, rather than reading either as a standalone chain. A project
+directory that cannot be derived is reported apart from the tree: `--evidence-run`, both
+acceptance verbs and `--chain-work-tree --project-dir` refuse on it, while `--tdd-complete`,
+`--round-prepare` and `--chain-work-tree` without `--project-dir`, which never need that
+directory, take the tree. `E25` pins that answer for `--chain-work-tree` only; the other two read
+just `_bwt_tree` and `_bwt_fault`. On a fault the arms of `--evidence-run` and both acceptance
+verbs write the cause into the transport file `work-tree-fault`, as the bound terminus does, and
+the modules own every word of the refusal: `run()` exits 2 after its usage checks and before
+anything runs, with `the chain's work tree could not be determined, so the command was not run:
+<cause>`; `record()` and `status()` of `acceptance-verify-v1.js` exit 2 with `the chain's work
+tree could not be determined, so no acceptance record can be bound to it: <cause>`, the status
+as an `ACCEPTANCE STATUS — unavailable` summary line; and the verdict reads the field as
+`unavailable`. Each passes the cause through its module's screen. A worktree that cannot be
 fingerprinted is measured only against the records whose run directory lies in it, so a green
 run in the anchor never passes there as `pass-tree-unverified`. `_evr_work_tree`,
 `_evr_work_dir` and `_avr_work_tree` start empty like `_evr_dir`, so a variable inherited from
@@ -253,9 +276,10 @@ the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S1
 in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in
 `skills/build/references/planning.md` and of Phase 4 in `skills/self-review/SKILL.md` (`L9b` and
 `L11` in `test-tdd-log-path-anchor.sh`, `E10g1` and `E10l` in `test-session-reanchor.sh`), E13
-to E24 in `test-evidence-run.sh`, F20 to F24 in `test-full-suite-gate.sh`, A29 to A31 in
-`test-acceptance-gate.sh`, and the bound cases of `evidence-run-v1.test.js`, the `--if-stale`
-one and the worktree that cannot be fingerprinted included.
+to E25 in `test-evidence-run.sh`, F20 to F24 in `test-full-suite-gate.sh`, A29 to A31 in
+`test-acceptance-gate.sh`, WB0 to WB20 in `test-tdd-complete-receipt-gate.sh`, the bound cases
+of `evidence-run-v1.test.js`, the `--if-stale` one and the worktree that cannot be fingerprinted
+included, and the work-tree fault cases of both module unit files.
 
 **Version of the bound work tree: `patch`.** Walked against `.claude/rules/runtime-lineage.md`:
 no record field and no strict key set moves. A full or scoped record still carries the `cwd`
@@ -264,7 +288,11 @@ from `cwd` and `command`, so it reads a bound chain's records against the same c
 acceptance record's `tree` holds a combined id only for a bound chain, whose terminus answers
 `not-checked` without reading records, and a released reader would read such a record as stale,
 never as a pass. No hook, matcher, config key or attestation moves, and `--project-dir` is a new
-flag on a read-only verb whose only callers are skills of the same installation.
+flag on a read-only verb whose only callers are skills of the same installation. Moving the
+refusal text into the modules and routing `--chain-work-tree`, `--round-prepare` and
+`--tdd-complete` through the lookup is `patch` on the same walk: the transport file already
+served the terminus, `--acceptance-status` prints an `ACCEPTANCE STATUS — unavailable` line in a
+state it already refused with exit 2, and no record field, key set, hook or matcher moves.
 
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when
@@ -272,6 +300,12 @@ both trees exist. A bound chain whose `workspaceRoot` the resolver refuses (a tr
 anchor, a clone, a submodule) can record no run at all, where it used to run in the anchor;
 `--tdd-complete` already refuses such a chain, so the refusal only arrives earlier. The bound
 work tree is unmeasured on Windows: none of the three suites that drive it is in a blocking
-Windows profile. `--chain-work-tree`, `--round-prepare` and `--tdd-complete` still read the
-Autopilot linkage with their own copies of the lookup, and `zensu-log.sh`, not the modules,
-words the work-tree refusal of `--evidence-run` and the acceptance verbs.
+Windows profile. A write into the private transport directory is not checked, as for every
+transport file, so a `work-tree-fault` that could not be written lets `--evidence-run` or an
+acceptance verb proceed as a standalone call, and a `bwt-tree` answer written empty reads as a
+standalone chain; the bound terminus resolves and measures the bound tree itself, so such a run
+cannot pass its gate unless the terminus loses its own `work-tree-fault` write as well. With
+`hooks.selfReview` off, the bound max-rounds arm of `post-review-tdd-delegate.sh` runs the bound
+terminus inside the hook before it directs the close-suite `--evidence-run`, which then reads the
+chain as done and runs in the anchor, not the run's worktree (`E24` pins that placement after a
+terminus; it predates the shared lookup).
