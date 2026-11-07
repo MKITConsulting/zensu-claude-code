@@ -175,8 +175,8 @@ zero-change ticket restart the count inside one. All five reset the store. A res
 disclosed on stderr as `REVIEW GATE RESET UNAVAILABLE` and does not undo the transition, as at
 `--tdd-begin`. `RP13`, `RP16a`, `RP23` and `RP23a` in `tests/structure/test-review-packet.sh` and
 `G9k` in `tests/structure/test-chain-terminus-zero-change-gate.sh` pin the reset at `--tdd-begin`,
-at the deferred seed, after the standalone rearm and at the reopen; no check drives the durable
-rearm arm. All five call `tdd_review_gate_reset` in `hooks/lib/zensu-tdd-phase.sh`, the four
+at the deferred seed, after the standalone rearm and at the reopen, and `X8b` in
+`tests/structure/test-autopilot-adversarial-recovery.sh` after the bound rearm. All five call `tdd_review_gate_reset` in `hooks/lib/zensu-tdd-phase.sh`, the four
 `zensu-log.sh` sites through `_zensu_review_gate_reset`.
 
 **The deferred seed also retires the session's receipt.** A deferred generation starts already
@@ -188,12 +188,23 @@ mode: a deferred generation without a receipt closes with an `EDIT LANDING — n
 and one whose own audit wrote a receipt is judged by it (`E12`–`E12b` in
 `tests/structure/test-terminal-edit-landing-gate.sh`).
 
+**The consume check is a read-only verdict between an event adapter and one write.**
+`consumeSubject` takes the report, the supplied packet and a launch from a PostToolUse payload or
+from a prompt arrival, and reads the report only when the verdict asks for it, so a check that
+stops at the chain state parses nothing. `consumeVerdict` refuses in a fixed order (the supplied
+packet, the tree and the receipt, the reviewer identities, the primary judge) and writes nothing.
+`recordConsumeLaunch` writes the only record, once a PostToolUse consume launch has passed, so a
+refusal, an arrival and a completed consume run leave the store as it was. A refusal names a
+reviewer through `describe`, which spells a judge run without the word run, because every
+template appends it.
+
 **Coupled sites:** `classify` in `hooks/lib/review-gate-v1.js`, which asks `REVIEWER_TYPES` in
 `hooks/lib/claude-principal-v1.js` whether a type is a confined reviewer and maps only the
 unscoped name to a role, because the one-definition scan in
 `tests/structure/reviewer-spawn-allow-v1.test.js` refuses a second spelling of the set, and the
-`case` pre-filter near the top of `hooks/post-review-tdd-delegate.sh`, which must name the same
-types, since a type it omits never reaches the gate; the three fix-round arms of `hooks/post-review-tdd-delegate.sh`, whose
+PostToolUse `case` pre-filter of `hooks/post-review-tdd-delegate.sh`, which must name the same
+types, since a type it omits never reaches the gate, and which a unit test in
+`tests/structure/review-gate-v1.test.js` holds equal to the types `classify` accepts; the three fix-round arms of `hooks/post-review-tdd-delegate.sh`, whose
 `I17` needles in `tests/structure/test-incremental-review-rounds.sh` must stay at three each and
 out of the convergence clause lines (`R16` in `tests/structure/test-review-convergence.sh`); step 10.2c, step 3, step 4b,
 step 5 and the fix-round paragraph of `skills/build/references/review-chain.md`; the `review_scope`
