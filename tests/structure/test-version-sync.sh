@@ -204,6 +204,21 @@ refusal_check "Release bump refuses a ref that is not a plain tag name and leave
   "refused (bad-ref)" "$TMP/valid.json" zensu "$TARGET_VERSION" "v$TARGET_VERSION; true"
 refusal_check "Release bump refuses a call without all four operands and leaves the file byte-identical" \
   "usage:" "$TMP/valid.json" zensu "$TARGET_VERSION"
+refusal_check "Release bump refuses a plugin name that is not a plain name and leaves the file byte-identical" \
+  "refused (bad-name)" "$TMP/valid.json" ../zensu "$TARGET_VERSION" "v$TARGET_VERSION"
+printf '%s\n' '{' '  "name": "zensu"' '}' > "$TMP/pluginless.json"
+refusal_check "Release bump refuses a marketplace without a plugins array and leaves it byte-identical" \
+  "refused (no-plugins)" "$TMP/pluginless.json" zensu "$TARGET_VERSION" "v$TARGET_VERSION"
+printf '%s\n' '{' > "$TMP/broken.json"
+refusal_check "Release bump refuses a marketplace that is not valid JSON and leaves it byte-identical" \
+  "refused (not-json)" "$TMP/broken.json" zensu "$TARGET_VERSION" "v$TARGET_VERSION"
+cp "$TMP/valid.json" "$TMP/link-target.json"
+if ln -s "$TMP/link-target.json" "$TMP/link.json" 2>/dev/null && [ -L "$TMP/link.json" ]; then
+  refusal_check "Release bump refuses a marketplace path that is a symlink and leaves the link target byte-identical" \
+    "refused (not-regular)" "$TMP/link.json" zensu "$TARGET_VERSION" "v$TARGET_VERSION"
+else
+  printf '  SKIP  %s\n' "Release bump refuses a marketplace path that is a symlink (this host cannot create a symbolic link)"
+fi
 
 TAG_PATTERN="$(sed -nE "s/^tag_pattern[[:space:]]*=[[:space:]]*'([^']+)'[[:space:]]*$/\1/p" "$CLIFF")"
 if [ -n "$TAG_PATTERN" ] && node -e '
