@@ -4,9 +4,8 @@ Status: draft, 2026-11-07. Nothing described here is implemented. The spec plans
 ship from different repositories: the plugin (this repository), its ports to other hosts, the
 `zensu` CLI, and the Zensu service with its web viewer. For the CLI and the service it fixes
 behavior and contract only; this repository is public, so it names no internal module of either.
-Decisions 1 to 4 were taken on 2026-11-04 and decisions 6 to 8 on 2026-11-07; decision 5 is
-partly open and decision 9 open (§10). §12 records how far a Zensu feature's acceptance criteria
-reach the plugin today.
+Decisions 1 to 4 were taken on 2026-11-04 and decisions 5 to 8 on 2026-11-07; decision 9 is open
+(§10). §12 records how far a Zensu feature's acceptance criteria reach the plugin today.
 
 **Zensu is optional, on every host.** Every run writes its report locally without a Zensu account,
 without a network and without a forge CLI. Zensu adds one optional destination: nothing in a run
@@ -334,8 +333,9 @@ and visual evidence.
 - Measured on 2026-11-03 on a single-file report of 13.7 MB that embedded 44 PNG screenshots of a
   web application: the 45 PNGs of its folder total 10.4 MB, losslessly transcoded 4.8 MB. Lossy
   at quality 85 they total 3.7 MB, which this spec does not use. Base64 adds a third, so the
-  single-file export of the lossless set is about 6.4 MB. At 1440 by 900 one screenshot averaged
-  232 KB as PNG and 107 KB losslessly transcoded. Appendix A holds the raw numbers.
+  single-file export of the lossless set is about 6.4 MB. One screenshot averaged 232 KB as PNG
+  and 107 KB losslessly transcoded; 41 of the 45 were taken at 1440 by 900 and 4 at 2880 by 1800.
+  Appendix A holds the raw numbers.
 - An image beyond WebP's limit of 16,383 pixels per side stays PNG.
 - Caps: 50 MiB per file and 2,000 files per report, checked at `--report-add`, so every file a
   report holds can also be uploaded (§8.3). A report has no size cap of its own: it is split into
@@ -562,9 +562,10 @@ repeated open lists only what is still missing.
   control characters other than tab and line breaks. Everything else is refused, SVG and HTML
   included.
 - The manifest is at most 1 MiB and is parsed with depth and string-length limits.
-- For the web application the service derives display renditions from each uploaded image: a
-  thumbnail and a screen-sized copy. A rendition is marked derived and never served as evidence,
-  and the original stays downloadable unchanged.
+- For the web application the service derives one display rendition from each uploaded image, a
+  thumbnail, and no screen-sized copy: a capture normalized at the run's viewport (§6.5) already
+  fits a screen, and the browser scales any other original (decision 5). A rendition is marked
+  derived and never served as evidence, and the original stays downloadable unchanged.
 - An open report expires after its tier's open time, at least 7 days. Until then its files count
   toward the tenant's quota; on expiry the files only it referenced are reclaimed.
 
@@ -603,9 +604,23 @@ finalize also sets that row's verification is decision 9.
 - Upload, finalize and deletion are audited.
 - A report is customer content: it is part of a data export and is removed by a deletion request.
 - Two kinds of cap. Fixed for every tier, because the plugin relies on them: 50 MiB per file and
-  2,000 files per report. Set per tier (decision 5): the stored bytes after deduplication, the
-  reports open at once, the open time of at least 7 days, and how long the files of a finalized
-  report are kept.
+  2,000 files per report. Set per tier (decision 5):
+
+| Cap per tier | Free | Pro | Team | Enterprise |
+|---|---|---|---|---|
+| Stored bytes after deduplication, per seat | 1 GiB | 1 GiB | 1 GiB | 1 GiB |
+| Reports open at once, per seat | 5 | 5 | 5 | 5 |
+| Open time, never below 7 days | 7 days | 7 days | 7 days | 7 days |
+| Files of a finalized report that is not kept | 3 months | 6 months | 12 months | 12 months |
+
+- Both per-seat caps are pooled across the organization, so one member can use what another
+  leaves. The stored bytes count the files the tenant uploaded; derived renditions do not count,
+  so the plugin can compute an upload's use from its bundle.
+- A finalized report is kept when it backs an accepted AI-work result or a released revision; it
+  keeps its files for as long as its feature exists. Every other finalized report loses its files
+  once its tier's time has passed since it was finalized, and keeps its manifest and criterion
+  rows, so the history of runs stays readable without its images. A file is reclaimed only when
+  no remaining report references it, because the reports of a tenant share files (§8.2).
 - The open answer reports the tier's caps and their current use, so the plugin's preview shows
   the remaining quota before the first file goes up. A refused upload names the cap it hit and
   the use.
@@ -717,7 +732,7 @@ its upload after step 8. Step 11 runs alongside; the write-back of decision 9 ne
 
 ## 10. Decisions
 
-Decisions 1 to 4 were taken on 2026-11-04 and decisions 6 to 8 on 2026-11-07. Each names what it
+Decisions 1 to 4 were taken on 2026-11-04 and decisions 5 to 8 on 2026-11-07. Each names what it
 costs and what it rejected.
 
 1. **Zensu viewer: native rendering from the manifest.** No code from an upload ever runs on the
@@ -735,14 +750,20 @@ costs and what it rejected.
 4. **Language: English.** Reports follow the plugin's language rule. A team that works in another
    language reads English evidence until the viewer's fixed strings are localized, which this
    spec leaves out.
-5. **Partly open: Zensu retention and caps per plan tier.** Decided on 2026-11-07: an open report
-   expires after 7 days at the earliest, and every cap beyond the fixed protocol caps is set per
-   tier (§8.6). Still open: the numbers per tier, and how long the files of a finalized report
-   are kept. Recommended for the second: keep every report that backs an accepted AI-work result
-   or a released revision for as long as its feature exists; remove the files of every other
-   report after the tier's time, 90 days on the smallest tier, and keep its manifest, so the
-   history of runs stays readable without its images. A large report is about 5 MB after
-   lossless transcoding.
+5. **Zensu caps and retention per plan tier.** Every cap beyond the fixed protocol caps is set per
+   tier (§8.6): 1 GiB of stored bytes after deduplication and 5 reports open at once per seat,
+   pooled across the organization, and an open time of 7 days, the same on every tier. A report
+   that backs an accepted AI-work result or a released revision keeps its files for as long as its
+   feature exists; every other finalized report keeps its manifest and loses its files after 3
+   months on Free, 6 on Pro and 12 on Team and Enterprise. The service derives a thumbnail and no
+   other rendition (§8.3). Basis (Appendix A): a report comes to about 2.1 MB on average and
+   6.1 MB at most, so a developer who uploads one every working day, five times the measured
+   rate, fills about half of a seat's 1 GiB in the first year on a 12-month tier and adds under
+   0.1 GB a year after that. It costs a byte count per organization that the service keeps
+   current as files arrive and are reclaimed, counting references because reports share files.
+   Rejected: a screen-sized copy beside each thumbnail, which adds three quarters to every image
+   while a normalized capture already fits a screen; and one cap per organization regardless of
+   its seats, which a growing team outgrows first.
 6. **Forges: a review summary on GitHub and GitLab, through the VCS driver.** These are the two
    forges the plugin's driver serves (`docs/vcs-driver-spec.md`), so every team the plugin
    reviews for gets a summary. It costs one driver operation and a GitLab measurement. Rejected:
@@ -821,11 +842,30 @@ What has to happen elsewhere, in this order:
 None of this blocks §6. Until it lands, a report's criteria carry no Zensu ref, and the report
 works with and without Zensu as before.
 
-## Appendix A — Measurements of 2026-11-03
+## Appendix A — Measurements
 
-- Sample: 20 single-file reports of one consuming web project, from 0.4 MB to 13.7 MB. The largest
-  embedded 44 PNG screenshots in 13,727,808 bytes.
+Of 2026-11-03:
+
+- Sample: 14 single-file reports of one consuming web project, from 0.4 MB to 13.7 MB, as counted
+  on 2026-11-07. The largest embedded 44 PNG screenshots in 13,727,808 bytes.
 - The 45 PNGs of that report's folder: 10,438,759 bytes. `cwebp -lossless -z 6`: 4,796,876 bytes.
   `cwebp -q 85`: 3,654,920 bytes.
 - `gh pr comment --help` of `gh` 2.101.0: `--attach` takes an image or video file, up to 50 files
   per command, and rewrites a body reference to an attached file.
+
+Of 2026-11-07, the basis of decision 5:
+
+- The 14 reports were written by one developer from 2026-07-20 to 2026-10-30, 4.2 a month for 3.3
+  distinct work items a month. They embed 274 PNG screenshots: 19.6 per report on average, 14.5
+  median, 57 at most.
+- Per image over the 45 files above, 41 captured at 1440 by 900 and 4 at 2880 by 1800: 106,597
+  bytes losslessly transcoded, 97,707 bytes for the 41 alone. A lossy thumbnail 320 pixels wide
+  takes 5,092 bytes, 4.8 percent of that; a lossy copy at quality 85 takes 81,220 bytes,
+  76 percent.
+- Assuming every report mixes its images like that folder, a report stores 2.09 MB on average,
+  1.55 MB median and 6.08 MB at most, thumbnails not included. Deduplication, manifests and text
+  captures were not measured and are not counted.
+- Per developer, with one report kept for good per work item: 82 MB a year of kept reports, plus
+  the other reports inside the tier's time. At the end of the first year on a 12-month tier that
+  is 0.10 GB at the measured rate and 0.53 GB at an assumed 21 uploads a month, one per working
+  day.
