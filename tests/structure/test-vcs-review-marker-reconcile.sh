@@ -256,10 +256,31 @@ else
 fi
 rm -f "$PINNED_PAYLOAD" "$PINNED_PLAN" "$PINNED_MANIFEST"
 
-if bash -c 'for f in _zensu_vcs_native_node_path _zensu_vcs_reconcile_review _zensu_vcs_snapshot_review_payload _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call; do type "$f" >/dev/null 2>&1 || exit 1; done'; then
+M20_SEEN=" "
+M20_PENDING="_zensu_vcs_reconcile_review"
+while [ -n "$M20_PENDING" ]; do
+  M20_F="${M20_PENDING%% *}"
+  case "$M20_PENDING" in *" "*) M20_PENDING="${M20_PENDING#* }" ;; *) M20_PENDING="" ;; esac
+  case "$M20_SEEN" in *" $M20_F "*) continue ;; esac
+  M20_SEEN="$M20_SEEN$M20_F "
+  for M20_G in $(declare -f "$M20_F" | grep -oE '_zensu_vcs_[A-Za-z0-9_]+' | sort -u); do
+    declare -F "$M20_G" >/dev/null 2>&1 && M20_PENDING="$M20_PENDING $M20_G"
+  done
+  M20_PENDING="${M20_PENDING# }"
+done
+M20_LIST="${M20_SEEN# }"
+M20_REACHES_POST=0
+case " $M20_LIST" in *" _zensu_vcs_gitlab_post_json "*) M20_REACHES_POST=1 ;; esac
+eq "M20a the derived reconcile helper closure reaches the GitLab JSON POST helper" "$M20_REACHES_POST" "1"
+if M20_LIST="$M20_LIST" bash -c 'for f in $M20_LIST; do type "$f" >/dev/null 2>&1 || exit 1; done'; then
   check "M20 exported reconcile function retains every transitive helper" PASS
 else
   check "M20 exported reconcile function retains every transitive helper" FAIL
+fi
+if ( export -fn _zensu_vcs_gitlab_post_json; M20_LIST="$M20_LIST" bash -c 'for f in $M20_LIST; do type "$f" >/dev/null 2>&1 || exit 1; done' ); then
+  check "M20b control: an unexported transitive helper makes the closure check fail" FAIL
+else
+  check "M20b control: an unexported transitive helper makes the closure check fail" PASS
 fi
 if bash "$LIB" --reconcile-review --provider github --provider github --repo-id acme/widget --expected-head abcdef0 --operation-key op 42 "$WORK/a.json" >/dev/null 2>&1; then
   check "M21 duplicate reconcile options fail closed" FAIL
@@ -641,7 +662,23 @@ if [ "${1:-}" = api ] && [ "${2:-}" = --paginate ]; then
   exit 0
 fi
 if [ "${1:-}" = api ] && [ "${2:-}" = --method ] && [ "${3:-}" = POST ]; then
-  [ "${5:-}" = --input ] && [ "${6:-}" = - ] || exit 2
+  input=""; content_type=""; prev=""
+  for arg in "$@"; do
+    [ "$prev" = --input ] && input="$arg"
+    if [ "$prev" = --header ] || [ "$prev" = -H ]; then
+      if [ "$(printf '%s' "${arg%%:*}" | tr '[:upper:]' '[:lower:]')" = content-type ]; then
+        content_type="$(printf '%s' "${arg#*:}" | tr -d ' ')"
+      fi
+    fi
+    prev="$arg"
+  done
+  [ "$input" = - ] || exit 2
+  case "$content_type" in
+    application/json|application/json\;*) ;;
+    *)
+      printf '%s\n' "{\"error\":\"The provided content-type '$content_type' is not supported.\"}" 'glab: HTTP 415' >&2
+      exit 1 ;;
+  esac
   part="$(ENDPOINT="${4:-}" node -e '
     var fs=require("fs"),raw="";
     process.stdin.on("data",function(c){raw+=c;});process.stdin.on("end",function(){
@@ -850,6 +887,33 @@ if [ "$(grep -cF 'api projects/grp%2Fproj/merge_requests/7' "$WORK/glstate/calls
   check "L21 every readiness attempt performs fresh MR observations" PASS
 else
   check "L21 every readiness attempt performs fresh MR observations" FAIL
+fi
+
+rm -rf "$WORK/glstate"; mkdir -p "$WORK/glstate"
+LR_HEADER="$(run_gl)"
+eq "L22 full GitLab reconcile posts every part through the fake" "$(printf '%s' "$LR_HEADER" | jfield postedCount)" "3"
+eq "L22a every GitLab POST declares a JSON Content-Type before its stdin body" \
+  "$(grep -c -- '--method POST .* --header Content-Type: application/json --input -$' "$WORK/glstate/calls" || true)" \
+  "$(grep -c -- '--method POST' "$WORK/glstate/calls" || true)"
+
+rm -rf "$WORK/glstate"; mkdir -p "$WORK/glstate"
+HEADERLESS_ERR="$(printf '%s' '{"body":"probe :part=1/3 -->"}' \
+  | FAKE_DIR="$WORK/glstate" "$WORK/bin/glab" api --method POST projects/grp%2Fproj/merge_requests/7/notes --input - 2>&1 >/dev/null)"
+HEADERLESS_RC=$?
+if [ "$HEADERLESS_RC" -ne 0 ] && printf '%s' "$HEADERLESS_ERR" | grep -qF 'HTTP 415' \
+  && printf '%s' "$HEADERLESS_ERR" | grep -qF "The provided content-type '' is not supported." \
+  && [ ! -f "$WORK/glstate/part1" ]; then
+  check "L23 fake glab answers a body POST without a JSON Content-Type with HTTP 415, as GitLab does" PASS
+else
+  check "L23 fake glab answers a body POST without a JSON Content-Type with HTTP 415, as GitLab does" FAIL
+fi
+if printf '%s' '{"body":"probe :part=1/3 -->"}' \
+  | FAKE_DIR="$WORK/glstate" "$WORK/bin/glab" api --method POST projects/grp%2Fproj/merge_requests/7/notes \
+      --header 'Content-Type: application/json' --input - >/dev/null 2>&1 \
+  && [ -f "$WORK/glstate/part1" ]; then
+  check "L24 the same POST with a JSON Content-Type is accepted" PASS
+else
+  check "L24 the same POST with a JSON Content-Type is accepted" FAIL
 fi
 
 echo "----"

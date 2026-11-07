@@ -25,12 +25,15 @@ assert:
         .map((p) => p.replace(/^assistant_text\]\s*/, ''))
         .join('\n').trim() || raw;
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
-      const ok = lines.length > 0 && lines.length <= 12;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      let above = lines.length;
+      lines.forEach((l, i) => { if (/^(?:this\s+)?session\b/i.test(undecorate(l))) above = i; });
+      const ok = lines.length > 0 && above <= 12;
       return {
         pass: ok,
         score: ok ? 1 : 0,
-        reason: (ok ? "Within the length target: " : "Rule 4 targets about 8 lines and 12 is the slack ceiling; got ")
-          + lines.length + " non-empty prose lines."
+        reason: (ok ? "Within the length target: " : "The length target is about 8 lines above the session block, and 12 is the slack ceiling; got ")
+          + above + " non-empty prose lines above the session block."
       };
   - type: javascript
     value: |
@@ -42,15 +45,19 @@ assert:
       const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
       const first = (prose.split('\n').map((s) => s.trim()).find(Boolean)) || '';
       const recapOpening = /^(?:recap|summary|last|since (?:your|the) last message)\b[^:.!?]{0,30}:/i.test(undecorate(first));
-      const resultFirst = !recapOpening && /\b(auth|middleware)\b|\.(ts|js|go|py|rs|java)\b/i.test(first);
+      const blockOpening = /^(?:this\s+)?session\s*:/i.test(undecorate(first));
+      const resultFirst = !recapOpening && !blockOpening
+        && (/(?:[Aa]uth|AUTH|[Mm]iddleware|MIDDLEWARE)(?![a-z])/.test(first) || /\.(ts|tsx|js|jsx|mjs|cjs|go|py|rb|rs|java|kt|scala|cs|php|swift|ex|exs|c|cc|cpp|h|hpp)\b/i.test(first));
       return {
         pass: resultFirst,
         score: resultFirst ? 1 : 0,
         reason: (resultFirst
           ? "Opens with the result, the changed auth middleware file: "
           : recapOpening
-            ? "Rule 1 requires the result first, and the first prose line opens with a recap label, the retired recap-first shape: "
-            : "Rule 1 requires the first prose line to give the result, the changed auth middleware file; got: ")
+            ? "The result-first rule requires the result in the first prose line, which opens with a recap label instead, the retired recap-first shape: "
+            : blockOpening
+              ? "The result-first rule requires the result in the first prose line, which opens with the session block instead of closing with it: "
+              : "The result-first rule requires the first prose line to give the result, the changed auth middleware file; got: ")
           + JSON.stringify(first.slice(0, 120))
       };
   - type: javascript
@@ -64,7 +71,7 @@ assert:
       return {
         pass: questions <= 1,
         score: questions <= 1 ? 1 : 0,
-        reason: "Rule 8 caps the turn at one question. Found " + questions + " question mark(s) in the prose."
+        reason: "The one-question cap allows one question per turn. Found " + questions + " question mark(s) in the prose."
       };
   - type: javascript
     value: |
@@ -78,7 +85,7 @@ assert:
         pass: !dumped,
         score: dumped ? 0 : 1,
         reason: dumped
-          ? "Rule 3 withholds trade-offs and alternatives unless asked; the reply volunteered them."
+          ? "The depth-on-demand rule withholds trade-offs and alternatives unless asked; the reply volunteered them."
           : "No unasked trade-off or alternatives dump."
       };
   - type: javascript
@@ -88,13 +95,13 @@ assert:
         .filter((p) => p.startsWith('assistant_text]'))
         .map((p) => p.replace(/^assistant_text\]\s*/, ''))
         .join('\n').trim() || raw;
-      const answered = /auth/i.test(prose) && /middleware|\.(ts|js|go|py|rs|java)\b/i.test(prose);
+      const answered = /auth/i.test(prose) && /middleware|\.(ts|tsx|js|jsx|mjs|cjs|go|py|rb|rs|java|kt|scala|cs|php|swift|ex|exs|c|cc|cpp|h|hpp)\b/i.test(prose);
       return {
         pass: answered,
         score: answered ? 1 : 0,
         reason: answered
           ? "The question ('which file did you change?') was answered."
-          : "Rule 2: the actual question must still be answered — the auth middleware file."
+          : "The result-first rule still requires the actual question to be answered — the auth middleware file."
       };
   - type: javascript
     value: |

@@ -52,7 +52,12 @@
       "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 91, "skips": {"win32": 3},
+      "path": "tests/structure/edit-landing-scope-v1.test.js", "registered": 37, "skips": {"win32": 1},
+      "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
+      "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
+    },
+    {
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 93, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -62,9 +67,10 @@
       "summary": "External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, the freshness check against changed files, and the review root bound to the session's work tree with every other layout named."
     },
     {
-      "path": "tests/structure/finding-verify-v1.test.js", "registered": 28,
+      "path": "tests/structure/finding-verify-v1.test.js", "registered": 35,
+      "skips": { "win32": 1 },
       "runs": [{ "driver": "tests/structure/test-finding-verification.sh" }],
-      "summary": "The finding-verification grading module."
+      "summary": "The finding-verification grading module and its bounded JSON input."
     },
     {
       "path": "tests/structure/fixture-mutation-watch.test.js", "registered": 19,
@@ -169,9 +175,19 @@
       "summary": "The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe."
     },
     {
+      "path": "tests/structure/review-gate-v1.test.js", "registered": 31,
+      "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
+      "summary": "The consume-review gate: reviewer records, canonical-packet equality, freshness and the primary-judge requirement."
+    },
+    {
       "path": "tests/structure/review-ledger-v1.test.js", "registered": 42,
       "runs": [{ "driver": "tests/structure/test-review-convergence.sh" }],
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
+    },
+    {
+      "path": "tests/structure/review-packet-v1.test.js", "registered": 33,
+      "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
+      "summary": "The canonical review change set and the immutable per-round review packet."
     },
     {
       "path": "tests/structure/review-round-scope-v1.test.js", "registered": 26,
@@ -330,7 +346,7 @@
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
     {
-      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 15,
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 16,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
     },

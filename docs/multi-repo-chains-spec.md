@@ -42,7 +42,7 @@ Six sites, all single-root.
 
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
-`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:148-155`), and
+`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:151-158`), and
 `hooks/checks/pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
 while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
@@ -50,10 +50,10 @@ Nothing in this proposal weakens that.
 
 One of the consumers named in §6.3 does NOT sit on that binding: the audit's
 default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
-(`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
+(`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1975`) and counts through the shared helper (`:2026`),
+(`hooks/lib/zensu-log.sh:2030`) and counts through the shared helper (`:2081`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -63,11 +63,11 @@ variable names for the audit in a multi-root topology, and what the fallback mea
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:127`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:365-405`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:1166`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:56`, flag at `:139`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:593-633`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:229`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1964`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2019`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -551,7 +551,7 @@ the list from an inherited or a command environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2839`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2906`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -568,7 +568,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5027`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5094`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -799,12 +799,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/build/references/audit.md:61`) and runs in vanilla
+Drift Audit does the same (`skills/build/references/audit.md:63`) and runs in vanilla
 (`skills/build/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/build/references/audit.md:67`), which is a test vanilla cannot be made to produce.
+(`skills/build/references/audit.md:69`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/build/references/audit.md:69`), AND reword the finding
+level as step 6c already is (`skills/build/references/audit.md:71`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no

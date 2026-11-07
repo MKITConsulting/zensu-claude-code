@@ -291,7 +291,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:1166 · zensu-log.sh:1964</p>
+      <p class="src">zensu-edit-landing.sh:229 · zensu-log.sh:2019</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -314,7 +314,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus now counts the same way. A chain that
       claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1975 · zensu-log.sh:98-121 · zensu-log.sh:118-119</p>
+      <p class="src">zensu-log.sh:2030 · zensu-log.sh:98-121 · zensu-log.sh:118-119</p>
     </div>
   </div>
 </section>
@@ -593,7 +593,7 @@
     paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
     two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
     so it reports the unpaired literal without demanding the pairing.</p>
-    <p class="src">skills/build/references/audit.md:67 · skills/build/references/audit.md:69</p>
+    <p class="src">skills/build/references/audit.md:69 · skills/build/references/audit.md:71</p>
     <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
     specification carries the same proposal in §7.4.</p>
   </div>
@@ -613,7 +613,7 @@
       anchor is clean while the changed files sit in the satellites, so a takeover brief would claim
       no uncommitted changes for a session with a dirty tree in two other repositories — the same
       silent green as section 2, relocated into the handover path.</p>
-      <p class="src">trail.mjs:2839</p>
+      <p class="src">trail.mjs:2906</p>
     </div>
     <div class="card">
       <span class="tag warn">Discovery</span>
@@ -629,7 +629,7 @@
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd -- ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:5027</p>
+      <p class="src">trail.mjs:5094</p>
     </div>
   </div>
 
