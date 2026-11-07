@@ -16,12 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **vcs**: Add a live GitLab tier with a pinned glab matrix (#575)
+- **verify-feature**: Decide the Zensu evidence caps and retention per tier (#574)
 - **verify-feature**: Size caps per file and tier, image sizing, Zensu acceptance criteria (#569)
 - **verify-feature**: Specify the evidence report, its ports and the Zensu side (#567)
 - **zen-mode**: Settle the grader follow-ups #537 left open (#563)
 
 ### Fixed
 
+- **hooks**: Grade changed non-ASCII files as landed and settle the #485 follow-ups (#572)
+- **evidence-run**: Make the work-tree fault transport fail closed (#573)
 - **hooks**: Raise the zensu-cli floor to 0.18.0, which AI-work capture needs (#571)
 - **review-gate**: Read background reviewer reports from completion notifications (#570)
 - **evidence-run**: Word work-tree refusals in the modules and share one bound lookup (#561)
