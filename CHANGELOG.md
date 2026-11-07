@@ -33,9 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "the receipt carries no audit scope; re-run the audit so the terminus can check it against the
   current tree", so a chain that is open during the upgrade re-runs its edit-landing audit before
   it closes. While `hooks.reviewPacketGate` is on, the default, a consume-mode review claims its
-  ticket only when every reviewer of its round saw the round's canonical review packet; outside
-  auto mode the Claude desktop app sends no hand-back for a reviewer it runs in the background, so
-  such a review stays refused with a hint to ask whether to set the key to `false`.
+  ticket only when every reviewer of its round saw the round's canonical review packet. A reviewer
+  the Claude desktop app runs in the background is completed by its hand-back or, outside auto
+  mode, by the `<result>` of its completion notification; a review whose reviewer delivers neither
+  stays refused, with a hint to wait for it or to ask whether to set the key to `false`.
 - **source-write gate program names**: `hooks/pre-bash-source-write-gate.sh` now reads a program
   or wrapper name the way a case-insensitive file system resolves it, as macOS and Windows do by
   default: in any letter case, with an optional `.exe` suffix and behind a path, on Windows also
