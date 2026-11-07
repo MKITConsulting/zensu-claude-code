@@ -432,6 +432,125 @@ esac
   && check "P2p8 the shipped hooks.json renders the row the coverage module derives ($SHELL_REAL_GAPS gap(s))" PASS \
   || check "P2p8 the shipped hooks.json renders the row the coverage module derives (gaps: ${SHELL_REAL_GAPS:-<none>}; row: $SHELL_REAL_ROW)" FAIL
 
+GATE_OK=$'\xe2\x9c\x85'
+GATE_WARN=$'\xe2\x9a\xa0\xef\xb8\x8f'
+GATE_BODY="$PLUGIN_DIR/hooks/checks/pre-bash-zensu-gate.sh"
+GATE_NAMES="$(grep -o 'lib()\.[A-Za-z0-9_]*' "$GATE_BODY" | sed 's/^lib()\.//' | sort -u | tr '\n' ' ')"
+GATE_NAME_COUNT="$(printf '%s\n' $GATE_NAMES | grep -c .)"
+case " $GATE_NAMES " in
+  (*" backendReading "*) check "P2q0 the gate body calls backendReading through lib() (calls: $GATE_NAMES)" PASS ;;
+  (*) check "P2q0 the gate body calls backendReading through lib() (calls: ${GATE_NAMES:-<none>})" FAIL ;;
+esac
+GATE_REAL_ROW="$(printf '%s\n' "$REAL_MANIFEST" | grep -F 'CLI write-gate:' || true)"
+GATE_REAL_OK=true
+case "$GATE_REAL_ROW" in
+  ("  $GATE_OK  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js loads and exports the $GATE_NAME_COUNT functions the gate calls to read a zensu call ("*")") ;;
+  (*) GATE_REAL_OK=false ;;
+esac
+for GATE_NAME in $GATE_NAMES; do
+  case "$GATE_REAL_ROW" in (*"$GATE_NAME"*) ;; (*) GATE_REAL_OK=false ;; esac
+done
+[ "$GATE_REAL_OK" = true ] \
+  && check "P2q1 the shipped tree renders the CLI write-gate row green and names every function the gate body calls through lib()" PASS \
+  || check "P2q1 the shipped tree renders the CLI write-gate row green (row: ${GATE_REAL_ROW:-<none>}; calls: $GATE_NAMES)" FAIL
+case "$GREEN" in
+  (*"$GATE_OK  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js loads and exports"*"all checks green"*) check "P2q2 the green fixture renders the CLI write-gate row green and keeps the green summary" PASS ;;
+  (*) check "P2q2 the green fixture renders the CLI write-gate row green and keeps the green summary (row: $(printf '%s' "$GREEN" | grep -F 'CLI write-gate:'))" FAIL ;;
+esac
+GATE_COPY="$SBOX/gate-copy"
+GATE_LIB="$GATE_COPY/hooks/lib"
+mkdir -p "$GATE_COPY/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$GATE_LIB"
+gate_report() {
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest ZDOC_VERIFY=consent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    node "$GATE_LIB/zensu-doctor-report.js" 2>/dev/null
+}
+gate_row() {
+  gate_report | grep -F 'CLI write-gate:' || true
+}
+gate_stub() {
+  GATE_STUB_BODY=""
+  for GATE_STUB_NAME in $GATE_NAMES; do
+    [ "$GATE_STUB_NAME" = "$1" ] && continue
+    GATE_STUB_BODY="$GATE_STUB_BODY $GATE_STUB_NAME: function () { return null; },"
+  done
+  printf 'module.exports = {%s };\n' "$GATE_STUB_BODY" > "$GATE_LIB/zensu-cli-backend-v1.js"
+}
+GATE_FULL_OUT="$(gate_report)"
+rm -f "$GATE_LIB/zensu-cli-backend-v1.js"
+GATE_GONE_OUT="$(gate_report)"
+case "$GATE_FULL_OUT" in
+  (*"$GATE_OK  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js loads and exports"*"all checks green"*) check "P2q3 a full copy of hooks/lib is all green with the module in place, so the next case withholds the summary because of the row alone" PASS ;;
+  (*) check "P2q3 a full copy of hooks/lib is all green with the module in place (row: $(printf '%s' "$GATE_FULL_OUT" | grep -F 'CLI write-gate:'); $(printf '%s' "$GATE_FULL_OUT" | grep -F 'Summary:'))" FAIL ;;
+esac
+GATE_GONE_ROW="$(printf '%s\n' "$GATE_GONE_OUT" | grep -F 'CLI write-gate:' || true)"
+case "$GATE_GONE_ROW" in
+  ("  $GATE_WARN  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the gate denies every command that holds a zensu call"*"reads and --help included"*"reinstall the plugin")
+    case "$GATE_GONE_OUT" in
+      (*"Summary: 1 $GATE_WARN"*) check "P2q4 a plugin copy without the backend module warns with the reinstall remedy and adds exactly one warning" PASS ;;
+      (*) check "P2q4 a plugin copy without the backend module warns with the reinstall remedy and adds exactly one warning (summary: $(printf '%s' "$GATE_GONE_OUT" | grep -F 'Summary:'))" FAIL ;;
+    esac ;;
+  (*) check "P2q4 a plugin copy without the backend module warns with the reinstall remedy and adds exactly one warning (row: ${GATE_GONE_ROW:-<none>})" FAIL ;;
+esac
+GATE_STUB_BAD=""
+for GATE_NAME in $GATE_NAMES; do
+  gate_stub "$GATE_NAME"
+  GATE_STUB_ROW="$(gate_row)"
+  case "$GATE_STUB_ROW" in
+    ("  $GATE_WARN  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js loads but does not export 1 of the $GATE_NAME_COUNT functions the gate calls to read a zensu call ($GATE_NAME), "*"reinstall the plugin") ;;
+    (*) GATE_STUB_BAD="$GATE_STUB_BAD [$GATE_NAME: ${GATE_STUB_ROW:-<none>}]" ;;
+  esac
+done
+[ -n "$GATE_NAMES" ] && [ -z "$GATE_STUB_BAD" ] \
+  && check "P2q5 a backend module that lacks any one function the gate body calls through lib() warns, names that function and says to reinstall" PASS \
+  || check "P2q5 a backend module that lacks any one function the gate body calls through lib() warns, names that function and says to reinstall:$GATE_STUB_BAD" FAIL
+gate_stub ""
+GATE_STUB_ROW="$(gate_row)"
+case "$GATE_STUB_ROW" in
+  ("  $GATE_OK  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js loads and exports the $GATE_NAME_COUNT functions"*) check "P2q6 a backend module that exports exactly the functions the gate body calls renders green, so the row requires nothing the gate does not call" PASS ;;
+  (*) check "P2q6 a backend module that exports exactly the functions the gate body calls renders green (row: ${GATE_STUB_ROW:-<none>})" FAIL ;;
+esac
+printf 'this is not javascript (\n' > "$GATE_LIB/zensu-cli-backend-v1.js"
+GATE_SYNTAX_ROW="$(gate_row)"
+printf 'module.exports = null;\n' > "$GATE_LIB/zensu-cli-backend-v1.js"
+GATE_NULL_ROW="$(gate_row)"
+printf 'module.exports = { backendReading: 1, isDynamic: "x", unquoted: {} };\n' > "$GATE_LIB/zensu-cli-backend-v1.js"
+GATE_VALUES_ROW="$(gate_row)"
+case "$GATE_SYNTAX_ROW" in
+  (*"$GATE_WARN  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js could not be loaded"*"reinstall the plugin") GATE_EDGE_OK=true ;;
+  (*) GATE_EDGE_OK=false ;;
+esac
+case "$GATE_NULL_ROW" in
+  (*"$GATE_WARN  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js loads but does not export $GATE_NAME_COUNT of the $GATE_NAME_COUNT functions"*"reinstall the plugin") ;;
+  (*) GATE_EDGE_OK=false ;;
+esac
+case "$GATE_VALUES_ROW" in
+  (*"$GATE_WARN  CLI write-gate: hooks/lib/zensu-cli-backend-v1.js loads but does not export $GATE_NAME_COUNT of the $GATE_NAME_COUNT functions"*"reinstall the plugin") ;;
+  (*) GATE_EDGE_OK=false ;;
+esac
+[ "$GATE_EDGE_OK" = true ] \
+  && check "P2q7 a module that fails to parse is a load failure, and a module that exports null or non-function values is an export failure" PASS \
+  || check "P2q7 edge modules (syntax: ${GATE_SYNTAX_ROW:-<none>}; null: ${GATE_NULL_ROW:-<none>}; values: ${GATE_VALUES_ROW:-<none>})" FAIL
+cp "$PLUGIN_DIR/hooks/lib/zensu-cli-backend-v1.js" "$GATE_LIB/zensu-cli-backend-v1.js"
+GATE_PLUGIN_BLOCK="$(gate_report | awk '/^Plugin integrity$/{f=1;next} /^(Config|Session state)$/{f=0} f')"
+case "$GATE_PLUGIN_BLOCK" in
+  (*"$GATE_OK  CLI write-gate: "*) check "P2q8 the row sits in the Plugin integrity block" PASS ;;
+  (*) check "P2q8 the row sits in the Plugin integrity block" FAIL ;;
+esac
+GATE_ROW_SRC="$(awk '/^function cliGateRow\(\)/{f=1} f{print} f&&/^}/{exit}' "$REPORT")"
+if [ -n "$GATE_ROW_SRC" ] && printf '%s\n' "$GATE_ROW_SRC" | grep -qF "require('./zensu-cli-backend-v1.js')" \
+  && ! printf '%s\n' "$GATE_ROW_SRC" | grep -qE 'fs\.|child_process|spawn|execSync|execFile|exec\(|\.write\(|process\.stdout|unlink|rename|mkdir|appendFile'; then
+  check "P2q9 the row only requires the sibling module: no file system call, no process, no write" PASS
+else
+  check "P2q9 the row only requires the sibling module: no file system call, no process, no write" FAIL
+fi
+if grep -qF "'CLI write-gate: hooks/lib/zensu-cli-backend-v1.js" "$REPORT" && grep -qF '`CLI write-gate:` row' "$PLUGIN_DIR/docs/gates.md"; then
+  check "P2q10 the report emits the CLI write-gate row and docs/gates.md names it for operators" PASS
+else
+  check "P2q10 the report emits the CLI write-gate row and docs/gates.md names it for operators" FAIL
+fi
+
 # --- verify-feature consent/policy row (renderer + wrapper source) --------
 verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
   ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
