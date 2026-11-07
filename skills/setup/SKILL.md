@@ -70,7 +70,7 @@ as it is.
    `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-version-v1.js" --lookup`. It runs
    `zensu --version` once with the update check off and prints `state=`, `version=`
    and `floor=` lines. On `state=old`, tell the user that Zensu skills need
-   zensu-cli 0.10.0 or later and name the upgrade: `brew upgrade --cask zensu`, or
+   zensu-cli 0.18.0 or later and name the upgrade: `brew upgrade --cask zensu`, or
    running the installer again. On `dev`, `unread` or `absent` (the shell found
    `zensu`, but no binary on `PATH`), say that the floor was not checked and why.
    Warn only: continue either way. On `cwd-relative`, `PATH` reaches `zensu` through an
