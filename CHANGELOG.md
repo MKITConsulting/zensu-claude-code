@@ -7,86 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.35.0] - 2026-11-03
-
-### Added
-
-- **ai-work**: Recover pending captures and preflight explicit scope (#553)
-- **ai-work**: Require explicit feature scope for captured goals (#548)
-
-### Fixed
-
-- **hooks**: Correct opt-in gate texts and harden the CLI write-gate (#536)
-- **zen-mode,plan-gate**: Settle the follow-ups #543 left open (#549)
-- **autopilot**: Stop a non-git folder from holding every repository below it (#552)
-- **hooks**: Refuse a linked-session desktop store other accounts can write (#545)
-- **zen-mode,plan-gate**: Settle the review follow-ups deferred by #516 (#543)
-
-- **CLI write-gate `--api-url`**: the `zensu` CLI write-gate now reads the target backend the way
-  the CLI does. It reads the one-word `--api-url=<url>` beside the two-word `--api-url <url>`, so
-  a mutation such as `zensu --api-url=http://localhost:8090 security classify f1` is no longer
-  denied as a freelance one; the one-word spelling counts only where the gate reads the call in
-  full, so a command with a `$`, backtick, brace, carriage return, glob character, `xargs`,
-  `watch`, a word built at run time such as a process substitution, on Windows a backslash, or a
-  `zensu` call the shell model cannot find keeps the deny. `http://[::1]` now counts as local in
-  the two-word spelling and in `ZENSU_API_URL`. The gate now denies these calls, which the
-  released gate let through as local:
-  - a remote `--api-url` beside a local one, in either order and spelling, because the CLI takes
-    the last; on Windows this includes an escaped `\--api-url`, and an escaped `\--` counts as a
-    `--`;
-  - a local `--api-url` that may be another word's value or a positional argument: after a `--`
-    or after a word built at run time anywhere before it, or right after a word that starts with
-    `-` and holds no `=` (`--json --api-url http://localhost:8090`), unless `ZENSU_API_URL` is
-    local too;
-  - a local one-word `--api-url=<url>` in a call the gate cannot read in full, even beside a local
-    `ZENSU_API_URL`, because the flag overrides the variable;
-  - a remote one-word `--api-url=<url>` over a local `ZENSU_API_URL`, and in PowerShell a flag the
-    analyzer cannot read (`--api-url=$u`, or one after the stop-parsing token `--%`);
-  - an empty inline `ZENSU_API_URL=` over a local value in the hook's environment, an inline
-    `ZENSU_API_URL+=`, which appends to the variable, and the hook's local value in a command that
-    names `ZENSU_API_URL` in any word, a title included, such as an earlier assignment, an
-    `export`, an `unset` or a PowerShell `$env:` write;
-  - a two-word `--api-url` without a value;
-  - a value whose host a URL parser reads as remote (`http://localhost:8090@api.zensu.dev`), that
-    carries another scheme or a backslash, or that the shell completes at run time before its host
-    ends (`http://localhost:$PORT`).
-
-  A value that names a loopback host only once a URL parser normalizes it (`http://127.1:8090`)
-  stays denied. When a local call is denied, spell the URL literally and either put the two-word
-  `--api-url <url>` right after `zensu`, or drop the flag and set a local `ZENSU_API_URL`. The
-  one-word spelling stays local only while no other word of the command names `zensu` in any
-  letter case, a title, an `echo` argument or a path such as `~/src/Zensu` included.
-- **CLI write-gate command name**: the `zensu` CLI write-gate now reads the command name the way a
-  case-insensitive file system resolves it, on every platform. A Bash call spelled `ZENSU`,
-  `Zensu`, `zenſu` or `/opt/homebrew/bin/ZENSU` runs the CLI on macOS and Windows, `ZENSU.EXE`
-  and a Windows path written with backslashes on Windows, and one with quotes, backslashes, an
-  ANSI-C or locale string or a line continuation inside the name (`z\ensu`, `zen""su`,
-  `zen$''su`) on every platform; the released gate let such a call through ungated unless the
-  command also named `zensu` plainly. It is now gated like `zensu`, also behind a wrapper or a
-  shell spelled in any letter case (`ENV`, `XARGS`, `BASH -c`), and after `&&` inside an `ssh`
-  string too. In a Bash call a noun or verb in another letter case is still not read as a
-  mutation, because zensu-cli rejects it. A command that names `zensu` but that the gate's parser
-  cannot read is now denied instead of let through, and on Windows the subagent accident guard
-  reads a program named by a path written with backslashes. Upgrade note: prose after a separator
-  inside a quoted string is read the same way, so a commit message such as
-  `-m "x; Zensu features create y"` is now denied like its lowercase spelling, and the deny names
-  the remedy: write such a message to a file and pass it with `-F`.
-
 ### Upgrade notes
 
-- **Stop guard background wait**: a turn of an armed review chain that only waits for its own
-  background work no longer has to poll. When its final message carries the line
-  `ZENSU-AWAIT: <task id>` on a line of its own, and Claude Code lists that task as running or
-  pending in the Stop input (a background shell or the Monitor tool, a background agent or a
-  workflow), the Stop guard lets the turn end without charging the review budget, at most five
-  times per task and chain generation, and the harness wakes the session when the task reports.
-  This works in the first review, in fix rounds and in the self-review stage. The first Stop that
-  sees such tasks and no line blocks once with a reason that names them and the line, and does so
-  again only for a new task, at most three times per chain generation. Neither happens once the
-  chain has used up its Stop budget, so the budget's own release still applies. The line is
-  required because a dev server that never ends looks the same to the guard as a run the turn
-  waits for. Set `hooks.backgroundTaskWait` to `false` to keep the previous behaviour.
-
+- **zensu-cli 0.18.0 floor**: the session banner, `/zensu:doctor`, `/zensu:setup`, the
+  `/zensu:work` refusal and the six skill prerequisites that state a zensu-cli release now give
+  0.18.0 as the oldest supported release, because older releases cannot declare a goal's feature,
+  so AI-work capture fails: since 0.35.0 every capture `begin` first checks that the CLI declares
+  `ai-work context --feature`, `ai-work start --feature` and `--maintenance-reason`, and answers
+  `cli_incompatible` without capturing when it does not. 0.18.0 is the first release that declares
+  them. The floor itself only warns; no gate reads the version. Check the installed release with
+  `zensu --version`. A release below the floor has no `zensu update`, so upgrade through the
+  channel it was installed with: `brew upgrade --cask zensu` for a Homebrew install, or run the
+  installer again (`curl -fsSL https://zensu.dev/install.sh | sh`, on Windows
+  `irm https://zensu.dev/install.ps1 | iex`); `docs/cli-install-update.md` covers every channel.
+  Then update the plugin with
+  `claude plugin marketplace update zensu` and `claude plugin update zensu@zensu`. A goal begun
+  with a release before 0.35.0 keeps a legacy receipt without feature scope, which cannot submit
+  new results automatically: begin a new goal with `--feature <feature-uuid>`,
+  `--maintenance-reason <reason>` or, for work that spans products,
+  `--cross-product-reason <reason>`.
+- **Edit-landing receipts and review packets**: `--chain-done` now refuses to close a reviewed
+  chain that changed files unless its edit-landing receipt is clean and fresh for the current
+  tree, beside the full-suite and acceptance gates; `docs/gates.md` §"Terminal Edit-Landing Gate"
+  names every terminus it checks and every exemption. A receipt without an audit scope, which every earlier release writes, is refused with
+  "the receipt carries no audit scope; re-run the audit so the terminus can check it against the
+  current tree", so a chain that is open during the upgrade re-runs its edit-landing audit before
+  it closes. While `hooks.reviewPacketGate` is on, the default, a consume-mode review claims its
+  ticket only when every reviewer of its round saw the round's canonical review packet; outside
+  auto mode the Claude desktop app sends no hand-back for a reviewer it runs in the background, so
+  such a review stays refused with a hint to ask whether to set the key to `false`.
 - **source-write gate program names**: `hooks/pre-bash-source-write-gate.sh` now reads a program
   or wrapper name the way a case-insensitive file system resolves it, as macOS and Windows do by
   default: in any letter case, with an optional `.exe` suffix and behind a path, on Windows also
@@ -171,6 +120,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the zsh way, as reserved words.
   A command that used one of these spellings to pass is now refused; `docs/gates.md`
   §"Source-Write Gate" lists what the check still leaves alone.
+
+## [0.35.0] - 2026-11-03
+
+### Added
+
+- **ai-work**: Recover pending captures and preflight explicit scope (#553)
+- **ai-work**: Require explicit feature scope for captured goals (#548)
+
+### Fixed
+
+- **hooks**: Correct opt-in gate texts and harden the CLI write-gate (#536)
+- **zen-mode,plan-gate**: Settle the follow-ups #543 left open (#549)
+- **autopilot**: Stop a non-git folder from holding every repository below it (#552)
+- **hooks**: Refuse a linked-session desktop store other accounts can write (#545)
+- **zen-mode,plan-gate**: Settle the review follow-ups deferred by #516 (#543)
+
+- **CLI write-gate `--api-url`**: the `zensu` CLI write-gate now reads the target backend the way
+  the CLI does. It reads the one-word `--api-url=<url>` beside the two-word `--api-url <url>`, so
+  a mutation such as `zensu --api-url=http://localhost:8090 security classify f1` is no longer
+  denied as a freelance one; the one-word spelling counts only where the gate reads the call in
+  full, so a command with a `$`, backtick, brace, carriage return, glob character, `xargs`,
+  `watch`, a word built at run time such as a process substitution, on Windows a backslash, or a
+  `zensu` call the shell model cannot find keeps the deny. `http://[::1]` now counts as local in
+  the two-word spelling and in `ZENSU_API_URL`. The gate now denies these calls, which the
+  released gate let through as local:
+  - a remote `--api-url` beside a local one, in either order and spelling, because the CLI takes
+    the last; on Windows this includes an escaped `\--api-url`, and an escaped `\--` counts as a
+    `--`;
+  - a local `--api-url` that may be another word's value or a positional argument: after a `--`
+    or after a word built at run time anywhere before it, or right after a word that starts with
+    `-` and holds no `=` (`--json --api-url http://localhost:8090`), unless `ZENSU_API_URL` is
+    local too;
+  - a local one-word `--api-url=<url>` in a call the gate cannot read in full, even beside a local
+    `ZENSU_API_URL`, because the flag overrides the variable;
+  - a remote one-word `--api-url=<url>` over a local `ZENSU_API_URL`, and in PowerShell a flag the
+    analyzer cannot read (`--api-url=$u`, or one after the stop-parsing token `--%`);
+  - an empty inline `ZENSU_API_URL=` over a local value in the hook's environment, an inline
+    `ZENSU_API_URL+=`, which appends to the variable, and the hook's local value in a command that
+    names `ZENSU_API_URL` in any word, a title included, such as an earlier assignment, an
+    `export`, an `unset` or a PowerShell `$env:` write;
+  - a two-word `--api-url` without a value;
+  - a value whose host a URL parser reads as remote (`http://localhost:8090@api.zensu.dev`), that
+    carries another scheme or a backslash, or that the shell completes at run time before its host
+    ends (`http://localhost:$PORT`).
+
+  A value that names a loopback host only once a URL parser normalizes it (`http://127.1:8090`)
+  stays denied. When a local call is denied, spell the URL literally and either put the two-word
+  `--api-url <url>` right after `zensu`, or drop the flag and set a local `ZENSU_API_URL`. The
+  one-word spelling stays local only while no other word of the command names `zensu` in any
+  letter case, a title, an `echo` argument or a path such as `~/src/Zensu` included.
+- **CLI write-gate command name**: the `zensu` CLI write-gate now reads the command name the way a
+  case-insensitive file system resolves it, on every platform. A Bash call spelled `ZENSU`,
+  `Zensu`, `zenſu` or `/opt/homebrew/bin/ZENSU` runs the CLI on macOS and Windows, `ZENSU.EXE`
+  and a Windows path written with backslashes on Windows, and one with quotes, backslashes, an
+  ANSI-C or locale string or a line continuation inside the name (`z\ensu`, `zen""su`,
+  `zen$''su`) on every platform; the released gate let such a call through ungated unless the
+  command also named `zensu` plainly. It is now gated like `zensu`, also behind a wrapper or a
+  shell spelled in any letter case (`ENV`, `XARGS`, `BASH -c`), and after `&&` inside an `ssh`
+  string too. In a Bash call a noun or verb in another letter case is still not read as a
+  mutation, because zensu-cli rejects it. A command that names `zensu` but that the gate's parser
+  cannot read is now denied instead of let through, and on Windows the subagent accident guard
+  reads a program named by a path written with backslashes. Upgrade note: prose after a separator
+  inside a quoted string is read the same way, so a commit message such as
+  `-m "x; Zensu features create y"` is now denied like its lowercase spelling, and the deny names
+  the remedy: write such a message to a file and pass it with `-F`.
+
+### Upgrade notes
+
+- **Stop guard background wait**: a turn of an armed review chain that only waits for its own
+  background work no longer has to poll. When its final message carries the line
+  `ZENSU-AWAIT: <task id>` on a line of its own, and Claude Code lists that task as running or
+  pending in the Stop input (a background shell or the Monitor tool, a background agent or a
+  workflow), the Stop guard lets the turn end without charging the review budget, at most five
+  times per task and chain generation, and the harness wakes the session when the task reports.
+  This works in the first review, in fix rounds and in the self-review stage. The first Stop that
+  sees such tasks and no line blocks once with a reason that names them and the line, and does so
+  again only for a new task, at most three times per chain generation. Neither happens once the
+  chain has used up its Stop budget, so the budget's own release still applies. The line is
+  required because a dev server that never ends looks the same to the guard as a run the turn
+  waits for. Set `hooks.backgroundTaskWait` to `false` to keep the previous behaviour.
 
 ## [0.34.0] - 2026-11-02
 
