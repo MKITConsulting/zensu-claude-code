@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 29,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 31,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
     },
@@ -57,7 +57,7 @@
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 91, "skips": {"win32": 3},
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 93, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -354,6 +354,11 @@
       "path": "tests/structure/zen-anchor-v1.test.js", "registered": 25,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain."
+    },
+    {
+      "path": "tests/structure/zensu-cli-backend-v1.test.js", "registered": 15,
+      "runs": [{ "driver": "tests/structure/test-bash-zensu-gate.sh" }],
+      "summary": "The CLI write-gate's backend reading: the local URL test, the shell words of the token scan, the run-time word tests, the --api-url occurrence rules, the one-word trust, the ZENSU_API_URL fallback, the PowerShell flag rules and the module's fail-closed analyzer load, with the gate suite's B53, B54 and B40o11 to B40o15 cases."
     },
     {
       "path": "tests/structure/zensu-cli-version-v1.test.js", "registered": 15, "skips": {"win32": 8},

@@ -220,6 +220,7 @@ path segment such as `~/src/Zensu` count, so such a local call needs the two-wor
 command also holds the stop-parsing token `--%` or a `--api-url` the analyzer cannot read as a word, such as
 `--api-url=$u`. The gate cannot tell where a call runs: one only the token scan finds, such as a call inside an `ssh`
 string, still counts as local when it names `localhost`, although there `localhost` is the host the string reaches.
+This backend reading lives in `hooks/lib/zensu-cli-backend-v1.js`, which the gate loads from its own plugin directory and a unit file pins rule by rule. The gate loads it only once it has found a `zensu` call, so a command that merely names `zensu`, such as a search for the word or a plugin helper under the plugin's own directory, never loads it. When that module cannot load, the gate denies every command in which it finds a `zensu` call, reads and `--help` included, as unreadable, with a reason that names the module and the damaged installation. `/zensu:doctor` shows the same damage in its `CLI write-gate:` row, which warns, with a reinstall remedy, when that module cannot be loaded or does not export a function the gate calls to read a `zensu` call, and renders green otherwise.
 In a Bash command a `--help` or `-h` word right after a word the shell expands at run time is read as that word's
 value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
@@ -1609,7 +1610,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   nested below the anchor, that fingerprint, and the one an `--evidence-run --scope acceptance`
   run records, is the combined fingerprint of the project and that worktree, so an edit in the
   worktree makes every record `stale`; when the worktree cannot be resolved, both verbs and the
-  acceptance run exit `2` and name the cause. The plan is the one named by this session's
+  acceptance run exit `2` and name the cause, and `--acceptance-status` prints it as an
+  `ACCEPTANCE STATUS — unavailable` summary line. The plan is the one named by this session's
   edit-landing receipt.
   `zensu-log.sh --acceptance-status --log <run log>` prints every criterion's state on the
   current tree and exits 0 only when all active criteria pass. Its summary line carries the same

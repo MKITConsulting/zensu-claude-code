@@ -116,9 +116,12 @@ baseline and the snapshot digests. For a standalone chain `WT` is `TOP`.
 **One resolver.** `_zensu_chain_work_tree` in `zensu-log.sh`, exposed read-only as
 `zensu-log.sh --chain-work-tree`: the workflow document's Autopilot binding
 (`tdd_autopilot_context`), then `autopilot_read_run`, which takes no lease, then the record's
-`workspaceRoot`, then the library's `--work-tree-check`. A standalone chain, or a legacy record
-without `workspaceRoot`, answers the anchor's top. An unreadable document or run record, an
-invalid `workspaceRoot` and a refused topology exit non-zero with the reason and never fall back.
+`workspaceRoot`, then the library's `--work-tree-check`. The verb, `--round-prepare` and
+`--tdd-complete` reach the binding only through `_zensu_bound_work_tree`, the lookup the evidence
+runner uses (`.claude/rules/evidence-runner.md`). A standalone chain, a legacy record without
+`workspaceRoot`, and a bound chain after its terminus answer the anchor's top. An unreadable
+document or run record, an invalid `workspaceRoot` and a refused topology exit non-zero with the
+reason and never fall back.
 No state file was added, so a chain armed by an older installation resolves the same way and a
 parked run needs no re-arming. The verb refuses a path holding `"`, `$`, a backtick or a
 backslash, like `--project-root`, because the skills paste it into double-quoted shell source.
@@ -197,7 +200,7 @@ full-suite verdict `unavailable`.
 The module and its unit file (`tests/profiles/unit-files.v1.json` holds its count); the grader,
 `--inventory`, `--change-set`, `--work-tree` and `--work-tree-check` in `zensu-edit-landing.sh`;
 the `append` pre-check, `_zensu_chain_work_tree`, `--chain-work-tree`, `--tdd-complete` and
-`--round-prepare` in `zensu-log.sh`, whose work-tree refusals `WB0` to `WB16` and `WA1` in
+`--round-prepare` in `zensu-log.sh`, whose work-tree refusals `WB0` to `WB20` and `WA1` in
 `test-tdd-complete-receipt-gate.sh` pin; `stripPrefix`, `prefix` and `anchor` in
 `round-prepare-v1.js`; `--path-prefix` in `review-round-scope-v1.js`; `auditedWorkTree` and
 `claimTopologyRow` in `zensu-doctor-report.js`, and the topology and `NOT checked` bullets of

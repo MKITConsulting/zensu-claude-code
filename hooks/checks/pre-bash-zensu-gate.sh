@@ -51,7 +51,7 @@ command -v node >/dev/null 2>&1 || exit 0
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; else ZPS=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
+INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; ZBACKEND=./zensu-cli-backend-v1.js; else ZPS=; ZBACKEND=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZBACKEND="$ZBACKEND" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
   let cmd = "", sub = false, ps = false, size = 0;
   try {
     const raw = require("fs").readFileSync(0);
@@ -81,75 +81,21 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   const out = new Set();
   const OPQ = String.fromCharCode(0);
   const UNJ = "__unjudged__\t";
-  function unquoted(value) {
-    let start = 0, end = value.length;
-    while (start < end && (value.charCodeAt(start) === 34 || value.charCodeAt(start) === 39)) start += 1;
-    while (end > start && (value.charCodeAt(end - 1) === 34 || value.charCodeAt(end - 1) === 39)) end -= 1;
-    return value.slice(start, end);
-  }
-  const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
-  const LOCAL_START = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?![^:\/?#])/i;
-  function isLocalUrl(value) {
-    let v = String(value || "");
-    const cut = v.search(/[\u0000\u0001\x24]/);
-    if (cut !== -1) {
-      v = v.slice(0, cut);
-      if (!/[\/?#]/.test(v.replace(/^https?:\/\//i, ""))) return false;
+  let backend = null;
+  function lib() {
+    if (backend === null) {
+      try { backend = require(process.env.ZBACKEND || ""); } catch (_) { process.stdout.write("__nobackend__"); process.exit(3); }
     }
-    if (!LOCAL_START.test(v) || /[^\x21-\x7e]|\\/.test(v)) return false;
-    let url = null;
-    try { url = new URL(/^https?:\/\//i.test(v) ? v : "http://" + v); } catch (_) { return false; }
-    return url.username === "" && url.password === "" && LOCAL_HOSTS.has(url.hostname);
+    return backend;
   }
   function takesNextWord(t) {
     return t.indexOf("=") === -1 && (t.length === 2 || t.charAt(1) === "-");
   }
-  function isDynamic(t) {
-    return t.indexOf("\u0001") !== -1 || t.indexOf("\x24") !== -1;
-  }
-  function runTime(t) {
-    return isDynamic(t) || t.indexOf(OPQ) !== -1;
-  }
-  function shellWords(tokens) {
-    const out = [];
-    let open = "", word = null;
-    for (const token of tokens) {
-      if (word === null && token.charAt(0) === "#") break;
-      word = word === null ? token : word + " " + token;
-      for (let k = 0; k < token.length; k++) {
-        const ch = token.charAt(k);
-        if (open === "\x27") { if (ch === "\x27") open = ""; }
-        else if (ch === "\\") k++;
-        else if (open !== "") { if (ch === open) open = ""; }
-        else if (ch === "\x22" || ch === "\x27") open = ch;
-      }
-      if (open === "") { out.push(word); word = null; }
-    }
-    if (word !== null) out.push(word);
-    return out;
-  }
-  function backendLocal(rest, invocation, whole) {
-    const exact = ps || invocation.exact === true, raw = exact ? rest : shellWords(rest);
-    const words = exact ? raw : raw.map(unquoted), end = words.indexOf("--"), dyn = raw.findIndex(runTime);
-    if (psHidden && dyn !== -1) return false;
-    const read = whole && dyn === -1;
-    let sure = false;
-    for (let i = 0; i < words.length; i++) {
-      const one = words[i].startsWith("--api-url=");
-      if (!one && words[i] !== "--api-url") continue;
-      if (!(one ? read && isLocalUrl(exact ? words[i].slice(10) : unquoted(words[i].slice(10))) : isLocalUrl(words[i + 1]))) return false;
-      const before = i > 0 ? words[i - 1] : "";
-      if ((end === -1 || i < end) && (dyn === -1 || i < dyn) && !(before.length > 1 && before.charAt(0) === "-" && before.indexOf("=") === -1)) sure = true;
-    }
-    if (sure) return true;
-    if (Object.prototype.hasOwnProperty.call(invocation.envp, "ZENSU_API_URL")) return !envAppended && isLocalUrl(invocation.envp.ZENSU_API_URL);
-    return !envNamed && isLocalUrl(process.env.ZAPI);
-  }
   function dynamicReadings(c) {
-    if (!c.rest.some(isDynamic)) return [];
-    const skipped = c.rest.filter((t) => !isDynamic(t)), consumed = [];
+    if (!c.rest.some(lib().isDynamic)) return [];
+    const skipped = c.rest.filter((t) => !lib().isDynamic(t)), consumed = [];
     for (let i = 0; i < c.rest.length; i++) {
-      if (isDynamic(c.rest[i])) { i++; continue; }
+      if (lib().isDynamic(c.rest[i])) { i++; continue; }
       consumed.push(c.rest[i]);
     }
     return [{ envp: c.envp, rest: skipped, derived: true }, { envp: c.envp, rest: consumed, derived: true }];
@@ -164,7 +110,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       for (;;) {
         while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {       // capture env prefixes (VAR=val)
           const a = toks[i], eq = a.indexOf("=");
-          envp[a.slice(0, eq)] = unquoted(a.slice(eq + 1));
+          envp[a.slice(0, eq)] = a.slice(eq + 1);
           i++;
         }
         if (i >= toks.length) break;
@@ -173,6 +119,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
         base = t.split("/").pop().replace(/\.exe(?![\s\S])/, ""); break;          // resolved command basename
       }
       if (base !== "zensu") continue;                                              // command basename must be zensu
+      for (const k of Object.keys(envp)) envp[k] = lib().unquoted(envp[k]);
       found.push({ envp, rest: toks.slice(i + 1) });
     }
     return found;
@@ -195,17 +142,8 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     modeled = walked.length;
     invocations = walked.concat(posix, invocations);
   } catch (_) {}
-  const apiNames = (text) => (text.match(/--api-url/gi) || []).length;
-  const psHidden = ps && (/(?:^|\s)--%(?!\S)/.test(cmd) || apiNames(cmd.replace(/\x60/g, "")) > invocations.reduce((n, c) => n + apiNames(c.rest.join(" ")), 0));
-  let named = plain.replace(/\x60/g, "");
-  if (ps) try { named += "\n" + require(process.env.ZPS || "").spellings(cmd); } catch (_) {}
-  const envNamed = /ZENSU_API_URL/i.test(named);
-  const envAppended = /(?:^|[^A-Za-z0-9_])ZENSU_API_URL\+=/.test(cmd);
+  const backendLocal = invocations.length === 0 ? null : lib().backendReading({ command: cmd, plain, tool: ps ? "PowerShell" : "Bash", invocations, apiUrl: process.env.ZAPI, modeled, zensuName: NAMED, platform: process.platform });
   invocations = invocations.concat(invocations.flatMap(dynamicReadings));
-  const oneWordTrusted = !/[\x24\x60{*?[\r]/.test(cmd)
-    && !/(?:^|[^A-Za-z0-9_.-])(?:xargs|watch)(?![A-Za-z0-9_-])/iu.test(plain)
-    && !(process.platform === "win32" && cmd.indexOf("\\") !== -1)
-    && (ps || modeled === (plain.match(new RegExp(NAMED.source, "giu")) || []).length);
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
@@ -213,7 +151,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       continue;
     }
     if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
-    if (backendLocal(rest, invocation, oneWordTrusted && !invocation.derived)) continue;   // localhost/dev backend → conventions moot, not the tracked product
+    if (backendLocal(invocation)) continue;   // localhost/dev backend → conventions moot, not the tracked product
     let noun = "", k = 0;
     for (; k < rest.length; k++) {
       const t = rest[k];
@@ -392,7 +330,11 @@ EOF
 
 [ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
-if [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
+if [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the plugin installation is damaged. Do not retry this command. Report the damaged installation to the main thread."
+elif [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the plugin installation is damaged. Until it loads, every command with a zensu call is denied, reads and --help included. Reinstall the plugin."
+elif [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ "$PARSE_STATUS" -ne 0 ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."

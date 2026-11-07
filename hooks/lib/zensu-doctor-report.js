@@ -595,6 +595,7 @@ function pluginBlock() {
     line(OK, 'hooks wiring: all ' + Object.keys(wired).length + ' hooks referenced in hooks.json exist on disk');
   }
   shellToolRow(hj.data);
+  cliGateRow();
 }
 
 var SHELL_TOOL_STATE_TEXT = {
@@ -635,6 +636,25 @@ function shellToolRow(manifest) {
   } else {
     line(OK, lead + '; ' + SHELL_TOOL_STATE_TEXT[state]);
   }
+}
+
+var CLI_GATE_EXPORTS = ['backendReading', 'isDynamic', 'unquoted'];
+
+function cliGateRow() {
+  var mod = null;
+  var loaded = false;
+  try { mod = require('./zensu-cli-backend-v1.js'); loaded = true; } catch (_error) { loaded = false; }
+  if (!loaded) {
+    line(WARN, 'CLI write-gate: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the gate denies every command that holds a zensu call, reads and --help included, while hooks.mcpGate is on; reinstall the plugin');
+    return;
+  }
+  var absent = CLI_GATE_EXPORTS.filter(function (name) { return !mod || typeof mod[name] !== 'function'; });
+  var lead = 'CLI write-gate: hooks/lib/zensu-cli-backend-v1.js';
+  if (absent.length) {
+    line(WARN, lead + ' loads but does not export ' + absent.length + ' of the ' + CLI_GATE_EXPORTS.length + ' functions the gate calls to read a zensu call (' + absent.join(', ') + '), so the gate can deny a command that holds a zensu call as unreadable; reinstall the plugin');
+    return;
+  }
+  line(OK, lead + ' loads and exports the ' + CLI_GATE_EXPORTS.length + ' functions the gate calls to read a zensu call (' + CLI_GATE_EXPORTS.join(', ') + ')');
 }
 
 // Two hooks inject a rule read at RUN TIME from a one-line marker block under docs/,
