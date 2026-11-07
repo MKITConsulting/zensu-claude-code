@@ -93,7 +93,35 @@ anything runs, with `the chain's work tree could not be determined, so the comma
 <cause>`; `record()` and `status()` of `acceptance-verify-v1.js` exit 2 with `the chain's work
 tree could not be determined, so no acceptance record can be bound to it: <cause>`, the status
 as an `ACCEPTANCE STATUS — unavailable` summary line; and the verdict reads the field as
-`unavailable`. Each passes the cause through its module's screen. A worktree that cannot be
+`unavailable`. Each passes the cause through its module's screen. **The transport fails closed.**
+Each arm checks its write of `work-tree-fault`: when it fails, `--evidence-run` and both acceptance
+verbs exit 2 with a line of the shell's own that names the failed write and the temporary directory
+and never the cause, so the cause still reaches the user only through a module's screen, and the
+shell still carries none of the modules' refusal sentences (`E19`, `A31`). The bound terminus takes
+the decision of a failed transport preparation for the same failure
+(`_zensu_full_suite_gate_unjudged`): an escaped gate is ledgered and passes with a
+`FULL SUITE — escaped` line, an advisory gate passes with a
+`FULL SUITE — unavailable (advisory, not blocking)` line, and a required gate refuses and keeps the
+chain open with the shell's own lines and no `FULL SUITE` line. The two passing lines name the
+failure and print after the transition like the module's verdict lines, so the CHAIN-END SUMMARY
+carries them and the terminus still prints the lines `docs/configuration.md` and `docs/gates.md`
+promise for an escaped and an advisory gate (`F26`, `F27`, and `F28` for a failed preparation). Both
+modules read the file through `readWorkTreeFault` of `evidence-run-v1.js`: a missing file is no
+fault, while an empty file and one that exists but cannot be read are a fault whose cause is the
+fixed `WORK_TREE_FAULT_UNREAD`, through the `workTreeFaultCause` that `run()`, `verdict()` and
+`workTreeRefusal()` share. The lookup reads an empty `bwt-tree` answer as a fault at stage
+`work-tree` and an empty `bwt-dir` answer as a project-directory fault, as it already read empty
+`bwt-fault` and `bwt-dir-fault` files. **The project-directory fault folds into the tree fault on
+purpose.** `_zensu_evr_work_tree` needs the directory, because the command runs there.
+`_zensu_avr_work_tree` does not, and refuses anyway: an observed acceptance record cites an
+`--evidence-run --scope acceptance` run, which cannot run without that directory, so a record verb
+that took the tree would let the records and the runs they cite disagree; an attested record would
+bind a verdict to a work tree that does not hold the project its criteria describe; and a bound
+chain's terminus answers `not-checked` without reading acceptance records, so the refusal blocks no
+close. The cost is wording: the module's sentence names the work tree, and the cause after it names
+the missing directory (`the chain's work tree has no directory … for the project root`). Carrying
+the fault kind to the modules was weighed and rejected: it adds a transport file and a sentence per
+module for a fault that every consumer answers with the same exit 2. A worktree that cannot be
 fingerprinted is measured only against the records whose run directory lies in it, so a green
 run in the anchor never passes there as `pass-tree-unverified`. `_evr_work_tree`,
 `_evr_work_dir` and `_avr_work_tree` start empty like `_evr_dir`, so a variable inherited from
@@ -276,8 +304,9 @@ the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S1
 in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in
 `skills/build/references/planning.md` and of Phase 4 in `skills/self-review/SKILL.md` (`L9b` and
 `L11` in `test-tdd-log-path-anchor.sh`, `E10g1` and `E10l` in `test-session-reanchor.sh`), E13
-to E25 in `test-evidence-run.sh`, F20 to F24 in `test-full-suite-gate.sh`, A29 to A31 in
-`test-acceptance-gate.sh`, WB0 to WB20 in `test-tdd-complete-receipt-gate.sh`, the bound cases
+to E27 in `test-evidence-run.sh`, F20 to F28 in `test-full-suite-gate.sh`, A29 to A32 in
+`test-acceptance-gate.sh`, WB0 to WB21 in `test-tdd-complete-receipt-gate.sh`, the `mktemp` stub
+that `E26`, `A32`, `F25`, `F26` and `F27` share in `tests/structure/lib-work-tree-fault-stub.sh`, the bound cases
 of `evidence-run-v1.test.js`, the `--if-stale` one and the worktree that cannot be fingerprinted
 included, and the work-tree fault cases of both module unit files.
 
@@ -292,7 +321,9 @@ flag on a read-only verb whose only callers are skills of the same installation.
 refusal text into the modules and routing `--chain-work-tree`, `--round-prepare` and
 `--tdd-complete` through the lookup is `patch` on the same walk: the transport file already
 served the terminus, `--acceptance-status` prints an `ACCEPTANCE STATUS — unavailable` line in a
-state it already refused with exit 2, and no record field, key set, hook or matcher moves.
+state it already refused with exit 2, and no record field, key set, hook or matcher moves. The
+fail-closed transport is `patch` as well: the verbs refuse in states where they used to proceed as a
+standalone call, and no record field, key set, hook, matcher or config key moves.
 
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when
@@ -300,11 +331,12 @@ both trees exist. A bound chain whose `workspaceRoot` the resolver refuses (a tr
 anchor, a clone, a submodule) can record no run at all, where it used to run in the anchor;
 `--tdd-complete` already refuses such a chain, so the refusal only arrives earlier. The bound
 work tree is unmeasured on Windows: none of the three suites that drive it is in a blocking
-Windows profile. A write into the private transport directory is not checked, as for every
-transport file, so a `work-tree-fault` that could not be written lets `--evidence-run` or an
-acceptance verb proceed as a standalone call, and a `bwt-tree` answer written empty reads as a
-standalone chain; the bound terminus resolves and measures the bound tree itself, so such a run
-cannot pass its gate unless the terminus loses its own `work-tree-fault` write as well. With
+Windows profile. Only the `work-tree-fault` write is checked; every other transport file is still
+written unchecked, as before, and the lookup's `bwt-*` answers are checked for emptiness, not for
+a truncated path. `E26`, `A32`, `F25`, `F26` and `F27` reach the failed write through a `mktemp` stub that
+occupies the fault path with a directory, not through a full disk or a read-only temporary
+directory, and `E27` drives the lookup's reader over empty answers through a stubbed lookup,
+because a write that succeeds without its bytes cannot be provoked portably. With
 `hooks.selfReview` off, the bound max-rounds arm of `post-review-tdd-delegate.sh` runs the bound
 terminus inside the hook before it directs the close-suite `--evidence-run`, which then reads the
 chain as done and runs in the anchor, not the run's worktree (`E24` pins that placement after a

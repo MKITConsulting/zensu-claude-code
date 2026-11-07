@@ -627,7 +627,43 @@ test('a chain whose work tree could not be determined refuses a record and the s
   const status = av.status(base(fixture, { workTreeFault: fault }));
   assert.equal(status.code, 2);
   assert.deepEqual(status.lines, [`ACCEPTANCE STATUS — unavailable | ${cause}`]);
-  assert.equal(attest(fixture, 'AC-001', 'pass', { workTreeFault: '' }).code, 0);
+  assert.equal(attest(fixture, 'AC-001', 'pass', { workTreeFault: null }).code, 0);
+});
+
+test('an empty or unreadable work-tree fault refuses a record and the status with the fixed cause, through the options and the CLI', () => {
+  const fixture = project();
+  const cause = `the chain's work tree could not be determined, so no acceptance record can be bound to it: ${evr.WORK_TREE_FAULT_UNREAD}`;
+  const refused = attest(fixture, 'AC-001', 'pass', { workTreeFault: '' });
+  assert.equal(refused.code, 2);
+  assert.equal(refused.error, cause);
+  const status = av.status(base(fixture, { workTreeFault: '' }));
+  assert.equal(status.code, 2);
+  assert.deepEqual(status.lines, [`ACCEPTANCE STATUS — unavailable | ${cause}`]);
+  for (const plant of [(file) => fs.writeFileSync(file, ''), (file) => fs.mkdirSync(file)]) {
+    const transport = tempDir('transport');
+    plant(path.join(transport, 'work-tree-fault'));
+    fs.writeFileSync(path.join(transport, 'evidence'), 'Opened the dashboard and saw three projects');
+    const env = {
+      ...process.env,
+      ZENSU_AVR_DIR: transport,
+      ZENSU_AVR_PLUGIN_DATA: fixture.data,
+      ZENSU_AVR_SESSION_KEY: SESSION,
+      ZENSU_AVR_PROJECT_ROOT: fixture.root,
+      ZENSU_AVR_RECEIPT: fixture.receiptPath,
+      ZENSU_AVR_LOG: fixture.logPath,
+    };
+    const recorded = childProcess.spawnSync(process.execPath, [LIB, 'record'], {
+      env: { ...env, ZENSU_AVR_LABEL: 'zensu-log.sh --acceptance-record', ZENSU_AVR_AC: 'AC-001', ZENSU_AVR_VERDICT: 'pass', ZENSU_AVR_DRIVER: 'browser' },
+      encoding: 'utf8',
+    });
+    assert.equal(recorded.status, 2, recorded.stderr);
+    assert.equal(recorded.stderr, `zensu-log.sh --acceptance-record: ${cause}\n`);
+    assert.equal(fs.existsSync(path.join(transport, 'run-log-line')), false);
+    const shown = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
+    assert.equal(shown.status, 2, shown.stdout + shown.stderr);
+    assert.equal(shown.stdout, `ACCEPTANCE STATUS — unavailable | ${cause}\n`);
+  }
+  assert.equal(fs.existsSync(path.join(fixture.data, 'acceptance-verify')), false);
 });
 
 test('the CLI hands the work-tree fault to the record and the status', () => {

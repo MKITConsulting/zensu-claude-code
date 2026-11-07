@@ -468,8 +468,9 @@ function resolveChain(options) {
 }
 
 function workTreeRefusal(options, limits = LIMITS) {
-  if (typeof options.workTreeFault !== 'string' || options.workTreeFault === '') return null;
-  return `the chain's work tree could not be determined, so no acceptance record can be bound to it: ${display(options.workTreeFault, options.projectRoot, limits)}`;
+  const fault = evidenceRun.workTreeFaultCause(options.workTreeFault);
+  if (fault === null) return null;
+  return `the chain's work tree could not be determined, so no acceptance record can be bound to it: ${display(fault, options.projectRoot, limits)}`;
 }
 
 function recordLine(record, projectRoot, limits = LIMITS) {
@@ -853,7 +854,7 @@ function transportOptions(env) {
     sessionKey: env.ZENSU_AVR_SESSION_KEY,
     projectRoot: env.ZENSU_AVR_PROJECT_ROOT,
     workTree: env.ZENSU_AVR_WORK_TREE || '',
-    workTreeFault: readTransportFile(directory, 'work-tree-fault'),
+    workTreeFault: evidenceRun.readWorkTreeFault(directory),
     receiptPath: env.ZENSU_AVR_RECEIPT || '',
     logPath: env.ZENSU_AVR_LOG || '',
     ac: env.ZENSU_AVR_AC,
