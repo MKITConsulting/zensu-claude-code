@@ -315,7 +315,8 @@ criterion and 400 per session, and sweeps sessions idle for 14 days.
 In a chain bound to an Autopilot run that drives a worktree nested below the anchor, both verbs
 and every `--evidence-run --scope acceptance` run bind the combined tree of the project and that
 worktree, so an edit in the worktree makes every record stale. When that worktree cannot be
-resolved, both verbs and the acceptance run exit `2` and name the cause.
+resolved, both verbs and the acceptance run exit `2` and name the cause, and `--acceptance-status`
+prints it as an `ACCEPTANCE STATUS — unavailable` summary line.
 
 | Key | Default | Effect |
 |---|---|---|

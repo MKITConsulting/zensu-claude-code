@@ -303,8 +303,10 @@ AFTER_F="$(record_count)"
 bash "$LOG" --chain-work-tree --project-dir >/dev/null 2>&1; RC_FPD=$?
 cp "$WORK/bound-run.pre" "$BOUND_RUN_FILE"
 if [ "$RC_F" -eq 2 ] && [ "$AFTER_F" -eq "$BEFORE_F" ] && [ "$RC_FPD" -eq 2 ] \
-  && printf '%s' "$FAULT_ERR" | grep -qF "the chain's work tree could not be determined, so the command was not run: "; then
-  check "E19 a bound chain whose worktree cannot be resolved refuses the run with exit 2 and writes no record" PASS
+  && printf '%s\n' "$FAULT_ERR" | grep -q "^zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: ." \
+  && grep -qF "the chain's work tree could not be determined, so the command was not run: " "$LIB" \
+  && ! grep -qF "the chain's work tree could not be determined" "$LOG"; then
+  check "E19 a bound chain whose worktree cannot be resolved refuses the run with exit 2, writes no record, and the evidence-run module words the refusal" PASS
 else
   check "E19 a bound chain whose worktree cannot be resolved refuses the run (rc=$RC_F/$RC_FPD before=$BEFORE_F after=$AFTER_F)" FAIL
   printf '%s\n' "$FAULT_ERR"
@@ -337,8 +339,8 @@ LINK_ERR="$(cd "$SUBREPO/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd
 AFTER_L="$(record_count)"
 cp "$WORK/sub-state.pre" "$SUB_STATE"
 if [ "$RC_L" -eq 2 ] && [ "$AFTER_L" -eq "$BEFORE_L" ] \
-  && printf '%s' "$LINK_ERR" | grep -qF "the chain's work tree could not be determined, so the command was not run: this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"; then
-  check "E21 a workflow document whose Autopilot linkage cannot be read refuses the run instead of falling back to the anchor" PASS
+  && printf '%s\n' "$LINK_ERR" | grep -qxF "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"; then
+  check "E21 a workflow document whose Autopilot linkage cannot be read refuses the run in one module-worded line instead of falling back to the anchor" PASS
 else
   check "E21 an unreadable Autopilot linkage refuses the run (rc=$RC_L before=$BEFORE_L after=$AFTER_L)" FAIL
   printf '%s\n' "$LINK_ERR"
@@ -362,6 +364,25 @@ else
   check "E24 once the bound chain is done, --evidence-run runs in the anchor again (rc=$RC_DONE)" FAIL
   printf '%s\n' "$OUT_DONE"
   cat "$WORK/e24.err"
+fi
+
+mv "$SWT/pkg" "$WORK/swt-pkg"
+OUT_NODIR="$(cd "$SUBREPO/pkg" && bash "$LOG" --chain-work-tree 2>/dev/null)"; RC_NODIR=$?
+ERR_NODIR_PD="$(cd "$SUBREPO/pkg" && bash "$LOG" --chain-work-tree --project-dir 2>&1 >/dev/null)"; RC_NODIR_PD=$?
+BEFORE_D="$(record_count)"
+ERR_NODIR_RUN="$(cd "$SUBREPO/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd 'true' 2>&1 >/dev/null)"; RC_NODIR_RUN=$?
+AFTER_D="$(record_count)"
+mv "$WORK/swt-pkg" "$SWT/pkg"
+if [ "$RC_NODIR" -eq 0 ] && [ "$OUT_NODIR" = "$SWT" ] \
+  && [ "$RC_NODIR_PD" -eq 2 ] && printf '%s' "$ERR_NODIR_PD" | grep -qF 'has no directory' \
+  && printf '%s' "$ERR_NODIR_PD" | grep -qF "the chain's project directory could not be resolved; the line above names the cause" \
+  && [ "$RC_NODIR_RUN" -eq 2 ] && [ "$AFTER_D" -eq "$BEFORE_D" ] \
+  && printf '%s' "$ERR_NODIR_RUN" | grep -qF "the chain's work tree could not be determined, so the command was not run: " \
+  && printf '%s' "$ERR_NODIR_RUN" | grep -qF 'has no directory'; then
+  check "E25 a worktree without the session's subdirectory still names the tree, refuses --project-dir with the cause, and refuses the run" PASS
+else
+  check "E25 a worktree without the session's subdirectory (tree='$OUT_NODIR' rc=$RC_NODIR/$RC_NODIR_PD/$RC_NODIR_RUN before=$BEFORE_D after=$AFTER_D)" FAIL
+  printf '%s\n' "$ERR_NODIR_PD" "$ERR_NODIR_RUN"
 fi
 
 unit_check_done "E1z every unit file the registry gives this suite was graded"
