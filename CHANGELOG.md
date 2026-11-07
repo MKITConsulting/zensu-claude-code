@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-07
+
+### Added
+
+- **hooks**: Move the CLI gate's backend reading into hooks/lib and add a doctor row (#568)
+- **review-chain**: Keep audit scope across retries and gate review rounds on one canonical packet (#485)
+
+### Changed
+
+- **verify-feature**: Size caps per file and tier, image sizing, Zensu acceptance criteria (#569)
+- **verify-feature**: Specify the evidence report, its ports and the Zensu side (#567)
+- **zen-mode**: Settle the grader follow-ups #537 left open (#563)
+
+### Fixed
+
+- **hooks**: Raise the zensu-cli floor to 0.18.0, which AI-work capture needs (#571)
+- **review-gate**: Read background reviewer reports from completion notifications (#570)
+- **evidence-run**: Word work-tree refusals in the modules and share one bound lookup (#561)
+- **vcs**: Send GitLab review bodies as JSON with an explicit content type (#560)
+- **hooks**: Name the closing session block in the zen-mode OFF directive (#565)
+- **hooks**: Let only the user's own text end zen-mode (#564)
+- **build**: Scope Phase 1.5 preconditions to the dependencies it lists (#559)
+- **session-trail**: Check desktop-store owner and mode like the resolver (#551)
+- **hooks**: Read commands the way the shell does in the source-write gate (#554)
+
 ### Upgrade notes
 
 - **zensu-cli 0.18.0 floor**: the session banner, `/zensu:doctor`, `/zensu:setup`, the
