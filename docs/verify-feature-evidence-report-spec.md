@@ -73,8 +73,8 @@ The plugin:
 | AC-009 | Rendering the same manifest and files twice yields byte-identical output. | spec |
 | AC-010 | The default store lies outside every git work tree. A configured store inside a work tree is refused unless git reports the path ignored. | spec |
 | AC-011 | Retention keeps the newest `evidence.report.keep` reports per repository and at most `evidence.report.maxBytes` in total, deleting the oldest first. The sweep never deletes the report being written. | spec |
-| AC-012 | When a lossless WebP encoder is available, images are stored losslessly transcoded, with the original's digest recorded. Without one they are stored as captured. No image is ever stored lossy. | spec |
-| AC-013 | Nothing leaves the machine unless the user asked for that publish step in this conversation or enabled it in the user-level config; a project-local `.zensu/config.json` can only switch publishing off. Before the first network call the step lists what will leave: destination, file count, file names and total size. | spec |
+| AC-012 | When a lossless WebP encoder is available, images are stored losslessly transcoded, with the original's digest recorded. Without one they are stored as captured. No image is ever stored lossy or scaled, and each records its viewport and scale factor. | spec |
+| AC-013 | Nothing leaves the machine unless the user asked for that publish step in this conversation or enabled it in the user-level config; a project-local `.zensu/config.json` can only switch publishing off. Before the first network call the step lists what will leave: destination, file count, file names and total size, and for a Zensu upload the tier's remaining quota. | spec |
 | AC-014 | The review summary goes through the VCS driver (`hooks/lib/zensu-vcs.sh`) to the open pull request (GitHub) or merge request (GitLab) of the current branch. It re-reads the request's state immediately before posting, attaches at most `evidence.report.prImages` images and never the bundle, and contains no local path. On any other forge it stops with the cause. | spec |
 | AC-015 | The Zensu upload sends the manifest, then only the files the service reports missing. An interrupted upload resumes, and publishing the same report twice changes nothing. Without a login, or with a CLI below the upload verb's floor, it stops with the remedy and changes nothing locally. | spec |
 | AC-016 | Without Zensu, without `gh` or `glab` and offline, every local function works unchanged, and the report path makes no network request unless a publish step was requested. A failed or unavailable publish step leaves the local report and the run's verdict as they were. | spec |
@@ -99,12 +99,12 @@ The Zensu service:
 
 | ID | Requirement | Source |
 |----|-------------|--------|
-| AC-023 | The service accepts a file only as PNG, WebP or UTF-8 text, judged by its content, at most `maxFileBytes` and within the pixel cap. It never stores or serves markup from a report. | spec |
-| AC-024 | Finalize verifies every file's SHA-256 and re-runs the checks of AC-003 and AC-004 on the uploaded manifest. A report that fails stays unfinalized and the answer names each fault. An open report that is not finalized within 24 hours expires. | spec |
+| AC-023 | The service accepts a file only as PNG, WebP or UTF-8 text, judged by its content, within the pixel cap and at most `maxFileBytes`, which is never below the plugin's per-file cap of 50 MiB. A report's total size is bounded only by the tenant's quota. The service never stores or serves markup from a report. | spec |
+| AC-024 | Finalize verifies every file's SHA-256 and re-runs the checks of AC-003 and AC-004 on the uploaded manifest. A report that fails stays unfinalized and the answer names each fault. An open report that is not finalized within its tier's open time, at least 7 days, expires. | spec |
 | AC-025 | A report is readable by the feature's readers and uploadable by the product's writers. Upload, finalize and deletion are audited. A deletion removes the report and every file no other report references. | spec |
 | AC-026 | The web application lists a feature's reports newest first, shows a report with its coverage matrix first, escapes every string, and compares two reports of one feature criterion by criterion. | spec |
 | AC-027 | A finalized report appears on its feature, on each criterion row the feature knows, at its commit, and on the review screen of the AI-work result it names. | spec |
-| AC-028 | Retention and quota follow decision 5 (§10). A refused upload names the tier's quota and the bytes in use, and the plugin relays that text unchanged. | spec |
+| AC-028 | Every cap beyond the fixed protocol caps of 50 MiB per file and 2,000 files per report is set per tier (decision 5, §10). The open answer carries the tier's caps and their current use; a refused upload names the cap it hit and the use, and the plugin relays that text unchanged. | spec |
 
 ## 5. Out of scope
 
@@ -239,7 +239,7 @@ escapes every string, and the only formatting text may carry is inline code in b
     "e2": { "kind": "request", "method": "PUT", "path": "/api/settings", "status": 200 }
   },
   "files": {
-    "<sha256>": { "name": "files/<sha256>.webp", "type": "image/webp", "bytes": 81234, "width": 1440, "height": 900, "source_sha256": "<sha256 of the captured PNG>" }
+    "<sha256>": { "name": "files/<sha256>.webp", "type": "image/webp", "bytes": 81234, "width": 1440, "height": 900, "viewport": { "width": 1440, "height": 900, "scale": 1 }, "source_sha256": "<sha256 of the captured PNG>" }
   },
   "sections": {
     "console": "clean",
@@ -264,6 +264,8 @@ Field rules:
   of `pass`, `fail`, `partial`, `missing`, `stale` and `deprecated`; `record` is `null` in matrix
   mode.
 - `steps[].result` is `pass`, `fail` or `skip`.
+- `files[].viewport` holds the viewport or window size in CSS or device-independent pixels and the
+  scale factor at capture. It is `null` for a text file and where the driver cannot tell.
 - `rendered_at` is `null` until the report is rendered.
 
 Evidence kinds:
@@ -315,12 +317,27 @@ and visual evidence.
   and records the PNG's digest as `source_sha256`; the PNG itself is not kept. Without an encoder
   the PNG is stored. Lossy encoding is never used, because evidence must show the pixels that
   were captured.
+- **Normalized at capture, never scaled afterwards.** A browser screenshot is taken at the run's
+  viewport, 1440 by 900 CSS pixels at scale factor 1 by default, set once with the allowed
+  `resize` command after `open`, and of the viewport only unless the criterion needs what lies
+  below the fold. A criterion about responsive layout or fine detail adds captures at the
+  viewport it names or with `--hires`. Device and window captures keep their native size. Each
+  image records its viewport and scale factor, so the images of two runs are compared only when
+  both match.
+- **Display scaling is the viewer's job.** The local viewer scales an image with CSS and loads it
+  lazily; Zensu derives its own thumbnails from the uploaded original (§8.3). A derived image is
+  never evidence and never goes into a bundle.
 - Measured on 2026-11-03 on a single-file report of 13.7 MB that embedded 44 PNG screenshots of a
   web application: the 45 PNGs of its folder total 10.4 MB, losslessly transcoded 4.8 MB. Lossy
   at quality 85 they total 3.7 MB, which this spec does not use. Base64 adds a third, so the
-  single-file export of the lossless set is about 6.4 MB. Appendix A holds the raw numbers.
-- Caps: 25 MiB per file and 2,000 files per report. The review summary skips an image above
-  10 MB.
+  single-file export of the lossless set is about 6.4 MB. At 1440 by 900 one screenshot averaged
+  232 KB as PNG and 107 KB losslessly transcoded. Appendix A holds the raw numbers.
+- An image beyond WebP's limit of 16,383 pixels per side stays PNG.
+- Caps: 50 MiB per file and 2,000 files per report, checked at `--report-add`, so every file a
+  report holds can also be uploaded (§8.3). A report has no size cap of its own: it is split into
+  files, and only `evidence.report.maxBytes` locally and the tenant's quota in Zensu bound it.
+  The review summary skips an image above 10 MB, the attachment limit recorded for a GitHub free
+  plan.
 
 ### 6.6 Viewer
 
@@ -496,7 +513,7 @@ are built in the service's repository, the CLI verbs in the `zensu` CLI's reposi
 
 | Step | Request | Answer |
 |---|---|---|
-| Open | `POST /v1/features/{featureId}/evidence-reports` with `manifest.json`, its SHA-256 and an optional `workResultId` | `reportId`, `missing` (the file digests the service lacks), `maxFileBytes`, and for each missing file either a pre-signed upload URL or the API path to `PUT` it |
+| Open | `POST /v1/features/{featureId}/evidence-reports` with `manifest.json`, its SHA-256 and an optional `workResultId` | `reportId`, `missing` (the file digests the service lacks), `maxFileBytes`, `limits` (the tier's caps and their current use), and for each missing file either a pre-signed upload URL or the API path to `PUT` it |
 | Upload | `PUT` of one missing file, at most `maxFileBytes` | `201`, or `200` when the digest is already stored |
 | Finalize | `POST /v1/evidence-reports/{reportId}/finalize` | the report URL once finalize accepted the report (§8.4); otherwise the faults |
 | Read | `GET /v1/evidence-reports/{reportId}` | the manifest and short-lived URLs for its files |
@@ -530,15 +547,22 @@ repeated open lists only what is still missing.
 - An upload goes straight to the object store through a pre-signed URL where the store supports
   one, else through the API path, which streams to the store. The client never sees a store
   credential.
-- Files go up one per request. The service's default upload cap is 10 MiB per upload, so a
-  single-file report of 13.7 MB would be refused, while every file of the measured report fits.
-  `maxFileBytes` tells the client the limit that actually applies.
+- Files go up one per request, so a report of any size travels in pieces of one file each.
+  Evidence files have their own limit, `maxFileBytes`, 50 MiB by default and never below the
+  plugin's per-file cap (§6.5). The service's general upload cap of 10 MiB per upload does not
+  apply to them: a pre-signed upload goes straight to the object store, and the API path streams
+  the file instead of buffering it. A report as a whole is bounded only by the tenant's quota
+  (decision 5).
 - The content type is judged from the bytes: PNG and WebP by their signatures, with the
-  dimensions read from the header and capped at 50 million pixels, and text as UTF-8 without
+  dimensions read from the header and capped at 100 million pixels, and text as UTF-8 without
   control characters other than tab and line breaks. Everything else is refused, SVG and HTML
   included.
 - The manifest is at most 1 MiB and is parsed with depth and string-length limits.
-- An open report expires after 24 hours, and the files only it referenced are reclaimed.
+- For the web application the service derives display renditions from each uploaded image: a
+  thumbnail and a screen-sized copy. A rendition is marked derived and never served as evidence,
+  and the original stays downloadable unchanged.
+- An open report expires after its tier's open time, at least 7 days. Until then its files count
+  toward the tenant's quota; on expiry the files only it referenced are reclaimed.
 
 ### 8.4 Finalize
 
@@ -552,11 +576,12 @@ service accept and refuse the same reports. A finalized report is immutable.
 - **Feature page:** an Evidence tab that lists the feature's reports newest first, each with
   verdict, host, branch, short head, date and coverage counts.
 - **Report page:** a header with verdict, target identity, host, uploader and links to the commit
-  and the pull request; the coverage matrix first; then the steps with their evidence, images
-  opened large, text captures monospaced, requests as a table; then signals, consent, limitations
-  and resources.
+  and the pull request; the coverage matrix first; then the steps with their evidence, images as
+  renditions that open the unchanged original at full size, text captures monospaced, requests as
+  a table; then signals, consent, limitations and resources.
 - **Comparison:** two reports of one feature, criterion by criterion, so a criterion that went
-  from `pass` to `fail` stands out, with the images of steps that share a title side by side.
+  from `pass` to `fail` stands out, with the images of steps that share a title side by side when
+  their viewport and scale factor match.
 - **Criteria:** where Zensu knows the feature's criterion ids, each criterion shows its latest
   state and links to the report behind it.
 - **AI-work review:** the review screen of a result shows the reports linked to it. Accepting the
@@ -571,8 +596,13 @@ service accept and refuse the same reports. A finalized report is immutable.
   deleted by a product admin or its uploader.
 - Upload, finalize and deletion are audited.
 - A report is customer content: it is part of a data export and is removed by a deletion request.
-- Retention and quota follow decision 5 (§10). A refused upload names the tier's quota and the
-  bytes in use.
+- Two kinds of cap. Fixed for every tier, because the plugin relies on them: 50 MiB per file and
+  2,000 files per report. Set per tier (decision 5): the stored bytes after deduplication, the
+  reports open at once, the open time of at least 7 days, and how long the files of a finalized
+  report are kept.
+- The open answer reports the tier's caps and their current use, so the plugin's preview shows
+  the remaining quota before the first file goes up. A refused upload names the cap it hit and
+  the use.
 
 ### 8.7 The CLI
 
@@ -642,7 +672,8 @@ Zensu.
 - The data, storage, endpoints, finalize, access and audit of §8, with the conformance corpus
   vendored from this repository.
 - Default: one file per request, the missing-digest protocol, a report immutable after finalize,
-  open reports expiring after 24 hours, the whole feature behind a per-organization flag.
+  open reports expiring after 7 days at the earliest, caps per tier as in §8.6, the whole feature
+  behind a per-organization flag.
 
 **Step 6 — Viewer in the Zensu web application** (service repository).
 
@@ -693,12 +724,14 @@ costs and what it rejected.
 4. **Language: English.** Reports follow the plugin's language rule. A team that works in another
    language reads English evidence until the viewer's fixed strings are localized, which this
    spec leaves out.
-5. **Still open: Zensu retention and quota per plan tier.** A service-side product decision.
-   Recommended, not yet decided: keep every report that backs an accepted AI-work result or a
-   released revision for as long as its feature exists; remove the files of every other report
-   after 90 days and keep its manifest, so the history of runs stays readable without its images;
-   let the tier set the quota in stored bytes after deduplication. A large report is about 5 MB
-   after lossless transcoding.
+5. **Partly open: Zensu retention and caps per plan tier.** Decided on 2026-11-07: an open report
+   expires after 7 days at the earliest, and every cap beyond the fixed protocol caps is set per
+   tier (§8.6). Still open: the numbers per tier, and how long the files of a finalized report
+   are kept. Recommended for the second: keep every report that backs an accepted AI-work result
+   or a released revision for as long as its feature exists; remove the files of every other
+   report after the tier's time, 90 days on the smallest tier, and keep its manifest, so the
+   history of runs stays readable without its images. A large report is about 5 MB after
+   lossless transcoding.
 6. **Forges: a review summary on GitHub and GitLab, through the VCS driver.** These are the two
    forges the plugin's driver serves (`docs/vcs-driver-spec.md`), so every team the plugin
    reviews for gets a summary. It costs one driver operation and a GitLab measurement. Rejected:
@@ -723,6 +756,9 @@ costs and what it rejected.
 - **Images are not machine-screened** for personal data. The capture rules and the preview before
   publishing carry that.
 - **Encoder availability.** Without `cwebp` a report stays at PNG size.
+- **One file is at most 50 MiB.** A very long full-page screenshot at high resolution can exceed
+  that and has to be taken in parts. Video, out of scope for version 1, will need multipart
+  uploads.
 - **Unmeasured:** WebP attachments on GitHub, the multipart uploads call through `glab`, the
   Content-Security-Policy meta element on `file://`, the file captures for the Android emulator
   and for desktop windows, pre-signed uploads with digest enforcement on the service's object
