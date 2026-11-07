@@ -312,6 +312,47 @@ else
   printf '%s\n' "$FAULT_ERR"
 fi
 
+source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+work_tree_fault_stub "$WORK/fault-stub"
+BAD_WS="$BOUND/pkg" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$BOUND_RUN_FILE"
+BEFORE_T="$(record_count)"
+TRANSPORT_ERR="$(cd "$BOUND" && PATH="$WORK/fault-stub:$PATH" bash "$LOG" --evidence-run --scope scoped --cmd "touch '$WORK/e26-ran'" 2>&1 >/dev/null)"; RC_T=$?
+AFTER_T="$(record_count)"
+cp "$WORK/bound-run.pre" "$BOUND_RUN_FILE"
+if [ "$RC_T" -eq 2 ] && [ "$AFTER_T" -eq "$BEFORE_T" ] && [ ! -e "$WORK/e26-ran" ] \
+  && printf '%s\n' "$TRANSPORT_ERR" | grep -qF '/work-tree-fault: ' \
+  && printf '%s\n' "$TRANSPORT_ERR" | grep -qF "zensu-log.sh --evidence-run: the work-tree lookup failed and its cause could not be written to the temporary directory, so neither the evidence-run module nor the command ran." \
+  && ! printf '%s\n' "$TRANSPORT_ERR" | grep -qF "the chain's work tree could not be determined"; then
+  check "E26 a work-tree fault whose transport write fails stops --evidence-run with exit 2 and the shell's own line, before the module or the command runs" PASS
+else
+  check "E26 a work-tree fault whose transport write fails stops --evidence-run (rc=$RC_T before=$BEFORE_T after=$AFTER_T)" FAIL
+  printf '%s\n' "$TRANSPORT_ERR"
+fi
+
+BWT_FN="$(awk '$0 == "_zensu_bound_work_tree() {" {f=1} f {print} f && $0 == "}" {exit}' "$LOG")"
+mkdir -p "$WORK/bwt-probe"
+BWT_OUT="$(
+  eval "$BWT_FN"
+  _zensu_bound_work_tree_lookup() { : > "$2/bwt-tree"; }
+  _zensu_bound_work_tree probe-session "$WORK/bwt-probe"
+  printf 'tree-empty fault=%s stage=%s tree=%s\n' "$_bwt_fault" "$_bwt_stage" "$_bwt_tree"
+  _zensu_bound_work_tree_lookup() { printf '%s' /probe/tree > "$2/bwt-tree"; : > "$2/bwt-dir"; }
+  _zensu_bound_work_tree probe-session "$WORK/bwt-probe"
+  printf 'dir-empty fault=%s dirfault=%s tree=%s dir=%s\n' "$_bwt_fault" "$_bwt_dir_fault" "$_bwt_tree" "$_bwt_dir"
+  _zensu_bound_work_tree_lookup() { printf '%s' /probe/tree > "$2/bwt-tree"; printf '%s' /probe/tree/pkg > "$2/bwt-dir"; }
+  _zensu_bound_work_tree probe-session "$WORK/bwt-probe"
+  printf 'answered fault=%s dirfault=%s tree=%s dir=%s\n' "$_bwt_fault" "$_bwt_dir_fault" "$_bwt_tree" "$_bwt_dir"
+)"
+if [ -n "$BWT_FN" ] \
+  && printf '%s\n' "$BWT_OUT" | grep -qxF 'tree-empty fault=the work-tree lookup handed back an empty work-tree path stage=work-tree tree=' \
+  && printf '%s\n' "$BWT_OUT" | grep -qxF 'dir-empty fault= dirfault=the work-tree lookup handed back an empty project-directory path tree=/probe/tree dir=' \
+  && printf '%s\n' "$BWT_OUT" | grep -qxF 'answered fault= dirfault= tree=/probe/tree dir=/probe/tree/pkg'; then
+  check "E27 the work-tree lookup reads an empty work-tree answer as a work-tree fault and an empty project-directory answer as a directory fault" PASS
+else
+  check "E27 the work-tree lookup reads empty answers as faults" FAIL
+  printf '%s\n' "$BWT_OUT"
+fi
+
 SUBREPO="$WORK/subrepo"
 bound_repo "$SUBREPO"
 SUBREPO="$(cd -P "$SUBREPO" && pwd -P)"

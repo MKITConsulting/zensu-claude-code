@@ -1121,16 +1121,31 @@ check "WB18 a workspaceRoot that names no work tree stops --round-prepare with t
 cp "$WT_STATE" "$PROJ_CANON/.zensu/wt-state.open"
 node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.implComplete = true; s.chainDone = true; s.chainOutcome = "pass"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_STATE"
 WT_CLOSED="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"; WT_CLOSED_RC=$?
+WT_CLOSED_RP="$(bash "$LOG" --round-prepare --round 0 --log "$WT_LOG_FILE" --baseline "$WT_BASE_SHA" 2>&1)"; WT_CLOSED_RP_RC=$?
+WT_CLOSED_TOP="$(node -e 'try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).top)); } catch (_) {}' "$WT_SNAP")"
+cp "$PROJ_CANON/.zensu/wt-state.open" "$WT_STATE"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.active = false; s.chainDone = false; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_STATE"
+WT_INACTIVE="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"; WT_INACTIVE_RC=$?
 cp "$PROJ_CANON/.zensu/wt-state.open" "$WT_STATE"
 WT_REOPENED="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"
-{ [ "$WT_CLOSED_RC" -eq 0 ] && [ "$WT_CLOSED" = "$PROJ_CANON" ] && [ "$WT_REOPENED" = "$WTB" ]; }
-check "WB19 once the bound chain is done --chain-work-tree answers the anchor's top, where --evidence-run then runs (got '$WT_CLOSED' / '$WT_REOPENED')" "$(verdict $?)"
+{ [ "$WT_CLOSED_RC" -eq 0 ] && [ "$WT_CLOSED" = "$PROJ_CANON" ] \
+  && [ "$WT_CLOSED_RP_RC" -eq 0 ] && [ "$WT_CLOSED_TOP" = "$PROJ_CANON" ] \
+  && [ "$WT_INACTIVE_RC" -eq 0 ] && [ "$WT_INACTIVE" = "$PROJ_CANON" ] \
+  && [ "$WT_REOPENED" = "$WTB" ]; }
+check "WB19 once the bound chain is done, or inactive with its linkage kept, --chain-work-tree and --round-prepare answer the anchor's top, where --evidence-run then runs (got '$WT_CLOSED' / '$WT_CLOSED_TOP' / '$WT_INACTIVE' / '$WT_REOPENED')" "$(verdict $?)"
+[ "$WT_CLOSED_RP_RC" -eq 0 ] || printf '%s\n' "$WT_CLOSED_RP" | head -6 | sed 's/^/        /'
 { [ "$(grep -c '_zensu_chain_work_tree "' "$LOG")" -eq 1 ] \
   && grep -qF '_zensu_chain_work_tree "$ctx" "$CLAUDE_PROJECT_DIR"' "$LOG" \
   && grep -qF '_zensu_bound_work_tree "$cwt_session" "$cwt_dir"' "$LOG" \
   && grep -qF '_zensu_bound_work_tree "${ZENSU_SESSION_KEY:-}" "$_rp_tmp"' "$LOG" \
   && grep -qF '_zensu_bound_work_tree "$session_val" "$_tc_wt_dir" "$complete_ctx"' "$LOG"; }
 check "WB20 the linkage reaches the work-tree resolver only inside the one lookup, which --chain-work-tree, --round-prepare and --tdd-complete call" "$(verdict $?)"
+{ grep -A1 -F "trap 'rm -rf \"\$cwt_dir\"' EXIT" "$LOG" | grep -qF '_zensu_bound_work_tree "$cwt_session" "$cwt_dir"' \
+  && grep -A1 -F 'rm -rf "$cwt_dir"' "$LOG" | grep -qxF '    trap - EXIT' \
+  && grep -B1 -F "trap 'rm -rf \"\$_tc_wt_dir\"' EXIT" "$LOG" | grep -qF 'if _tc_wt_dir="$(mktemp -d 2>/dev/null)"; then' \
+  && grep -A1 -F "trap 'rm -rf \"\$_tc_wt_dir\"' EXIT" "$LOG" | grep -qF '_zensu_bound_work_tree "$session_val" "$_tc_wt_dir" "$complete_ctx"' \
+  && grep -A1 -F 'rm -rf "$_tc_wt_dir"' "$LOG" | grep -qxF '            trap - EXIT'; }
+check "WB21 --chain-work-tree and the bound branch of --tdd-complete arm an EXIT trap right after their mktemp, and clear it after the explicit removal" "$(verdict $?)"
 
 echo "----"
 echo "test-tdd-complete-receipt-gate: $T_PASS PASS / $T_FAIL FAIL"
