@@ -16,6 +16,7 @@ const REVIEWER_ROLES = new Map([['review-aspect', 'aspect'], ['review-judge', 'j
 const RECORD_NAME_RE = /^record-r(\d+)-(\d+)-(\d+)-([0-9a-f]{12})\.json$/;
 const PACKET_NAME_RE = /^packet-r(\d+)\.json$/;
 const DELIVERY_STUB_RE = /^This agent's report was delivered to you as a message from /;
+const UNDELIVERED_STUB_RE = /^The subagent ended without delivering a report through SubagentHandback\b/;
 const PACKET_INVALID_RE = /^REVIEW PACKET INVALID\b/m;
 const ROLES = Object.freeze(['aspect', 'persona', 'judge-primary', 'judge-second', 'consume']);
 const PACKET_STATES = Object.freeze(['ok', 'absent', 'duplicate', 'unterminated']);
@@ -57,6 +58,19 @@ function reportText(response) {
   }
   if (text.trim() === '' || DELIVERY_STUB_RE.test(text.trim())) return { text: '', source: 'none' };
   return { text, source: 'content' };
+}
+
+function deliveredReport(text) {
+  if (typeof text !== 'string' || text.trim() === '') return false;
+  return !DELIVERY_STUB_RE.test(text.trim()) && !UNDELIVERED_STUB_RE.test(text.trim());
+}
+
+function arrivedReports(prompt) {
+  const handbacks = background.handbackReports(prompt).map((frame) => ({ ...frame, source: 'handback-prompt' }));
+  const notified = background.notificationReports(prompt)
+    .filter((entry) => entry.status === 'completed' && deliveredReport(entry.report))
+    .map((entry) => ({ agentId: entry.agentId, report: entry.report, source: 'notification-prompt' }));
+  return [...handbacks, ...notified];
 }
 
 function launchedAgent(response) {
@@ -224,7 +238,7 @@ function recordObservation(options) {
 
 function recordHandback(options) {
   const payload = options.payload || {};
-  const frames = background.handbackReports(payload.prompt);
+  const frames = arrivedReports(payload.prompt);
   if (frames.length === 0) return [];
   const root = packets.canonicalRoot(options.root);
   const state = packets.chainState(root, options.session);
@@ -236,7 +250,7 @@ function recordHandback(options) {
     const launch = runs.filter((entry) => entry.status === LAUNCHED && entry.role !== 'consume').pop();
     const kind = launch ? classify(launch.type) : null;
     if (!kind || runs.some((entry) => entry.status !== LAUNCHED)) continue;
-    const report = { text: frame.report, source: 'handback-prompt' };
+    const report = { text: frame.report, source: frame.source };
     const name = heading(report.text);
     const reason = launch.role === 'judge-primary' ? judgeFailure(report, 'completed') : null;
     const store = packets.ensureStore(root, options.session);
@@ -315,8 +329,8 @@ function checkConsume(options) {
   const respawnConsume = `${consumeAgain} and the block ${commands.show} prints, copied unchanged`;
   let report = reportText(payload.tool_response);
   if (arrival) {
-    const frame = background.handbackReports(payload.prompt).filter((entry) => entry.agentId === agent).pop();
-    report = { text: frame ? frame.report : '', source: frame ? 'handback-prompt' : 'none' };
+    const frame = arrivedReports(payload.prompt).filter((entry) => entry.agentId === agent).pop();
+    report = { text: frame ? frame.report : '', source: frame ? frame.source : 'none' };
   }
   if (PACKET_INVALID_RE.test(report.text)) {
     return consumeRefusal('the consume reviewer answered REVIEW PACKET INVALID', respawnConsume);
@@ -367,7 +381,7 @@ function checkConsume(options) {
   const ofRound = listing.records.filter((entry) => entry.round === round);
   const unreported = (roles) => ofRound.filter((entry) => entry.status === LAUNCHED && roles.includes(entry.role) && entry.agentId
     && !ofRound.some((other) => other.agentId === entry.agentId && other.status !== LAUNCHED)).length;
-  const waitHint = (count) => (count === 0 ? '' : `; ${count === 1 ? 'one background reviewer launch of this round has' : `${count} background reviewer launches of this round have`} sent no hand-back the hook could read yet, so wait for ${count === 1 ? 'it' : 'them'} first, and where the host delivers no hand-back, as outside auto mode, ask the user whether to set hooks.reviewPacketGate to false, which reviews this project without the gate`);
+  const waitHint = (count) => (count === 0 ? '' : `; ${count === 1 ? 'one background reviewer launch of this round has' : `${count} background reviewer launches of this round have`} delivered no report the hook could read yet, as a hand-back or in a completion notification, so wait for ${count === 1 ? 'it' : 'them'} first, and where the host delivers neither, ask the user whether to set hooks.reviewPacketGate to false, which reviews this project without the gate`);
   const latest = new Map();
   for (const entry of ofRound) if (entry.identity) latest.set(entry.identity, entry);
   const respawnReviewer = `spawn that reviewer again with the block ${commands.show} prints, merge its findings in place of the earlier ones, then ${consumeAgain} and that block`;
