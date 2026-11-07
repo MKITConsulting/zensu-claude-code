@@ -326,7 +326,7 @@
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
     },
     {
-      "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,
+      "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 26,
       "runs": [{ "driver": "tests/structure/test-workflow-dispatch-inputs.sh" }],
       "summary": "Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable."
     },
