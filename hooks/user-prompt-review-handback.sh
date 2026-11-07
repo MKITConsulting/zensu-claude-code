@@ -43,7 +43,7 @@ BR_ARRIVAL="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BR_EXCLUSIONS" ZENSU_
 case "$BR_ARRIVAL" in
   "pending agent="*) ;;
   "idle reason="*" retired="[1-9]*)
-    case "$INPUT" in *'<agent-message from='*) ;; *) exit 0 ;; esac
+    case "$INPUT" in *'<agent-message from='*|*'<result>'*) ;; *) exit 0 ;; esac
     ;;
   *) exit 0 ;;
 esac

@@ -111,6 +111,17 @@ if [ -n "$WORK" ]; then
         `<status>${process.env.STATUS}</status>`, "<summary>Agent consume review finished</summary>", "</task-notification>"].join("\n");
       process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
   }
+  result_notification_payload() {
+    AGENT="$1" STATUS="$2" REPORT="$3" SID_VALUE="$SID" node -e '
+      const result = process.env.REPORT.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const prompt = ["<task-notification>", `<task-id>${process.env.AGENT}</task-id>`, "<tool-use-id>toolu_01WPhqY4dh2LFbaugtAn6Kg8</tool-use-id>",
+        `<output-file>/private/tmp/claude-501/tasks/${process.env.AGENT}.output</output-file>`, `<status>${process.env.STATUS}</status>`,
+        "<summary>Agent review finished</summary>",
+        "<note>A task-notification fires each time this agent stops with no live background children of its own.</note>",
+        `<result>${result}</result>`, "<usage><subagent_tokens>24658</subagent_tokens><tool_uses>0</tool_uses><duration_ms>3280</duration_ms></usage>",
+        "</task-notification>"].join("\n");
+      process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
+  }
   hook_event_of() {
     node -e 'let s = ""; process.stdin.on("data", (c) => s += c); process.stdin.on("end", () => {
       try { process.stdout.write(JSON.parse(s).hookSpecificOutput.hookEventName); } catch (_) { process.stdout.write("none"); } });' < "$1"
@@ -610,6 +621,45 @@ merged findings: none"
     fi
   else
     check "RP31 arm a review chain" FAIL
+  fi
+
+  new_project "$WORK/p-notified"
+  if arm_review "rp-notified" "$WORK/p-notified"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    launch_payload zensu:review-aspect "perspective: correctness
+$PACKET" aspectnote1 | bash "$POSTREV" >/dev/null 2>&1
+    launch_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" judgenote1 | bash "$POSTREV" >/dev/null 2>&1
+    result_notification_payload aspectnote1 completed "## Aspect: correctness
+- (no findings)" | bash "$HANDBACK_HOOK" >"$WORK/hook-aspect" 2>&1
+    result_notification_payload judgenote1 completed "## Aspect: judge
+- (no findings)" | bash "$HANDBACK_HOOK" >"$WORK/hook-judge" 2>&1
+    if [ ! -s "$WORK/hook-aspect" ] && [ ! -s "$WORK/hook-judge" ] && [ "$(store_records)" = "4" ]; then
+      check "RP32 with the gate on, the completion notifications of a background aspect and judge complete their launches through the prompt hook" PASS
+    else
+      check "RP32 notification reports (records=$(store_records))" FAIL
+      cat "$WORK/hook-aspect" "$WORK/hook-judge"
+    fi
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    launch_payload zensu:code-reviewer "$CONSUME" consumenote2 | bash "$POSTREV" >/dev/null 2>&1
+    result_notification_payload consumenote2 completed "# Code Review Report
+
+- Verdict: PASS" | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] && grep -qF "BACKGROUND REVIEW REPORT" "$WORK/hook" \
+      && ! grep -qF "REVIEW INCOMPLETE" "$WORK/hook" && [ "$(consume_record)" = absent ] \
+      && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ]; then
+      check "RP32a with the gate on, the consume reviewer's completion notification claims the ticket on the panel that notifications recorded" PASS
+    else
+      check "RP32a notification claim (event=$(hook_event_of "$WORK/hook") record=$(consume_record) consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook"
+    fi
+  else
+    check "RP32 arm a review chain" FAIL
   fi
 
   echo "== The review chain's config probes read the project config =="
