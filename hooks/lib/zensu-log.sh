@@ -930,7 +930,7 @@ case "${1:-}" in
     if [ "$_rp_rc" -ne 0 ]; then
       _rp_stop "change-set: the change set could not be listed (exit $_rp_rc): $(head -n 1 "$_rp_tmp/changes.err")"
     fi
-    _tc_git -C "$_rp_wt" check-ignore --stdin < "$_rp_tmp/changes" > "$_rp_tmp/ignored" 2> "$_rp_tmp/ignored.err"
+    _tc_git -C "$_rp_wt" -c core.quotePath=false check-ignore --stdin < "$_rp_tmp/changes" > "$_rp_tmp/ignored" 2> "$_rp_tmp/ignored.err"
     _rp_rc=$?
     if [ "$_rp_rc" -gt 1 ]; then
       _rp_stop "ignore-check: git check-ignore could not read the change set (exit $_rp_rc): $(head -n 1 "$_rp_tmp/ignored.err")"
