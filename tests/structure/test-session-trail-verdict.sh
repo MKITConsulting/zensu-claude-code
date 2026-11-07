@@ -2608,7 +2608,7 @@ mutant_path() { # <tag> -> path to place the mutated trail.mjs at
   local d="$FAKE/mut-$1/skills/session-trail/scripts"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
   cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
+  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
 
@@ -5627,7 +5627,7 @@ else
     local d="$FAKE/cmut-$1/skills/session-trail/scripts"
     mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
     cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
+    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     printf '%s' "$d/trail.mjs"
   }
@@ -8924,7 +8924,7 @@ process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "TIMEOUT" : Strin
   OM_SB="$FAKE/om-sandbox"
   mkdir -p "$OM_SB/skills/session-trail/scripts" "$OM_SB/hooks/lib"
   cp "$TRAIL_MJS" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
+  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
   OM_BAD=""
   OM_OUT="$(omrun "$OM_SB/skills/session-trail/scripts/trail.mjs" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>&1)"
   OM_RC=$?

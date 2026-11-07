@@ -1,6 +1,7 @@
 ---
 paths:
   - "hooks/lib/worktree-keep-v1.js"
+  - "hooks/lib/git-environment-v1.js"
   - "hooks/lib/zensu-worktree-keep.sh"
   - "hooks/session-start-worktree-keep.sh"
   - "hooks/user-prompt-worktree-keep.sh"
@@ -80,7 +81,8 @@ silencing the one automatic channel the feature has. The sentinel fails `branchN
 never collide with a real name; `branchValueOk` is what admits it into a persisted record, and
 `describeBranch` renders it as a branch whose name this plugin does not render. Every git child
 runs with the fifteen `GIT_*`
-discovery and config-injection variables `_tc_git` lists deleted from its environment, so an
+discovery and config-injection variables `_tc_git` lists deleted from its environment, through
+`gitEnvironment` from `hooks/lib/git-environment-v1.js`, which the module re-exports, so an
 inherited `GIT_DIR` cannot make the branch read answer a foreign repository or the exclude write
 land in one. The marker is created only after `git check-ignore` confirms git ignores it
 (`markerIgnored` adds the exclude entry first when it does not, and refuses otherwise), because an
@@ -390,8 +392,11 @@ in `tests/structure/test-impl-stop-counter.sh` reads every getter's operands;
 `STATE_SEGMENTS` in the module, a twin of the owner-exported `WORKFLOW_STATE_SEGMENTS` in
 `session-control-core-v1.js` (pinned equal by the unit suite), and `SESSION_KEY_RE` /
 `ANCHOR_NAME_RE`, two further members of the grep-governed `scv1_` family §"Foreign-Chain Row"
-describes; `GIT_ENV_SCRUB` against `_tc_git`'s unset list in `hooks/lib/zensu-log.sh` (pinned by
-the same suite); the secure-open inventory entry in
+describes; `GIT_ENV_SCRUB` and `gitEnvironment`, owned by `hooks/lib/git-environment-v1.js` and
+re-exported by the module, against `_tc_git`'s unset list in `hooks/lib/zensu-log.sh` (pinned by
+the same suite, which also pins that the re-exports are the library's own), plus the
+`$SBOX/plug` tree of `tests/structure/test-doctor.sh`, which stages the library beside the
+module; the secure-open inventory entry in
 `tests/structure/test-windows-portability-guards.sh`, which classifies the module's one hardened
 reader, its two exclusive temp creates (the anchor's, renamed, and the marker's, linked or, where
 hard links are unsupported, copied with `COPYFILE_EXCL`), and its descriptor-landed append with

@@ -1,6 +1,7 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "hooks/lib/git-environment-v1.js"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 
@@ -14,16 +15,22 @@ caller's own tree, because every call in the file is a read. A git call that byp
 loses all three, so add new calls through the helper.
 
 **`git()` also runs every call in `gitEnvironment(process.env)` from
-`hooks/lib/worktree-keep-v1.js`**, which deletes `GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`
+`hooks/lib/git-environment-v1.js`**, which deletes `GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`
 and the other discovery and config variables of its `GIT_ENV_SCRUB` and sets
 `GIT_TERMINAL_PROMPT=0`. Measured against git 2.51.0: with `GIT_DIR` exported,
 `rev-parse --git-common-dir` answers that repository from any folder, one in no repository
 included, so every repository verdict of `takeover` would read the same repository. The list has
-one owner, and `gitChildEnvironment` fails with the plugin-tree-incomplete diagnostic when that
-module cannot be loaded, so every sandbox that stages `trail.mjs` (`mutant_path` and
-`cont_mutant` in `test-session-trail-verdict.sh`) copies it beside `claude-path-v1.js`. `CH13`
-there pins it: `CH7`'s takeover run from another repository with `GIT_DIR` and with
-`GIT_COMMON_DIR` exported gives the verdicts of the run without them.
+one owner, that library, which requires no other file so the Session Hub companion can vendor it
+byte for byte. `hooks/lib/worktree-keep-v1.js` takes both names from it and re-exports them, so
+its own git children and its exported API are unchanged. `gitChildEnvironment` fails with the
+plugin-tree-incomplete diagnostic, naming the library, when it cannot be loaded, so every sandbox
+that stages `trail.mjs` (`mutant_path`, `cont_mutant` and the `OM` sandbox in
+`test-session-trail-verdict.sh`) copies it beside `claude-path-v1.js`, and `$SBOX/plug` in
+`test-doctor.sh` copies it beside `worktree-keep-v1.js`. `CH13` there pins the scrub:
+`CH7`'s takeover run from another repository with `GIT_DIR` and with `GIT_COMMON_DIR` exported
+gives the verdicts of the run without them. The case `gitEnvironment and its scrub list come
+from git-environment-v1.js, …` in `tests/structure/worktree-keep-v1.test.js` pins the
+re-exported identity, the built-ins-only requires and `gitChildEnvironment`'s wiring.
 
 **MEASURED against git 2.51.0**, with a stat-dirty tracked file, the index mtime set to a fixed
 past time and a `core.fsmonitor` hook that logs each run:

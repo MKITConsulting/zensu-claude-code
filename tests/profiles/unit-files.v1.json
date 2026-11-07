@@ -341,7 +341,7 @@
       "summary": "The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative."
     },
     {
-      "path": "tests/structure/worktree-keep-v1.test.js", "registered": 101,
+      "path": "tests/structure/worktree-keep-v1.test.js", "registered": 102,
       "runs": [{ "driver": "tests/structure/test-worktree-keep.sh" }],
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },

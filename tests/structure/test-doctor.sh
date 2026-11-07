@@ -9587,6 +9587,7 @@ fi
 
 mkdir -p "$SBOX/plug/hooks/lib"
 cp "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js"
+cp "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$SBOX/plug/hooks/lib/git-environment-v1.js"
 WK_REPO="$SBOX/wk-repo"
 mkdir -p "$WK_REPO"
 git -C "$WK_REPO" init -q -b main >/dev/null 2>&1 || git -C "$WK_REPO" init -q >/dev/null 2>&1
