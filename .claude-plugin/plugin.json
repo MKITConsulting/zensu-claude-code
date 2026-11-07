@@ -23,6 +23,7 @@
     "./skills/autopilot-adopt",
     "./skills/autopilot-release",
     "./skills/bootstrap",
+    "./skills/change",
     "./skills/converge",
     "./skills/cover",
     "./skills/delivery-route",

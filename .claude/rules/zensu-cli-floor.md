@@ -24,7 +24,7 @@ list page. `FLOOR_REASON` says that in one sentence, and the doctor's old row re
 holds the Homebrew install and upgrade commands, `install.sh` and `install.ps1`. The doctor, the
 session banner, `/zensu:setup` and the work-order refusal in `probe()` of
 `hooks/lib/work-order-v1.js` read the module. Every prose copy — README Install and Requirements,
-the `docs/operations.md` troubleshooting row, the six skill prerequisites, `/zensu:setup`, the
+the `docs/operations.md` troubleshooting row, the seven skill prerequisites, `/zensu:setup`, the
 banner's literals and `docs/work-order-mode.md` — is pinned to it by `P10a`-`P10e` in
 `tests/structure/test-setup-skill.sh`. **Raising the floor is three edits, not one:** the constant,
 a new `FLOOR_REASON` that names what the releases below the new floor get wrong, and the prose
@@ -74,7 +74,7 @@ sits on the shrink-only allowlist of `tests/structure/test-skill-text-budget.sh`
 so the skill carries only a pointer to the reference. `P8z15` holds every row phrase against the
 report and the reference, and the pointer against the skill.
 
-**ghost-scan is the exception among the six skills.** Its body sits on the same allowlist at its
+**ghost-scan is the exception among the seven skills.** Its body sits on the same allowlist at its
 exact size, so its prerequisite line keeps the old line's length and names the floor and
 `/zensu:doctor` instead of the commands. Moving detail from that body into `references/` is what
 would make room for the full line.

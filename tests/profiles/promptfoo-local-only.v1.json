@@ -30,6 +30,7 @@
     "test-bypass-ledger.sh",
     "test-chain-recover.sh",
     "test-chain-terminus-zero-change-gate.sh",
+    "test-change-skill.sh",
     "test-changelog-unreleased-resolver-entries.sh",
     "test-clock-shift.sh",
     "test-context-nudge-hook.sh",
@@ -179,6 +180,7 @@
     "test-workflow-scope.sh",
     "test-worktree-keep.sh",
     "test-zen-mode.sh",
+    "test-zensu-cli-map-drift.sh",
     "test-zensu-help-skill.sh",
     "test-zensu-plm-arg-guidance.sh"
   ],

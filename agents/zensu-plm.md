@@ -25,7 +25,8 @@ mutation, open a workflow window, edit files, spawn another agent, or claim
 `main-v1`. You may analyze context made available to you and recommend the exact
 main-thread skill and ordered inputs. Any lifecycle mutation is performed by the
 top-level interactive thread through `/zensu:bootstrap`, `/zensu:ghost-scan`,
-`/zensu:implement`, `/zensu:security-review`, or the other matching skill. The
+`/zensu:change`, `/zensu:implement`, `/zensu:security-review`, or the other matching
+skill. The
 exceptions are the work-order and work-plan verbs the catalog marks: a **person**
 verb records the user's own decision, so the user runs it (Important Rule 13),
 and a **worker** or **session** verb is sent only by the work-order worker or by a
@@ -161,6 +162,8 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu wiki create` — Create a new wiki page (`--product`, `--title` and `--content` required); when a page already exists at the new page's path, it fails and names that page's id (an older CLI or server updates that page instead)
 - `zensu wiki update <page-id>` — Change an existing wiki page (`--content`, `--title`, `--change-summary`, `--visibility`)
 - `zensu wiki list --product <id>` — List wiki pages (`--json` carries each page's `id` and `path`)
+- `zensu wiki images upload --product <id> --file <path>` — Upload a local PNG, JPEG or WebP image without publishing it; the result's `wiki-asset:<uuid>` reference goes into a page's Markdown, and unused uploads expire
+- `zensu wiki images policy --product <id>` — Read the byte, pixel and dimension limits for wiki images
 
 ### Knowledge (Second-Brain)
 - `zensu knowledge context-pack <feature-ref> --json --agent claude-code` — Linked feature context, provenance and excerpts; inspect truncation and hydrate relevant real items before decisions
@@ -225,7 +228,7 @@ A brownfield repo whose plan/vision doc *also* describes not-yet-built features:
 1. Run the **ghost scan** workflow above — imports the built features.
 2. Diff the plan/vision doc against the applied features. For each plan item with no matching feature, run `zensu features create --product <id> --component <component-uuid> --title <title> --status planned` — it is genuinely unbuilt, so `planned` is correct and it gets its v1 only at implement-time.
 3. Present the new planned features for the user to prioritize.
-No separate skill — the hybrid is ghost-scan followed by direct `zensu features create` calls for the remainder.
+No separate skill for the hybrid itself: step 2 runs inside the ghost-scan window (its Phase 6), and a plan item added later goes through `/zensu:change`, one duplicate-checked planned feature per request.
 
 ### When the user asks about their dev session
 Use the `/zensu:pulse` skill workflow:
@@ -251,14 +254,15 @@ Never condense the context metadata straight into a wiki page — that is the fo
   |---|---|---|---|
   | no  | yes | —   | **bootstrap** (greenfield) |
   | yes | no  | —   | **ghost-scan** (brownfield) |
-  | yes | yes | yes | **hybrid** — ghost-scan, then `zensu features create --product <id> --component <component-uuid> --title <title> --status planned` for plan items the scan did not match |
+  | yes | yes | yes | **hybrid** — ghost-scan, then `zensu features create --product <id> --component <component-uuid> --title <title> --status planned` in its Phase 6 for plan items the scan did not match; a later item goes through **change** |
   | no  | no  | —   | ask for a vision/description, then **bootstrap** |
+- When a user asks for ONE change to a product already tracked in Zensu — a new feature, a subfeature, a revision, a roadmap, milestone or roadmap entry, a tier or tier assignment, a journey or journey step, a mock, a link, a classification, a deprecation, split, merge or promotion, a decision on one Ghost candidate, a wiki page or image, or a repository import → skip the triage and recommend the **change** workflow (`/zensu:change`), which checks for a duplicate before a create and asks before a command that removes or replaces data
 - When a user mentions a specific feature ID (KEY-N, e.g. ZEN-42) and wants to code → start **implement** workflow
 - When a user asks about security of a feature → start **security review** workflow
 - When a user wants to import or scan an existing codebase → start **ghost scan** workflow
 - When a user asks "what did I work on?" or starts/ends a session → use **pulse** commands
 - When a user asks about release readiness → use `zensu security validate` and `zensu journeys health`
-- When a user asks about tier pricing → use the tier commands (`zensu tiers create`, `zensu tiers set-feature`, `zensu tiers matrix`)
+- When a user asks about tier pricing → read `zensu tiers matrix`, and run a tier change (`zensu tiers create`, `zensu tiers set-feature`) through `/zensu:change`
 - When a user wants to dispatch autonomous work or follow a work plan → use the `zensu plan` and `zensu work` commands; the verbs marked **person** are the user's to run (Important Rule 13)
 - Before advising on a tracked feature, request the loaded context package and hydrated evidence from the main thread. For a topic without a feature reference, request a supplementary `zensu knowledge search --query <text> --json` result.
 - When a user wants to document a feature or generate a wiki page → follow the **documentation** procedure (`docs/documentation-guide.md`): get context, **read the source**, author, publish

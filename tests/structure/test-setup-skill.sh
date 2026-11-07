@@ -173,11 +173,11 @@ else
 fi
 ZC_FULL="- Zensu CLI $ZC_FLOOR or later on \`PATH\`: \`$ZC_BREW\`, \`$ZC_SCRIPT\`, or on Windows \`$ZC_PS\`; upgrade with \`$ZC_BREW_UP\` or by running the installer again"
 ZC_SKILLS_BAD=""
-for zc_skill in bootstrap implement pulse security-review docs; do
+for zc_skill in bootstrap implement pulse security-review docs change; do
   grep -qF -- "$ZC_FULL" "$PLUGIN_DIR/skills/$zc_skill/SKILL.md" || ZC_SKILLS_BAD="$ZC_SKILLS_BAD $zc_skill"
 done
 grep -qF -- "- Zensu CLI $ZC_FLOOR or later on \`PATH\`; see \`/zensu:doctor\` for install/upgrade hints" "$PLUGIN_DIR/skills/ghost-scan/SKILL.md" || ZC_SKILLS_BAD="$ZC_SKILLS_BAD ghost-scan"
-[ -n "$ZC_FLOOR" ] && [ -z "$ZC_SKILLS_BAD" ] && check "P10c the six skill prerequisites name the module's floor; five name the install commands and ghost-scan, on the shrink-only body allowlist, names /zensu:doctor" PASS \
+[ -n "$ZC_FLOOR" ] && [ -z "$ZC_SKILLS_BAD" ] && check "P10c the seven skill prerequisites name the module's floor; six name the install commands and ghost-scan, on the shrink-only body allowlist, names /zensu:doctor" PASS \
   || check "P10c a skill prerequisite does not match the module's floor or install commands:$ZC_SKILLS_BAD" FAIL
 ZC_STALE="$(grep -lF 'Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`)' "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null | tr '\n' ' ')"
 [ -z "$ZC_STALE" ] && check "P10d no skill keeps the curl-only install prerequisite" PASS || check "P10d a skill keeps the curl-only install prerequisite: $ZC_STALE" FAIL
