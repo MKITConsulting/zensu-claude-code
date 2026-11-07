@@ -4,8 +4,9 @@ Status: draft, 2026-11-07. Nothing described here is implemented. The spec plans
 ship from different repositories: the plugin (this repository), its ports to other hosts, the
 `zensu` CLI, and the Zensu service with its web viewer. For the CLI and the service it fixes
 behavior and contract only; this repository is public, so it names no internal module of either.
-Decisions 1 to 4 were taken on 2026-11-04 and decisions 6 to 8 on 2026-11-07; decision 5 stays
-open (§10).
+Decisions 1 to 4 were taken on 2026-11-04 and decisions 6 to 8 on 2026-11-07; decision 5 is
+partly open and decision 9 open (§10). §12 records how far a Zensu feature's acceptance criteria
+reach the plugin today.
 
 **Zensu is optional, on every host.** Every run writes its report locally without a Zensu account,
 without a network and without a forge CLI. Zensu adds one optional destination: nothing in a run
@@ -103,7 +104,7 @@ The Zensu service:
 | AC-024 | Finalize verifies every file's SHA-256 and re-runs the checks of AC-003 and AC-004 on the uploaded manifest. A report that fails stays unfinalized and the answer names each fault. An open report that is not finalized within its tier's open time, at least 7 days, expires. | spec |
 | AC-025 | A report is readable by the feature's readers and uploadable by the product's writers. Upload, finalize and deletion are audited. A deletion removes the report and every file no other report references. | spec |
 | AC-026 | The web application lists a feature's reports newest first, shows a report with its coverage matrix first, escapes every string, and compares two reports of one feature criterion by criterion. | spec |
-| AC-027 | A finalized report appears on its feature, on each criterion row the feature knows, at its commit, and on the review screen of the AI-work result it names. | spec |
+| AC-027 | A finalized report appears on its feature, on each requirement row its criteria name by Zensu ref, at its commit, and on the review screen of the AI-work result it names. A ref the feature does not hold is reported and left unlinked. | spec |
 | AC-028 | Every cap beyond the fixed protocol caps of 50 MiB per file and 2,000 files per report is set per tier (decision 5, §10). The open answer carries the tier's caps and their current use; a refused upload names the cap it hit and the use, and the plugin relays that text unchanged. | spec |
 
 ## 5. Out of scope
@@ -216,6 +217,7 @@ escapes every string, and the only formatting text may carry is inline code in b
         "driver": "browser",
         "record": "av1_…",
         "evidence_run": null,
+        "zensu": { "feature": "<feature id>", "ref": "AC-001" },
         "steps": [1],
         "note": "The record's evidence text."
       }
@@ -263,6 +265,8 @@ Field rules:
 - `coverage.source` is `acceptance-records` in chain mode and `matrix` otherwise. `state` is one
   of `pass`, `fail`, `partial`, `missing`, `stale` and `deprecated`; `record` is `null` in matrix
   mode.
+- `coverage.criteria[].zensu` names the Zensu feature and the requirement ref a criterion came
+  from. It is `null` for a criterion that exists only in the plan or the request (§12).
 - `steps[].result` is `pass`, `fail` or `skip`.
 - `files[].viewport` holds the viewport or window size in CSS or device-independent pixels and the
   scale factor at capture. It is `null` for a text file and where the driver cannot tell.
@@ -569,7 +573,9 @@ repeated open lists only what is still missing.
 Finalize verifies every file's SHA-256, validates the manifest against schema version 1, and
 re-runs the checks of AC-003 and AC-004. The service's implementation is its own, but its suite
 runs the conformance corpus of AC-019, vendored from this repository, so the plugin and the
-service accept and refuse the same reports. A finalized report is immutable.
+service accept and refuse the same reports. A finalized report is immutable. Every criterion
+that carries a Zensu ref is matched to the feature's requirement row of that ref; whether
+finalize also sets that row's verification is decision 9.
 
 ### 8.5 The viewer in the Zensu web application
 
@@ -582,8 +588,8 @@ service accept and refuse the same reports. A finalized report is immutable.
 - **Comparison:** two reports of one feature, criterion by criterion, so a criterion that went
   from `pass` to `fail` stands out, with the images of steps that share a title side by side when
   their viewport and scale factor match.
-- **Criteria:** where Zensu knows the feature's criterion ids, each criterion shows its latest
-  state and links to the report behind it.
+- **Criteria:** each requirement row a report names by ref shows the latest report's state for it
+  and links to that report.
 - **AI-work review:** the review screen of a result shows the reports linked to it. Accepting the
   result stays a human decision.
 - **Rendering:** every string escaped, inline code the only formatting, images served through
@@ -700,9 +706,14 @@ Zensu.
 **Step 10 — Autopilot VALIDATE** writes the same report for the evidence it captures per
 criterion.
 
+**Step 11 — Zensu requirements wiring** (service, CLI and plugin).
+
+- The six items of §12, in their order. Steps 1 to 10 do not wait for them: until they land, a
+  report's criteria carry no Zensu ref and link to no requirement row.
+
 Dependencies: step 1 before steps 2 and 4, step 2 before steps 3 and 10; step 5 before steps 6
 and 7, step 7 before step 8; step 9 after steps 1 to 3, with each port's summary after step 4 and
-its upload after step 8.
+its upload after step 8. Step 11 runs alongside; the write-back of decision 9 needs it.
 
 ## 10. Decisions
 
@@ -746,6 +757,13 @@ costs and what it rejected.
 8. **Uploads under a personal login only in version 1**, as for AI-work capture. Rejected for now:
    API keys, CI tokens and work-order session tokens. A later version may let a work-order token
    upload for its own order's feature.
+9. **Still open: does a report set a Zensu requirement's verification?** Recommended: yes. For
+   each criterion with a Zensu ref that a finalized report decided, finalize sets the row's
+   verification to `verified` or `failed` with source `agent` and a link to the report; `partial`
+   leaves the row unchanged. A person can override or waive, and a later report replaces an
+   earlier agent verdict but never a manual one. It costs a service write path that does not
+   exist yet (§12). Rejected: only proposing a verdict for a person to confirm, which turns every
+   run into review work; and never writing back, which leaves the rows unverified.
 
 ## 11. Known gaps
 
@@ -766,6 +784,42 @@ costs and what it rejected.
 - **A report is a snapshot.** It shows what held on its tree. The summary names head and tree, so
   a reader can tell it from the current state.
 - **Codex and Kiro wait** for their verify-feature ports before they can produce a report.
+
+## 12. Acceptance criteria from Zensu
+
+A feature's acceptance criteria are what verify-feature has to prove, so a user who works with
+Zensu expects the criteria stored on the feature to reach the run, and the run's result to flow
+back. A read-only audit on 2026-11-07 found that only the storage exists:
+
+| Link | State on 2026-11-07 |
+|---|---|
+| The service stores the criteria | **Exists.** A feature holds requirement rows of kind acceptance or functional, each with a stable ref (`AC-###` or `FR-###`), a state (draft, agreed, deprecated), a verification method, and a verification status (unverified, verified, failed, waived) with its source (test, manual, agent). Both kinds take their numbers from one sequence per feature, so one feature's refs can read `AC-001`, `FR-002`, `AC-003`. |
+| The service accepts a verification | **Missing.** No request sets the verification status. |
+| The CLI reads or writes the rows | **Missing.** No `zensu` verb reaches them. |
+| The plugin imports them into the plan | **Missing.** `/zensu:implement`, `/zensu:pilot` and `/zensu:build` build the plan's `## Requirements` table without them, and no plan row keeps a feature id or a Zensu ref. |
+| verify-feature verifies them | **Partial.** Chain mode verifies the plan's `AC-###` rows; a standalone run reads a feature id as free text. |
+| Results flow back to Zensu | **Missing.** |
+
+What this spec contributes: the manifest's `coverage.criteria[].zensu` field carries the feature
+and the ref of every criterion that came from Zensu, finalize links those criteria to their rows
+(AC-027), and decision 9 decides whether it also sets their verification.
+
+What has to happen elsewhere, in this order:
+
+1. **Service:** a request that sets a row's verification status with its source and the report or
+   test behind it, and writes an audit entry; a waiver keeps its reason.
+2. **CLI:** a `requirements` group that lists, reads, verifies and waives a feature's rows.
+3. **Plugin, import:** `/zensu:implement`, `/zensu:pilot` and `/zensu:build` import a feature's
+   agreed, non-deprecated rows into the plan table. A row keeps the service's ref as its id,
+   because the service numbers both kinds from one sequence, and names `zensu:<feature id>` in the
+   `Source` column.
+4. **verify-feature:** a run given a Zensu feature id without a plan reads that feature's rows as
+   its criteria.
+5. **Write-back:** decision 9, through the Zensu upload of §6.10 or the CLI group of item 2.
+6. **Work orders** still read the feature's older free-text criteria; they move to the rows.
+
+None of this blocks §6. Until it lands, a report's criteria carry no Zensu ref, and the report
+works with and without Zensu as before.
 
 ## Appendix A — Measurements of 2026-11-03
 
