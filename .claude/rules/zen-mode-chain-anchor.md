@@ -398,9 +398,15 @@ line of the library spells a marker directory, and that each reader resolves thr
 from the ambient `CLAUDE_PROJECT_DIR` instead, it paired the recorded root's marker with another
 tree's overlay: `--status` from a Bash tool without that variable answered `on` for a project whose
 overlay sets `zenModeDefault: false`, and the doctor and the hook did the same under a harness root
-other than the recorded one. `Z107e` drives all three. The `hooks.zenMode` checks stay
-harness-anchored, as `autoTdd` and its siblings do in the delivery-route hooks; moving them is its
-own change. The SessionStart banner keeps the argument-free form, because it discloses the
+other than the recorded one. `Z107e` drives all three. The hook's and the doctor's `hooks.zenMode`
+checks stay harness-anchored, as `autoTdd` and its siblings do in the delivery-route hooks; moving
+them is its own change. `--status` runs that check under whatever `CLAUDE_PROJECT_DIR` it gets, and
+`/zensu:zen-mode` renders it with the recorded root, because the Bash tool may not carry the
+variable; `Z107f` runs the rendered command. That rendering, the `--status` paragraph of the skill,
+the `zenModeDefault` row of `docs/configuration.md` and the doctor's row for a state it cannot read
+state it together and move together. After `/zensu:adopt-session --reanchor` the recorded root is
+not the directory the host set, so on that one key `--status` can disagree with the hook and the
+doctor until their checks move too. The SessionStart banner keeps the argument-free form, because it discloses the
 configured default rather than a session's resolution.
 
 **TWO WRITERS LAND THAT MARKER, and hardening one of them left the guarantee false.**
@@ -538,7 +544,7 @@ with no chain armed and measures the none variant (3720, ceiling 3770). Both var
 characters when rules (1) to (3) became the result-first rule and the closing session block, by
 78 more when the lead turned neutral and rules (4) and (5) gained the precedence and question-set
 clauses, and by 42 more when the carve-out's last sentence took the safety-warning wording that
-`Z110` pins across the skill, `docs/precedence.md` and this directive. Both measure through
+`Z110` pins across the skill, `docs/precedence.md`, this directive and its short body. Both measure through
 `node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
 code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
 directions: growth past the ceiling fails, and so does a shrink further below it than the

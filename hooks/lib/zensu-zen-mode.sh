@@ -220,7 +220,7 @@ case "$ZEN_VERB" in
     # two-word stdout contract is kept and the reason goes to stderr, matching the
     # untraversable arm below.
     if ! zensu_hook_enabled zenMode; then
-      echo "zensu-zen-mode.sh: the re-injection hook is disabled by hooks.zenMode, so no prompt receives the mode" >&2
+      echo "zensu-zen-mode.sh: hooks.zenMode is false in the config this check read, which keeps the re-injection hook off wherever it reads the same config" >&2
       echo "off"
     elif zen_mode_resolve "$_zensu_status_root" "$_zensu_status_key"; then
       echo "on"

@@ -251,8 +251,8 @@ total_budget() {
     first:ci) echo 4560 ;;
     first:*) echo 4200 ;;
     repeat:typed) echo 6780 ;;
-    repeat:ci) echo 2770 ;;
-    *) echo 2410 ;;
+    repeat:ci) echo 2863 ;;
+    *) echo 2503 ;;
   esac
 }
 

@@ -6,8 +6,8 @@ set -u
 # spends API credits, and asserts nothing about model behaviour.
 #
 # The load-bearing check is P8. Each scenario embeds the hook's injected
-# `additionalContext` as a copy, because a fresh `claude --print` session carries
-# no zen-mode marker and the real UserPromptSubmit hook therefore never fires. A
+# `additionalContext` as a copy, because the suite's provider switches the
+# installed runtime off, so no real zen-mode hook fires in a run. A
 # copy silently drifts from its source, and a drifted copy grades wording that no
 # user ever receives — which would be worse than having no eval, since it reports
 # green. P8 re-derives the directive from hooks/user-prompt-zen-mode.sh and
@@ -32,6 +32,9 @@ SCENARIOS=()
 while IFS= read -r _sc; do SCENARIOS+=("$_sc"); done < <(find "$EVAL_DIR/scenarios" -maxdepth 1 -name '*.yaml' | sort)
 HOOK="$PLUGIN_DIR/hooks/user-prompt-zen-mode.sh"
 WRAPPER="$PLUGIN_DIR/scripts/claude-promptfoo-wrapper.sh"
+PROVIDER="$EVAL_DIR/provider.sh"
+DENY_TOOLS="$EVAL_DIR/lib/deny-tools.js"
+EVAL_CONFIG="$EVAL_DIR/eval-config.json"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
 
 PASS=0; FAIL=0
@@ -72,9 +75,9 @@ for f in "$README" "$FIXTURE" "$IGNORE" "$HOOK" "${SCENARIOS[@]}"; do
   fi
 done
 
-grep -qF 'claude-promptfoo-wrapper.sh' "$CFG" \
-  && check "P2 promptfooconfig references claude-promptfoo-wrapper.sh provider" PASS \
-  || check "P2 promptfooconfig references claude-promptfoo-wrapper.sh provider" FAIL
+grep -qF "id: 'exec: ./provider.sh'" "$CFG" \
+  && check "P2 promptfooconfig runs every scenario through the suite's own provider.sh" PASS \
+  || check "P2 promptfooconfig runs every scenario through the suite's own provider.sh" FAIL
 
 grep -qF './test-projects/empty-host' "$CFG" \
   && check "P3 promptfooconfig points at test-projects/empty-host fixture" PASS \
@@ -197,7 +200,7 @@ if command -v node >/dev/null 2>&1; then
     try {
       registered = (fs.readFileSync(process.env.CFG, "utf8").match(/file:\/\/scenarios\/[^\s]+\.yaml/g) || []).length;
     } catch (_) { process.stdout.write("config-unreadable"); process.exit(0); }
-    if (registered < 12) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
+    if (registered < 14) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
     if (scenarios.length < registered) {
       process.stdout.write("directory-has-" + scenarios.length + "-scenarios-but-config-registers-" + registered);
       process.exit(0);
@@ -292,8 +295,9 @@ grep -qF 'ratio < 0.03' "$SC_PRECEDENCE" || PREC_BAD="$PREC_BAD user-style-not-g
 [ -z "$PREC_BAD" ] && check "P10 precedence scenario pits a style mode the user chose against zen-mode and grades the user's style as the winner" PASS \
   || check "P10 precedence scenario:$PREC_BAD" FAIL
 
-[ -x "$WRAPPER" ] && check "P11 referenced provider script exists and is executable" PASS \
-  || check "P11 referenced provider script exists and is executable" FAIL
+[ -x "$PROVIDER" ] && [ -x "$WRAPPER" ] && grep -qF 'scripts/claude-promptfoo-wrapper.sh' "$PROVIDER" \
+  && check "P11 provider.sh is executable and hands each run to the executable claude-promptfoo-wrapper.sh" PASS \
+  || check "P11 provider.sh is executable and hands each run to the executable claude-promptfoo-wrapper.sh" FAIL
 
 if command -v node >/dev/null 2>&1; then
   CFG_N="$(command -v cygpath >/dev/null 2>&1 && cygpath -m "$CFG" || printf '%s' "$CFG")"
@@ -355,6 +359,71 @@ grep -qiF 'NOT a CI gate' "$README" || README_BAD="$README_BAD no-advisory-note"
 grep -qF 'promptfoo eval -c promptfooconfig.yaml' "$README" || README_BAD="$README_BAD no-run-command"
 [ -z "$README_BAD" ] && check "P14 README documents the run command, the cost, and the advisory status" PASS \
   || check "P14 README:$README_BAD" FAIL
+
+if command -v node >/dev/null 2>&1; then
+  P15_HOME="$(mktemp -d -t zen-provider-XXXXXX)"
+  printf '%s' '{"enabledPlugins":{"zensu@zensu":true,"other@market":true,"off@market":false}}' > "$P15_HOME/settings.json"
+  P15_OUT="$(ZEN_EVAL_DRY_RUN=1 ZEN_EVAL_CLAUDE_HOME="$P15_HOME" bash "$PROVIDER" 'probe prompt' '{}' 2>/dev/null)"
+  P15_RC=$?
+  rm -rf "$P15_HOME"
+  P15_VERDICT="$(printf '%s' "$P15_OUT" | node -e '
+    const fs = require("fs");
+    const [deny, config] = process.argv.slice(1).map((p) => fs.realpathSync(p));
+    let s = "";
+    process.stdin.on("data", (c) => { s += c; }).on("end", () => {
+      const prefix = "ZEN_EVAL_DRY_RUN: settings ";
+      const line = s.split("\n").find((l) => l.startsWith(prefix));
+      if (!line) { process.stdout.write("no-settings-line"); return; }
+      let j;
+      try { j = JSON.parse(line.slice(prefix.length)); } catch (_) { process.stdout.write("settings-not-json"); return; }
+      const bad = [];
+      if (Object.keys(j).sort().join(",") !== "enabledPlugins,env,hooks") bad.push("top-level-keys");
+      if (!j.env || j.env.ZENSU_CONFIG !== config) bad.push("env-zensu-config");
+      const plugins = j.enabledPlugins || {};
+      if (plugins["zensu@zensu"] !== false) bad.push("zensu-plugin-on");
+      if (plugins["other@market"] !== false) bad.push("other-plugin-on");
+      if (Object.keys(j.hooks || {}).join(",") !== "PreToolUse") bad.push("hook-events");
+      const pre = (j.hooks && j.hooks.PreToolUse) || [];
+      const one = pre.length === 1 && pre[0].matcher === "*" && Array.isArray(pre[0].hooks) && pre[0].hooks.length === 1 ? pre[0].hooks[0] : null;
+      if (!one || one.type !== "command" || one.command !== "node '"'"'" + deny + "'"'"'") bad.push("deny-hook");
+      let cfg = null;
+      try { cfg = JSON.parse(fs.readFileSync(config, "utf8")); } catch (_) {}
+      const keys = cfg && cfg.hooks && typeof cfg.hooks === "object" ? Object.keys(cfg.hooks) : [];
+      if (!keys.includes("zenMode") || keys.some((k) => cfg.hooks[k] !== false)) bad.push("eval-config");
+      process.stdout.write(bad.length ? bad.join(" ") : "OK");
+    });
+  ' "$DENY_TOOLS" "$EVAL_CONFIG" 2>/dev/null)"
+  if [ "$P15_RC" -eq 0 ] && [ "$P15_VERDICT" = "OK" ]; then
+    check "P15 provider.sh writes run settings that switch every enabled plugin off, zensu@zensu included, point ZENSU_CONFIG at eval-config.json, which switches every Zensu hook it lists off, and deny every tool call" PASS
+  else
+    check "P15 provider run settings (exit $P15_RC): ${P15_VERDICT:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  check "P15 provider settings check did not run — node is not on PATH" FAIL
+fi
+
+if command -v node >/dev/null 2>&1; then
+  P16_OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"true"}}' | node "$DENY_TOOLS" 2>/dev/null)"
+  P16_RC=$?
+  P16_VERDICT="$(printf '%s' "$P16_OUT" | node -e '
+    let s = "";
+    process.stdin.on("data", (c) => { s += c; }).on("end", () => {
+      let j;
+      try { j = JSON.parse(s); } catch (_) { process.stdout.write("not-json"); return; }
+      const h = j && j.hookSpecificOutput;
+      const ok = h && h.hookEventName === "PreToolUse" && h.permissionDecision === "deny"
+        && typeof h.permissionDecisionReason === "string" && h.permissionDecisionReason.length > 0;
+      process.stdout.write(ok ? "OK" : "not-a-deny");
+    });
+  ' 2>/dev/null)"
+  if [ "$P16_RC" -eq 0 ] && [ "$P16_VERDICT" = "OK" ]; then
+    check "P16 lib/deny-tools.js answers a PreToolUse call with a deny decision and a reason" PASS
+  else
+    check "P16 deny-tools answer (exit $P16_RC): ${P16_VERDICT:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  check "P16 deny-tools check did not run — node is not on PATH" FAIL
+fi
 
 echo "----"
 echo "test-promptfoo-zen-mode: $PASS PASS / $FAIL FAIL"
