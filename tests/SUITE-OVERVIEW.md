@@ -289,7 +289,7 @@ together with the session-trail handover contract that command is spelled in and
 `session-hub-usage-feed` pins the Session Hub's usage-feed contract byte for byte, the
 `modules` entry of `hooks/hooks.json`, and the shape of `hooks/usage-feed.ts` against that
 contract: its two constants, the keys of its record and of each reading, the engine calls and
-environment names it reaches, the one event it hooks and its type-only imports. It reads the
+environment names it reaches, the two events it hooks and its type-only imports. It reads the
 module as text, because CI has no Claude Code to load it. The module's behaviour is tested by
 `tests/mods/usage-feed.test.ts` under `claude plugin test .`, which runs only where a Claude Code
 of at least 2.1.296 is installed and is not part of `run-all.sh`.
