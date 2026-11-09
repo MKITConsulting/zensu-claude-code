@@ -107,6 +107,20 @@ a test that can do neither. The same
 command takes unit files as arguments for a local check, for example
 `node tests/run-clock-shift.js tests/structure/full-suite-ci-v1.test.js`.
 
+`playwright-cli-drift.yml` also runs once a day and on manual dispatch, on Ubuntu only, and
+runs no suite. Its `drift` job keeps the read-only token and runs
+`.github/scripts/playwright-cli-drift.sh`, which reads the npm registry metadata of
+`@playwright/cli` with one `curl` and never installs or runs the package. When the highest
+stable version there is newer than `PLAYWRIGHT_CLI_SOURCE_VERSION`, the version the browser
+consent gate's parser port was measured against, the `drift-issue` job, which holds
+`issues: write` and nothing else, opens or rewrites the issue labelled `playwright-cli-drift`
+with the steps to re-record `tests/structure/fixtures/playwright-cli-argv.v1.json` locally,
+and it closes that issue once the measured version is the newest again. A red scheduled run
+comments on or opens the issue labelled `playwright-cli-drift-check`.
+`test-playwright-cli-drift.sh` guards the workflow graph, runs the script against fixture
+metadata and the two issue steps against a fake `gh`, and runs three mutants that its own
+cases must catch.
+
 ## Suites
 
 | Path | Kind | Covers |

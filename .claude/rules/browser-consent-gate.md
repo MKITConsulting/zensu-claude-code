@@ -23,6 +23,9 @@ paths:
   - "tests/structure/playwright-cli-version-v1.test.js"
   - "tests/structure/fixtures/playwright-cli-argv.v1.json"
   - "tests/structure/fixtures/record-playwright-cli-argv.js"
+  - ".github/workflows/playwright-cli-drift.yml"
+  - ".github/scripts/playwright-cli-drift.sh"
+  - "tests/structure/test-playwright-cli-drift.sh"
   - "docs/verify-feature.md"
   - "docs/verify-feature-consent-spec.md"
   - "evals/verify-feature/**"
@@ -414,7 +417,9 @@ announces a prompt rather than a capability the plugin hands itself.
   troubleshooting row carries that form — the doctor skill and the autopilot config rule; `P7h`
   pins the fenced install line of `docs/verify-feature.md`, the golden-recording sentence of
   `docs/gates.md` and the eval README. No check reads this file's copies. The MSYS boundary suite
-  derives it from the module.
+  derives it from the module, and so does `.github/scripts/playwright-cli-drift.sh` (see "The
+  release signal" below), whose report names the recorder, the fixture, the module and
+  `tests/structure/test-verify-consent.sh`; `PD14` fails when one of those paths moves.
 - `SESSION_PREFIX`, `SESSION_RE`, `RUN_CONFIG_NAME`, `RUN_OUTPUT_DIR_NAME`, `MAX_RUN_ORIGINS` and
   `runConfigShape` are consumed by the helper FROM the module, never re-spelled.
 - The `PATH` walk of `hooks/lib/playwright-cli-version-v1.js` — `findBinary` and its `cwd-relative`
@@ -496,6 +501,40 @@ announces a prompt rather than a capability the plugin hands itself.
   `Zensu capability gate (reviewer-capability-v1) deny:` reason stays deterministic (`scripts/session-control-claude-wrapper.sh`,
   `evals/session-control/lib/live-evidence.js`, `evals/session-control/tests/wrapper-selftest.sh`,
   `tests/structure/test-windows-portability-guards.sh`).
+
+**The release signal (`.github/workflows/playwright-cli-drift.yml`).** No live tier runs
+`playwright-cli`, and none is needed: the parser port is pinned by a fixture recorded from the
+real CLI, and the gate denies an argument shape it does not recognize. What goes stale is the
+knowledge that a newer release exists, and a nightly check supplies only that. Its `drift` job
+keeps the read-only token and runs `.github/scripts/playwright-cli-drift.sh`, which reads the
+abbreviated npm registry metadata of `@playwright/cli` with one `curl`, takes
+`PLAYWRIGHT_CLI_SOURCE_VERSION` and `PACKAGE_NAME` from the two modules, never from a copy, and
+prints a report whose first line is `<!-- zensu-playwright-cli-drift playwright-cli=X.Y.Z -->`
+when the highest stable version, compared by number, is above the measured one. A prerelease
+never counts, and the script never installs, downloads or runs the package. Every value it uses
+is validated first: the package name, every version key through `validVersion`, and each
+entry's own name and version. The report therefore carries no upstream text but version
+numbers, and it spells `@playwright/cli` only inside code spans, because GitHub notifies the
+owner of a bare `@name`. The check fails, and the run turns red, when the metadata cannot be
+read or do not parse, describe another package, carry a key that is not a semantic version or
+an entry that names another version, or do not list the measured version: an unpublished
+measured version breaks the pinned install command. The `drift-issue` job holds
+`issues: write` and nothing else, checks out nothing and runs only after a successful drift
+job; it opens the issue labelled `playwright-cli-drift`, rewrites it when the marker changes,
+and closes it when the report is empty. A red scheduled run comments on or opens the issue
+labelled `playwright-cli-drift-check`; the label, not the title, finds each issue. One
+concurrency group serializes every run, so a dispatch and the nightly run never race on an
+issue. A dispatch runs both jobs on the ref it names, so a dispatch from a branch writes the
+issue from that branch's constant until the next nightly run on `main` corrects it. Not read:
+`dist-tags`, publish times and deprecations. `tests/structure/test-playwright-cli-drift.sh`
+pins the workflow graph, runs the script against fixture metadata with spies that admit one
+`curl` and no package manager, archiver or CLI, runs the compare, issue and red-run steps
+against a fake `gh`, and requires three mutants (release order by text, an unanchored stable
+filter, a whole-body marker match) to give the wrong answer their cases refuse. Like
+`tests/structure/test-gitlab-live-workflow.sh`, the guard of the GitLab `drift` and
+`drift-issue` jobs this workflow is modelled on, it skips its executed checks on Git Bash.
+**Release class: `patch`**: CI and tests only, and `.github/` is outside the Session Control
+runtime digest.
 
 Operator-facing accounts: `docs/gates.md` §"Browser Consent Gate", `docs/verify-feature.md`, the
 current-behaviour opening of `docs/verify-feature-consent-spec.md`, both hook rows and the
@@ -594,7 +633,8 @@ retirement's, rides the same mechanism with no check of its own.
   they do not narrow this. A function or alias named `playwright-cli` that the shell already has
   is judged as the plain call its text shows, and no hook sees what it runs.
 - **Version drift is only partly fenced.** The driver is user-supplied: the plugin ships no pin and
-  no integrity check for `playwright-cli`. The one refusal is `checkReadiness` in the run-config
+  no integrity check for `playwright-cli`. The nightly release signal above says when npm lists
+  a newer stable release; it measures nothing. The one refusal is `checkReadiness` in the run-config
   helper, and BOTH entry points run it first: `checkPolicy` (the `--check-policy` preflight) and
   `run` (the write). It refuses unless `consentHookRegistered` and `consentRecorderRegistered`
   both answer `registered` and the `@playwright/cli` manifest of the `playwright-cli` on `PATH`
