@@ -73,8 +73,11 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" UserPromptSubmit || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 zensu_bind_hook_session "$INPUT" || exit 0
+[ -n "${ZENSU_SESSION_KEY:-}" ] || exit 0
+ZEN_ROOT="$(zensu_resolve_project_dir)" || exit 0
+[ -n "$ZEN_ROOT" ] || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
-zensu_hook_enabled zenMode || exit 0
+zensu_hook_enabled zenMode "$ZEN_ROOT" || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-bounded-run.sh"
 # THE ZEN-ONLY STATE PREDICATES. They used to sit in `zensu-session.sh`, which
@@ -388,10 +391,6 @@ zen_prompt_and_anchor() {
   '
   )
 }
-
-[ -n "${ZENSU_SESSION_KEY:-}" ] || exit 0
-ZEN_ROOT="$(zensu_resolve_project_dir)" || exit 0
-[ -n "$ZEN_ROOT" ] || exit 0
 
 zen_marker_path "$ZEN_ROOT" "$ZENSU_SESSION_KEY"
 
