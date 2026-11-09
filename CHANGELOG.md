@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill
+  prerequisites that name install commands, the README and `docs/operations.md` now give
+  `brew update && brew upgrade --cask mkitconsulting/tap/zensu` in place of
+  `brew upgrade --cask zensu`, the commands `docs/cli-install-update.md` and the AI-work capture
+  guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
+  passed, so on its own it can miss a new release.
+
 ## [0.36.0] - 2026-11-07
 
 ### Added

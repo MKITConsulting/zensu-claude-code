@@ -156,7 +156,8 @@ claude plugin update zensu@zensu
 ```
 
 Optional, for feature tracking: install zensu-cli 0.18.0 or later with
-`brew install --cask mkitconsulting/tap/zensu` (upgrade with `brew upgrade --cask zensu`),
+`brew install --cask mkitconsulting/tap/zensu` (upgrade with
+`brew update && brew upgrade --cask mkitconsulting/tap/zensu`),
 `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
 `irm https://zensu.dev/install.ps1 | iex`, then run `zensu auth login`.
 
