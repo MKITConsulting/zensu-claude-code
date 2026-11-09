@@ -248,14 +248,14 @@ if [ -n "${ZENSU_SESSION_TOKEN:-}" ]; then
 fi
 if command -v zensu >/dev/null 2>&1; then
   case "$_ZENSU_CLI_STATE" in
-    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release this plugin supports: older releases cannot declare a goal's feature, so AI-work capture fails. Upgrade: brew upgrade --cask zensu, or run the installer again: curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex." ;;
+    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release this plugin supports: older releases cannot declare a goal's feature, so AI-work capture fails. Upgrade: brew update && brew upgrade --cask mkitconsulting/tap/zensu, or run the installer again: curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex." ;;
     (ok) echo "zensu: CLI ready ($(command -v zensu), $_ZENSU_CLI_VERSION) — Zensu skills drive it.$_ZENSU_CLI_AUTH_HINT" ;;
     (*) echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it.$_ZENSU_CLI_AUTH_HINT" ;;
   esac
 else
   _ZENSU_CLI_NEED="it"
-  [ -n "$_ZENSU_CLI_FLOOR" ] && _ZENSU_CLI_NEED="zensu-cli $_ZENSU_CLI_FLOOR or later"
-  echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need $_ZENSU_CLI_NEED. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex$_ZENSU_CLI_LOGIN_STEP."
+  [ -n "$_ZENSU_CLI_FLOOR" ] && _ZENSU_CLI_NEED="zensu-cli $_ZENSU_CLI_FLOOR or later, the oldest release this plugin supports"
+  echo "zensu: ⚠ 'zensu' CLI not found on PATH — feature tracking and AI-work capture need $_ZENSU_CLI_NEED. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex$_ZENSU_CLI_LOGIN_STEP."
 fi
 echo "zensu: Hide this banner: set hooks.sessionBanner=false in ~/.zensu/config.json."
 }

@@ -434,7 +434,13 @@ mkdir -p "$ZC_FAKE" "$ZC_NODE_ONLY"
 printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "${ZENSU_NO_UPDATE_CHECK:-unset}" "$*" >> "$ZC_LOG"' 'printf "%s\n" "$ZC_VERSION_LINE"' > "$ZC_FAKE/zensu"
 chmod +x "$ZC_FAKE/zensu"
 ln -s "$(command -v node)" "$ZC_NODE_ONLY/node"
-ZC_FLOOR="$(node -e 'process.stdout.write(require(process.argv[1]).MIN_VERSION)' "$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js")"
+ZC_FACTS="$(node -e 'const m = require(process.argv[1]); process.stdout.write([m.MIN_VERSION, m.FLOOR_REASON, m.INSTALL.homebrew, m.INSTALL.homebrewUpgrade, m.INSTALL.script, m.INSTALL.powershell].join("\n"))' "$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js")"
+ZC_FLOOR="$(printf '%s\n' "$ZC_FACTS" | sed -n 1p)"
+ZC_REASON="$(printf '%s\n' "$ZC_FACTS" | sed -n 2p)"
+ZC_BREW="$(printf '%s\n' "$ZC_FACTS" | sed -n 3p)"
+ZC_BREW_UP="$(printf '%s\n' "$ZC_FACTS" | sed -n 4p)"
+ZC_SCRIPT="$(printf '%s\n' "$ZC_FACTS" | sed -n 5p)"
+ZC_PS="$(printf '%s\n' "$ZC_FACTS" | sed -n 6p)"
 zc_banner() {
   printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZENSU_NO_UPDATE_CHECK -u ZENSU_SESSION_TOKEN PATH="$1" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="$2" "${@:3}" bash "$BANNER" 2>/dev/null
 }
@@ -443,9 +449,9 @@ case "$(uname -s)" in
   *)
     ZC_OLD="$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" 'zensu 0.9.0 (commit abc1234, built now)')"
     case "$ZC_OLD" in
-      *"zensu CLI 0.9.0 ($ZC_FAKE/zensu) is older than $ZC_FLOOR"*'brew upgrade --cask zensu'*'curl -fsSL https://zensu.dev/install.sh | sh'*'irm https://zensu.dev/install.ps1 | iex'*)
-        check "B16a a CLI below the floor turns the CLI line into a warning with the floor and the upgrade commands" PASS ;;
-      *) check "B16a a CLI below the floor turns the CLI line into a warning with the floor and the upgrade commands" FAIL ;;
+      *"zensu CLI 0.9.0 ($ZC_FAKE/zensu) is older than $ZC_FLOOR, the oldest release this plugin supports: $ZC_REASON. Upgrade: $ZC_BREW_UP, or run the installer again: $ZC_SCRIPT, or on Windows $ZC_PS."*)
+        check "B16a a CLI below the floor turns the CLI line into a warning with the floor, the module's reason and its upgrade commands" PASS ;;
+      *) check "B16a a CLI below the floor turns the CLI line into a warning with the floor, the module's reason and its upgrade commands" FAIL ;;
     esac
     ZC_CALLS="$(tr '\n' ' ' < "$ZC_LOG" 2>/dev/null)"
     case "$ZC_CALLS" in
@@ -464,9 +470,9 @@ case "$(uname -s)" in
       check "B16d a zensu that PATH reaches through a relative entry is never run at session start" FAIL
     fi
     case "$(zc_banner "$ZC_NODE_ONLY:/usr/bin:/bin" '')" in
-      *"'zensu' CLI not found on PATH — Zensu skills need zensu-cli $ZC_FLOOR or later. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex"*)
-        check "B16e a missing CLI names the floor and the three install commands" PASS ;;
-      *) check "B16e a missing CLI names the floor and the three install commands" FAIL ;;
+      *"'zensu' CLI not found on PATH — feature tracking and AI-work capture need zensu-cli $ZC_FLOOR or later, the oldest release this plugin supports. Install: $ZC_BREW, $ZC_SCRIPT, or on Windows $ZC_PS"*)
+        check "B16e a missing CLI names what needs it, the floor this plugin supports and the module's three install commands" PASS ;;
+      *) check "B16e a missing CLI names what needs it, the floor this plugin supports and the module's three install commands" FAIL ;;
     esac
     ZC_READY_PLAIN="$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" "zensu $ZC_FLOOR (commit abc1234, built now)")"
     ZC_READY_TOKEN="$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" "zensu $ZC_FLOOR (commit abc1234, built now)" ZENSU_SESSION_TOKEN=zst_banner_case)"

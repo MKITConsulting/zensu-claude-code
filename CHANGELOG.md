@@ -17,15 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cli_incompatible` without capturing when it does not. 0.18.0 is the first release that declares
   them. The floor itself only warns; no gate reads the version. Check the installed release with
   `zensu --version`. A release below the floor has no `zensu update`, so upgrade through the
-  channel it was installed with: `brew upgrade --cask zensu` for a Homebrew install, or run the
-  installer again (`curl -fsSL https://zensu.dev/install.sh | sh`, on Windows
-  `irm https://zensu.dev/install.ps1 | iex`); `docs/cli-install-update.md` covers every channel.
-  Then update the plugin with
+  channel it was installed with: `brew update && brew upgrade --cask mkitconsulting/tap/zensu` for
+  a Homebrew install, or run the installer again (`curl -fsSL https://zensu.dev/install.sh | sh`,
+  on Windows `irm https://zensu.dev/install.ps1 | iex`); `docs/cli-install-update.md` covers every
+  channel. Then update the plugin with
   `claude plugin marketplace update zensu` and `claude plugin update zensu@zensu`. A goal begun
   with a release before 0.35.0 keeps a legacy receipt without feature scope, which cannot submit
   new results automatically: begin a new goal with `--feature <feature-uuid>`,
   `--maintenance-reason <reason>` or, for work that spans products,
   `--cross-product-reason <reason>`.
+- **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill
+  prerequisites that name install commands, the README and `docs/operations.md` now give
+  `brew update && brew upgrade --cask mkitconsulting/tap/zensu` in place of
+  `brew upgrade --cask zensu`, the commands `docs/cli-install-update.md` and the AI-work capture
+  guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
+  passed, so on its own it can miss a new release.
 - **Edit-landing receipts and review packets**: `--chain-done` now refuses to close a reviewed
   chain that changed files unless its edit-landing receipt is clean and fresh for the current
   tree, beside the full-suite and acceptance gates; `docs/gates.md` §"Terminal Edit-Landing Gate"
