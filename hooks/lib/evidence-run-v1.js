@@ -13,6 +13,7 @@ const SCHEMA = 'evidence-run-v1';
 const STORE_SEGMENTS = Object.freeze(['evidence-run', 'v1']);
 const SCOPES = Object.freeze(['full', 'lint', 'build', 'coverage', 'scoped', 'acceptance']);
 const TREE_SCOPES = Object.freeze(['full', 'scoped', 'acceptance']);
+const WORKFLOW_ARTIFACTS = Object.freeze(['state', 'logs', 'plans', 'reviews', 'verify-feature-runs', 'hook-events.log']);
 const TEST_SCOPES = Object.freeze(['full', 'scoped']);
 const RECORD_STATES = Object.freeze(['running', 'completed', 'interrupted']);
 const GATE_MODES = Object.freeze(['required', 'advisory']);
@@ -377,19 +378,27 @@ function runDirectory(projectRoot, requested, limits = LIMITS, workDirectory = n
   return { cwd: home, moved: true };
 }
 
-function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = []) {
-  const inside = git(projectRoot, ['rev-parse', '--is-inside-work-tree']);
+function artifactPathspecs(magic) {
+  return WORKFLOW_ARTIFACTS.flatMap((name) => [`${magic}**/.zensu/${name}`, `${magic}**/.zensu/${name}/**`]);
+}
+
+function computeTree(projectRoot, scratchDirectory, limits = LIMITS, options = {}) {
+  const everyDepth = options.workflowStateAtEveryDepth === true;
+  const excluded = Array.isArray(options.excluded) ? options.excluded : [];
+  const timeoutMs = limits.gitTimeoutMs;
+  const inside = git(projectRoot, ['rev-parse', '--is-inside-work-tree'], { timeoutMs });
   if (!inside.ok || inside.stdout.trim() !== 'true') return { tree: null, reason: 'not a git work tree' };
-  const prefix = git(projectRoot, ['rev-parse', '--show-prefix']);
+  const prefix = git(projectRoot, ['rev-parse', '--show-prefix'], { timeoutMs });
   if (!prefix.ok) return { tree: null, reason: prefix.reason };
-  const indexPath = git(projectRoot, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+  const indexPath = git(projectRoot, ['rev-parse', '--path-format=absolute', '--git-path', 'index'], { timeoutMs });
   if (!indexPath.ok) return { tree: null, reason: indexPath.reason };
-  const untracked = git(projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ':(exclude).zensu',
-    ...excluded.map((entry) => `:(exclude,literal)${entry}`)], { encoding: 'buffer' });
+  const untracked = git(projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.',
+    ...(everyDepth ? artifactPathspecs(':(exclude,glob)') : [':(exclude).zensu']),
+    ...excluded.map((entry) => `:(exclude,literal)${entry}`)], { encoding: 'buffer', timeoutMs });
   if (!untracked.ok) return { tree: null, reason: untracked.reason };
   const untrackedPaths = untracked.stdout.toString('utf8').split('\0').filter(Boolean);
   if (untrackedPaths.length > limits.untrackedMaxFiles) {
-    return { tree: null, reason: `more than ${limits.untrackedMaxFiles} untracked files` };
+    return { tree: null, reason: `more than ${limits.untrackedMaxFiles} untracked files`, limited: true };
   }
   let untrackedBytes = 0;
   for (const relative of untrackedPaths) {
@@ -397,7 +406,7 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = 
       untrackedBytes += fs.lstatSync(path.join(projectRoot, relative)).size;
     } catch { }
     if (untrackedBytes > limits.untrackedMaxBytes) {
-      return { tree: null, reason: `untracked files exceed ${Math.round(limits.untrackedMaxBytes / (1024 * 1024))} MiB` };
+      return { tree: null, reason: `untracked files exceed ${Math.round(limits.untrackedMaxBytes / (1024 * 1024))} MiB`, limited: true };
     }
   }
   const temporaryIndex = path.join(scratchDirectory, `index-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
@@ -409,13 +418,14 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = 
       fs.utimesSync(temporaryIndex, indexStat.atime, indexStat.mtime);
     }
     const env = { GIT_INDEX_FILE: temporaryIndex };
-    const added = git(projectRoot, ['add', '-A', '--', '.'], { env });
+    const added = git(projectRoot, ['add', '-A', '--', '.'], { env, timeoutMs });
     if (!added.ok) return { tree: null, reason: added.reason };
-    const pruned = git(projectRoot, ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '-q', '--', '.zensu',
-      ...excluded.map((entry) => `:(literal)${entry}`)], { env });
+    const pruned = git(projectRoot, ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '-q', '--',
+      ...(everyDepth ? artifactPathspecs(':(glob)') : ['.zensu']),
+      ...excluded.map((entry) => `:(literal)${entry}`)], { env, timeoutMs });
     if (!pruned.ok) return { tree: null, reason: pruned.reason };
     const relativePrefix = prefix.stdout.trim();
-    const written = git(projectRoot, relativePrefix ? ['write-tree', `--prefix=${relativePrefix}`] : ['write-tree'], { env });
+    const written = git(projectRoot, relativePrefix ? ['write-tree', `--prefix=${relativePrefix}`] : ['write-tree'], { env, timeoutMs });
     if (!written.ok) return { tree: null, reason: written.reason };
     const tree = written.stdout.trim();
     if (!TREE_RE.test(tree)) return { tree: null, reason: 'git write-tree returned no tree id' };
@@ -790,7 +800,7 @@ function verdict(options) {
     lines.push(`FULL SUITE — local runner | ${screen(options.ciPolicy.reason, projectRoot, limits)} | decided by: ${screen(String(options.ciPolicy.decidedBy || 'default'), projectRoot, limits)}`);
   }
   const boundTree = typeof options.workTree === 'string' && options.workTree !== '' ? options.workTree : null;
-  const workTreeFault = typeof options.workTreeFault === 'string' && options.workTreeFault !== '' ? options.workTreeFault : null;
+  const workTreeFault = workTreeFaultCause(options.workTreeFault);
   let decision;
   let currentTree = { tree: null, reason: 'not computed' };
   let treeRoot = projectRoot;
@@ -1103,6 +1113,12 @@ function run(options) {
       return;
     }
     const projectRoot = options.projectRoot;
+    const workTreeFault = workTreeFaultCause(options.workTreeFault);
+    if (workTreeFault !== null) {
+      say(stderr, `zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: ${screen(workTreeFault, projectRoot, limits)}`);
+      resolve(2);
+      return;
+    }
     if (options.scope === 'full' && !options.local && options.ciPolicy && options.ciPolicy.runner === 'ci') {
       say(stderr, `zensu-log.sh --evidence-run: this chain runs the full suite in CI (decided by: ${options.ciPolicy.decidedBy}), so it is not run here — this refusal is not a suite failure. Run the tests affected by the change instead with --scope scoped --cmd '<the affected tests>'. Add --local only when the user explicitly asked for a local full-suite run.`);
       say(stderr, `FULL SUITE — CI contract | ${options.ciPolicy.summary}`);
@@ -1307,6 +1323,22 @@ function readTransportFile(directory, name) {
   }
 }
 
+const WORK_TREE_FAULT_UNREAD = 'the work-tree lookup reported a fault, but its cause could not be read from the transport file';
+
+function readWorkTreeFault(directory) {
+  if (!directory) return null;
+  try {
+    return fs.readFileSync(path.join(directory, 'work-tree-fault'), 'utf8');
+  } catch (error) {
+    return error && error.code === 'ENOENT' ? null : '';
+  }
+}
+
+function workTreeFaultCause(value) {
+  if (typeof value !== 'string') return null;
+  return value === '' ? WORK_TREE_FAULT_UNREAD : value;
+}
+
 function ciPolicyFor(directory, env) {
   if (!directory || readTransportFile(directory, 'ci-config.json') === null) return null;
   try {
@@ -1334,7 +1366,7 @@ function transportOptions(env) {
     cwd: env.ZENSU_EVR_CWD || env.ZENSU_EVR_PROJECT_ROOT,
     workTree: env.ZENSU_EVR_WORK_TREE || '',
     workDirectory: env.ZENSU_EVR_WORK_DIR || '',
-    workTreeFault: readTransportFile(directory, 'work-tree-fault'),
+    workTreeFault: readWorkTreeFault(directory),
     scope: env.ZENSU_EVR_SCOPE,
     show: env.ZENSU_EVR_SHOW === 'all' ? 'all' : 'tail',
     ifStale: env.ZENSU_EVR_IF_STALE === '1',
@@ -1388,7 +1420,9 @@ module.exports = {
   STORE_SEGMENTS,
   CHILD_SCRUBBED_ENV,
   GIT_SCRUBBED_ENV,
+  WORKFLOW_ARTIFACTS,
   WITHHELD,
+  WORK_TREE_FAULT_UNREAD,
   EvidenceRunError,
   newRecordId,
   storeLocations,
@@ -1417,6 +1451,8 @@ module.exports = {
   decide,
   decideCi,
   verdict,
+  readWorkTreeFault,
+  workTreeFaultCause,
   freshScopedRecord,
   resolveCommand,
   childEnvironment,

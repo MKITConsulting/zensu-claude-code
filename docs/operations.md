@@ -98,8 +98,8 @@ share one hook, the [secret scan](gates.md#secret-scan), the
 [browser consent gate](gates.md#browser-consent-gate), the path redaction that
 runs after a shell command and the work-order gate each judge a PowerShell
 command or refuse it, and every refusal names the Bash tool, which stays
-available, except the CLI write-gate's refusal while its word reader cannot load, which names the
-reinstall. [Shell Tools](gates.md#shell-tools) says what each gate does with a
+available, except the CLI write-gate's refusal while one of the two modules it reads a call with
+cannot load, which names the reinstall. [Shell Tools](gates.md#shell-tools) says what each gate does with a
 PowerShell command. The same holds wherever the PowerShell tool is turned on,
 including macOS, Linux and WSL, where it is opt-in.
 
@@ -121,7 +121,7 @@ week. No CI job starts Claude Code itself, none runs on macOS, and none uses WSL
 
 | Problem | Solution |
 |---------|----------|
-| `zensu` CLI not found, or older than 0.10.0 | Install zensu-cli 0.10.0 or later with `brew install --cask mkitconsulting/tap/zensu` (upgrade: `brew upgrade --cask zensu`), `curl -fsSL https://zensu.dev/install.sh \| sh`, or on Windows `irm https://zensu.dev/install.ps1 \| iex`, and ensure it is on `PATH` — the session banner and `/zensu:doctor` warn when it is missing or older |
+| `zensu` CLI not found, or older than 0.18.0 | Install zensu-cli 0.18.0 or later with `brew install --cask mkitconsulting/tap/zensu` (upgrade: `brew update && brew upgrade --cask mkitconsulting/tap/zensu`), `curl -fsSL https://zensu.dev/install.sh \| sh`, or on Windows `irm https://zensu.dev/install.ps1 \| iex`, and ensure it is on `PATH` — the session banner and `/zensu:doctor` warn when it is missing or older |
 | Backend unreachable / `zensu` command errors | Verify network connectivity to `https://api.zensu.dev` (or your self-hosted `ZENSU_API_URL` — see [Self-hosting](../README.md#self-hosting)), and that `zensu auth status` shows a logged-in session |
 | Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and re-run `echo "$ZENSU_API_KEY" \| zensu auth login --with-token -` — see [API Key (CI/CD)](../README.md#api-key-cicd) |
 | Hook errors on Windows, or a Zensu gate that does not fire there | Run Claude Code inside WSL, or install Git for Windows so that Claude Code runs the hooks through Git Bash; if it cannot find Git Bash, set `CLAUDE_CODE_GIT_BASH_PATH`. When a Zensu gate refuses a PowerShell command, run it through the Bash tool, or set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` to keep Claude on the Bash tool. Make sure your shell profile prints nothing: Git Bash sources it for hook commands too, and output ahead of a hook's JSON makes Claude Code ignore that JSON decision. If every tool call is refused because Claude Code cannot start `node`, or with `zensu: reviewer capability gate unavailable`, check that `node` is on the `PATH` of the environment that starts Claude Code. See [Platform Support](#platform-support). |

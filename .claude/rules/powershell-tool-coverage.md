@@ -30,8 +30,9 @@ reads a shell command carries the `Bash|PowerShell` matcher in `DISPATCHED_CHECK
 Each one judges PowerShell text where the judgment is exact and refuses what it cannot judge. **No
 gate lets PowerShell text it cannot judge pass in silence**; a refusal tells the main thread to use
 the Bash tool (or Edit and Write) and a subagent to report to the main thread. The one exception is
-the CLI write-gate while `hooks/lib/zensu-cli-words-v1.js` cannot load: the Bash tool fails the same
-way, so that refusal tells the main thread to reinstall the plugin (`B58h`, `B58l`, `B58n`).
+the CLI write-gate while `hooks/lib/zensu-cli-words-v1.js` or `hooks/lib/zensu-cli-backend-v1.js`
+cannot load: the Bash tool fails the same way, so that refusal tells the main thread to reinstall the
+plugin (`B64h`, `B64l`, `B64n`, B59a).
 
 ## When the host runs the PowerShell tool
 
@@ -117,7 +118,7 @@ shell is refused.
 
 | Hook | PowerShell disposition |
 |---|---|
-| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, a group subcommand holding it (`isGroup` of `hooks/lib/zensu-cli-words-v1.js`), or an analyzer that fails to load while the text names `zensu` denies. When `hooks/lib/zensu-cli-words-v1.js` cannot load, every `zensu` call that holds a word that could name a subcommand, but `--help` and a localhost backend, denies, reads and unjudged calls included, with that module's reason instead of the Bash-tool advice (B58h, B58l). No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B48f). |
+| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, a group subcommand holding it (`isGroup` of `hooks/lib/zensu-cli-words-v1.js`), or an analyzer that fails to load while the text names `zensu` denies. When `hooks/lib/zensu-cli-words-v1.js` cannot load, every `zensu` call that holds a word that could name a subcommand, but `--help` and a localhost backend, denies, reads and unjudged calls included, with that module's reason instead of the Bash-tool advice (B64h, B64l). No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B48f). |
 | `pre-bash-source-write-gate.sh`, control mode | `controlVerdict`, always on. |
 | same, rules (A)/(B)/(C) | `readOnlyVerdict` while `hooks.bashWriteGate` is on; the deny ends with `OPT_IN_NOTE`. |
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |
@@ -150,9 +151,11 @@ green row would be a false all-clear.
 - The sibling loads: `bash-source-write-parse.js` requires the analyzer lazily and only for a
   PowerShell payload; `pre-bash-zensu-gate.sh` loads it through `cd -P` into its own `hooks/lib`
   with `ZPS`, which stays empty when the `cd` fails, so a project file can never load; the consent
-  module requires it lazily for `spellings()`; the doctor report requires it. PC5a, PC5b and PC5c
-  pin the three hook loads, and P2p9 the doctor's. A failed load in the source-write parser is
-  caught and denies with its own text (WP17); in the consent module it refuses the call.
+  module requires it lazily for `spellings()`; `zensu-cli-backend-v1.js` requires it lazily for
+  `spellings()` of a PowerShell command; the doctor report requires it. PC5a to PC5d pin the four
+  hook loads, and P2p9 the doctor's. A failed load in the source-write parser is caught and denies
+  with its own text (WP17); in the consent module it refuses the call; in the backend module the
+  command counts as naming `ZENSU_API_URL`, so the hook's own value never decides the call.
 - `UNIX_ALIASES` holds the aliases a PowerShell 7 session defines outside Windows: the
   `BuiltInAliases` list of `InitialSessionState.cs` without its `#if !UNIX` and `#if !CORECLR`
   entries, plus `fhx`, `gcb`, `gtz` and `scb`, which cmdlets declare and the Utility and

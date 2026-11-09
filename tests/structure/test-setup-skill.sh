@@ -160,10 +160,10 @@ zc_names_all() {
     && { grep -qF "$ZC_PS" "$1" || grep -qF "$escaped_ps" "$1"; }
 }
 ZC_SITES_BAD=""
-for zc_site in README.md docs/operations.md skills/setup/SKILL.md hooks/session-start-banner.sh; do
+for zc_site in README.md docs/operations.md docs/cli-install-update.md skills/setup/SKILL.md hooks/session-start-banner.sh; do
   zc_names_all "$PLUGIN_DIR/$zc_site" || ZC_SITES_BAD="$ZC_SITES_BAD $zc_site"
 done
-[ -z "$ZC_SITES_BAD" ] && check "P10a README, the operations troubleshooting row, /zensu:setup and the banner name the module's install and upgrade commands" PASS \
+[ -z "$ZC_SITES_BAD" ] && check "P10a README, the operations troubleshooting row, the CLI install guide, /zensu:setup and the banner name the module's install and upgrade commands" PASS \
   || check "P10a an install or upgrade command of the module is missing from:$ZC_SITES_BAD" FAIL
 if [ -n "$ZC_FLOOR" ] && [ "$(grep -cF "zensu-cli $ZC_FLOOR or later" "$README_MD")" -ge 2 ] \
   && grep -qF "older than $ZC_FLOOR" "$PLUGIN_DIR/docs/operations.md" && grep -qF "names zensu-cli $ZC_FLOOR" "$PLUGIN_DIR/docs/work-order-mode.md"; then
@@ -182,10 +182,11 @@ grep -qF -- "- Zensu CLI $ZC_FLOOR or later on \`PATH\`; see \`/zensu:doctor\` f
 ZC_STALE="$(grep -lF 'Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`)' "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null | tr '\n' ' ')"
 [ -z "$ZC_STALE" ] && check "P10d no skill keeps the curl-only install prerequisite" PASS || check "P10d a skill keeps the curl-only install prerequisite: $ZC_STALE" FAIL
 ZC_REASON="$(node -e 'process.stdout.write(require(process.argv[1]).FLOOR_REASON)' "$ZC_MODULE" 2>/dev/null)"
-if [ -n "$ZC_REASON" ] && grep -qF -- "$ZC_REASON" "$PLUGIN_DIR/hooks/session-start-banner.sh" && tr '\n' ' ' < "$README_MD" | grep -qF -- "$ZC_REASON"; then
-  check "P10e the banner and the README Requirements state the module's reason for the floor" PASS
+if [ -n "$ZC_REASON" ] && grep -qF -- "$ZC_REASON" "$PLUGIN_DIR/hooks/session-start-banner.sh" && tr '\n' ' ' < "$README_MD" | grep -qF -- "$ZC_REASON" \
+  && tr -s '[:space:]' ' ' < "$SKILL_MD" | grep -qF -- "$ZC_REASON"; then
+  check "P10e the banner, the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor" PASS
 else
-  check "P10e the banner and the README Requirements state the module's reason for the floor" FAIL
+  check "P10e the banner, the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor" FAIL
 fi
 
 echo "----"

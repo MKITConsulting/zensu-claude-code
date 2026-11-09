@@ -107,7 +107,7 @@ if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" ] \
 fi
 ROUTE_LEAD=''
 case "$PROMPT_ORIGIN" in
-  (typed|slash-command-args) [ "$LINKED_SESSION" = fresh-linked ] && ROUTE_LEAD="${ZENSU_LINKED_BRIEF_LEAD:-}" ;;
+  (typed|session-brief|slash-command-args) [ "$LINKED_SESSION" = fresh-linked ] && ROUTE_LEAD="${ZENSU_LINKED_BRIEF_LEAD:-}" ;;
 esac
 ROUTE_FIELD="$(zensu_delivery_route_field "$ROUTE_PROJECT" "${ZENSU_SESSION_KEY:-}")"
 ROUTE_COMMAND="$(zensu_delivery_route_record_command)"

@@ -436,6 +436,91 @@ L3I_WANT="$(printf '%s\n' 'linked/resolved/root' 'none/no-session-store/-' 'stub
   && check "L3i with the host reported as win32 and no process.getuid, a world-writable store and records another account owns still resolve as before, and the same store refuses once the POSIX host is restored" PASS \
   || check "L3i win32 arm ($(printf '%s' "$L3I_OUT" | tr '\n' ';'))" FAIL
 
+STORE_READ_LIB="$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js"
+TRAIL_SCRIPT="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+L3J_BAD=""
+grep -qF "require('./desktop-store-read-v1.js')" "$RESOLVER" || L3J_BAD="$L3J_BAD [the resolver does not require the module]"
+grep -qF "'../../../hooks/lib/desktop-store-read-v1.js'" "$TRAIL_SCRIPT" || L3J_BAD="$L3J_BAD [trail.mjs does not load the module]"
+for l3j_file in "$RESOLVER" "$TRAIL_SCRIPT"; do
+  for l3j_fn in writableOnlyByCaller anyOwnerOrMode realDirectory ownedRegularFile readBoundedBytes readBoundedFile; do
+    grep -qE "^function ${l3j_fn}\(" "$l3j_file" && L3J_BAD="$L3J_BAD [$(basename "$l3j_file") defines $l3j_fn]"
+    grep -qE "^[[:space:]]*(const|let|var)[[:space:]]+${l3j_fn}[[:space:]]*=" "$l3j_file" && L3J_BAD="$L3J_BAD [$(basename "$l3j_file") binds $l3j_fn]"
+  done
+done
+[ -z "$L3J_BAD" ] \
+  && check "L3j the resolver and session-trail take the owner and mode rule and the bounded reader from hooks/lib/desktop-store-read-v1.js and define no copy of their own" PASS \
+  || check "L3j one owner for the desktop-store rule:$L3J_BAD" FAIL
+
+L3K_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const lines = [];
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-policy-")));
+  try {
+    try {
+      m.realDirectory(dir);
+      lines.push("no-throw");
+    } catch (error) {
+      lines.push(error instanceof TypeError ? "TypeError" : "other");
+    }
+    lines.push(String(m.realDirectory(dir, m.anyOwnerOrMode)));
+    lines.push(String(m.realDirectory(dir, m.writableOnlyByCaller)));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  process.stdout.write(lines.join("\n"));
+' "$STORE_READ_LIB" 2>/dev/null)"
+L3K_CALLS="$(cat "$RESOLVER" "$TRAIL_SCRIPT" | grep -oE 'realDirectory\([^()]*\)')"
+L3K_TOTAL="$(printf '%s\n' "$L3K_CALLS" | grep -c .)"
+L3K_NAMED="$(printf '%s\n' "$L3K_CALLS" | grep -cE ', (writableOnlyByCaller|anyOwnerOrMode)\)$')"
+L3K_RAW="$(cat "$RESOLVER" "$TRAIL_SCRIPT" | grep -oE 'realDirectory[[:space:]]*\(' | grep -c .)"
+if [ "$L3K_OUT" = "$(printf '%s\n' TypeError true true)" ] \
+  && grep -qxF 'function realDirectory(target, accept) {' "$STORE_READ_LIB" \
+  && [ "${L3K_TOTAL:-0}" -ge 6 ] && [ "$L3K_NAMED" = "$L3K_TOTAL" ] && [ "$L3K_RAW" = "$L3K_TOTAL" ]; then
+  check "L3k realDirectory has no default policy and throws a TypeError without one, and every call in the resolver and session-trail names writableOnlyByCaller or anyOwnerOrMode in a form this pin reads ($L3K_NAMED of $L3K_TOTAL, $L3K_RAW raw)" PASS
+else
+  check "L3k realDirectory policy (behavior=$(printf '%s' "$L3K_OUT" | tr '\n' ';') named=$L3K_NAMED total=$L3K_TOTAL raw=$L3K_RAW)" FAIL
+fi
+
+L3L_OUT="$(node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.argv[1]);
+  const lines = [];
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "linked-scratch-")));
+  try {
+    const big = path.join(dir, "big.json");
+    const small = path.join(dir, "small.json");
+    fs.writeFileSync(big, "a".repeat(100), { mode: 0o600 });
+    fs.writeFileSync(small, "b".repeat(10), { mode: 0o600 });
+    const scratch = {};
+    const first = m.readBoundedBytes(big, 1000, scratch);
+    lines.push(first.state + ":" + (first.state === "read" ? first.bytes.length : "-"));
+    const held = scratch.buffer;
+    const second = m.readBoundedBytes(small, 1000, scratch);
+    lines.push(second.state + ":" + (second.state === "read" ? second.bytes.toString("latin1") : "-"));
+    lines.push(String(Buffer.isBuffer(held) && scratch.buffer === held));
+    const own = m.readBoundedBytes(small, 1000);
+    const other = m.readBoundedBytes(small, 1000);
+    own.bytes[0] = 0x7a;
+    lines.push(other.bytes.toString("latin1"));
+    lines.push(m.readBoundedFile(small, 1000).text);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  process.stdout.write(lines.join("\n"));
+' "$STORE_READ_LIB" 2>/dev/null)"
+if [ "$L3L_OUT" = "$(printf '%s\n' read:100 read:bbbbbbbbbb true bbbbbbbbbb bbbbbbbbbb)" ] \
+  && grep -qF 'readBoundedBytes(file, DESKTOP_RECORD_MAX_BYTES, RECORD_SCRATCH)' "$TRAIL_SCRIPT" \
+  && ! grep -qE 'readBoundedBytes\([^)]*,[^)]*,' "$RESOLVER"; then
+  check "L3l the bounded reader reuses a caller's scratch buffer and returns only the bytes it read, session-trail passes one, and the resolver reads without one, so each of its reads gets its own buffer" PASS
+else
+  check "L3l scratch buffer (behavior=$(printf '%s' "$L3L_OUT" | tr '\n' ';'))" FAIL
+fi
+
 T="$(mktemp -d 2>/dev/null)" || T=""
 if [ -z "$T" ] || [ ! -d "$T" ]; then
   check "L0 mktemp -d created a scratch directory" FAIL
@@ -978,6 +1063,11 @@ SL_OUT="$(remind "$WT" "$SL_CLI" "$SL_HOST" "/zensu:build add a parser to foo.js
 { opens_with_lead "$SL_OUT" && [ "$(lead_count "$SL_OUT")" = 1 ] && [ "$(last_field "$SL_OUT")" = "$INHERITED" ]; } \
   && check "L38 a brief that is a slash command with arguments opens with the brief note once" PASS \
   || check "L38 slash-command brief (lead=$(lead_count "$SL_OUT") field='$(last_field "$SL_OUT")')" FAIL
+session "$WT" "$P_HOST"; SB_CLI="$CLI"; SB_HOST="$HOST"
+SB_OUT="$(remind "$WT" "$SB_CLI" "$SB_HOST" $'Background (from the session that started this one):\nThe parent session found a parser bug.\n\nTask:\nadd a parser to foo.js')"
+{ opens_with_lead "$SB_OUT" && [ "$(lead_count "$SB_OUT")" = 1 ] && [ "$(last_field "$SB_OUT")" = "$INHERITED" ]; } \
+  && check "L45 a brief that opens with the app's Background line, which classifies as session-brief, opens with the brief note once" PASS \
+  || check "L45 session-brief brief (lead=$(lead_count "$SB_OUT") field='$(last_field "$SB_OUT")')" FAIL
 session "$WT" "$P_HOST"; CM_CLI="$CLI"; CM_HOST="$HOST"
 CM_1="$(remind "$WT" "$CM_CLI" "$CM_HOST" "<ci-monitor-event>CI failed on pull request 1</ci-monitor-event>")"
 CM_STATE="$(linked_state "$WT" "$CM_CLI")"

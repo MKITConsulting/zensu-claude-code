@@ -50,18 +50,18 @@
 // drops only that candidate, so a literal `-C ../sibling` beside it still denies.
 // `path.resolve` would otherwise splice the literal `$REPO` under the cwd and call
 // it in-project.
-// Rule (C) also anchors on `cmd0`, and the wrapper skip advances over WRAP names
-// and VAR=val only, so a wrapper's OWN flag or a shell keyword hides the verb:
-// `sudo -u me git …`, `nice -n 10 git …`, `for f in a b; do git …; done`. That is
+// Rule (C) also anchors on `program`, and the command reader sees through the WRAP
+// names, their own options and the reserved words before a command, so a wrapper
+// outside WRAP or the coproc keyword hides the verb: `timeout 5 git …`,
+// `xargs git …`, `coproc git …`. That is
 // pre-existing (`sed -i` and `dd` share the anchor) and is not the drifted-cwd
 // incident rule (C) exists for, so it is accepted rather than closed. A linked
 // worktree's admin dir may likewise ride along on an in-project --work-tree even
 // when it belongs to a FOREIGN repo — lexically the two are indistinguishable.
-// Two more come from the shared lexer and bind rules (B) and (C) alike: `cd`
-// tracking reads the token right after `cd`, so `cd -- ../sibling` and
+// One more comes from the shared reader and binds rules (B) and (C) alike: `cd`
+// tracking reads the word right after `cd`, so `cd -- ../sibling` and
 // `cd -P ../sibling` move the cwd to `<proj>/--` and `<proj>/-P` instead of the
-// sibling; and tokens split on whitespace, so a quoted path containing a space
-// (`git -C "/foo bar" add .`) leaves a fragment where the subcommand should be.
+// sibling.
 // Finally, `worktree remove|move` given a bare worktree NAME rather than a path
 // is unjudgeable — git resolves the name against a worktree list this parser
 // deliberately never reads — so that spelling passes.
@@ -83,21 +83,75 @@ const fs = require("fs");
 const { execFileSync } = require("child_process");
 // The ONLY sibling require in this file, and a deliberate one: the MSYS drive
 // rule has to be identical to the one the session-control path boundary applies,
-// and a shared total function is the way to guarantee that instead of a
-// hand-copy held by a lockstep pin. The module is 52 lines, side-effect-free, and
-// already required by four peers in this directory. If it were missing the parser
+// and the program-name reading to the one the other gates are to share, so a
+// shared total function is the way to guarantee that instead of a hand-copy held
+// by a lockstep pin. The module is side-effect-free and already required by its
+// peers in this directory. If it were missing the parser
 // would fail to load and its hook would deny — the fail-closed direction, and the
 // same posture tests/structure/test-msys-runtime-boundaries.sh already pins for
 // the sibling MSYS helper.
-const { msysDrivePrefix } = require("./claude-path-v1.js");
+const { msysDrivePrefix, programName: sharedProgramName } = require("./claude-path-v1.js");
 
 const SRC = new Set(
   "rs ts tsx js jsx mjs cjs py java kt kts go rb c cc cpp cxx h hh hpp cs php swift scala vue svelte".split(" ")
 );
 
+const SHELL_WRAP = new Set(["command", "builtin"]);
+const RESERVED_WORDS = new Set("! { } if then else elif fi do done while until".split(" "));
+const SHELL_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?(\+?)=/;
+const MAX_SPLITS = 8;
+const WRAPPER_OPTIONS = Object.assign(Object.create(null), {
+  env: {
+    flags: "0iv",
+    operands: "uCSPLU",
+    optional: "",
+    long: {
+      "ignore-environment": 0, null: 0, debug: 0, help: 0, version: 0, "list-signal-handling": 0,
+      unset: 1, chdir: 1, "split-string": 1, "block-signal": 2, "default-signal": 2, "ignore-signal": 2
+    },
+    effects: {
+      i: "clear", "ignore-environment": "clear", u: "unset", unset: "unset",
+      C: "chdir", chdir: "chdir", S: "split", "split-string": "split"
+    }
+  },
+  sudo: {
+    flags: "AbBEeHiKklNnPSsVv",
+    operands: "aCcDgpRrTtUu",
+    optional: "h",
+    long: {
+      askpass: 0, background: 0, bell: 0, edit: 0, "set-home": 0, help: 0, login: 0, "remove-timestamp": 0,
+      "reset-timestamp": 0, list: 0, "non-interactive": 0, "preserve-groups": 0, stdin: 0, shell: 0, version: 0,
+      validate: 0, "close-from": 1, chdir: 1, group: 1, host: 1, prompt: 1, chroot: 1, role: 1, type: 1,
+      "command-timeout": 1, "other-user": 1, user: 1, "preserve-env": 2
+    },
+    effects: { D: "chdir", chdir: "chdir" }
+  },
+  nice: { flags: "", operands: "n", optional: "", long: { adjustment: 1, help: 0, version: 0 }, effects: {} },
+  nohup: { flags: "", operands: "", optional: "", long: { help: 0, version: 0 }, effects: {} },
+  time: {
+    flags: "ahlpqv",
+    operands: "fo",
+    optional: "",
+    long: { format: 1, output: 1, append: 0, portability: 0, quiet: 0, verbose: 0, help: 0, version: 0 },
+    effects: {}
+  },
+  command: { flags: "pvV", operands: "", optional: "", long: {}, effects: {} },
+  builtin: { flags: "", operands: "", optional: "", long: {}, effects: {} },
+  exec: { flags: "cl", operands: "a", optional: "", long: {}, effects: { c: "clear" } }
+});
 // Transparent command wrappers — skipped so `env sed -i …` / `sudo dd of=…`
 // still resolve to the real verb (mirrors pre-bash-zensu-gate.sh).
-const WRAP = new Set("command builtin exec env sudo nohup nice time".split(" "));
+const WRAP = new Set(Object.keys(WRAPPER_OPTIONS));
+const ENV_SPLIT_ESCAPES = { f: "\f", n: "\n", r: "\r", t: "\t", v: "\v" };
+const SED_LONG_OPTIONS = {
+  "in-place": 2, expression: 1, file: 1, "line-length": 1, "follow-symlinks": 0, "null-data": 0,
+  "zero-terminated": 0, posix: 0, quiet: 0, silent: 0, "regexp-extended": 0, separate: 0, sandbox: 0,
+  unbuffered: 0, debug: 0, help: 0, version: 0
+};
+const ANSI_C_ESCAPES = Object.assign(Object.create(null), {
+  a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v",
+  "\\": "\\", "'": "'", "\"": "\"", "?": "?"
+});
 
 // Git subcommands that rewrite a repository's index or working tree. Rule (C)
 // denies these ONLY when the target repository escapes the session root, so the
@@ -299,6 +353,582 @@ function unquote(t) {
   return t.replace(/^['"]+|['"]+$/g, "");
 }
 
+function programName(word, isWindows = IS_WINDOWS) {
+  return sharedProgramName(String(word || ""), isWindows ? "win32" : "posix", "always");
+}
+
+function ansiC(text, start) {
+  let end = start;
+  while (end < text.length && text[end] !== "'") end += text[end] === "\\" ? 2 : 1;
+  end = Math.min(end, text.length);
+  const body = text.slice(start, end);
+  let value = "";
+  let cut = false;
+  let i = 0;
+  while (i < body.length) {
+    let ch = body[i];
+    let next = i + 1;
+    if (ch === "\\" && i + 1 < body.length) {
+      const c = body[i + 1];
+      const rest = body.slice(i + 2);
+      next = i + 2;
+      let m = null;
+      if (ANSI_C_ESCAPES[c] !== undefined) {
+        ch = ANSI_C_ESCAPES[c];
+      } else if (/[0-7]/.test(c)) {
+        m = /^[0-7]{0,2}/.exec(rest);
+        ch = String.fromCharCode(parseInt(c + m[0], 8) & 0xff);
+        next += m[0].length;
+      } else if (c === "x" && (m = /^[0-9A-Fa-f]{1,2}/.exec(rest))) {
+        ch = String.fromCharCode(parseInt(m[0], 16));
+        next += m[0].length;
+      } else if ((c === "u" || c === "U") && (m = (c === "u" ? /^[0-9A-Fa-f]{1,4}/ : /^[0-9A-Fa-f]{1,8}/).exec(rest))
+        && parseInt(m[0], 16) <= 0x10ffff) {
+        ch = String.fromCodePoint(parseInt(m[0], 16));
+        next += m[0].length;
+      } else if (c === "c" && rest.length > 0) {
+        ch = String.fromCharCode(rest.charCodeAt(0) & 0x1f);
+        next += rest[0] === "\\" && rest[1] === "\\" ? 2 : 1;
+      } else {
+        ch = "\\" + c;
+      }
+    }
+    if (ch.indexOf("\0") !== -1) {
+      value += cut ? "" : ch.slice(0, ch.indexOf("\0"));
+      cut = true;
+    } else if (!cut) {
+      value += ch;
+    }
+    i = next;
+  }
+  return { value, end };
+}
+
+function braceEnd(text, start, quoted, bashQuotes) {
+  const stack = [quoted ? "quoted" : "brace"];
+  let k = start + 2;
+  while (k < text.length && stack.length) {
+    const c = text[k];
+    const top = stack[stack.length - 1];
+    if (c === "\\") {
+      k += 2;
+    } else if (top === "string") {
+      if (c === "\"") stack.pop();
+      else if (c === "$" && text[k + 1] === "$") k++;
+      else if (c === "$" && text[k + 1] === "{") { stack.push("quoted"); k++; }
+      k++;
+    } else if (c === "}") {
+      stack.pop();
+      k++;
+    } else if (c === "$" && text[k + 1] === "$") {
+      k += 2;
+    } else if (c === "$" && text[k + 1] === "{") {
+      stack.push(top);
+      k += 2;
+    } else if (c === "\"") {
+      stack.push("string");
+      k++;
+    } else if (c === "$" && text[k + 1] === "'" && top === "brace") {
+      k += 2;
+      while (k < text.length && text[k] !== "'") k += text[k] === "\\" ? 2 : 1;
+      k++;
+    } else if (c === "'" && (top === "brace" || (bashQuotes && top === "quoted"))) {
+      const close = text.indexOf("'", k + 1);
+      k = close === -1 ? text.length : close + 1;
+    } else {
+      k++;
+    }
+  }
+  return Math.min(k, text.length);
+}
+
+function redirectOperator(text, i) {
+  const two = text.substr(i, 2);
+  if (text.substr(i, 3) === "<<<") return "<<<";
+  if (two === "<<") return text[i + 2] === "-" ? "<<-" : "<<";
+  if (text[i] === "<") return two === "<>" || two === "<&" ? two : "<";
+  return /^&?>>?&?[|!]?/.exec(text.substr(i, 5))[0];
+}
+
+function segmentWords(text, bashQuotes) {
+  const words = [];
+  const n = text.length;
+  let word = null;
+  let i = 0;
+  const close = (to) => {
+    if (word) words.push({ raw: text.slice(word.start, to), value: word.value });
+    word = null;
+  };
+  while (i < n) {
+    const c = text[i];
+    if (/\s/.test(c)) {
+      close(i);
+      i++;
+      continue;
+    }
+    if (c === "&" && text[i + 1] === ">") {
+      close(i);
+      const raw = redirectOperator(text, i);
+      i += raw.length;
+      words.push({ raw, value: raw, op: raw });
+      continue;
+    }
+    if (c === ">" || c === "<") {
+      const prefix = word === null ? "" : text.slice(word.start, i);
+      const fd = /^(?:\d+|\{[A-Za-z_][A-Za-z0-9_]*\})$/.test(prefix);
+      const start = fd ? word.start : i;
+      if (fd) word = null;
+      else close(i);
+      i += redirectOperator(text, i).length;
+      const raw = text.slice(start, i);
+      const token = { raw, value: raw, op: fd ? raw.slice(prefix.length) : raw };
+      if (fd && prefix[0] === "{") token.fdName = prefix.slice(1, -1);
+      words.push(token);
+      continue;
+    }
+    if (!word) word = { start: i, value: "" };
+    if (c === "\\") {
+      word.value += i + 1 < n ? text[i + 1] : c;
+      i += 2;
+    } else if (c === "'") {
+      const end = text.indexOf("'", i + 1);
+      word.value += text.slice(i + 1, end === -1 ? n : end);
+      i = end === -1 ? n : end + 1;
+    } else if (c === "$" && text[i + 1] === "$") {
+      word.value += "$$";
+      i += 2;
+    } else if (c === "$" && text[i + 1] === "'") {
+      const decoded = ansiC(text, i + 2);
+      word.value += decoded.value;
+      i = decoded.end + 1;
+    } else if (c === "\"" || (c === "$" && text[i + 1] === "\"")) {
+      let k = i + (c === "$" ? 2 : 1);
+      while (k < n && text[k] !== "\"") {
+        if (text[k] === "\\" && k + 1 < n && "$`\"\\\n".indexOf(text[k + 1]) !== -1) {
+          word.value += text[k + 1];
+          k += 2;
+        } else if (text[k] === "$" && (text[k + 1] === "$" || text[k + 1] === "{")) {
+          const stop = text[k + 1] === "$" ? k + 2 : braceEnd(text, k, true, bashQuotes);
+          word.value += text.slice(k, stop);
+          k = stop;
+        } else {
+          word.value += text[k];
+          k++;
+        }
+      }
+      i = k + 1;
+    } else if (c === "$" && text[i + 1] === "{") {
+      const stop = braceEnd(text, i, false, bashQuotes);
+      word.value += text.slice(i, stop);
+      i = stop;
+    } else {
+      word.value += c;
+      i++;
+    }
+  }
+  close(Math.min(i, n));
+  return words;
+}
+
+function scanLine(line, quote, edge) {
+  let q = quote;
+  let boundary = edge;
+  let dollar = false;
+  for (let k = 0; k < line.length; k++) {
+    const c = line[k];
+    if (q === "'") {
+      if (c === "'") q = "";
+      continue;
+    }
+    if (c === "\\") {
+      if (k === line.length - 1) return { quote: q, continues: true, edge: boundary };
+      k++;
+      boundary = false;
+      dollar = false;
+      continue;
+    }
+    if (q !== "") {
+      if (c === (q === "\"" ? "\"" : "'")) q = "";
+      continue;
+    }
+    if (c === "#" && boundary) return { quote: "", continues: false, edge: true };
+    if (c === "'") q = dollar ? "$'" : "'";
+    else if (c === "\"") q = "\"";
+    boundary = /[\s;&|()]/.test(c);
+    dollar = c === "$";
+  }
+  return { quote: q, continues: false, edge: boundary };
+}
+
+function heredocWord(line, start) {
+  let value = "";
+  let quoted = false;
+  let k = start;
+  while (k < line.length && !/[ \t\n;&|()<>]/.test(line[k])) {
+    const c = line[k];
+    if (c === "\\") {
+      value += line[k + 1] || "";
+      k += 2;
+      quoted = true;
+    } else if (c === "$" && line[k + 1] === "'") {
+      const decoded = ansiC(line, k + 2);
+      value += decoded.value;
+      k = decoded.end + 1;
+      quoted = true;
+    } else if (c === "$" && line[k + 1] === "\"") {
+      k++;
+    } else if (c === "'" || c === "\"") {
+      const close = line.indexOf(c, k + 1);
+      const end = close === -1 ? line.length : close;
+      value += line.slice(k + 1, end);
+      k = end + 1;
+      quoted = true;
+    } else {
+      value += c;
+      k++;
+    }
+  }
+  return { value, end: Math.min(k, line.length), quoted };
+}
+
+function heredocDelimiters(line) {
+  const docs = [];
+  let quote = "";
+  let depth = 0;
+  let boundary = true;
+  let dollar = false;
+  for (let k = 0; k < line.length; k++) {
+    const c = line[k];
+    if (quote === "'") {
+      if (c === "'") quote = "";
+      continue;
+    }
+    if (c === "\\") {
+      k++;
+      boundary = false;
+      dollar = false;
+      continue;
+    }
+    if (quote !== "") {
+      if (c === (quote === "\"" ? "\"" : "'")) quote = "";
+      continue;
+    }
+    if (depth > 0) {
+      if (line.startsWith("))", k)) {
+        depth--;
+        k++;
+      } else if (line.startsWith("((", k)) {
+        depth++;
+        k++;
+      }
+      continue;
+    }
+    if (c === "#" && boundary) break;
+    if (c === "$" && (line[k + 1] === "{" || line[k + 1] === "[")) {
+      k = (line[k + 1] === "{" ? braceEnd(line, k, false, false) : bracketEnd(line, k + 1)) - 1;
+      boundary = false;
+      dollar = false;
+      continue;
+    }
+    if (line.startsWith("((", k)) {
+      depth++;
+      k++;
+      continue;
+    }
+    if (line.startsWith("<<<", k)) {
+      k += 2;
+      boundary = false;
+      continue;
+    }
+    if (line.startsWith("<<", k)) {
+      let j = k + 2;
+      const tabs = line[j] === "-";
+      if (tabs) j++;
+      while (line[j] === " " || line[j] === "\t") j++;
+      const word = heredocWord(line, j);
+      if (word.end > j) docs.push({ delim: word.value, tabs, quoted: word.quoted });
+      k = Math.max(word.end, j) - 1;
+      boundary = false;
+      dollar = false;
+      continue;
+    }
+    if (c === "'") quote = dollar ? "$'" : "'";
+    else if (c === "\"") quote = "\"";
+    boundary = /[\s;&|()]/.test(c);
+    dollar = c === "$";
+  }
+  return docs;
+}
+
+function skipHeredocs(lines, i, docs) {
+  let next = i;
+  for (const doc of docs) {
+    while (next < lines.length && (doc.tabs ? lines[next].replace(/^\t+/, "") : lines[next]) !== doc.delim) next++;
+    if (next < lines.length) next++;
+  }
+  return next;
+}
+
+function keepHeredocs(lines, i, docs, out) {
+  let next = i;
+  for (const doc of docs) {
+    while (next < lines.length) {
+      let line = lines[next++];
+      while (!doc.quoted && /(?:^|[^\\])(?:\\\\)*\\$/.test(line) && next < lines.length) line = line.slice(0, -1) + lines[next++];
+      out.push(line);
+      if ((doc.tabs ? line.replace(/^\t+/, "") : line) === doc.delim) break;
+    }
+  }
+  return next;
+}
+
+function logicalText(text, skipBodies, keepBodies) {
+  const lines = text.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const parts = [];
+    let quote = "";
+    let edge = true;
+    for (;;) {
+      const line = lines[i++];
+      const scan = scanLine(line, quote, edge);
+      quote = scan.quote;
+      edge = scan.edge;
+      if (scan.continues) {
+        parts.push(line.slice(0, -1));
+        if (i < lines.length) continue;
+      } else {
+        parts.push(line);
+        if (quote !== "" && i < lines.length) {
+          parts.push("\n");
+          edge = false;
+          continue;
+        }
+      }
+      break;
+    }
+    const logical = parts.join("");
+    out.push(logical);
+    if (skipBodies) i = skipHeredocs(lines, i, heredocDelimiters(logical));
+    else if (keepBodies) i = keepHeredocs(lines, i, heredocDelimiters(logical), out);
+  }
+  return out.join("\n");
+}
+
+function joinContinuations(text) {
+  return logicalText(text, false);
+}
+
+function joinedText(text) {
+  return logicalText(text, false, true);
+}
+
+function commandText(cmd) {
+  return logicalText(cmd, true);
+}
+
+function splitRedirects(segment) {
+  const words = [];
+  const writes = [];
+  for (let k = 0; k < segment.length; k++) {
+    const w = segment[k];
+    if (!w.op) {
+      words.push(w);
+      continue;
+    }
+    const target = k + 1 < segment.length && !segment[k + 1].op ? segment[k + 1] : null;
+    if (target) k++;
+    const base = w.op.replace(/[|!]$/, "");
+    const duplicate = /^>>?&$/.test(base) && /^(?:\d+|-)$/.test(target ? target.value : "");
+    const readWrite = w.op === "<>" && /^\d+<>$/.test(w.raw) && !/^0+<>$/.test(w.raw);
+    if (target && ((/^(?:&>>?|>>?&?)$/.test(base) && !duplicate) || readWrite)) writes.push(target);
+  }
+  return { words, writes };
+}
+
+function longOption(table, given) {
+  const names = Object.keys(table);
+  if (names.indexOf(given) !== -1) return given;
+  const hits = names.filter((name) => name.startsWith(given));
+  return given !== "" && hits.length === 1 ? hits[0] : null;
+}
+
+function envSplit(text) {
+  const words = [];
+  let value = null;
+  let quote = "";
+  const finish = () => {
+    if (value !== null) words.push({ raw: value, value, split: true });
+    value = null;
+  };
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k];
+    const next = text[k + 1];
+    if (quote === "'") {
+      if (c === "\\" && (next === "\\" || next === "'")) {
+        value += next;
+        k++;
+      } else if (c === "'") {
+        quote = "";
+      } else {
+        value += c;
+      }
+      continue;
+    }
+    if (c === "\\") {
+      k++;
+      if (next === undefined || (next === "c" && quote === "")) break;
+      if (next === "_" && quote === "") finish();
+      else value = (value || "") + (next === "_" ? " " : ENV_SPLIT_ESCAPES[next] || next);
+      continue;
+    }
+    if (quote === "\"") {
+      if (c === "\"") quote = "";
+      else value += c;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      finish();
+    } else if (c === "#" && value === null) {
+      break;
+    } else if (c === "'" || c === "\"") {
+      quote = c;
+      value = value || "";
+    } else {
+      value = (value || "") + c;
+    }
+  }
+  finish();
+  return words;
+}
+
+function wrapperArguments(name, words, start, out) {
+  const spec = WRAPPER_OPTIONS[name];
+  if (!spec) return start;
+  const apply = (key, value, at, source) => {
+    const kind = Object.prototype.hasOwnProperty.call(spec.effects, key) ? spec.effects[key] : "";
+    if (kind === "clear") out.ops.push({ kind });
+    else if (value === undefined) return;
+    else if (kind === "unset" || kind === "chdir") out.ops.push({ kind, name: value });
+    else if (kind === "split" && out.splits++ < MAX_SPLITS) {
+      const literal = Boolean(source && (source.split || /['\\]/.test(source.raw)));
+      words.splice(at, 0, ...envSplit(value).map((w) => Object.assign(w, { literal })));
+    }
+    else if (kind === "split") out.overflow = true;
+  };
+  let i = start;
+  while (i < words.length) {
+    const word = words[i].value;
+    if (word === "--") {
+      i++;
+      break;
+    }
+    if (name === "env" && word === "-") {
+      out.ops.push({ kind: "clear" });
+      i++;
+      continue;
+    }
+    if (name === "nice" && /^-\d+$/.test(word)) {
+      i++;
+      continue;
+    }
+    if (word.length < 2 || word[0] !== "-") break;
+    const found = [];
+    let used = 1;
+    if (word[1] === "-") {
+      const eq = word.indexOf("=");
+      const key = longOption(spec.long, eq === -1 ? word.slice(2) : word.slice(2, eq));
+      let value = eq === -1 ? undefined : word.slice(eq + 1);
+      let source = words[i];
+      if (key !== null && spec.long[key] === 1 && value === undefined && i + 1 < words.length) {
+        value = words[i + 1].value;
+        source = words[i + 1];
+        used = 2;
+      }
+      if (key !== null) found.push([key, value, source]);
+    } else {
+      for (let k = 1; k < word.length; k++) {
+        const letter = word[k];
+        if (spec.operands.indexOf(letter) !== -1 || (spec.optional.indexOf(letter) !== -1 && k + 1 < word.length)) {
+          let value = word.slice(k + 1);
+          let source = words[i];
+          if (value === "" && i + 1 < words.length) {
+            value = words[i + 1].value;
+            source = words[i + 1];
+            used = 2;
+          }
+          found.push([letter, value === "" ? undefined : value, source]);
+          break;
+        }
+        found.push([letter, undefined]);
+      }
+    }
+    i += used;
+    for (const [key, value, source] of found) apply(key, value, i, source);
+  }
+  while (i < words.length && words[i].value.indexOf("=") > 0) {
+    const value = words[i].value;
+    out.ops.push({ kind: "set", name: value.slice(0, value.indexOf("=")), value: value.slice(value.indexOf("=") + 1) });
+    i++;
+  }
+  const named = (value) => value[0] === "-" || value.indexOf("=") <= 0 ? value : value.slice(0, value.indexOf("="));
+  if (words.slice(start, i + 1).some((w) => w.split && w.literal && named(w.value).indexOf("${") !== -1)) out.dynamic = true;
+  return i;
+}
+
+function commandWords(segment) {
+  const words = segment.slice();
+  const out = { words, index: 0, word: "", leading: [], ops: [], inShell: true, splits: 0, overflow: false, dynamic: false };
+  let i = 0;
+  for (;;) {
+    while (i < words.length && RESERVED_WORDS.has(words[i].raw)) i++;
+    if (i < words.length && words[i].raw === "time") {
+      i++;
+      while (i < words.length && (words[i].raw === "-p" || words[i].raw === "--")) i++;
+      continue;
+    }
+    break;
+  }
+  while (i < words.length) {
+    const m = SHELL_ASSIGNMENT.exec(words[i].raw);
+    if (!m) break;
+    const value = segmentWords(words[i].raw.slice(m[0].length)).map((w) => w.value).join("");
+    out.leading.push({ name: m[1], plain: !m[2] && !m[3], value, subscript: m[2] ? m[2].slice(1, -1) : "" });
+    i++;
+  }
+  while (i < words.length && WRAP.has(programName(words[i].value))) {
+    if (!SHELL_WRAP.has(words[i].value)) out.inShell = false;
+    i = wrapperArguments(programName(words[i].value), words, i + 1, out);
+  }
+  out.index = i;
+  out.word = i < words.length ? words[i].value : "";
+  return out;
+}
+
+function sedInPlace(args) {
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (a === "--") return false;
+    if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      const key = longOption(SED_LONG_OPTIONS, eq === -1 ? a.slice(2) : a.slice(2, eq));
+      if (key === "in-place") return true;
+      if (key !== null && SED_LONG_OPTIONS[key] === 1 && eq === -1) k++;
+      continue;
+    }
+    if (a.length < 2 || a[0] !== "-") continue;
+    for (let c = 1; c < a.length; c++) {
+      if (a[c] === "i" || a[c] === "I") return true;
+      if (a[c] === "e" || a[c] === "f") {
+        if (c === a.length - 1) k++;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
 // Absoluteness probe for a RAW spelling. A tilde only resolves to a fixed
 // location when HOME is non-empty — with an empty HOME `expand()` yields "",
 // and path.resolve(base, "") returns the base, i.e. position-DEPENDENT.
@@ -429,23 +1059,15 @@ function gitTargets(args, base, resolve, isWindows) {
 
 // Drop heredoc bodies so their content (which may contain `>` or `*.rs` text)
 // cannot be misread as commands. The intro line is kept, so `cat > FILE <<EOF`
-// still surfaces its `> FILE` redirect. The `(?<!<)<<(?!<)` guard excludes
-// here-strings (`<<<WORD`), which are not heredocs and must not swallow lines.
+// still surfaces its `> FILE` redirect.
 function stripHeredocs(s) {
   const lines = s.split("\n");
   const out = [];
   let i = 0;
   while (i < lines.length) {
-    out.push(lines[i]);
-    const hm = lines[i].match(/(?<!<)<<(?!<)[-~]?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
-    if (hm) {
-      const delim = hm[2];
-      i++;
-      while (i < lines.length && lines[i].trim() !== delim) i++;
-      if (i < lines.length) i++;
-      continue;
-    }
-    i++;
+    const line = lines[i++];
+    out.push(line);
+    i = skipHeredocs(lines, i, heredocDelimiters(line));
   }
   return out.join("\n");
 }
@@ -454,7 +1076,13 @@ function stripHeredocs(s) {
 // "enter" event and `)` a "leave" event so the caller can save/restore the cwd
 // across a subshell — a `cd` inside `( … )` must not leak to later commands.
 // Backtick is treated as a plain boundary. `&&`/`||`/`;`/`|`/newline/`&` split.
-function lex(s) {
+function escapedAt(s, i) {
+  let k = i - 1;
+  while (k >= 0 && s[k] === "\\") k--;
+  return (i - 1 - k) % 2 === 1;
+}
+
+function lex(s, wholeRedirects = true) {
   const ev = [];
   let buf = "";
   let depth = 0;
@@ -467,6 +1095,12 @@ function lex(s) {
     if (c === ")") { flush(); if (depth > 0) { ev.push({ t: "leave" }); depth--; } continue; }
     if (c === "`") { flush(); continue; }
     if (two === "&&" || two === "||") { flush(); i++; continue; }
+    const afterRedirect = (s[i - 1] === ">" || (c === "&" && s[i - 1] === "<")) && !escapedAt(s, i - 1);
+    const afterDuplicate = c === "|" && s[i - 1] === "&" && s[i - 2] === ">" && !escapedAt(s, i - 2);
+    if (wholeRedirects && ((c === "&" && (afterRedirect || s[i + 1] === ">")) || (c === "|" && afterRedirect) || afterDuplicate)) {
+      buf += c;
+      continue;
+    }
     // `|` and `&` put the next command in a subshell, so an `export` or `cd`
     // does NOT carry across them; `;` and newline do carry.
     if (c === "|" || c === "&") { flush(); ev.push({ t: "reset" }); continue; }
@@ -485,9 +1119,11 @@ function lex(s) {
 // it only widens what gets scanned; fd dups (2>&1, >&2, >&-) are NOT channels.
 // Default mode is byte-identical.
 //
-// This is a TEXT matcher with no operand resolution and no quote awareness, so
-// it reports `redirect` for `git commit -m "fix: A -> B"` and `tee` for a commit
-// message containing that word. Any consumer that DENIES on a hit refuses those.
+// Its patterns are a TEXT matcher with no operand resolution and no quote
+// awareness, so they report `redirect` for `git commit -m "fix: A -> B"` and `tee`
+// for a commit message containing that word; a second pass reads each command's
+// program word through commandWords, after the shell's quote removal. Any
+// consumer that DENIES on a hit refuses those.
 //
 // TWO consumers, and only one of them scans:
 //   - pre-write-secret-scan.sh SCANS on a hit, so over-detection is safe there.
@@ -509,12 +1145,20 @@ function detectChannels(cmd) {
     .replace(/>\|/g, ">")
     .replace(/(\d*)(>>?)&(?=\s*[^\s0-9&|;<>(\-])/g, "$1$2");
   const REDIR = /(\d*)>>?(?!\s*&\s*[\d-])(?!\s*['"]?\/dev\/(?:null|stdout|stderr|tty)\b)/;
-  const VERB = "(^|\\s|;|\\||&|/)";
+  const VERB = "(^|\\s|;|\\||&|/|\\\\|\\(|`|'|\")";
   if (REDIR.test(collapsed)) found.add("redirect");
-  if (new RegExp(VERB + "tee(\\s|$)").test(cmd)) found.add("tee");
-  if (new RegExp(VERB + "sed\\s+(-[A-Za-z]*\\s+)*-i").test(cmd)) found.add("sed -i");
-  if (new RegExp(VERB + "dd\\s+[^\\n]*of=").test(cmd)) found.add("dd of=");
+  if (new RegExp(VERB + "tee(\\.exe)?['\"]?(\\s|$)", "iu").test(cmd)) found.add("tee");
+  if (new RegExp(VERB + "sed(\\.exe)?['\"]?\\s+(-\\S*\\s+)*(-[A-Za-z]*i|--i)", "iu").test(cmd)) found.add("sed -i");
+  if (new RegExp(VERB + "dd(\\.exe)?['\"]?\\s+[^\\n]*of=", "iu").test(cmd)) found.add("dd of=");
   if (/(?<!<)<<(?!<)[-~]?\s*['"]?[A-Za-z_]/.test(cmd)) found.add("heredoc");
+  for (const segment of readings(cmd).flat()) {
+    const read = commandWords(splitRedirects(segment).words);
+    const program = programName(read.word);
+    const args = read.words.slice(read.index + 1).map((w) => w.value);
+    if (program === "tee") found.add("tee");
+    if (program === "sed" && sedInPlace(args)) found.add("sed -i");
+    if (program === "dd" && args.some((a) => a.startsWith("of="))) found.add("dd of=");
+  }
   return Array.from(found).join("\n");
 }
 
@@ -528,9 +1172,13 @@ const CONTROL_BINDINGS = new Set([
   "ZENSU_PROJECT_ROOT"
 ]);
 
-function bindingFromAssignment(raw) {
-  const m = unquote(raw).match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+function bindingFromAssignment(word) {
+  const m = SHELL_ASSIGNMENT.exec(word);
   return m && CONTROL_BINDINGS.has(m[1]) ? m[1] : "";
+}
+
+function foldPath(value) {
+  return value.normalize("NFC").toUpperCase().toLowerCase();
 }
 
 // Git Bash and native Windows processes can spell the same absolute path in
@@ -546,28 +1194,26 @@ function controlPathNamespace(value) {
   let normalized = value.replace(/\\/g, "/");
   normalized = normalized.replace(/^\/\/\?\/([A-Za-z]:\/)/, "$1");
   normalized = normalized.replace(/^\/([A-Za-z])(?=\/)/, "$1:");
-  if (!/^[A-Za-z]:\//.test(normalized)) return normalized;
-  const drive = normalized.slice(0, 2).toLowerCase();
+  if (!/^[A-Za-z]:\//.test(normalized)) return foldPath(normalized);
+  const drive = normalized.slice(0, 2);
   const tail = path.posix.normalize("/" + normalized.slice(3));
-  return (drive + tail).toLowerCase();
+  return foldPath(drive + tail);
 }
 
 function commandRefersToControlPath(cmd, envFile) {
   const target = controlPathNamespace(envFile);
   if (!target) return false;
-  const windowsDriveTarget = /^[a-z]:\//.test(target);
 
   // Normalize drive-root spellings wherever a shell token may begin. Keeping
   // token boundaries in the comparison prevents `.claude-env.backup` from
   // being mistaken for the protected file while still covering glued redirects
   // such as `>>/d/work/.claude-env` and quoted paths containing spaces.
-  let normalizedCommand = cmd
+  // Letter case and Unicode normalization are folded on every platform: macOS
+  // and Windows resolve both by default, and the parser cannot know the volume
+  // that holds the env file.
+  const normalizedCommand = foldPath(cmd
     .replace(/\\/g, "/")
-    .replace(/(^|[\s"'`=<>|&;(])\/([A-Za-z])(?=\/)/g, "$1$2:");
-  // Drive-letter paths are case-insensitive; POSIX paths are not. Lowercase
-  // only for the Windows namespace so the existing Unix exact-path behavior
-  // remains case-sensitive.
-  if (windowsDriveTarget) normalizedCommand = normalizedCommand.toLowerCase();
+    .replace(/(^|[\s"'`=<>|&;(])\/([A-Za-z])(?=\/)/g, "$1$2:"));
   let offset = 0;
   while (offset <= normalizedCommand.length - target.length) {
     const index = normalizedCommand.indexOf(target, offset);
@@ -583,6 +1229,16 @@ function commandRefersToControlPath(cmd, envFile) {
   return false;
 }
 
+function readings(cmd) {
+  const segments = lex(commandText(cmd)).filter((event) => event.t === "seg").map((event) => event.text);
+  return [false, true].map((bashQuotes) => segments.map((text) => segmentWords(text, bashQuotes)));
+}
+
+function wordsReferToControlPath(cmd, envFile) {
+  const target = controlPathNamespace(envFile);
+  return !!target && readings(cmd).flat(2).some((w) => !w.op && controlPathNamespace(w.value) === target);
+}
+
 // Claude's host session selector and Zensu's helper-private bindings must not
 // be rebound by a model-issued Bash call. Likewise, model commands may not
 // write CLAUDE_ENV_FILE and poison later Bash environments. This check is
@@ -594,54 +1250,966 @@ function detectControlMutation(cmd) {
   // command that writes through $CLAUDE_ENV_FILE must stay denied even if the
   // ambient value is missing, native Windows, or otherwise uncomparable.
   const refersToEnvFile = /\$\{?CLAUDE_ENV_FILE\}?/.test(cmd)
-    || commandRefersToControlPath(cmd, envFile);
+    || commandRefersToControlPath(cmd, envFile)
+    || wordsReferToControlPath(cmd, envFile);
   if (refersToEnvFile && detectChannels(cmd)) {
     return "Blocked a Bash write to CLAUDE_ENV_FILE. Model commands must not alter the environment inherited by later Claude Code Bash calls.";
   }
 
-  for (const event of lex(stripHeredocs(cmd))) {
+  const found = controlFinding(cmd);
+  if (!found) return "";
+  if (found.kind === "unread") {
+    return "Blocked a Bash command with more than " + MAX_SPLITS + " env -S split strings, which this check does not read. Write the command without nesting env -S.";
+  }
+  if (found.kind === "dynamic") {
+    return "Blocked a Bash command that builds the name of a variable it assigns or removes at run time, which this check cannot read. Write the variable name literally.";
+  }
+  if (found.kind === "nameref") {
+    return "Blocked a Bash nameref declaration, which this check cannot follow to the variable it names. Assign the variable by its literal name instead.";
+  }
+  if (found.kind === "deep") {
+    return "Blocked a Bash command nested deeper than this check reads. Write the command with fewer nested substitutions.";
+  }
+  return found.kind === "removal"
+    ? "Blocked removal of protected Session Control input " + found.name + ". Start a fresh Claude Code session instead."
+    : "Blocked a Bash rebind of protected Session Control input " + found.name + ". Start a fresh Claude Code session instead.";
+}
+
+function readControlMutation(cmd) {
+  for (const segment of readings(cmd).flat()) {
+    const descriptor = segment.find((w) => w.fdName && CONTROL_BINDINGS.has(w.fdName));
+    if (descriptor) return { kind: "rebind", name: descriptor.fdName };
+    const read = commandWords(splitRedirects(segment).words);
+    if (read.overflow) return { kind: "unread", name: "" };
+    const set = read.leading.concat(read.ops.filter((op) => op.kind === "set"))
+      .find((assignment) => CONTROL_BINDINGS.has(assignment.name));
+    if (set) return { kind: "rebind", name: set.name };
+    const unset = read.ops.find((op) => op.kind === "unset" && CONTROL_BINDINGS.has(op.name));
+    if (unset) return { kind: "removal", name: unset.name };
+    if (read.index >= read.words.length) continue;
+    const cmd0 = read.word.split("/").pop();
+    const args = read.words.slice(read.index + 1).map((w) => w.value);
+    const found = baseControlMutation(cmd0, args, bindingFromAssignment);
+    if (found) return found;
+  }
+  return null;
+}
+
+function wordSplitControlMutation(cmd) {
+  const plainBinding = (word) => {
+    const m = unquote(word).match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+    return m && CONTROL_BINDINGS.has(m[1]) ? m[1] : "";
+  };
+  for (const event of lex(stripHeredocs(cmd), false)) {
     if (event.t !== "seg") continue;
     const toks = event.text.trim().split(/\s+/).filter(Boolean);
-    if (!toks.length) continue;
     let i = 0;
-    while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
-      const name = bindingFromAssignment(toks[i]);
-      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
-      i++;
-    }
-    while (i < toks.length && WRAP.has(unquote(toks[i]).split("/").pop())) {
-      i++;
-      while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
-        const name = bindingFromAssignment(toks[i]);
-        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
-        i++;
+    let name = "";
+    const assignments = () => {
+      for (; i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i]); i++) {
+        name = plainBinding(toks[i]);
+        if (name) return true;
       }
+      return false;
+    };
+    if (assignments()) return { kind: "rebind", name };
+    while (i < toks.length && WRAP.has(programName(unquote(toks[i])))) {
+      i++;
+      if (assignments()) return { kind: "rebind", name };
     }
     if (i >= toks.length) continue;
-    const cmd0 = unquote(toks[i]).split("/").pop();
-    const args = toks.slice(i + 1).map(unquote);
-    if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
-      for (const arg of args) {
-        const name = bindingFromAssignment(arg);
-        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
-      }
+    const found = baseControlMutation(unquote(toks[i]).split("/").pop(), toks.slice(i + 1).map(unquote), plainBinding);
+    if (found) return found;
+  }
+  return null;
+}
+
+function baseControlMutation(cmd0, args, binding) {
+  if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
+    for (const arg of args) {
+      const name = binding(arg);
+      if (name) return { kind: "rebind", name };
     }
-    if (cmd0 === "unset") {
-      const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
-      if (name) return "Blocked removal of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
-    }
-    if (cmd0 === "printf") {
-      const vi = args.indexOf("-v");
-      if (vi !== -1 && CONTROL_BINDINGS.has(args[vi + 1])) {
-        return "Blocked a Bash rebind of protected Session Control input " + args[vi + 1] + ". Start a fresh Claude Code session instead.";
-      }
-    }
-    if (cmd0 === "read") {
-      const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
-      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+    const unexports = cmd0 === "export"
+      ? args.some((a) => /^-[A-Za-z]*n/.test(a))
+      : args.some((a) => /^(?:\+[A-Za-z]*x|-[A-Za-z]*[aA])/.test(a));
+    const name = unexports ? args.map(protectedName).find(Boolean) : "";
+    if (name) return { kind: "removal", name };
+  }
+  if (cmd0 === "unset") {
+    const name = args.map(protectedName).find(Boolean);
+    if (name) return { kind: "removal", name };
+  }
+  if (cmd0 === "printf") {
+    for (let k = 0; k < args.length; k++) {
+      const name = protectedName(args[k] === "-v" ? args[k + 1] || "" : /^-v./.test(args[k]) ? args[k].slice(2) : "");
+      if (name) return { kind: "rebind", name };
     }
   }
-  return "";
+  if (cmd0 === "read") {
+    const name = args.map(protectedName).find(Boolean);
+    if (name) return { kind: "rebind", name };
+  }
+  if (["for", "select", "foreach"].includes(cmd0)) {
+    for (const arg of args) {
+      if (arg === "in" || arg === "do" || arg.startsWith("(")) break;
+      const name = protectedName(arg);
+      if (name) return { kind: "rebind", name };
+    }
+  }
+  return null;
+}
+
+function builtinControlMutation(cmd0, args) {
+  const base = baseControlMutation(cmd0, args, bindingFromAssignment);
+  if (base) return base;
+  if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
+    if (["declare", "typeset", "local"].includes(cmd0) && args.some((a) => /^-[A-Za-z]*n/.test(a))) {
+      return { kind: "nameref", name: "" };
+    }
+    const found = args.map(subscriptFinding).find(Boolean);
+    if (found) return found;
+    const converts = ["declare", "typeset", "local"].includes(cmd0) && args.some((a) => /^-[A-Za-z0-9]*[TiEFluLRZ]/.test(a));
+    const name = converts ? args.filter((a) => !/^[-+]/.test(a)).map(protectedName).find(Boolean) : "";
+    if (name) return { kind: "rebind", name };
+  }
+  if (OPTION_BUILTINS.has(cmd0)) {
+    let built = false;
+    for (let k = 0; k < args.length && /^[-+$`]/.test(args[k]); k++) built = built || /[$`]/.test(args[k]);
+    if (built && args.some((a) => protectedName(a) || protectedName(a.slice(a.indexOf("=") + 1)))) return { kind: "dynamic", name: "" };
+  }
+  const operands = (list, kind) => list.map((arg) => operandFinding(arg, kind)).find(Boolean) || null;
+  if (cmd0 === "integer" || cmd0 === "float") {
+    const found = operands(args.filter((a) => !/^[-+]/.test(a)).map((a) => a.replace(/=[\s\S]*$/, "")), "rebind");
+    if (found) return found;
+  }
+  if (cmd0 === "unset") {
+    const found = args.some((a) => /^-[A-Za-z]*m/.test(a))
+      ? args.filter((a) => !/^-/.test(a)).map(patternFinding).find(Boolean)
+      : operands(args, "removal");
+    if (found) return found;
+  }
+  if (cmd0 === "test" || cmd0 === "[") {
+    for (let k = 0; k + 1 < args.length; k++) {
+      const found = args[k] === "-v" ? subscriptFinding(args[k + 1]) : null;
+      if (found) return found;
+    }
+  }
+  const nameOption = cmd0 === "printf" || cmd0 === "print" ? "v" : cmd0 === "wait" ? "p" : cmd0 === "read" ? "a" : cmd0 === "compgen" ? "V" : "";
+  if (nameOption) {
+    const option = new RegExp("^-[A-Za-z]*?" + nameOption + "([\\s\\S]*)$");
+    for (let k = 0; k < args.length; k++) {
+      const m = option.exec(args[k]);
+      const found = m ? operandFinding(m[1] || args[k + 1] || "", cmd0 === "compgen" ? "removal" : "rebind") : null;
+      if (found) return found;
+    }
+  }
+  if (cmd0 === "set") {
+    for (let k = 0; k < args.length; k++) {
+      const m = /^[-+][A-Za-z]*?A([\s\S]*)$/.exec(args[k]);
+      const found = m ? operandFinding(m[1] || args[k + 1] || "", "rebind") : null;
+      if (found) return found;
+    }
+  }
+  if (["read", "getopts", "mapfile", "readarray", "wait", "vared", "getln"].includes(cmd0)) {
+    const found = operands(cmd0 === "read" ? args.map((a) => a.replace(/\?[\s\S]*$/, "")) : args, "rebind");
+    if (found) return found;
+  }
+  if (["let", "repeat", "shift", "return", "break", "continue"].includes(cmd0)) {
+    const found = args.map((a) => arithmeticFinding(a)).find(Boolean);
+    if (found) return found;
+  }
+  return null;
+}
+
+function patternFinding(pattern) {
+  let source = "";
+  for (let k = 0; k < pattern.length; k++) {
+    const c = pattern[k];
+    if (c === "*") source += "[\\s\\S]*";
+    else if (c === "?") source += "[\\s\\S]";
+    else if (c === "(" || c === ")" || c === "|") source += c === "(" ? "(?:" : c;
+    else if (c === "[") {
+      const close = pattern.indexOf("]", k + 2);
+      if (close === -1) return { kind: "dynamic", name: "" };
+      source += "[" + pattern.slice(k + 1, close).replace(/^[!^]/, "^").replace(/\\/g, "\\\\") + "]";
+      k = close;
+    } else if (/[A-Za-z0-9_]/.test(c)) source += c;
+    else return { kind: "dynamic", name: "" };
+  }
+  let matcher;
+  try {
+    matcher = new RegExp("^(?:" + source + ")$");
+  } catch (_) {
+    return { kind: "dynamic", name: "" };
+  }
+  const name = Array.from(CONTROL_BINDINGS).find((binding) => matcher.test(binding));
+  return name ? { kind: "removal", name } : null;
+}
+
+function protectedName(arg) {
+  const name = arg.replace(/\[.*$/, "");
+  return CONTROL_BINDINGS.has(name) ? name : "";
+}
+
+function subscriptFinding(operand) {
+  const m = /^[A-Za-z_][A-Za-z0-9_]*\[([^\]]*)\]/.exec(operand);
+  return m ? arithmeticFinding(m[1]) : null;
+}
+
+function operandFinding(operand, kind) {
+  const name = protectedName(operand);
+  return name ? { kind, name } : subscriptFinding(operand);
+}
+
+const ARITH_OPERATOR = /\s*(?:(?:\*\*|<<|>>|&&|\|\||\^\^|[-+*/%&^|])?=(?!=)|\+\+|--)/y;
+
+function arithmeticReference(text, k) {
+  if (text[k] === "`") {
+    const close = text.indexOf("`", k + 1);
+    return close === -1 ? text.length : close + 1;
+  }
+  const open = text[k + 1];
+  if (open === "{" || open === "(") {
+    let depth = 0;
+    for (let j = k + 1; j < text.length; j++) {
+      if (text[j] === open) depth++;
+      else if (text[j] === (open === "{" ? "}" : ")") && --depth === 0) return j + 1;
+    }
+    return text.length;
+  }
+  PARAMETER_REFERENCE.lastIndex = k + 1;
+  const m = PARAMETER_REFERENCE.exec(text);
+  return k + 1 + (m ? m[0].length : 0);
+}
+
+function arithmeticFinding(expr, depth = 0) {
+  if (depth > MAX_NESTING) return { kind: "deep", name: "" };
+  const text = expr.replace(/["']/g, "");
+  const end = bracketPairs(text);
+  for (let k = 0; k < text.length;) {
+    const start = k;
+    let name = "";
+    if (/[A-Za-z_]/.test(text[k]) && !/[A-Za-z0-9_$]/.test(text[k - 1] || "")) {
+      while (k < text.length && /[A-Za-z0-9_]/.test(text[k])) k++;
+      name = text.slice(start, k);
+    } else if (text[k] === "$" || text[k] === "`") {
+      k = arithmeticReference(text, k);
+    } else {
+      k++;
+      continue;
+    }
+    let open = k;
+    while (/\s/.test(text[open] || "")) open++;
+    const close = text[open] === "[" ? end(open) : k;
+    let before = start - 1;
+    while (before > 0 && /\s/.test(text[before])) before--;
+    ARITH_OPERATOR.lastIndex = close;
+    if (ARITH_OPERATOR.test(text) || (before > 0 && /^(?:\+\+|--)$/.test(text.slice(before - 1, before + 1)))) {
+      if (!name) return { kind: "dynamic", name: "" };
+      if (CONTROL_BINDINGS.has(name)) return { kind: "rebind", name };
+    }
+    const inner = close > k ? arithmeticFinding(text.slice(open + 1, Math.max(open + 1, close - 1)), depth + 1) : null;
+    if (inner) return inner;
+    k = close;
+  }
+  return null;
+}
+
+const MAX_NESTING = 64;
+const PAREN_HEADS = new Set("! if then else elif do while until for time coproc".split(" "));
+const COPROC_BODIES = new Set("case if while until for select".split(" "));
+const OPTION_BUILTINS = new Set("export readonly declare typeset local printf print wait set compgen read".split(" "));
+const PARAMETER_REFERENCE = /[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-]/y;
+const DECLARATION_WORDS = new Set("export readonly declare typeset local integer float".split(" "));
+
+function cooked(text) {
+  return text.replace(/\\([\s\S])/g, (pair, c) => (c === "\n" ? "" : pair));
+}
+
+function bracketEnd(text, start) {
+  let depth = 0;
+  for (let k = start; k < text.length; k++) {
+    const c = text[k];
+    if (c === "\\") {
+      k++;
+    } else if (c === "'" || c === "\"") {
+      const close = text.indexOf(c, k + 1);
+      if (close === -1) return text.length;
+      k = close;
+    } else if (c === "[") {
+      depth++;
+    } else if (c === "]" && --depth === 0) {
+      return k + 1;
+    }
+  }
+  return text.length;
+}
+
+function bracketPairs(text) {
+  const pairs = new Map();
+  const open = [];
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k];
+    if (c === "\\") {
+      k++;
+    } else if (c === "'" || c === "\"") {
+      const close = text.indexOf(c, k + 1);
+      if (close === -1) break;
+      k = close;
+    } else if (c === "[") {
+      open.push(k);
+    } else if (c === "]" && open.length) {
+      pairs.set(open.pop(), k + 1);
+    }
+  }
+  return (k) => pairs.get(k) || text.length;
+}
+
+function zshFlagsEnd(body) {
+  const pairs = { "(": ")", "[": "]", "{": "}", "<": ">" };
+  for (let k = 1; k < body.length; k++) {
+    if (body[k] === ")") return k;
+    if ("jlrsZ_Ig".indexOf(body[k]) === -1 || k + 1 >= body.length || /[A-Za-z0-9)]/.test(body[k + 1])) continue;
+    const open = body[k + 1];
+    const close = pairs[open] || open;
+    k++;
+    while (body[k] === open) {
+      const end = body.indexOf(close, k + 1);
+      if (end === -1) return -1;
+      k = end + 1;
+    }
+    k--;
+  }
+  return -1;
+}
+
+function parameterFinding(body) {
+  let k = 0;
+  let flags = "";
+  if (body[0] === "(") {
+    const close = zshFlagsEnd(body);
+    if (close === -1) return arithmeticFinding(body);
+    flags = body.slice(1, close);
+    k = close + 1;
+  }
+  const m = /^([#!^=~+]*)([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])/.exec(body.slice(k));
+  if (!m) return /^[$`"]/.test(body.slice(k)) ? null : arithmeticFinding(body);
+  let end = k + m[0].length;
+  let subscript = "";
+  if (body[end] === "[") {
+    const close = bracketEnd(body, end);
+    subscript = body.slice(end + 1, Math.max(end + 1, close - 1));
+    end = close;
+  }
+  const rest = body.slice(end);
+  if (/^:{0,2}=/.test(rest)) {
+    if (flags.indexOf("P") !== -1 || m[1].indexOf("!") !== -1) return { kind: "dynamic", name: "" };
+    if (CONTROL_BINDINGS.has(m[2])) return { kind: "rebind", name: m[2] };
+  }
+  const offset = /^:(?![-=?+:#%/^,~])/.test(rest) ? rest.slice(1) : "";
+  return (subscript ? arithmeticFinding(subscript) : null) || (offset ? arithmeticFinding(offset) : null);
+}
+
+function arrayFinding(literal) {
+  const end = bracketPairs(literal);
+  for (let k = 0; k < literal.length; k++) {
+    if (literal[k] !== "[" || (k > 0 && !/\s/.test(literal[k - 1]))) continue;
+    const close = end(k);
+    const found = literal[close] === "=" || literal.startsWith("+=", close)
+      ? arithmeticFinding(literal.slice(k + 1, Math.max(k + 1, close - 1)))
+      : null;
+    if (found) return found;
+    k = Math.max(k, close - 1);
+  }
+  return null;
+}
+
+function conditionalFinding(tokens) {
+  for (let k = 0; k < tokens.length; k++) {
+    const raw = tokens[k].raw;
+    const found = /^-(?:eq|ne|lt|le|gt|ge)$/.test(raw)
+      ? arithmeticFinding(k > 0 ? tokens[k - 1].value : "") || arithmeticFinding(k + 1 < tokens.length ? tokens[k + 1].value : "")
+      : raw === "-v" && k + 1 < tokens.length ? subscriptFinding(tokens[k + 1].value) : null;
+    if (found) return found;
+  }
+  return null;
+}
+
+function commandFinding(words) {
+  if (!words.length) return null;
+  const read = commandWords(words);
+  if (read.overflow) return { kind: "unread", name: "" };
+  if (read.dynamic) return { kind: "dynamic", name: "" };
+  const set = read.leading.concat(read.ops.filter((op) => op.kind === "set"))
+    .find((assignment) => CONTROL_BINDINGS.has(assignment.name));
+  if (set) return { kind: "rebind", name: set.name };
+  const indexed = read.leading.map((assignment) => arithmeticFinding(assignment.subscript)).find(Boolean);
+  if (indexed) return indexed;
+  const unset = read.ops.find((op) => op.kind === "unset" && CONTROL_BINDINGS.has(op.name));
+  if (unset) return { kind: "removal", name: unset.name };
+  if (read.index >= read.words.length) return null;
+  const cmd0 = read.word.split("/").pop();
+  if (cmd0 === "coproc") {
+    const rest = read.words.slice(read.index + 1);
+    const name = rest.length ? protectedName(rest[0].value) : "";
+    return name ? { kind: "rebind", name } : commandFinding(rest);
+  }
+  return builtinControlMutation(cmd0, read.words.slice(read.index + 1).map((w) => w.value));
+}
+
+function shellFinding(source, bashQuotes) {
+  const deep = { kind: "deep", name: "" };
+  const limit = 32 * source.length + 65536;
+  let steps = 0;
+  const spent = (n) => (steps += n) > limit;
+
+  function part(text, k, depth) {
+    const c = text[k];
+    const next = text[k + 1];
+    if (c === "\\") return { end: k + 2, value: next === undefined ? "" : next, found: null };
+    if (c === "'") {
+      const close = text.indexOf("'", k + 1);
+      const end = close === -1 ? text.length : close;
+      return { end: Math.min(end + 1, text.length), value: text.slice(k + 1, end), found: null };
+    }
+    if (c === "$" && next === "'") {
+      const decoded = ansiC(text, k + 2);
+      return { end: Math.min(decoded.end + 1, text.length), value: decoded.value, found: null };
+    }
+    if (c === "\"" || (c === "$" && next === "\"")) return double(text, k + (c === "$" ? 2 : 1), depth);
+    if (c === "$" || c === "`") {
+      const read = c === "$" ? dollar(text, k, false, depth) : backtick(text, k, false, depth);
+      return { end: read.end, value: text.slice(k, read.end), found: read.found };
+    }
+    return { end: k + 1, value: c, found: null };
+  }
+
+  function double(text, start, depth) {
+    let value = "";
+    let k = start;
+    while (k < text.length && text[k] !== "\"") {
+      if (spent(1)) return { end: text.length, value, found: deep };
+      const c = text[k];
+      if (c === "\\") {
+        const next = text[k + 1];
+        if (next !== "\n") value += next !== undefined && "$`\"\\".indexOf(next) !== -1 ? next : c + (next || "");
+        k += 2;
+      } else if (c === "$" || c === "`") {
+        const read = c === "$" ? dollar(text, k, true, depth) : backtick(text, k, true, depth);
+        if (read.found) return { end: text.length, value, found: read.found };
+        value += text.slice(k, read.end);
+        k = read.end;
+      } else {
+        value += c;
+        k++;
+      }
+    }
+    return { end: Math.min(k + 1, text.length), value, found: null };
+  }
+
+  function dollar(text, k, quoted, depth) {
+    const next = text[k + 1];
+    if (next === "(" && text[k + 2] === "(") {
+      const read = arithmetic(text, k + 3, quoted, depth + 1);
+      if (read) return read;
+    }
+    if (next === "(") {
+      const read = commands(text, k + 2, ")", depth + 1);
+      return { end: Math.min(read.end + 1, text.length), found: read.found };
+    }
+    if (next === "{" && /[\s|]/.test(text[k + 2] || "")) {
+      const read = commands(text, k + (text[k + 2] === "|" ? 3 : 2), "}", depth + 1);
+      return { end: Math.min(read.end + 1, text.length), found: read.found };
+    }
+    if (next === "{") {
+      const end = braceEnd(text, k, quoted, bashQuotes);
+      if (spent(end - k)) return { end: text.length, found: deep };
+      const body = text.slice(k + 2, text[end - 1] === "}" ? end - 1 : end);
+      return { end, found: parameterFinding(cooked(body)) || expansions(body, depth + 1) };
+    }
+    if (next === "[") {
+      const close = bracketEnd(text, k + 1);
+      if (spent(close - k)) return { end: text.length, found: deep };
+      const inner = text.slice(k + 2, Math.max(k + 2, close - 1));
+      return { end: close, found: arithmeticFinding(cooked(inner)) || expansions(inner, depth + 1) };
+    }
+    PARAMETER_REFERENCE.lastIndex = k + 1;
+    const m = PARAMETER_REFERENCE.exec(text);
+    const end = k + 1 + (m ? m[0].length : 0);
+    if (!m || text[end] !== "[") return { end, found: null };
+    const close = bracketEnd(text, end);
+    if (spent(close - end)) return { end: text.length, found: deep };
+    const inner = text.slice(end + 1, Math.max(end + 1, close - 1));
+    return { end, found: text[close - 1] === "]" ? arithmeticFinding(cooked(inner)) : null };
+  }
+
+  function arithmetic(text, start, quoted, depth) {
+    if (depth > MAX_NESTING) return { end: text.length, found: deep };
+    let level = 0;
+    let found = null;
+    for (let k = start; k < text.length;) {
+      if (spent(1)) return { end: text.length, found: deep };
+      const c = text[k];
+      if (c === "\\") {
+        k += 2;
+      } else if (c === "'") {
+        const close = text.indexOf("'", k + 1);
+        k = close === -1 ? text.length : close + 1;
+      } else if (c === "\"" || c === "$" || c === "`") {
+        const read = c === "\"" ? double(text, k + 1, depth) : c === "$" ? dollar(text, k, quoted, depth) : backtick(text, k, quoted, depth);
+        found = found || read.found;
+        k = read.end;
+      } else if (c === "(") {
+        level++;
+        k++;
+      } else if (c !== ")") {
+        k++;
+      } else if (level > 0) {
+        level--;
+        k++;
+      } else {
+        return text[k + 1] === ")" ? { end: k + 2, found: found || arithmeticFinding(cooked(text.slice(start, k))) } : null;
+      }
+    }
+    return null;
+  }
+
+  function backtick(text, k, quoted, depth) {
+    let end = k + 1;
+    while (end < text.length && text[end] !== "`") end += text[end] === "\\" ? 2 : 1;
+    end = Math.min(end, text.length);
+    if (spent(end - k)) return { end: text.length, found: deep };
+    const inner = text.slice(k + 1, end).replace(quoted ? /\\([$`\\"])/g : /\\([$`\\])/g, "$1");
+    return { end: Math.min(end + 1, text.length), found: commands(inner, 0, "", depth + 1).found };
+  }
+
+  function expansions(text, depth) {
+    if (depth > MAX_NESTING) return deep;
+    for (let k = 0; k < text.length;) {
+      if (spent(1)) return deep;
+      const c = text[k];
+      if (c === "\\") {
+        k += 2;
+      } else if (c === "$" || c === "`") {
+        const read = c === "$" ? dollar(text, k, true, depth) : backtick(text, k, true, depth);
+        if (read.found) return read.found;
+        k = read.end;
+      } else {
+        k++;
+      }
+    }
+    return null;
+  }
+
+  function bodies(text, start, docs, depth) {
+    let k = start;
+    for (const doc of docs) {
+      let line = k;
+      while (line < text.length) {
+        const stop = text.indexOf("\n", line);
+        const end = stop === -1 ? text.length : stop;
+        const raw = text.slice(line, end);
+        if ((doc.tabs ? raw.replace(/^\t+/, "") : raw) === doc.delim) break;
+        line = end + 1;
+      }
+      if (spent(Math.min(line, text.length) - k)) return { end: text.length, found: deep };
+      const found = doc.quoted ? null : expansions(cooked(text.slice(k, Math.min(line, text.length))), depth + 1);
+      if (found) return { end: text.length, found };
+      if (line >= text.length) return { end: text.length, found: null };
+      const stop = text.indexOf("\n", line);
+      k = stop === -1 ? text.length : stop + 1;
+    }
+    return { end: k, found: null };
+  }
+
+  function parenWord(text, start, depth, comments) {
+    let level = 0;
+    let kept = "";
+    for (let k = start; k < text.length;) {
+      if (spent(1)) return { end: text.length, found: deep, kept };
+      const c = text[k];
+      if (comments && c === "#" && /[\s(]/.test(text[k - 1])) {
+        const stop = text.indexOf("\n", k);
+        k = stop === -1 ? text.length : stop;
+      } else if (c === "(" || c === ")") {
+        level += c === "(" ? 1 : -1;
+        k++;
+        if (level === 0) return { end: k, found: null, kept };
+        kept += c;
+      } else if ("\\'\"$`".indexOf(c) !== -1) {
+        const read = part(text, k, depth);
+        if (read.found) return { end: text.length, found: read.found, kept };
+        kept += text.slice(k, read.end);
+        k = read.end;
+      } else {
+        kept += c;
+        k++;
+      }
+    }
+    return { end: text.length, found: null, kept };
+  }
+
+  function conditional(text, start, depth) {
+    if (depth > MAX_NESTING) return { end: text.length, found: deep };
+    const tokens = [];
+    let word = null;
+    let fallback = null;
+    let newline = -1;
+    for (let k = start; k < text.length;) {
+      if (spent(1)) return { end: text.length, found: deep };
+      const c = text[k];
+      if (c === "\\" && text[k + 1] === "\n") {
+        k += 2;
+        continue;
+      }
+      if (c === "#" && !word) {
+        const stop = text.indexOf("\n", k);
+        k = stop === -1 ? text.length : stop;
+        continue;
+      }
+      const regex = tokens.length > 0 && tokens[tokens.length - 1].raw === "=~";
+      if (c === "(" && (word ? regex || /[@!+*?]$/.test(text.slice(word.start, k)) : regex)) {
+        if (!word) word = { start: k, value: "" };
+        const read = parenWord(text, k, depth);
+        if (read.found) return { end: text.length, found: read.found };
+        word.value += text.slice(k, read.end);
+        k = read.end;
+        continue;
+      }
+      if (c === "|" && word && regex) {
+        word.value += c;
+        k++;
+        continue;
+      }
+      if (/\s/.test(c) || "()<>;&|".indexOf(c) !== -1) {
+        if (word) tokens.push({ raw: text.slice(word.start, k), value: word.value });
+        word = null;
+        if (tokens.length && tokens[tokens.length - 1].raw === "]]") return { end: k, found: conditionalFinding(tokens), broken: fallback ? fallback.end : -1 };
+        if (/\s/.test(c)) {
+          if (c === "\n" && newline === -1) newline = k;
+          k++;
+        } else if ((c === "&" || c === "|") && text[k + 1] === c) {
+          tokens.push({ raw: c + c, value: c + c });
+          k += 2;
+        } else {
+          if ("()<>".indexOf(c) === -1 && !fallback) fallback = { end: k, tokens: tokens.slice() };
+          tokens.push({ raw: c, value: c });
+          k++;
+        }
+        continue;
+      }
+      if (!word) word = { start: k, value: "" };
+      const read = part(text, k, depth);
+      if (read.found) return { end: text.length, found: read.found };
+      word.value += read.value;
+      k = read.end;
+    }
+    if (word) tokens.push({ raw: text.slice(word.start), value: word.value });
+    if (tokens.length && tokens[tokens.length - 1].raw === "]]") return { end: text.length, found: conditionalFinding(tokens), broken: fallback ? fallback.end : -1 };
+    if (fallback) return { end: fallback.end, found: conditionalFinding(fallback.tokens), broken: -1 };
+    return { end: text.length, found: conditionalFinding(tokens), broken: newline };
+  }
+
+  function commands(text, start, closer, depth) {
+    if (depth > MAX_NESTING) return { end: text.length, found: deep };
+    const stack = [];
+    let words = [];
+    let word = null;
+    let target = false;
+    let piped = false;
+    let redirected = false;
+    let held = null;
+    let docs = [];
+    const top = () => stack[stack.length - 1];
+    const inCase = (state) => top() !== undefined && top().kind === "case" && top().state === state;
+    const commandStart = () => {
+      let k = 0;
+      let timed = piped;
+      for (;;) {
+        while (k < words.length && RESERVED_WORDS.has(words[k].raw)) k++;
+        if (k < words.length && words[k].raw === "coproc") {
+          k++;
+          timed = true;
+          continue;
+        }
+        if (!timed && k < words.length && words[k].raw === "time") {
+          k++;
+          timed = true;
+          if (k < words.length && words[k].raw === "-p") k++;
+          if (k < words.length && words[k].raw === "--") k++;
+          continue;
+        }
+        return k;
+      }
+    };
+    const atCommand = () => !(redirected && bashQuotes) && commandStart() === words.length;
+    const assignPos = () => {
+      for (let k = commandStart(); k < words.length; k++) {
+        if (!SHELL_ASSIGNMENT.test(words[k].raw)) return DECLARATION_WORDS.has(words[k].value);
+      }
+      return true;
+    };
+    const coprocName = () => words.length >= 2 && words[words.length - 2].raw === "coproc"
+      && commandStart() === words.length - 1 && /^[A-Za-z_][A-Za-z0-9_]*$/.test(words[words.length - 1].raw);
+    const closeWord = (to) => {
+      if (!word) return;
+      const w = { raw: text.slice(word.start, to), value: word.value };
+      word = null;
+      if (target) {
+        target = false;
+        return;
+      }
+      if (inCase("pattern")) {
+        const alternative = top().alternative;
+        top().alternative = false;
+        if (w.raw === "esac" && !alternative) stack.pop();
+        return;
+      }
+      if (atCommand() && w.raw === "esac" && inCase("body")) {
+        stack.pop();
+        return;
+      }
+      if (coprocName() && COPROC_BODIES.has(w.raw)) {
+        const name = words[words.length - 1].raw;
+        if (CONTROL_BINDINGS.has(name)) held = { kind: "rebind", name };
+        words = [];
+      }
+      if (atCommand() && w.raw === "case") stack.push({ kind: "case", state: "head" });
+      words.push(w);
+      if (inCase("head") && words.length >= 3 && w.raw === "in") {
+        top().state = "pattern";
+        words = [];
+      }
+      if (words.length === 2 && words[0].raw === "function") words = [];
+    };
+    const finish = (to) => {
+      closeWord(to);
+      target = false;
+      redirected = false;
+      if (inCase("head")) return null;
+      const found = commandFinding(words);
+      words = [];
+      return found;
+    };
+    let i = start;
+    while (i < text.length) {
+      if (held) return { end: text.length, found: held };
+      if (spent(1)) return { end: text.length, found: deep };
+      const c = text[i];
+      const next = text[i + 1];
+      if (c === "\\" && next === "\n") {
+        i += 2;
+        continue;
+      }
+      if (c === " " || c === "\t") {
+        closeWord(i);
+        i++;
+        continue;
+      }
+      if (c === "#" && !word) {
+        const stop = text.indexOf("\n", i);
+        i = stop === -1 ? text.length : stop;
+        continue;
+      }
+      if (!word && (c === "{" || c === "}") && !inCase("pattern") && (i + 1 >= text.length || /[\s;&|()<>]/.test(next))) {
+        if (c === "{" && (atCommand() || coprocName())) {
+          const found = atCommand() ? null : finish(i);
+          if (found) return { end: text.length, found };
+          stack.push({ kind: "group" });
+          piped = false;
+          words.push({ raw: c, value: c });
+          i++;
+          continue;
+        }
+        if (c === "}" && atCommand() && top() && top().kind === "group") {
+          stack.pop();
+          words.push({ raw: c, value: c });
+          i++;
+          continue;
+        }
+        if (c === "}" && atCommand() && closer === "}") return { end: i, found: finish(i) || held };
+      }
+      if (c === "[" && next === "[" && !word && !inCase("pattern") && (atCommand() || coprocName()) && /\s/.test(text[i + 2] || "")) {
+        const read = conditional(text, i + 2, depth + 1);
+        if (read.found) return { end: text.length, found: read.found };
+        const prior = (read.broken === -1 ? null : commands(text, read.broken, closer, depth + 1).found) || commandFinding(words);
+        if (prior) return { end: text.length, found: prior };
+        words = [];
+        i = read.end;
+        continue;
+      }
+      if (c === "(" && !word) {
+        if (inCase("pattern")) {
+          top().alternative = true;
+          i++;
+          continue;
+        }
+        const read = next === "(" ? arithmetic(text, i + 2, false, depth + 1) : null;
+        if (read && read.found) return { end: text.length, found: read.found };
+        if (read) {
+          i = read.end;
+          continue;
+        }
+        if (!atCommand()) {
+          let j = i + 1;
+          while (text[j] === " " || text[j] === "\t") j++;
+          if (text[j] === ")") {
+            words = [];
+            i = j + 1;
+            continue;
+          }
+        }
+        const found = finish(i);
+        if (found) return { end: text.length, found };
+        stack.push({ kind: "paren" });
+        piped = false;
+        i++;
+        continue;
+      }
+      if (c === ")") {
+        closeWord(i);
+        if (inCase("pattern")) {
+          top().state = "body";
+          words = [];
+          piped = false;
+          i++;
+          continue;
+        }
+        let at = stack.length - 1;
+        while (at >= 0 && stack[at].kind !== "paren") at--;
+        const paren = at >= 0;
+        if (paren) stack.length = at;
+        const found = finish(i);
+        if (!paren && closer === ")") return { end: i, found: found || held };
+        if (found) return { end: text.length, found };
+        i++;
+        continue;
+      }
+      if ((c === "<" || c === ">") && next === "(") {
+        const read = commands(text, i + 2, ")", depth + 1);
+        if (read.found) return { end: text.length, found: read.found };
+        if (!word) word = { start: i, value: "" };
+        word.value += text.slice(i, Math.min(read.end + 1, text.length));
+        i = Math.min(read.end + 1, text.length);
+        continue;
+      }
+      if (c === "<" || c === ">" || (c === "&" && next === ">")) {
+        if (word) {
+          const prefix = text.slice(word.start, i);
+          const fd = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(prefix);
+          if (fd && CONTROL_BINDINGS.has(fd[1])) return { end: text.length, found: { kind: "rebind", name: fd[1] } };
+          if (fd || /^\d+$/.test(prefix)) word = null;
+          else closeWord(i);
+        }
+        if (commandStart() === words.length) redirected = true;
+        const op = redirectOperator(text, i);
+        i += op.length;
+        if (op === "<<" || op === "<<-") {
+          let j = i;
+          while (text[j] === " " || text[j] === "\t") j++;
+          const doc = heredocWord(text, j);
+          if (doc.end > j) docs.push({ delim: doc.value, tabs: op === "<<-", quoted: doc.quoted });
+          i = Math.max(doc.end, j);
+        } else {
+          target = true;
+        }
+        continue;
+      }
+      if (c === ";" || c === "&" || c === "|" || c === "\n") {
+        if ((c === "|" && next !== "|" && inCase("pattern")) || (c === "\n" && inCase("head"))) {
+          closeWord(i);
+          if (c === "|" && inCase("pattern")) top().alternative = true;
+          i++;
+          continue;
+        }
+        if (c !== "\n" && inCase("head")) stack.pop();
+        const found = finish(i);
+        if (found) return { end: text.length, found };
+        piped = c === "|" && next !== "|";
+        if (c === ";" && (next === ";" || next === "&")) {
+          i += next === ";" && text[i + 2] === "&" ? 3 : 2;
+          let at = stack.length - 1;
+          while (at >= 0 && stack[at].kind !== "case") at--;
+          if (at >= 0) {
+            stack.length = at + 1;
+            Object.assign(top(), { state: "pattern", alternative: false });
+          }
+          continue;
+        }
+        if ((c === "&" && next === "&") || (c === "|" && (next === "|" || next === "&"))) {
+          i += 2;
+          continue;
+        }
+        i++;
+        if (c === "\n" && docs.length) {
+          const read = bodies(text, i, docs, depth);
+          docs = [];
+          if (read.found) return { end: text.length, found: read.found };
+          i = read.end;
+        }
+        continue;
+      }
+      if (c === "(" && word) {
+        const prefix = text.slice(word.start, i);
+        const coprocHead = words.length > 0 && words[words.length - 1].raw === "coproc" && atCommand() && /^[A-Za-z_][A-Za-z0-9_]*$/.test(prefix);
+        if (word.value === prefix && !inCase("pattern") && ((atCommand() && PAREN_HEADS.has(prefix)) || (prefix === "in" && inCase("head")) || coprocHead)) {
+          closeWord(i);
+          continue;
+        }
+        let j = i + 1;
+        while (text[j] === " " || text[j] === "\t") j++;
+        if (text[j] === ")" && prefix.indexOf("=") === -1 && (atCommand() || (words.length === 1 && words[0].raw === "function"))) {
+          word = null;
+          words = [];
+          i = j + 1;
+          continue;
+        }
+        const literal = /^[A-Za-z_][A-Za-z0-9_]*\+?=$/.test(prefix);
+        const read = prefix === "=" ? commands(text, i + 1, ")", depth + 1) : parenWord(text, i, depth, literal);
+        if (read.found) return { end: text.length, found: read.found };
+        const end = prefix === "=" ? Math.min(read.end + 1, text.length) : read.end;
+        const found = literal ? arrayFinding(cooked(read.kept.slice(1))) : null;
+        if (found) return { end: text.length, found };
+        word.value += text.slice(i, end);
+        i = end;
+        continue;
+      }
+      if (c === "[" && word && /^[A-Za-z_][A-Za-z0-9_]*$/.test(text.slice(word.start, i)) && assignPos()) {
+        const close = bracketEnd(text, i);
+        if (spent(close - i)) return { end: text.length, found: deep };
+        if (text[close] === "=" || text.startsWith("+=", close)) {
+          const name = text.slice(word.start, i);
+          const inner = text.slice(i + 1, Math.max(i + 1, close - 1));
+          const found = CONTROL_BINDINGS.has(name) ? { kind: "rebind", name } : arithmeticFinding(cooked(inner)) || expansions(inner, depth + 1);
+          if (found) return { end: text.length, found };
+          word.value += text.slice(i, close);
+          i = close;
+          continue;
+        }
+      }
+      if (!word) word = { start: i, value: "" };
+      const read = part(text, i, depth);
+      if (read.found) return { end: text.length, found: read.found };
+      word.value += read.value;
+      i = read.end;
+    }
+    const found = finish(text.length);
+    return { end: text.length, found: held || found };
+  }
+
+  return commands(source, 0, "", 0).found;
+}
+
+function shellControlMutation(cmd) {
+  const found = shellFinding(cmd, false) || shellFinding(cmd, true);
+  if (found || cmd.indexOf("\\\n") === -1) return found;
+  const joined = joinedText(cmd);
+  return shellFinding(joined, false) || shellFinding(joined, true);
+}
+
+function controlFinding(cmd) {
+  return readControlMutation(cmd) || wordSplitControlMutation(cmd) || shellControlMutation(cmd);
 }
 
 const POWERSHELL_CONTROL_MAIN =
@@ -886,8 +2454,13 @@ function main() {
     }
   }
 
-  function decide(raw, channel) {
-    const p = abspath(unquote(raw));
+  function decide(value, channel, base) {
+    if (base === null && !path.isAbsolute(msysToDrive(expand(value), IS_WINDOWS))) {
+      return targetsOnly && SRC.has(extOf(value))
+        ? "WRITE-TARGET " + value + " (via " + channel + ", under a directory named at run time)"
+        : "";
+    }
+    const p = resolveFrom(base === null || base === undefined ? curdir : base, value);
     if (!SRC.has(extOf(p))) return "";
     if (isTemp(p)) return "";
     // BSWG_MODE=targets — report the RESOLVED write operand instead of judging
@@ -994,8 +2567,6 @@ function main() {
     );
   }
 
-  const REDIR = /^(&|\d*)(>>?)(\|?)(.*)$/; // >  >>  &>  2>  >|  (and glued target)
-
   // Bound the work: a crafted command with thousands of `>> a.rs >> b.rs …`
   // targets would otherwise fan out into thousands of synchronous git calls.
   const MAX_TARGETS = 200;
@@ -1006,7 +2577,7 @@ function main() {
   const DEADLINE = Date.now() + 20000;
 
   // Bypass-ledger markers: when an inline env prefix (unquoted OR quoted —
-  // envp values are unquote()d below) suppresses this gate for a segment, the
+  // envp values are read after quote removal) suppresses this gate for a segment, the
   // fact is reported to the caller as `__bypass__\t<VAR>` lines — but only
   // when no deny reason wins. Detection thereby shares the ONE code path that
   // decides the bypass, instead of a shell-side textual re-parse.
@@ -1014,167 +2585,146 @@ function main() {
   const bypassMarkers = () =>
     bypassed.map((v) => "__bypass__\t" + v).join("\n");
 
-  // `>|` (noclobber override) and `>&FILE`/`>>&FILE` (redirect-all-to-file) are
-  // just `>`/`>>` with the same target; collapse them before lexing so the bare
-  // `|`/`&` is not taken as a boundary that severs the redirect from its file.
-  // fd dups (`>&2`, `>&-`, `2>&1` — a digit or `-` after `&`) are left intact.
-  const stack = [];
-  // Snapshot taken at the START of each segment. A `|`/`&` boundary discards
-  // only what the stage that just ended did, so rewinding to the command's
-  // initial cwd would erase an earlier `cd ../sibling &&` — the drift this rule
-  // exists for — on any command with a pipe before the git verb.
-  let segCwd = curdir;
-  let segEnv = {};
-  let carryEnv = {};
-  const pre = stripHeredocs(cmd)
-    .replace(/>\|/g, ">")
-    .replace(/(\d*)(>>?)&(?=\s*[^\s0-9&|;<>(\-])/g, "$1$2");
-  for (const e of lex(pre)) {
-    // The env carry is scoped exactly like the cwd: a binding made inside `( … )`
-    // dies with the subshell and must not deny a later in-project command.
-    // A pipeline stage and a backgrounded command run in a subshell, so neither
-    // an `export` nor a `cd` made INSIDE that stage carries past it.
-    if (e.t === "reset") { curdir = segCwd; carryEnv = segEnv; continue; }
-    if (e.t === "enter") { stack.push([curdir, Object.assign({}, carryEnv)]); continue; }
-    if (e.t === "leave") {
-      const f = stack.pop();
-      if (f) { curdir = f[0]; carryEnv = f[1]; }
-      continue;
-    }
+  const events = lex(commandText(cmd));
+  const startDir = curdir;
+  function scan(bashQuotes) {
+    curdir = startDir;
+    evaluated = 0;
+    const stack = [];
+    // Snapshot taken at the START of each segment. A `|`/`&` boundary discards
+    // only what the stage that just ended did, so rewinding to the command's
+    // initial cwd would erase an earlier `cd ../sibling &&` — the drift this rule
+    // exists for — on any command with a pipe before the git verb.
+    let segCwd = curdir;
+    let segEnv = {};
+    let carryEnv = {};
+    for (const e of events) {
+      // The env carry is scoped exactly like the cwd: a binding made inside `( … )`
+      // dies with the subshell and must not deny a later in-project command.
+      // A pipeline stage and a backgrounded command run in a subshell, so neither
+      // an `export` nor a `cd` made INSIDE that stage carries past it.
+      if (e.t === "reset") { curdir = segCwd; carryEnv = segEnv; continue; }
+      if (e.t === "enter") { stack.push([curdir, Object.assign({}, carryEnv)]); continue; }
+      if (e.t === "leave") {
+        const f = stack.pop();
+        if (f) { curdir = f[0]; carryEnv = f[1]; }
+        continue;
+      }
 
-    const toks = e.text.trim().split(/\s+/).filter(Boolean);
-    if (!toks.length) continue;
-    segCwd = curdir;
-    segEnv = Object.assign({}, carryEnv);
+      const split = splitRedirects(segmentWords(e.text, bashQuotes));
+      if (!split.words.length && !split.writes.length) continue;
+      segCwd = curdir;
+      segEnv = Object.assign({}, carryEnv);
 
-    let i = 0;
-    const envp = {};
-    while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
-      const a = toks[i];
-      const eq = a.indexOf("=");
-      envp[a.slice(0, eq)] = unquote(a.slice(eq + 1));
-      i++;
-    }
-    const rest = toks.slice(i).filter((t) => t !== "");
-    if (!rest.length) continue;
+      // Skip transparent wrappers (env/sudo/command/exec/…) and env's VAR=val args
+      // so a wrapped program still resolves to its real verb for the program gates.
+      // `env VAR=val git …` carries its assignments in read.ops rather than in envp. They
+      // are collected separately so rule (C) can read GIT_DIR/GIT_WORK_TREE off both
+      // spellings without widening which prefixes count as an escape hatch.
+      const read = commandWords(split.words);
+      const envp = {};
+      for (const assignment of read.leading) {
+        if (assignment.plain) envp[assignment.name] = assignment.value;
+      }
+      if (read.index >= read.words.length && !split.writes.length) continue;
+      const word = read.word;
+      const cmd0 = read.inShell && word.indexOf("/") === -1 ? word : "";
+      const program = programName(word);
+      const args = read.words.slice(read.index + 1).map((w) => w.value);
 
-    // Skip transparent wrappers (env/sudo/command/exec/…) and env's VAR=val args
-    // so a wrapped builtin still resolves to its real verb for the cmd0 gates.
-    // `env VAR=val git …` carries its assignments here rather than in envp. They
-    // are collected separately so rule (C) can read GIT_DIR/GIT_WORK_TREE off both
-    // spellings without widening which prefixes count as an escape hatch.
-    let ci = 0;
-    const wrapEnv = {};
-    while (ci < rest.length && WRAP.has(unquote(rest[ci]).split("/").pop())) {
-      ci++;
-      while (ci < rest.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[ci])) {
-        const eq = rest[ci].indexOf("=");
-        wrapEnv[rest[ci].slice(0, eq)] = unquote(rest[ci].slice(eq + 1));
-        ci++;
+      // `cd` updates the scoped cwd BEFORE the escape-hatch check — an escaped
+      // segment may still change the directory for the commands that follow it.
+      if (cmd0 === "cd" && args[0] !== undefined) {
+        curdir = abspath(args[0]);
+        continue;
+      }
+      if (envp.ZENSU_BASH_WRITE_GATE === "off" || envp.ZENSU_MCP_GATE === "off") {
+        if (envp.ZENSU_BASH_WRITE_GATE === "off" && bypassed.indexOf("ZENSU_BASH_WRITE_GATE") < 0) bypassed.push("ZENSU_BASH_WRITE_GATE");
+        if (envp.ZENSU_MCP_GATE === "off" && bypassed.indexOf("ZENSU_MCP_GATE") < 0) bypassed.push("ZENSU_MCP_GATE");
+        continue;
+      }
+
+      // `export GIT_WORK_TREE=… && git add -A` is the third spelling of the same
+      // designation, and detectControlMutation already treats these builtins this
+      // way for its own bindings — carry it to the next segment in this command.
+      // `declare`/`typeset` only reach git's environment with -x; plain `export` always
+      // does. Harvest and then FALL THROUGH — a redirect in the same segment is still
+      // a write channel rules (A)/(B) must see.
+      if (cmd0 === "export"
+        || (["declare", "typeset"].indexOf(cmd0) !== -1 && args.some((a) => /^-[A-Za-z]*x/.test(a)))) {
+        for (const arg of args) {
+          const eq = arg.indexOf("=");
+          const name = eq > 0 ? arg.slice(0, eq) : "";
+          if (name === "GIT_DIR" || name === "GIT_WORK_TREE") carryEnv[name] = arg.slice(eq + 1);
+        }
+      }
+
+      // Rule (C) is one of the two rules that need a project root, so targets mode
+      // skips it — there is no root to judge "escapes the session root" against.
+      // Before canonicalization this arm only passed by coincidence: projectRoot
+      // and curdir were byte-identical strings, so every repo looked in-project. A
+      // root that cannot be realpath'd (it was DELETED — the state this mode exists
+      // for) now stays in the unresolved namespace while the payload cwd resolves,
+      // and every git verb in the user's own tree would read as an escape.
+      const dirs = read.ops.filter((op) => op.kind === "chdir").map((op) => op.name);
+      if (program === "git" && !targetsOnly) {
+        let gitEnv = Object.assign({}, carryEnv, envp);
+        for (const op of read.ops) {
+          if (op.kind === "clear") gitEnv = {};
+          else if (op.kind === "unset") delete gitEnv[op.name];
+          else if (op.kind === "set") gitEnv[op.name] = op.value;
+        }
+        const g = decideGit(dirs.flatMap((dir) => ["-C", dir]).concat(args), {
+          GIT_DIR: gitEnv.GIT_DIR,
+          GIT_WORK_TREE: gitEnv.GIT_WORK_TREE
+        });
+        if (g) return g;
+      }
+
+      const runDir = dirs.some((dir) => UNEXPANDED.test(dir)) ? null : dirs.reduce((base, dir) => resolveFrom(base, dir), curdir);
+      const targets = split.writes.map((w) => [w.value, "redirect", curdir]);
+      const teeIdx = program === "tee" ? read.index : read.words.findIndex((w) => w.value === "tee");
+      if (teeIdx !== -1) {
+        const base = program === "tee" ? runDir : curdir;
+        for (const w of read.words.slice(teeIdx + 1)) {
+          if (w.value.charAt(0) !== "-") targets.push([w.value, "tee", base]);
+        }
+      }
+      if (program === "sed" && sedInPlace(args)) {
+        for (const a of args) {
+          if (a.charAt(0) !== "-" && SRC.has(extOf(a))) targets.push([a, "sed -i", runDir]);
+        }
+      }
+      if (program === "dd") {
+        for (const a of args) {
+          if (/^of=./.test(a)) targets.push([a.slice(3), "dd of=", runDir]);
+        }
+      }
+
+      for (let x = 0; x < targets.length; x++) {
+        // The ANCHORED path spends this budget inside decide(), where exhaustion
+        // is treated as tracked and therefore DENIES — otherwise 200 pre-created
+        // untracked source files would buy one free clobber of real tracked
+        // source. targets mode never reaches that branch (decide() reports the
+        // operand and returns first), so without a guard here the cap would be the
+        // only rule left standing, and `printf x > a1.txt … > a200.txt >
+        // src/app.ts` would walk a source write straight through a branch whose
+        // contract is "deny writes". Fail closed, the same way that branch treats
+        // a parser that cannot run at all. Counted only in targets mode so the two
+        // budgets never double-spend the same MAX_TARGETS.
+        if (targetsOnly && ++evaluated > MAX_TARGETS) {
+          return "WRITE-TARGET (unevaluated: target budget exceeded)";
+        }
+        const r = decide(targets[x][0], targets[x][1], targets[x][2]);
+        if (r) return r;
       }
     }
-    const cmd0 = ci < rest.length ? unquote(rest[ci]).split("/").pop() : "";
-
-    // `cd` updates the scoped cwd BEFORE the escape-hatch check — an escaped
-    // segment may still change the directory for the commands that follow it.
-    if (cmd0 === "cd" && rest[ci + 1] !== undefined) {
-      curdir = abspath(unquote(rest[ci + 1]));
-      continue;
-    }
-    if (envp.ZENSU_BASH_WRITE_GATE === "off" || envp.ZENSU_MCP_GATE === "off") {
-      if (envp.ZENSU_BASH_WRITE_GATE === "off" && bypassed.indexOf("ZENSU_BASH_WRITE_GATE") < 0) bypassed.push("ZENSU_BASH_WRITE_GATE");
-      if (envp.ZENSU_MCP_GATE === "off" && bypassed.indexOf("ZENSU_MCP_GATE") < 0) bypassed.push("ZENSU_MCP_GATE");
-      continue;
-    }
-
-    // `export GIT_WORK_TREE=… && git add -A` is the third spelling of the same
-    // designation, and detectControlMutation already treats these builtins this
-    // way for its own bindings — carry it to the next segment in this command.
-    // `declare`/`typeset` only reach git's environment with -x; plain `export` always
-    // does. Harvest and then FALL THROUGH — a redirect in the same segment is still
-    // a write channel rules (A)/(B) must see.
-    if (cmd0 === "export"
-      || (["declare", "typeset"].indexOf(cmd0) !== -1 && rest.indexOf("-x") !== -1)) {
-      for (const raw of rest.slice(ci + 1)) {
-        // Unquote AFTER the split, as the option and inline-prefix paths do:
-        // unquoting the whole token first leaves `GIT_WORK_TREE="/sib"` as
-        // `"/sib`, which is not absolute and resolves back inside the project.
-        const eq = unquote(raw).indexOf("=") >= 0 ? raw.replace(/^['"]/, "").indexOf("=") : -1;
-        if (eq <= 0) continue;
-        const bare = raw.replace(/^['"]/, "");
-        const name = unquote(bare.slice(0, eq));
-        if (name === "GIT_DIR" || name === "GIT_WORK_TREE") carryEnv[name] = unquote(bare.slice(eq + 1));
-      }
-    }
-
-    // Rule (C) is one of the two rules that need a project root, so targets mode
-    // skips it — there is no root to judge "escapes the session root" against.
-    // Before canonicalization this arm only passed by coincidence: projectRoot
-    // and curdir were byte-identical strings, so every repo looked in-project. A
-    // root that cannot be realpath'd (it was DELETED — the state this mode exists
-    // for) now stays in the unresolved namespace while the payload cwd resolves,
-    // and every git verb in the user's own tree would read as an escape.
-    if (cmd0 === "git" && !targetsOnly) {
-      const pick = (k) => {
-        if (wrapEnv[k] !== undefined) return wrapEnv[k];
-        if (envp[k] !== undefined) return envp[k];
-        return carryEnv[k];
-      };
-      const g = decideGit(rest.slice(ci + 1), {
-        GIT_DIR: pick("GIT_DIR"),
-        GIT_WORK_TREE: pick("GIT_WORK_TREE")
-      });
-      if (g) return g;
-    }
-
-    const targets = [];
-    for (let k = 0; k < rest.length; k++) {
-      const m = rest[k].match(REDIR);
-      if (m) {
-        if (m[4]) targets.push([m[4], "redirect"]);
-        else if (rest[k + 1] !== undefined) { targets.push([rest[k + 1], "redirect"]); k++; }
-      }
-    }
-    const teeIdx = rest.findIndex((t) => unquote(t) === "tee");
-    if (teeIdx !== -1) {
-      for (let k = teeIdx + 1; k < rest.length; k++) {
-        const t = rest[k];
-        if (t.charAt(0) === "-") continue;            // flag
-        const rm = t.match(REDIR);
-        if (rm) { if (!rm[4]) k++; continue; }         // skip a redirect operator (+ its operand)
-        targets.push([t, "tee"]);
-      }
-    }
-    if (cmd0 === "sed" && rest.some((t) => /^-i/.test(unquote(t)))) {
-      for (const t of rest) {
-        const u = unquote(t);
-        if (u.charAt(0) !== "-" && SRC.has(extOf(abspath(u)))) targets.push([t, "sed -i"]);
-      }
-    }
-    if (cmd0 === "dd") {
-      for (const t of rest) {
-        const m = t.match(/^of=(.+)$/);
-        if (m) targets.push([m[1], "dd of="]);
-      }
-    }
-
-    for (let x = 0; x < targets.length; x++) {
-      // The ANCHORED path spends this budget inside decide(), where exhaustion
-      // is treated as tracked and therefore DENIES — otherwise 200 pre-created
-      // untracked source files would buy one free clobber of real tracked
-      // source. targets mode never reaches that branch (decide() reports the
-      // operand and returns first), so without a guard here the cap would be the
-      // only rule left standing, and `printf x > a1.txt … > a200.txt >
-      // src/app.ts` would walk a source write straight through a branch whose
-      // contract is "deny writes". Fail closed, the same way that branch treats
-      // a parser that cannot run at all. Counted only in targets mode so the two
-      // budgets never double-spend the same MAX_TARGETS.
-      if (targetsOnly && ++evaluated > MAX_TARGETS) {
-        return "WRITE-TARGET (unevaluated: target budget exceeded)";
-      }
-      const r = decide(targets[x][0], targets[x][1]);
-      if (r) return r;
-    }
+    return "";
+  }
+  const reread = (text) => JSON.stringify(segmentWords(text, false)) !== JSON.stringify(segmentWords(text, true));
+  for (const bashQuotes of events.some((e) => e.t === "seg" && reread(e.text)) ? [false, true] : [false]) {
+    const verdict = scan(bashQuotes);
+    if (verdict) return verdict;
   }
   return bypassMarkers();
 }
@@ -1193,6 +2743,12 @@ if (require.main === module) {
     stripHeredocs,
     gitTargets,
     msysToDrive,
+    programName,
+    segmentWords,
+    joinContinuations,
+    splitRedirects,
+    commandWords,
+    sedInPlace,
     within,
     isUnsafeTempEntry,
     splitTempList,

@@ -229,9 +229,12 @@ test('system messages, a block decision and a stop from several checks are all k
 
 test('the secret-scan pre-check skips only a Bash payload that holds no write-channel token', () => {
   assert.equal(dispatch.secretScanSkipsBash(bashPayload('git status --short')), true);
-  for (const command of ['printf x > a', 'cat <<EOF\nx\nEOF', 'printf x | tee a', 'dd if=a of=b', 'sed -e s/a/b/ -i f']) {
+  for (const command of ['printf x > a', 'cat <<EOF\nx\nEOF', 'printf x | tee a', 'dd if=a of=b', 'sed -e s/a/b/ -i f',
+    'printf x | TEE a', "printf x | t'e'e a", 'printf x | \\tee a', 'printf x | "tee" a', "printf x | $'\\x74ee' a",
+    'DD if=a OF=b', 'SED -I s/a/b/ f', 'sed -ni p f', 'sed --in-place s/a/b/ f', 'ſed -i s/a/b/ f']) {
     assert.equal(dispatch.secretScanSkipsBash(bashPayload(command)), false, command);
   }
+  assert.equal(dispatch.secretScanSkipsBash(bashPayload('sed -n p f')), true);
   assert.equal(dispatch.secretScanSkipsBash('{"tool_name":"Bash","tool_input":{"command":"printf x \\u003e a"}}'), false);
   assert.equal(dispatch.secretScanSkipsBash('{"tool_name":"Bash","tool_input":{"command":"ls"},"tool_name":"PowerShell"}'), false);
   assert.equal(dispatch.secretScanSkipsBash(JSON.stringify({ tool_name: 'PowerShell', tool_input: { command: 'ls' } })), false);

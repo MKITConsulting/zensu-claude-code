@@ -61,11 +61,23 @@ grep -qF 'zensu-mcp-tools.sh' "$HOOK_BODY" && grep -qF 'zensu-cli-map.sh' "$HOOK
   && check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" PASS \
   || check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" FAIL
 
+if grep -qF 'then ZPS=./powershell-command-v1.js; ZBACKEND=./zensu-cli-backend-v1.js; ZCW=./zensu-cli-words-v1.js; else ZPS=; ZBACKEND=; ZCW=; fi;' "$HOOK_BODY" \
+   && [ "$(grep -o 'ZBACKEND=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
+   && [ "$(grep -o 'ZPS=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
+   && [ "$(grep -o 'ZCW=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
+   && grep -qF 'require(process.env.ZBACKEND || "")' "$HOOK_BODY" \
+   && grep -qF 'require(process.env.ZPS || "")' "$HOOK_BODY" \
+   && grep -qF 'require(process.env.ZCW || "")' "$HOOK_BODY"; then
+  check "B4c the body names its sibling modules relative to its own hooks/lib, set only after cd -P succeeds" PASS
+else
+  check "B4c the body names its sibling modules relative to its own hooks/lib, set only after cd -P succeeds" FAIL
+fi
+
 WORDS_LIB="$PLUGIN_DIR/hooks/lib/zensu-cli-words-v1.js"
 WORK_ORDER_LIB="$PLUGIN_DIR/hooks/lib/work-order-v1.js"
 . "$(dirname "$0")/lib-unit-registry.sh"
-unit_check "B58a the zensu-cli word reader unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-words-v1.test.js"
-unit_check_done "B58b every unit file the registry gives this suite was graded"
+unit_check "B58 the backend reading unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-backend-v1.test.js"
+unit_check "B64a the zensu-cli word reader unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-words-v1.test.js"
 DISPATCH_LIB="$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"
 if [ -f "$WORDS_LIB" ] && [ -f "$DISPATCH_LIB" ] \
    && grep -qF 'ZCW=./zensu-cli-words-v1.js' "$HOOK_BODY" && grep -qF 'require(process.env.ZCW || "")' "$HOOK_BODY" \
@@ -74,9 +86,9 @@ if [ -f "$WORDS_LIB" ] && [ -f "$DISPATCH_LIB" ] \
    && ! grep -qE 'takesNextWord|const (NOUNS|ALIAS|GROUPS) |commandWords|zensuCommandWords' "$DISPATCH_LIB" \
    && grep -qF "require('./zensu-cli-words-v1.js')" "$WORK_ORDER_LIB" \
    && ! grep -qE 'zensuCommandWords|WORK_VERB_ALIASES' "$WORK_ORDER_LIB"; then
-  check "B58c both gates read a zensu call's words through hooks/lib/zensu-cli-words-v1.js, each from its own hooks/lib, and neither the gate body, its wrapper nor the dispatcher keeps a copy of the search" PASS
+  check "B64c both gates read a zensu call's words through hooks/lib/zensu-cli-words-v1.js, each from its own hooks/lib, and neither the gate body, its wrapper nor the dispatcher keeps a copy of the search" PASS
 else
-  check "B58c the word search has one owner, hooks/lib/zensu-cli-words-v1.js, which both gates load from their own hooks/lib" FAIL
+  check "B64c the word search has one owner, hooks/lib/zensu-cli-words-v1.js, which both gates load from their own hooks/lib" FAIL
 fi
 
 # Build a PreToolUse Bash payload carrying tool_input.command.
@@ -598,47 +610,12 @@ envrun() {
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
 run "B53a --api-url localhost, then --api-url prod -> DENY" "zensu --api-url http://localhost:8090 --api-url https://api.zensu.dev security classify f1" '' DENY
-run "B53b --api-url localhost, then --api-url=prod -> DENY" "zensu --api-url http://localhost:8090 security classify f1 --api-url=https://api.zensu.dev" '' DENY
-run "B53c --api-url localhost after -- -> DENY" "zensu security classify f1 -- --api-url http://localhost:8090" '' DENY
-run "B53c2 --api-url localhost after -- and a positional word -> DENY" "zensu security classify f1 -- extra --api-url http://localhost:8090" '' DENY
-run "B53d --api-url localhost after -- beside an inline localhost ZENSU_API_URL -> ALLOW" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 -- --api-url http://localhost:8090" '' ALLOW
 run "B53e two local two-word values -> ALLOW" "zensu --api-url http://localhost:8090 --api-url http://127.0.0.1:8090 security classify f1" '' ALLOW
-run "B53f --api-url=prod over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu --api-url=https://api.zensu.dev security classify f1" '' DENY
-envrun "B53g --api-url=prod over the hook's localhost ZENSU_API_URL" "zensu --api-url=https://api.zensu.dev security classify f1" http://localhost:8090 DENY
-run "B53h --api-url=localhost in a call not read in full, over an inline localhost ZENSU_API_URL -> DENY" 'ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --api-url=http://localhost:8090 $X' '' DENY
-envrun "B53i an empty inline ZENSU_API_URL over the hook's localhost one" "ZENSU_API_URL= zensu security classify f1" http://localhost:8090 DENY
-envrun "B53j an inline localhost ZENSU_API_URL over the hook's prod one" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1" https://api.zensu.dev ALLOW
-run "B53k --api-url localhost as the value of --title -> DENY" "zensu features create --product p1 --title --api-url http://localhost:8090" '' DENY
-run "B53l --api-url localhost as the value of --title beside an inline localhost ZENSU_API_URL -> ALLOW" "ZENSU_API_URL=http://localhost:8090 zensu features create --product p1 --title --api-url http://localhost:8090" '' ALLOW
-run "B53m --api-url prod right after a flag without a value, over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --json --api-url https://api.zensu.dev" '' DENY
-run "B53n --api-url=prod right after a flag without a value, over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --json --api-url=https://api.zensu.dev" '' DENY
-run "B53o --api-url localhost right after a flag without a value -> DENY" "zensu security classify f1 --json --api-url http://localhost:8090" '' DENY
-run "B53q --api-url with userinfo before a remote host -> DENY" "zensu --api-url http://localhost:8090@api.zensu.dev security classify f1" '' DENY
-run "B53q2 --api-url localhost with a user name -> DENY" "zensu --api-url http://localhost:x@localhost:8090 security classify f1" '' DENY
-run "B53r inline ZENSU_API_URL with userinfo before a remote host -> DENY" "ZENSU_API_URL=http://localhost:8090@api.zensu.dev zensu security classify f1" '' DENY
-envrun "B53s the hook's ZENSU_API_URL with userinfo before a remote host" "zensu security classify f1" http://localhost:8090@api.zensu.dev DENY
-run "B53t --api-url [::1] -> ALLOW" "zensu --api-url 'http://[::1]:8090' security classify f1" '' ALLOW
-run "B53u --api-url 127.1, which only a URL parser reads as loopback -> DENY" "zensu --api-url http://127.1:8090 security classify f1" '' DENY
-run "B53v --api-url localhost with a backslash -> DENY" "zensu --api-url 'http://localhost:8090\\@api.zensu.dev' security classify f1" '' DENY
-run "B53w --api-url without a value beside an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --api-url" '' DENY
-run "B53x --api-url localhost with an ftp scheme -> DENY" "zensu --api-url ftp://localhost:8090 security classify f1" '' DENY
-envrun "B53y the hook's ZENSU_API_URL [::1]" "zensu security classify f1" 'http://[::1]:8090' ALLOW
-run "B53z --api-url uppercase LOCALHOST -> ALLOW" "zensu --api-url HTTP://LOCALHOST:8090 security classify f1" '' ALLOW
 run "B54a --api-url localhost beside a quoted title naming --api-url -> ALLOW" 'zensu --api-url http://localhost:8090 features create --product p1 --title "Fix --api-url parsing"' '' ALLOW
-run "B54b --api-url localhost after a quoted title holding -- -> ALLOW" 'zensu features create --product p1 --title "Phase 1 -- login" --api-url http://localhost:8090' '' ALLOW
-run "B54c --api-url localhost after a quoted title ending in a dash word -> ALLOW" 'zensu features create --product p1 --title "use -v" --api-url http://localhost:8090' '' ALLOW
-run "B54d --api-url localhost beside a comment naming a remote one -> ALLOW" 'zensu --api-url http://localhost:8090 security classify f1 # --api-url https://api.zensu.dev' '' ALLOW
-run "B54e a quote-glued --api-url fragment inside an ssh string -> DENY" "ssh deploy@host \"cd /srv && zensu features create --product p1 --title x' '--api-url http://localhost:8090\"" '' DENY
-run "B54f --api-url localhost behind a run-time word further ahead -> DENY" 'zensu security classify f1 $X y --api-url http://localhost:8090' '' DENY
-run "B54g --api-url localhost with a run-time port -> DENY" 'zensu --api-url http://localhost:$PORT security classify f1' '' DENY
-run "B54h inline ZENSU_API_URL localhost with a run-time port -> DENY" 'ZENSU_API_URL=http://localhost:${PORT} zensu security classify f1' '' DENY
 run "B54i --api-url localhost with a run-time path part -> ALLOW" 'zensu --api-url "http://localhost:8090/$PREFIX" features create --product p1 --title t' '' ALLOW
-run "B54j --api-url https localhost -> ALLOW" "zensu --api-url https://localhost:8443 security classify f1" '' ALLOW
 envrun "B54k a remote ZENSU_API_URL assigned in an earlier command over the hook's localhost one" "ZENSU_API_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
-envrun "B54l a remote ZENSU_API_URL exported in an earlier command over the hook's localhost one" "export ZENSU_API_URL=https://api.zensu.dev && zensu security classify f1" http://localhost:8090 DENY
-envrun "B54m an inline += that appends localhost to the hook's remote ZENSU_API_URL" "ZENSU_API_URL+=localhost:8090 zensu security classify f1" https://api.zensu.dev/ DENY
-envrun "B54n a remote ZENSU_API_URL exported through a quoted name over the hook's localhost one" "export ZENSU_API\"\"_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
-envrun "B54o the hook's localhost ZENSU_API_URL in a command that names it only in a title" "zensu features create --product p1 --title 'set ZENSU_API_URL'" http://localhost:8090 DENY
+envrun "B54k2 a remote ZENSU_API_URL assigned across a line continuation over the hook's localhost one" "ZENSU_API\\
+_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
 envrun "B54p the hook's localhost ZENSU_API_URL in a command that never names it" "zensu features create --product p1 --title t" http://localhost:8090 ALLOW
 run "B55a uppercase CLI name" "ZENSU security classify f1" '' DENY
 run "B55b capitalized CLI name" "Zensu features create --product p1 --title t" '' DENY
@@ -713,7 +690,7 @@ parser_lines() {
   node -e '
     const fs = require("fs");
     const { spawnSync } = require("child_process");
-    const [hook, binder, guard, preload, words] = process.argv.slice(1);
+    const [hook, binder, guard, preload, backend, words] = process.argv.slice(1);
     const source = fs.readFileSync(hook, "utf8");
     const begin = source.indexOf("INVOCATIONS=");
     const open = begin < 0 ? -1 : source.indexOf("node -e \x27", begin);
@@ -725,11 +702,11 @@ parser_lines() {
       encoding: "utf8",
       timeout: 15000,
       maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, ZAPI: "", ZGUARD: guard, ZBIND: binder, ZCW: words },
+      env: { ...process.env, ZAPI: "", ZGUARD: guard, ZBIND: binder, ZBACKEND: backend, ZCW: words },
     });
     if (run.error || run.status !== 0) { process.stdout.write("NO-ANSWER " + (run.error ? run.error.code : run.status)); process.exit(0); }
     process.stdout.write(run.stdout);
-  ' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}" "${2:-}" "${3:-$WORDS_LIB}"
+  ' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}" "${2:-}" "$PLUGIN_DIR/hooks/lib/zensu-cli-backend-v1.js" "${3:-$WORDS_LIB}"
 }
 TAB="$(printf '\t')"
 LINES_ONE="$(printf '%s' 'zensu features get f1' | parser_lines)"
@@ -755,9 +732,9 @@ LINES_POL="$(printf '%s' 'zensu work pol set p1' | parser_lines "" "" "$VERB_WOR
 LINES_POL_REAL="$(printf '%s' 'zensu work pol set p1' | parser_lines)"
 LINES_REPOS="$(printf '%s' 'zensu work repos add r1' | parser_lines)"
 if [ "$LINES_POL" = "work${TAB}policy${TAB}set" ] && [ "$LINES_POL_REAL" = "work${TAB}pol${TAB}set" ] && [ "$LINES_REPOS" = "work${TAB}repositories${TAB}add" ]; then
-  check "B58j the gate hands the map a verb through the module's commandVerb, so a verb alias needs only VERB_ALIASES" PASS
+  check "B64j the gate hands the map a verb through the module's commandVerb, so a verb alias needs only VERB_ALIASES" PASS
 else
-  check "B58j verb alias normalization (planted='$LINES_POL' real='$LINES_POL_REAL' repos='$LINES_REPOS')" FAIL
+  check "B64j verb alias normalization (planted='$LINES_POL' real='$LINES_POL_REAL' repos='$LINES_REPOS')" FAIL
 fi
 PARTIAL_GOT=""
 for missing in commandWords commandNoun commandVerb isGroup; do
@@ -767,9 +744,9 @@ for missing in commandWords commandNoun commandVerb isGroup; do
   [ "$LINES_PARTIAL" = "__unreadable__${TAB}the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded" ] || PARTIAL_GOT="$PARTIAL_GOT $missing='$LINES_PARTIAL'"
 done
 if [ -z "$PARTIAL_GOT" ]; then
-  check "B58k a word reader without commandWords, commandNoun, commandVerb or isGroup counts as not loaded, so its call is unreadable" PASS
+  check "B64k a word reader without commandWords, commandNoun, commandVerb or isGroup counts as not loaded, so its call is unreadable" PASS
 else
-  check "B58k partial word reader ($PARTIAL_GOT)" FAIL
+  check "B64k partial word reader ($PARTIAL_GOT)" FAIL
 fi
 NO_WORDS="$PROJECT/no-words-module.js"
 NOUN_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write([...m.NOUNS, ...Object.keys(m.NOUN_ALIASES)].join(" "))' "$WORDS_LIB")"
@@ -779,9 +756,9 @@ for noun in $NOUN_LIST; do
   [ "$LINES_NOUN" = "__unreadable__${TAB}the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded" ] || NOUN_GOT="$NOUN_GOT $noun='$LINES_NOUN'"
 done
 if [ -n "$NOUN_LIST" ] && [ -z "$NOUN_GOT" ]; then
-  check "B58m without the word reader a call that names any noun or alias of the module is unreadable, so the gate denies at least what it denies with the module" PASS
+  check "B64m without the word reader a call that names any noun or alias of the module is unreadable, so the gate denies at least what it denies with the module" PASS
 else
-  check "B58m reader-less noun coverage (nouns='$NOUN_LIST'$NOUN_GOT)" FAIL
+  check "B64m reader-less noun coverage (nouns='$NOUN_LIST'$NOUN_GOT)" FAIL
 fi
 WIN32_PRELOAD="$PROJECT/win32-platform.js"
 printf '%s\n' 'Object.defineProperty(process, "platform", { value: "win32" });' > "$WIN32_PRELOAD"
@@ -1113,9 +1090,7 @@ psrun "B40o7 PowerShell --api-url localhost, then --api-url prod" "zensu --api-u
 psrun "B40o8 PowerShell --api-url localhost after a run-time argument" "zensu features create --product p1 --title \$t --api-url http://localhost:8090" '' DENY
 psrun "B40o9 PowerShell --api-url localhost after --" "zensu security classify f1 -- --api-url http://localhost:8090" '' DENY
 envrun "B40o10 PowerShell --api-url=prod over the hook's localhost ZENSU_API_URL" "zensu --api-url=https://api.zensu.dev security classify f1" http://localhost:8090 DENY PowerShell
-envrun "B40o11 PowerShell --api-url= with a run-time value over the hook's localhost ZENSU_API_URL" "zensu --api-url=\$u security classify f1" http://localhost:8090 DENY PowerShell
 envrun "B40o12 PowerShell stop-parsing token ahead of a remote --api-url over the hook's localhost ZENSU_API_URL" "zensu security classify f1 --% --api-url https://api.zensu.dev" http://localhost:8090 DENY PowerShell
-envrun "B40o13 PowerShell env: assignment of a remote value over the hook's localhost ZENSU_API_URL" "\$env:ZENSU_API_URL = 'https://api.zensu.dev'; zensu security classify f1" http://localhost:8090 DENY PowerShell
 psrun "B40o14 PowerShell --api-url localhost right after zensu beside a run-time title" "zensu --api-url http://localhost:8090 features create --product p1 --title \$t" '' ALLOW
 envrun "B40o15 PowerShell Set-Item of a joined env: name over the hook's localhost ZENSU_API_URL" "Set-Item -Path ('env:ZENSU_API' + '_URL') -Value https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY PowerShell
 psrun "B40p PowerShell --help"                            "zensu security classify f1 --help"                             '' ALLOW
@@ -1199,6 +1174,50 @@ if [ "$PS_BOUND" = "BOUND" ] && printf '%s' "$PS_FB_BASH_DENY" | grep -qF "maps 
 else
   check "B41c analyzer-less Bash verdicts (bound='$PS_BOUND' deny='$PS_FB_BASH_DENY' read='$PS_FB_BASH_READ')" FAIL
 fi
+cp "$PLUGIN_DIR/hooks/lib/powershell-command-v1.js" "$PS_ROOT/hooks/lib/powershell-command-v1.js"
+rm -f "$PS_ROOT/hooks/lib/zensu-cli-backend-v1.js"
+BE_OUT="$(
+  export CLAUDE_PROJECT_DIR="$PS_BASE/project"
+  ZENSU_TEST_PLUGIN_DATA="$PS_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" backend-missing-gate "$PS_ROOT" || exit 1
+  printf 'BOUND\n'
+  for spec in 'Bash|zensu features get f1' 'Bash|git status --short' 'PowerShell|Get-ChildItem -Recurse' 'PowerShell|zensu features get f1' 'Bash|grep -n zensu README.md' 'Bash|DATA=x bash ~/.claude/plugins/cache/zensu/zensu/0.33.2/hooks/lib/zensu-log.sh --project-root' 'PowerShell|Write-Output zensu'; do
+    payload "${spec#*|}" '' backend-missing-gate "${spec%%|*}" | env CLAUDE_PLUGIN_ROOT="$PS_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$PS_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
+    printf '\n<<%s>>\n' "$spec"
+  done
+  payload 'zensu features get f1' general-purpose backend-missing-gate Bash | env CLAUDE_PLUGIN_ROOT="$PS_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$PS_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
+  printf '\n<<subagent>>\n'
+)"
+BE_BOUND="$(printf '%s\n' "$BE_OUT" | sed -n '1p')"
+BE_BASH_READ="$(printf '%s\n' "$BE_OUT" | sed -n '2p')"
+BE_BASH_PLAIN="$(printf '%s\n' "$BE_OUT" | sed -n '4p')"
+BE_PS_PLAIN="$(printf '%s\n' "$BE_OUT" | sed -n '6p')"
+BE_PS_READ="$(printf '%s\n' "$BE_OUT" | sed -n '8p')"
+BE_GREP="$(printf '%s\n' "$BE_OUT" | sed -n '10p')"
+BE_HELPER="$(printf '%s\n' "$BE_OUT" | sed -n '12p')"
+BE_PS_TEXT="$(printf '%s\n' "$BE_OUT" | sed -n '14p')"
+BE_CHILD="$(printf '%s\n' "$BE_OUT" | sed -n '16p')"
+if [ "$BE_BOUND" = "BOUND" ] && [ ! -e "$PS_ROOT/hooks/lib/zensu-cli-backend-v1.js" ] \
+   && printf '%s' "$BE_BASH_READ" | grep -qF 'could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded' \
+   && printf '%s' "$BE_PS_READ" | grep -qF 'could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded' \
+   && printf '%s' "$BE_BASH_READ" | grep -qF 'Reinstall the plugin' \
+   && ! printf '%s' "$BE_BASH_READ" | grep -qF 'Reads and --help pass'; then
+  check "B59a without the backend module a Bash and a PowerShell zensu call deny as unreadable and name the module" PASS
+else
+  check "B59a backend-less zensu calls (bound='$BE_BOUND' bash='$BE_BASH_READ' ps='$BE_PS_READ')" FAIL
+fi
+[ "$BE_BOUND" = "BOUND" ] && [ -z "$BE_BASH_PLAIN" ] && [ -z "$BE_PS_PLAIN" ] \
+  && check "B59b without the backend module a Bash and a PowerShell command without zensu pass" PASS \
+  || check "B59b backend-less plain commands (bound='$BE_BOUND' bash='$BE_BASH_PLAIN' ps='$BE_PS_PLAIN')" FAIL
+[ "$BE_BOUND" = "BOUND" ] && [ -z "$BE_GREP" ] && [ -z "$BE_HELPER" ] && [ -z "$BE_PS_TEXT" ] \
+  && check "B59c without the backend module a command that names zensu without a zensu call passes, a plugin helper included" PASS \
+  || check "B59c backend-less commands naming zensu without a call (bound='$BE_BOUND' grep='$BE_GREP' helper='$BE_HELPER' ps='$BE_PS_TEXT')" FAIL
+if [ "$BE_BOUND" = "BOUND" ] && printf '%s' "$BE_CHILD" | grep -qF 'hooks/lib/zensu-cli-backend-v1.js could not be loaded' \
+   && printf '%s' "$BE_CHILD" | grep -qF 'Report the damaged installation to the main thread' \
+   && ! printf '%s' "$BE_CHILD" | grep -qF 'Reinstall the plugin'; then
+  check "B59d without the backend module a subagent zensu call denies and reports to the main thread" PASS
+else
+  check "B59d backend-less subagent zensu call (bound='$BE_BOUND' got '$(printf '%s' "$BE_CHILD" | cut -c1-160)')" FAIL
+fi
 rm -rf "$PS_BASE"
 psrun "B41d PowerShell group subcommand built at run time"   "zensu work policy \$sub"                                     '' DENY
 psrun "B41e PowerShell read whose argument is built at run time" "zensu features get \$id"                                    '' ALLOW
@@ -1238,46 +1257,46 @@ if [ "$(WR_LINE 1)" = "BOUND" ] && [ ! -e "$WR_ROOT/hooks/lib/zensu-cli-words-v1
    && printf '%s' "$WR_MUTATION" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && printf '%s' "$WR_MUTATION" | grep -qF 'reinstall the plugin' \
    && ! printf '%s' "$WR_MUTATION" | grep -qF 'maps to'; then
-  check "B58d without the word reader a zensu mutation is denied with a reason that names the module and the reinstall" PASS
+  check "B64d without the word reader a zensu mutation is denied with a reason that names the module and the reinstall" PASS
 else
-  check "B58d reader-less mutation (bound='$(WR_LINE 1)' got '$(printf '%s' "$WR_MUTATION" | cut -c1-200)')" FAIL
+  check "B64d reader-less mutation (bound='$(WR_LINE 1)' got '$(printf '%s' "$WR_MUTATION" | cut -c1-200)')" FAIL
 fi
 if printf '%s' "$WR_READ" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && printf '%s' "$WR_QUIET_READ" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded'; then
-  check "B58e without the word reader a read is denied too, also behind a redirection, because the gate cannot tell it from a mutation" PASS
+  check "B64e without the word reader a read is denied too, also behind a redirection, because the gate cannot tell it from a mutation" PASS
 else
-  check "B58e reader-less read (got '$(printf '%s' "$WR_READ" | cut -c1-200)' redirected='$(printf '%s' "$WR_QUIET_READ" | cut -c1-200)')" FAIL
+  check "B64e reader-less read (got '$(printf '%s' "$WR_READ" | cut -c1-200)' redirected='$(printf '%s' "$WR_QUIET_READ" | cut -c1-200)')" FAIL
 fi
 [ "$(WR_LINE 1)" = "BOUND" ] && [ -z "$WR_HELP" ] && [ -z "$WR_ECHO" ] && [ -z "$WR_LOCAL" ] && [ -z "$WR_ESCAPE" ] \
   && [ -z "$WR_PROBE" ] && [ -z "$WR_BARE" ] && [ -z "$WR_VERSION" ] \
   && [ -z "$WR_QUIET" ] && [ -z "$WR_SILENT" ] && [ -z "$WR_MERGED" ] && [ -z "$WR_EMPTY" ] && [ -z "$WR_QUIET_PROBE" ] \
-  && check "B58f without the word reader --help, a command that runs no zensu call, a call with no word that can name a subcommand (command -v zensu, a bare zensu, zensu --version, the same probes with their output redirected, an empty word), a localhost backend and the main thread's inline escape still pass" PASS \
-  || check "B58f reader-less passes (help='$WR_HELP' echo='$WR_ECHO' localhost='$WR_LOCAL' escape='$WR_ESCAPE' probe='$WR_PROBE' bare='$WR_BARE' version='$WR_VERSION' quiet='$WR_QUIET' silent='$WR_SILENT' merged='$WR_MERGED' empty='$WR_EMPTY' quiet-probe='$WR_QUIET_PROBE')" FAIL
+  && check "B64f without the word reader --help, a command that runs no zensu call, a call with no word that can name a subcommand (command -v zensu, a bare zensu, zensu --version, the same probes with their output redirected, an empty word), a localhost backend and the main thread's inline escape still pass" PASS \
+  || check "B64f reader-less passes (help='$WR_HELP' echo='$WR_ECHO' localhost='$WR_LOCAL' escape='$WR_ESCAPE' probe='$WR_PROBE' bare='$WR_BARE' version='$WR_VERSION' quiet='$WR_QUIET' silent='$WR_SILENT' merged='$WR_MERGED' empty='$WR_EMPTY' quiet-probe='$WR_QUIET_PROBE')" FAIL
 if printf '%s' "$WR_CHILD" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && printf '%s' "$WR_CHILD" | grep -qF 'Report the operation you need to the main thread' \
    && ! printf '%s' "$WR_CHILD" | grep -qF 'reinstall'; then
-  check "B58g a subagent's reader-less deny reports the operation to the main thread" PASS
+  check "B64g a subagent's reader-less deny reports the operation to the main thread" PASS
 else
-  check "B58g reader-less subagent deny (got '$(printf '%s' "$WR_CHILD" | cut -c1-200)')" FAIL
+  check "B64g reader-less subagent deny (got '$(printf '%s' "$WR_CHILD" | cut -c1-200)')" FAIL
 fi
 if printf '%s' "$WR_PS" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && ! printf '%s' "$WR_PS" | grep -qF 'Run the zensu call through the Bash tool'; then
-  check "B58h without the word reader a PowerShell zensu call is denied with the reader reason, not the Bash-tool advice" PASS
+  check "B64h without the word reader a PowerShell zensu call is denied with the reader reason, not the Bash-tool advice" PASS
 else
-  check "B58h reader-less PowerShell call (got '$(printf '%s' "$WR_PS" | cut -c1-200)')" FAIL
+  check "B64h reader-less PowerShell call (got '$(printf '%s' "$WR_PS" | cut -c1-200)')" FAIL
 fi
 if printf '%s' "$WR_IEX" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && ! printf '%s' "$WR_IEX" | grep -qF 'Run the zensu call through the Bash tool'; then
-  check "B58l without the word reader a PowerShell call the analyzer cannot read gets the reader reason too, not the Bash-tool advice" PASS
+  check "B64l without the word reader a PowerShell call the analyzer cannot read gets the reader reason too, not the Bash-tool advice" PASS
 else
-  check "B58l reader-less unjudged PowerShell call (got '$(printf '%s' "$WR_IEX" | cut -c1-200)')" FAIL
+  check "B64l reader-less unjudged PowerShell call (got '$(printf '%s' "$WR_IEX" | cut -c1-200)')" FAIL
 fi
 if printf '%s' "$WR_PS_OPAQUE" | grep -qF '"permissionDecision":"deny"' \
    && printf '%s' "$WR_PS_OPAQUE" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
    && ! printf '%s' "$WR_PS_OPAQUE" | grep -qF 'Run the zensu call through the Bash tool'; then
-  check "B58n without the word reader a PowerShell zensu call whose only word the analyzer cannot read is denied with the reader reason" PASS
+  check "B64n without the word reader a PowerShell zensu call whose only word the analyzer cannot read is denied with the reader reason" PASS
 else
-  check "B58n reader-less PowerShell run-time word (got '$(printf '%s' "$WR_PS_OPAQUE" | cut -c1-200)')" FAIL
+  check "B64n reader-less PowerShell run-time word (got '$(printf '%s' "$WR_PS_OPAQUE" | cut -c1-200)')" FAIL
 fi
 rm -rf "$WR_BASE"
 
@@ -1286,15 +1305,16 @@ printf '%s\n' 'module.exports = { commandWords: () => [], commandNoun: () => "",
 mkdir -p "$WR_PLANT/hooks/lib" && cp "$WR_PLANT/zensu-cli-words-v1.js" "$WR_PLANT/hooks/lib/zensu-cli-words-v1.js"
 WR_PLANTED="$(cd "$WR_PLANT" && payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$WR_PLANTED" | grep -qF "maps to 'set_security_classification'"; then
-  check "B58i a zensu-cli-words-v1.js in the working directory is never loaded" PASS
+  check "B64i a zensu-cli-words-v1.js in the working directory is never loaded" PASS
 else
-  check "B58i planted word reader (got '$(printf '%s' "$WR_PLANTED" | cut -c1-200)')" FAIL
+  check "B64i planted word reader (got '$(printf '%s' "$WR_PLANTED" | cut -c1-200)')" FAIL
 fi
 rm -rf "$WR_PLANT"
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
 rm -rf "$PROJECT"
 
+unit_check_done "B58z every unit file the registry gives this suite was graded"
 echo "----"
 echo "test-bash-zensu-gate: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

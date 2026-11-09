@@ -153,7 +153,7 @@ fi
 if arm "fsg-stale" "$PROJ"; then
   run_full --cmd 'true'
   printf 'edited\n' > "$PROJ/tracked.txt"
-  chain_done; RC=$?
+  ZENSU_EDIT_LANDING_GATE=off chain_done; RC=$?
   if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
     && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree (record er1_[0-9_a-f]*); files changed since: tracked.txt | ' "$WORK/err"; then
     check "F5 an edit after the green run refuses as stale and lists the path" PASS
@@ -174,7 +174,7 @@ if arm "fsg-stale" "$PROJ"; then
     ERR
   fi
   run_full --cmd 'true' --if-stale
-  chain_done; RC=$?
+  ZENSU_EDIT_LANDING_GATE=off chain_done; RC=$?
   if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -q '^FULL SUITE — pass | ' "$WORK/err"; then
     check "F6 --if-stale re-runs the stale suite and the terminus then closes" PASS
   else
@@ -267,6 +267,23 @@ if arm "fsg-advisory" "$PROJ"; then
   fi
 else
   check "F10 arm a ticket-bound chain" FAIL
+fi
+
+mkdir -p "$WORK/no-temp-dir-stub"
+printf '#!/bin/sh\n[ "${1:-}" = "-d" ] && exit 1\nexec "%s" "$@"\n' "$(command -v mktemp)" > "$WORK/no-temp-dir-stub/mktemp"
+chmod +x "$WORK/no-temp-dir-stub/mktemp"
+if arm "fsg-advisory-prepare" "$PROJ"; then
+  PATH="$WORK/no-temp-dir-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && ! tdd_bypass_recorded "$SF" ZENSU_FULL_SUITE_GATE \
+    && grep -qxF 'zensu-log.sh --chain-done: no temporary directory available' "$WORK/err" \
+    && grep -qxF 'FULL SUITE — unavailable (advisory, not blocking) | the full-suite transport could not be prepared, so no run was read | gate: advisory' "$WORK/err"; then
+    check "F28 an advisory terminus whose full-suite transport cannot be prepared closes and prints its advisory FULL SUITE line" PASS
+  else
+    check "F28 an advisory terminus whose full-suite transport cannot be prepared closes (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "F28 arm a ticket-bound chain" FAIL
 fi
 
 printf '{"evidence":{"fullSuiteGate":"sometimes","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
@@ -394,18 +411,21 @@ echo "== A chain bound to an Autopilot run that drives a worktree below the anch
 source "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 APPROVED_SHA="$(printf 'a%.0s' $(seq 1 64))"
 WSTEM="2026-01-01-0202_build-bound-worktree"
-BOUND="$WORK/bound"
-mkdir -p "$BOUND"
-git -C "$BOUND" init -q
-git -C "$BOUND" config user.email t@example.invalid
-git -C "$BOUND" config user.name tester
-printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$BOUND/.gitignore"
-printf 'baseline\n' > "$BOUND/tracked.txt"
-git -C "$BOUND" add .gitignore tracked.txt
-git -C "$BOUND" -c commit.gpgsign=false commit -qm baseline
-git -C "$BOUND" worktree add -q "$BOUND/.claude/worktrees/wt" -b wt-bound 2>/dev/null
-BWT="$(cd -P "$BOUND/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
-BOUND_HOST="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$BOUND" 2>/dev/null)"
+bound_repo() {
+  BOUND="$1"
+  mkdir -p "$BOUND"
+  git -C "$BOUND" init -q
+  git -C "$BOUND" config user.email t@example.invalid
+  git -C "$BOUND" config user.name tester
+  printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$BOUND/.gitignore"
+  printf 'baseline\n' > "$BOUND/tracked.txt"
+  git -C "$BOUND" add .gitignore tracked.txt
+  git -C "$BOUND" -c commit.gpgsign=false commit -qm baseline
+  git -C "$BOUND" worktree add -q "$BOUND/.claude/worktrees/wt" -b wt-bound 2>/dev/null
+  BWT="$(cd -P "$BOUND/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
+  BOUND_HOST="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$BOUND" 2>/dev/null)"
+}
+bound_repo "$WORK/bound"
 bound_arm_wt() {
   local sid="$1" run="$2" chain="$3" rp
   export CLAUDE_PROJECT_DIR="$BOUND"
@@ -428,7 +448,7 @@ bound_arm_wt() {
   SF="$(tdd_state_file "$sid")"
 }
 bound_done_wt() {
-  bash "$LOG" --chain-done --session fsg-bound-wt --autopilot-run fsg_run --autopilot-attempt 1 \
+  ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --chain-done --session fsg-bound-wt --autopilot-run fsg_run --autopilot-attempt 1 \
     --autopilot-return-stage GATES --chain-id fsg-chain --outcome pass >"$WORK/out" 2>"$WORK/err"
 }
 printf 'changed in the worktree\n' > "$BWT/tracked.txt"
@@ -470,6 +490,23 @@ if [ -n "$BWT" ] && [ -n "$BOUND_HOST" ] && bound_arm_wt fsg-bound-wt fsg_run fs
     ERR
   fi
 
+  source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+  work_tree_fault_stub "$WORK/fault-stub"
+  BAD_WS="$BOUND" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS + "/missing-worktree"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$BOUND_RUN_FILE"
+  PATH="$WORK/fault-stub:$PATH" ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --chain-done --session fsg-bound-wt --autopilot-run fsg_run --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id fsg-chain --outcome pass >"$WORK/out" 2>"$WORK/err"; RC=$?
+  cp "$WORK/fsg-run.pre" "$BOUND_RUN_FILE"
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qF '/work-tree-fault: ' "$WORK/err" \
+    && grep -qxF 'zensu-log.sh --chain-done: the work-tree lookup failed and its cause could not be written to the temporary directory, so no full-suite verdict was read.' "$WORK/err" \
+    && grep -q '^zensu-log.sh --chain-done: the chain stays open; check that the temporary directory (.*) is writable and has free space, then run --chain-done again\.$' "$WORK/err" \
+    && ! grep -qF 'FULL SUITE — ' "$WORK/err"; then
+    check "F25 a work-tree fault whose transport write fails refuses the bound terminus under the required gate with the shell's own lines, and the chain stays open" PASS
+  else
+    check "F25 a work-tree fault whose transport write fails refuses the bound terminus (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+
   run_full --cmd 'pwd -P' --if-stale
   bound_done_wt; RC=$?
   if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] \
@@ -483,6 +520,54 @@ else
   check "F20 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL
   cat "$WORK/complete.err" 2>/dev/null
 fi
+
+TRANSPORT_LINE='zensu-log.sh --chain-done: the work-tree lookup failed and its cause could not be written to the temporary directory, so no full-suite verdict was read.'
+TRANSPORT_CAUSE='the work-tree lookup failed and its cause could not be written to the temporary directory'
+source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+work_tree_fault_stub "$WORK/fault-stub"
+bound_unresolvable() {
+  BAD_WS="$BOUND" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS + "/missing-worktree"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$(autopilot_run_file "$1" "$BOUND")"
+}
+
+bound_repo "$WORK/bound-escape"
+if [ -n "$BWT" ] && [ -n "$BOUND_HOST" ] && printf 'changed in the worktree\n' > "$BWT/tracked.txt" \
+  && bound_arm_wt fsg-bound-esc fsg_esc fsg-esc-chain && bound_unresolvable fsg_esc; then
+  PATH="$WORK/fault-stub:$PATH" ZENSU_FULL_SUITE_GATE=off ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --chain-done --session fsg-bound-esc \
+    --autopilot-run fsg_esc --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id fsg-esc-chain --outcome pass >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && tdd_bypass_recorded "$SF" ZENSU_FULL_SUITE_GATE \
+    && grep -qxF "$TRANSPORT_LINE" "$WORK/err" \
+    && grep -qxF "FULL SUITE — escaped | ZENSU_FULL_SUITE_GATE=off switched this check off, so no run was read ($TRANSPORT_CAUSE) | gate: required" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "F26 an escaped bound terminus whose transport write fails is ledgered, closes and prints its FULL SUITE — escaped line" PASS
+  else
+    check "F26 an escaped bound terminus whose transport write fails is ledgered and closes (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "F26 arm a bound chain whose worktree cannot be resolved" FAIL
+  cat "$WORK/complete.err" 2>/dev/null
+fi
+
+printf '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+bound_repo "$WORK/bound-advisory"
+if [ -n "$BWT" ] && [ -n "$BOUND_HOST" ] && printf 'changed in the worktree\n' > "$BWT/tracked.txt" \
+  && bound_arm_wt fsg-bound-adv fsg_adv fsg-adv-chain && bound_unresolvable fsg_adv; then
+  PATH="$WORK/fault-stub:$PATH" ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --chain-done --session fsg-bound-adv \
+    --autopilot-run fsg_adv --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id fsg-adv-chain --outcome pass >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && ! tdd_bypass_recorded "$SF" ZENSU_FULL_SUITE_GATE \
+    && grep -qxF "$TRANSPORT_LINE" "$WORK/err" \
+    && grep -qxF "FULL SUITE — unavailable (advisory, not blocking) | $TRANSPORT_CAUSE, so no run was read | gate: advisory" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "F27 an advisory bound terminus whose transport write fails closes and prints its advisory FULL SUITE line" PASS
+  else
+    check "F27 an advisory bound terminus whose transport write fails closes (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "F27 arm a bound chain whose worktree cannot be resolved" FAIL
+  cat "$WORK/complete.err" 2>/dev/null
+fi
+printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
 
 GATES_DOC="$PLUGIN_DIR/docs/gates.md"
 check "FS-A1 the gate doc names the combined fingerprint" "$(grep -qF 'combines the project tree and that work tree' "$GATES_DOC" && echo PASS || echo FAIL)"

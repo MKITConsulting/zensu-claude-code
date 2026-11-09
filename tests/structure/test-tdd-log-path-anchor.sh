@@ -120,7 +120,8 @@ if grep -Fq '`ANCHOR="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUD
   && grep -Fq 'as `cd "<that root>" && …`' "$VERIFY" \
   && ! grep -Fq 'cd -- "<that root>"' "$VERIFY" \
   && grep -Fq 'that `cd` is the one prefix a recorded `down` may carry' "$VERIFY" \
-  && grep -Fq 'the `cd "<that root>" &&` prefix of Chain mode point 9 is the one exception' "$VERIFY"; then
+  && grep -Fq 'the `cd "<that root>" &&` prefix of Chain mode point 9 is the one exception' "$VERIFY" \
+  && grep -Fq '`--evidence-run` needs no prefix: it runs in the chain'"'"'s work tree.' "$VERIFY"; then
   check "L12 /zensu:verify-feature --chain resolves its git root from --project-root and runs its commands there" PASS
 else
   check "L12 /zensu:verify-feature --chain resolves its git root from --project-root and runs its commands there" FAIL

@@ -50,40 +50,58 @@ zensu_prompt_origin_slash() {
   fi
 }
 
-zensu_prompt_origin() {
-  local body="${1-}" kind head rest close='</system-reminder>' peer='Another Claude session sent a message:'
+zensu_prompt_reminder_span() {
+  local body="${1-}" lead head close='</system-reminder>' span=0
   body="${body:0:16384}"
-  kind="$(zensu_prompt_origin_kind "${2-}")"
-  case "$kind" in
-    task-notification) printf 'task-notification'; return 0 ;;
-    peer) printf 'agent-message'; return 0 ;;
-  esac
   while :; do
-    body="${body#"${body%%[![:space:]]*}"}"
+    lead="${body%%[![:space:]]*}"
+    body="${body#"$lead"}"
+    span=$(( span + ${#lead} ))
     case "$body" in
       '<system-reminder>'*) ;;
       *) break ;;
     esac
     head="${body%%"$close"*}"
     [ "$head" = "$body" ] && break
+    span=$(( span + ${#head} + ${#close} ))
     body="${body:$(( ${#head} + ${#close} ))}"
   done
+  printf '%s' "$span"
+}
+
+zensu_prompt_own_text() {
+  local text="${1-}" span
+  span="$(zensu_prompt_reminder_span "$text")"
+  printf '%s' "${text:$span}"
+}
+
+zensu_prompt_origin() {
+  local body="${1-}" kind rest span peer='Another Claude session sent a message:' brief='Background (from the session that started this one):'
+  body="${body:0:16384}"
+  kind="$(zensu_prompt_origin_kind "${2-}")"
+  case "$kind" in
+    task-notification) printf 'task-notification'; return 0 ;;
+    peer) printf 'agent-message'; return 0 ;;
+  esac
+  span="$(zensu_prompt_reminder_span "$body")"
+  body="${body:$span}"
   if [ "$kind" != "human" ]; then
     case "$body" in
       '<task-notification>'*) printf 'task-notification'; return 0 ;;
       '<ci-monitor-event>'*|'<ci-monitor-event '*) printf 'ci-monitor-event'; return 0 ;;
-      '<agent-message>'*|'<agent-message '*) printf 'agent-message'; return 0 ;;
+      '<agent-message>'*|'<agent-message '*|'<cross-session-message>'*|'<cross-session-message '*) printf 'agent-message'; return 0 ;;
       "$peer"*)
         rest="${body#"$peer"}"
         rest="${rest#"${rest%%[![:space:]]*}"}"
         case "$rest" in
-          '<agent-message>'*|'<agent-message '*) printf 'agent-message'; return 0 ;;
+          '<agent-message>'*|'<agent-message '*|'<cross-session-message>'*|'<cross-session-message '*) printf 'agent-message'; return 0 ;;
         esac
         ;;
     esac
   fi
   case "$body" in
     '<bash-input>'*) printf 'bash-input'; return 0 ;;
+    "$brief"*) printf 'session-brief'; return 0 ;;
     '/'*|'<command-name>'*|'<command-message>'*) zensu_prompt_origin_slash "$body"; return 0 ;;
   esac
   printf 'typed'

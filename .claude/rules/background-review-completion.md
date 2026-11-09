@@ -66,12 +66,36 @@ completes the claim from that note.
 - **One claim spawned 89 `node` children** (11.7 s at load 19): 10 before `match`, 51 from
   `match` to the ticket CAS and 28 after it. 35 were `zensu_resolve_project_dir` verifications.
 
+## Measured outside auto mode (2.1.309 and 2.1.317, 2026-11-03 and 2026-11-07)
+
+Headless probes of the desktop-bundled Claude Code 2.1.309 and 2.1.317 (desktop app 4.4212.0 and
+4.23118.0) in `default` permission mode, with `CLAUDE_CODE_ENTRYPOINT=claude-desktop`, stream-json
+input, `--setting-sources local` and a project-local `UserPromptSubmit` hook that logged each raw
+payload, and a census of the live desktop transcripts of the three days before 2026-11-03:
+
+- **The completion notification carries the report.** It is its own prompt, also when it is queued
+  mid-turn, and the payload has no origin field. The `<task-notification>` block holds the
+  `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>`, `<summary>` and `<note>` lines, then
+  the agent's final text in `<result>…</result>`, whose tags share the first and the last line of
+  the report, then `<usage>`. Live desktop sessions in `plan` mode on 2.1.299 to 2.1.309 carry the
+  full multi-line report there too. A background Bash task's notification has no `<result>`.
+- **The result is not indented, but it is escaped.** Report lines sit at column zero as the agent
+  wrote them, and the host writes `<`, `>` and `&` as `&lt;`, `&gt;` and `&amp;`: none of the 711
+  agent results in the census held a raw `<`. A report whose lines looked like harness tags came
+  back behind a `[harness: subagent output matched instruction-shaped pattern(s): …]` banner, with
+  its control tags neutralized further (`&lt;\`, `[\Subagent hand-back]`).
+- **In auto mode the result is a stub:** the delivery pointer `This agent's report was delivered
+  to you as a message from "<id>" (its SubagentHandback call). …` (261 in the census on 2.1.309)
+  or `The subagent ended without delivering a report through SubagentHandback, so no report was
+  delivered. …` (16).
+
 ## The path
 
 1. **Launch.** On `async_launched`, `post-review-tdd-delegate.sh` records the launch in
    `<CLAUDE_PLUGIN_DATA>/background-review/v1/` (temp file then rename at `0600`, exact key sets).
-   A `zensu:review-aspect` or `zensu:review-judge` launch becomes one entry per agent under
-   `fanout/<scv1-key>/<agentId>.json` (`background-review-v1.js fanout`). The consume-mode
+   A `zensu:review-aspect`, `zensu:review-judge` or repo-local `zensu-review-*` persona launch
+   becomes one entry per agent under `fanout/<scv1-key>/<agentId>.json`
+   (`background-review-v1.js fanout`). The consume-mode
    `zensu:code-reviewer`, after the header, envelope and preflight checks, becomes the session's
    one record `records/<scv1-key>.json` (`record`), written only while the prompt's ticket is the
    ticket the claim would accept; an arrival note the session still holds is dropped then. Its
@@ -86,23 +110,28 @@ completes the claim from that note.
    consume reviewer, writes the arrival note `arrivals/<scv1-key>.json` (exact key set, `0600`,
    temp file then rename) before anything is claimed. It prints
    `pending agent=<id> source=<prompt|note> retired=<n>` or `idle reason=<r> retired=<n>`, and the
-   hook starts the delegate with `--background-arrival` only on `pending`, passing
-   `ZENSU_BR_CLAIM_BY`. The delegate binds and runs `match`. For the consume record `match`
-   answers `claim` on the prompt's own completed arrival, and otherwise on a note naming the
-   record's agent and ticket, WITHOUT retiring either, and names the source; a note outranks a
-   later notification with another status. It answers `ended` on such a notification without a
-   note (record retired), and `stale-ticket` when the claim would no longer accept the record's
-   ticket (record and note retired). On a claim the delegate re-runs the header, envelope and
-   preflight checks on the STORED header, claims through `tdd_consume_review_ticket_context`,
-   retires record and note (`retire`), and emits the routing directive as `UserPromptSubmit`
-   context with one lead sentence per arrival kind and source.
+   hook starts the delegate with `--background-arrival`, passing `ZENSU_BR_CLAIM_BY`, on `pending`
+   and on an `idle` line with `retired=` of at least 1 for a prompt that carries a hand-back
+   frame, so that the review packet gate records a fan-out reviewer's report; `match` then answers
+   `none`, and the delegate prints only the gate's advice. The delegate binds and runs `match`.
+   For the consume record `match` answers `claim` on the prompt's own completed arrival, and
+   otherwise on a note naming the record's agent and ticket, WITHOUT retiring either, and names the
+   source; a note outranks a later notification with another status. It answers `ended` on such a
+   notification without a note (record retired), and `stale-ticket` when the claim would no longer
+   accept the record's ticket (record and note retired). On a claim the delegate re-runs the header,
+   envelope and preflight checks on the STORED header, claims through
+   `tdd_consume_review_ticket_context`, retires record and note (`retire`), and emits the routing
+   directive as `UserPromptSubmit` context with one lead sentence per arrival kind and source.
 3. **Stop.** Before the wait, `background_review_recover` in `stop-chain-enforcer.sh` checks in
    bash for the session's arrival note beside its consume record. With both present, and only
    while the Stop has more than `BACKGROUND_REVIEW_CLAIM_MARGIN` seconds left before its deadline,
    it runs the delegate with `--background-recovery` as a background child under a watchdog that
    sends it `TERM` one second past that point. The delegate's `match` reads only the note
    (`ZENSU_BR_RECOVERY=1`), and a directive it prints becomes the block reason, ahead of
-   `outer_finish`. `background_review_wait` asks `wait` while a record or a fan-out entry exists.
+   `outer_finish`. With `hooks.reviewPacketGate` on, `review_gate_check` passes `UserPromptSubmit`
+   as the event there, because the gate accepts only that and `PostToolUse`, and the gate judges
+   the claim on the round's records alone, as for a notification-only arrival.
+   `background_review_wait` asks `wait` while a record or a fan-out entry exists.
    A consume record younger than the bound that still matches the issued ticket, or any fan-out
    entry younger than the bound, releases a standalone chain's Stop with one stderr line and no
    budget charge. An Autopilot-bound chain's Stop is held: it blocks, names the running agents,
@@ -133,7 +162,12 @@ completes the claim from that note.
   equals `<agent-message from="<agentId>">` and the next line starts with `[Subagent hand-back]`,
   and a notification only inside a `<task-notification>` block whose tags each stand alone on a
   column-zero line. Substring matching was the first draft and would have let any report that
-  quotes the reviewer's frame claim its ticket.
+  quotes the reviewer's frame claim its ticket. `notificationReports` reads a notification's
+  report inside the same block grammar, `notificationBlocks`, which `scanLines` shares: the agent
+  id and the status come from whole `<task-id>` and `<status>` lines, and the report runs from the
+  line that opens with `<result>` to the first line that closes with `</result>`, decoded. The
+  host escapes the result, so no line inside it can be a tag line, and no report can forge the
+  block, its id or its status.
 - **The arrival is noted before the claim, by the prompt hook's first `node` child.** The host's
   cancel kills the hook's whole process group, so only state written before the kill survives it,
   and the claim is the expensive part. `arrive` is one child that reads no workflow state and
@@ -233,6 +267,23 @@ completes the claim from that note.
 - **Fan-out entries carry no ticket and no chain binding.** The Stop hook consults them only on the
   path where it would block for an armed review chain, so an entry from an earlier chain of the
   same session can release a Stop for at most the wait bound.
+- **A repo persona's launch is a fan-out entry too.** Without one, `arrive` retires nothing for a
+  persona's hand-back, so the prompt hook does not start the delegate for it, the persona's
+  launch record stays without an identity in the review packet gate, which neither counts nor
+  blocks, and a persona launched with another block is caught only by the advice its launch
+  received. Its type is repo-authored, but the main thread spawned it, so the
+  entry gives the repository no lever the spawn did not already have: like a built-in reviewer's
+  entry, it releases a standalone Stop for at most the wait bound.
+- **A fan-out reviewer's hand-back, or its notification with a result, starts the delegate.** The
+  review packet gate completes a background reviewer's launch record from its hand-back, or outside
+  auto mode from its notification's `<result>`, in the delegate's arrival branch, so a prompt hook
+  that started the delegate only for the consume reviewer left every background panel and judge
+  without a run, and with the gate on every consume review on this host was refused. A
+  notification without a `<result>` carries no report, so it starts nothing (`BR12c`, `BR12d`). In
+  auto mode the hand-back retires the entry first, so its notification starts nothing either,
+  except in the order the known gaps name. The hook reads no config,
+  because `zensu_hook_enabled` costs a `node` child and needs the bound project root, so with the
+  gate off that run binds, matches and exits silently.
 - **The re-spawn sentence keeps `run_in_background: false` only where the Agent tool offers that
   parameter**, in the three severity arms of the delegate, the Stop resume reason and steps 10 and 5
   of `skills/build/references/review-chain.md`.
@@ -244,14 +295,34 @@ completes the claim from that note.
   spawns no `node` child), in `background_review_recover` (record and note paths), and in the
   prefilter of `user-prompt-review-handback.sh`, which must stay a superset of all three.
 - The arrival markers are spelled in `scanLines` and in the prefilter's `case`, which must stay a
-  superset of what `scanLines` accepts.
+  superset of what `scanLines` accepts. `handbackReports` reads the same frame grammar with the
+  same line splitter and exports it, with `AGENT_ID_RE`, to the review packet gate, which takes
+  each frame's de-indented report from it (`.claude/rules/review-packet-gate.md`).
+  `notificationReports` reads the notification block through the same `notificationBlocks` and the
+  `STATUS_LINE_RE` that `scanLines` uses, and exports each block's id, status and decoded
+  `<result>` to the gate. The prompt hook's `idle … retired=` arm names `<result>` beside
+  `<agent-message from=`.
+- With `hooks.reviewPacketGate` on, the delegate's arrival branch runs the gate's `record --event
+  UserPromptSubmit` after `match` and before the `ARRIVAL_MATCH` exit, so a failed `match` sets
+  `ARRIVAL_MATCH` empty instead of ending the branch, and `review_gate_check` runs at the consume
+  launch before `record` and at the arrival before the claim, the Stop recovery's included, where
+  it maps `Stop` to `UserPromptSubmit`. The prompt hook's `idle … retired=` arm starts that branch
+  for a fan-out reviewer's hand-back (`BR12c`) and for its `<result>`-carrying notification
+  (`BR12d`). `tests/structure/test-background-review.sh`
+  turns the gate off in its config, because its fixtures carry no canonical packet, so `RP28b`,
+  `RP30` and `RP30a` in `tests/structure/test-review-packet.sh` drive the advice exit, an ended
+  notification and a claim from the completion notification alone with the gate on, `RP24a` and
+  `RP28b` the fan-out hand-backs the gate records, `RP31` a Stop that completes a cut-off
+  hand-back's claim from its note, and `RP32` and `RP32a` a panel recorded and a ticket claimed
+  from completion notifications alone.
 - The claim predicate is `review-ticket-state-v1.js`; `_ZENSU_TDD_TICKET_STATE` is in the export
   list of `zensu-tdd-phase.sh` beside `_ZENSU_TDD_CHAIN_RECOVERY`.
 - The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, the
-  `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix of the
-  `arrive` line by the prompt hook's `case`, the `source` field of the `match` claim line by
-  the delegate's verdict parse, and the `hold count= of=` and `release` lines of `defer` by
-  `background_review_defer`, which `background_review_recover` and the resume reason call.
+  `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix and the
+  `idle reason= retired=` form of the `arrive` line by the prompt hook's `case`, the `source` field
+  of the `match` claim line by the delegate's verdict parse, and the `hold count= of=` and `release`
+  lines of `defer` by `background_review_defer`, which `background_review_recover` and the resume
+  reason call.
 - `--background-arrival` and `--background-recovery` are the delegate's two background modes; the
   Stop hook is the only caller of the second. `ZENSU_BR_CLAIM_BY` is read by the delegate, and
   `ZENSU_BR_RECOVERY` and `ZENSU_BR_HELD` by `envOptions`.
@@ -261,11 +332,13 @@ completes the claim from that note.
   registration of `stop-chain-enforcer.sh` (`BR1f`).
 - `arrive`'s principal check reads `PRINCIPALS` and `classifyPreToolPayload` from
   `claude-principal-v1.js`, the same classifier the capability gate uses.
-- The fan-out types are `FANOUT_TYPES` in the module and the `case` in the delegate's PostToolUse
-  branch. `FANOUT_TYPES` is derived, never spelled: the `zensu:` names in `REVIEWER_TYPES` of
-  `claude-principal-v1.js` other than `REVIEWER_SUBAGENT_TYPE`, because
-  `tests/structure/reviewer-spawn-allow-v1.test.js` fails on any second spelled copy of a confined
-  reviewer under `hooks/`.
+- The fan-out types are `FANOUT_TYPES` plus `PERSONA_TYPE_RE`, joined in `fanoutType`, and the
+  `case` in the delegate's PostToolUse branch. `FANOUT_TYPES` is derived, never spelled: the
+  `zensu:` names in `REVIEWER_TYPES` of `claude-principal-v1.js` other than
+  `REVIEWER_SUBAGENT_TYPE`, because `tests/structure/reviewer-spawn-allow-v1.test.js` fails on any
+  second spelled copy of a confined reviewer under `hooks/`. `classify` in
+  `hooks/lib/review-gate-v1.js` takes `PERSONA_TYPE_RE` from the module, so the persona pattern
+  has one owner.
 - The store is in both protected-root lists of `reviewer-capability-v1.js` (`BR1a`).
 - The prompt hook has a `budget()` row in `tests/structure/test-user-prompt-budget.sh` and a row in
   the table of `.claude/rules/prompt-origin.md`; the hook count in `docs/configuration.md` moved
@@ -304,9 +377,9 @@ completes the claim from that note.
 - **The column-zero rule rests on the host's indentation.** A peer message whose body the host does
   not indent, and that names a pending agent id, could still carry a forged frame; the id sits only
   in the session's own `0600` store, and the hand-back frame text is the only measured statement
-  of that indentation.
-- **Repo-local review personas are not recorded.** Their subagent types are repo-authored, so a turn
-  end while only a persona runs blocks and charges the budget as before.
+  of that indentation. A notification's result rests on the host's escaping instead, measured on
+  2.1.309 and 2.1.317; a host that wrote `<` there raw would let a report forge a block for a
+  pending agent id, with the same guard.
 - **An Autopilot-bound chain's hold costs turns.** Each held Stop is one more model turn until the
   report arrives, and at most `LIMITS.maxArrivalHolds` more once it has arrived and cannot be
   claimed; the wait bound and that count cap it, the budget does not.
@@ -320,6 +393,10 @@ completes the claim from that note.
   post-review hook has the same window.
 - **A kill before `arrive` wrote the note** leaves only the record, as before this change: a
   standalone Stop then waits out the bound, unless a later arrival names the reviewer again.
+- **A fan-out notification that arrives before its hand-back** retires the entry, so the
+  hand-back starts no delegate and the packet gate never reads that report; the consume check then
+  refuses for a missing reviewer. The measured host sends the hand-back first. In that order the
+  notification's stub result starts the delegate, which records nothing.
 - **Another session's note costs every prompt one `node` child.** The prefilter cannot derive the
   session key in bash, so while any session holds a note, each prompt of every session runs
   `arrive`, which answers `idle` for a note that is not its own (`BR18b`). A note normally lives
@@ -354,7 +431,9 @@ completes the claim from that note.
 Walked against `.claude/rules/runtime-lineage.md` entry by entry: no context-record or
 workflow-state field; the record and fan-out key sets are unchanged, and the arrival note's key set,
 `holds` included, is strict but ships for the first time, so no released reader or writer predates
-it, and a later change to it is a `minor`. The `defer` verb is new with the note and has no caller
+it, and a later change to it is a `minor`. Admitting
+persona types adds no key: an installation that predates it skips a persona entry as invalid,
+which only restores the behaviour it had. The `defer` verb is new with the note and has no caller
 outside this tree. No hook is added, removed or renamed and no matcher changes: the prompt
 hook's registration gains a `timeout`, which is neither. The prompt hook still returns only
 `additionalContext`, and the Stop hook's recovery emits a block it already emitted, with another
@@ -367,4 +446,6 @@ lineage never serves a session after a newer one, and the newer one reads the ol
 unchanged. No config key is added, and no attestation moves. The original feature's walk, recorded
 here before: the record and fan-out key sets shipped for the first time, the added hook returned
 only `additionalContext`, and the claim read its predicate from `review-ticket-state-v1.js` with the
-same field test.
+same field test. Starting the delegate for a notification that carries `<result>` is `patch` on the
+same walk: the hook's registration, matcher and output kind stay as they are, and the store's key
+sets do not move.

@@ -7,6 +7,174 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill
+  prerequisites that name install commands, the README and `docs/operations.md` now give
+  `brew update && brew upgrade --cask mkitconsulting/tap/zensu` in place of
+  `brew upgrade --cask zensu`, the commands `docs/cli-install-update.md` and the AI-work capture
+  guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
+  passed, so on its own it can miss a new release.
+
+## [0.36.0] - 2026-11-07
+
+### Added
+
+- **hooks**: Move the CLI gate's backend reading into hooks/lib and add a doctor row (#568)
+- **review-chain**: Keep audit scope across retries and gate review rounds on one canonical packet (#485)
+
+### Changed
+
+- **vcs**: Add a live GitLab tier with a pinned glab matrix (#575)
+- **verify-feature**: Decide the Zensu evidence caps and retention per tier (#574)
+- **verify-feature**: Size caps per file and tier, image sizing, Zensu acceptance criteria (#569)
+- **verify-feature**: Specify the evidence report, its ports and the Zensu side (#567)
+- **zen-mode**: Settle the grader follow-ups #537 left open (#563)
+
+### Fixed
+
+- **hooks**: Grade changed non-ASCII files as landed and settle the #485 follow-ups (#572)
+- **evidence-run**: Make the work-tree fault transport fail closed (#573)
+- **hooks**: Raise the zensu-cli floor to 0.18.0, which AI-work capture needs (#571)
+- **review-gate**: Read background reviewer reports from completion notifications (#570)
+- **evidence-run**: Word work-tree refusals in the modules and share one bound lookup (#561)
+- **vcs**: Send GitLab review bodies as JSON with an explicit content type (#560)
+- **hooks**: Name the closing session block in the zen-mode OFF directive (#565)
+- **hooks**: Let only the user's own text end zen-mode (#564)
+- **build**: Scope Phase 1.5 preconditions to the dependencies it lists (#559)
+- **session-trail**: Check desktop-store owner and mode like the resolver (#551)
+- **hooks**: Read commands the way the shell does in the source-write gate (#554)
+
+### Upgrade notes
+
+- **zensu-cli 0.18.0 floor**: the session banner, `/zensu:doctor`, `/zensu:setup`, the
+  `/zensu:work` refusal and the six skill prerequisites that state a zensu-cli release now give
+  0.18.0 as the oldest supported release, because older releases cannot declare a goal's feature,
+  so AI-work capture fails: since 0.35.0 every capture `begin` first checks that the CLI declares
+  `ai-work context --feature`, `ai-work start --feature` and `--maintenance-reason`, and answers
+  `cli_incompatible` without capturing when it does not. 0.18.0 is the first release that declares
+  them. The floor itself only warns; no gate reads the version. Check the installed release with
+  `zensu --version`. A release below the floor has no `zensu update`, so upgrade through the
+  channel it was installed with: `brew upgrade --cask zensu` for a Homebrew install, or run the
+  installer again (`curl -fsSL https://zensu.dev/install.sh | sh`, on Windows
+  `irm https://zensu.dev/install.ps1 | iex`); `docs/cli-install-update.md` covers every channel.
+  Then update the plugin with
+  `claude plugin marketplace update zensu` and `claude plugin update zensu@zensu`. A goal begun
+  with a release before 0.35.0 keeps a legacy receipt without feature scope, which cannot submit
+  new results automatically: begin a new goal with `--feature <feature-uuid>`,
+  `--maintenance-reason <reason>` or, for work that spans products,
+  `--cross-product-reason <reason>`.
+- **Edit-landing receipts and review packets**: `--chain-done` now refuses to close a reviewed
+  chain that changed files unless its edit-landing receipt is clean and fresh for the current
+  tree, beside the full-suite and acceptance gates; `docs/gates.md` §"Terminal Edit-Landing Gate"
+  names every terminus it checks and every exemption. A receipt without an audit scope, which every earlier release writes, is refused with
+  "the receipt carries no audit scope; re-run the audit so the terminus can check it against the
+  current tree", so a chain that is open during the upgrade re-runs its edit-landing audit before
+  it closes. While `hooks.reviewPacketGate` is on, the default, a consume-mode review claims its
+  ticket only when every reviewer of its round saw the round's canonical review packet. A reviewer
+  the Claude desktop app runs in the background is completed by its hand-back or, outside auto
+  mode, by the `<result>` of its completion notification; a review whose reviewer delivers neither
+  stays refused, with a hint to wait for it or to ask whether to set the key to `false`.
+- **source-write gate program names**: `hooks/pre-bash-source-write-gate.sh` now reads a program
+  or wrapper name the way a case-insensitive file system resolves it, as macOS and Windows do by
+  default: in any letter case, with an optional `.exe` suffix and behind a path, on Windows also
+  behind a path written with backslashes. The Session Control check, which runs whatever
+  `hooks.bashWriteGate` says, let `ENV CLAUDE_CODE_SESSION_ID=… …`, `Sudo ZENSU_PROJECT_ROOT=… …`
+  and a write to `CLAUDE_ENV_FILE` through `TEE`, `SED -i` or `DD of=` through, and missed `tee`,
+  `sed -i` and `dd of=` written in quotes, in a subshell or in a command substitution; they are now
+  refused like their plain lowercase spelling. The secret scan reads such a Bash command as a write
+  too, so it now scans it. With the gate opted in, rules (A), (B) and (C) also read `GIT`,
+  `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE` or a path to `tee` in command position, `DD of=`,
+  BSD sed's `-I` and a wrapper in any case. Shell builtins such as `cd`, `export`, `unset`, `read`
+  and `printf` keep their case, because the shell runs any other spelling as an external program,
+  and the gate now moves its tracked directory only for a `cd` the shell itself runs: `env cd`,
+  `sudo cd` and `/usr/bin/cd` no longer move it, so a write after them is judged where it really
+  lands.
+- **source-write gate shell reading**: `hooks/pre-bash-source-write-gate.sh` now reads a command
+  the way bash runs it. Every word is read after the shell's quote removal (a backslash or quotes
+  inside the word, `$'…'` with bash's escapes decoded, `$"…"` as double quotes), a backslash-newline
+  continues the line, a redirection splits off the word it is glued to, and each wrapper's own
+  options (`env -i`, `-u`, `-C`, `-S`, `--`, `sudo -u`, `nice -n`, `time -p`, `command -p`,
+  `exec -c`) are read as that wrapper reads them. The Session Control check, which runs whatever
+  `hooks.bashWriteGate` says, now refuses `\env CLAUDE_CODE_SESSION_ID=… …`, `e'n'v …`,
+  `\export ZENSU_SESSION_KEY=…`, `env -i CLAUDE_CODE_SESSION_ID=… …`, `env -- …`,
+  `env "CLAUDE_CODE_SESSION_ID=…" …`, `NAME+=…`, `NAME[i]=…`, `printf -vNAME` and a rebind behind a
+  reserved word (`if`, `{`, `!` …) or a leading redirection; it refuses `\unset`, `env -u`,
+  `export -n` and `declare +x` of a protected input as removal, reads `t'e'e`, `s\ed -i`,
+  `sed --in-place` and `sed -ni` into `CLAUDE_ENV_FILE` as writes, and compares a literal path to
+  that file with letter case and Unicode normalization folded on every platform, so a case or NFD
+  variant of it on macOS is no longer let through. `env -i` alone stays allowed. It reads a `\c`
+  before the closing quote of `$'…'`, a `${…}` that holds quotes or a nested `${…}`, `$$`, an `&>`
+  glued to a word, `>|` or `>&file` after a quoted word, an escaped `\<` or `\>`, a heredoc opened
+  on a continued line, a quoted `<<`, `#` or arithmetic shift and a heredoc delimiter such as
+  `EOF-1` as bash does, judges a single quote inside a double-quoted `${…}` both the bash and the
+  zsh way, splits `env -S` strings as env does and refuses more than eight nested ones, and refuses
+  a protected `for`, `select` or `foreach` loop name, a `{NAME}` redirection, `declare -a`/`-A` and
+  a subscript such as `unset 'NAME[0]'`; it still refuses every rebind or removal the earlier
+  whitespace reading found, so a spelling the new reader gets wrong is not let through either. The
+  secret scan
+  reads those write spellings as writes too. With the gate opted in, rules (A), (B) and (C) read
+  `\git`, `g'i't`, `\cd`, `sudo -u me git …`, `nice -n 10 git …`, `env -C <dir> git …`,
+  `env "GIT_WORK_TREE=…" git …`, `for … do git …`, `sed -ni` and `sed --in-place` as bash runs
+  them, read zsh's `>>|`, `>>&`, `&>|`, `&>>|`, `>&|` and `>!` and a read-write `n<>file` as
+  writes, keep the directory a `cd` moved to across `2>&1`, and leave it where it was after a quoted
+  `\time cd`; without a project root, a relative write under `env -C "$DIR"` is reported as a write
+  target. A command that used one of these spellings to pass is now refused, and
+  `docs/gates.md` §"Source-Write Gate" lists what the reader still leaves alone. The program-name
+  reading moved into `programName` in `hooks/lib/claude-path-v1.js`, with the fold policy as a
+  parameter.
+- **Session Control assignments by other means**: the Session Control check of
+  `hooks/pre-bash-source-write-gate.sh`, which runs whatever `hooks.bashWriteGate` says, now refuses
+  a protected input that a builtin, arithmetic or an expansion assigns, where it let each of these
+  through before: `getopts`, `mapfile`/`readarray`, `wait -p`, `coproc NAME`, zsh's `print -v`,
+  `set -A`, `integer`, `float`, `vared`, `getln` and `read 'NAME?prompt'`, and a name attached to
+  its option as in `wait -pNAME`, `read -aNAME` or zsh's `set -ANAME`; zsh's `typeset -T` tie, a
+  `typeset -i`, `-E`, `-F` or other option that converts a protected value, zsh's `unset -m`
+  pattern, bash 5.3's `compgen -V` and an assignment in the simple command after `coproc`; `let`,
+  `(( … ))`, `for (( … ))`, `$(( … ))`, `$[ … ]`, any operand of `-eq` and its siblings in
+  `[[ … ]]`, zsh's `repeat`, `shift`, `return`, `break` and `continue` operands, an array
+  subscript, nested or holding blanks, an array-literal element such as `a=([i]=v)`, the subscript
+  of a `-v NAME[…]` operand of `[[`, `[` and `test`, and zsh's brace-less `$NAME[…]`; the offset of
+  `${…}`, `$0` and `$@` included; and `${NAME=…}`, `${NAME:=…}` and zsh's `${NAME::=…}`, also
+  behind zsh's flags and modifiers. It refuses every nameref (`declare -n`, `typeset -n`,
+  `local -n`), an `env -S` string whose `${VAR}` reaches `env` unexpanded and builds a name, an
+  arithmetic lvalue such as `$N = 1`, zsh's `${(P)…}` assignment and an option built at run time
+  in front of a protected name (`declare $o NAME`), and it now reads the body of a heredoc whose
+  delimiter is unquoted and bash 5.3's `${ …; }`, where a `$(…)` or backtick command runs and an
+  expansion assigns. These refusals come from a new reading that follows the
+  shell's grammar: quoted text that only names a builtin, such as a commit message about
+  `declare -n`, stays allowed, and so do single-quoted text, a comment, a quoted-delimiter heredoc
+  body and a name the shell builds in a builtin operand, as in `export $(cat .env | xargs)` or
+  `unset "$v"`. A `<<` inside `${…}` or `$[…]` and a `$"…"` heredoc delimiter no longer hide the
+  lines after them, and a command nested more than 64 levels deep, or one whose reading would
+  exceed a work bound proportional to its length, is refused with its own reason. The reading also
+  follows `if((`, `while((`, `for((`, `if(` and `in(` written without a blank, `time`, `time -p`,
+  `time --` and `coproc` before a command, `time` as the keyword only at the start of a pipeline,
+  a compound command after `coproc NAME`, `esac` as a pattern word after `|`, a regex or
+  extended-pattern operand of `[[ … ]]`, `then`, `do` or `}` right after `]]`, a comment inside
+  `[[ … ]]` or an array literal, a line continuation after `$` or inside a heredoc delimiter or
+  delimiter line but not inside a comment or a quoted-delimiter heredoc body, and a heredoc
+  delimiter holding a no-break space; it opens no `[[` or `case` inside a `case` pattern, and it
+  reads `[[`, `case` and `{` after a leading redirection both the bash way, as plain words, and
+  the zsh way, as reserved words.
+  A command that used one of these spellings to pass is now refused; `docs/gates.md`
+  §"Source-Write Gate" lists what the check still leaves alone.
+
+## [0.35.0] - 2026-11-03
+
+### Added
+
+- **ai-work**: Recover pending captures and preflight explicit scope (#553)
+- **ai-work**: Require explicit feature scope for captured goals (#548)
+
+### Fixed
+
+- **hooks**: Correct opt-in gate texts and harden the CLI write-gate (#536)
+- **zen-mode,plan-gate**: Settle the follow-ups #543 left open (#549)
+- **autopilot**: Stop a non-git folder from holding every repository below it (#552)
+- **hooks**: Refuse a linked-session desktop store other accounts can write (#545)
+- **zen-mode,plan-gate**: Settle the review follow-ups deferred by #516 (#543)
+
 - **CLI write-gate `--api-url`**: the `zensu` CLI write-gate now reads the target backend the way
   the CLI does. It reads the one-word `--api-url=<url>` beside the two-word `--api-url <url>`, so
   a mutation such as `zensu --api-url=http://localhost:8090 security classify f1` is no longer

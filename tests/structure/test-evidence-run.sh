@@ -303,11 +303,54 @@ AFTER_F="$(record_count)"
 bash "$LOG" --chain-work-tree --project-dir >/dev/null 2>&1; RC_FPD=$?
 cp "$WORK/bound-run.pre" "$BOUND_RUN_FILE"
 if [ "$RC_F" -eq 2 ] && [ "$AFTER_F" -eq "$BEFORE_F" ] && [ "$RC_FPD" -eq 2 ] \
-  && printf '%s' "$FAULT_ERR" | grep -qF "the chain's work tree could not be determined, so the command was not run: "; then
-  check "E19 a bound chain whose worktree cannot be resolved refuses the run with exit 2 and writes no record" PASS
+  && printf '%s\n' "$FAULT_ERR" | grep -q "^zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: ." \
+  && grep -qF "the chain's work tree could not be determined, so the command was not run: " "$LIB" \
+  && ! grep -qF "the chain's work tree could not be determined" "$LOG"; then
+  check "E19 a bound chain whose worktree cannot be resolved refuses the run with exit 2, writes no record, and the evidence-run module words the refusal" PASS
 else
   check "E19 a bound chain whose worktree cannot be resolved refuses the run (rc=$RC_F/$RC_FPD before=$BEFORE_F after=$AFTER_F)" FAIL
   printf '%s\n' "$FAULT_ERR"
+fi
+
+source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+work_tree_fault_stub "$WORK/fault-stub"
+BAD_WS="$BOUND/pkg" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$BOUND_RUN_FILE"
+BEFORE_T="$(record_count)"
+TRANSPORT_ERR="$(cd "$BOUND" && PATH="$WORK/fault-stub:$PATH" bash "$LOG" --evidence-run --scope scoped --cmd "touch '$WORK/e26-ran'" 2>&1 >/dev/null)"; RC_T=$?
+AFTER_T="$(record_count)"
+cp "$WORK/bound-run.pre" "$BOUND_RUN_FILE"
+if [ "$RC_T" -eq 2 ] && [ "$AFTER_T" -eq "$BEFORE_T" ] && [ ! -e "$WORK/e26-ran" ] \
+  && printf '%s\n' "$TRANSPORT_ERR" | grep -qF '/work-tree-fault: ' \
+  && printf '%s\n' "$TRANSPORT_ERR" | grep -qF "zensu-log.sh --evidence-run: the work-tree lookup failed and its cause could not be written to the temporary directory, so neither the evidence-run module nor the command ran." \
+  && ! printf '%s\n' "$TRANSPORT_ERR" | grep -qF "the chain's work tree could not be determined"; then
+  check "E26 a work-tree fault whose transport write fails stops --evidence-run with exit 2 and the shell's own line, before the module or the command runs" PASS
+else
+  check "E26 a work-tree fault whose transport write fails stops --evidence-run (rc=$RC_T before=$BEFORE_T after=$AFTER_T)" FAIL
+  printf '%s\n' "$TRANSPORT_ERR"
+fi
+
+BWT_FN="$(awk '$0 == "_zensu_bound_work_tree() {" {f=1} f {print} f && $0 == "}" {exit}' "$LOG")"
+mkdir -p "$WORK/bwt-probe"
+BWT_OUT="$(
+  eval "$BWT_FN"
+  _zensu_bound_work_tree_lookup() { : > "$2/bwt-tree"; }
+  _zensu_bound_work_tree probe-session "$WORK/bwt-probe"
+  printf 'tree-empty fault=%s stage=%s tree=%s\n' "$_bwt_fault" "$_bwt_stage" "$_bwt_tree"
+  _zensu_bound_work_tree_lookup() { printf '%s' /probe/tree > "$2/bwt-tree"; : > "$2/bwt-dir"; }
+  _zensu_bound_work_tree probe-session "$WORK/bwt-probe"
+  printf 'dir-empty fault=%s dirfault=%s tree=%s dir=%s\n' "$_bwt_fault" "$_bwt_dir_fault" "$_bwt_tree" "$_bwt_dir"
+  _zensu_bound_work_tree_lookup() { printf '%s' /probe/tree > "$2/bwt-tree"; printf '%s' /probe/tree/pkg > "$2/bwt-dir"; }
+  _zensu_bound_work_tree probe-session "$WORK/bwt-probe"
+  printf 'answered fault=%s dirfault=%s tree=%s dir=%s\n' "$_bwt_fault" "$_bwt_dir_fault" "$_bwt_tree" "$_bwt_dir"
+)"
+if [ -n "$BWT_FN" ] \
+  && printf '%s\n' "$BWT_OUT" | grep -qxF 'tree-empty fault=the work-tree lookup handed back an empty work-tree path stage=work-tree tree=' \
+  && printf '%s\n' "$BWT_OUT" | grep -qxF 'dir-empty fault= dirfault=the work-tree lookup handed back an empty project-directory path tree=/probe/tree dir=' \
+  && printf '%s\n' "$BWT_OUT" | grep -qxF 'answered fault= dirfault= tree=/probe/tree dir=/probe/tree/pkg'; then
+  check "E27 the work-tree lookup reads an empty work-tree answer as a work-tree fault and an empty project-directory answer as a directory fault" PASS
+else
+  check "E27 the work-tree lookup reads empty answers as faults" FAIL
+  printf '%s\n' "$BWT_OUT"
 fi
 
 SUBREPO="$WORK/subrepo"
@@ -337,8 +380,8 @@ LINK_ERR="$(cd "$SUBREPO/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd
 AFTER_L="$(record_count)"
 cp "$WORK/sub-state.pre" "$SUB_STATE"
 if [ "$RC_L" -eq 2 ] && [ "$AFTER_L" -eq "$BEFORE_L" ] \
-  && printf '%s' "$LINK_ERR" | grep -qF "the chain's work tree could not be determined, so the command was not run: this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"; then
-  check "E21 a workflow document whose Autopilot linkage cannot be read refuses the run instead of falling back to the anchor" PASS
+  && printf '%s\n' "$LINK_ERR" | grep -qxF "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"; then
+  check "E21 a workflow document whose Autopilot linkage cannot be read refuses the run in one module-worded line instead of falling back to the anchor" PASS
 else
   check "E21 an unreadable Autopilot linkage refuses the run (rc=$RC_L before=$BEFORE_L after=$AFTER_L)" FAIL
   printf '%s\n' "$LINK_ERR"
@@ -362,6 +405,25 @@ else
   check "E24 once the bound chain is done, --evidence-run runs in the anchor again (rc=$RC_DONE)" FAIL
   printf '%s\n' "$OUT_DONE"
   cat "$WORK/e24.err"
+fi
+
+mv "$SWT/pkg" "$WORK/swt-pkg"
+OUT_NODIR="$(cd "$SUBREPO/pkg" && bash "$LOG" --chain-work-tree 2>/dev/null)"; RC_NODIR=$?
+ERR_NODIR_PD="$(cd "$SUBREPO/pkg" && bash "$LOG" --chain-work-tree --project-dir 2>&1 >/dev/null)"; RC_NODIR_PD=$?
+BEFORE_D="$(record_count)"
+ERR_NODIR_RUN="$(cd "$SUBREPO/pkg" && bash "$LOG" --evidence-run --scope scoped --cmd 'true' 2>&1 >/dev/null)"; RC_NODIR_RUN=$?
+AFTER_D="$(record_count)"
+mv "$WORK/swt-pkg" "$SWT/pkg"
+if [ "$RC_NODIR" -eq 0 ] && [ "$OUT_NODIR" = "$SWT" ] \
+  && [ "$RC_NODIR_PD" -eq 2 ] && printf '%s' "$ERR_NODIR_PD" | grep -qF 'has no directory' \
+  && printf '%s' "$ERR_NODIR_PD" | grep -qF "the chain's project directory could not be resolved; the line above names the cause" \
+  && [ "$RC_NODIR_RUN" -eq 2 ] && [ "$AFTER_D" -eq "$BEFORE_D" ] \
+  && printf '%s' "$ERR_NODIR_RUN" | grep -qF "the chain's work tree could not be determined, so the command was not run: " \
+  && printf '%s' "$ERR_NODIR_RUN" | grep -qF 'has no directory'; then
+  check "E25 a worktree without the session's subdirectory still names the tree, refuses --project-dir with the cause, and refuses the run" PASS
+else
+  check "E25 a worktree without the session's subdirectory (tree='$OUT_NODIR' rc=$RC_NODIR/$RC_NODIR_PD/$RC_NODIR_RUN before=$BEFORE_D after=$AFTER_D)" FAIL
+  printf '%s\n' "$ERR_NODIR_PD" "$ERR_NODIR_RUN"
 fi
 
 unit_check_done "E1z every unit file the registry gives this suite was graded"

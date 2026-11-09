@@ -2,6 +2,10 @@
 paths:
   - "hooks/lib/zensu-cli-version-v1.js"
   - "tests/structure/zensu-cli-version-v1.test.js"
+  - "tests/structure/fixtures/zensu-cli-0.18.0-ai-work-help.json"
+  - "hooks/lib/ai-work-preflight-v1.js"
+  - "hooks/lib/ai-work-capture-v1.js"
+  - "hooks/lib/context-auto-load-v1.js"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/session-start-banner.sh"
@@ -12,27 +16,55 @@ paths:
   - "skills/pilot/SKILL.md"
   - "docs/work-order-mode.md"
   - "docs/operations.md"
+  - "docs/cli-install-update.md"
   - "tests/structure/test-setup-skill.sh"
 ---
 
 # zensu-cli Version Floor (`hooks/lib/zensu-cli-version-v1.js`)
 
 **One module owns the floor and the install commands.** `MIN_VERSION` is the oldest zensu-cli
-release the plugin supports: 0.10.0, because zensu-monorepo#954 paginated ghost candidates and
-zensu-cli up to 0.9.0 prints only the first 100 of them, and because only 0.10.0 reads every wiki
-list page. `FLOOR_REASON` says that in one sentence, and the doctor's old row renders it. `INSTALL`
+release the plugin supports: 0.18.0, because `REQUIRED` in `hooks/lib/ai-work-preflight-v1.js`
+asks for `ai-work context --feature`, `ai-work start --feature` and `--maintenance-reason`, which
+0.18.0 is the first release to declare, and `hooks/lib/ai-work-capture-v1.js` runs that check
+before every `begin`, so an older CLI answers `cli_incompatible` for every goal. The earlier floor,
+0.10.0, came from ghost-scan pagination (zensu-monorepo#954) and wiki list pages; 0.18.0 covers
+both. `REQUIRED` is the floor's lower bound, and the unit case `the floor release declares every
+flag the AI-work capture preflight requires` holds it: it replays the floor release's `ai-work`
+help, recorded from the release archive in
+`tests/structure/fixtures/zensu-cli-0.18.0-ai-work-help.json`, through `check()` and requires
+`compatible`, so a flag `REQUIRED` adds that the floor release lacks fails it, and it requires the
+fixture's version line to equal `MIN_VERSION`, so raising the floor re-records the fixture from the
+new floor release's binary. A second lower bound has no case: the capability probe of
+`hooks/lib/context-auto-load-v1.js` needs `knowledge context-pack --agent`,
+`knowledge get --context-load` and `knowledge context-search --query`, which the 0.18.0 archive
+declares. `FLOOR_REASON` says that in one sentence, and the doctor's old row renders it. `INSTALL`
 holds the Homebrew install and upgrade commands, `install.sh` and `install.ps1`. The doctor, the
 session banner, `/zensu:setup` and the work-order refusal in `probe()` of
-`hooks/lib/work-order-v1.js` read the module. Every prose copy — README Install and Requirements,
-the `docs/operations.md` troubleshooting row, the six skill prerequisites, `/zensu:setup`, the
-banner's literals and `docs/work-order-mode.md` — is pinned to it by `P10a`-`P10e` in
+`hooks/lib/work-order-v1.js` read the module, and so does the AI-work capture preflight, whose
+`cli_unavailable` and `cli_incompatible` guidance takes the install commands and
+`INSTALL.homebrewUpgrade` from it and names the plugin's install guide by absolute path. Every prose copy
+— README Install and Requirements, the `docs/operations.md` troubleshooting row, the §Update block
+of `docs/cli-install-update.md`, the six skill prerequisites, `/zensu:setup`, the banner's literals
+and `docs/work-order-mode.md` — is pinned to it by `P10a`-`P10e` in
 `tests/structure/test-setup-skill.sh`. **Raising the floor is three edits, not one:** the constant,
 a new `FLOOR_REASON` that names what the releases below the new floor get wrong, and the prose
-those checks name. `P10e` then requires the new reason, word for word, in the banner and in the
-README Requirements; a floor raised without a new reason keeps telling users about pagination.
+those checks name. `P10e` then requires the new reason, word for word, in the banner, in the
+README Requirements and in `/zensu:setup` Phase 0; a floor raised without a new reason keeps
+telling users the previous floor's reason.
 
-**Warn, never block.** No gate reads the version. An older CLI still runs every command; the doctor
-row and the banner say what an older release gets wrong.
+**One Homebrew upgrade spelling.** `INSTALL.homebrewUpgrade` is
+`brew update && brew upgrade --cask mkitconsulting/tap/zensu`, one command that every surface
+copies verbatim. `brew upgrade` runs `brew update` only once `HOMEBREW_AUTO_UPDATE_SECS` has passed
+(brew(1)), so on its own it can miss a release the tap published since, and the tap-qualified name
+is the one `INSTALL.homebrew` installs. The unit file pins the value, and its floor-release case
+requires the preflight's refusal guidance to name it and the install guide's absolute path, and the
+guidance for an absent CLI to name the three install commands.
+
+**Warn, never block.** No gate compares the version with the floor. An older CLI still runs, but
+AI-work capture refuses to begin with it: `check()` in `hooks/lib/ai-work-preflight-v1.js` reads
+the CLI's `ai-work` help for the flags `REQUIRED` names and answers `cli_incompatible`, a
+capability probe rather than a version check. The doctor row and the banner say what an older
+release gets wrong.
 
 **The PATH walk is a hand copy of `playwright-cli-version-v1.js`.** It walks `PATH` as the shell
 does and answers `cwd-relative` without running anything when an empty or relative entry comes
@@ -85,12 +117,14 @@ the `unchecked` arm of `toolBlock` in `hooks/lib/zensu-doctor-report.js`; the CL
 `hooks/session-start-banner.sh`; `skills/setup/SKILL.md` Phase 0 and Phase 1; the degradation
 ladder of `skills/pilot/SKILL.md`; `skills/doctor/SKILL.md` and its `references/zensu-cli.md`;
 `probe()` in `hooks/lib/work-order-v1.js`; `findBinary` in `hooks/lib/playwright-cli-version-v1.js`,
-through the drift case; the prose copies above. Tests: the unit file, driven by
+through the drift case; `REQUIRED`, `check()` and `guidance` in `hooks/lib/ai-work-preflight-v1.js`,
+through the fixture case; the capability probe of `hooks/lib/context-auto-load-v1.js`, which no case holds;
+the prose copies above. Tests: the unit file, driven by
 `tests/structure/test-doctor.sh` (`P0zv`, `P0zw`); `P8z1`-`P8z15` there; `B16a`-`B16e` in
 `tests/structure/test-session-start-banner.sh`; `P9a`-`P9d` and `P10a`-`P10e` in
 `tests/structure/test-setup-skill.sh`.
 
-**Sites outside this repository.** Three zensu-cli facts are copied here and nothing checks them
+**Sites outside this repository.** Four zensu-cli facts are copied here and nothing checks them
 against the CLI:
 
 - the `Not logged in` text of `zensu auth status`. This one fails open: if the CLI rewords it, a
@@ -98,7 +132,9 @@ against the CLI:
 - the `ZENSU_NO_UPDATE_CHECK` name in the CLI's update check. If it is renamed, every doctor, banner
   and setup call starts the update check again, with its network call and its write of
   `version-check.json`;
-- the version line format of `internal/version`. A change there reads as `unread`, which only warns.
+- the version line format of `internal/version`. A change there reads as `unread`, which only warns;
+- the `ai-work` help of zensu-cli 0.18.0 in the fixture. It proves that the floor release satisfies
+  `REQUIRED`, not that a later release still declares every flag.
 
 **Version: `patch`.** Advisory banner text, doctor rows and skill text: no schema field, key set,
 hook, matcher, config key or attestation moves.

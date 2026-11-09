@@ -198,6 +198,14 @@ specified in `skills/autopilot/rules/conventions.md`.
   mismatch.
 - Extend the marker/structure guards so a skill can't call `gh`/`glab` directly
   outside the driver.
+- `tests/integration/gitlab/` — the live tier. The structure suites above replace glab
+  with a fake that encodes our model of glab and GitLab; the live suite drives the GitLab
+  verbs with the real glab builds pinned in `versions.v1.json` against a disposable GitLab
+  CE pinned by digest, and asserts what GitLab stored. `.github/workflows/gitlab-live.yml`
+  runs it for pull requests that touch the driver and nightly, and both release stages run
+  it as a gate. CI runs pinned builds only: a nightly drift check reads the release metadata
+  of newer glab and GitLab releases without running them and files their pin lines in an
+  issue. `tests/README.md` §"Live GitLab suite" holds the operator account.
 
 ### Implementation status
 
@@ -228,9 +236,11 @@ specified in `skills/autopilot/rules/conventions.md`.
     `--post-review <id> <payload>` (optional `--diff-refs-json`).
   - **GitHub publish** is one atomic `gh api -X POST …/pulls/<n>/reviews --input <payload>`
     (byte-identical to the pre-driver call). **GitLab publish** degrades per §7 to a LOOP: one
-    summary note + N inline discussions, each carrying a `position` object
-    (`base_sha`/`start_sha`/`head_sha` + `new_path`/`new_line` on `RIGHT`, `old_path`/`old_line`
-    on `LEFT`) and a `<!-- zensu:pr<iid>:<hash> -->` idempotency marker so a re-run after a
+    summary note + N inline discussions, each carrying a `position` object resolved against the
+    MR diff before the first write (`base_sha`/`start_sha`/`head_sha`, `old_path` and `new_path`,
+    `new_line` for an added line, `old_line` for a removed one, both for an unchanged context
+    line; an anchor the diff does not contain posts as a positionless discussion) and a
+    `<!-- zensu:pr<iid>:<hash> -->` idempotency marker so a re-run after a
     partial failure skips already-posted threads. The verdict rides in the summary-note text;
     the driver NEVER calls `glab mr approve`/`merge` (§9.3). Dry mode
     (`ZENSU_VCS_PRINT_ARGV=1`) prints the ordered argv sequence (note first, then each
@@ -325,7 +335,12 @@ Consequences to spec explicitly:
   hidden marker (`<!-- zensu:pr<iid>:<hash> -->`); on re-run, skip a discussion
   whose marker already exists. Same marker convention GitHub inline uses today.
 - **`glab` gap** — `glab` has no first-class inline-discussion create; use its
-  `glab api` passthrough (`glab api --method POST projects/:id/merge_requests/:iid/discussions -f …`).
+  `glab api` passthrough with the JSON request on stdin and an explicit content type
+  (`glab api --method POST projects/:id/merge_requests/:iid/discussions --header 'Content-Type: application/json' --input -`).
+  glab up to 1.122 sends an `--input` body without any Content-Type, which GitLab rejects
+  with HTTP 415, and glab 1.123 and later refuse bracketed field names such as
+  `-f 'position[base_sha]=…'` in a JSON body, so every GitLab body POST goes through
+  `_zensu_vcs_gitlab_post_json`.
 - **`iid` not `number`**, and project id = **URL-encoded** `namespace/project`.
 
 > **Decision — GitLab "approve" semantics.** Default: post the review as

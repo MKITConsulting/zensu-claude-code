@@ -64,7 +64,8 @@ extraction loop), `claimOf` in `round-prepare-v1.js`, `review-round-scope-v1.js`
   `--inventory` lists that root like an absolute claim's (`PC4`).
 - **Prose.** Grades `UNVERIFIED (malformed claim)`, naming its candidates and the correction.
 - **Fault.** A claim read that fails (no `node`, a module error) is an audit FAULT on the git-fault
-  path: exit 2, no tally, any earlier receipt removed. It never reports zero claims. So is a
+  path: exit 2, no tally, and the earlier receipt marked nonclean with its audit scope kept
+  (`RECEIPT REFUSED` when the mark cannot run). It never reports zero claims. So is a
   `rows` answer that carries a row kind the grader has no arm for: the module's exported
   `ROW_KINDS` and the grader's row-kind check name the same kinds (`CF2`, `CF3`).
 
@@ -115,9 +116,12 @@ baseline and the snapshot digests. For a standalone chain `WT` is `TOP`.
 **One resolver.** `_zensu_chain_work_tree` in `zensu-log.sh`, exposed read-only as
 `zensu-log.sh --chain-work-tree`: the workflow document's Autopilot binding
 (`tdd_autopilot_context`), then `autopilot_read_run`, which takes no lease, then the record's
-`workspaceRoot`, then the library's `--work-tree-check`. A standalone chain, or a legacy record
-without `workspaceRoot`, answers the anchor's top. An unreadable document or run record, an
-invalid `workspaceRoot` and a refused topology exit non-zero with the reason and never fall back.
+`workspaceRoot`, then the library's `--work-tree-check`. The verb, `--round-prepare` and
+`--tdd-complete` reach the binding only through `_zensu_bound_work_tree`, the lookup the evidence
+runner uses (`.claude/rules/evidence-runner.md`). A standalone chain, a legacy record without
+`workspaceRoot`, and a bound chain after its terminus answer the anchor's top. An unreadable
+document or run record, an invalid `workspaceRoot` and a refused topology exit non-zero with the
+reason and never fall back.
 No state file was added, so a chain armed by an older installation resolves the same way and a
 parked run needs no re-arming. The verb refuses a path holding `"`, `$`, a backtick or a
 backslash, like `--project-root`, because the skills paste it into double-quoted shell source.
@@ -196,7 +200,7 @@ full-suite verdict `unavailable`.
 The module and its unit file (`tests/profiles/unit-files.v1.json` holds its count); the grader,
 `--inventory`, `--change-set`, `--work-tree` and `--work-tree-check` in `zensu-edit-landing.sh`;
 the `append` pre-check, `_zensu_chain_work_tree`, `--chain-work-tree`, `--tdd-complete` and
-`--round-prepare` in `zensu-log.sh`, whose work-tree refusals `WB0` to `WB16` and `WA1` in
+`--round-prepare` in `zensu-log.sh`, whose work-tree refusals `WB0` to `WB20` and `WA1` in
 `test-tdd-complete-receipt-gate.sh` pin; `stripPrefix`, `prefix` and `anchor` in
 `round-prepare-v1.js`; `--path-prefix` in `review-round-scope-v1.js`; `auditedWorkTree` and
 `claimTopologyRow` in `zensu-doctor-report.js`, and the topology and `NOT checked` bullets of
@@ -226,9 +230,11 @@ import-layout paragraph of `docs/review-chain.md`, and §5 of `docs/multi-repo-c
 - Reviewer reads and `finding-verify` acceptance of a prefixed `.claude/worktrees/...` path follow
   from the source (`protectedAccessViolation` admits any path inside the project root that is not
   under the anchor's `.zensu`; `finding-verify-v1.js` denies only `.git` and `.zensu` segments).
-- Open PR #485 rewrites the same library and skill texts; whichever lands second reconciles.
-  Rows stay in log order and append-only, a correction's rows sit at the correction's position,
-  and the receipt names the graded tree in one field, `workTree`.
+- PR #485 reconciled with this change when it merged it. The audit scope it adds finds an earlier
+  claim by its step and raw text rather than by position, so a correction or a glob row between
+  two rounds keeps every earlier snapshot; its checkpoint receipt carries `workTree`; and
+  `review-packet-v1.js create` reads the change set of the receipt's `workTree`, spelled with the
+  work tree's prefix below the anchor (`.claude/rules/review-packet-gate.md`).
 - Windows is unverified: `workspaceRoot` is stored native-canonical, and the library canonicalizes
   with `cd … && pwd -P`.
 - No ports. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included.
