@@ -102,7 +102,10 @@ account owns or that grants group or other write:
 - `ccdRecordFiles` and `accountForHostSession` judge every folder they enter the same way, and
   refuse a symbolic link where a folder or a `local_*.json` is expected without following it.
   `ownedRegularFile` judges a record before the walk lists it and before the host-session probe
-  answers with its account.
+  answers with its account. `savedPresets` judges the folder that holds `ccd-session-presets.json`,
+  the parent of the store, the same way before it trusts a missing file or the file's answers, and
+  a refused one counts once as a refused entry
+  (`.claude/rules/session-trail-linked-sessions.md`).
 - Every record is read through `readBoundedBytes`: a regular file owned by the caller with no
   group or other write bit, judged on its `lstat` and again on the opened descriptor, opened
   with `O_NOFOLLOW` and `O_NONBLOCK`, at most `DESKTOP_RECORD_MAX_BYTES`. That covers the
@@ -139,7 +142,9 @@ plugin-tree-incomplete diagnostic and the lazy load, `OM6` a refused `ccd-sessio
 in both forms, `OM7` a refused candidate passed over for a later one, `OM7b` a refused candidate
 after the winning one, `OM8` and `OM9` the decisions a refused presets file and a refused,
 unparsable or unlisted record of the running session leave (`presets-unread` and `started-unread`,
-`.claude/rules/session-trail-linked-sessions.md`), and `L19b` and `L19c` in the lineage suite the
+`.claude/rules/session-trail-linked-sessions.md`), `OM10`, a ledger check that shares the block,
+the refused ledger records behind `ledger-unread`, `OM11` the decisions a refused presets folder
+leaves, and `L19b` and `L19c` in the lineage suite the
 null account an edge records when the host-session probe meets a refused workspace folder, account
 folder or record. `L3j`, `L3k` and `L3l` in `test-linked-session-route.sh` pin the one owner, the
 named `realDirectory` policies and the scratch buffer.

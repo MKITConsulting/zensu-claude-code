@@ -31,7 +31,7 @@ export const LINKED_WHY = Object.freeze({
   started: 'this session already started its continuation, which waits for its own plan confirmation',
   place: 'its record names no usable folder, so a start cannot be placed in its repository: it starts only when the user names it in the plan answer',
   fork: 'a user fork starts only when the user names it in the plan answer',
-  'presets-unread': 'the saved environments could not be read, so whether it runs over SSH is unknown: it starts only when the user names it in the plan answer',
+  'presets-unread': 'the saved environments could not be read or could not be trusted, so whether it runs over SSH is unknown: it starts only when the user names it in the plan answer',
   'ledger-unread': 'the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer',
   'started-unread': 'whether this session already started its continuation is unknown, because this session\'s own Claude Desktop record, or a record beside it, could not be read: it starts only when the user names it in the plan answer',
   cap: `more than ${LINKED_START_CAP} linked sessions qualify, so it starts only when the user asks for it in a later message`,
@@ -267,8 +267,9 @@ function entryOf(node, checkout) {
   };
 }
 
-function presetOf(presets, id) {
-  const hit = presets ? presets.get(id) : undefined;
+function presetOf(presets, id, complete) {
+  const found = presets ? presets.get(id) : undefined;
+  const hit = found && (complete || found.kind === 'ssh') ? found : undefined;
   return { id, name: hit ? hit.name : null, kind: hit ? hit.kind : null };
 }
 
@@ -313,7 +314,7 @@ export function decideLinked(walk, options = {}) {
   const factsOf = (node, nodeCheckout) => {
     const entry = entryOf(node, nodeCheckout);
     const ids = [entry.sessionId, ...entry.priorSessionIds].filter(Boolean);
-    const preset = entry.environment ? presetOf(presets, entry.environment) : null;
+    const preset = entry.environment ? presetOf(presets, entry.environment, presetsComplete) : null;
     const continued = ids.some((id) => confirmed.has(id)) ? true : (ledgerComplete ? false : null);
     return { entry, ids, preset, continued };
   };
