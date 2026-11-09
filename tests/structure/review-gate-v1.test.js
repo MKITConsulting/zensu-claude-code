@@ -15,6 +15,7 @@ const gate = require(GATE);
 const packets = require(path.join(LIB, 'review-packet-v1.js'));
 const core = require(path.join(LIB, 'session-control-core-v1.js'));
 const background = require(path.join(LIB, 'background-review-v1.js'));
+const principal = require(path.join(LIB, 'claude-principal-v1.js'));
 
 const FIELDS = {
   implementation_summary: 'Adds the invoice total.',
@@ -715,4 +716,45 @@ test('the CLI never fails a record, maps check verdicts to exit codes and reads 
   const passed = run(['check', '--root', c.root, '--session', c.session, '--judge', 'on', '--panel', 'lean'], consume);
   assert.equal(passed.status, 0);
   assert.equal(passed.stdout, 'pass not-engaged\n');
+});
+
+test('only a passing background consume launch writes a record; refusals, arrivals and completed consume runs write none', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.record('zensu:review-aspect', packet.text);
+  c.record('zensu:review-judge', packet.text, c.judged(JUDGE_OK));
+  const store = packets.storeDirectory(c.root, c.session);
+  const count = () => gate.listStore(store).files.length;
+  const before = count();
+  assert.equal(c.checkLaunch(c.consumePrompt(''), 'aConsume0').pass, false);
+  assert.equal(c.checkHandback('aConsume0', '- Verdict: PASS\n').pass, false);
+  assert.deepEqual(c.check(c.consumePrompt(packet.text)), { pass: true, reason: 'ok' });
+  assert.equal(count(), before, 'a refusal, an unchecked arrival and a completed consume run write nothing');
+  assert.deepEqual(c.checkLaunch(c.consumePrompt(packet.text), 'aConsume1'), { pass: true, reason: 'ok' });
+  assert.equal(count(), before + 1);
+  assert.deepEqual(c.checkHandback('aConsume1', '- Verdict: PASS\n'), { pass: true, reason: 'ok' });
+  assert.equal(count(), before + 1, 'the arrival of a checked launch writes nothing');
+});
+
+test('a refusal names a second judge run once, never as "run run"', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.record('zensu:review-aspect', packet.text);
+  c.record('zensu:review-judge', packet.text, c.judged(JUDGE_OK));
+  c.record('zensu:review-judge', `${packet.text.replace('AC-001', 'AC-002')}\nmerged_panel_findings: none\njudge_run: second`,
+    c.judged('## Aspect: judge (second run)\n- (no findings)\n'));
+  const refused = c.check(c.consumePrompt(packet.text));
+  assert.match(refused.message, /the latest second zensu:review-judge run of review round 0 saw another packet than the canonical one/);
+  assert.doesNotMatch(refused.message, /run run/);
+});
+
+test('the PostToolUse pre-filter of the review delegate lists exactly the agent types classify accepts', () => {
+  const delegate = fs.readFileSync(path.join(PLUGIN_DIR, 'hooks', 'post-review-tdd-delegate.sh'), 'utf8');
+  const arms = delegate.split('\n').map((line) => line.trim()).filter((line) => line.endsWith('zensu-review-*)'));
+  assert.equal(arms.length, 1, 'one case arm routes reviewer runs to the gate');
+  const listed = arms[0].slice(0, -1).split('|').sort();
+  const plugin = [...principal.REVIEWER_TYPES].filter((type) => gate.classify(type) !== null);
+  assert.deepEqual(listed, [...plugin, 'zensu-review-*'].sort());
+  assert.equal(gate.classify('zensu-review-api'), 'persona');
+  assert.ok(background.PERSONA_TYPE_RE.source.startsWith('^zensu-review-'), 'the persona glob covers every type the persona pattern accepts');
 });

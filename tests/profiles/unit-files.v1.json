@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 31,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 32,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
     },
@@ -57,7 +57,7 @@
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 93, "skips": {"win32": 3},
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 95, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -175,7 +175,7 @@
       "summary": "The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe."
     },
     {
-      "path": "tests/structure/review-gate-v1.test.js", "registered": 35,
+      "path": "tests/structure/review-gate-v1.test.js", "registered": 38,
       "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
       "summary": "The consume-review gate: reviewer records, background launches completed from hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement."
     },
@@ -326,7 +326,7 @@
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
     },
     {
-      "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,
+      "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 26,
       "runs": [{ "driver": "tests/structure/test-workflow-dispatch-inputs.sh" }],
       "summary": "Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable."
     },

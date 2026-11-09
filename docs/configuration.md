@@ -78,10 +78,11 @@ unreadable workflow document, `ZENSU_TDD_GATE=off` and every deny run its body, 
 the body's.
 
 The plugin also carries one hooks module, `hooks/usage-feed.ts`, which `hooks/hooks.json` names
-under `modules`. It is not a hook script, is not counted above and has no config flag: after each
-turn that got a response from Claude, it writes the session's rate-limit reading for the Zensu
-Session Hub, and only while `<config root>/zensu/session-hub/v1/usage/` exists, so deleting that
-directory switches it off. It writes nothing when a session starts.
+under `modules`. It is not a hook script, is not counted above and has no config flag: after
+Claude answered a turn, or when a rate-limit window moved, it writes the session's rate-limit
+reading for the Zensu Session Hub, dated by that moment, and only while
+`<config root>/zensu/session-hub/v1/usage/` exists, so deleting that directory switches it off. It
+writes nothing when a session starts.
 It needs Claude Code 2.1.296 or newer. [Session Hub usage feed](../README.md#session-hub-usage-feed)
 says what it writes and when it does not run.
 

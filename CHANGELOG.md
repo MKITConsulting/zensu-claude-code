@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill
+  prerequisites that name install commands, the README and `docs/operations.md` now give
+  `brew update && brew upgrade --cask mkitconsulting/tap/zensu` in place of
+  `brew upgrade --cask zensu`, the commands `docs/cli-install-update.md` and the AI-work capture
+  guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
+  passed, so on its own it can miss a new release.
+
+## [0.36.0] - 2026-11-07
+
+### Added
+
+- **hooks**: Move the CLI gate's backend reading into hooks/lib and add a doctor row (#568)
+- **review-chain**: Keep audit scope across retries and gate review rounds on one canonical packet (#485)
+
+### Changed
+
+- **vcs**: Add a live GitLab tier with a pinned glab matrix (#575)
+- **verify-feature**: Decide the Zensu evidence caps and retention per tier (#574)
+- **verify-feature**: Size caps per file and tier, image sizing, Zensu acceptance criteria (#569)
+- **verify-feature**: Specify the evidence report, its ports and the Zensu side (#567)
+- **zen-mode**: Settle the grader follow-ups #537 left open (#563)
+
+### Fixed
+
+- **hooks**: Grade changed non-ASCII files as landed and settle the #485 follow-ups (#572)
+- **evidence-run**: Make the work-tree fault transport fail closed (#573)
+- **hooks**: Raise the zensu-cli floor to 0.18.0, which AI-work capture needs (#571)
+- **review-gate**: Read background reviewer reports from completion notifications (#570)
+- **evidence-run**: Word work-tree refusals in the modules and share one bound lookup (#561)
+- **vcs**: Send GitLab review bodies as JSON with an explicit content type (#560)
+- **hooks**: Name the closing session block in the zen-mode OFF directive (#565)
+- **hooks**: Let only the user's own text end zen-mode (#564)
+- **build**: Scope Phase 1.5 preconditions to the dependencies it lists (#559)
+- **session-trail**: Check desktop-store owner and mode like the resolver (#551)
+- **hooks**: Read commands the way the shell does in the source-write gate (#554)
+
+### Upgrade notes
+
 - **zensu-cli 0.18.0 floor**: the session banner, `/zensu:doctor`, `/zensu:setup`, the
   `/zensu:work` refusal and the six skill prerequisites that state a zensu-cli release now give
   0.18.0 as the oldest supported release, because older releases cannot declare a goal's feature,
@@ -17,21 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cli_incompatible` without capturing when it does not. 0.18.0 is the first release that declares
   them. The floor itself only warns; no gate reads the version. Check the installed release with
   `zensu --version`. A release below the floor has no `zensu update`, so upgrade through the
-  channel it was installed with: `brew update && brew upgrade --cask mkitconsulting/tap/zensu` for
-  a Homebrew install, or run the installer again (`curl -fsSL https://zensu.dev/install.sh | sh`,
-  on Windows `irm https://zensu.dev/install.ps1 | iex`); `docs/cli-install-update.md` covers every
-  channel. Then update the plugin with
+  channel it was installed with: `brew upgrade --cask zensu` for a Homebrew install, or run the
+  installer again (`curl -fsSL https://zensu.dev/install.sh | sh`, on Windows
+  `irm https://zensu.dev/install.ps1 | iex`); `docs/cli-install-update.md` covers every channel.
+  Then update the plugin with
   `claude plugin marketplace update zensu` and `claude plugin update zensu@zensu`. A goal begun
   with a release before 0.35.0 keeps a legacy receipt without feature scope, which cannot submit
   new results automatically: begin a new goal with `--feature <feature-uuid>`,
   `--maintenance-reason <reason>` or, for work that spans products,
   `--cross-product-reason <reason>`.
-- **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill
-  prerequisites that name install commands, the README and `docs/operations.md` now give
-  `brew update && brew upgrade --cask mkitconsulting/tap/zensu` in place of
-  `brew upgrade --cask zensu`, the commands `docs/cli-install-update.md` and the AI-work capture
-  guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
-  passed, so on its own it can miss a new release.
 - **Edit-landing receipts and review packets**: `--chain-done` now refuses to close a reviewed
   chain that changed files unless its edit-landing receipt is clean and fresh for the current
   tree, beside the full-suite and acceptance gates; `docs/gates.md` §"Terminal Edit-Landing Gate"

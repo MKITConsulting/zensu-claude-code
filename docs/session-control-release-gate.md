@@ -278,9 +278,12 @@ has two deterministic exact-SHA gates:
    source ref together and creates the release commit locally
    (`prepare-commit`). `prepare-suite` runs `bash tests/run-all.sh --ci`
    against that exact commit as parallel `--shard=I/N` legs, which receive it
-   as a verified git bundle. `prepare` then verifies the exact clean commit SHA,
+   as a verified git bundle, and `prepare-gitlab-live` runs the pinned live
+   GitLab matrix (`tests/integration/gitlab/run.sh --glab pinned`) against the
+   same bundled commit. `prepare` then verifies the exact clean commit SHA,
    computes the Session Control runtime digest, and uploads deterministic
-   SHA-bound evidence before pushing the release branch. A re-run of failed
+   SHA-bound evidence, whose `gate: "passed"` requires both gates, before
+   pushing the release branch. A re-run of failed
    jobs reuses the same release commit, so every evidence artifact name also
    carries the run attempt. The bundle is kept for 7 days; after that, a re-run
    cannot fetch the commit and a fresh dispatch creates a new one.
@@ -290,8 +293,9 @@ has two deterministic exact-SHA gates:
    the separate `IMMUTABLE_RELEASES_ADMIN_TOKEN`, requires `enabled:true`,
    verifies marketplace version and ref, rejects a pre-existing tag at another
    SHA, and decides the gate, so a doomed publication fails before any shard
-   starts. `publish-suite` reruns the sharded suite at the exact clean
-   `${{ github.sha }}`. `publish` repeats the version, ref and tag checks,
+   starts. `publish-suite` reruns the sharded suite and `publish-gitlab-live`
+   the pinned live GitLab matrix at the exact clean `${{ github.sha }}`.
+   `publish` repeats the version, ref and tag checks,
    recomputes the runtime digest, and uploads a second deterministic evidence
    artifact.
 4. Immediately before publication it rechecks Immutable Releases. Publication

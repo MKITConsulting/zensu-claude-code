@@ -55,6 +55,7 @@
     "test-gauntlet-loop-skill.sh",
     "test-ghost-scan-test-detection.sh",
     "test-gitignore-zensu.sh",
+    "test-gitlab-live-workflow.sh",
     "test-harness-launcher.sh",
     "test-hook-payload-stdin.sh",
     "test-hook-process-budget.sh",
@@ -193,6 +194,7 @@
   ],
   "nodeDepsStructureTests": [
     "test-clock-shift.sh",
+    "test-gitlab-live-workflow.sh",
     "test-promptfoo-session-upgrade.sh",
     "test-release-session-control-gate.sh",
     "test-windows-ci-contract.sh",
