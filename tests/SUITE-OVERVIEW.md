@@ -615,9 +615,8 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
   (`file-mtime`, `git-date` or `lease-staleness`).
 - The live GitLab suite runs against GitLab CE in Docker only: gitlab.com, the github provider
   and the `changesRequested` arm of `--review-summary`, which needs a second GitLab user, are
-  not driven live. It records three driver bugs as strict XFAIL (`.claude/rules/gitlab-live-check.md`).
-  CI runs pinned glab and GitLab builds only, so a release that breaks the driver surfaces in
-  the pull request that pins it, not on the night it ships.
+  not driven live. CI runs pinned glab and GitLab builds only, so a release that breaks the
+  driver surfaces in the pull request that pins it, not on the night it ships.
 - The playwright-cli drift check reads release metadata only. It tells the team that npm lists
   a stable `@playwright/cli` release newer than the measured one; re-measuring the parser port
   and re-recording its fixture stay a maintainer's local step. A prerelease never counts, and

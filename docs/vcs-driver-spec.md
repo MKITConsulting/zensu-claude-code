@@ -241,7 +241,9 @@ specified in `skills/autopilot/rules/conventions.md`.
     `new_line` for an added line, `old_line` for a removed one, both for an unchanged context
     line; an anchor the diff does not contain posts as a positionless discussion) and a
     `<!-- zensu:pr<iid>:<hash> -->` idempotency marker so a re-run after a
-    partial failure skips already-posted threads. The verdict rides in the summary-note text;
+    partial failure skips already-posted threads. The re-run reads the markers from the parsed
+    bodies of the merge request's notes and discussions, never from raw response text: GitLab's
+    JSON escapes their angle brackets. The verdict rides in the summary-note text;
     the driver NEVER calls `glab mr approve`/`merge` (§9.3). Dry mode
     (`ZENSU_VCS_PRINT_ARGV=1`) prints the ordered argv sequence (note first, then each
     discussion) — the same hermetic seam as Phases 1-2; live `gh`/`glab` execution untested.
@@ -304,7 +306,8 @@ specified in `skills/autopilot/rules/conventions.md`.
     `--fetch-threads`). Dry-printable; tests R1-R17 in `test-vcs-pr-ops.sh`.
   - `--locate-pr` without a number exits **3** when the forge CLI reports that the current branch has
     no PR/MR (`no pull requests found for branch` from `gh`, `no open merge request available for`
-    from `glab`), so "no PR yet" is told apart from an error; every other failure exits 1 with the
+    from `glab`, both matched without regard to case because glab 1.113 and 1.122 capitalize the
+    message), so "no PR yet" is told apart from an error; every other failure exits 1 with the
     forge CLI's message on stderr. Existing callers treat any status other than 0 as "not located".
     Tests L1-L6 in `test-vcs-pr-ops.sh`.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through

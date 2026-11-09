@@ -453,9 +453,11 @@ _zensu_vcs_normalize_threads() {
               }
               seenNotes[nid]=noteSignature;
               var resolvable=n.resolvable!=null?n.resolvable:d.resolvable;
+              if(typeof resolvable!=="boolean")throw new Error("incomplete gitlab resolution state");
+              if(resolvable===false)continue;
               var resolved=n.resolved!=null?n.resolved:d.resolved;
-              if(typeof resolvable!=="boolean"||typeof resolved!=="boolean")throw new Error("incomplete gitlab resolution state");
-              if(chosen===null&&resolvable===true&&resolved===false)chosen=n;
+              if(typeof resolved!=="boolean")throw new Error("incomplete gitlab resolution state");
+              if(chosen===null&&resolved===false)chosen=n;
             }
             if(chosen){var pos=chosen.position||{};
               out.push({threadId:String(d.id),replyTo:String(d.id),path:pos.new_path||pos.old_path||"",line:(pos.new_line!=null?pos.new_line:(pos.old_line!=null?pos.old_line:null)),body:chosen.body||"",author:((chosen.author||{}).username)||""});
@@ -579,7 +581,9 @@ _zensu_vcs_locate_pr() {
 }
 
 _zensu_vcs_no_pr_message() {
-  case "${1:-}:${2:-}" in
+  local message
+  message="$(printf '%s' "${2:-}" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  case "${1:-}:$message" in
     github:*"no pull requests found for branch"*) return 0 ;;
     gitlab:*"no open merge request available for"*) return 0 ;;
   esac
@@ -1260,16 +1264,16 @@ _zensu_vcs_review_snapshot() {
 }
 
 _zensu_vcs_review_fetch_inventory() {
-  local provider="${1:-}" repoid="${2:-}" id="${3:-}"
+  local provider="${1:-}" repoid="${2:-}" id="${3:-}" label="${4:-reconcile-review inventory}"
   case "$provider" in
     github)
       local owner="${repoid%%/*}" name="${repoid#*/}"
       local q='query($owner:String!,$name:String!,$num:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100,after:$endCursor){nodes{id body url}pageInfo{hasNextPage endCursor}}}}}'
-      _zensu_vcs_run 'reconcile-review inventory (gh api graphql reviews)' gh api graphql --paginate --slurp -f query="$q" -f owner="$owner" -f name="$name" -F num="$id" ;;
+      _zensu_vcs_run "$label (gh api graphql reviews)" gh api graphql --paginate --slurp -f query="$q" -f owner="$owner" -f name="$name" -F num="$id" ;;
     gitlab)
       local notes discussions
-      notes="$(_zensu_vcs_run 'reconcile-review inventory (glab api notes)' glab api --paginate --output json "projects/$repoid/merge_requests/$id/notes")" || return 1
-      discussions="$(_zensu_vcs_run 'reconcile-review inventory (glab api discussions)' glab api --paginate --output json "projects/$repoid/merge_requests/$id/discussions")" || return 1
+      notes="$(_zensu_vcs_run "$label (glab api notes)" glab api --paginate --output json "projects/$repoid/merge_requests/$id/notes")" || return 1
+      discussions="$(_zensu_vcs_run "$label (glab api discussions)" glab api --paginate --output json "projects/$repoid/merge_requests/$id/discussions")" || return 1
       printf '%s\0%s' "$notes" "$discussions" | node -e '
         var chunks=[];
         process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
@@ -1933,10 +1937,9 @@ _zensu_vcs_post_review_gitlab() {
   fi
   local existing=""
   if ! _zensu_vcs_dry; then
-    local en ed
-    en="$(_zensu_vcs_run 'post-review existing notes (glab api notes)' glab api --paginate "projects/$repoid/merge_requests/$id/notes")" || return 1
-    ed="$(_zensu_vcs_run 'post-review existing discussions (glab api discussions)' glab api --paginate "projects/$repoid/merge_requests/$id/discussions")" || return 1
-    existing="$en$ed"
+    local inventory
+    inventory="$(_zensu_vcs_review_fetch_inventory gitlab "$repoid" "$id" 'post-review existing')" || return 1
+    existing="$(printf '%s' "$inventory" | _zensu_vcs_body_markers post)" || return 1
   fi
   local i=0
   while [ "$i" -lt "$n" ]; do
@@ -1946,8 +1949,8 @@ _zensu_vcs_post_review_gitlab() {
     local mkr="${all[0]}" kind="${all[1]}" request_json="${all[2]}"
     { [ -n "$mkr" ] && [ -n "$request_json" ]; } || return 1
     case "$kind" in notes|discussions) ;; *) return 1 ;; esac
-    case "$existing" in
-      *"$mkr"*) : ;;
+    case $'\n'"$existing"$'\n' in
+      *$'\n'"$mkr"$'\n'*) : ;;
       *) printf '%s' "$request_json" \
            | _zensu_vcs_gitlab_post_json 'post-review POST (glab api)' "projects/$repoid/merge_requests/$id/$kind" || return 1 ;;
     esac
@@ -1981,11 +1984,19 @@ _zensu_vcs_review_markers() {
   command -v node >/dev/null 2>&1 || return 1
   local inventory
   inventory="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
-  printf '%s' "$inventory" | node -e '
+  printf '%s' "$inventory" | _zensu_vcs_body_markers review
+}
+
+_zensu_vcs_body_markers() {
+  command -v node >/dev/null 2>&1 || return 1
+  MARKER_KIND="${1:-}" node -e '
     var chunks=[];process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
       var raw=Buffer.concat(chunks);if(raw.length>32*1024*1024)process.exit(1);
       var data;try{data=JSON.parse(raw.toString("utf8"));}catch(_){process.exit(1);}
-      var re=/<!-- zensu-review:v1:[a-f0-9]{64}:[a-f0-9]{64}:[a-f0-9]{7,64}:[1-9][0-9]{0,5}:part=1\/[1-9][0-9]{0,5} -->/g;
+      var re=null;
+      if(process.env.MARKER_KIND==="review")re=/<!-- zensu-review:v1:[a-f0-9]{64}:[a-f0-9]{64}:[a-f0-9]{7,64}:[1-9][0-9]{0,5}:part=1\/[1-9][0-9]{0,5} -->/g;
+      else if(process.env.MARKER_KIND==="post")re=/<!-- zensu:pr[0-9]+:[0-9a-f]{8} -->/g;
+      if(!re)process.exit(1);
       var seen={},out=[];
       function walk(value,depth){
         if(depth>64||value===null||typeof value!=="object")return;
@@ -2040,7 +2051,7 @@ _zensu_vcs_open_pr() {
   printf '%s' "$out" | _zensu_vcs_extract_url
 }
 
-export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions 2>/dev/null || true
+export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_body_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in

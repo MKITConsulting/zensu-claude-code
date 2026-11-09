@@ -161,6 +161,21 @@ if PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs
 else
   check "N11 normalize_diff_refs without Node fails closed" PASS
 fi
+RM_HEX_A="$(printf '%064d' 0 | tr 0 a)"
+RM_HEX_B="$(printf '%064d' 0 | tr 0 b)"
+RM_FIRST="<!-- zensu-review:v1:$RM_HEX_A:$RM_HEX_B:abcdef0:3:part=1/3 -->"
+RM_JSON="$(RM_FIRST="$RM_FIRST" node -e 'var m=process.env.RM_FIRST;process.stdout.write(JSON.stringify({notes:[{id:1,body:m+"\n\nsummary"},{id:2,body:"quoted "+m}],discussions:[[{id:"d1",notes:[{id:3,body:m.replace("part=1/3","part=2/3")}]}]]}))')"
+eq "N12 the shared body-marker walk lists each first-part review marker once" "$(printf '%s' "$RM_JSON" | _zensu_vcs_body_markers review)" "$RM_FIRST"
+if printf '%s' "$RM_JSON" | _zensu_vcs_body_markers bogus >/dev/null 2>&1; then
+  check "N13 the body-marker walk refuses an unknown marker kind" FAIL
+else
+  check "N13 the body-marker walk refuses an unknown marker kind" PASS
+fi
+if printf '%s' 'not json' | _zensu_vcs_body_markers post >/dev/null 2>&1; then
+  check "N14 the body-marker walk fails closed on malformed JSON" FAIL
+else
+  check "N14 the body-marker walk fails closed on malformed JSON" PASS
+fi
 
 # ---- summary-note-only path (comments:[]) — the common COMMENT verdict with zero inline ----
 cat > "$WORK/empty.json" <<'JSON'
@@ -264,10 +279,20 @@ if [ "${1:-}" = api ] && [ "$path" = 'projects/grp%2Fproj/merge_requests/7/diffs
   exit 0
 fi
 if [ "${1:-}" = api ] && [ "${2:-}" = --paginate ]; then
+  case "${FAKE_LISTING:-ok}" in
+    fail)
+      printf '%s\n' '{"message":"500 Internal Server Error"}' 'glab: HTTP 500' >&2
+      exit 1 ;;
+    malformed)
+      printf '%s' '[{'
+      exit 0 ;;
+  esac
   FAKE_DIR="$FAKE_DIR" KIND="${path##*/}" node -e '
     var fs=require("fs"),f=process.env.FAKE_DIR+"/posted",a=[];
-    if(fs.existsSync(f))fs.readFileSync(f,"utf8").split("\n").forEach(function(l){if(!l)return;var r=JSON.parse(l);if(r.kind===process.env.KIND)a.push({id:a.length+1,body:r.request.body});});
-    process.stdout.write(JSON.stringify(a));'
+    if(fs.existsSync(f))fs.readFileSync(f,"utf8").split("\n").forEach(function(l){if(!l)return;var r=JSON.parse(l);if(r.kind!==process.env.KIND)return;
+      var note={id:a.length+1,body:r.request.body,system:false};
+      a.push(r.kind==="discussions"?{id:"d"+(a.length+1),individual_note:false,notes:[note]}:note);});
+    process.stdout.write(JSON.stringify(a).replace(/[<>]/g,function(c){return "\\u00"+c.charCodeAt(0).toString(16);}));'
   exit 0
 fi
 if [ "${1:-}" = api ] && [ "${2:-}" = --method ] && [ "${3:-}" = POST ]; then
@@ -346,6 +371,10 @@ eq "LV13 the MR diff is read before the first POST" \
   "$(awk '/merge_requests\/7\/diffs$/{if(!d)d=NR} /--method POST/{if(!p)p=NR} END{if (d && p && d < p) print "ordered"; else print "unordered"}' "$WORK/live/state/calls")" "ordered"
 if live_post; then check "LV7 a live re-run succeeds" PASS; else check "LV7 a live re-run succeeds" FAIL; fi
 eq "LV8 a live re-run finds every marker and posts nothing new" "$(grep -c -- '--method POST' "$WORK/live/state/calls" || true)" "6"
+LIVE_LISTING="$(FAKE_DIR="$WORK/live/state" "$WORK/live/bin/glab" api --paginate --output json projects/grp%2Fproj/merge_requests/7/discussions 2>/dev/null)"
+has    "LV24a the fake glab lists a stored marker with JSON-escaped angle brackets, as GitLab does" "$LIVE_LISTING" '\u003c!-- zensu:pr7:'
+nothas "LV24b the fake glab lists no raw angle bracket" "$LIVE_LISTING" '<!--'
+has    "LV24c the fake glab nests each discussion's notes, as GitLab does" "$LIVE_LISTING" '"individual_note":false,"notes":[{"id":'
 LIVE_ERR="$(printf '%s' '{"body":"probe"}' \
   | FAKE_DIR="$WORK/live/state" "$WORK/live/bin/glab" api --method POST projects/grp%2Fproj/merge_requests/7/notes --input - 2>&1 >/dev/null)"
 LIVE_RC=$?
@@ -426,6 +455,26 @@ else
   check "LV23a a review without line comments posts" FAIL
 fi
 eq "LV23b a review without line comments never reads the MR diff" "$(grep -c 'merge_requests/7/diffs$' "$WORK/live/pf-noline/calls" || true)" "0"
+
+mkdir -p "$WORK/live/listing"
+FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1
+eq "LV25 a complete first post leaves the summary note and all five discussions" "$(grep -c -- '--method POST' "$WORK/live/listing/calls" || true)" "6"
+if FAKE_LISTING=fail FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/listing/stderr"; then
+  check "LV26a a failed existing-marker listing makes a re-run exit non-zero" FAIL
+else
+  check "LV26a a failed existing-marker listing makes a re-run exit non-zero" PASS
+fi
+eq "LV26b a failed existing-marker listing posts nothing again" "$(grep -c -- '--method POST' "$WORK/live/listing/calls" || true)" "6"
+has "LV26c the failed listing is reported under the post-review existing label" "$(cat "$WORK/live/listing/stderr" 2>/dev/null)" "zensu-vcs: post-review existing (glab api notes) failed (rc=1): "
+if FAKE_LISTING=malformed FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV27a an existing-marker listing that is not JSON makes a re-run exit non-zero" FAIL
+else
+  check "LV27a an existing-marker listing that is not JSON makes a re-run exit non-zero" PASS
+fi
+eq "LV27b an existing-marker listing that is not JSON posts nothing again" "$(grep -c -- '--method POST' "$WORK/live/listing/calls" || true)" "6"
 
 rm -rf "$WORK"
 
