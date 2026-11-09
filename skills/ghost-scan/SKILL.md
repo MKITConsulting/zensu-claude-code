@@ -28,7 +28,7 @@ This is the **brownfield** entry point — an existing codebase whose features a
 
 ## Prerequisites
 
-- Zensu CLI 0.10.0 or later on `PATH`; see `/zensu:doctor` for install/upgrade hints
+- Zensu CLI 0.18.0 or later on `PATH`; see `/zensu:doctor` for install/upgrade hints
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - Product ID known (create one first with `/zensu:bootstrap` if needed)
 - Working in the repository root (or a subdirectory)

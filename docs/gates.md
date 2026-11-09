@@ -227,6 +227,7 @@ path segment such as `~/src/Zensu` count, so such a local call needs the two-wor
 command also holds the stop-parsing token `--%` or a `--api-url` the analyzer cannot read as a word, such as
 `--api-url=$u`. The gate cannot tell where a call runs: one only the token scan finds, such as a call inside an `ssh`
 string, still counts as local when it names `localhost`, although there `localhost` is the host the string reaches.
+This backend reading lives in `hooks/lib/zensu-cli-backend-v1.js`, which the gate loads from its own plugin directory and a unit file pins rule by rule. The gate loads it only once it has found a `zensu` call, so a command that merely names `zensu`, such as a search for the word or a plugin helper under the plugin's own directory, never loads it. When that module cannot load, the gate denies every command in which it finds a `zensu` call, reads and `--help` included, as unreadable, with a reason that names the module and the damaged installation. `/zensu:doctor` shows the same damage in its `CLI write-gate:` row, which warns, with a reinstall remedy, when that module cannot be loaded or does not export a function the gate calls to read a `zensu` call, and renders green otherwise.
 In a Bash command a `--help` or `-h` word right after a word the shell expands at run time is read as that word's
 value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
@@ -1367,9 +1368,12 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   at once, naming the first differing line. A reviewer the host launches in the background, as
   the Claude desktop app does with every subagent, answers with status `async_launched` and no
   report: that launch is recorded with its agent id and its packet digest, counts as no run and
-  never as a failed judge, and the reviewer's hand-back, which `user-prompt-review-handback.sh`
-  passes to the hook, completes it with the report the frame carries. A second hand-back for
-  the same agent is ignored.
+  never as a failed judge, and the reviewer's hand-back, or outside auto mode its completion
+  notification, which `user-prompt-review-handback.sh` passes to the hook, completes it with the
+  report the frame or the notification's `<result>` carries. A notification completes a launch
+  only with status `completed` and a result that is not one of the host's two hand-back stubs,
+  and the gate decodes the `&lt;`, `&gt;` and `&amp;` the host writes there. A second completion
+  for the same agent is ignored.
 - **The consume refusal.** Before the hook claims a review ticket it refuses, with the ticket
   left unconsumed and the cause and remedy in `additionalContext`, when the round has no
   canonical packet, when the consume prompt's block is missing, duplicated or differs, when the
@@ -1387,12 +1391,13 @@ step 4b requires one. Two helpers and the post-review hook carry it.
   hook already treats a malformed or foreign document. A consume-mode reviewer the host launches
   in the background is checked at its launch, and a refused launch is not recorded for its
   arrival, so nothing it reports can claim. A passing launch records the block's digest, and the
-  arrival is checked again against that digest and with the report its hand-back carries; a
+  arrival is checked again against that digest and with the report its hand-back or its
+  notification's result carries; a
   refused arrival answers in the arrival's own `UserPromptSubmit` event, ends the wait for that
-  reviewer and leaves the ticket unconsumed. While background launches of the round have sent
-  no hand-back, the refusals for a missing reviewer and a missing primary judge say to wait for
-  them, and, where the host delivers no hand-back the hook can read, as outside auto mode, to ask
-  the user whether to set `hooks.reviewPacketGate` to `false`. A claim the Stop guard completes
+  reviewer and leaves the ticket unconsumed. While background launches of the round have
+  delivered no report, as a hand-back or in a completion notification, the refusals for a missing
+  reviewer and a missing primary judge say to wait for them, and, where the host delivers neither,
+  to ask the user whether to set `hooks.reviewPacketGate` to `false`. A claim the Stop guard completes
   from an arrival note, after the hook that received the hand-back was cut off, is checked as an
   arrival on the round's records alone, because the note carries no report.
 - **Only the live ticket is judged.** The hook hands the gate the consume prompt's review ticket.
@@ -1420,9 +1425,10 @@ every plugin store; a deferred review in a session that still holds an earlier g
 receipt is judged by that receipt, because only `--tdd-begin` retires one; and the judge's report
 is read from the PostToolUse `tool_response`, whose `handbackReport` shape was measured on Claude
 Code 2.1.299, or for a background reviewer from its hand-back frame, whose shape was measured in
-the desktop app in auto mode. Outside auto mode that host sends no hand-back, so a review whose
-reviewers all ran in the background stays refused there until the key is off; no live desktop
-run of a background panel through the gate exists yet.
+the desktop app in auto mode, or, outside auto mode, from the `<result>` of its completion
+notification, whose shape was measured on Claude Code 2.1.309 and 2.1.317 in `default` mode and in
+desktop transcripts in `plan` mode; the result rests on the host escaping `<`, `>` and `&` there,
+and no live desktop run of a background panel through the gate exists yet.
 
 ## Terminal Edit-Landing Gate
 
@@ -1621,7 +1627,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   nested below the anchor, that fingerprint, and the one an `--evidence-run --scope acceptance`
   run records, is the combined fingerprint of the project and that worktree, so an edit in the
   worktree makes every record `stale`; when the worktree cannot be resolved, both verbs and the
-  acceptance run exit `2` and name the cause. The plan is the one named by this session's
+  acceptance run exit `2` and name the cause, and `--acceptance-status` prints it as an
+  `ACCEPTANCE STATUS — unavailable` summary line. The plan is the one named by this session's
   edit-landing receipt.
   `zensu-log.sh --acceptance-status --log <run log>` prints every criterion's state on the
   current tree and exits 0 only when all active criteria pass. Its summary line carries the same

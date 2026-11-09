@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.35.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.36.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -155,8 +155,9 @@ claude plugin marketplace update zensu
 claude plugin update zensu@zensu
 ```
 
-Optional, for feature tracking: install zensu-cli 0.10.0 or later with
-`brew install --cask mkitconsulting/tap/zensu` (upgrade with `brew upgrade --cask zensu`),
+Optional, for feature tracking: install zensu-cli 0.18.0 or later with
+`brew install --cask mkitconsulting/tap/zensu` (upgrade with
+`brew update && brew upgrade --cask mkitconsulting/tap/zensu`),
 `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
 `irm https://zensu.dev/install.ps1 | iex`, then run `zensu auth login`.
 
@@ -444,16 +445,19 @@ otherwise. The Session Hub creates that directory; the module never creates it,
 so on a machine without the Session Hub nothing is written.
 
 While the directory exists, the module writes one file per Claude Code session,
-`<session id>.json`, each time Claude Code measures the session after a response
-from Claude, which happens at the end of every turn, and whenever a rate-limit
-window moves. It writes nothing when a session starts and nothing while a session
-is idle, so a file keeps the time of its last reading. The file holds the
-record's schema version, the session id, the time of the reading, and for each
-window its name (`five_hour`, `seven_day`), the percentage used and the reset
-time. It holds nothing else: no prompt, response, title, path, project or
-account data. Each write replaces the whole file, the file stays on your
-machine, and the module sends nothing anywhere. Deleting the directory stops the
-feed; only a write already under way at that moment can create it once more.
+`<session id>.json`, when Claude Code measures the session and the reading is
+new: Claude has just answered a turn of the session, or a rate-limit window has
+just moved. The time in the file is that moment, so a reading the session took
+earlier never comes back under a newer time. It writes nothing when a session
+starts and nothing while a session is idle, so a file keeps the time of its last
+reading. The file holds the record's schema version, the session id, the time of
+the reading, and for each window its name (`five_hour`, `seven_day`), the
+percentage used and the reset time. It holds nothing else: no prompt, response,
+title, path, project or account data. To tell an answered turn, the module reads
+only how the turn ended, not its text. Each write replaces the whole file, the
+file stays on your machine, and the module sends nothing anywhere. Deleting the
+directory stops the feed; only a write already under way at that moment can
+create it once more.
 
 The module needs Claude Code 2.1.296 or newer and uses its early-access hooks
 module API, which can change between releases. Anthropic can also switch modules
@@ -480,8 +484,8 @@ driver additionally need `playwright-cli` on `PATH`
 (`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
-Feature tracking needs zensu-cli 0.10.0 or later: older releases print only the
-first 100 ghost-scan candidates and read only the first page of wiki lists.
+Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older
+releases cannot declare a goal's feature, so AI-work capture fails.
 `zensu --version` shows the installed release, and the session banner and
 `/zensu:doctor` warn about an older one without blocking anything.
 

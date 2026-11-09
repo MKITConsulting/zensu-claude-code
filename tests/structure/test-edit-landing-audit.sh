@@ -1839,6 +1839,48 @@ CS_BOUND_OUT="$(CLAUDE_CODE_SESSION_ID="$SB_SID" CLAUDE_PLUGIN_DATA="$SB_DATA" \
   && ! grep -qF 'AUDIT SESSION REQUIRED' "$WORK/cs-bound.err" && ! grep -qF 'STANDALONE AUDIT' "$WORK/cs-bound.err" \
   && [ ! -e "$CS/.zensu" ]
 check "CS6 under the session of an armed chain --change-set still lists the union, passes no session gate and writes nothing (rc=$CS_BOUND_RC)" "$(verdict $?)"
+CSU="$WORK/change-set-utf8"
+new_repo "$CSU"
+CSU_TRACKED=$'tracked-\303\274.txt'
+CSU_UNTRACKED=$'na\303\257ve.txt'
+printf 'v1\n' > "$CSU/$CSU_TRACKED"
+printf 'v1\n' > "$CSU/plain.txt"
+G "$CSU" add -A >/dev/null 2>&1; G "$CSU" commit -qm base >/dev/null 2>&1
+CSU_BASE="$(G "$CSU" rev-parse HEAD)"
+printf 'v2\n' > "$CSU/plain.txt"
+G "$CSU" commit -qam mid >/dev/null 2>&1
+printf 'v2\n' > "$CSU/$CSU_TRACKED"
+printf 'new\n' > "$CSU/$CSU_UNTRACKED"
+mkdir -p "$CSU/.zensu/plans"
+printf 'plan\n' > "$CSU/.zensu/plans/p.md"
+CSU_OUT="$(bash "$LIB" --change-set --project "$CSU" --baseline "$CSU_BASE" 2>"$WORK/csu.err")"; CSU_RC=$?
+[ "$CSU_RC" -eq 0 ] \
+  && [ "$(printf '%s\n' "$CSU_OUT" | LC_ALL=C sort)" = "$(printf '%s\n' .zensu/plans/p.md "$CSU_UNTRACKED" plain.txt "$CSU_TRACKED" | LC_ALL=C sort)" ]
+check "CS7 --change-set prints a non-ASCII path as UTF-8, never in git's quoted form (rc=$CSU_RC)" "$(verdict $?)"
+printf '%s\n' "[10:00:00] EDIT LANDING AUDIT STARTED — round phase6" \
+  "[10:00:01] S1 IMPL completed — files: $CSU_TRACKED, $CSU_UNTRACKED" > "$WORK/csu.log"
+CSU_AUDIT="$(run_audit --log "$WORK/csu.log" --project "$CSU" --baseline "$CSU_BASE" --receipt -)"; CSU_AUDIT_RC=$?
+[ "$CSU_AUDIT_RC" -eq 0 ] \
+  && printf '%s\n' "$CSU_AUDIT" | grep -qxF "EDIT LANDED — S1: $CSU_TRACKED" \
+  && printf '%s\n' "$CSU_AUDIT" | grep -qxF "EDIT LANDED — S1: $CSU_UNTRACKED" \
+  && ! printf '%s\n' "$CSU_AUDIT" | grep -qF 'EDIT NOT LANDED'
+check "CS8 a claim naming a changed non-ASCII path lands, tracked and untracked alike (rc=$CSU_AUDIT_RC)" "$(verdict $?)"
+printf '%s\n' "$CSU_OUT" > "$WORK/csu.union"
+CSU_PARITY="$(node -e '
+  const fs = require("fs");
+  const path = require("path");
+  const [lib, root, baseline, unionFile] = process.argv.slice(1);
+  const packets = require(path.join(lib, "review-packet-v1.js"));
+  const artifacts = require(path.join(lib, "evidence-run-v1.js")).WORKFLOW_ARTIFACTS;
+  const workflow = (file) => file.split("/").some((part, index, parts) => part === ".zensu" && artifacts.includes(parts[index + 1]));
+  const union = fs.readFileSync(unionFile, "utf8").split("\n").filter(Boolean);
+  const canonical = packets.collectChanges({ root, baseline }).changed_files;
+  const same = JSON.stringify(union.filter((file) => !workflow(file)).sort()) === JSON.stringify([...canonical].sort());
+  process.stdout.write(same && union.some(workflow) ? "same" : JSON.stringify({ union, canonical }));
+' "$PLUGIN_DIR/hooks/lib" "$CSU" "$CSU_BASE" "$WORK/csu.union" 2>&1)"
+[ "$CSU_PARITY" = same ] || printf '    %s\n' "$CSU_PARITY"
+[ "$CSU_PARITY" = same ]
+check "CS9 --change-set and the review packet's collectChanges list the same paths, apart from the .zensu workflow artifacts only the packet leaves out" "$(verdict $?)"
 
 echo "== The chain's work tree: a worktree of the anchor's repository below the project root =="
 WTA="$WORK/wt-anchor"

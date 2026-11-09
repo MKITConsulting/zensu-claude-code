@@ -31,7 +31,7 @@ Run one change the user asked for against tracked Zensu state in an existing pro
 
 ## Prerequisites
 
-- Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
+- Zensu CLI 0.18.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew update && brew upgrade --cask mkitconsulting/tap/zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - The `zensu wiki images` commands are missing from older releases, and such a release answers `zensu wiki images --help` with the help of `zensu wiki` and exit status 0. When that output does not list `upload` and `policy`, tell the user to upgrade and leave that part of the change undone.
 
