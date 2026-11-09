@@ -190,11 +190,15 @@ and imports it as tracked features. Needs a Zensu account.
 features, journeys, and tiers. Then `/zensu:implement KEY-1` builds the first one.
 Needs a Zensu account.
 
+**One change** — `/zensu:change` makes one change you ask for in a tracked
+product, such as a new feature, a roadmap entry or a deprecation. It checks for
+a duplicate first and asks before anything is removed. Needs a Zensu account.
+
 ## What's included
 
-### Skills (31)
+### Skills (32)
 
-> The count is the workflow skills in these tables. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of these tables (32 skills are registered in `plugin.json`).
+> The count is the workflow skills in these tables. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of these tables (33 skills are registered in `plugin.json`).
 
 The **Needs** column says what a skill needs beyond Claude Code: "Zensu account"
 means the `zensu` CLI, logged in; `gh` or `glab` means the forge CLI of your
@@ -207,6 +211,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:bootstrap` | Turn a vision document into tracked features, journeys, security profiles, and tiers | Zensu account |
 | `/zensu:ghost-scan` | Scan an existing repo, discover undocumented features, and import them | Zensu account |
+| `/zensu:change` | One change you ask for in a tracked product: a new feature, a roadmap entry, a tier, a link, a deprecation or a merge, with a duplicate check first and a confirmation before anything is removed or replaced | Zensu account |
 | `/zensu:docs` | Write code-grounded feature documentation that honestly clears the docs release gate | Zensu account |
 | `/zensu:security-review` | A tracked feature's security review: classification, OWASP analysis, STRIDE threat model, release-gate check | Zensu account |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions | Zensu account |
@@ -400,6 +405,7 @@ through it:
 |-------|---------------|
 | `/zensu:bootstrap` | Product name, slug and type; **the full text of your vision or plan document**; the features, journeys, tiers and security profiles derived from it |
 | `/zensu:ghost-scan` | **The repository URL** and branch; per discovered feature its slug, title, component, confidence, security classification and the paths of its source, test and doc files |
+| `/zensu:change` | The values of the change you ask for: titles, slugs, priorities, periods, tier entries, **free-text descriptions and wiki pages as Markdown**, linked file paths, **an uploaded wiki image or mock file**, and a repository URL when you import one |
 | `/zensu:implement` | **A knowledge-search query** made of the feature title and key terms; linked test and source file paths; **the documentation it writes, as whole Markdown pages** (step 6); a free-text revision summary; status updates |
 | `/zensu:docs` | **The documentation it writes, as whole Markdown pages** in its default wiki mode; with `--repo-file`, the path of the file it writes into your repository instead |
 | `/zensu:security-review` | Classification attributes, the security tests it links, **a free-text findings summary** and approval conditions |

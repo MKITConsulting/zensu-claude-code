@@ -283,6 +283,91 @@ run "B52 the skills' free-text form (a quoted heredoc into a temporary file, the
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 run "B52b the same free-text form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
 
+tdd_workflow_begin gate-test "upload_wiki_image" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+run "B60f wiki images upload passes in a window that declares upload_wiki_image" "zensu wiki images upload --product p1 --file shot.png" '' ALLOW
+OUT="$(payload 'zensu wiki images upload --product p1 --file shot.png' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = ALLOW ] && check "B60j PowerShell wiki images upload passes in a window that declares upload_wiki_image -> ALLOW" PASS \
+  || check "B60j PowerShell wiki images upload in a window (got '$OUT' want 'ALLOW')" FAIL
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+
+CHANGE_WINDOW="$(grep -oE -- '--workflow-begin --tools "[^"]*"' "$PLUGIN_DIR/skills/change/SKILL.md" | sed -E 's/.*"([^"]*)"/\1/')"
+UNROUTED="zensu roadmap create --product p1 --title R
+zensu roadmap update r1 --title R
+zensu roadmap delete r1
+zensu roadmap add-feature r1 --feature f1
+zensu roadmap remove-feature r1 f1
+zensu roadmap milestone-create r1 --title GA
+zensu roadmap milestone-delete r1 m1
+zensu features deprecate f1
+zensu features merge f1 --title T --slug t
+zensu subfeatures promote f1 s1
+zensu ghost approve s1 c1 --product p1
+zensu ghost reject s1 c1 --product p1
+zensu journeys step-update j1 s1 --product p1 --title T
+zensu journeys step-delete j1 s1 --product p1
+zensu mocks create f1 mock.png
+zensu products import p1 --repo-url https://github.com/o/r"
+gate_out() { payload "$1" "${2:-}" gate-test "${3:-Bash}" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null; }
+CREATE_ROUTE='Run the matching skill — /zensu:change (one requested change), /zensu:bootstrap or /zensu:ghost-scan (onboarding) — in the interactive main thread.'
+CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T')"
+if [ "$(printf '%s' "$CREATE_OUT" | classify)" = DENY ] \
+   && printf '%s' "$CREATE_OUT" | grep -qF "maps to 'create_feature'" \
+   && printf '%s' "$CREATE_OUT" | grep -qF "$CREATE_ROUTE" \
+   && printf '%s' "$CREATE_OUT" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off (honored inline)'; then
+  check "B61a a freelance features create is denied with a reason that names /zensu:change for one change and /zensu:bootstrap or /zensu:ghost-scan for onboarding, and keeps the escape sentence" PASS
+else
+  check "B61a features create deny reason (got '$(printf '%s' "$CREATE_OUT" | cut -c1-240)')" FAIL
+fi
+PS_CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T' '' PowerShell)"
+if [ "$(printf '%s' "$PS_CREATE_OUT" | classify)" = DENY ] \
+   && printf '%s' "$PS_CREATE_OUT" | grep -qF "$CREATE_ROUTE A PowerShell command has no inline gate escape." \
+   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF '(honored inline)'; then
+  check "B61b the PowerShell deny of features create names the same routes and no inline escape" PASS
+else
+  check "B61b PowerShell features create deny reason (got '$(printf '%s' "$PS_CREATE_OUT" | cut -c1-240)')" FAIL
+fi
+U_BAD=""
+while IFS= read -r u_cmd; do
+  [ -n "$u_cmd" ] || continue
+  u_out="$(gate_out "$u_cmd")"
+  { [ "$(printf '%s' "$u_out" | classify)" = DENY ] && printf '%s' "$u_out" | grep -qF 'Run the matching skill — /zensu:change (one requested change)'; } || U_BAD="$U_BAD [$u_cmd]"
+done <<EOF
+$UNROUTED
+EOF
+[ -z "$U_BAD" ] && check "B61c each of the 16 commands that no skill window declared before is denied outside a window with a reason that names /zensu:change" PASS \
+  || check "B61c previously unrouted commands without a /zensu:change deny:$U_BAD" FAIL
+tdd_workflow_begin gate-test "$CHANGE_WINDOW" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+W_BAD=""
+while IFS= read -r u_cmd; do
+  [ -n "$u_cmd" ] || continue
+  [ "$(gate_out "$u_cmd" | classify)" = ALLOW ] || W_BAD="$W_BAD [$u_cmd]"
+done <<EOF
+zensu features create --product p1 --component c1 --title T
+$UNROUTED
+zensu wiki images upload --product p1 --file shot.png
+EOF
+[ -n "$CHANGE_WINDOW" ] && [ -z "$W_BAD" ] \
+  && check "B61d features create, the 16 commands and wiki images upload pass inside the window that skills/change/SKILL.md declares" PASS \
+  || check "B61d commands denied inside the /zensu:change window:$W_BAD" FAIL
+SUB_IN_WINDOW="$(gate_out 'zensu roadmap delete r1' general-purpose)"
+if [ "$(printf '%s' "$SUB_IN_WINDOW" | classify)" = DENY ] \
+   && printf '%s' "$SUB_IN_WINDOW" | grep -qF 'reserved for the interactive main thread' \
+   && printf '%s' "$SUB_IN_WINDOW" | grep -qF 'which runs it through the matching skill — /zensu:change (one requested change).' \
+   && ! printf '%s' "$SUB_IN_WINDOW" | grep -qF 'ZENSU_MCP_GATE'; then
+  check "B61e a subagent's mutation stays denied while the main thread holds the /zensu:change window, and its reason names the route and no escape" PASS
+else
+  check "B61e subagent inside the /zensu:change window (got '$(printf '%s' "$SUB_IN_WINDOW" | cut -c1-200)')" FAIL
+fi
+HUMAN_IN_WINDOW="$(gate_out 'zensu plan approve p1')"
+if [ "$(printf '%s' "$HUMAN_IN_WINDOW" | classify)" = DENY ] \
+   && printf '%s' "$HUMAN_IN_WINDOW" | grep -qF 'It records a decision that the person makes, so the person runs it' \
+   && ! printf '%s' "$HUMAN_IN_WINDOW" | grep -qF '/zensu:'; then
+  check "B61f a person's decision stays denied inside the /zensu:change window with the unchanged person-only reason" PASS
+else
+  check "B61f person-only decision inside the /zensu:change window (got '$(printf '%s' "$HUMAN_IN_WINDOW" | cut -c1-200)')" FAIL
+fi
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+
 # B9 env escape; B10 default-on; B11 explicit false
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "ALLOW" ] && check "B9 mutation + ZENSU_MCP_GATE=off -> ALLOW" PASS || check "B9 env escape (got '$OUT')" FAIL
@@ -294,12 +379,12 @@ OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROO
 # B19 deny-reason content (state-mutating wording + skill routing + mapped tool name; not "currently enabled")
 REASON_OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$REASON_OUT" | grep -qiF 'state-mutating' \
-   && printf '%s' "$REASON_OUT" | grep -qF 'zensu:bootstrap' \
-   && printf '%s' "$REASON_OUT" | grep -qF '/zensu:implement' \
-   && printf '%s' "$REASON_OUT" | grep -qF '/zensu:security-review' \
+   && printf '%s' "$REASON_OUT" | grep -qF 'Run the matching skill — /zensu:security-review (classification/review), /zensu:change (one requested change) — in the interactive main thread.' \
+   && ! printf '%s' "$REASON_OUT" | grep -qF '/zensu:bootstrap' \
+   && ! printf '%s' "$REASON_OUT" | grep -qF '/zensu:implement' \
    && printf '%s' "$REASON_OUT" | grep -qF 'set_security_classification' \
    && ! printf '%s' "$REASON_OUT" | grep -qiF 'currently enabled'; then
-  check "B19 deny reason: state-mutating wording + skill routing + mapped tool" PASS
+  check "B19 deny reason: state-mutating wording + the routes of the blocked tool and no other skill + mapped tool" PASS
 else
   check "B19 deny reason content" FAIL
 fi
@@ -308,7 +393,7 @@ if printf '%s' "$SUB_REASON_OUT" | grep -qF '"permissionDecision":"deny"' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'set_security_classification' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'reserved for the interactive main thread' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'Report the operation you need to the main thread' \
-   && printf '%s' "$SUB_REASON_OUT" | grep -qF '/zensu:security-review' \
+   && printf '%s' "$SUB_REASON_OUT" | grep -qF 'which runs it through the matching skill — /zensu:security-review (classification/review), /zensu:change (one requested change).' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'ZENSU_MCP_GATE' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'prefix the command with' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'in the interactive main thread. For a deliberate one-off'; then
@@ -845,8 +930,11 @@ security|analyze||analyze_feature_security|read
 security|threat-model||generate_threat_model|read
 doc|claude-md||generate_claude_md|read
 meta|scaffold-agent|||none
+wiki|images|upload|upload_wiki_image|mutation
+wiki|images|policy|get_wiki_image_policy|read
+wiki|images|||none
 MAP
-[ "$MAP_FAIL" -eq 0 ] && check "B41 every v0.10.0 mocks, design, journeys-step, work and plan verb maps to its tool and class, with the third word for work policy, work repositories|repos and plan followup" PASS \
+[ "$MAP_FAIL" -eq 0 ] && check "B41 every v0.10.0 mocks, design, journeys-step, work and plan verb and the wiki images verbs map to their tool and class, with the third word for work policy, work repositories|repos, plan followup and wiki images" PASS \
   || check "B41 map and class coverage ($MAP_FAIL)" FAIL
 
 unset ZENSU_SESSION_TOKEN
@@ -860,6 +948,11 @@ run "B42g plan followup accept (third word)"       "zensu plan followup accept p
 run "B42h plan push creates features and revisions" "zensu plan push plan.md"                                '' DENY
 run "B42i work create dispatches a work order"     "zensu work create --product p --feature f"               '' DENY
 run "B42j reads, reclassified reads and the unmapped stub" "zensu mocks list f1 && zensu mocks get f1 m1 --raw && zensu design context p1 && zensu work list && zensu work get o1 && zensu work events o1 && zensu work questions && zensu work policy get --product p && zensu work repositories list --product p && zensu work repos list --product p && zensu plan status p1 --watch && zensu plan list && zensu plan followups p1 && zensu security analyze f1 && zensu security threat-model f1 && zensu doc claude-md --product p && zensu meta scaffold-agent" '' ALLOW
+run "B60a wiki images upload is a mutation the gate denies outside a window" "zensu wiki images upload --product p1 --file shot.png" '' DENY
+run "B60b wiki images policy is a read"                       "zensu wiki images policy --product p1"                        '' ALLOW
+run "B60c the wiki-pages alias reaches wiki images upload"     "zensu wiki-pages images upload --product p1 --file shot.png"  '' DENY
+run "B60d a bare wiki images group only prints its help"       "zensu wiki images"                                            '' ALLOW
+run "B60e a value flag between the group and its leaf"         "zensu wiki images --product p1 upload --file shot.png"        '' DENY
 
 HUMAN_MAIN="$(payload 'zensu plan approve p1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$HUMAN_MAIN" | grep -qF '"permissionDecision":"deny"' \
@@ -1170,6 +1263,9 @@ fi
 rm -rf "$PS_BASE"
 psrun "B41d PowerShell group subcommand built at run time"   "zensu work policy \$sub"                                     '' DENY
 psrun "B41e PowerShell read whose argument is built at run time" "zensu features get \$id"                                    '' ALLOW
+psrun "B60g PowerShell wiki images upload outside a window"  "zensu wiki images upload --product p1 --file shot.png"      '' DENY
+psrun "B60h PowerShell wiki images policy is a read"         "zensu wiki images policy --product p1"                      '' ALLOW
+psrun "B60i PowerShell wiki images subcommand built at run time" "zensu wiki images \$sub --product p1"                   '' DENY
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
 rm -rf "$PROJECT"

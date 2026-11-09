@@ -92,7 +92,13 @@ The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creat
 updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
 work orders, work plans, …) run directly on the main thread is **denied by default** — it must
 run inside a skill that declared its work, so "freelance" writes cannot bypass the dedup,
-user-journey, baseline-revision and security-review conventions the skills enforce. Reads and
+user-journey, baseline-revision and security-review conventions the skills enforce. Every mutation
+an agent may run has at least one such skill, and the deny names the skills that route the blocked
+command (`ZENSU_TOOL_ROUTES` in `hooks/lib/zensu-mcp-tools.sh`): `/zensu:change` for one change a
+user asks for, such as a new feature, a roadmap entry, a tier or a deprecation, beside the
+onboarding, implementation, documentation or security-review skill the command also belongs to, so
+a denied `zensu features create` names `/zensu:change`, `/zensu:bootstrap` and `/zensu:ghost-scan`
+and a denied `zensu roadmap delete` names `/zensu:change` alone. Reads and
 telemetry are allowed in a session that binds, except a PowerShell call the analyzer cannot judge
 (see [Shell Tools](#shell-tools)); the gate binds before it classifies, so when the Session Control
 binding fails it denies every call it parses, reads included. A command that records a decision the person makes — creating,
@@ -110,8 +116,9 @@ name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/li
 source of truth. It finds the subcommand the way cobra, the CLI's command library, does: a flag
 without `=` takes the next word, an empty word is skipped and `--` ends the search, so
 `zensu features --product p1 create` counts as a create. Where the verb is itself a command group
-(`work policy`, `work repositories` or `repos`, `plan followup`), the third word picks the
-command. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
+(`work policy`, `work repositories` or `repos`, `plan followup`, `wiki images`), the third word
+picks the command, so `zensu wiki images upload` is a mutation and `zensu wiki images policy` a
+read. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
 once as if it were empty and once as if it were a value flag that takes the next word, so
 `zensu features $FLAGS create` counts as a create too. It reads the command twice and gates every invocation either reading finds. The
 shell model of the subagent accident guard (`hooks/lib/subagent-shell-guard-v1.js`) finds an
@@ -237,7 +244,12 @@ subagent's deny adds that it reports the need to the main thread. A structure
 test (`tests/structure/test-skill-workflow-markers.sh`)
 fails the build if any skill runs a mutation command without the `--workflow-begin` /
 `--workflow-end` markers, or runs one its window does not declare, so a new skill cannot silently
-regress the contract.
+regress the contract. It also fails when a mutation an agent may run has no skill window, or no
+route whose skills all declare it, and `tests/structure/test-zensu-cli-map-drift.sh` fails when the
+recorded command tree of the newest supported zensu-cli (`tests/structure/fixtures/zensu-cli-tree.txt`)
+holds a command, a group alias or a verb alias the gate does not read. The test reads that
+recorded tree, not the CLI a user runs: a verb a newer zensu-cli adds passes ungated until the
+tree is re-recorded with that release and the map learns the verb.
 
 ## Source-Write Gate
 

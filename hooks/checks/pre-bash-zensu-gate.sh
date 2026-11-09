@@ -76,7 +76,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   }
   const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",mock:"mocks",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
   const NOUNS = new Set("products features subfeatures roadmap tiers security journeys mocks design link ghost wiki doc knowledge pulse ai-work work plan meta org auth product feature subfeature roadmaps tier sec journey mock docs kb wiki-pages".split(" "));
-  const GROUPS = new Set(["work\tpolicy", "work\trepositories", "work\trepos", "plan\tfollowup"]);
+  const GROUPS = new Set(["work\tpolicy", "work\trepositories", "work\trepos", "plan\tfollowup", "wiki\timages"]);
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = new Set();
   const OPQ = String.fromCharCode(0);
@@ -330,6 +330,34 @@ EOF
 
 [ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
+ALL_ROUTES="/zensu:change (one requested change), /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)"
+ROUTE_TEXT="/zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)"
+route_text() {
+  local routes skill label last="" group="" text=""
+  routes="$(zensu_tool_routes "$1")" || return 0
+  for skill in ${routes//,/ }; do
+    case "$skill" in
+      (change) label="one requested change" ;;
+      (bootstrap|ghost-scan) label="onboarding" ;;
+      (implement) label="feature work" ;;
+      (security-review) label="classification/review" ;;
+      (docs) label="documentation" ;;
+      (pilot) label="the next step of a tracked feature" ;;
+      (*) label="its own workflow" ;;
+    esac
+    if [ -n "$group" ] && [ "$label" = "$last" ]; then
+      group="$group or /zensu:$skill"
+    else
+      [ -n "$group" ] && text="${text:+$text, }$group ($last)"
+      group="/zensu:$skill"
+      last="$label"
+    fi
+  done
+  [ -n "$group" ] && ROUTE_TEXT="${text:+$text, }$group ($last)"
+  return 0
+}
+[ -n "$DENY_TOOL" ] && route_text "$DENY_TOOL"
+
 if [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the plugin installation is damaged. Do not retry this command. Report the damaged installation to the main thread."
 elif [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ]; then
@@ -337,17 +365,17 @@ elif [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ]; then
 elif [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ "$PARSE_STATUS" -ne 0 ]; then
-  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — ${ALL_ROUTES}."
 elif [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ -n "$UNJUDGED" ]; then
-  REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+  REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — ${ALL_ROUTES}."
 elif [ "$IS_SUBAGENT" = true ]; then
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window, and the per-command gate escape is a deliberate one-off for the main thread, never a route for a subagent. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window, and the per-command gate escape is a deliberate one-off for the main thread, never a route for a subagent. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — ${ROUTE_TEXT}."
 elif [ "$TOOL_NAME" = PowerShell ]; then
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. A PowerShell command has no inline gate escape. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL in the session environment."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. A PowerShell command has no inline gate escape. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL in the session environment."
 else
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline). --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL, as an inline prefix of the call or in the session environment."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline). --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL, as an inline prefix of the call or in the session environment."
 fi
 
 if zensu_is_human_decision_tool "$DENY_TOOL"; then
