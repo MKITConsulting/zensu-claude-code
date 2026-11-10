@@ -159,7 +159,7 @@ test('an incomplete ledger read starts nothing on its own: each one waits for th
   assert.deepEqual(got, [[true, 'stays', 'continued'], [null, 'if-named', 'ledger-unread'], [null, 'if-named', 'fork']]);
 });
 
-test('a session started from a saved environment waits for the user to name it while the saved environments could not be read, and sshConfig still keeps an SSH session here', () => {
+test('a session started from a saved environment waits for the user to name it while the saved environments could not be read, and sshConfig or an SSH preset the incomplete read did find still keeps an SSH session here, while the name of any other preset that read found is withheld', () => {
   const records = [
     child(1, { startedFromEnvironmentId: 'env-ssh' }),
     child(2, { startedFromEnvironmentId: 'env-ssh', sshConfig: { host: 'box' } }),
@@ -172,9 +172,17 @@ test('a session started from a saved environment waits for the user to name it w
   assert.deepEqual(unread.sessions[0].preset, { id: 'env-ssh', name: null, kind: null });
   const presets = mod.presetMap({ byAccount: { acc1: { presets: [{ id: 'env-ssh', name: 'Remote box', target: { kind: 'ssh' } }] } } }, 'acc1');
   assert.deepEqual(decide(records, { presets }).sessions.map((entry) => entry.why), ['ssh', 'ssh', null, null]);
+  const sshUnread = decide(records, { presets, presetsComplete: false });
+  assert.deepEqual(sshUnread.sessions.map((entry) => [entry.decision, entry.why]), [['stays', 'ssh'], ['stays', 'ssh'], ['start', null], ['start', null]]);
+  assert.deepEqual(sshUnread.sessions[0].preset, { id: 'env-ssh', name: 'Remote box', kind: 'ssh' });
+  const local = mod.presetMap({ byAccount: { acc1: { presets: [{ id: 'env-ssh', name: 'Local box', target: { kind: 'local' } }] } } }, 'acc1');
+  const localUnread = decide(records, { presets: local, presetsComplete: false });
+  assert.deepEqual(localUnread.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'presets-unread'], ['stays', 'ssh'], ['start', null], ['start', null]]);
+  assert.deepEqual(localUnread.sessions[0].preset, { id: 'env-ssh', name: null, kind: null }, 'an incomplete read never names a preset that could place a start');
+  assert.deepEqual(decide(records, { presets: local }).sessions[0].preset, { id: 'env-ssh', name: 'Local box', kind: 'local' });
   assert.deepEqual(decide(records).sessions.map((entry) => entry.decision), ['start', 'stays', 'start', 'start']);
   assert.deepEqual(decide(records, { presetsComplete: false, planned: ['cont-00000001'] }).sessions.map((entry) => [entry.decision, entry.why]), [['start', null], ['stays', 'ssh'], ['later', 'unplanned'], ['later', 'unplanned']]);
-  assert.match(mod.LINKED_WHY['presets-unread'], /saved environments could not be read, so whether it runs over SSH is unknown/);
+  assert.match(mod.LINKED_WHY['presets-unread'], /saved environments could not be read or could not be trusted, so whether it runs over SSH is unknown/);
 });
 
 test('an incomplete started set keeps every session that could start from starting until the user names it, and every stay row still wins', () => {

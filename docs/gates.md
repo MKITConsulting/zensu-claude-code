@@ -740,7 +740,7 @@ desktop app has no shell prefix at all, so there it can come only from the `env`
 behind a capability broker. Claude Code started that server once per session, and each start
 materialized a private npm runtime of several hundred megabytes whether or not a browser was ever
 opened. The skill now drives `playwright-cli`, which the user installs once
-(`npm install -g @playwright/cli@0.1.21`, the measured version; `brew install playwright-cli` is
+(`npm install -g @playwright/cli@0.1.24`, the measured version; `brew install playwright-cli` is
 unpinned), and the controls the broker
 held moved into this gate and into the run config the browser is opened with.
 
@@ -785,7 +785,7 @@ session is prose, not a boundary.
   `-s=<session>`, `--session <session>` and a literal
   `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read; a session given twice, appended with
   `+=`, or spelled in another letter case or behind a path is refused. The arguments are parsed
-  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.21's
+  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.24's
   parser; an argument shape it does not recognize is denied rather than admitted — an option
   outside the allowlist on a `zensu-verify` call, and a plain call whose text names a
   `zensu-verify` session that the parser does not resolve as the call's session. **Accepted
@@ -827,7 +827,7 @@ run-config helper resolves each hostname once, refuses a non-public or mixed ans
 the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
 an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
 itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
-fence a WebSocket connection — measured with playwright-cli 0.1.21, an open gap. Nor does it refuse a
+fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
 line after every navigating call and stops a scenario that left the approved set. Nothing
 enforces routes: the evidence boundary is the origin, which the launch policy names or the human
@@ -956,7 +956,8 @@ through Bash.
   a policy too.
 - **`localhost` rests on a browser property no suite exercises.** Admitting it relies on the
   browser answering `localhost` itself before any HOSTS-file or DNS lookup. That was read in
-  Chromium's source and measured on one Chrome build, and no suite drives a real browser, so a
+  Chromium's source and measured on two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
+  156.0.8078.81 with 0.1.23 and 0.1.24), and no suite drives a real browser, so a
   Chromium that stopped serving `localhost` itself would let `/etc/hosts` steer it with every
   check green. `*.localhost` stays refused although the same Chromium code resolves it to
   loopback too.
@@ -1544,7 +1545,17 @@ reads the newest record, never a claim in the run log.
   whatever directory a record names, so a run that measured only the anchor reads `stale` and a
   changed path is listed as `.claude/worktrees/<name>/…`. When the worktree cannot be resolved,
   `--evidence-run` exits `2` without running the command, and the terminus reads `unavailable`
-  with the resolver's cause and keeps the chain open.
+  with the resolver's cause and keeps the chain open. With `hooks.selfReview` off, a bound
+  chain whose review stops at max rounds is closed by the post-review hook itself, and the
+  runner then treats it like a standalone chain. So the hook reads the worktree's directory
+  before it closes the chain and directs the closing run as `--evidence-run --scope scoped
+  --if-stale --cmd 'cd "<dir>" && …'`: the leading `cd` runs the suite there and makes the
+  record measure the worktree, and the scope is `scoped` because `--scope full` refuses every
+  command other than `evidence.fullSuiteCommand`. `<dir>` is that directory in the native
+  spelling `zensu-host-path.sh` renders, which the runner resolves on Git Bash too (`C:/…`, not
+  `/c/…`). When that directory cannot be resolved or rendered, or its rendered path holds a
+  quote, a dollar sign, a backtick, a backslash or a control character, the directive asks for
+  no closing run and for a reply that says so.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
   unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A

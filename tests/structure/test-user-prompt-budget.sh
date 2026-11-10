@@ -232,7 +232,7 @@ budget() {
     repeat:user-prompt-intent-router.sh:typed) echo "1 1400" ;;
     *:user-prompt-intent-router.sh:*) echo "0 0" ;;
     first:user-prompt-tdd-reminder.sh:typed) echo "4500 5870" ;;
-    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2750" ;;
+    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2850" ;;
     *:user-prompt-tdd-reminder.sh:ci) echo "300 400" ;;
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
     first:user-prompt-zen-mode.sh:*) echo "3400 3770" ;;
@@ -250,7 +250,7 @@ total_budget() {
     first:typed) echo 12720 ;;
     first:ci) echo 4560 ;;
     first:*) echo 4200 ;;
-    repeat:typed) echo 6780 ;;
+    repeat:typed) echo 6850 ;;
     repeat:ci) echo 2770 ;;
     *) echo 2410 ;;
   esac
@@ -375,12 +375,12 @@ for U10_CFG in "$CFG_ROUTE_TDD" "$CFG_ROUTE_DIRECT"; do
   case "$U10_LEN" in
     ''|*[!0-9]*) U10_BAD="$U10_BAD $(basename "$U10_CFG"):${U10_LEN:-no-verdict}"; continue ;;
   esac
-  [ "$U10_LEN" -ge 1 ] && [ "$U10_LEN" -le 1500 ] || U10_BAD="$U10_BAD $(basename "$U10_CFG"):$U10_LEN"
+  [ "$U10_LEN" -ge 1 ] && [ "$U10_LEN" -le 1575 ] || U10_BAD="$U10_BAD $(basename "$U10_CFG"):$U10_LEN"
   printf '%s' "$U10_OUT" | grep -qF 'route decided by the field below' \
     || U10_BAD="$U10_BAD $(basename "$U10_CFG"):no-decided-line"
 done
 if [ -z "$U10_BAD" ]; then
-  check "U10 a decided delivery route gets the decided line of at most 1500 characters even on the first prompt" PASS
+  check "U10 a decided delivery route gets the decided line of at most 1575 characters even on the first prompt" PASS
 else
   check "U10 a decided delivery route still costs the full reminder:$U10_BAD" FAIL
 fi

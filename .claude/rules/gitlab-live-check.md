@@ -29,9 +29,9 @@ driver with explicit `--provider gitlab` and `--repo-id`, because the SSRF guard
 `test-vcs-detect.sh`. Every verb that reaches glab is driven: `--post-review`, `--fetch-threads`,
 `--resolve-thread`, `--reconcile-review`, `--diff-refs`, `--pr-state`, `--scout-pr`, `--locate-pr`,
 `--review-markers`, `--review-summary` and `--open-pr`. The second merge request, opened through
-`--open-pr`, carries resolvable discussions only, so `--fetch-threads` meets real GitLab JSON in a
-state it can pass (`GL64`-`GL68`). Not covered: the `changesRequested` arm of `--review-summary`,
-which needs a second GitLab user.
+`--open-pr`, starts with resolvable discussions only (`GL64`-`GL68`); its approval then adds a
+system note that `--fetch-threads` has to pass over (`GL71`, `GL72`). Not covered: the
+`changesRequested` arm of `--review-summary`, which needs a second GitLab user.
 
 **Where it runs, and why not in `tests/run-all.sh`.** A GitLab container costs a 1.2-1.6 GiB pull,
 several GB of memory and minutes of boot, so it runs only where its signal pays for it:
@@ -78,22 +78,12 @@ the pull request that pins it, not on the night it ships.
 **Known bugs are strict XFAIL with a signature.** `xeq` takes the fixed result and the result the
 bug produces, as measured. The fixed result prints `XPASS` and fails the suite, so the fix must
 turn the check back into `eq` in the same change; the bug's own result prints `XFAIL`; any third
-result fails, so a regression cannot hide behind a known bug. Each bug also has a plain check
-that its trigger is present (`GL19`, `GL71`). Recorded at introduction:
-
-- `GL32`, `GL34`, `GL36`, `GL37`: `_zensu_vcs_post_review_gitlab` looks for its raw marker
-  `<!-- zensu:pr… -->` in the API JSON, where GitLab escapes both angle brackets as JSON
-  unicode escapes, so the literal marker never matches and every re-run posts the whole review
-  again, five discussions plus the summary note (`/zensu:pr-team-review` publishes this way);
-- `GL20`, `GL24`, `GL72`: the GitLab branch of `_zensu_vcs_normalize_threads` demands a boolean
-  `resolved` on every note. Plain comments and system notes (an approval, a pushed commit) carry
-  none, so `--fetch-threads` exits 1 with no output on almost every real merge request
-  (`/zensu:pilot`, `/zensu:pr-fix-findings`);
-- `GL55`, with glab 1.113.0 and 1.122.0 only: `_zensu_vcs_no_pr_message` matches
-  `no open merge request available for` case-sensitively and those releases print it
-  capitalized, so `--locate-pr` on a branch without a merge request exits 1 instead of 3 and
-  `/zensu:pilot` reports a probe error instead of "no PR yet". glab 1.128.0 prints it in lower
-  case and passes.
+result fails, so a regression cannot hide behind a known bug. A recorded bug also gets a plain
+check that its trigger is present, so the fixed check cannot pass for want of the trigger.
+`GL19` and `GL71` hold that guard for `--fetch-threads`: the merge requests carry a plain comment
+and an approval's system note, neither with a resolution state. A trigger check stays after its
+bug is fixed, so the `eq` that replaced the `xeq` cannot pass for want of the trigger either:
+`GL19` guards `GL20`, `GL71` guards `GL72`.
 
 **Pins.** `versions.v1.json` pins the image by digest and each glab build by sha256 per platform
 (`linux_amd64` for CI, `darwin_arm64` for local runs). `glab-install.sh` refuses a version or

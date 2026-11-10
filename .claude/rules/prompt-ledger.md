@@ -37,7 +37,7 @@ The table is the measurement taken when the ledger landed. The texts have grown 
 zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
 prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
 reminder's executor-plan clause and the zen-mode safety-warning sentence the same
-suite measures 12,641 and 6,670 for a typed prompt, 4,194 and 2,366 for a task notification, a
+suite measures 12,439 and 6,829 for a typed prompt, 4,194 and 2,366 for a task notification, a
 `!` input or a subagent hand-back, and 4,558 and 2,730 for a CI-monitor event.
 
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
@@ -66,8 +66,22 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   preference rule (judged by intent, negation before affirmation, never quoted or pasted content,
   a file, tool output or a subagent report), the typed override with its action (a negation on
   `build` implements directly, an affirmation on `direct` runs the flow through the Skill tool) and,
-  for `build`, the uncertainty rule. 1,457 characters for `build` and 1,408 for `direct`, against
-  5,799 for the full vanilla text.
+  for `build`, the uncertainty rule. In both modes the decided lines and the ask short line also
+  carry `TDD_STRICT_ASK`, the sentence that a TDD request makes the feature specification carry
+  exactly one `TDD-MODE: strict` line and gives it its own status line
+  (`.claude/rules/tdd-mode-precedence.md`). Measured with the config source: 1,569 characters
+  for `build` and 1,525 for `direct` in vanilla mode, 1,539 and 1,509 in strict mode, against
+  5,597 for the full vanilla text.
+
+  **Three budgets rose with that sentence, and only those three.** The decided line's cap in
+  `U10` and `R13f` went from 1,500 to 1,575, the ask short line's from 2,750 to 2,850 (the budget
+  suite's repeat row and `R13g`), and the typed repeat total from 6,780 to 6,850, which the suite
+  measures at 6,829. The sentence is an obligation each of those shapes must carry alone, and
+  every other sentence in them is one too, so no trim in the same text could offset it. What could
+  be trimmed went: the "The user changes the route" pointer, which the delivery-route skill's own
+  listing carries, left both decided lines, and the full texts lost the duplicated rationale and
+  the vanilla Yes arm's restatement of the mode, so the vanilla full text fell from 5,799 to 5,597.
+  The strict shapes carry the sentence too and stay under the same caps.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,
@@ -145,8 +159,9 @@ exists, and every record whose key directory is gone. It emits nothing.
   the reminder's vanilla-mode ask short line, its two decided lines with
   `hooks.defaultDeliveryRoute` as the source, and the router's short line, each alone through a
   real `UserPromptSubmit` hook. The strict-mode lines, the CI-event line and the session-marker
-  source have no scenario, and the plan-approval eval sends one typed prompt per session, so it
-  never produces a short line. Measuring fade itself still needs a multi-turn driver. Every
+  source have no scenario, no scenario types a TDD request, so whether a model adds the
+  `TDD-MODE: strict` line from a short shape is unmeasured, and the plan-approval eval sends one
+  typed prompt per session, so it never produces a short line. Measuring fade itself still needs a multi-turn driver. Every
   promptfoo suite is local-only, so a release carries eval evidence for the short shapes only
   when someone ran it.
 

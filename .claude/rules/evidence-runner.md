@@ -67,7 +67,21 @@ Autopilot binding whose chain is still open (`active` and not `chainDone`), so a
 chain, and every call after a bound chain's terminus, runs its command where it ran before, and
 `--chain-work-tree` then prints the anchor's top. With `hooks.selfReview` on, a bound chain stays
 open through every review and self-review round, because the bound max-rounds handoff keeps
-`chainDone` false; with it off, see the known gaps.
+`chainDone` false. With it off, the bound max-rounds arm of `post-review-tdd-delegate.sh` closes
+the chain itself, so it asks `--chain-work-tree --project-dir --session` for the work directory
+while the chain is still open and, when that directory is not the anchor's project root, directs
+the closing run as `--scope scoped` with a leading literal `cd "<dir>" &&`, which
+`commandDirectory` follows; `scoped`, because `--scope full` refuses any command other than
+`evidence.fullSuiteCommand`. `<dir>` is that directory as `zensu-host-path.sh` renders it, the
+spelling `_zensu_evr_work_tree` hands the runner for an open chain, because the native runner
+follows a `cd` only in a drive spelling (`C:/…`) and keeps the project-root fingerprint for an
+MSYS one such as `/c/…`. A lookup that fails, a directory the renderer refuses and a rendered
+path holding a quote, a dollar sign, a backtick, a backslash or a control character get a
+directive to run no closing suite and to say why: the single-quoted `--cmd` cannot carry a single
+quote, and `LEADING_CD_RE` follows a double-quoted `cd` target only without the other four, so
+the record would measure the anchor. The verb's own screen does not cover this, because it judges
+the raw path, and a symbolic link in a middle directory or an MSYS rendering changes the
+characters. That sentence lives in `MAX_CLOSE_SENTENCE`, whose default is the standalone one.
 `--tdd-complete` and the bound terminus hand the lookup the linkage they already validated
 instead of reading the document a second time. The lookup runs in a subshell, hands its answer
 back through files in the transport directory, and is the only place the linkage reaches the
@@ -320,14 +334,21 @@ documented residual of every plugin store, and no seal was added.
 `tests/structure/test-bypass-ledger.sh`. The close step moves together across
 `FULL_SUITE_STEP`, `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP` and `CLOSE_SUITE_REASON` of
 `hooks/post-review-tdd-delegate.sh` (both `CLOSE_PASS` arms, `CLOSE_PASS_SUITE_CI` and both
-max-rounds hand-offs interpolate them), the routed-round sentence of step 10 in
+max-rounds hand-offs interpolate them, the one without self-review through
+`MAX_CLOSE_SENTENCE`, whose worktree arm `MAX_CLOSE_RUN` spells the command of `FULL_SUITE_STEP`
+and `AFFECTED_SUITE_STEP` again with the scope `scoped` and the leading `cd`; `M6h` in
+`test-autopilot-post-review-max-rounds.sh` and `C23b` in `test-full-suite-ci.sh` compare each arm's
+rendered command with the shared step's), the routed-round sentence of step 10 in
 `skills/build/references/review-chain.md`, discipline patch 12 in `docs/build-workflow.md`,
 the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S17` in
 `tests/structure/test-post-review-tdd-scope.sh`, the `MR` checks in
 `evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in
 `tests/structure/test-full-suite-ci.sh`, and the `evidence-run-v1.test.js` entry in
 `tests/profiles/unit-files.v1.json`. The bound work tree moves with `_zensu_bound_work_tree`,
-`_zensu_chain_project_dir` and `--chain-work-tree --project-dir` in `zensu-log.sh`, `chainTree`
+`_zensu_chain_project_dir` and `--chain-work-tree --project-dir` in `zensu-log.sh`, the bound
+max-rounds arm of `post-review-tdd-delegate.sh` that reads it before its terminus and renders it
+through `zensu-host-path.sh` as `_zensu_evr_work_tree` does (`M6` to `M6h` in
+`test-autopilot-post-review-max-rounds.sh`, `C23b` in `test-full-suite-ci.sh`), `chainTree`
 in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in
 `skills/build/references/planning.md` and of Phase 4 in `skills/self-review/SKILL.md` (`L9b` and
 `L11` in `test-tdd-log-path-anchor.sh`, `E10g1` and `E10l` in `test-session-reanchor.sh`), E13
@@ -363,7 +384,10 @@ module does, and the transport files and their readers stay as they are. The exa
 work-tree probe is `patch` too: `workTree()` and `_zensu_unqualified_change_count` answer
 `unavailable` for output that is neither `true` nor `false`, where they answered not applicable and
 `unknown`, so the gates refuse in more states, and no record field, key set, hook, matcher or config
-key moves.
+key moves. The bound max-rounds closing run is `patch` on the same walk: the hook changes only the
+directive text it already returned as `additionalContext`, adds one read-only `--chain-work-tree`
+call before its terminus and one `zensu-host-path.sh` render after it, and no hook, matcher, key
+set, record field or config key moves.
 
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when
@@ -382,8 +406,19 @@ the lookup's reader over empty answers through a stubbed lookup, because a write
 without its bytes cannot be provoked portably. Without `node` the unjudged full-suite arm has no
 not-applicable step, so outside git an escape is ledgered and a required gate refuses where the
 module would pass. A probe answer with a trace line makes the unqualified verbs refuse with the
-sentence for a failed listing, which names `git diff --name-only HEAD` rather than the probe. With
-`hooks.selfReview` off, the bound max-rounds arm of `post-review-tdd-delegate.sh` runs the bound
-terminus inside the hook before it directs the close-suite `--evidence-run`, which then reads the
-chain as done and runs in the anchor, not the run's worktree (`E24` pins that placement after a
-terminus; it predates the shared lookup).
+sentence for a failed listing, which names `git diff --name-only HEAD` rather than the probe. After
+a bound max-rounds close without self-review, the closing run measures the worktree only through the
+leading `cd` the directive names: the runner itself treats the closed chain as standalone
+(`E24`), so a run started without that `cd` measures the anchor, and no gate reads either record,
+because no terminus follows. `M6` and `M6b` drive the local runner's sentence and `C23b` the CI
+runner's. `M6f` reaches the renderer's refusal through a project directory that is a symbolic link
+inside the worktree, and `M6g` the dollar-sign screen through a linked middle directory whose target
+holds one; both print `SKIP` where `ln -s` makes no link, as Git Bash does by default. The
+renderer's MSYS refusals (no drive spelling, no `cygpath`) are not driven, and of the screened
+characters only the single quote and the dollar sign are. On Windows the `cd` target is the drive spelling the
+open chain's runs already receive, but no Windows run has driven this arm: the suite reaches
+Windows only through the weekly Windows Safety structure shard, where `M6` expects the rendered
+spelling. The CI weight of `test-autopilot-post-review-max-rounds.sh` in
+`tests/profiles/ci-shard-weights.v1.json` was not re-derived after `M6` to `M6h` added five git
+fixtures, and neither was that of `test-full-suite-ci.sh` after `C23b` added a bound chain in a
+worktree.

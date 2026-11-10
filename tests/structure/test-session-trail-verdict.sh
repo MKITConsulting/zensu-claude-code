@@ -9023,7 +9023,7 @@ fs.writeFileSync(file, JSON.stringify({ byAccount: { [acct]: { presets: [{ id: "
   OM_GOT="$(om8_take)"
   [ "$OM_GOT" = "if-named/presets-unread" ] || OM_BAD="$OM_BAD group-write=$OM_GOT"
   OM8_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
-  printf '%s\n' "$OM8_MD" | grep -qxF -- '- why: the saved environments could not be read, so whether it runs over SSH is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
+  printf '%s\n' "$OM8_MD" | grep -qxF -- '- why: the saved environments could not be read or could not be trusted, so whether it runs over SSH is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
   chmod 644 "$OM8_PRESETS"
   printf '{"byAccount": ' > "$OM8_PRESETS"
   OM_GOT="$(om8_take)"
@@ -9137,6 +9137,107 @@ fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".jso
   [ -z "$OM_BAD" ] \
     && check "OM9 a running session whose own record is refused or does not parse, or lies in a folder that is refused or cannot be listed, keeps every linked session that could start waiting for its name as started-unread under the full host environment, the host id alone and none; a session id its record does not carry reads the record the host id names, so the session that record started stays and a refused record beside it leaves the set unknown; with no own record a refused folder anywhere in the store leaves the set unknown, while a clean store and a refused presets file, read after the started set, keep every start (controls)" PASS \
     || check "OM9 started set of the running session:$OM_BAD" FAIL
+
+  OM10_EDGES="$LS_HOME/.claude/zensu/session-lineage/v1/edges"
+  OM10_EDGE="$OM10_EDGES/1760000000001-fixture.json"
+  OM10_NEWER="$OM10_EDGES/1760000000003-fixture.json"
+  OM10_BODY="$(cat "$OM10_EDGE")"
+  OM10_UNREAD="if-named/ledger-unread"
+  om10_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om10.json" 2>/dev/null
+    ls_eval "$LS_HOME/om10.json" '[8, 13, 1].map((n) => pick(n).decision + "/" + pick(n).why).join(",") + ":" + o.linkedSessions.schemaNewer + ":" + o.linkedSessions.ledgerRefused'
+  }
+  om10_diagnose() {
+    (cd "$LS_TAKER" && lsrun "" lineage --diagnose --json --all) > "$LS_HOME/om10d.json" 2>/dev/null
+    ls_eval "$LS_HOME/om10d.json" 'o.refusedRecords + ":" + o.refusedFiles.map((r) => r.reason + "/" + r.file).join(",")'
+  }
+  OM10_NOTE='_The lineage ledger could not be read completely'
+  OM_BAD=""
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "stays/continued,start/null,start/null:false:0" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  OM10_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM10_MD" | grep -qF -- "$OM10_NOTE" && OM_BAD="$OM_BAD control-note"
+  OM_GOT="$(om10_diagnose)"
+  [ "$OM_GOT" = "0:" ] || OM_BAD="$OM_BAD control-diagnose=$OM_GOT"
+  printf '%s' "${OM10_BODY%?}" > "$OM10_EDGE"
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "$OM10_UNREAD,$OM10_UNREAD,$OM10_UNREAD:false:1" ] || OM_BAD="$OM_BAD corrupt-edge=$OM_GOT"
+  OM10_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM10_MD" | grep -qxF -- '- why: the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
+  printf '%s\n' "$OM10_MD" | grep -F -- "$OM10_NOTE (1 record(s) in " | grep -F -- ' were refused, and `/zensu:session-trail lineage --diagnose` names each one), so whether a linked session already continues elsewhere is unknown' | grep -qF -- '/session-lineage/v1/edges`' || OM_BAD="$OM_BAD brief-note"
+  OM_GOT="$(om10_diagnose)"
+  [ "$OM_GOT" = "1:corrupt/1760000000001-fixture.json" ] || OM_BAD="$OM_BAD corrupt-diagnose=$OM_GOT"
+  OM10_DT="$(cd "$LS_TAKER" && lsrun "" lineage --diagnose --all 2>/dev/null)"
+  printf '%s\n' "$OM10_DT" | grep -qF -- 'LEDGER REFUSED 1 record(s) could not be read' || OM_BAD="$OM_BAD diagnose-head"
+  printf '%s\n' "$OM10_DT" | grep -qxF -- '  corrupt  1760000000001-fixture.json' || OM_BAD="$OM_BAD diagnose-record"
+  printf '%s' "$OM10_BODY" > "$OM10_EDGE"
+  printf '%s' '{"schemaVersion":2,"from":{"sessionId":"c1c1c1c1-0000-4000-8000-000000000001"},"to":{"sessionId":"d1d1d1d1-0000-4000-8000-000000000001"},"confidence":"confirmed","inferred":false,"reason":"manual","recordedAt":"2026-10-17T10:00:00.000Z"}' > "$OM10_NEWER"
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "stays/continued,$OM10_UNREAD,$OM10_UNREAD:true:1" ] || OM_BAD="$OM_BAD newer-schema=$OM_GOT"
+  OM_GOT="$(om10_diagnose)"
+  [ "$OM_GOT" = "1:schema-newer/1760000000003-fixture.json" ] || OM_BAD="$OM_BAD newer-diagnose=$OM_GOT"
+  rm -f "$OM10_NEWER"
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "stays/continued,start/null,start/null:false:0" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM10 a linked session whose confirmed lineage edge is a record the ledger read refused, and every session that could start beside a refused record of a newer schema, waits for the user to name it as ledger-unread, the why line in the brief included, while a confirmed edge that was read keeps its session continued; the brief's ledger note and takeover --json count the refused record and lineage --diagnose names it with its reason in both forms; the intact ledger and the restored one decide as before, with no note and nothing refused (controls)" PASS \
+    || check "OM10 refused ledger records:$OM_BAD" FAIL
+
+  OM11_DIR="$LS_HOME/Library/Application Support/Claude"
+  OM11_PRESETS="$OM11_DIR/ccd-session-presets.json"
+  OM11_ASIDE="$LS_HOME/om11-presets-aside.json"
+  OM11_LINK="$LS_HOME/om11-claude-link"
+  om11_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om11.json" 2>/dev/null
+    ls_eval "$LS_HOME/om11.json" 'pick(10).decision + "/" + pick(10).why + "/" + pick(10).preset.name + ":" + o.skipped'
+  }
+  om11_store() {
+    (cd "$LS_TAKER" && env -u CLAUDE_CONFIG_DIR -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME CLAUDE_CODE_SESSION_ID="" ZENSU_CCD_STORE="$1" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" takeover "$LS_ROOT" --all --no-record --json --config-dir "$LS_HOME/.claude") > "$LS_HOME/om11.json" 2>/dev/null
+    ls_eval "$LS_HOME/om11.json" 'pick(10).decision + "/" + pick(10).why + "/" + pick(10).preset.name'
+  }
+  OM_BAD=""
+  cp "$OM11_PRESETS" "$OM11_ASIDE"
+  printf '{"byAccount":{"%s":{"presets":[{"id":"aaaaaaaa-0000-4000-8000-000000000001","name":"Env Fixture","target":{"kind":"ssh"}}]}}}' "$LS_ACCT" > "$OM11_PRESETS"
+  chmod 644 "$OM11_PRESETS"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  OM11_SKIPPED="${OM_GOT##*:}"
+  [ "${OM_GOT%:*}" = "stays/ssh/Env Fixture" ] || OM_BAD="$OM_BAD private-ssh=$OM_GOT"
+  chmod 775 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "${OM_GOT%:*}" = "stays/ssh/Env Fixture" ] || OM_BAD="$OM_BAD group-write-ssh=$OM_GOT"
+  rm -f "$OM11_PRESETS"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "if-named/presets-unread/null:$((OM11_SKIPPED + 1))" ] || OM_BAD="$OM_BAD group-write-missing=$OM_GOT"
+  chmod 1777 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "if-named/presets-unread/null:$((OM11_SKIPPED + 1))" ] || OM_BAD="$OM_BAD sticky-missing=$OM_GOT"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "start/null/null:$OM11_SKIPPED" ] || OM_BAD="$OM_BAD private-missing=$OM_GOT"
+  cp "$OM11_ASIDE" "$OM11_PRESETS"
+  chmod 644 "$OM11_PRESETS"
+  chmod 775 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "${OM_GOT%:*}" = "if-named/presets-unread/null" ] || OM_BAD="$OM_BAD group-write-local=$OM_GOT"
+  OM11_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM11_MD" | grep -qxF -- '- saved environment: it could not be named here, so it starts without it; say so in the plan' || OM_BAD="$OM_BAD brief-unnamed"
+  printf '%s\n' "$OM11_MD" | grep -qF -- '- saved environment: `Env Fixture`' && OM_BAD="$OM_BAD brief-named"
+  chmod 755 "$OM11_DIR"
+  OM11_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM11_MD" | grep -qF -- '- saved environment: `Env Fixture`; pass it as `preset`' || OM_BAD="$OM_BAD private-brief-unnamed"
+  ln -s "$OM11_DIR" "$OM11_LINK"
+  OM_GOT="$(om11_store "$OM11_LINK/claude-code-sessions")"
+  [ "$OM_GOT" = "if-named/presets-unread/null" ] || OM_BAD="$OM_BAD symlink-local=$OM_GOT"
+  OM_GOT="$(om11_store "$OM11_DIR/claude-code-sessions")"
+  [ "$OM_GOT" = "start/null/Env Fixture" ] || OM_BAD="$OM_BAD private-override-local=$OM_GOT"
+  rm -f "$OM11_LINK"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "start/null/Env Fixture:$OM11_SKIPPED" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  rm -f "$OM11_ASIDE"
+  [ -z "$OM_BAD" ] \
+    && check "OM11 a linked session started from a saved environment without sshConfig waits for the user to name it as presets-unread while the folder that holds ccd-session-presets.json grants group write, is world writable with the sticky bit or is named through a symbolic link, whether the file is missing or names the local preset, the refused folder counts once as skipped and the brief withholds the local preset's name; a preset the file names as SSH keeps its session and its name in that folder too, and the private folder, also named through ZENSU_CCD_STORE, decides and names as before (controls)" PASS \
+    || check "OM11 presets folder:$OM_BAD" FAIL
 fi
 
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
