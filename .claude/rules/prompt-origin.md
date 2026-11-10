@@ -84,7 +84,7 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 
 | Hook | Typed, slash with arguments | Task notification, subagent hand-back or cross-session message, `!` input, bare slash | CI-monitor event |
 |---|---|---|---|
-| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `build` or `direct`; on a linked session's brief, one more opening sentence | silent | route field + one standing-authorization sentence, at most about 400 characters |
+| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `build` or `direct`; on a linked session's brief, one more opening sentence; silent on a slash command that invokes `/zensu:autopilot`, `/zensu:pilot` or `/zensu:work` (`zensu_prompt_slash_name`) | silent | route field + one standing-authorization sentence, at most about 400 characters |
 | `user-prompt-intent-router.sh` | keyword screen; full notice once per context generation, then a short line | silent | silent |
 | `user-prompt-zen-mode.sh` | directive once per context generation and anchor variant, then a short body; the text behind the leading reminders can deactivate the mode | the same directive; never deactivates, except a bare slash command, which can | the same directive; never deactivates |
 | `user-prompt-best-solution-first.sh` | one-line reminder | one-line reminder | one-line reminder |

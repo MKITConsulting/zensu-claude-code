@@ -471,7 +471,7 @@ d17_carrier docs/configuration.md 'naming the four mutually exclusive delivery r
 d17_carrier docs/architecture.md 'ask which delivery route;<br/>only the /zensu:build route is drawn'
 d17_carrier README.md 'Autopilot to a reviewed pull request, the Zensu workflow with its review chain'
 d17_carrier skills/build/SKILL.md '`/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly'
-d17_carrier skills/gauntlet-loop/SKILL.md 'hands the mission to whichever is chosen' 'it offers neither'
+d17_carrier skills/gauntlet-loop/SKILL.md 'hands the mission to whichever is chosen' 'the NARROWER'
 # An empty roster must FAIL rather than report a clean sweep: deleting the
 # d17_carrier calls leaves D17_MISSING empty and would otherwise pass. Same rule
 # this repository applies to Z19b's derivation.
