@@ -69,7 +69,9 @@ for both readings.
 
 Every refusal of a command a gate cannot judge tells the main thread to use the Bash tool, or Edit
 and Write, and a subagent to report to the main thread; a judged `zensu` mutation is refused as
-in Bash, with the skill to run instead. The session banner names the commands to run through the
+in Bash, with the skill to run instead. The one exception is the CLI write-gate while
+`hooks/lib/zensu-cli-words-v1.js` or `hooks/lib/zensu-cli-backend-v1.js` cannot load: the Bash tool
+fails the same way, so that refusal tells the main thread to reinstall the plugin. The session banner names the commands to run through the
 Bash tool while the PowerShell tool may be active. While that tool may be active, the
 `shell tools:` row of `/zensu:doctor` warns when a hook fires for `Bash` but not for
 `PowerShell`; once every such hook covers `PowerShell`, it warns when the analyzer does not load.
@@ -100,7 +102,8 @@ onboarding, implementation, documentation or security-review skill the command a
 a denied `zensu features create` names `/zensu:change`, `/zensu:bootstrap` and `/zensu:ghost-scan`
 and a denied `zensu roadmap delete` names `/zensu:change` alone. Reads and
 telemetry are allowed in a session that binds, except a PowerShell call the analyzer cannot judge
-(see [Shell Tools](#shell-tools)); the gate binds before it classifies, so when the Session Control
+(see [Shell Tools](#shell-tools)) and, while the gate cannot load the module that reads a call's
+words or the one that reads its backend, the calls the paragraphs on those modules below name; the gate binds before it classifies, so when the Session Control
 binding fails it denies every call it parses, reads included. A command that records a decision the person makes — creating,
 approving, requeuing, cancelling or confirming the merge of a work order, pushing, approving,
 finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing its
@@ -118,7 +121,14 @@ without `=` takes the next word, an empty word is skipped and `--` ends the sear
 `zensu features --product p1 create` counts as a create. Where the verb is itself a command group
 (`work policy`, `work repositories` or `repos`, `plan followup`, `wiki images`), the third word
 picks the command, so `zensu wiki images upload` is a mutation and `zensu wiki images policy` a
-read. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
+read. This gate and the work-order gate read those words through one module,
+`hooks/lib/zensu-cli-words-v1.js`. When this gate cannot load it, it denies every `zensu` call
+that holds a word that could name a subcommand and that `--help`, a localhost backend or an escape
+does not already pass, reads included, because it can no longer tell a read from a mutation. A
+word counts unless it is empty, a flag, a redirection, a bare number or a path, so a call such as
+`command -v zensu`, `zensu --version` or `zensu --version >/dev/null 2>&1` still passes, while a
+flag's value, such as the `t` of `--title t`, and a redirection target written as a word of its
+own, such as the `out.log` of `> out.log`, count. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
 once as if it were empty and once as if it were a value flag that takes the next word, so
 `zensu features $FLAGS create` counts as a create too. It reads the command twice and gates every invocation either reading finds. The
 shell model of the subagent accident guard (`hooks/lib/subagent-shell-guard-v1.js`) finds an
