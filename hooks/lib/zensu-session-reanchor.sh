@@ -29,11 +29,12 @@ claude-hook-session-v1.js|Session Control binder
 review-evidence-sweep-v1.js|review-evidence sweep module
 review-evidence-lease-v1.js|review-evidence lease module
 worktree-keep-v1.js|worktree-keep module
+git-environment-v1.js|git-environment module
 bash-source-write-parse.js|source-write parser
 zensu-safe-display-v1.js|display-safety module
 claude-path-v1.js|host-path module
 ZSR_REQUIRED_MODULES
-[ "$_zsr_seen" -eq 9 ] || {
+[ "$_zsr_seen" -eq 10 ] || {
   printf '%s\n' 'zensu:adopt-session --reanchor: the required-module table could not be read in full; repair the Zensu plugin installation' >&2
   exit 1
 }

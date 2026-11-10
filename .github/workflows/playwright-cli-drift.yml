@@ -1,0 +1,108 @@
+name: playwright-cli drift
+
+on:
+  schedule:
+    - cron: '29 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playwright-cli-drift
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  drift:
+    name: playwright-cli release drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      report: ${{ steps.compare.outputs.report }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+      - name: Compare the measured version with the newest npm release
+        id: compare
+        run: |
+          set -euo pipefail
+          bash .github/scripts/playwright-cli-drift.sh > "$RUNNER_TEMP/drift.md"
+          node -e 'process.stdout.write(`report=${JSON.stringify(require("fs").readFileSync(process.argv[1], "utf8"))}\n`)' "$RUNNER_TEMP/drift.md" >> "$GITHUB_OUTPUT"
+
+  drift-issue:
+    name: Track the playwright-cli drift
+    needs: [drift]
+    if: needs.drift.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REPORT: ${{ fromJSON(needs.drift.outputs.report) }}
+        run: |
+          set -euo pipefail
+          label='playwright-cli-drift'
+          gh label create "$label" --repo "$REPO" --color FBCA04 --description 'npm lists a playwright-cli release past the measured parser port' --force
+          number="$(gh issue list --repo "$REPO" --state open --label "$label" --limit 1 --json number --jq '.[0].number // empty')"
+          if [ -z "$REPORT" ]; then
+            if [ -n "$number" ]; then
+              gh issue close "$number" --repo "$REPO" --comment 'The measured version is the newest stable playwright-cli release on npm again.'
+            fi
+            exit 0
+          fi
+          IFS= read -r marker <<< "$REPORT"
+          case "$marker" in
+            '<!-- zensu-playwright-cli-drift '*' -->') ;;
+            *) echo 'the drift report does not start with its marker line' >&2; exit 1 ;;
+          esac
+          if [ -z "$number" ]; then
+            gh issue create --repo "$REPO" --title 'Re-measure the playwright-cli parser port against a newer release' --label "$label" --body "$REPORT"
+            exit 0
+          fi
+          current="$(gh issue view "$number" --repo "$REPO" --json body --jq .body)"
+          case "$current" in
+            *"$marker"*) echo "issue $number already names this release" ;;
+            *)
+              gh issue edit "$number" --repo "$REPO" --body "$REPORT"
+              gh issue comment "$number" --repo "$REPO" --body 'npm lists a newer release now; the description names it.'
+              ;;
+          esac
+
+  notify:
+    name: Report a red scheduled run
+    needs: [drift, drift-issue]
+    if: always() && github.event_name == 'schedule' && (needs.drift.result != 'success' || needs.drift-issue.result != 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          label='playwright-cli-drift-check'
+          title='The playwright-cli drift check is red'
+          body="The scheduled playwright-cli drift check failed: $RUN_URL"
+          gh label create "$label" --repo "$REPO" --color B60205 --description 'A scheduled playwright-cli drift check is red' --force
+          number="$(gh issue list --repo "$REPO" --state open --label "$label" --limit 1 --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --label "$label" --body "$body"
+          fi

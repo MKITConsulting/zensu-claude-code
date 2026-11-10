@@ -8,7 +8,7 @@ const MIN_VERSION = '0.18.0';
 const FLOOR_REASON = "older releases cannot declare a goal's feature, so AI-work capture fails";
 const INSTALL = Object.freeze({
   homebrew: 'brew install --cask mkitconsulting/tap/zensu',
-  homebrewUpgrade: 'brew upgrade --cask zensu',
+  homebrewUpgrade: 'brew update && brew upgrade --cask mkitconsulting/tap/zensu',
   script: 'curl -fsSL https://zensu.dev/install.sh | sh',
   powershell: 'irm https://zensu.dev/install.ps1 | iex',
 });

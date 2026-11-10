@@ -61,18 +61,35 @@ grep -qF 'zensu-mcp-tools.sh' "$HOOK_BODY" && grep -qF 'zensu-cli-map.sh' "$HOOK
   && check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" PASS \
   || check "B4b reuses zensu-mcp-tools.sh + zensu-cli-map.sh" FAIL
 
-if grep -qF 'then ZPS=./powershell-command-v1.js; ZBACKEND=./zensu-cli-backend-v1.js; else ZPS=; ZBACKEND=; fi;' "$HOOK_BODY" \
+if grep -qF 'then ZPS=./powershell-command-v1.js; ZBACKEND=./zensu-cli-backend-v1.js; ZCW=./zensu-cli-words-v1.js; else ZPS=; ZBACKEND=; ZCW=; fi;' "$HOOK_BODY" \
    && [ "$(grep -o 'ZBACKEND=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
    && [ "$(grep -o 'ZPS=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
+   && [ "$(grep -o 'ZCW=' "$HOOK_BODY" | wc -l | tr -d ' ')" = 3 ] \
    && grep -qF 'require(process.env.ZBACKEND || "")' "$HOOK_BODY" \
-   && grep -qF 'require(process.env.ZPS || "")' "$HOOK_BODY"; then
+   && grep -qF 'require(process.env.ZPS || "")' "$HOOK_BODY" \
+   && grep -qF 'require(process.env.ZCW || "")' "$HOOK_BODY"; then
   check "B4c the body names its sibling modules relative to its own hooks/lib, set only after cd -P succeeds" PASS
 else
   check "B4c the body names its sibling modules relative to its own hooks/lib, set only after cd -P succeeds" FAIL
 fi
 
+WORDS_LIB="$PLUGIN_DIR/hooks/lib/zensu-cli-words-v1.js"
+WORK_ORDER_LIB="$PLUGIN_DIR/hooks/lib/work-order-v1.js"
 . "$(dirname "$0")/lib-unit-registry.sh"
 unit_check "B58 the backend reading unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-backend-v1.test.js"
+unit_check "B64a the zensu-cli word reader unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-words-v1.test.js"
+DISPATCH_LIB="$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"
+if [ -f "$WORDS_LIB" ] && [ -f "$DISPATCH_LIB" ] \
+   && grep -qF 'ZCW=./zensu-cli-words-v1.js' "$HOOK_BODY" && grep -qF 'require(process.env.ZCW || "")' "$HOOK_BODY" \
+   && ! grep -qE 'takesNextWord|const (NOUNS|ALIAS|GROUPS) ' "$HOOK_BODY" \
+   && ! grep -qE 'takesNextWord|NOUNS|ALIAS|GROUPS|zensu-cli-words' "$HOOK" \
+   && ! grep -qE 'takesNextWord|const (NOUNS|ALIAS|GROUPS) |commandWords|zensuCommandWords' "$DISPATCH_LIB" \
+   && grep -qF "require('./zensu-cli-words-v1.js')" "$WORK_ORDER_LIB" \
+   && ! grep -qE 'zensuCommandWords|WORK_VERB_ALIASES' "$WORK_ORDER_LIB"; then
+  check "B64c both gates read a zensu call's words through hooks/lib/zensu-cli-words-v1.js, each from its own hooks/lib, and neither the gate body, its wrapper nor the dispatcher keeps a copy of the search" PASS
+else
+  check "B64c the word search has one owner, hooks/lib/zensu-cli-words-v1.js, which both gates load from their own hooks/lib" FAIL
+fi
 
 # Build a PreToolUse Bash payload carrying tool_input.command.
 payload() {
@@ -283,6 +300,91 @@ run "B52 the skills' free-text form (a quoted heredoc into a temporary file, the
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 run "B52b the same free-text form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
 
+tdd_workflow_begin gate-test "upload_wiki_image" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+run "B60f wiki images upload passes in a window that declares upload_wiki_image" "zensu wiki images upload --product p1 --file shot.png" '' ALLOW
+OUT="$(payload 'zensu wiki images upload --product p1 --file shot.png' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = ALLOW ] && check "B60j PowerShell wiki images upload passes in a window that declares upload_wiki_image -> ALLOW" PASS \
+  || check "B60j PowerShell wiki images upload in a window (got '$OUT' want 'ALLOW')" FAIL
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+
+CHANGE_WINDOW="$(grep -oE -- '--workflow-begin --tools "[^"]*"' "$PLUGIN_DIR/skills/change/SKILL.md" | sed -E 's/.*"([^"]*)"/\1/')"
+UNROUTED="zensu roadmap create --product p1 --title R
+zensu roadmap update r1 --title R
+zensu roadmap delete r1
+zensu roadmap add-feature r1 --feature f1
+zensu roadmap remove-feature r1 f1
+zensu roadmap milestone-create r1 --title GA
+zensu roadmap milestone-delete r1 m1
+zensu features deprecate f1
+zensu features merge f1 --title T --slug t
+zensu subfeatures promote f1 s1
+zensu ghost approve s1 c1 --product p1
+zensu ghost reject s1 c1 --product p1
+zensu journeys step-update j1 s1 --product p1 --title T
+zensu journeys step-delete j1 s1 --product p1
+zensu mocks create f1 mock.png
+zensu products import p1 --repo-url https://github.com/o/r"
+gate_out() { payload "$1" "${2:-}" gate-test "${3:-Bash}" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null; }
+CREATE_ROUTE='Run the matching skill — /zensu:change (one requested change), /zensu:bootstrap or /zensu:ghost-scan (onboarding) — in the interactive main thread.'
+CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T')"
+if [ "$(printf '%s' "$CREATE_OUT" | classify)" = DENY ] \
+   && printf '%s' "$CREATE_OUT" | grep -qF "maps to 'create_feature'" \
+   && printf '%s' "$CREATE_OUT" | grep -qF "$CREATE_ROUTE" \
+   && printf '%s' "$CREATE_OUT" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off (honored inline)'; then
+  check "B61a a freelance features create is denied with a reason that names /zensu:change for one change and /zensu:bootstrap or /zensu:ghost-scan for onboarding, and keeps the escape sentence" PASS
+else
+  check "B61a features create deny reason (got '$(printf '%s' "$CREATE_OUT" | cut -c1-240)')" FAIL
+fi
+PS_CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T' '' PowerShell)"
+if [ "$(printf '%s' "$PS_CREATE_OUT" | classify)" = DENY ] \
+   && printf '%s' "$PS_CREATE_OUT" | grep -qF "$CREATE_ROUTE A PowerShell command has no inline gate escape." \
+   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF '(honored inline)'; then
+  check "B61b the PowerShell deny of features create names the same routes and no inline escape" PASS
+else
+  check "B61b PowerShell features create deny reason (got '$(printf '%s' "$PS_CREATE_OUT" | cut -c1-240)')" FAIL
+fi
+U_BAD=""
+while IFS= read -r u_cmd; do
+  [ -n "$u_cmd" ] || continue
+  u_out="$(gate_out "$u_cmd")"
+  { [ "$(printf '%s' "$u_out" | classify)" = DENY ] && printf '%s' "$u_out" | grep -qF 'Run the matching skill — /zensu:change (one requested change)'; } || U_BAD="$U_BAD [$u_cmd]"
+done <<EOF
+$UNROUTED
+EOF
+[ -z "$U_BAD" ] && check "B61c each of the 16 commands that no skill window declared before is denied outside a window with a reason that names /zensu:change" PASS \
+  || check "B61c previously unrouted commands without a /zensu:change deny:$U_BAD" FAIL
+tdd_workflow_begin gate-test "$CHANGE_WINDOW" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+W_BAD=""
+while IFS= read -r u_cmd; do
+  [ -n "$u_cmd" ] || continue
+  [ "$(gate_out "$u_cmd" | classify)" = ALLOW ] || W_BAD="$W_BAD [$u_cmd]"
+done <<EOF
+zensu features create --product p1 --component c1 --title T
+$UNROUTED
+zensu wiki images upload --product p1 --file shot.png
+EOF
+[ -n "$CHANGE_WINDOW" ] && [ -z "$W_BAD" ] \
+  && check "B61d features create, the 16 commands and wiki images upload pass inside the window that skills/change/SKILL.md declares" PASS \
+  || check "B61d commands denied inside the /zensu:change window:$W_BAD" FAIL
+SUB_IN_WINDOW="$(gate_out 'zensu roadmap delete r1' general-purpose)"
+if [ "$(printf '%s' "$SUB_IN_WINDOW" | classify)" = DENY ] \
+   && printf '%s' "$SUB_IN_WINDOW" | grep -qF 'reserved for the interactive main thread' \
+   && printf '%s' "$SUB_IN_WINDOW" | grep -qF 'which runs it through the matching skill — /zensu:change (one requested change).' \
+   && ! printf '%s' "$SUB_IN_WINDOW" | grep -qF 'ZENSU_MCP_GATE'; then
+  check "B61e a subagent's mutation stays denied while the main thread holds the /zensu:change window, and its reason names the route and no escape" PASS
+else
+  check "B61e subagent inside the /zensu:change window (got '$(printf '%s' "$SUB_IN_WINDOW" | cut -c1-200)')" FAIL
+fi
+HUMAN_IN_WINDOW="$(gate_out 'zensu plan approve p1')"
+if [ "$(printf '%s' "$HUMAN_IN_WINDOW" | classify)" = DENY ] \
+   && printf '%s' "$HUMAN_IN_WINDOW" | grep -qF 'It records a decision that the person makes, so the person runs it' \
+   && ! printf '%s' "$HUMAN_IN_WINDOW" | grep -qF '/zensu:'; then
+  check "B61f a person's decision stays denied inside the /zensu:change window with the unchanged person-only reason" PASS
+else
+  check "B61f person-only decision inside the /zensu:change window (got '$(printf '%s' "$HUMAN_IN_WINDOW" | cut -c1-200)')" FAIL
+fi
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+
 # B9 env escape; B10 default-on; B11 explicit false
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "ALLOW" ] && check "B9 mutation + ZENSU_MCP_GATE=off -> ALLOW" PASS || check "B9 env escape (got '$OUT')" FAIL
@@ -294,12 +396,12 @@ OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROO
 # B19 deny-reason content (state-mutating wording + skill routing + mapped tool name; not "currently enabled")
 REASON_OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$REASON_OUT" | grep -qiF 'state-mutating' \
-   && printf '%s' "$REASON_OUT" | grep -qF 'zensu:bootstrap' \
-   && printf '%s' "$REASON_OUT" | grep -qF '/zensu:implement' \
-   && printf '%s' "$REASON_OUT" | grep -qF '/zensu:security-review' \
+   && printf '%s' "$REASON_OUT" | grep -qF 'Run the matching skill — /zensu:security-review (classification/review), /zensu:change (one requested change) — in the interactive main thread.' \
+   && ! printf '%s' "$REASON_OUT" | grep -qF '/zensu:bootstrap' \
+   && ! printf '%s' "$REASON_OUT" | grep -qF '/zensu:implement' \
    && printf '%s' "$REASON_OUT" | grep -qF 'set_security_classification' \
    && ! printf '%s' "$REASON_OUT" | grep -qiF 'currently enabled'; then
-  check "B19 deny reason: state-mutating wording + skill routing + mapped tool" PASS
+  check "B19 deny reason: state-mutating wording + the routes of the blocked tool and no other skill + mapped tool" PASS
 else
   check "B19 deny reason content" FAIL
 fi
@@ -308,7 +410,7 @@ if printf '%s' "$SUB_REASON_OUT" | grep -qF '"permissionDecision":"deny"' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'set_security_classification' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'reserved for the interactive main thread' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'Report the operation you need to the main thread' \
-   && printf '%s' "$SUB_REASON_OUT" | grep -qF '/zensu:security-review' \
+   && printf '%s' "$SUB_REASON_OUT" | grep -qF 'which runs it through the matching skill — /zensu:security-review (classification/review), /zensu:change (one requested change).' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'ZENSU_MCP_GATE' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'prefix the command with' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'in the interactive main thread. For a deliberate one-off'; then
@@ -673,7 +775,7 @@ parser_lines() {
   node -e '
     const fs = require("fs");
     const { spawnSync } = require("child_process");
-    const [hook, binder, guard, preload, backend] = process.argv.slice(1);
+    const [hook, binder, guard, preload, backend, words] = process.argv.slice(1);
     const source = fs.readFileSync(hook, "utf8");
     const begin = source.indexOf("INVOCATIONS=");
     const open = begin < 0 ? -1 : source.indexOf("node -e \x27", begin);
@@ -685,11 +787,11 @@ parser_lines() {
       encoding: "utf8",
       timeout: 15000,
       maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, ZAPI: "", ZGUARD: guard, ZBIND: binder, ZBACKEND: backend },
+      env: { ...process.env, ZAPI: "", ZGUARD: guard, ZBIND: binder, ZBACKEND: backend, ZCW: words },
     });
     if (run.error || run.status !== 0) { process.stdout.write("NO-ANSWER " + (run.error ? run.error.code : run.status)); process.exit(0); }
     process.stdout.write(run.stdout);
-  ' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}" "${2:-}" "$PLUGIN_DIR/hooks/lib/zensu-cli-backend-v1.js"
+  ' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}" "${2:-}" "$PLUGIN_DIR/hooks/lib/zensu-cli-backend-v1.js" "${3:-$WORDS_LIB}"
 }
 TAB="$(printf '\t')"
 LINES_ONE="$(printf '%s' 'zensu features get f1' | parser_lines)"
@@ -708,6 +810,40 @@ if [ "$LINES_TOKEN" = "features${TAB}get${TAB}f1" ] && [ "$LINES_PREFIX" = "feat
   check "B51 the token scan trims quotes in linear time: a 600000-quote command word, assignment value and --api-url value each finish within 15 s" PASS
 else
   check "B51 linear quote trim (word='$LINES_TOKEN' prefix='$LINES_PREFIX' url='$LINES_URL')" FAIL
+fi
+VERB_WORDS="$PROJECT/verb-alias-words.js"
+printf 'const real = require(%s);\nmodule.exports = { ...real, commandVerb: (noun, verb) => (noun === "work" && verb === "pol" ? "policy" : real.commandVerb(noun, verb)) };\n' "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$WORDS_LIB")" > "$VERB_WORDS"
+LINES_POL="$(printf '%s' 'zensu work pol set p1' | parser_lines "" "" "$VERB_WORDS")"
+LINES_POL_REAL="$(printf '%s' 'zensu work pol set p1' | parser_lines)"
+LINES_REPOS="$(printf '%s' 'zensu work repos add r1' | parser_lines)"
+if [ "$LINES_POL" = "work${TAB}policy${TAB}set" ] && [ "$LINES_POL_REAL" = "work${TAB}pol${TAB}set" ] && [ "$LINES_REPOS" = "work${TAB}repositories${TAB}add" ]; then
+  check "B64j the gate hands the map a verb through the module's commandVerb, so a verb alias needs only VERB_ALIASES" PASS
+else
+  check "B64j verb alias normalization (planted='$LINES_POL' real='$LINES_POL_REAL' repos='$LINES_REPOS')" FAIL
+fi
+PARTIAL_GOT=""
+for missing in commandWords commandNoun commandVerb isGroup; do
+  PARTIAL_WORDS="$PROJECT/partial-words-$missing.js"
+  printf 'const real = { ...require(%s) };\ndelete real.%s;\nmodule.exports = real;\n' "$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$WORDS_LIB")" "$missing" > "$PARTIAL_WORDS"
+  LINES_PARTIAL="$(printf '%s' 'zensu work policy set p1' | parser_lines "" "" "$PARTIAL_WORDS")"
+  [ "$LINES_PARTIAL" = "__unreadable__${TAB}the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded" ] || PARTIAL_GOT="$PARTIAL_GOT $missing='$LINES_PARTIAL'"
+done
+if [ -z "$PARTIAL_GOT" ]; then
+  check "B64k a word reader without commandWords, commandNoun, commandVerb or isGroup counts as not loaded, so its call is unreadable" PASS
+else
+  check "B64k partial word reader ($PARTIAL_GOT)" FAIL
+fi
+NO_WORDS="$PROJECT/no-words-module.js"
+NOUN_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write([...m.NOUNS, ...Object.keys(m.NOUN_ALIASES)].join(" "))' "$WORDS_LIB")"
+NOUN_GOT=""
+for noun in $NOUN_LIST; do
+  LINES_NOUN="$(printf 'zensu %s x' "$noun" | parser_lines "" "" "$NO_WORDS")"
+  [ "$LINES_NOUN" = "__unreadable__${TAB}the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded" ] || NOUN_GOT="$NOUN_GOT $noun='$LINES_NOUN'"
+done
+if [ -n "$NOUN_LIST" ] && [ -z "$NOUN_GOT" ]; then
+  check "B64m without the word reader a call that names any noun or alias of the module is unreadable, so the gate denies at least what it denies with the module" PASS
+else
+  check "B64m reader-less noun coverage (nouns='$NOUN_LIST'$NOUN_GOT)" FAIL
 fi
 WIN32_PRELOAD="$PROJECT/win32-platform.js"
 printf '%s\n' 'Object.defineProperty(process, "platform", { value: "win32" });' > "$WIN32_PRELOAD"
@@ -845,8 +981,11 @@ security|analyze||analyze_feature_security|read
 security|threat-model||generate_threat_model|read
 doc|claude-md||generate_claude_md|read
 meta|scaffold-agent|||none
+wiki|images|upload|upload_wiki_image|mutation
+wiki|images|policy|get_wiki_image_policy|read
+wiki|images|||none
 MAP
-[ "$MAP_FAIL" -eq 0 ] && check "B41 every v0.10.0 mocks, design, journeys-step, work and plan verb maps to its tool and class, with the third word for work policy, work repositories|repos and plan followup" PASS \
+[ "$MAP_FAIL" -eq 0 ] && check "B41 every v0.10.0 mocks, design, journeys-step, work and plan verb and the wiki images verbs map to their tool and class, with the third word for work policy, work repositories|repos, plan followup and wiki images" PASS \
   || check "B41 map and class coverage ($MAP_FAIL)" FAIL
 
 unset ZENSU_SESSION_TOKEN
@@ -860,6 +999,11 @@ run "B42g plan followup accept (third word)"       "zensu plan followup accept p
 run "B42h plan push creates features and revisions" "zensu plan push plan.md"                                '' DENY
 run "B42i work create dispatches a work order"     "zensu work create --product p --feature f"               '' DENY
 run "B42j reads, reclassified reads and the unmapped stub" "zensu mocks list f1 && zensu mocks get f1 m1 --raw && zensu design context p1 && zensu work list && zensu work get o1 && zensu work events o1 && zensu work questions && zensu work policy get --product p && zensu work repositories list --product p && zensu work repos list --product p && zensu plan status p1 --watch && zensu plan list && zensu plan followups p1 && zensu security analyze f1 && zensu security threat-model f1 && zensu doc claude-md --product p && zensu meta scaffold-agent" '' ALLOW
+run "B60a wiki images upload is a mutation the gate denies outside a window" "zensu wiki images upload --product p1 --file shot.png" '' DENY
+run "B60b wiki images policy is a read"                       "zensu wiki images policy --product p1"                        '' ALLOW
+run "B60c the wiki-pages alias reaches wiki images upload"     "zensu wiki-pages images upload --product p1 --file shot.png"  '' DENY
+run "B60d a bare wiki images group only prints its help"       "zensu wiki images"                                            '' ALLOW
+run "B60e a value flag between the group and its leaf"         "zensu wiki images --product p1 upload --file shot.png"        '' DENY
 
 HUMAN_MAIN="$(payload 'zensu plan approve p1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$HUMAN_MAIN" | grep -qF '"permissionDecision":"deny"' \
@@ -1170,6 +1314,98 @@ fi
 rm -rf "$PS_BASE"
 psrun "B41d PowerShell group subcommand built at run time"   "zensu work policy \$sub"                                     '' DENY
 psrun "B41e PowerShell read whose argument is built at run time" "zensu features get \$id"                                    '' ALLOW
+psrun "B60g PowerShell wiki images upload outside a window"  "zensu wiki images upload --product p1 --file shot.png"      '' DENY
+psrun "B60h PowerShell wiki images policy is a read"         "zensu wiki images policy --product p1"                      '' ALLOW
+psrun "B60i PowerShell wiki images subcommand built at run time" "zensu wiki images \$sub --product p1"                   '' DENY
+
+WR_BASE="$(mktemp -d -t bashgate-wordreader-XXXXXX)"
+WR_ROOT="$WR_BASE/plugin"
+mkdir -p "$WR_ROOT" "$WR_BASE/project"
+for part in hooks agents skills docs templates scripts .claude-plugin; do
+  [ -e "$PLUGIN_DIR/$part" ] && cp -R "$PLUGIN_DIR/$part" "$WR_ROOT/$part"
+done
+rm -f "$WR_ROOT/hooks/lib/zensu-cli-words-v1.js"
+WR_OUT="$(
+  export CLAUDE_PROJECT_DIR="$WR_BASE/project"
+  ZENSU_TEST_PLUGIN_DATA="$WR_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" word-reader-gate "$WR_ROOT" || exit 1
+  printf 'BOUND\n'
+  for spec in '|Bash|zensu security classify f1' '|Bash|zensu features get f1' '|Bash|zensu features create --help' \
+    '|Bash|echo zensu features create' '|Bash|zensu --api-url http://localhost:8090 security classify f1' \
+    'general-purpose|Bash|zensu features get f1' '|PowerShell|zensu features get f1' \
+    '|Bash|ZENSU_MCP_GATE=off zensu security classify f1' "|PowerShell|iex 'zensu features get f1'" \
+    '|Bash|command -v zensu' '|Bash|zensu' '|Bash|zensu --version' \
+    '|Bash|zensu --version 2>/dev/null' '|Bash|zensu --version >/dev/null 2>&1' '|Bash|zensu --version 2>&1' \
+    "|Bash|zensu '' --json" '|Bash|command -v zensu >/dev/null 2>&1' '|Bash|zensu 2>/dev/null features get f1' \
+    '|PowerShell|zensu $x'; do
+    wr_agent="${spec%%|*}"; wr_rest="${spec#*|}"
+    payload "${wr_rest#*|}" "$wr_agent" word-reader-gate "${wr_rest%%|*}" | env CLAUDE_PLUGIN_ROOT="$WR_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$WR_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
+    printf '\n<<%s>>\n' "$spec"
+  done
+)"
+WR_LINE() { printf '%s\n' "$WR_OUT" | sed -n "${1}p"; }
+WR_MUTATION="$(WR_LINE 2)"; WR_READ="$(WR_LINE 4)"; WR_HELP="$(WR_LINE 6)"; WR_ECHO="$(WR_LINE 8)"
+WR_LOCAL="$(WR_LINE 10)"; WR_CHILD="$(WR_LINE 12)"; WR_PS="$(WR_LINE 14)"; WR_ESCAPE="$(WR_LINE 16)"; WR_IEX="$(WR_LINE 18)"
+WR_PROBE="$(WR_LINE 20)"; WR_BARE="$(WR_LINE 22)"; WR_VERSION="$(WR_LINE 24)"
+WR_QUIET="$(WR_LINE 26)"; WR_SILENT="$(WR_LINE 28)"; WR_MERGED="$(WR_LINE 30)"; WR_EMPTY="$(WR_LINE 32)"; WR_QUIET_PROBE="$(WR_LINE 34)"
+WR_QUIET_READ="$(WR_LINE 36)"; WR_PS_OPAQUE="$(WR_LINE 38)"
+if [ "$(WR_LINE 1)" = "BOUND" ] && [ ! -e "$WR_ROOT/hooks/lib/zensu-cli-words-v1.js" ] \
+   && printf '%s' "$WR_MUTATION" | grep -qF '"permissionDecision":"deny"' \
+   && printf '%s' "$WR_MUTATION" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && printf '%s' "$WR_MUTATION" | grep -qF 'reinstall the plugin' \
+   && ! printf '%s' "$WR_MUTATION" | grep -qF 'maps to'; then
+  check "B64d without the word reader a zensu mutation is denied with a reason that names the module and the reinstall" PASS
+else
+  check "B64d reader-less mutation (bound='$(WR_LINE 1)' got '$(printf '%s' "$WR_MUTATION" | cut -c1-200)')" FAIL
+fi
+if printf '%s' "$WR_READ" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && printf '%s' "$WR_QUIET_READ" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded'; then
+  check "B64e without the word reader a read is denied too, also behind a redirection, because the gate cannot tell it from a mutation" PASS
+else
+  check "B64e reader-less read (got '$(printf '%s' "$WR_READ" | cut -c1-200)' redirected='$(printf '%s' "$WR_QUIET_READ" | cut -c1-200)')" FAIL
+fi
+[ "$(WR_LINE 1)" = "BOUND" ] && [ -z "$WR_HELP" ] && [ -z "$WR_ECHO" ] && [ -z "$WR_LOCAL" ] && [ -z "$WR_ESCAPE" ] \
+  && [ -z "$WR_PROBE" ] && [ -z "$WR_BARE" ] && [ -z "$WR_VERSION" ] \
+  && [ -z "$WR_QUIET" ] && [ -z "$WR_SILENT" ] && [ -z "$WR_MERGED" ] && [ -z "$WR_EMPTY" ] && [ -z "$WR_QUIET_PROBE" ] \
+  && check "B64f without the word reader --help, a command that runs no zensu call, a call with no word that can name a subcommand (command -v zensu, a bare zensu, zensu --version, the same probes with their output redirected, an empty word), a localhost backend and the main thread's inline escape still pass" PASS \
+  || check "B64f reader-less passes (help='$WR_HELP' echo='$WR_ECHO' localhost='$WR_LOCAL' escape='$WR_ESCAPE' probe='$WR_PROBE' bare='$WR_BARE' version='$WR_VERSION' quiet='$WR_QUIET' silent='$WR_SILENT' merged='$WR_MERGED' empty='$WR_EMPTY' quiet-probe='$WR_QUIET_PROBE')" FAIL
+if printf '%s' "$WR_CHILD" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && printf '%s' "$WR_CHILD" | grep -qF 'Report the operation you need to the main thread' \
+   && ! printf '%s' "$WR_CHILD" | grep -qF 'reinstall'; then
+  check "B64g a subagent's reader-less deny reports the operation to the main thread" PASS
+else
+  check "B64g reader-less subagent deny (got '$(printf '%s' "$WR_CHILD" | cut -c1-200)')" FAIL
+fi
+if printf '%s' "$WR_PS" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && ! printf '%s' "$WR_PS" | grep -qF 'Run the zensu call through the Bash tool'; then
+  check "B64h without the word reader a PowerShell zensu call is denied with the reader reason, not the Bash-tool advice" PASS
+else
+  check "B64h reader-less PowerShell call (got '$(printf '%s' "$WR_PS" | cut -c1-200)')" FAIL
+fi
+if printf '%s' "$WR_IEX" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && ! printf '%s' "$WR_IEX" | grep -qF 'Run the zensu call through the Bash tool'; then
+  check "B64l without the word reader a PowerShell call the analyzer cannot read gets the reader reason too, not the Bash-tool advice" PASS
+else
+  check "B64l reader-less unjudged PowerShell call (got '$(printf '%s' "$WR_IEX" | cut -c1-200)')" FAIL
+fi
+if printf '%s' "$WR_PS_OPAQUE" | grep -qF '"permissionDecision":"deny"' \
+   && printf '%s' "$WR_PS_OPAQUE" | grep -qF 'the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded' \
+   && ! printf '%s' "$WR_PS_OPAQUE" | grep -qF 'Run the zensu call through the Bash tool'; then
+  check "B64n without the word reader a PowerShell zensu call whose only word the analyzer cannot read is denied with the reader reason" PASS
+else
+  check "B64n reader-less PowerShell run-time word (got '$(printf '%s' "$WR_PS_OPAQUE" | cut -c1-200)')" FAIL
+fi
+rm -rf "$WR_BASE"
+
+WR_PLANT="$(mktemp -d -t bashgate-plant-XXXXXX)"
+printf '%s\n' 'module.exports = { commandWords: () => [], commandNoun: () => "", commandVerb: (n, v) => v, isGroup: () => false };' > "$WR_PLANT/zensu-cli-words-v1.js"
+mkdir -p "$WR_PLANT/hooks/lib" && cp "$WR_PLANT/zensu-cli-words-v1.js" "$WR_PLANT/hooks/lib/zensu-cli-words-v1.js"
+WR_PLANTED="$(cd "$WR_PLANT" && payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$WR_PLANTED" | grep -qF "maps to 'set_security_classification'"; then
+  check "B64i a zensu-cli-words-v1.js in the working directory is never loaded" PASS
+else
+  check "B64i planted word reader (got '$(printf '%s' "$WR_PLANTED" | cut -c1-200)')" FAIL
+fi
+rm -rf "$WR_PLANT"
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
 rm -rf "$PROJECT"

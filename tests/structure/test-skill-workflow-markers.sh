@@ -5,6 +5,8 @@ set -u
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh" 2>/dev/null || true
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh" 2>/dev/null || true
 source "${CLAUDE_PLUGIN_ROOT}/tests/structure/lib-skill-text.sh" 2>/dev/null || true
+CLI_NOUN_ALIASES="$(node -e 'process.stdout.write(Object.entries(require(process.argv[1]).NOUN_ALIASES).map((pair) => pair.join("=")).join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-words-v1.js" 2>/dev/null)"
+CLI_VERB_ALIASES="$(node -e 'process.stdout.write(Object.entries(require(process.argv[1]).VERB_ALIASES).flatMap(([noun, aliases]) => Object.entries(aliases).map(([alias, verb]) => noun + ":" + alias + "=" + verb)).join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-words-v1.js" 2>/dev/null)"
 
 # Flags a skill that calls a Zensu mutation outside the --workflow-begin/-end
 # markers. Detects two forms: a `zensu <noun> <verb>` CLI invocation that maps to
@@ -19,15 +21,16 @@ skill_cli_mutations() {
 }
 
 skill_cli_tools() {
-  local f="$1" line rest noun verb third
+  local f="$1" line rest noun verb third pair
   for line in $(grep -oE 'zensu +[a-z][a-z-]+ +[a-z][a-z-]+( +[a-z][a-z-]+)?' "$f" | sed -E 's/ +/=/g'); do
     rest="${line#zensu=}"; noun="${rest%%=*}"; rest="${rest#*=}"; verb="${rest%%=*}"; third=""
     case "$rest" in *=*) third="${rest#*=}" ;; esac
-    case "$noun" in                                                # normalize CLI noun aliases (mirror the gate's ALIAS map)
-      product) noun=products ;; feature) noun=features ;; subfeature) noun=subfeatures ;;
-      roadmaps) noun=roadmap ;; tier) noun=tiers ;; sec) noun=security ;;
-      journey) noun=journeys ;; mock) noun=mocks ;; docs) noun=doc ;; kb) noun=knowledge ;; wiki-pages) noun=wiki ;;
-    esac
+    for pair in $CLI_NOUN_ALIASES; do
+      if [ "${pair%%=*}" = "$noun" ]; then noun="${pair#*=}"; break; fi
+    done
+    for pair in $CLI_VERB_ALIASES; do
+      if [ "${pair%%=*}" = "$noun:$verb" ]; then verb="${pair#*=}"; break; fi
+    done
     zensu_cli_to_tool "$noun" "$verb" "$third"
   done
 }
@@ -71,6 +74,25 @@ if zensu_is_zensu_tool "mcpGate" 2>/dev/null || zensu_is_mutation_tool "hooks" 2
   check "T-nontool non-tool token not classified as tool/mutation" FAIL
 else
   check "T-nontool non-tool token not classified as tool/mutation" PASS
+fi
+
+case " $CLI_NOUN_ALIASES " in
+  *" sec=security "*) check "T-alias the CLI noun aliases come from hooks/lib/zensu-cli-words-v1.js" PASS ;;
+  *) check "T-alias the CLI noun aliases could not be read from hooks/lib/zensu-cli-words-v1.js (got '$CLI_NOUN_ALIASES')" FAIL ;;
+esac
+case " $CLI_VERB_ALIASES " in
+  *" work:repos=repositories "*) check "T-verbalias the CLI verb aliases come from hooks/lib/zensu-cli-words-v1.js" PASS ;;
+  *) check "T-verbalias the CLI verb aliases could not be read from hooks/lib/zensu-cli-words-v1.js (got '$CLI_VERB_ALIASES')" FAIL ;;
+esac
+VA_FX="$(mktemp -t skillverb-XXXXXX)"
+printf 'Run `zensu work pol set p1` here.\n' > "$VA_FX"
+VA_PLANTED="$(CLI_VERB_ALIASES="work:pol=policy" skill_cli_tools "$VA_FX")"
+VA_BARE="$(CLI_VERB_ALIASES="" skill_cli_tools "$VA_FX")"
+rm -f "$VA_FX"
+if [ "$VA_PLANTED" = "set_automation_policy" ] && [ -z "$VA_BARE" ]; then
+  check "T-verbalias-apply a verb alias in the module's table reaches the map in its canonical spelling" PASS
+else
+  check "T-verbalias-apply verb alias normalization (planted='$VA_PLANTED' bare='$VA_BARE')" FAIL
 fi
 
 FXD="$(mktemp -d -t skillmark-XXXXXX)"
@@ -256,6 +278,87 @@ for v in $(printf '%s\n' $WO_PLAN_VERBS $MAP_PLAN_VERBS | sort -u); do
   [ "$human" = "$listed" ] || { H_FAIL=$((H_FAIL+1)); echo "      zensu plan $v: records a person's decision=$human, in HUMAN_PLAN_VERBS=$listed"; }
 done
 [ "$H_FAIL" -eq 0 ] && check "C6 the work-order gate's HUMAN_PLAN_VERBS are exactly the plan verbs that record a person's decision" PASS || check "C6 HUMAN_PLAN_VERBS drift from the human-decision plan tools ($H_FAIL)" FAIL
+
+window_rows() {
+  local d f t
+  for d in "$1"/skills/*/; do
+    [ -f "${d}SKILL.md" ] || continue
+    f="$(skill_text_file "${d%/}" 2>/dev/null)" || continue
+    for t in $(grep -oE -- '--workflow-begin --tools "[^"]*"' "$f" | sed -E 's/.*"([^"]*)"/\1/' | tr ',\n' '  '); do
+      printf '%s %s\n' "$(basename "$d")" "$t"
+    done
+    rm -f "$f"
+  done
+}
+
+agent_tools() {
+  local t
+  for t in $(grep -oE 'echo "[a-z_]+"' "$1" | sed -E 's/echo "([a-z_]+)"/\1/' | LC_ALL=C sort -u); do
+    zensu_is_mutation_tool "$t" || continue
+    zensu_is_human_decision_tool "$t" && continue
+    zensu_is_work_order_tool "$t" && continue
+    zensu_tool_in_list "$t" "$ZENSU_AI_WORK_CAPTURE_TOOL_NAMES" && continue
+    printf '%s\n' "$t"
+  done
+}
+
+undeclared_tools() {
+  local t
+  for t in $2; do
+    printf '%s\n' "$1" | grep -q " $t\$" || printf '%s\n' "$t"
+  done
+}
+
+route_drift() {
+  local t routes skill entry known=" $(printf '%s ' $2)"
+  for t in $2; do
+    routes="$(zensu_tool_routes "$t")" || { printf 'no-route %s\n' "$t"; continue; }
+    for skill in ${routes//,/ }; do
+      printf '%s\n' "$1" | grep -qxF "$skill $t" || printf 'undeclared-route %s %s\n' "$t" "$skill"
+    done
+  done
+  for entry in $ZENSU_TOOL_ROUTES; do
+    case "$known" in
+      (*" ${entry%%=*} "*) ;;
+      (*) printf 'stale-route %s\n' "${entry%%=*}" ;;
+    esac
+  done
+  for t in $(printf '%s\n' $ZENSU_TOOL_ROUTES | sed 's/=.*//' | LC_ALL=C sort | uniq -d); do
+    printf 'duplicate-route %s\n' "$t"
+  done
+}
+
+WINDOW_ROWS="$(window_rows "$CLAUDE_PLUGIN_ROOT")"
+AGENT_TOOLS="$(agent_tools "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh")"
+AGENT_N="$(printf '%s\n' "$AGENT_TOOLS" | grep -c .)"
+C7_OUT="$(undeclared_tools "$WINDOW_ROWS" "$AGENT_TOOLS")"
+if [ "$AGENT_N" -gt 0 ] && [ -n "$WINDOW_ROWS" ] && [ -z "$C7_OUT" ]; then
+  check "C7 every agent-runnable mutation the CLI map emits ($AGENT_N tools, without person-only decisions, work-order verbs and AI-work capture) is declared by at least one skill window" PASS
+else
+  printf '%s\n' "$C7_OUT" | sed 's/^/      no skill window declares /'
+  check "C7 agent-runnable mutations without a skill window" FAIL
+fi
+C8_OUT="$(route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+if [ "$AGENT_N" -gt 0 ] && [ -z "$C8_OUT" ]; then
+  check "C8 zensu_tool_routes names at least one skill for every agent-runnable mutation, every skill it names declares that tool, and ZENSU_TOOL_ROUTES holds no stale or duplicate entry" PASS
+else
+  printf '%s\n' "$C8_OUT" | sed 's/^/      /'
+  check "C8 the route table drifts from the skill windows" FAIL
+fi
+C7_BITE="$(undeclared_tools "$(printf '%s\n' "$WINDOW_ROWS" | grep -vxF 'change create_roadmap')" "$AGENT_TOOLS")"
+[ "$C7_BITE" = create_roadmap ] \
+  && check "C7b dropping create_roadmap from the /zensu:change window makes C7 name it" PASS \
+  || check "C7b C7 did not name the dropped window tool (got '$C7_BITE')" FAIL
+C8_BITE_MISSING="$(ZENSU_TOOL_ROUTES="${ZENSU_TOOL_ROUTES/create_roadmap=change /}"; route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+C8_BITE_WRONG="$(ZENSU_TOOL_ROUTES="${ZENSU_TOOL_ROUTES/create_roadmap=change /create_roadmap=change,bootstrap }"; route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+C8_BITE_STALE="$(ZENSU_TOOL_ROUTES="$ZENSU_TOOL_ROUTES retired_tool=change create_mock=change"; route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+if [ "$C8_BITE_MISSING" = "no-route create_roadmap" ] \
+  && [ "$C8_BITE_WRONG" = "undeclared-route create_roadmap bootstrap" ] \
+  && [ "$C8_BITE_STALE" = "$(printf '%s\n' 'stale-route retired_tool' 'duplicate-route create_mock')" ]; then
+  check "C8b a dropped route entry, a route to a skill whose window lacks the tool, a stale entry and a duplicate entry each make C8 name it" PASS
+else
+  check "C8b C8 bites (missing '$C8_BITE_MISSING' wrong '$C8_BITE_WRONG' stale '$C8_BITE_STALE')" FAIL
+fi
 
 if command -v node >/dev/null 2>&1; then
   check "AP0 node is available for the argument-placeholder lint" PASS
@@ -566,7 +669,7 @@ else
 fi
 
 FT_MISSING=""
-for ft_skill in docs implement bootstrap ghost-scan security-review autopilot; do
+for ft_skill in docs implement bootstrap ghost-scan security-review autopilot change; do
   ft_md="$CLAUDE_PLUGIN_ROOT/skills/$ft_skill/SKILL.md"
   grep -qF "<<'ZENSU_TEXT_END'" "$ft_md" && grep -qxF 'ZENSU_TEXT_END' <(sed 's/^ *//' "$ft_md") \
     && grep -qF '"$(cat "$f")"' "$ft_md" && grep -qF "trap 'rm -f \"\$f\"" "$ft_md" \
