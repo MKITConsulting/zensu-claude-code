@@ -1544,7 +1544,17 @@ reads the newest record, never a claim in the run log.
   whatever directory a record names, so a run that measured only the anchor reads `stale` and a
   changed path is listed as `.claude/worktrees/<name>/…`. When the worktree cannot be resolved,
   `--evidence-run` exits `2` without running the command, and the terminus reads `unavailable`
-  with the resolver's cause and keeps the chain open.
+  with the resolver's cause and keeps the chain open. With `hooks.selfReview` off, a bound
+  chain whose review stops at max rounds is closed by the post-review hook itself, and the
+  runner then treats it like a standalone chain. So the hook reads the worktree's directory
+  before it closes the chain and directs the closing run as `--evidence-run --scope scoped
+  --if-stale --cmd 'cd "<dir>" && …'`: the leading `cd` runs the suite there and makes the
+  record measure the worktree, and the scope is `scoped` because `--scope full` refuses every
+  command other than `evidence.fullSuiteCommand`. `<dir>` is that directory in the native
+  spelling `zensu-host-path.sh` renders, which the runner resolves on Git Bash too (`C:/…`, not
+  `/c/…`). When that directory cannot be resolved or rendered, or its rendered path holds a
+  quote, a dollar sign, a backtick, a backslash or a control character, the directive asks for
+  no closing run and for a reply that says so.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
   unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A

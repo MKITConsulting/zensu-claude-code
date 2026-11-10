@@ -723,17 +723,46 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. FIRST, ${CLOSE_SUITE_STEP}, because fix rounds re-run only their own scoped suites. THEN your next action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry this exact generation line into it: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_CARRY_PHRASE} Carry the remaining reviewer findings forward under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the ticket-bound chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
     [ "$REPRODUCTION_ON" = "1" ] && CONV_MSG="${CONV_MSG} A CRITICAL finding from a re-review is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED."
   else
+    MAX_CLOSE_SENTENCE="Before you reply, ${CLOSE_SUITE_STEP}. Fix rounds re-run only their own scoped suites and no terminus gate follows here, so ${CLOSE_SUITE_REASON}."
     if [ "$AUTOPILOT_BOUND" = "true" ]; then
+      MAX_CLOSE_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-work-tree --project-dir --session "$SESSION_ID" 2>/dev/null)" || MAX_CLOSE_DIR=""
+      MAX_CLOSE_CANON=""
+      [ -n "$MAX_CLOSE_DIR" ] && MAX_CLOSE_CANON="$(cd "$MAX_CLOSE_DIR" 2>/dev/null && pwd -P)"
+      MAX_ANCHOR_CANON=""
+      [ -n "$PROJECT_ROOT" ] && MAX_ANCHOR_CANON="$(cd "$PROJECT_ROOT" 2>/dev/null && pwd -P)"
       bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --session "$SESSION_ID" \
         --autopilot-run "$AUTOPILOT_RUN" --autopilot-attempt "$AUTOPILOT_ATTEMPT" \
         --chain-id "$AUTOPILOT_CHAIN" --claimed-review-ticket "$REVIEW_TICKET" \
         --outcome max-rounds >/dev/null 2>&1 || exit 0
+      MAX_CLOSE_SKIP=""
+      if [ -z "$MAX_CLOSE_CANON" ] || [ -z "$MAX_ANCHOR_CANON" ]; then
+        MAX_CLOSE_SKIP="this chain's work tree could not be resolved before this hook closed the chain"
+      elif [ "$MAX_CLOSE_CANON" != "$MAX_ANCHOR_CANON" ]; then
+        MAX_CLOSE_NATIVE="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$MAX_CLOSE_DIR" 2>/dev/null)" || MAX_CLOSE_NATIVE=""
+        case "$MAX_CLOSE_NATIVE" in
+          "")
+            MAX_CLOSE_SKIP="the path of this chain's work tree could not be rendered in the native spelling the evidence runner reads"
+            ;;
+          *"'"*|*'"'*|*'$'*|*'`'*|*'\'*|*[[:cntrl:]]*)
+            MAX_CLOSE_SKIP="the path of this chain's work tree holds a quote, a dollar sign, a backtick, a backslash or a control character, which the runner command cannot carry"
+            ;;
+          *)
+            if [ "$FULL_SUITE_RUNNER" = "ci" ]; then
+              MAX_CLOSE_RUN="re-run the affected-suite command of Phase 6 step 1 in this chain's work tree through the evidence runner: ${LOG_COMMAND} --evidence-run --scope scoped --if-stale --cmd 'cd \"${MAX_CLOSE_NATIVE}\" && <the Phase 6 affected-suite command>' --log <run log>"
+            else
+              MAX_CLOSE_RUN="run the FULL test suite in this chain's work tree through the evidence runner: ${LOG_COMMAND} --evidence-run --scope scoped --if-stale --cmd 'cd \"${MAX_CLOSE_NATIVE}\" && <full test command>' --log <run log>, with evidence.fullSuiteCommand as the full test command when it is configured (the scope is scoped because --scope full refuses every command other than that one)"
+            fi
+            MAX_CLOSE_SENTENCE="Before you reply, ${MAX_CLOSE_RUN}. Keep the leading cd: this hook has already closed the chain, so the evidence runner no longer follows its work tree by itself, and the cd runs the suite in that directory and makes its record fingerprint that work tree beside the project. Fix rounds re-run only their own scoped suites and no terminus gate follows here, so ${CLOSE_SUITE_REASON}."
+            ;;
+        esac
+      fi
+      [ -z "$MAX_CLOSE_SKIP" ] || MAX_CLOSE_SENTENCE="Do NOT run a closing suite: ${MAX_CLOSE_SKIP}, and the evidence runner now treats the closed chain as a standalone one, so a run would measure the anchor instead of the tree that ships. Say in your reply that no closing suite ran, and why."
     else
       tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || exit 0
     fi
     MAX_ROUNDS_VERDICTS=""
     [ -n "$COMBINED_SUMMARY_DIRECTIVE" ] && MAX_ROUNDS_VERDICTS=" No FULL SUITE or ACCEPTANCE line reaches you for this max-rounds close, so in the summary below write 🟡 not checked (max-rounds) as the Full suite verdict and 🟡 not-checked (max-rounds) as the Acceptance verdict."
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Before you reply, ${CLOSE_SUITE_STEP}. Fix rounds re-run only their own scoped suites and no terminus gate follows here, so ${CLOSE_SUITE_REASON}. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${MAX_ROUNDS_VERDICTS}${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. ${MAX_CLOSE_SENTENCE} Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${MAX_ROUNDS_VERDICTS}${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
   fi
   printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0

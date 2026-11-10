@@ -77,7 +77,10 @@ through the helper's repo and session verbs.
 **Coupled sites that move together:** `skills/build/SKILL.md` Phase 0 step 2 and the section
 "Full Suite in CI (mode-gated deltas)" in `skills/build/references/modes.md`; the CI fix-round
 paragraph and the legend in `skills/self-review/SKILL.md`; `CLOSE_PASS_SUITE_CI`,
-`AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP`, `FULL_SUITE_ROUND_NOTE` and the `deferred-ci` legend
+`AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP`, `FULL_SUITE_ROUND_NOTE`, the CI arm of
+`MAX_CLOSE_RUN` (the bound max-rounds closing run, `M6e` in
+`test-autopilot-post-review-max-rounds.sh` and `C23b` in `test-full-suite-ci.sh`, which compares
+its command with the rendered `AFFECTED_SUITE_STEP`) and the `deferred-ci` legend
 entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.sh` counts
 `--evidence-run --scope full --if-stale` exactly once, in `FULL_SUITE_STEP`, and
 `test-full-suite-ci.sh` C10, C22 and C23 refuse it in a CI chain's directives, so the CI variant
