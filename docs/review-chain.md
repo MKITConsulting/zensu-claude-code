@@ -466,7 +466,7 @@ Four artifact skeletons ship as plugin defaults under `templates/` and resolve w
 | Template | Consumer | Mandatory sections |
 |----------|----------|--------------------|
 | `zensu-plan.md` | `/zensu:build` Phase 2 | `## Requirements` (ID/Covers), `## Preconditions`, `## Cross-Layer Value Flow Pairings`, Status Legend, Steps table with Status+Covers, `## Final Verification` |
-| `autopilot-spec.md` | `/zensu:autopilot` Phase 0.C | numbered stable `AC-###` criteria, out-of-scope section, resolved recipe |
+| `autopilot-spec.md` | `/zensu:autopilot` Phase 0.C | a `## Requirements` table of stable `AC-###` criteria, which the VALIDATE stage reads from the approved plan, out-of-scope section, resolved recipe |
 | `autopilot-pr-body.md` | `/zensu:autopilot` step 3 | per-AC checklist table (deprecated rows kept) whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix, `Gates bypassed during build:` audit line |
 | `pr-body.md` | `/zensu:pilot` "Commit + open PR" (shared default for any PR opener) | `## Acceptance criteria` table filled from the feature's `## Requirements` rows, with a stub-row fallback, whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix |
 

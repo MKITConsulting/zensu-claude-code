@@ -222,7 +222,7 @@ const actionText = Object.freeze({
   RECONCILE_PR: 'Reconcile the pull-request operation key before creating or updating a PR.',
   RECONCILE_TEAM_REVIEW: 'Reconcile the team-review operation key before publishing review output.',
   FIX_REVIEW_FINDINGS: 'Inspect unresolved review threads and route required fixes through the bound build chain.',
-  VALIDATE_FEATURE: 'Validate the running feature against every acceptance criterion.',
+  VALIDATE_FEATURE: 'Record every acceptance criterion observed on the pull-request head, then run zensu-log.sh --autopilot-validate --run with the run id; never send VALIDATION_PASSED yourself.',
   RUN_COVERAGE: 'Run the configured coverage phase and persist its evidence.',
   DELIVER_PR: 'Verify delivery invariants and report the ready pull request without merging or deploying.',
   AWAIT_RESUME: 'Remain blocked until an explicit, audited resume or cancel event is applied.',

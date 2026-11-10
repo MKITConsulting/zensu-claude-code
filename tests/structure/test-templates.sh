@@ -5,7 +5,7 @@ set -u
 # plugin defaults under templates/ exist and carry their mandatory sections
 # (zensu-plan: Requirements with ID/Covers, Preconditions, Cross-Layer heading,
 # Status Legend, Steps header with Status+Covers, per-step Covers line, Final
-# Verification; autopilot-spec: numbered stable AC-### criteria + out-of-scope
+# Verification; autopilot-spec: a Requirements table of stable AC-### criteria + out-of-scope
 # + resolved recipe; autopilot-pr-body: per-AC table with deprecated note +
 # the Gates-bypassed audit line); the resolution contract (override path
 # .zensu/templates/<name>.md before the plugin default) is pinned in BOTH
@@ -69,10 +69,13 @@ plan_pin "P1j zensu-plan per-step Covers line" '- **Covers**: {AC-###'
 plan_pin_x "P1k zensu-plan ## Final Verification heading" '## Final Verification'
 
 # P2 — autopilot templates
-if grep -qF -- '- AC-001: {machine-checkable criterion}' "$TPL_SPEC" && grep -qiF 'never recycled' "$TPL_SPEC"; then
-  check "P2a spec template seeds stable AC-### criteria" PASS
+if grep -qxF '## Requirements' "$TPL_SPEC" && grep -qxF '| ID | Requirement | Source |' "$TPL_SPEC" \
+  && grep -qxF '| AC-001 | {machine-checkable criterion} | spec |' "$TPL_SPEC" \
+  && grep -qiF 'never recycled' "$TPL_SPEC" && ! grep -qF -- '- AC-001:' "$TPL_SPEC" \
+  && [ "$(bash "$PLUGIN_DIR/hooks/lib/zensu-plan-requirements.sh" --list --plan "$TPL_SPEC" 2>/dev/null | grep -c '^AC-[0-9]*	placeholder	')" = "2" ]; then
+  check "P2a spec template seeds stable AC-### criteria as a ## Requirements table the row parser reads" PASS
 else
-  check "P2a spec template seeds stable AC-### criteria" FAIL
+  check "P2a spec template seeds stable AC-### criteria as a ## Requirements table the row parser reads" FAIL
 fi
 if grep -qxF '## Who it is NOT for / Out of scope' "$TPL_SPEC" && grep -qiF 'Resolved recipe' "$TPL_SPEC"; then
   check "P2b spec template carries out-of-scope + recipe sections" PASS

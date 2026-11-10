@@ -178,8 +178,8 @@ State-changing effects use these pairs: `PR_OPEN_REQUESTED` → `PR_OPENED`, the
 `TEAM_REVIEW_REQUESTED` → `TEAM_REVIEW_PUBLISHED`. The request event is written before the
 remote call, and retries reconcile the recorded operation before repeating it. Phase 1
 must also record `GATES_PASSED`/`GATES_FAILED`, `CONVERGENCE_PASSED`/
-`CONVERGENCE_FAILED`, `FIX_REQUIRED`/`FINDINGS_CLEARED`, `VALIDATION_PASSED`/
-`VALIDATION_FAILED`, optional `COVERAGE_PASSED`/`COVERAGE_FAILED`, and finally
+`CONVERGENCE_FAILED`, `FIX_REQUIRED`/`FINDINGS_CLEARED`, `VALIDATION_FAILED` (`--autopilot-validate`
+applies the pass), optional `COVERAGE_PASSED`/`COVERAGE_FAILED`, and finally
 `DELIVERY_COMPLETE`. Delivery requires the PR head, gates, cleared findings, validation, and
 optional coverage to name the same final head. The review need only be the durable once-only
 publication for this PR generation; it is not rewritten to pretend that it reviewed later
@@ -294,7 +294,7 @@ the detected app type — see `rules/drivers.md`.
 exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plugin root):
 1. A short **spec** — what it does, who it's for, who it's NOT for, success, out-of-scope.
    Read the relevant domain docs first if the feature touches an existing area.
-2. **Acceptance criteria** — a NUMBERED list with **stable `AC-###` IDs** (AC-001, AC-002, …),
+2. **Acceptance criteria** — the `## Requirements` table, one row per criterion with **stable `AC-###` IDs** (AC-001, AC-002, …),
    each one machine-checkable: verifiable by a test, a gate assertion, or a concrete
    observation through the validation driver. No vague ACs. **ID allocation is stable and
    never recycled**: IDs are assigned monotonically; a dropped criterion keeps its ID and is
@@ -307,11 +307,12 @@ exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plu
 3. **Every open question batched** — defaults, edge cases, scope cuts, data shape — asked
    in this phase. This is the only chance.
 
-**0.D — Confirm.** Present spec + numbered ACs + the resolved recipe (the boot / auth /
+**0.D — Confirm.** Present spec + the AC table + the resolved recipe (the boot / auth /
 gates / validate commands the probe chose, so the user sees exactly what will run) via
 **ExitPlanMode**, and wait for approval. If the probe wrote or would write
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
-without the user's explicit OK**. **Remove every pre-existing `<!-- zensu-autopilot:... -->` COMMENT from the plan CONTENT you are about to pass to
+without the user's explicit OK**. A plan without an active `AC-###` row is refused as
+`PLAN_CRITERIA_UNUSABLE`. **Remove every pre-existing `<!-- zensu-autopilot:... -->` COMMENT from the plan CONTENT you are about to pass to
 `ExitPlanMode` — leaving the rest of each line intact — before appending this run's
 marker.** Strip the comment, never the whole line: the gate's matcher is unanchored, so a
 marker can share a line with real requirement text that must survive. The plan content is
@@ -390,7 +391,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    `Gates bypassed during build: <list|none|UNREADABLE — …>`
    from the bypass ledger: after EVERY `/zensu:build` chain of this run (the initial one and
    each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
-   and union the non-`none` entries. **Check its exit status, not just its output.** On a
+   and union the non-`none` entries with the run's `bypasses[].gate` (`rules/validate.md` §4).
+   **Check its exit status, not just its output.** On a
    non-zero exit the verb did not read a ledger: exit 3 prints an `UNREADABLE — …` line on
    stdout, and any other non-zero exit leaves stdout empty with the diagnosis on stderr.
    That sentence is NOT an entry to union — it is prose, and unioning it would splice it
@@ -416,18 +418,13 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    advances the durable PR head, and resolves the addressed threads. Repeat only while its
    authoritative paginated re-fetch still reports unresolved threads. Persist
    `FINDINGS_CLEARED` only after that count is zero.
-6. **Validate ↔ fix LOOP** — only now exercise the running feature:
-   a. Run the resolved validation **driver** (see `rules/drivers.md`), authenticating via
-      the credential-blind login script if one is configured (see `rules/auth.md`). Assert
-      **every non-deprecated AC by its `AC-###` ID** and capture evidence per AC under that
-      ID (ACs marked deprecated are exempt — their rows stay in the table per the
-      never-recycle rule).
-   b. Every non-deprecated AC passes + gates green → persist `VALIDATION_PASSED` and
-      **exit the loop**.
-   c. Anything off → persist `VALIDATION_FAILED`, fix it through `/zensu:build` (vanilla,
-      scoped to the failing AC(s), carrying `AUTOPILOT-RUN: <RUN_ID>`),
-      re-run the step-2 gates, push to update the PR, then go back to (a).
-   d. Repeat (a)–(c) until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.
+6. **Validate ↔ fix LOOP** — only now exercise the running feature, per `rules/validate.md`:
+   a. On the clean PR head, drive **every non-deprecated AC by its `AC-###` ID** and record
+      each with `--acceptance-record --run "$RUN_ID"`.
+   b. `--autopilot-validate --run "$RUN_ID"` applies `VALIDATION_PASSED`; exit 0 **exits the loop**.
+   c. On a `fix:` refusal persist `VALIDATION_FAILED`, fix it through `/zensu:build` (vanilla,
+      scoped, carrying `AUTOPILOT-RUN: <RUN_ID>`), re-run the step-2 gates, push, back to (a).
+   d. Repeat until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.
 6b. **Persist coverage — opt-in `--cover`** — with `--cover`, after the loop exits green,
    invoke `/zensu:cover --from-acs` to emit the now-passing ACs as **durable committed
    tests** (one test per active `AC-###` ID, keyed by the ID; deprecated ACs are skipped),
@@ -500,6 +497,7 @@ worst case               → still a reviewed, tested PR — minus the live proo
   cross-cutting augments, on-demand drivers, and the `custom` escape hatch.
 - `rules/config.md` — `.zensu/autopilot.yaml` schema, a concrete worked instance, and the
   login-script prerequisite a project supplies.
+- `rules/validate.md` — step 6: acceptance records and `--autopilot-validate`.
 - `rules/work-order.md` — work-order mode: branch, plan file, spec binding, push and PR helpers.
 - `rules/conventions.md` — the repository's commit style, language, attribution and PR body order.
 

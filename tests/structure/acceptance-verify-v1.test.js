@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,6 +13,7 @@ const RECEIPT_LIB = path.join(__dirname, '..', '..', 'hooks', 'lib', 'edit-landi
 const av = require(LIB);
 const receipts = require(RECEIPT_LIB);
 const evr = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-run-v1.js'));
+const planPayload = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'plan-payload-v1.js'));
 
 const SESSION = `scv1_${'a'.repeat(64)}`;
 const OTHER_SESSION = `scv1_${'b'.repeat(64)}`;
@@ -692,4 +694,299 @@ test('the CLI hands the work-tree fault to the record and the status', () => {
   const status = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
   assert.equal(status.status, 2, status.stdout + status.stderr);
   assert.equal(status.stdout, `ACCEPTANCE STATUS — unavailable | ${cause}\n`);
+});
+
+const RUN_ID = 'validate_run_01';
+const ORDER_ID = '7f3c2b1a-4d5e-4f60-8a7b-9c0d1e2f3a4b';
+
+function sha256(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function runFixture(options = {}) {
+  const fixture = project({ receipt: false, git: options.git });
+  const bytes = Buffer.from(`${planText(options.rows || [
+    ['AC-001', 'The dashboard lists every project'],
+    ['AC-002', 'The export button downloads a CSV'],
+  ])}\n<!-- zensu-autopilot:${RUN_ID} -->\n`, 'utf8');
+  const sha = sha256(bytes);
+  if (options.store !== false) {
+    const stored = planPayload.storeApprovedPlan(fixture.root, sha, bytes);
+    assert.equal(stored.ok, true, stored.reason);
+  }
+  const head = options.git === false ? null : sh(fixture.root, 'git rev-parse HEAD').trim();
+  const run = {
+    runId: RUN_ID,
+    stage: 'VALIDATE',
+    approvedPlanSha256: sha,
+    options: { cover: false, validate: true },
+    evidence: { pr: head ? { number: 7, url: 'https://github.com/acme/repo/pull/7', headSha: head } : null },
+  };
+  return { ...fixture, bytes, sha, head, run };
+}
+
+function runBase(fixture, overrides = {}) {
+  return {
+    pluginData: fixture.data,
+    sessionKey: SESSION,
+    projectRoot: fixture.root,
+    runId: RUN_ID,
+    run: fixture.run,
+    bashPath: 'bash',
+    ...overrides,
+  };
+}
+
+function runAttest(fixture, ac, verdict = 'pass', overrides = {}) {
+  return av.record(runBase(fixture, { ac, verdict, driver: 'browser', evidenceText: `Opened the page for ${ac}; the snapshot shows it`, ...overrides }));
+}
+
+function runGate(fixture, overrides = {}) {
+  return av.verdict(runBase(fixture, { gateMode: 'required', ...overrides }));
+}
+
+function withPrHead(run, headSha) {
+  return { ...run, evidence: { pr: headSha === null ? null : { number: 7, url: 'https://github.com/acme/repo/pull/7', headSha } } };
+}
+
+test('run mode reads the criteria from the approved plan the run stored and binds its records to that copy', () => {
+  const fixture = runFixture();
+  const copy = `.zensu/state/autopilot-approved-plan-${fixture.sha}.md`;
+  const recorded = runAttest(fixture, 'AC-001');
+  assert.equal(recorded.code, 0, recorded.error);
+  assert.equal(recorded.record.stem, `autopilot-approved-plan-${fixture.sha}`);
+  assert.equal(recorded.record.plan, copy);
+  assert.equal(av.validateRecord(recorded.record), null);
+  assert.equal(av.validateRecord({ ...recorded.record, plan: `.zensu/plans/autopilot-approved-plan-${fixture.sha}.md` }), 'malformed plan');
+  assert.equal(av.validateRecord({ ...recorded.record, stem: 'autopilot-approved-plan-abc', plan: '.zensu/state/autopilot-approved-plan-abc.md' }), 'malformed plan');
+  assert.equal(av.runChain(runBase(fixture)).planRel, copy);
+  assert.match(runAttest(fixture, 'AC-009').error, /AC-009 is not an acceptance criterion of \.zensu\/state\/autopilot-approved-plan-[0-9a-f]{64}\.md \(active: AC-001, AC-002\)/);
+  const both = runAttest(fixture, 'AC-001', 'pass', { logPath: fixture.logPath });
+  assert.equal(both.code, 2);
+  assert.match(both.error, /--log and --run/);
+});
+
+test('run mode refuses a run without a usable approved plan and names the cause and the user-owned escape', () => {
+  const missing = runFixture({ store: false });
+  const absent = runAttest(missing, 'AC-001');
+  assert.equal(absent.code, 1);
+  assert.match(absent.error, /no stored copy of the plan it approved/);
+  assert.match(absent.error, /ZENSU_ACCEPTANCE_GATE=off/);
+  const refused = runGate(missing);
+  assert.equal(refused.state, 'unresolved');
+  assert.equal(refused.passes, false);
+  assert.match(refused.lines[0], /^ACCEPTANCE — unresolved \| .*no stored copy of the plan it approved.* \| gate: required$/);
+  const tampered = runFixture();
+  fs.appendFileSync(path.join(tampered.root, '.zensu', 'state', `autopilot-approved-plan-${tampered.sha}.md`), '| AC-003 | Added after the approval | spec |\n');
+  assert.match(runAttest(tampered, 'AC-001').error, /no longer matches the digest the run approved/);
+  assert.equal(runGate(tampered).state, 'unresolved');
+  const fixture = runFixture();
+  assert.match(runAttest(fixture, 'AC-001', 'pass', { run: { ...fixture.run, options: { cover: false, validate: false } } }).error, /--no-validate/);
+  assert.match(runAttest(fixture, 'AC-001', 'pass', { run: { ...fixture.run, runId: 'other_run_01' } }).error, /names run other_run_01/);
+  assert.match(runAttest(fixture, 'AC-001', 'pass', { run: null }).error, /did not reach the acceptance check/);
+  assert.match(runAttest(fixture, 'AC-001', 'pass', { run: { ...fixture.run, approvedPlanSha256: null } }).error, /records no approved plan/);
+});
+
+test('the run-mode verdict passes only at the pull-request head on a clean tree with every criterion passing', () => {
+  const fixture = runFixture();
+  assert.equal(runGate(fixture).state, 'incomplete');
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  let result = runGate(fixture);
+  assert.equal(result.state, 'pass', result.lines.join('\n'));
+  assert.equal(result.passes, true);
+  assert.match(result.lines[0], new RegExp(`^ACCEPTANCE — pass \\| autopilot run ${RUN_ID}: 2/2 acceptance criteria pass on the pull-request head ${fixture.head.slice(0, 12)} \\(observed 0, attested 2\\) \\| plan: \\.zensu/state/autopilot-approved-plan-${fixture.sha}\\.md \\| gate: required$`));
+  assert.equal(runGate(fixture, { run: withPrHead(fixture.run, fixture.head.slice(0, 12)) }).state, 'pass');
+  fs.writeFileSync(path.join(fixture.root, 'scratch.txt'), 'untracked\n');
+  result = runGate(fixture);
+  assert.equal(result.state, 'unresolved');
+  assert.match(result.lines[0], /the work tree has uncommitted changes/);
+  fs.rmSync(path.join(fixture.root, 'scratch.txt'));
+  sh(fixture.root, 'git commit -q --allow-empty -m later');
+  result = runGate(fixture);
+  assert.equal(result.state, 'unresolved');
+  assert.match(result.lines[0], new RegExp(`HEAD of the work tree is [0-9a-f]{12}, not the pull-request head ${fixture.head.slice(0, 12)}`));
+  sh(fixture.root, `git checkout -q ${fixture.head}`);
+  assert.equal(runGate(fixture).state, 'pass');
+  assert.match(runGate(fixture, { run: withPrHead(fixture.run, 'f'.repeat(40)) }).lines[0], /is not a commit in the work tree/);
+  assert.match(runGate(fixture, { run: withPrHead(fixture.run, null) }).lines[0], /records no pull-request head/);
+});
+
+test('--accept-partial passes only when every criterion that does not pass is partial', () => {
+  const fixture = runFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002', 'partial').code, 0);
+  let result = runGate(fixture);
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /AC-002 partial/);
+  assert.match(result.lines[0], new RegExp(`\\| run: drive each criterion that does not pass again on this tree and record it with zensu-log\\.sh --acceptance-record --run ${RUN_ID}`));
+  assert.match(result.lines[0], new RegExp(`\\| accept: .*zensu-log\\.sh --autopilot-validate --run ${RUN_ID} --accept-partial`));
+  assert.doesNotMatch(result.lines[0], /verify-feature/);
+  result = runGate(fixture, { acceptPartial: true });
+  assert.equal(result.state, 'partial-accepted');
+  assert.equal(result.passes, true);
+  assert.match(result.lines[0], new RegExp(`^ACCEPTANCE — partial-accepted \\| autopilot run ${RUN_ID}: 1/2 acceptance criteria pass on the pull-request head [0-9a-f]{12}; accepted as partial: AC-002 \\| plan: `));
+  assert.ok(av.PASSING_STATES.includes('partial-accepted'));
+  assert.equal(runAttest(fixture, 'AC-002', 'fail').code, 0);
+  result = runGate(fixture, { acceptPartial: true });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /--accept-partial covers only partial criteria/);
+  assert.match(result.lines[0], /\| fix: .*VALIDATION_FAILED/);
+  assert.doesNotMatch(result.lines[0], /\| accept:/);
+  const fresh = runFixture();
+  assert.equal(runAttest(fresh, 'AC-001', 'partial').code, 0);
+  assert.equal(runGate(fresh, { acceptPartial: true }).state, 'incomplete');
+});
+
+test('a run outside git is unresolved in run mode, never a tree-unverified pass', () => {
+  const fixture = runFixture({ git: false });
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  const result = runGate(fixture, { run: withPrHead(fixture.run, 'a'.repeat(40)) });
+  assert.equal(result.state, 'unresolved');
+  assert.equal(result.passes, false);
+  assert.doesNotMatch(result.lines.join('\n'), /pass-tree-unverified/);
+});
+
+test('the escape and the advisory gate keep their meaning in run mode', () => {
+  const fixture = runFixture({ store: false });
+  const escaped = runGate(fixture, { escape: true });
+  assert.equal(escaped.state, 'escaped');
+  assert.equal(escaped.passes, true);
+  assert.equal(escaped.lines[0], `ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record of autopilot run ${RUN_ID} was read | gate: required`);
+  const advisory = runGate(fixture, { gateMode: 'advisory' });
+  assert.equal(advisory.state, 'unresolved');
+  assert.equal(advisory.passes, true);
+  assert.match(advisory.lines[0], /^ACCEPTANCE — unresolved \(advisory, not blocking\) \|/);
+});
+
+test('a plan without an active criterion is a no-criteria refusal in run mode with its own remedy', () => {
+  const fixture = runFixture({ rows: [['FR-001', 'Projects are sorted by name']] });
+  const result = runGate(fixture);
+  assert.equal(result.state, 'no-criteria');
+  assert.match(result.lines[0], /\| add: the approved plan carries no active AC-### criterion, so only the user can leave ZENSU_ACCEPTANCE_GATE=off for this run$/);
+});
+
+test('a work-order run reads .zensu/plans/<order>.md and checks its digest only when a person approved the plan', () => {
+  const fixture = runFixture({ store: false });
+  const planPath = path.join(fixture.root, '.zensu', 'plans', `${ORDER_ID}.md`);
+  const planBytes = Buffer.from(planText([['AC-001', 'The order works']]), 'utf8');
+  fs.writeFileSync(planPath, planBytes);
+  const specHash = 'c'.repeat(64);
+  const unapproved = { ...fixture.run, approvedPlanSha256: specHash, workOrder: { orderId: ORDER_ID, attempt: 1, specHash } };
+  const first = runAttest(fixture, 'AC-001', 'pass', { run: unapproved });
+  assert.equal(first.code, 0, first.error);
+  assert.equal(first.record.plan, `.zensu/plans/${ORDER_ID}.md`);
+  assert.equal(first.record.stem, ORDER_ID);
+  assert.match(first.disclosures.join('\n'), new RegExp(`^ACCEPTANCE PLAN UNAPPROVED — work order ${ORDER_ID} asks for no plan approval`));
+  const unapprovedGate = runGate(fixture, { run: unapproved });
+  assert.equal(unapprovedGate.state, 'pass', unapprovedGate.lines.join('\n'));
+  assert.match(unapprovedGate.lines.join('\n'), /ACCEPTANCE PLAN UNAPPROVED/);
+  const approved = { ...unapproved, approvedPlanSha256: sha256(planBytes) };
+  const second = runAttest(fixture, 'AC-001', 'pass', { run: approved });
+  assert.equal(second.code, 0, second.error);
+  assert.deepEqual(second.disclosures, []);
+  assert.equal(runGate(fixture, { run: approved }).state, 'pass');
+  fs.appendFileSync(planPath, '| AC-002 | Added after the approval | spec |\n');
+  assert.match(runAttest(fixture, 'AC-001', 'pass', { run: approved }).error, /no longer matches the plan a person approved/);
+  assert.equal(runGate(fixture, { run: approved }).state, 'unresolved');
+  fs.rmSync(planPath);
+  assert.match(runAttest(fixture, 'AC-001', 'pass', { run: unapproved }).error, /does not exist/);
+});
+
+test('a run whose work tree is a nested worktree binds its records to the combined tree, and an edit there makes them stale', () => {
+  const fixture = runFixture();
+  const tree = boundWorktree(fixture);
+  const run = withPrHead(fixture.run, sh(tree, 'git rev-parse HEAD').trim());
+  const scratch = tempDir('scratch');
+  const recorded = runAttest(fixture, 'AC-001', 'pass', { run, workTree: tree });
+  assert.equal(recorded.code, 0, recorded.error);
+  assert.equal(recorded.record.tree, evr.computeFingerprint(fixture.root, tree, scratch).tree);
+  assert.equal(runAttest(fixture, 'AC-002', 'pass', { run, workTree: tree }).code, 0);
+  assert.equal(runGate(fixture, { run, workTree: tree }).state, 'pass');
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  assert.match(av.status(runBase(fixture, { run, workTree: tree })).lines.join('\n'), /AC-001 stale \(files changed since it was verified: \.claude\/worktrees\/wt\/a\.txt\)/);
+  const blocked = runGate(fixture, { run, workTree: tree });
+  assert.equal(blocked.state, 'unresolved');
+  assert.match(blocked.lines[0], /the work tree has uncommitted changes/);
+});
+
+function subdirectoryRunFixture() {
+  const top = tempDir('top');
+  sh(top, 'git init -q && git config user.email t@example.invalid && git config user.name tester && git config commit.gpgsign false');
+  fs.writeFileSync(path.join(top, '.gitignore'), '/.zensu/\n');
+  fs.mkdirSync(path.join(top, 'app', '.zensu', 'state'), { recursive: true });
+  fs.mkdirSync(path.join(top, 'shared'));
+  fs.writeFileSync(path.join(top, 'app', 'a.txt'), 'one\n');
+  fs.writeFileSync(path.join(top, 'shared', 'lib.txt'), 'shared\n');
+  sh(top, 'git add .gitignore app/a.txt shared/lib.txt && git commit -q -m init');
+  const root = path.join(top, 'app');
+  const bytes = Buffer.from(`${planText([['AC-001', 'The dashboard lists every project']])}\n<!-- zensu-autopilot:${RUN_ID} -->\n`, 'utf8');
+  const sha = sha256(bytes);
+  const stored = planPayload.storeApprovedPlan(root, sha, bytes);
+  assert.equal(stored.ok, true, stored.reason);
+  const head = sh(top, 'git rev-parse HEAD').trim();
+  const run = {
+    runId: RUN_ID,
+    stage: 'VALIDATE',
+    approvedPlanSha256: sha,
+    options: { cover: false, validate: true },
+    evidence: { pr: { number: 7, url: 'https://github.com/acme/repo/pull/7', headSha: head } },
+  };
+  return { top, root, data: tempDir('data'), sha, head, run };
+}
+
+test('a run whose project root lies below the repository top binds the whole repository and leaves the project state out', () => {
+  const fixture = subdirectoryRunFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  let result = runGate(fixture);
+  assert.equal(result.state, 'pass', result.lines.join('\n'));
+  fs.writeFileSync(path.join(fixture.top, 'shared', 'lib.txt'), 'edited outside the project root\n');
+  const status = av.status(runBase(fixture));
+  assert.equal(status.code, 1, status.lines.join('\n'));
+  assert.match(status.lines.join('\n'), /^AC-001 stale \(files changed since it was verified: \.\.\/shared\/lib\.txt\) \| browser attested \| /m);
+  result = runGate(fixture);
+  assert.equal(result.state, 'unresolved');
+  assert.match(result.lines[0], /the work tree has uncommitted changes/);
+  sh(fixture.top, 'git checkout -q -- shared/lib.txt');
+  assert.equal(runGate(fixture).state, 'pass');
+});
+
+test('the escaped-receipt path never takes its plan from a run-mode record', () => {
+  const fixture = runFixture();
+  assert.equal(attest(fixture, 'AC-001', 'pass', { editLandingEscaped: true }).code, 0);
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  const result = gate(fixture, { editLandingEscaped: true });
+  assert.equal(result.state, 'incomplete', result.lines.join('\n'));
+  assert.match(result.lines.join('\n'), new RegExp(`plan: \\.zensu/plans/${STEM}\\.md`));
+});
+
+test('the CLI carries the run id, the run record and --accept-partial to the verdict and the status', () => {
+  const fixture = runFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002', 'partial').code, 0);
+  const transport = tempDir('transport');
+  fs.writeFileSync(path.join(transport, 'run.json'), JSON.stringify(fixture.run));
+  const env = {
+    ...process.env,
+    ZENSU_AVR_DIR: transport,
+    ZENSU_AVR_PLUGIN_DATA: fixture.data,
+    ZENSU_AVR_SESSION_KEY: SESSION,
+    ZENSU_AVR_PROJECT_ROOT: fixture.root,
+    ZENSU_AVR_RUN: RUN_ID,
+  };
+  const blocked = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env, encoding: 'utf8' });
+  assert.equal(blocked.status, 1, blocked.stderr);
+  assert.equal(fs.readFileSync(path.join(transport, 'verdict-state'), 'utf8'), 'incomplete');
+  const accepted = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env: { ...env, ZENSU_AVR_ACCEPT_PARTIAL: '1' }, encoding: 'utf8' });
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.equal(fs.readFileSync(path.join(transport, 'verdict-state'), 'utf8'), 'partial-accepted');
+  const shown = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
+  assert.equal(shown.status, 1, shown.stdout + shown.stderr);
+  assert.match(shown.stdout, new RegExp(`^ACCEPTANCE STATUS — autopilot run ${RUN_ID} \\| plan: \\.zensu/state/autopilot-approved-plan-${fixture.sha}\\.md \\| tree: [0-9a-f]{12} \\| 1/2 active criteria pass \\| run: `));
+  assert.match(shown.stdout, /^AC-001 pass \| browser attested \| record av1_[0-9]{13}_[0-9a-f]{12} \| evidence: Opened the page for AC-001; the snapshot shows it \| The dashboard lists every project$/m);
+  fs.rmSync(path.join(transport, 'run.json'));
+  const lost = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
+  assert.equal(lost.status, 2, lost.stdout + lost.stderr);
+  assert.match(lost.stdout, /^ACCEPTANCE STATUS — unresolved \| the record of autopilot run validate_run_01 did not reach the acceptance check/);
 });
