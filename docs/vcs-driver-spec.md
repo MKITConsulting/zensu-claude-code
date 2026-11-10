@@ -215,9 +215,10 @@ specified in `skills/autopilot/rules/conventions.md`.
     `{id,url,state,base,head}`; `--fetch-threads <id>` → normalized unresolved-thread
     array; `--resolve-thread <id> <threadId> [<replyTo>] [--reply <text>]`.
   - Each op = a pure argv-builder (dry-printable via `ZENSU_VCS_PRINT_ARGV=1` under
-    `ZENSU_VCS_TEST=1`) + a thin runner + a `node` normalizer. Live `gh`/`glab`
-    execution is untested — the hermetic seam is the argv-builder + normalizer, same
-    stance as the Phase-1 probe. Test: `test-vcs-pr-ops.sh`.
+    `ZENSU_VCS_TEST=1`) + a thin runner + a `node` normalizer. Live `gh` execution is
+    untested; glab runs live against a disposable GitLab (Step 5). The hermetic seam is the
+    argv-builder + normalizer, same stance as the Phase-1 probe. Test: `test-vcs-pr-ops.sh`,
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - **Normalized thread shape**: `{threadId, replyTo, path, line, body, author}`.
     `threadId` is the **resolve** handle (GitHub GraphQL thread id / GitLab discussion
     id); `replyTo` is the **reply** target (GitHub REST comment id / the same GitLab
@@ -243,11 +244,15 @@ specified in `skills/autopilot/rules/conventions.md`.
     `<!-- zensu:pr<iid>:<hash> -->` idempotency marker so a re-run after a
     partial failure skips already-posted threads. The re-run reads the markers from the parsed
     bodies of the merge request's notes and discussions, never from raw response text: GitLab's
-    JSON escapes their angle brackets. The verdict rides in the summary-note text;
+    JSON escapes their angle brackets. It counts a marker only where it opens a non-system note
+    of the publishing account (`glab api user`): another account's comment, a system note or a
+    marker quoted inside a note cannot suppress a part, while a note of the publishing account
+    that opens with a copied marker still does. The verdict rides in the summary-note text;
     the driver NEVER calls `glab mr approve`/`merge` (§9.3). Dry mode
     (`ZENSU_VCS_PRINT_ARGV=1`) prints the ordered argv sequence (note first, then each
-    discussion) — the same hermetic seam as Phases 1-2; live `gh`/`glab` execution untested.
-    Test: `test-vcs-publish.sh`.
+    discussion) — the same hermetic seam as Phases 1-2. Live `gh` execution is untested; glab
+    runs live against a disposable GitLab (Step 5).
+    Test: `test-vcs-publish.sh`, `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - `pr-team-review`: Step 0 resolves the driver; Phase A.1 detects the forge (repo-scoped) +
     scouts + fetches the PR/MR ref through the driver (the file list for casting stays the
     forge-agnostic worktree diff — not a forge API); Phase D publishes via `--post-review`.
@@ -262,9 +267,10 @@ specified in `skills/autopilot/rules/conventions.md`.
     Returns the PR/MR URL — normalizer prefers the `.../pull|merge_requests/<n>` URL, falls back to the
     first http URL, and strips control/ANSI bytes. Failure is propagated (non-zero rc + stderr; not
     swallowed). It infers the repo from **cwd** (caller `cd "$REPO"`) — no `--repo-id`, matching
-    `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh`/`glab` execution untested
-    (hermetic argv seam, same stance as Phases 1-3). `--pr-state` (Phase 2) is REUSED for the pre-push
-    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O7).
+    `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh` execution untested
+    (hermetic argv seam, same stance as Phases 1-3), while glab `--open-pr` runs live (Step 5). `--pr-state` (Phase 2) is REUSED for the pre-push
+    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O7),
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh` (GL60, GL61).
   - `autopilot`: Step 0 resolves the driver; Phase 0.A.1 detects the forge (carries
     `PROVIDER`/`REPOID`/`CLIREADY`, `cliReady=false` stop, `unknown` ask); Phase 1 step 3 opens the
     PR/MR via `--open-pr` (run from `$REPO`); the Critical-Conventions pre-push guard uses `--pr-state`.
@@ -336,7 +342,8 @@ Consequences to spec explicitly:
 - **Not transactional** — GitLab publish is a loop; a partial failure can leave
   some discussions posted. → **Idempotency:** prefix each posted body with a
   hidden marker (`<!-- zensu:pr<iid>:<hash> -->`); on re-run, skip a discussion
-  whose marker already exists. Same marker convention GitHub inline uses today.
+  whose marker already opens a non-system note of the publishing account (Phase 3).
+  Same marker convention GitHub inline uses today.
 - **`glab` gap** — `glab` has no first-class inline-discussion create; use its
   `glab api` passthrough with the JSON request on stdin and an explicit content type
   (`glab api --method POST projects/:id/merge_requests/:iid/discussions --header 'Content-Type: application/json' --input -`).

@@ -571,6 +571,9 @@ _zensu_vcs_locate_pr() {
     rm -f -- "$err_file"
   else
     out="$("${argv[@]}" 2>/dev/null)"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+      err="$("${argv[@]}" 2>&1 >/dev/null)"
+    fi
   fi
   if [ "$rc" -ne 0 ]; then
     if [ -z "$num" ] && _zensu_vcs_no_pr_message "$provider" "$err"; then return 3; fi
@@ -1264,7 +1267,8 @@ _zensu_vcs_review_snapshot() {
 }
 
 _zensu_vcs_review_fetch_inventory() {
-  local provider="${1:-}" repoid="${2:-}" id="${3:-}" label="${4:-reconcile-review inventory}"
+  local provider="${1:-}" repoid="${2:-}" id="${3:-}" label="${4:-}"
+  [ -n "$label" ] || { printf 'zensu-vcs: internal error: the review inventory fetch needs a failure label\n' >&2; return 1; }
   case "$provider" in
     github)
       local owner="${repoid%%/*}" name="${repoid#*/}"
@@ -1275,13 +1279,15 @@ _zensu_vcs_review_fetch_inventory() {
       notes="$(_zensu_vcs_run "$label (glab api notes)" glab api --paginate --output json "projects/$repoid/merge_requests/$id/notes")" || return 1
       discussions="$(_zensu_vcs_run "$label (glab api discussions)" glab api --paginate --output json "projects/$repoid/merge_requests/$id/discussions")" || return 1
       printf '%s\0%s' "$notes" "$discussions" | node -e '
-        var chunks=[];
+        var fs=require("fs"),chunks=[],label=process.argv[1];
+        function fail(reason){fs.writeSync(2,"zensu-vcs: "+label+" failed: "+reason+"\n");process.exit(1);}
         process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
           var raw=Buffer.concat(chunks),separator=raw.indexOf(0);
-          if(separator<0||raw.indexOf(0,separator+1)>=0||raw.length>32*1024*1024)process.exit(1);
-          var n,d;try{n=JSON.parse(raw.subarray(0,separator).toString("utf8"));d=JSON.parse(raw.subarray(separator+1).toString("utf8"));}catch(_){process.exit(1);}
+          if(raw.length>32*1024*1024)fail("the notes and discussions listings exceed 32 MiB");
+          if(separator<0||raw.indexOf(0,separator+1)>=0)fail("the notes and discussions listings are not two separate documents");
+          var n,d;try{n=JSON.parse(raw.subarray(0,separator).toString("utf8"));d=JSON.parse(raw.subarray(separator+1).toString("utf8"));}catch(_){fail("the notes or discussions listing is not JSON");}
           process.stdout.write(JSON.stringify({notes:n,discussions:d}));
-        });' ;;
+        });' "$label" ;;
     *) return 1 ;;
   esac
 }
@@ -1562,15 +1568,18 @@ _zensu_vcs_review_gitlab_manifest() {
 }
 
 _zensu_vcs_review_gitlab_publisher_id() {
-  local out
-  out="$(_zensu_vcs_run 'reconcile-review publisher id (glab api user)' glab api user)" || return 1
+  local label="${1:-}" out
+  [ -n "$label" ] || { printf 'zensu-vcs: internal error: the publisher lookup needs a failure label\n' >&2; return 1; }
+  out="$(_zensu_vcs_run "$label (glab api user)" glab api user)" || return 1
   printf '%s' "$out" | node -e '
-    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
-      var j;try{j=JSON.parse(s);}catch(_){process.exit(1);}
+    var fs=require("fs"),s="",label=process.argv[1];
+    function fail(reason){fs.writeSync(2,"zensu-vcs: "+label+" failed: "+reason+"\n");process.exit(1);}
+    process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var j;try{j=JSON.parse(s);}catch(_){fail("the glab api user answer is not JSON");}
       if(!j||typeof j!=="object"||Array.isArray(j)
-          ||!((Number.isSafeInteger(j.id)&&j.id>0)||(typeof j.id==="string"&&/^[1-9][0-9]*$/.test(j.id)&&Number.isSafeInteger(Number(j.id)))))process.exit(1);
+          ||!((Number.isSafeInteger(j.id)&&j.id>0)||(typeof j.id==="string"&&/^[1-9][0-9]*$/.test(j.id)&&Number.isSafeInteger(Number(j.id)))))fail("the glab api user answer carries no account id");
       process.stdout.write(String(Number(j.id)));
-    });'
+    });' "$label"
 }
 
 _zensu_vcs_review_gitlab_call() {
@@ -1739,11 +1748,11 @@ _zensu_vcs_reconcile_review() (
       "$gitlab_plan_digest" "$payload_snapshot_digest")" || return 1
     [ "${#gitlab_manifest_digest}" -eq 64 ] || return 1
     case "$gitlab_manifest_digest" in *[!0-9a-f]*) return 1 ;; esac
-    gitlab_publisher_id="$(_zensu_vcs_review_gitlab_publisher_id)" || return 1
+    gitlab_publisher_id="$(_zensu_vcs_review_gitlab_publisher_id 'reconcile-review publisher id')" || return 1
     rm -f -- "$gitlab_plan_file"
     gitlab_plan_file=""
   fi
-  raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
+  raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'reconcile-review inventory')" || return 1
   if [ "$provider" = gitlab ]; then
     inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count" "$gitlab_manifest_file" "$gitlab_publisher_id" "$gitlab_manifest_digest")" || return 1
   else
@@ -1805,7 +1814,7 @@ _zensu_vcs_reconcile_review() (
   fi
 
   if [ "$posted_count" -gt 0 ]; then
-    raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
+    raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'reconcile-review inventory')" || return 1
     if [ "$provider" = gitlab ]; then
       inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count" "$gitlab_manifest_file" "$gitlab_publisher_id" "$gitlab_manifest_digest")" || return 1
     else
@@ -1913,6 +1922,7 @@ _zensu_vcs_post_review_gitlab() {
     }
     if(mode==="count"){process.stdout.write(String(calls.length));return;}
     if(mode==="needpos"){var np=0;for(var q=0;q<calls.length;q++){if(calls[q].pos)np=1;}process.stdout.write(String(np));return;}
+    if(mode==="markers"){process.stdout.write(calls.map(function(c){return c.marker;}).join("\n"));return;}
     var call=calls[idx];if(!call){process.exit(1);}
     var NUL=String.fromCharCode(0);
     process.stdout.write([call.marker,call.kind,JSON.stringify(call.request)].join(NUL)+NUL);
@@ -1937,9 +1947,12 @@ _zensu_vcs_post_review_gitlab() {
   fi
   local existing=""
   if ! _zensu_vcs_dry; then
-    local inventory
+    local inventory publisher wanted
+    publisher="$(_zensu_vcs_review_gitlab_publisher_id 'post-review publisher id')" || return 1
+    wanted="$(ZENSU_PL_MODE=markers ZENSU_PL_PAYLOAD="$native_payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" node -e "$ZPLAN" 2>/dev/null)" && [ -n "$wanted" ] ||
+      { printf 'zensu-vcs: post-review markers failed: the payload yields no part markers\n' >&2; return 1; }
     inventory="$(_zensu_vcs_review_fetch_inventory gitlab "$repoid" "$id" 'post-review existing')" || return 1
-    existing="$(printf '%s' "$inventory" | _zensu_vcs_body_markers post)" || return 1
+    existing="$(printf '%s' "$inventory" | _zensu_vcs_body_markers post "$publisher" "$wanted")" || return 1
   fi
   local i=0
   while [ "$i" -lt "$n" ]; do
@@ -1983,27 +1996,38 @@ _zensu_vcs_review_markers() {
   esac
   command -v node >/dev/null 2>&1 || return 1
   local inventory
-  inventory="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
+  inventory="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id" 'review-markers inventory')" || return 1
   printf '%s' "$inventory" | _zensu_vcs_body_markers review
 }
 
 _zensu_vcs_body_markers() {
   command -v node >/dev/null 2>&1 || return 1
-  MARKER_KIND="${1:-}" node -e '
+  MARKER_KIND="${1:-}" MARKER_PUBLISHER="${2:-}" MARKER_WANT="${3:-}" node -e '
+    var fs=require("fs"),kind=process.env.MARKER_KIND;
+    function fail(reason){fs.writeSync(2,"zensu-vcs: "+reason+"\n");process.exit(1);}
     var chunks=[];process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
-      var raw=Buffer.concat(chunks);if(raw.length>32*1024*1024)process.exit(1);
-      var data;try{data=JSON.parse(raw.toString("utf8"));}catch(_){process.exit(1);}
+      var raw=Buffer.concat(chunks);if(raw.length>32*1024*1024)fail(kind+" marker walk failed: the input exceeds 32 MiB");
+      var data;try{data=JSON.parse(raw.toString("utf8"));}catch(_){fail(kind+" marker walk failed: the input is not JSON");}
       var re=null;
       if(process.env.MARKER_KIND==="review")re=/<!-- zensu-review:v1:[a-f0-9]{64}:[a-f0-9]{64}:[a-f0-9]{7,64}:[1-9][0-9]{0,5}:part=1\/[1-9][0-9]{0,5} -->/g;
-      else if(process.env.MARKER_KIND==="post")re=/<!-- zensu:pr[0-9]+:[0-9a-f]{8} -->/g;
-      if(!re)process.exit(1);
+      var want=null,publisher=process.env.MARKER_PUBLISHER||"";
+      if(kind==="post"){
+        if(!/^[1-9][0-9]*$/.test(publisher))fail("post marker walk failed: no publisher id");
+        want=(process.env.MARKER_WANT||"").split("\n").filter(function(m){return m!=="";});
+        if(!want.length)fail("post marker walk failed: no markers to look for");
+      }
+      if(!re&&!want)fail("marker walk failed: unknown marker kind");
       var seen={},out=[];
+      function add(marker){if(!seen[marker]){seen[marker]=true;out.push(marker);}}
       function walk(value,depth){
         if(depth>64||value===null||typeof value!=="object")return;
         if(Array.isArray(value)){value.forEach(function(item){walk(item,depth+1);});return;}
         Object.keys(value).forEach(function(key){
           if(key==="body"&&typeof value[key]==="string"){
-            (value[key].match(re)||[]).forEach(function(marker){if(!seen[marker]){seen[marker]=true;out.push(marker);}});
+            if(re){(value[key].match(re)||[]).forEach(add);}
+            else if(value.system!==true&&value.author&&typeof value.author==="object"&&String(value.author.id)===publisher){
+              want.forEach(function(marker){if(value[key].indexOf(marker)===0)add(marker);});
+            }
           }else{walk(value[key],depth+1);}
         });
       }

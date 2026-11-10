@@ -81,7 +81,9 @@ turn the check back into `eq` in the same change; the bug's own result prints `X
 result fails, so a regression cannot hide behind a known bug. A recorded bug also gets a plain
 check that its trigger is present, so the fixed check cannot pass for want of the trigger.
 `GL19` and `GL71` hold that guard for `--fetch-threads`: the merge requests carry a plain comment
-and an approval's system note, neither with a resolution state. No known bug is recorded now.
+and an approval's system note, neither with a resolution state. A trigger check stays after its
+bug is fixed, so the `eq` that replaced the `xeq` cannot pass for want of the trigger either:
+`GL19` guards `GL20`, `GL71` guards `GL72`.
 
 **Pins.** `versions.v1.json` pins the image by digest and each glab build by sha256 per platform
 (`linux_amd64` for CI, `darwin_arm64` for local runs). `glab-install.sh` refuses a version or
