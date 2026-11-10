@@ -575,8 +575,8 @@ test('the copy loop renders as ONE fence, opener and closer together', () => {
 test('an absent desktop-app store gets its own wording', () => {
   const withStore = mod.worktreeAdvice(rec({ ccdStore: true })).join('\n');
   const noStore = mod.worktreeAdvice(rec({ ccdStore: false })).join('\n');
-  assert.ok(withStore.includes('has no record for this session'), 'the has-a-store wording moved');
-  assert.ok(noStore.includes('no desktop-app record store exists on this host'),
+  assert.ok(withStore.includes('has no readable record for this session'), 'the has-a-store wording moved');
+  assert.ok(noStore.includes('no readable desktop-app record store exists on this host'),
     'the absent-store wording is never rendered');
 });
 

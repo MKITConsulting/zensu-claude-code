@@ -47,7 +47,7 @@ assert:
           ? "The supplied chain anchor came back verbatim: " + anchor
           : (anchor
               ? "A `Zensu:` line was emitted but it is not the supplied one. Got: " + anchor + " — expected: " + SUPPLIED
-              : "Rule 6 requires the supplied chain anchor to be rendered verbatim; no line starting with `Zensu:` was emitted."),
+              : "The chain-progress anchor rule requires the supplied chain anchor to be rendered verbatim; no line starting with `Zensu:` was emitted."),
       };
   - type: javascript
     value: |

@@ -35,8 +35,8 @@ assert:
         reason: (ok
           ? "Opens with the result, what the flag does: "
           : labelled
-            ? "Rule 1 requires the result first, and the first prose line opens with a label instead: "
-            : "Rule 1 requires the first prose line to say what the flag does; got: ")
+            ? "The result-first rule requires the result in the first prose line, which opens with a label instead: "
+            : "The result-first rule requires the first prose line to say what the flag does; got: ")
           + JSON.stringify(first.slice(0, 120))
       };
   - type: javascript
@@ -58,7 +58,7 @@ assert:
         score: ok ? 1 : 0,
         reason: ok
           ? "The session block names what the session was started for: " + lines[goal]
-          : "Rule 2 requires a line below the answer naming what the user started the session for."
+          : "The session-block rule requires a line below the answer naming what the user started the session for."
       };
   - type: javascript
     value: |
@@ -82,7 +82,7 @@ assert:
           ? "No earlier-work bullets, because no earlier turn exists."
           : goal < 0
             ? "No session line was found, so the block cannot be judged."
-            : "Rule 2 lists no earlier-work bullets while there is no earlier work; got: " + JSON.stringify(invented)
+            : "The session-block rule lists no earlier-work bullets while there is no earlier work; got: " + JSON.stringify(invented)
       };
   - type: javascript
     value: |
@@ -106,7 +106,7 @@ assert:
           ? "The next step follows the session line directly, with no recap line, because this turn only answered: " + lines[lines.length - 1]
           : goal < 0
             ? "No session line was found, so the block cannot be judged."
-            : "Rule 2 omits the recap line when the turn only answered, so exactly one next step follows the session line; " + after + " line(s) follow it."
+            : "The session-block rule omits the recap line when the turn only answered, so exactly one next step follows the session line; " + after + " line(s) follow it."
       };
   - type: javascript
     value: |

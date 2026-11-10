@@ -65,7 +65,8 @@ the pathspec-mode variables. They are wrappers of their own because `X10e` compa
 `_el_git` and `_tc_git` scrub lists and `worktree-keep-v1.test.js` pins the `_tc_git` list.
 
 **The union.** `_zensu_union_change_count` is the count every terminus caller takes:
-`--tdd-complete`, both `--chain-done` paths and `--code-review-done`. Any `unavailable` makes it
+`--tdd-complete`, both `--chain-done` paths, the terminal edit-landing gate and
+`--code-review-done`. Any `unavailable` makes it
 `unavailable`, a module that fails to load included, a non-zero part makes it non-zero, and otherwise it is the anchor's own answer,
 so a folder anchor with clean roots keeps `unknown`, which the terminus reads as zero. Without
 a `"codeRoots"` key in the document the helper spawns nothing and returns the anchor's count.

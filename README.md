@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.34.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.36.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -155,8 +155,9 @@ claude plugin marketplace update zensu
 claude plugin update zensu@zensu
 ```
 
-Optional, for feature tracking: install zensu-cli 0.10.0 or later with
-`brew install --cask mkitconsulting/tap/zensu` (upgrade with `brew upgrade --cask zensu`),
+Optional, for feature tracking: install zensu-cli 0.18.0 or later with
+`brew install --cask mkitconsulting/tap/zensu` (upgrade with
+`brew update && brew upgrade --cask mkitconsulting/tap/zensu`),
 `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
 `irm https://zensu.dev/install.ps1 | iex`, then run `zensu auth login`.
 
@@ -189,11 +190,15 @@ and imports it as tracked features. Needs a Zensu account.
 features, journeys, and tiers. Then `/zensu:implement KEY-1` builds the first one.
 Needs a Zensu account.
 
+**One change** — `/zensu:change` makes one change you ask for in a tracked
+product, such as a new feature, a roadmap entry or a deprecation. It checks for
+a duplicate first and asks before anything is removed. Needs a Zensu account.
+
 ## What's included
 
-### Skills (31)
+### Skills (32)
 
-> The count is the workflow skills in these tables. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of these tables (32 skills are registered in `plugin.json`).
+> The count is the workflow skills in these tables. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of these tables (33 skills are registered in `plugin.json`).
 
 The **Needs** column says what a skill needs beyond Claude Code: "Zensu account"
 means the `zensu` CLI, logged in; `gh` or `glab` means the forge CLI of your
@@ -206,6 +211,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:bootstrap` | Turn a vision document into tracked features, journeys, security profiles, and tiers | Zensu account |
 | `/zensu:ghost-scan` | Scan an existing repo, discover undocumented features, and import them | Zensu account |
+| `/zensu:change` | One change you ask for in a tracked product: a new feature, a roadmap entry, a tier, a link, a deprecation or a merge, with a duplicate check first and a confirmation before anything is removed or replaced | Zensu account |
 | `/zensu:docs` | Write code-grounded feature documentation that honestly clears the docs release gate | Zensu account |
 | `/zensu:security-review` | A tracked feature's security review: classification, OWASP analysis, STRIDE threat model, release-gate check | Zensu account |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions | Zensu account |
@@ -399,6 +405,7 @@ through it:
 |-------|---------------|
 | `/zensu:bootstrap` | Product name, slug and type; **the full text of your vision or plan document**; the features, journeys, tiers and security profiles derived from it |
 | `/zensu:ghost-scan` | **The repository URL** and branch; per discovered feature its slug, title, component, confidence, security classification and the paths of its source, test and doc files |
+| `/zensu:change` | The values of the change you ask for: titles, slugs, priorities, periods, tier entries, **free-text descriptions and wiki pages as Markdown**, linked file paths, **an uploaded wiki image or mock file**, and a repository URL when you import one |
 | `/zensu:implement` | **A knowledge-search query** made of the feature title and key terms; linked test and source file paths; **the documentation it writes, as whole Markdown pages** (step 6); a free-text revision summary; status updates |
 | `/zensu:docs` | **The documentation it writes, as whole Markdown pages** in its default wiki mode; with `--repo-file`, the path of the file it writes into your repository instead |
 | `/zensu:security-review` | Classification attributes, the security tests it links, **a free-text findings summary** and approval conditions |
@@ -438,16 +445,19 @@ otherwise. The Session Hub creates that directory; the module never creates it,
 so on a machine without the Session Hub nothing is written.
 
 While the directory exists, the module writes one file per Claude Code session,
-`<session id>.json`, each time Claude Code measures the session after a response
-from Claude, which happens at the end of every turn, and whenever a rate-limit
-window moves. It writes nothing when a session starts and nothing while a session
-is idle, so a file keeps the time of its last reading. The file holds the
-record's schema version, the session id, the time of the reading, and for each
-window its name (`five_hour`, `seven_day`), the percentage used and the reset
-time. It holds nothing else: no prompt, response, title, path, project or
-account data. Each write replaces the whole file, the file stays on your
-machine, and the module sends nothing anywhere. Deleting the directory stops the
-feed; only a write already under way at that moment can create it once more.
+`<session id>.json`, when Claude Code measures the session and the reading is
+new: Claude has just answered a turn of the session, or a rate-limit window has
+just moved. The time in the file is that moment, so a reading the session took
+earlier never comes back under a newer time. It writes nothing when a session
+starts and nothing while a session is idle, so a file keeps the time of its last
+reading. The file holds the record's schema version, the session id, the time of
+the reading, and for each window its name (`five_hour`, `seven_day`), the
+percentage used and the reset time. It holds nothing else: no prompt, response,
+title, path, project or account data. To tell an answered turn, the module reads
+only how the turn ended, not its text. Each write replaces the whole file, the
+file stays on your machine, and the module sends nothing anywhere. Deleting the
+directory stops the feed; only a write already under way at that moment can
+create it once more.
 
 The module needs Claude Code 2.1.296 or newer and uses its early-access hooks
 module API, which can change between releases. Anthropic can also switch modules
@@ -474,8 +484,8 @@ driver additionally need `playwright-cli` on `PATH`
 (`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
-Feature tracking needs zensu-cli 0.10.0 or later: older releases print only the
-first 100 ghost-scan candidates and read only the first page of wiki lists.
+Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older
+releases cannot declare a goal's feature, so AI-work capture fails.
 `zensu --version` shows the installed release, and the session banner and
 `/zensu:doctor` warn about an older one without blocking anything.
 

@@ -146,9 +146,11 @@ green row would be a false all-clear.
 - The sibling loads: `bash-source-write-parse.js` requires the analyzer lazily and only for a
   PowerShell payload; `pre-bash-zensu-gate.sh` loads it through `cd -P` into its own `hooks/lib`
   with `ZPS`, which stays empty when the `cd` fails, so a project file can never load; the consent
-  module requires it lazily for `spellings()`; the doctor report requires it. PC5a, PC5b and PC5c
-  pin the three hook loads, and P2p9 the doctor's. A failed load in the source-write parser is
-  caught and denies with its own text (WP17); in the consent module it refuses the call.
+  module requires it lazily for `spellings()`; `zensu-cli-backend-v1.js` requires it lazily for
+  `spellings()` of a PowerShell command; the doctor report requires it. PC5a to PC5d pin the four
+  hook loads, and P2p9 the doctor's. A failed load in the source-write parser is caught and denies
+  with its own text (WP17); in the consent module it refuses the call; in the backend module the
+  command counts as naming `ZENSU_API_URL`, so the hook's own value never decides the call.
 - `UNIX_ALIASES` holds the aliases a PowerShell 7 session defines outside Windows: the
   `BuiltInAliases` list of `InitialSessionState.cs` without its `#if !UNIX` and `#if !CORECLR`
   entries, plus `fhx`, `gcb`, `gtz` and `scb`, which cmdlets declare and the Utility and

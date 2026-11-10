@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+umask 022
 
 # Behavioural contract for the session-trail LINEAGE ledger.
 #
@@ -670,6 +671,48 @@ OUT="$(cd "$SELF_CWD" && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STOR
   env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" adopt "$SID_A" --all --json --config-dir "$CFG" 2>&1)"
 GOT="$(jq_field "$OUT" recorded.to.accountUuid)"
 [ "$GOT" = "$ACCT_B" ] && check "L19 a session with no cliSessionId record still resolves its account through the record file name" PASS || check "L19 the host-session-id fallback resolves the account (want $ACCT_B, got ${GOT:-<empty>})" FAIL
+if [ "$(node -p process.platform 2>/dev/null)" = win32 ]; then
+  skip "L19b the desktop-store owner and mode check is not judged on Windows"
+else
+  chmod 775 "$STORE/$ACCT_B/ws-0002"
+  reset_ledger
+  OUT="$(cd "$SELF_CWD" && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" \
+    CLAUDE_CODE_SESSION_ID="ffffffff-0000-0000-0000-0000000000ff" CLAUDE_PID="$LIVE_PID" \
+    CLAUDE_CODE_HOST_SESSION_ID="local_orphan-host" \
+    env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" adopt "$SID_A" --all --json --config-dir "$CFG" 2>&1)"
+  chmod 755 "$STORE/$ACCT_B/ws-0002"
+  GOT="$(jq_field "$OUT" recorded.to.accountUuid)"
+  RECORDED="$(jq_field "$OUT" recorded.to.sessionId)"
+  if [ "$RECORDED" = "ffffffff-0000-0000-0000-0000000000ff" ] && { [ -z "$GOT" ] || [ "$GOT" = "null" ]; }; then
+    check "L19b a group-writable workspace folder is refused, so the host-session fallback names no account and the edge still lands" PASS
+  else
+    check "L19b a group-writable workspace folder is refused (account ${GOT:-<empty>}, recorded ${RECORDED:-<empty>})" FAIL
+  fi
+  l19c_adopt() {
+    reset_ledger
+    OUT="$(cd "$SELF_CWD" && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" \
+      CLAUDE_CODE_SESSION_ID="ffffffff-0000-0000-0000-0000000000ff" CLAUDE_PID="$LIVE_PID" \
+      CLAUDE_CODE_HOST_SESSION_ID="local_orphan-host" \
+      env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" adopt "$SID_A" --all --json --config-dir "$CFG" 2>&1)"
+    printf '%s:%s' "$(jq_field "$OUT" recorded.to.accountUuid)" "$(jq_field "$OUT" recorded.to.sessionId)"
+  }
+  L19C_BAD=""
+  chmod 664 "$STORE/$ACCT_B/ws-0002/local_orphan-host.json"
+  GOT="$(l19c_adopt)"
+  chmod 644 "$STORE/$ACCT_B/ws-0002/local_orphan-host.json"
+  case "$GOT" in (":ffffffff-0000-0000-0000-0000000000ff"|"null:ffffffff-0000-0000-0000-0000000000ff") ;; (*) L19C_BAD="$L19C_BAD record-664=$GOT" ;; esac
+  chmod 775 "$STORE/$ACCT_B"
+  GOT="$(l19c_adopt)"
+  chmod 755 "$STORE/$ACCT_B"
+  case "$GOT" in (":ffffffff-0000-0000-0000-0000000000ff"|"null:ffffffff-0000-0000-0000-0000000000ff") ;; (*) L19C_BAD="$L19C_BAD account-775=$GOT" ;; esac
+  GOT="$(l19c_adopt)"
+  [ "$GOT" = "$ACCT_B:ffffffff-0000-0000-0000-0000000000ff" ] || L19C_BAD="$L19C_BAD restored=$GOT"
+  if [ -z "$L19C_BAD" ]; then
+    check "L19c a group-writable host-session record in an accepted workspace, and a group-writable account folder, are refused, so the fallback names no account while the edge still lands; restored, the account comes back (control)" PASS
+  else
+    check "L19c host-session record and account folder refusals:$L19C_BAD" FAIL
+  fi
+fi
 rm -f "$STORE/$ACCT_B/ws-0002/local_orphan-host.json"
 
 # ── L20 — a ledger that cannot be written is reported, never swallowed ──────

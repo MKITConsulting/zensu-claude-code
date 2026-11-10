@@ -9,9 +9,10 @@ bound Autopilot run drives, recorded in the receipt as `workTree` and counted be
 the anchor's change set (discipline patch 10 in
 [build-workflow.md](build-workflow.md); a claim the audit cannot grade as written is
 settled by the `CLAIM CORRECTED` line its verdict names, never by an escape)
-and §Requirements-Table Gate below, which has its own section here — and TWO
-terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
-Eight of the ten are
+and §Requirements-Table Gate below, which has its own section here — THREE
+terminus refusals at `--chain-done`, §Terminal Edit-Landing Gate, §Full-Suite Gate and
+§Acceptance Verification Gate, and ONE consume-time refusal in the review chain,
+§Review Packet Gate. Ten of the twelve are
 convention-nudges with a documented escape hatch, not security boundaries — see [Session Control](session-control.md) for the part that is. The
 two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
 escape hatch, and neither is a security boundary on its own: the first closes one
@@ -91,7 +92,13 @@ The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creat
 updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
 work orders, work plans, …) run directly on the main thread is **denied by default** — it must
 run inside a skill that declared its work, so "freelance" writes cannot bypass the dedup,
-user-journey, baseline-revision and security-review conventions the skills enforce. Reads and
+user-journey, baseline-revision and security-review conventions the skills enforce. Every mutation
+an agent may run has at least one such skill, and the deny names the skills that route the blocked
+command (`ZENSU_TOOL_ROUTES` in `hooks/lib/zensu-mcp-tools.sh`): `/zensu:change` for one change a
+user asks for, such as a new feature, a roadmap entry, a tier or a deprecation, beside the
+onboarding, implementation, documentation or security-review skill the command also belongs to, so
+a denied `zensu features create` names `/zensu:change`, `/zensu:bootstrap` and `/zensu:ghost-scan`
+and a denied `zensu roadmap delete` names `/zensu:change` alone. Reads and
 telemetry are allowed in a session that binds, except a PowerShell call the analyzer cannot judge
 (see [Shell Tools](#shell-tools)); the gate binds before it classifies, so when the Session Control
 binding fails it denies every call it parses, reads included. A command that records a decision the person makes — creating,
@@ -109,8 +116,9 @@ name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/li
 source of truth. It finds the subcommand the way cobra, the CLI's command library, does: a flag
 without `=` takes the next word, an empty word is skipped and `--` ends the search, so
 `zensu features --product p1 create` counts as a create. Where the verb is itself a command group
-(`work policy`, `work repositories` or `repos`, `plan followup`), the third word picks the
-command. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
+(`work policy`, `work repositories` or `repos`, `plan followup`, `wiki images`), the third word
+picks the command, so `zensu wiki images upload` is a mutation and `zensu wiki images policy` a
+read. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
 once as if it were empty and once as if it were a value flag that takes the next word, so
 `zensu features $FLAGS create` counts as a create too. It reads the command twice and gates every invocation either reading finds. The
 shell model of the subagent accident guard (`hooks/lib/subagent-shell-guard-v1.js`) finds an
@@ -219,6 +227,7 @@ path segment such as `~/src/Zensu` count, so such a local call needs the two-wor
 command also holds the stop-parsing token `--%` or a `--api-url` the analyzer cannot read as a word, such as
 `--api-url=$u`. The gate cannot tell where a call runs: one only the token scan finds, such as a call inside an `ssh`
 string, still counts as local when it names `localhost`, although there `localhost` is the host the string reaches.
+This backend reading lives in `hooks/lib/zensu-cli-backend-v1.js`, which the gate loads from its own plugin directory and a unit file pins rule by rule. The gate loads it only once it has found a `zensu` call, so a command that merely names `zensu`, such as a search for the word or a plugin helper under the plugin's own directory, never loads it. When that module cannot load, the gate denies every command in which it finds a `zensu` call, reads and `--help` included, as unreadable, with a reason that names the module and the damaged installation. `/zensu:doctor` shows the same damage in its `CLI write-gate:` row, which warns, with a reinstall remedy, when that module cannot be loaded or does not export a function the gate calls to read a `zensu` call, and renders green otherwise.
 In a Bash command a `--help` or `-h` word right after a word the shell expands at run time is read as that word's
 value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
@@ -235,7 +244,12 @@ subagent's deny adds that it reports the need to the main thread. A structure
 test (`tests/structure/test-skill-workflow-markers.sh`)
 fails the build if any skill runs a mutation command without the `--workflow-begin` /
 `--workflow-end` markers, or runs one its window does not declare, so a new skill cannot silently
-regress the contract.
+regress the contract. It also fails when a mutation an agent may run has no skill window, or no
+route whose skills all declare it, and `tests/structure/test-zensu-cli-map-drift.sh` fails when the
+recorded command tree of the newest supported zensu-cli (`tests/structure/fixtures/zensu-cli-tree.txt`)
+holds a command, a group alias or a verb alias the gate does not read. The test reads that
+recorded tree, not the CLI a user runs: a verb a newer zensu-cli adds passes ungated until the
+tree is re-recorded with that release and the map learns the verb.
 
 ## Source-Write Gate
 
@@ -290,6 +304,128 @@ is covered by (C) when it escapes the session root. Like the CLI gate this is a
 the deny texts no longer name that prefix — they name `hooks.bashWriteGate` and leave an intended
 command to the user, because the host's auto-mode classifier refuses a command that carries it.
 `tests/structure/test-bash-source-write-gate.sh` pins the behavior.
+
+**A program name counts the way a case-insensitive file system resolves it.** macOS and Windows
+resolve a program name in any letter case by default, Windows also with `.exe`, so the gate reads
+`GIT`, `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE`, `DD of=` and a wrapper such as `ENV` or `Sudo`
+like their lowercase spelling, on every platform, and on Windows also behind a path written with
+backslashes. A path to `tee` in command position counts like `tee`, while elsewhere in a command
+only the word `tee` itself does, so `grep -n TEE src/app.rs` stays a read; BSD sed's `-I`,
+`--in-place` and an option cluster that holds `i`, such as `-ni` or `-Ei`, count as in place like
+`-i`. Shell builtins keep their case: the shell runs any other spelling of `cd`,
+`export`, `unset`, `read` or `printf` as an external program, which cannot change the shell's
+directory or variables. For the same reason the gate moves its tracked directory only for a `cd`
+the shell itself runs: the bare word, alone, behind `command` or `builtin`, or behind the `time`
+keyword at the start of the command. `env cd`, `ENV cd`, `sudo cd`, `/usr/bin/cd` and a quoted
+`\time cd` run a separate program and leave the directory where it was.
+The Session Control check reads wrappers and the `tee`, `sed -i` and `dd of=` channels the same
+way, also right after a quote, `(` or a backtick, so `ENV CLAUDE_CODE_SESSION_ID=…`,
+`TEE "$CLAUDE_ENV_FILE"` or `(tee "$CLAUDE_ENV_FILE")` is refused whatever `hooks.bashWriteGate`
+says, and the secret scan reads a Bash command spelled that way as a write.
+
+**Words are read after the shell's quote removal, and each wrapper with its own options.** Before
+a word is matched, the gate removes quotes the way bash does: a backslash and single or double
+quotes anywhere inside the word, `$'…'` with bash's escapes decoded, and `$"…"` as double quotes.
+So `\git`, `g'i't`, `\env`, `e'n'v`, `$'\x65nv'`, `\export`, `\unset`, `t'e'e` and `s\ed -i` count
+like their plain spelling, and `\cd ../sibling` moves the tracked directory. A backslash-newline
+continues the line and a newline inside quotes stays in the word, except after a `#` that starts a
+comment outside quotes. A heredoc is found on the joined line with its whole quote-removed
+delimiter word, outside quotes, comments and arithmetic, several per line, and its body ends on
+the exact delimiter line (tabs stripped for `<<-`), so `echo '<<X'`, `$((1<<2))` or `cat <<EOF-1`
+no longer hide the lines after them. A redirection splits off the word it is glued to, as in
+`printf x>src/app.rs` or `unset X&>/dev/null`; `>|` and `>&file` write their file after any quoted
+word, zsh's `>>|`, `>>&`, `&>|`, `&>>|`, `>&|` and `>!` write theirs, and so does `n<>file` on a
+descriptor other than 0, while an escaped `\<` or `\>` stays part of its word. `$'…'` ends where
+bash ends it, `\c` included, a `${…}` expansion ends at its matching brace even when it holds quotes
+or a nested `${…}`, and `$$` is one unit, also inside a string within `${…}`, so a quote inside one
+of them does not shift the words after it. bash reads a single quote inside a double-quoted `${…}`
+as quoting and zsh as a character, so each command is judged under both readings. Each wrapper's
+own options are read the way that
+wrapper reads them (`env -i`, `-u`, `-C`, `-S` and `--`, `sudo -u` and `-D`, `nice -n`, `time -p`,
+`command -p`, `exec -c` and `-a`), so they no longer end the scan: `env -i CLAUDE_CODE_SESSION_ID=… …`
+is a rebind, `env -u ZENSU_SESSION_KEY …` is refused as removal like `unset`, and `env -C <dir> git …`
+runs git in that directory; a relative operand under an `env -C` directory named at run time is
+reported as a write target where the session has no project root. `env -S` strings are split as
+env splits them (`\_` separates, `\c` stops, `#` starts a comment), and more than eight nested
+`-S` strings are refused. A quoted assignment after `env` or `sudo`, as in
+`env "GIT_WORK_TREE=…" git add -A`, is read as one, while a quoted leading assignment stays a
+command word, as it is to bash. The assignment forms `NAME+=…` and `NAME[i]=…`, `printf -vNAME`,
+`export -n`, `declare +x`, `declare -a`, a `for`, `select` or `foreach` loop name, a `{NAME}`
+redirection and a subscript such as `unset 'NAME[0]'` count too, and neither the reserved words
+`!`, `{`, `}`, `if`, `then`,
+`else`, `elif`, `fi`, `do`, `done`, `while` and `until` nor a redirection before the command word
+hide it any more. `env -i` on its own is not refused: it names no protected input, and the
+model-side binder (`model-bind` in `hooks/lib/claude-hook-session-v1.js`) refuses a missing
+`CLAUDE_CODE_SESSION_ID`. A literal path to `CLAUDE_ENV_FILE` is
+compared with letter case and Unicode normalization folded on every platform, as macOS and Windows
+resolve it by default. The Session Control check also reads every command a second time the way it
+did before this reader, split on whitespace with the quotes stripped, and refuses when either
+reading finds a rebind or a removal, so a spelling the word reader gets wrong is still refused
+wherever the earlier reading refused it. `tests/structure/test-bash-source-write-gate.sh` pins each
+spelling (W265, W74 and W267 to W381).
+
+**Assignments by other means.** A third reading walks each command the way the shell reads it: it
+keeps quotes, `$'…'` and `$"…"` whole, starts a comment only where a word starts, also inside
+`[[ … ]]` and an array literal, follows heredocs, `case` patterns, `[[ … ]]` with its regex and
+extended-pattern operands, and `(( … ))`, also when a reserved word such as `if`, `while` or `in` is
+written directly before the parenthesis, and enters every command substitution, also one inside
+double quotes, in the body of a heredoc whose delimiter is unquoted or in bash 5.3's `${ …; }`. It
+takes a reserved word only where the shell does: `time` with one `-p` and one `--` only at the
+start of a pipeline, a compound command after `coproc NAME`, `then`, `do` or `}` right after
+`[[ … ]]`, neither `[[` nor `case` inside a `case` pattern, and `[[`, `case` and `{` after a
+leading redirection both as bash reads them there, as plain words, and as zsh reads them, as
+reserved words. It
+reads the command a second time with its line continuations joined, the way the shell's input
+reader joins them before it reads a word or a heredoc delimiter: outside single quotes and comments,
+not in a quoted-delimiter heredoc body, and in an unquoted body before it compares a line with the
+delimiter. It judges each command it
+finds there and refuses a protected input that a builtin, an arithmetic context or an expansion
+assigns: the name operand of `getopts`, `mapfile`/`readarray`, `wait -p`, `coproc NAME`, `printf -v`
+and zsh's `print -v` in any option cluster, a name attached to its option as in `wait -pNAME`,
+`read -raNAME` or zsh's `set -ANAME`, zsh's `set -A`/`set +A`, `integer`, `float`, `vared`, `getln`
+and `read 'NAME?prompt'`, zsh's `typeset -T` tie, a `typeset -i`, `-E`, `-F` or case and width
+option that converts a protected value, an assignment word or wrapper in the simple command after
+`coproc`, bash 5.3's `compgen -V` and zsh's `unset -m` pattern that matches a protected input; an
+arithmetic assignment (`=`, a compound `op=`, `++`, `--`) in `let`, `(( … ))`, `for (( … ))`,
+`$(( … ))`, `$[ … ]`, any operand of `-eq` and its siblings in `[[ … ]]`, also after `&&` or `||`
+and inside a group, zsh's `repeat`, `shift`, `return`, `break` and `continue` operands, and a
+subscript, nested or holding blanks, of an assignment word, a declaration operand, an array-literal
+element such as `a=([i]=v)`, a name operand, the `-v` operand of `[[`, `[` and `test`, zsh's
+brace-less `$NAME[…]` or a `${…}` expansion; the offset of a `${…}`
+expansion, `$0` and `$@` included; and the expansions `${NAME=…}`, `${NAME:=…}` and zsh's
+`${NAME::=…}`, also behind zsh's flags and its `=`, `~`, `^` and `+` modifiers. Every nameref
+(`declare -n`, `typeset -n`, `local -n`) is refused, because the check cannot follow it to the
+variable it names, and so is a name built at run time where that spelling has no common use: an
+`env -S` string whose `${VAR}` reaches `env` (single-quoted or escaped) in an option, assignment
+or command position, an arithmetic lvalue such as `$N = 1`, zsh's `${(P)…}` assignment, an option
+the shell builds at run time in front of a protected name (`declare $o r=NAME`) and an `unset -m`
+pattern this check cannot translate. A heredoc body is read as the shell expands
+it, with its line continuations removed, and a `$((` that does not close with `))` is read as the
+command substitution the shell makes of it. Text inside single quotes, a comment or a
+quoted-delimiter heredoc stays unread, and these refusals apply only to commands this reading
+finds, so quoted text that merely names `declare -n` or `mapfile`, a commit message for example,
+stays allowed; the word reader and the whitespace reading above keep only the refusals they had
+before. A `<<` inside `${…}` or `$[…]` no longer starts a heredoc and a `$"…"` delimiter ends where
+the shell ends it, so no reading drops the lines after them. A command nested more than 64 levels
+deep, or one whose reading would exceed a work bound proportional to its length, is refused with
+its own reason. W382 to W554 pin each spelling and the commands that stay allowed.
+
+**What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
+differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and
+`-`; where the Bash tool runs zsh, the gate still reads those spellings the bash way, so they pass.
+A variable name the shell builds at run time in a builtin or wrapper operand (`export "$N=…"`,
+`export $(cat .env | xargs)`, `unset "$v"`) stays allowed, because loading an environment file that
+way is common and `source` reaches the same assignments. A program word the shell builds at run
+time (`$GIT`, `$(…)`), an alias or a function, code the shell builds or stores to run later
+(`eval`, `trap`, `bash -c`, `source`, a script file, a `mapfile -C` callback), arithmetic that
+reaches a name through another variable's value (`x='NAME=1'; (( x ))`) or an integer attribute
+(`declare -i`), zsh's numeric `printf` arguments and module builtins (`zparseopts`, `strftime -s`,
+`zstat -A`) and a wrapper outside the list (`timeout`, `xargs`, `stdbuf`) are not followed either.
+The third reading is a hand-written approximation of the shell grammar, and a construct it misreads
+can hide the commands after it, so a spelling outside the pinned rows may still pass. The word
+reader and the whitespace reading still split
+a command at a `;`, `&` or `|` inside quotes, so quoted text that spells a protected assignment can
+be refused there.
 
 **While the gate is enabled, the expected *legitimate* hit of rule (C) is a cross-worktree takeover.**
 At its default (off) nothing on this page refuses the commit or a `git worktree move` out of a
@@ -1178,6 +1314,197 @@ plan must carry a usable `## Requirements` table.
   the two gates share one change-set computation precisely so neither inherits the other's
   switch. Both escapes are recorded in the per-session bypass ledger.
 
+## Review Packet Gate
+
+Every reviewer of one `/zensu:build` review round reads one canonical evidence packet, and the
+consume-mode review does not advance the chain without a substantive primary judge report when
+step 4b requires one. Two helpers and the post-review hook carry it.
+
+- **The packet.** `hooks/lib/review-packet-v1.js create --root <project root> --session <key>
+  --input <json> [--baseline <sha>] [--work-tree <dir>]` refuses unless the session's chain is active,
+  implementation-complete and not yet closed. It runs `zensu-edit-landing.sh --check-receipt
+  --allow-unclean`, so a receipt the tree has outgrown is refused with the audit command to run,
+  while a receipt that records unlanded, pending or unverified claims is carried rather than
+  cleared: a bare `<step> WIRED` entry the audit graded counts as an unverified claim, and a
+  receipt whose latest audit did not complete is carried with `audit=incomplete` on its receipt
+  line. Two generations need no receipt. A chain whose bypass ledger records
+  `ZENSU_EDIT_LANDING_GATE`, or a `create` call made with that switch set to `off`, gets the
+  receipt line `escaped (…)`. A deferred review the Stop hook adopted and that holds no receipt
+  gets `none (not run — …)`; one that holds a receipt is checked like any other chain. It takes
+  `changed_files` from the canonical change set (a project outside git lists them in the input
+  and gets a content snapshot instead), binds the tree with the evidence runner's fingerprint, and
+  renders the seven model-written fields as indented blocks, so no field line can forge the
+  `REVIEW PACKET v1` or `END REVIEW PACKET v1` boundary. The change set lists untracked files
+  without the user's global excludes file, as the edit-landing audit does, so a file only that
+  file ignores is still reviewed. It leaves out the plugin's own workflow artifacts under any
+  `.zensu` directory (state, logs, plans, review inputs, verification runs and the hook-event
+  log) and nothing else there, so an edit to the project's Zensu configuration is reviewed too.
+  With a receipt, the change set is taken
+  against the baseline the edit-landing audit recorded, and a `--baseline` that differs from it is
+  refused; the `change_set:` line names where the baseline came from (`baseline_source=receipt`,
+  `argument` or `none`). A chain that works in an Autopilot worktree below the anchor is reviewed
+  in that tree: with a receipt the packet takes the work tree the audit graded and refuses a
+  `--work-tree` naming another one, without one it takes a `--work-tree` the audit's topology
+  check accepts, and every listed path carries the work tree's location below the anchor as a
+  prefix, with a `work_tree:` line naming the measured tree. A tree the fingerprint cannot measure, such as one with more than 20000
+  untracked files, is bound by its reason and shown as `tree=unverified (<reason>)`. The
+  model-written fields may take 192 KiB together (`shorten its summaries` otherwise) and the
+  changed-file list 1 MiB (`review a change this large in smaller chains`), so a large change set
+  never reads as long summaries. The block carries a receipt line derived from the receipt bytes
+  and is stored under the round's review number in `.zensu/state/review-gate-<key>/`; `show`
+  prints it again. An unchanged block keeps its creation time, and a changed one replaces it.
+  After a successful `create` the command removes its `--input` file when that file lies in a
+  `.zensu/reviews/` directory of the project, because the input carries model-written summaries
+  and `.zensu/` is often committed; `finding-verify-v1.js --input` does the same with the findings
+  file it graded. An input elsewhere, or one that failed to parse, is left in place.
+- **The records.** On every `zensu:review-aspect`, `zensu:review-judge` and `zensu-review-*`
+  completion of an implementation-complete chain, `post-review-tdd-delegate.sh` records the
+  round, the role (a primary or a second judge run, by the `judge_run: second` last line), the
+  report heading, the digest of the one packet block in the prompt and, for a primary judge, whether
+  its report is substantive: status `completed`, a `## Aspect: judge` heading with a `JUDGE-<n>`
+  finding or `- (no findings)`, and no line starting with `REVIEW PACKET INVALID`. The report is
+  read from `handbackReport.text` when the reviewer delivered it through `SubagentHandback`,
+  otherwise from the text content. A run whose block differs from the canonical one gets advice
+  at once, naming the first differing line. A reviewer the host launches in the background, as
+  the Claude desktop app does with every subagent, answers with status `async_launched` and no
+  report: that launch is recorded with its agent id and its packet digest, counts as no run and
+  never as a failed judge, and the reviewer's hand-back, or outside auto mode its completion
+  notification, which `user-prompt-review-handback.sh` passes to the hook, completes it with the
+  report the frame or the notification's `<result>` carries. A notification completes a launch
+  only with status `completed` and a result that is not one of the host's two hand-back stubs,
+  and the gate decodes the `&lt;`, `&gt;` and `&amp;` the host writes there. A second completion
+  for the same agent is ignored.
+- **The consume refusal.** Before the hook claims a review ticket it refuses, with the ticket
+  left unconsumed and the cause and remedy in `additionalContext`, when the round has no
+  canonical packet, when the consume prompt's block is missing, duplicated or differs, when the
+  tree, the change set or the receipt changed after `create` (for a packet that recorded no
+  receipt, when an audit wrote one after `create`), when the latest run of a recorded
+  reviewer saw another block or completed before the block was created, when no recorded reviewer
+  reported on the block at all, or when `hooks.reviewJudge` is on, the review is the first one or
+  the panel is `full`, and no primary judge run returned a substantive report on the block after
+  it was created. A second judge run never stands in. Two failed primary runs on one block turn
+  the remedy into a stop: keep both results and report the chain as pending. A consume report
+  that starts a line with `REVIEW PACKET INVALID` is refused whatever the packet state. Every
+  remedy names the full `node <plugin root>/hooks/lib/review-packet-v1.js show` or `create`
+  command with the project root and the session key, and the seven fields a `create` input holds.
+  A workflow document the gate cannot read or validate holds the claim without a word, the way the
+  hook already treats a malformed or foreign document. A consume-mode reviewer the host launches
+  in the background is checked at its launch, and a refused launch is not recorded for its
+  arrival, so nothing it reports can claim. A passing launch records the block's digest, and the
+  arrival is checked again against that digest and with the report its hand-back or its
+  notification's result carries; a
+  refused arrival answers in the arrival's own `UserPromptSubmit` event, ends the wait for that
+  reviewer and leaves the ticket unconsumed. While background launches of the round have
+  delivered no report, as a hand-back or in a completion notification, the refusals for a missing
+  reviewer and a missing primary judge say to wait for them, and, where the host delivers neither,
+  to ask the user whether to set `hooks.reviewPacketGate` to `false`. A claim the Stop guard completes
+  from an arrival note, after the hook that received the hand-back was cut off, is checked as an
+  arrival on the round's records alone, because the note carries no report.
+- **Only the live ticket is judged.** The hook hands the gate the consume prompt's review ticket.
+  A completion whose ticket is not the chain's live, unconsumed ticket, or that arrives after the
+  code review was marked done, passes the gate as `not-current-ticket`; the ticket claim after it
+  then refuses that completion without a word, as it did before the gate existed, so a duplicate
+  or late completion never reads as a refusal of the current round.
+- **What engages it.** A chain generation engages the gate once it has a canonical packet or a
+  recorded reviewer run, or when a consume prompt carries a packet block. `--tdd-begin` removes
+  the previous generation's store, and so does the Stop hook when it seeds an adopted deferred
+  review. A `--review-rearm` and a `--chain-done` that reopens the review of a minted zero-change
+  ticket remove it too, because both restart the round count at 0 and the store is keyed by
+  round. A reset that fails prints `REVIEW GATE RESET UNAVAILABLE` and leaves the transition in
+  place. A consume review with no packet block and no reviewer run
+  recorded in the generation claims its ticket as before.
+- **Escape.** `hooks.reviewPacketGate: false` records nothing and checks nothing. It is a
+  config key, not a ledgered environment escape.
+
+Known bounds: a reviewer whose latest run completed before the round's packet was created blocks
+the consume review until it runs again on the block, so a hand-built block spawned before `create`
+is refused rather than counted; a report
+without an `## Aspect:` heading has no reviewer identity and cannot be superseded or block; the
+store sits in the session-writable `.zensu/state/`, so a Bash write can forge a record, as for
+every plugin store; a deferred review in a session that still holds an earlier generation's
+receipt is judged by that receipt, because only `--tdd-begin` retires one; and the judge's report
+is read from the PostToolUse `tool_response`, whose `handbackReport` shape was measured on Claude
+Code 2.1.299, or for a background reviewer from its hand-back frame, whose shape was measured in
+the desktop app in auto mode, or, outside auto mode, from the `<result>` of its completion
+notification, whose shape was measured on Claude Code 2.1.309 and 2.1.317 in `default` mode and in
+desktop transcripts in `plan` mode; the result rests on the host escaping `<`, `>` and `&` there,
+and no live desktop run of a background panel through the gate exists yet.
+
+## Terminal Edit-Landing Gate
+
+`--tdd-complete` accepts a clean edit-landing receipt. This gate checks at `--chain-done` that the
+receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --check-receipt
+--project <root> --session <key>`, which grades nothing and writes nothing.
+
+- **What fresh means.** The receipt is clean and carries the audit scope of this session and
+  project root. It names this session's run log, and that log still starts with the bytes the
+  audit read. Every claim the log now holds is one the receipt graded, and so is every bare
+  `WIRED` entry. The audited repository root is unchanged, every claimed file still hashes to what the
+  audit saw, and the working tree has the fingerprint the audit measured. Ordinary lines appended
+  to the run log after the audit, such as acceptance records, ledger lines and review notes, keep
+  the receipt fresh.
+- **What it prints.** `EDIT LANDING RECEIPT STALE — <cause>.`, then `Run: <audit command>` with
+  the bound project root, run log and session key, then the recovery guidance: keep the
+  original inputs or omit them, and add `--predicates` with current proofs where a claim is
+  pending. A value the command cannot carry safely is printed as a placeholder. A refusal exits
+  `1` and leaves the chain open.
+- **Where it applies.** The ticket-bound standalone terminus, evaluated together with the
+  full-suite and acceptance gates so one call names every refusal; the unqualified terminus when
+  the change count is zero or cannot be evaluated; and a bound Autopilot chain that closes with
+  outcome `pass`. Outcomes `max-rounds` and `no-changes` are not gated. A chain without a receipt
+  is exempt only while its change count is zero or cannot be evaluated (no `git`, a root outside a
+  work tree, a HEAD that names no commit). On such a count a receipt exempts the chain too when it
+  records `claims: 0` and the claim inventory of its run log completes with `claimed-files=0` and
+  `bare-wired=0`, so a step 5b audit of a chain that claimed nothing never wedges the zero-change
+  terminus; a claim or a bare `WIRED` entry logged after that audit arms the gate again, and the
+  refusal names the entry the receipt has not graded. An
+  inventory that does not complete arms the gate when its partial count is above zero, and
+  otherwise refuses with its own cause, `EDIT LANDING — … the claim inventory over its run log did
+  not complete …`, naming the `--inventory` command that shows why. That is stricter than
+  `--tdd-complete`, where an inventory that answered nothing leaves the requirement on the change
+  set alone, because this gate is the last point at which a claim logged after the audit can be
+  caught. With changes it refuses with `no edit-landing receipt exists for this session`, and when
+  git cannot list the changes the refusal names git, not the audit.
+- **A deferred review the Stop hook adopted.** Its generation is seeded already implemented, so
+  no step 5b audit runs in it. Without a receipt it closes on any change count and prints
+  `EDIT LANDING — not checked: this chain is a deferred review the Stop hook adopted, and no
+  edit-landing audit ran in it, so there is no receipt to judge.`, which is the review packet's
+  `none` mode at the terminus; the exemption records no bypass-ledger entry, because no gate was
+  escaped. Once an audit in that generation writes the session's receipt, for example after a fix
+  round, the receipt is checked like any other. The seed retires a receipt the session still holds
+  from an earlier generation exactly as `--tdd-begin` does, by renaming it to a unique
+  `.superseded-*` name, and discloses `RECEIPT RETIREMENT UNRESOLVED` on stderr when it cannot, so
+  an earlier generation's clean verdict never closes the deferred review.
+- **A tree the fingerprint cannot measure.** More than 20000 untracked files, or more than 512 MiB
+  of them, leave the evidence runner's fingerprint without a tree id. The audit then seals the
+  receipt with no tree id and the reason, and the audit and every freshness check print
+  `TREE UNVERIFIED — <reason>; the receipt binds the run log and the claimed files, not the rest of
+  the working tree.` The receipt stays fresh while the reason stays the same, so a change outside
+  the claimed files is not detected there; the terminus prints the line beside its verdict. A git
+  failure is still a fault, never an unverified tree.
+- **Audit bounds.** Each bound refuses the audit with its remedy in the message:
+
+  | Bound | Limit | Remedy |
+  |---|---|---|
+  | Claimed files in one run log | 2000 | name each file once per step, or arm a new generation with `--tdd-begin`, which starts an empty audit scope |
+  | Literals in one predicate list | 100, each at most 4096 bytes | prove the claim with fewer, shorter literals |
+  | File a literal predicate reads | 8 MiB | withdraw that claim with `CLAIM WITHDRAWN` |
+  | Claimed files hashed by one audit | 64 MiB in total | claim source files rather than generated artifacts, or arm a new generation |
+  | Receipt with its audit scope | 4 MiB | claim fewer files in this generation, or arm a new generation |
+  | Working audit scope | 16 MiB | the same |
+  | Run log | none | read in 1 MiB chunks, so a long log never refuses |
+
+  The predicate document and the `--dirty-before` list are read up to 4 MiB each. A sealed receipt
+  over the receipt bound is refused with `RECEIPT REFUSED` before it replaces anything, so the
+  nonclean checkpoint the audit wrote at its start stays in place.
+- **Bypass** with `ZENSU_EDIT_LANDING_GATE=off`, the switch that also exempts `--tdd-complete`.
+  The escape is recorded in the bypass ledger only where the gate applies, and a chain whose
+  ledger already records it is not gated again.
+- **What it does not prove.** The receipt and the run log are ordinary files in the project tree,
+  so the gate stops a chain from closing on a stale receipt by accident, not a model that writes
+  one on purpose. A file no claim names is covered only by the tree fingerprint, and without a
+  receipt nothing locates the run log of a chain whose change count is zero.
+
 ## Full-Suite Gate
 
 A reviewed chain closes only on a green full-suite run of the current tree. The plugin runs the
@@ -1300,7 +1627,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   nested below the anchor, that fingerprint, and the one an `--evidence-run --scope acceptance`
   run records, is the combined fingerprint of the project and that worktree, so an edit in the
   worktree makes every record `stale`; when the worktree cannot be resolved, both verbs and the
-  acceptance run exit `2` and name the cause. The plan is the one named by this session's
+  acceptance run exit `2` and name the cause, and `--acceptance-status` prints it as an
+  `ACCEPTANCE STATUS — unavailable` summary line. The plan is the one named by this session's
   edit-landing receipt.
   `zensu-log.sh --acceptance-status --log <run log>` prints every criterion's state on the
   current tree and exits 0 only when all active criteria pass. Its summary line carries the same

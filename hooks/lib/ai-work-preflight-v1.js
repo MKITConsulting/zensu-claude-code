@@ -3,6 +3,8 @@
 // Only local CLI help/version is probed. Never authenticate, bind or submit here.
 const cp = require('node:child_process');
 const fs = require('node:fs');
+const path = require('node:path');
+const { INSTALL } = require('./zensu-cli-version-v1.js');
 const REQUIRED = Object.freeze({
   bind: ['product', 'confirm'],
   context: ['feature', 'feature-revision', 'cross-product'],
@@ -10,7 +12,8 @@ const REQUIRED = Object.freeze({
   get: ['json'],
   submit: ['event-id', 'expected-version', 'artifact', 'criteria-version', 'review-file'],
 });
-const guidance = 'Run zensu update, then verify zensu --version and the executable selected by PATH. If update is unknown, use the original installer: Homebrew users run brew update then brew upgrade --cask mkitconsulting/tap/zensu; other users follow docs/cli-install-update.md. Do not replace a package-manager installation with another installer.';
+const installGuide = path.resolve(__dirname, '../../docs/cli-install-update.md');
+const guidance = `If zensu is not installed, install it with ${INSTALL.homebrew}, ${INSTALL.script}, or on Windows ${INSTALL.powershell}. If it is installed, run zensu update, then verify zensu --version and the executable selected by PATH. If update is unknown, use the original installer: Homebrew users run ${INSTALL.homebrewUpgrade}; other users follow ${installGuide}. Do not replace a package-manager installation with another installer.`;
 function check(workspace, budgetMs = 8000) {
   const deadline = Date.now() + budgetMs;
   const env = { ...process.env, ZENSU_NO_UPDATE_CHECK: '1' };

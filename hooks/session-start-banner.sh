@@ -232,7 +232,7 @@ fi
 if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-zen-mode.sh" ] && zensu_hook_enabled zenMode && zensu_zen_mode_default_on; then
   echo "zensu: zen-mode — on by default: answers lead with the result, keep the substance whole and end with one next step; your own CLAUDE.md, output style or a style mode you chose outranks it. Say \"zen off\" to leave it for this session, or set hooks.zenModeDefault=false in ~/.zensu/config.json to make it opt-in."
 fi
-echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:build · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
+echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:change · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:build · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
 _ZENSU_CLI_PROBE=""
 if command -v node >/dev/null 2>&1; then
   _ZENSU_CLI_PROBE="$(cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null && node -e 'process.exitCode = require("./zensu-cli-version-v1.js").cliMain(["--lookup"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" || _ZENSU_CLI_PROBE=""
@@ -248,14 +248,14 @@ if [ -n "${ZENSU_SESSION_TOKEN:-}" ]; then
 fi
 if command -v zensu >/dev/null 2>&1; then
   case "$_ZENSU_CLI_STATE" in
-    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release Zensu skills support: older releases print only the first 100 ghost-scan candidates and read only the first page of wiki lists. Upgrade: brew upgrade --cask zensu, or run the installer again: curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex." ;;
+    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release this plugin supports: older releases cannot declare a goal's feature, so AI-work capture fails. Upgrade: brew update && brew upgrade --cask mkitconsulting/tap/zensu, or run the installer again: curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex." ;;
     (ok) echo "zensu: CLI ready ($(command -v zensu), $_ZENSU_CLI_VERSION) — Zensu skills drive it.$_ZENSU_CLI_AUTH_HINT" ;;
     (*) echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it.$_ZENSU_CLI_AUTH_HINT" ;;
   esac
 else
   _ZENSU_CLI_NEED="it"
-  [ -n "$_ZENSU_CLI_FLOOR" ] && _ZENSU_CLI_NEED="zensu-cli $_ZENSU_CLI_FLOOR or later"
-  echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need $_ZENSU_CLI_NEED. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex$_ZENSU_CLI_LOGIN_STEP."
+  [ -n "$_ZENSU_CLI_FLOOR" ] && _ZENSU_CLI_NEED="zensu-cli $_ZENSU_CLI_FLOOR or later, the oldest release this plugin supports"
+  echo "zensu: ⚠ 'zensu' CLI not found on PATH — feature tracking and AI-work capture need $_ZENSU_CLI_NEED. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex$_ZENSU_CLI_LOGIN_STEP."
 fi
 echo "zensu: Hide this banner: set hooks.sessionBanner=false in ~/.zensu/config.json."
 }

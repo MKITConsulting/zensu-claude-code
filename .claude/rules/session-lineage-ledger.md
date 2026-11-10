@@ -46,6 +46,21 @@ groups by window. `ZENSU_CCD_STORE` overrides the probe list and is AUTHORITATIV
 applies the same override rule, so a change to it here moves that function too
 (`.claude/rules/session-delivery-route.md`).
 
+**Session-trail reads the desktop store under the resolver's owner and mode rule.** On
+every platform it refuses a symbolic link where a folder or a record is expected, a record
+that is not a regular file and a record larger than 8 MiB, and off Windows also a store,
+account or organization folder and a record that another uid owns or that carries a group
+or other write bit, through `hooks/lib/desktop-store-read-v1.js`, the module
+`hooks/lib/linked-session-v1.js` loads too. The reason is that store values steer steps no one confirms: the takeover plan pass
+measures folders the records name, `isArchived` lifts the release busy gate, and the
+store's account picks the saved presets and the account an edge endpoint records, so an
+account folder the check refuses leaves that endpoint's account `null`. The readers, the
+refusal reasons, the costs and the pins are in
+`.claude/rules/session-trail-targeted-lookup.md`. The resolver answers a refusal its own
+way: a refused store, folder or own record answers `none`, while a refused parent record
+answers `linked` without a parent root (`parent-record-unavailable`), so that session
+stays linked and inherits nothing (`.claude/rules/session-delivery-route.md`).
+
 **The edge's `repo` comes from the HANDED-OVER work, never from the recording
 process's cwd.** The documented takeover route runs from a window in a different repo,
 so deriving it from the recorder filed the edge under the taker's repo and made the

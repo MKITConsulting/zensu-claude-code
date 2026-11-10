@@ -256,6 +256,12 @@ grows past 64 directories is denied (`directories`).
   `evals/session-control/tests/live-evidence-negative.test.js` and the stub denial in
   `evals/session-control/tests/wrapper-selftest.sh`.
 - The config-layer deny: `test-reviewer-capability-gate.sh`.
+- The shell grammar: `RESERVED_WORDS`, `ASSIGNMENT_RE`, `DIRECTORY_WRAPPERS` and `WRAPPERS` here
+  restate what `RESERVED_WORDS`, `SHELL_ASSIGNMENT`, `SHELL_WRAP` and `WRAPPER_OPTIONS` say in
+  `hooks/lib/bash-source-write-parse.js`. The unit case `the shell readers of the source-write
+  parser and the subagent shell guard, compared over one corpus` in
+  `tests/structure/git-repo-escape.test.js` pins where the two readers agree and the three places
+  they differ: `env -S`, `sudo -h` and the wrappers only this guard sees through.
 - The neutral sentence of `renderHostContext` in `hooks/lib/session-control-core-v1.js`: pinned
   verbatim in `tests/structure/test-session-control-claude.sh` and
   `evals/session-control/tests/wrapper-selftest.sh`; `test-reviewer-capability-gate.sh` checks

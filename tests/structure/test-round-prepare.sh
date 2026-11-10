@@ -242,5 +242,20 @@ OUT10="$(HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" bash "$LOG" --ro
   && ! grep -qF 'token' "$DIFF"; }
 check "RP14 a changed path the user's own git excludes ignore stays out of the packet lists and the round diff" "$(verdict $?)"
 
+RP15_IGNORED=$'secret-\303\244.env'
+RP15_CHANGED=$'src/r\303\251sum\303\251.js'
+printf '%s\n' "$RP15_IGNORED" >> "$WORK/home/.config/git/ignore"
+printf 'token2\n' > "$PROJ/$RP15_IGNORED"
+printf 'nine\n' > "$PROJ/$RP15_CHANGED"
+note "R4-F1 IMPL completed — files: $RP15_CHANGED"
+OUT11="$(HOME="$WORK/home" XDG_CONFIG_HOME="$WORK/home/.config" bash "$LOG" --round-prepare --log "$RUN" --round 4 2>"$WORK/prep.err")"; RC11=$?
+{ [ "$RC11" -eq 0 ] \
+  && printf '%s' "$OUT11" | grep -qxF 'user_ignored: 2 changed path(s) your own git excludes ignore are left out of the packet lists and the round diff' \
+  && printf '%s\n' "$OUT11" | grep '^judge_changed_files: ' | grep -qF "$RP15_CHANGED" \
+  && ! printf '%s' "$OUT11" | grep -qF 'secret-' \
+  && ! printf '%s' "$OUT11" | grep -qF '\303' \
+  && grep -qF 'nine' "$DIFF" && ! grep -qF 'token2' "$DIFF"; }
+check "RP15 a non-ASCII path reaches the packet lists and the round diff as UTF-8, and one the user's own excludes ignore stays out (rc=$RC11)" "$(verdict $?)"
+
 unit_check_done "RP99 every unit file the registry gives this suite was graded"
 finish

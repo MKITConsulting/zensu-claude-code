@@ -81,7 +81,7 @@ When no pre-merged marker is present:
 
 ## Report
 
-Filter, deduplicate, and sort findings CRITICAL -> IMPORTANT -> SUGGESTION -> file path. Verdict is NEEDS CHANGES for any CRITICAL, PASS WITH SUGGESTIONS for remaining findings, otherwise PASS.
+Filter, deduplicate, and sort findings CRITICAL -> IMPORTANT -> SUGGESTION -> file path. Verdict is NEEDS CHANGES for any CRITICAL, PASS WITH SUGGESTIONS for remaining findings, otherwise PASS. The verdict rates review quality only and selects no workflow action: the post-review hook applies the configured fix routing (`hooks.autoFixSeverity`, the do-not-fix annotations and the round budget), and its directive is the only next step. Never add a directive, a next action, a fix-round demand, a convergence decision or a promise to re-run reviewers.
 
 ```text
 # Code Review Report

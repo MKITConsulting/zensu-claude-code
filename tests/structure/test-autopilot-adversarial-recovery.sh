@@ -397,6 +397,28 @@ else
   check "X8 parallel finish/rearm cannot create BLOCKED plus active unfinished Inner" FAIL
 fi
 
+P8B="$ROOT/rearm-gate-store"
+R8B=adversarial_rearm_gate_run
+S8B=adversarial_rearm_gate_session
+C8B=adversarial-rearm-gate-chain
+prepare_session "$P8B" "$S8B" S8B || exit 1
+T8B="$(seed_exhausted_review "$P8B" "$R8B" "$S8B" 1 "$C8B")" || exit 1
+STORE8B="$(node -e '
+  const packets = require(process.argv[1]);
+  process.stdout.write(packets.ensureStore(packets.canonicalRoot(process.argv[2]), process.argv[3]));
+' "$PLUGIN_DIR/hooks/lib/review-packet-v1.js" "$P8B" "$S8B" 2>/dev/null)"
+OUT8B="$(CLAUDE_PROJECT_DIR="$P8B" bash "$LOG" --review-rearm --session "$S8B" --autopilot-run "$R8B" \
+  --autopilot-attempt 1 --chain-id "$C8B" --claimed-review-ticket "$T8B" 2>&1)"; RC8B=$?
+TF8B="$(tdd_state_file "$S8B")"
+if [ -n "$STORE8B" ] && [ "$RC8B" -eq 0 ] && [ ! -e "$STORE8B" ] \
+  && ! printf '%s' "$OUT8B" | grep -qF 'REVIEW GATE RESET UNAVAILABLE' \
+  && field_ok "$TF8B" 'value.reviewRound === 0 && value.codeReviewDone === false && value.chainDone === false'; then
+  check "X8b the bound --review-rearm arm removes the review packets and reviewer records of the rounds before it" PASS
+else
+  check "X8b bound --review-rearm store reset (rc=$RC8B store='$STORE8B')" FAIL
+  printf '%s\n' "$OUT8B"
+fi
+
 # A terminal outer run may clear only the generation it still names. A stale
 # attempt-N reset must lose its CAS once attempt N+1 owns both files.
 P9="$ROOT/stale-reset"

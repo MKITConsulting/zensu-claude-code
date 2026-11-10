@@ -364,7 +364,9 @@ Z8F_TOTAL="$(grep -c . "$PLUGIN_DIR/hooks/lib/zensu-log.sh" || true)"
 Z8F_TOTAL="${Z8F_TOTAL:-0}"
 { [ "$Z8F_LINES" -gt 0 ] && [ "$Z8F_LINES" -lt $((Z8F_TOTAL / 4)) ]; }
 check "Z8f-control the begin-success slice is bounded (${Z8F_LINES} lines), not a run to EOF" "$(verdict $?)"
-printf '%s\n' "$Z8F_SLICE" | grep -qF '_tdd_locked_run'
+Z8F_WRAPPER="$(awk '/^tdd_retire_edit_landing_receipt\(\) \{/,/^}$/' "$PHASE_LIB")"
+{ printf '%s\n' "$Z8F_SLICE" | grep -qF 'tdd_retire_edit_landing_receipt "$session_val"' \
+  && printf '%s\n' "$Z8F_WRAPPER" | grep -qF '_tdd_locked_run "$state_file" _tdd_retire_receipt_critical "$receipt"'; }
 check "Z8f the retirement runs under the workflow document's external lease" "$(verdict $?)"
 # ORDERING is a contract, not layout. The retirement used to run above the arm,
 # so a REFUSED `--tdd-begin` — a held workspace, a storage fault, a bad argument —
@@ -386,7 +388,7 @@ z8c_holds() {
   [ -n "$arm" ] || return 1
   end="$(awk -v s="$arm" 'NR>s && /^        else$/{print NR; exit}' "$src")"
   [ -n "$end" ] || return 1
-  mv="$(grep -n '_tdd_retire_receipt_critical "\$begin_receipt"' "$src" 2>/dev/null | head -1 | cut -d: -f1)"
+  mv="$(grep -n 'tdd_retire_edit_landing_receipt "\$session_val"' "$src" 2>/dev/null | head -1 | cut -d: -f1)"
   [ -n "$mv" ] || return 1
   [ "$mv" -gt "$arm" ] && [ "$mv" -lt "$end" ]
 }
@@ -397,9 +399,9 @@ check "Z8c the receipt retirement runs only on the SUCCESSFUL arm of --tdd-begin
 # silently re-grades the claim-armed section by the change set instead of by the
 # claim it is named for.
 Z8C_MUT="$PROJ/.zensu/z8c-mutant.sh"
-grep -v '_tdd_retire_receipt_critical "\$begin_receipt"' "$Z8C_SRC" > "$Z8C_MUT"
-grep -n '_tdd_retire_receipt_critical "\$begin_receipt"' "$Z8C_SRC" | head -1 | cut -d: -f2- >> "$Z8C_MUT"
-{ grep -q '_tdd_retire_receipt_critical "\$begin_receipt"' "$Z8C_MUT" && ! z8c_holds "$Z8C_MUT"; }
+grep -v 'tdd_retire_edit_landing_receipt "\$session_val"' "$Z8C_SRC" > "$Z8C_MUT"
+grep -n 'tdd_retire_edit_landing_receipt "\$session_val"' "$Z8C_SRC" | head -1 | cut -d: -f2- >> "$Z8C_MUT"
+{ grep -q 'tdd_retire_edit_landing_receipt "\$session_val"' "$Z8C_MUT" && ! z8c_holds "$Z8C_MUT"; }
 check "Z8c-mut the same predicate REJECTS a retirement moved out of the success block" "$(verdict $?)"
 
 # From here on the project really changed, so the gate is in scope.
@@ -662,7 +664,7 @@ check "I2 the library wrote a receipt under the audited project's state dir" "$(
 [ "$(basename "$LIB_WROTE")" = "$(basename "$EXPECTED")" ]
 check "I3 library and gate agree on the receipt FILENAME (session-key derivation matches)" "$(verdict $?)"
 # Same project for both: audit the session's own project root, as the skill does.
-bash "$LIB" --log "$REPO/run.log" --project "$REPO" --receipt "$EXPECTED" >/dev/null 2>&1
+bash "$LIB" --log "$REPO/run.log" --project "$REPO" --session "$SID_I" --receipt "$EXPECTED" >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session "$SID_I" >/dev/null 2>&1
 [ $? -eq 0 ]
 check "I4 completion is accepted after the audit deposits the receipt where the gate reads" "$(verdict $?)"
@@ -866,7 +868,7 @@ check "Z14-control an ordinary receipt is retired without the line" "$(verdict $
 # reintroduction takes. Strip comments and search for the fixed string, and
 # prove the pipeline reports a PLANTED one rather than asserting an absence
 # nothing establishes is detectable.
-Z14B_CODE="$(grep -vE '^[[:space:]]*#' "$LOG")"
+Z14B_CODE="$(grep -vE '^[[:space:]]*#' "$PHASE_LIB")"
 { ! printf '%s\n' "$Z14B_CODE" | grep -qF 'dest="${receipt}.superseded"'; }
 check "Z14b the retirement has no fixed-name fallback to overwrite or unlink" "$(verdict $?)"
 Z14B_PROBE="$PROJ/.zensu/z14b-probe.sh"
@@ -1098,6 +1100,52 @@ WT_LEASED="$(with_autopilot_lease "$PROJ_CANON" bash "$LOG" --chain-work-tree --
 WT_LEASE_SECS=$(( $(date +%s) - WT_LEASE_START ))
 { [ "$WT_LEASED_RC" -eq 0 ] && [ "$WT_LEASED" = "$WTB" ] && [ "$WT_LEASE_SECS" -lt 8 ]; }
 check "WB12 the resolver answers while another process holds the project lease, so it takes none (${WT_LEASE_SECS}s)" "$(verdict $?)"
+WT_STATE="$(tdd_state_file "$SID_WT")"
+cp "$WT_STATE" "$PROJ_CANON/.zensu/wt-state.pre"
+printf '{"not":"a workflow document"}\n' > "$WT_STATE"
+WT_LINK_ERR="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>&1 >/dev/null)"; WT_LINK_RC=$?
+WT_LINK_RP="$(bash "$LOG" --round-prepare --round 2 --log "$WT_LOG_FILE" --baseline "$WT_BASE_SHA" 2>&1)"; WT_LINK_RP_RC=$?
+cp "$PROJ_CANON/.zensu/wt-state.pre" "$WT_STATE"
+{ [ "$WT_LINK_RC" -eq 2 ] \
+  && printf '%s\n' "$WT_LINK_ERR" | grep -qxF 'zensu-log.sh --chain-work-tree: corrupt or incomplete Autopilot linkage' \
+  && [ "$WT_LINK_RP_RC" -eq 2 ] \
+  && printf '%s\n' "$WT_LINK_RP" | grep -qxF "ROUND PREPARE STOPPED — chain: the chain's Autopilot linkage could not be read"; }
+check "WB17 an unreadable workflow document keeps the linkage refusal of --chain-work-tree and of --round-prepare (rc=$WT_LINK_RC/$WT_LINK_RP_RC)" "$(verdict $?)"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.argv[2]; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE" "$PROJ_CANON/.claude/worktrees/gone"
+WT_GONE_RP="$(bash "$LOG" --round-prepare --round 2 --log "$WT_LOG_FILE" --baseline "$WT_BASE_SHA" 2>&1)"; WT_GONE_RP_RC=$?
+cp "$WT_RUN_SAVED" "$WT_RUN_FILE"
+{ [ "$WT_GONE_RP_RC" -eq 2 ] \
+  && printf '%s\n' "$WT_GONE_RP" | grep -qF "ROUND PREPARE STOPPED — work-tree: the chain's work tree could not be resolved: " \
+  && printf '%s\n' "$WT_GONE_RP" | grep -qF 'work tree not found'; }
+check "WB18 a workspaceRoot that names no work tree stops --round-prepare with the resolver's cause (rc=$WT_GONE_RP_RC)" "$(verdict $?)"
+cp "$WT_STATE" "$PROJ_CANON/.zensu/wt-state.open"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.implComplete = true; s.chainDone = true; s.chainOutcome = "pass"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_STATE"
+WT_CLOSED="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"; WT_CLOSED_RC=$?
+WT_CLOSED_RP="$(bash "$LOG" --round-prepare --round 0 --log "$WT_LOG_FILE" --baseline "$WT_BASE_SHA" 2>&1)"; WT_CLOSED_RP_RC=$?
+WT_CLOSED_TOP="$(node -e 'try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).top)); } catch (_) {}' "$WT_SNAP")"
+cp "$PROJ_CANON/.zensu/wt-state.open" "$WT_STATE"
+node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.active = false; s.chainDone = false; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_STATE"
+WT_INACTIVE="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"; WT_INACTIVE_RC=$?
+cp "$PROJ_CANON/.zensu/wt-state.open" "$WT_STATE"
+WT_REOPENED="$(bash "$LOG" --chain-work-tree --session "$SID_WT" 2>/dev/null)"
+{ [ "$WT_CLOSED_RC" -eq 0 ] && [ "$WT_CLOSED" = "$PROJ_CANON" ] \
+  && [ "$WT_CLOSED_RP_RC" -eq 0 ] && [ "$WT_CLOSED_TOP" = "$PROJ_CANON" ] \
+  && [ "$WT_INACTIVE_RC" -eq 0 ] && [ "$WT_INACTIVE" = "$PROJ_CANON" ] \
+  && [ "$WT_REOPENED" = "$WTB" ]; }
+check "WB19 once the bound chain is done, or inactive with its linkage kept, --chain-work-tree and --round-prepare answer the anchor's top, where --evidence-run then runs (got '$WT_CLOSED' / '$WT_CLOSED_TOP' / '$WT_INACTIVE' / '$WT_REOPENED')" "$(verdict $?)"
+[ "$WT_CLOSED_RP_RC" -eq 0 ] || printf '%s\n' "$WT_CLOSED_RP" | head -6 | sed 's/^/        /'
+{ [ "$(grep -c '_zensu_chain_work_tree "' "$LOG")" -eq 1 ] \
+  && grep -qF '_zensu_chain_work_tree "$ctx" "$CLAUDE_PROJECT_DIR"' "$LOG" \
+  && grep -qF '_zensu_bound_work_tree "$cwt_session" "$cwt_dir"' "$LOG" \
+  && grep -qF '_zensu_bound_work_tree "${ZENSU_SESSION_KEY:-}" "$_rp_tmp"' "$LOG" \
+  && grep -qF '_zensu_bound_work_tree "$session_val" "$_tc_wt_dir" "$complete_ctx"' "$LOG"; }
+check "WB20 the linkage reaches the work-tree resolver only inside the one lookup, which --chain-work-tree, --round-prepare and --tdd-complete call" "$(verdict $?)"
+{ grep -A1 -F "trap 'rm -rf \"\$cwt_dir\"' EXIT" "$LOG" | grep -qF '_zensu_bound_work_tree "$cwt_session" "$cwt_dir"' \
+  && grep -A1 -F 'rm -rf "$cwt_dir"' "$LOG" | grep -qxF '    trap - EXIT' \
+  && grep -B1 -F "trap 'rm -rf \"\$_tc_wt_dir\"' EXIT" "$LOG" | grep -qF 'if _tc_wt_dir="$(mktemp -d 2>/dev/null)"; then' \
+  && grep -A1 -F "trap 'rm -rf \"\$_tc_wt_dir\"' EXIT" "$LOG" | grep -qF '_zensu_bound_work_tree "$session_val" "$_tc_wt_dir" "$complete_ctx"' \
+  && grep -A1 -F 'rm -rf "$_tc_wt_dir"' "$LOG" | grep -qxF '            trap - EXIT'; }
+check "WB21 --chain-work-tree and the bound branch of --tdd-complete arm an EXIT trap right after their mktemp, and clear it after the explicit removal" "$(verdict $?)"
 
 echo "----"
 echo "test-tdd-complete-receipt-gate: $T_PASS PASS / $T_FAIL FAIL"

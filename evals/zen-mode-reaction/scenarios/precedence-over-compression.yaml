@@ -37,7 +37,7 @@ assert:
       return {
         pass: ok,
         score: ok ? 1 : 0,
-        reason: (ok ? "Low article density — the style mode the user turned on outranked zen-mode's full sentences. " : "Rule 4 / Precedence: the user's own style mode outranks zen-mode, so the caveman directive shapes the reply and articles are dropped. ")
+        reason: (ok ? "Low article density — the style mode the user turned on outranked zen-mode's full sentences. " : "Precedence: the user's own style mode outranks zen-mode, so the caveman directive shapes the reply and articles are dropped. ")
           + "articles=" + articles + " words=" + words + " ratio=" + ratio.toFixed(3)
       };
   - type: javascript

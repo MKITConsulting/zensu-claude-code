@@ -142,6 +142,14 @@
     {
       "path": "tests/structure/test-code-roots.sh",
       "reason": "The only native-Windows marker is the platform guard that skips the suite on Git Bash before it grades anything: its fixtures need POSIX symlinks, perl -pi on a plugin copy and a git owner other than the caller, so code roots stay unmeasured on native Windows. The suite is in ciStructureTests, so the weekly Windows Safety run still executes it and passes through that skip."
+    },
+    {
+      "path": "tests/structure/test-gitlab-live-workflow.sh",
+      "reason": "The only native-Windows marker is the platform guard that skips the lane, gitlab-up, installer and drift checks on Git Bash: the live GitLab tier and its drift job run on Linux and macOS hosts only, and glab-install.sh refuses every other platform. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes its workflow and pin checks and passes through that skip."
+    },
+    {
+      "path": "tests/structure/test-playwright-cli-drift.sh",
+      "reason": "The only native-Windows marker is the platform guard that skips the executed drift, step and mutation checks on Git Bash: the playwright-cli drift workflow runs on Ubuntu only, and those checks read their fixtures through file:// URLs and link the hooks directory into a mutant tree. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes its workflow and script checks and passes through that skip."
     }
   ]
 }

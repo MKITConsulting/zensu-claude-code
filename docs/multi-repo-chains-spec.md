@@ -50,10 +50,10 @@ Nothing in this proposal weakens that.
 
 One of the consumers named in §6.3 does NOT sit on that binding: the audit's
 default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
-(`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
+(`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:2226`) and counts through the shared helper (`:2277`),
+(`hooks/lib/zensu-log.sh:2330`) and counts through the shared helper (`:2389`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:130-131`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -63,11 +63,11 @@ variable names for the audit in a multi-root topology, and what the fallback mea
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:128`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:543-572`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:1415`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:56`, flag at `:140`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:782-826`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:232`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:2215`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2319`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -89,9 +89,9 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 
 **The write gate confines Bash writes while it is opted in, the edit gate does not confine
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!inUnion(p)`
-(`hooks/lib/bash-source-write-parse.js:960`), whose union is the project root alone until a
-code root is declared, and rule (C) at the same predicate for git targets (`:1006`), with
-`projectRoot` taken from the passed `CLAUDE_PROJECT_DIR` (`:831`).
+(`hooks/lib/bash-source-write-parse.js:2533`), whose union is the project root alone until a
+code root is declared, and rule (C) at the same predicate for git targets (`:2579`), with
+`projectRoot` taken from the passed `CLAUDE_PROJECT_DIR` (`:2399`).
 `hooks/checks/pre-edit-tdd-reminder.sh:132-152` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
@@ -553,7 +553,7 @@ the list from an inherited or a command environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2839`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2906`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -570,7 +570,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5027`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:5094`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -802,12 +802,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/build/references/audit.md:61`) and runs in vanilla
+Drift Audit does the same (`skills/build/references/audit.md:63`) and runs in vanilla
 (`skills/build/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/build/references/audit.md:67`), which is a test vanilla cannot be made to produce.
+(`skills/build/references/audit.md:69`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/build/references/audit.md:69`), AND reword the finding
+level as step 6c already is (`skills/build/references/audit.md:71`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no
