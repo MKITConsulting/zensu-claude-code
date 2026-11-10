@@ -132,7 +132,7 @@ test('the gate rides the Bash and PowerShell matcher and names two hook files th
   assert.deepEqual([...consent.CLI_BASENAMES], ['playwright-cli', 'playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']);
   assert.equal(consent.RUN_CONFIG_NAME, 'playwright-cli.json');
   assert.equal(consent.RUN_OUTPUT_DIR_NAME, 'browser');
-  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.23');
+  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.24');
 });
 
 test('SESSION_RE admits only a lower-case zensu-verify name of bounded length', () => {

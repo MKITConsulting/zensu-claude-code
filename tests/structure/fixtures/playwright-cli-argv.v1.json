@@ -2,11 +2,11 @@
   "schema": 1,
   "source": {
     "package": "@playwright/cli",
-    "version": "0.1.23",
+    "version": "0.1.24",
     "bin": [
       "playwright-cli"
     ],
-    "playwrightCore": "1.65.0-alpha-2026-10-30"
+    "playwrightCore": "1.66.0-alpha-1794252756000"
   },
   "booleanOptions": [
     "all",

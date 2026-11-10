@@ -104,7 +104,7 @@ app's screenshots and accessibility tree are its DOM and visual planes (run-owne
 data; a deployed backend or a real account needs the user's yes first), while raw logs of an
 authenticated session stay PARTIAL unless the data is proven synthetic.
 
-**Electron and Tauri are `desktop`.** `playwright-cli` 0.1.23 has no command that launches an
+**Electron and Tauri are `desktop`.** `playwright-cli` 0.1.24 has no command that launches an
 Electron app, and the consent gate denies `attach` on a `zensu-verify` session.
 
 **Never `xcodebuild` before the build, and never the user's DerivedData.** Measured with Xcode

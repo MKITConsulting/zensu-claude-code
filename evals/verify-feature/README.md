@@ -53,7 +53,8 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
 ```
 
 The runner requires authenticated `claude`, `promptfoo`, and `playwright-cli` on `PATH` (the
-grader was written against `playwright-cli` 0.1.23), plus a Chrome or Chromium build that
+run-config helper accepts only the measured version, `playwright-cli` 0.1.24, and the grader in
+`assertions/transcript-check.js` parses its response lines), plus a Chrome or Chromium build that
 `playwright-cli` can drive. The runner never installs a browser. It sets
 `ZENSU_PLUGIN_DIR_OVERRIDE` to this checkout, uses a temporary writable `PROMPTFOO_CONFIG_DIR`,
 and disables Promptfoo cache, sharing, and result writes plus telemetry. Snapshots and

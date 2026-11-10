@@ -43,10 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
   passed, so on its own it can miss a new release.
 - **verify-feature**: the browser consent gate is now measured against `playwright-cli`
-  0.1.23, and the run-config helper refuses to start a browser verification run on any other
-  version, 0.1.21 included. Upgrade with `npm install -g @playwright/cli@0.1.23`.
+  0.1.24, and the run-config helper refuses to start a browser verification run on any other
+  version, 0.1.21 included. Upgrade with `npm install -g @playwright/cli@0.1.24`.
   `brew install playwright-cli` is unpinned: the helper refuses it unless Homebrew ships
-  exactly 0.1.23.
+  exactly that version. A session that was running when the plugin updated keeps its earlier
+  plugin root, whose helper still accepts only 0.1.21 and tells you to install 0.1.21 again; do
+  not follow it, but start a fresh session for `/zensu:verify-feature` after upgrading
+  `playwright-cli`.
 
 ## [0.36.0] - 2026-11-07
 

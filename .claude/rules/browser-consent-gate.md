@@ -174,13 +174,13 @@ and the skill's instruction to use only the printed session is prose, not a boun
    `--json/--raw/--help/--version` harmless everywhere and a repeated flag denied. `COMMAND_DENIED` and `FLAG_DENIED` scope the refusal to
    `/zensu:verify-feature` and forbid a retry under another session name or program. The arguments
    are parsed by `parseCliArgs`, a port of the CLI's own minimist parser MEASURED against
-   `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.23) and pinned by a golden fixture recorded from that
+   `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.24) and pinned by a golden fixture recorded from that
    version's own parser; an argument shape it does not recognize denies rather than admits — an
    unknown option on a gated call, and, through step 7, a `zensu-verify` name no call resolves.
    A flag a newer CLI adds stays off the allowlist until a change admits it: 0.1.23 added
    `tab-new --isolated-context`, `find --filename` and `--max-results`, and `--all` on `console`
    and `requests`, and each denies `FLAG_DENIED`; `find --filename` would be a file-write channel
-   outside the run directory. The unknown-flag unit case holds all five.
+   outside the run directory. The unknown-flag unit case holds all five; 0.1.24 adds no flag.
    **The per-call order matters:** the wrapper ladder decides only the deny REASON, never whether a
    call is admitted.
 5. **`open`** must carry `--config=<absolute path>`, and the gate reads that file itself through
@@ -222,12 +222,13 @@ and the skill's instruction to use only the printed session is prose, not a boun
 **The run config is where the browser's own fences live.** `buildConfig` writes an isolated browser,
 `--no-proxy-server`, one `--host-resolver-rules` pin per remote hostname, `serviceWorkers: 'block'`,
 `network.allowedOrigins`, and `outputDir` under the run directory. MEASURED with 0.1.21, and again
-with 0.1.23 driving Google Chrome 156.0.8078.81: a `goto` to an origin outside `allowedOrigins`
-fails with `net::ERR_BLOCKED_BY_CLIENT` and exit 1 before that origin's server sees a request.
-MEASURED with 0.1.23: a service-worker registration resolves to `undefined`, no worker is
-registered and its script is never fetched. A server REDIRECT to another origin is NOT refused by
-the browser (recorded as measured in `docs/gates.md`, and measured again with 0.1.23), so the
-skill reads the `Page URL` line after every navigating call — prose, not a boundary.
+with 0.1.23 and 0.1.24 driving Google Chrome 156.0.8078.81: a `goto` to an origin outside
+`allowedOrigins` fails with `net::ERR_BLOCKED_BY_CLIENT` and exit 1 before that origin's server
+sees a request. MEASURED with 0.1.23 and 0.1.24: a service-worker registration resolves to
+`undefined`, no worker is registered and its script is never fetched. A server REDIRECT to another
+origin is NOT refused by the browser (recorded as measured in `docs/gates.md`, and measured again
+with 0.1.23 and 0.1.24), so the skill reads the `Page URL` line after every navigating call —
+prose, not a boundary.
 
 **One floor and one policy parser.** `verify-navigation-floor-v1.js` owns origin classification and
 `parsePolicyTargets`, the full synchronous parse of `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
@@ -251,8 +252,8 @@ address, and measured on Chromium 1228 `MAP localhost 127.0.0.1` made a server b
 config allowing two `localhost` origins reached a server bound only to `[::1]` and one bound only to
 `127.0.0.1`, a `fetch` between them passed, and a third `localhost` origin outside
 `allowedOrigins` failed with `net::ERR_BLOCKED_BY_CLIENT` before its server saw a request. The
-same run, MEASURED again with playwright-cli 0.1.23 driving Google Chrome 156.0.8078.81, gave the
-same result.
+same run, MEASURED again with playwright-cli 0.1.23 and with 0.1.24, both driving Google Chrome
+156.0.8078.81, gave the same result.
 `localhost` and `127.0.0.1` stay different origins: a policy target or a consent for one never
 admits the other. Sites that move together: `LOCALHOST_NAME`, `isLocalHost`,
 `FLOOR_REASONS.LOCAL_LOOPBACK_ONLY` and `CONSENT_REMOTE_REASON` in the floor, both arms of
@@ -325,7 +326,7 @@ HTTPS (`FLOOR_REASONS.NETWORK_ONLY_HTTPS` otherwise), and the hostname rule
 (`FLOOR_REASONS.HOSTNAME_PATTERN`: an IP literal or `[a-z0-9._-]` only) binds targets too. That
 is a deliberate tightening, not a side effect: playwright-core turns each allowed origin into the
 URL glob `<origin>/**` (`originOrHostGlob` in the bundled `coreBundle.js` of 0.1.21, unchanged in
-0.1.23), so a `*`,
+0.1.23 and 0.1.24), so a `*`,
 `{` or `,` in a hostname was a browser-side wildcard the parser used to accept. The run config
 stays ONE plain `network.allowedOrigins` list and `runConfigShape` keeps its key set, so
 navigability is derived, never written: `judgeOrigin` takes an optional `role` — `navigable` for
@@ -339,9 +340,9 @@ origin as an ordinary `--origin`. The redirect rule stays prose, and the reason 
 rather than argued: the browser has ONE class of allowed origin, so a page-initiated navigation
 onto a network-only origin is followed, and the triggering call prints that page's URL and title
 before the skill can stop. **WebSockets are outside the browser fence for every origin** —
-measured with playwright-cli 0.1.21 and Chrome 154, and again with 0.1.23 and Chrome 156, where a
-page on an allowed origin opened one to a loopback origin outside `allowedOrigins` and received
-its message: `context.route` does not intercept them —
+measured with playwright-cli 0.1.21 and Chrome 154, and again with 0.1.23 and with 0.1.24 and
+Chrome 156, where a page on an allowed origin opened one to a loopback origin outside
+`allowedOrigins` and received its message: `context.route` does not intercept them —
 so the docs say "every HTTP(S) request"; fencing them is a separate change. The decisions and the
 security analysis live in §11 of `docs/verify-feature-consent-spec.md`. **Version for this
 delta: `patch`**, by the route-retirement argument above — the policy is read from the launch
@@ -422,14 +423,19 @@ announces a prompt rather than a capability the plugin hands itself.
   (the install block and the troubleshooting table), `docs/gates.md` (the install command and the
   golden-recording sentence), the verify-feature troubleshooting row of `docs/operations.md`,
   `skills/doctor/SKILL.md`, `skills/autopilot/rules/config.md`, the
-  `### Upgrade notes` block of `CHANGELOG.md` (`P9a`), `evals/verify-feature/README.md`, the
+  `## [Unreleased]` upgrade note of `CHANGELOG.md` (`P9e`), `evals/verify-feature/README.md`, the
   Electron sentence of `.claude/rules/verify-feature-drivers.md` and this rule file (step 4 and
   the run-config measurement), and as a literal into the unit pin beside the
   constant. `P7e` derives the version from the module and requires the pinned install command, in
   backticks, in the skill, `README.md`, the three docs pages — in `docs/verify-feature.md` only the
   troubleshooting row carries that form — the doctor skill and the autopilot config rule; `P7h`
   pins the fenced install line of `docs/verify-feature.md`, the golden-recording sentence of
-  `docs/gates.md` and the eval README. No check reads this file's copies. The MSYS boundary suite
+  `docs/gates.md` and the eval README. `P9e` requires every `npm install -g @playwright/cli@…` in
+  the `## [Unreleased]` section of `CHANGELOG.md` to name the measured version, wrapped lines
+  included, and `P9f` and `P9g` are its controls, the second with the pin wrapped after `-g`;
+  `P9a` holds only the released `0.22.0` block, whose pin is history, and an Unreleased section
+  that names no pin passes `P9e`, so a bump that forgets its upgrade note stays a reviewer's
+  catch. No check reads this file's copies. The MSYS boundary suite
   derives it from the module, and so does `.github/scripts/playwright-cli-drift.sh` (see "The
   release signal" below), whose report names the recorder, the fixture, the module and
   `tests/structure/test-verify-consent.sh`; `PD14` fails when one of those paths moves.
@@ -573,9 +579,10 @@ section of `CHANGELOG.md`. It was written under `## [Unreleased]`: the workflow 
 generated section directly under that heading, ahead of the block, so the block closes the new
 release section and its notes. `P9b` in `tests/structure/test-verify-feature-skill.sh` runs the
 workflow's own two awk programs over the real file to hold that, and `P9d` holds that the
-released block survives the next release. `P9` follows only the block that names
+released block survives the next release. `P9a` to `P9d` follow only the block that names
 `mcp__plugin_zensu_playwright__`; a later block under `## [Unreleased]`, such as the route
-retirement's, rides the same mechanism with no check of its own.
+retirement's, rides the same mechanism with no placement check of its own, and `P9e` reads it only
+for its `@playwright/cli` install pins.
 
 **Known gaps, accepted and named:**
 
@@ -593,7 +600,8 @@ retirement's, rides the same mechanism with no check of its own.
   screenshot; the skill reads it as that page's content, like fetched data, which is why
   `NETWORK_ONLY_NAVIGATION` denies evidence only to a page the browser lands on there.
 - **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
-  `main` and the measurement of one Chrome build; no suite drives a real browser, so a Chromium that
+  `main` and the measurements of two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
+  156.0.8078.81 with 0.1.23 and 0.1.24); no suite drives a real browser, so a Chromium that
   stopped serving `localhost` itself would let `/etc/hosts` steer it with every check green.
   `*.localhost` stays refused although the same Chromium code resolves it to loopback too.
 - **The consent memory is forgeable:** a record written through a Bash redirect skips the prompt for
@@ -756,3 +764,40 @@ update check's shell resolves. **Release class: `patch`.** No
 schema field, key set, hook, matcher, config key or attestation moves, and the gate decides every
 call as before; the one consequence is that `checkReadiness` now refuses 0.1.21, which the
 `## [Unreleased]` upgrade note of `CHANGELOG.md` states.
+
+**The 0.1.24 measurement (2026-11-10).** 0.1.24 became npm `latest` before the 0.1.23 pin was
+released, so the pin moves from 0.1.21 to 0.1.24 in one release and 0.1.23 stays a measurement only. The fixture was
+re-recorded from the npm package, installed with `--ignore-scripts`; the recorder raised no
+refusal, and the recording differs from 0.1.23's only in `source.version` and
+`source.playwrightCore` (1.65.0-alpha-2026-10-30 to 1.66.0-alpha-1794252756000), so the port
+needed no change. READ, comparing both installed packages: `help.json` is identical, so no command
+or flag was added or removed; the CLI client's `minimist.js` and `registry.js` are identical, and
+`program.js` now exports `parseArgs`, which keeps the minimist call and the `-s`/`-g` folds the
+recorder asserts and which the entry point runs once, before its update check, to name the
+command. The new environment names are `PLAYWRIGHT_MCP_BACKGROUND` and
+`PLAYWRIGHT_MCP_NO_TAB_GROUP`, inside the prefix `ambientOverride` and `AMBIENT_TEXT_RE` already
+judge, and the Linux-only `CHROME_CONFIG_HOME`, `XDG_CONFIG_HOME` and `CHROME_USER_DATA_DIR`, which
+only the channel lookup of `list`, the `--cdp` channel endpoint of `attach` and extension mode
+read, so none configures the isolated browser an `open` starts, and an inline assignment of any of
+them on a gated call still denies `ENV_ASSIGNMENT`; `PLAYWRIGHT_SKIP_DIALOG_CHECK` and
+`PLAYWRIGHT_SKIP_INERT_CHECK` are gone. The new config keys `tabGroup`, `background` and
+`browser.contextOptions.locateOnlyVisible` lie outside `GLOBAL_CONFIG_HARMLESS`, so a global config
+carrying one is refused. A config file's relative paths now resolve against the file's real
+directory, which leaves the run config as it was, because `runConfigShape` requires an absolute
+`outputDir` beside the config. The four run-config fences keep their names and their readers:
+request interception, `originOrHostGlob` and isolated contexts in the backend context module, the
+service-worker block, and the user launch arguments, still appended last. 0.1.24 disables
+`HttpsUpgrades` again, together with `HttpsFirstBalancedModeAutoEnable`, so a loopback HTTP
+navigation stays on HTTP; neither is a fence the gate relies on. Console entries now carry 1-based
+line numbers, and the console count also includes the errors of page and context event handlers.
+MEASURED with Google Chrome 156.0.8078.81: the run-config, `localhost` and WebSocket statements
+above; a `tab-new --isolated-context` to an origin outside `allowedOrigins`, which failed with
+`net::ERR_BLOCKED_BY_CLIENT`; a `goto` and a `tab-new` on a session that was never opened, which
+exit 1 with the not-open message, start no browser and no daemon and send no request; and the
+response lines the eval grader parses: the `- Page URL:` line, a snapshot `[ref=…]`, the console
+`Errors:` count, a `[GET] … => [200]` request line and the screenshot link. UNMEASURED on 0.1.24:
+a remote HTTPS origin with a resolver pin, Windows, and which `npm` binary and which `.npmrc` files
+the update check's shell resolves. **Release class: `patch`.** No schema field, key set, hook,
+matcher, config key or attestation moves, and the gate decides every call as before; the one
+consequence is that `checkReadiness` now refuses every version but 0.1.24, 0.1.21 included, which
+the `## [Unreleased]` upgrade note of `CHANGELOG.md` states.
