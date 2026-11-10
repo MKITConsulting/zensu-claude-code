@@ -32,7 +32,9 @@ its interactive planning gate, and no `zensu work` command runs.
    `--autopilot-begin --work-order <id>`, which stores the order binding in the run record. Zensu,
    not the plan-approval gate, binds the plan: `zensu-work-order.sh --bind-spec` reports `planning`
    and `implementing`, and only after Zensu accepted `implementing` records the internal event
-   `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. When the order needs a plan approval,
+   `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. A run that validates its result is
+   refused first, with `plan-criteria-unusable` and exit 8, while `.zensu/plans/<order-id>.md`
+   carries no active `AC-###` row, because its VALIDATE stage reads its criteria from that file. When the order needs a plan approval,
    `--plan-approval` commits the plan file with the message the session wrote in the repository's
    own commit conventions (`--message-file <absolute path>`), pushes it, attaches it to the order
    as the plan artifact and asks for the approval, which ends the session. A later attempt binds the approved plan and

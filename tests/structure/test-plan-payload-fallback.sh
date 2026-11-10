@@ -234,7 +234,7 @@ arm_run() {
   local project="$TMP/$1"
   mkdir -p "$project"
   provision_session "$project" "$2" "$1" || return 1
-  autopilot_begin_run "$3" "$PROVISIONED_KEY" "$project" >/dev/null || return 1
+  autopilot_begin_run "$3" "$PROVISIONED_KEY" "$project" false false >/dev/null || return 1
   ARMED_PROJECT="$project"
   ARMED_DATA="$PROVISIONED_DATA"
   ARMED_RUN_FILE="$(autopilot_run_file "$3" "$project")"
@@ -1119,7 +1119,7 @@ TRANSPORT_VERDICT="$(HOOK="$HOOK" node -e '
         /^    plan_module_loadable "\$\{PLAN_PAYLOAD_DIR\}\/foreign-executor-v1\.js" \|\| return 0$/,
         /^  PLAN_MSYS_EXCL="\$\(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB\)" \|\| PLAN_MSYS_EXCL="\$\{MSYS2_ENV_CONV_EXCL:-\}"$/,
         /^      PLAN_PAYLOAD_LIB="\$PLAN_PAYLOAD_LIB" node -e .$/,
-        /^        \(\{resolveApprovedPlan,responseOrigin,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/,
+        /^        \(\{resolveApprovedPlan,responseOrigin,storeApprovedPlan,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/,
         /^        reader=require\(process\.env\.PLAN_PAYLOAD_LIB\);$/,
         /^        foreign=require\(require\("path"\)\.join\(require\("path"\)\.dirname\(process\.env\.PLAN_PAYLOAD_LIB\),"foreign-executor-v1\.js"\)\);$/
       ];
@@ -1241,7 +1241,7 @@ if [ "$NO_MODULE_READY" = true ] \
   export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/restoredmodule"
   # shellcheck disable=SC1090
   if source "$BASELINE" restored_session "$NO_MODULE_PLUGIN" >/dev/null 2>&1 \
-      && autopilot_begin_run restored_run "$ZENSU_SESSION_KEY" "$RESTORED_PROJECT" >/dev/null 2>&1; then
+      && autopilot_begin_run restored_run "$ZENSU_SESSION_KEY" "$RESTORED_PROJECT" false false >/dev/null 2>&1; then
     RESTORED_PLAN='# Plan
 
 <!-- zensu-autopilot:restored_run -->'
@@ -1264,6 +1264,51 @@ if [ "$NO_MODULE_READY" = true ] \
   fi
 else
   check "F47a restored-module fixture could not be prepared" FAIL
+fi
+
+NO_CRITERIA_READY=false
+if [ "$NO_MODULE_READY" = true ] && [ -f "$NO_MODULE_PLUGIN/hooks/lib/plan-payload-v1.js" ] \
+    && rm -f "$NO_MODULE_PLUGIN/hooks/lib/zensu-plan-requirements.sh"; then
+  NO_CRITERIA_PROJECT="$TMP/nocriteriahelper"
+  mkdir -p "$NO_CRITERIA_PROJECT"
+  export CLAUDE_PROJECT_DIR="$NO_CRITERIA_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/nocriteriahelper"
+  if source "$BASELINE" nocriteria_session "$NO_MODULE_PLUGIN" >/dev/null 2>&1 \
+      && autopilot_begin_run nocriteria_run "$ZENSU_SESSION_KEY" "$NO_CRITERIA_PROJECT" >/dev/null 2>&1; then
+    NO_CRITERIA_READY=true
+  fi
+fi
+if [ "$NO_CRITERIA_READY" = true ]; then
+  NO_CRITERIA_RUN_FILE="$(autopilot_run_file nocriteria_run "$NO_CRITERIA_PROJECT")"
+  NO_CRITERIA_BEFORE="$(digest "$NO_CRITERIA_RUN_FILE")"
+  OUT47B="$(payload_response nocriteria_session '# Plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | The plan gate reads its criteria before it approves. | spec |
+
+<!-- zensu-autopilot:nocriteria_run -->' __ABSENT__ \
+    | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+      -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+      CLAUDE_PLUGIN_ROOT="$NO_MODULE_PLUGIN" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+      CLAUDE_PROJECT_DIR="$NO_CRITERIA_PROJECT" ZENSU_CONFIG="$CFG_OFF" \
+      bash "$NO_MODULE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null)"
+  NO_CRITERIA_COPIES=0
+  for NO_CRITERIA_ENTRY in "$NO_CRITERIA_PROJECT/.zensu/state"/autopilot-approved-plan-*; do
+    if [ -e "$NO_CRITERIA_ENTRY" ] || [ -L "$NO_CRITERIA_ENTRY" ]; then NO_CRITERIA_COPIES=$((NO_CRITERIA_COPIES + 1)); fi
+  done
+  if printf '%s' "$OUT47B" | grep -qF 'code=RUNTIME_UNAVAILABLE' \
+    && ! printf '%s' "$OUT47B" | grep -qF 'PLAN_APPROVED' \
+    && ! printf '%s' "$OUT47B" | grep -qF 'PLAN_CRITERIA_UNUSABLE' \
+    && [ "$NO_CRITERIA_COPIES" = 0 ] \
+    && [ "$(digest "$NO_CRITERIA_RUN_FILE")" = "$NO_CRITERIA_BEFORE" ]; then
+    check "F47b a validating run in a plugin without the criteria reader refuses as a runtime fault and stores nothing" PASS
+  else
+    check "F47b missing criteria reader (copies=$NO_CRITERIA_COPIES out='$(printf '%s' "$OUT47B" | head -c 200)')" FAIL
+  fi
+else
+  check "F47b criteria-reader-less fixture could not be provisioned" FAIL
 fi
 
 unit_check_done "F11z every unit file the registry gives this suite was graded"

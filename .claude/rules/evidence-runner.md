@@ -222,7 +222,9 @@ worktree the chain works in. A record fingerprinted at the project root reads `s
 combined fingerprint, never `pass`. An `acceptance` run of a standalone chain keeps the
 project-root fingerprint, because `acceptance-verify-v1.js` compares it with
 `computeTree(projectRoot)`; a bound chain's takes its worktree's combined fingerprint, which
-`chainTree` in that module computes the same way. Known gaps: only
+`chainTree` in that module computes the same way. An Autopilot run's acceptance run (`--run`, no
+nested work tree) takes `repositoryTree`, the repository top with the project root's `.zensu` left
+out, which `chainTree` computes for the run's records as well. Known gaps: only
 a leading `cd` moves the directory, so a suite reached any other way (`--manifest-path`,
 `git -C`, `pushd`, an assignment or a command before the `cd`, a script that changes directory)
 keeps the project-root fingerprint; and a work tree outside the project root's own work tree is
@@ -250,9 +252,9 @@ time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
 `workTreeTop` reads the same `NO_WORK_TREE_RE` for the external-review root rule and also
 places a root outside git when no `git` binary exists (`.claude/rules/external-review-import.md`).
 The same options argument of `computeTree` takes `excluded`, a list of root-relative paths it
-drops beside `.zensu`, matched literally; only the external review passes one, the `.zensu` of a
-session whose project root lies below the top level it fingerprints, and every runner caller
-keeps its fingerprint.
+drops beside `.zensu`, matched literally; the external review and `repositoryTree` pass one, the
+`.zensu` of a session whose project root lies below the top level they fingerprint, and every other
+runner caller keeps its fingerprint.
 `gitEnvironment` also drops the pathspec-mode variables in `GIT_PATHSPEC_ENV`
 (`GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS`, `GIT_ICASE_PATHSPECS`):
 an inherited `GIT_LITERAL_PATHSPECS` reads that list's `:(exclude,literal)` magic as a file name

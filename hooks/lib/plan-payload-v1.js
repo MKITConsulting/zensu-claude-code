@@ -40,6 +40,7 @@
 
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const nodePath = require("path");
 
@@ -186,7 +187,107 @@ const responseOrigin = (payload) => {
   return { ok: true };
 };
 
+const APPROVED_PLAN_PREFIX = "autopilot-approved-plan-";
+
+const APPROVED_PLAN_FAILURES = {
+  DIGEST: "approved-plan-digest-invalid",
+  ROOT: "approved-plan-project-root-rejected",
+  STATE_DIRECTORY: "approved-plan-state-directory-rejected",
+  MISSING: "approved-plan-missing",
+  MISMATCH: "approved-plan-digest-mismatch",
+  WRITE: "approved-plan-write-failed",
+};
+
+const sha256Hex = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+
+const approvedPlanStem = (sha) =>
+  typeof sha === "string" && /^[0-9a-f]{64}$/.test(sha) ? `${APPROVED_PLAN_PREFIX}${sha}` : null;
+
+const approvedPlanRelPath = (sha) => {
+  const stem = approvedPlanStem(sha);
+  return stem === null ? null : `.zensu/state/${stem}.md`;
+};
+
+const approvedPlanDirectory = (projectRoot, create) => {
+  if (typeof projectRoot !== "string" || !nodePath.isAbsolute(projectRoot)
+    || projectRoot.indexOf(String.fromCharCode(0)) >= 0) return { failure: APPROVED_PLAN_FAILURES.ROOT };
+  let directory = projectRoot;
+  for (const segment of [".zensu", "state"]) {
+    directory = nodePath.join(directory, segment);
+    let stat = null;
+    try {
+      stat = fs.lstatSync(directory);
+    } catch (error) {
+      if (!create) {
+        return { failure: error && error.code === "ENOENT" ? APPROVED_PLAN_FAILURES.MISSING : APPROVED_PLAN_FAILURES.STATE_DIRECTORY };
+      }
+      if (!error || error.code !== "ENOENT") return { failure: APPROVED_PLAN_FAILURES.STATE_DIRECTORY };
+      try {
+        fs.mkdirSync(directory, { mode: 0o700 });
+        stat = fs.lstatSync(directory);
+      } catch (_) {
+        return { failure: APPROVED_PLAN_FAILURES.STATE_DIRECTORY };
+      }
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { failure: APPROVED_PLAN_FAILURES.STATE_DIRECTORY };
+  }
+  return { directory };
+};
+
+const readApprovedPlan = (projectRoot, sha) => {
+  const stem = approvedPlanStem(sha);
+  if (stem === null) return { ok: false, reason: APPROVED_PLAN_FAILURES.DIGEST };
+  const located = approvedPlanDirectory(projectRoot, false);
+  if (located.failure) return { ok: false, reason: located.failure };
+  const planPath = nodePath.join(located.directory, `${stem}.md`);
+  try {
+    fs.lstatSync(planPath);
+  } catch (error) {
+    return { ok: false, reason: error && error.code === "ENOENT" ? APPROVED_PLAN_FAILURES.MISSING : REASONS.UNREADABLE };
+  }
+  const read = readPlanFile(planPath);
+  if (read.failure) return { ok: false, reason: read.failure };
+  if (sha256Hex(read.bytes) !== sha) return { ok: false, reason: APPROVED_PLAN_FAILURES.MISMATCH };
+  return { ok: true, path: planPath, rel: approvedPlanRelPath(sha), stem, bytes: read.bytes };
+};
+
+const storeApprovedPlan = (projectRoot, sha, bytes) => {
+  const stem = approvedPlanStem(sha);
+  if (stem === null) return { ok: false, reason: APPROVED_PLAN_FAILURES.DIGEST };
+  if (!Buffer.isBuffer(bytes) || bytes.length < 1) return { ok: false, reason: REASONS.EMPTY };
+  if (bytes.length > PLAN_FILE_MAX_BYTES) return { ok: false, reason: REASONS.TOO_LARGE };
+  if (sha256Hex(bytes) !== sha) return { ok: false, reason: APPROVED_PLAN_FAILURES.MISMATCH };
+  const existing = readApprovedPlan(projectRoot, sha);
+  if (existing.ok) return { ok: true, path: existing.path, rel: existing.rel, stem, reused: true };
+  const located = approvedPlanDirectory(projectRoot, true);
+  if (located.failure) return { ok: false, reason: located.failure };
+  const planPath = nodePath.join(located.directory, `${stem}.md`);
+  const temporary = nodePath.join(located.directory, `.${stem}.${crypto.randomBytes(6).toString("hex")}.tmp`);
+  let descriptor = null;
+  try {
+    descriptor = fs.openSync(temporary,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | platformNoFollow(), 0o600);
+    let written = 0;
+    while (written < bytes.length) written += fs.writeSync(descriptor, bytes, written, bytes.length - written, written);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+    fs.renameSync(temporary, planPath);
+  } catch (_) {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor); } catch (_) {}
+    }
+    try { fs.unlinkSync(temporary); } catch (_) {}
+    return { ok: false, reason: APPROVED_PLAN_FAILURES.WRITE };
+  }
+  const stored = readApprovedPlan(projectRoot, sha);
+  if (!stored.ok) return { ok: false, reason: stored.reason };
+  return { ok: true, path: stored.path, rel: stored.rel, stem, reused: false };
+};
+
 module.exports = {
   resolveApprovedPlan, responseOrigin, readPlanFile, platformNoFollow,
   LSTAT_PRECHECK_MODE, PLAN_FILE_MAX_BYTES, REASONS, SOURCES,
+  APPROVED_PLAN_PREFIX, APPROVED_PLAN_FAILURES, approvedPlanStem, approvedPlanRelPath,
+  readApprovedPlan, storeApprovedPlan,
 };

@@ -13,14 +13,17 @@
 ## Success looks like
 {Observable end state when the feature works.}
 
-## Acceptance criteria
+## Requirements
 Stable `AC-###` IDs — allocated monotonically, never recycled; a dropped
-criterion keeps its ID and is marked deprecated, never deleted or renumbered.
-Each criterion is machine-checkable (verifiable by a test, a gate assertion,
-or a concrete observation through the validation driver).
+criterion keeps its ID and its row is marked `(deprecated)`, never deleted or
+renumbered. Each acceptance criterion is machine-checkable (verifiable by a
+test, a gate assertion, or a concrete observation through the validation
+driver), and Phase 1 validates exactly these rows.
 
-- AC-001: {machine-checkable criterion}
-- AC-002: {machine-checkable criterion}
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | {machine-checkable criterion} | spec |
+| AC-002 | {machine-checkable criterion} | spec |
 
 ## Resolved recipe
 | Seam | Command / driver |

@@ -92,7 +92,8 @@ full-suite gate so one call names every refusal, after the read-only ticket pre-
 Autopilot `pass` calls it with the bound flag and the run's `validate` option and gets
 `not-checked`, whose cause (`boundLine`) says whether VALIDATE verifies every criterion, the run
 was started with `--no-validate`, or the option could not be read; verify-feature's questions
-conflict with the delegated no-question rule, so the bound chain is never gated. The zero-change
+conflict with the delegated no-question rule, so the bound chain is never gated; the run's own
+VALIDATE stage checks the criteria instead, through run mode (§"Autopilot run mode"). The zero-change
 terminus stays silent (`test-chain-terminus-zero-change-gate.sh` G1), and so does a minted
 `zc_` self-review ticket on a changed tree, which the terminus refuses before either gate runs
 (`G9e`). A max-rounds close with
@@ -101,6 +102,130 @@ terminus stays silent (`test-chain-terminus-zero-change-gate.sh` G1), and so doe
 max-rounds` with its output discarded. `MAX_ROUNDS_VERDICTS` in the post-review hook tells the
 renderer to show both verdicts as not checked. `ZENSU_ACCEPTANCE_GATE=off` is read only after the
 bound and `not-applicable` answers, so it is ledgered only where the gate applies.
+
+## Autopilot run mode (`--run <id>` and `--autopilot-validate`)
+
+Autopilot's VALIDATE stage used to be self-reported: `VALIDATION_PASSED` carried only a head and
+any caller could send it. It now passes only through
+`zensu-log.sh --autopilot-validate --run <id> [--accept-partial]`, which applies the event itself,
+and `--autopilot-event` refuses `VALIDATION_PASSED` and the two event-id namespaces the verb uses
+(`validation-passed:`, `validation-bypass:`), the way `release-` is reserved.
+`VALIDATION_FAILED` stays free, because failing unlocks nothing.
+
+**The run bind.** `_zensu_run_bind` in `zensu-log.sh` serves `--acceptance-record --run`,
+`--acceptance-status --run`, `--evidence-run --scope acceptance --run` and the verb. It reads the
+caller's own run through `autopilot_read_active_strict` inside a command substitution, so the state
+library never loads into the verb's process (the evidence runner's E22/E23 rule), requires the
+named id to be that run and the run to be nonterminal, and maps the strict read's 1 to "owns no
+active run" and its 5 to the unreadable-state refusal; those two, another run's id and an ended run
+all exit 2, like every misuse. `--run` and `--log` exclude each other, and
+`--evidence-run --run` takes `--scope acceptance` only. The run record reaches the module as the
+transport file `run.json`; the work tree comes from `{"runId":"<id>"}` handed to
+`_zensu_bound_work_tree` as the given context, so a run whose `workspaceRoot` is a worktree below
+the anchor binds the combined tree even though no chain is open at VALIDATE.
+
+**The criteria come from the plan the user approved.** `hooks/plan-approved-delegate.sh` stores the
+exact approved bytes at `.zensu/state/autopilot-approved-plan-<sha256>.md` before it applies
+`PLAN_APPROVED` on a validate-on run (`storeApprovedPlan` in `plan-payload-v1.js`: real-directory
+checks, an `O_EXCL` temp at `0600`, fsync, rename, idempotent on the same digest). The name is
+content-addressed, so a refused re-approval cannot replace an approved copy. A plan without an
+active `AC-###` row is refused as `PLAN_CRITERIA_UNUSABLE` and the run stays at `PLANNING`; a
+store that fails is `APPROVED_PLAN_STORE_FAILED`. `runChain` reads the copy through
+`readApprovedPlan`, which compares the digest with `approvedPlanSha256`; a missing copy (a run
+approved before this release) or a changed one is `unresolved` and names
+`ZENSU_ACCEPTANCE_GATE=off` as the user's escape. A record of a run copy carries
+`plan: .zensu/state/<stem>.md` (`expectedPlanRel`), and the standalone escaped-receipt path skips
+run-copy stems. A work-order run reads `.zensu/plans/<order-id>.md`: when a person approved the
+plan (`approvedPlanSha256` differs from `workOrder.specHash`) its digest is checked, otherwise the
+verb discloses `ACCEPTANCE PLAN UNAPPROVED`. No plan gate sees a work-order plan, so
+`planCriteriaRefusal` in `work-order-v1.js` takes the place of `PLAN_CRITERIA_UNUSABLE`:
+`--bind-spec` of a run that validates refuses with `plan-criteria-unusable` and exit 8 while that
+file carries no active `AC-###` row, reading it through the module's `planFor` and `readCriteria`,
+before any stage is reported and before a person is asked to approve the plan. Without it the run
+reached VALIDATE with no criterion and an `add:` remedy only the user could take. `--plan-approval`
+does not repeat the check, because the protocol reaches it only after `--bind-spec` refused with
+`plan-approval-required`.
+
+**Head binding.** `runHead` requires `HEAD` of the work tree to resolve to the run's
+`evidence.pr.headSha` (abbreviated heads resolve through `<head>^{commit}`) and the tree to be clean
+(`hasChanges`, `.zensu` excluded), before records are read. The fingerprint is content-based, so
+without this a pass recorded on an uncommitted tree that equals no commit would count. In run mode
+a tree that cannot be fingerprinted refuses as `unresolved` rather than `pass-tree-unverified`.
+
+**The whole repository, not the project root.** A run's `workspaceRoot` is the repository top, so
+when the session's project root lies below it and no nested work tree is bound, run mode binds the
+repository: `repositoryRoot` and `repositoryTree` in `evidence-run-v1.js` fingerprint the top with
+the project root's own `.zensu` left out (the `excluded` option the external review already passes),
+`runHead` checks `HEAD` and the clean tree there with the same exclusion,
+`--evidence-run --scope acceptance --run` takes the same fingerprint through the transport file
+`tree-mode`, and `fingerprintChanges` lists a changed path relative to the project root
+(`../shared/lib.txt`). A fingerprint of the project root alone let an edit outside it, committed or
+not, leave every record current. A project root that is the repository top keeps
+`computeTree(projectRoot)`, so its trees do not change.
+
+**States and exits.** A pass is `pass`; `--accept-partial` turns a verdict whose every open row is
+`partial` into `partial-accepted`, a passing state, and any `fail`, `missing`, `stale` or `dropped`
+row keeps it `incomplete`. The verb exits 0 after it applied `VALIDATION_PASSED`, 1 when the
+acceptance verdict refused (the run stays at `VALIDATE`), and 2 for a misuse or a fault: no active
+run of this session, another run, an ended run, a `--no-validate` run, a stage other than
+`VALIDATE`, a run back from a fix attempt whose pushed head is not recorded yet
+(`tdd.headUpdateRequired`, which `_zensu_run_bind` reads as its fifth fact; the state machine
+accepts `BYPASS_RECORDED` before that guard and rejects `VALIDATION_PASSED` after it, so the verb
+refuses before the module runs and before any bypass, the switched-off gate included), no PR head,
+an `unavailable` verdict, an unreadable state, or an event the library rejected. `escaped` applies
+`BYPASS_RECORDED {"gate":"ZENSU_ACCEPTANCE_GATE"}` first and `partial-accepted` applies
+`{"gate":"acceptance-partial"}`, so the PR's `Gates bypassed during build:` line, which unions
+`bypasses[].gate` from `--autopilot-status`, names it. `evidence.acceptanceGate: advisory`
+discloses `(advisory, not blocking)` and validates, and the verb applies
+`{"gate":"acceptance-advisory"}` first for every verdict state other than `pass`, `escaped` and
+`partial-accepted`: only advisory mode lets such a state exit 0, and a run that validated with a
+gap must name it in the PR. `VALIDATION_PASSED` carries the run's own durable head.
+
+**Why the event ids carry a visit number.** A replay with the same id, type and payload exits 10
+in the worker, and `_autopilot_apply_critical` answers 0, so an id derived from the head alone
+would let a second VALIDATE visit at an unchanged head report success while the run stays at
+`VALIDATE`. The id is `validation-passed:<visit>:<head>` (and
+`validation-bypass:<gate>:<visit>:<head>`), where the visit counts the events that entered
+`VALIDATE` from another stage: a retry inside one visit replays idempotently, a new visit gets a
+new id.
+
+**Coupled sites of run mode:** `runFacts`, `runChain`, `runHead`, `runOutcome`, `runVerdict`,
+`runRemedies`, `isRunCopyStem`, `expectedPlanRel` and the `run.json` and `ZENSU_AVR_RUN` /
+`ZENSU_AVR_ACCEPT_PARTIAL` transport in `acceptance-verify-v1.js`; `repositoryRoot`,
+`repositoryTree`, the repository branch of `fingerprintChanges` and the `tree-mode` transport in
+`evidence-run-v1.js`; `_zensu_run_bind`, `_zensu_active_run_json`, the `--run` arms, the
+`tree-mode` write and the `--autopilot-validate` arm in `zensu-log.sh`;
+the store, the two refusal codes and their `causes` in `plan-approved-delegate.sh`;
+`APPROVED_PLAN_PREFIX`, `approvedPlanRelPath`, `readApprovedPlan` and `storeApprovedPlan` in
+`plan-payload-v1.js`; the `## Requirements` table of `templates/autopilot-spec.md`; step 6 of
+`skills/autopilot/SKILL.md` and `skills/autopilot/rules/validate.md`; the `VALIDATE_FEATURE` line of
+`hooks/session-start-autopilot-resume.sh`; `planCriteriaRefusal` in `work-order-v1.js` and the
+`plan-criteria-unusable` paragraph of `skills/autopilot/rules/work-order.md` §4. Pins: `V1`-`V15`
+and `V7b` in `test-acceptance-gate.sh` (`V7b` the ended run, `V10` the advisory ledger entry,
+`V15` the pending head update and a third visit's event ids), the run cases of
+`acceptance-verify-v1.test.js`, the repository-tree case of `evidence-run-v1.test.js`,
+`P17`-`P17i` in `test-autopilot-plan-delegate.sh`, `F47b` in `test-plan-payload-fallback.sh`,
+`C13a` in `test-autopilot-chain-integration.sh`, `I6b`, `I9a` and `I9b` in
+`test-work-order-implement.sh`, and `G7` in `test-work-order-gates.sh`, whose plan carries the
+table before its first `--bind-spec`.
+
+**Version of run mode: `minor`.** A session still holding the earlier skill text sends
+`VALIDATION_PASSED` through `--autopilot-event`, which this release refuses, and a record's `plan`
+gains the `.zensu/state/` value form that an earlier root's `validateRecord` reads as malformed. No
+workflow-state field, run key or event type changes.
+
+**Known gaps of run mode:** `browser`, `mobile` and `desktop` verdicts stay attested; an observed
+run proves its command's exit code, not that the command checks the criterion; `.zensu/state/`,
+the run record and the plugin store are writable from the session, and a direct library call
+skips the CLI refusal, so this bounds accidents, not intent; every commit after validation,
+`--cover` included, makes every record stale; records are per session key, so a new owner after
+`/zensu:autopilot-adopt` verifies again; a run in flight across this release has no stored copy and
+needs the user's escape; `--accept-partial` is available to the model, and what keeps it honest is
+the 🟡 row, the evidence and the ledger entry; a work-order plan the order timeline names under
+another path than `.zensu/plans/<order-id>.md` refuses as changed; and the run record travels to
+the bind's node child on stdin, while `_zensu_chain_work_tree` still hands it over in an
+environment variable, which a record near the 512-event bound can push past Linux's 128 KiB limit
+for one variable. Windows is unmeasured.
 
 **Coupled sites:** `ZENSU_BYPASS_GATE_ALLOWLIST` and `tdd_bypass_recorded` in
 `zensu-tdd-phase.sh`; both protected-root lists in `reviewer-capability-v1.js`;

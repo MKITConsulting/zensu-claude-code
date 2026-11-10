@@ -10,6 +10,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const nodePath = require("node:path");
@@ -21,6 +22,8 @@ const modulePath = process.env.ZENSU_PLAN_PAYLOAD_UNIT_TARGET
 const {
   resolveApprovedPlan, responseOrigin, readPlanFile, platformNoFollow,
   LSTAT_PRECHECK_MODE, PLAN_FILE_MAX_BYTES, REASONS, SOURCES,
+  APPROVED_PLAN_PREFIX, APPROVED_PLAN_FAILURES, approvedPlanStem, approvedPlanRelPath,
+  readApprovedPlan, storeApprovedPlan,
 } = require(modulePath);
 
 const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "zensu-plan-payload-"));
@@ -310,4 +313,93 @@ test("responseOrigin judges the caller without reading any plan source", () => {
     REASONS.AGENT_ORIGIN,
     "a path the walk would refuse never decides the origin verdict",
   );
+});
+
+const digestOf = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const projectDir = (label) => fs.mkdtempSync(nodePath.join(tmpRoot, `${label}-`));
+const copyPath = (root, digest) => nodePath.join(root, ".zensu", "state", `${APPROVED_PLAN_PREFIX}${digest}.md`);
+
+test("an approved-plan copy is named by its lowercase sha256 digest and by nothing else", () => {
+  const digest = digestOf(Buffer.from("plan\n"));
+  assert.strictEqual(approvedPlanStem(digest), `${APPROVED_PLAN_PREFIX}${digest}`);
+  assert.strictEqual(approvedPlanRelPath(digest), `.zensu/state/${APPROVED_PLAN_PREFIX}${digest}.md`);
+  for (const bad of [digest.toUpperCase(), digest.slice(1), `${digest}0`, "../escape", "", null, 42]) {
+    assert.strictEqual(approvedPlanStem(bad), null, `stem for ${String(bad)}`);
+    assert.strictEqual(approvedPlanRelPath(bad), null, `path for ${String(bad)}`);
+  }
+});
+
+test("the store keeps the exact approved bytes private and reads them back only when they still match", () => {
+  const root = projectDir("store");
+  const bytes = Buffer.from("# Spec\r\n\n| AC-001 | CRLF and bytes survive as approved | spec |\n<!-- zensu-autopilot:run_abc -->\n", "utf8");
+  const digest = digestOf(bytes);
+  const stored = storeApprovedPlan(root, digest, bytes);
+  assert.strictEqual(stored.ok, true);
+  assert.strictEqual(stored.reused, false);
+  assert.strictEqual(stored.path, copyPath(root, digest));
+  assert.strictEqual(stored.rel, approvedPlanRelPath(digest));
+  assert.ok(fs.readFileSync(stored.path).equals(bytes));
+  if (process.platform !== "win32") assert.strictEqual(fs.statSync(stored.path).mode & 0o777, 0o600);
+  const read = readApprovedPlan(root, digest);
+  assert.strictEqual(read.ok, true);
+  assert.ok(read.bytes.equals(bytes));
+  assert.strictEqual(read.stem, `${APPROVED_PLAN_PREFIX}${digest}`);
+  assert.deepStrictEqual(fs.readdirSync(nodePath.join(root, ".zensu", "state")), [`${APPROVED_PLAN_PREFIX}${digest}.md`]);
+});
+
+test("a second store reuses an intact copy, and an edited copy reads as a mismatch until the next store restores it", () => {
+  const root = projectDir("reuse");
+  const bytes = Buffer.from("approved\n");
+  const digest = digestOf(bytes);
+  assert.strictEqual(storeApprovedPlan(root, digest, bytes).ok, true);
+  assert.strictEqual(storeApprovedPlan(root, digest, bytes).reused, true);
+  fs.writeFileSync(copyPath(root, digest), "approved, then edited\n");
+  assert.deepStrictEqual(readApprovedPlan(root, digest), { ok: false, reason: APPROVED_PLAN_FAILURES.MISMATCH });
+  const restored = storeApprovedPlan(root, digest, bytes);
+  assert.strictEqual(restored.ok, true);
+  assert.strictEqual(restored.reused, false);
+  assert.ok(fs.readFileSync(copyPath(root, digest)).equals(bytes));
+});
+
+test("the store refuses a malformed digest, foreign bytes, an empty or oversized plan and a relative root, and writes nothing", () => {
+  const root = projectDir("refuse");
+  const bytes = Buffer.from("plan\n");
+  const digest = digestOf(bytes);
+  const big = Buffer.alloc(PLAN_FILE_MAX_BYTES + 1, 0x61);
+  assert.strictEqual(storeApprovedPlan(root, "f".repeat(63), bytes).reason, APPROVED_PLAN_FAILURES.DIGEST);
+  assert.strictEqual(storeApprovedPlan(root, digestOf(Buffer.from("other\n")), bytes).reason, APPROVED_PLAN_FAILURES.MISMATCH);
+  assert.strictEqual(storeApprovedPlan(root, digestOf(Buffer.alloc(0)), Buffer.alloc(0)).reason, REASONS.EMPTY);
+  assert.strictEqual(storeApprovedPlan(root, digest, "plan\n").reason, REASONS.EMPTY);
+  assert.strictEqual(storeApprovedPlan(root, digestOf(big), big).reason, REASONS.TOO_LARGE);
+  assert.strictEqual(storeApprovedPlan("relative/root", digest, bytes).reason, APPROVED_PLAN_FAILURES.ROOT);
+  assert.strictEqual(readApprovedPlan(root, "not-a-digest").reason, APPROVED_PLAN_FAILURES.DIGEST);
+  assert.strictEqual(fs.existsSync(nodePath.join(root, ".zensu")), false);
+});
+
+test("a missing copy reads as missing, and a symlinked state directory is refused on store and on read", () => {
+  const root = projectDir("link");
+  const elsewhere = projectDir("elsewhere");
+  const bytes = Buffer.from("plan\n");
+  const digest = digestOf(bytes);
+  assert.strictEqual(readApprovedPlan(root, digest).reason, APPROVED_PLAN_FAILURES.MISSING);
+  fs.mkdirSync(nodePath.join(root, ".zensu", "state"), { recursive: true });
+  assert.strictEqual(readApprovedPlan(root, digest).reason, APPROVED_PLAN_FAILURES.MISSING);
+  fs.rmdirSync(nodePath.join(root, ".zensu", "state"));
+  let linked = true;
+  try { fs.symlinkSync(elsewhere, nodePath.join(root, ".zensu", "state"), "dir"); } catch (_) { linked = false; }
+  if (!linked) return;
+  assert.strictEqual(storeApprovedPlan(root, digest, bytes).reason, APPROVED_PLAN_FAILURES.STATE_DIRECTORY);
+  assert.strictEqual(readApprovedPlan(root, digest).reason, APPROVED_PLAN_FAILURES.STATE_DIRECTORY);
+  assert.deepStrictEqual(fs.readdirSync(elsewhere), []);
+});
+
+test("a copy that gained a second hard link is refused like a symlink", () => {
+  const root = projectDir("hardlink");
+  const bytes = Buffer.from("plan\n");
+  const digest = digestOf(bytes);
+  assert.strictEqual(storeApprovedPlan(root, digest, bytes).ok, true);
+  let linked = true;
+  try { fs.linkSync(copyPath(root, digest), nodePath.join(root, "second-name.md")); } catch (_) { linked = false; }
+  if (!linked) return;
+  assert.strictEqual(readApprovedPlan(root, digest).reason, REASONS.SYMLINK);
 });

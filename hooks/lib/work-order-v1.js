@@ -1186,6 +1186,27 @@ function planFileFor(orderId) {
   return `.zensu/plans/${orderId}.md`;
 }
 
+function planCriteriaRefusal(context, run, runId) {
+  if (!isObject(run.options) || run.options.validate !== true) return null;
+  const acceptance = require('./acceptance-verify-v1.js');
+  const orderId = run.workOrder.orderId;
+  const file = planFileFor(orderId);
+  const plan = acceptance.planFor(context.projectRoot, orderId);
+  let cause = null;
+  if (plan.reason) {
+    cause = plan.reason;
+  } else {
+    const read = acceptance.readCriteria(plan.planPath);
+    if (read.status !== 'ok') {
+      cause = `the plan ${file} carries no active AC-### criterion (${read.reason})`;
+    } else if (!read.criteria.some((criterion) => criterion.state === 'active')) {
+      cause = `the plan ${file} carries no active AC-### criterion (${read.criteria.length === 0 ? 'its ## Requirements table has no AC-### row' : 'every AC-### row is deprecated'})`;
+    }
+  }
+  if (cause === null) return null;
+  return `plan-criteria-unusable: Autopilot run ${runId} validates its result, but ${cause}, so its VALIDATE stage would have no criterion to check; write the plan to ${file} with a ## Requirements table holding one | AC-### | criterion | source | row per acceptance criterion of the order, then run --bind-spec again`;
+}
+
 function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
   const bound = markerRun(context, runId);
@@ -1201,6 +1222,8 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   if (run.stage !== 'PLANNING') return { exit: EXIT.REFUSED, message: `Autopilot run ${bound.runId} is at ${run.stage}, not PLANNING` };
   const branch = currentBranch(context.projectRoot);
   if (branch && !branch.startsWith(orderBranchPrefix(context))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
+  const criteria = planCriteriaRefusal(context, run, bound.runId);
+  if (criteria) return { exit: EXIT.REFUSED, message: criteria };
   const reported = drain(context, { env, now });
   if (reported.verdict === 'ended') return endedResult(context, '');
   if (reported.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' };

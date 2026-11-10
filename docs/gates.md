@@ -1660,8 +1660,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
 - **What it prints.** One line, `ACCEPTANCE — <state> | <cause> | plan: <plan> | gate: <mode>`.
   Passing states: `pass` (the cause gives the observed and attested split, and an earlier
   non-pass verdict on the same tree adds a `flaky` line), `pass-tree-unverified`,
-  `not-applicable` (no edit-landing receipt and no changed file, or no git repository) and
-  `escaped`. Refusing states: `incomplete` (names every criterion that does not pass, with a cause
+  `not-applicable` (no edit-landing receipt and no changed file, or no git repository),
+  `partial-accepted` (an Autopilot run validated with `--accept-partial`) and `escaped`. Refusing states: `incomplete` (names every criterion that does not pass, with a cause
   for the first twelve), `no-criteria` (the plan declares no active `AC-###` criterion),
   `unresolved` (no receipt names the chain's plan while the tree has changes), `invalid` (the
   newest record does not validate) and `unavailable`. A refusal exits `1` and leaves the chain
@@ -1684,9 +1684,30 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   `hooks.selfReview` off is never blocked by this gate or the full-suite gate: a standalone chain
   runs no terminus there, and a bound one discards the terminus output. The chain-end summary
   then shows both as not checked.
+- **Autopilot runs.** A run's VALIDATE stage applies the same records to the run itself. The
+  acceptance verbs take `--run <id>` instead of `--log`, `zensu-log.sh --evidence-run --scope
+  acceptance --run <id>` runs a check in the run's work tree, and
+  `zensu-log.sh --autopilot-validate --run <id> [--accept-partial]` is the only way past VALIDATE:
+  `--autopilot-event` refuses `VALIDATION_PASSED`. The criteria are the `AC-###` rows of the plan
+  the user approved, which the plan-approval hook stores byte for byte as
+  `.zensu/state/autopilot-approved-plan-<sha256>.md` and refuses as `PLAN_CRITERIA_UNUSABLE` when it
+  carries no active `AC-###` row; a work-order run reads `.zensu/plans/<order-id>.md`. The verb
+  refuses unless `HEAD` of the work tree is the pull-request head and the tree is clean, and a
+  stored plan that no longer matches its digest, or a run approved before this release kept one,
+  is `unresolved`. When the session's project root lies below the repository top, the records and
+  the clean-tree check cover the whole repository, so an edit outside the project root makes the
+  records stale too. `--accept-partial` validates a verdict whose every open criterion is `partial`
+  as `partial-accepted` and records `acceptance-partial` in the run's `bypasses` list;
+  `ZENSU_ACCEPTANCE_GATE=off` records `ZENSU_ACCEPTANCE_GATE` there. Exit 0 means the run moved
+  on, 1 that it stays at VALIDATE, 2 a misuse or a fault. A run that came back to VALIDATE from a
+  fix attempt is refused with exit 2, the switched-off gate included, until its pushed head is
+  recorded with `PR_HEAD_UPDATED`. A work-order run that validates is refused at `--bind-spec`
+  with `plan-criteria-unusable` while its plan carries no active `AC-###` row.
 - **Modes.** `evidence.acceptanceGate` is `required` (default) or `advisory`, which prints the same
-  verdict marked `(advisory, not blocking)` and closes the chain. An unknown value acts as
-  `required`, and the first line says so.
+  verdict marked `(advisory, not blocking)` and closes the chain. Under `advisory`,
+  `--autopilot-validate` validates a run whose verdict did not pass and records
+  `acceptance-advisory` in its `bypasses` list. An unknown value acts as `required`, and the first
+  line says so.
 - **Bypass** with `ZENSU_ACCEPTANCE_GATE=off`, recorded in the bypass ledger only where the gate
   applies. A chain the gate finds `not-applicable` prints that state and records no escape.
 - **What it does not prove.** An attested verdict is written by the model, so the gate proves

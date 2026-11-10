@@ -9,6 +9,12 @@ A driver does two things for each AC: **exercise** (perform the action the AC de
 and **assert** (observe the result and record evidence — a status code, a DOM state, a
 stdout line, a DB row, a screenshot). Evidence per AC feeds the PR's per-AC table.
 
+Each observation becomes an acceptance record right after it is made (`validate.md`): a driver
+decided by an exit code (`api`, `cli`, `library`, `async`, `iac`, `custom`) runs its check through
+`--evidence-run --scope acceptance --run "$RUN_ID"` and cites that run, and a UI driver
+(`browser`, `mobile`, `desktop`) records what it saw. A criterion a degraded driver can observe
+only in part is recorded `partial`, with the missing part named in its evidence.
+
 ## Tier 1 — ship first (covers the common case)
 
 | Driver | Target | Exercise → assert | Session artifact |

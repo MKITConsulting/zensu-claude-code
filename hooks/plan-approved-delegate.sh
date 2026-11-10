@@ -121,9 +121,10 @@ emit_autopilot_context() {
 }
 
 emit_autopilot_blocked() {
-  CODE="$1" PLAN_SOURCE="${2:-}" node -e '
+  CODE="$1" PLAN_SOURCE="${2:-}" PLAN_DETAIL="${3:-}" node -e '
     const code=process.env.CODE;
     const source=process.env.PLAN_SOURCE||"";
+    const detail=process.env.PLAN_DETAIL||"";
     const causes={
       CORRUPT_ACTIVE_STATE:" The durable run pointer or run record could not be parsed into a usable stage.",
       ACTIVE_STATE_UNREADABLE:" The project-local Autopilot state could not be read: its lock could not be taken, or its storage or path failed a safety check, so whether this session owns a run is unknown. That is not a no-run answer, so the standalone plan policy was not applied. Retry the approval once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor, whose autopilot row reads the same records without taking the project lease.",
@@ -145,10 +146,13 @@ emit_autopilot_blocked() {
       PLAN_PAYLOAD_TOOL_MISMATCH:" The payload did not come from ExitPlanMode, so its fields were never read as an approved plan.",
       PLAN_RESPONSE_AGENT_ORIGIN_REJECTED:" The ExitPlanMode tool response declares an agent origin; only the top-level interactive session may approve a durable run plan.",
       PLAN_RESPONSE_ORIGIN_TYPE_REJECTED:" The ExitPlanMode tool response carries an isAgent field that is not a boolean, so the caller origin it claims cannot be trusted either way.",
+      APPROVED_PLAN_STORE_FAILED:" This run validates its result, so the approved plan must be kept byte for byte under .zensu/state for the VALIDATE stage to read its acceptance criteria from, and that copy could not be written. Nothing was recorded and the run stays at PLANNING; repair the project state directory and approve the plan again.",
+      PLAN_CRITERIA_UNUSABLE:" This run validates its result, but the approved plan has no active AC-### row in a ## Requirements table: the section is missing, its AC rows are placeholders or deprecated, or the document does not parse, for example because a code fence is never closed. Nothing was recorded and the run stays at PLANNING. Add a ## Requirements table with one | AC-### | criterion | source | row per acceptance criterion, keep the run marker, and present the corrected plan with ExitPlanMode again.",
       PLAN_EVALUATION_UNAVAILABLE:" The plan evaluation produced no verdict at all, so the payload itself was never judged."
     };
     const from=source ? ` The payload field carrying the plan was ${source}.` : "";
-    const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}.${causes[code]||""}${from} Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
+    const answered=detail ? ` The store answered ${detail}.` : "";
+    const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}.${causes[code]||""}${from}${answered} Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
     process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
   '
 }
@@ -303,13 +307,14 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         const attempt=state.stage==="PLANNING" ? 1 : state.tdd&&Number.isInteger(state.tdd.attempt) ? state.tdd.attempt+1 : null;
         const returnStage=state.stage==="PLANNING" ? "GATES" : state.tdd&&state.tdd.returnStage;
         if(!Number.isInteger(attempt)||attempt<1||attempt>999||!stages.has(returnStage))process.exit(3);
-        process.stdout.write([state.runId,state.ownerSessionId,state.stage,attempt,returnStage].join("\t"));
+        const store=state.stage==="PLANNING"&&state.options&&state.options.validate===true&&!state.workOrder ? "store" : "none";
+        process.stdout.write([state.runId,state.ownerSessionId,state.stage,attempt,returnStage,store].join("\t"));
       } catch (_) { process.exit(3); } });
     ' 2>/dev/null)" || {
       emit_autopilot_blocked CORRUPT_ACTIVE_STATE
       exit 0
     }
-    IFS=$'\t' read -r ACTIVE_RUN ACTIVE_OWNER ACTIVE_STAGE ACTIVE_ATTEMPT ACTIVE_RETURN_STAGE <<<"$ACTIVE_META"
+    IFS=$'\t' read -r ACTIVE_RUN ACTIVE_OWNER ACTIVE_STAGE ACTIVE_ATTEMPT ACTIVE_RETURN_STAGE ACTIVE_PLAN_STORE <<<"$ACTIVE_META"
     # A missing plan-payload module is a RUNTIME fault, not a payload one. Without
     # this guard the require throws, node exits on a code no arm claims, and the
     # operator is handed PLAN_EVALUATION_UNAVAILABLE — "the payload itself was
@@ -319,9 +324,21 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       emit_autopilot_runtime_blocked
       exit 0
     }
+    PLAN_STORE_ROOT=""
+    PLAN_REQUIREMENTS_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-plan-requirements.sh"
+    if [ "$ACTIVE_PLAN_STORE" = store ]; then
+      if [ ! -f "$PLAN_REQUIREMENTS_LIB" ] || [ ! -r "$PLAN_REQUIREMENTS_LIB" ]; then
+        emit_autopilot_runtime_blocked
+        exit 0
+      fi
+      PLAN_STORE_ROOT="$(zensu_host_path "$PROJECT_ROOT" 2>/dev/null)" || PLAN_STORE_ROOT=""
+    fi
+    PLAN_EVAL_MSYS_EXCL="$(MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" zensu_msys_env_exclusions PLAN_STORE_ROOT)" \
+      || PLAN_EVAL_MSYS_EXCL="$PLAN_MSYS_EXCL"
     PLAN_META="$(printf '%s' "$INPUT" | ACTIVE_RUN="$ACTIVE_RUN" ACTIVE_OWNER="$ACTIVE_OWNER" \
       ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" \
-      MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
+      ACTIVE_PLAN_STORE="$ACTIVE_PLAN_STORE" PLAN_STORE_ROOT="$PLAN_STORE_ROOT" \
+      MSYS2_ENV_CONV_EXCL="$PLAN_EVAL_MSYS_EXCL" \
       PLAN_PAYLOAD_LIB="$PLAN_PAYLOAD_LIB" node -e '
       const crypto=require("crypto");
       // hooks/lib/plan-payload-v1.js owns the precedence walk, the field-type
@@ -332,14 +349,15 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       // 17 is the module-load fault. It is deliberately NOT a BLOCK_CODE: the
       // shell routes it to emit_autopilot_runtime_blocked, so a broken install
       // never reports "the payload itself was never judged".
-      let resolveApprovedPlan,responseOrigin,REASONS,SOURCES;
+      let resolveApprovedPlan,responseOrigin,storeApprovedPlan,REASONS,SOURCES;
       try {
-        ({resolveApprovedPlan,responseOrigin,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+        ({resolveApprovedPlan,responseOrigin,storeApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
       } catch (_) { process.exit(17); }
       // Destructuring a module with the wrong exports does not throw — it yields
       // undefined, and the next statement would throw OUTSIDE this guard, exit 1,
       // and land on the very receipt 17 exists to avoid. Validate the shape here.
       if (typeof resolveApprovedPlan!=="function" || typeof responseOrigin!=="function"
+        || typeof storeApprovedPlan!=="function"
         || typeof REASONS!=="object" || !REASONS
         || Array.isArray(REASONS) || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(17);
       const EXITS={};
@@ -391,9 +409,19 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         const matches=[...resolved.plan.matchAll(/<!-- zensu-autopilot:([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) -->/g)];
         if (matches.length!==1) return refuse(4);
         if (process.env.ACTIVE_RUN!==matches[0][1]) return refuse(5);
-        const sha=crypto.createHash("sha256")
-          .update(resolved.buffer!==null ? resolved.buffer : Buffer.from(resolved.plan,"utf8")).digest("hex");
-        process.stdout.write([process.env.ACTIVE_RUN,sha].join("\t"));
+        const bytes=resolved.buffer!==null ? resolved.buffer : Buffer.from(resolved.plan,"utf8");
+        const sha=crypto.createHash("sha256").update(bytes).digest("hex");
+        if (process.env.ACTIVE_PLAN_STORE!=="store") {
+          process.stdout.write([process.env.ACTIVE_RUN,sha].join("\t"));
+          return;
+        }
+        const stored=storeApprovedPlan(process.env.PLAN_STORE_ROOT||"",sha,bytes);
+        if (!stored || stored.ok!==true) {
+          process.stdout.write(["STORE",String((stored&&stored.reason)||"")].join("\t"));
+          process.exitCode=20;
+          return;
+        }
+        process.stdout.write([process.env.ACTIVE_RUN,sha,stored.rel].join("\t"));
       } catch (_) { process.exit(9); } });
     ' 2>/dev/null)"
     META_RC=$?
@@ -419,12 +447,14 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         16) BLOCK_CODE=PLAN_PAYLOAD_TOOL_MISMATCH ;;
         18) BLOCK_CODE=PLAN_RESPONSE_AGENT_ORIGIN_REJECTED ;;
         19) BLOCK_CODE=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED ;;
+        20) BLOCK_CODE=APPROVED_PLAN_STORE_FAILED ;;
         *) BLOCK_CODE=PLAN_EVALUATION_UNAVAILABLE ;;
       esac
       # The producer validated the label against the module's SOURCES table, so
       # the shell only has to recognize the record and reject a label carrying
       # anything a field name cannot: whitespace, a slash, or a path separator.
       PLAN_SOURCE=""
+      PLAN_STORE_REASON=""
       PLAN_TAB="$(printf '\t')"
       case "$PLAN_META" in
         "SOURCE${PLAN_TAB}"*)
@@ -432,11 +462,40 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
           case "$PLAN_SOURCE" in
             *[!A-Za-z0-9._]*) PLAN_SOURCE="" ;;
           esac ;;
+        "STORE${PLAN_TAB}"*)
+          PLAN_STORE_REASON="${PLAN_META#*"$PLAN_TAB"}"
+          case "$PLAN_STORE_REASON" in
+            *[!A-Za-z0-9_-]*) PLAN_STORE_REASON="" ;;
+          esac ;;
       esac
-      emit_autopilot_blocked "$BLOCK_CODE" "$PLAN_SOURCE"
+      emit_autopilot_blocked "$BLOCK_CODE" "$PLAN_SOURCE" "$PLAN_STORE_REASON"
       exit 0
     fi
-    IFS=$'\t' read -r RUN_ID PLAN_SHA <<<"$PLAN_META"
+    IFS=$'\t' read -r RUN_ID PLAN_SHA PLAN_COPY_REL <<<"$PLAN_META"
+    if [ "$ACTIVE_PLAN_STORE" = store ]; then
+      PLAN_COPY_NAME="${PLAN_COPY_REL#.zensu/state/}"
+      case "$PLAN_COPY_NAME" in
+        ''|.*|*/*|*[!A-Za-z0-9._-]*) PLAN_COPY_NAME="" ;;
+      esac
+      if [ -z "$PLAN_COPY_NAME" ] || [ "$PLAN_COPY_REL" != ".zensu/state/$PLAN_COPY_NAME" ]; then
+        emit_autopilot_blocked APPROVED_PLAN_STORE_FAILED
+        exit 0
+      fi
+      PLAN_COPY="$PROJECT_ROOT/.zensu/state/$PLAN_COPY_NAME"
+      PLAN_CRITERIA_ROWS="$(bash "$PLAN_REQUIREMENTS_LIB" --list --plan "$PLAN_COPY" 2>/dev/null)" \
+        || PLAN_CRITERIA_ROWS=""
+      PLAN_ACTIVE_CRITERIA=0
+      while IFS=$'\t' read -r PLAN_CRITERION_ID PLAN_CRITERION_STATE _; do
+        case "$PLAN_CRITERION_ID:$PLAN_CRITERION_STATE" in
+          AC-[0-9]*:active) PLAN_ACTIVE_CRITERIA=$((PLAN_ACTIVE_CRITERIA + 1)) ;;
+        esac
+      done <<<"$PLAN_CRITERIA_ROWS"
+      if [ "$PLAN_ACTIVE_CRITERIA" -eq 0 ]; then
+        rm -f -- "$PLAN_COPY"
+        emit_autopilot_blocked PLAN_CRITERIA_UNUSABLE
+        exit 0
+      fi
+    fi
     PLAN_PAYLOAD="$(PLAN_SHA="$PLAN_SHA" node -e 'process.stdout.write(JSON.stringify({approvedPlanSha256:process.env.PLAN_SHA}))')"
     if ! autopilot_apply_event "$RUN_ID" "plan-approved-${PLAN_SHA}" PLAN_APPROVED \
         "$PLAN_PAYLOAD" "$PROJECT_ROOT" "$SESSION_ID" >/dev/null 2>&1; then

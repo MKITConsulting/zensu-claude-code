@@ -34,8 +34,10 @@ Probe as Autopilot's 0.B says, with two differences:
 
 ## 3. Plan
 
-Write the plan to `.zensu/plans/<order-id>.md`: the spec from the order, numbered acceptance
-criteria with stable `AC-###` ids, and the resolved recipe, shaped on the Autopilot spec template.
+Write the plan to `.zensu/plans/<order-id>.md`: the spec from the order, a `## Requirements` table
+with one row per acceptance criterion and stable `AC-###` ids, and the resolved recipe, shaped on
+the Autopilot spec template. The VALIDATE stage reads its criteria from this file, so a run that
+validates needs at least one active `AC-###` row there; `--bind-spec` refuses the plan otherwise.
 Settle every open question yourself with the safest reversible choice and record each choice in the
 plan under `## Decisions`. A choice a person should see goes to Zensu as a non-blocking question
 whose default option is that choice; a question the work cannot go past is a blocking one and ends
@@ -57,6 +59,10 @@ names another order.
 `--bind-spec` reports `planning`, checks the order's plan-approval state, reports `implementing`
 and records `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. On exit 0 continue with
 Autopilot's Phase 1 step 1, the `/zensu:build` run with the exact `AUTOPILOT-RUN: <RUN_ID>` line.
+
+Exit 8 with `plan-criteria-unusable` on stderr means the run validates and its plan carries no
+active `AC-###` row: add the `## Requirements` table §3 asks for and run `--bind-spec` again. The
+refusal comes before any stage report and before a person is asked to approve the plan.
 
 Exit 8 with `plan-approval-required` on stderr means a person must approve the plan first. Write
 the plan commit's message in the commit style, language and attribution practice
@@ -84,6 +90,12 @@ Exit 6 or 4 from either step: finish once and end.
 Run Autopilot's Phase 1 in order. After every Autopilot event you persist, run `"$WO" --drain`.
 These steps differ:
 
+- **Validation** (Phase 1 step 6): `--autopilot-validate` reads the criteria from
+  `.zensu/plans/<order-id>.md` and applies `VALIDATION_PASSED` itself; run `--drain` after it as
+  after an event you persist. When the order asked for no plan approval, its
+  `ACCEPTANCE PLAN UNAPPROVED` line says that no person approved those criteria: state that in the
+  pull request body. A plan a person approved and that no longer matches its digest refuses; never
+  edit it to get past a refusal.
 - **Every push** runs `"$WO" --push`, never `git push`. That holds inside `/zensu:pr-fix-findings`
   and in the validate loop too: where those steps push, run `--push` instead. Exit 8 from `--push`
   names its cause on stderr; never force past it. A working branch without the order's prefix means

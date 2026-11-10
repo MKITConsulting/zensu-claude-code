@@ -12,9 +12,9 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 32,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 44,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
-      "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
+      "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, retention, and the Autopilot run mode that reads the approved plan copy and checks the pull-request head."
     },
     {
       "path": "tests/structure/aspect-activation-v1.test.js", "registered": 21,
@@ -57,7 +57,7 @@
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 95, "skips": {"win32": 3},
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 96, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -112,9 +112,9 @@
       "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
     },
     {
-      "path": "tests/structure/plan-payload-v1.test.js", "registered": 22,
+      "path": "tests/structure/plan-payload-v1.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-plan-payload-fallback.sh" }],
-      "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
+      "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals, the O_NOFOLLOW fallback and the digest-named approved-plan copy."
     },
     {
       "path": "tests/structure/playwright-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 12},

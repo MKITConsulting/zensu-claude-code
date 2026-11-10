@@ -311,6 +311,8 @@ _zensu_avr_node() {
   ZENSU_AVR_BOUND="${_avr_bound:-0}" \
   ZENSU_AVR_VALIDATE="${_avr_validate:-}" \
   ZENSU_AVR_EDIT_LANDING_ESCAPED="${_avr_escaped_el:-0}" \
+  ZENSU_AVR_RUN="${_avr_run:-}" \
+  ZENSU_AVR_ACCEPT_PARTIAL="${_avr_accept_partial:-0}" \
   ZENSU_AVR_BASH="${_avr_bash:-bash}" \
   ZENSU_AVR_LABEL="$1" \
   ZENSU_AVR_MODE="$2" \
@@ -466,7 +468,7 @@ _zensu_evr_work_tree() {
 
 _zensu_avr_work_tree() {
   _avr_work_tree=""
-  _zensu_bound_work_tree "${1:-}" "$_avr_dir"
+  _zensu_bound_work_tree "${1:-}" "$_avr_dir" ${2+"$2"}
   [ -z "$_bwt_fault" ] || return 1
   [ -n "$_bwt_tree" ] || return 0
   [ -z "$_bwt_dir_fault" ] || { _bwt_fault="$_bwt_dir_fault"; return 1; }
@@ -474,6 +476,99 @@ _zensu_avr_work_tree() {
   _avr_work_tree=""
   _bwt_fault="its path cannot be handed to node"
   return 1
+}
+
+_zensu_active_run_json() {
+  command -v autopilot_read_active_strict >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" 2>/dev/null \
+    || return 6
+  autopilot_read_active_strict "${CLAUDE_PROJECT_DIR:-.}" "$1" 2>/dev/null
+}
+
+_zensu_run_bind() {
+  local label="$1" run_id="$2" session="$3" rc=0 run_json facts
+  _rb_json=""
+  _rb_stage=""
+  _rb_validate=""
+  _rb_head=""
+  _rb_visit=""
+  _rb_head_update=""
+  case "$run_id" in
+    (''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.:-]*)
+      echo "$label: --run must name an Autopilot run id" >&2
+      return 2
+      ;;
+  esac
+  if [ "${#run_id}" -lt 3 ] || [ "${#run_id}" -gt 128 ]; then
+    echo "$label: --run must name an Autopilot run id" >&2
+    return 2
+  fi
+  if [ -z "$session" ]; then
+    echo "zensu-log.sh: Session Control session identity unavailable" >&2
+    return 2
+  fi
+  run_json="$(_zensu_active_run_json "$session")" || rc=$?
+  case "$rc" in
+    (0) ;;
+    (1)
+      echo "$label: this session owns no active Autopilot run, so --run $run_id names no run it may verify" >&2
+      return 2
+      ;;
+    (5)
+      echo "$label: the project-local Autopilot state could not be read: its lock could not be taken, or its storage or path failed a safety check. Retry once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor" >&2
+      return 2
+      ;;
+    (6)
+      echo "$label: the Autopilot state library could not be loaded" >&2
+      return 2
+      ;;
+    (*)
+      echo "$label: the Autopilot run state is unreadable or inconsistent (status $rc); use its explicit repair, resume or cancel path before verifying" >&2
+      return 2
+      ;;
+  esac
+  facts="$(printf '%s' "$run_json" | ZENSU_RB_RUN_ID="$run_id" node -e '
+    let s;
+    try { s = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch (_) { process.exit(3); }
+    if (!s || typeof s !== "object" || Array.isArray(s) || typeof s.stage !== "string") process.exit(3);
+    if (s.runId !== process.env.ZENSU_RB_RUN_ID) process.exit(4);
+    if (s.stage === "DONE" || s.stage === "CANCELLED") process.exit(5);
+    const options = s.options && typeof s.options === "object" ? s.options : {};
+    const validate = options.validate === true ? "on" : options.validate === false ? "off" : "-";
+    const pr = s.evidence && s.evidence.pr && typeof s.evidence.pr.headSha === "string" ? s.evidence.pr.headSha : "-";
+    const events = Array.isArray(s.events) ? s.events : [];
+    const visit = events.filter((event) => event && event.toStage === "VALIDATE" && event.fromStage !== "VALIDATE").length;
+    const update = s.tdd && typeof s.tdd === "object" && typeof s.tdd.headUpdateRequired === "boolean" ? String(s.tdd.headUpdateRequired) : "-";
+    process.stdout.write([s.stage, validate, pr, String(visit), update].join("\t"));
+  ' 2>/dev/null)"
+  rc=$?
+  case "$rc" in
+    (0) ;;
+    (4)
+      echo "$label: --run $run_id is not the active Autopilot run of this session" >&2
+      return 2
+      ;;
+    (5)
+      echo "$label: autopilot run $run_id has already ended" >&2
+      return 2
+      ;;
+    (*)
+      echo "$label: the record of the active Autopilot run could not be read" >&2
+      return 2
+      ;;
+  esac
+  IFS=$'\t' read -r _rb_stage _rb_validate _rb_head _rb_visit _rb_head_update <<<"$facts"
+  [ "$_rb_validate" != "-" ] || _rb_validate=""
+  [ "$_rb_head_update" != "-" ] || _rb_head_update=""
+  [ "$_rb_head" != "-" ] || _rb_head=""
+  case "$_rb_head" in
+    (*[!0-9a-fA-F]*) _rb_head="" ;;
+  esac
+  case "$_rb_visit" in
+    (''|*[!0-9]*) _rb_visit=0 ;;
+  esac
+  _rb_json="$run_json"
+  return 0
 }
 
 _zensu_acceptance_gate() {
@@ -606,6 +701,8 @@ _avr_dir=""
 _evr_work_tree=""
 _evr_work_dir=""
 _avr_work_tree=""
+_avr_run=""
+_avr_accept_partial=0
 
 case "${1:-}" in
   --evidence-run)
@@ -617,10 +714,13 @@ case "${1:-}" in
     _evr_show="tail"
     _evr_if_stale=0
     _evr_local=0
+    _evr_run=""
+    _evr_run_seen=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --scope) _evr_scope="${2:-}"; shift 2 || break ;;
+        --run) _evr_run="${2:-}"; _evr_run_seen=true; shift 2 || break ;;
         --cmd) evr_cmd="${2:-}"; evr_cmd_seen=true; shift 2 || break ;;
         --show) _evr_show="${2:-}"; shift 2 || break ;;
         --if-stale) _evr_if_stale=1; shift ;;
@@ -638,8 +738,24 @@ case "${1:-}" in
       tail|all) ;;
       *) echo "zensu-log.sh --evidence-run: --show must be tail or all" >&2; exit 2 ;;
     esac
+    _evr_ctx_args=()
+    if [ "$_evr_run_seen" = true ]; then
+      if [ "$_evr_scope" != "acceptance" ]; then
+        echo "zensu-log.sh --evidence-run: --run applies only to --scope acceptance, the checks an Autopilot run's acceptance records cite" >&2
+        exit 2
+      fi
+      _evr_session="$(zensu_resolve_session_id 2>/dev/null)" || _evr_session=""
+      _zensu_run_bind "zensu-log.sh --evidence-run" "$_evr_run" "$_evr_session" || exit $?
+      _evr_ctx_args=("{\"runId\":\"$_evr_run\"}")
+    fi
     _zensu_evr_prepare "zensu-log.sh --evidence-run" || exit 2
-    if ! _zensu_evr_work_tree "$(zensu_resolve_session_id 2>/dev/null)"; then
+    if [ "$_evr_run_seen" = true ]; then
+      printf 'repository' > "$_evr_dir/tree-mode" || {
+        echo "zensu-log.sh --evidence-run: the tree mode of autopilot run $_evr_run could not be written to the temporary directory, so neither the evidence-run module nor the command ran. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --evidence-run again." >&2
+        exit 2
+      }
+    fi
+    if ! _zensu_evr_work_tree "$(zensu_resolve_session_id 2>/dev/null)" ${_evr_ctx_args[@]+"${_evr_ctx_args[@]}"}; then
       printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault" || {
         echo "zensu-log.sh --evidence-run: the work-tree lookup failed and its cause could not be written to the temporary directory, so neither the evidence-run module nor the command ran. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --evidence-run again." >&2
         exit 2
@@ -759,10 +875,12 @@ case "${1:-}" in
     _avr_verdict=""
     _avr_driver=""
     _avr_evidence_run=""
+    avr_run_seen=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --log) _avr_log="${2:-}"; shift 2 || break ;;
+        --run) _avr_run="${2:-}"; avr_run_seen=true; shift 2 || break ;;
         --start) avr_start="${2:-}"; shift 2 || break ;;
         --ac|--verdict|--driver|--evidence-run)
           if [ "$avr_verb" != "--acceptance-record" ]; then
@@ -780,8 +898,12 @@ case "${1:-}" in
         *) echo "zensu-log.sh $avr_verb: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
-    if [ -z "$_avr_log" ]; then
-      echo "zensu-log.sh $avr_verb: --log <this chain's run log> is required" >&2
+    if [ "$avr_run_seen" = true ] && [ -n "$_avr_log" ]; then
+      echo "zensu-log.sh $avr_verb: --log and --run name two different anchors; pass --run for an Autopilot run and --log for a standalone chain" >&2
+      exit 2
+    fi
+    if [ "$avr_run_seen" = false ] && [ -z "$_avr_log" ]; then
+      echo "zensu-log.sh $avr_verb: --log <this chain's run log> is required, or --run <id> for an Autopilot run's VALIDATE stage" >&2
       exit 2
     fi
     avr_log_arg="$_avr_log"
@@ -789,9 +911,22 @@ case "${1:-}" in
       echo "zensu-log.sh: Session Control session identity unavailable" >&2
       exit 2
     fi
+    avr_light=0
+    avr_ctx_args=()
+    if [ "$avr_run_seen" = true ]; then
+      _zensu_run_bind "zensu-log.sh $avr_verb" "$_avr_run" "$avr_session" || exit $?
+      avr_light=1
+      avr_ctx_args=("{\"runId\":\"$_avr_run\"}")
+    fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-    _zensu_avr_prepare "zensu-log.sh $avr_verb" "$avr_session" || exit 2
-    if ! _zensu_avr_work_tree "$avr_session"; then
+    _zensu_avr_prepare "zensu-log.sh $avr_verb" "$avr_session" "$avr_light" || exit 2
+    if [ "$avr_run_seen" = true ]; then
+      printf '%s' "$_rb_json" > "$_avr_dir/run.json" || {
+        echo "zensu-log.sh $avr_verb: the record of autopilot run $_avr_run could not be written to the temporary directory (${TMPDIR:-/tmp}), so the acceptance module did not run" >&2
+        exit 2
+      }
+    fi
+    if ! _zensu_avr_work_tree "$avr_session" ${avr_ctx_args[@]+"${avr_ctx_args[@]}"}; then
       printf '%s' "$_bwt_fault" > "$_avr_dir/work-tree-fault" || {
         echo "zensu-log.sh $avr_verb: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance module did not run. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run $avr_verb again." >&2
         exit 2
@@ -808,7 +943,7 @@ case "${1:-}" in
     head -c 65536 > "$_avr_dir/evidence"
     _zensu_avr_node "zensu-log.sh --acceptance-record" record
     avr_rc=$?
-    if [ "$avr_rc" -eq 0 ] && [ -s "$_avr_dir/run-log-line" ]; then
+    if [ "$avr_rc" -eq 0 ] && [ -n "$avr_log_arg" ] && [ -s "$_avr_dir/run-log-line" ]; then
       avr_line="$(cat "$_avr_dir/run-log-line")"
       if [ -n "$avr_start" ]; then
         bash "$0" append --log "$avr_log_arg" --message "$avr_line" --start "$avr_start" >/dev/null \
@@ -1419,6 +1554,110 @@ case "${1:-}" in
     fi
     exit "$begin_rc"
     ;;
+  --autopilot-validate)
+    apv_label="zensu-log.sh --autopilot-validate"
+    apv_run=""
+    apv_run_seen=false
+    apv_partial_seen=false
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run)
+          [ "$apv_run_seen" = false ] && [ $# -ge 2 ] || { echo "$apv_label: duplicate/missing --run" >&2; exit 2; }
+          apv_run_seen=true; apv_run="$2"; shift 2
+          ;;
+        --accept-partial)
+          [ "$apv_partial_seen" = false ] || { echo "$apv_label: duplicate --accept-partial" >&2; exit 2; }
+          apv_partial_seen=true; _avr_accept_partial=1; shift
+          ;;
+        *) echo "$apv_label: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ "$apv_run_seen" = true ] || { echo "$apv_label requires --run <id>" >&2; exit 2; }
+    apv_session="$(zensu_resolve_session_id)" || apv_session=""
+    _zensu_run_bind "$apv_label" "$apv_run" "$apv_session" || exit $?
+    case "$_rb_validate" in
+      (on) ;;
+      (off)
+        echo "$apv_label: autopilot run $apv_run was begun with --no-validate, so it has no VALIDATE stage and nothing to validate" >&2
+        exit 2
+        ;;
+      (*)
+        echo "$apv_label: the record of autopilot run $apv_run carries no readable validate option" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$_rb_stage" != "VALIDATE" ]; then
+      echo "$apv_label: autopilot run $apv_run is at stage $_rb_stage, not VALIDATE, so there is nothing to validate" >&2
+      exit 2
+    fi
+    case "$_rb_head_update" in
+      (false) ;;
+      (true)
+        echo "$apv_label: autopilot run $apv_run came back to VALIDATE from a fix attempt whose pushed head is not recorded yet, so it has no pull-request head to validate: re-run the gates, push the fix and record PR_HEAD_UPDATED; the run then rebuilds its proofs from FIX_FINDINGS, and FINDINGS_CLEARED on the new head brings it back to VALIDATE" >&2
+        exit 2
+        ;;
+      (*)
+        echo "$apv_label: the record of autopilot run $apv_run carries no readable head-update flag" >&2
+        exit 2
+        ;;
+    esac
+    if [ -z "$_rb_head" ]; then
+      echo "$apv_label: autopilot run $apv_run records no pull-request head, so there is no commit to validate" >&2
+      exit 2
+    fi
+    apv_head="$(printf '%s' "$_rb_head" | tr 'ABCDEF' 'abcdef')"
+    _avr_run="$apv_run"
+    _avr_escape=0
+    [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
+    _zensu_avr_prepare "$apv_label" "$apv_session" 1 || exit 2
+    printf '%s' "$_rb_json" > "$_avr_dir/run.json" || {
+      echo "$apv_label: the record of autopilot run $apv_run could not be written to the temporary directory (${TMPDIR:-/tmp}), so autopilot run $apv_run stays at VALIDATE" >&2
+      exit 2
+    }
+    if [ "$_avr_escape" != "1" ] && ! _zensu_avr_work_tree "$apv_session" "{\"runId\":\"$apv_run\"}"; then
+      printf '%s' "$_bwt_fault" > "$_avr_dir/work-tree-fault" || {
+        echo "$apv_label: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance check did not run. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --autopilot-validate again." >&2
+        exit 2
+      }
+    fi
+    _zensu_avr_node "$apv_label" verdict
+    apv_rc=$?
+    if [ "$apv_rc" -ne 0 ]; then
+      echo "$apv_label: autopilot run $apv_run stays at VALIDATE; act on the ACCEPTANCE refusal above, then run --autopilot-validate again" >&2
+      exit "$apv_rc"
+    fi
+    apv_state="$(cat "$_avr_dir/verdict-state" 2>/dev/null)" || apv_state=""
+    case "$apv_state" in
+      (pass) apv_gate="" ;;
+      (escaped) apv_gate="ZENSU_ACCEPTANCE_GATE" ;;
+      (partial-accepted) apv_gate="acceptance-partial" ;;
+      ('')
+        echo "$apv_label: the acceptance verdict could not be read back, so autopilot run $apv_run stays at VALIDATE; run --autopilot-validate again" >&2
+        exit 2
+        ;;
+      (*) apv_gate="acceptance-advisory" ;;
+    esac
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+    if [ -n "$apv_gate" ]; then
+      autopilot_apply_event "$apv_run" "validation-bypass:$apv_gate:$_rb_visit:$apv_head" BYPASS_RECORDED \
+        "{\"gate\":\"$apv_gate\"}" "${CLAUDE_PROJECT_DIR:-.}" "$apv_session"
+      apv_rc=$?
+      if [ "$apv_rc" -ne 0 ]; then
+        echo "$apv_label: the $apv_gate bypass could not be recorded in the ledger of autopilot run $apv_run (status $apv_rc), so autopilot run $apv_run stays at VALIDATE" >&2
+        exit 2
+      fi
+    fi
+    autopilot_apply_event "$apv_run" "validation-passed:$_rb_visit:$apv_head" VALIDATION_PASSED \
+      "{\"headSha\":\"$apv_head\"}" "${CLAUDE_PROJECT_DIR:-.}" "$apv_session"
+    apv_rc=$?
+    if [ "$apv_rc" -ne 0 ]; then
+      echo "$apv_label: VALIDATION_PASSED could not be applied to autopilot run $apv_run (status $apv_rc), so autopilot run $apv_run stays at VALIDATE" >&2
+      exit 2
+    fi
+    echo "zensu autopilot: run $apv_run validated at the pull-request head ${apv_head:0:12}${apv_gate:+, with the $apv_gate bypass recorded in its ledger}"
+    exit 0
+    ;;
   --autopilot-event)
     run_val=""
     event_val=""
@@ -1468,6 +1707,10 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-event: the 'work-order-release-' event-id namespace is reserved for zensu-work-order.sh" >&2
         exit 2
         ;;
+      validation-passed:*|validation-bypass:*)
+        echo "zensu-log.sh --autopilot-event: the 'validation-passed:' and 'validation-bypass:' event-id namespaces are reserved for --autopilot-validate" >&2
+        exit 2
+        ;;
     esac
     case "$event_val" in
       TDD_STARTED|TDD_CHAIN_DONE)
@@ -1480,6 +1723,10 @@ case "${1:-}" in
         ;;
       TEAM_REVIEW_IMPORTED)
         echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-work-order.sh --review-import" >&2
+        exit 2
+        ;;
+      VALIDATION_PASSED)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-log.sh --autopilot-validate --run <id>, which checks the acceptance records on the pull-request head first" >&2
         exit 2
         ;;
     esac

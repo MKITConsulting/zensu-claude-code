@@ -461,6 +461,39 @@ function fingerprintRoot(directory, projectRoot, limits = LIMITS) {
   return otherTop;
 }
 
+function repositoryPrefix(projectRoot, treeRoot) {
+  if (typeof projectRoot !== 'string' || typeof treeRoot !== 'string' || projectRoot === '' || treeRoot === '' || treeRoot === projectRoot) return null;
+  let own = projectRoot;
+  let top = treeRoot;
+  try { own = fs.realpathSync.native(projectRoot); } catch { }
+  try { top = fs.realpathSync.native(treeRoot); } catch { }
+  const relative = path.relative(top, own);
+  if (relative === '' || relative.split(/[\\/]/)[0] === '..' || path.isAbsolute(relative)) return null;
+  return relative.split(path.sep).join('/');
+}
+
+function repositoryRoot(projectRoot, limits = LIMITS) {
+  const top = workTreeTop(projectRoot, limits);
+  if (top.reason) return { root: null, excluded: [], reason: top.reason };
+  if (top.top === null) return { root: projectRoot, excluded: [], reason: null };
+  let own;
+  try {
+    own = fs.realpathSync.native(projectRoot);
+  } catch (error) {
+    return { root: null, excluded: [], reason: `the project root does not resolve (${error.code || error.message})` };
+  }
+  if (own === top.top) return { root: projectRoot, excluded: [], reason: null };
+  const prefix = repositoryPrefix(own, top.top);
+  if (prefix === null) return { root: null, excluded: [], reason: 'the project root lies outside the work tree git reports for it' };
+  return { root: top.top, excluded: [`${prefix}/.zensu`], reason: null };
+}
+
+function repositoryTree(projectRoot, scratchDirectory, limits = LIMITS) {
+  const repository = repositoryRoot(projectRoot, limits);
+  if (repository.root === null) return { ...repository, tree: null };
+  return { ...repository, ...computeTree(repository.root, scratchDirectory, limits, { excluded: repository.excluded }) };
+}
+
 function computeFingerprint(projectRoot, treeRoot, scratchDirectory, limits = LIMITS) {
   if (treeRoot === null) return { tree: null, reason: 'git could not resolve the work tree the run directory lies in' };
   const own = computeTree(projectRoot, scratchDirectory, limits);
@@ -532,6 +565,11 @@ function measuredLabel(projectRoot, treeRoot, limits = LIMITS) {
 
 function fingerprintChanges(projectRoot, treeRoot, fromTree, toTree, limits = LIMITS) {
   if (!fromTree || !toTree || treeRoot === null) return null;
+  const repository = repositoryPrefix(projectRoot, treeRoot);
+  if (repository !== null) {
+    const paths = changedPaths(treeRoot, fromTree, toTree, limits);
+    return paths === null ? null : paths.map((entry) => path.posix.relative(repository, entry));
+  }
   const from = treeParts(projectRoot, fromTree, limits);
   const to = treeParts(projectRoot, toTree, limits);
   if (treeRoot === projectRoot) return from || to ? null : changedPaths(projectRoot, fromTree, toTree, limits);
@@ -1139,6 +1177,10 @@ function run(options) {
     let treeRoot = projectRoot;
     if (TEST_SCOPES.includes(options.scope)) treeRoot = fingerprintRoot(suiteDirectory, projectRoot, limits);
     else if (options.scope === 'acceptance' && boundTree) treeRoot = fingerprintRoot(boundTree, projectRoot, limits);
+    const repositoryScope = options.scope === 'acceptance' && !boundTree && options.treeMode === 'repository';
+    const fingerprint = () => (repositoryScope
+      ? repositoryTree(projectRoot, locations.scratch, limits)
+      : computeFingerprint(projectRoot, treeRoot, locations.scratch, limits));
     if (options.ifStale && options.scope === 'scoped') {
       const freshRoot = boundTree ? fingerprintRoot(boundTree, projectRoot, limits) : treeRoot;
       const fresh = freshScopedRecord(locations, options.sessionKey, projectRoot, resolved.command, freshRoot, limits);
@@ -1170,7 +1212,7 @@ function run(options) {
     const logPath = path.join(locations.logs, `${id}.log`);
     const scriptPath = path.join(locations.scratch, `run-${id}.sh`);
     const startedAt = new Date();
-    const treeStart = TREE_SCOPES.includes(options.scope) ? computeFingerprint(projectRoot, treeRoot, locations.scratch, limits) : { tree: null, reason: null };
+    const treeStart = TREE_SCOPES.includes(options.scope) ? fingerprint() : { tree: null, reason: null };
     if (where.moved) {
       say(stderr, boundTree
         ? `zensu evidence-run: the working directory is not in the work tree of this Autopilot-bound chain, so the command runs in ${where.cwd}`
@@ -1263,7 +1305,7 @@ function run(options) {
       else if (interruptedBy) exitCode = 128 + signalNumber(interruptedBy);
       else if (code === null || code === undefined) exitCode = 128 + signalNumber(signal);
       else exitCode = code;
-      const treeEnd = TREE_SCOPES.includes(options.scope) ? computeFingerprint(projectRoot, treeRoot, locations.scratch, limits) : { tree: null, reason: null };
+      const treeEnd = TREE_SCOPES.includes(options.scope) ? fingerprint() : { tree: null, reason: null };
       let logInfo = { bytes: null, truncated: false };
       try { logInfo = truncateLogMiddle(logPath, limits); } catch { }
       const final = {
@@ -1367,6 +1409,7 @@ function transportOptions(env) {
     workTree: env.ZENSU_EVR_WORK_TREE || '',
     workDirectory: env.ZENSU_EVR_WORK_DIR || '',
     workTreeFault: readWorkTreeFault(directory),
+    treeMode: readTransportFile(directory, 'tree-mode') === 'repository' ? 'repository' : '',
     scope: env.ZENSU_EVR_SCOPE,
     show: env.ZENSU_EVR_SHOW === 'all' ? 'all' : 'tail',
     ifStale: env.ZENSU_EVR_IF_STALE === '1',
@@ -1437,6 +1480,8 @@ module.exports = {
   computeTree,
   commandDirectory,
   fingerprintRoot,
+  repositoryRoot,
+  repositoryTree,
   computeFingerprint,
   fingerprintChanges,
   changedPaths,

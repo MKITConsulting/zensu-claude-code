@@ -75,7 +75,9 @@ a code change first. Remote mode is refused there, because a deployed URL runs o
 the tree the records bind to. The consent and policy rules below apply unchanged. In consent
 mode the later pass boots on the same loopback origin, so the prompt is not asked twice. An
 Autopilot-bound chain skips this stage: its VALIDATE stage verifies every criterion unless the
-run was started with `--no-validate`, and the chain's terminus line says which.
+run was started with `--no-validate`, and the chain's terminus line says which. That stage
+records against the run with `--run <id>` and passes only through `zensu-log.sh
+--autopilot-validate`, which checks the records on the pull-request head.
 
 ## What it can verify
 

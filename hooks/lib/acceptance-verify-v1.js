@@ -9,6 +9,7 @@ const { redact, defaultHome } = require('./zensu-artifact-redact-v1.js');
 const { scan } = require('./secret-patterns.js');
 const evidenceRun = require('./evidence-run-v1.js');
 const receipts = require('./edit-landing-receipt-v1.js');
+const planPayload = require('./plan-payload-v1.js');
 
 const { canonical, resolveRunLog } = receipts;
 const SCHEMA = 'acceptance-verify-v1';
@@ -28,13 +29,14 @@ const VERDICT_STATES = Object.freeze([
   'not-applicable',
   'not-checked',
   'escaped',
+  'partial-accepted',
   'incomplete',
   'no-criteria',
   'unresolved',
   'invalid',
   'unavailable',
 ]);
-const PASSING_STATES = Object.freeze(['pass', 'pass-tree-unverified', 'not-applicable', 'not-checked', 'escaped']);
+const PASSING_STATES = Object.freeze(['pass', 'pass-tree-unverified', 'not-applicable', 'not-checked', 'escaped', 'partial-accepted']);
 const CRITERION_STATES = Object.freeze(['pass', 'fail', 'partial', 'stale', 'missing', 'deprecated', 'dropped']);
 const VERIFY_AGAIN_STATES = Object.freeze(['missing', 'stale', 'partial']);
 const ID_RE = /^av1_[0-9]{13}_[0-9a-f]{12}$/;
@@ -45,6 +47,10 @@ const DIGEST_RE = /^[0-9a-f]{64}$/;
 const AC_RE = /^AC-([0-9]+)([a-z]?)$/;
 const EVIDENCE_RUN_RE = /^er1_[0-9]{13}_[0-9a-f]{12}$/;
 const STEM_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/;
+const ORDER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const COMMIT_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const RECORDED_HEAD_RE = /^[0-9a-fA-F]{7,64}$/;
 const RECORD_KEYS = Object.freeze([
   'ac',
   'criterion',
@@ -123,6 +129,15 @@ function nullableString(value, max) {
   return value === null || (typeof value === 'string' && value.length <= max);
 }
 
+function isRunCopyStem(stem) {
+  return typeof stem === 'string' && stem.startsWith(planPayload.APPROVED_PLAN_PREFIX);
+}
+
+function expectedPlanRel(stem) {
+  if (isRunCopyStem(stem)) return planPayload.approvedPlanRelPath(stem.slice(planPayload.APPROVED_PLAN_PREFIX.length));
+  return `.zensu/plans/${stem}.md`;
+}
+
 function validateRecord(record, expected = {}) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return 'not an object';
   const keys = Object.keys(record).sort();
@@ -137,7 +152,7 @@ function validateRecord(record, expected = {}) {
   if (typeof record.project_root !== 'string' || record.project_root === '') return 'malformed project root';
   if (expected.projectRoot !== undefined && record.project_root !== expected.projectRoot) return 'bound to another project root';
   if (typeof record.stem !== 'string' || !STEM_RE.test(record.stem)) return 'malformed stem';
-  if (record.plan !== `.zensu/plans/${record.stem}.md`) return 'malformed plan';
+  if (record.plan !== expectedPlanRel(record.stem)) return 'malformed plan';
   if (typeof record.ac !== 'string' || !AC_RE.test(record.ac)) return 'malformed criterion id';
   if (typeof record.criterion !== 'string' || record.criterion.length > LIMITS.maxCriterionChars) return 'malformed criterion';
   if (typeof record.criterion_digest !== 'string' || !DIGEST_RE.test(record.criterion_digest)) return 'malformed criterion digest';
@@ -381,8 +396,9 @@ function gitEnvironment() {
   return evidenceRun.gitEnvironment();
 }
 
-function hasChanges(root, limits = LIMITS) {
-  const result = childProcess.spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).zensu'], {
+function hasChanges(root, limits = LIMITS, excluded = []) {
+  const result = childProcess.spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).zensu',
+    ...excluded.map((entry) => `:(exclude,literal)${entry}`)], {
     env: gitEnvironment(),
     encoding: 'utf8',
     timeout: limits.gitTimeoutMs,
@@ -396,6 +412,10 @@ function hasChanges(root, limits = LIMITS) {
 
 function chainTree(options, scratchDirectory) {
   if (typeof options.workTree !== 'string' || options.workTree === '') {
+    if (options.runId) {
+      const repository = evidenceRun.repositoryTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS);
+      return { root: repository.root, tree: { tree: repository.tree, reason: repository.reason } };
+    }
     return { root: options.projectRoot, tree: evidenceRun.computeTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS) };
   }
   const root = evidenceRun.fingerprintRoot(options.workTree, options.projectRoot, evidenceRun.LIMITS);
@@ -467,6 +487,117 @@ function resolveChain(options) {
   return { root, stem, planPath: plan.planPath, planRel: plan.planRel, disclosures };
 }
 
+function runFacts(options) {
+  const runId = options.runId;
+  if (typeof runId !== 'string' || !RUN_ID_RE.test(runId)) return { error: '--run must name an Autopilot run id' };
+  const label = `autopilot run ${runId}`;
+  const run = options.run;
+  if (!run || typeof run !== 'object' || Array.isArray(run)) {
+    return { error: `the record of ${label} did not reach the acceptance check; run the verb again` };
+  }
+  if (run.runId !== runId) {
+    return { error: `the run record handed to the acceptance check names run ${display(String(run.runId), options.projectRoot)}, not ${runId}` };
+  }
+  const validate = run.options && typeof run.options === 'object' ? run.options.validate : undefined;
+  if (validate === false) return { error: `${label} was begun with --no-validate, so it has no acceptance criteria to verify` };
+  if (validate !== true) return { error: `the record of ${label} carries no readable validate option` };
+  const approved = run.approvedPlanSha256;
+  if (approved === null || approved === undefined) return { error: `${label} records no approved plan, so it has no acceptance criteria to verify yet` };
+  if (typeof approved !== 'string' || !DIGEST_RE.test(approved)) return { error: `the record of ${label} carries a malformed approved-plan digest` };
+  let workOrder = null;
+  if (run.workOrder !== undefined && run.workOrder !== null) {
+    const order = run.workOrder;
+    if (typeof order !== 'object' || Array.isArray(order) || typeof order.orderId !== 'string' || !ORDER_ID_RE.test(order.orderId)
+      || typeof order.specHash !== 'string' || !DIGEST_RE.test(order.specHash)) {
+      return { error: `the record of ${label} carries a malformed work-order binding` };
+    }
+    workOrder = { orderId: order.orderId, specHash: order.specHash };
+  }
+  const pr = run.evidence && typeof run.evidence === 'object' ? run.evidence.pr : null;
+  const prHead = pr && typeof pr === 'object' && typeof pr.headSha === 'string' ? pr.headSha : null;
+  return { runId, label, approved, workOrder, prHead };
+}
+
+function approvedPlanRefusal(facts, reason) {
+  const copy = planPayload.approvedPlanRelPath(facts.approved);
+  const failures = planPayload.APPROVED_PLAN_FAILURES;
+  if (reason === failures.MISSING) {
+    return `${facts.label} has no stored copy of the plan it approved (${copy}): the plan was approved before this release kept one, or the copy was removed, so its acceptance criteria cannot be read; only the user can leave ZENSU_ACCEPTANCE_GATE=off for this run`;
+  }
+  if (reason === failures.MISMATCH) {
+    return `the stored copy ${copy} no longer matches the digest the run approved, so its acceptance criteria cannot be trusted; only the user can leave ZENSU_ACCEPTANCE_GATE=off for this run`;
+  }
+  if (reason === failures.STATE_DIRECTORY) {
+    return `the project .zensu/state directory is a symlink or not a directory, so the approved plan of ${facts.label} cannot be read`;
+  }
+  return `the stored copy ${copy} of the plan ${facts.label} approved cannot be read (${reason})`;
+}
+
+function runChain(options) {
+  const facts = runFacts(options);
+  if (facts.error) return { error: facts.error };
+  if (typeof options.projectRoot !== 'string' || options.projectRoot === '') return { error: 'no project root is bound' };
+  const root = canonical(path.resolve(options.projectRoot));
+  if (!facts.workOrder) {
+    const copy = planPayload.readApprovedPlan(root, facts.approved);
+    if (!copy.ok) return { error: approvedPlanRefusal(facts, copy.reason) };
+    return { root, stem: copy.stem, planPath: copy.path, planRel: copy.rel, disclosures: [], runId: facts.runId, facts };
+  }
+  const stem = facts.workOrder.orderId;
+  const plan = planFor(root, stem);
+  if (plan.reason) return { error: plan.reason };
+  const disclosures = [];
+  if (facts.approved !== facts.workOrder.specHash) {
+    const read = planPayload.readPlanFile(plan.planPath);
+    if (read.failure) return { error: `the plan ${plan.planRel} of ${facts.label} cannot be read (${read.failure})` };
+    if (crypto.createHash('sha256').update(read.bytes).digest('hex') !== facts.approved) {
+      return {
+        error: `the plan ${plan.planRel} no longer matches the plan a person approved for ${facts.label}, so its acceptance criteria cannot be trusted; restore the approved plan, or leave ZENSU_ACCEPTANCE_GATE=off to the user`,
+      };
+    }
+  } else {
+    disclosures.push(`ACCEPTANCE PLAN UNAPPROVED — work order ${stem} asks for no plan approval, so the criteria of ${facts.label} come from the session's own plan ${plan.planRel}, which no person approved`);
+  }
+  return { root, stem, planPath: plan.planPath, planRel: plan.planRel, disclosures, runId: facts.runId, facts };
+}
+
+function commitOf(root, revision, limits) {
+  const result = childProcess.spawnSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', revision], {
+    env: gitEnvironment(),
+    encoding: 'utf8',
+    timeout: limits.gitTimeoutMs,
+    maxBuffer: 1024 * 1024,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) return null;
+  const value = String(result.stdout || '').trim().toLowerCase();
+  return COMMIT_RE.test(value) ? value : null;
+}
+
+function runHead(root, prHead, limits = LIMITS, excluded = []) {
+  if (typeof prHead !== 'string' || !RECORDED_HEAD_RE.test(prHead)) {
+    return { reason: 'the run records no pull-request head, so there is no commit to validate' };
+  }
+  const head = commitOf(root, 'HEAD', limits);
+  if (!head) return { reason: 'the HEAD commit of the work tree could not be read, so it cannot be compared with the pull-request head' };
+  const pr = commitOf(root, `${prHead.toLowerCase()}^{commit}`, limits);
+  if (!pr) return { reason: `the pull-request head ${prHead.slice(0, 12).toLowerCase()} is not a commit in the work tree; fetch it, then validate again` };
+  if (pr !== head) {
+    return {
+      reason: `HEAD of the work tree is ${head.slice(0, 12)}, not the pull-request head ${pr.slice(0, 12)}; check out ${pr.slice(0, 12)}, or send the newer commit through the fix loop with VALIDATION_FAILED: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE`,
+    };
+  }
+  const changes = hasChanges(root, limits, excluded);
+  if (!changes.known) return { reason: 'git status failed in the work tree, so whether it is clean is unknown' };
+  if (changes.changed) {
+    return {
+      reason: `the work tree has uncommitted changes, so it is not the pull-request head ${pr.slice(0, 12)}; discard them, or send them through the fix loop with VALIDATION_FAILED: once its fix attempt is back, push them and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE`,
+    };
+  }
+  return { head };
+}
+
 function workTreeRefusal(options, limits = LIMITS) {
   const fault = evidenceRun.workTreeFaultCause(options.workTreeFault);
   if (fault === null) return null;
@@ -485,12 +616,15 @@ function record(options) {
   if (typeof ac !== 'string' || !AC_RE.test(ac)) return { code: 2, error: '--ac must name an acceptance criterion id such as AC-001' };
   if (!VERDICTS.includes(options.verdict)) return { code: 2, error: `--verdict must be one of ${VERDICTS.join(', ')}` };
   if (!ACCEPTED_DRIVERS.includes(options.driver)) return { code: 2, error: `--driver must be one of ${DRIVERS.join(', ')}` };
-  if (!options.logPath) return { code: 2, error: '--log <this chain\'s run log> is required' };
+  if (options.runId && options.logPath) {
+    return { code: 2, error: '--log and --run name two different anchors; pass --run for an Autopilot run and --log for a standalone chain' };
+  }
+  if (!options.logPath && !options.runId) return { code: 2, error: '--log <this chain\'s run log> is required' };
   const refusal = workTreeRefusal(options, limits);
   if (refusal) return { code: 2, error: refusal };
   const evidence = cleanEvidence(options.evidenceText, options.projectRoot, limits);
   if (evidence.error) return { code: 1, error: evidence.error };
-  const chain = resolveChain(options);
+  const chain = options.runId ? runChain(options) : resolveChain(options);
   if (chain.error) return { code: 1, error: chain.error };
   const criteria = readCriteria(chain.planPath, options);
   if (criteria.status !== 'ok') return { code: 1, error: `${chain.planRel}: ${criteria.reason}` };
@@ -652,7 +786,7 @@ function countKinds(rows) {
   return { observed, attested };
 }
 
-function describeRow(row, projectRoot, limits = LIMITS) {
+function describeRow(row, projectRoot, limits = LIMITS, withEvidence = false) {
   const id = row.criterion.id;
   const text = display(row.criterion.text, projectRoot, limits);
   if (row.state === 'missing' || row.state === 'deprecated') return `${id} ${row.state} | ${text}`;
@@ -660,15 +794,16 @@ function describeRow(row, projectRoot, limits = LIMITS) {
   const how = row.record
     ? ` | ${row.record.driver} ${row.record.evidence_run ? `observed ${row.record.evidence_run}` : 'attested'} | record ${row.record.id}`
     : '';
+  const evidence = withEvidence && row.record ? ` | evidence: ${display(row.record.evidence, projectRoot, limits)}` : '';
   const unverified = row.treeUnverified ? ' (tree unverified)' : '';
-  return `${id} ${row.state}${cause}${unverified}${how} | ${text}`;
+  return `${id} ${row.state}${cause}${unverified}${how}${evidence} | ${text}`;
 }
 
 function status(options) {
   const limits = limitsWith(options.limits);
   const refusal = workTreeRefusal(options, limits);
   if (refusal) return { code: 2, lines: [`ACCEPTANCE STATUS — unavailable | ${refusal}`] };
-  const chain = resolveChain(options);
+  const chain = options.runId ? runChain(options) : resolveChain(options);
   if (chain.error) return { code: 2, lines: [`ACCEPTANCE STATUS — unresolved | ${chain.error}`] };
   const result = assess({ ...options, chain });
   if (result.outcome !== 'evaluated') {
@@ -681,8 +816,9 @@ function status(options) {
   const complete = passing === active.length && blocking === 0;
   const tree = result.currentTree.tree ? result.currentTree.tree.slice(0, 12) : `unverified (${result.currentTree.reason || 'no tree id'})`;
   const suffix = complete ? '' : remedies('incomplete', result.rows, chain, options.projectRoot).map((entry) => ` | ${entry}`).join('');
-  const lines = [...chain.disclosures, `ACCEPTANCE STATUS — plan: ${chain.planRel} | tree: ${tree} | ${passing}/${active.length} active criteria pass${blocking > 0 ? ` | ${blocking} dropped` : ''}${suffix}`];
-  for (const row of result.rows) lines.push(describeRow(row, options.projectRoot, limits));
+  const anchor = chain.runId ? `autopilot run ${chain.runId} | ` : '';
+  const lines = [...chain.disclosures, `ACCEPTANCE STATUS — ${anchor}plan: ${chain.planRel} | tree: ${tree} | ${passing}/${active.length} active criteria pass${blocking > 0 ? ` | ${blocking} dropped` : ''}${suffix}`];
+  for (const row of result.rows) lines.push(describeRow(row, options.projectRoot, limits, Boolean(chain.runId)));
   return { code: complete ? 0 : 1, lines };
 }
 
@@ -712,7 +848,7 @@ function verdictChain(options) {
     } catch (error) {
       return { outcome: 'unavailable', reason: error.message };
     }
-    const newest = entries.filter((entry) => entry.record).pop();
+    const newest = entries.filter((entry) => entry.record && !isRunCopyStem(entry.record.stem)).pop();
     if (!newest) {
       return { outcome: 'unresolved', reason: 'ZENSU_EDIT_LANDING_GATE=off left no receipt to name this chain\'s plan, and no acceptance record names one either' };
     }
@@ -754,7 +890,29 @@ function verifyRemedy(chain, projectRoot) {
   return `run: ${REMEDY}${log}`;
 }
 
+function runRemedies(state, rows, runId) {
+  if (state === 'no-criteria') {
+    return ['add: the approved plan carries no active AC-### criterion, so only the user can leave ZENSU_ACCEPTANCE_GATE=off for this run'];
+  }
+  const verify = `run: drive each criterion that does not pass again on this tree and record it with zensu-log.sh --acceptance-record --run ${runId}`;
+  if (state === 'invalid') return [verify];
+  if (state !== 'incomplete') return [];
+  const found = new Set(rows.map((row) => row.state));
+  const listed = [];
+  if (VERIFY_AGAIN_STATES.some((entry) => found.has(entry))) listed.push(verify);
+  if (found.has('fail')) {
+    listed.push(`fix: a criterion that fails on this tree needs a code change; send VALIDATION_FAILED for autopilot run ${runId} so the run returns to its fix loop`);
+  }
+  if (found.has('dropped')) listed.push('restore: a dropped criterion needs a pass, or ZENSU_ACCEPTANCE_GATE left to the user');
+  const open = rows.filter((row) => row.state !== 'pass' && row.state !== 'deprecated');
+  if (open.length > 0 && open.every((row) => row.state === 'partial')) {
+    listed.push(`accept: every criterion that does not pass is partial, so zensu-log.sh --autopilot-validate --run ${runId} --accept-partial records the gap in the run's ledger and validates the run`);
+  }
+  return listed;
+}
+
 function remedies(state, rows, chain, projectRoot) {
+  if (chain && chain.runId) return runRemedies(state, rows, chain.runId);
   if (state === 'no-criteria') {
     return ['add: give the plan\'s ## Requirements table an active AC-### criterion, or leave ZENSU_ACCEPTANCE_GATE to the user'];
   }
@@ -772,12 +930,89 @@ function remedies(state, rows, chain, projectRoot) {
   return listed;
 }
 
+function runOutcome(options, chain, limits) {
+  const bound = typeof options.workTree === 'string' && options.workTree !== '';
+  const repository = bound ? { root: options.workTree, excluded: [], reason: null } : evidenceRun.repositoryRoot(options.projectRoot, evidenceRun.LIMITS);
+  if (repository.root === null) {
+    return {
+      state: 'unresolved',
+      cause: `${chain.facts.label}: the repository of the project root could not be determined (${display(repository.reason || 'no reason', options.projectRoot, limits)}), so the pull-request head cannot be checked`,
+      rows: [],
+    };
+  }
+  const head = runHead(repository.root, chain.facts.prHead, limits, repository.excluded);
+  if (head.reason) return { state: 'unresolved', cause: `${chain.facts.label}: ${head.reason}`, rows: [] };
+  const result = assess({ ...options, chain });
+  if (result.outcome !== 'evaluated') return { state: result.outcome, cause: result.reason, rows: [] };
+  if (!result.currentTree.tree) {
+    return {
+      state: 'unresolved',
+      cause: `${chain.facts.label}: the work tree could not be fingerprinted (${result.currentTree.reason || 'no tree id'}), so no record can be matched to the pull-request head`,
+      rows: [],
+    };
+  }
+  const rows = result.rows;
+  const active = rows.filter((row) => row.criterion.state === 'active');
+  const passing = active.filter((row) => row.state === 'pass').length;
+  const open = rows.filter((row) => row.state !== 'pass' && row.state !== 'deprecated');
+  const deprecated = rows.filter((row) => row.state === 'deprecated').map((row) => row.criterion.id);
+  const deprecatedText = deprecated.length > 0 ? `; deprecated: ${deprecated.join(', ')}` : '';
+  const where = `${chain.facts.label}: ${passing}/${active.length} acceptance criteria pass on the pull-request head ${head.head.slice(0, 12)}`;
+  if (open.length === 0) {
+    const kinds = countKinds(rows);
+    const flaky = rows.filter((row) => row.earlierNonPass > 0).map((row) => `${row.criterion.id} had ${row.earlierNonPass} earlier non-pass verdict(s) on this same tree`);
+    return { state: 'pass', cause: `${where} (observed ${kinds.observed}, attested ${kinds.attested})${deprecatedText}`, rows, flaky };
+  }
+  if (options.acceptPartial && open.every((row) => row.state === 'partial')) {
+    return { state: 'partial-accepted', cause: `${where}; accepted as partial: ${open.map((row) => row.criterion.id).join(', ')}${deprecatedText}`, rows };
+  }
+  const listed = open.map((row, index) => `${row.criterion.id} ${row.state}${row.cause && index < limits.listedCriteria ? ` (${row.cause})` : ''}`);
+  const refusedAccept = options.acceptPartial ? '; --accept-partial covers only partial criteria' : '';
+  return { state: 'incomplete', cause: `${where}; ${listed.join('; ')}${deprecatedText}${refusedAccept}`, rows };
+}
+
+function runVerdict(options, gate, lines, limits) {
+  const gateLabel = `gate: ${gate.mode}`;
+  if (options.escape) {
+    lines.push(`ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record of autopilot run ${options.runId} was read | ${gateLabel}`);
+    return { state: 'escaped', passes: true, mode: gate.mode, lines };
+  }
+  let outcome;
+  let chain = null;
+  let planText = '';
+  const refusal = workTreeRefusal(options, limits);
+  if (refusal) {
+    outcome = { state: 'unavailable', cause: refusal, rows: [] };
+  } else {
+    const resolved = runChain(options);
+    if (resolved.error) {
+      outcome = { state: 'unresolved', cause: resolved.error, rows: [] };
+    } else {
+      chain = resolved;
+      lines.push(...chain.disclosures);
+      planText = ` | plan: ${chain.planRel}`;
+      outcome = runOutcome(options, chain, limits);
+    }
+  }
+  const passes = PASSING_STATES.includes(outcome.state);
+  if (passes) {
+    lines.push(`ACCEPTANCE — ${outcome.state} | ${outcome.cause}${planText} | ${gateLabel}`);
+    for (const entry of outcome.flaky || []) lines.push(`ACCEPTANCE — flaky: ${entry}`);
+  } else {
+    const label = gate.mode === 'advisory' ? `${outcome.state} (advisory, not blocking)` : outcome.state;
+    const suffix = runRemedies(outcome.state, outcome.rows, options.runId).map((entry) => ` | ${entry}`).join('');
+    lines.push(`ACCEPTANCE — ${label} | ${outcome.cause}${planText} | ${gateLabel}${suffix}`);
+  }
+  return { state: outcome.state, passes: passes || gate.mode === 'advisory', mode: gate.mode, lines };
+}
+
 function verdict(options) {
   const limits = limitsWith(options.limits);
   const gate = normalizeGateMode(options.gateMode, options.projectRoot);
   const lines = [];
   if (gate.disclosure) lines.push(gate.disclosure);
   const gateLabel = `gate: ${gate.mode}`;
+  if (options.runId) return runVerdict(options, gate, lines, limits);
   if (options.bound) {
     lines.push(boundLine(options.validate));
     return { state: 'not-checked', passes: true, mode: gate.mode, lines };
@@ -847,9 +1082,22 @@ function readTransportFile(directory, name) {
   }
 }
 
+function readRunTransport(directory) {
+  const text = readTransportFile(directory, 'run.json');
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 function transportOptions(env) {
   const directory = env.ZENSU_AVR_DIR || '';
   return {
+    runId: env.ZENSU_AVR_RUN || '',
+    run: readRunTransport(directory),
+    acceptPartial: env.ZENSU_AVR_ACCEPT_PARTIAL === '1',
     pluginData: env.ZENSU_AVR_PLUGIN_DATA,
     sessionKey: env.ZENSU_AVR_SESSION_KEY,
     projectRoot: env.ZENSU_AVR_PROJECT_ROOT,
@@ -947,6 +1195,8 @@ module.exports = {
   hasChanges,
   citedRun,
   resolveChain,
+  runChain,
+  runHead,
   recordLine,
   record,
   evaluate,
