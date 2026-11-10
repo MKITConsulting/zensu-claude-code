@@ -44,24 +44,63 @@ with a reason, and both briefs print it.
 | `ssh` | stays | `sshConfig` is set, or its saved environment is an SSH preset |
 | `continued` | stays | a `confirmed` lineage edge leaves its current or a prior (`priorCliSessionIds`) id |
 | `started` | stays | the running session has an open child with the handle `cont-<8 hex>` of this run |
-| `unplanned` | later | only on a run that carries `--linked-start`: its names leave the session out; a session they carry skips the next three rows |
+| `unplanned` | later | only on a run that carries `--linked-start`: its names leave the session out; a session they carry skips the next five rows |
 | `place` | if named | its `originCwd` is missing, relative or carries a control character, so no start can be placed in its repository |
 | `fork` | if named | a user fork, started only when the user names it in the plan answer |
+| `presets-unread` | if named | it names a saved environment and carries no `sshConfig`, and `ccd-session-presets.json` was refused, could not be read or did not parse |
 | `ledger-unread` | if named | the ledger read had a directory error or hit its record cap |
+| `started-unread` | if named | the running session's own record, or a record in its folder, was refused or could not be read, or no own record was found while a store entry was |
 | none | start | a side or task-chip session, the first `LINKED_START_CAP` (8) in creation order |
 | `cap` | later | the rest, started only on a later message the user types |
 
 Cloud and Remote Control sessions have no `local_` record in the store, so they never appear.
 The list is bounded at `LINKED_LIST_MAX` (64) and says how many it leaves out.
 
+**A refused store read never turns a stay into a start.** Two stay rows read store files beside
+the old session's record: `ssh` reads the saved environments in `ccd-session-presets.json`, and
+`started` reads the running session's own record and the records beside it. A read that the owner
+and mode rule of `hooks/lib/desktop-store-read-v1.js` refused, or that could not be read, leaves
+that answer unknown, and an unknown answer is an **if named** row of its own, as `ledger-unread` is
+for `continued`:
+
+- `presets-unread` applies to a session that names a saved environment and carries no `sshConfig`
+  while `savedPresets` reports its read incomplete: the presets file was refused, could not be read
+  or did not parse. A missing presets file, and a preset the read file no longer lists, keep the
+  answer of before, because a deleted preset is common and is not a refused read. Measured on one
+  Mac on 2026-11-04: 51 of the 191 linked records that named a saved environment named one the file
+  no longer listed, and all 3 records that named an SSH preset also carried `sshConfig`.
+- `started-unread` applies to every session that would otherwise start while
+  `startedContinuations` reports its set incomplete. It looks for the running session's record by
+  `CLAUDE_CODE_SESSION_ID` among the records' `cliSessionId` values and, when none carries it, by
+  the file name `CLAUDE_CODE_HOST_SESSION_ID` names among the records the walk listed, because
+  Claude Desktop can run a session under a new CLI id before it writes that id into the record. The
+  set is incomplete when the record found could not be read, or when it was read but its folder
+  could not be listed or a record in it was refused or could not be read, since any of them may be
+  a continuation the running session started.
+- **No own record found is an answer only when the store read was whole.** A refused record is
+  never listed and an unparsable one never matches, so the lookup cannot tell a missing record from
+  one it could not read. With no record found, the set is complete only while `CCD_REFUSED` and
+  `CCD_UNREAD` are both empty: no store candidate, folder or record was refused, no folder failed to
+  list, and no record was caught mid-write or failed to parse. Any of them may be the running
+  session's own record, whether or not a host variable names it, so one such entry anywhere in the
+  store holds every start. `savedPresets` runs after `startedContinuations`, so a refused presets
+  file never counts, and `OM9` pins that order. A session that runs outside Claude Desktop over a
+  whole store keeps the answer of before, nothing started. Measured on the same Mac on 2026-11-08:
+  none of the 4,357 records and 67 folders was refused, failed to parse or failed to list, so
+  neither rule decided anything there.
+- The **if named** rows match in the order `place`, `fork`, `presets-unread`, `ledger-unread`,
+  `started-unread`, the order of the stay rows the last three stand in for. A carried plan that
+  names the session skips all five, and every one of them keeps its start call.
+
 **The run after the yes carries the plan's start set (`--linked-start`).** `takeover --force`
 takes `--linked-start` with `none` or the comma-separated names of the sessions the plan answer
 starts, parsed by `linkedStartNames` (only `cont-` and eight lowercase hexadecimal digits, each
 name kept once, in order). `decideLinked` receives them as `planned`: a session past the six stay
-rows that the names leave out is **later** with `why` `unplanned`; one they carry skips the three
+rows that the names leave out is **later** with `why` `unplanned`; one they carry skips the five
 **if named** rows, so a named user fork, a named session without a usable folder and a named
-session behind an unread ledger start too, and the carried ones start in creation order while
-`LINKED_START_CAP` allows, the rest **later** with `cap`. A carried session that stays keeps its
+session behind unread saved environments, an unread ledger or an unread started set start too,
+and the carried ones start in creation order while `LINKED_START_CAP` allows, the rest **later**
+with `cap`. A carried session that stays keeps its
 reason. Each entry carries `planned` (`true` or `false`, `null` without the flag), and the state
 carries `plan: { names, unlisted }`, `unlisted` being the carried names no listed session has; the
 brief names a carried session it does not start on that session's entry and the unlisted names on
@@ -90,12 +129,22 @@ step speaks to the carried brief: start each session the handoff brief marks sta
 user's answer did not leave out and each if-named one the answer named, as that brief's lead
 says. Flow 4 of `references/handoff.md` points there.
 
-**The Zensu Session Hub needs no follow-up.** `Catalog::decide` in
+**The Zensu Session Hub needs no follow-up for `--linked-start`.** `Catalog::decide` in
 `src-tauri/src/resources/desktop_sessions/catalog.rs` mirrors the plan pass, which decides exactly
 as before without the flag. The `unplanned` row exists only on the run after the yes, which the Hub
 never computes: it types `takeover <session id> --all` and reads the records and the ledger
 afterwards. `family_continuation` joins by the `cont-` handle and the ledger, so a session the
 plan answer left out reads `Stays` there, as any session the user leaves out does.
+
+**The Hub needs a follow-up for `presets-unread`, and none for `started-unread`.** Its `remote`
+closure reads a `Presets` set into which `src-tauri/src/environment_presets.rs` collapses every
+read failure, so `Catalog::decide` marks a member whose presets it could not read as one that
+continues, where the plan pass marks it **if named**. The mirror is a Hub change of its own:
+`Presets` reports whether every presets file it found was read, and `decide` keeps a member that
+names a saved environment while one was not. `decide` has no `started` row, because the Hub is not
+the session that runs the takeover, so `started-unread` has nothing to mirror. The Hub reads the
+presets without the owner and mode check, so a presets file only the plan pass refuses still decides
+the two apart until the Hub adopts that check too.
 
 **Every session marked start belongs to every yes.** The plan confirmation names each one by its
 title, and the model never leaves one out on its own judgment: not because its own work looks
@@ -235,6 +284,10 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
   session could start.
 - The record-text class lives in the module as `RECORD_CONTROL` and `recordText`, and
   `openTaskChips` uses it, so chips and linked sessions strip the same characters.
+- `CCD_UNREAD` in `trail.mjs` holds what the store walk, `ccdIndex`, `ccdCandidates` and `ccdApp`
+  could not read, beside `CCD_REFUSED`, and `startedContinuations` reads both when it finds no own
+  record, so a new store read that can fail adds its entry to one of them. `hostNamedRecord` reads
+  `CLAUDE_CODE_HOST_SESSION_ID` through `isSafeHostSessionId`, as `accountForHostSession` does.
 - `trail.mjs` imports the module, so every test that stages `trail.mjs` in a sandbox tree copies
   it too: `mutant_path` and `cont_mutant` in `test-session-trail-verdict.sh` and the TDZ tree of
   `L46` in `test-session-trail-lineage.sh`. A line added to `trail.mjs` above `gitState`, such as
@@ -289,7 +342,24 @@ detached one or one its continuation keeps, and once each` drives the count, and
 `the plan names are none or a comma-separated list of cont- handles, …`, `a carried plan starts
 exactly the sessions it names that can start, …`, `a carried plan counts its starts against the
 cap in creation order, …` and `the names a carried plan holds that no listed session has are
-reported, …` drive the parser and the carried decisions.
+reported, …` drive the parser and the carried decisions. The three cases `a session started from a
+saved environment waits for the user to name it while the saved environments could not be read, …`,
+`an incomplete started set keeps every session that could start from starting until the user names
+it, …` and `the rows that wait for a name match in table order, …` drive the two fail-safe rows,
+their order and a carried plan that names them. `OM8` and `OM9` in the owner and mode block of
+`test-session-trail-verdict.sh` drive them through `trail.mjs`, POSIX hosts only: `OM8` rewrites
+the LS fixture's saved environment to an SSH preset and grades it private (`stays`/`ssh`), group
+writable and unparsable (`if-named`/`presets-unread`, the why line in the brief included), missing
+and restored to the local preset (`start`); `OM9` adds a running-session record in a UUID-shaped
+organization folder and grades it refused under the full host environment, the host id alone and
+none, unparsable under the full environment and none, in a refused folder and in a folder that
+cannot be listed (skipped as root), each `if-named`/`started-unread` with the why line in the
+brief; a session id its record does not carry, which reads the record the host id names and keeps
+the session that record started under both forms, and holds every start once a record beside it is
+refused; no own record over a clean store (`start`), with a refused folder elsewhere in the store
+(`started-unread`, while a found own record ignores that folder) and with a refused presets file,
+which `savedPresets` reads after the started set and so leaves it complete; all against the
+private control that keeps the session it started as `stays`/`started`.
 
 **Known gaps, accepted and named:**
 
@@ -305,9 +375,25 @@ reported, …` drive the parser and the carried decisions.
   start does not arm it, and the brief does not list such a session, so no run can start it from
   its brief either.
 - **Two descendants can still count although they never follow.** One started from an SSH saved
-  environment without `sshConfig` counts unless a listed session also names a saved environment,
-  because `linkedSessions` reads the presets only then; one that already continues elsewhere
-  counts when the ledger read was incomplete.
+  environment without `sshConfig` counts unless a listed session also names a saved environment
+  and the presets read completes, because `linkedSessions` reads the presets only then; one that
+  already continues elsewhere counts when the ledger read was incomplete.
+- **A refused ledger record does not make the ledger read incomplete.** `ledgerComplete` reads the
+  directory error and the record cap only, so an edge record `readEdges` refused, which may be the
+  `confirmed` edge that keeps a session `continued`, lets that session start. Counting refused
+  records toward `ledger-unread` is a follow-up of its own.
+- **A preset the presets file no longer lists keeps the answer of before.** Its kind is unknown, so
+  an SSH session without `sshConfig` started from a since-deleted preset starts; the measurement in
+  the fail-safe paragraph found no SSH-preset record without `sshConfig`.
+- **With no own record found, one unread store entry holds every start.** A session that runs
+  outside Claude Desktop, over a store with a refused or unreadable entry anywhere, waits for names
+  it would have started, because that entry may be its own record. A record caught mid-write reads
+  as unread for that run only; running `takeover` again settles it.
+- **The host id is trusted to name the running session's record.** A process that inherits another
+  session's `CLAUDE_CODE_HOST_SESSION_ID` and carries a CLI id no record holds reads that session's
+  started set, which can only keep more sessions. Without a host id, a record whose `cliSessionId`
+  key is escaped is still missed, the prefilter bound `.claude/rules/session-trail-targeted-lookup.md`
+  names.
 - **Every Claude rule above is one bundle build's reading.** The admission of a start on the
   answer turn, the record fields of a started session, the kept `name` and `title`, `use_worktree`
   without `sharedCheckout` and the place approval for `cwd` need the Hub's live checks (H11) before
@@ -345,4 +431,7 @@ and the new flow step as minor; neither is in the policy's breaking list. `--lin
 and `linkedSessions.plan` are exchanged `--json` keys no strict validator reads, and nothing is
 persisted. Its refusal of a `--force` run without the flag tightens one verb inside one
 installation and names the flag that answers it, so a session that read the older step 1 and is
-served by this build recovers on its next command; no hook can deny anything new.
+served by this build recovers on its next command; no hook can deny anything new. The two
+fail-safe rows are `patch` on the same walk: `presets-unread` and `started-unread` are new `why`
+values of an exchanged `--json` shape no strict validator reads, they only turn a `start` into an
+**if named** decision an older brief reader already handles, and nothing is persisted.
