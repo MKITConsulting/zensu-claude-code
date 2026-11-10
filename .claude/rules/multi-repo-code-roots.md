@@ -52,8 +52,12 @@ refuses exclusivity instead of reading no record.
 **The read-only git leaf.** `git-read-only-v1.js` owns `READ_ONLY_GIT` and `gitEnvironment`.
 Every git call into a code root takes both: the module's recipes, the audit's per-claim
 `check-ignore` (through the module's `ignored` verb) and rule (A)'s `tracked()` probe in the
-Bash gate. `trail.mjs` and `evidence-run-v1.js` keep private copies until PRs C and D move
-them; the unit file holds the three equal.
+Bash gate. `trail.mjs` keeps a private `READ_ONLY_GIT` and `evidence-run-v1.js` a private
+`gitEnvironment` until PRs C and D move them; the unit file holds each copy equal to the leaf.
+`hooks/lib/git-environment-v1.js` exports a `gitEnvironment` of its own, which `trail.mjs` and
+`worktree-keep-v1.js` load: its argument is the base environment, while the leaf's and the
+evidence runner's argument is an overlay applied after the scrub. Give the two contracts distinct
+names before either module replaces the other (`.claude/rules/session-trail-read-only-git.md`).
 
 **Two recipes, one per consumer.** The enumeration follows the audit (`core.excludesFile` set
 to `/dev/null`), the count follows `_zensu_unqualified_change_count` (the global excludes file
