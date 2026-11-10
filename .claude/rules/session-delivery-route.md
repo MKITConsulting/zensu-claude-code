@@ -41,7 +41,10 @@ removes the workflow together with the question.
 `hooks/lib/zensu-config.sh` owns the whole ladder:
 
 1. an explicit preference in the user's OWN text — fast-path (B) of the plan directive, the
-   reminder's negation-then-affirmation arms — judged by the model and never recorded;
+   reminder's negation-then-affirmation arms — judged by the model and never recorded; an
+   affirmation asking for TDD also runs that one chain strict through exactly one
+   `TDD-MODE: strict` line unless a vanilla `/zensu:tdd-mode` choice outranks it
+   (`.claude/rules/tdd-mode-precedence.md`);
 2. the session marker `<project>/.zensu/state/delivery-route-<session-key>.json`
    (`{"route":"build"|"direct"}`; `{"route":"auto"}` is a recorded release and falls through);
 3. the inherited route `<project>/.zensu/state/inherited-route-<session-key>.json`

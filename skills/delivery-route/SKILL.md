@@ -107,7 +107,9 @@ Both hooks resolve the route in this order, and `zensu-config.sh` owns the ladde
 
 1. **an explicit preference in the user's own text** — "use autopilot", "no tdd",
    "use tdd" in the approval message or the request itself; judged by the model from
-   the directive and never recorded
+   the directive and never recorded. "use tdd" also runs that one chain strict,
+   through a `TDD-MODE: strict` line in its specification, unless this session's
+   `/zensu:tdd-mode` choice is vanilla
 2. **this session's marker** — what this skill records
 3. **a `build` inherited from the parent session** — a linked session copies the `build` its
    parent recorded or itself inherited, once, the first time a hook resolves where the

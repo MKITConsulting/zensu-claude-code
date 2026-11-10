@@ -411,6 +411,32 @@ both_have "D14 autopilot option states its planning gate and forge-CLI cost" \
   'authenticated forge CLI (gh or glab), without which the Zensu workflow is the route'
 both_have "D15 pilot option states its zensu-CLI and tracked-feature prerequisite" \
   'MUST state the prerequisite' 'ALREADY tracked in Zensu'
+D15B_COST="its description MUST state the cost — the turn waits for the review chain and, by default, a full-suite run (/zensu:full-suite can leave it to the PR pipeline) and a live check of each acceptance criterion (evidence.fullSuiteGate, evidence.acceptanceGate)."
+D15B_BAD=""
+[ "$BRANCHES_DISTINCT" = yes ] || D15B_BAD=" [not graded: D9pre failed]"
+for d15b_name in OUT OUT_STRICT; do
+  d15b_ctx="${!d15b_name}"
+  d15b_opt="${d15b_ctx#*"(2) implements THIS plan now"}"
+  [ "$d15b_opt" != "$d15b_ctx" ] || { D15B_BAD="$D15B_BAD [$d15b_name has no option (2)]"; continue; }
+  d15b_opt="${d15b_opt%%"(3) conducts the TRACKED FEATURE"*}"
+  case "$d15b_opt" in (*"$D15B_COST"*) ;; (*) D15B_BAD="$D15B_BAD [$d15b_name option (2) lacks the cost statement]" ;; esac
+  case "$d15b_ctx" in (*"no prerequisites"*) D15B_BAD="$D15B_BAD [$d15b_name still says no prerequisites]" ;; esac
+done
+[ -z "$D15B_BAD" ] && check "D15b the Zensu-workflow option states its cost in both branches: the held turn, the full-suite run with /zensu:full-suite as the CI alternative and the live acceptance check with both config keys, and no branch calls it prerequisite-free" PASS \
+  || check "D15b Zensu-workflow option cost:$D15B_BAD" FAIL
+D15D_ARM="one asking for TDD, like these, ensures the specification carries exactly one line 'TDD-MODE: strict' and uses the status line 'Executing via /zensu:build (strict TDD requested)'"
+D15D_BAD=""
+[ "$BRANCHES_DISTINCT" = yes ] || D15D_BAD=" [not graded: D9pre failed]"
+for d15d_name in OUT OUT_STRICT; do
+  d15d_ctx="${!d15d_name}"
+  d15d_ref="${d15d_ctx%%FIRST a REFUSAL*}"
+  d15d_arm="${d15d_ctx%%"$D15D_ARM"*}"
+  d15d_last="${d15d_ctx%%LAST, as the fallthrough*}"
+  { [ "${#d15d_ref}" -lt "${#d15d_arm}" ] && [ "${#d15d_arm}" -lt "${#d15d_last}" ] && [ "${#d15d_last}" -lt "${#d15d_ctx}" ]; } \
+    || D15D_BAD="$D15D_BAD [$d15d_name]"
+done
+[ -z "$D15D_BAD" ] && check "D15d in both branches an affirmation that asks for TDD ensures exactly one TDD-MODE: strict line and its own status line, after the refusal arm and before the implement-directly fallthrough" PASS \
+  || check "D15d TDD-request arm missing or out of order in:$D15D_BAD" FAIL
 
 # D16 the four OPTION LABELS themselves. Every other route check grades the
 # act-on-the-answer paragraph, so without this one an option could be deleted
@@ -1115,12 +1141,11 @@ both_have "D34 both branches carry the (S) clause, the ask conjunct and the work
   "The 'No — implement directly' answer records nothing and decides this plan only" \
   "this one Bash call comes BEFORE the 'next tool call' that arm names" \
   "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back" \
-  "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow" \
+  "evidence.acceptanceGate). Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow" \
   "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered" \
   "a route the field decided records nothing" \
   "The field never names /zensu:autopilot or /zensu:pilot" \
-  "ZENSU DELIVERY ROUTE:" \
-  "The user changes a recorded route with /zensu:delivery-route"
+  "ZENSU DELIVERY ROUTE:"
 # D35 the default fixture has no marker and no config default, so the field must
 # read exactly `ask` — and it must be the FIRST thing in the directive, because the
 # (S) clause tells the model to read "the field at the top".
@@ -1254,6 +1279,7 @@ d46_ctx() {
 d46_notice() {
   printf '%s' "$1" | grep -qF "the approved plan names its own executor, $2, so Zensu asks no delivery-route question for it" \
     && printf '%s' "$1" | grep -qF '/zensu:build runs this plan under the Zensu workflow' \
+    && printf '%s' "$1" | grep -qF "An approval message asking for TDD takes the /zensu:build arm, and its specification then carries exactly one line 'TDD-MODE: strict'." \
     && ! printf '%s' "$1" | grep -qF 'AskUserQuestion' \
     && ! printf '%s' "$1" | grep -qF 'ZENSU DELIVERY ROUTE:' \
     && ! printf '%s' "$1" | grep -qiE 'non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b' \
