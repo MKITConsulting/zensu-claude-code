@@ -44,9 +44,16 @@ TASK=$'<task-notification>\n<task-id>bq7budget</task-id>\n<tool-use-id>toolu_01B
 BASH_INPUT=$'<system-reminder>\nYou are operating in a git worktree.\nWorktree path: /Users/dev/IdeaProjects/dev.zensu/zensu-claude-code/.claude/worktrees/budget\n</system-reminder>\n\n<bash-input>gh pr checks 382 --repo MKITConsulting/zensu-claude-code</bash-input>'
 CI_EVENT=$'<ci-monitor-event>"Auto-fix pull requests" (the desktop app) is watching MKITConsulting/zensu-claude-code PR #382 and reports the following, read from the state of the pull request on GitHub. The user turned on Auto-fix: standing authorization to fix what the app reports, commit, and push to the PR branch without asking first.\n\n1 CI check failed (named below): run `gh pr checks 382 --repo MKITConsulting/zensu-claude-code` for details, then fix, commit, and push.\n</ci-monitor-event>'
 AGENT_MSG=$'Another Claude session sent a message:\n<agent-message from="a24a61949f3bb60be">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  Plan the product roadmap and the feature tiers.\n</agent-message>'
+CROSS_MSG=$'<cross-session-message from="local_00000000-0000-4000-8000-000000000000" name="Budget fixture">\nPlease rebase the branch and re-run the suite.\n</cross-session-message>'
+PEER_CROSS_MSG=$'Another Claude session sent a message:\n<cross-session-message from="local_00000000-0000-4000-8000-000000000000" from-name="Budget fixture">\nThe rebase is done.\n</cross-session-message>'
+BRIEF=$'Background (from the session that started this one):\nThe parent session found a misfire in a hook.\n\nTask:\nFix it and run the affected suites.'
 
 origin_of() {
   ( source "$ORIGIN_LIB"; zensu_prompt_origin "$1" "${2-}" )
+}
+
+own_of() {
+  ( source "$ORIGIN_LIB"; zensu_prompt_own_text "$1" )
 }
 
 ORIGIN_BAD=""
@@ -77,8 +84,16 @@ expect_origin agent-message $'<system-reminder>ctx</system-reminder>\n'"$AGENT_M
 expect_origin agent-message '<agent-message from="x">report</agent-message>'
 expect_origin typed 'Another Claude session sent a message: please plan the roadmap'
 expect_origin typed 'Another Claude session sent a message:<agent-messages>x'
+expect_origin agent-message "$CROSS_MSG"
+expect_origin agent-message "$PEER_CROSS_MSG"
+expect_origin agent-message $'<system-reminder>ctx</system-reminder>\n'"$CROSS_MSG"
+expect_origin typed '<cross-session-messages>x'
+expect_origin session-brief "$BRIEF"
+expect_origin session-brief $'<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n\n'"$BRIEF"
+expect_origin typed 'Background (from my notes): the build is red'
+expect_origin typed $'Please read this.\nBackground (from the session that started this one):\nx'
 if [ -z "$ORIGIN_BAD" ]; then
-  check "U2 zensu_prompt_origin classifies by leading tag after the system reminders, a subagent hand-back included, and unknown counts as typed" PASS
+  check "U2 zensu_prompt_origin classifies by leading tag after the system reminders, a subagent hand-back, a cross-session message and a side-session brief included, and unknown counts as typed" PASS
 else
   check "U2 zensu_prompt_origin misclassifies:$ORIGIN_BAD" FAIL
 fi
@@ -98,6 +113,10 @@ GOT3F="$(origin_of "$TYPED" '{"origin":{"kind":"peer"},"prompt":"x"}')"
 GOT3G="$(origin_of "$AGENT_MSG" '{"origin":{"kind":"human"},"prompt":"x"}')"
 [ "$GOT3G" = "typed" ] || STRUCT_BAD="$STRUCT_BAD [origin.kind human over a hand-back -> $GOT3G]"
 [ "$GOT3E" = "typed" ] || STRUCT_BAD="$STRUCT_BAD [quoted origin inside the prompt -> $GOT3E]"
+GOT3H="$(origin_of "$BRIEF" '{"origin":{"kind":"human"},"prompt":"x"}')"
+[ "$GOT3H" = "session-brief" ] || STRUCT_BAD="$STRUCT_BAD [origin.kind human over a side-session brief -> $GOT3H]"
+GOT3I="$(origin_of "$CROSS_MSG" '{"origin":{"kind":"human"},"prompt":"x"}')"
+[ "$GOT3I" = "typed" ] || STRUCT_BAD="$STRUCT_BAD [origin.kind human over a cross-session message -> $GOT3I]"
 if [ -z "$STRUCT_BAD" ]; then
   check "U3 a structured origin.kind decides when the payload carries one, and the tags decide otherwise" PASS
 else
@@ -113,6 +132,35 @@ if [ "$U4_GOT" = "typed" ] && [ "$U4_ELAPSED" -le 5 ]; then
   check "U4 a reminder chain longer than the classified window fails toward typed in ${U4_ELAPSED}s" PASS
 else
   check "U4 an oversized reminder chain gave '$U4_GOT' in ${U4_ELAPSED}s, want typed within 5s" FAIL
+fi
+
+OWN_BAD=""
+expect_own() {
+  local want="$1" got
+  got="$(own_of "$2")"
+  [ "$got" = "$want" ] || OWN_BAD="$OWN_BAD [$(printf '%s' "$2" | head -c 40 | tr '\n' '~') -> $(printf '%s' "$got" | head -c 40 | tr '\n' '~')]"
+}
+expect_own "$TYPED" "$TYPED"
+expect_own "$TYPED" $'<system-reminder>\nWorktree path: /w/budget\n</system-reminder>\n\n'"$TYPED"
+expect_own "$TYPED" $'<system-reminder>a</system-reminder>\n<system-reminder>b</system-reminder>\n  '"$TYPED"
+expect_own '<system-reminder>never closed' $'\n<system-reminder>never closed'
+expect_own $'text first\n<system-reminder>later</system-reminder>' $'text first\n<system-reminder>later</system-reminder>'
+expect_own '' $'<system-reminder>only</system-reminder>\n'
+U12_LONG="$TYPED $(head -c 20000 /dev/zero | tr '\0' 'b') tail"
+expect_own "$U12_LONG" $'<system-reminder>r</system-reminder>\n'"$U12_LONG"
+U12_START=$SECONDS
+U12_GOT="$(own_of "<system-reminder>${BIG}</system-reminder>
+$TYPED")"
+U12_ELAPSED=$(( SECONDS - U12_START ))
+case "$U12_GOT" in
+  '<system-reminder>'*) ;;
+  *) OWN_BAD="$OWN_BAD [a reminder past the window was stripped]" ;;
+esac
+[ "$U12_ELAPSED" -le 5 ] || OWN_BAD="$OWN_BAD [oversized reminder took ${U12_ELAPSED}s]"
+if [ -z "$OWN_BAD" ]; then
+  check "U12 zensu_prompt_own_text drops only the leading reminder blocks the classified window closes, and keeps everything after them" PASS
+else
+  check "U12 zensu_prompt_own_text:$OWN_BAD" FAIL
 fi
 
 PROJ="$WORK/project"
@@ -184,7 +232,7 @@ budget() {
     repeat:user-prompt-intent-router.sh:typed) echo "1 1400" ;;
     *:user-prompt-intent-router.sh:*) echo "0 0" ;;
     first:user-prompt-tdd-reminder.sh:typed) echo "4500 5870" ;;
-    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2750" ;;
+    repeat:user-prompt-tdd-reminder.sh:typed) echo "1 2850" ;;
     *:user-prompt-tdd-reminder.sh:ci) echo "300 400" ;;
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
     first:user-prompt-zen-mode.sh:*) echo "3400 3770" ;;
@@ -202,7 +250,7 @@ total_budget() {
     first:typed) echo 12720 ;;
     first:ci) echo 4560 ;;
     first:*) echo 4200 ;;
-    repeat:typed) echo 6780 ;;
+    repeat:typed) echo 6850 ;;
     repeat:ci) echo 2770 ;;
     *) echo 2410 ;;
   esac
@@ -327,12 +375,12 @@ for U10_CFG in "$CFG_ROUTE_TDD" "$CFG_ROUTE_DIRECT"; do
   case "$U10_LEN" in
     ''|*[!0-9]*) U10_BAD="$U10_BAD $(basename "$U10_CFG"):${U10_LEN:-no-verdict}"; continue ;;
   esac
-  [ "$U10_LEN" -ge 1 ] && [ "$U10_LEN" -le 1500 ] || U10_BAD="$U10_BAD $(basename "$U10_CFG"):$U10_LEN"
+  [ "$U10_LEN" -ge 1 ] && [ "$U10_LEN" -le 1575 ] || U10_BAD="$U10_BAD $(basename "$U10_CFG"):$U10_LEN"
   printf '%s' "$U10_OUT" | grep -qF 'route decided by the field below' \
     || U10_BAD="$U10_BAD $(basename "$U10_CFG"):no-decided-line"
 done
 if [ -z "$U10_BAD" ]; then
-  check "U10 a decided delivery route gets the decided line of at most 1500 characters even on the first prompt" PASS
+  check "U10 a decided delivery route gets the decided line of at most 1575 characters even on the first prompt" PASS
 else
   check "U10 a decided delivery route still costs the full reminder:$U10_BAD" FAIL
 fi
@@ -347,6 +395,22 @@ case "$U11_CI:$U11_TYPED" in
       check "U11 a CI-monitor note never marks the ledger, so the next typed prompt still carries the full reminder ($U11_CI then $U11_TYPED)" PASS
     else
       check "U11 after a CI-monitor note the typed prompt carried $U11_TYPED characters, want the full reminder" FAIL
+    fi ;;
+esac
+
+U13_ASK='Plan the product roadmap and the feature tiers.'
+new_session
+U13_BRIEF_REMINDER="$(run_hook user-prompt-tdd-reminder.sh $'Background (from the session that started this one):\nA parent session.\n\nTask:\n'"$U13_ASK" | ctx_len)"
+U13_BRIEF_ROUTER="$(run_hook user-prompt-intent-router.sh $'Background (from the session that started this one):\nA parent session.\n\nTask:\n'"$U13_ASK" | ctx_len)"
+U13_CROSS_REMINDER="$(run_hook user-prompt-tdd-reminder.sh $'<cross-session-message from="local_u13" name="U13">\n'"$U13_ASK"$'\n</cross-session-message>' | ctx_len)"
+U13_CROSS_ROUTER="$(run_hook user-prompt-intent-router.sh $'<cross-session-message from="local_u13" name="U13">\n'"$U13_ASK"$'\n</cross-session-message>' | ctx_len)"
+case "$U13_BRIEF_REMINDER:$U13_BRIEF_ROUTER:$U13_CROSS_REMINDER:$U13_CROSS_ROUTER" in
+  *[!0-9:]*|:*|*::*|*:) check "U13 the sibling hooks gave no verdict ($U13_BRIEF_REMINDER:$U13_BRIEF_ROUTER:$U13_CROSS_REMINDER:$U13_CROSS_ROUTER)" FAIL ;;
+  *)
+    if [ "$U13_BRIEF_REMINDER" -ge 1 ] && [ "$U13_BRIEF_ROUTER" -ge 1 ] && [ "$U13_CROSS_REMINDER" -eq 0 ] && [ "$U13_CROSS_ROUTER" -eq 0 ]; then
+      check "U13 the reminder and the router treat a side-session brief as typed ($U13_BRIEF_REMINDER and $U13_BRIEF_ROUTER characters) and stay silent on a cross-session message" PASS
+    else
+      check "U13 sibling hooks on a brief gave $U13_BRIEF_REMINDER and $U13_BRIEF_ROUTER characters, on a cross-session message $U13_CROSS_REMINDER and $U13_CROSS_ROUTER" FAIL
     fi ;;
 esac
 

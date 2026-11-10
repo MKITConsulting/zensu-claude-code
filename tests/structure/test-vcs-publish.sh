@@ -6,7 +6,8 @@ set -u
 # every op is a pure argv-builder (dry-printed under ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1)
 # plus node normalizers fed fixture JSON. The GitLab publish path is a LOOP (spec §7:
 # summary note + N inline discussions + position object + idempotency marker); its dry
-# output is the ordered argv sequence, asserted below.
+# output is the ordered argv sequence, each POST followed by its JSON request line, asserted
+# below.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
@@ -46,6 +47,13 @@ before(){ local l="$1" g="$2" a="$3" b="$4"; local pre="${g%%"$b"*}"; case "$g" 
 
 argv() { env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>/dev/null; }
 fails() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -ne 0 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
+nth_json() {
+  TEXT="$1" N="$2" FIELD="$3" node -e '
+    var lines=process.env.TEXT.split("\n").filter(function(l){return l.charAt(0)==="{";});
+    var v;try{v=JSON.parse(lines[Number(process.env.N)-1]);}catch(_){process.exit(1);}
+    process.env.FIELD.split(".").forEach(function(p){if(p&&v!=null)v=Object.prototype.hasOwnProperty.call(v,p)?v[p]:undefined;});
+    process.stdout.write(v===undefined?"<absent>":JSON.stringify(v));'
+}
 
 # ---- payload fixture (read by the GitLab publish planner) ----
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-publish.XXXXXXXX")"
@@ -80,13 +88,16 @@ has    "A10b gitlab inline discussions POST"  "$GLP" "glab api --method POST pro
 before "A10c gitlab summary note BEFORE discussions" "$GLP" "merge_requests/7/notes" "merge_requests/7/discussions"
 has    "A10d gitlab idempotency marker (pr7)" "$GLP" "<!-- zensu:pr7:"
 has    "A10e gitlab verdict carried in body"  "$GLP" "_Verdict: REQUEST_CHANGES_"
-has    "A10f gitlab position_type text"       "$GLP" "position[position_type]=text"
-has    "A10g gitlab position diff refs"       "$GLP" "position[base_sha]=BBB"
-has    "A10h gitlab RIGHT->new_path"          "$GLP" "position[new_path]=src/a.js"
-has    "A10i gitlab RIGHT->new_line"          "$GLP" "position[new_line]=10"
-has    "A10j gitlab LEFT->old_path"           "$GLP" "position[old_path]=src/b.js"
-has    "A10k gitlab LEFT->old_line"           "$GLP" "position[old_line]=5"
-nothas "A10l gitlab LEFT has no new_path"     "$GLP" "position[new_path]=src/b.js"
+eq     "A10f gitlab RIGHT position is one nested JSON object" "$(nth_json "$GLP" 2 position)" \
+  '{"position_type":"text","base_sha":"BBB","start_sha":"SSS","head_sha":"HHH","old_path":"src/a.js","new_path":"src/a.js","new_line":10}'
+eq     "A10g gitlab LEFT position is one nested JSON object"  "$(nth_json "$GLP" 3 position)" \
+  '{"position_type":"text","base_sha":"BBB","start_sha":"SSS","head_sha":"HHH","old_path":"src/b.js","new_path":"src/b.js","old_line":5}'
+eq     "A10h gitlab summary note request carries no position" "$(nth_json "$GLP" 1 position)" "<absent>"
+nothas "A10i gitlab sends no bracketed field names"          "$GLP" "position["
+nothas "A10j gitlab passes no -f field flags"                "$GLP" " -f "
+eq     "A10k every gitlab POST declares a JSON Content-Type before its stdin body" \
+  "$(printf '%s\n' "$GLP" | grep -c -- '--header Content-Type: application/json --input -$')" "3"
+eq     "A10l every gitlab POST is followed by exactly one JSON request line" "$(printf '%s\n' "$GLP" | grep -c '^{')" "3"
 nothas "A10m gitlab never auto-approves"      "$GLP" "mr approve"
 eq     "A10n gitlab exactly 1 summary note"   "$(printf '%s' "$GLP" | grep -c 'merge_requests/7/notes')" "1"
 eq     "A10o gitlab exactly 2 discussions"    "$(printf '%s' "$GLP" | grep -c 'merge_requests/7/discussions')" "2"
@@ -150,6 +161,41 @@ if PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs
 else
   check "N11 normalize_diff_refs without Node fails closed" PASS
 fi
+RM_HEX_A="$(printf '%064d' 0 | tr 0 a)"
+RM_HEX_B="$(printf '%064d' 0 | tr 0 b)"
+RM_FIRST="<!-- zensu-review:v1:$RM_HEX_A:$RM_HEX_B:abcdef0:3:part=1/3 -->"
+RM_JSON="$(RM_FIRST="$RM_FIRST" node -e 'var m=process.env.RM_FIRST;process.stdout.write(JSON.stringify({notes:[{id:1,body:m+"\n\nsummary"},{id:2,body:"quoted "+m}],discussions:[[{id:"d1",notes:[{id:3,body:m.replace("part=1/3","part=2/3")}]}]]}))')"
+eq "N12 the shared body-marker walk lists each first-part review marker once" "$(printf '%s' "$RM_JSON" | _zensu_vcs_body_markers review)" "$RM_FIRST"
+if printf '%s' "$RM_JSON" | _zensu_vcs_body_markers bogus >/dev/null 2>&1; then
+  check "N13 the body-marker walk refuses an unknown marker kind" FAIL
+else
+  check "N13 the body-marker walk refuses an unknown marker kind" PASS
+fi
+has "N13b the body-marker walk names an unknown marker kind on stderr" "$(printf '%s' "$RM_JSON" | _zensu_vcs_body_markers bogus 2>&1 >/dev/null)" "zensu-vcs: marker walk failed: unknown marker kind"
+if printf '%s' 'not json' | _zensu_vcs_body_markers review >/dev/null 2>&1; then
+  check "N14 the body-marker walk fails closed on malformed JSON" FAIL
+else
+  check "N14 the body-marker walk fails closed on malformed JSON" PASS
+fi
+has "N14b the body-marker walk names malformed input on stderr" "$(printf '%s' 'not json' | _zensu_vcs_body_markers review 2>&1 >/dev/null)" "zensu-vcs: review marker walk failed: the input is not JSON"
+has "N14c the body-marker walk names an input over 32 MiB on stderr" "$(head -c 33554433 /dev/zero | tr '\0' ' ' | _zensu_vcs_body_markers review 2>&1 >/dev/null)" "zensu-vcs: review marker walk failed: the input exceeds 32 MiB"
+PM() { printf '<!-- zensu:pr7:%08x -->' "$1"; }
+PM_JSON="$(M1="$(PM 1)" M2="$(PM 2)" M3="$(PM 3)" M4="$(PM 4)" M5="$(PM 5)" node -e 'var e=process.env;process.stdout.write(JSON.stringify({notes:[{id:1,body:e.M1+"\n\nsummary",system:false,author:{id:42}},{id:2,body:e.M2,system:false,author:{id:7}},{id:3,body:"quoting "+e.M3,system:false,author:{id:42}},{id:4,body:e.M4,system:true,author:{id:42}}],discussions:[{id:"d5",individual_note:false,notes:[{id:5,body:e.M5+"\n\nfinding",system:false,author:{id:42}}]}]}))')"
+PM_WANT="$(printf '%s\n' "$(PM 1)" "$(PM 2)" "$(PM 3)" "$(PM 4)" "$(PM 5)" "$(PM 6)")"
+eq "N15 the post walk lists only wanted markers that open a non-system note by the publisher" \
+  "$(printf '%s' "$PM_JSON" | _zensu_vcs_body_markers post 42 "$PM_WANT")" "$(printf '%s\n%s' "$(PM 1)" "$(PM 5)")"
+if printf '%s' "$PM_JSON" | _zensu_vcs_body_markers post '' "$PM_WANT" >/dev/null 2>&1; then
+  check "N16 the post walk refuses to run without a publisher id" FAIL
+else
+  check "N16 the post walk refuses to run without a publisher id" PASS
+fi
+has "N16b the post walk names the missing publisher id on stderr" "$(printf '%s' "$PM_JSON" | _zensu_vcs_body_markers post '' "$PM_WANT" 2>&1 >/dev/null)" "zensu-vcs: post marker walk failed: no publisher id"
+if printf '%s' "$PM_JSON" | _zensu_vcs_body_markers post 42 '' >/dev/null 2>&1; then
+  check "N17 the post walk refuses to run without markers to look for" FAIL
+else
+  check "N17 the post walk refuses to run without markers to look for" PASS
+fi
+has "N17b the post walk names the missing markers on stderr" "$(printf '%s' "$PM_JSON" | _zensu_vcs_body_markers post 42 '' 2>&1 >/dev/null)" "zensu-vcs: post marker walk failed: no markers to look for"
 
 # ---- summary-note-only path (comments:[]) — the common COMMENT verdict with zero inline ----
 cat > "$WORK/empty.json" <<'JSON'
@@ -166,30 +212,30 @@ has "A12a marker is 8-hex well-formed"                "$MK_FIRST" "<!-- zensu:pr
 eq  "A12b summary + 2 comments -> 3 distinct markers" "$MK_DISTINCT" "3"
 
 # ---- all three diff-ref SHAs mapped (not just base_sha) ----
-has "A13a start_sha mapped" "$GLP" "position[start_sha]=SSS"
-has "A13b head_sha mapped"  "$GLP" "position[head_sha]=HHH"
+eq "A13a start_sha mapped" "$(nth_json "$GLP" 2 position.start_sha)" '"SSS"'
+eq "A13b head_sha mapped"  "$(nth_json "$GLP" 2 position.head_sha)" '"HHH"'
 
 # ---- RIGHT is the default side + no old_* leak on a RIGHT comment ----
 cat > "$WORK/rightdef.json" <<'JSON'
 {"event":"COMMENT","body":"b","comments":[{"path":"z.js","line":3,"body":"no side field"}]}
 JSON
 GLD="$(argv --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/rightdef.json")"
-has    "A14a side omitted -> RIGHT/new_path" "$GLD" "position[new_path]=z.js"
-nothas "A14b RIGHT comment has no old_path"  "$GLD" "position[old_path]=z.js"
+eq "A14a side omitted -> RIGHT/new_path" "$(nth_json "$GLD" 2 position.new_path)" '"z.js"'
+eq "A14b RIGHT comment has no old_line"  "$(nth_json "$GLD" 2 position.old_line)" "<absent>"
 
 # ---- placeholder diff-refs branch (no --diff-refs-json in dry mode) ----
 GLP2="$(argv --post-review --provider gitlab --repo-id grp%2Fproj 7 "$PAY")"
-has "A15 placeholder diff-refs when json omitted" "$GLP2" "position[base_sha]=BASE_SHA"
+eq "A15 placeholder diff-refs when json omitted" "$(nth_json "$GLP2" 2 position.base_sha)" '"BASE_SHA"'
 
-# ---- C0 sanitization: a NUL in a body must NOT smuggle an extra argv token ----
+# ---- C0 sanitization: a NUL in a body never reaches the request ----
 node -e 'var fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({event:"COMMENT",body:"ok",comments:[{path:"a.js",line:1,side:"RIGHT",body:"x"+String.fromCharCode(0)+"--host"+String.fromCharCode(0)+"evil"}]}));' "$WORK/nul.json"
 GLN="$(argv --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/nul.json")"
-# A16a is the real guard: without san() the embedded NUL would split the body into extra
-# argv tokens, so the dry output would read "x --host evil" (space-separated) instead of the
-# fused "x--hostevil". (A prior "output has no NUL" check was dropped — $() capture strips
+# A16a is the real guard: without san() JSON.stringify would carry the embedded NUL as an
+# escape, so the dry output would read "x\u0000--host\u0000evil" instead of the fused
+# "x--hostevil". (A prior "output has no NUL" check was dropped — $() capture strips
 # NUL before the assertion could ever observe one, making it tautological.)
 has "A16a NUL stripped from body (tokens fused, no smuggle)" "$GLN" "x--hostevil"
-nothas "A16b un-sanitized split would leak a bare --host token" "$GLN" " --host"
+nothas "A16b no escaped NUL reaches the JSON request" "$GLN" '\u0000'
 
 # ---- line-less comment (e.g. a file-level coverage finding) posts as a general thread ----
 # GitLab rejects an inline position with an empty line; rather than post the summary note and
@@ -199,7 +245,7 @@ cat > "$WORK/noline.json" <<'JSON'
 JSON
 GLL="$(argv --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/noline.json")"
 has    "A17a line-less comment still posts a discussion" "$GLL" "merge_requests/7/discussions"
-nothas "A17b line-less comment has NO position object"   "$GLL" "position["
+eq     "A17b line-less comment has NO position object"   "$(nth_json "$GLL" 2 position)" "<absent>"
 has    "A17c line-less comment keeps the path in body"    "$GLL" "uncovered/File.java"
 
 # ---- more fail-loud guards for the new ops ----
@@ -220,6 +266,342 @@ if PATH="$WORK/bin:$PATH" _zensu_vcs_post_review_gitlab grp%2Fproj 7 "$PAY" "" >
 else
   check "G16 legacy GitLab diff-ref read preserves producer failure" PASS
 fi
+
+mkdir -p "$WORK/live/bin" "$WORK/live/state"
+cat > "$WORK/live/payload.json" <<'JSON'
+{"commit_id":"abcdef0","event":"COMMENT","body":"Live review body.","comments":[{"path":"src/a.js","line":10,"side":"RIGHT","body":"added line note"},{"path":"src/b.js","line":5,"side":"LEFT","body":"removed line note"},{"path":"src/a.js","line":12,"side":"RIGHT","body":"context line note"},{"path":"src/new.js","line":3,"side":"RIGHT","body":"renamed file note"},{"path":"src/a.js","line":99,"side":"RIGHT","body":"outside the diff note"}]}
+JSON
+cat > "$WORK/live/diffs.json" <<'JSON'
+[[{"old_path":"src/a.js","new_path":"src/a.js","diff":"@@ -9,4 +9,5 @@\n line9\n+added10\n ctx\n ctx2\n ctx3\n"},{"old_path":"src/b.js","new_path":"src/b.js","diff":"@@ -4,3 +4,2 @@\n keep4\n-removed5\n keep6\n"},{"old_path":"src/old.js","new_path":"src/new.js","diff":"@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"}]]
+JSON
+cat > "$WORK/live/lines.json" <<'JSON'
+[["src/a.js","src/a.js",9,9],["src/a.js","src/a.js",null,10],["src/a.js","src/a.js",10,11],["src/a.js","src/a.js",11,12],["src/a.js","src/a.js",12,13],["src/b.js","src/b.js",4,4],["src/b.js","src/b.js",5,null],["src/b.js","src/b.js",6,5],["src/old.js","src/new.js",1,1],["src/old.js","src/new.js",2,null],["src/old.js","src/new.js",null,2],["src/old.js","src/new.js",3,3]]
+JSON
+cat > "$WORK/live/bin/glab" <<'FAKE'
+#!/bin/bash
+set -u
+printf '%s\n' "$*" >> "$FAKE_DIR/calls"
+path="${*: -1}"
+if [ "${1:-}" = api ] && [ "$path" = 'projects/grp%2Fproj/merge_requests/7' ]; then
+  printf '%s' '{"diff_refs":{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}}'
+  exit 0
+fi
+if [ "${1:-}" = api ] && [ "$path" = 'projects/grp%2Fproj/merge_requests/7/diffs' ]; then
+  case "${FAKE_DIFFS:-ok}" in
+    fail)
+      printf '%s\n' '{"message":"500 Internal Server Error"}' 'glab: HTTP 500' >&2
+      exit 1 ;;
+    truncated)
+      printf '%s' '[[{"old_path":"src/a.js","new_path":"src/a.js","diff":"@@ -9,4 +9,5 @@\n line9\n+added10\n"}]]'
+      exit 0 ;;
+  esac
+  cat "${FAKE_DIR%/*}/diffs.json"
+  exit 0
+fi
+if [ "${1:-}" = api ] && [ "$path" = user ]; then
+  case "${FAKE_USER:-ok}" in
+    fail)
+      printf '%s\n' '{"message":"401 Unauthorized"}' 'glab: HTTP 401' >&2
+      exit 1 ;;
+    noid)
+      printf '%s' '{"username":"zensu-bot"}'
+      exit 0 ;;
+    html)
+      printf '%s' '<html><body>Sign in</body></html>'
+      exit 0 ;;
+  esac
+  printf '%s' '{"id":42,"username":"zensu-bot"}'
+  exit 0
+fi
+if [ "${1:-}" = api ] && [ "${2:-}" = --paginate ]; then
+  case "${FAKE_LISTING:-ok}" in
+    fail)
+      printf '%s\n' '{"message":"500 Internal Server Error"}' 'glab: HTTP 500' >&2
+      exit 1 ;;
+    malformed)
+      printf '%s' '[{'
+      exit 0 ;;
+    huge)
+      if [ "${path##*/}" = notes ]; then head -c 33554433 /dev/zero | tr '\0' ' '; else printf '%s' '[]'; fi
+      exit 0 ;;
+  esac
+  FAKE_DIR="$FAKE_DIR" KIND="${path##*/}" node -e '
+    var fs=require("fs"),f=process.env.FAKE_DIR+"/posted",g=process.env.FAKE_DIR+"/foreign",a=[];
+    function put(kind,note){a.push(kind==="discussions"?{id:"d"+(a.length+1),individual_note:false,notes:[note]}:note);}
+    if(fs.existsSync(g))fs.readFileSync(g,"utf8").split("\n").forEach(function(l){if(!l)return;var r=JSON.parse(l);if(r.kind!==process.env.KIND)return;
+      put(r.kind,{id:a.length+1,body:r.body,system:r.system===true,author:{id:r.authorId}});});
+    if(fs.existsSync(f))fs.readFileSync(f,"utf8").split("\n").forEach(function(l){if(!l)return;var r=JSON.parse(l);if(r.kind!==process.env.KIND)return;
+      put(r.kind,{id:a.length+1,body:r.request.body,system:false,author:{id:42}});});
+    process.stdout.write(JSON.stringify(a).replace(/[<>]/g,function(c){return "\\u00"+c.charCodeAt(0).toString(16);}));'
+  exit 0
+fi
+if [ "${1:-}" = api ] && [ "${2:-}" = --method ] && [ "${3:-}" = POST ]; then
+  input=""; content_type=""; prev=""
+  for arg in "$@"; do
+    case "$arg" in -f|-F|--field|--raw-field) exit 2 ;; esac
+    [ "$prev" = --input ] && input="$arg"
+    if [ "$prev" = --header ] || [ "$prev" = -H ]; then
+      if [ "$(printf '%s' "${arg%%:*}" | tr '[:upper:]' '[:lower:]')" = content-type ]; then
+        content_type="$(printf '%s' "${arg#*:}" | tr -d ' ')"
+      fi
+    fi
+    prev="$arg"
+  done
+  [ "$input" = - ] || exit 2
+  case "$content_type" in
+    application/json|application/json\;*) ;;
+    *)
+      printf '%s\n' "{\"error\":\"The provided content-type '$content_type' is not supported.\"}" 'glab: HTTP 415' >&2
+      exit 1 ;;
+  esac
+  if [ -n "${FAKE_REFUSE_AT:-}" ] && [ "$(grep -c -- '--method POST' "$FAKE_DIR/calls")" = "$FAKE_REFUSE_AT" ]; then
+    cat >/dev/null
+    printf '%s\n' '{"message":"400 Bad request - refused by the fixture"}' 'glab: HTTP 400' >&2
+    exit 1
+  fi
+  FAKE_DIR="$FAKE_DIR" KIND="${4##*/}" node -e '
+    var fs=require("fs"),raw="";
+    process.stdin.on("data",function(c){raw+=c;});process.stdin.on("end",function(){
+      var r;try{r=JSON.parse(raw);}catch(_){process.exit(2);}
+      if(!r||typeof r!=="object"||Array.isArray(r)||typeof r.body!=="string"
+          ||!Object.keys(r).every(function(k){return k==="body"||k==="position";}))process.exit(2);
+      if(Object.prototype.hasOwnProperty.call(r,"position")){
+        var p=r.position,dir=process.env.FAKE_DIR;
+        var lines=JSON.parse(fs.readFileSync(dir.slice(0,dir.lastIndexOf("/"))+"/lines.json","utf8"));
+        var ol=p&&p.old_line!=null?p.old_line:null,nl=p&&p.new_line!=null?p.new_line:null;
+        if(!p||p.position_type!=="text"||p.base_sha!=="ba5e000"||p.start_sha!=="57a2700"||p.head_sha!=="abcdef0"
+            ||!lines.some(function(l){return l[0]===p.old_path&&l[1]===p.new_path&&l[2]===ol&&l[3]===nl;})){
+          process.stderr.write("{\"message\":\"400 Bad request - the position names no line of the merge request diff\"}\nglab: HTTP 400\n");
+          process.exit(1);
+        }
+      }
+      fs.appendFileSync(process.env.FAKE_DIR+"/posted",JSON.stringify({kind:process.env.KIND,request:r})+"\n");
+      process.stdout.write("{\"id\":1}");
+    });'
+  exit $?
+fi
+exit 2
+FAKE
+chmod +x "$WORK/live/bin/glab"
+live_post() {
+  FAKE_DIR="$WORK/live/state" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1
+}
+if live_post; then
+  check "LV1 live gitlab post-review succeeds against a glab that enforces the JSON Content-Type and GitLab's position rules" PASS
+else
+  check "LV1 live gitlab post-review succeeds against a glab that enforces the JSON Content-Type and GitLab's position rules" FAIL
+fi
+eq "LV2 live run posts the summary note and all five discussions" "$(grep -c -- '--method POST' "$WORK/live/state/calls" || true)" "6"
+eq "LV3 every live POST declares the JSON Content-Type before its stdin body" \
+  "$(grep -c -- '--method POST .* --header Content-Type: application/json --input -$' "$WORK/live/state/calls" || true)" "6"
+LIVE_POSTED="$(cat "$WORK/live/state/posted" 2>/dev/null)"
+eq "LV4 live summary note is a body-only JSON request" "$(nth_json "$LIVE_POSTED" 1 request.position)" "<absent>"
+eq "LV5 an added line carries new_line and both paths from the MR diff" "$(nth_json "$LIVE_POSTED" 2 request.position)" \
+  '{"position_type":"text","base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0","old_path":"src/a.js","new_path":"src/a.js","new_line":10}'
+eq "LV6 a removed line carries old_line and both paths from the MR diff" "$(nth_json "$LIVE_POSTED" 3 request.position)" \
+  '{"position_type":"text","base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0","old_path":"src/b.js","new_path":"src/b.js","old_line":5}'
+eq "LV10 an unchanged context line carries both line numbers from the MR diff" "$(nth_json "$LIVE_POSTED" 4 request.position)" \
+  '{"position_type":"text","base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0","old_path":"src/a.js","new_path":"src/a.js","old_line":11,"new_line":12}'
+eq "LV11 a context line of a renamed file carries the old and the new path from the MR diff" "$(nth_json "$LIVE_POSTED" 5 request.position)" \
+  '{"position_type":"text","base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0","old_path":"src/old.js","new_path":"src/new.js","old_line":3,"new_line":3}'
+eq "LV12a an anchor outside the MR diff posts as a positionless discussion" "$(nth_json "$LIVE_POSTED" 6 request.position)" "<absent>"
+has "LV12b the positionless discussion keeps the path in its body" "$(nth_json "$LIVE_POSTED" 6 request.body)" '`src/a.js`: outside the diff note'
+eq "LV13 the MR diff is read before the first POST" \
+  "$(awk '/merge_requests\/7\/diffs$/{if(!d)d=NR} /--method POST/{if(!p)p=NR} END{if (d && p && d < p) print "ordered"; else print "unordered"}' "$WORK/live/state/calls")" "ordered"
+if live_post; then check "LV7 a live re-run succeeds" PASS; else check "LV7 a live re-run succeeds" FAIL; fi
+eq "LV8 a live re-run finds every marker and posts nothing new" "$(grep -c -- '--method POST' "$WORK/live/state/calls" || true)" "6"
+LIVE_LISTING="$(FAKE_DIR="$WORK/live/state" "$WORK/live/bin/glab" api --paginate --output json projects/grp%2Fproj/merge_requests/7/discussions 2>/dev/null)"
+has    "LV24a the fake glab lists a stored marker with JSON-escaped angle brackets, as GitLab does" "$LIVE_LISTING" '\u003c!-- zensu:pr7:'
+nothas "LV24b the fake glab lists no raw angle bracket" "$LIVE_LISTING" '<!--'
+has    "LV24c the fake glab nests each discussion's notes, as GitLab does" "$LIVE_LISTING" '"individual_note":false,"notes":[{"id":'
+LIVE_ERR="$(printf '%s' '{"body":"probe"}' \
+  | FAKE_DIR="$WORK/live/state" "$WORK/live/bin/glab" api --method POST projects/grp%2Fproj/merge_requests/7/notes --input - 2>&1 >/dev/null)"
+LIVE_RC=$?
+if [ "$LIVE_RC" -ne 0 ] && printf '%s' "$LIVE_ERR" | grep -qF 'HTTP 415' \
+  && [ "$(grep -c . "$WORK/live/state/posted")" = 6 ]; then
+  check "LV9 the fake glab refuses a stdin body without a JSON Content-Type, as GitLab does" PASS
+else
+  check "LV9 the fake glab refuses a stdin body without a JSON Content-Type, as GitLab does" FAIL
+fi
+LIVE_ONE_SIDED_ERR="$(printf '%s' '{"body":"probe","position":{"position_type":"text","base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0","old_path":"src/a.js","new_path":"src/a.js","new_line":12}}' \
+  | FAKE_DIR="$WORK/live/state" "$WORK/live/bin/glab" api --method POST projects/grp%2Fproj/merge_requests/7/discussions \
+      --header 'Content-Type: application/json' --input - 2>&1 >/dev/null)"
+LIVE_ONE_SIDED_RC=$?
+if [ "$LIVE_ONE_SIDED_RC" -ne 0 ] && printf '%s' "$LIVE_ONE_SIDED_ERR" | grep -qF 'HTTP 400' \
+  && [ "$(grep -c . "$WORK/live/state/posted")" = 6 ]; then
+  check "LV14 the fake glab refuses a one-sided position on an unchanged context line, as GitLab does" PASS
+else
+  check "LV14 the fake glab refuses a one-sided position on an unchanged context line, as GitLab does" FAIL
+fi
+
+mkdir -p "$WORK/live/refuse"
+if FAKE_REFUSE_AT=3 FAKE_DIR="$WORK/live/refuse" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/refuse/stderr"; then
+  check "LV15 a discussion GitLab refuses mid-loop makes post-review exit non-zero" FAIL
+else
+  check "LV15 a discussion GitLab refuses mid-loop makes post-review exit non-zero" PASS
+fi
+LIVE_REFUSE_ERR="$(cat "$WORK/live/refuse/stderr" 2>/dev/null)"
+has "LV16a the refusal is reported under the post-review POST label" "$LIVE_REFUSE_ERR" "zensu-vcs: post-review POST (glab api) failed (rc=1): "
+has "LV16b the refusal report carries the forge status" "$LIVE_REFUSE_ERR" "glab: HTTP 400"
+eq "LV17 the run stops at the refused POST with only the parts before it posted" "$(grep -c . "$WORK/live/refuse/posted")" "2"
+if FAKE_DIR="$WORK/live/refuse" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV18 a re-run after the refusal succeeds" PASS
+else
+  check "LV18 a re-run after the refusal succeeds" FAIL
+fi
+eq "LV19a the re-run posts exactly the four missing discussions" "$(grep -c -- '--method POST' "$WORK/live/refuse/calls")" "7"
+eq "LV19b the merge request ends with one summary note and five discussions" \
+  "$(grep -c '"kind":"notes"' "$WORK/live/refuse/posted"):$(grep -c '"kind":"discussions"' "$WORK/live/refuse/posted")" "1:5"
+
+mkdir -p "$WORK/live/pf-fail"
+if FAKE_DIFFS=fail FAKE_DIR="$WORK/live/pf-fail" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV20a a failed MR diff read makes post-review exit non-zero" FAIL
+else
+  check "LV20a a failed MR diff read makes post-review exit non-zero" PASS
+fi
+eq "LV20b a failed MR diff read posts nothing" "$(grep -c -- '--method POST' "$WORK/live/pf-fail/calls" || true)" "0"
+
+mkdir -p "$WORK/live/pf-trunc"
+if FAKE_DIFFS=truncated FAKE_DIR="$WORK/live/pf-trunc" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV21a a truncated MR diff hunk makes post-review exit non-zero" FAIL
+else
+  check "LV21a a truncated MR diff hunk makes post-review exit non-zero" PASS
+fi
+eq "LV21b a truncated MR diff hunk posts nothing" "$(grep -c -- '--method POST' "$WORK/live/pf-trunc/calls" || true)" "0"
+
+mkdir -p "$WORK/live/pf-head"
+if FAKE_DIR="$WORK/live/pf-head" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj \
+      --diff-refs-json '{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"ABCDEF0"}' 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV22a an anchor plan the diff-plan guard refuses makes post-review exit non-zero" FAIL
+else
+  check "LV22a an anchor plan the diff-plan guard refuses makes post-review exit non-zero" PASS
+fi
+eq "LV22b a refused anchor plan posts nothing" "$(grep -c -- '--method POST' "$WORK/live/pf-head/calls" || true)" "0"
+
+cat > "$WORK/live/noline.json" <<'JSON'
+{"event":"COMMENT","body":"Line-less review.","comments":[{"path":"src/a.js","body":"file-level note"}]}
+JSON
+mkdir -p "$WORK/live/pf-noline"
+if FAKE_DIR="$WORK/live/pf-noline" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/noline.json" >/dev/null 2>&1; then
+  check "LV23a a review without line comments posts" PASS
+else
+  check "LV23a a review without line comments posts" FAIL
+fi
+eq "LV23b a review without line comments never reads the MR diff" "$(grep -c 'merge_requests/7/diffs$' "$WORK/live/pf-noline/calls" || true)" "0"
+
+mkdir -p "$WORK/live/listing"
+FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1
+eq "LV25 a complete first post leaves the summary note and all five discussions" "$(grep -c -- '--method POST' "$WORK/live/listing/calls" || true)" "6"
+if FAKE_LISTING=fail FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/listing/stderr"; then
+  check "LV26a a failed existing-marker listing makes a re-run exit non-zero" FAIL
+else
+  check "LV26a a failed existing-marker listing makes a re-run exit non-zero" PASS
+fi
+eq "LV26b a failed existing-marker listing posts nothing again" "$(grep -c -- '--method POST' "$WORK/live/listing/calls" || true)" "6"
+has "LV26c the failed listing is reported under the post-review existing label" "$(cat "$WORK/live/listing/stderr" 2>/dev/null)" "zensu-vcs: post-review existing (glab api notes) failed (rc=1): "
+if FAKE_LISTING=malformed FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/listing/stderr-malformed"; then
+  check "LV27a an existing-marker listing that is not JSON makes a re-run exit non-zero" FAIL
+else
+  check "LV27a an existing-marker listing that is not JSON makes a re-run exit non-zero" PASS
+fi
+eq "LV27b an existing-marker listing that is not JSON posts nothing again" "$(grep -c -- '--method POST' "$WORK/live/listing/calls" || true)" "6"
+has "LV27c the unparseable listing is reported under the post-review existing label" "$(cat "$WORK/live/listing/stderr-malformed" 2>/dev/null)" "zensu-vcs: post-review existing failed: the notes or discussions listing is not JSON"
+if FAKE_LISTING=huge FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/listing/stderr-huge"; then
+  check "LV27d an existing-marker listing over 32 MiB makes a re-run exit non-zero" FAIL
+else
+  check "LV27d an existing-marker listing over 32 MiB makes a re-run exit non-zero" PASS
+fi
+eq "LV27e an existing-marker listing over 32 MiB posts nothing again" "$(grep -c -- '--method POST' "$WORK/live/listing/calls" || true)" "6"
+has "LV27f the oversized listing is reported under the post-review existing label" "$(cat "$WORK/live/listing/stderr-huge" 2>/dev/null)" "zensu-vcs: post-review existing failed: the notes and discussions listings exceed 32 MiB"
+RM_FAIL_ERR="$(FAKE_LISTING=fail FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" \
+  bash "$LIB" --review-markers --provider gitlab --repo-id grp%2Fproj 7 2>&1 >/dev/null)"
+has "LV28 a failed --review-markers listing is reported under the review-markers inventory label" "$RM_FAIL_ERR" "zensu-vcs: review-markers inventory (glab api notes) failed (rc=1): "
+if FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" "$BASH_ABS" -c 'source "$1"; _zensu_vcs_review_fetch_inventory gitlab grp%2Fproj 7' _ "$LIB" >/dev/null 2>&1; then
+  check "LV29 the inventory fetch refuses a call without a failure label" FAIL
+else
+  check "LV29 the inventory fetch refuses a call without a failure label" PASS
+fi
+if FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" "$BASH_ABS" -c 'source "$1"; _zensu_vcs_review_gitlab_publisher_id' _ "$LIB" >/dev/null 2>&1; then
+  check "LV30 the publisher lookup refuses a call without a failure label" FAIL
+else
+  check "LV30 the publisher lookup refuses a call without a failure label" PASS
+fi
+eq "LV31 a labelled publisher lookup reads the account id" \
+  "$(FAKE_DIR="$WORK/live/listing" PATH="$WORK/live/bin:$PATH" "$BASH_ABS" -c 'source "$1"; _zensu_vcs_review_gitlab_publisher_id "post-review publisher id"' _ "$LIB" 2>/dev/null)" "42"
+
+mkdir -p "$WORK/live/user"
+if FAKE_USER=fail FAKE_DIR="$WORK/live/user" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/user/stderr-fail"; then
+  check "LV33a a failed publisher lookup makes --post-review exit non-zero" FAIL
+else
+  check "LV33a a failed publisher lookup makes --post-review exit non-zero" PASS
+fi
+has "LV33b the failed lookup is reported under the post-review publisher id label" "$(cat "$WORK/live/user/stderr-fail" 2>/dev/null)" "zensu-vcs: post-review publisher id (glab api user) failed (rc=1): "
+if FAKE_USER=noid FAKE_DIR="$WORK/live/user" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/user/stderr-noid"; then
+  check "LV34a a publisher answer without an account id makes --post-review exit non-zero" FAIL
+else
+  check "LV34a a publisher answer without an account id makes --post-review exit non-zero" PASS
+fi
+has "LV34b the answer without an account id is reported under the post-review publisher id label" "$(cat "$WORK/live/user/stderr-noid" 2>/dev/null)" "zensu-vcs: post-review publisher id failed: the glab api user answer carries no account id"
+if FAKE_USER=html FAKE_DIR="$WORK/live/user" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>"$WORK/live/user/stderr-html"; then
+  check "LV35a a publisher answer that is not JSON makes --post-review exit non-zero" FAIL
+else
+  check "LV35a a publisher answer that is not JSON makes --post-review exit non-zero" PASS
+fi
+has "LV35b the unparseable answer is reported under the post-review publisher id label" "$(cat "$WORK/live/user/stderr-html" 2>/dev/null)" "zensu-vcs: post-review publisher id failed: the glab api user answer is not JSON"
+eq "LV36 a refused publisher lookup posts nothing" "$(grep -c -- '--method POST' "$WORK/live/user/calls" || true)" "0"
+
+mkdir -p "$WORK/live/foreign-src" "$WORK/live/foreign"
+if FAKE_DIR="$WORK/live/foreign-src" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV32c the foreign-source post succeeds" PASS
+else
+  check "LV32c the foreign-source post succeeds" FAIL
+fi
+SRC="$WORK/live/foreign-src/posted" OUT="$WORK/live/foreign/foreign" node -e '
+  var fs=require("fs"),rows=fs.readFileSync(process.env.SRC,"utf8").split("\n").filter(Boolean).map(function(l){return JSON.parse(l);});
+  function mk(i){return rows[i].request.body.split("\n")[0];}
+  fs.writeFileSync(process.env.OUT,[
+    JSON.stringify({kind:"notes",body:mk(0)+"\n\nquoted by another reviewer",authorId:7,system:false}),
+    JSON.stringify({kind:"discussions",body:mk(1)+"\n\ncopied into a system note",authorId:42,system:true}),
+    JSON.stringify({kind:"discussions",body:"quoting "+mk(2),authorId:42,system:false})
+  ].join("\n")+"\n");'
+eq "LV32d the foreign fixture carries the markers of parts 1 to 3" \
+  "$(SRC="$WORK/live/foreign-src/posted" OUT="$WORK/live/foreign/foreign" node -e '
+    var fs=require("fs");
+    function rows(p){return fs.readFileSync(p,"utf8").split("\n").filter(Boolean).map(function(l){return JSON.parse(l);});}
+    var src=rows(process.env.SRC),out=rows(process.env.OUT),n=0;
+    out.forEach(function(r,i){var m=src[i].request.body.split("\n")[0];if(/^<!-- zensu:pr7:[0-9a-f]{8} -->$/.test(m)&&r.body.indexOf(m)>=0)n++;});
+    process.stdout.write(String(out.length===3?n:-1));' 2>/dev/null)" "3"
+if FAKE_DIR="$WORK/live/foreign" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV32e the run over the foreign notes succeeds" PASS
+else
+  check "LV32e the run over the foreign notes succeeds" FAIL
+fi
+eq "LV32a a part marker in another author's note, a system note or a quoting note does not stop that part from being posted" \
+  "$(grep -c -- '--method POST' "$WORK/live/foreign/calls" || true)" "6"
+if FAKE_DIR="$WORK/live/foreign" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1; then
+  check "LV32f the re-run over the publisher's own notes succeeds" PASS
+else
+  check "LV32f the re-run over the publisher's own notes succeeds" FAIL
+fi
+eq "LV32b a re-run finds every part in the publisher's own notes and posts nothing new" \
+  "$(grep -c -- '--method POST' "$WORK/live/foreign/calls" || true)" "6"
 
 rm -rf "$WORK"
 

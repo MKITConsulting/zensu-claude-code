@@ -95,7 +95,10 @@ The `zensu plan` verbs it denies are the ones that record a person's decision: `
 `finalize`, `abandon`, `confirm-merge` and `followup accept|dismiss`; `status`, `list` and
 `followups` pass. It finds the noun and the verb of a `zensu` call the way the CLI does, so a value
 flag or an empty word in front of them, as in `zensu --reason x plan abandon <id>`, hides neither,
-and it reads the `repos` alias of `zensu work repositories` as the full name.
+and it reads the `repos` alias of `zensu work repositories` as the full name. It reads those words
+through `hooks/lib/zensu-cli-words-v1.js`, the module the CLI write-gate reads them through as well;
+when that module cannot load, it denies every `zensu` call that holds a word that could name a
+subcommand.
 
 A work-order session never runs `zensu auth login`: the CLI uses the session token and ignores any
 stored login while `ZENSU_SESSION_TOKEN` is set, and no person is there to sign in. So in a session
@@ -196,7 +199,7 @@ raw output to a file there; nothing else keeps it.
 ## Known gaps
 
 - The installed `zensu` CLI must provide `zensu work`, which zensu-cli 0.8.0 is the first release
-  to carry; with an older CLI, `/zensu:work` refuses in one line that names zensu-cli 0.10.0,
+  to carry; with an older CLI, `/zensu:work` refuses in one line that names zensu-cli 0.18.0,
   the oldest release the plugin supports.
 - The gate reads command text. A command assembled at run time, such as a script the session
   wrote and then runs, an interpreter one-liner, or a spelling the gate does not know is not

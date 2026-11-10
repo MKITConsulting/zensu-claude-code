@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 29,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 32,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
     },
@@ -52,7 +52,12 @@
       "summary": "The edit-landing claim grammar: the files split, brace and glob expansion, prose candidates, audited corrections and the append pre-check."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 89, "skips": {"win32": 3},
+      "path": "tests/structure/edit-landing-scope-v1.test.js", "registered": 37, "skips": {"win32": 1},
+      "runs": [{ "driver": "tests/structure/test-edit-landing-audit.sh" }],
+      "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
+    },
+    {
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 95, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -62,9 +67,10 @@
       "summary": "External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, the freshness check against changed files, and the review root bound to the session's work tree with every other layout named."
     },
     {
-      "path": "tests/structure/finding-verify-v1.test.js", "registered": 28,
+      "path": "tests/structure/finding-verify-v1.test.js", "registered": 35,
+      "skips": { "win32": 1 },
       "runs": [{ "driver": "tests/structure/test-finding-verification.sh" }],
-      "summary": "The finding-verification grading module."
+      "summary": "The finding-verification grading module and its bounded JSON input."
     },
     {
       "path": "tests/structure/fixture-mutation-watch.test.js", "registered": 19,
@@ -82,9 +88,9 @@
       "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict."
     },
     {
-      "path": "tests/structure/git-repo-escape.test.js", "registered": 45,
+      "path": "tests/structure/git-repo-escape.test.js", "registered": 63,
       "runs": [{ "driver": "tests/structure/test-bash-source-write-gate.sh" }],
-      "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
+      "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice, plus the shell word and command reader, the program-name reading of the wrappers and its comparison with the other gates, the Session Control check and the write channels, the comparison of the shell readers with the subagent shell guard, and targets mode under a directory named at run time."
     },
     {
       "path": "tests/structure/hook-dispatch-v1.test.js", "registered": 19,
@@ -92,7 +98,7 @@
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 30,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 33,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
@@ -169,9 +175,19 @@
       "summary": "The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe."
     },
     {
+      "path": "tests/structure/review-gate-v1.test.js", "registered": 38,
+      "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
+      "summary": "The consume-review gate: reviewer records, background launches completed from hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement."
+    },
+    {
       "path": "tests/structure/review-ledger-v1.test.js", "registered": 42,
       "runs": [{ "driver": "tests/structure/test-review-convergence.sh" }],
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
+    },
+    {
+      "path": "tests/structure/review-packet-v1.test.js", "registered": 33,
+      "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
+      "summary": "The canonical review change set and the immutable per-round review packet."
     },
     {
       "path": "tests/structure/review-round-scope-v1.test.js", "registered": 26,
@@ -304,13 +320,13 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 101,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 102,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
-      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading, its refusal when that reader cannot load and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
     },
     {
-      "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,
+      "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 26,
       "runs": [{ "driver": "tests/structure/test-workflow-dispatch-inputs.sh" }],
       "summary": "Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable."
     },
@@ -325,12 +341,12 @@
       "summary": "The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative."
     },
     {
-      "path": "tests/structure/worktree-keep-v1.test.js", "registered": 101,
+      "path": "tests/structure/worktree-keep-v1.test.js", "registered": 102,
       "runs": [{ "driver": "tests/structure/test-worktree-keep.sh" }],
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
     {
-      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 15,
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 16,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
     },
@@ -340,9 +356,19 @@
       "summary": "The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain."
     },
     {
-      "path": "tests/structure/zensu-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 8},
+      "path": "tests/structure/zensu-cli-backend-v1.test.js", "registered": 15,
+      "runs": [{ "driver": "tests/structure/test-bash-zensu-gate.sh" }],
+      "summary": "The CLI write-gate's backend reading: the local URL test, the shell words of the token scan, the run-time word tests, the --api-url occurrence rules, the one-word trust, the ZENSU_API_URL fallback, the PowerShell flag rules and the module's fail-closed analyzer load, with the gate suite's B53, B54 and B40o11 to B40o15 cases."
+    },
+    {
+      "path": "tests/structure/zensu-cli-version-v1.test.js", "registered": 15, "skips": {"win32": 8},
       "runs": [{ "driver": "tests/structure/test-doctor.sh" }],
-      "summary": "The zensu-cli version floor: the version line, the floor comparison, and a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does."
+      "summary": "The zensu-cli version floor: the version line, the floor comparison, a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does, and the floor release's recorded ai-work help passing the capture preflight."
+    },
+    {
+      "path": "tests/structure/zensu-cli-words-v1.test.js", "registered": 6,
+      "runs": [{ "driver": "tests/structure/test-bash-zensu-gate.sh" }],
+      "summary": "The zensu-cli word reader both gates share: cobra's subcommand search over value flags, empty words and --, the noun table with its aliases, the work verb alias, the group verbs and the frozen tables."
     },
     {
       "path": "tests/structure/zensu-doctor-invocation.test.js", "registered": 27,

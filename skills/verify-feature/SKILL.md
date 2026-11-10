@@ -100,10 +100,10 @@ only these points:
    id to `--driver` when you record the criterion.
    The credential-blind rules above bind every driver: never the
    autopilot `storageState` login, and never a secret in a command or in the evidence. An
-   exit-code check reaches only an unauthenticated, synthetic, loopback target and discards its
-   own output (`curl -fsS -o /dev/null http://127.0.0.1:<port>/…`, `<command> >/dev/null 2>&1`),
-   because the evidence runner prints the tail of that output to you. A criterion that needs a
-   token file, ambient credentials or a non-loopback host is `partial`.
+   exit-code check reaches only an unauthenticated, synthetic, loopback target and prints only
+   what `rules/acceptance-evidence.md` allows, because the evidence runner prints the tail of its
+   output to you; that file also says how one run backs several ACs. A criterion that needs
+   a token file, ambient credentials or a non-loopback host is `partial`.
 4. **The plugin observes every exit-code check.** Run the check through
    `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope acceptance --cmd '<check>' --log <run log>`
    and cite the `record=er1_…` id of its summary line. The check must leave the working tree
@@ -141,9 +141,8 @@ only these points:
    starts — `git`, the runtime recipe, fixtures and teardown, but never a `playwright-cli` call,
    which must stay one plain call — as `cd "<that root>" && …`, and read the recipe files
    from that root; that `cd` is the one prefix a recorded `down` may carry (Phase 2 step 3).
-   After `/zensu:adopt-session --reanchor` the Bash
-   tool still starts in the session's previous worktree, while every record binds to the
-   anchor's tree. `--evidence-run` needs no prefix: it already runs in the anchor.
+   After `/zensu:adopt-session --reanchor` the Bash tool still starts in the session's previous worktree,
+   while every record binds to the anchor's tree. `--evidence-run` needs no prefix: it runs in the chain's work tree.
 
 ## Phase 0 — Resolve scope and target
 
@@ -547,12 +546,12 @@ Use the same bare form with `FAIL` or `PARTIAL` as appropriate.
 
 Verification drives the browser through `playwright-cli`, the `@playwright/cli` package, which
 must be on `PATH`: check with `command -v playwright-cli`. When it is missing, stop with PARTIAL
-and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.21`,
+and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.24`,
 the version the browser consent gate was measured against; `brew install playwright-cli` is
 unpinned and may install a version the run-config helper refuses. Never install it on their
 behalf.
 `/zensu:doctor` reports whether it is installed and which version. The browser consent gate
-parses its arguments as measured against version 0.1.21 and denies an argument shape it does
+parses its arguments as measured against version 0.1.24 and denies an argument shape it does
 not recognize rather than admitting it — including a `zensu-verify` session name it does not
 resolve as the call's session.
 

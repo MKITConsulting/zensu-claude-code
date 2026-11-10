@@ -186,7 +186,9 @@ Outside work-order mode all three print nothing and exit 0.
   `zensu`. Zensu refuses `zensu work list`, `questions`, `policy get` and `repositories list` (alias
   `repos list`) for a session token, so their denial points at the order file. It finds the noun and
   the verb of a `zensu` call as the CLI does: a flag without `=` takes the next word, an empty word
-  is skipped and `--` ends the search. It reads commands inside `bash -c`,
+  is skipped and `--` ends the search. It reads those words through the plugin's `hooks/lib/zensu-cli-words-v1.js`;
+  when that module cannot load, it denies every `zensu` call that holds a word that could name a
+  subcommand, because it can no longer tell which verb a call runs, and the denial says that the plugin installation is incomplete. It reads commands inside `bash -c`,
   `eval`, `env -S`, command substitutions and wrappers such as `env` or `sudo`. It reads every
   command three ways, with plain single quotes and with the ANSI-C quoting (`$'work'`) of bash and
   of zsh, and denies when any reading finds a forbidden command. It denies an option between `-c`

@@ -26,7 +26,7 @@ authorize the browser:
 The browser is driven by `playwright-cli`, which you install once:
 
 ```bash
-npm install -g @playwright/cli@0.1.21
+npm install -g @playwright/cli@0.1.24
 ```
 
 That is the version the browser consent gate was measured against, and the run-config helper
@@ -61,8 +61,13 @@ the skill verifies every active `AC-###` criterion of the chain's plan on this w
 cheapest driver that can observe it: the browser for a UI criterion, a simulator for a mobile
 app, and a shell check for an API, a CLI or a queue. A shell check runs through the plugin's
 evidence runner, so the plugin records its real exit code; it reaches only an unauthenticated
-loopback target and discards its own output, because the runner shows the tail of that output
-to the model. The skill records one verdict per criterion, and the chain closes only when every
+loopback target and prints no raw application, network or credential output, because the runner
+shows the tail of that output to the model. Against a proven synthetic fixture it may print
+bounded diagnostics instead — the criterion id, a fixed check name, the result, a fixed failure
+category and a child's exit status, at most 20 lines — so a failure shows which assertion broke
+(`skills/verify-feature/rules/acceptance-evidence.md`). One observed run may back every
+criterion it asserts, each recorded on its own and only while the tree is unchanged. The skill
+records one verdict per criterion, and the chain closes only when every
 active criterion has a `pass` on the tree that ships
 ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). It verifies a criterion
 that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs
@@ -558,7 +563,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | the page loads, but its API calls fail with `net::ERR_BLOCKED_BY_CLIENT` | the API runs on an origin the run config does not name | declare that origin in the recipe's `validate.networkOnly.origins` (and, under a policy, in its `networkOnlyOrigins`), or as the recipe's `auth.baseUrl` when it is a login origin you navigate, so the run config allows it next to the page's origin |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
-| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
+| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.24` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
 | PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers both `Bash` and `PowerShell` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
 | PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` | the `@playwright/cli` package manifest of the `playwright-cli` on `PATH` does not declare the measured version: it names another version or another package, the helper could not judge it, or there is no manifest at all. The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted. Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it, which then answers as another package or as one the helper cannot judge. A version the binary prints about itself is never accepted | run the install command the reason names; for a wrapper script, also put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way |
 | PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` | an empty `PATH` entry (a leading or trailing `:`, or `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the `playwright-cli` found on `PATH`; the shell reads it against each call's working directory, so a gated call could run another binary than the one measured | remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli` |

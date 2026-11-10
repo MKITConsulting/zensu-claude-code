@@ -457,5 +457,75 @@ else
   check "C23 drive a CI chain without self-review to the max-rounds close" FAIL
 fi
 
+CI_STANDALONE="$(directive)"
+source "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+WT_CI=""
+printf '.claude/worktrees/\n' >> "$PROJ/.gitignore"
+if git -C "$PROJ" add .gitignore && git -C "$PROJ" -c commit.gpgsign=false commit -qm 'ignore worktrees' \
+  && git -C "$PROJ" worktree add -q "$PROJ/.claude/worktrees/ci-wt" -b ci-wt >/dev/null 2>&1; then
+  WT_CI="$(cd -P "$PROJ/.claude/worktrees/ci-wt" 2>/dev/null && pwd -P)"
+fi
+WT_CI_NATIVE=""
+[ -n "$WT_CI" ] && WT_CI_NATIVE="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$WT_CI" 2>/dev/null)"
+BOUND_RUN_FILE=""
+
+bound_ci_max_rounds() {
+  local run=fsci_bound_wt_run chain=fsci-bound-wt-chain state ctx
+  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  bind "fsci-bound-wt" "$PROJ" || return 1
+  bash "$HELPER" --ci --session >/dev/null 2>&1 || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$PROJ" false true "$WT_CI" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" "plan-${run}" PLAN_APPROVED \
+    "{\"approvedPlanSha256\":\"$sha\"}" "$PROJ" "$ZENSU_SESSION_KEY" >/dev/null 2>&1 || return 1
+  bash "$LOG" --tdd-begin --session "$ZENSU_SESSION_KEY" --autopilot-run "$run" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
+  bash "$LOG" --tdd-complete --session "$ZENSU_SESSION_KEY" --autopilot-run "$run" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
+  state="$(tdd_state_file "$ZENSU_SESSION_KEY")" || return 1
+  tdd_increment_counter "$ZENSU_SESSION_KEY" reviewRound >/dev/null || return 1
+  TICKET="$(bash "$LOG" --review-ticket --session "$ZENSU_SESSION_KEY" 2>/dev/null)"
+  [ -n "$TICKET" ] || return 1
+  ctx="$(tdd_autopilot_context "$state" "$ZENSU_SESSION_KEY")" || return 1
+  SID_VALUE="fsci-bound-wt" TICKET="$TICKET" CONTEXT="$ctx" node -e '
+    const c = JSON.parse(process.env.CONTEXT);
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
+      session_id: process.env.SID_VALUE,
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=${c.runId} attempt=${c.attempt} chain=${c.chainId}\nAUTOPILOT-STAGE: ${c.returnStage}\nfixture`
+      }
+    }));
+  ' | bash "$POSTREV" >"$WORK/postrev.json" 2>/dev/null
+  BOUND_RUN_FILE="$(autopilot_run_file "$run" "$PROJ")"
+}
+
+if [ -n "$WT_CI_NATIVE" ] && bound_ci_max_rounds; then
+  DIRECTIVE="$(directive)"
+  FLAG23B="$(A="$CI_STANDALONE" B="$DIRECTIVE" W="$WT_CI_NATIVE" node -e '
+    const cmd = (s) => { const m = String(s || "").match(/Before you reply, [^\n]*?( --evidence-run [^\n]*? --log <run log>)/); return m ? m[1] : null; };
+    const a = cmd(process.env.A), b = cmd(process.env.B);
+    if (!a || !b) { process.stdout.write("missing"); process.exit(0); }
+    const want = a.replace(" --cmd \x27", " --cmd \x27cd \"" + process.env.W + "\" && ");
+    process.stdout.write(want === b ? "equal" : "differ");
+  ' 2>/dev/null)"
+  if printf '%s' "$DIRECTIVE" | grep -qF "Before you reply, re-run the affected-suite command of Phase 6 step 1 in this chain's work tree through the evidence runner: " \
+    && printf '%s' "$DIRECTIVE" | grep -qF -- "--evidence-run --scope scoped --if-stale --cmd 'cd \"$WT_CI_NATIVE\" && <the Phase 6 affected-suite command>' --log <run log>" \
+    && ! printf '%s' "$DIRECTIVE" | grep -qF -- '--evidence-run --scope full' \
+    && [ "$FLAG23B" = equal ] \
+    && node -e '
+      const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      process.exit(j.stage === "BLOCKED" && j.blocked && j.blocked.code === "TDD_MAX_ROUNDS" ? 0 : 1);
+    ' "$BOUND_RUN_FILE" 2>/dev/null; then
+    check "C23b the max-rounds close of a bound CI chain in a nested worktree re-runs the shared affected-suite command there, and the outer run is BLOCKED" PASS
+  else
+    check "C23b the max-rounds close of a bound CI chain in a nested worktree re-runs the shared affected-suite command there, and the outer run is BLOCKED (flag=$FLAG23B)" FAIL
+    printf '%s\n' "$DIRECTIVE" | head -c 4000; echo
+  fi
+else
+  check "C23b drive a bound CI chain in a nested worktree to the max-rounds close without self-review" FAIL
+fi
+
 unit_check_done "C1z every unit file the registry gives this suite was graded"
 finish

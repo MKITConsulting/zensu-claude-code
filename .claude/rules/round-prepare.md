@@ -165,12 +165,21 @@ leaves every path it reports out of the packet lists and the round diff and coun
 `user_ignored:` line. The audit's `_el_git` sets `core.excludesFile=/dev/null` on purpose, so its
 grading never depends on a personal excludes file; the change set therefore still lists an
 untracked file only that file ignores, and the verb hides it from the reviewers, never from the
-audit. A `check-ignore` exit above 1 is an exit-2 stop.
+audit. A `check-ignore` exit above 1 is an exit-2 stop. `_el_git` and the verb's `check-ignore`
+call also set `core.quotePath=false`, so a non-ASCII path reaches the change set, the ignore
+check, the packet lists and the round diff in the UTF-8 spelling a claim and `collectChanges` use;
+git's quoted form made a changed non-ASCII file grade `EDIT NOT LANDED` and left it out of the
+round diff. A path holding a double quote, a backslash or a control character is still quoted.
 
 **Coupled sites.** The module and its unit file; the verb arm in `zensu-log.sh` and
-`tests/structure/test-round-prepare.sh` (`RP0`–`RP14`); the `--change-set` mode and `CS1`–`CS5`
-in `tests/structure/test-edit-landing-audit.sh`; `claimOf`, which moves with the audit's claim
-grammar and its `X29`–`X33` pins in the same suite; the verb sentence in all three severity arms of
+`tests/structure/test-round-prepare.sh` (`RP0`–`RP15`); the `--change-set` mode and `CS1`–`CS9`
+in `tests/structure/test-edit-landing-audit.sh`, where `CS9` holds the change set equal to
+`collectChanges` in `hooks/lib/review-packet-v1.js` apart from the `.zensu` workflow artifacts
+only that helper leaves out; `claimOf`, which moves with the audit's claim
+grammar and its `X29`–`X33` pins in the same suite; `VERDICT` and `DIRTY_TAILS`, which read the
+audit's verdict heads and both spellings of its `PENDING PREDICATE` line, the current one and
+the one older run logs carry, so a reworded verdict line in `zensu-edit-landing.sh` moves them
+and the verdict-line unit case; the verb sentence in all three severity arms of
 `hooks/post-review-tdd-delegate.sh` and its `ROUND_SCOPE` on-variant (`I17f`, `I30b`, `I31c`);
 the `fixed`-line sentences of `CONVERGENCE_CLAUSE`, which must stay clear of the `R16` needles in
 `tests/structure/test-review-convergence.sh`; the reset marker `RESET` of

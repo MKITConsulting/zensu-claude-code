@@ -1,6 +1,7 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "hooks/lib/desktop-store-read-v1.js"
   - "skills/session-trail/references/commands.md"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
@@ -42,8 +43,8 @@ other admitted transcript to find its siblings.
 - `keepOwners()` takes the keep keys of the live anchors it must attribute and builds a row only
   for an inventory entry whose session id hashes to one of them. The caller reads the map only
   at those keys.
-- `ccdApp(id)` answers one session's desktop record. One pass reads every `local_*.json` into a
-  reusable buffer and records the files in which a `"cliSessionId"` key carries each id; only
+- `ccdApp(id)` answers one session's desktop record. One pass reads every `local_*.json` into one
+  reusable buffer, `RECORD_SCRATCH`, and records the files in which a `"cliSessionId"` key carries each id; only
   those files are parsed, last match in walk order wins, and `CCD_RECORD_PATHS` gets the same
   entry the full walk writes. `ccdIndex()` stays the full map for the surveys and reuses the same
   memoized file listing, so a directory that cannot be read is counted once.
@@ -78,6 +79,75 @@ survives `replace`, `trim` and `slice` unchanged is a view into the whole decode
 `INDEX_CACHE` keeps rows until exit: 76 recovered rows held 249.7 MiB after forced GC on the
 measuring machine. On Node 26 those transcripts are external strings, so a retention check must
 read `external` as well as `heapUsed`.
+
+**Every desktop-store read passes the linked-session resolver's rule, from
+`hooks/lib/desktop-store-read-v1.js`.** Store values steer session-trail steps no one
+confirms: the takeover plan pass runs `stat` and `git` in folders the records name,
+`isArchived` lifts the release busy gate, the store's account picks the saved presets behind
+the `ssh` stay row and the account an edge endpoint records, and a record that is a FIFO
+blocks a plain read. So session-trail applies the check `hooks/lib/linked-session-v1.js`
+applies, from the same module, and defines no copy of it. On every platform it refuses a
+symbolic link where a folder or a record is expected, a record that is not a regular file and a
+record larger than `DESKTOP_RECORD_MAX_BYTES`; off Windows it also refuses an entry that another
+account owns or that grants group or other write:
+
+- `ccdStoreProbe` judges each store candidate that exists with
+  `realDirectory(dir, writableOnlyByCaller)`. A refused candidate never becomes the store, and
+  `lineage --diagnose` marks it `REFUSED`; when no candidate resolves, it names the permission
+  fix rather than `ZENSU_CCD_STORE`, which is judged by the same rule. A refused candidate ahead
+  of the winning one also counts as a refused entry, so when a later candidate wins and holds no
+  record of the session, the brief says store entries were refused rather than that the record
+  is missing. A refused candidate after the winning one is never read, so it is marked but not
+  counted. `ZENSU_CCD_STORE` stays authoritative, so a refused override leaves no store at all.
+- `ccdRecordFiles` and `accountForHostSession` judge every folder they enter the same way, and
+  refuse a symbolic link where a folder or a `local_*.json` is expected without following it.
+  `ownedRegularFile` judges a record before the walk lists it and before the host-session probe
+  answers with its account. `savedPresets` judges the folder that holds `ccd-session-presets.json`,
+  the parent of the store, the same way before it trusts a missing file or the file's answers, and
+  a refused one counts once as a refused entry
+  (`.claude/rules/session-trail-linked-sessions.md`).
+- Every record is read through `readBoundedBytes`: a regular file owned by the caller with no
+  group or other write bit, judged on its `lstat` and again on the opened descriptor, opened
+  with `O_NOFOLLOW` and `O_NONBLOCK`, at most `DESKTOP_RECORD_MAX_BYTES`. That covers the
+  records behind `ccdIndex`, `ccdCandidates`, `ccdApp`, `desktopRecordOf` and `familyRecords`,
+  and `ccd-session-presets.json` in `savedPresets`.
+- `storeRecordBytes` hands the reader `RECORD_SCRATCH`, so the bytes it returns are a view the
+  next read overwrites, and every caller decodes them before it reads another record. The
+  resolver passes no scratch, so each of its reads gets its own buffer. A fresh buffer per
+  record was measured on 2026-11-02 at about 205 MB max RSS for `show <uuid> --all --json`
+  against 91 MB before the check; with the scratch buffer it measured 88 MB and 0.38 s user
+  CPU, against 0.37 s before.
+- A refused entry counts into `SKIPPED` once, through `CCD_REFUSED`. A session whose record was
+  not read gets a reason that names the refusal: `STORE_REFUSED_REASON`,
+  `RECORD_REFUSED_REASON` or `RECORDS_REFUSED_REASON`, while a missing store and a missing
+  record keep their wordings. The reader returns one `refused` state for every cause, so each
+  reason lists them all: the owner and write bits, the file type, the size cap and a failed
+  open or read. `unreadableWhy` says `no readable` for the same reason.
+- `storeRead()` loads the module lazily, only once a store candidate exists, and a tree without
+  it fails with the plugin-tree-incomplete diagnostic, as `gitChildEnvironment` does.
+  `mutant_path` and `cont_mutant` in the verdict suite copy it beside `trail.mjs`.
+
+Costs, accepted: a group write bit is refused even where the group holds the user alone, as
+under the umask 002 of a user-private-group setup, so such a machine shows no desktop data in
+session-trail; the skipped count, `lineage --diagnose` and the brief reasons say so. The check
+reads the owner and the mode bits only: write granted through an access-control list passes,
+and on Windows neither is judged.
+Measured on 2026-11-02 on macOS, the store, the 69 directories below it and its 4,170 records
+belonged to the user with no group or other write bit, and the store held no symbolic link, so
+the check refuses nothing there. `umask 022` heads `test-session-trail-verdict.sh` and
+`test-session-trail-lineage.sh`, so their fixture stores pass under any runner umask. `OM0` to
+`OM4` in the verdict suite pin the check, `OM0` as the control; against the code before the
+check, `OM1` to `OM4` fail and the FIFO case hangs until its timeout. `OM5` pins the
+plugin-tree-incomplete diagnostic and the lazy load, `OM6` a refused `ccd-session-presets.json`
+in both forms, `OM7` a refused candidate passed over for a later one, `OM7b` a refused candidate
+after the winning one, `OM8` and `OM9` the decisions a refused presets file and a refused,
+unparsable or unlisted record of the running session leave (`presets-unread` and `started-unread`,
+`.claude/rules/session-trail-linked-sessions.md`), `OM10`, a ledger check that shares the block,
+the refused ledger records behind `ledger-unread`, `OM11` the decisions a refused presets folder
+leaves, and `L19b` and `L19c` in the lineage suite the
+null account an edge records when the host-session probe meets a refused workspace folder, account
+folder or record. `L3j`, `L3k` and `L3l` in `test-linked-session-route.sh` pin the one owner, the
+named `realDirectory` policies and the scratch buffer.
 
 **Bounds, accepted and named.**
 

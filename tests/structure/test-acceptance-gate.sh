@@ -156,18 +156,20 @@ review_to_done() {
   SF="$(tdd_state_file "$sid")"
 }
 
+audit_receipt() {
+  bash "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" --log "$2/.zensu/logs/$STEM.log" --project "$2" \
+    --session "$1" >/dev/null 2>&1
+}
+
 arm() {
-  local sid="$1" rp
+  local sid="$1"
   export CLAUDE_PROJECT_DIR="$PROJ"
   cd "$PROJ" || return 1
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
   bash "$LOG" --tdd-begin >/dev/null 2>&1 || return 1
   write_plan "$PROJ"
   printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/$STEM.log"
-  rp="$(tdd_edit_landing_receipt "$sid")" || return 1
-  mkdir -p "$(dirname "$rp")"
-  printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
-    "$sid" "$STEM" > "$rp"
+  audit_receipt "$sid" "$PROJ" || return 1
   bash "$LOG" --tdd-complete --plan "./$PLAN_REL" >/dev/null 2>&1 || return 1
   review_to_done "$sid"
 }
@@ -208,7 +210,7 @@ bound_project() {
 }
 
 bound_arm() {
-  local sid="$1" project="$2" run="$3" chain="$4" validate="$5" rp
+  local sid="$1" project="$2" run="$3" chain="$4" validate="$5"
   export CLAUDE_PROJECT_DIR="$project"
   cd "$project" || return 1
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
@@ -218,10 +220,7 @@ bound_arm() {
     --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
   write_plan "$project"
   printf 'S1 IMPL completed — files: tracked.txt\n' > "$project/.zensu/logs/$STEM.log"
-  rp="$(tdd_edit_landing_receipt "$sid")" || return 1
-  mkdir -p "$(dirname "$rp")"
-  printf '{"schema":"edit-landing-v2","session":"%s","log":".zensu/logs/%s.log","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
-    "$sid" "$STEM" > "$rp"
+  audit_receipt "$sid" "$project" || return 1
   bash "$LOG" --tdd-complete --session "$sid" --plan "./$PLAN_REL" --autopilot-run "$run" \
     --autopilot-attempt 1 --chain-id "$chain" >/dev/null 2>&1 || return 1
   SF="$(tdd_state_file "$sid")"
@@ -499,6 +498,44 @@ else
   check "A12 arm a ticket-bound chain with a receipt" FAIL
 fi
 
+if arm "acc-shared"; then
+  observe 'printf ok'
+  SHARED_RUN="$RUN_ID"
+  acc_record AC-001 pass cli "$SHARED_RUN" <<'EVIDENCE'
+the shared check asserted the AC-001 case and exited 0
+EVIDENCE
+  RC_ONE=$?
+  acc_record AC-002 pass api "$SHARED_RUN" <<'EVIDENCE'
+the same check asserted the AC-002 case and exited 0
+EVIDENCE
+  RC_TWO=$?
+  acc_status; RC_ST=$?
+  if [ -n "$SHARED_RUN" ] && [ "$RC_ONE" -eq 0 ] && [ "$RC_TWO" -eq 0 ] && [ "$RC_ST" -eq 0 ] \
+    && grep -q "| 2/2 active criteria pass$" "$WORK/sout"; then
+    check "A12a one observed acceptance run backs two separately recorded criteria on an unchanged tree" PASS
+  else
+    check "A12a one run for two criteria (run=$SHARED_RUN one=$RC_ONE two=$RC_TWO status=$RC_ST)" FAIL
+    cat "$WORK/sout"; ERR
+  fi
+  printf 'v3\n' > "$PROJ/tracked.txt"
+  acc_status; RC_ST=$?
+  STALE_OUT="$(cat "$WORK/sout")"
+  acc_record AC-002 pass api "$SHARED_RUN" <<'EVIDENCE'
+the earlier shared check, cited again after the tree changed
+EVIDENCE
+  RC_CITE=$?
+  if [ "$RC_ST" -eq 1 ] && printf '%s\n' "$STALE_OUT" | grep -q "| 0/2 active criteria pass" \
+    && [ "$RC_CITE" -eq 1 ] && grep -qF "evidence run $SHARED_RUN measured another tree than the current one" "$WORK/rerr"; then
+    check "A12b after an edit the shared run backs neither criterion and cannot be cited again" PASS
+  else
+    check "A12b shared run after an edit (status=$RC_ST cite=$RC_CITE)" FAIL
+    printf '%s\n' "$STALE_OUT"; ERR
+  fi
+  printf 'v2\n' > "$PROJ/tracked.txt"
+else
+  check "A12a arm a ticket-bound chain with a receipt" FAIL
+fi
+
 if arm "acc-escape"; then
   ZENSU_ACCEPTANCE_GATE=off bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
   LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
@@ -719,14 +756,38 @@ EVIDENCE
   if [ "$RC_RUN" -eq 2 ] && [ ! -e "$WORK/fault-ran" ] \
     && grep -qF "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: " "$WORK/eerr" \
     && [ "$RC_ST" -eq 2 ] \
-    && grep -qF "zensu-log.sh --acceptance-status: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/serr" \
+    && grep -qF "ACCEPTANCE STATUS — unavailable | the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/sout" \
+    && grep -qF 'work tree not found' "$WORK/sout" \
     && [ "$RC_REC" -eq 2 ] \
     && grep -qF "zensu-log.sh --acceptance-record: the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$WORK/rerr" \
-    && grep -qF 'work tree not found' "$WORK/serr"; then
-    check "A31 a bound chain whose worktree cannot be resolved refuses the acceptance run and both acceptance verbs with exit 2 and the cause" PASS
+    && grep -qF 'work tree not found' "$WORK/rerr" \
+    && grep -qF "the chain's work tree could not be determined, so no acceptance record can be bound to it: " "$LIB" \
+    && ! grep -qF "the chain's work tree could not be determined" "$LOG"; then
+    check "A31 a bound chain whose worktree cannot be resolved refuses the acceptance run and both acceptance verbs with exit 2 and the cause, worded by the modules" PASS
   else
     check "A31 a bound chain whose worktree cannot be resolved refuses with exit 2 (run=$RC_RUN status=$RC_ST record=$RC_REC)" FAIL
-    cat "$WORK/eerr" "$WORK/serr" "$WORK/rerr"
+    cat "$WORK/eerr" "$WORK/sout" "$WORK/serr" "$WORK/rerr"
+  fi
+
+  source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+  work_tree_fault_stub "$WORK/fault-stub"
+  BAD_WS="$BOUND_WT" node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.workspaceRoot = process.env.BAD_WS + "/missing-worktree"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");' "$WT_RUN_FILE"
+  PATH="$WORK/fault-stub:$PATH" bash "$LOG" --acceptance-status --log "$RUN_LOG" >"$WORK/sout" 2>"$WORK/serr"; RC_TST=$?
+  PATH="$WORK/fault-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/rout" 2>"$WORK/rerr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_TREC=$?
+  cp "$WORK/acc-run-wt.pre" "$WT_RUN_FILE"
+  if [ "$RC_TST" -eq 2 ] && [ "$RC_TREC" -eq 2 ] && [ ! -s "$WORK/sout" ] && [ ! -s "$WORK/rout" ] \
+    && grep -qF '/work-tree-fault: ' "$WORK/serr" \
+    && grep -qF "zensu-log.sh --acceptance-status: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance module did not run." "$WORK/serr" \
+    && grep -qF '/work-tree-fault: ' "$WORK/rerr" \
+    && grep -qF "zensu-log.sh --acceptance-record: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance module did not run." "$WORK/rerr" \
+    && ! grep -qF "the chain's work tree could not be determined" "$WORK/serr" "$WORK/rerr"; then
+    check "A32 a work-tree fault whose transport write fails stops both acceptance verbs with exit 2 and the shell's own line, before the module runs" PASS
+  else
+    check "A32 a work-tree fault whose transport write fails stops both acceptance verbs (status=$RC_TST record=$RC_TREC)" FAIL
+    cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr"
   fi
 else
   check "A29 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL

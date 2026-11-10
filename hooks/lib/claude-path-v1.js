@@ -61,4 +61,13 @@ function normalizeHostPathInput(value, label = 'path', platform = process.platfo
   return value;
 }
 
-module.exports = { normalizeHostPathInput, msysDrivePrefix };
+function programName(value, platform = process.platform, fold = 'always') {
+  const word = typeof value === 'string' ? value : '';
+  const cut = platform === 'win32' ? Math.max(word.lastIndexOf('/'), word.lastIndexOf('\\')) : word.lastIndexOf('/');
+  const name = word.slice(cut + 1).replace(/\.exe$/i, '');
+  if (fold === 'always') return name.toUpperCase().toLowerCase();
+  if (fold === 'platform' && (platform === 'darwin' || platform === 'win32')) return name.toLowerCase();
+  return name;
+}
+
+module.exports = { normalizeHostPathInput, msysDrivePrefix, programName };

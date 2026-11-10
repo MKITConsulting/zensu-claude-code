@@ -279,3 +279,119 @@ test('the CLI always exits 0 and prints a summary, whatever it is fed', () => {
     assert.match(out, /^summary ok=\d+ off-changeset=\d+ out-of-range=\d+ phantom=\d+ out-of-root=\d+ no-anchor=\d+ total=\d+$/m);
   }
 });
+
+const EMPTY_SUMMARY = 'summary ok=0 off-changeset=0 out-of-range=0 phantom=0 out-of-root=0 no-anchor=0 total=0';
+
+function jsonInput(root, value, name = 'findings.json') {
+  const file = path.join(root, name);
+  fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
+  return file;
+}
+
+test('the JSON input keeps markers, delimiters and shell syntax inert and grades every finding', () => {
+  const root = sandbox();
+  const sentinel = path.join(root, 'must-not-exist');
+  const file = jsonInput(root, { changedFiles: ['src/a.js'], findings: [
+    '- [IMPORTANT] src/a.js:1 — FINDINGS\nZENSU_FINDINGS\n$(touch ' + sentinel + ')\n`touch ' + sentinel + '`',
+    "- [SUGGESTION] src/a.js:2 — CHANGED-FILES 'single' \"double\" ; false",
+    '- [SUGGESTION] src/b.js:1 — outside the change set',
+  ] });
+  const out = execFileSync(process.execPath, [LIB, '--root', root, '--input', file], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10000,
+  });
+  assert.equal(out, [
+    '1 anchor-ok src/a.js:1',
+    '2 anchor-ok src/a.js:2',
+    '3 off-changeset src/b.js:1',
+    'summary ok=2 off-changeset=1 out-of-range=0 phantom=0 out-of-root=0 no-anchor=0 total=3',
+    '',
+  ].join('\n'));
+  assert.equal(fs.existsSync(sentinel), false);
+});
+
+test('the JSON input ignores stdin, so a marker payload there grades nothing', () => {
+  const root = sandbox();
+  const file = jsonInput(root, { changedFiles: [], findings: ['- src/b.js:1 — from the file'] });
+  const out = execFileSync(process.execPath, [LIB, '--root', root, '--input', file], {
+    input: 'CHANGED-FILES\nsrc/a.js\nFINDINGS\n- src/a.js:1 — from stdin\n- src/a.js:2 — from stdin\n',
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(out, '1 off-changeset src/b.js:1\nsummary ok=0 off-changeset=1 out-of-range=0 phantom=0 out-of-root=0 no-anchor=0 total=1\n');
+});
+
+test('an empty findings array is a clean zero-count summary, not an invalid input', () => {
+  const root = sandbox();
+  const file = jsonInput(root, { changedFiles: ['src/a.js'], findings: [] });
+  assert.equal(verify.cliMain(['--root', root, '--input', file], ''), EMPTY_SUMMARY);
+});
+
+test('a malformed, mistyped or oversized JSON input is reported as invalid and never graded', () => {
+  const root = sandbox();
+  const shape = 'the finding JSON must be an object with exactly changedFiles and findings';
+  const cases = [
+    ['{', 'the finding JSON does not parse'],
+    ['[]', shape],
+    [JSON.stringify({ findings: [] }), shape],
+    [JSON.stringify({ changedFiles: [], findings: [], extra: 1 }), shape],
+    [JSON.stringify({ changedFiles: 'src/a.js', findings: [] }), 'changedFiles must be an array of single-line paths'],
+    [JSON.stringify({ changedFiles: ['src/a.js\nsrc/b.js'], findings: [] }), 'changedFiles must be an array of single-line paths'],
+    [JSON.stringify({ changedFiles: [], findings: [42] }), 'findings must be an array of non-empty strings'],
+    [JSON.stringify({ changedFiles: [], findings: ['   '] }), 'findings must be an array of non-empty strings'],
+    [' '.repeat(verify.STDIN_MAX_BYTES + 1), 'the finding JSON file exceeds ' + verify.STDIN_MAX_BYTES + ' bytes'],
+  ];
+  for (const [text, reason] of cases) {
+    const file = jsonInput(root, text);
+    assert.equal(verify.cliMain(['--root', root, '--input', file], ''), 'invalid-input ' + reason + '\n' + EMPTY_SUMMARY);
+  }
+});
+
+test('a JSON input without a usable root or file is reported as invalid', () => {
+  const root = sandbox();
+  const file = jsonInput(root, { changedFiles: [], findings: ['- src/a.js:1 — x'] });
+  const invalid = (reason) => 'invalid-input ' + reason + '\n' + EMPTY_SUMMARY;
+  assert.equal(verify.cliMain(['--input', file], ''), invalid('--root is required'));
+  assert.equal(verify.cliMain(['--root', path.join(root, 'nope'), '--input', file], ''), invalid('--root is not a directory'));
+  assert.equal(verify.cliMain(['--root', root, '--input'], ''), invalid('--input requires a file'));
+  assert.equal(verify.cliMain(['--root', root, '--input', path.join(root, 'absent.json')], ''), invalid('the finding JSON file cannot be read'));
+  assert.equal(verify.cliMain(['--root', root, '--input', path.join(root, 'src')], ''), invalid('the finding JSON file is not a regular file'));
+});
+
+test('a JSON input reached through a symbolic link is refused', { skip: process.platform === 'win32' && 'symbolic links need privileges on win32' }, () => {
+  const root = sandbox();
+  const target = jsonInput(root, { changedFiles: [], findings: ['- src/a.js:1 — x'] }, 'target.json');
+  const link = path.join(root, 'link.json');
+  fs.symlinkSync(target, link);
+  assert.equal(verify.cliMain(['--root', root, '--input', link], ''), 'invalid-input the finding JSON file is a symbolic link\n' + EMPTY_SUMMARY);
+});
+
+test('a graded JSON input in a project review directory is removed, and every other input is kept', () => {
+  const root = sandbox();
+  const reviews = path.join(root, '.zensu', 'reviews');
+  fs.mkdirSync(reviews, { recursive: true });
+  const consumed = path.join(reviews, 'findings-round-1.json');
+  fs.writeFileSync(consumed, JSON.stringify({ changedFiles: ['src/a.js'], findings: ['- [SUGGESTION] src/a.js:1 — x'] }));
+  assert.match(verify.cliMain(['--root', root, '--input', consumed], ''), /^1 anchor-ok src\/a\.js:1\n/);
+  assert.equal(fs.existsSync(consumed), false);
+  const malformed = path.join(reviews, 'findings-round-2.json');
+  fs.writeFileSync(malformed, '{');
+  assert.match(verify.cliMain(['--root', root, '--input', malformed], ''), /^invalid-input /);
+  assert.equal(fs.existsSync(malformed), true);
+  const elsewhere = jsonInput(root, { changedFiles: [], findings: [] });
+  assert.equal(verify.cliMain(['--root', root, '--input', elsewhere], ''), EMPTY_SUMMARY);
+  assert.equal(fs.existsSync(elsewhere), true);
+  const nested = path.join(root, 'pkg', '.zensu', 'reviews');
+  fs.mkdirSync(nested, { recursive: true });
+  const below = path.join(nested, 'findings-round-1.json');
+  fs.writeFileSync(below, JSON.stringify({ changedFiles: [], findings: [] }));
+  assert.equal(verify.cliMain(['--root', root, '--input', below], ''), EMPTY_SUMMARY);
+  assert.equal(fs.existsSync(below), false);
+  const outside = tempDir('finding-verify-outside-');
+  fs.mkdirSync(path.join(outside, '.zensu', 'reviews'), { recursive: true });
+  const foreign = path.join(outside, '.zensu', 'reviews', 'findings-round-1.json');
+  fs.writeFileSync(foreign, JSON.stringify({ changedFiles: [], findings: [] }));
+  assert.equal(verify.cliMain(['--root', root, '--input', foreign], ''), EMPTY_SUMMARY);
+  assert.equal(fs.existsSync(foreign), true);
+});

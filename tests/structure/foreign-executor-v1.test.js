@@ -94,6 +94,7 @@ test("the notice names the executor and the way back to the Zensu workflow, and 
   ));
   assert.ok(NOTICE.includes("because the plan names superpowers:executing-plans, and that /zensu:build runs this plan"));
   assert.ok(NOTICE.includes("/zensu:build runs this plan under the Zensu workflow"));
+  assert.ok(NOTICE.includes("An approval message asking for TDD takes the /zensu:build arm, and its specification then carries exactly one line 'TDD-MODE: strict'."));
   assert.ok(!NOTICE.includes("AskUserQuestion"));
   assert.ok(!NOTICE.includes("ZENSU DELIVERY ROUTE:"));
   assert.ok(NOTICE.length <= 1200);

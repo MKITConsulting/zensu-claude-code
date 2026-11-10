@@ -51,7 +51,7 @@ command -v node >/dev/null 2>&1 || exit 0
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; else ZPS=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
+INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; ZBACKEND=./zensu-cli-backend-v1.js; ZCW=./zensu-cli-words-v1.js; else ZPS=; ZBACKEND=; ZCW=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZBACKEND="$ZBACKEND" ZCW="$ZCW" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
   let cmd = "", sub = false, ps = false, size = 0;
   try {
     const raw = require("fs").readFileSync(0);
@@ -74,82 +74,33 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     process.stdout.write("__oversized__\t" + size + "\t" + cap);
     process.exit(0);
   }
-  const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",mock:"mocks",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
-  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys mocks design link ghost wiki doc knowledge pulse ai-work work plan meta org auth product feature subfeature roadmaps tier sec journey mock docs kb wiki-pages".split(" "));
-  const GROUPS = new Set(["work\tpolicy", "work\trepositories", "work\trepos", "plan\tfollowup"]);
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = new Set();
   const OPQ = String.fromCharCode(0);
   const UNJ = "__unjudged__\t";
-  function unquoted(value) {
-    let start = 0, end = value.length;
-    while (start < end && (value.charCodeAt(start) === 34 || value.charCodeAt(start) === 39)) start += 1;
-    while (end > start && (value.charCodeAt(end - 1) === 34 || value.charCodeAt(end - 1) === 39)) end -= 1;
-    return value.slice(start, end);
-  }
-  const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
-  const LOCAL_START = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?![^:\/?#])/i;
-  function isLocalUrl(value) {
-    let v = String(value || "");
-    const cut = v.search(/[\u0000\u0001\x24]/);
-    if (cut !== -1) {
-      v = v.slice(0, cut);
-      if (!/[\/?#]/.test(v.replace(/^https?:\/\//i, ""))) return false;
+  const UNR = "__unreadable__\t";
+  let reader = null;
+  try {
+    const loaded = require(process.env.ZCW || "");
+    if ([loaded.commandWords, loaded.commandNoun, loaded.commandVerb, loaded.isGroup].every((f) => typeof f === "function")) reader = loaded;
+  } catch (_) {}
+  let backend = null;
+  function lib() {
+    if (backend === null) {
+      try { backend = require(process.env.ZBACKEND || ""); } catch (_) { process.stdout.write("__nobackend__"); process.exit(3); }
     }
-    if (!LOCAL_START.test(v) || /[^\x21-\x7e]|\\/.test(v)) return false;
-    let url = null;
-    try { url = new URL(/^https?:\/\//i.test(v) ? v : "http://" + v); } catch (_) { return false; }
-    return url.username === "" && url.password === "" && LOCAL_HOSTS.has(url.hostname);
+    return backend;
   }
-  function takesNextWord(t) {
-    return t.indexOf("=") === -1 && (t.length === 2 || t.charAt(1) === "-");
-  }
-  function isDynamic(t) {
-    return t.indexOf("\u0001") !== -1 || t.indexOf("\x24") !== -1;
-  }
-  function runTime(t) {
-    return isDynamic(t) || t.indexOf(OPQ) !== -1;
-  }
-  function shellWords(tokens) {
-    const out = [];
-    let open = "", word = null;
-    for (const token of tokens) {
-      if (word === null && token.charAt(0) === "#") break;
-      word = word === null ? token : word + " " + token;
-      for (let k = 0; k < token.length; k++) {
-        const ch = token.charAt(k);
-        if (open === "\x27") { if (ch === "\x27") open = ""; }
-        else if (ch === "\\") k++;
-        else if (open !== "") { if (ch === open) open = ""; }
-        else if (ch === "\x22" || ch === "\x27") open = ch;
-      }
-      if (open === "") { out.push(word); word = null; }
-    }
-    if (word !== null) out.push(word);
-    return out;
-  }
-  function backendLocal(rest, invocation, whole) {
-    const exact = ps || invocation.exact === true, raw = exact ? rest : shellWords(rest);
-    const words = exact ? raw : raw.map(unquoted), end = words.indexOf("--"), dyn = raw.findIndex(runTime);
-    if (psHidden && dyn !== -1) return false;
-    const read = whole && dyn === -1;
-    let sure = false;
-    for (let i = 0; i < words.length; i++) {
-      const one = words[i].startsWith("--api-url=");
-      if (!one && words[i] !== "--api-url") continue;
-      if (!(one ? read && isLocalUrl(exact ? words[i].slice(10) : unquoted(words[i].slice(10))) : isLocalUrl(words[i + 1]))) return false;
-      const before = i > 0 ? words[i - 1] : "";
-      if ((end === -1 || i < end) && (dyn === -1 || i < dyn) && !(before.length > 1 && before.charAt(0) === "-" && before.indexOf("=") === -1)) sure = true;
-    }
-    if (sure) return true;
-    if (Object.prototype.hasOwnProperty.call(invocation.envp, "ZENSU_API_URL")) return !envAppended && isLocalUrl(invocation.envp.ZENSU_API_URL);
-    return !envNamed && isLocalUrl(process.env.ZAPI);
+  function couldNameSubcommand(word) {
+    const w = lib().unquoted(word);
+    if (w.indexOf(OPQ) !== -1) return true;
+    return w !== "" && w[0] !== "-" && !/^[0-9]*[<>]/.test(w) && /[^0-9]/.test(w) && w.indexOf("/") === -1;
   }
   function dynamicReadings(c) {
-    if (!c.rest.some(isDynamic)) return [];
-    const skipped = c.rest.filter((t) => !isDynamic(t)), consumed = [];
+    if (!c.rest.some(lib().isDynamic)) return [];
+    const skipped = c.rest.filter((t) => !lib().isDynamic(t)), consumed = [];
     for (let i = 0; i < c.rest.length; i++) {
-      if (isDynamic(c.rest[i])) { i++; continue; }
+      if (lib().isDynamic(c.rest[i])) { i++; continue; }
       consumed.push(c.rest[i]);
     }
     return [{ envp: c.envp, rest: skipped, derived: true }, { envp: c.envp, rest: consumed, derived: true }];
@@ -164,7 +115,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       for (;;) {
         while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {       // capture env prefixes (VAR=val)
           const a = toks[i], eq = a.indexOf("=");
-          envp[a.slice(0, eq)] = unquoted(a.slice(eq + 1));
+          envp[a.slice(0, eq)] = a.slice(eq + 1);
           i++;
         }
         if (i >= toks.length) break;
@@ -173,6 +124,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
         base = t.split("/").pop().replace(/\.exe(?![\s\S])/, ""); break;          // resolved command basename
       }
       if (base !== "zensu") continue;                                              // command basename must be zensu
+      for (const k of Object.keys(envp)) envp[k] = lib().unquoted(envp[k]);
       found.push({ envp, rest: toks.slice(i + 1) });
     }
     return found;
@@ -195,17 +147,8 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     modeled = walked.length;
     invocations = walked.concat(posix, invocations);
   } catch (_) {}
-  const apiNames = (text) => (text.match(/--api-url/gi) || []).length;
-  const psHidden = ps && (/(?:^|\s)--%(?!\S)/.test(cmd) || apiNames(cmd.replace(/\x60/g, "")) > invocations.reduce((n, c) => n + apiNames(c.rest.join(" ")), 0));
-  let named = plain.replace(/\x60/g, "");
-  if (ps) try { named += "\n" + require(process.env.ZPS || "").spellings(cmd); } catch (_) {}
-  const envNamed = /ZENSU_API_URL/i.test(named);
-  const envAppended = /(?:^|[^A-Za-z0-9_])ZENSU_API_URL\+=/.test(cmd);
+  const backendLocal = invocations.length === 0 ? null : lib().backendReading({ command: cmd, plain, tool: ps ? "PowerShell" : "Bash", invocations, apiUrl: process.env.ZAPI, modeled, zensuName: NAMED, platform: process.platform });
   invocations = invocations.concat(invocations.flatMap(dynamicReadings));
-  const oneWordTrusted = !/[\x24\x60{*?[\r]/.test(cmd)
-    && !/(?:^|[^A-Za-z0-9_.-])(?:xargs|watch)(?![A-Za-z0-9_-])/iu.test(plain)
-    && !(process.platform === "win32" && cmd.indexOf("\\") !== -1)
-    && (ps || modeled === (plain.match(new RegExp(NAMED.source, "giu")) || []).length);
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
@@ -213,31 +156,18 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       continue;
     }
     if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
-    if (backendLocal(rest, invocation, oneWordTrusted && !invocation.derived)) continue;   // localhost/dev backend → conventions moot, not the tracked product
-    let noun = "", k = 0;
-    for (; k < rest.length; k++) {
-      const t = rest[k];
-      if (t === "--") break;
-      if (t === "") continue;
-      if (t.charAt(0) === "-") { if (takesNextWord(t)) k++; continue; }
-      if (NOUNS.has(t)) { noun = ALIAS[t] || t; }
-      break;                                                                       // first non-flag token decides
-    }
-    if (ps && typeof rest[k] === "string" && rest[k].indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
+    if (backendLocal(invocation)) continue;   // localhost/dev backend → conventions moot, not the tracked product
+    if (!reader) { if (rest.some(couldNameSubcommand)) out.add(UNR + "the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded"); continue; }
+    const found = reader.commandWords(rest), first = found[0] || "";
+    if (ps && first.indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
+    const noun = reader.commandNoun(first);
     if (!noun) continue;
-    const words = [];
-    for (let m = k + 1; m < rest.length && words.length < 2; m++) {
-      const t = rest[m];
-      if (t === "--") break;
-      if (t === "") continue;
-      if (t.charAt(0) === "-") { if (takesNextWord(t)) m++; continue; }
-      words.push(t.split(/[\t\r\n]/)[0]);
-    }
-    const verb = words[0] || "", third = words[1] || "";
+    const verb = (found[1] || "").split(/[\t\r\n]/)[0], third = (found[2] || "").split(/[\t\r\n]/)[0];
     if (ps && verb.indexOf(OPQ) !== -1) { out.add(UNJ + "the verb of a zensu call is built at run time"); continue; }
-    if (ps && third.indexOf(OPQ) !== -1 && GROUPS.has(noun + "\t" + verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
-    out.add(noun + "\t" + verb + "\t" + third.split(OPQ).join(""));
+    if (ps && third.indexOf(OPQ) !== -1 && reader.isGroup(noun, verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
+    out.add(noun + "\t" + reader.commandVerb(noun, verb) + "\t" + third.split(OPQ).join(""));
   }
+  if (!reader && [...out].some((line) => line.startsWith(UNJ))) out.add(UNR + "the word reader hooks/lib/zensu-cli-words-v1.js could not be loaded");
   if (modeled === 0 && invocations.every((c) => !c.exact) && [...out].some((line) => line.indexOf("__") !== 0)) out.add("__textonly__");
   process.stdout.write([...out].join("\n"));
 ' 2>/dev/null)"
@@ -330,6 +260,7 @@ if [ -n "$AGENT_ID" ] || [ -n "$AGENT_TYPE" ]; then
   IS_SUBAGENT=true
 fi
 UNJUDGED="$(printf '%s\n' "$INVOCATIONS" | awk -F'\t' '$1=="__unjudged__"{print $2; exit}')"
+UNREADABLE="$(printf '%s\n' "$INVOCATIONS" | awk -F'\t' '$1=="__unreadable__"{print $2; exit}')"
 
 # Returns 0 (allowed) only when the current hook payload session (or, when the
 # payload omitted it, the exact exported Session Control key) owns a workflow
@@ -390,22 +321,58 @@ done <<EOF
 $INVOCATIONS
 EOF
 
-[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
+[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ -z "$UNREADABLE" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
-if [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
+ALL_ROUTES="/zensu:change (one requested change), /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)"
+ROUTE_TEXT="/zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)"
+route_text() {
+  local routes skill label last="" group="" text=""
+  routes="$(zensu_tool_routes "$1")" || return 0
+  for skill in ${routes//,/ }; do
+    case "$skill" in
+      (change) label="one requested change" ;;
+      (bootstrap|ghost-scan) label="onboarding" ;;
+      (implement) label="feature work" ;;
+      (security-review) label="classification/review" ;;
+      (docs) label="documentation" ;;
+      (pilot) label="the next step of a tracked feature" ;;
+      (*) label="its own workflow" ;;
+    esac
+    if [ -n "$group" ] && [ "$label" = "$last" ]; then
+      group="$group or /zensu:$skill"
+    else
+      [ -n "$group" ] && text="${text:+$text, }$group ($last)"
+      group="/zensu:$skill"
+      last="$label"
+    fi
+  done
+  [ -n "$group" ] && ROUTE_TEXT="${text:+$text, }$group ($last)"
+  return 0
+}
+[ -n "$DENY_TOOL" ] && route_text "$DENY_TOOL"
+
+if [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the plugin installation is damaged. Do not retry this command. Report the damaged installation to the main thread."
+elif [ "$PARSE_STATUS" -ne 0 ] && [ "$INVOCATIONS" = "__nobackend__" ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the plugin installation is damaged. Until it loads, every command with a zensu call is denied, reads and --help included. Reinstall the plugin."
+elif [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ "$PARSE_STATUS" -ne 0 ]; then
-  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — ${ALL_ROUTES}."
+elif [ -n "$UNREADABLE" ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNREADABLE}, so the gate cannot tell a read from a mutation. Do not retry this command. Report the operation you need to the main thread."
+elif [ -n "$UNREADABLE" ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNREADABLE}, so the gate cannot tell a read from a mutation. The plugin installation is incomplete; reinstall the plugin and start a new session. --help is never gated, and neither is a write the gate can read as going to a localhost backend."
 elif [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ -n "$UNJUDGED" ]; then
-  REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+  REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — ${ALL_ROUTES}."
 elif [ "$IS_SUBAGENT" = true ]; then
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window, and the per-command gate escape is a deliberate one-off for the main thread, never a route for a subagent. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window, and the per-command gate escape is a deliberate one-off for the main thread, never a route for a subagent. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — ${ROUTE_TEXT}."
 elif [ "$TOOL_NAME" = PowerShell ]; then
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. A PowerShell command has no inline gate escape. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL in the session environment."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. A PowerShell command has no inline gate escape. --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL in the session environment."
 else
-  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline). --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL, as an inline prefix of the call or in the session environment."
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — ${ROUTE_TEXT} — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline). --help is never gated, and neither is a write the gate can read as going to a localhost backend: put a literal two-word --api-url http://localhost:<port> right after zensu, or give no --api-url and set ZENSU_API_URL to a literal localhost URL, as an inline prefix of the call or in the session environment."
 fi
 
 if zensu_is_human_decision_tool "$DENY_TOOL"; then

@@ -107,6 +107,20 @@ a test that can do neither. The same
 command takes unit files as arguments for a local check, for example
 `node tests/run-clock-shift.js tests/structure/full-suite-ci-v1.test.js`.
 
+`playwright-cli-drift.yml` also runs once a day and on manual dispatch, on Ubuntu only, and
+runs no suite. Its `drift` job keeps the read-only token and runs
+`.github/scripts/playwright-cli-drift.sh`, which reads the npm registry metadata of
+`@playwright/cli` with one `curl` and never installs or runs the package. When the highest
+stable version there is newer than `PLAYWRIGHT_CLI_SOURCE_VERSION`, the version the browser
+consent gate's parser port was measured against, the `drift-issue` job, which holds
+`issues: write` and nothing else, opens or rewrites the issue labelled `playwright-cli-drift`
+with the steps to re-record `tests/structure/fixtures/playwright-cli-argv.v1.json` locally,
+and it closes that issue once the measured version is the newest again. A red scheduled run
+comments on or opens the issue labelled `playwright-cli-drift-check`.
+`test-playwright-cli-drift.sh` guards the workflow graph, runs the script against fixture
+metadata and the two issue steps against a fake `gh`, and runs three mutants that its own
+cases must catch.
+
 ## Suites
 
 | Path | Kind | Covers |
@@ -120,6 +134,7 @@ command takes unit files as arguments for a local check, for example
 | `tests/e2e-tdd/` | live | full `/zensu:build` cycle (RED→GREEN→review→self-review→done), real `node --test` |
 | `tests/e2e-context-nudge/` | live | `user-prompt-context-nudge.sh` parsing a real `claude --print` session transcript (read→occupancy→threshold→`/compact` proposal) |
 | `tests/structure/test-tdd-full-cycle.sh` | deterministic | the same full cycle driven through the hooks (no API) |
+| `tests/integration/gitlab/` | live service (Docker) | the GitLab VCS driver against a disposable GitLab CE with real glab builds; CI runs it through `.github/workflows/gitlab-live.yml`, `tests/run-all.sh` never does |
 
 ## Running individual suites
 
@@ -137,7 +152,51 @@ bash tests/e2e-skills/setup-fixtures.sh && bash tests/e2e-skills/run.sh
 
 # Advisory Promptfoo eval; it has no --offline/--self-check mode and grants unrestricted host access.
 ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
+
+# Live GitLab (Docker; a 1.2-1.6 GiB image that boots in minutes)
+bash tests/integration/gitlab/run.sh                # pinned glab matrix, removes the container it started
+bash tests/integration/gitlab/run.sh --keep         # keep GitLab up for repeated runs
+bash tests/integration/gitlab/drift.sh              # pin lines of glab or GitLab releases past the pins; runs no build
+bash tests/integration/gitlab/gitlab-down.sh        # remove a kept container
 ```
+
+## Live GitLab suite
+
+`tests/integration/gitlab/` proves what the fake-backed `test-vcs-*` suites cannot: that real
+glab builds talk to a real GitLab the way the driver expects. `run.sh` installs each glab version
+pinned in `versions.v1.json` (sha256 per platform), starts the pinned GitLab CE image by digest
+(`gitlab-up.sh`, memory-constrained, port 8929 on 127.0.0.1), mints a throwaway root token inside
+the container and runs `test-vcs-gitlab-live.sh` once per glab version. Each run seeds its own
+project and merge request with an added, a removed, a context, a renamed and an out-of-diff line,
+drives every verb that reaches glab (`--post-review`, `--fetch-threads`, `--resolve-thread`,
+`--reconcile-review`, `--diff-refs`, `--pr-state`, `--scout-pr`, `--locate-pr`, `--review-markers`,
+`--review-summary` and `--open-pr`), and asserts what GitLab stored through its API. A second
+merge request, opened through `--open-pr`, starts with resolvable discussions only (`GL64`-`GL68`);
+its approval then adds a system note that `--fetch-threads` has to pass over (`GL71`, `GL72`). The summary line
+reads `N PASS / M FAIL / K XFAIL`.
+
+- **Known bugs are XFAIL, strictly.** `xeq` takes the fixed result and the result the reported
+  driver bug produces. The bug's result counts as `XFAIL`, the fixed result prints `XPASS` and
+  fails the suite, so the fix has to turn the check back into `eq`, and any other result fails.
+- **Credentials.** The token lives only in the state directory (mode 0700, files 0600) and is
+  never printed. `gitlab-down.sh` removes only a container that carries the
+  `dev.zensu.gitlab-it=1` label.
+- **Where it runs.** Pull requests that touch `hooks/lib/zensu-vcs.sh`, this directory or the
+  workflow run the pinned lane; the required check is the `GitLab live result` job. A nightly
+  run repeats the pinned lane and, when it fails, comments on the open issue labelled
+  `gitlab-live` or opens one. Both release stages run the pinned matrix as a gate.
+- **Only pinned builds run in CI.** The nightly drift job reads the newest glab release with its
+  vendor `checksums.txt` and the Docker Hub tag listing of `gitlab/gitlab-ce`, downloads no
+  archive and pulls no image. When upstream released past the pins, it opens or rewrites the
+  issue labelled `gitlab-live-drift` with the new pin lines, and closes it once the pins catch
+  up. Adopting them is a pull request that edits `versions.v1.json`, which runs the matrix.
+- **One run at a time.** `run.sh` holds `run.lock` in the cache directory, so two local runs
+  cannot share the container or tear it down under each other.
+- **Knobs.** `ZENSU_GITLAB_IT_CACHE` (glab builds and state), `ZENSU_GITLAB_IT_VERSIONS`
+  (another pin file, the way to try a release before pinning it), `ZENSU_GITLAB_IT_CONTAINER`,
+  `ZENSU_GITLAB_IT_PORT`, `ZENSU_GITLAB_IT_MEMORY` (default `4g`),
+  `ZENSU_GITLAB_IT_BOOT_SECONDS`, `ZENSU_GITLAB_IT_KEEP=1` (keep the seeded project) and
+  `ZENSU_GITLAB_IT_LIB` (run another driver file, for a mutation or bisect run).
 
 ## Conventions
 
@@ -147,8 +206,9 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
   negative assert, `# ` = comment. Tolerant by design (LLM output is non-deterministic).
 - Generated fixtures (`*/fixtures/`) and captures (`*/results/`, `tests/results/`) are
   git-ignored; build them with each suite's `setup-fixtures.sh`.
-- Deterministic non-Promptfoo suites run in CI via `--ci`. Promptfoo and live/API
-  suites remain explicitly local and opt-in.
+- Deterministic non-Promptfoo suites run in CI via `--ci`. Promptfoo and live model/API
+  suites remain explicitly local and opt-in. The live GitLab suite runs in CI only through
+  `.github/workflows/gitlab-live.yml` and the release gates, never through `run-all.sh`.
 
 ## Live-suite notes
 

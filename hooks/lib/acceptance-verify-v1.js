@@ -467,6 +467,12 @@ function resolveChain(options) {
   return { root, stem, planPath: plan.planPath, planRel: plan.planRel, disclosures };
 }
 
+function workTreeRefusal(options, limits = LIMITS) {
+  const fault = evidenceRun.workTreeFaultCause(options.workTreeFault);
+  if (fault === null) return null;
+  return `the chain's work tree could not be determined, so no acceptance record can be bound to it: ${display(fault, options.projectRoot, limits)}`;
+}
+
 function recordLine(record, projectRoot, limits = LIMITS) {
   const kind = record.evidence_run ? `observed ${record.evidence_run}` : 'attested';
   const tree = record.tree ? record.tree.slice(0, 12) : `unverified (${record.tree_reason || 'no tree id'})`;
@@ -480,6 +486,8 @@ function record(options) {
   if (!VERDICTS.includes(options.verdict)) return { code: 2, error: `--verdict must be one of ${VERDICTS.join(', ')}` };
   if (!ACCEPTED_DRIVERS.includes(options.driver)) return { code: 2, error: `--driver must be one of ${DRIVERS.join(', ')}` };
   if (!options.logPath) return { code: 2, error: '--log <this chain\'s run log> is required' };
+  const refusal = workTreeRefusal(options, limits);
+  if (refusal) return { code: 2, error: refusal };
   const evidence = cleanEvidence(options.evidenceText, options.projectRoot, limits);
   if (evidence.error) return { code: 1, error: evidence.error };
   const chain = resolveChain(options);
@@ -658,6 +666,8 @@ function describeRow(row, projectRoot, limits = LIMITS) {
 
 function status(options) {
   const limits = limitsWith(options.limits);
+  const refusal = workTreeRefusal(options, limits);
+  if (refusal) return { code: 2, lines: [`ACCEPTANCE STATUS — unavailable | ${refusal}`] };
   const chain = resolveChain(options);
   if (chain.error) return { code: 2, lines: [`ACCEPTANCE STATUS — unresolved | ${chain.error}`] };
   const result = assess({ ...options, chain });
@@ -844,6 +854,7 @@ function transportOptions(env) {
     sessionKey: env.ZENSU_AVR_SESSION_KEY,
     projectRoot: env.ZENSU_AVR_PROJECT_ROOT,
     workTree: env.ZENSU_AVR_WORK_TREE || '',
+    workTreeFault: evidenceRun.readWorkTreeFault(directory),
     receiptPath: env.ZENSU_AVR_RECEIPT || '',
     logPath: env.ZENSU_AVR_LOG || '',
     ac: env.ZENSU_AVR_AC,

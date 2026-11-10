@@ -29,12 +29,19 @@ const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'sess
 const ARRIVAL_KEYS = Object.freeze(['agent_id', 'arrival', 'arrived_at_ms', 'holds', 'schema', 'session_key', 'ticket']);
 const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
   .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
+const PERSONA_TYPE_RE = /^zensu-review-[A-Za-z0-9_-]+$/;
 const VERDICTS = Object.freeze(['claim', 'ended', 'none']);
 const ARRIVALS = Object.freeze(['handback', 'notification']);
 const WAIT_KINDS = Object.freeze(['consume', 'fanout']);
 const ASYNC_STATUS = 'async_launched';
 const COMPLETED_STATUS = 'completed';
 const HANDBACK_FRAME_LINE = '[Subagent hand-back]';
+const TASK_ID_LINE_RE = /^<task-id>[ \t]*([^<\s]*)[ \t]*<\/task-id>$/;
+const STATUS_LINE_RE = /^<status>[ \t]*([^<\s]*)[ \t]*<\/status>$/;
+const RESULT_OPEN = '<result>';
+const RESULT_CLOSE = '</result>';
+const RESULT_ENTITY_RE = /&(lt|gt|amp);/g;
+const RESULT_ENTITIES = Object.freeze({ lt: '<', gt: '>', amp: '&' });
 const LIMITS = Object.freeze({
   maxPayloadBytes: 8 * 1024 * 1024,
   maxRecordBytes: 16 * 1024,
@@ -111,6 +118,10 @@ function validateRecord(record, expected = {}, limits = LIMITS) {
   return headerProblem(record.header, record.ticket, limits);
 }
 
+function fanoutType(type) {
+  return FANOUT_TYPES.includes(type) || (typeof type === 'string' && PERSONA_TYPE_RE.test(type));
+}
+
 function validateFanout(entry, expected = {}) {
   if (!exactKeys(entry, FANOUT_KEYS)) return 'fanout keys';
   if (entry.schema !== SCHEMA) return 'fanout schema';
@@ -118,7 +129,7 @@ function validateFanout(entry, expected = {}) {
   if (expected.sessionKey !== undefined && entry.session_key !== expected.sessionKey) return 'fanout session mismatch';
   if (typeof entry.agent_id !== 'string' || !AGENT_ID_RE.test(entry.agent_id)) return 'fanout agent id';
   if (expected.agentId !== undefined && entry.agent_id !== expected.agentId) return 'fanout agent mismatch';
-  if (!FANOUT_TYPES.includes(entry.subagent_type)) return 'fanout subagent type';
+  if (!fanoutType(entry.subagent_type)) return 'fanout subagent type';
   if (!Number.isSafeInteger(entry.launched_at_ms) || entry.launched_at_ms < 0) return 'fanout launch time';
   return null;
 }
@@ -401,7 +412,7 @@ function recordFanout(payload, options, limits = LIMITS) {
   const sessionKey = requireSessionKey(options.sessionKey);
   if (!isPlainObject(payload)) return { recorded: false, reason: 'payload' };
   const input = isPlainObject(payload.tool_input) ? payload.tool_input : {};
-  if (!FANOUT_TYPES.includes(input.subagent_type)) return { recorded: false, reason: 'subagent-type' };
+  if (!fanoutType(input.subagent_type)) return { recorded: false, reason: 'subagent-type' };
   const response = payload.tool_response;
   if (!isPlainObject(response) || response.status !== ASYNC_STATUS) return { recorded: false, reason: 'not-async' };
   const agentId = launchAgentId(response);
@@ -445,6 +456,25 @@ function promptLines(prompt) {
   return prompt.split('\n').map((line) => line.replace(/\r$/, ''));
 }
 
+function notificationBlocks(lines) {
+  const blocks = [];
+  let block = null;
+  for (const line of lines) {
+    if (line === '<task-notification>') {
+      block = [];
+      continue;
+    }
+    if (block === null) continue;
+    if (line !== '</task-notification>') {
+      block.push(line);
+      continue;
+    }
+    blocks.push(block);
+    block = null;
+  }
+  return blocks;
+}
+
 function scanLines(lines, agentId) {
   if (!Array.isArray(lines) || typeof agentId !== 'string' || !AGENT_ID_RE.test(agentId)) {
     return { arrival: null };
@@ -457,21 +487,9 @@ function scanLines(lines, agentId) {
   }
   const idLine = new RegExp(`^<task-id>[ \\t]*${escapeRegExp(agentId)}[ \\t]*</task-id>$`);
   let status = null;
-  let block = null;
-  for (const line of lines) {
-    if (line === '<task-notification>') {
-      block = [];
-      continue;
-    }
-    if (block === null) continue;
-    if (line !== '</task-notification>') {
-      block.push(line);
-      continue;
-    }
-    const entries = block;
-    block = null;
+  for (const entries of notificationBlocks(lines)) {
     if (!entries.some((entry) => idLine.test(entry))) continue;
-    const found = entries.map((entry) => /^<status>[ \t]*([^<\s]*)[ \t]*<\/status>$/.exec(entry)).find(Boolean);
+    const found = entries.map((entry) => STATUS_LINE_RE.exec(entry)).find(Boolean);
     const value = found && STATUS_RE.test(found[1]) ? found[1] : 'unknown';
     if (value === COMPLETED_STATUS) return { arrival: 'notification', status: COMPLETED_STATUS };
     status = value;
@@ -482,6 +500,43 @@ function scanLines(lines, agentId) {
 function scanPrompt(prompt, agentId) {
   if (typeof prompt !== 'string') return { arrival: null };
   return scanLines(promptLines(prompt), agentId);
+}
+
+function handbackReports(prompt) {
+  if (typeof prompt !== 'string') return [];
+  const lines = promptLines(prompt);
+  const reports = [];
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    const open = /^<agent-message from="([^"]*)">$/.exec(lines[index]);
+    if (!open || !AGENT_ID_RE.test(open[1]) || !lines[index + 1].startsWith(HANDBACK_FRAME_LINE)) continue;
+    const close = lines.indexOf('</agent-message>', index + 2);
+    const body = lines.slice(index + 2, close === -1 ? lines.length : close);
+    const indent = (line) => /^ */.exec(line)[0].length;
+    const widths = body.filter((line) => line.trim() !== '').map(indent);
+    const strip = widths.length ? Math.min(...widths) : 0;
+    reports.push({ agentId: open[1], report: body.map((line) => line.slice(Math.min(strip, indent(line)))).join('\n') });
+    index = close === -1 ? lines.length : close;
+  }
+  return reports;
+}
+
+function notificationReports(prompt) {
+  if (typeof prompt !== 'string') return [];
+  const reports = [];
+  for (const entries of notificationBlocks(promptLines(prompt))) {
+    const id = entries.map((entry) => TASK_ID_LINE_RE.exec(entry)).find(Boolean);
+    if (!id || !AGENT_ID_RE.test(id[1])) continue;
+    const found = entries.map((entry) => STATUS_LINE_RE.exec(entry)).find(Boolean);
+    const open = entries.findIndex((entry) => entry.startsWith(RESULT_OPEN));
+    const close = open === -1 ? -1 : entries.findIndex((entry, index) => index >= open && entry.endsWith(RESULT_CLOSE));
+    const text = close === -1 ? null : entries.slice(open, close + 1).join('\n').slice(RESULT_OPEN.length, -RESULT_CLOSE.length);
+    reports.push({
+      agentId: id[1],
+      status: found && STATUS_RE.test(found[1]) ? found[1] : null,
+      report: text === null ? null : text.replace(RESULT_ENTITY_RE, (entity, name) => RESULT_ENTITIES[name]),
+    });
+  }
+  return reports;
 }
 
 function consumeRecord(file, expectedText, limits = LIMITS) {
@@ -910,11 +965,13 @@ module.exports = {
   FANOUT_KEYS,
   ARRIVAL_KEYS,
   FANOUT_TYPES,
+  PERSONA_TYPE_RE,
   VERDICTS,
   ARRIVALS,
   WAIT_KINDS,
   ENVELOPES,
   LIMITS,
+  AGENT_ID_RE,
   BackgroundReviewError,
   limitsWith,
   ttlMinutes,
@@ -928,6 +985,8 @@ module.exports = {
   recordLaunch,
   recordFanout,
   scanPrompt,
+  handbackReports,
+  notificationReports,
   consumeRecord,
   noteArrival,
   matchArrival,
