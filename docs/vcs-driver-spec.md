@@ -206,6 +206,26 @@ specified in `skills/autopilot/rules/conventions.md`.
   it as a gate. CI runs pinned builds only: a nightly drift check reads the release metadata
   of newer glab and GitLab releases without running them and files their pin lines in an
   issue. `tests/README.md` §"Live GitLab suite" holds the operator account.
+- `tests/integration/github/` — the GitHub live tier. There is no disposable GitHub, so the
+  suite runs against a dedicated sandbox repository on github.com with an installation token
+  of a GitHub App that is installed on that repository only. Each run creates its own
+  branches and pull requests, drives every verb that reaches gh with the gh builds pinned in
+  `versions.v1.json`, asserts what GitHub stored through its REST and GraphQL APIs, and
+  closes the pull requests and deletes the branches again. `.github/workflows/github-live.yml`
+  runs it for same-repository pull requests that touch the driver, nightly and on dispatch,
+  and both release stages run it as a gate. CI runs pinned builds only, with the same
+  metadata-only drift check for gh releases. `tests/README.md` §"Live GitHub suite" holds
+  the operator account.
+
+**gh floor.** The gh floor is 2.48.0. It is the first release whose `gh api` accepts
+`--slurp`, which `--fetch-threads`, `--reconcile-review` and `--review-markers` pass together
+with `--paginate` to read every page of a GraphQL connection; gh 2.47.0 refuses the flag with
+`unknown flag: --slurp`. Every other flag the driver passes (`gh pr view -R` and `--json`,
+`gh pr create --body-file`, `gh api -X`, `--input`, `-f`, `-F`) and every `gh pr view --json`
+field it reads (`number`, `url`, `state`, `title`, `body`, `headRefName`, `baseRefName`,
+`headRefOid`, `author`, `labels`, `reviewDecision`, `latestReviews`) is older: gh 2.47.0
+already lists all of these fields. The GitHub live tier pins the floor and the newest
+release, so a change that needs a newer gh fails its floor lane.
 
 ### Implementation status
 

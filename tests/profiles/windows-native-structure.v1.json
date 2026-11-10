@@ -146,6 +146,10 @@
     {
       "path": "tests/structure/test-playwright-cli-drift.sh",
       "reason": "The only native-Windows marker is the platform guard that skips the executed drift, step and mutation checks on Git Bash: the playwright-cli drift workflow runs on Ubuntu only, and those checks read their fixtures through file:// URLs and link the hooks directory into a mutant tree. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes its workflow and script checks and passes through that skip."
+    },
+    {
+      "path": "tests/structure/test-github-live-workflow.sh",
+      "reason": "The only native-Windows marker is the platform guard that skips the lane, installer, token, drift and issue checks on Git Bash: the live GitHub tier and its drift job run on Linux and macOS hosts only, and gh-install.sh refuses every other platform. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes its workflow and pin checks and passes through that skip."
     }
   ]
 }

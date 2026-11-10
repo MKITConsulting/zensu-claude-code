@@ -158,6 +158,11 @@ bash tests/integration/gitlab/run.sh                # pinned glab matrix, remove
 bash tests/integration/gitlab/run.sh --keep         # keep GitLab up for repeated runs
 bash tests/integration/gitlab/drift.sh              # pin lines of glab or GitLab releases past the pins; runs no build
 bash tests/integration/gitlab/gitlab-down.sh        # remove a kept container
+
+# Live GitHub (writes test branches and pull requests to the sandbox repository, then removes them)
+bash tests/integration/github/run.sh                # pinned gh matrix against the sandbox
+bash tests/integration/github/run.sh --gh 2.48.0    # the floor only
+bash tests/integration/github/drift.sh              # pin lines of a gh release past the pins; runs no build
 ```
 
 ## Live GitLab suite
@@ -197,6 +202,45 @@ reads `N PASS / M FAIL / K XFAIL`.
   `ZENSU_GITLAB_IT_PORT`, `ZENSU_GITLAB_IT_MEMORY` (default `4g`),
   `ZENSU_GITLAB_IT_BOOT_SECONDS`, `ZENSU_GITLAB_IT_KEEP=1` (keep the seeded project) and
   `ZENSU_GITLAB_IT_LIB` (run another driver file, for a mutation or bisect run).
+
+## Live GitHub suite
+
+`tests/integration/github/` does the same for the GitHub path. There is no disposable GitHub, so
+it writes to one sandbox repository on github.com through a GitHub App that is installed on that
+repository only. `run.sh` checks that the credentials are configured, installs each gh version
+pinned in `versions.v1.json` (sha256 per platform: the floor 2.48.0 and the newest release),
+mints a one-hour installation token per version and runs `test-vcs-github-live.sh`, then revokes
+the token. Each run seeds its own branches under `zensu-it/<epoch>-<hex>/` and two pull requests,
+drives every verb that reaches gh (`--detect`, `--post-review`, `--fetch-threads`,
+`--resolve-thread`, `--reconcile-review`, `--diff-refs`, `--pr-state`, `--scout-pr`,
+`--locate-pr`, `--review-markers`, `--review-summary` and `--open-pr`), asserts what GitHub stored
+through its REST and GraphQL APIs, and closes its pull requests and deletes its branches at the
+end, also after a failure. The next run removes what a killed run left behind once it is older
+than six hours.
+
+- **Setup, done once by the repository owner.** A private sandbox repository with an initial
+  README, Actions disabled and no branch protection; a GitHub App without a webhook, with
+  Contents and Pull requests write, installed on that repository only; its private key. Local
+  runs read `~/.config/zensu-github-it/app-id`, `private-key.pem` (mode 0600, refused otherwise)
+  and `repo` (`owner/name`). CI reads the repository secret `ZENSU_GITHUB_IT_APP_KEY` and the
+  repository variables `ZENSU_GITHUB_IT_APP_ID` and `ZENSU_GITHUB_IT_REPO`. The suite fails before
+  its first write when GitHub reports that repository as not private.
+- **Credentials.** The token is limited to the sandbox repository and to contents and pull
+  request rights, lives only in the state directory (mode 0700, files 0600), reaches gh through
+  `GH_TOKEN`, is masked inside GitHub Actions and is revoked after each version. Nothing prints
+  the key or the token.
+- **Where it runs.** Same-repository pull requests that touch `hooks/lib/zensu-vcs.sh`, this
+  directory or the workflow run the pinned lane; fork and Dependabot pull requests get no
+  secret and skip it with a notice. The required check is the `GitHub live result` job. A
+  nightly run repeats the pinned lane and reports red in the issue labelled `github-live`. Both
+  release stages run the pinned matrix as a gate.
+- **Only pinned builds run in CI.** The nightly drift job reads the newest gh release and its
+  vendor checksums, installs nothing, and keeps the issue labelled `github-live-drift` in step
+  with the pins.
+- **Knobs.** `ZENSU_GITHUB_IT_CACHE` (gh builds, state and lock), `ZENSU_GITHUB_IT_CONFIG` (the
+  local credential directory), `ZENSU_GITHUB_IT_VERSIONS` (another pin file), `ZENSU_GITHUB_IT_KEEP=1`
+  (keep the run's pull requests and branches for inspection; close them by hand afterwards) and
+  `ZENSU_GITHUB_IT_LIB` (run another driver file).
 
 ## Conventions
 

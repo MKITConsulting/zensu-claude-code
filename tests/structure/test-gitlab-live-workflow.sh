@@ -97,13 +97,15 @@ for (const [file, step] of Object.entries(extracted)) fs.writeFileSync(`${work}/
 const driftRuns = steps(jobs.drift).filter((step) => has(step, 'run'));
 const driftUses = steps(jobs.drift).filter((step) => has(step, 'uses')).map((step) => String(step.uses).split('@')[0]);
 const PREPARE_IF = "${{ !cancelled() && !inputs.dry_run && needs.prepare-commit.result == 'success'"
-  + " && ((needs.prepare-suite.result == 'success' && needs.prepare-gitlab-live.result == 'success')"
-  + " || (inputs.skip_test_gate && needs.prepare-suite.result == 'skipped' && needs.prepare-gitlab-live.result == 'skipped')) }}";
+  + " && ((needs.prepare-suite.result == 'success' && needs.prepare-gitlab-live.result == 'success'"
+  + " && needs.prepare-github-live.result == 'success')"
+  + " || (inputs.skip_test_gate && needs.prepare-suite.result == 'skipped' && needs.prepare-gitlab-live.result == 'skipped'"
+  + " && needs.prepare-github-live.result == 'skipped')) }}";
 const PUBLISH_IF = "${{ !cancelled() && needs.publish-plan.result == 'success'"
   + " && ((needs.publish-plan.outputs.gate == 'run' && needs.publish-suite.result == 'success'"
-  + " && needs.publish-gitlab-live.result == 'success')"
+  + " && needs.publish-gitlab-live.result == 'success' && needs.publish-github-live.result == 'success')"
   + " || (needs.publish-plan.outputs.gate == 'skipped' && needs.publish-suite.result == 'skipped'"
-  + " && needs.publish-gitlab-live.result == 'skipped')) }}";
+  + " && needs.publish-gitlab-live.result == 'skipped' && needs.publish-github-live.result == 'skipped')) }}";
 const NOTIFY_IF = "always() && github.event_name == 'schedule' && (needs.result.result != 'success'"
   + " || needs.drift.result != 'success' || needs.drift-issue.result != 'success')";
 const prepareEvidence = stepNamed(rjobs.prepare, 'Record deterministic exact-commit runtime evidence');
