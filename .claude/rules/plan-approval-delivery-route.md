@@ -36,6 +36,33 @@ only mode-dependent text is `(S)`'s status-line example, option (2) and the work
 Rationale this file carries gets at most one sentence in the directive: put the rest here, not in the
 heredocs. Version `patch`: the hook still emits only `additionalContext`.
 
+**Option (2) names its cost, like option (1).** It used to say "no prerequisites" while the
+chain cannot close before a full-suite run and a live check of every acceptance criterion
+(`evidence.fullSuiteGate` and `evidence.acceptanceGate`, both `required` by default) and the
+Stop hook holds the turn until the review chain closes; the option is usually ranked first and
+marked recommended, so a newcomer agreed to costs nobody named (newcomer audit 2026-10-18,
+P1-7). Its description now states that the turn waits for the review chain and, by default,
+for the full-suite run and the live acceptance check, names both keys, and names
+`/zensu:full-suite` as the way to leave the suite to the pull-request pipeline. That wording
+says "PR pipeline", never "CI": `D13` reads `\bCI\b` in the question block as unattended-run
+vocabulary, and the cost text must not weaken that grader. `D15b` pins the statement inside
+option (2) of both heredocs. The room came from the text itself, not from `D44`'s ceiling: the
+rationale after "never record it with --direct yourself", the repeated "The user changes a
+recorded route" sentence, "and in most cases ASK the user" (the question sentence already says
+so), the lead-in of the human-present sentence, which now opens with "The field's", and the
+vanilla option's cause clause went. Measured with `D44`'s method, the vanilla directive grows
+from 8,962 to 8,986 and the strict one from 8,826 to 8,960, because strict had no cause clause
+to trim.
+
+**An affirmation that asks for TDD runs that one chain strict.** The affirmation arm of `(B)`
+ensures the specification carries exactly one `TDD-MODE: strict` line and uses the status line
+`Executing via /zensu:build (strict TDD requested)` when the approval message asks for TDD;
+any other affirmation of the Zensu workflow takes the arm as it stands. The sub-arm sits
+inside the `P1b6` span, so it is byte-identical in both heredocs, and in strict mode it is a
+no-op escalation. `D15d` pins it in both heredocs after the refusal arm and before the
+implement-directly fallthrough. The reason and the rank it uses are in
+`.claude/rules/tdd-mode-precedence.md`.
+
 **The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
 `<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
 route or workflow question": Autopilot has spent its single planning gate by then, and a second
@@ -393,8 +420,9 @@ as the real one. It prints one notice instead: carry the plan
 out with that skill, say in one line that Zensu asked no route question, and name `/zensu:build` as
 the way to run the plan under the Zensu workflow. The approval message still wins as it does under
 (B): a request, not a mere mention, for `/zensu:build` or the Zensu workflow, `/zensu:autopilot` or
-`/zensu:pilot` dispatches that route with the input its arm names, and a refused route is never
-taken. Offering the two outward-facing routes there is safe because the notice fires only while
+`/zensu:pilot` dispatches that route with the input its arm names, a request for TDD takes
+`/zensu:build` with exactly one `TDD-MODE: strict` line in the specification, and a refused route
+is never taken. Offering the two outward-facing routes there is safe because the notice fires only while
 the field reads `yes`, the one value under which (B) keeps them. The notice is a `printf` of a JSON object built
 in node, never a third heredoc, so `R12` and the parity helper still count two.
 
