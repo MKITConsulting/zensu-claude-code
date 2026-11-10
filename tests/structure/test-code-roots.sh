@@ -215,10 +215,12 @@ CONTROL_OUT="$(LC_ALL=C HOME="$FAULT_HOME" XDG_CONFIG_HOME="$FAULT_HOME/xdg" GIT
   git -C "$FOLDER/svc" status --porcelain 2>&1)"; CONTROL_RC=$?
 [ "$CONTROL_RC" -ne 0 ] && printf '%s\n' "$CONTROL_OUT" | grep -qi 'dubious ownership'
 check "A14-control real git refuses the code root under the assumed different owner" "$(verdict $?)"
-[ "$FAULT_RC" -eq 2 ] && [ ! -e "$WORK/fault-receipt.json" ] \
+[ "$FAULT_RC" -eq 2 ] && [ -f "$WORK/fault-receipt.json" ] \
+  && grep -qF '"clean":false' "$WORK/fault-receipt.json" \
+  && grep -qF '"auditFailure":"The latest audit did not complete because git failed' "$WORK/fault-receipt.json" \
   && printf '%s\n' "$FAULT_OUT" | grep -F 'EDIT LANDING AUDIT FAULT —' | grep -qF "$FOLDER/svc" \
   && ! printf '%s\n' "$FAULT_OUT" | grep -qE '^EDIT (NOT )?LANDED'
-check "A14 a git fault in a code root names that root, grades nothing and writes no receipt" "$(verdict $?)"
+check "A14 a git fault in a code root names that root, grades nothing and leaves only a nonclean receipt" "$(verdict $?)"
 
 INV_LOG="$WORK/inventory.log"
 {
