@@ -24,6 +24,7 @@ const VERB_ALIASES = Object.freeze({
 const GROUPS = Object.freeze({
   work: Object.freeze(['policy', 'repositories']),
   plan: Object.freeze(['followup']),
+  wiki: Object.freeze(['images']),
 });
 
 const NOUN_LOOKUP = new Map([...NOUNS.map((noun) => [noun, noun]), ...Object.entries(NOUN_ALIASES)]);

@@ -44,7 +44,7 @@ session banner, `/zensu:setup` and the work-order refusal in `probe()` of
 `cli_unavailable` and `cli_incompatible` guidance takes the install commands and
 `INSTALL.homebrewUpgrade` from it and names the plugin's install guide by absolute path. Every prose copy
 — README Install and Requirements, the `docs/operations.md` troubleshooting row, the §Update block
-of `docs/cli-install-update.md`, the six skill prerequisites, `/zensu:setup`, the banner's literals
+of `docs/cli-install-update.md`, the seven skill prerequisites, `/zensu:setup`, the banner's literals
 and `docs/work-order-mode.md` — is pinned to it by `P10a`-`P10e` in
 `tests/structure/test-setup-skill.sh`. **Raising the floor is three edits, not one:** the constant,
 a new `FLOOR_REASON` that names what the releases below the new floor get wrong, and the prose
@@ -106,7 +106,7 @@ sits on the shrink-only allowlist of `tests/structure/test-skill-text-budget.sh`
 so the skill carries only a pointer to the reference. `P8z15` holds every row phrase against the
 report and the reference, and the pointer against the skill.
 
-**ghost-scan is the exception among the six skills.** Its body sits on the same allowlist at its
+**ghost-scan is the exception among the seven skills.** Its body sits on the same allowlist at its
 exact size, so its prerequisite line keeps the old line's length and names the floor and
 `/zensu:doctor` instead of the commands. Moving detail from that body into `references/` is what
 would make room for the full line.

@@ -20,11 +20,11 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 - User asks about plugin internals: agents, hooks, FSM, auto-fix loop, the `zensu` CLI write-gate
 - User asks about Zensu concepts: features, KEY-N ids, tiers, journeys, classifications
 - User asks "what changed in version X" or "how do I disable hook Y"
-- User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `implement` vs `verify-feature` vs `cover`) applies to their situation
+- User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `change` vs `implement` vs `verify-feature` vs `cover`) applies to their situation
 
 ## Do NOT Use For
 
-- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, `/zensu:verify-feature`, `/zensu:cover`, `/zensu:security-review`, `/zensu:pulse`, `/zensu:reset-review-limit`, `/zensu:recover-chain`
+- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:change`, `/zensu:implement`, `/zensu:verify-feature`, `/zensu:cover`, `/zensu:security-review`, `/zensu:pulse`, `/zensu:reset-review-limit`, `/zensu:recover-chain`
 - Modifying Zensu data — this skill is read-only Q&A
 
 ## Prerequisites
@@ -45,13 +45,13 @@ None. This skill answers from embedded knowledge and the plugin's own canonical 
 
 ## Three Layers (embedded — architecture overview)
 
-1. **Planning** (main-thread skills) — `/zensu:bootstrap` (greenfield: a plan/vision doc, no code yet) or `/zensu:ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built, then create the plan's not-yet-built items as `planned` features. The interactive agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built?
+1. **Planning** (main-thread skills) — `/zensu:bootstrap` (greenfield: a plan/vision doc, no code yet) or `/zensu:ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built; its Phase 6 creates the plan's not-yet-built items as `planned` features inside its own window, and a plan item added later goes through `/zensu:change`. The interactive agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built? One change to a product that is already tracked, such as a new feature, a roadmap entry, a tier or a deprecation, skips the triage and runs through `/zensu:change`.
 2. **Implementation** (`/zensu:build` skill in the MAIN thread + read-only reviewer panel) — vanilla implementation is the default; setting `hooks.tddImplementation:true` enables strict RED→IMPL→GREEN FSM-gated edits. Both modes keep the Phase 5/6 evidence audits and review chain: parallel `zensu:review-aspect` agents (three by default, five with `hooks.reviewPanel: full`), the optional `zensu:review-judge` second pass (default on; on the lean panel for the first review only, and on any review the `Stop` hook resumes), then one consume-mode `zensu:code-reviewer`, an auto-fix loop, and terminal self-review, all backed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 implementation runs in the main agent rather than a `tdd-manager` subagent.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
 ## Agents (embedded — one-liners)
 
-- `zensu-plm` — optional read-only planning analyst; it recommends a skill but never performs mutations. The interactive main thread runs bootstrap, ghost-scan, security review, and release-readiness workflows.
+- `zensu-plm` — optional read-only planning analyst; it recommends a skill but never performs mutations. The interactive main thread runs bootstrap, ghost-scan, single changes, security review, and release-readiness workflows.
 - `review-aspect` — READ-ONLY instances run in parallel, one per panel perspective: correctness, design and security by default, or conventions, bugs, architecture, tests and security with `hooks.reviewPanel: full`.
 - `review-judge` — optional READ-ONLY second pass over the merged panel findings; enabled by default.
 - `code-reviewer` — one READ-ONLY consume-mode subagent that consolidates the panel + judge findings and triggers the auto-fix hook.
@@ -71,6 +71,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Config resolution order, `ZENSU_CONFIG` precedence | `${CLAUDE_PLUGIN_ROOT}/docs/configuration.md` § Config Resolution Order |
 | Environment variables and native placeholders (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_FULL_SUITE_GATE`, `ZENSU_ACCEPTANCE_GATE`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR`, `CLAUDE_ENV_FILE`) | `${CLAUDE_PLUGIN_ROOT}/docs/configuration.md` § Claude Environment and Native Placeholders |
 | The write gates (CLI write-gate, source-write gate, secret scan, TDD phase gate) | `${CLAUDE_PLUGIN_ROOT}/docs/gates.md` |
+| One change to tracked state (a new feature, a roadmap entry, a tier, a link, a deprecation or a merge), and which skill a CLI write-gate deny names for a `zensu` command | `${CLAUDE_PLUGIN_ROOT}/skills/change/SKILL.md` + `${CLAUDE_PLUGIN_ROOT}/skills/change/references/commands.md` + `${CLAUDE_PLUGIN_ROOT}/docs/gates.md` § CLI Write-Gate |
 | Subagent safety, Session Control principals, unbindable sessions | `${CLAUDE_PLUGIN_ROOT}/docs/session-control.md` |
 | The review agents, custom repo personas, skill overlays, templates | `${CLAUDE_PLUGIN_ROOT}/docs/review-chain.md` |
 | TDD FSM details, phase transitions, gate logic, four-channel logging | `${CLAUDE_PLUGIN_ROOT}/docs/build-workflow.md` |

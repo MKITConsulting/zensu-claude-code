@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`/zensu:change`**: a new skill makes one change a user asks for in a tracked product: a new
+  feature, subfeature or revision, a roadmap, milestone or roadmap entry, a tier or tier
+  assignment, a journey or journey step, a mock, a link, a classification, a deprecation, split,
+  merge or promotion, a decision on one Ghost candidate, a wiki page or image, or a repository
+  import. It checks for a duplicate through a list read before every create, asks before a
+  command that removes or replaces data (`features deprecate`, `features merge`,
+  `features split`, `subfeatures promote`, `roadmap delete`, `roadmap milestone-delete`,
+  `journeys step-delete`, and `tiers set-feature` when it drops or changes an assignment), and
+  gives a new feature its priority, a Markdown description and a security classification. The
+  intent router, the session banner and primer, `/zensu:zensu-help`, the `zensu-plm` agent and the
+  README route a single change there; onboarding stays with `/zensu:bootstrap` and
+  `/zensu:ghost-scan`, and a decision the person makes stays with the person.
+- **CLI write-gate routes**: every `zensu` mutation an agent may run now has a skill window, and
+  a deny names the skills that route the blocked command instead of the same four skills for every
+  command. A denied `zensu features create` names `/zensu:change`, `/zensu:bootstrap` and
+  `/zensu:ghost-scan`, and the sixteen commands that no skill window declared before (every
+  roadmap write, `features deprecate` and `features merge`, `subfeatures promote`, `ghost approve`
+  and `ghost reject`, `journeys step-update` and `journeys step-delete`, `mocks create` and
+  `products import`) name `/zensu:change`. Structure checks fail the build on such a mutation
+  without a window or without a route, and a drift test fails on a command, a group alias or a
+  verb alias of the recorded zensu-cli 0.15.0 command tree that the gate does not read. Upgrade
+  note: `zensu wiki images upload` is now a gated mutation (`upload_wiki_image`), which the
+  released gate did not know and let through; run it inside `/zensu:change`.
+  `zensu wiki images policy` stays a read.
+
 ### Upgrade notes
 
 - **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill

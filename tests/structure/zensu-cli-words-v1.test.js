@@ -101,17 +101,18 @@ test('a group is a verb whose third word picks the command, under either spellin
   assert.deepEqual(Object.fromEntries(Object.entries(words.GROUPS).map(([noun, verbs]) => [noun, [...verbs]])), {
     work: ['policy', 'repositories'],
     plan: ['followup'],
+    wiki: ['images'],
   });
-  for (const [noun, verb] of [['work', 'policy'], ['work', 'repositories'], ['work', 'repos'], ['plan', 'followup']]) {
+  for (const [noun, verb] of [['work', 'policy'], ['work', 'repositories'], ['work', 'repos'], ['plan', 'followup'], ['wiki', 'images']]) {
     assert.equal(words.isGroup(noun, verb), true, `${noun} ${verb}`);
   }
-  for (const [noun, verb] of [['plan', 'followups'], ['work', 'list'], ['work', ''], ['features', 'policy'], ['plan', 'repos'], ['', ''], ['work', undefined]]) {
+  for (const [noun, verb] of [['plan', 'followups'], ['work', 'list'], ['work', ''], ['features', 'policy'], ['plan', 'repos'], ['wiki', 'image'], ['wiki', 'list'], ['', ''], ['work', undefined]]) {
     assert.equal(words.isGroup(noun, verb), false, `${noun} ${verb}`);
   }
 });
 
 test('the tables are frozen, so no caller can widen or narrow the rule', () => {
-  for (const table of [words.NOUNS, words.NOUN_ALIASES, words.VERB_ALIASES, words.VERB_ALIASES.work, words.GROUPS, words.GROUPS.work, words.GROUPS.plan]) {
+  for (const table of [words.NOUNS, words.NOUN_ALIASES, words.VERB_ALIASES, words.VERB_ALIASES.work, words.GROUPS, words.GROUPS.work, words.GROUPS.plan, words.GROUPS.wiki]) {
     assert.ok(Object.isFrozen(table));
   }
   assert.throws(() => { words.NOUN_ALIASES.wo = 'work'; }, TypeError);

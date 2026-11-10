@@ -622,6 +622,62 @@ else
   check "fixture installer rejects tracked symlinks before any external write" FAIL
 fi
 
+seed_marketplace_source() {
+  local dir="$1" marketplace="$2"
+  mkdir -p "$dir/.claude-plugin" "$dir/hooks"
+  git -C "$dir" init -q
+  git -C "$dir" config user.name 'Versioned Upgrade Test'
+  git -C "$dir" config user.email 'versioned-upgrade@zensu.invalid'
+  git -C "$dir" config core.hooksPath \
+    "$(case "$(uname -s 2>/dev/null)" in (MINGW*|MSYS*|CYGWIN*) printf NUL ;; (*) printf /dev/null ;; esac)"
+  printf '%s\n' '{"name":"zensu","version":"0.16.1"}' > "$dir/.claude-plugin/plugin.json"
+  printf '%s\n' "$marketplace" > "$dir/.claude-plugin/marketplace.json"
+  printf '%s\n' '#!/bin/bash' 'exit 0' > "$dir/hooks/example.sh"
+  git -C "$dir" add .
+  git -C "$dir" -c commit.gpgsign=false commit -qm 'test: seed marketplace source'
+}
+
+MARKETPLACE_ZENSU_ENTRY='{"name":"zensu","source":{"source":"github","repo":"MKITConsulting/zensu-claude-code","ref":"v0.16.1"},"version":"0.16.1"}'
+MARKETPLACE_SECOND_ENTRY='{"name":"session-hub","source":{"source":"git-subdir","url":"https://github.com/MKITConsulting/zensu-claude-code.git","path":"plugins/session-hub","ref":"session-hub--v1.0.0"},"version":"1.0.0"}'
+
+MULTI_SOURCE="$TMP/multi-entry-source"
+seed_marketplace_source "$MULTI_SOURCE" \
+  "{\"name\":\"zensu\",\"plugins\":[$MARKETPLACE_SECOND_ENTRY,$MARKETPLACE_ZENSU_ENTRY]}"
+MULTI_REVISION="$(git -C "$MULTI_SOURCE" rev-parse HEAD)"
+if MULTI_RUNTIME="$(
+    node "$INSTALL_FIXTURE" "$MULTI_SOURCE" "$TMP/multi-entry-cache" 0.17.0 "$MULTI_REVISION" 2>/dev/null
+  )" \
+    && node -e '
+      const fs = require("node:fs");
+      const [sourceFile, installedFile] = process.argv.slice(1);
+      const source = JSON.parse(fs.readFileSync(sourceFile, "utf8"));
+      const installed = JSON.parse(fs.readFileSync(installedFile, "utf8"));
+      const names = installed.plugins.map((entry) => entry.name).join(",");
+      const zensu = installed.plugins.filter((entry) => entry.name === "zensu");
+      const unchanged = JSON.stringify(installed.plugins[0]) === JSON.stringify(source.plugins[0]);
+      process.exit(names === "session-hub,zensu" && zensu.length === 1
+        && zensu[0].version === "0.17.0" && zensu[0].source.ref === "v0.17.0" && unchanged ? 0 : 1);
+    ' "$MULTI_SOURCE/.claude-plugin/marketplace.json" "$MULTI_RUNTIME/.claude-plugin/marketplace.json"; then
+  check "fixture installer bumps only the zensu entry of a marketplace that lists a git-subdir entry ahead of it" PASS
+else
+  check "fixture installer bumps only the zensu entry of a marketplace that lists a git-subdir entry ahead of it" FAIL
+fi
+
+DUPLICATE_SOURCE="$TMP/duplicate-entry-source"
+DUPLICATE_CACHE_PARENT="$TMP/duplicate-entry-cache"
+DUPLICATE_ERR="$TMP/duplicate-entry-installer.err"
+seed_marketplace_source "$DUPLICATE_SOURCE" \
+  "{\"name\":\"zensu\",\"plugins\":[$MARKETPLACE_ZENSU_ENTRY,$MARKETPLACE_ZENSU_ENTRY]}"
+DUPLICATE_REVISION="$(git -C "$DUPLICATE_SOURCE" rev-parse HEAD)"
+if ! node "$INSTALL_FIXTURE" "$DUPLICATE_SOURCE" "$DUPLICATE_CACHE_PARENT" 0.17.0 \
+    "$DUPLICATE_REVISION" >/dev/null 2>"$DUPLICATE_ERR" \
+    && grep -Fq 'marketplace fixture does not contain the exact plugin entry' "$DUPLICATE_ERR" \
+    && [ -z "$(ls -A "$DUPLICATE_CACHE_PARENT" 2>/dev/null)" ]; then
+  check "fixture installer refuses a marketplace with two zensu entries and leaves no runtime root" PASS
+else
+  check "fixture installer refuses a marketplace with two zensu entries and leaves no runtime root" FAIL
+fi
+
 # This offline structure test materializes both roots from the COMMITTED revision:
 # `ROOT_REVISION` captures `git rev-parse HEAD` above and the install fixture reads
 # the tree with `git ls-tree`. (No line number here on purpose — the previous wording
@@ -765,7 +821,7 @@ if runtime_roots_are_safe \
     && [ "$EXISTING_BEFORE" = "$EXISTING_AFTER" ] \
     && [ "$(node -p 'require(process.argv[1]).version' "$SYNTHETIC_EXISTING_ROOT/.claude-plugin/plugin.json")" = 0.16.1 ] \
     && [ "$(node -p 'require(process.argv[1]).version' "$SYNTHETIC_CANDIDATE_ROOT/.claude-plugin/plugin.json")" = 0.17.0 ] \
-    && [ "$(node -p 'require(process.argv[1]).plugins[0].source.ref' "$SYNTHETIC_CANDIDATE_ROOT/.claude-plugin/marketplace.json")" = v0.17.0 ]; then
+    && [ "$(node -p 'require(process.argv[1]).plugins.find((entry) => entry.name === "zensu").source.ref' "$SYNTHETIC_CANDIDATE_ROOT/.claude-plugin/marketplace.json")" = v0.17.0 ]; then
   check "synthetic runtimes occupy distinct unpredictable immutable roots" PASS
 else
   check "synthetic runtimes occupy distinct unpredictable immutable roots" FAIL
