@@ -811,8 +811,9 @@ process.stdout.write('EXPECTED_FAIL_CLOSED:'+fault+'\\n');
     path.join(source, '.claude-plugin', 'marketplace.json'),
     'utf8',
   ));
-  releaseMarketplace.plugins[0].version = '0.17.0';
-  releaseMarketplace.plugins[0].source.ref = 'v0.17.0';
+  const releaseEntry = releaseMarketplace.plugins.find((entry) => entry.name === 'zensu');
+  releaseEntry.version = '0.17.0';
+  releaseEntry.source.ref = 'v0.17.0';
   write('.claude-plugin/marketplace.json', `${JSON.stringify(releaseMarketplace)}\n`);
   git(['add', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json']);
   git(['-c', 'commit.gpgsign=false', 'commit', '-qm', 'test: exercise a non-synthetic candidate version']);

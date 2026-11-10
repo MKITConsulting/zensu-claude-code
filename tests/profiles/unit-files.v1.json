@@ -235,9 +235,9 @@
       "summary": "The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root."
     },
     {
-      "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 13,
+      "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 17,
       "runs": [{ "driver": "tests/structure/test-session-hub-receipt.sh" }],
-      "summary": "The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields."
+      "summary": "The companion's Session Hub takeover receipt entry: the command token, the refused prompt shapes, the receipt fields, the config switch, the principal and plugin-root guards and the hook entry."
     },
     {
       "path": "tests/structure/session-lineage-v1.test.js", "registered": 78, "skips": {"root": 2, "win32": 17},
@@ -331,14 +331,15 @@
       "summary": "Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable."
     },
     {
-      "path": "tests/structure/worktree-advice-v1.test.js", "registered": 66, "skips": {"win32": 2},
+      "path": "tests/structure/worktree-advice-v1.test.js", "registered": 67, "skips": {"win32": 2},
       "guards": [
         "the briefShellArg carrier population is derived, and a twelfth carrier fails here",
+        "the companion's briefShellArg carrier population is derived, and a sixth carrier fails here",
         "the create route and the move alternative are not in the same paste unit",
         "the move alternative states its stop condition before the command"
       ],
       "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
-      "summary": "The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative."
+      "summary": "The companion's session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative, plus the briefShellArg carrier census of both trail.mjs copies."
     },
     {
       "path": "tests/structure/worktree-keep-v1.test.js", "registered": 102,

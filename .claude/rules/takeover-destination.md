@@ -1,8 +1,11 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/SKILL.md"
+  - "plugins/session-hub/skills/session-trail/SKILL.md"
   - "skills/session-trail/references/**"
+  - "plugins/session-hub/skills/session-trail/references/**"
   - "tests/structure/worktree-advice-v1.test.js"
   - "tests/structure/test-session-trail-verdict.sh"
   - "tests/structure/test-session-trail-skill.sh"

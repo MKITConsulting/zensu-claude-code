@@ -47,7 +47,10 @@ umask 022
 # machine's sessions.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TRAIL_MJS="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+HUB_SKILL_DIR="$PLUGIN_DIR/plugins/session-hub/skills/session-trail"
+HUB_TRAIL_MJS="$HUB_SKILL_DIR/scripts/trail.mjs"
+PLM_TRAIL_MJS="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+TRAIL_MJS="$HUB_TRAIL_MJS"
 
 PASS=0; FAIL=0; SKIP=0
 check() {
@@ -1017,7 +1020,7 @@ v11g_carrier() { # <label> <body>
 # placeholders, and `continuationPlan`'s further down through `cont.lines`. Matching the whole
 # body meant the first one could be deleted and the second would satisfy every needle, so the
 # arm's bite depended on which branch `continuationPlan` happened to take in this fixture. The
-# slice is the WHERE block: from the advice head down to the WRITES section that follows it.
+# slice is the WHERE block: from the advice head down to the prompt timeline that follows it.
 #
 # THE TERMINATOR IS ASSERTED, not assumed. `[ -z "$SHOW_ADVICE" ]` alone could not see the
 # failure this slice exists to prevent: with no `^WRITES` line the awk runs to EOF, the slice
@@ -1034,17 +1037,17 @@ v11g_carrier() { # <label> <body>
 # so hoisting `writesLines(w)` above the WHERE block kept it green, ran the slice to EOF, and
 # restored exactly the vacuity this control was added to close. The offset comparison is the
 # instrument `L70m` already uses for the same class of question.
-SHOW_ADVICE="$(printf '%s\n' "$SHOW_MD" | awk '/^WHERE /{f=1} f && /^WRITES/{exit} f{print}')"
+SHOW_ADVICE="$(printf '%s\n' "$SHOW_MD" | awk '/^WHERE /{f=1} f && /^--- PROMPT TIMELINE ---/{exit} f{print}')"
 V11G_WHERE_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^WHERE ' | head -1 | cut -d: -f1)"
-V11G_WRITES_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^WRITES' | head -1 | cut -d: -f1)"
+V11G_WRITES_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^--- PROMPT TIMELINE ---' | head -1 | cut -d: -f1)"
 if [ -z "$SHOW_ADVICE" ]; then
   check "V11g-control the WHERE block could not be sliced out of show, so the show arm is vacuous" FAIL
 elif [ -z "$V11G_WRITES_AT" ]; then
-  check "V11g-control show renders no ^WRITES head, so the WHERE slice ran to EOF and the show arm is vacuous" FAIL
+  check "V11g-control show renders no prompt-timeline head, so the WHERE slice ran to EOF and the show arm is vacuous" FAIL
 elif [ -z "$V11G_WHERE_AT" ]; then
   check "V11g-control show renders no ^WHERE head, so the slice has no anchor and the show arm is vacuous" FAIL
 elif [ "$V11G_WRITES_AT" -le "$V11G_WHERE_AT" ]; then
-  check "V11g-control the WRITES head does not follow the WHERE head (where@$V11G_WHERE_AT writes@$V11G_WRITES_AT), so the slice ran to EOF and the show arm is vacuous" FAIL
+  check "V11g-control the prompt-timeline head does not follow the WHERE head (where@$V11G_WHERE_AT timeline@$V11G_WRITES_AT), so the slice ran to EOF and the show arm is vacuous" FAIL
 fi
 v11g_carrier TAKEOVER_MD "$TAKEOVER_MD"
 v11g_carrier HANDOFF_MD "$HANDOFF_MD"
@@ -2572,6 +2575,7 @@ CLOCK_IDLE="$(field aaaaaaaa-0000-0000-0000-000000000001 takeover.idleMin)"
 # `canonicalDir` and both sides keep their lexical spelling — which is why W1b
 # exists: without a spelling-divergent pair nothing here would fail if the
 # normalization were deleted.
+TRAIL_MJS="$PLM_TRAIL_MJS"
 WT_A="$FAKE/work/wt-aaaaaaaa"
 SID_A=aaaaaaaa-0000-0000-0000-000000000001
 
@@ -2605,10 +2609,11 @@ writes_block() { grep -E -A4 '^WRITES' || true; }
 # at once. `bash-source-write-parse.js` is deliberately NOT staged, because W22's whole
 # subject is that gate being absent.
 mutant_path() { # <tag> -> path to place the mutated trail.mjs at
-  local d="$FAKE/mut-$1/skills/session-trail/scripts"
+  local d="$FAKE/mut-$1/skills/session-trail/scripts" src="${TRAIL_MJS%/*}"
+  local lib="$src/../../../hooks/lib"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
-  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
+  cp "$src/session-lineage-v1.mjs" "$src/linked-sessions-v1.mjs" "$d/" 2>/dev/null
+  cp "$lib/claude-path-v1.js" "$lib/git-environment-v1.js" "$lib/worktree-keep-v1.js" "$lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
 
@@ -2985,6 +2990,7 @@ else
   check "W7b brief structural invariants:$W7B_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 W7C_BAD=""
 W7C_CAUTION="$(node -e 'const s=require("fs").readFileSync(process.argv[1],"utf8");const m=s.match(/^const BRIEF_DATA_CAUTION = \x27((?:[^\x27\\]|\\.)*)\x27;$/m);process.stdout.write(m?m[1].replace(/\\(.)/g,"$1"):"")' "$TRAIL_MJS")"
 [ -n "$W7C_CAUTION" ] || W7C_BAD="$W7C_BAD caution-constant-not-extracted"
@@ -3011,6 +3017,7 @@ else
   check "W7c rendered data caution:$W7C_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W8 — the write-anchor caution BOUNDS its transcript-derived path. The brief is
 # persisted and read by an instance that need not have this skill loaded, so a
 # newline in the worktree path could fabricate a line — including this brief's own
@@ -3099,6 +3106,7 @@ else
   check "W8 write-anchor caution bounding:$W8_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W8b — `show`'s own path lines. `flatPath` bounds them, and nothing exercised it:
 # the only fixture carrying a newline in its path was driven through the two BRIEF
 # renderers alone, so deleting the strip left both suites green while a transcript
@@ -3270,6 +3278,7 @@ else
   check "W9 runnable cd quoting:$W9_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W10 — `CLAUDE_PROJECT_DIR` is not the anchor the gate compares, so it may never
 # produce an "allowed". `hooks/lib/claude-hook-session-v1.js` reads that variable
 # only as the LAST RESORT when no Session Control record exists — the header over
@@ -3455,6 +3464,7 @@ else
   check "W12 brief control-class bound:$W12_BAD (head='$(printf '%s' "$W12_BRIEF" | head -3 | tr -d '\033' | tr '\n' '/')')" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W13 — the desktop store's account UUID, on `list`'s `appTag` row and `show`'s
 # OWNER row. `appTag` used `oneLine(app.instance, 8)`, which got BOTH halves wrong:
 # `oneLine` then collapsed `/\s+/` only, so a CSI sequence survived into a row a
@@ -3507,6 +3517,7 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
   fi
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W14 — `canonicalDir`'s two normalization decisions, neither of which any probe
 # reached. The arms are of different kinds and the labels say which is which.
 #
@@ -3587,6 +3598,7 @@ else
   check "W14b filesystem-root guard:$W14B_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # (c) The win32 drive root, on ANY host. `trimDir` is extracted from the source and
 # evaluated against `path.win32`, so the guard the POSIX arm cannot discriminate —
 # `path.parse(p).root === p` versus the `p.length > 1` spelling it replaced — is
@@ -3611,6 +3623,7 @@ else
   check "W14c win32 drive-root guard: $W14C" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # (d) MIXED canonicalization: the anchor EXISTS, the target does not. Every other
 # fixture in this block leaves both absent, so both keep their lexical spelling and
 # the namespace split cannot show. Under a per-operand canonicalization the real
@@ -3643,6 +3656,7 @@ else
   skip "W14d mixed-canonicalization arm (could not create the anchor directory)"
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W16 — `resumedUntil`, the one bound on `stopCause` that was executed but never
 # OBSERVED. It renders in exactly one place: `cmdShow`'s RECOVERED branch, the
 # `else if (r.stopCause)` arm that runs only when the api-error record is NOT the
@@ -3765,6 +3779,7 @@ else
   check "W17 registry cwd fallback:$W17_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W18 — two reason/attribution defects the round-1 review found, and one field the
 # `cwd` repair left behind. All three are about a renderer telling the reader
 # something the code beside it knows to be false.
@@ -4043,6 +4058,7 @@ else
   check "W20 relative target operand:$W20_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W23 — the shared control class must cover the zero-advance and bidi block. It did
 # not: `CONTROL_RUN` enumerated C0/C1 plus U+2028/2029, while `ZERO_WIDTH` — defined
 # in the same file for `instanceId` — strips exactly `\p{Cf}\p{Mn}\p{Me}`. Those
@@ -4229,6 +4245,7 @@ else
   check "W24 renderer-bound values:$W24_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W25 — the deny head asserted a containment relation nothing measured. Off the weak
 # channel it read "the anchor the gate compares lies inside it", which requires
 # ZENSU_PROJECT_ROOT to be contained in CLAUDE_PROJECT_DIR — true for a session that
@@ -4416,6 +4433,7 @@ else
 fi
 
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # V-clock — the budget stated at the fixture block, asserted. Runs LAST, so it
 # reports the state every preceding V check actually saw (the reading itself is
 # taken above, before the W block). A lapsed budget is not a
@@ -5113,6 +5131,7 @@ else
   check "WT8-ids all $WT8_N worktree-advice fixture ids hold distinct 8-char prefixes, so no two share a cwd" PASS
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # ===========================================================================
 # CONTINUE — the continuation-worktree plan (WC*)
 # ===========================================================================
@@ -6169,6 +6188,7 @@ $(printf '%s' "$2" | cut -d'|' -f2)"
     fi
   fi
 fi
+TRAIL_MJS="$HUB_TRAIL_MJS"
 
 V21_SID=3e7a0001-0000-0000-0000-0000000000b1
 V21_AGED_SID=3e7a0002-0000-0000-0000-0000000000b2
@@ -7354,7 +7374,7 @@ CH_AT_THREADS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open threads' | head -1 
 [ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_THREADS" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_THREADS" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_THREADS"
 [ -z "$CH_BAD" ] && check "CH5 the handoff brief carries the same open chips ahead of its open threads, their folders judged by repository there too" PASS || check "CH5 handoff brief chips:$CH_BAD" FAIL
 
-CH_REF="$PLUGIN_DIR/skills/session-trail/references/takeover.md"
+CH_REF="$HUB_SKILL_DIR/references/takeover.md"
 CH_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
 CH_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
 CH_STEP="$(grep -F "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1)"
@@ -7364,7 +7384,7 @@ for CH_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `own_initiative
   case "$CH_STEP" in *"$CH_NEEDLE"*) ;; *) CH_BAD="$CH_BAD [missing:$CH_NEEDLE]" ;; esac
 done
 grep -qF 'how many open task chips the brief lists' "$CH_REF" || CH_BAD="$CH_BAD confirmation-line-absent"
-grep -rqF 'spawn_task' "$PLUGIN_DIR/skills/session-trail" && CH_BAD="$CH_BAD spawn-task-named"
+grep -rqF 'spawn_task' "$HUB_SKILL_DIR" && CH_BAD="$CH_BAD spawn-task-named"
 [ -z "$CH_BAD" ] && check "CH6 references/takeover.md proposes the chips with start_session own_initiative before the release step, with the plan confirmation line and the fallback, and the skill names no spawn_task" PASS || check "CH6 takeover.md chip step:$CH_BAD" FAIL
 
 CH7_SID=cdcdcdcd-0000-0000-0000-0000000000c4
@@ -7688,7 +7708,7 @@ printf '%s\n' "$LS_MD" | grep -qF 'never more than 8 in one takeover, with `init
 printf '%s\n' "$LS_MD" | grep -qxF '### Linked session 1: start' || LS_BAD="$LS_BAD heading-absent"
 printf '%s\n' "$LS_MD" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
 printf '%s\n' "$LS_MD" | grep -qxF 'Alpha[2K side' || LS_BAD="$LS_BAD title-absent"
-printf '%s\n' "$LS_MD" | grep -qF -- '- takeover command: `/zensu:session-trail takeover c1c1c1c1-0000-4000-8000-000000000001 --all`' || LS_BAD="$LS_BAD command-absent"
+printf '%s\n' "$LS_MD" | grep -qF -- '- takeover command: `/session-hub:session-trail takeover c1c1c1c1-0000-4000-8000-000000000001 --all`' || LS_BAD="$LS_BAD command-absent"
 printf '%s\n' "$LS_MD" | grep -qF -- '- saved environment: `Env Fixture`; pass it as `preset` only when `list_start_targets` lists a local preset of exactly this name' || LS_BAD="$LS_BAD preset-absent"
 printf '%s\n' "$LS_MD" | grep -qxF -- '- why: it runs over SSH, not on this Mac' || LS_BAD="$LS_BAD ssh-why-absent"
 [ "$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')" = "2" ] || LS_BAD="$LS_BAD cwd-blocks=$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')"
@@ -7757,7 +7777,7 @@ LS_AT_QUOTE="$(grep -nF "Put the names in single quotes, \`--linked-start 'cont-
 [ -n "$LS_AT_DRIFT" ] && [ "$LS_AT_DRIFT" = "$LS_AT_START" ] || LS_BAD="$LS_BAD carried-run-rule-not-in-step-4=$LS_AT_DRIFT/$LS_AT_START"
 LS_AT_HANDOFF_READER="$(grep -nF "A reader that holds only a handoff brief, with no \`--force\` run, has no carried plan answer: start each session that brief marks **start** that the user's answer did not name to leave out and each session it marks **if named** that the answer named, as that brief's lead says" "$CH_REF" | head -1 | cut -d: -f1)"
 [ -n "$LS_AT_HANDOFF_READER" ] && [ "$LS_AT_HANDOFF_READER" = "$LS_AT_START" ] || LS_BAD="$LS_BAD handoff-reader-rule-not-in-step-4=$LS_AT_HANDOFF_READER/$LS_AT_START"
-LS_HANDOFF_REF="$PLUGIN_DIR/skills/session-trail/references/handoff.md"
+LS_HANDOFF_REF="$HUB_SKILL_DIR/references/handoff.md"
 grep -qF -- 'Its plan confirmation names every linked session the brief marks start, each of which belongs to the yes' "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-4-pointer-absent"
 grep -qF -- 'each of which belongs to the yes unless the user names it to leave out' "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-5-pointer-absent"
 grep -qF -- "\`takeover <selector> --all --force\` with the plan answer's \`--linked-start\` value" "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-5-linked-start-absent"
@@ -7877,7 +7897,7 @@ const o = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
 process.stdout.write([o.linkedSessions.measured, o.linkedSessions.plan.names.join(","), o.linkedSessions.plan.unlisted.join(",")].join(":"));
 ' "$LS_UNREAD_CARRIED_JSON" 2>/dev/null)"
 [ "$LS_GOT" = "false:cont-00000001:cont-00000001" ] || LS_BAD="$LS_BAD unread-plan-json=$LS_GOT"
-LS_COMMANDS_REF="$PLUGIN_DIR/skills/session-trail/references/commands.md"
+LS_COMMANDS_REF="$HUB_SKILL_DIR/references/commands.md"
 grep -qF -- '`--linked-start <names>` (`takeover --force` only: `none`, or the comma-separated `cont-` names of the linked sessions the plan answer starts' "$LS_COMMANDS_REF" || LS_BAD="$LS_BAD commands-flag-absent"
 grep -qF -- 'in single quotes as the plan brief spells them, because PowerShell passes an unquoted comma list as separate arguments; with it, `takeover` refuses an operand besides the selector' "$LS_COMMANDS_REF" || LS_BAD="$LS_BAD commands-quote-absent"
 grep -qF -- 'On `takeover` it also needs `--linked-start` while a listed linked session could start' "$LS_COMMANDS_REF" || LS_BAD="$LS_BAD commands-force-absent"
@@ -7998,7 +8018,7 @@ for DR_VERB in takeover handoff; do
   if [ -z "$DR_MD" ]; then DR_BAD="$DR_BAD $DR_VERB-brief-absent"; continue; fi
   printf '%s\n' "$DR_MD" | grep -qF -- "$DR_PREFIX" && DR_BAD="$DR_BAD $DR_VERB-brief-names-the-account"
 done
-DR_REF="$PLUGIN_DIR/skills/session-trail/references/disclosure.md"
+DR_REF="$HUB_SKILL_DIR/references/disclosure.md"
 grep -qF 'NEITHER brief carries an account-adjacent value at all' "$DR_REF" || DR_BAD="$DR_BAD disclosure-claim-gone"
 grep -qF 'never its account' "$DR_REF" || DR_BAD="$DR_BAD disclosure-source-sentence-gone"
 [ -z "$DR_BAD" ] \
@@ -8700,6 +8720,26 @@ elif [ "$FK_OK" != 1 ]; then
 else
   check "FK0 the fork fixture holds a transcript whose first record carries its parent's session id and worktree, a live registry entry, a desktop fork record naming the parent's worktree, and a fork past the full-read limit whose fork point lies between the head and the tail" PASS
 
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --json 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD wt=$(wr_json "$FK_OUT" 'o.wt')"
+  [ "$(wr_json "$FK_OUT" 'o.cwd')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwd=$(wr_json "$FK_OUT" 'o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwdLast=$(wr_json "$FK_OUT" 'o.cwdLast')"
+  [ "$(wr_json "$FK_OUT" 'o.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD branch=$(wr_json "$FK_OUT" 'o.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
+  [ "$(wr_json "$FK_OUT" '("writes" in o) + ":" + ("continuation" in o)')" = "false:false" ] || FK_BAD="$FK_BAD write-anchor-keys-present"
+  [ -z "$FK_BAD" ] && check "FK1 show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and it carries no write-anchor keys" PASS || check "FK1 fork show --json:$FK_BAD" FAIL
+
+  FK_TXT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" 2>/dev/null)"
+  FK_BAD=""
+  printf '%s\n' "$FK_TXT" | grep -qxF "WORKTREE $FK_FORK_WT" || FK_BAD="$FK_BAD worktree-line"
+  printf '%s\n' "$FK_TXT" | grep -qxF "BRANCH   claude/fork-wt" || FK_BAD="$FK_BAD branch-line"
+  printf '%s\n' "$FK_TXT" | grep -qE '^(WRITES|CONTINUE) ' && FK_BAD="$FK_BAD write-anchor-lines-present"
+  printf '%s\n' "$FK_TXT" | grep -qxF "  cd -- '$FK_FORK_WT' && claude --resume '$FK_FORK'" || FK_BAD="$FK_BAD resume-line"
+  printf '%s\n' "$FK_TXT" | grep -E '^(WORKTREE|CWD|BRANCH|WRITES|CONTINUE) ' | grep -qF 'parent-wt' && FK_BAD="$FK_BAD names-the-parent-worktree"
+  [ -z "$FK_BAD" ] && check "FK2 show names the fork's own worktree and branch in its WORKTREE and BRANCH lines and in its resume line, renders no WRITES or CONTINUE line, and never names the parent's" PASS || check "FK2 fork show text:$FK_BAD" FAIL
+
+  TRAIL_MJS="$PLM_TRAIL_MJS"
   FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --json --anchor "$FK_FORK_WT" 2>/dev/null)"
   FK_BAD=""
   [ "$(wr_json "$FK_OUT" 'o.wt')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD wt=$(wr_json "$FK_OUT" 'o.wt')"
@@ -8709,7 +8749,7 @@ else
   [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
   [ "$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')" = "$FK_FORK_WT:true" ] || FK_BAD="$FK_BAD writes=$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')"
   [ "$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')" = "not-needed:$FK_FORK_WT" ] || FK_BAD="$FK_BAD continuation=$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')"
-  [ -z "$FK_BAD" ] && check "FK1 show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and its WRITES and CONTINUE verdicts judge that worktree" PASS || check "FK1 fork show --json:$FK_BAD" FAIL
+  [ -z "$FK_BAD" ] && check "FK1p PLM's frozen copy: show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and its WRITES and CONTINUE verdicts judge that worktree" PASS || check "FK1p fork show --json:$FK_BAD" FAIL
 
   FK_TXT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --anchor "$FK_FORK_WT" 2>/dev/null)"
   FK_BAD=""
@@ -8719,7 +8759,8 @@ else
   printf '%s\n' "$FK_TXT" | grep -qE '^CONTINUE not needed' || FK_BAD="$FK_BAD continue-line"
   printf '%s\n' "$FK_TXT" | grep -qxF "  cd -- '$FK_FORK_WT' && claude --resume '$FK_FORK'" || FK_BAD="$FK_BAD resume-line"
   printf '%s\n' "$FK_TXT" | grep -E '^(WORKTREE|CWD|BRANCH|WRITES|CONTINUE) ' | grep -qF 'parent-wt' && FK_BAD="$FK_BAD names-the-parent-worktree"
-  [ -z "$FK_BAD" ] && check "FK2 show names the fork's own worktree and branch in its WORKTREE, BRANCH, WRITES and CONTINUE lines and in its resume line, and never the parent's" PASS || check "FK2 fork show text:$FK_BAD" FAIL
+  [ -z "$FK_BAD" ] && check "FK2p PLM's frozen copy: show names the fork's own worktree and branch in its WORKTREE, BRANCH, WRITES and CONTINUE lines and in its resume line, and never the parent's" PASS || check "FK2p fork show text:$FK_BAD" FAIL
+  TRAIL_MJS="$HUB_TRAIL_MJS"
 
   FK_OUT="$(fkrun "$FK_TAKER_WT" release "$FK_FORK" --json --force 2>/dev/null)"; FK_RC=$?
   FK_BAD=""
@@ -8923,8 +8964,8 @@ process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "TIMEOUT" : Strin
 
   OM_SB="$FAKE/om-sandbox"
   mkdir -p "$OM_SB/skills/session-trail/scripts" "$OM_SB/hooks/lib"
-  cp "$TRAIL_MJS" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
+  cp "$TRAIL_MJS" "$HUB_SKILL_DIR/scripts/session-lineage-v1.mjs" "$HUB_SKILL_DIR/scripts/linked-sessions-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
+  cp "$PLUGIN_DIR/plugins/session-hub/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/plugins/session-hub/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/plugins/session-hub/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
   OM_BAD=""
   OM_OUT="$(omrun "$OM_SB/skills/session-trail/scripts/trail.mjs" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>&1)"
   OM_RC=$?
@@ -9164,7 +9205,7 @@ fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".jso
   [ "$OM_GOT" = "$OM10_UNREAD,$OM10_UNREAD,$OM10_UNREAD:false:1" ] || OM_BAD="$OM_BAD corrupt-edge=$OM_GOT"
   OM10_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
   printf '%s\n' "$OM10_MD" | grep -qxF -- '- why: the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
-  printf '%s\n' "$OM10_MD" | grep -F -- "$OM10_NOTE (1 record(s) in " | grep -F -- ' were refused, and `/zensu:session-trail lineage --diagnose` names each one), so whether a linked session already continues elsewhere is unknown' | grep -qF -- '/session-lineage/v1/edges`' || OM_BAD="$OM_BAD brief-note"
+  printf '%s\n' "$OM10_MD" | grep -F -- "$OM10_NOTE (1 record(s) in " | grep -F -- ' were refused, and `/session-hub:session-trail lineage --diagnose` names each one), so whether a linked session already continues elsewhere is unknown' | grep -qF -- '/session-lineage/v1/edges`' || OM_BAD="$OM_BAD brief-note"
   OM_GOT="$(om10_diagnose)"
   [ "$OM_GOT" = "1:corrupt/1760000000001-fixture.json" ] || OM_BAD="$OM_BAD corrupt-diagnose=$OM_GOT"
   OM10_DT="$(cd "$LS_TAKER" && lsrun "" lineage --diagnose --all 2>/dev/null)"

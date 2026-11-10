@@ -20,6 +20,8 @@ main-thread skills       /zensu:build         Zensu Dashboard
 
 **Layer 3 — Tracking (HOW is progress tracked?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
+**A second plugin, outside the three layers.** The `zensu` marketplace also lists `session-hub@zensu`, the Zensu Session Hub companion in `plugins/session-hub/`: `/session-hub:session-trail`, one Node receipt hook and the usage-feed module, with no Session Control, no gate and no review chain. It loads nothing from this plugin. Its vendored libraries, the usage-feed module with its contract, and the lineage ledger module are byte-identical copies of this plugin's files, and `tests/structure/test-session-hub-plugin.sh` fails on any byte that differs. This plugin answers the companion's takeover command only with the advisory notice of `user-prompt-session-hub-takeover-notice.sh`, and only while `hooks.bashWriteGate` is on. Each plugin has its own version, tags and release workflow; see the [companion's README](../plugins/session-hub/README.md).
+
 ## Agent & Workflow Overview
 
 The Implementation layer shows both modes: **vanilla** skips the RED→GREEN
@@ -211,7 +213,8 @@ background panel reviewer's report; it exits before any `node` child on a prompt
 marker while no arrival note is pending, and on one that does while no background review is
 pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
-takeover command. With
+takeover command. `user-prompt-session-hub-takeover-notice.sh` emits text only for the takeover
+command of the `session-hub@zensu` companion, and only while `hooks.bashWriteGate` is on. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
 costs about **12.6 K characters on the first prompt of a generation and 6.7 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or

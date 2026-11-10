@@ -1,8 +1,11 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/SKILL.md"
+  - "plugins/session-hub/skills/session-trail/SKILL.md"
   - "skills/session-trail/references/**"
+  - "plugins/session-hub/skills/session-trail/references/**"
   - "tests/structure/prompt-listing-v1.test.js"
   - "tests/structure/fixtures/queued-command-delivery.v1.jsonl"
   - "tests/structure/test-session-trail-verdict.sh"

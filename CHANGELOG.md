@@ -33,6 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   note: `zensu wiki images upload` is now a gated mutation (`upload_wiki_image`), which the
   released gate did not know and let through; run it inside `/zensu:change`.
   `zensu wiki images policy` stays a read.
+- **Session Hub companion plugin**: the `zensu` marketplace now also lists `session-hub@zensu`,
+  the Zensu Session Hub companion in `plugins/session-hub/`, with its own version,
+  `session-hub--vX.Y.Z` tags, changelog and release workflow (`release-session-hub.yml`). It
+  carries `/session-hub:session-trail`, the handover receipt as one Node hook and the usage-feed
+  module, and needs neither this plugin nor a Zensu account; its handover contract 2 names the
+  prefix `/session-hub:session-trail takeover `. This plugin's `/zensu:session-trail`, its receipt
+  hook and its usage-feed module are frozen until a later release removes them, and the skill's
+  description names the companion. CI runs `claude plugin validate` on the marketplace and the
+  companion with a pinned Claude Code, and this changelog leaves out commits that touch only
+  `plugins/session-hub/`.
+- **Session Hub takeover notice**: a new advisory hook, `user-prompt-session-hub-takeover-notice.sh`,
+  answers the companion's takeover command with one notice while `hooks.bashWriteGate` is on: the
+  opt-in source-write gate refuses source writes and git commands outside the session's Session
+  Control root, and `/zensu:adopt-session --reanchor` moves that root. On every other prompt, and
+  with the gate off, it prints nothing.
 
 ### Upgrade notes
 

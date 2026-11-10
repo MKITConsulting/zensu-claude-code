@@ -7,6 +7,11 @@ HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 CONTRACT="$PLUGIN_DIR/skills/session-trail/handover-contract.json"
 TRAIL="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
 UNIT="$PLUGIN_DIR/tests/structure/session-hub-receipt-v1.test.js"
+HUB_DIR="$PLUGIN_DIR/plugins/session-hub"
+HUB_ENTRY="$HUB_DIR/hooks/lib/session-hub-receipt-v1.mjs"
+HUB_HOOKS_JSON="$HUB_DIR/hooks/hooks.json"
+HUB_CONTRACT="$HUB_DIR/skills/session-trail/handover-contract.json"
+HUB_TRAIL="$HUB_DIR/skills/session-trail/scripts/trail.mjs"
 WORK="$(mktemp -d -t session-hub-receipt-XXXXXX)"
 WORK="$(cd "$WORK" && pwd -P)"
 trap 'rm -rf "$WORK"' EXIT
@@ -132,13 +137,14 @@ for PROMPT in \
   "please run $COMMAND" \
   "$COMMAND extra" \
   "/zensu:session-trail show $SID --all --receipt $TOKEN" \
+  "/session-hub:session-trail takeover $SID --all --receipt $TOKEN" \
   $'<task-notification>\n<status>completed</status>\n</task-notification>'; do
   OUT="$(run_hook "$CFG" "$PROMPT")"
   RC=$?
   [ "$RC" = "0" ] && [ -z "$OUT" ] || MISS_BAD="$MISS_BAD [$(printf '%s' "$PROMPT" | head -c 30): rc=$RC out=${#OUT}]"
 done
 [ -z "$MISS_BAD" ] && [ -z "$(entries "$CFG")" ] \
-  && check "R8 every other prompt writes nothing and prints nothing" PASS \
+  && check "R8 every other prompt, the companion's takeover command included, writes nothing and prints nothing" PASS \
   || check "R8 another prompt wrote or printed something:$MISS_BAD tree=$(entries "$CFG")" FAIL
 
 CFG="$WORK/cfg-guards"
@@ -165,21 +171,125 @@ OUT="$(run_hook "$CFG" "$COMMAND")"; RC=$?
 
 EMPTY="$WORK/empty-config"
 mkdir -p "$EMPTY"
-FLAG_BAD=""
-for VERB in show handoff takeover; do
-  OUT="$(node "$TRAIL" "$VERB" "$SID" --all --receipt "$TOKEN" --no-git --config-dir "$EMPTY" 2>&1)"
-  case "$VERB:$OUT" in
-    takeover:*) OUT="$(ZENSU_SESSION_LINEAGE=off node "$TRAIL" takeover "$SID" --all --no-record --receipt "$TOKEN" --config-dir "$EMPTY" 2>&1)" ;;
-  esac
-  case "$OUT" in *"not a flag of"*|*"--receipt needs"*|*"unknown flag"*) FLAG_BAD="$FLAG_BAD $VERB" ;; esac
-done
-LINEAGE_OUT="$(node "$TRAIL" lineage --receipt "$TOKEN" --config-dir "$EMPTY" 2>&1)"
-case "$LINEAGE_OUT" in *"--receipt is not a flag of \`lineage\`"*) ;; *) FLAG_BAD="$FLAG_BAD lineage-accepted" ;; esac
-SHAPE_OUT="$(node "$TRAIL" show "$SID" --receipt ABCDEF --config-dir "$EMPTY" 2>&1)"
-case "$SHAPE_OUT" in *"--receipt needs 32 lowercase hexadecimal characters"*) ;; *) FLAG_BAD="$FLAG_BAD malformed-accepted" ;; esac
+receipt_flag_bad() {
+  local trail="$1" bad="" verb out lineage_out shape_out
+  for verb in show handoff takeover; do
+    out="$(node "$trail" "$verb" "$SID" --all --receipt "$TOKEN" --no-git --config-dir "$EMPTY" 2>&1)"
+    case "$verb:$out" in
+      takeover:*) out="$(ZENSU_SESSION_LINEAGE=off node "$trail" takeover "$SID" --all --no-record --receipt "$TOKEN" --config-dir "$EMPTY" 2>&1)" ;;
+    esac
+    case "$out" in *"not a flag of"*|*"--receipt needs"*|*"unknown flag"*) bad="$bad $verb" ;; esac
+  done
+  lineage_out="$(node "$trail" lineage --receipt "$TOKEN" --config-dir "$EMPTY" 2>&1)"
+  case "$lineage_out" in *"--receipt is not a flag of \`lineage\`"*) ;; *) bad="$bad lineage-accepted" ;; esac
+  shape_out="$(node "$trail" show "$SID" --receipt ABCDEF --config-dir "$EMPTY" 2>&1)"
+  case "$shape_out" in *"--receipt needs 32 lowercase hexadecimal characters"*) ;; *) bad="$bad malformed-accepted" ;; esac
+  printf '%s' "$bad"
+}
+FLAG_BAD="$(receipt_flag_bad "$TRAIL")"
 [ -z "$FLAG_BAD" ] \
   && check "R11 trail.mjs accepts --receipt on show, handoff and takeover, refuses it elsewhere and refuses a malformed token" PASS \
   || check "R11 trail.mjs --receipt handling:$FLAG_BAD" FAIL
+
+WANT_HUB_CONTRACT='{"schemaVersion":1,"takeover":{"contract":2,"prefix":"/session-hub:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1},"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1}}}'
+GOT_HUB_CONTRACT="$(cat "$HUB_CONTRACT" 2>/dev/null)"
+GOT_HUB_BYTES="$(wc -c < "$HUB_CONTRACT" 2>/dev/null | tr -d ' ')"
+if [ "$GOT_HUB_CONTRACT" = "$WANT_HUB_CONTRACT" ] && [ "$GOT_HUB_BYTES" = "$(( ${#WANT_HUB_CONTRACT} + 1 ))" ]; then
+  check "R12 the companion's handover contract is exactly the contract-2 line" PASS
+else
+  check "R12 the companion's handover contract changed (got ${GOT_HUB_BYTES:-0} bytes)" FAIL
+fi
+
+HUB_REGISTRATION="$(node -e '
+  const doc = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const found = [];
+  for (const [event, groups] of Object.entries(doc.hooks || {})) {
+    for (const group of groups || []) {
+      for (const hook of group.hooks || []) {
+        found.push([event, group.matcher === undefined ? "none" : String(group.matcher), hook.type, hook.command, JSON.stringify(hook.args), String(hook.timeout)].join(":"));
+      }
+    }
+  }
+  process.stdout.write(found.join(","));
+' "$HUB_HOOKS_JSON" 2>/dev/null)"
+[ "$HUB_REGISTRATION" = 'UserPromptSubmit:none:command:node:["${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-hub-receipt-v1.mjs"]:10' ] \
+  && check "R13 the companion registers its receipt entry once, on UserPromptSubmit, in exec form with a 10 s bound" PASS \
+  || check "R13 the companion's registration is ${HUB_REGISTRATION:-<absent>}" FAIL
+
+HUB_COMMAND="/session-hub:session-trail takeover $SID --all --receipt $TOKEN"
+HUB_TAGGED="$(printf '<command-message>session-hub:session-trail</command-message>\n<command-name>/session-hub:session-trail</command-name>\n<command-args>takeover %s --all --receipt %s</command-args>' "$SID" "$TOKEN")"
+HUB_HOME="$WORK/hub-home"
+mkdir -p "$HUB_HOME"
+HUB_OFF_HOME="$WORK/hub-off-home"
+mkdir -p "$HUB_OFF_HOME/.zensu"
+printf '%s' '{"hooks":{"sessionHubReceipt":false}}' > "$HUB_OFF_HOME/.zensu/config.json"
+
+run_hub() {
+  local config_root="$1" prompt="$2" home="${3:-$HUB_HOME}" plugin_root="${4:-$HUB_DIR}" extra="${5:-}"
+  node -e '
+    const body = { session_id: "receipt-test", cwd: process.argv[2], hook_event_name: "UserPromptSubmit", prompt: process.argv[1] };
+    if (process.argv[3]) body.agent_id = process.argv[3];
+    process.stdout.write(JSON.stringify(body));
+  ' "$prompt" "$WORK" "$extra" > "$WORK/hub-payload.json"
+  env CLAUDE_CONFIG_DIR="$config_root" HOME="$home" ZENSU_CONFIG="$OFF_CONFIG" CLAUDE_PLUGIN_ROOT="$plugin_root" node "$HUB_ENTRY" < "$WORK/hub-payload.json"
+}
+
+HUB_HIT_BAD=""
+for FORM in raw tagged; do
+  CFG="$WORK/hub-hit-$FORM"
+  mkdir -p "$CFG"
+  case "$FORM" in (raw) PROMPT="$HUB_COMMAND" ;; (*) PROMPT="$HUB_TAGGED" ;; esac
+  OUT="$(run_hub "$CFG" "$PROMPT")"; RC=$?
+  [ "$RC" = "0" ] && [ -z "$OUT" ] && [ "$(entries "$CFG")" = "$WANT_LISTED" ] || HUB_HIT_BAD="$HUB_HIT_BAD $FORM:rc=$RC:out=${#OUT}:tree=$(entries "$CFG")"
+  HUB_BODY="$(node -e '
+    const fs = require("fs");
+    const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const want = JSON.parse(fs.readFileSync(process.argv[3], "utf8")).version;
+    process.stdout.write(String(Object.keys(r).sort().join(",") === "event,kind,plugin,recordedAt,schemaVersion,token" && r.token === process.argv[2] && r.plugin === want));
+  ' "$CFG/zensu/session-hub/v1/receipts/$TOKEN.json" "$TOKEN" "$HUB_DIR/.claude-plugin/plugin.json" 2>/dev/null)"
+  [ "$HUB_BODY" = "true" ] || HUB_HIT_BAD="$HUB_HIT_BAD $FORM:body"
+done
+[ -z "$HUB_HIT_BAD" ] \
+  && check "R14 the companion entry lands exactly one private receipt with the companion's version for the raw and the command-tag form, prints nothing and ignores ZENSU_CONFIG" PASS \
+  || check "R14 the companion entry:$HUB_HIT_BAD" FAIL
+
+CFG="$WORK/hub-miss"
+mkdir -p "$CFG"
+HUB_MISS_BAD=""
+for PROMPT in \
+  'add a feature flag to the checkout page' \
+  "$COMMAND" \
+  "/session-hub:session-trail takeover $SID --all" \
+  "please run $HUB_COMMAND" \
+  "$HUB_COMMAND extra" \
+  "/session-hub:session-trail show $SID --all --receipt $TOKEN" \
+  $'<task-notification>\n<status>completed</status>\n</task-notification>'; do
+  OUT="$(run_hub "$CFG" "$PROMPT")"; RC=$?
+  [ "$RC" = "0" ] && [ -z "$OUT" ] || HUB_MISS_BAD="$HUB_MISS_BAD [$(printf '%s' "$PROMPT" | head -c 30): rc=$RC out=${#OUT}]"
+done
+[ -z "$HUB_MISS_BAD" ] && [ -z "$(entries "$CFG")" ] \
+  && check "R15 the companion entry writes nothing for PLM's takeover command or any other prompt" PASS \
+  || check "R15 the companion entry wrote or printed something:$HUB_MISS_BAD tree=$(entries "$CFG")" FAIL
+
+CFG="$WORK/hub-guards"
+mkdir -p "$CFG"
+HUB_GUARD_BAD=""
+OUT="$(run_hub "$CFG" "$HUB_COMMAND" "$HUB_OFF_HOME")"; RC=$?
+[ "$RC" = "0" ] && [ -z "$OUT" ] || HUB_GUARD_BAD="$HUB_GUARD_BAD switched-off:rc=$RC"
+OUT="$(run_hub "$CFG" "$HUB_COMMAND" "$HUB_HOME" "$WORK")"; RC=$?
+[ "$RC" = "0" ] && [ -z "$OUT" ] || HUB_GUARD_BAD="$HUB_GUARD_BAD wrong-root:rc=$RC"
+OUT="$(run_hub "$CFG" "$HUB_COMMAND" "$HUB_HOME" "$HUB_DIR" "agent-1")"; RC=$?
+[ "$RC" = "0" ] && [ -z "$OUT" ] || HUB_GUARD_BAD="$HUB_GUARD_BAD subagent:rc=$RC"
+OUT="$(printf '%s' '{"prompt": "--receipt "' | env CLAUDE_CONFIG_DIR="$CFG" HOME="$HUB_HOME" CLAUDE_PLUGIN_ROOT="$HUB_DIR" node "$HUB_ENTRY")"; RC=$?
+[ "$RC" = "0" ] && [ -z "$OUT" ] || HUB_GUARD_BAD="$HUB_GUARD_BAD not-json:rc=$RC"
+[ -z "$HUB_GUARD_BAD" ] && [ -z "$(entries "$CFG")" ] \
+  && check "R16 hooks.sessionHubReceipt false in ~/.zensu/config.json, a foreign plugin root, a subagent payload and a broken payload each write nothing and exit 0" PASS \
+  || check "R16 a companion guard wrote or failed:$HUB_GUARD_BAD tree=$(entries "$CFG")" FAIL
+
+HUB_FLAG_BAD="$(receipt_flag_bad "$HUB_TRAIL")"
+[ -z "$HUB_FLAG_BAD" ] \
+  && check "R17 the companion's trail.mjs accepts --receipt on show, handoff and takeover, refuses it elsewhere and refuses a malformed token" PASS \
+  || check "R17 the companion's trail.mjs --receipt handling:$HUB_FLAG_BAD" FAIL
 
 unit_check_done "R2z every unit file the registry gives this suite was graded"
 

@@ -1,10 +1,15 @@
 ---
 paths:
   - "skills/session-trail/scripts/linked-sessions-v1.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs"
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/handover-contract.json"
+  - "plugins/session-hub/skills/session-trail/handover-contract.json"
   - "skills/session-trail/SKILL.md"
+  - "plugins/session-hub/skills/session-trail/SKILL.md"
   - "skills/session-trail/references/**"
+  - "plugins/session-hub/skills/session-trail/references/**"
   - "tests/structure/linked-sessions-v1.test.js"
   - "tests/structure/test-session-trail-verdict.sh"
 ---

@@ -221,7 +221,7 @@ ROSTER="$(node -e '
   process.stdout.write(out.join("\n"));
 ' "$HOOKS_JSON" 2>/dev/null)"
 
-BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-review-handback.sh"
+BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-session-hub-takeover-notice.sh user-prompt-review-handback.sh"
 
 budget() {
   case "${3:-first}:$1:$2" in
@@ -240,6 +240,7 @@ budget() {
     *:user-prompt-best-solution-first.sh:*) echo "300 540" ;;
     *:user-prompt-worktree-keep.sh:*) echo "0 0" ;;
     *:user-prompt-session-hub-receipt.sh:*) echo "0 0" ;;
+    *:user-prompt-session-hub-takeover-notice.sh:*) echo "0 0" ;;
     *:user-prompt-review-handback.sh:*) echo "0 0" ;;
     *) echo "" ;;
   esac

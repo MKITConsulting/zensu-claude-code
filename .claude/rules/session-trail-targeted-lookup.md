@@ -1,8 +1,11 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "hooks/lib/desktop-store-read-v1.js"
+  - "plugins/session-hub/hooks/lib/desktop-store-read-v1.js"
   - "skills/session-trail/references/commands.md"
+  - "plugins/session-hub/skills/session-trail/references/commands.md"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 

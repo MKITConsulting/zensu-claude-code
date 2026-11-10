@@ -1,6 +1,7 @@
 ---
 paths:
   - "skills/session-trail/scripts/session-lineage-v1.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs"
   - "tests/structure/session-lineage-v1.test.js"
   - "tests/structure/test-session-trail-lineage.sh"
 ---

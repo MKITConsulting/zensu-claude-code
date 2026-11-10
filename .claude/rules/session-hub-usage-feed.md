@@ -1,7 +1,9 @@
 ---
 paths:
   - "hooks/usage-feed.ts"
+  - "plugins/session-hub/hooks/usage-feed.ts"
   - "hooks/usage-feed-contract.json"
+  - "plugins/session-hub/hooks/usage-feed-contract.json"
   - "tests/mods/usage-feed.test.ts"
   - "tests/structure/test-session-hub-usage-feed.sh"
 ---
@@ -13,6 +15,15 @@ Claude's usage popover, one foreground change per account. This plugin's one hoo
 writes each running engine's latest rate-limit reading into a directory the Hub owns, so an
 account that works in Claude Code keeps current limits without that press. The popover read
 stays the Hub's default, and the Hub works without the plugin.
+
+**Two copies, one file.** The `session-hub@zensu` companion ships the module and its contract
+as `plugins/session-hub/hooks/usage-feed.ts` and `usage-feed-contract.json`, byte-identical to
+the files here: `test-session-hub-plugin.sh` H4 and `test-session-hub-usage-feed.sh` U9b fail on
+any byte that differs, and U9b is also what lets `tests/mods/usage-feed.test.ts`, which runs
+against this copy, cover the companion's. An edit here copies the file into the companion in the
+same commit. PLM's copy stays until a later release leaves the feed to the companion; while both
+plugins are enabled both copies write the same `<session id>.json`, so PLM releases no later than
+the companion (`.claude/rules/session-hub-companion.md`).
 
 **`hooks/usage-feed-contract.json` is the Hub's contract with this module.** The Hub byte-copies
 it to its own `tests/fixtures/usage-feed-contract.json` and pins it there, the way it mirrors

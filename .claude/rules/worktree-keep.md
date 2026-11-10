@@ -1,7 +1,9 @@
 ---
 paths:
   - "hooks/lib/worktree-keep-v1.js"
+  - "plugins/session-hub/hooks/lib/worktree-keep-v1.js"
   - "hooks/lib/git-environment-v1.js"
+  - "plugins/session-hub/hooks/lib/git-environment-v1.js"
   - "hooks/lib/zensu-worktree-keep.sh"
   - "hooks/session-start-worktree-keep.sh"
   - "hooks/user-prompt-worktree-keep.sh"
@@ -23,6 +25,13 @@ branch out IN PLACE — the displaced session's directory changes branch under i
 evidence; every one of the eight rebinds of that directory since 2026-09-09 crossed an account
 boundary. The root cause is the app's — per-instance lease visibility plus last-writer-wins
 registry writes — and nothing here changes it.
+
+**The module has a second home.** `plugins/session-hub/hooks/lib/worktree-keep-v1.js` and
+`git-environment-v1.js` beside it are byte-identical copies, vendored so the companion's
+`release` verb can end a keep anchor and remove its marker without loading PLM;
+`test-session-hub-plugin.sh` H4 fails on any byte that differs, so an edit to either file here
+copies it into the companion in the same commit. The keep hooks themselves stay in PLM, and the
+companion computes the keep key with core's domain-separated hash instead of requiring core (H7).
 
 **Two signals, and the second is the safety net for the first.** The app skips a worktree whose
 root carries a file named `.worktree-keep` (`WORKTREE_KEEP_FILENAME` in `app.asar`, read by
@@ -82,8 +91,8 @@ never collide with a real name; `branchValueOk` is what admits it into a persist
 `describeBranch` renders it as a branch whose name this plugin does not render. Every git child
 runs with the fifteen `GIT_*`
 discovery and config-injection variables `_tc_git` lists deleted from its environment, through
-`gitEnvironment` from `hooks/lib/git-environment-v1.js`, which the module re-exports, so an
-inherited `GIT_DIR` cannot make the branch read answer a foreign repository or the exclude write
+`scrubGitEnvironment` from `hooks/lib/git-environment-v1.js`, which the module re-exports as
+`gitEnvironment`, so an inherited `GIT_DIR` cannot make the branch read answer a foreign repository or the exclude write
 land in one. The marker is created only after `git check-ignore` confirms git ignores it
 (`markerIgnored` adds the exclude entry first when it does not, and refuses otherwise), because an
 untracked marker is one `git add -A` away from being committed into every checkout of the
@@ -392,8 +401,8 @@ in `tests/structure/test-impl-stop-counter.sh` reads every getter's operands;
 `STATE_SEGMENTS` in the module, a twin of the owner-exported `WORKFLOW_STATE_SEGMENTS` in
 `session-control-core-v1.js` (pinned equal by the unit suite), and `SESSION_KEY_RE` /
 `ANCHOR_NAME_RE`, two further members of the grep-governed `scv1_` family §"Foreign-Chain Row"
-describes; `GIT_ENV_SCRUB` and `gitEnvironment`, owned by `hooks/lib/git-environment-v1.js` and
-re-exported by the module, against `_tc_git`'s unset list in `hooks/lib/zensu-log.sh` (pinned by
+describes; `GIT_ENV_SCRUB` and `scrubGitEnvironment`, owned by `hooks/lib/git-environment-v1.js`
+and re-exported by the module (the second as `gitEnvironment`), against `_tc_git`'s unset list in `hooks/lib/zensu-log.sh` (pinned by
 the same suite, which also pins that the re-exports are the library's own), plus the
 `$SBOX/plug` tree of `tests/structure/test-doctor.sh`, which stages the library beside the
 module; the secure-open inventory entry in

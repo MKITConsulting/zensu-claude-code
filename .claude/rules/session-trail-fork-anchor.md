@@ -1,7 +1,9 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/references/gotchas.md"
+  - "plugins/session-hub/skills/session-trail/references/gotchas.md"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 

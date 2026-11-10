@@ -24,6 +24,24 @@
         "ref": "v0.36.0"
       },
       "version": "0.36.0"
+    },
+    {
+      "name": "session-hub",
+      "displayName": "Zensu Session Hub",
+      "description": "Companion plugin for the Zensu Session Hub: the /session-hub:session-trail takeover the Hub types, its handover receipt and the usage feed.",
+      "author": {
+        "name": "Zensu",
+        "url": "https://github.com/MKITConsulting/zensu-claude-code"
+      },
+      "category": "productivity",
+      "homepage": "https://github.com/MKITConsulting/zensu-claude-code/tree/main/plugins/session-hub",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/MKITConsulting/zensu-claude-code.git",
+        "path": "plugins/session-hub",
+        "ref": "session-hub--v1.0.0"
+      },
+      "version": "1.0.0"
     }
   ]
 }
