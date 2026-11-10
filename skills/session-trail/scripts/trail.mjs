@@ -994,7 +994,7 @@ const STORE_REFUSED_REASON = 'the Claude Desktop session store was refused: anot
 const RECORD_REFUSED_REASON = 'its Claude Desktop record was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read';
 const RECORDS_REFUSED_REASON = 'Claude Desktop holds no readable record for this session, and some of its store entries were refused: another account owns them or can write them, they are symbolic links, of the wrong file type or larger than 8 MiB, or they could not be opened or read';
 const CCD_REFUSED = new Set();
-
+const CCD_UNREAD = new Set();
 function refuseStoreEntry(entry) {
   if (CCD_REFUSED.has(entry)) return;
   CCD_REFUSED.add(entry);
@@ -1056,7 +1056,7 @@ function ccdRecordFiles() {
   const walk = (dir, depth, accountUuid) => {
     if (depth > 3) return;
     let es;
-    try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch { SKIPPED += 1; return; }
+    try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch { SKIPPED += 1; CCD_UNREAD.add(dir); return; }
     for (const e of es) {
       const p = path.join(dir, e.name);
       if (e.isSymbolicLink()) {
@@ -1089,7 +1089,7 @@ function storeRecordBytes(file) {
 
 function storeRecordObject(file) {
   const read = storeRecordBytes(file);
-  if (read.state !== 'read') return { state: read.state === 'refused' ? 'refused' : 'unreadable', record: null };
+  if (read.state !== 'read') return { state: read.state === 'refused' || read.state === 'missing' ? read.state : 'unreadable', record: null };
   try { return { state: 'read', record: JSON.parse(read.bytes.toString('utf8')) }; } catch { return { state: 'unreadable', record: null }; }
 }
 
@@ -1110,8 +1110,8 @@ function ccdIndex() {
   const map = new Map();
   CCD_CACHE = map;
   for (const f of ccdRecordFiles()) {
-    const o = storeRecordObject(f.path).record;
-    if (!o || !o.cliSessionId) continue;
+    const { state, record: o } = storeRecordObject(f.path);
+    if (!o || !o.cliSessionId) { if (state === 'unreadable') CCD_UNREAD.add(f.path); continue; }
     CCD_RECORD_PATHS.set(o.cliSessionId, f.path);
     map.set(o.cliSessionId, ccdAppEntry(o, f.accountUuid));
   }
@@ -1164,7 +1164,7 @@ function ccdCandidates() {
   CCD_CANDIDATES = map;
   ccdRecordFiles().forEach((f, index) => {
     const read = storeRecordBytes(f.path);
-    if (read.state !== 'read') return;
+    if (read.state !== 'read') { if (read.state === 'changing') CCD_UNREAD.add(f.path); return; }
     for (const id of cliSessionIdsIn(read.bytes)) {
       const list = map.get(id);
       if (!list) map.set(id, [index]);
@@ -1180,8 +1180,8 @@ function ccdApp(sessionId) {
   const files = ccdRecordFiles();
   let found;
   for (const index of ccdCandidates().get(sessionId) || []) {
-    const o = storeRecordObject(files[index].path).record;
-    if (!o || !o.cliSessionId || o.cliSessionId !== sessionId) continue;
+    const { state, record: o } = storeRecordObject(files[index].path);
+    if (!o || !o.cliSessionId || o.cliSessionId !== sessionId) { if (state === 'unreadable') CCD_UNREAD.add(files[index].path); continue; }
     CCD_RECORD_PATHS.set(sessionId, files[index].path);
     found = ccdAppEntry(o, files[index].accountUuid);
   }
@@ -5286,19 +5286,33 @@ function accountOf(file) {
 
 function savedPresets(accountUuid) {
   const store = ccdStore();
-  if (!store || !accountUuid) return null;
+  if (!store || !accountUuid) return { presets: null, complete: true };
   const read = storeRecordObject(path.join(path.dirname(store.dir), 'ccd-session-presets.json'));
-  if (read.state !== 'read') return null;
-  try { return presetMap(read.record, accountUuid); } catch { return null; }
+  if (read.state === 'missing') return { presets: null, complete: true };
+  if (read.state !== 'read') return { presets: null, complete: false };
+  try { return { presets: presetMap(read.record, accountUuid), complete: true }; } catch { return { presets: null, complete: false }; }
+}
+
+function hostNamedRecord() {
+  const host = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim();
+  if (!isSafeHostSessionId(host)) return null;
+  const hit = ccdRecordFiles().find((f) => path.basename(f.path) === `${host}.json`);
+  if (!hit) return null;
+  const read = storeRecordObject(hit.path);
+  return { file: hit.path, record: read.record, reason: read.state === 'read' ? null : read.state };
 }
 
 function startedContinuations() {
   const self = selfSessionId();
-  if (!self) return new Set();
-  const own = desktopRecordOf(self);
-  if (own.reason) return new Set();
+  if (!self) return { names: new Set(), complete: true };
+  const found = desktopRecordOf(self);
+  const own = found.file ? found : hostNamedRecord();
+  if (!own) return { names: new Set(), complete: CCD_REFUSED.size === 0 && CCD_UNREAD.size === 0 };
+  if (own.reason) return { names: new Set(), complete: false };
   const run = runIdOf(own.record && typeof own.record === 'object' ? own.record.sessionId : null);
-  return run ? continuationsStartedBy(run, familyRecords(path.dirname(own.file)).records) : new Set();
+  if (!run) return { names: new Set(), complete: true };
+  const family = familyRecords(path.dirname(own.file));
+  return { names: continuationsStartedBy(run, family.records), complete: family.listed && family.unreadable === 0 };
 }
 
 const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, sessions: [] });
@@ -5313,12 +5327,16 @@ function linkedSessions(r, verdicts, planned = null) {
   const walk = familyWalk(own.record, family.records);
   if (!walk) return { measured: false, reason: 'its Claude Desktop record names no desktop session id', ...LINKED_NONE, unreadable: family.unreadable, plan, sameRepository, oldRepositoryMeasured };
   const led = walk.open.some((node) => typeof node.record.cliSessionId === 'string') ? ledgerRead() : null;
+  const started = walk.open.length ? startedContinuations() : { names: new Set(), complete: true };
+  const saved = walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(accountOf(own.file)) : { presets: null, complete: true };
   const decided = decideLinked(walk, {
     edges: led ? led.edges : [],
     ledgerComplete: !led || (!led.directoryError && !led.truncated),
-    started: walk.open.length ? startedContinuations() : new Set(),
+    started: started.names,
+    startedComplete: started.complete,
     self: selfSessionId(),
-    presets: walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(accountOf(own.file)) : null,
+    presets: saved.presets,
+    presetsComplete: saved.complete,
     checkout: verdicts.checkout,
     sameRepository,
     planned,
@@ -6205,10 +6223,10 @@ function cmdAdopt(opts) {
 function gitChildEnvironment() {
   let gitEnvironment = null;
   try {
-    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/worktree-keep-v1.js'));
+    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/git-environment-v1.js'));
   } catch { gitEnvironment = null; }
   if (typeof gitEnvironment !== 'function') {
-    fail('hooks/lib/worktree-keep-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
+    fail('hooks/lib/git-environment-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
   }
   return gitEnvironment(process.env);
 }

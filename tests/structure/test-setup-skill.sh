@@ -150,21 +150,27 @@ ZC_BREW="$(printf '%s\n' "$ZC_FACTS" | sed -n 1p)"
 ZC_BREW_UP="$(printf '%s\n' "$ZC_FACTS" | sed -n 2p)"
 ZC_SCRIPT="$(printf '%s\n' "$ZC_FACTS" | sed -n 3p)"
 ZC_PS="$(printf '%s\n' "$ZC_FACTS" | sed -n 4p)"
-zc_names_all() {
-  [ -n "$ZC_BREW" ] && [ -n "$ZC_BREW_UP" ] && [ -n "$ZC_SCRIPT" ] && [ -n "$ZC_PS" ] || return 1
+zc_names_install() {
+  [ -n "$ZC_BREW" ] && [ -n "$ZC_SCRIPT" ] && [ -n "$ZC_PS" ] || return 1
   local escaped_script escaped_ps
   escaped_script="$(printf '%s' "$ZC_SCRIPT" | sed 's/|/\\|/')"
   escaped_ps="$(printf '%s' "$ZC_PS" | sed 's/|/\\|/')"
-  grep -qF "$ZC_BREW" "$1" && grep -qF "$ZC_BREW_UP" "$1" \
+  grep -qF "$ZC_BREW" "$1" \
     && { grep -qF "$ZC_SCRIPT" "$1" || grep -qF "$escaped_script" "$1"; } \
     && { grep -qF "$ZC_PS" "$1" || grep -qF "$escaped_ps" "$1"; }
 }
+zc_names_all() {
+  [ -n "$ZC_BREW_UP" ] && grep -qF "$ZC_BREW_UP" "$1" && zc_names_install "$1"
+}
+ZC_BANNER="$PLUGIN_DIR/hooks/session-start-banner.sh"
 ZC_SITES_BAD=""
-for zc_site in README.md docs/operations.md docs/cli-install-update.md skills/setup/SKILL.md hooks/session-start-banner.sh; do
+for zc_site in README.md docs/operations.md docs/cli-install-update.md skills/setup/SKILL.md; do
   zc_names_all "$PLUGIN_DIR/$zc_site" || ZC_SITES_BAD="$ZC_SITES_BAD $zc_site"
 done
-[ -z "$ZC_SITES_BAD" ] && check "P10a README, the operations troubleshooting row, the CLI install guide, /zensu:setup and the banner name the module's install and upgrade commands" PASS \
-  || check "P10a an install or upgrade command of the module is missing from:$ZC_SITES_BAD" FAIL
+zc_names_install "$ZC_BANNER" && [ -n "$ZC_BREW_UP" ] && ! grep -qF -- "$ZC_BREW_UP" "$ZC_BANNER" && grep -qF 'INSTALL.homebrewUpgrade' "$ZC_BANNER" \
+  || ZC_SITES_BAD="$ZC_SITES_BAD hooks/session-start-banner.sh"
+[ -z "$ZC_SITES_BAD" ] && check "P10a README, the operations troubleshooting row, the CLI install guide and /zensu:setup name the module's install and upgrade commands; the banner names the install commands on its missing-CLI line and reads the upgrade command from the module" PASS \
+  || check "P10a a site misses an install or upgrade command of the module, or the banner copies the upgrade command instead of reading it:$ZC_SITES_BAD" FAIL
 if [ -n "$ZC_FLOOR" ] && [ "$(grep -cF "zensu-cli $ZC_FLOOR or later" "$README_MD")" -ge 2 ] \
   && grep -qF "older than $ZC_FLOOR" "$PLUGIN_DIR/docs/operations.md" && grep -qF "names zensu-cli $ZC_FLOOR" "$PLUGIN_DIR/docs/work-order-mode.md"; then
   check "P10b README Install and Requirements, the operations row and the work-order doc name the module's floor" PASS
@@ -182,11 +188,20 @@ grep -qF -- "- Zensu CLI $ZC_FLOOR or later on \`PATH\`; see \`/zensu:doctor\` f
 ZC_STALE="$(grep -lF 'Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`)' "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null | tr '\n' ' ')"
 [ -z "$ZC_STALE" ] && check "P10d no skill keeps the curl-only install prerequisite" PASS || check "P10d a skill keeps the curl-only install prerequisite: $ZC_STALE" FAIL
 ZC_REASON="$(node -e 'process.stdout.write(require(process.argv[1]).FLOOR_REASON)' "$ZC_MODULE" 2>/dev/null)"
-if [ -n "$ZC_REASON" ] && grep -qF -- "$ZC_REASON" "$PLUGIN_DIR/hooks/session-start-banner.sh" && tr '\n' ' ' < "$README_MD" | grep -qF -- "$ZC_REASON" \
+if [ -n "$ZC_REASON" ] && ! grep -qF -- "$ZC_REASON" "$ZC_BANNER" && grep -qF 'FLOOR_REASON' "$ZC_BANNER" \
+  && tr '\n' ' ' < "$README_MD" | grep -qF -- "$ZC_REASON" \
   && tr -s '[:space:]' ' ' < "$SKILL_MD" | grep -qF -- "$ZC_REASON"; then
-  check "P10e the banner, the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor" PASS
+  check "P10e the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor, and the banner reads it from the module instead of copying it" PASS
 else
-  check "P10e the banner, the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor" FAIL
+  check "P10e the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor, and the banner reads it from the module instead of copying it" FAIL
+fi
+ZC_OLD_BREW_UP='brew upgrade --cask zensu'
+ZC_OLD_SITES="$(cd "$PLUGIN_DIR" || exit 2; grep -rlF -- "$ZC_OLD_BREW_UP" README.md docs skills hooks)"
+ZC_OLD_RC=$?
+if [ "$ZC_OLD_RC" -eq 1 ]; then
+  check "P10f README, docs, skills and hooks hold no copy of the old Homebrew upgrade spelling '$ZC_OLD_BREW_UP'" PASS
+else
+  check "P10f the old Homebrew upgrade spelling '$ZC_OLD_BREW_UP' is back, or the scan failed (grep exit $ZC_OLD_RC): $(printf '%s' "$ZC_OLD_SITES" | tr '\n' ' ')" FAIL
 fi
 
 echo "----"

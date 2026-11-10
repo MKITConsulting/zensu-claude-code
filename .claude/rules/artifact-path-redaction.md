@@ -1,6 +1,7 @@
 ---
 paths:
   - "hooks/lib/zensu-artifact-redact-v1.js"
+  - "hooks/lib/git-environment-v1.js"
   - "hooks/post-artifact-redact.sh"
   - "hooks/lib/hook-dispatch-v1.js"
   - "tests/structure/test-artifact-redaction.sh"
@@ -284,8 +285,8 @@ in the same call) is clean to git and never swept, and `assume-unchanged` hides 
 modification the same way. Coupled sites: `sweepTargets` returns `{ targets, fallback }`,
 read by the hook and by R48, R49 and R62-R81 (R81 is the check that fails, on any OS, if
 the scope decides from `git status` alone); `GIT_ENV_SCRUB` is a THIRD hand-copy of
-the list in `worktree-keep-v1.js` (`GIT_ENV_SCRUB`) and `evidence-run-v1.js`
-(`GIT_SCRUBBED_ENV`), and nothing pins the three against each other.
+the list in `git-environment-v1.js` (`GIT_ENV_SCRUB`, re-exported by `worktree-keep-v1.js`) and
+`evidence-run-v1.js` (`GIT_SCRUBBED_ENV`), and nothing pins the three against each other.
 
 **The PostToolUse net is MAIN-THREAD only.** `zensu_hook_is_main_principal` gates
 it, so a subagent's `Write` to a plan is caught only by a later main-thread pass —

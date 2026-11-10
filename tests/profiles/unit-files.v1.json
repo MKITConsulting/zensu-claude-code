@@ -98,7 +98,7 @@
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 30,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 33,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
@@ -326,10 +326,10 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 101,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 102,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
-      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading, its refusal when that reader cannot load and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
     },
     {
       "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 26,
@@ -347,7 +347,7 @@
       "summary": "The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative."
     },
     {
-      "path": "tests/structure/worktree-keep-v1.test.js", "registered": 101,
+      "path": "tests/structure/worktree-keep-v1.test.js", "registered": 102,
       "runs": [{ "driver": "tests/structure/test-worktree-keep.sh" }],
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
@@ -370,6 +370,11 @@
       "path": "tests/structure/zensu-cli-version-v1.test.js", "registered": 15, "skips": {"win32": 8},
       "runs": [{ "driver": "tests/structure/test-doctor.sh" }],
       "summary": "The zensu-cli version floor: the version line, the floor comparison, a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does, and the floor release's recorded ai-work help passing the capture preflight."
+    },
+    {
+      "path": "tests/structure/zensu-cli-words-v1.test.js", "registered": 6,
+      "runs": [{ "driver": "tests/structure/test-bash-zensu-gate.sh" }],
+      "summary": "The zensu-cli word reader both gates share: cobra's subcommand search over value flags, empty words and --, the noun table with its aliases, the work verb alias, the group verbs and the frozen tables."
     },
     {
       "path": "tests/structure/zensu-doctor-invocation.test.js", "registered": 27,
