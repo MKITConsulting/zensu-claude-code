@@ -1597,7 +1597,7 @@ function ledgerRead() {
   // make visible. Per-record refusals stay a separate number: they are the narrow
   // half of the same hazard, one dropped record is one pair missing from the
   // duplicate guard, and the remedies differ.
-  return { edges, refused: refused.length, directoryError, schemaNewer, truncated };
+  return { edges, refused: refused.length, refusedFiles: refused, directoryError, schemaNewer, truncated };
 }
 
 
@@ -5287,10 +5287,14 @@ function accountOf(file) {
 function savedPresets(accountUuid) {
   const store = ccdStore();
   if (!store || !accountUuid) return { presets: null, complete: true };
-  const read = storeRecordObject(path.join(path.dirname(store.dir), 'ccd-session-presets.json'));
-  if (read.state === 'missing') return { presets: null, complete: true };
+  const folder = path.dirname(store.dir);
+  const { realDirectory, writableOnlyByCaller } = storeRead();
+  const owned = realDirectory(folder, writableOnlyByCaller);
+  if (!owned) refuseStoreEntry(folder);
+  const read = storeRecordObject(path.join(folder, 'ccd-session-presets.json'));
+  if (read.state === 'missing') return { presets: null, complete: owned };
   if (read.state !== 'read') return { presets: null, complete: false };
-  try { return { presets: presetMap(read.record, accountUuid), complete: true }; } catch { return { presets: null, complete: false }; }
+  try { return { presets: presetMap(read.record, accountUuid), complete: owned }; } catch { return { presets: null, complete: false }; }
 }
 
 function hostNamedRecord() {
@@ -5315,7 +5319,7 @@ function startedContinuations() {
   return { names: continuationsStartedBy(run, family.records), complete: family.listed && family.unreadable === 0 };
 }
 
-const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, sessions: [] });
+const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, sessions: [] });
 
 function linkedSessions(r, verdicts, planned = null) {
   const { sameRepository, oldRepositoryMeasured } = verdicts;
@@ -5331,7 +5335,7 @@ function linkedSessions(r, verdicts, planned = null) {
   const saved = walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(accountOf(own.file)) : { presets: null, complete: true };
   const decided = decideLinked(walk, {
     edges: led ? led.edges : [],
-    ledgerComplete: !led || (!led.directoryError && !led.truncated),
+    ledgerComplete: !led || (!led.directoryError && !led.truncated && led.refused === 0),
     started: started.names,
     startedComplete: started.complete,
     self: selfSessionId(),
@@ -5348,7 +5352,7 @@ function linkedSessions(r, verdicts, planned = null) {
     ...decided,
     oldRepositoryMeasured,
     unreadable: family.unreadable,
-    ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null,
+    ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null, ledgerRefused: led ? led.refused : null,
   };
 }
 
@@ -5424,7 +5428,10 @@ function linkedSessionLines(state, when, planPass = false) {
     return L;
   }
   if (state.unreadable) L.push(`_${state.unreadable} record(s) in its Claude Desktop folder could not be read, so a linked session may be missing below._`);
-  if (state.ledgerError || state.ledgerTruncated) L.push('_The lineage ledger could not be read completely, so whether a linked session already continues elsewhere is unknown: each such one starts only when the user names it._');
+  if (state.ledgerError || state.ledgerTruncated || state.ledgerRefused) {
+    const refused = state.ledgerRefused ? ` (${state.ledgerRefused} record(s) in \`${briefPath(LEDGER_DIR)}\` were refused, and \`/zensu:session-trail lineage --diagnose\` names each one)` : '';
+    L.push(`_The lineage ledger could not be read completely${refused}, so whether a linked session already continues elsewhere is unknown: each such one starts only when the user names it._`);
+  }
   if (unlisted) L.push(`_The plan answer named ${state.plan.unlisted.length} linked session(s) that this brief does not list, so none of them starts: ${unlisted}. Each was archived, detached or removed after the plan, or never was an open linked session of the old session; name each one to the user in one line._`);
   if (!state.sessions.length) {
     L.push('_the session had no open linked sessions_');
@@ -6614,10 +6621,13 @@ function cmdRelease(opts) {
   }
 }
 
+const LEDGER_REFUSED_SHOWN = 20;
+
 function lineageDiagnose(opts) {
   const { probes, store: resolved } = ccdStoreProbe();
   const led = ledgerRead();
   const edges = led.edges;
+  const refusedShown = led.refusedFiles.slice(0, LEDGER_REFUSED_SHOWN);
   if (opts.json) {
     return print(JSON.stringify({
       configRoot: CONFIG_ROOT,
@@ -6627,6 +6637,8 @@ function lineageDiagnose(opts) {
       edgeCount: edges.length,
       ledgerTruncated: led.truncated, ledgerError: led.directoryError,
       schemaNewer: led.schemaNewer,
+      refusedRecords: led.refused,
+      refusedFiles: refusedShown.map((r) => ({ file: r.file, reason: r.reason })),
       store: resolved,
       probes,
       platform: process.platform,
@@ -6640,6 +6652,11 @@ function lineageDiagnose(opts) {
   { const t = truncatedNote(led); if (t) print(`LEDGER CAP   ${t}`); }
   if (led.directoryError) print(`LEDGER ERROR ${led.directoryError} — the count above is NOT a measurement of what exists.`);
   if (led.schemaNewer) print('LEDGER SCHEMA A record from a NEWER schema was refused; upgrade the plugin to read it.');
+  if (led.refused) {
+    print(`LEDGER REFUSED ${led.refused} record(s) could not be read; while one remains, takeover starts a linked session only when the user names it, and \`lineage --forget\` cannot remove it:`);
+    for (const r of refusedShown) print(`  ${r.reason}  ${oneLine(r.file, 200)}`);
+    if (led.refused > refusedShown.length) print(`  and ${led.refused - refusedShown.length} more not listed`);
+  }
   print(`START TIMES  ${processStartTimeHealth()}`);
   print(`LABELS       ${LABELS_FILE}`);
   print('');
