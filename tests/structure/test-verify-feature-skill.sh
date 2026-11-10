@@ -780,7 +780,7 @@ fi
 PIN_DRIFT=""
 grep -qxF "npm install -g @playwright/cli@${PW_MEASURED:-unset}" "$PLUGIN_DIR/docs/verify-feature.md" || PIN_DRIFT="$PIN_DRIFT docs/verify-feature.md(install block)"
 grep -qF "pinned by a golden recording of \`playwright-cli\` ${PW_MEASURED:-unset}'s parser" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/docs/gates.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT docs/gates.md(golden recording)"
-grep -qF "grader was written against \`playwright-cli\` ${PW_MEASURED:-unset})" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/evals/verify-feature/README.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT evals/verify-feature/README.md"
+grep -qF "the run-config helper accepts only the measured version, \`playwright-cli\` ${PW_MEASURED:-unset}, and the grader" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/evals/verify-feature/README.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT evals/verify-feature/README.md"
 if [ -z "$PIN_DRIFT" ]; then
   check "P7h the fenced install line, the golden-recording sentence and the eval README name the measured version ${PW_MEASURED:-}" PASS
 else
@@ -922,6 +922,27 @@ P9_VERDICTS="$(node -e '
     if (target === -1) throw new Error("no " + heading + " section to move the notes into");
     return rest.slice(0, target + 2).concat(block, rest.slice(target + 2)).join("\n");
   }
+  const PIN = /npm install -g @playwright\/cli@([^\s`"(),;]+)/g;
+  function unreleasedSection(text) {
+    const lines = text.split("\n");
+    const at = lines.indexOf("## [Unreleased]");
+    if (at === -1 || lines.lastIndexOf("## [Unreleased]") !== at) throw new Error("the changelog does not carry exactly one Unreleased heading");
+    let end = at + 1;
+    while (end < lines.length && !/^## /.test(lines[end])) end += 1;
+    return { lines, at, end };
+  }
+  function unreleasedPins(text, measuredVersion) {
+    const { lines, at, end } = unreleasedSection(text);
+    const flat = lines.slice(at + 1, end).join(" ").replace(/\s+/g, " ");
+    const pins = Array.from(flat.matchAll(PIN), (match) => match[1].replace(/\.+$/, ""));
+    const foreign = pins.filter((pin) => pin !== measuredVersion);
+    if (foreign.length) throw new Error("the Unreleased section names " + foreign.map((pin) => "@playwright/cli@" + pin).join(", ") + ", not the measured " + measuredVersion);
+    return pins.length + (pins.length === 1 ? " pin" : " pins") + " at " + measuredVersion;
+  }
+  function withUnreleasedTail(text, injected) {
+    const { lines, end } = unreleasedSection(text);
+    return lines.slice(0, end).concat(injected, "", lines.slice(end)).join("\n");
+  }
   const verdicts = [];
   function scenario(name, run) {
     try { verdicts.push(name + "\tok\t" + run()); }
@@ -937,6 +958,9 @@ P9_VERDICTS="$(node -e '
       const shipped = release(changelog, measured, "99.0.0").released;
       return release(shipped, bumped, "99.1.0").version + " with measured " + bumped;
     });
+    scenario("unreleased-pins", () => unreleasedPins(changelog, measured));
+    scenario("foreign-pin", () => unreleasedPins(withUnreleasedTail(changelog, ["- **synthetic**: Upgrade with `npm install -g @playwright/cli@" + bumped + "`."]), measured));
+    scenario("wrapped-pin", () => unreleasedPins(withUnreleasedTail(changelog, ["- **synthetic**: Upgrade with `npm install -g", "  @playwright/cli@" + bumped + "`."]), measured));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -958,6 +982,18 @@ esac
 case "$(p9_verdict bumped)" in
   ok$'\t'*) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" PASS ;;
   *) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict unreleased-pins)" in
+  ok$'\t'*) check "P9e every npm install pin of @playwright/cli in the Unreleased section names the measured version ($(p9_verdict unreleased-pins | cut -f2))" PASS ;;
+  *) check "P9e every npm install pin of @playwright/cli in the Unreleased section names the measured version ($(p9_verdict unreleased-pins | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict foreign-pin)" in
+  fail$'\t'*'not the measured'*) check "P9f an install pin of another version at the end of the Unreleased section is refused" PASS ;;
+  *) check "P9f an install pin of another version at the end of the Unreleased section is refused (got: $(p9_verdict foreign-pin))" FAIL ;;
+esac
+case "$(p9_verdict wrapped-pin)" in
+  fail$'\t'*'not the measured'*) check "P9g an install pin of another version wrapped after -g at the end of the Unreleased section is refused" PASS ;;
+  *) check "P9g an install pin of another version wrapped after -g at the end of the Unreleased section is refused (got: $(p9_verdict wrapped-pin))" FAIL ;;
 esac
 
 DRIVERS_MD="$SKILL_DIR/rules/drivers.md"

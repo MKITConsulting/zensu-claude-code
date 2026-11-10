@@ -740,7 +740,7 @@ desktop app has no shell prefix at all, so there it can come only from the `env`
 behind a capability broker. Claude Code started that server once per session, and each start
 materialized a private npm runtime of several hundred megabytes whether or not a browser was ever
 opened. The skill now drives `playwright-cli`, which the user installs once
-(`npm install -g @playwright/cli@0.1.21`, the measured version; `brew install playwright-cli` is
+(`npm install -g @playwright/cli@0.1.24`, the measured version; `brew install playwright-cli` is
 unpinned), and the controls the broker
 held moved into this gate and into the run config the browser is opened with.
 
@@ -785,7 +785,7 @@ session is prose, not a boundary.
   `-s=<session>`, `--session <session>` and a literal
   `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read; a session given twice, appended with
   `+=`, or spelled in another letter case or behind a path is refused. The arguments are parsed
-  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.21's
+  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.24's
   parser; an argument shape it does not recognize is denied rather than admitted — an option
   outside the allowlist on a `zensu-verify` call, and a plain call whose text names a
   `zensu-verify` session that the parser does not resolve as the call's session. **Accepted
@@ -827,7 +827,7 @@ run-config helper resolves each hostname once, refuses a non-public or mixed ans
 the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
 an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
 itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
-fence a WebSocket connection — measured with playwright-cli 0.1.21, an open gap. Nor does it refuse a
+fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
 line after every navigating call and stops a scenario that left the approved set. Nothing
 enforces routes: the evidence boundary is the origin, which the launch policy names or the human
@@ -956,7 +956,8 @@ through Bash.
   a policy too.
 - **`localhost` rests on a browser property no suite exercises.** Admitting it relies on the
   browser answering `localhost` itself before any HOSTS-file or DNS lookup. That was read in
-  Chromium's source and measured on one Chrome build, and no suite drives a real browser, so a
+  Chromium's source and measured on two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
+  156.0.8078.81 with 0.1.23 and 0.1.24), and no suite drives a real browser, so a
   Chromium that stopped serving `localhost` itself would let `/etc/hosts` steer it with every
   check green. `*.localhost` stays refused although the same Chromium code resolves it to
   loopback too.
