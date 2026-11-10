@@ -100,7 +100,11 @@ _zensu_unqualified_change_count() {
   [ -n "$root" ] || { printf 'unavailable'; return 0; }
   command -v git >/dev/null 2>&1 || { printf 'unknown'; return 0; }
   if inside="$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)"; then
-    [ "$inside" = "true" ] || { printf 'unknown'; return 0; }
+    case "$inside" in
+      (true) ;;
+      (false) printf 'unknown'; return 0 ;;
+      (*) printf 'unavailable'; return 0 ;;
+    esac
   else
     inside_err="$(LC_ALL=C _tc_git -C "$root" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
     case "$inside_err" in
@@ -118,6 +122,16 @@ _zensu_unqualified_change_count() {
   tracked="$(_tc_git -C "$root" diff --name-only HEAD 2>/dev/null)" || { printf 'unavailable'; return 0; }
   untracked="$(_tc_git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" || { printf 'unavailable'; return 0; }
   printf '%s\n%s\n' "$tracked" "$untracked" | awk 'length($0) > 0 && !seen[$0]++ { n++ } END { print n + 0 }'
+}
+
+_zensu_transport_unwritten() {
+  echo "$1: the $2 transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space." >&2
+}
+
+_zensu_transport_put() {
+  printf '%s' "$4" > "$2/$3" && return 0
+  _zensu_transport_unwritten "$1" "$3"
+  return 2
 }
 
 _zensu_evr_prepare() {
@@ -143,14 +157,15 @@ _zensu_evr_prepare() {
     echo "$label: the temporary directory cannot be resolved" >&2
     return 2
   }
-  printf '%s' "$(zensu_evidence_full_suite_command)" > "$_evr_dir/full-suite-command"
-  printf '%s' "$(zensu_evidence_full_suite_gate)" > "$_evr_dir/gate-mode"
-  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
-    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix"
-  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
-    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix-scoped"
-  printf '%s' "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" > "$_evr_dir/full-suite-marker"
-  printf '%s' "$(zensu_evidence_ci_config_json)" > "$_evr_dir/ci-config.json"
+  _zensu_transport_put "$label" "$_evr_dir" full-suite-command "$(zensu_evidence_full_suite_command)" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" gate-mode "$(zensu_evidence_full_suite_gate)" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" remedy-prefix "$(printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" remedy-prefix-scoped "$(printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" full-suite-marker \
+    "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" ci-config.json "$(zensu_evidence_ci_config_json)" || return 2
   _evr_msys_excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_DIR ZENSU_EVR_PLUGIN_DATA \
     ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH ZENSU_EVR_WORK_TREE ZENSU_EVR_WORK_DIR)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
@@ -192,9 +207,24 @@ _zensu_full_suite_ticket_matches() {
   [ -n "$current" ] && [ "$current" = "${2:-}" ]
 }
 
+_zensu_full_suite_not_applicable() {
+  local excl
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ -n "${_evr_lib_dir:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_PROJECT_ROOT)" || excl="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$excl" \
+  ZENSU_EVR_LIB="$_evr_lib_dir/evidence-run-v1.js" \
+  ZENSU_EVR_PROJECT_ROOT="$ZENSU_PROJECT_ROOT" \
+    node -e 'const where = require(process.env.ZENSU_EVR_LIB).workTree(process.env.ZENSU_EVR_PROJECT_ROOT); if (where.applicable !== false || typeof where.reason !== "string" || where.reason === "") process.exit(1); process.stdout.write(where.reason);' 2>/dev/null
+}
+
 _zensu_full_suite_gate_unjudged() {
-  local cause="${2:-the full-suite transport failed}" mode=required
+  local cause="${2:-the full-suite transport failed}" mode=required reason
   [ "$(zensu_evidence_full_suite_gate)" = "advisory" ] && mode=advisory
+  if reason="$(_zensu_full_suite_not_applicable)"; then
+    _fsg_lines="FULL SUITE — not-applicable | $reason, so no run can be bound to a tree ($cause) | gate: $mode"
+    return 0
+  fi
   if [ "$_evr_escape" = "1" ]; then
     tdd_record_bypass "${1:-}" ZENSU_FULL_SUITE_GATE >/dev/null 2>&1 || true
     _fsg_lines="FULL SUITE — escaped | ZENSU_FULL_SUITE_GATE=off switched this check off, so no run was read ($cause) | gate: $mode"
@@ -209,10 +239,12 @@ _zensu_full_suite_gate() {
   local session="$1" bound="${2:-}" rc=0
   _fsg_lines=""
   _evr_escape=0
+  _evr_lib_dir=""
   [ "${ZENSU_FULL_SUITE_GATE:-on}" = "off" ] && _evr_escape=1
   if ! _zensu_evr_prepare "zensu-log.sh --chain-done"; then
-    _zensu_full_suite_gate_unjudged "$session" "the full-suite transport could not be prepared"
-    return $?
+    _zensu_full_suite_gate_unjudged "$session" "the full-suite transport could not be prepared" && return 0
+    echo "zensu-log.sh --chain-done: the chain stays open; resolve the full-suite transport fault named above, then run --chain-done again." >&2
+    return 1
   fi
   if [ "$bound" = "bound" ] && ! _zensu_evr_work_tree "$session" "${3:-}"; then
     if ! printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault"; then
@@ -286,7 +318,7 @@ _zensu_avr_prepare() {
     echo "$label: the temporary directory cannot be resolved" >&2
     return 2
   }
-  printf '%s' "$(zensu_evidence_acceptance_gate)" > "$_avr_dir/gate-mode"
+  _zensu_transport_put "$label" "$_avr_dir" gate-mode "$(zensu_evidence_acceptance_gate)" || return 2
   _avr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _avr_bash="bash"
   _avr_msys_excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_DIR ZENSU_AVR_PLUGIN_DATA \
     ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH ZENSU_AVR_WORK_TREE)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
@@ -476,6 +508,19 @@ _zensu_avr_work_tree() {
   return 1
 }
 
+_zensu_acceptance_gate_unjudged() {
+  local cause="${2:-the acceptance transport failed}" mode=required
+  [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && mode=advisory
+  if [ "$_avr_escape" = "1" ]; then
+    tdd_record_bypass "${1:-}" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
+    _avg_lines="ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($cause) | gate: $mode"
+    return 0
+  fi
+  [ "$mode" = "advisory" ] || return 1
+  _avg_lines="ACCEPTANCE — unavailable (advisory, not blocking) | $cause, so no acceptance record was read | gate: advisory"
+  return 0
+}
+
 _zensu_acceptance_gate() {
   local session="$1" rc=0
   _avg_lines=""
@@ -489,11 +534,8 @@ _zensu_acceptance_gate() {
   fi
   [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
   if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session"; then
-    if [ "$_avr_escape" = "1" ]; then
-      tdd_record_bypass "$session" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
-      return 0
-    fi
-    [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && return 0
+    _zensu_acceptance_gate_unjudged "$session" "the acceptance transport could not be prepared" && return 0
+    echo "zensu-log.sh --chain-done: the chain stays open; resolve the acceptance transport fault named above, then run --chain-done again." >&2
     return 1
   fi
   _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || rc=$?
@@ -648,10 +690,10 @@ case "${1:-}" in
     _evr_cwd="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$PWD" 2>/dev/null)" || _evr_cwd=""
     _evr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _evr_bash="bash"
     if [ "$evr_cmd_seen" = true ]; then
-      printf '%s' "$evr_cmd" > "$_evr_dir/command"
+      _zensu_transport_put "zensu-log.sh --evidence-run" "$_evr_dir" command "$evr_cmd" || exit 2
     fi
     if [ "${_ZENSU_EVR_CALLER_PD_SET:-}" = "set" ]; then
-      printf '%s' "${_ZENSU_EVR_CALLER_PD:-}" > "$_evr_dir/caller-project-dir"
+      _zensu_transport_put "zensu-log.sh --evidence-run" "$_evr_dir" caller-project-dir "${_ZENSU_EVR_CALLER_PD:-}" || exit 2
     fi
     _zensu_evr_node "zensu-log.sh --evidence-run" run
     evr_rc=$?
@@ -805,7 +847,10 @@ case "${1:-}" in
       echo "zensu-log.sh --acceptance-record: pass the evidence text on stdin through a quoted heredoc" >&2
       exit 2
     fi
-    head -c 65536 > "$_avr_dir/evidence"
+    head -c 65536 > "$_avr_dir/evidence" || {
+      _zensu_transport_unwritten "zensu-log.sh --acceptance-record" evidence
+      exit 2
+    }
     _zensu_avr_node "zensu-log.sh --acceptance-record" record
     avr_rc=$?
     if [ "$avr_rc" -eq 0 ] && [ -s "$_avr_dir/run-log-line" ]; then

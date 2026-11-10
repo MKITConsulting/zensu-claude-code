@@ -595,6 +595,66 @@ else
   check "A18 arm a ticket-bound chain with a receipt" FAIL
 fi
 
+source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+transport_fault_stub "$WORK/terminus-gate-mode-stub" gate-mode
+UNJUDGED_CAUSE='the acceptance transport could not be prepared'
+GATE_MODE_LINE="zensu-log.sh --chain-done: the gate-mode transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+ACCEPTANCE_STAYS_OPEN='zensu-log.sh --chain-done: the chain stays open; resolve the acceptance transport fault named above, then run --chain-done again.'
+unjudged_done() {
+  PATH="$WORK/terminus-gate-mode-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"
+}
+
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+if arm "acc-unjudged-escape"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ "$LEDGER" = "ZENSU_ACCEPTANCE_GATE" ] \
+    && grep -qF '/gate-mode: ' "$WORK/err" \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($UNJUDGED_CAUSE) | gate: required" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A34 an escaped terminus whose acceptance transport cannot be prepared is ledgered, closes and prints its ACCEPTANCE — escaped line" PASS
+  else
+    check "A34 an escaped terminus whose acceptance transport cannot be prepared is ledgered and closes (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A34 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+printf '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+if arm "acc-unjudged-advisory"; then
+  unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "ACCEPTANCE — unavailable (advisory, not blocking) | $UNJUDGED_CAUSE, so no acceptance record was read | gate: advisory" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A35 an advisory terminus whose acceptance transport cannot be prepared closes and prints its advisory ACCEPTANCE line" PASS
+  else
+    check "A35 an advisory terminus whose acceptance transport cannot be prepared closes (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A35 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+if arm "acc-unjudged-required"; then
+  unjudged_done; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "$ACCEPTANCE_STAYS_OPEN" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — ' "$WORK/err"; then
+    check "A36 a required terminus whose acceptance transport cannot be prepared refuses with the shell's own lines and keeps the chain open" PASS
+  else
+    check "A36 a required terminus whose acceptance transport cannot be prepared refuses (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A36 arm a ticket-bound chain with a receipt" FAIL
+fi
+
 printf '{}\n' > "$ZENSU_CONFIG"
 if arm "acc-both-gates"; then
   observe 'printf ok'
@@ -788,6 +848,32 @@ EVIDENCE
   else
     check "A32 a work-tree fault whose transport write fails stops both acceptance verbs (status=$RC_TST record=$RC_TREC)" FAIL
     cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr"
+  fi
+
+  transport_fault_stub "$WORK/gate-mode-stub" gate-mode
+  transport_fault_stub "$WORK/evidence-stub" evidence
+  PATH="$WORK/gate-mode-stub:$PATH" bash "$LOG" --acceptance-status --log "$RUN_LOG" >"$WORK/sout" 2>"$WORK/serr"; RC_GST=$?
+  PATH="$WORK/gate-mode-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/rout" 2>"$WORK/rerr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_GREC=$?
+  PATH="$WORK/evidence-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/vout" 2>"$WORK/verr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_VREC=$?
+  A33_TAIL="transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+  if [ "$RC_GST" -eq 2 ] && [ "$RC_GREC" -eq 2 ] && [ "$RC_VREC" -eq 2 ] \
+    && [ ! -s "$WORK/sout" ] && [ ! -s "$WORK/rout" ] && [ ! -s "$WORK/vout" ] \
+    && grep -qF '/gate-mode: ' "$WORK/serr" \
+    && grep -qxF "zensu-log.sh --acceptance-status: the gate-mode $A33_TAIL" "$WORK/serr" \
+    && grep -qF '/gate-mode: ' "$WORK/rerr" \
+    && grep -qxF "zensu-log.sh --acceptance-record: the gate-mode $A33_TAIL" "$WORK/rerr" \
+    && grep -qF '/evidence: ' "$WORK/verr" \
+    && grep -qxF "zensu-log.sh --acceptance-record: the evidence $A33_TAIL" "$WORK/verr"; then
+    check "A33 a failed gate-mode or evidence transport write stops the acceptance verbs with exit 2 and the shell's own line, before the module runs" PASS
+  else
+    check "A33 a failed gate-mode or evidence transport write stops the acceptance verbs (status=$RC_GST record=$RC_GREC evidence=$RC_VREC)" FAIL
+    cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr" "$WORK/vout" "$WORK/verr"
   fi
 else
   check "A29 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL

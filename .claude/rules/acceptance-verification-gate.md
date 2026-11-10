@@ -100,11 +100,34 @@ terminus stays silent (`test-chain-terminus-zero-change-gate.sh` G1), and so doe
 `tdd_mark_review_converged` without a terminus, and a bound one runs `--chain-done --outcome
 max-rounds` with its output discarded. `MAX_ROUNDS_VERDICTS` in the post-review hook tells the
 renderer to show both verdicts as not checked. `ZENSU_ACCEPTANCE_GATE=off` is read only after the
-bound and `not-applicable` answers, so it is ledgered only where the gate applies.
+bound and `not-applicable` answers, so it is ledgered only where the gate applies, with one
+exception, a failed preparation.
+
+**A failed preparation answers in the shell.** When the transport cannot be prepared at a
+ticket-bound standalone terminus (no `node`, an unresolvable module, plugin data or receipt path,
+no temporary directory, or a transport write that fails), `_zensu_acceptance_gate_unjudged`
+answers as `_zensu_full_suite_gate_unjudged` does for the full suite: an escaped gate is ledgered
+and passes with `ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no
+acceptance record was read (<cause>) | gate: <mode>`, an advisory gate passes with
+`ACCEPTANCE — unavailable (advisory, not blocking) | <cause>, so no acceptance record was read |
+gate: advisory`, and a required gate refuses with `the chain stays open; resolve the acceptance
+transport fault named above, then run --chain-done again.` and no `ACCEPTANCE` line (`A34` to
+`A36`). Both passing lines print after the transition, so the CHAIN-END SUMMARY carries them, and
+they are the lines `docs/configuration.md` promises for the escape and for the advisory mode,
+which the arm used to skip in silence. Unlike the full-suite arm it has no not-applicable step:
+the module answers `not-applicable` from the edit-landing receipt and the git status, which the
+shell cannot judge without the module, so the escape is ledgered even where the module would have
+answered `not-applicable`. That over-discloses and never passes in silence. A transport write that
+fails (`gate-mode`, and `evidence` for `--acceptance-record`) stops both verbs with exit 2 and the
+shell's own line before the module runs (`A33`, the fail-closed transport in
+`.claude/rules/evidence-runner.md`). The bound arm still discards a failed preparation without a
+line: its `not-checked` line is the module's text and gates nothing.
 
 **Coupled sites:** `ZENSU_BYPASS_GATE_ALLOWLIST` and `tdd_bypass_recorded` in
 `zensu-tdd-phase.sh`; both protected-root lists in `reviewer-capability-v1.js`;
-`zensu_evidence_acceptance_gate` in `zensu-config.sh`; `SCOPES`/`TREE_SCOPES` and per-scope
+`zensu_evidence_acceptance_gate` in `zensu-config.sh`; `_zensu_acceptance_gate_unjudged` in
+`zensu-log.sh`, whose escaped line repeats the module's escaped wording with the cause appended
+(`A15` pins the module's, `A34` the shell's); `SCOPES`/`TREE_SCOPES` and per-scope
 retention in `evidence-run-v1.js`; the `receipt-log` call and its exit handling in
 `--tdd-complete`; step 6d in `skills/build/references/audit.md`, Phase 1.5 in `references/planning.md` and step 2c in `references/review-chain.md`; the
 re-verification paragraph, finalize steps and the `Acceptance` row of
