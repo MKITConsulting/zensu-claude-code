@@ -235,11 +235,16 @@ fi
 echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:change · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:build · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
 _ZENSU_CLI_PROBE=""
 if command -v node >/dev/null 2>&1; then
-  _ZENSU_CLI_PROBE="$(cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null && node -e 'process.exitCode = require("./zensu-cli-version-v1.js").cliMain(["--lookup"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" || _ZENSU_CLI_PROBE=""
+  _ZENSU_CLI_PROBE="$(cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null && node -e '
+    const cli = require("./zensu-cli-version-v1.js");
+    process.exitCode = cli.cliMain(["--lookup"], process.stdout) ? 0 : 2;
+    process.stdout.write("reason=" + cli.FLOOR_REASON + "\nupgrade=" + cli.INSTALL.homebrewUpgrade + "\nscript=" + cli.INSTALL.script + "\npowershell=" + cli.INSTALL.powershell + "\n");
+  ' </dev/null 2>/dev/null)" || _ZENSU_CLI_PROBE=""
 fi
-_ZENSU_CLI_STATE="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^state=//p')"
-_ZENSU_CLI_VERSION="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^version=//p')"
-_ZENSU_CLI_FLOOR="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^floor=//p')"
+_zensu_cli_field() { printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n "s/^$1=//p"; }
+_ZENSU_CLI_STATE="$(_zensu_cli_field state)"
+_ZENSU_CLI_VERSION="$(_zensu_cli_field version)"
+_ZENSU_CLI_FLOOR="$(_zensu_cli_field floor)"
 _ZENSU_CLI_AUTH_HINT=" On an auth error run: zensu auth login."
 _ZENSU_CLI_LOGIN_STEP=" — then: zensu auth login"
 if [ -n "${ZENSU_SESSION_TOKEN:-}" ]; then
@@ -248,7 +253,7 @@ if [ -n "${ZENSU_SESSION_TOKEN:-}" ]; then
 fi
 if command -v zensu >/dev/null 2>&1; then
   case "$_ZENSU_CLI_STATE" in
-    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release this plugin supports: older releases cannot declare a goal's feature, so AI-work capture fails. Upgrade: brew update && brew upgrade --cask mkitconsulting/tap/zensu, or run the installer again: curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex." ;;
+    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release this plugin supports: $(_zensu_cli_field reason). Upgrade: $(_zensu_cli_field upgrade), or run the installer again: $(_zensu_cli_field script), or on Windows $(_zensu_cli_field powershell)." ;;
     (ok) echo "zensu: CLI ready ($(command -v zensu), $_ZENSU_CLI_VERSION) — Zensu skills drive it.$_ZENSU_CLI_AUTH_HINT" ;;
     (*) echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it.$_ZENSU_CLI_AUTH_HINT" ;;
   esac
