@@ -1,0 +1,14 @@
+{
+  "description": "A WebP image whose content is lossy.",
+  "inScope": [
+    "AC-001"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "file.type",
+        "at": "files.d475104ad1ea41c9863e85b93d0f48c6588b6ba8c655cd91cf3f828f1464d99e.type"
+      }
+    ]
+  }
+}

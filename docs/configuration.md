@@ -194,7 +194,7 @@ The plugin **deep-MERGES** the config files field by field to build the effectiv
 
 A missing or malformed file is treated as `{}`, and any key absent from the merged result falls back to the hook's built-in default. So a downstream project can commit a project-local `.zensu/config.json` that sets only a few keys (e.g. enabling `autoFixIncludeSuggestions:true`) and the developer's other global settings still apply.
 
-**Three keys deviate from this section.** `hooks.reviewerSpawnAutoAllow` and `hooks.subagentShell` are exempt from the merge and the per-key overlay, while `ZENSU_CONFIG` still replaces the global file and the project overlay outright. Both follow the `zensu_hook_enabled_strict` rules rather than the merged `cfg()` — the shell reader itself for `reviewerSpawnAutoAllow`, and a port of it inside the capability gate for `subagentShell` — because each governs a capability the plugin grants ITSELF rather than a protection it runs. There is no merge and no per-key overlay: a `false` in ANY candidate withdraws the grant, so a project-local file cannot re-arm one the user withdrew globally; a present-but-malformed candidate withdraws it instead of degrading to `{}`; and an empty candidate list withdraws it rather than falling back to the built-in default. Their rows above state the full rule. `hooks.sessionAutoAdopt` deviates in ONE respect: `false` is sticky across the layers, while an unreadable or malformed layer degrades to enabled as it does for every ordinary key, because enabled runs a repair rather than a bypass; its row above states that rule. No other key should be given either treatment without the same argument.
+**Four keys deviate from this section.** `hooks.reviewerSpawnAutoAllow` and `hooks.subagentShell` are exempt from the merge and the per-key overlay, while `ZENSU_CONFIG` still replaces the global file and the project overlay outright. Both follow the `zensu_hook_enabled_strict` rules rather than the merged `cfg()` — the shell reader itself for `reviewerSpawnAutoAllow`, and a port of it inside the capability gate for `subagentShell` — because each governs a capability the plugin grants ITSELF rather than a protection it runs. There is no merge and no per-key overlay: a `false` in ANY candidate withdraws the grant, so a project-local file cannot re-arm one the user withdrew globally; a present-but-malformed candidate withdraws it instead of degrading to `{}`; and an empty candidate list withdraws it rather than falling back to the built-in default. Their rows above state the full rule. `hooks.sessionAutoAdopt` deviates in ONE respect: `false` is sticky across the layers, while an unreadable or malformed layer degrades to enabled as it does for every ordinary key, because enabled runs a repair rather than a bypass; its row above states that rule. `evidence.report.maxBytes` is read from the user layers alone (`ZENSU_CONFIG`, else the global file), and a project value is ignored and disclosed, because the size sweep it drives deletes the reports of every repository in the store, so a committed file must not reach another repository's reports; its row under Evidence Reports states that rule. No other key should be given any of these treatments without the same argument.
 
 > If your project commits a `.zensu/config.json` and a developer also has `~/.zensu/config.json`, the two are **merged field by field** — the project-local file wins per key, and keys it omits keep the developer's global value. Use `ZENSU_CONFIG=/path/to/other.json` to bypass the merge entirely for one session.
 
@@ -322,6 +322,53 @@ prints it as an `ACCEPTANCE STATUS — unavailable` summary line.
 | Key | Default | Effect |
 |---|---|---|
 | `evidence.acceptanceGate` | `required` | How `--chain-done` applies the acceptance verdict: `required` refuses while an active criterion lacks a `pass` on the current tree; `advisory` prints the same verdict marked `(advisory, not blocking)` and closes the chain. Any other value is treated as `required`, and the verdict says so. |
+
+### Evidence Reports
+
+An evidence report is one static page per `/zensu:verify-feature` run: every criterion, every row
+of the evidence matrix and every capture, kept outside the repository
+([the evidence report spec](verify-feature-evidence-report-spec.md)). The core module and its
+verbs ship first; the skill does not call them yet. Every verb is bound to the session and its
+project root, and free text (a feature, a caption, a step's title, expected and observed text, a
+limitation) arrives on stdin, never as an argument:
+
+```bash
+CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" --report-begin --run-dir <run dir> --drivers browser,api <<'FIELDS'
+feature: The settings page saves the chosen locale
+AC-001: The locale persists after a reload
+FIELDS
+CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" --report-add --report <id> --kind image --file <run dir>/browser/shot.png --viewport 1440x900@2 <<'CAPTION'
+The settings page after a reload shows the new locale
+CAPTION
+CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" --report-step --report <id> --priority P0 --driver browser --result pass --criteria AC-001 --evidence e1 <<'FIELDS'
+title: Save the locale
+expected: The page shows the new locale after a reload
+observed: The page shows the new locale after a reload
+FIELDS
+CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" --report-render --report <id> --verdict PASS <<'SECTIONS'
+limitation: No mobile viewport was checked
+SECTIONS
+```
+
+| Verb | Effect |
+|---|---|
+| `--report-begin` | Creates a report with a `vr1_…` id for the run directory, which must be a physical directory inside the project's work tree, records the mode (`--mode local\|remote`, `--origin` in remote mode, `--attach`), the drivers, an optional `--recipe` and the target identity, and runs the retention sweep. With `--log <run log>` the report belongs to the chain this session's edit-landing receipt names and takes its criteria from the plan; without it, the `AC-###:` lines on stdin are its criteria. |
+| `--report-add` | `--kind image` copies a PNG or a lossless WebP and `--kind text` UTF-8 text without markup from inside the run directory into the store; the type is read from the content, the caption from stdin, and a text file passes the secret screen and the path redaction before it is stored. A symlink, a hard link, a file outside the run directory, a file over 50 MiB and a report past 2,000 files are refused. `--kind request` (`--method`, `--path`, `--status`), `--kind signal` (`--source`, `--class`, the message on stdin) and `--kind run` (`--evidence-run <er1 id>`) record no file. It prints the evidence id, `e1` onward. |
+| `--report-step` | Appends one numbered row of the evidence matrix: `--priority P0\|P1\|P2`, `--driver`, `--result pass\|fail\|skip`, `--criteria`, `--evidence` and, after a manual login, `--authenticated`; `title:`, `expected:` and `observed:` on stdin. |
+| `--report-render` | Folds the coverage (chain mode, with `--log`: the acceptance states at render time; matrix mode: the states the rows imply), checks the stated `--verdict PASS\|FAIL\|PARTIAL` and every file, and writes `manifest.json` and `index.html`. `--console` and `--network` take `clean`, `issues` or `not-checked`; stdin may carry `limitation:`, `resource:` and `consent: <origin> <route> <asked\|remembered\|policy-mode>` lines. A refusal names each fault by its code and remedy and writes nothing. A rendered report is immutable. |
+| `--report-list` | Lists this repository's reports newest first, `--limit` of them (default 20). |
+| `--report-export` | Writes `export.html` into a rendered bundle: one page with every image inlined. |
+
+The verbs exit `0` when done, `1` on a refusal, `2` on a usage fault (a flag that is unknown,
+repeated, missing or malformed) or an environment fault, and `3` when reports are switched off. A report lives in `$CLAUDE_PLUGIN_DATA/evidence-report/v1/<repository>/<id>/`,
+or under `evidence.report.dir`, with its session binding in `<id>.binding.json` beside it.
+
+| Key | Default | Effect |
+|---|---|---|
+| `evidence.report.enabled` | `true` | `false` makes `--report-begin` exit `3` without creating a report. Any other value leaves reports on. |
+| `evidence.report.dir` | unset | An absolute directory for the store instead of the plugin data directory. A store inside a git work tree is refused unless git reports the path ignored. A relative value is ignored, and the verb says so. |
+| `evidence.report.keep` | `30` | The reports kept per repository, an integer from 1 to 100000. Each `--report-begin` deletes the oldest reports of its own repository beyond it and never touches another repository's. It never deletes the report being written, a report whose lock another call holds, or an unrendered report touched within the last 14 days. Any other value falls back to the default, and the verb says so. |
+| `evidence.report.maxBytes` | `2147483648` | The most bytes the whole store holds, a positive integer; past it the oldest reports of every repository are deleted first, with the same exceptions. It is read from the user configuration only (`~/.zensu/config.json` or `ZENSU_CONFIG`), because the sweep it drives deletes other repositories' reports: a value in a project's `.zensu/config.json` is ignored, and the verb says so. Any other value falls back to the default, and the verb says so. |
 
 ### Claude Environment and Native Placeholders
 

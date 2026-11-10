@@ -5,8 +5,7 @@ live in `.claude/rules/`, one file per subsystem. Each rule file declares `paths
 Claude Code loads it only when a matching file is read. When a task touches a subsystem without
 opening its files, open the rule file from the index at the end of this file.
 
-A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the rule
-file listed under that title in the index.
+A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the rule file listed under that title in the index.
 
 ## Keeping This File Small
 
@@ -128,6 +127,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Evidence Runner and Full-Suite Gate (`hooks/lib/evidence-run-v1.js` + `zensu-log.sh --evidence-run` / `--chain-done`)** — the plugin-run full suite, its tree-bound record and the terminus gate: `.claude/rules/evidence-runner.md`
 - **Full Suite in CI (`ci-contract-v1.js` + `full-suite-policy-v1.js` + `/zensu:full-suite`)** — leaving a chain's full suite to the verified CI pull-request pipeline, the asymmetric ladder and the chain snapshot: `.claude/rules/full-suite-ci-deferral.md`
 - **Acceptance Verification Gate (`hooks/lib/acceptance-verify-v1.js` + `zensu-log.sh --acceptance-record` / `--acceptance-status` / `--chain-done`)** — per-criterion live verification records, the receipt-anchored plan and the terminus refusal: `.claude/rules/acceptance-verification-gate.md`
+- **Evidence Report Core (`hooks/lib/evidence-report-v1.js` + `zensu-log.sh --report-*`)** — the host-agnostic report owner, its verbs and transport, the store and its placement, containment, the text screen, the fault codes, the corpus and retention: `.claude/rules/evidence-report.md`
 - **Windows Budget for `best-solution-first`** — why a Windows shard budget, not a suite cap, binds: `.claude/rules/windows-budget-best-solution-first.md`
 - **Runtime Lineage (`version_type` is load-bearing)** — the full `version_type` policy and its breaking-change list: `.claude/rules/runtime-lineage.md`
 - **Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)** — `/zensu:adopt-session` and the pruned-installation state: `.claude/rules/session-adoption.md`

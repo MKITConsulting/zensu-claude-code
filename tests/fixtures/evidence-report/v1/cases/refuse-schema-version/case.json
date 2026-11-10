@@ -1,0 +1,12 @@
+{
+  "description": "A manifest that names another schema version.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.value",
+        "at": "schema"
+      }
+    ]
+  }
+}

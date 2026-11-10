@@ -252,6 +252,9 @@ time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
 (`.claude/rules/multi-repo-stage1.md`). A change to the split here moves both copies too.
 `workTreeTop` reads the same `NO_WORK_TREE_RE` for the external-review root rule and also
 places a root outside git when no `git` binary exists (`.claude/rules/external-review-import.md`).
+`evidence-report-v1.js` reads the split only through the exported `outsideWorkTree` and
+`workTreeTop`, and runs git only through the exported `git`, whose failure answer carries the exit
+`status` its `check-ignore` call needs.
 The same options argument of `computeTree` takes `excluded`, a list of root-relative paths it
 drops beside `.zensu`, matched literally; only the external review passes one, the `.zensu` of a
 session whose project root lies below the top level it fingerprints, and every runner caller

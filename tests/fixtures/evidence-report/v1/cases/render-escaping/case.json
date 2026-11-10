@@ -1,0 +1,9 @@
+{
+  "description": "Markup, quotes, ampersands, backticks and non-ASCII text in every free-text field.",
+  "inScope": [
+    "AC-001"
+  ],
+  "expect": {
+    "rendering": "sha256:51817f67ecfed9c94936fea800f5636d31eb3528fb7619b13f3029818195cd3a"
+  }
+}

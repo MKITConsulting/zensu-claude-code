@@ -1,0 +1,12 @@
+{
+  "description": "A top-level key schema version 1 does not define.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.unknown-key",
+        "at": "extra"
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "A file no evidence item references.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "file.unreferenced",
+        "at": "files.69b2115faa01e52a7362820613d8baa1d42a5b027b2ed58d79d91f9696c62688"
+      }
+    ]
+  }
+}

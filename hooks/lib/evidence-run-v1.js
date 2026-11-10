@@ -321,15 +321,19 @@ function git(root, args, options = {}) {
   if (result.error) return { ok: false, code: result.error.code || null, reason: result.error.code === 'ETIMEDOUT' ? 'git timed out' : `git unavailable (${result.error.code || result.error.message})` };
   if (result.status !== 0) {
     const stderr = String(result.stderr || '').trim().split('\n')[0] || `exit ${result.status}`;
-    return { ok: false, reason: `git ${args[0]} failed: ${stderr.slice(0, 160)}` };
+    return { ok: false, status: result.status, reason: `git ${args[0]} failed: ${stderr.slice(0, 160)}` };
   }
   return { ok: true, stdout: result.stdout };
+}
+
+function outsideWorkTree(result) {
+  return result.code === 'ENOENT' || NO_WORK_TREE_RE.test(result.reason || '');
 }
 
 function workTreeTop(directory, limits = LIMITS) {
   const result = git(directory, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
   if (!result.ok) {
-    return result.code === 'ENOENT' || NO_WORK_TREE_RE.test(result.reason) ? { top: null, reason: null } : { top: null, reason: result.reason };
+    return outsideWorkTree(result) ? { top: null, reason: null } : { top: null, reason: result.reason };
   }
   const printed = result.stdout.trim();
   if (printed === '') return { top: null, reason: 'git rev-parse printed no top level' };
@@ -1432,6 +1436,8 @@ module.exports = {
   writeRecordAtomic,
   listRecords,
   gitEnvironment,
+  git,
+  outsideWorkTree,
   workTree,
   workTreeTop,
   runDirectory,

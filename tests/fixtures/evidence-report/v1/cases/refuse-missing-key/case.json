@@ -1,0 +1,12 @@
+{
+  "description": "A manifest without its sections object.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.missing-key",
+        "at": "sections"
+      }
+    ]
+  }
+}

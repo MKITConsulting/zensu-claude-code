@@ -1,0 +1,12 @@
+{
+  "description": "A remote run whose target names no origin.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.value",
+        "at": "target.origin"
+      }
+    ]
+  }
+}

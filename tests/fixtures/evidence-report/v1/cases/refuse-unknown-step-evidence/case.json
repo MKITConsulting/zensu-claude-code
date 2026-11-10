@@ -1,0 +1,15 @@
+{
+  "description": "A step that links an evidence id the manifest does not hold.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "step.unknown-evidence",
+        "at": "steps[0].evidence"
+      }
+    ]
+  }
+}
