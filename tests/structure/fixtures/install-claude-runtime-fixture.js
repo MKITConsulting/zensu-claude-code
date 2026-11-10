@@ -5,6 +5,13 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const {
+  BumpRefusal,
+  bumpMarketplaceEntry,
+  namedEntry,
+} = require(path.join(__dirname, '..', '..', '..', '.github', 'scripts', 'bump-marketplace-entry.js'));
+
+const ENTRY_REFUSALS = new Set(['bad-name', 'no-plugins', 'entry-count']);
 
 class InstallerFailure extends Error {
   constructor(message) {
@@ -336,15 +343,21 @@ function install(argv, hooks = {}) {
     }
     const marketplaceFile = path.join(runtime, '.claude-plugin', 'marketplace.json');
     const marketplace = JSON.parse(fs.readFileSync(marketplaceFile, 'utf8'));
-    if (!Array.isArray(marketplace.plugins) || marketplace.plugins.length !== 1
-        || marketplace.plugins[0]?.name !== manifest.name) {
-      fail('marketplace fixture does not contain the exact plugin entry');
+    let bumped;
+    try {
+      const entry = namedEntry(marketplace, manifest.name);
+      bumped = bumpMarketplaceEntry(marketplace, {
+        name: manifest.name,
+        version,
+        ref: entry.source?.source === 'github' ? `v${version}` : null,
+      });
+    } catch (error) {
+      if (!(error instanceof BumpRefusal)) throw error;
+      fail(ENTRY_REFUSALS.has(error.code)
+        ? 'marketplace fixture does not contain the exact plugin entry'
+        : `marketplace fixture cannot be bumped: ${error.message}`);
     }
-    marketplace.plugins[0].version = version;
-    if (marketplace.plugins[0].source?.source === 'github') {
-      marketplace.plugins[0].source.ref = `v${version}`;
-    }
-    replaceRegularJson(marketplaceFile, marketplace);
+    replaceRegularJson(marketplaceFile, bumped);
 
     if (typeof hooks.beforeFinalRootReady === 'function') {
       hooks.beforeFinalRootReady({

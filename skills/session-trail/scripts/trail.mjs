@@ -6205,10 +6205,10 @@ function cmdAdopt(opts) {
 function gitChildEnvironment() {
   let gitEnvironment = null;
   try {
-    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/worktree-keep-v1.js'));
+    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/git-environment-v1.js'));
   } catch { gitEnvironment = null; }
   if (typeof gitEnvironment !== 'function') {
-    fail('hooks/lib/worktree-keep-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
+    fail('hooks/lib/git-environment-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
   }
   return gitEnvironment(process.env);
 }

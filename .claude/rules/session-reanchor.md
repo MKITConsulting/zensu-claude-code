@@ -177,6 +177,15 @@ The re-anchor runs only in a bound session, the recognizer admits it in no shape
 (`test-session-reanchor.sh` E8), and the user-facing spelling stays `/zensu:adopt-session
 --reanchor` because the skill routes that argument to the other script.
 
+**The wrapper refuses a missing or symlinked module before node loads it.** The
+`ZSR_REQUIRED_MODULES` table in `zensu-session-reanchor.sh` lists the top-level require closure
+of `session-reanchor-v1.js`, and its row-count guard must equal the number of rows. `E0r` in
+`test-session-reanchor.sh` derives that closure from every line-start `const`, `let` or `var`
+statement that requires a literal `./x.js`, following each module it reaches, and fails on any
+difference; `E0r2` holds the guard to the row count. A require inside a function, such as the lazy
+loads of `session-auto-adopt-v1.js` and `powershell-command-v1.js`, is outside both the walk and
+the table, and the walk does not see a computed or extension-less specifier either.
+
 **Skills follow the anchor through `zensu-log.sh --project-root`.** The verb prints the
 `CLAUDE_PROJECT_DIR` its binding case exports — the record's `project_root`, validated by
 `zensu_resolve_project_dir` — writes nothing, and refuses any argument with exit 2. The host keeps
