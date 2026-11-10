@@ -5152,10 +5152,135 @@ z107g_case recorded-root-off off "off (hooks.zenMode=false)" EMPTY "first prompt
 rm -f "$P107G/.zensu/config.json"
 printf '%s' '{"hooks":{"zenMode":false}}' > "$Q107G/.zensu/config.json"
 z107g_case host-directory-off on "on (hooks.zenModeDefault)" "UserPromptSubmit|ON" "second prompt" "zen-mode default: off for every session (hooks.zenMode=false)" LINE
-rm -rf "$P107G" "$Q107G"
 [ -z "$Z107G_BAD" ] \
   && check "Z107g the hook, the /zensu:doctor session row, --status and the SessionStart banner read hooks.zenMode under the session's recorded root while CLAUDE_PROJECT_DIR names another tree: the recorded root's overlay switches all four off and the other tree's overlay switches none of them, while the doctor's zen-mode default: row, read from its config block, says that the zen-mode: row describes the session" PASS \
   || check "Z107g hooks.zenMode not read under the recorded root:$Z107G_BAD" FAIL
+
+Z107H_LINE="zensu-zen-mode.sh: hooks.zenMode is false in the config read under the session's recorded project root, where the re-injection hook reads it too, so the hook is off"
+Z107H_ERR="$CONTROL_TMP/z107h.err"
+z107h_status() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107G" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$Q107G" env -u ZENSU_CONFIG \
+    bash "$HELPER" --status 2>"$Z107H_ERR"
+}
+rm -f "$P107G/.zensu/config.json"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$Q107G/.zensu/config.json"
+Z107H_BAD=""
+Z107H_OUT="$(z107h_status)"
+[ "$Z107H_OUT" = on ] || Z107H_BAD="$Z107H_BAD [host-directory-off status='$Z107H_OUT']"
+[ ! -s "$Z107H_ERR" ] || Z107H_BAD="$Z107H_BAD [host-directory-off stderr='$(head -c 200 "$Z107H_ERR")']"
+rm -f "$Q107G/.zensu/config.json"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$P107G/.zensu/config.json"
+Z107H_OUT="$(z107h_status)"
+[ "$Z107H_OUT" = off ] || Z107H_BAD="$Z107H_BAD [recorded-root-off status='$Z107H_OUT']"
+[ "$(cat "$Z107H_ERR")" = "$Z107H_LINE" ] || Z107H_BAD="$Z107H_BAD [recorded-root-off stderr='$(head -c 200 "$Z107H_ERR")']"
+[ -z "$Z107H_BAD" ] \
+  && check "Z107h --status names the session's recorded project root on stderr, with a bare off on stdout, when hooks.zenMode is false in that root's overlay, and writes nothing to stderr when only the CLAUDE_PROJECT_DIR tree's overlay sets it" PASS \
+  || check "Z107h --status stderr does not name the recorded root:$Z107H_BAD" FAIL
+
+Z107I_BIN="$CONTROL_TMP/z107i-bin"
+mkdir -p "$Z107I_BIN"
+cat > "$Z107I_BIN/node" <<'STUB'
+#!/bin/bash
+kind=x
+case "$*" in
+  (*'core.readContext({ recordsDir, sessionId: key })'*) kind=root ;;
+esac
+printf '%s\n' "$kind" >> "$Z107I_CALLS"
+exec "$Z107I_NODE" "$@"
+STUB
+chmod +x "$Z107I_BIN/node"
+Z107I_NODE="$(command -v node)"
+z107i_hook() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$S107G" "$1" \
+    | PATH="$Z107I_BIN:$PATH" Z107I_CALLS="$2" Z107I_NODE="$Z107I_NODE" HOME="$Z107_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+      CLAUDE_PROJECT_DIR="$Q107G" env -u ZENSU_CONFIG bash "$HOOK" 2>/dev/null | classify
+}
+z107i_count() {
+  if [ -f "$1" ]; then grep -c "$2" "$1" | tr -d ' '; else printf '0'; fi
+}
+rm -f "$Q107G/.zensu/config.json"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$P107G/.zensu/config.json"
+Z107I_BAD=""
+Z107I_OFF="$CONTROL_TMP/z107i-off.calls"
+Z107I_GOT="$(z107i_hook "third prompt" "$Z107I_OFF")"
+[ "$Z107I_GOT" = EMPTY ] || Z107I_BAD="$Z107I_BAD [recorded-root-off hook='$Z107I_GOT']"
+[ "$(z107i_count "$Z107I_OFF" '^root$')" = 0 ] || Z107I_BAD="$Z107I_BAD [recorded-root-off root verifications=$(z107i_count "$Z107I_OFF" '^root$')]"
+[ "$(z107i_count "$Z107I_OFF" '^x$')" -ge 1 ] || Z107I_BAD="$Z107I_BAD [recorded-root-off: the node shim saw no call, so the count proves nothing]"
+rm -f "$P107G/.zensu/config.json"
+Z107I_ON="$CONTROL_TMP/z107i-on.calls"
+Z107I_GOT="$(z107i_hook "fourth prompt" "$Z107I_ON")"
+[ "$Z107I_GOT" = "UserPromptSubmit|ON" ] || Z107I_BAD="$Z107I_BAD [no overlay hook='$Z107I_GOT']"
+[ "$(z107i_count "$Z107I_ON" '^root$')" = 1 ] || Z107I_BAD="$Z107I_BAD [no overlay root verifications=$(z107i_count "$Z107I_ON" '^root$')]"
+[ -z "$Z107I_BAD" ] \
+  && check "Z107i with hooks.zenMode false in the recorded root's overlay the hook exits before it verifies the root, so that path starts no zensu_resolve_project_dir node child, while the enabled path verifies the root exactly once for the marker" PASS \
+  || check "Z107i the disabled path verifies the root, or the enabled path does not verify it exactly once:$Z107I_BAD" FAIL
+rm -rf "$P107G" "$Q107G"
+
+Z107J_SLICE="$CONTROL_TMP/z107j-slice.sh"
+awk '
+  on { print }
+  on && $0 == "esac" { exit }
+  $0 == "zensu_bind_hook_session \"$INPUT\" || exit 0" { on = 1 }
+' "$HOOK" > "$Z107J_SLICE"
+Z107J_N="$(wc -l < "$Z107J_SLICE" | tr -d ' ')"
+Z107J_LAST="$(sed -n '$p' "$Z107J_SLICE")"
+cat >> "$Z107J_SLICE" <<'SLICE'
+printf 'reached:%s' "$ZEN_FLAG_ROOT"
+SLICE
+z107j_run() {
+  local out rc
+  out="$(OSTYPE="$1" ZENSU_SESSION_KEY=z107j ZENSU_PROJECT_ROOT="$2" bash "$Z107J_SLICE" 2>/dev/null)"
+  rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+z107j_want() {
+  local got
+  got="$(z107j_run "$1" "$2")"
+  [ "$got" = "$3" ] || Z107J_BAD="$Z107J_BAD [$4: got '$got']"
+}
+z107j_line() {
+  local hits
+  hits="$(grep -nxF -- "$1" "$HOOK" | cut -d: -f1)"
+  case "$hits" in
+    (''|*[!0-9]*) printf '0' ;;
+    (*) printf '%s' "$hits" ;;
+  esac
+}
+Z107J_BAD=""
+Z107J_REAL="$CONTROL_TMP/z107j-real"
+Z107J_ALIAS="$CONTROL_TMP/z107j-alias"
+mkdir -p "$Z107J_REAL"
+if [ "$Z107J_LAST" != esac ] || [ "$Z107J_N" -gt 12 ]; then
+  Z107J_BAD="$Z107J_BAD [no slice of at most 12 lines runs from the session bind to the end of the flag-root render]"
+else
+  if ln -s "$Z107J_REAL" "$Z107J_ALIAS" 2>/dev/null && [ -L "$Z107J_ALIAS" ]; then
+    Z107J_PHYS="$(cd -P -- "$Z107J_REAL" && pwd -P)"
+    z107j_want msys "$Z107J_ALIAS" "0|reached:$Z107J_PHYS" "msys alias"
+    z107j_want cygwin "$Z107J_ALIAS" "0|reached:$Z107J_PHYS" "cygwin alias"
+    z107j_want linux-gnu "$Z107J_ALIAS" "0|reached:$Z107J_ALIAS" "posix alias"
+  elif [ "$IS_WINDOWS" = true ]; then
+    skipcheck "Z107j alias arms — native directory symlinks are unavailable on this host"
+  else
+    Z107J_BAD="$Z107J_BAD [symlink fixture creation failed]"
+  fi
+  z107j_want msys "" "0|" "msys empty root"
+  z107j_want linux-gnu "" "0|" "posix empty root"
+  z107j_want msys "$CONTROL_TMP/z107j-missing" "0|" "msys missing root"
+fi
+Z107J_BIND="$(z107j_line 'zensu_bind_hook_session "$INPUT" || exit 0')"
+Z107J_GUARD="$(z107j_line '[ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 0')"
+Z107J_READ="$(z107j_line 'zensu_hook_enabled zenMode "$ZEN_FLAG_ROOT" || exit 0')"
+Z107J_RESOLVE="$(z107j_line 'ZEN_ROOT="$(zensu_resolve_project_dir)" || exit 0')"
+Z107J_END=$((Z107J_BIND + Z107J_N))
+if ! { [ "$Z107J_BIND" -gt 0 ] && [ "$Z107J_GUARD" -gt "$Z107J_BIND" ] && [ "$Z107J_GUARD" -lt "$Z107J_END" ] \
+   && [ "$Z107J_READ" -gt "$Z107J_END" ] && [ "$Z107J_RESOLVE" -gt "$Z107J_READ" ]; }; then
+  Z107J_BAD="$Z107J_BAD [order bind=$Z107J_BIND guard=$Z107J_GUARD render-end=$Z107J_END read=$Z107J_READ resolve=$Z107J_RESOLVE]"
+fi
+[ "$(grep -c '^zensu_hook_enabled zenMode ' "$HOOK")" = 1 ] || Z107J_BAD="$Z107J_BAD [the hook does not read hooks.zenMode exactly once]"
+[ -z "$Z107J_BAD" ] \
+  && check "Z107j the hook exits before its hooks.zenMode read on an empty exported root, renders that root with cd -P on MSYS and Cygwin only and exits when the render fails, and reads the flag under the rendered root between the session bind and zensu_resolve_project_dir" PASS \
+  || check "Z107j the flag-root guard, its MSYS render or its place in the hook drifted:$Z107J_BAD" FAIL
 
 P108="$(mktemp -d -t zenmode-XXXXXX)"; S108="z108-$$"
 new_session "$P108" "$S108"

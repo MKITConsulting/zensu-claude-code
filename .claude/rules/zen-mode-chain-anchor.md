@@ -412,11 +412,25 @@ node-free pre-check and its node read under it; every one-argument caller keeps 
 and `autoTdd` and its siblings in the delivery-route hooks stay harness-anchored, each a change of
 its own. `C2r` in `tests/structure/test-hook-process-budget.sh` holds the two-argument form: the
 root's overlay decides, the ambient one never does, and the pre-check starts no `node` when no file
-it reads names the key. The hook resolves the recorded root before its flag read and reuses it for
-the marker. No step between the two positions exits, so the enabled path starts no more processes
-than before, while a session whose project sets `hooks.zenMode: false` pays one `node` start more,
-the root resolution, which reads the record a second time and measures the runtime digest, before
-the hook exits. `/zensu:zen-mode` renders the bare `--status` command, because the verb reads the
+it reads names the key. The hook reads the flag under the root the session bind exported,
+`ZENSU_PROJECT_ROOT`, and only then resolves the recorded root for the marker through
+`zensu_resolve_project_dir`, so a session whose project sets `hooks.zenMode: false` exits without
+the root resolution, which reads the record a second time and measures the runtime digest. The
+order changes no answer: the exported root is the recorded root as the bind validated it, a root
+the resolver would refuse ends the hook silently whatever the flag read found, and on a POSIX host
+a root the resolver accepts renders to the same string. On MSYS and Cygwin the exported root is the
+host-native spelling, which this hook keeps away from shell builtins, so the hook renders it with
+`cd -P` first and exits when that fails: one subshell on every prompt there, none elsewhere. An
+empty exported root exits before the read, because `zensu_hook_enabled` would then read the global
+config alone. `Z107i` counts root verifications through a `node` shim that classifies the resolver
+by its `core.readContext({ recordsDir, sessionId: key })` literal, as the Stop latency suite does:
+none on the disabled path, one on the enabled path. Measured with that shim on macOS bash 3.2, the
+disabled path starts three `node` children where it started four, and the enabled path five, as
+before. `Z107j` runs the hook's lines from the session bind to the end of that render in a child
+`bash` under an MSYS, a Cygwin and a POSIX `OSTYPE`, against a symlinked, an empty and a missing
+root, and pins the flag read between that render and the resolver. `Z107h` pins the `--status`
+stderr line that names the recorded root as where the flag was read.
+`/zensu:zen-mode` renders the bare `--status` command, because the verb reads the
 recorded root itself; `Z107f` runs the rendered command under a diverging ambient root. The
 SessionStart banner reads both keys under the root its `hooks.defaultDeliveryRoute` disclosure
 reads, the binder's `resolveFreshHookProject` answer put into the shell spelling by `cd -P`, and
