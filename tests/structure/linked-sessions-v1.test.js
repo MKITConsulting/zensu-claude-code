@@ -159,6 +159,59 @@ test('an incomplete ledger read starts nothing on its own: each one waits for th
   assert.deepEqual(got, [[true, 'stays', 'continued'], [null, 'if-named', 'ledger-unread'], [null, 'if-named', 'fork']]);
 });
 
+test('a session started from a saved environment waits for the user to name it while the saved environments could not be read, and sshConfig still keeps an SSH session here', () => {
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-ssh' }),
+    child(2, { startedFromEnvironmentId: 'env-ssh', sshConfig: { host: 'box' } }),
+    child(3),
+    child(4, { startedFromEnvironmentId: 'x'.repeat(129) }),
+  ];
+  const unread = decide(records, { presetsComplete: false });
+  assert.deepEqual(unread.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'presets-unread'], ['stays', 'ssh'], ['start', null], ['start', null]]);
+  assert.ok(unread.sessions[0].start, 'a session that waits for its name carries its start call');
+  assert.deepEqual(unread.sessions[0].preset, { id: 'env-ssh', name: null, kind: null });
+  const presets = mod.presetMap({ byAccount: { acc1: { presets: [{ id: 'env-ssh', name: 'Remote box', target: { kind: 'ssh' } }] } } }, 'acc1');
+  assert.deepEqual(decide(records, { presets }).sessions.map((entry) => entry.why), ['ssh', 'ssh', null, null]);
+  assert.deepEqual(decide(records).sessions.map((entry) => entry.decision), ['start', 'stays', 'start', 'start']);
+  assert.deepEqual(decide(records, { presetsComplete: false, planned: ['cont-00000001'] }).sessions.map((entry) => [entry.decision, entry.why]), [['start', null], ['stays', 'ssh'], ['later', 'unplanned'], ['later', 'unplanned']]);
+  assert.match(mod.LINKED_WHY['presets-unread'], /saved environments could not be read, so whether it runs over SSH is unknown/);
+});
+
+test('an incomplete started set keeps every session that could start from starting until the user names it, and every stay row still wins', () => {
+  const edges = [{ confidence: 'confirmed', from: { sessionId: cli(5) }, to: { sessionId: 'd1d1d1d1-0000-4000-8000-000000000005' } }];
+  const records = [
+    child(1),
+    child(2),
+    child(3, { sshConfig: { host: 'box' } }),
+    child(4),
+    child(5),
+    child(6, {}, { sideSession: undefined }),
+  ];
+  const options = { edges, self: cli(4), started: new Set(['cont-00000002']), startedComplete: false };
+  const state = decide(records, options);
+  assert.deepEqual(state.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'started-unread'], ['stays', 'started'], ['stays', 'ssh'], ['stays', 'self'], ['stays', 'continued'], ['if-named', 'started-unread']]);
+  assert.ok(state.sessions[0].start && state.sessions[5].start, 'a session that waits for its name carries its start call');
+  assert.deepEqual(decide(records, { ...options, startedComplete: true }).sessions.map((entry) => entry.decision), ['start', 'stays', 'stays', 'stays', 'stays', 'start']);
+  assert.deepEqual(decide(records, { ...options, planned: ['cont-00000006'] }).sessions.map((entry) => [entry.decision, entry.why]), [['later', 'unplanned'], ['stays', 'started'], ['stays', 'ssh'], ['stays', 'self'], ['stays', 'continued'], ['start', null]]);
+  assert.match(mod.LINKED_WHY['started-unread'], /whether this session already started its continuation is unknown/);
+});
+
+test('the rows that wait for a name match in table order, place, fork, presets-unread, ledger-unread, started-unread, and a carried plan that names them starts them all', () => {
+  const env = { startedFromEnvironmentId: 'env-local' };
+  const records = [
+    child(1, { ...env, originCwd: 'relative/path' }, { userFork: true }),
+    child(2, env, { userFork: true }),
+    child(3, env),
+    child(4),
+  ];
+  const unread = { presetsComplete: false, ledgerComplete: false, startedComplete: false };
+  assert.deepEqual(decide(records, unread).sessions.map((entry) => entry.why), ['place', 'fork', 'presets-unread', 'ledger-unread']);
+  assert.deepEqual(decide(records, { ...unread, ledgerComplete: true }).sessions.map((entry) => entry.why), ['place', 'fork', 'presets-unread', 'started-unread']);
+  assert.deepEqual(decide(records, { startedComplete: false }).sessions.map((entry) => entry.why), ['place', 'fork', 'started-unread', 'started-unread']);
+  const names = records.map((record) => mod.continuationName(record.sessionId));
+  assert.deepEqual(decide(records, { ...unread, planned: names }).sessions.map((entry) => [entry.decision, entry.why, entry.planned]), Array(4).fill(['start', null, true]));
+});
+
 test('at most eight sessions start, in creation order, and the rest wait for a later message', () => {
   const records = Array.from({ length: 11 }, (_, i) => child(i + 1, { createdAt: 5000 - i }));
   const state = decide(records);
@@ -238,7 +291,7 @@ test('sessions that cannot or must not be continued stay, each with its reason',
   ], { self: cli(3), started: new Set(['cont-00000004']) });
   const got = state.sessions.map((entry) => [entry.decision, entry.why, entry.start === null]);
   assert.deepEqual(got, [['stays', 'no-session-id', true], ['stays', 'ssh', true], ['stays', 'self', true], ['stays', 'started', true], ['start', null, false]]);
-  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'place', 'fork', 'ledger-unread', 'cap', 'unplanned']) {
+  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'place', 'fork', 'presets-unread', 'ledger-unread', 'started-unread', 'cap', 'unplanned']) {
     assert.ok(mod.LINKED_WHY[why], why);
   }
 });

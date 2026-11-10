@@ -137,17 +137,12 @@ the check refuses nothing there. `umask 022` heads `test-session-trail-verdict.s
 check, `OM1` to `OM4` fail and the FIFO case hangs until its timeout. `OM5` pins the
 plugin-tree-incomplete diagnostic and the lazy load, `OM6` a refused `ccd-session-presets.json`
 in both forms, `OM7` a refused candidate passed over for a later one, `OM7b` a refused candidate
-after the winning one, and `L19b` and `L19c` in the lineage suite the null
-account an edge records when the host-session probe meets a refused workspace folder, account
+after the winning one, `OM8` and `OM9` the decisions a refused presets file and a refused,
+unparsable or unlisted record of the running session leave (`presets-unread` and `started-unread`,
+`.claude/rules/session-trail-linked-sessions.md`), and `L19b` and `L19c` in the lineage suite the
+null account an edge records when the host-session probe meets a refused workspace folder, account
 folder or record. `L3j`, `L3k` and `L3l` in `test-linked-session-route.sh` pin the one owner, the
 named `realDirectory` policies and the scratch buffer.
-
-Open, named rather than closed: a refused `ccd-session-presets.json`, or a refused record or
-folder of the running session, still lets `decideLinked` mark a session `start` that its `ssh` or
-`started` stay row would have kept, because both rows read a missing input as an empty one. The
-fail-safe answer is an if-named row of its own, as `ledger-unread` has, but the walk cannot tell
-whether a refused record belonged to the running session, and the Session Hub's `Catalog::decide`
-mirrors the plan pass, so the change waits for that decision.
 
 **Bounds, accepted and named.**
 

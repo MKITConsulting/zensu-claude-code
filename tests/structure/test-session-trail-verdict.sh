@@ -154,7 +154,7 @@ trap 'rm -rf "$FAKE"' EXIT
 # included, because --config-dir does not reach it. Either way those reads would
 # resolve against the developer's root instead of the sandbox, all while V0 still
 # passed.
-unset CLAUDE_CONFIG_DIR ZENSU_CCD_STORE
+unset CLAUDE_CONFIG_DIR ZENSU_CCD_STORE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID
 FAKE_CFG="$FAKE/.claude"
 trailrun() { env -u CLAUDE_CONFIG_DIR HOME="$FAKE" USERPROFILE="$FAKE" node "$TRAIL_MJS" "$@" --config-dir "$FAKE_CFG"; }
 # USERPROFILE too: the probe has to measure the environment trailrun uses, or it
@@ -9002,6 +9002,141 @@ process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "TIMEOUT" : Strin
   [ -z "$OM_BAD" ] \
     && check "OM7b a refused store candidate listed after the store that wins is never read and never counted: lineage --diagnose still marks it REFUSED, show stays clean, and a session absent from the winning store keeps the missing-record wording" PASS \
     || check "OM7b refused candidate after the winning store:$OM_BAD" FAIL
+
+  OM8_PRESETS="$LS_HOME/Library/Application Support/Claude/ccd-session-presets.json"
+  OM8_ASIDE="$LS_HOME/om8-presets-aside.json"
+  om8_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om8.json" 2>/dev/null
+    ls_eval "$LS_HOME/om8.json" 'pick(10).decision + "/" + pick(10).why'
+  }
+  OM_BAD=""
+  cp "$OM8_PRESETS" "$OM8_ASIDE"
+  node -e '
+const fs = require("node:fs");
+const [file, acct] = process.argv.slice(1);
+fs.writeFileSync(file, JSON.stringify({ byAccount: { [acct]: { presets: [{ id: "aaaaaaaa-0000-4000-8000-000000000001", name: "Env Fixture", target: { kind: "ssh" } }] } } }));
+' "$OM8_PRESETS" "$LS_ACCT" 2>/dev/null
+  chmod 644 "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "stays/ssh" ] || OM_BAD="$OM_BAD private=$OM_GOT"
+  chmod 664 "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "if-named/presets-unread" ] || OM_BAD="$OM_BAD group-write=$OM_GOT"
+  OM8_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM8_MD" | grep -qxF -- '- why: the saved environments could not be read, so whether it runs over SSH is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
+  chmod 644 "$OM8_PRESETS"
+  printf '{"byAccount": ' > "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "if-named/presets-unread" ] || OM_BAD="$OM_BAD unparsable=$OM_GOT"
+  rm -f "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "start/null" ] || OM_BAD="$OM_BAD missing=$OM_GOT"
+  mv "$OM8_ASIDE" "$OM8_PRESETS"
+  chmod 644 "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "start/null" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM8 a linked session started from an SSH saved environment without sshConfig stays while ccd-session-presets.json is private, waits for the user to name it as presets-unread while that file grants group write or does not parse, and keeps starting while the file is missing or names a local preset (controls)" PASS \
+    || check "OM8 SSH preset decision:$OM_BAD" FAIL
+
+  OM9_ACCT=acc22222-0000-4000-8000-000000000002
+  OM9_ORG=0a9a0a9a-0000-4000-8000-000000000009
+  OM9_DIR="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/$OM9_ACCT/$OM9_ORG"
+  OM9_HOST=local_0a9a0a9a-1111-4111-8111-000000000009
+  OM9_SELF=0a9a0a9a-0000-4000-8000-000000000009
+  OM9_REC="$OM9_DIR/$OM9_HOST.json"
+  OM9_BESIDE="$OM9_DIR/local_0a9a0a9a-1111-4111-8111-000000000010.json"
+  OM9_FULL="CLAUDE_CODE_HOST_SESSION_ID=$OM9_HOST CLAUDE_CODE_ACCOUNT_UUID=$OM9_ACCT CLAUDE_CODE_ORGANIZATION_UUID=$OM9_ORG"
+  OM9_ENV=""
+  mkdir -p "$OM9_DIR"
+  node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [dir, host, self, beside] = process.argv.slice(1);
+fs.writeFileSync(path.join(dir, `${host}.json`), JSON.stringify({ sessionId: host, cliSessionId: self, isArchived: false, title: "om9 running session", createdAt: 4 }));
+fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".json"), cliSessionId: "0a9a0a9a-0000-4000-8000-000000000010", isArchived: false, title: "om9 started", createdAt: 5, spawnedFrom: { sessionId: host, taskId: "task_om9", title: "om9 started", sideSession: true, name: "cont-00000014" } }));
+' "$OM9_DIR" "$OM9_HOST" "$OM9_SELF" "$OM9_BESIDE" 2>/dev/null
+  om9run() { local self="$1"; shift; env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME -u CLAUDE_CODE_HOST_SESSION_ID -u CLAUDE_CODE_ACCOUNT_UUID -u CLAUDE_CODE_ORGANIZATION_UUID $OM9_ENV CLAUDE_CODE_SESSION_ID="$self" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" "$@" --config-dir "$LS_HOME/.claude"; }
+  om9_take() {
+    (cd "$LS_TAKER" && om9run "$1" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om9.json" 2>/dev/null
+    ls_eval "$LS_HOME/om9.json" '[14, 15].map((n) => pick(n).decision + "/" + pick(n).why).join(",")'
+  }
+  OM9_UNREAD="if-named/started-unread,if-named/started-unread"
+  OM9_OTHER=0a9a0a9a-0000-4000-8000-0000000000ff
+  OM9_SPARE="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/acc33333-0000-4000-8000-000000000003"
+  OM9_BODY="$(cat "$OM9_REC")"
+  OM_BAD=""
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  chmod 664 "$OM9_REC"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record=$OM_GOT"
+  OM9_MD="$(cd "$LS_TAKER" && om9run "$OM9_SELF" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM9_MD" | grep -qxF -- "- why: whether this session already started its continuation is unknown, because this session's own Claude Desktop record, or a record beside it, could not be read: it starts only when the user names it in the plan answer" || OM_BAD="$OM_BAD brief-why"
+  OM9_ENV="CLAUDE_CODE_HOST_SESSION_ID=$OM9_HOST"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record-host-id=$OM_GOT"
+  OM9_ENV=""
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record-no-host=$OM_GOT"
+  chmod 644 "$OM9_REC"
+  printf '{"sessionId":"%s","cliSessionId":"%s",' "$OM9_HOST" "$OM9_SELF" > "$OM9_REC"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD unparsable-no-host=$OM_GOT"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD unparsable=$OM_GOT"
+  printf '%s' "$OM9_BODY" > "$OM9_REC"
+  chmod 775 "$OM9_DIR"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD folder=$OM_GOT"
+  OM9_ENV=""
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD folder-no-host=$OM_GOT"
+  chmod 755 "$OM9_DIR"
+  if [ "$(id -u)" != 0 ]; then
+    chmod 300 "$OM9_DIR"
+    OM_GOT="$(om9_take "$OM9_SELF")"
+    [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD unlisted-folder=$OM_GOT"
+    chmod 755 "$OM9_DIR"
+  fi
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD mismatch=$OM_GOT"
+  OM9_ENV="CLAUDE_CODE_HOST_SESSION_ID=$OM9_HOST"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD mismatch-host-id=$OM_GOT"
+  chmod 664 "$OM9_BESIDE"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD mismatch-beside=$OM_GOT"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD beside=$OM_GOT"
+  chmod 644 "$OM9_BESIDE"
+  OM9_ENV=""
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "start/null,later/cap" ] || OM_BAD="$OM_BAD absent=$OM_GOT"
+  mkdir -p "$OM9_SPARE"
+  chmod 775 "$OM9_SPARE"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD absent-refused-folder=$OM_GOT"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD found-refused-folder=$OM_GOT"
+  chmod 755 "$OM9_SPARE"
+  rmdir "$OM9_SPARE"
+  OM9_ENV=""
+  chmod 664 "$OM8_PRESETS"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "start/null,start/null" ] || OM_BAD="$OM_BAD absent-presets-refused=$OM_GOT"
+  chmod 644 "$OM8_PRESETS"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  OM9_ENV=""
+  [ -z "$OM_BAD" ] \
+    && check "OM9 a running session whose own record is refused or does not parse, or lies in a folder that is refused or cannot be listed, keeps every linked session that could start waiting for its name as started-unread under the full host environment, the host id alone and none; a session id its record does not carry reads the record the host id names, so the session that record started stays and a refused record beside it leaves the set unknown; with no own record a refused folder anywhere in the store leaves the set unknown, while a clean store and a refused presets file, read after the started set, keep every start (controls)" PASS \
+    || check "OM9 started set of the running session:$OM_BAD" FAIL
 fi
 
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
