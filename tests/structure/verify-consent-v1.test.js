@@ -132,7 +132,7 @@ test('the gate rides the Bash and PowerShell matcher and names two hook files th
   assert.deepEqual([...consent.CLI_BASENAMES], ['playwright-cli', 'playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']);
   assert.equal(consent.RUN_CONFIG_NAME, 'playwright-cli.json');
   assert.equal(consent.RUN_OUTPUT_DIR_NAME, 'browser');
-  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.21');
+  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.23');
 });
 
 test('SESSION_RE admits only a lower-case zensu-verify name of bounded length', () => {
@@ -841,6 +841,10 @@ test('an unknown, denied or repeated flag is refused and the harmless flags pass
   assert.equal(denied(cli('goto --foo http://127.0.0.1:4200/')), `flag '--foo' ${REASONS.FLAG_DENIED}`);
   assert.equal(denied(cli('screenshot --filename=shot.png')), `flag '--filename' ${REASONS.FLAG_DENIED}`);
   assert.equal(denied(cli('open --save-video=run.webm --config=/tmp/playwright-cli.json')), `flag '--save-video' ${REASONS.FLAG_DENIED}`);
+  for (const [rest, flag] of [['tab-new --isolated-context=probe http://127.0.0.1:4200/', 'isolated-context'], ['find --filename=hits.md login', 'filename'],
+    ['find --max-results=3 login', 'max-results'], ['console --all', 'all'], ['requests --all', 'all']]) {
+    assert.equal(denied(cli(rest)), `flag '--${flag}' ${REASONS.FLAG_DENIED}`, rest);
+  }
   assert.equal(denied(cli('snapshot --depth=3 --depth=4')), "flag '--depth' is given more than once");
   assert.equal(denied(cli('open --config=/a.json --config=/b.json')), "flag '--config' is given more than once");
   assert.deepEqual(decide(cli('snapshot --json')), { verdict: 'none', plan: [] });

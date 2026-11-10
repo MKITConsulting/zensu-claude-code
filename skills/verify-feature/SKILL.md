@@ -546,12 +546,12 @@ Use the same bare form with `FAIL` or `PARTIAL` as appropriate.
 
 Verification drives the browser through `playwright-cli`, the `@playwright/cli` package, which
 must be on `PATH`: check with `command -v playwright-cli`. When it is missing, stop with PARTIAL
-and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.21`,
+and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.23`,
 the version the browser consent gate was measured against; `brew install playwright-cli` is
 unpinned and may install a version the run-config helper refuses. Never install it on their
 behalf.
 `/zensu:doctor` reports whether it is installed and which version. The browser consent gate
-parses its arguments as measured against version 0.1.21 and denies an argument shape it does
+parses its arguments as measured against version 0.1.23 and denies an argument shape it does
 not recognize rather than admitting it — including a `zensu-verify` session name it does not
 resolve as the call's session.
 

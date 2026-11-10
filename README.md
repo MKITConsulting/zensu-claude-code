@@ -482,7 +482,7 @@ starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the
 known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
 driver additionally need `playwright-cli` on `PATH`
-(`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
+(`npm install -g @playwright/cli@0.1.23`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
 Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older

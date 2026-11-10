@@ -422,7 +422,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   helper refuses to start `/zensu:verify-feature` until it reads the version from the package
   manifest. Relay the row and the pinned reinstall command it names.
 - **⚠️ playwright-cli: not found on PATH** → the user installs the version the browser consent
-  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.21` command the
+  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.23` command the
   row prints. `brew install playwright-cli` is unpinned: it installs whichever version Homebrew
   ships, which the run-config helper refuses unless it is the measured one. Never install it on
   their behalf.

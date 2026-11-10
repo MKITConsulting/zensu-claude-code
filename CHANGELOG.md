@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `brew upgrade --cask zensu`, the commands `docs/cli-install-update.md` and the AI-work capture
   guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
   passed, so on its own it can miss a new release.
+- **verify-feature**: the browser consent gate is now measured against `playwright-cli`
+  0.1.23, and the run-config helper refuses to start a browser verification run on any other
+  version, 0.1.21 included. Upgrade with `npm install -g @playwright/cli@0.1.23`.
+  `brew install playwright-cli` is unpinned: the helper refuses it unless Homebrew ships
+  exactly 0.1.23.
 
 ## [0.36.0] - 2026-11-07
 
