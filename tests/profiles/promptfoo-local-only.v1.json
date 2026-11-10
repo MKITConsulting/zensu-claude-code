@@ -30,6 +30,7 @@
     "test-bypass-ledger.sh",
     "test-chain-recover.sh",
     "test-chain-terminus-zero-change-gate.sh",
+    "test-change-skill.sh",
     "test-changelog-unreleased-resolver-entries.sh",
     "test-clock-shift.sh",
     "test-context-nudge-hook.sh",
@@ -79,6 +80,7 @@
     "test-plan-payload-fallback.sh",
     "test-plan-requirement-ids.sh",
     "test-plan-review-skill.sh",
+    "test-playwright-cli-drift.sh",
     "test-plugin-data-guard.sh",
     "test-post-review-autopilot-claim.sh",
     "test-post-review-outer-ownership-root.sh",
@@ -180,6 +182,7 @@
     "test-workflow-scope.sh",
     "test-worktree-keep.sh",
     "test-zen-mode.sh",
+    "test-zensu-cli-map-drift.sh",
     "test-zensu-help-skill.sh",
     "test-zensu-plm-arg-guidance.sh"
   ],
@@ -195,6 +198,7 @@
   "nodeDepsStructureTests": [
     "test-clock-shift.sh",
     "test-gitlab-live-workflow.sh",
+    "test-playwright-cli-drift.sh",
     "test-promptfoo-session-upgrade.sh",
     "test-release-session-control-gate.sh",
     "test-windows-ci-contract.sh",

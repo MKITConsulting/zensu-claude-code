@@ -14,7 +14,7 @@ main-thread skills       /zensu:build         Zensu Dashboard
 /zensu:implement         (main thread)
 ```
 
-**Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
+**Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. One later change to a tracked product, such as a new feature or a roadmap entry, runs through `/zensu:change`. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
 **Layer 2 — Implementation (HOW is it built securely?):** `/zensu:build` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only, and on any review the Stop hook resumes) → consume-mode code-reviewer → auto-fix loop → self-review.
 
@@ -363,12 +363,22 @@ on it. What the suite enforces is the 9,000-character ceiling, never the host's 
 For a brownfield repo whose plan/vision doc also describes not-yet-built features:
 
 ```
-1. /zensu:ghost-scan         → Import what is built (each feature seated at a v1 baseline)
-2. (agent) create_feature    → Plan doc's not-yet-built items → planned features
+1. /zensu:ghost-scan         → Import what is built (each feature seated at a v1 baseline); its Phase 6 creates the plan doc's not-yet-built items as planned features
+2. /zensu:change             → A plan item added later: one planned feature per request, duplicate-checked first
 3. /zensu:implement KEY-N    → Build the planned items; v1 revision at implement-time
 ```
 
-No separate skill — the agent runs ghost-scan, then creates the remainder as planned features.
+No separate skill for the hybrid itself — ghost-scan creates the remainder inside its own window, and `/zensu:change` adds what comes later.
+
+### One Change to a Tracked Product
+
+```
+1. /zensu:change             → One requested change: a new feature, a roadmap entry, a tier, a link, a deprecation or a merge
+```
+
+`/zensu:change` checks for a duplicate before every create, asks before a command that removes
+or replaces data, and gives a new feature its priority, a Markdown description and a security
+classification. The CLI write-gate names it in the deny of every command it routes.
 
 ### One Change, No Tracked Feature
 
@@ -393,6 +403,7 @@ The Zensu workflow and its review chain work **without a Zensu account**. No `ze
 tracking happens only in the skills that call the CLI, once it is installed and authenticated:
 - `/zensu:implement` runs `/zensu:build` and then, in its own later steps, links tests and sources (`zensu link test`, `zensu link source`), publishes and links docs, creates a revision (`zensu features revision`) and validates the release gate (`zensu security validate`)
 - `/zensu:pilot` updates feature status (`zensu features status`) as it moves a tracked feature along
+- `/zensu:change` makes the one change a user asks for, such as `zensu features create`, `zensu roadmap add-feature` or `zensu features deprecate`
 - `/zensu:security-review` records the review and its findings (`zensu security review`)
 - `/zensu:docs` publishes code-grounded documentation and updates the docs score (`zensu link docs`)
 

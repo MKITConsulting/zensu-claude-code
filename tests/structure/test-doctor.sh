@@ -9706,6 +9706,7 @@ fi
 
 mkdir -p "$SBOX/plug/hooks/lib"
 cp "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js"
+cp "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$SBOX/plug/hooks/lib/git-environment-v1.js"
 WK_REPO="$SBOX/wk-repo"
 mkdir -p "$WK_REPO"
 git -C "$WK_REPO" init -q -b main >/dev/null 2>&1 || git -C "$WK_REPO" init -q >/dev/null 2>&1
@@ -10686,12 +10687,13 @@ ZC_LOG="$SBOX/zc.log"
 mkdir -p "$ZC_BIN"
 printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "${ZENSU_NO_UPDATE_CHECK:-unset}" "$*" >> "$ZC_LOG"' 'case "$1" in' '  --version) printf "%s\n" "$ZC_VERSION_LINE" ;;' '  auth) printf "%s\n" "$ZC_AUTH_LINE"; exit "${ZC_AUTH_RC:-0}" ;;' 'esac' > "$ZC_BIN/zensu"
 chmod +x "$ZC_BIN/zensu"
-ZC_FACTS="$(DOCTOR_ZC_MODULE="$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js" node -e 'const m = require(process.env.DOCTOR_ZC_MODULE); process.stdout.write([m.MIN_VERSION, m.INSTALL.homebrew, m.INSTALL.homebrewUpgrade, m.INSTALL.script, m.INSTALL.powershell].join("\n"))')"
+ZC_FACTS="$(DOCTOR_ZC_MODULE="$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js" node -e 'const m = require(process.env.DOCTOR_ZC_MODULE); process.stdout.write([m.MIN_VERSION, m.INSTALL.homebrew, m.INSTALL.homebrewUpgrade, m.INSTALL.script, m.INSTALL.powershell, m.FLOOR_REASON].join("\n"))')"
 ZC_FLOOR="$(printf '%s\n' "$ZC_FACTS" | sed -n 1p)"
 ZC_BREW="$(printf '%s\n' "$ZC_FACTS" | sed -n 2p)"
 ZC_BREW_UP="$(printf '%s\n' "$ZC_FACTS" | sed -n 3p)"
 ZC_SCRIPT="$(printf '%s\n' "$ZC_FACTS" | sed -n 4p)"
 ZC_PS="$(printf '%s\n' "$ZC_FACTS" | sed -n 5p)"
+ZC_REASON="$(printf '%s\n' "$ZC_FACTS" | sed -n 6p)"
 zc_wrap() {
   env -u ZDOC_ZENSU -u ZDOC_ZENSU_VERSION -u ZDOC_ZENSU_VERSION_STATE -u ZENSU_NO_UPDATE_CHECK \
     PATH="$ZC_BIN:$PATH" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="$1" ZC_AUTH_LINE="$2" ZC_AUTH_RC="${3:-0}" \
@@ -10705,7 +10707,7 @@ case "$(uname -s)" in
     rm -f "$ZC_LOG"
     ZC_OUT="$(zc_wrap 'zensu 0.9.0 (commit abc1234, built 2026-10-13T15:09:40Z)' 'Not logged in. Run `zensu auth login`.')"
     case "$ZC_OUT" in *'⚠️  zensu CLI: installed but not authenticated — run `zensu auth login`'*) check "P8z1 an auth status that exits 0 and prints Not logged in reads as not authenticated" PASS ;; *) check "P8z1 an auth status that exits 0 and prints Not logged in reads as not authenticated" FAIL ;; esac
-    case "$ZC_OUT" in *"⚠️  zensu CLI version: 0.9.0 is older than $ZC_FLOOR, the oldest release this plugin supports"*"\`$ZC_BREW_UP\`"*"\`$ZC_SCRIPT\`"*"\`$ZC_PS\`"*) check "P8z2 a CLI below the floor warns with the floor and the upgrade commands" PASS ;; *) check "P8z2 a CLI below the floor warns with the floor and the upgrade commands" FAIL ;; esac
+    case "$ZC_OUT" in *"⚠️  zensu CLI version: 0.9.0 is older than $ZC_FLOOR, the oldest release this plugin supports — $ZC_REASON; upgrade with \`$ZC_BREW_UP\`, or run the installer again: \`$ZC_SCRIPT\` or, on Windows, \`$ZC_PS\`"*) check "P8z2 a CLI below the floor warns with the floor, the module's reason and its upgrade commands" PASS ;; *) check "P8z2 a CLI below the floor warns with the floor, the module's reason and its upgrade commands" FAIL ;; esac
     ZC_CALLS="$(tr '\n' ' ' < "$ZC_LOG" 2>/dev/null)"
     case "$ZC_CALLS" in '1|--version 1|auth status ') check "P8z3 the wrapper runs --version before auth status, once each, both with the update check off" PASS ;; *) check "P8z3 the wrapper runs --version before auth status, once each, both with the update check off (got: $ZC_CALLS)" FAIL ;; esac
     ZC_OK="$(zc_wrap "zensu $ZC_FLOOR (commit abc1234, built now)" 'Logged in to https://api.zensu.dev as dev@example.com')"
