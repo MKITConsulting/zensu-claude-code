@@ -140,6 +140,16 @@ function writeSnapshot(storeSet, sessionKey, projectRoot, policy, now = Date.now
   return entry;
 }
 
+function removeSnapshot(storeSet, sessionKey) {
+  if (!SESSION_KEY_RE.test(String(sessionKey || ''))) return false;
+  try {
+    fs.rmSync(path.join(storeSet.snapshots, `${sessionKey}.json`), { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function textOrNull(value) {
   return typeof value === 'string' && value.trim() !== '' && !value.includes('\0') && value.length <= 512 ? value.trim() : null;
 }
@@ -266,6 +276,22 @@ function policyLines(policy, options) {
   return [`full suite: local | ${shown(policy.reason || 'local full-suite runs', projectRoot)} | decided by: ${policy.decidedBy}`];
 }
 
+function snapshotPolicy(inputs, now = Date.now()) {
+  const cached = resolve({ ...inputs, mode: 'cache', needCandidate: false, now });
+  if (cached.runner === 'ci' || cached.ciRequested !== true) return cached;
+  return resolve({ ...inputs, mode: 'refresh', needCandidate: false, now });
+}
+
+function snapshotLines(policy, projectRoot) {
+  if (policy.runner === 'ci') {
+    return [`full suite: ci | this chain began with the CI runner: ${shown(policy.contract.workflow, projectRoot)}, job "${shown(policy.contract.job, projectRoot)}" runs its full suite when a pull request against ${shown(policy.contract.base, projectRoot)} is opened or updated | decided by: ${policy.decidedBy}`];
+  }
+  if (policy.ciRequested === true) {
+    return [`full suite: local | ${shown(policy.reason || 'the CI pull-request pipeline is not verified', projectRoot)} | decided by: ${policy.decidedBy} | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before`];
+  }
+  return [];
+}
+
 function sourceLine(policy, projectRoot) {
   const clone = policy.clone
     ? `${policy.clone.runner}${policy.clone.workflow ? ` (${shown(policy.clone.workflow, projectRoot)}, job "${shown(policy.clone.job || '', projectRoot)}")` : ''}`
@@ -373,8 +399,16 @@ async function main(argv, env = process.env) {
       return 0;
     }
     if (mode === 'snapshot') {
-      const policy = resolve({ ...inputs, mode: 'cache', needCandidate: false, now });
-      writeSnapshot(stores(inputs.pluginData), inputs.sessionKey, inputs.projectRoot, policy, now);
+      const storeSet = stores(inputs.pluginData);
+      removeSnapshot(storeSet, inputs.sessionKey);
+      const policy = snapshotPolicy(inputs, now);
+      writeSnapshot(storeSet, inputs.sessionKey, inputs.projectRoot, policy, now);
+      write(process.stdout, snapshotLines(policy, inputs.projectRoot));
+      return 0;
+    }
+    if (mode === 'chain') {
+      const policy = resolve({ ...inputs, mode: env.ZENSU_FSP_REFRESH === '1' ? 'refresh' : 'cache', needCandidate: false, requireSnapshot: true, now });
+      write(process.stdout, policyLines(policy, { ...inputs, now }));
       return 0;
     }
     if (mode === 'effective') {
@@ -387,7 +421,7 @@ async function main(argv, env = process.env) {
     process.stderr.write(`full-suite-policy: ${error && error.message ? error.message : String(error)}\n`);
     return 2;
   }
-  process.stderr.write('usage: full-suite-policy-v1.js policy|status|snapshot|effective|set-clone\n');
+  process.stderr.write('usage: full-suite-policy-v1.js policy|status|snapshot|chain|effective|set-clone\n');
   return 2;
 }
 
@@ -405,11 +439,14 @@ module.exports = {
   clearClone,
   readSnapshot,
   writeSnapshot,
+  removeSnapshot,
   normalizeConfig,
   resolve,
   formatAge,
   contractSummary,
   policyLines,
+  snapshotPolicy,
+  snapshotLines,
   sourceLine,
   verdictInput,
   inputsFromTransport,

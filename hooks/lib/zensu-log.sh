@@ -669,14 +669,16 @@ case "${1:-}" in
     ;;
   --full-suite-policy)
     _fsp_refresh=0
+    _fsp_mode=policy
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --refresh) _fsp_refresh=1; shift ;;
+        --chain) _fsp_mode=chain; shift ;;
         *) echo "zensu-log.sh --full-suite-policy: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
-    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" policy "$_fsp_refresh"
+    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" "$_fsp_mode" "$_fsp_refresh"
     exit $?
     ;;
   --external-review)
@@ -2012,18 +2014,20 @@ case "${1:-}" in
           if ! tdd_retire_edit_landing_receipt "$session_val"; then
             echo "zensu-log.sh --tdd-begin: RECEIPT RETIREMENT UNRESOLVED — the previous generation's edit-landing receipt could not be retired (${begin_receipt}). It records a verdict about ANOTHER generation's run log, and this chain's --tdd-complete may accept it as its own. Move or delete that file before completing." >&2
           fi
-          if ! zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot >/dev/null 2>&1; then
-            echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
-          fi
           zensu_external_review_wait_reset "$session_val"
           _zensu_review_gate_reset "--tdd-begin" "$session_val" \
             "the previous generation's review packets and reviewer records could not be removed; this chain's review rounds still compare against packets created after this point."
           zensu_stop_background_wait_reset "$session_val"
+          if ! begin_full_suite_line="$(zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot 2>/dev/null)"; then
+            begin_full_suite_line=""
+            echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
+          fi
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
             echo "mode: strict"
           fi
+          [ -n "$begin_full_suite_line" ] && printf '%s\n' "$begin_full_suite_line"
           [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses (cleared now): $outgoing_bypasses"
         else
           echo "zensu-log --tdd-begin: atomic chain activation failed — session NOT activated" >&2
