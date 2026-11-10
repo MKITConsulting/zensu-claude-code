@@ -342,25 +342,27 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    Stay in the worktree.
    (Vanilla `/zensu:build` may ship thin coverage — `/zensu:cover` on the diff hardens the
    durable test net; opt in with `--cover`, applied in step 6b below.)
-2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
-   before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
-   Persist `GATES_PASSED` with the tested head SHA; on failure persist `GATES_FAILED`, then
-   run the bound `/zensu:build` fix attempt and return here.
+2. **Gates green** — commit (`rules/conventions.md`), then run the resolved `gates:` recipe;
+   every command must pass (e.g. type-check, lint, unit tests, per-file coverage floor).
+   Persist `GATES_PASSED` with the full tested head SHA; on failure persist `GATES_FAILED`, run
+   the bound `/zensu:build` fix attempt and return here. Step 3 sends a head the gates never
+   tested back here, without `GATES_FAILED` (`rules/pr-open.md`).
 2b. **Converge (report-only)** — run `/zensu:converge <session-plan-path>` (always the
    session plan, never mtime-resolved — scoped fix runs write newer plans): a
    `contradicts` finding on an active AC **blocks the PR open** until fixed via
-   `/zensu:build` (vanilla, scoped); after each fix re-run the converge report against the
-   SAME session plan — if `contradicts` persists after 2 fix attempts, treat it as a
+   `/zensu:build` (vanilla, scoped); after each fix re-run step 2 and this report — if
+   `contradicts` persists after 2 fix attempts, treat it as a
    stop-the-world blocker per The one rule (halt + report). `missing`/`partial`
    findings feed the step-6 validate loop; with `--no-validate`, `missing` on an
    active AC also blocks the PR open and `partial` is recorded unvalidated in the
    PR body's per-AC table. Flow-back edit proposals are reported only — never
    auto-applied in this non-interactive run. Persist `CONVERGENCE_PASSED` before PR open;
    each contradiction uses `CONVERGENCE_FAILED` and the bound TDD return path.
-3. **Open the PR** — commit (`rules/conventions.md`), push, then open the PR/MR
+3. **Open the PR** — push, then open the PR/MR
    against `--base` **through the driver** (run from `$REPO` so `gh`/`glab` resolve the host;
    GitHub → `gh pr create`, GitLab → `glab mr create` with `--source-branch`/`--target-branch`,
-   the driver picks per `$PROVIDER` and returns the PR/MR URL):
+   the driver picks per `$PROVIDER` and returns the PR/MR URL). Follow `rules/pr-open.md`:
+   the head check, the events, a requested PR/MR, the bound.
 
    ```bash
    REPO="$(git rev-parse --show-toplevel)"
@@ -371,12 +373,9 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    [ -n "$URL" ] || { echo "PR/MR open returned an empty URL — aborting"; exit 1; }
    ```
 
-   Persist `PR_OPEN_REQUESTED` with a deterministic operation key before calling the driver;
-   after success persist `PR_OPENED` with that same key, PR number/URL, and current head.
    `$HEAD` is the worktree's feature branch (already pushed above), `$BASE` the `--base` arg
-   (default `vcs.prBase`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open (auth
-   expired, an MR already exists on the branch, a push race) is a **stop-the-world blocker**
-   (The one rule) — halt and report; never run step 4+ against a PR/MR that was not created.
+   (default `vcs.prBase`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open is a
+   **stop-the-world blocker** (The one rule): never run step 4+ against a PR/MR not created.
 
    Render the title and body (`$BODY_FILE`) in the order of `rules/conventions.md` §4:
    `$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when `overrides`
@@ -403,8 +402,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    Persist the running union durably after every chain as a `Gates bypassed (build union):`
    line in the autopilot plan artifact — the PR body is rendered FROM that line, never from
    conversation memory, so a compaction or session restart between chains cannot
-   under-report. Render `none` when the union is empty; update the line whenever step 5/6
-   pushes.
+   under-report. Render `none` when the union is empty; re-apply the body on every push to an
+   open PR/MR (`rules/pr-open.md`).
 4. **Team review — ONCE** — derive the deterministic key and exact four-line envelope above,
    persist `TEAM_REVIEW_REQUESTED`, then run `/zensu:pr-team-review` on the PR. Its delegated
    path reconciles the write-ahead operation remotely and returns the structured receipt;
@@ -502,6 +501,7 @@ worst case               → still a reviewed, tested PR — minus the live proo
   login-script prerequisite a project supplies.
 - `rules/work-order.md` — work-order mode: branch, plan file, spec binding, push and PR helpers.
 - `rules/conventions.md` — the repository's commit style, language, attribution and PR body order.
+- `rules/pr-open.md` — the head check before the push, a requested PR/MR, the body refresh, the bound.
 
 ## Critical Conventions
 
