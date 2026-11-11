@@ -232,11 +232,11 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   — this is the chain's last edit, so this is
   the run whose verdict describes the tree that ships, and Phase 5 checkpoints are
   scoped and cannot stand in for it.
-  **In CI mode** — `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --full-suite-policy`
+  **In CI mode** — `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --full-suite-policy --chain`
   prints `full suite: ci` — run the Phase 6 affected-suite command instead:
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope scoped --cmd '<the tests affected by the change>' --log <run-log>`,
   covering the suites of every file this chain changed, never `--scope full`: the
-  runner refuses it, and the repository's CI pull-request pipeline runs the full suite.
+  runner refuses it, and the CI pull-request pipeline runs the full suite.
   This stage is often forced cold and never ran `/zensu:build` Phase 1, so resolve the
   suite command in THIS order. (1) `evidence.fullSuiteCommand` — when the project
   configures it, drop `--cmd` and the runner uses it. (2) The project's own

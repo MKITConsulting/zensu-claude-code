@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.36.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.37.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -220,7 +220,7 @@ make no `zensu` call at all.
 
 | Skill | What it does | Needs |
 |-------|--------------|-------|
-| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
+| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; "with tdd" in a request or a plan approval runs that one chain strict unless a `/zensu:tdd-mode` session choice says vanilla, `/zensu:tdd-mode` switches strict TDD on for the session and `hooks.tddImplementation` for the project or globally | — |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys | `gh` or `glab` |
 | `/zensu:implement` | Implement a tracked feature through the Zensu workflow, then link its tests, sources and docs and create a revision | Zensu account |
 | `/zensu:pilot` | The guided route: probes a tracked feature's real state and offers the next step, one confirmed step at a time | Zensu account and a tracked feature; `gh` or `glab` for its pull request |
@@ -482,7 +482,7 @@ starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the
 known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
 driver additionally need `playwright-cli` on `PATH`
-(`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
+(`npm install -g @playwright/cli@0.1.24`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
 Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older
@@ -592,3 +592,12 @@ Upgrade the product-scope backend and CLI before the plugin. See the shipped
 `docs/ai-work-capture.md` for identity checks and legacy receipt handling.
 
 CLI setup and troubleshooting: [Install or update the CLI, including `zensu update` and older-version recovery](docs/cli-install-update.md).
+
+### Review context and source-system links
+
+Before handoff, the native capture helper accepts `checkpoint --review-file` with
+an explicit summary, acceptance criteria, evidence, limitations and optional
+`artifactUrl` for the exact commit. The URL is supplied deliberately, never inferred
+from a Git remote. Pending reports retain their original content for retries; a
+changed report creates a new result version without inherited acceptance.
+See [result reporting and disclosure scope](docs/ai-work-capture.md#explain-the-result-before-human-acceptance).

@@ -53,7 +53,7 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:2330`) and counts through the shared helper (`:2389`),
+(`hooks/lib/zensu-log.sh:2334`) and counts through the shared helper (`:2393`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:130-131`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -67,7 +67,7 @@ when it is unset, is an open question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:782-826`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:232`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:2319`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2323`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -732,7 +732,7 @@ A cheaper first move exists and is not blocked on any of it — see §7.4.
 pass, Finding Verification Gate, the consuming reviewer, the self-review terminus
 — among what runs exactly as written in vanilla. A reviewer reports a finding; it
 does not demand a Characterization test. That demand is precisely why the
-Cross-Layer Value Flow Audit cannot run in vanilla (`:10`, `:13`), and
+Cross-Layer Value Flow Audit cannot run in vanilla (`:11`, `:14`), and
 the new stage does not inherit it.
 
 ### 7.2 What a reviewer may read
@@ -803,7 +803,7 @@ while part (b) only scans the diff.
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
 Drift Audit does the same (`skills/build/references/audit.md:63`) and runs in vanilla
-(`skills/build/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
+(`skills/build/references/modes.md:15`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
 (`skills/build/references/audit.md:69`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
