@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-11
+
+### Added
+
+- **hooks**: Offer /zensu:autopilot in the reminder's route question (#601)
+
+### Fixed
+
+- **hooks**: Record a named reviewer's hand-back under its spawn's agent id (#602)
+- **hooks**: Keep one CI proof per workflow version so parallel worktrees stop voiding each other (#598)
+- **agents**: State what Zensu knowledge search indexes and how it ranks (#597)
+
 ## [0.37.0] - 2026-11-10
 
 ### Added
