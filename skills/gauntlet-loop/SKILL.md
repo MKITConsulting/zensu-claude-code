@@ -95,9 +95,9 @@ closes none.
   `plan-approved-delegate.sh` fires on
   `ExitPlanMode` and directs the main thread to ask which delivery route the plan
   takes — `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`, or implementing directly —
-  before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER `/zensu:build`
-  yes/no question on every prompt while no chain is active — it offers neither
-  `/zensu:autopilot` nor `/zensu:pilot`, and when no human can answer it, the
+  before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER
+  question on every prompt while no chain is active — no `/zensu:pilot`, `/zensu:autopilot`
+  only on a human answer — and when no human can answer it, the
   fast-path runs the workflow without asking. Approving a gauntlet charter through
   plan mode therefore hands the mission to a different skill. Decide that question
   deliberately before the loop starts, or approve the charter with `AskUserQuestion`
