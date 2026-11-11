@@ -69,6 +69,11 @@ function git(root, args, limits = LIMITS) {
   return String(result.stdout).trim();
 }
 
+function workflowTree(options, limits = LIMITS) {
+  const given = typeof options.workTree === 'string' && options.workTree !== '' ? options.workTree : options.projectRoot;
+  return git(given, ['rev-parse', '--show-toplevel'], limits) || given;
+}
+
 function remoteUrl(projectRoot, env, limits = LIMITS) {
   const source = env || process.env;
   if (typeof source.ZENSU_VCS_REMOTE === 'string' && source.ZENSU_VCS_REMOTE !== '') return source.ZENSU_VCS_REMOTE;
@@ -666,10 +671,11 @@ function verify(options) {
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
   const workflowPath = normalizeWorkflowPath(options.workflow);
   if (!workflowPath) return unverified(`evidence.ci.workflow must name a .yml or .yaml file directly under ${WORKFLOW_DIR}`);
-  const identity = repoIdentity(remoteUrl(projectRoot, env, limits));
+  const tree = workflowTree(options, limits);
+  const identity = repoIdentity(remoteUrl(tree, env, limits));
   if (identity.provider === 'unknown') return unverified('the repository has no usable git remote');
   if (identity.provider !== 'github') return unverified(`the code forge ${identity.host} is not supported yet (GitHub.com only)`);
-  const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  const file = readWorkflowFile(tree, workflowPath, limits);
   if (file.error) return unverified(file.error);
   const scanned = scanWorkflow(file.text, limits);
   if (!scanned.readable) return unverified(`${workflowPath}: ${scanned.reason}`);
@@ -729,16 +735,17 @@ function discover(options) {
   const projectRoot = options.projectRoot;
   if (typeof projectRoot !== 'string' || projectRoot === '') return unverified('no project root is bound');
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
+  const tree = workflowTree(options, limits);
   const candidates = [];
-  for (const workflowPath of listWorkflows(projectRoot, limits)) {
-    const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  for (const workflowPath of listWorkflows(tree, limits)) {
+    const file = readWorkflowFile(tree, workflowPath, limits);
     if (file.error) continue;
     if (scanWorkflow(file.text, limits).pullRequest) candidates.push(workflowPath);
   }
   if (candidates.length === 0) return unverified(`no workflow under ${WORKFLOW_DIR} triggers on pull_request`);
   let last = null;
   for (const workflowPath of candidates.slice(0, limits.maxCandidates)) {
-    const result = verify({ ...options, workflow: workflowPath, job: null });
+    const result = verify({ ...options, workTree: tree, workflow: workflowPath, job: null });
     if (result.verified) return result;
     last = result;
   }

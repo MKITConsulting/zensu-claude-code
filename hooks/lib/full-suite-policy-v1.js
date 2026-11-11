@@ -164,6 +164,12 @@ function normalizeConfig(config) {
   };
 }
 
+function chainContract(options, verifyOptions) {
+  const fault = evr.workTreeFaultCause(options.workTreeFault);
+  if (fault !== null) return { verified: false, reason: `the chain's work tree could not be resolved: ${fault}`, transient: false };
+  return verifyOptions.workflow ? contract.verify(verifyOptions) : contract.discover(verifyOptions);
+}
+
 function resolve(options) {
   const env = options.env || process.env;
   const projectRoot = options.projectRoot;
@@ -190,6 +196,7 @@ function resolve(options) {
   const job = config.job || (clone && clone.job) || null;
   const verifyOptions = {
     projectRoot,
+    workTree: options.workTree,
     pluginData: options.pluginData,
     workflow,
     job,
@@ -200,7 +207,7 @@ function resolve(options) {
     ghPath: options.ghPath,
     limits: options.limits,
   };
-  const result = workflow ? contract.verify(verifyOptions) : contract.discover(verifyOptions);
+  const result = chainContract(options, verifyOptions);
   if (ciIndex !== -1) {
     const rank = RANKS[ciIndex];
     if (!result.verified) {
@@ -334,6 +341,8 @@ function inputsFromTransport(directory, env, names) {
     pluginData: env[names.pluginData],
     sessionKey: env[names.sessionKey],
     projectRoot: env[names.projectRoot],
+    workTree: env[names.workTree] || '',
+    workTreeFault: evr.readWorkTreeFault(directory),
     markerState: String(readTransport(directory, names.marker) || 'none').trim(),
     config: { ...transportConfig(readTransport(directory, 'ci-config.json')), fullSuiteCommand: readTransport(directory, 'full-suite-command') },
     env,
@@ -345,6 +354,7 @@ function policyInputs(env) {
     pluginData: 'ZENSU_FSP_PLUGIN_DATA',
     sessionKey: 'ZENSU_FSP_SESSION_KEY',
     projectRoot: 'ZENSU_FSP_PROJECT_ROOT',
+    workTree: 'ZENSU_FSP_WORK_TREE',
     marker: 'marker-state',
   });
 }
@@ -373,8 +383,8 @@ function setClone(inputs, env, now) {
   const config = normalizeConfig(inputs.config);
   const workflow = textOrNull(env.ZENSU_FSP_WORKFLOW) || config.workflow;
   const job = textOrNull(env.ZENSU_FSP_JOB) || config.job;
-  const verifyOptions = { projectRoot: inputs.projectRoot, pluginData: inputs.pluginData, workflow, job, localCommand: config.fullSuiteCommand, env, mode: 'cache', now };
-  const result = workflow ? contract.verify(verifyOptions) : contract.discover(verifyOptions);
+  const verifyOptions = { projectRoot: inputs.projectRoot, workTree: inputs.workTree, pluginData: inputs.pluginData, workflow, job, localCommand: config.fullSuiteCommand, env, mode: 'cache', now };
+  const result = chainContract(inputs, verifyOptions);
   if (!result.verified) {
     process.stderr.write(`full-suite: refusing to record CI full-suite runs for this clone — ${shown(result.reason, inputs.projectRoot)}\n`);
     return 2;

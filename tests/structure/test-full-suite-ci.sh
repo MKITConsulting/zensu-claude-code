@@ -612,24 +612,29 @@ WT_CI_NATIVE=""
 [ -n "$WT_CI" ] && WT_CI_NATIVE="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$WT_CI" 2>/dev/null)"
 BOUND_RUN_FILE=""
 
-bound_ci_max_rounds() {
-  local run=fsci_bound_wt_run chain=fsci-bound-wt-chain state ctx
+bound_begin() {
+  local sid="$1" run="$2" chain="$3" tree="$4"
   local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  bind "fsci-bound-wt" "$PROJ" || return 1
+  bind "$sid" "$PROJ" || return 1
   bash "$HELPER" --ci --session >/dev/null 2>&1 || return 1
-  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$PROJ" false true "$WT_CI" >/dev/null 2>&1 || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$PROJ" false true "$tree" >/dev/null 2>&1 || return 1
   autopilot_apply_event "$run" "plan-${run}" PLAN_APPROVED \
     "{\"approvedPlanSha256\":\"$sha\"}" "$PROJ" "$ZENSU_SESSION_KEY" >/dev/null 2>&1 || return 1
+  BEGIN_CALLS_BEFORE="$(call_count)"
   bash "$LOG" --tdd-begin --session "$ZENSU_SESSION_KEY" --autopilot-run "$run" --autopilot-attempt 1 \
-    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
+    --autopilot-return-stage GATES --chain-id "$chain" >"$WORK/begin.out" 2>"$WORK/begin.err" || return 1
+  BEGIN_CALLS_AFTER="$(call_count)"
   bash "$LOG" --tdd-complete --session "$ZENSU_SESSION_KEY" --autopilot-run "$run" --autopilot-attempt 1 \
-    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
+    --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1
+}
+
+bound_review() {
+  local sid="$1" state ctx
   state="$(tdd_state_file "$ZENSU_SESSION_KEY")" || return 1
-  tdd_increment_counter "$ZENSU_SESSION_KEY" reviewRound >/dev/null || return 1
   TICKET="$(bash "$LOG" --review-ticket --session "$ZENSU_SESSION_KEY" 2>/dev/null)"
   [ -n "$TICKET" ] || return 1
   ctx="$(tdd_autopilot_context "$state" "$ZENSU_SESSION_KEY")" || return 1
-  SID_VALUE="fsci-bound-wt" TICKET="$TICKET" CONTEXT="$ctx" node -e '
+  SID_VALUE="$sid" TICKET="$TICKET" CONTEXT="$ctx" node -e '
     const c = JSON.parse(process.env.CONTEXT);
     process.stdout.write(JSON.stringify({
       hook_event_name: "PostToolUse",
@@ -641,7 +646,14 @@ bound_ci_max_rounds() {
       }
     }));
   ' | bash "$POSTREV" >"$WORK/postrev.json" 2>/dev/null
-  BOUND_RUN_FILE="$(autopilot_run_file "$run" "$PROJ")"
+  return 0
+}
+
+bound_ci_max_rounds() {
+  bound_begin "fsci-bound-wt" fsci_bound_wt_run fsci-bound-wt-chain "$WT_CI" || return 1
+  tdd_increment_counter "$ZENSU_SESSION_KEY" reviewRound >/dev/null || return 1
+  bound_review "fsci-bound-wt" || return 1
+  BOUND_RUN_FILE="$(autopilot_run_file fsci_bound_wt_run "$PROJ")"
 }
 
 if [ -n "$WT_CI_NATIVE" ] && bound_ci_max_rounds; then
@@ -668,6 +680,131 @@ if [ -n "$WT_CI_NATIVE" ] && bound_ci_max_rounds; then
   fi
 else
   check "C23b drive a bound CI chain in a nested worktree to the max-rounds close without self-review" FAIL
+fi
+
+ZENSU_CONFIG="$WORK/config.json"
+ANCHOR_BRANCH="$(git -C "$PROJ" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+PUSH_ONLY_YAML=$'name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    name: test\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n'
+PUSH_ONLY_REASON='the session marker chose CI full-suite runs, but the CI pull-request pipeline is not verified: no workflow under .github/workflows triggers on pull_request'
+CI_SESSION_BEGIN='full suite: ci | this chain began with the CI runner: .github/workflows/ci.yml, job "test" runs its full suite when a pull request against main is opened or updated | decided by: session marker'
+
+nested_worktree() {
+  local name="$1" workflow="$2" tree
+  git -C "$PROJ" worktree add -q "$PROJ/.claude/worktrees/$name" -b "$name" >/dev/null 2>&1 || return 1
+  tree="$(cd -P "$PROJ/.claude/worktrees/$name" 2>/dev/null && pwd -P)" || return 1
+  printf '%s' "$workflow" > "$tree/.github/workflows/ci.yml" || return 1
+  git -C "$tree" add .github/workflows/ci.yml && git -C "$tree" -c commit.gpgsign=false commit -qm "$name workflow" >/dev/null 2>&1 || return 1
+  printf '%s\n' "$tree"
+}
+
+proof_exists() {
+  node -e '
+    const crypto = require("crypto"), fs = require("fs"), path = require("path");
+    const [data, tree] = process.argv.slice(1);
+    const sha = (text) => crypto.createHash("sha256").update(text).digest("hex");
+    const name = `${sha("acme/app\n.github/workflows/ci.yml").slice(0, 40)}.${sha(fs.readFileSync(path.join(tree, ".github", "workflows", "ci.yml")))}.${sha("test").slice(0, 16)}.json`;
+    process.exit(fs.existsSync(path.join(data, "ci-contract", "v1", "cache", name)) ? 0 : 1);
+  ' "$CLAUDE_PLUGIN_DATA" "$1" 2>/dev/null
+}
+
+local_directive() {
+  printf '%s' "$1" | grep -qF -- '--evidence-run --scope full --if-stale' \
+    && ! printf '%s' "$1" | grep -qF 'so do NOT run --scope full'
+}
+
+ci_directive() {
+  printf '%s' "$1" | grep -qF -- "--evidence-run --scope scoped --if-stale --cmd '<the Phase 6 affected-suite command>'" \
+    && printf '%s' "$1" | grep -qF 'so do NOT run --scope full' \
+    && ! printf '%s' "$1" | grep -qF -- '--evidence-run --scope full --if-stale'
+}
+
+WT_PUSH="$(nested_worktree ci-push-only "$PUSH_ONLY_YAML")"
+if [ -n "$WT_PUSH" ] && bound_begin "fsci-bound-push" fsci_bound_push_run fsci-bound-push-chain "$WT_PUSH"; then
+  if snapshot_is local 'session marker' \
+    && grep -qxF "full suite: local | $PUSH_ONLY_REASON | decided by: session marker | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before" "$WORK/begin.out"; then
+    check "C29 a bound chain whose nested worktree's workflow does not trigger on pull_request begins local, although the anchor's workflow is verified" PASS
+  else
+    check "C29 a bound chain whose nested worktree's workflow does not trigger on pull_request begins local, although the anchor's workflow is verified" FAIL
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  if [ "$CHAIN_OUT" = "full suite: local | $PUSH_ONLY_REASON | decided by: session marker" ]; then
+    check "C29b --full-suite-policy --chain judges that chain by its worktree's workflow file" PASS
+  else
+    check "C29b --full-suite-policy --chain judges that chain by its worktree's workflow file" FAIL
+    printf '%s\n' "$CHAIN_OUT"
+  fi
+  if bound_review "fsci-bound-push"; then
+    DIRECTIVE="$(directive)"
+    if local_directive "$DIRECTIVE"; then
+      check "C29c the post-review directive of that chain keeps the local full suite" PASS
+    else
+      check "C29c the post-review directive of that chain keeps the local full suite" FAIL
+      printf '%s\n' "$DIRECTIVE" | head -c 4000; echo
+    fi
+  else
+    check "C29c drive the review of that chain" FAIL
+  fi
+  BEFORE="$(records)"
+  bash "$LOG" --evidence-run --scope full >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(records)" -gt "$BEFORE" ] && ! grep -qF 'not a suite failure' "$WORK/err"; then
+    check "C29d the runner lets that chain run its full suite locally" PASS
+  else
+    check "C29d the runner lets that chain run its full suite locally (rc=$RC)" FAIL
+    ERR
+  fi
+else
+  check "C29 prepare a bound chain in a nested worktree whose workflow does not trigger on pull_request" FAIL
+  cat "$WORK/begin.err" 2>/dev/null
+fi
+
+DIFF_YAML="$(cat "$PROJ/.github/workflows/ci.yml")"$'\n# the workflow of the chain branch\n'
+WT_DIFF="$(nested_worktree ci-differs "$DIFF_YAML")"
+if [ -n "$WT_DIFF" ] && bound_begin "fsci-bound-diff" fsci_bound_diff_run fsci-bound-diff-chain "$WT_DIFF"; then
+  if [ "$BEGIN_CALLS_AFTER" -gt "$BEGIN_CALLS_BEFORE" ] && proof_exists "$WT_DIFF" \
+    && snapshot_is ci 'session marker' && grep -qxF "$CI_SESSION_BEGIN" "$WORK/begin.out"; then
+    check "C30 a bound chain whose nested worktree's workflow differs verifies that version at --tdd-begin and begins ci" PASS
+  else
+    check "C30 a bound chain whose nested worktree's workflow differs verifies that version at --tdd-begin and begins ci (calls=$BEGIN_CALLS_BEFORE/$BEGIN_CALLS_AFTER)" FAIL
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+  SWITCHED=no
+  if git -C "$PROJ" checkout -q -b fsci-anchor-push-only \
+    && printf '%s' "$PUSH_ONLY_YAML" > "$PROJ/.github/workflows/ci.yml" \
+    && git -C "$PROJ" add .github/workflows/ci.yml \
+    && git -C "$PROJ" -c commit.gpgsign=false commit -qm 'anchor push-only workflow' >/dev/null 2>&1; then
+    SWITCHED=yes
+  fi
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  if [ "$SWITCHED" = yes ] && printf '%s\n' "$CHAIN_OUT" | head -n 1 | grep -q '^full suite: ci | CI: \.github/workflows/ci\.yml, job "test" .* | decided by: session marker$'; then
+    check "C30b a branch switch in the anchor checkout in the middle of the chain leaves --full-suite-policy --chain ci" PASS
+  else
+    check "C30b a branch switch in the anchor checkout in the middle of the chain leaves --full-suite-policy --chain ci (switched=$SWITCHED)" FAIL
+    printf '%s\n' "$CHAIN_OUT"
+  fi
+  if bound_review "fsci-bound-diff"; then
+    DIRECTIVE="$(directive)"
+    if ci_directive "$DIRECTIVE"; then
+      check "C30c after that switch the post-review directive still runs only the affected suite" PASS
+    else
+      check "C30c after that switch the post-review directive still runs only the affected suite" FAIL
+      printf '%s\n' "$DIRECTIVE" | head -c 4000; echo
+    fi
+  else
+    check "C30c drive the review of that chain" FAIL
+  fi
+  BEFORE="$(records)"
+  bash "$LOG" --evidence-run --scope full >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 2 ] && [ "$(records)" = "$BEFORE" ] && grep -qF 'not a suite failure' "$WORK/err"; then
+    check "C30d after that switch the runner still refuses a local full run of that chain" PASS
+  else
+    check "C30d after that switch the runner still refuses a local full run of that chain (rc=$RC)" FAIL
+    ERR
+  fi
+  [ -z "$ANCHOR_BRANCH" ] || git -C "$PROJ" checkout -q "$ANCHOR_BRANCH" >/dev/null 2>&1
+else
+  check "C30 prepare a bound chain in a nested worktree whose workflow differs from the anchor's" FAIL
+  cat "$WORK/begin.err" 2>/dev/null
 fi
 
 unit_check_done "C1z every unit file the registry gives this suite was graded"

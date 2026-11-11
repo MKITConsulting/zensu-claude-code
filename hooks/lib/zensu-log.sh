@@ -476,6 +476,24 @@ _zensu_avr_work_tree() {
   return 1
 }
 
+_zensu_full_suite_work_tree() {
+  local scratch
+  _fsw_tree=""
+  _fsw_fault=""
+  scratch="$(mktemp -d 2>/dev/null)" || {
+    _fsw_fault="no temporary directory was available for the work-tree lookup"
+    return 0
+  }
+  _zensu_bound_work_tree "${1:-}" "$scratch"
+  rm -rf "$scratch"
+  if [ -n "$_bwt_fault" ]; then
+    _fsw_fault="$_bwt_fault"
+  else
+    _fsw_tree="$_bwt_tree"
+  fi
+  return 0
+}
+
 _zensu_acceptance_gate() {
   local session="$1" rc=0
   _avg_lines=""
@@ -606,6 +624,8 @@ _avr_dir=""
 _evr_work_tree=""
 _evr_work_dir=""
 _avr_work_tree=""
+_fsw_tree=""
+_fsw_fault=""
 
 case "${1:-}" in
   --evidence-run)
@@ -678,7 +698,8 @@ case "${1:-}" in
         *) echo "zensu-log.sh --full-suite-policy: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
-    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" "$_fsp_mode" "$_fsp_refresh"
+    _zensu_full_suite_work_tree "${ZENSU_SESSION_KEY:-}"
+    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" "$_fsp_mode" "$_fsp_refresh" "$_fsw_tree" "$_fsw_fault"
     exit $?
     ;;
   --external-review)
@@ -2018,7 +2039,8 @@ case "${1:-}" in
           _zensu_review_gate_reset "--tdd-begin" "$session_val" \
             "the previous generation's review packets and reviewer records could not be removed; this chain's review rounds still compare against packets created after this point."
           zensu_stop_background_wait_reset "$session_val"
-          if ! begin_full_suite_line="$(zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot 2>/dev/null)"; then
+          _zensu_full_suite_work_tree "$session_val"
+          if ! begin_full_suite_line="$(zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot 0 "$_fsw_tree" "$_fsw_fault" 2>/dev/null)"; then
             begin_full_suite_line=""
             echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
           fi

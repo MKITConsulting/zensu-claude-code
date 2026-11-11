@@ -490,8 +490,14 @@ fi
 review_gate_check
 
 FULL_SUITE_RUNNER="local"
+FULL_SUITE_WORK_TREE=""
+FULL_SUITE_WORK_FAULT=""
+if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
+  FULL_SUITE_WORK_TREE="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-work-tree --session "$SESSION_ID" 2>/dev/null)" || FULL_SUITE_WORK_TREE=""
+  [ -n "$FULL_SUITE_WORK_TREE" ] || FULL_SUITE_WORK_FAULT="zensu-log.sh --chain-work-tree could not resolve the work tree of this Autopilot-bound chain"
+fi
 if source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-full-suite-transport.sh" 2>/dev/null \
-  && [ "$(zensu_full_suite_policy_node "post-review-tdd-delegate.sh" effective 2>/dev/null)" = "ci" ]; then
+  && [ "$(zensu_full_suite_policy_node "post-review-tdd-delegate.sh" effective 0 "$FULL_SUITE_WORK_TREE" "$FULL_SUITE_WORK_FAULT" 2>/dev/null)" = "ci" ]; then
   FULL_SUITE_RUNNER="ci"
 fi
 FULL_SUITE_ROUND_NOTE="the full suite returns only when the review loop closes"
