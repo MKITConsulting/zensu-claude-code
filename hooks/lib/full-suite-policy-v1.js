@@ -166,7 +166,7 @@ function normalizeConfig(config) {
 
 function chainContract(options, verifyOptions) {
   const fault = evr.workTreeFaultCause(options.workTreeFault);
-  if (fault !== null) return { verified: false, reason: `the chain's work tree could not be resolved: ${fault}`, transient: false };
+  if (fault !== null) return { verified: false, reason: `the chain's work tree could not be resolved: ${fault}`, workTreeFault: fault, transient: false };
   return verifyOptions.workflow ? contract.verify(verifyOptions) : contract.discover(verifyOptions);
 }
 
@@ -232,6 +232,15 @@ function shown(text, projectRoot) {
   return evr.screen(String(text), projectRoot, DISPLAY);
 }
 
+function reasonText(policy, projectRoot, fallback) {
+  const reason = policy.reason || fallback;
+  const fault = policy.contract && typeof policy.contract.workTreeFault === 'string' ? policy.contract.workTreeFault : null;
+  if (fault === null) return shown(reason, projectRoot);
+  const tail = `: ${fault}`;
+  const head = reason.endsWith(tail) ? reason.slice(0, -tail.length) : reason;
+  return `${shown(head, projectRoot)} | work tree: ${shown(fault, projectRoot)}`;
+}
+
 function formatAge(milliseconds) {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) return 'an unknown time';
   const minutes = Math.round(milliseconds / 60000);
@@ -280,7 +289,7 @@ function policyLines(policy, options) {
       `full suite: nothing is recorded yet. Ask the user once, then record the answer. Repository (this clone, every worktree): ${renderHelper(options.pluginData, '--ci --repo')} | this session only: ${renderHelper(options.pluginData, '--ci --session')} | stay local: ${renderHelper(options.pluginData, '--local --session')}`,
     ];
   }
-  return [`full suite: local | ${shown(policy.reason || 'local full-suite runs', projectRoot)} | decided by: ${policy.decidedBy}`];
+  return [`full suite: local | ${reasonText(policy, projectRoot, 'local full-suite runs')} | decided by: ${policy.decidedBy}`];
 }
 
 function snapshotPolicy(inputs, now = Date.now()) {
@@ -294,7 +303,7 @@ function snapshotLines(policy, projectRoot) {
     return [`full suite: ci | this chain began with the CI runner: ${shown(policy.contract.workflow, projectRoot)}, job "${shown(policy.contract.job, projectRoot)}" runs its full suite when a pull request against ${shown(policy.contract.base, projectRoot)} is opened or updated | decided by: ${policy.decidedBy}`];
   }
   if (policy.ciRequested === true) {
-    return [`full suite: local | ${shown(policy.reason || 'the CI pull-request pipeline is not verified', projectRoot)} | decided by: ${policy.decidedBy} | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before`];
+    return [`full suite: local | ${reasonText(policy, projectRoot, 'the CI pull-request pipeline is not verified')} | decided by: ${policy.decidedBy} | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before`];
   }
   return [];
 }
@@ -427,11 +436,12 @@ async function main(argv, env = process.env) {
       return 0;
     }
     if (mode === 'set-clone') return setClone(inputs, env, now);
+    if (mode === 'retire') return removeSnapshot(stores(inputs.pluginData), inputs.sessionKey) ? 0 : 2;
   } catch (error) {
     process.stderr.write(`full-suite-policy: ${error && error.message ? error.message : String(error)}\n`);
     return 2;
   }
-  process.stderr.write('usage: full-suite-policy-v1.js policy|status|snapshot|chain|effective|set-clone\n');
+  process.stderr.write('usage: full-suite-policy-v1.js policy|status|snapshot|chain|effective|set-clone|retire\n');
   return 2;
 }
 

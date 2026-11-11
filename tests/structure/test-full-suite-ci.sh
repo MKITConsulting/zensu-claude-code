@@ -475,7 +475,11 @@ snapshot_is() {
 }
 
 call_count() {
-  if [ -f "$CALLS" ]; then wc -l < "$CALLS" | tr -d ' '; else echo 0; fi
+  call_count_in "$CALLS"
+}
+
+call_count_in() {
+  if [ -f "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi
 }
 
 CI_BEGIN_LINE='full suite: ci | this chain began with the CI runner: .github/workflows/ci.yml, job "test" runs its full suite when a pull request against main is opened or updated | decided by: this clone'
@@ -707,6 +711,14 @@ proof_exists() {
   ' "$CLAUDE_PLUGIN_DATA" "$1" 2>/dev/null
 }
 
+seed_ci_snapshot() {
+  node -e '
+    const policy = require(process.argv[1]);
+    policy.writeSnapshot(policy.stores(process.argv[2]), process.argv[3], process.argv[4], { runner: "ci", decidedBy: "session marker" });
+  ' "$PLUGIN_DIR/hooks/lib/full-suite-policy-v1.js" "$CLAUDE_PLUGIN_DATA" "${ZENSU_SESSION_KEY:-}" "${ZENSU_PROJECT_ROOT:-}" 2>/dev/null \
+    && snapshot_is ci 'session marker'
+}
+
 local_directive() {
   printf '%s' "$1" | grep -qF -- '--evidence-run --scope full --if-stale' \
     && ! printf '%s' "$1" | grep -qF 'so do NOT run --scope full'
@@ -727,19 +739,21 @@ if [ -n "$WT_PUSH" ] && bound_begin "fsci-bound-push" fsci_bound_push_run fsci-b
     check "C29 a bound chain whose nested worktree's workflow does not trigger on pull_request begins local, although the anchor's workflow is verified" FAIL
     cat "$WORK/begin.out" "$WORK/begin.err"
   fi
+  SEEDED=no
+  seed_ci_snapshot && SEEDED=yes
   CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
-  if [ "$CHAIN_OUT" = "full suite: local | $PUSH_ONLY_REASON | decided by: session marker" ]; then
-    check "C29b --full-suite-policy --chain judges that chain by its worktree's workflow file" PASS
+  if [ "$SEEDED" = yes ] && [ "$CHAIN_OUT" = "full suite: local | $PUSH_ONLY_REASON | decided by: session marker" ]; then
+    check "C29b with a ci snapshot on record, --full-suite-policy --chain judges that chain by its worktree's workflow file" PASS
   else
-    check "C29b --full-suite-policy --chain judges that chain by its worktree's workflow file" FAIL
+    check "C29b with a ci snapshot on record, --full-suite-policy --chain judges that chain by its worktree's workflow file (seeded=$SEEDED)" FAIL
     printf '%s\n' "$CHAIN_OUT"
   fi
   if bound_review "fsci-bound-push"; then
     DIRECTIVE="$(directive)"
-    if local_directive "$DIRECTIVE"; then
-      check "C29c the post-review directive of that chain keeps the local full suite" PASS
+    if [ "$SEEDED" = yes ] && local_directive "$DIRECTIVE"; then
+      check "C29c with a ci snapshot on record, the post-review directive of that chain keeps the local full suite" PASS
     else
-      check "C29c the post-review directive of that chain keeps the local full suite" FAIL
+      check "C29c with a ci snapshot on record, the post-review directive of that chain keeps the local full suite (seeded=$SEEDED)" FAIL
       printf '%s\n' "$DIRECTIVE" | head -c 4000; echo
     fi
   else
@@ -747,10 +761,10 @@ if [ -n "$WT_PUSH" ] && bound_begin "fsci-bound-push" fsci_bound_push_run fsci-b
   fi
   BEFORE="$(records)"
   bash "$LOG" --evidence-run --scope full >"$WORK/out" 2>"$WORK/err"; RC=$?
-  if [ "$RC" -eq 0 ] && [ "$(records)" -gt "$BEFORE" ] && ! grep -qF 'not a suite failure' "$WORK/err"; then
-    check "C29d the runner lets that chain run its full suite locally" PASS
+  if [ "$SEEDED" = yes ] && [ "$RC" -eq 0 ] && [ "$(records)" -gt "$BEFORE" ] && ! grep -qF 'not a suite failure' "$WORK/err"; then
+    check "C29d with a ci snapshot on record, the runner lets that chain run its full suite locally" PASS
   else
-    check "C29d the runner lets that chain run its full suite locally (rc=$RC)" FAIL
+    check "C29d with a ci snapshot on record, the runner lets that chain run its full suite locally (rc=$RC seeded=$SEEDED)" FAIL
     ERR
   fi
 else
@@ -804,6 +818,175 @@ if [ -n "$WT_DIFF" ] && bound_begin "fsci-bound-diff" fsci_bound_diff_run fsci-b
   [ -z "$ANCHOR_BRANCH" ] || git -C "$PROJ" checkout -q "$ANCHOR_BRANCH" >/dev/null 2>&1
 else
   check "C30 prepare a bound chain in a nested worktree whose workflow differs from the anchor's" FAIL
+  cat "$WORK/begin.err" 2>/dev/null
+fi
+
+source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+REAL_NODE="$(command -v node)"
+COUNT_BIN="$WORK/count-bin"
+mkdir -p "$COUNT_BIN"
+printf '#!/bin/bash\nprintf "node\\n" >> "$NODE_CALLS"\nexec "$REAL_NODE" "$@"\n' > "$COUNT_BIN/node"
+chmod +x "$COUNT_BIN/node"
+LOOKUP_NODE_CEILING=10
+LOOKUP_FAULT_HEAD="the session marker chose CI full-suite runs, but the CI pull-request pipeline is not verified: the chain's work tree could not be resolved | work tree: "
+LOCAL_BEGIN_TAIL=' | decided by: session marker | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before'
+
+fresh_worktree() {
+  local tree
+  git -C "$PROJ" worktree add -q "$PROJ/.claude/worktrees/$1" -b "$1" >/dev/null 2>&1 || return 1
+  tree="$(cd -P "$PROJ/.claude/worktrees/$1" 2>/dev/null && pwd -P)" || return 1
+  printf '%s\n' "$tree"
+}
+
+faulted_begin() {
+  local sid="$1" run="$2" chain="$3" tree="$4" seed="$5" stub="${6:-}" rc=0
+  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  bind "$sid" "$PROJ" || return 1
+  bash "$HELPER" --ci --session >/dev/null 2>&1 || return 1
+  bash "$LOG" --full-suite-policy --refresh >/dev/null 2>&1
+  proof_exists "$tree" || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$PROJ" false true "$tree" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" "plan-${run}" PLAN_APPROVED \
+    "{\"approvedPlanSha256\":\"$sha\"}" "$PROJ" "$ZENSU_SESSION_KEY" >/dev/null 2>&1 || return 1
+  [ "$seed" = no ] || seed_ci_snapshot || return 1
+  mv "$tree" "$tree.away" || return 1
+  PATH="${stub:+$stub:}$PATH" bash "$LOG" --tdd-begin --session "$ZENSU_SESSION_KEY" --autopilot-run "$run" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$chain" >"$WORK/begin.out" 2>"$WORK/begin.err" || rc=$?
+  mv "$tree.away" "$tree" || return 1
+  return "$rc"
+}
+
+WT_STALE="$(fresh_worktree ci-stale)"
+if [ -n "$WT_STALE" ] && work_tree_fault_stub "$WORK/fault-stub" \
+  && faulted_begin "fsci-stale" fsci_stale_run fsci-stale-chain "$WT_STALE" yes "$WORK/fault-stub"; then
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  if [ ! -e "$CLAUDE_PLUGIN_DATA/ci-contract/v1/snapshots/${ZENSU_SESSION_KEY:-missing}.json" ] \
+    && grep -qF 'FULL SUITE SNAPSHOT UNAVAILABLE' "$WORK/begin.err" \
+    && ! grep -qF 'RETIREMENT UNRESOLVED' "$WORK/begin.err" \
+    && [ "$CHAIN_OUT" = 'full suite: local | this chain recorded no full-suite snapshot when it began, so it closes as a local chain | decided by: session marker' ]; then
+    check "C31 a --tdd-begin that cannot record its own snapshot retires the previous chain's ci snapshot first, so the new chain closes local" PASS
+  else
+    check "C31 a --tdd-begin that cannot record its own snapshot retires the previous chain's ci snapshot first, so the new chain closes local" FAIL
+    printf '%s\n' "$CHAIN_OUT"
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+else
+  check "C31 prepare a bound chain whose --tdd-begin cannot record its snapshot" FAIL
+  cat "$WORK/begin.err" 2>/dev/null
+fi
+
+WT_LOOKUP="$(fresh_worktree ci-lookup)"
+if [ -n "$WT_LOOKUP" ] && faulted_begin "fsci-lookup" fsci_lookup_run fsci-lookup-chain "$WT_LOOKUP" no; then
+  if snapshot_is local 'session marker' \
+    && grep -qF "full suite: local | $LOOKUP_FAULT_HEAD" "$WORK/begin.out" \
+    && grep -qF "$LOCAL_BEGIN_TAIL" "$WORK/begin.out" \
+    && ! grep -qF 'FULL SUITE SNAPSHOT UNAVAILABLE' "$WORK/begin.err"; then
+    check "C32 a bound chain whose worktree cannot be resolved at --tdd-begin begins local and names the lookup fault" PASS
+  else
+    check "C32 a bound chain whose worktree cannot be resolved at --tdd-begin begins local and names the lookup fault" FAIL
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+  bash "$LOG" --tdd-complete --session "$ZENSU_SESSION_KEY" --autopilot-run fsci_lookup_run --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id fsci-lookup-chain >/dev/null 2>&1; RC_COMPLETE=$?
+  rm -f "$WORK/lookup.calls"
+  LOOKUP_OUT="$(PATH="$COUNT_BIN:$PATH" NODE_CALLS="$WORK/lookup.calls" REAL_NODE="$REAL_NODE" \
+    bash "$LOG" --chain-work-tree --project-dir --session "$ZENSU_SESSION_KEY" 2>/dev/null)"
+  LOOKUP_NODES="$(call_count_in "$WORK/lookup.calls")"
+  SEEDED=no
+  seed_ci_snapshot && SEEDED=yes
+  MOVED=no
+  mv "$WT_LOOKUP" "$WT_LOOKUP.away" && MOVED=yes
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  REVIEWED=no
+  bound_review "fsci-lookup" && REVIEWED=yes
+  DIRECTIVE="$(directive)"
+  [ "$MOVED" = no ] || mv "$WT_LOOKUP.away" "$WT_LOOKUP"
+  case "$CHAIN_OUT" in
+    ("full suite: local | $LOOKUP_FAULT_HEAD"*' | decided by: session marker') CHAIN_OK=yes ;;
+    (*) CHAIN_OK=no ;;
+  esac
+  if [ "$RC_COMPLETE" -eq 0 ] && [ "$SEEDED" = yes ] && [ "$MOVED" = yes ] && [ "$CHAIN_OK" = yes ]; then
+    check "C32b with a ci snapshot on record, --full-suite-policy --chain of a chain whose worktree cannot be resolved reads local and names the lookup fault" PASS
+  else
+    check "C32b with a ci snapshot on record, --full-suite-policy --chain of a chain whose worktree cannot be resolved reads local (complete=$RC_COMPLETE seeded=$SEEDED moved=$MOVED)" FAIL
+    printf '%s\n' "$CHAIN_OUT"
+  fi
+  if [ "$REVIEWED" = yes ] && [ "$SEEDED" = yes ] && local_directive "$DIRECTIVE"; then
+    check "C32c with a ci snapshot on record, the post-review directive of a chain whose worktree cannot be resolved keeps the local full suite" PASS
+  else
+    check "C32c with a ci snapshot on record, the post-review directive of a chain whose worktree cannot be resolved keeps the local full suite (reviewed=$REVIEWED seeded=$SEEDED)" FAIL
+    printf '%s\n' "$DIRECTIVE" | head -c 4000; echo
+  fi
+  if [ "$LOOKUP_OUT" = "$WT_LOOKUP" ] && [ "$LOOKUP_NODES" -gt 0 ] && [ "$LOOKUP_NODES" -le "$LOOKUP_NODE_CEILING" ]; then
+    check "C33 the work-tree lookup the post-review hook starts for a bound chain spawns at most $LOOKUP_NODE_CEILING node processes" PASS
+  else
+    check "C33 the work-tree lookup the post-review hook starts for a bound chain spawns at most $LOOKUP_NODE_CEILING node processes (spawned=$LOOKUP_NODES out=$LOOKUP_OUT)" FAIL
+  fi
+else
+  check "C32 prepare a bound chain whose worktree cannot be resolved at --tdd-begin" FAIL
+  cat "$WORK/begin.err" 2>/dev/null
+fi
+
+plain_begin() {
+  local sid="$1" run="$2" chain="$3" tree="$4" root="$5"
+  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  bind "$sid" "$root" || return 1
+  bash "$HELPER" --ci --session >/dev/null 2>&1 || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$root" false true "$tree" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" "plan-${run}" PLAN_APPROVED \
+    "{\"approvedPlanSha256\":\"$sha\"}" "$root" "$ZENSU_SESSION_KEY" >/dev/null 2>&1 || return 1
+  bash "$LOG" --tdd-begin --session "$ZENSU_SESSION_KEY" --autopilot-run "$run" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$chain" >"$WORK/begin.out" 2>"$WORK/begin.err"
+}
+
+SCREEN_FAULT="the chain's work tree contains a double quote, a dollar sign, a backtick or a backslash"
+SCREEN_NAME='ci-$screen'
+WT_SCREEN=""
+if git -C "$PROJ" worktree add -q "$PROJ/.claude/worktrees/$SCREEN_NAME" -b ci-screen >/dev/null 2>&1; then
+  WT_SCREEN="$(cd -P "$PROJ/.claude/worktrees/$SCREEN_NAME" 2>/dev/null && pwd -P)"
+fi
+if [ -n "$WT_SCREEN" ] && plain_begin "fsci-screen" fsci_screen_run fsci-screen-chain "$WT_SCREEN" "$PROJ"; then
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  if snapshot_is local 'session marker' \
+    && grep -qxF "full suite: local | ${LOOKUP_FAULT_HEAD}${SCREEN_FAULT}${LOCAL_BEGIN_TAIL}" "$WORK/begin.out" \
+    && [ "$CHAIN_OUT" = "full suite: local | ${LOOKUP_FAULT_HEAD}${SCREEN_FAULT} | decided by: session marker" ]; then
+    check "C34 a bound chain whose worktree path holds a dollar sign is judged unresolved at --tdd-begin and at --chain, as --chain-work-tree screens it" PASS
+  else
+    check "C34 a bound chain whose worktree path holds a dollar sign is judged unresolved at --tdd-begin and at --chain, as --chain-work-tree screens it" FAIL
+    printf '%s\n' "$CHAIN_OUT"
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+else
+  check "C34 prepare a bound chain whose worktree path holds a dollar sign" FAIL
+  cat "$WORK/begin.err" 2>/dev/null
+fi
+
+FOLD_ROOT="$PROJ/pkg"
+WT_FOLD=""
+if mkdir -p "$FOLD_ROOT" \
+  && git -C "$PROJ" worktree add -q "$FOLD_ROOT/.claude/worktrees/ci-fold" -b ci-fold >/dev/null 2>&1; then
+  WT_FOLD="$(cd -P "$FOLD_ROOT/.claude/worktrees/ci-fold" 2>/dev/null && pwd -P)"
+fi
+if [ -n "$WT_FOLD" ] && [ ! -e "$WT_FOLD/pkg" ] \
+  && plain_begin "fsci-fold" fsci_fold_run fsci-fold-chain "$WT_FOLD" "$FOLD_ROOT"; then
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  case "$CHAIN_OUT" in
+    ("full suite: local | ${LOOKUP_FAULT_HEAD}"*'has no directory'*' | decided by: session marker') FOLD_CHAIN=yes ;;
+    (*) FOLD_CHAIN=no ;;
+  esac
+  if snapshot_is local 'session marker' \
+    && grep -qF "full suite: local | ${LOOKUP_FAULT_HEAD}" "$WORK/begin.out" \
+    && grep -qF 'has no directory' "$WORK/begin.out" \
+    && grep -qF "$LOCAL_BEGIN_TAIL" "$WORK/begin.out" \
+    && [ "$FOLD_CHAIN" = yes ]; then
+    check "C35 a bound chain whose worktree lacks the session's subdirectory is judged unresolved at --tdd-begin and at --chain, with the missing directory named" PASS
+  else
+    check "C35 a bound chain whose worktree lacks the session's subdirectory is judged unresolved at --tdd-begin and at --chain, with the missing directory named" FAIL
+    printf '%s\n' "$CHAIN_OUT"
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+else
+  check "C35 prepare a bound chain in a subdirectory session whose worktree lacks that subdirectory" FAIL
   cat "$WORK/begin.err" 2>/dev/null
 fi
 

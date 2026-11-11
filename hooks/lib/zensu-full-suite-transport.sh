@@ -26,7 +26,8 @@ zensu_full_suite_policy_node() {
     return 2
   }
   if [ -n "$work_tree" ] && [ -z "$work_tree_fault" ]; then
-    work_tree_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$work_tree")" || {
+    work_tree_native="$(cd "$work_tree" 2>/dev/null && pwd -P)" \
+      && work_tree_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$work_tree_native")" || {
       work_tree_native=""
       work_tree_fault="its path cannot be handed to node"
     }
@@ -56,4 +57,21 @@ zensu_full_suite_policy_node() {
     node -e 'require(process.env.ZENSU_FSP_LIB).main([process.env.ZENSU_FSP_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_FSP_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })' || rc=$?
   rm -rf "$dir"
   return "$rc"
+}
+
+zensu_full_suite_snapshot_retire() {
+  local label="${1:-zensu full-suite}" lib data exclusions
+  command -v node >/dev/null 2>&1 || return 2
+  lib="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib")" || return 2
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 2
+  exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  if command -v zensu_msys_env_exclusions >/dev/null 2>&1; then
+    exclusions="$(zensu_msys_env_exclusions ZENSU_FSP_LIB ZENSU_FSP_PLUGIN_DATA)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  fi
+  MSYS2_ENV_CONV_EXCL="$exclusions" \
+  ZENSU_FSP_LIB="$lib/full-suite-policy-v1.js" \
+  ZENSU_FSP_PLUGIN_DATA="$data" \
+  ZENSU_FSP_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+  ZENSU_FSP_LABEL="$label" \
+    node -e 'require(process.env.ZENSU_FSP_LIB).main(["retire"]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_FSP_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
 }

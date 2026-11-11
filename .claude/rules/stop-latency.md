@@ -171,10 +171,19 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   bind functions unset it (`L36`, `L49`). A variable or a file that a model-side Bash command
   could set is never a pre-verified binding; `CONTROL_BINDINGS` needs no new entry for that
   reason.
-- **Opt-in, two callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
-  `zensu_memoize_project_dir`, each right after its only bind. Every other entry point verifies on
-  every call, as before. `zensu-log.sh` is a candidate, not a caller. A further caller may memoize
-  only after its last bind, and only in a process that runs no record writer. The delegate meets
+- **Opt-in, three callers.** The Stop hook and `hooks/post-review-tdd-delegate.sh` call
+  `zensu_memoize_project_dir`, each right after its only bind, and `_zensu_bound_work_tree_lookup`
+  in `zensu-log.sh` calls it first, inside the subshell `_zensu_bound_work_tree` runs it in, so
+  that memo ends with the subshell. Every other entry point verifies on every call, as before, and
+  the rest of `zensu-log.sh` is a candidate, not a caller. A further caller may memoize
+  only after its last bind, and only in a process that runs no record writer. The lookup subshell
+  meets both: the verb bound before it started, and it only reads the workflow document and the
+  run record and writes its answers into the transport directory. Measured with a counting shim on
+  an Autopilot-bound chain's `zensu-log.sh --chain-work-tree --project-dir --session`, the call the
+  post-review delegate makes on every review completion of such a chain: 18 `node` children
+  without the memo on macOS bash 3.2.57, ten of them root verifications, and 10 with it, two of
+  them root verifications, on that host and on Linux bash 5.2.15; `C33` in
+  `tests/structure/test-full-suite-ci.sh` holds the 10. The delegate meets
   both: its one bind precedes the memo, and what it writes afterwards is the workflow document's
   ticket claim and the background-review store, never the context record. Measured with the
   counting shim on one background hand-back claim through the real prompt hook: 89 `node` children
@@ -199,8 +208,8 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every
-  caller that does not memoize; on the Stop path and in the post-review delegate the memo answers
-  instead.
+  caller that does not memoize; on the Stop path, in the post-review delegate and inside the
+  work-tree lookup the memo answers instead.
 - **Port.** Host half only; `session-control-core-v1.js` is unchanged. `zensu-codex`,
   `zensu-kiro` and `zensu-antigravity` were NOT included. A port that adopts the memo must take
   the `_ZENSU_PROJECT_DIR_MEMO` unset in both bind functions with it, or a re-bind keeps a stale
