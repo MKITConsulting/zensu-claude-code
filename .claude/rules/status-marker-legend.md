@@ -50,11 +50,12 @@ target is a state. Two rows were added at the same time, and their extra arms ar
 disabled gate must never render like a clean one — the rule this repo already applies to
 `reviewerSpawnPermissionCheck`), while `Gates bypassed` carries a NOT-READABLE arm, since
 its value is always read and the failure mode is an unreadable ledger rather than an absent
-one. Its 🟢 is bound to the literal `none` and everything else is 🔴, so a reworded ledger
-constant cannot render clean. `Acceptance` follows the `Full suite` rule: it carries the terminus's `ACCEPTANCE — …`
-lines verbatim, 🟢 only for `pass`, 🟡 for the passing states that verified nothing on this tree
-and an advisory `incomplete` that lists only missing criteria, 🔴 for everything else including
-`escaped`; both renderers carry it right after `Full suite`.
+one. Its 🟢 is bound to the literal `none`, its 🟡 to the literal `acceptance-partial` alone (a
+gap the user consented to, which only the terminus records), and everything else is 🔴, so a
+reworded ledger constant cannot render clean and an escape beside the consented gap stays 🔴. `Acceptance` follows the `Full suite` rule: it carries the terminus's `ACCEPTANCE — …`
+lines verbatim, 🟢 only for `pass`, 🟡 for the passing states that verified nothing on this tree,
+for `partial-accepted` and for an advisory `incomplete` that lists only missing criteria, 🔴 for
+everything else including `escaped`; both renderers carry it right after `Full suite`.
 
 **EIGHT CARRIERS, and a census in prose goes stale the next time one is added — so this is
 a GREP, not a list: before rewording the legend or the vocabulary, run
@@ -157,8 +158,8 @@ misaligns a table column. A later reader should not "reconcile" the two sets.
   colours. Colouring converge was considered and deliberately not done here.
 - The `Gates bypassed` row names the ledger's `UNREADABLE — …` prefix, whose owning
   constants are named in §"Bypass Ledger Read Contract". The row is keyed so that 🟢 is
-  exclusive to the literal `none` and EVERYTHING else is 🔴, which is what makes a reworded
-  constant safe — an earlier wording here claimed it "still falls to 🔴 for any named
+  exclusive to the literal `none`, 🟡 to the literal `acceptance-partial` alone, and EVERYTHING
+  else is 🔴, which is what makes a reworded constant safe — an earlier wording here claimed it "still falls to 🔴 for any named
   escape", which was false, because a reworded unreadable line is neither `none` nor a
   named escape and matched no arm at all. Recorded here rather than in that section's
   roster.

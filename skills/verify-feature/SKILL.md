@@ -126,10 +126,10 @@ only these points:
    name the route or page and what it showed. `pass` needs the proof the Phase 5 PASS rule
    demands for that criterion: for an observed driver the cited exit-0 run is that proof, and the
    DOM/data-and-visual rule binds the UI drivers. Anything not proven is `partial` with the
-   reason, and `partial` blocks the chain exactly like `fail`.
+   reason.
 6. **Never end the turn to wait.** When a manual login or a consent prompt is needed, ask with
    `AskUserQuestion` whether the user has finished it, then continue in the same turn. A
-   criterion the user cannot unblock now is `partial`.
+   criterion the user cannot unblock now is `partial`: follow `rules/acceptance-consent.md`.
 7. **Boot on the same loopback origin** as an earlier pass of this chain. Consent is remembered
    per origin, so the same port asks nothing twice.
 8. **Report** in the Phase 5 format and name the criterion id first in every Scenario cell

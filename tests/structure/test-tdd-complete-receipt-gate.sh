@@ -630,8 +630,9 @@ bash "$LOG" --tdd-begin --session "$SID_E" >/dev/null 2>&1
 ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --tdd-complete --session "$SID_E" >/dev/null 2>&1
 [ $? -eq 0 ]
 check "E1 ZENSU_EDIT_LANDING_GATE=off bypasses the gate for an exempted session" "$(verdict $?)"
-printf '%s' "$ERR_R" | grep -qF 'ZENSU_EDIT_LANDING_GATE=off'
-check "E2 the refusal documents the escape hatch instead of hiding it" "$(verdict $?)"
+printf '%s' "$ERR_R" | grep -qF 'report this refusal and leave the decision to the user' \
+  && ! printf '%s' "$ERR_R" | grep -qE 'ZENSU_[A-Z_]*GATE'
+check "E2 the refusal leaves the decision to the user and names no gate escape" "$(verdict $?)"
 
 echo "== Integration: the library writes where the gate reads =="
 # The whole gate is worthless if these two disagree on the path, and a wrong

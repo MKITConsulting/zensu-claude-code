@@ -94,8 +94,9 @@ JSON objects parses neither, so a second object would cost the block decision it
 - **Every stdout writer sets `DECISION_EMITTED`**: `emit_block`, the five literal emitters and the
   three inline blocks of the inner-state snapshot. `emit_block` carries the notices collected
   before it on the same object, `decision` first. A notice written after a block stays on stderr;
-  the nudge and the three background-wait releases (the workflow wait, the background review wait
-  and the explicit `ZENSU-AWAIT:` wait of `.claude/rules/stop-background-wait.md`) already return
+  the nudge, the three background-wait releases (the workflow wait, the background review wait
+  and the explicit `ZENSU-AWAIT:` wait of `.claude/rules/stop-background-wait.md`) and the
+  acceptance hand-off release of `.claude/rules/acceptance-verification-gate.md` already return
   on `DECISION_EMITTED`.
 - **The supervisor writes only into an empty stdout.** Its deadline release becomes a
   `systemMessage` only when the worker's stdout file is empty, and a worker killed at the deadline

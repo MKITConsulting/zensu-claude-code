@@ -535,7 +535,8 @@ for SID in rq-missing rq-placeholder rq-filled rq-explicit rq-explicit-absent \
            rq-explicit-outside rq-explicit-stem rq-relative-log rq-outside-log \
            rq-wrong-schema rq-malformed rq-clean-tree rq-symlink-plans \
            rq-symlink-logs rq-no-stem rq-stem-unchecked rq-writer-seam rq-both-off \
-           rq-legacy-v1 rq-git-refused rq-git-refused-off; do
+           rq-legacy-v1 rq-git-refused rq-git-refused-off rq-fr-only rq-fr-advisory \
+           rq-fr-escape; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -645,8 +646,9 @@ printf '%s' "$ERR_M" | grep -qF 'no usable `## Requirements` table'
 check "M2 the refusal names the missing table" "$(verdict $?)"
 printf '%s' "$ERR_M" | grep -qF '/zensu:converge'
 check "M3 the refusal explains what the table is for, not just that it failed" "$(verdict $?)"
-printf '%s' "$ERR_M" | grep -qF 'ZENSU_REQUIREMENTS_GATE=off'
-check "M4 the refusal documents the escape hatch instead of hiding it" "$(verdict $?)"
+printf '%s' "$ERR_M" | grep -qF 'report this refusal and leave the decision to the user' \
+  && ! printf '%s' "$ERR_M" | grep -qE 'ZENSU_[A-Z_]*GATE'
+check "M4 the refusal leaves the decision to the user and names no gate escape" "$(verdict $?)"
 printf '%s' "$ERR_M" | grep -qF '2026-01-01-0101_build-missing.md'
 check "M5 the refusal names the plan path it judged" "$(verdict $?)"
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_M")" implComplete)" != "true" ]
@@ -689,6 +691,52 @@ RC_D=$?
 # that never reached the gate at all (a session-state refusal exits above it).
 [ "$RC_D" -eq 0 ] && ! printf '%s' "$ERR_D" | grep -qF 'REQUIREMENTS GATE UNRESOLVED'
 check "D3 the accepted completion judged a plan rather than skipping (no UNRESOLVED line)" "$(verdict $?)"
+
+echo "== FR-008: a standalone plan needs an active acceptance criterion =="
+SID_FR="rq-fr-only"
+activate_session "$SID_FR"
+cat > "$BODIES/fr-only.md" <<'PLAN'
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| FR-001 | the gate refuses a plan with no table | spec |
+PLAN
+stage "$SID_FR" "2026-01-01-2424_build-fr-only" "$BODIES/fr-only.md"
+ERR_FR="$(bash "$LOG" --tdd-complete --session "$SID_FR" 2>&1 >/dev/null)"
+RC_FR=$?
+[ "$RC_FR" -eq 1 ] \
+  && printf '%s' "$ERR_FR" | grep -qF 'zensu-log.sh --tdd-complete: refusing to mark implementation complete — the plan .zensu/plans/2026-01-01-2424_build-fr-only.md carries no active AC-### acceptance criterion (its ## Requirements table has no AC-### row)' \
+  && printf '%s' "$ERR_FR" | grep -qF 'Prefer criteria this environment can observe' \
+  && ! printf '%s' "$ERR_FR" | grep -q 'ZENSU_' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FR")" implComplete)" != "true" ]
+check "AC1 a changed tree whose plan carries only FR rows is refused with the observable-criterion remedy and no escape" "$(verdict $?)"
+cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2026-01-01-2424_build-fr-only.md"
+bash "$LOG" --tdd-complete --session "$SID_FR" >/dev/null 2>&1
+[ $? -eq 0 ] && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FR")" implComplete)" = "true" ]
+check "AC2 the same chain completes once the plan carries an active AC row" "$(verdict $?)"
+awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -A2 -F '              0)' | grep -qF "if [ \"\$complete_ctx\" = '{}' ]; then"
+check "AC3 the criterion check runs only for a standalone chain, after the table was judged usable" "$(verdict $?)"
+SID_FA="rq-fr-advisory"
+activate_session "$SID_FA"
+stage "$SID_FA" "2026-01-01-2525_build-fr-advisory" "$BODIES/fr-only.md"
+printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$SUITE_TMP/acceptance-advisory.json"
+ERR_FA="$(ZENSU_CONFIG="$SUITE_TMP/acceptance-advisory.json" bash "$LOG" --tdd-complete --session "$SID_FA" 2>&1 >/dev/null)"
+RC_FA=$?
+[ "$RC_FA" -eq 0 ] \
+  && printf '%s' "$ERR_FA" | grep -qF 'ACCEPTANCE CRITERIA — advisory, not blocking | the plan .zensu/plans/2026-01-01-2525_build-fr-advisory.md carries no active AC-### acceptance criterion' \
+  && printf '%s' "$ERR_FA" | grep -qF 'the chain terminus will report no-criteria after the review without blocking it' \
+  && ! printf '%s' "$ERR_FA" | grep -q 'ZENSU_' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FA")" implComplete)" = "true" ]
+check "AC4 an advisory acceptance gate completes an FR-only plan and says the terminus will report no-criteria" "$(verdict $?)"
+SID_FE="rq-fr-escape"
+activate_session "$SID_FE"
+stage "$SID_FE" "2026-01-01-2626_build-fr-escape" "$BODIES/fr-only.md"
+ERR_FE="$(ZENSU_ACCEPTANCE_GATE=off bash "$LOG" --tdd-complete --session "$SID_FE" 2>&1 >/dev/null)"
+RC_FE=$?
+[ "$RC_FE" -eq 0 ] \
+  && ! printf '%s' "$ERR_FE" | grep -qF 'carries no active AC-###' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FE")" implComplete)" = "true" ]
+check "AC5 a switched-off acceptance gate skips the criteria check at completion" "$(verdict $?)"
 
 echo "== AC-005: the explicit --plan channel =="
 SID_X="rq-explicit"

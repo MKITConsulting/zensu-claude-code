@@ -2702,8 +2702,9 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
       + ' a note records it.) Counted in turns,'
       + ' never in elapsed time, so a paused session or a powered-off machine never reaches this row.'
       + ' The exit is the review chain: run the /zensu:build Phase 6 step 5b edit-landing audit until its'
-      + ' receipt records a CLEAN verdict, and give the plan a usable `## Requirements` table, because'
-      + ' while the tree is dirty the completion verb refuses a plan without that table and refuses a'
+      + ' receipt records a CLEAN verdict, and give the plan a usable `## Requirements` table with at least'
+      + ' one active AC-### row, because while the tree is dirty the completion verb refuses a plan without'
+      + ' that table, refuses a standalone chain\'s plan without an active AC-### row and refuses a'
       + ' receipt that is merely present — every claimed edit has to have landed.'
       // QUALIFIES, never withholds. The caveat is worded so that its absence costs
       // the reader nothing they can act wrongly on: with no live note the row is the

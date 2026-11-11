@@ -225,6 +225,7 @@ tdd_retire_edit_landing_receipt() {
 
 tdd_review_gate_reset() {
   local session_id="${1:-}" root="${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" lib
+  command -v zensu_acceptance_handoff_reset >/dev/null 2>&1 && zensu_acceptance_handoff_reset "$session_id"
   [ -n "$root" ] && command -v node >/dev/null 2>&1 || return 1
   lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js"
   lib="$(_tdd_native_path "$lib" 2>/dev/null || printf '%s' "$lib")"
@@ -2897,10 +2898,11 @@ tdd_has_red_fail() {
 # can never exhaust the ledger) — a crafted value can neither smuggle
 # directive text into the rendered surfaces nor bloat the state file every
 # hook parses. New gates extend ZENSU_BYPASS_GATE_ALLOWLIST in ONE place.
-# This ledger records ONLY gate escapes, so every entry rendered under "Gates
-# bypassed" is true. Operator interventions that are not gate escapes — the
-# --chain-recover repair — record their provenance as a workflow history entry
-# inside their own transaction instead.
+# This ledger records gate escapes plus one consented gap, acceptance-partial
+# (criteria the user explicitly accepted as partial at the terminus), so every
+# entry rendered under "Gates bypassed" is true. Operator interventions that are
+# not gate escapes — the --chain-recover repair — record their provenance as a
+# workflow history entry inside their own transaction instead.
 # tdd_bypasses is the ONE reader of the _tdd_read_validated_state family that
 # signals through its EXIT STATUS rather than an echoed sentinel: 1 for a
 # document that does not validate, 2 for one that is absent. Its value is
@@ -2914,7 +2916,7 @@ tdd_has_red_fail() {
 # document renders: `text` for a terminus that must disclose, the default
 # `empty` for a clearing verb, where a clean ENOENT means nothing was recorded.
 
-ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE ZENSU_FULL_SUITE_GATE ZENSU_ACCEPTANCE_GATE"
+ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE ZENSU_FULL_SUITE_GATE ZENSU_ACCEPTANCE_GATE acceptance-partial"
 ZENSU_BYPASS_UNREADABLE_TEXT="UNREADABLE — workflow state could not be validated; this is NOT a clean ledger"
 ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this session; this is NOT a clean ledger"
 
@@ -3234,6 +3236,22 @@ zensu_stop_background_wait_file() {
 zensu_stop_background_wait_reset() {
   local file
   file="$(zensu_stop_background_wait_file "${1:-}")" || return 0
+  if [ -e "$file" ] || [ -L "$file" ]; then rm -f -- "$file" 2>/dev/null; fi
+  return 0
+}
+
+zensu_acceptance_handoff_file() {
+  local key="${1:-}"
+  command -v zensu_session_key_canonical >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  zensu_session_key_canonical "$key" || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  printf '%s/acceptance-handoff/v1/%s.json' "$CLAUDE_PLUGIN_DATA" "$key"
+}
+
+zensu_acceptance_handoff_reset() {
+  local file
+  file="$(zensu_acceptance_handoff_file "${1:-}")" || return 0
   if [ -e "$file" ] || [ -L "$file" ]; then rm -f -- "$file" 2>/dev/null; fi
   return 0
 }
