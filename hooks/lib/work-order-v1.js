@@ -1668,6 +1668,13 @@ const TOKEN_EXPANSION_RE = /\$\{?[!#]?ZENSU_SESSION_TOKEN(?![A-Za-z0-9_])/;
 const PROCESS_ENVIRONMENT_RE = /\/proc\/[^/\s]+\/environ(?![A-Za-z0-9_])/;
 const MAX_SHELL_DEPTH = 4;
 const SHELL_READINGS = ['posix', 'bash', 'zsh'];
+const REDIRECTION_OPERATORS = {
+  posix: /<<<|<<-|<<|<>|<&|<|>>|>&|>\||>/y,
+  bash: /<<<|<<-|<<|<>|<&|<|>>|>&|>\||>|&>>|&>/y,
+  zsh: /<<<|<<-|<<|<>|<&|<|>>&[!|]?|>>[!|]?|>&[!|]?|>[!|]?|&>>[!|]?|&>[!|]?/y,
+};
+const REDIRECTION_DESCRIPTOR_RE = /^(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})$/;
+const ZSH_AMPERSAND_DESCRIPTOR_RE = /^(?:[0-9]|\{[A-Za-z_][A-Za-z0-9_]*\})$/;
 const ENV_SHORT_OPERANDS = new Set(['u', 'C', 'P', 'S', 'a', 'L', 'U']);
 const ENV_LONG_OPERANDS = new Set(['unset', 'chdir', 'split-string', 'argv0']);
 const VARIABLE_READERS = new Set(['read', 'mapfile', 'readarray', 'getopts']);
@@ -1679,6 +1686,39 @@ function stripHeredocBodies(text) {
   } catch (_) {
     return text;
   }
+}
+
+function heredocSubstitutions(text) {
+  let bodies;
+  try {
+    bodies = require('./bash-source-write-parse.js').heredocBodies(text);
+  } catch (_) {
+    return [];
+  }
+  const spans = [];
+  for (const { quoted, body } of bodies) {
+    if (quoted) continue;
+    for (let index = 0; index < body.length; index += 1) {
+      const char = body[index];
+      if (char === '\\') {
+        index += 1;
+        continue;
+      }
+      if (char === '$' && body[index + 1] === '(') {
+        const close = matchingParen(body, index + 1);
+        spans.push(body.slice(index + 2, close));
+        index = close;
+        continue;
+      }
+      if (char === '`') {
+        const end = body.indexOf('`', index + 1);
+        const stop = end < 0 ? body.length : end;
+        spans.push(body.slice(index + 1, stop));
+        index = stop;
+      }
+    }
+  }
+  return spans;
 }
 
 function gitOperandOptions() {
@@ -1783,25 +1823,38 @@ function ansiCString(text, start) {
   return { value, end };
 }
 
-function shellCommands(text, depth = 0, reading = 'bash') {
+function redirectionOperator(text, index, reading) {
+  const pattern = REDIRECTION_OPERATORS[reading];
+  pattern.lastIndex = index;
+  const match = pattern.exec(text);
+  return match ? match[0] : '';
+}
+
+function shellCommands(text, depth = 0, reading = 'bash', redirections = false) {
   const commands = [];
   if (depth > MAX_SHELL_DEPTH) return commands;
   let words = [];
   let word = null;
-  const add = (piece) => {
+  let literal = true;
+  let operand = false;
+  const add = (piece, plain = false) => {
     word = (word === null ? '' : word) + piece;
+    literal = literal && plain;
   };
   const endWord = () => {
-    if (word !== null) words.push(reading === 'zsh' && word.includes('\u0000') ? word.slice(0, word.indexOf('\u0000')) : word);
+    if (word !== null && operand) operand = false;
+    else if (word !== null) words.push(reading === 'zsh' && word.includes('\u0000') ? word.slice(0, word.indexOf('\u0000')) : word);
     word = null;
+    literal = true;
   };
   const endCommand = () => {
     endWord();
+    operand = false;
     if (words.length > 0) commands.push(words);
     words = [];
   };
   const nested = (inner) => {
-    for (const command of shellCommands(inner, depth + 1, reading)) commands.push(command);
+    for (const command of shellCommands(inner, depth + 1, reading, redirections)) commands.push(command);
   };
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
@@ -1881,6 +1934,15 @@ function shellCommands(text, depth = 0, reading = 'bash') {
       index = stop;
       continue;
     }
+    const operator = redirections && (char === '<' || char === '>' || (char === '&' && next === '>')) ? redirectionOperator(text, index, reading) : '';
+    if (operator) {
+      const descriptor = char === '&' ? reading === 'zsh' && ZSH_AMPERSAND_DESCRIPTOR_RE.test(word || '') : REDIRECTION_DESCRIPTOR_RE.test(word || '');
+      if (literal && descriptor) word = null;
+      endWord();
+      operand = true;
+      index += operator.length - 1;
+      continue;
+    }
     if (char === ';' || char === '\n' || char === '|' || char === '&' || char === '(' || char === ')') {
       endCommand();
       continue;
@@ -1889,7 +1951,7 @@ function shellCommands(text, depth = 0, reading = 'bash') {
       endWord();
       continue;
     }
-    add(char);
+    add(char, true);
   }
   endCommand();
   return commands;
@@ -2034,7 +2096,23 @@ function bashFinding(code, detail) {
 }
 
 function analyzeBash(command, depth = 0) {
-  const text = String(command || '');
+  return analyzeText(String(command || ''), depth, new Map());
+}
+
+function analyzeText(text, depth, memo) {
+  const plain = analyzeReadings(text, depth, false, memo);
+  if (plain.deny || !/[<>$]/.test(text)) return plain;
+  const removed = analyzeReadings(text, depth, true, memo);
+  return removed.deny ? removed : { deny: null, forge: plain.forge || removed.forge };
+}
+
+function analyzeReadings(text, depth, redirections, memo) {
+  const key = `${redirections ? 'r' : 'p'}${depth}:${text}`;
+  if (!memo.has(key)) memo.set(key, readingsVerdict(text, depth, redirections, memo));
+  return memo.get(key);
+}
+
+function readingsVerdict(text, depth, redirections, memo) {
   const result = { deny: null, forge: false };
   if (!text.trim() || depth > MAX_SHELL_DEPTH) return result;
   if (TOKEN_EXPANSION_RE.test(text)) {
@@ -2047,7 +2125,7 @@ function analyzeBash(command, depth = 0) {
   }
   const stripped = stripHeredocBodies(text);
   const seen = new Set();
-  const readings = SHELL_READINGS.flatMap((reading) => shellCommands(stripped, 0, reading)).filter((words) => {
+  const readings = SHELL_READINGS.flatMap((reading) => shellCommands(stripped, 0, reading, redirections)).filter((words) => {
     const key = JSON.stringify(words);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -2093,7 +2171,7 @@ function analyzeBash(command, depth = 0) {
       const evalWords = name === 'eval' && (args[0] === '--' || args[0] === '-') ? args.slice(1) : args;
       const inner = name === 'eval' ? evalWords.join(' ') : (at >= 0 ? String(args[at + 1] || '') : '');
       if (inner) {
-        const innerResult = analyzeBash(inner, depth + 1);
+        const innerResult = redirections ? analyzeText(inner, depth + 1, memo) : analyzeReadings(inner, depth + 1, false, memo);
         if (innerResult.deny) return innerResult;
         result.forge = result.forge || innerResult.forge;
       } else if (name !== 'eval' && commandName(plainWords(args)[0]) === 'zensu-vcs.sh') {
@@ -2201,6 +2279,12 @@ function analyzeBash(command, depth = 0) {
         return result;
       }
     }
+  }
+  if (!redirections) return result;
+  for (const inner of heredocSubstitutions(text)) {
+    const innerResult = analyzeText(inner, depth + 1, memo);
+    if (innerResult.deny) return innerResult;
+    result.forge = result.forge || innerResult.forge;
   }
   return result;
 }

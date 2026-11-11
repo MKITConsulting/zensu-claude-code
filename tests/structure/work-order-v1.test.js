@@ -2049,6 +2049,130 @@ test('the Bash analysis reads the zensu command words as cobra does, so no flag 
   }
 });
 
+test('the Bash analysis removes a redirection as the shell does, so no descriptor, operator or target hides the program, the noun or the verb', () => {
+  const denied = {
+    'zensu >/dev/null auth login': ['auth', null],
+    'zensu 2>/dev/null plan approve p1': ['human-gate', 'zensu plan approve'],
+    'zensu 2>&1 auth login': ['auth', null],
+    'zensu &>/dev/null auth login': ['auth', null],
+    'zensu &>>log plan push plan.md': ['human-gate', 'zensu plan push'],
+    'zensu >&2 work heartbeat 1234': ['helper-verb', 'zensu work heartbeat'],
+    'zensu <in.txt work event 1234 --stage x': ['helper-verb', 'zensu work event'],
+    'zensu <<<word plan finalize p1': ['human-gate', 'zensu plan finalize'],
+    'zensu > out.txt auth login': ['auth', null],
+    'zensu 2> err.txt plan approve p1': ['human-gate', 'zensu plan approve'],
+    'zensu {fd}>/dev/null work list': ['order-file', 'zensu work list'],
+    'zensu >| out work policy get': ['order-file', 'zensu work policy get'],
+    'zensu >! out plan abandon p1': ['human-gate', 'zensu plan abandon'],
+    'zensu >>& log auth login': ['auth', null],
+    'zensu <<EOF auth login\nbody\nEOF': ['auth', null],
+    'zensu <<- EOF auth login\n\tbody\n\tEOF': ['auth', null],
+    'zensu 0<&3 auth login': ['auth', null],
+    'git >! push origin HEAD': ['push', null],
+    "sh -c 'true &>/dev/null git push'": ['push', null],
+    "dash -c 'true &>>log zensu auth login'": ['auth', null],
+    'git 2&>/dev/null push origin HEAD': ['push', null],
+    '2&>/dev/null git push origin HEAD': ['push', null],
+    'gh 2&>/dev/null pr merge 7': ['merge', null],
+    'env 2&>env.txt': ['token', 'it prints the whole environment'],
+    'zensu 1&>>log auth login': ['auth', null],
+    '{fd}&>/dev/null git push': ['push', null],
+    "bash -c $'zensu \\x3e/dev/null auth login'": ['auth', null],
+    "eval $'git \\x3e/dev/null push origin HEAD'": ['push', null],
+    "bash -c eval\\ \\$\\'git\\ \\\\x3e/dev/null\\ push\\ origin\\ HEAD\\'": ['push', null],
+    "bash -c \"eval \\$\"\\''zensu \\x3e/dev/null auth login'\\'": ['auth', null],
+    '>/dev/null zensu auth login': ['auth', null],
+    '2>/dev/null git push origin HEAD': ['push', null],
+    'git >/dev/null push origin HEAD': ['push', null],
+    'git -C repo 2>&1 push': ['push', null],
+    'gh 2>/dev/null pr create --fill': ['open-pr', null],
+    'glab >/dev/null mr merge 1': ['merge', null],
+    'printenv >/tmp/env.txt': ['token', 'it prints the environment'],
+    'env > env.txt': ['token', 'it prints the whole environment'],
+    'export -p > vars.txt': ['token', 'it prints every exported variable'],
+    'set >vars.txt': ['token', 'it prints every shell variable'],
+    '>/dev/null ZENSU_API_URL=https://h zensu work get 1': ['token-host', 'it sets or removes ZENSU_API_URL'],
+    'bash >/dev/null -c "git push"': ['push', null],
+    "bash -c 'zensu 2>/dev/null auth login'": ['auth', null],
+    'echo $(zensu >/dev/null auth login)': ['auth', null],
+  };
+  for (const [command, [code, detail]] of Object.entries(denied)) {
+    const analysis = wo.analyzeBash(command);
+    assert.ok(analysis.deny, command);
+    assert.equal(analysis.deny.code, code, command);
+    assert.equal(analysis.deny.detail, detail, command);
+  }
+  for (const operator of ['>!', '>>!', '>>|', '>&!', '>&|', '&>!', '&>|', '&>>!', '&>>|', '>>&', '>>&!', '>>&|']) {
+    assert.deepEqual(wo.analyzeBash(`zensu ${operator} log auth login`).deny, { code: 'auth', detail: null }, operator);
+  }
+  const allowed = [
+    'zensu work get 1234 --json > order.json', 'zensu work events 1234 --json 2>/dev/null', 'command -v zensu >/dev/null 2>&1',
+    'zensu --version 2>&1', 'git status 2>&1', 'gh pr view 7 >/dev/null', 'printenv PATH > p.txt', 'npm test 2>&1',
+    "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", '[[ a > b ]] && echo y', 'diff <(git show a) <(git show b)',
+    'npm test &>/dev/null', 'command -v zensu &>/dev/null', 'zensu 10&>/dev/null auth login',
+  ];
+  for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
+  assert.equal(wo.analyzeBash('>/dev/null gh pr view 7').forge, true);
+  assert.deepEqual(wo.analyzeBash('>printenv'), { deny: { code: 'token', detail: 'it prints the environment' }, forge: false });
+  assert.equal(wo.analyzeBash('>ZENSU_SESSION_TOKEN=1 git push').deny.code, 'token');
+});
+
+test('a redirection at any word boundary of a command never hides its finding, and in front of the program or at the end leaves it exactly', () => {
+  const commands = [
+    'zensu auth login', 'zensu --reason x plan abandon p1', 'zensu work policy set --plan-approval auto', 'zensu work heartbeat 1234',
+    'git -C repo push origin HEAD', 'gh -R o/r pr create --fill', 'env -u ZENSU_API_URL zensu work get 1', 'ZENSU_SESSION_TOKEN=x zensu work get 1',
+    'printenv', 'export -p', 'sudo -u root git push', 'bash -c "git push"', 'eval zensu auth login', 'zensu work get 1234 --json',
+    'git status --short', 'gh pr view 7',
+  ];
+  const redirections = [
+    '>/dev/null', '> /dev/null', '2>/dev/null', '2>&1', '>&2', '&>/dev/null', '&>>log', '>>log', '<in.txt', '<<<word', '<>rw', '>|out',
+    '{fd}>/dev/null', '10>/dev/null', '2>&-', '>"a target"', '>$(mktemp)', '< <(echo x)',
+  ];
+  for (const command of commands) {
+    const expected = wo.analyzeBash(command).deny;
+    const words = command.match(/"[^"]*"|\S+/g);
+    for (const redirection of redirections) {
+      for (let at = 0; at <= words.length; at += 1) {
+        const placed = [...words.slice(0, at), redirection, ...words.slice(at)].join(' ');
+        const found = wo.analyzeBash(placed).deny;
+        if (at === 0 || at === words.length) assert.deepEqual(found, expected, placed);
+        else if (expected) assert.ok(found, placed);
+      }
+    }
+  }
+});
+
+test('the redirection readings run only when the released analysis allows the command, so a finding it gave stays the same through a shell string or an eval body', () => {
+  for (const command of ["bash -c 'printenv >/dev/null'; git push", "eval 'printenv >/dev/null'; git push", "sh -c 'zensu 2>/dev/null auth login'; git push"]) {
+    assert.deepEqual(wo.analyzeBash(command), { deny: { code: 'push', detail: null }, forge: false }, command);
+  }
+  assert.deepEqual(wo.analyzeBash("bash -c 'printenv >/dev/null'"), { deny: { code: 'token', detail: 'it prints the environment' }, forge: false });
+  assert.deepEqual(wo.analyzeBash("bash -c 'gh pr view 7 >/dev/null'; >/dev/null gh pr view 8"), { deny: null, forge: true });
+});
+
+test('the Bash analysis reads the command substitutions of a heredoc body whose delimiter is unquoted, and never its plain text or a quoted body', () => {
+  const denied = {
+    'cat <<EOF\n$(git push origin HEAD)\nEOF': ['push', null],
+    'cat <<EOF >env.txt\n$(printenv)\nEOF': ['token', 'it prints the environment'],
+    'cat <<EOF\n`zensu auth login`\nEOF': ['auth', null],
+    'cat <<-EOF\n\t$(git push)\n\tEOF': ['push', null],
+    'cat <<EOF\n${X:-$(gh pr merge 7)}\nEOF': ['merge', null],
+    'cat <<EOF\n$(git \\\npush)\nEOF': ['push', null],
+    'cat <<A <<B\nfirst\nA\n$(zensu plan approve p1)\nB': ['human-gate', 'zensu plan approve'],
+    "bash -c 'cat <<EOF\n$(zensu work list)\nEOF'": ['order-file', 'zensu work list'],
+    "bash -c $'cat \\x3c\\x3cEOF\\n\\x24(git push origin HEAD)\\nEOF'": ['push', null],
+  };
+  for (const [command, [code, detail]] of Object.entries(denied)) {
+    assert.deepEqual(wo.analyzeBash(command).deny, { code, detail }, command);
+  }
+  const allowed = [
+    "cat <<'EOF'\n$(git push origin HEAD)\nEOF", 'cat <<"EOF"\n$(git push origin HEAD)\nEOF', 'cat <<\\EOF\n$(git push origin HEAD)\nEOF',
+    'cat <<EOF\n\\$(git push origin HEAD)\nEOF', 'cat <<EOF\ngit push is a step\nEOF', 'cat <<EOF\n<(git push)\nEOF',
+    "cat <<'MSG' > /tmp/m\n`git push` is a step\nMSG",
+  ];
+  for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
+});
+
 test('the Bash analysis denies every plan verb that records a person\'s decision, push and followup included, and passes the plan reads', () => {
   const denied = {
     'zensu plan push plan.md': 'zensu plan push',
