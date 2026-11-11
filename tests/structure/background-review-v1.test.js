@@ -159,6 +159,18 @@ function fannedOut(f, subagentType, agentId, extra = {}) {
   return result;
 }
 
+function named(payload, name) {
+  return { ...payload, tool_input: { ...payload.tool_input, name } };
+}
+
+function namePath(f, agentId, key = SESSION) {
+  return path.join(f.data, ...br.STORE_SEGMENTS, br.NAMES_SEGMENT, key, `${agentId}.json`);
+}
+
+function queued(from) {
+  return handback(from).split('\n').slice(1).join('\n');
+}
+
 test('a standalone launch records one exact-key record at mode 0600', () => {
   const f = fixture();
   const result = recorded(f);
@@ -786,4 +798,193 @@ test('validateArrival rejects a foreign shape', () => {
   const { holds, ...withoutHolds } = note;
   assert.equal(holds, 0);
   assert.equal(br.validateArrival(withoutHolds), 'arrival keys');
+});
+
+test('a named background launch binds its name to its agent id at 0600 with an exact key set, and nothing else binds', () => {
+  const f = fixture();
+  const aspect = br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  assert.deepEqual(aspect, { recorded: true, agentId: ASPECT_AGENT, ttlMinutes: 60 });
+  const binding = JSON.parse(fs.readFileSync(namePath(f, ASPECT_AGENT), 'utf8'));
+  assert.deepEqual(Object.keys(binding).sort(), [...br.NAME_KEYS].sort());
+  assert.deepEqual(binding, { schema: br.SCHEMA, session_key: SESSION, agent_id: ASPECT_AGENT, name: 'aspect-security', named_at_ms: BASE });
+  assert.equal(br.validateName(binding, { sessionKey: SESSION, agentId: ASPECT_AGENT }), null);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(namePath(f, ASPECT_AGENT)).mode & 0o777, 0o600);
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  assert.equal(JSON.parse(fs.readFileSync(namePath(f, AGENT), 'utf8')).name, 'consume-reviewer');
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT);
+  assert.equal(fs.existsSync(namePath(f, JUDGE_AGENT)), false, 'an unnamed launch binds nothing');
+  for (const bad of ['', 'two words', 'x'.repeat(65), '-lead', 'a"b', 7]) {
+    br.recordFanout(named(fanoutPayload('zensu:review-aspect', OTHER_AGENT), bad), options(f));
+    assert.equal(fs.existsSync(namePath(f, OTHER_AGENT)), false, `the name ${JSON.stringify(bad)} binds nothing`);
+  }
+  assert.equal(br.recordFanout(named(fanoutPayload('zensu:review-aspect', PERSONA_AGENT, 'completed'), 'aspect-design'), options(f)).reason, 'not-async');
+  assert.equal(br.recordLaunch(named(launchPayload(standalonePrompt(OTHER_TICKET), PERSONA_AGENT), 'consume-again'), options(f)).reason, 'ticket-not-issued');
+  assert.equal(fs.existsSync(namePath(f, PERSONA_AGENT)), false, 'a launch the store refused binds nothing');
+});
+
+test('a hand-back framed with a bound name names its agent in either host frame position', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  br.recordFanout(named(fanoutPayload('zensu:review-judge', JUDGE_AGENT), 'judge-primary'), options(f));
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  assert.deepEqual(br.matchArrival(prompt(handback('aspect-security')), options(f)), { verdict: 'none', reason: 'no-arrival', retired: 1 });
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
+  assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), true);
+  assert.equal(br.noteArrival(arrivalPrompt(queued('judge-primary')), options(f)).retired, 1);
+  assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), false);
+  assert.deepEqual(br.noteArrival(arrivalPrompt(queued('consume-reviewer')), options(f)), { pending: true, agentId: AGENT, source: 'prompt', retired: 0 });
+  assert.equal(JSON.parse(fs.readFileSync(arrivalPath(f), 'utf8')).arrival, 'handback');
+  const claim = br.matchArrival(prompt(handback('consume-reviewer')), options(f));
+  assert.equal(claim.verdict, 'claim');
+  assert.equal(claim.arrival, 'handback');
+  assert.equal(claim.source, 'prompt');
+  assert.equal(claim.record.agent_id, AGENT);
+});
+
+test('a name frame counts only on the first line or right after the peer line, while an id frame counts anywhere at column zero', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  const late = `typed text\n${queued('aspect-security')}`;
+  const wrapped = `Another Claude session sent a message:\n<cross-session-message from="local_x">\n${queued('aspect-security')}\n</cross-session-message>`;
+  const indented = queued('aspect-security').split('\n').map((line) => `  ${line}`).join('\n');
+  for (const text of [late, wrapped, indented]) {
+    assert.equal(br.matchArrival(prompt(text), options(f)).retired, 0, text);
+  }
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(br.matchArrival(prompt(`typed text\n${queued(ASPECT_AGENT)}`), options(f)).retired, 1, 'an id frame keeps the column-zero rule');
+});
+
+test('the newest launch of a name holds it, and an older launch of that name is named by its agent id only', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-correctness'), options(f));
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', OTHER_AGENT), 'aspect-correctness'), options(f, { now: BASE + MINUTE }));
+  assert.equal(fs.existsSync(namePath(f, ASPECT_AGENT)), false);
+  assert.equal(JSON.parse(fs.readFileSync(namePath(f, OTHER_AGENT), 'utf8')).named_at_ms, BASE + MINUTE);
+  assert.equal(br.matchArrival(prompt(handback('aspect-correctness')), options(f)).retired, 1);
+  assert.equal(fs.existsSync(fanoutPath(f, OTHER_AGENT)), false);
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(br.matchArrival(prompt(handback('aspect-correctness')), options(f)).retired, 0, 'a repeated delivery names the retired holder, never the older launch');
+  assert.equal(br.matchArrival(prompt(handback(ASPECT_AGENT)), options(f)).retired, 1);
+});
+
+test('a named spawn the store does not record releases the name through unbind', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-correctness'), options(f));
+  const general = named({
+    hook_event_name: 'PostToolUse',
+    session_id: 'background-review-unit-session',
+    tool_name: 'Agent',
+    tool_input: { subagent_type: 'general-purpose', prompt: 'Summarize the change.' },
+    tool_response: { isAsync: true, status: 'async_launched', agentId: OTHER_AGENT },
+  }, 'aspect-correctness');
+  const env = { ...process.env, ZENSU_BR_PLUGIN_DATA: f.data, ZENSU_BR_SESSION_KEY: SESSION };
+  const run = (input, extra = {}) => spawnSync(process.execPath, [MODULE, 'unbind'], { env: { ...env, ...extra }, input, encoding: 'utf8' });
+  const released = run(JSON.stringify(general));
+  assert.equal(released.status, 0);
+  assert.equal(released.stdout, 'unbound count=1\n');
+  assert.equal(fs.existsSync(namePath(f, ASPECT_AGENT)), false);
+  assert.equal(br.matchArrival(prompt(handback('aspect-correctness')), options(f)).retired, 0);
+  assert.equal(br.matchArrival(prompt(handback(ASPECT_AGENT)), options(f)).retired, 1);
+  assert.equal(run(JSON.stringify(general)).stdout, 'unbound count=0\n');
+  assert.equal(run(JSON.stringify(named(general, ''))).stdout, 'idle reason=name\n');
+  assert.equal(run('not json').stdout, 'idle reason=payload\n');
+  assert.equal(run(JSON.stringify(general), { ZENSU_BR_SESSION_KEY: 'scv1_x' }).stdout, 'idle reason=fault\n');
+  assert.equal(run(JSON.stringify(general), { ZENSU_BR_PLUGIN_DATA: path.join(f.data, 'missing') }).stdout, 'idle reason=store\n');
+});
+
+test('a name held twice, a binding past the wait bound and a name equal to a known agent id name no agent', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT);
+  const bind = (agentId, name, at = BASE) => {
+    fs.mkdirSync(path.dirname(namePath(f, agentId)), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(namePath(f, agentId), JSON.stringify({ schema: br.SCHEMA, session_key: SESSION, agent_id: agentId, name, named_at_ms: at }), { mode: 0o600 });
+  };
+  bind(ASPECT_AGENT, 'twin');
+  bind(JUDGE_AGENT, 'twin');
+  assert.equal(br.matchArrival(prompt(handback('twin')), options(f)).retired, 0, 'two bindings of one name');
+  assert.deepEqual([...br.nameAliases(options(f))], []);
+  fs.rmSync(namePath(f, JUDGE_AGENT));
+  bind(ASPECT_AGENT, 'stale', BASE - 61 * MINUTE);
+  assert.equal(br.matchArrival(prompt(handback('stale')), options(f)).retired, 0, 'a binding past the wait bound');
+  bind(ASPECT_AGENT, JUDGE_AGENT);
+  assert.equal(br.matchArrival(prompt(handback(JUDGE_AGENT)), options(f)).retired, 1);
+  assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), false, 'the id frame names the judge');
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true, 'a name equal to a known agent id names nobody');
+  bind(ASPECT_AGENT, 'aspect-security');
+  assert.deepEqual([...br.nameAliases(options(f))], [['aspect-security', ASPECT_AGENT]]);
+  assert.deepEqual([...br.nameAliases(options(f, { pluginData: path.join(f.data, 'missing') }))], []);
+  assert.deepEqual([...br.nameAliases(options(f, { sessionKey: 'scv1_x' }))], []);
+});
+
+test('handbackReports resolves the frame in the host position through the aliases it is given', () => {
+  const aliases = new Map([['j1', JUDGE_AGENT], ['aspect-security', ASPECT_AGENT]]);
+  assert.deepEqual(br.handbackReports(queued('j1')), [], 'a short name is no agent id without its binding');
+  assert.deepEqual(br.handbackReports(queued('j1'), aliases).map((entry) => entry.agentId), [JUDGE_AGENT]);
+  assert.deepEqual(br.handbackReports(handback('aspect-security'), aliases), [{ agentId: ASPECT_AGENT, report: 'Verdict: PASS' }]);
+  assert.deepEqual(br.handbackReports(`${handback(AGENT)}\n${queued('aspect-security')}`, aliases).map((entry) => entry.agentId), [AGENT, 'aspect-security'],
+    'a name frame after the first frame is read as an agent id, as before');
+  assert.deepEqual(br.handbackReports(handback('aspect-security'), new Map()).map((entry) => entry.agentId), ['aspect-security']);
+});
+
+test('validateName rejects a foreign shape', () => {
+  const binding = { schema: br.SCHEMA, session_key: SESSION, agent_id: ASPECT_AGENT, name: 'aspect-security', named_at_ms: BASE };
+  assert.equal(br.validateName(binding, { sessionKey: SESSION, agentId: ASPECT_AGENT }), null);
+  const cases = [
+    [{ ...binding, extra: 1 }, 'name keys'],
+    [{ ...binding, schema: 'other' }, 'name schema'],
+    [{ ...binding, session_key: 'scv1_x' }, 'name session key'],
+    [{ ...binding, agent_id: '../x' }, 'name agent id'],
+    [{ ...binding, name: 'two words' }, 'name value'],
+    [{ ...binding, named_at_ms: -1 }, 'name time'],
+    [null, 'name keys'],
+  ];
+  for (const [value, reason] of cases) assert.equal(br.validateName(value), reason);
+  assert.equal(br.validateName(binding, { sessionKey: OTHER_SESSION }), 'name session mismatch');
+  assert.equal(br.validateName(binding, { agentId: JUDGE_AGENT }), 'name agent mismatch');
+});
+
+test('a host-position name frame without the hand-back line names no agent', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  for (const from of ['aspect-security', 'consume-reviewer']) {
+    const bare = `<agent-message from="${from}">\nVerdict: PASS\n</agent-message>`;
+    for (const text of [bare, `Another Claude session sent a message:\n${bare}`]) {
+      assert.deepEqual(br.noteArrival(arrivalPrompt(text), options(f)), { pending: false, reason: 'no-arrival', retired: 0 }, text);
+      assert.deepEqual(br.matchArrival(prompt(text), options(f)), { verdict: 'none', reason: 'no-arrival', retired: 0 }, text);
+    }
+  }
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(fs.existsSync(recordPath(f)), true);
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+});
+
+test('a launch sweeps the name bindings of an idle session and keeps its own', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  const idle = namePath(f, OTHER_AGENT, OTHER_SESSION);
+  fs.mkdirSync(path.dirname(idle), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(idle, '{}', { mode: 0o600 });
+  const old = new Date(BASE - 25 * 60 * MINUTE);
+  fs.utimesSync(idle, old, old);
+  fs.utimesSync(path.dirname(idle), old, old);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT, { now: BASE + MINUTE });
+  assert.equal(fs.existsSync(path.dirname(idle)), false);
+  assert.equal(JSON.parse(fs.readFileSync(namePath(f, ASPECT_AGENT), 'utf8')).name, 'aspect-security');
+});
+
+test('an unusable names segment costs only the name mapping', () => {
+  const f = fixture();
+  const store = path.join(f.data, ...br.STORE_SEGMENTS);
+  fs.mkdirSync(store, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(store, br.NAMES_SEGMENT), 'not a directory', { mode: 0o600 });
+  assert.equal(br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f)).recorded, true);
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  assert.deepEqual([...br.nameAliases(options(f))], []);
+  assert.equal(br.matchArrival(prompt(handback('aspect-security')), options(f)).retired, 0);
+  assert.equal(br.matchArrival(prompt(handback(ASPECT_AGENT)), options(f)).retired, 1);
+  assert.deepEqual(br.noteArrival(arrivalPrompt(handback(AGENT)), options(f)), { pending: true, agentId: AGENT, source: 'prompt', retired: 0 });
+  assert.equal(br.matchArrival(prompt(handback(AGENT)), options(f)).verdict, 'claim');
+  assert.deepEqual(br.releaseName(named(fanoutPayload('general-purpose', OTHER_AGENT), 'aspect-security'), options(f)), { released: false, reason: 'store' });
 });

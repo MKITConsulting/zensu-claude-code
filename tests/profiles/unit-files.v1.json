@@ -22,9 +22,9 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
-      "path": "tests/structure/background-review-v1.test.js", "registered": 33, "skips": {"win32": 2},
+      "path": "tests/structure/background-review-v1.test.js", "registered": 44, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
-      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the name bindings that map a named spawn's hand-back to its agent id, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
     },
     {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
@@ -175,9 +175,9 @@
       "summary": "The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe."
     },
     {
-      "path": "tests/structure/review-gate-v1.test.js", "registered": 38,
+      "path": "tests/structure/review-gate-v1.test.js", "registered": 42,
       "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
-      "summary": "The consume-review gate: reviewer records, background launches completed from hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement."
+      "summary": "The consume-review gate: reviewer records, background launches completed from hand-backs, name-framed hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement."
     },
     {
       "path": "tests/structure/review-ledger-v1.test.js", "registered": 42,
