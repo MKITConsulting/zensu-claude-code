@@ -51,14 +51,24 @@ function isTakeoverPrompt(prompt) {
 
 function shownRoot(root) {
   if (typeof root !== 'string' || root === '' || root.length > MAX_ROOT_CHARS) return '';
-  if (CONTROL_CHARACTER.test(root)) return '';
+  if (CONTROL_CHARACTER.test(root) || root.includes('"')) return '';
   return root;
 }
 
-function noticeText(root) {
+function unboundNoticeText() {
+  return [
+    `zensu: Session Hub takeover. Zensu PLM's opt-in source-write gate is on in this session (hooks.bashWriteGate: true), and this session has no usable Session Control record.`,
+    "The gate then judges a Bash write to a source file and every working-tree git command against the session's project directory, and refuses every one it can attribute when no usable project directory remains.",
+    'Run /zensu:doctor, which works without a binding, to learn why the record cannot be used.',
+    "State this constraint in the takeover's plan confirmation, before anything durable is written.",
+  ].join(' ');
+}
+
+function noticeText(root, bound = true) {
+  if (bound === false) return unboundNoticeText();
   const shown = shownRoot(root);
   const anchor = shown
-    ? `this session's Session Control root, ${shown}`
+    ? `this session's Session Control root, "${shown}"`
     : "this session's Session Control root";
   return [
     `zensu: Session Hub takeover. Zensu PLM's opt-in source-write gate is on in this session (hooks.bashWriteGate: true).`,
@@ -83,7 +93,7 @@ function decide(input, env) {
   return {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
-      additionalContext: noticeText((env || {}).ZENSU_NOTICE_ROOT),
+      additionalContext: noticeText((env || {}).ZENSU_NOTICE_ROOT, (env || {}).ZENSU_NOTICE_BOUND !== '0'),
     },
   };
 }

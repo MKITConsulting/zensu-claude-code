@@ -23,7 +23,10 @@ any byte that differs, and U9b is also what lets `tests/mods/usage-feed.test.ts`
 against this copy, cover the companion's. An edit here copies the file into the companion in the
 same commit. PLM's copy stays until a later release leaves the feed to the companion; while both
 plugins are enabled both copies write the same `<session id>.json`, so PLM releases no later than
-the companion (`.claude/rules/session-hub-companion.md`).
+the companion. `.github/scripts/session-hub-release-order.sh` enforces that in both jobs of the
+companion's release workflow: it refuses while the newest `vX.Y.Z` tag carries another
+`hooks/usage-feed.ts` or `hooks/usage-feed-contract.json` than the companion's working tree
+(`.claude/rules/session-hub-companion.md`).
 
 **`hooks/usage-feed-contract.json` is the Hub's contract with this module.** The Hub byte-copies
 it to its own `tests/fixtures/usage-feed-contract.json` and pins it there, the way it mirrors

@@ -35,6 +35,7 @@ fi
 
 ALLOWED='.claude-plugin/plugin.json
 CHANGELOG.md
+LICENSE
 README.md
 cliff.toml
 hooks/hooks.json
@@ -66,7 +67,7 @@ else
 fi
 WANT="$(printf '%s\n' "$ALLOWED" | LC_ALL=C sort -u)"
 if [ "$LISTED" = "$WANT" ]; then
-  check "H1 plugins/session-hub holds exactly the allowlisted files: the manifest, the hooks, the vendored libraries, the session-trail skill and its docs" PASS
+  check "H1 plugins/session-hub holds exactly the allowlisted files: the manifest, the license, the hooks, the vendored libraries, the session-trail skill and its docs" PASS
 else
   EXTRA="$(LC_ALL=C comm -13 <(printf '%s\n' "$WANT") <(printf '%s\n' "$LISTED") | tr '\n' ' ')"
   MISSING="$(LC_ALL=C comm -23 <(printf '%s\n' "$WANT") <(printf '%s\n' "$LISTED") | tr '\n' ' ')"
@@ -128,7 +129,8 @@ HOOKS_SHAPE="$(node -e '
   && check "H3 hooks.json registers one UserPromptSubmit entry that runs the receipt module in exec form, plus the usage-feed module, and nothing else" PASS \
   || check "H3 the companion hooks.json is $HOOKS_SHAPE" FAIL
 
-VENDORED='hooks/lib/claude-path-v1.js:hooks/lib/claude-path-v1.js
+VENDORED='LICENSE:LICENSE
+hooks/lib/claude-path-v1.js:hooks/lib/claude-path-v1.js
 hooks/lib/desktop-store-read-v1.js:hooks/lib/desktop-store-read-v1.js
 hooks/lib/git-environment-v1.js:hooks/lib/git-environment-v1.js
 hooks/lib/worktree-keep-v1.js:hooks/lib/worktree-keep-v1.js
@@ -146,8 +148,8 @@ while IFS= read -r pair; do
 done <<EOF
 $VENDORED
 EOF
-[ "$IDENTITY_N" = "7" ] && [ -z "$IDENTITY_BAD" ] \
-  && check "H4 the four vendored libraries, the usage-feed module, its contract and the lineage ledger module are byte-identical to their PLM sources ($IDENTITY_N files)" PASS \
+[ "$IDENTITY_N" = "8" ] && [ -z "$IDENTITY_BAD" ] \
+  && check "H4 the license, the four vendored libraries, the usage-feed module, its contract and the lineage ledger module are byte-identical to their PLM sources ($IDENTITY_N files)" PASS \
   || check "H4 a vendored file differs from its PLM source or the list is incomplete ($IDENTITY_N files):$IDENTITY_BAD" FAIL
 cp "$HUB_DIR/hooks/lib/git-environment-v1.js" "$WORK/flipped.js"
 node -e '
@@ -177,8 +179,16 @@ scan_loads() {
       /\bimport\(\s*([\x27"])([^\x27"]+)\1\s*\)/g,
       /\bnew URL\(\s*([\x27"])(\.[^\x27"]*)\1\s*,\s*import\.meta\.url\s*\)/g,
     ];
+    const q = String.fromCharCode(39);
+    const computed = [
+      new RegExp("\\b(?:require|requireFromHere)\\(\\s*(?![" + q + "\"])([^)\\n]{0,80})", "g"),
+      new RegExp("\\bimport\\(\\s*(?![" + q + "\"])([^)\\n]{0,80})", "g"),
+    ];
     for (const file of files) {
       const text = fs.readFileSync(file, "utf8");
+      for (const pattern of computed) {
+        for (const m of text.matchAll(pattern)) bad.push(path.relative(root, file) + ":computed:" + m[1].trim());
+      }
       for (const pattern of patterns) {
         for (const m of text.matchAll(pattern)) {
           const spec = m[2];
@@ -211,7 +221,7 @@ ARGS_BAD="$(node -e '
   process.stdout.write(bad.join(" "));
 ' "$HUB_HOOKS_JSON" "$HUB_DIR" 2>&1)"
 [ -n "$CODE_FILES" ] && [ -z "$LOAD_BAD" ] && [ -z "$SHELL_FILES" ] && [ -z "$ARGS_BAD" ] \
-  && check "H5 nothing under plugins/session-hub requires, imports or sources a file outside it, and every hook argument and module resolves inside it" PASS \
+  && check "H5 nothing under plugins/session-hub requires, imports or sources a file outside it or by a computed path, and every hook argument and module resolves inside it" PASS \
   || check "H5 the companion reaches outside its tree: loads ${LOAD_BAD:-none}; shell files ${SHELL_FILES:-none}; hook targets ${ARGS_BAD:-none}" FAIL
 mkdir -p "$WORK/probe/hooks/lib" "$WORK/probe/skills/x"
 printf '%s\n' "import { a } from '../../hooks/lib/inside.mjs';" "const b = require('../../../hooks/lib/outside.js');" "const c = require('fs');" > "$WORK/probe/skills/x/probe.mjs"
@@ -222,6 +232,15 @@ case "$PROBE_BAD" in
     case "$PROBE_BAD" in *inside.mjs*) check "H5-control the load scan flags a path inside the tree ($PROBE_BAD)" FAIL ;; *) check "H5-control the load scan flags a load outside the tree and a bare specifier, and passes one inside it" PASS ;; esac ;;
   *) check "H5-control the load scan missed a load outside the tree or a bare specifier ($PROBE_BAD)" FAIL ;;
 esac
+printf '%s\n' "const lib = '../../hooks/lib';" "const d = requireFromHere(path.join(lib, 'inside.mjs'));" "const e = await import(spec);" "const f = require(\`./\${name}.js\`);" > "$WORK/probe/skills/x/computed.mjs"
+COMPUTED_BAD="$(scan_loads "$WORK/probe" "$WORK/probe/skills/x/computed.mjs" 2>&1)"
+COMPUTED_MISSED=""
+for needle in "computed:path.join(lib" "computed:spec" "computed:\`./"; do
+  case "$COMPUTED_BAD" in *"$needle"*) ;; *) COMPUTED_MISSED="$COMPUTED_MISSED [$needle]" ;; esac
+done
+[ -z "$COMPUTED_MISSED" ] \
+  && check "H5-control the load scan flags a computed require, a computed import and a template-literal require" PASS \
+  || check "H5-control the load scan missed a computed load:$COMPUTED_MISSED ($COMPUTED_BAD)" FAIL
 
 PLM_ONLY_BAD=""
 TRAIL_CODE="$(grep -vE '^[[:space:]]*//' "$HUB_TRAIL")"
@@ -266,28 +285,18 @@ case "$MUTATED_RESULT" in
   *) check "H7-control a changed hash domain makes the comparison fail" PASS ;;
 esac
 
-DESC_FACTS="$(node -e '
-  const text = require("fs").readFileSync(process.argv[1], "utf8");
-  const m = /^description: >\n((?:  .*\n)+)/m.exec(text);
-  if (!m) { process.stdout.write("none"); process.exit(0); }
-  const d = m[1].split("\n").map((s) => s.trim()).filter(Boolean).join(" ");
-  process.stdout.write(d.length + " " + d.indexOf("Use when"));
-' "$HUB_SKILL" 2>&1)"
-DESC_LEN="${DESC_FACTS%% *}"; DESC_USE="${DESC_FACTS##* }"
-case "$DESC_LEN:$DESC_USE" in
-  (*[!0-9:-]*|:*|*:) check "H8 the companion skill description could not be measured ($DESC_FACTS)" FAIL ;;
-  (*) if [ "$DESC_LEN" -le 220 ] && [ "$DESC_USE" -ge 0 ] && [ "$DESC_USE" -lt 150 ]; then
-        check "H8 the companion skill description fits the listing budget ($DESC_LEN chars, Use when at $DESC_USE)" PASS
-      else
-        check "H8 the companion skill description is $DESC_LEN chars with Use when at $DESC_USE, want at most 220 and before 150" FAIL
-      fi ;;
-esac
-
 cliff_split() {
   node -e '
     const fs = require("fs");
     const [rootFile, hubFile] = process.argv.slice(1);
-    const lines = (file) => fs.readFileSync(file, "utf8").split("\n").filter((l) => !l.startsWith("#"));
+    const lines = (file) => {
+      let inBody = false;
+      return fs.readFileSync(file, "utf8").split("\n").filter((l) => {
+        const keep = inBody || !l.startsWith("#");
+        if ((l.split("\"\"\"").length - 1) % 2 === 1) inBody = !inBody;
+        return keep;
+      });
+    };
     const root = lines(rootFile);
     const hub = lines(hubFile);
     const bad = [];
@@ -298,6 +307,8 @@ cliff_split() {
     one(hub, "include_paths = [\"plugins/session-hub/**\"]", "hub-include-paths");
     if (root.some((l) => l.startsWith("include_paths"))) bad.push("root-include-paths");
     if (hub.some((l) => l.startsWith("exclude_paths"))) bad.push("hub-exclude-paths");
+    const header = (list) => list.filter((l) => l.startsWith("## [")).length;
+    if (header(root) !== 1 || header(hub) !== 1) bad.push("body-header");
     const shared = (list) => list
       .filter((l) => !/^(tag_pattern|exclude_paths|include_paths) = /.test(l))
       .map((l) => l.replace("trim_start_matches(pat=\"session-hub--v\")", "trim_start_matches(pat=\"v\")"))
@@ -308,7 +319,7 @@ cliff_split() {
 }
 CLIFF_BAD="$(cliff_split "$PLUGIN_DIR/cliff.toml" "$HUB_DIR/cliff.toml")"
 [ -z "$CLIFF_BAD" ] \
-  && check "H9 cliff.toml leaves plugins/session-hub out of PLM's changelog on v* tags, and the companion's cliff.toml lists only commits that touch it on session-hub--v* tags, with the same body and parsers" PASS \
+  && check "H9 cliff.toml leaves plugins/session-hub out of PLM's changelog on v* tags, and the companion's cliff.toml lists only commits that touch it on session-hub--v* tags, with the same body, its version header included, and the same parsers" PASS \
   || check "H9 the changelog path filters disagree: $CLIFF_BAD" FAIL
 CLIFF_PROBE="$(mktemp -d -t hub-cliff-XXXXXX)"
 grep -v '^include_paths = ' "$HUB_DIR/cliff.toml" > "$CLIFF_PROBE/hub.toml"
@@ -316,60 +327,245 @@ case "$(cliff_split "$PLUGIN_DIR/cliff.toml" "$CLIFF_PROBE/hub.toml")" in
   (*hub-include-paths*) check "H9-control a companion config without its path filter fails the comparison" PASS ;;
   (*) check "H9-control a companion config without its path filter passes the comparison" FAIL ;;
 esac
+sed 's/ | trim_start_matches(pat="session-hub--v")//' "$HUB_DIR/cliff.toml" > "$CLIFF_PROBE/hub-header.toml"
+case "$(cliff_split "$PLUGIN_DIR/cliff.toml" "$CLIFF_PROBE/hub-header.toml")" in
+  (*body-or-parsers-differ*) check "H9-header-control a companion version header without its tag-prefix trim fails the comparison" PASS ;;
+  (*) check "H9-header-control a companion version header without its tag-prefix trim passes the comparison" FAIL ;;
+esac
 rm -rf "$CLIFF_PROBE"
 
 REL_WF="$PLUGIN_DIR/.github/workflows/release-session-hub.yml"
 PLM_WF="$PLUGIN_DIR/.github/workflows/release.yml"
 CI_WF="$PLUGIN_DIR/.github/workflows/ci.yml"
 GATE="$PLUGIN_DIR/.github/scripts/session-hub-release-gate.sh"
+INSTALL_PROBE="$PLUGIN_DIR/.github/scripts/session-hub-install-probe.sh"
+ORDER_SCRIPT="$PLUGIN_DIR/.github/scripts/session-hub-release-order.sh"
+HUB_README="$HUB_DIR/README.md"
 tag_discipline() {
   node -e '
     const fs = require("fs");
     const [rel, plm] = process.argv.slice(1).map((f) => fs.readFileSync(f, "utf8"));
+    const q = String.fromCharCode(39);
     const bad = [];
     const lines = rel.split("\n").map((l) => l.trim());
-    if (lines.filter((l) => l === "claude plugin tag plugins/session-hub --push").length !== 1) bad.push("tag-command");
+    const tagLines = lines.filter((l) => /\bclaude\s+plugin\s+tag\b/.test(l) && !/^- name: /.test(l) && !/^echo\s/.test(l));
+    if (tagLines.length !== 1 || tagLines[0] !== "claude plugin tag plugins/session-hub" || /\bclaude\s+plugin\s+tag\b[^\n]*--push/.test(rel)) bad.push("tag-command");
     if (/\bgit\s+tag\b(?!\s+-l\b)/.test(rel)) bad.push("git-tag");
-    if (/\bgit\s+push\b(?![^\n]*"\$BR")/.test(rel)) bad.push("other-push");
+    const pushes = lines.filter((l) => /\bgit\s+push\b/.test(l));
+    const allowedPushes = ["git push -f origin \"$BR\"", "git push origin \"refs/tags/$TAG\""];
+    if (pushes.length !== allowedPushes.length || allowedPushes.some((p) => pushes.filter((l) => l === p).length !== 1)) bad.push("other-push");
     if (/\bgit\/(refs|tags)\b/.test(rel)) bad.push("git-data-api");
     for (const m of rel.matchAll(/gh release create[^\n]*/g)) if (!m[0].includes("--verify-tag")) bad.push("release-without-verify-tag");
+    const steps = rel.split(/\n(?=      - (?:name|uses): )/);
+    const publish = steps.findIndex((s) => s.includes("Reject a publish dispatch outside main"));
+    const after = (from, needle) => steps.findIndex((s, i) => i > from && s.includes(needle));
+    const verify = after(publish, "tr -d " + q + "[:space:]" + q + " < \"$RUNNER_TEMP/notes.md\"");
+    const order = after(publish, "bash .github/scripts/session-hub-release-order.sh");
+    const gate = after(publish, "bash .github/scripts/session-hub-release-gate.sh");
+    const tag = after(publish, "claude plugin tag plugins/session-hub");
+    const recheck = after(tag, "immutable-releases");
+    const push = after(publish, "git push origin \"refs/tags/$TAG\"");
+    const create = after(publish, "gh release create");
+    const ordered = [publish, verify, gate, tag, recheck, push, create];
+    if (publish < 0 || ordered.some((v, i) => v < 0 || (i > 0 && v <= ordered[i - 1])) || order !== verify) bad.push("publish-order");
+    if (tag >= 0 && /GH_TOKEN|secrets\./.test(steps[tag])) bad.push("tag-token");
+    if (create >= 0 && steps[create].split("commits/$TAG").length - 1 < 2) bad.push("no-relock-check");
     const hub = "chore(release): bump session-hub to";
     const plmPrefix = "chore(release): bump version to";
-    if (!rel.includes("startsWith(github.event.head_commit.message, \u0027" + hub + "\u0027)")) bad.push("publish-trigger");
+    if (!rel.includes("startsWith(github.event.head_commit.message, " + q + hub + q + ")")) bad.push("publish-trigger");
     if (!rel.includes("git commit -m \"" + hub + " $VER\"")) bad.push("prepare-subject");
     if (!plm.includes(plmPrefix) || hub.startsWith(plmPrefix) || plmPrefix.startsWith(hub)) bad.push("prefix-overlap");
     process.stdout.write(bad.join(" "));
   ' "$1" "$PLM_WF" 2>&1
 }
+mutated_release() {
+  node -e '
+    const fs = require("fs");
+    const [src, mode, out] = process.argv.slice(1);
+    let t = fs.readFileSync(src, "utf8");
+    const swap = (a, b) => { if (!t.includes(a)) throw new Error("anchor missing: " + a); t = t.split(a).join(b); };
+    if (mode === "hand-push") t += "          git push --tags origin\n";
+    if (mode === "token") swap("          TAG: ${{ steps.target.outputs.tag }}\n          CLAUDE_CONFIG_DIR:", "          TAG: ${{ steps.target.outputs.tag }}\n          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n          CLAUDE_CONFIG_DIR:");
+    if (mode === "push-flag") swap("          claude plugin tag plugins/session-hub\n", "          claude plugin tag plugins/session-hub --push\n");
+    if (mode === "no-recheck") {
+      const from = t.indexOf("      - name: Re-check repository Immutable Releases before the tag goes out\n");
+      const to = t.indexOf("      - name: Push the tag\n");
+      if (from < 0 || to < from) throw new Error("re-check step missing");
+      t = t.slice(0, from) + t.slice(to);
+    }
+    if (mode === "no-cliff-pin") swap("          version: v2.13.1\n          config: plugins/session-hub/cliff.toml\n", "          config: plugins/session-hub/cliff.toml\n");
+    fs.writeFileSync(out, t);
+  ' "$REL_WF" "$1" "$2" 2>&1
+}
 TAG_BAD="$(tag_discipline "$REL_WF")"
 [ -z "$TAG_BAD" ] \
-  && check "H10 release-session-hub.yml creates the companion tag only through claude plugin tag plugins/session-hub --push, and its release subject never starts PLM's publish" PASS \
+  && check "H10 release-session-hub.yml creates the companion tag only through claude plugin tag plugins/session-hub with no token, after the notes, order and gate checks, re-checks Immutable Releases before a step of its own pushes it, re-resolves it once the release locks it, and its release subject never starts PLM's publish" PASS \
   || check "H10 the companion release workflow breaks its tag discipline: $TAG_BAD" FAIL
-TAG_PROBE="$(mktemp -d -t hub-tag-XXXXXX)"
-{ cat "$REL_WF"; printf '%s\n' '          git push origin "refs/tags/$TAG"'; } > "$TAG_PROBE/release.yml"
-case "$(tag_discipline "$TAG_PROBE/release.yml")" in
-  (*other-push*) check "H10-control a hand-pushed tag in the companion release workflow fails the discipline check" PASS ;;
-  (*) check "H10-control a hand-pushed tag in the companion release workflow passes the discipline check" FAIL ;;
-esac
-rm -rf "$TAG_PROBE"
+TAG_PROBE="$WORK/tag-probe"
+mkdir -p "$TAG_PROBE"
+for spec in "hand-push|other-push|a hand-pushed tag" "token|tag-token|a token in the claude plugin tag step" "push-flag|tag-command|claude plugin tag with --push" "no-recheck|publish-order|a push without the second Immutable Releases check"; do
+  mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
+  MUTATE_ERR="$(mutated_release "$mode" "$TAG_PROBE/$mode.yml")"
+  if [ -n "$MUTATE_ERR" ]; then
+    check "H10-control $what could not be built ($MUTATE_ERR)" FAIL
+    continue
+  fi
+  case " $(tag_discipline "$TAG_PROBE/$mode.yml") " in
+    (*" $want "*) check "H10-control $what fails the discipline check as $want" PASS ;;
+    (*) check "H10-control $what passes the discipline check" FAIL ;;
+  esac
+done
 
 PIN_FACTS="$(node -e '
   const fs = require("fs");
-  const [ci, rel, gate] = process.argv.slice(1).map((f) => fs.readFileSync(f, "utf8"));
+  const [ci, rel, gate, probe, readme] = process.argv.slice(1).map((f) => fs.readFileSync(f, "utf8"));
+  const job = (text, name) => {
+    const lines = text.split("\n");
+    const start = lines.indexOf("  " + name + ":");
+    if (start < 0) return "";
+    let end = lines.findIndex((l, i) => i > start && /^  [A-Za-z0-9_-]+:\s*$/.test(l));
+    if (end < 0) end = lines.length;
+    return lines.slice(start, end).join("\n") + "\n";
+  };
   const installs = (t) => [...t.matchAll(/@anthropic-ai\/claude-code@([^\s"]+)/g)].map((m) => m[1]);
-  const checks = (t) => [...t.matchAll(/"([0-9][^"\s]*) \(Claude Code\)"/g)].map((m) => m[1]);
-  const gatePin = [...gate.matchAll(/^CLAUDE_CODE_VERSION="([^"]+)"$/gm)].map((m) => m[1]);
-  const parts = { ciInstall: installs(ci), ciCheck: checks(ci), releaseInstall: installs(rel), gatePin };
-  const all = Object.values(parts).flat();
-  const empty = Object.entries(parts).filter(([, v]) => v.length === 0).map(([k]) => k);
-  const distinct = [...new Set(all)];
-  const ok = empty.length === 0 && distinct.length === 1 && /^[0-9]+\.[0-9]+\.[0-9]+$/.test(distinct[0]);
-  process.stdout.write(ok ? "ok " + distinct[0] : "missing=" + empty.join(",") + " versions=" + distinct.join(","));
-' "$CI_WF" "$REL_WF" "$GATE" 2>&1)"
+  const semver = /^[0-9]+\.[0-9]+\.[0-9]+$/;
+  const readOnly = (t) => /\n    permissions:\n      contents: read\n/.test(t);
+  const validate = job(ci, "plugin-validate");
+  const floor = job(ci, "plugin-floor");
+  const bad = [];
+  const pins = { validate: installs(validate), release: installs(rel), gate: [...gate.matchAll(/^CLAUDE_CODE_VERSION="([^"]+)"$/gm)].map((m) => m[1]) };
+  const pin = [...new Set(Object.values(pins).flat())];
+  if (Object.values(pins).some((v) => v.length === 0) || pin.length !== 1 || !semver.test(pin[0])) bad.push("pins=" + JSON.stringify(pins));
+  if (pins.release.length !== 2) bad.push("release-installs=" + pins.release.length);
+  if (!validate.includes("run: bash .github/scripts/session-hub-release-gate.sh\n")) bad.push("validate-runs-no-gate");
+  if (!readOnly(validate)) bad.push("validate-permissions");
+  if (rel.split("bash .github/scripts/session-hub-release-gate.sh").length - 1 !== 2) bad.push("release-gate-runs");
+  if (!gate.includes("bash .github/scripts/session-hub-install-probe.sh \"$CLAUDE_CODE_VERSION\"")) bad.push("gate-runs-no-probe");
+  if (!probe.includes("\"$WANT (Claude Code)\"")) bad.push("probe-version-check");
+  const floorPin = installs(floor);
+  if (floorPin.length !== 1 || !semver.test(floorPin[0])) bad.push("floor=" + floorPin.join(","));
+  else {
+    const f = floorPin[0];
+    const older = (a, b) => { const x = a.split(".").map(Number); const y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i]; return false; };
+    if (!floor.includes("run: bash .github/scripts/session-hub-install-probe.sh " + f + "\n")) bad.push("floor-probe");
+    if (!readOnly(floor)) bad.push("floor-permissions");
+    if (pin.length === 1 && !older(f, pin[0])) bad.push("floor-not-older");
+    if (!readme.includes("Claude Code " + f + " or newer")) bad.push("readme-floor");
+    if (pin.length === 1 && !readme.includes("tested with Claude Code " + f + " and " + pin[0])) bad.push("readme-tested");
+  }
+  process.stdout.write(bad.length ? bad.join(" ") : "ok " + pin[0] + " floor " + floorPin[0]);
+' "$CI_WF" "$REL_WF" "$GATE" "$INSTALL_PROBE" "$HUB_README" 2>&1)"
 case "$PIN_FACTS" in
-  ("ok "*) check "H11 the CI validate job, the companion release workflow and its gate pin one exact Claude Code (${PIN_FACTS#ok })" PASS ;;
-  (*) check "H11 the Claude Code pins disagree or float: $PIN_FACTS" FAIL ;;
+  ("ok "*) check "H11 the CI gate job, the companion release workflow and its gate pin one exact Claude Code, the floor job probes an older one, both jobs read only, and the README names both (${PIN_FACTS#ok })" PASS ;;
+  (*) check "H11 the Claude Code pins disagree, float or are not run: $PIN_FACTS" FAIL ;;
 esac
+
+COPY="$WORK/copy/session-hub"
+mkdir -p "$WORK/copy" "$WORK/copy-home" "$WORK/copy-config"
+cp -R "$HUB_DIR" "$COPY"
+COPY_TOKEN="$(node -e 'process.stdout.write(require("crypto").randomBytes(16).toString("hex"))')"
+COPY_SESSION="$(node -e 'process.stdout.write(require("crypto").randomUUID())')"
+COPY_PAYLOAD="$(node -e '
+  const [session, token, cwd] = process.argv.slice(1);
+  process.stdout.write(JSON.stringify({ session_id: session, cwd, hook_event_name: "UserPromptSubmit", prompt: "/session-hub:session-trail takeover " + session + " --all --receipt " + token }));
+' "$COPY_SESSION" "$COPY_TOKEN" "$WORK/copy-home")"
+COPY_OUT="$(printf '%s' "$COPY_PAYLOAD" | env HOME="$WORK/copy-home" USERPROFILE="$WORK/copy-home" CLAUDE_CONFIG_DIR="$WORK/copy-config" CLAUDE_PLUGIN_ROOT="$COPY" node "$COPY/hooks/lib/session-hub-receipt-v1.mjs" 2>&1)"; COPY_RC=$?
+COPY_LIST_RC=0
+env HOME="$WORK/copy-home" USERPROFILE="$WORK/copy-home" CLAUDE_CONFIG_DIR="$WORK/copy-config" ZENSU_CCD_STORE="$WORK/copy-home/no-store" \
+  node "$COPY/skills/session-trail/scripts/trail.mjs" list --json > "$WORK/copy-list.json" 2> "$WORK/copy-list.err" || COPY_LIST_RC=$?
+COPY_LIST_JSON="$(node -e 'try { JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write("ok"); } catch (_) { process.stdout.write("bad"); }' "$WORK/copy-list.json")"
+if [ "$COPY_RC" -eq 0 ] && [ -z "$COPY_OUT" ] && [ -f "$WORK/copy-config/zensu/session-hub/v1/receipts/$COPY_TOKEN.json" ] \
+  && [ "$COPY_LIST_RC" -eq 0 ] && [ "$COPY_LIST_JSON" = ok ]; then
+  check "H12 a copy of plugins/session-hub outside this repository lands a receipt for the takeover command and runs trail.mjs list --json" PASS
+else
+  check "H12 a copy of plugins/session-hub outside this repository does not run on its own (receipt rc=$COPY_RC out=${COPY_OUT:0:120}; list rc=$COPY_LIST_RC json=$COPY_LIST_JSON: $(head -c 200 "$WORK/copy-list.err"))" FAIL
+fi
+
+PLM_LINKED="$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs"
+HUB_LINKED="$HUB_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs"
+linked_equal() {
+  node -e '
+    const fs = require("fs");
+    const [plm, hub] = process.argv.slice(1).map((f) => fs.readFileSync(f, "utf8"));
+    const named = (t) => t.split("/session-hub:session-trail").join("/zensu:session-trail").split("session-hub:session-trail").join("zensu:session-trail").split("Zensu Session Hub plugin").join("Zensu plugin");
+    process.stdout.write(hub !== plm && named(hub) === plm ? "equal" : hub === plm ? "unrenamed" : "differ");
+  ' "$1" "$2" 2>&1
+}
+LINKED_RESULT="$(linked_equal "$PLM_LINKED" "$HUB_LINKED")"
+[ "$LINKED_RESULT" = equal ] \
+  && check "H13 the companion's linked-sessions-v1.mjs equals PLM's frozen copy except for the command and plugin names" PASS \
+  || check "H13 the two linked-sessions-v1.mjs copies drifted apart beyond the names ($LINKED_RESULT)" FAIL
+node -e '
+  const fs = require("fs");
+  const t = fs.readFileSync(process.argv[1], "utf8");
+  const i = t.indexOf("const ");
+  fs.writeFileSync(process.argv[2], i < 0 ? t + "\n" : t.slice(0, i) + "let " + t.slice(i + 6));
+' "$HUB_LINKED" "$WORK/linked-drift.mjs"
+[ "$(linked_equal "$PLM_LINKED" "$WORK/linked-drift.mjs")" = differ ] \
+  && check "H13-control a one-word change to the companion's copy fails the comparison" PASS \
+  || check "H13-control a one-word change to the companion's copy passes the comparison" FAIL
+
+order_wiring() {
+  node -e '
+    const fs = require("fs");
+    const [rel, plm] = process.argv.slice(1).map((f) => fs.readFileSync(f, "utf8"));
+    const bad = [];
+    const run = "bash .github/scripts/session-hub-release-order.sh";
+    if (rel.split(run).length - 1 !== 2) bad.push("order-runs");
+    const first = rel.indexOf(run);
+    const bump = rel.indexOf("node .github/scripts/bump-marketplace-entry.js");
+    if (first < 0 || bump < 0 || first > bump) bad.push("order-after-bump");
+    for (const [name, t] of [["release-session-hub", rel], ["release", plm]]) {
+      const blocks = [...t.matchAll(/uses: orhun\/git-cliff-action@[^\n]*\n((?: {8,}[^\n]*\n)+)/g)].map((m) => m[1]);
+      if (blocks.length !== 1 || !blocks[0].includes("          version: v2.13.1\n")) bad.push(name + "-cliff-version");
+    }
+    process.stdout.write(bad.join(" "));
+  ' "$1" "$PLM_WF" 2>&1
+}
+ORDER_WIRING="$(order_wiring "$REL_WF")"
+[ -z "$ORDER_WIRING" ] \
+  && check "H14 both companion release jobs run the release-order script, prepare before its bump, and both release workflows pin git-cliff v2.13.1" PASS \
+  || check "H14 the release order or the git-cliff pin is not wired: $ORDER_WIRING" FAIL
+MUTATE_ERR="$(mutated_release no-cliff-pin "$TAG_PROBE/no-cliff-pin.yml")"
+case " $MUTATE_ERR $(order_wiring "$TAG_PROBE/no-cliff-pin.yml") " in
+  (*" release-session-hub-cliff-version "*) check "H14-control a git-cliff step without its version pin fails the wiring check" PASS ;;
+  (*) check "H14-control a git-cliff step without its version pin passes the wiring check" FAIL ;;
+esac
+
+ORDER_REPO="$WORK/order-repo"
+mkdir -p "$ORDER_REPO/hooks" "$ORDER_REPO/plugins/session-hub/hooks"
+order_git() {
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR git -C "$ORDER_REPO" \
+    -c user.name=order -c user.email=order@localhost -c commit.gpgsign=false -c tag.gpgsign=false -c core.hooksPath=/dev/null "$@"
+}
+order_run() {
+  (cd "$ORDER_REPO" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR bash "$ORDER_SCRIPT" >/dev/null 2>&1)
+  printf '%s' "$?"
+}
+order_git init -q
+printf '%s\n' 'export default {};' > "$ORDER_REPO/hooks/usage-feed.ts"
+printf '%s\n' '{"schemaVersion":1}' > "$ORDER_REPO/hooks/usage-feed-contract.json"
+cp "$ORDER_REPO/hooks/usage-feed.ts" "$ORDER_REPO/hooks/usage-feed-contract.json" "$ORDER_REPO/plugins/session-hub/hooks/"
+order_git add -A && order_git commit -q -m "feed"
+NO_TAG="$(order_run)"
+order_git tag v0.9.0
+NO_NOTICE="$(order_run)"
+printf '%s\n' '#!/bin/bash' > "$ORDER_REPO/hooks/user-prompt-session-hub-takeover-notice.sh"
+order_git add -A && order_git commit -q -m "notice"
+STALE_TAG="$(order_run)"
+order_git tag v0.10.0
+READY="$(order_run)"
+order_git tag v1.0.0-rc.1 HEAD~1
+PRERELEASE="$(order_run)"
+printf '%s\n' 'export default { changed: true };' > "$ORDER_REPO/plugins/session-hub/hooks/usage-feed.ts"
+FEED_DRIFT="$(order_run)"
+cp "$ORDER_REPO/hooks/usage-feed.ts" "$ORDER_REPO/plugins/session-hub/hooks/usage-feed.ts"
+printf '%s\n' '{"schemaVersion":2}' > "$ORDER_REPO/plugins/session-hub/hooks/usage-feed-contract.json"
+CONTRACT_DRIFT="$(order_run)"
+ORDER_RESULT="$NO_TAG $NO_NOTICE $STALE_TAG $READY $PRERELEASE $FEED_DRIFT $CONTRACT_DRIFT"
+[ "$ORDER_RESULT" = "1 1 1 0 0 1 1" ] \
+  && check "H14 the release-order script refuses without a Zensu tag, while the newest one by version lacks the takeover notice, and while the companion's usage feed or its contract differs from it, ignores a pre-release tag, and passes once Zensu released both" PASS \
+  || check "H14 the release-order script decided no-tag, no-notice, stale-tag, ready, pre-release, feed-drift, contract-drift as $ORDER_RESULT, want 1 1 1 0 0 1 1" FAIL
 
 report
 [ "$FAIL" -eq 0 ]

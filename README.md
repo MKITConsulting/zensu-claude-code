@@ -179,10 +179,13 @@ it moves, so it needs the companion, not Zensu. Zensu still carries its own
 copy of `/zensu:session-trail`, its receipt hook and the usage feed, frozen
 until a later release removes them; with both plugins enabled, each receipt
 hook answers only its own command and both usage-feed copies write the same
-file. While `hooks.bashWriteGate` is on, Zensu adds one notice to a companion
-takeover: its opt-in source-write gate refuses source writes and git commands,
-commits included, outside the session's Session Control root, and
-`/zensu:adopt-session --reanchor` moves that root.
+file. While `hooks.bashWriteGate` is on, Zensu adds one notice to a takeover
+command typed as `/session-hub:session-trail takeover …`: its opt-in
+source-write gate refuses source writes and git commands, commits included,
+outside the session's Session Control root, and
+`/zensu:adopt-session --reanchor` moves that root. A linked session started
+from a takeover brief gets no notice, so the companion's briefs state that rule
+themselves.
 
 ## Try it
 

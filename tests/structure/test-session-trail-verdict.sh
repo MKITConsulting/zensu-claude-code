@@ -9281,5 +9281,68 @@ fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".jso
     || check "OM11 presets folder:$OM_BAD" FAIL
 fi
 
+pl_run() {
+  local script="$1"; shift
+  env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME CLAUDE_CODE_SESSION_ID="" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$script" "$@" --config-dir "$LS_HOME/.claude"
+}
+pl_compare() {
+  node -e '
+    const fs = require("node:fs");
+    const [plmFile, hubFile, root] = process.argv.slice(1);
+    const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+    const PLM_ONLY = new Set(["writes", "continuation"]);
+    const named = (v) => {
+      if (typeof v === "string") return v.split("/session-hub:session-trail").join("/zensu:session-trail").split("session-hub:session-trail").join("zensu:session-trail").split("Zensu Session Hub plugin").join("Zensu plugin");
+      if (Array.isArray(v)) return v.map(named);
+      if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, named(x)]));
+      return v;
+    };
+    const shared = (v) => {
+      if (Array.isArray(v)) return v.map(shared);
+      if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).filter(([k]) => !PLM_ONLY.has(k)).map(([k, x]) => [k, shared(x)]));
+      return v;
+    };
+    const plm = read(plmFile);
+    const hub = read(hubFile);
+    if (!plm || !hub) { process.stdout.write("unreadable"); process.exit(0); }
+    if (!JSON.stringify(plm).includes(root)) { process.stdout.write("no-session"); process.exit(0); }
+    const diffs = [];
+    const walk = (a, b, at) => {
+      if (JSON.stringify(a) === JSON.stringify(b)) return;
+      if (a && b && typeof a === "object" && typeof b === "object" && Array.isArray(a) === Array.isArray(b)) {
+        for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) walk(a[k], b[k], at + "." + k);
+        return;
+      }
+      diffs.push(at);
+    };
+    walk(shared(plm), shared(named(hub)), "$");
+    process.stdout.write(diffs.length ? diffs.slice(0, 12).join(" ") : "equal");
+  ' "$1" "$2" "$3" 2>&1
+}
+PL_DIR="$LS_HOME/pl"
+mkdir -p "$PL_DIR"
+for pl_side in plm hub; do
+  pl_script="$PLM_TRAIL_MJS"
+  [ "$pl_side" = hub ] && pl_script="$HUB_TRAIL_MJS"
+  (cd "$LS_TAKER" && pl_run "$pl_script" show "$LS_ROOT" --all --json) > "$PL_DIR/show-$pl_side.json" 2>/dev/null
+  (cd "$LS_TAKER" && pl_run "$pl_script" takeover "$LS_ROOT" --all --no-record --json) > "$PL_DIR/takeover-$pl_side.json" 2>/dev/null
+done
+PL_SHOW="$(pl_compare "$PL_DIR/show-plm.json" "$PL_DIR/show-hub.json" "$LS_ROOT")"
+PL_TAKE="$(pl_compare "$PL_DIR/takeover-plm.json" "$PL_DIR/takeover-hub.json" "$LS_ROOT")"
+[ "$PL_SHOW" = equal ] && [ "$PL_TAKE" = equal ] \
+  && check "PL1 PLM's frozen trail.mjs and the companion's answer show --all --json and takeover --all --no-record --json for the LS family identically, apart from the command name and PLM's writes and continuation keys" PASS \
+  || check "PL1 PLM's frozen trail.mjs and the companion's disagree (show: $PL_SHOW; takeover: $PL_TAKE)" FAIL
+node -e '
+  const fs = require("node:fs");
+  const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const k = Object.keys(o).find((key) => key !== "writes" && key !== "continuation");
+  o[k] = "drift";
+  fs.writeFileSync(process.argv[2], JSON.stringify(o));
+' "$PL_DIR/takeover-hub.json" "$PL_DIR/takeover-drift.json" 2>/dev/null
+case "$(pl_compare "$PL_DIR/takeover-plm.json" "$PL_DIR/takeover-drift.json" "$LS_ROOT")" in
+  (equal|unreadable|no-session) check "PL1-control a changed field in the companion's takeover --json is not detected" FAIL ;;
+  (*) check "PL1-control a changed field in the companion's takeover --json makes the comparison fail" PASS ;;
+esac
+
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
 report

@@ -19,15 +19,19 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh" 2>/dev/null || exit 0
 zensu_hook_opted_in bashWriteGate || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 NOTICE_ROOT=""
+NOTICE_BOUND=0
 if source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh" 2>/dev/null \
   && zensu_bind_hook_session "$INPUT" >/dev/null 2>&1; then
-  NOTICE_ROOT="${ZENSU_PROJECT_ROOT:-}"
+  NOTICE_BOUND=1
+  NOTICE_ROOT="$(zensu_safe_display_path "${ZENSU_PROJECT_ROOT:-}" 2>/dev/null)" || NOTICE_ROOT=""
+  [ "$NOTICE_ROOT" = "(unreadable)" ] && NOTICE_ROOT=""
 fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-bounded-run.sh" 2>/dev/null || exit 0
 
 (
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null || exit 0
   export ZENSU_NOTICE_ROOT="$NOTICE_ROOT"
+  export ZENSU_NOTICE_BOUND="$NOTICE_BOUND"
   printf '%s' "$INPUT" | zensu_run_bounded node ./session-hub-takeover-notice-v1.js
 ) 2>/dev/null || true
 exit 0

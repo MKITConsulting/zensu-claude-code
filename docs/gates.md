@@ -453,9 +453,13 @@ contains that worktree — `cd -- <cwd> && claude --resume <id>` as `show` print
 brief opened by an instance already running there — not the escape prefix above: the host's
 permission layer commonly refuses an inline `ZENSU_BASH_WRITE_GATE=off` as well. Switching the gate
 off is the other route, and it is the user's call. A takeover through the `session-hub@zensu`
-companion's `/session-hub:session-trail` meets the same rule, and the companion has no gate of its
-own to say so: while this gate is on, `user-prompt-session-hub-takeover-notice.sh` adds one notice to
-the companion's takeover command that names the refusal and the fourth route below.
+companion's `/session-hub:session-trail` meets the same rule. The companion has no gate of its own,
+so its takeover briefs and `show` state the rule themselves. While this gate is on,
+`user-prompt-session-hub-takeover-notice.sh` adds one notice to a takeover command typed as
+`/session-hub:session-trail takeover …`, raw or in the command-tag form, that names the refusal and
+the fourth route below; in a session without a usable Session Control record it names
+`/zensu:doctor` instead. A linked session started from a takeover brief and a takeover started
+through the Skill tool get no notice, so a missing notice is no evidence that the gate is off.
 
 **A third route needs no other session, and it works BECAUSE containment is the test.** Since a
 worktree nested inside the anchor is writable, the taking session can create its continuation there

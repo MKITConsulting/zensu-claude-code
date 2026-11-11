@@ -264,12 +264,14 @@ consistency. Heaviest: `pr-team-review-skill` (~121).
 transcripts under a synthetic `HOME` and asserts what `trail.mjs` actually decides about
 taking a session over, which its structural sibling can only pin as vocabulary. It skips
 loudly where `os.homedir()` does not follow `$HOME`, rather than reporting against the
-developer's real sessions. `session-trail-lineage` is behavioural too: it drives the
+developer's real sessions. Both suites grade the companion's copy, and `PL1` holds PLM's frozen
+copy to it on one fixture. `session-trail-lineage` is behavioural too: it drives the
 machine-wide takeover ledger the skill writes and the chain walk that reads it back.
 
-`skill-text-budget` is the one suite in this group that reads EVERY skill: it bounds each
-`SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
-listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
+`skill-text-budget` is the one suite in this group that reads EVERY skill, a companion
+plugin's under `plugins/*/` included: it bounds each `SKILL.md` body at 25,000 chars, with a
+shrink-only allowlist for the larger ones, and each listed description at 220 chars with its
+"Use when"/"Use for" trigger in the first 150.
 
 ### Prompt routing & payloads (14)
 `agent-context` · `best-solution-first` · `context-nudge-hook` · `hook-payload-stdin` ·
@@ -294,9 +296,10 @@ flag.
 
 `session-hub-takeover-notice` drives PLM's notice for the companion's takeover command: one
 `additionalContext` notice while the opt-in source-write gate is on, naming the refusal of writes
-outside the Session Control root and `/zensu:adopt-session --reanchor`, and silence with the gate
-off, on every other prompt, for a subagent and with no `node` child on a prompt that does not
-name the command.
+outside the Session Control root and `/zensu:adopt-session --reanchor`, or `/zensu:doctor` in a
+session without a usable record, and silence with the gate off, on every other prompt, for a
+subagent and with no `node` child on a prompt that does not name the command. It also holds the
+command name to the companion contract's takeover prefix.
 
 `session-hub-usage-feed` pins the Session Hub's usage-feed contract byte for byte, the
 `modules` entry of the companion's `hooks/hooks.json`, its byte identity with PLM's frozen copy,
@@ -360,8 +363,10 @@ with spies, its compare, issue and red-run steps against a fake `gh`, and three 
 cases must catch (`playwright-cli-drift`) — the unit-file registry with its census and the
 generated regions of this file (`unit-registry`), the companion plugin's file allowlist,
 manifest and hooks registration, the byte identity of its vendored files, the absence of any
-load outside its tree and its keep key against Session Control's (`session-hub-plugin`), and the
-runner's own contract.
+load outside its tree or by a computed path, its keep key against Session Control's, a copy of
+the tree run outside the repository, its linked-session module against PLM's, and its release
+workflow's tag discipline, Claude Code pins and release-order script (`session-hub-plugin`), and
+the runner's own contract.
 `workflow-dispatch-inputs`, `clock-shift` and `playwright-cli-drift` need `node_modules` →
 `BLOCK` without `npm ci`.
 

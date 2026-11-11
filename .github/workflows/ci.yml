@@ -189,7 +189,9 @@ jobs:
   plugin-validate:
     name: Plugin manifest validation
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -199,13 +201,23 @@ jobs:
           node-version: 22
       - name: Install the pinned Claude Code
         run: npm install -g --no-fund --no-audit @anthropic-ai/claude-code@2.1.317
-      - name: Validate the marketplace and the session-hub companion
-        env:
-          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-config
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
-          DISABLE_AUTOUPDATER: '1'
-        run: |
-          set -euo pipefail
-          test "$(claude --version)" = "2.1.317 (Claude Code)"
-          claude plugin validate .
-          claude plugin validate plugins/session-hub
+      - name: Run the companion release gate
+        run: bash .github/scripts/session-hub-release-gate.sh
+
+  plugin-floor:
+    name: Session Hub companion on the oldest supported Claude Code
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install the oldest supported Claude Code
+        run: npm install -g --no-fund --no-audit @anthropic-ai/claude-code@2.1.296
+      - name: Validate and install the companion through its git-subdir entry
+        run: bash .github/scripts/session-hub-install-probe.sh 2.1.296

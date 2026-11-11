@@ -19,4 +19,6 @@ and this plugin adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   `hooks.sessionHubReceipt` in `~/.zensu/config.json`; and the `usage-feed.ts` hooks module.
   Its handover contract 2 names the prefix `/session-hub:session-trail takeover `. The
   receipt, lineage and usage directories and their schema versions are the ones the Zensu
-  plugin writes.
+  plugin writes. It needs Claude Code 2.1.296 or newer and `node` on the `PATH`, and its
+  takeover briefs state the commit rule of the Zensu plugin's opt-in source-write gate for a
+  session where both plugins run.

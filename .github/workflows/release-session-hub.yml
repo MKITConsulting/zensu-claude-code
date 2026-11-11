@@ -86,6 +86,9 @@ jobs:
           echo "tag=session-hub--v$VER" >> "$GITHUB_OUTPUT"
           echo "Companion version: $CURRENT -> $VER"
 
+      - name: Require that Zensu released first
+        run: bash .github/scripts/session-hub-release-order.sh
+
       - name: Bump the companion version files
         env:
           VER: ${{ steps.ver.outputs.version }}
@@ -103,6 +106,7 @@ jobs:
       - name: Generate the companion CHANGELOG section (git-cliff)
         uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
+          version: v2.13.1
           config: plugins/session-hub/cliff.toml
           args: --unreleased --tag ${{ steps.ver.outputs.tag }}
         env:
@@ -260,6 +264,16 @@ jobs:
             echo "::error::plugins/session-hub/CHANGELOG.md carries no ## [$VER] section"
             exit 1
           }
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { f = 1; next }
+            f && /^## \[/ { f = 0 }
+            f { print }
+          ' plugins/session-hub/CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          test -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/notes.md")" || {
+            echo "::error::the ## [$VER] section of plugins/session-hub/CHANGELOG.md is empty"
+            exit 1
+          }
+          bash .github/scripts/session-hub-release-order.sh
           TAGGED=false
           if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
             TAG_SHA="$(git rev-list -n 1 "$TAG")"
@@ -286,10 +300,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
-      - name: Create and push the tag through claude plugin tag
+      - name: Create the tag through claude plugin tag
         if: steps.target.outputs.tagged == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
           CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-config
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
@@ -298,23 +312,43 @@ jobs:
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          claude plugin tag plugins/session-hub
+          test "$(git cat-file -t "refs/tags/$TAG")" = tag
+          test "$(git rev-list -n 1 "refs/tags/$TAG")" = "${{ github.sha }}"
+
+      - name: Re-check repository Immutable Releases before the tag goes out
+        if: steps.target.outputs.tagged == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            --jq '.enabled' | grep -qx true || {
+              echo "::error::GitHub Immutable Releases was switched off while the gate ran; no tag was pushed"
+              exit 1
+            }
+
+      - name: Push the tag
+        if: steps.target.outputs.tagged == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-list -n 1 "refs/tags/$TAG")" = "${{ github.sha }}"
           gh auth setup-git
-          claude plugin tag plugins/session-hub --push
+          git push origin "refs/tags/$TAG"
 
       - name: Publish the GitHub Release and verify it is immutable
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VER: ${{ steps.target.outputs.version }}
           TAG: ${{ steps.target.outputs.tag }}
         run: |
           set -euo pipefail
           NOTES="$RUNNER_TEMP/notes.md"
-          awk -v ver="$VER" '
-            $0 ~ "^## \\[" ver "\\]" { f = 1; next }
-            f && /^## \[/ { f = 0 }
-            f { print }
-          ' plugins/session-hub/CHANGELOG.md > "$NOTES"
-          test -n "$(tr -d '[:space:]' < "$NOTES")" || { echo "::error::the ## [$VER] section of plugins/session-hub/CHANGELOG.md is empty"; exit 1; }
+          test -n "$(tr -d '[:space:]' < "$NOTES")"
           REMOTE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
           test "$REMOTE_SHA" = "${{ github.sha }}" || {
             echo "::error::$TAG resolves to $REMOTE_SHA on GitHub, not to ${{ github.sha }}"
@@ -333,7 +367,12 @@ jobs:
                 .draft == false and .prerelease == false and .immutable == true
                 and .tag_name == $tag and .name == $tag and (.body | norm) == ($body | norm)
               ' >/dev/null; then
-              echo "$TAG is published, immutable and carries the CHANGELOG section."
+              LOCKED_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+              if [ "$LOCKED_SHA" != "${{ github.sha }}" ]; then
+                echo "::error::$TAG was moved to $LOCKED_SHA before its immutable release locked it; the release names the wrong commit and needs a maintainer"
+                exit 1
+              fi
+              echo "$TAG is published, immutable, still at ${{ github.sha }} and carries the CHANGELOG section."
               exit 0
             fi
             sleep 3

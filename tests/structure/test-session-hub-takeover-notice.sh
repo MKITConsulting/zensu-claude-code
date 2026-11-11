@@ -6,6 +6,8 @@ HOOK="$PLUGIN_DIR/hooks/user-prompt-session-hub-takeover-notice.sh"
 MODULE="$PLUGIN_DIR/hooks/lib/session-hub-takeover-notice-v1.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 MINT="$PLUGIN_DIR/hooks/session-start-session-control.sh"
+HUB_CONTRACT="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/handover-contract.json"
+HUB_RECEIPT="$PLUGIN_DIR/plugins/session-hub/hooks/lib/session-hub-receipt-v1.mjs"
 
 SBOX="$(mktemp -d -t hubnotice-XXXXXX)"
 SBOX="$(cd "$SBOX" && pwd -P)"
@@ -37,13 +39,13 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
-for f in "$HOOK" "$MODULE" "$HOOKS_JSON" "$MINT"; do
+for f in "$HOOK" "$MODULE" "$HOOKS_JSON" "$MINT" "$HUB_CONTRACT" "$HUB_RECEIPT"; do
   if [ ! -f "$f" ]; then
     check "N0 required file exists: $f" FAIL
     finish; exit 1
   fi
 done
-check "N0 the hook, its module, hooks.json and the session-control minter exist" PASS
+check "N0 the hook, its module, hooks.json, the session-control minter and the companion's contract and receipt entry exist" PASS
 
 [ -x "$HOOK" ] && check "N1 the hook is executable" PASS || check "N1 the hook is executable" FAIL
 bash -n "$HOOK" 2>/dev/null && check "N1 bash -n accepts the hook" PASS || check "N1 bash -n accepts the hook" FAIL
@@ -102,6 +104,14 @@ HUB_PROMPT="/session-hub:session-trail takeover $TARGET --all --receipt $TOKEN"
 TAG_PROMPT="$(printf '<command-message>session-hub:session-trail</command-message>\n<command-name>/session-hub:session-trail</command-name>\n<command-args>takeover %s --all</command-args>' "$TARGET")"
 REMINDED_PROMPT="$(printf '<system-reminder>\nlinked sessions now\n</system-reminder>\n/session-hub:session-trail takeover %s' "$TARGET")"
 
+SID_BOUND="hubnotice-$$-$RANDOM"
+payload "start" "$SID_BOUND" "$PROJECT" | node -e '
+  let s = ""; process.stdin.on("data", (c) => { s += c; }).on("end", () => {
+    const o = JSON.parse(s); o.hook_event_name = "SessionStart"; o.source = "startup"; delete o.prompt;
+    process.stdout.write(JSON.stringify(o));
+  });
+' | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$NO_CONFIG" bash "$MINT" >/dev/null 2>&1
+
 notice_ok() {
   local ctx="$1"
   case "$ctx" in
@@ -109,8 +119,19 @@ notice_ok() {
   esac
   return 1
 }
+unbound_notice_ok() {
+  local ctx="$1"
+  case "$ctx" in
+    *"hooks.bashWriteGate: true"*"no usable Session Control record"*"/zensu:doctor"*"plan confirmation"*) ;;
+    *) return 1 ;;
+  esac
+  case "$ctx" in
+    *"--reanchor"*|*"$PROJECT"*) return 1 ;;
+  esac
+  return 0
+}
 
-OUT="$(payload "$HUB_PROMPT" "$SID_FREE" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null)"; RC=$?
+OUT="$(payload "$HUB_PROMPT" "$SID_BOUND" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null)"; RC=$?
 CTX="$(printf '%s' "$OUT" | context_of)"
 [ "$RC" -eq 0 ] && notice_ok "$CTX" \
   && check "N3 the Session Hub's exact takeover command gets one notice naming the refusal and the reanchor" PASS \
@@ -124,20 +145,20 @@ for spec in \
   "N4 a bare takeover|/session-hub:session-trail takeover" \
   "N4 a takeover separated by a tab|$(printf '/session-hub:session-trail\ttakeover abc')"; do
   label="${spec%%|*}"; prompt="${spec#*|}"
-  CTX="$(payload "$prompt" "$SID_FREE" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
+  CTX="$(payload "$prompt" "$SID_BOUND" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
   notice_ok "$CTX" && check "$label gets the notice" PASS || check "$label gets the notice (got ${CTX:0:160})" FAIL
 done
 
-CTX="$(payload "$TAG_PROMPT" "$SID_FREE" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
+CTX="$(payload "$TAG_PROMPT" "$SID_BOUND" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
 notice_ok "$CTX" && check "N5 the command-tag form gets the notice" PASS || check "N5 the command-tag form gets the notice (got ${CTX:0:160})" FAIL
-CTX="$(payload "$REMINDED_PROMPT" "$SID_FREE" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
+CTX="$(payload "$REMINDED_PROMPT" "$SID_BOUND" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
 notice_ok "$CTX" && check "N5 a takeover behind leading system reminders gets the notice" PASS || check "N5 a takeover behind leading system reminders gets the notice (got ${CTX:0:160})" FAIL
 
 silent_case() {
   local label="$1" prompt="$2" cfg="$3" kind="${4:-main}"
   shift 4
   local out rc
-  out="$(payload "$prompt" "$SID_FREE" "$PROJECT" "$kind" | run_hook "$cfg" "$@" 2>/dev/null)"; rc=$?
+  out="$(payload "$prompt" "$SID_BOUND" "$PROJECT" "$kind" | run_hook "$cfg" "$@" 2>/dev/null)"; rc=$?
   [ "$rc" -eq 0 ] && [ -z "$out" ] && check "$label stays silent with exit 0" PASS || check "$label stays silent with exit 0 (rc=$rc out=${out:0:160})" FAIL
 }
 silent_case "N6 PLM's own takeover command" "/zensu:session-trail takeover $TARGET --all --receipt $TOKEN" "$ON_CONFIG" main
@@ -161,22 +182,14 @@ OUT="$(printf '%s' '{"prompt": "/session-hub:session-trail takeover' | run_hook 
 [ "$RC" -eq 0 ] && [ -z "$OUT" ] && check "N9 a payload that is not JSON stays silent with exit 0" PASS || check "N9 a payload that is not JSON stays silent with exit 0 (rc=$RC)" FAIL
 
 CTX="$(payload "$HUB_PROMPT" "$SID_FREE" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
-case "$CTX" in
-  *"outside this session's Session Control root. "*) check "N10 an unbound session gets the notice without a root path" PASS ;;
-  *) check "N10 an unbound session gets the notice without a root path (got ${CTX:0:200})" FAIL ;;
-esac
+unbound_notice_ok "$CTX" \
+  && check "N10 a session with no usable Session Control record gets the unbound notice: /zensu:doctor, no reanchor, no root path" PASS \
+  || check "N10 a session with no usable Session Control record gets the unbound notice: /zensu:doctor, no reanchor, no root path (got ${CTX:0:240})" FAIL
 
-SID_BOUND="hubnotice-$$-$RANDOM"
-payload "start" "$SID_BOUND" "$PROJECT" | node -e '
-  let s = ""; process.stdin.on("data", (c) => { s += c; }).on("end", () => {
-    const o = JSON.parse(s); o.hook_event_name = "SessionStart"; o.source = "startup"; delete o.prompt;
-    process.stdout.write(JSON.stringify(o));
-  });
-' | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$NO_CONFIG" bash "$MINT" >/dev/null 2>&1
 CTX="$(payload "$HUB_PROMPT" "$SID_BOUND" "$PROJECT" | run_hook "$ON_CONFIG" 2>/dev/null | context_of)"
 case "$CTX" in
-  *"outside this session's Session Control root, $PROJECT. "*) check "N10 a bound session's notice names its recorded root" PASS ;;
-  *) check "N10 a bound session's notice names its recorded root (got ${CTX:0:240})" FAIL ;;
+  *"outside this session's Session Control root, \"$PROJECT\". "*) check "N10 a bound session's notice names its recorded root in double quotes" PASS ;;
+  *) check "N10 a bound session's notice names its recorded root in double quotes (got ${CTX:0:240})" FAIL ;;
 esac
 
 SHIM="$SBOX/shim"
@@ -207,7 +220,11 @@ UNIT="$(cd "$PLUGIN_DIR/hooks/lib" && node -e '
   if (m.noticeText("/a/b\u001b[2Jc").includes("/a/b")) bad.push("control-root");
   if (m.noticeText("/a/b\u2028c").includes("/a/b")) bad.push("separator-root");
   if (m.noticeText("/" + "x".repeat(5000)).includes("xxxx")) bad.push("long-root");
-  if (!m.noticeText("/work/tree").includes("root, /work/tree. ")) bad.push("plain-root");
+  if (m.noticeText("/a/\"b").includes("/a/\"b")) bad.push("quote-root");
+  if (!m.noticeText("/work/tree").includes("root, \"/work/tree\". ")) bad.push("plain-root");
+  const unbound = m.noticeText("/work/tree", false);
+  if (unbound.includes("/work/tree") || unbound.includes("--reanchor")) bad.push("unbound-advice");
+  if (!unbound.includes("no usable Session Control record") || !unbound.includes("/zensu:doctor")) bad.push("unbound-text");
   if (m.decide("[]", {}) !== null) bad.push("array-payload");
   if (m.decide("null", {}) !== null) bad.push("null-payload");
   if (m.decide("{\"prompt\":42}", {}) !== null) bad.push("number-prompt");
@@ -217,9 +234,38 @@ UNIT="$(cd "$PLUGIN_DIR/hooks/lib" && node -e '
   if (m.isTakeoverPrompt("<system-reminder>unclosed /session-hub:session-trail takeover x")) bad.push("unclosed-reminder");
   const out = m.decide(JSON.stringify({ prompt: "/session-hub:session-trail takeover x" }), { ZENSU_NOTICE_ROOT: "/r" });
   if (!out || Object.keys(out).join() !== "hookSpecificOutput" || Object.keys(out.hookSpecificOutput).join() !== "hookEventName,additionalContext") bad.push("shape");
+  else if (!out.hookSpecificOutput.additionalContext.includes("root, \"/r\". ")) bad.push("decide-bound");
+  const off = m.decide(JSON.stringify({ prompt: "/session-hub:session-trail takeover x" }), { ZENSU_NOTICE_ROOT: "/r", ZENSU_NOTICE_BOUND: "0" });
+  if (!off || off.hookSpecificOutput.additionalContext !== m.noticeText("/r", false)) bad.push("decide-unbound");
   process.stdout.write(bad.length ? bad.join(",") : "ok");
 ' 2>&1)"
-[ "$UNIT" = "ok" ] && check "N12 the module withholds an unsafe root, refuses malformed and oversized payloads and keeps the output shape" PASS \
-  || check "N12 the module withholds an unsafe root, refuses malformed and oversized payloads and keeps the output shape ($UNIT)" FAIL
+[ "$UNIT" = "ok" ] && check "N12 the module withholds an unsafe root, quotes a safe one, renders the unbound variant, refuses malformed and oversized payloads and keeps the output shape" PASS \
+  || check "N12 the module withholds an unsafe root, quotes a safe one, renders the unbound variant, refuses malformed and oversized payloads and keeps the output shape ($UNIT)" FAIL
+
+NAMES="$(cd "$PLUGIN_DIR" && node -e '
+  const fs = require("fs");
+  const path = require("path");
+  const { pathToFileURL } = require("url");
+  (async () => {
+    const contract = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const prefix = contract && contract.takeover && contract.takeover.prefix;
+    const verb = " takeover ";
+    if (typeof prefix !== "string" || !prefix.endsWith(verb) || prefix.length <= verb.length) { process.stdout.write("bad-prefix"); return; }
+    const name = prefix.slice(0, -verb.length);
+    const notice = require(path.resolve(process.argv[2]));
+    const receipt = await import(pathToFileURL(path.resolve(process.argv[3])).href);
+    const hook = fs.readFileSync(process.argv[4], "utf8");
+    const q = String.fromCharCode(39);
+    const bad = [];
+    if (notice.COMMAND_NAME !== name) bad.push("notice");
+    if (receipt.COMMAND_NAME !== name) bad.push("receipt");
+    if (receipt.TAKEOVER_PREFIX !== prefix) bad.push("receipt-prefix");
+    if (!hook.includes("*" + q + name + q + "*")) bad.push("hook-prefilter");
+    process.stdout.write(bad.length ? bad.join(",") : "ok:" + name);
+  })().catch((error) => process.stdout.write("error:" + error.message));
+' "$HUB_CONTRACT" "$MODULE" "$HUB_RECEIPT" "$HOOK" 2>&1)"
+[ "$NAMES" = "ok:/session-hub:session-trail" ] \
+  && check "N13 the notice module, the hook's prefilter and the companion's receipt entry name the command its contract-2 takeover prefix declares" PASS \
+  || check "N13 the notice module, the hook's prefilter and the companion's receipt entry name the command its contract-2 takeover prefix declares ($NAMES)" FAIL
 
 finish

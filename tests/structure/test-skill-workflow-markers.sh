@@ -497,11 +497,17 @@ for d in "${CLAUDE_PLUGIN_ROOT}"/skills/*/; do
   [ -f "${d}SKILL.md" ] || continue
   PH_SKILLS+=("skills/$(basename "$d")/SKILL.md")
 done
+PH_COMPANION=0
+for d in "${CLAUDE_PLUGIN_ROOT}"/plugins/*/skills/*/; do
+  [ -f "${d}SKILL.md" ] || continue
+  PH_SKILLS+=("${d#"${CLAUDE_PLUGIN_ROOT}"/}SKILL.md")
+  PH_COMPANION=$((PH_COMPANION + 1))
+done
 PH_OUT="$(ph_scan "$CLAUDE_PLUGIN_ROOT" "$PH_ALLOW" ${PH_SKILLS[@]+"${PH_SKILLS[@]}"})"
 PH_BAD="$(printf '%s\n' "$PH_OUT" | grep -E '^(HIT|ALLOW-MISMATCH) ')"
 PH_SCANNED="$(printf '%s\n' "$PH_OUT" | sed -n 's/^SCANNED //p')"
-if [ -z "$PH_BAD" ] && [ "${#PH_SKILLS[@]}" -gt 1 ] && [ "$PH_SCANNED" = "${#PH_SKILLS[@]}" ]; then
-  check "AP1 no skill body carries an argument placeholder in a code span or fenced block beyond the allowlist ($PH_SCANNED skills scanned)" PASS
+if [ -z "$PH_BAD" ] && [ "${#PH_SKILLS[@]}" -gt 1 ] && [ "$PH_COMPANION" -gt 0 ] && [ "$PH_SCANNED" = "${#PH_SKILLS[@]}" ]; then
+  check "AP1 no skill body, the companion plugins' $PH_COMPANION included, carries an argument placeholder in a code span or fenced block beyond the allowlist ($PH_SCANNED skills scanned)" PASS
 else
   printf '%s\n' "${PH_BAD:-$PH_OUT}" | sed 's/^/      /'
   echo "      pass a value into a shell snippet through a named environment variable, or allowlist a deliberate use in PH_ALLOW"

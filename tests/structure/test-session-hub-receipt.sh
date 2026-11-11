@@ -202,17 +202,14 @@ fi
 
 HUB_REGISTRATION="$(node -e '
   const doc = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-  const found = [];
-  for (const [event, groups] of Object.entries(doc.hooks || {})) {
-    for (const group of groups || []) {
-      for (const hook of group.hooks || []) {
-        found.push([event, group.matcher === undefined ? "none" : String(group.matcher), hook.type, hook.command, JSON.stringify(hook.args), String(hook.timeout)].join(":"));
-      }
-    }
-  }
-  process.stdout.write(found.join(","));
+  const canonical = (value) => Array.isArray(value)
+    ? "[" + value.map(canonical).join(",") + "]"
+    : value !== null && typeof value === "object"
+      ? "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + canonical(value[key])).join(",") + "}"
+      : JSON.stringify(value);
+  process.stdout.write(canonical(doc.hooks));
 ' "$HUB_HOOKS_JSON" 2>/dev/null)"
-[ "$HUB_REGISTRATION" = 'UserPromptSubmit:none:command:node:["${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-hub-receipt-v1.mjs"]:10' ] \
+[ "$HUB_REGISTRATION" = '{"UserPromptSubmit":[{"hooks":[{"args":["${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-hub-receipt-v1.mjs"],"command":"node","timeout":10,"type":"command"}]}]}' ] \
   && check "R13 the companion registers its receipt entry once, on UserPromptSubmit, in exec form with a 10 s bound" PASS \
   || check "R13 the companion's registration is ${HUB_REGISTRATION:-<absent>}" FAIL
 

@@ -43,7 +43,9 @@ the spec's `ARGUMENTS:` line. `plan-review` and `pr-team-review` broke the same 
 argument on, and `verify-feature` replaced the `"$12"` example of its quoting rule from the
 thirteenth word on.
 
-**Where the rule binds.** Only `skills/*/SKILL.md` bodies reach the loader in this plugin. There is
+**Where the rule binds.** Only `skills/*/SKILL.md` bodies reach the loader in this plugin, and
+`plugins/*/skills/*/SKILL.md` bodies in a companion plugin such as `session-hub@zensu`; `AP1`
+scans both. There is
 no `commands/` directory; agent definitions in `agents/*.md` are never substituted, because the
 2.1.286 binary calls the function only from the skill and command loaders, one built-in command and
 the prompt and agent hook runners; and this plugin registers command hooks only. Frontmatter is not

@@ -135,10 +135,25 @@ REAL="$(budget_scan "$PLUGIN_DIR" "$ALLOWLIST")" || REAL=""
 SUMMARY="$(printf '%s\n' "$REAL" | awk -F'\t' '$1 == "summary" { print $3 }')"
 SKILL_FILES="$(ls "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
 SCANNED="$(printf '%s\n' "$SUMMARY" | sed -n 's/.*skills=\([0-9]*\).*/\1/p')"
-if [ -n "$SUMMARY" ] && [ "$SCANNED" = "$SKILL_FILES" ] && [ "$SKILL_FILES" -gt 0 ]; then
-  check "B0 the scan read all $SKILL_FILES skills/*/SKILL.md files ($SUMMARY)" PASS
+COMPANIONS=""
+COMPANION_FILES=0
+COMPANION_SCANNED=0
+for companion in "$PLUGIN_DIR"/plugins/*/; do
+  companion="${companion%/}"
+  [ -d "$companion/skills" ] || continue
+  label="$(basename "$companion")"
+  COMPANIONS="$COMPANIONS $label"
+  ONE="$(budget_scan "$companion" "")" || ONE=""
+  n="$(printf '%s\n' "$ONE" | awk -F'\t' '$1 == "summary" { print $3 }' | sed -n 's/.*skills=\([0-9]*\).*/\1/p')"
+  COMPANION_SCANNED=$((COMPANION_SCANNED + ${n:-0}))
+  COMPANION_FILES=$((COMPANION_FILES + $(ls "$companion"/skills/*/SKILL.md 2>/dev/null | wc -l | tr -d ' ')))
+  REAL="$REAL"$'\n'"$(printf '%s\n' "$ONE" | awk -F'\t' -v p="$label:" 'BEGIN { OFS = "\t" } $1 != "summary" && $1 != "" { $2 = p $2; print }')"
+done
+if [ -n "$SUMMARY" ] && [ "$SCANNED" = "$SKILL_FILES" ] && [ "$SKILL_FILES" -gt 0 ] \
+  && [ -n "$COMPANIONS" ] && [ "$COMPANION_SCANNED" = "$COMPANION_FILES" ] && [ "$COMPANION_FILES" -gt 0 ]; then
+  check "B0 the scan read all $SKILL_FILES skills/*/SKILL.md files ($SUMMARY) and all $COMPANION_FILES of the companion plugins (${COMPANIONS# }), which have no allowlist" PASS
 else
-  check "B0 the scan did not read every SKILL.md (scanned='${SCANNED:-none}' files=$SKILL_FILES)" FAIL
+  check "B0 the scan did not read every SKILL.md (scanned='${SCANNED:-none}' files=$SKILL_FILES; companions:${COMPANIONS:- none} scanned=$COMPANION_SCANNED files=$COMPANION_FILES)" FAIL
 fi
 
 BAD="$(findings_of "$REAL" unparsed)"
@@ -221,10 +236,12 @@ else
 fi
 
 docpath_scan() {
-  node - "$1" <<'NODE'
+  node - "$1" "${2:-}" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
-const root = process.argv[2];
+const [root, foreignDocs] = process.argv.slice(2);
+const foreign = Boolean(foreignDocs);
+const FOREIGN_URL = 'https://github.com/MKITConsulting/zensu-claude-code/blob/main/';
 const walk = (dir, rel, visit) => {
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
@@ -235,7 +252,7 @@ const walk = (dir, rel, visit) => {
   }
 };
 const docs = new Set();
-walk(path.join(root, 'docs'), '', (r) => docs.add(`docs/${r}`));
+walk(foreign ? foreignDocs : path.join(root, 'docs'), '', (r) => docs.add(`docs/${r}`));
 const files = [];
 walk(path.join(root, 'skills'), '', (r) => { if (r.endsWith('.md')) files.push(r); });
 const placeholders = [
@@ -255,6 +272,10 @@ for (const rel of files.sort()) {
     if (!docs.has(m[0])) continue;
     const before = text.slice(0, m.index);
     const where = `skills/${rel}:${before.split('\n').length}`;
+    if (foreign) {
+      if (!before.endsWith(FOREIGN_URL)) out.push(`doc-foreign\t${where}\t${m[0]}`);
+      continue;
+    }
     if (body) {
       if (!before.endsWith('${CLAUDE_PLUGIN_ROOT}/')) out.push(`doc-bare\t${where}\t${m[0]}`);
       continue;
@@ -273,10 +294,20 @@ NODE
 DOCS_REAL="$(docpath_scan "$PLUGIN_DIR")" || DOCS_REAL=""
 DOCS_SUMMARY="$(printf '%s\n' "$DOCS_REAL" | awk -F'\t' '$1 == "summary" { print $3 }')"
 DOCS_BAD="$(printf '%s\n' "$DOCS_REAL" | awk -F'\t' '$1 ~ /^doc-/ { printf "%s(%s %s) ", $2, $1, $3 }')"
-if [ -n "$DOCS_SUMMARY" ] && ! printf '%s\n' "$DOCS_SUMMARY" | grep -qE 'files=0|docs=0' && [ -z "$DOCS_BAD" ]; then
-  check "B8 every plugin doc a skill names is reached through the plugin root, never by a path relative to the user's working directory ($DOCS_SUMMARY)" PASS
+FOREIGN_SUMMARY=""
+for companion in "$PLUGIN_DIR"/plugins/*/; do
+  companion="${companion%/}"
+  [ -d "$companion/skills" ] || continue
+  label="$(basename "$companion")"
+  ONE="$(docpath_scan "$companion" "$PLUGIN_DIR/docs")" || ONE=""
+  FOREIGN_SUMMARY="$FOREIGN_SUMMARY $label: $(printf '%s\n' "$ONE" | awk -F'\t' '$1 == "summary" { print $3 }')"
+  DOCS_BAD="$DOCS_BAD$(printf '%s\n' "$ONE" | awk -F'\t' -v p="plugins/$label/" '$1 ~ /^doc-/ { printf "%s%s(%s %s) ", p, $2, $1, $3 }')"
+done
+if [ -n "$DOCS_SUMMARY" ] && ! printf '%s\n' "$DOCS_SUMMARY" | grep -qE 'files=0|docs=0' \
+  && [ -n "$FOREIGN_SUMMARY" ] && ! printf '%s\n' "$FOREIGN_SUMMARY" | grep -qE 'files=0|docs=0' && [ -z "$DOCS_BAD" ]; then
+  check "B8 every plugin doc a skill names is reached through the plugin root, never by a path relative to the user's working directory, and a companion skill names a Zensu doc only by its GitHub URL ($DOCS_SUMMARY;$FOREIGN_SUMMARY)" PASS
 else
-  check "B8 plugin docs named by a bare or unrendered path, or through a placeholder the router never defines — write \${CLAUDE_PLUGIN_ROOT}/docs/… in SKILL.md and the router's placeholder in a reference: ${DOCS_BAD:-scan read nothing ($DOCS_SUMMARY)}" FAIL
+  check "B8 plugin docs named by a bare or unrendered path, or through a placeholder the router never defines — write \${CLAUDE_PLUGIN_ROOT}/docs/… in SKILL.md and the router's placeholder in a reference, and a companion names a Zensu doc by https://github.com/MKITConsulting/zensu-claude-code/blob/main/docs/…: ${DOCS_BAD:-scan read nothing ($DOCS_SUMMARY;${FOREIGN_SUMMARY:- no companion})}" FAIL
 fi
 
 DFIX="$(mktemp -d "${TMPDIR:-/tmp}/zensu-skill-docpath.XXXXXX")" || DFIX=""
@@ -301,6 +332,19 @@ else
   else
     printf '%s\n' "$DGOT" | sed 's/^/      /'
     check "B9 doc-path fixture findings differ from the planted set" FAIL
+  fi
+  mkdir -p "$DFIX/companion/skills/gamma/references"
+  printf '%s\n' '---' 'name: gamma' '---' 'Read `docs/guide.md`.' \
+    'Read [the guide](https://github.com/MKITConsulting/zensu-claude-code/blob/main/docs/guide.md).' > "$DFIX/companion/skills/gamma/SKILL.md"
+  printf '%s\n' 'Read `{plugin_root}/docs/sub/deep.md`.' 'Glob the project'"'"'s `docs/*.md` and read `docs/features/x.md`.' \
+    > "$DFIX/companion/skills/gamma/references/notes.md"
+  FGOT="$(docpath_scan "$DFIX/companion" "$DFIX/docs")" || FGOT=""
+  FWANT=$'doc-foreign\tskills/gamma/SKILL.md:4\tdocs/guide.md\ndoc-foreign\tskills/gamma/references/notes.md:1\tdocs/sub/deep.md'
+  if [ "$(printf '%s\n' "$FGOT" | grep -E '^doc-')" = "$FWANT" ] && printf '%s\n' "$FGOT" | grep -qF $'summary\t-\tfiles=2 docs=2'; then
+    check "B9 a companion skill naming a Zensu doc by a bare path or through a placeholder is flagged; its GitHub URL and the project's own docs are not" PASS
+  else
+    printf '%s\n' "$FGOT" | sed 's/^/      /'
+    check "B9 companion doc-path fixture findings differ from the planted set" FAIL
   fi
   rm -rf "$DFIX"
 fi

@@ -23,8 +23,12 @@ It needs no Zensu account, no `zensu` CLI and not the Zensu plugin.
 
 ## Install
 
-The usage feed needs Claude Code 2.1.296 or newer. Installing this plugin from
-the marketplace was tested with Claude Code 2.1.317.
+The plugin needs Claude Code 2.1.296 or newer and `node` on the `PATH`. The
+receipt hook runs as `node …` and `/session-hub:session-trail` runs its script
+with `node`, so without it no receipt lands and the skill cannot run; Claude
+Code's native installer does not put `node` there. Installing this plugin from
+the marketplace was tested with Claude Code 2.1.296 and 2.1.317, and CI repeats
+that install with both versions on every pull request.
 
 ```bash
 claude plugin marketplace add MKITConsulting/zensu-claude-code
@@ -111,12 +115,22 @@ removes them. Each receipt hook answers only its own command, and both
 usage-feed copies write the same file under the same rule.
 
 This plugin has no write gate. While the Zensu plugin's opt-in source-write
-gate is on (`hooks.bashWriteGate: true`), Zensu answers a takeover by this
-plugin with one notice: the gate refuses a Bash write to a source file and
-every working-tree git command whose target lies outside the session's Session
-Control root. `/zensu:adopt-session --reanchor`, run from inside the worktree
-the takeover works in, moves that root there; it accepts only a registered
-worktree of the same repository, reports first and moves only on `--confirm`.
+gate is on (`hooks.bashWriteGate: true`), the gate refuses a Bash write to a
+source file and every working-tree git command whose target lies outside the
+session's Session Control root. `/zensu:adopt-session --reanchor`, run from
+inside the worktree the takeover works in, moves that root there; it accepts
+only a registered worktree of the same repository, reports first and moves only
+on `--confirm`. The takeover briefs and `show` state that rule themselves.
+
+A Zensu release that ships it adds one notice to a takeover command typed as
+`/session-hub:session-trail takeover …`, in its raw or command-tag form, while
+that gate is on. In a session without a usable Session Control record the notice
+says so and points at `/zensu:doctor` instead of the reanchor. A linked session
+started from a takeover brief, a takeover the model starts through the Skill
+tool and an older Zensu release get no notice, so a missing notice is no
+evidence that the gate is off: read `hooks.bashWriteGate` in
+`~/.zensu/config.json` and in the project's `.zensu/config.json`, whose value
+wins.
 
 ## Remove it
 
@@ -139,28 +153,44 @@ changelog lists only commits that touch it, so a commit that touches both
 appears in both.
 
 1. Actions → **Release Session Hub** → run with `mode: prepare` and a
-   `version_type`. The job requires the current version to be tagged already.
-   It bumps `plugins/session-hub/.claude-plugin/plugin.json` and the
-   `session-hub` marketplace entry, its `version` and its `ref`, through
+   `version_type`. The job requires the current version to be tagged already,
+   and it refuses unless the newest Zensu release `vX.Y.Z` ships this plugin's
+   usage feed and its contract byte for byte and the takeover notice
+   (`.github/scripts/session-hub-release-order.sh`). It bumps
+   `plugins/session-hub/.claude-plugin/plugin.json` and the `session-hub`
+   marketplace entry, its `version` and its `ref`, through
    `.github/scripts/bump-marketplace-entry.js`, and writes the new section of
-   this changelog with git-cliff from the commits that touched
+   this changelog with git-cliff 2.13.1 from the commits that touched
    `plugins/session-hub/` since the last companion tag. It then runs the release
    gate, `.github/scripts/session-hub-release-gate.sh`, against the release
    commit and pushes `release/session-hub-vX.Y.Z` with a link to open the pull
-   request. The gate runs `claude plugin validate` on the marketplace and on
-   this plugin with the pinned Claude Code, then the companion's suites.
+   request.
 2. Review and squash-merge that pull request.
-3. The merged commit starts the `publish` job. It runs the gate again on that
-   exact commit, creates the tag with
-   `claude plugin tag plugins/session-hub --push`, which refuses unless
-   `plugin.json` and the marketplace entry agree, and publishes an immutable
-   GitHub Release whose notes are the new changelog section. It does not mark
-   the release as the repository's latest, which stays the Zensu plugin's.
+3. The merged commit starts the `publish` job. It checks the release order and
+   the changelog section again, runs the gate on that exact commit and creates
+   the tag locally with `claude plugin tag plugins/session-hub`, which refuses
+   unless `plugin.json` and the marketplace entry agree. It checks Immutable
+   Releases once more and pushes the tag in a step of its own, so no token
+   reaches Claude Code. It then publishes an immutable GitHub Release whose
+   notes are the new changelog section, and checks that the locked tag still
+   names the released commit. It does not mark the release as the repository's
+   latest, which stays the Zensu plugin's.
 
-The first release, 1.0.0, needs no bump: run the workflow with `mode: publish`
-on `main`. A publication that failed is retried the same way. Tags are created
-only by this workflow.
+The gate runs `.github/scripts/session-hub-install-probe.sh` with the pinned
+Claude Code: it validates the marketplace and this plugin, installs this plugin
+through its `git-subdir` entry from a local clone into an isolated config,
+checks that the installed copy holds exactly the committed tree, lands a
+receipt from it and runs `/session-hub:session-trail list`. Then it runs the
+companion's suites. CI runs the same gate on every pull request, and the probe
+alone with Claude Code 2.1.296.
+
+Zensu releases first: while both plugins ship the usage feed, an installed Zensu
+older than this plugin would write it by an older rule. So the order is: merge
+the change, release Zensu, then run this workflow. The first release, 1.0.0,
+needs no bump: run the workflow with `mode: publish` on `main`. A tag that
+already exists at another commit is refused, and a publication that failed is
+retried the same way. Tags are created only by this workflow.
 
 ## License
 
-[FSL-1.1-Apache-2.0](../../LICENSE), as the rest of this repository.
+[FSL-1.1-Apache-2.0](LICENSE), as the rest of this repository.
