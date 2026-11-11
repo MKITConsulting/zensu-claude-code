@@ -293,10 +293,51 @@ introduced no one-sided defect in the duplicated span — every directive edit l
 mode-DEPENDENT clause (`run TDD instead` / `run the workflow instead`). Recorded so the next reader
 does not have to re-derive whether the condition was met: it was checked, and it was not.
 
-**Deliberately NOT changed — the QUESTION SHAPE, not the file:** `hooks/user-prompt-tdd-reminder.sh`
-keeps its yes/no question. Its TDD arms WERE edited by this chain (intent-judging, arm order, the
-untrusted-input scoping), which is why it is on the coupled-sites roster above. The route choice belongs to the moment a plan is approved; re-asking it on
-every prompt while no chain is active would be four options of noise.
+**The reminder offers Autopilot as a third option, and only while a person is present.**
+`hooks/user-prompt-tdd-reminder.sh` offers the Zensu workflow, `Autopilot — /zensu:autopilot` and
+`No — implement directly`, in that fixed order, in both heredocs and in its ask short line, while the
+`ZENSU HUMAN PRESENT:` field reads `yes`; under `unknown` or `no` it offers Yes and No only. It was
+yes/no until a session that began with a direct request never saw Autopilot: a Yes records `build`,
+and a recorded route skips the four-route plan question. A direct request is also Autopilot's
+cheapest entry, because chosen after a plan approval it costs a second approval round. The rules that
+keep it safe and small:
+
+- Only a person's answer selects Autopilot. The plan gate keeps Autopilot in its question under
+  `unknown`, because an `ExitPlanMode` approval stands before that question; the reminder answers any
+  prompt, so an `unknown` host that answers `AskUserQuestion` itself could pick the branch-pushing
+  route. The Autopilot text lives once, in the hook's `AUTOPILOT_*` values, and reaches both heredocs
+  through the `__ZENSU_AUTOPILOT_OPTION__` and `__ZENSU_AUTOPILOT_RULE__` placeholders, which
+  `autopilot_substitute` fills by bash parameter expansion before the route substitution. Those two
+  values must therefore carry no `"`, `\` or `&`.
+- A request that asks for Autopilot is neither preference: the reminder asks, or takes its no-human
+  default, and its Autopilot sentence says so over every other sentence, the closing yield sentence
+  included. That is this file's (C) property as one override sentence, because the request text also
+  reaches runs with nobody to answer.
+- A slash command that invokes `/zensu:autopilot`, `/zensu:pilot` or `/zensu:work` gets no reminder,
+  under any route field: those prompts chose their route, and `/zensu:work` is how
+  `harness/launcher.js` starts a headless work order. `zensu_prompt_slash_name` in
+  `hooks/lib/zensu-prompt-origin.sh` reads the name in the raw and the tag spelling behind any
+  leading reminders, and only the namespaced spelling matches, so `/zensu:autopilot-release` and
+  `/zensu:build` still get the reminder.
+- An Autopilot answer records nothing, so the question comes back on the next code request.
+- `/zensu:pilot` is not offered: it needs a feature already tracked in Zensu, which a direct
+  request does not name.
+- The order is fixed rather than ranked. Direct requests skew small, a ranking rule would cost
+  characters on every later prompt, and the outward-facing route stays out of the first slot. The
+  directive says "in this order", so the best-solution-first rule leaves the order alone.
+- The label is this file's option (1) literal, spelled once in the reminder's `AUTOPILOT_OPTION`.
+  `P1` in `tests/structure/test-tdd-vanilla-mode.sh` pins the plan gate's copy and `R13b` the
+  reminder's, and nothing compares the two, so a rename edits both by hand.
+
+`R13b` in `tests/structure/test-delivery-route.sh` holds the attended property: the three labels in
+order, the Autopilot sentences right after the No arm and nowhere else, exactly three
+`zensu:autopilot` mentions (label, dispatch, status line), one record command, and no
+`zensu:pilot`. `R13h` holds the `unknown` and `no` shapes, `R13g` the short line, `R13f` the decided
+lines, and in `tests/structure/test-tdd-reminder-hook.sh` `C15` the CI note, `C30c` the option
+against the human-present field and `C14b` the slash-command exit. With a person present the option
+inserts 686 characters into each full text and 473 into the ask short line, which every later `ask`
+prompt carries; without one the reminder inserts 254 and 208 for its never-run sentence.
+`.claude/rules/prompt-ledger.md` records the measured figures and budgets.
 
 **Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same plan gate
 against different harnesses and were NOT included in this change. A port owns more here than a

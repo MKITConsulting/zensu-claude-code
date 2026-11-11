@@ -13,6 +13,7 @@ const LOOK_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'LSP', 'Bash', 'WebSearch', 'W
 const IMPERATIVE = /\b(please (answer|confirm|choose|tell|pick|reply|let me know)|reply with|let me know|tell me (whether|if|how|which)|choose (one|between)|pick one|confirm (whether|which|that))\b/i;
 const YES_LABEL = /\bYes[\s—–:(|*,_-]+Zensu workflow\b/i;
 const NO_LABEL = /\bNo[\s—–:(|*,_-]+implement(\s+it)?\s+directly\b/i;
+const AUTOPILOT_LABEL = /\bAutopilot[\s—–:(|*,_`-]+\/?zensu:autopilot\b/i;
 const ROUTE_WORKFLOW = /\b(zensu workflow|zensu:build|tdd|review chain)\b/i;
 const ROUTE_DIRECT = /\b(implement(ing)?( it| this| the change)? directly|directly implement|direct implementation|edit(ing)?( it| this| the file| the code)? directly|skip(ping)? (the )?((zensu|build) )?(workflow|tdd|\/?zensu:build)|without (the )?((zensu|build) )?(workflow|tdd|\/?zensu:build))\b/i;
 const ROUTER_Q1 = /\b(already (built|written|implemented)|starting (fresh|from scratch)|(existing|current|working) code(base)?|code(base)? (has |is )?(already )?(been )?(built|written|implemented)|is (the|your) code(base)? built|(has|have) (it |any of it )?been (built|implemented))\b/i;
@@ -280,6 +281,7 @@ module.exports = {
   LOOK_TOOLS,
   YES_LABEL,
   NO_LABEL,
+  AUTOPILOT_LABEL,
   parse,
   pairs,
   resultOf,
