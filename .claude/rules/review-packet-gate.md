@@ -125,7 +125,11 @@ the latest launch of that agent in the round. Its report is the one `handbackRep
 `hooks/lib/background-review-v1.js` de-indents from a hand-back frame, or the `<result>` that
 `notificationReports` there reads from a completion notification and decodes (`&lt;`, `&gt;`,
 `&amp;`); `arrivedReports` joins the two, hand-backs first, with `reportSource` `handback-prompt`
-or `notification-prompt`. A notification counts only with status `completed` and a result that
+or `notification-prompt`. A reviewer spawned with the Agent `name` parameter hands back under that
+name, so the hand-back in the host's frame position names its launch through the background
+store's name bindings, which the delegate hands the gate as `--plugin-data` on `record` and
+`check` for a prompt event (`aliasesFor`, which asks `promptNameAliases` only when the gate reads a report); without the flag a name frame names no launch, as before
+(`.claude/rules/background-review-completion.md`). A notification counts only with status `completed` and a result that
 `deliveredReport` accepts: not empty, and neither the host's delivery pointer (`DELIVERY_STUB_RE`)
 nor its no-report text (`UNDELIVERED_STUB_RE`), which is what an auto-mode notification carries, so
 it never reads as a failed judge before or after the hand-back it points at. A second completion
@@ -228,15 +232,17 @@ of `docs/gates.md`; and `docs/review-chain.md`. The background path adds `launch
 `recordHandback`, `arrivedReports`, `deliveredReport`, `UNDELIVERED_STUB_RE`, `LAUNCHED`, `EVENTS`
 and the `consume` role in `hooks/lib/review-gate-v1.js`, which takes `AGENT_ID_RE`,
 `handbackReports` and `notificationReports` from `hooks/lib/background-review-v1.js`, so the frame
-and notification grammars and the agent-id pattern keep one owner; the `idle … retired=` arm of
+and notification grammars and the agent-id pattern keep one owner; `aliasesFor` there, which takes
+`promptNameAliases` from the same module and is fed by the delegate's two `--plugin-data`
+arguments, on the arrival branch's `record` call and on `review_gate_check`; the `idle … retired=` arm of
 `hooks/user-prompt-review-handback.sh`, which starts the delegate for a fan-out reviewer's
 hand-back or `<result>`-carrying notification; `review_gate_check` and the arrival
 branch's `record` call in `hooks/post-review-tdd-delegate.sh`, which runs before the
 `ARRIVAL_MATCH` exit, so a fan-out reviewer's hand-back is recorded while no consume record
 exists; `"reviewPacketGate":false` in `tests/structure/test-background-review.sh`, whose
 fixtures carry no canonical packet; and the panel bullet of §"Background review agents" in
-`docs/review-chain.md`. `RP24` to `RP26a`, `RP28a`, `RP28b`, `RP30`, `RP30a`, `RP31`, `RP32` and
-`RP32a` in
+`docs/review-chain.md`. `RP24` to `RP26a`, `RP28a`, `RP28b`, `RP30`, `RP30a`, `RP31`, `RP32`, `RP32a` and
+`RP33` to `RP33d` in
 `tests/structure/test-review-packet.sh` drive it through the shipped hooks, and `RP29` drives the
 hook's fallback for a gate that cannot check.
 
@@ -250,7 +256,9 @@ the record's `agentId` field and `consume` role ship with the record schema's fi
 Reading reports from completion notifications is `patch` on the same walk: no hook, matcher, key
 set, schema field, config key or attestation moves, the record's `reportSource` gains the value
 `notification-prompt`, which no validator reads, and the prompt hook still returns only
-`additionalContext`.
+`additionalContext`. Resolving a name frame through `--plugin-data` is `patch` on the same walk: the
+flag is optional, its one caller is the delegate in this tree, and the gate record keeps its fields,
+because a name-framed report is recorded under the launch's agent id.
 
 **Known gaps:**
 
