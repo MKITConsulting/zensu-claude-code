@@ -1592,9 +1592,9 @@ reads the newest record, never a claim in the run log.
   names the workflow, the job, the last pull-request run and who decided. Runs only on an older
   tree read `stale`, no test run reads `missing`, and every remedy renders `--scope scoped`.
   `--evidence-run --scope full` is refused in such a chain unless `--local` is passed. A chain
-  keeps the runner it began with, so a switch to CI in the middle of a chain never relaxes its
-  terminus; a chain that chose CI but closes locally prints `FULL SUITE — local runner | …` with
-  the reason. The same `required` and `advisory` modes apply.
+  keeps the runner it began with, and `--tdd-begin` prints it, so a switch to CI in the middle of
+  a chain never relaxes its terminus; a chain that chose CI but closes locally prints
+  `FULL SUITE — local runner | …` with the reason. The same `required` and `advisory` modes apply.
 - **Order.** A closed chain short-circuits first. A claimed ticket is then compared, read-only,
   with the session's consumed ticket; a wrong ticket is refused by the transition and never
   reaches the verdict. The verdict runs before the transition, and the pass line and the

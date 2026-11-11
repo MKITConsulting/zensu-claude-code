@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Session Hub companion plugin**: the `zensu` marketplace now also lists `session-hub@zensu`,
+  the Zensu Session Hub companion in `plugins/session-hub/`, with its own version,
+  `session-hub--vX.Y.Z` tags, changelog and release workflow (`release-session-hub.yml`). It
+  carries `/session-hub:session-trail`, the handover receipt as one Node hook and the usage-feed
+  module, and needs neither this plugin nor a Zensu account; its handover contract 2 names the
+  prefix `/session-hub:session-trail takeover `. This plugin's `/zensu:session-trail`, its receipt
+  hook and its usage-feed module are frozen until a later release removes them, and the skill's
+  description names the companion. CI runs the companion's release gate on every pull request
+  with a pinned Claude Code (`claude plugin validate` on the marketplace and the companion, an
+  install through its `git-subdir` entry into an isolated config, and its suites) and the install
+  alone with the oldest supported Claude Code, 2.1.296, and this changelog leaves out commits
+  that touch only `plugins/session-hub/`.
+- **Session Hub takeover notice**: a new advisory hook, `user-prompt-session-hub-takeover-notice.sh`,
+  answers the companion's takeover command, typed raw or in the command-tag form, with one notice
+  while `hooks.bashWriteGate` is on: the opt-in source-write gate refuses source writes and git
+  commands outside the session's Session Control root, and `/zensu:adopt-session --reanchor` moves
+  that root. In a session without a usable Session Control record the notice names
+  `/zensu:doctor` instead. On every other prompt, and with the gate off, it prints nothing; a
+  linked session started from a takeover brief gets no notice, so the companion's briefs state
+  the rule themselves.
+
+## [0.37.0] - 2026-11-10
+
+### Added
+
+- **ai-work**: Include explicit review context and source links (#556)
+- **hooks**: Route every agent-runnable zensu write through a skill (#566)
+
+### Changed
+
+- **hooks**: Read zensu-cli words through one shared module (#557)
+- Prepare the session-hub plugin split (#577)
+- **verify-feature**: Report new playwright-cli releases nightly (#584)
+- **changelog**: List #572 to #575 in the 0.36.0 section (#578)
+
+### Fixed
+
+- **vcs**: Settle the three GitLab driver bugs the live tier found (#587)
+- **verify-feature**: Measure the consent gate against playwright-cli 0.1.24 (#592)
+- **hooks**: State the Zensu workflow's cost and run a TDD request strict (#581)
+- **hooks**: Run the bound max-rounds closing suite in the chain's work tree (#591)
+- **session-trail**: Hold linked starts behind refused ledger records and an untrusted presets folder (#589)
+- **hooks**: Print the banner's zensu-cli floor reason and commands from the version module (#588)
+- **session-trail**: Hold linked-session starts when a store read fails (#582)
+- **hooks**: Align the zensu-cli upgrade command and floor wording across surfaces (#585)
+- **usage-feed**: Write a limit reading only once it is proven new (#576)
+
+### Added
+
 - **`/zensu:change`**: a new skill makes one change a user asks for in a tracked product: a new
   feature, subfeature or revision, a roadmap, milestone or roadmap entry, a tier or tier
   assignment, a journey or journey step, a mock, a link, a classification, a deprecation, split,
@@ -33,26 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   note: `zensu wiki images upload` is now a gated mutation (`upload_wiki_image`), which the
   released gate did not know and let through; run it inside `/zensu:change`.
   `zensu wiki images policy` stays a read.
-- **Session Hub companion plugin**: the `zensu` marketplace now also lists `session-hub@zensu`,
-  the Zensu Session Hub companion in `plugins/session-hub/`, with its own version,
-  `session-hub--vX.Y.Z` tags, changelog and release workflow (`release-session-hub.yml`). It
-  carries `/session-hub:session-trail`, the handover receipt as one Node hook and the usage-feed
-  module, and needs neither this plugin nor a Zensu account; its handover contract 2 names the
-  prefix `/session-hub:session-trail takeover `. This plugin's `/zensu:session-trail`, its receipt
-  hook and its usage-feed module are frozen until a later release removes them, and the skill's
-  description names the companion. CI runs the companion's release gate on every pull request
-  with a pinned Claude Code (`claude plugin validate` on the marketplace and the companion, an
-  install through its `git-subdir` entry into an isolated config, and its suites) and the install
-  alone with the oldest supported Claude Code, 2.1.296, and this changelog leaves out commits
-  that touch only `plugins/session-hub/`.
-- **Session Hub takeover notice**: a new advisory hook, `user-prompt-session-hub-takeover-notice.sh`,
-  answers the companion's takeover command, typed raw or in the command-tag form, with one notice
-  while `hooks.bashWriteGate` is on: the opt-in source-write gate refuses source writes and git
-  commands outside the session's Session Control root, and `/zensu:adopt-session --reanchor` moves
-  that root. In a session without a usable Session Control record the notice names
-  `/zensu:doctor` instead. On every other prompt, and with the gate off, it prints nothing; a
-  linked session started from a takeover brief gets no notice, so the companion's briefs state
-  the rule themselves.
 
 ### Upgrade notes
 

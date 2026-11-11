@@ -72,6 +72,43 @@ for verb in '--local --session' '--auto --session' '--auto --repo'; do
 done
 check "C2 the skill renders every helper verb" "$SKILL_OK"
 
+c28_holds() {
+  local src="$1" arm end snap pat line
+  arm="$(grep -nF 'if [ "$tdd_begin_rc" -eq 0 ]' "$src" 2>/dev/null | head -1 | cut -d: -f1)"
+  [ -n "$arm" ] || return 1
+  end="$(awk -v s="$arm" 'NR>s && /^        else$/{print NR; exit}' "$src")"
+  [ -n "$end" ] || return 1
+  snap="$(grep -nF 'zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot' "$src" 2>/dev/null | head -1 | cut -d: -f1)"
+  [ -n "$snap" ] && [ "$snap" -gt "$arm" ] && [ "$snap" -lt "$end" ] || return 1
+  for pat in 'zensu_external_review_wait_reset "$session_val"' '_zensu_review_gate_reset "--tdd-begin" "$session_val"' 'zensu_stop_background_wait_reset "$session_val"'; do
+    line="$(awk -v s="$arm" -v e="$end" -v p="$pat" 'NR>s && NR<e && index($0, p){print NR; exit}' "$src")"
+    [ -n "$line" ] && [ "$line" -lt "$snap" ] || return 1
+  done
+}
+if c28_holds "$LOG"; then
+  check "C28 the --tdd-begin snapshot, which may wait on the network, runs after the three local resets of the success arm" PASS
+else
+  check "C28 the --tdd-begin snapshot, which may wait on the network, runs after the three local resets of the success arm" FAIL
+fi
+C28_MUT="$WORK/c28-mutant.sh"
+node -e '
+const fs = require("fs");
+const [src, out] = process.argv.slice(1);
+const lines = fs.readFileSync(src, "utf8").split("\n");
+const arm = lines.findIndex((l) => l.includes("if [ \"$tdd_begin_rc\" -eq 0 ]"));
+const start = lines.findIndex((l, i) => i > arm && l.includes("zensu_full_suite_policy_node \"zensu-log.sh --tdd-begin\" snapshot"));
+const reset = lines.findIndex((l, i) => i > arm && l.includes("zensu_external_review_wait_reset \"$session_val\""));
+if (arm < 0 || start < 0 || reset < 0 || reset > start) process.exit(1);
+const block = lines.splice(start, 4);
+lines.splice(reset, 0, ...block);
+fs.writeFileSync(out, lines.join("\n"));
+' "$LOG" "$C28_MUT" 2>/dev/null
+if [ -s "$C28_MUT" ] && grep -qF 'zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot' "$C28_MUT" && ! c28_holds "$C28_MUT"; then
+  check "C28-mut the same predicate rejects a snapshot call moved above the resets" PASS
+else
+  check "C28-mut the same predicate rejects a snapshot call moved above the resets" FAIL
+fi
+
 unset CI GITHUB_ACTIONS GITLAB_CI TF_BUILD BUILDKITE ZENSU_VCS_REMOTE CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_FULL_SUITE_GATE ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE 2>/dev/null || true
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export ZENSU_TEST_PLUGIN_DATA="$WORK/plugin-data"
@@ -260,11 +297,19 @@ if arm "fsci-session"; then
   if node -e '
     const s = require(process.argv[1]);
     process.exit(s.runner === "ci" && s.decidedBy === "session marker" ? 0 : 1);
-  ' "$SNAPSHOT" 2>/dev/null && ! grep -q 'FULL SUITE SNAPSHOT UNAVAILABLE' "$WORK/begin.err"; then
+  ' "$SNAPSHOT" 2>/dev/null && ! grep -q 'FULL SUITE SNAPSHOT UNAVAILABLE' "$WORK/begin.err" \
+    && grep -qx 'full suite: ci | this chain began with the CI runner: \.github/workflows/ci\.yml, job "test" runs its full suite when a pull request against main is opened or updated | decided by: session marker' "$WORK/begin.out"; then
     check "C9 --tdd-begin records the chain's CI runner in a snapshot" PASS
   else
     check "C9 --tdd-begin records the chain's CI runner in a snapshot" FAIL
     cat "$WORK/begin.err"
+  fi
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  if printf '%s\n' "$CHAIN_OUT" | head -n 1 | grep -q '^full suite: ci | .* | decided by: session marker$'; then
+    check "C27b --full-suite-policy --chain answers ci for a chain that began with the CI runner" PASS
+  else
+    check "C27b --full-suite-policy --chain answers ci for a chain that began with the CI runner" FAIL
+    printf '%s\n' "$CHAIN_OUT"
   fi
 
   DIRECTIVE="$(directive)"
@@ -316,10 +361,21 @@ fi
 
 bind "fsci-upgrade" "$PROJ" || { check "C14 bind the upgrade session" FAIL; finish; exit 1; }
 if arm "fsci-upgrade"; then
+  BEGIN_LINES="$(grep -c '' "$WORK/begin.out")"
+  BEGIN_MODE="$(grep -cxE 'mode: (vanilla|strict)' "$WORK/begin.out")"
   bash "$HELPER" --ci --session >/dev/null 2>&1
+  CHAIN_OUT="$(bash "$LOG" --full-suite-policy --chain 2>&1)"
+  POLICY_OUT="$(bash "$LOG" --full-suite-policy 2>&1)"
+  if [ "$CHAIN_OUT" = 'full suite: local | this chain began with the local runner; a switch to CI takes effect with the next chain | decided by: chain begin' ] \
+    && printf '%s\n' "$POLICY_OUT" | grep -q '^full suite: ci | '; then
+    check "C27 --full-suite-policy --chain answers with the runner the chain began with, not with the cache" PASS
+  else
+    check "C27 --full-suite-policy --chain answers with the runner the chain began with, not with the cache" FAIL
+    printf '%s\n' "$CHAIN_OUT" "$POLICY_OUT"
+  fi
   bash "$LOG" --evidence-run --scope scoped --cmd 'echo affected-ok' >/dev/null 2>&1
   chain_done; RC=$?
-  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] && [ "$BEGIN_LINES" = 1 ] && [ "$BEGIN_MODE" = 1 ] \
     && grep -qF 'FULL SUITE — local runner | this chain began with the local runner; a switch to CI takes effect with the next chain | decided by: chain begin' "$WORK/err" \
     && grep -q '^FULL SUITE — missing | ' "$WORK/err"; then
     check "C14 a switch to CI in the middle of a chain never relaxes that chain's terminus" PASS
@@ -409,6 +465,93 @@ if [ "$RC" -eq 2 ] && printf '%s\n' "$OUT" | grep -qF 'refusing to record CI ful
 else
   check "C21 --ci --repo refuses without a verified pipeline and records nothing (rc=$RC)" FAIL
   printf '%s\n' "$OUT"
+fi
+
+snapshot_is() {
+  node -e '
+    const s = require(process.argv[1]);
+    process.exit(s.runner === process.argv[2] && s.decidedBy === process.argv[3] ? 0 : 1);
+  ' "$CLAUDE_PLUGIN_DATA/ci-contract/v1/snapshots/${ZENSU_SESSION_KEY:-missing}.json" "$1" "$2" 2>/dev/null
+}
+
+call_count() {
+  if [ -f "$CALLS" ]; then wc -l < "$CALLS" | tr -d ' '; else echo 0; fi
+}
+
+CI_BEGIN_LINE='full suite: ci | this chain began with the CI runner: .github/workflows/ci.yml, job "test" runs its full suite when a pull request against main is opened or updated | decided by: this clone'
+WT_B=""
+if git -C "$PROJ" worktree add -q "$WORK/wt-b" -b wt-b >/dev/null 2>&1; then
+  WT_B="$(cd -P "$WORK/wt-b" 2>/dev/null && pwd -P)"
+fi
+if [ -n "$WT_B" ] \
+  && printf '# the workflow of worktree b\n' >> "$WT_B/.github/workflows/ci.yml" \
+  && git -C "$WT_B" add -A && git -C "$WT_B" -c commit.gpgsign=false commit -qm 'worktree b workflow' \
+  && git -C "$WT_B" checkout -q -b fsci-older-ci \
+  && printf '# an older branch\n' >> "$WT_B/.github/workflows/ci.yml" \
+  && git -C "$WT_B" add -A && git -C "$WT_B" -c commit.gpgsign=false commit -qm 'older workflow' \
+  && git -C "$WT_B" checkout -q wt-b; then
+  bind "fsci-wt-a" "$PROJ" || { check "C24 bind worktree A" FAIL; finish; exit 1; }
+  bash "$LOG" --full-suite-policy --refresh >/dev/null 2>&1
+  bash "$HELPER" --ci --repo >/dev/null 2>&1; RC_REPO=$?
+  bind "fsci-wt-b" "$WT_B" || { check "C24 bind worktree B" FAIL; finish; exit 1; }
+  BEFORE_B="$(call_count)"
+  OUT_B="$(bash "$LOG" --full-suite-policy --refresh 2>&1)"
+  AFTER_B="$(call_count)"
+  bind "fsci-wt-a-begin" "$PROJ" || { check "C24 bind worktree A again" FAIL; finish; exit 1; }
+  OUT_A="$(bash "$LOG" --full-suite-policy 2>&1)"
+  bash "$LOG" --tdd-begin >"$WORK/begin.out" 2>"$WORK/begin.err"; RC_BEGIN=$?
+  if [ "$RC_REPO" -eq 0 ] && [ "$RC_BEGIN" -eq 0 ] && [ "$AFTER_B" -gt "$BEFORE_B" ] \
+    && printf '%s\n' "$OUT_B" | grep -q '^full suite: ci | .* | decided by: this clone$' \
+    && printf '%s\n' "$OUT_A" | grep -q '^full suite: ci | .* | decided by: this clone$' \
+    && snapshot_is ci 'this clone' \
+    && grep -qxF "$CI_BEGIN_LINE" "$WORK/begin.out" \
+    && ! grep -q 'FULL SUITE SNAPSHOT UNAVAILABLE' "$WORK/begin.err"; then
+    check "C24 a worktree whose workflow file differs verifies its own version and leaves the other worktree's proof and snapshot ci" PASS
+  else
+    check "C24 a worktree whose workflow file differs verifies its own version and leaves the other worktree's proof and snapshot ci (repo=$RC_REPO begin=$RC_BEGIN calls=$BEFORE_B/$AFTER_B)" FAIL
+    printf '%s\n' "$OUT_B" "$OUT_A"
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+
+  cp "$WORK/bin/fixture.json" "$WORK/fixture.healthy.json"
+  bind "fsci-switch-fail" "$WT_B" || { check "C25 bind the switching session" FAIL; finish; exit 1; }
+  OUT="$(bash "$LOG" --full-suite-policy --refresh 2>&1)"
+  git -C "$WT_B" checkout -q fsci-older-ci
+  printf '{"repos/acme/app":{"__fail":"error connecting to api.github.com"}}\n' > "$WORK/bin/fixture.json"
+  bash "$LOG" --tdd-begin >"$WORK/begin.out" 2>"$WORK/begin.err"; RC_BEGIN=$?
+  cp "$WORK/fixture.healthy.json" "$WORK/bin/fixture.json"
+  if [ "$RC_BEGIN" -eq 0 ] \
+    && printf '%s\n' "$OUT" | grep -q '^full suite: ci | .* | decided by: this clone$' \
+    && snapshot_is local 'this clone' \
+    && grep -qxF 'full suite: local | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: gh api repos/acme/app failed: error connecting to api.github.com | decided by: this clone | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before' "$WORK/begin.out"; then
+    check "C25 a branch switch after the refresh whose new workflow cannot be verified at --tdd-begin snapshots local and prints why" PASS
+  else
+    check "C25 a branch switch after the refresh whose new workflow cannot be verified at --tdd-begin snapshots local and prints why (begin=$RC_BEGIN)" FAIL
+    printf '%s\n' "$OUT"
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+
+  git -C "$WT_B" checkout -q wt-b
+  bind "fsci-switch-ok" "$WT_B" || { check "C26 bind the switching session" FAIL; finish; exit 1; }
+  OUT="$(bash "$LOG" --full-suite-policy --refresh 2>&1)"
+  git -C "$WT_B" checkout -q fsci-older-ci
+  BEFORE_BEGIN="$(call_count)"
+  bash "$LOG" --tdd-begin >"$WORK/begin.out" 2>"$WORK/begin.err"; RC_BEGIN=$?
+  AFTER_BEGIN="$(call_count)"
+  if [ "$RC_BEGIN" -eq 0 ] && [ "$AFTER_BEGIN" -gt "$BEFORE_BEGIN" ] \
+    && printf '%s\n' "$OUT" | grep -q '^full suite: ci | .* | decided by: this clone$' \
+    && snapshot_is ci 'this clone' \
+    && grep -qxF "$CI_BEGIN_LINE" "$WORK/begin.out"; then
+    check "C26 a branch switch after the refresh refreshes once at --tdd-begin and keeps the chain ci" PASS
+  else
+    check "C26 a branch switch after the refresh refreshes once at --tdd-begin and keeps the chain ci (begin=$RC_BEGIN calls=$BEFORE_BEGIN/$AFTER_BEGIN)" FAIL
+    printf '%s\n' "$OUT"
+    cat "$WORK/begin.out" "$WORK/begin.err"
+  fi
+  git -C "$WT_B" checkout -q wt-b
+  bash "$HELPER" --auto --repo >/dev/null 2>&1
+else
+  check "C24 prepare a second worktree with another workflow file" FAIL
 fi
 
 max_rounds() {
