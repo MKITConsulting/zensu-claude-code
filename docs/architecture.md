@@ -188,9 +188,9 @@ ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
 typed request, a background-task notification, a subagent hand-back, a shell input behind a
 system reminder, and a CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
 each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Five hooks emit text on an ordinary turn:
-`user-prompt-tdd-reminder.sh` (about 5.2 K characters strict and 5.7 K vanilla plus the paths of
+`user-prompt-tdd-reminder.sh` (about 6.0 K characters strict and 6.3 K vanilla plus the paths of
 the helper command it renders, on the first typed request or slash command with arguments of a
-generation while no chain is armed, about 2.7 K on later ones, a decided line of about 1.4 to 1.5 K on
+generation while no chain is armed, about 3.3 K on later ones, a decided line of about 1.5 to 1.6 K on
 every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,332 characters, then 1,303 later in the generation, only when such
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
 `user-prompt-context-auto-load.sh` (on a typed task prompt that names no feature key, the
@@ -213,13 +213,13 @@ pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **12.6 K characters on the first prompt of a generation and 6.8 K on every later
+costs about **13.2 K characters on the first prompt of a generation and 7.4 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
 shell input about 4.2 K, then 2.5 K (4.6 K, then 2.8 K for a CI-monitor event). The typed figures
 carry the 320-character context notice that the suite's failing CLI stub produces; a search that
-returns five full candidates raises them to about 22.0 K and 16.1 K. The generation also receives this
-hook's 1,938-character block once at `SessionStart`, so its first turn costs about 14.6 K in all,
-2.1 K more than one turn did before the ledger, 0.3 K of it for the context notice, which that turn
+returns five full candidates raises them to about 22.5 K and 16.8 K. The generation also receives this
+hook's 1,938-character block once at `SessionStart`, so its first turn costs about 15.1 K in all,
+2.6 K more than one turn did before the ledger, 0.3 K of it for the context notice, which that turn
 did not carry; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather
