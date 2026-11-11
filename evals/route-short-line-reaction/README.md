@@ -135,7 +135,11 @@ file, is `edit-outside`. `first-decisive.js` names the part and the code that de
 `other:` action and lists the calls answered `RETRY` before it. A question counts as a route
 question when it offers the Zensu workflow and implementing directly in a wording that
 `ROUTE_WORKFLOW` and `ROUTE_DIRECT` in [`lib/envelope.js`](lib/envelope.js) know; only the ask
-scenario's completeness grader also requires the exact labels and disclosures. A question counts as
+scenario's completeness grader also requires the exact labels and disclosures. Its
+`autopilot_option` var says whether the injected line offers Autopilot: `offered` also requires the
+Autopilot label, the branch push and pull request and the gh or glab CLI, and `absent` fails a
+question that offers Autopilot anyway. The ask scenario sets `absent`, because the capture runs with
+no host entrypoint, so the line's human-present field reads `unknown`. A question counts as
 the triage when its three topics stand in sentences that ask, or in list items under a lead-in that
 asks; a statement before a dash, colon or semicolon in such a sentence is left out, but a guess
 joined to a question by a comma still counts. A question asked through the tool counts as `ask` only

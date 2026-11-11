@@ -36,8 +36,8 @@ classified as a typed prompt before and now gets what a task notification gets.
 The table is the measurement taken when the ledger landed. The texts have grown since: with the
 zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
 prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
-reminder's executor-plan clause and the zen-mode safety-warning sentence the same
-suite measures 12,439 and 6,829 for a typed prompt, 4,194 and 2,366 for a task notification, a
+reminder's executor-plan clause, the zen-mode safety-warning sentence and the reminder's Autopilot
+option the same suite measures 13,178 and 7,322 for a typed prompt, 4,194 and 2,366 for a task notification, a
 `!` input or a subagent hand-back, and 4,558 and 2,730 for a CI-monitor event.
 
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
@@ -52,8 +52,10 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
 ## Which contract takes which path
 
 - **`user-prompt-tdd-reminder.sh`, route `ask`:** the strict or the vanilla heredoc on the first
-  typed prompt of a generation, then a short line with the code definition, the flow it offers and
-  its `AskUserQuestion` labels, the full consent disclosure, the rendered record command, the
+  typed prompt of a generation, then a short line with the code definition, the flow it offers,
+  its `AskUserQuestion` labels in order, with a person present the Autopilot description, its
+  record-nothing dispatch and its precedence, without one the sentence that the reminder never runs
+  it, the full consent disclosure, the rendered record command, the
   declined-call line (say in one line that nothing was recorded and that the question will come
   back, then continue), both status lines, never recording `--direct`, every skip case (not a code
   change, Plan mode or an active chain, an explicit preference the user typed, which decides this
@@ -71,7 +73,7 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   exactly one `TDD-MODE: strict` line and gives it its own status line
   (`.claude/rules/tdd-mode-precedence.md`). Measured with the config source: 1,569 characters
   for `build` and 1,525 for `direct` in vanilla mode, 1,539 and 1,509 in strict mode, against
-  5,597 for the full vanilla text.
+  6,308 for the full vanilla text.
 
   **Three budgets rose with that sentence, and only those three.** The decided line's cap in
   `U10` and `R13f` went from 1,500 to 1,575, the ask short line's from 2,750 to 2,850 (the budget
@@ -82,6 +84,18 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   listing carries, left both decided lines, and the full texts lost the duplicated rationale and
   the vanilla Yes arm's restatement of the mode, so the vanilla full text fell from 5,799 to 5,597.
   The strict shapes carry the sentence too and stay under the same caps.
+
+  **The Autopilot option raised four budgets.** The reminder's first-prompt row went from 5,870 to
+  6,320 and the first typed total from 12,720 to 13,200; the ask short line's cap went from 2,850
+  to 3,340 (the budget suite's repeat row and `R13g`) and the typed repeat total from 6,850 to
+  7,345. The suite measures 6,308 for the vanilla full text, 5,991 for the strict one, 3,328 for
+  the vanilla short line and 13,178 and 7,322 for the two typed totals. Its `run_hook` pins
+  `CLAUDE_CODE_ENTRYPOINT=cli`, so the human-present field reads `yes` and the suite measures the
+  attended shapes, the longest ones, on every host; before the pin a CI run measured the `unknown`
+  field and a desktop run the `yes` one. With a person present the option inserts 686 characters
+  into each full text and 473 into the short line, and the short line must carry it alone, so no
+  trim offsets it; the short line already dropped the restated list of what never selects
+  Autopilot, which the full text keeps (`.claude/rules/plan-approval-delivery-route.md`).
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,

@@ -93,7 +93,8 @@ already rely on:
 - **Claude asks which delivery route to take.** After you approve a plan, Zensu
   has Claude ask whether to use Autopilot, the Zensu workflow or Pilot, or to
   implement directly; on a direct code request it asks whether to use the Zensu
-  workflow. A plan that names its own executor, such as another plugin's
+  workflow or Autopilot, or to implement directly, and leaves Autopilot out when
+  no one is there to answer. A plan that names its own executor, such as another plugin's
   `superpowers:executing-plans`, gets a short notice instead: Claude carries it
   out with that skill and names `/zensu:build` as the way to use the Zensu
   workflow. `/zensu:delivery-route` or
