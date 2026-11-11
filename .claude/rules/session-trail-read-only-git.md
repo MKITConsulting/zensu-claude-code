@@ -23,7 +23,7 @@ and the other discovery and config variables of its `GIT_ENV_SCRUB` and sets
 `rev-parse --git-common-dir` answers that repository from any folder, one in no repository
 included, so every repository verdict of `takeover` would read the same repository. That library
 owns the list for `trail.mjs` and `worktree-keep-v1.js` and requires no other file, so the Session
-Hub companion vendors it byte for byte (`plugins/session-hub/hooks/lib/`, held by
+Hub companion, `session-hub@zensu` with `/session-hub:session-trail`, vendors it byte for byte (`plugins/session-hub/hooks/lib/`, held by
 `test-session-hub-plugin.sh`). It is not the only spelling. Apart from `_tc_git`'s
 unset list in `hooks/lib/zensu-log.sh`, which the worktree-keep unit suite pins against it, no
 check holds these copies to it: `GIT_SCRUBBED_ENV` in `evidence-run-v1.js` and `GIT_ENV_SCRUB` in

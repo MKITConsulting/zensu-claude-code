@@ -13,6 +13,10 @@ paths:
 
 # Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)
 
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
+
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 **A SECOND renderer of this same advice lives in `.claude/rules/worktree-keep.md`**, and the two

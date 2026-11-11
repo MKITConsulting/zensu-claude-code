@@ -16,7 +16,8 @@ writes each running engine's latest rate-limit reading into a directory the Hub 
 account that works in Claude Code keeps current limits without that press. The popover read
 stays the Hub's default, and the Hub works without the plugin.
 
-**Two copies, one file.** The `session-hub@zensu` companion ships the module and its contract
+**Two copies, one file.** The `session-hub@zensu` companion, which carries
+`/session-hub:session-trail`, ships the module and its contract
 as `plugins/session-hub/hooks/usage-feed.ts` and `usage-feed-contract.json`, byte-identical to
 the files here: `test-session-hub-plugin.sh` H4 and `test-session-hub-usage-feed.sh` U9b fail on
 any byte that differs, and U9b is also what lets `tests/mods/usage-feed.test.ts`, which runs

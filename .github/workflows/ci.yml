@@ -200,7 +200,7 @@ jobs:
         with:
           node-version: 22
       - name: Install the pinned Claude Code
-        run: npm install -g --no-fund --no-audit @anthropic-ai/claude-code@2.1.317
+        run: bash .github/scripts/session-hub-install-claude-code.sh .github/tools/claude-code
       - name: Run the companion release gate
         run: bash .github/scripts/session-hub-release-gate.sh
 
@@ -218,6 +218,6 @@ jobs:
         with:
           node-version: 22
       - name: Install the oldest supported Claude Code
-        run: npm install -g --no-fund --no-audit @anthropic-ai/claude-code@2.1.296
+        run: bash .github/scripts/session-hub-install-claude-code.sh .github/tools/claude-code-floor
       - name: Validate and install the companion through its git-subdir entry
-        run: bash .github/scripts/session-hub-install-probe.sh 2.1.296
+        run: bash .github/scripts/session-hub-install-probe.sh .github/tools/claude-code-floor

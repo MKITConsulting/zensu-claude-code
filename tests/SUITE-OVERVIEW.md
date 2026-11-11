@@ -365,7 +365,9 @@ generated regions of this file (`unit-registry`), the companion plugin's file al
 manifest and hooks registration, the byte identity of its vendored files, the absence of any
 load outside its tree or by a computed path, its keep key against Session Control's, a copy of
 the tree run outside the repository, its linked-session module against PLM's, and its release
-workflow's tag discipline, Claude Code pins and release-order script (`session-hub-plugin`), and
+workflow's tag discipline and Claude Code pins, with its release-order, release-target,
+version, supersede and Immutable Releases scripts and its install probe each run on a scratch
+fixture (`session-hub-plugin`), and
 the runner's own contract.
 `workflow-dispatch-inputs`, `clock-shift` and `playwright-cli-drift` need `node_modules` →
 `BLOCK` without `npm ci`.
@@ -492,7 +494,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/session-adopt-report-v1.test.js` | 63 | – | `test-versioned-plugin-upgrade.sh` | The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows. |
 | `structure/session-auto-adopt-v1.test.js` | 44 | – | `test-versioned-plugin-upgrade.sh` | Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, and the lock. |
 | `structure/session-control-lineage.test.js` | 13 | – | `test-versioned-plugin-upgrade.sh` | The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root. |
-| `structure/session-hub-receipt-v1.test.js` | 17 | – | `test-session-hub-receipt.sh` | The companion's Session Hub takeover receipt entry: the command token, the refused prompt shapes, the receipt fields, the config switch, the principal and plugin-root guards and the hook entry. |
+| `structure/session-hub-receipt-v1.test.js` | 21 | – | `test-session-hub-receipt.sh` | The companion's Session Hub takeover receipt entry: the command token, the refused prompt shapes, the receipt fields, the config switch, the principal and plugin-root guards, the hook entry, the home it writes under, and its exit 0 with no output when the home lookup, the clock or the lineage module fails. |
 | `structure/session-lineage-v1.test.js` | 78 | root 2, win32 17 | `test-session-trail-lineage.sh` | The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk. |
 | `structure/session-reanchor-v1.test.js` | 68 | win32 1 | `test-session-reanchor.sh` | Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason. |
 | `structure/state-path-safety-v1.test.js` | 13 | root 1, win32 2 | `test-tdd-state-path-safety.sh` | The state path walk the tdd-phase lease processes and _tdd_paths_safe share: link, kind and link-count refusals, unreadable components, trusted-root and fallback anchors, and malformed requests. |

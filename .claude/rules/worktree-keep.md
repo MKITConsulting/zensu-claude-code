@@ -28,7 +28,7 @@ registry writes — and nothing here changes it.
 
 **The module has a second home.** `plugins/session-hub/hooks/lib/worktree-keep-v1.js` and
 `git-environment-v1.js` beside it are byte-identical copies, vendored so the companion's
-`release` verb can end a keep anchor and remove its marker without loading PLM;
+`/session-hub:session-trail release` can end a keep anchor and remove its marker without loading PLM;
 `test-session-hub-plugin.sh` H4 fails on any byte that differs, so an edit to either file here
 copies it into the companion in the same commit. The keep hooks themselves stay in PLM, and the
 companion computes the keep key with core's domain-separated hash instead of requiring core (H7).

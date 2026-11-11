@@ -39,6 +39,16 @@ Skip the first line when the `zensu` marketplace is already added.
 `claude plugin install` installs for your user by default, so the plugin is
 there in every project the Session Hub moves a session into.
 
+The install works once the plugin's first release, `session-hub--v1.0.0`, is
+published, which follows the Zensu release that ships this plugin's marketplace
+entry. Until then the catalog names a tag that does not exist yet, and
+`claude plugin install session-hub@zensu` fails.
+
+Moving a session through this plugin also needs a Session Hub release that reads
+handover contract 2, the contract this plugin declares. Until that release, the
+Session Hub moves sessions through the Zensu plugin's own `/zensu:session-trail`,
+as before.
+
 Update later with:
 
 ```bash
@@ -80,10 +90,12 @@ reads the same key for its own receipt hook.
 ### Usage feed
 
 The module writes only while the directory
-`<config root>/zensu/session-hub/v1/usage/` already exists, where the config
-root is `CLAUDE_CONFIG_DIR` when that names an absolute path and `~/.claude`
-otherwise. The Session Hub creates that directory; the module never creates it,
-so on a machine without the Session Hub nothing is written.
+`<config root>/zensu/session-hub/v1/usage/` already exists as a directory and
+not as a link. The config root is `CLAUDE_CONFIG_DIR`, trimmed, when it names an
+absolute path, and `$HOME/.claude` when `CLAUDE_CONFIG_DIR` is unset or empty; a
+relative `CLAUDE_CONFIG_DIR` writes nothing and never falls back to `$HOME`. The
+Session Hub creates that directory; the module never creates it, so on a machine
+without the Session Hub nothing is written.
 
 While the directory exists, the module writes one file per Claude Code session,
 `<session id>.json`, when Claude Code measures the session and the reading is
@@ -111,13 +123,17 @@ popover as it does without the plugin.
 Both plugins can be enabled at once. The Zensu plugin still carries its own
 copy of `/zensu:session-trail`, a receipt hook for `/zensu:session-trail
 takeover …` and the same usage-feed module, frozen until a later Zensu release
-removes them. Each receipt hook answers only its own command, and both
-usage-feed copies write the same file under the same rule.
+removes them. Each receipt hook answers only its own command. Both usage-feed
+copies write the same file, `<session id>.json`, and the last write wins. They
+follow the same rule once the installed Zensu plugin is the release that ships
+this plugin's entry or a newer one; an older installed Zensu plugin writes the
+file by its older rule until you update it.
 
 This plugin has no write gate. While the Zensu plugin's opt-in source-write
 gate is on (`hooks.bashWriteGate: true`), the gate refuses a Bash write to a
 source file and every working-tree git command whose target lies outside the
-session's Session Control root. `/zensu:adopt-session --reanchor`, run from
+session's Session Control root; inside that root it still refuses a raw Bash
+overwrite of a git-tracked source file. `/zensu:adopt-session --reanchor`, run from
 inside the worktree the takeover works in, moves that root there; it accepts
 only a registered worktree of the same repository, reports first and moves only
 on `--confirm`. The takeover briefs and `show` state that rule themselves.
@@ -152,44 +168,77 @@ leaves out a commit that touches only `plugins/session-hub/`, and this
 changelog lists only commits that touch it, so a commit that touches both
 appears in both.
 
+Every job that runs Claude Code, npm or git-cliff has read-only repository
+permissions and passes no token to any step, so the actions in it see at most
+that job's read-only token; the jobs that push a branch or a tag, or publish a
+release, run none of them and check what the job before them handed on.
+
 1. Actions → **Release Session Hub** → run with `mode: prepare` and a
-   `version_type`. The job requires the current version to be tagged already,
-   and it refuses unless the newest Zensu release `vX.Y.Z` ships this plugin's
-   usage feed and its contract byte for byte and the takeover notice
-   (`.github/scripts/session-hub-release-order.sh`). It bumps
+   `version_type`. The `prepare-commit` job computes the next version with
+   `.github/scripts/session-hub-release-version.sh`, which requires the current
+   version to be tagged already unless `supersede` is set (see below), and it
+   refuses unless the newest Zensu release `vX.Y.Z`
+   ships this plugin's usage feed and its contract byte for byte and the
+   takeover notice (`.github/scripts/session-hub-release-order.sh`). It bumps
    `plugins/session-hub/.claude-plugin/plugin.json` and the `session-hub`
    marketplace entry, its `version` and its `ref`, through
    `.github/scripts/bump-marketplace-entry.js`, and writes the new section of
    this changelog with git-cliff 2.13.1 from the commits that touched
-   `plugins/session-hub/` since the last companion tag. It then runs the release
+   `plugins/session-hub/` since the last companion tag. It runs the release
    gate, `.github/scripts/session-hub-release-gate.sh`, against the release
-   commit and pushes `release/session-hub-vX.Y.Z` with a link to open the pull
-   request.
+   commit and hands that commit on as a git bundle. The `prepare-push` job
+   checks the bundled commit, its parent, its subject, its three changed files
+   and its version, refuses a release branch that already exists, pushes
+   `release/session-hub-vX.Y.Z` and prints a link to open the pull request.
 2. Review and squash-merge that pull request.
-3. The merged commit starts the `publish` job. It checks the release order and
-   the changelog section again, runs the gate on that exact commit and creates
-   the tag locally with `claude plugin tag plugins/session-hub`, which refuses
-   unless `plugin.json` and the marketplace entry agree. It checks Immutable
-   Releases once more and pushes the tag in a step of its own, so no token
-   reaches Claude Code. It then publishes an immutable GitHub Release whose
-   notes are the new changelog section, and checks that the locked tag still
-   names the released commit. It does not mark the release as the repository's
-   latest, which stays the Zensu plugin's.
+3. The merged commit starts the `publish-gate` job. Its release target, which
+   `.github/scripts/session-hub-release-target.sh` resolves, is the commit on
+   `main`'s first-parent line that introduced the version, so a dispatch and
+   the push of the release commit release the same commit. It checks the
+   marketplace entry field by field, the changelog section and the release
+   order at that commit, runs the gate there and creates the tag with
+   `claude plugin tag plugins/session-hub`, which refuses unless `plugin.json`
+   and the marketplace entry agree. The `publish` job rebuilds the notes from
+   the changelog at the target with `.github/scripts/session-hub-release-notes.sh`
+   and refuses notes from `publish-gate` that differ. It checks the bundled tag
+   object, its name, its type, its message and its target, requires Immutable
+   Releases, pushes the tag and publishes an immutable GitHub Release whose
+   notes are that rebuilt section. It checks that the locked tag still names
+   the target, and it does not mark the release as the repository's latest,
+   which stays the Zensu plugin's.
 
 The gate runs `.github/scripts/session-hub-install-probe.sh` with the pinned
-Claude Code: it validates the marketplace and this plugin, installs this plugin
-through its `git-subdir` entry from a local clone into an isolated config,
-checks that the installed copy holds exactly the committed tree, lands a
-receipt from it and runs `/session-hub:session-trail list`. Then it runs the
-companion's suites. CI runs the same gate on every pull request, and the probe
-alone with Claude Code 2.1.296.
+Claude Code: it validates the marketplace and this plugin, adds the whole
+catalog as a local marketplace, tags a scratch clone with
+`claude plugin tag plugins/session-hub` and requires an annotated tag at the
+probed commit with the message `session-hub X.Y.Z` that the publish job checks,
+installs this plugin through its `git-subdir` entry into an
+isolated config, checks that every installed file equals the committed tree by
+content, lands a receipt from it and runs `/session-hub:session-trail list`.
+Then it runs the companion's suites. CI runs the same gate on every pull
+request, and the probe alone with Claude Code 2.1.296. Each Claude Code these
+jobs run is installed from a committed manifest and lockfile under
+`.github/tools/`, whose exact pin `.github/scripts/session-hub-claude-code-pin.sh`
+reads, with `npm ci --ignore-scripts`, followed by the package's own install
+script, the only one the lockfile admits.
 
 Zensu releases first: while both plugins ship the usage feed, an installed Zensu
 older than this plugin would write it by an older rule. So the order is: merge
-the change, release Zensu, then run this workflow. The first release, 1.0.0,
-needs no bump: run the workflow with `mode: publish` on `main`. A tag that
-already exists at another commit is refused, and a publication that failed is
-retried the same way. Tags are created only by this workflow.
+the change, release Zensu, then run this workflow with `mode: publish` right
+after, because until `session-hub--v1.0.0` exists the catalog lists this plugin
+at a tag that does not exist. The first release, 1.0.0, needs no bump. A
+publish dispatch refuses `dry_run` and `supersede`, a tag that already exists
+at another commit is refused, and a publication that failed is retried the same
+way. When the current version can never be published at the commit that
+introduced it, for example because a later Zensu release changed the usage
+feed, dispatch `mode: prepare` with `supersede: true`. It is accepted only while
+that version has no tag and every companion tag is older; it marks the
+version's changelog section as superseded and never published, and cuts the
+next version, whose section lists every companion commit since the last tag.
+Tags are
+created only by this workflow; a tag ruleset that admits only the release
+workflows to `refs/tags/session-hub--v*` and `refs/tags/v*` is a maintainer
+setting of the repository.
 
 ## License
 

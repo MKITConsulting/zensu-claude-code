@@ -11,6 +11,10 @@ paths:
 
 # Session-Trail Targeted Lookup (`idCandidateRows`, `siblings`, `keepOwners`, `ccdApp` in `skills/session-trail/scripts/trail.mjs`)
 
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
+
 **A selector verb summarizes what its answer needs, not the machine.** `resolve()` used to build
 the full index before it tried the exact-id tier, and `--all` drops the project-directory filter,
 so every `show`, `takeover`, `handoff`, `adopt` and `release` process summarized every transcript

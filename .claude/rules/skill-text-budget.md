@@ -13,8 +13,8 @@ long body is paid on every invocation. A skill's description is paid in a differ
 the host's skill listing, which every session carries and which has a fixed budget shared
 with every other plugin and user skill on the machine. The suite bounds both, for every
 `skills/*/SKILL.md` and, root by root with an empty allowlist, for every
-`plugins/*/skills/*/SKILL.md` of a companion plugin such as `session-hub@zensu`; `B0` requires
-both counts to match the files on disk.
+`plugins/*/skills/*/SKILL.md` of a companion plugin such as `session-hub@zensu`, whose
+`/session-hub:session-trail` is one; `B0` requires both counts to match the files on disk.
 
 **How the host builds the listing.** Read from the Claude Code 2.1.280 CLI and 2.1.288
 desktop binaries, not from a documented contract, so re-check it when the host changes:

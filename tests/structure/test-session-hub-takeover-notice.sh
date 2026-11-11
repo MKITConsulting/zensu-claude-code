@@ -222,6 +222,8 @@ UNIT="$(cd "$PLUGIN_DIR/hooks/lib" && node -e '
   if (m.noticeText("/" + "x".repeat(5000)).includes("xxxx")) bad.push("long-root");
   if (m.noticeText("/a/\"b").includes("/a/\"b")) bad.push("quote-root");
   if (!m.noticeText("/work/tree").includes("root, \"/work/tree\". ")) bad.push("plain-root");
+  if (m.noticeText("/work/tree").includes("stays writable")) bad.push("writable-claim");
+  if (!m.noticeText("/work/tree").includes("Inside that root the gate still refuses a raw Bash overwrite of a git-tracked source file; in a worktree outside it this takeover can edit and test but not commit.")) bad.push("clobber-rule");
   const unbound = m.noticeText("/work/tree", false);
   if (unbound.includes("/work/tree") || unbound.includes("--reanchor")) bad.push("unbound-advice");
   if (!unbound.includes("no usable Session Control record") || !unbound.includes("/zensu:doctor")) bad.push("unbound-text");
@@ -239,8 +241,8 @@ UNIT="$(cd "$PLUGIN_DIR/hooks/lib" && node -e '
   if (!off || off.hookSpecificOutput.additionalContext !== m.noticeText("/r", false)) bad.push("decide-unbound");
   process.stdout.write(bad.length ? bad.join(",") : "ok");
 ' 2>&1)"
-[ "$UNIT" = "ok" ] && check "N12 the module withholds an unsafe root, quotes a safe one, renders the unbound variant, refuses malformed and oversized payloads and keeps the output shape" PASS \
-  || check "N12 the module withholds an unsafe root, quotes a safe one, renders the unbound variant, refuses malformed and oversized payloads and keeps the output shape ($UNIT)" FAIL
+[ "$UNIT" = "ok" ] && check "N12 the module withholds an unsafe root, quotes a safe one, states that the clobber rule still applies inside the root, renders the unbound variant, refuses malformed and oversized payloads and keeps the output shape" PASS \
+  || check "N12 the module withholds an unsafe root, quotes a safe one, states that the clobber rule still applies inside the root, renders the unbound variant, refuses malformed and oversized payloads and keeps the output shape ($UNIT)" FAIL
 
 NAMES="$(cd "$PLUGIN_DIR" && node -e '
   const fs = require("fs");

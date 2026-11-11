@@ -53,12 +53,25 @@ PLM_TRAIL_MJS="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
 TRAIL_MJS="$HUB_TRAIL_MJS"
 
 PASS=0; FAIL=0; SKIP=0
+GRADED_COPY=""
+UNBOUND_LABELS=0
+graded_copy() {
+  COPY_TAG="$GRADED_COPY"
+  [ -n "$COPY_TAG" ] && return 0
+  case "$TRAIL_MJS" in
+    ("$HUB_TRAIL_MJS") COPY_TAG=hub ;;
+    ("$PLM_TRAIL_MJS") COPY_TAG=plm ;;
+    (*) COPY_TAG=unbound; UNBOUND_LABELS=$((UNBOUND_LABELS+1)) ;;
+  esac
+}
 check() {
-  local label="$1" cond="$2"
+  local label cond="$2"
+  graded_copy
+  label="[$COPY_TAG] $1"
   if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
-skip() { echo "  SKIP  $1"; SKIP=$((SKIP+1)); }
+skip() { graded_copy; echo "  SKIP  [$COPY_TAG] $1"; SKIP=$((SKIP+1)); }
 report() {
   echo "----"
   echo "test-session-trail-verdict: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
@@ -5016,7 +5029,65 @@ elif [ -z "$WT8R_BAD" ]; then
 else
   check "WT8r cwdExists branch rendering:$WT8R_BAD" FAIL
 fi
-# The consumer side of the same property, end to end rather than by convention.
+PG_WT="$FAKE/work/wt-${WT8_ADOPT:0:8}"
+PG_HEAD='- **Commits, when Zensu PLM is installed:** this plugin refuses no write.'
+PG_SHOW_1='COMMITS  not measured: this plugin refuses no write. While Zensu PLM runs in this session with its'
+PG_SHOW_2='         opt-in source-write gate on (hooks.bashWriteGate: true), Bash source writes and working-tree git'
+PG_SHOW_3='         commands outside its Session Control root are refused; /zensu:adopt-session --reanchor, run from'
+PG_SHOW_4='         inside the worktree to work in, moves that root. A missing PLM notice is no evidence the gate is off.'
+pg_brief() {
+  printf '%s\n' "$1" | awk -v head="$PG_HEAD" -v wt="$PG_WT" '
+    index($0, head) == 1 && index($0, "(`hooks.bashWriteGate: true`, off by default)") && index($0, "`/zensu:adopt-session --reanchor`, run from inside that worktree") && index($0, "does not contain `" wt "` can edit and test there but not commit") && index($0, "so a missing notice is no evidence that the gate is off.") { n += 1 }
+    index($0, head) == 1 { seen += 1 }
+    END { print (n + 0) ":" (seen + 0) }
+  '
+}
+pg_show() {
+  printf '%s\n' "$1" | awk -v a="$PG_SHOW_1" -v b="$PG_SHOW_2" -v c="$PG_SHOW_3" -v d="$PG_SHOW_4" '
+    { line[NR] = $0 }
+    $0 ~ /^COMMITS / { seen += 1 }
+    END { n = 0; for (i = 1; i + 3 <= NR; i++) if (line[i] == a && line[i + 1] == b && line[i + 2] == c && line[i + 3] == d) n += 1; print n ":" (seen + 0) }
+  '
+}
+PG_SHOW_TXT="$(trailrun show "$WT8_ADOPT" --all 2>/dev/null)"
+PG_MUT="$(mutant_path plm-gate)"
+PG_MUT_ERR="$(node -e '
+  const fs = require("fs");
+  const [src, out] = process.argv.slice(1);
+  let t = fs.readFileSync(src, "utf8");
+  for (const needle of ["  L.push(plmGateCaution(briefPath(r.wt)));\n", "  for (const line of PLM_GATE_SHOW_LINES) print(line);\n"]) {
+    if (!t.includes(needle)) throw new Error("anchor missing: " + needle);
+    t = t.split(needle).join("");
+  }
+  fs.writeFileSync(out, t);
+' "$TRAIL_MJS" "$PG_MUT" 2>&1)"
+pg_mutrun() { env -u CLAUDE_CONFIG_DIR HOME="$FAKE" USERPROFILE="$FAKE" node "$PG_MUT" "$@" --config-dir "$FAKE_CFG"; }
+if [ -n "$PG_MUT_ERR" ]; then
+  PG_MUT_MD=""; PG_MUT_HO=""; PG_MUT_SHOW=""
+else
+  PG_MUT_MD="$(pg_mutrun takeover "$WT8_ADOPT" --all --force --no-record 2>/dev/null)"
+  PG_MUT_HO="$(pg_mutrun handoff "$WT8_ADOPT" --all --force 2>/dev/null)"
+  PG_MUT_SHOW="$(pg_mutrun show "$WT8_ADOPT" --all 2>/dev/null)"
+fi
+for spec in "PG1|takeover brief|brief|WT8_PRESENT_MD|PG_MUT_MD" "PG2|handoff brief|brief|WT8_PRESENT_HO|PG_MUT_HO" "PG3|show|show|PG_SHOW_TXT|PG_MUT_SHOW"; do
+  id="${spec%%|*}"; rest="${spec#*|}"; what="${rest%%|*}"; rest="${rest#*|}"; kind="${rest%%|*}"; rest="${rest#*|}"; real_var="${rest%%|*}"; mut_var="${rest#*|}"
+  real_txt="${!real_var}"; mut_txt="${!mut_var}"
+  if [ "$kind" = brief ]; then real_n="$(pg_brief "$real_txt")"; mut_n="$(pg_brief "$mut_txt")"; else real_n="$(pg_show "$real_txt")"; mut_n="$(pg_show "$mut_txt")"; fi
+  if [ -z "$real_txt" ]; then
+    check "$id the $what could not be rendered, so its PLM-gate lines are unchecked" FAIL
+  elif [ "$real_n" = "1:1" ]; then
+    check "$id the $what renders the PLM-gate lines once, with the opt-in key, the reanchor recipe and the missing-notice clause$([ "$kind" = brief ] && printf ', naming the worktree of the session it describes')" PASS
+  else
+    check "$id the $what renders the PLM-gate lines as complete:seen=$real_n, want 1:1" FAIL
+  fi
+  if [ -n "$PG_MUT_ERR" ]; then
+    check "$id-control the planted copy without the PLM-gate carriers could not be built ($PG_MUT_ERR)" FAIL
+  elif [ -n "$mut_txt" ] && [ "$mut_n" = "0:0" ]; then
+    check "$id-control a copy whose $what drops the PLM-gate lines still renders and fails the check" PASS
+  else
+    check "$id-control a copy whose $what drops the PLM-gate lines rendered ${#mut_txt} bytes with complete:seen=$mut_n" FAIL
+  fi
+done
 if printf '%s\n' "$HANDOFF_MD" | grep -B1 -F 'git worktree add' | grep -qF '```bash'; then
   check "WT8p2 the handoff brief renders the advice's git command inside a bash fence" PASS
 else
@@ -9329,6 +9400,7 @@ for pl_side in plm hub; do
 done
 PL_SHOW="$(pl_compare "$PL_DIR/show-plm.json" "$PL_DIR/show-hub.json" "$LS_ROOT")"
 PL_TAKE="$(pl_compare "$PL_DIR/takeover-plm.json" "$PL_DIR/takeover-hub.json" "$LS_ROOT")"
+GRADED_COPY=both
 [ "$PL_SHOW" = equal ] && [ "$PL_TAKE" = equal ] \
   && check "PL1 PLM's frozen trail.mjs and the companion's answer show --all --json and takeover --all --no-record --json for the LS family identically, apart from the command name and PLM's writes and continuation keys" PASS \
   || check "PL1 PLM's frozen trail.mjs and the companion's disagree (show: $PL_SHOW; takeover: $PL_TAKE)" FAIL
@@ -9343,6 +9415,10 @@ case "$(pl_compare "$PL_DIR/takeover-plm.json" "$PL_DIR/takeover-drift.json" "$L
   (equal|unreadable|no-session) check "PL1-control a changed field in the companion's takeover --json is not detected" FAIL ;;
   (*) check "PL1-control a changed field in the companion's takeover --json makes the comparison fail" PASS ;;
 esac
+GRADED_COPY=""
+[ "$UNBOUND_LABELS" -eq 0 ] \
+  && check "PL-copy every check and skip label of this suite named the trail.mjs copy it graded" PASS \
+  || check "PL-copy $UNBOUND_LABELS check or skip labels ran while TRAIL_MJS named neither copy" FAIL
 
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
 report

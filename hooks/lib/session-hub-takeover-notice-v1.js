@@ -73,7 +73,7 @@ function noticeText(root, bound = true) {
   return [
     `zensu: Session Hub takeover. Zensu PLM's opt-in source-write gate is on in this session (hooks.bashWriteGate: true).`,
     `It refuses a Bash write to a source file and every working-tree git command, git add and git commit included, whose target lies outside ${anchor}.`,
-    'A worktree inside that root stays writable; in one outside it this takeover can edit and test but not commit.',
+    'Inside that root the gate still refuses a raw Bash overwrite of a git-tracked source file; in a worktree outside it this takeover can edit and test but not commit.',
     'To commit there, move the root first: run /zensu:adopt-session --reanchor from inside that worktree.',
     'It accepts only a registered worktree of the same repository, reports first and moves only on --confirm.',
     "State this constraint in the takeover's plan confirmation, before anything durable is written.",

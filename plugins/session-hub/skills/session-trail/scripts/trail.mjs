@@ -402,8 +402,9 @@ function withdrawnBriefLines(withdrawn, limit) {
 // split and the per-function tally are all OWNED by the derived scan named below, which
 // prints the real table when it disagrees with the tree. A numeral repeated in this comment
 // is a lagging copy of that expectation: it cannot fail on its own, it goes stale on the
-// next carrier, and the previous spelling had already drifted twice — once naming
-// `continuationPlan` as a single carrier when it renders seven, and once stating two
+// next carrier, and the previous spelling had already drifted twice — once naming PLM's
+// `continuationPlan`, which this copy dropped, as a single carrier when it renders seven,
+// and once stating two
 // different subtrahends four lines apart. What this comment owns is the CLASSIFICATION
 // RULE: what makes a line class (a), (b) or (c), and why each must stay unclipped.
 //

@@ -9,6 +9,10 @@ paths:
 
 # Session-Trail Fork Anchor (`sessionAnchor`, `forkOwnCwd` and `firstCwdOf` in `skills/session-trail/scripts/trail.mjs`)
 
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
+
 **A session's directory is the cwd of its first own record**: the first record that carries the
 session's own id (the transcript's file stem, `transcriptSessionId`) and a `cwd`. For a session
 that is not a fork this is the transcript's first record, the rule `references/gotchas.md` has

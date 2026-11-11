@@ -14,6 +14,10 @@ paths:
 
 # Session-Trail Prompt Listing (`extractPrompts` in `skills/session-trail/scripts/trail.mjs`)
 
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
+
 **One listing feeds every prompt section.** A deep read calls `extractPrompts(text, read.full)`
 once per session and stores `prompts` and `withdrawnPrompts` on the row. Every carrier reads
 those two fields: the `show` timeline and its withdrawn section, the takeover brief's

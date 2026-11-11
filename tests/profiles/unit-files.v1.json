@@ -235,9 +235,9 @@
       "summary": "The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root."
     },
     {
-      "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 17,
+      "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 21,
       "runs": [{ "driver": "tests/structure/test-session-hub-receipt.sh" }],
-      "summary": "The companion's Session Hub takeover receipt entry: the command token, the refused prompt shapes, the receipt fields, the config switch, the principal and plugin-root guards and the hook entry."
+      "summary": "The companion's Session Hub takeover receipt entry: the command token, the refused prompt shapes, the receipt fields, the config switch, the principal and plugin-root guards, the hook entry, the home it writes under, and its exit 0 with no output when the home lookup, the clock or the lineage module fails."
     },
     {
       "path": "tests/structure/session-lineage-v1.test.js", "registered": 78, "skips": {"root": 2, "win32": 17},

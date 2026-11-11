@@ -189,17 +189,17 @@ plm_all_md() {
 
 
 if [ ! -f "$SKILL_MD" ]; then
-  check "T1 skills/session-trail/SKILL.md exists" FAIL
+  check "T1 plugins/session-hub/skills/session-trail/SKILL.md exists" FAIL
   echo "----"
   echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
   exit 1
 fi
-check "T1 skills/session-trail/SKILL.md exists" PASS
+check "T1 plugins/session-hub/skills/session-trail/SKILL.md exists" PASS
 
 if [ -f "$TRAIL_MJS" ]; then
-  check "T2 skills/session-trail/scripts/trail.mjs ships with the skill" PASS
+  check "T2 plugins/session-hub/skills/session-trail/scripts/trail.mjs ships with the skill" PASS
 else
-  check "T2 skills/session-trail/scripts/trail.mjs ships with the skill" FAIL
+  check "T2 plugins/session-hub/skills/session-trail/scripts/trail.mjs ships with the skill" FAIL
   echo "----"
   echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
   exit 1
@@ -2658,6 +2658,59 @@ if [ -z "$T39_MISS" ]; then
 else
   check "T39 own-session and turn-activity documentation drift:$T39_MISS" FAIL
 fi
+
+plm_gate_sites() {
+  node -e '
+    const fs = require("fs");
+    const [hubFile, plmFile] = process.argv.slice(1);
+    const t = fs.readFileSync(hubFile, "utf8");
+    const plm = fs.readFileSync(plmFile, "utf8");
+    const bad = [];
+    const count = (s, n) => s.split(n).length - 1;
+    const body = (name) => {
+      const lines = t.split("\n");
+      const start = lines.findIndex((l) => l.startsWith("function " + name + "("));
+      if (start < 0) return "";
+      const end = lines.findIndex((l, i) => i > start && l === "}");
+      return end < 0 ? "" : lines.slice(start, end + 1).join("\n");
+    };
+    if (count(t, "\nfunction plmGateCaution(") !== 1) bad.push("caution-definitions");
+    if (count(t, "\nconst PLM_GATE_SHOW_LINES = [") !== 1) bad.push("show-lines-definitions");
+    const cautionCall = "  L.push(plmGateCaution(briefPath(r.wt)));\n";
+    if (count(t, "plmGateCaution(") !== 3) bad.push("caution-references=" + count(t, "plmGateCaution("));
+    for (const fn of ["cmdTakeover", "cmdHandoff"]) if (count(body(fn), cautionCall.trimEnd()) !== 1) bad.push(fn + "-caution-call");
+    const showCall = "  for (const line of PLM_GATE_SHOW_LINES) print(line);";
+    if (count(t, "PLM_GATE_SHOW_LINES") !== 2 || count(body("cmdShow"), showCall) !== 1) bad.push("show-lines-call");
+    if (/plmGateCaution|PLM_GATE_SHOW_LINES/.test(plm)) bad.push("in-plm-copy");
+    process.stdout.write(bad.join(" "));
+  ' "$1" "$2" 2>&1
+}
+T40_BAD="$(plm_gate_sites "$TRAIL_MJS" "$PLM_TRAIL_MJS")"
+[ -z "$T40_BAD" ] \
+  && check "T40 the companion's trail.mjs defines plmGateCaution and PLM_GATE_SHOW_LINES once each, cmdTakeover and cmdHandoff push the caution once each, cmdShow prints the lines once, and PLM's frozen copy carries neither" PASS \
+  || check "T40 the companion's PLM-gate lines moved, doubled or lost a carrier: $T40_BAD" FAIL
+T40_SANDBOX="$(mktemp -d -t session-trail-t40-XXXXXX)"
+for spec in "handoff-call|cmdHandoff-caution-call|a handoff brief that no longer pushes the caution" "show-call|show-lines-call|a show that no longer prints the lines"; do
+  mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
+  T40_ERR="$(node -e '
+    const fs = require("fs");
+    const [src, mode, out] = process.argv.slice(1);
+    let t = fs.readFileSync(src, "utf8");
+    const cut = (from, needle) => { const at = t.indexOf(needle, t.indexOf(from)); if (t.indexOf(from) < 0 || at < 0) throw new Error("anchor missing: " + needle); t = t.slice(0, at) + t.slice(at + needle.length); };
+    if (mode === "handoff-call") cut("\nfunction cmdHandoff(", "  L.push(plmGateCaution(briefPath(r.wt)));\n");
+    if (mode === "show-call") cut("\nfunction cmdShow(", "  for (const line of PLM_GATE_SHOW_LINES) print(line);\n");
+    fs.writeFileSync(out, t);
+  ' "$TRAIL_MJS" "$mode" "$T40_SANDBOX/$mode.mjs" 2>&1)"
+  if [ -n "$T40_ERR" ]; then
+    check "T40-control $what could not be built ($T40_ERR)" FAIL
+    continue
+  fi
+  case " $(plm_gate_sites "$T40_SANDBOX/$mode.mjs" "$PLM_TRAIL_MJS") " in
+    (*" $want "*) check "T40-control $what fails the site check as $want" PASS ;;
+    (*) check "T40-control $what passes the site check" FAIL ;;
+  esac
+done
+rm -rf "$T40_SANDBOX"
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

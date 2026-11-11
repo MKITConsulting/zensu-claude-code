@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { ensureLedgerDir, ledgerPathUnlinked } from '../../skills/session-trail/scripts/session-lineage-v1.mjs';
+
+const lineage = await import('../../skills/session-trail/scripts/session-lineage-v1.mjs').catch(() => null);
 
 export const RECEIPT_SCHEMA_VERSION = 1;
 export const RECEIPT_KIND = 'session-hub-receipt';
@@ -97,8 +98,9 @@ export function receiptsDir(root) {
 }
 
 export function landReceipt(root, receipt) {
+  if (!lineage) throw new Error('the session-trail lineage module did not load');
   const dir = receiptsDir(root);
-  ensureLedgerDir(dir, root);
+  lineage.ensureLedgerDir(dir, root);
   const file = path.join(dir, `${receipt.token}.json`);
   const tmp = path.join(dir, `.receipt-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
   fs.writeFileSync(tmp, `${JSON.stringify(receipt)}\n`, { flag: 'wx', mode: 0o600 });
@@ -115,7 +117,7 @@ export function landReceipt(root, receipt) {
 
 export function pruneReceipts(root, now, limit = RECEIPT_SCAN_LIMIT, retention = RECEIPT_RETENTION_MS) {
   const dir = receiptsDir(root);
-  if (!ledgerPathUnlinked(dir, root)) return 0;
+  if (!lineage || !lineage.ledgerPathUnlinked(dir, root)) return 0;
   let handle;
   try { handle = fs.opendirSync(dir); } catch { return 0; }
   let seen = 0;
@@ -160,14 +162,14 @@ export function pluginVersion(root) {
   }
 }
 
-export function record(text, env = process.env, now = Date.now(), root = pluginRoot()) {
+export function record(text, env = process.env, now = Date.now(), root = pluginRoot(), home = os.homedir()) {
   if (typeof text !== 'string' || text.length > MAX_PAYLOAD_CHARS) return null;
   let payload;
   try { payload = JSON.parse(text); } catch { return null; }
-  if (!skillPresent(root)) return null;
+  if (!lineage || !skillPresent(root)) return null;
   const receipt = receiptFor(payload, pluginVersion(root), now);
   if (!receipt) return null;
-  const config = configRoot(env);
+  const config = configRoot(env, home);
   const landed = landReceipt(config, receipt);
   pruneReceipts(config, now);
   return landed ? receipt : null;
@@ -204,17 +206,20 @@ export function declaredRootMatches(env = process.env, root = pluginRoot()) {
   }
 }
 
-export function hookMain(text, env = process.env, now = Date.now(), root = pluginRoot(), home = os.homedir()) {
+export function hookMain(text, env, now, root, home) {
   try {
     if (typeof text !== 'string' || text.length > MAX_PAYLOAD_CHARS) return null;
     if (!text.includes(RECEIPT_FLAG.trimStart())) return null;
-    if (!declaredRootMatches(env, root)) return null;
+    const environment = env === undefined ? process.env : env;
+    const plugin = root === undefined ? pluginRoot() : root;
+    if (!declaredRootMatches(environment, plugin)) return null;
     let payload;
     try { payload = JSON.parse(text); } catch { return null; }
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
     if (!mainPrincipal(payload)) return null;
-    if (!receiptEnabled(home)) return null;
-    return record(text, env, now, root);
+    const homeDir = home === undefined ? os.homedir() : home;
+    if (!receiptEnabled(homeDir)) return null;
+    return record(text, environment, now === undefined ? Date.now() : now, plugin, homeDir);
   } catch {
     return null;
   }
@@ -227,9 +232,11 @@ function isEntryPoint() {
   return real(invoked) === real(fileURLToPath(import.meta.url));
 }
 
-if (isEntryPoint()) {
+let entry = false;
+try { entry = isEntryPoint(); } catch {}
+if (entry) {
   let input = '';
   try { input = fs.readFileSync(0, 'utf8'); } catch {}
-  hookMain(input);
+  try { hookMain(input); } catch {}
   process.exitCode = 0;
 }

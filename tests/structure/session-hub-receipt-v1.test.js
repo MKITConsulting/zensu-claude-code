@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const mod = await import(new URL('../../plugins/session-hub/hooks/lib/session-hub-receipt-v1.mjs', import.meta.url));
@@ -289,4 +290,63 @@ test('the hook entry records only past every guard, and never throws', () => {
     assert.equal(miss.landed, false, `case ${index}`);
   }
   for (const value of [undefined, null, 7, {}, []]) assert.equal(mod.hookMain(value, {}, NOW, plugin, home), null);
+});
+
+test('a home handed to the hook entry without CLAUDE_CONFIG_DIR is the home its receipt lands under', () => {
+  const plugin = pluginTree('1.0.0');
+  const home = homeWith();
+  fs.mkdirSync(path.join(home, '.claude'));
+  const result = mod.hookMain(JSON.stringify(payload(RAW)), { CLAUDE_PLUGIN_ROOT: plugin }, NOW, plugin, home);
+  assert.equal(result.token, TOKEN);
+  assert.equal(fs.existsSync(path.join(mod.receiptsDir(path.join(home, '.claude')), `${TOKEN}.json`)), true);
+  assert.equal(mod.record(JSON.stringify(payload(RAW.replace(TOKEN, TOKEN.replace(/^9/, '8')))), {}, NOW, plugin, home).plugin, '1.0.0');
+  assert.equal(fs.existsSync(path.join(mod.receiptsDir(path.join(home, '.claude')), `${TOKEN.replace(/^9/, '8')}.json`)), true);
+});
+
+const HUB_ENTRY = fileURLToPath(new URL('../../plugins/session-hub/hooks/lib/session-hub-receipt-v1.mjs', import.meta.url));
+const HUB_ROOT = path.resolve(path.dirname(HUB_ENTRY), '..', '..');
+const preload = (source) => {
+  const file = path.join(tmp(), 'preload.cjs');
+  fs.writeFileSync(file, source);
+  return file;
+};
+const entryRun = (entry, root, preloaded) => {
+  const home = homeWith();
+  const config = tmp();
+  const result = spawnSync(process.execPath, preloaded === undefined ? [entry] : ['-r', preloaded, entry], {
+    input: JSON.stringify(payload(RAW)),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: config, CLAUDE_PLUGIN_ROOT: root },
+  });
+  return { status: result.status, stdout: result.stdout, landed: fs.existsSync(path.join(mod.receiptsDir(config), `${TOKEN}.json`)) };
+};
+
+test('the hook entry exits 0 with no output and lands nothing when the home lookup throws', () => {
+  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT), { status: 0, stdout: '', landed: true });
+  const homeless = preload("require('node:os').homedir = () => { throw new Error('no home directory'); };\n");
+  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT, homeless), { status: 0, stdout: '', landed: false });
+});
+
+test('any other throw on the entry path, such as a failing clock, still ends with exit 0 and no output', () => {
+  const clockless = preload("Date.now = () => { throw new Error('no clock'); };\n");
+  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT, clockless), { status: 0, stdout: '', landed: false });
+});
+
+test('a missing lineage module leaves the entry silent with exit 0, while the same tree with the module lands the receipt', () => {
+  const copy = (withLineage) => {
+    const plugin = pluginTree('1.0.0');
+    fs.mkdirSync(path.join(plugin, 'hooks', 'lib'), { recursive: true });
+    fs.copyFileSync(HUB_ENTRY, path.join(plugin, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'));
+    if (withLineage) {
+      fs.copyFileSync(
+        path.join(HUB_ROOT, 'skills', 'session-trail', 'scripts', 'session-lineage-v1.mjs'),
+        path.join(plugin, 'skills', 'session-trail', 'scripts', 'session-lineage-v1.mjs'),
+      );
+    }
+    return plugin;
+  };
+  const whole = copy(true);
+  assert.deepEqual(entryRun(path.join(whole, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), whole), { status: 0, stdout: '', landed: true });
+  const partial = copy(false);
+  assert.deepEqual(entryRun(path.join(partial, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), partial), { status: 0, stdout: '', landed: false });
 });

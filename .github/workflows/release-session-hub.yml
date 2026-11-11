@@ -21,7 +21,12 @@ on:
           - minor
           - major
       dry_run:
-        description: 'Offline dry run (prepare mode only): compute the version and notes; no commit or branch push'
+        description: 'Offline dry run (prepare mode only; a publish dispatch refuses it): compute the version and notes; no commit or branch push'
+        required: false
+        default: false
+        type: boolean
+      supersede:
+        description: 'Prepare mode only (a publish dispatch refuses it): replace the untagged current companion version, which can no longer be published, with the next one'
         required: false
         default: false
         type: boolean
@@ -36,13 +41,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prepare:
-    name: Prepare companion release branch
+  prepare-commit:
+    name: Build the companion release commit
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'prepare'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      branch: ${{ steps.release_commit.outputs.branch }}
+      sha: ${{ steps.release_commit.outputs.sha }}
     steps:
       - name: Reject a prepare dispatch outside main
         run: |
@@ -65,26 +74,11 @@ jobs:
         id: ver
         env:
           VERSION_TYPE: ${{ inputs.version_type }}
+          SUPERSEDE: ${{ inputs.supersede }}
         run: |
           set -euo pipefail
-          CURRENT="$(jq -r .version plugins/session-hub/.claude-plugin/plugin.json)"
-          [[ "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          LATEST="$(git tag -l 'session-hub--v*' | sed -n -E 's/^session-hub--v([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | sort -V | tail -1)"
-          if [ "$LATEST" != "$CURRENT" ]; then
-            echo "::error::plugins/session-hub is at $CURRENT on main and the newest companion tag is session-hub--v${LATEST:-<none>}; publish $CURRENT first (mode: publish)"
-            exit 1
-          fi
-          IFS='.' read -r MA MI PA <<< "$CURRENT"
-          case "$VERSION_TYPE" in
-            major) MA=$((MA + 1)); MI=0; PA=0 ;;
-            minor) MI=$((MI + 1)); PA=0 ;;
-            patch) PA=$((PA + 1)) ;;
-            *) echo "::error::unknown version_type: $VERSION_TYPE"; exit 1 ;;
-          esac
-          VER="${MA}.${MI}.${PA}"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "tag=session-hub--v$VER" >> "$GITHUB_OUTPUT"
-          echo "Companion version: $CURRENT -> $VER"
+          bash .github/scripts/session-hub-release-version.sh "$VERSION_TYPE" "$SUPERSEDE" "$RUNNER_TEMP/version.env"
+          cat "$RUNNER_TEMP/version.env" >> "$GITHUB_OUTPUT"
 
       - name: Require that Zensu released first
         run: bash .github/scripts/session-hub-release-order.sh
@@ -115,6 +109,8 @@ jobs:
       - name: Prepend the section into the companion CHANGELOG
         env:
           SECTION: ${{ runner.temp }}/section.md
+          VER: ${{ steps.ver.outputs.version }}
+          SUPERSEDED: ${{ steps.ver.outputs.superseded }}
         run: |
           set -euo pipefail
           test -s "$SECTION" || { echo "::error::git-cliff produced no section (no conventional commit touched plugins/session-hub since the last companion tag)"; exit 1; }
@@ -125,6 +121,9 @@ jobs:
             /^## \[Unreleased\]/ && !done { printf "%s", sec; done = 1 }
           ' "$SECTION" plugins/session-hub/CHANGELOG.md > "$RUNNER_TEMP/CHANGELOG.new"
           mv "$RUNNER_TEMP/CHANGELOG.new" plugins/session-hub/CHANGELOG.md
+          if [ -n "$SUPERSEDED" ]; then
+            bash .github/scripts/session-hub-release-supersede.sh "$SUPERSEDED" "$VER" plugins/session-hub/CHANGELOG.md
+          fi
           echo "----- generated section -----"
           cat "$SECTION"
 
@@ -149,6 +148,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           VER: ${{ steps.ver.outputs.version }}
+          SUPERSEDED: ${{ steps.ver.outputs.superseded }}
         run: |
           set -euo pipefail
           BR="release/session-hub-v$VER"
@@ -156,14 +156,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BR"
           git add plugins/session-hub/.claude-plugin/plugin.json .claude-plugin/marketplace.json plugins/session-hub/CHANGELOG.md
-          git commit -m "chore(release): bump session-hub to $VER"
+          if [ -n "$SUPERSEDED" ]; then
+            git commit -m "chore(release): bump session-hub to $VER" -m "Supersedes: session-hub $SUPERSEDED (never published)"
+          else
+            git commit -m "chore(release): bump session-hub to $VER"
+          fi
+          test "$(git rev-parse HEAD~1)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           echo "branch=$BR" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Install the pinned Claude Code
         if: ${{ !inputs.dry_run }}
-        run: npm install -g --no-fund --no-audit @anthropic-ai/claude-code@2.1.317
+        run: bash .github/scripts/session-hub-install-claude-code.sh .github/tools/claude-code
 
       - name: Run the companion release gate against the release commit
         if: ${{ !inputs.dry_run }}
@@ -176,19 +181,78 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
-      - name: Push the release branch and print the PR link
+      - name: Bundle the release commit
         if: ${{ !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BR: ${{ steps.release_commit.outputs.branch }}
           SHA: ${{ steps.release_commit.outputs.sha }}
-          VER: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SHA"
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          mkdir -p "$RUNNER_TEMP/release-commit"
+          git bundle create "$RUNNER_TEMP/release-commit/release.bundle" "refs/heads/$BR" "^$SHA~1"
+          git bundle verify "$RUNNER_TEMP/release-commit/release.bundle"
+
+      - name: Upload the release commit bundle
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: session-hub-release-commit-${{ steps.release_commit.outputs.sha }}
+          path: ${{ runner.temp }}/release-commit/release.bundle
+          if-no-files-found: error
+          retention-days: 7
+
+  prepare-push:
+    name: Push the companion release branch
+    needs: prepare-commit
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: session-hub-release-commit-${{ needs.prepare-commit.outputs.sha }}
+          path: ${{ runner.temp }}/release-commit
+
+      - name: Verify the bundled release commit
+        env:
+          BR: ${{ needs.prepare-commit.outputs.branch }}
+          SHA: ${{ needs.prepare-commit.outputs.sha }}
+          VER: ${{ needs.prepare-commit.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$BR" = "release/session-hub-v$VER"
+          BUNDLE="$RUNNER_TEMP/release-commit/release.bundle"
+          git bundle verify "$BUNDLE"
+          git fetch --no-tags "$BUNDLE" "refs/heads/$BR:refs/heads/$BR"
+          test "$(git rev-parse "refs/heads/$BR")" = "$SHA"
+          test "$(git rev-parse "$SHA~1")" = "$GITHUB_SHA"
+          test "$(git log -1 --format=%s "$SHA")" = "chore(release): bump session-hub to $VER"
+          test "$(git diff --name-only "$GITHUB_SHA" "$SHA" | LC_ALL=C sort | tr '\n' ' ')" = ".claude-plugin/marketplace.json plugins/session-hub/.claude-plugin/plugin.json plugins/session-hub/CHANGELOG.md "
+          test "$(git show "$SHA:plugins/session-hub/.claude-plugin/plugin.json" | jq -r .version)" = "$VER"
+
+      - name: Push the release branch and print the PR link
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BR: ${{ needs.prepare-commit.outputs.branch }}
+          VER: ${{ needs.prepare-commit.outputs.version }}
+        run: |
+          set -euo pipefail
           gh auth setup-git
-          git push -f origin "$BR"
+          if git ls-remote --exit-code --heads origin "refs/heads/$BR" > /dev/null; then
+            echo "::error::$BR already exists on origin; merge or close its release PR and delete the branch before preparing $VER again"
+            exit 1
+          fi
+          git -c core.hooksPath=/dev/null push origin "refs/heads/$BR:refs/heads/$BR"
           TITLE_ENC="$(printf '%s' "chore(release): bump session-hub to $VER" | jq -sRr @uri)"
           PR_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...${BR}?expand=1&title=${TITLE_ENC}"
           {
@@ -198,12 +262,12 @@ jobs:
             echo ""
             echo "${PR_URL}"
             echo ""
-            echo "Review + **squash-merge** it → the \`publish\` job tags main through \`claude plugin tag\` and publishes the release."
+            echo "Review + **squash-merge** it → the \`publish-gate\` job tags the release commit through \`claude plugin tag\` and the \`publish\` job publishes it."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Open the PR: ${PR_URL}"
 
-  publish:
-    name: Publish companion release
+  publish-gate:
+    name: Gate and tag the companion release
     if: >-
       (github.event_name == 'push' &&
        startsWith(github.event.head_commit.message, 'chore(release): bump session-hub to')) ||
@@ -211,16 +275,33 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      version: ${{ steps.target.outputs.version }}
+      tag: ${{ steps.target.outputs.tag }}
+      target: ${{ steps.target.outputs.target }}
+      tagged: ${{ steps.target.outputs.tagged }}
+      tag_object: ${{ steps.tag.outputs.object }}
     steps:
-      - name: Reject a publish dispatch outside main
+      - name: Reject a publish dispatch outside main, with dry_run or with supersede
         if: github.event_name == 'workflow_dispatch'
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          SUPERSEDE: ${{ inputs.supersede }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main || {
             echo "::error::publish mode may only be dispatched on main"
             exit 1
           }
+          if [ "$DRY_RUN" = true ]; then
+            echo "::error::dry_run applies to prepare mode only; a publish run tags and releases, so dispatch it without dry_run"
+            exit 1
+          fi
+          if [ "$SUPERSEDE" = true ]; then
+            echo "::error::supersede applies to prepare mode only; a publish run releases the companion version already on main"
+            exit 1
+          fi
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -231,127 +312,145 @@ jobs:
         with:
           node-version: 22
 
-      - name: Require repository Immutable Releases
-        env:
-          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::IMMUTABLE_RELEASES_ADMIN_TOKEN with read access to repository settings is required"
-            exit 1
-          fi
-          gh api -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" \
-            --jq '.enabled' | grep -qx true || {
-              echo "::error::GitHub Immutable Releases must be enabled before publishing a marketplace tag"
-              exit 1
-            }
-
-      - name: Verify the companion release target
+      - name: Resolve the companion release target
         id: target
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          VER="$(jq -r .version plugins/session-hub/.claude-plugin/plugin.json)"
-          [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          TAG="session-hub--v$VER"
-          HUB_ENTRY='[.plugins[] | select(.name == "session-hub")] | select(length == 1) | .[0]'
-          test "$(jq -r "$HUB_ENTRY.version" .claude-plugin/marketplace.json)" = "$VER"
-          test "$(jq -c "$HUB_ENTRY.source" .claude-plugin/marketplace.json)" = "{\"source\":\"git-subdir\",\"url\":\"https://github.com/MKITConsulting/zensu-claude-code.git\",\"path\":\"plugins/session-hub\",\"ref\":\"$TAG\"}"
-          grep -qE "^## \[${VER//./\\.}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" plugins/session-hub/CHANGELOG.md || {
-            echo "::error::plugins/session-hub/CHANGELOG.md carries no ## [$VER] section"
-            exit 1
-          }
-          awk -v ver="$VER" '
-            $0 ~ "^## \\[" ver "\\]" { f = 1; next }
-            f && /^## \[/ { f = 0 }
-            f { print }
-          ' plugins/session-hub/CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          test -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/notes.md")" || {
-            echo "::error::the ## [$VER] section of plugins/session-hub/CHANGELOG.md is empty"
-            exit 1
-          }
+          mkdir -p "$RUNNER_TEMP/release"
+          bash .github/scripts/session-hub-release-target.sh "$RUNNER_TEMP/target.env" "$RUNNER_TEMP/release/notes.md"
+          VER="$(sed -n 's/^version=//p' "$RUNNER_TEMP/target.env")"
+          TARGET="$(sed -n 's/^target=//p' "$RUNNER_TEMP/target.env")"
+          [[ "$TARGET" =~ ^[0-9a-f]{40}$ ]]
+          git checkout --quiet --detach "$TARGET"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(jq -r .version plugins/session-hub/.claude-plugin/plugin.json)" = "$VER"
           bash .github/scripts/session-hub-release-order.sh
-          TAGGED=false
-          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
-            TAG_SHA="$(git rev-list -n 1 "$TAG")"
-            if [ "$TAG_SHA" != "${{ github.sha }}" ]; then
-              echo "::error::$TAG already exists at $TAG_SHA, not at main SHA ${{ github.sha }}"
-              exit 1
-            fi
-            TAGGED=true
-          fi
-          {
-            echo "version=$VER"
-            echo "tag=$TAG"
-            echo "tagged=$TAGGED"
-          } >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/target.env" >> "$GITHUB_OUTPUT"
 
       - name: Install the pinned Claude Code
-        run: npm install -g --no-fund --no-audit @anthropic-ai/claude-code@2.1.317
+        run: bash .github/scripts/session-hub-install-claude-code.sh .github/tools/claude-code
 
-      - name: Run the companion release gate against the exact main SHA
+      - name: Run the companion release gate against the release target
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test "$(git rev-parse HEAD)" = "$TARGET"
           bash .github/scripts/session-hub-release-gate.sh
-          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test "$(git rev-parse HEAD)" = "$TARGET"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
       - name: Create the tag through claude plugin tag
+        id: tag
         if: steps.target.outputs.tagged == 'false'
         env:
           TAG: ${{ steps.target.outputs.tag }}
+          TARGET: ${{ steps.target.outputs.target }}
           CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-config
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test "$(git rev-parse HEAD)" = "$TARGET"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           claude plugin tag plugins/session-hub
           test "$(git cat-file -t "refs/tags/$TAG")" = tag
-          test "$(git rev-list -n 1 "refs/tags/$TAG")" = "${{ github.sha }}"
+          test "$(git rev-list -n 1 "refs/tags/$TAG")" = "$TARGET"
+          echo "object=$(git rev-parse "refs/tags/$TAG")" >> "$GITHUB_OUTPUT"
+          git bundle create "$RUNNER_TEMP/release/tag.bundle" "refs/tags/$TAG" "^$TARGET"
+          git bundle verify "$RUNNER_TEMP/release/tag.bundle"
 
-      - name: Re-check repository Immutable Releases before the tag goes out
-        if: steps.target.outputs.tagged == 'false'
+      - name: Upload the release notes and the tag bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: session-hub-release-${{ steps.target.outputs.target }}
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish companion release
+    needs: publish-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: session-hub-release-${{ needs.publish-gate.outputs.target }}
+          path: ${{ runner.temp }}/release
+
+      - name: Verify the release target and the tag the gate created
+        env:
+          TAG: ${{ needs.publish-gate.outputs.tag }}
+          TARGET: ${{ needs.publish-gate.outputs.target }}
+          TAGGED: ${{ needs.publish-gate.outputs.tagged }}
+          TAG_OBJECT: ${{ needs.publish-gate.outputs.tag_object }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TAG" =~ ^session-hub--v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor "$TARGET" "$GITHUB_SHA"
+          VER="${TAG#session-hub--v}"
+          git show "$TARGET:plugins/session-hub/CHANGELOG.md" > "$RUNNER_TEMP/CHANGELOG.target.md"
+          bash .github/scripts/session-hub-release-notes.sh "$VER" "$RUNNER_TEMP/CHANGELOG.target.md" "$RUNNER_TEMP/notes.md"
+          cmp -s "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/release/notes.md" || {
+            echo "::error::the notes publish-gate handed on are not the ## [$VER] section of plugins/session-hub/CHANGELOG.md at $TARGET"
+            exit 1
+          }
+          if [ "$TAGGED" = false ]; then
+            [[ "$TAG_OBJECT" =~ ^[0-9a-f]{40}$ ]]
+            BUNDLE="$RUNNER_TEMP/release/tag.bundle"
+            git bundle verify "$BUNDLE"
+            git fetch --no-tags "$BUNDLE" "refs/tags/$TAG:refs/tags/$TAG"
+            test "$(git rev-parse "refs/tags/$TAG")" = "$TAG_OBJECT"
+            test "$(git cat-file -t "refs/tags/$TAG")" = tag
+            test "$(git cat-file tag "refs/tags/$TAG" | sed -n 's/^tag //p')" = "$TAG"
+            test "$(git cat-file tag "refs/tags/$TAG" | sed '1,/^$/d')" = "session-hub $VER"
+            test "$(git rev-list -n 1 "refs/tags/$TAG")" = "$TARGET"
+          else
+            test "$TAGGED" = true
+            test "$(git rev-list -n 1 "refs/tags/$TAG")" = "$TARGET"
+          fi
+
+      - name: Require repository Immutable Releases before the tag goes out
         env:
           GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh api -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" \
-            --jq '.enabled' | grep -qx true || {
-              echo "::error::GitHub Immutable Releases was switched off while the gate ran; no tag was pushed"
-              exit 1
-            }
+        run: bash .github/scripts/session-hub-require-immutable-releases.sh "GitHub Immutable Releases must be enabled before a companion tag goes out; no tag was pushed"
 
       - name: Push the tag
-        if: steps.target.outputs.tagged == 'false'
+        if: needs.publish-gate.outputs.tagged == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.target.outputs.tag }}
+          TAG: ${{ needs.publish-gate.outputs.tag }}
+          TARGET: ${{ needs.publish-gate.outputs.target }}
         run: |
           set -euo pipefail
-          test "$(git rev-list -n 1 "refs/tags/$TAG")" = "${{ github.sha }}"
+          test "$(git rev-list -n 1 "refs/tags/$TAG")" = "$TARGET"
           gh auth setup-git
-          git push origin "refs/tags/$TAG"
+          git -c core.hooksPath=/dev/null push origin "refs/tags/$TAG"
 
       - name: Publish the GitHub Release and verify it is immutable
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.target.outputs.tag }}
+          TAG: ${{ needs.publish-gate.outputs.tag }}
+          TARGET: ${{ needs.publish-gate.outputs.target }}
         run: |
           set -euo pipefail
           NOTES="$RUNNER_TEMP/notes.md"
           test -n "$(tr -d '[:space:]' < "$NOTES")"
           REMOTE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
-          test "$REMOTE_SHA" = "${{ github.sha }}" || {
-            echo "::error::$TAG resolves to $REMOTE_SHA on GitHub, not to ${{ github.sha }}"
+          test "$REMOTE_SHA" = "$TARGET" || {
+            echo "::error::$TAG resolves to $REMOTE_SHA on GitHub, not to $TARGET"
             exit 1
           }
           EXISTING="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG\") | (.draft | tostring)")"
@@ -368,11 +467,11 @@ jobs:
                 and .tag_name == $tag and .name == $tag and (.body | norm) == ($body | norm)
               ' >/dev/null; then
               LOCKED_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
-              if [ "$LOCKED_SHA" != "${{ github.sha }}" ]; then
+              if [ "$LOCKED_SHA" != "$TARGET" ]; then
                 echo "::error::$TAG was moved to $LOCKED_SHA before its immutable release locked it; the release names the wrong commit and needs a maintainer"
                 exit 1
               fi
-              echo "$TAG is published, immutable, still at ${{ github.sha }} and carries the CHANGELOG section."
+              echo "$TAG is published, immutable, still at $TARGET and carries the CHANGELOG section."
               exit 0
             fi
             sleep 3

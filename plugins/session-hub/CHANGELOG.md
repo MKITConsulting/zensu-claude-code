@@ -21,4 +21,6 @@ and this plugin adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   receipt, lineage and usage directories and their schema versions are the ones the Zensu
   plugin writes. It needs Claude Code 2.1.296 or newer and `node` on the `PATH`, and its
   takeover briefs state the commit rule of the Zensu plugin's opt-in source-write gate for a
-  session where both plugins run.
+  session where both plugins run. Moving a session through it needs a Zensu Session Hub
+  release that reads handover contract 2; until then the Session Hub moves sessions through
+  the Zensu plugin's `/zensu:session-trail`.

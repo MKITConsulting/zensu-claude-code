@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$REPO_ROOT"
 
-CLAUDE_CODE_VERSION="2.1.317"
+CLAUDE_CODE_TOOL=".github/tools/claude-code"
 SUITES=(
   test-session-hub-plugin
   test-session-hub-receipt
@@ -22,8 +22,8 @@ for suite in "${SUITES[@]}"; do
     exit 1
   fi
 done
-echo "::group::install probe (Claude Code $CLAUDE_CODE_VERSION)"
-bash .github/scripts/session-hub-install-probe.sh "$CLAUDE_CODE_VERSION"
+echo "::group::install probe ($CLAUDE_CODE_TOOL)"
+bash .github/scripts/session-hub-install-probe.sh "$CLAUDE_CODE_TOOL"
 echo "::endgroup::"
 for suite in "${SUITES[@]}"; do
   echo "::group::$suite"

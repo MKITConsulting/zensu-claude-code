@@ -187,6 +187,11 @@ outside the session's Session Control root, and
 from a takeover brief gets no notice, so the companion's briefs state that rule
 themselves.
 
+`session-hub@zensu` installs once its first release, `session-hub--v1.0.0`, is
+published, right after the Zensu release that ships its marketplace entry; until
+then its install fails on a tag that does not exist yet. Moving a session
+through it also needs a Session Hub release that reads its handover contract 2.
+
 ## Try it
 
 The first two need no Zensu account.
