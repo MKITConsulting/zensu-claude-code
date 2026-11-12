@@ -509,8 +509,14 @@ fi
 review_gate_check
 
 FULL_SUITE_RUNNER="local"
+FULL_SUITE_WORK_DIR=""
+FULL_SUITE_WORK_FAULT=""
+if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
+  FULL_SUITE_WORK_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-work-tree --project-dir --session "$SESSION_ID" 2>/dev/null)" || FULL_SUITE_WORK_DIR=""
+  [ -n "$FULL_SUITE_WORK_DIR" ] || FULL_SUITE_WORK_FAULT="zensu-log.sh --chain-work-tree --project-dir could not resolve the work tree of this Autopilot-bound chain"
+fi
 if source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-full-suite-transport.sh" 2>/dev/null \
-  && [ "$(zensu_full_suite_policy_node "post-review-tdd-delegate.sh" effective 2>/dev/null)" = "ci" ]; then
+  && [ "$(zensu_full_suite_policy_node "post-review-tdd-delegate.sh" effective 0 "$FULL_SUITE_WORK_DIR" "$FULL_SUITE_WORK_FAULT" 2>/dev/null)" = "ci" ]; then
   FULL_SUITE_RUNNER="ci"
 fi
 FULL_SUITE_ROUND_NOTE="the full suite returns only when the review loop closes"
@@ -744,7 +750,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
   else
     MAX_CLOSE_SENTENCE="Before you reply, ${CLOSE_SUITE_STEP}. Fix rounds re-run only their own scoped suites and no terminus gate follows here, so ${CLOSE_SUITE_REASON}."
     if [ "$AUTOPILOT_BOUND" = "true" ]; then
-      MAX_CLOSE_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-work-tree --project-dir --session "$SESSION_ID" 2>/dev/null)" || MAX_CLOSE_DIR=""
+      MAX_CLOSE_DIR="$FULL_SUITE_WORK_DIR"
       MAX_CLOSE_CANON=""
       [ -n "$MAX_CLOSE_DIR" ] && MAX_CLOSE_CANON="$(cd "$MAX_CLOSE_DIR" 2>/dev/null && pwd -P)"
       MAX_ANCHOR_CANON=""

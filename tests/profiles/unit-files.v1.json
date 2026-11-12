@@ -83,9 +83,9 @@
       "summary": "The plan-approval notice for a plan that names another plugin's executor: the narrow classifier, the notice text and the origin-first payload decision."
     },
     {
-      "path": "tests/structure/full-suite-ci-v1.test.js", "registered": 45,
+      "path": "tests/structure/full-suite-ci-v1.test.js", "registered": 56,
       "runs": [{ "driver": "tests/structure/test-full-suite-ci.sh" }],
-      "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the per-version verification cache, the policy ladder, the chain-begin snapshot and the deferred-ci verdict."
+      "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the per-version verification cache, the policy ladder, the chain-begin snapshot, the deferred-ci verdict and the chain's own work tree."
     },
     {
       "path": "tests/structure/git-repo-escape.test.js", "registered": 63,

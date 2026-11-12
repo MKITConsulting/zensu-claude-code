@@ -69,6 +69,59 @@ function git(root, args, limits = LIMITS) {
   return String(result.stdout).trim();
 }
 
+function workflowTree(options, limits = LIMITS) {
+  const own = evr.workTreeTop(options.projectRoot, limits);
+  if (own.reason !== null) return { error: `git could not place the project root in a work tree: ${own.reason}` };
+  let real = options.projectRoot;
+  try {
+    real = fs.realpathSync.native(options.projectRoot);
+  } catch { }
+  const below = own.top ? path.relative(own.top, real) : '';
+  const prefix = below === '' || below === '..' || below.startsWith(`..${path.sep}`) || path.isAbsolute(below) ? '' : below.split(path.sep).join('/');
+  if (typeof options.workTree !== 'string' || options.workTree === '') return { tree: own.top || options.projectRoot, prefix };
+  const placed = evr.workTreeTop(options.workTree, limits);
+  if (placed.reason !== null) return { error: `git could not place the chain's work tree in a work tree: ${placed.reason}` };
+  return { tree: placed.top || options.workTree, prefix };
+}
+
+const PATTERN_SYNTAX_RE = /[*?[\]{}+!]/;
+
+function patternReaches(pattern, prefix) {
+  const clean = pattern.replace(/^\.\//, '');
+  const index = clean.search(PATTERN_SYNTAX_RE);
+  const end = index === -1 ? clean.length : Math.max(0, clean[index] === '?' ? index - 1 : index);
+  const head = clean.slice(0, end);
+  const below = `${prefix}/`;
+  return below.startsWith(head) || head.startsWith(below);
+}
+
+function patternCovers(pattern, prefix) {
+  const match = pattern.replace(/^\.\//, '').match(/^(.*?)\*\*(\/\*)?$/);
+  if (!match || PATTERN_SYNTAX_RE.test(match[1])) return false;
+  return match[1] === '' || (match[1].endsWith('/') && `${prefix}/`.startsWith(match[1]));
+}
+
+function pathFilterRefusal(scanned, workflowPath, prefix, limits = LIMITS) {
+  if (prefix === '') return null;
+  const where = `the project root lies in ${prefix} below the repository top, so its pull requests may never run the suite`;
+  if (scanned.flowTrigger) return `${workflowPath} writes its pull_request trigger in flow form, so its path filters were not read, and ${where}`;
+  for (const filter of scanned.filters) {
+    if (filter.key !== 'paths' && filter.key !== 'paths-ignore') continue;
+    if (filter.values.length === 0 || filter.values.length >= limits.maxListValues) return `${workflowPath} lists pull_request ${filter.key} patterns this check cannot read in full, and ${where}`;
+    if (filter.key === 'paths-ignore' && filter.values.some((value) => patternReaches(value, prefix))) {
+      return `${workflowPath} has a pull_request paths-ignore pattern that can match files in ${prefix}, and ${where}`;
+    }
+    if (filter.key === 'paths') {
+      const negated = filter.values.filter((value) => value.startsWith('!'));
+      const covered = filter.values.some((value) => !value.startsWith('!') && patternCovers(value, prefix));
+      if (!covered || negated.some((value) => patternReaches(value.slice(1), prefix))) {
+        return `${workflowPath} has pull_request paths patterns that do not cover every file in ${prefix}, and ${where}`;
+      }
+    }
+  }
+  return null;
+}
+
 function remoteUrl(projectRoot, env, limits = LIMITS) {
   const source = env || process.env;
   if (typeof source.ZENSU_VCS_REMOTE === 'string' && source.ZENSU_VCS_REMOTE !== '') return source.ZENSU_VCS_REMOTE;
@@ -658,6 +711,10 @@ function decorate(result, extra) {
 }
 
 function verify(options) {
+  return verifyIn(options, null);
+}
+
+function verifyIn(options, placedTree) {
   const limits = limitsWith(options.limits);
   const now = Number.isInteger(options.now) ? options.now : Date.now();
   const env = options.env || process.env;
@@ -666,16 +723,21 @@ function verify(options) {
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
   const workflowPath = normalizeWorkflowPath(options.workflow);
   if (!workflowPath) return unverified(`evidence.ci.workflow must name a .yml or .yaml file directly under ${WORKFLOW_DIR}`);
-  const identity = repoIdentity(remoteUrl(projectRoot, env, limits));
+  const placed = placedTree || workflowTree(options, limits);
+  if (placed.error) return unverified(placed.error);
+  const tree = placed.tree;
+  const identity = repoIdentity(remoteUrl(tree, env, limits));
   if (identity.provider === 'unknown') return unverified('the repository has no usable git remote');
   if (identity.provider !== 'github') return unverified(`the code forge ${identity.host} is not supported yet (GitHub.com only)`);
-  const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  const file = readWorkflowFile(tree, workflowPath, limits);
   if (file.error) return unverified(file.error);
   const scanned = scanWorkflow(file.text, limits);
   if (!scanned.readable) return unverified(`${workflowPath}: ${scanned.reason}`);
   if (!scanned.pullRequest) {
     return unverified(`${workflowPath} does not trigger on pull_request${scanned.pullRequestTarget ? ' (pull_request_target runs the base branch workflow and does not count)' : ''}`);
   }
+  const filtered = pathFilterRefusal(scanned, workflowPath, placed.prefix, limits);
+  if (filtered) return unverified(filtered);
   let directory = null;
   try {
     directory = cacheDirectory(options.pluginData);
@@ -729,16 +791,18 @@ function discover(options) {
   const projectRoot = options.projectRoot;
   if (typeof projectRoot !== 'string' || projectRoot === '') return unverified('no project root is bound');
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
+  const placed = workflowTree(options, limits);
+  if (placed.error) return unverified(placed.error);
   const candidates = [];
-  for (const workflowPath of listWorkflows(projectRoot, limits)) {
-    const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  for (const workflowPath of listWorkflows(placed.tree, limits)) {
+    const file = readWorkflowFile(placed.tree, workflowPath, limits);
     if (file.error) continue;
     if (scanWorkflow(file.text, limits).pullRequest) candidates.push(workflowPath);
   }
   if (candidates.length === 0) return unverified(`no workflow under ${WORKFLOW_DIR} triggers on pull_request`);
   let last = null;
   for (const workflowPath of candidates.slice(0, limits.maxCandidates)) {
-    const result = verify({ ...options, workflow: workflowPath, job: null });
+    const result = verifyIn({ ...options, workflow: workflowPath, job: null }, placed);
     if (result.verified) return result;
     last = result;
   }

@@ -1347,6 +1347,7 @@ function ciPolicyFor(directory, env) {
       pluginData: 'ZENSU_EVR_PLUGIN_DATA',
       sessionKey: 'ZENSU_EVR_SESSION_KEY',
       projectRoot: 'ZENSU_EVR_PROJECT_ROOT',
+      workTree: 'ZENSU_EVR_WORK_TREE',
       marker: 'full-suite-marker',
     });
     const resolved = policy.resolve({ ...inputs, mode: 'cache', requireSnapshot: true, needCandidate: false });

@@ -805,10 +805,11 @@ test('the effective CLI answers ci only for a verified clone choice with a ci sn
   assert.equal(after.stdout.trim(), 'ci');
 });
 
-function snapshotCli(root, data, gh, markerState = 'none') {
+function snapshotCli(root, data, gh, markerState = 'none', chain = {}) {
   const transport = tempDir('transport');
   fs.writeFileSync(path.join(transport, 'ci-config.json'), '{}');
   fs.writeFileSync(path.join(transport, 'marker-state'), markerState);
+  if (typeof chain.fault === 'string') fs.writeFileSync(path.join(transport, 'work-tree-fault'), chain.fault);
   const pathKey = Object.keys(CLEAN_ENV).find((name) => name.toUpperCase() === 'PATH') || 'PATH';
   const env = {
     ...CLEAN_ENV,
@@ -818,6 +819,7 @@ function snapshotCli(root, data, gh, markerState = 'none') {
     ZENSU_FSP_PLUGIN_DATA: data,
     ZENSU_FSP_SESSION_KEY: SESSION,
     ZENSU_FSP_PROJECT_ROOT: root,
+    ZENSU_FSP_WORK_TREE: chain.workTree || '',
   };
   const result = childProcess.spawnSync(process.execPath, [CLI, 'snapshot'], { env, encoding: 'utf8' });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr, snapshot: policy.readSnapshot(policy.stores(data), SESSION) };
@@ -893,4 +895,246 @@ test('the chain CLI answers with the runner the chain began with, while the poli
   assert.match(cli('policy').stdout, /^full suite: ci \| /);
   policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'this clone' }, Date.now());
   assert.match(cli('chain').stdout, /^full suite: ci \| .* \| decided by: this clone\n/);
+});
+
+const PUSH_ONLY = 'on:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: x\n';
+const UNREADABLE_RUN = 'the bound run record is unreadable';
+
+function nestedWorktreeOf(root, name, workflow) {
+  fs.appendFileSync(path.join(root, '.gitignore'), '.claude/worktrees/\n');
+  sh(root, 'git add .gitignore && git commit -q -m ignore-worktrees');
+  const tree = path.join(root, '.claude', 'worktrees', name);
+  sh(root, `git worktree add -q ${JSON.stringify(tree)} -b ${name}`);
+  const real = fs.realpathSync(tree);
+  fs.writeFileSync(workflowFile(real), workflow);
+  sh(real, 'git add -A && git commit -q -m variant');
+  return real;
+}
+
+test('verify reads the workflow files of the work tree it is given, and the project root\'s files without one', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-push-only', PUSH_ONLY);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  const anchor = contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR }));
+  assert.equal(anchor.verified, true, anchor.reason);
+  const chain = contract.verify(verifyOptions(root, data, gh, { workTree: nested, mode: 'cache', now: NOW + HOUR }));
+  assert.equal(chain.verified, false);
+  assert.equal(chain.reason, '.github/workflows/ci.yml does not trigger on pull_request');
+  const found = contract.discover(verifyOptions(root, data, gh, { workTree: nested, workflow: undefined, mode: 'cache', now: NOW + HOUR }));
+  assert.equal(found.verified, false);
+  assert.equal(found.reason, 'no workflow under .github/workflows triggers on pull_request');
+});
+
+test('verify reads the remote of the work tree it is given, so the chain\'s own branch decides its upstream', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-fork', `${WORKFLOW}# the chain's branch\n`);
+  sh(root, 'git remote add fork https://github.com/other/app.git');
+  sh(nested, 'git update-ref refs/remotes/fork/auto-fork HEAD && git config branch.auto-fork.remote fork && git config branch.auto-fork.merge refs/heads/auto-fork');
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { mode: 'cache' })).repo, REPO);
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { workTree: nested, mode: 'cache' })).repo, 'other/app');
+  assert.deepEqual(gh.calls(), []);
+});
+
+test('a project root below the repository top reads the workflow files at the top, where GitHub reads them', () => {
+  const root = project();
+  const sub = path.join(root, 'packages', 'app');
+  fs.mkdirSync(sub, { recursive: true });
+  const gh = ghShim(responses());
+  const result = contract.verify(verifyOptions(sub, tempDir('data'), gh));
+  assert.equal(result.verified, true, result.reason);
+  assert.equal(result.workflow, WF);
+  const found = contract.discover(verifyOptions(sub, tempDir('data'), gh, { workflow: undefined }));
+  assert.equal(found.verified, true, found.reason);
+});
+
+test('the policy judges a bound chain by its nested worktree\'s workflow file, so an anchor branch switch changes nothing the chain reads', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-chain', `${WORKFLOW}# the chain's branch\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  const stores = policy.stores(data);
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  policy.writeClone(stores, root, 'ci', WF, 'test', NOW);
+  const inputs = (extra = {}) => policyInputs(root, data, { workTree: nested, env: { ...CLEAN_ENV, ...gh.env }, ghPath: gh.ghPath, ...extra });
+  const cached = policy.resolve(inputs());
+  assert.equal(cached.runner, 'local');
+  assert.equal(cached.ciRequested, true);
+  assert.match(cached.reason, /in this working tree differs from every verified version/);
+  const calls = gh.calls().length;
+  const snapshot = policy.snapshotPolicy(inputs(), NOW + HOUR);
+  assert.equal(snapshot.runner, 'ci', snapshot.reason);
+  assert.ok(gh.calls().length > calls, 'the begin refresh asked GitHub about the worktree\'s version');
+  assert.equal(fs.existsSync(proofFile(data, blobOf(nested))), true);
+  policy.writeSnapshot(stores, SESSION, root, snapshot, NOW + HOUR);
+  fs.writeFileSync(workflowFile(root), PUSH_ONLY);
+  const terminus = policy.resolve({ ...inputs(), requireSnapshot: true });
+  assert.equal(terminus.runner, 'ci', terminus.reason);
+  assert.equal(terminus.decidedBy, 'this clone');
+  const anchor = policy.resolve({ ...policyInputs(root, data), requireSnapshot: true });
+  assert.equal(anchor.runner, 'local');
+  assert.match(anchor.reason, /does not trigger on pull_request$/);
+  assert.equal(policy.readClone(stores, nested).runner, 'ci');
+  policy.writeSnapshot(stores, SESSION, nested, snapshot, NOW + HOUR);
+  const foreign = policy.resolve({ ...inputs(), requireSnapshot: true });
+  assert.equal(foreign.runner, 'local');
+  assert.equal(foreign.reason, 'this chain recorded no full-suite snapshot when it began, so it closes as a local chain');
+});
+
+test('a work-tree lookup fault never falls back to the anchor: the policy resolves unverified and names the cause', () => {
+  const { root, data } = verifiedProject();
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', NOW);
+  const prefix = 'the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: the chain\'s work tree could not be resolved: ';
+  const faulted = policy.resolve(policyInputs(root, data, { workTreeFault: UNREADABLE_RUN }));
+  assert.equal(faulted.runner, 'local');
+  assert.equal(faulted.ciRequested, true);
+  assert.equal(faulted.reason, `${prefix}${UNREADABLE_RUN}`);
+  assert.equal(policy.resolve(policyInputs(root, data, { workTreeFault: '' })).reason, `${prefix}${evr.WORK_TREE_FAULT_UNREAD}`);
+  assert.equal(policy.resolve(policyInputs(root, data, { workTreeFault: null })).runner, 'ci');
+  assert.equal(policy.resolve(policyInputs(root, data, { workTreeFault: UNREADABLE_RUN, markerState: 'local' })).reason, 'the session marker chose local full-suite runs');
+});
+
+test('the policy CLI reads the chain\'s work tree and its lookup fault from the transport', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-cli', PUSH_ONLY);
+  const data = tempDir('data');
+  const gh = ghShim(responses({}, Date.now()));
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { now: Date.now() })).verified, true);
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', Date.now());
+  const tail = ' | decided by: this clone | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before\n';
+  const chain = snapshotCli(root, data, gh, 'none', { workTree: nested });
+  assert.equal(chain.status, 0, chain.stderr);
+  assert.equal(chain.snapshot && chain.snapshot.runner, 'local');
+  assert.equal(chain.stdout, `full suite: local | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: .github/workflows/ci.yml does not trigger on pull_request${tail}`);
+  const faulted = snapshotCli(root, data, gh, 'none', { fault: UNREADABLE_RUN });
+  assert.equal(faulted.status, 0, faulted.stderr);
+  assert.equal(faulted.snapshot && faulted.snapshot.runner, 'local');
+  assert.equal(faulted.stdout, `full suite: local | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: the chain's work tree could not be resolved | work tree: ${UNREADABLE_RUN}${tail}`);
+  const anchor = snapshotCli(root, data, gh);
+  assert.equal(anchor.snapshot && anchor.snapshot.runner, 'ci');
+});
+
+test('the runner\'s CI policy reads the chain\'s work tree and its lookup fault from the evidence-run transport', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-runner', PUSH_ONLY);
+  const data = tempDir('data');
+  const gh = ghShim(responses({}, Date.now()));
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { now: Date.now() })).verified, true);
+  const stores = policy.stores(data);
+  policy.writeClone(stores, root, 'ci', WF, 'test', Date.now());
+  policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'this clone' }, Date.now());
+  const verdictLines = (chain = {}) => {
+    const transport = tempDir('evr-transport');
+    fs.writeFileSync(path.join(transport, 'ci-config.json'), '{}');
+    fs.writeFileSync(path.join(transport, 'full-suite-marker'), 'none');
+    if (typeof chain.fault === 'string') fs.writeFileSync(path.join(transport, 'work-tree-fault'), chain.fault);
+    const env = { ...CLEAN_ENV, ZENSU_EVR_DIR: transport, ZENSU_EVR_PLUGIN_DATA: data, ZENSU_EVR_SESSION_KEY: SESSION, ZENSU_EVR_PROJECT_ROOT: root, ZENSU_EVR_WORK_TREE: chain.workTree || '' };
+    const result = childProcess.spawnSync(process.execPath, ['-e', 'require(process.argv[1]).main(["verdict"]).then((code) => { process.exitCode = code; })', path.join(LIB_DIR, 'evidence-run-v1.js')], { env, encoding: 'utf8' });
+    return result.stderr.split('\n').filter(Boolean);
+  };
+  const anchor = verdictLines();
+  assert.ok(anchor.some((line) => line.startsWith('FULL SUITE — CI contract | CI: .github/workflows/ci.yml, job "test"')), anchor.join('\n'));
+  const chain = verdictLines({ workTree: nested });
+  assert.ok(chain.includes('FULL SUITE — local runner | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: .github/workflows/ci.yml does not trigger on pull_request | decided by: this clone'), chain.join('\n'));
+  assert.equal(chain.some((line) => line.startsWith('FULL SUITE — CI contract')), false);
+  const faulted = verdictLines({ fault: UNREADABLE_RUN });
+  assert.ok(faulted.includes(`FULL SUITE — local runner | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: the chain's work tree could not be resolved: ${UNREADABLE_RUN} | decided by: this clone`), faulted.join('\n'));
+  assert.ok(faulted.some((line) => line.startsWith('FULL SUITE — unavailable | the work tree of this Autopilot-bound chain could not be resolved')), faulted.join('\n'));
+});
+
+test('a git refusal at the project root is named as the cause instead of reading the project root as the tree', () => {
+  const root = project();
+  const gh = ghShim(responses());
+  const home = tempDir('git-home');
+  const isolated = { HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), GIT_CONFIG_NOSYSTEM: '1', GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' };
+  const saved = {};
+  let verified;
+  let discovered;
+  try {
+    for (const [name, value] of Object.entries(isolated)) {
+      saved[name] = process.env[name];
+      process.env[name] = value;
+    }
+    verified = contract.verify(verifyOptions(root, tempDir('data'), gh));
+    discovered = contract.discover(verifyOptions(root, tempDir('data'), gh, { workflow: undefined }));
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+  assert.equal(verified.verified, false);
+  assert.match(verified.reason, /^git could not place the project root in a work tree: git rev-parse failed: fatal: detected dubious ownership in repository/);
+  assert.equal(discovered.verified, false);
+  assert.match(discovered.reason, /^git could not place the project root in a work tree: /);
+});
+
+test('a project root below the repository top is unverified when a pull_request path filter can leave it out, and passes one that covers it', () => {
+  const pathsOnly = (patterns) => WORKFLOW.replace("    paths-ignore:\n      - 'docs/**'", `    paths:\n${patterns.map((pattern) => `      - '${pattern}'`).join('\n')}`);
+  const ignoring = WORKFLOW.replace("      - 'docs/**'", "      - 'docs/**'\n      - 'services/b/**'");
+  const cases = [
+    [pathsOnly(['services/a/**']), 'has pull_request paths patterns that do not cover every file in services/b'],
+    [pathsOnly(['services/**', '!services/b/legacy/**']), 'has pull_request paths patterns that do not cover every file in services/b'],
+    [ignoring, 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [WORKFLOW.replace("      - 'docs/**'", "      - '**.md'"), 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [WORKFLOW.replace("      - 'docs/**'", "      - 'docs/**'\n      - 'services/bx?/**'"), 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [pathsOnly(['**', '!services/bx?/**']), 'has pull_request paths patterns that do not cover every file in services/b'],
+    [WORKFLOW.replace("      - 'docs/**'", "      - 'docs/**'\n      - '!docs/keep/**'"), 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [WORKFLOW.replace("  pull_request:\n    paths-ignore:\n      - 'docs/**'", "  pull_request: { paths-ignore: ['docs/**'] }"), 'writes its pull_request trigger in flow form, so its path filters were not read'],
+    [WORKFLOW.replace("      - 'docs/**'", Array.from({ length: 20 }, (_, item) => `      - 'docs/part${item}/**'`).join('\n')), 'lists pull_request paths-ignore patterns this check cannot read in full'],
+  ];
+  for (const [workflow, reason] of cases) {
+    const root = project(workflow);
+    const sub = path.join(root, 'services', 'b');
+    fs.mkdirSync(sub, { recursive: true });
+    const result = contract.verify(verifyOptions(sub, tempDir('data'), ghShim(responses())));
+    assert.equal(result.verified, false, workflow);
+    assert.equal(result.reason, `${WF} ${reason}, and the project root lies in services/b below the repository top, so its pull requests may never run the suite`);
+    assert.equal(contract.verify(verifyOptions(root, tempDir('data'), ghShim(responses()))).verified, true, `the repository top ignores the filter: ${workflow}`);
+  }
+  for (const covering of [pathsOnly(['services/**']), pathsOnly(['**']), pathsOnly(['services/b/**', 'docs/**'])]) {
+    const root = project(covering);
+    const sub = path.join(root, 'services', 'b');
+    fs.mkdirSync(sub, { recursive: true });
+    const result = contract.verify(verifyOptions(sub, tempDir('data'), ghShim(responses())));
+    assert.equal(result.verified, true, `${covering}\n${result.reason}`);
+  }
+});
+
+test('the retire mode removes the session\'s snapshot without a transport directory and refuses an invalid session key', async () => {
+  const root = project();
+  const data = tempDir('data');
+  const stores = policy.stores(data);
+  policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'session marker' });
+  assert.equal(policy.readSnapshot(stores, SESSION).runner, 'ci');
+  const quiet = { write: () => true };
+  const original = process.stderr.write;
+  let retired;
+  let refused;
+  try {
+    process.stderr.write = quiet.write;
+    retired = await policy.main(['retire'], { ZENSU_FSP_PLUGIN_DATA: data, ZENSU_FSP_SESSION_KEY: SESSION });
+    refused = await policy.main(['retire'], { ZENSU_FSP_PLUGIN_DATA: data, ZENSU_FSP_SESSION_KEY: 'not-a-session' });
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.equal(retired, 0);
+  assert.equal(policy.readSnapshot(stores, SESSION), null);
+  assert.equal(refused, 2);
+  assert.equal(await policy.main(['retire'], { ZENSU_FSP_PLUGIN_DATA: data, ZENSU_FSP_SESSION_KEY: SESSION }), 0);
+});
+
+test('a long work-tree lookup cause keeps its own segment in the snapshot line, so the display cut never drops it', () => {
+  const root = project();
+  const data = tempDir('data');
+  const gh = ghShim(responses({}, Date.now()));
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', Date.now());
+  const cause = 'the record of the bound Autopilot run fsci_bound_push_run could not be read, so the chain\'s worktree is unknown';
+  const faulted = snapshotCli(root, data, gh, 'none', { fault: cause });
+  assert.equal(faulted.status, 0, faulted.stderr);
+  assert.equal(faulted.snapshot && faulted.snapshot.runner, 'local');
+  assert.ok(faulted.stdout.includes(` | work tree: ${cause} | decided by: this clone | `), faulted.stdout);
 });
