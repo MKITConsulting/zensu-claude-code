@@ -23,8 +23,8 @@ const VALIDATE = 'Validate test-gate skip request';
 const PUBLISH_GATE = 'Deterministic exact-main-SHA gate';
 const PUBLISH_PLAN_GATE = 'Decide the exact-main-SHA gate';
 const PUBLISH_DECISION = 'COMMIT_MSG="$(git log -1 --format=%B HEAD)"';
-const PREPARE_EVIDENCE = 'if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ] && [ "$GITLAB_RESULT" = skipped ] && [ -n "${SKIP_REASON//[[:space:]]/}" ]; then';
-const PUBLISH_EVIDENCE = 'if [ "$GATE_DECISION" = skipped ] && [ "$SUITE_RESULT" = skipped ] && [ "$GITLAB_RESULT" = skipped ] && [ -n "${GATE_REASON//[[:space:]]/}" ]; then';
+const PREPARE_EVIDENCE = 'if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ] && [ "$GITLAB_RESULT" = skipped ] && [ "$LIVE_GITHUB_RESULT" = skipped ] && [ -n "${SKIP_REASON//[[:space:]]/}" ]; then';
+const PUBLISH_EVIDENCE = 'if [ "$GATE_DECISION" = skipped ] && [ "$SUITE_RESULT" = skipped ] && [ "$GITLAB_RESULT" = skipped ] && [ "$LIVE_GITHUB_RESULT" = skipped ] && [ -n "${GATE_REASON//[[:space:]]/}" ]; then';
 const RELEASE_SUBJECT = 'chore(release): bump version to 9.9.9';
 const EXPECTED_SHA = 'f'.repeat(40);
 const HOSTILE = 'it\'s "quoted" `touch backtick-ran` $(touch dollar-ran) ${HOME} $HOME;  exit 7\t* \\ 100%';
@@ -154,12 +154,13 @@ function publishDecision(repo, context) {
   return decide(stepNamed('publish-plan', PUBLISH_PLAN_GATE), PUBLISH_DECISION, context, repo);
 }
 
-function publishEvidence(cwd, gate, reason, suiteResult, gitlabResult = suiteResult) {
+function publishEvidence(cwd, gate, reason, suiteResult, gitlabResult = suiteResult, githubResult = suiteResult) {
   return decide(stepNamed('publish', PUBLISH_GATE), PUBLISH_EVIDENCE, {
     'needs.publish-plan.outputs.gate': gate,
     'needs.publish-plan.outputs.gate_reason': reason,
     'needs.publish-suite.result': suiteResult,
     'needs.publish-gitlab-live.result': gitlabResult,
+    'needs.publish-github-live.result': githubResult,
     'github.sha': EXPECTED_SHA,
   }, cwd);
 }
@@ -186,7 +187,7 @@ function createReleaseCommit({ repo, output }, skipTestGate, skipReason) {
   }, repo, { GITHUB_OUTPUT: output });
 }
 
-function evidenceDecision(cwd, skipTestGate, skipReason, suiteResult, gitlabResult = suiteResult) {
+function evidenceDecision(cwd, skipTestGate, skipReason, suiteResult, gitlabResult = suiteResult, githubResult = suiteResult) {
   return decide(
     stepNamed('prepare', 'Record deterministic exact-commit runtime evidence'),
     PREPARE_EVIDENCE,
@@ -195,6 +196,7 @@ function evidenceDecision(cwd, skipTestGate, skipReason, suiteResult, gitlabResu
       'inputs.skip_reason': skipReason,
       'needs.prepare-suite.result': suiteResult,
       'needs.prepare-gitlab-live.result': gitlabResult,
+      'needs.prepare-github-live.result': githubResult,
     },
     cwd,
     { EXPECTED_SHA },
@@ -560,6 +562,25 @@ test('the prepare evidence step refuses a gate the GitLab live result contradict
   }
 });
 
+test('the prepare evidence step refuses a gate the GitHub live result contradicts', () => {
+  for (const [skipTestGate, reason, suiteResult, githubResult] of [
+    ['false', '', 'success', 'failure'],
+    ['false', '', 'success', 'cancelled'],
+    ['false', '', 'success', 'skipped'],
+    ['false', '', 'success', ''],
+    ['true', HOSTILE, 'skipped', 'success'],
+    ['true', HOSTILE, 'skipped', 'failure'],
+  ]) {
+    withDir((cwd) => {
+      const result = evidenceDecision(cwd, skipTestGate, reason, suiteResult, suiteResult, githubResult);
+      assert.strictEqual(result.status, 1, `${skipTestGate}/${suiteResult}/${githubResult}: ${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /^::error::the release suite result \(.*, GitHub live: .*\) does not match the gate decision/m);
+      assert.doesNotMatch(result.stdout, /::warning::/);
+      assert.deepStrictEqual(executed(cwd), []);
+    });
+  }
+});
+
 test('the publish evidence step records passed only after every suite shard succeeded', () => {
   withDir((cwd) => {
     const result = publishEvidence(cwd, 'run', '', 'success');
@@ -616,6 +637,25 @@ test('the publish evidence step refuses a gate the GitLab live result contradict
       const result = publishEvidence(cwd, gate, reason, suiteResult, gitlabResult);
       assert.strictEqual(result.status, 1, `${gate}/${suiteResult}/${gitlabResult}: ${result.stdout}${result.stderr}`);
       assert.match(result.stdout, /^::error::the publish suite result \(.*, GitLab live: .*\) does not match the planned gate/m);
+      assert.doesNotMatch(result.stdout, /::warning::/);
+      assert.deepStrictEqual(executed(cwd), []);
+    });
+  }
+});
+
+test('the publish evidence step refuses a gate the GitHub live result contradicts', () => {
+  for (const [gate, reason, suiteResult, githubResult] of [
+    ['run', '', 'success', 'failure'],
+    ['run', '', 'success', 'cancelled'],
+    ['run', '', 'success', 'skipped'],
+    ['run', '', 'success', ''],
+    ['skipped', HOSTILE, 'skipped', 'success'],
+    ['skipped', HOSTILE, 'skipped', 'failure'],
+  ]) {
+    withDir((cwd) => {
+      const result = publishEvidence(cwd, gate, reason, suiteResult, suiteResult, githubResult);
+      assert.strictEqual(result.status, 1, `${gate}/${suiteResult}/${githubResult}: ${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /^::error::the publish suite result \(.*, GitHub live: .*\) does not match the planned gate/m);
       assert.doesNotMatch(result.stdout, /::warning::/);
       assert.deepStrictEqual(executed(cwd), []);
     });

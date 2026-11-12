@@ -55,6 +55,7 @@
     "test-full-suite-gate.sh",
     "test-gauntlet-loop-skill.sh",
     "test-ghost-scan-test-detection.sh",
+    "test-github-live-workflow.sh",
     "test-gitignore-zensu.sh",
     "test-gitlab-live-workflow.sh",
     "test-harness-launcher.sh",
@@ -197,6 +198,7 @@
   ],
   "nodeDepsStructureTests": [
     "test-clock-shift.sh",
+    "test-github-live-workflow.sh",
     "test-gitlab-live-workflow.sh",
     "test-playwright-cli-drift.sh",
     "test-promptfoo-session-upgrade.sh",

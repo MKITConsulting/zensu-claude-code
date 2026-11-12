@@ -1,0 +1,21 @@
+{
+  "schema": "zensu-github-live-versions-v1",
+  "gh": [
+    {
+      "version": "2.48.0",
+      "role": "floor-first-api-slurp",
+      "sha256": {
+        "linux_amd64": "1c477e2562aca8679b0219569f0482f1975de76daca8ba307892c1787338a28d",
+        "darwin_arm64": "b82c847c581d2540d12f266d7f1739274c5cccbfc0dffe236739ac5cc21acc91"
+      }
+    },
+    {
+      "version": "2.103.3",
+      "role": "newest-pinned",
+      "sha256": {
+        "linux_amd64": "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d",
+        "darwin_arm64": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062"
+      }
+    }
+  ]
+}

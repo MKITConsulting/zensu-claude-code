@@ -127,10 +127,10 @@ fi
 
 DOWNLOAD_PIN='actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4'
 DOWNLOADS="$(grep -c 'uses: actions/download-artifact@' "$WORKFLOW")"
-if [ "$DOWNLOADS" -eq 3 ] && [ "$(grep -Fc -- "$DOWNLOAD_PIN" "$WORKFLOW")" -eq "$DOWNLOADS" ]; then
-  check "All three release-commit bundle downloads use the pinned artifact action" PASS
+if [ "$DOWNLOADS" -eq 4 ] && [ "$(grep -Fc -- "$DOWNLOAD_PIN" "$WORKFLOW")" -eq "$DOWNLOADS" ]; then
+  check "All four release-commit bundle downloads use the pinned artifact action" PASS
 else
-  check "All three release-commit bundle downloads use the pinned artifact action" FAIL
+  check "All four release-commit bundle downloads use the pinned artifact action" FAIL
 fi
 
 contains "The release commit travels as a bundle that excludes everything but itself" \

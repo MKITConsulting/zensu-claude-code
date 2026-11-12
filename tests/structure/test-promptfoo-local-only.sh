@@ -42,15 +42,15 @@ let source = fs.readdirSync(root)
   .map((name) => fs.readFileSync(path.join(root, name), 'utf8'))
   .join('\n');
 source = source.replace(
-  /\$\{\{\s*secrets\.(?:GITHUB_TOKEN|IMMUTABLE_RELEASES_ADMIN_TOKEN)\s*\}\}/g,
+  /\$\{\{\s*secrets\.(?:GITHUB_TOKEN|IMMUTABLE_RELEASES_ADMIN_TOKEN|ZENSU_GITHUB_IT_APP_KEY)\s*\}\}/g,
   '',
 );
 process.exit(/\bsecrets\b/.test(source) ? 1 : 0);
 NODE
 then
-  check "Actions secrets are limited to repository and immutable-release administration" PASS
+  check "Actions secrets are limited to repository and immutable-release administration and the GitHub live sandbox App" PASS
 else
-  check "Actions secrets are limited to repository and immutable-release administration" FAIL
+  check "Actions secrets are limited to repository and immutable-release administration and the GitHub live sandbox App" FAIL
 fi
 
 if [ ! -e "$WORKFLOWS/session-control-nightly.yml" ] \
