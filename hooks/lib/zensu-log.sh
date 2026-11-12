@@ -368,6 +368,7 @@ _zensu_chain_project_dir() {
 _zensu_bound_work_tree_lookup() {
   local session="$1" scratch="$2" given="$3" ctx="$4" state open line dir unknown
   unknown="this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"
+  zensu_memoize_project_dir >/dev/null 2>&1 || true
   if [ "$given" != "given" ]; then
     command -v tdd_autopilot_context >/dev/null 2>&1 \
       || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh" 2>/dev/null \
@@ -474,6 +475,33 @@ _zensu_avr_work_tree() {
   _avr_work_tree=""
   _bwt_fault="its path cannot be handed to node"
   return 1
+}
+
+_zensu_full_suite_work_tree() {
+  local scratch
+  _fsw_tree=""
+  _fsw_fault=""
+  scratch="$(mktemp -d 2>/dev/null)" || {
+    _fsw_fault="no temporary directory was available for the work-tree lookup"
+    return 0
+  }
+  _zensu_bound_work_tree "${1:-}" "$scratch"
+  rm -rf "$scratch"
+  if [ -n "$_bwt_fault" ]; then
+    _fsw_fault="$_bwt_fault"
+  elif [ -n "$_bwt_tree" ] && [ -n "$_bwt_dir_fault" ]; then
+    _fsw_fault="$_bwt_dir_fault"
+  else
+    case "$_bwt_dir$_bwt_tree" in
+      (*'"'*|*'$'*|*'`'*|*'\'*)
+        _fsw_fault="the chain's work tree contains a double quote, a dollar sign, a backtick or a backslash"
+        ;;
+      (*)
+        _fsw_tree="$_bwt_tree"
+        ;;
+    esac
+  fi
+  return 0
 }
 
 _zensu_acceptance_gate() {
@@ -606,6 +634,8 @@ _avr_dir=""
 _evr_work_tree=""
 _evr_work_dir=""
 _avr_work_tree=""
+_fsw_tree=""
+_fsw_fault=""
 
 case "${1:-}" in
   --evidence-run)
@@ -678,7 +708,8 @@ case "${1:-}" in
         *) echo "zensu-log.sh --full-suite-policy: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
-    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" "$_fsp_mode" "$_fsp_refresh"
+    _zensu_full_suite_work_tree "${ZENSU_SESSION_KEY:-}"
+    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" "$_fsp_mode" "$_fsp_refresh" "$_fsw_tree" "$_fsw_fault"
     exit $?
     ;;
   --external-review)
@@ -2018,7 +2049,10 @@ case "${1:-}" in
           _zensu_review_gate_reset "--tdd-begin" "$session_val" \
             "the previous generation's review packets and reviewer records could not be removed; this chain's review rounds still compare against packets created after this point."
           zensu_stop_background_wait_reset "$session_val"
-          if ! begin_full_suite_line="$(zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot 2>/dev/null)"; then
+          zensu_full_suite_snapshot_retire "zensu-log.sh --tdd-begin" 2>/dev/null \
+            || echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT RETIREMENT UNRESOLVED — the previous chain's full-suite runner could not be removed, so it stays in force for this chain unless this chain records its own." >&2
+          _zensu_full_suite_work_tree "$session_val"
+          if ! begin_full_suite_line="$(zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot 0 "$_fsw_tree" "$_fsw_fault" 2>/dev/null)"; then
             begin_full_suite_line=""
             echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
           fi

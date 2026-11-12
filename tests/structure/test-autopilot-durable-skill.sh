@@ -146,5 +146,38 @@ else
   check "D16 an ExitPlanMode ordering statement or part of its standalone fall-through consequence is missing" FAIL
 fi
 
+D17_RULES="$ROOT/skills/autopilot/rules/pr-open.md"
+D17_WO="$ROOT/skills/autopilot/rules/work-order.md"
+D17_STEP3="$(grep -n '^3\. \*\*Open the PR\*\*' "$AUTO" | head -1)"
+D17_WO_OPEN="$(grep -n '^- \*\*Opening the pull request\*\*' "$D17_WO" | head -1)"
+if has "$AUTO" '2. **Gates green** — commit (`rules/conventions.md`), then run the resolved `gates:` recipe;' \
+  && has "$AUTO" 'tested back here, without `GATES_FAILED` (`rules/pr-open.md`).' \
+  && has "$AUTO" 'after each fix re-run step 2 and this report' \
+  && has "$AUTO" '3. **Open the PR** — push, then open the PR/MR' \
+  && has "$AUTO" 'returns the PR/MR URL). Follow `rules/pr-open.md`:' \
+  && has "$AUTO" 're-apply the body on every push to an' \
+  && [ -n "$D17_STEP3" ] && ! printf '%s' "$D17_STEP3" | grep -qi 'commit' \
+  && has "$D17_RULES" 'Every head SHA the run persists is the full `git rev-parse HEAD` value, never an abbreviation' \
+  && has "$D17_RULES" "status --porcelain -- . ':(exclude,glob)**/.zensu/**'" \
+  && has "$D17_RULES" 'line that status prints, is work the gates never tested, so nothing reaches the forge: return to' \
+  && has "$ROOT/hooks/session-start-autopilot-resume.sh" 'Commit and re-run the gates when the working tree holds changes outside .zensu/ or HEAD differs from the gate evidence' \
+  && has "$D17_RULES" 'Persist no new `PR_OPEN_REQUESTED`, which the state machine refuses, and never call `--open-pr`' \
+  && has "$D17_RULES" '1. Before any push, find the PR/MR with `bash "$VCS" --locate-pr --provider "$PROVIDER"`, run' \
+  && has "$D17_RULES" 'Act on the answer, and push only in the first and the third case:' \
+  && has "$D17_RULES" '`PR_NOT_OPEN` and halt.' \
+  && has "$D17_RULES" 'the lookup failed. Persist `BLOCK` with code `PR_LOOKUP_FAILED` and halt.' \
+  && has "$D17_RULES" '`bash "$VCS" --diff-refs --provider "$PROVIDER" <id>`' \
+  && has "$D17_RULES" 'Never send this mismatch back to step 2, which would' \
+  && has "$D17_RULES" 'returns to step 2 once per open request.' \
+  && has "$D17_RULES" 'These three cases never go back to step 2:' \
+  && has "$D17_RULES" '- a gate event the state machine refuses with `gates already recorded for this head`;' \
+  && has "$D17_RULES" 'stop-the-world blocker: persist `BLOCK` with code `PR_HEAD_GATE_MISMATCH` and halt.' \
+  && [ -n "$D17_WO_OPEN" ] && ! printf '%s' "$D17_WO_OPEN" | grep -qi 'commit' \
+  && has "$D17_WO" 'persist `PR_OPEN_REQUESTED` unless the run already records it'; then
+  check "D17 the gates run on a committed head, step 3 only pushes and re-gates a head the gates never tested once per open request, and a requested PR/MR is taken over instead of opened twice" PASS
+else
+  check "D17 the commit-before-gates order, the step-3 head check, the requested-PR/MR takeover or the re-gate bound is missing from the skill, rules/pr-open.md or rules/work-order.md" FAIL
+fi
+
 rm -f "$TDD"
 echo "----"; echo "test-autopilot-durable-skill: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]
