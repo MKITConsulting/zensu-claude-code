@@ -269,12 +269,12 @@ specified in `skills/autopilot/rules/conventions.md`.
     swallowed). It infers the repo from **cwd** (caller `cd "$REPO"`) — no `--repo-id`, matching
     `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh` execution untested
     (hermetic argv seam, same stance as Phases 1-3), while glab `--open-pr` runs live (Step 5). `--pr-state` (Phase 2) is REUSED for the pre-push
-    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O7),
+    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O8),
     `tests/integration/gitlab/test-vcs-gitlab-live.sh` (GL60, GL61).
   - `autopilot`: Step 0 resolves the driver; Phase 0.A.1 detects the forge (carries
     `PROVIDER`/`REPOID`/`CLIREADY`, `cliReady=false` stop, `unknown` ask); Phase 1 step 3 opens the
     PR/MR via `--open-pr` (run from `$REPO`); the Critical-Conventions pre-push guard uses `--pr-state`.
-    Pins: `test-autopilot-skill.sh` (P11a-g). Never auto-merge/approve preserved.
+    Pins: `test-autopilot-skill.sh` (P11a-h). Never auto-merge/approve preserved.
 - **Phase 5 — DONE**: repository conventions and `pilot` wired to the driver.
   - `--conventions [--repo DIR] [--provider P] [--template PATH]` → one JSON line from
     `hooks/lib/repo-conventions-v1.js`: `provider`, `prTemplate` (the template the forge pre-fills:
@@ -309,13 +309,15 @@ specified in `skills/autopilot/rules/conventions.md`.
     Edition when no approval rule applies even with nobody approving, so `approved` also needs a
     non-empty `approved_by`. The GitLab answer is a mapping, not a 1:1 equivalent of `reviewDecision`:
     a review that only left discussions reads as not reviewed (its threads still count through
-    `--fetch-threads`). Dry-printable; tests R1-R17 in `test-vcs-pr-ops.sh`.
+    `--fetch-threads`). Dry-printable; tests R1-R17 in `test-vcs-pr-ops.sh` and GL69, GL70 in
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - `--locate-pr` without a number exits **3** when the forge CLI reports that the current branch has
     no PR/MR (`no pull requests found for branch` from `gh`, `no open merge request available for`
     from `glab`, both matched without regard to case because glab 1.113 and 1.122 capitalize the
     message), so "no PR yet" is told apart from an error; every other failure exits 1 with the
     forge CLI's message on stderr. Existing callers treat any status other than 0 as "not located".
-    Tests L1-L6 in `test-vcs-pr-ops.sh`.
+    Tests L1-L6 in `test-vcs-pr-ops.sh` and GL55 in
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.
