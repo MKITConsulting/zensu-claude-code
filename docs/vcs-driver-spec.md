@@ -157,6 +157,7 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 | `fetch_threads(id)` | fix | GraphQL `reviewThreads` | REST `GET …/merge_requests/:iid/discussions` (keep `resolvable && !resolved`) |
 | `fetch_inline_comments(id)` | fix | `gh api …/pulls/<n>/comments --paginate` | discussions (same call as above) |
 | `post_review(id, payload)` | team-review | 1× `gh api -X POST …/pulls/<n>/reviews --input` | 1× summary note + N× inline discussions (see §7) |
+| `reconcile_review(id, payload, operation, head)` | team-review (Autopilot-delegated) | 1× marker-tagged `gh api -X POST …/pulls/<n>/reviews --input -`, only when no review carries the operation's marker | the parts of the summary note + N× inline discussions that no note carries yet (see Phase 3) |
 | `reply_and_resolve(thread,body)` | fix | reply comment + GraphQL `resolveReviewThread` | `POST …/discussions/:id/notes` + `PUT …/discussions/:id?resolved=true` |
 
 ### Step 3 — Config schema (extends `autopilot.yaml` `vcs:` node)
@@ -255,10 +256,32 @@ specified in `skills/autopilot/rules/conventions.md`.
     Test: `test-vcs-publish.sh`, `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - `pr-team-review`: Step 0 resolves the driver; Phase A.1 detects the forge (repo-scoped) +
     scouts + fetches the PR/MR ref through the driver (the file list for casting stays the
-    forge-agnostic worktree diff — not a forge API); Phase D publishes via `--post-review`.
+    forge-agnostic worktree diff — not a forge API); Phase D publishes via `--post-review`, or via
+    `--reconcile-review` when Autopilot delegates the review.
     Publish rules split into `rules/github-publish.md` (atomic) + `rules/gitlab-publish.md`
     (loop). Known limit (follow-up): multi-line range comments collapse to a single-line GitLab
     position.
+  - **Delegated publish** (PR #175): `--reconcile-review --provider <p> --repo-id R --expected-head <sha>
+    [--diff-refs-json J] <id> <payload> <operation-key>` (or `--operation-key K`) → one JSON line
+    `{status, marker, headSha, partCount, postedCount, url, provider}`. The payload has the
+    `--post-review` shape and at most 8 MiB, and is copied once into a snapshot that every later read
+    checks by digest. Every part carries
+    `<!-- zensu-review:v1:<sha256(operation key)>:<payload digest>:<head>:<N>:part=<i>/<N> -->`, which
+    binds it to the operation key, the canonical payload digest, the expected head and the part count
+    `N`: 1 on GitHub, the summary note plus one discussion per comment on GitLab. The PR/MR must be
+    open at the expected head before every write and once more at the end. The verb reads every page
+    of the PR's reviews or the MR's notes and discussions and posts only the parts no record carries
+    yet: `present` means nothing was posted, `posted` that every part was, and `reconciled` that a
+    partial GitLab review was completed; after a write it reads the inventory again and requires every
+    part. A duplicate or malformed marker, or a marker of this operation with another payload, head or
+    part count, fails closed before the first write. On GitLab a record that carries this operation's
+    marker must also be a note of the publishing account (`glab api user`) with the planned body, note
+    kind and position; without `--diff-refs-json` the verb tries up to five times, a second apart,
+    until the MR reports complete diff refs. `pr-team-review` calls it only for a review Autopilot
+    delegates, with the durable operation key and the bound head
+    (`skills/pr-team-review/references/publish.md`); a standalone run keeps `--post-review`. Test:
+    `test-vcs-review-marker-reconcile.sh` (M0-M25, I1-I15, G1-G19, L1-L24),
+    `test-autopilot-full-cycle.sh`, `tests/integration/gitlab/test-vcs-gitlab-live.sh` (GL40-GL49).
 - **Phase 4 — DONE**: `autopilot` wired to the driver for the PR-open + pre-push guard.
   - New subcommand: `--open-pr --provider <p> --base <b> --head <h> --title <t> --body-file <f>` →
     GitHub `gh pr create --title --body-file --base --head`; GitLab
@@ -318,6 +341,14 @@ specified in `skills/autopilot/rules/conventions.md`.
     forge CLI's message on stderr. Existing callers treat any status other than 0 as "not located".
     Tests L1-L6 in `test-vcs-pr-ops.sh` and GL55 in
     `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
+  - `--review-markers --provider <p> --repo-id R <id>` (PR #428) → the distinct first-part markers
+    `<!-- zensu-review:v1:…:part=1/<N> -->` in the body fields of the PR's reviews (GitHub GraphQL,
+    every page) or of the MR's notes and discussions (GitLab), one per line, and nothing when there
+    is none. A failed or unparseable listing exits 1 and names the failure on stderr. `pilot` reads
+    review presence from it, and a work-order run's review import uses it to recognize a review an
+    earlier attempt published (`skills/work/references/protocol.md`). Tests N12-N14c and LV28 in
+    `test-vcs-publish.sh`, GL56 and GL57 in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
+    Known gap (follow-up): no fake-backed check drives the GitHub listing.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.

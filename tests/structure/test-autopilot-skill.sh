@@ -186,7 +186,6 @@ if printf '%s' "$STEP0_SECTION" | grep -qF '[ -f "$ROOT/hooks/lib/zensu-vcs.sh" 
 else
   check "P11g Step 0 preflight validates zensu-vcs.sh, not zensu-log.sh" FAIL
 fi
-# P11g — the raw pre-push `gh pr view <n>` guard must be GONE (routed through --pr-state)
 if grep -qF -- 'gh pr view <n> --json state,mergedAt' "$SKILL_MD"; then
   check "P11h pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" FAIL
 else
