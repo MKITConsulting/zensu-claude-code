@@ -361,8 +361,8 @@ in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in
 to E28 in `test-evidence-run.sh`, F20 to F31 in `test-full-suite-gate.sh`, A29 to A36 in
 `test-acceptance-gate.sh`, WB0 to WB21 in `test-tdd-complete-receipt-gate.sh`, the `mktemp` stub
 `transport_fault_stub` (and `work_tree_fault_stub` for `work-tree-fault`) that `E26`, `E28`, `E28b`,
-`A32` to `A36`, `F25` to `F27` and `F29` to `F31` share in `tests/structure/lib-work-tree-fault-stub.sh`,
-the bound cases of `evidence-run-v1.test.js`, the `--if-stale` one and the worktree that cannot be
+`A32` to `A36`, `F25` to `F27` and `F29` to `F31` share in `tests/structure/lib-work-tree-fault-stub.sh`
+with `C31` in `test-full-suite-ci.sh`, the bound cases of `evidence-run-v1.test.js`, the `--if-stale` one and the worktree that cannot be
 fingerprinted included, and the work-tree fault cases of both module unit files.
 `_zensu_full_suite_not_applicable` prints the reason `workTree()` answers, so `F14` (the module's
 verdict) and `F30` and `F31` (the unjudged arm) pin one string, and `G17d` pins the exact reading
@@ -403,8 +403,9 @@ anchor, a clone, a submodule) can record no run at all, where it used to run in 
 work tree is unmeasured on Windows: none of the three suites that drive it is in a blocking
 Windows profile. Every write the shell makes into the evidence and acceptance transports is checked
 for failure, not for its bytes; the modules' own `verdict-state` write, which decides whether an
-escape is ledgered, and the three writes of `zensu_full_suite_policy_node` in
-`hooks/lib/zensu-full-suite-transport.sh` are still unchecked. The lookup's `bwt-*` answers are
+escape is ledgered, and the `marker-state`, `ci-config.json` and `full-suite-command` writes of
+`zensu_full_suite_policy_node` in `hooks/lib/zensu-full-suite-transport.sh` are still unchecked;
+only its `work-tree-fault` write is checked there. The lookup's `bwt-*` answers are
 checked for emptiness, not for a truncated path. `E26`, `E28`, `E28b`, `A32` to `A36`, `F25` to
 `F27` and `F29` to `F31` reach the failed write through a `mktemp` stub that occupies the transport
 path with a directory, not through a full disk or a read-only temporary directory, and `E27` drives
