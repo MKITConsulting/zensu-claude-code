@@ -604,7 +604,7 @@ if command -v node >/dev/null 2>&1; then
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { bad.push("eval-dir:unreadable"); }
-    if (scenarios.length < 12) bad.push("eval-dir:expected-at-least-12-scenarios-got-" + scenarios.length);
+    if (scenarios.length < 14) bad.push("eval-dir:expected-at-least-14-scenarios-got-" + scenarios.length);
     // The floor above is an absolute one and cannot see the loss of a scenario
     // added AFTER it was written: deleting one together with its registration
     // used to leave a consistent smaller world in which nothing turned red, and
@@ -632,7 +632,7 @@ if command -v node >/dev/null 2>&1; then
     // floor is what closes that, and it is therefore the CURRENT scenario count
     // rather than a round number below it — raising it is the registration step
     // for a new scenario, exactly as `registered` in tests/profiles/unit-files.v1.json works.
-    if (registered < 12) {
+    if (registered < 14) {
       bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
     }
     if (scenarios.length < registered) {
@@ -995,9 +995,9 @@ MISSING20=""
 for FRAG20 in "security warnings" "irreversible" "credentials" "every required step" "one-question cap"; do
   printf '%s' "$RAW20" | grep -qiF "$FRAG20" || MISSING20="$MISSING20 '$FRAG20'"
 done
-# The carve-out must NOT suspend the full-sentence / precedence rule: a safety
-# warning is the last place for fragments. Naming rules by number here would be a
-# drift hazard, since the hook's numbering differs from SKILL.md's.
+# The carve-out must NOT suspend the full-sentence / precedence rule: a style the user
+# chose may set a safety warning's sentence form, never its length or detail. Naming
+# rules by number here would be a drift hazard: the hook's numbering differs from SKILL.md's.
 printf '%s' "$RAW20" | grep -qiF 'full-sentence rule is NEVER suspended' \
   || MISSING20="$MISSING20 'full-sentence rule is NEVER suspended'"
 printf '%s' "$RAW20" | grep -qE 'rules? [0-9], *[0-9].*do not apply' \
@@ -4459,19 +4459,27 @@ fi
 
 Z110_BAD=""
 Z110_SHARED="a style the user chose may set a safety warning's sentence form, never its length or detail"
-Z110_FULL="$(HOOK="$HOOK" node -e '
-  const hook = require("fs").readFileSync(process.env.HOOK, "utf8");
-  const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
-    .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
-  const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
-  process.stdout.write(active === undefined ? "" : active);
-' 2>/dev/null)"
+z110_block() {
+  HOOK="$HOOK" WANT="$1" node -e '
+    const hook = require("fs").readFileSync(process.env.HOOK, "utf8");
+    const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
+      .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
+    const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
+    const shortBody = blocks.find((s) => s.startsWith("zen-mode is ACTIVE; the full zen-mode contract"));
+    const found = process.env.WANT === "short" ? shortBody : active;
+    process.stdout.write(found === undefined ? "" : found);
+  ' 2>/dev/null
+}
+Z110_FULL="$(z110_block full)"
+Z110_SHORT="$(z110_block short)"
 Z110_SKILL="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
 Z110_PRECEDENCE="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/precedence.md" | tr -s ' ')"
 [ -n "$Z110_FULL" ] || Z110_BAD="$Z110_BAD hook:full-directive-not-found"
-for Z110_NAME in hook skill precedence; do
+[ -n "$Z110_SHORT" ] || Z110_BAD="$Z110_BAD hook:short-body-not-found"
+for Z110_NAME in hook short skill precedence; do
   case "$Z110_NAME" in
     (hook) Z110_TEXT="$Z110_FULL" ;;
+    (short) Z110_TEXT="$Z110_SHORT" ;;
     (skill) Z110_TEXT="$Z110_SKILL" ;;
     (precedence) Z110_TEXT="$Z110_PRECEDENCE" ;;
   esac
@@ -4479,7 +4487,7 @@ for Z110_NAME in hook skill precedence; do
   printf '%s' "$Z110_TEXT" | grep -qiF -- 'last place for fragments' && Z110_BAD="$Z110_BAD $Z110_NAME:keeps-the-retired-rationale"
 done
 if [ -z "$Z110_BAD" ]; then
-  check "Z110 the skill, docs/precedence.md and the full directive share one sentence on what a style the user chose sets in a safety warning, and none keeps the retired rationale" PASS
+  check "Z110 the skill, docs/precedence.md, the full directive and its short body share one sentence on what a style the user chose sets in a safety warning, and none keeps the retired rationale" PASS
 else
   check "Z110 the safety-warning precedence wording diverges across its carriers:$Z110_BAD" FAIL
 fi
@@ -4835,7 +4843,7 @@ Z104="$(HOOK="$HOOK" node -e '
   && check "Z104 the hook holds the full ACTIVE contract first and the short body second, and the short body carries the none-swap span exactly once" PASS \
   || check "Z104 ACTIVE heredoc layout is '${Z104:-unreadable}', want 2:full-first:1:1" FAIL
 
-ZEN_SHORT_ARMED_CEILING=2320
+ZEN_SHORT_ARMED_CEILING=2413
 ZEN_SHORT_ARMED_HEADROOM=95
 Z105_LEN="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" node -e '
   const fs = require("fs");
@@ -5049,6 +5057,37 @@ rm -rf "$P107E" "$Q107E"
 [ -z "$Z107E_BAD" ] \
   && check "Z107e the default rung reads the project overlay under the session's recorded root: --status without CLAUDE_PROJECT_DIR and the doctor row and the hook under another CLAUDE_PROJECT_DIR resolve the overlay's off, and on once it is removed" PASS \
   || check "Z107e default rung not read under the recorded root:$Z107E_BAD" FAIL
+
+P107F="$(mktemp -d -t zenmode-XXXXXX)"; S107F="z107f-$$"
+new_session "$P107F" "$S107F"
+mkdir -p "$P107F/.zensu"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$P107F/.zensu/config.json"
+Z107F_CMD="$(node -e '
+  const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n");
+  const hits = lines.filter((l) => l.includes("zensu-zen-mode.sh\" --status"));
+  if (hits.length !== 1) process.exit(3);
+  process.stdout.write(hits[0].split("${CLAUDE_PLUGIN_DATA}").join(process.argv[2]).split("${CLAUDE_PLUGIN_ROOT}").join(process.argv[3]));
+' "$SKILL" "$CLAUDE_PLUGIN_DATA" "$PLUGIN_DIR" 2>/dev/null)"
+z107f_run() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107F" env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG -u CLAUDE_PLUGIN_ROOT \
+    bash -c "$1" 2>/dev/null
+}
+Z107F_BAD=""
+if [ -z "$Z107F_CMD" ]; then
+  Z107F_BAD=" [skills/zen-mode/SKILL.md renders no single --status command]"
+else
+  Z107F_ST="$(z107f_run "$Z107F_CMD")"
+  [ "$Z107F_ST" = off ] || Z107F_BAD="$Z107F_BAD [rendered --status under a recorded-root overlay that sets hooks.zenMode false='$Z107F_ST']"
+  Z107F_BARE="$(z107f_run "CLAUDE_PLUGIN_DATA=\"$CLAUDE_PLUGIN_DATA\" bash \"$HELPER\" --status")"
+  [ "$Z107F_BARE" = on ] || Z107F_BAD="$Z107F_BAD [control: --status without CLAUDE_PROJECT_DIR='$Z107F_BARE']"
+  rm -f "$P107F/.zensu/config.json"
+  Z107F_ST="$(z107f_run "$Z107F_CMD")"
+  [ "$Z107F_ST" = on ] || Z107F_BAD="$Z107F_BAD [control without the overlay: rendered --status='$Z107F_ST']"
+fi
+rm -rf "$P107F"
+[ -z "$Z107F_BAD" ] \
+  && check "Z107f /zensu:zen-mode renders --status with the recorded root as CLAUDE_PROJECT_DIR: the rendered command answers off under a recorded-root overlay that sets hooks.zenMode false, the bare verb answers on there, and the rendered one answers on once the overlay is removed" PASS \
+  || check "Z107f rendered --status does not read the recorded root:$Z107F_BAD" FAIL
 
 P108="$(mktemp -d -t zenmode-XXXXXX)"; S108="z108-$$"
 new_session "$P108" "$S108"

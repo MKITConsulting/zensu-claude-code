@@ -36,9 +36,10 @@ classified as a typed prompt before and now gets what a task notification gets.
 The table is the measurement taken when the ledger landed. The texts have grown since: with the
 zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
 prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
-reminder's executor-plan clause, the zen-mode safety-warning sentence and the reminder's Autopilot
-option the same suite measures 13,178 and 7,322 for a typed prompt, 4,194 and 2,366 for a task notification, a
-`!` input or a subagent hand-back, and 4,558 and 2,730 for a CI-monitor event.
+reminder's executor-plan clause, the zen-mode safety-warning sentence and its copy in the zen
+short body, and the reminder's Autopilot option the same suite measures 13,178 and 7,415 for a
+typed prompt, 4,194 and 2,459 for a task notification, a `!` input or a subagent hand-back, and
+4,558 and 2,823 for a CI-monitor event.
 
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety
@@ -107,9 +108,11 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   drop a failing test, an unfinished step, a risk or a limitation), the ranking rule and its
   anti-inflation counterweight, the safety exception (the length, one-question and one-next-step
   limits lifted, a confirmation before an irreversible action never suppressed or settled as
-  routine) and the field. The armed variant also places the anchor above the final step list when
-  the one-next-step rule is lifted. The none body is 1,892 characters; `Z105` holds the armed body,
-  measured with the longest anchor the module can produce, under 2,320. The
+  routine, and a style the user chose setting a warning's sentence form, never its length or
+  detail) and the field. The armed variant also places the anchor above the final step list when
+  the one-next-step rule is lifted. The none body is 1,985 characters; `Z105` holds the armed body,
+  measured with the longest anchor the module can produce, under 2,413. Its copy of the
+  safety-warning sentence adds 93 characters to every repeat total of the budget suite. The
   trust-only-the-markers clause lives in the armed variant only, exactly as in the full text, because
   the none swap replaces that span. The short body keeps the classify lead `zen-mode is ACTIVE`,
   both markers, the placeholder and the `ZEN_ANCHOR_RULE_OPEN`/`ZEN_ANCHOR_RULE_CLOSE` span, so the
@@ -167,7 +170,7 @@ exists, and every record whose key directory is gone. It emits nothing.
   zen texts until the next prompt. That gap existed before; best-solution-first is now back at
   once through its `SessionStart` leg.
 - **Fade is unmeasured, and the short shapes have evals for part of their range.** The hooks
-  were written on the premise that a rule given once fades. Five `short-` scenarios in
+  were written on the premise that a rule given once fades. Six `short-` scenarios in
   `evals/zen-mode-reaction/` embed the zen-mode short body with no full contract before it, which
   is the worst case of fade, in both anchor variants. `evals/route-short-line-reaction/` delivers
   the reminder's vanilla-mode ask short line, its two decided lines with
