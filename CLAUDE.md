@@ -1,10 +1,9 @@
 # zensu-claude-code Repo Conventions
 
-This file holds only the rules that apply to every change in this repository.
-Subsystem notes live in `.claude/rules/`, one file per subsystem. Each rule file
-declares `paths:` frontmatter, so Claude Code loads it only when a matching file is
-read. When a task touches a subsystem without opening its files, open the rule file
-from the index at the end of this file.
+This file holds only the rules that apply to every change in this repository. Subsystem notes
+live in `.claude/rules/`, one file per subsystem. Each rule file declares `paths:` frontmatter, so
+Claude Code loads it only when a matching file is read. When a task touches a subsystem without
+opening its files, open the rule file from the index at the end of this file.
 
 A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the rule
 file listed under that title in the index.
@@ -135,6 +134,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Automatic Adoption (`hooks/lib/session-auto-adopt-v1.js`)** — the hook-side adoption of a compatible-schema record across a lineage break, its opt-out and the refusal tokens its denies name: `.claude/rules/automatic-adoption.md`
 - **Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)** — rebuilding a missing workflow document without relaxing the deny: `.claude/rules/workflow-baseline-repair.md`
 - **Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)** — owner versus workspace scoping, release and adoption of durable runs: `.claude/rules/autopilot-run-scope.md`
+- **Autopilot Gate Re-entry (`transition` in `hooks/lib/zensu-autopilot-state.sh`)** — why stage edges are only ever added, the gate re-entry after a convergence fix and the bound on re-opening a pull request: `.claude/rules/autopilot-gate-reentry.md`
 - **Owner-Scoped Active-Run Read (`autopilot_read_active_strict`)** — which callers read the owner-scoped question strictly, the read-only look on a held lease, the same separation in the Stop reconcile and the public workspace read, and the lease checks: `.claude/rules/autopilot-active-read.md`
 - **CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)** — which `zensu` CLI verbs the write-gate treats as mutations: `.claude/rules/cli-command-classification.md`
 - **zensu-cli Version Floor (`hooks/lib/zensu-cli-version-v1.js`)** — the oldest supported zensu-cli, its install commands, a probe that never runs a working-directory binary, and the prose copies pinned to it: `.claude/rules/zensu-cli-floor.md`
