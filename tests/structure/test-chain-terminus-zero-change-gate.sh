@@ -273,6 +273,52 @@ else
   check "G15a HEAD probe error on --chain-done (rc=$RC15A chainDone=$DONE15A err='$(cat "$ERR15A" 2>/dev/null)')" FAIL
 fi
 
+G17_BIN="$STATE_DIR/g17-bin"
+mkdir -p "$G17_BIN"
+cat > "$G17_BIN/git" <<'STUB'
+#!/bin/bash
+for arg in "$@"; do
+  case "$arg" in
+    (--is-inside-work-tree) printf '%s\n' '12:00:00.000000 git.c:463 trace: built-in: git rev-parse --is-inside-work-tree' ;;
+  esac
+done
+exec "$G15_REAL_GIT" "$@"
+STUB
+chmod +x "$G17_BIN/git"
+G17_INSIDE="$("$G17_BIN/git" -C "$GIT_PROJ" rev-parse --is-inside-work-tree 2>/dev/null)"
+if [ "$(printf '%s\n' "$G17_INSIDE" | sed -n '$p')" = "true" ] && [ "$(printf '%s\n' "$G17_INSIDE" | grep -c .)" -eq 2 ]; then
+  check "G17-control the stub git prints one trace line before the true of the work-tree probe" PASS
+else
+  check "G17-control stub work-tree probe (out='$G17_INSIDE')" FAIL
+fi
+G17D_PROBE="$(PATH="$G17_BIN:$PATH" node -e "$WORK_TREE_PROBE" "$PLUGIN_DIR/hooks/lib/evidence-run-v1.js" "$GIT_PROJ" 2>/dev/null)"
+if [ "$G17D_PROBE" = "null" ]; then
+  check "G17d the evidence runner reads a work-tree probe that prints more than true as unavailable, never as outside git" PASS
+else
+  check "G17d evidence-runner workTree on a polluted probe (applicable='$G17D_PROBE')" FAIL
+fi
+SID17A="unqualified-probe-noise"
+arm "$SID17A"
+SF17A="$(tdd_state_file "$SID17A")"
+ERR17B="$STATE_DIR/g17b.err"
+PATH="$G17_BIN:$PATH" bash "$LOG" --code-review-done --session "$SID17A" >/dev/null 2>"$ERR17B"; RC17B=$?
+CRD17B="$(tdd_code_review_done "$SF17A" 2>/dev/null)"
+if [ "$RC17B" -eq 1 ] && [ "$CRD17B" = "false" ] && grep -qF "$REVIEW_GATE_PHRASE" "$ERR17B" \
+  && grep -qF "$LISTING_PHRASE" "$ERR17B" && ! grep -qF "changed file(s)" "$ERR17B"; then
+  check "G17b a work-tree probe that prints more than true refuses the unqualified review mark instead of reading the tree as outside git" PASS
+else
+  check "G17b polluted work-tree probe on --code-review-done (rc=$RC17B codeReviewDone=$CRD17B err='$(cat "$ERR17B" 2>/dev/null)')" FAIL
+fi
+ERR17A="$STATE_DIR/g17a.err"
+PATH="$G17_BIN:$PATH" bash "$LOG" --chain-done --session "$SID17A" >/dev/null 2>"$ERR17A"; RC17A=$?
+DONE17A="$(tdd_chain_done "$SF17A" 2>/dev/null)"
+if [ "$RC17A" -eq 1 ] && [ "$DONE17A" = "false" ] && grep -qF "$GATE_PHRASE" "$ERR17A" \
+  && grep -qF "$LISTING_PHRASE" "$ERR17A" && ! grep -qF "changed file(s)" "$ERR17A"; then
+  check "G17a a work-tree probe that prints more than true refuses the unqualified terminus instead of reading the tree as outside git" PASS
+else
+  check "G17a polluted work-tree probe on --chain-done (rc=$RC17A chainDone=$DONE17A err='$(cat "$ERR17A" 2>/dev/null)')" FAIL
+fi
+
 # --- G4 ignored-only change: allowed ---
 SID4="terminus-ignored"
 arm "$SID4"

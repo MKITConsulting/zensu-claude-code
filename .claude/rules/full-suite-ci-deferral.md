@@ -4,9 +4,13 @@ paths:
   - "hooks/lib/full-suite-policy-v1.js"
   - "hooks/lib/zensu-full-suite.sh"
   - "hooks/lib/zensu-full-suite-transport.sh"
+  - "hooks/lib/zensu-log.sh"
+  - "hooks/lib/evidence-run-v1.js"
+  - "hooks/post-review-tdd-delegate.sh"
   - "skills/full-suite/SKILL.md"
   - "tests/structure/full-suite-ci-v1.test.js"
   - "tests/structure/test-full-suite-ci.sh"
+  - "tests/structure/fixtures/gh-api-stub.js"
 ---
 
 # Full Suite in CI (`ci-contract-v1.js` + `full-suite-policy-v1.js` + `/zensu:full-suite`)
@@ -34,14 +38,80 @@ worktree sees it and no feature PR carries config noise. The question never writ
 committed config. No `ZENSU_*=off` stem was added: the choice is a mode, not a gate escape, so
 `ESCAPE_STEMS` and the bypass-ledger roster stay unchanged.
 
-**Verified means the job ran, not that it passed.** A workflow under `.github/workflows/`
-triggers on `pull_request`, the repository is not a fork, and a job matching the bound pattern
-concluded `success` or `failure` in a completed pull-request run of the last 30 days.
-`pull_request_target` never counts, because it runs the base branch's workflow. Merge-blocking
-is read and shown, never required. Path filters, branch filters and the `if:` conditions of the
-jobs that form the bound pattern are shown, never evaluated; when no job in the file matches the
-pattern, every job's condition is shown rather than none. A process inside CI resolves `local`,
-so the pipeline never defers to itself. Only GitHub.com is supported.
+**Verified means the job ran, not that it passed, and the tree's version still runs it.** A
+workflow under `.github/workflows/` triggers on `pull_request`, the repository is not a fork, a job
+matching the bound pattern concluded `success` or `failure` in a completed pull-request run of the
+last 30 days, and the version of the workflow file in the working tree defines a job that can run
+under that pattern. `pull_request_target` never counts, because it runs the base branch's
+workflow. Merge-blocking is read and shown, never required. Path filters are evaluated only for a
+project root below the repository top (§"A chain is judged by its own work tree"); otherwise they,
+the branch filters and the `if:` conditions of the jobs that form the bound pattern are shown,
+never evaluated; when no job in the file matches the pattern, every job's condition is shown rather
+than none. A process inside CI
+resolves `local`, so the pipeline never defers to itself. Only GitHub.com is supported.
+
+**The host is pinned.** `ghApi` runs `gh api <endpoint> --hostname github.com` (`GITHUB_HOST`, the
+host `repoIdentity` accepts), because gh otherwise answers from `GH_HOST` or from the only host it
+is logged in to. Measured with gh 2.101.0: `GH_HOST=example.invalid gh api repos/cli/cli` failed
+with `error connecting to example.invalid`, and the same call with a trailing
+`--hostname github.com` answered from github.com. The flag follows the endpoint, so the stub's
+POSIX script still finds the endpoint at its old position; both stub variants parse the arguments
+(`ghRequest`) and choose the host the way gh does, `--hostname`, else `GH_HOST`, else github.com,
+and answer only github.com.
+
+**Only a job the version runs is certified.** The workflow scan folds a block-scalar job name
+(`name: >-` and the lines below it, kept raw so a `#` inside the name survives), folds a plain or
+quoted name continued on more-indented lines, decodes a quoted name (`''` in single quotes, the
+JSON escapes in double quotes), opens a quote only where a scalar starts, so the apostrophe in
+`Ann's suite # nightly` keeps no comment, and marks a job with a job-level `uses:` as reusable. A
+job runs as a pattern when one of its name shapes and the pattern can describe the same name
+(`versionRuns`): the shapes are the name, or the job key without one, with every `${{ }}` read as
+any text and the ends trimmed the way GitHub trims an evaluated name (`iOS ${{ … }}` ran as
+`iOS`), that name plus a matrix suffix ` (*)`, and for a reusable job `<name> / *` and
+`<name> (*) / *`. A job whose body is written inline, a flow mapping or an alias, and every job of
+a `jobs:` block written in flow form (`flowJobs`) run as any name, because the scan does not read
+those forms; an anchor alone (`test: &defaults` above the job's own lines) is no inline body, so
+that job keeps its name. The trim applies to the name before a shape adds its suffix, because trimming the
+composed shape let the pattern's `*` stand for a ` / ` the name never had. The overlap is a dynamic
+program over both wildcard sides, and two bounds keep it cheap, both overridable through `limits`
+like every other bound: a name longer than `LIMITS.maxNameChars` (1024, a judgement) counts as any
+text, and a check whose tables would exceed `LIMITS.maxMatchCells` (4 Mi cells, a judgement: about
+15 ms on a machine that measured 286 M cells per second) counts as running, the lenient direction
+the scan takes wherever the file cannot tell. One matcher per `verify` builds the shapes once and
+answers each pattern once (`jobMatcher`), and a proposal checks only a group that scores, so the
+matching between two `gh` calls stays bounded however many groups a run lists. A requested job the
+version lacks is refused before any cache or network work, with `disproves: 'version'`, and removes
+nothing, because every cache read of that version refuses it the same way; a cache read skips every
+proof whose job the version does not run, an older installation's proof and the legacy slot
+included; and a refresh without a requested job proposes only among the job groups the version
+runs. When the only test-like group a refresh found is one the version lacks, it answers unverified
+with `disproves: 'version'` and removes that version's own proofs, of every job, and the legacy
+slot when it holds that version, so a later cache read of the version agrees with the refresh;
+every other version keeps its proofs, because the fact concerns this version alone. Measured on
+2026-11-11 over completed pull-request runs, each group scanned against the workflow file at the
+run's head commit:
+
+| Repository, workflow | Groups | Matched before | Matched now |
+|---|---|---|---|
+| this repository, `ci.yml` (3 runs) | 6 | 6 | 6 |
+| `python/cpython`, `build.yml` (3 runs) | 96 | 26 | 96 |
+| `rust-lang/rust`, `ci.yml` (2 runs) | 26 | 4 | 26 |
+
+The earlier matcher missed every reusable-workflow job (`<caller> / <callee>`), every block-scalar
+name and every name built wholly from `${{ }}`, so a strict check with it would have failed closed
+for most of CPython's test jobs.
+
+**Every refresh has one deadline.** `LIMITS.refreshDeadlineMs` (60 s, a judgement: half of the Bash
+tool's default 120 s timeout, so `--tdd-begin` keeps the rest for its own work) bounds the whole
+refresh, the Phase 0 one and the `--tdd-begin` snapshot alike. `verify` takes the deadline when it
+starts, and `discover` takes one for all its candidates. `ghApi` caps each call's timeout by the
+time left and, once it has passed, starts no call; either answer is transient and reads `the
+refresh deadline of <n> s passed before gh api <endpoint> answered`, so a proof inside the grace
+window still counts and the snapshot otherwise records `local` with that reason. A refresh that
+ends at the deadline after the job evidence arrived keeps its proof. Merge-blocking reads `yes`
+when an answered branch-protection read lists the job, `no` only when both reads answered, and
+`unknown` otherwise, so a deadline that cuts either read never records a definite `no`; the two
+reads are only shown.
 
 **The cache keeps one proof per workflow version and job.** A proof is
 `cache/<key>.<blob>.<job>.json`: `<key>` is the first 40 hex digits of the sha256 of the
@@ -61,12 +131,15 @@ than `cacheGraceMs` and keeps at most `LIMITS.maxProofsPerWorkflow` (16, a judge
 `verifiedAt`, never the one it wrote; an entry it cannot read is neither counted nor removed. A
 refresh that DISPROVES the pipeline removes every proof of that repository and workflow, whatever
 its version or job, and the legacy slot, because the disproof is a fact about the workflow on
-GitHub, not about one version. The two disproofs that concern the requested job alone, that it did
-not run in the recent pull-request runs or that its newest run is older than 30 days, carry
-`disproves: 'job'` and remove only that job's proofs, and the legacy slot only when it holds that
-job, because a worktree whose config names a job that has not run yet would otherwise void every
-other worktree's proof for another job; with no job requested a read accepts any job, so such a
-disproof still removes everything. Without that removal, the `--tdd-begin` snapshot honoured a proof
+GitHub, not about one version. The two disproofs that concern one job, that it did not run in the
+recent pull-request runs or that its newest run is older than 30 days, carry `disproves: 'job'`
+and the job, and remove only that job's proofs of every version, and the legacy slot only when it
+holds that job, because a worktree whose config names a job that has not run yet would otherwise
+void every other worktree's proof for another job. Without a requested job the disproved job is
+the one the refresh proposed, and that proposal depends on the version, because only a job the
+version runs is proposed; such a disproof therefore also removes this version's own proofs, of
+every job, so the version's later reads agree with the refresh, and never another version's proof
+of another job (`removeDisproved`). Without that removal, the `--tdd-begin` snapshot honoured a proof
 the Phase 0 refresh had just rejected. A version no proof covers, an edited workflow file
 included, is unverified, and its reason says that the tree differs from every verified version.
 
@@ -88,17 +161,24 @@ repository a session switched to a branch whose workflow file no proof covered t
 after its Phase 0 refresh, and the cache-only snapshot froze the chain `local` although Phase 0 had
 printed `ci`. The refresh costs nothing when the cache holds the version, the normal case right
 after Phase 0, and a chain without a CI choice never asks. `--tdd-begin` prints the snapshot's line
-after `mode:` whenever a CI choice is recorded, `full suite: ci | this chain began with the CI
+after `mode:` whenever a CI choice is recorded and no rank chose local, `full suite: ci | this chain began with the CI
 runner: …` or `full suite: local | <reason> | decided by: <rank> | this chain began with the local
 runner, …`, because a chain whose choice did not hold ran every phase in CI mode, as Phase 0 told
-it, and then met a terminus that demanded a local full suite. ## Full Suite in CI in
+it, and then met a terminus that demanded a local full suite. A local choice in any rank wins
+before the pipeline is read, so it prints no line, like a chain without a CI choice. ## Full Suite in CI in
 `skills/build/references/modes.md` names that line as the one that activates the CI deltas. The
-snapshot mode removes the session's previous snapshot before it resolves, so an interrupted
-`--tdd-begin`, or one whose snapshot write fails, leaves no runner in force and the chain closes
-local through the "recorded no full-suite snapshot" arm, which is what the stderr notice says; the
-file is one per session key, so the previous chain's `ci` would otherwise stand for the new one.
-The snapshot call runs after the three local resets of the success arm, so a network wait there
-never leaves the previous generation's review-gate, workflow-wait or background-wait state behind.
+snapshot file is one per session key, so the previous chain's `ci` would otherwise stand for the
+new one. The success arm therefore retires it before anything else of the full-suite step runs,
+through `zensu_full_suite_snapshot_retire`, the policy module's `retire` mode, which needs no
+temporary directory and no work-tree lookup. A snapshot call that then fails anywhere, in the
+transport (no temporary directory, a `work-tree-fault` file that cannot be written) or in the
+module, leaves no runner in force, and the chain closes local through the "recorded no full-suite
+snapshot" arm, which is what the `FULL SUITE SNAPSHOT UNAVAILABLE` notice says; the snapshot mode
+still removes the file before it resolves, so an interrupted module run leaves none either. Only a
+retirement that cannot run keeps the previous snapshot, and it prints
+`FULL SUITE SNAPSHOT RETIREMENT UNRESOLVED`. Retirement and snapshot call run after the three local
+resets of the success arm, so a network wait there never leaves the previous generation's
+review-gate, workflow-wait or background-wait state behind.
 `zensu-log.sh --full-suite-policy --chain` (the policy module's `chain` mode) answers the same
 question the terminus asks, with `requireSnapshot`, and `/zensu:self-review` decides its CI mode
 from it rather than from the plain `--full-suite-policy`, which reads the cache alone. The
@@ -107,6 +187,67 @@ terminus, the `--scope full` refusal and the post-review directive all resolve w
 relaxes its terminus, while a switch to local applies at once. When a chain that chose CI closes
 locally, the verdict prints `FULL SUITE — local runner | <reason> | decided by: <rank>`, because a
 bare `missing` would not tell the user why the choice did not hold.
+
+**A chain is judged by its own work tree.** `verify` and `discover` read the workflow files and the
+remote at the git top level of the `workTree` they are given, and of the project root without one
+(`workflowTree`). That is the tree `zensu-log.sh --chain-work-tree` prints: the worktree of the
+Autopilot run an open chain is bound to, and otherwise the repository top of the project root,
+where GitHub reads `.github/workflows/`, so a session recorded in a subdirectory finds its
+workflow too. Git's answer decides: a root git reports outside every work tree keeps itself, and
+any other git failure, a `safe.directory` refusal for example, answers unverified with git's
+message (`git could not place the project root in a work tree: …`, or `the chain's work tree` for
+the bound tree) instead of judging the project root as if it were the top. Reading the session's
+recorded project root instead judged a bound chain whose worktree lies below the anchor by a file
+its branch may not carry, at the per-version binding, at the begin refresh and at every cache read,
+and a branch switch in the anchor checkout in the middle of such a chain changed the version all of
+them read. The remote follows the same tree, because the chain's own branch decides its upstream.
+
+**A session below the repository top also needs path filters that let its pull requests run the
+suite** (`pathFilterRefusal`). A pull request of such a session changes only files under its
+prefix, so a `pull_request` path filter can keep the suite from ever running for it, while a
+verified run of the job proves only that some pull request ran it. `verify` therefore answers
+unverified, naming the prefix, for a trigger written in flow form, a `paths` or `paths-ignore` list
+that is empty or holds `maxListValues` entries (the scan may have cut it), a `paths-ignore` list
+with a negated pattern or a pattern that can match under the prefix, and a `paths` list with no
+pattern that covers the whole prefix or with a negated pattern that can match under it. The
+evaluator expands no glob, so it decides only what a pattern's text decides: a pattern can match
+under the prefix when its literal head and `<prefix>/` are one a prefix of the other. The head is
+the text before the first character of `PATTERN_SYNTAX_RE`, one character shorter when that
+character is a `?`, because a `?` makes the character before it optional. `!` is one of those
+characters, so a negated `paths-ignore` pattern has an empty head and can always match, while a
+negated `paths` pattern is judged by the text after its `!`. A pattern covers the prefix only as
+`**`, `**/*`, or a literal directory ending in `/` that contains the prefix, followed by `**` or
+`**/*`. A session at the repository top skips the check.
+
+`zensu_full_suite_policy_node` takes the bound work tree and a lookup fault as its fourth and fifth
+arguments, resolves the tree with `cd … && pwd -P`, renders it through `zensu-host-path.sh`, where
+a tree it cannot render becomes the fault `its path cannot be handed to node`, hands it on as
+`ZENSU_FSP_WORK_TREE`, and writes the fault into the transport file `work-tree-fault`, the name
+`readWorkTreeFault` of `evidence-run-v1.js` reads, so `inputsFromTransport` reads both transports
+alike. `zensu-log.sh` resolves both in process for `--full-suite-policy` and for the `--tdd-begin`
+snapshot through `_zensu_full_suite_work_tree`, which asks `_zensu_bound_work_tree`, the lookup
+behind `--chain-work-tree`, and applies the two refusals `--chain-work-tree --project-dir` adds to
+that lookup: a project directory the lookup could not derive, and a work tree or project directory
+whose path holds a double quote, a dollar sign, a backtick or a backslash, are lookup faults too,
+so the in-process reads and the post-review hook judge every chain alike. The post-review hook
+asks `zensu-log.sh --chain-work-tree --project-dir --session` once, for an Autopilot-bound chain
+only, right before its `effective` read, so a standalone review completion spawns nothing more,
+and the bound max-rounds arm takes that answer as its closing-run directory instead of asking
+again; a lookup that fails becomes the fault `zensu-log.sh --chain-work-tree --project-dir could
+not resolve the work tree of this Autopilot-bound chain`. The runner's `ciPolicyFor` passes the
+`ZENSU_EVR_WORK_TREE` and the `work-tree-fault` its own transport already carries. A lookup fault
+never falls back to the anchor: `chainContract` answers unverified with `the chain's work tree
+could not be resolved: <cause>`, which a recorded CI choice turns into `local`, the fail-closed
+direction, and the policy line prints the cause as a segment of its own,
+`… could not be resolved | work tree: <cause> | decided by: …`, under its own display bound, so a
+long cause never pushes the rank out of the line. The clone record keeps keying on the git common
+directory of the project
+root, which every worktree of the clone shares, and the snapshot keeps its `projectRoot` check, so
+no store and no key set moved. A delegated chain's Phase 0 refresh runs before `--tdd-begin` binds
+it, so it judges the anchor's top level; the begin snapshot then judges the worktree and refreshes
+once when no proof covers its version, and its begin line is the one that decides. The
+`/zensu:full-suite` helper passes no work tree: it records a clone or session choice, and a bound
+chain never asks it, so its `--status` line judges the project root's top level.
 
 **Stores.** `$CLAUDE_PLUGIN_DATA/ci-contract/v1/` holds the cache, `clones/` and `snapshots/`,
 and sits in both protected-root lists of `hooks/lib/reviewer-capability-v1.js`. The session
@@ -129,11 +270,42 @@ and a healthy shim; C25 swaps the fixture file and restores it. C28 pins the ord
 `--tdd-begin` success arm, the snapshot call after the three local resets, and a mutant that moves
 the call above them must fail it. C27 and C27b drive
 `--full-suite-policy --chain` in a chain that began local after a mid-chain switch to CI and in
-one that began `ci`. The unit file spells the proof and legacy file names a second time (`keyOf`,
-`jobKeyOf`, `proofFile`, `legacyFile`), so a rename of either fails there, and its CLI cases put
+one that began `ci`. C29 to C30d drive Autopilot-bound chains in worktrees nested below the anchor
+through `bound_begin` and `bound_review`, which C23b shares: C29 to C29d a worktree whose workflow
+does not trigger on pull requests while the anchor's is verified (the begin line, `--chain`, the
+post-review directive and `--evidence-run --scope full` all read `local`), C30 to C30d a worktree
+whose workflow version differs, which the begin refresh verifies with its own proof, and a branch
+switch in the anchor checkout to a workflow without a pull-request trigger after the begin, which
+leaves `--chain`, the directive and the runner refusal `ci`. Each of the eight fails when the path
+it drives reads the project root instead: C29b to C29d run over a `ci` snapshot written in place of
+the begin's local one (`seed_ci_snapshot`), so none of them leans on the begin snapshot to read
+`local`. C31 to C33 drive the faults. C31 writes a `ci` snapshot, moves the worktree away and puts
+the `mktemp` stub of `lib-work-tree-fault-stub.sh` on `PATH`, so the begin's snapshot call fails
+in the transport, and requires `--chain` to read the "recorded no full-suite snapshot" arm, which a
+begin that leaves the retirement to the snapshot mode fails. C32 to C32c move the worktree away at
+the begin, at `--chain` and at the post-review read and require `local` with the lookup fault
+named, the last two over a `ci` snapshot. C33 counts the `node` processes the post-review hook's
+lookup starts through a counting `node` shim and holds them at the measured ceiling. C34 and C35
+drive the two refusals `_zensu_full_suite_work_tree` adds to the lookup, through `plain_begin`, a
+bound begin without a completion: C34 a worktree whose path holds a dollar sign, C35 a session
+bound in an untracked subdirectory that the worktree's branch lacks. Both require the begin line
+and `--chain` to read `local` with the lookup fault named, and both fail when the function hands
+the lookup's tree on unscreened. The unit cases
+beside them pin `workTree` in `verify` and `discover`, the remote of the worktree's branch, a
+project root below the repository top and its path filters, a git refusal named as such, the
+policy, the snapshot CLI, the `retire` mode and the runner over the same layouts, and the lookup
+fault with its own segment. The unit file spells the proof and legacy file names a second time
+(`keyOf`, `jobKeyOf`, `proofFile`, `legacyFile`), so a rename of either fails there, and its CLI
+cases put
 the shim first on `PATH`. The stub's optional `__probe` fixture key records at every `gh` call
 whether a named file exists, which is how the unit file shows the previous snapshot gone during
-the begin refresh.
+the begin refresh. Its `__delayMs` key holds every answer back that long, which drives the refresh
+deadline with a 1 s `refreshDeadlineMs`, and the unit file runs the exported `windowsPreload` under
+a stand-in `process` whose `execPath` ends in `gh.exe`, because no blocking pull-request job runs
+the Windows variant. It runs the exported `posixScript` directly under `GH_HOST` as well, because
+the host pin keeps every shimmed call away from that script's host refusal. The three deadline cases
+hold each answer back 4 s against a 1 s deadline and expect exactly one call, the reason for
+`repos/acme/app` and less than 2.5 s, which only a capped first call satisfies.
 
 **Coupled sites that move together:** `skills/build/SKILL.md` Phase 0 step 2 and the section
 "Full Suite in CI (mode-gated deltas)" in `skills/build/references/modes.md`; the CI fix-round
@@ -156,8 +328,28 @@ CI in `skills/build/references/modes.md`, which names them; the router cell and 
 `skills/build/SKILL.md`, which open that section on a `full suite: ci` line from step 2 or step 3;
 the `--chain` flag of `--full-suite-policy` in `zensu-log.sh`, the module's `chain` mode and the
 CI-mode sentence of `skills/self-review/SKILL.md` Phase 4 that names it, whose body size the
-`self-review` entry of `tests/structure/test-skill-text-budget.sh` holds; and the `__probe` key of
-`tests/structure/fixtures/gh-api-stub.js`.
+`self-review` entry of `tests/structure/test-skill-text-budget.sh` holds; the `__probe` and
+`__delayMs` keys and `ghRequest` of `tests/structure/fixtures/gh-api-stub.js`, which must keep
+choosing the host the way gh does; `GITHUB_HOST` and the `--hostname` argument of `ghApi`;
+`LIMITS.refreshDeadlineMs` and the deadline reason, which the unit file matches
+(`DEADLINE_REASON`); `notRunHere`, whose text the unit file spells again (`NOT_RUN_HERE`), with
+`versionRuns`, `jobMatcher`, `MATRIX_SUFFIX`, `CALLEE_SUFFIX`, `LIMITS.maxNameChars`,
+`LIMITS.maxMatchCells`, the `reusable` and `inline` fields of a scanned job and the scan's
+`flowJobs`; `removeDisproved`, which reads `disproves` and the job of a job disproof; the chain's
+work tree: `workflowTree` and the `workTree` option of `verify` and `discover`, `chainContract`
+and the `workTree` name of `inputsFromTransport`, the two trailing arguments of
+`zensu_full_suite_policy_node` and their `ZENSU_FSP_WORK_TREE` exclusion,
+`_zensu_full_suite_work_tree` and its two callers in `zensu-log.sh`, whose path screen spells the
+one `--chain-work-tree` applies a second time and which C34 and C35 drive, the bound-only
+`--chain-work-tree --project-dir --session` read before `effective` in
+`hooks/post-review-tdd-delegate.sh` and the `MAX_CLOSE_DIR` that reuses it, the
+`ZENSU_EVR_WORK_TREE` name in `ciPolicyFor`, and the transport file name `work-tree-fault`, which
+`readWorkTreeFault` owns for both transports; `reasonText`, whose `| work tree: ` segment the unit
+file and C32 to C32b match; `pathFilterRefusal`, `patternReaches`, `patternCovers` and
+`PATTERN_SYNTAX_RE` beside the scanner's `filters` and `flowTrigger`, whose refusal sentences the
+unit file matches; and the begin's retirement: the module's `retire` mode,
+`zensu_full_suite_snapshot_retire` in the transport and its call in the `--tdd-begin` success arm,
+ahead of the work-tree lookup and the snapshot call, which C31 drives.
 
 **R8k reads these modules too.** R8k in `tests/structure/test-delivery-route.sh` fails any file
 under `hooks/` other than `zensu-config.sh` that spells a marker stem, `full-suite` included,
@@ -172,12 +364,33 @@ keys read permissively. The marker is the same class as the delivery-route marke
 per-version proofs and the snapshot refresh are `patch` on the same walk: `CACHE_KEYS`,
 `CLONE_KEYS` and `SNAPSHOT_KEYS` are unchanged and only a file name in a private store moved;
 `LIMITS` gained a bound no reader validates; no hook, matcher, record field or config key moved;
-and `--tdd-begin` prints one more stdout line, only when a CI choice is recorded. The job digest
+and `--tdd-begin` prints one more stdout line, only when a CI choice is recorded and no rank chose
+local. The job digest
 in the proof name and the `disproves` field move nothing a released reader reads: the name is a
 private store detail an older installation never lists, and an unverified result is never cached.
 `--chain` is an additive flag of a read-only verb whose one caller ships in the same installation. An older
 installation of the lineage never lists the cache directory, so it neither reads nor removes the
-new files, and the newer one still reads the slot the older one writes.
+new files, and the newer one still reads the slot the older one writes. Judging a chain by its own
+work tree is `patch` on the same walk: `CACHE_KEYS`, `CLONE_KEYS` and `SNAPSHOT_KEYS` are unchanged
+and the snapshot still records the project root; `work-tree-fault` and `ZENSU_FSP_WORK_TREE` live
+for one call; no hook, matcher, record field or config key moved; and the two trailing transport
+arguments are optional, so a caller that passes none reads the project root's top level. A session
+whose begin and terminus ran on two installations of the lineage gets at most the stricter answer:
+the terminus honours CI only when the snapshot says the chain began with it. The begin's
+retirement, the path filters, the named git refusal and the work-tree segment are `patch` on the
+same walk: `retire` is a new mode of the module's CLI whose one caller, the `--tdd-begin` success
+arm, ships in the same installation; the path-filter check runs before the cache is read, refuses
+only in the fail-closed direction, writes no proof and removes none, because it returns before any
+`gh` call; and the segment changes a line only the unit file and the suite parse. No key set,
+record field, hook, matcher or config key moved. The host pin, the version job check and the
+refresh deadline are `patch` on the same walk: no hook, matcher, record field, key set or config
+key moves; `LIMITS` gained three bounds no reader validates; the scan's job entries gained
+`reusable` and `inline` and the scan `flowJobs`, which only this module reads;
+`disproves: 'version'` and the job of a job disproof are fields of an unverified result, never
+cached; a disproof now removes fewer proofs of other versions, never more; and the verification
+refuses strictly more inside one installation, including a proof an older installation wrote for a
+version that does not run its job, while an older installation reads the proofs the newer one
+writes unchanged.
 
 **Known gaps, accepted and named:** a full-suite command the model runs by hand is not blocked;
 the chain never waits for CI, so a branch may close `deferred-ci` and never reach a pull
@@ -196,28 +409,45 @@ still run their own test gate locally; conditions are not evaluated per chain; t
 - The proof binds the workflow file in the working tree, while a `pull_request` run takes the
   workflow from the pull request's merge commit, so a branch behind `main` is judged by a version
   CI no longer runs.
-- `--tdd-begin` may ask GitHub: at most nine `gh api` calls, each bounded by `LIMITS.ghTimeoutMs`
-  (20 s), and three times as many when no workflow is configured and discovery tries three
-  candidates. A host without network records `local` there and prints why.
+- `--tdd-begin` may ask GitHub for up to `LIMITS.refreshDeadlineMs` (60 s), plus the moment a
+  stopped `gh` needs to exit and the name matching that `LIMITS.maxMatchCells` bounds per check;
+  the rest of the verb is not timed. A host without network records
+  `local` there and prints why.
 - Proofs of a workflow that no session refreshes again are never pruned; each is about 600 bytes.
-- A chain bound to an Autopilot run whose worktree lies below the anchor is judged by the anchor's
-  workflow file: the policy reads the session's recorded project root, never the chain's work tree,
-  so the per-version binding and the begin refresh judge a file the chain's branch may not carry,
-  and a branch switch in the anchor checkout in the middle of such a chain changes the version every
-  cache read of the chain uses. This predates the per-version cache; the fix passes the work tree
-  through the policy transport, the runner's `ciPolicyFor` and the post-review `effective` read.
-- A refresh never reads the jobs of the workflow version it certifies. It certifies the version in
-  the tree from the newest pull-request run in which the bound job ran, so a branch whose workflow
-  drops the bound job or filters it out is certified too, at Phase 0 and at the begin refresh alike,
+- The post-review read of an Autopilot-bound chain starts one `zensu-log.sh --chain-work-tree
+  --project-dir` process, with its own bind and workflow-document read, on every review completion
+  of such a chain, the background claim's included. It started 18 `node` processes, ten of them
+  project-root verifications; since the lookup subshell memoizes the root
+  (`.claude/rules/stop-latency.md`) it starts 10, measured on macOS bash 3.2.57 and Linux bash
+  5.2.15, and C33 holds that ceiling. It runs before the claim's last deadline check, so on a
+  slow host a background claim that it delays past its deadline defers to the next Stop or prompt
+  with record and note kept, rather than being cut off after the ticket CAS; the cost is a later
+  claim, never a lost one.
+- `evidence.ci.workflow`, `evidence.ci.job`, `evidence.fullSuiteRunner` and
+  `evidence.fullSuiteCommand` still come from the anchor checkout's `.zensu/config.json`, because
+  the transport reads the config against the session's project root. A branch that edits them is
+  judged by the anchor's values until the anchor checkout carries the edit.
+- The path-filter check reads a pattern's text and never the tree: a `paths` list that covers the
+  prefix only through a wildcard segment, such as `services/*/**` for `services/b`, reads as not
+  covering it, and so does a list the scan cut at `maxListValues`, so such a session stays local
+  although its pull requests would run the suite.
+- A retirement that cannot run, because `node` or the plugin data directory is unavailable, keeps
+  the previous chain's snapshot in force; `FULL SUITE SNAPSHOT RETIREMENT UNRESOLVED` says so, and
+  a snapshot call that succeeds afterwards replaces the file, while one that fails as well leaves
+  the previous chain's runner standing for this chain.
+- The version check reads names, not conditions. A version that keeps the bound job but filters
+  it out, with `if:` or, for a session at the repository top, a path filter, is still certified,
   and the begin line names neither the skipped newer runs nor the conditions the Phase 0 line shows.
-  Answering unverified when no job of the scanned file matches the pattern would fail closed for job
-  names built with `${{ }}` and for reusable-workflow jobs, so it needs its own measurement.
-- `gh api` runs without `--hostname` and with the caller's environment, so `GH_HOST`, or a gh login
-  only to another host, could answer the verification from another host, while `repoIdentity`
-  accepts only github.com. This predates the per-version cache, and the begin refresh reaches it
-  too; pinning the host means `--hostname github.com` in `ghApi` and a stub that reads the endpoint
-  past a trailing flag on Windows.
+- The version check is lenient where the file cannot tell: a name built wholly from `${{ }}` runs
+  as every pattern, an expression can stand for text the name never shows, and `<name> / *`
+  accepts every callee job, because the reusable workflow's own file is not read, so a callee that
+  dropped the job is certified. An inline job body, a `jobs:` block in flow form and a check past
+  `LIMITS.maxMatchCells` run as every pattern too.
+- A block-scalar name line that starts with `#` is read as a comment, and a continuation line of a
+  double-quoted name that holds ` #` loses the rest of that line, because comments are stripped
+  line by line. A YAML escape JSON lacks, such as `\x41`, is read with its backslash dropped.
 - Windows is unmeasured: the new cases ran on macOS only, and no blocking Windows profile names
-  `test-full-suite-ci.sh`.
+  `test-full-suite-ci.sh`. The Windows stub variant is driven only by the stand-in `process` of the
+  unit file, and once on macOS through a node binary linked as `gh.exe`.
 
 **Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.

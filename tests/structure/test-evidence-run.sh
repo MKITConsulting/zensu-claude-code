@@ -353,6 +353,43 @@ else
   printf '%s\n' "$BWT_OUT"
 fi
 
+E28_FAILED=""
+for E28_NAME in full-suite-command gate-mode remedy-prefix remedy-prefix-scoped full-suite-marker ci-config.json command caller-project-dir; do
+  transport_fault_stub "$WORK/stub-$E28_NAME" "$E28_NAME" || { E28_FAILED="$E28_FAILED $E28_NAME(stub)"; continue; }
+  rm -f "$WORK/e28-ran"
+  BEFORE_W="$(record_count)"
+  WRITE_ERR="$(cd "$BOUND" && PATH="$WORK/stub-$E28_NAME:$PATH" bash "$LOG" --evidence-run --scope scoped --cmd "touch '$WORK/e28-ran'" 2>&1 >/dev/null)"; RC_W=$?
+  AFTER_W="$(record_count)"
+  E28_LINE="zensu-log.sh --evidence-run: the $E28_NAME transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+  E28_OTHER="$(printf '%s\n' "$WRITE_ERR" | grep -F 'zensu-log.sh --evidence-run: ' | grep -vxF "$E28_LINE")"
+  if [ "$RC_W" -ne 2 ] || [ "$AFTER_W" -ne "$BEFORE_W" ] || [ -e "$WORK/e28-ran" ] || [ -n "$E28_OTHER" ] \
+    || ! printf '%s\n' "$WRITE_ERR" | grep -qF "/$E28_NAME: " \
+    || ! printf '%s\n' "$WRITE_ERR" | grep -qxF "$E28_LINE"; then
+    E28_FAILED="$E28_FAILED $E28_NAME(rc=$RC_W before=$BEFORE_W after=$AFTER_W)"
+    printf '%s\n' "$WRITE_ERR"
+  fi
+done
+if [ -z "$E28_FAILED" ]; then
+  check "E28 every transport write of --evidence-run fails closed: exit 2, the shell's own line naming the file and no line of the module, no record and no command run" PASS
+else
+  check "E28 every transport write of --evidence-run fails closed (failed:$E28_FAILED)" FAIL
+fi
+
+printf '{"evidence":{"fullSuiteCommand":"touch %s"}}\n' "$WORK/e28-configured-ran" > "$ZENSU_CONFIG"
+rm -f "$WORK/e28-configured-ran" "$WORK/e28-explicit-ran"
+BEFORE_W="$(record_count)"
+FULL_ERR="$(cd "$BOUND" && PATH="$WORK/stub-command:$PATH" bash "$LOG" --evidence-run --scope full --local --cmd "touch '$WORK/e28-explicit-ran'" 2>&1 >/dev/null)"; RC_W=$?
+AFTER_W="$(record_count)"
+printf '{}\n' > "$ZENSU_CONFIG"
+if [ "$RC_W" -eq 2 ] && [ "$AFTER_W" -eq "$BEFORE_W" ] \
+  && [ ! -e "$WORK/e28-configured-ran" ] && [ ! -e "$WORK/e28-explicit-ran" ] \
+  && printf '%s\n' "$FULL_ERR" | grep -qxF "zensu-log.sh --evidence-run: the command transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."; then
+  check "E28b a full run whose command write fails stops before the module, so evidence.fullSuiteCommand never runs in place of the given --cmd" PASS
+else
+  check "E28b a full run whose command write fails stops before the module (rc=$RC_W before=$BEFORE_W after=$AFTER_W)" FAIL
+  printf '%s\n' "$FULL_ERR"
+fi
+
 SUBREPO="$WORK/subrepo"
 bound_repo "$SUBREPO"
 SUBREPO="$(cd -P "$SUBREPO" && pwd -P)"

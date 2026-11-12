@@ -569,6 +569,61 @@ else
 fi
 printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
 
+transport_fault_stub "$WORK/command-write-stub" full-suite-command
+COMMAND_WRITE_LINE="zensu-log.sh --chain-done: the full-suite-command transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+PREPARE_STAYS_OPEN='zensu-log.sh --chain-done: the chain stays open; resolve the full-suite transport fault named above, then run --chain-done again.'
+if arm "fsg-command-write" "$PROJ"; then
+  run_full --cmd 'true'
+  printf '{"evidence":{"fullSuiteCommand":"echo configured","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+  PATH="$WORK/command-write-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
+  printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qF '/full-suite-command: ' "$WORK/err" \
+    && grep -qxF "$COMMAND_WRITE_LINE" "$WORK/err" \
+    && grep -qxF "$PREPARE_STAYS_OPEN" "$WORK/err" \
+    && ! grep -qF 'FULL SUITE — ' "$WORK/err"; then
+    check "F29 a failed full-suite-command write refuses the required terminus with the shell's own lines, so a green run of another command than the configured one cannot pass" PASS
+  else
+    check "F29 a failed full-suite-command write refuses the required terminus (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "F29 arm a ticket-bound chain" FAIL
+fi
+
+PLAIN_UNJUDGED='FULL SUITE — not-applicable | the project is not a git repository, so no run can be bound to a tree (the full-suite transport could not be prepared) | gate: required'
+if arm "fsg-plain-escape-write" "$PLAIN"; then
+  PATH="$WORK/command-write-stub:$PATH" ZENSU_FULL_SUITE_GATE=off bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && grep -qxF "$COMMAND_WRITE_LINE" "$WORK/err" \
+    && grep -qxF "$PLAIN_UNJUDGED" "$WORK/err" \
+    && ! grep -qF 'FULL SUITE — escaped' "$WORK/err"; then
+    check "F30 an escaped terminus outside git whose transport cannot be prepared reads not-applicable, as the module does, and records no escape" PASS
+  else
+    check "F30 an escaped terminus outside git whose transport cannot be prepared reads not-applicable (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "F30 arm a ticket-bound chain outside git" FAIL
+fi
+
+if arm "fsg-plain-required-write" "$PLAIN"; then
+  PATH="$WORK/command-write-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && grep -qxF "$COMMAND_WRITE_LINE" "$WORK/err" \
+    && grep -qxF "$PLAIN_UNJUDGED" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "F31 a required terminus outside git whose transport cannot be prepared closes as not-applicable, as the module would" PASS
+  else
+    check "F31 a required terminus outside git whose transport cannot be prepared closes as not-applicable (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "F31 arm a ticket-bound chain outside git" FAIL
+fi
+
 GATES_DOC="$PLUGIN_DIR/docs/gates.md"
 check "FS-A1 the gate doc names the combined fingerprint" "$(grep -qF 'combines the project tree and that work tree' "$GATES_DOC" && echo PASS || echo FAIL)"
 check "FS-A2 the gate doc names the leading cd" "$(grep -qF 'target of a leading literal `cd <dir>`' "$GATES_DOC" && echo PASS || echo FAIL)"

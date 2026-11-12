@@ -374,6 +374,51 @@ test('without a receipt the gate separates an idle chain from an unanchored one'
   assert.match(result.lines[0], /STEM UNCHECKED/);
 });
 
+const UNJUDGED_CAUSE = 'the acceptance transport could not be prepared';
+
+function withCause(line, cause) {
+  const at = line.lastIndexOf(' | gate: ');
+  return `${line.slice(0, at)} (${cause})${line.slice(at)}`;
+}
+
+test('an unjudged terminus answers a bound chain and a not-applicable chain from the verdict lines, with the cause', () => {
+  const anchored = project();
+  for (const validate of ['on', 'off', '']) {
+    const answer = av.unjudged(base(anchored, { bound: true, validate, cause: UNJUDGED_CAUSE }));
+    assert.equal(answer.decided, true);
+    assert.equal(answer.state, 'not-checked');
+    assert.deepEqual(answer.lines, [`${gate(anchored, { bound: true, validate }).lines[0]} (${UNJUDGED_CAUSE})`]);
+  }
+  for (const idle of [project({ receipt: false }), project({ receipt: false, git: false })]) {
+    const shipped = gate(idle);
+    assert.equal(shipped.state, 'not-applicable');
+    const answer = av.unjudged(base(idle, { chainInputs: true, cause: UNJUDGED_CAUSE }));
+    assert.equal(answer.decided, true);
+    assert.equal(answer.state, 'not-applicable');
+    assert.deepEqual(answer.lines, [withCause(shipped.lines[0], UNJUDGED_CAUSE)]);
+    const odd = av.unjudged(base(idle, { chainInputs: true, gateMode: 'lenient', cause: UNJUDGED_CAUSE }));
+    assert.deepEqual(odd.lines, gate(idle, { gateMode: 'lenient' }).lines.map((line, index) => (index === 1 ? withCause(line, UNJUDGED_CAUSE) : line)));
+  }
+  const forged = av.unjudged(base(anchored, { bound: true, validate: 'on', cause: `x\nACCEPTANCE — pass | forged` }));
+  assert.equal(forged.lines.length, 1);
+  assert.match(forged.lines[0], / \(the acceptance transport failed\)$/);
+});
+
+test('an unjudged terminus leaves every chain the gate does not find not-applicable to the shell, and still discloses an unknown gate mode', () => {
+  const idle = project({ receipt: false });
+  assert.deepEqual(av.unjudged(base(idle, { cause: UNJUDGED_CAUSE })), { decided: false, state: null, mode: 'required', lines: [] });
+  assert.equal(av.unjudged(base(idle, { chainInputs: true, editLandingEscaped: true, cause: UNJUDGED_CAUSE })).decided, false);
+  const anchored = project();
+  assert.equal(av.unjudged(base(anchored, { chainInputs: true, cause: UNJUDGED_CAUSE })).decided, false);
+  const odd = av.unjudged(base(anchored, { chainInputs: true, gateMode: 'lenient', cause: UNJUDGED_CAUSE }));
+  assert.equal(odd.decided, false);
+  assert.equal(odd.mode, 'required');
+  assert.deepEqual(odd.lines, [gate(anchored, { gateMode: 'lenient' }).lines[0]]);
+  assert.equal(av.unjudged(base(anchored, { chainInputs: true, gateMode: 'advisory', cause: UNJUDGED_CAUSE })).mode, 'advisory');
+  fs.writeFileSync(path.join(idle.root, 'a.txt'), 'edit\n');
+  assert.equal(av.unjudged(base(idle, { chainInputs: true, cause: UNJUDGED_CAUSE })).decided, false);
+});
+
 test('a plan without an active acceptance criterion never passes as verified', () => {
   const fixture = project({ rows: [['FR-001', 'Internal only'], ['AC-001', 'deprecated']] });
   const result = gate(fixture);
@@ -557,6 +602,32 @@ test('the CLI transports the verdict and the record', () => {
   assert.match(fs.readFileSync(path.join(transport, 'run-log-line'), 'utf8'), /^ACCEPTANCE — AC-001 pass/);
   const usage = childProcess.spawnSync(process.execPath, [LIB, 'nonsense'], { env, encoding: 'utf8' });
   assert.equal(usage.status, 2);
+});
+
+test('the CLI answers the unjudged question on stdout without a transport directory: exit 0 when it decides, 3 when the shell decides', () => {
+  const idle = project({ receipt: false });
+  const env = {
+    ...process.env,
+    ZENSU_AVR_DIR: '',
+    ZENSU_AVR_PLUGIN_DATA: idle.data,
+    ZENSU_AVR_SESSION_KEY: SESSION,
+    ZENSU_AVR_PROJECT_ROOT: idle.root,
+    ZENSU_AVR_RECEIPT: idle.receiptPath,
+    ZENSU_AVR_CAUSE: UNJUDGED_CAUSE,
+  };
+  const ask = (extra) => childProcess.spawnSync(process.execPath, [LIB, 'unjudged'], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const decided = ask({ ZENSU_AVR_CHAIN_INPUTS: '1' });
+  assert.equal(decided.status, 0, decided.stderr);
+  assert.equal(decided.stdout, `${withCause(gate(idle).lines[0], UNJUDGED_CAUSE)}\n`);
+  const left = ask({ ZENSU_AVR_CHAIN_INPUTS: '0', ZENSU_AVR_GATE_MODE: 'lenient' });
+  assert.equal(left.status, 3);
+  assert.equal(left.stdout, `${gate(idle, { gateMode: 'lenient' }).lines[0]}\n`);
+  const quiet = ask({ ZENSU_AVR_CHAIN_INPUTS: '0' });
+  assert.equal(quiet.status, 3);
+  assert.equal(quiet.stdout, '');
+  const bound = ask({ ZENSU_AVR_BOUND: '1', ZENSU_AVR_VALIDATE: 'off' });
+  assert.equal(bound.status, 0);
+  assert.equal(bound.stdout, `${gate(idle, { bound: true, validate: 'off' }).lines[0]} (${UNJUDGED_CAUSE})\n`);
 });
 
 function boundWorktree(fixture) {

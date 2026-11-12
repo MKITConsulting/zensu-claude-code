@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 32,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 35,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
     },
@@ -22,9 +22,9 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
-      "path": "tests/structure/background-review-v1.test.js", "registered": 33, "skips": {"win32": 2},
+      "path": "tests/structure/background-review-v1.test.js", "registered": 44, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
-      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the name bindings that map a named spawn's hand-back to its agent id, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
     },
     {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
@@ -83,9 +83,9 @@
       "summary": "The plan-approval notice for a plan that names another plugin's executor: the narrow classifier, the notice text and the origin-first payload decision."
     },
     {
-      "path": "tests/structure/full-suite-ci-v1.test.js", "registered": 45,
+      "path": "tests/structure/full-suite-ci-v1.test.js", "registered": 74,
       "runs": [{ "driver": "tests/structure/test-full-suite-ci.sh" }],
-      "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the per-version verification cache, the policy ladder, the chain-begin snapshot and the deferred-ci verdict."
+      "summary": "Full-suite CI deferral: the workflow scan and the version job check, the remote proof with its host pin and refresh deadline, the per-version verification cache, the policy ladder, the chain-begin snapshot, the deferred-ci verdict and the chain's own work tree."
     },
     {
       "path": "tests/structure/git-repo-escape.test.js", "registered": 63,
@@ -175,9 +175,9 @@
       "summary": "The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe."
     },
     {
-      "path": "tests/structure/review-gate-v1.test.js", "registered": 38,
+      "path": "tests/structure/review-gate-v1.test.js", "registered": 42,
       "runs": [{ "driver": "tests/structure/test-review-packet.sh" }],
-      "summary": "The consume-review gate: reviewer records, background launches completed from hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement."
+      "summary": "The consume-review gate: reviewer records, background launches completed from hand-backs, name-framed hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement."
     },
     {
       "path": "tests/structure/review-ledger-v1.test.js", "registered": 42,
@@ -347,7 +347,7 @@
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
     {
-      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 16,
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 17,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
     },

@@ -1975,7 +1975,7 @@ function zenModeRow() {
   if (v === 'unknown') {
     line(WARN, 'zen-mode: not checked — no bound session key or recorded project root was available, so this session\'s zen-mode marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
   } else if (v === 'unjudged') {
-    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session, shows what the hook resolves');
+    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session as /zensu:zen-mode renders it, walks the hook\'s state ladder under the recorded project root; its hooks.zenMode check reads that root\'s config, while the hook reads the project directory its host sets');
   } else if (v === 'on (session marker)' || v === 'on (hooks.zenModeDefault)') {
     line(OK, 'zen-mode: ' + v + ' — every prompt of this session gets the low-noise contract, and ' + ZEN_YIELD
       + '; "zen off" leaves it for this session');
