@@ -1,0 +1,15 @@
+{
+  "description": "A file whose declared size differs from its content.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "file.size",
+        "at": "files.4aa9f214380c0b5e516a589a27fd9159e58410b8c7befcc6292b154e571bf301.bytes"
+      }
+    ]
+  }
+}

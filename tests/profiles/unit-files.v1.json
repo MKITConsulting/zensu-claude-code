@@ -57,6 +57,11 @@
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
+      "path": "tests/structure/evidence-report-v1.test.js", "registered": 56, "skips": {"win32": 4},
+      "runs": [{ "driver": "tests/structure/test-evidence-report.sh" }],
+      "summary": "Verify-feature evidence reports: ids, the strict manifest schema, the conformance corpus, deterministic rendering, containment, the secret screen and redaction, retention, the store placement, chain and matrix coverage, and the transport."
+    },
+    {
       "path": "tests/structure/evidence-run-v1.test.js", "registered": 95, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."

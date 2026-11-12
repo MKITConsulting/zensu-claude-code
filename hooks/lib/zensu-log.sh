@@ -504,6 +504,40 @@ _zensu_full_suite_work_tree() {
   return 0
 }
 
+_zensu_report_native_dir() {
+  local value="${1:-}" native
+  if native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$value" 2>/dev/null)" && [ -n "$native" ]; then
+    printf '%s' "$native"
+    return 0
+  fi
+  if native="$(_zensu_config_native_path "$value" 2>/dev/null)" && [ -n "$native" ]; then
+    printf '%s' "$native"
+    return 0
+  fi
+  printf '%s' "$value"
+}
+
+_zensu_report_native_file() {
+  local value="${1:-}" parent base native
+  case "$value" in
+    (*/*) parent="${value%/*}"; base="${value##*/}" ;;
+    (*) parent="."; base="$value" ;;
+  esac
+  [ -n "$parent" ] || parent="/"
+  if [ -n "$base" ] && native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$parent" 2>/dev/null)" && [ -n "$native" ]; then
+    case "$native" in
+      (*/) printf '%s%s' "$native" "$base" ;;
+      (*) printf '%s/%s' "$native" "$base" ;;
+    esac
+    return 0
+  fi
+  if native="$(_zensu_config_native_path "$value" 2>/dev/null)" && [ -n "$native" ]; then
+    printf '%s' "$native"
+    return 0
+  fi
+  printf '%s' "$value"
+}
+
 _zensu_acceptance_gate() {
   local session="$1" rc=0
   _avg_lines=""
@@ -852,6 +886,163 @@ case "${1:-}" in
       fi
     fi
     exit "$avr_rc"
+    ;;
+  --report-begin|--report-add|--report-step|--report-render|--report-list|--report-export)
+    erp_verb="$1"
+    erp_mode="${erp_verb#--report-}"
+    erp_label="zensu-log.sh $erp_verb"
+    shift
+    _avr_dir=""
+    _avr_log=""
+    _avr_work_tree=""
+    _erp_dir=""
+    if ! command -v node >/dev/null 2>&1; then
+      echo "$erp_label: node is required for evidence reports" >&2
+      exit 2
+    fi
+    _erp_dir="$(mktemp -d 2>/dev/null)" || {
+      echo "$erp_label: no temporary directory available" >&2
+      exit 2
+    }
+    trap 'rm -rf ${_erp_dir:+"$_erp_dir"} ${_avr_dir:+"$_avr_dir"}' EXIT
+    if ! : > "$_erp_dir/args"; then
+      echo "$erp_label: the temporary directory is not writable" >&2
+      exit 2
+    fi
+    erp_kind=""
+    erp_seen=" "
+    while [ $# -gt 0 ]; do
+      erp_flag="$1"
+      case "$erp_flag" in
+        --attach|--authenticated)
+          erp_value="1"
+          shift
+          ;;
+        --run-dir|--mode|--drivers|--recipe|--origin|--log|--report|--kind|--file|--plane|--viewport|--method|--path|--status|--source|--class|--evidence-run|--priority|--driver|--result|--criteria|--evidence|--verdict|--console|--network|--limit)
+          if [ $# -lt 2 ]; then
+            echo "$erp_label: $erp_flag needs a value" >&2
+            exit 2
+          fi
+          erp_value="$2"
+          shift 2
+          ;;
+        *)
+          echo "$erp_label: unknown argument: $erp_flag (a caption, a title, a feature and every other free text go on stdin)" >&2
+          exit 2
+          ;;
+      esac
+      erp_key="${erp_flag#--}"
+      case "$erp_seen" in
+        *" $erp_key "*)
+          echo "$erp_label: $erp_flag is given more than once" >&2
+          exit 2
+          ;;
+      esac
+      erp_seen="$erp_seen$erp_key "
+      case "$erp_key" in
+        run-dir) erp_value="$(_zensu_report_native_dir "$erp_value")" ;;
+        file) erp_value="$(_zensu_report_native_file "$erp_value")" ;;
+        kind) erp_kind="$erp_value" ;;
+        log)
+          _avr_log="$erp_value"
+          continue
+          ;;
+      esac
+      if ! printf '%s\0%s\0' "$erp_key" "$erp_value" >> "$_erp_dir/args"; then
+        echo "$erp_label: the arguments could not be written to the temporary directory" >&2
+        exit 2
+      fi
+    done
+    _erp_receipt=""
+    _erp_escaped=0
+    _erp_bash="bash"
+    if [ -n "$_avr_log" ]; then
+      case "$erp_mode" in
+        begin|render)
+          if ! erp_session="$(zensu_resolve_session_id)" || [ -z "$erp_session" ]; then
+            echo "zensu-log.sh: Session Control session identity unavailable" >&2
+            exit 2
+          fi
+          source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+          _zensu_avr_prepare "$erp_label" "$erp_session" || exit 2
+          trap 'rm -rf ${_erp_dir:+"$_erp_dir"} ${_avr_dir:+"$_avr_dir"}' EXIT
+          if ! _zensu_avr_work_tree "$erp_session"; then
+            if ! printf '%s' "$_bwt_fault" > "$_erp_dir/work-tree-fault"; then
+              echo "$erp_label: the work-tree lookup failed and its cause could not be written to the temporary directory, so the report module did not run. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run $erp_verb again." >&2
+              exit 2
+            fi
+          fi
+          _erp_receipt="$_avr_receipt"
+          _erp_escaped="$_avr_escaped_el"
+          _erp_bash="$_avr_bash"
+          ;;
+      esac
+      if ! printf '%s\0%s\0' log "$_avr_log" >> "$_erp_dir/args"; then
+        echo "$erp_label: the arguments could not be written to the temporary directory" >&2
+        exit 2
+      fi
+    fi
+    if ! : > "$_erp_dir/stdin"; then
+      echo "$erp_label: the temporary directory is not writable" >&2
+      exit 2
+    fi
+    erp_read_stdin=1
+    case "$erp_mode" in
+      list|export) erp_read_stdin=0 ;;
+      add)
+        case "$erp_kind" in
+          image|text|signal) ;;
+          *) erp_read_stdin=0 ;;
+        esac
+        ;;
+    esac
+    if [ "$erp_read_stdin" = "1" ] && [ ! -t 0 ]; then
+      if ! head -c 65537 > "$_erp_dir/stdin"; then
+        echo "$erp_label: stdin could not be read" >&2
+        exit 2
+      fi
+    fi
+    if ! zensu_evidence_report_config_json > "$_erp_dir/config.json"; then
+      echo "$erp_label: the configuration could not be written to the temporary directory" >&2
+      exit 2
+    fi
+    _erp_lib_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib")" || {
+      echo "$erp_label: the report module cannot be resolved" >&2
+      exit 2
+    }
+    _erp_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || {
+      echo "$erp_label: CLAUDE_PLUGIN_DATA does not name a usable directory" >&2
+      exit 2
+    }
+    _erp_dir_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_erp_dir")" || {
+      echo "$erp_label: the temporary directory cannot be resolved" >&2
+      exit 2
+    }
+    _erp_home="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${HOME:-}" 2>/dev/null)" || _erp_home=""
+    _erp_manifest=""
+    if _erp_manifest_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/.claude-plugin" 2>/dev/null)"; then
+      _erp_manifest="$_erp_manifest_dir/plugin.json"
+    fi
+    _erp_msys_excl="$(zensu_msys_env_exclusions ZENSU_ERP_LIB ZENSU_ERP_DIR ZENSU_ERP_PLUGIN_DATA \
+      ZENSU_ERP_PROJECT_ROOT ZENSU_ERP_HOME ZENSU_ERP_PLUGIN_MANIFEST ZENSU_ERP_RECEIPT \
+      ZENSU_ERP_WORK_TREE ZENSU_ERP_BASH)" || _erp_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
+    MSYS2_ENV_CONV_EXCL="$_erp_msys_excl" \
+    ZENSU_ERP_LIB="$_erp_lib_dir/evidence-report-v1.js" \
+    ZENSU_ERP_DIR="$_erp_dir_native" \
+    ZENSU_ERP_PLUGIN_DATA="$_erp_data" \
+    ZENSU_ERP_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+    ZENSU_ERP_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
+    ZENSU_ERP_HOST="claude-code" \
+    ZENSU_ERP_HOME="$_erp_home" \
+    ZENSU_ERP_PLUGIN_MANIFEST="$_erp_manifest" \
+    ZENSU_ERP_RECEIPT="$_erp_receipt" \
+    ZENSU_ERP_EDIT_LANDING_ESCAPED="$_erp_escaped" \
+    ZENSU_ERP_WORK_TREE="${_avr_work_tree:-}" \
+    ZENSU_ERP_BASH="$_erp_bash" \
+    ZENSU_ERP_LABEL="$erp_label" \
+    ZENSU_ERP_MODE="$erp_mode" \
+      node -e 'require(process.env.ZENSU_ERP_LIB).main([process.env.ZENSU_ERP_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_ERP_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
+    exit $?
     ;;
   --session-key)
     session_val="$(zensu_resolve_session_id)" || {

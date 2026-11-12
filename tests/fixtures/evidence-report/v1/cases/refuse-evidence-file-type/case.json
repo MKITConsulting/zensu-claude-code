@@ -1,0 +1,15 @@
+{
+  "description": "An image item whose file is text.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "evidence.file-type",
+        "at": "evidence.e2.file"
+      }
+    ]
+  }
+}

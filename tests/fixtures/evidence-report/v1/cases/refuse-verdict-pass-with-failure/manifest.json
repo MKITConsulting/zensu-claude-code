@@ -1,0 +1,144 @@
+{
+  "schema": "zensu-evidence-report/v1",
+  "id": "vr1_1794200000000_0123456789ab",
+  "created_at": "2026-11-09T10:00:00Z",
+  "rendered_at": "2026-11-09T10:05:00Z",
+  "plugin_version": "0.36.0",
+  "run": {
+    "host": "claude-code",
+    "mode": "local",
+    "attach": false,
+    "chain": null,
+    "feature": "The settings page saves the chosen locale",
+    "drivers": [
+      "browser",
+      "cli"
+    ],
+    "recipe": ".zensu/runtime.yaml",
+    "authenticated": false
+  },
+  "target": {
+    "repository": "example/demo",
+    "branch": "feature/locale",
+    "head": "3f1c2b9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c",
+    "tree": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+    "dirty": false,
+    "origin": null
+  },
+  "verdict": "PASS",
+  "coverage": {
+    "source": "matrix",
+    "criteria": [
+      {
+        "id": "AC-001",
+        "text": "Saving the form shows a confirmation",
+        "state": "fail",
+        "driver": "browser",
+        "record": null,
+        "evidence_run": null,
+        "zensu": null,
+        "steps": [
+          1
+        ],
+        "note": null
+      },
+      {
+        "id": "AC-002",
+        "text": "The CLI prints the saved value",
+        "state": "pass",
+        "driver": "cli",
+        "record": null,
+        "evidence_run": null,
+        "zensu": null,
+        "steps": [
+          2
+        ],
+        "note": null
+      }
+    ]
+  },
+  "steps": [
+    {
+      "n": 1,
+      "title": "Save the form",
+      "priority": "P0",
+      "driver": "browser",
+      "criteria": [
+        "AC-001"
+      ],
+      "result": "fail",
+      "expected": "A confirmation appears",
+      "observed": "An error banner appears and the request answers 500",
+      "evidence": [
+        "e1",
+        "e3"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Read the value back",
+      "priority": "P2",
+      "driver": "cli",
+      "criteria": [
+        "AC-002"
+      ],
+      "result": "pass",
+      "expected": "The CLI prints the value",
+      "observed": "The CLI printed the value",
+      "evidence": [
+        "e2"
+      ]
+    }
+  ],
+  "evidence": {
+    "e1": {
+      "kind": "image",
+      "file": "69b2115faa01e52a7362820613d8baa1d42a5b027b2ed58d79d91f9696c62688",
+      "caption": "The error banner after saving",
+      "plane": "visual"
+    },
+    "e2": {
+      "kind": "run",
+      "record": "er1_1794200000003_eeeeeeeeeeee",
+      "command": "demo-cli settings get locale",
+      "exit_code": 0,
+      "duration_ms": 812
+    },
+    "e3": {
+      "kind": "request",
+      "method": "POST",
+      "path": "/api/save",
+      "status": 500
+    },
+    "e4": {
+      "kind": "signal",
+      "source": "network",
+      "class": "error",
+      "message": "POST /api/save answered 500"
+    }
+  },
+  "files": {
+    "69b2115faa01e52a7362820613d8baa1d42a5b027b2ed58d79d91f9696c62688": {
+      "name": "files/69b2115faa01e52a7362820613d8baa1d42a5b027b2ed58d79d91f9696c62688.png",
+      "type": "image/png",
+      "bytes": 85,
+      "width": 3,
+      "height": 2,
+      "viewport": null,
+      "source_sha256": null
+    }
+  },
+  "sections": {
+    "console": "clean",
+    "network": "issues",
+    "consent": [
+      {
+        "origin": "http://localhost:3000",
+        "route": "/form",
+        "decided_by": "remembered"
+      }
+    ],
+    "limitations": [],
+    "resources": []
+  }
+}

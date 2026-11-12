@@ -945,6 +945,7 @@ module.exports = {
   planFor,
   readCriteria,
   hasChanges,
+  chainTree,
   citedRun,
   resolveChain,
   recordLine,

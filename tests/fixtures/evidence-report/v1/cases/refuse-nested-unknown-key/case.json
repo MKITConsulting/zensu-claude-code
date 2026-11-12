@@ -1,0 +1,12 @@
+{
+  "description": "A key inside run that schema version 1 does not define.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.unknown-key",
+        "at": "run.browser"
+      }
+    ]
+  }
+}

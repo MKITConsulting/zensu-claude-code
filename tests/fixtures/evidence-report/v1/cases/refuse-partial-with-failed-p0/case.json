@@ -1,0 +1,15 @@
+{
+  "description": "Verdict PARTIAL while a P0 row failed.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "verdict.contradiction",
+        "at": "verdict"
+      }
+    ]
+  }
+}

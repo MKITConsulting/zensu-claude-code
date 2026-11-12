@@ -1,0 +1,15 @@
+{
+  "description": "Verdict PASS while an in-scope criterion is partial.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "verdict.contradiction",
+        "at": "verdict"
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "description": "A manifest that is not JSON.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "manifest.unparseable",
+        "at": ""
+      }
+    ]
+  }
+}

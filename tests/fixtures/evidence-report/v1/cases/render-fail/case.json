@@ -1,0 +1,10 @@
+{
+  "description": "A failed P0 row and a failed criterion with verdict FAIL, a run item and a network signal.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "rendering": "sha256:6709a47d7541c9064db50ea159ff5651dc8ed177fd5c50a6cff0455e9338f434"
+  }
+}

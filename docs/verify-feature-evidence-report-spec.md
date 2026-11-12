@@ -1,6 +1,7 @@
 # Verify-Feature Evidence Report — Specification
 
-Status: draft, 2026-11-07. Nothing described here is implemented. The spec plans four parts that
+Status: draft, 2026-11-07. Build step 1 of §9 is implemented: the core module, its `zensu-log.sh`
+verbs and the conformance corpus; nothing else described here is. The spec plans four parts that
 ship from different repositories: the plugin (this repository), its ports to other hosts, the
 `zensu` CLI, and the Zensu service with its web viewer. For the CLI and the service it fixes
 behavior and contract only; this repository is public, so it names no internal module of either.
@@ -359,8 +360,10 @@ attachment or an e-mail. That is how a report is shared without Zensu.
 
 ### 6.7 Store and retention
 
-The defaults are in §6.11. The sweep runs at `--report-begin`: by count per repository and by
-size across the store, oldest first. A published report counts like any other; deleting its
+The defaults are in §6.11. The sweep runs at `--report-begin`: by count in the calling repository
+and by size across the store, oldest first. It never deletes a report another call is still
+building: one whose lock is held, or an unrendered one touched within the last 14 days. A
+published report counts like any other; deleting its
 local copy does not touch its copy in Zensu. Each host keeps its own store (§7.1).
 
 ### 6.8 Safety
@@ -439,8 +442,8 @@ Every key belongs to the `evidence.*` family of `docs/configuration.md`.
 |---|---|---|---|
 | `evidence.report.enabled` | `true` | merged | `false` writes no report; the chat report is unchanged. |
 | `evidence.report.dir` | `$CLAUDE_PLUGIN_DATA/evidence-report/v1` | merged | The store. Refused inside a work tree unless git reports the path ignored. |
-| `evidence.report.keep` | `30` | merged | Reports kept per repository. |
-| `evidence.report.maxBytes` | `2147483648` | merged | Size cap of the whole store. |
+| `evidence.report.keep` | `30` | merged | Reports kept per repository; a begin trims only its own repository. |
+| `evidence.report.maxBytes` | `2147483648` | user-level only | Size cap of the whole store. A project file cannot set it, because the sweep deletes other repositories' reports. |
 | `evidence.report.webp` | `auto` | merged | `auto` transcodes losslessly when `cwebp` is on `PATH`; `off` keeps PNG. |
 | `evidence.report.prImages` | `6` | merged | Images in the review summary, from 0 to 20. |
 | `evidence.report.publish` | `ask` | user-level only; a project file can only set `off` | `ask` publishes only on request. `pr`, `zensu` or `pr,zensu` publish after every run, subject to rule 3 of §6.8. |
@@ -448,6 +451,8 @@ Every key belongs to the `evidence.*` family of `docs/configuration.md`.
 `evidence.report.publish` is read like the self-granted capabilities in §Config Resolution Order
 of `docs/configuration.md`. A committed `.zensu/config.json` must not make every contributor's
 screenshots leave their machine, so the project layer can withdraw publishing but never grant it.
+`evidence.report.maxBytes` is read from the user layers alone for a related reason: the size sweep
+deletes the reports of every repository in the store, so a committed file must not set it.
 
 ### 6.12 Versioning
 

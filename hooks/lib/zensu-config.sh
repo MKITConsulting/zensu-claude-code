@@ -520,6 +520,14 @@ zensu_evidence_ci_config_json() {
   printf '%s' "$val"
 }
 
+zensu_evidence_report_config_json() {
+  command -v node >/dev/null 2>&1 || { printf '{}'; return 0; }
+  local val
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' function ob(x){return Boolean(x)&&typeof x==="object"&&!Array.isArray(x)}function has(x,k){return Object.prototype.hasOwnProperty.call(x,k)}var j=cfg();var e=ob(j)&&ob(j.evidence)?j.evidence:{};var r=ob(e.report)?e.report:{};var u=process.env.ZENSU_CONFIG?rd(process.env.ZENSU_CONFIG):rd((process.env.HOME||"")+"/.zensu/config.json");var ue=ob(u)&&ob(u.evidence)?u.evidence:{};var ur=ob(ue.report)?ue.report:{};var o={};["enabled","dir","keep"].forEach(function(k){if(has(r,k))o[k]=r[k]});if(has(ur,"maxBytes"))o.maxBytes=ur.maxBytes;if(has(r,"maxBytes")&&!(has(ur,"maxBytes")&&JSON.stringify(ur.maxBytes)===JSON.stringify(r.maxBytes)))o.maxBytesFromProject=true;process.stdout.write(JSON.stringify(o))' 2>/dev/null)
+  [ -n "$val" ] || val='{}'
+  printf '%s' "$val"
+}
+
 zensu_full_suite_marker_path() {
   local project_dir="${1:-}" session_key="${2:-}"
   [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1

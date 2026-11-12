@@ -1,0 +1,98 @@
+{
+  "schema": "zensu-evidence-report/v1",
+  "id": "vr1_1794200000000_0123456789ab",
+  "created_at": "2026-11-09T10:00:00Z",
+  "rendered_at": "2026-11-09T10:05:00Z",
+  "plugin_version": "0.36.0",
+  "run": {
+    "host": "claude-code",
+    "mode": "local",
+    "attach": false,
+    "chain": null,
+    "feature": "Render <script>alert(1)</script> & \"quotes\" 'single' café ✓ → done with `code` and a lone ` tick",
+    "drivers": [
+      "api"
+    ],
+    "recipe": ".zensu/runtime.yaml",
+    "authenticated": false
+  },
+  "target": {
+    "repository": "example/demo",
+    "branch": "feature/locale",
+    "head": "3f1c2b9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c",
+    "tree": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+    "dirty": false,
+    "origin": null
+  },
+  "verdict": "PASS",
+  "coverage": {
+    "source": "matrix",
+    "criteria": [
+      {
+        "id": "AC-001",
+        "text": "A <b>bold</b> requirement & more",
+        "state": "pass",
+        "driver": "api",
+        "record": null,
+        "evidence_run": null,
+        "zensu": null,
+        "steps": [
+          1
+        ],
+        "note": "A note with <i>markup</i>"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "n": 1,
+      "title": "Run `npm run dev` & <check>",
+      "priority": "P0",
+      "driver": "api",
+      "criteria": [
+        "AC-001"
+      ],
+      "result": "pass",
+      "expected": "Status \"200\" & <ok>",
+      "observed": "Status '200'",
+      "evidence": [
+        "e1",
+        "e2"
+      ]
+    }
+  ],
+  "evidence": {
+    "e1": {
+      "kind": "text",
+      "file": "0dfbe158c9e7672e35fe20894131318d9b4d19fd33cdf645007deb5e022ae2dc",
+      "caption": "Body with <img src=x onerror=alert(1)>",
+      "plane": "state"
+    },
+    "e2": {
+      "kind": "request",
+      "method": "GET",
+      "path": "/api/items/a&b'c",
+      "status": 200
+    }
+  },
+  "files": {
+    "0dfbe158c9e7672e35fe20894131318d9b4d19fd33cdf645007deb5e022ae2dc": {
+      "name": "files/0dfbe158c9e7672e35fe20894131318d9b4d19fd33cdf645007deb5e022ae2dc.txt",
+      "type": "text/plain",
+      "bytes": 55,
+      "width": null,
+      "height": null,
+      "viewport": null,
+      "source_sha256": null
+    }
+  },
+  "sections": {
+    "console": "clean",
+    "network": "clean",
+    "consent": [],
+    "limitations": [
+      "A limitation with <tags> & `code`"
+    ],
+    "resources": []
+  }
+}

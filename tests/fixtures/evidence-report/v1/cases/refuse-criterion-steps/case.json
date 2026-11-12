@@ -1,0 +1,15 @@
+{
+  "description": "A criterion whose step list disagrees with the steps that name it.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "criterion.steps",
+        "at": "coverage.criteria[1].steps"
+      }
+    ]
+  }
+}

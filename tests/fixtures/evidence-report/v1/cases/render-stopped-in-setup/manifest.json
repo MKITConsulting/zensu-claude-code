@@ -1,0 +1,46 @@
+{
+  "schema": "zensu-evidence-report/v1",
+  "id": "vr1_1794200000000_0123456789ab",
+  "created_at": "2026-11-09T10:00:00Z",
+  "rendered_at": "2026-11-09T10:05:00Z",
+  "plugin_version": "0.36.0",
+  "run": {
+    "host": "claude-code",
+    "mode": "local",
+    "attach": false,
+    "chain": null,
+    "feature": "The settings page saves the chosen locale",
+    "drivers": [
+      "browser"
+    ],
+    "recipe": ".zensu/runtime.yaml",
+    "authenticated": false
+  },
+  "target": {
+    "repository": "example/demo",
+    "branch": "feature/locale",
+    "head": "3f1c2b9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c",
+    "tree": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+    "dirty": false,
+    "origin": null
+  },
+  "verdict": "PARTIAL",
+  "coverage": {
+    "source": "matrix",
+    "criteria": []
+  },
+  "steps": [],
+  "evidence": {},
+  "files": {},
+  "sections": {
+    "console": "not-checked",
+    "network": "not-checked",
+    "consent": [],
+    "limitations": [
+      "The run stopped during setup: the dev server did not answer within 60 s."
+    ],
+    "resources": [
+      "The dev server process was stopped."
+    ]
+  }
+}

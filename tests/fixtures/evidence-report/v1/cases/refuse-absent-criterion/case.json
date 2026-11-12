@@ -1,0 +1,16 @@
+{
+  "description": "An in-scope criterion the manifest does not list.",
+  "inScope": [
+    "AC-001",
+    "AC-002",
+    "AC-003"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "criterion.absent",
+        "at": "coverage.criteria"
+      }
+    ]
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "schema": "zensu-evidence-report/v1",
+  "id": "vr1_1794200000000_0123456789ab",
+  "created_at": "2026-11-09T10:00:00Z",
+  "rendered_at": "2026-11-09T10:05:00Z",
+  "plugin_version": "0.36.0",
+  "run": {
+    "host": "claude-code",
+    "mode": "local",
+    "attach": false,
+    "chain": null,
+    "feature": "The settings page saves the chosen locale",
+    "drivers": [
+      "browser",
+      "api"
+    ],
+    "recipe": ".zensu/runtime.yaml",
+    "authenticated": false
+  },
+  "target": {
+    "repository": "example/demo",
+    "branch": "feature/locale",
+    "head": "3f1c2b9d8e7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c",
+    "tree": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+    "dirty": false,
+    "origin": null
+  },
+  "verdict": "PASS",
+  "coverage": {
+    "source": "matrix",
+    "criteria": [
+      {
+        "id": "AC-001",
+        "text": "The locale select persists after a reload",
+        "state": "pass",
+        "driver": "browser",
+        "record": null,
+        "evidence_run": null,
+        "zensu": null,
+        "steps": [
+          1
+        ],
+        "note": null
+      },
+      {
+        "id": "AC-002",
+        "text": "PUT /api/settings answers 200",
+        "state": "pass",
+        "driver": "api",
+        "record": null,
+        "evidence_run": null,
+        "zensu": null,
+        "steps": [
+          2
+        ],
+        "note": null
+      }
+    ]
+  },
+  "steps": [
+    {
+      "n": 1,
+      "title": "Save the locale",
+      "priority": "P0",
+      "driver": "browser",
+      "criteria": [
+        "AC-001"
+      ],
+      "result": "pass",
+      "expected": "The page shows the new locale after a reload",
+      "observed": "The page shows `de-DE` after a reload",
+      "evidence": [
+        "e1",
+        "e2"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "The API stores the locale",
+      "priority": "P1",
+      "driver": "api",
+      "criteria": [
+        "AC-002"
+      ],
+      "result": "pass",
+      "expected": "The request answers 200",
+      "observed": "The request answered 200",
+      "evidence": [
+        "e3"
+      ]
+    }
+  ],
+  "evidence": {
+    "e1": {
+      "kind": "image",
+      "file": "78aa501bf69b236fde07ec039438d5468f3a303bb80395f2645f5a2f2ef4e99a",
+      "caption": "The settings page after a reload shows `de-DE` in the locale select",
+      "plane": "visual"
+    },
+    "e2": {
+      "kind": "text",
+      "file": "4aa9f214380c0b5e516a589a27fd9159e58410b8c7befcc6292b154e571bf301",
+      "caption": "Network and console log of the save",
+      "plane": "state"
+    },
+    "e3": {
+      "kind": "request",
+      "method": "PUT",
+      "path": "/api/settings",
+      "status": 200
+    },
+    "e4": {
+      "kind": "signal",
+      "source": "console",
+      "class": "warning",
+      "message": "The locale picker uses a deprecated API"
+    }
+  },
+  "files": {
+    "78aa501bf69b236fde07ec039438d5468f3a303bb80395f2645f5a2f2ef4e99a": {
+      "name": "files/78aa501bf69b236fde07ec039438d5468f3a303bb80395f2645f5a2f2ef4e99a.png",
+      "type": "image/png",
+      "bytes": 120,
+      "width": 6,
+      "height": 4,
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "scale": 2
+      },
+      "source_sha256": null
+    },
+    "4aa9f214380c0b5e516a589a27fd9159e58410b8c7befcc6292b154e571bf301": {
+      "name": "files/4aa9f214380c0b5e516a589a27fd9159e58410b8c7befcc6292b154e571bf301.txt",
+      "type": "text/plain",
+      "bytes": 118,
+      "width": null,
+      "height": null,
+      "viewport": null,
+      "source_sha256": null
+    }
+  },
+  "sections": {
+    "console": "issues",
+    "network": "clean",
+    "consent": [
+      {
+        "origin": "http://localhost:3000",
+        "route": "/settings",
+        "decided_by": "asked"
+      }
+    ],
+    "limitations": [
+      "No mobile viewport was checked."
+    ],
+    "resources": [
+      "A local dev server on port 3000, started by the run and stopped after it."
+    ]
+  }
+}
