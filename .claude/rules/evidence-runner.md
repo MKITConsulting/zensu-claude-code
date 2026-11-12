@@ -61,15 +61,18 @@ record names, in local mode and in `decideCi` alike, so a run that measured only
 `stale`, and an `acceptance` run takes the same combined fingerprint. `--if-stale` judges
 freshness against that tree too, in both scopes, so a command that leaves the worktree never
 skips a run the terminus would read as `stale`. Every `--evidence-run`, both acceptance verbs,
-`--chain-work-tree` (with and without `--project-dir`) and `--round-prepare` read the workflow
+`--chain-work-tree` (with and without `--project-dir`), `--round-prepare`, `--full-suite-policy`
+and the `--tdd-begin` full-suite snapshot (through `_zensu_full_suite_work_tree`,
+`.claude/rules/full-suite-ci-deferral.md`) read the workflow
 document once, a standalone chain's included, and ask the resolver only when it carries an
 Autopilot binding whose chain is still open (`active` and not `chainDone`), so a standalone
 chain, and every call after a bound chain's terminus, runs its command where it ran before, and
 `--chain-work-tree` then prints the anchor's top. With `hooks.selfReview` on, a bound chain stays
 open through every review and self-review round, because the bound max-rounds handoff keeps
 `chainDone` false. With it off, the bound max-rounds arm of `post-review-tdd-delegate.sh` closes
-the chain itself, so it asks `--chain-work-tree --project-dir --session` for the work directory
-while the chain is still open and, when that directory is not the anchor's project root, directs
+the chain itself, so it needs the work directory while the chain is still open. It takes the
+answer of the one `--chain-work-tree --project-dir --session` read the delegate makes for every
+bound chain before its full-suite policy read, and, when that directory is not the anchor's project root, directs
 the closing run as `--scope scoped` with a leading literal `cd "<dir>" &&`, which
 `commandDirectory` follows; `scoped`, because `--scope full` refuses any command other than
 `evidence.fullSuiteCommand`. `<dir>` is that directory as `zensu-host-path.sh` renders it, the
@@ -345,8 +348,11 @@ the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S1
 `evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in
 `tests/structure/test-full-suite-ci.sh`, and the `evidence-run-v1.test.js` entry in
 `tests/profiles/unit-files.v1.json`. The bound work tree moves with `_zensu_bound_work_tree`,
-`_zensu_chain_project_dir` and `--chain-work-tree --project-dir` in `zensu-log.sh`, the bound
-max-rounds arm of `post-review-tdd-delegate.sh` that reads it before its terminus and renders it
+whose lookup subshell memoizes the project root (`.claude/rules/stop-latency.md`, `C33` in
+`test-full-suite-ci.sh`), `_zensu_chain_project_dir`, `_zensu_full_suite_work_tree` and
+`--chain-work-tree --project-dir` in `zensu-log.sh`, the delegate's one bound read of it before
+the full-suite policy read, which the bound
+max-rounds arm of `post-review-tdd-delegate.sh` reuses before its terminus and renders
 through `zensu-host-path.sh` as `_zensu_evr_work_tree` does (`M6` to `M6h` in
 `test-autopilot-post-review-max-rounds.sh`, `C23b` in `test-full-suite-ci.sh`), `chainTree`
 in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in

@@ -25,6 +25,7 @@ const LIMITS = Object.freeze({
   maxRunAgeMs: 30 * 24 * 60 * 60 * 1000,
   cacheTtlMs: 24 * 60 * 60 * 1000,
   cacheGraceMs: 7 * 24 * 60 * 60 * 1000,
+  maxProofsPerWorkflow: 16,
   maxCommands: 2,
   maxListValues: 20,
 });
@@ -33,6 +34,7 @@ const KEY_RE = /^(?:"([^"]*)"|'([^']*)'|([^\s:'"#-][^:]*?))\s*:(?:\s+(.*))?$/;
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const ACTION_REF_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@\S+$/;
 const SHA_RE = /^[0-9a-f]{64}$/;
+const PROOF_NAME_RE = /^([0-9a-f]{40})\.([0-9a-f]{64})\.([0-9a-f]{16})\.json$/;
 
 function limitsWith(overrides) {
   return Object.freeze({ ...LIMITS, ...(overrides || {}) });
@@ -40,6 +42,10 @@ function limitsWith(overrides) {
 
 function unverified(reason, transient = false) {
   return { verified: false, reason, transient };
+}
+
+function jobUnverified(reason) {
+  return { ...unverified(reason), disproves: 'job' };
 }
 
 function truthy(value) {
@@ -61,6 +67,59 @@ function git(root, args, limits = LIMITS) {
   });
   if (result.error || result.status !== 0) return null;
   return String(result.stdout).trim();
+}
+
+function workflowTree(options, limits = LIMITS) {
+  const own = evr.workTreeTop(options.projectRoot, limits);
+  if (own.reason !== null) return { error: `git could not place the project root in a work tree: ${own.reason}` };
+  let real = options.projectRoot;
+  try {
+    real = fs.realpathSync.native(options.projectRoot);
+  } catch { }
+  const below = own.top ? path.relative(own.top, real) : '';
+  const prefix = below === '' || below === '..' || below.startsWith(`..${path.sep}`) || path.isAbsolute(below) ? '' : below.split(path.sep).join('/');
+  if (typeof options.workTree !== 'string' || options.workTree === '') return { tree: own.top || options.projectRoot, prefix };
+  const placed = evr.workTreeTop(options.workTree, limits);
+  if (placed.reason !== null) return { error: `git could not place the chain's work tree in a work tree: ${placed.reason}` };
+  return { tree: placed.top || options.workTree, prefix };
+}
+
+const PATTERN_SYNTAX_RE = /[*?[\]{}+!]/;
+
+function patternReaches(pattern, prefix) {
+  const clean = pattern.replace(/^\.\//, '');
+  const index = clean.search(PATTERN_SYNTAX_RE);
+  const end = index === -1 ? clean.length : Math.max(0, clean[index] === '?' ? index - 1 : index);
+  const head = clean.slice(0, end);
+  const below = `${prefix}/`;
+  return below.startsWith(head) || head.startsWith(below);
+}
+
+function patternCovers(pattern, prefix) {
+  const match = pattern.replace(/^\.\//, '').match(/^(.*?)\*\*(\/\*)?$/);
+  if (!match || PATTERN_SYNTAX_RE.test(match[1])) return false;
+  return match[1] === '' || (match[1].endsWith('/') && `${prefix}/`.startsWith(match[1]));
+}
+
+function pathFilterRefusal(scanned, workflowPath, prefix, limits = LIMITS) {
+  if (prefix === '') return null;
+  const where = `the project root lies in ${prefix} below the repository top, so its pull requests may never run the suite`;
+  if (scanned.flowTrigger) return `${workflowPath} writes its pull_request trigger in flow form, so its path filters were not read, and ${where}`;
+  for (const filter of scanned.filters) {
+    if (filter.key !== 'paths' && filter.key !== 'paths-ignore') continue;
+    if (filter.values.length === 0 || filter.values.length >= limits.maxListValues) return `${workflowPath} lists pull_request ${filter.key} patterns this check cannot read in full, and ${where}`;
+    if (filter.key === 'paths-ignore' && filter.values.some((value) => patternReaches(value, prefix))) {
+      return `${workflowPath} has a pull_request paths-ignore pattern that can match files in ${prefix}, and ${where}`;
+    }
+    if (filter.key === 'paths') {
+      const negated = filter.values.filter((value) => value.startsWith('!'));
+      const covered = filter.values.some((value) => !value.startsWith('!') && patternCovers(value, prefix));
+      if (!covered || negated.some((value) => patternReaches(value.slice(1), prefix))) {
+        return `${workflowPath} has pull_request paths patterns that do not cover every file in ${prefix}, and ${where}`;
+      }
+    }
+  }
+  return null;
 }
 
 function remoteUrl(projectRoot, env, limits = LIMITS) {
@@ -462,9 +521,9 @@ function verifyRemote(input) {
     }
   }
   if (!pattern) return unverified(`no job in the recent pull_request runs of ${workflowPath} looks like a test run; name one with evidence.ci.job`);
-  if (!evidence) return unverified(`job "${pattern}" did not run to success or failure in the last ${examined} pull_request run(s) of ${workflowPath}`);
+  if (!evidence) return jobUnverified(`job "${pattern}" did not run to success or failure in the last ${examined} pull_request run(s) of ${workflowPath}`);
   if (now - Date.parse(evidence.run.created_at) > limits.maxRunAgeMs) {
-    return unverified(`the newest pull_request run in which job "${pattern}" ran is older than ${Math.round(limits.maxRunAgeMs / 86400000)} days`);
+    return jobUnverified(`the newest pull_request run in which job "${pattern}" ran is older than ${Math.round(limits.maxRunAgeMs / 86400000)} days`);
   }
   const jobNames = evidence.jobs.map((entry) => entry.name);
   return {
@@ -491,8 +550,20 @@ function cacheDirectory(pluginData) {
   return ensurePrivateDirectory(root, ['cache']);
 }
 
+function cacheKey(repo, workflowPath) {
+  return crypto.createHash('sha256').update(`${repo}\n${workflowPath}`).digest('hex').slice(0, 40);
+}
+
 function cacheName(repo, workflowPath) {
-  return `${crypto.createHash('sha256').update(`${repo}\n${workflowPath}`).digest('hex').slice(0, 40)}.json`;
+  return `${cacheKey(repo, workflowPath)}.json`;
+}
+
+function jobKey(job) {
+  return crypto.createHash('sha256').update(String(job)).digest('hex').slice(0, 16);
+}
+
+function proofName(repo, workflowPath, blob, job) {
+  return `${cacheKey(repo, workflowPath)}.${blob}.${jobKey(job)}.json`;
 }
 
 function readJsonFile(filePath, maxBytes) {
@@ -559,11 +630,91 @@ function validCacheEntry(entry, repo, workflowPath) {
   return true;
 }
 
+function proofNames(directory, repo, workflowPath) {
+  const key = cacheKey(repo, workflowPath);
+  let names;
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return [];
+  }
+  return names
+    .map((name) => PROOF_NAME_RE.exec(name))
+    .filter((match) => match && match[1] === key)
+    .map((match) => ({ name: match[0], blob: match[2], job: match[3] }));
+}
+
+function readProof(directory, name, repo, workflowPath, limits) {
+  const entry = readJsonFile(path.join(directory, name), limits.maxCacheBytes);
+  return validCacheEntry(entry, repo, workflowPath) ? entry : null;
+}
+
+function cachedProofs(directory, repo, workflowPath, blob, limits) {
+  if (!directory) return [];
+  const found = [];
+  for (const entry of proofNames(directory, repo, workflowPath)) {
+    if (entry.blob !== blob) continue;
+    const proof = readProof(directory, entry.name, repo, workflowPath, limits);
+    if (proof && proof.blob === blob && jobKey(proof.job) === entry.job) found.push({ proof, legacy: false });
+  }
+  const legacy = readProof(directory, cacheName(repo, workflowPath), repo, workflowPath, limits);
+  if (legacy && legacy.blob === blob) found.push({ proof: legacy, legacy: true });
+  return found.sort((left, right) => Date.parse(right.proof.verifiedAt) - Date.parse(left.proof.verifiedAt));
+}
+
+function otherVersionsCached(directory, repo, workflowPath, blob, limits) {
+  if (!directory) return false;
+  if (proofNames(directory, repo, workflowPath).some((entry) => entry.blob !== blob)) return true;
+  const legacy = readProof(directory, cacheName(repo, workflowPath), repo, workflowPath, limits);
+  return legacy !== null && legacy.blob !== blob;
+}
+
+function removeFile(target) {
+  try {
+    fs.rmSync(target, { force: true });
+  } catch { }
+}
+
+function keepProof(directory, repo, workflowPath, found) {
+  if (!found.legacy) return;
+  try {
+    writeJsonAtomic(directory, proofName(repo, workflowPath, found.proof.blob, found.proof.job), found.proof);
+  } catch { }
+}
+
+function pruneProofs(directory, repo, workflowPath, keptName, now, limits) {
+  const dated = [];
+  for (const entry of proofNames(directory, repo, workflowPath)) {
+    if (entry.name === keptName) continue;
+    const proof = readProof(directory, entry.name, repo, workflowPath, limits);
+    if (!proof || proof.blob !== entry.blob || jobKey(proof.job) !== entry.job) continue;
+    dated.push({ name: entry.name, verifiedAt: Date.parse(proof.verifiedAt) });
+  }
+  dated.sort((left, right) => right.verifiedAt - left.verifiedAt);
+  const others = Math.max(0, limits.maxProofsPerWorkflow - 1);
+  dated.forEach((entry, index) => {
+    if (index >= others || now - entry.verifiedAt > limits.cacheGraceMs) removeFile(path.join(directory, entry.name));
+  });
+}
+
+function removeProofs(directory, repo, workflowPath, job, limits) {
+  for (const entry of proofNames(directory, repo, workflowPath)) {
+    if (job === null || entry.job === jobKey(job)) removeFile(path.join(directory, entry.name));
+  }
+  const legacyPath = path.join(directory, cacheName(repo, workflowPath));
+  const legacy = job === null ? null : readJsonFile(legacyPath, limits.maxCacheBytes);
+  if (job === null || (legacy && legacy.job === job)) removeFile(legacyPath);
+}
+
 function decorate(result, extra) {
   return { ...result, ...extra };
 }
 
 function verify(options) {
+  return verifyIn(options, null);
+}
+
+function verifyIn(options, placedTree) {
   const limits = limitsWith(options.limits);
   const now = Number.isInteger(options.now) ? options.now : Date.now();
   const env = options.env || process.env;
@@ -572,54 +723,65 @@ function verify(options) {
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
   const workflowPath = normalizeWorkflowPath(options.workflow);
   if (!workflowPath) return unverified(`evidence.ci.workflow must name a .yml or .yaml file directly under ${WORKFLOW_DIR}`);
-  const identity = repoIdentity(remoteUrl(projectRoot, env, limits));
+  const placed = placedTree || workflowTree(options, limits);
+  if (placed.error) return unverified(placed.error);
+  const tree = placed.tree;
+  const identity = repoIdentity(remoteUrl(tree, env, limits));
   if (identity.provider === 'unknown') return unverified('the repository has no usable git remote');
   if (identity.provider !== 'github') return unverified(`the code forge ${identity.host} is not supported yet (GitHub.com only)`);
-  const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  const file = readWorkflowFile(tree, workflowPath, limits);
   if (file.error) return unverified(file.error);
   const scanned = scanWorkflow(file.text, limits);
   if (!scanned.readable) return unverified(`${workflowPath}: ${scanned.reason}`);
   if (!scanned.pullRequest) {
     return unverified(`${workflowPath} does not trigger on pull_request${scanned.pullRequestTarget ? ' (pull_request_target runs the base branch workflow and does not count)' : ''}`);
   }
+  const filtered = pathFilterRefusal(scanned, workflowPath, placed.prefix, limits);
+  if (filtered) return unverified(filtered);
   let directory = null;
   try {
     directory = cacheDirectory(options.pluginData);
   } catch {
     directory = null;
   }
-  const name = cacheName(identity.repo, workflowPath);
-  const cached = directory ? readJsonFile(path.join(directory, name), limits.maxCacheBytes) : null;
-  const valid = validCacheEntry(cached, identity.repo, workflowPath);
   const wantedJob = typeof options.job === 'string' && options.job !== '' ? options.job : null;
-  const usable = valid && cached.blob === file.blob && (!wantedJob || cached.job === wantedJob);
-  const age = usable ? Math.max(0, now - Date.parse(cached.verifiedAt)) : Infinity;
+  const proofs = cachedProofs(directory, identity.repo, workflowPath, file.blob, limits);
+  const chosen = proofs.find((found) => !wantedJob || found.proof.job === wantedJob) || null;
+  const cached = chosen ? chosen.proof : null;
+  const age = cached ? Math.max(0, now - Date.parse(cached.verifiedAt)) : Infinity;
   const extraFor = (job) => ({ workflow: workflowPath, repo: identity.repo, conditions: conditionsOf(scanned, job || wantedJob) });
   if (options.mode !== 'refresh') {
-    if (usable && age <= limits.cacheGraceMs) return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: age > limits.cacheTtlMs, refreshFailure: null });
-    if (valid && cached.blob !== file.blob) return decorate(unverified(`${workflowPath} changed since it was verified, so CI may no longer run what was verified`), extraFor(null));
-    if (valid && wantedJob && cached.job !== wantedJob) return decorate(unverified(`the verified job "${cached.job}" is not the requested job "${wantedJob}"; run --full-suite-policy --refresh`), extraFor(null));
-    if (usable) return decorate(unverified(`the verification is older than ${Math.round(limits.cacheGraceMs / 86400000)} days; run --full-suite-policy --refresh`), extraFor(cached.job));
+    if (cached && age <= limits.cacheGraceMs) {
+      keepProof(directory, identity.repo, workflowPath, chosen);
+      return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: age > limits.cacheTtlMs, refreshFailure: null });
+    }
+    if (cached) return decorate(unverified(`the verification is older than ${Math.round(limits.cacheGraceMs / 86400000)} days; run --full-suite-policy --refresh`), extraFor(cached.job));
+    if (proofs.length > 0) return decorate(unverified(`the verified job "${proofs[0].proof.job}" is not the requested job "${wantedJob}"; run --full-suite-policy --refresh`), extraFor(null));
+    if (otherVersionsCached(directory, identity.repo, workflowPath, file.blob, limits)) {
+      return decorate(unverified(`${workflowPath} in this working tree differs from every verified version, so CI may no longer run what was verified; run --full-suite-policy --refresh`), extraFor(null));
+    }
     return decorate(unverified('no verification of the CI pull-request pipeline is cached yet; run --full-suite-policy --refresh'), extraFor(null));
   }
-  if (usable && age <= limits.cacheTtlMs) return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: false, refreshFailure: null });
+  if (cached && age <= limits.cacheTtlMs) {
+    keepProof(directory, identity.repo, workflowPath, chosen);
+    return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: false, refreshFailure: null });
+  }
   const remote = verifyRemote({ repo: identity.repo, workflowPath, job: wantedJob, localCommand: options.localCommand, ghPath: options.ghPath, env, limits, now });
   if (remote.verified) {
     if (directory) {
       try {
-        writeJsonAtomic(directory, name, { schema: SCHEMA, repo: identity.repo, workflow: workflowPath, job: remote.job, blob: file.blob, verifiedAt: new Date(now).toISOString(), result: remote });
+        const written = proofName(identity.repo, workflowPath, file.blob, remote.job);
+        writeJsonAtomic(directory, written, { schema: SCHEMA, repo: identity.repo, workflow: workflowPath, job: remote.job, blob: file.blob, verifiedAt: new Date(now).toISOString(), result: remote });
+        pruneProofs(directory, identity.repo, workflowPath, written, now, limits);
       } catch { }
     }
     return decorate(remote, { ...extraFor(remote.job), ageMs: 0, stale: false, refreshFailure: null });
   }
-  if (usable && remote.transient && age <= limits.cacheGraceMs) {
+  if (cached && remote.transient && age <= limits.cacheGraceMs) {
+    keepProof(directory, identity.repo, workflowPath, chosen);
     return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: true, refreshFailure: remote.reason });
   }
-  if (!remote.transient && directory && valid) {
-    try {
-      fs.rmSync(path.join(directory, name), { force: true });
-    } catch { }
-  }
+  if (!remote.transient && directory) removeProofs(directory, identity.repo, workflowPath, wantedJob && remote.disproves === 'job' ? wantedJob : null, limits);
   return decorate(remote, extraFor(remote.job));
 }
 
@@ -629,16 +791,18 @@ function discover(options) {
   const projectRoot = options.projectRoot;
   if (typeof projectRoot !== 'string' || projectRoot === '') return unverified('no project root is bound');
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
+  const placed = workflowTree(options, limits);
+  if (placed.error) return unverified(placed.error);
   const candidates = [];
-  for (const workflowPath of listWorkflows(projectRoot, limits)) {
-    const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  for (const workflowPath of listWorkflows(placed.tree, limits)) {
+    const file = readWorkflowFile(placed.tree, workflowPath, limits);
     if (file.error) continue;
     if (scanWorkflow(file.text, limits).pullRequest) candidates.push(workflowPath);
   }
   if (candidates.length === 0) return unverified(`no workflow under ${WORKFLOW_DIR} triggers on pull_request`);
   let last = null;
   for (const workflowPath of candidates.slice(0, limits.maxCandidates)) {
-    const result = verify({ ...options, workflow: workflowPath, job: null });
+    const result = verifyIn({ ...options, workflow: workflowPath, job: null }, placed);
     if (result.verified) return result;
     last = result;
   }
@@ -670,6 +834,7 @@ module.exports = {
   verifyRemote,
   cacheDirectory,
   cacheName,
+  proofName,
   readJsonFile,
   writeJsonAtomic,
   validCacheEntry,

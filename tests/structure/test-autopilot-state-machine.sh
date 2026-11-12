@@ -876,6 +876,212 @@ else
   check "H7 delivery accepts the once-only review on its original head after final-head proofs pass" FAIL
 fi
 
+GR_HEAD_A="1111111111111111111111111111111111111111"
+GR_HEAD_B="2222222222222222222222222222222222222222"
+GR_HEAD_C="3333333333333333333333333333333333333333"
+GR_HEAD_MIXED="abcdefabcdefabcdefabcdefabcdefabcdefabcd"
+GR_HEAD_MIXED_UPPER="ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+GR_FROZEN="$PLUGIN_DIR/tests/structure/fixtures/autopilot-0.36.0-pr-head-gate-mismatch"
+gr_event() {
+  autopilot_apply_event "$GR_RUN" "$1" "$2" "$3" "$GR_PROJECT" >/dev/null 2>&1
+}
+gr_project() {
+  GR_RUN="$1"
+  GR_OWNER="$2"
+  GR_PROJECT="$ROOT/gate-reentry-$3"
+  GR_FILE="$GR_PROJECT/.zensu/state/autopilot-run-${GR_RUN}.json"
+}
+gr_begin() {
+  gr_project "run_gate_reentry_$1" "session_gate_reentry_$1" "$1"
+  mkdir -p "$GR_PROJECT" \
+    && autopilot_begin_run "$GR_RUN" "$GR_OWNER" "$GR_PROJECT" >/dev/null 2>&1 \
+    && gr_event gr-plan PLAN_APPROVED "{\"approvedPlanSha256\":\"$PLAN_SHA\"}"
+}
+gr_frozen() {
+  local native
+  gr_project run_gate_reentry_frozen session_gate_reentry_frozen frozen
+  mkdir -p "$GR_PROJECT/.zensu/state" \
+    && cp "$GR_FROZEN"/autopilot-active-*.json "$GR_PROJECT/.zensu/state/" \
+    && native="$(native_directory "$GR_PROJECT")" \
+    && GR_ROOT_NATIVE="$native" node -e '
+      const fs = require("fs");
+      const [source, target] = process.argv.slice(1);
+      const text = fs.readFileSync(source, "utf8");
+      fs.writeFileSync(target, text.split(JSON.stringify("@PROJECT_ROOT@")).join(JSON.stringify(process.env.GR_ROOT_NATIVE)));
+    ' "$GR_FROZEN/autopilot-run-${GR_RUN}.json" "$GR_FILE" \
+    && chmod 600 "$GR_PROJECT"/.zensu/state/*.json
+}
+gr_snapshot() {
+  cp "$GR_FILE" "$ROOT/gr-snapshot-$1.json"
+}
+gr_restore() {
+  cp "$ROOT/gr-snapshot-$1.json" "$GR_FILE"
+}
+gr_refused() {
+  local before
+  before="$(file_digest "$GR_FILE")" || return 1
+  if "$@"; then
+    return 1
+  fi
+  [ "$(file_digest "$GR_FILE")" = "$before" ]
+}
+gr_tdd() {
+  gr_event "gr-tdd-start-$1" TDD_STARTED "{\"attempt\":$1,\"chainId\":\"gr-chain-$1\",\"sessionId\":\"$GR_OWNER\"}" \
+    && gr_event "gr-tdd-done-$1" TDD_CHAIN_DONE "{\"attempt\":$1,\"chainId\":\"gr-chain-$1\",\"sessionId\":\"$GR_OWNER\",\"outcome\":\"pass\"}"
+}
+gr_pr_opened() {
+  gr_event "$1" PR_OPENED "{\"operationKey\":\"pr:$GR_RUN\",\"pr\":{\"number\":$2,\"url\":\"https://github.com/acme/repo/pull/$2\",\"headSha\":\"$3\"}}"
+}
+gr_converge_fix() {
+  gr_tdd 1 \
+    && gr_event gr-gates-a GATES_PASSED "{\"headSha\":\"$GR_HEAD_A\"}" \
+    && gr_event gr-converge-fail CONVERGENCE_FAILED '{"reason":"contradicts an active acceptance criterion","limitReached":false}' \
+    && gr_tdd 2 \
+    && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.tdd.returnStage === "CONVERGE" && value.evidence.gates.headSha === "1111111111111111111111111111111111111111"'
+}
+
+GR1_OK=false
+GR8_KEPT=false
+if gr_begin 001 && gr_converge_fix && gr_snapshot converge-fix \
+  && autopilot_increment_stop_budget "$GR_RUN" CONVERGE "$GR_PROJECT" >/dev/null 2>&1 \
+  && gr_event gr-gates-b GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.evidence.gates.passed === true && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"'; then
+  if json_ok "$GR_FILE" 'value.stopBudget.stage === "CONVERGE" && value.stopBudget.count === 1'; then
+    GR8_KEPT=true
+  fi
+  if gr_event gr-converge-pass CONVERGENCE_PASSED '{}' \
+    && gr_event gr-pr-request PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN\"}" \
+    && gr_pr_opened gr-pr-open 901 "$GR_HEAD_B" \
+    && autopilot_read_run "$GR_RUN" "$GR_PROJECT" > "$ROOT/gr-001-read.json" 2>/dev/null \
+    && json_ok "$ROOT/gr-001-read.json" 'value.stage === "TEAM_REVIEW" && value.effects.prOpen.status === "completed" && value.evidence.pr.headSha === "2222222222222222222222222222222222222222" && value.evidence.gates.headSha === value.evidence.pr.headSha'; then
+    GR1_OK=true
+  fi
+fi
+if [ "$GR1_OK" = true ]; then
+  check "GR1 a convergence fix that lands a new commit re-runs the gates and opens its PR on that commit" PASS
+else
+  check "GR1 a convergence fix that lands a new commit re-runs the gates and opens its PR on that commit" FAIL
+fi
+
+if gr_restore converge-fix \
+  && gr_event gr-gates-b-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_B\",\"reason\":\"type check failed on the fix\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "AWAIT_TDD" && value.tdd.returnStage === "GATES" && value.evidence.gates.passed === false && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"' \
+  && gr_tdd 3 \
+  && json_ok "$GR_FILE" 'value.stage === "GATES" && value.tdd.attempt === 3' \
+  && gr_event gr-gates-c GATES_PASSED "{\"headSha\":\"$GR_HEAD_C\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.evidence.gates.passed === true && value.evidence.gates.headSha === "3333333333333333333333333333333333333333"'; then
+  check "GR2 a gate failure after a convergence fix returns the run through GATES" PASS
+else
+  check "GR2 a gate failure after a convergence fix returns the run through GATES" FAIL
+fi
+
+GR_REQUESTED=false
+if gr_begin 004 && gr_tdd 1 \
+  && gr_event gr-gates-a GATES_PASSED "{\"headSha\":\"$GR_HEAD_A\"}" \
+  && gr_event gr-converge-pass CONVERGENCE_PASSED '{}' \
+  && gr_event gr-pr-request PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN\"}" \
+  && gr_snapshot requested; then
+  GR_REQUESTED=true
+fi
+
+if [ "$GR_REQUESTED" = true ] \
+  && gr_refused gr_pr_opened gr-pr-open-stale 904 "$GR_HEAD_B" \
+  && gr_event gr-gates-b GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.effects.prOpen.status === "requested" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_004" && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"' \
+  && gr_event gr-converge-pass-2 CONVERGENCE_PASSED '{}' \
+  && gr_refused gr_event gr-pr-request-again PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN:again\"}" \
+  && gr_pr_opened gr-pr-open 904 "$GR_HEAD_B" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.effects.prOpen.status === "completed" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_004" && value.evidence.pr.headSha === "2222222222222222222222222222222222222222"'; then
+  check "GR4 gates re-run after PR_OPEN_REQUESTED keep the requested operation, which completes on the new head" PASS
+else
+  check "GR4 gates re-run after PR_OPEN_REQUESTED keep the requested operation, which completes on the new head" FAIL
+fi
+
+if [ "$GR_REQUESTED" = true ] && gr_restore requested \
+  && gr_event gr-gates-b-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_B\",\"reason\":\"lint failed on the pushed head\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "AWAIT_TDD" && value.tdd.returnStage === "GATES" && value.effects.prOpen.status === "requested" && value.evidence.gates.passed === false' \
+  && gr_tdd 2 \
+  && gr_event gr-gates-c GATES_PASSED "{\"headSha\":\"$GR_HEAD_C\"}" \
+  && gr_event gr-converge-pass-2 CONVERGENCE_PASSED '{}' \
+  && gr_pr_opened gr-pr-open 905 "$GR_HEAD_C" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.evidence.pr.headSha === "3333333333333333333333333333333333333333" && value.evidence.gates.headSha === value.evidence.pr.headSha'; then
+  check "GR4b a gate failure after PR_OPEN_REQUESTED returns through GATES, and the requested operation completes on the fixed head" PASS
+else
+  check "GR4b a gate failure after PR_OPEN_REQUESTED returns through GATES, and the requested operation completes on the fixed head" FAIL
+fi
+
+GR7_REFUSED=false
+if [ "$GR_REQUESTED" = true ] && gr_restore requested \
+  && gr_pr_opened gr-pr-open 907 "$GR_HEAD_A" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW"' \
+  && gr_refused gr_event gr-gates-late GATES_PASSED "{\"headSha\":\"$GR_HEAD_C\"}" \
+  && gr_refused gr_event gr-gates-late-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_C\",\"reason\":\"late gate run\"}"; then
+  GR7_REFUSED=true
+fi
+
+if [ "$GR_REQUESTED" = true ] && gr_restore requested \
+  && gr_refused gr_event gr-gates-same GATES_PASSED "{\"headSha\":\"$GR_HEAD_A\"}" \
+  && gr_refused gr_event gr-gates-same-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_A\",\"reason\":\"re-run on the gated head\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "OPEN_PR" && value.effects.prOpen.status === "requested" && value.evidence.gates.passed === true'; then
+  check "GR9 OPEN_PR refuses a gate event for the head its gate evidence already records" PASS
+else
+  check "GR9 OPEN_PR refuses a gate event for the head its gate evidence already records" FAIL
+fi
+
+if gr_begin 006 && gr_tdd 1 \
+  && gr_event gr-gates-mixed GATES_PASSED "{\"headSha\":\"$GR_HEAD_MIXED\"}" \
+  && gr_event gr-converge-pass CONVERGENCE_PASSED '{}' \
+  && gr_event gr-pr-request PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN\"}" \
+  && gr_refused gr_pr_opened gr-pr-open-other 906 "$GR_HEAD_B" \
+  && gr_pr_opened gr-pr-open-upper 906 "$GR_HEAD_MIXED_UPPER" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.evidence.pr.headSha === "abcdefabcdefabcdefabcdefabcdefabcdefabcd"'; then
+  check "GR5 PR_OPENED refuses a head the gates did not test and accepts the gated head in any letter case" PASS
+else
+  check "GR5 PR_OPENED refuses a head the gates did not test and accepts the gated head in any letter case" FAIL
+fi
+
+GR6_VALID=false
+if gr_frozen \
+  && autopilot_read_run "$GR_RUN" "$GR_PROJECT" > "$ROOT/gr-frozen-read.json" 2>/dev/null \
+  && json_ok "$ROOT/gr-frozen-read.json" 'value.stage === "BLOCKED" && value.blocked.from === "OPEN_PR" && value.blocked.code === "PR_HEAD_GATE_MISMATCH" && value.effects.prOpen.status === "requested" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_frozen" && value.evidence.gates.headSha === "1111111111111111111111111111111111111111" && value.events.map(event => event.eventType).join(",") === "START,PLAN_APPROVED,TDD_STARTED,TDD_CHAIN_DONE,GATES_PASSED,CONVERGENCE_FAILED,TDD_STARTED,TDD_CHAIN_DONE,CONVERGENCE_PASSED,PR_OPEN_REQUESTED,BLOCK"'; then
+  GR6_VALID=true
+  if ! gr_refused gr_event gr-gates-blocked GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+    || ! gr_refused gr_event gr-gates-blocked-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_B\",\"reason\":\"gate run while blocked\"}"; then
+    GR7_REFUSED=false
+  fi
+fi
+if [ "$GR6_VALID" = true ] \
+  && gr_event gr-resume RESUME '{}' \
+  && json_ok "$GR_FILE" 'value.stage === "OPEN_PR" && value.effects.prOpen.status === "requested"' \
+  && gr_refused gr_event gr-pr-request-again PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN:again\"}" \
+  && gr_event gr-gates-b GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.effects.prOpen.status === "requested" && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"' \
+  && gr_event gr-converge-pass-2 CONVERGENCE_PASSED '{}' \
+  && gr_pr_opened gr-pr-open 903 "$GR_HEAD_B" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.effects.prOpen.status === "completed" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_frozen" && value.evidence.pr.headSha === "2222222222222222222222222222222222222222"'; then
+  check "GR3 a run the released library blocked as PR_HEAD_GATE_MISMATCH resumes, keeps its open request, re-runs the gates and opens its PR on the recorded key" PASS
+else
+  check "GR3 a run the released library blocked as PR_HEAD_GATE_MISMATCH resumes, keeps its open request, re-runs the gates and opens its PR on the recorded key" FAIL
+fi
+
+if [ "$GR6_VALID" = true ]; then
+  check "GR6 the frozen record the released library wrote for a PR_HEAD_GATE_MISMATCH block reads as valid" PASS
+else
+  check "GR6 the frozen record the released library wrote for a PR_HEAD_GATE_MISMATCH block reads as valid" FAIL
+fi
+
+if [ "$GR7_REFUSED" = true ] && [ "$GR6_VALID" = true ]; then
+  check "GR7 gate events stay refused in TEAM_REVIEW and in BLOCKED" PASS
+else
+  check "GR7 gate events stay refused in TEAM_REVIEW and in BLOCKED (refused=$GR7_REFUSED blocked-fixture=$GR6_VALID)" FAIL
+fi
+
+if [ "$GR8_KEPT" = true ]; then
+  check "GR8 a gate event in CONVERGE stores its evidence and keeps the stage's Stop budget" PASS
+else
+  check "GR8 a gate event in CONVERGE stores its evidence and keeps the stage's Stop budget" FAIL
+fi
+
 RUN2="run_blocking_002"
 RUN2_FILE="$PROJECT/.zensu/state/autopilot-run-${RUN2}.json"
 if autopilot_begin_run "$RUN2" "session_owner_002" "$PROJECT" >/dev/null \

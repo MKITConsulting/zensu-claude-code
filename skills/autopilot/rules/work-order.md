@@ -91,8 +91,8 @@ These steps differ:
   again, unless the order's pull request was merged or closed, which ends the order with `--reason`.
   Every other exit 8, such as a remote that moved past the head Zensu recorded or a head Zensu
   refused to record, ends the order with `--reason`.
-- **Opening the pull request** (Phase 1 step 3): commit, run `"$WO" --push`, persist
-  `PR_OPEN_REQUESTED`, then run
+- **Opening the pull request** (Phase 1 step 3): run the head check of `rules/pr-open.md` §1,
+  run `"$WO" --push`, persist `PR_OPEN_REQUESTED` unless the run already records it, then run
   `"$WO" --open-pr --title "<title>" --body-file "<absolute path>"` instead of the driver's
   `--open-pr`. Its stdout is `{"value":{"url":…,"number":…,"base":…,"branch":…,"head":…}}`; persist
   `PR_OPENED` with that number, URL and head, then run `--drain`. When the order already has an open

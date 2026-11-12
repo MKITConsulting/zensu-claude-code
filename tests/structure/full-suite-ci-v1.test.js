@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -15,6 +16,8 @@ const { writeGhStub } = require(path.join(__dirname, 'fixtures', 'gh-api-stub.js
 
 const SESSION = `scv1_${'c'.repeat(64)}`;
 const REPO = 'acme/app';
+const WF = '.github/workflows/ci.yml';
+const CLI = path.join(LIB_DIR, 'full-suite-policy-v1.js');
 const NOW = Date.parse('2026-09-29T12:00:00.000Z');
 const HOUR = 60 * 60 * 1000;
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !['CI', 'GITHUB_ACTIONS', 'GITLAB_CI', 'TF_BUILD', 'BUILDKITE'].includes(name)));
@@ -89,7 +92,44 @@ function ghShim(map) {
   const calls = path.join(directory, 'calls.log');
   fs.writeFileSync(fixture, JSON.stringify(map));
   const stub = writeGhStub(directory, fixture, calls);
-  return { ghPath: stub.ghPath, env: stub.env, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []) };
+  return { dir: directory, ghPath: stub.ghPath, env: stub.env, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []) };
+}
+
+function cacheDirOf(data) {
+  return path.join(data, 'ci-contract', 'v1', 'cache');
+}
+
+function keyOf(workflow = WF) {
+  return crypto.createHash('sha256').update(`${REPO}\n${workflow}`).digest('hex').slice(0, 40);
+}
+
+function jobKeyOf(name) {
+  return crypto.createHash('sha256').update(name).digest('hex').slice(0, 16);
+}
+
+function proofFile(data, blob, workflow = WF, jobName = 'test') {
+  return path.join(cacheDirOf(data), `${keyOf(workflow)}.${blob}.${jobKeyOf(jobName)}.json`);
+}
+
+function legacyFile(data, workflow = WF) {
+  return path.join(cacheDirOf(data), `${keyOf(workflow)}.json`);
+}
+
+function workflowFile(tree) {
+  return path.join(tree, '.github', 'workflows', 'ci.yml');
+}
+
+function blobOf(tree) {
+  return crypto.createHash('sha256').update(fs.readFileSync(workflowFile(tree))).digest('hex');
+}
+
+function worktreeOf(root, branch, workflow) {
+  const tree = path.join(tempDir(`wt-${branch}`), 'tree');
+  sh(root, `git worktree add -q ${JSON.stringify(tree)} -b ${branch}`);
+  const real = fs.realpathSync(tree);
+  fs.writeFileSync(workflowFile(real), workflow);
+  sh(real, 'git add -A && git commit -q -m variant');
+  return real;
 }
 
 function verifyOptions(root, data, gh, extra = {}) {
@@ -259,7 +299,7 @@ test('the cache serves the proof offline, expires by age and is voided by a work
   assert.equal(stale.stale, true);
   assert.match(contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + 8 * 24 * HOUR })).reason, /older than 7 days/);
   fs.appendFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), '# edited\n');
-  assert.match(contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR })).reason, /changed since it was verified/);
+  assert.match(contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR })).reason, /in this working tree differs from every verified version, so CI may no longer run what was verified; run --full-suite-policy --refresh$/);
   assert.match(contract.verify(verifyOptions(project(), tempDir('data'), gh, { mode: 'cache' })).reason, /no verification .* is cached yet/);
 });
 
@@ -287,6 +327,220 @@ test('a refresh that disproves the pipeline removes the cached proof, so later c
   const cached = contract.verify(verifyOptions(root, data, disproved, { mode: 'cache', now: NOW + 2 * 24 * HOUR }));
   assert.equal(cached.verified, false);
   assert.match(cached.reason, /no verification .* is cached yet/);
+});
+
+test('two worktrees of one clone whose workflow files differ keep their own proofs, so neither voids the other', () => {
+  const root = project();
+  const other = worktreeOf(root, 'other-ci', `${WORKFLOW}# another version\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.notEqual(blobOf(root), blobOf(other));
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  assert.equal(contract.verify(verifyOptions(other, data, gh)).verified, true);
+  const first = contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR }));
+  assert.equal(first.verified, true, first.reason);
+  assert.equal(first.job, 'test');
+  const second = contract.verify(verifyOptions(other, data, gh, { mode: 'cache', now: NOW + HOUR }));
+  assert.equal(second.verified, true, second.reason);
+  assert.deepEqual(fs.readdirSync(cacheDirOf(data)).sort(), [path.basename(proofFile(data, blobOf(root))), path.basename(proofFile(data, blobOf(other)))].sort());
+  assert.equal(contract.proofName(REPO, WF, blobOf(root), 'test'), path.basename(proofFile(data, blobOf(root))));
+});
+
+test('a disproof removes every cached proof of the workflow, the legacy slot included, and spares other workflows', () => {
+  const root = project();
+  const other = worktreeOf(root, 'other-ci', `${WORKFLOW}# another version\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  assert.equal(contract.verify(verifyOptions(other, data, gh)).verified, true);
+  fs.mkdirSync(cacheDirOf(data), { recursive: true });
+  const legacy = legacyFile(data);
+  const elsewhere = proofFile(data, blobOf(root), '.github/workflows/release.yml');
+  fs.writeFileSync(legacy, fs.readFileSync(proofFile(data, blobOf(other))));
+  fs.writeFileSync(elsewhere, '{}\n');
+  const disproved = ghShim(responses({ [`repos/${REPO}`]: { default_branch: 'main', fork: true } }));
+  const refreshed = contract.verify(verifyOptions(root, data, disproved, { now: NOW + 2 * 24 * HOUR }));
+  assert.equal(refreshed.verified, false);
+  assert.match(refreshed.reason, /fork/);
+  assert.deepEqual(fs.readdirSync(cacheDirOf(data)), [path.basename(elsewhere)]);
+  const cachedOther = contract.verify(verifyOptions(other, data, disproved, { mode: 'cache', now: NOW + 2 * 24 * HOUR }));
+  assert.equal(cachedOther.verified, false);
+  assert.match(cachedOther.reason, /no verification .* is cached yet/);
+});
+
+test('a refresh prunes proofs older than the grace window and keeps at most maxProofsPerWorkflow, never the one it wrote', () => {
+  const root = project();
+  const data = tempDir('data');
+  const versions = [];
+  const refresh = (label, at, limits) => {
+    fs.writeFileSync(workflowFile(root), `${WORKFLOW}# ${label}\n`);
+    const result = contract.verify(verifyOptions(root, data, ghShim(responses({}, at)), { now: at, limits }));
+    assert.equal(result.verified, true, result.reason);
+    versions.push(blobOf(root));
+  };
+  const present = () => versions.map((blob) => fs.existsSync(proofFile(data, blob)));
+  refresh('v1', NOW - 8 * 24 * HOUR);
+  refresh('v2', NOW);
+  assert.deepEqual(present(), [false, true]);
+  const bound = { maxProofsPerWorkflow: 3 };
+  refresh('v3', NOW + HOUR, bound);
+  refresh('v4', NOW + 2 * HOUR, bound);
+  assert.deepEqual(present(), [false, true, true, true]);
+  refresh('v5', NOW + 3 * HOUR, bound);
+  assert.deepEqual(present(), [false, false, true, true, true]);
+  refresh('v6', NOW - HOUR, { maxProofsPerWorkflow: 1 });
+  assert.deepEqual(present(), [false, false, false, false, false, true]);
+  assert.equal(fs.existsSync(legacyFile(data)), false);
+  assert.equal(contract.LIMITS.maxProofsPerWorkflow, 16);
+});
+
+test('a legacy slot written by an older installation serves the version it verified, and a refresh never writes that slot', () => {
+  const root = project();
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  const legacy = legacyFile(data);
+  assert.equal(fs.existsSync(legacy), false);
+  assert.equal(contract.cacheName(REPO, WF), path.basename(legacy));
+  fs.renameSync(proofFile(data, blobOf(root)), legacy);
+  const served = contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR }));
+  assert.equal(served.verified, true, served.reason);
+  const before = fs.readFileSync(legacy, 'utf8');
+  fs.appendFileSync(workflowFile(root), '# edited\n');
+  assert.match(contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR })).reason, /differs from every verified version/);
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { now: NOW + HOUR })).verified, true);
+  assert.equal(fs.readFileSync(legacy, 'utf8'), before);
+  assert.equal(fs.existsSync(proofFile(data, blobOf(root))), true);
+});
+
+test('a proof served from the legacy slot is kept as its own version, so an older installation that rewrites the slot leaves it verified', () => {
+  const root = project();
+  const other = worktreeOf(root, 'older-install', `${WORKFLOW}# another version\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(other, data, gh)).verified, true);
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  const legacy = legacyFile(data);
+  const otherProof = fs.readFileSync(proofFile(data, blobOf(other)));
+  fs.rmSync(proofFile(data, blobOf(other)));
+  fs.renameSync(proofFile(data, blobOf(root)), legacy);
+  const calls = gh.calls().length;
+  const served = contract.verify(verifyOptions(root, data, gh, { now: NOW + HOUR }));
+  assert.equal(served.verified, true, served.reason);
+  assert.equal(gh.calls().length, calls);
+  assert.equal(fs.existsSync(proofFile(data, blobOf(root))), true);
+  fs.writeFileSync(legacy, otherProof);
+  const cached = contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + 2 * HOUR }));
+  assert.equal(cached.verified, true, cached.reason);
+});
+
+test('a fresher legacy proof of the same version and job wins over an expired proof of its own', () => {
+  const root = project();
+  const data = tempDir('data');
+  const early = NOW - 9 * 24 * HOUR;
+  assert.equal(contract.verify(verifyOptions(root, data, ghShim(responses({}, early)), { now: early })).verified, true);
+  const scratch = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, scratch, gh)).verified, true);
+  fs.copyFileSync(proofFile(scratch, blobOf(root)), legacyFile(data));
+  const cached = contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR }));
+  assert.equal(cached.verified, true, cached.reason);
+  assert.equal(JSON.parse(fs.readFileSync(proofFile(data, blobOf(root)), 'utf8')).verifiedAt, new Date(NOW).toISOString());
+});
+
+test('one workflow version verified for two jobs keeps one proof per job, so neither job voids the other', () => {
+  const root = project();
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { job: 'test' })).verified, true);
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { job: 'lint' })).verified, true);
+  const tested = contract.verify(verifyOptions(root, data, gh, { job: 'test', mode: 'cache', now: NOW + HOUR }));
+  const linted = contract.verify(verifyOptions(root, data, gh, { job: 'lint', mode: 'cache', now: NOW + HOUR }));
+  assert.equal(tested.verified, true, tested.reason);
+  assert.equal(linted.verified, true, linted.reason);
+  assert.deepEqual(fs.readdirSync(cacheDirOf(data)).sort(), [path.basename(proofFile(data, blobOf(root), WF, 'test')), path.basename(proofFile(data, blobOf(root), WF, 'lint'))].sort());
+});
+
+test('a refresh that disproves only its own job removes that job\'s proofs and keeps the proofs of other jobs', () => {
+  const root = project();
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { job: 'test' })).verified, true);
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { job: 'lint', now: NOW + HOUR })).verified, true);
+  const unrun = contract.verify(verifyOptions(root, data, gh, { job: 'e2e', now: NOW + HOUR }));
+  assert.equal(unrun.verified, false);
+  assert.match(unrun.reason, /job "e2e" did not run to success or failure/);
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { job: 'test', mode: 'cache', now: NOW + HOUR })).verified, true);
+  const skipped = ghShim(responses({
+    [`repos/${REPO}/actions/runs/2/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'skipped', [])] },
+    [`repos/${REPO}/actions/runs/1/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'cancelled', [])] },
+  }));
+  const later = NOW + 25 * HOUR;
+  const disproved = contract.verify(verifyOptions(root, data, skipped, { job: 'test', now: later }));
+  assert.equal(disproved.verified, false);
+  assert.match(disproved.reason, /job "test" did not run to success or failure/);
+  assert.equal(fs.existsSync(proofFile(data, blobOf(root), WF, 'test')), false);
+  const lint = contract.verify(verifyOptions(root, data, skipped, { job: 'lint', mode: 'cache', now: later }));
+  assert.equal(lint.verified, true, lint.reason);
+});
+
+test('a refresh that fails transiently serves a legacy proof inside the grace window and keeps it as its own version', () => {
+  const root = project();
+  const other = worktreeOf(root, 'older-slot', `${WORKFLOW}# another version\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(other, data, gh)).verified, true);
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  const otherProof = fs.readFileSync(proofFile(data, blobOf(other)));
+  fs.rmSync(proofFile(data, blobOf(other)));
+  fs.renameSync(proofFile(data, blobOf(root)), legacyFile(data));
+  const broken = ghShim({ [`repos/${REPO}`]: { __fail: 'error connecting to api.github.com' } });
+  const kept = contract.verify(verifyOptions(root, data, broken, { now: NOW + 25 * HOUR }));
+  assert.equal(kept.verified, true, kept.reason);
+  assert.equal(kept.stale, true);
+  assert.match(kept.refreshFailure, /error connecting/);
+  assert.equal(fs.existsSync(proofFile(data, blobOf(root))), true);
+  fs.writeFileSync(legacyFile(data), otherProof);
+  const cached = contract.verify(verifyOptions(root, data, broken, { mode: 'cache', now: NOW + 26 * HOUR }));
+  assert.equal(cached.verified, true, cached.reason);
+});
+
+test('a disproof of one job removes its proofs of every version and a legacy slot holding it, and spares a legacy slot of another job', () => {
+  const root = project();
+  const other = worktreeOf(root, 'other-version', `${WORKFLOW}# another version\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { job: 'test' })).verified, true);
+  assert.equal(contract.verify(verifyOptions(other, data, gh, { job: 'test' })).verified, true);
+  fs.copyFileSync(proofFile(data, blobOf(other)), legacyFile(data));
+  const scratch = tempDir('data');
+  assert.equal(contract.verify(verifyOptions(root, scratch, gh, { job: 'lint' })).verified, true);
+  const lintProof = fs.readFileSync(proofFile(scratch, blobOf(root), WF, 'lint'));
+  const skipped = ghShim(responses({
+    [`repos/${REPO}/actions/runs/2/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'skipped', [])] },
+    [`repos/${REPO}/actions/runs/1/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'cancelled', [])] },
+  }));
+  const disproved = contract.verify(verifyOptions(root, data, skipped, { job: 'test', now: NOW + 25 * HOUR }));
+  assert.equal(disproved.verified, false);
+  assert.match(disproved.reason, /job "test" did not run to success or failure/);
+  assert.deepEqual(fs.readdirSync(cacheDirOf(data)), []);
+  fs.writeFileSync(legacyFile(data), lintProof);
+  assert.equal(contract.verify(verifyOptions(root, data, skipped, { job: 'test', now: NOW + 26 * HOUR })).verified, false);
+  assert.deepEqual(fs.readdirSync(cacheDirOf(data)), [path.basename(legacyFile(data))]);
+});
+
+test('a requested job whose newest run is older than 30 days disproves that job alone and keeps another job\'s proof', () => {
+  const root = project();
+  const data = tempDir('data');
+  assert.equal(contract.verify(verifyOptions(root, data, ghShim(responses()), { job: 'lint' })).verified, true);
+  const old = ghShim(responses({
+    [`repos/${REPO}/actions/workflows/ci.yml/runs?event=pull_request&status=completed&per_page=20`]: { workflow_runs: [run(2, NOW - 40 * 24 * HOUR)] },
+  }));
+  const aged = contract.verify(verifyOptions(root, data, old, { job: 'test', now: NOW + HOUR }));
+  assert.equal(aged.verified, false);
+  assert.match(aged.reason, /job "test" ran is older than 30 days/);
+  const lint = contract.verify(verifyOptions(root, data, old, { job: 'lint', mode: 'cache', now: NOW + HOUR }));
+  assert.equal(lint.verified, true, lint.reason);
 });
 
 test('discovery picks the workflow that runs pull requests', () => {
@@ -371,6 +625,27 @@ test('the terminus honours CI only when the chain began in CI, so a mid-chain sw
   policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'session marker' }, NOW);
   assert.equal(terminus({ markerState: 'ci' }).runner, 'ci');
   assert.equal(terminus({ markerState: 'local' }).runner, 'local');
+});
+
+test('a worktree keeps its ci policy and snapshot after a worktree with another workflow file refreshed', () => {
+  const root = project();
+  const other = worktreeOf(root, 'other-ci', `${WORKFLOW}# another version\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  const inputs = (tree) => policyInputs(tree, data, { env: { ...CLEAN_ENV, ...gh.env }, ghPath: gh.ghPath });
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', NOW);
+  assert.equal(policy.resolve({ ...inputs(other), mode: 'refresh' }).runner, 'ci');
+  const calls = gh.calls().length;
+  const cached = policy.resolve(inputs(root));
+  assert.equal(cached.runner, 'ci', cached.reason);
+  assert.equal(cached.decidedBy, 'this clone');
+  const snapshot = policy.snapshotPolicy(inputs(root), NOW + HOUR);
+  assert.equal(snapshot.runner, 'ci', snapshot.reason);
+  assert.equal(gh.calls().length, calls);
+  assert.deepEqual(policy.snapshotLines(snapshot, root), ['full suite: ci | this chain began with the CI runner: .github/workflows/ci.yml, job "test" runs its full suite when a pull request against main is opened or updated | decided by: this clone']);
+  policy.writeSnapshot(policy.stores(data), SESSION, root, snapshot, NOW + HOUR);
+  assert.equal(policy.resolve({ ...inputs(root), requireSnapshot: true }).runner, 'ci');
 });
 
 test('the policy lines name the contract, the deactivation and the rendered answer commands', () => {
@@ -528,4 +803,338 @@ test('the effective CLI answers ci only for a verified clone choice with a ci sn
   assert.equal(snapshot.status, 0, snapshot.stderr);
   const after = childProcess.spawnSync(process.execPath, [cli, 'effective'], { env, encoding: 'utf8' });
   assert.equal(after.stdout.trim(), 'ci');
+});
+
+function snapshotCli(root, data, gh, markerState = 'none', chain = {}) {
+  const transport = tempDir('transport');
+  fs.writeFileSync(path.join(transport, 'ci-config.json'), '{}');
+  fs.writeFileSync(path.join(transport, 'marker-state'), markerState);
+  if (typeof chain.fault === 'string') fs.writeFileSync(path.join(transport, 'work-tree-fault'), chain.fault);
+  const pathKey = Object.keys(CLEAN_ENV).find((name) => name.toUpperCase() === 'PATH') || 'PATH';
+  const env = {
+    ...CLEAN_ENV,
+    ...gh.env,
+    [pathKey]: `${gh.dir}${path.delimiter}${CLEAN_ENV[pathKey] || ''}`,
+    ZENSU_FSP_DIR: transport,
+    ZENSU_FSP_PLUGIN_DATA: data,
+    ZENSU_FSP_SESSION_KEY: SESSION,
+    ZENSU_FSP_PROJECT_ROOT: root,
+    ZENSU_FSP_WORK_TREE: chain.workTree || '',
+  };
+  const result = childProcess.spawnSync(process.execPath, [CLI, 'snapshot'], { env, encoding: 'utf8' });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, snapshot: policy.readSnapshot(policy.stores(data), SESSION) };
+}
+
+test('the snapshot refreshes once when a recorded CI choice has no proof for the workflow version in the tree, and prints its ci line', () => {
+  const { root, data } = verifiedProject(Date.now());
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', Date.now());
+  fs.appendFileSync(workflowFile(root), '# checked out from another branch\n');
+  const gh = ghShim(responses({}, Date.now()));
+  const result = snapshotCli(root, data, gh);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(gh.calls().length > 0, 'the snapshot asked GitHub once more');
+  assert.equal(result.snapshot && result.snapshot.runner, 'ci');
+  assert.equal(result.snapshot.decidedBy, 'this clone');
+  assert.equal(result.stdout, 'full suite: ci | this chain began with the CI runner: .github/workflows/ci.yml, job "test" runs its full suite when a pull request against main is opened or updated | decided by: this clone\n');
+  assert.equal(fs.existsSync(proofFile(data, blobOf(root))), true);
+});
+
+test('a snapshot whose refresh fails records local and prints the local line with its reason', () => {
+  const { root, data } = verifiedProject(Date.now());
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', Date.now());
+  fs.appendFileSync(workflowFile(root), '# checked out from another branch\n');
+  const gh = ghShim({ [`repos/${REPO}`]: { __fail: 'error connecting to api.github.com' } });
+  const result = snapshotCli(root, data, gh);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.snapshot && result.snapshot.runner, 'local');
+  assert.equal(result.snapshot.decidedBy, 'this clone');
+  assert.equal(result.stdout, 'full suite: local | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: gh api repos/acme/app failed: error connecting to api.github.com | decided by: this clone | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before\n');
+});
+
+test('a snapshot without any CI choice prints no line and asks GitHub nothing', () => {
+  const root = project();
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  const result = snapshotCli(root, data, gh);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(gh.calls(), []);
+  assert.equal(result.snapshot && result.snapshot.runner, 'local');
+  assert.equal(result.snapshot.decidedBy, 'default');
+});
+
+test('the snapshot retires the previous chain\'s snapshot before its refresh asks GitHub', () => {
+  const { root, data } = verifiedProject(Date.now());
+  const stores = policy.stores(data);
+  policy.writeClone(stores, root, 'ci', WF, 'test', Date.now());
+  policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'this clone' }, Date.now());
+  fs.appendFileSync(workflowFile(root), '# checked out from another branch\n');
+  const probe = path.join(tempDir('probe'), 'probe.log');
+  const gh = ghShim({ ...responses({}, Date.now()), __probe: { path: path.join(stores.snapshots, `${SESSION}.json`), out: probe } });
+  const result = snapshotCli(root, data, gh);
+  assert.equal(result.status, 0, result.stderr);
+  const seen = fs.readFileSync(probe, 'utf8').trim().split('\n');
+  assert.ok(seen.length > 0, 'the snapshot asked GitHub');
+  assert.deepEqual([...new Set(seen)], ['absent']);
+  assert.equal(result.snapshot && result.snapshot.runner, 'ci');
+});
+
+test('the chain CLI answers with the runner the chain began with, while the policy CLI answers with the cache', () => {
+  const { root, data } = verifiedProject(Date.now());
+  const stores = policy.stores(data);
+  policy.writeClone(stores, root, 'ci', WF, 'test', Date.now());
+  const transport = tempDir('transport');
+  fs.writeFileSync(path.join(transport, 'ci-config.json'), '{}');
+  fs.writeFileSync(path.join(transport, 'marker-state'), 'none');
+  const env = { ...CLEAN_ENV, ZENSU_FSP_DIR: transport, ZENSU_FSP_PLUGIN_DATA: data, ZENSU_FSP_SESSION_KEY: SESSION, ZENSU_FSP_PROJECT_ROOT: root };
+  const cli = (mode) => childProcess.spawnSync(process.execPath, [CLI, mode], { env, encoding: 'utf8' });
+  policy.writeSnapshot(stores, SESSION, root, { runner: 'local', decidedBy: 'default' }, Date.now());
+  const began = cli('chain');
+  assert.equal(began.status, 0, began.stderr);
+  assert.equal(began.stdout, 'full suite: local | this chain began with the local runner; a switch to CI takes effect with the next chain | decided by: chain begin\n');
+  assert.match(cli('policy').stdout, /^full suite: ci \| /);
+  policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'this clone' }, Date.now());
+  assert.match(cli('chain').stdout, /^full suite: ci \| .* \| decided by: this clone\n/);
+});
+
+const PUSH_ONLY = 'on:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: x\n';
+const UNREADABLE_RUN = 'the bound run record is unreadable';
+
+function nestedWorktreeOf(root, name, workflow) {
+  fs.appendFileSync(path.join(root, '.gitignore'), '.claude/worktrees/\n');
+  sh(root, 'git add .gitignore && git commit -q -m ignore-worktrees');
+  const tree = path.join(root, '.claude', 'worktrees', name);
+  sh(root, `git worktree add -q ${JSON.stringify(tree)} -b ${name}`);
+  const real = fs.realpathSync(tree);
+  fs.writeFileSync(workflowFile(real), workflow);
+  sh(real, 'git add -A && git commit -q -m variant');
+  return real;
+}
+
+test('verify reads the workflow files of the work tree it is given, and the project root\'s files without one', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-push-only', PUSH_ONLY);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  const anchor = contract.verify(verifyOptions(root, data, gh, { mode: 'cache', now: NOW + HOUR }));
+  assert.equal(anchor.verified, true, anchor.reason);
+  const chain = contract.verify(verifyOptions(root, data, gh, { workTree: nested, mode: 'cache', now: NOW + HOUR }));
+  assert.equal(chain.verified, false);
+  assert.equal(chain.reason, '.github/workflows/ci.yml does not trigger on pull_request');
+  const found = contract.discover(verifyOptions(root, data, gh, { workTree: nested, workflow: undefined, mode: 'cache', now: NOW + HOUR }));
+  assert.equal(found.verified, false);
+  assert.equal(found.reason, 'no workflow under .github/workflows triggers on pull_request');
+});
+
+test('verify reads the remote of the work tree it is given, so the chain\'s own branch decides its upstream', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-fork', `${WORKFLOW}# the chain's branch\n`);
+  sh(root, 'git remote add fork https://github.com/other/app.git');
+  sh(nested, 'git update-ref refs/remotes/fork/auto-fork HEAD && git config branch.auto-fork.remote fork && git config branch.auto-fork.merge refs/heads/auto-fork');
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { mode: 'cache' })).repo, REPO);
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { workTree: nested, mode: 'cache' })).repo, 'other/app');
+  assert.deepEqual(gh.calls(), []);
+});
+
+test('a project root below the repository top reads the workflow files at the top, where GitHub reads them', () => {
+  const root = project();
+  const sub = path.join(root, 'packages', 'app');
+  fs.mkdirSync(sub, { recursive: true });
+  const gh = ghShim(responses());
+  const result = contract.verify(verifyOptions(sub, tempDir('data'), gh));
+  assert.equal(result.verified, true, result.reason);
+  assert.equal(result.workflow, WF);
+  const found = contract.discover(verifyOptions(sub, tempDir('data'), gh, { workflow: undefined }));
+  assert.equal(found.verified, true, found.reason);
+});
+
+test('the policy judges a bound chain by its nested worktree\'s workflow file, so an anchor branch switch changes nothing the chain reads', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-chain', `${WORKFLOW}# the chain's branch\n`);
+  const data = tempDir('data');
+  const gh = ghShim(responses());
+  const stores = policy.stores(data);
+  assert.equal(contract.verify(verifyOptions(root, data, gh)).verified, true);
+  policy.writeClone(stores, root, 'ci', WF, 'test', NOW);
+  const inputs = (extra = {}) => policyInputs(root, data, { workTree: nested, env: { ...CLEAN_ENV, ...gh.env }, ghPath: gh.ghPath, ...extra });
+  const cached = policy.resolve(inputs());
+  assert.equal(cached.runner, 'local');
+  assert.equal(cached.ciRequested, true);
+  assert.match(cached.reason, /in this working tree differs from every verified version/);
+  const calls = gh.calls().length;
+  const snapshot = policy.snapshotPolicy(inputs(), NOW + HOUR);
+  assert.equal(snapshot.runner, 'ci', snapshot.reason);
+  assert.ok(gh.calls().length > calls, 'the begin refresh asked GitHub about the worktree\'s version');
+  assert.equal(fs.existsSync(proofFile(data, blobOf(nested))), true);
+  policy.writeSnapshot(stores, SESSION, root, snapshot, NOW + HOUR);
+  fs.writeFileSync(workflowFile(root), PUSH_ONLY);
+  const terminus = policy.resolve({ ...inputs(), requireSnapshot: true });
+  assert.equal(terminus.runner, 'ci', terminus.reason);
+  assert.equal(terminus.decidedBy, 'this clone');
+  const anchor = policy.resolve({ ...policyInputs(root, data), requireSnapshot: true });
+  assert.equal(anchor.runner, 'local');
+  assert.match(anchor.reason, /does not trigger on pull_request$/);
+  assert.equal(policy.readClone(stores, nested).runner, 'ci');
+  policy.writeSnapshot(stores, SESSION, nested, snapshot, NOW + HOUR);
+  const foreign = policy.resolve({ ...inputs(), requireSnapshot: true });
+  assert.equal(foreign.runner, 'local');
+  assert.equal(foreign.reason, 'this chain recorded no full-suite snapshot when it began, so it closes as a local chain');
+});
+
+test('a work-tree lookup fault never falls back to the anchor: the policy resolves unverified and names the cause', () => {
+  const { root, data } = verifiedProject();
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', NOW);
+  const prefix = 'the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: the chain\'s work tree could not be resolved: ';
+  const faulted = policy.resolve(policyInputs(root, data, { workTreeFault: UNREADABLE_RUN }));
+  assert.equal(faulted.runner, 'local');
+  assert.equal(faulted.ciRequested, true);
+  assert.equal(faulted.reason, `${prefix}${UNREADABLE_RUN}`);
+  assert.equal(policy.resolve(policyInputs(root, data, { workTreeFault: '' })).reason, `${prefix}${evr.WORK_TREE_FAULT_UNREAD}`);
+  assert.equal(policy.resolve(policyInputs(root, data, { workTreeFault: null })).runner, 'ci');
+  assert.equal(policy.resolve(policyInputs(root, data, { workTreeFault: UNREADABLE_RUN, markerState: 'local' })).reason, 'the session marker chose local full-suite runs');
+});
+
+test('the policy CLI reads the chain\'s work tree and its lookup fault from the transport', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-cli', PUSH_ONLY);
+  const data = tempDir('data');
+  const gh = ghShim(responses({}, Date.now()));
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { now: Date.now() })).verified, true);
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', Date.now());
+  const tail = ' | decided by: this clone | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before\n';
+  const chain = snapshotCli(root, data, gh, 'none', { workTree: nested });
+  assert.equal(chain.status, 0, chain.stderr);
+  assert.equal(chain.snapshot && chain.snapshot.runner, 'local');
+  assert.equal(chain.stdout, `full suite: local | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: .github/workflows/ci.yml does not trigger on pull_request${tail}`);
+  const faulted = snapshotCli(root, data, gh, 'none', { fault: UNREADABLE_RUN });
+  assert.equal(faulted.status, 0, faulted.stderr);
+  assert.equal(faulted.snapshot && faulted.snapshot.runner, 'local');
+  assert.equal(faulted.stdout, `full suite: local | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: the chain's work tree could not be resolved | work tree: ${UNREADABLE_RUN}${tail}`);
+  const anchor = snapshotCli(root, data, gh);
+  assert.equal(anchor.snapshot && anchor.snapshot.runner, 'ci');
+});
+
+test('the runner\'s CI policy reads the chain\'s work tree and its lookup fault from the evidence-run transport', () => {
+  const root = project();
+  const nested = nestedWorktreeOf(root, 'auto-runner', PUSH_ONLY);
+  const data = tempDir('data');
+  const gh = ghShim(responses({}, Date.now()));
+  assert.equal(contract.verify(verifyOptions(root, data, gh, { now: Date.now() })).verified, true);
+  const stores = policy.stores(data);
+  policy.writeClone(stores, root, 'ci', WF, 'test', Date.now());
+  policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'this clone' }, Date.now());
+  const verdictLines = (chain = {}) => {
+    const transport = tempDir('evr-transport');
+    fs.writeFileSync(path.join(transport, 'ci-config.json'), '{}');
+    fs.writeFileSync(path.join(transport, 'full-suite-marker'), 'none');
+    if (typeof chain.fault === 'string') fs.writeFileSync(path.join(transport, 'work-tree-fault'), chain.fault);
+    const env = { ...CLEAN_ENV, ZENSU_EVR_DIR: transport, ZENSU_EVR_PLUGIN_DATA: data, ZENSU_EVR_SESSION_KEY: SESSION, ZENSU_EVR_PROJECT_ROOT: root, ZENSU_EVR_WORK_TREE: chain.workTree || '' };
+    const result = childProcess.spawnSync(process.execPath, ['-e', 'require(process.argv[1]).main(["verdict"]).then((code) => { process.exitCode = code; })', path.join(LIB_DIR, 'evidence-run-v1.js')], { env, encoding: 'utf8' });
+    return result.stderr.split('\n').filter(Boolean);
+  };
+  const anchor = verdictLines();
+  assert.ok(anchor.some((line) => line.startsWith('FULL SUITE — CI contract | CI: .github/workflows/ci.yml, job "test"')), anchor.join('\n'));
+  const chain = verdictLines({ workTree: nested });
+  assert.ok(chain.includes('FULL SUITE — local runner | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: .github/workflows/ci.yml does not trigger on pull_request | decided by: this clone'), chain.join('\n'));
+  assert.equal(chain.some((line) => line.startsWith('FULL SUITE — CI contract')), false);
+  const faulted = verdictLines({ fault: UNREADABLE_RUN });
+  assert.ok(faulted.includes(`FULL SUITE — local runner | the record for this clone chose CI full-suite runs, but the CI pull-request pipeline is not verified: the chain's work tree could not be resolved: ${UNREADABLE_RUN} | decided by: this clone`), faulted.join('\n'));
+  assert.ok(faulted.some((line) => line.startsWith('FULL SUITE — unavailable | the work tree of this Autopilot-bound chain could not be resolved')), faulted.join('\n'));
+});
+
+test('a git refusal at the project root is named as the cause instead of reading the project root as the tree', () => {
+  const root = project();
+  const gh = ghShim(responses());
+  const home = tempDir('git-home');
+  const isolated = { HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), GIT_CONFIG_NOSYSTEM: '1', GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' };
+  const saved = {};
+  let verified;
+  let discovered;
+  try {
+    for (const [name, value] of Object.entries(isolated)) {
+      saved[name] = process.env[name];
+      process.env[name] = value;
+    }
+    verified = contract.verify(verifyOptions(root, tempDir('data'), gh));
+    discovered = contract.discover(verifyOptions(root, tempDir('data'), gh, { workflow: undefined }));
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+  assert.equal(verified.verified, false);
+  assert.match(verified.reason, /^git could not place the project root in a work tree: git rev-parse failed: fatal: detected dubious ownership in repository/);
+  assert.equal(discovered.verified, false);
+  assert.match(discovered.reason, /^git could not place the project root in a work tree: /);
+});
+
+test('a project root below the repository top is unverified when a pull_request path filter can leave it out, and passes one that covers it', () => {
+  const pathsOnly = (patterns) => WORKFLOW.replace("    paths-ignore:\n      - 'docs/**'", `    paths:\n${patterns.map((pattern) => `      - '${pattern}'`).join('\n')}`);
+  const ignoring = WORKFLOW.replace("      - 'docs/**'", "      - 'docs/**'\n      - 'services/b/**'");
+  const cases = [
+    [pathsOnly(['services/a/**']), 'has pull_request paths patterns that do not cover every file in services/b'],
+    [pathsOnly(['services/**', '!services/b/legacy/**']), 'has pull_request paths patterns that do not cover every file in services/b'],
+    [ignoring, 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [WORKFLOW.replace("      - 'docs/**'", "      - '**.md'"), 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [WORKFLOW.replace("      - 'docs/**'", "      - 'docs/**'\n      - 'services/bx?/**'"), 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [pathsOnly(['**', '!services/bx?/**']), 'has pull_request paths patterns that do not cover every file in services/b'],
+    [WORKFLOW.replace("      - 'docs/**'", "      - 'docs/**'\n      - '!docs/keep/**'"), 'has a pull_request paths-ignore pattern that can match files in services/b'],
+    [WORKFLOW.replace("  pull_request:\n    paths-ignore:\n      - 'docs/**'", "  pull_request: { paths-ignore: ['docs/**'] }"), 'writes its pull_request trigger in flow form, so its path filters were not read'],
+    [WORKFLOW.replace("      - 'docs/**'", Array.from({ length: 20 }, (_, item) => `      - 'docs/part${item}/**'`).join('\n')), 'lists pull_request paths-ignore patterns this check cannot read in full'],
+  ];
+  for (const [workflow, reason] of cases) {
+    const root = project(workflow);
+    const sub = path.join(root, 'services', 'b');
+    fs.mkdirSync(sub, { recursive: true });
+    const result = contract.verify(verifyOptions(sub, tempDir('data'), ghShim(responses())));
+    assert.equal(result.verified, false, workflow);
+    assert.equal(result.reason, `${WF} ${reason}, and the project root lies in services/b below the repository top, so its pull requests may never run the suite`);
+    assert.equal(contract.verify(verifyOptions(root, tempDir('data'), ghShim(responses()))).verified, true, `the repository top ignores the filter: ${workflow}`);
+  }
+  for (const covering of [pathsOnly(['services/**']), pathsOnly(['**']), pathsOnly(['services/b/**', 'docs/**'])]) {
+    const root = project(covering);
+    const sub = path.join(root, 'services', 'b');
+    fs.mkdirSync(sub, { recursive: true });
+    const result = contract.verify(verifyOptions(sub, tempDir('data'), ghShim(responses())));
+    assert.equal(result.verified, true, `${covering}\n${result.reason}`);
+  }
+});
+
+test('the retire mode removes the session\'s snapshot without a transport directory and refuses an invalid session key', async () => {
+  const root = project();
+  const data = tempDir('data');
+  const stores = policy.stores(data);
+  policy.writeSnapshot(stores, SESSION, root, { runner: 'ci', decidedBy: 'session marker' });
+  assert.equal(policy.readSnapshot(stores, SESSION).runner, 'ci');
+  const quiet = { write: () => true };
+  const original = process.stderr.write;
+  let retired;
+  let refused;
+  try {
+    process.stderr.write = quiet.write;
+    retired = await policy.main(['retire'], { ZENSU_FSP_PLUGIN_DATA: data, ZENSU_FSP_SESSION_KEY: SESSION });
+    refused = await policy.main(['retire'], { ZENSU_FSP_PLUGIN_DATA: data, ZENSU_FSP_SESSION_KEY: 'not-a-session' });
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.equal(retired, 0);
+  assert.equal(policy.readSnapshot(stores, SESSION), null);
+  assert.equal(refused, 2);
+  assert.equal(await policy.main(['retire'], { ZENSU_FSP_PLUGIN_DATA: data, ZENSU_FSP_SESSION_KEY: SESSION }), 0);
+});
+
+test('a long work-tree lookup cause keeps its own segment in the snapshot line, so the display cut never drops it', () => {
+  const root = project();
+  const data = tempDir('data');
+  const gh = ghShim(responses({}, Date.now()));
+  policy.writeClone(policy.stores(data), root, 'ci', WF, 'test', Date.now());
+  const cause = 'the record of the bound Autopilot run fsci_bound_push_run could not be read, so the chain\'s worktree is unknown';
+  const faulted = snapshotCli(root, data, gh, 'none', { fault: cause });
+  assert.equal(faulted.status, 0, faulted.stderr);
+  assert.equal(faulted.snapshot && faulted.snapshot.runner, 'local');
+  assert.ok(faulted.stdout.includes(` | work tree: ${cause} | decided by: this clone | `), faulted.stdout);
 });
