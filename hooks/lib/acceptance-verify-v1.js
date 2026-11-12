@@ -79,6 +79,7 @@ const LIMITS = Object.freeze({
   gitTimeoutMs: 120000,
 });
 const REMEDY = '/zensu:verify-feature --chain';
+const UNJUDGED_CAUSE = 'the acceptance transport failed';
 
 class AcceptanceError extends Error {
   constructor(message) {
@@ -749,6 +750,28 @@ function boundLine(validate) {
   return 'ACCEPTANCE — not-checked | Autopilot-bound chain: the run\'s validate option could not be read, so whether its VALIDATE stage checks the acceptance criteria is unknown';
 }
 
+function notApplicableLine(reason, mode) {
+  return `ACCEPTANCE — not-applicable | ${reason} | gate: ${mode}`;
+}
+
+function unjudged(options) {
+  const gate = normalizeGateMode(options.gateMode, options.projectRoot);
+  const lines = gate.disclosure ? [gate.disclosure] : [];
+  const cause = typeof options.cause === 'string' && /^[^\x00-\x1f\x7f]+$/.test(options.cause) ? options.cause : UNJUDGED_CAUSE;
+  if (options.bound) {
+    lines.push(`${boundLine(options.validate)} (${cause})`);
+    return { decided: true, state: 'not-checked', mode: gate.mode, lines };
+  }
+  if (options.chainInputs) {
+    const resolved = verdictChain(options);
+    if (resolved.outcome === 'not-applicable') {
+      lines.push(notApplicableLine(`${resolved.reason} (${cause})`, gate.mode));
+      return { decided: true, state: 'not-applicable', mode: gate.mode, lines };
+    }
+  }
+  return { decided: false, state: null, mode: gate.mode, lines };
+}
+
 function verifyRemedy(chain, projectRoot) {
   const log = chain ? ` --log ${display(`.zensu/logs/${chain.stem}.log`, projectRoot)}` : '';
   return `run: ${REMEDY}${log}`;
@@ -784,7 +807,7 @@ function verdict(options) {
   }
   const resolved = verdictChain(options);
   if (resolved.outcome === 'not-applicable') {
-    lines.push(`ACCEPTANCE — not-applicable | ${resolved.reason} | ${gateLabel}`);
+    lines.push(notApplicableLine(resolved.reason, gate.mode));
     return { state: 'not-applicable', passes: true, mode: gate.mode, lines };
   }
   if (options.escape) {
@@ -906,7 +929,17 @@ async function main(argv, env = process.env) {
     if (result.state === 'unavailable' && result.mode !== 'advisory') return 2;
     return result.passes ? 0 : 1;
   }
-  process.stderr.write('usage: acceptance-verify-v1.js record|status|verdict\n');
+  if (mode === 'unjudged') {
+    const result = unjudged({
+      ...options,
+      gateMode: env.ZENSU_AVR_GATE_MODE,
+      chainInputs: env.ZENSU_AVR_CHAIN_INPUTS === '1',
+      cause: env.ZENSU_AVR_CAUSE,
+    });
+    for (const line of result.lines) process.stdout.write(`${line}\n`);
+    return result.decided ? 0 : 3;
+  }
+  process.stderr.write('usage: acceptance-verify-v1.js record|status|verdict|unjudged\n');
   return 2;
 }
 
@@ -954,6 +987,7 @@ module.exports = {
   status,
   normalizeGateMode,
   boundLine,
+  unjudged,
   remedies,
   verdict,
   main,
