@@ -400,9 +400,36 @@ function revalidateWorkflowState(options) {
   ) {
     throw new Error('activated workflow CAS state is unsafe');
   }
-  core.readWorkflowState({
+  return core.readWorkflowState({
     projectRoot: options.projectRoot,
     sessionId: options.sessionId,
+  });
+}
+
+function declaredRootTops(document) {
+  if (!document || typeof document !== 'object' || !Array.isArray(document.codeRoots)) return [];
+  const tops = [];
+  for (const entry of document.codeRoots) {
+    if (!entry || typeof entry !== 'object') continue;
+    for (const value of [entry.top, entry.path]) {
+      if (typeof value !== 'string' || value === '' || /[\0\r\n]/.test(value) || !path.isAbsolute(value)) continue;
+      const resolved = path.resolve(value);
+      if (!tops.includes(resolved)) tops.push(resolved);
+    }
+  }
+  return tops;
+}
+
+function codeRootZensuDirectories(trusted) {
+  return (Array.isArray(trusted.codeRootTops) ? trusted.codeRootTops : [])
+    .map((top) => path.join(top, '.zensu'));
+}
+
+function zensuBelowRoot(trusted, candidate) {
+  const bases = [trusted.projectRoot].concat(Array.isArray(trusted.codeRootTops) ? trusted.codeRootTops : []);
+  return bases.some((base) => {
+    if (typeof base !== 'string' || !isInside(base, candidate)) return false;
+    return path.relative(base, candidate).split(path.sep).some((segment) => foldedPath(segment) === '.zensu');
   });
 }
 
@@ -420,13 +447,14 @@ function revalidateSessionContext(payload, bind) {
   // never announced — every later call sees a record that simply serves.
   try {
     const projectRoot = canonicalDirectory(binding.projectRoot, 'context project root');
-    revalidateWorkflowState({
+    const document = revalidateWorkflowState({
       sessionId: payload.session_id,
       projectRoot,
     });
     return {
       ...binding,
       projectRoot,
+      codeRootTops: declaredRootTops(document),
     };
   } catch (error) {
     if (binding.adoption && error && typeof error === 'object' && !error.adoption) error.adoption = binding.adoption;
@@ -635,13 +663,16 @@ function protectedAccessViolation(payload, trusted) {
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-session.sh'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-log.sh'),
     path.join(trusted.pluginRoot, 'hooks', 'session-start-session-control.sh'),
+    ...codeRootZensuDirectories(trusted),
   ].map((value) => path.resolve(value));
 
   if (candidates.some((candidate) => candidate && !isInside(trusted.projectRoot, candidate))) {
     return 'file access must remain inside the immutable project root';
   }
 
-  if (candidates.some((candidate) => candidate && protectedRoots.some((root) => isInside(root, candidate)))) {
+  if (candidates.some((candidate) => candidate && (
+    protectedRoots.some((root) => isInside(root, candidate)) || zensuBelowRoot(trusted, candidate)
+  ))) {
     return 'the requested path is protected Session Control or workflow state';
   }
 
@@ -774,6 +805,7 @@ function neutralViolation(payload, trusted) {
     path.join(trusted.pluginRoot, 'hooks', 'session-start-session-control.sh'),
     path.join(trusted.pluginRoot, 'hooks', 'pre-reviewer-capability-gate.sh'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-log.sh'),
+    ...codeRootZensuDirectories(trusted),
   ].map((value) => path.resolve(value));
 
   const toolViolation = hostProfileToolViolation(payload, trusted, protectedRoots);
@@ -828,7 +860,7 @@ function neutralViolation(payload, trusted) {
   }
 
   if (candidates.some((candidate) => candidate
-      && protectedRoots.some((root) => isInside(root, candidate)))) {
+      && (protectedRoots.some((root) => isInside(root, candidate)) || zensuBelowRoot(trusted, candidate)))) {
     return `host-profile-v1 cannot access a protected Session Control path, because it is Zensu's own workflow state; ${MAIN_THREAD_REMEDY}`;
   }
 
@@ -1220,4 +1252,6 @@ module.exports = {
   NON_PATH_TOOLS,
   knownTool,
   neutralViolation,
+  protectedAccessViolation,
+  declaredRootTops,
 };
