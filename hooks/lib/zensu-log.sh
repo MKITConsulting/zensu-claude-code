@@ -308,6 +308,7 @@ _zensu_avr_prepare() {
       && tdd_bypass_recorded "$state_file" ZENSU_EDIT_LANDING_GATE; then
       _avr_escaped_el=1
     fi
+    _avr_chain_inputs=1
   fi
   _avr_dir="$(mktemp -d 2>/dev/null)" || {
     echo "$label: no temporary directory available" >&2
@@ -536,16 +537,57 @@ _zensu_full_suite_work_tree() {
   return 0
 }
 
+_zensu_avr_ask() {
+  local excl
+  [ -n "${_avr_lib:-}" ] || return 2
+  command -v node >/dev/null 2>&1 || return 2
+  excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_PLUGIN_DATA ZENSU_AVR_PROJECT_ROOT \
+    ZENSU_AVR_RECEIPT ZENSU_AVR_GATE_MODE)" || excl="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$excl" \
+  ZENSU_AVR_LIB="$_avr_lib" \
+  ZENSU_AVR_DIR="" \
+  ZENSU_AVR_PLUGIN_DATA="${_avr_data:-}" \
+  ZENSU_AVR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+  ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
+  ZENSU_AVR_WORK_TREE="" \
+  ZENSU_AVR_RECEIPT="${_avr_receipt:-}" \
+  ZENSU_AVR_LOG="" \
+  ZENSU_AVR_AC="" \
+  ZENSU_AVR_VERDICT="" \
+  ZENSU_AVR_DRIVER="" \
+  ZENSU_AVR_EVIDENCE_RUN="" \
+  ZENSU_AVR_ESCAPE=0 \
+  ZENSU_AVR_BOUND="${_avr_bound:-0}" \
+  ZENSU_AVR_VALIDATE="${_avr_validate:-}" \
+  ZENSU_AVR_EDIT_LANDING_ESCAPED="${_avr_escaped_el:-0}" \
+  ZENSU_AVR_BASH=bash \
+  ZENSU_AVR_CHAIN_INPUTS="${_avr_chain_inputs:-0}" \
+  ZENSU_AVR_GATE_MODE="${2:-}" \
+  ZENSU_AVR_CAUSE="$1" \
+    node -e 'require(process.env.ZENSU_AVR_LIB).main(["unjudged"]).then((code) => { process.exitCode = code; }, () => { process.exitCode = 2; })' 2>/dev/null
+}
+
 _zensu_acceptance_gate_unjudged() {
-  local cause="${2:-the acceptance transport failed}" mode=required
-  [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && mode=advisory
-  if [ "$_avr_escape" = "1" ]; then
-    tdd_record_bypass "${1:-}" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
-    _avg_lines="ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($cause) | gate: $mode"
+  local cause="${2:-the acceptance transport failed}" mode=required raw answer lead="" rc=0 nl=$'\n'
+  raw="$(zensu_evidence_acceptance_gate)"
+  answer="$(_zensu_avr_ask "$cause" "$raw")" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$answer" ]; then
+    _avg_lines="$answer"
     return 0
   fi
-  [ "$mode" = "advisory" ] || return 1
-  _avg_lines="ACCEPTANCE — unavailable (advisory, not blocking) | $cause, so no acceptance record was read | gate: advisory"
+  [ "$rc" -eq 3 ] && lead="$answer"
+  [ "${_avr_bound:-0}" = "1" ] && return 0
+  [ "$raw" = "advisory" ] && mode=advisory
+  if [ "$_avr_escape" = "1" ]; then
+    tdd_record_bypass "${1:-}" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
+    _avg_lines="${lead:+$lead$nl}ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($cause) | gate: $mode"
+    return 0
+  fi
+  if [ "$mode" != "advisory" ]; then
+    [ -z "$lead" ] || printf '%s\n' "$lead" >&2
+    return 1
+  fi
+  _avg_lines="${lead:+$lead$nl}ACCEPTANCE — unavailable (advisory, not blocking) | $cause, so no acceptance record was read | gate: advisory"
   return 0
 }
 
@@ -555,8 +597,16 @@ _zensu_acceptance_gate() {
   _avr_bound="${2:-0}"
   _avr_validate="${3:-}"
   _avr_escape=0
+  _avr_lib=""
+  _avr_data=""
+  _avr_receipt=""
+  _avr_escaped_el=0
+  _avr_chain_inputs=0
   if [ "$_avr_bound" = "1" ]; then
-    _zensu_avr_prepare "zensu-log.sh --chain-done" "$session" 1 2>/dev/null || return 0
+    if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session" 1 2>/dev/null; then
+      _zensu_acceptance_gate_unjudged "$session" "the acceptance transport could not be prepared"
+      return 0
+    fi
     _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || _avg_lines=""
     return 0
   fi

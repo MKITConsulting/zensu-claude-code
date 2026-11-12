@@ -143,8 +143,9 @@ above, then run --chain-done again.` The passing lines name the failure and prin
 transition like the module's verdict lines, so the CHAIN-END SUMMARY carries them and the terminus
 still prints the lines `docs/configuration.md` and `docs/gates.md` promise for an escaped and an
 advisory gate (`F26`, `F27`, and `F28` for a failed preparation). The acceptance gate's failed
-preparation answers the same way through `_zensu_acceptance_gate_unjudged`, without the
-not-applicable step (`.claude/rules/acceptance-verification-gate.md`). Both
+preparation answers the same way through `_zensu_acceptance_gate_unjudged`, which asks the
+`unjudged` mode of `acceptance-verify-v1.js` through `_zensu_avr_ask` for every line that needs
+the module's judgment (`.claude/rules/acceptance-verification-gate.md`). Both
 modules read the file through `readWorkTreeFault` of `evidence-run-v1.js`: a missing file is no
 fault, while an empty file and one that exists but cannot be read are a fault whose cause is the
 fixed `WORK_TREE_FAULT_UNREAD`, through the `workTreeFaultCause` that `run()`, `verdict()` and
@@ -358,11 +359,12 @@ through `zensu-host-path.sh` as `_zensu_evr_work_tree` does (`M6` to `M6h` in
 in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in
 `skills/build/references/planning.md` and of Phase 4 in `skills/self-review/SKILL.md` (`L9b` and
 `L11` in `test-tdd-log-path-anchor.sh`, `E10g1` and `E10l` in `test-session-reanchor.sh`), E13
-to E28 in `test-evidence-run.sh`, F20 to F31 in `test-full-suite-gate.sh`, A29 to A36 in
+to E28 in `test-evidence-run.sh`, F20 to F31 in `test-full-suite-gate.sh`, A29 to A46b in
 `test-acceptance-gate.sh`, WB0 to WB21 in `test-tdd-complete-receipt-gate.sh`, the `mktemp` stub
 `transport_fault_stub` (and `work_tree_fault_stub` for `work-tree-fault`) that `E26`, `E28`, `E28b`,
-`A32` to `A36`, `F25` to `F27` and `F29` to `F31` share in `tests/structure/lib-work-tree-fault-stub.sh`
-with `C31` in `test-full-suite-ci.sh`, the bound cases of `evidence-run-v1.test.js`, the `--if-stale` one and the worktree that cannot be
+`A32` to `A44`, `A46`, `A46b`, `F25` to `F27` and `F29` to `F31` share in
+`tests/structure/lib-work-tree-fault-stub.sh` with `C31` in `test-full-suite-ci.sh`, the bound
+cases of `evidence-run-v1.test.js`, the `--if-stale` one and the worktree that cannot be
 fingerprinted included, and the work-tree fault cases of both module unit files.
 `_zensu_full_suite_not_applicable` prints the reason `workTree()` answers, so `F14` (the module's
 verdict) and `F30` and `F31` (the unjudged arm) pin one string, and `G17d` pins the exact reading
@@ -406,13 +408,15 @@ for failure, not for its bytes; the modules' own `verdict-state` write, which de
 escape is ledgered, and the `marker-state`, `ci-config.json` and `full-suite-command` writes of
 `zensu_full_suite_policy_node` in `hooks/lib/zensu-full-suite-transport.sh` are still unchecked;
 only its `work-tree-fault` write is checked there. The lookup's `bwt-*` answers are
-checked for emptiness, not for a truncated path. `E26`, `E28`, `E28b`, `A32` to `A36`, `F25` to
-`F27` and `F29` to `F31` reach the failed write through a `mktemp` stub that occupies the transport
+checked for emptiness, not for a truncated path. `E26`, `E28`, `E28b`, `A32` to `A44`, `A46`,
+`A46b`, `F25` to `F27` and `F29` to `F31` reach the failed write through a `mktemp` stub that occupies the transport
 path with a directory, not through a full disk or a read-only temporary directory, and `E27` drives
 the lookup's reader over empty answers through a stubbed lookup, because a write that succeeds
 without its bytes cannot be provoked portably. Without `node` the unjudged full-suite arm has no
 not-applicable step, so outside git an escape is ledgered and a required gate refuses where the
-module would pass. A probe answer with a trace line makes the unqualified verbs refuse with the
+module would pass. That arm never asks the module, so an unknown `evidence.fullSuiteGate` value
+acts as `required` there without the disclosure line `verdict()` prints first, while the
+acceptance arm prints its module's disclosure (`A46`); `docs/gates.md` says so. A probe answer with a trace line makes the unqualified verbs refuse with the
 sentence for a failed listing, which names `git diff --name-only HEAD` rather than the probe. After
 a bound max-rounds close without self-review, the closing run measures the worktree only through the
 leading `cd` the directive names: the runner itself treats the closed chain as standalone
