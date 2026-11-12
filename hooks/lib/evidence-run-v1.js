@@ -353,9 +353,10 @@ function workTree(projectRoot, limits = LIMITS) {
     return { applicable: null, reason: result.error.code === 'ETIMEDOUT' ? 'git timed out' : `git unavailable (${result.error.code || result.error.message})` };
   }
   if (result.status === 0) {
-    return String(result.stdout).trim() === 'true'
-      ? { applicable: true, reason: null }
-      : { applicable: false, reason: 'the project root is not inside a git work tree' };
+    const printed = String(result.stdout).trim();
+    if (printed === 'true') return { applicable: true, reason: null };
+    if (printed === 'false') return { applicable: false, reason: 'the project root is not inside a git work tree' };
+    return { applicable: null, reason: 'git rev-parse --is-inside-work-tree printed neither true nor false' };
   }
   const stderr = String(result.stderr || '');
   if (/not a git repository/i.test(stderr)) return { applicable: false, reason: 'the project is not a git repository' };

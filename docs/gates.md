@@ -1598,6 +1598,15 @@ reads the newest record, never a claim in the run log.
   full-suite gate.
 - **Bypass** with `ZENSU_FULL_SUITE_GATE=off`. The escape is recorded in the bypass ledger only
   where the gate applies: never for a wrong ticket and never outside a work tree.
+- **When its temporary files cannot be written.** The verdict reads its inputs from files the
+  plugin writes into a temporary directory. When that directory or one of the files cannot be
+  written, no run is read, and the terminus answers in the order the verdict decides: outside a
+  work tree it prints `not-applicable` with the reason the module gives, an escaped gate prints
+  `escaped` and is ledgered, and an advisory gate prints `unavailable (advisory, not blocking)`;
+  each of these lines names the failure. A required gate refuses with a line naming what could not
+  be written and a line saying that the chain stays open. An unknown `evidence.fullSuiteGate`
+  value acts as `required` there without the line that says so. `--evidence-run` stops with exit
+  `2` and the same kind of line before the command runs.
 - **What it does not prove.** Records live in the plugin's private data directory, which the
   file tools of the reviewer and of a neutral subagent cannot read, the subagent shell guard
   denies by name, and Edit/Write cannot reach. A Bash redirect from
@@ -1690,6 +1699,22 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   `required`, and the first line says so.
 - **Bypass** with `ZENSU_ACCEPTANCE_GATE=off`, recorded in the bypass ledger only where the gate
   applies. A chain the gate finds `not-applicable` prints that state and records no escape.
+- **When its temporary files cannot be written.** As for the full-suite gate, the terminus then
+  answers in the order the verdict decides and names the failure. It asks the acceptance module,
+  which builds the two answers that need its judgment from the verdict's own lines: a bound
+  Autopilot chain prints the module's `not-checked` line for the run's validate option, and a
+  chain the gate would find `not-applicable` prints that line with the module's reason and
+  records no escape. An unknown `evidence.acceptanceGate` value is disclosed first, as on the
+  usual path. Then an escape prints `escaped` and is ledgered, an advisory gate prints
+  `unavailable (advisory, not blocking)`, and a required gate refuses with a line saying that the
+  chain stays open. A bound chain prints no line only when the module cannot be asked, because
+  its path cannot be resolved or it does not load; a standalone chain then gets neither the
+  `not-applicable` answer nor the disclosure. A standalone chain whose preparation stopped before
+  it had resolved the receipt and the edit-landing escape, for example at an unusable plugin data
+  directory, gets no `not-applicable` answer either. In both cases an escape is ledgered and a
+  required gate refuses, which discloses more than needed and never passes in silence.
+  `--acceptance-status` and `--acceptance-record` stop with exit `2` and a line naming what could
+  not be written, and write no record.
 - **What it does not prove.** An attested verdict is written by the model, so the gate proves
   that every criterion was verified and recorded on the current tree, not that the model looked
   honestly. An observed verdict proves only that a command the model chose exited as recorded on
