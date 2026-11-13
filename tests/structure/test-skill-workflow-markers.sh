@@ -671,13 +671,14 @@ fi
 FT_MISSING=""
 for ft_skill in docs implement bootstrap ghost-scan security-review autopilot change; do
   ft_md="$CLAUDE_PLUGIN_ROOT/skills/$ft_skill/SKILL.md"
-  grep -qF "<<'ZENSU_TEXT_END'" "$ft_md" && grep -qxF 'ZENSU_TEXT_END' <(sed 's/^ *//' "$ft_md") \
+  grep -qF "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" "$ft_md" && grep -qxF 'ZENSU_TEXT_<hex>' <(sed 's/^ *//' "$ft_md") \
+    && grep -qxF '[ -s "$f" ] || exit 1' <(sed 's/^ *//' "$ft_md") \
     && grep -qF '"$(cat "$f")"' "$ft_md" && grep -qF "trap 'rm -f \"\$f\"" "$ft_md" \
     || FT_MISSING="$FT_MISSING $ft_skill"
 done
 [ -z "$FT_MISSING" ] \
-  && check "FT2 every skill that uploads free text writes it through a quoted heredoc into a temporary file and passes \"\$(cat \"\$f\")\"" PASS \
-  || check "FT2 skills without the quoted-heredoc file form for free text:$FT_MISSING" FAIL
+  && check "FT2 every skill that uploads free text writes it with >| through a quoted heredoc with a random <hex> delimiter, stops on an empty file and passes \"\$(cat \"\$f\")\"" PASS \
+  || check "FT2 skills without the free-text file form (>|, a <hex> delimiter, the emptiness check, the trap and \"\$(cat \"\$f\")\"):$FT_MISSING" FAIL
 
 FT_FIX="$(mktemp -d -t skillftfix-XXXXXX)"
 mkdir -p "$FT_FIX/bad" "$FT_FIX/good"
@@ -697,9 +698,9 @@ cat > "$FT_FIX/good/SKILL.md" <<'EOF'
 name: good
 ---
 f="$(mktemp)" || exit 1
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
 zensu link docs <feature-id> --title "<title>" --content "$(cat "$f")"
 bash "$LOG" --payload '{"headSha":"<sha>"}'
 Return the `<markdown>` you authored, never a `<json>` dump.
@@ -737,6 +738,7 @@ const SITES = [
   ['skills/ghost-scan/SKILL.md', "A candidate's optional `description`", MD, false],
   ['skills/ghost-scan/SKILL.md', 'per approved journey', MD, true],
   ['skills/ghost-scan/SKILL.md', 'per step (`--title` and a 1-based', PLAIN, true],
+  ['skills/ghost-scan/SKILL.md', '`--reject-reason` gives every rejected candidate one reason', PLAIN, true],
   ['skills/ghost-scan/references/cross-component-journeys.md', 'citation into the step `--description`', PLAIN, true],
   ['skills/security-review/SKILL.md', '`--findings`: the findings summary', MD, false],
   ['skills/implement/SKILL.md', '`--scope-details` are plain text', PLAIN, true],
@@ -762,13 +764,41 @@ for (const [file, anchor, phrase, fileForm] of SITES) {
 console.log('CHECKED ' + checked);
 NODE
 FF_OUT="$(node "$FF_PROBE" "$CLAUDE_PLUGIN_ROOT" 2>&1)"
-if ! printf '%s\n' "$FF_OUT" | grep -q '^MISS ' && printf '%s\n' "$FF_OUT" | grep -qx 'CHECKED 12'; then
-  check "FT5 each of the 12 free-text field sites of bootstrap, ghost-scan, security-review and implement states its text format, and each flag site passes its value through the file form" PASS
+if ! printf '%s\n' "$FF_OUT" | grep -q '^MISS ' && printf '%s\n' "$FF_OUT" | grep -qx 'CHECKED 13'; then
+  check "FT5 each of the 13 free-text field sites of bootstrap, ghost-scan, security-review and implement states its text format, and each flag site passes its value through the file form" PASS
 else
   printf '%s\n' "$FF_OUT" | sed 's/^/      /'
   check "FT5 a free-text field site lost its text-format sentence or its file form" FAIL
 fi
 rm -f "$FF_PROBE"
+
+ft6_scan() {
+  grep -rnF --include='*.md' 'ZENSU_TEXT_END' "$1" | sed 's/^/FIXED /'
+  grep -rnE --include='*.md' 'cat[[:space:]]+>[[:space:]]*"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*<<' "$1" | sed 's/^/PLAIN /'
+}
+FT6_OUT="$(ft6_scan "$CLAUDE_PLUGIN_ROOT/skills")"
+FT6_FIX="$(mktemp -d -t skillft6-XXXXXX)"
+mkdir -p "$FT6_FIX/old" "$FT6_FIX/new"
+printf '%s\n' 'f="$(mktemp)" || exit 1' "cat > \"\$f\" <<'ZENSU_TEXT_END'" '<text>' 'ZENSU_TEXT_END' > "$FT6_FIX/old/SKILL.md"
+printf '%s\n' 'f="$(mktemp)" || exit 1' "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" '<text>' 'ZENSU_TEXT_<hex>' > "$FT6_FIX/new/SKILL.md"
+FT6_OLD="$(ft6_scan "$FT6_FIX/old")"
+FT6_NEW="$(ft6_scan "$FT6_FIX/new")"
+rm -rf "$FT6_FIX"
+if [ -z "$FT6_OUT" ] && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^FIXED ')" = 2 ] \
+  && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^PLAIN ')" = 1 ] && [ -z "$FT6_NEW" ]; then
+  check "FT6 no skill file spells the fixed delimiter ZENSU_TEXT_END or writes a heredoc into a temporary file with a plain >, and a fixture with both is flagged" PASS
+else
+  printf '%s\n' "$FT6_OUT" | sed 's/^/      /'
+  check "FT6 a skill file keeps the fixed delimiter or a plain > heredoc write (fixture old='$FT6_OLD' new='$FT6_NEW')" FAIL
+fi
+
+FT7_MD="$CLAUDE_PLUGIN_ROOT/skills/bootstrap/SKILL.md"
+if grep -qxF '[ -f "$p" ] && [ -s "$p" ] || exit 1' <(sed 's/^ *//' "$FT7_MD") \
+  && grep -qF -- '--content "$(cat "$p")"' "$FT7_MD" && ! grep -qF '"~/' "$FT7_MD"; then
+  check "FT7 bootstrap passes a plan file by path only after [ -f \"\$p\" ] && [ -s \"\$p\" ], and spells no ~/ path inside double quotes" PASS
+else
+  check "FT7 bootstrap's by-path plan form lacks its regular-file and emptiness check, or spells a ~/ path inside double quotes" FAIL
+fi
 
 echo "----"
 echo "test-skill-workflow-markers: $PASS PASS / $FAIL FAIL"

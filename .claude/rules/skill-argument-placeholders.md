@@ -93,16 +93,17 @@ paragraph of `docs/build-workflow.md` (unpinned). `ZENSU_ROOT` is read by nothin
 the plugin; pick another name if that ever changes, because the probe hands it to every child the
 sourced library starts.
 
-**Free text never goes into a command line (`FT1`–`FT4`).** A skill that sends model-written
+**Free text never goes into a command line (`FT1`–`FT7`).** A skill that sends model-written
 Markdown, JSON, a plan document, review findings or conditions writes the text to a temporary
 file through a heredoc with a quoted delimiter and passes `"$(cat "$f")"`:
 
 ```bash
 f="$(mktemp)" || exit 1
 trap 'rm -f "$f"' EXIT
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+[ -s "$f" ] || exit 1
 zensu link docs <feature-id> --doc-type <type> --content "$(cat "$f")"
 ```
 
@@ -122,26 +123,54 @@ reports `redirect` and `heredoc` for the file form and nothing for the old inlin
 `--scope-summary` and `--scope-details` (read from the zensu-cli 0.16.0 `--help`), which is why
 the round trip through a file exists.
 
+Four rules make the recipe safe to repeat. The delimiter is random: `<hex>` stands for eight
+hex digits picked anew for each call and written the same on both lines, because a fixed
+delimiter ends the heredoc at the first text line that spells it, and the shell then runs every
+line after it as a command. A plan document, or a page that documents this recipe, can hold
+that line. A plan document that is already a Markdown or plain-text file goes in by path, never
+retyped into a heredoc and never under the `trap`, which would delete it: `p` holds an absolute
+or `$HOME/…` path, never `~/…`, which double quotes leave unexpanded, and
+`[ -f "$p" ] && [ -s "$p" ] || exit 1` runs before `--content "$(cat "$p")"`. Both tests are
+needed: `cat` of a wrong path, a `~/…` path or a directory hands on an empty value, and `-s`
+alone passes a directory. A PDF or Word document is read and goes through the heredoc as text.
+`>|` writes even under `noclobber`, which a shell profile may set: `mktemp` has already created
+the file, so a plain `>` fails with exit 1, the file stays empty and the command still runs with
+an empty value. `[ -s "$f" ] || exit 1` stops the call before that. Measured under macOS
+`/bin/bash` 3.2.57 and `/bin/zsh`: with `noclobber` set the plain `>` failed and left 0 bytes, `>|`
+wrote the file, a text line spelling another delimiter stayed text, and the check stopped an
+empty file; `-s` passed a directory and `-f` did not, and a `~/…` path in double quotes stayed
+literal, so `cat` read nothing. Last, one recipe runs per Bash call,
+with one `mktemp` per variable and one `trap` that names every file: a second `trap` replaces the
+first, and a second `mktemp` into the same variable leaves the first file behind.
+
 `FT1` scans every Markdown file under `skills/`, references and rules included, and fails on a
 `--flag` whose value is a placeholder naming Markdown, JSON, a document, a description, findings
 or conditions, whether unquoted, double-quoted, single-quoted or joined with `=`. `FT2` requires the
-file form in the seven skills that send free text: docs, implement, bootstrap, ghost-scan,
-security-review, autopilot and change. `FT3` and `FT4` pin the five flagged spellings and five near
-misses on fixtures. `FT5` pins the text-format sentence at each of the twelve free-text field
-sites of bootstrap, ghost-scan, security-review and implement, and the file form at each flag
-site among them: a Markdown field says Zensu renders headings, lists and code, a plain-text field
-says Zensu does not render Markdown there. The formats come from the Zensu web app, which renders
+whole recipe, `>|`, the `<hex>` delimiter, the emptiness check, the `trap` and `"$(cat "$f")"`, in
+the seven skills that send free text: docs, implement, bootstrap, ghost-scan, security-review,
+autopilot and change. `FT3` and `FT4` pin the five flagged spellings and five near misses on
+fixtures. `FT5` pins the text-format sentence at each of the thirteen free-text field sites of
+bootstrap, ghost-scan, security-review and implement, and the file form at each flag site among
+them: a Markdown field says Zensu renders headings, lists and code, a plain-text field says Zensu
+does not render Markdown there. `FT6` fails on any Markdown file under `skills/` that spells the
+retired fixed delimiter `ZENSU_TEXT_END` or writes a heredoc into a temporary file with a plain
+`>`, and bites both on a fixture. `FT7` requires bootstrap's by-path plan form to run
+`[ -f "$p" ] && [ -s "$p" ] || exit 1` before `--content "$(cat "$p")"` and to spell no `~/`
+path inside double quotes. The formats come from the Zensu web app, which renders
 product, component, feature, sub-feature and journey descriptions and security findings and
-conditions as Markdown, and renders no Markdown in the tier description, the journey step fields
-or the revision scope fields. `B52` and `B52b` in `tests/structure/test-bash-zensu-gate.sh` drive the
+conditions as Markdown, and renders no Markdown in the tier description, the journey step fields,
+the revision scope fields or a ghost candidate's reject reason. A ghost candidate's description
+shows unrendered on the scan's review page and rendered in the feature apply creates from it, so
+the skill writes it as Markdown. `B52` and `B52b` in `tests/structure/test-bash-zensu-gate.sh` drive the
 whole form through the CLI write-gate: it passes inside a window that declares its tool and
 stays a denied mutation outside one.
 
 Known gaps: a positional free-text argument and a placeholder with another name are not
-judged; short titles (`--title "<title>"`), a journey's `--persona`, a batch `--reject-reason`,
-the wiki `--change-summary` and the work-order `--rationale` stay double-quoted, so a backtick in
-them still runs; nothing checks that the delimiter line is absent from the
-text; the CLI write-gate's token scan reads each heredoc line as a command
+judged; short titles (`--title "<title>"`), a journey's `--persona`, the wiki
+`--change-summary` and the work-order `--rationale` stay double-quoted, so a backtick in them
+still runs; nothing checks that a model picks a fresh delimiter, so one that types `<hex>`
+literally or reuses an earlier value has a fixed delimiter again; the CLI write-gate's token scan
+reads each heredoc line as a command
 (`.claude/rules/subagent-shell-guard.md`), so a text line that opens with a `zensu` mutation the
 window does not declare is denied; and the text still travels as one command-line argument, so
 the operating system's argument-size limits apply exactly as they did inline. A zensu-cli flag

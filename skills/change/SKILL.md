@@ -78,13 +78,14 @@ Run the command from its row. Pass every free text, such as a description, a rea
 ```bash
 f="$(mktemp)" || exit 1
 trap 'rm -f "$f"' EXIT
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+[ -s "$f" ] || exit 1
 zensu features update <feature-id> --description "$(cat "$f")"
 ```
 
-Inside double quotes the shell would run every backtick span of the text and expand every `$NAME`; the quoted delimiter keeps the text literal. A short title, slug or one-line summary may stay inline in double quotes when it holds no backtick and no `$`.
+Inside double quotes the shell would run every backtick span of the text and expand every `$NAME`; the quoted delimiter keeps the text literal. Replace `<hex>` with eight random hex digits, new for each call and the same on both lines, so no line of the text can end the heredoc early; `>|` writes even under `noclobber`, and `[ -s "$f" ] || exit 1` stops before an empty value reaches Zensu. A second free text in the same call gets its own file, and the one `trap` widens to both. A short title, slug or one-line summary may stay inline in double quotes when it holds no backtick and no `$`.
 
 After `zensu features create`, finish the new feature in this order, and report each result:
 

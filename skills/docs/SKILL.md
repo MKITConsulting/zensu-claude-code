@@ -224,9 +224,10 @@ score:
 ```bash
 f="$(mktemp)" || exit 1
 trap 'rm -f "$f"' EXIT
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+[ -s "$f" ] || exit 1
 zensu link docs <feature-id> \
   --doc-type <type> --title "<title>" --audience <audience> \
   --content "$(cat "$f")"
@@ -236,8 +237,10 @@ zensu link docs <feature-id> \
 shell runs every backtick span of it and expands every `$NAME`, and a single quote ends
 at the first apostrophe. zensu-cli has no stdin or file form for `--content`, so the
 heredoc with the quoted delimiter writes the text to a temporary file unchanged, and
-`"$(cat "$f")"` hands it over as one argument the shell does not expand again. If the
-Markdown holds a line that reads `ZENSU_TEXT_END`, pick another delimiter.
+`"$(cat "$f")"` hands it over as one argument the shell does not expand again. Replace
+`<hex>` with eight random hex digits, new for each call and the same on both lines, so no
+line of the Markdown can end the heredoc early; `>|` writes even under `noclobber`, and
+`[ -s "$f" ] || exit 1` stops before an empty page reaches Zensu.
 
 **The page exists** (a re-run, or a refresh after a code change): `--content`
 never changes an existing page, so update the page, then link the doc without
@@ -246,9 +249,10 @@ never changes an existing page, so update the page, then link the doc without
 ```bash
 f="$(mktemp)" || exit 1
 trap 'rm -f "$f"' EXIT
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+[ -s "$f" ] || exit 1
 zensu wiki update <page-id> \
   --content "$(cat "$f")" --change-summary "<what changed>"
 zensu link docs <feature-id> \

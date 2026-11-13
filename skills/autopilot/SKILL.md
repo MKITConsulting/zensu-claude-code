@@ -130,15 +130,16 @@ approved spec plus the exact line `AUTOPILOT-RUN: <RUN_ID>` to every initial or 
 fresh chain id, and uses the bound `--tdd-begin` form; its guarded `--chain-done` returns to
 that exact stage. Never start an unbound TDD generation during an active run.
 
-Every other transition goes through the closed API (stable event ids; exact JSON payload,
-written to a file because a `reason` is free text an apostrophe or backtick would break):
+Every other transition goes through the closed API (stable event ids; exact JSON payload via a
+file, since a free-text `reason` breaks inline quoting):
 
 ```bash
 f="$(mktemp)" || exit 1
 trap 'rm -f "$f"' EXIT
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <exact-json>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+[ -s "$f" ] || exit 1
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
   --event-id <stable-id> --payload "$(cat "$f")"
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status

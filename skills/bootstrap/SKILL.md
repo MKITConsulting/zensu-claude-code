@@ -48,21 +48,38 @@ form for `--content`, `--description`, `--expected-result`, `--result`, `--child
 `--tiers`, so a heredoc whose delimiter is quoted writes the text unchanged and `"$(cat "$f")"`
 hands it over as one argument the shell does not expand again. Write each file in the same
 Bash call as the command that reads it, one file per free-text flag, because the `trap` removes
-the files when that call ends. Pick another delimiter if the text holds the line
-`ZENSU_TEXT_END`.
+the files when that call ends. Keep one `trap` per call and widen it for each further file: a
+second `trap` replaces the first and leaves its file behind. Replace `<hex>` in the delimiter
+with eight random hex digits, new for each call and the same on both lines, so no line of the
+text can end the heredoc early. `>|` writes the file even under `noclobber`, and
+`[ -s "$f" ] || exit 1` stops the call before an empty value reaches Zensu.
 
 ### Phase 1: Product & Vision Setup
 
 1. Ask the user for their product name, slug, type (public_product|internal_product|hybrid), and the vision/plan document content
 2. Run `zensu products create` with name, slug, and product type. Its optional `--description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph, and pass it as `"$(cat "$f")"`, written to `$f` in the same Bash call as in step 3
-3. Create the vision from the plan document:
+3. Create the vision from the plan document. A Markdown or plain-text file goes in by path,
+   never retyped and never under a `trap`, which would delete it. Write the path absolute or
+   as `$HOME/…`, never `~/…`, which double quotes leave unexpanded; the check stops a wrong
+   path, a directory and an empty file:
+
+   ```bash
+   p="<absolute-plan-path>"
+   [ -f "$p" ] && [ -s "$p" ] || exit 1
+   zensu products vision-create --product <product-id> --title "<vision-title>" \
+     --content "$(cat "$p")" --source claude-code
+   ```
+
+   A plan given as text, or one you read from a PDF or Word file, goes through a temporary
+   file:
 
    ```bash
    f="$(mktemp)" || exit 1
    trap 'rm -f "$f"' EXIT
-   cat > "$f" <<'ZENSU_TEXT_END'
+   cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <plan-document>
-   ZENSU_TEXT_END
+   ZENSU_TEXT_<hex>
+   [ -s "$f" ] || exit 1
    zensu products vision-create --product <product-id> --title "<vision-title>" \
      --content "$(cat "$f")" --source claude-code
    ```
@@ -104,7 +121,7 @@ Execute each step below, presenting results to the user after each.
   - Link to features via `--feature` (the feature **UUID**, not its slug)
   - Set `--interaction-type` (action|navigation|input|validation|output|wait)
   - Mark critical steps with `--critical`
-  - `--description` and `--expected-result` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. Pass them as `--description "$(cat "$f")" --expected-result "$(cat "$e")"`, with `e="$(mktemp)" || exit 1` and the trap widened to `trap 'rm -f "$f" "$e"' EXIT`
+  - `--description` and `--expected-result` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. Pass them as `--description "$(cat "$f")" --expected-result "$(cat "$e")"`, with `e="$(mktemp)" || exit 1`, the one trap widened to `trap 'rm -f "$f" "$e"' EXIT`, and both files written and checked as in Phase 1 step 3
 - Run `zensu journeys health --product <product-id> <journey-id>` on each journey to identify weak links
 - After completion: run `zensu products bootstrap-step <vision-id> 2`
 
