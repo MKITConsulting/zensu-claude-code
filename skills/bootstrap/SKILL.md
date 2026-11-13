@@ -52,7 +52,8 @@ the files when that call ends. Keep one `trap` per call and widen it for each fu
 second `trap` replaces the first and leaves its file behind. Replace `<hex>` in the delimiter
 with eight random hex digits, new for each call and the same on both lines, so no line of the
 text can end the heredoc early. `>|` writes the file even under `noclobber`, and
-`[ -s "$f" ] || exit 1` stops the call before an empty value reaches Zensu.
+`grep -qI '[^[:space:]]' -- "$f" || exit 1` stops the call before an empty, blank or binary
+value reaches Zensu.
 
 ### Phase 1: Product & Vision Setup
 
@@ -61,11 +62,11 @@ text can end the heredoc early. `>|` writes the file even under `noclobber`, and
 3. Create the vision from the plan document. A Markdown or plain-text file goes in by path,
    never retyped and never under a `trap`, which would delete it. Write the path absolute or
    as `$HOME/…`, never `~/…`, which double quotes leave unexpanded; the check stops a wrong
-   path, a directory and an empty file:
+   path, a directory, and an unreadable, empty, blank or binary file:
 
    ```bash
    p="<absolute-plan-path>"
-   [ -f "$p" ] && [ -s "$p" ] || exit 1
+   [ -f "$p" ] && grep -qI '[^[:space:]]' -- "$p" || exit 1
    zensu products vision-create --product <product-id> --title "<vision-title>" \
      --content "$(cat "$p")" --source claude-code
    ```
@@ -79,7 +80,7 @@ text can end the heredoc early. `>|` writes the file even under `noclobber`, and
    cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <plan-document>
    ZENSU_TEXT_<hex>
-   [ -s "$f" ] || exit 1
+   grep -qI '[^[:space:]]' -- "$f" || exit 1
    zensu products vision-create --product <product-id> --title "<vision-title>" \
      --content "$(cat "$f")" --source claude-code
    ```

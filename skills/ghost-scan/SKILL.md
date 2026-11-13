@@ -179,7 +179,7 @@ is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
 
 ### Phase 3: Create Ghost Scan
 
-1. Never paste the candidates' JSON into the command line: a single quote ends at an apostrophe, and double quotes run backtick spans and expand `$NAME`. zensu-cli reads `--candidates` from no file or stdin, so write the JSON through a quoted heredoc. Replace `<hex>` with eight random hex digits, new for each call and the same on both lines; `>|` writes even under `noclobber`, and `[ -s "$f" ]` stops an empty upload. Keep one `trap` per call and widen it for each further file:
+1. Never paste the candidates' JSON into the command line: a single quote ends at an apostrophe, and double quotes run backtick spans and expand `$NAME`. zensu-cli reads `--candidates` from no file or stdin, so write the JSON through a quoted heredoc. Replace `<hex>` with eight random hex digits, new for each call and the same on both lines; `>|` writes even under `noclobber`, and the `grep` line stops an empty, blank or binary upload. Keep one `trap` per call and widen it for each further file:
 
    ```bash
    f="$(mktemp)" || exit 1
@@ -187,7 +187,7 @@ is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
    cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <candidates-json>
    ZENSU_TEXT_<hex>
-   [ -s "$f" ] || exit 1
+   grep -qI '[^[:space:]]' -- "$f" || exit 1
    zensu ghost scan --product <product-id> --repo-url <url> --branch <branch> --candidates "$(cat "$f")"
    ```
 

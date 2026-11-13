@@ -117,7 +117,7 @@ a file of this project) first, then follow it:
    temporary file through a heredoc whose delimiter is quoted, then pass the file. Replace
    `<hex>` with eight random hex digits, new for each call and the same on both lines, so no
    line of the text can end the heredoc early; `>|` writes even under `noclobber`, and
-   `[ -s "$f" ] || exit 1` stops before an empty page reaches Zensu:
+   the `grep` line stops before an empty, blank or binary page reaches Zensu:
 
    ```bash
    f="$(mktemp)" || exit 1
@@ -125,7 +125,7 @@ a file of this project) first, then follow it:
    cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <markdown>
    ZENSU_TEXT_<hex>
-   [ -s "$f" ] || exit 1
+   grep -qI '[^[:space:]]' -- "$f" || exit 1
    ```
 
    - **The page exists:** `zensu wiki update <page-id> --content "$(cat "$f")" --change-summary "<what changed>"`.

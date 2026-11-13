@@ -131,7 +131,7 @@ fresh chain id, and uses the bound `--tdd-begin` form; its guarded `--chain-done
 that exact stage. Never start an unbound TDD generation during an active run.
 
 Every other transition goes through the closed API (stable event ids; exact JSON payload via a
-file, since a free-text `reason` breaks inline quoting):
+file, as `reason` is free text):
 
 ```bash
 f="$(mktemp)" || exit 1
@@ -139,7 +139,7 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <exact-json>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] || exit 1
+grep -qI '[^[:space:]]' -- "$f" || exit 1
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
   --event-id <stable-id> --payload "$(cat "$f")"
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status

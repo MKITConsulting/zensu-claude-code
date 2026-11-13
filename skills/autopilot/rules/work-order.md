@@ -68,7 +68,7 @@ trap 'rm -f "$MSG"' EXIT
 cat >| "$MSG" <<'ZENSU_TEXT_<hex>'
 <plan commit message>
 ZENSU_TEXT_<hex>
-[ -s "$MSG" ] || exit 1
+grep -qI '[^[:space:]]' -- "$MSG" || exit 1
 CLAUDE_PLUGIN_DATA="…" bash "$WO" --plan-approval --message-file "$MSG"
 ```
 

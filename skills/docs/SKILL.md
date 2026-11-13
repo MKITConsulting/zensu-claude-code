@@ -227,7 +227,7 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] || exit 1
+grep -qI '[^[:space:]]' -- "$f" || exit 1
 zensu link docs <feature-id> \
   --doc-type <type> --title "<title>" --audience <audience> \
   --content "$(cat "$f")"
@@ -240,7 +240,7 @@ heredoc with the quoted delimiter writes the text to a temporary file unchanged,
 `"$(cat "$f")"` hands it over as one argument the shell does not expand again. Replace
 `<hex>` with eight random hex digits, new for each call and the same on both lines, so no
 line of the Markdown can end the heredoc early; `>|` writes even under `noclobber`, and
-`[ -s "$f" ] || exit 1` stops before an empty page reaches Zensu.
+the `grep` line stops before an empty, blank or binary page reaches Zensu.
 
 **The page exists** (a re-run, or a refresh after a code change): `--content`
 never changes an existing page, so update the page, then link the doc without
@@ -252,7 +252,7 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] || exit 1
+grep -qI '[^[:space:]]' -- "$f" || exit 1
 zensu wiki update <page-id> \
   --content "$(cat "$f")" --change-summary "<what changed>"
 zensu link docs <feature-id> \

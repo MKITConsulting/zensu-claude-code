@@ -672,13 +672,13 @@ FT_MISSING=""
 for ft_skill in docs implement bootstrap ghost-scan security-review autopilot change; do
   ft_md="$CLAUDE_PLUGIN_ROOT/skills/$ft_skill/SKILL.md"
   grep -qF "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" "$ft_md" && grep -qxF 'ZENSU_TEXT_<hex>' <(sed 's/^ *//' "$ft_md") \
-    && grep -qxF '[ -s "$f" ] || exit 1' <(sed 's/^ *//' "$ft_md") \
+    && grep -qxF "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" <(sed 's/^ *//' "$ft_md") \
     && grep -qF '"$(cat "$f")"' "$ft_md" && grep -qF "trap 'rm -f \"\$f\"" "$ft_md" \
     || FT_MISSING="$FT_MISSING $ft_skill"
 done
 [ -z "$FT_MISSING" ] \
-  && check "FT2 every skill that uploads free text writes it with >| through a quoted heredoc with a random <hex> delimiter, stops on an empty file and passes \"\$(cat \"\$f\")\"" PASS \
-  || check "FT2 skills without the free-text file form (>|, a <hex> delimiter, the emptiness check, the trap and \"\$(cat \"\$f\")\"):$FT_MISSING" FAIL
+  && check "FT2 every skill that uploads free text writes it with >| through a quoted heredoc with a random <hex> delimiter, stops on an empty, blank or binary file and passes \"\$(cat \"\$f\")\"" PASS \
+  || check "FT2 skills without the free-text file form (>|, a <hex> delimiter, the content check, the trap and \"\$(cat \"\$f\")\"):$FT_MISSING" FAIL
 
 FT_FIX="$(mktemp -d -t skillftfix-XXXXXX)"
 mkdir -p "$FT_FIX/bad" "$FT_FIX/good"
@@ -775,29 +775,31 @@ rm -f "$FF_PROBE"
 ft6_scan() {
   grep -rnF --include='*.md' 'ZENSU_TEXT_END' "$1" | sed 's/^/FIXED /'
   grep -rnE --include='*.md' 'cat[[:space:]]+>[[:space:]]*"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*<<' "$1" | sed 's/^/PLAIN /'
+  grep -rnE --include='*.md' '\[ -s "\$[A-Za-z_][A-Za-z0-9_]*" \] \|\| exit 1' "$1" | sed 's/^/WEAK /'
 }
 FT6_OUT="$(ft6_scan "$CLAUDE_PLUGIN_ROOT/skills")"
 FT6_FIX="$(mktemp -d -t skillft6-XXXXXX)"
 mkdir -p "$FT6_FIX/old" "$FT6_FIX/new"
-printf '%s\n' 'f="$(mktemp)" || exit 1' "cat > \"\$f\" <<'ZENSU_TEXT_END'" '<text>' 'ZENSU_TEXT_END' > "$FT6_FIX/old/SKILL.md"
-printf '%s\n' 'f="$(mktemp)" || exit 1' "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" '<text>' 'ZENSU_TEXT_<hex>' > "$FT6_FIX/new/SKILL.md"
+printf '%s\n' 'f="$(mktemp)" || exit 1' "cat > \"\$f\" <<'ZENSU_TEXT_END'" '<text>' 'ZENSU_TEXT_END' '[ -s "$f" ] || exit 1' > "$FT6_FIX/old/SKILL.md"
+printf '%s\n' 'f="$(mktemp)" || exit 1' "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" '<text>' 'ZENSU_TEXT_<hex>' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" > "$FT6_FIX/new/SKILL.md"
 FT6_OLD="$(ft6_scan "$FT6_FIX/old")"
 FT6_NEW="$(ft6_scan "$FT6_FIX/new")"
 rm -rf "$FT6_FIX"
 if [ -z "$FT6_OUT" ] && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^FIXED ')" = 2 ] \
-  && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^PLAIN ')" = 1 ] && [ -z "$FT6_NEW" ]; then
-  check "FT6 no skill file spells the fixed delimiter ZENSU_TEXT_END or writes a heredoc into a temporary file with a plain >, and a fixture with both is flagged" PASS
+  && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^PLAIN ')" = 1 ] \
+  && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^WEAK ')" = 1 ] && [ -z "$FT6_NEW" ]; then
+  check "FT6 no skill file spells the fixed delimiter ZENSU_TEXT_END, writes a heredoc into a temporary file with a plain > or checks it with the weaker [ -s ], and a fixture with all three is flagged" PASS
 else
   printf '%s\n' "$FT6_OUT" | sed 's/^/      /'
-  check "FT6 a skill file keeps the fixed delimiter or a plain > heredoc write (fixture old='$FT6_OLD' new='$FT6_NEW')" FAIL
+  check "FT6 a skill file keeps the fixed delimiter, a plain > heredoc write or the weaker [ -s ] check (fixture old='$FT6_OLD' new='$FT6_NEW')" FAIL
 fi
 
 FT7_MD="$CLAUDE_PLUGIN_ROOT/skills/bootstrap/SKILL.md"
-if grep -qxF '[ -f "$p" ] && [ -s "$p" ] || exit 1' <(sed 's/^ *//' "$FT7_MD") \
+if grep -qxF "[ -f \"\$p\" ] && grep -qI '[^[:space:]]' -- \"\$p\" || exit 1" <(sed 's/^ *//' "$FT7_MD") \
   && grep -qF -- '--content "$(cat "$p")"' "$FT7_MD" && ! grep -qF '"~/' "$FT7_MD"; then
-  check "FT7 bootstrap passes a plan file by path only after [ -f \"\$p\" ] && [ -s \"\$p\" ], and spells no ~/ path inside double quotes" PASS
+  check "FT7 bootstrap passes a plan file by path only after its regular-file and content check, and spells no ~/ path inside double quotes" PASS
 else
-  check "FT7 bootstrap's by-path plan form lacks its regular-file and emptiness check, or spells a ~/ path inside double quotes" FAIL
+  check "FT7 bootstrap's by-path plan form lacks its regular-file and content check, or spells a ~/ path inside double quotes" FAIL
 fi
 
 echo "----"

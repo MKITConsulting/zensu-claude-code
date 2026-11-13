@@ -103,7 +103,7 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] || exit 1
+grep -qI '[^[:space:]]' -- "$f" || exit 1
 zensu link docs <feature-id> --doc-type <type> --content "$(cat "$f")"
 ```
 
@@ -130,33 +130,41 @@ line after it as a command. A plan document, or a page that documents this recip
 that line. A plan document that is already a Markdown or plain-text file goes in by path, never
 retyped into a heredoc and never under the `trap`, which would delete it: `p` holds an absolute
 or `$HOME/…` path, never `~/…`, which double quotes leave unexpanded, and
-`[ -f "$p" ] && [ -s "$p" ] || exit 1` runs before `--content "$(cat "$p")"`. Both tests are
-needed: `cat` of a wrong path, a `~/…` path or a directory hands on an empty value, and `-s`
-alone passes a directory. A PDF or Word document is read and goes through the heredoc as text.
+`[ -f "$p" ] && grep -qI '[^[:space:]]' -- "$p" || exit 1` runs before
+`--content "$(cat "$p")"`. A PDF or Word document is read and goes through the heredoc as text.
 `>|` writes even under `noclobber`, which a shell profile may set: `mktemp` has already created
 the file, so a plain `>` fails with exit 1, the file stays empty and the command still runs with
-an empty value. `[ -s "$f" ] || exit 1` stops the call before that. Measured under macOS
-`/bin/bash` 3.2.57 and `/bin/zsh`: with `noclobber` set the plain `>` failed and left 0 bytes, `>|`
-wrote the file, a text line spelling another delimiter stayed text, and the check stopped an
-empty file; `-s` passed a directory and `-f` did not, and a `~/…` path in double quotes stayed
-literal, so `cat` read nothing. Last, one recipe runs per Bash call,
+an empty value. `grep -qI '[^[:space:]]' -- "$f" || exit 1` stops the call before that. The
+content check is `grep` because each weaker test lets something through: `cat` of a wrong path,
+a `~/…` path, a directory or an unreadable file hands on an empty value; `-s` passes a
+directory, an unreadable file and a file of blank lines; and `grep` without `-I` passes a binary
+file. `[ -f "$p" ]` stays in front because `grep` would block on a FIFO. Measured under macOS
+`/bin/bash` 3.2.57 and `/bin/zsh` with BSD grep 2.6.0, in the C and the `en_US.UTF-8` locale:
+with `noclobber` set the plain `>` failed and left 0 bytes, `>|` wrote the file, and a text line
+spelling another delimiter stayed text; `grep -qI` returned 1 for an empty, a blank and a binary
+file, 2 for an unreadable file and a directory, and 0 for text, a line of umlauts and a single
+character between blanks; `-s` passed a directory and `-f` did not, `grep` on a FIFO waited until
+a 3-second alarm ended it while `-f` stopped the FIFO, and a `~/…` path in double quotes stayed
+literal, so `cat` read nothing. GNU grep was not measured; its manual gives `-q`,
+`-I` and `[:space:]` the same meaning. Last, one recipe runs per Bash call,
 with one `mktemp` per variable and one `trap` that names every file: a second `trap` replaces the
 first, and a second `mktemp` into the same variable leaves the first file behind.
 
 `FT1` scans every Markdown file under `skills/`, references and rules included, and fails on a
 `--flag` whose value is a placeholder naming Markdown, JSON, a document, a description, findings
 or conditions, whether unquoted, double-quoted, single-quoted or joined with `=`. `FT2` requires the
-whole recipe, `>|`, the `<hex>` delimiter, the emptiness check, the `trap` and `"$(cat "$f")"`, in
+whole recipe, `>|`, the `<hex>` delimiter, the content check, the `trap` and `"$(cat "$f")"`, in
 the seven skills that send free text: docs, implement, bootstrap, ghost-scan, security-review,
 autopilot and change. `FT3` and `FT4` pin the five flagged spellings and five near misses on
 fixtures. `FT5` pins the text-format sentence at each of the thirteen free-text field sites of
 bootstrap, ghost-scan, security-review and implement, and the file form at each flag site among
 them: a Markdown field says Zensu renders headings, lists and code, a plain-text field says Zensu
 does not render Markdown there. `FT6` fails on any Markdown file under `skills/` that spells the
-retired fixed delimiter `ZENSU_TEXT_END` or writes a heredoc into a temporary file with a plain
-`>`, and bites both on a fixture. `FT7` requires bootstrap's by-path plan form to run
-`[ -f "$p" ] && [ -s "$p" ] || exit 1` before `--content "$(cat "$p")"` and to spell no `~/`
-path inside double quotes. The formats come from the Zensu web app, which renders
+retired fixed delimiter `ZENSU_TEXT_END`, writes a heredoc into a temporary file with a plain
+`>` or checks it with the weaker `[ -s "$f" ] || exit 1`, and bites all three on a fixture.
+`FT7` requires bootstrap's by-path plan form to run
+`[ -f "$p" ] && grep -qI '[^[:space:]]' -- "$p" || exit 1` before `--content "$(cat "$p")"` and
+to spell no `~/` path inside double quotes. The formats come from the Zensu web app, which renders
 product, component, feature, sub-feature and journey descriptions and security findings and
 conditions as Markdown, and renders no Markdown in the tier description, the journey step fields,
 the revision scope fields or a ghost candidate's reject reason. A ghost candidate's description
