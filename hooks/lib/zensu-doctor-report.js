@@ -1948,6 +1948,7 @@ function deliveryRouteRow() {
 }
 
 var ZEN_YIELD = 'the user\'s own CLAUDE.md, output style or a style mode they chose outranks it';
+var ZEN_ROOT_SCOPE = 'the hook reads both zen-mode keys under each session\'s recorded project root, so the zen-mode: row says what this session resolves';
 
 function zenModeInstalled() {
   try {
@@ -1960,12 +1961,12 @@ function zenModeInstalled() {
 function zenModeConfigRow(cfgReads) {
   if (!zenModeInstalled()) return;
   if (hookFlagDisabled(cfgReads, 'zenMode')) {
-    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the zen-mode hook is switched off, so no prompt receives the low-noise contract');
+    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the config files this block reads switch the zen-mode hook off; ' + ZEN_ROOT_SCOPE);
   } else if (hookFlagDisabled(cfgReads, 'zenModeDefault')) {
-    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode');
+    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode; ' + ZEN_ROOT_SCOPE);
   } else {
     line(OK, 'zen-mode default: on (hooks.zenModeDefault) — every session gets low-noise answers, and ' + ZEN_YIELD
-      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in');
+      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in; ' + ZEN_ROOT_SCOPE);
   }
 }
 
@@ -1975,7 +1976,7 @@ function zenModeRow() {
   if (v === 'unknown') {
     line(WARN, 'zen-mode: not checked — no bound session key or recorded project root was available, so this session\'s zen-mode marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
   } else if (v === 'unjudged') {
-    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session as /zensu:zen-mode renders it, walks the hook\'s state ladder under the recorded project root; its hooks.zenMode check reads that root\'s config, while the hook reads the project directory its host sets');
+    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session as /zensu:zen-mode renders it, walks the hook\'s state ladder and its hooks.zenMode check under the recorded project root, as the hook does');
   } else if (v === 'on (session marker)' || v === 'on (hooks.zenModeDefault)') {
     line(OK, 'zen-mode: ' + v + ' — every prompt of this session gets the low-noise contract, and ' + ZEN_YIELD
       + '; "zen off" leaves it for this session');

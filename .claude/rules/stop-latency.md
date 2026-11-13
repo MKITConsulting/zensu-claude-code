@@ -204,7 +204,9 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
 - **Coupled sites.** The suite's counting shim classifies a spawn by two literals: the inline
   `core.readContext({ recordsDir, sessionId: key })` in `zensu_resolve_project_dir` and the argv
   `session-control-core-v1.js session-key `. Rewording either turns the count checks of the
-  latency suite red. Three in-code rationales assume every `zensu_resolve_project_dir` call
+  latency suite red, and rewording the first also those of `BR4b` in
+  `tests/structure/test-background-review.sh` and `Z107i` in `tests/structure/test-zen-mode.sh`,
+  whose shims classify by the same literal. Three in-code rationales assume every `zensu_resolve_project_dir` call
   spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
   `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
   the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every
