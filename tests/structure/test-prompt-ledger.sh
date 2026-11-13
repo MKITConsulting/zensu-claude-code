@@ -113,6 +113,7 @@ for BADKEY in '' 'ledger-session-a' "scv1_$(printf '%064d' 0)x" "../$KEY_A"; do
   ledger "$DATA" "$PLUGIN_DIR" zensu_prompt_ledger_has "$BADKEY" router && L4_BAD="$L4_BAD [has key '$BADKEY']"
 done
 NO_SESSION_LIB="$( export CLAUDE_PLUGIN_DATA="$DATA" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+  unset -f zensu_session_key_canonical
   source "$LIB"; zensu_prompt_ledger_has "$KEY_A" tdd-vanilla && echo has || echo refused )"
 [ "$NO_SESSION_LIB" = "refused" ] || L4_BAD="$L4_BAD [read without the session key validator]"
 [ -z "$L4_BAD" ] \

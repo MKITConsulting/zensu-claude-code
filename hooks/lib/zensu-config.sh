@@ -101,11 +101,15 @@ _zensu_config_key_unset() {
 }
 
 zensu_hook_enabled() {
-  local key="$1"
+  local key="$1" root val
   command -v node >/dev/null 2>&1 || return 0   # node missing → fall back to enabled
-  _zensu_config_key_unset "$key" && return 0
-  local val
-  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===false?"0":"1")' "$key" 2>/dev/null)
+  if [ "$#" -gt 1 ]; then
+    root="$2"
+  else
+    root="${CLAUDE_PROJECT_DIR:-}"
+  fi
+  CLAUDE_PROJECT_DIR="$root" _zensu_config_key_unset "$key" && return 0
+  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===false?"0":"1")' "$key" 2>/dev/null)
   [ -z "$val" ] && return 0                      # any other failure → enabled
   [ "$val" = "1" ]
 }

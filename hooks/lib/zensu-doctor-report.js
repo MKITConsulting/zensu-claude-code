@@ -595,6 +595,7 @@ function pluginBlock() {
     line(OK, 'hooks wiring: all ' + Object.keys(wired).length + ' hooks referenced in hooks.json exist on disk');
   }
   shellToolRow(hj.data);
+  cliGateRow();
 }
 
 var SHELL_TOOL_STATE_TEXT = {
@@ -635,6 +636,25 @@ function shellToolRow(manifest) {
   } else {
     line(OK, lead + '; ' + SHELL_TOOL_STATE_TEXT[state]);
   }
+}
+
+var CLI_GATE_EXPORTS = ['backendReading', 'isDynamic', 'unquoted'];
+
+function cliGateRow() {
+  var mod = null;
+  var loaded = false;
+  try { mod = require('./zensu-cli-backend-v1.js'); loaded = true; } catch (_error) { loaded = false; }
+  if (!loaded) {
+    line(WARN, 'CLI write-gate: hooks/lib/zensu-cli-backend-v1.js could not be loaded, so the gate denies every command that holds a zensu call, reads and --help included, while hooks.mcpGate is on; reinstall the plugin');
+    return;
+  }
+  var absent = CLI_GATE_EXPORTS.filter(function (name) { return !mod || typeof mod[name] !== 'function'; });
+  var lead = 'CLI write-gate: hooks/lib/zensu-cli-backend-v1.js';
+  if (absent.length) {
+    line(WARN, lead + ' loads but does not export ' + absent.length + ' of the ' + CLI_GATE_EXPORTS.length + ' functions the gate calls to read a zensu call (' + absent.join(', ') + '), so the gate can deny a command that holds a zensu call as unreadable; reinstall the plugin');
+    return;
+  }
+  line(OK, lead + ' loads and exports the ' + CLI_GATE_EXPORTS.length + ' functions the gate calls to read a zensu call (' + CLI_GATE_EXPORTS.join(', ') + ')');
 }
 
 // Two hooks inject a rule read at RUN TIME from a one-line marker block under docs/,
@@ -1928,6 +1948,7 @@ function deliveryRouteRow() {
 }
 
 var ZEN_YIELD = 'the user\'s own CLAUDE.md, output style or a style mode they chose outranks it';
+var ZEN_ROOT_SCOPE = 'the hook reads both zen-mode keys under each session\'s recorded project root, so the zen-mode: row says what this session resolves';
 
 function zenModeInstalled() {
   try {
@@ -1940,12 +1961,12 @@ function zenModeInstalled() {
 function zenModeConfigRow(cfgReads) {
   if (!zenModeInstalled()) return;
   if (hookFlagDisabled(cfgReads, 'zenMode')) {
-    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the zen-mode hook is switched off, so no prompt receives the low-noise contract');
+    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the config files this block reads switch the zen-mode hook off; ' + ZEN_ROOT_SCOPE);
   } else if (hookFlagDisabled(cfgReads, 'zenModeDefault')) {
-    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode');
+    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode; ' + ZEN_ROOT_SCOPE);
   } else {
     line(OK, 'zen-mode default: on (hooks.zenModeDefault) — every session gets low-noise answers, and ' + ZEN_YIELD
-      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in');
+      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in; ' + ZEN_ROOT_SCOPE);
   }
 }
 
@@ -1955,7 +1976,7 @@ function zenModeRow() {
   if (v === 'unknown') {
     line(WARN, 'zen-mode: not checked — no bound session key or recorded project root was available, so this session\'s zen-mode marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
   } else if (v === 'unjudged') {
-    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session, shows what the hook resolves');
+    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session as /zensu:zen-mode renders it, walks the hook\'s state ladder and its hooks.zenMode check under the recorded project root, as the hook does');
   } else if (v === 'on (session marker)' || v === 'on (hooks.zenModeDefault)') {
     line(OK, 'zen-mode: ' + v + ' — every prompt of this session gets the low-noise contract, and ' + ZEN_YIELD
       + '; "zen off" leaves it for this session');

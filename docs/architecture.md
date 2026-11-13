@@ -14,7 +14,7 @@ main-thread skills       /zensu:build         Zensu Dashboard
 /zensu:implement         (main thread)
 ```
 
-**Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
+**Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. One later change to a tracked product, such as a new feature or a roadmap entry, runs through `/zensu:change`. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
 **Layer 2 — Implementation (HOW is it built securely?):** `/zensu:build` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only, and on any review the Stop hook resumes) → consume-mode code-reviewer → auto-fix loop → self-review.
 
@@ -111,7 +111,7 @@ That gate replaced a witness that logged every Bash call and a cross-check that 
 ## Best Solution First
 
 A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
-`hooks/user-prompt-zen-mode.sh` injects a ~3.7 to 5.0 KB always-on contract on the same
+`hooks/user-prompt-zen-mode.sh` injects a ~3.7 to 5.1 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
 block. It is named here so the next reader does not conclude it was overlooked.
 
@@ -188,19 +188,19 @@ ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
 typed request, a background-task notification, a subagent hand-back, a shell input behind a
 system reminder, and a CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
 each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Five hooks emit text on an ordinary turn:
-`user-prompt-tdd-reminder.sh` (about 5.2 K characters strict and 5.7 K vanilla plus the paths of
+`user-prompt-tdd-reminder.sh` (about 6.0 K characters strict and 6.3 K vanilla plus the paths of
 the helper command it renders, on the first typed request or slash command with arguments of a
-generation while no chain is armed, about 2.7 K on later ones, a decided line of about 1.4 to 1.5 K on
+generation while no chain is armed, about 3.3 K on later ones, a decided line of about 1.5 to 1.6 K on
 every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,332 characters, then 1,303 later in the generation, only when such
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
 `user-prompt-context-auto-load.sh` (on a typed task prompt that names no feature key, the
 candidates of one context search behind 1,773 characters of instructions, about 9.7 K with five
 candidates whose titles and excerpts fill their 200- and 1,200-character limits, or a
-387-character notice when the search is unavailable; on a prompt that names exactly one key,
+320-character notice when the search is unavailable; on a prompt that names exactly one key,
 that feature's context package, up to 24,000 bytes of JSON behind about 1.8 K; it keeps no
 ledger, so every such prompt pays again),
-`user-prompt-zen-mode.sh` (the 3.7 K or 5.1 K above once per generation and about 1.9 K after
-that with no chain armed or 2.2 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (474
+`user-prompt-zen-mode.sh` (the 3.7 K or 5.1 K above once per generation and about 2.0 K after
+that with no chain armed or 2.3 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (474
 characters, on every prompt kind for the same reason). Three emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold,
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
@@ -213,13 +213,13 @@ pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **12.6 K characters on the first prompt of a generation and 6.7 K on every later
+costs about **13.2 K characters on the first prompt of a generation and 7.4 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
-shell input about 4.2 K, then 2.4 K (4.6 K, then 2.7 K for a CI-monitor event). The typed figures
-carry the 387-character context notice that the suite's failing CLI stub produces; a search that
-returns five full candidates raises them to about 21.9 K and 16.0 K. The generation also receives this
-hook's 1,938-character block once at `SessionStart`, so its first turn costs about 14.6 K in all,
-2.1 K more than one turn did before the ledger, 0.4 K of it for the context notice, which that turn
+shell input about 4.2 K, then 2.5 K (4.6 K, then 2.8 K for a CI-monitor event). The typed figures
+carry the 320-character context notice that the suite's failing CLI stub produces; a search that
+returns five full candidates raises them to about 22.5 K and 16.8 K. The generation also receives this
+hook's 1,938-character block once at `SessionStart`, so its first turn costs about 15.1 K in all,
+2.6 K more than one turn did before the ledger, 0.3 K of it for the context notice, which that turn
 did not carry; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather
@@ -363,12 +363,22 @@ on it. What the suite enforces is the 9,000-character ceiling, never the host's 
 For a brownfield repo whose plan/vision doc also describes not-yet-built features:
 
 ```
-1. /zensu:ghost-scan         → Import what is built (each feature seated at a v1 baseline)
-2. (agent) create_feature    → Plan doc's not-yet-built items → planned features
+1. /zensu:ghost-scan         → Import what is built (each feature seated at a v1 baseline); its Phase 6 creates the plan doc's not-yet-built items as planned features
+2. /zensu:change             → A plan item added later: one planned feature per request, duplicate-checked first
 3. /zensu:implement KEY-N    → Build the planned items; v1 revision at implement-time
 ```
 
-No separate skill — the agent runs ghost-scan, then creates the remainder as planned features.
+No separate skill for the hybrid itself — ghost-scan creates the remainder inside its own window, and `/zensu:change` adds what comes later.
+
+### One Change to a Tracked Product
+
+```
+1. /zensu:change             → One requested change: a new feature, a roadmap entry, a tier, a link, a deprecation or a merge
+```
+
+`/zensu:change` checks for a duplicate before every create, asks before a command that removes
+or replaces data, and gives a new feature its priority, a Markdown description and a security
+classification. The CLI write-gate names it in the deny of every command it routes.
 
 ### One Change, No Tracked Feature
 
@@ -393,6 +403,7 @@ The Zensu workflow and its review chain work **without a Zensu account**. No `ze
 tracking happens only in the skills that call the CLI, once it is installed and authenticated:
 - `/zensu:implement` runs `/zensu:build` and then, in its own later steps, links tests and sources (`zensu link test`, `zensu link source`), publishes and links docs, creates a revision (`zensu features revision`) and validates the release gate (`zensu security validate`)
 - `/zensu:pilot` updates feature status (`zensu features status`) as it moves a tracked feature along
+- `/zensu:change` makes the one change a user asks for, such as `zensu features create`, `zensu roadmap add-feature` or `zensu features deprecate`
 - `/zensu:security-review` records the review and its findings (`zensu security review`)
 - `/zensu:docs` publishes code-grounded documentation and updates the docs score (`zensu link docs`)
 

@@ -14,7 +14,11 @@ const envelope = require(path.join(EVAL, 'lib', 'envelope.js'));
 const probe = require(path.join(EVAL, 'lib', 'decision-probe.js'));
 
 const ROUTE_QUESTION = 'Run the Zensu workflow for this change? Yes — Zensu workflow | No — implement directly';
-const COMPLETE_ROUTE_QUESTION = `${ROUTE_QUESTION} | A Yes is remembered for the rest of this session, later approved plans included, through one Bash call you may be asked to allow. A No decides this request only and is not remembered. /zensu:delivery-route changes the session route.`;
+const THREE_OPTION_QUESTION = 'Run the Zensu workflow for this change? Yes — Zensu workflow | Autopilot — /zensu:autopilot | No — implement directly';
+const DISCLOSURES = 'A Yes is remembered for the rest of this session, later approved plans included, through one Bash call you may be asked to allow. A No decides this request only and is not remembered. /zensu:delivery-route changes the session route.';
+const AUTOPILOT_DISCLOSURE = 'Autopilot plans with its own approval, then pushes a branch and opens a pull request unattended, and needs an authenticated gh or glab CLI.';
+const COMPLETE_ROUTE_QUESTION = `${THREE_OPTION_QUESTION} | ${DISCLOSURES} ${AUTOPILOT_DISCLOSURE}`;
+const COMPLETE_TWO_OPTION_QUESTION = `${ROUTE_QUESTION} | ${DISCLOSURES}`;
 const TRIAGE = 'Is the code already built? Is there a plan or spec document? Does the plan hold unbuilt items?';
 const ATTESTED = { init_git: true, tracked_clean: true };
 const LIVE = { root: '/plugin', version: '0.25.0', silent_hooks: 6, leaks: 0, control_chars: 5690 };
@@ -869,6 +873,7 @@ test('allowed-read requires an allowed Bash read that ran and returned the fixtu
 test('first-decisive grades the first decisive action against the scenario allowlist', () => {
   const ask = { allowed_first: 'skill:zensu:build,ask', expected_hook: 'reminder' };
   assert.equal(passes('first-decisive', skillRun('Executing.'), ask), true);
+  assert.equal(grade('first-decisive', output({ probe: [{ id: 'a1', tool: 'Skill', decision: 'END', skill: 'zensu:autopilot' }] }), ask).reason, 'first decisive action skill:zensu:autopilot; allowed skill:zensu:build | ask');
   assert.equal(passes('first-decisive', output({ probe: [{ id: 'e1', tool: 'Edit', decision: 'END' }] }), ask), false);
   assert.equal(passes('first-decisive', output({ blocks: [{ text: ROUTE_QUESTION }] }), ask), true);
   assert.equal(passes('first-decisive', output({ blocks: [{ text: 'Done thinking.' }] }), ask), false);
@@ -954,6 +959,7 @@ test('after-ask lets an unanswered route question end the run or start the workf
   const asked = { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: COMPLETE_ROUTE_QUESTION };
   assert.equal(passes('after-ask', output({ probe: [asked] })), true);
   assert.equal(passes('after-ask', output({ probe: [asked, { id: 's', tool: 'Skill', decision: 'END', skill: 'zensu:build' }] })), true);
+  assert.equal(grade('after-ask', output({ probe: [asked, { id: 's', tool: 'Skill', decision: 'END', skill: 'zensu:autopilot' }] })).reason, 'after the unanswered route question the run went on to skill:zensu:autopilot');
   assert.equal(passes('after-ask', output({ probe: [asked, { id: 'e', tool: 'Edit', decision: 'END' }] })), false);
   assert.equal(passes('after-ask', output({ probe: [asked, { id: 'b', tool: 'Bash', decision: 'END', command: 'bash zensu-delivery-route.sh --build' }] })), false);
   assert.equal(passes('after-ask', output({ probe: [{ id: 'e', tool: 'Edit', decision: 'END' }] })), true);
@@ -972,28 +978,39 @@ test('no-record-command flags a route record and --tdd-begin, and nothing else',
 
 test('route-question-complete scores a route question by its labels and disclosures', () => {
   const route = require(path.join(EVAL, 'assertions', 'route-question-complete.js'));
-  assert.deepEqual(route.missing(COMPLETE_ROUTE_QUESTION), []);
-  assert.equal(route.missing(ROUTE_QUESTION).length, 5);
+  const offered = { autopilot_option: 'offered' };
+  const absent = { autopilot_option: 'absent' };
+  assert.deepEqual(route.missing(COMPLETE_ROUTE_QUESTION, true), []);
+  assert.deepEqual(route.missing(COMPLETE_ROUTE_QUESTION.replace('Autopilot — /zensu:autopilot | ', ''), true), ['the Autopilot label']);
+  assert.deepEqual(route.missing(COMPLETE_ROUTE_QUESTION.replace(` ${AUTOPILOT_DISCLOSURE}`, ''), true), ['the branch push and pull request it makes', 'the gh or glab CLI it needs']);
+  assert.deepEqual(['Autopilot — /zensu:autopilot', '**Autopilot** — zensu:autopilot', 'Autopilot (/zensu:autopilot)', 'Autopilot — `/zensu:autopilot`', 'Autopilot'].map((t) => envelope.AUTOPILOT_LABEL.test(t)), [true, true, true, true, false]);
+  assert.equal(route.missing(ROUTE_QUESTION, true).length, 8);
+  assert.deepEqual(route.missing(COMPLETE_TWO_OPTION_QUESTION, false), []);
+  assert.deepEqual(route.missing(COMPLETE_ROUTE_QUESTION, false), ['an Autopilot option the injected shape does not offer']);
   const viaTool = (question) => output({ probe: [{ id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question }] });
-  assert.deepEqual([grade('route-question-complete', viaTool(COMPLETE_ROUTE_QUESTION)).pass, grade('route-question-complete', viaTool(COMPLETE_ROUTE_QUESTION)).score], [true, 1]);
-  const partial = grade('route-question-complete', viaTool(ROUTE_QUESTION));
-  assert.deepEqual([partial.pass, partial.score], [false, 2 / 7]);
-  assert.equal(passes('route-question-complete', output({ blocks: [{ text: COMPLETE_ROUTE_QUESTION }] })), true);
-  assert.equal(passes('route-question-complete', output({ blocks: [{ text: ROUTE_QUESTION }] })), false);
-  assert.equal(passes('route-question-complete', skillRun('Executing.')), true);
-  const reworded = "Run the Zensu workflow? **Yes** — Zensu workflow | **No** — implement it directly | A Yes is saved for the rest of the session, later approved plans included, through one Bash call. A No only affects this request and won't be remembered. /zensu:delivery-route changes it.";
-  assert.deepEqual(route.missing(reworded), []);
+  assert.deepEqual([grade('route-question-complete', viaTool(COMPLETE_ROUTE_QUESTION), offered).pass, grade('route-question-complete', viaTool(COMPLETE_ROUTE_QUESTION), offered).score], [true, 1]);
+  const partial = grade('route-question-complete', viaTool(ROUTE_QUESTION), offered);
+  assert.deepEqual([partial.pass, partial.score], [false, 2 / 10]);
+  const extra = grade('route-question-complete', viaTool(COMPLETE_ROUTE_QUESTION), absent);
+  assert.deepEqual([extra.pass, extra.score, extra.reason], [false, 7 / 8, 'the route question offers Autopilot, which the injected shape does not']);
+  assert.deepEqual([grade('route-question-complete', viaTool(COMPLETE_TWO_OPTION_QUESTION), absent).pass, grade('route-question-complete', viaTool(ROUTE_QUESTION), absent).score], [true, 3 / 8]);
+  assert.equal(grade('route-question-complete', viaTool(COMPLETE_ROUTE_QUESTION), {}).reason, 'the scenario does not say whether the injected shape offers Autopilot');
+  assert.equal(passes('route-question-complete', output({ blocks: [{ text: COMPLETE_ROUTE_QUESTION }] }), offered), true);
+  assert.equal(passes('route-question-complete', output({ blocks: [{ text: ROUTE_QUESTION }] }), offered), false);
+  assert.equal(passes('route-question-complete', skillRun('Executing.'), offered), true);
+  const reworded = "Run the Zensu workflow? **Yes** — Zensu workflow | **Autopilot** — /zensu:autopilot, which plans first, then pushes a branch and opens a PR on its own and needs gh or glab | **No** — implement it directly | A Yes is saved for the rest of the session, later approved plans included, through one Bash call. A No only affects this request and won't be remembered. /zensu:delivery-route changes it.";
+  assert.deepEqual(route.missing(reworded, true), []);
   const requestOnly = route.NEEDLES.find(([name]) => name === 'a No decides this request only')[1];
   assert.deepEqual(["A No won't be remembered.", 'A No is not saved.', 'A No is final.'].map((t) => requestOnly.test(t)), [true, true, false]);
   const loose = viaTool('Use the Zensu workflow (/zensu:build), or implement directly? | Zensu workflow | Implement directly');
-  assert.equal(passes('route-question-complete', loose), false);
+  assert.equal(passes('route-question-complete', loose, absent), false);
   const afterEnd = output({
     blocks: [{ use: 'Skill', id: 's1' }, { result: 'Skill', id: 's1', error: true, summary: `PreToolUse:Skill hook error: ${probe.END_REASON}` }, { text: 'Next I would run /zensu:build here, or should I implement it directly instead?' }],
     probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }],
   });
-  assert.equal(grade('route-question-complete', afterEnd).reason, 'no route question was asked; nothing to check');
+  assert.equal(grade('route-question-complete', afterEnd, offered).reason, 'no route question was asked; nothing to check');
   const toolAfterEnd = output({ probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }, { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }] });
-  assert.equal(passes('route-question-complete', toolAfterEnd), true);
+  assert.equal(passes('route-question-complete', toolAfterEnd, offered), true);
 });
 
 test('status-line-exact requires the expected status as the opening line, setup narration aside', () => {
@@ -1198,6 +1215,7 @@ test('each scenario names a known source and the vars its graders read', () => {
       assert.ok(['', 'reminder', 'router'].includes(vars.expected_hook), `${f} expected_hook`);
     }
     if (text.includes('file://assertions/status-line-exact.js')) assert.ok(vars.expected_status, `${f} expected_status`);
+    if (text.includes('file://assertions/route-question-complete.js')) assert.ok(['offered', 'absent'].includes(vars.autopilot_option), `${f} autopilot_option`);
     if (text.includes('file://assertions/allowed-read.js')) assert.ok(vars.read_marker && fs.readFileSync(path.join(EVAL, 'test-projects', 'cart-app', 'src', 'cart.js'), 'utf8').includes(vars.read_marker), `${f} read_marker`);
     if (vars.route_source !== 'none' && vars.route_source !== 'nonce') assert.ok(vars.anchor_clause, `${f} anchor_clause`);
     if (vars.router_fires !== undefined) assert.equal(vars.router_fires, 'yes', `${f} router_fires`);

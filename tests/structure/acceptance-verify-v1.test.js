@@ -374,6 +374,51 @@ test('without a receipt the gate separates an idle chain from an unanchored one'
   assert.match(result.lines[0], /STEM UNCHECKED/);
 });
 
+const UNJUDGED_CAUSE = 'the acceptance transport could not be prepared';
+
+function withCause(line, cause) {
+  const at = line.lastIndexOf(' | gate: ');
+  return `${line.slice(0, at)} (${cause})${line.slice(at)}`;
+}
+
+test('an unjudged terminus answers a bound chain and a not-applicable chain from the verdict lines, with the cause', () => {
+  const anchored = project();
+  for (const validate of ['on', 'off', '']) {
+    const answer = av.unjudged(base(anchored, { bound: true, validate, cause: UNJUDGED_CAUSE }));
+    assert.equal(answer.decided, true);
+    assert.equal(answer.state, 'not-checked');
+    assert.deepEqual(answer.lines, [`${gate(anchored, { bound: true, validate }).lines[0]} (${UNJUDGED_CAUSE})`]);
+  }
+  for (const idle of [project({ receipt: false }), project({ receipt: false, git: false })]) {
+    const shipped = gate(idle);
+    assert.equal(shipped.state, 'not-applicable');
+    const answer = av.unjudged(base(idle, { chainInputs: true, cause: UNJUDGED_CAUSE }));
+    assert.equal(answer.decided, true);
+    assert.equal(answer.state, 'not-applicable');
+    assert.deepEqual(answer.lines, [withCause(shipped.lines[0], UNJUDGED_CAUSE)]);
+    const odd = av.unjudged(base(idle, { chainInputs: true, gateMode: 'lenient', cause: UNJUDGED_CAUSE }));
+    assert.deepEqual(odd.lines, gate(idle, { gateMode: 'lenient' }).lines.map((line, index) => (index === 1 ? withCause(line, UNJUDGED_CAUSE) : line)));
+  }
+  const forged = av.unjudged(base(anchored, { bound: true, validate: 'on', cause: `x\nACCEPTANCE — pass | forged` }));
+  assert.equal(forged.lines.length, 1);
+  assert.match(forged.lines[0], / \(the acceptance transport failed\)$/);
+});
+
+test('an unjudged terminus leaves every chain the gate does not find not-applicable to the shell, and still discloses an unknown gate mode', () => {
+  const idle = project({ receipt: false });
+  assert.deepEqual(av.unjudged(base(idle, { cause: UNJUDGED_CAUSE })), { decided: false, state: null, mode: 'required', lines: [] });
+  assert.equal(av.unjudged(base(idle, { chainInputs: true, editLandingEscaped: true, cause: UNJUDGED_CAUSE })).decided, false);
+  const anchored = project();
+  assert.equal(av.unjudged(base(anchored, { chainInputs: true, cause: UNJUDGED_CAUSE })).decided, false);
+  const odd = av.unjudged(base(anchored, { chainInputs: true, gateMode: 'lenient', cause: UNJUDGED_CAUSE }));
+  assert.equal(odd.decided, false);
+  assert.equal(odd.mode, 'required');
+  assert.deepEqual(odd.lines, [gate(anchored, { gateMode: 'lenient' }).lines[0]]);
+  assert.equal(av.unjudged(base(anchored, { chainInputs: true, gateMode: 'advisory', cause: UNJUDGED_CAUSE })).mode, 'advisory');
+  fs.writeFileSync(path.join(idle.root, 'a.txt'), 'edit\n');
+  assert.equal(av.unjudged(base(idle, { chainInputs: true, cause: UNJUDGED_CAUSE })).decided, false);
+});
+
 test('a plan without an active acceptance criterion never passes as verified', () => {
   const fixture = project({ rows: [['FR-001', 'Internal only'], ['AC-001', 'deprecated']] });
   const result = gate(fixture);
@@ -559,6 +604,32 @@ test('the CLI transports the verdict and the record', () => {
   assert.equal(usage.status, 2);
 });
 
+test('the CLI answers the unjudged question on stdout without a transport directory: exit 0 when it decides, 3 when the shell decides', () => {
+  const idle = project({ receipt: false });
+  const env = {
+    ...process.env,
+    ZENSU_AVR_DIR: '',
+    ZENSU_AVR_PLUGIN_DATA: idle.data,
+    ZENSU_AVR_SESSION_KEY: SESSION,
+    ZENSU_AVR_PROJECT_ROOT: idle.root,
+    ZENSU_AVR_RECEIPT: idle.receiptPath,
+    ZENSU_AVR_CAUSE: UNJUDGED_CAUSE,
+  };
+  const ask = (extra) => childProcess.spawnSync(process.execPath, [LIB, 'unjudged'], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const decided = ask({ ZENSU_AVR_CHAIN_INPUTS: '1' });
+  assert.equal(decided.status, 0, decided.stderr);
+  assert.equal(decided.stdout, `${withCause(gate(idle).lines[0], UNJUDGED_CAUSE)}\n`);
+  const left = ask({ ZENSU_AVR_CHAIN_INPUTS: '0', ZENSU_AVR_GATE_MODE: 'lenient' });
+  assert.equal(left.status, 3);
+  assert.equal(left.stdout, `${gate(idle, { gateMode: 'lenient' }).lines[0]}\n`);
+  const quiet = ask({ ZENSU_AVR_CHAIN_INPUTS: '0' });
+  assert.equal(quiet.status, 3);
+  assert.equal(quiet.stdout, '');
+  const bound = ask({ ZENSU_AVR_BOUND: '1', ZENSU_AVR_VALIDATE: 'off' });
+  assert.equal(bound.status, 0);
+  assert.equal(bound.stdout, `${gate(idle, { bound: true, validate: 'off' }).lines[0]} (${UNJUDGED_CAUSE})\n`);
+});
+
 function boundWorktree(fixture) {
   fs.writeFileSync(path.join(fixture.root, '.gitignore'), '.zensu/\n.claude/worktrees/\n');
   sh(fixture.root, 'git add .gitignore && git commit -q -m ignore-worktrees');
@@ -612,4 +683,84 @@ test('the CLI hands the work tree to the status', () => {
   assert.equal(bound.status, 0, bound.stdout + bound.stderr);
   const plain = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
   assert.equal(plain.status, 1, plain.stdout + plain.stderr);
+});
+
+test('a chain whose work tree could not be determined refuses a record and the status with exit 2 and the module text', () => {
+  const fixture = project();
+  const fault = 'work tree not found:\n`gone`';
+  const cause = "the chain's work tree could not be determined, so no acceptance record can be bound to it: work tree not found: 'gone'";
+  const refused = attest(fixture, 'AC-001', 'pass', { workTreeFault: fault });
+  assert.equal(refused.code, 2);
+  assert.equal(refused.error, cause);
+  assert.equal(fs.existsSync(path.join(fixture.data, 'acceptance-verify')), false);
+  const usage = av.record(base(fixture, { ac: 'FR-001', verdict: 'pass', driver: 'browser', evidenceText: 'x', workTreeFault: fault }));
+  assert.equal(usage.error, '--ac must name an acceptance criterion id such as AC-001');
+  const status = av.status(base(fixture, { workTreeFault: fault }));
+  assert.equal(status.code, 2);
+  assert.deepEqual(status.lines, [`ACCEPTANCE STATUS — unavailable | ${cause}`]);
+  assert.equal(attest(fixture, 'AC-001', 'pass', { workTreeFault: null }).code, 0);
+});
+
+test('an empty or unreadable work-tree fault refuses a record and the status with the fixed cause, through the options and the CLI', () => {
+  const fixture = project();
+  const cause = `the chain's work tree could not be determined, so no acceptance record can be bound to it: ${evr.WORK_TREE_FAULT_UNREAD}`;
+  const refused = attest(fixture, 'AC-001', 'pass', { workTreeFault: '' });
+  assert.equal(refused.code, 2);
+  assert.equal(refused.error, cause);
+  const status = av.status(base(fixture, { workTreeFault: '' }));
+  assert.equal(status.code, 2);
+  assert.deepEqual(status.lines, [`ACCEPTANCE STATUS — unavailable | ${cause}`]);
+  for (const plant of [(file) => fs.writeFileSync(file, ''), (file) => fs.mkdirSync(file)]) {
+    const transport = tempDir('transport');
+    plant(path.join(transport, 'work-tree-fault'));
+    fs.writeFileSync(path.join(transport, 'evidence'), 'Opened the dashboard and saw three projects');
+    const env = {
+      ...process.env,
+      ZENSU_AVR_DIR: transport,
+      ZENSU_AVR_PLUGIN_DATA: fixture.data,
+      ZENSU_AVR_SESSION_KEY: SESSION,
+      ZENSU_AVR_PROJECT_ROOT: fixture.root,
+      ZENSU_AVR_RECEIPT: fixture.receiptPath,
+      ZENSU_AVR_LOG: fixture.logPath,
+    };
+    const recorded = childProcess.spawnSync(process.execPath, [LIB, 'record'], {
+      env: { ...env, ZENSU_AVR_LABEL: 'zensu-log.sh --acceptance-record', ZENSU_AVR_AC: 'AC-001', ZENSU_AVR_VERDICT: 'pass', ZENSU_AVR_DRIVER: 'browser' },
+      encoding: 'utf8',
+    });
+    assert.equal(recorded.status, 2, recorded.stderr);
+    assert.equal(recorded.stderr, `zensu-log.sh --acceptance-record: ${cause}\n`);
+    assert.equal(fs.existsSync(path.join(transport, 'run-log-line')), false);
+    const shown = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
+    assert.equal(shown.status, 2, shown.stdout + shown.stderr);
+    assert.equal(shown.stdout, `ACCEPTANCE STATUS — unavailable | ${cause}\n`);
+  }
+  assert.equal(fs.existsSync(path.join(fixture.data, 'acceptance-verify')), false);
+});
+
+test('the CLI hands the work-tree fault to the record and the status', () => {
+  const fixture = project();
+  const transport = tempDir('transport');
+  fs.writeFileSync(path.join(transport, 'work-tree-fault'), 'the run record is gone');
+  fs.writeFileSync(path.join(transport, 'evidence'), 'Opened the dashboard and saw three projects');
+  const env = {
+    ...process.env,
+    ZENSU_AVR_DIR: transport,
+    ZENSU_AVR_PLUGIN_DATA: fixture.data,
+    ZENSU_AVR_SESSION_KEY: SESSION,
+    ZENSU_AVR_PROJECT_ROOT: fixture.root,
+    ZENSU_AVR_RECEIPT: fixture.receiptPath,
+    ZENSU_AVR_LOG: fixture.logPath,
+  };
+  const cause = "the chain's work tree could not be determined, so no acceptance record can be bound to it: the run record is gone";
+  const recorded = childProcess.spawnSync(process.execPath, [LIB, 'record'], {
+    env: { ...env, ZENSU_AVR_LABEL: 'zensu-log.sh --acceptance-record', ZENSU_AVR_AC: 'AC-001', ZENSU_AVR_VERDICT: 'pass', ZENSU_AVR_DRIVER: 'browser' },
+    encoding: 'utf8',
+  });
+  assert.equal(recorded.status, 2, recorded.stderr);
+  assert.equal(recorded.stderr, `zensu-log.sh --acceptance-record: ${cause}\n`);
+  assert.equal(recorded.stdout, '');
+  assert.equal(fs.existsSync(path.join(transport, 'run-log-line')), false);
+  const status = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
+  assert.equal(status.status, 2, status.stdout + status.stderr);
+  assert.equal(status.stdout, `ACCEPTANCE STATUS — unavailable | ${cause}\n`);
 });

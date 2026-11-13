@@ -60,17 +60,108 @@ the bound chain. The verdict measures `fingerprintRoot(workTree)` whatever direc
 record names, in local mode and in `decideCi` alike, so a run that measured only the anchor reads
 `stale`, and an `acceptance` run takes the same combined fingerprint. `--if-stale` judges
 freshness against that tree too, in both scopes, so a command that leaves the worktree never
-skips a run the terminus would read as `stale`. Every `--evidence-run` and both acceptance verbs
-read the workflow document once, a standalone chain's included, and ask the resolver only when
-it carries an Autopilot binding whose chain is still open (`active` and not `chainDone`), so a
-standalone chain, and every call after a bound chain's terminus, runs its command where it ran
-before. The lookup runs in a subshell and hands its answer back through files in the transport
-directory. A binding the resolver cannot answer is a FAULT and never falls back to the anchor,
-and so are a workflow document that cannot be read, which `--chain-work-tree` refuses the same
-way, and a phase library that does not load: `--evidence-run` and both acceptance verbs exit 2
-before anything runs, and the bound terminus, which hands the lookup the linkage it already
-validated instead of reading the document a second time, writes the cause into the transport
-file `work-tree-fault`, which the verdict reads as `unavailable`. A worktree that cannot be
+skips a run the terminus would read as `stale`. Every `--evidence-run`, both acceptance verbs,
+`--chain-work-tree` (with and without `--project-dir`), `--round-prepare`, `--full-suite-policy`
+and the `--tdd-begin` full-suite snapshot (through `_zensu_full_suite_work_tree`,
+`.claude/rules/full-suite-ci-deferral.md`) read the workflow
+document once, a standalone chain's included, and ask the resolver only when it carries an
+Autopilot binding whose chain is still open (`active` and not `chainDone`), so a standalone
+chain, and every call after a bound chain's terminus, runs its command where it ran before, and
+`--chain-work-tree` then prints the anchor's top. With `hooks.selfReview` on, a bound chain stays
+open through every review and self-review round, because the bound max-rounds handoff keeps
+`chainDone` false. With it off, the bound max-rounds arm of `post-review-tdd-delegate.sh` closes
+the chain itself, so it needs the work directory while the chain is still open. It takes the
+answer of the one `--chain-work-tree --project-dir --session` read the delegate makes for every
+bound chain before its full-suite policy read, and, when that directory is not the anchor's project root, directs
+the closing run as `--scope scoped` with a leading literal `cd "<dir>" &&`, which
+`commandDirectory` follows; `scoped`, because `--scope full` refuses any command other than
+`evidence.fullSuiteCommand`. `<dir>` is that directory as `zensu-host-path.sh` renders it, the
+spelling `_zensu_evr_work_tree` hands the runner for an open chain, because the native runner
+follows a `cd` only in a drive spelling (`C:/…`) and keeps the project-root fingerprint for an
+MSYS one such as `/c/…`. A lookup that fails, a directory the renderer refuses and a rendered
+path holding a quote, a dollar sign, a backtick, a backslash or a control character get a
+directive to run no closing suite and to say why: the single-quoted `--cmd` cannot carry a single
+quote, and `LEADING_CD_RE` follows a double-quoted `cd` target only without the other four, so
+the record would measure the anchor. The verb's own screen does not cover this, because it judges
+the raw path, and a symbolic link in a middle directory or an MSYS rendering changes the
+characters. That sentence lives in `MAX_CLOSE_SENTENCE`, whose default is the standalone one.
+`--tdd-complete` and the bound terminus hand the lookup the linkage they already validated
+instead of reading the document a second time. The lookup runs in a subshell, hands its answer
+back through files in the transport directory, and is the only place the linkage reaches the
+resolver (`WB20` in `test-tdd-complete-receipt-gate.sh`). A binding the resolver cannot answer
+is a FAULT and never falls back to the anchor, and so are a workflow document that cannot be
+read and a phase library that does not load. The lookup names the stage that failed (`library`,
+`state`, `linkage` or `work-tree`) beside its cause, so each verb keeps its own refusal:
+`--chain-work-tree` answers `current-session workflow path unavailable` and `corrupt or
+incomplete Autopilot linkage` for the document faults, `--round-prepare` stops with `chain: the
+chain's Autopilot linkage could not be read`; for every other fault `--chain-work-tree` and
+`--tdd-complete` print its cause above their own sentence, while `--round-prepare` carries it in
+its one stop line (`chain: <cause>`, or `work-tree: the chain's work tree could not be resolved:
+<cause>`). `--round-prepare` stops on an unresolvable workflow path and on a phase
+library that does not load, rather than reading either as a standalone chain. A project
+directory that cannot be derived is reported apart from the tree: `--evidence-run`, both
+acceptance verbs and `--chain-work-tree --project-dir` refuse on it, while `--tdd-complete`,
+`--round-prepare` and `--chain-work-tree` without `--project-dir`, which never need that
+directory, take the tree. `E25` pins that answer for `--chain-work-tree` only; the other two read
+just `_bwt_tree` and `_bwt_fault`. On a fault the arms of `--evidence-run` and both acceptance
+verbs write the cause into the transport file `work-tree-fault`, as the bound terminus does, and
+the modules own every word of the refusal: `run()` exits 2 after its usage checks and before
+anything runs, with `the chain's work tree could not be determined, so the command was not run:
+<cause>`; `record()` and `status()` of `acceptance-verify-v1.js` exit 2 with `the chain's work
+tree could not be determined, so no acceptance record can be bound to it: <cause>`, the status
+as an `ACCEPTANCE STATUS — unavailable` summary line; and the verdict reads the field as
+`unavailable`. Each passes the cause through its module's screen. **The transport fails closed.**
+Each arm checks its write of `work-tree-fault`: when it fails, `--evidence-run` and both acceptance
+verbs exit 2 with a line of the shell's own that names the failed write and the temporary directory
+and never the cause, so the cause still reaches the user only through a module's screen, and the
+shell still carries none of the modules' refusal sentences (`E19`, `A31`). Every other transport
+write is checked as well, through `_zensu_transport_put`: the six files of `_zensu_evr_prepare`
+(`full-suite-command`, `gate-mode`, `remedy-prefix`, `remedy-prefix-scoped`, `full-suite-marker`,
+`ci-config.json`), the `gate-mode` of `_zensu_avr_prepare`, and `command` and `caller-project-dir`
+of `--evidence-run`, while `--acceptance-record` checks its `evidence` write with the same line,
+`<verb>: the <file> transport file could not be written to the temporary directory; check that
+<TMPDIR> is writable and has free space.` A lost write read as an absent file and changed the
+answer: an unwritten `full-suite-command` read as no configured command, so `decide()` skipped
+`command-mismatch` and passed a green run of another command; an unwritten `command` let a full
+run fall back to `evidence.fullSuiteCommand` (`E28b`); an unwritten `caller-project-dir` ran the
+command without the caller's `CLAUDE_PROJECT_DIR`, which the module scrubs and restores only from
+that file. A failed write in either preparation is a failed preparation (`E28`, `A33`, `F29`). The
+`work-tree-fault` writes keep their own longer lines, which `E26`, `A32` and `F25` pin. The
+ticket-bound terminus, standalone or bound, takes the decision of a failed transport preparation
+for the same failure (`_zensu_full_suite_gate_unjudged`), in the order `verdict()` decides. A
+project the module calls not applicable passes with a `FULL SUITE — not-applicable` line in every
+mode and ledgers nothing, because outside git the module passes whatever the transport does
+(`F30`, `F31`). `_zensu_full_suite_not_applicable` asks `workTree()` itself through `node`, with
+the library `_zensu_evr_prepare` resolved, so the line carries the module's own reason and the
+shell holds no copy of the split. Without `node`, without that library or with an empty
+`ZENSU_PROJECT_ROOT` the answer is unknown and the next arms decide. Then an escaped gate is
+ledgered and passes with a `FULL SUITE — escaped` line, an
+advisory gate passes with a `FULL SUITE — unavailable (advisory, not blocking)` line, and a
+required gate refuses and keeps the chain open with the shell's own lines and no `FULL SUITE`
+line; a failed preparation adds `the chain stays open; resolve the full-suite transport fault named
+above, then run --chain-done again.` The passing lines name the failure and print after the
+transition like the module's verdict lines, so the CHAIN-END SUMMARY carries them and the terminus
+still prints the lines `docs/configuration.md` and `docs/gates.md` promise for an escaped and an
+advisory gate (`F26`, `F27`, and `F28` for a failed preparation). The acceptance gate's failed
+preparation answers the same way through `_zensu_acceptance_gate_unjudged`, which asks the
+`unjudged` mode of `acceptance-verify-v1.js` through `_zensu_avr_ask` for every line that needs
+the module's judgment (`.claude/rules/acceptance-verification-gate.md`). Both
+modules read the file through `readWorkTreeFault` of `evidence-run-v1.js`: a missing file is no
+fault, while an empty file and one that exists but cannot be read are a fault whose cause is the
+fixed `WORK_TREE_FAULT_UNREAD`, through the `workTreeFaultCause` that `run()`, `verdict()` and
+`workTreeRefusal()` share. The lookup reads an empty `bwt-tree` answer as a fault at stage
+`work-tree` and an empty `bwt-dir` answer as a project-directory fault, as it already read empty
+`bwt-fault` and `bwt-dir-fault` files. **The project-directory fault folds into the tree fault on
+purpose.** `_zensu_evr_work_tree` needs the directory, because the command runs there.
+`_zensu_avr_work_tree` does not, and refuses anyway: an observed acceptance record cites an
+`--evidence-run --scope acceptance` run, which cannot run without that directory, so a record verb
+that took the tree would let the records and the runs they cite disagree; an attested record would
+bind a verdict to a work tree that does not hold the project its criteria describe; and a bound
+chain's terminus answers `not-checked` without reading acceptance records, so the refusal blocks no
+close. The cost is wording: the module's sentence names the work tree, and the cause after it names
+the missing directory (`the chain's work tree has no directory … for the project root`). Carrying
+the fault kind to the modules was weighed and rejected: it adds a transport file and a sentence per
+module for a fault that every consumer answers with the same exit 2. A worktree that cannot be
 fingerprinted is measured only against the records whose run directory lies in it, so a green
 run in the anchor never passes there as `pass-tree-unverified`. `_evr_work_tree`,
 `_evr_work_dir` and `_avr_work_tree` start empty like `_evr_dir`, so a variable inherited from
@@ -174,12 +265,17 @@ because `execSync` runs them through `cmd.exe` on Windows.
 **`not-applicable` is decided narrowly.** Only a root that git reports as outside any
 repository or work tree, or a host without git, skips the gate. Every other git failure
 is `unavailable` and blocks under `required`: a `safe.directory` refusal also exits 128,
-and reading it as "not a repository" would open the gate on a real repository.
+and reading it as "not a repository" would open the gate on a real repository. The probe's
+answer must be exactly `true` or `false`: any other output on exit 0, such as a line that a
+`GIT_TRACE` variable naming standard output adds before the `true`, is `unavailable` as well,
+because the exact-`true` test that read it as outside git passed a real work tree.
 `_zensu_unqualified_change_count` in `hooks/lib/zensu-log.sh` copies this split in shell, under
 `LC_ALL=C`, for the unqualified `--chain-done` and `--code-review-done`, for the count a minted
-`zc_` ticket takes and for the scope of `--tdd-complete`'s two preconditions, and `G14d` in
-`tests/structure/test-chain-terminus-zero-change-gate.sh` asks `workTree` about the inputs that
-suite drives through the unqualified verbs. The edit-landing audit draws the same split a third
+`zc_` ticket takes and for the scope of `--tdd-complete`'s two preconditions; it reads a printed
+`false` as `unknown` and any other answer as `unavailable`. `G14d` and `G17d` in
+`tests/structure/test-chain-terminus-zero-change-gate.sh` ask `workTree` about the inputs that
+suite drives through the unqualified verbs, and `G17a` and `G17b` drive an answer with a trace
+line through both verbs. The edit-landing audit draws the same split a third
 time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
 (`.claude/rules/multi-repo-stage1.md`). A change to the split here moves both copies too.
 `workTreeTop` reads the same `NO_WORK_TREE_RE` for the external-review root rule and also
@@ -242,20 +338,38 @@ documented residual of every plugin store, and no seal was added.
 `tests/structure/test-bypass-ledger.sh`. The close step moves together across
 `FULL_SUITE_STEP`, `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP` and `CLOSE_SUITE_REASON` of
 `hooks/post-review-tdd-delegate.sh` (both `CLOSE_PASS` arms, `CLOSE_PASS_SUITE_CI` and both
-max-rounds hand-offs interpolate them), the routed-round sentence of step 10 in
+max-rounds hand-offs interpolate them, the one without self-review through
+`MAX_CLOSE_SENTENCE`, whose worktree arm `MAX_CLOSE_RUN` spells the command of `FULL_SUITE_STEP`
+and `AFFECTED_SUITE_STEP` again with the scope `scoped` and the leading `cd`; `M6h` in
+`test-autopilot-post-review-max-rounds.sh` and `C23b` in `test-full-suite-ci.sh` compare each arm's
+rendered command with the shared step's), the routed-round sentence of step 10 in
 `skills/build/references/review-chain.md`, discipline patch 12 in `docs/build-workflow.md`,
 the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S17` in
 `tests/structure/test-post-review-tdd-scope.sh`, the `MR` checks in
 `evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in
 `tests/structure/test-full-suite-ci.sh`, and the `evidence-run-v1.test.js` entry in
 `tests/profiles/unit-files.v1.json`. The bound work tree moves with `_zensu_bound_work_tree`,
-`_zensu_chain_project_dir` and `--chain-work-tree --project-dir` in `zensu-log.sh`, `chainTree`
+whose lookup subshell memoizes the project root (`.claude/rules/stop-latency.md`, `C33` in
+`test-full-suite-ci.sh`), `_zensu_chain_project_dir`, `_zensu_full_suite_work_tree` and
+`--chain-work-tree --project-dir` in `zensu-log.sh`, the delegate's one bound read of it before
+the full-suite policy read, which the bound
+max-rounds arm of `post-review-tdd-delegate.sh` reuses before its terminus and renders
+through `zensu-host-path.sh` as `_zensu_evr_work_tree` does (`M6` to `M6h` in
+`test-autopilot-post-review-max-rounds.sh`, `C23b` in `test-full-suite-ci.sh`), `chainTree`
 in `acceptance-verify-v1.js`, the `cd` rule of Phase 1 step 3 in
 `skills/build/references/planning.md` and of Phase 4 in `skills/self-review/SKILL.md` (`L9b` and
 `L11` in `test-tdd-log-path-anchor.sh`, `E10g1` and `E10l` in `test-session-reanchor.sh`), E13
-to E24 in `test-evidence-run.sh`, F20 to F24 in `test-full-suite-gate.sh`, A29 to A31 in
-`test-acceptance-gate.sh`, and the bound cases of `evidence-run-v1.test.js`, the `--if-stale`
-one and the worktree that cannot be fingerprinted included.
+to E28 in `test-evidence-run.sh`, F20 to F31 in `test-full-suite-gate.sh`, A29 to A46b in
+`test-acceptance-gate.sh`, WB0 to WB21 in `test-tdd-complete-receipt-gate.sh`, the `mktemp` stub
+`transport_fault_stub` (and `work_tree_fault_stub` for `work-tree-fault`) that `E26`, `E28`, `E28b`,
+`A32` to `A44`, `A46`, `A46b`, `F25` to `F27` and `F29` to `F31` share in
+`tests/structure/lib-work-tree-fault-stub.sh` with `C31` in `test-full-suite-ci.sh`, the bound
+cases of `evidence-run-v1.test.js`, the `--if-stale` one and the worktree that cannot be
+fingerprinted included, and the work-tree fault cases of both module unit files.
+`_zensu_full_suite_not_applicable` prints the reason `workTree()` answers, so `F14` (the module's
+verdict) and `F30` and `F31` (the unjudged arm) pin one string, and `G17d` pins the exact reading
+of the probe. The transport line of `_zensu_transport_unwritten` is pinned by `E28`, `E28b`, `A33`
+to `A36`, `F29` and `F30`.
 
 **Version of the bound work tree: `patch`.** Walked against `.claude/rules/runtime-lineage.md`:
 no record field and no strict key set moves. A full or scoped record still carries the `cwd`
@@ -264,7 +378,24 @@ from `cwd` and `command`, so it reads a bound chain's records against the same c
 acceptance record's `tree` holds a combined id only for a bound chain, whose terminus answers
 `not-checked` without reading records, and a released reader would read such a record as stale,
 never as a pass. No hook, matcher, config key or attestation moves, and `--project-dir` is a new
-flag on a read-only verb whose only callers are skills of the same installation.
+flag on a read-only verb whose only callers are skills of the same installation. Moving the
+refusal text into the modules and routing `--chain-work-tree`, `--round-prepare` and
+`--tdd-complete` through the lookup is `patch` on the same walk: the transport file already
+served the terminus, `--acceptance-status` prints an `ACCEPTANCE STATUS — unavailable` line in a
+state it already refused with exit 2, and no record field, key set, hook or matcher moves. The
+fail-closed transport is `patch` as well: the verbs refuse in states where they used to proceed as a
+standalone call, and no record field, key set, hook, matcher or config key moves. Checking every
+transport write, the acceptance lines of a failed preparation and the not-applicable step of the
+unjudged full-suite arm are `patch` on the same walk: the verbs refuse in more states, the terminus
+prints lines the documentation already promises and answers `not-applicable` outside git where the
+module does, and the transport files and their readers stay as they are. The exact reading of the
+work-tree probe is `patch` too: `workTree()` and `_zensu_unqualified_change_count` answer
+`unavailable` for output that is neither `true` nor `false`, where they answered not applicable and
+`unknown`, so the gates refuse in more states, and no record field, key set, hook, matcher or config
+key moves. The bound max-rounds closing run is `patch` on the same walk: the hook changes only the
+directive text it already returned as `additionalContext`, adds one read-only `--chain-work-tree`
+call before its terminus and one `zensu-host-path.sh` render after it, and no hook, matcher, key
+set, record field or config key moves.
 
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when
@@ -272,6 +403,33 @@ both trees exist. A bound chain whose `workspaceRoot` the resolver refuses (a tr
 anchor, a clone, a submodule) can record no run at all, where it used to run in the anchor;
 `--tdd-complete` already refuses such a chain, so the refusal only arrives earlier. The bound
 work tree is unmeasured on Windows: none of the three suites that drive it is in a blocking
-Windows profile. `--chain-work-tree`, `--round-prepare` and `--tdd-complete` still read the
-Autopilot linkage with their own copies of the lookup, and `zensu-log.sh`, not the modules,
-words the work-tree refusal of `--evidence-run` and the acceptance verbs.
+Windows profile. Every write the shell makes into the evidence and acceptance transports is checked
+for failure, not for its bytes; the modules' own `verdict-state` write, which decides whether an
+escape is ledgered, and the `marker-state`, `ci-config.json` and `full-suite-command` writes of
+`zensu_full_suite_policy_node` in `hooks/lib/zensu-full-suite-transport.sh` are still unchecked;
+only its `work-tree-fault` write is checked there. The lookup's `bwt-*` answers are
+checked for emptiness, not for a truncated path. `E26`, `E28`, `E28b`, `A32` to `A44`, `A46`,
+`A46b`, `F25` to `F27` and `F29` to `F31` reach the failed write through a `mktemp` stub that occupies the transport
+path with a directory, not through a full disk or a read-only temporary directory, and `E27` drives
+the lookup's reader over empty answers through a stubbed lookup, because a write that succeeds
+without its bytes cannot be provoked portably. Without `node` the unjudged full-suite arm has no
+not-applicable step, so outside git an escape is ledgered and a required gate refuses where the
+module would pass. That arm never asks the module, so an unknown `evidence.fullSuiteGate` value
+acts as `required` there without the disclosure line `verdict()` prints first, while the
+acceptance arm prints its module's disclosure (`A46`); `docs/gates.md` says so. A probe answer with a trace line makes the unqualified verbs refuse with the
+sentence for a failed listing, which names `git diff --name-only HEAD` rather than the probe. After
+a bound max-rounds close without self-review, the closing run measures the worktree only through the
+leading `cd` the directive names: the runner itself treats the closed chain as standalone
+(`E24`), so a run started without that `cd` measures the anchor, and no gate reads either record,
+because no terminus follows. `M6` and `M6b` drive the local runner's sentence and `C23b` the CI
+runner's. `M6f` reaches the renderer's refusal through a project directory that is a symbolic link
+inside the worktree, and `M6g` the dollar-sign screen through a linked middle directory whose target
+holds one; both print `SKIP` where `ln -s` makes no link, as Git Bash does by default. The
+renderer's MSYS refusals (no drive spelling, no `cygpath`) are not driven, and of the screened
+characters only the single quote and the dollar sign are. On Windows the `cd` target is the drive spelling the
+open chain's runs already receive, but no Windows run has driven this arm: the suite reaches
+Windows only through the weekly Windows Safety structure shard, where `M6` expects the rendered
+spelling. The CI weight of `test-autopilot-post-review-max-rounds.sh` in
+`tests/profiles/ci-shard-weights.v1.json` was not re-derived after `M6` to `M6h` added five git
+fixtures, and neither was that of `test-full-suite-ci.sh` after `C23b` added a bound chain in a
+worktree.

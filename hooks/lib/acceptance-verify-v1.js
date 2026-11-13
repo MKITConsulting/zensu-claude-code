@@ -79,6 +79,7 @@ const LIMITS = Object.freeze({
   gitTimeoutMs: 120000,
 });
 const REMEDY = '/zensu:verify-feature --chain';
+const UNJUDGED_CAUSE = 'the acceptance transport failed';
 
 class AcceptanceError extends Error {
   constructor(message) {
@@ -467,6 +468,12 @@ function resolveChain(options) {
   return { root, stem, planPath: plan.planPath, planRel: plan.planRel, disclosures };
 }
 
+function workTreeRefusal(options, limits = LIMITS) {
+  const fault = evidenceRun.workTreeFaultCause(options.workTreeFault);
+  if (fault === null) return null;
+  return `the chain's work tree could not be determined, so no acceptance record can be bound to it: ${display(fault, options.projectRoot, limits)}`;
+}
+
 function recordLine(record, projectRoot, limits = LIMITS) {
   const kind = record.evidence_run ? `observed ${record.evidence_run}` : 'attested';
   const tree = record.tree ? record.tree.slice(0, 12) : `unverified (${record.tree_reason || 'no tree id'})`;
@@ -480,6 +487,8 @@ function record(options) {
   if (!VERDICTS.includes(options.verdict)) return { code: 2, error: `--verdict must be one of ${VERDICTS.join(', ')}` };
   if (!ACCEPTED_DRIVERS.includes(options.driver)) return { code: 2, error: `--driver must be one of ${DRIVERS.join(', ')}` };
   if (!options.logPath) return { code: 2, error: '--log <this chain\'s run log> is required' };
+  const refusal = workTreeRefusal(options, limits);
+  if (refusal) return { code: 2, error: refusal };
   const evidence = cleanEvidence(options.evidenceText, options.projectRoot, limits);
   if (evidence.error) return { code: 1, error: evidence.error };
   const chain = resolveChain(options);
@@ -658,6 +667,8 @@ function describeRow(row, projectRoot, limits = LIMITS) {
 
 function status(options) {
   const limits = limitsWith(options.limits);
+  const refusal = workTreeRefusal(options, limits);
+  if (refusal) return { code: 2, lines: [`ACCEPTANCE STATUS — unavailable | ${refusal}`] };
   const chain = resolveChain(options);
   if (chain.error) return { code: 2, lines: [`ACCEPTANCE STATUS — unresolved | ${chain.error}`] };
   const result = assess({ ...options, chain });
@@ -739,6 +750,28 @@ function boundLine(validate) {
   return 'ACCEPTANCE — not-checked | Autopilot-bound chain: the run\'s validate option could not be read, so whether its VALIDATE stage checks the acceptance criteria is unknown';
 }
 
+function notApplicableLine(reason, mode) {
+  return `ACCEPTANCE — not-applicable | ${reason} | gate: ${mode}`;
+}
+
+function unjudged(options) {
+  const gate = normalizeGateMode(options.gateMode, options.projectRoot);
+  const lines = gate.disclosure ? [gate.disclosure] : [];
+  const cause = typeof options.cause === 'string' && /^[^\x00-\x1f\x7f]+$/.test(options.cause) ? options.cause : UNJUDGED_CAUSE;
+  if (options.bound) {
+    lines.push(`${boundLine(options.validate)} (${cause})`);
+    return { decided: true, state: 'not-checked', mode: gate.mode, lines };
+  }
+  if (options.chainInputs) {
+    const resolved = verdictChain(options);
+    if (resolved.outcome === 'not-applicable') {
+      lines.push(notApplicableLine(`${resolved.reason} (${cause})`, gate.mode));
+      return { decided: true, state: 'not-applicable', mode: gate.mode, lines };
+    }
+  }
+  return { decided: false, state: null, mode: gate.mode, lines };
+}
+
 function verifyRemedy(chain, projectRoot) {
   const log = chain ? ` --log ${display(`.zensu/logs/${chain.stem}.log`, projectRoot)}` : '';
   return `run: ${REMEDY}${log}`;
@@ -774,7 +807,7 @@ function verdict(options) {
   }
   const resolved = verdictChain(options);
   if (resolved.outcome === 'not-applicable') {
-    lines.push(`ACCEPTANCE — not-applicable | ${resolved.reason} | ${gateLabel}`);
+    lines.push(notApplicableLine(resolved.reason, gate.mode));
     return { state: 'not-applicable', passes: true, mode: gate.mode, lines };
   }
   if (options.escape) {
@@ -844,6 +877,7 @@ function transportOptions(env) {
     sessionKey: env.ZENSU_AVR_SESSION_KEY,
     projectRoot: env.ZENSU_AVR_PROJECT_ROOT,
     workTree: env.ZENSU_AVR_WORK_TREE || '',
+    workTreeFault: evidenceRun.readWorkTreeFault(directory),
     receiptPath: env.ZENSU_AVR_RECEIPT || '',
     logPath: env.ZENSU_AVR_LOG || '',
     ac: env.ZENSU_AVR_AC,
@@ -895,7 +929,17 @@ async function main(argv, env = process.env) {
     if (result.state === 'unavailable' && result.mode !== 'advisory') return 2;
     return result.passes ? 0 : 1;
   }
-  process.stderr.write('usage: acceptance-verify-v1.js record|status|verdict\n');
+  if (mode === 'unjudged') {
+    const result = unjudged({
+      ...options,
+      gateMode: env.ZENSU_AVR_GATE_MODE,
+      chainInputs: env.ZENSU_AVR_CHAIN_INPUTS === '1',
+      cause: env.ZENSU_AVR_CAUSE,
+    });
+    for (const line of result.lines) process.stdout.write(`${line}\n`);
+    return result.decided ? 0 : 3;
+  }
+  process.stderr.write('usage: acceptance-verify-v1.js record|status|verdict|unjudged\n');
   return 2;
 }
 
@@ -943,6 +987,7 @@ module.exports = {
   status,
   normalizeGateMode,
   boundLine,
+  unjudged,
   remedies,
   verdict,
   main,

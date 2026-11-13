@@ -142,9 +142,8 @@ only these points:
    starts — `git`, the runtime recipe, fixtures and teardown, but never a `playwright-cli` call,
    which must stay one plain call — as `cd "<that root>" && …`, and read the recipe files
    from that root; that `cd` is the one prefix a recorded `down` may carry (Phase 2 step 3).
-   After `/zensu:adopt-session --reanchor` the Bash
-   tool still starts in the session's previous worktree, while every record binds to the
-   anchor's tree. `--evidence-run` needs no prefix: it already runs in the anchor.
+   After `/zensu:adopt-session --reanchor` the Bash tool still starts in the session's previous worktree,
+   while every record binds to the anchor's tree. `--evidence-run` needs no prefix: it runs in the chain's work tree.
 
 ## Phase 0 — Resolve scope and target
 
@@ -548,12 +547,12 @@ Use the same bare form with `FAIL` or `PARTIAL` as appropriate.
 
 Verification drives the browser through `playwright-cli`, the `@playwright/cli` package, which
 must be on `PATH`: check with `command -v playwright-cli`. When it is missing, stop with PARTIAL
-and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.21`,
+and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.24`,
 the version the browser consent gate was measured against; `brew install playwright-cli` is
 unpinned and may install a version the run-config helper refuses. Never install it on their
 behalf.
 `/zensu:doctor` reports whether it is installed and which version. The browser consent gate
-parses its arguments as measured against version 0.1.21 and denies an argument shape it does
+parses its arguments as measured against version 0.1.24 and denies an argument shape it does
 not recognize rather than admitting it — including a `zensu-verify` session name it does not
 resolve as the call's session.
 

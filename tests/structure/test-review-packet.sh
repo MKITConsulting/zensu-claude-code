@@ -111,6 +111,17 @@ if [ -n "$WORK" ]; then
         `<status>${process.env.STATUS}</status>`, "<summary>Agent consume review finished</summary>", "</task-notification>"].join("\n");
       process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
   }
+  result_notification_payload() {
+    AGENT="$1" STATUS="$2" REPORT="$3" SID_VALUE="$SID" node -e '
+      const result = process.env.REPORT.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const prompt = ["<task-notification>", `<task-id>${process.env.AGENT}</task-id>`, "<tool-use-id>toolu_01WPhqY4dh2LFbaugtAn6Kg8</tool-use-id>",
+        `<output-file>/private/tmp/claude-501/tasks/${process.env.AGENT}.output</output-file>`, `<status>${process.env.STATUS}</status>`,
+        "<summary>Agent review finished</summary>",
+        "<note>A task-notification fires each time this agent stops with no live background children of its own.</note>",
+        `<result>${result}</result>`, "<usage><subagent_tokens>24658</subagent_tokens><tool_uses>0</tool_uses><duration_ms>3280</duration_ms></usage>",
+        "</task-notification>"].join("\n");
+      process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
+  }
   hook_event_of() {
     node -e 'let s = ""; process.stdin.on("data", (c) => s += c); process.stdin.on("end", () => {
       try { process.stdout.write(JSON.parse(s).hookSpecificOutput.hookEventName); } catch (_) { process.stdout.write("none"); } });' < "$1"
@@ -610,6 +621,190 @@ merged findings: none"
     fi
   else
     check "RP31 arm a review chain" FAIL
+  fi
+
+  new_project "$WORK/p-notified"
+  if arm_review "rp-notified" "$WORK/p-notified"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    launch_payload zensu:review-aspect "perspective: correctness
+$PACKET" aspectnote1 | bash "$POSTREV" >/dev/null 2>&1
+    launch_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" judgenote1 | bash "$POSTREV" >/dev/null 2>&1
+    result_notification_payload aspectnote1 completed "## Aspect: correctness
+- (no findings)" | bash "$HANDBACK_HOOK" >"$WORK/hook-aspect" 2>&1
+    result_notification_payload judgenote1 completed "## Aspect: judge
+- (no findings)" | bash "$HANDBACK_HOOK" >"$WORK/hook-judge" 2>&1
+    if [ ! -s "$WORK/hook-aspect" ] && [ ! -s "$WORK/hook-judge" ] && [ "$(store_records)" = "4" ]; then
+      check "RP32 with the gate on, the completion notifications of a background aspect and judge complete their launches through the prompt hook" PASS
+    else
+      check "RP32 notification reports (records=$(store_records))" FAIL
+      cat "$WORK/hook-aspect" "$WORK/hook-judge"
+    fi
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    launch_payload zensu:code-reviewer "$CONSUME" consumenote2 | bash "$POSTREV" >/dev/null 2>&1
+    result_notification_payload consumenote2 completed "# Code Review Report
+
+- Verdict: PASS" | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] && grep -qF "BACKGROUND REVIEW REPORT" "$WORK/hook" \
+      && ! grep -qF "REVIEW INCOMPLETE" "$WORK/hook" && [ "$(consume_record)" = absent ] \
+      && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ]; then
+      check "RP32a with the gate on, the consume reviewer's completion notification claims the ticket on the panel that notifications recorded" PASS
+    else
+      check "RP32a notification claim (event=$(hook_event_of "$WORK/hook") record=$(consume_record) consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook"
+    fi
+  else
+    check "RP32 arm a review chain" FAIL
+  fi
+
+  echo "== Background reviewers spawned with the Agent name parameter =="
+  named_launch_payload() {
+    TYPE="$1" PROMPT="$2" AGENT="$3" NAME="$4" SID_VALUE="$SID" node -e '
+      process.stdout.write(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Agent", session_id: process.env.SID_VALUE,
+        tool_input: { description: "named review", subagent_type: process.env.TYPE, name: process.env.NAME, prompt: process.env.PROMPT },
+        tool_response: { status: "async_launched", isAsync: true, agentId: process.env.AGENT } }));'
+  }
+  peer_handback_payload() {
+    FROM="$1" REPORT="$2" SID_VALUE="$SID" node -e '
+      const body = process.env.REPORT.split("\n").map((line) => `  ${line}`);
+      const prompt = ["Another Claude session sent a message:", `<agent-message from="${process.env.FROM}">`,
+        "[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:",
+        ...body, "</agent-message>"].join("\n");
+      process.stdout.write(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: process.env.SID_VALUE, prompt }));'
+  }
+  completed_runs() {
+    node -e 'const fs = require("fs"), path = require("path"); const base = process.argv[1]; const runs = [];
+      for (const dir of fs.readdirSync(base).filter((name) => name.startsWith("review-gate-"))) {
+        for (const file of fs.readdirSync(path.join(base, dir)).filter((name) => /^record-r.*\.json$/.test(name))) {
+          const record = JSON.parse(fs.readFileSync(path.join(base, dir, file), "utf8"));
+          if (record.status === "completed") runs.push(`${record.agentId}:${record.reportSource}:${record.identity}`);
+        }
+      }
+      process.stdout.write(runs.sort().join(" "));' "$PROJECT/.zensu/state" 2>/dev/null
+  }
+
+  new_project "$WORK/p-named"
+  if arm_review "rp-named" "$WORK/p-named"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    named_launch_payload zensu:review-aspect "perspective: security
+$PACKET" aspectnamed1 aspect-security | bash "$POSTREV" >"$WORK/hook-aspect" 2>&1
+    named_launch_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" judgenamed1 judge-primary | bash "$POSTREV" >"$WORK/hook-judge" 2>&1
+    named_launch_payload zensu-review-api "$PACKET" personanamed1 persona-api | bash "$POSTREV" >"$WORK/hook-persona" 2>&1
+    NAMED_FANOUT="$CLAUDE_PLUGIN_DATA/background-review/v1/fanout/$ZENSU_SESSION_KEY"
+    NAMED_ENTRIES="$(ls "$NAMED_FANOUT" 2>/dev/null | tr '\n' ' ')"
+    peer_handback_payload aspect-security "## Aspect: security
+- (no findings)" | bash "$HANDBACK_HOOK" >>"$WORK/hook-aspect" 2>&1
+    handback_payload judge-primary "## Aspect: judge
+- (no findings)" | bash "$HANDBACK_HOOK" >>"$WORK/hook-judge" 2>&1
+    handback_payload persona-api "## Aspect: zensu-review-api
+- (no findings)" | bash "$HANDBACK_HOOK" >>"$WORK/hook-persona" 2>&1
+    if [ ! -s "$WORK/hook-aspect" ] && [ ! -s "$WORK/hook-judge" ] && [ ! -s "$WORK/hook-persona" ] && [ "$(store_records)" = "6" ] \
+      && [ "$NAMED_ENTRIES" = "aspectnamed1.json judgenamed1.json personanamed1.json " ] && [ -z "$(ls "$NAMED_FANOUT" 2>/dev/null)" ] \
+      && [ "$(completed_runs)" = "aspectnamed1:handback-prompt:aspect:security judgenamed1:handback-prompt:judge-primary personanamed1:handback-prompt:persona:zensu-review-api" ]; then
+      check "RP33 the hand-backs of a background aspect, judge and persona spawned with the Agent name parameter retire their fan-out entries and are recorded under their agent ids" PASS
+    else
+      check "RP33 named reviewer hand-backs (records=$(store_records) entries=$NAMED_ENTRIES left=$(ls "$NAMED_FANOUT" 2>/dev/null | tr '\n' ' ') completed=$(completed_runs))" FAIL
+      cat "$WORK/hook-aspect" "$WORK/hook-judge" "$WORK/hook-persona"
+    fi
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    named_launch_payload zensu:code-reviewer "$CONSUME" consumenamed1 consume-reviewer | bash "$POSTREV" >"$WORK/hook-launch" 2>&1
+    handback_payload consume-reviewer "# Code Review Report
+
+- Verdict: PASS" | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] \
+      && grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent consumenamed1) delivered its report in this message as its hand-back" "$WORK/hook" \
+      && ! grep -qF "REVIEW INCOMPLETE" "$WORK/hook-launch" "$WORK/hook" && [ "$(consume_record)" = absent ] \
+      && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ]; then
+      check "RP33a with the gate on, a consume reviewer spawned with the Agent name parameter claims the ticket through its name-framed hand-back" PASS
+    else
+      check "RP33a named consume claim (event=$(hook_event_of "$WORK/hook") record=$(consume_record) consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook-launch" "$WORK/hook"
+    fi
+  else
+    check "RP33 arm a review chain" FAIL
+  fi
+
+  new_project "$WORK/p-renamed"
+  if arm_review "rp-renamed" "$WORK/p-renamed"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    named_launch_payload zensu:review-aspect "perspective: correctness
+$PACKET" aspectmoved1 aspect-correctness | bash "$POSTREV" >/dev/null 2>&1
+    named_launch_payload general-purpose "Summarize the change." generalmoved1 aspect-correctness | bash "$POSTREV" >"$WORK/hook-moved" 2>&1
+    peer_handback_payload aspect-correctness "## Aspect: correctness
+- (no findings)" | bash "$HANDBACK_HOOK" >>"$WORK/hook-moved" 2>&1
+    MOVED_BY_NAME="$(completed_runs)"
+    peer_handback_payload aspectmoved1 "## Aspect: correctness
+- (no findings)" | bash "$HANDBACK_HOOK" >>"$WORK/hook-moved" 2>&1
+    if [ -z "$MOVED_BY_NAME" ] && [ "$(completed_runs)" = "aspectmoved1:handback-prompt:aspect:correctness" ] && [ ! -s "$WORK/hook-moved" ]; then
+      check "RP33b a name a later unrecorded spawn took names no reviewer, while the reviewer's own agent id still does" PASS
+    else
+      check "RP33b moved name (by-name=$MOVED_BY_NAME completed=$(completed_runs))" FAIL
+      cat "$WORK/hook-moved"
+    fi
+  else
+    check "RP33b arm a review chain" FAIL
+  fi
+
+  new_project "$WORK/p-named-off"
+  if arm_review "rp-named-off" "$WORK/p-named-off"; then
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    named_launch_payload zensu:code-reviewer "PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+merged findings: none" consumeoff1 consume-reviewer | ZENSU_CONFIG="$GATE_OFF_CONFIG" bash "$POSTREV" >/dev/null 2>&1
+    peer_handback_payload consume-reviewer "# Code Review Report
+
+- Verdict: PASS" | ZENSU_CONFIG="$GATE_OFF_CONFIG" bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] \
+      && grep -qF "BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent consumeoff1) delivered its report in this message as its hand-back" "$WORK/hook" \
+      && [ "$(consume_record)" = absent ] && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ]; then
+      check "RP33c with the gate off, a consume reviewer spawned with the Agent name parameter claims the ticket through its name-framed hand-back" PASS
+    else
+      check "RP33c named consume claim, gate off (event=$(hook_event_of "$WORK/hook") record=$(consume_record) consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook"
+    fi
+  else
+    check "RP33c arm a review chain" FAIL
+  fi
+
+  new_project "$WORK/p-named-invalid"
+  if arm_review "rp-named-invalid" "$WORK/p-named-invalid"; then
+    node "$LIB" create --root "$PROJECT" --session "$SID" --input "$INPUT_JSON" >"$WORK/created" 2>"$WORK/created.err"
+    PACKET="$(awk '$0=="REVIEW PACKET v1"{on=1} on{print} $0=="END REVIEW PACKET v1"{exit}' "$WORK/created")"
+    agent_payload zensu:review-aspect "perspective: correctness
+$PACKET" "## Aspect: correctness
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    agent_payload zensu:review-judge "$PACKET
+merged_panel_findings: none" "## Aspect: judge
+- (no findings)" | bash "$POSTREV" >/dev/null 2>&1
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    CONSUME="PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $TICKET
+$PACKET
+merged findings: none"
+    named_launch_payload zensu:code-reviewer "$CONSUME" consumeinvalid1 consume-reviewer | bash "$POSTREV" >"$WORK/hook-launch" 2>&1
+    handback_payload consume-reviewer "REVIEW PACKET INVALID: policy" | bash "$HANDBACK_HOOK" >"$WORK/hook" 2>&1
+    if [ "$(hook_event_of "$WORK/hook")" = UserPromptSubmit ] && grep -qF "the consume reviewer answered REVIEW PACKET INVALID" "$WORK/hook" \
+      && ! grep -qF "REVIEW INCOMPLETE" "$WORK/hook-launch" \
+      && [ "$(state_field reviewTicketConsumed)" = "false" ] && [ "$(state_field reviewRound)" = "0" ]; then
+      check "RP33d with the gate on, a named consume reviewer whose name-framed hand-back answers REVIEW PACKET INVALID is refused and keeps the ticket" PASS
+    else
+      check "RP33d named invalid consume report (event=$(hook_event_of "$WORK/hook") consumed=$(state_field reviewTicketConsumed) round=$(state_field reviewRound))" FAIL
+      cat "$WORK/hook-launch" "$WORK/hook"
+    fi
+  else
+    check "RP33d arm a review chain" FAIL
   fi
 
   echo "== The review chain's config probes read the project config =="

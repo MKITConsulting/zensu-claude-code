@@ -1663,11 +1663,18 @@ const SESSION_WORK_VERBS = new Set(['get', 'events', 'ask', 'followup']);
 const ORDER_FILE_WORK_VERBS = new Set(['list', 'questions']);
 const HELPER_WORK_VERBS = new Set(['event', 'heartbeat']);
 const HUMAN_PLAN_VERBS = new Set(['push', 'approve', 'finalize', 'abandon', 'confirm-merge', 'followup']);
-const WORK_VERB_ALIASES = new Map([['repos', 'repositories']]);
+const ZENSU_WORD_READER = 'hooks/lib/zensu-cli-words-v1.js';
 const TOKEN_EXPANSION_RE = /\$\{?[!#]?ZENSU_SESSION_TOKEN(?![A-Za-z0-9_])/;
 const PROCESS_ENVIRONMENT_RE = /\/proc\/[^/\s]+\/environ(?![A-Za-z0-9_])/;
 const MAX_SHELL_DEPTH = 4;
 const SHELL_READINGS = ['posix', 'bash', 'zsh'];
+const REDIRECTION_OPERATORS = {
+  posix: /<<<|<<-|<<|<>|<&|<|>>|>&|>\||>/y,
+  bash: /<<<|<<-|<<|<>|<&|<|>>|>&|>\||>|&>>|&>/y,
+  zsh: /<<<|<<-|<<|<>|<&|<|>>&[!|]?|>>[!|]?|>&[!|]?|>[!|]?|&>>[!|]?|&>[!|]?/y,
+};
+const REDIRECTION_DESCRIPTOR_RE = /^(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})$/;
+const ZSH_AMPERSAND_DESCRIPTOR_RE = /^(?:[0-9]|\{[A-Za-z_][A-Za-z0-9_]*\})$/;
 const ENV_SHORT_OPERANDS = new Set(['u', 'C', 'P', 'S', 'a', 'L', 'U']);
 const ENV_LONG_OPERANDS = new Set(['unset', 'chdir', 'split-string', 'argv0']);
 const VARIABLE_READERS = new Set(['read', 'mapfile', 'readarray', 'getopts']);
@@ -1681,12 +1688,58 @@ function stripHeredocBodies(text) {
   }
 }
 
+function heredocSubstitutions(text) {
+  let bodies;
+  try {
+    bodies = require('./bash-source-write-parse.js').heredocBodies(text);
+  } catch (_) {
+    return [];
+  }
+  const spans = [];
+  for (const { quoted, body } of bodies) {
+    if (quoted) continue;
+    for (let index = 0; index < body.length; index += 1) {
+      const char = body[index];
+      if (char === '\\') {
+        index += 1;
+        continue;
+      }
+      if (char === '$' && body[index + 1] === '(') {
+        const close = matchingParen(body, index + 1);
+        spans.push(body.slice(index + 2, close));
+        index = close;
+        continue;
+      }
+      if (char === '`') {
+        const end = body.indexOf('`', index + 1);
+        const stop = end < 0 ? body.length : end;
+        spans.push(body.slice(index + 1, stop));
+        index = stop;
+      }
+    }
+  }
+  return spans;
+}
+
 function gitOperandOptions() {
   try {
     return new Set(require('./bash-source-write-parse.js').GIT_OPTS_WITH_OPERAND);
   } catch (_) {
     return new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
   }
+}
+
+function zensuWordReader() {
+  try {
+    const reader = require('./zensu-cli-words-v1.js');
+    return [reader.commandWords, reader.commandNoun, reader.commandVerb, reader.isGroup].every((f) => typeof f === 'function') ? reader : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function couldNameSubcommand(word) {
+  return word !== '' && !word.startsWith('-') && !/^[0-9]*[<>]/.test(word) && /[^0-9]/.test(word) && !word.includes('/');
 }
 
 function matchingParen(text, open, reading = 'posix') {
@@ -1770,25 +1823,38 @@ function ansiCString(text, start) {
   return { value, end };
 }
 
-function shellCommands(text, depth = 0, reading = 'bash') {
+function redirectionOperator(text, index, reading) {
+  const pattern = REDIRECTION_OPERATORS[reading];
+  pattern.lastIndex = index;
+  const match = pattern.exec(text);
+  return match ? match[0] : '';
+}
+
+function shellCommands(text, depth = 0, reading = 'bash', redirections = false) {
   const commands = [];
   if (depth > MAX_SHELL_DEPTH) return commands;
   let words = [];
   let word = null;
-  const add = (piece) => {
+  let literal = true;
+  let operand = false;
+  const add = (piece, plain = false) => {
     word = (word === null ? '' : word) + piece;
+    literal = literal && plain;
   };
   const endWord = () => {
-    if (word !== null) words.push(reading === 'zsh' && word.includes('\u0000') ? word.slice(0, word.indexOf('\u0000')) : word);
+    if (word !== null && operand) operand = false;
+    else if (word !== null) words.push(reading === 'zsh' && word.includes('\u0000') ? word.slice(0, word.indexOf('\u0000')) : word);
     word = null;
+    literal = true;
   };
   const endCommand = () => {
     endWord();
+    operand = false;
     if (words.length > 0) commands.push(words);
     words = [];
   };
   const nested = (inner) => {
-    for (const command of shellCommands(inner, depth + 1, reading)) commands.push(command);
+    for (const command of shellCommands(inner, depth + 1, reading, redirections)) commands.push(command);
   };
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
@@ -1868,6 +1934,15 @@ function shellCommands(text, depth = 0, reading = 'bash') {
       index = stop;
       continue;
     }
+    const operator = redirections && (char === '<' || char === '>' || (char === '&' && next === '>')) ? redirectionOperator(text, index, reading) : '';
+    if (operator) {
+      const descriptor = char === '&' ? reading === 'zsh' && ZSH_AMPERSAND_DESCRIPTOR_RE.test(word || '') : REDIRECTION_DESCRIPTOR_RE.test(word || '');
+      if (literal && descriptor) word = null;
+      endWord();
+      operand = true;
+      index += operator.length - 1;
+      continue;
+    }
     if (char === ';' || char === '\n' || char === '|' || char === '&' || char === '(' || char === ')') {
       endCommand();
       continue;
@@ -1876,7 +1951,7 @@ function shellCommands(text, depth = 0, reading = 'bash') {
       endWord();
       continue;
     }
-    add(char);
+    add(char, true);
   }
   endCommand();
   return commands;
@@ -2002,21 +2077,6 @@ function plainWords(args, operandOptions = new Set()) {
   return plain;
 }
 
-function zensuCommandWords(args) {
-  const words = [];
-  for (let index = 0; index < args.length && words.length < 3; index += 1) {
-    const word = args[index];
-    if (word === '--') break;
-    if (word === '') continue;
-    if (word.startsWith('-')) {
-      if (!word.includes('=') && (word.length === 2 || word[1] === '-')) index += 1;
-      continue;
-    }
-    words.push(word);
-  }
-  return words;
-}
-
 function gitSubcommand(args) {
   const operands = gitOperandOptions();
   for (let index = 0; index < args.length; index += 1) {
@@ -2036,7 +2096,23 @@ function bashFinding(code, detail) {
 }
 
 function analyzeBash(command, depth = 0) {
-  const text = String(command || '');
+  return analyzeText(String(command || ''), depth, new Map());
+}
+
+function analyzeText(text, depth, memo) {
+  const plain = analyzeReadings(text, depth, false, memo);
+  if (plain.deny || !/[<>$]/.test(text)) return plain;
+  const removed = analyzeReadings(text, depth, true, memo);
+  return removed.deny ? removed : { deny: null, forge: plain.forge || removed.forge };
+}
+
+function analyzeReadings(text, depth, redirections, memo) {
+  const key = `${redirections ? 'r' : 'p'}${depth}:${text}`;
+  if (!memo.has(key)) memo.set(key, readingsVerdict(text, depth, redirections, memo));
+  return memo.get(key);
+}
+
+function readingsVerdict(text, depth, redirections, memo) {
   const result = { deny: null, forge: false };
   if (!text.trim() || depth > MAX_SHELL_DEPTH) return result;
   if (TOKEN_EXPANSION_RE.test(text)) {
@@ -2049,7 +2125,7 @@ function analyzeBash(command, depth = 0) {
   }
   const stripped = stripHeredocBodies(text);
   const seen = new Set();
-  const readings = SHELL_READINGS.flatMap((reading) => shellCommands(stripped, 0, reading)).filter((words) => {
+  const readings = SHELL_READINGS.flatMap((reading) => shellCommands(stripped, 0, reading, redirections)).filter((words) => {
     const key = JSON.stringify(words);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -2095,7 +2171,7 @@ function analyzeBash(command, depth = 0) {
       const evalWords = name === 'eval' && (args[0] === '--' || args[0] === '-') ? args.slice(1) : args;
       const inner = name === 'eval' ? evalWords.join(' ') : (at >= 0 ? String(args[at + 1] || '') : '');
       if (inner) {
-        const innerResult = analyzeBash(inner, depth + 1);
+        const innerResult = redirections ? analyzeText(inner, depth + 1, memo) : analyzeReadings(inner, depth + 1, false, memo);
         if (innerResult.deny) return innerResult;
         result.forge = result.forge || innerResult.forge;
       } else if (name !== 'eval' && commandName(plainWords(args)[0]) === 'zensu-vcs.sh') {
@@ -2169,8 +2245,15 @@ function analyzeBash(command, depth = 0) {
         result.deny = bashFinding('token-host', 'it passes --api-url to zensu');
         return result;
       }
-      const [noun, named, third] = zensuCommandWords(args);
-      const verb = noun === 'work' ? (WORK_VERB_ALIASES.get(named) || named) : named;
+      const reader = zensuWordReader();
+      if (!reader) {
+        if (!args.some(couldNameSubcommand)) continue;
+        result.deny = bashFinding('reader', ZENSU_WORD_READER);
+        return result;
+      }
+      const [first, named, third] = reader.commandWords(args);
+      const noun = reader.commandNoun(first);
+      const verb = reader.commandVerb(noun, named);
       if (noun === 'auth') {
         result.deny = bashFinding('auth', null);
         return result;
@@ -2180,7 +2263,7 @@ function analyzeBash(command, depth = 0) {
           result.deny = bashFinding('helper-verb', `zensu work ${verb}`);
           return result;
         }
-        const scoped = (verb === 'policy' || verb === 'repositories') && third ? ` ${third}` : '';
+        const scoped = reader.isGroup(noun, verb) && third ? ` ${third}` : '';
         if (ORDER_FILE_WORK_VERBS.has(verb) || (verb === 'policy' && third === 'get') || (verb === 'repositories' && third === 'list')) {
           result.deny = bashFinding('order-file', `zensu work ${verb}${scoped}`);
           return result;
@@ -2191,11 +2274,17 @@ function analyzeBash(command, depth = 0) {
         }
       }
       if (noun === 'plan' && HUMAN_PLAN_VERBS.has(verb)) {
-        const scoped = verb === 'followup' && third ? ` ${third}` : '';
+        const scoped = reader.isGroup(noun, verb) && third ? ` ${third}` : '';
         result.deny = bashFinding('human-gate', `zensu plan ${verb}${scoped}`);
         return result;
       }
     }
+  }
+  if (!redirections) return result;
+  for (const inner of heredocSubstitutions(text)) {
+    const innerResult = analyzeText(inner, depth + 1, memo);
+    if (innerResult.deny) return innerResult;
+    result.forge = result.forge || innerResult.forge;
   }
   return result;
 }
@@ -2231,6 +2320,8 @@ function gateReason(orderId, finding) {
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run any more. Run zensu-work-order.sh --finish once and end the session.`;
     case 'powershell':
       return `${lead} The PowerShell tool is not available here, because this gate judges Bash commands only. Run the command through the Bash tool.`;
+    case 'reader':
+      return `${lead} The gate cannot judge a zensu command, because ${finding.detail}, which finds the noun and the verb of a zensu call, could not be loaded: the plugin installation is incomplete. Run no zensu command directly in this session; the work-order helpers still work.`;
     case 'lease-refused':
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run until a lease renewal succeeds. Run zensu-work-order.sh --renew --force and follow its exit code: after exit 0 run the command again, after exit 4 or 6 run zensu-work-order.sh --finish once and end the session, and after exit 7 follow the exit table of /zensu:work.`;
     default:

@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.35.0",
+  "version": "0.38.0",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -23,6 +23,7 @@
     "./skills/autopilot-adopt",
     "./skills/autopilot-release",
     "./skills/bootstrap",
+    "./skills/change",
     "./skills/converge",
     "./skills/cover",
     "./skills/delivery-route",

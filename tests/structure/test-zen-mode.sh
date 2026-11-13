@@ -604,7 +604,7 @@ if command -v node >/dev/null 2>&1; then
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { bad.push("eval-dir:unreadable"); }
-    if (scenarios.length < 12) bad.push("eval-dir:expected-at-least-12-scenarios-got-" + scenarios.length);
+    if (scenarios.length < 14) bad.push("eval-dir:expected-at-least-14-scenarios-got-" + scenarios.length);
     // The floor above is an absolute one and cannot see the loss of a scenario
     // added AFTER it was written: deleting one together with its registration
     // used to leave a consistent smaller world in which nothing turned red, and
@@ -632,7 +632,7 @@ if command -v node >/dev/null 2>&1; then
     // floor is what closes that, and it is therefore the CURRENT scenario count
     // rather than a round number below it — raising it is the registration step
     // for a new scenario, exactly as `registered` in tests/profiles/unit-files.v1.json works.
-    if (registered < 12) {
+    if (registered < 14) {
       bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
     }
     if (scenarios.length < registered) {
@@ -995,9 +995,9 @@ MISSING20=""
 for FRAG20 in "security warnings" "irreversible" "credentials" "every required step" "one-question cap"; do
   printf '%s' "$RAW20" | grep -qiF "$FRAG20" || MISSING20="$MISSING20 '$FRAG20'"
 done
-# The carve-out must NOT suspend the full-sentence / precedence rule: a safety
-# warning is the last place for fragments. Naming rules by number here would be a
-# drift hazard, since the hook's numbering differs from SKILL.md's.
+# The carve-out must NOT suspend the full-sentence / precedence rule: a style the user
+# chose may set a safety warning's sentence form, never its length or detail. Naming
+# rules by number here would be a drift hazard: the hook's numbering differs from SKILL.md's.
 printf '%s' "$RAW20" | grep -qiF 'full-sentence rule is NEVER suspended' \
   || MISSING20="$MISSING20 'full-sentence rule is NEVER suspended'"
 printf '%s' "$RAW20" | grep -qE 'rules? [0-9], *[0-9].*do not apply' \
@@ -4459,19 +4459,27 @@ fi
 
 Z110_BAD=""
 Z110_SHARED="a style the user chose may set a safety warning's sentence form, never its length or detail"
-Z110_FULL="$(HOOK="$HOOK" node -e '
-  const hook = require("fs").readFileSync(process.env.HOOK, "utf8");
-  const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
-    .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
-  const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
-  process.stdout.write(active === undefined ? "" : active);
-' 2>/dev/null)"
+z110_block() {
+  HOOK="$HOOK" WANT="$1" node -e '
+    const hook = require("fs").readFileSync(process.env.HOOK, "utf8");
+    const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
+      .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
+    const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
+    const shortBody = blocks.find((s) => s.startsWith("zen-mode is ACTIVE; the full zen-mode contract"));
+    const found = process.env.WANT === "short" ? shortBody : active;
+    process.stdout.write(found === undefined ? "" : found);
+  ' 2>/dev/null
+}
+Z110_FULL="$(z110_block full)"
+Z110_SHORT="$(z110_block short)"
 Z110_SKILL="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
 Z110_PRECEDENCE="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/precedence.md" | tr -s ' ')"
 [ -n "$Z110_FULL" ] || Z110_BAD="$Z110_BAD hook:full-directive-not-found"
-for Z110_NAME in hook skill precedence; do
+[ -n "$Z110_SHORT" ] || Z110_BAD="$Z110_BAD hook:short-body-not-found"
+for Z110_NAME in hook short skill precedence; do
   case "$Z110_NAME" in
     (hook) Z110_TEXT="$Z110_FULL" ;;
+    (short) Z110_TEXT="$Z110_SHORT" ;;
     (skill) Z110_TEXT="$Z110_SKILL" ;;
     (precedence) Z110_TEXT="$Z110_PRECEDENCE" ;;
   esac
@@ -4479,7 +4487,7 @@ for Z110_NAME in hook skill precedence; do
   printf '%s' "$Z110_TEXT" | grep -qiF -- 'last place for fragments' && Z110_BAD="$Z110_BAD $Z110_NAME:keeps-the-retired-rationale"
 done
 if [ -z "$Z110_BAD" ]; then
-  check "Z110 the skill, docs/precedence.md and the full directive share one sentence on what a style the user chose sets in a safety warning, and none keeps the retired rationale" PASS
+  check "Z110 the skill, docs/precedence.md, the full directive and its short body share one sentence on what a style the user chose sets in a safety warning, and none keeps the retired rationale" PASS
 else
   check "Z110 the safety-warning precedence wording diverges across its carriers:$Z110_BAD" FAIL
 fi
@@ -4835,7 +4843,7 @@ Z104="$(HOOK="$HOOK" node -e '
   && check "Z104 the hook holds the full ACTIVE contract first and the short body second, and the short body carries the none-swap span exactly once" PASS \
   || check "Z104 ACTIVE heredoc layout is '${Z104:-unreadable}', want 2:full-first:1:1" FAIL
 
-ZEN_SHORT_ARMED_CEILING=2320
+ZEN_SHORT_ARMED_CEILING=2413
 ZEN_SHORT_ARMED_HEADROOM=95
 Z105_LEN="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" node -e '
   const fs = require("fs");
@@ -5049,6 +5057,230 @@ rm -rf "$P107E" "$Q107E"
 [ -z "$Z107E_BAD" ] \
   && check "Z107e the default rung reads the project overlay under the session's recorded root: --status without CLAUDE_PROJECT_DIR and the doctor row and the hook under another CLAUDE_PROJECT_DIR resolve the overlay's off, and on once it is removed" PASS \
   || check "Z107e default rung not read under the recorded root:$Z107E_BAD" FAIL
+
+P107F="$(mktemp -d -t zenmode-XXXXXX)"; S107F="z107f-$$"
+Q107F="$(mktemp -d -t zenmode-XXXXXX)"
+new_session "$P107F" "$S107F"
+mkdir -p "$P107F/.zensu" "$Q107F/.zensu"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$P107F/.zensu/config.json"
+Z107F_CMD="$(node -e '
+  const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n");
+  const hits = lines.filter((l) => l.includes("zensu-zen-mode.sh\" --status"));
+  if (hits.length !== 1) process.exit(3);
+  process.stdout.write(hits[0].split("${CLAUDE_PLUGIN_DATA}").join(process.argv[2]).split("${CLAUDE_PLUGIN_ROOT}").join(process.argv[3]));
+' "$SKILL" "$CLAUDE_PLUGIN_DATA" "$PLUGIN_DIR" 2>/dev/null)"
+z107f_run() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107F" env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG -u CLAUDE_PLUGIN_ROOT \
+    ${2:+CLAUDE_PROJECT_DIR="$2"} bash -c "$1" 2>/dev/null
+}
+Z107F_BAD=""
+if [ -z "$Z107F_CMD" ]; then
+  Z107F_BAD=" [skills/zen-mode/SKILL.md renders no single --status command]"
+else
+  case "$Z107F_CMD" in
+    (*CLAUDE_PROJECT_DIR*) Z107F_BAD="$Z107F_BAD [the rendered --status command still sets CLAUDE_PROJECT_DIR]" ;;
+  esac
+  Z107F_ST="$(z107f_run "$Z107F_CMD")"
+  [ "$Z107F_ST" = off ] || Z107F_BAD="$Z107F_BAD [no CLAUDE_PROJECT_DIR, recorded-root overlay sets hooks.zenMode false: '$Z107F_ST']"
+  Z107F_ST="$(z107f_run "$Z107F_CMD" "$Q107F")"
+  [ "$Z107F_ST" = off ] || Z107F_BAD="$Z107F_BAD [CLAUDE_PROJECT_DIR names a silent tree, recorded-root overlay sets hooks.zenMode false: '$Z107F_ST']"
+  rm -f "$P107F/.zensu/config.json"
+  printf '%s' '{"hooks":{"zenMode":false}}' > "$Q107F/.zensu/config.json"
+  Z107F_ST="$(z107f_run "$Z107F_CMD" "$Q107F")"
+  [ "$Z107F_ST" = on ] || Z107F_BAD="$Z107F_BAD [CLAUDE_PROJECT_DIR names a tree whose overlay sets hooks.zenMode false, recorded root silent: '$Z107F_ST']"
+fi
+rm -rf "$P107F" "$Q107F"
+[ -z "$Z107F_BAD" ] \
+  && check "Z107f /zensu:zen-mode renders the bare --status command, and it follows the recorded root whatever CLAUDE_PROJECT_DIR it carries: off under a recorded-root overlay that sets hooks.zenMode false, with no CLAUDE_PROJECT_DIR and with one naming a silent tree, and on when only that other tree's overlay sets it" PASS \
+  || check "Z107f rendered --status does not follow the recorded root:$Z107F_BAD" FAIL
+
+P107G="$(mktemp -d -t zenmode-XXXXXX)"; S107G="z107g-$$"
+Q107G="$(mktemp -d -t zenmode-XXXXXX)"
+new_session "$P107G" "$S107G"
+mkdir -p "$P107G/.zensu" "$Q107G/.zensu"
+z107g_status() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107G" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$Q107G" env -u ZENSU_CONFIG \
+    bash "$HELPER" --status 2>/dev/null
+}
+z107g_hook() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$S107G" "$1" \
+    | HOME="$Z107_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$Q107G" env -u ZENSU_CONFIG \
+      bash "$HOOK" 2>/dev/null | classify
+}
+z107g_doctor() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107G" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$Q107G" ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=absent \
+    ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing \
+    env -u ZENSU_CONFIG -u ZDOC_ZEN_MODE bash "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh" 2>/dev/null
+}
+z107g_banner() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"clear",session_id:process.argv[1],cwd:process.argv[2]}))' "$S107G" "$P107G" \
+    | HOME="$Z107_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$Q107G" \
+      env -u ZENSU_CONFIG bash "$PLUGIN_DIR/hooks/session-start-banner.sh" 2>/dev/null \
+    | node -e '
+      let s = ""; process.stdin.on("data", (c) => { s += c; });
+      process.stdin.on("end", () => {
+        s = s.trim();
+        if (!s) { process.stdout.write("EMPTY"); return; }
+        let message = "";
+        try { message = String(JSON.parse(s).systemMessage || ""); } catch (_) { process.stdout.write("BADJSON"); return; }
+        process.stdout.write(message.split("\n").some((l) => l.startsWith("zensu: zen-mode — on by default")) ? "LINE" : "NOLINE");
+      });'
+}
+Z107G_SCOPE="the hook reads both zen-mode keys under each session's recorded project root, so the zen-mode: row says what this session resolves"
+Z107G_BAD=""
+z107g_case() {
+  local got report
+  got="$(z107g_status)"
+  [ "$got" = "$2" ] || Z107G_BAD="$Z107G_BAD [$1 status='$got']"
+  report="$(z107g_doctor)"
+  got="$(printf '%s\n' "$report" | grep -o 'zen-mode: [a-z]* ([^)]*)' | head -1)"
+  [ "$got" = "zen-mode: $3" ] || Z107G_BAD="$Z107G_BAD [$1 doctor='$got']"
+  got="$(printf '%s\n' "$report" | grep -F 'zen-mode default: ' | head -1)"
+  case "$got" in
+    (*"$6"*"$Z107G_SCOPE"*) ;;
+    (*) Z107G_BAD="$Z107G_BAD [$1 config-row='${got:0:90}']" ;;
+  esac
+  got="$(z107g_hook "$5")"
+  [ "$got" = "$4" ] || Z107G_BAD="$Z107G_BAD [$1 hook='$got']"
+  got="$(z107g_banner)"
+  [ "$got" = "$7" ] || Z107G_BAD="$Z107G_BAD [$1 banner='$got']"
+}
+printf '%s' '{"hooks":{"zenMode":false}}' > "$P107G/.zensu/config.json"
+z107g_case recorded-root-off off "off (hooks.zenMode=false)" EMPTY "first prompt" "zen-mode default: on (hooks.zenModeDefault)" NOLINE
+rm -f "$P107G/.zensu/config.json"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$Q107G/.zensu/config.json"
+z107g_case host-directory-off on "on (hooks.zenModeDefault)" "UserPromptSubmit|ON" "second prompt" "zen-mode default: off for every session (hooks.zenMode=false)" LINE
+[ -z "$Z107G_BAD" ] \
+  && check "Z107g the hook, the /zensu:doctor session row, --status and the SessionStart banner read hooks.zenMode under the session's recorded root while CLAUDE_PROJECT_DIR names another tree: the recorded root's overlay switches all four off and the other tree's overlay switches none of them, while the doctor's zen-mode default: row, read from its config block, says that the zen-mode: row describes the session" PASS \
+  || check "Z107g hooks.zenMode not read under the recorded root:$Z107G_BAD" FAIL
+
+Z107H_LINE="zensu-zen-mode.sh: hooks.zenMode is false in the config read under the session's recorded project root, where the re-injection hook reads it too, so the hook is off"
+Z107H_ERR="$CONTROL_TMP/z107h.err"
+z107h_status() {
+  HOME="$Z107_HOME" CLAUDE_CODE_SESSION_ID="$S107G" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$Q107G" env -u ZENSU_CONFIG \
+    bash "$HELPER" --status 2>"$Z107H_ERR"
+}
+rm -f "$P107G/.zensu/config.json"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$Q107G/.zensu/config.json"
+Z107H_BAD=""
+Z107H_OUT="$(z107h_status)"
+[ "$Z107H_OUT" = on ] || Z107H_BAD="$Z107H_BAD [host-directory-off status='$Z107H_OUT']"
+[ ! -s "$Z107H_ERR" ] || Z107H_BAD="$Z107H_BAD [host-directory-off stderr='$(head -c 200 "$Z107H_ERR")']"
+rm -f "$Q107G/.zensu/config.json"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$P107G/.zensu/config.json"
+Z107H_OUT="$(z107h_status)"
+[ "$Z107H_OUT" = off ] || Z107H_BAD="$Z107H_BAD [recorded-root-off status='$Z107H_OUT']"
+[ "$(cat "$Z107H_ERR")" = "$Z107H_LINE" ] || Z107H_BAD="$Z107H_BAD [recorded-root-off stderr='$(head -c 200 "$Z107H_ERR")']"
+[ -z "$Z107H_BAD" ] \
+  && check "Z107h --status names the session's recorded project root on stderr, with a bare off on stdout, when hooks.zenMode is false in that root's overlay, and writes nothing to stderr when only the CLAUDE_PROJECT_DIR tree's overlay sets it" PASS \
+  || check "Z107h --status stderr does not name the recorded root:$Z107H_BAD" FAIL
+
+Z107I_BIN="$CONTROL_TMP/z107i-bin"
+mkdir -p "$Z107I_BIN"
+cat > "$Z107I_BIN/node" <<'STUB'
+#!/bin/bash
+kind=x
+case "$*" in
+  (*'core.readContext({ recordsDir, sessionId: key })'*) kind=root ;;
+esac
+printf '%s\n' "$kind" >> "$Z107I_CALLS"
+exec "$Z107I_NODE" "$@"
+STUB
+chmod +x "$Z107I_BIN/node"
+Z107I_NODE="$(command -v node)"
+z107i_hook() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$S107G" "$1" \
+    | PATH="$Z107I_BIN:$PATH" Z107I_CALLS="$2" Z107I_NODE="$Z107I_NODE" HOME="$Z107_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+      CLAUDE_PROJECT_DIR="$Q107G" env -u ZENSU_CONFIG bash "$HOOK" 2>/dev/null | classify
+}
+z107i_count() {
+  if [ -f "$1" ]; then grep -c "$2" "$1" | tr -d ' '; else printf '0'; fi
+}
+rm -f "$Q107G/.zensu/config.json"
+printf '%s' '{"hooks":{"zenMode":false}}' > "$P107G/.zensu/config.json"
+Z107I_BAD=""
+Z107I_OFF="$CONTROL_TMP/z107i-off.calls"
+Z107I_GOT="$(z107i_hook "third prompt" "$Z107I_OFF")"
+[ "$Z107I_GOT" = EMPTY ] || Z107I_BAD="$Z107I_BAD [recorded-root-off hook='$Z107I_GOT']"
+[ "$(z107i_count "$Z107I_OFF" '^root$')" = 0 ] || Z107I_BAD="$Z107I_BAD [recorded-root-off root verifications=$(z107i_count "$Z107I_OFF" '^root$')]"
+[ "$(z107i_count "$Z107I_OFF" '^x$')" -ge 1 ] || Z107I_BAD="$Z107I_BAD [recorded-root-off: the node shim saw no call, so the count proves nothing]"
+rm -f "$P107G/.zensu/config.json"
+Z107I_ON="$CONTROL_TMP/z107i-on.calls"
+Z107I_GOT="$(z107i_hook "fourth prompt" "$Z107I_ON")"
+[ "$Z107I_GOT" = "UserPromptSubmit|ON" ] || Z107I_BAD="$Z107I_BAD [no overlay hook='$Z107I_GOT']"
+[ "$(z107i_count "$Z107I_ON" '^root$')" = 1 ] || Z107I_BAD="$Z107I_BAD [no overlay root verifications=$(z107i_count "$Z107I_ON" '^root$')]"
+[ -z "$Z107I_BAD" ] \
+  && check "Z107i with hooks.zenMode false in the recorded root's overlay the hook exits before it verifies the root, so that path starts no zensu_resolve_project_dir node child, while the enabled path verifies the root exactly once for the marker" PASS \
+  || check "Z107i the disabled path verifies the root, or the enabled path does not verify it exactly once:$Z107I_BAD" FAIL
+rm -rf "$P107G" "$Q107G"
+
+Z107J_SLICE="$CONTROL_TMP/z107j-slice.sh"
+awk '
+  on { print }
+  on && $0 == "esac" { exit }
+  $0 == "zensu_bind_hook_session \"$INPUT\" || exit 0" { on = 1 }
+' "$HOOK" > "$Z107J_SLICE"
+Z107J_N="$(wc -l < "$Z107J_SLICE" | tr -d ' ')"
+Z107J_LAST="$(sed -n '$p' "$Z107J_SLICE")"
+cat >> "$Z107J_SLICE" <<'SLICE'
+printf 'reached:%s' "$ZEN_FLAG_ROOT"
+SLICE
+z107j_run() {
+  local out rc
+  out="$(OSTYPE="$1" ZENSU_SESSION_KEY=z107j ZENSU_PROJECT_ROOT="$2" bash "$Z107J_SLICE" 2>/dev/null)"
+  rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+z107j_want() {
+  local got
+  got="$(z107j_run "$1" "$2")"
+  [ "$got" = "$3" ] || Z107J_BAD="$Z107J_BAD [$4: got '$got']"
+}
+z107j_line() {
+  local hits
+  hits="$(grep -nxF -- "$1" "$HOOK" | cut -d: -f1)"
+  case "$hits" in
+    (''|*[!0-9]*) printf '0' ;;
+    (*) printf '%s' "$hits" ;;
+  esac
+}
+Z107J_BAD=""
+Z107J_REAL="$CONTROL_TMP/z107j-real"
+Z107J_ALIAS="$CONTROL_TMP/z107j-alias"
+mkdir -p "$Z107J_REAL"
+if [ "$Z107J_LAST" != esac ] || [ "$Z107J_N" -gt 12 ]; then
+  Z107J_BAD="$Z107J_BAD [no slice of at most 12 lines runs from the session bind to the end of the flag-root render]"
+else
+  if ln -s "$Z107J_REAL" "$Z107J_ALIAS" 2>/dev/null && [ -L "$Z107J_ALIAS" ]; then
+    Z107J_PHYS="$(cd -P -- "$Z107J_REAL" && pwd -P)"
+    z107j_want msys "$Z107J_ALIAS" "0|reached:$Z107J_PHYS" "msys alias"
+    z107j_want cygwin "$Z107J_ALIAS" "0|reached:$Z107J_PHYS" "cygwin alias"
+    z107j_want linux-gnu "$Z107J_ALIAS" "0|reached:$Z107J_ALIAS" "posix alias"
+  elif [ "$IS_WINDOWS" = true ]; then
+    skipcheck "Z107j alias arms — native directory symlinks are unavailable on this host"
+  else
+    Z107J_BAD="$Z107J_BAD [symlink fixture creation failed]"
+  fi
+  z107j_want msys "" "0|" "msys empty root"
+  z107j_want linux-gnu "" "0|" "posix empty root"
+  z107j_want msys "$CONTROL_TMP/z107j-missing" "0|" "msys missing root"
+fi
+Z107J_BIND="$(z107j_line 'zensu_bind_hook_session "$INPUT" || exit 0')"
+Z107J_GUARD="$(z107j_line '[ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 0')"
+Z107J_READ="$(z107j_line 'zensu_hook_enabled zenMode "$ZEN_FLAG_ROOT" || exit 0')"
+Z107J_RESOLVE="$(z107j_line 'ZEN_ROOT="$(zensu_resolve_project_dir)" || exit 0')"
+Z107J_END=$((Z107J_BIND + Z107J_N))
+if ! { [ "$Z107J_BIND" -gt 0 ] && [ "$Z107J_GUARD" -gt "$Z107J_BIND" ] && [ "$Z107J_GUARD" -lt "$Z107J_END" ] \
+   && [ "$Z107J_READ" -gt "$Z107J_END" ] && [ "$Z107J_RESOLVE" -gt "$Z107J_READ" ]; }; then
+  Z107J_BAD="$Z107J_BAD [order bind=$Z107J_BIND guard=$Z107J_GUARD render-end=$Z107J_END read=$Z107J_READ resolve=$Z107J_RESOLVE]"
+fi
+[ "$(grep -c '^zensu_hook_enabled zenMode ' "$HOOK")" = 1 ] || Z107J_BAD="$Z107J_BAD [the hook does not read hooks.zenMode exactly once]"
+[ -z "$Z107J_BAD" ] \
+  && check "Z107j the hook exits before its hooks.zenMode read on an empty exported root, renders that root with cd -P on MSYS and Cygwin only and exits when the render fails, and reads the flag under the rendered root between the session bind and zensu_resolve_project_dir" PASS \
+  || check "Z107j the flag-root guard, its MSYS render or its place in the hook drifted:$Z107J_BAD" FAIL
 
 P108="$(mktemp -d -t zenmode-XXXXXX)"; S108="z108-$$"
 new_session "$P108" "$S108"

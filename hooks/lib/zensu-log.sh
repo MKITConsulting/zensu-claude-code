@@ -100,7 +100,11 @@ _zensu_unqualified_change_count() {
   [ -n "$root" ] || { printf 'unavailable'; return 0; }
   command -v git >/dev/null 2>&1 || { printf 'unknown'; return 0; }
   if inside="$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)"; then
-    [ "$inside" = "true" ] || { printf 'unknown'; return 0; }
+    case "$inside" in
+      (true) ;;
+      (false) printf 'unknown'; return 0 ;;
+      (*) printf 'unavailable'; return 0 ;;
+    esac
   else
     inside_err="$(LC_ALL=C _tc_git -C "$root" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
     case "$inside_err" in
@@ -118,6 +122,16 @@ _zensu_unqualified_change_count() {
   tracked="$(_tc_git -C "$root" diff --name-only HEAD 2>/dev/null)" || { printf 'unavailable'; return 0; }
   untracked="$(_tc_git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" || { printf 'unavailable'; return 0; }
   printf '%s\n%s\n' "$tracked" "$untracked" | awk 'length($0) > 0 && !seen[$0]++ { n++ } END { print n + 0 }'
+}
+
+_zensu_transport_unwritten() {
+  echo "$1: the $2 transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space." >&2
+}
+
+_zensu_transport_put() {
+  printf '%s' "$4" > "$2/$3" && return 0
+  _zensu_transport_unwritten "$1" "$3"
+  return 2
 }
 
 _zensu_evr_prepare() {
@@ -143,14 +157,15 @@ _zensu_evr_prepare() {
     echo "$label: the temporary directory cannot be resolved" >&2
     return 2
   }
-  printf '%s' "$(zensu_evidence_full_suite_command)" > "$_evr_dir/full-suite-command"
-  printf '%s' "$(zensu_evidence_full_suite_gate)" > "$_evr_dir/gate-mode"
-  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
-    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix"
-  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
-    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix-scoped"
-  printf '%s' "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" > "$_evr_dir/full-suite-marker"
-  printf '%s' "$(zensu_evidence_ci_config_json)" > "$_evr_dir/ci-config.json"
+  _zensu_transport_put "$label" "$_evr_dir" full-suite-command "$(zensu_evidence_full_suite_command)" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" gate-mode "$(zensu_evidence_full_suite_gate)" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" remedy-prefix "$(printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" remedy-prefix-scoped "$(printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" full-suite-marker \
+    "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" ci-config.json "$(zensu_evidence_ci_config_json)" || return 2
   _evr_msys_excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_DIR ZENSU_EVR_PLUGIN_DATA \
     ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH ZENSU_EVR_WORK_TREE ZENSU_EVR_WORK_DIR)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
@@ -192,21 +207,52 @@ _zensu_full_suite_ticket_matches() {
   [ -n "$current" ] && [ "$current" = "${2:-}" ]
 }
 
+_zensu_full_suite_not_applicable() {
+  local excl
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ -n "${_evr_lib_dir:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_PROJECT_ROOT)" || excl="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$excl" \
+  ZENSU_EVR_LIB="$_evr_lib_dir/evidence-run-v1.js" \
+  ZENSU_EVR_PROJECT_ROOT="$ZENSU_PROJECT_ROOT" \
+    node -e 'const where = require(process.env.ZENSU_EVR_LIB).workTree(process.env.ZENSU_EVR_PROJECT_ROOT); if (where.applicable !== false || typeof where.reason !== "string" || where.reason === "") process.exit(1); process.stdout.write(where.reason);' 2>/dev/null
+}
+
+_zensu_full_suite_gate_unjudged() {
+  local cause="${2:-the full-suite transport failed}" mode=required reason
+  [ "$(zensu_evidence_full_suite_gate)" = "advisory" ] && mode=advisory
+  if reason="$(_zensu_full_suite_not_applicable)"; then
+    _fsg_lines="FULL SUITE — not-applicable | $reason, so no run can be bound to a tree ($cause) | gate: $mode"
+    return 0
+  fi
+  if [ "$_evr_escape" = "1" ]; then
+    tdd_record_bypass "${1:-}" ZENSU_FULL_SUITE_GATE >/dev/null 2>&1 || true
+    _fsg_lines="FULL SUITE — escaped | ZENSU_FULL_SUITE_GATE=off switched this check off, so no run was read ($cause) | gate: $mode"
+    return 0
+  fi
+  [ "$mode" = "advisory" ] || return 1
+  _fsg_lines="FULL SUITE — unavailable (advisory, not blocking) | $cause, so no run was read | gate: advisory"
+  return 0
+}
+
 _zensu_full_suite_gate() {
   local session="$1" bound="${2:-}" rc=0
   _fsg_lines=""
   _evr_escape=0
+  _evr_lib_dir=""
   [ "${ZENSU_FULL_SUITE_GATE:-on}" = "off" ] && _evr_escape=1
   if ! _zensu_evr_prepare "zensu-log.sh --chain-done"; then
-    if [ "$_evr_escape" = "1" ]; then
-      tdd_record_bypass "$session" ZENSU_FULL_SUITE_GATE >/dev/null 2>&1 || true
-      return 0
-    fi
-    [ "$(zensu_evidence_full_suite_gate)" = "advisory" ] && return 0
+    _zensu_full_suite_gate_unjudged "$session" "the full-suite transport could not be prepared" && return 0
+    echo "zensu-log.sh --chain-done: the chain stays open; resolve the full-suite transport fault named above, then run --chain-done again." >&2
     return 1
   fi
   if [ "$bound" = "bound" ] && ! _zensu_evr_work_tree "$session" "${3:-}"; then
-    printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault"
+    if ! printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault"; then
+      echo "zensu-log.sh --chain-done: the work-tree lookup failed and its cause could not be written to the temporary directory, so no full-suite verdict was read." >&2
+      _zensu_full_suite_gate_unjudged "$session" "the work-tree lookup failed and its cause could not be written to the temporary directory" && return 0
+      echo "zensu-log.sh --chain-done: the chain stays open; check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --chain-done again." >&2
+      return 1
+    fi
   fi
   _fsg_lines="$(_zensu_evr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || rc=$?
   if [ "$(cat "$_evr_dir/verdict-state" 2>/dev/null)" = "escaped" ]; then
@@ -262,6 +308,7 @@ _zensu_avr_prepare() {
       && tdd_bypass_recorded "$state_file" ZENSU_EDIT_LANDING_GATE; then
       _avr_escaped_el=1
     fi
+    _avr_chain_inputs=1
   fi
   _avr_dir="$(mktemp -d 2>/dev/null)" || {
     echo "$label: no temporary directory available" >&2
@@ -272,7 +319,7 @@ _zensu_avr_prepare() {
     echo "$label: the temporary directory cannot be resolved" >&2
     return 2
   }
-  printf '%s' "$(zensu_evidence_acceptance_gate)" > "$_avr_dir/gate-mode"
+  _zensu_transport_put "$label" "$_avr_dir" gate-mode "$(zensu_evidence_acceptance_gate)" || return 2
   _avr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _avr_bash="bash"
   _avr_msys_excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_DIR ZENSU_AVR_PLUGIN_DATA \
     ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH ZENSU_AVR_WORK_TREE)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
@@ -354,18 +401,20 @@ _zensu_chain_project_dir() {
 _zensu_bound_work_tree_lookup() {
   local session="$1" scratch="$2" given="$3" ctx="$4" state open line dir unknown
   unknown="this chain's workflow document cannot be read, so whether it is bound to an Autopilot worktree is unknown"
+  zensu_memoize_project_dir >/dev/null 2>&1 || true
   if [ "$given" != "given" ]; then
     command -v tdd_autopilot_context >/dev/null 2>&1 \
       || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh" 2>/dev/null \
-      || { printf '%s' "the phase library could not be loaded, so whether this chain is bound to an Autopilot worktree is unknown" > "$scratch/bwt-fault"; return 0; }
+      || { printf 'library' > "$scratch/bwt-stage"; printf '%s' "the phase library could not be loaded, so whether this chain is bound to an Autopilot worktree is unknown" > "$scratch/bwt-fault"; return 0; }
     state="$(tdd_state_file "$session" 2>/dev/null)" || state=""
     if [ -z "$state" ]; then
+      printf 'state' > "$scratch/bwt-stage"
       printf '%s' "the current session's workflow path is unavailable" > "$scratch/bwt-fault"
       return 0
     fi
     ctx='{}'
     if [ -e "$state" ] || [ -L "$state" ]; then
-      ctx="$(tdd_autopilot_context "$state" "$session" 2>/dev/null)" || { printf '%s' "$unknown" > "$scratch/bwt-fault"; return 0; }
+      ctx="$(tdd_autopilot_context "$state" "$session" 2>/dev/null)" || { printf 'linkage' > "$scratch/bwt-stage"; printf '%s' "$unknown" > "$scratch/bwt-fault"; return 0; }
     fi
     case "$ctx" in
       (''|'{}') : > "$scratch/bwt-standalone"; return 0 ;;
@@ -374,14 +423,15 @@ _zensu_bound_work_tree_lookup() {
     case "$open" in
       (open) ;;
       (closed) : > "$scratch/bwt-standalone"; return 0 ;;
-      (*) printf '%s' "$unknown" > "$scratch/bwt-fault"; return 0 ;;
+      (*) printf 'linkage' > "$scratch/bwt-stage"; printf '%s' "$unknown" > "$scratch/bwt-fault"; return 0 ;;
     esac
   else
     case "$ctx" in
-      (''|'{}') printf '%s' "the bound chain's Autopilot linkage is empty" > "$scratch/bwt-fault"; return 0 ;;
+      (''|'{}') printf 'linkage' > "$scratch/bwt-stage"; printf '%s' "the bound chain's Autopilot linkage is empty" > "$scratch/bwt-fault"; return 0 ;;
     esac
   fi
   if ! line="$(_zensu_chain_work_tree "$ctx" "$CLAUDE_PROJECT_DIR" 2>"$scratch/work-tree.err")"; then
+    printf 'work-tree' > "$scratch/bwt-stage"
     awk 'NF' "$scratch/work-tree.err" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' > "$scratch/bwt-fault"
     [ -s "$scratch/bwt-fault" ] || printf '%s' "the work-tree resolver named no cause" > "$scratch/bwt-fault"
     return 0
@@ -390,12 +440,12 @@ _zensu_bound_work_tree_lookup() {
     (work-tree$'\t'?*) ;;
     (*) : > "$scratch/bwt-standalone"; return 0 ;;
   esac
+  printf '%s' "${line#*$'\t'}" > "$scratch/bwt-tree"
   if ! dir="$(_zensu_chain_project_dir "$line" "$CLAUDE_PROJECT_DIR" 2>"$scratch/work-tree.err")"; then
-    awk 'NF' "$scratch/work-tree.err" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' > "$scratch/bwt-fault"
-    [ -s "$scratch/bwt-fault" ] || printf '%s' "the chain's project directory could not be resolved" > "$scratch/bwt-fault"
+    awk 'NF' "$scratch/work-tree.err" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' > "$scratch/bwt-dir-fault"
+    [ -s "$scratch/bwt-dir-fault" ] || printf '%s' "the chain's project directory could not be resolved" > "$scratch/bwt-dir-fault"
     return 0
   fi
-  printf '%s' "${line#*$'\t'}" > "$scratch/bwt-tree"
   printf '%s' "$dir" > "$scratch/bwt-dir"
 }
 
@@ -403,16 +453,29 @@ _zensu_bound_work_tree() {
   local session="${1:-}" scratch="${2:-}"
   _bwt_tree=""
   _bwt_dir=""
+  _bwt_dir_fault=""
   _bwt_fault=""
+  _bwt_stage=""
   [ -n "$session" ] && [ -n "$scratch" ] || return 0
-  rm -f "$scratch/bwt-standalone" "$scratch/bwt-tree" "$scratch/bwt-dir" "$scratch/bwt-fault"
+  rm -f "$scratch/bwt-standalone" "$scratch/bwt-tree" "$scratch/bwt-dir" "$scratch/bwt-dir-fault" \
+    "$scratch/bwt-fault" "$scratch/bwt-stage"
   ( _zensu_bound_work_tree_lookup "$session" "$scratch" "${3+given}" "${3-}" )
   if [ -f "$scratch/bwt-fault" ]; then
     _bwt_fault="$(cat "$scratch/bwt-fault" 2>/dev/null)"
     [ -n "$_bwt_fault" ] || _bwt_fault="the work-tree lookup named no cause"
-  elif [ -f "$scratch/bwt-tree" ] && [ -f "$scratch/bwt-dir" ]; then
-    _bwt_tree="$(cat "$scratch/bwt-tree")"
-    _bwt_dir="$(cat "$scratch/bwt-dir")"
+    _bwt_stage="$(cat "$scratch/bwt-stage" 2>/dev/null)"
+  elif [ -f "$scratch/bwt-tree" ]; then
+    _bwt_tree="$(cat "$scratch/bwt-tree" 2>/dev/null)"
+    if [ -z "$_bwt_tree" ]; then
+      _bwt_fault="the work-tree lookup handed back an empty work-tree path"
+      _bwt_stage="work-tree"
+    elif [ -f "$scratch/bwt-dir" ]; then
+      _bwt_dir="$(cat "$scratch/bwt-dir" 2>/dev/null)"
+      [ -n "$_bwt_dir" ] || _bwt_dir_fault="the work-tree lookup handed back an empty project-directory path"
+    else
+      _bwt_dir_fault="$(cat "$scratch/bwt-dir-fault" 2>/dev/null)"
+      [ -n "$_bwt_dir_fault" ] || _bwt_dir_fault="the chain's project directory could not be resolved"
+    fi
   elif [ ! -f "$scratch/bwt-standalone" ]; then
     _bwt_fault="the work-tree lookup did not finish"
   fi
@@ -425,6 +488,7 @@ _zensu_evr_work_tree() {
   _zensu_bound_work_tree "${1:-}" "$_evr_dir" ${2+"$2"}
   [ -z "$_bwt_fault" ] || return 1
   [ -n "$_bwt_tree" ] || return 0
+  [ -z "$_bwt_dir_fault" ] || { _bwt_fault="$_bwt_dir_fault"; return 1; }
   _evr_work_tree="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_bwt_tree")" \
     && _evr_work_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_bwt_dir")" \
     && return 0
@@ -439,10 +503,92 @@ _zensu_avr_work_tree() {
   _zensu_bound_work_tree "${1:-}" "$_avr_dir"
   [ -z "$_bwt_fault" ] || return 1
   [ -n "$_bwt_tree" ] || return 0
+  [ -z "$_bwt_dir_fault" ] || { _bwt_fault="$_bwt_dir_fault"; return 1; }
   _avr_work_tree="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_bwt_tree")" && return 0
   _avr_work_tree=""
   _bwt_fault="its path cannot be handed to node"
   return 1
+}
+
+_zensu_full_suite_work_tree() {
+  local scratch
+  _fsw_tree=""
+  _fsw_fault=""
+  scratch="$(mktemp -d 2>/dev/null)" || {
+    _fsw_fault="no temporary directory was available for the work-tree lookup"
+    return 0
+  }
+  _zensu_bound_work_tree "${1:-}" "$scratch"
+  rm -rf "$scratch"
+  if [ -n "$_bwt_fault" ]; then
+    _fsw_fault="$_bwt_fault"
+  elif [ -n "$_bwt_tree" ] && [ -n "$_bwt_dir_fault" ]; then
+    _fsw_fault="$_bwt_dir_fault"
+  else
+    case "$_bwt_dir$_bwt_tree" in
+      (*'"'*|*'$'*|*'`'*|*'\'*)
+        _fsw_fault="the chain's work tree contains a double quote, a dollar sign, a backtick or a backslash"
+        ;;
+      (*)
+        _fsw_tree="$_bwt_tree"
+        ;;
+    esac
+  fi
+  return 0
+}
+
+_zensu_avr_ask() {
+  local excl
+  [ -n "${_avr_lib:-}" ] || return 2
+  command -v node >/dev/null 2>&1 || return 2
+  excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_PLUGIN_DATA ZENSU_AVR_PROJECT_ROOT \
+    ZENSU_AVR_RECEIPT ZENSU_AVR_GATE_MODE)" || excl="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$excl" \
+  ZENSU_AVR_LIB="$_avr_lib" \
+  ZENSU_AVR_DIR="" \
+  ZENSU_AVR_PLUGIN_DATA="${_avr_data:-}" \
+  ZENSU_AVR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+  ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
+  ZENSU_AVR_WORK_TREE="" \
+  ZENSU_AVR_RECEIPT="${_avr_receipt:-}" \
+  ZENSU_AVR_LOG="" \
+  ZENSU_AVR_AC="" \
+  ZENSU_AVR_VERDICT="" \
+  ZENSU_AVR_DRIVER="" \
+  ZENSU_AVR_EVIDENCE_RUN="" \
+  ZENSU_AVR_ESCAPE=0 \
+  ZENSU_AVR_BOUND="${_avr_bound:-0}" \
+  ZENSU_AVR_VALIDATE="${_avr_validate:-}" \
+  ZENSU_AVR_EDIT_LANDING_ESCAPED="${_avr_escaped_el:-0}" \
+  ZENSU_AVR_BASH=bash \
+  ZENSU_AVR_CHAIN_INPUTS="${_avr_chain_inputs:-0}" \
+  ZENSU_AVR_GATE_MODE="${2:-}" \
+  ZENSU_AVR_CAUSE="$1" \
+    node -e 'require(process.env.ZENSU_AVR_LIB).main(["unjudged"]).then((code) => { process.exitCode = code; }, () => { process.exitCode = 2; })' 2>/dev/null
+}
+
+_zensu_acceptance_gate_unjudged() {
+  local cause="${2:-the acceptance transport failed}" mode=required raw answer lead="" rc=0 nl=$'\n'
+  raw="$(zensu_evidence_acceptance_gate)"
+  answer="$(_zensu_avr_ask "$cause" "$raw")" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$answer" ]; then
+    _avg_lines="$answer"
+    return 0
+  fi
+  [ "$rc" -eq 3 ] && lead="$answer"
+  [ "${_avr_bound:-0}" = "1" ] && return 0
+  [ "$raw" = "advisory" ] && mode=advisory
+  if [ "$_avr_escape" = "1" ]; then
+    tdd_record_bypass "${1:-}" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
+    _avg_lines="${lead:+$lead$nl}ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($cause) | gate: $mode"
+    return 0
+  fi
+  if [ "$mode" != "advisory" ]; then
+    [ -z "$lead" ] || printf '%s\n' "$lead" >&2
+    return 1
+  fi
+  _avg_lines="${lead:+$lead$nl}ACCEPTANCE — unavailable (advisory, not blocking) | $cause, so no acceptance record was read | gate: advisory"
+  return 0
 }
 
 _zensu_acceptance_gate() {
@@ -451,18 +597,23 @@ _zensu_acceptance_gate() {
   _avr_bound="${2:-0}"
   _avr_validate="${3:-}"
   _avr_escape=0
+  _avr_lib=""
+  _avr_data=""
+  _avr_receipt=""
+  _avr_escaped_el=0
+  _avr_chain_inputs=0
   if [ "$_avr_bound" = "1" ]; then
-    _zensu_avr_prepare "zensu-log.sh --chain-done" "$session" 1 2>/dev/null || return 0
+    if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session" 1 2>/dev/null; then
+      _zensu_acceptance_gate_unjudged "$session" "the acceptance transport could not be prepared"
+      return 0
+    fi
     _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || _avg_lines=""
     return 0
   fi
   [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
   if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session"; then
-    if [ "$_avr_escape" = "1" ]; then
-      tdd_record_bypass "$session" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
-      return 0
-    fi
-    [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && return 0
+    _zensu_acceptance_gate_unjudged "$session" "the acceptance transport could not be prepared" && return 0
+    echo "zensu-log.sh --chain-done: the chain stays open; resolve the acceptance transport fault named above, then run --chain-done again." >&2
     return 1
   fi
   _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || rc=$?
@@ -575,6 +726,8 @@ _avr_dir=""
 _evr_work_tree=""
 _evr_work_dir=""
 _avr_work_tree=""
+_fsw_tree=""
+_fsw_fault=""
 
 case "${1:-}" in
   --evidence-run)
@@ -609,16 +762,18 @@ case "${1:-}" in
     esac
     _zensu_evr_prepare "zensu-log.sh --evidence-run" || exit 2
     if ! _zensu_evr_work_tree "$(zensu_resolve_session_id 2>/dev/null)"; then
-      echo "zensu-log.sh --evidence-run: the chain's work tree could not be determined, so the command was not run: $_bwt_fault" >&2
-      exit 2
+      printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault" || {
+        echo "zensu-log.sh --evidence-run: the work-tree lookup failed and its cause could not be written to the temporary directory, so neither the evidence-run module nor the command ran. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --evidence-run again." >&2
+        exit 2
+      }
     fi
     _evr_cwd="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$PWD" 2>/dev/null)" || _evr_cwd=""
     _evr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _evr_bash="bash"
     if [ "$evr_cmd_seen" = true ]; then
-      printf '%s' "$evr_cmd" > "$_evr_dir/command"
+      _zensu_transport_put "zensu-log.sh --evidence-run" "$_evr_dir" command "$evr_cmd" || exit 2
     fi
     if [ "${_ZENSU_EVR_CALLER_PD_SET:-}" = "set" ]; then
-      printf '%s' "${_ZENSU_EVR_CALLER_PD:-}" > "$_evr_dir/caller-project-dir"
+      _zensu_transport_put "zensu-log.sh --evidence-run" "$_evr_dir" caller-project-dir "${_ZENSU_EVR_CALLER_PD:-}" || exit 2
     fi
     _zensu_evr_node "zensu-log.sh --evidence-run" run
     evr_rc=$?
@@ -636,14 +791,17 @@ case "${1:-}" in
     ;;
   --full-suite-policy)
     _fsp_refresh=0
+    _fsp_mode=policy
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --refresh) _fsp_refresh=1; shift ;;
+        --chain) _fsp_mode=chain; shift ;;
         *) echo "zensu-log.sh --full-suite-policy: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
-    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" policy "$_fsp_refresh"
+    _zensu_full_suite_work_tree "${ZENSU_SESSION_KEY:-}"
+    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" "$_fsp_mode" "$_fsp_refresh" "$_fsw_tree" "$_fsw_fault"
     exit $?
     ;;
   --external-review)
@@ -759,8 +917,10 @@ case "${1:-}" in
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     _zensu_avr_prepare "zensu-log.sh $avr_verb" "$avr_session" || exit 2
     if ! _zensu_avr_work_tree "$avr_session"; then
-      echo "zensu-log.sh $avr_verb: the chain's work tree could not be determined, so no acceptance record can be bound to it: $_bwt_fault" >&2
-      exit 2
+      printf '%s' "$_bwt_fault" > "$_avr_dir/work-tree-fault" || {
+        echo "zensu-log.sh $avr_verb: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance module did not run. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run $avr_verb again." >&2
+        exit 2
+      }
     fi
     if [ "$avr_verb" = "--acceptance-status" ]; then
       _zensu_avr_node "zensu-log.sh --acceptance-status" status
@@ -770,7 +930,10 @@ case "${1:-}" in
       echo "zensu-log.sh --acceptance-record: pass the evidence text on stdin through a quoted heredoc" >&2
       exit 2
     fi
-    head -c 65536 > "$_avr_dir/evidence"
+    head -c 65536 > "$_avr_dir/evidence" || {
+      _zensu_transport_unwritten "zensu-log.sh --acceptance-record" evidence
+      exit 2
+    }
     _zensu_avr_node "zensu-log.sh --acceptance-record" record
     avr_rc=$?
     if [ "$avr_rc" -eq 0 ] && [ -s "$_avr_dir/run-log-line" ]; then
@@ -859,27 +1022,22 @@ case "${1:-}" in
     fi
     _rp_tmp="$(mktemp -d)" || _rp_stop "temp: no temporary directory"
     trap 'rm -rf "$_rp_tmp"' EXIT
-    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-    _rp_ctx='{}'
-    _rp_state="$(tdd_state_file "${ZENSU_SESSION_KEY:-}" 2>/dev/null)" || _rp_state=""
-    if [ -n "$_rp_state" ] && { [ -e "$_rp_state" ] || [ -L "$_rp_state" ]; }; then
-      _rp_ctx="$(tdd_autopilot_context "$_rp_state" "${ZENSU_SESSION_KEY:-}" 2>/dev/null)" \
-        || _rp_stop "chain: the chain's Autopilot linkage could not be read"
+    _zensu_bound_work_tree "${ZENSU_SESSION_KEY:-}" "$_rp_tmp"
+    if [ -n "$_bwt_fault" ]; then
+      case "$_bwt_stage" in
+        (work-tree) _rp_stop "work-tree: the chain's work tree could not be resolved: $_bwt_fault" ;;
+        (linkage) _rp_stop "chain: the chain's Autopilot linkage could not be read" ;;
+        (*) _rp_stop "chain: $_bwt_fault" ;;
+      esac
     fi
     _rp_wt="$_rp_top"
     _rp_prefix=""
-    if [ "$_rp_ctx" != '{}' ]; then
-      _rp_wt_line="$(_zensu_chain_work_tree "$_rp_ctx" "$_rp_root" 2> "$_rp_tmp/work-tree.err")" \
-        || _rp_stop "work-tree: the chain's work tree could not be resolved: $(head -n 1 "$_rp_tmp/work-tree.err")"
-      case "$_rp_wt_line" in
-        (work-tree$'\t'?*)
-          _rp_wt="${_rp_wt_line#*$'\t'}"
-          _rp_top_canon="$(cd "$_rp_top" 2>/dev/null && pwd -P)" || _rp_top_canon=""
-          case "$_rp_wt" in
-            ("$_rp_top_canon"/?*) _rp_prefix="${_rp_wt#"$_rp_top_canon"/}" ;;
-            (*) _rp_stop "work-tree: the chain's work tree does not lie below the anchor's work-tree top" ;;
-          esac
-          ;;
+    if [ -n "$_bwt_tree" ]; then
+      _rp_wt="$_bwt_tree"
+      _rp_top_canon="$(cd "$_rp_top" 2>/dev/null && pwd -P)" || _rp_top_canon=""
+      case "$_rp_wt" in
+        ("$_rp_top_canon"/?*) _rp_prefix="${_rp_wt#"$_rp_top_canon"/}" ;;
+        (*) _rp_stop "work-tree: the chain's work tree does not lie below the anchor's work-tree top" ;;
       esac
     fi
     _rp_append() {
@@ -900,7 +1058,7 @@ case "${1:-}" in
     if [ "$_rp_rc" -ne 0 ]; then
       _rp_stop "change-set: the change set could not be listed (exit $_rp_rc): $(head -n 1 "$_rp_tmp/changes.err")"
     fi
-    _tc_git -C "$_rp_wt" check-ignore --stdin < "$_rp_tmp/changes" > "$_rp_tmp/ignored" 2> "$_rp_tmp/ignored.err"
+    _tc_git -C "$_rp_wt" -c core.quotePath=false check-ignore --stdin < "$_rp_tmp/changes" > "$_rp_tmp/ignored" 2> "$_rp_tmp/ignored.err"
     _rp_rc=$?
     if [ "$_rp_rc" -gt 1 ]; then
       _rp_stop "ignore-check: git check-ignore could not read the change set (exit $_rp_rc): $(head -n 1 "$_rp_tmp/ignored.err")"
@@ -1057,29 +1215,47 @@ case "${1:-}" in
       echo "zensu-log.sh: Session Control session identity unavailable" >&2
       exit 2
     fi
-    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-    cwt_state="$(tdd_state_file "$cwt_session")" || cwt_state=""
-    if [ -z "$cwt_state" ]; then
-      echo "zensu-log.sh --chain-work-tree: current-session workflow path unavailable" >&2
-      exit 2
-    fi
-    cwt_ctx='{}'
-    if [ -e "$cwt_state" ] || [ -L "$cwt_state" ]; then
-      cwt_ctx="$(tdd_autopilot_context "$cwt_state" "$cwt_session" 2>/dev/null)" || {
-        echo "zensu-log.sh --chain-work-tree: corrupt or incomplete Autopilot linkage" >&2
-        exit 2
-      }
-    fi
-    cwt_line="$(_zensu_chain_work_tree "$cwt_ctx" "$CLAUDE_PROJECT_DIR")" || {
-      echo "zensu-log.sh --chain-work-tree: the chain's work tree could not be resolved; the line above names the cause" >&2
+    cwt_dir="$(mktemp -d 2>/dev/null)" || {
+      echo "zensu-log.sh --chain-work-tree: no temporary directory available" >&2
       exit 2
     }
-    cwt_path="${cwt_line#*$'\t'}"
-    if [ "$cwt_project_dir" = true ]; then
-      cwt_path="$(_zensu_chain_project_dir "$cwt_line" "$CLAUDE_PROJECT_DIR")" || {
-        echo "zensu-log.sh --chain-work-tree: the chain's project directory could not be resolved; the line above names the cause" >&2
+    trap 'rm -rf "$cwt_dir"' EXIT
+    _zensu_bound_work_tree "$cwt_session" "$cwt_dir"
+    rm -rf "$cwt_dir"
+    trap - EXIT
+    if [ -n "$_bwt_fault" ]; then
+      case "$_bwt_stage" in
+        (state) echo "zensu-log.sh --chain-work-tree: current-session workflow path unavailable" >&2 ;;
+        (linkage) echo "zensu-log.sh --chain-work-tree: corrupt or incomplete Autopilot linkage" >&2 ;;
+        (*)
+          printf '%s\n' "$_bwt_fault" >&2
+          echo "zensu-log.sh --chain-work-tree: the chain's work tree could not be resolved; the line above names the cause" >&2
+          ;;
+      esac
+      exit 2
+    fi
+    if [ -n "$_bwt_tree" ]; then
+      cwt_path="$_bwt_tree"
+      if [ "$cwt_project_dir" = true ]; then
+        if [ -n "$_bwt_dir_fault" ]; then
+          printf '%s\n' "$_bwt_dir_fault" >&2
+          echo "zensu-log.sh --chain-work-tree: the chain's project directory could not be resolved; the line above names the cause" >&2
+          exit 2
+        fi
+        cwt_path="$_bwt_dir"
+      fi
+    else
+      cwt_line="$(_zensu_chain_work_tree '{}' "$CLAUDE_PROJECT_DIR")" || {
+        echo "zensu-log.sh --chain-work-tree: the chain's work tree could not be resolved; the line above names the cause" >&2
         exit 2
       }
+      cwt_path="${cwt_line#*$'\t'}"
+      if [ "$cwt_project_dir" = true ]; then
+        cwt_path="$(_zensu_chain_project_dir "$cwt_line" "$CLAUDE_PROJECT_DIR")" || {
+          echo "zensu-log.sh --chain-work-tree: the chain's project directory could not be resolved; the line above names the cause" >&2
+          exit 2
+        }
+      fi
     fi
     case "$cwt_path" in
       (*'"'*|*'$'*|*'`'*|*'\'*)
@@ -1964,18 +2140,23 @@ case "${1:-}" in
           if ! tdd_retire_edit_landing_receipt "$session_val"; then
             echo "zensu-log.sh --tdd-begin: RECEIPT RETIREMENT UNRESOLVED — the previous generation's edit-landing receipt could not be retired (${begin_receipt}). It records a verdict about ANOTHER generation's run log, and this chain's --tdd-complete may accept it as its own. Move or delete that file before completing." >&2
           fi
-          if ! zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot >/dev/null 2>&1; then
-            echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
-          fi
           zensu_external_review_wait_reset "$session_val"
           _zensu_review_gate_reset "--tdd-begin" "$session_val" \
             "the previous generation's review packets and reviewer records could not be removed; this chain's review rounds still compare against packets created after this point."
           zensu_stop_background_wait_reset "$session_val"
+          zensu_full_suite_snapshot_retire "zensu-log.sh --tdd-begin" 2>/dev/null \
+            || echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT RETIREMENT UNRESOLVED — the previous chain's full-suite runner could not be removed, so it stays in force for this chain unless this chain records its own." >&2
+          _zensu_full_suite_work_tree "$session_val"
+          if ! begin_full_suite_line="$(zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot 0 "$_fsw_tree" "$_fsw_fault" 2>/dev/null)"; then
+            begin_full_suite_line=""
+            echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
+          fi
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
             echo "mode: strict"
           fi
+          [ -n "$begin_full_suite_line" ] && printf '%s\n' "$begin_full_suite_line"
           [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses (cleared now): $outgoing_bypasses"
         else
           echo "zensu-log --tdd-begin: atomic chain activation failed — session NOT activated" >&2
@@ -2069,11 +2250,19 @@ case "${1:-}" in
         _tc_wt_flag=""
         _tc_wt_fault=0
         if [ "$complete_ctx" != '{}' ]; then
-          if _tc_wt_line="$(_zensu_chain_work_tree "$complete_ctx" "$_tc_root")"; then
-            case "$_tc_wt_line" in
-              (work-tree$'\t'?*) _tc_wt="${_tc_wt_line#*$'\t'}" ;;
-            esac
+          if _tc_wt_dir="$(mktemp -d 2>/dev/null)"; then
+            trap 'rm -rf "$_tc_wt_dir"' EXIT
+            _zensu_bound_work_tree "$session_val" "$_tc_wt_dir" "$complete_ctx"
+            rm -rf "$_tc_wt_dir"
+            trap - EXIT
+            if [ -n "$_bwt_fault" ]; then
+              printf '%s\n' "$_bwt_fault" >&2
+              _tc_wt_fault=1
+            else
+              _tc_wt="$_bwt_tree"
+            fi
           else
+            echo "the work-tree lookup has no temporary directory" >&2
             _tc_wt_fault=1
           fi
         fi

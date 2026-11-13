@@ -10,11 +10,13 @@ const evr = require('./evidence-run-v1.js');
 const SCHEMA = 'ci-contract-v1';
 const STORE_SEGMENTS = Object.freeze(['ci-contract', 'v1']);
 const WORKFLOW_DIR = '.github/workflows';
+const GITHUB_HOST = 'github.com';
 const FILTER_KEYS = Object.freeze(['paths', 'paths-ignore', 'branches', 'branches-ignore', 'types']);
 const PASSING_CONCLUSIONS = Object.freeze(['success', 'failure']);
 const CACHE_KEYS = Object.freeze(['blob', 'job', 'repo', 'result', 'schema', 'verifiedAt', 'workflow']);
 const LIMITS = Object.freeze({
   ghTimeoutMs: 20000,
+  refreshDeadlineMs: 60000,
   gitTimeoutMs: 20000,
   maxWorkflowBytes: 256 * 1024,
   maxWorkflowFiles: 40,
@@ -25,14 +27,23 @@ const LIMITS = Object.freeze({
   maxRunAgeMs: 30 * 24 * 60 * 60 * 1000,
   cacheTtlMs: 24 * 60 * 60 * 1000,
   cacheGraceMs: 7 * 24 * 60 * 60 * 1000,
+  maxProofsPerWorkflow: 16,
   maxCommands: 2,
   maxListValues: 20,
+  maxNameChars: 1024,
+  maxMatchCells: 4 * 1024 * 1024,
 });
 const TEST_RE = /(?:\btests?\b|\bsuite\b|pytest|vitest|\bjest\b|\bmocha\b|rspec|phpunit|\bctest\b|\btox\b|\bnox\b|nextest|gradlew?\b|\bmvn\b|\bmaven\b|go test|cargo test|run-all|playwright test|cypress run|dotnet test|mix test|bun test)/i;
 const KEY_RE = /^(?:"([^"]*)"|'([^']*)'|([^\s:'"#-][^:]*?))\s*:(?:\s+(.*))?$/;
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const ACTION_REF_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@\S+$/;
 const SHA_RE = /^[0-9a-f]{64}$/;
+const PROOF_NAME_RE = /^([0-9a-f]{40})\.([0-9a-f]{64})\.([0-9a-f]{16})\.json$/;
+const BLOCK_SCALAR_RE = /^[>|](?:[1-9][+-]?|[+-][1-9]?)?$/;
+const EXPRESSION_RE = /\$\{\{[\s\S]*?\}\}/;
+const ANCHOR_RE = /^&\S+$/;
+const MATRIX_SUFFIX = Object.freeze([' ', '(', null, ')']);
+const CALLEE_SUFFIX = Object.freeze([' ', '/', ' ', null]);
 
 function limitsWith(overrides) {
   return Object.freeze({ ...LIMITS, ...(overrides || {}) });
@@ -40,6 +51,10 @@ function limitsWith(overrides) {
 
 function unverified(reason, transient = false) {
   return { verified: false, reason, transient };
+}
+
+function jobUnverified(reason, job) {
+  return { ...unverified(reason), disproves: 'job', job };
 }
 
 function truthy(value) {
@@ -61,6 +76,59 @@ function git(root, args, limits = LIMITS) {
   });
   if (result.error || result.status !== 0) return null;
   return String(result.stdout).trim();
+}
+
+function workflowTree(options, limits = LIMITS) {
+  const own = evr.workTreeTop(options.projectRoot, limits);
+  if (own.reason !== null) return { error: `git could not place the project root in a work tree: ${own.reason}` };
+  let real = options.projectRoot;
+  try {
+    real = fs.realpathSync.native(options.projectRoot);
+  } catch { }
+  const below = own.top ? path.relative(own.top, real) : '';
+  const prefix = below === '' || below === '..' || below.startsWith(`..${path.sep}`) || path.isAbsolute(below) ? '' : below.split(path.sep).join('/');
+  if (typeof options.workTree !== 'string' || options.workTree === '') return { tree: own.top || options.projectRoot, prefix };
+  const placed = evr.workTreeTop(options.workTree, limits);
+  if (placed.reason !== null) return { error: `git could not place the chain's work tree in a work tree: ${placed.reason}` };
+  return { tree: placed.top || options.workTree, prefix };
+}
+
+const PATTERN_SYNTAX_RE = /[*?[\]{}+!]/;
+
+function patternReaches(pattern, prefix) {
+  const clean = pattern.replace(/^\.\//, '');
+  const index = clean.search(PATTERN_SYNTAX_RE);
+  const end = index === -1 ? clean.length : Math.max(0, clean[index] === '?' ? index - 1 : index);
+  const head = clean.slice(0, end);
+  const below = `${prefix}/`;
+  return below.startsWith(head) || head.startsWith(below);
+}
+
+function patternCovers(pattern, prefix) {
+  const match = pattern.replace(/^\.\//, '').match(/^(.*?)\*\*(\/\*)?$/);
+  if (!match || PATTERN_SYNTAX_RE.test(match[1])) return false;
+  return match[1] === '' || (match[1].endsWith('/') && `${prefix}/`.startsWith(match[1]));
+}
+
+function pathFilterRefusal(scanned, workflowPath, prefix, limits = LIMITS) {
+  if (prefix === '') return null;
+  const where = `the project root lies in ${prefix} below the repository top, so its pull requests may never run the suite`;
+  if (scanned.flowTrigger) return `${workflowPath} writes its pull_request trigger in flow form, so its path filters were not read, and ${where}`;
+  for (const filter of scanned.filters) {
+    if (filter.key !== 'paths' && filter.key !== 'paths-ignore') continue;
+    if (filter.values.length === 0 || filter.values.length >= limits.maxListValues) return `${workflowPath} lists pull_request ${filter.key} patterns this check cannot read in full, and ${where}`;
+    if (filter.key === 'paths-ignore' && filter.values.some((value) => patternReaches(value, prefix))) {
+      return `${workflowPath} has a pull_request paths-ignore pattern that can match files in ${prefix}, and ${where}`;
+    }
+    if (filter.key === 'paths') {
+      const negated = filter.values.filter((value) => value.startsWith('!'));
+      const covered = filter.values.some((value) => !value.startsWith('!') && patternCovers(value, prefix));
+      if (!covered || negated.some((value) => patternReaches(value.slice(1), prefix))) {
+        return `${workflowPath} has pull_request paths patterns that do not cover every file in ${prefix}, and ${where}`;
+      }
+    }
+  }
+  return null;
 }
 
 function remoteUrl(projectRoot, env, limits = LIMITS) {
@@ -88,29 +156,37 @@ function repoIdentity(url) {
   }
   host = host.toLowerCase();
   if (!host) return { provider: 'unknown', host: null, repo: null };
-  if (host === 'github.com' && REPO_RE.test(repoPath)) return { provider: 'github', host, repo: repoPath };
+  if (host === GITHUB_HOST && REPO_RE.test(repoPath)) return { provider: 'github', host, repo: repoPath };
   return { provider: 'unsupported', host, repo: null };
 }
 
 function stripComment(line) {
   let quote = null;
+  let previous = '';
   for (let index = 0; index < line.length; index += 1) {
     const character = line[index];
     if (quote) {
-      if (character === quote) quote = null;
+      if (quote === '"' && character === '\\') index += 1;
+      else if (character === quote && quote === "'" && line[index + 1] === "'") index += 1;
+      else if (character === quote) {
+        quote = null;
+        previous = character;
+      }
       continue;
     }
-    if (character === '"' || character === "'") quote = character;
+    if ((character === '"' || character === "'") && (previous === '' || ':-[{,?'.includes(previous))) quote = character;
     else if (character === '#' && (index === 0 || /\s/.test(line[index - 1]))) return line.slice(0, index);
+    if (!/\s/.test(character)) previous = character;
   }
   return line;
 }
 
 function yamlEntries(text) {
   return text.split(/\r?\n/).map((raw) => {
-    const line = stripComment(raw.replace(/\t/g, '  ')).replace(/\s+$/, '');
+    const expanded = raw.replace(/\t/g, '  ');
+    const line = stripComment(expanded).replace(/\s+$/, '');
     const indent = /^ */.exec(line)[0].length;
-    return { indent, text: line.slice(indent) };
+    return { indent, text: line.slice(indent), raw: expanded.slice(indent).trim() };
   }).filter((entry) => entry.text !== '' && entry.text !== '---');
 }
 
@@ -142,6 +218,27 @@ function directChildren(entries, index) {
   return all.filter((cursor) => entries[cursor].indent === level);
 }
 
+function scalarText(value) {
+  const text = String(value).trim();
+  if (text.length >= 2 && text.startsWith("'") && text.endsWith("'")) return text.slice(1, -1).replace(/''/g, "'");
+  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+    try {
+      const decoded = JSON.parse(text);
+      if (typeof decoded === 'string') return decoded;
+    } catch { }
+    return text.slice(1, -1).replace(/\\(.)/g, '$1');
+  }
+  return text;
+}
+
+function scalarOf(entries, index, value) {
+  const block = BLOCK_SCALAR_RE.test(value);
+  const lines = childrenOf(entries, index).map((cursor) => (block ? entries[cursor].raw : entries[cursor].text));
+  if (block) return lines.length === 0 ? null : lines.join(' ');
+  const text = [value, ...lines].filter((line) => line !== '').join(' ');
+  return text === '' ? null : scalarText(text);
+}
+
 function flowItems(value) {
   const trimmed = value.trim();
   const inner = /^\[(.*)\]$/.exec(trimmed);
@@ -165,12 +262,16 @@ function listItems(entries, index, limits) {
   return out;
 }
 
+function inlineBody(value) {
+  return value !== '' && !ANCHOR_RE.test(value);
+}
+
 function topLevel(entries, name) {
   return entries.findIndex((entry) => entry.indent === 0 && (keyOf(entry.text) || {}).key === name);
 }
 
 function scanWorkflow(text, limits = LIMITS) {
-  const result = { readable: false, reason: null, pullRequest: false, pullRequestTarget: false, flowTrigger: false, filters: [], jobs: [] };
+  const result = { readable: false, reason: null, pullRequest: false, pullRequestTarget: false, flowTrigger: false, flowJobs: false, filters: [], jobs: [] };
   if (typeof text !== 'string') {
     result.reason = 'the workflow could not be read';
     return result;
@@ -215,15 +316,17 @@ function scanWorkflow(text, limits = LIMITS) {
   }
   const jobsIndex = topLevel(entries, 'jobs');
   if (jobsIndex !== -1) {
+    result.flowJobs = inlineBody((keyOf(entries[jobsIndex].text) || { value: '' }).value);
     for (const cursor of directChildren(entries, jobsIndex)) {
       const job = keyOf(entries[cursor].text);
       if (!job) continue;
-      const record = { key: job.key, name: null, condition: null };
+      const record = { key: job.key, name: null, condition: null, reusable: false, inline: inlineBody(job.value) };
       for (const inner of directChildren(entries, cursor)) {
         const field = keyOf(entries[inner].text);
         if (!field) continue;
-        if (field.key === 'name') record.name = unquote(field.value);
+        if (field.key === 'name') record.name = scalarOf(entries, inner, field.value);
         if (field.key === 'if') record.condition = field.value;
+        if (field.key === 'uses') record.reusable = true;
       }
       result.jobs.push(record);
     }
@@ -231,19 +334,105 @@ function scanWorkflow(text, limits = LIMITS) {
   return result;
 }
 
-function jobMatches(job, pattern) {
-  return [job.name, job.key].some((text) => typeof text === 'string' && text !== ''
-    && (matchesPattern(text, pattern) || jobPatternOf(text) === pattern || `${text} (*)` === pattern));
+function patternTokens(pattern) {
+  return Array.from(String(pattern), (character) => (character === '*' ? null : character));
 }
 
-function conditionsOf(scanResult, jobPattern = null) {
+function nameTokens(template, limits = LIMITS) {
+  const text = String(template);
+  if (text.length > limits.maxNameChars) return [null];
+  const tokens = [];
+  text.split(EXPRESSION_RE).forEach((part, index) => {
+    if (index > 0) tokens.push(null);
+    for (const character of part) tokens.push(character);
+  });
+  const solid = tokens.map((token) => token !== null && !/\s/.test(token));
+  const first = solid.indexOf(true);
+  const last = solid.lastIndexOf(true);
+  return tokens.filter((token, index) => token === null || (index >= first && index <= last));
+}
+
+function overlaps(left, right) {
+  const width = right.length + 1;
+  const table = new Uint8Array((left.length + 1) * width);
+  for (let i = left.length; i >= 0; i -= 1) {
+    for (let j = right.length; j >= 0; j -= 1) {
+      let value = 0;
+      if (i === left.length && j === right.length) value = 1;
+      else if (i < left.length && left[i] === null) value = table[(i + 1) * width + j] || (j < right.length ? table[i * width + j + 1] : 0);
+      else if (j < right.length && right[j] === null) value = table[i * width + j + 1] || (i < left.length ? table[(i + 1) * width + j] : 0);
+      else if (i < left.length && j < right.length && left[i] === right[j]) value = table[(i + 1) * width + j + 1];
+      table[i * width + j] = value;
+    }
+  }
+  return table[0] === 1;
+}
+
+function jobTemplate(job) {
+  return String(typeof job.name === 'string' && job.name !== '' ? job.name : job.key);
+}
+
+function jobShapes(job, limits = LIMITS) {
+  if (job.inline === true) return [[null]];
+  const base = nameTokens(jobTemplate(job), limits);
+  const shapes = [base, [...base, ...MATRIX_SUFFIX]];
+  if (job.reusable === true) shapes.push([...base, ...CALLEE_SUFFIX], [...base, ...MATRIX_SUFFIX, ...CALLEE_SUFFIX]);
+  return shapes;
+}
+
+function widthBound(job, limits) {
+  if (job.inline === true) return 2;
+  const length = jobTemplate(job).length;
+  const base = length > limits.maxNameChars ? 1 : length;
+  return 2 * base + 6 + (job.reusable === true ? 2 * base + 14 : 0);
+}
+
+function jobMatcher(scanResult, limits = LIMITS) {
+  const jobs = scanResult && Array.isArray(scanResult.jobs) ? scanResult.jobs : [];
+  const open = Boolean(scanResult && scanResult.flowJobs) || 2 * jobs.reduce((sum, job) => sum + widthBound(job, limits), 0) > limits.maxMatchCells;
+  const shaped = open ? [] : jobs.map((job) => ({ job, shapes: jobShapes(job, limits) }));
+  const width = shaped.reduce((sum, entry) => entry.shapes.reduce((inner, shape) => inner + shape.length + 1, sum), 0);
+  const memo = new Map();
+  return (pattern) => {
+    if (typeof pattern !== 'string' || pattern === '') return [];
+    if (!memo.has(pattern)) {
+      let found = null;
+      if (!open && (pattern.length + 1) * width <= limits.maxMatchCells) {
+        const wanted = patternTokens(pattern);
+        found = shaped.filter((entry) => entry.shapes.some((shape) => overlaps(wanted, shape))).map((entry) => entry.job);
+      }
+      memo.set(pattern, found);
+    }
+    return memo.get(pattern);
+  };
+}
+
+function runsFound(found) {
+  return found === null || found.length > 0;
+}
+
+function versionRuns(scanResult, pattern, limits) {
+  return runsFound(jobMatcher(scanResult, limitsWith(limits))(pattern));
+}
+
+function notRunHere(workflowPath, pattern) {
+  return `${workflowPath} in this working tree defines no job that runs as "${pattern}", so a pull request from this tree would not run it`;
+}
+
+function versionUnverified(workflowPath, pattern) {
+  return { ...unverified(notRunHere(workflowPath, pattern)), disproves: 'version' };
+}
+
+function conditionsOf(scanResult, jobPattern = null, match = null) {
   const out = [];
   for (const filter of scanResult.filters) out.push(`on.pull_request.${filter.key}: ${filter.values.join(', ') || '(block)'}`);
-  const bound = typeof jobPattern === 'string' && jobPattern !== '' ? scanResult.jobs.filter((job) => jobMatches(job, jobPattern)) : [];
+  const found = typeof jobPattern === 'string' && jobPattern !== '' ? (match || jobMatcher(scanResult))(jobPattern) : null;
+  const bound = Array.isArray(found) ? found : [];
   for (const job of bound.length > 0 ? bound : scanResult.jobs) {
     if (job.condition) out.push(`job ${job.key} if: ${job.condition}`);
   }
   if (scanResult.flowTrigger) out.push('the trigger block is written in flow form, so its filters were not read');
+  if (scanResult.flowJobs) out.push('the jobs block is written in flow form, so its jobs were not read');
   return out;
 }
 
@@ -303,20 +492,28 @@ function ghEnvironment(env) {
   return { ...(env || process.env), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1', CLICOLOR: '0' };
 }
 
+function refreshDeadline(options, limits) {
+  return Number.isFinite(options.deadline) ? options.deadline : Date.now() + limits.refreshDeadlineMs;
+}
+
 function ghApi(endpoint, options = {}) {
   const limits = options.limits || LIMITS;
-  const result = childProcess.spawnSync(options.ghPath || 'gh', ['api', endpoint], {
+  const label = endpoint.split('?')[0];
+  const left = Number.isFinite(options.deadline) ? options.deadline - Date.now() : Infinity;
+  const late = `the refresh deadline of ${Math.round(limits.refreshDeadlineMs / 1000)} s passed before gh api ${label} answered`;
+  if (left <= 0) return { ok: false, reason: late, transient: true };
+  const timeout = Math.max(1, Math.min(limits.ghTimeoutMs, Math.ceil(left)));
+  const result = childProcess.spawnSync(options.ghPath || 'gh', ['api', endpoint, '--hostname', GITHUB_HOST], {
     env: ghEnvironment(options.env),
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
-    timeout: limits.ghTimeoutMs,
+    timeout,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const label = endpoint.split('?')[0];
   if (result.error) {
     if (result.error.code === 'ENOENT') return { ok: false, reason: 'the GitHub CLI (gh) is not installed', transient: true };
-    if (result.error.code === 'ETIMEDOUT') return { ok: false, reason: `gh api ${label} timed out`, transient: true };
+    if (result.error.code === 'ETIMEDOUT') return { ok: false, reason: timeout < limits.ghTimeoutMs ? late : `gh api ${label} timed out`, transient: true };
     return { ok: false, reason: `gh is unavailable (${result.error.code || result.error.message})`, transient: true };
   }
   if (result.status !== 0) {
@@ -380,7 +577,7 @@ function localTokens(command) {
   return tokens.filter((token) => token.length >= 4);
 }
 
-function proposeJob(jobs, localCommand) {
+function proposeJob(jobs, localCommand, certifiable = () => true) {
   const tokens = localTokens(localCommand);
   let best = null;
   for (const group of groupJobs(jobs)) {
@@ -389,7 +586,7 @@ function proposeJob(jobs, localCommand) {
     if (tokens.length > 0 && commands.some((command) => tokens.some((token) => command.includes(token)))) score += 4;
     if (commands.some((command) => TEST_RE.test(command))) score += 2;
     if (TEST_RE.test(group.pattern)) score += 1;
-    if (score > 0 && (!best || score > best.score)) best = { pattern: group.pattern, score };
+    if (score > 0 && (!best || score > best.score) && certifiable(group.pattern)) best = { pattern: group.pattern, score };
   }
   return best ? best.pattern : null;
 }
@@ -400,10 +597,10 @@ function uniqueStrings(values) {
 
 function mergeBlocking(repo, base, jobNames, pattern, options) {
   const contexts = new Set();
-  let known = false;
+  let answered = 0;
   const branch = ghApi(`repos/${repo}/branches/${encodeURIComponent(base)}`, options);
   if (branch.ok && branch.json && typeof branch.json === 'object') {
-    known = true;
+    answered += 1;
     const required = branch.json.protection && branch.json.protection.required_status_checks;
     if (required && required.enforcement_level !== 'off') {
       for (const context of Array.isArray(required.contexts) ? required.contexts : []) contexts.add(String(context));
@@ -414,7 +611,7 @@ function mergeBlocking(repo, base, jobNames, pattern, options) {
   }
   const rules = ghApi(`repos/${repo}/rules/branches/${encodeURIComponent(base)}`, options);
   if (rules.ok && Array.isArray(rules.json)) {
-    known = true;
+    answered += 1;
     for (const rule of rules.json) {
       if (!rule || rule.type !== 'required_status_checks') continue;
       const checks = rule.parameters && Array.isArray(rule.parameters.required_status_checks) ? rule.parameters.required_status_checks : [];
@@ -423,14 +620,16 @@ function mergeBlocking(repo, base, jobNames, pattern, options) {
       }
     }
   }
-  if (!known) return 'unknown';
-  return [...contexts].some((context) => jobNames.includes(context) || matchesPattern(context, pattern)) ? 'yes' : 'no';
+  if ([...contexts].some((context) => jobNames.includes(context) || matchesPattern(context, pattern))) return 'yes';
+  return answered === 2 ? 'no' : 'unknown';
 }
 
 function verifyRemote(input) {
   const { repo, workflowPath, job, localCommand, limits } = input;
   const now = input.now;
-  const options = { ghPath: input.ghPath, env: input.env, limits };
+  const certifiable = typeof input.certifiable === 'function' ? input.certifiable : () => true;
+  let pattern = typeof job === 'string' && job !== '' ? job : null;
+  const options ={ ghPath: input.ghPath, env: input.env, limits, deadline: input.deadline };
   const workflowFile = path.posix.basename(workflowPath);
   const info = ghApi(`repos/${repo}`, options);
   if (!info.ok) return unverified(info.reason, true);
@@ -444,7 +643,7 @@ function verifyRemote(input) {
     .filter((run) => run && Number.isInteger(run.id) && PASSING_CONCLUSIONS.includes(run.conclusion) && !Number.isNaN(Date.parse(run.created_at)))
     .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
   if (runs.length === 0) return unverified(`${workflowPath} has no completed pull_request run that concluded success or failure`);
-  let pattern = typeof job === 'string' && job !== '' ? job : null;
+  let dropped = null;
   let evidence = null;
   let examined = 0;
   for (const run of runs.slice(0, limits.maxJobRuns)) {
@@ -453,7 +652,10 @@ function verifyRemote(input) {
     examined += 1;
     const jobs = (jobsResponse.json && Array.isArray(jobsResponse.json.jobs) ? jobsResponse.json.jobs : [])
       .filter((entry) => entry && typeof entry.name === 'string');
-    if (!pattern) pattern = proposeJob(jobs, localCommand);
+    if (!pattern) {
+      pattern = proposeJob(jobs, localCommand, certifiable);
+      if (!pattern && !dropped) dropped = proposeJob(jobs, localCommand);
+    }
     if (!pattern) continue;
     const matched = jobs.filter((entry) => matchesPattern(entry.name, pattern));
     if (matched.length > 0 && matched.every((entry) => PASSING_CONCLUSIONS.includes(entry.conclusion))) {
@@ -461,10 +663,11 @@ function verifyRemote(input) {
       break;
     }
   }
+  if (!pattern && dropped) return versionUnverified(workflowPath, dropped);
   if (!pattern) return unverified(`no job in the recent pull_request runs of ${workflowPath} looks like a test run; name one with evidence.ci.job`);
-  if (!evidence) return unverified(`job "${pattern}" did not run to success or failure in the last ${examined} pull_request run(s) of ${workflowPath}`);
+  if (!evidence) return jobUnverified(`job "${pattern}" did not run to success or failure in the last ${examined} pull_request run(s) of ${workflowPath}`, pattern);
   if (now - Date.parse(evidence.run.created_at) > limits.maxRunAgeMs) {
-    return unverified(`the newest pull_request run in which job "${pattern}" ran is older than ${Math.round(limits.maxRunAgeMs / 86400000)} days`);
+    return jobUnverified(`the newest pull_request run in which job "${pattern}" ran is older than ${Math.round(limits.maxRunAgeMs / 86400000)} days`, pattern);
   }
   const jobNames = evidence.jobs.map((entry) => entry.name);
   return {
@@ -491,8 +694,20 @@ function cacheDirectory(pluginData) {
   return ensurePrivateDirectory(root, ['cache']);
 }
 
+function cacheKey(repo, workflowPath) {
+  return crypto.createHash('sha256').update(`${repo}\n${workflowPath}`).digest('hex').slice(0, 40);
+}
+
 function cacheName(repo, workflowPath) {
-  return `${crypto.createHash('sha256').update(`${repo}\n${workflowPath}`).digest('hex').slice(0, 40)}.json`;
+  return `${cacheKey(repo, workflowPath)}.json`;
+}
+
+function jobKey(job) {
+  return crypto.createHash('sha256').update(String(job)).digest('hex').slice(0, 16);
+}
+
+function proofName(repo, workflowPath, blob, job) {
+  return `${cacheKey(repo, workflowPath)}.${blob}.${jobKey(job)}.json`;
 }
 
 function readJsonFile(filePath, maxBytes) {
@@ -559,12 +774,115 @@ function validCacheEntry(entry, repo, workflowPath) {
   return true;
 }
 
+function proofNames(directory, repo, workflowPath) {
+  const key = cacheKey(repo, workflowPath);
+  let names;
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return [];
+  }
+  return names
+    .map((name) => PROOF_NAME_RE.exec(name))
+    .filter((match) => match && match[1] === key)
+    .map((match) => ({ name: match[0], blob: match[2], job: match[3] }));
+}
+
+function readProof(directory, name, repo, workflowPath, limits) {
+  const entry = readJsonFile(path.join(directory, name), limits.maxCacheBytes);
+  return validCacheEntry(entry, repo, workflowPath) ? entry : null;
+}
+
+function cachedProofs(directory, repo, workflowPath, blob, limits) {
+  if (!directory) return [];
+  const found = [];
+  for (const entry of proofNames(directory, repo, workflowPath)) {
+    if (entry.blob !== blob) continue;
+    const proof = readProof(directory, entry.name, repo, workflowPath, limits);
+    if (proof && proof.blob === blob && jobKey(proof.job) === entry.job) found.push({ proof, legacy: false });
+  }
+  const legacy = readProof(directory, cacheName(repo, workflowPath), repo, workflowPath, limits);
+  if (legacy && legacy.blob === blob) found.push({ proof: legacy, legacy: true });
+  return found.sort((left, right) => Date.parse(right.proof.verifiedAt) - Date.parse(left.proof.verifiedAt));
+}
+
+function otherVersionsCached(directory, repo, workflowPath, blob, limits) {
+  if (!directory) return false;
+  if (proofNames(directory, repo, workflowPath).some((entry) => entry.blob !== blob)) return true;
+  const legacy = readProof(directory, cacheName(repo, workflowPath), repo, workflowPath, limits);
+  return legacy !== null && legacy.blob !== blob;
+}
+
+function removeFile(target) {
+  try {
+    fs.rmSync(target, { force: true });
+  } catch { }
+}
+
+function keepProof(directory, repo, workflowPath, found) {
+  if (!found.legacy) return;
+  try {
+    writeJsonAtomic(directory, proofName(repo, workflowPath, found.proof.blob, found.proof.job), found.proof);
+  } catch { }
+}
+
+function pruneProofs(directory, repo, workflowPath, keptName, now, limits) {
+  const dated = [];
+  for (const entry of proofNames(directory, repo, workflowPath)) {
+    if (entry.name === keptName) continue;
+    const proof = readProof(directory, entry.name, repo, workflowPath, limits);
+    if (!proof || proof.blob !== entry.blob || jobKey(proof.job) !== entry.job) continue;
+    dated.push({ name: entry.name, verifiedAt: Date.parse(proof.verifiedAt) });
+  }
+  dated.sort((left, right) => right.verifiedAt - left.verifiedAt);
+  const others = Math.max(0, limits.maxProofsPerWorkflow - 1);
+  dated.forEach((entry, index) => {
+    if (index >= others || now - entry.verifiedAt > limits.cacheGraceMs) removeFile(path.join(directory, entry.name));
+  });
+}
+
+function removeProofs(directory, repo, workflowPath, job, limits) {
+  for (const entry of proofNames(directory, repo, workflowPath)) {
+    if (job === null || entry.job === jobKey(job)) removeFile(path.join(directory, entry.name));
+  }
+  const legacyPath = path.join(directory, cacheName(repo, workflowPath));
+  const legacy = job === null ? null : readJsonFile(legacyPath, limits.maxCacheBytes);
+  if (job === null || (legacy && legacy.job === job)) removeFile(legacyPath);
+}
+
+function removeVersionProofs(directory, repo, workflowPath, blob, limits) {
+  for (const entry of proofNames(directory, repo, workflowPath)) {
+    if (entry.blob === blob) removeFile(path.join(directory, entry.name));
+  }
+  const legacyPath = path.join(directory, cacheName(repo, workflowPath));
+  const legacy = readJsonFile(legacyPath, limits.maxCacheBytes);
+  if (legacy && legacy.blob === blob) removeFile(legacyPath);
+}
+
+function removeDisproved(directory, repo, workflowPath, blob, wantedJob, remote, limits) {
+  if (remote.disproves === 'version') {
+    removeVersionProofs(directory, repo, workflowPath, blob, limits);
+    return;
+  }
+  if (remote.disproves !== 'job') {
+    removeProofs(directory, repo, workflowPath, null, limits);
+    return;
+  }
+  removeProofs(directory, repo, workflowPath, remote.job, limits);
+  if (!wantedJob) removeVersionProofs(directory, repo, workflowPath, blob, limits);
+}
+
 function decorate(result, extra) {
   return { ...result, ...extra };
 }
 
 function verify(options) {
+  return verifyIn(options, null);
+}
+
+function verifyIn(options, placedTree) {
   const limits = limitsWith(options.limits);
+  const deadline = refreshDeadline(options, limits);
   const now = Number.isInteger(options.now) ? options.now : Date.now();
   const env = options.env || process.env;
   const projectRoot = options.projectRoot;
@@ -572,73 +890,95 @@ function verify(options) {
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
   const workflowPath = normalizeWorkflowPath(options.workflow);
   if (!workflowPath) return unverified(`evidence.ci.workflow must name a .yml or .yaml file directly under ${WORKFLOW_DIR}`);
-  const identity = repoIdentity(remoteUrl(projectRoot, env, limits));
+  const placed = placedTree || workflowTree(options, limits);
+  if (placed.error) return unverified(placed.error);
+  const tree = placed.tree;
+  const identity = repoIdentity(remoteUrl(tree, env, limits));
   if (identity.provider === 'unknown') return unverified('the repository has no usable git remote');
   if (identity.provider !== 'github') return unverified(`the code forge ${identity.host} is not supported yet (GitHub.com only)`);
-  const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  const file = readWorkflowFile(tree, workflowPath, limits);
   if (file.error) return unverified(file.error);
   const scanned = scanWorkflow(file.text, limits);
   if (!scanned.readable) return unverified(`${workflowPath}: ${scanned.reason}`);
   if (!scanned.pullRequest) {
     return unverified(`${workflowPath} does not trigger on pull_request${scanned.pullRequestTarget ? ' (pull_request_target runs the base branch workflow and does not count)' : ''}`);
   }
+  const filtered = pathFilterRefusal(scanned, workflowPath, placed.prefix, limits);
+  if (filtered) return unverified(filtered);
+  const wantedJob = typeof options.job === 'string' && options.job !== '' ? options.job : null;
+  const match = jobMatcher(scanned, limits);
+  const runsHere = (pattern) => runsFound(match(pattern));
+  const extraFor = (job) => ({ workflow: workflowPath, repo: identity.repo, conditions: conditionsOf(scanned, job || wantedJob, match) });
+  if (wantedJob && !runsHere(wantedJob)) return decorate(versionUnverified(workflowPath, wantedJob), extraFor(null));
   let directory = null;
   try {
     directory = cacheDirectory(options.pluginData);
   } catch {
     directory = null;
   }
-  const name = cacheName(identity.repo, workflowPath);
-  const cached = directory ? readJsonFile(path.join(directory, name), limits.maxCacheBytes) : null;
-  const valid = validCacheEntry(cached, identity.repo, workflowPath);
-  const wantedJob = typeof options.job === 'string' && options.job !== '' ? options.job : null;
-  const usable = valid && cached.blob === file.blob && (!wantedJob || cached.job === wantedJob);
-  const age = usable ? Math.max(0, now - Date.parse(cached.verifiedAt)) : Infinity;
-  const extraFor = (job) => ({ workflow: workflowPath, repo: identity.repo, conditions: conditionsOf(scanned, job || wantedJob) });
+  const proofs = cachedProofs(directory, identity.repo, workflowPath, file.blob, limits);
+  const usable = proofs.filter((found) => runsHere(found.proof.job));
+  const chosen = usable.find((found) => !wantedJob || found.proof.job === wantedJob) || null;
+  const cached = chosen ? chosen.proof : null;
+  const age = cached ? Math.max(0, now - Date.parse(cached.verifiedAt)) : Infinity;
   if (options.mode !== 'refresh') {
-    if (usable && age <= limits.cacheGraceMs) return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: age > limits.cacheTtlMs, refreshFailure: null });
-    if (valid && cached.blob !== file.blob) return decorate(unverified(`${workflowPath} changed since it was verified, so CI may no longer run what was verified`), extraFor(null));
-    if (valid && wantedJob && cached.job !== wantedJob) return decorate(unverified(`the verified job "${cached.job}" is not the requested job "${wantedJob}"; run --full-suite-policy --refresh`), extraFor(null));
-    if (usable) return decorate(unverified(`the verification is older than ${Math.round(limits.cacheGraceMs / 86400000)} days; run --full-suite-policy --refresh`), extraFor(cached.job));
+    if (cached && age <= limits.cacheGraceMs) {
+      keepProof(directory, identity.repo, workflowPath, chosen);
+      return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: age > limits.cacheTtlMs, refreshFailure: null });
+    }
+    if (cached) return decorate(unverified(`the verification is older than ${Math.round(limits.cacheGraceMs / 86400000)} days; run --full-suite-policy --refresh`), extraFor(cached.job));
+    if (usable.length > 0) return decorate(unverified(`the verified job "${usable[0].proof.job}" is not the requested job "${wantedJob}"; run --full-suite-policy --refresh`), extraFor(null));
+    if (proofs.length > 0) {
+      const reason = wantedJob ? `no verification of job "${wantedJob}" is cached for this version of ${workflowPath}` : notRunHere(workflowPath, proofs[0].proof.job);
+      return decorate(unverified(`${reason}; run --full-suite-policy --refresh`), extraFor(null));
+    }
+    if (otherVersionsCached(directory, identity.repo, workflowPath, file.blob, limits)) {
+      return decorate(unverified(`${workflowPath} in this working tree differs from every verified version, so CI may no longer run what was verified; run --full-suite-policy --refresh`), extraFor(null));
+    }
     return decorate(unverified('no verification of the CI pull-request pipeline is cached yet; run --full-suite-policy --refresh'), extraFor(null));
   }
-  if (usable && age <= limits.cacheTtlMs) return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: false, refreshFailure: null });
-  const remote = verifyRemote({ repo: identity.repo, workflowPath, job: wantedJob, localCommand: options.localCommand, ghPath: options.ghPath, env, limits, now });
+  if (cached && age <= limits.cacheTtlMs) {
+    keepProof(directory, identity.repo, workflowPath, chosen);
+    return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: false, refreshFailure: null });
+  }
+  const remote = verifyRemote({ repo: identity.repo, workflowPath, job: wantedJob, localCommand: options.localCommand, ghPath: options.ghPath, env, limits, now, certifiable: runsHere, deadline });
   if (remote.verified) {
     if (directory) {
       try {
-        writeJsonAtomic(directory, name, { schema: SCHEMA, repo: identity.repo, workflow: workflowPath, job: remote.job, blob: file.blob, verifiedAt: new Date(now).toISOString(), result: remote });
+        const written = proofName(identity.repo, workflowPath, file.blob, remote.job);
+        writeJsonAtomic(directory, written, { schema: SCHEMA, repo: identity.repo, workflow: workflowPath, job: remote.job, blob: file.blob, verifiedAt: new Date(now).toISOString(), result: remote });
+        pruneProofs(directory, identity.repo, workflowPath, written, now, limits);
       } catch { }
     }
     return decorate(remote, { ...extraFor(remote.job), ageMs: 0, stale: false, refreshFailure: null });
   }
-  if (usable && remote.transient && age <= limits.cacheGraceMs) {
+  if (cached && remote.transient && age <= limits.cacheGraceMs) {
+    keepProof(directory, identity.repo, workflowPath, chosen);
     return decorate(cached.result, { ...extraFor(cached.result.job), ageMs: age, stale: true, refreshFailure: remote.reason });
   }
-  if (!remote.transient && directory && valid) {
-    try {
-      fs.rmSync(path.join(directory, name), { force: true });
-    } catch { }
-  }
+  if (!remote.transient && directory) removeDisproved(directory, identity.repo, workflowPath, file.blob, wantedJob, remote, limits);
   return decorate(remote, extraFor(remote.job));
 }
 
 function discover(options) {
   const limits = limitsWith(options.limits);
+  const deadline = refreshDeadline(options, limits);
   const env = options.env || process.env;
   const projectRoot = options.projectRoot;
   if (typeof projectRoot !== 'string' || projectRoot === '') return unverified('no project root is bound');
   if (insideCi(env)) return unverified('this process runs inside a CI pipeline, which is where the full suite runs');
+  const placed = workflowTree(options, limits);
+  if (placed.error) return unverified(placed.error);
   const candidates = [];
-  for (const workflowPath of listWorkflows(projectRoot, limits)) {
-    const file = readWorkflowFile(projectRoot, workflowPath, limits);
+  for (const workflowPath of listWorkflows(placed.tree, limits)) {
+    const file = readWorkflowFile(placed.tree, workflowPath, limits);
     if (file.error) continue;
     if (scanWorkflow(file.text, limits).pullRequest) candidates.push(workflowPath);
   }
   if (candidates.length === 0) return unverified(`no workflow under ${WORKFLOW_DIR} triggers on pull_request`);
   let last = null;
   for (const workflowPath of candidates.slice(0, limits.maxCandidates)) {
-    const result = verify({ ...options, workflow: workflowPath, job: null });
+    const result = verifyIn({ ...options, workflow: workflowPath, job: null, deadline }, placed);
     if (result.verified) return result;
     last = result;
   }
@@ -655,6 +995,7 @@ module.exports = {
   remoteUrl,
   repoIdentity,
   scanWorkflow,
+  versionRuns,
   conditionsOf,
   normalizeWorkflowPath,
   readWorkflowFile,
@@ -670,6 +1011,7 @@ module.exports = {
   verifyRemote,
   cacheDirectory,
   cacheName,
+  proofName,
   readJsonFile,
   writeJsonAtomic,
   validCacheEntry,

@@ -157,6 +157,7 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 | `fetch_threads(id)` | fix | GraphQL `reviewThreads` | REST `GET …/merge_requests/:iid/discussions` (keep `resolvable && !resolved`) |
 | `fetch_inline_comments(id)` | fix | `gh api …/pulls/<n>/comments --paginate` | discussions (same call as above) |
 | `post_review(id, payload)` | team-review | 1× `gh api -X POST …/pulls/<n>/reviews --input` | 1× summary note + N× inline discussions (see §7) |
+| `reconcile_review(id, payload, operation, head)` | team-review (Autopilot-delegated) | 1× marker-tagged `gh api -X POST …/pulls/<n>/reviews --input -`, only when no review carries the operation's marker | the parts of the summary note + N× inline discussions that no note carries yet (see Phase 3) |
 | `reply_and_resolve(thread,body)` | fix | reply comment + GraphQL `resolveReviewThread` | `POST …/discussions/:id/notes` + `PUT …/discussions/:id?resolved=true` |
 
 ### Step 3 — Config schema (extends `autopilot.yaml` `vcs:` node)
@@ -198,6 +199,14 @@ specified in `skills/autopilot/rules/conventions.md`.
   mismatch.
 - Extend the marker/structure guards so a skill can't call `gh`/`glab` directly
   outside the driver.
+- `tests/integration/gitlab/` — the live tier. The structure suites above replace glab
+  with a fake that encodes our model of glab and GitLab; the live suite drives the GitLab
+  verbs with the real glab builds pinned in `versions.v1.json` against a disposable GitLab
+  CE pinned by digest, and asserts what GitLab stored. `.github/workflows/gitlab-live.yml`
+  runs it for pull requests that touch the driver and nightly, and both release stages run
+  it as a gate. CI runs pinned builds only: a nightly drift check reads the release metadata
+  of newer glab and GitLab releases without running them and files their pin lines in an
+  issue. `tests/README.md` §"Live GitLab suite" holds the operator account.
 
 ### Implementation status
 
@@ -207,9 +216,10 @@ specified in `skills/autopilot/rules/conventions.md`.
     `{id,url,state,base,head}`; `--fetch-threads <id>` → normalized unresolved-thread
     array; `--resolve-thread <id> <threadId> [<replyTo>] [--reply <text>]`.
   - Each op = a pure argv-builder (dry-printable via `ZENSU_VCS_PRINT_ARGV=1` under
-    `ZENSU_VCS_TEST=1`) + a thin runner + a `node` normalizer. Live `gh`/`glab`
-    execution is untested — the hermetic seam is the argv-builder + normalizer, same
-    stance as the Phase-1 probe. Test: `test-vcs-pr-ops.sh`.
+    `ZENSU_VCS_TEST=1`) + a thin runner + a `node` normalizer. Live `gh` execution is
+    untested; glab runs live against a disposable GitLab (Step 5). The hermetic seam is the
+    argv-builder + normalizer, same stance as the Phase-1 probe. Test: `test-vcs-pr-ops.sh`,
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - **Normalized thread shape**: `{threadId, replyTo, path, line, body, author}`.
     `threadId` is the **resolve** handle (GitHub GraphQL thread id / GitLab discussion
     id); `replyTo` is the **reply** target (GitHub REST comment id / the same GitLab
@@ -228,20 +238,50 @@ specified in `skills/autopilot/rules/conventions.md`.
     `--post-review <id> <payload>` (optional `--diff-refs-json`).
   - **GitHub publish** is one atomic `gh api -X POST …/pulls/<n>/reviews --input <payload>`
     (byte-identical to the pre-driver call). **GitLab publish** degrades per §7 to a LOOP: one
-    summary note + N inline discussions, each carrying a `position` object
-    (`base_sha`/`start_sha`/`head_sha` + `new_path`/`new_line` on `RIGHT`, `old_path`/`old_line`
-    on `LEFT`) and a `<!-- zensu:pr<iid>:<hash> -->` idempotency marker so a re-run after a
-    partial failure skips already-posted threads. The verdict rides in the summary-note text;
+    summary note + N inline discussions, each carrying a `position` object resolved against the
+    MR diff before the first write (`base_sha`/`start_sha`/`head_sha`, `old_path` and `new_path`,
+    `new_line` for an added line, `old_line` for a removed one, both for an unchanged context
+    line; an anchor the diff does not contain posts as a positionless discussion) and a
+    `<!-- zensu:pr<iid>:<hash> -->` idempotency marker so a re-run after a
+    partial failure skips already-posted threads. The re-run reads the markers from the parsed
+    bodies of the merge request's notes and discussions, never from raw response text: GitLab's
+    JSON escapes their angle brackets. It counts a marker only where it opens a non-system note
+    of the publishing account (`glab api user`): another account's comment, a system note or a
+    marker quoted inside a note cannot suppress a part, while a note of the publishing account
+    that opens with a copied marker still does. The verdict rides in the summary-note text;
     the driver NEVER calls `glab mr approve`/`merge` (§9.3). Dry mode
     (`ZENSU_VCS_PRINT_ARGV=1`) prints the ordered argv sequence (note first, then each
-    discussion) — the same hermetic seam as Phases 1-2; live `gh`/`glab` execution untested.
-    Test: `test-vcs-publish.sh`.
+    discussion) — the same hermetic seam as Phases 1-2. Live `gh` execution is untested; glab
+    runs live against a disposable GitLab (Step 5).
+    Test: `test-vcs-publish.sh`, `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - `pr-team-review`: Step 0 resolves the driver; Phase A.1 detects the forge (repo-scoped) +
     scouts + fetches the PR/MR ref through the driver (the file list for casting stays the
-    forge-agnostic worktree diff — not a forge API); Phase D publishes via `--post-review`.
+    forge-agnostic worktree diff — not a forge API); Phase D publishes via `--post-review`, or via
+    `--reconcile-review` when Autopilot delegates the review.
     Publish rules split into `rules/github-publish.md` (atomic) + `rules/gitlab-publish.md`
     (loop). Known limit (follow-up): multi-line range comments collapse to a single-line GitLab
     position.
+  - **Delegated publish** (PR #175): `--reconcile-review --provider <p> --repo-id R --expected-head <sha>
+    [--diff-refs-json J] <id> <payload> <operation-key>` (or `--operation-key K`) → one JSON line
+    `{status, marker, headSha, partCount, postedCount, url, provider}`. The payload has the
+    `--post-review` shape and at most 8 MiB, and is copied once into a snapshot that every later read
+    checks by digest. Every part carries
+    `<!-- zensu-review:v1:<sha256(operation key)>:<payload digest>:<head>:<N>:part=<i>/<N> -->`, which
+    binds it to the operation key, the canonical payload digest, the expected head and the part count
+    `N`: 1 on GitHub, the summary note plus one discussion per comment on GitLab. The PR/MR must be
+    open at the expected head before every write and once more at the end. The verb reads every page
+    of the PR's reviews or the MR's notes and discussions and posts only the parts no record carries
+    yet: `present` means nothing was posted, `posted` that every part was, and `reconciled` that a
+    partial GitLab review was completed; after a write it reads the inventory again and requires every
+    part. A duplicate or malformed marker, or a marker of this operation with another payload, head or
+    part count, fails closed before the first write. On GitLab a record that carries this operation's
+    marker must also be a note of the publishing account (`glab api user`) with the planned body, note
+    kind and position; without `--diff-refs-json` the verb tries up to five times, a second apart,
+    until the MR reports complete diff refs. `pr-team-review` calls it only for a review Autopilot
+    delegates, with the durable operation key and the bound head
+    (`skills/pr-team-review/references/publish.md`); a standalone run keeps `--post-review`. Test:
+    `test-vcs-review-marker-reconcile.sh` (M0-M25, I1-I15, G1-G19, L1-L24),
+    `test-autopilot-full-cycle.sh`, `tests/integration/gitlab/test-vcs-gitlab-live.sh` (GL40-GL49).
 - **Phase 4 — DONE**: `autopilot` wired to the driver for the PR-open + pre-push guard.
   - New subcommand: `--open-pr --provider <p> --base <b> --head <h> --title <t> --body-file <f>` →
     GitHub `gh pr create --title --body-file --base --head`; GitLab
@@ -250,13 +290,14 @@ specified in `skills/autopilot/rules/conventions.md`.
     Returns the PR/MR URL — normalizer prefers the `.../pull|merge_requests/<n>` URL, falls back to the
     first http URL, and strips control/ANSI bytes. Failure is propagated (non-zero rc + stderr; not
     swallowed). It infers the repo from **cwd** (caller `cd "$REPO"`) — no `--repo-id`, matching
-    `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh`/`glab` execution untested
-    (hermetic argv seam, same stance as Phases 1-3). `--pr-state` (Phase 2) is REUSED for the pre-push
-    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O7).
+    `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh` execution untested
+    (hermetic argv seam, same stance as Phases 1-3), while glab `--open-pr` runs live (Step 5). `--pr-state` (Phase 2) is REUSED for the pre-push
+    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O8),
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh` (GL60, GL61).
   - `autopilot`: Step 0 resolves the driver; Phase 0.A.1 detects the forge (carries
     `PROVIDER`/`REPOID`/`CLIREADY`, `cliReady=false` stop, `unknown` ask); Phase 1 step 3 opens the
     PR/MR via `--open-pr` (run from `$REPO`); the Critical-Conventions pre-push guard uses `--pr-state`.
-    Pins: `test-autopilot-skill.sh` (P11a-g). Never auto-merge/approve preserved.
+    Pins: `test-autopilot-skill.sh` (P11a-h). Never auto-merge/approve preserved.
 - **Phase 5 — DONE**: repository conventions and `pilot` wired to the driver.
   - `--conventions [--repo DIR] [--provider P] [--template PATH]` → one JSON line from
     `hooks/lib/repo-conventions-v1.js`: `provider`, `prTemplate` (the template the forge pre-fills:
@@ -291,12 +332,23 @@ specified in `skills/autopilot/rules/conventions.md`.
     Edition when no approval rule applies even with nobody approving, so `approved` also needs a
     non-empty `approved_by`. The GitLab answer is a mapping, not a 1:1 equivalent of `reviewDecision`:
     a review that only left discussions reads as not reviewed (its threads still count through
-    `--fetch-threads`). Dry-printable; tests R1-R17 in `test-vcs-pr-ops.sh`.
+    `--fetch-threads`). Dry-printable; tests R1-R17 in `test-vcs-pr-ops.sh` and GL69, GL70 in
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - `--locate-pr` without a number exits **3** when the forge CLI reports that the current branch has
     no PR/MR (`no pull requests found for branch` from `gh`, `no open merge request available for`
-    from `glab`), so "no PR yet" is told apart from an error; every other failure exits 1 with the
+    from `glab`, both matched without regard to case because glab 1.113 and 1.122 capitalize the
+    message), so "no PR yet" is told apart from an error; every other failure exits 1 with the
     forge CLI's message on stderr. Existing callers treat any status other than 0 as "not located".
-    Tests L1-L6 in `test-vcs-pr-ops.sh`.
+    Tests L1-L6 in `test-vcs-pr-ops.sh` and GL55 in
+    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
+  - `--review-markers --provider <p> --repo-id R <id>` (PR #428) → the distinct first-part markers
+    `<!-- zensu-review:v1:…:part=1/<N> -->` in the body fields of the PR's reviews (GitHub GraphQL,
+    every page) or of the MR's notes and discussions (GitLab), one per line, and nothing when there
+    is none. A failed or unparseable listing exits 1 and names the failure on stderr. `pilot` reads
+    review presence from it, and a work-order run's review import uses it to recognize a review an
+    earlier attempt published (`skills/work/references/protocol.md`). Tests N12-N14c and LV28 in
+    `test-vcs-publish.sh`, GL56 and GL57 in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
+    Known gap (follow-up): no fake-backed check drives the GitHub listing.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.
@@ -323,9 +375,15 @@ Consequences to spec explicitly:
 - **Not transactional** — GitLab publish is a loop; a partial failure can leave
   some discussions posted. → **Idempotency:** prefix each posted body with a
   hidden marker (`<!-- zensu:pr<iid>:<hash> -->`); on re-run, skip a discussion
-  whose marker already exists. Same marker convention GitHub inline uses today.
+  whose marker already opens a non-system note of the publishing account (Phase 3).
+  Same marker convention GitHub inline uses today.
 - **`glab` gap** — `glab` has no first-class inline-discussion create; use its
-  `glab api` passthrough (`glab api --method POST projects/:id/merge_requests/:iid/discussions -f …`).
+  `glab api` passthrough with the JSON request on stdin and an explicit content type
+  (`glab api --method POST projects/:id/merge_requests/:iid/discussions --header 'Content-Type: application/json' --input -`).
+  glab up to 1.122 sends an `--input` body without any Content-Type, which GitLab rejects
+  with HTTP 415, and glab 1.123 and later refuse bracketed field names such as
+  `-f 'position[base_sha]=…'` in a JSON body, so every GitLab body POST goes through
+  `_zensu_vcs_gitlab_post_json`.
 - **`iid` not `number`**, and project id = **URL-encoded** `namespace/project`.
 
 > **Decision — GitLab "approve" semantics.** Default: post the review as

@@ -102,6 +102,9 @@ grep -qF 'ZPS=./powershell-command-v1.js' "$PLUGIN_DIR/hooks/checks/pre-bash-zen
 grep -qF "require('./powershell-command-v1.js').spellings(" "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" \
   && check "PC5c the consent gate reads PowerShell spellings through the analyzer in its own hooks/lib" PASS \
   || check "PC5c the consent gate reads PowerShell spellings through the analyzer in its own hooks/lib" FAIL
+grep -qF "require('./powershell-command-v1.js').spellings(" "$PLUGIN_DIR/hooks/lib/zensu-cli-backend-v1.js" \
+  && check "PC5d the CLI gate's backend reading reads PowerShell spellings through the analyzer in its own hooks/lib" PASS \
+  || check "PC5d the CLI gate's backend reading reads PowerShell spellings through the analyzer in its own hooks/lib" FAIL
 
 unit_check_done "PC1z every unit file the registry gives this suite was graded"
 

@@ -199,6 +199,34 @@ if [ -z "$OUT14" ] && [ "$OUT14B" = "FIRED" ]; then
 else
   check "C14 origin gate (harness output='${OUT14:0:60}' slash-with-args='$OUT14B')" FAIL
 fi
+CFG14_BUILD="$P14/route-build.json"; printf '%s' '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$CFG14_BUILD"
+CFG14_DIRECT="$P14/route-direct.json"; printf '%s' '{"hooks":{"defaultDeliveryRoute":"direct"}}' > "$CFG14_DIRECT"
+prompt14() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit", prompt:process.argv[1], session_id:process.argv[2]}))' "$1" "$2" \
+    | env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$3" bash "$HOOK" 2>/dev/null
+}
+OUT14C=""
+N14C=0
+S14C=0
+for CFG14 in "$NO_CONFIG" "$CFG14_BUILD" "$CFG14_DIRECT"; do
+  S14C=$((S14C + 1))
+  payload "register" "s14c-$S14C" "$P14" >/dev/null || OUT14C="${OUT14C}[no-session-$S14C]"
+  for PROMPT14C in "/zensu:autopilot add a cart total" "/zensu:pilot ZEN-42 continue" "/zensu:work implement order-7" \
+    "$(printf '<command-message>zensu:autopilot is running…</command-message>\n<command-name>/zensu:autopilot</command-name>\n<command-args>add a cart total</command-args>')" \
+    "$(printf '<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n/zensu:work implement order-7')"; do
+    N14C=$((N14C + 1))
+    OUT14C="${OUT14C}$(prompt14 "$PROMPT14C" "s14c-$S14C" "$CFG14")"
+  done
+done
+payload "register" "s14-near" "$P14" >/dev/null || OUT14C="${OUT14C}[no-session-near]"
+OUT14D="$(prompt14 "/zensu:autopilot-release run-1" "s14-near" "$NO_CONFIG" | fired)"
+payload "register" "s14-build" "$P14" >/dev/null || OUT14C="${OUT14C}[no-session-build]"
+OUT14E="$(prompt14 "/zensu:build add a retry helper" "s14-build" "$CFG14_BUILD")"
+if [ -z "$OUT14C" ] && [ "$N14C" = 15 ] && [ "$OUT14D" = "FIRED" ] && printf '%s' "$OUT14E" | grep -qF 'route decided by the field below'; then
+  check "C14b a slash command that invokes /zensu:autopilot, /zensu:pilot or /zensu:work gets no reminder under an ask, build or direct route, in the raw, tag and reminder-prefixed spellings, while /zensu:autopilot-release and /zensu:build still get theirs" PASS
+else
+  check "C14b route-skill slash commands (output='${OUT14C:0:80}' prompts=$N14C near-miss='$OUT14D' build='${OUT14E:0:60}')" FAIL
+fi
 rm -rf "$P14"
 
 P15="$(mktemp -d -t tddrem-XXXXXX)"
@@ -220,8 +248,9 @@ if [ -n "$CTX15" ] && [ "$LEN15" -le 400 ] \
    && printf '%s' "$CTX15" | grep -qF 'standing authorization' \
    && printf '%s' "$CTX15" | grep -qF 'within the scope of that pull request' \
    && printf '%s' "$CTX15" | grep -qF 'ZENSU DELIVERY ROUTE: ask' \
-   && ! printf '%s' "$CTX15" | grep -qF 'AskUserQuestion'; then
-  check "C15 a CI event gets the route field and one standing-authorization sentence ($LEN15 chars), never the ask-first directive" PASS
+   && ! printf '%s' "$CTX15" | grep -qF 'AskUserQuestion' \
+   && ! printf '%s' "$CTX15" | grep -qi 'autopilot'; then
+  check "C15 a CI event gets the route field and one standing-authorization sentence ($LEN15 chars), never the ask-first directive or the Autopilot route" PASS
 else
   check "C15 CI-event note (len=${LEN15:-none}: ${CTX15:0:80})" FAIL
 fi
@@ -265,21 +294,35 @@ reminder_with_host() {
     | env -u CLAUDE_CODE_ENTRYPOINT ${entry:+CLAUDE_CODE_ENTRYPOINT="$entry"} CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
       CLAUDE_PLUGIN_DATA="$P30/plugin-data" CLAUDE_PROJECT_DIR="$P30" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null
 }
+autopilot_offer() {
+  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const t=JSON.parse(s).hookSpecificOutput.additionalContext;const label=/in this order: \x27Yes — (Zensu workflow|TDD flow)\x27, \x27Autopilot — \/zensu:autopilot\x27 and \x27No — implement directly\x27\./.test(t)||/"Yes — (Zensu workflow|TDD flow)", "Autopilot — \/zensu:autopilot" and "No — implement directly", in this order\./.test(t);const arm=/skill=\x27zensu:autopilot\x27|skill zensu:autopilot/.test(t);process.stdout.write(label&&arm?"offered":!label&&!arm?"absent":"partial")}catch(_){process.stdout.write("unparseable")}})'
+}
 C30_BAD=""
+C30C_BAD=""
 for c30_case in "sdk-cli:default:no" "claude-code-github-action:default:no" "cli:dontAsk:no" "claude-desktop:auto:yes" \
   "cli:bypassPermissions:yes" "claude-vscode:plan:yes" "sdk-ts:default:unknown" ":auto:unknown"; do
   c30_entry="${c30_case%%:*}"; c30_rest="${c30_case#*:}"; c30_mode="${c30_rest%%:*}"; c30_want="${c30_rest#*:}"
-  c30_got="$(reminder_with_host "$c30_entry" "$c30_mode" "s30-${c30_entry:-none}-$c30_mode" | human_field)"
+  c30_out="$(reminder_with_host "$c30_entry" "$c30_mode" "s30-${c30_entry:-none}-$c30_mode")"
+  c30_got="$(printf '%s' "$c30_out" | human_field)"
   [ "$c30_got" = "$c30_want" ] || C30_BAD="$C30_BAD [${c30_entry:-unset}/$c30_mode: $c30_got]"
+  c30_offer="$(printf '%s' "$c30_out" | autopilot_offer)"
+  case "$c30_want" in
+    (yes) [ "$c30_offer" = offered ] || C30C_BAD="$C30C_BAD [${c30_entry:-unset}/$c30_mode: $c30_offer]" ;;
+    (*) [ "$c30_offer" = absent ] || C30C_BAD="$C30C_BAD [${c30_entry:-unset}/$c30_mode: $c30_offer]" ;;
+  esac
 done
 [ -z "$C30_BAD" ] \
   && check "C30 the full reminder carries the human-present field right above its closing route field, read from the host entrypoint and the payload permission mode, auto mode included" PASS \
   || check "C30 human-present field in the full reminder:$C30_BAD" FAIL
+[ -z "$C30C_BAD" ] \
+  && check "C30c the full reminder offers /zensu:autopilot, label and dispatch together, exactly when the human-present field reads yes, and neither when it reads no or unknown" PASS \
+  || check "C30c Autopilot option against the human-present field:$C30C_BAD" FAIL
 C30B="$(reminder_with_host claude-desktop auto s30-claude-desktop-auto)"
 if [ "$(printf '%s' "$C30B" | human_field)" = yes ] \
+   && [ "$(printf '%s' "$C30B" | autopilot_offer)" = offered ] \
    && printf '%s' "$C30B" | grep -qF 'the full reminder given earlier in this context still applies' \
    && ! printf '%s' "$C30B" | grep -qF '__ZENSU_HUMAN_PRESENT__'; then
-  check "C30b the short ask line of a later prompt carries the same human-present field" PASS
+  check "C30b the short ask line of a later prompt carries the same human-present field and, as it reads yes, the Autopilot option" PASS
 else
   check "C30b short ask line human-present field (out=$(printf '%s' "$C30B" | head -c 400))" FAIL
 fi

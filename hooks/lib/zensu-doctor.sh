@@ -682,7 +682,7 @@ if [ -z "$ZDOC_ZEN_MODE" ]; then
     ZDOC_ZEN_ROOT="$(cd -P -- "$ZDOC_SESSION_PROJECT_ROOT" 2>/dev/null && pwd -P)"
     if [ -z "$ZDOC_ZEN_ROOT" ]; then
       ZDOC_ZEN_MODE=unjudged
-    elif ! zensu_hook_enabled zenMode; then
+    elif ! zensu_hook_enabled zenMode "$ZDOC_ZEN_ROOT"; then
       ZDOC_ZEN_MODE="off (hooks.zenMode=false)"
     elif zen_mode_resolve "$ZDOC_ZEN_ROOT" "$ZDOC_SESSION_KEY"; then
       case "$ZEN_MODE_SOURCE" in

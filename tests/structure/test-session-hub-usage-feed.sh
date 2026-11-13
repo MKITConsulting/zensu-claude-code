@@ -70,7 +70,7 @@ SOURCE_FACTS="$(node -e '
     reading: JSON.stringify(reading) === JSON.stringify(contract.usage.rateLimit),
     calls: JSON.stringify(calls) === JSON.stringify(["clock.now", "env.get", "fs.exists", "fs.stat", "fs.write", "session.id"]),
     env: JSON.stringify(envNames) === JSON.stringify(["CLAUDE_CONFIG_DIR", "HOME"]),
-    events: JSON.stringify(events) === JSON.stringify(["session.measure"]),
+    events: JSON.stringify(events) === JSON.stringify(["turn.complete", "session.measure"]),
     imports: imports.length > 0 && imports.every((line) => /^import type \{[^}]+\} from \x27claude-code\x27$/.test(line)),
   };
   facts.detail = JSON.stringify({ version, directory, record, reading, calls, envNames, events, imports });
@@ -87,7 +87,7 @@ check "U4 the usage directory is a sibling of the session-trail receipt director
 [ "$(fact calls)" = PASS ] && [ "$(fact env)" = PASS ] \
   && check "U6 the module reaches only the clock, CLAUDE_CONFIG_DIR and HOME, three fs calls, and the session id" PASS \
   || check "U6 the module reaches more of the engine than the feed needs: ${DETAIL:-<unreadable>}" FAIL
-check "U7 the module hooks session.measure alone, so session.start writes no stale reading" "$(fact events)"
+check "U7 the module hooks turn.complete and session.measure alone, so no hook sits on the model's stream and session.start writes nothing" "$(fact events)"
 check "U8 the module imports nothing but types from claude-code" "$(fact imports)"
 
 [ -f "$MODULE_TEST" ] && grep -q "from 'claude-code/testing'" "$MODULE_TEST" \
