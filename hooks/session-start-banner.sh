@@ -229,7 +229,11 @@ else
     echo "zensu: Tip — use Claude Code Plan mode for code changes."
   fi
 fi
-if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-zen-mode.sh" ] && zensu_hook_enabled zenMode && zensu_zen_mode_default_on; then
+_ZENSU_ZEN_ROOT=""
+if [ -n "$_ZENSU_ROUTE_ROOT" ]; then
+  _ZENSU_ZEN_ROOT="$(cd -P -- "$_ZENSU_ROUTE_ROOT" 2>/dev/null && pwd -P)" || _ZENSU_ZEN_ROOT=""
+fi
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-zen-mode.sh" ] && zensu_hook_enabled zenMode ${_ZENSU_ZEN_ROOT:+"$_ZENSU_ZEN_ROOT"} && zensu_zen_mode_default_on ${_ZENSU_ZEN_ROOT:+"$_ZENSU_ZEN_ROOT"}; then
   echo "zensu: zen-mode — on by default: answers lead with the result, keep the substance whole and end with one next step; your own CLAUDE.md, output style or a style mode you chose outranks it. Say \"zen off\" to leave it for this session, or set hooks.zenModeDefault=false in ~/.zensu/config.json to make it opt-in."
 fi
 echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:change · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:build · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."

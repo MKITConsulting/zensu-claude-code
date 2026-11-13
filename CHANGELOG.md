@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **zen-mode keys follow the session's recorded project root**: the zen-mode hook,
+  `/zensu:zen-mode --status` and the `/zensu:doctor` session row now read `hooks.zenMode` and
+  `hooks.zenModeDefault` from the `.zensu/config.json` under the session's recorded project root,
+  where they already read the session marker, instead of the one under the directory Claude Code
+  sets as `CLAUDE_PROJECT_DIR`; the session banner reads both under the same root as its
+  delivery-route line. The two directories differ in a session whose working directory is a git
+  worktree and after `/zensu:adopt-session --reanchor`. An opt-out such as `"zenMode": false` or
+  `"zenModeDefault": false` that lives only in the host directory's `.zensu/config.json` no longer
+  reaches such a session: copy it into that worktree's `.zensu/config.json` or into
+  `~/.zensu/config.json`.
+
 ## [0.37.0] - 2026-11-10
 
 ### Added
