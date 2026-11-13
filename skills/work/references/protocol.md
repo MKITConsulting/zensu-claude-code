@@ -191,7 +191,12 @@ Outside work-order mode all three print nothing and exit 0.
   subcommand, because it can no longer tell which verb a call runs, and the denial says that the plugin installation is incomplete. It reads commands inside `bash -c`,
   `eval`, `env -S`, command substitutions and wrappers such as `env` or `sudo`. It reads every
   command three ways, with plain single quotes and with the ANSI-C quoting (`$'work'`) of bash and
-  of zsh, and denies when any reading finds a forbidden command. It denies an option between `-c`
+  of zsh, and denies when any reading finds a forbidden command. When none does and the command
+  holds `<`, `>` or `$`, through which an ANSI-C string can spell either, it reads it again with
+  each redirection removed as bash, zsh or a POSIX shell
+  removes it, so `2>/dev/null`, `>&2` or `&>file` in front of a program, a noun or a verb hides
+  none of them, and it reads the command substitutions of a heredoc body whose delimiter is
+  unquoted. It denies an option between `-c`
   and the command string, which it cannot judge. It renews the lease when due, and once the lease is
   lost or the session ended it denies every `gh`, `glab` and `zensu-vcs.sh` call, as it does while
   Zensu refused the lease and a send without an answer still waits for its replay; that denial
