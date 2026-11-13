@@ -167,6 +167,8 @@ Run `zensu features revision <feature-id>` to version the implementation:
 - `--docs-required` (optional): Whether docs are required for this revision
 - `--created-by` (optional): api | mcp | web-ui | github-sync
 
+`--scope-summary` and `--scope-details` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. Pass them as `--scope-summary "$(cat "$f")" --scope-details "$(cat "$d")"`, each file written in the same Bash call through a quoted heredoc as in Step 6, with `d="$(mktemp)" || exit 1` and the trap widened to `trap 'rm -f "$f" "$d"' EXIT`.
+
 ### Step 8: Validate
 
 Run `zensu security validate <feature-id>` to check if the implementation meets all security requirements for release.

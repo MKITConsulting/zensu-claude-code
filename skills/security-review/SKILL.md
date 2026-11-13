@@ -120,7 +120,9 @@ The command takes:
 - `--type`: `automated` with `--reviewer claude-code`; `manual` only for the person's own
   review and `external` only for an outside review the user names. The CLI defaults to
   `manual`, so always pass it.
-- `--findings`: the findings summary; `--conditions`: only for `conditional`
+- `--findings`: the findings summary; `--conditions`: only for `conditional`. Both are
+  Markdown: Zensu's Security tab renders headings, lists and code, so write structured
+  Markdown, not one unformatted paragraph
 
 The findings and the conditions are free text and never go into the command line
 itself: inside double quotes the shell runs every backtick span and expands every

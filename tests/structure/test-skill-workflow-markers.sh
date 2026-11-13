@@ -630,7 +630,7 @@ FT_PROBE="$(mktemp -t skillft-XXXXXX)"
 cat > "$FT_PROBE" <<'NODE'
 'use strict';
 const fs = require('fs');
-const FREE_TEXT = /markdown|json|document|findings|conditions/i;
+const FREE_TEXT = /markdown|json|document|description|findings|conditions/i;
 const ARGUMENT = /--[A-Za-z][\w-]*(?:=|[ \t]+)(["']?)<([^<>\n]+)>\1/g;
 let scanned = 0;
 for (const file of process.argv.slice(2)) {
@@ -661,7 +661,7 @@ FT_OUT="$(ft_scan "$CLAUDE_PLUGIN_ROOT" ${FT_FILES[@]+"${FT_FILES[@]}"})"
 FT_BAD="$(printf '%s\n' "$FT_OUT" | grep -E '^HIT ')"
 FT_SCANNED="$(printf '%s\n' "$FT_OUT" | sed -n 's/^SCANNED //p')"
 if [ -z "$FT_BAD" ] && [ "${#FT_FILES[@]}" -gt 1 ] && [ "$FT_SCANNED" = "${#FT_FILES[@]}" ]; then
-  check "FT1 no skill file passes a Markdown, JSON, document or findings placeholder as a quoted or unquoted flag value ($FT_SCANNED files scanned)" PASS
+  check "FT1 no skill file passes a Markdown, JSON, document, description or findings placeholder as a quoted or unquoted flag value ($FT_SCANNED files scanned)" PASS
 else
   printf '%s\n' "${FT_BAD:-$FT_OUT}" | sed 's/^/      /'
   echo "      write free text to a temporary file through a heredoc with a quoted delimiter and pass \"\$(cat \"\$f\")\""
@@ -690,6 +690,7 @@ zensu link docs <id> --content "<authored-markdown>"
 zensu ghost scan --candidates '<json>'
 zensu products vision-create --content <plan-document> --source claude-code
 zensu security review <id> --findings="<findings-summary>"
+zensu journeys create --product <id> --description "<journey-description>"
 EOF
 cat > "$FT_FIX/good/SKILL.md" <<'EOF'
 ---
@@ -709,13 +710,65 @@ ft_has 'HIT bad/SKILL.md:5 --content "<authored-markdown>"' \
   && ft_has "HIT bad/SKILL.md:6 --candidates '<json>'" \
   && ft_has 'HIT bad/SKILL.md:7 --content <plan-document>' \
   && ft_has 'HIT bad/SKILL.md:8 --findings="<findings-summary>"' \
-  && check "FT3 a double-quoted, a single-quoted, an unquoted and an equals-joined free-text placeholder are flagged at their lines" PASS \
-  || check "FT3 a double-quoted, a single-quoted, an unquoted and an equals-joined free-text placeholder are flagged at their lines" FAIL
-ft_has 'SCANNED 2' && [ "$(printf '%s\n' "$FT_FX_OUT" | grep -c '^HIT ')" = 4 ] \
+  && ft_has 'HIT bad/SKILL.md:9 --description "<journey-description>"' \
+  && check "FT3 a double-quoted, a single-quoted, an unquoted, an equals-joined and a description free-text placeholder are flagged at their lines" PASS \
+  || check "FT3 a double-quoted, a single-quoted, an unquoted, an equals-joined and a description free-text placeholder are flagged at their lines" FAIL
+ft_has 'SCANNED 2' && [ "$(printf '%s\n' "$FT_FX_OUT" | grep -c '^HIT ')" = 5 ] \
   && ! printf '%s\n' "$FT_FX_OUT" | grep -qF 'HIT good/' \
   && check "FT4 frontmatter, a heredoc body, a short placeholder, a JSON literal and prose stay outside the lint" PASS \
   || { printf '%s\n' "$FT_FX_OUT" | sed 's/^/      /'; check "FT4 frontmatter, a heredoc body, a short placeholder, a JSON literal and prose stay outside the lint" FAIL; }
 rm -rf "$FT_FIX" "$FT_PROBE"
+
+FF_PROBE="$(mktemp -t skillff-XXXXXX)"
+cat > "$FF_PROBE" <<'NODE'
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const MD = 'renders headings, lists and code, so write structured Markdown, not one unformatted paragraph';
+const PLAIN = 'plain text: Zensu does not render Markdown there, so do not use Markdown syntax';
+const FILE_FORM = '"$(cat "$';
+const SITES = [
+  ['skills/bootstrap/SKILL.md', 'with name, slug, and product type', MD, true],
+  ['skills/bootstrap/SKILL.md', 'with the structured JSON containing components and features', MD, false],
+  ['skills/bootstrap/SKILL.md', 'Rewrite a vague or unformatted description with', MD, true],
+  ['skills/bootstrap/SKILL.md', 'Create approved journeys with', MD, true],
+  ['skills/bootstrap/SKILL.md', '`--expected-result` are plain text', PLAIN, true],
+  ['skills/bootstrap/SKILL.md', 'for each tier (`--tier-order` ascending', PLAIN, true],
+  ['skills/ghost-scan/SKILL.md', "A candidate's optional `description`", MD, false],
+  ['skills/ghost-scan/SKILL.md', 'per approved journey', MD, true],
+  ['skills/ghost-scan/SKILL.md', 'per step (`--title` and a 1-based', PLAIN, true],
+  ['skills/ghost-scan/references/cross-component-journeys.md', 'citation into the step `--description`', PLAIN, true],
+  ['skills/security-review/SKILL.md', '`--findings`: the findings summary', MD, false],
+  ['skills/implement/SKILL.md', '`--scope-details` are plain text', PLAIN, true],
+];
+const blocksOf = (raw) => {
+  const blocks = [];
+  let cur = [];
+  for (const line of raw.replace(/\r\n/g, '\n').split('\n')) {
+    const starts = /^\s*$/.test(line) || /^\s*([-*]|\d+\.)\s/.test(line) || /^#/.test(line) || /^\s*```/.test(line);
+    if (starts && cur.length) { blocks.push(cur.join(' ')); cur = []; }
+    if (!/^\s*$/.test(line)) cur.push(line.trim());
+  }
+  if (cur.length) blocks.push(cur.join(' '));
+  return blocks;
+};
+let checked = 0;
+for (const [file, anchor, phrase, fileForm] of SITES) {
+  const blocks = blocksOf(fs.readFileSync(path.join(process.argv[2], file), 'utf8')).filter((b) => b.includes(anchor));
+  const ok = blocks.length === 1 && blocks[0].includes(phrase) && (!fileForm || blocks[0].includes(FILE_FORM));
+  if (!ok) console.log('MISS ' + file + ' ' + anchor + ' (blocks=' + blocks.length + ')');
+  checked++;
+}
+console.log('CHECKED ' + checked);
+NODE
+FF_OUT="$(node "$FF_PROBE" "$CLAUDE_PLUGIN_ROOT" 2>&1)"
+if ! printf '%s\n' "$FF_OUT" | grep -q '^MISS ' && printf '%s\n' "$FF_OUT" | grep -qx 'CHECKED 12'; then
+  check "FT5 each of the 12 free-text field sites of bootstrap, ghost-scan, security-review and implement states its text format, and each flag site passes its value through the file form" PASS
+else
+  printf '%s\n' "$FF_OUT" | sed 's/^/      /'
+  check "FT5 a free-text field site lost its text-format sentence or its file form" FAIL
+fi
+rm -f "$FF_PROBE"
 
 echo "----"
 echo "test-skill-workflow-markers: $PASS PASS / $FAIL FAIL"

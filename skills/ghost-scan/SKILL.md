@@ -205,6 +205,8 @@ is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
    }
    ```
 
+   A candidate's optional `description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph. Keep it brief, because all candidates travel as one command-line argument and the operating system limits its size. Apply copies it into the feature it creates.
+
 2. **Pre-submit self-check.** Sum `detectedTestFiles` **and** `detectedDocFiles` across all candidates. If the Phase 2 walk surfaced test or doc files but either sum is 0 — or far below what you saw — the per-candidate mapping is broken: STOP and re-glob each candidate's source dirs (steps 6–7) before submitting. Importing source without its tests or docs understates real maturity and skews release gates.
 3. Output: "Scan created with {n} candidates ({x} high, {y} medium, {z} low confidence), {t} tests and {d} docs mapped across candidates. Ready for review."
 
@@ -267,11 +269,17 @@ This mirrors `/zensu:bootstrap` Step 2.
    - `zensu journeys create --product <product-id>` per approved journey
      (`--title` required, `--slug`, `--type` ∈ critical|happy_path|edge_case|error_path|onboarding,
      `--priority` ∈ critical|high|medium|low, `--persona` free text). Use only
-     those `--type` values — the server rejects anything else.
+     those `--type` values — the server rejects anything else. `--description` is Markdown:
+     Zensu renders headings, lists and code, so write structured Markdown, not one unformatted
+     paragraph; pass it as `"$(cat "$f")"`, written to `$f` in the same Bash call as in Phase 3
+     step 1.
    - `zensu journeys step <journey-id> --product <product-id>` per step (`--title` and a 1-based
      `--step-order` are required, `--feature` = the feature **UUID** from the map, never a slug,
      `--interaction-type` ∈ action|navigation|input|validation|output|wait,
-     `--critical`).
+     `--critical`). `--description` and `--expected-result` are plain text: Zensu does not
+     render Markdown there, so do not use Markdown syntax. Pass them as `--description "$(cat "$f")"
+     --expected-result "$(cat "$e")"`, each file written in the same Bash call, with `e="$(mktemp)"`
+     and the trap widened to both.
    - `zensu journeys health --product <product-id> <journey-id>` on each created journey; report weak links to the user.
 
 > **Build-out baseline (automatic, server-side).** Each newly created feature is
@@ -282,20 +290,7 @@ This mirrors `/zensu:bootstrap` Step 2.
 
 ### Phase 5b: Cross-Component Deep Journey Pass (multi-component products)
 
-Run this ONCE, after **every** component of a multi-component product has been scanned + applied (so all features exist). It replaces the per-component Phase 5 for such products. Rationale: a single metadata pass over feature titles yields plausible-but-unverified journeys; real cross-component journeys must be **traced through the actual code and the existing E2E specs**, then cross-checked adversarially. Structure it as a fan-out → debate → synthesize workflow (the house pattern — drive it with the Workflow tool or a parallel `Agent` batch of read-only `Explore` lenses).
-
-**A — Explore (parallel read-only lenses).** Each lens reads the whole repo set + the full feature catalog and proposes 2-5 candidate journeys. **Every step must be grounded in a REAL catalogued feature slug plus a concrete code/test evidence string** (a route/handler, a CLI verb, a UI nav target, an event/webhook, or a test that exercises the transition). Core lenses:
-- **entry-points** — routes/controllers, CLI verbs, UI nav, MCP tools, webhooks → where journeys start + the real step-to-step transitions.
-- **test-derived** (highest signal) — read the existing E2E specs + flow tests; they already encode real, team-validated user journeys. Reconstruct each onto catalogued slugs, citing the spec + test name.
-- **data-flow** — trace writer→reader across components (e.g. agent heartbeat POST → backend ingest → frontend dashboard) for genuine sequential dependencies.
-- **cross-component-bridge** — session hand-off, deep-links, shared auth/redirects → the seams that let a journey cross a component boundary.
-- **persona lenses** — one per persona (new-user/admin, developer/API consumer, security-engineer/SRE) → that persona's end-to-end path.
-
-**B — Consolidate + adversarially verify.** Merge/dedupe the candidates into a master list (collapse overlapping step-sets, keep distinct personas). Then, per master journey, spawn a **skeptic** that tries to REFUTE each step transition against the code: it must find evidence that in the running product an actor genuinely moves from step k to step k+1 (a nav link, a returned id consumed by the next call, an event, a test doing exactly this). **Trim unevidenced steps, or split the journey, rather than fabricate a link.** A completeness critic names the personas/paths/components left uncovered.
-
-**C — Synthesize + create.** Emit the final evidenced journeys — carry each step's code/test citation into the step `--description` so the evidence lives in Zensu. Present the table for user approval, then create via the Phase 5 step-5 mechanic (`journeys create` / `journeys step <id> --feature <UUID>` / `journeys health`). **Real catalogued slugs ONLY** — never invent one; if a wanted step has no catalogued feature, record it as a gap.
-
-Discipline: ground every step in code, prefer ≥2 components per journey, and honestly leave a component uncovered (with a logged reason) rather than forcing an invented cross-component step. Journey-health scores reflect the underlying features' readiness (docs + security), not the wiring.
+Run this ONCE, after **every** component of a multi-component product has been scanned + applied (so all features exist). It replaces the per-component Phase 5 for such products. Before you start it, read the lenses, the adversarial check and the synthesis in `references/cross-component-journeys.md` of this skill's directory.
 
 ### Phase 6: Summary & Next Steps
 

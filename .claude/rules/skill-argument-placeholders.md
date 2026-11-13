@@ -118,20 +118,29 @@ redirect also makes the text a write channel the Bash secret scan inspects: `det
 reports `redirect` and `heredoc` for the file form and nothing for the old inline
 `--content "…"`. zensu-cli has no stdin or file form for `--content`, `--candidates`,
 `--result`, `--children`, `--tiers`, `--findings` or `--conditions` (read from its
-`internal/cmd/*.go` at `bffa3ae`), which is why the round trip through a file exists.
+`internal/cmd/*.go` at `bffa3ae`), nor for `--description`, `--expected-result`,
+`--scope-summary` and `--scope-details` (read from the zensu-cli 0.16.0 `--help`), which is why
+the round trip through a file exists.
 
 `FT1` scans every Markdown file under `skills/`, references and rules included, and fails on a
-`--flag` whose value is a placeholder naming Markdown, JSON, a document, findings or
-conditions, whether unquoted, double-quoted, single-quoted or joined with `=`. `FT2` requires the
-file form in the six skills that send free text: docs, implement, bootstrap, ghost-scan,
-security-review and autopilot. `FT3` and `FT4` pin the four flagged spellings and five near
-misses on fixtures. `B52` and `B52b` in `tests/structure/test-bash-zensu-gate.sh` drive the
+`--flag` whose value is a placeholder naming Markdown, JSON, a document, a description, findings
+or conditions, whether unquoted, double-quoted, single-quoted or joined with `=`. `FT2` requires the
+file form in the seven skills that send free text: docs, implement, bootstrap, ghost-scan,
+security-review, autopilot and change. `FT3` and `FT4` pin the five flagged spellings and five near
+misses on fixtures. `FT5` pins the text-format sentence at each of the twelve free-text field
+sites of bootstrap, ghost-scan, security-review and implement, and the file form at each flag
+site among them: a Markdown field says Zensu renders headings, lists and code, a plain-text field
+says Zensu does not render Markdown there. The formats come from the Zensu web app, which renders
+product, component, feature, sub-feature and journey descriptions and security findings and
+conditions as Markdown, and renders no Markdown in the tier description, the journey step fields
+or the revision scope fields. `B52` and `B52b` in `tests/structure/test-bash-zensu-gate.sh` drive the
 whole form through the CLI write-gate: it passes inside a window that declares its tool and
 stays a denied mutation outside one.
 
 Known gaps: a positional free-text argument and a placeholder with another name are not
-judged; short titles (`--title "<title>"`) and the work-order `--rationale` stay double-quoted,
-so a backtick in a title still runs; nothing checks that the delimiter line is absent from the
+judged; short titles (`--title "<title>"`), a journey's `--persona`, a batch `--reject-reason`,
+the wiki `--change-summary` and the work-order `--rationale` stay double-quoted, so a backtick in
+them still runs; nothing checks that the delimiter line is absent from the
 text; the CLI write-gate's token scan reads each heredoc line as a command
 (`.claude/rules/subagent-shell-guard.md`), so a text line that opens with a `zensu` mutation the
 window does not declare is denied; and the text still travels as one command-line argument, so

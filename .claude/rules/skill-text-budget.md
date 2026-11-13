@@ -35,7 +35,10 @@ read the `skill_listing` attachment, which every session transcript records.
 
 - **Body ≤ 25,000 chars**, frontmatter excluded. Move detail into
   `skills/<name>/references/*.md` and name each file at the step that reads it; `B6`
-  fails a references file its `SKILL.md` never names.
+  fails a references file its `SKILL.md` never names, and a `references/<file>` its `SKILL.md`
+  names that does not exist. A path with a `/` before `references/` names another skill's file
+  and is not judged. A new reference is an untracked file until it is staged, so stage it by
+  path: `git commit -a` leaves it out.
 - **Larger bodies sit on a shrink-only allowlist** in the suite, holding each body's exact
   size. A grown body fails, a shrunk one must lower its entry in the same change, and an
   entry under the cap must leave the list. The list only ever gets shorter.
@@ -89,9 +92,11 @@ A path that names no plugin doc, such as a project's `docs/*.md` glob or the doc
 every source absolute), and the router check is a substring test, so a router that mentions
 its placeholder without defining it passes.
 
-**Split so far:** `skills/session-trail/`, `skills/build/`, `skills/pr-team-review/` and the
-confidence heuristic of `skills/ghost-scan/` (`references/confidence-score.md`, moved to make
-room for the free-text file form of `.claude/rules/skill-argument-placeholders.md`). Each
+**Split so far:** `skills/session-trail/`, `skills/build/`, `skills/pr-team-review/` and two
+parts of `skills/ghost-scan/`: the confidence heuristic (`references/confidence-score.md`, moved
+to make room for the free-text file form of `.claude/rules/skill-argument-placeholders.md`) and
+the Phase 5b cross-component journey pass (`references/cross-component-journeys.md`, moved to
+make room for the text-format lines next to its candidate and journey fields). Each
 split lowers or removes its allowlist entry and re-points the suites that slice the moved
 text. A suite that compares line numbers across a split compares them inside one file, or
 orders the files by the router line that names them, as `P14aa` in
