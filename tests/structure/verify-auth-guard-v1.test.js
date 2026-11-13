@@ -63,6 +63,7 @@ test('a file tool that reaches a run auth directory is denied, in every spelling
     ['Read', { file_path: `${PROJECT}/.ZENSU/Verify-Feature-Runs/run-a1/AUTH/storage-state.json` }],
     ['Read', { file_path: 'C:\\work\\app\\.zensu\\verify-feature-runs\\run-a1\\auth\\storage-state.json' }],
     ['Read', { file_path: `${RUN}/auth/.storage-state.json.0123456789ab.tmp` }],
+    ['Read', { file_path: `${RUN}/auth./storage-state.json` }],
     ['Edit', { file_path: STATE, old_string: 'a', new_string: 'b' }],
     ['Write', { file_path: STATE, content: '{}' }],
     ['MultiEdit', { file_path: STATE, edits: [] }],
@@ -133,6 +134,12 @@ test('a search is denied when its root or its pattern reaches a run auth directo
     ['Glob', { pattern: '[[=a=]]uth/*', path: RUN }],
     ['Grep', { pattern: 'sid', path: RUN, glob: 'a\\uth/*' }],
     ['Glob', { pattern: '\\a\\u\\t\\h/*', path: RUN }],
+    ['Grep', { pattern: 'sid', path: RUN, glob: '[a[=]u[t=]h/*' }],
+    ['Glob', { pattern: '[a[:]u[t:]h/*', path: RUN }],
+    ['Glob', { pattern: '[a[.]u[t.]h/*', path: RUN }],
+    ['Grep', { pattern: 'sid', path: RUN, glob: '[a{]u{t,x}h/*' }],
+    ['Glob', { pattern: '(auth)/*', path: RUN }],
+    ['Glob', { pattern: '*[ht]/*', path: RUN }],
   ];
   for (const [tool, input] of denied) assert.equal(verdict(tool, input).deny, true, `${tool} ${JSON.stringify(input)}`);
   const allowed = [
@@ -143,6 +150,7 @@ test('a search is denied when its root or its pattern reaches a run auth directo
     ['Glob', { pattern: `${consent.RUN_OUTPUT_DIR_NAME}/*.png`, path: RUN }],
     ['Glob', { pattern: '*.png', path: `${RUN}/${consent.RUN_OUTPUT_DIR_NAME}` }],
     ['Glob', { pattern: `*/${consent.RUN_CONFIG_NAME}`, path: runs }],
+    ['Glob', { pattern: `*/${consent.RUN_OUTPUT_DIR_NAME}/*.png`, path: runs }],
     ['Glob', { pattern: 'src/**/*.ts' }],
   ];
   for (const [tool, input] of allowed) assert.equal(verdict(tool, input).deny, false, `${tool} ${JSON.stringify(input)}`);
@@ -175,6 +183,28 @@ test('a shell command that names a run auth path is denied in every spelling the
     ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[[=a=]]uth/*'],
     ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[[:a]uth/*'],
     ['Bash', 'cat .zensu/verify-feature-runs/run-a1/{a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[a[=]u[t=]h/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[a"]"]uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[a\\]]uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[a{]u{t,x}h/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/{a..z}uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/(auth)/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/(auth|x)/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/@(auth)/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/authx#/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/auth~x/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/*h/*'],
+    ['Bash', 'ls .zensu/verify-feature-runs/run-a1/*[ht]'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/$D/*'],
+    ['Bash', 'cat ".zensu/verify-feature-runs/run-a1/a b/../auth/"*'],
+    ['Bash', "cat '.zensu/verify-feature-runs/run-a1/a;b/../auth/'*"],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/x/.?/auth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/<->/../auth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/browser/**/../../auth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs*/run-a1/auth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs{,/x}/run-a1/auth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs{/x/y/z,/run-a1/auth}/*'],
+    ['PowerShell', 'Get-ChildItem .zensu/verify-feature-runs/run-a1/[a]uth'],
   ];
   for (const [tool, command] of denied) {
     const result = verdict(tool, { command });
@@ -191,6 +221,14 @@ test('a shell command that names a run auth path is denied in every spelling the
     ['Bash', 'git status --short'],
     ['PowerShell', 'Get-ChildItem .zensu/verify-feature-runs'],
     ['Bash', 'echo {a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}'],
+    ['Bash', `cat .zensu/verify-feature-runs/run-a1/${consent.RUN_CONFIG_NAME} | jq .`],
+    ['Bash', `x=$(cat .zensu/verify-feature-runs/run-a1/${consent.RUN_CONFIG_NAME});echo "$x"`],
+    ['Bash', `ls -l ".zensu/verify-feature-runs/run-a1/${consent.RUN_OUTPUT_DIR_NAME}/page 1.png"`],
+    ['Bash', 'ls .zensu/verify-feature-runs/run-a1/*.png'],
+    ['Bash', `ls .zensu/verify-feature-runs/*/${consent.RUN_OUTPUT_DIR_NAME}/*.png`],
+    ['Bash', `ls .zensu/verify-feature-runs/run-a1/${consent.RUN_OUTPUT_DIR_NAME}/**/*.png`],
+    ['Bash', 'RUN_DIR="$GIT_ROOT/.zensu/verify-feature-runs/$(openssl rand -hex 6)"'],
+    ['PowerShell', `Get-Content .zensu/verify-feature-runs/run-a1/${consent.RUN_CONFIG_NAME} -Raw | ConvertFrom-Json`],
   ];
   for (const [tool, command] of allowed) assert.deepEqual(verdict(tool, { command }), { deny: false, reason: guard.REASONS.CLEAN }, `${tool} ${command}`);
   assert.deepEqual(verdict('Bash', {}), { deny: false, reason: guard.REASONS.CLEAN });

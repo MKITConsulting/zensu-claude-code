@@ -80,6 +80,19 @@ restore the state unjudged. That rule's markers derive from their owners: `CLI_W
 `verify-auth-state-v1.js`: `GUARD_MATCHER` derives from it, the registry entry spells the same
 string, and the guard's unit file compares them.
 
+**Below a run directory a path is read conservatively, never dialect by dialect.** The guard
+translates no glob into a regular expression, because the shells disagree on nested classes, a
+quoted or escaped `]`, an unmatched brace before a valid group and zsh groups, and a translation
+that misreads one form lets that form reach `auth/`. `couldBeAuth` counts a plain name only when it is `auth` once
+trailing dots and spaces are dropped, a glob of `*`, `?` and brackets unless its literal head or
+tail rules `auth` out, and every other segment always. `shifts` names the segments that can stand
+for `..`, `.` or no directory (a brace or group character, `$`, a backtick, a dot glob, an all-dot
+name); after one every later segment is a candidate, and after `**` too once a `..` follows.
+`shellWords` splits a command as a POSIX shell does (quotes and escapes removed, a quoted space or
+`;` kept inside its word, `;&|<>` breaking words, a zsh `<n-m>` range kept whole), and every
+spelling is read with its backslashes as escapes and again as separators. Do not reintroduce glob
+translation to win back a false positive.
+
 **It binds no session and never stands between a session and its repair commands.** The guard
 judges only a payload that names a verify-feature run directory, so it allows `/zensu:doctor`
 and the adoption command in every bind state and on every platform. That is why
@@ -127,9 +140,14 @@ permissively, which on its own would be a `patch`.
   directory that names `auth/` relatively, and a recursive command started at or above the run
   directory, such as a `grep -r`, `cp -r` or `tar` of the run directory itself, are not judged;
   a recursive Grep from the project root relies on the `.gitignore`, which ripgrep honours only
-  inside a git work tree. `**` at or above a run directory is denied even where it could not
-  reach `auth/`. The session rule reads the command text too, so a copy of a signed-in run
+  inside a git work tree. A runs directory whose own name is a glob or an expansion
+  (`.zensu/verify-*-runs`) is not recognized, because the dispatcher reads only payloads that name
+  `verify-feature-runs`. The session rule reads the command text too, so a copy of a signed-in run
   config outside a run directory escapes it.
+- The path rule over-denies on purpose: `**` at or above a run directory, a segment at the `auth`
+  position that is neither a plain name nor a glob whose head or tail rules `auth` out
+  (`{a,b}.png`, `$NAME`), and, in PowerShell's whitespace-free spelling, an argument written right
+  after a file directly below a run directory.
 - Only the nine tools are judged: an MCP server's file reader or an IDE's file tool reaches
   `auth/` unjudged. Hooks switched off host-side judge nothing.
 - Local mode signs in on the run's loopback origins, which the caller chooses and nothing binds

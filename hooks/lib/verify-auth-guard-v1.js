@@ -19,12 +19,16 @@ const PATH_FIELDS = Object.freeze({
 const PATTERN_FIELDS = Object.freeze({ Grep: 'glob', Glob: 'pattern' });
 const SEARCH_TOOLS = Object.freeze(['Grep', 'Glob']);
 const MARKER = authState.RUNS_DIR_NAME;
+const AUTH = authState.AUTH_DIR_NAME;
 const STATE_STEM = authState.STATE_FILE_NAME.replace(/\.json$/, '');
-const MAX_BRACE_ALTERNATIVES = 64;
-const BRACKET_CLASS_CLOSERS = Object.freeze({ ':': ':]', '=': '=]', '.': '.]' });
+const PLAIN_NAME = /^[a-z0-9._ -]+$/;
+const SIMPLE_GLOB = /^[a-z0-9._ *?[\]-]+$/;
+const SHIFTING = /[{}()$`]/;
+const WORD_END = /[)`'",;&|<>}]+$/;
+const WORD_BREAKS = ';&|<>';
+const ZSH_RANGE = /<\d*-\d*>/y;
 const CLI_WORDS = Object.freeze([...cliVersion.BINARY_NAMES, cliVersion.PACKAGE_NAME]);
 const SESSION_MARKER = authState.AUTH_SESSION_PREFIX.slice(0, -'auth-'.length);
-const TOKEN_RE = /[^\s;&|<>()'"`]+/g;
 const REASONS = Object.freeze({
   PATH: 'path-inside-run-auth-directory',
   COMMAND: 'command-names-run-auth-directory',
@@ -47,141 +51,110 @@ function marked(raw) {
   });
 }
 
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+function couldBeAuth(segment) {
+  const name = segment.replace(/[. ]+$/, '');
+  if (name === '') return false;
+  if (PLAIN_NAME.test(name)) return name === AUTH;
+  if (!SIMPLE_GLOB.test(name.replace(/\[[!^]/g, '['))) return true;
+  const prefix = /^[a-z0-9._ -]*/.exec(name)[0];
+  const suffix = /[a-z0-9._ -]*$/.exec(name)[0];
+  return AUTH.startsWith(prefix) && AUTH.endsWith(suffix) && prefix.length + suffix.length <= AUTH.length;
 }
 
-function matchingBrace(text, open) {
-  let depth = 0;
-  for (let index = open; index < text.length; index += 1) {
-    if (text[index] === '{') depth += 1;
-    else if (text[index] === '}') {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-  }
-  return -1;
-}
-
-function splitAlternatives(body) {
-  const alternatives = [];
-  let depth = 0;
-  let start = 0;
-  for (let index = 0; index < body.length; index += 1) {
-    if (body[index] === '{') depth += 1;
-    else if (body[index] === '}') depth -= 1;
-    else if (body[index] === ',' && depth === 0) {
-      alternatives.push(body.slice(start, index));
-      start = index + 1;
-    }
-  }
-  alternatives.push(body.slice(start));
-  return alternatives;
-}
-
-function expandBraces(segment) {
-  const open = segment.indexOf('{');
-  if (open === -1) return [segment];
-  const close = matchingBrace(segment, open);
-  if (close === -1) return [segment];
-  const head = segment.slice(0, open);
-  const tail = segment.slice(close + 1);
-  const results = [];
-  for (const alternative of splitAlternatives(segment.slice(open + 1, close))) {
-    const rests = expandBraces(`${alternative}${tail}`);
-    if (rests === null) return null;
-    for (const rest of rests) {
-      results.push(`${head}${rest}`);
-      if (results.length > MAX_BRACE_ALTERNATIVES) return null;
-    }
-  }
-  return results;
-}
-
-function bracketEnd(glob, open) {
-  let index = open + 1;
-  if (glob[index] === '!' || glob[index] === '^') index += 1;
-  if (glob[index] === ']') index += 1;
-  while (index < glob.length) {
-    const closer = glob[index] === '[' ? BRACKET_CLASS_CLOSERS[glob[index + 1]] : undefined;
-    const close = closer ? glob.indexOf(closer, index + 2) : -1;
-    if (close !== -1) {
-      index = close + 2;
-      continue;
-    }
-    if (glob[index] === ']') return index;
-    index += 1;
-  }
-  return -1;
-}
-
-function globRegExp(glob) {
-  let source = '';
-  for (let index = 0; index < glob.length; index += 1) {
-    const char = glob[index];
-    if (char === '*') source += '.*';
-    else if (char === '?') source += '.';
-    else if (char === '[') {
-      const end = bracketEnd(glob, index);
-      if (end === -1) {
-        source += '\\[';
-        continue;
-      }
-      source += '.';
-      index = end;
-    } else {
-      source += escapeRegExp(char);
-    }
-  }
-  return new RegExp(`^${source}$`);
-}
-
-function segmentMatches(segment, name) {
-  if (!/[*?[{]/.test(segment)) return segment === name;
-  try {
-    const alternatives = expandBraces(segment);
-    if (alternatives === null) return true;
-    return alternatives.some((alternative) => globRegExp(alternative).test(name));
-  } catch (_error) {
-    return true;
-  }
+function shifts(segment) {
+  return SHIFTING.test(segment) || /^[. ]+$/.test(segment) || (segment.startsWith('.') && !PLAIN_NAME.test(segment));
 }
 
 function reachesAuth(segments) {
   const resolved = [];
-  for (const segment of segments) {
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
     if (segment === '..') {
       if (resolved.length === 0) return false;
       resolved.pop();
       continue;
     }
-    resolved.push(segment);
+    const deep = segment.includes('**');
+    if (!deep && !shifts(segment)) {
+      resolved.push(segment);
+      continue;
+    }
+    if (resolved.length === 0 ? deep : couldBeAuth(resolved.length === 1 ? segment : resolved[1])) return true;
+    const later = segments.slice(index + 1);
+    return (shifts(segment) || later.some((next) => next === '..' || shifts(next))) && later.some(couldBeAuth);
   }
-  if (resolved.slice(0, 2).some((segment) => segment.includes('**'))) return true;
-  return resolved.length >= 2 && segmentMatches(resolved[1], authState.AUTH_DIR_NAME);
+  return resolved.length >= 2 && couldBeAuth(resolved[1]);
 }
 
 function reachesFrom(word) {
-  let from = 0;
-  for (;;) {
-    const at = word.indexOf(MARKER, from);
-    if (at === -1) return false;
-    from = at + MARKER.length;
-    const rest = word.slice(from);
-    if (!rest.startsWith('/')) continue;
-    if (reachesAuth(rest.split('/').filter((segment) => segment !== '' && segment !== '.'))) return true;
+  for (let at = word.indexOf(MARKER); at !== -1; at = word.indexOf(MARKER, at + 1)) {
+    const end = word.indexOf('/', at + MARKER.length);
+    if (end === -1) return false;
+    const segments = word.slice(end + 1).replace(WORD_END, '').split('/').filter((segment) => segment !== '' && segment !== '.');
+    const shifted = SHIFTING.test(word.slice(word.lastIndexOf('/', at) + 1, end));
+    if (shifted ? segments.some(couldBeAuth) : reachesAuth(segments)) return true;
   }
+  return false;
 }
 
 function namesAuthPath(text) {
-  if (typeof text !== 'string' || text === '') return false;
-  const lowered = text.toLowerCase().replace(/\\/g, '/');
-  for (const token of lowered.match(TOKEN_RE) || []) {
-    if (!token.includes(MARKER)) continue;
-    const words = token.includes('{') ? expandBraces(token) : [token];
-    if (words === null || words.some(reachesFrom)) return true;
+  return typeof text === 'string' && text !== '' && reachesFrom(text.toLowerCase().replace(/\\/g, '/'));
+}
+
+function zshRange(text, index) {
+  ZSH_RANGE.lastIndex = index;
+  const match = ZSH_RANGE.exec(text);
+  return match ? match[0] : '';
+}
+
+function shellWords(text) {
+  const words = [];
+  let word = '';
+  let open = false;
+  let quote = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (quote === "'") {
+      if (char === "'") quote = '';
+      else word += char;
+      continue;
+    }
+    if (quote === '"') {
+      if (char === '"') quote = '';
+      else if (char === '\\' && next !== undefined && '"\\$`\n'.includes(next)) {
+        if (next !== '\n') word += next;
+        index += 1;
+      } else word += char;
+      continue;
+    }
+    if (char === '\\') {
+      if (next !== undefined && next !== '\n') word += next;
+      index += 1;
+      open = true;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      open = true;
+      continue;
+    }
+    const range = char === '<' ? zshRange(text, index) : '';
+    if (range !== '') {
+      word += range;
+      index += range.length - 1;
+      open = true;
+    } else if (/\s/.test(char) || WORD_BREAKS.includes(char)) {
+      if (open) words.push(word);
+      word = '';
+      open = false;
+    } else {
+      word += char;
+      open = true;
+    }
   }
-  return false;
+  if (open) words.push(word);
+  return words;
 }
 
 function namesCliWord(text) {
@@ -215,9 +188,9 @@ function shellSpellings(command, tool) {
 
 function commandNamesAuth(command, tool) {
   for (const spelling of shellSpellings(command, tool)) {
-    if (namesAuthPath(spelling)) return true;
     const lowered = spelling.toLowerCase();
     if (lowered.includes(MARKER) && lowered.includes(STATE_STEM)) return true;
+    if (marked(spelling) && [spelling, spelling.replace(/\\/g, '/')].some((variant) => shellWords(variant).some(namesAuthPath))) return true;
   }
   return false;
 }
@@ -332,5 +305,4 @@ module.exports = {
   denyReason,
   marked,
   namesAuthPath,
-  segmentMatches,
 };

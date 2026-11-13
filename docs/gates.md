@@ -1102,12 +1102,20 @@ and tells the model not to retry through another tool, path spelling or command.
   the payload's working directory, normalized, or resolved through symlinks — lies inside a
   run's `auth/` directory. Letter case and backslashes are folded and `..` segments resolved.
 - A `Grep` or `Glob` whose root lies inside one, or whose root plus pattern can reach one: a
-  pattern without a `/` matches at any depth, `**` at or above a run directory reaches every
-  directory below it, and a glob, class or brace segment that could match `auth` counts as
-  matching it. A `Grep` without a `glob` searches its whole root.
+  pattern without a `/` matches at any depth, and `**` at or above a run directory reaches every
+  directory below it. A `Grep` without a `glob` searches its whole root.
 - A `Bash` or `PowerShell` command whose text names such a path in a spelling the shell joins —
   quotes and backslashes removed, line continuations joined, PowerShell backticks and string
-  concatenation undone — or that names a runs directory and `storage-state` together.
+  concatenation undone — or that names a runs directory and `storage-state` together. The text is
+  split into words as a POSIX shell splits it, so a quoted space or `;` stays inside its path.
+- For every tool above, the segment after a run's own directory is the `auth` position, and it
+  counts as `auth` whenever it is not plainly something else. A plain name counts when it is
+  `auth` once trailing dots and spaces are dropped, as Windows drops them. A glob of `*`, `?` and
+  brackets counts unless its literal head or tail rules `auth` out, so `*.png` passes while `*h`
+  and `[a]uth` do not. Everything else counts without being expanded: a class such as
+  `[[:alpha:]]`, a brace, a group, a negation, a `$` or a backtick. A segment that can stand for
+  `..` or for no directory at all — a brace, a group, an expansion, a dot glob such as `.?` —
+  makes every later segment a candidate, and so does `**` when a `..` follows it.
 - A `playwright-cli` call whose command names a run directory but no `zensu-verify` session, so
   a signed-in run config never opens on a session the consent gate does not judge.
 - A payload the dispatcher could not parse, when it names `verify-feature-runs`.
@@ -1133,14 +1141,20 @@ symlinked or unloadable guard module.
   command started at or above the run directory, such as a `grep -r`, `cp -r` or `tar` of the
   run directory itself, are not judged. A recursive search from the project root relies on the
   auth directory's `.gitignore` of `*`, which ripgrep honours inside a git work tree. A copy of a
-  signed-in run config placed outside a run directory is not judged either.
+  signed-in run config placed outside a run directory is not judged either, and neither is a
+  runs directory whose own name is a glob or an expansion, such as `.zensu/verify-*-runs`,
+  because the guard reads only a payload that names `verify-feature-runs`.
 - **Only its nine tools are judged.** Another tool that reads files, such as an MCP server's file
   reader or an IDE's file tool, reaches the directory unjudged.
 - **Hooks switched off host-side judge nothing.** The run-config helper refuses `--login-recipe`
   while `hooks/hooks.json` does not register the guard, but no check observes that the host runs
   it.
-- **`**` at or above a run directory is denied** even where the rest of the pattern could not
-  reach `auth/`: a conservative false positive.
+- **Conservative false positives.** `**` at or above a run directory is denied even where the
+  rest of the pattern could not reach `auth/`, and so is a segment at the `auth` position that is
+  neither a plain name nor a glob whose head or tail rules `auth` out, such as `{a,b}.png` or
+  `$NAME`. PowerShell text is also read with its whitespace removed, so an argument such as
+  `$dest` written right after a file directly below a run directory joins that file's name and
+  is denied.
 - **Same user, no isolation.** Every process the model's shell starts runs as the user the
   browser runs as and can read the file. The guard closes the accidental and the injected "read
   the state file" routes, not a determined actor; isolation at the operating-system level is out

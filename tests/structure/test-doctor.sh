@@ -821,12 +821,16 @@ case "$(vf_reg_doctor)" in
 esac
 cp "$PLUGIN_DIR/hooks/pre-verify-auth-guard.sh" "$VF_REG_ROOT/hooks/pre-verify-auth-guard.sh"
 rm -f "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js"
-ln -s "$PLUGIN_DIR/hooks/lib/verify-auth-guard-v1.js" "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js"
-case "$(vf_reg_doctor)" in
-  *'❌  verify-feature: cannot start (the verify-auth read guard module is a symlink, which the guard refuses)'*)
-    check "P1vl16 a symlinked verify-auth guard module is named, because the guard refuses one" PASS ;;
-  *) check "P1vl16 a symlinked verify-auth guard module is named, because the guard refuses one" FAIL ;;
-esac
+ln -s "$PLUGIN_DIR/hooks/lib/verify-auth-guard-v1.js" "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js" 2>/dev/null
+if [ -L "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js" ]; then
+  case "$(vf_reg_doctor)" in
+    *'❌  verify-feature: cannot start (the verify-auth read guard module is a symlink, which the guard refuses)'*)
+      check "P1vl16 a symlinked verify-auth guard module is named, because the guard refuses one" PASS ;;
+    *) check "P1vl16 a symlinked verify-auth guard module is named, because the guard refuses one" FAIL ;;
+  esac
+else
+  check "P1vl16 a symlinked verify-auth guard module is named, because the guard refuses one (no symlink on this host, covered on macOS/Linux)" PASS
+fi
 rm -rf "$VF_REG_ROOT"
 VF_PROBE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-probe.XXXXXX")" || exit 1
 cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_PROBE_ROOT/" 2>/dev/null

@@ -641,7 +641,9 @@ second `open` of the same run config is denied, so a fresh browser means a fresh
   and a recursive command started at or above the run directory (a `grep -r`, `cp -r` or `tar` of
   the run directory itself) are not judged; a recursive search relies on the auth directory's
   `.gitignore`, which ripgrep honours inside a git work tree. Other tools, such as an MCP file
-  reader or an IDE's file tool, are not judged at all.
+  reader or an IDE's file tool, are not judged at all. Below a run directory it reads a path
+  conservatively: a glob, brace, group or expansion that could stand for `auth/` counts as
+  `auth/`, so `ls <run>/*.png` passes while `ls <run>/*` and `ls <run>/$NAME` are denied.
 - The state file exists from the login until `open`, normally seconds. A refused consent prompt
   or a failed `open` leaves it until Phase 4, which removes the run's `auth/` directory with the
   helper's `--discard-state` before teardown, also when it keeps the run directory; a crash
