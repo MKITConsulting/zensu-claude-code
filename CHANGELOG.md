@@ -30,6 +30,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked session started from a takeover brief gets no notice, so the companion's briefs state
   the rule themselves.
 
+## [0.38.0] - 2026-11-13
+
+### Added
+
+- **hooks**: Offer /zensu:autopilot in the reminder's route question (#601)
+
+### Changed
+
+- **vcs**: Document the reconcile-review and review-markers verbs (#612)
+- **vcs**: Correct the test references in the driver spec (#610)
+
+### Fixed
+
+- **zen-mode**: Read hooks.zenMode under the recorded project root (#595)
+- **hooks**: Read redirections the way the shell does in the work-order gate (#604)
+- **evidence-run**: Make every transport write fail closed (#590)
+- **hooks**: Pin the gh host, certify only jobs the workflow version runs, and bound every CI refresh (#605)
+- **autopilot**: Re-gate a convergence fix before the pull request opens (#599)
+- **hooks**: Judge a chain's CI full-suite policy by its own work tree (#603)
+- **zen-mode**: Settle the open points of #549 (#579)
+- **hooks**: Record a named reviewer's hand-back under its spawn's agent id (#602)
+- **hooks**: Keep one CI proof per workflow version so parallel worktrees stop voiding each other (#598)
+- **agents**: State what Zensu knowledge search indexes and how it ranks (#597)
+
 ### Upgrade notes
 
 - **zen-mode keys follow the session's recorded project root**: the zen-mode hook,
