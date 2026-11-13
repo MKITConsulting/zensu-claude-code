@@ -605,7 +605,7 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
       const named = (probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on a matcher that covers " + probe[2];
       const probes = [["consent hook", mod.consentHookRegistered(process.cwd()), "Bash and PowerShell"], ["consent recorder", mod.consentRecorderRegistered(process.cwd()), "Bash and PowerShell"]];
       const faults = probes.filter((probe) => probe[1] !== REGISTERED).map(named);
-      const guard = faults.length === 0 ? ["verify-auth guard", mod.authGuardRegistered(process.cwd()), "the file, search and shell tools"] : null;
+      const guard = faults.length === 0 ? ["verify-auth guard", mod.authGuardRegistered(process.cwd()), "every tool"] : null;
       if (guard && guard[1] !== REGISTERED) faults.push(named(guard));
       process.stdout.write(faults.join("; "));
     ' 2>/dev/null)"; then

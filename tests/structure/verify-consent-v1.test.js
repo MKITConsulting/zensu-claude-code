@@ -2270,3 +2270,119 @@ test('consent records carry restoredState only as true, and a restored and a pla
   assert.deepEqual(read.records.map((entry) => entry.restoredState === true), [false, true]);
   assert.equal(JSON.parse(fs.readFileSync(memory, 'utf8')).version, consent.MEMORY_VERSION);
 });
+
+test('commandMarkers marks a run directory and a config channel beside the session markers', () => {
+  const pick = (marks) => ({ cli: marks.cli, runs: marks.runs, config: marks.config });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine open --config=/p/.zensu/verify-feature-runs/r/playwright-cli.json', {})), { cli: true, runs: true, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine open --con"fig" x.json', {})), { cli: true, runs: false, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('PLAYWRIGHT_MCP_CONFIG=x.json playwright-cli open', {})), { cli: true, runs: false, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('ls .zensu\\VERIFY-FEATURE-RUNS', {})), { cli: false, runs: true, config: false });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine snapshot', {})), { cli: true, runs: false, config: false });
+});
+
+test('a playwright-cli call on any session but a zensu-verify one is denied with a final reason when its command names a run directory', () => {
+  const runDir = '/p/.zensu/verify-feature-runs/run-a1';
+  const config = `${runDir}/playwright-cli.json`;
+  const cases = [
+    [`playwright-cli -s=zvprobe-state1 open --config=${config}`, {}],
+    [`playwright-cli open --config ${config}`, {}],
+    [`PLAYWRIGHT_CLI_SESSION=mine playwright-cli open --config=${config}`, {}],
+    [`playwright-cli open --config=${config}`, { PLAYWRIGHT_CLI_SESSION: 'mine' }],
+    [`playwright-cli -s=mine open --config=${config}`, { PLAYWRIGHT_CLI_SESSION: SESSION }],
+    [`playwright-cli -s=mine state-load ${runDir}/auth/storage-state.json`, {}],
+    [`PLAYWRIGHT_MCP_STORAGE_STATE=${runDir}/auth/storage-state.json playwright-cli -s=mine open`, {}],
+    [`cp ${config} /tmp/c.json && playwright-cli -s=mine open --config=/tmp/c.json`, {}],
+    [`playwright-cli -s="$S" open --config=${config}`, {}],
+    [`bash -c 'playwright-cli -s=mine open --config=${config}'`, {}],
+    [`xargs playwright-cli -s=mine open --config < ${runDir}/list`, {}],
+    [`grep -r playwright-cli ${runDir}`, {}],
+  ];
+  for (const [command, env] of cases) assert.equal(denied(command, { env }), REASONS.RUN_DIR_OFF_SESSION, command);
+  assert.notEqual(decide(cli(`open --config=${config}`)).reason, REASONS.RUN_DIR_OFF_SESSION);
+  assert.equal(denied(`playwright-cli -S=${SESSION} open --config=${config}`), REASONS.SESSION_UNRESOLVED);
+  assert.deepEqual(decide('playwright-cli -s=mine snapshot'), { verdict: 'none' });
+  assert.deepEqual(decide(`ls ${runDir}/browser`), { verdict: 'none' });
+  for (const key of ['RUN_DIR_OFF_SESSION', 'STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION', 'POWERSHELL_OFF_SESSION_NOT_JUDGED']) {
+    assert.equal(consent.FINAL_REASONS.includes(key), true, key);
+    assert.equal(consent.SHAPE_REASONS.includes(key), false, key);
+  }
+});
+
+test('a playwright-cli call on any session but a zensu-verify one is denied when its config restores a browser state or cannot be judged', (t) => {
+  const dir = tempDir(t, 'zensu-offsession-');
+  const write = (name, body) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, body);
+    return file;
+  };
+  const restoring = write('restoring.json', JSON.stringify({ browser: { contextOptions: { storageState: '/elsewhere/state.json' } } }));
+  const escaped = write('escaped.json', '{"browser":{"contextOptions":{"storag\\u0065State":"x"}}}');
+  const bom = write('bom.json', `\ufeff${JSON.stringify({ browser: { contextOptions: { storageState: 'x' } } })}`);
+  const own = write('own.json', JSON.stringify({ browser: { contextOptions: { viewport: null } }, outputDir: '/tmp/out' }));
+  const ini = write('own.ini', 'browser.contextOptions.storageState=x\n');
+  const iniText = write('text.conf', 'browser.contextOptions.storageState=x\n');
+  const broken = write('broken.json', '{"browser":');
+  const large = write('large.json', JSON.stringify({ pad: 'x'.repeat(1048576) }));
+  const payload = { cwd: dir };
+  const reason = (command, env = {}) => denied(command, { payload, env });
+  const passes = (command, env = {}) => assert.deepEqual(decide(command, { payload, env }), { verdict: 'none' }, command);
+  for (const command of [
+    `playwright-cli -s=zvprobe-state1 open --config=${restoring}`,
+    `playwright-cli -s=mine open --config=${escaped}`,
+    `playwright-cli -s=mine open --config=${bom}`,
+    `playwright-cli -s=mine attach --config ${restoring}`,
+    `PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `env PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    'playwright-cli open --config restoring.json',
+    `playwright-cli -s=mine open --config=${own} --config=${restoring}`,
+  ]) assert.equal(reason(command), REASONS.STATE_CONFIG_OFF_SESSION, command);
+  assert.equal(reason('playwright-cli open --config=missing.json', { PLAYWRIGHT_CLI_SESSION: 'mine' }), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  for (const command of [
+    `playwright-cli -s=mine open --config=${ini}`,
+    `playwright-cli -s=mine open --config=${iniText}`,
+    `playwright-cli -s=mine open --config=${broken}`,
+    `playwright-cli -s=mine open --config=${large}`,
+    `playwright-cli -s=mine open --config=${path.join(dir, 'missing.json')}`,
+    `playwright-cli -s=mine open --config=${dir}`,
+  ]) assert.equal(reason(command), REASONS.CONFIG_UNJUDGED_OFF_SESSION, command);
+  for (const command of [
+    `cd ${dir} && playwright-cli -s=mine open --config=own.json`,
+    `env -C ${dir} playwright-cli -s=mine open --config=own.json`,
+  ]) assert.equal(reason(command), REASONS.CONFIG_UNRESOLVED_OFF_SESSION, command);
+  assert.equal(denied('playwright-cli -s=mine open --config=own.json', { payload: {} }), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
+  passes(`playwright-cli -s=mine open --config=${own}`);
+  passes('playwright-cli -s=mine open --config=own.json');
+  passes(`cd ${dir} && playwright-cli -s=mine open --config=${own}`);
+  passes('playwright-cli -s=mine open --config="$CFG"');
+  passes('playwright-cli -s=mine snapshot');
+  passes(`eslint --config ${restoring} src && echo playwright-cli`);
+  if (process.platform === 'win32') return;
+  const link = path.join(dir, 'link.json');
+  fs.symlinkSync(restoring, link);
+  assert.equal(reason(`playwright-cli -s=mine open --config=${link}`), REASONS.STATE_CONFIG_OFF_SESSION);
+  const fifo = path.join(dir, 'fifo.json');
+  if (spawnSync('mkfifo', [fifo]).status === 0) {
+    assert.equal(reason(`playwright-cli -s=mine open --config=${fifo}`), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  }
+});
+
+test('a PowerShell call that names playwright-cli with a run directory or a config file is refused, and one without stays unjudged', () => {
+  const err = sink();
+  const powershell = (command) => ({ tool_name: 'PowerShell', tool_input: { command } });
+  for (const command of [
+    'playwright-cli -s=mine open --config=C:\\p\\own.json',
+    'playwright-cli -s=mine open --config=C:\\p\\.zensu\\verify-feature-runs\\r\\playwright-cli.json',
+    '$env:PLAYWRIGHT_MCP_CONFIG = "C:\\p\\own.json"; playwright-cli -s=mine open',
+  ]) {
+    const out = sink();
+    assert.equal(consent.runPre(powershell(command), {}, out, err), true, command);
+    assert.deepEqual(JSON.parse(out.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_OFF_SESSION_NOT_JUDGED }), command);
+  }
+  const plain = sink();
+  assert.equal(consent.runPre(powershell('playwright-cli -s=mine snapshot'), {}, plain, err), false);
+  assert.equal(plain.text(), '');
+  const gated = sink();
+  assert.equal(consent.runPre(powershell(`playwright-cli -s=${SESSION} open --config=C:\\p\\own.json`), {}, gated, err), true);
+  assert.deepEqual(JSON.parse(gated.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }));
+  assert.equal(err.text(), '');
+});

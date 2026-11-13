@@ -816,11 +816,16 @@ if node -e '
     }
   }
   if (widened !== 1) process.exit(1);
+  registry.hooks.PreToolUse.push({ matcher: ".*", hooks: [{ type: "command", command: "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-verify-auth-guard.sh\"" }] });
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
-' "$VF_REG_ROOT/hooks/hooks.json"; then
-  check "P1vl7-control the registration fixture puts the group that registers the consent gate on a matcher wider than Bash|PowerShell" PASS
+' "$VF_REG_ROOT/hooks/hooks.json" \
+  && [ "$(cd -P -- "$VF_REG_ROOT" && node -e '
+    const mod = require("./hooks/lib/verify-consent-v1.js");
+    process.stdout.write(mod.authGuardRegistered(process.cwd()));
+  ' 2>/dev/null)" = "registered" ]; then
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on a matcher wider than Bash|PowerShell and keeps the guard on every tool" PASS
 else
-  check "P1vl7-control the registration fixture puts the group that registers the consent gate on a matcher wider than Bash|PowerShell" FAIL
+  check "P1vl7-control the registration fixture puts the group that registers the consent gate on a matcher wider than Bash|PowerShell and keeps the guard on every tool" FAIL
 fi
 case "$(vf_reg_doctor)" in
   *'not registered on a matcher that covers Bash and PowerShell'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
@@ -927,9 +932,9 @@ else
   check "P1vl14-control the guard fixture registers both consent hooks on the shell tools and the guard on the shell tools alone" FAIL
 fi
 case "$(vf_reg_doctor)" in
-  *'❌  verify-feature: cannot start (verify-auth guard not registered on a matcher that covers the file, search and shell tools)'*)
-    check "P1vl14 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" PASS ;;
-  *) check "P1vl14 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" FAIL ;;
+  *'❌  verify-feature: cannot start (verify-auth guard not registered on a matcher that covers every tool)'*)
+    check "P1vl14 a verify-auth guard that misses any tool is named, beside registered consent hooks" PASS ;;
+  *) check "P1vl14 a verify-auth guard that misses any tool is named, beside registered consent hooks" FAIL ;;
 esac
 cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
 rm -f "$VF_REG_ROOT/hooks/pre-verify-auth-guard.sh"

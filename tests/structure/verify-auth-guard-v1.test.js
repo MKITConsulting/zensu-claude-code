@@ -32,17 +32,20 @@ function tempDir(t, prefix) {
   return dir;
 }
 
-test('the guard check is registered once, in-process and fail-open, on exactly the tools the guard judges', () => {
+test('the guard check is registered once, in-process and fail-open, on every tool', () => {
   const entries = registration.DISPATCHED_CHECKS.filter((check) => check.name === 'verify-auth-guard');
   assert.equal(entries.length, 1);
   const [entry] = entries;
   assert.deepEqual({ ...entry }, {
     event: 'PreToolUse', name: 'verify-auth-guard', matcher: guard.GUARD_MATCHER, script: authState.AUTH_GUARD_HOOK_FILE, body: null, failure: 'open',
   });
+  assert.equal(guard.GUARD_MATCHER, '.*');
+  assert.equal(guard.GUARD_MATCHER, authState.AUTH_GUARD_MATCHER);
   assert.deepEqual([...guard.GUARD_TOOLS], [...authState.AUTH_GUARD_TOOLS]);
-  for (const tool of guard.GUARD_TOOLS) assert.equal(registration.hostMatcherCovers(entry.matcher, tool), registration.REGISTRATION.REGISTERED, tool);
-  for (const tool of ['WebFetch', 'WebSearch', 'Agent', 'Task', 'TodoWrite', 'Read2', 'BashOutput']) {
-    assert.equal(registration.hostMatcherCovers(entry.matcher, tool), registration.REGISTRATION.UNREGISTERED, tool);
+  assert.deepEqual([...authState.AUTH_GUARD_PROBE_TOOLS], [...authState.AUTH_GUARD_TOOLS, 'mcp__server__read_file']);
+  for (const tool of [...guard.GUARD_TOOLS, 'WebFetch', 'WebSearch', 'Agent', 'Task', 'TodoWrite', 'LSP', 'mcp__filesystem__read_file']) {
+    assert.equal(registration.hostMatcherCovers(entry.matcher, tool), registration.REGISTRATION.REGISTERED, tool);
+    assert.ok(dispatch.selectChecks('PreToolUse', tool).some((check) => check.name === 'verify-auth-guard'), tool);
   }
   for (const tool of guard.GUARD_TOOLS.filter((name) => !['Bash', 'PowerShell'].includes(name))) assert.ok(guard.PATH_FIELDS[tool], tool);
   assert.equal(consent.authGuardRegistered(PLUGIN), registration.REGISTRATION.REGISTERED);
@@ -50,6 +53,44 @@ test('the guard check is registered once, in-process and fail-open, on exactly t
   assert.match(wrapper, /zensu_hook_dispatch pre verify-auth-guard "\$_zensu_hooks"/);
   assert.match(wrapper, /ZENSU_GUARD_CALLER_CWD="\$\(pwd -P/);
   if (process.platform !== 'win32') assert.notEqual(fs.statSync(WRAPPER).mode & 0o111, 0);
+});
+
+test('a tool outside the nine field-precise tools is denied when any string of its input reaches a run auth directory', () => {
+  const denied = [
+    ['mcp__filesystem__read_file', { path: STATE }],
+    ['mcp__filesystem__read_multiple_files', { paths: [`${PROJECT}/README.md`, STATE] }],
+    ['mcp__terminal__run_in_terminal', { command: `cat '${RUN}/auth/storage-state.json' | head -c 100` }],
+    ['mcp__terminal__run_in_terminal', { command: `cd ${RUN} && cat auth/storage-state.json` }],
+    ['Artifact', { file_path: STATE }],
+    ['LSP', { operation: 'hover', filePath: `${RUN}/auth/artifact/state.json` }],
+    ['mcp__x__tool', { nested: { deeper: [{ target: `${RUN}/AUTH/` }] } }],
+    ['mcp__x__tool', { [STATE]: true }],
+    ['mcp__x__tool', { file: 'auth/storage-state.json' }, RUN],
+  ];
+  for (const [tool, input, cwd] of denied) assert.equal(verdict(tool, input, cwd).deny, true, `${tool} ${JSON.stringify(input)}`);
+  assert.equal(verdict('mcp__terminal__run_in_terminal', { command: `cat '${RUN}/auth/storage-state.json'` }).reason, guard.REASONS.INPUT);
+  assert.equal(verdict('mcp__filesystem__read_file', { path: 'auth/storage-state.json' }, RUN).reason, guard.REASONS.PATH);
+  const allowed = [
+    ['mcp__filesystem__read_file', { path: `${RUN}/browser/page.png` }],
+    ['mcp__filesystem__read_file', { path: `${PROJECT}/src/auth/login.ts` }],
+    ['WebFetch', { url: 'https://example.com/auth' }],
+    ['Agent', { prompt: `Review the screenshots under ${RUN}/browser` }],
+    ['mcp__x__tool', { count: 3, flag: true, nothing: null }],
+  ];
+  for (const [tool, input] of allowed) assert.equal(verdict(tool, input).deny, false, `${tool} ${JSON.stringify(input)}`);
+  assert.equal(verdict('WebFetch', { url: 'https://example.com/' }).reason, guard.REASONS.OTHER_TOOL);
+  const deep = {};
+  let cursor = deep;
+  for (let depth = 0; depth < 40; depth += 1) {
+    cursor.next = {};
+    cursor = cursor.next;
+  }
+  cursor.path = `${RUN}/browser`;
+  assert.deepEqual(verdict('mcp__x__tool', deep), { deny: true, reason: guard.REASONS.UNREADABLE });
+  assert.equal(verdict('mcp__x__tool', { list: Array.from({ length: 5000 }, () => `${RUN}/browser/x.png`) }).reason, guard.REASONS.UNREADABLE);
+  const reason = guard.denyReason(verdict('mcp__terminal__run_in_terminal', { command: `cat '${STATE}'` }));
+  assert.match(reason, /the tool input names a path inside a run auth directory/);
+  assert.match(reason, /use the Grep tool or a commit message file/);
 });
 
 test('a file tool that reaches a run auth directory is denied, in every spelling of the path', () => {
@@ -88,7 +129,7 @@ test('a file tool that reaches a run auth directory is denied, in every spelling
     ['Write', { file_path: `${PROJECT}/.zensu/runtime.yaml`, content: 'auth:\n  mode: login-script\n' }],
   ];
   for (const [tool, input, cwd] of allowed) assert.deepEqual(verdict(tool, input, cwd), { deny: false, reason: guard.REASONS.CLEAN }, `${tool} ${JSON.stringify(input)}`);
-  assert.deepEqual(verdict('WebFetch', { url: `file://${STATE}` }), { deny: false, reason: guard.REASONS.OTHER_TOOL });
+  assert.deepEqual(verdict('WebFetch', { url: `file://${STATE}` }), { deny: true, reason: guard.REASONS.INPUT });
 });
 
 test('a link into a run auth directory is denied through the path it resolves to', { skip: POSIX_ONLY }, (t) => {

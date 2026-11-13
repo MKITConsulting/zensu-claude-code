@@ -410,7 +410,7 @@ done
   && check "H17d both hooks source the one prefilter library, carry no copy of its two-marker test, and scan only in the library-unavailable fallback" PASS \
   || check "H17d both hooks source the one prefilter library, carry no copy of its two-marker test, and scan only in the library-unavailable fallback" FAIL
 PRE_BLOCK="$(cat "$PREFILTER_LIB" 2>/dev/null)"
-CLI_MARKER_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write(m.CLI_MARKERS.concat(m.SESSION_PREFIX).join("\n"))' "$MODULE" 2>/dev/null)"
+CLI_MARKER_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write(m.CLI_MARKERS.concat(m.SESSION_PREFIX, m.RUNS_MARKER, m.CONFIG_FLAG, m.CONFIG_ENV.toLowerCase()).join("\n"))' "$MODULE" 2>/dev/null)"
 SESSION_ENV_NAME="$(node -e 'process.stdout.write(require(process.argv[1]).SESSION_ENV)' "$MODULE" 2>/dev/null)"
 H17E_OK=1
 [ -n "$CLI_MARKER_LIST" ] || H17E_OK=0
@@ -422,8 +422,8 @@ done <<EOF
 $CLI_MARKER_LIST
 EOF
 [ "$H17E_OK" -eq 1 ] \
-  && check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" PASS \
-  || check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" FAIL
+  && check "H17e the prefilter names every CLI marker, the session prefix, the run-directory and config markers and the session variable the module derives" PASS \
+  || check "H17e the prefilter names every CLI marker, the session prefix, the run-directory and config markers and the session variable the module derives" FAIL
 NOLIB_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nolib.XXXXXX")"
 remember_tmp "$NOLIB_ROOT"
 NOLIB_ROOT="$(cd "$NOLIB_ROOT" && pwd -P)"
@@ -1574,6 +1574,37 @@ PS_BT='`'
 [ "$(pre_verdict "& \"pla${PS_BT}u{79}wright-cli\" -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
   && check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" PASS \
   || check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" FAIL
+
+V71_DIR="$PROJ/v71"
+V71_RUN_CONFIG="$V71_DIR/.zensu/verify-feature-runs/run-v71/playwright-cli.json"
+mkdir -p "$V71_DIR/.zensu/verify-feature-runs/run-v71"
+printf '%s' '{"browser":{"contextOptions":{"storageState":"/elsewhere/state.json"}}}' > "$V71_DIR/restoring.json"
+printf '%s' '{"browser":{"contextOptions":{"viewport":null}}}' > "$V71_DIR/own.json"
+case "$(pre_reason "playwright-cli -s=zvprobe-state1 open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" in
+  *'opens only on the zensu-verify-auth session the run-config helper printed with it'*) check "V71 the real pre hook denies a config that restores a browser state on a session outside the gate" PASS ;;
+  *) check "V71 the real pre hook denies a config that restores a browser state on a session outside the gate" FAIL ;;
+esac
+case "$(pre_reason "playwright-cli -s=mine open --config=$V71_RUN_CONFIG" "$SID" "$PROJ")" in
+  *'must not name a /zensu:verify-feature run directory'*'Grep tool or a message file'*) check "V71b the real pre hook denies a call on another session that names a run directory, with the remedy named" PASS ;;
+  *) check "V71b the real pre hook denies a call on another session that names a run directory, with the remedy named" FAIL ;;
+esac
+[ "$(pre_verdict "playwright-cli -s=mine open --config=$V71_DIR/own.json" "$SID" "$PROJ")" = "NONE" ] \
+  && check "V71c a call on another session whose config restores no state reaches no decision" PASS \
+  || check "V71c a call on another session whose config restores no state reaches no decision" FAIL
+[ "$(PLAYWRIGHT_CLI_SESSION=mine pre_verdict "playwright-cli open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" = "DENY" ] \
+  && [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict "playwright-cli -s=mine open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V71d a session from PLAYWRIGHT_CLI_SESSION is judged too, whatever it names" PASS \
+  || check "V71d a session from PLAYWRIGHT_CLI_SESSION is judged too, whatever it names" FAIL
+case "$(pre_reason "playwright-cli -s=mine open --config=$V71_DIR/own.json" "$SID" "$PROJ" "$PS_EXTRA")" in
+  *'runs through the Bash tool only'*) check "V71e the real pre hook refuses a PowerShell call that passes a config file" PASS ;;
+  *) check "V71e the real pre hook refuses a PowerShell call that passes a config file" FAIL ;;
+esac
+[ "$(diff_passes "playwright-cl''i -s=mine open --con\"\"fig $V71_DIR/own.json" "")" = "1" ] \
+  && [ "$(diff_passes "PLAYWRIGHT_MCP_CONFIG=$V71_DIR/own.json playwright-cli open" "")" = "1" ] \
+  && [ "$(diff_passes "playwright-cli -s=mine state-load $V71_RUN_CONFIG" "")" = "1" ] \
+  && [ "$(diff_passes "playwright-cli -s=mine snapshot" "")" = "0" ] \
+  && check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" PASS \
+  || check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" FAIL
 
 unit_check_done "V7z every unit file the registry gives this suite was graded"
 

@@ -5,7 +5,10 @@ const authState = require('./verify-auth-state-v1.js');
 const cliVersion = require('./playwright-cli-version-v1.js');
 
 const GUARD_TOOLS = authState.AUTH_GUARD_TOOLS;
-const GUARD_MATCHER = GUARD_TOOLS.join('|');
+const GUARD_MATCHER = authState.AUTH_GUARD_MATCHER;
+const MAX_INPUT_STRINGS = 4096;
+const MAX_INPUT_DEPTH = 32;
+const MAX_PATH_CANDIDATE_LENGTH = 4096;
 const SHELL_TOOLS = Object.freeze(['Bash', 'PowerShell']);
 const PATH_FIELDS = Object.freeze({
   Read: Object.freeze(['file_path']),
@@ -33,6 +36,7 @@ const SESSION_MARKER = authState.AUTH_SESSION_PREFIX.slice(0, -'auth-'.length);
 const REASONS = Object.freeze({
   PATH: 'path-inside-run-auth-directory',
   COMMAND: 'command-names-run-auth-directory',
+  INPUT: 'tool-input-names-run-auth-directory',
   SESSION: 'browser-call-names-run-without-verify-session',
   UNREADABLE: 'unreadable-payload-names-runs',
   CLEAN: 'clean',
@@ -220,13 +224,43 @@ function pathTarget(value, base) {
   return resolvedSpellings(value, base).find((spelling) => namesAuthPath(spelling)) || '';
 }
 
+function inputStrings(value, depth, out) {
+  if (typeof value === 'string') {
+    out.push(value);
+    return out.length <= MAX_INPUT_STRINGS;
+  }
+  if (!value || typeof value !== 'object') return true;
+  if (depth >= MAX_INPUT_DEPTH) return false;
+  const array = Array.isArray(value);
+  for (const key of Object.keys(value)) {
+    if (!array) out.push(key);
+    if (!inputStrings(value[key], depth + 1, out)) return false;
+  }
+  return out.length <= MAX_INPUT_STRINGS;
+}
+
+function otherToolVerdict(payload, options) {
+  const raw = typeof options.raw === 'string' && options.raw !== '' ? options.raw : JSON.stringify(payload);
+  if (!marked(raw)) return { deny: false, reason: REASONS.OTHER_TOOL };
+  const strings = [];
+  if (!inputStrings(payload.tool_input, 0, strings)) return { deny: true, reason: REASONS.UNREADABLE };
+  const base = baseOf(payload, options.cwd);
+  for (const text of strings) {
+    if (commandNamesAuth(text, 'Bash')) return { deny: true, reason: REASONS.INPUT };
+    if (text.length > MAX_PATH_CANDIDATE_LENGTH || /[\r\n]/.test(text)) continue;
+    const target = pathTarget(text, base);
+    if (target) return { deny: true, reason: REASONS.PATH, target };
+  }
+  return { deny: false, reason: REASONS.CLEAN };
+}
+
 function decide(options = {}) {
   const payload = options.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return marked(options.raw) ? { deny: true, reason: REASONS.UNREADABLE } : { deny: false, reason: REASONS.UNMARKED };
   }
   const tool = payload.tool_name;
-  if (!GUARD_TOOLS.includes(tool)) return { deny: false, reason: REASONS.OTHER_TOOL };
+  if (!GUARD_TOOLS.includes(tool)) return otherToolVerdict(payload, options);
   const input = payload.tool_input && typeof payload.tool_input === 'object' && !Array.isArray(payload.tool_input) ? payload.tool_input : {};
   if (SHELL_TOOLS.includes(tool)) {
     const command = typeof input.command === 'string' ? input.command : '';
@@ -275,7 +309,9 @@ function denyReason(verdict) {
     ? `(${displayTarget(verdict.target)})`
     : verdict && verdict.reason === REASONS.COMMAND
       ? '(the command names a path inside a run auth directory)'
-      : '(the payload could not be read and names a verify-feature run)';
+      : verdict && verdict.reason === REASONS.INPUT
+        ? '(the tool input names a path inside a run auth directory)'
+        : '(the payload could not be read and names a verify-feature run)';
   return `Zensu verify-auth guard: this call reaches the signed-in browser state of a /zensu:verify-feature run ${where}. `
     + `The ${authState.AUTH_DIR_NAME}/ directory of .zensu/${MARKER}/<run> holds a test-account session that no tool reads, writes or searches: `
     + 'the run-config helper writes it, the browser consent gate validates it, its recorder deletes it after the browser opens, '

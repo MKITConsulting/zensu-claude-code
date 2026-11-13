@@ -73,7 +73,7 @@ function publicResolver(map) {
 
 test('argument parsing refuses a missing, repeated or unknown argument', () => {
   const good = ['--run-dir', '/tmp/x', '--mode', 'local', '--origin', 'http://127.0.0.1:5173'];
-  assert.deepEqual(helper.parseArgs(good), { runDir: '/tmp/x', mode: 'local', origins: ['http://127.0.0.1:5173'], networkOnlyOrigins: [], loginRecipe: null, authOrigin: null });
+  assert.deepEqual(helper.parseArgs(good), { runDir: '/tmp/x', mode: 'local', origins: ['http://127.0.0.1:5173'], networkOnlyOrigins: [], loginRecipe: null });
   const bad = [
     [],
     ['--run-dir', '/tmp/x', '--mode', 'local'],
@@ -92,7 +92,7 @@ test('argument parsing refuses a missing, repeated or unknown argument', () => {
 test('argument parsing keeps network-only origins apart and counts them toward the same origin bound', () => {
   const base = ['--run-dir', '/tmp/x', '--mode', 'remote', '--origin', 'https://app.example.com'];
   assert.deepEqual(helper.parseArgs([...base, '--network-only-origin', 'https://api.example.org', '--network-only-origin', 'https://id.example.org']),
-    { runDir: '/tmp/x', mode: 'remote', origins: ['https://app.example.com'], networkOnlyOrigins: ['https://api.example.org', 'https://id.example.org'], loginRecipe: null, authOrigin: null });
+    { runDir: '/tmp/x', mode: 'remote', origins: ['https://app.example.com'], networkOnlyOrigins: ['https://api.example.org', 'https://id.example.org'], loginRecipe: null });
   assert.throws(() => helper.parseArgs(['--run-dir', '/tmp/x', '--mode', 'remote', '--network-only-origin', 'https://api.example.org']), /usage/);
   assert.throws(() => helper.parseArgs([...base, '--network-only-origin']), /usage/);
   const full = [...base];
@@ -587,14 +587,15 @@ async function loginFails(project, kind, argv = loginArgs(project), resolver, lo
   assert.equal(fs.existsSync(path.join(project.dir, 'auth', 'artifact')), false, `${kind} removes the artifact directory`);
 }
 
-test('argument parsing takes one login recipe and one auth origin, and an auth origin only beside a recipe', () => {
+test('argument parsing takes one login recipe and no caller-chosen auth origin', () => {
   const base = ['--run-dir', '/tmp/x', '--mode', 'local', '--origin', APP];
-  assert.deepEqual(helper.parseArgs([...base, '--login-recipe', '/p/.zensu/runtime.yaml', '--auth-origin', 'http://127.0.0.1:4301']),
-    { runDir: '/tmp/x', mode: 'local', origins: [APP], networkOnlyOrigins: [], loginRecipe: '/p/.zensu/runtime.yaml', authOrigin: 'http://127.0.0.1:4301' });
+  assert.deepEqual(helper.parseArgs([...base, '--login-recipe', '/p/.zensu/runtime.yaml']),
+    { runDir: '/tmp/x', mode: 'local', origins: [APP], networkOnlyOrigins: [], loginRecipe: '/p/.zensu/runtime.yaml' });
+  assert.throws(() => helper.parseArgs([...base, '--auth-origin', APP]), (error) => /usage/.test(error.message) && !error.message.includes('--auth-origin'));
   for (const argv of [
     [...base, '--auth-origin', 'http://127.0.0.1:4301'],
     [...base, '--login-recipe', '/a', '--login-recipe', '/b'],
-    [...base, '--login-recipe', '/a', '--auth-origin', APP, '--auth-origin', APP],
+    [...base, '--login-recipe', '/a', '--auth-origin', APP],
     [...base, '--login-recipe'],
   ]) {
     assert.throws(() => helper.parseArgs(argv), /usage/, JSON.stringify(argv));
@@ -672,12 +673,12 @@ test('a login run writes a signed-in run config whose private state keeps only t
   assert.deepEqual(seen, [path.join(project.dir, 'auth', 'artifact'), APP, APP]);
   const config = JSON.parse(fs.readFileSync(result.configPath, 'utf8'));
   assert.equal(JSON.stringify(config).includes(LOGIN_SECRET), false);
-  const again = await helper.run(loginArgs(project, ['--origin', 'http://127.0.0.1:4301', '--auth-origin', 'http://127.0.0.1:4301']), undefined, NO_POLICY, READY);
+  const again = await helper.run(loginArgs(project, ['--origin', 'http://127.0.0.1:4301']), undefined, NO_POLICY, READY);
   assert.equal(again.login, 'state-restored');
-  assert.deepEqual(fs.readFileSync(path.join(project.root, 'seen-env.txt'), 'utf8').trim().split('\n')[1], 'http://127.0.0.1:4301');
+  assert.deepEqual(fs.readFileSync(path.join(project.root, 'seen-env.txt'), 'utf8').trim().split('\n').slice(1), [APP, APP]);
   fs.rmSync(path.join(project.root, 'seen-env.txt'));
-  await assert.rejects(helper.run(loginArgs(project, ['--auth-origin', 'http://127.0.0.1:4302']), undefined, NO_POLICY, READY),
-    /--auth-origin must be one of the --origin values/);
+  await assert.rejects(helper.run(loginArgs(project, ['--origin', 'http://127.0.0.1:4302', '--auth-origin', 'http://127.0.0.1:4302']), undefined, NO_POLICY, READY),
+    /usage/);
   assert.equal(fs.existsSync(path.join(project.root, 'seen-env.txt')), false);
 });
 
@@ -754,8 +755,16 @@ test('a remote login run needs the recipe to bind the application origin and dec
   assert.equal((await helper.run(loginArgs(local), undefined, NO_POLICY, READY)).login, 'state-restored');
   const wide = publicResolver({ 'app.example.com': ['93.184.216.34'], 'collector.example.net': ['93.184.216.35'] });
   const collector = loginProject(t, { origin: remote, auth: auth(['  appOrigin: "https://app.example.com"', '  environment: test']) });
-  await loginFails(collector, 'recipe', [...args(collector), '--origin', 'https://collector.example.net', '--auth-origin', 'https://collector.example.net'], wide);
+  await assert.rejects(helper.run([...args(collector), '--origin', 'https://collector.example.net', '--auth-origin', 'https://collector.example.net'], wide, NO_POLICY, READY), /usage/);
   assert.equal(fs.existsSync(path.join(collector.root, 'seen-env.txt')), false);
+  const unbound = await helper.run([...args(collector), '--origin', 'https://collector.example.net'], wide, NO_POLICY, READY);
+  assert.equal(unbound.login, 'state-restored');
+  assert.deepEqual(fs.readFileSync(path.join(collector.root, 'seen-env.txt'), 'utf8').trim().split('\n').slice(1), [remote, remote]);
+  const identity = publicResolver({ 'app.example.com': ['93.184.216.34'], 'login.example.com': ['93.184.216.36'] });
+  const bound = loginProject(t, { origin: remote, auth: auth(['  appOrigin: "https://app.example.com"', '  environment: test', '  baseUrl: "https://login.example.com"']) });
+  const signedIn = await helper.run([...args(bound), '--origin', 'https://login.example.com'], identity, NO_POLICY, READY);
+  assert.equal(signedIn.login, 'state-restored');
+  assert.deepEqual(fs.readFileSync(path.join(bound.root, 'seen-env.txt'), 'utf8').trim().split('\n').slice(1), ['https://login.example.com', remote]);
 });
 
 test('the CLI prints login=state-restored for a signed-in run and only the failure class when the login fails', (t) => {
@@ -842,11 +851,11 @@ test('a signed-in run needs the verify-auth read guard registered, and a plain r
     PostToolUse: [{ matcher: consent.CONSENT_MATCHER, hooks: [command(consent.CONSENT_RECORDER_FILE)] }],
   };
   const withGuard = {
-    PreToolUse: [...consentOnly.PreToolUse, { matcher: authState.AUTH_GUARD_TOOLS.join('|'), hooks: [command(authState.AUTH_GUARD_HOOK_FILE)] }],
+    PreToolUse: [...consentOnly.PreToolUse, { matcher: authState.AUTH_GUARD_MATCHER, hooks: [command(authState.AUTH_GUARD_HOOK_FILE)] }],
     PostToolUse: consentOnly.PostToolUse,
   };
   const narrowGuard = {
-    PreToolUse: [...consentOnly.PreToolUse, { matcher: 'Bash|PowerShell', hooks: [command(authState.AUTH_GUARD_HOOK_FILE)] }],
+    PreToolUse: [...consentOnly.PreToolUse, { matcher: authState.AUTH_GUARD_TOOLS.join('|'), hooks: [command(authState.AUTH_GUARD_HOOK_FILE)] }],
     PostToolUse: consentOnly.PostToolUse,
   };
   const rootWith = (hooks) => {

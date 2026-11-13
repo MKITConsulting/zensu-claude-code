@@ -22,6 +22,10 @@ const CLI_PACKAGE = cliVersion.PACKAGE_NAME;
 const SESSION_PREFIX = 'zensu-verify-';
 const SESSION_RE = /^zensu-verify-[a-z0-9][a-z0-9-]{0,39}$/;
 const SESSION_ENV = 'PLAYWRIGHT_CLI_SESSION';
+const RUNS_MARKER = authState.RUNS_DIR_NAME;
+const CONFIG_FLAG = '--config';
+const CONFIG_ENV = 'PLAYWRIGHT_MCP_CONFIG';
+const MAX_OFF_SESSION_CONFIG_BYTES = 1048576;
 const CLI_MARKERS = Object.freeze([...new Set([
   ...CLI_BASENAMES.map((name) => name.replace(/\.(cmd|exe|ps1)$/i, '').toLowerCase()),
   CLI_PACKAGE.toLowerCase(),
@@ -167,6 +171,11 @@ const REASONS = Object.freeze({
   STATE_UNSAFE: 'the signed-in state file of this run config is not a private regular file the gate can trust; run the run-config helper with --login-recipe again in a fresh run directory',
   STATE_INVALID: 'the signed-in state file of this run config is not storage state within the run config origins; run the run-config helper with --login-recipe again',
   AUTH_SIGNAL_DENIED: 'is not available on a signed-in zensu-verify-auth session, because console and network output of a signed-in page can carry credentials; report that evidence plane PARTIAL',
+  RUN_DIR_OFF_SESSION: 'a playwright-cli call on any session other than the zensu-verify session /zensu:verify-feature printed must not name a /zensu:verify-feature run directory, because a signed-in run config there would restore its browser state outside this gate; run the call on the printed zensu-verify session, and search or commit text that names both through the Grep tool or a message file',
+  STATE_CONFIG_OFF_SESSION: 'a playwright-cli config that restores a browser state (browser.contextOptions.storageState) opens only on the zensu-verify-auth session the run-config helper printed with it, so this gate refuses it on every other session; do not retry under another session name, config path or program',
+  CONFIG_UNJUDGED_OFF_SESSION: 'the config of a playwright-cli call on a session other than a zensu-verify session must be an existing JSON file of at most 1 MiB that this gate can read, because the gate reads it to rule out a restored browser state; an INI config, a missing or unreadable file and invalid JSON are refused',
+  CONFIG_UNRESOLVED_OFF_SESSION: 'a playwright-cli call on a session other than a zensu-verify session that passes a relative config path must run as one plain call without a wrapper, so this gate reads the same config file the CLI opens; pass the config as an absolute path',
+  POWERSHELL_OFF_SESSION_NOT_JUDGED: 'a playwright-cli call that names a /zensu:verify-feature run directory or passes a config file runs through the Bash tool only, because this gate judges Bash command text; re-issue it through the Bash tool, and search or commit such text through the Grep tool or a message file',
 });
 const SHAPE_REASONS = Object.freeze([
   'NOT_PLAIN', 'ARGUMENT_UNEXPANDED', 'SESSION_UNRESOLVED', 'SESSION_UNEXPANDED', 'CLI_NOT_BARE', 'WRAPPER', 'LAUNCHER', 'ENV_ASSIGNMENT',
@@ -178,6 +187,8 @@ const FINAL_REASONS = Object.freeze([
   'NETWORK_ONLY_NEEDS_POLICY', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
   'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED', 'POWERSHELL_NOT_JUDGED',
   'STATE_NEEDS_AUTH_SESSION', 'STATE_CONSUMED', 'STATE_UNSAFE', 'STATE_INVALID', 'AUTH_SIGNAL_DENIED',
+  'RUN_DIR_OFF_SESSION', 'STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION',
+  'POWERSHELL_OFF_SESSION_NOT_JUDGED',
 ]);
 const SHAPE_MARKER = '(shape denial: re-issue this call once as one plain playwright-cli call with single-quoted literal arguments; a second denial is final)';
 const SHAPE_TEXTS = new Set(SHAPE_REASONS.map((key) => REASONS[key]));
@@ -201,6 +212,8 @@ function commandMarkers(command, env) {
     cli: CLI_MARKER_RE.test(normalized),
     named: normalized.includes(SESSION_PREFIX),
     session: normalized.includes(SESSION_PREFIX) || envSessionMarked(env),
+    runs: normalized.includes(RUNS_MARKER),
+    config: normalized.includes(CONFIG_FLAG) || normalized.includes(CONFIG_ENV.toLowerCase()),
   };
 }
 
@@ -785,6 +798,11 @@ function namesCli(text) {
 
 const NO_SCOPE = Object.freeze({ assignments: Object.freeze([]), wrappers: Object.freeze([]) });
 
+function hiddenCli(found, context, kind) {
+  found.hidden = true;
+  if (context.marks.session) found[kind] = true;
+}
+
 function scanSegments(lexed, context, depth, found, inherited) {
   for (const words of lexed.segments) {
     const position = commandPosition(words);
@@ -817,7 +835,7 @@ function scanSegments(lexed, context, depth, found, inherited) {
           const body = words[flagAt + 1];
           consumed.add(flagAt + 1);
           if (body.unexpanded || depth >= MAX_NEST) {
-            if (namesCli(body.raw) && context.marks.session) found.unjudged = true;
+            if (namesCli(body.raw)) hiddenCli(found, context, 'unjudged');
           } else {
             scanCommand(body.value, context, depth + 1, found, scope);
           }
@@ -827,7 +845,7 @@ function scanSegments(lexed, context, depth, found, inherited) {
         const body = words.slice(position.index + 1);
         body.forEach((_word, offset) => consumed.add(position.index + 1 + offset));
         if (body.some((word) => word.unexpanded) || depth >= MAX_NEST) {
-          if (body.some((word) => namesCli(word.raw)) && context.marks.session) found.unjudged = true;
+          if (body.some((word) => namesCli(word.raw))) hiddenCli(found, context, 'unjudged');
         } else {
           scanCommand(body.map((word) => word.value).join(' '), context, depth + 1, found, scope);
         }
@@ -850,24 +868,24 @@ function scanSegments(lexed, context, depth, found, inherited) {
     }
     const indirect = words.some((word, offset) => offset !== position.index && !consumed.has(offset)
       && (isCliWord(word) || namesCli(word.value)));
-    if (indirect && context.marks.session) found.indirect = true;
+    if (indirect) hiddenCli(found, context, 'indirect');
   }
 }
 
 function scanCommand(text, context, depth, found, inherited = NO_SCOPE) {
   const lexed = lexShell(text);
   if (depth === 0) context.top = lexed;
-  if (lexed.fault && namesCli(text) && context.marks.session) found.unjudged = true;
+  if (lexed.fault && namesCli(text)) hiddenCli(found, context, 'unjudged');
   scanSegments(lexed, context, depth, found, inherited);
   for (const body of lexed.nested) {
     if (depth < MAX_NEST) scanCommand(body, context, depth + 1, found);
-    else if (namesCli(body) && context.marks.session) found.unjudged = true;
+    else if (namesCli(body)) hiddenCli(found, context, 'unjudged');
   }
   for (const body of lexed.heredocs) {
-    if (namesCli(body) && context.marks.session) found.unjudged = true;
+    if (namesCli(body)) hiddenCli(found, context, 'unjudged');
   }
   for (const word of lexed.herestrings) {
-    if (namesCli(word.raw) && context.marks.session) found.unjudged = true;
+    if (namesCli(word.raw)) hiddenCli(found, context, 'unjudged');
   }
 }
 
@@ -880,7 +898,7 @@ function plainShape(top, invocations) {
 function analyzeCommand(command, env, platform = process.platform) {
   const text = String(command);
   const marks = commandMarkers(text, env);
-  const found = { invocations: [], indirect: false, unjudged: false, envBuiltin: false };
+  const found = { invocations: [], indirect: false, unjudged: false, envBuiltin: false, hidden: false };
   const context = { text, marks, platform, commandSession: null, sessionAssignments: [], top: null };
   scanCommand(text, context, 0, found);
   const conflict = marks.session && context.sessionAssignments.length > 1;
@@ -917,7 +935,97 @@ function analyzeCommand(command, env, platform = process.platform) {
     unjudged: found.unjudged,
     envBuiltin: found.envBuiltin,
     plain: plainShape(context.top, found.invocations),
+    hidden: found.hidden,
+    offSession: offSessionCalls(found.invocations, context, env),
   };
+}
+
+function offSessionCalls(invocations, context, env) {
+  const calls = [];
+  for (const invocation of invocations) {
+    const argv = invocation.words.map((word, position) => (word.unexpanded ? unexpandedSentinel(word, position) : word.value));
+    const parsed = parseCliArgs(argv);
+    if (parsed.fault) {
+      calls.push({ invocation, args: null });
+      continue;
+    }
+    const assigned = invocation.segmentSession || context.commandSession;
+    const session = sessionOf(parsed.args, assigned, env);
+    const literal = !hasSentinel(session.value) && !(session.source === 'assignment' && session.unexpanded);
+    if (literal && isGatedSession(session.value)) continue;
+    calls.push({ invocation, args: parsed.args });
+  }
+  return calls;
+}
+
+function configValues(call) {
+  const flag = call.args.config;
+  const values = (Array.isArray(flag) ? flag : [flag]).filter((value) => typeof value === 'string');
+  for (const assignment of call.invocation.assignments) {
+    if (assignment.name === CONFIG_ENV) values.push(assignment.unexpanded ? '\u0000' : assignment.value);
+  }
+  return values;
+}
+
+function readBoundedConfig(file) {
+  let fd;
+  try { fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0)); }
+  catch (_error) { return null; }
+  try {
+    const info = fs.fstatSync(fd);
+    if (!info.isFile() || info.size > MAX_OFF_SESSION_CONFIG_BYTES) return null;
+    const buffer = Buffer.alloc(MAX_OFF_SESSION_CONFIG_BYTES + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const read = fs.readSync(fd, buffer, size, buffer.length - size, null);
+      if (read === 0) break;
+      size += read;
+    }
+    return size > MAX_OFF_SESSION_CONFIG_BYTES ? null : buffer.subarray(0, size).toString('utf8');
+  } catch (_error) {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function restoresState(config) {
+  const object = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  if (!object(config) || !object(config.browser) || !object(config.browser.contextOptions)) return false;
+  return Object.prototype.hasOwnProperty.call(config.browser.contextOptions, 'storageState');
+}
+
+function offSessionConfigReason(value, cwd, placed) {
+  if (value === '' || hasSentinel(value)) return null;
+  const raw = msysDrivePrefix(value);
+  let file = raw;
+  if (!path.isAbsolute(raw)) {
+    if (!placed || typeof cwd !== 'string' || !path.isAbsolute(cwd)) return REASONS.CONFIG_UNRESOLVED_OFF_SESSION;
+    file = path.resolve(cwd, raw);
+  }
+  if (/\.ini$/i.test(file)) return REASONS.CONFIG_UNJUDGED_OFF_SESSION;
+  const text = readBoundedConfig(file);
+  if (text === null) return REASONS.CONFIG_UNJUDGED_OFF_SESSION;
+  let config;
+  try { config = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); }
+  catch (_error) { return REASONS.CONFIG_UNJUDGED_OFF_SESSION; }
+  return restoresState(config) ? REASONS.STATE_CONFIG_OFF_SESSION : null;
+}
+
+function offSessionReason(analysis, marks, payload) {
+  if (analysis.offSession.length === 0 && !analysis.hidden) return null;
+  if (marks.runs) return REASONS.RUN_DIR_OFF_SESSION;
+  if (!marks.config) return null;
+  const cwd = payload && typeof payload.cwd === 'string' ? payload.cwd : '';
+  for (const call of analysis.offSession) {
+    if (call.args === null) return REASONS.CONFIG_UNJUDGED_OFF_SESSION;
+    const placed = analysis.plain && call.invocation.wrappers.length === 0;
+    for (const value of configValues(call)) {
+      const reason = offSessionConfigReason(value, cwd, placed);
+      if (reason) return reason;
+    }
+  }
+  return null;
 }
 
 function isIsoInstant(value) {
@@ -1364,14 +1472,18 @@ function evaluate({ command, payload, env, records, policy, platform }) {
   const marks = commandMarkers(command, env);
   if (!marks.cli) return { verdict: 'none' };
   if (Buffer.byteLength(command) > MAX_COMMAND_BYTES) {
-    return marks.session ? { verdict: 'deny', reason: REASONS.COMMAND_TOO_LARGE } : { verdict: 'none' };
+    return marks.session || marks.runs || marks.config ? { verdict: 'deny', reason: REASONS.COMMAND_TOO_LARGE } : { verdict: 'none' };
   }
   if (marks.session && REDEFINITION_RE.test(command)) return { verdict: 'deny', reason: REASONS.REDEFINED };
   const analysis = analyzeCommand(command, env, platform);
   if (analysis.unjudged) return { verdict: 'deny', reason: REASONS.UNJUDGED_BODY };
   if (analysis.indirect) return { verdict: 'deny', reason: REASONS.INDIRECT };
   const gated = analysis.calls.filter((call) => call.gated);
-  if (gated.length === 0 && !marks.session) return { verdict: 'none' };
+  if (gated.length === 0) {
+    const offSession = marks.named ? null : offSessionReason(analysis, marks, payload);
+    if (offSession) return { verdict: 'deny', reason: offSession };
+    if (!marks.session) return { verdict: 'none' };
+  }
   if (analysis.envBuiltin) return { verdict: 'deny', reason: REASONS.ENV_BUILTIN };
   if (AMBIENT_TEXT_RE.test(command) || AMBIENT_TEXT_RE.test(strippedText(command))) {
     return { verdict: 'deny', reason: REASONS.AMBIENT_TEXT };
@@ -1431,15 +1543,17 @@ function commandOf(payload) {
   return input && typeof input === 'object' && typeof input.command === 'string' ? input.command : null;
 }
 
-function powershellMarked(text, env) {
+function powershellReason(text, env) {
   let spelled;
   try {
     spelled = require('./powershell-command-v1.js').spellings(text);
   } catch (_error) {
-    return true;
+    return REASONS.POWERSHELL_NOT_JUDGED;
   }
   const marks = commandMarkers(spelled, env);
-  return marks.cli && marks.session;
+  if (!marks.cli) return null;
+  if (marks.session) return REASONS.POWERSHELL_NOT_JUDGED;
+  return marks.runs || marks.config ? REASONS.POWERSHELL_OFF_SESSION_NOT_JUDGED : null;
 }
 
 function runPre(payload, env, out, err) {
@@ -1450,8 +1564,9 @@ function runPre(payload, env, out, err) {
   if (payload.tool_name === 'PowerShell') {
     const input = payload.tool_input;
     const text = input && typeof input === 'object' && typeof input.command === 'string' ? input.command : '';
-    if (!powershellMarked(text, env)) return false;
-    out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED })));
+    const reason = powershellReason(text, env);
+    if (!reason) return false;
+    out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason })));
     return true;
   }
   const command = commandOf(payload);
@@ -1583,7 +1698,7 @@ function consentRecorderRegistered(pluginRoot) {
 }
 
 function authGuardRegistered(pluginRoot) {
-  return hookRegistered(pluginRoot, 'PreToolUse', authState.AUTH_GUARD_HOOK_FILE, authState.AUTH_GUARD_TOOLS);
+  return hookRegistered(pluginRoot, 'PreToolUse', authState.AUTH_GUARD_HOOK_FILE, authState.AUTH_GUARD_PROBE_TOOLS);
 }
 
 function recordingStream(out) {
@@ -1605,6 +1720,8 @@ module.exports = {
   CHROMIUM_BROWSERS,
   CLI_PACKAGE,
   CLI_MARKERS,
+  CONFIG_ENV,
+  CONFIG_FLAG,
   CONSENT_HOOK_FILE,
   CONSENT_MATCHER,
   CONSENT_TOOLS,
@@ -1625,6 +1742,7 @@ module.exports = {
   REGISTRATION,
   RUN_CONFIG_NAME,
   RUN_OUTPUT_DIR_NAME,
+  RUNS_MARKER,
   SESSION_ENV,
   SHAPE_MARKER,
   SHAPE_REASONS,

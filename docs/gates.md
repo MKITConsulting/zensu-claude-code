@@ -18,7 +18,7 @@ three exceptions, §Plugin-Data Guard, §Browser Consent Gate and §Verify-Auth 
 deliberately have no escape hatch, and none is a security boundary on its own: the first
 closes one channel to one directory and names the ones it leaves open; the second puts a
 human prompt in front of a browser origin and states in its own section what a session can
-still do around it; the third keeps the file, search and shell tools away from a signed-in
+still do around it; the third keeps every tool the model calls away from a signed-in
 browser state and names what a textual guard cannot see.
 
 **Two commands stay reachable when the Session Control bind fails**, in every
@@ -716,9 +716,11 @@ text names the CLI and that session, or names the CLI while the hook environment
 `PLAYWRIGHT_CLI_SESSION` names one, and while their prefilter library loads they stay out of
 every other Bash call: both hooks exit before starting `node` unless the payload, with quotes and
 backslashes removed and in any letter case, names `playwright-cli` (or `@playwright/cli`) and a
-`zensu-verify-` session, or the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. A
+`zensu-verify-` session, a `verify-feature-runs` directory, `--config` or
+`PLAYWRIGHT_MCP_CONFIG`, or the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. A
 `playwright-cli` call on any other session reaches no decision unless its command text also names
-a `zensu-verify-` session, which denies it. While the hook environment's `PLAYWRIGHT_CLI_SESSION`
+a `zensu-verify-` session, which denies it, or a run directory or a config, which the
+**Other sessions** rules below judge. While the hook environment's `PLAYWRIGHT_CLI_SESSION`
 names one, such a call reaches no decision only when all of these hold: the command parses and
 stays within the 256 KiB size bound; it holds no operator (`;`, `&`, `&&`, `|`, `||`, `|&`,
 parentheses), no command on a further line, and no `$(…)`, `${…}`, `$((…))`, backtick or
@@ -893,13 +895,17 @@ scenario. The residuals below name what else reaches such an origin unjudged.
 `browser.contextOptions.storageState` equal to `auth/storage-state.json` beside the run config,
 inside a `.zensu/verify-feature-runs/<run>` directory. The run-config helper writes it from a
 recipe's login script (`--login-recipe`, [verify-feature.md §6](verify-feature.md#6-signing-in-with-a-test-account)),
-which signs in only on one of the run's origins and, in remote mode, only on the recipe's
-`baseUrl`, or on its `appOrigin` without one; in local mode nothing binds the loopback origins
-to the recipe, so a local recipe signs in only a throwaway account the local app alone knows.
+which signs in only on an origin the checked-in recipe binds, because the login runs before any
+consent prompt: in remote mode on the recipe's `auth.baseUrl`, which must be one of the run's
+origins, or on its `auth.appOrigin` without one; in local mode on the run's own loopback app
+origin, its first `--origin`. The caller names no login origin. In local mode that loopback
+origin is still the caller's choice, so a local recipe signs in only a throwaway account the
+local app alone knows.
 An inline state object, a relative path and every other location are refused. Such a config
-opens only on a `zensu-verify-auth-…` session, which the helper names, and the read guard
-refuses a `playwright-cli` call that names a run directory without naming a `zensu-verify`
-session. Before it admits that `open` the gate validates the state file itself — a regular
+opens only on a `zensu-verify-auth-…` session, which the helper names. A call on any other
+session that names a run directory, or whose config restores a browser state, is denied by this
+gate (see **Other sessions** below), and the read guard refuses a `playwright-cli` call that
+names a run directory without naming a `zensu-verify` session. Before it admits that `open` the gate validates the state file itself — a regular
 file, no symlink, one link, owner-only on POSIX, at most 1 MiB, valid storage state with at most
 256 cookies and 64 origins, every cookie domain the host of a run-config origin or, written with
 a leading dot, a parent domain of one, and every origin entry one of those origins — because
@@ -923,6 +929,25 @@ cookie, storage and state command stays denied on every `zensu-verify` session:
 command of `playwright-cli` 0.1.24, recorded in
 `tests/structure/fixtures/playwright-cli-commands.v1.json` and compared with the installed
 `help.json` where that version is installed, on a plain and on a signed-in session.
+
+**Other sessions.** A `playwright-cli` call is judged whatever its session — named by `-s`, by
+an inline `PLAYWRIGHT_CLI_SESSION` assignment, by the hook environment or by the CLI's default —
+when its command text names a `verify-feature-runs` directory or passes a config through
+`--config` or an inline `PLAYWRIGHT_MCP_CONFIG`. A call on a `zensu-verify-…` session keeps every
+rule above, so a signed-in config still opens only as one plain gated call on the
+`zensu-verify-auth-…` session with its canonical run config, and `state-load` stays denied. A
+call on any other session is denied with a final reason when the command names a run
+directory, in any position and behind any program the text shows, or when its config file
+carries `browser.contextOptions.storageState`. The gate reads that config as the CLI does: the
+path as given when it is absolute, else against the payload's working directory when the call
+is one plain call without a wrapper, with a byte-order mark skipped and the text parsed as JSON.
+The CLI reads an `.ini` path, and a file that is no JSON and does not start with `{`, as INI, so
+the gate refuses a config it cannot read as JSON — missing, not a regular file, over 1 MiB,
+invalid JSON or an `.ini` path — and a relative config path in a command that is not one plain
+unwrapped call. A config that restores no state passes, and so does a call that names neither a
+run directory nor a config. A PowerShell call that names the CLI with a run directory or a
+config is refused, because the gate judges Bash text only. Measured in the specification
+session: a session outside the gate that opened a `storageState` config came up signed in.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
@@ -973,6 +998,13 @@ through Bash.
 
 **Residuals, named rather than implied.**
 
+- **A config the gate never sees opens a signed-in browser outside it** while a run's state file
+  exists, that is, until the first gated `open` consumes it: the working directory's default
+  `.playwright/cli.config.json` and the global `~/.playwright/cli.config.json`, which a call
+  without `--config` reads; a config path behind a variable or assembled at run time; a config
+  file written or swapped after the gate read it; and a program that spawns `playwright-cli`
+  itself, a tool that runs shell commands outside the Bash tool included. The **Other sessions**
+  rules judge only what the command text shows.
 - **Hooks switched off host-side leave `playwright-cli` unconstrained.** The retired broker
   refused to self-approve an origin without a per-session marker the gate wrote, so a disabled
   hook ended in a refusal. Nothing stands in that position now: with the hooks off, the run
@@ -1111,12 +1143,12 @@ and pins the matcher, the memory, the floor, the command set and the skill wordi
 
 ## Verify-Auth Read Guard
 
-`hooks/pre-verify-auth-guard.sh`, dispatched in-process as `verify-auth-guard` on
-`Read|Grep|Glob|NotebookEdit|Edit|Write|MultiEdit|Bash|PowerShell`
-(`hooks/lib/verify-auth-guard-v1.js`). A signed-in `/zensu:verify-feature` run keeps its
-browser state in `.zensu/verify-feature-runs/<run>/auth/` from the login until the consent
-recorder consumes it at `open` or the cleanup discards it; this guard keeps the model's file,
-search and shell tools out of that directory.
+`hooks/pre-verify-auth-guard.sh`, dispatched in-process as `verify-auth-guard` on every tool
+(matcher `.*`) (`hooks/lib/verify-auth-guard-v1.js`). A signed-in `/zensu:verify-feature` run
+keeps its browser state in `.zensu/verify-feature-runs/<run>/auth/` from the login until the
+consent recorder consumes it at `open` or the cleanup discards it; this guard keeps the model's
+file, search and shell tools, and every other tool, out of that directory. It reads text, not
+the file system's real layout.
 Its deny starts `Zensu verify-auth guard:`, names the path it reached with control bytes masked,
 and tells the model not to retry through another tool, path spelling or command.
 
@@ -1142,6 +1174,11 @@ and tells the model not to retry through another tool, path spelling or command.
   makes every later segment a candidate, and so does `**` when a `..` follows it.
 - A `playwright-cli` call whose command names a run directory but no `zensu-verify` session, so
   a signed-in run config never opens on a session the consent gate does not judge.
+- Any other tool — an MCP server's tool, `WebFetch`, `LSP`, `Artifact`, an agent or task
+  prompt — whose payload names `verify-feature-runs` and whose input holds a string, a key
+  included, that reaches a run's `auth/` directory, read as shell text or as a path joined to the
+  payload's working directory and resolved through symlinks. An input nested deeper than 32
+  levels or holding more than 4096 strings is refused unread.
 - A payload the dispatcher could not parse, when it names `verify-feature-runs`.
 
 **What passes.** The run directory itself, its run config and its `browser/` output, the
@@ -1152,7 +1189,8 @@ session, and the cleanup's `rm -rf` of the run directory, because none of them n
 **Fault direction.** The check fails open like the other dispatched checks, but a payload that
 names `verify-feature-runs` is refused when its decision module is absent, a symlink or broken,
 and the entry point's fallback without `node` refuses such a payload too. The run-config helper
-refuses `--login-recipe` unless `hooks/hooks.json` registers the guard on all nine tools, and the
+refuses `--login-recipe` unless `hooks/hooks.json` registers the guard on a matcher that covers
+every tool, which the helper probes with the nine tools above and an MCP tool name, and the
 `verify-feature` row of `/zensu:doctor` names an unregistered guard, a missing guard file and a
 symlinked or unloadable guard module.
 
@@ -1167,9 +1205,13 @@ symlinked or unloadable guard module.
   auth directory's `.gitignore` of `*`, which ripgrep honours inside a git work tree. A copy of a
   signed-in run config placed outside a run directory is not judged either, and neither is a
   runs directory whose own name is a glob or an expansion, such as `.zensu/verify-*-runs`,
-  because the guard reads only a payload that names `verify-feature-runs`.
-- **Only its nine tools are judged.** Another tool that reads files, such as an MCP server's file
-  reader or an IDE's file tool, reaches the directory unjudged.
+  because the guard reads only a payload that names `verify-feature-runs`. For the same reason
+  shell text that reaches `auth/` through a symlink the model created to a runs directory or a run
+  directory, and, on Windows, through an 8.3 short name such as `VERIFY~1`, is not judged; the file
+  tools resolve a symlink, the 8.3 case is unverified.
+- **Prose is judged as text.** A tool input outside the nine field-precise tools is read string
+  by string, so a plan, a prompt or a message that spells a path inside a run's `auth/` directory
+  is refused like a file read; name that directory without its full path.
 - **Hooks switched off host-side judge nothing.** The run-config helper refuses `--login-recipe`
   while `hooks/hooks.json` does not register the guard, but no check observes that the host runs
   it.

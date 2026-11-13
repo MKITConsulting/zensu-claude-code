@@ -10,7 +10,7 @@ zensu_browser_consent_marked() {
   case "$_zensu_scan" in
     *playwright-cli*|*@playwright/cli*|*@playwright\\/cli*)
       case "$_zensu_scan" in
-        *zensu-verify-*) _zensu_marked=0 ;;
+        *zensu-verify-*|*verify-feature-runs*|*--config*|*playwright_mcp_config*) _zensu_marked=0 ;;
         *)
           case "${PLAYWRIGHT_CLI_SESSION:-}" in
             *zensu-verify-*) _zensu_marked=0 ;;
@@ -26,7 +26,7 @@ zensu_browser_consent_marked() {
           *u{*) _zensu_marked=0 ;;
           *wright*)
             case "$_zensu_scan" in
-              *verify*) _zensu_marked=0 ;;
+              *verify*|*config*) _zensu_marked=0 ;;
               *)
                 case "${PLAYWRIGHT_CLI_SESSION:-}" in
                   *zensu-verify-*) _zensu_marked=0 ;;

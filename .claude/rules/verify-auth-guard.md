@@ -33,9 +33,12 @@ with a strict reader (`readAuthBlock`: `key: scalar` lines only), runs `auth.log
 `SIGTERM`, `SIGINT` or `SIGHUP` to the helper (`ABORT_SIGNALS`) kills the login's process group
 and removes the artifact directory before the helper exits `128 + n`; the skill gives the helper
 call a Bash timeout of 330000 ms, above the login's own bound, so the host's timeout does not
-fire first. The auth origin must be one of the `--origin` values, and in remote mode the
-recipe's `auth.baseUrl`, or `auth.appOrigin` without one. In local mode nothing binds the
-loopback origins to the recipe, which is why the docs require a throwaway local account. The
+fire first. The caller names no login origin: `--auth-origin` was removed, because the login
+runs before any consent prompt and the checked-in recipe is the only approval of where
+credentials go. In remote mode the login goes to the recipe's `auth.baseUrl`, which must be one
+of the `--origin` values, or to `auth.appOrigin` without one; in local mode to the run's first,
+loopback origin, which nothing binds to the recipe, which is why the docs require a throwaway
+local account. The
 artifact must sit physically beneath the fresh `auth/artifact/`, is scoped to the run's origins
 and written owner-only with a `.gitignore` of `*`; the artifact directory is removed whatever
 the outcome. The helper refuses `--login-recipe` unless `authGuardRegistered` answers
@@ -76,9 +79,16 @@ directory without naming a `zensu-verify` session (`REASONS.SESSION`), because t
 judges only `zensu-verify` sessions and a signed-in run config opened on another session would
 restore the state unjudged. That rule's markers derive from their owners: `CLI_WORDS` from
 `BINARY_NAMES` and `PACKAGE_NAME` of `playwright-cli-version-v1.js`, `SESSION_MARKER` from
-`AUTH_SESSION_PREFIX`. The tool set has ONE owner, `AUTH_GUARD_TOOLS` in
-`verify-auth-state-v1.js`: `GUARD_MATCHER` derives from it, the registry entry spells the same
-string, and the guard's unit file compares them.
+`AUTH_SESSION_PREFIX`. The matcher has ONE owner, `AUTH_GUARD_MATCHER` (`.*`) in
+`verify-auth-state-v1.js`: `GUARD_MATCHER` is it, the registry entry spells the same string, and
+the guard's unit file compares them. `AUTH_GUARD_TOOLS` names the nine tools with field-precise
+rules; every other tool goes through `otherToolVerdict`, which walks only a payload `marked`
+names, tests every string of the input, keys included, as shell text (`commandNamesAuth`) and as
+a path (`pathTarget`), and refuses an input deeper than `MAX_INPUT_DEPTH` or wider than
+`MAX_INPUT_STRINGS` unread (`REASONS.INPUT`, `REASONS.PATH`, `REASONS.UNREADABLE`). The guard
+runs in the dispatcher's process, so the wider matcher adds no hook process. `authGuardRegistered`
+probes `AUTH_GUARD_PROBE_TOOLS`, the nine plus an MCP-shaped name, so a registration narrower
+than every tool reads as unregistered and the helper refuses `--login-recipe`.
 
 **Below a run directory a path is read conservatively, never dialect by dialect.** The guard
 translates no glob into a regular expression, because the shells disagree on nested classes, a
@@ -113,7 +123,8 @@ a missing entry point or an unregistered guard blocks only `--login-recipe`.
 `skills/doctor/references/verify-auth-guard.md` says so per cause, and the doctor skill points
 there instead of listing them, because its body sits on the shrink-only allowlist.
 
-**Coupled sites:** `AUTH_SESSION_PREFIX`, `AUTH_GUARD_HOOK_FILE`, `AUTH_GUARD_TOOLS`, the caps,
+**Coupled sites:** `AUTH_SESSION_PREFIX`, `AUTH_GUARD_HOOK_FILE`, `AUTH_GUARD_TOOLS`,
+`AUTH_GUARD_MATCHER`, `AUTH_GUARD_PROBE_TOOLS`, the caps,
 `FAULTS` and `discardAuthState` in `verify-auth-state-v1.js`; `CLI_WORDS`, `SESSION_MARKER` and
 `REASONS.SESSION` in the guard; `runConfigShape`, `judgeCall`, `evaluate`, `runPost`,
 `authGuardRegistered` and the `STATE_*` and `AUTH_SIGNAL_DENIED` reasons in
@@ -135,7 +146,9 @@ row and counts in `docs/configuration.md` and the roster rows in `docs/session-c
 `permissionDecision` joined the file, search and shell matchers, the strict key set of the run
 config widened (`browser.contextOptions` may carry `storageState`), and the consent gate denies
 two commands it admitted on a signed-in session. The consent memory gains an optional field read
-permissively, which on its own would be a `patch`.
+permissively, which on its own would be a `patch`. The hardening that followed is `minor` too:
+the guard's matcher widened to `.*`, the consent gate refuses calls on other sessions it never
+judged, and the helper refuses `--auth-origin`.
 
 **Known gaps, accepted and named:**
 
@@ -145,18 +158,24 @@ permissively, which on its own would be a `patch`.
   a recursive Grep from the project root relies on the `.gitignore`, which ripgrep honours only
   inside a git work tree. A runs directory whose own name is a glob or an expansion
   (`.zensu/verify-*-runs`) is not recognized, because the dispatcher reads only payloads that name
-  `verify-feature-runs`. The session rule reads the command text too, so a copy of a signed-in run
-  config outside a run directory escapes it.
+  `verify-feature-runs`. For the same reason shell text that reaches `auth/` through a symlink
+  the model created to a runs directory or a run directory, and, on Windows, an 8.3 short name
+  such as `VERIFY~1`, is not judged; the file tools resolve a symlink, the 8.3 case is
+  unverified. The session rule reads the command text too, so a copy of a signed-in run config
+  outside a run directory escapes it; the consent gate's "Other sessions" rules read that copy
+  when the call names it with `--config`.
 - The path rule over-denies on purpose: `**` at or above a run directory, a segment at the `auth`
   position that is neither a plain name nor a glob whose head or tail rules `auth` out
   (`{a,b}.png`, `$NAME`), and, in PowerShell's whitespace-free spelling, an argument written right
   after a file directly below a run directory.
-- Only the nine tools are judged: an MCP server's file reader or an IDE's file tool reaches
-  `auth/` unjudged. Hooks switched off host-side judge nothing.
-- Local mode signs in on the run's loopback origins, which the caller chooses and nothing binds
-  to the recipe, so a loopback listener the model started would receive the credentials. The
-  docs require a throwaway account only the local app knows; binding a local recipe's origin is
-  the standing fix.
+- Every tool is judged, but as text: a prose input outside the nine, a plan, a prompt or a
+  message, that spells a path inside a run's `auth/` directory is refused like a read, and a tool
+  that runs shell commands outside the Bash tool can still start `playwright-cli` where the
+  consent gate never looks. Hooks switched off host-side judge nothing.
+- Local mode signs in on the run's first, loopback origin, which the caller chooses and nothing
+  binds to the recipe, so a loopback listener the model started there would receive the
+  credentials. The docs require a throwaway account only the local app knows; binding a local
+  recipe's origin is the standing fix.
 - Cookies are scoped by host, not by port, and a parent-domain cookie (`.example.com`) is kept
   when a run origin's host lies below it, so the restored session reaches every approved port of
   a host and a sibling host a redirect lands on.

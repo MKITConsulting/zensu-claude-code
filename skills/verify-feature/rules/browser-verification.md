@@ -217,10 +217,11 @@ A recipe whose top-level `auth:` block sets `mode: login-script`, `artifact: sto
 You never see the password, the script's output or the browser state, and you never need them.
 
 1. **Call the helper with the recipe.** Add `--login-recipe "<absolute recipe path>"` to the
-   run-config helper call, and `--auth-origin "<origin>"` only when the account signs in on
-   another of the run's origins than the first `--origin`; it must be one of the `--origin`
-   values. Give that Bash call a timeout of 330000 ms, above the login's own 300 s bound; a
-   helper stopped anyway kills the login and removes its artifact directory. The run directory
+   run-config helper call. No argument names the login origin: the helper signs in on the
+   run's own app origin, the first `--origin`, in local mode, and in remote mode on the
+   recipe's `auth.baseUrl`, which must be one of the `--origin` values, else on its
+   `auth.appOrigin`. Give that Bash call a timeout of 330000 ms, above the login's own 300 s
+   bound; a helper stopped anyway kills the login and removes its artifact directory. The run directory
    must be `$GIT_ROOT/.zensu/verify-feature-runs/<random>`. The helper reads the `auth` block with a
    strict reader (`key: scalar` lines only), runs `auth.loginScript` with `bash -c` in the
    project root, in its own process group, with stdin closed, its output never shown and a
@@ -246,16 +247,21 @@ You never see the password, the script's output or the browser state, and you ne
    that config is denied: for a fresh browser, run the helper again, which logs in again. A
    refused prompt or a failed `open` leaves the file until Phase 4, which runs the helper with
    `--discard-state --run-dir "$RUN_DIR"` before `teardown`, whatever its outcome; it removes
-   the run's `auth/` directory and prints `state=discarded` or `state=none`.
+   the run's `auth/` directory and prints `state=discarded` or `state=none`. On any other
+   session the gate refuses a `playwright-cli` call that names a run directory or passes a
+   `--config` whose file restores a browser state, so never copy, move or rename the run
+   config, and never open it on another session.
 4. **What a signed-in session cannot do.** `console` and `requests` are denied, so the
    runtime-signal plane of a signed-in row is PARTIAL. Every cookie, storage and state command
    stays denied, as on every `zensu-verify` session. What the app renders reaches you by design, so never
    drive pages that show credentials, API keys, tokens or session lists.
-5. **The read guard.** The verify-auth guard denies every `Read`, `Grep`, `Glob`,
-   `NotebookEdit`, `Edit`, `Write` and `MultiEdit` call that reaches
-   `.zensu/verify-feature-runs/<run>/auth/`, and every `Bash` or `PowerShell` command whose text
-   names such a path, and every `playwright-cli` call that names a run directory without naming
-   a `zensu-verify` session. Its denial is final; never try another tool, session or spelling.
+5. **The read guard.** The verify-auth guard judges every tool call. It denies every `Read`,
+   `Grep`, `Glob`, `NotebookEdit`, `Edit`, `Write` and `MultiEdit` call that reaches
+   `.zensu/verify-feature-runs/<run>/auth/`, every `Bash` or `PowerShell` command whose text
+   names such a path, every `playwright-cli` call that names a run directory without naming a
+   `zensu-verify` session, and every call of another tool whose input spells such a path, a
+   prompt or message included. Name that directory without its full path when you report it.
+   Its denial is final; never try another tool, session or spelling.
    Phase 4 deletes the run directory by its own path, which the guard admits.
 6. **Targets.** Local: a stack the recipe boots, or `--attach` with a recipe that carries the
    `auth` block; the run's validated loopback origins are used and the recipe's `baseUrl` and
