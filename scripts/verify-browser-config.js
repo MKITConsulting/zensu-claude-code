@@ -33,7 +33,10 @@ const MAX_LOGIN_STDOUT_BYTES = 65536;
 const MAX_RECIPE_BYTES = 262144;
 const AUTH_ENVIRONMENTS = Object.freeze(['test', 'production']);
 const LOGIN_FAILURES = Object.freeze(['recipe', 'timeout', 'contract', 'artifact-path', 'artifact-shape', 'artifact-scope']);
+const LOGIN_FAILURE_RE = new RegExp(`^(?:${LOGIN_FAILURES.join('|')}|exit [0-9]{1,3})$`);
 const LOGIN_RESTORED = 'login=state-restored';
+const ABORT_SIGNALS = Object.freeze(['SIGTERM', 'SIGINT', 'SIGHUP']);
+const DISCARD_USAGE = 'usage: verify-browser-config.js --discard-state --run-dir <absolute-dir>';
 
 function parseArgs(argv) {
   const options = { runDir: null, mode: null, origins: [], networkOnlyOrigins: [], loginRecipe: null, authOrigin: null };
@@ -290,8 +293,8 @@ function runLoginScript(script, options) {
     const chunks = [];
     let size = 0;
     let overflow = false;
-    let timedOut = false;
     let settled = false;
+    let timer = null;
     const killGroup = () => {
       const attempts = detached ? [() => process.kill(-child.pid, 'SIGKILL'), () => child.kill('SIGKILL')] : [() => child.kill('SIGKILL')];
       for (const attempt of attempts) {
@@ -303,9 +306,23 @@ function runLoginScript(script, options) {
         }
       }
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const abort = (signal) => {
       killGroup();
+      if (typeof options.onAbort === 'function') options.onAbort();
+      process.exit(signalStatus(signal));
+    };
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const signal of ABORT_SIGNALS) process.removeListener(signal, abort);
+      resolve(outcome);
+    };
+    for (const signal of ABORT_SIGNALS) process.once(signal, abort);
+    timer = setTimeout(() => {
+      killGroup();
+      child.stdout.destroy();
+      finish({ kind: 'timeout' });
     }, options.timeoutMs || LOGIN_TIMEOUT_MS);
     child.stdout.on('data', (chunk) => {
       if (overflow) return;
@@ -319,20 +336,11 @@ function runLoginScript(script, options) {
       chunks.push(chunk);
     });
     child.on('exit', () => killGroup());
-    child.on('error', () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ kind: 'exit 127' });
-    });
+    child.on('error', () => finish({ kind: 'exit 127' }));
     child.on('close', (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (timedOut) resolve({ kind: 'timeout' });
-      else if (overflow) resolve({ kind: 'contract' });
-      else if (code !== 0) resolve({ kind: `exit ${code === null ? signalStatus(signal) : code}` });
-      else resolve({ kind: 'ok', stdout: Buffer.concat(chunks).toString('utf8') });
+      if (overflow) finish({ kind: 'contract' });
+      else if (code !== 0) finish({ kind: `exit ${code === null ? signalStatus(signal) : code}` });
+      else finish({ kind: 'ok', stdout: Buffer.concat(chunks).toString('utf8') });
     });
   });
 }
@@ -343,9 +351,11 @@ async function signIn(options, runDir, origins, env, login = {}) {
   const recipe = readLoginRecipe(options.loginRecipe, layout.projectRoot);
   const appOrigin = origins[0];
   const authOrigin = options.authOrigin === null ? appOrigin : checkOrigin(options.authOrigin, options.mode).origin;
+  if (!origins.includes(authOrigin)) throw new Error('--auth-origin must be one of the --origin values');
   if (options.mode === 'remote') {
     if (originValue(recipe.appOrigin) !== appOrigin) throw loginFailure('recipe');
-    if (recipe.baseUrl !== undefined && originValue(recipe.baseUrl) !== authOrigin) throw loginFailure('recipe');
+    const bound = recipe.baseUrl === undefined ? appOrigin : originValue(recipe.baseUrl);
+    if (bound !== authOrigin) throw loginFailure('recipe');
     if (!AUTH_ENVIRONMENTS.includes(recipe.environment)) throw loginFailure('recipe');
   }
   const prepared = authState.prepareAuthDir(runDir);
@@ -359,6 +369,7 @@ async function signIn(options, runDir, origins, env, login = {}) {
       }),
       timeoutMs: login.timeoutMs,
       shell: login.shell,
+      onAbort: () => authState.removeArtifactDir(prepared.artifactDir),
     });
     if (outcome.kind !== 'ok') throw loginFailure(outcome.kind);
     const line = authState.artifactLine(outcome.stdout);
@@ -472,11 +483,20 @@ async function run(argv, resolver = dns.promises.lookup, env = process.env, read
   return { session, configPath, origins, networkOnlyOrigins, config, mode: consentNeeded ? 'consent' : 'policy', login: signedIn ? 'state-restored' : null };
 }
 
+function discardState(argv) {
+  if (!Array.isArray(argv) || argv.length !== 2 || argv[0] !== '--run-dir') throw new Error(DISCARD_USAGE);
+  const result = authState.discardAuthState(checkRunDir(argv[1]));
+  if (!result.ok) throw new Error(result.reason);
+  return result.removed ? 'discarded' : 'none';
+}
+
 module.exports = {
+  ABORT_SIGNALS,
   AUTH_ENVIRONMENTS,
   AUTH_SESSION_PREFIX,
   CONFIG_NAME,
   LOGIN_FAILURES,
+  LOGIN_FAILURE_RE,
   LOGIN_RESTORED,
   LOGIN_TIMEOUT_MS,
   MAX_LOGIN_STDOUT_BYTES,
@@ -488,6 +508,7 @@ module.exports = {
   checkOrigin,
   checkPolicy,
   checkRunDir,
+  discardState,
   parseArgs,
   readAuthBlock,
   run,
@@ -500,6 +521,8 @@ if (require.main === module) {
   const policyPresent = consent.readPolicy(process.env) !== null;
   const work = argv[0] === '--check-policy'
     ? checkPolicy(argv.slice(1)).then((verdict) => ({ text: `${verdict}\n`, consentUnderPolicy: policyPresent && verdict === 'consent' }))
+    : argv[0] === '--discard-state'
+    ? Promise.resolve().then(() => ({ text: `state=${discardState(argv.slice(1))}\n`, consentUnderPolicy: false }))
     : run(argv).then((result) => {
       const lines = [`session=${result.session}`, `config=${result.configPath}`, `mode=${result.mode}`];
       for (const origin of result.origins) lines.push(`origin=${origin}`);

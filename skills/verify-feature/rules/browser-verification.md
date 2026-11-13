@@ -218,8 +218,10 @@ You never see the password, the script's output or the browser state, and you ne
 
 1. **Call the helper with the recipe.** Add `--login-recipe "<absolute recipe path>"` to the
    run-config helper call, and `--auth-origin "<origin>"` only when the account signs in on
-   another of the run's origins than the first `--origin`. The run directory must be
-   `$GIT_ROOT/.zensu/verify-feature-runs/<random>`. The helper reads the `auth` block with a
+   another of the run's origins than the first `--origin`; it must be one of the `--origin`
+   values. Give that Bash call a timeout of 330000 ms, above the login's own 300 s bound; a
+   helper stopped anyway kills the login and removes its artifact directory. The run directory
+   must be `$GIT_ROOT/.zensu/verify-feature-runs/<random>`. The helper reads the `auth` block with a
    strict reader (`key: scalar` lines only), runs `auth.loginScript` with `bash -c` in the
    project root, in its own process group, with stdin closed, its output never shown and a
    300 s timeout, and hands it `ZENSU_AUTH_ARTIFACT_DIR`, `ZENSU_AUTH_BASE_URL` and
@@ -242,21 +244,26 @@ You never see the password, the script's output or the browser state, and you ne
    plain approval of the same origin; a remote origin is asked at every `open`; a policy target
    passes as before. The recorder deletes the state file once `open` ran, so a second `open` of
    that config is denied: for a fresh browser, run the helper again, which logs in again. A
-   refused prompt or a failed `open` leaves the file until Phase 4 deletes the run directory.
+   refused prompt or a failed `open` leaves the file until Phase 4, which runs the helper with
+   `--discard-state --run-dir "$RUN_DIR"` before `teardown`, whatever its outcome; it removes
+   the run's `auth/` directory and prints `state=discarded` or `state=none`.
 4. **What a signed-in session cannot do.** `console` and `requests` are denied, so the
    runtime-signal plane of a signed-in row is PARTIAL. Every cookie, storage and state command
-   stays denied, as on every session. What the app renders reaches you by design, so never
+   stays denied, as on every `zensu-verify` session. What the app renders reaches you by design, so never
    drive pages that show credentials, API keys, tokens or session lists.
 5. **The read guard.** The verify-auth guard denies every `Read`, `Grep`, `Glob`,
    `NotebookEdit`, `Edit`, `Write` and `MultiEdit` call that reaches
    `.zensu/verify-feature-runs/<run>/auth/`, and every `Bash` or `PowerShell` command whose text
-   names such a path. Its denial is final; never try another tool or spelling. Phase 4 deletes
-   the run directory by its own path, which the guard admits.
+   names such a path, and every `playwright-cli` call that names a run directory without naming
+   a `zensu-verify` session. Its denial is final; never try another tool, session or spelling.
+   Phase 4 deletes the run directory by its own path, which the guard admits.
 6. **Targets.** Local: a stack the recipe boots, or `--attach` with a recipe that carries the
    `auth` block; the run's validated loopback origins are used and the recipe's `baseUrl` and
-   `appOrigin` are not compared. Remote: a hosted test environment or production; the recipe
-   must set `auth.appOrigin` equal to the first `--origin`, `auth.baseUrl`, when present, equal
-   to the auth origin, and `auth.environment` to `test` or `production`. Production is an
+   `appOrigin` are not compared, so nothing binds them to the recipe: a local recipe signs in
+   only a throwaway account the local app alone knows. Remote: a hosted test environment or
+   production; the recipe must set `auth.appOrigin` equal to the first `--origin`, the auth
+   origin must equal `auth.baseUrl`, or `auth.appOrigin` without it, and `auth.environment`
+   must be `test` or `production`. Production is an
    explicit opt-in of that recipe: a dedicated test account in an isolated organization with
    synthetic data only, never the developer's own account, and a password the script resolves
    itself, from a keychain or password manager rather than a plain environment variable,

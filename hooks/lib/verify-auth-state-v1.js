@@ -67,11 +67,16 @@ function hostnameOf(origin) {
   }
 }
 
+function unbracketed(text) {
+  const match = /^\[([^\]]*)\]$/.exec(text);
+  return match ? match[1] : text;
+}
+
 function domainMatches(domain, host) {
   if (typeof domain !== 'string' || typeof host !== 'string' || domain === '' || host === '') return false;
   const lowered = domain.toLowerCase();
   const dotted = lowered.startsWith('.');
-  const bare = dotted ? lowered.slice(1) : lowered;
+  const bare = unbracketed(dotted ? lowered.slice(1) : lowered);
   if (bare === '') return false;
   if (host === bare) return true;
   return dotted && net.isIP(host) === 0 && host.endsWith(`.${bare}`);
@@ -82,7 +87,7 @@ function cookieShape(cookie) {
   if (!COOKIE_STRINGS.every((key) => typeof cookie[key] === 'string')) return false;
   if (cookie.name === '') return false;
   const bare = cookie.domain.replace(/^\./, '');
-  if (!(/^[A-Za-z0-9._-]+$/.test(bare) || net.isIP(bare) === 6)) return false;
+  if (!(/^[A-Za-z0-9._-]+$/.test(bare) || net.isIP(unbracketed(bare)) === 6)) return false;
   if (cookie.path !== undefined && typeof cookie.path !== 'string') return false;
   if (cookie.expires !== undefined && (typeof cookie.expires !== 'number' || !Number.isFinite(cookie.expires))) return false;
   if (COOKIE_BOOLEANS.some((key) => cookie[key] !== undefined && typeof cookie[key] !== 'boolean')) return false;
@@ -318,6 +323,20 @@ function removeArtifactDir(artifactDir) {
   }
 }
 
+function discardAuthState(runDir) {
+  if (!runDirLayout(runDir).ok) return { ok: false, reason: `the run directory must be <project>/${ZENSU_DIR_NAME}/${RUNS_DIR_NAME}/<leaf>` };
+  const authDir = path.join(runDir, AUTH_DIR_NAME);
+  const state = dirState(authDir);
+  if (state === 'missing') return { ok: true, removed: false };
+  if (state !== 'ok') return { ok: false, reason: 'the run directory carries an auth entry that is not a plain directory' };
+  try {
+    fs.rmSync(authDir, { recursive: true, force: true });
+  } catch (_error) {
+    return { ok: false, reason: 'the auth directory of the run could not be removed' };
+  }
+  return { ok: true, removed: true };
+}
+
 function writeStateFile(file, state) {
   const body = `${JSON.stringify(normalizedState(state))}\n`;
   if (Buffer.byteLength(body, 'utf8') > MAX_STATE_BYTES) return { ok: false, fault: FAULTS.TOO_LARGE };
@@ -392,6 +411,7 @@ module.exports = {
   canonicalOrigin,
   checkStateFile,
   consumeStateFile,
+  discardAuthState,
   domainMatches,
   emptyState,
   inScope,

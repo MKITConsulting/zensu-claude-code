@@ -803,29 +803,29 @@ if node -e '
     const mod = require("./hooks/lib/verify-consent-v1.js");
     process.stdout.write([mod.consentHookRegistered(process.cwd()), mod.consentRecorderRegistered(process.cwd()), mod.authGuardRegistered(process.cwd())].join(" "));
   ' 2>/dev/null)" = "registered registered unregistered" ]; then
-  check "P1vl11-control the guard fixture registers both consent hooks on the shell tools and the guard on the shell tools alone" PASS
+  check "P1vl14-control the guard fixture registers both consent hooks on the shell tools and the guard on the shell tools alone" PASS
 else
-  check "P1vl11-control the guard fixture registers both consent hooks on the shell tools and the guard on the shell tools alone" FAIL
+  check "P1vl14-control the guard fixture registers both consent hooks on the shell tools and the guard on the shell tools alone" FAIL
 fi
 case "$(vf_reg_doctor)" in
   *'❌  verify-feature: cannot start (verify-auth guard not registered on a matcher that covers the file, search and shell tools)'*)
-    check "P1vl11 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" PASS ;;
-  *) check "P1vl11 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" FAIL ;;
+    check "P1vl14 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" PASS ;;
+  *) check "P1vl14 a verify-auth guard that misses the file and search tools is named, beside registered consent hooks" FAIL ;;
 esac
 cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
 rm -f "$VF_REG_ROOT/hooks/pre-verify-auth-guard.sh"
 case "$(vf_reg_doctor)" in
   *'❌  verify-feature: cannot start (the verify-auth read guard hook or its module missing from the plugin)'*)
-    check "P1vl12 a missing verify-auth guard hook is named as a missing file" PASS ;;
-  *) check "P1vl12 a missing verify-auth guard hook is named as a missing file" FAIL ;;
+    check "P1vl15 a missing verify-auth guard hook is named as a missing file" PASS ;;
+  *) check "P1vl15 a missing verify-auth guard hook is named as a missing file" FAIL ;;
 esac
 cp "$PLUGIN_DIR/hooks/pre-verify-auth-guard.sh" "$VF_REG_ROOT/hooks/pre-verify-auth-guard.sh"
 rm -f "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js"
 ln -s "$PLUGIN_DIR/hooks/lib/verify-auth-guard-v1.js" "$VF_REG_ROOT/hooks/lib/verify-auth-guard-v1.js"
 case "$(vf_reg_doctor)" in
   *'❌  verify-feature: cannot start (the verify-auth read guard module is a symlink, which the guard refuses)'*)
-    check "P1vl13 a symlinked verify-auth guard module is named, because the guard refuses one" PASS ;;
-  *) check "P1vl13 a symlinked verify-auth guard module is named, because the guard refuses one" FAIL ;;
+    check "P1vl16 a symlinked verify-auth guard module is named, because the guard refuses one" PASS ;;
+  *) check "P1vl16 a symlinked verify-auth guard module is named, because the guard refuses one" FAIL ;;
 esac
 rm -rf "$VF_REG_ROOT"
 VF_PROBE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-probe.XXXXXX")" || exit 1

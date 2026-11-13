@@ -1,13 +1,14 @@
 # Verify-Feature Test-Account Login (Opaque Browser State) — Specification
 
-Status: approved 2026-11-06 (§9). Repository: `zensu-claude-code`, worktree
-`.claude/worktrees/verify-test-account`, branch `claude/verify-test-account` (from `origin/main`
-`b96cd011`). Nothing is built yet. The canonical copy is
-`docs/verify-feature-auth-state-spec.md` in that worktree.
+Status: approved 2026-11-06 (§9) and built. This file keeps the decisions and the threat model
+as they were approved; the current behaviour is described in
+[gates.md §Verify-Auth Read Guard](gates.md#verify-auth-read-guard), the signed-in paragraph of
+[gates.md §Browser Consent Gate](gates.md#browser-consent-gate) and
+[verify-feature.md §6](verify-feature.md#6-signing-in-with-a-test-account), which win where they
+differ.
 
-Every claim about the current code below was read in this session from that worktree; every claim
-about `playwright-cli` behaviour was measured in this session against the installed 0.1.21 unless
-it says otherwise.
+Every claim below about the code before the build was read from `b96cd011`; every claim about
+`playwright-cli` behaviour was measured against the installed 0.1.21 unless it says otherwise.
 
 ## 1. Problem
 
@@ -168,9 +169,12 @@ the same config content.
 - **Remote:** asked at every `open`, as today.
 - **Policy targets** (`ZENSU_VERIFY_NAVIGATION_POLICY_V1`): pass silently, as today. The recipe's
   login script and the credentials the user provisioned are the opt-in for unattended runs.
-- **Scope never widens.** The state holds entries for the run config's origins only, and the
-  browser refuses every HTTP(S) request outside them, so restored cookies can only travel to
-  approved origins.
+- **Scope stays with the run's hosts.** The state holds cookies whose domain is the host of a
+  run-config origin or, written with a leading dot, a parent domain of one, and origin entries
+  for the run config's origins only, and the browser refuses every HTTP(S) request outside those
+  origins. Cookies are scoped by host, not by port, so every approved port of a host receives
+  them, and a parent-domain cookie also reaches a sibling host a redirect lands on before the
+  redirect rule stops that page.
 - **Redirects** keep today's rule. A redirect to a login page or an identity provider on another
   origin means the state did not sign in: stop driving that page, report PARTIAL, optionally fall
   back to visible manual login in a fresh non-restored session.
@@ -205,15 +209,16 @@ tell a production host from a test host by itself.
 |---|---|---|
 | Password reaches the model | Script holds or derives it; recipe names an env var at most; helper never shows script output | The model's shell can read anything the user can (env, keychain, files). Docs recommend a keychain or password-manager lookup inside the script over a plain env var, because an `env` dump prints every variable |
 | State via `playwright-cli` | Allowlist unchanged: every getter/exporter denied, `config-print` included | Textual gate: a program that spawns `playwright-cli` itself is not judged (existing residual) |
-| State via file reads | Consumed at `open`; 0700/0600; `.gitignore`; read guard; run dir deleted at teardown | Bash guard is textual (`$(…)`, globs bypass it); same OS user |
+| State via file reads | Consumed at `open`; 0700/0600; `.gitignore`; read guard; `auth/` discarded at cleanup | Bash guard is textual (`$(…)`, globs bypass it); a recursive command at or above the run directory and a tool outside the guard's nine are not judged; hooks switched off judge nothing; same OS user |
 | Error reflection | Gate and helper parse the state before `open` | Swap between gate check and launch (same class as the run-config residual in the consent spec §12) |
 | Snapshots / screenshots | Origin consent; test account with synthetic data; skill forbids driving credential pages (API keys, sessions, tokens) | What the app itself renders enters the context by design |
 | `console` / `requests` | Denied on signed-in sessions | Runtime-signal plane stays PARTIAL for signed-in rows (as today) |
 | Redirect / navigation exfiltration | `allowedOrigins`, no query/fragment/userinfo in navigation, redirect stop rule | Redirect followed before the check; WebSockets unfenced (D12) |
-| State scope creep | Helper filters to run origins; gate rejects out-of-scope entries | — |
+| State scope creep | Helper filters to run hosts and origins; gate rejects out-of-scope entries | Cookies are scoped by host, not port; a parent-domain cookie stays valid for a sibling host a redirect reaches |
+| Credential destination | The login origin must be one of the run's origins; in remote mode the recipe's `baseUrl`, or its `appOrigin` without one | Local mode: the loopback origins are the caller's choice, so a local recipe signs in only a throwaway account the local app alone knows |
 | Run-config tampering | Only the canonical path beside the config is accepted; no inline state | Same as the consent spec §12 swap residual |
-| Session laundering | State only on `zensu-verify-auth-…`; signals denied by name | Manual login in a non-auth session keeps today's prose-only rule |
-| Leftover state | Consumed once; teardown; refused prompt leaves it only until Phase 4 | Crash before teardown leaves a 0600 file in an ignored directory |
+| Session laundering | State only on `zensu-verify-auth-…`; signals denied by name; the read guard refuses a `playwright-cli` call that names a run directory without a `zensu-verify` session | A copy of the run config outside a run directory, or a path assembled at run time, is not judged; manual login in a non-auth session keeps today's prose-only rule |
+| Leftover state | Consumed once, also by a recorder that cannot bind the session; Phase 4 discards `auth/` with `--discard-state`, also when it keeps the run directory; a helper stopped by a signal kills the login and removes the artifact directory | A crash or `SIGKILL` before cleanup leaves a 0600 file in an ignored directory |
 
 ## 7. Build steps, decisions, defaults
 
@@ -262,5 +267,4 @@ tell a production host from a test host by itself.
 3. **Delivery route: the Zensu workflow (`/zensu:build`, vanilla implementation + review chain),**
    run from a session anchored in the `zensu-claude-code` worktree, because the chain audits of a
    session anchored elsewhere fail edits outside their root.
-4. **Spec approved** with these answers. Commit on `claude/verify-test-account`; no push or pull
-   request without the user's explicit OK.
+4. **Spec approved** with these answers, to be built on `claude/verify-test-account`.

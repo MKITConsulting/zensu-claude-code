@@ -603,7 +603,8 @@ auth:
 
 A remote recipe also sets `appOrigin` (the exact origin of the app), optionally `baseUrl` (the
 origin the account signs in on, when it differs), and `environment: test` for a hosted test
-environment or `environment: production`.
+environment or `environment: production`. The origin the script signs in on must be one of the
+run's origins, and in remote mode the one the recipe names: `baseUrl`, or `appOrigin` without it.
 
 **What the login script does.** It signs a dedicated test account in against
 `$ZENSU_APP_ORIGIN` (or `$ZENSU_AUTH_BASE_URL`), saves a Playwright storage-state file beneath
@@ -625,19 +626,33 @@ second `open` of the same run config is denied, so a fresh browser means a fresh
 
 **Limits.**
 
-- Every cookie, local/session-storage and state command stays denied on every session, and on a
-  signed-in session `console` and `requests` are denied too, because a signed-in page's console
-  and network output can carry credentials. The runtime-signal evidence of a signed-in scenario
-  is therefore PARTIAL.
+- Every cookie, local/session-storage and state command stays denied on every `zensu-verify`
+  session, and on a signed-in session `console` and `requests` are denied too, because a
+  signed-in page's console and network output can carry credentials. The runtime-signal evidence
+  of a signed-in scenario is therefore PARTIAL.
+- A signed-in run config opens only on the `zensu-verify-auth-…` session the helper printed: the
+  consent gate refuses it on any other `zensu-verify` session, and the read guard refuses a
+  `playwright-cli` call that names a run directory without naming a `zensu-verify` session. A
+  copy of the run config placed elsewhere, or a path assembled at run time, is not judged.
 - The **verify-auth read guard** denies every `Read`, `Grep`, `Glob`, `NotebookEdit`, `Edit`,
   `Write` and `MultiEdit` call that reaches `.zensu/verify-feature-runs/<run>/auth/`, and every
   Bash or PowerShell command whose text names such a path. It is textual: a path assembled at run
   time, a command run from inside the run directory that names the auth directory relatively,
-  and a recursive search started above the run directory are not judged; such a search relies
-  on the auth directory's `.gitignore`, which ripgrep honours inside a git work tree.
+  and a recursive command started at or above the run directory (a `grep -r`, `cp -r` or `tar` of
+  the run directory itself) are not judged; a recursive search relies on the auth directory's
+  `.gitignore`, which ripgrep honours inside a git work tree. Other tools, such as an MCP file
+  reader or an IDE's file tool, are not judged at all.
 - The state file exists from the login until `open`, normally seconds. A refused consent prompt
-  or a failed `open` leaves it until the run directory is deleted at cleanup, and a crash before
-  cleanup leaves an owner-only file in that ignored directory.
+  or a failed `open` leaves it until Phase 4, which removes the run's `auth/` directory with the
+  helper's `--discard-state` before teardown, also when it keeps the run directory; a crash
+  before cleanup leaves an owner-only file in that ignored directory.
+- In local mode the login signs in on the run's own loopback origins, which the run chooses and
+  nothing binds to the recipe, so a loopback listener the model started would receive the
+  credentials. Give a local recipe a throwaway account that only the local app knows, seeded or
+  derived by the run itself, never the password of a shared or remote account.
+- The restored cookies are scoped by host, not by port, and a cookie set on a parent domain
+  (`.example.com`) stays valid for its sibling hosts: every approved port of the same host, and a
+  sibling host a redirect reaches, receive the session cookie.
 - What the app renders reaches the model by design. Use a dedicated test account with synthetic
   data, never your own account, and keep pages that show credentials, API keys or session lists
   out of the scenarios.

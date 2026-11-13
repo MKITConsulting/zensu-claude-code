@@ -874,6 +874,33 @@ esac
 [ "$UNBOUND_RC" -eq 0 ] && [ "$UNBOUND_SAID" -eq 1 ] && [ "$BEFORE" = "$AFTER" ] \
   && check "H15b an unbound recorder writes nothing, exits 0 and names its cause" PASS \
   || check "H15b an unbound recorder writes nothing, exits 0 and names its cause (rc=$UNBOUND_RC)" FAIL
+H15C_RUN="$PROJ/.zensu/verify-feature-runs/run-h15c"
+mkdir -p "$H15C_RUN"
+node -e '
+  const path = require("path");
+  const fs = require("fs");
+  const [plugin, runDir] = process.argv.slice(1);
+  const helper = require(path.join(plugin, "scripts", "verify-browser-config.js"));
+  const authState = require(path.join(plugin, "hooks", "lib", "verify-auth-state-v1.js"));
+  const prepared = authState.prepareAuthDir(runDir);
+  authState.removeArtifactDir(prepared.artifactDir);
+  const cookie = { name: "sid", value: "h15c", domain: "127.0.0.1", path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" };
+  if (!authState.writeStateFile(prepared.statePath, { cookies: [cookie], origins: [] }).ok) process.exit(1);
+  fs.writeFileSync(path.join(runDir, helper.CONFIG_NAME), JSON.stringify(helper.buildConfig(runDir, ["http://127.0.0.1:4380"], [], prepared.statePath)));
+' "$PLUGIN_DIR" "$H15C_RUN"
+H15C_CMD="playwright-cli -s=zensu-verify-auth-h15c open --config=$H15C_RUN/playwright-cli.json http://127.0.0.1:4380/"
+H15C_STATE="$H15C_RUN/auth/storage-state.json"
+H15C_BEFORE=0
+[ -f "$H15C_STATE" ] && H15C_BEFORE=1
+H15C_RC=0
+post_run "$H15C_CMD" "no-such-session" "$PROJ" >/dev/null || H15C_RC=$?
+case "$(pre_reason "$H15C_CMD" "no-such-session" "$PROJ")" in
+  *'already consumed'*) H15C_DENIED=1 ;;
+  *) H15C_DENIED=0 ;;
+esac
+[ "$H15C_BEFORE" -eq 1 ] && [ "$H15C_RC" -eq 0 ] && [ ! -e "$H15C_STATE" ] && [ "$H15C_DENIED" -eq 1 ] \
+  && check "H15c an unbound recorder still consumes the signed-in state after a restoring open, so a second open of that config is denied" PASS \
+  || check "H15c an unbound recorder still consumes the signed-in state after a restoring open, so a second open of that config is denied (before=$H15C_BEFORE rc=$H15C_RC denied=$H15C_DENIED)" FAIL
 
 REMOTE_ORIGIN='https://93.184.216.34'
 REMOTE_RUN_DIR="$PROJ/run-remote"

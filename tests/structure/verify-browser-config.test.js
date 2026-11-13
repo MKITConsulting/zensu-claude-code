@@ -5,7 +5,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const HELPER = path.resolve(__dirname, '../../scripts/verify-browser-config.js');
 const helper = require(HELPER);
@@ -672,9 +672,13 @@ test('a login run writes a signed-in run config whose private state keeps only t
   assert.deepEqual(seen, [path.join(project.dir, 'auth', 'artifact'), APP, APP]);
   const config = JSON.parse(fs.readFileSync(result.configPath, 'utf8'));
   assert.equal(JSON.stringify(config).includes(LOGIN_SECRET), false);
-  const again = await helper.run(loginArgs(project, ['--auth-origin', 'http://127.0.0.1:4301']), undefined, NO_POLICY, READY);
+  const again = await helper.run(loginArgs(project, ['--origin', 'http://127.0.0.1:4301', '--auth-origin', 'http://127.0.0.1:4301']), undefined, NO_POLICY, READY);
   assert.equal(again.login, 'state-restored');
   assert.deepEqual(fs.readFileSync(path.join(project.root, 'seen-env.txt'), 'utf8').trim().split('\n')[1], 'http://127.0.0.1:4301');
+  fs.rmSync(path.join(project.root, 'seen-env.txt'));
+  await assert.rejects(helper.run(loginArgs(project, ['--auth-origin', 'http://127.0.0.1:4302']), undefined, NO_POLICY, READY),
+    /--auth-origin must be one of the --origin values/);
+  assert.equal(fs.existsSync(path.join(project.root, 'seen-env.txt')), false);
 });
 
 test('a login run fails with one fixed class, writes no run config and keeps no state or artifact', async (t) => {
@@ -748,6 +752,10 @@ test('a remote login run needs the recipe to bind the application origin and dec
   }
   const local = loginProject(t, { auth: auth(['  appOrigin: "http://127.0.0.1:9"', '  baseUrl: "http://127.0.0.1:9"']) });
   assert.equal((await helper.run(loginArgs(local), undefined, NO_POLICY, READY)).login, 'state-restored');
+  const wide = publicResolver({ 'app.example.com': ['93.184.216.34'], 'collector.example.net': ['93.184.216.35'] });
+  const collector = loginProject(t, { origin: remote, auth: auth(['  appOrigin: "https://app.example.com"', '  environment: test']) });
+  await loginFails(collector, 'recipe', [...args(collector), '--origin', 'https://collector.example.net', '--auth-origin', 'https://collector.example.net'], wide);
+  assert.equal(fs.existsSync(path.join(collector.root, 'seen-env.txt')), false);
 });
 
 test('the CLI prints login=state-restored for a signed-in run and only the failure class when the login fails', (t) => {
@@ -768,9 +776,63 @@ test('the CLI prints login=state-restored for a signed-in run and only the failu
   assert.equal(failed.stdout, '');
   assert.equal(failed.stderr, 'zensu verify browser config: login failed: exit 9\n');
   assert.deepEqual([...helper.LOGIN_FAILURES], ['recipe', 'timeout', 'contract', 'artifact-path', 'artifact-shape', 'artifact-scope']);
+  for (const kind of [...helper.LOGIN_FAILURES, 'exit 9', 'exit 127']) assert.match(kind, helper.LOGIN_FAILURE_RE);
+  for (const kind of ['exit', 'exit 1000', 'password', 'recipe ']) assert.doesNotMatch(kind, helper.LOGIN_FAILURE_RE);
+  assert.deepEqual([...helper.ABORT_SIGNALS], ['SIGTERM', 'SIGINT', 'SIGHUP']);
   assert.deepEqual([...helper.AUTH_ENVIRONMENTS], ['test', 'production']);
   assert.equal(helper.LOGIN_TIMEOUT_MS, 300000);
   assert.equal(helper.MAX_LOGIN_STDOUT_BYTES, 65536);
+});
+
+test('the discard verb removes a run\'s signed-in material and refuses any other argument shape or layout', async (t) => {
+  const project = loginProject(t);
+  assert.equal(helper.discardState(['--run-dir', project.dir]), 'none');
+  await helper.run(loginArgs(project), undefined, NO_POLICY, READY);
+  assert.equal(fs.existsSync(path.join(project.dir, 'auth', 'storage-state.json')), true);
+  const cli = spawnSync(process.execPath, [HELPER, '--discard-state', '--run-dir', project.dir], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout, 'state=discarded\n');
+  assert.equal(fs.existsSync(path.join(project.dir, 'auth')), false);
+  assert.equal(fs.existsSync(path.join(project.dir, helper.CONFIG_NAME)), true);
+  for (const argv of [[], ['--run-dir'], ['--run-dir', project.dir, '--mode', 'local'], ['--mode', project.dir]]) {
+    assert.throws(() => helper.discardState(argv), /usage: verify-browser-config\.js --discard-state/);
+  }
+  assert.throws(() => helper.discardState(['--run-dir', 'relative/dir']), /absolute path/);
+  const outside = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-discard-outside-')));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(outside, 'auth'));
+  const refused = spawnSync(process.execPath, [HELPER, '--discard-state', '--run-dir', outside], { encoding: 'utf8' });
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /the run directory must be <project>\/\.zensu\/verify-feature-runs\/<leaf>/);
+  assert.equal(fs.existsSync(path.join(outside, 'auth')), true);
+});
+
+test('a helper stopped by a signal during the login kills the login and removes the artifact directory', { skip: process.platform === 'win32' ? 'POSIX signals and process groups' : false }, async (t) => {
+  const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
+  const env = { ...process.env, [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}` };
+  delete env.ZENSU_VERIFY_NAVIGATION_POLICY_V1;
+  const project = loginProject(t, { script: ['echo $$ > login.pid', 'touch "$ZENSU_AUTH_ARTIFACT_DIR/started"', 'exec sleep 30'].join('\n') });
+  const child = spawn(process.execPath, [HELPER, ...loginArgs(project)], { env, stdio: ['ignore', 'ignore', 'ignore'] });
+  const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+  const started = path.join(project.dir, 'auth', 'artifact', 'started');
+  const deadline = Date.now() + 20000;
+  while (!fs.existsSync(started) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(fs.existsSync(started), true, 'the login started');
+  child.kill('SIGTERM');
+  assert.equal(await exited, 128 + os.constants.signals.SIGTERM);
+  assert.equal(fs.existsSync(path.join(project.dir, 'auth', 'artifact')), false);
+  assert.equal(fs.existsSync(path.join(project.dir, helper.CONFIG_NAME)), false);
+  const pid = Number(fs.readFileSync(path.join(project.root, 'login.pid'), 'utf8').trim());
+  let alive = true;
+  for (let attempt = 0; attempt < 40 && alive; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } catch (_error) {
+      alive = false;
+    }
+  }
+  assert.equal(alive, false, 'the login process group was killed');
 });
 
 test('a signed-in run needs the verify-auth read guard registered, and a plain run does not', async (t) => {

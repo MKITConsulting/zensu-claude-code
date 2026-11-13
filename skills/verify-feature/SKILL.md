@@ -436,12 +436,12 @@ any protected page—including an initial `open` or `goto`, which prints the pag
 writes a snapshot of the page—its origin must be approved: by a parent-environment policy
 target that names that origin with `evidenceMode: declared-safe`, or by the user's answer to the
 permission prompt the gate raises for that origin. An
-approved origin covers every page on it, at any path, including routes whose identifiers change
-on every run; no route list is declared, matched or checked. A page on an origin that is not
+approved origin covers every page on it, at any path; no route list is declared, matched or
+checked. A page on an origin that is not
 approved is never opened, and a refused prompt makes that origin's scenarios PARTIAL.
 Final-report redaction is too late. The same boundary applies to screenshots. A recipe's
 `validate.evidenceSafety` block (`../autopilot/rules/config.md`) is an optional declaration of
-the application's data classification; it no longer gates navigation, and a `routes` list left
+the application's data classification; it gates no navigation, and a `routes` list left
 in it is ignored.
 
 Use this order:
@@ -483,8 +483,9 @@ Run cleanup on PASS, FAIL, cancellation, and setup failure:
 
 - run `playwright-cli -s=<session> close` for every session this run opened; never `close-all`
   or `kill-all`, which end sessions this run does not own;
+- after `--login-recipe`, run the run-config helper's `--discard-state --run-dir "$RUN_DIR"`;
 - run the run-resource helper's `teardown` for `$RUN_DIR` before the run directory is deleted,
-  because its ledger lives there (`rules/drivers.md` section 5);
+  because its ledger lives there;
 - invoke every accepted recipe's configured `down` command byte-for-byte as a standalone Bash
   call, under `--chain` behind the `cd` prefix of Chain mode point 9 and nothing else; let its
   lease-bound controller stop only the process groups and resources it owns;

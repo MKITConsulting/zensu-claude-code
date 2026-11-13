@@ -384,7 +384,7 @@ else
 fi
 if grep -qF '1. **Recipe login script:** when the selected recipe'"'"'s `auth` block sets `mode: login-script` and `artifact: storageState`, sign in through the helper'"'"'s `--login-recipe` as `rules/browser-verification.md` section 6 says.' <<<"$SKILL_FLAT" \
   && grep -qF '`console` and `requests` are denied, so the runtime-signal plane of a signed-in row is PARTIAL.' <<<"$BROWSER_FLAT" \
-  && grep -qF 'Every cookie, storage and state command stays denied, as on every session.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Every cookie, storage and state command stays denied, as on every `zensu-verify` session.' <<<"$BROWSER_FLAT" \
   && grep -qF 'The recorder deletes the state file once `open` ran' <<<"$BROWSER_FLAT" \
   && ! grep -qF 'A future gate may re-enable opaque state' <<<"$SKILL_FLAT"; then
   check "P4g browser state restores only through the recipe login, and a signed-in session loses console and requests" PASS

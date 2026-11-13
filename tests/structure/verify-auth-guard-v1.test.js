@@ -104,6 +104,11 @@ test('a link into a run auth directory is denied through the path it resolves to
   assert.equal(verdict('Read', { file_path: 'notes/dir/storage-state.json' }, root).deny, true);
   assert.equal(verdict('Grep', { pattern: 'value', path: path.join(root, 'notes', 'dir') }, root).deny, true);
   assert.equal(verdict('Read', { file_path: path.join(root, 'notes', 'missing.json') }, root).deny, false);
+  fs.symlinkSync(path.join(root, '.zensu', 'verify-feature-runs'), path.join(root, 'runs'));
+  fs.symlinkSync(path.join(root, '.zensu', 'verify-feature-runs', 'run-a1'), path.join(root, 'run'));
+  assert.equal(verdict('Grep', { pattern: 'value', path: path.join(root, 'runs') }, root).deny, true);
+  assert.equal(verdict('Glob', { pattern: '**/*.json', path: path.join(root, 'run') }, root).deny, true);
+  assert.equal(verdict('Grep', { pattern: 'value', path: 'run' }, root).deny, true);
 });
 
 test('a search is denied when its root or its pattern reaches a run auth directory, and allowed otherwise', () => {
@@ -121,6 +126,13 @@ test('a search is denied when its root or its pattern reaches a run auth directo
     ['Glob', { pattern: '*/storage-state.json', path: RUN }],
     ['Glob', { pattern: '**/*.png', path: RUN }],
     ['Glob', { pattern: 'state.json', path: `${RUN}/auth/artifact` }],
+    ['Grep', { pattern: 'sid', path: RUN, glob: '!browser/**' }],
+    ['Glob', { pattern: '[[:alpha:]]uth/*', path: RUN }],
+    ['Glob', { pattern: '[]a]uth/*', path: RUN }],
+    ['Grep', { pattern: 'sid', path: RUN, glob: '[!]]uth/*' }],
+    ['Glob', { pattern: '[[=a=]]uth/*', path: RUN }],
+    ['Grep', { pattern: 'sid', path: RUN, glob: 'a\\uth/*' }],
+    ['Glob', { pattern: '\\a\\u\\t\\h/*', path: RUN }],
   ];
   for (const [tool, input] of denied) assert.equal(verdict(tool, input).deny, true, `${tool} ${JSON.stringify(input)}`);
   const allowed = [
@@ -154,6 +166,15 @@ test('a shell command that names a run auth path is denied in every spelling the
     ['PowerShell', "Get-Content ('.zensu/verify-feature-runs/run-a1/au' + 'th/state.json')"],
     ['PowerShell', 'Get-Content .zensu/verify-feature-runs/run-a1/a`uth/state.json'],
     ['PowerShell', 'Get-Content .zensu\\verify-feature-runs\\run-a1\\auth\\state.json'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1{/auth,}/*.json'],
+    ['Bash', 'cat .zensu/{verify-feature-runs/run-a1/auth,x}/state.json'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/{x,{y,auth}}/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[[:alpha:]]uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[]a]uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[!]]uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[[=a=]]uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/[[:a]uth/*'],
+    ['Bash', 'cat .zensu/verify-feature-runs/run-a1/{a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}'],
   ];
   for (const [tool, command] of denied) {
     const result = verdict(tool, { command });
@@ -169,9 +190,39 @@ test('a shell command that names a run auth path is denied in every spelling the
     ['Bash', 'cat src/auth/session.js'],
     ['Bash', 'git status --short'],
     ['PowerShell', 'Get-ChildItem .zensu/verify-feature-runs'],
+    ['Bash', 'echo {a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}'],
   ];
   for (const [tool, command] of allowed) assert.deepEqual(verdict(tool, { command }), { deny: false, reason: guard.REASONS.CLEAN }, `${tool} ${command}`);
   assert.deepEqual(verdict('Bash', {}), { deny: false, reason: guard.REASONS.CLEAN });
+});
+
+test('a browser CLI call that names a verify-feature run directory needs a zensu-verify session, and both markers derive from their owners', () => {
+  const cliVersion = require(path.join(LIB, 'playwright-cli-version-v1.js'));
+  assert.equal(guard.SESSION_MARKER, consent.SESSION_PREFIX);
+  assert.deepEqual([...guard.CLI_WORDS], [...cliVersion.BINARY_NAMES, cliVersion.PACKAGE_NAME]);
+  const config = `--config=${RUN}/${consent.RUN_CONFIG_NAME}`;
+  const denied = [
+    ['Bash', `playwright-cli -s=mine open ${config} http://127.0.0.1:4300/`],
+    ['Bash', `playwright-cli open ${config}`],
+    ['Bash', `/usr/local/bin/playwright-cli -s=mine open ${config}`],
+    ['Bash', `npx @playwright/cli@0.1.21 -s=mine open ${config}`],
+    ['Bash', `play''wright-cli -s=mine open ${config}`],
+    ['Bash', `cd ${RUN} && playwright-cli -s=mine open --config=${consent.RUN_CONFIG_NAME}`],
+    ['PowerShell', `playwright-cli -s=mine open ${config}`],
+  ];
+  for (const [tool, command] of denied) assert.deepEqual(verdict(tool, { command }), { deny: true, reason: guard.REASONS.SESSION }, `${tool} ${command}`);
+  const allowed = [
+    `playwright-cli -s=${authState.AUTH_SESSION_PREFIX}run-a1 open ${config}`,
+    `playwright-cli -s=${consent.SESSION_PREFIX}run-a1 open ${config}`,
+    `cat ${RUN}/${consent.RUN_CONFIG_NAME}`,
+    'playwright-cli -s=mine open --config=/tmp/other.json',
+    'node x.js --run-dir /u/playwright-cli-tests/.zensu/verify-feature-runs/r',
+  ];
+  for (const command of allowed) assert.deepEqual(verdict('Bash', { command }), { deny: false, reason: guard.REASONS.CLEAN }, command);
+  const reason = guard.denyReason({ deny: true, reason: guard.REASONS.SESSION });
+  assert.ok(reason.startsWith(LEAD));
+  assert.ok(reason.includes('-s=<session> exactly as the helper printed it'));
+  assert.ok(!reason.includes('playwright-cli'));
 });
 
 test('a payload the dispatcher could not parse is refused exactly when it names a verify-feature run, and both marker tests agree', () => {
@@ -206,7 +257,7 @@ test('the deny reason names the reached path without control bytes and names the
   assert.ok(text.startsWith(LEAD));
   assert.ok(text.includes(`(${RUN}/auth/a?b?[31m.json)`), text);
   assert.doesNotMatch(text, /[\u0000-\u001f\u007f]/);
-  for (const phrase of ['Do not retry through another tool, path spelling or command', 'use the Grep tool or a commit message file', 'Phase 4 deletes the run directory']) {
+  for (const phrase of ['Do not retry through another tool, path spelling or command', 'use the Grep tool or a commit message file', 'Phase 4 discards what is left with the run-config helper\'s --discard-state']){
     assert.ok(text.includes(phrase), phrase);
   }
   assert.ok(guard.denyReason({ deny: true, reason: guard.REASONS.COMMAND }).includes('(the command names a path inside a run auth directory)'));

@@ -223,8 +223,10 @@ so the skill reads the `Page URL` line after every navigating call — prose, no
 `browser.contextOptions.storageState` only at the canonical `auth/storage-state.json` beside it.
 Such a config opens only on a `zensu-verify-auth-` session after `checkStateFile` passed,
 `console` and `requests` deny on that session, the prompt says the browser opens signed in, its
-records carry `restoredState`, and the recorder consumes the state after `open`. The helper's
-login, the read guard, the version verdict and the gaps are in
+records carry `restoredState`, and the recorder consumes the state after `open`, also when it
+cannot bind a session. The read guard refuses a browser call that names a run directory without
+naming a `zensu-verify` session, which keeps a signed-in config off the sessions this gate never
+judges. The helper's login, the read guard, the version verdict and the gaps are in
 `.claude/rules/verify-auth-guard.md`.
 
 **One floor and one policy parser.** `verify-navigation-floor-v1.js` owns origin classification and
@@ -439,7 +441,9 @@ announces a prompt rather than a capability the plugin hands itself.
   registered, a registration that could not be determined, a probe that did not complete — and the rule that
   each hook is named with its own state, because a model relaying an undetermined registration as
   a missing hook, or the gate's state as the recorder's, sends the user after a problem that is
-  not there. No check compares the bullet with the reasons.
+  not there. No check compares the bullet with the reasons. The verify-auth read guard's causes
+  are named in `skills/doctor/references/verify-auth-guard.md`, which the bullet points to, and
+  that file must name every guard cause the doctor prints.
 - `hooks/lib/hook-registration-v1.js` is the ONE reader of the host rule that decides which
   `hooks.json` groups fire for a tool. `hookRegistered` in `hooks/lib/verify-consent-v1.js`, behind
   `consentHookRegistered`/`consentRecorderRegistered`, calls its `registration` with

@@ -78,6 +78,8 @@ test('a cookie domain matches its own host, and a dotted domain also matches eve
     ['.', 'example.com', false],
     ['', 'example.com', false],
     ['::1', '::1', true],
+    ['[::1]', '::1', true],
+    ['[::1]', '127.0.0.1', false],
   ];
   for (const [domain, host, expected] of rows) assert.equal(auth.domainMatches(domain, host), expected, `${domain} ${host}`);
 });
@@ -85,6 +87,7 @@ test('a cookie domain matches its own host, and a dotted domain also matches eve
 test('storage state parses only the cookie and localStorage shape Playwright writes, and a parse fault never carries the input', () => {
   assert.equal(auth.parseState(JSON.stringify(state())).ok, true);
   assert.deepEqual(auth.parseState('{}').state, { cookies: [], origins: [] });
+  assert.equal(auth.parseState(JSON.stringify(state({ cookies: [cookie({ domain: '[::1]' })] }))).ok, true);
   const notJson = auth.parseState(SECRET);
   assert.deepEqual(notJson, { ok: false, fault: FAULTS.NOT_JSON });
   assert.equal(JSON.stringify(notJson).includes('eyJ'), false);
@@ -95,6 +98,7 @@ test('storage state parses only the cookie and localStorage shape Playwright wri
     state({ cookies: [cookie({ url: 'http://127.0.0.1/' })] }),
     state({ cookies: [cookie({ name: '' })] }),
     state({ cookies: [cookie({ domain: 'http://127.0.0.1' })] }),
+    state({ cookies: [cookie({ domain: '[example.com]' })] }),
     state({ cookies: [cookie({ sameSite: 'lax' })] }),
     state({ cookies: [cookie({ httpOnly: 'yes' })] }),
     state({ cookies: [cookie({ expires: '1' })] }),
@@ -132,6 +136,33 @@ test('scope keeps only cookies for a run host and origins equal to a run origin,
   assert.equal(auth.emptyState(auth.scopeState(mixed, ['https://unrelated.example.org'])), true);
   assert.equal(auth.emptyState({ cookies: [], origins: [] }), true);
   assert.equal(auth.emptyState(scoped), false);
+  const ipv6 = state({ cookies: [cookie({ domain: '[::1]' })], origins: [] });
+  assert.deepEqual(auth.scopeState(ipv6, ['http://[::1]:4310']).cookies.map((item) => item.domain), ['[::1]']);
+  assert.equal(auth.inScope(ipv6, ['http://[::1]:4310']), true);
+  assert.equal(auth.inScope(state({ origins: [] }), ['http://127.0.0.1:9999']), true);
+  const parent = state({ cookies: [cookie({ name: 'parent', domain: '.example.com' })], origins: [] });
+  assert.deepEqual(auth.scopeState(parent, ['https://app.example.com']).cookies.map((item) => item.name), ['parent']);
+});
+
+test('discarding a run removes its auth directory, refuses a foreign layout or a linked auth entry, and repeats harmlessly', (t) => {
+  const { dir } = runDir(t);
+  assert.deepEqual(auth.discardAuthState(dir), { ok: true, removed: false });
+  const prepared = auth.prepareAuthDir(dir);
+  assert.equal(auth.writeStateFile(prepared.statePath, state()).ok, true);
+  assert.deepEqual(auth.discardAuthState(dir), { ok: true, removed: true });
+  assert.equal(fs.existsSync(path.join(dir, auth.AUTH_DIR_NAME)), false);
+  assert.deepEqual(auth.discardAuthState(dir), { ok: true, removed: false });
+  const outside = tempDir(t, 'zensu-auth-outside-');
+  fs.mkdirSync(path.join(outside, auth.AUTH_DIR_NAME));
+  assert.equal(auth.discardAuthState(outside).ok, false);
+  assert.equal(fs.existsSync(path.join(outside, auth.AUTH_DIR_NAME)), true);
+  if (POSIX) {
+    const target = tempDir(t, 'zensu-auth-target-');
+    fs.writeFileSync(path.join(target, 'keep'), 'x');
+    fs.symlinkSync(target, path.join(dir, auth.AUTH_DIR_NAME));
+    assert.equal(auth.discardAuthState(dir).ok, false);
+    assert.equal(fs.existsSync(path.join(target, 'keep')), true);
+  }
 });
 
 test('a state file passes only as a private regular single-link file inside a real auth directory, within its origins', (t) => {
