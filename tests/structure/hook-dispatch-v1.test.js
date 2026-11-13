@@ -12,10 +12,10 @@ const DISPATCHER = path.join(PLUGIN, 'hooks', 'lib', 'hook-dispatch-v1.js');
 const dispatch = require(DISPATCHER);
 const registration = require(path.join(PLUGIN, 'hooks', 'lib', 'hook-registration-v1.js'));
 
-const SHELL_PRE = ['reviewer-capability', 'zensu-cli-gate', 'source-write-gate', 'secret-scan', 'browser-consent', 'work-order-gate'];
+const SHELL_PRE = ['reviewer-capability', 'zensu-cli-gate', 'source-write-gate', 'secret-scan', 'browser-consent', 'work-order-gate', 'verify-auth-guard'];
 const SHELL_POST = ['artifact-redact', 'browser-consent-recorder', 'work-order-post'];
-const EDIT_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard', 'tdd-edit-gate', 'secret-scan-write'];
-const NOTEBOOK_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard-notebook', 'secret-scan-notebook'];
+const EDIT_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard', 'tdd-edit-gate', 'secret-scan-write', 'verify-auth-guard'];
+const NOTEBOOK_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard-notebook', 'secret-scan-notebook', 'verify-auth-guard'];
 const SPAWN_PRE = ['reviewer-capability', 'work-order-gate', 'reviewer-spawn-allow'];
 
 const names = (event, tool) => dispatch.selectChecks(event, tool).map((check) => check.name);
@@ -25,8 +25,9 @@ const pre = (decision, reason) => ({
 });
 const bashPayload = (command) => JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } });
 
-test('a Read call runs only the capability and work-order checks, never a check registered for the shell tools', () => {
-  assert.deepEqual(names('PreToolUse', 'Read'), ['reviewer-capability', 'work-order-gate']);
+test('a Read call runs only the capability, work-order and verify-auth checks, never a check registered for the shell tools alone', () => {
+  for (const tool of ['Read', 'Grep', 'Glob']) assert.deepEqual(names('PreToolUse', tool), ['reviewer-capability', 'work-order-gate', 'verify-auth-guard']);
+  assert.deepEqual(names('PreToolUse', 'WebFetch'), ['reviewer-capability', 'work-order-gate']);
   assert.deepEqual(names('PostToolUse', 'Read'), ['work-order-post']);
 });
 
@@ -153,7 +154,7 @@ test('every check matcher has one host reading, and only the capability, source-
     ['reviewer-capability', 'source-write-gate', 'browser-consent'],
   );
   assert.deepEqual(dispatch.REGISTRY.filter((check) => check.failure !== 'closed').map((check) => check.failure),
-    Array(13).fill('open'));
+    Array(14).fill('open'));
 });
 
 test('hooks.json starts one dispatcher per tool event in exec form on every tool, blocking on failure before a tool runs', () => {
