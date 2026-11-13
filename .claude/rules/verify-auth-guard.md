@@ -90,7 +90,10 @@ for `..`, `.` or no directory (a brace or group character, `$`, a backtick, a do
 name); after one every later segment is a candidate, and after `**` too once a `..` follows.
 `shellWords` splits a command as a POSIX shell does (quotes and escapes removed, a quoted space or
 `;` kept inside its word, `;&|<>` breaking words, a zsh `<n-m>` range kept whole), and every
-spelling is read with its backslashes as escapes and again as separators. Do not reintroduce glob
+spelling is read with its backslashes as escapes and again as separators. Only a space, a tab or
+a newline separates Bash words, never JavaScript's `\s`: bash keeps a no-break space or a carriage
+return inside a word, so splitting there would cut a run path before a `..`. PowerShell text
+splits on every whitespace character, as PowerShell does. Do not reintroduce glob
 translation to win back a false positive.
 
 **It binds no session and never stands between a session and its repair commands.** The guard

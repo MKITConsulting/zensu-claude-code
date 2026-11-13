@@ -26,6 +26,7 @@ const SIMPLE_GLOB = /^[a-z0-9._ *?[\]-]+$/;
 const SHIFTING = /[{}()$`]/;
 const WORD_END = /[)`'",;&|<>}]+$/;
 const WORD_BREAKS = ';&|<>';
+const POSIX_BLANKS = ' \t\n';
 const ZSH_RANGE = /<\d*-\d*>/y;
 const CLI_WORDS = Object.freeze([...cliVersion.BINARY_NAMES, cliVersion.PACKAGE_NAME]);
 const SESSION_MARKER = authState.AUTH_SESSION_PREFIX.slice(0, -'auth-'.length);
@@ -107,7 +108,8 @@ function zshRange(text, index) {
   return match ? match[0] : '';
 }
 
-function shellWords(text) {
+function shellWords(text, tool) {
+  const blank = tool === 'PowerShell' ? (char) => /\s/.test(char) : (char) => POSIX_BLANKS.includes(char);
   const words = [];
   let word = '';
   let open = false;
@@ -144,7 +146,7 @@ function shellWords(text) {
       word += range;
       index += range.length - 1;
       open = true;
-    } else if (/\s/.test(char) || WORD_BREAKS.includes(char)) {
+    } else if (blank(char) || WORD_BREAKS.includes(char)) {
       if (open) words.push(word);
       word = '';
       open = false;
@@ -187,12 +189,13 @@ function shellSpellings(command, tool) {
 }
 
 function commandNamesAuth(command, tool) {
+  const variants = new Set();
   for (const spelling of shellSpellings(command, tool)) {
     const lowered = spelling.toLowerCase();
     if (lowered.includes(MARKER) && lowered.includes(STATE_STEM)) return true;
-    if (marked(spelling) && [spelling, spelling.replace(/\\/g, '/')].some((variant) => shellWords(variant).some(namesAuthPath))) return true;
+    if (marked(spelling)) variants.add(spelling).add(spelling.replace(/\\/g, '/'));
   }
-  return false;
+  return [...variants].some((variant) => shellWords(variant, tool).some(namesAuthPath));
 }
 
 function baseOf(payload, fallback) {
