@@ -39,10 +39,11 @@ grep -q 'repeat: 3' "$EVAL_DIR/promptfooconfig-concurrency.yaml"
 grep -q 'repeat: 5' "$EVAL_DIR/promptfooconfig-adversarial.yaml"
 grep -q 'source_dir: ../..' "$EVAL_DIR/promptfooconfig-live.yaml"
 PLUGIN_VERSION="$(jq -r '.version' "$ROOT/.claude-plugin/plugin.json")"
-test "$(jq -r '.plugins[0].version' "$ROOT/.claude-plugin/marketplace.json")" = "$PLUGIN_VERSION"
-test "$(jq -r '.plugins[0].source.source' "$ROOT/.claude-plugin/marketplace.json")" = github
-test "$(jq -r '.plugins[0].source.repo' "$ROOT/.claude-plugin/marketplace.json")" = MKITConsulting/zensu-claude-code
-test "$(jq -r '.plugins[0].source.ref' "$ROOT/.claude-plugin/marketplace.json")" = "v$PLUGIN_VERSION"
+ZENSU_ENTRY='[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0]'
+test "$(jq -r "$ZENSU_ENTRY.version" "$ROOT/.claude-plugin/marketplace.json")" = "$PLUGIN_VERSION"
+test "$(jq -r "$ZENSU_ENTRY.source.source" "$ROOT/.claude-plugin/marketplace.json")" = github
+test "$(jq -r "$ZENSU_ENTRY.source.repo" "$ROOT/.claude-plugin/marketplace.json")" = MKITConsulting/zensu-claude-code
+test "$(jq -r "$ZENSU_ENTRY.source.ref" "$ROOT/.claude-plugin/marketplace.json")" = "v$PLUGIN_VERSION"
 grep -q 'create-local-marketplace-fixture.js' "$EVAL_DIR/lib/provision-installed-plugin.sh"
 grep -q 'plugin marketplace add "$MARKETPLACE_ROOT"' "$EVAL_DIR/lib/provision-installed-plugin.sh"
 grep -q 'plugin install "$PLUGIN_ID" --scope user' "$EVAL_DIR/lib/provision-installed-plugin.sh"

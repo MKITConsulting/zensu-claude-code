@@ -1,7 +1,9 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "hooks/lib/git-environment-v1.js"
+  - "plugins/session-hub/hooks/lib/git-environment-v1.js"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 
@@ -14,25 +16,27 @@ and `handoff`, and that session may still be live. The prefix is `--no-optional-
 caller's own tree, because every call in the file is a read. A git call that bypasses `git()`
 loses all three, so add new calls through the helper.
 
-**`git()` also runs every call in `gitEnvironment(process.env)` from
+**`git()` also runs every call in `scrubGitEnvironment(process.env)` from
 `hooks/lib/git-environment-v1.js`**, which deletes `GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`
 and the other discovery and config variables of its `GIT_ENV_SCRUB` and sets
 `GIT_TERMINAL_PROMPT=0`. Measured against git 2.51.0: with `GIT_DIR` exported,
 `rev-parse --git-common-dir` answers that repository from any folder, one in no repository
 included, so every repository verdict of `takeover` would read the same repository. That library
 owns the list for `trail.mjs` and `worktree-keep-v1.js` and requires no other file, so the Session
-Hub companion can vendor it byte for byte. It is not the only spelling. Apart from `_tc_git`'s
+Hub companion, `session-hub@zensu` with `/session-hub:session-trail`, vendors it byte for byte (`plugins/session-hub/hooks/lib/`, held by
+`test-session-hub-plugin.sh`). It is not the only spelling. Apart from `_tc_git`'s
 unset list in `hooks/lib/zensu-log.sh`, which the worktree-keep unit suite pins against it, no
 check holds these copies to it: `GIT_SCRUBBED_ENV` in `evidence-run-v1.js` and `GIT_ENV_SCRUB` in
 `zensu-artifact-redact-v1.js` carry the same fifteen names, `repo-conventions-v1.js` and
 `work-order-v1.js` carry nine-name lists, and `zensu-edit-landing.sh` and
 `zensu-autopilot-state.sh` clear their own sets inline. `evidence-run-v1.js` also exports a
-`gitEnvironment` of its own whose argument is an overlay applied after the scrub, where this one's
-argument is the base environment, and the `git-read-only-v1` leaf that
-`docs/multi-repo-chains-spec.md` §6.2 plans carries that overlay form. The two contracts need
-distinct names before either module replaces the other. `hooks/lib/worktree-keep-v1.js` takes
-both names from `git-environment-v1.js` and re-exports them, so
-its own git children and its exported API are unchanged. `gitChildEnvironment` fails with the
+`gitEnvironment` of its own whose argument is an overlay applied after the scrub, and the
+`git-read-only-v1` leaf that `docs/multi-repo-chains-spec.md` §6.2 plans carries that overlay form.
+This library's function takes the base environment instead, so it is named `scrubGitEnvironment`:
+the two contracts carry distinct names, and the overlay leaf can land without renaming a file the
+companion vendors. `hooks/lib/worktree-keep-v1.js` takes `GIT_ENV_SCRUB` and
+`scrubGitEnvironment` from `git-environment-v1.js` and re-exports them as `GIT_ENV_SCRUB` and
+`gitEnvironment`, so its own git children and its exported API are unchanged. `gitChildEnvironment` fails with the
 plugin-tree-incomplete diagnostic, naming the library, when it cannot be loaded, so every sandbox
 that stages `trail.mjs` (`mutant_path`, `cont_mutant` and the `OM` sandbox in
 `test-session-trail-verdict.sh`) copies it beside `claude-path-v1.js`, and `$SBOX/plug` in

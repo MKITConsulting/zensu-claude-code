@@ -1,0 +1,8 @@
+{
+  "name": "zensu-ci-claude-code-floor",
+  "private": true,
+  "description": "The oldest Claude Code CLI the companion supports, which plugin-floor runs the install probe with.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.296"
+  }
+}

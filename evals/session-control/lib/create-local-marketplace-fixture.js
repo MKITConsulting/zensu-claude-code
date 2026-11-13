@@ -72,19 +72,20 @@ function validateProductionMarketplace(pluginRoot) {
       || !VERSION_RE.test(plugin.version)) {
     fail('plugin manifest does not identify a semantic-versioned zensu plugin');
   }
-  if (!Array.isArray(marketplace?.plugins) || marketplace.plugins.length !== 1
-      || marketplace.plugins[0]?.name !== 'zensu'
-      || marketplace.plugins[0]?.version !== plugin.version) {
+  const entries = Array.isArray(marketplace?.plugins)
+    ? marketplace.plugins.filter((entry) => entry && entry.name === 'zensu')
+    : [];
+  if (entries.length !== 1 || entries[0].version !== plugin.version) {
     fail('production marketplace and plugin manifest are not version-aligned');
   }
-  const source = marketplace.plugins[0].source;
+  const source = entries[0].source;
   if (!source || typeof source !== 'object' || Array.isArray(source)
       || source.source !== 'github' || source.repo !== REPOSITORY
       || source.ref !== `v${plugin.version}`
       || JSON.stringify(Object.keys(source).sort()) !== JSON.stringify(['ref', 'repo', 'source'])) {
     fail('production marketplace source is not pinned to its immutable release tag');
   }
-  return marketplace;
+  return { marketplace, entry: entries[0] };
 }
 
 function rejectUnsafeTrackedEntries(pluginRoot) {
@@ -130,9 +131,9 @@ function createFixture(sourceInput, targetInput, expectedRevision) {
       fail('source checkout changed while creating the fixture');
     }
     rejectUnsafeTrackedEntries(pluginRoot);
-    const marketplace = validateProductionMarketplace(pluginRoot);
+    const { marketplace, entry } = validateProductionMarketplace(pluginRoot);
     const localMarketplace = JSON.parse(JSON.stringify(marketplace));
-    localMarketplace.plugins[0].source = './plugin';
+    localMarketplace.plugins = [{ ...JSON.parse(JSON.stringify(entry)), source: './plugin' }];
 
     const metadataRoot = path.join(targetRoot, '.claude-plugin');
     fs.mkdirSync(metadataRoot, { mode: 0o700 });

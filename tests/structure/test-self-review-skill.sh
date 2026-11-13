@@ -157,7 +157,7 @@ grep -qiF 'do not spawn' "$SKILL_MD" && check "V13 forbids spawning the code-rev
 jq -e '.skills | index("./skills/self-review")' "$PLUGIN_JSON" >/dev/null 2>&1 && check "V14 plugin.json skills[] contains './skills/self-review'" PASS || check "V14 plugin.json registration" FAIL
 
 PLUGIN_VERSION="$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null)"
-MARKETPLACE_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKETPLACE_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 [ "$PLUGIN_VERSION" = "$EXPECTED_VERSION" ] && check "V15 plugin.json .version == $EXPECTED_VERSION (got: $PLUGIN_VERSION)" PASS || check "V15 plugin.json version (got: $PLUGIN_VERSION)" FAIL
 [ "$MARKETPLACE_VERSION" = "$EXPECTED_VERSION" ] && check "V16 marketplace.json version == $EXPECTED_VERSION (got: $MARKETPLACE_VERSION)" PASS || check "V16 marketplace version (got: $MARKETPLACE_VERSION)" FAIL
 { [ "$PLUGIN_VERSION" = "$MARKETPLACE_VERSION" ] && [ -n "$PLUGIN_VERSION" ]; } && check "V17 plugin.json == marketplace.json version (cross-file invariant)" PASS || check "V17 version cross-file invariant" FAIL

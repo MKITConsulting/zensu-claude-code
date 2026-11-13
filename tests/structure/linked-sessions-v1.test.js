@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const mod = await import(new URL('../../skills/session-trail/scripts/linked-sessions-v1.mjs', import.meta.url));
+const mod = await import(new URL('../../plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs', import.meta.url));
 
 const ESC = String.fromCharCode(27);
 const C1 = String.fromCharCode(0x9b);
@@ -444,8 +444,9 @@ test('the start call is the one the takeover step names, with a bounded title an
   for (const needle of [
     `Continue the linked session "${call.title}"`,
     `Take over Claude Code session ${cli(1)}`,
-    `\`/zensu:session-trail takeover ${cli(1)} --all\``,
-    `the Skill tool with skill \`zensu:session-trail\` and args \`takeover ${cli(1)} --all\``,
+    `\`/session-hub:session-trail takeover ${cli(1)} --all\``,
+    `the Skill tool with skill \`session-hub:session-trail\` and args \`takeover ${cli(1)} --all\``,
+    'with the Zensu Session Hub plugin',
     'steps 0 to 4',
     '`references/takeover.md`',
     'ask your own user in this session to confirm the plan before anything durable',

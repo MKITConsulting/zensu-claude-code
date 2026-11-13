@@ -2,9 +2,12 @@
 paths:
   - "hooks/user-prompt-session-hub-receipt.sh"
   - "hooks/lib/session-hub-receipt-v1.mjs"
+  - "plugins/session-hub/hooks/lib/session-hub-receipt-v1.mjs"
   - "skills/session-trail/handover-contract.json"
+  - "plugins/session-hub/skills/session-trail/handover-contract.json"
   - "tests/structure/test-session-hub-receipt.sh"
   - "tests/structure/session-hub-receipt-v1.test.js"
+  - "plugins/session-hub/hooks/hooks.json"
 ---
 
 # Session Hub Receipt (`hooks/user-prompt-session-hub-receipt.sh` + `session-hub-receipt-v1.mjs`)
@@ -15,6 +18,19 @@ session to another account by typing `/zensu:session-trail takeover <session id>
 `<config root>/zensu/session-hub/v1/receipts/<token>.json` when exactly that prompt arrives, and
 the Hub reads that one file to tell a command the plugin received from one that reached a session
 where the plugin did not load. The Hub renames both sessions only after it read the receipt.
+
+**Two receipts, one per plugin.** The `session-hub@zensu` companion carries its own receipt as
+one Node entry, `plugins/session-hub/hooks/lib/session-hub-receipt-v1.mjs`, registered in exec
+form in `plugins/session-hub/hooks/hooks.json`. It answers only
+`/session-hub:session-trail takeover …` and declares `takeover.contract` 2 with that prefix in
+`plugins/session-hub/skills/session-trail/handover-contract.json`, the same receipt directory and
+schema. Instead of the shell libraries it keeps the hook's guards itself: the declared plugin root
+must equal the executed one, a payload with `agent_id` or `agent_type` is refused, and
+`hooks.sessionHubReceipt: false` is read from `~/.zensu/config.json` alone, permissively. PLM's
+hook and module below stay frozen at contract 1; each plugin writes nothing for the other's
+command (R8, R15). Everything below describes PLM's copy; the companion's twin is pinned by
+R12-R17 and `session-hub-receipt-v1.test.js`, and `.claude/rules/session-hub-companion.md`
+covers the split.
 
 **`handover-contract.json` is the Hub's contract with this skill.** The Hub refuses to type
 anything unless every applicable install of this plugin declares `takeover.contract` 1 with

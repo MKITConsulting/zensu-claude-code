@@ -1,9 +1,9 @@
 ---
 name: session-trail
 description: >
-  [Zensu] Track, inspect and take over sessions of other Claude Code instances
-  on this machine. Use when the user asks what another session is doing or wants
-  to continue its work, or via /zensu:session-trail.
+  [Zensu] Inspect and take over other Claude Code sessions (frozen; maintained in
+  session-hub@zensu). Use when the user asks what another session is doing or
+  wants to continue it, or via /zensu:session-trail.
 ---
 
 # /zensu:session-trail
