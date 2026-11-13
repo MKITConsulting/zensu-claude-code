@@ -2024,3 +2024,249 @@ test('the CLI entry answers pre and post and refuses any other mode', () => {
   assert.equal(recorded.stdout, '');
   assert.equal(recorded.stderr.includes('zensu: verify consent memory not written (no bound session)\n'), true);
 });
+
+const AUTH_SESSION = 'zensu-verify-auth-run1';
+const STATE_SECRET = 'eyJhbGciOiJIUzI1NiJ9.signed-in-session';
+const COMMANDS_FIXTURE = path.join(__dirname, 'fixtures', 'playwright-cli-commands.v1.json');
+const LOOPBACK = 'http://127.0.0.1:4200';
+const STATE_SHAPE_FAULT = 'the run config may restore a signed-in state only from auth/storage-state.json beside it, inside a .zensu/verify-feature-runs run directory';
+
+function authCli(rest) {
+  return `playwright-cli -s=${AUTH_SESSION} ${rest}`;
+}
+
+function signedInState(origin) {
+  return {
+    cookies: [{ name: 'sid', value: STATE_SECRET, domain: new URL(origin).hostname, path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' }],
+    origins: [{ origin, localStorage: [{ name: 'token', value: STATE_SECRET }] }],
+  };
+}
+
+function stateRun(t, origins, rules = [], options = {}) {
+  const root = tempDir(t, 'zensu-state-project-');
+  const runDir = path.join(root, '.zensu', 'verify-feature-runs', options.leaf || 'run1');
+  fs.mkdirSync(runDir, { recursive: true });
+  const config = buildConfig(runDir, origins, rules);
+  const statePath = path.join(runDir, 'auth', 'storage-state.json');
+  config.browser.contextOptions.storageState = statePath;
+  const file = path.join(runDir, consent.RUN_CONFIG_NAME);
+  fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  fs.mkdirSync(path.dirname(statePath), { mode: 0o700 });
+  const state = options.state === undefined ? signedInState(origins[0]) : options.state;
+  const mode = options.mode || 0o600;
+  fs.writeFileSync(statePath, typeof state === 'string' ? state : JSON.stringify(state), { mode });
+  if (process.platform !== 'win32') fs.chmodSync(statePath, mode);
+  return { root, runDir, file, statePath, config };
+}
+
+function restoringOpen(run, origin = LOOPBACK) {
+  return authCli(`open --config='${run.file}' ${origin}/`);
+}
+
+test('a run config restores state only from auth/storage-state.json beside it, inside a verify-feature run directory', (t) => {
+  const run = stateRun(t, [LOOPBACK]);
+  const shape = consent.runConfigShape(run.config, run.file);
+  assert.equal(shape.ok, true, shape.fault);
+  assert.equal(shape.statePath, run.statePath);
+  assert.equal(consent.readRunConfig(run.file).statePath, run.statePath);
+  const plain = runConfig(t, [LOOPBACK]);
+  assert.equal(consent.runConfigShape(plain.config, plain.file).statePath, null);
+  const variant = (mutate, base = run) => {
+    const copy = structuredClone(base.config);
+    mutate(copy);
+    return consent.runConfigShape(copy, base.file).fault;
+  };
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = signedInState(LOOPBACK); }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = 'auth/storage-state.json'; }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(run.runDir, 'storage-state.json'); }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(run.runDir, 'auth', 'other.json'); }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(plain.runDir, 'auth', 'storage-state.json'); }, plain), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.viewport = { width: 1, height: 1 }; }),
+    'the run config must block service workers and set nothing else on the context');
+  assert.equal(variant((c) => { c.browser.contextOptions.serviceWorkers = 'allow'; }),
+    'the run config must block service workers and set nothing else on the context');
+});
+
+test('a restoring open runs only on a zensu-verify-auth session, asks with the signed-in sentence and is remembered only by a restored record', (t) => {
+  const env = isolatedEnv(t);
+  const run = stateRun(t, [LOOPBACK]);
+  assert.equal(denied(cli(`open --config='${run.file}' ${LOOPBACK}/`), { env }), REASONS.STATE_NEEDS_AUTH_SESSION);
+  const asked = decide(restoringOpen(run), { env });
+  assert.equal(asked.verdict, 'ask');
+  assert.match(asked.prompt, /The browser opens signed in: its state was restored from the recipe's login script, so the model can reach every page that account can reach on this origin\./);
+  assert.equal(asked.prompt.includes(STATE_SECRET), false);
+  assert.deepEqual(asked.plan, [{ origin: LOOPBACK, route: '/', decidedBy: 'asked', restoredState: true }]);
+  assert.equal(decide(restoringOpen(run), { env, records: [record(LOOPBACK)] }).verdict, 'ask');
+  const restored = [{ ...record(LOOPBACK), restoredState: true }];
+  const remembered = decide(restoringOpen(run), { env, records: restored });
+  assert.equal(remembered.verdict, 'none');
+  assert.deepEqual(remembered.plan, [{ origin: LOOPBACK, route: '/', decidedBy: 'remembered', restoredState: true }]);
+  const plain = runConfig(t, [LOOPBACK]);
+  assert.equal(decide(cli(`open --config='${plain.file}' ${LOOPBACK}/`), { env, records: restored }).verdict, 'none');
+  const plainOnAuth = decide(authCli(`open --config='${plain.file}' ${LOOPBACK}/`), { env });
+  assert.equal(plainOnAuth.verdict, 'ask');
+  assert.equal(plainOnAuth.prompt.includes('signed in'), false);
+  assert.equal(plainOnAuth.plan[0].restoredState, undefined);
+  const navigation = decide(authCli('goto http://127.0.0.1:4201/'), { env, records: [record('http://127.0.0.1:4201')] });
+  assert.equal(navigation.verdict, 'ask');
+  assert.match(navigation.prompt, /The browser session is signed in: its state was restored from the recipe's login script/);
+  assert.equal(decide(authCli(`goto ${LOOPBACK}/admin`), { env, records: restored }).verdict, 'none');
+  assert.equal(decide(cli('goto http://127.0.0.1:4201/'), { env, records: [record('http://127.0.0.1:4201')] }).verdict, 'none');
+});
+
+test('a restored remote open asks at every open with the signed-in sentence, and a policy target passes silently', (t) => {
+  const env = isolatedEnv(t);
+  const run = stateRun(t, ['https://app.example.com'], [...APP_PIN]);
+  const restored = [{ ...record('https://app.example.com'), restoredState: true }];
+  const asked = decide(restoringOpen(run, 'https://app.example.com'), { env, records: restored, payload: HUMAN });
+  assert.equal(asked.verdict, 'ask');
+  assert.match(asked.prompt, /\(remote\)\. The browser opens signed in:/);
+  assert.equal(asked.plan[0].restoredState, true);
+  const policy = policyOf('remote', [{ origin: 'https://app.example.com', evidenceMode: 'declared-safe' }]);
+  const silent = decide(restoringOpen(run, 'https://app.example.com'), { env, policy, payload: { permission_mode: 'bypassPermissions' } });
+  assert.equal(silent.verdict, 'none');
+  assert.deepEqual(silent.plan, [{ origin: 'https://app.example.com', route: '/', decidedBy: 'policy-mode', restoredState: true }]);
+});
+
+test('a restoring open is denied with a fixed reason when its state file is missing, unsafe, out of scope or not storage state', (t) => {
+  const env = isolatedEnv(t);
+  const open = (run) => denied(restoringOpen(run), { env });
+  const missing = stateRun(t, [LOOPBACK]);
+  fs.rmSync(missing.statePath);
+  assert.equal(open(missing), REASONS.STATE_CONSUMED);
+  const garbage = stateRun(t, [LOOPBACK], [], { state: STATE_SECRET });
+  const reason = open(garbage);
+  assert.equal(reason, REASONS.STATE_INVALID);
+  assert.equal(reason.includes('eyJ'), false);
+  const scoped = stateRun(t, [LOOPBACK], [], { state: { cookies: [{ name: 'sid', value: 'v', domain: 'tracker.example.net' }], origins: [] } });
+  assert.equal(open(scoped), REASONS.STATE_INVALID);
+  const empty = stateRun(t, [LOOPBACK], [], { state: { cookies: [], origins: [] } });
+  assert.equal(open(empty), REASONS.STATE_INVALID);
+  const outsideOrigin = stateRun(t, [LOOPBACK], [], { state: { cookies: [], origins: [{ origin: 'http://127.0.0.1:9999', localStorage: [] }] } });
+  assert.equal(open(outsideOrigin), REASONS.STATE_INVALID);
+  for (const key of ['STATE_NEEDS_AUTH_SESSION', 'STATE_CONSUMED', 'STATE_UNSAFE', 'STATE_INVALID', 'AUTH_SIGNAL_DENIED']) {
+    assert.equal(consent.FINAL_REASONS.includes(key), true, key);
+    assert.equal(consent.SHAPE_REASONS.includes(key), false, key);
+  }
+  if (process.platform === 'win32') return;
+  const wide = stateRun(t, [LOOPBACK], [], { mode: 0o644 });
+  assert.equal(open(wide), REASONS.STATE_UNSAFE);
+  const linked = stateRun(t, [LOOPBACK]);
+  const elsewhere = path.join(linked.runDir, 'elsewhere.json');
+  fs.renameSync(linked.statePath, elsewhere);
+  fs.symlinkSync(elsewhere, linked.statePath);
+  assert.equal(open(linked), REASONS.STATE_UNSAFE);
+});
+
+test('console and requests are denied on every zensu-verify-auth session and stay available on a plain one', () => {
+  assert.deepEqual([...consent.AUTH_SIGNAL_COMMANDS], ['console', 'requests']);
+  assert.equal(consent.AUTH_SESSION_PREFIX, 'zensu-verify-auth-');
+  for (const command of ['console', 'console error', 'console --clear', 'requests', 'requests --static', 'requests --clear']) {
+    const name = command.split(' ')[0];
+    assert.equal(denied(authCli(command)), `command '${name}' ${REASONS.AUTH_SIGNAL_DENIED}`, command);
+    assert.equal(decide(cli(command)).verdict, 'none', command);
+  }
+  for (const command of ['snapshot', 'screenshot', 'click e1', 'tab-list', 'close', 'list']) {
+    assert.equal(decide(authCli(command)).verdict, 'none', command);
+  }
+});
+
+test('every command of the measured playwright-cli outside the allowlist, every getter and exporter of the auth specification included, is denied on plain and signed-in sessions', () => {
+  const fixture = JSON.parse(fs.readFileSync(COMMANDS_FIXTURE, 'utf8'));
+  assert.equal(fixture.version, consent.PLAYWRIGHT_CLI_SOURCE_VERSION);
+  const names = Object.keys(fixture.commands);
+  assert.equal(names.length, 102);
+  for (const name of Object.keys(consent.ALLOWED_COMMANDS)) assert.equal(names.includes(name), true, `${name} is a measured command`);
+  const named = ['state-save', 'state-load', 'eval', 'run-code', 'config-print', 'request', 'route', 'route-list', 'unroute',
+    'network-state-set', 'delete-data', 'upload', 'drop', 'pdf', 'attach', 'detach', 'close-all', 'kill-all'];
+  const families = [/^cookie-/, /^localstorage-/, /^sessionstorage-/, /^request-/, /^response-/, /^recording-/, /^tracing-/, /^video-/, /^install/];
+  for (const name of named) assert.equal(names.includes(name), true, `${name} is a measured command`);
+  for (const family of families) assert.equal(names.some((name) => family.test(name)), true, String(family));
+  const outside = names.filter((name) => !Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, name));
+  const credentialRevealing = [...named, ...names.filter((name) => families.some((family) => family.test(name)))];
+  for (const name of credentialRevealing) assert.equal(outside.includes(name), true, `${name} stays outside the allowlist`);
+  for (const session of [SESSION, AUTH_SESSION]) {
+    for (const name of outside) {
+      assert.equal(denied(`playwright-cli -s=${session} ${name}`), `command '${name}' ${REASONS.COMMAND_DENIED}`, `${session} ${name}`);
+    }
+  }
+  const required = { filename: false, persistent: false, profile: false };
+  for (const session of [SESSION, AUTH_SESSION]) {
+    for (const [command, flags] of Object.entries(fixture.commands)) {
+      if (!Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, command)) continue;
+      for (const flag of flags) {
+        if (consent.ALLOWED_COMMANDS[command].includes(flag) || ['json', 'raw', 'help', 'version'].includes(flag)) continue;
+        if (Object.prototype.hasOwnProperty.call(required, flag)) required[flag] = true;
+        const spelled = consent.CLI_BOOLEAN_OPTIONS.includes(flag) ? `--${flag}` : `--${flag}=x`;
+        const expected = session === AUTH_SESSION && consent.AUTH_SIGNAL_COMMANDS.includes(command)
+          ? `command '${command}' ${REASONS.AUTH_SIGNAL_DENIED}`
+          : `flag '--${flag}' ${REASONS.FLAG_DENIED}`;
+        assert.equal(denied(`playwright-cli -s=${session} ${command} ${spelled}`), expected, `${session} ${command} ${spelled}`);
+      }
+    }
+  }
+  assert.deepEqual(required, { filename: true, persistent: true, profile: true });
+});
+
+test('the recorded command list equals the help.json of the installed playwright-cli when the measured version is installed', (t) => {
+  const installed = cliVersion.installedVersion(process.env);
+  if (installed.source !== 'manifest' || installed.version !== consent.PLAYWRIGHT_CLI_SOURCE_VERSION) {
+    t.skip(`playwright-cli ${consent.PLAYWRIGHT_CLI_SOURCE_VERSION} is not installed here (${installed.source})`);
+    return;
+  }
+  const packageDir = path.dirname(fs.realpathSync(cliVersion.findBinary(process.env)));
+  const tail = ['playwright-core', 'lib', 'tools', 'cli-client', 'help.json'];
+  const help = [path.join(packageDir, 'node_modules', ...tail), path.join(packageDir, '..', '..', ...tail)].find((file) => fs.existsSync(file));
+  if (!help) {
+    t.skip('the installed playwright-cli carries no playwright-core help.json beside it');
+    return;
+  }
+  const doc = JSON.parse(fs.readFileSync(help, 'utf8'));
+  const recorded = {};
+  for (const name of Object.keys(doc.commands).sort()) recorded[name] = Object.keys(doc.commands[name].flags || {}).sort();
+  assert.deepEqual(recorded, JSON.parse(fs.readFileSync(COMMANDS_FIXTURE, 'utf8')).commands);
+});
+
+test('the recorder deletes the restored state after every open that reached it, interrupted or not, and records the approval as restored', (t) => {
+  const { root, memory } = project(t);
+  const env = { ...isolatedEnv(t), ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory };
+  const err = sink();
+  const run = stateRun(t, [LOOPBACK]);
+  const result = consent.runPost(post(restoringOpen(run)), env, err);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.consumed, [run.statePath]);
+  assert.equal(fs.existsSync(run.statePath), false);
+  const read = consent.readConsentMemory(memory, root);
+  assert.deepEqual(read.records.map(({ origin, route, decidedBy, restoredState }) => ({ origin, route, decidedBy, restoredState })),
+    [{ origin: LOOPBACK, route: '/', decidedBy: 'asked', restoredState: true }]);
+  assert.equal(denied(restoringOpen(run), { env, records: read.records }), REASONS.STATE_CONSUMED);
+  const interrupted = stateRun(t, [LOOPBACK], [], { leaf: 'run2' });
+  const skipped = consent.runPost(post(restoringOpen(interrupted), { tool_response: { interrupted: true } }), env, err);
+  assert.deepEqual(skipped, { ok: true, skipped: 'interrupted', consumed: [interrupted.statePath] });
+  assert.equal(fs.existsSync(interrupted.statePath), false);
+  const unbound = stateRun(t, [LOOPBACK], [], { leaf: 'run3' });
+  assert.deepEqual(consent.runPost(post(restoringOpen(unbound)), { PWTEST_CLI_GLOBAL_CONFIG: env.PWTEST_CLI_GLOBAL_CONFIG }, sink()),
+    { ok: false, reason: 'no-bound-session', consumed: [unbound.statePath] });
+  const kept = stateRun(t, [LOOPBACK], [], { leaf: 'run4' });
+  assert.deepEqual(consent.runPost(post(authCli('snapshot')), env, err), { ok: true, skipped: 'nothing-to-record' });
+  assert.deepEqual(consent.runPost(post(`ls '${kept.statePath}'`), env, err), { ok: true, skipped: 'nothing-to-record' });
+  assert.equal(fs.existsSync(kept.statePath), true);
+  assert.equal(err.text(), '');
+});
+
+test('consent records carry restoredState only as true, and a restored and a plain approval of one route are kept apart', (t) => {
+  const { root, memory } = project(t);
+  const plain = record(LOOPBACK);
+  const restored = { ...record(LOOPBACK), restoredState: true };
+  assert.equal(consent.validRecord(restored), true);
+  assert.equal(consent.validRecord({ ...plain, restoredState: false }), false);
+  assert.equal(consent.validRecord({ ...plain, restoredState: 'yes' }), false);
+  assert.equal(consent.appendRecord(memory, plain, { projectRoot: root }).duplicate, false);
+  assert.equal(consent.appendRecord(memory, restored, { projectRoot: root }).duplicate, false);
+  assert.equal(consent.appendRecord(memory, restored, { projectRoot: root }).duplicate, true);
+  assert.equal(consent.appendRecord(memory, plain, { projectRoot: root }).duplicate, true);
+  const read = consent.readConsentMemory(memory, root);
+  assert.equal(read.ok, true);
+  assert.deepEqual(read.records.map((entry) => entry.restoredState === true), [false, true]);
+  assert.equal(JSON.parse(fs.readFileSync(memory, 'utf8')).version, consent.MEMORY_VERSION);
+});

@@ -323,22 +323,27 @@ fi
 # P4 — credential-blind auth; no token extraction/injection recipe.
 if grep -qiF 'credential-blind' "$SKILL_MD" && grep -qF 'use visible manual' "$SKILL_MD" \
   && grep -qF 'browser login or report the authenticated coverage as PARTIAL' "$SKILL_MD" \
+  && grep -qF "only the run-config helper runs a recipe's (§Authentication)" <<<"$SKILL_FLAT" \
   && grep -qF 'The browser consent gate denies every cookie, local/session-storage and state command on a `zensu-verify` session because they expose credential material.' <<<"$SKILL_FLAT"; then
-  check "P4a auth is visible-only and the gate denies every browser storage command" PASS
+  check "P4a auth is a helper-run recipe login or a visible login, and the gate denies every browser storage command" PASS
 else
-  check "P4a auth is visible-only and the gate denies every browser storage command" FAIL
+  check "P4a auth is a helper-run recipe login or a visible login, and the gate denies every browser storage command" FAIL
 fi
-if grep -qF 'not accept an auth artifact path' "$SKILL_MD" \
+if grep -qF 'Never accept an auth artifact path or run a login script yourself' "$SKILL_MD" \
+  && ! grep -qF 'not accept an auth artifact path' "$SKILL_MD" \
   && ! grep -rqF 'browser_set_storage_state' "$SKILL_DIR"; then
-  check "P4b verify-feature never accepts or restores storage-state artifacts" PASS
+  check "P4b verify-feature never accepts an artifact path or runs a login script itself" PASS
 else
-  check "P4b verify-feature never accepts or restores storage-state artifacts" FAIL
+  check "P4b verify-feature never accepts an artifact path or runs a login script itself" FAIL
 fi
-if grep -qF 'hard-denies every getter/exporter' "$SKILL_MD" \
-  && grep -qF 'Do not invoke `auth.loginScript`' <<<"$SKILL_FLAT"; then
-  check "P4e future opaque auth requires a narrow deny-by-default gate" PASS
+if grep -qF 'Never run `auth.loginScript`, read `STORAGE_STATE` or open a run'"'"'s `auth/` directory yourself; the verify-auth read guard denies it.' <<<"$SKILL_FLAT" \
+  && grep -qF '## 6. Signed-in runs (recipe login script)' "$BROWSER_MD" \
+  && grep -qF 'It refuses unless the verify-auth read guard is registered.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'The helper prints `login failed: <class>`' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'Do not invoke `auth.loginScript`' <<<"$SKILL_FLAT"; then
+  check "P4e a recipe login runs only inside the run-config helper, behind the verify-auth read guard" PASS
 else
-  check "P4e future opaque auth requires a narrow deny-by-default gate" FAIL
+  check "P4e a recipe login runs only inside the run-config helper, behind the verify-auth read guard" FAIL
 fi
 if grep -qF '$GIT_ROOT/.zensu/verify-feature-runs/<random>' "$SKILL_MD" \
   && grep -qF 'Remove only the unique leaf on cleanup.' "$SKILL_MD"; then
@@ -377,10 +382,14 @@ if grep -qF 'The evidence boundary is the ORIGIN, never the route.' <<<"$SKILL_F
 else
   check "P4q protected DOM and visual evidence reaches the model only from an approved origin, at any path" FAIL
 fi
-if grep -qF 'A future gate may re-enable opaque state only when it admits a path-contained setter and hard-denies every getter/exporter.' <<<"$SKILL_FLAT"; then
-  check "P4g browser state commands stay denied until a narrow gate exists" PASS
+if grep -qF '1. **Recipe login script:** when the selected recipe'"'"'s `auth` block sets `mode: login-script` and `artifact: storageState`, sign in through the helper'"'"'s `--login-recipe` as `rules/browser-verification.md` section 6 says.' <<<"$SKILL_FLAT" \
+  && grep -qF '`console` and `requests` are denied, so the runtime-signal plane of a signed-in row is PARTIAL.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Every cookie, storage and state command stays denied, as on every `zensu-verify` session.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'The recorder deletes the state file once `open` ran' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'A future gate may re-enable opaque state' <<<"$SKILL_FLAT"; then
+  check "P4g browser state restores only through the recipe login, and a signed-in session loses console and requests" PASS
 else
-  check "P4g browser state commands stay denied until a narrow gate exists" FAIL
+  check "P4g browser state restores only through the recipe login, and a signed-in session loses console and requests" FAIL
 fi
 if grep -qF 'baseUrl:     "http://localhost:5173" # same-origin /api proxy' "$AUTOPILOT_CONFIG" \
   && grep -qF 'appOrigin:   "http://localhost:5173" # exact browser/storage-state origin' "$AUTOPILOT_CONFIG"; then

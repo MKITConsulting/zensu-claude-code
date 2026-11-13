@@ -1,6 +1,6 @@
 # Gates
 
-Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
+Seven PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt — whose VERDICT is what is judged, not its existence, which a logged
 claim arms even when the anchor's tree is clean, and which must have graded the
@@ -12,13 +12,14 @@ settled by the `CLAIM CORRECTED` line its verdict names, never by an escape)
 and §Requirements-Table Gate below, which has its own section here — THREE
 terminus refusals at `--chain-done`, §Terminal Edit-Landing Gate, §Full-Suite Gate and
 §Acceptance Verification Gate, and ONE consume-time refusal in the review chain,
-§Review Packet Gate. Ten of the twelve are
+§Review Packet Gate. Ten of the thirteen are
 convention-nudges with a documented escape hatch, not security boundaries — see [Session Control](session-control.md) for the part that is. The
-two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
-escape hatch, and neither is a security boundary on its own: the first closes one
-channel to one directory and names the ones it leaves open; the second puts a human
-prompt in front of a browser origin and states in its own section what a session can
-still do around it.
+three exceptions, §Plugin-Data Guard, §Browser Consent Gate and §Verify-Auth Read Guard,
+deliberately have no escape hatch, and none is a security boundary on its own: the first
+closes one channel to one directory and names the ones it leaves open; the second puts a
+human prompt in front of a browser origin and states in its own section what a session can
+still do around it; the third keeps the file, search and shell tools away from a signed-in
+browser state and names what a textual guard cannot see.
 
 **Two commands stay reachable when the Session Control bind fails**, in every
 bind failure including a record that exists and disagrees, and they are
@@ -897,6 +898,41 @@ still navigate itself onto a network-only origin, by a link, a form, a script or
 redirect, because the browser knows one class of allowed origin: the `Page URL` check ends that
 scenario. The residuals below name what else reaches such an origin unjudged.
 
+**Signed-in sessions.** A run config may restore a signed-in browser state in one way only:
+`browser.contextOptions.storageState` equal to `auth/storage-state.json` beside the run config,
+inside a `.zensu/verify-feature-runs/<run>` directory. The run-config helper writes it from a
+recipe's login script (`--login-recipe`, [verify-feature.md §6](verify-feature.md#6-signing-in-with-a-test-account)),
+which signs in only on one of the run's origins and, in remote mode, only on the recipe's
+`baseUrl`, or on its `appOrigin` without one; in local mode nothing binds the loopback origins
+to the recipe, so a local recipe signs in only a throwaway account the local app alone knows.
+An inline state object, a relative path and every other location are refused. Such a config
+opens only on a `zensu-verify-auth-…` session, which the helper names, and the read guard
+refuses a `playwright-cli` call that names a run directory without naming a `zensu-verify`
+session. Before it admits that `open` the gate validates the state file itself — a regular
+file, no symlink, one link, owner-only on POSIX, at most 1 MiB, valid storage state with at most
+256 cookies and 64 origins, every cookie domain the host of a run-config origin or, written with
+a leading dot, a parent domain of one, and every origin entry one of those origins — because
+the browser's JSON parser echoes the start of a malformed file into its error and
+`playwright-cli` prints that error. Cookies are scoped by host, not by port, so every approved
+port of that host receives them, and a parent-domain cookie also reaches a sibling host a
+redirect lands on. Every deny names a fixed reason and never a byte of the file
+(`hooks/lib/verify-auth-state-v1.js` holds the shape, scope and file checks for the helper and
+the gate alike). The prompt says the browser opens signed in. A signed-in `open` of a loopback
+origin is asked once per session even when the origin was approved without state, because its
+record carries `restoredState: true` and the memory deduplicates on origin, route and that flag;
+a remote origin is asked at every `open`, and a policy target passes, as before. The recorder
+deletes the state file after every `open` of such a config that reached it, interrupted or not,
+and also when it cannot bind the session and so records nothing, so a second `open` is denied
+with a consumed-state reason. A state file no `open` consumed, after a refused prompt or a
+failed `open`, waits for the skill's cleanup, which removes the run's `auth/` directory with the
+helper's `--discard-state` before teardown, also when it keeps the run directory. On a
+`zensu-verify-auth-…` session `console` and `requests` are denied with a final reason, and every
+cookie, storage and state command stays denied on every `zensu-verify` session:
+`tests/structure/verify-consent-v1.test.js` drives every
+command of `playwright-cli` 0.1.24, recorded in
+`tests/structure/fixtures/playwright-cli-commands.v1.json` and compared with the installed
+`help.json` where that version is installed, on a plain and on a signed-in session.
+
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
 raised for this origin), `remembered` (the memory already held the origin) and `policy-mode`.
@@ -963,6 +999,14 @@ through Bash.
   `open`; it does skip the one of a `goto` or `tab-new`, which the run config the browser was
   launched with bounds. Where a prompt can be shown, a forged loopback record now skips it under
   a policy too.
+- **A signed-in state lives on disk between the login and `open`**, normally seconds, owner-only
+  in an ignored directory. A refused prompt or a failed `open` leaves it until the skill's
+  cleanup discards it with the helper's `--discard-state`, because the host fires no PostToolUse
+  event for a failed call, and a crash before cleanup leaves it behind. The gate validates the file at `open` and the
+  browser reads it again at launch, so a file swapped in between is followed, the same class as
+  the run-config swap named below. The model's shell runs as the same operating-system user, so
+  §Verify-Auth Read Guard keeps accidents and injected instructions away from the file and is no
+  isolation.
 - **`localhost` rests on a browser property no suite exercises.** Admitting it relies on the
   browser answering `localhost` itself before any HOSTS-file or DNS lookup. That was read in
   Chromium's source and measured on two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
@@ -1073,6 +1117,83 @@ through Bash.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.
+
+## Verify-Auth Read Guard
+
+`hooks/pre-verify-auth-guard.sh`, dispatched in-process as `verify-auth-guard` on
+`Read|Grep|Glob|NotebookEdit|Edit|Write|MultiEdit|Bash|PowerShell`
+(`hooks/lib/verify-auth-guard-v1.js`). A signed-in `/zensu:verify-feature` run keeps its
+browser state in `.zensu/verify-feature-runs/<run>/auth/` from the login until the consent
+recorder consumes it at `open` or the cleanup discards it; this guard keeps the model's file,
+search and shell tools out of that directory.
+Its deny starts `Zensu verify-auth guard:`, names the path it reached with control bytes masked,
+and tells the model not to retry through another tool, path spelling or command.
+
+**What it denies.**
+
+- A `Read`, `Edit`, `Write`, `MultiEdit` or `NotebookEdit` whose path — as written, joined to
+  the payload's working directory, normalized, or resolved through symlinks — lies inside a
+  run's `auth/` directory. Letter case and backslashes are folded and `..` segments resolved.
+- A `Grep` or `Glob` whose root lies inside one, or whose root plus pattern can reach one: a
+  pattern without a `/` matches at any depth, and `**` at or above a run directory reaches every
+  directory below it. A `Grep` without a `glob` searches its whole root.
+- A `Bash` or `PowerShell` command whose text names such a path in a spelling the shell joins —
+  quotes and backslashes removed, line continuations joined, PowerShell backticks and string
+  concatenation undone — or that names a runs directory and `storage-state` together. The text is
+  split into words as a POSIX shell splits it, so a quoted space or `;` stays inside its path.
+- For every tool above, the segment after a run's own directory is the `auth` position, and it
+  counts as `auth` whenever it is not plainly something else. A plain name counts when it is
+  `auth` once trailing dots and spaces are dropped, as Windows drops them. A glob of `*`, `?` and
+  brackets counts unless its literal head or tail rules `auth` out, so `*.png` passes while `*h`
+  and `[a]uth` do not. Everything else counts without being expanded: a class such as
+  `[[:alpha:]]`, a brace, a group, a negation, a `$` or a backtick. A segment that can stand for
+  `..` or for no directory at all — a brace, a group, an expansion, a dot glob such as `.?` —
+  makes every later segment a candidate, and so does `**` when a `..` follows it.
+- A `playwright-cli` call whose command names a run directory but no `zensu-verify` session, so
+  a signed-in run config never opens on a session the consent gate does not judge.
+- A payload the dispatcher could not parse, when it names `verify-feature-runs`.
+
+**What passes.** The run directory itself, its run config and its `browser/` output, the
+run-config helper call, `--discard-state` included, every browser call on a `zensu-verify`
+session, and the cleanup's `rm -rf` of the run directory, because none of them names the
+`auth/` directory.
+
+**Fault direction.** The check fails open like the other dispatched checks, but a payload that
+names `verify-feature-runs` is refused when its decision module is absent, a symlink or broken,
+and the entry point's fallback without `node` refuses such a payload too. The run-config helper
+refuses `--login-recipe` unless `hooks/hooks.json` registers the guard on all nine tools, and the
+`verify-feature` row of `/zensu:doctor` names an unregistered guard, a missing guard file and a
+symlinked or unloadable guard module.
+
+**No escape and no config flag**, deliberately, as for §Plugin-Data Guard.
+
+**Residuals, named rather than implied.**
+
+- **It is textual.** A path assembled at run time — a variable, a substitution, a file list — a
+  command run from inside the run directory that names `auth/` relatively, and a recursive
+  command started at or above the run directory, such as a `grep -r`, `cp -r` or `tar` of the
+  run directory itself, are not judged. A recursive search from the project root relies on the
+  auth directory's `.gitignore` of `*`, which ripgrep honours inside a git work tree. A copy of a
+  signed-in run config placed outside a run directory is not judged either, and neither is a
+  runs directory whose own name is a glob or an expansion, such as `.zensu/verify-*-runs`,
+  because the guard reads only a payload that names `verify-feature-runs`.
+- **Only its nine tools are judged.** Another tool that reads files, such as an MCP server's file
+  reader or an IDE's file tool, reaches the directory unjudged.
+- **Hooks switched off host-side judge nothing.** The run-config helper refuses `--login-recipe`
+  while `hooks/hooks.json` does not register the guard, but no check observes that the host runs
+  it.
+- **Conservative false positives.** `**` at or above a run directory is denied even where the
+  rest of the pattern could not reach `auth/`, and so is a segment at the `auth` position that is
+  neither a plain name nor a glob whose head or tail rules `auth` out, such as `{a,b}.png` or
+  `$NAME`. PowerShell text is also read with its whitespace removed, so an argument such as
+  `$dest` written right after a file directly below a run directory joins that file's name and
+  is denied.
+- **Same user, no isolation.** Every process the model's shell starts runs as the user the
+  browser runs as and can read the file. The guard closes the accidental and the injected "read
+  the state file" routes, not a determined actor; isolation at the operating-system level is out
+  of scope.
+- **Windows is unverified** end to end; PowerShell text is read through the same `spellings()`
+  the browser consent gate reads.
 
 ## Missing Workflow Baseline
 

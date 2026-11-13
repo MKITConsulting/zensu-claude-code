@@ -581,23 +581,33 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
     || [ ! -f "$ZDOC_ROOT/scripts/verify-browser-config.js" ]; then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin"
+  elif [ ! -f "$ZDOC_ROOT/hooks/pre-verify-auth-guard.sh" ] || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-auth-guard-v1.js" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the verify-auth read guard hook or its module missing from the plugin"
   elif [ -L "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ]; then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="the consent decision module is a symlink, which both consent hooks refuse"
+  elif [ -L "$ZDOC_ROOT/hooks/lib/verify-auth-guard-v1.js" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the verify-auth read guard module is a symlink, which the guard refuses"
   elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="the consent decision module could not be loaded"
   elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./scripts/verify-browser-config.js")' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="the run-config helper could not be loaded"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./hooks/lib/verify-auth-guard-v1.js")' >/dev/null 2>&1); then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the verify-auth read guard module could not be loaded"
   elif ! ZDOC_VERIFY_REGISTRATION_FAULT="$(cd -P -- "$ZDOC_ROOT" && node -e '
       const mod = require("./hooks/lib/verify-consent-v1.js");
       const { REGISTERED, UNKNOWN } = mod.REGISTRATION;
-      const probes = [["consent hook", mod.consentHookRegistered(process.cwd())], ["consent recorder", mod.consentRecorderRegistered(process.cwd())]];
-      process.stdout.write(probes
-        .filter((probe) => probe[1] !== REGISTERED)
-        .map((probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on a matcher that covers Bash and PowerShell")
-        .join("; "));
+      const named = (probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on a matcher that covers " + probe[2];
+      const probes = [["consent hook", mod.consentHookRegistered(process.cwd()), "Bash and PowerShell"], ["consent recorder", mod.consentRecorderRegistered(process.cwd()), "Bash and PowerShell"]];
+      const faults = probes.filter((probe) => probe[1] !== REGISTERED).map(named);
+      const guard = faults.length === 0 ? ["verify-auth guard", mod.authGuardRegistered(process.cwd()), "the file, search and shell tools"] : null;
+      if (guard && guard[1] !== REGISTERED) faults.push(named(guard));
+      process.stdout.write(faults.join("; "));
     ' 2>/dev/null)"; then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="the consent hook pair registration probe did not complete"

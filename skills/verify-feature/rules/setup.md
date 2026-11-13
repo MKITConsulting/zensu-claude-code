@@ -111,6 +111,25 @@ recipe to serve both skills writes `autopilot.yaml` rather than `runtime.yaml`.
 when present. `validate.networkOnly` takes `origins`, a list of exact origins, and in a remote
 recipe `appOrigin`, as `../../autopilot/rules/config.md` describes.
 
+When the changed feature sits behind a login, offer in the same confirmation round to record a
+login script for a dedicated test account, never the user's own account:
+
+```yaml
+auth:
+  mode: login-script
+  loginScript: "./scripts/verify-login.sh"
+  artifact: storageState
+```
+
+A remote recipe adds `appOrigin`, an optional `baseUrl` and `environment: test` or
+`environment: production`. Every value is one `key: scalar` line, because the run-config helper
+refuses any other form. The user writes the script, not this skill: it signs the test account in
+against `$ZENSU_APP_ORIGIN` or `$ZENSU_AUTH_BASE_URL`, saves a Playwright storage state file
+beneath `$ZENSU_AUTH_ARTIFACT_DIR`, prints exactly one line `STORAGE_STATE=<path>`, and resolves
+the password itself, from a keychain or password manager rather than a plain environment
+variable. Never write a password, token or account secret into the recipe or the script, and
+never run the script yourself; `browser-verification.md` section 6 says how a run uses it.
+
 A build driver needs no services. A native iOS app that talks to no backend:
 
 ```yaml

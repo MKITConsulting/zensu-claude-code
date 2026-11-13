@@ -45,7 +45,7 @@ properties are easy to get wrong and cost the whole feature:
   checks on the `Bash|PowerShell` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
   `pre-write-secret-scan.sh`, `pre-browser-navigation-consent.sh`) and one on `.*`
   (`pre-reviewer-capability-gate.sh` via `reviewer-capability-v1.js`), all five can
-  deny, and its aggregation lets any one deny win as the host does across hooks. O21a enumerates the matcher, so a hook added there changes this roster. The consent gate exits before its bind for every command
+  deny, and its aggregation lets any one deny win as the host does across hooks. O21a enumerates the matcher, so a hook added there changes this roster. The verify-auth guard joins that matcher too, binds no session and judges only a command naming a verify-feature run directory, so it never denies the two recognized commands (`.claude/rules/verify-auth-guard.md`). The consent gate exits before its bind for every command
   that carries no `playwright-cli` marker and admits the recognized `/zensu:doctor` and adoption
   commands through `zensu_doctor_allowed` before its module runs, so on a POSIX host with `node`
   it never stands between a session and the doctor — the recognizer refuses on win32; it denies a `zensu-verify-*` call and a command that merely mentions
