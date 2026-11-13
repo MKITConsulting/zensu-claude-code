@@ -559,12 +559,12 @@ test('the CLI resolves a name frame through the bindings under --plugin-data, on
   const posted = run(['record', ...base, '--event', 'PostToolUse', '--plugin-data', data], report);
   assert.equal(posted.status, 0, posted.stderr);
   assert.equal(posted.stdout, '', 'a tool event resolves no name frame, so the launch stays open for the prompt below');
+  const missing = run(['record', ...base, '--event', 'UserPromptSubmit', '--plugin-data', path.join(c.base, 'missing')], report);
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.equal(missing.stdout, '', 'an unreadable store resolves no name, so the launch stays open for the prompt below');
   const recorded = run(['record', ...base, '--event', 'UserPromptSubmit', '--plugin-data', data], report);
   assert.equal(recorded.status, 0, recorded.stderr);
   assert.match(JSON.parse(recorded.stdout).hookSpecificOutput.additionalContext, /^PRIMARY JUDGE INCOMPLETE — the judge answered REVIEW PACKET INVALID/);
-  const missing = run(['record', ...base, '--event', 'UserPromptSubmit', '--plugin-data', path.join(c.base, 'missing')], prompt(frame('judge-primary', JUDGE_OK)));
-  assert.equal(missing.status, 0);
-  assert.equal(missing.stdout, '', 'an unreadable store resolves no name');
   const checked = run(['check', ...base, '--judge', 'off', '--panel', 'lean', '--event', 'UserPromptSubmit', '--agent', 'aConsume9', '--plugin-data', data],
     prompt(frame('judge-primary', '- Verdict: PASS\n')));
   assert.equal(checked.status, 1);
