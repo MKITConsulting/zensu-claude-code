@@ -920,7 +920,7 @@ helper's `--discard-state` before teardown, also when it keeps the run directory
 `zensu-verify-auth-…` session `console` and `requests` are denied with a final reason, and every
 cookie, storage and state command stays denied on every `zensu-verify` session:
 `tests/structure/verify-consent-v1.test.js` drives every
-command of `playwright-cli` 0.1.21, recorded in
+command of `playwright-cli` 0.1.24, recorded in
 `tests/structure/fixtures/playwright-cli-commands.v1.json` and compared with the installed
 `help.json` where that version is installed, on a plain and on a signed-in session.
 

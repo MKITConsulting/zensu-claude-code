@@ -2171,16 +2171,16 @@ test('console and requests are denied on every zensu-verify-auth session and sta
   }
 });
 
-test('every playwright-cli 0.1.21 command outside the allowlist, every getter and exporter of the auth specification included, is denied on plain and signed-in sessions', () => {
+test('every command of the measured playwright-cli outside the allowlist, every getter and exporter of the auth specification included, is denied on plain and signed-in sessions', () => {
   const fixture = JSON.parse(fs.readFileSync(COMMANDS_FIXTURE, 'utf8'));
   assert.equal(fixture.version, consent.PLAYWRIGHT_CLI_SOURCE_VERSION);
   const names = Object.keys(fixture.commands);
   assert.equal(names.length, 102);
-  for (const name of Object.keys(consent.ALLOWED_COMMANDS)) assert.equal(names.includes(name), true, `${name} is a 0.1.21 command`);
+  for (const name of Object.keys(consent.ALLOWED_COMMANDS)) assert.equal(names.includes(name), true, `${name} is a measured command`);
   const named = ['state-save', 'state-load', 'eval', 'run-code', 'config-print', 'request', 'route', 'route-list', 'unroute',
     'network-state-set', 'delete-data', 'upload', 'drop', 'pdf', 'attach', 'detach', 'close-all', 'kill-all'];
   const families = [/^cookie-/, /^localstorage-/, /^sessionstorage-/, /^request-/, /^response-/, /^recording-/, /^tracing-/, /^video-/, /^install/];
-  for (const name of named) assert.equal(names.includes(name), true, `${name} is a 0.1.21 command`);
+  for (const name of named) assert.equal(names.includes(name), true, `${name} is a measured command`);
   for (const family of families) assert.equal(names.some((name) => family.test(name)), true, String(family));
   const outside = names.filter((name) => !Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, name));
   const credentialRevealing = [...named, ...names.filter((name) => families.some((family) => family.test(name)))];
@@ -2208,7 +2208,7 @@ test('every playwright-cli 0.1.21 command outside the allowlist, every getter an
   assert.deepEqual(required, { filename: true, persistent: true, profile: true });
 });
 
-test('the recorded 0.1.21 command list equals the help.json of the installed playwright-cli when that version is installed', (t) => {
+test('the recorded command list equals the help.json of the installed playwright-cli when the measured version is installed', (t) => {
   const installed = cliVersion.installedVersion(process.env);
   if (installed.source !== 'manifest' || installed.version !== consent.PLAYWRIGHT_CLI_SOURCE_VERSION) {
     t.skip(`playwright-cli ${consent.PLAYWRIGHT_CLI_SOURCE_VERSION} is not installed here (${installed.source})`);

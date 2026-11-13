@@ -69,14 +69,15 @@ model ── snapshot / screenshot / click … on authenticated pages (console a
 
 1. A verify-feature run against a local stack whose recipe declares `auth.mode: login-script` and
    `auth.artifact: storageState` reaches an authenticated page with no manual login. Proven by an
-   integration test with a fixture app, the real `playwright-cli` 0.1.21 and the real gate module.
+   integration test with a fixture app, the real `playwright-cli` at its measured version and the
+   real gate module.
 2. Every command that could reveal state or credentials stays denied on every `zensu-verify`
    session, signed-in or not: `state-save`, `state-load`, every `cookie-*`, `localstorage-*`,
    `sessionstorage-*`, `eval`, `run-code`, `config-print`, `request`, `request-*`, `response-*`,
    `route`, `route-list`, `unroute`, `network-state-set`, `delete-data`, `upload`, `drop`, `pdf`,
    recording, tracing, video, `attach`, `detach`, `install*`, `close-all`, `kill-all`, and the
    flags `--filename`, `--persistent`, `--profile`. Proven by a table-driven test over the
-   0.1.21 command list (`help.json`).
+   measured version's command list (`help.json`).
 3. `console` and `requests` are denied on a signed-in session (new, enforced).
 4. The state file never outlives the `open` that consumed it, and never leaves the run directory.
 5. The skill docs describe the mode, its targets and its limits; the structure tests that pinned
