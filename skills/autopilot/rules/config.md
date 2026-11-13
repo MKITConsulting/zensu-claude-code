@@ -47,6 +47,7 @@ auth:
   artifact:    storageState # storageState | bearer-token-file | keychain | none
   baseUrl:     "<authentication/API origin for the selected runtime>"
   appOrigin:   "<exact browser application origin; browser driver only>"
+  environment: test         # test | production; required by a remote /zensu:verify-feature login, ignored by autopilot
   # orchestrator exports ZENSU_AUTH_ARTIFACT_DIR; script writes beneath it
   # orchestrator exports auth.baseUrl as ZENSU_AUTH_BASE_URL; script must use it
   # orchestrator exports auth.appOrigin as ZENSU_APP_ORIGIN for browser storage state
@@ -327,6 +328,12 @@ orchestration is identical.
 
 - A project with **no auth** sets `auth.mode: none` and omits `loginScript`; the validate
   step runs unauthenticated.
+- `/zensu:verify-feature` reads the same `auth` block when it signs a browser in: only
+  `mode: login-script` with `artifact: storageState`, every key on one `key: scalar` line, and in
+  remote mode `appOrigin`, an optional `baseUrl` and `environment` (`test`, or `production` for a
+  dedicated test account in an isolated organization with synthetic data). Its run-config helper
+  runs the script, keeps the state for the run's origins only and never shows it to the model;
+  `skills/verify-feature/rules/browser-verification.md` section 6 is the contract.
 - A project with **no UI** sets `validate.driver: api` (or `cli`, `library`, `async`, `iac` or
   `custom`) and provides an `assert` command or the driver's block instead of a `baseUrl`.
 - A **native app** sets `validate.driver: mobile` or `desktop` with that driver's block; it

@@ -907,12 +907,14 @@ test('captures the hooks directory this repository ships, its registry read as d
       'pre-write-plugin-data-guard.sh',
       'pre-edit-tdd-reminder.sh',
       'pre-write-secret-scan.sh',
+      'pre-verify-auth-guard.sh',
     ]);
     assert.deepEqual(shippedHooks('PreToolUse', 'NotebookEdit'), [
       'pre-reviewer-capability-gate.sh',
       'pre-work-order-gate.sh',
       'pre-write-plugin-data-guard.sh',
       'pre-write-secret-scan.sh',
+      'pre-verify-auth-guard.sh',
     ]);
     assert.deepEqual(shippedHooks('PreToolUse', 'Agent'), [
       'pre-reviewer-capability-gate.sh',

@@ -19,6 +19,12 @@ UNIT_CONSENT="$PLUGIN_DIR/tests/structure/verify-consent-v1.test.js"
 UNIT_PORT="$PLUGIN_DIR/tests/structure/verify-free-port.test.js"
 UNIT_CONFIG="$PLUGIN_DIR/tests/structure/verify-browser-config.test.js"
 UNIT_VERSION="$PLUGIN_DIR/tests/structure/playwright-cli-version-v1.test.js"
+AUTH_STATE_MODULE="$PLUGIN_DIR/hooks/lib/verify-auth-state-v1.js"
+AUTH_GUARD_MODULE="$PLUGIN_DIR/hooks/lib/verify-auth-guard-v1.js"
+AUTH_GUARD_HOOK="$PLUGIN_DIR/hooks/pre-verify-auth-guard.sh"
+UNIT_AUTH_STATE="$PLUGIN_DIR/tests/structure/verify-auth-state-v1.test.js"
+UNIT_AUTH_GUARD="$PLUGIN_DIR/tests/structure/verify-auth-guard-v1.test.js"
+UNIT_AUTH_E2E="$PLUGIN_DIR/tests/structure/verify-auth-login-e2e.test.js"
 ESCAPE_STEMS_SUITE="$PLUGIN_DIR/tests/structure/test-gauntlet-loop-skill.sh"
 TDD_PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 SETUP_MD="$PLUGIN_DIR/skills/verify-feature/rules/setup.md"
@@ -46,19 +52,23 @@ for _vc_name in $(env | sed -n 's/^\(PLAYWRIGHT_MCP_[A-Za-z0-9_]*\)=.*/\1/p;s/^\
 done
 
 for f in "$PRE_HOOK" "$POST_HOOK" "$PREFILTER_LIB" "$MODULE" "$FLOOR" "$VERSION_MODULE" "$REGISTRATION_MODULE" \
-  "$CONFIG_HELPER" "$FREE_PORT" "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION"; do
+  "$CONFIG_HELPER" "$FREE_PORT" "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION" \
+  "$AUTH_STATE_MODULE" "$AUTH_GUARD_MODULE" "$AUTH_GUARD_HOOK" "$UNIT_AUTH_STATE" "$UNIT_AUTH_GUARD" "$UNIT_AUTH_E2E"; do
   [ -f "$f" ] && check "V0 file exists: ${f#"$PLUGIN_DIR"/}" PASS || check "V0 file exists: ${f#"$PLUGIN_DIR"/}" FAIL
 done
 [ -x "$PRE_HOOK" ] && [ -x "$POST_HOOK" ] && check "V1 both hooks are executable" PASS || check "V1 both hooks are executable" FAIL
+[ -x "$AUTH_GUARD_HOOK" ] && bash -n "$AUTH_GUARD_HOOK" 2>/dev/null && check "V1b the verify-auth guard hook is executable and passes bash -n" PASS \
+  || check "V1b the verify-auth guard hook is executable and passes bash -n" FAIL
 bash -n "$PRE_HOOK" 2>/dev/null && bash -n "$POST_HOOK" 2>/dev/null && bash -n "$PREFILTER_LIB" 2>/dev/null \
   && check "V2 bash -n passes for both hooks and the prefilter library" PASS || check "V2 bash -n passes for both hooks and the prefilter library" FAIL
 V2B_OK=1
 for f in "$MODULE" "$FLOOR" "$VERSION_MODULE" "$REGISTRATION_MODULE" "$CONFIG_HELPER" "$FREE_PORT" \
-  "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION"; do
+  "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION" \
+  "$AUTH_STATE_MODULE" "$AUTH_GUARD_MODULE" "$UNIT_AUTH_STATE" "$UNIT_AUTH_GUARD" "$UNIT_AUTH_E2E"; do
   node --check "$f" >/dev/null 2>&1 || V2B_OK=0
 done
-[ "$V2B_OK" -eq 1 ] && check "V2b node --check passes for the four modules, both helpers and the five unit files" PASS \
-  || check "V2b node --check passes for the four modules, both helpers and the five unit files" FAIL
+[ "$V2B_OK" -eq 1 ] && check "V2b node --check passes for the six modules, both helpers and the eight unit files" PASS \
+  || check "V2b node --check passes for the six modules, both helpers and the eight unit files" FAIL
 
 MATCHER="$(node -e 'process.stdout.write(String(require(process.argv[1]).CONSENT_MATCHER))' "$MODULE" 2>/dev/null)"
 [ "$MATCHER" = "Bash|PowerShell" ] && check "V3 the module's CONSENT_MATCHER is Bash|PowerShell" PASS \
@@ -101,6 +111,9 @@ unit_check "V7 the consent gate unit file passes" "$UNIT_CONSENT"
 unit_check "V7b the free-port unit file passes" "$UNIT_PORT"
 unit_check "V7c the browser-config unit file passes" "$UNIT_CONFIG"
 unit_check "V7d the cli-version unit file passes" "$UNIT_VERSION"
+unit_check "V7e the signed-in state validator unit file passes" "$UNIT_AUTH_STATE"
+unit_check "V7f the verify-auth read guard unit file passes" "$UNIT_AUTH_GUARD"
+unit_check "V7g the signed-in browser integration file passes or skips with its reason" "$UNIT_AUTH_E2E"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
   && grep -qF "'verify-navigation-floor-v1.js'" "$CONFIG_HELPER" \
@@ -861,6 +874,33 @@ esac
 [ "$UNBOUND_RC" -eq 0 ] && [ "$UNBOUND_SAID" -eq 1 ] && [ "$BEFORE" = "$AFTER" ] \
   && check "H15b an unbound recorder writes nothing, exits 0 and names its cause" PASS \
   || check "H15b an unbound recorder writes nothing, exits 0 and names its cause (rc=$UNBOUND_RC)" FAIL
+H15C_RUN="$PROJ/.zensu/verify-feature-runs/run-h15c"
+mkdir -p "$H15C_RUN"
+node -e '
+  const path = require("path");
+  const fs = require("fs");
+  const [plugin, runDir] = process.argv.slice(1);
+  const helper = require(path.join(plugin, "scripts", "verify-browser-config.js"));
+  const authState = require(path.join(plugin, "hooks", "lib", "verify-auth-state-v1.js"));
+  const prepared = authState.prepareAuthDir(runDir);
+  authState.removeArtifactDir(prepared.artifactDir);
+  const cookie = { name: "sid", value: "h15c", domain: "127.0.0.1", path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" };
+  if (!authState.writeStateFile(prepared.statePath, { cookies: [cookie], origins: [] }).ok) process.exit(1);
+  fs.writeFileSync(path.join(runDir, helper.CONFIG_NAME), JSON.stringify(helper.buildConfig(runDir, ["http://127.0.0.1:4380"], [], prepared.statePath)));
+' "$PLUGIN_DIR" "$H15C_RUN"
+H15C_CMD="playwright-cli -s=zensu-verify-auth-h15c open --config=$H15C_RUN/playwright-cli.json http://127.0.0.1:4380/"
+H15C_STATE="$H15C_RUN/auth/storage-state.json"
+H15C_BEFORE=0
+[ -f "$H15C_STATE" ] && H15C_BEFORE=1
+H15C_RC=0
+post_run "$H15C_CMD" "no-such-session" "$PROJ" >/dev/null || H15C_RC=$?
+case "$(pre_reason "$H15C_CMD" "no-such-session" "$PROJ")" in
+  *'already consumed'*) H15C_DENIED=1 ;;
+  *) H15C_DENIED=0 ;;
+esac
+[ "$H15C_BEFORE" -eq 1 ] && [ "$H15C_RC" -eq 0 ] && [ ! -e "$H15C_STATE" ] && [ "$H15C_DENIED" -eq 1 ] \
+  && check "H15c an unbound recorder still consumes the signed-in state after a restoring open, so a second open of that config is denied" PASS \
+  || check "H15c an unbound recorder still consumes the signed-in state after a restoring open, so a second open of that config is denied (before=$H15C_BEFORE rc=$H15C_RC denied=$H15C_DENIED)" FAIL
 
 REMOTE_ORIGIN='https://93.184.216.34'
 REMOTE_RUN_DIR="$PROJ/run-remote"

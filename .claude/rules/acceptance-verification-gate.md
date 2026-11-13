@@ -66,8 +66,9 @@ membership in `validateRecord`, so a stored `desktop` reads there as `unknown dr
 newest record it turns the gate `invalid`, and as an older one it is dropped from `valid`, which
 lets an earlier `pass` of the same criterion on the same tree stand over a newer `fail`. Storing
 `desktop` itself needs a `minor` release, whose automatic adoption retires the earlier root. The
-browser follows `/zensu:verify-feature`'s credential-blind rules, never the `storageState` login of
-the autopilot catalog (`skills/autopilot/rules/drivers.md`).
+browser follows `/zensu:verify-feature`'s credential-blind rules: it signs in only through the
+run-config helper's `--login-recipe` (`.claude/rules/verify-auth-guard.md`) or visibly, never
+through the autopilot catalog's own `storageState` loading (`skills/autopilot/rules/drivers.md`).
 
 **States.** Per criterion: `pass`, `fail`, `partial`, `missing`, `stale` (another tree, or the
 criterion digest changed) and `deprecated`. A deprecated criterion whose newest record is not

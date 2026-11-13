@@ -58,8 +58,13 @@ The consumer validates, without reading the file, that the returned path is abso
 non-symlink regular file, and resolves physically beneath `ZENSU_AUTH_ARTIFACT_DIR`. It loads
 and later deletes only that validated path. A rejected/out-of-bound path remains untouched
 and authentication degrades safely. This artifact boundary is used by `/zensu:autopilot`.
-`/zensu:verify-feature` deliberately does not accept artifacts or run login scripts; it uses
-visible manual browser login only.
+`/zensu:verify-feature` consumes it for `auth.artifact: storageState` only, and never in the
+model's own shell: its run-config helper (`--login-recipe`) runs the script with its output
+hidden, validates the returned path against this contract, keeps only the state for the run's
+origins, writes it owner-only beside the run config, and deletes the artifact directory. The
+browser consent gate re-checks that state before `open`, its recorder deletes it after `open`,
+and the model never accepts an artifact path itself. A remote verify-feature recipe must also
+declare `auth.environment` (`test` or `production`).
 
 ### Artifact forms by driver
 
