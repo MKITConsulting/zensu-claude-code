@@ -19,7 +19,7 @@ below reads that copy, never the plan text in this conversation. In work-order m
 Check out the pull-request head and leave the work tree clean: every record binds to the tree it
 was taken on, and `--autopilot-validate` refuses a work tree whose `HEAD` is not the pull-request
 head or that holds an uncommitted or untracked change outside `.zensu/`. Write throwaway output
-outside the project or to a gitignored path.
+outside the repository or to a gitignored path.
 
 ## 2. Record each criterion right after you observe it
 
@@ -69,8 +69,11 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
     the pull-request row reads `🟡 partial` with the evidence.
   - A refusal without a segment (`unresolved`), an `add:` or a `restore:` segment: persist `BLOCK`
     with the code `validation-unresolved` and report the line. Only the user can add a criterion
-    to an approved plan or switch the gate off. A cause that names the pull-request head or a dirty
-    work tree is fixed by checking out the head or cleaning the tree, then validating again.
+    to an approved plan or switch the gate off. A cause that names the pull-request head is fixed by
+    checking out the head, then validating again, unless it says no checkout settles it: then block
+    as the line says. A cause that names a dirty work tree lists its first
+    changed paths: send a change that belongs to the change through the fix loop as the `fix:` arm
+    does, remove what a check left behind, then validate again.
 - **Exit 2**: a misuse, such as a run id that is not this session's active run or a run that has
   ended, or a fault the line names, an `ACCEPTANCE — unavailable` verdict included. Never retry it
   blindly: persist `BLOCK` with `validation-unresolved` and report. One exit-2 refusal is no
@@ -87,5 +90,7 @@ Under the project's `evidence.acceptanceGate: advisory` the verb discloses a ref
 
 Fill the per-AC table from `--acceptance-status --run "$RUN_ID"` on the validated head: a `pass`
 row is `🟢 pass` with its evidence, a `partial` one `🟡 partial` with the reason, and a deprecated
-one `⚪ deprecated` without evidence. The `Gates bypassed during build:` line unions the
+one `⚪ deprecated` without evidence. A run that validated under the advisory gate or the switched-off
+gate can still show other rows: a `missing` or `stale` one is `🟡 unvalidated`, a `fail` one
+`🔴 fail` with its evidence, and a `dropped` one `🔴 fail` whose evidence cell says it was dropped. The `Gates bypassed during build:` line unions the
 `--bypass-list` entries with every `bypasses[].gate` that `--autopilot-status` reports for the run.

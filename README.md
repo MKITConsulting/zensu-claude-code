@@ -126,6 +126,9 @@ already rely on:
   or set `ZENSU_FULL_SUITE_GATE=off` or `ZENSU_ACCEPTANCE_GATE=off` for one
   closing step; those two escapes are recorded in the chain's bypass ledger.
   `/zensu:full-suite` moves the full suite to a verified CI pipeline instead.
+  An Autopilot run that validates leaves its VALIDATE stage only through
+  `zensu-log.sh --autopilot-validate`, once every acceptance criterion of the plan
+  you approved has a passing record on the clean pull-request head.
 - **`node` must be on `PATH`.** Claude Code starts the hook dispatcher, which
   runs the capability gate before every tool call, as `node` itself. Without
   `node` the dispatcher cannot start, and its registration makes Claude Code

@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const childProcess = require('node:child_process');
 const { ensurePrivateDirectory } = require('./review-evidence-lease-v1.js');
 const { redact, defaultHome } = require('./zensu-artifact-redact-v1.js');
@@ -10,6 +11,7 @@ const { scan } = require('./secret-patterns.js');
 const evidenceRun = require('./evidence-run-v1.js');
 const receipts = require('./edit-landing-receipt-v1.js');
 const planPayload = require('./plan-payload-v1.js');
+const approvedPlan = require('./approved-plan-v1.js');
 
 const { canonical, resolveRunLog } = receipts;
 const SCHEMA = 'acceptance-verify-v1';
@@ -81,6 +83,8 @@ const LIMITS = Object.freeze({
   displayMax: 200,
   listedCriteria: 12,
   listedPaths: 10,
+  listedChanges: 5,
+  headCandidates: 16,
   listTimeoutMs: 60000,
   gitTimeoutMs: 120000,
 });
@@ -131,11 +135,11 @@ function nullableString(value, max) {
 }
 
 function isRunCopyStem(stem) {
-  return typeof stem === 'string' && stem.startsWith(planPayload.APPROVED_PLAN_PREFIX);
+  return typeof stem === 'string' && stem.startsWith(approvedPlan.APPROVED_PLAN_PREFIX);
 }
 
 function expectedPlanRel(stem) {
-  if (isRunCopyStem(stem)) return planPayload.approvedPlanRelPath(stem.slice(planPayload.APPROVED_PLAN_PREFIX.length));
+  if (isRunCopyStem(stem)) return approvedPlan.approvedPlanRelPath(stem.slice(approvedPlan.APPROVED_PLAN_PREFIX.length));
   return `.zensu/plans/${stem}.md`;
 }
 
@@ -360,7 +364,24 @@ function planFor(root, stem) {
   return { planPath, planRel };
 }
 
-function readCriteria(planPath, options = {}) {
+function readCriteria(plan, options = {}) {
+  if (!Buffer.isBuffer(plan)) return listCriteria(plan, options, null);
+  let directory = null;
+  try {
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-acceptance-plan-'));
+    const copy = path.join(directory, 'plan.md');
+    fs.writeFileSync(copy, plan, { flag: 'wx', mode: 0o600 });
+    return listCriteria(copy, options, options.planLabel || 'the approved plan');
+  } catch (error) {
+    return { status: 'error', reason: `the verified plan could not be handed to the requirements lister (${error.code || error.message})` };
+  } finally {
+    if (directory !== null) {
+      try { fs.rmSync(directory, { recursive: true, force: true }); } catch (_) {}
+    }
+  }
+}
+
+function listCriteria(planPath, options, label) {
   const lister = path.join(options.libDir || __dirname, 'zensu-plan-requirements.sh');
   const result = childProcess.spawnSync(options.bashPath || 'bash', ['--noprofile', '--norc', lister, '--list', '--plan', planPath], {
     encoding: 'utf8',
@@ -372,8 +393,10 @@ function readCriteria(planPath, options = {}) {
   if (result.error) {
     return { status: 'error', reason: `the requirements lister could not run (${result.error.code || result.error.message})` };
   }
-  const message = String(result.stderr || '').trim().split('\n').filter(Boolean).pop() || '';
+  const raw = String(result.stderr || '').trim().split('\n').filter(Boolean).pop() || '';
+  const message = label === null ? raw : raw.split(planPath).join(label);
   if (result.status === 3) return { status: 'no-section', reason: 'the plan has no ## Requirements section' };
+  if (result.status === 5) return { status: 'unparseable', reason: message ? clip(normalizeText(message), 300) : 'the plan does not parse' };
   if (result.status !== 0 && result.status !== 4) {
     return { status: 'error', reason: message ? clip(normalizeText(message), 300) : `the requirements lister exited ${result.status}` };
   }
@@ -393,6 +416,11 @@ function readCriteria(planPath, options = {}) {
   return { status: 'ok', criteria: [...byId.values()].sort((left, right) => compareCriterionIds(left.id, right.id)) };
 }
 
+function chainCriteria(chain, options) {
+  if (Buffer.isBuffer(chain.planBytes)) return readCriteria(chain.planBytes, { ...options, planLabel: chain.planRel });
+  return readCriteria(chain.planPath, options);
+}
+
 function gitEnvironment() {
   return evidenceRun.gitEnvironment();
 }
@@ -408,22 +436,35 @@ function hasChanges(root, limits = LIMITS, excluded = []) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.error || result.status !== 0) return { known: false };
-  return { known: true, changed: String(result.stdout || '').length > 0 };
+  const fields = String(result.stdout || '').split('\0');
+  const paths = [];
+  let count = 0;
+  for (let index = 0; index < fields.length; index += 1) {
+    const entry = fields[index];
+    if (entry.length < 4) continue;
+    count += 1;
+    if (paths.length < limits.listedChanges) paths.push(entry.slice(3));
+    if ('RC'.includes(entry[0]) || 'RC'.includes(entry[1])) index += 1;
+  }
+  return { known: true, changed: count > 0, paths, count };
 }
 
 function chainTree(options, scratchDirectory) {
   if (typeof options.workTree !== 'string' || options.workTree === '') {
     if (options.runId) {
       const repository = evidenceRun.repositoryTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS);
-      return { root: repository.root, tree: { tree: repository.tree, reason: repository.reason } };
+      return { root: repository.root, name: 'the repository', outside: 'the repository', tree: { tree: repository.tree, reason: repository.reason } };
     }
-    return { root: options.projectRoot, tree: evidenceRun.computeTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS) };
+    return { root: options.projectRoot, name: 'the project', outside: 'the project', tree: evidenceRun.computeTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS) };
   }
   const root = evidenceRun.fingerprintRoot(options.workTree, options.projectRoot, evidenceRun.LIMITS);
-  return { root, tree: evidenceRun.computeFingerprint(options.projectRoot, root, scratchDirectory, evidenceRun.LIMITS) };
+  const nested = typeof root === 'string' && root !== options.projectRoot;
+  const name = nested ? `the project and its work tree ${display(path.relative(options.projectRoot, root).split(path.sep).join('/'), options.projectRoot)}` : 'the project';
+  return { root, name, outside: 'the project', tree: evidenceRun.computeFingerprint(options.projectRoot, root, scratchDirectory, evidenceRun.LIMITS) };
 }
 
-function citedRun(options, runId, currentTree) {
+function citedRun(options, runId, current) {
+  const currentTree = current.tree;
   if (!EVIDENCE_RUN_RE.test(runId)) return { error: `--evidence-run ${JSON.stringify(runId)} is not an evidence-run record id` };
   let locations;
   try {
@@ -444,7 +485,7 @@ function citedRun(options, runId, currentTree) {
   const state = evidenceRun.effectiveState(run);
   if (state !== 'completed') return { error: `evidence run ${runId} is ${state}, not completed` };
   if (run.tree_start && run.tree_end && run.tree_start !== run.tree_end) {
-    return { error: `evidence run ${runId} changed the tree while it ran; make the check leave the working tree unchanged, tracked and untracked non-ignored files alike, by writing its output outside the project or to a gitignored path, then run it again` };
+    return { error: `evidence run ${runId} changed ${current.name} while it ran; make the check leave ${current.name} unchanged, tracked and untracked non-ignored files alike, by writing its output outside ${current.outside} or to a gitignored path, then run it again` };
   }
   if (currentTree.tree && run.tree_end !== currentTree.tree) {
     return { error: `evidence run ${runId} measured another tree than the current one; run the check again on this tree` };
@@ -520,8 +561,8 @@ function runFacts(options) {
 }
 
 function approvedPlanRefusal(facts, reason) {
-  const copy = planPayload.approvedPlanRelPath(facts.approved);
-  const failures = planPayload.APPROVED_PLAN_FAILURES;
+  const copy = approvedPlan.approvedPlanRelPath(facts.approved);
+  const failures = approvedPlan.APPROVED_PLAN_FAILURES;
   if (reason === failures.MISSING) {
     return `${facts.label} has no stored copy of the plan it approved (${copy}): the plan was approved before this release kept one, or the copy was removed, so its acceptance criteria cannot be read; only the user can leave ZENSU_ACCEPTANCE_GATE=off for this run`;
   }
@@ -540,14 +581,15 @@ function runChain(options) {
   if (typeof options.projectRoot !== 'string' || options.projectRoot === '') return { error: 'no project root is bound' };
   const root = canonical(path.resolve(options.projectRoot));
   if (!facts.workOrder) {
-    const copy = planPayload.readApprovedPlan(root, facts.approved);
+    const copy = approvedPlan.readApprovedPlan(root, facts.approved);
     if (!copy.ok) return { error: approvedPlanRefusal(facts, copy.reason) };
-    return { root, stem: copy.stem, planPath: copy.path, planRel: copy.rel, disclosures: [], runId: facts.runId, facts };
+    return { root, stem: copy.stem, planPath: copy.path, planRel: copy.rel, planBytes: copy.bytes, disclosures: [], runId: facts.runId, facts };
   }
   const stem = facts.workOrder.orderId;
   const plan = planFor(root, stem);
   if (plan.reason) return { error: plan.reason };
   const disclosures = [];
+  let planBytes = null;
   if (facts.approved !== facts.workOrder.specHash) {
     const read = planPayload.readPlanFile(plan.planPath);
     if (read.failure) return { error: `the plan ${plan.planRel} of ${facts.label} cannot be read (${read.failure})` };
@@ -556,10 +598,11 @@ function runChain(options) {
         error: `the plan ${plan.planRel} no longer matches the plan a person approved for ${facts.label}, so its acceptance criteria cannot be trusted; restore the approved plan, or leave ZENSU_ACCEPTANCE_GATE=off to the user`,
       };
     }
+    planBytes = read.bytes;
   } else {
     disclosures.push(`ACCEPTANCE PLAN UNAPPROVED — work order ${stem} asks for no plan approval, so the criteria of ${facts.label} come from the session's own plan ${plan.planRel}, which no person approved`);
   }
-  return { root, stem, planPath: plan.planPath, planRel: plan.planRel, disclosures, runId: facts.runId, facts };
+  return { root, stem, planPath: plan.planPath, planRel: plan.planRel, planBytes, disclosures, runId: facts.runId, facts };
 }
 
 function commitOf(root, revision, limits) {
@@ -576,14 +619,65 @@ function commitOf(root, revision, limits) {
   return COMMIT_RE.test(value) ? value : null;
 }
 
-function runHead(root, prHead, limits = LIMITS, excluded = []) {
+function gitLines(root, args, limits, input) {
+  const result = childProcess.spawnSync('git', ['-C', root, ...args], {
+    env: gitEnvironment(),
+    encoding: 'utf8',
+    input,
+    timeout: limits.gitTimeoutMs,
+    maxBuffer: 1024 * 1024,
+    windowsHide: true,
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) return null;
+  return String(result.stdout || '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+}
+
+function prCommit(root, name, head, limits) {
+  if (name === head) return { commit: head };
+  if (name.length >= head.length) {
+    return name.length === head.length && commitOf(root, `${name}^{commit}`, limits) === name ? { commit: name } : { missing: true };
+  }
+  const objects = gitLines(root, ['rev-parse', `--disambiguate=${name}`], limits);
+  if (objects === null) return { fault: true };
+  if (objects.length === 0) return { missing: true };
+  if (objects.length > limits.headCandidates) return { ambiguous: `more than ${limits.headCandidates} objects` };
+  const typed = gitLines(root, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], limits, `${objects.join('\n')}\n`);
+  if (typed === null) return { fault: true };
+  const commits = typed.map((line) => line.split(' ')).filter((fields) => fields.length === 2 && fields[1] === 'commit' && fields[0].length === head.length && fields[0].startsWith(name)).map((fields) => fields[0]);
+  if (commits.length === 0) return { missing: true };
+  if (commits.length > 1) return { ambiguous: `${commits.length} commits` };
+  return { commit: commits[0] };
+}
+
+function pathList(paths, rest, projectRoot, limits) {
+  const listed = paths.map((entry) => display(entry, projectRoot, limits).replace(/\|/g, '\\|'));
+  const tail = rest === true ? ' and more' : rest > 0 ? ` and ${rest} more` : '';
+  return `${listed.join(', ')}${tail}`;
+}
+
+function changeList(changes, root, projectRoot, limits) {
+  const rebased = changes.paths.map((entry) => path.relative(projectRoot, path.join(root, entry)).split(path.sep).join('/'));
+  return pathList(rebased, changes.count - rebased.length, projectRoot, limits);
+}
+
+function runHead(root, prHead, limits = LIMITS, excluded = [], projectRoot = root) {
   if (typeof prHead !== 'string' || !RECORDED_HEAD_RE.test(prHead)) {
     return { reason: 'the run records no pull-request head, so there is no commit to validate' };
   }
   const head = commitOf(root, 'HEAD', limits);
   if (!head) return { reason: 'the HEAD commit of the work tree could not be read, so it cannot be compared with the pull-request head' };
-  const pr = commitOf(root, `${prHead.toLowerCase()}^{commit}`, limits);
-  if (!pr) return { reason: `the pull-request head ${prHead.slice(0, 12).toLowerCase()} is not a commit in the work tree; fetch it, then validate again` };
+  const named = prHead.toLowerCase();
+  const short = named.slice(0, 12);
+  const resolved = prCommit(root, named, head, limits);
+  if (resolved.fault) return { reason: `git could not list the objects whose names begin with the pull-request head ${short}, so it cannot be compared with HEAD; no checkout settles that, so persist BLOCK with the code validation-unresolved and report this line` };
+  if (resolved.missing) return { reason: `the pull-request head ${short} is not a commit in the work tree; fetch it, then validate again` };
+  if (resolved.ambiguous) {
+    return {
+      reason: `the pull-request head ${short} is an abbreviation that ${resolved.ambiguous} in the work tree begin with, so it names no single commit; no checkout settles that, so persist BLOCK with the code validation-unresolved and report this line`,
+    };
+  }
+  const pr = resolved.commit;
   if (pr !== head) {
     return {
       reason: `HEAD of the work tree is ${head.slice(0, 12)}, not the pull-request head ${pr.slice(0, 12)}; check out ${pr.slice(0, 12)}, or send the newer commit through the fix loop with VALIDATION_FAILED: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE`,
@@ -593,7 +687,7 @@ function runHead(root, prHead, limits = LIMITS, excluded = []) {
   if (!changes.known) return { reason: 'git status failed in the work tree, so whether it is clean is unknown' };
   if (changes.changed) {
     return {
-      reason: `the work tree has uncommitted changes, so it is not the pull-request head ${pr.slice(0, 12)}; discard them, or send them through the fix loop with VALIDATION_FAILED: once its fix attempt is back, push them and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE`,
+      reason: `the work tree has uncommitted changes, so it is not the pull-request head ${pr.slice(0, 12)}: ${changeList(changes, root, projectRoot, limits)}; send a change that belongs to this change through the fix loop with VALIDATION_FAILED: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE; remove what a check left behind, and make that check write its output outside the repository or to a gitignored path`,
     };
   }
   return { head };
@@ -627,7 +721,7 @@ function record(options) {
   if (evidence.error) return { code: 1, error: evidence.error };
   const chain = options.runId ? runChain(options) : resolveChain(options);
   if (chain.error) return { code: 1, error: chain.error };
-  const criteria = readCriteria(chain.planPath, options);
+  const criteria = chainCriteria(chain, options);
   if (criteria.status !== 'ok') return { code: 1, error: `${chain.planRel}: ${criteria.reason}` };
   const criterion = criteria.criteria.find((entry) => entry.id === ac);
   if (!criterion) {
@@ -641,7 +735,8 @@ function record(options) {
   } catch (error) {
     return { code: 2, error: error.message };
   }
-  const currentTree = chainTree(options, locations.scratch).tree;
+  const current = chainTree(options, locations.scratch);
+  if (options.runId && !current.tree.tree) return { code: 1, error: unfingerprintedCause(chain, current.tree) };
   const runId = typeof options.evidenceRun === 'string' && options.evidenceRun !== '' ? options.evidenceRun : null;
   const observed = OBSERVED_DRIVERS.includes(options.driver) || EARLIER_OBSERVED_DRIVERS.includes(options.driver);
   if (observed && !runId && options.verdict !== 'partial') {
@@ -651,7 +746,7 @@ function record(options) {
     };
   }
   if (runId) {
-    const cited = citedRun(options, runId, currentTree);
+    const cited = citedRun(options, runId, current);
     if (cited.error) return { code: 1, error: cited.error };
     if (options.verdict === 'pass' && cited.run.exit_code !== 0) {
       return { code: 1, error: `evidence run ${runId} exited ${cited.run.exit_code}, which contradicts --verdict pass` };
@@ -674,8 +769,8 @@ function record(options) {
     driver: RECORDED_DRIVER_SPELLINGS.get(options.driver) || options.driver,
     evidence: evidence.value,
     evidence_run: runId,
-    tree: currentTree.tree,
-    tree_reason: currentTree.tree ? null : clip(String(currentTree.reason || 'no tree id'), 400),
+    tree: current.tree.tree,
+    tree_reason: current.tree.tree ? null : clip(String(current.tree.reason || 'no tree id'), 400),
     recorded_at: new Date(options.now ? options.now() : Date.now()).toISOString(),
     plugin_version: readPluginVersion(),
   };
@@ -719,7 +814,7 @@ function evaluate(criteria, entries, currentTree, projectRoot, limits = LIMITS, 
       const last = matching[matching.length - 1];
       const paths = last.tree ? evidenceRun.fingerprintChanges(projectRoot, treeRoot, last.tree, currentTree.tree, { ...evidenceRun.LIMITS, listedPaths: limits.listedPaths }) : null;
       const listed = paths && paths.length > 0
-        ? `: ${paths.slice(0, limits.listedPaths).map((entry) => display(entry, projectRoot, limits)).join(', ')}${paths.length > limits.listedPaths ? ', …' : ''}`
+        ? `: ${pathList(paths.slice(0, limits.listedPaths), paths.length > limits.listedPaths, projectRoot, limits)}`
         : '';
       return { criterion, state: 'stale', record: last, cause: `files changed since it was verified${listed}` };
     }
@@ -752,7 +847,7 @@ function assess(options) {
     return { outcome: 'unavailable', reason: error.message };
   }
   const chain = options.chain;
-  const criteria = readCriteria(chain.planPath, options);
+  const criteria = chainCriteria(chain, options);
   if (criteria.status === 'no-section' || criteria.status === 'unusable') return { outcome: 'no-criteria', reason: criteria.reason, chain };
   if (criteria.status !== 'ok') return { outcome: 'unresolved', reason: `${chain.planRel}: ${criteria.reason}`, chain };
   const active = criteria.criteria.filter((entry) => entry.state === 'active');
@@ -800,6 +895,10 @@ function describeRow(row, projectRoot, limits = LIMITS, withEvidence = false) {
   return `${id} ${row.state}${cause}${unverified}${how}${evidence} | ${text}`;
 }
 
+function unfingerprintedCause(chain, currentTree) {
+  return `${chain.facts.label}: the work tree could not be fingerprinted (${currentTree.reason || 'no tree id'}), so no record can be matched to the pull-request head`;
+}
+
 function status(options) {
   const limits = limitsWith(options.limits);
   const refusal = workTreeRefusal(options, limits);
@@ -810,6 +909,9 @@ function status(options) {
   if (result.outcome !== 'evaluated') {
     const suffix = remedies(result.outcome, [], chain, options.projectRoot).map((entry) => ` | ${entry}`).join('');
     return { code: result.outcome === 'unavailable' ? 2 : 1, lines: [...chain.disclosures, `ACCEPTANCE STATUS — ${result.outcome} | ${result.reason} | plan: ${chain.planRel}${suffix}`] };
+  }
+  if (chain.runId && !result.currentTree.tree) {
+    return { code: 1, lines: [...chain.disclosures, `ACCEPTANCE STATUS — unresolved | ${unfingerprintedCause(chain, result.currentTree)} | plan: ${chain.planRel}`] };
   }
   const active = result.rows.filter((row) => row.criterion.state === 'active');
   const passing = active.filter((row) => row.state === 'pass').length;
@@ -963,17 +1065,11 @@ function runOutcome(options, chain, limits) {
       rows: [],
     };
   }
-  const head = runHead(repository.root, chain.facts.prHead, limits, repository.excluded);
+  const head = runHead(repository.root, chain.facts.prHead, limits, repository.excluded, options.projectRoot);
   if (head.reason) return { state: 'unresolved', cause: `${chain.facts.label}: ${head.reason}`, rows: [] };
   const result = assess({ ...options, chain });
   if (result.outcome !== 'evaluated') return { state: result.outcome, cause: result.reason, rows: [] };
-  if (!result.currentTree.tree) {
-    return {
-      state: 'unresolved',
-      cause: `${chain.facts.label}: the work tree could not be fingerprinted (${result.currentTree.reason || 'no tree id'}), so no record can be matched to the pull-request head`,
-      rows: [],
-    };
-  }
+  if (!result.currentTree.tree) return { state: 'unresolved', cause: unfingerprintedCause(chain, result.currentTree), rows: [] };
   const rows = result.rows;
   const active = rows.filter((row) => row.criterion.state === 'active');
   const passing = active.filter((row) => row.state === 'pass').length;

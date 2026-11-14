@@ -1911,13 +1911,22 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   acceptance verbs take `--run <id>` instead of `--log`, `zensu-log.sh --evidence-run --scope
   acceptance --run <id>` runs a check in the run's work tree, and
   `zensu-log.sh --autopilot-validate --run <id> [--accept-partial]` is the only way past VALIDATE:
-  `--autopilot-event` refuses `VALIDATION_PASSED`. The criteria are the `AC-###` rows of the plan
-  the user approved, which the plan-approval hook stores byte for byte as
-  `.zensu/state/autopilot-approved-plan-<sha256>.md` and refuses as `PLAN_CRITERIA_UNUSABLE` when it
-  carries no active `AC-###` row; a work-order run reads `.zensu/plans/<order-id>.md`. The verb
-  refuses unless `HEAD` of the work tree is the pull-request head and the tree is clean, and a
+  `--autopilot-event` refuses `VALIDATION_PASSED`, and also `PLAN_APPROVED` and every event id in
+  the `plan-approved-` namespace, which only the plan-approval hook records when the user approves
+  a plan. The criteria are the `AC-###` rows of the plan the user approved, which the plan-approval
+  hook stores byte for byte as `.zensu/state/autopilot-approved-plan-<sha256>.md` on a run that
+  validates, lists from a private copy of those bytes, and refuses as `PLAN_CRITERIA_UNUSABLE` when
+  it carries no active `AC-###` row or does not parse, or as `PLAN_CRITERIA_UNREADABLE` when the
+  requirements lister fails for another reason; a work-order run reads `.zensu/plans/<order-id>.md`.
+  Every verb reads the criteria from the plan bytes whose digest it has just checked, never from a
+  second read of the file, except for a work-order plan no person approved, which has no digest to
+  check: the verb reads that file and says so with `ACCEPTANCE PLAN UNAPPROVED`. The verb refuses unless `HEAD` of the work tree is the pull-request head and the tree
+  is clean. An abbreviated head is looked up among the repository's commits only, so a branch or
+  tag of the same name never stands in for it, and an abbreviation that several commits begin with
+  refuses; a dirty tree refuses with its first five changed paths and the count of the rest. A
   stored plan that no longer matches its digest, or a run approved before this release kept one,
-  is `unresolved`. When the session's project root lies below the repository top, the records and
+  is `unresolved`, and so is a tree that cannot be fingerprinted, for the verb and for
+  `--acceptance-status --run`, which then exits `1`. When the session's project root lies below the repository top, the records and
   the clean-tree check cover the whole repository, so an edit outside the project root makes the
   records stale too. `--accept-partial` validates a verdict whose every open criterion is `partial`
   as `partial-accepted` and records `acceptance-partial` in the run's `bypasses` list;
@@ -1925,7 +1934,9 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   on, 1 that it stays at VALIDATE, 2 a misuse or a fault. A run that came back to VALIDATE from a
   fix attempt is refused with exit 2, the switched-off gate included, until its pushed head is
   recorded with `PR_HEAD_UPDATED`. A work-order run that validates is refused at `--bind-spec`
-  with `plan-criteria-unusable` while its plan carries no active `AC-###` row.
+  with `plan-criteria-unusable` while its plan carries no active `AC-###` row or does not parse,
+  the latter with its own remedy to close the open code fence, and with
+  `plan-criteria-unreadable` while the requirements lister cannot judge that plan.
 - **Modes.** `evidence.acceptanceGate` is `required` (default) or `advisory`, which prints the same
   verdict marked `(advisory, not blocking)` and closes the chain. Under `advisory`,
   `--autopilot-validate` validates a run whose verdict did not pass and records

@@ -320,7 +320,7 @@ an opening fence that is never closed
 | AC-001 | a real requirement the fence swallows | spec |
 PLAN
 ERR_L19="$(bash "$REQ" --plan "$FIX/fence-unterminated.md" 2>&1 >/dev/null)"
-[ $? -eq 2 ] && printf '%s' "$ERR_L19" | grep -qF 'unterminated code fence'
+[ $? -eq 5 ] && printf '%s' "$ERR_L19" | grep -qF 'unterminated code fence'
 check "L19 an unterminated fence is a parse failure, not a verdict about the table" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/no-header.md" >/dev/null 2>&1
 check "L18 a table with no recognizable header row falls back to split index 3" "$(verdict $?)"
@@ -434,8 +434,8 @@ check "L23 a fence nested inside another fence does not flip parity (no false un
 # failure, and a table that lives only inside a fence is still not a table.
 printf '%s\n' '# Zensu Plan: still open' '' '## Requirements' '```' '| AC-001 | x | spec |' > "$FIX/still-open.md"
 bash "$REQ" --plan "$FIX/still-open.md" >/dev/null 2>&1
-[ $? -eq 2 ]
-check "L23b a genuinely unterminated fence is still exit 2" "$(verdict $?)"
+[ $? -eq 5 ]
+check "L23b a genuinely unterminated fence is still exit 5" "$(verdict $?)"
 rm -rf "$FIX"
 
 echo "== AC-004: a chain that changed nothing is out of scope =="
@@ -535,7 +535,7 @@ for SID in rq-missing rq-placeholder rq-filled rq-explicit rq-explicit-absent \
            rq-explicit-outside rq-explicit-stem rq-relative-log rq-outside-log \
            rq-wrong-schema rq-malformed rq-clean-tree rq-symlink-plans \
            rq-symlink-logs rq-no-stem rq-stem-unchecked rq-writer-seam rq-both-off \
-           rq-legacy-v1 rq-git-refused rq-git-refused-off; do
+           rq-legacy-v1 rq-git-refused rq-git-refused-off rq-explicit-fence; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -749,6 +749,17 @@ check "X3 --plan is refused on a verb that cannot act on it" "$(verdict $?)"
 ERR_X4="$(bash "$LOG" --tdd-complete --session "$SID_XA" --plan "" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_X4" | grep -qF 'must not be empty'
 check "X4 an empty --plan is a usage error, not a plan-content verdict" "$(verdict $?)"
+SID_XF="rq-explicit-fence"
+activate_session "$SID_XF"
+printf '%s\n' '# Zensu Plan: fence' '' '## Requirements' '| ID | Requirement | Source |' '|----|-------------|--------|' '| AC-001 | a requirement the open fence leaves unread | spec |' '' '```' 'an example that is never closed' > "$BODIES/fence-open.md"
+stage "$SID_XF" "2026-01-01-0606_build-explicit-fence" "$BODIES/fence-open.md"
+ERR_XF="$(bash "$LOG" --tdd-complete --session "$SID_XF" --plan "$PROJ/.zensu/plans/2026-01-01-0606_build-explicit-fence.md" 2>&1 >/dev/null)"
+RC_XF=$?
+[ "$RC_XF" -ne 0 ] && printf '%s' "$ERR_XF" | grep -qF 'does not parse' \
+  && printf '%s' "$ERR_XF" | grep -qF 'Close the code fence the plan leaves open' \
+  && ! printf '%s' "$ERR_XF" | grep -qF 'could not judge the plan' \
+  && ! printf '%s' "$ERR_XF" | grep -qF 'carries no usable'
+check "X2f a plan whose code fence never closes is refused as a plan that does not parse, with the fence as the remedy" "$(verdict $?)"
 
 echo "== AC-006: the escape hatch, and its independence =="
 SID_E="rq-escape"
