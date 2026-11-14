@@ -166,16 +166,22 @@ the same config content.
   command names a run directory, or when its config file carries
   `browser.contextOptions.storageState`; a CLI another program runs (`xargs`, `stdbuf`, `env -S`,
   `bash -c --`, a heredoc, a path into the `@playwright/cli` package, a CLI path the shell
-  expands first such as `~/.local/bin/playwright-cli`) counts as such a call, a word
-  that only contains the CLI's name (`playwright-cli.json`) does not. The gate reads every config
+  expands first such as `~/.local/bin/playwright-cli`) counts as such a call, a word, expanded
+  or not, that holds the CLI's name only inside a longer one (`playwright-cli.json`, a folder
+  `playwright-cli-demo`) does not; the consent gate and the read guard share that name rule, which
+  counts the name only where nothing follows it but the start of a `.cmd`, `.exe` or `.ps1`
+  suffix. The gate reads every config
   value the text sets, behind `export`, `declare`, `sudo` or `doas` and inside a command string or
   heredoc included, as the CLI does, and refuses one it cannot read as JSON (missing, not a
   regular file, a network path, over 1 MiB, invalid JSON, an `.ini` path, which the CLI reads as
   INI) and one it cannot pin down (a value assembled at run time or appended with `+=`, a
   `--config` that another program completes, the variable set by `read`, `printf -v` or any other
-  way than a literal assignment, an assignment value whose `~` the shell expands, a relative
-  path in a command that is not one plain unwrapped call). It confirms a regular file before it
-  opens one. `state-load` stays denied. The cost falls on a user's own browser skills too: their
+  way than a literal assignment, an assignment value whose `~` or zsh `=` the shell expands, a
+  relative path in a command that is not one plain unwrapped call). A search of the CLI's own
+  output, a command made only of plain literal calls of the CLI, `grep`, `egrep`, `fgrep`, `rg`,
+  `cd` and `pushd`, reads only the CLI calls' own config, so
+  `playwright-cli --help | grep -- --config` passes. It confirms a regular file before it opens
+  one. `state-load` stays denied. The cost falls on a user's own browser skills too: their
   own state-restoring, INI or variable-held config is refused on every session. Measured in the
   specification session: a session outside the gate (`-s=zvprobe-state1`) that opened a
   `storageState` config came up signed in.

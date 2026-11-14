@@ -204,3 +204,17 @@ test('the CLI prints one key per line and nothing a report could mistake for a r
   assert.equal(version.cliMain(['--binary', ''], { write: (text) => printed.push(text) }), true);
   assert.deepEqual(printed, ['source=absent\nversion=\nowner=\n']);
 });
+
+test('holdsCliName counts a CLI name only where the name characters after it can still end a binary name', () => {
+  for (const text of [
+    'playwright-cli', '~/bin/playwright-cli', '$HOME/bin/PLAYWRIGHT-CLI', "$'playwright-cli'", "playwright-cli$''",
+    '"$(command -v playwright-cli)"', '"${PW:-playwright-cli}"', '{playwright-cli,}', 'playwright-cli.{cmd,json}',
+    'playwright-cli.c*', 'playwright-cli.EXE', '/opt/*/playwright-cli.ps1', 'playwright-cli`true`', "$'playwright-cli\\x00.json'",
+    'play\\wright-cli*', 'playwright-cl``i', 'play\\\nwright-cli', '~/node_modules/@playwright/cli/cli.js', '@playwright/cli@0.1.24',
+    '/u/playwright-cli-demo/bin/playwright-cli',
+  ]) assert.equal(version.holdsCliName(text), true, text);
+  for (const text of [
+    '', 'playwright', '.zensu/verify-feature-runs/*/playwright-cli.json', '/u/playwright-cli-demo/.zensu/x', '~/playwright-cli-tests/*',
+    "'playwright-cli'.json", 'playwright-cli.cmdx', 'playwright-cli.exe.bak', '@playwright/cli-tools/*', 'play\\wright-cli\\.json',
+  ]) assert.equal(version.holdsCliName(text), false, text);
+});

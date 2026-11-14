@@ -1474,14 +1474,14 @@ else
   check "V64-control a name assembled at run time reaches no decision, and while the hook environment names a zensu-verify session a literal playwright-cli call with a non-literal session is denied" FAIL
 fi
 VERSION_MEMBERS="$(grep -oE 'cliVersion\.[A-Za-z_]+' "$MODULE" | LC_ALL=C sort -u | tr '\n' ' ')"
-if [ "$VERSION_MEMBERS" = "cliVersion.BINARY_NAMES cliVersion.PACKAGE_NAME cliVersion.binaryNames " ] \
-  && [ "$(grep -o 'cliVersion' "$MODULE" | wc -l | tr -d ' ')" = "4" ] \
+if [ "$VERSION_MEMBERS" = "cliVersion.BINARY_NAMES cliVersion.PACKAGE_NAME cliVersion.binaryNames cliVersion.holdsCliName " ] \
+  && [ "$(grep -o 'cliVersion' "$MODULE" | wc -l | tr -d ' ')" = "5" ] \
   && [ "$(grep -c 'playwright-cli-version' "$MODULE")" = "1" ] \
   && grep -qF "const cliVersion = require('./playwright-cli-version-v1.js');" "$MODULE" \
   && ! grep -q 'playwright-cli-version' "$PRE_HOOK" "$POST_HOOK" "$PRE_BODY" "$POST_BODY" "$PREFILTER_LIB"; then
-  check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME and binaryNames from the version module, so the gate never reads the installed version" PASS
+  check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME, binaryNames and holdsCliName from the version module, so the gate never reads the installed version" PASS
 else
-  check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME and binaryNames from the version module, so the gate never reads the installed version (members:$VERSION_MEMBERS)" FAIL
+  check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME, binaryNames and holdsCliName from the version module, so the gate never reads the installed version (members:$VERSION_MEMBERS)" FAIL
 fi
 HOOK_DENY_MISSING=""
 for literal in 'Zensu browser consent gate denied the playwright-cli call: %s' 'deny "prefilter library unavailable"' 'deny "node unavailable"' 'deny "decision module absent or symlinked"' 'deny "decision module failed"'; do

@@ -958,10 +958,12 @@ directory, in any position and behind any program the text shows, or when its co
 carries `browser.contextOptions.storageState`. A CLI that another program receives as an
 argument counts as such a call — `xargs`, `stdbuf`, `caffeinate`, `env -S`, `bash -c --`, a
 heredoc fed to a shell, a path into the `@playwright/cli` package — and so does any word the
-shell expands first whose text names the CLI, such as `~/.local/bin/playwright-cli`,
-`$'playwright-cli'` or `"$(command -v playwright-cli)"`, while a literal word that only
-contains the CLI's name, such as the run config `playwright-cli.json` or a project folder named
-after the CLI, does not, and neither does the directory a `cd` or `pushd` enters. The gate reads
+shell expands first whose text names the CLI where a binary name can still end, with nothing
+after the name but the start of a `.cmd`, `.exe` or `.ps1` suffix, such as
+`~/.local/bin/playwright-cli`, `$'playwright-cli'`, `"$(command -v playwright-cli)"` or
+`playwright-cli.{cmd,json}`, while a word that holds the CLI's name only inside a longer one,
+expanded or not, such as the run config `playwright-cli.json` behind a glob or a project folder
+`playwright-cli-demo`, does not, and neither does the directory a `cd` or `pushd` enters. The gate reads
 that config as the CLI does: the path as given when it is absolute, else against the payload's
 working directory when the call is one plain call without a wrapper, with a byte-order mark
 skipped and the text parsed as JSON. It reads every config value the command text sets —
@@ -970,8 +972,12 @@ skipped and the text parsed as JSON. It reads every config value the command tex
 refuses one it cannot pin down: a value assembled at run time or appended with `+=`, a
 `--config` with no word after it, which another program such as `xargs` completes, the variable
 set any other way than by a literal assignment (`read`, `printf -v`, `mapfile`, a reference or a
-bare `export`), an assignment value whose `~` the shell expands, and a relative path unless the
-command is one plain unwrapped call. It confirms that the path names a
+bare `export`), an assignment value whose `~`, or zsh's `=`, the shell expands, and a relative
+path unless the command is one plain unwrapped call. A search of the CLI's own output is the one
+command that is not read that way: in a command made only of plain calls of `playwright-cli`,
+`grep`, `egrep`, `fgrep`, `rg`, `cd` and `pushd`, with no word the shell expands, substitution,
+heredoc or here-string, only the config of the CLI calls themselves is read, so
+`playwright-cli --help | grep -- --config` passes. It confirms that the path names a
 regular file before it opens it, so it never opens a FIFO or a device, and it refuses a path that
 starts with two slashes or backslashes, a network path, unread. The CLI reads an `.ini` path, and
 a file that is no JSON and does not start with `{`, as INI, so the gate refuses a config it cannot
@@ -1213,7 +1219,11 @@ and tells the model not to retry through another tool, path spelling or command.
   `..` or for no directory at all — a brace, a group, an expansion, a dot glob such as `.?` —
   makes every later segment a candidate, and so does `**` when a `..` follows it.
 - A `playwright-cli` call whose command names a run directory but no `zensu-verify` session, so
-  a signed-in run config never opens on a session the consent gate does not judge.
+  a signed-in run config never opens on a session the consent gate does not judge. A word the
+  shell expands counts as the CLI by the consent gate's rule, when nothing follows the name but
+  the start of a `.cmd`, `.exe` or `.ps1` suffix, so a glob path to a run's `playwright-cli.json`
+  passes. The deny names the Grep tool and a commit message file for text that only mentions the
+  CLI beside a run directory.
 - Any other tool — an MCP server's tool, `WebFetch`, `LSP`, `Artifact`, an agent or task
   prompt — whose payload names `verify-feature-runs` and whose input holds a string, a key
   included, that spells a path inside a run's `auth/` directory, read word by word as shell text

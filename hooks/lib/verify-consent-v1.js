@@ -35,8 +35,9 @@ const CLI_PACKAGE_PATH_RE = new RegExp(`${CLI_PACKAGE.toLowerCase().replace(/[.*
 const CLI_TOKEN_BREAK_RE = /[\s;&|()<>=,{}]+/;
 const CONFIG_ASSIGNMENT_RE = new RegExp(`^${CONFIG_ENV}(\\+?)=`, 'i');
 const CONFIG_NAME_RE = new RegExp(`(^|[^A-Za-z0-9_])${CONFIG_ENV}($|[^A-Za-z0-9_])`, 'i');
-const ASSIGNMENT_TILDE_RE = /(^|:)~/;
+const ASSIGNMENT_EXPANSION_RE = /(^|:)[~=]/;
 const DIRECTORY_BUILTINS = Object.freeze(['cd', 'pushd']);
+const SEARCHERS = Object.freeze(['grep', 'egrep', 'fgrep', 'rg']);
 const REMOTE_CONFIG_RE = /^[\\/]{2}/;
 const AMBIENT_TEXT_RE = /(^|[^A-Za-z0-9_])(PLAYWRIGHT_MCP_|PWTEST_)/;
 const REDEFINITION_RE = /(^|[\s;&|({])(function\s+)?playwright-cli\s*\(\s*\)|(^|[\s;&|({])function\s+playwright-cli(\s|$|\{)/i;
@@ -674,8 +675,8 @@ function assignmentOf(word) {
   if (!word) return null;
   const match = word.raw.match(/^([A-Za-z_][A-Za-z0-9_]*)(\+?)=/);
   if (!match) return null;
-  const tilde = ASSIGNMENT_TILDE_RE.test(word.raw.slice(match[0].length));
-  return { name: match[1], value: word.value.slice(match[0].length), unexpanded: word.unexpanded || match[2] === '+' || tilde };
+  const expanded = ASSIGNMENT_EXPANSION_RE.test(word.raw.slice(match[0].length));
+  return { name: match[1], value: word.value.slice(match[0].length), unexpanded: word.unexpanded || match[2] === '+' || expanded };
 }
 
 function cliBasename(value) {
@@ -815,7 +816,7 @@ function runsCli(text) {
 }
 
 function expandsIntoCli(word) {
-  return Boolean(word) && word.unexpanded && (namesCli(word.raw) || namesCli(word.value));
+  return Boolean(word) && word.unexpanded && [word.raw, word.value].some(cliVersion.holdsCliName);
 }
 
 const NO_SCOPE = Object.freeze({ assignments: Object.freeze([]), wrappers: Object.freeze([]) });
@@ -920,6 +921,12 @@ function plainShape(top, invocations) {
   return invocations.length === 1 && invocations[0].depth === 0;
 }
 
+function searchShape(top) {
+  if (!top || top.fault || top.redirectUnexpanded || top.nested.length + top.heredocs.length + top.herestrings.length > 0) return false;
+  return top.segments.every((words) => words.length > 0 && words.every((word) => !word.unexpanded)
+    && (isCliWord(words[0]) || SEARCHERS.includes(words[0].value) || DIRECTORY_BUILTINS.includes(words[0].value)));
+}
+
 function analyzeCommand(command, env, platform = process.platform) {
   const text = String(command);
   const marks = commandMarkers(text, env);
@@ -963,6 +970,7 @@ function analyzeCommand(command, env, platform = process.platform) {
     unjudged: found.unjudged,
     envBuiltin: found.envBuiltin,
     plain: plainShape(context.top, found.invocations),
+    searchOnly: searchShape(context.top),
     hidden: found.hidden,
     offSession,
   };
@@ -1080,7 +1088,7 @@ function offSessionReason(analysis, marks, payload) {
       if (reason) return reason;
     }
   }
-  if (placed) return null;
+  if (placed || analysis.searchOnly) return null;
   for (const value of configMentions(analysis.text, 0, [])) {
     const reason = offSessionConfigReason(value, cwd, false);
     if (reason) return reason;

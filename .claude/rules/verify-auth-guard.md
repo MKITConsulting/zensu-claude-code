@@ -84,14 +84,23 @@ restore the state unjudged. That rule's markers derive from their owners: `CLI_W
 `BINARY_NAMES` and `PACKAGE_NAME` of `playwright-cli-version-v1.js`, `SESSION_MARKER` from
 `AUTH_SESSION_PREFIX`. A token names the CLI when it equals a `CLI_WORDS` entry, ends in `/` and
 one, starts with one and `@`, or holds an expansion character (`EXPANSION_TOKEN`) the shell acts
-on and contains one. `maskedQuotedExpansions` decides "acts on" for Bash text: it hides each such
-character inside single quotes, an ANSI-C string or behind a backslash, and every one but `$`
-inside double quotes, so `$'playwright-cli'`, `playwright-cli$''`, `"${PW:-playwright-cli}"` and
-`{playwright-cli,}` count while `playwright-cli.json`, `'*/playwright-cli.json'` and
-`"playwright-cli*"` do not. An unquoted glob or variable path that contains the name, such as
-`.zensu/verify-feature-runs/*/playwright-cli.json`, still counts, as the consent gate's
-`expandsIntoCli` counts it. PowerShell text keeps the unmasked reading, which the consent gate
-refuses anyway. The matcher has ONE owner, `AUTH_GUARD_MATCHER` (`.*`) in
+on and holds the CLI's name where a binary name can still end. That last test is `holdsCliName`
+in `playwright-cli-version-v1.js`, the one the consent gate's `expandsIntoCli` calls: an
+occurrence of the name counts only when the name characters after it (`[a-z0-9._-]`) are none or
+the start of a `.cmd`, `.exe` or `.ps1` suffix, read once with a backslash or backtick ending
+them and once with both removed. The guard hands it the tokens of the masked text's shell
+spellings before quotes, backslashes and backticks are stripped, so a NUL escape in
+`$'playwright-cli\x00.json'` or a backtick substitution right after the name still ends it.
+`maskedQuotedExpansions` decides "acts on" for Bash text: it hides each such character inside
+single quotes, an ANSI-C string or behind a backslash, and every one but `$` inside double
+quotes, so `$'playwright-cli'`, `playwright-cli$''`, `"${PW:-playwright-cli}"`,
+`{playwright-cli,}` and `playwright-cli.{cmd,json}` count while `playwright-cli.json`,
+`'*/playwright-cli.json'` and `"playwright-cli*"` do not, and neither does an unquoted glob or
+variable path that holds the name only inside a longer one, such as
+`.zensu/verify-feature-runs/*/playwright-cli.json` or `"$HOME"/playwright-cli-tests/…`.
+PowerShell text keeps the unmasked reading, which the consent gate refuses anyway. The session
+deny names no CLI and points text that only mentions the browser CLI beside a run directory to
+the Grep tool or a commit message file, as the other deny texts do. The matcher has ONE owner, `AUTH_GUARD_MATCHER` (`.*`) in
 `verify-auth-state-v1.js`: `GUARD_MATCHER` is it, the registry entry spells the same string, and
 the guard's unit file compares them. `AUTH_GUARD_TOOLS`, the guard's `FIELD_TOOLS`, names the
 nine tools with field-precise rules; every other tool goes through `otherToolVerdict`, which
@@ -151,7 +160,9 @@ there instead of listing them, because its body sits on the shrink-only allowlis
 **Coupled sites:** `AUTH_SESSION_PREFIX`, `AUTH_GUARD_HOOK_FILE`, `AUTH_GUARD_TOOLS`,
 `AUTH_GUARD_MATCHER`, `AUTH_GUARD_PROBE_TOOLS`, the caps,
 `FAULTS` and `discardAuthState` in `verify-auth-state-v1.js`; `CLI_WORDS`, `SESSION_MARKER` and
-`REASONS.SESSION` in the guard; `runConfigShape`, `judgeCall`, `evaluate`, `runPost`,
+`REASONS.SESSION` in the guard; `holdsCliName` and `NAME_SUFFIXES` in
+`playwright-cli-version-v1.js`, shared with the consent gate's `expandsIntoCli`;
+`runConfigShape`, `judgeCall`, `evaluate`, `runPost`,
 `authGuardRegistered` and the `STATE_*` and `AUTH_SIGNAL_DENIED` reasons in
 `hooks/lib/verify-consent-v1.js`; `checkReadiness`, `signIn`, `sessionName`, `LOGIN_RESTORED`,
 `LOGIN_FAILURE_RE`, `ABORT_SIGNALS`, `discardState` and `DISCARD_USAGE` in
@@ -173,7 +184,11 @@ config widened (`browser.contextOptions` may carry `storageState`), and the cons
 two commands it admitted on a signed-in session. The consent memory gains an optional field read
 permissively, which on its own would be a `patch`. The hardening that followed is `minor` too:
 the guard's matcher widened to `.*`, the consent gate refuses calls on other sessions it never
-judged, and the helper refuses `--auth-origin`.
+judged, and the helper refuses `--auth-origin`. The name boundary, the search shape, the zsh `=`
+reading and the session deny remedy that came after are `patch`: no schema field, key set, hook,
+matcher, config key or attestation moved, the two gates refuse less for a longer name such as
+`playwright-cli.json` and for a search of the CLI's help, and refuse more only for a zsh `=`
+assignment, whose value they misread before.
 
 **Known gaps, accepted and named:**
 

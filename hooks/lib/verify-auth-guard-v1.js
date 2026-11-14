@@ -212,12 +212,12 @@ function namesCliWord(spellings, active) {
   const tokens = (text) => text.match(/[^\s;&|<>()]+/g) || [];
   return spellings.some((text) => tokens(text).some((token) => CLI_WORDS.some((word) => token === word
     || token.endsWith(`/${word}`) || token.startsWith(`${word}@`))))
-    || active.some((text) => tokens(text).some((token) => EXPANSION_TOKEN.test(token) && CLI_WORDS.some((word) => token.includes(word))));
+    || active.some((text) => tokens(text).some((token) => EXPANSION_TOKEN.test(token) && cliVersion.holdsCliName(token)));
 }
 
 function runCallWithoutSession(command, tool) {
   const spellings = cliSpellings(command, tool);
-  const active = tool === 'PowerShell' ? spellings : cliSpellings(maskedQuotedExpansions(String(command)), tool);
+  const active = tool === 'PowerShell' ? spellings : shellSpellings(maskedQuotedExpansions(String(command)), tool);
   return namesCliWord(spellings, active)
     && spellings.some((spelling) => spelling.includes(MARKER))
     && !spellings.some((spelling) => spelling.includes(SESSION_MARKER));
@@ -368,7 +368,8 @@ function denyReason(verdict) {
     return 'Zensu verify-auth guard: this browser CLI call names a /zensu:verify-feature run directory but no zensu-verify session. '
       + 'A run config there may restore a signed-in test-account state, so it opens only on the session the run-config helper printed with it, '
       + 'where the browser consent gate judges every call. Name that session with -s=<session> exactly as the helper printed it; '
-      + 'do not retry under another session name, program or path spelling.';
+      + 'do not retry under another session name, program or path spelling, '
+      + 'and to search or commit text that merely names the browser CLI beside a run directory, use the Grep tool or a commit message file.';
   }
   const where = verdict && verdict.reason === REASONS.PATH && verdict.target
     ? `(${displayTarget(verdict.target)})`
