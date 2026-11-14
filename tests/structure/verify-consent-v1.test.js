@@ -2340,6 +2340,7 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
     `playwright-cli -s=mine open --config=${bom}`,
     `playwright-cli -s=mine attach --config ${restoring}`,
     `PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `playwright_mcp_config=${restoring} playwright-cli -s=mine open`,
     `env PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
     'playwright-cli open --config restoring.json',
     `playwright-cli -s=mine open --config=${own} --config=${restoring}`,
@@ -2377,6 +2378,10 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
     'stdbuf -oL playwright-cli -s=mine open --config=own.json',
     'find . -name x.json -exec playwright-cli -s=mine open --config {} \\;',
   ]) assert.equal(reason(command), REASONS.CONFIG_UNRESOLVED_OFF_SESSION, command);
+  assert.equal(reason('git commit -m "fix playwright-cli --config handling"'), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
+  for (const key of ['STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION']) {
+    assert.match(REASONS[key], /search or commit text that names playwright-cli beside a config through the Grep tool or a message file$/, key);
+  }
   assert.equal(denied('playwright-cli -s=mine open --config=own.json', { payload: {} }), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
   passes(`playwright-cli -s=mine open --config=${own}`);
   passes('playwright-cli -s=mine open --config=own.json');

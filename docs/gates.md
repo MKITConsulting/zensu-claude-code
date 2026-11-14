@@ -964,6 +964,9 @@ path. A config that restores no state passes, and so does a call that names neit
 directory nor a config. A PowerShell call that names the CLI with a run directory or a
 config is refused, because the gate judges Bash text only. Measured in the specification
 session: a session outside the gate that opened a `storageState` config came up signed in.
+A `PLAYWRIGHT_MCP_CONFIG` assignment counts in any letter case, because Windows reads environment
+names that way. Text that only mentions the CLI beside a config, such as a commit message, is
+judged like a call, so every config refusal names the Grep tool and a message file for it.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was

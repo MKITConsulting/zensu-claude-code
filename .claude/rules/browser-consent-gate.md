@@ -268,7 +268,8 @@ contains the name, such as `playwright-cli.json` or a project folder named after
 token, and the operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never counts; the gated
 `indirect` test keeps its substring reading. With the `runs` arm an off-session call or a hidden
 CLI denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each
-inline `PLAYWRIGHT_MCP_CONFIG` assignment of an off-session call is read, and when the command is
+inline `PLAYWRIGHT_MCP_CONFIG` assignment of an off-session call, in any letter case because
+Windows reads environment names that way, is read, and when the command is
 not one plain unwrapped call, or a CLI is hidden, `configMentions` also reads every config value
 the text sets: `--config <path>`, `--config=<path>` and a `PLAYWRIGHT_MCP_CONFIG` assignment in
 any letter case, in any segment, behind `export`, `declare`, `sudo` or `doas`, inside a word that
@@ -286,7 +287,9 @@ its text parsed as JSON. A key `browser.contextOptions.storageState` denies
 which is why a config the gate cannot parse is refused rather than passed. A command whose text
 names a `zensu-verify-` session keeps its shape denials (`marks.named` skips this pass), so a typo
 such as `-S=` still gets `SESSION_UNRESOLVED`. `powershellReason` refuses a PowerShell call with
-either arm as `POWERSHELL_OFF_SESSION_NOT_JUDGED`. All five reasons are final. The read guard's
+either arm as `POWERSHELL_OFF_SESSION_NOT_JUDGED`. All five reasons are final, and each names the
+Grep tool and a message file, because a commit message that names the CLI beside `--config` is
+judged like a call. The read guard's
 session rule stays beside this as a second, textual line. **Residual:** a config the gate never
 sees — the working directory's default `.playwright/cli.config.json`, the global config, which
 the CLI merges under every config, a `PLAYWRIGHT_MCP_CONFIG` the shell inherited, a flag or
