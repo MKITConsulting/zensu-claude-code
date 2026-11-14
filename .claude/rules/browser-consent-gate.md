@@ -73,8 +73,9 @@ across lines (`'play' + 'wri' + 'ght-cli'`); it forwards a text that names `veri
 or holds `u{`, and every PowerShell call while the hook environment's `PLAYWRIGHT_CLI_SESSION`
 names a `zensu-verify-` session, because a split spelling never names `playwright-cli` literally
 and node's `spellings()` decides. `consentMarked` and the pre hook's fallback drop the same
-characters for a PowerShell payload and count any of `wright`, `verify`, `config` or `u{`, or that
-session variable, as marked. V70 to V70g, V72, V72b, V72f and H17g5-H17g6 pin both halves.
+characters for a PowerShell payload and count any of `wright`, `verify`, `config` or `u{` as
+marked; `consentMarked` also counts that session variable, which the fallback never reads (H17d).
+V70 to V70g, V72, V72b, V72f and H17g5-H17g6 pin both halves.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,

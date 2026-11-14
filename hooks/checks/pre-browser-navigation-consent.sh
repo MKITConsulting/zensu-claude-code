@@ -23,7 +23,7 @@ else
   case "$_zensu_scan $INPUT" in
     *[Pp][Ll][Aa][Yy][Ww][Rr][Ii][Gg][Hh][Tt]*|*[Zz][Ee][Nn][Ss][Uu]-[Vv][Ee][Rr][Ii][Ff][Yy]*) ;;
     *'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
-      case "$_zensu_scan ${PLAYWRIGHT_CLI_SESSION:-}" in
+      case "$_zensu_scan" in
         *[Ww][Rr][Ii][Gg][Hh][Tt]*|*[Vv][Ee][Rr][Ii][Ff][Yy]*|*[Cc][Oo][Nn][Ff][Ii][Gg]*|*[Uu]{*) ;;
         *) exit 0 ;;
       esac
