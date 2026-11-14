@@ -15,6 +15,7 @@ const LITERAL_GLOB = /[*?[]/;
 const LITERAL_EXPANSION = /[%$`{]/;
 const REMOTE_PATH = /^[\\/]{2}/;
 const EXPANSION_TOKEN = /[$*?[{}~]/;
+const MASKED_EXPANSION = '\u0001';
 const SHELL_TOOLS = Object.freeze(['Bash', 'PowerShell']);
 const PATH_FIELDS = Object.freeze({
   Read: Object.freeze(['file_path']),
@@ -176,14 +177,48 @@ function shellWords(text, tool) {
   return words;
 }
 
-function namesCliWord(text) {
-  return (text.match(/[^\s;&|<>()]+/g) || []).some((token) => CLI_WORDS.some((word) => token === word
-    || token.endsWith(`/${word}`) || token.startsWith(`${word}@`) || (EXPANSION_TOKEN.test(token) && token.includes(word))));
+function maskedQuotedExpansions(text) {
+  const mask = (char) => (EXPANSION_TOKEN.test(char) ? MASKED_EXPANSION : char);
+  let out = '';
+  let quote = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '\\' && next !== undefined && quote !== "'") {
+      out += char + mask(next);
+      index += 1;
+    } else if (quote === '') {
+      if (char === '$' && next === "'") {
+        out += "$'";
+        quote = "$'";
+        index += 1;
+      } else {
+        if (char === "'" || char === '"') quote = char;
+        out += char;
+      }
+    } else {
+      if (char === quote.slice(-1)) quote = '';
+      out += quote === '' || (quote === '"' && char === '$') ? char : mask(char);
+    }
+  }
+  return out;
+}
+
+function cliSpellings(command, tool) {
+  return shellSpellings(command, tool).map((spelling) => spelling.toLowerCase().replace(/[`'"\\]/g, ''));
+}
+
+function namesCliWord(spellings, active) {
+  const tokens = (text) => text.match(/[^\s;&|<>()]+/g) || [];
+  return spellings.some((text) => tokens(text).some((token) => CLI_WORDS.some((word) => token === word
+    || token.endsWith(`/${word}`) || token.startsWith(`${word}@`))))
+    || active.some((text) => tokens(text).some((token) => EXPANSION_TOKEN.test(token) && CLI_WORDS.some((word) => token.includes(word))));
 }
 
 function runCallWithoutSession(command, tool) {
-  const spellings = shellSpellings(command, tool).map((spelling) => spelling.toLowerCase().replace(/[`'"\\]/g, ''));
-  return spellings.some(namesCliWord)
+  const spellings = cliSpellings(command, tool);
+  const active = tool === 'PowerShell' ? spellings : cliSpellings(maskedQuotedExpansions(String(command)), tool);
+  return namesCliWord(spellings, active)
     && spellings.some((spelling) => spelling.includes(MARKER))
     && !spellings.some((spelling) => spelling.includes(SESSION_MARKER));
 }

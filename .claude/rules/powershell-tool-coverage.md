@@ -192,7 +192,7 @@ declares 17 cases and one skip on `darwin`, `linux` and `root`, measured where n
 installed, and none on `win32`, where the case is required. Its driver
 `tests/structure/test-powershell-tool-coverage.sh` runs on `windows-shard-3`. The per-hook
 PowerShell cases are B40-B41 (B40x2-B40x7 for the 5.1 readings and the native arguments),
-WP1-WP17, F8p-F8p6, V70-V70g, H17g5-H17g6, R7p-R7pd, PS1-PS6, the work-order gate and post
+WP1-WP17, F8p-F8p6, V70-V70g, V72-V72h, H17g5-H17g8, R7p-R7pd, PS1-PS6, the work-order gate and post
 cases and the PowerShell payloads of `test-vanished-session-cwd.sh`; the surfaces are B16 and
 P2p1-P2p9.
 

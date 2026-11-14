@@ -342,6 +342,7 @@ test('a browser CLI call that names a verify-feature run directory needs a zensu
     ['Bash', `npx @playwright/cli@0.1.21 -s=mine open ${config}`],
     ['Bash', `play''wright-cli -s=mine open ${config}`],
     ['Bash', `$'playwright-cli' -s=mine open ${config}`],
+    ['Bash', `playwright-cli$'' -s=mine open ${config}`],
     ['Bash', `"\${PW:-playwright-cli}" -s=mine open ${config}`],
     ['Bash', `{playwright-cli,} -s=mine open ${config}`],
     ['Bash', `cd ${RUN} && playwright-cli -s=mine open --config=${consent.RUN_CONFIG_NAME}`],
@@ -354,6 +355,10 @@ test('a browser CLI call that names a verify-feature run directory needs a zensu
     `cat ${RUN}/${consent.RUN_CONFIG_NAME}`,
     'playwright-cli -s=mine open --config=/tmp/other.json',
     'node x.js --run-dir /u/playwright-cli-tests/.zensu/verify-feature-runs/r',
+    `find .zensu/verify-feature-runs -path '*/${consent.RUN_CONFIG_NAME}'`,
+    'find .zensu/verify-feature-runs -name "playwright-cli*"',
+    'ls .zensu/verify-feature-runs/run-a1/playwright-cli\\*',
+    `echo '{"config":".zensu/verify-feature-runs/run-a1/${consent.RUN_CONFIG_NAME}"}'`,
   ];
   for (const command of allowed) assert.deepEqual(verdict('Bash', { command }), { deny: false, reason: guard.REASONS.CLEAN }, command);
   const reason = guard.denyReason({ deny: true, reason: guard.REASONS.SESSION });

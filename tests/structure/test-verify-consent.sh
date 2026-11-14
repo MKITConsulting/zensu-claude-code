@@ -454,8 +454,17 @@ case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$NOLIB_JOINED" 2
   *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" PASS ;;
   *) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" FAIL ;;
 esac
+PS_LQ=$'\xe2\x80\x98'
+PS_RQ=$'\xe2\x80\x99'
+ps_payload_spelling() {
+  if [ "${1:-}" = escaped ]; then
+    LC_ALL=C sed -e "s/$PS_LQ/\\\\u2018/g" -e "s/$PS_RQ/\\\\u2019/g"
+  else
+    cat
+  fi
+}
 nolib_powershell() {
-  bash_payload PreToolUse "$1" "$SID" "$PROJ" '{"tool_name":"PowerShell"}' \
+  bash_payload PreToolUse "$1" "$SID" "$PROJ" '{"tool_name":"PowerShell"}' | ps_payload_spelling "${2:-}" \
     | CLAUDE_PLUGIN_ROOT="$NOLIB_ROOT" bash "$NOLIB_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null
 }
 case "$(nolib_powershell "& ('pla' + 'ywright-cli') -s=('zensu-' + 'ver' + 'ify-nolib') snapshot")" in
@@ -465,6 +474,15 @@ esac
 [ -z "$(nolib_powershell 'Get-ChildItem -Recurse')" ] \
   && check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" PASS \
   || check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" FAIL
+NOLIB_TYPOGRAPHIC="& (${PS_LQ}playw${PS_RQ} + ${PS_LQ}right-cli${PS_RQ}) -s=(${PS_LQ}zensu-ve${PS_RQ} + ${PS_LQ}rify-nolib${PS_RQ}) snapshot"
+case "$(nolib_powershell "$NOLIB_TYPOGRAPHIC")" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g7 without the prefilter library a PowerShell call that splits both markers with typographic quotes is still denied" PASS ;;
+  *) check "H17g7 without the prefilter library a PowerShell call that splits both markers with typographic quotes is still denied" FAIL ;;
+esac
+case "$(nolib_powershell "$NOLIB_TYPOGRAPHIC" escaped)" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g8 without the prefilter library the JSON-escaped spelling of those typographic quotes is still denied" PASS ;;
+  *) check "H17g8 without the prefilter library the JSON-escaped spelling of those typographic quotes is still denied" FAIL ;;
+esac
 
 BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
@@ -1606,8 +1624,8 @@ esac
   && check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" PASS \
   || check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" FAIL
 diff_passes_ps() {
-  case "$(bash_payload PreToolUse "$1" "$SID" "$PROJ" "$PS_EXTRA" \
-    | CLAUDE_PLUGIN_ROOT="$DIFF_ROOT" bash "$DIFF_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)" in
+  case "$(bash_payload PreToolUse "$1" "$SID" "$PROJ" "$PS_EXTRA" | ps_payload_spelling "${3:-}" \
+    | env -u PLAYWRIGHT_CLI_SESSION ${2:+"PLAYWRIGHT_CLI_SESSION=$2"} CLAUDE_PLUGIN_ROOT="$DIFF_ROOT" bash "$DIFF_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)" in
     *'decision module absent or symlinked'*) printf 1 ;;
     *) printf 0 ;;
   esac
@@ -1633,16 +1651,21 @@ case "$(pre_reason "~/.local/bin/playwright-cli -s=mine open --config=$V71_DIR/r
   *'is refused on every session but a zensu-verify-auth one'*) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" PASS ;;
   *) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" FAIL ;;
 esac
-PS_LQ=$'\xe2\x80\x98'
-PS_RQ=$'\xe2\x80\x99'
 PS_SPLIT_LINE="& ('playwr' +"$'\n'"'ight-cli') -s=('zensu-ver' +"$'\n'"'ify-x') cookie-list"
-PS_SPLIT_QUOTES="& (${PS_LQ}playwr${PS_RQ} + ${PS_LQ}ight-cli${PS_RQ}) -s=mine open --config=C:\\p\\c.json"
+PS_SPLIT_QUOTES="& (${PS_LQ}playwr${PS_RQ} + ${PS_LQ}ight-cli${PS_RQ}) -s=mine open (${PS_LQ}--con${PS_RQ} + ${PS_LQ}fig${PS_RQ}) C:\\p\\c.json"
 [ "$(diff_passes_ps "$PS_SPLIT_LINE")" = "1" ] \
   && [ "$(diff_passes_ps "$PS_SPLIT_QUOTES")" = "1" ] \
   && [ "$(pre_verdict "$PS_SPLIT_LINE" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
   && [ "$(pre_verdict "$PS_SPLIT_QUOTES" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
   && check "V72f a PowerShell call joined across a line break or with typographic quotes reaches the gate and is refused" PASS \
   || check "V72f a PowerShell call joined across a line break or with typographic quotes reaches the gate and is refused" FAIL
+[ "$(diff_passes_ps "$PS_SPLIT_QUOTES" "" escaped)" = "1" ] \
+  && check "V72g the prefilter forwards the JSON-escaped spelling of typographic quotes that split the config flag" PASS \
+  || check "V72g the prefilter forwards the JSON-escaped spelling of typographic quotes that split the config flag" FAIL
+[ "$(diff_passes_ps 'Get-ChildItem -Recurse' zensu-verify-envarm)" = "1" ] \
+  && [ "$(diff_passes_ps 'Get-ChildItem -Recurse')" = "0" ] \
+  && check "V72h the prefilter forwards every PowerShell call while the hook environment names a zensu-verify session, and only then" PASS \
+  || check "V72h the prefilter forwards every PowerShell call while the hook environment names a zensu-verify session, and only then" FAIL
 
 unit_check_done "V7z every unit file the registry gives this suite was graded"
 
