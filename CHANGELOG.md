@@ -33,8 +33,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   note: `zensu wiki images upload` is now a gated mutation (`upload_wiki_image`), which the
   released gate did not know and let through; run it inside `/zensu:change`.
   `zensu wiki images policy` stays a read.
+- **Acceptance consent**: a standalone `/zensu:build` chain whose criteria this environment cannot
+  observe (a real login, an account, a non-loopback host, a signed build, a driver that cannot
+  run here) now closes only with the
+  user's consent for exactly those criteria. `--chain-done --accept-partial <AC ids>` passes when
+  the listed ids are exactly the open criteria and every one is `partial` on the current tree,
+  records `acceptance-partial` in the session bypass ledger (a consent the ledger does not take
+  keeps the chain open), and the chain-end summary renders it 🟡 with each criterion's reason. A refusal whose open criteria are all `partial` ends with an
+  `accept:` segment. `partial` is never a must-fix in `/zensu:build` step 6d,
+  `/zensu:verify-feature --chain` or `/zensu:self-review`: they ask one question (provide access
+  now, accept as partial, leave the chain open), and a gap foreseen at planning goes into the
+  plan's new optional `## Manual Acceptance` table; `skills/verify-feature/rules/acceptance-consent.md`
+  owns that question and that row. Once the review has converged, a terminus refusal that waits only
+  on the user lets the Stop guard end the turn with an `ACCEPTANCE HAND-OFF — …` notice instead of
+  blocking until the Stop cap, and `--chain-status` prints the same line on stderr; an edit, a plan edit, a
+  new acceptance record or a new review generation re-arms the block. No remedy, refusal or
+  skill text on the chain-closing path names an environment-variable escape any more, and
+  `tests/structure/test-escape-wording.sh` holds that.
 
 ### Upgrade notes
+
+- **An acceptance criterion before review**: `--tdd-complete` now refuses a standalone chain on a
+  changed tree whose plan carries no active `AC-###` row, and names the remedy (one `AC-###` row
+  per acceptance criterion, preferably one this environment can observe). A plan with only `FR-###`
+  rows used to pass there and was refused as `no-criteria` at the terminus, after the review. With
+  `evidence.acceptanceGate: advisory` the check prints a notice and completes, also when it cannot
+  run or cannot read the plan.
 
 - **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill
   prerequisites that name install commands, the README and `docs/operations.md` now give

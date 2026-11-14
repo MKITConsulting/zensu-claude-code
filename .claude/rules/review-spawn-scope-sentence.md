@@ -94,7 +94,8 @@ default rather than a capability, which is why it is NOT the strict reader
 prose in the tree whose subject is a HOST-level rule; without it the only lever was
 `hooks.chainEnforcer=false`, which disables the whole guard — and is not ledgered
 either: a config-disabled gate has no decision point, so only the NINE `ZENSU_*` gate escapes
-listed under §"Visible opt-outs" ever produce an entry — and not every `ZENSU_*=off`
+listed under §"Visible opt-outs" and the consented `acceptance-partial` gap ever produce an
+entry — and not every `ZENSU_*=off`
 spelling is among them, `ZENSU_AUTOPILOT` and `ZENSU_SESSION_LINEAGE` being the two this
 file already records as escapes that are deliberately not ledgered. Disabling THIS key likewise escapes no gate and records nothing.
 

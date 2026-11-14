@@ -43,7 +43,8 @@ SPELLING, never about what the variable does.
 
 **State the two counts, because they are NOT the same number and the gap is the point.**
 `ESCAPE_STEMS` now holds ELEVEN stems; `ZENSU_BYPASS_GATE_ALLOWLIST` in
-`hooks/lib/zensu-tdd-phase.sh` holds TEN names, and `docs/configuration.md` §"Visible opt-outs"
+`hooks/lib/zensu-tdd-phase.sh` holds TEN escape names plus the consented gap `acceptance-partial`,
+which is no `ZENSU_*=off` spelling and so no stem, and `docs/configuration.md` §"Visible opt-outs"
 stays the authoritative ledger roster. TWO stems are therefore in the set and not in the
 ledger, and `ZENSU_SESSION_LINEAGE` is not the first: `ZENSU_AUTOPILOT` was already one,
 because its escape is recorded as an audited `BLOCKED` transition rather than as a ledger
@@ -54,5 +55,7 @@ from covering a spelling a skill must not teach. ONE name runs the other way:
 together with the Bash witness, so no source spells its escape any more and G12a would
 fail on a stem nothing derives; the allowlist keeps it because the ledger write path
 filters existing entries through the allowlist, and dropping it would erase it from every
-ledger an older installation wrote. A future member needs its own two sentences here,
-and the counts above updated with it.
+ledger an older installation wrote. `acceptance-partial` is in the allowlist and not in the
+set for a different reason: it records a gap the user consented to at the terminus
+(`--chain-done --accept-partial`), not an escape, and `--bypass-note` refuses it. A future
+member needs its own two sentences here, and the counts above updated with it.

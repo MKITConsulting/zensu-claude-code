@@ -70,8 +70,10 @@ because moving the log message off the command line removed that gate's incident
 sight of it, `append` RESTORES the control at the chokepoint — it runs the same
 curated rules over the message and REFUSES on a match rather than redacting, since
 rewriting a credential silently would hide it from whoever has to rotate it. It
-honours `ZENSU_SECRET_SCAN=off` and the `zensu-secret-allow` line marker — the two
-escapes the gate itself teaches — so a heuristic false positive is not a wedge.
+honours `ZENSU_SECRET_SCAN=off` and the `zensu-secret-allow` line marker, so a heuristic
+false positive is not a wedge. Its refusal names only the marker, which stays visible in the
+committed artifact: run-log writes happen inside the review chain, and no text a model reads
+there names an env-var escape (`tests/structure/test-escape-wording.sh`).
 
 **The ledger picture is narrower than "unrecorded", and worth stating precisely
 because a first draft of this paragraph got it wrong.** `pre-write-secret-scan.sh`

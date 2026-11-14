@@ -1213,7 +1213,10 @@ if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \
   && grep -qF 'a loopback port alone proves nothing.' <<<"$ACCEPTANCE_FLAT" \
   && grep -qF 'Never redact a log with a pattern and call the rest safe.' <<<"$ACCEPTANCE_FLAT" \
   && grep -qF 'keep the plain discarding form' <<<"$ACCEPTANCE_FLAT" \
-  && grep -qF 'A setup or launch failure does not show that the criterion fails: record `partial` with its category.' <<<"$ACCEPTANCE_FLAT"; then
+  && grep -qF 'A setup or launch failure does not show that the criterion fails: fix the setup and run the check again.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'only when its cause is one this environment cannot provide (`rules/acceptance-consent.md`).' <<<"$ACCEPTANCE_FLAT" \
+  && ! grep -qF 'record `partial` with its category.' <<<"$ACCEPTANCE_FLAT" \
+  && ! grep -qF 'and `partial` for one the failure left unproven' <<<"$ACCEPTANCE_FLAT"; then
   check "P12 an exit-code check prints only the bounded synthetic diagnostics of rules/acceptance-evidence.md, never raw output" PASS
 else
   check "P12 an exit-code check prints only the bounded synthetic diagnostics of rules/acceptance-evidence.md, never raw output" FAIL

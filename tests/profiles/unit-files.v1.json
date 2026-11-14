@@ -12,9 +12,9 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 44,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 52,
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
-      "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, retention, and the Autopilot run mode that reads the approved plan copy and checks the pull-request head."
+      "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, retention, the Autopilot run mode that reads the approved plan copy and checks the pull-request head, and the standalone consent close, the hand-off record and the plan-criteria check."
     },
     {
       "path": "tests/structure/aspect-activation-v1.test.js", "registered": 21,

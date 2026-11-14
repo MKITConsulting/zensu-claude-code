@@ -45,7 +45,9 @@ category in the evidence text instead.
 A diagnostic never replaces an assertion. The check still inspects the real interface — its
 output, its errors and its side effects where the criterion needs them — and exits 0 only when
 every assertion it claims ran and passed. A setup or launch failure does not show that the
-criterion fails: record `partial` with its category.
+criterion fails: fix the setup and run the check again. Record `fail` when the launch failure is
+the feature's own defect, and `partial`, with its category, only when its cause is one this
+environment cannot provide (`rules/acceptance-consent.md`).
 
 ## 2. One observed run, several recorded criteria
 
@@ -66,7 +68,7 @@ own, citing the same `er1_…` id:
    each verdict, never which criterion the check asserted: keeping that mapping honest is yours.
    After any edit the run backs nothing; run the check again.
 5. A failed run backs no `pass`. Record `fail` only for a criterion whose own assertion showed the
-   defect, and `partial` for one the failure left unproven. A separate targeted check may still
-   prove a criterion the shared run did not reach.
+   defect. A criterion the failure left unproven is not `partial`: prove it with a separate
+   targeted check, or run the shared check again once it passes.
 6. Finish with `--acceptance-status`: every active criterion must pass on the current tree,
    whether its records share a run or not.

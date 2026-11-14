@@ -1292,6 +1292,18 @@ plan must carry a usable `## Requirements` table.
 - **Refusal wording is typed.** A missing or placeholder-only table refuses as a verdict about
   the plan; an unreadable path, a usage error, or a missing library refuses with "could not
   judge the plan" instead — a load fault must never be reported as a judged table.
+- **An active acceptance criterion, for a standalone chain.** Once the table is usable, a
+  standalone chain's plan must also carry at least one active `AC-###` row, read through the
+  acceptance gate's own criterion reader, or `--tdd-complete` refuses and names the remedy: add
+  one `AC-###` row per acceptance criterion, preferring criteria this environment can observe; a
+  criterion only a person can check keeps its active `AC-###` row and, with the user's consent,
+  also gets a row in the plan's `## Manual Acceptance` table. Without it the acceptance gate would
+  refuse the chain as `no-criteria` at the terminus, after the review, when adding a criterion is
+  no longer the agent's job. An Autopilot-bound chain is exempt, because its plan approval already
+  refuses such a plan (`PLAN_CRITERIA_UNUSABLE`). The check shares this gate's scope and its
+  switch, and it follows the acceptance gate's own mode as the terminus does:
+  `evidence.acceptanceGate: advisory` turns the refusal into an
+  `ACCEPTANCE CRITERIA — advisory, not blocking` notice, and `ZENSU_ACCEPTANCE_GATE=off` skips it.
 - **Scope.** A non-empty change set. That is NARROWER than the receipt gate above it, which
   multi-repo stage 1 also arms on a logged claim, so a zero-change chain whose work landed in
   another repository is gated there and not here. A chain that changed nothing has no plan
@@ -1661,18 +1673,63 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   Passing states: `pass` (the cause gives the observed and attested split, and an earlier
   non-pass verdict on the same tree adds a `flaky` line), `pass-tree-unverified`,
   `not-applicable` (no edit-landing receipt and no changed file, or no git repository),
-  `partial-accepted` (an Autopilot run validated with `--accept-partial`) and `escaped`. Refusing states: `incomplete` (names every criterion that does not pass, with a cause
+  `partial-accepted` (every criterion that does not pass is `partial`; a standalone chain reaches
+  it only through `--chain-done --accept-partial <ids>` with the user's consent for exactly those
+  ids, and Autopilot's VALIDATE stage through `--autopilot-validate --accept-partial`, which the
+  agent decides with no person present) and `escaped`. Refusing states: `incomplete` (names every criterion that does not pass, with a cause
   for the first twelve), `no-criteria` (the plan declares no active `AC-###` criterion),
   `unresolved` (no receipt names the chain's plan while the tree has changes), `invalid` (the
   newest record does not validate) and `unavailable`. A refusal exits `1` and leaves the chain
   open. A refusal line ends with one segment per remedy that applies:
   - `run: /zensu:verify-feature --chain --log <run log>` when verifying again can change the
-    verdict: a `missing`, `stale` or `partial` criterion, or an `invalid` record.
+    verdict: a `missing` or `stale` criterion, or an `invalid` record. An Autopilot run's
+    remedy also names a `partial` one.
   - `fix:` when a criterion fails on the current tree. Only a code change can turn it, so
     verifying the same tree again is never the remedy.
   - `add:` for `no-criteria`, and `restore:` for a `dropped` criterion.
+  - `accept:` when every criterion that does not pass is `partial`. It names the ids, says that
+    they close only with the user's consent for exactly those criteria, names the file that owns
+    the two sources of that consent, and asks for each criterion's `## Manual Acceptance` row
+    before `--accept-partial <ids>` on the same `--chain-done` call.
 
-  An `unresolved` cause names its own remedy, and `unavailable` names none.
+  An `unresolved` cause names its own remedy, and `unavailable` names none. No remedy names a
+  way to switch the gate off.
+- **Consent to a partial criterion.** `partial` means this environment cannot observe a
+  criterion: it needs credentials, an account, a non-loopback host or a signed build, or its
+  driver cannot run here, so no code change turns it. A criterion the run could observe but did not
+  prove is verified again, or recorded `fail` when what was observed contradicts it. `zensu-log.sh --chain-done
+  --claimed-review-ticket <ticket> --accept-partial AC-004,AC-005` closes a chain whose open
+  criteria (active and not `pass`) are exactly the listed ids and are all `partial` on the
+  current tree. The verdict prints `ACCEPTANCE — partial-accepted` and one
+  `ACCEPTANCE — accepted as partial:` line per criterion with its reason, and the terminus
+  records `acceptance-partial` in the session bypass ledger, which the chain-end summary renders
+  🟡. A `fail`, `missing`, `stale` or `dropped` row, a listed id that is not open and an open id
+  that is not listed keep the verdict `incomplete`, and the refusal names the difference. The
+  flag exits `1` on the zero-change terminus, with Autopilot binding arguments and with
+  `--outcome`; a malformed id list exits `2`, and so does a bare `--accept-partial`: only
+  `--autopilot-validate` takes the flag without ids. The consent comes from a row of the plan's
+  `## Manual Acceptance` table whose reason names the same cause category as the `partial` record, which records
+  an answer the user gave at planning or when the gap was found, or from the one question `/zensu:build` step 6d, `/zensu:verify-feature --chain` and
+  `/zensu:self-review` ask when a gap is found (provide access now, accept as partial, leave the
+  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. Nothing makes the user approve the table itself, the gate does not read it, and it
+  cannot tell a relayed consent from an invented one, the same bound as every attested verdict.
+- **Leaving the chain open is a clean stop.** A standalone refusal whose every remedy is the
+  user's (`accept:`, `add:`, `restore:`, or `fix:` once the single self-review fix round is
+  spent, or at once while `hooks.selfReview` is off) writes a hand-off record, `$CLAUDE_PLUGIN_DATA/acceptance-handoff/v1/<session key>.json`,
+  bound to the review ticket, the tree fingerprint, the plan's bytes and the chain's acceptance
+  records, when the edit-landing and full-suite gates passed and, while `hooks.selfReview` is on,
+  the code review has converged (`--code-review-done`): a refusal before that is a stage of the
+  chain, so it writes no record and the Stop guard honours none. While all four match, the Stop guard
+  lets the turn end with one notice that carries `ACCEPTANCE HAND-OFF — the chain stays open,
+  waiting on the user's acceptance decision | …`, without charging the Stop budget, and
+  `--chain-status` prints the same line on stderr, so its stdout stays one JSON document. A `run:`
+  remedy, a first-round `fix:`, an edit, a changed plan, a new acceptance record, a new review
+  generation, an Autopilot-bound chain, a session that owns an Autopilot run and an adopted or
+  claimed deferred review all keep the Stop blocked as before. A tree the gate cannot fingerprint
+  and a minted `zc_` self-review ticket get no `accept:` segment and no record: their refusal
+  ends with a `tree:` or `review:` segment that leaves the decision to the user. Every
+  review-generation restart (`--tdd-begin`, `--review-rearm`, a reopened review and the
+  deferred-review seed) and a successful terminus remove the record.
 - **Where it applies.** The ticket-bound standalone terminus only. Both terminus gates are
   evaluated before either refuses, so one run of `--chain-done` names every problem. A bound
   Autopilot chain that closes with outcome `pass` prints `ACCEPTANCE — not-checked`, and the

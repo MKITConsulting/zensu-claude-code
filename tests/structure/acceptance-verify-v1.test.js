@@ -381,7 +381,8 @@ test('a plan without an active acceptance criterion never passes as verified', (
   const result = gate(fixture);
   assert.equal(result.state, 'no-criteria');
   assert.equal(result.passes, false);
-  assert.match(result.lines[0], /\| add: give the plan's ## Requirements table an active AC-### criterion, or leave ZENSU_ACCEPTANCE_GATE to the user$/);
+  assert.match(result.lines[0], /\| add: give the plan's ## Requirements table an active AC-### criterion this environment can observe, or leave the refusal to the user$/);
+  assert.doesNotMatch(result.lines[0], /ZENSU_/);
   assert.doesNotMatch(result.lines[0], /verify-feature/);
 });
 
@@ -697,6 +698,349 @@ test('the CLI hands the work-tree fault to the record and the status', () => {
 });
 
 const RUN_ID = 'validate_run_01';
+test('--accept-partial takes a comma list of criterion ids, deduplicated and sorted, and refuses anything else', () => {
+  assert.deepEqual(av.parseAcceptIds('AC-005, AC-004,AC-005'), { ids: ['AC-004', 'AC-005'] });
+  assert.deepEqual(av.parseAcceptIds('AC-012a'), { ids: ['AC-012a'] });
+  assert.deepEqual(av.parseAcceptIds(''), { ids: [] });
+  for (const bad of ['FR-001', 'AC-004;rm', 'AC-004,,AC-005', 'x', 'AC-']) {
+    assert.match(av.parseAcceptIds(bad).error, /^--accept-partial takes a comma-separated list of acceptance criterion ids such as AC-004,AC-005, and /);
+  }
+});
+
+test('a standalone refusal whose open criteria are all partial ends with an accept: segment and no verify-again remedy', () => {
+  const fixture = project();
+  assert.equal(attest(fixture, 'AC-001', 'partial').code, 0);
+  assert.equal(attest(fixture, 'AC-002', 'partial').code, 0);
+  const result = gate(fixture);
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /AC-001 partial.*AC-002 partial/);
+  assert.match(result.lines[0], /\| accept: AC-001, AC-002 could not be observed in this environment; they close only with the user's consent for exactly these criteria, from one of the two sources the plugin's skills\/verify-feature\/rules\/acceptance-consent\.md names, so once each has its ## Manual Acceptance row in the plan, add --accept-partial AC-001,AC-002 to the same --chain-done call$/);
+  assert.doesNotMatch(result.lines[0], /\| run: |\/zensu:verify-feature|ZENSU_/);
+  assert.equal(result.handoff, true);
+  const mixed = project();
+  assert.equal(attest(mixed, 'AC-001', 'partial').code, 0);
+  const pending = gate(mixed);
+  assert.match(pending.lines[0], /\| run: \/zensu:verify-feature --chain --log /);
+  assert.doesNotMatch(pending.lines[0], /\| accept:/);
+  assert.equal(pending.handoff, false);
+  const failing = project();
+  assert.equal(attest(failing, 'AC-001', 'partial').code, 0);
+  assert.equal(attest(failing, 'AC-002', 'fail').code, 0);
+  const fix = gate(failing);
+  assert.match(fix.lines[0], /\| fix: /);
+  assert.doesNotMatch(fix.lines[0], /\| accept:|\| run:/);
+  assert.equal(fix.handoff, false);
+  assert.equal(gate(failing, { fixRoundSpent: true }).handoff, true);
+  assert.equal(gate(fixture, { gateMode: 'advisory' }).handoff, false);
+});
+
+test('--accept-partial closes a standalone chain only for exactly the open partial criteria', () => {
+  const fixture = project();
+  assert.equal(attest(fixture, 'AC-001').code, 0);
+  assert.equal(attest(fixture, 'AC-002', 'partial').code, 0);
+  let result = gate(fixture, { acceptPartialIds: 'AC-002' });
+  assert.equal(result.state, 'partial-accepted', result.lines.join('\n'));
+  assert.equal(result.passes, true);
+  assert.match(result.lines[0], /^ACCEPTANCE — partial-accepted \| 1\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; accepted as partial: AC-002 \| plan: \.zensu\/plans\/2026-09-29-0100_build-sample\.md \| gate: required$/);
+  assert.match(result.lines[1], /^ACCEPTANCE — accepted as partial: AC-002 partial \| browser attested \| record av1_[0-9]{13}_[0-9a-f]{12} \| evidence: Opened the page for AC-002; the snapshot and the screenshot show it \| The export button downloads a CSV$/);
+  assert.ok(av.PASSING_STATES.includes('partial-accepted'));
+  result = gate(fixture, { acceptPartialIds: 'AC-001,AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /; --accept-partial names AC-001, which is not open \|/);
+  const two = project();
+  assert.equal(attest(two, 'AC-001', 'partial').code, 0);
+  assert.equal(attest(two, 'AC-002', 'partial').code, 0);
+  result = gate(two, { acceptPartialIds: 'AC-001' });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /; --accept-partial leaves AC-002 open \|/);
+  result = gate(two, { acceptPartialIds: 'AC-002, AC-001' });
+  assert.equal(result.state, 'partial-accepted', result.lines.join('\n'));
+  assert.equal(result.passes, true);
+  assert.match(result.lines[0], /^ACCEPTANCE — partial-accepted \| 0\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; accepted as partial: AC-001, AC-002 \| plan: \.zensu\/plans\/2026-09-29-0100_build-sample\.md \| gate: required$/);
+  const accepted = result.lines.filter((line) => line.startsWith('ACCEPTANCE — accepted as partial: '));
+  assert.equal(accepted.length, 2);
+  assert.match(accepted[0], /^ACCEPTANCE — accepted as partial: AC-001 partial \| browser attested \| record av1_[0-9]{13}_[0-9a-f]{12} \| evidence: Opened the page for AC-001; /);
+  assert.match(accepted[1], /^ACCEPTANCE — accepted as partial: AC-002 partial \| browser attested \| record av1_[0-9]{13}_[0-9a-f]{12} \| evidence: Opened the page for AC-002; /);
+  assert.equal(attest(two, 'AC-002', 'fail').code, 0);
+  result = gate(two, { acceptPartialIds: 'AC-001,AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /; --accept-partial covers only partial criteria, not AC-002 fail \|/);
+  const missing = project();
+  assert.equal(attest(missing, 'AC-001', 'partial').code, 0);
+  result = gate(missing, { acceptPartialIds: 'AC-001,AC-002' });
+  assert.match(result.lines[0], /--accept-partial covers only partial criteria, not AC-002 missing/);
+  result = gate(missing, { acceptPartialIds: 'AC-001;AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /--accept-partial takes a comma-separated list/);
+  const stale = project();
+  assert.equal(attest(stale, 'AC-001', 'partial').code, 0);
+  assert.equal(attest(stale, 'AC-002', 'partial').code, 0);
+  fs.writeFileSync(path.join(stale.root, 'a.txt'), 'edited\n');
+  result = gate(stale, { acceptPartialIds: 'AC-001,AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /not AC-001 stale, AC-002 stale/);
+  const allPass = project();
+  assert.equal(attest(allPass, 'AC-001').code, 0);
+  assert.equal(attest(allPass, 'AC-002').code, 0);
+  result = gate(allPass, { acceptPartialIds: 'AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.equal(result.passes, false);
+  assert.match(result.lines[0], /^ACCEPTANCE — incomplete \| 2\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; --accept-partial names AC-002, which is not open: every criterion passes, so run --chain-done again without --accept-partial \| plan: /);
+  assert.equal(result.handoff, false);
+  assert.equal(gate(allPass).state, 'pass');
+  for (const f of [fixture, two, missing, stale, allPass]) {
+    for (const line of gate(f, { acceptPartialIds: 'AC-001,AC-002' }).lines) assert.doesNotMatch(line, /ZENSU_/);
+  }
+});
+
+test('only user remedies hand the chain off, and a fix remedy only once the fix round is spent', () => {
+  assert.equal(av.isHandoff('incomplete', ['accept: x'], false), true);
+  assert.equal(av.isHandoff('incomplete', ['restore: x'], false), true);
+  assert.equal(av.isHandoff('no-criteria', ['add: x'], false), true);
+  assert.equal(av.isHandoff('incomplete', ['fix: x'], false), false);
+  assert.equal(av.isHandoff('incomplete', ['fix: x'], true), true);
+  assert.equal(av.isHandoff('incomplete', ['run: x', 'accept: y'], true), false);
+  assert.equal(av.isHandoff('incomplete', [], true), false);
+  assert.equal(av.isHandoff('unresolved', ['accept: x'], true), false);
+  assert.equal(av.isHandoff('invalid', ['run: x'], true), false);
+  assert.deepEqual([...av.USER_REMEDIES], ['accept', 'add', 'restore']);
+});
+
+test('a refusal that waits only on the user writes a hand-off bound to the ticket and the tree, and the Stop check follows both', () => {
+  const fixture = project();
+  assert.equal(attest(fixture, 'AC-001').code, 0);
+  assert.equal(attest(fixture, 'AC-002', 'partial').code, 0);
+  const ticket = 'rt_fixture_ticket_01';
+  const armed = { handoffTicket: ticket, gatesPassed: true, reviewDone: true };
+  assert.equal(gate(fixture, armed).handoff, true);
+  const file = av.handoffFile(fixture.data, SESSION);
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(av.validateHandoff(written, SESSION), null);
+  assert.equal(av.validateHandoff({ ...written, extra: 1 }, SESSION), 'unexpected key set');
+  assert.equal(av.validateHandoff(written, OTHER_SESSION), 'bound to another session');
+  assert.equal(av.validateHandoff({ ...written, remedies: ['accept: AC-002\nforged line'] }, SESSION), 'malformed remedies');
+  assert.equal(av.validateHandoff({ ...written, remedies: ['run: /zensu:verify-feature --chain'] }, SESSION), 'malformed remedies');
+  assert.deepEqual(written.open, ['AC-002']);
+  assert.equal(written.ticket, ticket);
+  assert.equal(written.plan, `.zensu/plans/${STEM}.md`);
+  assert.match(written.plan_sha256, /^[0-9a-f]{64}$/);
+  assert.match(written.records_sha256, /^[0-9a-f]{64}$/);
+  assert.equal(av.validateHandoff({ ...written, plan: '.zensu/plans/../x.md' }, SESSION), 'malformed plan');
+  assert.equal(av.validateHandoff({ ...written, plan_sha256: 'x' }, SESSION), 'malformed plan digest');
+  assert.equal(av.validateHandoff({ ...written, records_sha256: '' }, SESSION), 'malformed record-set digest');
+  assert.equal(av.validateHandoff({ ...written, remedies: [`accept: ${'x'.repeat(av.LIMITS.maxRemedyChars)}`] }, SESSION), 'malformed remedies');
+  let checked = av.handoffStatus(base(fixture, { handoffTicket: ticket }));
+  assert.equal(checked.code, 0, checked.reason);
+  assert.match(checked.line, /^ACCEPTANCE HAND-OFF — the chain stays open, waiting on the user's acceptance decision \| incomplete \| open: AC-002 \| accept: AC-002 could not be observed in this environment; .* \| review ticket rt_fixture_ticket_01 \| tree [0-9a-f]{12}$/);
+  assert.doesNotMatch(checked.line, /ZENSU_/);
+  assert.equal(av.handoffStatus(base(fixture, { handoffTicket: 'rt_other_ticket_02' })).code, 1);
+  assert.equal(av.handoffStatus(base(fixture, { handoffTicket: '' })).code, 1);
+  fs.writeFileSync(path.join(fixture.root, 'a.txt'), 'edited\n');
+  checked = av.handoffStatus(base(fixture, { handoffTicket: ticket }));
+  assert.equal(checked.code, 1);
+  assert.match(checked.reason, /tree changed/);
+  fs.writeFileSync(path.join(fixture.root, 'a.txt'), 'one\n');
+  assert.equal(av.handoffStatus(base(fixture, { handoffTicket: ticket })).code, 0);
+  const planPath = path.join(fixture.root, '.zensu', 'plans', `${STEM}.md`);
+  const planBytes = fs.readFileSync(planPath);
+  fs.appendFileSync(planPath, '\n');
+  checked = av.handoffStatus(base(fixture, { handoffTicket: ticket }));
+  assert.equal(checked.code, 1);
+  assert.match(checked.reason, /the plan changed since the terminus refused/);
+  fs.writeFileSync(planPath, planBytes);
+  assert.equal(av.handoffStatus(base(fixture, { handoffTicket: ticket })).code, 0);
+  assert.equal(attest(fixture, 'AC-002', 'partial').code, 0);
+  checked = av.handoffStatus(base(fixture, { handoffTicket: ticket }));
+  assert.equal(checked.code, 1);
+  assert.match(checked.reason, /the acceptance records changed since the terminus refused/);
+  assert.equal(gate(fixture, armed).handoff, true);
+  assert.equal(av.handoffStatus(base(fixture, { handoffTicket: ticket })).code, 0);
+  gate(fixture, { handoffTicket: ticket, gatesPassed: false, reviewDone: true });
+  assert.equal(fs.existsSync(file), false);
+  gate(fixture, armed);
+  assert.equal(fs.existsSync(file), true);
+  assert.equal(gate(fixture, { handoffTicket: ticket, gatesPassed: true }).handoff, true);
+  assert.equal(fs.existsSync(file), false);
+  gate(fixture, armed);
+  assert.equal(fs.existsSync(file), true);
+  const running = project();
+  assert.equal(attest(running, 'AC-001', 'partial').code, 0);
+  gate(running, armed);
+  assert.equal(fs.existsSync(av.handoffFile(running.data, SESSION)), false);
+  assert.equal(gate(fixture, { ...armed, acceptPartialIds: 'AC-002' }).state, 'partial-accepted');
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(av.handoffStatus(base(fixture, { handoffTicket: ticket })).code, 1);
+  const frOnly = project({ rows: [['FR-001', 'Projects are sorted by name']] });
+  const none = gate(frOnly, armed);
+  assert.equal(none.state, 'no-criteria');
+  assert.equal(none.handoff, true);
+  const noneRecord = JSON.parse(fs.readFileSync(av.handoffFile(frOnly.data, SESSION), 'utf8'));
+  assert.equal(av.validateHandoff(noneRecord, SESSION), null);
+  assert.equal(noneRecord.state, 'no-criteria');
+  assert.deepEqual(noneRecord.open, []);
+  assert.equal(typeof noneRecord.tree, 'string');
+  assert.match(noneRecord.remedies[0], /^add: give the plan's ## Requirements table an active AC-### criterion /);
+  const noneChecked = av.handoffStatus(base(frOnly, { handoffTicket: ticket }));
+  assert.equal(noneChecked.code, 0, noneChecked.reason);
+  assert.match(noneChecked.line, /^ACCEPTANCE HAND-OFF — the chain stays open, waiting on the user's acceptance decision \| no-criteria \| open: none \| add: give the plan's ## Requirements table an active AC-### criterion .* \| review ticket rt_fixture_ticket_01 \| tree [0-9a-f]{12}$/);
+});
+
+test('consent binds only to a consumed review ticket and a fingerprinted tree, so a zero-change ticket and an unfingerprinted tree name their own remedy and hand nothing off', () => {
+  const fixture = project();
+  assert.equal(attest(fixture, 'AC-001').code, 0);
+  assert.equal(attest(fixture, 'AC-002', 'partial').code, 0);
+  const ticket = 'rt_fixture_ticket_03';
+  const zero = gate(fixture, { zeroChangeTicket: true, handoffTicket: ticket, gatesPassed: true, reviewDone: true });
+  assert.equal(zero.state, 'incomplete');
+  assert.match(zero.lines[0], /\| review: AC-002 could not be observed in this environment, and consent to a partial criterion closes only a chain whose review ticket a reviewer consumed, which this zero-change self-review ticket is not; report the refusal and leave the decision to the user$/);
+  assert.doesNotMatch(zero.lines[0], /\| accept:|--accept-partial|ZENSU_/);
+  assert.equal(zero.handoff, false);
+  assert.equal(fs.existsSync(av.handoffFile(fixture.data, SESSION)), false);
+  const zeroConsent = gate(fixture, { zeroChangeTicket: true, acceptPartialIds: 'AC-002', handoffTicket: ticket, gatesPassed: true, reviewDone: true });
+  assert.equal(zeroConsent.state, 'incomplete');
+  assert.equal(zeroConsent.passes, false);
+  assert.match(zeroConsent.lines[0], /; --accept-partial closes only a chain whose review ticket a reviewer consumed, which this zero-change self-review ticket is not \| plan: /);
+  assert.match(zeroConsent.lines[0], /\| review: AC-002 could not be observed in this environment, /);
+  assert.equal(zeroConsent.lines.some((line) => /partial-accepted|accepted as partial/.test(line)), false);
+  assert.equal(zeroConsent.handoff, false);
+  const rows = [{ criterion: { id: 'AC-002' }, state: 'partial' }];
+  const untreedSegments = av.remedies('incomplete', rows, null, fixture.root, { currentTree: { tree: null, reason: 'the tree is too large' } });
+  assert.deepEqual(untreedSegments, ['tree: AC-002 could not be observed in this environment, and consent binds to a tree the gate can fingerprint, which this one is not (the tree is too large); report the refusal and leave the decision to the user']);
+  assert.equal(av.isHandoff('incomplete', untreedSegments, true), false);
+  assert.equal(av.isHandoff('incomplete', av.remedies('incomplete', rows, null, fixture.root, { zeroChangeTicket: true }), true), false);
+  assert.match(av.remedies('incomplete', rows, null, fixture.root)[0], /^accept: AC-002 could not be observed in this environment; /);
+  const outside = project({ git: false });
+  assert.equal(attest(outside, 'AC-001').code, 0);
+  assert.equal(attest(outside, 'AC-002', 'partial').code, 0);
+  const untreed = gate(outside, { handoffTicket: ticket, gatesPassed: true, reviewDone: true });
+  assert.equal(untreed.state, 'incomplete');
+  assert.match(untreed.lines[0], /\| tree: AC-002 could not be observed in this environment, and consent binds to a tree the gate can fingerprint, which this one is not \(/);
+  assert.doesNotMatch(untreed.lines[0], /\| accept:/);
+  assert.equal(untreed.handoff, false);
+  assert.equal(fs.existsSync(av.handoffFile(outside.data, SESSION)), false);
+  const zeroStatus = av.status({ ...base(fixture), zeroChangeTicket: true });
+  assert.equal(zeroStatus.code, 1);
+  assert.match(zeroStatus.lines[0], /\| review: AC-002 could not be observed in this environment, /);
+  assert.doesNotMatch(zeroStatus.lines[0], /\| accept:/);
+  assert.match(av.status(base(fixture)).lines[0], /\| accept: AC-002 could not be observed in this environment; /);
+  const untreedStatus = av.status(base(outside));
+  assert.equal(untreedStatus.code, 1);
+  assert.match(untreedStatus.lines[0], /\| tree: AC-002 could not be observed in this environment, /);
+  assert.doesNotMatch(untreedStatus.lines[0], /\| accept:/);
+  const consented = gate(outside, { acceptPartialIds: 'AC-002' });
+  assert.equal(consented.state, 'incomplete');
+  assert.match(consented.lines[0], /--accept-partial needs a tree the gate can fingerprint, and this one could not be fingerprinted/);
+  const shown = av.handoffLine({ state: 'incomplete', open: ['AC-002'], remedies: [`accept: AC-002 \`x\` ${fixture.root}/a.txt`], ticket, tree: 'a'.repeat(40) }, fixture.root);
+  assert.match(shown, /\| accept: AC-002 'x' <project>\/a\.txt \| review ticket rt_fixture_ticket_03 \| tree a{12}$/);
+  assert.doesNotMatch(shown, /`/);
+});
+
+test('--tdd-complete refuses a plan without an active acceptance criterion and names an observable criterion as the remedy', () => {
+  const fixture = project({ rows: [['FR-001', 'Projects are sorted by name']] });
+  const planPath = path.join(fixture.root, '.zensu', 'plans', `${STEM}.md`);
+  const judge = (extra = {}) => av.planCriteria({ planPath, projectRoot: fixture.root, bashPath: 'bash', ...extra });
+  const refused = judge();
+  assert.equal(refused.code, 1);
+  assert.match(refused.lines[0], /^the plan \.zensu\/plans\/2026-09-29-0100_build-sample\.md carries no active AC-### acceptance criterion \(its ## Requirements table has no AC-### row\), so the chain terminus would refuse it as no-criteria after the review$/);
+  assert.match(refused.lines[1], /^Add one AC-### row to the plan's ## Requirements table for each acceptance criterion, then run --tdd-complete again\. Prefer criteria this environment can observe /);
+  assert.match(refused.lines[1], /a criterion only a person can check is an active AC-### row too, and with the user's consent it also gets a row in the plan's ## Manual Acceptance table\.$/);
+  assert.doesNotMatch(refused.lines.join('\n'), /ZENSU_|=off|advisory/);
+  const advisory = judge({ criteriaAdvisory: true });
+  assert.equal(advisory.code, 0);
+  assert.deepEqual(advisory.lines, ["ACCEPTANCE CRITERIA — advisory, not blocking | the plan .zensu/plans/2026-09-29-0100_build-sample.md carries no active AC-### acceptance criterion (its ## Requirements table has no AC-### row), so the chain terminus will report no-criteria after the review without blocking it"]);
+  assert.doesNotMatch(advisory.lines[0], /ZENSU_|=off/);
+  fs.writeFileSync(planPath, planText([['AC-001', 'deprecated'], ['FR-001', 'Projects are sorted by name']]));
+  assert.match(judge().lines[0], /\(every AC-### row is deprecated\)/);
+  fs.writeFileSync(planPath, planText([['AC-001', 'The dashboard lists every project']]));
+  assert.deepEqual(judge(), { code: 0, lines: [] });
+  assert.equal(av.planCriteria({ projectRoot: fixture.root }).code, 2);
+  assert.deepEqual(av.planCriteria({ projectRoot: fixture.root, criteriaAdvisory: true }), {
+    code: 0,
+    lines: ['ACCEPTANCE CRITERIA — advisory, not blocking | the plan path did not reach the acceptance check, so the plan was NOT judged'],
+  });
+  const missingBash = path.join(fixture.root, 'no-such-bash');
+  const unread = judge({ bashPath: missingBash });
+  assert.equal(unread.code, 2);
+  assert.match(unread.lines[0], /^the acceptance criteria of \.zensu\/plans\/2026-09-29-0100_build-sample\.md could not be read: the requirements lister could not run \(ENOENT\)$/);
+  const unreadAdvisory = judge({ bashPath: missingBash, criteriaAdvisory: true });
+  assert.equal(unreadAdvisory.code, 0);
+  assert.deepEqual(unreadAdvisory.lines, ['ACCEPTANCE CRITERIA — advisory, not blocking | the acceptance criteria of .zensu/plans/2026-09-29-0100_build-sample.md could not be read: the requirements lister could not run (ENOENT), so the plan was NOT judged']);
+});
+
+test('the CLI checks accept ids, answers the hand-off and judges the plan criteria', () => {
+  const cli = (mode, env) => childProcess.spawnSync(process.execPath, [LIB, mode], { env: { ...process.env, ZENSU_AVR_LABEL: 'zensu-log.sh --chain-done', ...env }, encoding: 'utf8' });
+  let run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-005,AC-004' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, 'AC-004,AC-005\n');
+  run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: '' });
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /^zensu-log\.sh --chain-done: --accept-partial needs the ids of the criteria the user accepted as partial/);
+  run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'FR-001' });
+  assert.equal(run.status, 2);
+  run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-004', ZENSU_AVR_ACCEPT_CONTEXT: 'bound' });
+  assert.equal(run.status, 1);
+  assert.equal(run.stdout, '');
+  assert.match(run.stderr, /^zensu-log\.sh --chain-done: refusing --accept-partial — it belongs to the ticket-bound standalone terminus and takes no Autopilot binding and no --outcome; /);
+  run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-004', ZENSU_AVR_ACCEPT_CONTEXT: 'unticketed' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /^zensu-log\.sh --chain-done: refusing --accept-partial on the zero-change terminus — consent to a partial criterion closes only a chain whose review ticket a reviewer consumed, so pass it with --claimed-review-ticket <the consumed review ticket>\. The chain stays open\.\n$/);
+  run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-004', ZENSU_AVR_ACCEPT_CONTEXT: 'zero-change' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /^zensu-log\.sh --chain-done: refusing --accept-partial on the zero-change terminus — consent to a partial criterion closes only a chain whose review ticket a reviewer consumed, and no reviewer consumed this zero-change self-review ticket; report the refusal and leave the decision to the user\. The chain stays open\.\n$/);
+  assert.doesNotMatch(run.stderr, /pass it with --claimed-review-ticket/);
+  run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-004', ZENSU_AVR_ACCEPT_CONTEXT: 'elsewhere' });
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /unknown context "elsewhere"/);
+  run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-004', ZENSU_AVR_ACCEPT_CONTEXT: 'standalone' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, 'AC-004\n');
+  const fixture = project();
+  assert.equal(attest(fixture, 'AC-001').code, 0);
+  assert.equal(attest(fixture, 'AC-002', 'partial').code, 0);
+  const verdictEnv = {
+    ZENSU_AVR_DIR: tempDir('handoff-transport'),
+    ZENSU_AVR_PLUGIN_DATA: fixture.data,
+    ZENSU_AVR_SESSION_KEY: SESSION,
+    ZENSU_AVR_PROJECT_ROOT: fixture.root,
+    ZENSU_AVR_RECEIPT: fixture.receiptPath,
+    ZENSU_AVR_HANDOFF_TICKET: 'rt_cli_ticket_01',
+    ZENSU_AVR_GATES_PASSED: '1',
+  };
+  run = cli('verdict', verdictEnv);
+  assert.equal(run.status, 1);
+  assert.equal(fs.existsSync(av.handoffFile(fixture.data, SESSION)), false);
+  run = cli('verdict', { ...verdictEnv, ZENSU_AVR_REVIEW_DONE: '1' });
+  assert.equal(run.status, 1);
+  assert.equal(fs.existsSync(av.handoffFile(fixture.data, SESSION)), true);
+  const handoffEnv = { ZENSU_AVR_PLUGIN_DATA: fixture.data, ZENSU_AVR_SESSION_KEY: SESSION, ZENSU_AVR_PROJECT_ROOT: fixture.root, ZENSU_AVR_HANDOFF_TICKET: 'rt_cli_ticket_01' };
+  run = cli('handoff', handoffEnv);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /^ACCEPTANCE HAND-OFF — the chain stays open, waiting on the user's acceptance decision \| incomplete \| open: AC-002 \|/);
+  run = cli('handoff', { ...handoffEnv, ZENSU_AVR_HANDOFF_TICKET: 'rt_cli_ticket_02' });
+  assert.equal(run.status, 1);
+  assert.equal(run.stdout, '');
+  run = cli('handoff', { ...handoffEnv, ZENSU_AVR_SESSION_KEY: 'not-a-key' });
+  assert.equal(run.status, 2);
+  const frOnly = project({ rows: [['FR-001', 'Projects are sorted by name']] });
+  const planEnv = { ZENSU_AVR_PLAN: path.join(frOnly.root, '.zensu', 'plans', `${STEM}.md`), ZENSU_AVR_PROJECT_ROOT: frOnly.root, ZENSU_AVR_LABEL: 'zensu-log.sh --tdd-complete' };
+  run = cli('plan-criteria', planEnv);
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /^zensu-log\.sh --tdd-complete: refusing to mark implementation complete — the plan \.zensu\/plans\/2026-09-29-0100_build-sample\.md carries no active AC-### acceptance criterion/);
+  assert.doesNotMatch(run.stderr, /ZENSU_/);
+  run = cli('plan-criteria', { ...planEnv, ZENSU_AVR_CRITERIA_ADVISORY: '1' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /^ACCEPTANCE CRITERIA — advisory, not blocking \| the plan \.zensu\/plans\/2026-09-29-0100_build-sample\.md carries no active AC-### acceptance criterion/);
+  run = cli('plan-criteria', { ...planEnv, ZENSU_AVR_PLAN: '' });
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /so the plan was NOT judged\.$/m);
+  assert.match(run.stderr, /^Check the plan path and run \/zensu:doctor; if the plan still cannot be read, report this refusal and leave the decision to the user\.$/m);
+  run = cli('plan-criteria', { ...planEnv, ZENSU_AVR_PLAN: '', ZENSU_AVR_CRITERIA_ADVISORY: '1' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stderr, 'ACCEPTANCE CRITERIA — advisory, not blocking | the plan path did not reach the acceptance check, so the plan was NOT judged\n');
+  run = cli('plan-criteria', { ...planEnv, ZENSU_AVR_PLAN: path.join(fixture.root, '.zensu', 'plans', `${STEM}.md`), ZENSU_AVR_PROJECT_ROOT: fixture.root });
+  assert.equal(run.status, 0, run.stderr);
+});
+
 const ORDER_ID = '7f3c2b1a-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 
 function sha256(bytes) {
@@ -766,12 +1110,13 @@ test('run mode reads the criteria from the approved plan the run stored and bind
   assert.match(both.error, /--log and --run/);
 });
 
-test('run mode refuses a run without a usable approved plan and names the cause and the user-owned escape', () => {
+test('run mode refuses a run without a usable approved plan, names the cause and leaves the decision to the user', () => {
   const missing = runFixture({ store: false });
   const absent = runAttest(missing, 'AC-001');
   assert.equal(absent.code, 1);
   assert.match(absent.error, /no stored copy of the plan it approved/);
-  assert.match(absent.error, /ZENSU_ACCEPTANCE_GATE=off/);
+  assert.match(absent.error, /report this refusal and leave the decision to the user/);
+  assert.doesNotMatch(absent.error, /ZENSU_/);
   const refused = runGate(missing);
   assert.equal(refused.state, 'unresolved');
   assert.equal(refused.passes, false);
@@ -864,7 +1209,8 @@ test('a plan without an active criterion is a no-criteria refusal in run mode wi
   const fixture = runFixture({ rows: [['FR-001', 'Projects are sorted by name']] });
   const result = runGate(fixture);
   assert.equal(result.state, 'no-criteria');
-  assert.match(result.lines[0], /\| add: the approved plan carries no active AC-### criterion, so only the user can leave ZENSU_ACCEPTANCE_GATE=off for this run$/);
+  assert.match(result.lines[0], /\| add: the approved plan carries no active AC-### criterion, so this run cannot validate; report this refusal and leave the decision to the user$/);
+  assert.doesNotMatch(result.lines[0], /ZENSU_/);
 });
 
 test('a work-order run reads .zensu/plans/<order>.md and checks its digest only when a person approved the plan', () => {

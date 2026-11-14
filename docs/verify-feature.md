@@ -71,8 +71,13 @@ records one verdict per criterion, and the chain closes only when every
 active criterion has a `pass` on the tree that ships
 ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). It verifies a criterion
 that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs
-a code change first. Remote mode is refused there, because a deployed URL runs other code than
-the tree the records bind to. The consent and policy rules below apply unchanged. In consent
+a code change first. A criterion this environment cannot observe (it needs
+credentials, an account, a non-loopback host or a signed build, or its driver cannot run here)
+is `partial`, never a fix step:
+the skill asks the user once whether to provide access now, accept it as partial or leave the
+chain open (`skills/verify-feature/rules/acceptance-consent.md`), and an accepted criterion
+closes the chain only through `--chain-done --accept-partial` for exactly its id. Remote mode is
+refused there, because a deployed URL runs other code than the tree the records bind to. The consent and policy rules below apply unchanged. In consent
 mode the later pass boots on the same loopback origin, so the prompt is not asked twice. An
 Autopilot-bound chain skips this stage: its VALIDATE stage verifies every criterion unless the
 run was started with `--no-validate`, and the chain's terminus line says which. That stage
