@@ -642,7 +642,8 @@ second `open` of the same run config is denied, so a fresh browser means a fresh
   refuses a `playwright-cli` call that names a run directory, or that passes a config — through
   `--config` or a `PLAYWRIGHT_MCP_CONFIG` assignment anywhere in the command, behind another
   program included — whose file restores a browser state, cannot be read as JSON, or is a path it
-  cannot pin down; `state-load` stays denied. Those refusals bind your own browser skills too:
+  cannot pin down, such as one another program appends, one read into the variable at run time or
+  a `~` the shell expands; `state-load` stays denied. Those refusals bind your own browser skills too:
   their own config that restores a state, an INI config and a config behind a variable are
   refused on any session. The read guard also refuses a `playwright-cli` call that names a run
   directory without naming a `zensu-verify` session. A config the gate never sees still opens a

@@ -341,6 +341,9 @@ test('a browser CLI call that names a verify-feature run directory needs a zensu
     ['Bash', `/usr/local/bin/playwright-cli -s=mine open ${config}`],
     ['Bash', `npx @playwright/cli@0.1.21 -s=mine open ${config}`],
     ['Bash', `play''wright-cli -s=mine open ${config}`],
+    ['Bash', `$'playwright-cli' -s=mine open ${config}`],
+    ['Bash', `"\${PW:-playwright-cli}" -s=mine open ${config}`],
+    ['Bash', `{playwright-cli,} -s=mine open ${config}`],
     ['Bash', `cd ${RUN} && playwright-cli -s=mine open --config=${consent.RUN_CONFIG_NAME}`],
     ['PowerShell', `playwright-cli -s=mine open ${config}`],
   ];

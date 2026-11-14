@@ -2297,6 +2297,7 @@ test('a playwright-cli call on any session but a zensu-verify one is denied with
     [`xargs playwright-cli -s=mine open --config < ${runDir}/list`, {}],
     [`grep -r playwright-cli ${runDir}`, {}],
     [`~/bin/playwright-cli -s=mine open --config=${config}`, {}],
+    [`$'playwright-cli' -s=mine open --config=${config}`, {}],
   ];
   for (const [command, env] of cases) assert.equal(denied(command, { env }), REASONS.RUN_DIR_OFF_SESSION, command);
   assert.notEqual(decide(cli(`open --config=${config}`)).reason, REASONS.RUN_DIR_OFF_SESSION);
@@ -2362,6 +2363,10 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
     `$HOME/bin/playwright-cli -s=mine open --config ${restoring}`,
     `{playwright-cli,} -s=mine open --config=${restoring}`,
     `/opt/*/playwright-cli -s=mine open --config=${restoring}`,
+    `playwright-cli$'' -s=mine open --config=${restoring}`,
+    `$'playwright-cli' -s=mine open --config=${restoring}`,
+    `node "$(command -v playwright-cli)" -s=mine open --config=${restoring}`,
+    `"\${PW:-playwright-cli}" -s=mine open --config=${restoring}`,
     `eslint --config ${restoring} src && echo playwright-cli`,
   ]) assert.equal(reason(command), REASONS.STATE_CONFIG_OFF_SESSION, command);
   assert.equal(reason('playwright-cli open --config=missing.json', { PLAYWRIGHT_CLI_SESSION: 'mine' }), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
@@ -2382,7 +2387,15 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
     'export PLAYWRIGHT_MCP_CONFIG="$HOME/cfg.json"; playwright-cli -s=mine open',
     'stdbuf -oL playwright-cli -s=mine open --config=own.json',
     'find . -name x.json -exec playwright-cli -s=mine open --config {} \\;',
+    'xargs playwright-cli -s=mine open --config < /tmp/list',
+    'read PLAYWRIGHT_MCP_CONFIG < /tmp/p; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open',
+    "printf -v PLAYWRIGHT_MCP_CONFIG '%s' /tmp/c.json; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open",
+    'mapfile -t PLAYWRIGHT_MCP_CONFIG < /tmp/p; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG=~/c.json playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG=a:~/c.json playwright-cli -s=mine open',
   ]) assert.equal(reason(command), REASONS.CONFIG_UNRESOLVED_OFF_SESSION, command);
+  assert.equal(reason("PLAYWRIGHT_MCP_CONFIG='~/c.json' playwright-cli -s=mine open"), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  passes(`unset PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open --config=${own}`);
   assert.equal(reason('git commit -m "fix playwright-cli --config handling"'), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
   for (const key of ['STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION']) {
     assert.match(REASONS[key], /search or commit text that names playwright-cli beside a config through the Grep tool or a message file$/, key);

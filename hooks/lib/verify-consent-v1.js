@@ -34,6 +34,8 @@ const CLI_MARKER_RE = new RegExp(CLI_MARKERS.map((marker) => marker.replace(/[.*
 const CLI_PACKAGE_PATH_RE = new RegExp(`${CLI_PACKAGE.toLowerCase().replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?:$|[@/])`);
 const CLI_TOKEN_BREAK_RE = /[\s;&|()<>=,{}]+/;
 const CONFIG_ASSIGNMENT_RE = new RegExp(`^${CONFIG_ENV}(\\+?)=`, 'i');
+const CONFIG_NAME_RE = new RegExp(`(^|[^A-Za-z0-9_])${CONFIG_ENV}($|[^A-Za-z0-9_])`, 'i');
+const ASSIGNMENT_TILDE_RE = /(^|:)~/;
 const DIRECTORY_BUILTINS = Object.freeze(['cd', 'pushd']);
 const REMOTE_CONFIG_RE = /^[\\/]{2}/;
 const AMBIENT_TEXT_RE = /(^|[^A-Za-z0-9_])(PLAYWRIGHT_MCP_|PWTEST_)/;
@@ -672,7 +674,8 @@ function assignmentOf(word) {
   if (!word) return null;
   const match = word.raw.match(/^([A-Za-z_][A-Za-z0-9_]*)(\+?)=/);
   if (!match) return null;
-  return { name: match[1], value: word.value.slice(match[0].length), unexpanded: word.unexpanded || match[2] === '+' };
+  const tilde = ASSIGNMENT_TILDE_RE.test(word.raw.slice(match[0].length));
+  return { name: match[1], value: word.value.slice(match[0].length), unexpanded: word.unexpanded || match[2] === '+' || tilde };
 }
 
 function cliBasename(value) {
@@ -811,6 +814,10 @@ function runsCli(text) {
   return [unquoted.replace(/\\/g, '/'), unquoted.replace(/\\/g, '')].some((spelling) => spelling.split(CLI_TOKEN_BREAK_RE).some(cliToken));
 }
 
+function expandsIntoCli(word) {
+  return Boolean(word) && word.unexpanded && (namesCli(word.raw) || namesCli(word.value));
+}
+
 const NO_SCOPE = Object.freeze({ assignments: Object.freeze([]), wrappers: Object.freeze([]) });
 
 function hiddenCli(found, context, kind) {
@@ -882,12 +889,11 @@ function scanSegments(lexed, context, depth, found, inherited) {
       for (const assignment of position.assignments) if (assignment.name === SESSION_ENV) context.commandSession = assignment;
     }
     const head = words[position.index];
-    if (head && head.unexpanded && runsCli(head.raw)) found.hidden = true;
+    if (head && expandsIntoCli(head)) found.hidden = true;
     const others = words.filter((_word, offset) => offset !== position.index && !consumed.has(offset));
-    if (!others.some((word) => isCliWord(word) || namesCli(word.value))) continue;
-    if (context.marks.session) found.indirect = true;
+    if (context.marks.session && others.some((word) => isCliWord(word) || namesCli(word.value))) found.indirect = true;
     const directory = Boolean(head) && !head.quoted && DIRECTORY_BUILTINS.includes(head.value);
-    if (!directory && others.some((word) => isCliWord(word) || runsCli(word.value))) found.hidden = true;
+    if (!directory && others.some((word) => isCliWord(word) || runsCli(word.value) || expandsIntoCli(word))) found.hidden = true;
   }
 }
 
@@ -976,6 +982,13 @@ function mentionsConfig(text) {
   return normalized.includes(CONFIG_FLAG) || normalized.includes(CONFIG_ENV.toLowerCase());
 }
 
+function removesConfig(words, index) {
+  const head = words[0] ? words[0].value : '';
+  const previous = index > 0 ? words[index - 1].value : '';
+  return head === 'unset' || previous === '-u' || previous === '--unset' || words[index].value.startsWith('--unset=')
+    || (head === 'export' && words.slice(1, index).some((word) => word.value === '-n'));
+}
+
 function configMentions(text, depth, out) {
   const lexed = lexShell(text);
   if (lexed.fault || depth > MAX_NEST) {
@@ -986,11 +999,15 @@ function configMentions(text, depth, out) {
     words.forEach((word, index) => {
       const lowered = word.value.toLowerCase();
       const assignment = word.value.match(CONFIG_ASSIGNMENT_RE);
+      const assigned = assignmentOf(word);
       const next = words[index + 1];
-      if (assignment) out.push(word.unexpanded || assignment[1] === '+' ? '\u0000' : word.value.slice(assignment[0].length));
+      if (assignment) out.push(word.unexpanded || assignment[1] === '+' || (assigned && assigned.unexpanded) ? '\u0000' : word.value.slice(assignment[0].length));
       else if (lowered.startsWith(`${CONFIG_FLAG}=`)) out.push(word.unexpanded ? '\u0000' : word.value.slice(CONFIG_FLAG.length + 1));
-      else if (lowered === CONFIG_FLAG && next && !next.value.startsWith('-')) out.push(next.unexpanded ? '\u0000' : next.value);
-      else if (/\s/.test(word.value) && mentionsConfig(word.value)) configMentions(word.value, depth + 1, out);
+      else if (lowered === CONFIG_FLAG) {
+        if (!next) out.push('\u0000');
+        else if (!next.value.startsWith('-')) out.push(next.unexpanded ? '\u0000' : next.value);
+      } else if (/\s/.test(word.value) && mentionsConfig(word.value)) configMentions(word.value, depth + 1, out);
+      else if ((CONFIG_NAME_RE.test(word.raw) || CONFIG_NAME_RE.test(word.value)) && !removesConfig(words, index)) out.push('\u0000');
     });
   }
   for (const body of [...lexed.nested, ...lexed.heredocs, ...lexed.herestrings.map((word) => word.value)]) {

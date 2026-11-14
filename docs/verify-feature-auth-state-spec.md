@@ -171,7 +171,9 @@ the same config content.
   value the text sets, behind `export`, `declare`, `sudo` or `doas` and inside a command string or
   heredoc included, as the CLI does, and refuses one it cannot read as JSON (missing, not a
   regular file, a network path, over 1 MiB, invalid JSON, an `.ini` path, which the CLI reads as
-  INI) and one it cannot pin down (a value assembled at run time or appended with `+=`, a relative
+  INI) and one it cannot pin down (a value assembled at run time or appended with `+=`, a
+  `--config` that another program completes, the variable set by `read`, `printf -v` or any other
+  way than a literal assignment, an assignment value whose `~` the shell expands, a relative
   path in a command that is not one plain unwrapped call). It confirms a regular file before it
   opens one. `state-load` stays denied. The cost falls on a user's own browser skills too: their
   own state-restoring, INI or variable-held config is refused on every session. Measured in the

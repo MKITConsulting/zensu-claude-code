@@ -14,6 +14,7 @@ const COMMAND_KEYS = Object.freeze(['command', 'commands', 'cmd', 'script', 'cod
 const LITERAL_GLOB = /[*?[]/;
 const LITERAL_EXPANSION = /[%$`{]/;
 const REMOTE_PATH = /^[\\/]{2}/;
+const EXPANSION_TOKEN = /[$*?[{}~]/;
 const SHELL_TOOLS = Object.freeze(['Bash', 'PowerShell']);
 const PATH_FIELDS = Object.freeze({
   Read: Object.freeze(['file_path']),
@@ -177,7 +178,7 @@ function shellWords(text, tool) {
 
 function namesCliWord(text) {
   return (text.match(/[^\s;&|<>()]+/g) || []).some((token) => CLI_WORDS.some((word) => token === word
-    || token.endsWith(`/${word}`) || token.startsWith(`${word}@`)));
+    || token.endsWith(`/${word}`) || token.startsWith(`${word}@`) || (EXPANSION_TOKEN.test(token) && token.includes(word))));
 }
 
 function runCallWithoutSession(command, tool) {

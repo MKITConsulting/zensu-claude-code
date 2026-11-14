@@ -82,7 +82,10 @@ directory without naming a `zensu-verify` session (`REASONS.SESSION`), because t
 judges only `zensu-verify` sessions and a signed-in run config opened on another session would
 restore the state unjudged. That rule's markers derive from their owners: `CLI_WORDS` from
 `BINARY_NAMES` and `PACKAGE_NAME` of `playwright-cli-version-v1.js`, `SESSION_MARKER` from
-`AUTH_SESSION_PREFIX`. The matcher has ONE owner, `AUTH_GUARD_MATCHER` (`.*`) in
+`AUTH_SESSION_PREFIX`. A token names the CLI when it equals a `CLI_WORDS` entry, ends in `/` and
+one, starts with one and `@`, or holds an expansion character (`EXPANSION_TOKEN`) and contains
+one, so `$'playwright-cli'` and `${PW:-playwright-cli}` count while a literal
+`playwright-cli.json` does not. The matcher has ONE owner, `AUTH_GUARD_MATCHER` (`.*`) in
 `verify-auth-state-v1.js`: `GUARD_MATCHER` is it, the registry entry spells the same string, and
 the guard's unit file compares them. `AUTH_GUARD_TOOLS`, the guard's `FIELD_TOOLS`, names the
 nine tools with field-precise rules; every other tool goes through `otherToolVerdict`, which

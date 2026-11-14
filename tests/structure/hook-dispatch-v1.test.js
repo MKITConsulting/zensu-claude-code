@@ -257,6 +257,10 @@ test('the consent pre-check marks the playwright spellings the prefilter marks a
   assert.equal(dispatch.consentMarked(powershell("& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list")), true);
   assert.equal(dispatch.consentMarked(powershell("& ('pl' + 'ay' + 'wri' + 'ght-cli') -s=mine open ('--con' + 'fig') C:\\p\\own.json")), true);
   assert.equal(dispatch.consentMarked(powershell('Write-Output "`u{41}"')), true);
+  assert.equal(dispatch.consentMarked(powershell("& ('playwr' +\n'ight-cli') -s=('zensu-ver' +\n'ify-x') cookie-list")), true);
+  assert.equal(dispatch.consentMarked(powershell('& (\u2018playwr\u2019 + \u2018ight-cli\u2019) -s=mine open (\u2018--con\u2019 + \u2018fig\u2019) C:\\p\\c.json')), true);
+  assert.equal(dispatch.consentMarked(powershell('& $cli snapshot'), { PLAYWRIGHT_CLI_SESSION: 'zensu-verify-a' }), true);
+  assert.equal(dispatch.consentMarked(powershell('& $cli snapshot'), {}), false);
   assert.equal(dispatch.consentMarked(powershell('Get-ChildItem -Recurse')), false);
   assert.equal(dispatch.consentMarked(bashPayload('git status --short')), false);
 });

@@ -709,9 +709,11 @@ A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse comp
 PowerShell call that names `playwright-cli` and a `zensu-verify-*` session, a `verify-feature-runs`
 directory or a config file is refused, so run those calls through the Bash tool. It is refused in
 every spelling the shared PowerShell analyzer decodes, a backtick or Unicode escape and joined
-string literals included, so the prefilter starts `node` for a PowerShell call whose text, with
-quotes, `+`, parentheses, `$` and blanks dropped, names `wright` beside `verify` or `config`, or
-holds a Unicode escape. The gate is
+string literals included, on one line or across lines and with typographic quotes, so the
+prefilter starts `node` for a PowerShell call whose text, with quotes, `+`, parentheses, `$`,
+blanks and line breaks dropped, names `verify` or `config`, or holds a Unicode escape, and for
+every PowerShell call while the hook environment's `PLAYWRIGHT_CLI_SESSION` names a
+`zensu-verify-` session. The gate is
 textual: they judge a `playwright-cli` call on a `zensu-verify-*` session — the session
 `scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — when its command
 text names the CLI and that session, or names the CLI while the hook environment's
@@ -946,9 +948,9 @@ call on any other session is denied with a final reason when the command names a
 directory, in any position and behind any program the text shows, or when its config file
 carries `browser.contextOptions.storageState`. A CLI that another program receives as an
 argument counts as such a call — `xargs`, `stdbuf`, `caffeinate`, `env -S`, `bash -c --`, a
-heredoc fed to a shell, a path into the `@playwright/cli` package — and so does a CLI path the
-shell expands first, such as `~/.local/bin/playwright-cli` or `$HOME/bin/playwright-cli`, while a
-word that only
+heredoc fed to a shell, a path into the `@playwright/cli` package — and so does any word the
+shell expands first whose text names the CLI, such as `~/.local/bin/playwright-cli`,
+`$'playwright-cli'` or `"$(command -v playwright-cli)"`, while a literal word that only
 contains the CLI's name, such as the run config `playwright-cli.json` or a project folder named
 after the CLI, does not, and neither does the directory a `cd` or `pushd` enters. The gate reads
 that config as the CLI does: the path as given when it is absolute, else against the payload's
@@ -956,8 +958,11 @@ working directory when the call is one plain call without a wrapper, with a byte
 skipped and the text parsed as JSON. It reads every config value the command text sets —
 `--config <path>`, `--config=<path>` and a `PLAYWRIGHT_MCP_CONFIG` assignment, behind `export`,
 `declare`, `sudo` or `doas`, on a line of its own, or inside a command string or heredoc — and
-refuses one it cannot pin down: a value assembled at run time or appended with `+=`, and a
-relative path unless the command is one plain unwrapped call. It confirms that the path names a
+refuses one it cannot pin down: a value assembled at run time or appended with `+=`, a
+`--config` with no word after it, which another program such as `xargs` completes, the variable
+set any other way than by a literal assignment (`read`, `printf -v`, `mapfile`, a reference or a
+bare `export`), an assignment value whose `~` the shell expands, and a relative path unless the
+command is one plain unwrapped call. It confirms that the path names a
 regular file before it opens it, so it never opens a FIFO or a device, and it refuses a path that
 starts with two slashes or backslashes, a network path, unread. The CLI reads an `.ini` path, and
 a file that is no JSON and does not start with `{`, as INI, so the gate refuses a config it cannot

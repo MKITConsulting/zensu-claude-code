@@ -221,13 +221,15 @@ function foldings(text) {
   return [text.replace(/[A-Z]+/g, (letters) => letters.toLowerCase()), text.toLowerCase()];
 }
 
-function consentMarked(input) {
+function consentMarked(input, env = process.env) {
   const texts = [input, libraryScan(input), fallbackScan(input)].flatMap(foldings);
   if (texts.some((text) => text.includes('playwright') || text.includes('zensu-verify'))) return true;
   const powershell = foldings(input).some((text) => text.includes('"tool_name":"powershell"') || text.includes('"tool_name": "powershell"'));
   if (!powershell) return false;
-  const joined = texts.concat(texts.map((text) => text.replace(/[+()$\s]/g, '')));
-  return joined.some((text) => text.includes('wright') || text.includes('verify') || text.includes('u{'));
+  const session = env && typeof env.PLAYWRIGHT_CLI_SESSION === 'string' ? env.PLAYWRIGHT_CLI_SESSION.toLowerCase() : '';
+  if (session.includes('zensu-verify-')) return true;
+  const joined = texts.concat(texts.map((text) => text.replace(/\\u201[89a-e]/g, '').replace(/[+()$\s‘-„]/g, '')));
+  return joined.some((text) => text.includes('wright') || text.includes('verify') || text.includes('config') || text.includes('u{'));
 }
 
 function binderPayloadValid(input) {

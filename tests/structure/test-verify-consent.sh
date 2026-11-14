@@ -1633,6 +1633,16 @@ case "$(pre_reason "~/.local/bin/playwright-cli -s=mine open --config=$V71_DIR/r
   *'is refused on every session but a zensu-verify-auth one'*) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" PASS ;;
   *) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" FAIL ;;
 esac
+PS_LQ=$'\xe2\x80\x98'
+PS_RQ=$'\xe2\x80\x99'
+PS_SPLIT_LINE="& ('playwr' +"$'\n'"'ight-cli') -s=('zensu-ver' +"$'\n'"'ify-x') cookie-list"
+PS_SPLIT_QUOTES="& (${PS_LQ}playwr${PS_RQ} + ${PS_LQ}ight-cli${PS_RQ}) -s=mine open --config=C:\\p\\c.json"
+[ "$(diff_passes_ps "$PS_SPLIT_LINE")" = "1" ] \
+  && [ "$(diff_passes_ps "$PS_SPLIT_QUOTES")" = "1" ] \
+  && [ "$(pre_verdict "$PS_SPLIT_LINE" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && [ "$(pre_verdict "$PS_SPLIT_QUOTES" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V72f a PowerShell call joined across a line break or with typographic quotes reaches the gate and is refused" PASS \
+  || check "V72f a PowerShell call joined across a line break or with typographic quotes reaches the gate and is refused" FAIL
 
 unit_check_done "V7z every unit file the registry gives this suite was graded"
 

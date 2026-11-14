@@ -66,12 +66,15 @@ and the Grep tool, and the recorder skips a PowerShell call (`powershell-call`).
 read over `spellings()` of `hooks/lib/powershell-command-v1.js`, which decodes backtick and
 Unicode escapes and joins string literals in both the Windows PowerShell 5.1 and the PowerShell 7
 reading, and a call that reaches node while that module cannot load is refused. For a PowerShell
-payload the prefilter's one `tr -d` pass also drops `+`, parentheses, `$` and blanks, so literals
-joined by `+` read as one word (`'play' + 'wri' + 'ght-cli'`), and it forwards a text that names
-`wright` beside `verify` or `config`, or holds `u{`, because those spellings never name
-`playwright-cli` literally. `consentMarked` and the pre hook's fallback drop the same characters
-for a PowerShell payload and count any of `wright`, `verify` or `u{` as marked. V70 to V70g, V72,
-V72b and H17g5-H17g6 pin both halves.
+payload the prefilter's one `tr -d` pass also drops `+`, parentheses, `$`, blanks and the bytes of
+the typographic quotes U+2018 to U+201E, and its one `sed` pass also drops the JSON escapes `\n`,
+`\r`, `\t` and `‘` to `„`, so literals joined by `+` read as one word on one line or
+across lines (`'play' + 'wri' + 'ght-cli'`); it forwards a text that names `verify` or `config`,
+or holds `u{`, and every PowerShell call while the hook environment's `PLAYWRIGHT_CLI_SESSION`
+names a `zensu-verify-` session, because a split spelling never names `playwright-cli` literally
+and node's `spellings()` decides. `consentMarked` and the pre hook's fallback drop the same
+characters for a PowerShell payload and count any of `wright`, `verify`, `config` or `u{`, or that
+session variable, as marked. V70 to V70g, V72, V72b, V72f and H17g5-H17g6 pin both halves.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,
@@ -101,8 +104,9 @@ config held in a variable and a relative config handed to a wrapper are refused,
    It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session, a
    `verify-feature-runs` directory, `--config` or `playwright_mcp_config` — or name the CLI while
    the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. For a PowerShell payload the same
-   `tr -d` pass also drops `+`, parentheses, `$` and blanks, and its PowerShell arm forwards
-   `wright` beside `verify` or `config`. The third `case` arm, the
+   `tr -d` pass also drops `+`, parentheses, `$`, blanks and the typographic quote bytes, the
+   `sed` pass also drops the JSON line and quote escapes, and its PowerShell arm forwards `verify`,
+   `config` or `u{`, and every call while that variable names a session. The third `case` arm, the
    JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
    Every other Bash call exits 0 with no output — which is what keeps the pair off the hot path of
    every Bash call and out of every bind-failure state for unrelated commands. It is also why the
@@ -263,12 +267,15 @@ every invocation whose session is not a literal `zensu-verify-` name, a session 
 inline assignment, the hook environment or the CLI's default alike, an unexpanded one included.
 `hidden` marks a CLI another program runs: a word outside command position that is a CLI word or
 holds one as a token (`runsCli`: a token whose basename is a CLI name, or a path into the
-`@playwright/cli` package), a command word the shell expands before it runs that holds one as a
-token (`~/bin/playwright-cli`, `$HOME/…`, a brace or a glob), which is no invocation because only a
-literal word is, and a body the lexer cannot judge that names the CLI. A word that only
-contains the name, such as `playwright-cli.json` or a project folder named after the CLI, is no
-token, and the operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never counts; the gated
-`indirect` test keeps its substring reading. With the `runs` arm an off-session call or a hidden
+`@playwright/cli` package), any word the shell expands before it runs, the command word included,
+whose text names the CLI at all (`expandsIntoCli`: `~/bin/playwright-cli`, `$HOME/…`, a brace, a
+glob, `$'playwright-cli'`, `playwright-cli$''`, `"$(command -v playwright-cli)"`,
+`"${PW:-playwright-cli}"`), which is no invocation because only a literal word is, and a body the
+lexer cannot judge that names the CLI. A literal word that only contains the name, such as
+`playwright-cli.json` or a project folder named after the CLI, is no token, while an expanded one
+such as `"$HOME/playwright-cli.json"` counts, and the operand of `cd` or `pushd`
+(`DIRECTORY_BUILTINS`) never counts; the gated `indirect` test keeps its substring reading of
+literal words. With the `runs` arm an off-session call or a hidden
 CLI denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each
 inline `PLAYWRIGHT_MCP_CONFIG` assignment of an off-session call, in any letter case because
 Windows reads environment names that way, is read, and when the command is
@@ -276,7 +283,11 @@ not one plain unwrapped call, or a CLI is hidden, `configMentions` also reads ev
 the text sets: `--config <path>`, `--config=<path>` and a `PLAYWRIGHT_MCP_CONFIG` assignment in
 any letter case, in any segment, behind `export`, `declare`, `sudo` or `doas`, inside a word that
 holds a command string and inside nested bodies, heredocs and here-strings, up to `MAX_NEST`. A
-value assembled at run time, appended with `+=`, behind a lexer fault or past that depth, and a
+value assembled at run time, appended with `+=`, behind a lexer fault or past that depth, a
+`--config` with no word after it in its segment (`xargs` appends one), any other mention of the
+variable's name than a literal assignment or an `unset` (`read`, `printf -v`, `mapfile`, a
+reference or a bare `export`; `removesConfig` names the exemptions), an assignment value whose
+tilde the shell expands (`assignmentOf` reads `~` after `=` or `:` as unexpanded), and a
 relative path outside one plain unwrapped call, deny `CONFIG_UNRESOLVED_OFF_SESSION`. A literal
 path is read as given when absolute, else against the payload's `cwd`; `readBoundedConfig`
 refuses a path that starts with two slashes or backslashes unread, stats it and requires a
