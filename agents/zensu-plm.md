@@ -130,19 +130,29 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu plan push <plan-file>` — Create a work plan from a Markdown plan file (**person**; `--dry-run` previews it)
 - `zensu plan status <plan-id>` — Show a work plan and its orders (`--watch` follows it until it is merged or abandoned)
 - `zensu plan list --product <id>` — List the work plans of a product
-- `zensu plan approve|finalize|abandon|confirm-merge <plan-id>` — Approve a draft plan, record its final PR, abandon it, or confirm its final merge (**person**)
+- `zensu plan approve|abandon <plan-id>` — Approve a draft plan, or abandon it (**person**; abandon needs `--confirm-pr-closed` when an order has an open PR)
+- `zensu plan finalize <plan-id>` — Print the compare link for opening the plan's final PR, or record that PR (**person**; recording requires `--pr-url`, `--pr-number` and `--head-sha` together)
+- `zensu plan confirm-merge <plan-id>` — Confirm the merge of the plan's final PR (**person**; `--head-sha` required: the full SHA of the merged head of the final PR, which must match the head `finalize` recorded)
 - `zensu plan followups <plan-id>` — List the follow-ups the plan's sessions reported
 - `zensu plan followup accept|dismiss <plan-id> <followup-id>` — Accept or dismiss a reported follow-up (**person**)
 - `zensu work list` / `zensu work get <work-order-id>` / `zensu work events <work-order-id>` — List work orders, show one, or show its event timeline
 - `zensu work questions --plan <plan-id>` — List the questions of a work plan
-- `zensu work create --product <id>` — Create a one-item plan with one draft work order for a feature or revision (**person**)
-- `zensu work approve|requeue|cancel|confirm-merge <work-order-id>` — Approve, requeue, cancel, or confirm the merge of a work order (**person**)
-- `zensu work answer|overturn <question-id>` — Answer a session's question, or replace an automatic answer (**person**)
+- `zensu work create --product <id>` — Create a one-item plan with one draft work order for a feature or revision (**person**; `--repository` and exactly one of `--feature` or `--revision` required: `--repository` takes a registered repository URL, `--feature` a feature UUID or `KEY-N` reference whose active revision the order targets, `--revision` a revision UUID)
+- `zensu work approve|requeue|cancel <work-order-id>` — Approve, requeue, or cancel a work order (**person**; cancel needs `--confirm-pr-closed` when the order has an open PR)
+- `zensu work confirm-merge <work-order-id>` — Confirm the merge of a work order's PR (**person**; `--head-sha` required: the full SHA of the merged PR head)
+- `zensu work answer|overturn <question-id>` — Answer a session's question, or replace an automatic answer (**person**; `--answer` required)
 - `zensu work policy get|set --product <id>` — Show or change a product's automation policy (`set` is **person**)
-- `zensu work repositories list|add --product <id>` (alias `repos`) — List or register the repositories a product's work orders may use (`add` is **person**)
-- `zensu work repositories update|remove <repository-id>` (alias `repos`) — Replace a registered repository's risk paths, or remove it while no plan names it (**person**)
-- `zensu work claim|confirm|release|usage` — Claim the next work order, confirm or release the claim, and report a session's cost and token usage (**worker**)
-- `zensu work heartbeat|event|ask|followup <work-order-id>` — Renew the lease, report a stage, ask the humans behind the plan, or report out-of-scope work (**session**; heartbeat and event only through the `/zensu:work` helper)
+- `zensu work repositories list --product <id>` (alias `repos`) — List the repositories a product's work orders may use
+- `zensu work repositories add --product <id>` (alias `repos`) — Register a repository for a product's work orders (**person**; `--repository` required: an https repository URL; optional repeatable `--risk-path`)
+- `zensu work repositories update <repository-id> --product <id>` (alias `repos`) — Replace a registered repository's risk paths (**person**; `--risk-path` or `--clear` required: the repeatable `--risk-path` names every risk path the repository keeps, `--clear` removes them all)
+- `zensu work repositories remove <repository-id> --product <id>` (alias `repos`) — Remove a registered repository while no plan names it (**person**)
+- `zensu work claim` — Claim the next work order (**worker**; `--session-id` and `--repository` required: `--session-id` names the session that will run the order, the repeatable `--repository` every repository the worker can check out)
+- `zensu work confirm|usage <work-order-id>` — Confirm the claim once the session started, or report the session's cost and token usage (**worker**; `--session-id` and `--attempt` of the claim required)
+- `zensu work release <work-order-id>` — Release the claim when the session exits (**worker**; `--session-id`, `--attempt` and `--outcome` required: success|failure|rate_limited|runtime_cap|interrupted; `--outcome rate_limited` also requires `--not-before`)
+- `zensu work heartbeat <work-order-id>` — Renew the lease (**session**; only through the `/zensu:work` helper)
+- `zensu work event <work-order-id>` — Report a stage, an artifact or a block (**session**; only through the `/zensu:work` helper; exactly one of `--stage`, `--artifact` or `--blocked` required, and `--blocked` also requires `--reason`)
+- `zensu work ask <work-order-id>` — Ask the humans behind the plan (**session**; `--question` and `--category` required: clarification|technical_choice|product_decision|scope|risk|external; `--default-option` also required unless `--blocking` is set)
+- `zensu work followup <work-order-id>` — Report out-of-scope work (**session**; `--title`, `--rationale` and `--severity` required: low|medium|high|critical)
 
 ### Product Visions & Bootstrap
 - `zensu products vision-create` — Store a vision document (`--title` and `--content` required; optional `--product` and `--source` studio|import|claude-code)
