@@ -124,6 +124,7 @@ marketplace_fixture() {
     const fs = require("node:fs");
     const [source, target, shape, secondName] = process.argv.slice(1);
     const marketplace = JSON.parse(fs.readFileSync(source, "utf8"));
+    marketplace.plugins = marketplace.plugins.filter((entry) => entry.name !== "session-hub");
     const second = {
       name: secondName,
       source: {
@@ -166,6 +167,33 @@ for POSITION in first last; do
     check "Release bump changes only the zensu version and ref when a git-subdir entry is listed $POSITION" PASS
   else
     check "Release bump changes only the zensu version and ref when a git-subdir entry is listed $POSITION (rc=$BUMP_RC changed lines=$DIFF_LINES)" FAIL
+  fi
+done
+
+COMPANION_VERSION="7.7.8"
+for POSITION in first last; do
+  FIXTURE="$TMP/companion-bump-$POSITION.json"
+  marketplace_fixture "$FIXTURE" "$POSITION"
+  cp "$FIXTURE" "$TMP/before.json"
+  BUMP_RC=0
+  node "$BUMP" "$FIXTURE" "$SECOND_NAME" "$COMPANION_VERSION" "$SECOND_NAME--v$COMPANION_VERSION" >"$TMP/bump.out" 2>&1 || BUMP_RC=$?
+  ZENSU_BEFORE="$(jq -c '[.plugins[] | select(.name == "zensu")]' "$TMP/before.json" 2>/dev/null)"
+  ZENSU_AFTER="$(jq -c '[.plugins[] | select(.name == "zensu")]' "$FIXTURE" 2>/dev/null)"
+  SECOND_ENTRY="[.plugins[] | select(.name == \"$SECOND_NAME\")] | select(length == 1) | .[0]"
+  ORDER_BEFORE="$(jq -c '[.plugins[].name]' "$TMP/before.json" 2>/dev/null)"
+  ORDER_AFTER="$(jq -c '[.plugins[].name]' "$FIXTURE" 2>/dev/null)"
+  DIFF_LINES="$(diff "$TMP/before.json" "$FIXTURE" | grep -c '^[<>]')"
+  ADDED_LINES="$(diff "$TMP/before.json" "$FIXTURE" | sed -n 's/^> *//p' | sort | tr '\n' '|')"
+  if [ "$BUMP_RC" -eq 0 ] \
+    && [ "$(jq -r "$SECOND_ENTRY.version" "$FIXTURE" 2>/dev/null)" = "$COMPANION_VERSION" ] \
+    && [ "$(jq -r "$SECOND_ENTRY.source.ref" "$FIXTURE" 2>/dev/null)" = "$SECOND_NAME--v$COMPANION_VERSION" ] \
+    && [ -n "$ZENSU_BEFORE" ] && [ "$ZENSU_BEFORE" != "[]" ] && [ "$ZENSU_BEFORE" = "$ZENSU_AFTER" ] \
+    && [ "$ORDER_BEFORE" = "$ORDER_AFTER" ] \
+    && [ "$DIFF_LINES" -eq 4 ] \
+    && [ "$ADDED_LINES" = "\"ref\": \"$SECOND_NAME--v$COMPANION_VERSION\"|\"version\": \"$COMPANION_VERSION\"|" ]; then
+    check "Companion release bump changes only the session-hub version and ref, never the zensu entry, when it is listed $POSITION" PASS
+  else
+    check "Companion release bump changes only the session-hub version and ref when it is listed $POSITION (rc=$BUMP_RC changed lines=$DIFF_LINES)" FAIL
   fi
 done
 

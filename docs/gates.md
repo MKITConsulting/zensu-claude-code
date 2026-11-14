@@ -453,10 +453,19 @@ and the main checkout addressed from inside a worktree. The route is a session w
 contains that worktree — `cd -- <cwd> && claude --resume <id>` as `show` prints it, or the handoff
 brief opened by an instance already running there — not the escape prefix above: the host's
 permission layer commonly refuses an inline `ZENSU_BASH_WRITE_GATE=off` as well. Switching the gate
-off is the other route, and it is the user's call.
+off is the other route, and it is the user's call. A takeover through the `session-hub@zensu`
+companion's `/session-hub:session-trail` meets the same rule. The companion has no gate of its own,
+so its takeover briefs and `show` state the rule themselves. While this gate is on,
+`user-prompt-session-hub-takeover-notice.sh` adds one notice to a takeover command typed as
+`/session-hub:session-trail takeover …`, raw or in the command-tag form, that names the refusal and
+the fourth route below; in a session without a usable Session Control record it names
+`/zensu:doctor` instead. A linked session started from a takeover brief and a takeover started
+through the Skill tool get no notice, so a missing notice is no evidence that the gate is off.
 
-**A third route needs no other session, and it works BECAUSE containment is the test.** Since a
-worktree nested inside the anchor is writable, the taking session can create its continuation there
+**A third route needs no other session, and it works BECAUSE containment is the test.** It belongs
+to PLM's `/zensu:session-trail` alone: the companion's `/session-hub:session-trail` has no `--anchor`
+flag and renders no `CONTINUE` head, so a companion takeover takes the first, second or fourth
+route. Since a worktree nested inside the anchor is writable, the taking session can create its continuation there
 instead of writing into the escaping one: `show --anchor <your project root>` (and `takeover --json`)
 renders the whole block under a `CONTINUE` head — `git -C <anchor> worktree add -b claude/<slug>-cont
 -- <anchor>/.claude/worktrees/<slug>-cont refs/heads/<source branch>`, plus the transfer of the

@@ -185,3 +185,39 @@ jobs:
         run: bash tests/structure/test-session-control-sandbox-hook-integration.sh
         env:
           ZENSU_RUN_LINUX_SANDBOX_HOOK_INTEGRATION: '1'
+
+  plugin-validate:
+    name: Plugin manifest validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install the pinned Claude Code
+        run: bash .github/scripts/session-hub-install-claude-code.sh .github/tools/claude-code
+      - name: Run the companion release gate
+        run: bash .github/scripts/session-hub-release-gate.sh
+
+  plugin-floor:
+    name: Session Hub companion on the oldest supported Claude Code
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install the oldest supported Claude Code
+        run: bash .github/scripts/session-hub-install-claude-code.sh .github/tools/claude-code-floor
+      - name: Validate and install the companion through its git-subdir entry
+        run: bash .github/scripts/session-hub-install-probe.sh .github/tools/claude-code-floor

@@ -1,15 +1,24 @@
 ---
 paths:
   - "skills/session-trail/scripts/linked-sessions-v1.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs"
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/handover-contract.json"
+  - "plugins/session-hub/skills/session-trail/handover-contract.json"
   - "skills/session-trail/SKILL.md"
+  - "plugins/session-hub/skills/session-trail/SKILL.md"
   - "skills/session-trail/references/**"
+  - "plugins/session-hub/skills/session-trail/references/**"
   - "tests/structure/linked-sessions-v1.test.js"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 
 # Session-Trail Linked Sessions (`linkedSessions` in `trail.mjs` + `skills/session-trail/scripts/linked-sessions-v1.mjs`)
+
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
 
 **A takeover continues the old session's open linked sessions from the session that takes it
 over.** A linked session is one the old session started in Claude Desktop: its record carries

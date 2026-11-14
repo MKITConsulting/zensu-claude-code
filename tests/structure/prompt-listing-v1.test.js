@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const mod = await import(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url));
+const mod = await import(new URL('../../plugins/session-hub/skills/session-trail/scripts/trail.mjs', import.meta.url));
 const REACH = mod.QUEUE_DELIVERY_REACH;
 
 function transcript() {

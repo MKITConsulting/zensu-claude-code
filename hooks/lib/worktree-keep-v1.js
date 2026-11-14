@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
-const { GIT_ENV_SCRUB, gitEnvironment } = require('./git-environment-v1.js');
+const { GIT_ENV_SCRUB, scrubGitEnvironment: gitEnvironment } = require('./git-environment-v1.js');
 
 const KEEP_FILENAME = '.worktree-keep';
 const KEEP_SOURCE_BUILD = '2.2553.1';

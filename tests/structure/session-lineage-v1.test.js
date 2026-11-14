@@ -1,4 +1,4 @@
-// Unit contract for skills/session-trail/scripts/session-lineage-v1.mjs.
+// Unit contract for plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs.
 //
 // The shape lattice and the refusal table are what a unit layer can pin and the
 // end-to-end bash suite cannot: a bash check can observe that a chain renders,
@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const mod = await import(new URL('../../skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url));
+const mod = await import(new URL('../../plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url));
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lineage-unit-'));
 const ep = (id, extra = {}) => ({ sessionId: id, ...extra });
@@ -756,7 +756,7 @@ test('the open cannot block on a non-regular entry', { skip: process.platform ==
   // node:test's own timeout could never fire — the deadline has to come from outside
   // the blocked process. The read therefore runs in a child that execFileSync kills:
   // a killed child is the RED signal, a clean exit the GREEN one.
-  const modUrl = new URL('../../skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url).href;
+  const modUrl = new URL('../../plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url).href;
   const probe = `import(${JSON.stringify(modUrl)}).then((m) => {`
     + `const o = m.readEdges(${JSON.stringify(p.edges)});`
     + `const f = o.refused.find((r) => r.file === '2-fifo.json');`
@@ -990,7 +990,7 @@ test('the record cap bounds the WORK, not only the count', () => {
   // roughly 200x after the fix, and the pre-fix figure is ~2.7x the deadline — so
   // a loaded CI box moves the number without flipping the verdict.
   const src = `
-    const mod = await import(${JSON.stringify(new URL('../../skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url).href)});
+    const mod = await import(${JSON.stringify(new URL('../../plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url).href)});
     const edges = [];
     for (let i = 0; i < mod.MAX_EDGE_RECORDS; i += 1) {
       edges.push({ from: { sessionId: 'a' + i }, to: { sessionId: 'b' + i },
