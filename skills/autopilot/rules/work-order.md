@@ -65,9 +65,10 @@ the plan commit's message in the commit style, language and attribution practice
 ```bash
 MSG="$(mktemp)" || exit 1
 trap 'rm -f "$MSG"' EXIT
-cat > "$MSG" <<'ZENSU_TEXT_END'
+cat >| "$MSG" <<'ZENSU_TEXT_<hex>'
 <plan commit message>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+grep -qI '[^[:space:]]' -- "$MSG" || exit 1
 CLAUDE_PLUGIN_DATA="…" bash "$WO" --plan-approval --message-file "$MSG"
 ```
 

@@ -292,11 +292,11 @@ else
 fi
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 
-B52_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat > \"\$f\" <<'ZENSU_TEXT_END'" \
-  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'zensu link docs f1 \' \
-  '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content "$(cat "$f")"')"
+B52_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat >| \"\$f\" <<'ZENSU_TEXT_3f9a1c7e'" \
+  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'ZENSU_TEXT_3f9a1c7e' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" \
+  'zensu link docs f1 \' '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content "$(cat "$f")"')"
 tdd_workflow_begin gate-test "link_docs" "$(( $(date +%s) + 3600 ))" 2>/dev/null
-run "B52 the skills' free-text form (a quoted heredoc into a temporary file, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
+run "B52 the skills' free-text form (>| into a temporary file through a quoted heredoc with a random delimiter, a content check, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 run "B52b the same free-text form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
 

@@ -40,26 +40,47 @@ Execute these phases in order. Present results to the user after each phase and 
 
 **Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "create_product,create_product_vision,bootstrap_from_vision,apply_bootstrap,create_feature,add_subfeature,create_tier,set_feature_tiers,create_user_journey,create_journey_step,split_feature,update_feature,update_bootstrap_step,set_security_classification"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu products create` / `zensu products vision-create` / `zensu products bootstrap-apply` / `zensu features create` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
 
-**Free text never goes into the command line itself.** The plan document and every JSON
-argument below are written to a temporary file first: inside double quotes the shell
-runs every backtick span and expands every `$NAME`, and a single quote ends at the first
-apostrophe. zensu-cli has no stdin or file form for `--content`, `--result`, `--children`
-or `--tiers`, so a heredoc whose delimiter is quoted writes the text unchanged and
-`"$(cat "$f")"` hands it over as one argument the shell does not expand again. Pick
-another delimiter if the text holds the line `ZENSU_TEXT_END`.
+**Free text never goes into the command line itself.** The plan document, every
+`--description` and `--expected-result`, and every JSON argument below are written to a
+temporary file first: inside double quotes the shell runs every backtick span and expands
+every `$NAME`, and a single quote ends at the first apostrophe. zensu-cli has no stdin or file
+form for `--content`, `--description`, `--expected-result`, `--result`, `--children` or
+`--tiers`, so a heredoc whose delimiter is quoted writes the text unchanged and `"$(cat "$f")"`
+hands it over as one argument the shell does not expand again. Write each file in the same
+Bash call as the command that reads it, one file per free-text flag, because the `trap` removes
+the files when that call ends. Keep one `trap` per call and widen it for each further file: a
+second `trap` replaces the first and leaves its file behind. Replace `<hex>` in the delimiter
+with eight random hex digits, new for each call and the same on both lines, so no line of the
+text can end the heredoc early. `>|` writes the file even under `noclobber`, and
+`grep -qI '[^[:space:]]' -- "$f" || exit 1` stops the call before an empty, blank or binary
+value reaches Zensu.
 
 ### Phase 1: Product & Vision Setup
 
 1. Ask the user for their product name, slug, type (public_product|internal_product|hybrid), and the vision/plan document content
-2. Run `zensu products create` with name, slug, and product type
-3. Create the vision from the plan document:
+2. Run `zensu products create` with name, slug, and product type. Its optional `--description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph, and pass it as `"$(cat "$f")"`, written to `$f` in the same Bash call as in step 3
+3. Create the vision from the plan document. A Markdown or plain-text file goes in by path,
+   never retyped and never under a `trap`, which would delete it. Write the path absolute or
+   as `$HOME/…`, never `~/…`, which double quotes leave unexpanded; the check stops a wrong
+   path, a directory, and an unreadable, empty, blank or binary file:
+
+   ```bash
+   p="<absolute-plan-path>"
+   [ -f "$p" ] && grep -qI '[^[:space:]]' -- "$p" || exit 1
+   zensu products vision-create --product <product-id> --title "<vision-title>" \
+     --content "$(cat "$p")" --source claude-code
+   ```
+
+   A plan given as text, or one you read from a PDF or Word file, goes through a temporary
+   file:
 
    ```bash
    f="$(mktemp)" || exit 1
    trap 'rm -f "$f"' EXIT
-   cat > "$f" <<'ZENSU_TEXT_END'
+   cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <plan-document>
-   ZENSU_TEXT_END
+   ZENSU_TEXT_<hex>
+   grep -qI '[^[:space:]]' -- "$f" || exit 1
    zensu products vision-create --product <product-id> --title "<vision-title>" \
      --content "$(cat "$f")" --source claude-code
    ```
@@ -75,7 +96,7 @@ another delimiter if the text holds the line `ZENSU_TEXT_END`.
    - **Security classification**: public (no sensitive data), internal (standard auth), confidential (PII/financial), restricted (health/credentials/regulatory)
    - **Estimated effort**: S (hours-1 day), M (2-3 days), L (1-2 weeks), XL (2+ weeks, consider splitting)
 3. Present the decomposition to the user for review
-4. Run `zensu products bootstrap-apply <vision-id> --result "$(cat "$f")"` with the structured JSON containing components and features, written to `$f` in the same Bash call by the `mktemp`, `trap` and quoted-heredoc lines of Phase 1 step 3
+4. Run `zensu products bootstrap-apply <vision-id> --result "$(cat "$f")"` with the structured JSON containing components and features, written to `$f` in the same Bash call by the `mktemp`, `trap` and quoted-heredoc lines of Phase 1 step 3. The component, feature and sub-feature `description` values in that JSON are Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph. Keep each one brief, because the whole JSON travels as one command-line argument and the operating system limits its size
 5. Report the created entities (component count, feature count, features by priority). Bootstrapped features start at `planned` with **no revision baseline** — there is nothing built yet to capture; a feature gets its v1 revision at implement-time (`/zensu:implement`), or at discovery if `/zensu:ghost-scan` later finds it already built
 
 ### Phase 3: Post-Bootstrap Setup (5 Steps)
@@ -88,18 +109,20 @@ Execute each step below, presenting results to the user after each.
 - Split XL-effort features using `zensu subfeatures add <feature-id> --title <title>` or `zensu features split <feature-id> --children "$(cat "$f")"` (a JSON array of `{"title", "slug"}` objects, written to `$f` in the same Bash call as in Phase 1 step 3)
 - Add missing features with `zensu features create --product <product-id> --component <component-uuid> --title <title>`; the `components` array of `zensu journeys suggest --product <product-id>` holds the component UUIDs, and the command takes no priority, so set it afterwards with `zensu features update`
 - Fix incorrect priorities with `zensu features update <feature-id> --priority <low|medium|high|critical>` and incorrect security classifications with `zensu security classify <feature-id> --classification <public|internal|confidential|restricted>`
+- Rewrite a vague or unformatted description with `zensu features update <feature-id> --description "$(cat "$f")"`, written to `$f` in the same Bash call as in Phase 1 step 3. That `--description` and the optional one of `zensu subfeatures add` are Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph
 - After completion: run `zensu products bootstrap-step <vision-id> 1` (the step is a positional argument, not a `--step` flag)
 
 **Step 2: Define User Journeys**
 - Run `zensu journeys suggest --product <product-id>` to get product context for journey suggestions
 - Propose 3-5 critical user journeys to the user
-- Create approved journeys with `zensu journeys create --product <product-id>`: `--title` (required), `--slug`, `--type` (critical|happy_path|edge_case|error_path|onboarding), `--priority` (critical|high|medium|low), `--persona` (free text). Pick `--type` from that enum only — the server rejects any other value.
+- Create approved journeys with `zensu journeys create --product <product-id>`: `--title` (required), `--slug`, `--type` (critical|happy_path|edge_case|error_path|onboarding), `--priority` (critical|high|medium|low), `--persona` (free text). Pick `--type` from that enum only — the server rejects any other value. `--description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph; pass it as `"$(cat "$f")"`, written to `$f` in the same Bash call as in Phase 1 step 3.
 - For each journey, add steps with `zensu journeys step <journey-id> --product <product-id>`:
   - Name the step via `--title` (required)
   - Set step order (1-based sequential) via `--step-order` (required)
   - Link to features via `--feature` (the feature **UUID**, not its slug)
   - Set `--interaction-type` (action|navigation|input|validation|output|wait)
   - Mark critical steps with `--critical`
+  - `--description` and `--expected-result` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. Pass them as `--description "$(cat "$f")" --expected-result "$(cat "$e")"`, with `e="$(mktemp)" || exit 1`, the one trap widened to `trap 'rm -f "$f" "$e"' EXIT`, and both files written and checked as in Phase 1 step 3
 - Run `zensu journeys health --product <product-id> <journey-id>` on each journey to identify weak links
 - After completion: run `zensu products bootstrap-step <vision-id> 2`
 
@@ -114,7 +137,7 @@ Execute each step below, presenting results to the user after each.
 - Ask the user: "Does this product use pricing tiers (e.g. Free/Pro/Enterprise)?"
 - If yes:
   1. Ask which tiers they need
-  2. Run `zensu tiers create --product <product-id> --slug <slug> --name <name> --tier-order <n>` for each tier (`--tier-order` ascending, 1 = the lowest tier: 1, 2, 3...)
+  2. Run `zensu tiers create --product <product-id> --slug <slug> --name <name> --tier-order <n>` for each tier (`--tier-order` ascending, 1 = the lowest tier: 1, 2, 3...). Its optional `--description` is plain text: Zensu does not render Markdown there, so do not use Markdown syntax; pass it as `"$(cat "$f")"`, written to `$f` in the same Bash call as in Phase 1 step 3
   3. Run `zensu tiers set-feature <feature-id> --tiers "$(cat "$f")"` for each feature, the JSON written to `$f` in the same Bash call as in Phase 1 step 3. The JSON array replaces the feature's tier assignments; each entry is `{"tierId": "<tier-uuid>", "gatingType": "hard|soft|preview"}` with an optional `tierLimits` object, and `zensu tiers list --product <product-id>` returns the tier UUIDs:
      - Critical features: available in all tiers (hard gating)
      - High priority: Pro and above

@@ -9,10 +9,10 @@ USER_ONLY_CLAUSE="Only the user's own instruction in this conversation triggers 
 
 ALLOWLIST="$(cat <<'ALLOW'
 adopt-session 39289
-autopilot 32713
+autopilot 32708
 doctor 91906
 gauntlet-loop 31628
-ghost-scan 27613
+ghost-scan 26247
 plan-review 32832
 self-review 32613
 verify-feature 39816
@@ -120,6 +120,10 @@ for (const name of names) {
       if (!src.includes(`references/${file}`)) emit('ref-orphan', name, file);
     }
   }
+  const named = new Set([...src.matchAll(/(?:^|[^\/\w.-])references\/([A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]));
+  for (const file of [...named].sort()) {
+    if (!fs.existsSync(path.join(refs, file))) emit('ref-missing', name, file);
+  }
 }
 for (const name of allow.keys()) if (!names.includes(name)) emit('allow-unknown', name, '-');
 emit('summary', '-', `skills=${names.length} maxDesc=${maxDesc} latestTrigger=${latestTrigger} totalDesc=${totalDesc}`);
@@ -177,8 +181,9 @@ BAD="$(printf '%s\n' "$REAL" | awk -F'\t' '$1 ~ /^allow-/ { printf "%s(%s: %s) "
   || check "B5 allowlist drift — a grown body must shrink, a shrunk one lowers its entry, one under the cap leaves the list: $BAD" FAIL
 
 BAD="$(findings_of "$REAL" ref-orphan)"
-[ -z "$BAD" ] && check "B6 every skills/<name>/references/ file is named in its SKILL.md" PASS \
-  || check "B6 references file never named by its SKILL.md: $BAD" FAIL
+MISSING="$(printf '%s\n' "$REAL" | awk -F'\t' '$1 == "ref-missing" { printf "%s/references/%s ", $2, $3 }')"
+[ -z "$BAD" ] && [ -z "$MISSING" ] && check "B6 every skills/<name>/references/ file is named in its SKILL.md, and every references/<file> a SKILL.md names exists" PASS \
+  || check "B6 references file never named by its SKILL.md: ${BAD:-none}; named reference missing: ${MISSING:-none}" FAIL
 
 FIX="$(mktemp -d "${TMPDIR:-/tmp}/zensu-skill-budget.XXXXXX")" || FIX=""
 if [ -z "$FIX" ]; then
@@ -206,6 +211,7 @@ else
   mkdir -p "$FIX/skills/orphan/references"
   printf 'x\n' > "$FIX/skills/orphan/references/used.md"
   printf 'x\n' > "$FIX/skills/orphan/references/unused.md"
+  mk missing-ref "$OK_FM See references/absent.md and the build skill's /skills/build/references/review-chain.md."$'\n'
   FIX_ALLOW=$'grew 25005\nshrank 25010\nunder 25000\nghost 30000\nbroken entry'
   GOT="$(budget_scan "$FIX" "$FIX_ALLOW")" || GOT=""
   CTL_BAD=""
@@ -225,6 +231,7 @@ else
   expect allow-unknown "ghost"
   expect allow-malformed "-"
   expect ref-orphan "orphan"
+  expect ref-missing "missing-ref"
   printf '%s\n' "$GOT" | grep -q $'\tclean\t' && CTL_BAD="$CTL_BAD [clean-fixture-reported]"
   printf '%s\n' "$GOT" | grep -q $'\tclause-ok\t' && CTL_BAD="$CTL_BAD [user-only-sentence-counted]"
   if [ -z "$CTL_BAD" ]; then
