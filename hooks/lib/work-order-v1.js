@@ -1193,18 +1193,26 @@ function planCriteriaRefusal(context, run, runId) {
   const file = planFileFor(orderId);
   const plan = acceptance.planFor(context.projectRoot, orderId);
   let cause = null;
+  let remedy = `write the plan to ${file} with a ## Requirements table holding one | AC-### | criterion | source | row per acceptance criterion of the order`;
   if (plan.reason) {
     cause = plan.reason;
   } else {
     const read = acceptance.readCriteria(plan.planPath);
-    if (read.status !== 'ok') {
-      cause = `the plan ${file} carries no active AC-### criterion (${read.reason})`;
+    const reason = String(read.reason || '').split(plan.planPath).join(file);
+    if (read.status === 'error') {
+      return `plan-criteria-unreadable: Autopilot run ${runId} validates its result, but the requirements lister could not judge the plan ${file} (${reason}), which says nothing about its content; leave the plan as it is, check the plugin installation with /zensu:doctor, then run --bind-spec again`;
+    }
+    if (read.status === 'unparseable') {
+      cause = `the plan ${file} does not parse (${reason})`;
+      remedy = `close the code fence the plan ${file} leaves open and keep its ## Requirements table`;
+    } else if (read.status !== 'ok') {
+      cause = `the plan ${file} carries no active AC-### criterion (${reason})`;
     } else if (!read.criteria.some((criterion) => criterion.state === 'active')) {
       cause = `the plan ${file} carries no active AC-### criterion (${read.criteria.length === 0 ? 'its ## Requirements table has no AC-### row' : 'every AC-### row is deprecated'})`;
     }
   }
   if (cause === null) return null;
-  return `plan-criteria-unusable: Autopilot run ${runId} validates its result, but ${cause}, so its VALIDATE stage would have no criterion to check; write the plan to ${file} with a ## Requirements table holding one | AC-### | criterion | source | row per acceptance criterion of the order, then run --bind-spec again`;
+  return `plan-criteria-unusable: Autopilot run ${runId} validates its result, but ${cause}, so its VALIDATE stage would have no criterion to check; ${remedy}, then run --bind-spec again`;
 }
 
 function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {

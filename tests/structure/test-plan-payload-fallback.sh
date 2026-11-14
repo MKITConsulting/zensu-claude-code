@@ -70,6 +70,7 @@ check() {
 PLAN_LIB="$PLUGIN_DIR/hooks/lib/plan-payload-v1.js"
 . "$(dirname "$0")/lib-unit-registry.sh"
 ZENSU_PLAN_PAYLOAD_UNIT_TARGET="$PLAN_LIB" unit_check "F11b the plan-payload module unit file passes" "$PLUGIN_DIR/tests/structure/plan-payload-v1.test.js"
+ZENSU_APPROVED_PLAN_UNIT_TARGET="$PLUGIN_DIR/hooks/lib/approved-plan-v1.js" unit_check "F11f the approved-plan module unit file passes" "$PLUGIN_DIR/tests/structure/approved-plan-v1.test.js"
 
 [ -f "$HOOK" ] && bash -n "$HOOK" 2>/dev/null \
   && check "F0 plan hook exists and parses" PASS \
@@ -1117,15 +1118,17 @@ TRANSPORT_VERDICT="$(HOOK="$HOOK" node -e '
         /^  PLAN_PAYLOAD_LIB="\$\{PLAN_PAYLOAD_DIR:\+\$\{PLAN_PAYLOAD_DIR\}\/plan-payload-v1\.js\}"$/,
         /^  plan_module_loadable "\$PLAN_PAYLOAD_LIB" \|\| return 1$/,
         /^    plan_module_loadable "\$\{PLAN_PAYLOAD_DIR\}\/foreign-executor-v1\.js" \|\| return 0$/,
+        /^      plan_module_loadable "\$\{PLAN_PAYLOAD_DIR\}\/approved-plan-v1\.js" \|\| \{$/,
         /^  PLAN_MSYS_EXCL="\$\(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB\)" \|\| PLAN_MSYS_EXCL="\$\{MSYS2_ENV_CONV_EXCL:-\}"$/,
         /^      PLAN_PAYLOAD_LIB="\$PLAN_PAYLOAD_LIB" node -e .$/,
-        /^        \(\{resolveApprovedPlan,responseOrigin,storeApprovedPlan,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/,
+        /^        \(\{resolveApprovedPlan,responseOrigin,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/,
+        /^        if \(process\.env\.ACTIVE_PLAN_STORE==="store"\) \(\{storeApprovedPlan,listPlanCriteria\}=require\(require\("path"\)\.join\(require\("path"\)\.dirname\(process\.env\.PLAN_PAYLOAD_LIB\),"approved-plan-v1\.js"\)\)\);$/,
         /^        reader=require\(process\.env\.PLAN_PAYLOAD_LIB\);$/,
         /^        foreign=require\(require\("path"\)\.join\(require\("path"\)\.dirname\(process\.env\.PLAN_PAYLOAD_LIB\),"foreign-executor-v1\.js"\)\);$/
       ];
       const offenders=[];
       lines.forEach((line,index)=>{
-        if (!/PLAN_PAYLOAD_LIB|PLAN_PAYLOAD_DIR|plan-payload-v1\.js|foreign-executor-v1\.js/.test(line)) return;
+        if (!/PLAN_PAYLOAD_LIB|PLAN_PAYLOAD_DIR|plan-payload-v1\.js|foreign-executor-v1\.js|approved-plan-v1\.js/.test(line)) return;
         // Shell comments AND the JS line comments inside the evaluator: both name
         // the module in prose, and the header there is required by F11c.
         if (/^\s*(#|\/\/)/.test(line)) return;
@@ -1141,7 +1144,7 @@ TRANSPORT_VERDICT="$(HOOK="$HOOK" node -e '
   process.stdout.write(verdict);
 ')"
 if [ "$TRANSPORT_VERDICT" = ok ]; then
-  check "F48 the reader module is preflighted and transported through the environment" PASS
+  check "F48 the reader and store modules are preflighted and transported through the environment" PASS
 else
   check "F48 reader module transport or preflight is not wired ($TRANSPORT_VERDICT)" FAIL
 fi
@@ -1155,8 +1158,8 @@ GUARD_CALLS="$(grep -cE '^ +plan_module_loadable "' "$HOOK")"
 GUARD_INLINE="$(grep -cE '\[ -L "\$(PLAN_PAYLOAD_LIB|\{?PLAN_PAYLOAD_DIR)' "$HOOK")"
 if [ "$LOADER_RENDERS" = 1 ] && [ "$LOADER_DEFINITIONS" = 1 ] \
   && [ "$LOADER_DURABLE_CALLS" = 1 ] && [ "$LOADER_NOTICE_CALLS" = 1 ] \
-  && [ "$GUARD_DEFINITIONS" = 1 ] && [ "$GUARD_BODIES" = 1 ] && [ "$GUARD_CALLS" = 2 ] && [ "$GUARD_INLINE" = 0 ]; then
-  check "F48b the reader loader is spelled once and serves the durable branch and the executor notice, and one -f/-L/-r guard serves the reader and the classifier module" PASS
+  && [ "$GUARD_DEFINITIONS" = 1 ] && [ "$GUARD_BODIES" = 1 ] && [ "$GUARD_CALLS" = 3 ] && [ "$GUARD_INLINE" = 0 ]; then
+  check "F48b the reader loader is spelled once and serves the durable branch and the executor notice, and one -f/-L/-r guard serves the reader, the classifier and the approved-plan store module" PASS
 else
   check "F48b reader loader (renders=$LOADER_RENDERS definitions=$LOADER_DEFINITIONS durable=$LOADER_DURABLE_CALLS notice=$LOADER_NOTICE_CALLS guard-definitions=$GUARD_DEFINITIONS guard-bodies=$GUARD_BODIES guard-calls=$GUARD_CALLS inline-guards=$GUARD_INLINE)" FAIL
 fi
@@ -1309,6 +1312,135 @@ if [ "$NO_CRITERIA_READY" = true ]; then
   fi
 else
   check "F47b criteria-reader-less fixture could not be provisioned" FAIL
+fi
+
+NO_STORE_READY=false
+if [ "$NO_MODULE_READY" = true ] && [ -f "$NO_MODULE_PLUGIN/hooks/lib/plan-payload-v1.js" ] \
+    && cp "$PLUGIN_DIR/hooks/lib/zensu-plan-requirements.sh" "$NO_MODULE_PLUGIN/hooks/lib/zensu-plan-requirements.sh" \
+    && rm -f "$NO_MODULE_PLUGIN/hooks/lib/approved-plan-v1.js"; then
+  NO_STORE_PROJECT="$TMP/nostoremodule"
+  mkdir -p "$NO_STORE_PROJECT"
+  export CLAUDE_PROJECT_DIR="$NO_STORE_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/nostoremodule"
+  if source "$BASELINE" nostore_session "$NO_MODULE_PLUGIN" >/dev/null 2>&1 \
+      && autopilot_begin_run nostore_run "$ZENSU_SESSION_KEY" "$NO_STORE_PROJECT" >/dev/null 2>&1; then
+    NO_STORE_READY=true
+    NO_STORE_DATA="$CLAUDE_PLUGIN_DATA"
+  fi
+fi
+if [ "$NO_STORE_READY" = true ]; then
+  NO_STORE_RUN_FILE="$(autopilot_run_file nostore_run "$NO_STORE_PROJECT")"
+  NO_STORE_BEFORE="$(digest "$NO_STORE_RUN_FILE")"
+  OUT47C="$(payload_response nostore_session '# Plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | The plan gate stores the approved plan before it approves. | spec |
+
+<!-- zensu-autopilot:nostore_run -->' __ABSENT__ \
+    | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+      -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+      CLAUDE_PLUGIN_ROOT="$NO_MODULE_PLUGIN" CLAUDE_PLUGIN_DATA="$NO_STORE_DATA" \
+      CLAUDE_PROJECT_DIR="$NO_STORE_PROJECT" ZENSU_CONFIG="$CFG_OFF" \
+      bash "$NO_MODULE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null)"
+  NO_STORE_COPIES=0
+  for NO_STORE_ENTRY in "$NO_STORE_PROJECT/.zensu/state"/autopilot-approved-plan-*; do
+    if [ -e "$NO_STORE_ENTRY" ] || [ -L "$NO_STORE_ENTRY" ]; then NO_STORE_COPIES=$((NO_STORE_COPIES + 1)); fi
+  done
+  if printf '%s' "$OUT47C" | grep -qF 'code=RUNTIME_UNAVAILABLE' \
+    && ! printf '%s' "$OUT47C" | grep -qF 'PLAN_APPROVED' \
+    && ! printf '%s' "$OUT47C" | grep -qF 'PLAN_CRITERIA_UNUSABLE' \
+    && ! printf '%s' "$OUT47C" | grep -qF 'APPROVED_PLAN_STORE_FAILED' \
+    && [ "$NO_STORE_COPIES" = 0 ] \
+    && [ "$(digest "$NO_STORE_RUN_FILE")" = "$NO_STORE_BEFORE" ]; then
+    check "F47c a validating run in a plugin without the approved-plan store module refuses as a runtime fault and stores nothing" PASS
+  else
+    check "F47c missing approved-plan store module (copies=$NO_STORE_COPIES out='$(printf '%s' "$OUT47C" | head -c 200)')" FAIL
+  fi
+  NO_STORE_PLAIN_PROJECT="$TMP/nostoreplain"
+  mkdir -p "$NO_STORE_PLAIN_PROJECT"
+  export CLAUDE_PROJECT_DIR="$NO_STORE_PLAIN_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/nostoreplain"
+  if source "$BASELINE" nostore_plain_session "$NO_MODULE_PLUGIN" >/dev/null 2>&1 \
+      && autopilot_begin_run nostore_plain_run "$ZENSU_SESSION_KEY" "$NO_STORE_PLAIN_PROJECT" false false >/dev/null 2>&1; then
+    NO_STORE_PLAIN_PLAN='# Plan
+
+<!-- zensu-autopilot:nostore_plain_run -->'
+    OUT47D="$(payload_response nostore_plain_session "$NO_STORE_PLAIN_PLAN" __ABSENT__ \
+      | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+        -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+        CLAUDE_PLUGIN_ROOT="$NO_MODULE_PLUGIN" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+        CLAUDE_PROJECT_DIR="$NO_STORE_PLAIN_PROJECT" ZENSU_CONFIG="$CFG_OFF" \
+        bash "$NO_MODULE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null)"
+    NO_STORE_PLAIN_SHA="$(run_field "$(autopilot_run_file nostore_plain_run "$NO_STORE_PLAIN_PROJECT")" approvedPlanSha256)"
+    if printf '%s' "$OUT47D" | grep -qF 'PLAN_APPROVED runId=nostore_plain_run' \
+      && ! printf '%s' "$OUT47D" | grep -qF 'RUNTIME_UNAVAILABLE' \
+      && [ "$NO_STORE_PLAIN_SHA" = "$(text_sha "$NO_STORE_PLAIN_PLAN")" ]; then
+      check "F47d a run without the validate stage approves in the same plugin, because only a validating run loads the store module" PASS
+    else
+      check "F47d store-less plugin without validation (out='$(printf '%s' "$OUT47D" | head -c 200)')" FAIL
+    fi
+  else
+    check "F47d store-less plain-run fixture could not be provisioned" FAIL
+  fi
+else
+  check "F47c store-less plugin fixture could not be provisioned" FAIL
+  check "F47d store-less plugin fixture could not be provisioned" FAIL
+fi
+
+LISTER_FAULT_READY=false
+if [ "$NO_STORE_READY" = true ] \
+    && cp "$PLUGIN_DIR/hooks/lib/approved-plan-v1.js" "$NO_MODULE_PLUGIN/hooks/lib/approved-plan-v1.js" \
+    && printf '%s\n' '#!/usr/bin/env bash' \
+      'echo "zensu-plan-requirements.sh: could not read plan: $3" >&2' \
+      'exit "${ZENSU_TEST_LISTER_EXIT:-2}"' > "$NO_MODULE_PLUGIN/hooks/lib/zensu-plan-requirements.sh"; then
+  LISTER_FAULT_PROJECT="$TMP/listerfault"
+  mkdir -p "$LISTER_FAULT_PROJECT"
+  export CLAUDE_PROJECT_DIR="$LISTER_FAULT_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/listerfault"
+  if source "$BASELINE" listerfault_session "$NO_MODULE_PLUGIN" >/dev/null 2>&1 \
+      && autopilot_begin_run listerfault_run "$ZENSU_SESSION_KEY" "$LISTER_FAULT_PROJECT" >/dev/null 2>&1; then
+    LISTER_FAULT_READY=true
+    LISTER_FAULT_DATA="$CLAUDE_PLUGIN_DATA"
+  fi
+fi
+lister_fault_refused() {
+  local out copies=0 entry
+  out="$(payload_response listerfault_session '# Plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | The plan gate judges criteria it could read. | spec |
+
+<!-- zensu-autopilot:listerfault_run -->' __ABSENT__ \
+    | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+      -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+      CLAUDE_PLUGIN_ROOT="$NO_MODULE_PLUGIN" CLAUDE_PLUGIN_DATA="$LISTER_FAULT_DATA" \
+      CLAUDE_PROJECT_DIR="$LISTER_FAULT_PROJECT" ZENSU_CONFIG="$CFG_OFF" ZENSU_TEST_LISTER_EXIT="$1" \
+      bash "$NO_MODULE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null)"
+  for entry in "$LISTER_FAULT_PROJECT/.zensu/state"/autopilot-approved-plan-*; do
+    if [ -e "$entry" ] || [ -L "$entry" ]; then copies=$((copies + 1)); fi
+  done
+  LISTER_FAULT_OUT="$out"
+  printf '%s' "$out" | grep -qF 'PLAN_GATE_BLOCKED code=PLAN_CRITERIA_UNREADABLE' \
+    && printf '%s' "$out" | grep -qF 'run stays at PLANNING' \
+    && ! printf '%s' "$out" | grep -qF 'PLAN_CRITERIA_UNUSABLE' \
+    && ! printf '%s' "$out" | grep -qF 'PLAN_APPROVED' \
+    && [ "$copies" = 0 ] \
+    && [ "$(digest "$LISTER_FAULT_RUN_FILE")" = "$LISTER_FAULT_BEFORE" ]
+}
+if [ "$LISTER_FAULT_READY" = true ]; then
+  LISTER_FAULT_RUN_FILE="$(autopilot_run_file listerfault_run "$LISTER_FAULT_PROJECT")"
+  LISTER_FAULT_BEFORE="$(digest "$LISTER_FAULT_RUN_FILE")"
+  if lister_fault_refused 2 && lister_fault_refused 1; then
+    check "F47e a requirements lister that fails for a reason other than the plan refuses as PLAN_CRITERIA_UNREADABLE, removes the copy and keeps the run at PLANNING" PASS
+  else
+    check "F47e lister fault (out='$(printf '%s' "$LISTER_FAULT_OUT" | head -c 200)')" FAIL
+  fi
+else
+  check "F47e lister-fault plugin fixture could not be provisioned" FAIL
 fi
 
 unit_check_done "F11z every unit file the registry gives this suite was graded"

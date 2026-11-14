@@ -46,7 +46,8 @@
 # no row carried a recognizable id, or every recognized row's Requirement column
 # is still empty. Both are exit 4 because both mean the same thing to the caller
 # (converge would audit nothing), but they print DIFFERENT messages: they are
-# different edits, and "fill the table" is the wrong instruction for the first.
+# different edits, and "fill the table" is the wrong instruction for the first;
+# 5 the plan does not parse, because a code fence is never closed.
 set -u
 
 PLAN_FILE=""
@@ -101,7 +102,7 @@ AWK_OUT="$(awk -v list="$LIST" '
   # toggle flips on any marker line and a plan may legitimately nest one fence
   # inside another (` ``` ` inside a `~~~` block, or a longer run wrapping a
   # shorter one). A toggle then leaves odd parity, the heading below is read as
-  # fenced, and the run dies at exit 2 with "unterminated code fence" against a
+  # fenced, and the run dies at exit 5 with "unterminated code fence" against a
   # complete table; even parity is worse, because a heading that really was
   # inside an example reads as a real section. CommonMark closes a fence only
   # with a run of the SAME character at least as long as the opener.
@@ -227,7 +228,10 @@ esac
 # is a parse failure, not a verdict about the table: reporting it as "no section"
 # would tell the author to fill a table that is already filled, and their only
 # remaining move would be the escape hatch and an undeserved ledger entry.
-[ "$FENCE_OPEN" -eq 0 ] || die "plan has an unterminated code fence, so the document could not be parsed: $PLAN_FILE"
+if [ "$FENCE_OPEN" -ne 0 ]; then
+  echo "zensu-plan-requirements.sh: plan has an unterminated code fence, so the document could not be parsed: $PLAN_FILE" >&2
+  exit 5
+fi
 
 if [ "$HEADING" -eq 0 ]; then
   say "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## Requirements\" section"

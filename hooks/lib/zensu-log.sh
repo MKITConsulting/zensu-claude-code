@@ -576,7 +576,7 @@ _zensu_run_bind() {
     if (s.stage === "DONE" || s.stage === "CANCELLED") process.exit(5);
     const options = s.options && typeof s.options === "object" ? s.options : {};
     const validate = options.validate === true ? "on" : options.validate === false ? "off" : "-";
-    const pr = s.evidence && s.evidence.pr && typeof s.evidence.pr.headSha === "string" ? s.evidence.pr.headSha : "-";
+    const pr = s.evidence && s.evidence.pr && typeof s.evidence.pr.headSha === "string" && /^[0-9a-fA-F]{7,64}$/.test(s.evidence.pr.headSha) ? s.evidence.pr.headSha : "-";
     const events = Array.isArray(s.events) ? s.events : [];
     const visit = events.filter((event) => event && event.toStage === "VALIDATE" && event.fromStage !== "VALIDATE").length;
     const update = s.tdd && typeof s.tdd === "object" && typeof s.tdd.headUpdateRequired === "boolean" ? String(s.tdd.headUpdateRequired) : "-";
@@ -602,9 +602,6 @@ _zensu_run_bind() {
   [ "$_rb_validate" != "-" ] || _rb_validate=""
   [ "$_rb_head_update" != "-" ] || _rb_head_update=""
   [ "$_rb_head" != "-" ] || _rb_head=""
-  case "$_rb_head" in
-    (*[!0-9a-fA-F]*) _rb_head="" ;;
-  esac
   case "$_rb_visit" in
     (''|*[!0-9]*) _rb_visit=0 ;;
   esac
@@ -1934,6 +1931,10 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-event: the 'validation-passed:' and 'validation-bypass:' event-id namespaces are reserved for --autopilot-validate" >&2
         exit 2
         ;;
+      plan-approved-*)
+        echo "zensu-log.sh --autopilot-event: the 'plan-approved-' event-id namespace is reserved for the plan-approval hook" >&2
+        exit 2
+        ;;
     esac
     case "$event_val" in
       TDD_STARTED|TDD_CHAIN_DONE)
@@ -1950,6 +1951,10 @@ case "${1:-}" in
         ;;
       VALIDATION_PASSED)
         echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-log.sh --autopilot-validate --run <id>, which checks the acceptance records on the pull-request head first" >&2
+        exit 2
+        ;;
+      PLAN_APPROVED)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; the plan-approval hook records it when the user approves the plan, and on a run that validates it first stores the plan and checks its acceptance criteria" >&2
         exit 2
         ;;
     esac
@@ -3266,6 +3271,13 @@ case "${1:-}" in
                 echo "  ${_rq_verdict}" >&2
                 echo "Fill the table with AC-###/FR-### rows per Phase 2 step 1b, then re-run. Pass --plan <path> when the plan is not the run log's sibling under .zensu/plans/." >&2
                 echo "If this cannot be resolved, report this refusal and leave the decision to the user." >&2
+                exit 1
+                ;;
+              5)
+                echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's Zensu plan does not parse, so its \`## Requirements\` table could not be read:" >&2
+                echo "  ${_rq_verdict}" >&2
+                echo "Close the code fence the plan leaves open, then re-run." >&2
+                echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
                 exit 1
                 ;;
               *)

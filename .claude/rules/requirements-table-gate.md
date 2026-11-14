@@ -61,8 +61,9 @@ the caller asserted where the plan is. A DERIVED path that is not there does NOT
 nothing was asserted — but the gate then prints `REQUIREMENTS GATE UNRESOLVED` instead of
 staying quiet, because "the table passed" and "no table was checked" reading the same is the
 exact failure this feature exists to remove. **Refusal wording is typed**: exits 3/4 are a
-verdict about the plan, exit 2 and anything else (a missing library included) refuse with
-"could not judge the plan" — the sibling rule CLAUDE.md already states for the plan-payload
+verdict about the plan, exit 5 is a plan that does not parse and refuses with a text that asks
+for the open code fence to be closed, and exit 2 and anything else (a missing library included)
+refuse with "could not judge the plan" — the sibling rule CLAUDE.md already states for the plan-payload
 gate, that a load fault must never be reported as a judged payload.
 
 **Scoping and the switch are copied from the edit-landing receipt gate**, which sits directly

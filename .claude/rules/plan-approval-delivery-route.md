@@ -503,7 +503,8 @@ root with whitespace and an apostrophe. `D46c2` keeps the function ASCII-only,
 because its node program travels in argv. A symlinked module never reaches the hook: Session
 Control rejects a runtime symlink when the session registers, so the hook's `-L` guard is
 defense in depth. One predicate, `plan_module_loadable`, holds the `-f`/`-L`/`-r` guard for the
-reader and the classifier, and `F48b` pins its one body and its two calls. The reader's arm has no
+reader, the classifier and the approved-plan store module, and `F48b` pins its one body and its
+three calls. The reader's arm has no
 fixture. `D46g` drives the classifier's through the extracted notice function rather than a sealed
 plugin copy, because Session Control refuses a runtime symlink at registration and the runtime
 digest covers `hooks/`. A regular module is the control, and a symlinked, a missing and an

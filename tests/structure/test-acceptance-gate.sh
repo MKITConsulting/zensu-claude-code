@@ -997,7 +997,7 @@ the fixture command failed
 EVIDENCE
   RC_RED=$?
   RED_ERR="$(cat "$WORK/rerr")"
-  if [ "$RC_MUT" -eq 1 ] && printf '%s' "$MUT_ERR" | grep -qF 'changed the tree while it ran' \
+  if [ "$RC_MUT" -eq 1 ] && printf '%s' "$MUT_ERR" | grep -qF 'changed the project while it ran; make the check leave the project unchanged' \
     && [ "$RC_FULL" -eq 1 ] && printf '%s' "$FULL_ERR" | grep -qF 'has scope full; run the check with --evidence-run --scope acceptance' \
     && [ "$RC_RED" -eq 1 ] && printf '%s' "$RED_ERR" | grep -qF "evidence run $RED_RUN exited 3, which contradicts --verdict pass"; then
     check "A12 a cited run that mutated the tree, a full-scope run and a red run cannot back a pass" PASS
@@ -1783,7 +1783,7 @@ fi
 
 echo "== The Autopilot VALIDATE stage validates a run only on its acceptance records =="
 source "$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
-PLAN_PAYLOAD_LIB="$PLUGIN_DIR/hooks/lib/plan-payload-v1.js"
+APPROVED_PLAN_LIB="$PLUGIN_DIR/hooks/lib/approved-plan-v1.js"
 VAL_PLAN_TEXT='# Fixture plan
 
 ## Requirements
@@ -1806,7 +1806,7 @@ val_project() {
 }
 
 val_store_plan() {
-  VAL_SHA="$(ROOT="$1" PLAN_TEXT="$VAL_PLAN_TEXT" LIB="$PLAN_PAYLOAD_LIB" node -e '
+  VAL_SHA="$(ROOT="$1" PLAN_TEXT="$VAL_PLAN_TEXT" LIB="$APPROVED_PLAN_LIB" node -e '
     const crypto = require("crypto");
     const bytes = Buffer.from(process.env.PLAN_TEXT, "utf8");
     const sha = crypto.createHash("sha256").update(bytes).digest("hex");
@@ -1850,7 +1850,7 @@ val_drive() {
 }
 
 val_setup() {
-  local sid="$1" dir="$2" run="$3" cover="${4:-false}" sha="${5:-}"
+  local sid="$1" dir="$2" run="$3" cover="${4:-false}" sha="${5:-}" abbreviate="${6:-}"
   val_project "$dir" || return 1
   export CLAUDE_PROJECT_DIR="$dir"
   cd "$dir" || return 1
@@ -1861,6 +1861,7 @@ val_setup() {
     sha="$VAL_SHA"
   fi
   VAL_HEAD="$(git -C "$dir" rev-parse HEAD)"
+  [ -z "$abbreviate" ] || VAL_HEAD="${VAL_HEAD:0:$abbreviate}"
   val_drive "$run" "$dir" "$sha" "$VAL_HEAD" || return 1
   VAL_RUN_FILE="$(autopilot_run_file "$run" "$dir")"
   run_json_ok "$VAL_RUN_FILE" 'v.stage === "VALIDATE"'
@@ -2356,6 +2357,73 @@ if val_setup "val-head-update" "$VH" val_run_head false; then
   fi
 else
   check "V15 drive an Autopilot run to VALIDATE for the head-update case" FAIL
+fi
+cd "$PROJ" || exit 1
+
+if PLUGIN_DIR="$PLUGIN_DIR" node -e '
+  const fs = require("fs");
+  const path = require("path");
+  const root = process.env.PLUGIN_DIR;
+  const log = fs.readFileSync(path.join(root, "hooks/lib/zensu-log.sh"), "utf8");
+  const start = log.indexOf("_zensu_run_bind() {");
+  const body = start < 0 ? "" : log.slice(start, log.indexOf("\n}\n", start));
+  const bind = [...body.matchAll(/(\/\^\[[^\]\/]*\]\{\d+,\d+\}\$\/)\.test\(s\.evidence\.pr\.headSha\)/g)].map((m) => m[1]);
+  const recorded = [...fs.readFileSync(path.join(root, "hooks/lib/acceptance-verify-v1.js"), "utf8").matchAll(/^const RECORDED_HEAD_RE = (\/[^\n]*\/);$/gm)].map((m) => m[1]);
+  const state = [...fs.readFileSync(path.join(root, "hooks/lib/zensu-autopilot-state.sh"), "utf8").matchAll(/^const sha = value => typeof value === "string" && (\/[^\n]*\/)\.test\(value\);$/gm)].map((m) => m[1]);
+  if (bind.length !== 1 || recorded.length !== 1 || state.length !== 1) process.exit(2);
+  if (bind[0] !== recorded[0]) process.exit(3);
+  const forms = [bind[0], recorded[0], state[0]].map((literal) => new RegExp(literal.slice(1, -1)));
+  const samples = ["", "abcdef", "abcdef0", "ABCDEF0", "gggggg0", "a".repeat(40), "A".repeat(64), "a".repeat(65), " abcdef0", "abcdef0 ", "abcdef0\n", "abc-def0"];
+  for (const sample of samples) {
+    const answers = forms.map((form) => form.test(sample));
+    if (answers.some((answer) => answer !== answers[0])) process.exit(4);
+  }
+  if (!forms[1].test("a".repeat(7)) || forms[1].test("a".repeat(6)) || !forms[1].test("a".repeat(64)) || forms[1].test("a".repeat(65))) process.exit(5);
+'; then
+  check "V16 the run bind takes a recorded pull-request head only within the module's RECORDED_HEAD_RE, whose literal it repeats, and the state machine's sha check agrees with both" PASS
+else
+  check "V16 the run bind, RECORDED_HEAD_RE and the state machine's sha check bound a pull-request head alike" FAIL
+fi
+
+VS="$WORK/val-shadow"
+if val_setup "val-shadow" "$VS" val_run_shadow false "" 7; then
+  VS_ABBREV="$VAL_HEAD"
+  VS_FULL="$(git -C "$VS" rev-parse HEAD)"
+  VS_FILE="$VAL_RUN_FILE"
+  val_observe val_run_shadow 'printf ok'
+  SHADOW_EVR="$VAL_EVR"
+  val_record val_run_shadow AC-001 pass cli "$SHADOW_EVR" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_shadow AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_R2=$?
+  git -C "$VS" -c commit.gpgsign=false commit -q --allow-empty -m 'a later commit'
+  VS_LATER="$(git -C "$VS" rev-parse HEAD)"
+  git -C "$VS" branch "$VS_ABBREV" "$VS_LATER"
+  VS_SHADOW="$(git -C "$VS" rev-parse --verify --quiet "$VS_ABBREV^{commit}")"
+  VS_BEFORE="$(file_sha "$VS_FILE")"
+  val_validate val_run_shadow; RC_SHADOW=$?
+  SHADOW_ERR="$(cat "$WORK/verr")"
+  VS_AFTER="$(file_sha "$VS_FILE")"
+  git -C "$VS" checkout -q "$VS_FULL"
+  val_validate val_run_shadow; RC=$?
+  if [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ -n "$SHADOW_EVR" ] && [ "$VS_SHADOW" = "$VS_LATER" ] \
+    && [ "$RC_SHADOW" -eq 1 ] \
+    && printf '%s' "$SHADOW_ERR" | grep -qF "HEAD of the work tree is ${VS_LATER:0:12}, not the pull-request head ${VS_FULL:0:12}" \
+    && [ "$VS_AFTER" = "$VS_BEFORE" ] \
+    && [ "$RC" -eq 0 ] \
+    && run_json_ok "$VS_FILE" "v.stage === \"DELIVER\" && v.evidence.validation.headSha === \"$VS_ABBREV\""; then
+    check "V17 an abbreviated pull-request head that a branch name equals is compared with the abbreviated commit, not the branch: the branch's commit refuses and the abbreviated commit validates" PASS
+  else
+    check "V17 an abbreviated pull-request head shadowed by a branch (r1=$RC_R1 r2=$RC_R2 shadow=$RC_SHADOW rc=$RC branch=$VS_SHADOW later=$VS_LATER)" FAIL
+    printf '%s\n' "$SHADOW_ERR"
+    VERR
+  fi
+else
+  check "V17 drive an Autopilot run with an abbreviated pull-request head to VALIDATE" FAIL
 fi
 cd "$PROJ" || exit 1
 

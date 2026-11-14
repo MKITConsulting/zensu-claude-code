@@ -148,10 +148,11 @@ emit_autopilot_blocked() {
       PLAN_RESPONSE_ORIGIN_TYPE_REJECTED:" The ExitPlanMode tool response carries an isAgent field that is not a boolean, so the caller origin it claims cannot be trusted either way.",
       APPROVED_PLAN_STORE_FAILED:" This run validates its result, so the approved plan must be kept byte for byte under .zensu/state for the VALIDATE stage to read its acceptance criteria from, and that copy could not be written. Nothing was recorded and the run stays at PLANNING; repair the project state directory and approve the plan again.",
       PLAN_CRITERIA_UNUSABLE:" This run validates its result, but the approved plan has no active AC-### row in a ## Requirements table: the section is missing, its AC rows are placeholders or deprecated, or the document does not parse, for example because a code fence is never closed. Nothing was recorded and the run stays at PLANNING. Add a ## Requirements table with one | AC-### | criterion | source | row per acceptance criterion, keep the run marker, and present the corrected plan with ExitPlanMode again.",
+      PLAN_CRITERIA_UNREADABLE:" This run validates its result, but the requirements lister failed for a reason other than the content of the approved plan, so its acceptance criteria were never judged. Nothing was recorded, the stored copy was removed and the run stays at PLANNING. Run /zensu:doctor to check the plugin installation and the temporary directory, then present the plan with ExitPlanMode again.",
       PLAN_EVALUATION_UNAVAILABLE:" The plan evaluation produced no verdict at all, so the payload itself was never judged."
     };
     const from=source ? ` The payload field carrying the plan was ${source}.` : "";
-    const answered=detail ? ` The store answered ${detail}.` : "";
+    const answered=detail ? (code==="PLAN_CRITERIA_UNREADABLE" ? ` The requirements lister answered ${detail}.` : ` The store answered ${detail}.`) : "";
     const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}.${causes[code]||""}${from}${answered} Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
     process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
   '
@@ -331,6 +332,10 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         emit_autopilot_runtime_blocked
         exit 0
       fi
+      plan_module_loadable "${PLAN_PAYLOAD_DIR}/approved-plan-v1.js" || {
+        emit_autopilot_runtime_blocked
+        exit 0
+      }
       PLAN_STORE_ROOT="$(zensu_host_path "$PROJECT_ROOT" 2>/dev/null)" || PLAN_STORE_ROOT=""
     fi
     PLAN_EVAL_MSYS_EXCL="$(MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" zensu_msys_env_exclusions PLAN_STORE_ROOT)" \
@@ -349,15 +354,16 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       // 17 is the module-load fault. It is deliberately NOT a BLOCK_CODE: the
       // shell routes it to emit_autopilot_runtime_blocked, so a broken install
       // never reports "the payload itself was never judged".
-      let resolveApprovedPlan,responseOrigin,storeApprovedPlan,REASONS,SOURCES;
+      let resolveApprovedPlan,responseOrigin,storeApprovedPlan,listPlanCriteria,REASONS,SOURCES;
       try {
-        ({resolveApprovedPlan,responseOrigin,storeApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+        ({resolveApprovedPlan,responseOrigin,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+        if (process.env.ACTIVE_PLAN_STORE==="store") ({storeApprovedPlan,listPlanCriteria}=require(require("path").join(require("path").dirname(process.env.PLAN_PAYLOAD_LIB),"approved-plan-v1.js")));
       } catch (_) { process.exit(17); }
       // Destructuring a module with the wrong exports does not throw — it yields
       // undefined, and the next statement would throw OUTSIDE this guard, exit 1,
       // and land on the very receipt 17 exists to avoid. Validate the shape here.
       if (typeof resolveApprovedPlan!=="function" || typeof responseOrigin!=="function"
-        || typeof storeApprovedPlan!=="function"
+        || (process.env.ACTIVE_PLAN_STORE==="store" && (typeof storeApprovedPlan!=="function" || typeof listPlanCriteria!=="function"))
         || typeof REASONS!=="object" || !REASONS
         || Array.isArray(REASONS) || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(17);
       const EXITS={};
@@ -421,6 +427,13 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
           process.exitCode=20;
           return;
         }
+        const criteria=listPlanCriteria(bytes);
+        if (!criteria || criteria.status!=="ok") {
+          try { require("fs").unlinkSync(stored.path); } catch (_) {}
+          process.stdout.write(["CRITERIA",String((criteria&&criteria.detail)||"")].join("\t"));
+          process.exitCode=criteria&&criteria.status==="unusable" ? 21 : 22;
+          return;
+        }
         process.stdout.write([process.env.ACTIVE_RUN,sha,stored.rel].join("\t"));
       } catch (_) { process.exit(9); } });
     ' 2>/dev/null)"
@@ -448,6 +461,8 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         18) BLOCK_CODE=PLAN_RESPONSE_AGENT_ORIGIN_REJECTED ;;
         19) BLOCK_CODE=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED ;;
         20) BLOCK_CODE=APPROVED_PLAN_STORE_FAILED ;;
+        21) BLOCK_CODE=PLAN_CRITERIA_UNUSABLE ;;
+        22) BLOCK_CODE=PLAN_CRITERIA_UNREADABLE ;;
         *) BLOCK_CODE=PLAN_EVALUATION_UNAVAILABLE ;;
       esac
       # The producer validated the label against the module's SOURCES table, so
@@ -467,6 +482,13 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
           case "$PLAN_STORE_REASON" in
             *[!A-Za-z0-9_-]*) PLAN_STORE_REASON="" ;;
           esac ;;
+        "CRITERIA${PLAN_TAB}"*)
+          if [ "$BLOCK_CODE" = PLAN_CRITERIA_UNREADABLE ]; then
+            PLAN_STORE_REASON="${PLAN_META#*"$PLAN_TAB"}"
+            case "$PLAN_STORE_REASON" in
+              *[!A-Za-z0-9_-]*) PLAN_STORE_REASON="" ;;
+            esac
+          fi ;;
       esac
       emit_autopilot_blocked "$BLOCK_CODE" "$PLAN_SOURCE" "$PLAN_STORE_REASON"
       exit 0
@@ -479,20 +501,6 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       esac
       if [ -z "$PLAN_COPY_NAME" ] || [ "$PLAN_COPY_REL" != ".zensu/state/$PLAN_COPY_NAME" ]; then
         emit_autopilot_blocked APPROVED_PLAN_STORE_FAILED
-        exit 0
-      fi
-      PLAN_COPY="$PROJECT_ROOT/.zensu/state/$PLAN_COPY_NAME"
-      PLAN_CRITERIA_ROWS="$(bash "$PLAN_REQUIREMENTS_LIB" --list --plan "$PLAN_COPY" 2>/dev/null)" \
-        || PLAN_CRITERIA_ROWS=""
-      PLAN_ACTIVE_CRITERIA=0
-      while IFS=$'\t' read -r PLAN_CRITERION_ID PLAN_CRITERION_STATE _; do
-        case "$PLAN_CRITERION_ID:$PLAN_CRITERION_STATE" in
-          AC-[0-9]*:active) PLAN_ACTIVE_CRITERIA=$((PLAN_ACTIVE_CRITERIA + 1)) ;;
-        esac
-      done <<<"$PLAN_CRITERIA_ROWS"
-      if [ "$PLAN_ACTIVE_CRITERIA" -eq 0 ]; then
-        rm -f -- "$PLAN_COPY"
-        emit_autopilot_blocked PLAN_CRITERIA_UNUSABLE
         exit 0
       fi
     fi

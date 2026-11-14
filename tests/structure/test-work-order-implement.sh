@@ -141,11 +141,13 @@ bash "$LOG_HELPER" --autopilot-event --run "$RUN" --event ORDER_SPEC_BOUND --eve
   && check "I5 ORDER_SPEC_BOUND cannot be recorded through --autopilot-event" PASS \
   || check "I5 ORDER_SPEC_BOUND cannot be recorded through --autopilot-event (rc=$RC)" FAIL
 
-bash "$LOG_HELPER" --autopilot-event --run "$RUN" --event PLAN_APPROVED --event-id plan-approved \
-  --payload "{\"approvedPlanSha256\":\"$(printf 'b%.0s' $(seq 1 64))\"}" >/dev/null 2>&1; RC=$?
-[ "$RC" -ne 0 ] && [ "$(json_get "$RUN_FILE" 'value.stage')" = "PLANNING" ] \
-  && check "I6 a work-order run refuses PLAN_APPROVED" PASS \
-  || check "I6 a work-order run refuses PLAN_APPROVED (rc=$RC)" FAIL
+( source "$STATE_LIB" && autopilot_apply_event "$RUN" plan-approved-direct PLAN_APPROVED \
+  "{\"approvedPlanSha256\":\"$(printf 'b%.0s' $(seq 1 64))\"}" "$PROJECT" "$ZENSU_SESSION_KEY" ) \
+  >/dev/null 2>"$SBOX/plan-approved.err"; RC=$?
+[ "$RC" -eq 3 ] && grep -qF 'a work-order run binds its spec through ORDER_SPEC_BOUND, never through PLAN_APPROVED' "$SBOX/plan-approved.err" \
+  && [ "$(json_get "$RUN_FILE" 'value.stage')" = "PLANNING" ] \
+  && check "I6 the state machine refuses PLAN_APPROVED for a work-order run" PASS \
+  || check "I6 the state machine refuses PLAN_APPROVED for a work-order run (rc=$RC $(cat "$SBOX/plan-approved.err"))" FAIL
 
 mkdir -p "$PROJECT/.zensu/plans"
 bash "$WRAPPER" --bind-spec --run "$RUN" >/dev/null 2>"$SBOX/bind-noplan.err"; RC_NOPLAN=$?

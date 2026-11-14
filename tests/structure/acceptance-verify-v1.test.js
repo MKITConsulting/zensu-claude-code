@@ -13,7 +13,7 @@ const RECEIPT_LIB = path.join(__dirname, '..', '..', 'hooks', 'lib', 'edit-landi
 const av = require(LIB);
 const receipts = require(RECEIPT_LIB);
 const evr = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-run-v1.js'));
-const planPayload = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'plan-payload-v1.js'));
+const approvedPlan = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'approved-plan-v1.js'));
 
 const SESSION = `scv1_${'a'.repeat(64)}`;
 const OTHER_SESSION = `scv1_${'b'.repeat(64)}`;
@@ -264,7 +264,10 @@ test('an exit-code driver needs a cited acceptance run that agrees with the verd
   assert.match(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: green.id, evidenceText: 'ran it' })).error, /another tree/);
   assert.match(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: 'er1_0000000000000_000000000000', evidenceText: 'x' })).error, /no evidence run/);
   const mutating = await acceptanceRun(fixture, 'echo more >> a.txt');
-  assert.match(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: mutating.id, evidenceText: 'ran it' })).error, /changed the tree while it ran/);
+  assert.equal(
+    av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: mutating.id, evidenceText: 'ran it' })).error,
+    `evidence run ${mutating.id} changed the project while it ran; make the check leave the project unchanged, tracked and untracked non-ignored files alike, by writing its output outside the project or to a gitignored path, then run it again`,
+  );
 });
 
 test('the per-criterion state follows the tree, the criterion text and deprecation', () => {
@@ -666,6 +669,11 @@ test('with a work tree a cited acceptance run must have measured the project wit
   const passed = av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: bound.id, evidenceText: 'ran it', workTree: tree }));
   assert.equal(passed.code, 0, passed.error);
   assert.match(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: bound.id, evidenceText: 'ran it' })).error, /another tree/);
+  const mutating = await acceptanceRun(fixture, 'echo more >> a.txt', { workTree: tree, workDirectory: tree });
+  assert.equal(
+    av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'cli', evidenceRun: mutating.id, evidenceText: 'ran it', workTree: tree })).error,
+    `evidence run ${mutating.id} changed the project and its work tree .claude/worktrees/wt while it ran; make the check leave the project and its work tree .claude/worktrees/wt unchanged, tracked and untracked non-ignored files alike, by writing its output outside the project or to a gitignored path, then run it again`,
+  );
 });
 
 test('the CLI hands the work tree to the status', () => {
@@ -1126,7 +1134,7 @@ function runFixture(options = {}) {
   ])}\n<!-- zensu-autopilot:${RUN_ID} -->\n`, 'utf8');
   const sha = sha256(bytes);
   if (options.store !== false) {
-    const stored = planPayload.storeApprovedPlan(fixture.root, sha, bytes);
+    const stored = approvedPlan.storeApprovedPlan(fixture.root, sha, bytes);
     assert.equal(stored.ok, true, stored.reason);
   }
   const head = options.git === false ? null : sh(fixture.root, 'git rev-parse HEAD').trim();
@@ -1216,7 +1224,7 @@ test('the run-mode verdict passes only at the pull-request head on a clean tree 
   fs.writeFileSync(path.join(fixture.root, 'scratch.txt'), 'untracked\n');
   result = runGate(fixture);
   assert.equal(result.state, 'unresolved');
-  assert.match(result.lines[0], /the work tree has uncommitted changes/);
+  assert.match(result.lines[0], new RegExp(`the work tree has uncommitted changes, so it is not the pull-request head ${fixture.head.slice(0, 12)}: scratch\\.txt; send a change that belongs to this change through the fix loop with VALIDATION_FAILED`));
   fs.rmSync(path.join(fixture.root, 'scratch.txt'));
   sh(fixture.root, 'git commit -q --allow-empty -m later');
   result = runGate(fixture);
@@ -1226,6 +1234,174 @@ test('the run-mode verdict passes only at the pull-request head on a clean tree 
   assert.equal(runGate(fixture).state, 'pass');
   assert.match(runGate(fixture, { run: withPrHead(fixture.run, 'f'.repeat(40)) }).lines[0], /is not a commit in the work tree/);
   assert.match(runGate(fixture, { run: withPrHead(fixture.run, null) }).lines[0], /records no pull-request head/);
+});
+
+function collidingCommits(root) {
+  const tree = sh(root, 'git rev-parse "HEAD^{tree}"').trim();
+  const algorithm = tree.length === 64 ? 'sha256' : 'sha1';
+  const body = (nonce) => `tree ${tree}\nauthor tester <t@example.invalid> 1700000000 +0000\ncommitter tester <t@example.invalid> 1700000000 +0000\n\ncollision ${nonce}\n`;
+  const seen = new Map();
+  for (let nonce = 0; nonce < 4000000; nonce += 1) {
+    const text = body(nonce);
+    const prefix = crypto.createHash(algorithm).update(`commit ${Buffer.byteLength(text)}\0${text}`).digest('hex').slice(0, 7);
+    if (seen.has(prefix)) {
+      const ids = [body(seen.get(prefix)), text].map((input) => childProcess.execFileSync('git', ['hash-object', '-t', 'commit', '-w', '--stdin'], { cwd: root, input, encoding: 'utf8' }).trim());
+      assert.ok(ids.every((id) => id.startsWith(prefix)), ids.join(' '));
+      return { prefix, ids };
+    }
+    seen.set(prefix, nonce);
+  }
+  throw new Error('no two commits sharing a 7-digit prefix were found');
+}
+
+test('an abbreviated pull-request head resolves among objects only, so a branch of the same name never stands in for it', () => {
+  const fixture = runFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  const abbreviated = fixture.head.slice(0, 7);
+  sh(fixture.root, 'git commit -q --allow-empty -m later');
+  const later = sh(fixture.root, 'git rev-parse HEAD').trim();
+  sh(fixture.root, `git branch ${abbreviated} ${later}`);
+  assert.equal(sh(fixture.root, `git rev-parse --verify --quiet "${abbreviated}^{commit}"`).trim(), later);
+  const run = withPrHead(fixture.run, abbreviated);
+  let result = runGate(fixture, { run });
+  assert.equal(result.state, 'unresolved', result.lines.join('\n'));
+  assert.match(result.lines[0], new RegExp(`HEAD of the work tree is ${later.slice(0, 12)}, not the pull-request head ${fixture.head.slice(0, 12)}`));
+  sh(fixture.root, `git checkout -q ${fixture.head}`);
+  result = runGate(fixture, { run });
+  assert.equal(result.state, 'pass', result.lines.join('\n'));
+  assert.equal(runGate(fixture, { run: withPrHead(fixture.run, fixture.head.toUpperCase()) }).state, 'pass');
+  assert.equal(sh(fixture.root, 'git rev-parse --disambiguate=0000000').trim(), '');
+  assert.match(runGate(fixture, { run: withPrHead(fixture.run, '0000000') }).lines[0], /the pull-request head 0000000 is not a commit in the work tree; fetch it, then validate again/);
+});
+
+test('an abbreviated pull-request head that several commits begin with names no single commit and refuses', () => {
+  const fixture = runFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  const shared = collidingCommits(fixture.root);
+  const run = withPrHead(fixture.run, shared.prefix);
+  const result = runGate(fixture, { run });
+  assert.equal(result.state, 'unresolved', result.lines.join('\n'));
+  assert.match(result.lines[0], new RegExp(`the pull-request head ${shared.prefix} is an abbreviation that 2 commits in the work tree begin with, so it names no single commit; no checkout settles that, so persist BLOCK with the code validation-unresolved and report this line`));
+  assert.match(runGate(fixture, { run, limits: { headCandidates: 1 } }).lines[0], new RegExp(`the pull-request head ${shared.prefix} is an abbreviation that more than 1 objects in the work tree begin with, so it names no single commit`));
+  assert.equal(runGate(fixture).state, 'pass');
+});
+
+test('the dirty-tree refusal names the first changed paths and counts the rest, and never asks to discard them', () => {
+  const fixture = runFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  sh(fixture.root, 'git mv a.txt b.txt');
+  for (let index = 1; index <= 7; index += 1) fs.writeFileSync(path.join(fixture.root, `z${index}.txt`), 'left behind\n');
+  const result = runGate(fixture);
+  assert.equal(result.state, 'unresolved', result.lines.join('\n'));
+  const line = result.lines[0];
+  const listed = new RegExp(`the work tree has uncommitted changes, so it is not the pull-request head ${fixture.head.slice(0, 12)}: (.+?) and (\\d+) more; send a change that belongs to this change through the fix loop with VALIDATION_FAILED: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE; remove what a check left behind, and make that check write its output outside the repository or to a gitignored path`).exec(line);
+  assert.ok(listed, line);
+  const names = listed[1].split(', ');
+  assert.equal(names.length, 5, line);
+  assert.equal(Number(listed[2]), 3, line);
+  assert.ok(names.every((name) => name === 'b.txt' || /^z[1-7]\.txt$/.test(name)), line);
+  assert.equal(new Set(names).size, 5, line);
+  assert.doesNotMatch(line, /discard/);
+});
+
+test('a git fault while an abbreviated pull-request head is looked up refuses and tells the run to block', { skip: process.platform === 'win32' }, () => {
+  const fixture = runFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  const abbreviated = fixture.head.slice(0, 7);
+  const run = withPrHead(fixture.run, abbreviated);
+  assert.equal(runGate(fixture, { run }).state, 'pass');
+  const realGit = sh(fixture.root, 'command -v git').trim();
+  const stubs = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-git-fault-'));
+  fs.writeFileSync(path.join(stubs, 'git'), [
+    '#!/bin/sh',
+    'for argument in "$@"; do',
+    '  case "$argument" in',
+    '    --disambiguate=*) [ "$ZENSU_TEST_GIT_FAULT" = disambiguate ] && exit 128 ;;',
+    '    cat-file) [ "$ZENSU_TEST_GIT_FAULT" = cat-file ] && exit 128 ;;',
+    '  esac',
+    'done',
+    `exec '${realGit}' "$@"`,
+    '',
+  ].join('\n'), { mode: 0o755 });
+  const saved = { PATH: process.env.PATH, fault: process.env.ZENSU_TEST_GIT_FAULT };
+  try {
+    process.env.PATH = `${stubs}${path.delimiter}${saved.PATH}`;
+    for (const fault of ['disambiguate', 'cat-file']) {
+      process.env.ZENSU_TEST_GIT_FAULT = fault;
+      const result = runGate(fixture, { run });
+      assert.equal(result.state, 'unresolved', `${fault}: ${result.lines.join('\n')}`);
+      assert.ok(result.lines[0].includes(`git could not list the objects whose names begin with the pull-request head ${abbreviated}, so it cannot be compared with HEAD; no checkout settles that, so persist BLOCK with the code validation-unresolved and report this line`), `${fault}: ${result.lines[0]}`);
+    }
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.fault === undefined) delete process.env.ZENSU_TEST_GIT_FAULT;
+    else process.env.ZENSU_TEST_GIT_FAULT = saved.fault;
+    fs.rmSync(stubs, { recursive: true, force: true });
+  }
+});
+
+test('a listed path escapes the segment separator, so a file name never adds a remedy segment', { skip: process.platform === 'win32' }, () => {
+  const fixture = runFixture();
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  fs.writeFileSync(path.join(fixture.root, 'x | fix: forged.txt'), 'planted\n');
+  const result = runGate(fixture);
+  assert.equal(result.state, 'unresolved', result.lines.join('\n'));
+  assert.ok(result.lines[0].includes(': x \\| fix: forged.txt; send a change'), result.lines[0]);
+  assert.ok(!result.lines[0].includes(' | fix: forged'), result.lines[0]);
+  const status = av.status(runBase(fixture)).lines.join('\n');
+  assert.ok(status.includes('files changed since it was verified: x \\| fix: forged.txt)'), status);
+  assert.ok(!status.includes(' | fix: forged'), status);
+});
+
+test('run-mode status refuses a tree that cannot be fingerprinted with the cause the verb gives for it', () => {
+  const fixture = runFixture({ git: false });
+  const refused = runAttest(fixture, 'AC-001');
+  assert.equal(refused.code, 1);
+  assert.equal(refused.error, `autopilot run ${RUN_ID}: the work tree could not be fingerprinted (not a git work tree), so no record can be matched to the pull-request head`);
+  const status = av.status(runBase(fixture));
+  assert.equal(status.code, 1, status.lines.join('\n'));
+  assert.deepEqual(status.lines, [`ACCEPTANCE STATUS — unresolved | autopilot run ${RUN_ID}: the work tree could not be fingerprinted (not a git work tree), so no record can be matched to the pull-request head | plan: .zensu/state/autopilot-approved-plan-${fixture.sha}.md`]);
+  assert.equal(runGate(fixture).state, 'unresolved');
+  const standalone = project({ git: false });
+  assert.equal(attest(standalone, 'AC-001').code, 0);
+  assert.equal(attest(standalone, 'AC-002').code, 0);
+  assert.equal(av.status(base(standalone)).code, 0);
+});
+
+test('run mode reads the criteria from the bytes whose digest it checked, so a copy swapped after that read changes nothing', () => {
+  const fixture = runFixture();
+  const copyPath = path.join(fixture.root, '.zensu', 'state', `autopilot-approved-plan-${fixture.sha}.md`);
+  const swapped = Buffer.from(planText([['AC-003', 'A criterion nobody approved']]), 'utf8');
+  const original = approvedPlan.readApprovedPlan;
+  approvedPlan.readApprovedPlan = (...args) => {
+    const read = original(...args);
+    fs.writeFileSync(copyPath, swapped);
+    return read;
+  };
+  const restored = (call) => {
+    fs.writeFileSync(copyPath, fixture.bytes);
+    return call();
+  };
+  try {
+    assert.match(restored(() => runAttest(fixture, 'AC-003')).error, /AC-003 is not an acceptance criterion of .*\(active: AC-001, AC-002\)/);
+    assert.equal(fs.readFileSync(copyPath, 'utf8'), swapped.toString('utf8'));
+    assert.equal(restored(() => runAttest(fixture, 'AC-001')).code, 0);
+    assert.equal(restored(() => runAttest(fixture, 'AC-002')).code, 0);
+    const status = restored(() => av.status(runBase(fixture)));
+    assert.equal(status.code, 0, status.lines.join('\n'));
+    assert.match(status.lines.join('\n'), /^AC-001 pass/m);
+    assert.doesNotMatch(status.lines.join('\n'), /AC-003/);
+    const result = restored(() => runGate(fixture));
+    assert.equal(result.state, 'pass', result.lines.join('\n'));
+  } finally {
+    approvedPlan.readApprovedPlan = original;
+    fs.writeFileSync(copyPath, fixture.bytes);
+  }
 });
 
 test('--accept-partial passes only when every criterion that does not pass is partial', () => {
@@ -1256,8 +1432,8 @@ test('--accept-partial passes only when every criterion that does not pass is pa
 
 test('a run outside git is unresolved in run mode, never a tree-unverified pass', () => {
   const fixture = runFixture({ git: false });
-  assert.equal(runAttest(fixture, 'AC-001').code, 0);
-  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  assert.equal(runAttest(fixture, 'AC-001').code, 1);
+  assert.equal(runAttest(fixture, 'AC-002').code, 1);
   const result = runGate(fixture, { run: withPrHead(fixture.run, 'a'.repeat(40)) });
   assert.equal(result.state, 'unresolved');
   assert.equal(result.passes, false);
@@ -1282,6 +1458,43 @@ test('a plan without an active criterion is a no-criteria refusal in run mode wi
   assert.equal(result.state, 'no-criteria');
   assert.match(result.lines[0], /\| add: the approved plan carries no active AC-### criterion, so this run cannot validate; report this refusal and leave the decision to the user$/);
   assert.doesNotMatch(result.lines[0], /ZENSU_/);
+});
+
+test('a plan whose code fence never closes does not parse by path or by bytes, so a record refuses and the chain and the run stay unresolved, and only lister exit 5 reads so', () => {
+  const fixture = project();
+  const planPath = path.join(fixture.root, '.zensu', 'plans', `${STEM}.md`);
+  fs.appendFileSync(planPath, '```\nan example that is never closed\n');
+  const byPath = av.readCriteria(planPath);
+  assert.equal(byPath.status, 'unparseable', byPath.reason);
+  assert.match(byPath.reason, /unterminated code fence/);
+  const byBytes = av.readCriteria(fs.readFileSync(planPath), { planLabel: `.zensu/plans/${STEM}.md` });
+  assert.equal(byBytes.status, 'unparseable', byBytes.reason);
+  assert.match(byBytes.reason, new RegExp(`unterminated code fence.*: \\.zensu/plans/${STEM}\\.md$`));
+  const recorded = attest(fixture, 'AC-001');
+  assert.equal(recorded.code, 1);
+  assert.match(recorded.error, /unterminated code fence/);
+  const status = av.status(base(fixture));
+  assert.equal(status.code, 1, status.lines.join('\n'));
+  assert.match(status.lines[status.lines.length - 1], /^ACCEPTANCE STATUS — unresolved \| .*unterminated code fence/);
+  assert.equal(gate(fixture).state, 'unresolved');
+  const run = runFixture({ store: false });
+  const fenced = Buffer.from(`${planText([['AC-001', 'The dashboard lists every project']])}\n<!-- zensu-autopilot:${RUN_ID} -->\n\`\`\`\nan example that is never closed\n`, 'utf8');
+  const stored = approvedPlan.storeApprovedPlan(run.root, sha256(fenced), fenced);
+  assert.equal(stored.ok, true, stored.reason);
+  const fencedRun = { ...run.run, approvedPlanSha256: sha256(fenced) };
+  const refused = runAttest(run, 'AC-001', 'pass', { run: fencedRun });
+  assert.equal(refused.code, 1);
+  assert.match(refused.error, new RegExp(`^\\.zensu/state/autopilot-approved-plan-${sha256(fenced)}\\.md: .*unterminated code fence`));
+  assert.doesNotMatch(refused.error, /zensu-acceptance-plan-/);
+  const runStatus = av.status(runBase(run, { run: fencedRun }));
+  assert.equal(runStatus.code, 1, runStatus.lines.join('\n'));
+  assert.match(runStatus.lines[runStatus.lines.length - 1], /^ACCEPTANCE STATUS — unresolved \|/);
+  assert.equal(runGate(run, { run: fencedRun }).state, 'unresolved');
+  const libDir = tempDir('lister');
+  for (const [exit, expected] of [[5, 'unparseable'], [2, 'error'], [1, 'error'], [3, 'no-section']]) {
+    fs.writeFileSync(path.join(libDir, 'zensu-plan-requirements.sh'), `echo "zensu-plan-requirements.sh: plan has an unterminated code fence, so the document could not be parsed: $3" >&2\nexit ${exit}\n`);
+    assert.equal(av.readCriteria(planPath, { libDir }).status, expected, `lister exit ${exit}`);
+  }
 });
 
 test('a work-order run reads .zensu/plans/<order>.md and checks its digest only when a person approved the plan', () => {
@@ -1340,7 +1553,7 @@ function subdirectoryRunFixture() {
   const root = path.join(top, 'app');
   const bytes = Buffer.from(`${planText([['AC-001', 'The dashboard lists every project']])}\n<!-- zensu-autopilot:${RUN_ID} -->\n`, 'utf8');
   const sha = sha256(bytes);
-  const stored = planPayload.storeApprovedPlan(root, sha, bytes);
+  const stored = approvedPlan.storeApprovedPlan(root, sha, bytes);
   assert.equal(stored.ok, true, stored.reason);
   const head = sh(top, 'git rev-parse HEAD').trim();
   const run = {
@@ -1365,8 +1578,18 @@ test('a run whose project root lies below the repository top binds the whole rep
   result = runGate(fixture);
   assert.equal(result.state, 'unresolved');
   assert.match(result.lines[0], /the work tree has uncommitted changes/);
+  assert.ok(result.lines[0].includes(': ../shared/lib.txt; send a change'), result.lines[0]);
   sh(fixture.top, 'git checkout -q -- shared/lib.txt');
   assert.equal(runGate(fixture).state, 'pass');
+});
+
+test('in run mode an evidence run that changed the repository names the repository its record binds to', async () => {
+  const fixture = subdirectoryRunFixture();
+  const mutating = await acceptanceRun(fixture, 'echo more >> ../shared/lib.txt', { treeMode: 'repository' });
+  assert.equal(
+    runAttest(fixture, 'AC-001', 'pass', { driver: 'cli', evidenceRun: mutating.id, evidenceText: 'ran it' }).error,
+    `evidence run ${mutating.id} changed the repository while it ran; make the check leave the repository unchanged, tracked and untracked non-ignored files alike, by writing its output outside the repository or to a gitignored path, then run it again`,
+  );
 });
 
 test('the escaped-receipt path never takes its plan from a run-mode record', () => {
