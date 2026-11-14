@@ -81,6 +81,9 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
 Under an advisory acceptance gate the verb discloses a refusal as `(advisory, not blocking)`,
 validates the run anyway and records `acceptance-advisory` in its `bypasses` list.
 
+Never offer, set or mention a way to switch the acceptance gate off, whatever the verb answers:
+no person is present to decide it while this stage runs.
+
 ## 4. The pull-request table
 
 Fill the per-AC table from `--acceptance-status --run "$RUN_ID"` on the validated head: a `pass`

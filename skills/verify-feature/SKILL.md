@@ -91,8 +91,8 @@ only these points:
    complete feature boundary: build one or more P0 rows per criterion and no other rows.
 2. **Local only.** Refuse `--mode=remote`, because a deployed URL runs other code than this
    tree and every record binds to this tree. `--attach` is allowed, but when Phase 2 cannot
-   prove that the attached process serves this worktree, each verdict it yields is at most
-   `partial`.
+   prove that the attached process serves this worktree, record none of its verdicts; verify
+   locally.
 3. **Use the cheapest driver that can observe the criterion,** named as in
    `rules/drivers.md`: `browser` through this skill's `playwright-cli` flow; `mobile` and
    `desktop` through their own rule files; and `api`, `cli`, `async`, `iac`, `custom` or
@@ -125,8 +125,8 @@ only these points:
    CLI or the `zensu-verify-…` session, because the browser consent gate refuses such a call;
    name the route or page and what it showed. `pass` needs the proof the Phase 5 PASS rule
    demands for that criterion: for an observed driver the cited exit-0 run is that proof, and the
-   DOM/data-and-visual rule binds the UI drivers. Anything not proven is `partial` with the
-   reason.
+   DOM/data-and-visual rule binds the UI drivers. Observable but unproven: verify again, or
+   `fail`.
 6. **Never end the turn to wait.** When a manual login or a consent prompt is needed, ask with
    `AskUserQuestion` whether the user has finished it, then continue in the same turn. A
    criterion the user cannot unblock now is `partial`: follow `rules/acceptance-consent.md`.

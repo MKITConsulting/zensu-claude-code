@@ -71,8 +71,9 @@ records one verdict per criterion, and the chain closes only when every
 active criterion has a `pass` on the tree that ships
 ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). It verifies a criterion
 that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs
-a code change first. A criterion this environment can observe only in part (it needs
-credentials, an account, a non-loopback host or a signed build) is `partial`, never a fix step:
+a code change first. A criterion this environment cannot observe (it needs
+credentials, an account, a non-loopback host or a signed build, or its driver cannot run here)
+is `partial`, never a fix step:
 the skill asks the user once whether to provide access now, accept it as partial or leave the
 chain open (`skills/verify-feature/rules/acceptance-consent.md`), and an accepted criterion
 closes the chain only through `--chain-done --accept-partial` for exactly its id. Remote mode is

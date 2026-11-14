@@ -317,6 +317,7 @@ _zensu_avr_node() {
   ZENSU_AVR_HANDOFF_TICKET="${_avr_handoff_ticket:-}" \
   ZENSU_AVR_GATES_PASSED="${_avr_gates_passed:-0}" \
   ZENSU_AVR_FIX_ROUND_SPENT="${_avr_fix_round_spent:-0}" \
+  ZENSU_AVR_REVIEW_DONE="${_avr_review_done:-0}" \
   ZENSU_AVR_ZERO_CHANGE_TICKET="${_avr_zero_change_ticket:-0}" \
   ZENSU_AVR_PLAN="${_avr_plan:-}" \
   ZENSU_AVR_BASH="${_avr_bash:-bash}" \
@@ -585,21 +586,33 @@ _zensu_accept_partial_ids() {
     return 2
   }
   exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
-  MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_ACCEPT_PARTIAL_IDS="${1:-}" ZENSU_AVR_LABEL="$label" \
+  MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_ACCEPT_PARTIAL_IDS="${1:-}" \
+    ZENSU_AVR_ACCEPT_CONTEXT="${2:-standalone}" ZENSU_AVR_LABEL="$label" \
     node -e 'require(process.env.ZENSU_AVR_LIB).main(["accept-ids"]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
 }
 
+_zensu_plan_criteria_unjudged() {
+  local label="$1" advisory="$2" cause="$3"
+  if [ "$advisory" = "1" ]; then
+    echo "ACCEPTANCE CRITERIA — advisory, not blocking | $cause, so the plan was NOT judged" >&2
+    return 0
+  fi
+  echo "$label: $cause, so the plan was NOT judged." >&2
+  echo "Run /zensu:doctor; if the check still cannot run, report this refusal and leave the decision to the user." >&2
+  return 1
+}
+
 _zensu_plan_criteria_gate() {
-  local label="zensu-log.sh --tdd-complete" plan="${1:-}" lib native_plan bash_path exclusions advisory=0
+  local label="zensu-log.sh --tdd-complete" plan="${1:-}" lib native_plan bash_path exclusions advisory=0 rc=0
   [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && return 0
   [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && advisory=1
   command -v node >/dev/null 2>&1 || {
-    echo "$label: the acceptance-criteria check needs node, so the plan was NOT judged." >&2
-    return 1
+    _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance-criteria check needs node"
+    return
   }
   lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js")" || {
-    echo "$label: the acceptance module cannot be resolved, so the plan was NOT judged." >&2
-    return 1
+    _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance module cannot be resolved"
+    return
   }
   native_plan="$(_tdd_native_path "$plan" 2>/dev/null)" || native_plan="$plan"
   bash_path="$(_zensu_config_native_path "${BASH:-bash}" 2>/dev/null)" || bash_path="bash"
@@ -608,8 +621,12 @@ _zensu_plan_criteria_gate() {
     ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" ZENSU_AVR_BASH="$bash_path" ZENSU_AVR_LABEL="$label" \
     ZENSU_AVR_CRITERIA_ADVISORY="$advisory" \
     node -e 'require(process.env.ZENSU_AVR_LIB).main(["plan-criteria"]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })' \
-    || return 1
-  return 0
+    || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  case "$rc" in
+    (1|2) [ "$advisory" = "1" ] || return 1 ;;
+  esac
+  _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance-criteria check did not complete (exit $rc)"
 }
 
 _zensu_acceptance_handoff_line() {
@@ -637,6 +654,8 @@ _zensu_acceptance_gate() {
     return 0
   fi
   [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
+  _avr_gates_passed=0
+  [ "${chain_gate_rc:-1}" = "0" ] && _avr_gates_passed=1
   if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session"; then
     command -v zensu_acceptance_handoff_reset >/dev/null 2>&1 && zensu_acceptance_handoff_reset "$session"
     if [ "$_avr_escape" = "1" ]; then
@@ -763,6 +782,7 @@ _avr_accept_partial_ids=""
 _avr_handoff_ticket=""
 _avr_gates_passed=0
 _avr_fix_round_spent=0
+_avr_review_done=0
 _avr_zero_change_ticket=0
 _avr_plan=""
 
@@ -995,6 +1015,11 @@ case "${1:-}" in
       }
     fi
     if [ "$avr_verb" = "--acceptance-status" ]; then
+      if [ "$avr_run_seen" = false ] \
+        && avr_claimed_ticket="$(tdd_claimed_review_ticket "$(tdd_state_file "$avr_session")" 2>/dev/null)" \
+        && _tdd_zero_change_ticket "$avr_claimed_ticket"; then
+        _avr_zero_change_ticket=1
+      fi
       _zensu_avr_node "zensu-log.sh --acceptance-status" status
       exit $?
     fi
@@ -3309,15 +3334,15 @@ case "${1:-}" in
         ;;
       --chain-done)
         if [ "$seen_accept_partial" = true ]; then
+          _avr_accept_context=standalone
           if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ] || [ "$seen_outcome" = true ]; then
-            echo "zensu-log.sh --chain-done: refusing --accept-partial — it belongs to the ticket-bound standalone terminus and takes no Autopilot binding and no --outcome; an Autopilot run checks its criteria in its VALIDATE stage. The chain stays open." >&2
-            exit 1
+            _avr_accept_context=bound
+          elif [ "$claimed_ticket_seen" != "true" ]; then
+            _avr_accept_context=unticketed
+          elif _tdd_zero_change_ticket "$claimed_ticket_val"; then
+            _avr_accept_context=zero-change
           fi
-          if [ "$claimed_ticket_seen" != "true" ] || _tdd_zero_change_ticket "$claimed_ticket_val"; then
-            echo "zensu-log.sh --chain-done: refusing --accept-partial on the zero-change terminus — consent to a partial criterion closes only a reviewed chain, so pass it with --claimed-review-ticket <the consumed review ticket>. The chain stays open." >&2
-            exit 1
-          fi
-          _avr_accept_partial_ids="$(_zensu_accept_partial_ids "$accept_partial_val")" || exit 2
+          _avr_accept_partial_ids="$(_zensu_accept_partial_ids "$accept_partial_val" "$_avr_accept_context")" || exit $?
         fi
         if ! autopilot_ctx="$(tdd_autopilot_context "$(tdd_state_file "$session_val")" "$session_val" 2>/dev/null)"; then
           echo "zensu-log.sh --chain-done: corrupt or incomplete Autopilot linkage" >&2
@@ -3344,21 +3369,31 @@ case "${1:-}" in
               case "$chain_change_count" in
                 (''|0|unknown)
                   if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
-                    chain_gate_rc=0
-                    _zensu_terminal_edit_landing_gate "$session_val" || chain_gate_rc=1
-                    _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
-                    _avr_gates_passed=0
-                    [ "$chain_gate_rc" -eq 0 ] && _avr_gates_passed=1
                     _avr_handoff_ticket="$claimed_ticket_val"
                     _avr_zero_change_ticket=0
                     _tdd_zero_change_ticket "$claimed_ticket_val" && _avr_zero_change_ticket=1
                     _avr_fix_round_spent=0
+                    _avr_review_done=0
                     [ "$(tdd_self_review_fixed "$(tdd_state_file "$session_val")" 2>/dev/null)" = "true" ] && _avr_fix_round_spent=1
-                    zensu_hook_enabled selfReview || _avr_fix_round_spent=1
+                    [ "$(tdd_code_review_done "$(tdd_state_file "$session_val")" 2>/dev/null)" = "true" ] && _avr_review_done=1
+                    if ! zensu_hook_enabled selfReview; then
+                      _avr_fix_round_spent=1
+                      _avr_review_done=1
+                    fi
+                    chain_gate_rc=0
+                    _zensu_terminal_edit_landing_gate "$session_val" || chain_gate_rc=1
+                    _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
                     _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
                     [ "$chain_gate_rc" -eq 0 ] || exit 1
                     if [ "${_avg_state:-}" = "partial-accepted" ]; then
-                      tdd_record_bypass "$session_val" acceptance-partial >/dev/null 2>&1 || true
+                      tdd_add_bypass "$session_val" acceptance-partial >/dev/null 2>&1
+                      tdd_bypass_recorded "$(tdd_state_file "$session_val")" acceptance-partial || {
+                        echo "zensu-log.sh --chain-done: refusing to close the chain — the user's consent to the partial criteria ${_avr_accept_partial_ids} could not be recorded in the session bypass ledger as acceptance-partial, so the chain stays open. Run the same --chain-done call again; it records the consent before the chain closes." >&2
+                        exit 1
+                      }
+                    elif [ -n "${_avr_accept_partial_ids:-}" ] && [ -z "${_avg_state:-}" ]; then
+                      echo "zensu-log.sh --chain-done: refusing to close the chain — the acceptance verdict state did not reach the terminus, so it cannot tell whether the consent to ${_avr_accept_partial_ids} must be recorded in the session bypass ledger; the chain stays open. Run the same --chain-done call again." >&2
+                      exit 1
                     fi
                   fi
                   ;;

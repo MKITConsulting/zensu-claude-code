@@ -36,8 +36,43 @@ const CODE_READS = [
   new RegExp(String.raw`\$${NAME}`, 'g'),
   new RegExp(String.raw`\b(?:process\.)?env\.${NAME}`, 'g'),
   new RegExp(String.raw`\benv\[(['"])${NAME}\1\]`, 'g'),
-  new RegExp(String.raw`(['"\x60])${NAME}\1`, 'g'),
 ];
+const WHOLE_NAME = new RegExp(String.raw`^${NAME}$`);
+const topLevelLiterals = (line) => {
+  const literals = [];
+  let index = 0;
+  while (index < line.length) {
+    const quote = line[index];
+    if (quote !== "'" && quote !== '"' && quote !== '`') {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (end < line.length && line[end] !== quote) end += line[end] === '\\' ? 2 : 1;
+    if (end >= line.length) break;
+    literals.push({ start: index, end, body: line.slice(index + 1, end) });
+    index = end + 1;
+  }
+  return literals;
+};
+const lookupToken = (line, start, end) => {
+  const before = line.slice(0, start);
+  const after = line.slice(end + 1);
+  if (/(?:===|!==|==|!=)\s*$/.test(before) || /^\s*(?:===|!==|==|!=)/.test(after)) return true;
+  if (/(?:^|[\s;(&|])[A-Za-z_][A-Za-z0-9_]*=$/.test(before)) return true;
+  if (/\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*$/.test(before) && /^\s*;?\s*$/.test(after)) return true;
+  return /[[,]\s*$/.test(before) && /^(?:\s*,\s*(?:'[^']*'|"[^"]*"))*\s*\]\.(?:includes|indexOf|has)\(/.test(after);
+};
+const stripLookupNames = (line) => {
+  let judged = '';
+  let cursor = 0;
+  for (const literal of topLevelLiterals(line)) {
+    if (!WHOLE_NAME.test(literal.body) || !lookupToken(line, literal.start, literal.end)) continue;
+    judged += line.slice(cursor, literal.start);
+    cursor = literal.end + 1;
+  }
+  return judged + line.slice(cursor);
+};
 const LEDGER_ARGUMENT = new RegExp(String.raw`\b((?:tdd_record_bypass|tdd_bypass_recorded)\s+(?:"[^"]*"|'[^']*'|\S+))\s+${NAME}`, 'g');
 const DISCLOSURES = [
   /ACCEPTANCE — escaped \|/,
@@ -68,6 +103,7 @@ for (const rel of files) {
       if (trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return;
       judged = judged.replace(LEDGER_ARGUMENT, '$1');
       for (const pattern of CODE_READS) judged = judged.replace(pattern, '');
+      judged = stripLookupNames(judged);
       if (!ESCAPE.test(judged)) return;
     }
     if (DISCLOSURES.some((pattern) => pattern.test(line))) {
@@ -113,36 +149,52 @@ if [ -n "$FIX" ] && [ -d "$FIX" ]; then
 EOF
   cat > "$FIX/bad.sh" <<'EOF'
 echo "zensu-log.sh: refusing. Set ZENSU_FULL_SUITE_GATE=off to skip this check." >&2
+cat >&2 <<'MSG'
+Leave `ZENSU_ACCEPTANCE_GATE` to the user to close the chain.
+MSG
 EOF
   cat > "$FIX/bad.js" <<'EOF'
   listed.push('restore: a dropped criterion needs a pass, or leave ZENSU_ACCEPTANCE_GATE to the user');
   return ['add: no criterion; set evidence.acceptanceGate to advisory to close'];
+  lines.push('restore: a dropped criterion needs a pass, or leave `ZENSU_ACCEPTANCE_GATE` to the user');
+  return 'restore: a dropped criterion needs a pass, or switch the gate off (`ZENSU_ACCEPTANCE_GATE`)';
+  lines.push(['restore: or set', 'ZENSU_ACCEPTANCE_GATE', 'to off'].join(' '));
+  return { remedy: 'ZENSU_ACCEPTANCE_GATE' };
+  lines.push(`set ${'ZENSU_ACCEPTANCE_GATE'}=off`);
 EOF
   cat > "$FIX/good.sh" <<'EOF'
 [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
 tdd_record_bypass "$session" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
 # A comment may explain ZENSU_CHAIN=off to a maintainer.
+  (escaped) apv_gate="ZENSU_ACCEPTANCE_GATE" ;;
 EOF
   cat > "$FIX/good.js" <<'EOF'
   if (process.env.ZENSU_SECRET_SCAN !== "off") {
   const ESCAPE_NAME = 'ZENSU_EDIT_LANDING_GATE';
+  if (gate === 'ZENSU_ACCEPTANCE_GATE' || ["ZENSU_FULL_SUITE_GATE", 'ZENSU_CHAIN'].includes(gate)) {
     lines.push(`ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read | gate`);
 EOF
   BAD="$(scan "$FIX" bad.md bad.sh bad.js | sed '1d')"
   GOOD="$(scan "$FIX" good.sh good.js)"
   BAD_COUNT="$(printf '%s\n' "$BAD" | grep -c ':[0-9][0-9]*: ')"
-  if [ "$BAD_COUNT" -eq 4 ] \
+  if [ "$BAD_COUNT" -eq 10 ] \
     && printf '%s\n' "$BAD" | grep -qF 'bad.md:1:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.sh:1:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.sh:3:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.js:1:' \
-    && printf '%s\n' "$BAD" | grep -qF 'bad.js:2:'; then
-    check "W3 a fixture that names an env-var escape as a remedy fails the scan (4 findings)" PASS
+    && printf '%s\n' "$BAD" | grep -qF 'bad.js:2:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.js:3:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.js:4:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.js:5:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.js:6:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.js:7:'; then
+    check "W3 a fixture that names an env-var escape as a remedy fails the scan, a name quoted inside prose, joined from pieces, used as a value or interpolated included (10 findings)" PASS
   else
     check "W3 fixture escape remedies were not all found ($BAD_COUNT): $(printf '%s' "$BAD" | tr '\n' ';')" FAIL
   fi
   if [ "$(printf '%s\n' "$GOOD" | sed '1d' | grep -c .)" -eq 0 ] \
     && printf '%s\n' "$GOOD" | grep -qF 'scanned=2 disclosed=1'; then
-    check "W4 variable reads, ledger arguments, comments, name literals and disclosures pass the scan" PASS
+    check "W4 variable reads, ledger arguments, comments, name literals compared, assigned or looked up, and disclosures pass the scan" PASS
   else
     check "W4 the scan flagged code reads or disclosures: $(printf '%s' "$GOOD" | tr '\n' ';')" FAIL
   fi
@@ -179,11 +231,12 @@ for (const chain of chains) {
 }
 segments.push(avr.acceptOpenRows(['AC-007'], [row('AC-001', 'partial'), row('AC-002', 'fail')]).refusal);
 segments.push(avr.parseAcceptIds('x').error);
+segments.push(...avr.ACCEPT_CONTEXT_REFUSALS.values());
 const escaped = segments.filter((segment) => /ZENSU_|evidence\.(?:acceptance|fullSuite)Gate/.test(String(segment)));
 const accept = avr.remedies('incomplete', [row('AC-001', 'partial'), row('AC-002', 'partial')], { stem: 's' }, '/project');
 const acceptLine = accept.find((segment) => segment.startsWith('accept:')) || '';
 process.stdout.write(`segments=${segments.length} escaped=${escaped.length}\n`);
-process.stdout.write(`accept=${/AC-001, AC-002/.test(acceptLine) && /--accept-partial AC-001,AC-002/.test(acceptLine) && /explicit consent/.test(acceptLine) ? 'ok' : 'missing'}\n`);
+process.stdout.write(`accept=${/AC-001, AC-002/.test(acceptLine) && /--accept-partial AC-001,AC-002/.test(acceptLine) && /the user's consent for exactly these criteria/.test(acceptLine) && /acceptance-consent\.md/.test(acceptLine) && /## Manual Acceptance row/.test(acceptLine) ? 'ok' : 'missing'}\n`);
 for (const segment of escaped) process.stdout.write(`escaped: ${segment}\n`);
 NODE
 }

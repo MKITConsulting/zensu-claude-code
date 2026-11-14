@@ -536,7 +536,7 @@ for SID in rq-missing rq-placeholder rq-filled rq-explicit rq-explicit-absent \
            rq-wrong-schema rq-malformed rq-clean-tree rq-symlink-plans \
            rq-symlink-logs rq-no-stem rq-stem-unchecked rq-writer-seam rq-both-off \
            rq-legacy-v1 rq-git-refused rq-git-refused-off rq-fr-only rq-fr-advisory \
-           rq-fr-escape; do
+           rq-fr-escape rq-fr-fault rq-fr-unread rq-fr-fault-required; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -737,6 +737,51 @@ RC_FE=$?
   && ! printf '%s' "$ERR_FE" | grep -qF 'carries no active AC-###' \
   && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FE")" implComplete)" = "true" ]
 check "AC5 a switched-off acceptance gate skips the criteria check at completion" "$(verdict $?)"
+CRITERIA_FAULT="$SUITE_TMP/criteria-fault.js"
+cat > "$CRITERIA_FAULT" <<'JS'
+if (process.env.ZENSU_AVR_CRITERIA_ADVISORY !== undefined && process.env.ZENSU_AVR_LABEL === 'zensu-log.sh --tdd-complete') {
+  if (process.env.ZENSU_TEST_CRITERIA_FAULT === 'unreadable') {
+    const childProcess = require('child_process');
+    const spawnSync = childProcess.spawnSync;
+    childProcess.spawnSync = function patchedSpawnSync(command, args) {
+      if (Array.isArray(args) && args.includes('--list')) {
+        return { error: Object.assign(new Error('fixture'), { code: 'EACCES' }), status: null, stdout: '', stderr: '' };
+      }
+      return spawnSync.apply(this, arguments);
+    };
+  } else {
+    process.exit(70);
+  }
+}
+JS
+SID_FX="rq-fr-fault"
+activate_session "$SID_FX"
+stage "$SID_FX" "2026-01-01-2727_build-fr-fault" "$BODIES/fr-only.md"
+ERR_FX="$(ZENSU_CONFIG="$SUITE_TMP/acceptance-advisory.json" NODE_OPTIONS="--require=$CRITERIA_FAULT" bash "$LOG" --tdd-complete --session "$SID_FX" 2>&1 >/dev/null)"
+RC_FX=$?
+[ "$RC_FX" -eq 0 ] \
+  && printf '%s\n' "$ERR_FX" | grep -qxF 'ACCEPTANCE CRITERIA — advisory, not blocking | the acceptance-criteria check did not complete (exit 70), so the plan was NOT judged' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FX")" implComplete)" = "true" ]
+check "AC6 an advisory acceptance gate completes with a not-judged notice when the criteria check faults" "$(verdict $?)"
+SID_FU="rq-fr-unread"
+activate_session "$SID_FU"
+stage "$SID_FU" "2026-01-01-2828_build-fr-unread" "$BODIES/fr-only.md"
+ERR_FU="$(ZENSU_CONFIG="$SUITE_TMP/acceptance-advisory.json" ZENSU_TEST_CRITERIA_FAULT=unreadable NODE_OPTIONS="--require=$CRITERIA_FAULT" bash "$LOG" --tdd-complete --session "$SID_FU" 2>&1 >/dev/null)"
+RC_FU=$?
+[ "$RC_FU" -eq 0 ] \
+  && printf '%s' "$ERR_FU" | grep -qF 'ACCEPTANCE CRITERIA — advisory, not blocking | the acceptance criteria of .zensu/plans/2026-01-01-2828_build-fr-unread.md could not be read: the requirements lister could not run (EACCES), so the plan was NOT judged' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FU")" implComplete)" = "true" ]
+check "AC7 an advisory acceptance gate completes with a not-judged notice when the criteria check cannot read the plan" "$(verdict $?)"
+SID_FR2="rq-fr-fault-required"
+activate_session "$SID_FR2"
+stage "$SID_FR2" "2026-01-01-2929_build-fr-fault-required" "$BODIES/filled.md"
+ERR_FR2="$(NODE_OPTIONS="--require=$CRITERIA_FAULT" bash "$LOG" --tdd-complete --session "$SID_FR2" 2>&1 >/dev/null)"
+RC_FR2=$?
+[ "$RC_FR2" -eq 1 ] \
+  && printf '%s' "$ERR_FR2" | grep -qF 'zensu-log.sh --tdd-complete: the acceptance-criteria check did not complete (exit 70), so the plan was NOT judged.' \
+  && printf '%s' "$ERR_FR2" | grep -qF 'Run /zensu:doctor; if the check still cannot run, report this refusal and leave the decision to the user.' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FR2")" implComplete)" != "true" ]
+check "AC8 a required acceptance gate refuses --tdd-complete with its cause when the criteria check faults" "$(verdict $?)"
 
 echo "== AC-005: the explicit --plan channel =="
 SID_X="rq-explicit"

@@ -857,6 +857,9 @@ acceptance_handoff_release() {
   [ -z "$INNER_BOUND_RUN" ] || return 1
   file="$(zensu_acceptance_handoff_file "$SESSION_ID" 2>/dev/null)" || return 1
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled selfReview ); then
+    return 1
+  fi
   pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
   claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
   if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi

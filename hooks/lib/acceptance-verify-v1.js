@@ -825,7 +825,7 @@ function status(options) {
   const blocking = result.rows.filter((row) => row.state === 'dropped').length;
   const complete = passing === active.length && blocking === 0;
   const tree = result.currentTree.tree ? result.currentTree.tree.slice(0, 12) : `unverified (${result.currentTree.reason || 'no tree id'})`;
-  const suffix = complete ? '' : remedies('incomplete', result.rows, chain, options.projectRoot, { currentTree: result.currentTree }).map((entry) => ` | ${entry}`).join('');
+  const suffix = complete ? '' : remedies('incomplete', result.rows, chain, options.projectRoot, { currentTree: result.currentTree, zeroChangeTicket: options.zeroChangeTicket === true }).map((entry) => ` | ${entry}`).join('');
   const anchor = chain.runId ? `autopilot run ${chain.runId} | ` : '';
   const lines = [...chain.disclosures, `ACCEPTANCE STATUS — ${anchor}plan: ${chain.planRel} | tree: ${tree} | ${passing}/${active.length} active criteria pass${blocking > 0 ? ` | ${blocking} dropped` : ''}${suffix}`];
   for (const row of result.rows) lines.push(describeRow(row, options.projectRoot, limits, Boolean(chain.runId)));
@@ -925,15 +925,24 @@ function openRows(rows) {
   return rows.filter((row) => row.state !== 'pass' && row.state !== 'deprecated');
 }
 
+const REVIEWED_CHAIN_ONLY = 'closes only a chain whose review ticket a reviewer consumed';
+const ACCEPT_CONTEXT_REFUSALS = new Map([
+  ['standalone', ''],
+  ['bound', 'refusing --accept-partial — it belongs to the ticket-bound standalone terminus and takes no Autopilot binding and no --outcome; an Autopilot run checks its criteria in its VALIDATE stage. The chain stays open.'],
+  ['unticketed', `refusing --accept-partial on the zero-change terminus — consent to a partial criterion ${REVIEWED_CHAIN_ONLY}, so pass it with --claimed-review-ticket <the consumed review ticket>. The chain stays open.`],
+  ['zero-change', `refusing --accept-partial on the zero-change terminus — consent to a partial criterion ${REVIEWED_CHAIN_ONLY}, and no reviewer consumed this zero-change self-review ticket; report the refusal and leave the decision to the user. The chain stays open.`],
+]);
+const UNJUDGED_NEXT_STEP = 'Check the plan path and run /zensu:doctor; if the plan still cannot be read, report this refusal and leave the decision to the user.';
+
 function partialRemedy(ids, projectRoot, context) {
   const named = ids.join(', ');
   if (context.zeroChangeTicket === true) {
-    return `review: ${named} could not be observed in this environment, and consent to a partial criterion closes only a chain whose review ticket a reviewer consumed, which this zero-change self-review ticket is not; report the refusal and leave the decision to the user`;
+    return `review: ${named} could not be observed in this environment, and consent to a partial criterion ${REVIEWED_CHAIN_ONLY}, which this zero-change self-review ticket is not; report the refusal and leave the decision to the user`;
   }
   if (context.currentTree && !context.currentTree.tree) {
     return `tree: ${named} could not be observed in this environment, and consent binds to a tree the gate can fingerprint, which this one is not (${display(context.currentTree.reason || 'no tree id', projectRoot)}); report the refusal and leave the decision to the user`;
   }
-  return `accept: ${named} could not be observed in this environment; only with the user's explicit consent for exactly these criteria, add --accept-partial ${ids.join(',')} to the same --chain-done call`;
+  return `accept: ${named} could not be observed in this environment; they close only with the user's consent for exactly these criteria, from one of the two sources the plugin's skills/verify-feature/rules/acceptance-consent.md names, so once each has its ## Manual Acceptance row in the plan, add --accept-partial ${ids.join(',')} to the same --chain-done call`;
 }
 
 function remedies(state, rows, chain, projectRoot, context = {}) {
@@ -1120,7 +1129,7 @@ function handoffLine(record, projectRoot) {
 function recordHandoff(options, result) {
   if (typeof options.handoffTicket !== 'string' || options.handoffTicket === '') return;
   const tree = result.currentTree && result.currentTree.tree;
-  if (!result.handoff || options.gatesPassed !== true || !tree || !result.chain || !TICKET_RE.test(options.handoffTicket)) {
+  if (!result.handoff || options.gatesPassed !== true || options.reviewDone !== true || !tree || !result.chain || !TICKET_RE.test(options.handoffTicket)) {
     removeHandoff(options);
     return;
   }
@@ -1183,13 +1192,20 @@ function handoffStatus(options) {
   return { code: 0, line: handoffLine(loaded.record, options.projectRoot) };
 }
 
+function unjudgedCriteria(options, cause) {
+  if (options.criteriaAdvisory === true) {
+    return { code: 0, lines: [`ACCEPTANCE CRITERIA — advisory, not blocking | ${cause}, so the plan was NOT judged`] };
+  }
+  return { code: 2, lines: [cause] };
+}
+
 function planCriteria(options) {
   const planPath = typeof options.planPath === 'string' ? options.planPath : '';
-  if (planPath === '') return { code: 2, lines: ['the plan path did not reach the acceptance check'] };
+  if (planPath === '') return unjudgedCriteria(options, 'the plan path did not reach the acceptance check');
   const relative = options.projectRoot ? path.relative(options.projectRoot, planPath) : '';
   const shown = display(relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : planPath, options.projectRoot);
   const read = readCriteria(planPath, options);
-  if (read.status === 'error') return { code: 2, lines: [`the acceptance criteria of ${shown} could not be read: ${read.reason}`] };
+  if (read.status === 'error') return unjudgedCriteria(options, `the acceptance criteria of ${shown} could not be read: ${read.reason}`);
   if (read.status === 'ok' && read.criteria.some((criterion) => criterion.state === 'active')) return { code: 0, lines: [] };
   const cause = read.status !== 'ok'
     ? read.reason
@@ -1345,6 +1361,8 @@ function standaloneVerdict(options, gate, lines, limits) {
         let decision = null;
         if (accept.error) {
           decision = { accepted: false, refusal: accept.error };
+        } else if (accept.ids.length > 0 && options.zeroChangeTicket === true) {
+          decision = { accepted: false, refusal: `--accept-partial ${REVIEWED_CHAIN_ONLY}, which this zero-change self-review ticket is not` };
         } else if (accept.ids.length > 0) {
           decision = result.currentTree.tree
             ? acceptOpenRows(accept.ids, failing)
@@ -1418,9 +1436,11 @@ function transportOptions(env) {
     run: readRunTransport(directory),
     acceptPartial: env.ZENSU_AVR_ACCEPT_PARTIAL === '1',
     acceptPartialIds: env.ZENSU_AVR_ACCEPT_PARTIAL_IDS || '',
+    acceptContext: env.ZENSU_AVR_ACCEPT_CONTEXT || 'standalone',
     handoffTicket: env.ZENSU_AVR_HANDOFF_TICKET || '',
     gatesPassed: env.ZENSU_AVR_GATES_PASSED === '1',
     fixRoundSpent: env.ZENSU_AVR_FIX_ROUND_SPENT === '1',
+    reviewDone: env.ZENSU_AVR_REVIEW_DONE === '1',
     zeroChangeTicket: env.ZENSU_AVR_ZERO_CHANGE_TICKET === '1',
     criteriaAdvisory: env.ZENSU_AVR_CRITERIA_ADVISORY === '1',
     planPath: env.ZENSU_AVR_PLAN || '',
@@ -1481,6 +1501,15 @@ async function main(argv, env = process.env) {
     return result.passes ? 0 : 1;
   }
   if (mode === 'accept-ids') {
+    if (!ACCEPT_CONTEXT_REFUSALS.has(options.acceptContext)) {
+      process.stderr.write(`${label}: --accept-partial reached the acceptance module with the unknown context ${JSON.stringify(options.acceptContext)}\n`);
+      return 2;
+    }
+    const refusal = ACCEPT_CONTEXT_REFUSALS.get(options.acceptContext);
+    if (refusal) {
+      process.stderr.write(`${label}: ${refusal}\n`);
+      return 1;
+    }
     const parsed = parseAcceptIds(options.acceptPartialIds);
     if (!parsed.error && parsed.ids.length === 0) parsed.error = '--accept-partial needs the ids of the criteria the user accepted as partial, such as AC-004,AC-005';
     if (parsed.error) {
@@ -1503,7 +1532,7 @@ async function main(argv, env = process.env) {
     } else if (result.code === 1) {
       process.stderr.write(`${label}: refusing to mark implementation complete — ${result.lines[0]}.\n${result.lines.slice(1).join('\n')}\n`);
     } else if (result.code === 2) {
-      process.stderr.write(`${label}: ${result.lines[0]}, so the plan was NOT judged.\n`);
+      process.stderr.write(`${label}: ${result.lines[0]}, so the plan was NOT judged.\n${UNJUDGED_NEXT_STEP}\n`);
     }
     return result.code;
   }
@@ -1533,6 +1562,7 @@ module.exports = {
   HANDOFF_KEYS,
   HANDOFF_STATES,
   USER_REMEDIES,
+  ACCEPT_CONTEXT_REFUSALS,
   RECORD_KEYS,
   LIMITS,
   REMEDY,

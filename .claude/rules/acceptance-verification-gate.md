@@ -1,6 +1,9 @@
 ---
 paths:
   - "hooks/lib/acceptance-verify-v1.js"
+  - "hooks/lib/zensu-log.sh"
+  - "hooks/stop-chain-enforcer.sh"
+  - "hooks/post-review-tdd-delegate.sh"
   - "hooks/lib/edit-landing-receipt-v1.js"
   - "hooks/lib/zensu-plan-requirements.sh"
   - "tests/structure/acceptance-verify-v1.test.js"
@@ -9,6 +12,9 @@ paths:
   - "skills/self-review/SKILL.md"
   - "skills/self-review/references/acceptance.md"
   - "skills/verify-feature/rules/acceptance-consent.md"
+  - "skills/build/references/audit.md"
+  - "skills/autopilot/rules/validate.md"
+  - "tests/structure/test-requirements-table-gate.sh"
   - "tests/structure/test-escape-wording.sh"
 ---
 
@@ -87,7 +93,8 @@ summary line, end with one segment per remedy that applies (`remedies`): `run:` 
 for `invalid` (`STANDALONE_VERIFY_AGAIN_STATES`; run mode keeps `partial` in
 `VERIFY_AGAIN_STATES`); `fix:` for a criterion that fails on the current tree; `add:` for
 `no-criteria`; `restore:` for a dropped criterion; `accept:` when every criterion that does not
-pass is `partial`, naming the ids and the user's explicit consent (§"Standalone consent"), or in
+pass is `partial`, naming the ids, the user's consent with the file that owns its two sources, and
+the `## Manual Acceptance` row (§"Standalone consent"), or in
 its place `review:` on a minted `zc_` self-review ticket and `tree:` on a tree the gate cannot
 fingerprint, because consent binds to neither (`partialRemedy`). No segment names an escape. `unresolved` names its remedy in its cause, `unavailable` names none.
 Every consumer acts on the segment: `/zensu:self-review`, the self-review-off `CLOSE_PASS` and
@@ -132,21 +139,32 @@ verdict into `partial-accepted` only when `acceptOpenRows` finds the listed ids 
 rows (active, not `pass`) and every one `partial` on a tree the gate can fingerprint; otherwise it
 stays `incomplete` and the cause names the difference (`covers only partial criteria, not …`,
 `names …, which is not open`, `leaves … open`). Exact-set matching is the point: consent never
-covers a criterion the user was not shown. A `partial-accepted` close prints one
+covers a criterion the user was not shown. `standaloneVerdict` also refuses the ids on a minted `zc_`
+self-review ticket by itself (`ZENSU_AVR_ZERO_CHANGE_TICKET`), so that rule does not rest on the
+shell's refusal alone. A `partial-accepted` close prints one
 `ACCEPTANCE — accepted as partial: …` line per criterion with its evidence and records
 `acceptance-partial` in the session bypass ledger right after every terminus gate passed and
-before the converged transition, because `tdd_record_bypass` needs an active chain.
+before the converged transition, because the ledger writer needs an active chain. The write goes
+through `tdd_add_bypass` and is confirmed with `tdd_bypass_recorded`: a consent the ledger did not
+take, or ids given while the verdict state did not reach the terminus, refuses with exit 1 before
+the transition, so the chain stays open and the same call records the consent on a retry.
 `acceptance-partial` joined `ZENSU_BYPASS_GATE_ALLOWLIST` (shape-legal; an earlier installation's
 writer and reader filter it out rather than fail); it renders 🟡 alone and every escape 🔴
 (`status-marker-legend.md`), and `--bypass-note` refuses it, so only the terminus writes it. Run
 mode keeps #594's bare `--accept-partial`, which the agent decides without consent.
 
-**Where consent comes from.** The plan's optional `## Manual Acceptance` table
-(`templates/zensu-plan.md`), filled at planning (Phase 1.5 "Acceptance observability" in
-`skills/build/references/planning.md`) or when a gap is found; and the one question
-`/zensu:build` step 6d, `/zensu:verify-feature --chain` (`rules/acceptance-consent.md`) and
-`/zensu:self-review` (`references/acceptance.md`) ask: provide access now, accept as partial, leave
-the chain open. The gate reads neither the table nor the answer.
+**Where consent comes from.** `skills/verify-feature/rules/acceptance-consent.md` is the one owner
+of what `partial` means (a criterion this environment cannot observe; one it could observe but did
+not prove is verified again, or recorded `fail`), of the two sources of consent, of the ONE question
+with its option order (provide access now, accept as partial, leave the chain open) and of the
+`## Manual Acceptance` row. The sources are a row of the plan's optional `## Manual Acceptance`
+table (`templates/zensu-plan.md`), filled at planning (Phase 1.5 "Acceptance observability" in
+`skills/build/references/planning.md`) or when a gap is found, whose reason names the same cause
+category as the `partial` record, and the user's answer to that question. `/zensu:build` step 6d,
+`/zensu:verify-feature --chain`, `/zensu:self-review` (`references/acceptance.md`) and the
+self-review-off `ACCEPTANCE_REVERIFY` directive name that file instead of restating it; step 6d, the
+self-review reference and the directive still say never to offer, set or mention a way to switch
+the gate off. The gate reads neither the table nor the answer.
 
 **The hand-off.** A refused standalone terminus used to persist nothing, so the Stop enforcer could
 not tell "waiting on the user" from "stalled". `isHandoff` answers true for an `incomplete` or
@@ -158,7 +176,8 @@ not tell "waiting on the user" from "stalled". `isHandoff` answers true for an `
 (`ZENSU_AVR_ZERO_CHANGE_TICKET`) or under an advisory gate. `recordHandoff` writes
 `$CLAUDE_PLUGIN_DATA/acceptance-handoff/v1/<session key>.json` (`HANDOFF_KEYS`, an exact key set,
 temp then rename at `0600`) only when the shell passed the review ticket, the edit-landing and
-full-suite gates passed, the tree has a fingerprint and the chain resolved, and removes it on every
+full-suite gates passed, the review converged (`ZENSU_AVR_REVIEW_DONE`), the tree has a
+fingerprint and the chain resolved, and removes it on every
 other answer of the same call, a pass included. Beside the ticket and the tree the record binds the
 plan (`plan` under `HANDOFF_PLAN_RE`, `plan_sha256` from `fileDigest`, bounded at
 `LIMITS.maxPlanBytes`) and the chain's acceptance records (`records_sha256` from
@@ -167,9 +186,12 @@ ends the hand-off; every remedy is at most `LIMITS.maxRemedyChars`. A sidecar, n
 field, so no schema moved; the store is in both protected-root lists of
 `reviewer-capability-v1.js`. `acceptance_handoff_release` in `hooks/stop-chain-enforcer.sh` runs
 after the background-task wait for a standalone chain: no owned Autopilot run, no bound chain, no
-adopted deferred review and no `pending-review.json.claim` in the project. It does not require
-`--code-review-done`: with `hooks.selfReview` off, the closing directive runs the terminus without
-that mark. It hands the module the recorded project root raw, the spelling the terminus binds the
+adopted deferred review and no `pending-review.json.claim` in the project. While `hooks.selfReview`
+is on it also requires `--code-review-done`, the mark the shell reads through `tdd_code_review_done`
+for `ZENSU_AVR_REVIEW_DONE`: a terminus refused before the review converged is a stage of the chain,
+not a wait on the user, so it neither writes nor honours a hand-off. With `hooks.selfReview` off the
+closing directive runs the terminus without that mark, so the shell reports the review done and the
+Stop guard skips the check. It hands the module the recorded project root raw, the spelling the terminus binds the
 records to, because `validateRecord` compares roots exactly and a `zensu-host-path.sh` rendering
 (`C:/…` under Git Bash) would make every record read as invalid. It spawns
 `node` only when the file exists, and `handoffStatus` releases only for the current ticket, tree,
@@ -189,7 +211,11 @@ requirements-table gate's usable-table arm, for a standalone chain only (`comple
 an Autopilot plan approval already refuses `PLAN_CRITERIA_UNUSABLE`. It shares that gate's scope
 and switch and follows the acceptance gate's own mode: `ZENSU_ACCEPTANCE_GATE=off` skips it, and
 `evidence.acceptanceGate: advisory` completes with `ACCEPTANCE CRITERIA — advisory, not blocking`
-on stderr (`ZENSU_AVR_CRITERIA_ADVISORY`). Its wording is the module's; the remedy asks for one
+on stderr (`ZENSU_AVR_CRITERIA_ADVISORY`). Under `advisory` a check that cannot run (no `node`, an
+unresolvable module, a module fault) or cannot read the plan completes as well, with the same
+prefix naming what was not judged: `unjudgedCriteria` words the read faults in the module, and
+`_zensu_plan_criteria_unjudged` the faults the module cannot report. Under `required` each refuses
+with `…, so the plan was NOT judged.` Its wording is the module's; the remedy asks for one
 `AC-###` row per criterion and prefers criteria this environment can observe.
 
 **Escape-free texts.** No refusal, remedy, hand-off or skill text on the chain-closing path names
@@ -206,24 +232,27 @@ follow-up.
 **Coupled sites of this section:** `STANDALONE_VERIFY_AGAIN_STATES`, `USER_REMEDIES`,
 `HANDOFF_*`, `LIMITS.maxPlanBytes` and `LIMITS.maxRemedyChars`, `remedies`, `partialRemedy`,
 `isHandoff`, `parseAcceptIds`, `acceptOpenRows`, `fileDigest`, `recordSetDigest`,
-`handoffEvidence`, `recordHandoff`, `handoffStatus`, `handoffLine`, `planCriteria` and the
-`accept-ids`, `handoff` and `plan-criteria` modes in `acceptance-verify-v1.js`; the
-`--accept-partial` parse and refusals, `_zensu_accept_partial_ids`, `_zensu_plan_criteria_gate`,
-`_zensu_acceptance_handoff_line`, the `ZENSU_AVR_ACCEPT_PARTIAL_IDS`, `_HANDOFF_TICKET`,
-`_GATES_PASSED`, `_FIX_ROUND_SPENT`, `_ZERO_CHANGE_TICKET`, `_CRITERIA_ADVISORY` and `_PLAN`
-transport, the ledger write and the `--bypass-note` refusal in `zensu-log.sh`;
+`handoffEvidence`, `recordHandoff`, `handoffStatus`, `handoffLine`, `planCriteria`,
+`unjudgedCriteria` and the `accept-ids`, `handoff` and `plan-criteria` modes in
+`acceptance-verify-v1.js`; the `--accept-partial` parse and refusals, `_zensu_accept_partial_ids`,
+`_zensu_plan_criteria_gate`, `_zensu_plan_criteria_unjudged`, `_zensu_acceptance_handoff_line`, the
+`ZENSU_AVR_ACCEPT_PARTIAL_IDS`, `_HANDOFF_TICKET`, `_GATES_PASSED`, `_FIX_ROUND_SPENT`,
+`_REVIEW_DONE`, `_ZERO_CHANGE_TICKET`, `_CRITERIA_ADVISORY` and `_PLAN` transport, the confirmed
+ledger write and the `--bypass-note` refusal in `zensu-log.sh`;
 `zensu_acceptance_handoff_file` / `_reset`, the reset in `tdd_review_gate_reset` and the allowlist
 in `zensu-tdd-phase.sh`; the `acceptance-handoff` entries of both protected-root lists in
 `reviewer-capability-v1.js`;
-`acceptance_handoff_release` in `hooks/stop-chain-enforcer.sh`; `ACCEPTANCE_REVERIFY` and the
-summary rules of `COMBINED_SUMMARY_DIRECTIVE` in `hooks/post-review-tdd-delegate.sh`;
+`acceptance_handoff_release` in `hooks/stop-chain-enforcer.sh`; `CONSENT_RULE`,
+`ACCEPTANCE_REVERIFY` and the summary rules of `COMBINED_SUMMARY_DIRECTIVE` in
+`hooks/post-review-tdd-delegate.sh`;
 `skills/self-review/SKILL.md` and `references/acceptance.md`; step 6d of `audit.md` and Phase 1.5
 of `planning.md`; chain mode points 5 and 6 of `skills/verify-feature/SKILL.md` and
-`rules/acceptance-consent.md`; `templates/zensu-plan.md`; `docs/gates.md`,
-`docs/configuration.md`, `docs/build-workflow.md` and `docs/verify-feature.md`. Pins: the
-consent, hand-off, segment and plan-criteria cases of `acceptance-verify-v1.test.js`; `A0e`–`A0g`
-and `C1`–`C13` with `C7b` in `test-acceptance-gate.sh`; `AC1`–`AC5` in
-`test-requirements-table-gate.sh`; `W0`–`W6` in `test-escape-wording.sh`.
+`rules/acceptance-consent.md`; §3 of `skills/autopilot/rules/validate.md`;
+`templates/zensu-plan.md`; `docs/gates.md`, `docs/configuration.md`, `docs/build-workflow.md` and
+`docs/verify-feature.md`. Pins: the consent, hand-off, segment and plan-criteria cases of
+`acceptance-verify-v1.test.js`; `A0e`–`A0j` and `C1`–`C21` with `C7b` in
+`test-acceptance-gate.sh`; `AC1`–`AC8` in `test-requirements-table-gate.sh`; `W0`–`W6` in
+`test-escape-wording.sh`, whose quoted-name exemption admits only a whole code token.
 
 **Version: `minor`.** A standalone `--tdd-complete` now refuses a plan the previous release
 completed; the hook directives and the skills name `--chain-done --accept-partial`, which the

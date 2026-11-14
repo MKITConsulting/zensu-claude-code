@@ -26,11 +26,11 @@ Authoring rules — this file is written to be COMMITTED. Consuming repos keep
 | {name} | CLI/secret/endpoint/fixture | `{verify_cmd}` | present/missing | install / substitute=`{user-named}` / skip |
 
 ## Manual Acceptance
-(Optional. One row per active `AC-###` criterion the user accepted as partial because no driver in this environment can observe it. The acceptance gate does not read this table: the chain terminus closes such a criterion only with `--accept-partial` for exactly its id. The Consent cell names where the consent was given and when, never a person, an account, an email address or an internal hostname, because plans are committed and may be published. Omit the section when no criterion was accepted.)
+(Optional. One row per active `AC-###` criterion the user accepted as partial because this environment cannot observe it. The acceptance gate does not read this table: the chain terminus closes such a criterion only with `--accept-partial` for exactly its id. The Consent cell names where the consent was given and when, never a person, an account, an email address or an internal hostname, because plans are committed and may be published. Omit the section when no criterion was accepted.)
 
 | Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
 |-----------|------------------------------------|----------------------------------------|---------|
-| {AC-###} | {the manual check} | {credentials / account / non-loopback host / signed build} | {consent source and date, e.g. planning answer, 2026-11-10} |
+| {AC-###} | {the manual check} | {credentials / account / non-loopback host / signed build / driver cannot run here} | {consent source and date, e.g. planning answer, 2026-11-10} |
 
 ## Cross-Layer Value Flow Pairings
 (Per Principle 2 — Cross-Layer Value Flow Pairing. Omit table body if no pairings; keep the heading so Phase 6 audit can detect absence vs zero rows.)
