@@ -3277,7 +3277,7 @@ case "${1:-}" in
                 echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's Zensu plan does not parse, so its \`## Requirements\` table could not be read:" >&2
                 echo "  ${_rq_verdict}" >&2
                 echo "Close the code fence the plan leaves open, then re-run." >&2
-                echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
+                echo "If this cannot be resolved, report this refusal and leave the decision to the user." >&2
                 exit 1
                 ;;
               *)
