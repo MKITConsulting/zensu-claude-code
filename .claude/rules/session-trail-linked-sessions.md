@@ -57,8 +57,8 @@ with a reason, and both briefs print it.
 | `place` | if named | its `originCwd` is missing, relative or carries a control character, so no start can be placed in its repository |
 | `fork` | if named | a user fork, started only when the user names it in the plan answer |
 | `presets-unread` | if named | it names a saved environment and carries no `sshConfig`, and `ccd-session-presets.json` was refused, could not be read or did not parse, or the folder that holds it failed the owner and mode rule |
-| `ledger-unread` | if named | the ledger read had a directory error, hit its record cap or refused a record |
-| `started-unread` | if named | the running session's own record, or a record in its folder, was refused or could not be read, or no own record was found while a store entry was |
+| `ledger-unread` | if named | the ledger read had a directory error, hit its record cap or refused a record, or a ledger directory of a newer schema beside it holds records or could not be inspected |
+| `started-unread` | if named | the running session's own record, or a record in its folder, was refused or could not be read, no own record was found while a store entry was, or the folder that holds the store failed the owner and mode rule |
 | none | start | a side or task-chip session, the first `LINKED_START_CAP` (8) in creation order |
 | `cap` | later | the rest, started only on a later message the user types |
 
@@ -69,15 +69,18 @@ The list is bounded at `LINKED_LIST_MAX` (64) and says how many it leaves out.
 session's record: `ssh` reads the saved environments in `ccd-session-presets.json`, `continued`
 reads the lineage ledger, and `started` reads the running session's own record and the records
 beside it. A read that the owner and mode rule of `hooks/lib/desktop-store-read-v1.js` refused, a
-ledger record `readEdges` refused, or a read that could not complete leaves that answer unknown,
-and an unknown answer is an **if named** row of its own:
+ledger record `readEdges` refused, a ledger directory of a newer schema that holds records or could
+not be inspected, a store whose folder fails that rule, or a read that could not complete leaves that
+answer unknown, and an
+unknown answer is an **if named** row of its own:
 
 - `presets-unread` applies to a session that names a saved environment and carries no `sshConfig`
   while `savedPresets` reports its read incomplete: the presets file was refused, could not be read
   or did not parse, or the folder that holds it, the parent of the store, fails
-  `realDirectory(folder, writableOnlyByCaller)`. That folder is judged before the file is read and
-  counts once as a refused entry when it fails, because an account that can write it can delete the
-  file or rename another file of the user's over it. The file is still read then, so a preset it
+  `realDirectory(folder, writableOnlyByCaller)`. `storeFolderVerdict` judges that folder once per
+  process, before this read and before the started set below, and it counts once as a refused entry
+  when it fails, because an account that can write it can delete the file or rename another file of
+  the user's over it. The file is still read then, so a preset it
   names as SSH keeps its session as `ssh`, while nothing it lacks or names as local is trusted:
   `decideLinked` drops every preset an incomplete read found that is not SSH, so the brief says the
   saved environment could not be named rather than offering a name that another account could have
@@ -89,7 +92,7 @@ and an unknown answer is an **if named** row of its own:
   same Mac on 2026-11-09 the folder that holds the presets file was `0700` and the user's own, so
   the folder check refuses nothing there.
 - **A `ZENSU_CCD_STORE` directly under a shared sticky folder such as `/tmp` reads its presets as
-  unread.** The folder that holds the presets file is then that shared folder, which every account
+  unread and its started set as unknown.** The folder that holds the presets file is then that shared folder, which every account
   can write, so it fails the rule; on macOS `/tmp` is also a symbolic link to `/private/tmp`
   (measured 2026-11-09), refused for that alone. The sticky bit would stop another account from
   deleting or renaming the user's file (sticky(7)), but the rule reads the owner and the write bits
@@ -97,8 +100,51 @@ and an unknown answer is an **if named** row of its own:
   `hooks/lib/desktop-store-read-v1.js`, which both readers load and `L3k` pins to two, for a store
   only `ZENSU_CCD_STORE` can place there. So such a store holds every session started from a saved
   environment without `sshConfig` for its name, unless the presets file names that preset as SSH,
-  which keeps it; a store in a private folder below `/tmp`, such as one `mktemp -d` makes, reads as
-  before.
+  which keeps it, and while a running session id exists every other session that could start as
+  well; a store in a private folder below `/tmp`, such as one `mktemp -d` makes, reads as before.
+  The note names `move` as the remedy for such a store, because the shared folder, or on macOS the
+  real folder its link names, belongs to another account.
+- **A Claude application-data folder that is a symbolic link fails the rule too**, such as one moved
+  to another drive and linked back, because `realDirectory` refuses a symbolic link where a folder
+  is expected. `ZENSU_CCD_STORE` set to the store's real path makes the rule judge the real folder
+  instead.
+- **While the folder is refused, both briefs print one note that names it, its cause and the remedy
+  that cause and the store's source call for**, because a remedy that fits one cause does harm under
+  another. `ownedDirectoryRefusal` in `hooks/lib/desktop-store-read-v1.js` names the cause:
+  `symlink`, `not-directory`, `foreign-owner`, `shared-write` or `uninspectable`.
+  `storeFolderVerdict` also judges the real folder of a symbolic link, and `storeFolderRemedy` in
+  the module picks the remedy from the real folder's cause for a link and from the folder's own
+  otherwise:
+  - `real-path`, a link whose real folder passes: set `ZENSU_CCD_STORE` to the store's real path.
+  - `chmod`, a folder the user owns that grants group or other write: remove those bits, and for a
+    link then set `ZENSU_CCD_STORE` to the store's real path.
+  - `move`, a folder another account owns while `ZENSU_CCD_STORE` named a store that is not Claude
+    Desktop's own: move the store into a private folder of the user's own, such as one `mktemp -d`
+    makes, and point the variable there. A permission change on a folder another account owns is
+    never the remedy, because on a shared folder such as `/tmp` it would take every other account's
+    write access away.
+  - `admin`, a folder another account owns while the store is Claude Desktop's own, whether the
+    probe found it or `ZENSU_CCD_STORE` names it: never move the store, because Claude Desktop keeps
+    writing there; only an administrator can give the folder back to the user's account.
+  - `inspect`, a folder that is not a directory or could not be inspected: make it a directory of
+    the user's own without group or other write.
+
+  **Claude Desktop's own store is decided by where it is, never by how it was named.** The
+  `real-path` remedy, the linked `chmod` remedy and the linked `admin` remedy all tell the user to
+  set `ZENSU_CCD_STORE` to the store's real path, which is Claude Desktop's live store, so a source
+  test would advise moving the very store those remedies named. `storeFolderVerdict` sets
+  `desktopOwn` true for a store the probe found, and for an override `desktopOwnStore` compares the
+  store with every existing candidate of `ccdStoreCandidates(true)`, the candidate list with the
+  override ignored, through `canonicalPair`, whose `realpathSync.native` also settles letter case
+  on a case-insensitive volume (measured on macOS: `/USERS` reads as `/Users`).
+  `storeFolderRemedy` answers `move` only for an override whose `desktopOwn` is `false`, and
+  `admin` for every other folder another account owns, an unknown `desktopOwn` included.
+
+  `takeover --json` reports `linkedSessions.storeFolderRefused` and `linkedSessions.storeFolder`,
+  which carries `dir`, `cause`, `realDir`, `realStore`, `realCause`, `override`, `desktopOwn`,
+  `remedy` and `reads`, the reads that judged the folder (`presets`, `started` or both). Both keys are `null`
+  while no read judged it, because the state comes from the folder verdict that `savedPresets` and
+  `startedContinuations` return beside their answers, never from the memo.
 - `ledger-unread` applies to every session that no confirmed edge the read found keeps and that
   would otherwise start, while `ledgerRead()` reports a directory error, its record cap or a refused
   record. A record `readEdges` refused, whatever its reason (unreadable, not a regular file, over
@@ -110,7 +156,23 @@ and an unknown answer is an **if named** row of its own:
   directory and points at `lineage --diagnose`, which lists each refused record with its reason, up
   to `LEDGER_REFUSED_SHOWN` (20), in its text and as `refusedRecords` and `refusedFiles` in its
   `--json`, because `lineage --forget` matches read edges only and cannot remove one.
-  `takeover --json` carries the count as `linkedSessions.ledgerRefused`.
+  `takeover --json` carries the count as `linkedSessions.ledgerRefused`. A ledger directory of a
+  newer schema beside the `v1` one that holds records counts the same way, because a newer build
+  records its handovers there and this build cannot read them, and so does a schema directory that
+  could not be inspected, because it may be one. `schemaLedgerCensus` in `session-lineage-v1.mjs`
+  lists both kinds, the read ones in `ledgers` and the others in `unread` with `records` `null`: a
+  `v<N>` directory or its `edges` that is a symbolic link or cannot be listed, and, with `version`
+  `null`, the folder that holds the schema directories when it cannot be listed or it or `zensu`
+  above it is a symbolic link. `takeover --json` carries every entry that is not older, read or
+  not, in `linkedSessions.newerSchemaLedgers` (`version`, `dir`, `records`, `truncated`,
+  `relation`), and the ledger note names each read `edges` directory with the records it holds and
+  says to update the plugin, and names each other one as a directory that may hold records of a
+  newer schema and could not be inspected. An empty newer directory and an older one, read or not,
+  count nothing, and `newerSchemaLedgers` is `null` when no census ran: no open linked session
+  carries a Claude Code session id, so no ledger read ran, or that read had a directory error, which holds
+  every start on its own. `lineage --backfill --apply` stamps no record later than
+  the moment it runs, the earlier of the successor's modification time and that moment, so a
+  transcript modified in the future cannot mint a record the read refuses and so hold every start.
 - `started-unread` applies to every session that would otherwise start while
   `startedContinuations` reports its set incomplete. It looks for the running session's record by
   `CLAUDE_CODE_SESSION_ID` among the records' `cliSessionId` values and, when none carries it, by
@@ -118,7 +180,11 @@ and an unknown answer is an **if named** row of its own:
   Claude Desktop can run a session under a new CLI id before it writes that id into the record. The
   set is incomplete when the record found could not be read, or when it was read but its folder
   could not be listed or a record in it was refused or could not be read, since any of them may be
-  a continuation the running session started.
+  a continuation the running session started. It is incomplete as well, in every branch after the
+  running-session check, while the folder that holds the store fails the owner and mode rule:
+  an account that can write that folder can put an older copy of the store in its place, which
+  lacks the continuations the running session started since. A continuation the read did find
+  still keeps its session `started`.
 - **No own record found is an answer only when the store read was whole.** A refused record is
   never listed and an unparsable one never matches, so the lookup cannot tell a missing record from
   one it could not read. With no record found, the set is complete only while `CCD_REFUSED` and
@@ -126,7 +192,8 @@ and an unknown answer is an **if named** row of its own:
   list, and no record was caught mid-write or failed to parse. Any of them may be the running
   session's own record, whether or not a host variable names it, so one such entry anywhere in the
   store holds every start. `savedPresets` runs after `startedContinuations`, so a refused presets
-  file or presets folder never counts, and `OM9` pins that order. A session that runs outside Claude Desktop over a
+  file never counts, and `OM9` pins that order; the folder that holds it is the store's own parent
+  and counts for both reads, which `OM12` pins. A session that runs outside Claude Desktop over a
   whole store keeps the answer of before, nothing started. Measured on the same Mac on 2026-11-08:
   none of the 4,357 records and 67 folders was refused, failed to parse or failed to list, so
   neither rule decided anything there.
@@ -192,7 +259,9 @@ record it cannot read or that fails its edge checks and calls the read complete 
 fits its cap, so `decide` marks a member whose only confirmed edge it could not read as one that
 continues, where the plan pass marks it **if named** as `ledger-unread`. That mirror is a Hub change
 too: `scan` reports the read incomplete for a record it could not read or parse as an edge, while a
-well-formed edge that is not `confirmed` stays no continuation.
+well-formed edge that is not `confirmed` stays no continuation. `scan` reads no ledger directory of
+a newer schema either, so the mirror also reports the read incomplete while such a directory holds
+records or could not be inspected.
 
 **Every session marked start belongs to every yes.** The plan confirmation names each one by its
 title, and the model never leaves one out on its own judgment: not because its own work looks
@@ -323,8 +392,9 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
 - Both briefs render `linkedSessionLines` and `unreadReportLines` after `openChipLines`.
   `takeover --json` carries `linkedSessions`, each entry with its `openBelow` and `planned` and the
   state with its `plan`, and `unreadReports`; the first reports the ledger read
-  with `ledgerTruncated`, `ledgerError`, `schemaNewer` and `ledgerRefused` on one line, as `L36b`
-  requires for the first two.
+  with `ledgerTruncated`, `ledgerError`, `schemaNewer`, `ledgerRefused` and `newerSchemaLedgers` on
+  one line, as `L36b` requires for the first two, and the store folder's verdict as
+  `storeFolderRefused` and `storeFolder`.
 - `references/takeover.md` step 1 has the plan confirmation name the linked sessions and the yes
   run `--force` with `--linked-start`, step 0 says that run carries them, and step 4 starts what
   the carried brief marks start right after `takeover --force`, ahead of the chips and `release`.
@@ -338,6 +408,20 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
   could not read, beside `CCD_REFUSED`, and `startedContinuations` reads both when it finds no own
   record, so a new store read that can fail adds its entry to one of them. `hostNamedRecord` reads
   `CLAUDE_CODE_HOST_SESSION_ID` through `isSafeHostSessionId`, as `accountForHostSession` does.
+- `storeFolderVerdict` in `trail.mjs` is the one judge of the folder that holds the store and
+  memoizes its answer in `STORE_FOLDER`: `savedPresets` and `startedContinuations` both call it and
+  return its verdict beside their answers, `linkedSessions` reports what they returned through
+  `storeFolderState` as `storeFolderRefused` and `storeFolder`, and `linkedSessionLines` renders
+  `storeFolderNote` from it, so a new reader of that folder calls it rather than `realDirectory`
+  again and returns its verdict too. `storeFolderNote`, its cause words in `STORE_FOLDER_CAUSE` and
+  `storeFolderRemedy` live in the module, where the unit file drives the remedy and every note text;
+  `linkedSessionLines` passes `briefPath` to show each path. `ccdStoreCandidates(true)` is the one
+  candidate list `desktopOwnStore` reads, so a candidate added for the probe also counts as Claude
+  Desktop's own store.
+- `ownedDirectoryRefusal` names why `realDirectory(dir, writableOnlyByCaller)` refused a folder and
+  decides nothing, so the store keeps one rule. It lives in `hooks/lib/desktop-store-read-v1.js`
+  beside that rule, the companion's byte copy carries it, and `storeRead()` requires it of every
+  tree it loads.
 - `trail.mjs` imports the module, so every test that stages `trail.mjs` in a sandbox tree copies
   it too: `mutant_path` and `cont_mutant` in `test-session-trail-verdict.sh` and the TDZ tree of
   `L46` in `test-session-trail-lineage.sh`. A line added to `trail.mjs` above `gitState`, such as
@@ -427,7 +511,41 @@ and newer-schema cases and `OM11` on its group-write, sticky and symbolic-link c
 control passed; the withheld name, the ledger note, `ledgerRefused` and the diagnose listing were
 proven red against the code before the self-review round. The unit case for `presets-unread` also
 drives a preset map from an incomplete read: an SSH preset still stays and keeps its name, a local
-one waits for its name and is not named.
+one waits for its name and is not named. The unit case `the store-folder remedy fits its cause and
+its store: …` drives `storeFolderRemedy` for every cause, both sources, a known and an unknown
+`desktopOwn` and every real-folder cause of a link, and `the store-folder note names the folder, …`
+compares the whole note for every remedy with and without a link, each read set and an unknown
+cause. `OM12` in the same block runs the `OM9` running session against the folder that holds
+the store: group writable, world writable with the sticky bit and named through a symbolic link in
+`ZENSU_CCD_STORE`, with and without the running session's own record and with an own record whose
+`sessionId` names no run, each `if-named`/`started-unread` while the continuation the read found
+stays `started`, with the folder counted once as skipped, `storeFolderRefused` true and
+`storeFolder` naming `shared-write`, `chmod`, no override, Claude Desktop's own store and both
+reads; both briefs carry the whole note line, which removes the write bits of the group-writable
+and the sticky folder, names the store's real path for the link to the private folder, where
+`--json` reads the link, `real-path`, the override and Claude Desktop's own store, and asks for both
+for a link to the group-writable folder; the takeover brief carries the why line. Where the real
+path of `/tmp` belongs to another account, a store copied into a folder `mktemp -d` makes there
+holds the same starts, `--json` reads `move` for an override that is not Claude Desktop's own, and
+its note moves the store and changes no permission. The controls are
+the private folder, also named through its real path, which decides as before with no note, the
+run-less own record in the private folder, and a measured run in which no read judged the folder,
+which reports `null` for both keys and prints no note; `OM9`'s why-line needle names the folder
+too. `OM13` plants a record in a `v2` ledger directory beside the intact `v1` one, which holds
+every session that could start as `if-named`/`ledger-unread` with the why line and a ledger note
+that names the `edges` directory in the brief, keeps the session a read confirmed edge leaves
+`continued` and lists the directory in `newerSchemaLedgers` with its count. On a host not running
+as root, a `v2/edges` that cannot be listed holds the same starts with a `null` count and a note
+that names `v2` as uninspected, and so does a folder of schema directories that cannot be listed,
+with a `null` version; a `v2` that is a symbolic link to a populated directory holds them too.
+Its controls are an empty `v2` directory, a populated `v0` one and the restored ledger, each with
+an empty list. `L13g` in `test-session-trail-lineage.sh` backfills a successor transcript modified
+two days ahead and requires its edge stamped no later than the apply with nothing refused, and
+`L13g-control` requires the past successor's own modification time on the edge already written.
+Against the code before this change, `L13g`, `OM12`, `OM13`, `OM9`'s why line and both
+store-folder unit cases failed while `L13g-control` passed; every subject case of `OM12` and
+`OM13` decided as before, the decisions of their controls agreed, and `storeFolderRefused`,
+`storeFolder` and `newerSchemaLedgers` read `undefined` in every case.
 
 **Known gaps, accepted and named:**
 
@@ -450,12 +568,16 @@ one waits for its name and is not named.
   holds the file passes the owner and mode rule.** Its kind is unknown, so an SSH session without
   `sshConfig` started from a since-deleted preset starts; the measurement in the fail-safe
   paragraph found no SSH-preset record without `sshConfig`.
-- **Only the presets read judges the parent of the store.** The store and the folders below it are
-  judged as they are entered, so an account that can write that parent could put another folder of
-  the user's in the store's place. Such a folder holds no record of the session taken over, so
-  nothing starts from it, unless it is an older copy of the store, which can lack the running
-  session's newer records and so the continuations it already started; the measurement in the
-  fail-safe paragraph found that parent `0700`.
+- **Nothing above the folder that holds the store is judged.** The presets read and the started set
+  judge that folder, and the store and the folders below it are judged as they are entered, so an
+  account that can write a folder further up could still put another folder of the user's in its
+  place. Such a folder holds no record of the session taken over, so nothing starts from it, unless
+  it is an older copy, which can lack the continuations the running session already started; the
+  measurement in the fail-safe paragraph found the folder that holds the store `0700`.
+- **A Claude application-data folder that is a symbolic link holds every start that the saved
+  environments or the started set decide** until `ZENSU_CCD_STORE` names the store's real path,
+  which the brief's note says. Before the started set judged that folder, it held only the sessions
+  started from a saved environment.
 - **With no own record found, one unread store entry holds every start.** A session that runs
   outside Claude Desktop, over a store with a refused or unreadable entry anywhere, waits for names
   it would have started, because that entry may be its own record. A record caught mid-write reads
@@ -473,8 +595,13 @@ one waits for its name and is not named.
   prompt therefore names the Skill tool too.
 - **The `cont-` handle joins on eight hex digits.** Two old runs that share them would both read as
   started once one of them is.
-- **The edge read covers the `v1` ledger directory only**, as every other ledger read does, and a
-  `confirmed` tier is a claim any local process can write.
+- **The edge read covers the `v1` ledger directory only.** A directory of a newer schema that holds
+  records holds every start instead of being read, and so does one the census could not inspect,
+  while one of an older schema is neither read nor counted, because no build before `v1` wrote one;
+  a `confirmed` tier is a claim any local process can write.
+- **The census inspects without reading.** It counts the `.json` names in a newer `edges`
+  directory and never opens one, so a planted name or an empty file holds every start as a real
+  record would, the price of never reading a schema this build does not know.
 - **The store and presets paths are verified on macOS only**; Windows and Linux are the inferred
   candidates of `ccdStoreCandidates`.
 - **The receiving folder is the working directory of the `takeover` process**, not the folder
@@ -492,7 +619,7 @@ one waits for its name and is not named.
 **Version: `patch`.** Walked against `.claude/rules/runtime-lineage.md`: no context-record or
 workflow-state field, no strict key set (the Hub reads the contract file permissively, and only
 tests read it in this repository), no hook added, removed or renamed, no matcher, config key or
-attestation change, and `session-lineage-v1.mjs` is untouched. New `--json` keys and new brief and
+attestation change, and the edge record `session-lineage-v1.mjs` writes keeps its shape. New `--json` keys and new brief and
 skill text are patch-class, as they were for the open chips; so are `linkedSessions.sameRepository`,
 `linkedSessions.oldRepositoryMeasured`, each entry's `cwdWhy`, the `place` reason, the repository
 verdict behind `sameCheckout` and the brief's `folder` block, and so are each entry's `openBelow`
@@ -510,4 +637,13 @@ refused ledger records toward `ledger-unread` and judging the presets folder are
 same walk: no new `why` value, config key or persisted field, both decide only through the existing
 `ledger-unread` and `presets-unread` rows, and `linkedSessions.ledgerRefused` and the
 `refusedRecords` and `refusedFiles` keys of `lineage --diagnose --json` are new keys of exchanged
-shapes no strict validator reads.
+shapes no strict validator reads. Its follow-ups are `patch` on the same walk: a ledger directory of
+a newer schema, one the census could not inspect and the folder that holds the store decide only
+through the existing `ledger-unread` and `started-unread` rows, `linkedSessions.newerSchemaLedgers`,
+`linkedSessions.storeFolderRefused` and `linkedSessions.storeFolder` are new keys of an exchanged
+shape, the `started-unread` why text changes its words and not its value, and the backfill's clamp
+changes a value it persists, never the record's shape. `session-lineage-v1.mjs` gains the
+read-only `schemaLedgerCensus`, behind which `otherSchemaLedgers` returns what it returned before,
+and its `LEDGER_SCHEMA_VERSION`, `makeEndpoint`, `ENDPOINT_KEYS` and `buildEdge` are unchanged, so
+the edge record's shape is byte for byte the same; `desktop-store-read-v1.js` gains
+`ownedDirectoryRefusal`, which decides nothing.

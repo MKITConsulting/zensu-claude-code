@@ -24,6 +24,19 @@ function realDirectory(target, accept) {
   }
 }
 
+function ownedDirectoryRefusal(target) {
+  let stat;
+  try {
+    stat = fs.lstatSync(target);
+  } catch (_) {
+    return 'uninspectable';
+  }
+  if (stat.isSymbolicLink()) return 'symlink';
+  if (!stat.isDirectory()) return 'not-directory';
+  if (writableOnlyByCaller(stat)) return null;
+  return typeof process.getuid === 'function' && stat.uid !== process.getuid() ? 'foreign-owner' : 'shared-write';
+}
+
 function ownedRegularFile(target) {
   try {
     const stat = fs.lstatSync(target);
@@ -107,6 +120,7 @@ module.exports = {
   writableOnlyByCaller,
   anyOwnerOrMode,
   realDirectory,
+  ownedDirectoryRefusal,
   ownedRegularFile,
   readBoundedBytes,
   readBoundedFile,

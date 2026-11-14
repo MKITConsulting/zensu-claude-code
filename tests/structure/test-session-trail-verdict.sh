@@ -9184,7 +9184,8 @@ fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".jso
   OM_GOT="$(om9_take "$OM9_SELF")"
   [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record=$OM_GOT"
   OM9_MD="$(cd "$LS_TAKER" && om9run "$OM9_SELF" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
-  printf '%s\n' "$OM9_MD" | grep -qxF -- "- why: whether this session already started its continuation is unknown, because this session's own Claude Desktop record, or a record beside it, could not be read: it starts only when the user names it in the plan answer" || OM_BAD="$OM_BAD brief-why"
+  OM9_WHY="- why: whether this session already started its continuation is unknown, because this session's own Claude Desktop record, or a record beside it, could not be read, or the folder that holds the store could not be trusted: it starts only when the user names it in the plan answer"
+  printf '%s\n' "$OM9_MD" | grep -qxF -- "$OM9_WHY" || OM_BAD="$OM_BAD brief-why"
   OM9_ENV="CLAUDE_CODE_HOST_SESSION_ID=$OM9_HOST"
   OM_GOT="$(om9_take "$OM9_SELF")"
   [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record-host-id=$OM_GOT"
@@ -9350,6 +9351,146 @@ fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".jso
   [ -z "$OM_BAD" ] \
     && check "OM11 a linked session started from a saved environment without sshConfig waits for the user to name it as presets-unread while the folder that holds ccd-session-presets.json grants group write, is world writable with the sticky bit or is named through a symbolic link, whether the file is missing or names the local preset, the refused folder counts once as skipped and the brief withholds the local preset's name; a preset the file names as SSH keeps its session and its name in that folder too, and the private folder, also named through ZENSU_CCD_STORE, decides and names as before (controls)" PASS \
     || check "OM11 presets folder:$OM_BAD" FAIL
+
+  OM12_LINK="$LS_HOME/om12-claude-link"
+  om12run() { local self="$1" host="$2" store="$3"; shift 3; env -u CLAUDE_CONFIG_DIR -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME -u CLAUDE_CODE_ACCOUNT_UUID -u CLAUDE_CODE_ORGANIZATION_UUID CLAUDE_CODE_SESSION_ID="$self" CLAUDE_CODE_HOST_SESSION_ID="$host" ZENSU_CCD_STORE="$store" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" "$@" --config-dir "$LS_HOME/.claude"; }
+  om12_take() {
+    (cd "$LS_TAKER" && om12run "$1" "$2" "$3" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om12.json" 2>/dev/null
+    ls_eval "$LS_HOME/om12.json" '[14, 15].map((n) => pick(n).decision + "/" + pick(n).why).join(",") + ":" + o.linkedSessions.storeFolderRefused + ":" + o.skipped'
+  }
+  OM12_STARTED="stays/started,if-named/started-unread"
+  OM12_READS="so the saved environments and the continuations this session started cannot be trusted, and each linked session that depends on them starts only when the user names it."
+  OM12_NOTE="_The folder that holds the Claude Desktop store, \`$OM11_DIR\`, grants group or other write, $OM12_READS It belongs to the user, so remove its group and other write bits._"
+  OM12_REAL="$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$OM11_DIR" 2>/dev/null)"
+  OM12_LINKED="_The folder that holds the Claude Desktop store, \`$OM12_LINK\`, is a symbolic link to \`$OM12_REAL\`, $OM12_READS That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`$OM12_REAL/claude-code-sessions\`, whose folder is then judged instead._"
+  OM12_LINKED_CHMOD="_The folder that holds the Claude Desktop store, \`$OM12_LINK\`, is a symbolic link to \`$OM12_REAL\`, $OM12_READS That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, \`$OM12_REAL/claude-code-sessions\`._"
+  OM12_MOVE="belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns._"
+  OM_BAD=""
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  OM12_SKIPPED="${OM_GOT##*:}"
+  [ "${OM_GOT%:*}" = "stays/started,start/null:false" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qF -- '_The folder that holds the Claude Desktop store, ' && OM_BAD="$OM_BAD control-note"
+  chmod 775 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  [ "$OM_GOT" = "$OM12_STARTED:true:$((OM12_SKIPPED + 1))" ] || OM_BAD="$OM_BAD group-write=$OM_GOT"
+  OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.storeFolder.cause, o.linkedSessions.storeFolder.remedy, o.linkedSessions.storeFolder.override, o.linkedSessions.storeFolder.desktopOwn, o.linkedSessions.storeFolder.reads.join("+")].join(":")')"
+  [ "$OM_GOT" = "shared-write:chmod:false:true:presets+started" ] || OM_BAD="$OM_BAD folder-json=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_NOTE" || OM_BAD="$OM_BAD brief-note"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM9_WHY" || OM_BAD="$OM_BAD brief-why"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" handoff "$LS_ROOT" --all 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_NOTE" || OM_BAD="$OM_BAD handoff-note"
+  OM_GOT="$(om12_take "$OM9_OTHER" "" "")"
+  [ "${OM_GOT%:*}" = "if-named/started-unread,if-named/started-unread:true" ] || OM_BAD="$OM_BAD no-own-record=$OM_GOT"
+  OM12_REC_BODY="$(cat "$OM9_REC")"
+  node -e 'const fs = require("node:fs"); const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); o.sessionId = "om12-not-a-run"; fs.writeFileSync(process.argv[1], JSON.stringify(o));' "$OM9_REC" 2>/dev/null
+  OM_GOT="$(om12_take "$OM9_SELF" "" "")"
+  [ "${OM_GOT%:*}" = "if-named/started-unread,if-named/started-unread:true" ] || OM_BAD="$OM_BAD no-run-id=$OM_GOT"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "" "")"
+  [ "${OM_GOT%:*}" = "start/null,later/cap:false" ] || OM_BAD="$OM_BAD no-run-id-control=$OM_GOT"
+  printf '%s' "$OM12_REC_BODY" > "$OM9_REC"
+  chmod 1777 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  [ "${OM_GOT%:*}" = "$OM12_STARTED:true" ] || OM_BAD="$OM_BAD sticky=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_NOTE" || OM_BAD="$OM_BAD sticky-note"
+  chmod 755 "$OM11_DIR"
+  ln -s "$OM11_DIR" "$OM12_LINK"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "$OM12_LINK/claude-code-sessions")"
+  [ "${OM_GOT%:*}" = "$OM12_STARTED:true" ] || OM_BAD="$OM_BAD symlink=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "$OM12_LINK/claude-code-sessions" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_LINKED" || OM_BAD="$OM_BAD symlink-note"
+  OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.storeFolder.cause, o.linkedSessions.storeFolder.remedy, o.linkedSessions.storeFolder.override, o.linkedSessions.storeFolder.desktopOwn].join(":")')"
+  [ "$OM_GOT" = "symlink:real-path:true:true" ] || OM_BAD="$OM_BAD symlink-json=$OM_GOT"
+  chmod 775 "$OM11_DIR"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "$OM12_LINK/claude-code-sessions" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_LINKED_CHMOD" || OM_BAD="$OM_BAD symlink-chmod-note"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "$OM11_DIR/claude-code-sessions")"
+  [ "${OM_GOT%:*}" = "stays/started,start/null:false" ] || OM_BAD="$OM_BAD real-path=$OM_GOT"
+  rm -f "$OM12_LINK"
+  OM12_FOREIGN_TMP="$(node -e 'const fs = require("node:fs"); let st = null; try { st = fs.statSync(fs.realpathSync("/tmp")); } catch {} process.stdout.write(st && typeof process.getuid === "function" && st.uid !== process.getuid() ? "foreign" : "");' 2>/dev/null)"
+  if [ "$OM12_FOREIGN_TMP" = foreign ]; then
+    OM12_TMP_STORE="$(mktemp -d /tmp/zensu-om12-store.XXXXXX)"
+    cp -R "$OM11_DIR/claude-code-sessions/." "$OM12_TMP_STORE/"
+    OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "$OM12_TMP_STORE")"
+    [ "${OM_GOT%:*}" = "$OM12_STARTED:true" ] || OM_BAD="$OM_BAD shared-tmp=$OM_GOT"
+    OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.storeFolder.remedy, o.linkedSessions.storeFolder.override, o.linkedSessions.storeFolder.desktopOwn].join(":")')"
+    [ "$OM_GOT" = "move:true:false" ] || OM_BAD="$OM_BAD shared-tmp-json=$OM_GOT"
+    OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "$OM12_TMP_STORE" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+    printf '%s\n' "$OM12_MD" | grep -F -- '_The folder that holds the Claude Desktop store, ' | grep -qF -- "$OM12_MOVE" || OM_BAD="$OM_BAD shared-tmp-note"
+    printf '%s\n' "$OM12_MD" | grep -qF -- 'group and other write bits' && OM_BAD="$OM_BAD shared-tmp-chmod"
+    rm -rf "$OM12_TMP_STORE"
+  fi
+  OM12_C10="$LS_STORE/local_00000010-1111-4111-8111-000000000010.json"
+  OM12_C10_BODY="$(cat "$OM12_C10")"
+  node -e 'const fs = require("node:fs"); const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); delete o.startedFromEnvironmentId; fs.writeFileSync(process.argv[1], JSON.stringify(o));' "$OM12_C10" 2>/dev/null
+  chmod 775 "$OM11_DIR"
+  (cd "$LS_TAKER" && om12run "" "" "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om12.json" 2>/dev/null
+  OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.measured, o.linkedSessions.storeFolderRefused, o.linkedSessions.storeFolder].map(String).join(":")')"
+  [ "$OM_GOT" = "true:null:null" ] || OM_BAD="$OM_BAD unjudged=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "" "" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qF -- '_The folder that holds the Claude Desktop store, ' && OM_BAD="$OM_BAD unjudged-note"
+  chmod 755 "$OM11_DIR"
+  printf '%s' "$OM12_C10_BODY" > "$OM12_C10"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  [ "$OM_GOT" = "stays/started,start/null:false:$OM12_SKIPPED" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM12 with a running session id, a folder that holds the store and grants group write, is world writable with the sticky bit, or is named through a symbolic link in ZENSU_CCD_STORE leaves the started set unknown, so every linked session that could start waits for its name as started-unread whether or not the running session's own record is found and whether or not that record names a run, while the continuation the read found stays started; the refused folder counts once as skipped, takeover --json names its cause, its remedy, whether its location makes the store Claude Desktop's own, also when ZENSU_CCD_STORE names it, and the reads that judged it, and both briefs name the folder with the remedy its cause and store call for: removing the write bits of a folder the user owns, the store's real path for a link to such a folder, both for a link to a group-writable folder of the user's, and moving a store that is not Claude Desktop's own out of a folder another account owns, never a permission change there; a measured run in which no read judged the folder reports null with no note, while the private folder, also named through its real path, decides as before with no note (controls)" PASS \
+    || check "OM12 store folder:$OM_BAD" FAIL
+
+  OM13_BASE="$LS_HOME/.claude/zensu/session-lineage"
+  om13_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om13.json" 2>/dev/null
+    ls_eval "$LS_HOME/om13.json" '[8, 13, 1].map((n) => pick(n).decision + "/" + pick(n).why).join(",") + ":" + (Array.isArray(o.linkedSessions.newerSchemaLedgers) ? o.linkedSessions.newerSchemaLedgers.map((l) => l.version + "=" + l.records).join("+") || "none" : String(o.linkedSessions.newerSchemaLedgers))'
+  }
+  OM13_KEPT="stays/continued,start/null,start/null:none"
+  OM13_HELD="stays/continued,$OM10_UNREAD,$OM10_UNREAD"
+  OM_BAD=""
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  mkdir -p "$OM13_BASE/v2/edges"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD empty-newer=$OM_GOT"
+  printf '%s' '{"schemaVersion":2}' > "$OM13_BASE/v2/edges/1760000000009-fixture.json"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_HELD:2=1" ] || OM_BAD="$OM_BAD newer=$OM_GOT"
+  OM13_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM13_MD" | grep -F -- "$OM10_NOTE (1 record(s) of a newer schema in \`$OM13_BASE/v2/edges\` cannot be read by this build, so update the plugin), so whether a linked session already continues elsewhere is unknown" >/dev/null || OM_BAD="$OM_BAD brief-note"
+  printf '%s\n' "$OM13_MD" | grep -qxF -- '- why: the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
+  if [ "$(id -u)" != 0 ]; then
+    chmod 000 "$OM13_BASE/v2/edges"
+    OM_GOT="$(om13_take)"
+    [ "$OM_GOT" = "$OM13_HELD:2=null" ] || OM_BAD="$OM_BAD unreadable-newer=$OM_GOT"
+    OM13_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+    printf '%s\n' "$OM13_MD" | grep -F -- "$OM10_NOTE (\`$OM13_BASE/v2\` may hold records of a newer schema and could not be inspected), so whether a linked session already continues elsewhere is unknown" >/dev/null || OM_BAD="$OM_BAD unreadable-note"
+    chmod 755 "$OM13_BASE/v2/edges"
+    chmod 300 "$OM13_BASE"
+    OM_GOT="$(om13_take)"
+    [ "$OM_GOT" = "$OM13_HELD:null=null" ] || OM_BAD="$OM_BAD unlisted-base=$OM_GOT"
+    chmod 755 "$OM13_BASE"
+  fi
+  rm -rf "$OM13_BASE/v2"
+  mkdir -p "$LS_HOME/om13-elsewhere/edges"
+  printf '%s' '{"schemaVersion":2}' > "$LS_HOME/om13-elsewhere/edges/1760000000009-fixture.json"
+  ln -s "$LS_HOME/om13-elsewhere" "$OM13_BASE/v2"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_HELD:2=null" ] || OM_BAD="$OM_BAD linked-newer=$OM_GOT"
+  rm -f "$OM13_BASE/v2"
+  rm -rf "$LS_HOME/om13-elsewhere"
+  mkdir -p "$OM13_BASE/v0/edges"
+  printf '%s' '{"schemaVersion":0}' > "$OM13_BASE/v0/edges/1760000000009-fixture.json"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD older=$OM_GOT"
+  rm -rf "$OM13_BASE/v0"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM13 a record in a ledger directory of a newer schema beside the v1 ledger, and a newer-schema directory that cannot be listed, is a symbolic link or sits in a folder that cannot be listed, keeps every linked session that could start waiting for its name as ledger-unread, with the why line and a ledger note that names each such directory in the brief, while a confirmed edge the v1 read found keeps its session continued and takeover --json lists each directory in newerSchemaLedgers with its record count, or null for one it could not read; an empty newer directory, a populated older one and the restored ledger decide as before with an empty list (controls)" PASS \
+    || check "OM13 newer-schema ledger:$OM_BAD" FAIL
 fi
 
 pl_run() {
