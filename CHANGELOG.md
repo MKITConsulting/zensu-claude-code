@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-13
+
+### Added
+
+- **session-hub**: Add the session-hub@zensu companion plugin (#606)
+- **verify-feature**: Sign the browser in through a recipe login script (#615)
+
 ### Added
 
 - **Session Hub companion plugin**: the `zensu` marketplace now also lists `session-hub@zensu`,
