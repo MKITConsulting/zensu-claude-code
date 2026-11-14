@@ -536,7 +536,7 @@ process.stdout.write(bad.length ? `BAD:${bad.length}` : "ALL_INFERRED");
 TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
 case "$TXT" in *"[inferred"*) check "L13d a rendered chain marks an inferred link, so a guess never reads like a measurement" PASS ;; *) check "L13d a rendered chain marks an inferred link" FAIL ;; esac
 
-# A reconstructed edge is stamped from the STALLED SESSION'S activity, never from the
+# A reconstructed edge is stamped from its successor's last write, never later than the
 # moment --apply ran. recordedAt is the sole ordering key at four sites, so an
 # apply-time stamp made every guess newer than every real handover by construction —
 # one backfill then promoted guesses above measurements permanently, and printChain
@@ -557,6 +557,38 @@ process.stdout.write(stamps[stamps.length - 1]);
 BEFORE="$(edge_count)"
 trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --apply --all >/dev/null
 [ "$(edge_count)" = "$BEFORE" ] && check "L13e a second --apply does not duplicate an edge the ledger already holds" PASS || check "L13e a second --apply does not duplicate (before $BEFORE, after $(edge_count))" FAIL
+
+SID_F="66666666-0000-0000-0000-00000000000f"
+SID_G="77777777-0000-0000-0000-000000000077"
+fix "$SID_F" "$DEAD_PID" 90 skew "$ACCT_A" stalled
+fix "$SID_G" "$DEAD_PID" -2880 skew "$ACCT_B"
+trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --apply --all >/dev/null
+SKEW_AFTER="$(node -e 'process.stdout.write(new Date().toISOString())')"
+SKEW_GOT="$(node -e '
+const fs = require("fs"), path = require("path");
+const [cfg, sidF, sidA, sidB, after] = process.argv.slice(1);
+const dir = path.join(cfg, "zensu", "session-lineage", "v1", "edges");
+const edges = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+const skew = edges.find((e) => e.from && e.from.sessionId === sidF);
+const past = edges.find((e) => e.from && e.from.sessionId === sidA && e.to && e.to.sessionId === sidB);
+const handover = path.join(cfg, "work", "handover").replace(/[^A-Za-z0-9]/g, "-");
+const pastStamp = new Date(fs.statSync(path.join(cfg, "projects", handover, `${sidB}.jsonl`)).mtimeMs).toISOString();
+const skewWord = skew ? (skew.recordedAt <= after ? "skew-clamped" : `skew-ahead:${skew.recordedAt}`) : "skew-missing";
+const pastWord = past ? (past.recordedAt === pastStamp ? "past-kept" : `past-moved:${past.recordedAt}/${pastStamp}`) : "past-missing";
+process.stdout.write(`${skewWord},${pastWord}`);
+' "$CFG" "$SID_F" "$SID_A" "$SID_B" "$SKEW_AFTER")"
+SKEW_REFUSED="$(jq_field "$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --json --all)" refusedRecords)"
+case "$SKEW_GOT:$SKEW_REFUSED" in
+  (skew-clamped,*:0) check "L13g a backfilled edge whose successor transcript was modified two days ahead is stamped no later than the apply, so the ledger read refuses nothing" PASS ;;
+  (*) check "L13g a backfilled edge whose successor was modified in the future is stamped no later than the apply (got $SKEW_GOT, refused records $SKEW_REFUSED)" FAIL ;;
+esac
+case "$SKEW_GOT" in
+  (*,past-kept) check "L13g-control a backfilled edge whose successor was modified in the past keeps that transcript's own modification time as its stamp" PASS ;;
+  (*) check "L13g-control a backfilled edge whose successor was modified in the past keeps that transcript's modification time (got $SKEW_GOT)" FAIL ;;
+esac
+SKEW_PROJECT="$(node -e 'process.stdout.write(require("path").join(process.argv[1], "work", "skew").replace(/[^A-Za-z0-9]/g, "-"))' "$CFG")"
+[ -n "$SKEW_PROJECT" ] && rm -rf "$CFG/projects/$SKEW_PROJECT" "$CFG/work/skew"
+rm -f "$CFG/sessions/$SID_F.json" "$CFG/sessions/$SID_G.json" "$STORE/$ACCT_A/ws-0001/local_host-$SID_F.json" "$STORE/$ACCT_B/ws-0001/local_host-$SID_G.json"
 
 # ── L14 — backfill discriminates: same account is a resume, not a handover ──
 reset_ledger

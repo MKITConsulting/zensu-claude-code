@@ -605,3 +605,56 @@ test('every chip is listed when this session works in another repository, and on
   assert.equal(mod.chipProposal({ title: 't', prompt: 'p', cwd: REPO }, { checkout, sameRepository: true }).why, null);
   assert.ok(mod.CHIP_WHY.repository.includes('ran outside the repository of the session taken over'));
 });
+
+test('the store-folder remedy fits its cause and its store: a folder the user owns is fixed in place, a folder another account owns is never changed, and Claude Desktop\'s own store is never moved, also when ZENSU_CCD_STORE names it', () => {
+  assert.equal(mod.storeFolderRemedy(null), null);
+  assert.equal(mod.storeFolderRemedy({ cause: null, override: true, desktopOwn: false }), null);
+  assert.equal(mod.storeFolderRemedy({ cause: 'shared-write', override: false, desktopOwn: true }), 'chmod');
+  assert.equal(mod.storeFolderRemedy({ cause: 'shared-write', override: true, desktopOwn: false }), 'chmod');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: true, desktopOwn: false }), 'move');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: true, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: false, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: null, override: false, desktopOwn: true }), 'real-path');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: null, override: true, desktopOwn: false }), 'real-path');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'shared-write', override: true, desktopOwn: true }), 'chmod');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'foreign-owner', override: true, desktopOwn: false }), 'move');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'foreign-owner', override: true, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'foreign-owner', override: false, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'uninspectable', override: true, desktopOwn: false }), 'inspect');
+  assert.equal(mod.storeFolderRemedy({ cause: 'not-directory', override: false, desktopOwn: true }), 'inspect');
+  assert.equal(mod.storeFolderRemedy({ cause: 'uninspectable', override: true, desktopOwn: false }), 'inspect');
+});
+
+test('the store-folder note names the folder, its cause, the reads it decided and the remedy text of every cause and store, with and without a link', () => {
+  const shown = (p) => p;
+  const lead = (dir, cause, reads) => `_The folder that holds the Claude Desktop store, \`${dir}\`, ${cause}, so ${reads} cannot be trusted, and each linked session that depends on them starts only when the user names it.`;
+  const both = 'the saved environments and the continuations this session started';
+  const plain = { dir: '/s', realDir: null, realStore: null, realCause: null, reads: ['presets', 'started'] };
+  const link = { dir: '/l', realDir: '/r', realStore: '/r/store', reads: ['presets', 'started'] };
+  const linkLead = lead('/l', 'is a symbolic link to `/r`', both);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'shared-write', override: false, desktopOwn: true }, shown),
+    `${lead('/s', 'grants group or other write', both)} It belongs to the user, so remove its group and other write bits._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: null, override: false, desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`, whose folder is then judged instead._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'shared-write', override: false, desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'foreign-owner', override: true, desktopOwn: false }, shown),
+    `${lead('/s', 'belongs to another account', both)} It belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'foreign-owner', override: true, desktopOwn: false }, shown),
+    `${linkLead} That real folder belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'foreign-owner', override: true, desktopOwn: true }, shown),
+    `${lead('/s', 'belongs to another account', both)} It belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'foreign-owner', override: false, desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write, after which \`ZENSU_CCD_STORE\` set to the store's real path, \`/r/store\`, has it judged._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'not-directory', override: false, desktopOwn: true }, shown),
+    `${lead('/s', 'is not a directory', both)} Make it a directory of the user's own with no group or other write bit._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'symlink', realDir: null, realCause: 'uninspectable', override: false, desktopOwn: true }, shown),
+    `${lead('/s', 'is a symbolic link', both)} Make it a directory of the user's own with no group or other write bit, then set \`ZENSU_CCD_STORE\` to the store's real path._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: null, override: false, desktopOwn: true, reads: ['started'] }, shown),
+    `${lead('/l', 'is a symbolic link to `/r`', 'the continuations this session started')} That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`, whose folder is then judged instead._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'uninspectable', override: false, desktopOwn: true, reads: ['presets'] }, (p) => `<${p}>`),
+    `${lead('</s>', 'could not be inspected', 'the saved environments')} Make it a directory of the user's own with no group or other write bit._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'unknown-cause', override: false, desktopOwn: true, reads: [] }, shown),
+    `${lead('/s', 'could not be inspected', 'what this brief read beside it')} Make it a directory of the user's own with no group or other write bit._`);
+});
