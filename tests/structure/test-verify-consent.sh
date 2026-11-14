@@ -410,7 +410,7 @@ done
   && check "H17d both hooks source the one prefilter library, carry no copy of its two-marker test, and scan only in the library-unavailable fallback" PASS \
   || check "H17d both hooks source the one prefilter library, carry no copy of its two-marker test, and scan only in the library-unavailable fallback" FAIL
 PRE_BLOCK="$(cat "$PREFILTER_LIB" 2>/dev/null)"
-CLI_MARKER_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write(m.CLI_MARKERS.concat(m.SESSION_PREFIX).join("\n"))' "$MODULE" 2>/dev/null)"
+CLI_MARKER_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write(m.CLI_MARKERS.concat(m.SESSION_PREFIX, m.RUNS_MARKER, m.CONFIG_FLAG, m.CONFIG_ENV.toLowerCase()).join("\n"))' "$MODULE" 2>/dev/null)"
 SESSION_ENV_NAME="$(node -e 'process.stdout.write(require(process.argv[1]).SESSION_ENV)' "$MODULE" 2>/dev/null)"
 H17E_OK=1
 [ -n "$CLI_MARKER_LIST" ] || H17E_OK=0
@@ -422,8 +422,8 @@ done <<EOF
 $CLI_MARKER_LIST
 EOF
 [ "$H17E_OK" -eq 1 ] \
-  && check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" PASS \
-  || check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" FAIL
+  && check "H17e the prefilter names every CLI marker, the session prefix, the run-directory and config markers and the session variable the module derives" PASS \
+  || check "H17e the prefilter names every CLI marker, the session prefix, the run-directory and config markers and the session variable the module derives" FAIL
 NOLIB_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nolib.XXXXXX")"
 remember_tmp "$NOLIB_ROOT"
 NOLIB_ROOT="$(cd "$NOLIB_ROOT" && pwd -P)"
@@ -454,8 +454,17 @@ case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$NOLIB_JOINED" 2
   *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" PASS ;;
   *) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" FAIL ;;
 esac
+PS_LQ=$'\xe2\x80\x98'
+PS_RQ=$'\xe2\x80\x99'
+ps_payload_spelling() {
+  if [ "${1:-}" = escaped ]; then
+    LC_ALL=C sed -e "s/$PS_LQ/\\\\u2018/g" -e "s/$PS_RQ/\\\\u2019/g"
+  else
+    cat
+  fi
+}
 nolib_powershell() {
-  bash_payload PreToolUse "$1" "$SID" "$PROJ" '{"tool_name":"PowerShell"}' \
+  bash_payload PreToolUse "$1" "$SID" "$PROJ" '{"tool_name":"PowerShell"}' | ps_payload_spelling "${2:-}" \
     | CLAUDE_PLUGIN_ROOT="$NOLIB_ROOT" bash "$NOLIB_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null
 }
 case "$(nolib_powershell "& ('pla' + 'ywright-cli') -s=('zensu-' + 'ver' + 'ify-nolib') snapshot")" in
@@ -465,6 +474,15 @@ esac
 [ -z "$(nolib_powershell 'Get-ChildItem -Recurse')" ] \
   && check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" PASS \
   || check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" FAIL
+NOLIB_TYPOGRAPHIC="& (${PS_LQ}playw${PS_RQ} + ${PS_LQ}right-cli${PS_RQ}) -s=(${PS_LQ}zensu-ve${PS_RQ} + ${PS_LQ}rify-nolib${PS_RQ}) snapshot"
+case "$(nolib_powershell "$NOLIB_TYPOGRAPHIC")" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g7 without the prefilter library a PowerShell call that splits both markers with typographic quotes is still denied" PASS ;;
+  *) check "H17g7 without the prefilter library a PowerShell call that splits both markers with typographic quotes is still denied" FAIL ;;
+esac
+case "$(nolib_powershell "$NOLIB_TYPOGRAPHIC" escaped)" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g8 without the prefilter library the JSON-escaped spelling of those typographic quotes is still denied" PASS ;;
+  *) check "H17g8 without the prefilter library the JSON-escaped spelling of those typographic quotes is still denied" FAIL ;;
+esac
 
 BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
@@ -1574,6 +1592,80 @@ PS_BT='`'
 [ "$(pre_verdict "& \"pla${PS_BT}u{79}wright-cli\" -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
   && check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" PASS \
   || check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" FAIL
+
+V71_DIR="$PROJ/v71"
+V71_RUN_CONFIG="$V71_DIR/.zensu/verify-feature-runs/run-v71/playwright-cli.json"
+mkdir -p "$V71_DIR/.zensu/verify-feature-runs/run-v71"
+printf '%s' '{"browser":{"contextOptions":{"storageState":"/elsewhere/state.json"}}}' > "$V71_DIR/restoring.json"
+printf '%s' '{"browser":{"contextOptions":{"viewport":null}}}' > "$V71_DIR/own.json"
+case "$(pre_reason "playwright-cli -s=zvprobe-state1 open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" in
+  *'is refused on every session but a zensu-verify-auth one'*'a config of your own must leave that key out'*) check "V71 the real pre hook denies a config that restores a browser state on a session outside the gate" PASS ;;
+  *) check "V71 the real pre hook denies a config that restores a browser state on a session outside the gate" FAIL ;;
+esac
+case "$(pre_reason "playwright-cli -s=mine open --config=$V71_RUN_CONFIG" "$SID" "$PROJ")" in
+  *'must not name a /zensu:verify-feature run directory'*'Grep tool or a message file'*) check "V71b the real pre hook denies a call on another session that names a run directory, with the remedy named" PASS ;;
+  *) check "V71b the real pre hook denies a call on another session that names a run directory, with the remedy named" FAIL ;;
+esac
+[ "$(pre_verdict "playwright-cli -s=mine open --config=$V71_DIR/own.json" "$SID" "$PROJ")" = "NONE" ] \
+  && check "V71c a call on another session whose config restores no state reaches no decision" PASS \
+  || check "V71c a call on another session whose config restores no state reaches no decision" FAIL
+[ "$(PLAYWRIGHT_CLI_SESSION=mine pre_verdict "playwright-cli open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" = "DENY" ] \
+  && [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict "playwright-cli -s=mine open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V71d a session from PLAYWRIGHT_CLI_SESSION is judged too, whatever it names" PASS \
+  || check "V71d a session from PLAYWRIGHT_CLI_SESSION is judged too, whatever it names" FAIL
+case "$(pre_reason "playwright-cli -s=mine open --config=$V71_DIR/own.json" "$SID" "$PROJ" "$PS_EXTRA")" in
+  *'runs through the Bash tool only'*) check "V71e the real pre hook refuses a PowerShell call that passes a config file" PASS ;;
+  *) check "V71e the real pre hook refuses a PowerShell call that passes a config file" FAIL ;;
+esac
+[ "$(diff_passes "playwright-cl''i -s=mine open --con\"\"fig $V71_DIR/own.json" "")" = "1" ] \
+  && [ "$(diff_passes "PLAYWRIGHT_MCP_CONFIG=$V71_DIR/own.json playwright-cli open" "")" = "1" ] \
+  && [ "$(diff_passes "playwright-cli -s=mine state-load $V71_RUN_CONFIG" "")" = "1" ] \
+  && [ "$(diff_passes "playwright-cli -s=mine snapshot" "")" = "0" ] \
+  && check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" PASS \
+  || check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" FAIL
+diff_passes_ps() {
+  case "$(bash_payload PreToolUse "$1" "$SID" "$PROJ" "$PS_EXTRA" | ps_payload_spelling "${3:-}" \
+    | env -u PLAYWRIGHT_CLI_SESSION ${2:+"PLAYWRIGHT_CLI_SESSION=$2"} CLAUDE_PLUGIN_ROOT="$DIFF_ROOT" bash "$DIFF_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)" in
+    *'decision module absent or symlinked'*) printf 1 ;;
+    *) printf 0 ;;
+  esac
+}
+[ "$(diff_passes_ps "& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list")" = "1" ] \
+  && [ "$(diff_passes_ps "& ('pl' + 'aywright-cli') -s=mine open ('--con' + 'fig') C:\\p\\own.json")" = "1" ] \
+  && [ "$(diff_passes_ps 'Get-ChildItem -Recurse')" = "0" ] \
+  && check "V72 the prefilter forwards a PowerShell call whose markers are split across string literals" PASS \
+  || check "V72 the prefilter forwards a PowerShell call whose markers are split across string literals" FAIL
+case "$(pre_reason "& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list" "$SID" "$PROJ" "$PS_EXTRA")" in
+  *'runs through the Bash tool only'*) check "V72b the real pre hook refuses a PowerShell call whose CLI and session names are split across string literals" PASS ;;
+  *) check "V72b the real pre hook refuses a PowerShell call whose CLI and session names are split across string literals" FAIL ;;
+esac
+case "$(pre_reason "stdbuf -oL playwright-cli -s=mine open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" in
+  *'is refused on every session but a zensu-verify-auth one'*) check "V72c the real pre hook denies a restoring config that another program hands to playwright-cli" PASS ;;
+  *) check "V72c the real pre hook denies a restoring config that another program hands to playwright-cli" FAIL ;;
+esac
+[ "$(pre_verdict "cat $V71_RUN_CONFIG" "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(pre_verdict "export PLAYWRIGHT_MCP_CONFIG=$V71_DIR/restoring.json; playwright-cli -s=mine open" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V72d reading a run config passes, and a restoring config exported before the call is denied" PASS \
+  || check "V72d reading a run config passes, and a restoring config exported before the call is denied" FAIL
+case "$(pre_reason "~/.local/bin/playwright-cli -s=mine open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" in
+  *'is refused on every session but a zensu-verify-auth one'*) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" PASS ;;
+  *) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" FAIL ;;
+esac
+PS_SPLIT_LINE="& ('playwr' +"$'\n'"'ight-cli') -s=('zensu-ver' +"$'\n'"'ify-x') cookie-list"
+PS_SPLIT_QUOTES="& (${PS_LQ}playwr${PS_RQ} + ${PS_LQ}ight-cli${PS_RQ}) -s=mine open (${PS_LQ}--con${PS_RQ} + ${PS_LQ}fig${PS_RQ}) C:\\p\\c.json"
+[ "$(diff_passes_ps "$PS_SPLIT_LINE")" = "1" ] \
+  && [ "$(diff_passes_ps "$PS_SPLIT_QUOTES")" = "1" ] \
+  && [ "$(pre_verdict "$PS_SPLIT_LINE" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && [ "$(pre_verdict "$PS_SPLIT_QUOTES" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V72f a PowerShell call joined across a line break or with typographic quotes reaches the gate and is refused" PASS \
+  || check "V72f a PowerShell call joined across a line break or with typographic quotes reaches the gate and is refused" FAIL
+[ "$(diff_passes_ps "$PS_SPLIT_QUOTES" "" escaped)" = "1" ] \
+  && check "V72g the prefilter forwards the JSON-escaped spelling of typographic quotes that split the config flag" PASS \
+  || check "V72g the prefilter forwards the JSON-escaped spelling of typographic quotes that split the config flag" FAIL
+[ "$(diff_passes_ps 'Get-ChildItem -Recurse' zensu-verify-envarm)" = "1" ] \
+  && [ "$(diff_passes_ps 'Get-ChildItem -Recurse')" = "0" ] \
+  && check "V72h the prefilter forwards every PowerShell call while the hook environment names a zensu-verify session, and only then" PASS \
+  || check "V72h the prefilter forwards every PowerShell call while the hook environment names a zensu-verify session, and only then" FAIL
 
 unit_check_done "V7z every unit file the registry gives this suite was graded"
 

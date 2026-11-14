@@ -23,7 +23,7 @@ const OUTPUT_DIR_NAME = consent.RUN_OUTPUT_DIR_NAME;
 const SESSION_PREFIX = consent.SESSION_PREFIX;
 const MAX_ORIGINS = consent.MAX_RUN_ORIGINS;
 const MODES = Object.freeze(['local', 'remote']);
-const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...] [--network-only-origin <origin> ...] [--login-recipe <absolute-recipe-path> [--auth-origin <origin>]]';
+const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...] [--network-only-origin <origin> ...] [--login-recipe <absolute-recipe-path>]';
 const CHECK_USAGE = 'usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>';
 const POLICY_CONSENT_NOTE = 'the navigation policy in the launch environment does not name every origin checked here as a target: the permission prompt asks for the others, and a session that cannot show it (permission mode bypassPermissions or dontAsk) is denied them at open';
 const CHECK_ROLES = Object.freeze({ 'declared-safe': 'navigable', 'network-only': 'network-only' });
@@ -39,7 +39,7 @@ const ABORT_SIGNALS = Object.freeze(['SIGTERM', 'SIGINT', 'SIGHUP']);
 const DISCARD_USAGE = 'usage: verify-browser-config.js --discard-state --run-dir <absolute-dir>';
 
 function parseArgs(argv) {
-  const options = { runDir: null, mode: null, origins: [], networkOnlyOrigins: [], loginRecipe: null, authOrigin: null };
+  const options = { runDir: null, mode: null, origins: [], networkOnlyOrigins: [], loginRecipe: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = argv[index + 1];
@@ -49,14 +49,12 @@ function parseArgs(argv) {
     else if (arg === '--origin') options.origins.push(value);
     else if (arg === '--network-only-origin') options.networkOnlyOrigins.push(value);
     else if (arg === '--login-recipe' && options.loginRecipe === null) options.loginRecipe = value;
-    else if (arg === '--auth-origin' && options.authOrigin === null) options.authOrigin = value;
     else throw new Error(USAGE);
     index += 1;
   }
   if (!options.runDir || !MODES.includes(options.mode) || options.origins.length === 0) {
     throw new Error(USAGE);
   }
-  if (options.authOrigin !== null && options.loginRecipe === null) throw new Error(USAGE);
   if (options.origins.length + options.networkOnlyOrigins.length > MAX_ORIGINS) {
     throw new Error(`at most ${MAX_ORIGINS} origins are accepted`);
   }
@@ -350,13 +348,15 @@ async function signIn(options, runDir, origins, env, login = {}) {
   if (!layout.ok) throw new Error(`with --login-recipe the run directory must be <project>/${authState.ZENSU_DIR_NAME}/${authState.RUNS_DIR_NAME}/<leaf>`);
   const recipe = readLoginRecipe(options.loginRecipe, layout.projectRoot);
   const appOrigin = origins[0];
-  const authOrigin = options.authOrigin === null ? appOrigin : checkOrigin(options.authOrigin, options.mode).origin;
-  if (!origins.includes(authOrigin)) throw new Error('--auth-origin must be one of the --origin values');
+  let authOrigin = appOrigin;
   if (options.mode === 'remote') {
     if (originValue(recipe.appOrigin) !== appOrigin) throw loginFailure('recipe');
-    const bound = recipe.baseUrl === undefined ? appOrigin : originValue(recipe.baseUrl);
-    if (bound !== authOrigin) throw loginFailure('recipe');
+    authOrigin = recipe.baseUrl === undefined ? appOrigin : originValue(recipe.baseUrl);
+    if (!origins.includes(authOrigin)) throw loginFailure('recipe');
     if (!AUTH_ENVIRONMENTS.includes(recipe.environment)) throw loginFailure('recipe');
+  } else if (recipe.environment !== undefined
+    || [recipe.appOrigin, recipe.baseUrl].some((value) => value !== undefined && originValue(value) !== appOrigin)) {
+    throw loginFailure('recipe');
   }
   const prepared = authState.prepareAuthDir(runDir);
   try {

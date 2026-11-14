@@ -32,24 +32,117 @@ function tempDir(t, prefix) {
   return dir;
 }
 
-test('the guard check is registered once, in-process and fail-open, on exactly the tools the guard judges', () => {
+test('the guard check is registered once, in-process and fail-open, on every tool', () => {
   const entries = registration.DISPATCHED_CHECKS.filter((check) => check.name === 'verify-auth-guard');
   assert.equal(entries.length, 1);
   const [entry] = entries;
   assert.deepEqual({ ...entry }, {
     event: 'PreToolUse', name: 'verify-auth-guard', matcher: guard.GUARD_MATCHER, script: authState.AUTH_GUARD_HOOK_FILE, body: null, failure: 'open',
   });
-  assert.deepEqual([...guard.GUARD_TOOLS], [...authState.AUTH_GUARD_TOOLS]);
-  for (const tool of guard.GUARD_TOOLS) assert.equal(registration.hostMatcherCovers(entry.matcher, tool), registration.REGISTRATION.REGISTERED, tool);
-  for (const tool of ['WebFetch', 'WebSearch', 'Agent', 'Task', 'TodoWrite', 'Read2', 'BashOutput']) {
-    assert.equal(registration.hostMatcherCovers(entry.matcher, tool), registration.REGISTRATION.UNREGISTERED, tool);
+  assert.equal(guard.GUARD_MATCHER, '.*');
+  assert.equal(guard.GUARD_MATCHER, authState.AUTH_GUARD_MATCHER);
+  assert.deepEqual([...guard.FIELD_TOOLS], [...authState.AUTH_GUARD_TOOLS]);
+  assert.deepEqual([...authState.AUTH_GUARD_PROBE_TOOLS], [...authState.AUTH_GUARD_TOOLS, 'mcp__server__read_file', 'Agent', 'WebFetch', 'TodoWrite', 'LSP', 'ZensuUnlistedToolProbe']);
+  for (const tool of [...guard.FIELD_TOOLS, 'WebFetch', 'WebSearch', 'Agent', 'Task', 'TodoWrite', 'LSP', 'mcp__filesystem__read_file']) {
+    assert.equal(registration.hostMatcherCovers(entry.matcher, tool), registration.REGISTRATION.REGISTERED, tool);
+    assert.ok(dispatch.selectChecks('PreToolUse', tool).some((check) => check.name === 'verify-auth-guard'), tool);
   }
-  for (const tool of guard.GUARD_TOOLS.filter((name) => !['Bash', 'PowerShell'].includes(name))) assert.ok(guard.PATH_FIELDS[tool], tool);
+  const listed = [...authState.AUTH_GUARD_TOOLS, 'mcp__.*', 'Agent', 'Task', 'WebFetch', 'WebSearch', 'TodoWrite', 'LSP'].join('|');
+  assert.ok(authState.AUTH_GUARD_PROBE_TOOLS.some((tool) => registration.hostMatcherCovers(listed, tool) !== registration.REGISTRATION.REGISTERED));
+  for (const tool of guard.FIELD_TOOLS.filter((name) => !['Bash', 'PowerShell'].includes(name))) assert.ok(guard.PATH_FIELDS[tool], tool);
   assert.equal(consent.authGuardRegistered(PLUGIN), registration.REGISTRATION.REGISTERED);
   const wrapper = fs.readFileSync(WRAPPER, 'utf8');
   assert.match(wrapper, /zensu_hook_dispatch pre verify-auth-guard "\$_zensu_hooks"/);
   assert.match(wrapper, /ZENSU_GUARD_CALLER_CWD="\$\(pwd -P/);
   if (process.platform !== 'win32') assert.notEqual(fs.statSync(WRAPPER).mode & 0o111, 0);
+});
+
+test('a tool outside the nine field-precise tools is denied when any string of its input reaches a run auth directory', () => {
+  const denied = [
+    ['mcp__filesystem__read_file', { path: STATE }],
+    ['mcp__filesystem__read_multiple_files', { paths: [`${PROJECT}/README.md`, STATE] }],
+    ['mcp__terminal__run_in_terminal', { command: `cat '${RUN}/auth/storage-state.json' | head -c 100` }],
+    ['mcp__terminal__run_in_terminal', { command: `cd ${RUN} && cat auth/storage-state.json` }],
+    ['Artifact', { file_path: STATE }],
+    ['LSP', { operation: 'hover', filePath: `${RUN}/auth/artifact/state.json` }],
+    ['mcp__x__tool', { nested: { deeper: [{ target: `${RUN}/AUTH/` }] } }],
+    ['mcp__x__tool', { [STATE]: true }],
+    ['mcp__x__tool', { file: 'auth/storage-state.json' }, RUN],
+  ];
+  for (const [tool, input, cwd] of denied) assert.equal(verdict(tool, input, cwd).deny, true, `${tool} ${JSON.stringify(input)}`);
+  assert.equal(verdict('mcp__terminal__run_in_terminal', { command: `cat '${RUN}/auth/storage-state.json'` }).reason, guard.REASONS.INPUT);
+  assert.equal(verdict('mcp__filesystem__read_file', { path: 'auth/storage-state.json' }, RUN).reason, guard.REASONS.PATH);
+  const allowed = [
+    ['mcp__filesystem__read_file', { path: `${RUN}/browser/page.png` }],
+    ['mcp__filesystem__read_file', { path: `${PROJECT}/src/auth/login.ts` }],
+    ['WebFetch', { url: 'https://example.com/auth' }],
+    ['Agent', { prompt: `Review the screenshots under ${RUN}/browser` }],
+    ['mcp__x__tool', { count: 3, flag: true, nothing: null }],
+  ];
+  for (const [tool, input] of allowed) assert.equal(verdict(tool, input).deny, false, `${tool} ${JSON.stringify(input)}`);
+  assert.equal(verdict('WebFetch', { url: 'https://example.com/' }).reason, guard.REASONS.NO_RUN);
+  const deep = {};
+  let cursor = deep;
+  for (let depth = 0; depth < 40; depth += 1) {
+    cursor.next = {};
+    cursor = cursor.next;
+  }
+  cursor.path = `${RUN}/browser`;
+  assert.deepEqual(verdict('mcp__x__tool', deep), { deny: true, reason: guard.REASONS.UNREADABLE });
+  assert.equal(verdict('mcp__x__tool', { list: Array.from({ length: 5000 }, () => `${RUN}/browser/x.png`) }).reason, guard.REASONS.UNREADABLE);
+  const reason = guard.denyReason(verdict('mcp__terminal__run_in_terminal', { command: `cat '${STATE}'` }));
+  assert.match(reason, /the tool input names a path inside a run auth directory/);
+  assert.match(reason, /use the Grep tool or a commit message file/);
+  assert.match(reason, /in a prompt, plan or message refer to the run without spelling a path inside its auth directory/);
+});
+
+test('a tool outside the nine reads prose as text: run words without a path, punctuation and a run-directory cwd pass, and no input string reaches the filesystem', (t) => {
+  const passing = [
+    ['Agent', { subagent_type: 'zensu:review-aspect', prompt: 'Explain how the verify-feature-runs cleanup removes the storage-state file once the browser opened.' }],
+    ['ExitPlanMode', { plan: 'Consume the storage-state file of the run in verify-feature-runs right after open.' }],
+    ['TodoWrite', { todos: [{ content: 'Check verify-feature-runs teardown and storage-state removal', status: 'pending' }] }],
+    ['AskUserQuestion', { questions: [{ question: 'Keep verify-feature-runs after a storage-state login failure?', header: 'Runs' }] }],
+    ['SubagentHandback', { report: 'verify-feature-runs: storage-state consumed.' }],
+    ['Agent', { prompt: `Look at ${RUN}/browser, then report.` }],
+    ['Agent', { prompt: `The run's screenshots are in ${RUN}/browser, aren't they?` }],
+    ['mcp__terminal__run_in_terminal', { command: `ls ${RUN}/browser` }],
+  ];
+  for (const [tool, input] of passing) assert.deepEqual(verdict(tool, input), { deny: false, reason: guard.REASONS.CLEAN }, `${tool} ${JSON.stringify(input)}`);
+  const fromRun = [
+    ['Agent', { subagent_type: 'zensu:review-aspect', prompt: 'Check the diff, then report.' }],
+    ['Skill', { skill: 'zensu:verify-feature', args: '--chain --log x.log' }],
+    ['WebFetch', { url: 'https://example.com/a,b', prompt: 'Summarize: what changed?' }],
+    ['TodoWrite', { todos: [{ content: 'Fix it, then test', status: 'in_progress' }] }],
+  ];
+  for (const [tool, input] of fromRun) assert.deepEqual(verdict(tool, input, RUN), { deny: false, reason: guard.REASONS.CLEAN }, `${tool} ${JSON.stringify(input)}`);
+  const commandLike = [
+    { command: 'cd .zensu/verify-feature-runs/run-a1 && cat auth/storage-state.json' },
+    { cmd: 'cd .zensu/verify-feature-runs/run-a1; cat auth/storage-state.json' },
+    { shell_command: 'pushd .zensu/verify-feature-runs/run-a1 && cat auth/storage-state.json' },
+  ];
+  for (const input of commandLike) assert.deepEqual(verdict('mcp__x__exec', input), { deny: true, reason: guard.REASONS.INPUT }, JSON.stringify(input));
+  const encoded = [
+    { path: `${RUN}/%61uth/storage-state.json` },
+    { path: `${RUN}/a*/storage-state.json` },
+    { path: `${RUN}/[a]uth/storage-state.json` },
+    { path: `${RUN}/AUTH::$INDEX_ALLOCATION/storage-state.json` },
+    { url: `file://${RUN}/auth./storage-state.json` },
+  ];
+  for (const input of encoded) assert.equal(verdict('mcp__x__read', input).deny, true, JSON.stringify(input));
+  const seen = [];
+  const original = fs.realpathSync.native;
+  t.after(() => { fs.realpathSync.native = original; });
+  fs.realpathSync.native = (candidate, ...rest) => {
+    seen.push(String(candidate));
+    return original(candidate, ...rest);
+  };
+  verdict('mcp__x__read', { path: '\\\\evil.example\\share\\.zensu\\verify-feature-runs\\run-a1\\auth\\storage-state.json' });
+  verdict('mcp__x__read', { path: '//evil.example/share/.zensu/verify-feature-runs/run-a1/browser/x.png' });
+  verdict('Agent', { prompt: 'Read //evil.example/share/notes.txt' }, RUN);
+  assert.deepEqual(seen, []);
+  verdict('Read', { file_path: '//evil.example/share/.zensu/verify-feature-runs/run-a1/browser/x.png' });
+  verdict('Grep', { pattern: 'x', path: '//evil.example/share/.zensu/verify-feature-runs/run-a1' });
+  assert.ok(seen.every((candidate) => !/^[\\/]{2}/.test(candidate)), JSON.stringify(seen));
 });
 
 test('a file tool that reaches a run auth directory is denied, in every spelling of the path', () => {
@@ -88,7 +181,7 @@ test('a file tool that reaches a run auth directory is denied, in every spelling
     ['Write', { file_path: `${PROJECT}/.zensu/runtime.yaml`, content: 'auth:\n  mode: login-script\n' }],
   ];
   for (const [tool, input, cwd] of allowed) assert.deepEqual(verdict(tool, input, cwd), { deny: false, reason: guard.REASONS.CLEAN }, `${tool} ${JSON.stringify(input)}`);
-  assert.deepEqual(verdict('WebFetch', { url: `file://${STATE}` }), { deny: false, reason: guard.REASONS.OTHER_TOOL });
+  assert.deepEqual(verdict('WebFetch', { url: `file://${STATE}` }), { deny: true, reason: guard.REASONS.INPUT });
 });
 
 test('a link into a run auth directory is denied through the path it resolves to', { skip: POSIX_ONLY }, (t) => {
@@ -248,6 +341,10 @@ test('a browser CLI call that names a verify-feature run directory needs a zensu
     ['Bash', `/usr/local/bin/playwright-cli -s=mine open ${config}`],
     ['Bash', `npx @playwright/cli@0.1.21 -s=mine open ${config}`],
     ['Bash', `play''wright-cli -s=mine open ${config}`],
+    ['Bash', `$'playwright-cli' -s=mine open ${config}`],
+    ['Bash', `playwright-cli$'' -s=mine open ${config}`],
+    ['Bash', `"\${PW:-playwright-cli}" -s=mine open ${config}`],
+    ['Bash', `{playwright-cli,} -s=mine open ${config}`],
     ['Bash', `cd ${RUN} && playwright-cli -s=mine open --config=${consent.RUN_CONFIG_NAME}`],
     ['PowerShell', `playwright-cli -s=mine open ${config}`],
   ];
@@ -258,6 +355,10 @@ test('a browser CLI call that names a verify-feature run directory needs a zensu
     `cat ${RUN}/${consent.RUN_CONFIG_NAME}`,
     'playwright-cli -s=mine open --config=/tmp/other.json',
     'node x.js --run-dir /u/playwright-cli-tests/.zensu/verify-feature-runs/r',
+    `find .zensu/verify-feature-runs -path '*/${consent.RUN_CONFIG_NAME}'`,
+    'find .zensu/verify-feature-runs -name "playwright-cli*"',
+    'ls .zensu/verify-feature-runs/run-a1/playwright-cli\\*',
+    `echo '{"config":".zensu/verify-feature-runs/run-a1/${consent.RUN_CONFIG_NAME}"}'`,
   ];
   for (const command of allowed) assert.deepEqual(verdict('Bash', { command }), { deny: false, reason: guard.REASONS.CLEAN }, command);
   const reason = guard.denyReason({ deny: true, reason: guard.REASONS.SESSION });
@@ -303,6 +404,9 @@ test('the deny reason names the reached path without control bytes and names the
   }
   assert.ok(guard.denyReason({ deny: true, reason: guard.REASONS.COMMAND }).includes('(the command names a path inside a run auth directory)'));
   assert.ok(guard.denyReason({ deny: true, reason: guard.REASONS.UNREADABLE }).includes('(the payload could not be read and names a verify-feature run)'));
+  const long = guard.denyReason({ deny: true, reason: guard.REASONS.PATH, target: `${RUN}/auth/${'x'.repeat(1000)}` });
+  assert.ok(long.includes(`(${RUN}/auth/xxxxxxxxxx`), long);
+  assert.ok(!long.includes('x'.repeat(400)));
 });
 
 test('the dispatcher runs the guard alone, and refuses only a marked payload when its module is missing, linked or broken', (t) => {

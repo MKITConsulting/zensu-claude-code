@@ -14,6 +14,8 @@ const ZENSU_DIR_NAME = '.zensu';
 const AUTH_SESSION_PREFIX = 'zensu-verify-auth-';
 const AUTH_GUARD_HOOK_FILE = 'pre-verify-auth-guard.sh';
 const AUTH_GUARD_TOOLS = Object.freeze(['Read', 'Grep', 'Glob', 'NotebookEdit', 'Edit', 'Write', 'MultiEdit', 'Bash', 'PowerShell']);
+const AUTH_GUARD_MATCHER = '.*';
+const AUTH_GUARD_PROBE_TOOLS = Object.freeze([...AUTH_GUARD_TOOLS, 'mcp__server__read_file', 'Agent', 'WebFetch', 'TodoWrite', 'LSP', 'ZensuUnlistedToolProbe']);
 const STATE_LINE_KEY = 'STORAGE_STATE';
 const MAX_STATE_BYTES = 1024 * 1024;
 const MAX_COOKIES = 256;
@@ -391,6 +393,8 @@ module.exports = {
   ARTIFACT_DIR_NAME,
   AUTH_DIR_NAME,
   AUTH_GUARD_HOOK_FILE,
+  AUTH_GUARD_MATCHER,
+  AUTH_GUARD_PROBE_TOOLS,
   AUTH_GUARD_TOOLS,
   AUTH_SESSION_PREFIX,
   COOKIE_KEYS,

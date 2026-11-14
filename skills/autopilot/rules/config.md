@@ -47,7 +47,7 @@ auth:
   artifact:    storageState # storageState | bearer-token-file | keychain | none
   baseUrl:     "<authentication/API origin for the selected runtime>"
   appOrigin:   "<exact browser application origin; browser driver only>"
-  environment: test         # test | production; required by a remote /zensu:verify-feature login, ignored by autopilot
+  environment: test         # test | production; required by a remote /zensu:verify-feature login, refused by a local one, ignored by autopilot
   # orchestrator exports ZENSU_AUTH_ARTIFACT_DIR; script writes beneath it
   # orchestrator exports auth.baseUrl as ZENSU_AUTH_BASE_URL; script must use it
   # orchestrator exports auth.appOrigin as ZENSU_APP_ORIGIN for browser storage state

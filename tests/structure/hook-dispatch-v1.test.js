@@ -16,7 +16,7 @@ const SHELL_PRE = ['reviewer-capability', 'zensu-cli-gate', 'source-write-gate',
 const SHELL_POST = ['artifact-redact', 'browser-consent-recorder', 'work-order-post'];
 const EDIT_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard', 'tdd-edit-gate', 'secret-scan-write', 'verify-auth-guard'];
 const NOTEBOOK_PRE = ['reviewer-capability', 'work-order-gate', 'plugin-data-guard-notebook', 'secret-scan-notebook', 'verify-auth-guard'];
-const SPAWN_PRE = ['reviewer-capability', 'work-order-gate', 'reviewer-spawn-allow'];
+const SPAWN_PRE = ['reviewer-capability', 'work-order-gate', 'reviewer-spawn-allow', 'verify-auth-guard'];
 
 const names = (event, tool) => dispatch.selectChecks(event, tool).map((check) => check.name);
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -27,7 +27,8 @@ const bashPayload = (command) => JSON.stringify({ hook_event_name: 'PreToolUse',
 
 test('a Read call runs only the capability, work-order and verify-auth checks, never a check registered for the shell tools alone', () => {
   for (const tool of ['Read', 'Grep', 'Glob']) assert.deepEqual(names('PreToolUse', tool), ['reviewer-capability', 'work-order-gate', 'verify-auth-guard']);
-  assert.deepEqual(names('PreToolUse', 'WebFetch'), ['reviewer-capability', 'work-order-gate']);
+  assert.deepEqual(names('PreToolUse', 'WebFetch'), ['reviewer-capability', 'work-order-gate', 'verify-auth-guard']);
+  assert.deepEqual(names('PreToolUse', 'mcp__filesystem__read_file'), ['reviewer-capability', 'work-order-gate', 'verify-auth-guard']);
   assert.deepEqual(names('PostToolUse', 'Read'), ['work-order-post']);
 });
 
@@ -253,8 +254,14 @@ test('the consent pre-check marks the playwright spellings the prefilter marks a
   }
   const powershell = (command) => JSON.stringify({ tool_name: 'PowerShell', tool_input: { command } });
   assert.equal(dispatch.consentMarked(powershell("& ('pla' + 'ywright-cli') -s=('zensu-' + 'verify-x') snapshot")), true);
+  assert.equal(dispatch.consentMarked(powershell("& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list")), true);
+  assert.equal(dispatch.consentMarked(powershell("& ('pl' + 'ay' + 'wri' + 'ght-cli') -s=mine open ('--con' + 'fig') C:\\p\\own.json")), true);
   assert.equal(dispatch.consentMarked(powershell('Write-Output "`u{41}"')), true);
-  assert.equal(dispatch.consentMarked(powershell('Get-ChildItem -Recurse')), false);
+  assert.equal(dispatch.consentMarked(powershell("& ('playwr' +\n'ight-cli') -s=('zensu-ver' +\n'ify-x') cookie-list")), true);
+  assert.equal(dispatch.consentMarked(powershell('& (\u2018playwr\u2019 + \u2018ight-cli\u2019) -s=mine open (\u2018--con\u2019 + \u2018fig\u2019) C:\\p\\c.json')), true);
+  assert.equal(dispatch.consentMarked(powershell('& $cli snapshot'), { PLAYWRIGHT_CLI_SESSION: 'zensu-verify-a' }), true);
+  assert.equal(dispatch.consentMarked(powershell('& $cli snapshot'), {}), false);
+  assert.equal(dispatch.consentMarked(powershell('Get-ChildItem -Recurse'), {}), false);
   assert.equal(dispatch.consentMarked(bashPayload('git status --short')), false);
 });
 

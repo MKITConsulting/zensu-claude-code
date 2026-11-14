@@ -30,6 +30,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked session started from a takeover brief gets no notice, so the companion's briefs state
   the rule themselves.
 
+### Upgrade notes
+
+- **Browser configs on every session**: the browser consent gate now also judges a
+  `playwright-cli` call on a session that is not a `zensu-verify-*` one when its command names a
+  `.zensu/verify-feature-runs/` directory or passes a config through `--config` or
+  `PLAYWRIGHT_MCP_CONFIG`. It denies such a call that names a run directory, and one whose config
+  restores a browser state (`browser.contextOptions.storageState`), is not a local JSON file of
+  at most 1 MiB it can read (an INI config included), or is a path it cannot pin down: a value
+  assembled at run time or appended with `+=`, or a relative path in a command that is not one
+  plain call without a wrapper. A browser skill of your own that passes such a config needs a
+  literal absolute path to a JSON config without that key. A PowerShell call that names the CLI
+  with a run directory or a config is refused; run it through the Bash tool.
+- **Run-config helper**: `scripts/verify-browser-config.js` no longer accepts `--auth-origin`.
+  A local signed-in run refuses a recipe that declares `auth.environment` or names an
+  `auth.appOrigin` or `auth.baseUrl` other than the run's first `--origin`, so a split local
+  frontend/API recipe cannot sign in in local mode.
+- **Read guard on every tool**: the verify-auth read guard is registered on every tool (`.*`),
+  so an MCP tool, `WebFetch` or an agent prompt whose input spells a path inside a run's `auth/`
+  directory is refused, and `/zensu:doctor` reports a registration that lists tools as not
+  registered.
+
 ## [0.38.0] - 2026-11-13
 
 ### Added

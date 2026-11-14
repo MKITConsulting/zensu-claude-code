@@ -2270,3 +2270,186 @@ test('consent records carry restoredState only as true, and a restored and a pla
   assert.deepEqual(read.records.map((entry) => entry.restoredState === true), [false, true]);
   assert.equal(JSON.parse(fs.readFileSync(memory, 'utf8')).version, consent.MEMORY_VERSION);
 });
+
+test('commandMarkers marks a run directory and a config channel beside the session markers', () => {
+  const pick = (marks) => ({ cli: marks.cli, runs: marks.runs, config: marks.config });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine open --config=/p/.zensu/verify-feature-runs/r/playwright-cli.json', {})), { cli: true, runs: true, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine open --con"fig" x.json', {})), { cli: true, runs: false, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('PLAYWRIGHT_MCP_CONFIG=x.json playwright-cli open', {})), { cli: true, runs: false, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('ls .zensu\\VERIFY-FEATURE-RUNS', {})), { cli: false, runs: true, config: false });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine snapshot', {})), { cli: true, runs: false, config: false });
+});
+
+test('a playwright-cli call on any session but a zensu-verify one is denied with a final reason when its command names a run directory', () => {
+  const runDir = '/p/.zensu/verify-feature-runs/run-a1';
+  const config = `${runDir}/playwright-cli.json`;
+  const cases = [
+    [`playwright-cli -s=zvprobe-state1 open --config=${config}`, {}],
+    [`playwright-cli open --config ${config}`, {}],
+    [`PLAYWRIGHT_CLI_SESSION=mine playwright-cli open --config=${config}`, {}],
+    [`playwright-cli open --config=${config}`, { PLAYWRIGHT_CLI_SESSION: 'mine' }],
+    [`playwright-cli -s=mine open --config=${config}`, { PLAYWRIGHT_CLI_SESSION: SESSION }],
+    [`playwright-cli -s=mine state-load ${runDir}/auth/storage-state.json`, {}],
+    [`PLAYWRIGHT_MCP_STORAGE_STATE=${runDir}/auth/storage-state.json playwright-cli -s=mine open`, {}],
+    [`cp ${config} /tmp/c.json && playwright-cli -s=mine open --config=/tmp/c.json`, {}],
+    [`playwright-cli -s="$S" open --config=${config}`, {}],
+    [`bash -c 'playwright-cli -s=mine open --config=${config}'`, {}],
+    [`xargs playwright-cli -s=mine open --config < ${runDir}/list`, {}],
+    [`grep -r playwright-cli ${runDir}`, {}],
+    [`~/bin/playwright-cli -s=mine open --config=${config}`, {}],
+    [`$'playwright-cli' -s=mine open --config=${config}`, {}],
+  ];
+  for (const [command, env] of cases) assert.equal(denied(command, { env }), REASONS.RUN_DIR_OFF_SESSION, command);
+  assert.notEqual(decide(cli(`open --config=${config}`)).reason, REASONS.RUN_DIR_OFF_SESSION);
+  assert.equal(denied(`playwright-cli -S=${SESSION} open --config=${config}`), REASONS.SESSION_UNRESOLVED);
+  assert.deepEqual(decide('playwright-cli -s=mine snapshot'), { verdict: 'none' });
+  assert.deepEqual(decide(`ls ${runDir}/browser`), { verdict: 'none' });
+  for (const command of [
+    `cat ${config}`,
+    `jq . ${config}`,
+    `cp ${config} /tmp/copy.json`,
+    `cd /u/playwright-cli && rm -rf ${runDir}`,
+    'node scripts/verify-browser-config.js --discard-state --run-dir /u/playwright-cli-demo/.zensu/verify-feature-runs/r',
+    'mkdir -p /u/playwright-cli-demo/.zensu/verify-feature-runs/r',
+  ]) assert.deepEqual(decide(command), { verdict: 'none' }, command);
+  for (const key of ['RUN_DIR_OFF_SESSION', 'STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION', 'POWERSHELL_OFF_SESSION_NOT_JUDGED']) {
+    assert.equal(consent.FINAL_REASONS.includes(key), true, key);
+    assert.equal(consent.SHAPE_REASONS.includes(key), false, key);
+  }
+});
+
+test('a playwright-cli call on any session but a zensu-verify one is denied when its config restores a browser state or cannot be judged', (t) => {
+  const dir = tempDir(t, 'zensu-offsession-');
+  const write = (name, body) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, body);
+    return file;
+  };
+  const restoring = write('restoring.json', JSON.stringify({ browser: { contextOptions: { storageState: '/elsewhere/state.json' } } }));
+  const escaped = write('escaped.json', '{"browser":{"contextOptions":{"storag\\u0065State":"x"}}}');
+  const bom = write('bom.json', `\ufeff${JSON.stringify({ browser: { contextOptions: { storageState: 'x' } } })}`);
+  const own = write('own.json', JSON.stringify({ browser: { contextOptions: { viewport: null } }, outputDir: '/tmp/out' }));
+  const ini = write('own.ini', 'browser.contextOptions.storageState=x\n');
+  const iniText = write('text.conf', 'browser.contextOptions.storageState=x\n');
+  const broken = write('broken.json', '{"browser":');
+  const large = write('large.json', JSON.stringify({ pad: 'x'.repeat(1048576) }));
+  const payload = { cwd: dir };
+  const reason = (command, env = {}) => denied(command, { payload, env });
+  const passes = (command, env = {}) => assert.deepEqual(decide(command, { payload, env }), { verdict: 'none' }, command);
+  for (const command of [
+    `playwright-cli -s=zvprobe-state1 open --config=${restoring}`,
+    `playwright-cli -s=mine open --config=${escaped}`,
+    `playwright-cli -s=mine open --config=${bom}`,
+    `playwright-cli -s=mine attach --config ${restoring}`,
+    `PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `playwright_mcp_config=${restoring} playwright-cli -s=mine open`,
+    `env PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    'playwright-cli open --config restoring.json',
+    `playwright-cli -s=mine open --config=${own} --config=${restoring}`,
+    `export PLAYWRIGHT_MCP_CONFIG=${restoring}; playwright-cli -s=mine open`,
+    `declare -x PLAYWRIGHT_MCP_CONFIG=${restoring} && playwright-cli -s=mine open`,
+    `set -a; PLAYWRIGHT_MCP_CONFIG=${restoring}; playwright-cli -s=mine open`,
+    `sudo PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `doas PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `stdbuf -oL playwright-cli -s=mine open --config=${restoring}`,
+    `caffeinate -i playwright-cli -s=mine open --config ${restoring}`,
+    `setsid playwright-cli -s=mine open --config=${restoring}`,
+    `xargs playwright-cli -s=mine open --config=${restoring} < /dev/null`,
+    `env -S 'playwright-cli -s=mine open --config=${restoring}'`,
+    `bash -c -- 'playwright-cli -s=mine open --config=${restoring}'`,
+    `bash <<'EOF'\nplaywright-cli -s=mine open --config=${restoring}\nEOF`,
+    `node /usr/local/lib/node_modules/@playwright/cli/cli.js -s=mine open --config=${restoring}`,
+    `~/.local/bin/playwright-cli -s=mine open --config=${restoring}`,
+    `$HOME/bin/playwright-cli -s=mine open --config ${restoring}`,
+    `{playwright-cli,} -s=mine open --config=${restoring}`,
+    `/opt/*/playwright-cli -s=mine open --config=${restoring}`,
+    `playwright-cli$'' -s=mine open --config=${restoring}`,
+    `$'playwright-cli' -s=mine open --config=${restoring}`,
+    `node "$(command -v playwright-cli)" -s=mine open --config=${restoring}`,
+    `"\${PW:-playwright-cli}" -s=mine open --config=${restoring}`,
+    `eslint --config ${restoring} src && echo playwright-cli`,
+  ]) assert.equal(reason(command), REASONS.STATE_CONFIG_OFF_SESSION, command);
+  assert.equal(reason('playwright-cli open --config=missing.json', { PLAYWRIGHT_CLI_SESSION: 'mine' }), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  for (const command of [
+    `playwright-cli -s=mine open --config=${ini}`,
+    `playwright-cli -s=mine open --config=${iniText}`,
+    `playwright-cli -s=mine open --config=${broken}`,
+    `playwright-cli -s=mine open --config=${large}`,
+    `playwright-cli -s=mine open --config=${path.join(dir, 'missing.json')}`,
+    `playwright-cli -s=mine open --config=${dir}`,
+    'playwright-cli -s=mine open --config=//server/share/c.json',
+  ]) assert.equal(reason(command), REASONS.CONFIG_UNJUDGED_OFF_SESSION, command);
+  for (const command of [
+    `cd ${dir} && playwright-cli -s=mine open --config=own.json`,
+    `env -C ${dir} playwright-cli -s=mine open --config=own.json`,
+    'playwright-cli -s=mine open --config="$CFG"',
+    `PLAYWRIGHT_MCP_CONFIG+=${restoring} playwright-cli -s=mine open`,
+    'export PLAYWRIGHT_MCP_CONFIG="$HOME/cfg.json"; playwright-cli -s=mine open',
+    'stdbuf -oL playwright-cli -s=mine open --config=own.json',
+    'find . -name x.json -exec playwright-cli -s=mine open --config {} \\;',
+    'xargs playwright-cli -s=mine open --config < /tmp/list',
+    'read PLAYWRIGHT_MCP_CONFIG < /tmp/p; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open',
+    "printf -v PLAYWRIGHT_MCP_CONFIG '%s' /tmp/c.json; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open",
+    'mapfile -t PLAYWRIGHT_MCP_CONFIG < /tmp/p; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG=~/c.json playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG=a:~/c.json playwright-cli -s=mine open',
+  ]) assert.equal(reason(command), REASONS.CONFIG_UNRESOLVED_OFF_SESSION, command);
+  assert.equal(reason("PLAYWRIGHT_MCP_CONFIG='~/c.json' playwright-cli -s=mine open"), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  passes(`unset PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open --config=${own}`);
+  assert.equal(reason('git commit -m "fix playwright-cli --config handling"'), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
+  for (const key of ['STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION']) {
+    assert.match(REASONS[key], /search or commit text that names playwright-cli beside a config through the Grep tool or a message file$/, key);
+  }
+  assert.equal(denied('playwright-cli -s=mine open --config=own.json', { payload: {} }), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
+  passes(`playwright-cli -s=mine open --config=${own}`);
+  passes('playwright-cli -s=mine open --config=own.json');
+  passes(`cd ${dir} && playwright-cli -s=mine open --config=${own}`);
+  passes('playwright-cli -s=mine snapshot');
+  passes('~/bin/playwright-cli -s=mine snapshot');
+  passes(`eslint --config ${own} src && echo playwright-cli`);
+  passes(`stdbuf -oL playwright-cli -s=mine open --config=${own}`);
+  if (process.platform === 'win32') return;
+  const link = path.join(dir, 'link.json');
+  fs.symlinkSync(restoring, link);
+  assert.equal(reason(`playwright-cli -s=mine open --config=${link}`), REASONS.STATE_CONFIG_OFF_SESSION);
+  const fifo = path.join(dir, 'fifo.json');
+  const unopened = [dir, '//server/share/c.json'];
+  if (spawnSync('mkfifo', [fifo]).status === 0) unopened.push(fifo);
+  const opened = [];
+  const openSync = fs.openSync;
+  t.after(() => { fs.openSync = openSync; });
+  fs.openSync = (file, ...rest) => {
+    opened.push(String(file));
+    return openSync(file, ...rest);
+  };
+  for (const file of unopened) assert.equal(reason(`playwright-cli -s=mine open --config=${file}`), REASONS.CONFIG_UNJUDGED_OFF_SESSION, file);
+  passes(`playwright-cli -s=mine open --config=${own}`);
+  fs.openSync = openSync;
+  assert.deepEqual(opened.filter((file) => unopened.includes(file)), []);
+  assert.ok(opened.includes(own), JSON.stringify(opened));
+});
+
+test('a PowerShell call that names playwright-cli with a run directory or a config file is refused, and one without stays unjudged', () => {
+  const err = sink();
+  const powershell = (command) => ({ tool_name: 'PowerShell', tool_input: { command } });
+  for (const command of [
+    'playwright-cli -s=mine open --config=C:\\p\\own.json',
+    'playwright-cli -s=mine open --config=C:\\p\\.zensu\\verify-feature-runs\\r\\playwright-cli.json',
+    '$env:PLAYWRIGHT_MCP_CONFIG = "C:\\p\\own.json"; playwright-cli -s=mine open',
+    "& ('play' + 'wri' + 'ght-cli') -s=mine open ('--con' + 'fig') C:\\p\\own.json",
+  ]) {
+    const out = sink();
+    assert.equal(consent.runPre(powershell(command), {}, out, err), true, command);
+    assert.deepEqual(JSON.parse(out.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_OFF_SESSION_NOT_JUDGED }), command);
+  }
+  const plain = sink();
+  assert.equal(consent.runPre(powershell('playwright-cli -s=mine snapshot'), {}, plain, err), false);
+  assert.equal(plain.text(), '');
+  const gated = sink();
+  assert.equal(consent.runPre(powershell(`playwright-cli -s=${SESSION} open --config=C:\\p\\own.json`), {}, gated, err), true);
+  assert.deepEqual(JSON.parse(gated.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }));
+  const split = sink();
+  assert.equal(consent.runPre(powershell("& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list"), {}, split, err), true);
+  assert.deepEqual(JSON.parse(split.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }));
+  assert.equal(err.text(), '');
+});

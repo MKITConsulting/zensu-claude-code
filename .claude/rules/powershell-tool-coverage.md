@@ -122,7 +122,7 @@ shell is refused.
 | `pre-bash-source-write-gate.sh`, control mode | `controlVerdict`, always on. |
 | same, rules (A)/(B)/(C) | `readOnlyVerdict` while `hooks.bashWriteGate` is on; the deny ends with `OPT_IN_NOTE`. |
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |
-| `pre-browser-navigation-consent.sh` | A call carrying both consent markers in any spelling `spellings()` decodes is refused (`POWERSHELL_NOT_JUDGED`), and a call that reaches node while the analyzer cannot load is refused too. The prefilter forwards a PowerShell payload that names `wright` and `verify` or holds `u{`, because a backtick, Unicode or concatenated spelling never names `playwright-cli` literally. |
+| `pre-browser-navigation-consent.sh` | A call carrying both consent markers in any spelling `spellings()` decodes is refused (`POWERSHELL_NOT_JUDGED`), one that names the CLI with a `verify-feature-runs` directory or a config is refused too (`POWERSHELL_OFF_SESSION_NOT_JUDGED`), and a call that reaches node while the analyzer cannot load is refused. For a PowerShell payload the prefilter drops quotes, typographic quotes, `+`, parentheses, `$`, blanks and the JSON line escapes and forwards a text that names `verify` or `config`, or holds `u{`, and every call while the hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, because a backtick, Unicode or concatenated spelling never names `playwright-cli` literally. |
 | `post-browser-navigation-consent.sh` | Skipped (`powershell-call`), because the pre hook refused every marked call. |
 | `pre-verify-auth-guard.sh` | Judged textually over the raw text, its backtick-free and concatenation-free forms and `spellings()`: a command that names a verify-feature run's `auth/` directory is denied as in Bash. A failed load of the analyzer falls back to the stripped forms rather than refusing. |
 | `post-artifact-redact.sh` | Parity: the sweep runs as after Bash. |
@@ -192,7 +192,7 @@ declares 17 cases and one skip on `darwin`, `linux` and `root`, measured where n
 installed, and none on `win32`, where the case is required. Its driver
 `tests/structure/test-powershell-tool-coverage.sh` runs on `windows-shard-3`. The per-hook
 PowerShell cases are B40-B41 (B40x2-B40x7 for the 5.1 readings and the native arguments),
-WP1-WP17, F8p-F8p6, V70-V70g, H17g5-H17g6, R7p-R7pd, PS1-PS6, the work-order gate and post
+WP1-WP17, F8p-F8p6, V70-V70g, V72-V72h, H17g5-H17g8, R7p-R7pd, PS1-PS6, the work-order gate and post
 cases and the PowerShell payloads of `test-vanished-session-cwd.sh`; the surfaces are B16 and
 P2p1-P2p9.
 
@@ -205,8 +205,11 @@ P2p1-P2p9.
   `zensu` call the gate never sees. Only `zensu`'s own arguments are checked for cmd.exe text.
 - Outside Windows the opt-in rules refuse `ls`, `cat` and the other names PowerShell 7 leaves to
   native programs, because only cmdlets are on the read-only list.
-- A project path that names `wright` and `verify` makes the consent prefilter start `node` for
-  every PowerShell call there.
+- A project path that names `verify` or `config` makes the consent prefilter start `node` for
+  every PowerShell call there, and since the prefilter joins literals by dropping blanks, line
+  escapes and typographic quotes, so does a payload whose words only spell those fragments
+  across them; while the hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-`
+  session, every PowerShell call starts it.
 - A pure variable in the option position of a POSIX shell (`bash $flags $code`) counts as the
   script path.
 - Script files, interpreter code (`node -e`, `python -c`), and an alias, function or variable an

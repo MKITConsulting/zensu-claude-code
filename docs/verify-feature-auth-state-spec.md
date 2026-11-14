@@ -102,25 +102,33 @@ navigated: the page received the cookie and the localStorage entry. So the conte
 
 ### 6.2 The login step inside the run-config helper
 
-`scripts/verify-browser-config.js` gains `--login-recipe <abs path>` and `--auth-origin <origin>`
-(default: the first `--origin`). With `--login-recipe` it:
+`scripts/verify-browser-config.js` gains `--login-recipe <abs path>`. The caller names no login
+origin: the login runs before any consent prompt, so the checked-in recipe is the only approval
+of where credentials go. With `--login-recipe` it:
 
 1. Reads the recipe's top-level `auth:` block with a strict reader: `key: scalar` lines only
    (plain, single- or double-quoted); a flow collection, block scalar, anchor, alias, tag or
    multi-line value refuses the whole block. It needs `mode: login-script`,
    `artifact: storageState` and a `loginScript`. The recipe must be a regular file inside the
    project root.
-2. In remote mode also requires `auth.appOrigin` equal to the first `--origin`, `auth.baseUrl`
-   (when present) equal to the auth origin, and `auth.environment` declared (§6.6). In local mode
-   the recipe's `baseUrl`/`appOrigin` are not compared, because a consent-mode local run picks
-   its port per run; the run's validated origins are used instead.
+2. Binds the login origin. In remote mode it requires `auth.appOrigin` equal to the first
+   `--origin` and `auth.environment` declared (§6.6); the login origin is `auth.baseUrl`,
+   validated as an absolute origin and required to equal one of the run's origins, or
+   `auth.appOrigin` when `baseUrl` is absent. In local mode the login origin is the run's own
+   loopback app origin, the first `--origin`, because a consent-mode local run picks its port per
+   run. A local recipe may name that origin as `auth.appOrigin` or `auth.baseUrl` and no other,
+   and declares no `auth.environment`; one that names another origin or an environment fails with
+   `recipe`, so a login is never sent to an origin the recipe bound elsewhere, and an account bound
+   to a deployed environment never signs in on a loopback origin. A local recipe that names no
+   origin binds none, so its login goes to the first `--origin` the run chose. A split local
+   deployment whose API signs in on a second loopback origin is refused in local mode.
 3. Creates `R/auth/` (0700, must not exist yet, or holds only a previous state this helper wrote)
    with a `.gitignore` of `*` — the monorepo does not ignore `.zensu/verify-feature-runs/`, so
    `git add -A` would otherwise stage it — and a fresh `R/auth/artifact/` (0700).
 4. Runs `bash -c <loginScript>` in the project root, detached in its own process group, stdin
    closed, stdout captured in memory (64 KiB cap), stderr discarded, 300 s timeout. Environment:
    the parent's, plus the canonical `ZENSU_AUTH_ARTIFACT_DIR=R/auth/artifact`,
-   `ZENSU_AUTH_BASE_URL=<auth origin>`, `ZENSU_APP_ORIGIN=<first --origin>`.
+   `ZENSU_AUTH_BASE_URL=<login origin of step 2>`, `ZENSU_APP_ORIGIN=<first --origin>`.
 5. Requires stdout to be exactly one non-empty line `STORAGE_STATE=<abs path>`, the path a
    regular, non-symlink, single-link file physically beneath `R/auth/artifact/`.
 6. Parses it (1 MiB cap) as Playwright storage state, keeps only cookies whose domain
@@ -149,6 +157,28 @@ the same config content.
 - **Signed-in sessions.** On any `zensu-verify-auth-…` session `console` and `requests` are denied
   (final reason). Today's skill text already forbids them on authenticated targets; this makes it
   a gate rule for the sessions the gate can identify.
+- **Other sessions.** A command that names `playwright-cli` is also judged when its text names a
+  `.zensu/verify-feature-runs/` directory or passes a config (`--config`, or a
+  `PLAYWRIGHT_MCP_CONFIG` assignment), whatever its session name, one from
+  `PLAYWRIGHT_CLI_SESSION` included. A gated `zensu-verify-…` call keeps the rules above, so a
+  signed-in config is admitted only as one plain gated call on a `zensu-verify-auth-…` session
+  with the canonical run config. Any other session's call is denied with a final reason when the
+  command names a run directory, or when its config file carries
+  `browser.contextOptions.storageState`; a CLI another program runs (`xargs`, `stdbuf`, `env -S`,
+  `bash -c --`, a heredoc, a path into the `@playwright/cli` package, a CLI path the shell
+  expands first such as `~/.local/bin/playwright-cli`) counts as such a call, a word
+  that only contains the CLI's name (`playwright-cli.json`) does not. The gate reads every config
+  value the text sets, behind `export`, `declare`, `sudo` or `doas` and inside a command string or
+  heredoc included, as the CLI does, and refuses one it cannot read as JSON (missing, not a
+  regular file, a network path, over 1 MiB, invalid JSON, an `.ini` path, which the CLI reads as
+  INI) and one it cannot pin down (a value assembled at run time or appended with `+=`, a
+  `--config` that another program completes, the variable set by `read`, `printf -v` or any other
+  way than a literal assignment, an assignment value whose `~` the shell expands, a relative
+  path in a command that is not one plain unwrapped call). It confirms a regular file before it
+  opens one. `state-load` stays denied. The cost falls on a user's own browser skills too: their
+  own state-restoring, INI or variable-held config is refused on every session. Measured in the
+  specification session: a session outside the gate (`-s=zvprobe-state1`) that opened a
+  `storageState` config came up signed in.
 - **Getters and exporters.** No change to the allowlist: every command in §5.2 stays outside it
   for every session. New tests pin that.
 - **Consumed once.** The PostToolUse recorder deletes `R/auth/storage-state.json` after every
@@ -182,14 +212,22 @@ the same config content.
 
 ### 6.5 Read guard for the auth directory
 
-A new dispatched PreToolUse check, `verify-auth-guard` (decision module
-`hooks/lib/verify-auth-guard-v1.js`, fail-closed only for payloads that name
+A new dispatched PreToolUse check on every tool (matcher `.*`), `verify-auth-guard` (decision
+module `hooks/lib/verify-auth-guard-v1.js`, fail-closed only for payloads that name
 `verify-feature-runs`): it denies `Read`, `Grep`, `Glob`, `NotebookEdit`, `Edit`, `Write` and
-`MultiEdit` on a path inside any `.zensu/verify-feature-runs/<leaf>/auth/`, and a `Bash` or
-`PowerShell` command whose text names such a path. The skill never names that directory in a
-command; teardown removes the run directory by its own path. Together with the `.gitignore`
+`MultiEdit` on a path inside any `.zensu/verify-feature-runs/<leaf>/auth/`, a `Bash` or
+`PowerShell` command whose text names such a path, and any other tool, an MCP tool included,
+whose payload names `verify-feature-runs` and whose input holds a string that spells such a
+path, read word by word as shell text and as one literal path that resolves no link and touches
+no file; a runs directory and `storage-state` named together deny only in a command-shaped field,
+so a prompt, plan or message that merely names both words passes. The skill never names that
+directory in a command;
+teardown removes the run directory by its own path. Together with the `.gitignore`
 (ripgrep, which backs Grep, honours nested ignore files) this closes the accidental and the
-injected "just read the state file" routes. It is a textual guard, not a sandbox (§6.7).
+injected "just read the state file" routes. It is a textual guard, not a sandbox: it judges only
+a payload that names `verify-feature-runs`, so shell text that reaches `auth/` through a symlink
+alias of a runs directory or, on Windows, an 8.3 short name such as `VERIFY~1` is not judged
+(§6.7).
 
 ### 6.6 Targets
 
@@ -201,7 +239,8 @@ injected "just read the state file" routes. It is a textual guard, not a sandbox
 | Production | `remote` | supported as an explicit opt-in: the checked-in recipe binds the origin and declares `auth.environment: production` (§9) |
 
 `auth.environment` is a new optional recipe key, `test` or `production`, required in remote mode
-and ignored in local mode. It is a reviewable declaration in a checked-in file; the plugin cannot
+and refused in local mode, where a recipe bound to a deployed environment must not sign in on a
+loopback origin. It is a reviewable declaration in a checked-in file; the plugin cannot
 tell a production host from a test host by itself.
 
 ### 6.7 Threat model
@@ -210,15 +249,15 @@ tell a production host from a test host by itself.
 |---|---|---|
 | Password reaches the model | Script holds or derives it; recipe names an env var at most; helper never shows script output | The model's shell can read anything the user can (env, keychain, files). Docs recommend a keychain or password-manager lookup inside the script over a plain env var, because an `env` dump prints every variable |
 | State via `playwright-cli` | Allowlist unchanged: every getter/exporter denied, `config-print` included | Textual gate: a program that spawns `playwright-cli` itself is not judged (existing residual) |
-| State via file reads | Consumed at `open`; 0700/0600; `.gitignore`; read guard; `auth/` discarded at cleanup | Bash guard is textual (a variable, `$(…)` or a glob in the runs directory's own name bypasses it; below a run directory a glob or expansion that could stand for `auth/` is denied); a recursive command at or above the run directory and a tool outside the guard's nine are not judged; hooks switched off judge nothing; same OS user |
+| State via file reads | Consumed at `open`; 0700/0600; `.gitignore`; read guard on every tool, MCP tools included; `auth/` discarded at cleanup | The guard is textual (a variable, `$(…)` or a glob in the runs directory's own name bypasses it; below a run directory a glob or expansion that could stand for `auth/` is denied); a recursive command at or above the run directory, shell text through a symlink alias of a runs directory, and a Windows 8.3 short name such as `VERIFY~1` are not judged; hooks switched off judge nothing; same OS user |
 | Error reflection | Gate and helper parse the state before `open` | Swap between gate check and launch (same class as the run-config residual in the consent spec §12) |
 | Snapshots / screenshots | Origin consent; test account with synthetic data; skill forbids driving credential pages (API keys, sessions, tokens) | What the app itself renders enters the context by design |
 | `console` / `requests` | Denied on signed-in sessions | Runtime-signal plane stays PARTIAL for signed-in rows (as today) |
 | Redirect / navigation exfiltration | `allowedOrigins`, no query/fragment/userinfo in navigation, redirect stop rule | Redirect followed before the check; WebSockets unfenced (D12) |
 | State scope creep | Helper filters to run hosts and origins; gate rejects out-of-scope entries | Cookies are scoped by host, not port; a parent-domain cookie stays valid for a sibling host a redirect reaches |
-| Credential destination | The login origin must be one of the run's origins; in remote mode the recipe's `baseUrl`, or its `appOrigin` without one | Local mode: the loopback origins are the caller's choice, so a local recipe signs in only a throwaway account the local app alone knows |
+| Credential destination | The caller names no login origin; the login runs before any consent prompt, so the recipe binds it: in remote mode its `baseUrl`, which must be one of the run's origins, or its `appOrigin` without one; in local mode the run's own loopback app origin, and a local recipe that names another origin or declares an `environment` is refused | Local mode: the loopback app origin is still the caller's choice, so a local recipe signs in only a throwaway account the local app alone knows; a split local frontend/API deployment cannot sign in |
 | Run-config tampering | Only the canonical path beside the config is accepted; no inline state | Same as the consent spec §12 swap residual |
-| Session laundering | State only on `zensu-verify-auth-…`; signals denied by name; the read guard refuses a `playwright-cli` call that names a run directory without a `zensu-verify` session | A copy of the run config outside a run directory, or a path assembled at run time, is not judged; manual login in a non-auth session keeps today's prose-only rule |
+| Session laundering | State only on `zensu-verify-auth-…`; signals denied by name; the consent gate judges a call on any session whose text names a run directory or passes a config, and denies one outside `zensu-verify-…` that names a run directory or whose config carries `storageState` or cannot be read as JSON; the read guard refuses a `playwright-cli` call that names a run directory without a `zensu-verify` session | A config the gate never sees (the working directory's default `.playwright/cli.config.json`, the global `~/.playwright/cli.config.json`, which the CLI merges under every config, a `PLAYWRIGHT_MCP_CONFIG` the shell inherited, a flag or variable name assembled at run time, a file swapped after the gate read it, a program that spawns `playwright-cli` without naming it) still opens a signed-in browser outside the gate while the state file exists, that is, until the first gated `open` consumes it; manual login in a non-auth session keeps today's prose-only rule |
 | Leftover state | Consumed once, also by a recorder that cannot bind the session; Phase 4 discards `auth/` with `--discard-state`, also when it keeps the run directory; a helper stopped by a signal kills the login and removes the artifact directory | A crash or `SIGKILL` before cleanup leaves a 0600 file in an ignored directory |
 
 ## 7. Build steps, decisions, defaults
