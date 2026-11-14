@@ -9,6 +9,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Session Hub companion plugin**: the `zensu` marketplace now also lists `session-hub@zensu`,
+  the Zensu Session Hub companion in `plugins/session-hub/`, with its own version,
+  `session-hub--vX.Y.Z` tags, changelog and release workflow (`release-session-hub.yml`). It
+  carries `/session-hub:session-trail`, the handover receipt as one Node hook and the usage-feed
+  module, and needs neither this plugin nor a Zensu account; its handover contract 2 names the
+  prefix `/session-hub:session-trail takeover `. This plugin's `/zensu:session-trail`, its receipt
+  hook and its usage-feed module are frozen until a later release removes them, and the skill's
+  description names the companion. CI runs the companion's release gate on every pull request
+  with a pinned Claude Code (`claude plugin validate` on the marketplace and the companion, an
+  install through its `git-subdir` entry into an isolated config, and its suites) and the install
+  alone with the oldest supported Claude Code, 2.1.296, and this changelog leaves out commits
+  that touch only `plugins/session-hub/`.
+- **Session Hub takeover notice**: a new advisory hook, `user-prompt-session-hub-takeover-notice.sh`,
+  answers the companion's takeover command, typed raw or in the command-tag form, with one notice
+  while `hooks.bashWriteGate` is on: the opt-in source-write gate refuses source writes and git
+  commands outside the session's Session Control root, and `/zensu:adopt-session --reanchor` moves
+  that root. In a session without a usable Session Control record the notice names
+  `/zensu:doctor` instead. On every other prompt, and with the gate off, it prints nothing; a
+  linked session started from a takeover brief gets no notice, so the companion's briefs state
+  the rule themselves.
+
+### Upgrade notes
+
+- **Browser configs on every session**: the browser consent gate now also judges a
+  `playwright-cli` call on a session that is not a `zensu-verify-*` one when its command names a
+  `.zensu/verify-feature-runs/` directory or passes a config through `--config` or
+  `PLAYWRIGHT_MCP_CONFIG`. It denies such a call that names a run directory, and one whose config
+  restores a browser state (`browser.contextOptions.storageState`), is not a local JSON file of
+  at most 1 MiB it can read (an INI config included), or is a path it cannot pin down: a value
+  assembled at run time or appended with `+=`, or a relative path in a command that is not one
+  plain call without a wrapper. A browser skill of your own that passes such a config needs a
+  literal absolute path to a JSON config without that key. A PowerShell call that names the CLI
+  with a run directory or a config is refused; run it through the Bash tool.
+- **Run-config helper**: `scripts/verify-browser-config.js` no longer accepts `--auth-origin`.
+  A local signed-in run refuses a recipe that declares `auth.environment` or names an
+  `auth.appOrigin` or `auth.baseUrl` other than the run's first `--origin`, so a split local
+  frontend/API recipe cannot sign in in local mode.
+- **Read guard on every tool**: the verify-auth read guard is registered on every tool (`.*`),
+  so an MCP tool, `WebFetch` or an agent prompt whose input spells a path inside a run's `auth/`
+  directory is refused, and `/zensu:doctor` reports a registration that lists tools as not
+  registered.
+
+## [0.38.0] - 2026-11-13
+
+### Added
+
+- **hooks**: Offer /zensu:autopilot in the reminder's route question (#601)
+
+### Changed
+
+- **vcs**: Document the reconcile-review and review-markers verbs (#612)
+- **vcs**: Correct the test references in the driver spec (#610)
+
+### Fixed
+
+- **zen-mode**: Read hooks.zenMode under the recorded project root (#595)
+- **hooks**: Read redirections the way the shell does in the work-order gate (#604)
+- **evidence-run**: Make every transport write fail closed (#590)
+- **hooks**: Pin the gh host, certify only jobs the workflow version runs, and bound every CI refresh (#605)
+- **autopilot**: Re-gate a convergence fix before the pull request opens (#599)
+- **hooks**: Judge a chain's CI full-suite policy by its own work tree (#603)
+- **zen-mode**: Settle the open points of #549 (#579)
+- **hooks**: Record a named reviewer's hand-back under its spawn's agent id (#602)
+- **hooks**: Keep one CI proof per workflow version so parallel worktrees stop voiding each other (#598)
+- **agents**: State what Zensu knowledge search indexes and how it ranks (#597)
+
+### Upgrade notes
+
+- **zen-mode keys follow the session's recorded project root**: the zen-mode hook,
+  `/zensu:zen-mode --status` and the `/zensu:doctor` session row now read `hooks.zenMode` and
+  `hooks.zenModeDefault` from the `.zensu/config.json` under the session's recorded project root,
+  where they already read the session marker, instead of the one under the directory Claude Code
+  sets as `CLAUDE_PROJECT_DIR`; the session banner reads both under the same root as its
+  delivery-route line. The two directories differ in a session whose working directory is a git
+  worktree and after `/zensu:adopt-session --reanchor`. An opt-out such as `"zenMode": false` or
+  `"zenModeDefault": false` that lives only in the host directory's `.zensu/config.json` no longer
+  reaches such a session: copy it into that worktree's `.zensu/config.json` or into
+  `~/.zensu/config.json`.
+
+## [0.37.0] - 2026-11-10
+
+### Added
+
+- **ai-work**: Include explicit review context and source links (#556)
+- **hooks**: Route every agent-runnable zensu write through a skill (#566)
+
+### Changed
+
+- **hooks**: Read zensu-cli words through one shared module (#557)
+- Prepare the session-hub plugin split (#577)
+- **verify-feature**: Report new playwright-cli releases nightly (#584)
+- **changelog**: List #572 to #575 in the 0.36.0 section (#578)
+
+### Fixed
+
+- **vcs**: Settle the three GitLab driver bugs the live tier found (#587)
+- **verify-feature**: Measure the consent gate against playwright-cli 0.1.24 (#592)
+- **hooks**: State the Zensu workflow's cost and run a TDD request strict (#581)
+- **hooks**: Run the bound max-rounds closing suite in the chain's work tree (#591)
+- **session-trail**: Hold linked starts behind refused ledger records and an untrusted presets folder (#589)
+- **hooks**: Print the banner's zensu-cli floor reason and commands from the version module (#588)
+- **session-trail**: Hold linked-session starts when a store read fails (#582)
+- **hooks**: Align the zensu-cli upgrade command and floor wording across surfaces (#585)
+- **usage-feed**: Write a limit reading only once it is proven new (#576)
+
+### Added
+
 - **`/zensu:change`**: a new skill makes one change a user asks for in a tracked product: a new
   feature, subfeature or revision, a roadmap, milestone or roadmap entry, a tier or tier
   assignment, a journey or journey step, a mock, a link, a classification, a deprecation, split,
@@ -42,6 +149,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `brew upgrade --cask zensu`, the commands `docs/cli-install-update.md` and the AI-work capture
   guidance already named: `brew upgrade` refreshes the tap only once its auto-update interval has
   passed, so on its own it can miss a new release.
+- **verify-feature**: the browser consent gate is now measured against `playwright-cli`
+  0.1.24, and the run-config helper refuses to start a browser verification run on any other
+  version, 0.1.21 included. Upgrade with `npm install -g @playwright/cli@0.1.24`.
+  `brew install playwright-cli` is unpinned: the helper refuses it unless Homebrew ships
+  exactly that version. A session that was running when the plugin updated keeps its earlier
+  plugin root, whose helper still accepts only 0.1.21 and tells you to install 0.1.21 again; do
+  not follow it, but start a fresh session for `/zensu:verify-feature` after upgrading
+  `playwright-cli`.
 
 ## [0.36.0] - 2026-11-07
 

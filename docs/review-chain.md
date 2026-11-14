@@ -314,7 +314,12 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   it refuses is not recorded and gets the gate's refusal instead, and a passing one is recorded
   in the gate's store with the digest of the block it carried.
 - **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
-  the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
+  the agent id, then a completion notification. A reviewer spawned with the Agent tool's `name`
+  parameter hands back under that name instead, so its launch also binds the name to its agent id
+  under `names/`: the newest spawn of a name holds it, as the host gives it, any other named spawn
+  of the main thread releases it once its post-review hook runs after the binding was written, and
+  a name frame counts only on the prompt's first line or right after the
+  `Another Claude session sent a message:` line, where the host puts a real hand-back. `hooks/user-prompt-review-handback.sh` exits
   without a `node` child unless the prompt carries one of the two markers and the store holds a
   pending record or entry, or the store holds an arrival note. Its first `node` child,
   `background-review-v1.js arrive`, retires every fan-out entry the prompt names and, for a
@@ -394,7 +399,13 @@ the hand-back first. With `hooks.reviewPacketGate` off, each fan-out hand-back s
 post-review hook, which binds the session and exits without output, because the hand-back hook
 reads no config. A claim the Stop completes from a note is checked without the report, so a
 consume reviewer that answered `REVIEW PACKET INVALID` in a hand-back whose claim was cut off is
-not refused there.
+not refused there. A name frame on a prompt's first line names that name's current holder,
+whoever wrote the prompt, because the hook payload does not tell a queued hand-back from a typed
+or pasted prompt, so a pasted earlier hand-back of a bound name can claim the pending consume
+ticket. Two spawns given one name in one tool message whose hooks run in the other order leave the
+name with the earlier one, so the later one's report is recorded for it, and when the earlier one
+is the consume reviewer that report claims the ticket. Spawning reviewers without `name` avoids
+both.
 
 #### Waiting for background work
 

@@ -218,7 +218,7 @@ const actionText = Object.freeze({
   START_TDD: 'Start the delegated build chain for the current attempt.',
   AWAIT_TDD_CHAIN: 'Resume the bound build chain and wait for its ticket-bound terminal outcome.',
   RUN_GATES: 'Run the configured quality gates and persist their evidence.',
-  RUN_CONVERGENCE: 'Run the convergence checks before any pull-request effect.',
+  RUN_CONVERGENCE: 'Commit and re-run the gates when the working tree holds changes outside .zensu/ or HEAD differs from the gate evidence, then run the convergence checks before any pull-request effect.',
   RECONCILE_PR: 'Reconcile the pull-request operation key before creating or updating a PR.',
   RECONCILE_TEAM_REVIEW: 'Reconcile the team-review operation key before publishing review output.',
   FIX_REVIEW_FINDINGS: 'Inspect unresolved review threads and route required fixes through the bound build chain.',

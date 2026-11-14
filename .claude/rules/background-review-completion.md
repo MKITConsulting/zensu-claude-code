@@ -89,6 +89,34 @@ payload, and a census of the live desktop transcripts of the three days before 2
   or `The subagent ended without delivering a report through SubagentHandback, so no report was
   delivered. …` (16).
 
+## Measured (named spawns, 2.1.321, 2026-11-10)
+
+The KS-1c chain (desktop Code tab, plugin 0.36.0, PR #597) spawned its panel, its judge pair and
+its consume reviewer with the Agent tool's `name` parameter. A desktop session the same day spawned
+two general-purpose probes with one name in one tool message, and a census read the transcripts:
+
+- **A named spawn hands back under its name.** The six named spawns handed back as
+  `<agent-message from="<name>">`, the four unnamed ones as `<agent-message from="<agentId>">`.
+  Their completion notifications still carry `<task-id><agentId></task-id>`, and in auto mode the
+  `<result>` stub reads `delivered to you as a message from "<name>"`. Every named seat's gate
+  launch record stayed `async_launched`, and the consume review was refused until the primary
+  judge ran again without `name`, whose hand-back `handback-prompt` then recorded.
+- **The launch names both.** The Agent tool result (`toolUseResult`) has no `name` key; the call's
+  input carries it. The PostToolUse hook input is `{…, tool_name, tool_input, tool_response,
+  tool_use_id, …}`, and `tool_input` is the object the tool is called with, read from the 2.1.321
+  bundle, so the launch hook sees `tool_input.name` beside `tool_response.agentId`. No hook payload
+  was logged for it.
+- **The newest spawn holds the name.** The host accepted both probes. The later one handed back
+  under the name, the earlier one under its agent id, also after the later one had finished. Both
+  `subagents/agent-<id>.meta.json` files record the requested `name`, so the meta files cannot
+  tell which agent holds it. The transcript stores each hand-back's `origin` with the agent id as
+  `senderTaskId`, but the hook payload carries no `origin` (`.claude/rules/prompt-origin.md`).
+- **The host puts a hand-back frame in one of two places.** The 3,839 transcripts modified in the
+  twelve days before 2026-11-10 hold 8,339 hand-back frames, 932 of them named: 3,432 open the
+  prompt (a queued prompt), 4,905 follow the line `Another Claude session sent a message:`, and two
+  sit in a typed prompt that quoted frames. None of the 389 cross-session message bodies there is
+  indented, so the host's indentation guards a report, never a peer message.
+
 ## The path
 
 1. **Launch.** On `async_launched`, `post-review-tdd-delegate.sh` records the launch in
@@ -100,13 +128,21 @@ payload, and a census of the live desktop transcripts of the three days before 2
    one record `records/<scv1-key>.json` (`record`), written only while the prompt's ticket is the
    ticket the claim would accept; an arrival note the session still holds is dropped then. Its
    directive tells a standalone chain to end its turn and wait, and an Autopilot-bound chain to
-   keep its turn.
+   keep its turn. Either launch whose `tool_input.name` matches the Agent tool's name pattern
+   (`AGENT_NAME_RE`) also binds that name to its agent id, `names/<scv1-key>/<agentId>.json`
+   (`moveName`, exact key set `NAME_KEYS`, `0600`, temp file then rename), after removing every
+   binding of that name and every binding past the wait bound. Every other named main-thread spawn
+   releases the name: the delegate runs `background-review-v1.js unbind` for any PostToolUse
+   payload that names one while the session holds a binding, before the type arms, so a recorded
+   launch binds it again right after.
 2. **Arrival.** `hooks/user-prompt-review-handback.sh` exits in bash, before any `node` child,
    unless the payload contains `<agent-message from=` or `<task-notification>` AND the store holds
    a regular `records/scv1_*.json` or `fanout/scv1_*/*.json`, or the store holds a regular
    `arrivals/scv1_*.json` of any session. Its first `node` child is `background-review-v1.js
    arrive`, which derives the session key from the payload, retires every fan-out entry whose
-   agent the prompt names, any status, and, for a completed arrival of the session's pending
+   agent the prompt names, any status, where a hand-back frame names an agent by its id or, only
+   in the host's frame position (`hostFrame`), by the name the session's bindings hold for it
+   (`nameIndex`), and, for a completed arrival of the session's pending
    consume reviewer, writes the arrival note `arrivals/<scv1-key>.json` (exact key set, `0600`,
    temp file then rename) before anything is claimed. It prints
    `pending agent=<id> source=<prompt|note> retired=<n>` or `idle reason=<r> retired=<n>`, and the
@@ -168,6 +204,35 @@ payload, and a census of the live desktop transcripts of the three days before 2
   line that opens with `<result>` to the first line that closes with `</result>`, decoded. The
   host escapes the result, so no line inside it can be a tag line, and no report can forge the
   block, its id or its status.
+- **A named reviewer is matched through its launch's name binding, never refused.** The binding is
+  exact where it is made: the launch payload carries `tool_input.name` beside
+  `tool_response.agentId`, and the host gives a name to the newest spawn that asks for it, which
+  across tool messages is the order the main thread's PostToolUse events arrive in. So the table
+  holds, for each name, the newest recorded launch that took it, and a frame names that launch only
+  while no later spawn took the name: `unbind` releases it for every named spawn the store does not
+  record, any agent type, because the host's holder is then an agent whose report must never count
+  as a reviewer's. Refusing a named spawn was rejected: a PreToolUse deny is a hook that can return
+  a `permissionDecision`, a `minor` by `.claude/rules/runtime-lineage.md`, the reviewer-spawn grant
+  must only grant or stay silent (`.claude/rules/review-packet-gate.md`), and each refusal costs a
+  re-spawn. A spawn-time warning was rejected for the same re-run and because it rests on the model,
+  which named 932 hand-backs in the census. The host's `meta.json` files were rejected as the
+  source: they record every spawn's requested name, not the holder.
+- **A name frame counts only in the host's frame position** (`hostFrame`): the first line of the
+  prompt, or the line right after `Another Claude session sent a message:`. A name is chosen by the
+  main thread and predictable, so it cannot carry the agent id's unguessability, and a cross-session
+  message, whose body the host does not indent, holds its wrapper in those two lines. An id frame
+  keeps the column-zero rule above. **Every ambiguity names no agent:** two bindings of one name,
+  which two hooks that bound it in parallel leave, a binding past `LIMITS.waitTtlMs`, and a name
+  equal to an agent id the session's store knows (`nameIndex`). The review packet gate reads the
+  same bindings by the same rule: the delegate passes `--plugin-data` to its `record --event
+  UserPromptSubmit` and to `review_gate_check`, and the gate asks `promptNameAliases`, which answers
+  no alias unless the prompt has a host frame, only when it reads a report. The match and the gate
+  read the store one after the other, so they agree unless a binding passes its bound or is rebound
+  between the two reads (Known gaps).
+- **A broken `names/` costs only the name mapping.** `storeLocations` does not ensure `names/`;
+  `namesDirectory` does, and every caller reads its failure as no binding: `moveName` answers
+  `store`, `nameIndex` an empty index and the idle sweep nothing, so records, fan-out entries and
+  arrival notes still work by agent id.
 - **The arrival is noted before the claim, by the prompt hook's first `node` child.** The host's
   cancel kills the hook's whole process group, so only state written before the kill survives it,
   and the claim is the expensive part. `arrive` is one child that reads no workflow state and
@@ -317,6 +382,27 @@ payload, and a census of the live desktop transcripts of the three days before 2
   from completion notifications alone.
 - The claim predicate is `review-ticket-state-v1.js`; `_ZENSU_TDD_TICKET_STATE` is in the export
   list of `zensu-tdd-phase.sh` beside `_ZENSU_TDD_CHAIN_RECOVERY`.
+- The name bindings are spelled in `NAMES_SEGMENT`, `NAME_KEYS`, `validateName`, `moveName`,
+  `nameIndex` and `nameAliases`, and in `background_review_unbind` of the delegate, which globs
+  `names/<scv1-key>/*.json` before it starts `unbind`, so a named spawn in a session without a
+  binding spawns no `node` child. `AGENT_NAME_RE` is the host Agent tool's `name` pattern (its
+  2.1.321 schema), `PEER_LINE` the line the host stores above a hand-back frame, which
+  `zensu_prompt_origin` in `hooks/lib/zensu-prompt-origin.sh` and `promptText` in
+  `hooks/lib/context-auto-load-v1.js` spell too, and `hostFrame` is shared by `scanLines`,
+  `handbackReports` and `promptNameAliases`. `names/` shares `sessionFiles`, `SESSION_FILE_RE`,
+  `LIMITS.maxSessionFiles` and `sweepIdleSessions` with `fanout/`, so a change to any of them moves
+  both segments, and `namesDirectory` is the one place that ensures `names/`. The gate takes the
+  bindings through `--plugin-data` on `record` and `check` (`aliasesFor` in
+  `hooks/lib/review-gate-v1.js`, which hands `arrivedReports` a resolver over `promptNameAliases`),
+  which the delegate's arrival `record` call and `review_gate_check` pass. `RP33` to `RP33d` in
+  `tests/structure/test-review-packet.sh` drive the shipped hooks: a named panel with a persona and
+  a named consume claim with the gate on, a name a later unrecorded spawn took, a named consume
+  claim with the gate off, and a named consume report that answers `REVIEW PACKET INVALID`; the
+  unit files hold the binding rules, the frame position, every ambiguity, the idle sweep and the
+  unusable segment. The operator accounts are the delegate
+  row of `docs/configuration.md`, the Arrival bullet of `docs/review-chain.md` and the step-10
+  lead of `skills/build/references/review-chain.md`, which tells the main thread to spawn
+  reviewers without `name`.
 - The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, the
   `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix and the
   `idle reason= retired=` form of the `arrive` line by the prompt hook's `case`, the `source` field
@@ -420,6 +506,30 @@ payload, and a census of the live desktop transcripts of the three days before 2
   sweeps them. Observed after the `BR16` cancel.
 - **Not measured live.** The suite drives the real hooks with payloads shaped like the
   measurements and a host-style cancel; no desktop session has run the patched plugin yet.
+- **Two named spawns of one name in one tool message.** The host gives the name to the later
+  spawn. When their PostToolUse hooks run in the other order, the table names the earlier launch,
+  the later one's report is recorded for it, and the earlier one's own id-framed report then reads
+  as a second completion. When the earlier spawn is the consume reviewer and the later an agent
+  the store does not record, that agent's hand-back claims the review ticket and routes as the
+  code review; only a report that answers `REVIEW PACKET INVALID` is refused. Two hooks that bind
+  in parallel leave two bindings and name no agent. Neither order was measured. Spawning reviewers
+  without `name` avoids all of these.
+- **A prompt that opens with a frame of a bound name** names that name's current holder, whoever
+  wrote the prompt. The hook payload does not tell a queued hand-back from a typed or pasted prompt
+  (`.claude/rules/prompt-origin.md`), and a name, unlike an agent id, is predictable and can repeat
+  across rounds, so a pasted earlier hand-back of a bound name can claim the pending consume ticket.
+- **The match and the gate read the bindings one after the other.** A binding that passes
+  `LIMITS.waitTtlMs` or is rebound between the delegate's `match` and the gate's `check` leaves the
+  gate without the report, so a `REVIEW PACKET INVALID` answer in that hand-back is not refused
+  there, as for a claim the Stop completes from a note.
+- **A named spawn whose PostToolUse hook did not run** (cancelled, or without a session key)
+  leaves the earlier binding in place, so a frame of the new holder names the earlier reviewer.
+  `unbind` sees only the main thread's `Agent` and `Task` calls, so a name the host hands out
+  another way is not seen either.
+- **The frame position for a name was measured in stored transcripts**, not in a logged hook
+  payload. A host that put another line above the frame would leave a named reviewer unmatched,
+  which is the behaviour before this change. An id frame keeps the column-zero rule, although the
+  census found every real frame in the host's position.
 - **Windows is unmeasured.** The suite is in `ciStructureTests` and in no blocking Windows shard;
   `tests/profiles/windows-native-structure.v1.json` lists it as excluded, because BR2's host
   branch is a native-Windows marker that `windows-ci-contract.test.js` audits. The cancel
@@ -448,4 +558,13 @@ here before: the record and fan-out key sets shipped for the first time, the add
 only `additionalContext`, and the claim read its predicate from `review-ticket-state-v1.js` with the
 same field test. Starting the delegate for a notification that carries `<result>` is `patch` on the
 same walk: the hook's registration, matcher and output kind stay as they are, and the store's key
-sets do not move.
+sets do not move. The name bindings are `patch` too: `NAME_KEYS` is strict but ships for the first
+time, in a segment of its own, so no released reader or writer predates it, and the record,
+fan-out and arrival key sets do not move. An older installation of the same lineage never reads
+`names/` and matches by id as before; a newer one finds no binding in an older store and does the
+same. `unbind` is a new verb and `--plugin-data` a new optional gate flag, each called only from
+this tree. No hook is added, removed or renamed and no matcher changes; the delegate still returns
+only `additionalContext`, and starts one more `node` child only for a named spawn while the session
+holds a binding. `promptNameAliases` and `namesDirectory` move no persisted shape either: the gate
+builds the index only for a prompt with a host frame, and an unusable `names/` no longer fails the
+other segments.

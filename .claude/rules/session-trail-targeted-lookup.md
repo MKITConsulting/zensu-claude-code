@@ -1,12 +1,19 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "hooks/lib/desktop-store-read-v1.js"
+  - "plugins/session-hub/hooks/lib/desktop-store-read-v1.js"
   - "skills/session-trail/references/commands.md"
+  - "plugins/session-hub/skills/session-trail/references/commands.md"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 
 # Session-Trail Targeted Lookup (`idCandidateRows`, `siblings`, `keepOwners`, `ccdApp` in `skills/session-trail/scripts/trail.mjs`)
+
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
 
 **A selector verb summarizes what its answer needs, not the machine.** `resolve()` used to build
 the full index before it tried the exact-id tier, and `--all` drops the project-directory filter,

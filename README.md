@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.36.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.38.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -93,7 +93,8 @@ already rely on:
 - **Claude asks which delivery route to take.** After you approve a plan, Zensu
   has Claude ask whether to use Autopilot, the Zensu workflow or Pilot, or to
   implement directly; on a direct code request it asks whether to use the Zensu
-  workflow. A plan that names its own executor, such as another plugin's
+  workflow or Autopilot, or to implement directly, and leaves Autopilot out when
+  no one is there to answer. A plan that names its own executor, such as another plugin's
   `superpowers:executing-plans`, gets a short notice instead: Claude carries it
   out with that skill and names `/zensu:build` as the way to use the Zensu
   workflow. `/zensu:delivery-route` or
@@ -164,6 +165,34 @@ Optional, for feature tracking: install zensu-cli 0.18.0 or later with
 Run `/zensu:setup` to configure Zensu step by step, or `/zensu:doctor` if
 something is not firing.
 
+## Two plugins
+
+The `zensu` marketplace lists two plugins. Each has its own version, tags and
+changelog, and neither needs the other.
+
+| Plugin | Install | What it is |
+|--------|---------|------------|
+| `zensu@zensu` | `claude plugin install zensu --scope project` | Zensu itself: everything this README describes |
+| `session-hub@zensu` | `claude plugin install session-hub@zensu` | The companion for the Zensu Session Hub: `/session-hub:session-trail`, the handover receipt and the usage feed, and nothing else. [Its README](plugins/session-hub/README.md) |
+
+The Session Hub types `/session-hub:session-trail takeover …` into the session
+it moves, so it needs the companion, not Zensu. Zensu still carries its own
+copy of `/zensu:session-trail`, its receipt hook and the usage feed, frozen
+until a later release removes them; with both plugins enabled, each receipt
+hook answers only its own command and both usage-feed copies write the same
+file. While `hooks.bashWriteGate` is on, Zensu adds one notice to a takeover
+command typed as `/session-hub:session-trail takeover …`: its opt-in
+source-write gate refuses source writes and git commands, commits included,
+outside the session's Session Control root, and
+`/zensu:adopt-session --reanchor` moves that root. A linked session started
+from a takeover brief gets no notice, so the companion's briefs state that rule
+themselves.
+
+`session-hub@zensu` installs once its first release, `session-hub--v1.0.0`, is
+published, right after the Zensu release that ships its marketplace entry; until
+then its install fails on a tag that does not exist yet. Moving a session
+through it also needs a Session Hub release that reads its handover contract 2.
+
 ## Try it
 
 The first two need no Zensu account.
@@ -220,7 +249,7 @@ make no `zensu` call at all.
 
 | Skill | What it does | Needs |
 |-------|--------------|-------|
-| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
+| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; "with tdd" in a request or a plan approval runs that one chain strict unless a `/zensu:tdd-mode` session choice says vanilla, `/zensu:tdd-mode` switches strict TDD on for the session and `hooks.tddImplementation` for the project or globally | — |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys | `gh` or `glab` |
 | `/zensu:implement` | Implement a tracked feature through the Zensu workflow, then link its tests, sources and docs and create a revision | Zensu account |
 | `/zensu:pilot` | The guided route: probes a tracked feature's real state and offers the next step, one confirmed step at a time | Zensu account and a tracked feature; `gh` or `glab` for its pull request |
@@ -258,7 +287,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:setup` | Interactive first-run configuration | — (a Zensu account for its optional login step) |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A | — |
-| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over and then release the old one so it can be archived, and trace where a session was continued across windows and accounts | — |
+| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over and then release the old one so it can be archived, and trace where a session was continued across windows and accounts. Frozen: the Session Hub uses the companion's `/session-hub:session-trail` ([Two plugins](#two-plugins)) | — |
 
 #### Recovery
 
@@ -362,7 +391,8 @@ What stays behind:
   `.claude/worktrees/`, and the `.worktree-keep` line in the repository's
   `.git/info/exclude`.
 - `~/.claude/zensu/` (under `CLAUDE_CONFIG_DIR` when that is set): the session
-  lineage ledger of `/zensu:session-trail` and the Session Hub receipts.
+  lineage ledger that `/zensu:session-trail` shares with the companion's
+  `/session-hub:session-trail`, the Session Hub receipts and the usage files.
 - The `zensu` CLI and its stored login, which are a separate install. Run
   `zensu auth logout` before you remove the CLI.
 
@@ -436,34 +466,20 @@ self-hosting keeps the data under your control.
 
 ### Session Hub usage feed
 
-The plugin carries one optional hooks module, `hooks/usage-feed.ts`, for the
+Zensu still carries one optional hooks module, `hooks/usage-feed.ts`, for the
 Zensu Session Hub, a macOS app that shows the five-hour and weekly limits of
-several Claude accounts. The module writes only while the directory
-`<config root>/zensu/session-hub/v1/usage/` already exists, where the config
-root is `CLAUDE_CONFIG_DIR` when that names an absolute path and `~/.claude`
-otherwise. The Session Hub creates that directory; the module never creates it,
-so on a machine without the Session Hub nothing is written.
-
-While the directory exists, the module writes one file per Claude Code session,
-`<session id>.json`, when Claude Code measures the session and the reading is
-new: Claude has just answered a turn of the session, or a rate-limit window has
-just moved. The time in the file is that moment, so a reading the session took
-earlier never comes back under a newer time. It writes nothing when a session
-starts and nothing while a session is idle, so a file keeps the time of its last
-reading. The file holds the record's schema version, the session id, the time of
-the reading, and for each window its name (`five_hour`, `seven_day`), the
-percentage used and the reset time. It holds nothing else: no prompt, response,
-title, path, project or account data. To tell an answered turn, the module reads
-only how the turn ended, not its text. Each write replaces the whole file, the
-file stays on your machine, and the module sends nothing anywhere. Deleting the
-directory stops the feed; only a write already under way at that moment can
-create it once more.
-
-The module needs Claude Code 2.1.296 or newer and uses its early-access hooks
-module API, which can change between releases. Anthropic can also switch modules
-of installed plugins off at any time. The feed then writes nothing, every other
-Zensu hook keeps running, and the Session Hub reads the limits from Claude's
-usage popover as it does without the plugin.
+several Claude accounts. It is the same file the `session-hub` companion ships,
+and Zensu keeps it only until a later release leaves the feed to the companion.
+The module writes only while the directory
+`<config root>/zensu/session-hub/v1/usage/` already exists, a directory only the
+Session Hub creates, so on a machine without the Session Hub nothing is written.
+It then writes one file per session with the session id, the time of the
+reading and, for the five-hour and seven-day windows, the percentage used and
+the reset time: no prompt, response, title, path, project or account data, and
+nothing leaves your machine. With both plugins enabled, both copies write the
+same file under the same rule. When it writes, how to stop it and what happens
+when Claude Code switches the module off are described in the companion's
+[README](plugins/session-hub/README.md#usage-feed).
 
 ## Requirements
 
@@ -482,7 +498,7 @@ starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the
 known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
 driver additionally need `playwright-cli` on `PATH`
-(`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
+(`npm install -g @playwright/cli@0.1.24`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
 Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older
@@ -592,3 +608,12 @@ Upgrade the product-scope backend and CLI before the plugin. See the shipped
 `docs/ai-work-capture.md` for identity checks and legacy receipt handling.
 
 CLI setup and troubleshooting: [Install or update the CLI, including `zensu update` and older-version recovery](docs/cli-install-update.md).
+
+### Review context and source-system links
+
+Before handoff, the native capture helper accepts `checkpoint --review-file` with
+an explicit summary, acceptance criteria, evidence, limitations and optional
+`artifactUrl` for the exact commit. The URL is supplied deliberately, never inferred
+from a Git remote. Pending reports retain their original content for retries; a
+changed report creates a new result version without inherited acceptance.
+See [result reporting and disclosure scope](docs/ai-work-capture.md#explain-the-result-before-human-acceptance).

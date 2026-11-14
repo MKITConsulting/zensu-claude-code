@@ -2,8 +2,8 @@
 name: tdd-mode
 description: >
   [Zensu] Switch this session between strict RED→GREEN TDD and vanilla
-  implementation. Use when the user says "with TDD", "strict TDD", "TDD off" or
-  "back to the default", or /zensu:tdd-mode.
+  implementation. Use when the user says "strict TDD from now on", "TDD off for
+  this session" or "back to the default", or /zensu:tdd-mode.
 ---
 
 # /zensu:tdd-mode
@@ -17,6 +17,13 @@ the current state with `--status` and ask what the user wants.
 <!-- /zensu:evidence-discipline -->
 
 Record the strict/vanilla choice for THIS session.
+
+A TDD request for one change is not a session switch. When the user writes "with
+tdd" in a code request or a plan approval, the plan-approval question and the
+prompt reminder run that one `/zensu:build` chain strict through a
+`TDD-MODE: strict` line in its specification, and record nothing; a vanilla choice
+made with this skill still outranks that line. Use this skill only when the user
+wants the mode for the rest of the session.
 
 The mode decides how `/zensu:build` implements: **strict** writes a failing test
 first and drives every step through RED → IMPL → GREEN under the PreToolUse

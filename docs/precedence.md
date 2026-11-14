@@ -29,7 +29,7 @@ These steer the model and step aside for the user's own instructions.
 |---|---|---|
 | Session orientation | `hooks/session-start-primer.sh` | the conventions it recommends |
 | Delivery-route question after a plan approval | `hooks/plan-approved-delegate.sh` | the question and its default |
-| TDD reminder on a code request | `hooks/user-prompt-tdd-reminder.sh` | the question and its default |
+| TDD reminder on a code request | `hooks/user-prompt-tdd-reminder.sh` | the question and its default, but not its Autopilot rule (below) |
 | Planning triage | `hooks/user-prompt-intent-router.sh` | the triage and its routing |
 | zen-mode | `hooks/user-prompt-zen-mode.sh` | the shape of each answer |
 
@@ -40,6 +40,15 @@ zen-mode states its own form of the rule: the user's CLAUDE.md, their output sty
 mode or plugin they chose outrank it, so a compressed style the user turned on wins over
 zen-mode's full sentences. A style the user chose may set a safety warning's sentence form,
 never its length or detail.
+
+**One rule of the reminder does not yield.** While the route field reads `ask`, a request that
+asks for `/zensu:autopilot` states no preference: only the answer to the reminder's question
+selects it, and the question offers it only while the `ZENSU HUMAN PRESENT:` field reads `yes`.
+The rule holds over the reminder's closing sentence, because the same request text reaches runs
+with nobody to answer, and Autopilot pushes a branch and opens a pull request. Under a decided
+`build` or `direct` route the reminder sends its decided line instead, which neither offers nor
+names Autopilot. A user who wants Autopilot without the question invokes `/zensu:autopilot`; the
+reminder stays silent on that prompt under every route.
 
 **The user's own instructions** are what the user writes in this conversation, their
 CLAUDE.md, their output style, and a style mode or plugin they turned on. All of them may

@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "runId": "run_gate_reentry_frozen",
+  "projectRoot": "@PROJECT_ROOT@",
+  "workspaceRoot": "@PROJECT_ROOT@",
+  "ownerSessionId": "session_gate_reentry_frozen",
+  "stage": "BLOCKED",
+  "nextActionCode": "AWAIT_RESUME",
+  "approvedPlanSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "options": {
+    "cover": false,
+    "validate": true
+  },
+  "tdd": {
+    "attempt": 2,
+    "chainId": "gr-chain-2",
+    "sessionId": "session_gate_reentry_frozen",
+    "returnStage": "CONVERGE",
+    "outcome": "pass",
+    "headUpdateRequired": false
+  },
+  "effects": {
+    "prOpen": {
+      "status": "requested",
+      "operationKey": "pr:run_gate_reentry_frozen"
+    },
+    "teamReview": {
+      "status": "none",
+      "operationKey": null,
+      "provider": null
+    }
+  },
+  "evidence": {
+    "pr": null,
+    "gates": {
+      "passed": true,
+      "headSha": "1111111111111111111111111111111111111111"
+    },
+    "review": null,
+    "findings": null,
+    "validation": null,
+    "coverage": null,
+    "delivery": null
+  },
+  "blocked": {
+    "from": "OPEN_PR",
+    "code": "PR_HEAD_GATE_MISMATCH"
+  },
+  "bypasses": [],
+  "stopBudget": {
+    "stage": "BLOCKED",
+    "count": 0
+  },
+  "events": [
+    {
+      "eventId": "start",
+      "eventType": "START",
+      "payloadDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "payload": {},
+      "fromStage": null,
+      "toStage": "PLANNING"
+    },
+    {
+      "eventId": "gr-plan",
+      "eventType": "PLAN_APPROVED",
+      "payloadDigest": "ccccc36de7346f39075c1e50a6bdb4bf7f5d314c50e45aebf9382030646adc03",
+      "payload": {
+        "approvedPlanSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "fromStage": "PLANNING",
+      "toStage": "AWAIT_TDD"
+    },
+    {
+      "eventId": "gr-tdd-start-1",
+      "eventType": "TDD_STARTED",
+      "payloadDigest": "4006af4fe37cf268456f5900f04249ea242d21e03cf6592cb9b0fced3c13d994",
+      "payload": {
+        "attempt": 1,
+        "chainId": "gr-chain-1",
+        "sessionId": "session_gate_reentry_frozen"
+      },
+      "fromStage": "AWAIT_TDD",
+      "toStage": "TDD_RUNNING"
+    },
+    {
+      "eventId": "gr-tdd-done-1",
+      "eventType": "TDD_CHAIN_DONE",
+      "payloadDigest": "c864c0a3d670309b62ea5d83ab052df7c7b5463484ab40bbadd9411c765778ca",
+      "payload": {
+        "attempt": 1,
+        "chainId": "gr-chain-1",
+        "sessionId": "session_gate_reentry_frozen",
+        "outcome": "pass"
+      },
+      "fromStage": "TDD_RUNNING",
+      "toStage": "GATES"
+    },
+    {
+      "eventId": "gr-gates-a",
+      "eventType": "GATES_PASSED",
+      "payloadDigest": "9acc5d656835bde71027af4eec3264f51ce074e195653dd60664787195c04a31",
+      "payload": {
+        "headSha": "1111111111111111111111111111111111111111"
+      },
+      "fromStage": "GATES",
+      "toStage": "CONVERGE"
+    },
+    {
+      "eventId": "gr-converge-fail",
+      "eventType": "CONVERGENCE_FAILED",
+      "payloadDigest": "f15bdc3f51b834f6e278e2238ea10cfcdace3e19b5426c90c9744556516c0cbe",
+      "payload": {
+        "reason": "contradicts an active acceptance criterion",
+        "limitReached": false
+      },
+      "fromStage": "CONVERGE",
+      "toStage": "AWAIT_TDD"
+    },
+    {
+      "eventId": "gr-tdd-start-2",
+      "eventType": "TDD_STARTED",
+      "payloadDigest": "c62adcf45c214f1f655728f8aa8963eda9999aed4449b0fd3f8f6a53feb51e02",
+      "payload": {
+        "attempt": 2,
+        "chainId": "gr-chain-2",
+        "sessionId": "session_gate_reentry_frozen"
+      },
+      "fromStage": "AWAIT_TDD",
+      "toStage": "TDD_RUNNING"
+    },
+    {
+      "eventId": "gr-tdd-done-2",
+      "eventType": "TDD_CHAIN_DONE",
+      "payloadDigest": "c9268008d83f7ab45a7729caa0b6a26b3629b07f33000afb569254d1ae12c81e",
+      "payload": {
+        "attempt": 2,
+        "chainId": "gr-chain-2",
+        "sessionId": "session_gate_reentry_frozen",
+        "outcome": "pass"
+      },
+      "fromStage": "TDD_RUNNING",
+      "toStage": "CONVERGE"
+    },
+    {
+      "eventId": "gr-converge-pass",
+      "eventType": "CONVERGENCE_PASSED",
+      "payloadDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "payload": {},
+      "fromStage": "CONVERGE",
+      "toStage": "OPEN_PR"
+    },
+    {
+      "eventId": "gr-pr-request",
+      "eventType": "PR_OPEN_REQUESTED",
+      "payloadDigest": "fd22c22d795bcc3f0b900fd9f3a1f085ab429f8076c1bfa9dd2fa3e126b34563",
+      "payload": {
+        "operationKey": "pr:run_gate_reentry_frozen"
+      },
+      "fromStage": "OPEN_PR",
+      "toStage": "OPEN_PR"
+    },
+    {
+      "eventId": "gr-block",
+      "eventType": "BLOCK",
+      "payloadDigest": "1b047ce814a4839b723d6a2b7cc8849dbc6455b2af3809a30fbce81dd67f6f20",
+      "payload": {
+        "code": "PR_HEAD_GATE_MISMATCH"
+      },
+      "fromStage": "OPEN_PR",
+      "toStage": "BLOCKED"
+    }
+  ]
+}

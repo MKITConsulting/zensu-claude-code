@@ -12,7 +12,9 @@ paths:
 long body is paid on every invocation. A skill's description is paid in a different place:
 the host's skill listing, which every session carries and which has a fixed budget shared
 with every other plugin and user skill on the machine. The suite bounds both, for every
-`skills/*/SKILL.md`.
+`skills/*/SKILL.md` and, root by root with an empty allowlist, for every
+`plugins/*/skills/*/SKILL.md` of a companion plugin such as `session-hub@zensu`, whose
+`/session-hub:session-trail` is one; `B0` requires both counts to match the files on disk.
 
 **How the host builds the listing.** Read from the Claude Code 2.1.280 CLI and 2.1.288
 desktop binaries, not from a documented contract, so re-check it when the host changes:
@@ -82,7 +84,10 @@ file names it through its router's placeholder: `{plugin_root}/docs/…` in `ski
 `skills/autopilot/`, whose router sets `ROOT="${CLAUDE_PLUGIN_ROOT}"`. `B8` derives the plugin
 docs from the files under `docs/` and fails on a bare or skill-relative (`../../docs/…`)
 spelling in a body, on `${CLAUDE_PLUGIN_ROOT}/docs/…` in a reference, where it is not
-rendered, and on a placeholder its router never defines. `B9` bites each arm on a fixture tree.
+rendered, and on a placeholder its router never defines. A companion plugin carries no `docs/`
+once installed, so in its skills `B8` judges the names of PLM's docs instead and accepts only
+the GitHub URL `https://github.com/MKITConsulting/zensu-claude-code/blob/main/docs/…`
+(`doc-foreign`). `B9` bites each arm on a fixture tree.
 A path that names no plugin doc, such as a project's `docs/*.md` glob or the docs skill's
 `docs/features/<KEY-N>-<slug>.md`, is not judged. Known gaps: only `docs/` is judged, so a bare
 `README.md` or `hooks/…` in prose stays a reviewer's catch (zensu-help, which reads them, spells

@@ -28,14 +28,14 @@ This holds even when the wording matches this skill's trigger phrases exactly.
 Two hooks ask which route a code change takes: `hooks/plan-approved-delegate.sh` after
 a plan approval (four options: `/zensu:autopilot`, `/zensu:build`, `/zensu:pilot`,
 implement directly) and `hooks/user-prompt-tdd-reminder.sh` on a code request while no
-chain is active (yes/no: Zensu workflow or direct). Both read this session's marker
+chain is active (Zensu workflow, direct and, while a person is present, `/zensu:autopilot`). Both read this session's marker
 first and ask only when nothing decided. A linked session — one another session started
 in Claude Desktop — that has no marker of its own takes its parent's `build`, so the user
 who chose the Zensu workflow there is not asked again. The marker records exactly one of
 two answers — the Zensu workflow (`build`) or direct implementation (`direct`). It never
 records `/zensu:autopilot` or `/zensu:pilot`: those push a branch, open a pull request
-or mutate tracked feature state, so they stay choices made per plan, through the
-question itself, through an explicit preference in the approval message, or by
+or mutate tracked feature state, so they stay choices made per plan or request, through
+the question itself, through an explicit preference in the approval message, or by
 invoking the skill.
 
 Both questions share this one marker, so a Zensu-workflow answer to either one decides both for the rest of the session.
@@ -105,9 +105,14 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 
 Both hooks resolve the route in this order, and `zensu-config.sh` owns the ladder:
 
-1. **an explicit preference in the user's own text** — "use autopilot", "no tdd",
-   "use tdd" in the approval message or the request itself; judged by the model from
-   the directive and never recorded
+1. **an explicit preference in the user's own text** — "no tdd" or "use tdd" in the
+   approval message or the request itself, and "use autopilot" in the approval message
+   only, while a person is present; judged by the model from the directive and never
+   recorded. A code request that asks for `/zensu:autopilot` selects nothing: while the
+   route reads `ask` the reminder's question offers it, a decided route's line never names
+   it, and invoking the skill runs it. "use tdd" also runs that one chain strict,
+   through a `TDD-MODE: strict` line in its specification, unless this session's
+   `/zensu:tdd-mode` choice is vanilla
 2. **this session's marker** — what this skill records
 3. **a `build` inherited from the parent session** — a linked session copies the `build` its
    parent recorded or itself inherited, once, the first time a hook resolves where the

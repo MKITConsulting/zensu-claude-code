@@ -91,7 +91,8 @@ test('the state layout twin matches the Session Control owner and the scrub list
 
 test('gitEnvironment and its scrub list come from git-environment-v1.js, which requires no plugin file, and session-trail takes them from there', () => {
   const owner = require(path.join(LIB, 'git-environment-v1.js'));
-  assert.strictEqual(keep.gitEnvironment, owner.gitEnvironment);
+  assert.deepStrictEqual(Object.keys(owner).sort(), ['GIT_ENV_SCRUB', 'scrubGitEnvironment']);
+  assert.strictEqual(keep.gitEnvironment, owner.scrubGitEnvironment);
   assert.strictEqual(keep.GIT_ENV_SCRUB, owner.GIT_ENV_SCRUB);
   assert.ok(Object.isFrozen(owner.GIT_ENV_SCRUB));
   const source = fs.readFileSync(path.join(LIB, 'git-environment-v1.js'), 'utf8');
@@ -99,12 +100,16 @@ test('gitEnvironment and its scrub list come from git-environment-v1.js, which r
   const builtins = [...source.matchAll(/\brequire\s*\(\s*(['"])(node:[a-z_/]+)\1\s*\)/g)];
   assert.strictEqual(calls.length, builtins.length);
   assert.strictEqual(/^\s*import\b/m.test(source), false);
-  const trail = fs.readFileSync(path.join(ROOT, 'skills', 'session-trail', 'scripts', 'trail.mjs'), 'utf8');
-  const start = trail.indexOf('function gitChildEnvironment() {');
-  assert.ok(start >= 0, 'trail.mjs must still define gitChildEnvironment');
-  const body = trail.slice(start, trail.indexOf('\n}\n', start));
-  assert.ok(body.includes("requireFromHere('../../../hooks/lib/git-environment-v1.js')"));
-  assert.strictEqual(body.includes('worktree-keep-v1.js'), false);
+  for (const copy of [['skills', 'session-trail'], ['plugins', 'session-hub', 'skills', 'session-trail']]) {
+    const file = path.join(ROOT, ...copy, 'scripts', 'trail.mjs');
+    const trail = fs.readFileSync(file, 'utf8');
+    const start = trail.indexOf('function gitChildEnvironment() {');
+    assert.ok(start >= 0, `${file} must still define gitChildEnvironment`);
+    const body = trail.slice(start, trail.indexOf('\n}\n', start));
+    assert.ok(body.includes("requireFromHere('../../../hooks/lib/git-environment-v1.js')"), file);
+    assert.ok(body.includes('scrubGitEnvironment(process.env)'), file);
+    assert.strictEqual(body.includes('worktree-keep-v1.js'), false, file);
+  }
 });
 
 test('managedWorktree recognizes a linked worktree under .claude/worktrees and nothing else', () => {

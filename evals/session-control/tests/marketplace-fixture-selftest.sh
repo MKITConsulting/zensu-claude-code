@@ -33,8 +33,8 @@ case "$(uname -s)" in
 esac
 [ "$(cd "$RESULT" && pwd -P)" = "$(cd "$TARGET" && pwd -P)" ]
 [ "$(jq -r '.plugins[0].source' "$TARGET/.claude-plugin/marketplace.json")" = './plugin' ]
-[ "$(jq -r '.plugins[0].source.source' "$TARGET/plugin/.claude-plugin/marketplace.json")" = github ]
-[ "$(jq -r '.plugins[0].source.ref' "$TARGET/plugin/.claude-plugin/marketplace.json")" = v9.8.7 ]
+[ "$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].source.source' "$TARGET/plugin/.claude-plugin/marketplace.json")" = github ]
+[ "$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].source.ref' "$TARGET/plugin/.claude-plugin/marketplace.json")" = v9.8.7 ]
 [ "$(git -C "$TARGET/plugin" rev-parse HEAD)" = "$REVISION" ]
 [ -z "$(git -C "$TARGET/plugin" status --porcelain=v1 --untracked-files=all)" ]
 [ "$(git -C "$SOURCE" rev-parse HEAD)" = "$REVISION" ]
@@ -67,7 +67,7 @@ node -e '
   const fs = require("node:fs");
   const file = process.argv[1];
   const value = JSON.parse(fs.readFileSync(file, "utf8"));
-  value.plugins[0].source.ref = "main";
+  value.plugins.find((entry) => entry.name === "zensu").source.ref = "main";
   fs.writeFileSync(file, `${JSON.stringify(value)}\n`);
 ' "$SOURCE/.claude-plugin/marketplace.json"
 git -C "$SOURCE" add .claude-plugin/marketplace.json

@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "aspectActivation": false,
+    "autoFix": false,
+    "autopilotEnforcer": false,
+    "backgroundTaskWait": false,
+    "bestSolutionFirst": false,
+    "chainEnforcer": false,
+    "contextAutoLoad": false,
+    "criticalReproduction": false,
+    "externalReviewImport": false,
+    "findingVerification": false,
+    "incrementalReviewRounds": false,
+    "intentRouter": false,
+    "mcpGate": false,
+    "pulseSession": false,
+    "reviewConvergence": false,
+    "reviewJudge": false,
+    "reviewPacketGate": false,
+    "reviewSpawnScopeSentence": false,
+    "secretScan": false,
+    "selfReview": false,
+    "sessionBanner": false,
+    "sessionHubReceipt": false,
+    "tddReminder": false,
+    "worktreeKeep": false,
+    "zenMode": false
+  },
+  "context": {
+    "compactionNudge": false
+  }
+}

@@ -88,6 +88,22 @@ background_review_retire() {
   return 0
 }
 
+background_review_unbind() {
+  local key entry
+  case "$INPUT" in *'"name"'*) ;; *) return 0 ;; esac
+  key="$(zensu_resolve_session_id "")" || return 0
+  for entry in "${CLAUDE_PLUGIN_DATA:-}/background-review/v1/names/$key"/*.json; do
+    if [ -f "$entry" ] && [ ! -L "$entry" ]; then
+      background_review_env || return 0
+      printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BACKGROUND_REVIEW_EXCLUSIONS" \
+        ZENSU_BR_PLUGIN_DATA="$BACKGROUND_REVIEW_DATA" ZENSU_BR_SESSION_KEY="$key" \
+        node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" unbind >/dev/null 2>&1
+      return 0
+    fi
+  done
+  return 0
+}
+
 REVIEW_INPUT="$INPUT"
 if [ "$BACKGROUND_ARRIVAL" = true ]; then
   ARRIVAL_SESSION="$(node -e '
@@ -115,7 +131,8 @@ if [ "$BACKGROUND_ARRIVAL" = true ]; then
     GATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
     GATE_LIB="$(bash "$GATE_LIB/zensu-host-path.sh" "$GATE_LIB" 2>/dev/null || printf '%s' "$GATE_LIB")"
     GATE_ADVICE="$(node "$GATE_LIB/review-gate-v1.js" record --event UserPromptSubmit \
-      --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$ARRIVAL_SESSION" <<<"$INPUT" 2>/dev/null)"
+      --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$ARRIVAL_SESSION" \
+      --plugin-data "$BACKGROUND_REVIEW_DATA" <<<"$INPUT" 2>/dev/null)"
     if [ -n "$GATE_ADVICE" ]; then
       printf '%s\n' "$GATE_ADVICE"
       exit 0
@@ -182,6 +199,7 @@ SUBAGENT_TYPE="$(node -e '
 ' <<<"$REVIEW_INPUT" 2>/dev/null)"
 
 if [ "$HOOK_EVENT" = PostToolUse ]; then
+  background_review_unbind
   case "$SUBAGENT_TYPE" in
     zensu:review-aspect|zensu:review-judge|zensu-review-*)
       if zensu_hook_enabled reviewPacketGate; then
@@ -441,6 +459,7 @@ review_gate_check() {
   lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
   lib="$(bash "$lib/zensu-host-path.sh" "$lib" 2>/dev/null || printf '%s' "$lib")"
   verdict="$(node "$lib/review-gate-v1.js" check --event "$event" ${ARRIVAL_AGENT:+--agent "$ARRIVAL_AGENT"} \
+    ${BACKGROUND_REVIEW_DATA:+--plugin-data "$BACKGROUND_REVIEW_DATA"} \
     --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$SESSION_ID" \
     --judge "$judge" --panel "$panel" --ticket "$REVIEW_TICKET" <<<"$INPUT" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] && return 0
@@ -490,8 +509,14 @@ fi
 review_gate_check
 
 FULL_SUITE_RUNNER="local"
+FULL_SUITE_WORK_DIR=""
+FULL_SUITE_WORK_FAULT=""
+if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
+  FULL_SUITE_WORK_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-work-tree --project-dir --session "$SESSION_ID" 2>/dev/null)" || FULL_SUITE_WORK_DIR=""
+  [ -n "$FULL_SUITE_WORK_DIR" ] || FULL_SUITE_WORK_FAULT="zensu-log.sh --chain-work-tree --project-dir could not resolve the work tree of this Autopilot-bound chain"
+fi
 if source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-full-suite-transport.sh" 2>/dev/null \
-  && [ "$(zensu_full_suite_policy_node "post-review-tdd-delegate.sh" effective 2>/dev/null)" = "ci" ]; then
+  && [ "$(zensu_full_suite_policy_node "post-review-tdd-delegate.sh" effective 0 "$FULL_SUITE_WORK_DIR" "$FULL_SUITE_WORK_FAULT" 2>/dev/null)" = "ci" ]; then
   FULL_SUITE_RUNNER="ci"
 fi
 FULL_SUITE_ROUND_NOTE="the full suite returns only when the review loop closes"
@@ -725,7 +750,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
   else
     MAX_CLOSE_SENTENCE="Before you reply, ${CLOSE_SUITE_STEP}. Fix rounds re-run only their own scoped suites and no terminus gate follows here, so ${CLOSE_SUITE_REASON}."
     if [ "$AUTOPILOT_BOUND" = "true" ]; then
-      MAX_CLOSE_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-work-tree --project-dir --session "$SESSION_ID" 2>/dev/null)" || MAX_CLOSE_DIR=""
+      MAX_CLOSE_DIR="$FULL_SUITE_WORK_DIR"
       MAX_CLOSE_CANON=""
       [ -n "$MAX_CLOSE_DIR" ] && MAX_CLOSE_CANON="$(cd "$MAX_CLOSE_DIR" 2>/dev/null && pwd -P)"
       MAX_ANCHOR_CANON=""

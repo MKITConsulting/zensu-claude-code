@@ -591,8 +591,69 @@ if arm "acc-unknown-mode"; then
     check "A18 an unknown gate mode is disclosed and acts as required (rc=$RC)" FAIL
     ERR
   fi
+  A18_LINE="$(grep -m 1 '^ACCEPTANCE — evidence\.acceptanceGate value ' "$WORK/err")"
 else
   check "A18 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+transport_fault_stub "$WORK/terminus-gate-mode-stub" gate-mode
+UNJUDGED_CAUSE='the acceptance transport could not be prepared'
+GATE_MODE_LINE="zensu-log.sh --chain-done: the gate-mode transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+ACCEPTANCE_STAYS_OPEN='zensu-log.sh --chain-done: the chain stays open; resolve the acceptance transport fault named above, then run --chain-done again.'
+unjudged_done() {
+  PATH="$WORK/terminus-gate-mode-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"
+}
+
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+if arm "acc-unjudged-escape"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ "$LEDGER" = "ZENSU_ACCEPTANCE_GATE" ] \
+    && grep -qF '/gate-mode: ' "$WORK/err" \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($UNJUDGED_CAUSE) | gate: required" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A34 an escaped terminus whose acceptance transport cannot be prepared is ledgered, closes and prints its ACCEPTANCE — escaped line" PASS
+  else
+    check "A34 an escaped terminus whose acceptance transport cannot be prepared is ledgered and closes (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A34 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+printf '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+if arm "acc-unjudged-advisory"; then
+  unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "ACCEPTANCE — unavailable (advisory, not blocking) | $UNJUDGED_CAUSE, so no acceptance record was read | gate: advisory" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A35 an advisory terminus whose acceptance transport cannot be prepared closes and prints its advisory ACCEPTANCE line" PASS
+  else
+    check "A35 an advisory terminus whose acceptance transport cannot be prepared closes (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A35 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+if arm "acc-unjudged-required"; then
+  unjudged_done; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "$ACCEPTANCE_STAYS_OPEN" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — ' "$WORK/err"; then
+    check "A36 a required terminus whose acceptance transport cannot be prepared refuses with the shell's own lines and keeps the chain open" PASS
+  else
+    check "A36 a required terminus whose acceptance transport cannot be prepared refuses (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A36 arm a ticket-bound chain with a receipt" FAIL
 fi
 
 printf '{}\n' > "$ZENSU_CONFIG"
@@ -644,6 +705,7 @@ if bound_arm "acc-bound-on" "$BOUND_ON" acc_run_on acc-chain-on true; then
     check "A26 a bound pass with live validation on closes as not-checked (rc=$RC done=$(done_flag))" FAIL
     ERR
   fi
+  A26_LINE="$(grep -m 1 '^ACCEPTANCE — not-checked | ' "$WORK/err")"
 else
   check "A26 arm an Autopilot-bound chain with a receipt and a dirty tree" FAIL
 fi
@@ -659,6 +721,7 @@ if bound_arm "acc-bound-off" "$BOUND_OFF" acc_run_off acc-chain-off false; then
     check "A27 a bound pass of a --no-validate run says so (rc=$RC done=$(done_flag))" FAIL
     ERR
   fi
+  A27_LINE="$(grep -m 1 '^ACCEPTANCE — not-checked | ' "$WORK/err")"
 else
   check "A27 arm an Autopilot-bound chain started with --no-validate" FAIL
 fi
@@ -678,6 +741,39 @@ if bound_arm "acc-bound-escape" "$BOUND_ESC" acc_run_esc acc-chain-esc true; the
   fi
 else
   check "A28 arm an Autopilot-bound chain for the escape case" FAIL
+fi
+
+BOUND_PREP="$WORK/bound-prepare"
+bound_project "$BOUND_PREP"
+if bound_arm "acc-bound-prepare" "$BOUND_PREP" acc_run_prep acc-chain-prep true; then
+  PATH="$WORK/terminus-gate-mode-stub:$PATH" bound_done "acc-bound-prepare" acc_run_prep acc-chain-prep; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] && [ -n "${A26_LINE:-}" ] \
+    && grep -qxF "$A26_LINE ($UNJUDGED_CAUSE)" "$WORK/err" \
+    && [ "$(grep -c '^ACCEPTANCE — ' "$WORK/err")" -eq 1 ]; then
+    check "A38 a bound pass whose acceptance transport cannot be prepared prints the module's not-checked line for a validating run, with the cause" PASS
+  else
+    check "A38 a bound pass whose acceptance transport cannot be prepared prints its not-checked line (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A38 arm an Autopilot-bound chain with a receipt and a dirty tree" FAIL
+fi
+
+BOUND_PREP_OFF="$WORK/bound-prepare-off"
+bound_project "$BOUND_PREP_OFF"
+if bound_arm "acc-bound-prepare-off" "$BOUND_PREP_OFF" acc_run_prep_off acc-chain-prep-off false; then
+  PATH="$WORK/terminus-gate-mode-stub:$PATH" bound_done "acc-bound-prepare-off" acc_run_prep_off acc-chain-prep-off; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] && [ -n "${A27_LINE:-}" ] \
+    && grep -qxF "$A27_LINE ($UNJUDGED_CAUSE)" "$WORK/err"; then
+    check "A38b a bound pass of a --no-validate run whose acceptance transport cannot be prepared prints the module's not-checked line for that run, with the cause" PASS
+  else
+    check "A38b a bound --no-validate pass whose acceptance transport cannot be prepared prints its not-checked line (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A38b arm an Autopilot-bound chain started with --no-validate" FAIL
 fi
 
 echo "== A chain bound to an Autopilot run that drives a worktree below the anchor =="
@@ -789,6 +885,32 @@ EVIDENCE
     check "A32 a work-tree fault whose transport write fails stops both acceptance verbs (status=$RC_TST record=$RC_TREC)" FAIL
     cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr"
   fi
+
+  transport_fault_stub "$WORK/gate-mode-stub" gate-mode
+  transport_fault_stub "$WORK/evidence-stub" evidence
+  PATH="$WORK/gate-mode-stub:$PATH" bash "$LOG" --acceptance-status --log "$RUN_LOG" >"$WORK/sout" 2>"$WORK/serr"; RC_GST=$?
+  PATH="$WORK/gate-mode-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/rout" 2>"$WORK/rerr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_GREC=$?
+  PATH="$WORK/evidence-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/vout" 2>"$WORK/verr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_VREC=$?
+  A33_TAIL="transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+  if [ "$RC_GST" -eq 2 ] && [ "$RC_GREC" -eq 2 ] && [ "$RC_VREC" -eq 2 ] \
+    && [ ! -s "$WORK/sout" ] && [ ! -s "$WORK/rout" ] && [ ! -s "$WORK/vout" ] \
+    && grep -qF '/gate-mode: ' "$WORK/serr" \
+    && grep -qxF "zensu-log.sh --acceptance-status: the gate-mode $A33_TAIL" "$WORK/serr" \
+    && grep -qF '/gate-mode: ' "$WORK/rerr" \
+    && grep -qxF "zensu-log.sh --acceptance-record: the gate-mode $A33_TAIL" "$WORK/rerr" \
+    && grep -qF '/evidence: ' "$WORK/verr" \
+    && grep -qxF "zensu-log.sh --acceptance-record: the evidence $A33_TAIL" "$WORK/verr"; then
+    check "A33 a failed gate-mode or evidence transport write stops the acceptance verbs with exit 2 and the shell's own line, before the module runs" PASS
+  else
+    check "A33 a failed gate-mode or evidence transport write stops the acceptance verbs (status=$RC_GST record=$RC_GREC evidence=$RC_VREC)" FAIL
+    cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr" "$WORK/vout" "$WORK/verr"
+  fi
 else
   check "A29 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL
 fi
@@ -806,9 +928,195 @@ if arm_plain "acc-no-receipt-clean" "$PROJ"; then
     check "A20 a chain with no receipt and no changed file is not gated (rc=$RC)" FAIL
     ERR
   fi
+  A20_LINE="$(grep -m 1 '^ACCEPTANCE — not-applicable | ' "$WORK/err")"
 else
   check "A20 arm a ticket-bound chain without a receipt" FAIL
 fi
+
+with_cause() {
+  [ -n "$1" ] || return 1
+  printf '%s' "${1% | gate: *} ($2) | gate: ${1##* | gate: }"
+}
+
+unjudged_refused() {
+  [ "$1" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qxF "$ACCEPTANCE_STAYS_OPEN" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — not-applicable' "$WORK/err"
+}
+
+if arm_plain "acc-unjudged-clean" "$PROJ"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A20_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — escaped' "$WORK/err"; then
+    check "A37 an escaped terminus whose acceptance transport cannot be prepared prints the module's not-applicable line with the cause on a clean tree without a receipt and records no escape" PASS
+  else
+    check "A37 an escaped terminus on a clean tree without a receipt records no escape (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-clean-required" "$PROJ"; then
+  unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A20_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A37c a required terminus whose acceptance transport cannot be prepared closes a clean chain without a receipt with the module's not-applicable line and the cause" PASS
+  else
+    check "A37c a required terminus on a clean tree without a receipt closes as not-applicable (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37c arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-dirty" "$PROJ"; then
+  printf 'late edit\n' > "$PROJ/tracked.txt"
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A39 a required terminus whose acceptance transport cannot be prepared refuses a changed tree without a receipt and says that the chain stays open" PASS
+  else
+    check "A39 a required terminus whose acceptance transport cannot be prepared refuses a changed tree without a receipt (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+  git -C "$PROJ" checkout -q -- tracked.txt
+else
+  check "A39 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-index-only" "$PROJ"; then
+  printf 'staged only\n' > "$PROJ/staged-only.txt"
+  git -C "$PROJ" add staged-only.txt
+  rm -f "$PROJ/staged-only.txt"
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A40 a change that exists only in the index refuses a required terminus whose acceptance transport cannot be prepared" PASS
+  else
+    check "A40 an index-only change refuses a required terminus whose acceptance transport cannot be prepared (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+  git -C "$PROJ" rm -q --cached staged-only.txt
+else
+  check "A40 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-landing-env" "$PROJ"; then
+  ZENSU_EDIT_LANDING_GATE=off unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A41 an edit-landing escape set in the environment keeps a clean chain without a receipt out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A41 an environment edit-landing escape keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A41 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-landing-ledger" "$PROJ" escape-edit-landing; then
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A42 an edit-landing escape recorded in the ledger keeps a clean chain without a receipt out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A42 a ledgered edit-landing escape keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A42 arm a ticket-bound chain with the edit-landing gate escaped" FAIL
+fi
+
+printf 'v2\n' > "$PROJ/tracked.txt"
+if arm "acc-unjudged-receipt-clean"; then
+  git -C "$PROJ" checkout -q -- tracked.txt
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A43 an edit-landing receipt keeps a clean chain out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A43 a receipt keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A43 arm a ticket-bound chain with a receipt" FAIL
+fi
+git -C "$PROJ" checkout -q -- tracked.txt
+rm -rf "$PROJ/.zensu/plans" "$PROJ/.zensu/logs"
+
+mkdir -p "$WORK/status-fault-stub"
+printf '#!/bin/sh\nfor arg in "$@"; do\n  [ "$arg" = ":(exclude).zensu" ] && { echo "fatal: simulated git status failure" >&2; exit 128; }\ndone\nexec "%s" "$@"\n' "$(command -v git)" > "$WORK/status-fault-stub/git"
+chmod +x "$WORK/status-fault-stub/git"
+if arm_plain "acc-unjudged-git-fault" "$PROJ"; then
+  PATH="$WORK/status-fault-stub:$WORK/terminus-gate-mode-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A44 a git status that fails keeps a clean chain without a receipt out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A44 a failing git status keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A44 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-early-stop" "$PROJ" escape-edit-landing; then
+  _avr_log="$(printf 'unresolvable\nlog')" _avr_chain_inputs=1 chain_done; RC=$?
+  if unjudged_refused "$RC" \
+    && grep -qxF 'zensu-log.sh --chain-done: --log cannot be resolved' "$WORK/err"; then
+    check "A45 a preparation that stops before it resolves the edit-landing escape never asks for not-applicable, whatever inputs flag the caller exported" PASS
+  else
+    check "A45 a preparation that stops before the chain's inputs never asks for not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A45 arm a ticket-bound chain with the edit-landing gate escaped" FAIL
+fi
+
+line_of() {
+  grep -nxF "$1" "$2" | head -n 1 | cut -d: -f1
+}
+
+printf '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"sometimes"}}\n' > "$ZENSU_CONFIG"
+printf 'v2\n' > "$PROJ/tracked.txt"
+if arm "acc-unjudged-unknown-mode"; then
+  unjudged_done; RC=$?
+  DISCLOSED="$(line_of "${A18_LINE:-}" "$WORK/err")"
+  OPEN_AT="$(line_of "$ACCEPTANCE_STAYS_OPEN" "$WORK/err")"
+  if unjudged_refused "$RC" && [ -n "${A18_LINE:-}" ] && [ -n "$DISCLOSED" ] && [ -n "$OPEN_AT" ] \
+    && [ "$DISCLOSED" -lt "$OPEN_AT" ] \
+    && [ "$(grep -c '^ACCEPTANCE — ' "$WORK/err")" -eq 1 ]; then
+    check "A46 an unknown gate mode is disclosed ahead of the refusal of a required terminus whose acceptance transport cannot be prepared" PASS
+  else
+    check "A46 an unknown gate mode is disclosed ahead of the refusal (rc=$RC done=$(done_flag) disclosed=$DISCLOSED open=$OPEN_AT)" FAIL
+    ERR
+  fi
+else
+  check "A46 arm a ticket-bound chain with a receipt" FAIL
+fi
+if arm "acc-unjudged-unknown-escape"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  ESCAPED_LINE="ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($UNJUDGED_CAUSE) | gate: required"
+  DISCLOSED="$(line_of "${A18_LINE:-}" "$WORK/err")"
+  ESCAPED_AT="$(line_of "$ESCAPED_LINE" "$WORK/err")"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ "$LEDGER" = "ZENSU_ACCEPTANCE_GATE" ] \
+    && [ -n "${A18_LINE:-}" ] && [ -n "$DISCLOSED" ] && [ -n "$ESCAPED_AT" ] \
+    && [ "$((DISCLOSED + 1))" -eq "$ESCAPED_AT" ]; then
+    check "A46b an unknown gate mode is disclosed on the line before the escaped line of a terminus whose acceptance transport cannot be prepared" PASS
+  else
+    check "A46b an unknown gate mode is disclosed before the escaped line (rc=$RC done=$(done_flag) ledger='$LEDGER' disclosed=$DISCLOSED escaped=$ESCAPED_AT)" FAIL
+    ERR
+  fi
+else
+  check "A46b arm a ticket-bound chain with a receipt" FAIL
+fi
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+git -C "$PROJ" checkout -q -- tracked.txt
+rm -rf "$PROJ/.zensu/plans" "$PROJ/.zensu/logs"
 
 if arm_plain "acc-no-receipt-dirty" "$PROJ"; then
   printf 'late edit\n' > "$PROJ/tracked.txt"
@@ -881,8 +1189,41 @@ if arm_plain "acc-plain" "$PLAIN"; then
     check "A23 a project outside git without a receipt is not gated (rc=$RC)" FAIL
     ERR
   fi
+  A23_LINE="$(grep -m 1 '^ACCEPTANCE — not-applicable | ' "$WORK/err")"
 else
   check "A23 arm a ticket-bound chain outside git" FAIL
+fi
+
+if arm_plain "acc-plain-unjudged" "$PLAIN"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A23_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — escaped' "$WORK/err"; then
+    check "A37b an escaped terminus outside git whose acceptance transport cannot be prepared prints the module's not-applicable line with the cause and records no escape" PASS
+  else
+    check "A37b an escaped terminus outside git whose acceptance transport cannot be prepared closes as not-applicable (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37b arm a ticket-bound chain outside git" FAIL
+fi
+
+if arm_plain "acc-plain-unjudged-required" "$PLAIN"; then
+  unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A23_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A37d a required terminus outside git whose acceptance transport cannot be prepared closes with the module's not-applicable line and the cause" PASS
+  else
+    check "A37d a required terminus outside git whose acceptance transport cannot be prepared closes as not-applicable (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37d arm a ticket-bound chain outside git" FAIL
 fi
 
 export CLAUDE_PROJECT_DIR="$PROJ"

@@ -131,6 +131,16 @@ the suite, and attempt 2 was green on all three shards.
   the larger, and `post-review-self-review-handoff` 704709 and 687026 ms; the shard summed 1316
   and 1297 s.
 
+**The gate re-entry block grew `autopilot-state-machine`, UNMEASURED on Windows.** Its `GR`
+checks make 58 lease-taking state-library calls across five temporary projects
+(`.claude/rules/autopilot-gate-reentry.md`). At the roughly 1.2 s per hook drive recorded above
+for the prompt-ledger change, that is about 70 s, which would leave about 240 s, 19% of the
+1280000 ms cap, over the 969005 ms figure; a slow runner, which this file records as 28% slower
+on this suite, leaves less. No cap moved and no suite moved. Replace the estimate with the next
+green `windows-shard-1` figure; when the suite then keeps less than 20% headroom, move the `GR`
+block into a suite of its own on a shard with room, or another suite off shard 1, instead of
+raising the cap.
+
 The two raised shard-5 caps hold together. When `autopilot-plan-delegate` and
 `post-review-self-review-handoff` both run to their caps of 720000 and 900000 ms, the four suites
 behind them are left about 179 s: 180000 ms less `coverage-report-windows-paths` (at most 862 ms

@@ -1,6 +1,6 @@
 'use strict';
 
-const { parse, firstEnd, proseAsk, classifyQuestion, YES_LABEL, NO_LABEL } = require('../lib/envelope.js');
+const { parse, firstEnd, proseAsk, classifyQuestion, YES_LABEL, NO_LABEL, AUTOPILOT_LABEL } = require('../lib/envelope.js');
 
 const NEEDLES = [
   ['the Yes label', YES_LABEL],
@@ -12,18 +12,46 @@ const NEEDLES = [
   ['the route change command', /\/zensu:delivery-route\b/],
 ];
 
-function missing(text) {
-  return NEEDLES.filter(([, re]) => !re.test(text)).map(([name]) => name);
+const AUTOPILOT_NEEDLES = [
+  ['the Autopilot label', AUTOPILOT_LABEL],
+  ['the branch push and pull request it makes', /\bpush(es|ed|ing)?\b[^.|]{0,80}\b(pull request|PR)\b|\b(pull request|PR)\b[^.|]{0,80}\bpush(es|ed|ing)?\b/i],
+  ['the gh or glab CLI it needs', /\b(gh|glab)\b|\bgit(hub|lab) cli\b/i],
+];
+
+const OFFERED_ANYWAY = 'an Autopilot option the injected shape does not offer';
+
+function needles(offered) {
+  return offered ? [...NEEDLES, ...AUTOPILOT_NEEDLES] : NEEDLES;
 }
 
-module.exports = (output) => {
+function missing(text, offered) {
+  const gaps = needles(offered).filter(([, re]) => !re.test(text)).map(([name]) => name);
+  if (!offered && AUTOPILOT_LABEL.test(text)) gaps.push(OFFERED_ANYWAY);
+  return gaps;
+}
+
+function verdictReason(gaps, offered) {
+  if (gaps.length === 0) return offered ? 'all three labels and all seven disclosures present' : 'both labels and all five disclosures present, and no Autopilot option';
+  const lacking = gaps.filter((gap) => gap !== OFFERED_ANYWAY);
+  const parts = [];
+  if (lacking.length) parts.push(`lacks ${lacking.join(', ')}`);
+  if (gaps.includes(OFFERED_ANYWAY)) parts.push('offers Autopilot, which the injected shape does not');
+  return `the route question ${parts.join(' and ')}`;
+}
+
+module.exports = (output, context) => {
+  const vars = (context && (context.vars || (context.test && context.test.vars))) || {};
   const cut = firstEnd(parse(output));
   const tool = cut.probe.find((r) => r.tool === 'AskUserQuestion' && classifyQuestion(r.question) === 'route');
   const text = tool ? String(tool.question || '') : proseAsk(cut.prose, 'reminder') ? cut.prose : null;
   if (text === null) return { pass: true, score: 1, reason: 'no route question was asked; nothing to check' };
-  const gaps = missing(text);
-  return { pass: gaps.length === 0, score: 1 - gaps.length / NEEDLES.length, reason: gaps.length ? `the route question lacks ${gaps.join(', ')}` : 'both labels and all five disclosures present' };
+  if (vars.autopilot_option !== 'offered' && vars.autopilot_option !== 'absent') return { pass: false, score: 0, reason: 'the scenario does not say whether the injected shape offers Autopilot' };
+  const offered = vars.autopilot_option === 'offered';
+  const gaps = missing(text, offered);
+  const total = needles(offered).length + (offered ? 0 : 1);
+  return { pass: gaps.length === 0, score: (total - gaps.length) / total, reason: verdictReason(gaps, offered) };
 };
 
 module.exports.NEEDLES = NEEDLES;
+module.exports.AUTOPILOT_NEEDLES = AUTOPILOT_NEEDLES;
 module.exports.missing = missing;

@@ -15,12 +15,16 @@ if source "$_ZENSU_HOOK_DIR/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null 
   zensu_browser_consent_marked "$INPUT" || exit 0
   ZENSU_CONSENT_PREFILTER=loaded
 else
-  _zensu_scan="$(printf '%s' "$INPUT" | LC_ALL=C sed 's/\\[nrt]//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\\`" 2>/dev/null)" || _zensu_scan=""
+  _zensu_drop="\"'\\\\\`"
+  case "$INPUT" in
+    *'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) _zensu_drop="$_zensu_drop+()\$ "$'\t\342\200\230\231\232\233\234\235\236' ;;
+  esac
+  _zensu_scan="$(printf '%s' "$INPUT" | LC_ALL=C sed -e 's/\\[nrt]//g' -e 's/\\u201[89a-eA-E]//g' 2>/dev/null | LC_ALL=C tr -d "$_zensu_drop" 2>/dev/null)" || _zensu_scan=""
   case "$_zensu_scan $INPUT" in
     *[Pp][Ll][Aa][Yy][Ww][Rr][Ii][Gg][Hh][Tt]*|*[Zz][Ee][Nn][Ss][Uu]-[Vv][Ee][Rr][Ii][Ff][Yy]*) ;;
     *'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*)
       case "$_zensu_scan" in
-        *[Ww][Rr][Ii][Gg][Hh][Tt]*|*[Vv][Ee][Rr][Ii][Ff][Yy]*|*[Uu]{*) ;;
+        *[Ww][Rr][Ii][Gg][Hh][Tt]*|*[Vv][Ee][Rr][Ii][Ff][Yy]*|*[Cc][Oo][Nn][Ff][Ii][Gg]*|*[Uu]{*) ;;
         *) exit 0 ;;
       esac
       ;;

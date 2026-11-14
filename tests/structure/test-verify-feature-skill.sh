@@ -323,22 +323,27 @@ fi
 # P4 — credential-blind auth; no token extraction/injection recipe.
 if grep -qiF 'credential-blind' "$SKILL_MD" && grep -qF 'use visible manual' "$SKILL_MD" \
   && grep -qF 'browser login or report the authenticated coverage as PARTIAL' "$SKILL_MD" \
+  && grep -qF "only the run-config helper runs a recipe's (§Authentication)" <<<"$SKILL_FLAT" \
   && grep -qF 'The browser consent gate denies every cookie, local/session-storage and state command on a `zensu-verify` session because they expose credential material.' <<<"$SKILL_FLAT"; then
-  check "P4a auth is visible-only and the gate denies every browser storage command" PASS
+  check "P4a auth is a helper-run recipe login or a visible login, and the gate denies every browser storage command" PASS
 else
-  check "P4a auth is visible-only and the gate denies every browser storage command" FAIL
+  check "P4a auth is a helper-run recipe login or a visible login, and the gate denies every browser storage command" FAIL
 fi
-if grep -qF 'not accept an auth artifact path' "$SKILL_MD" \
+if grep -qF 'Never accept an auth artifact path or run a login script yourself' "$SKILL_MD" \
+  && ! grep -qF 'not accept an auth artifact path' "$SKILL_MD" \
   && ! grep -rqF 'browser_set_storage_state' "$SKILL_DIR"; then
-  check "P4b verify-feature never accepts or restores storage-state artifacts" PASS
+  check "P4b verify-feature never accepts an artifact path or runs a login script itself" PASS
 else
-  check "P4b verify-feature never accepts or restores storage-state artifacts" FAIL
+  check "P4b verify-feature never accepts an artifact path or runs a login script itself" FAIL
 fi
-if grep -qF 'hard-denies every getter/exporter' "$SKILL_MD" \
-  && grep -qF 'Do not invoke `auth.loginScript`' <<<"$SKILL_FLAT"; then
-  check "P4e future opaque auth requires a narrow deny-by-default gate" PASS
+if grep -qF 'Never run `auth.loginScript`, read `STORAGE_STATE` or open a run'"'"'s `auth/` directory yourself; the verify-auth read guard denies it.' <<<"$SKILL_FLAT" \
+  && grep -qF '## 6. Signed-in runs (recipe login script)' "$BROWSER_MD" \
+  && grep -qF 'It refuses unless the verify-auth read guard is registered.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'The helper prints `login failed: <class>`' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'Do not invoke `auth.loginScript`' <<<"$SKILL_FLAT"; then
+  check "P4e a recipe login runs only inside the run-config helper, behind the verify-auth read guard" PASS
 else
-  check "P4e future opaque auth requires a narrow deny-by-default gate" FAIL
+  check "P4e a recipe login runs only inside the run-config helper, behind the verify-auth read guard" FAIL
 fi
 if grep -qF '$GIT_ROOT/.zensu/verify-feature-runs/<random>' "$SKILL_MD" \
   && grep -qF 'Remove only the unique leaf on cleanup.' "$SKILL_MD"; then
@@ -377,10 +382,14 @@ if grep -qF 'The evidence boundary is the ORIGIN, never the route.' <<<"$SKILL_F
 else
   check "P4q protected DOM and visual evidence reaches the model only from an approved origin, at any path" FAIL
 fi
-if grep -qF 'A future gate may re-enable opaque state only when it admits a path-contained setter and hard-denies every getter/exporter.' <<<"$SKILL_FLAT"; then
-  check "P4g browser state commands stay denied until a narrow gate exists" PASS
+if grep -qF '1. **Recipe login script:** when the selected recipe'"'"'s `auth` block sets `mode: login-script` and `artifact: storageState`, sign in through the helper'"'"'s `--login-recipe` as `rules/browser-verification.md` section 6 says.' <<<"$SKILL_FLAT" \
+  && grep -qF '`console` and `requests` are denied, so the runtime-signal plane of a signed-in row is PARTIAL.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Every cookie, storage and state command stays denied, as on every `zensu-verify` session.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'The recorder deletes the state file once `open` ran' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'A future gate may re-enable opaque state' <<<"$SKILL_FLAT"; then
+  check "P4g browser state restores only through the recipe login, and a signed-in session loses console and requests" PASS
 else
-  check "P4g browser state commands stay denied until a narrow gate exists" FAIL
+  check "P4g browser state restores only through the recipe login, and a signed-in session loses console and requests" FAIL
 fi
 if grep -qF 'baseUrl:     "http://localhost:5173" # same-origin /api proxy' "$AUTOPILOT_CONFIG" \
   && grep -qF 'appOrigin:   "http://localhost:5173" # exact browser/storage-state origin' "$AUTOPILOT_CONFIG"; then
@@ -780,7 +789,7 @@ fi
 PIN_DRIFT=""
 grep -qxF "npm install -g @playwright/cli@${PW_MEASURED:-unset}" "$PLUGIN_DIR/docs/verify-feature.md" || PIN_DRIFT="$PIN_DRIFT docs/verify-feature.md(install block)"
 grep -qF "pinned by a golden recording of \`playwright-cli\` ${PW_MEASURED:-unset}'s parser" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/docs/gates.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT docs/gates.md(golden recording)"
-grep -qF "grader was written against \`playwright-cli\` ${PW_MEASURED:-unset})" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/evals/verify-feature/README.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT evals/verify-feature/README.md"
+grep -qF "the run-config helper accepts only the measured version, \`playwright-cli\` ${PW_MEASURED:-unset}, and the grader" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/evals/verify-feature/README.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT evals/verify-feature/README.md"
 if [ -z "$PIN_DRIFT" ]; then
   check "P7h the fenced install line, the golden-recording sentence and the eval README name the measured version ${PW_MEASURED:-}" PASS
 else
@@ -922,6 +931,27 @@ P9_VERDICTS="$(node -e '
     if (target === -1) throw new Error("no " + heading + " section to move the notes into");
     return rest.slice(0, target + 2).concat(block, rest.slice(target + 2)).join("\n");
   }
+  const PIN = /npm install -g @playwright\/cli@([^\s`"(),;]+)/g;
+  function unreleasedSection(text) {
+    const lines = text.split("\n");
+    const at = lines.indexOf("## [Unreleased]");
+    if (at === -1 || lines.lastIndexOf("## [Unreleased]") !== at) throw new Error("the changelog does not carry exactly one Unreleased heading");
+    let end = at + 1;
+    while (end < lines.length && !/^## /.test(lines[end])) end += 1;
+    return { lines, at, end };
+  }
+  function unreleasedPins(text, measuredVersion) {
+    const { lines, at, end } = unreleasedSection(text);
+    const flat = lines.slice(at + 1, end).join(" ").replace(/\s+/g, " ");
+    const pins = Array.from(flat.matchAll(PIN), (match) => match[1].replace(/\.+$/, ""));
+    const foreign = pins.filter((pin) => pin !== measuredVersion);
+    if (foreign.length) throw new Error("the Unreleased section names " + foreign.map((pin) => "@playwright/cli@" + pin).join(", ") + ", not the measured " + measuredVersion);
+    return pins.length + (pins.length === 1 ? " pin" : " pins") + " at " + measuredVersion;
+  }
+  function withUnreleasedTail(text, injected) {
+    const { lines, end } = unreleasedSection(text);
+    return lines.slice(0, end).concat(injected, "", lines.slice(end)).join("\n");
+  }
   const verdicts = [];
   function scenario(name, run) {
     try { verdicts.push(name + "\tok\t" + run()); }
@@ -937,6 +967,9 @@ P9_VERDICTS="$(node -e '
       const shipped = release(changelog, measured, "99.0.0").released;
       return release(shipped, bumped, "99.1.0").version + " with measured " + bumped;
     });
+    scenario("unreleased-pins", () => unreleasedPins(changelog, measured));
+    scenario("foreign-pin", () => unreleasedPins(withUnreleasedTail(changelog, ["- **synthetic**: Upgrade with `npm install -g @playwright/cli@" + bumped + "`."]), measured));
+    scenario("wrapped-pin", () => unreleasedPins(withUnreleasedTail(changelog, ["- **synthetic**: Upgrade with `npm install -g", "  @playwright/cli@" + bumped + "`."]), measured));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -958,6 +991,18 @@ esac
 case "$(p9_verdict bumped)" in
   ok$'\t'*) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" PASS ;;
   *) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict unreleased-pins)" in
+  ok$'\t'*) check "P9e every npm install pin of @playwright/cli in the Unreleased section names the measured version ($(p9_verdict unreleased-pins | cut -f2))" PASS ;;
+  *) check "P9e every npm install pin of @playwright/cli in the Unreleased section names the measured version ($(p9_verdict unreleased-pins | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict foreign-pin)" in
+  fail$'\t'*'not the measured'*) check "P9f an install pin of another version at the end of the Unreleased section is refused" PASS ;;
+  *) check "P9f an install pin of another version at the end of the Unreleased section is refused (got: $(p9_verdict foreign-pin))" FAIL ;;
+esac
+case "$(p9_verdict wrapped-pin)" in
+  fail$'\t'*'not the measured'*) check "P9g an install pin of another version wrapped after -g at the end of the Unreleased section is refused" PASS ;;
+  *) check "P9g an install pin of another version wrapped after -g at the end of the Unreleased section is refused (got: $(p9_verdict wrapped-pin))" FAIL ;;
 esac
 
 DRIVERS_MD="$SKILL_DIR/rules/drivers.md"

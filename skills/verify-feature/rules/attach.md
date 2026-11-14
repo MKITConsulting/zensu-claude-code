@@ -17,3 +17,10 @@ unestablished.
 
 Consent applies unchanged: the first navigation to the attached origin asks the user. Attach
 applies to `browser` and `api` rows; a build driver always builds and launches its own copy.
+
+Signing in: when the selected recipe carries an `auth` block with `mode: login-script` and
+`artifact: storageState`, the `browser` rows may sign in through that recipe's login script,
+exactly as `rules/browser-verification.md` section 6 says, with the attached origin as the run's
+`--origin`. The login script then runs against the process the user started, so it needs a test
+account that process already knows; a failed login falls back to visible manual login or PARTIAL.
+Without such a recipe, attach mode signs in only visibly.

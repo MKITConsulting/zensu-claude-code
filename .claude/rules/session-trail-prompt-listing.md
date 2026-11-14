@@ -1,8 +1,11 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/SKILL.md"
+  - "plugins/session-hub/skills/session-trail/SKILL.md"
   - "skills/session-trail/references/**"
+  - "plugins/session-hub/skills/session-trail/references/**"
   - "tests/structure/prompt-listing-v1.test.js"
   - "tests/structure/fixtures/queued-command-delivery.v1.jsonl"
   - "tests/structure/test-session-trail-verdict.sh"
@@ -10,6 +13,10 @@ paths:
 ---
 
 # Session-Trail Prompt Listing (`extractPrompts` in `skills/session-trail/scripts/trail.mjs`)
+
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
 
 **One listing feeds every prompt section.** A deep read calls `extractPrompts(text, read.full)`
 once per session and stores `prompts` and `withdrawnPrompts` on the row. Every carrier reads

@@ -144,7 +144,7 @@ fi
 
 # P10 — version stays in sync across plugin.json + marketplace.json + README badge.
 # Adding a skill does NOT bump the version; this guards against an accidental drift.
-MARKET_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKET_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 if [ "$MARKET_VERSION" = "$EXPECTED_VERSION" ]; then
   check "P10a marketplace.json version ($MARKET_VERSION) == plugin.json ($EXPECTED_VERSION)" PASS
 else
@@ -186,7 +186,6 @@ if printf '%s' "$STEP0_SECTION" | grep -qF '[ -f "$ROOT/hooks/lib/zensu-vcs.sh" 
 else
   check "P11g Step 0 preflight validates zensu-vcs.sh, not zensu-log.sh" FAIL
 fi
-# P11g — the raw pre-push `gh pr view <n>` guard must be GONE (routed through --pr-state)
 if grep -qF -- 'gh pr view <n> --json state,mergedAt' "$SKILL_MD"; then
   check "P11h pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" FAIL
 else
