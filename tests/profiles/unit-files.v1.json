@@ -270,9 +270,9 @@
       "summary": "The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions."
     },
     {
-      "path": "tests/structure/verify-auth-guard-v1.test.js", "registered": 11, "skips": {"win32": 2},
+      "path": "tests/structure/verify-auth-guard-v1.test.js", "registered": 12, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
-      "summary": "The verify-auth read guard: file, search, shell and every other tool's calls that reach a run auth directory, the browser call that names a run without a zensu-verify session, its registration on every tool and its fail-closed copies."
+      "summary": "The verify-auth read guard: file, search, shell and every other tool's calls that reach a run auth directory, other tools' prose read literally without touching the file system, the browser call that names a run without a zensu-verify session, its registration on every tool and its fail-closed copies."
     },
     {
       "path": "tests/structure/verify-auth-login-e2e.test.js", "registered": 1, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 1},

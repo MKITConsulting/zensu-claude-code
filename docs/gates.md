@@ -64,7 +64,7 @@ for both readings.
 | Session Control check | Denied when it names a protected input such as `ZENSU_SESSION_KEY` in any spelling, writes the Environment provider under a name built at run time, turns text built at run time into code, or cannot be read. |
 | Source-write rules (A), (B), (C) | While `hooks.bashWriteGate` is on, only a provably read-only command passes. Outside Windows, a name that PowerShell 7 leaves to a native program, such as `sort` or `ls`, counts as that program. |
 | Secret scan | The whole command text is scanned. |
-| Browser consent gate | A `zensu-verify` `playwright-cli` call is refused, in every spelling the analyzer decodes: backtick escapes, Unicode escapes and joined string literals. |
+| Browser consent gate | A `zensu-verify` `playwright-cli` call, and one that names a `verify-feature-runs` directory or a config file, is refused, in every spelling the analyzer decodes: backtick escapes, Unicode escapes and joined string literals. |
 | Artifact redaction | Runs as after a Bash command. |
 | Work-order gate | Refused in a work-order session; the launcher turns the PowerShell tool off. |
 
@@ -706,10 +706,12 @@ chain states.
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
 (`post-browser-navigation-consent.sh`), both run by the hook dispatcher on the `Bash|PowerShell` matcher. A
-PowerShell call that names `playwright-cli` and a `zensu-verify-*` session is refused, so run
-those calls through the Bash tool. It is refused in every spelling the shared PowerShell analyzer
-decodes, a backtick or Unicode escape and joined string literals included, so the prefilter
-starts `node` for a PowerShell call that names `wright` and `verify` or holds a Unicode escape. The gate is
+PowerShell call that names `playwright-cli` and a `zensu-verify-*` session, a `verify-feature-runs`
+directory or a config file is refused, so run those calls through the Bash tool. It is refused in
+every spelling the shared PowerShell analyzer decodes, a backtick or Unicode escape and joined
+string literals included, so the prefilter starts `node` for a PowerShell call whose text, with
+quotes, `+`, parentheses, `$` and blanks dropped, names `wright` beside `verify` or `config`, or
+holds a Unicode escape. The gate is
 textual: they judge a `playwright-cli` call on a `zensu-verify-*` session — the session
 `scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — when its command
 text names the CLI and that session, or names the CLI while the hook environment's
@@ -747,10 +749,13 @@ opened. The skill now drives `playwright-cli`, which the user installs once
 unpinned), and the controls the broker
 held moved into this gate and into the run config the browser is opened with.
 
-**Scope.** Only `zensu-verify-*` sessions are judged. A `playwright-cli` call on the default
+**Scope.** `zensu-verify-*` sessions are judged in full. A `playwright-cli` call on the default
 session or on a session a user or another skill named is not a verification run: a user's own
 skill may legitimately use `eval`, cookies or state files there, and denying it would be
-overreach. The cost is stated rather than implied: a model that opens a browser under a session
+overreach, so on such a session the gate applies only the **Other sessions** rules below, to a
+call that names a run directory or passes a config. Those rules bind a user's own skill too: its
+own config that restores a browser state, an INI config, a config the gate cannot read, and a
+config path it cannot pin down are refused there. The cost is stated rather than implied: a model that opens a browser under a session
 name it chose itself sits outside the gate, and the skill's instruction to use only the printed
 session is prose, not a boundary.
 
@@ -900,7 +905,8 @@ consent prompt: in remote mode on the recipe's `auth.baseUrl`, which must be one
 origins, or on its `auth.appOrigin` without one; in local mode on the run's own loopback app
 origin, its first `--origin`. The caller names no login origin. In local mode that loopback
 origin is still the caller's choice, so a local recipe signs in only a throwaway account the
-local app alone knows.
+local app alone knows; a local recipe that names any other origin as `appOrigin` or `baseUrl`, or
+declares an `environment`, is refused, which also refuses a split local frontend/API recipe.
 An inline state object, a relative path and every other location are refused. Such a config
 opens only on a `zensu-verify-auth-…` session, which the helper names. A call on any other
 session that names a run directory, or whose config restores a browser state, is denied by this
@@ -933,19 +939,29 @@ command of `playwright-cli` 0.1.24, recorded in
 **Other sessions.** A `playwright-cli` call is judged whatever its session — named by `-s`, by
 an inline `PLAYWRIGHT_CLI_SESSION` assignment, by the hook environment or by the CLI's default —
 when its command text names a `verify-feature-runs` directory or passes a config through
-`--config` or an inline `PLAYWRIGHT_MCP_CONFIG`. A call on a `zensu-verify-…` session keeps every
-rule above, so a signed-in config still opens only as one plain gated call on the
+`--config` or a `PLAYWRIGHT_MCP_CONFIG` assignment. A call on a `zensu-verify-…` session keeps
+every rule above, so a signed-in config still opens only as one plain gated call on the
 `zensu-verify-auth-…` session with its canonical run config, and `state-load` stays denied. A
 call on any other session is denied with a final reason when the command names a run
 directory, in any position and behind any program the text shows, or when its config file
-carries `browser.contextOptions.storageState`. The gate reads that config as the CLI does: the
-path as given when it is absolute, else against the payload's working directory when the call
-is one plain call without a wrapper, with a byte-order mark skipped and the text parsed as JSON.
-The CLI reads an `.ini` path, and a file that is no JSON and does not start with `{`, as INI, so
-the gate refuses a config it cannot read as JSON — missing, not a regular file, over 1 MiB,
-invalid JSON or an `.ini` path — and a relative config path in a command that is not one plain
-unwrapped call. A config that restores no state passes, and so does a call that names neither a
-run directory nor a config. A PowerShell call that names the CLI with a run directory or a
+carries `browser.contextOptions.storageState`. A CLI that another program receives as an
+argument counts as such a call — `xargs`, `stdbuf`, `caffeinate`, `env -S`, `bash -c --`, a
+heredoc fed to a shell, a path into the `@playwright/cli` package — while a word that only
+contains the CLI's name, such as the run config `playwright-cli.json` or a project folder named
+after the CLI, does not, and neither does the directory a `cd` or `pushd` enters. The gate reads
+that config as the CLI does: the path as given when it is absolute, else against the payload's
+working directory when the call is one plain call without a wrapper, with a byte-order mark
+skipped and the text parsed as JSON. It reads every config value the command text sets —
+`--config <path>`, `--config=<path>` and a `PLAYWRIGHT_MCP_CONFIG` assignment, behind `export`,
+`declare`, `sudo` or `doas`, on a line of its own, or inside a command string or heredoc — and
+refuses one it cannot pin down: a value assembled at run time or appended with `+=`, and a
+relative path unless the command is one plain unwrapped call. It confirms that the path names a
+regular file before it opens it, so it never opens a FIFO or a device, and it refuses a path that
+starts with two slashes or backslashes, a network path, unread. The CLI reads an `.ini` path, and
+a file that is no JSON and does not start with `{`, as INI, so the gate refuses a config it cannot
+read as JSON — missing, not a regular file, over 1 MiB, invalid JSON, a network path or an `.ini`
+path. A config that restores no state passes, and so does a call that names neither a run
+directory nor a config. A PowerShell call that names the CLI with a run directory or a
 config is refused, because the gate judges Bash text only. Measured in the specification
 session: a session outside the gate that opened a `storageState` config came up signed in.
 
@@ -1000,11 +1016,14 @@ through Bash.
 
 - **A config the gate never sees opens a signed-in browser outside it** while a run's state file
   exists, that is, until the first gated `open` consumes it: the working directory's default
-  `.playwright/cli.config.json` and the global `~/.playwright/cli.config.json`, which a call
-  without `--config` reads; a config path behind a variable or assembled at run time; a config
-  file written or swapped after the gate read it; and a program that spawns `playwright-cli`
-  itself, a tool that runs shell commands outside the Bash tool included. The **Other sessions**
-  rules judge only what the command text shows.
+  `.playwright/cli.config.json`, which a call without `--config` reads; the global
+  `~/.playwright/cli.config.json`, which the CLI merges under every config, an explicit one
+  included; a `PLAYWRIGHT_MCP_CONFIG` the shell inherited from the launch environment or a
+  profile; a flag or variable name assembled at run time, such as `--con$'f'ig=` or a variable
+  that holds `--config`; a config file written or swapped after the gate read it; and a program
+  that spawns `playwright-cli` without naming it in the command text, a tool that runs shell
+  commands outside the Bash tool included. The **Other sessions** rules judge only what the
+  command text shows.
 - **Hooks switched off host-side leave `playwright-cli` unconstrained.** The retired broker
   refused to self-approve an origin without a per-session marker the gate wrote, so a disabled
   hook ended in a refusal. Nothing stands in that position now: with the hooks off, the run
@@ -1156,7 +1175,9 @@ and tells the model not to retry through another tool, path spelling or command.
 
 - A `Read`, `Edit`, `Write`, `MultiEdit` or `NotebookEdit` whose path — as written, joined to
   the payload's working directory, normalized, or resolved through symlinks — lies inside a
-  run's `auth/` directory. Letter case and backslashes are folded and `..` segments resolved.
+  run's `auth/` directory. Letter case and backslashes are folded and `..` segments resolved. A
+  path that starts with two slashes or backslashes, a network or device path, is read as written
+  and never resolved, so the guard does not reach a network host.
 - A `Grep` or `Glob` whose root lies inside one, or whose root plus pattern can reach one: a
   pattern without a `/` matches at any depth, and `**` at or above a run directory reaches every
   directory below it. A `Grep` without a `glob` searches its whole root.
@@ -1176,9 +1197,15 @@ and tells the model not to retry through another tool, path spelling or command.
   a signed-in run config never opens on a session the consent gate does not judge.
 - Any other tool — an MCP server's tool, `WebFetch`, `LSP`, `Artifact`, an agent or task
   prompt — whose payload names `verify-feature-runs` and whose input holds a string, a key
-  included, that reaches a run's `auth/` directory, read as shell text or as a path joined to the
-  payload's working directory and resolved through symlinks. An input nested deeper than 32
-  levels or holding more than 4096 strings is refused unread.
+  included, that spells a path inside a run's `auth/` directory, read word by word as shell text
+  and as one literal path joined to the payload's working directory. That reading is literal: a
+  segment at the `auth` position counts only when it is `auth` once trailing dots and spaces and
+  an NTFS stream suffix are dropped, or when it carries a glob, `%`, `$`, a backtick or a brace,
+  so prose with punctuation after a run path passes; it resolves no link and touches no file. A
+  runs directory and `storage-state` named together deny only in a command-shaped field
+  (`command`, `cmd`, `script`, `code`, `shell` and their spellings), never in a prompt, a plan or
+  a message. An input nested deeper than 32 levels or holding more than 4096 strings is refused
+  unread.
 - A payload the dispatcher could not parse, when it names `verify-feature-runs`.
 
 **What passes.** The run directory itself, its run config and its `browser/` output, the
@@ -1190,7 +1217,9 @@ session, and the cleanup's `rm -rf` of the run directory, because none of them n
 names `verify-feature-runs` is refused when its decision module is absent, a symlink or broken,
 and the entry point's fallback without `node` refuses such a payload too. The run-config helper
 refuses `--login-recipe` unless `hooks/hooks.json` registers the guard on a matcher that covers
-every tool, which the helper probes with the nine tools above and an MCP tool name, and the
+every tool, which the helper probes with the nine tools above, an MCP tool name, `Agent`,
+`WebFetch`, `TodoWrite`, `LSP` and a name no host defines, so a registration that lists tools
+reads as unregistered while a pattern that excludes one single tool is not detected, and the
 `verify-feature` row of `/zensu:doctor` names an unregistered guard, a missing guard file and a
 symlinked or unloadable guard module.
 
@@ -1211,7 +1240,9 @@ symlinked or unloadable guard module.
   tools resolve a symlink, the 8.3 case is unverified.
 - **Prose is judged as text.** A tool input outside the nine field-precise tools is read string
   by string, so a plan, a prompt or a message that spells a path inside a run's `auth/` directory
-  is refused like a file read; name that directory without its full path.
+  is refused like a file read, a template such as `<run>/auth/` included; name that directory
+  without its full path. One that only names both words, or a run path outside `auth/`, passes.
+  Such an input resolves no link, so a symlink alias of a run directory in it is not judged.
 - **Hooks switched off host-side judge nothing.** The run-config helper refuses `--login-recipe`
   while `hooks/hooks.json` does not register the guard, but no check observes that the host runs
   it.

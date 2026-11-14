@@ -64,7 +64,9 @@ hidden, validates the returned path against this contract, keeps only the state 
 origins, writes it owner-only beside the run config, and deletes the artifact directory. The
 browser consent gate re-checks that state before `open`, its recorder deletes it after `open`,
 and the model never accepts an artifact path itself. A remote verify-feature recipe must also
-declare `auth.environment` (`test` or `production`).
+declare `auth.environment` (`test` or `production`); a local verify-feature login refuses a
+recipe that declares one, or that names an `appOrigin` or `baseUrl` other than the run's first
+origin, so a split local frontend/API recipe cannot sign in through it.
 
 ### Artifact forms by driver
 

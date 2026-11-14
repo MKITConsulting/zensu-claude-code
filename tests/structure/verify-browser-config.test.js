@@ -751,8 +751,23 @@ test('a remote login run needs the recipe to bind the application origin and dec
     assert.equal(result.login, 'state-restored', environment);
     assert.deepEqual(result.config.browser.launchOptions.args, ['--no-proxy-server', '--host-resolver-rules=MAP app.example.com 93.184.216.34']);
   }
-  const local = loginProject(t, { auth: auth(['  appOrigin: "http://127.0.0.1:9"', '  baseUrl: "http://127.0.0.1:9"']) });
-  assert.equal((await helper.run(loginArgs(local), undefined, NO_POLICY, READY)).login, 'state-restored');
+  for (const extra of [
+    ['  appOrigin: "http://127.0.0.1:9"', '  baseUrl: "http://127.0.0.1:9"'],
+    [`  appOrigin: "${APP}"`, '  baseUrl: "http://127.0.0.1:9"'],
+    ['  baseUrl: "https://login.example.com"'],
+    ['  appOrigin: "https://app.example.com"'],
+    ['  environment: test'],
+    [`  appOrigin: "${APP}"`, '  environment: production'],
+  ]) {
+    const project = loginProject(t, { auth: auth(extra) });
+    await loginFails(project, 'recipe');
+    assert.equal(fs.existsSync(path.join(project.root, 'seen-env.txt')), false, 'the login script never ran');
+  }
+  for (const extra of [[], [`  appOrigin: "${APP}"`, `  baseUrl: "${APP}/"`]]) {
+    const local = loginProject(t, { auth: auth(extra) });
+    assert.equal((await helper.run(loginArgs(local), undefined, NO_POLICY, READY)).login, 'state-restored');
+    assert.deepEqual(fs.readFileSync(path.join(local.root, 'seen-env.txt'), 'utf8').trim().split('\n').slice(1), [APP, APP]);
+  }
   const wide = publicResolver({ 'app.example.com': ['93.184.216.34'], 'collector.example.net': ['93.184.216.35'] });
   const collector = loginProject(t, { origin: remote, auth: auth(['  appOrigin: "https://app.example.com"', '  environment: test']) });
   await assert.rejects(helper.run([...args(collector), '--origin', 'https://collector.example.net', '--auth-origin', 'https://collector.example.net'], wide, NO_POLICY, READY), /usage/);

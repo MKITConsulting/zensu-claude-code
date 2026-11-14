@@ -122,7 +122,7 @@ shell is refused.
 | `pre-bash-source-write-gate.sh`, control mode | `controlVerdict`, always on. |
 | same, rules (A)/(B)/(C) | `readOnlyVerdict` while `hooks.bashWriteGate` is on; the deny ends with `OPT_IN_NOTE`. |
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |
-| `pre-browser-navigation-consent.sh` | A call carrying both consent markers in any spelling `spellings()` decodes is refused (`POWERSHELL_NOT_JUDGED`), and a call that reaches node while the analyzer cannot load is refused too. The prefilter forwards a PowerShell payload that names `wright` and `verify` or holds `u{`, because a backtick, Unicode or concatenated spelling never names `playwright-cli` literally. |
+| `pre-browser-navigation-consent.sh` | A call carrying both consent markers in any spelling `spellings()` decodes is refused (`POWERSHELL_NOT_JUDGED`), one that names the CLI with a `verify-feature-runs` directory or a config is refused too (`POWERSHELL_OFF_SESSION_NOT_JUDGED`), and a call that reaches node while the analyzer cannot load is refused. For a PowerShell payload the prefilter drops quotes, `+`, parentheses, `$` and blanks and forwards a text that names `wright` beside `verify` or `config`, or holds `u{`, because a backtick, Unicode or concatenated spelling never names `playwright-cli` literally. |
 | `post-browser-navigation-consent.sh` | Skipped (`powershell-call`), because the pre hook refused every marked call. |
 | `pre-verify-auth-guard.sh` | Judged textually over the raw text, its backtick-free and concatenation-free forms and `spellings()`: a command that names a verify-feature run's `auth/` directory is denied as in Bash. A failed load of the analyzer falls back to the stripped forms rather than refusing. |
 | `post-artifact-redact.sh` | Parity: the sweep runs as after Bash. |
@@ -205,8 +205,9 @@ P2p1-P2p9.
   `zensu` call the gate never sees. Only `zensu`'s own arguments are checked for cmd.exe text.
 - Outside Windows the opt-in rules refuse `ls`, `cat` and the other names PowerShell 7 leaves to
   native programs, because only cmdlets are on the read-only list.
-- A project path that names `wright` and `verify` makes the consent prefilter start `node` for
-  every PowerShell call there.
+- A project path that names `wright` beside `verify` or `config` makes the consent prefilter
+  start `node` for every PowerShell call there, and since the prefilter joins literals by
+  dropping blanks, so does a payload whose words only spell those fragments across a space.
 - A pure variable in the option position of a POSIX shell (`bash $flags $code`) counts as the
   script path.
 - Script files, interpreter code (`node -e`, `python -c`), and an alias, function or variable an

@@ -5,7 +5,9 @@ guard keeps every tool the model calls out of the `auth/` directory of a signed-
 `/zensu:verify-feature` run. It runs in-process in the hook dispatcher
 (`hooks/lib/verify-auth-guard-v1.js`), and the run-config helper refuses `--login-recipe` unless
 `hooks/hooks.json` registers its entry point `hooks/pre-verify-auth-guard.sh` on a matcher that
-covers every tool.
+covers every tool. The probe tries the nine file, search and shell tools, an MCP tool, `Agent`,
+`WebFetch`, `TodoWrite`, `LSP` and a name no host defines, so a registration that lists tools
+reads as not registered, while a pattern that excludes only one other tool is not detected.
 The causes block different runs, so relay the one the parenthesis names:
 
 | The parenthesis names | What it blocks |

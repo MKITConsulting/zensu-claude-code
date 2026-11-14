@@ -31,6 +31,11 @@ const CLI_MARKERS = Object.freeze([...new Set([
   CLI_PACKAGE.toLowerCase(),
 ])]);
 const CLI_MARKER_RE = new RegExp(CLI_MARKERS.map((marker) => marker.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|'));
+const CLI_PACKAGE_PATH_RE = new RegExp(`${CLI_PACKAGE.toLowerCase().replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?:$|[@/])`);
+const CLI_TOKEN_BREAK_RE = /[\s;&|()<>=,]+/;
+const CONFIG_ASSIGNMENT_RE = new RegExp(`^${CONFIG_ENV}(\\+?)=`, 'i');
+const DIRECTORY_BUILTINS = Object.freeze(['cd', 'pushd']);
+const REMOTE_CONFIG_RE = /^[\\/]{2}/;
 const AMBIENT_TEXT_RE = /(^|[^A-Za-z0-9_])(PLAYWRIGHT_MCP_|PWTEST_)/;
 const REDEFINITION_RE = /(^|[\s;&|({])(function\s+)?playwright-cli\s*\(\s*\)|(^|[\s;&|({])function\s+playwright-cli(\s|$|\{)/i;
 const RUN_CONFIG_NAME = 'playwright-cli.json';
@@ -172,9 +177,9 @@ const REASONS = Object.freeze({
   STATE_INVALID: 'the signed-in state file of this run config is not storage state within the run config origins; run the run-config helper with --login-recipe again',
   AUTH_SIGNAL_DENIED: 'is not available on a signed-in zensu-verify-auth session, because console and network output of a signed-in page can carry credentials; report that evidence plane PARTIAL',
   RUN_DIR_OFF_SESSION: 'a playwright-cli call on any session other than the zensu-verify session /zensu:verify-feature printed must not name a /zensu:verify-feature run directory, because a signed-in run config there would restore its browser state outside this gate; run the call on the printed zensu-verify session, and search or commit text that names both through the Grep tool or a message file',
-  STATE_CONFIG_OFF_SESSION: 'a playwright-cli config that restores a browser state (browser.contextOptions.storageState) opens only on the zensu-verify-auth session the run-config helper printed with it, so this gate refuses it on every other session; do not retry under another session name, config path or program',
-  CONFIG_UNJUDGED_OFF_SESSION: 'the config of a playwright-cli call on a session other than a zensu-verify session must be an existing JSON file of at most 1 MiB that this gate can read, because the gate reads it to rule out a restored browser state; an INI config, a missing or unreadable file and invalid JSON are refused',
-  CONFIG_UNRESOLVED_OFF_SESSION: 'a playwright-cli call on a session other than a zensu-verify session that passes a relative config path must run as one plain call without a wrapper, so this gate reads the same config file the CLI opens; pass the config as an absolute path',
+  STATE_CONFIG_OFF_SESSION: 'a playwright-cli config that restores a browser state (browser.contextOptions.storageState) is refused on every session but a zensu-verify-auth one, because this gate cannot tell a signed-in /zensu:verify-feature run config from any other; a /zensu:verify-feature run opens its config only on the session the run-config helper printed, and a config of your own must leave that key out; do not retry the same config under another session name, path or program',
+  CONFIG_UNJUDGED_OFF_SESSION: 'the config of a playwright-cli call on a session other than a zensu-verify session must be an existing JSON file of at most 1 MiB that this gate can read, because the gate reads it to rule out a restored browser state; an INI config, a network path, a missing or unreadable file and invalid JSON are refused',
+  CONFIG_UNRESOLVED_OFF_SESSION: 'the config of a playwright-cli call on a session other than a zensu-verify session must be a literal path this gate can read before the call runs: a value assembled at run time or appended with +=, and a relative path in a command that is not one plain call without a wrapper or that hands the CLI to another program, are refused; pass the config as a literal absolute path in one plain call',
   POWERSHELL_OFF_SESSION_NOT_JUDGED: 'a playwright-cli call that names a /zensu:verify-feature run directory or passes a config file runs through the Bash tool only, because this gate judges Bash command text; re-issue it through the Bash tool, and search or commit such text through the Grep tool or a message file',
 });
 const SHAPE_REASONS = Object.freeze([
@@ -796,6 +801,16 @@ function namesCli(text) {
   return CLI_MARKER_RE.test(normalizedText(text));
 }
 
+function cliToken(token) {
+  if (token === '') return false;
+  return CLI_MARKERS.includes(cliBasename(token).replace(/\.(cmd|exe|ps1)$/, '')) || CLI_PACKAGE_PATH_RE.test(token);
+}
+
+function runsCli(text) {
+  const unquoted = String(text).replace(/\\\r?\n/g, '').replace(/['"`]/g, '').toLowerCase();
+  return [unquoted.replace(/\\/g, '/'), unquoted.replace(/\\/g, '')].some((spelling) => spelling.split(CLI_TOKEN_BREAK_RE).some(cliToken));
+}
+
 const NO_SCOPE = Object.freeze({ assignments: Object.freeze([]), wrappers: Object.freeze([]) });
 
 function hiddenCli(found, context, kind) {
@@ -866,9 +881,12 @@ function scanSegments(lexed, context, depth, found, inherited) {
     if (position.index >= words.length) {
       for (const assignment of position.assignments) if (assignment.name === SESSION_ENV) context.commandSession = assignment;
     }
-    const indirect = words.some((word, offset) => offset !== position.index && !consumed.has(offset)
-      && (isCliWord(word) || namesCli(word.value)));
-    if (indirect) hiddenCli(found, context, 'indirect');
+    const others = words.filter((_word, offset) => offset !== position.index && !consumed.has(offset));
+    if (!others.some((word) => isCliWord(word) || namesCli(word.value))) continue;
+    if (context.marks.session) found.indirect = true;
+    const head = words[position.index];
+    const directory = Boolean(head) && !head.quoted && DIRECTORY_BUILTINS.includes(head.value);
+    if (!directory && others.some((word) => isCliWord(word) || runsCli(word.value))) found.hidden = true;
   }
 }
 
@@ -903,24 +921,27 @@ function analyzeCommand(command, env, platform = process.platform) {
   scanCommand(text, context, 0, found);
   const conflict = marks.session && context.sessionAssignments.length > 1;
   const calls = [];
+  const offSession = [];
   for (const invocation of found.invocations) {
     const argv = invocation.words.map((word, position) => (word.unexpanded ? unexpandedSentinel(word, position) : word.value));
     const parsed = parseCliArgs(argv);
     if (parsed.fault) {
+      offSession.push({ invocation, args: null });
       calls.push({ invocation, gated: marks.session, fault: parsed.fault });
       continue;
     }
+    const assigned = invocation.segmentSession || context.commandSession;
+    const session = sessionOf(parsed.args, assigned, env);
+    const unexpandedSession = hasSentinel(session.value) || (session.source === 'assignment' && session.unexpanded);
+    if (unexpandedSession || !isGatedSession(session.value)) offSession.push({ invocation, args: parsed.args });
     if (conflict || (marks.session && parsed.sessionFlags > 1)) {
       calls.push({ invocation, gated: true, fault: REASONS.SESSION_MALFORMED });
       continue;
     }
-    const assigned = invocation.segmentSession || context.commandSession;
     if (marks.session && assigned && assigned.unexpanded) {
       calls.push({ invocation, gated: true, fault: REASONS.SESSION_UNEXPANDED });
       continue;
     }
-    const session = sessionOf(parsed.args, assigned, env);
-    const unexpandedSession = hasSentinel(session.value) || (session.source === 'assignment' && session.unexpanded);
     if (unexpandedSession) {
       calls.push({ invocation, gated: marks.session, fault: REASONS.SESSION_UNEXPANDED });
       continue;
@@ -936,26 +957,8 @@ function analyzeCommand(command, env, platform = process.platform) {
     envBuiltin: found.envBuiltin,
     plain: plainShape(context.top, found.invocations),
     hidden: found.hidden,
-    offSession: offSessionCalls(found.invocations, context, env),
+    offSession,
   };
-}
-
-function offSessionCalls(invocations, context, env) {
-  const calls = [];
-  for (const invocation of invocations) {
-    const argv = invocation.words.map((word, position) => (word.unexpanded ? unexpandedSentinel(word, position) : word.value));
-    const parsed = parseCliArgs(argv);
-    if (parsed.fault) {
-      calls.push({ invocation, args: null });
-      continue;
-    }
-    const assigned = invocation.segmentSession || context.commandSession;
-    const session = sessionOf(parsed.args, assigned, env);
-    const literal = !hasSentinel(session.value) && !(session.source === 'assignment' && session.unexpanded);
-    if (literal && isGatedSession(session.value)) continue;
-    calls.push({ invocation, args: parsed.args });
-  }
-  return calls;
 }
 
 function configValues(call) {
@@ -967,13 +970,46 @@ function configValues(call) {
   return values;
 }
 
+function mentionsConfig(text) {
+  const normalized = normalizedText(text);
+  return normalized.includes(CONFIG_FLAG) || normalized.includes(CONFIG_ENV.toLowerCase());
+}
+
+function configMentions(text, depth, out) {
+  const lexed = lexShell(text);
+  if (lexed.fault || depth > MAX_NEST) {
+    out.push('\u0000');
+    return out;
+  }
+  for (const words of lexed.segments) {
+    words.forEach((word, index) => {
+      const lowered = word.value.toLowerCase();
+      const assignment = word.value.match(CONFIG_ASSIGNMENT_RE);
+      const next = words[index + 1];
+      if (assignment) out.push(word.unexpanded || assignment[1] === '+' ? '\u0000' : word.value.slice(assignment[0].length));
+      else if (lowered.startsWith(`${CONFIG_FLAG}=`)) out.push(word.unexpanded ? '\u0000' : word.value.slice(CONFIG_FLAG.length + 1));
+      else if (lowered === CONFIG_FLAG && next && !next.value.startsWith('-')) out.push(next.unexpanded ? '\u0000' : next.value);
+      else if (/\s/.test(word.value) && mentionsConfig(word.value)) configMentions(word.value, depth + 1, out);
+    });
+  }
+  for (const body of [...lexed.nested, ...lexed.heredocs, ...lexed.herestrings.map((word) => word.value)]) {
+    if (mentionsConfig(body)) configMentions(body, depth + 1, out);
+  }
+  return out;
+}
+
 function readBoundedConfig(file) {
+  if (REMOTE_CONFIG_RE.test(file)) return null;
+  let before;
+  try { before = fs.statSync(file); }
+  catch (_error) { return null; }
+  if (!before.isFile() || before.size > MAX_OFF_SESSION_CONFIG_BYTES) return null;
   let fd;
   try { fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0)); }
   catch (_error) { return null; }
   try {
     const info = fs.fstatSync(fd);
-    if (!info.isFile() || info.size > MAX_OFF_SESSION_CONFIG_BYTES) return null;
+    if (!info.isFile() || info.dev !== before.dev || info.ino !== before.ino || info.size > MAX_OFF_SESSION_CONFIG_BYTES) return null;
     const buffer = Buffer.alloc(MAX_OFF_SESSION_CONFIG_BYTES + 1);
     let size = 0;
     while (size < buffer.length) {
@@ -996,7 +1032,8 @@ function restoresState(config) {
 }
 
 function offSessionConfigReason(value, cwd, placed) {
-  if (value === '' || hasSentinel(value)) return null;
+  if (value === '') return null;
+  if (hasSentinel(value)) return REASONS.CONFIG_UNRESOLVED_OFF_SESSION;
   const raw = msysDrivePrefix(value);
   let file = raw;
   if (!path.isAbsolute(raw)) {
@@ -1017,13 +1054,18 @@ function offSessionReason(analysis, marks, payload) {
   if (marks.runs) return REASONS.RUN_DIR_OFF_SESSION;
   if (!marks.config) return null;
   const cwd = payload && typeof payload.cwd === 'string' ? payload.cwd : '';
+  const placed = analysis.plain && !analysis.hidden && analysis.offSession.every((call) => call.invocation.wrappers.length === 0);
   for (const call of analysis.offSession) {
     if (call.args === null) return REASONS.CONFIG_UNJUDGED_OFF_SESSION;
-    const placed = analysis.plain && call.invocation.wrappers.length === 0;
     for (const value of configValues(call)) {
       const reason = offSessionConfigReason(value, cwd, placed);
       if (reason) return reason;
     }
+  }
+  if (placed) return null;
+  for (const value of configMentions(analysis.text, 0, [])) {
+    const reason = offSessionConfigReason(value, cwd, false);
+    if (reason) return reason;
   }
   return null;
 }

@@ -1,9 +1,13 @@
 #!/bin/bash
 
 zensu_browser_consent_marked() {
-  local _zensu_pair _zensu_scan _zensu_marked
+  local _zensu_pair _zensu_scan _zensu_marked _zensu_drop
   _zensu_pair=$'\001'
-  _zensu_scan="$(printf '%s' "$1" | LC_ALL=C sed -e 's/\\\\/'"$_zensu_pair"'/g' -e 's/'"$_zensu_pair"'\\r\\n//g' -e 's/'"$_zensu_pair"'\\n//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\\`$_zensu_pair" 2>/dev/null)" || _zensu_scan="$1"
+  _zensu_drop="\"'\\\\\`$_zensu_pair"
+  case "$1" in
+    *'"tool_name":"PowerShell"'*|*'"tool_name": "PowerShell"'*) _zensu_drop="$_zensu_drop+()\$ "$'\t' ;;
+  esac
+  _zensu_scan="$(printf '%s' "$1" | LC_ALL=C sed -e 's/\\\\/'"$_zensu_pair"'/g' -e 's/'"$_zensu_pair"'\\r\\n//g' -e 's/'"$_zensu_pair"'\\n//g' 2>/dev/null | LC_ALL=C tr -d "$_zensu_drop" 2>/dev/null)" || _zensu_scan="$1"
   [ -n "$_zensu_scan" ] || _zensu_scan="$1"
   _zensu_marked=1
   shopt -s nocasematch

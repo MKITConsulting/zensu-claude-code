@@ -60,14 +60,18 @@ library's normalization or in the fallback's, and for a PowerShell payload also 
 The consent case of `tests/structure/hook-dispatch-v1.test.js` holds the spellings it must mark.
 
 **A PowerShell call is refused, not judged.** The lexer reads Bash, so a PowerShell call that
-carries both markers denies with `POWERSHELL_NOT_JUDGED`, which names the Bash tool and the Grep
-tool, and the recorder skips a PowerShell call (`powershell-call`). The markers are read over
-`spellings()` of `hooks/lib/powershell-command-v1.js`, which decodes backtick and Unicode escapes
-and joins string literals in both the Windows PowerShell 5.1 and the PowerShell 7 reading, and a
-call that reaches node while that module cannot load is refused. For a PowerShell payload the
-prefilter also forwards a text that names `wright` and `verify` or holds `u{`, because those
-spellings never name `playwright-cli` literally, and the pre hook's fallback counts any of
-`wright`, `verify` or `u{` as marked. V70 to V70g and H17g5-H17g6 pin both halves.
+carries both markers denies with `POWERSHELL_NOT_JUDGED`, one that names the CLI with a run
+directory or a config denies with `POWERSHELL_OFF_SESSION_NOT_JUDGED`, both naming the Bash tool
+and the Grep tool, and the recorder skips a PowerShell call (`powershell-call`). The markers are
+read over `spellings()` of `hooks/lib/powershell-command-v1.js`, which decodes backtick and
+Unicode escapes and joins string literals in both the Windows PowerShell 5.1 and the PowerShell 7
+reading, and a call that reaches node while that module cannot load is refused. For a PowerShell
+payload the prefilter's one `tr -d` pass also drops `+`, parentheses, `$` and blanks, so literals
+joined by `+` read as one word (`'play' + 'wri' + 'ght-cli'`), and it forwards a text that names
+`wright` beside `verify` or `config`, or holds `u{`, because those spellings never name
+`playwright-cli` literally. `consentMarked` and the pre hook's fallback drop the same characters
+for a PowerShell payload and count any of `wright`, `verify` or `u{` as marked. V70 to V70g, V72,
+V72b and H17g5-H17g6 pin both halves.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,
@@ -77,7 +81,11 @@ described: a model that opens a browser under a session name it chose itself is 
 and the skill's instruction to use only the printed session is prose, not a boundary. **One
 exception, decided after a measured bypass:** a call on any session is judged when its text
 names a `verify-feature-runs` directory or passes a config, because a signed-in run config opened
-outside the gate restores its state unjudged (see "Other sessions" below).
+outside the gate restores its state unjudged (see "Other sessions" below). That exception costs a
+user's own browser skills something, stated here so it is not rediscovered as a defect: on every
+session their own config that restores a state, an INI config, a config the gate cannot read, a
+config held in a variable and a relative config handed to a wrapper are refused, and
+`STATE_CONFIG_OFF_SESSION` tells them a config of their own must leave the key out.
 
 **The order of judgement is the contract.**
 
@@ -92,8 +100,9 @@ outside the gate restores its state unjudged (see "Other sessions" below).
    `H16r` hold that through the real pre hook and the module-absent copy.
    It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session, a
    `verify-feature-runs` directory, `--config` or `playwright_mcp_config` — or name the CLI while
-   the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. Its PowerShell arm forwards `wright`
-   beside `verify` or `config`. The third `case` arm, the
+   the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. For a PowerShell payload the same
+   `tr -d` pass also drops `+`, parentheses, `$` and blanks, and its PowerShell arm forwards
+   `wright` beside `verify` or `config`. The third `case` arm, the
    JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
    Every other Bash call exits 0 with no output — which is what keeps the pair off the hot path of
    every Bash call and out of every bind-failure state for unrelated commands. It is also why the
@@ -248,28 +257,43 @@ judges. The helper's login, the read guard, the version verdict and the gaps are
 **Other sessions.** `commandMarkers` carries two more arms, `runs` (`RUNS_MARKER`, the
 `verify-feature-runs` directory name) and `config` (`CONFIG_FLAG` or `CONFIG_ENV`, `--config` and
 `PLAYWRIGHT_MCP_CONFIG`). When a command names the CLI and either arm, and no gated call exists,
-`evaluate` runs `offSessionReason` over `offSessionCalls`: every invocation whose session is not a
-literal `zensu-verify-` name, a session from `-s`, an inline assignment, the hook environment or
-the CLI's default alike, an unexpanded one included. With the `runs` arm such a call, or a CLI
-word the lexer finds outside command position or inside a body it cannot judge (`hidden`),
-denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each inline
-`PLAYWRIGHT_MCP_CONFIG` assignment is read: an absolute path as given, a relative one against the
-payload's `cwd` only when the command is one plain call without a wrapper (else
-`CONFIG_UNRESOLVED_OFF_SESSION`), opened non-blocking and read only as a regular file within
-`MAX_OFF_SESSION_CONFIG_BYTES`, its byte-order mark skipped and its text parsed as JSON; a key
-`browser.contextOptions.storageState` denies `STATE_CONFIG_OFF_SESSION`, and a file that cannot be
-read that way, or an `.ini` path, denies `CONFIG_UNJUDGED_OFF_SESSION`. Measured on 0.1.24
-(`parseConfigFile` in `coreBundle.js`): an `.ini` path is INI, and a file that is no JSON and does
-not start with `{` falls back to INI, which is why a config the gate cannot parse is refused
-rather than passed. A command whose text names a `zensu-verify-` session keeps its shape denials
-(`marks.named` skips this pass), so a typo such as `-S=` still gets `SESSION_UNRESOLVED`. A value
-assembled at run time is left to the residual below. `powershellReason` refuses a PowerShell call
-with either arm as `POWERSHELL_OFF_SESSION_NOT_JUDGED`. All five reasons are final. The read
-guard's session rule stays beside this as a second, textual line. **Residual:** a config the
-gate never sees — the working directory's default `.playwright/cli.config.json`, the global
-config, a path behind a variable, a file swapped after the gate read it, a program that spawns
-`playwright-cli` — still opens a signed-in browser outside the gate while the state file exists,
-that is, until the first gated `open` consumes it. Measured in the specification session: an
+`evaluate` runs `offSessionReason` over `analysis.offSession`, which `analyzeCommand` builds in
+its one loop over the invocations from the same parse and session resolution the gated calls use:
+every invocation whose session is not a literal `zensu-verify-` name, a session from `-s`, an
+inline assignment, the hook environment or the CLI's default alike, an unexpanded one included.
+`hidden` marks a CLI another program runs: a word outside command position that is a CLI word or
+holds one as a token (`runsCli`: a token whose basename is a CLI name, or a path into the
+`@playwright/cli` package), and a body the lexer cannot judge that names the CLI. A word that only
+contains the name, such as `playwright-cli.json` or a project folder named after the CLI, is no
+token, and the operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never counts; the gated
+`indirect` test keeps its substring reading. With the `runs` arm an off-session call or a hidden
+CLI denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each
+inline `PLAYWRIGHT_MCP_CONFIG` assignment of an off-session call is read, and when the command is
+not one plain unwrapped call, or a CLI is hidden, `configMentions` also reads every config value
+the text sets: `--config <path>`, `--config=<path>` and a `PLAYWRIGHT_MCP_CONFIG` assignment in
+any letter case, in any segment, behind `export`, `declare`, `sudo` or `doas`, inside a word that
+holds a command string and inside nested bodies, heredocs and here-strings, up to `MAX_NEST`. A
+value assembled at run time, appended with `+=`, behind a lexer fault or past that depth, and a
+relative path outside one plain unwrapped call, deny `CONFIG_UNRESOLVED_OFF_SESSION`. A literal
+path is read as given when absolute, else against the payload's `cwd`; `readBoundedConfig`
+refuses a path that starts with two slashes or backslashes unread, stats it and requires a
+regular file within `MAX_OFF_SESSION_CONFIG_BYTES` before it opens anything, opens it
+non-blocking, and requires the descriptor to be the same file; its byte-order mark is skipped and
+its text parsed as JSON. A key `browser.contextOptions.storageState` denies
+`STATE_CONFIG_OFF_SESSION`, and a file that cannot be read that way, or an `.ini` path, denies
+`CONFIG_UNJUDGED_OFF_SESSION`. Measured on 0.1.24 (`parseConfigFile` in `coreBundle.js`): an
+`.ini` path is INI, and a file that is no JSON and does not start with `{` falls back to INI,
+which is why a config the gate cannot parse is refused rather than passed. A command whose text
+names a `zensu-verify-` session keeps its shape denials (`marks.named` skips this pass), so a typo
+such as `-S=` still gets `SESSION_UNRESOLVED`. `powershellReason` refuses a PowerShell call with
+either arm as `POWERSHELL_OFF_SESSION_NOT_JUDGED`. All five reasons are final. The read guard's
+session rule stays beside this as a second, textual line. **Residual:** a config the gate never
+sees — the working directory's default `.playwright/cli.config.json`, the global config, which
+the CLI merges under every config, a `PLAYWRIGHT_MCP_CONFIG` the shell inherited, a flag or
+variable name assembled at run time (`--con$'f'ig=`, a variable holding `--config`), a file
+swapped after the gate read it, a program that spawns `playwright-cli` without naming it — still
+opens a signed-in browser outside the gate while the state file exists, that is, until the first
+gated `open` consumes it. Measured in the specification session: an
 ungated `-s=zvprobe-state1` session opening a `storageState` config came up signed in.
 
 **One floor and one policy parser.** `verify-navigation-floor-v1.js` owns origin classification and
@@ -635,7 +659,10 @@ for its `@playwright/cli` install pins.
   to self-approve without the gate's marker, so a disabled hook ended in a refusal; nothing stands
   in that position now, and the doctor reports registration, never execution.
 - **Other session names are ungated** — see SCOPE — except for the "Other sessions" rules, which
-  judge only what the command text shows.
+  judge only what the command text shows, and which refuse a user's own state-restoring, INI,
+  unreadable or variable-held config on every session. A command that only echoes the CLI's name
+  beside a config, such as `eslint --config <file> && echo playwright-cli`, is judged as if the
+  CLI read that config, because the gate cannot tell which program would.
 - **The gate judges a URL only where a command names one.** `judgeCall` reads the URL of `open`,
   `goto` and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` carry none, so where
   they land is never judged. The browser follows a server redirect to another origin, a

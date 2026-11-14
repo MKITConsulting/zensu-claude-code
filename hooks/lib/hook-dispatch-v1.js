@@ -225,7 +225,9 @@ function consentMarked(input) {
   const texts = [input, libraryScan(input), fallbackScan(input)].flatMap(foldings);
   if (texts.some((text) => text.includes('playwright') || text.includes('zensu-verify'))) return true;
   const powershell = foldings(input).some((text) => text.includes('"tool_name":"powershell"') || text.includes('"tool_name": "powershell"'));
-  return powershell && texts.some((text) => text.includes('wright') || text.includes('verify') || text.includes('u{'));
+  if (!powershell) return false;
+  const joined = texts.concat(texts.map((text) => text.replace(/[+()$\s]/g, '')));
+  return joined.some((text) => text.includes('wright') || text.includes('verify') || text.includes('u{'));
 }
 
 function binderPayloadValid(input) {

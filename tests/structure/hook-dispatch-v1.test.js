@@ -254,6 +254,8 @@ test('the consent pre-check marks the playwright spellings the prefilter marks a
   }
   const powershell = (command) => JSON.stringify({ tool_name: 'PowerShell', tool_input: { command } });
   assert.equal(dispatch.consentMarked(powershell("& ('pla' + 'ywright-cli') -s=('zensu-' + 'verify-x') snapshot")), true);
+  assert.equal(dispatch.consentMarked(powershell("& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list")), true);
+  assert.equal(dispatch.consentMarked(powershell("& ('pl' + 'ay' + 'wri' + 'ght-cli') -s=mine open ('--con' + 'fig') C:\\p\\own.json")), true);
   assert.equal(dispatch.consentMarked(powershell('Write-Output "`u{41}"')), true);
   assert.equal(dispatch.consentMarked(powershell('Get-ChildItem -Recurse')), false);
   assert.equal(dispatch.consentMarked(bashPayload('git status --short')), false);

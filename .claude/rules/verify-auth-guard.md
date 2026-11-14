@@ -37,8 +37,11 @@ fire first. The caller names no login origin: `--auth-origin` was removed, becau
 runs before any consent prompt and the checked-in recipe is the only approval of where
 credentials go. In remote mode the login goes to the recipe's `auth.baseUrl`, which must be one
 of the `--origin` values, or to `auth.appOrigin` without one; in local mode to the run's first,
-loopback origin, which nothing binds to the recipe, which is why the docs require a throwaway
-local account. The
+loopback origin. A local recipe may name that origin as `appOrigin` or `baseUrl` and no other, and
+declares no `environment`: `signIn` refuses with `recipe` otherwise, so an account bound to a
+deployed environment never signs in on a loopback origin, and a split local frontend/API recipe
+cannot sign in in local mode. A local recipe that names no origin binds none, which is why the
+docs require a throwaway local account. The
 artifact must sit physically beneath the fresh `auth/artifact/`, is scoped to the run's origins
 and written owner-only with a `.gitignore` of `*`; the artifact directory is removed whatever
 the outcome. The helper refuses `--login-recipe` unless `authGuardRegistered` answers
@@ -81,14 +84,27 @@ restore the state unjudged. That rule's markers derive from their owners: `CLI_W
 `BINARY_NAMES` and `PACKAGE_NAME` of `playwright-cli-version-v1.js`, `SESSION_MARKER` from
 `AUTH_SESSION_PREFIX`. The matcher has ONE owner, `AUTH_GUARD_MATCHER` (`.*`) in
 `verify-auth-state-v1.js`: `GUARD_MATCHER` is it, the registry entry spells the same string, and
-the guard's unit file compares them. `AUTH_GUARD_TOOLS` names the nine tools with field-precise
-rules; every other tool goes through `otherToolVerdict`, which walks only a payload `marked`
-names, tests every string of the input, keys included, as shell text (`commandNamesAuth`) and as
-a path (`pathTarget`), and refuses an input deeper than `MAX_INPUT_DEPTH` or wider than
-`MAX_INPUT_STRINGS` unread (`REASONS.INPUT`, `REASONS.PATH`, `REASONS.UNREADABLE`). The guard
-runs in the dispatcher's process, so the wider matcher adds no hook process. `authGuardRegistered`
-probes `AUTH_GUARD_PROBE_TOOLS`, the nine plus an MCP-shaped name, so a registration narrower
-than every tool reads as unregistered and the helper refuses `--login-recipe`.
+the guard's unit file compares them. `AUTH_GUARD_TOOLS`, the guard's `FIELD_TOOLS`, names the
+nine tools with field-precise rules; every other tool goes through `otherToolVerdict`, which
+answers `REASONS.NO_RUN` for a payload `marked` does not name, and otherwise tests every string of
+the input, keys included, word by word as shell text (`wordsNameAuth`) and as one literal path
+joined to the payload's working directory (`literalTarget`), and refuses an input deeper than
+`MAX_INPUT_DEPTH` or wider than `MAX_INPUT_STRINGS` unread (`REASONS.INPUT`, `REASONS.PATH`,
+`REASONS.UNREADABLE`). That reading is literal (`couldBeAuthLiteral`): a segment at the `auth`
+position counts only when it is `auth` once trailing dots and spaces and an NTFS stream suffix
+are dropped, or when it is a simple glob or carries `%`, `$`, a backtick or a brace, which then
+take the conservative test, so prose with punctuation after a run path, and every string while
+the working directory is a run directory, pass; it resolves no link and touches no file. The
+runs-directory-plus-`storage-state` rule of `commandNamesAuth` applies only to a string under a
+command-shaped key (`COMMAND_KEYS`: `command`, `cmd`, `script`, `code`, `shell` and their
+spellings), never to a prompt, plan or message. For the nine, `resolvedSpellings` resolves a
+path through `realpathSync` except one that starts with two slashes or backslashes, so the guard
+never reaches a network host before the permission decision. A path shown in a deny is cut at
+`MAX_SHOWN_TARGET` characters. The guard runs in the dispatcher's process, so the wider matcher
+adds no hook process. `authGuardRegistered` probes `AUTH_GUARD_PROBE_TOOLS`, the nine plus an
+MCP-shaped name, `Agent`, `WebFetch`, `TodoWrite`, `LSP` and `ZensuUnlistedToolProbe`, a name no
+host defines, so a registration that lists tools reads as unregistered and the helper refuses
+`--login-recipe`; a pattern that matches every name but one is not detected.
 
 **Below a run directory a path is read conservatively, never dialect by dialect.** The guard
 translates no glob into a regular expression, because the shells disagree on nested classes, a
@@ -169,13 +185,17 @@ judged, and the helper refuses `--auth-origin`.
   (`{a,b}.png`, `$NAME`), and, in PowerShell's whitespace-free spelling, an argument written right
   after a file directly below a run directory.
 - Every tool is judged, but as text: a prose input outside the nine, a plan, a prompt or a
-  message, that spells a path inside a run's `auth/` directory is refused like a read, and a tool
-  that runs shell commands outside the Bash tool can still start `playwright-cli` where the
-  consent gate never looks. Hooks switched off host-side judge nothing.
-- Local mode signs in on the run's first, loopback origin, which the caller chooses and nothing
-  binds to the recipe, so a loopback listener the model started there would receive the
-  credentials. The docs require a throwaway account only the local app knows; binding a local
-  recipe's origin is the standing fix.
+  message, that spells a path inside a run's `auth/` directory is refused like a read, a template
+  such as `<run>/auth/` included, and a tool that runs shell commands outside the Bash tool can
+  still start `playwright-cli` where the consent gate never looks. Such an input resolves no link,
+  so a symlink alias of a run directory in it is not judged, and a relative `auth/` path in a
+  command-shaped field outside the Bash tool, run from inside a run directory, is not judged
+  either. Hooks switched off host-side judge nothing.
+- Local mode signs in on the run's first, loopback origin, which the caller chooses; a local
+  recipe can confirm it but never move it, so a loopback listener the model started there would
+  receive the credentials of a recipe that names no origin. The docs require a throwaway account
+  only the local app knows. A split local frontend/API recipe is refused; binding the login to a
+  local recipe's loopback `baseUrl` when it is one of the run's origins is the open alternative.
 - Cookies are scoped by host, not by port, and a parent-domain cookie (`.example.com`) is kept
   when a run origin's host lies below it, so the restored session reaches every approved port of
   a host and a sibling host a redirect lands on.

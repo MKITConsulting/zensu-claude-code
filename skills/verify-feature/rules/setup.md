@@ -122,7 +122,8 @@ auth:
 ```
 
 A remote recipe adds `appOrigin`, an optional `baseUrl` and `environment: test` or
-`environment: production`. Every value is one `key: scalar` line, because the run-config helper
+`environment: production`. A local recipe declares no `environment`, and names at most the run's
+own first origin as `appOrigin` or `baseUrl`; the helper refuses any other in local mode. Every value is one `key: scalar` line, because the run-config helper
 refuses any other form. The user writes the script, not this skill: it signs the test account in
 against `$ZENSU_APP_ORIGIN` or `$ZENSU_AUTH_BASE_URL`, saves a Playwright storage state file
 beneath `$ZENSU_AUTH_ARTIFACT_DIR`, prints exactly one line `STORAGE_STATE=<path>`, and resolves

@@ -354,6 +354,9 @@ async function signIn(options, runDir, origins, env, login = {}) {
     authOrigin = recipe.baseUrl === undefined ? appOrigin : originValue(recipe.baseUrl);
     if (!origins.includes(authOrigin)) throw loginFailure('recipe');
     if (!AUTH_ENVIRONMENTS.includes(recipe.environment)) throw loginFailure('recipe');
+  } else if (recipe.environment !== undefined
+    || [recipe.appOrigin, recipe.baseUrl].some((value) => value !== undefined && originValue(value) !== appOrigin)) {
+    throw loginFailure('recipe');
   }
   const prepared = authState.prepareAuthDir(runDir);
   try {

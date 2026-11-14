@@ -220,7 +220,8 @@ You never see the password, the script's output or the browser state, and you ne
    run-config helper call. No argument names the login origin: the helper signs in on the
    run's own app origin, the first `--origin`, in local mode, and in remote mode on the
    recipe's `auth.baseUrl`, which must be one of the `--origin` values, else on its
-   `auth.appOrigin`. Give that Bash call a timeout of 330000 ms, above the login's own 300 s
+   `auth.appOrigin`. In local mode it refuses a recipe that declares `auth.environment` or names
+   an `appOrigin` or `baseUrl` other than the first `--origin`. Give that Bash call a timeout of 330000 ms, above the login's own 300 s
    bound; a helper stopped anyway kills the login and removes its artifact directory. The run directory
    must be `$GIT_ROOT/.zensu/verify-feature-runs/<random>`. The helper reads the `auth` block with a
    strict reader (`key: scalar` lines only), runs `auth.loginScript` with `bash -c` in the
@@ -249,8 +250,8 @@ You never see the password, the script's output or the browser state, and you ne
    `--discard-state --run-dir "$RUN_DIR"` before `teardown`, whatever its outcome; it removes
    the run's `auth/` directory and prints `state=discarded` or `state=none`. On any other
    session the gate refuses a `playwright-cli` call that names a run directory or passes a
-   `--config` whose file restores a browser state, so never copy, move or rename the run
-   config, and never open it on another session.
+   config whose file restores a browser state, so never copy, move or rename the run config,
+   never open it on another session, and never hand the CLI to another program.
 4. **What a signed-in session cannot do.** `console` and `requests` are denied, so the
    runtime-signal plane of a signed-in row is PARTIAL. Every cookie, storage and state command
    stays denied, as on every `zensu-verify` session. What the app renders reaches you by design, so never
@@ -260,13 +261,14 @@ You never see the password, the script's output or the browser state, and you ne
    `.zensu/verify-feature-runs/<run>/auth/`, every `Bash` or `PowerShell` command whose text
    names such a path, every `playwright-cli` call that names a run directory without naming a
    `zensu-verify` session, and every call of another tool whose input spells such a path, a
-   prompt or message included. Name that directory without its full path when you report it.
+   prompt or message included; naming the runs directory and the state file in prose, without
+   a path into `auth/`, passes. Name that directory without its full path when you report it.
    Its denial is final; never try another tool, session or spelling.
    Phase 4 deletes the run directory by its own path, which the guard admits.
 6. **Targets.** Local: a stack the recipe boots, or `--attach` with a recipe that carries the
-   `auth` block; the run's validated loopback origins are used and the recipe's `baseUrl` and
-   `appOrigin` are not compared, so nothing binds them to the recipe: a local recipe signs in
-   only a throwaway account the local app alone knows. Remote: a hosted test environment or
+   `auth` block; the login goes to the run's first validated loopback origin, which a local
+   recipe may name as `baseUrl` or `appOrigin` but never move, so a local recipe signs in only a
+   throwaway account the local app alone knows and declares no `environment`. Remote: a hosted test environment or
    production; the recipe must set `auth.appOrigin` equal to the first `--origin`, the auth
    origin must equal `auth.baseUrl`, or `auth.appOrigin` without it, and `auth.environment`
    must be `test` or `production`. Production is an

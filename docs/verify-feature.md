@@ -129,8 +129,8 @@ keeps screenshots and snapshots inside the run directory. For a remote host it a
 address the helper resolved.
 
 The **browser consent gate** — two hooks on the `Bash|PowerShell` matcher — reads Bash only, so
-it refuses a PowerShell call that names the CLI and a `zensu-verify` session: run every browser
-call through the Bash tool. It is a textual gate: it judges a
+it refuses a PowerShell call that names the CLI together with a `zensu-verify` session, a
+verify-feature run directory or a config file: run every browser call through the Bash tool. It is a textual gate: it judges a
 `playwright-cli` call on a `zensu-verify` session before it runs only when the command text
 names the CLI and that session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one. A CLI name assembled at run time — an expansion inside
@@ -156,8 +156,9 @@ file. While the hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verif
 call on any other session reaches no decision only when the command meets every condition that
 [Browser Consent Gate](gates.md#browser-consent-gate) lists for it, and every other command that
 names the CLI, a mere mention included, is denied. A known wrapper, a package launcher, a CLI
-path or an environment assignment is refused only on a `zensu-verify` session. For a
-`zensu-verify` call:
+path or an environment assignment is refused only on a `zensu-verify` session; on any other
+session the rules of section 6 still apply to such a call, so a relative config handed to a
+wrapper or passed after a `cd` is refused there. For a `zensu-verify` call:
 
 - only the commands a verification needs are admitted: opening and closing the session,
   navigation, snapshots, screenshots, console and request listings, clicks and typing, and
@@ -607,6 +608,10 @@ origin the account signs in on, when it differs), and `environment: test` for a 
 environment or `environment: production`. No caller argument names the origin the script signs
 in on: in local mode it is the run's own app origin, the first `--origin`, and in remote mode the
 one the recipe names, `baseUrl`, which must be one of the run's origins, or `appOrigin` without it.
+A local recipe may name that first origin as `appOrigin` or `baseUrl` and nothing else, and
+declares no `environment`: in local mode the helper refuses a recipe bound to another origin or
+to a deployed environment, so an account meant for a deployed app never signs in on a loopback
+origin. That also refuses a split local deployment whose API signs in on another loopback origin.
 
 **What the login script does.** It signs a dedicated test account in against
 `$ZENSU_APP_ORIGIN` (or `$ZENSU_AUTH_BASE_URL`), saves a Playwright storage-state file beneath
@@ -634,13 +639,18 @@ second `open` of the same run config is denied, so a fresh browser means a fresh
   of a signed-in scenario is therefore PARTIAL.
 - A signed-in run config opens only on the `zensu-verify-auth-…` session the helper printed: the
   consent gate refuses it on any other `zensu-verify` session, and on every other session it
-  refuses a `playwright-cli` call that names a run directory, or that passes a `--config` whose
-  file restores a browser state or cannot be read as JSON; `state-load` stays denied. The read
-  guard also refuses a `playwright-cli` call that names a run directory without naming a
-  `zensu-verify` session. A config the gate never sees still opens a signed-in browser on another
-  session while the state file exists, until the first gated `open` consumes it: the CLI's default
-  `.playwright/cli.config.json` in the working directory, a config path behind a variable, and a
-  program that starts `playwright-cli` itself.
+  refuses a `playwright-cli` call that names a run directory, or that passes a config — through
+  `--config` or a `PLAYWRIGHT_MCP_CONFIG` assignment anywhere in the command, behind another
+  program included — whose file restores a browser state, cannot be read as JSON, or is a path it
+  cannot pin down; `state-load` stays denied. Those refusals bind your own browser skills too:
+  their own config that restores a state, an INI config and a config behind a variable are
+  refused on any session. The read guard also refuses a `playwright-cli` call that names a run
+  directory without naming a `zensu-verify` session. A config the gate never sees still opens a
+  signed-in browser on another session while the state file exists, until the first gated `open`
+  consumes it: the CLI's default `.playwright/cli.config.json` in the working directory, the
+  global `~/.playwright/cli.config.json`, which the CLI merges under every config, a
+  `PLAYWRIGHT_MCP_CONFIG` the shell inherited, a flag or variable name assembled at run time, and
+  a program that starts `playwright-cli` without naming it in the command.
 - The **verify-auth read guard** judges every tool call. It denies every `Read`, `Grep`, `Glob`,
   `NotebookEdit`, `Edit`, `Write` and `MultiEdit` call that reaches
   `.zensu/verify-feature-runs/<run>/auth/`, every Bash or PowerShell command whose text names such
@@ -652,17 +662,20 @@ second `open` of the same run config is denied, so a fresh browser means a fresh
   recursive search relies on the auth directory's `.gitignore`, which ripgrep honours inside a git
   work tree. A tool whose input does not spell the path, such as one that picks files on its own,
   is not judged either, and a prompt or message that spells a path inside `auth/` is refused like
-  a file read. Below a run directory it reads a path
+  a file read, while one that only names both words, or a run path outside `auth/` followed by
+  punctuation, passes; such an input is read literally and resolves no link. Below a run
+  directory it reads a path
   conservatively: a glob, brace, group or expansion that could stand for `auth/` counts as
   `auth/`, so `ls <run>/*.png` passes while `ls <run>/*` and `ls <run>/$NAME` are denied.
 - The state file exists from the login until `open`, normally seconds. A refused consent prompt
   or a failed `open` leaves it until Phase 4, which removes the run's `auth/` directory with the
   helper's `--discard-state` before teardown, also when it keeps the run directory; a crash
   before cleanup leaves an owner-only file in that ignored directory.
-- In local mode the login signs in on the run's own loopback app origin, which the run chooses and
-  nothing binds to the recipe, so a loopback listener the model started would receive the
-  credentials. Give a local recipe a throwaway account that only the local app knows, seeded or
-  derived by the run itself, never the password of a shared or remote account.
+- In local mode the login signs in on the run's own loopback app origin, which the run chooses; a
+  local recipe can confirm that origin but never move it, so a loopback listener the model started
+  on that origin would receive the credentials. Give a local recipe a throwaway account that only
+  the local app knows, seeded or derived by the run itself, never the password of a shared or
+  remote account; a recipe that names another origin or an `environment` is refused in local mode.
 - The restored cookies are scoped by host, not by port, and a cookie set on a parent domain
   (`.example.com`) stays valid for its sibling hosts: every approved port of the same host, and a
   sibling host a redirect reaches, receive the session cookie.

@@ -1581,7 +1581,7 @@ mkdir -p "$V71_DIR/.zensu/verify-feature-runs/run-v71"
 printf '%s' '{"browser":{"contextOptions":{"storageState":"/elsewhere/state.json"}}}' > "$V71_DIR/restoring.json"
 printf '%s' '{"browser":{"contextOptions":{"viewport":null}}}' > "$V71_DIR/own.json"
 case "$(pre_reason "playwright-cli -s=zvprobe-state1 open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" in
-  *'opens only on the zensu-verify-auth session the run-config helper printed with it'*) check "V71 the real pre hook denies a config that restores a browser state on a session outside the gate" PASS ;;
+  *'is refused on every session but a zensu-verify-auth one'*'a config of your own must leave that key out'*) check "V71 the real pre hook denies a config that restores a browser state on a session outside the gate" PASS ;;
   *) check "V71 the real pre hook denies a config that restores a browser state on a session outside the gate" FAIL ;;
 esac
 case "$(pre_reason "playwright-cli -s=mine open --config=$V71_RUN_CONFIG" "$SID" "$PROJ")" in
@@ -1605,6 +1605,30 @@ esac
   && [ "$(diff_passes "playwright-cli -s=mine snapshot" "")" = "0" ] \
   && check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" PASS \
   || check "V71f the prefilter forwards a call that names a run directory or a config channel and drops one that names neither" FAIL
+diff_passes_ps() {
+  case "$(bash_payload PreToolUse "$1" "$SID" "$PROJ" "$PS_EXTRA" \
+    | CLAUDE_PLUGIN_ROOT="$DIFF_ROOT" bash "$DIFF_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)" in
+    *'decision module absent or symlinked'*) printf 1 ;;
+    *) printf 0 ;;
+  esac
+}
+[ "$(diff_passes_ps "& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list")" = "1" ] \
+  && [ "$(diff_passes_ps "& ('pl' + 'aywright-cli') -s=mine open ('--con' + 'fig') C:\\p\\own.json")" = "1" ] \
+  && [ "$(diff_passes_ps 'Get-ChildItem -Recurse')" = "0" ] \
+  && check "V72 the prefilter forwards a PowerShell call whose markers are split across string literals" PASS \
+  || check "V72 the prefilter forwards a PowerShell call whose markers are split across string literals" FAIL
+case "$(pre_reason "& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list" "$SID" "$PROJ" "$PS_EXTRA")" in
+  *'runs through the Bash tool only'*) check "V72b the real pre hook refuses a PowerShell call whose CLI and session names are split across string literals" PASS ;;
+  *) check "V72b the real pre hook refuses a PowerShell call whose CLI and session names are split across string literals" FAIL ;;
+esac
+case "$(pre_reason "stdbuf -oL playwright-cli -s=mine open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" in
+  *'is refused on every session but a zensu-verify-auth one'*) check "V72c the real pre hook denies a restoring config that another program hands to playwright-cli" PASS ;;
+  *) check "V72c the real pre hook denies a restoring config that another program hands to playwright-cli" FAIL ;;
+esac
+[ "$(pre_verdict "cat $V71_RUN_CONFIG" "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(pre_verdict "export PLAYWRIGHT_MCP_CONFIG=$V71_DIR/restoring.json; playwright-cli -s=mine open" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V72d reading a run config passes, and a restoring config exported before the call is denied" PASS \
+  || check "V72d reading a run config passes, and a restoring config exported before the call is denied" FAIL
 
 unit_check_done "V7z every unit file the registry gives this suite was graded"
 
