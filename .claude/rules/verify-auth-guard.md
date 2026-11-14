@@ -90,7 +90,8 @@ occurrence of the name counts only when the name characters after it (`[a-z0-9._
 the start of a `.cmd`, `.exe` or `.ps1` suffix, read once with a backslash or backtick ending
 them and once with both removed. The guard hands it the tokens of the masked text's shell
 spellings before quotes, backslashes and backticks are stripped, so a NUL escape in
-`$'playwright-cli\x00.json'` or a backtick substitution right after the name still ends it.
+`$'playwright-cli\x00.json'` still ends the name, as does a backtick substitution in a token
+that also holds an expansion character the rule acts on.
 `maskedQuotedExpansions` decides "acts on" for Bash text: it hides each such character inside
 single quotes, an ANSI-C string or behind a backslash, and every one but `$` inside double
 quotes, so `$'playwright-cli'`, `playwright-cli$''`, `"${PW:-playwright-cli}"`,
@@ -204,6 +205,11 @@ assignment, whose value they misread before.
   unverified. The session rule reads the command text too, so a copy of a signed-in run config
   outside a run directory escapes it; the consent gate's "Other sessions" rules read that copy
   when the call names it with `--config`.
+- A backtick is no expansion character to the session rule, so a backtick substitution right
+  after the bare CLI name, in a call that names a run directory, passes the guard; the consent
+  gate counts that word as a hidden CLI and refuses the call with `RUN_DIR_OFF_SESSION`.
+  Counting it here needs `maskedQuotedExpansions` to tell a single-quoted backtick from an
+  active one, and it hides only `EXPANSION_TOKEN` characters today.
 - The path rule over-denies on purpose: `**` at or above a run directory, a segment at the `auth`
   position that is neither a plain name nor a glob whose head or tail rules `auth` out
   (`{a,b}.png`, `$NAME`), and, in PowerShell's whitespace-free spelling, an argument written right
