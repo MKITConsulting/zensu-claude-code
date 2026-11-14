@@ -1231,7 +1231,21 @@ const transition = (state, type, payload, reject = fail) => {
       state.evidence.gates = { passed: true, headSha: payload.headSha.toLowerCase() };
       move(state, "CONVERGE");
       return;
+    case "CONVERGE:GATES_PASSED":
+      state.evidence.gates = { passed: true, headSha: payload.headSha.toLowerCase() };
+      return;
+    case "OPEN_PR:GATES_PASSED":
+      if (state.evidence.gates && sameSha(state.evidence.gates.headSha, payload.headSha)) reject(4, "gates already recorded for this head");
+      state.evidence.gates = { passed: true, headSha: payload.headSha.toLowerCase() };
+      move(state, "CONVERGE");
+      return;
     case "GATES:GATES_FAILED":
+    case "CONVERGE:GATES_FAILED":
+      state.evidence.gates = { passed: false, headSha: payload.headSha.toLowerCase() };
+      toAwaitTdd(state, "GATES");
+      return;
+    case "OPEN_PR:GATES_FAILED":
+      if (state.evidence.gates && sameSha(state.evidence.gates.headSha, payload.headSha)) reject(4, "gates already recorded for this head");
       state.evidence.gates = { passed: false, headSha: payload.headSha.toLowerCase() };
       toAwaitTdd(state, "GATES");
       return;
@@ -1253,7 +1267,7 @@ const transition = (state, type, payload, reject = fail) => {
     case "OPEN_PR:PR_OPENED":
       if (state.effects.prOpen.status !== "requested"
         || state.effects.prOpen.operationKey !== payload.operationKey) reject(4, "PR open operation key mismatch");
-      if (state.evidence.gates && state.evidence.gates.headSha !== payload.pr.headSha) reject(4, "PR head differs from gate evidence");
+      if (state.evidence.gates && !sameSha(state.evidence.gates.headSha, payload.pr.headSha)) reject(4, "PR head differs from gate evidence");
       state.effects.prOpen = { status: "completed", operationKey: payload.operationKey };
       state.evidence.pr = { number: payload.pr.number, url: payload.pr.url, headSha: payload.pr.headSha.toLowerCase() };
       move(state, "TEAM_REVIEW");

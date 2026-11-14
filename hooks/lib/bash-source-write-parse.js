@@ -2729,6 +2729,21 @@ function main() {
   return bypassMarkers();
 }
 
+function heredocBodies(s) {
+  const lines = s.split("\n");
+  const bodies = [];
+  let i = 0;
+  while (i < lines.length) {
+    for (const doc of heredocDelimiters(lines[i++])) {
+      const start = i;
+      i = skipHeredocs(lines, i, [doc]);
+      const closed = i > start && (doc.tabs ? lines[i - 1].replace(/^\t+/, "") : lines[i - 1]) === doc.delim;
+      bodies.push({ quoted: doc.quoted, body: lines.slice(start, closed ? i - 1 : i).join("\n") });
+    }
+  }
+  return bodies;
+}
+
 if (require.main === module) {
   process.stdout.write(main());
 } else {
@@ -2741,6 +2756,7 @@ if (require.main === module) {
     detectChannels,
     detectControlMutation,
     stripHeredocs,
+    heredocBodies,
     gitTargets,
     msysToDrive,
     programName,

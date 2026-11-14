@@ -107,7 +107,7 @@ fi
 
 # P8 — version stays in sync across plugin.json + marketplace.json + README badge.
 # Adding a skill does NOT bump the version; this guards against accidental drift.
-MARKET_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKET_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 if [ "$MARKET_VERSION" = "$EXPECTED_VERSION" ]; then
   check "P8a marketplace.json version ($MARKET_VERSION) == plugin.json ($EXPECTED_VERSION)" PASS
 else

@@ -6228,14 +6228,14 @@ function cmdAdopt(opts) {
 }
 
 function gitChildEnvironment() {
-  let gitEnvironment = null;
+  let scrubGitEnvironment = null;
   try {
-    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/git-environment-v1.js'));
-  } catch { gitEnvironment = null; }
-  if (typeof gitEnvironment !== 'function') {
+    ({ scrubGitEnvironment } = requireFromHere('../../../hooks/lib/git-environment-v1.js'));
+  } catch { scrubGitEnvironment = null; }
+  if (typeof scrubGitEnvironment !== 'function') {
     fail('hooks/lib/git-environment-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
   }
-  return gitEnvironment(process.env);
+  return scrubGitEnvironment(process.env);
 }
 
 function worktreeKeepModules() {

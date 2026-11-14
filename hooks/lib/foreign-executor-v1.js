@@ -44,6 +44,7 @@ const noticeText = (executor) => [
   "/zensu:build or the Zensu workflow runs skill='zensu:build' with the approved plan content as the feature specification,",
   "/zensu:autopilot runs skill='zensu:autopilot' with that content as the feature description,",
   "and /zensu:pilot runs skill='zensu:pilot' naming the tracked feature the plan belongs to.",
+  "An approval message asking for TDD takes the /zensu:build arm, and its specification then carries exactly one line 'TDD-MODE: strict'.",
 ].join(" ");
 
 const noticeForPayload = (payload, reader) => {

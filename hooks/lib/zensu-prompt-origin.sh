@@ -50,6 +50,32 @@ zensu_prompt_origin_slash() {
   fi
 }
 
+zensu_prompt_slash_name() {
+  local body="${1-}" span name
+  body="${body:0:16384}"
+  span="$(zensu_prompt_reminder_span "$body")"
+  body="${body:$span}"
+  case "$body" in
+    ('<command-name>'*|'<command-message>'*)
+      case "$body" in
+        (*'<command-name>'*) ;;
+        (*) return 0 ;;
+      esac
+      name="${body#*"<command-name>"}"
+      name="${name%%"</command-name>"*}"
+      ;;
+    ('/'*) name="${body%%[[:space:]]*}" ;;
+    (*) return 0 ;;
+  esac
+  name="${name#"${name%%[![:space:]]*}"}"
+  name="${name%"${name##*[![:space:]]}"}"
+  name="${name#/}"
+  case "$name" in
+    (''|*[![:alnum:]_.:-]*) return 0 ;;
+  esac
+  printf '%s' "$name"
+}
+
 zensu_prompt_reminder_span() {
   local body="${1-}" lead head close='</system-reminder>' span=0
   body="${body:0:16384}"

@@ -110,7 +110,7 @@ Run its `hooks/lib/ai-work-capture-v1.js` with Node and these arguments:
 | Action | Arguments |
 | --- | --- |
 | `begin` | `--workspace` current worktree, `--session` exact session key, `--task` stable goal key, `--title` concise agreed objective, `--criteria` agreed criteria version or digest |
-| `checkpoint` | `--workspace` same worktree, `--session` same session key |
+| `checkpoint` | `--workspace` same worktree, `--session` same session key, `--review-file` explicit result JSON |
 
 Pass each value as a separate quoted argument. The objective is at most 160
 characters. Use a feature/revision or a new goal UUID as the task key, not a
@@ -188,3 +188,65 @@ before begin/checkpoint writes, so a later downgrade cannot drop required flags.
 
 See [CLI installation and updates](cli-install-update.md), including `zensu update`,
 the fallback for older versions, PATH diagnostics and all preflight statuses.
+
+## Explain the result before human acceptance
+
+Before the final checkpoint, write an explicit review JSON file and pass its path
+with `--review-file`. This sends authored result descriptions to the selected API
+host in addition to capture metadata; stay within the user's approved disclosure
+scope. Never copy transcripts, diffs, credentials or private tool output. State
+what changed, the agreed acceptance criteria, actual check results and remaining
+limitations. Do not invent a passed check. The file is limited to 32 KiB:
+
+```json
+{
+  "summary": "Added version-bound review details to the acceptance dialog.",
+  "artifactUrl": "https://git.example.test/team/repo/commit/0123456789012345678901234567890123456789",
+  "acceptanceCriteria": [
+    {"text": "The reviewer sees implementation, criteria and evidence.", "status": "met"},
+    {"text": "Manual production validation", "status": "not_checked"}
+  ],
+  "evidence": [
+    {"label": "Focused tests", "description": "18 tests passed locally."},
+    {"label": "Pull request", "url": "https://github.com/example/project/pull/123"}
+  ],
+  "limitations": "Not deployed; production validation is pending."
+}
+```
+
+Criteria statuses are `met`, `not_met`, or `not_checked`, reported by the agent.
+They are never human acceptance. Use at most 20 criteria and 20 evidence entries.
+Summary/limitations allow 4000 characters, criteria 1000, evidence labels 200,
+and evidence URLs/descriptions 2000. An evidence entry needs a description or
+an HTTP(S) URL without embedded credentials. Links are references, not fetched
+or independently verified by capture.
+
+Requires a CLI supporting `ai-work submit --review-file` and a backend supporting
+`reviewDetails`. Upgrade backend, CLI, then plugin. The helper freezes the content
+inside its private pending receipt, passes a temporary private file to the CLI,
+and confirms the saved content. A changed file cannot rewrite a pending result;
+retry the frozen submission first. A changed report at the same commit creates
+a new result version and does not inherit acceptance. Stop can replay a pending
+report without the original file. Without an explicit file it preserves legacy
+metadata-only capture; the web dialog marks absent information rather than
+reconstructing it from earlier conversations.
+
+### Link the immutable artifact to its source system
+
+When the exact source URL is known and its disclosure is authorized, include
+optional `artifactUrl` in the explicit review file. For a commit result, use the
+source system's commit page for the full checkpoint HEAD, never a branch or
+pull-request URL. Keep the actual repository and host; do not infer them from a
+product name or unrelated evidence. Omit the field when the URL is unknown.
+The helper does not discover or transmit local Git remotes automatically.
+
+The field accepts up to 2000 characters, HTTP(S) only, without URL credentials,
+whitespace, backslashes or control characters. Self-hosted systems are supported.
+The web dialog and submission history link the artifact reference to this URL;
+it remains a reporter assertion, not independent provenance verification.
+
+Upgrade the backend and typed CLI to versions supporting `artifactUrl` before
+using it. The helper freezes and confirms it with all other review details;
+changing the URL requires a new result and never transfers human acceptance.
+Old reports without a URL stay unchanged. An unsupported server/CLI is visible
+incomplete capture, never permission to silently omit the field from a retry.

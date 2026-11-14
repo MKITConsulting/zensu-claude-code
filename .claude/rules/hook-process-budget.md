@@ -76,8 +76,8 @@ against Windows executables.
   `hostMatcherCovers`, so a `Bash|PowerShell` check never runs for `Read` and an
   `Edit|Write|MultiEdit` check never runs for `NotebookEdit`, which an unanchored regular expression
   would select. `script` names the entry point under `hooks/`, `body` the old hook body under
-  `hooks/checks/` (`null` for the capability, redact, data-guard and spawn-grant checks, which run
-  in-process only), and `failure` the policy. A hook that had several registrations has one entry
+  `hooks/checks/` (`null` for the capability, redact, data-guard, spawn-grant and verify-auth
+  guard checks, which run in-process only), and `failure` the policy. A hook that had several registrations has one entry
   per original group, under its own `name` and with the same `script`, `body` and `failure`
   (`secret-scan`, `secret-scan-write`, `secret-scan-notebook`), and its entry point dispatches the
   first of them. The registry is one key set: a further key is a strict-key-set change.
@@ -89,7 +89,9 @@ against Windows executables.
   consent gate on a marked call fail closed: exit 2 with the check's message. The CLI gate, the
   secret scan, the work-order checks, the redact sweep, the consent recorder, the data guard and the
   edit gate fail open with a stderr line, as the separate hooks did: a host treated their crash or
-  timeout as a non-blocking error. The edit gate's own fail-closed decisions are denies of its body,
+  timeout as a non-blocking error. The verify-auth guard fails open as well, and its own refusal of
+  a payload naming `verify-feature-runs` while its decision module is missing or broken is a deny it
+  returns, not this policy (`.claude/rules/verify-auth-guard.md`). The edit gate's own fail-closed decisions are denies of its body,
   not this policy. The spawn grant fails silent.
 - **The edit gate allows in-process and decides nothing else** (`editGateAllows`). It answers true
   only for a child principal, another tool, a bound session with a valid document and no active
@@ -124,7 +126,9 @@ against Windows executables.
   which runs the named check whatever its matcher and reproduces the old hook's output and exit
   status. Without `node` a wrapper with a body runs it directly, as the old hook behaved, the
   capability wrapper refuses with exit 2 and names `node`, the redact and data-guard wrappers write
-  their stderr notes and allow, and the spawn-grant wrapper exits 0 without a word. The capability wrapper keeps the guarded capture
+  their stderr notes and allow, the spawn-grant wrapper exits 0 without a word, and the
+  verify-auth guard wrapper denies a payload that names `verify-feature-runs` once backticks,
+  quotes and backslashes are stripped and the case is folded, and allows every other. The capability wrapper keeps the guarded capture
   (`zensu_hook_dispatch_guarded`), so a dispatcher that cannot start still refuses with exit 2
   and a one-line reason.
 - **One registration reader.** `registration()`, `hookEntries` and `registeredHooks` in

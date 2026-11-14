@@ -91,7 +91,15 @@ Turn it off by hand with:
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-zen-mode.sh" --off
 ```
 
-`--status` reports `on` or `off`.
+`--status` reports `on` or `off`. It reads the session marker, `hooks.zenModeDefault` and
+`hooks.zenMode` under the session's recorded project root, where the hook and `/zensu:doctor`
+read them too. That root differs from the directory the host sets in a session whose working
+directory is a git worktree and after `/zensu:adopt-session --reanchor`; the project overlay for
+both keys is then the recorded root's `.zensu/config.json`, and the three still agree:
+
+```
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-zen-mode.sh" --status
+```
 
 ## The contract
 
@@ -211,7 +219,8 @@ omits a problem is a wrong report. Shorten the prose, never the findings.
 ## Configuration
 
 Two independent flags, both in `~/.zensu/config.json` or the project-local
-`.zensu/config.json`:
+`.zensu/config.json` under the session's recorded project root, which in a session whose working
+directory is a git worktree is that worktree's own file:
 
 | Key | Default | Effect |
 | --- | --- | --- |

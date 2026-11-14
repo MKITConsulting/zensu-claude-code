@@ -535,6 +535,51 @@ if [ -z "$CONFIG_NODE_MISMATCH" ]; then
 else
   check "C2 node starts of the config getters:$CONFIG_NODE_MISMATCH" FAIL
 fi
+CONFIG_ROOT="$TMP/config-root"
+mkdir -p "$CONFIG_ROOT/.zensu"
+ROOT_FILE="$CONFIG_ROOT/.zensu/config.json"
+CONFIG_ROOT_MISMATCH=""
+config_root_case() {
+  local label="$1" expect_decided="$2" result
+  result="$(
+    export HOME="$CONFIG_HOME" CLAUDE_PROJECT_DIR="$CONFIG_PROJ"
+    unset ZENSU_CONFIG
+    . "$CONFIG_LIB"
+    : > "$TMP/config.log"
+    export ZENSU_BUDGET_LOG="$TMP/config.log"
+    SAVED_PATH="$PATH"
+    PATH="$SHIMS"
+    zensu_hook_enabled probeKey "$CONFIG_ROOT"; enabled=$?
+    PATH="$SAVED_PATH"
+    nodes="$(grep -cx node "$TMP/config.log")"
+    val="$(CLAUDE_PROJECT_DIR="$CONFIG_ROOT" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===false?"0":"1")' probeKey 2>/dev/null)"
+    if [ -z "$val" ] || [ "$val" = 1 ]; then ref_enabled=0; else ref_enabled=1; fi
+    printf '%s %s %s' "$enabled" "$nodes" "$ref_enabled"
+  )"
+  set -- $result
+  if [ "${1:-x}" != "${3:-y}" ]; then
+    CONFIG_ROOT_MISMATCH="$CONFIG_ROOT_MISMATCH [$label: enabled ${1:-x}/${3:-y}]"
+  fi
+  case "$expect_decided:${2:-x}" in
+    (yes:0|no:[1-9]*) ;;
+    (*) CONFIG_ROOT_MISMATCH="$CONFIG_ROOT_MISMATCH [$label: ${2:-x} node]" ;;
+  esac
+}
+put "$ROOT_FILE" absent
+put "$PROJECT_FILE" text '{"hooks":{"probeKey":false}}'
+config_root_case "the root's overlay is silent while the ambient overlay disables the key" yes
+put "$PROJECT_FILE" absent
+put "$ROOT_FILE" text '{"hooks":{"probeKey":false}}'
+config_root_case "the root's overlay disables the key while the ambient overlay is silent" no
+put "$PROJECT_FILE" text '{"hooks":{"probeKey":false}}'
+put "$ROOT_FILE" text '{"hooks":{"probeKey":true}}'
+config_root_case "the root's overlay enables the key while the ambient overlay disables it" no
+put "$ROOT_FILE" absent; put "$PROJECT_FILE" absent
+if [ -z "$CONFIG_ROOT_MISMATCH" ]; then
+  check "C2r zensu_hook_enabled with a root argument reads the overlay under that root and never the one under CLAUDE_PROJECT_DIR, starts no node when no file it reads names the key, and defers to node when the root's overlay does" PASS
+else
+  check "C2r the root form of zensu_hook_enabled:$CONFIG_ROOT_MISMATCH" FAIL
+fi
 
 CFG_JS="$(. "$CONFIG_LIB" && printf '%s' "$_ZENSU_CFG_JS")"
 SHAPE_HOME="$TMP/shape-home"

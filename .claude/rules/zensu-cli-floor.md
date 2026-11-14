@@ -6,6 +6,9 @@ paths:
   - "hooks/lib/ai-work-preflight-v1.js"
   - "hooks/lib/ai-work-capture-v1.js"
   - "hooks/lib/context-auto-load-v1.js"
+  - "agents/zensu-plm.md"
+  - "skills/implement/references/knowledge-context.md"
+  - "tests/structure/test-knowledge-context.sh"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/session-start-banner.sh"
@@ -140,7 +143,7 @@ the prose copies above. Tests: the unit file, driven by
 `tests/structure/test-session-start-banner.sh`; `P9a`-`P9d` and `P10a`-`P10f` in
 `tests/structure/test-setup-skill.sh`.
 
-**Sites outside this repository.** Four zensu-cli facts are copied here and nothing checks them
+**Sites outside this repository.** Five zensu-cli facts are copied here and nothing checks them
 against the CLI:
 
 - the `Not logged in` text of `zensu auth status`. This one fails open: if the CLI rewords it, a
@@ -150,7 +153,27 @@ against the CLI:
   `version-check.json`;
 - the version line format of `internal/version`. A change there reads as `unread`, which only warns;
 - the `ai-work` help of zensu-cli 0.18.0 in the fixture. It proves that the floor release satisfies
-  `REQUIRED`, not that a later release still declares every flag.
+  `REQUIRED`, not that a later release still declares every flag;
+- the knowledge help of zensu-cli 0.20.1 (`knowledge search --help`, `knowledge sources --help`),
+  which states the server's behaviour: search indexes each product's features, visions, journeys,
+  wiki pages, feature-doc titles and links (not the linked files), mocks and design assets, plus
+  Zensu's built-in documentation; a source of type external is a registration nothing indexes; and
+  ranking is full-text unless the server has an embedding model, then hybrid, falling back to
+  full-text when the embedding endpoint fails. The search help puts the mocks right after "but not
+  the linked files", which reads as if they were excluded; the sources help lists `mock` and
+  `design` among the sources Zensu syncs, which settles that they are indexed. The Knowledge
+  section of `agents/zensu-plm.md` repeats these facts and
+  `tests/structure/test-knowledge-context.sh` pins that wording, so the suite stays green when the
+  server changes: re-read both help texts when a connector, an artifact type or a ranking mode
+  ships. The trust rule there, Important Rule 14, and its copy in
+  `skills/implement/references/knowledge-context.md` are unconditional on purpose, because the
+  server marks the text members and agents write `internal_verified`, so a rule that exempted that
+  level would invite following it. Search results spell the field `trustLevel`; `knowledge get`
+  items and context-pack nodes spell it `trust_level`. The `--query` placeholders differ on
+  purpose: `knowledge search` matches whole words in its full-text default, so its hint in the plm
+  prompt and in the truncated-pack advice of `hooks/lib/context-auto-load-v1.js` asks for a few
+  terms the artifacts use, while `knowledge context-search` takes a task description by its own
+  help, so the discovery advice keeps `<specific task question>`.
 
 **Version: `patch`.** Advisory banner text, doctor rows and skill text: no schema field, key set,
 hook, matcher, config key or attestation moves.

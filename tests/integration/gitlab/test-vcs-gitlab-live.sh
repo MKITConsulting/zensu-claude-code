@@ -57,12 +57,6 @@ xeq() {
   fi
   return 0
 }
-plus() {
-  case "$1" in
-    (''|*[!0-9]*) printf '<not a count: %s>' "$1" ;;
-    (*) printf '%s' "$(( $1 + $2 ))" ;;
-  esac
-}
 
 finish() {
   echo "----"
@@ -264,11 +258,6 @@ REVIEW_TEXTS="added line note|removed line note|context line note|renamed file n
 REVIEW_COUNT='d.filter((x) => !x.individual_note && x.notes.length > 0 && process.env.ARG.split("|").some((t) => x.notes[0].body.includes(t))).length'
 THREAD_LINES='d.map((t) => `${t.path}:${t.line}`).sort().join(" ")'
 
-THREADS_BUG='the GitLab thread normalizer demands a boolean resolved on every note, and plain comments and system notes such as an approval carry none'
-THREADS_SIG='rc=1; glab returned the discussions; the normalizer printed nothing'
-POSTREVIEW_BUG='post-review looks for its raw marker in GitLab JSON, which escapes the angle brackets as unicode escapes'
-LOCATE_BUG='locate-pr matches the no-merge-request message of glab case-sensitively, and this glab capitalizes it'
-
 fetch_threads() {
   local iid="$1" expr="$2" arg="${3:-}" out rc raw
   out="$(vcs --fetch-threads --provider gitlab --repo-id "$RID" "$iid" 2>"$WORK/threads.err")"
@@ -310,8 +299,8 @@ has "GL18 the positionless discussion names the path in its body" \
 
 eq "GL19 GitLab stores the summary as a plain note without a resolution state" \
   "$(printf '%s' "$D" | json 'd.some((x) => x.individual_note && x.notes.some((n) => !n.system && typeof n.resolved !== "boolean"))')" "true"
-xeq "GL20 --fetch-threads lists the five unresolved review threads" \
-  "$(fetch_threads "$IID" "$THREAD_LINES")" ":null src/a.js:10 src/a.js:12 src/b.js:5 src/new.js:3" "$THREADS_SIG" "$THREADS_BUG"
+eq "GL20 --fetch-threads lists the five unresolved review threads" \
+  "$(fetch_threads "$IID" "$THREAD_LINES")" ":null src/a.js:10 src/a.js:12 src/b.js:5 src/new.js:3"
 
 added_thread="$(printf '%s' "$D" | json "$DISCUSSION_ID" 'added line note')"
 resolve_out="$(vcs --resolve-thread --provider gitlab --repo-id "$RID" --reply 'Fixed by the live check.' "$IID" "$added_thread" 2>&1)"
@@ -322,8 +311,8 @@ thread="$(api GET "projects/$PROJECT_ID/merge_requests/$IID/discussions/$added_t
 eq "GL22 the reply is stored in the resolved thread" \
   "$(printf '%s' "$thread" | json 'd.notes.map((n) => n.body.split("\n")[0]).slice(1).join("|")')" "Fixed by the live check."
 eq "GL23 GitLab marks the thread resolved" "$(printf '%s' "$thread" | json 'd.notes[0].resolved')" "true"
-xeq "GL24 --fetch-threads drops the resolved thread" \
-  "$(fetch_threads "$IID" 'd.some((t) => t.threadId === process.env.ARG) ? "listed" : d.length' "$added_thread")" "4" "$THREADS_SIG" "$THREADS_BUG"
+eq "GL24 --fetch-threads drops the resolved thread" \
+  "$(fetch_threads "$IID" 'd.some((t) => t.threadId === process.env.ARG) ? "listed" : d.length' "$added_thread")" "4"
 
 EACH_COUNT='process.env.ARG.split("|").map((t) => d.filter((x) => !x.individual_note && x.notes.length > 0 && x.notes[0].body.includes(t)).length).join(" ")'
 context_note="$(printf '%s' "$(discussions)" | json "$FIRST_NOTE_ID" 'context line note')"
@@ -335,11 +324,11 @@ partial_rc=$?
 eq "GL31 a re-run after a lost discussion succeeds" "$partial_rc" "0"
 [ "$partial_rc" -eq 0 ] || printf '%s\n' "$partial_out" | tail -n 20 | sed 's/^/        /'
 D="$(discussions)"
-xeq "GL32 the re-run restores the lost discussion without repeating the others" \
-  "$(printf '%s' "$D" | json "$EACH_COUNT" "$REVIEW_TEXTS")" "1 1 1 1 1" "2 2 1 2 2" "$POSTREVIEW_BUG"
+eq "GL32 the re-run restores the lost discussion without repeating the others" \
+  "$(printf '%s' "$D" | json "$EACH_COUNT" "$REVIEW_TEXTS")" "1 1 1 1 1"
 eq "GL33 the restored discussion keeps its context-line position" \
   "$(printf '%s' "$D" | json "$POSITION_OF" 'context line note')" '["DiffNote","text","src/a.js","src/a.js",11,12]'
-xeq "GL34 the re-run adds no summary note" "$(notes | json "$SUMMARY_COUNT" 'Live review body.')" "1" "2" "$POSTREVIEW_BUG"
+eq "GL34 the re-run adds no summary note" "$(notes | json "$SUMMARY_COUNT" 'Live review body.')" "1"
 
 discussions_before="$(discussions | json 'd.length')"
 notes_before="$(notes | json "$USER_NOTES")"
@@ -347,10 +336,8 @@ rerun_out="$(vcs --post-review --provider gitlab --repo-id "$RID" "$IID" "$WORK/
 rerun_rc=$?
 eq "GL35 a re-run on a complete review succeeds" "$rerun_rc" "0"
 [ "$rerun_rc" -eq 0 ] || printf '%s\n' "$rerun_out" | tail -n 20 | sed 's/^/        /'
-xeq "GL36 a re-run on a complete review adds no discussion" "$(discussions | json 'd.length')" "$discussions_before" \
-  "$(plus "$discussions_before" 6)" "$POSTREVIEW_BUG"
-xeq "GL37 a re-run on a complete review adds no note" "$(notes | json "$USER_NOTES")" "$notes_before" \
-  "$(plus "$notes_before" 6)" "$POSTREVIEW_BUG"
+eq "GL36 a re-run on a complete review adds no discussion" "$(discussions | json 'd.length')" "$discussions_before"
+eq "GL37 a re-run on a complete review adds no note" "$(notes | json "$USER_NOTES")" "$notes_before"
 
 OP="team-review:v1:live-$NAME"
 reconcile() {
@@ -396,21 +383,9 @@ isolated git -c user.name=zensu -c user.email=zensu@example.invalid -c commit.gp
   || abort "GL54 the local checkout switches to the merge request branch"
 eq "GL54 --locate-pr finds the merge request of the checked-out branch" "$(vcs --locate-pr --provider gitlab 2>&1)" "$LOCATED"
 isolated git checkout -q -b lonely >/dev/null 2>&1 || abort "GL55 the local checkout switches to a branch without a merge request"
-lonely_err="$(isolated glab mr view --output json 2>&1 >/dev/null)"
 vcs --locate-pr --provider gitlab >/dev/null 2>"$WORK/locate.err"
 locate_rc=$?
-case "$lonely_err" in
-  *"No open merge request available for"*)
-    located="$locate_rc"
-    if [ "$locate_rc" != 3 ] && ! grep -Fq 'No open merge request available for' "$WORK/locate.err"; then
-      located="$locate_rc ($(tr '\n' ' ' < "$WORK/locate.err" | head -c 200))"
-    fi
-    xeq "GL55 --locate-pr exits 3 on a branch without a merge request" "$located" "3" "1" "$LOCATE_BUG"
-    ;;
-  *)
-    eq "GL55 --locate-pr exits 3 on a branch without a merge request" "$locate_rc" "3" "$WORK/locate.err"
-    ;;
-esac
+eq "GL55 --locate-pr exits 3 on a branch without a merge request" "$locate_rc" "3" "$WORK/locate.err"
 markers="$(vcs --review-markers --provider gitlab --repo-id "$RID" "$IID" 2>&1)"
 markers_rc=$?
 eq "GL56 --review-markers lists exactly one marker, the first part of the reconciled review" \
@@ -480,7 +455,7 @@ eq "GL70 --review-summary reports the approval" \
   "$(vcs --review-summary --provider gitlab --repo-id "$RID" "$IID2" 2>&1)" '{"reviewed":true,"approved":true,"changesRequested":false}'
 eq "GL71 the approval leaves a system note without a resolution state" \
   "$(discussions2 | json 'd.some((x) => x.notes.some((n) => n.system && typeof n.resolved !== "boolean"))')" "true"
-xeq "GL72 --fetch-threads still lists the unresolved threads after the approval" \
-  "$(fetch_threads "$IID2" "$THREAD_LINES")" ":null src/b.js:2" "$THREADS_SIG" "$THREADS_BUG"
+eq "GL72 --fetch-threads still lists the unresolved threads after the approval" \
+  "$(fetch_threads "$IID2" "$THREAD_LINES")" ":null src/b.js:2"
 
 finish

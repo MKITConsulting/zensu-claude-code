@@ -36,6 +36,33 @@ only mode-dependent text is `(S)`'s status-line example, option (2) and the work
 Rationale this file carries gets at most one sentence in the directive: put the rest here, not in the
 heredocs. Version `patch`: the hook still emits only `additionalContext`.
 
+**Option (2) names its cost, like option (1).** It used to say "no prerequisites" while the
+chain cannot close before a full-suite run and a live check of every acceptance criterion
+(`evidence.fullSuiteGate` and `evidence.acceptanceGate`, both `required` by default) and the
+Stop hook holds the turn until the review chain closes; the option is usually ranked first and
+marked recommended, so a newcomer agreed to costs nobody named (newcomer audit 2026-10-18,
+P1-7). Its description now states that the turn waits for the review chain and, by default,
+for the full-suite run and the live acceptance check, names both keys, and names
+`/zensu:full-suite` as the way to leave the suite to the pull-request pipeline. That wording
+says "PR pipeline", never "CI": `D13` reads `\bCI\b` in the question block as unattended-run
+vocabulary, and the cost text must not weaken that grader. `D15b` pins the statement inside
+option (2) of both heredocs. The room came from the text itself, not from `D44`'s ceiling: the
+rationale after "never record it with --direct yourself", the repeated "The user changes a
+recorded route" sentence, "and in most cases ASK the user" (the question sentence already says
+so), the lead-in of the human-present sentence, which now opens with "The field's", and the
+vanilla option's cause clause went. Measured with `D44`'s method, the vanilla directive grows
+from 8,962 to 8,986 and the strict one from 8,826 to 8,960, because strict had no cause clause
+to trim.
+
+**An affirmation that asks for TDD runs that one chain strict.** The affirmation arm of `(B)`
+ensures the specification carries exactly one `TDD-MODE: strict` line and uses the status line
+`Executing via /zensu:build (strict TDD requested)` when the approval message asks for TDD;
+any other affirmation of the Zensu workflow takes the arm as it stands. The sub-arm sits
+inside the `P1b6` span, so it is byte-identical in both heredocs, and in strict mode it is a
+no-op escalation. `D15d` pins it in both heredocs after the refusal arm and before the
+implement-directly fallthrough. The reason and the rank it uses are in
+`.claude/rules/tdd-mode-precedence.md`.
+
 **The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
 `<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
 route or workflow question": Autopilot has spent its single planning gate by then, and a second
@@ -266,10 +293,51 @@ introduced no one-sided defect in the duplicated span — every directive edit l
 mode-DEPENDENT clause (`run TDD instead` / `run the workflow instead`). Recorded so the next reader
 does not have to re-derive whether the condition was met: it was checked, and it was not.
 
-**Deliberately NOT changed — the QUESTION SHAPE, not the file:** `hooks/user-prompt-tdd-reminder.sh`
-keeps its yes/no question. Its TDD arms WERE edited by this chain (intent-judging, arm order, the
-untrusted-input scoping), which is why it is on the coupled-sites roster above. The route choice belongs to the moment a plan is approved; re-asking it on
-every prompt while no chain is active would be four options of noise.
+**The reminder offers Autopilot as a third option, and only while a person is present.**
+`hooks/user-prompt-tdd-reminder.sh` offers the Zensu workflow, `Autopilot — /zensu:autopilot` and
+`No — implement directly`, in that fixed order, in both heredocs and in its ask short line, while the
+`ZENSU HUMAN PRESENT:` field reads `yes`; under `unknown` or `no` it offers Yes and No only. It was
+yes/no until a session that began with a direct request never saw Autopilot: a Yes records `build`,
+and a recorded route skips the four-route plan question. A direct request is also Autopilot's
+cheapest entry, because chosen after a plan approval it costs a second approval round. The rules that
+keep it safe and small:
+
+- Only a person's answer selects Autopilot. The plan gate keeps Autopilot in its question under
+  `unknown`, because an `ExitPlanMode` approval stands before that question; the reminder answers any
+  prompt, so an `unknown` host that answers `AskUserQuestion` itself could pick the branch-pushing
+  route. The Autopilot text lives once, in the hook's `AUTOPILOT_*` values, and reaches both heredocs
+  through the `__ZENSU_AUTOPILOT_OPTION__` and `__ZENSU_AUTOPILOT_RULE__` placeholders, which
+  `autopilot_substitute` fills by bash parameter expansion before the route substitution. Those two
+  values must therefore carry no `"`, `\` or `&`.
+- A request that asks for Autopilot is neither preference: the reminder asks, or takes its no-human
+  default, and its Autopilot sentence says so over every other sentence, the closing yield sentence
+  included. That is this file's (C) property as one override sentence, because the request text also
+  reaches runs with nobody to answer.
+- A slash command that invokes `/zensu:autopilot`, `/zensu:pilot` or `/zensu:work` gets no reminder,
+  under any route field: those prompts chose their route, and `/zensu:work` is how
+  `harness/launcher.js` starts a headless work order. `zensu_prompt_slash_name` in
+  `hooks/lib/zensu-prompt-origin.sh` reads the name in the raw and the tag spelling behind any
+  leading reminders, and only the namespaced spelling matches, so `/zensu:autopilot-release` and
+  `/zensu:build` still get the reminder.
+- An Autopilot answer records nothing, so the question comes back on the next code request.
+- `/zensu:pilot` is not offered: it needs a feature already tracked in Zensu, which a direct
+  request does not name.
+- The order is fixed rather than ranked. Direct requests skew small, a ranking rule would cost
+  characters on every later prompt, and the outward-facing route stays out of the first slot. The
+  directive says "in this order", so the best-solution-first rule leaves the order alone.
+- The label is this file's option (1) literal, spelled once in the reminder's `AUTOPILOT_OPTION`.
+  `P1` in `tests/structure/test-tdd-vanilla-mode.sh` pins the plan gate's copy and `R13b` the
+  reminder's, and nothing compares the two, so a rename edits both by hand.
+
+`R13b` in `tests/structure/test-delivery-route.sh` holds the attended property: the three labels in
+order, the Autopilot sentences right after the No arm and nowhere else, exactly three
+`zensu:autopilot` mentions (label, dispatch, status line), one record command, and no
+`zensu:pilot`. `R13h` holds the `unknown` and `no` shapes, `R13g` the short line, `R13f` the decided
+lines, and in `tests/structure/test-tdd-reminder-hook.sh` `C15` the CI note, `C30c` the option
+against the human-present field and `C14b` the slash-command exit. With a person present the option
+inserts 686 characters into each full text and 473 into the ask short line, which every later `ask`
+prompt carries; without one the reminder inserts 254 and 208 for its never-run sentence.
+`.claude/rules/prompt-ledger.md` records the measured figures and budgets.
 
 **Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same plan gate
 against different harnesses and were NOT included in this change. A port owns more here than a
@@ -393,8 +461,9 @@ as the real one. It prints one notice instead: carry the plan
 out with that skill, say in one line that Zensu asked no route question, and name `/zensu:build` as
 the way to run the plan under the Zensu workflow. The approval message still wins as it does under
 (B): a request, not a mere mention, for `/zensu:build` or the Zensu workflow, `/zensu:autopilot` or
-`/zensu:pilot` dispatches that route with the input its arm names, and a refused route is never
-taken. Offering the two outward-facing routes there is safe because the notice fires only while
+`/zensu:pilot` dispatches that route with the input its arm names, a request for TDD takes
+`/zensu:build` with exactly one `TDD-MODE: strict` line in the specification, and a refused route
+is never taken. Offering the two outward-facing routes there is safe because the notice fires only while
 the field reads `yes`, the one value under which (B) keeps them. The notice is a `printf` of a JSON object built
 in node, never a third heredoc, so `R12` and the parity helper still count two.
 

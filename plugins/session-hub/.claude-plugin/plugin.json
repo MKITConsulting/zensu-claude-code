@@ -1,0 +1,17 @@
+{
+  "name": "session-hub",
+  "version": "1.0.0",
+  "displayName": "Zensu Session Hub",
+  "description": "Companion plugin for the Zensu Session Hub: the /session-hub:session-trail takeover the Hub types, its handover receipt and the usage feed.",
+  "author": {
+    "name": "Zensu",
+    "email": "hello@zensu.dev"
+  },
+  "homepage": "https://github.com/MKITConsulting/zensu-claude-code/tree/main/plugins/session-hub",
+  "repository": "https://github.com/MKITConsulting/zensu-claude-code",
+  "license": "FSL-1.1-Apache-2.0",
+  "keywords": ["session-hub", "session-trail", "takeover", "handover", "usage-feed"],
+  "skills": [
+    "./skills/session-trail"
+  ]
+}

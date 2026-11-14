@@ -14,9 +14,11 @@ const STORE_SEGMENTS = Object.freeze(['background-review', 'v1']);
 const RECORDS_SEGMENT = 'records';
 const FANOUT_SEGMENT = 'fanout';
 const ARRIVALS_SEGMENT = 'arrivals';
+const NAMES_SEGMENT = 'names';
 const SESSION_KEY_RE = /^scv1_[0-9a-f]{64}$/;
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
-const FANOUT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}\.json$/;
+const AGENT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const SESSION_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}\.json$/;
 const TICKET_RE = /^[A-Za-z0-9_-]{1,96}$/;
 const STATUS_RE = /^[a-z][a-z_-]{0,31}$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
@@ -27,6 +29,7 @@ const ENVELOPES = Object.freeze({ standalone: 2, bound: 5 });
 const RECORD_KEYS = Object.freeze(['agent_id', 'header', 'launched_at_ms', 'schema', 'session_key', 'ticket']);
 const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'session_key', 'subagent_type']);
 const ARRIVAL_KEYS = Object.freeze(['agent_id', 'arrival', 'arrived_at_ms', 'holds', 'schema', 'session_key', 'ticket']);
+const NAME_KEYS = Object.freeze(['agent_id', 'name', 'named_at_ms', 'schema', 'session_key']);
 const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
   .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
 const PERSONA_TYPE_RE = /^zensu-review-[A-Za-z0-9_-]+$/;
@@ -36,6 +39,8 @@ const WAIT_KINDS = Object.freeze(['consume', 'fanout']);
 const ASYNC_STATUS = 'async_launched';
 const COMPLETED_STATUS = 'completed';
 const HANDBACK_FRAME_LINE = '[Subagent hand-back]';
+const PEER_LINE = 'Another Claude session sent a message:';
+const FRAME_RE = /^<agent-message from="([^"]*)">$/;
 const TASK_ID_LINE_RE = /^<task-id>[ \t]*([^<\s]*)[ \t]*<\/task-id>$/;
 const STATUS_LINE_RE = /^<status>[ \t]*([^<\s]*)[ \t]*<\/status>$/;
 const RESULT_OPEN = '<result>';
@@ -48,7 +53,7 @@ const LIMITS = Object.freeze({
   maxStateBytes: 4 * 1024 * 1024,
   maxHeaderLineChars: 512,
   maxFanoutEntries: 32,
-  maxFanoutNames: 256,
+  maxSessionFiles: 256,
   waitTtlMs: 60 * 60 * 1000,
   maxArrivalHolds: 3,
   idleMs: 24 * 60 * 60 * 1000,
@@ -147,6 +152,18 @@ function validateArrival(note, expected = {}) {
   return null;
 }
 
+function validateName(binding, expected = {}) {
+  if (!exactKeys(binding, NAME_KEYS)) return 'name keys';
+  if (binding.schema !== SCHEMA) return 'name schema';
+  if (typeof binding.session_key !== 'string' || !SESSION_KEY_RE.test(binding.session_key)) return 'name session key';
+  if (expected.sessionKey !== undefined && binding.session_key !== expected.sessionKey) return 'name session mismatch';
+  if (typeof binding.agent_id !== 'string' || !AGENT_ID_RE.test(binding.agent_id)) return 'name agent id';
+  if (expected.agentId !== undefined && binding.agent_id !== expected.agentId) return 'name agent mismatch';
+  if (typeof binding.name !== 'string' || !AGENT_NAME_RE.test(binding.name)) return 'name value';
+  if (!Number.isSafeInteger(binding.named_at_ms) || binding.named_at_ms < 0) return 'name time';
+  return null;
+}
+
 function storeLocations(pluginData) {
   let root;
   try {
@@ -160,6 +177,19 @@ function storeLocations(pluginData) {
     fanout: ensurePrivateDirectory(root, [FANOUT_SEGMENT]),
     arrivals: ensurePrivateDirectory(root, [ARRIVALS_SEGMENT]),
   };
+}
+
+function namesDirectory(locations) {
+  try {
+    return ensurePrivateDirectory(locations.root, [NAMES_SEGMENT]);
+  } catch {
+    return null;
+  }
+}
+
+function sweepIdleNames(locations, keepKey, limits, now) {
+  const names = namesDirectory(locations);
+  return names ? sweepIdleSessions(names, keepKey, limits, now) : 0;
 }
 
 function recordFileName(sessionKey) {
@@ -279,17 +309,17 @@ function sweepIdle(records, keepName, limits = LIMITS, now = Date.now()) {
   return removed;
 }
 
-function sweepIdleFanout(fanoutRoot, keepKey, limits = LIMITS, now = Date.now()) {
+function sweepIdleSessions(segmentRoot, keepKey, limits = LIMITS, now = Date.now()) {
   let names;
   try {
-    names = fs.readdirSync(fanoutRoot);
+    names = fs.readdirSync(segmentRoot);
   } catch {
     return 0;
   }
   let removed = 0;
   for (const name of names) {
     if (name === keepKey) continue;
-    const entry = path.join(fanoutRoot, name);
+    const entry = path.join(segmentRoot, name);
     let stat;
     try {
       stat = fs.lstatSync(entry);
@@ -348,7 +378,8 @@ function recordLaunch(payload, options, limits = LIMITS) {
   const name = recordFileName(sessionKey);
   sweepIdle(locations.records, name, limits, now);
   sweepIdle(locations.arrivals, name, limits, now);
-  sweepIdleFanout(locations.fanout, sessionKey, limits, now);
+  sweepIdleSessions(locations.fanout, sessionKey, limits, now);
+  sweepIdleNames(locations, sessionKey, limits, now);
   const note = arrivalFile(locations, sessionKey);
   dropArrival(note, loadArrival(note, sessionKey, limits), limits);
   try {
@@ -356,11 +387,12 @@ function recordLaunch(payload, options, limits = LIMITS) {
   } catch {
     return { recorded: false, reason: 'write' };
   }
+  bindLaunchName(payload, locations, sessionKey, agentId, limits, now);
   return { recorded: true, agentId, ticket, ttlMinutes: ttlMinutes(limits) };
 }
 
-function fanoutDirectory(locations, sessionKey) {
-  const directory = path.join(locations.fanout, requireSessionKey(sessionKey));
+function sessionDirectory(base, sessionKey) {
+  const directory = path.join(base, requireSessionKey(sessionKey));
   try {
     const stat = fs.lstatSync(directory);
     return stat.isDirectory() && !stat.isSymbolicLink() ? directory : null;
@@ -369,7 +401,11 @@ function fanoutDirectory(locations, sessionKey) {
   }
 }
 
-function fanoutEntries(directory, sessionKey, limits = LIMITS) {
+function fanoutDirectory(locations, sessionKey) {
+  return sessionDirectory(locations.fanout, sessionKey);
+}
+
+function sessionFiles(directory, sessionKey, validate, limits = LIMITS) {
   let names;
   try {
     names = fs.readdirSync(directory);
@@ -377,8 +413,8 @@ function fanoutEntries(directory, sessionKey, limits = LIMITS) {
     return [];
   }
   const entries = [];
-  for (const name of names.slice(0, limits.maxFanoutNames)) {
-    if (!FANOUT_NAME_RE.test(name)) continue;
+  for (const name of names.slice(0, limits.maxSessionFiles)) {
+    if (!SESSION_FILE_RE.test(name)) continue;
     const file = path.join(directory, name);
     const loaded = readBoundedFile(file, limits.maxRecordBytes);
     if (loaded.invalid) continue;
@@ -388,15 +424,122 @@ function fanoutEntries(directory, sessionKey, limits = LIMITS) {
     } catch {
       continue;
     }
-    if (validateFanout(entry, { sessionKey, agentId: name.slice(0, -'.json'.length) })) continue;
+    if (validate(entry, { sessionKey, agentId: name.slice(0, -'.json'.length) })) continue;
     entries.push({ file, text: loaded.text, entry });
   }
   return entries;
 }
 
-function fanoutFresh(entry, limits, now) {
-  const age = now - entry.launched_at_ms;
+function fanoutEntries(directory, sessionKey, limits = LIMITS) {
+  return sessionFiles(directory, sessionKey, validateFanout, limits);
+}
+
+function withinWait(at, limits, now) {
+  const age = now - at;
   return age >= -limits.clockSkewMs && age < limits.waitTtlMs;
+}
+
+function fanoutFresh(entry, limits, now) {
+  return withinWait(entry.launched_at_ms, limits, now);
+}
+
+function launchName(payload) {
+  const input = isPlainObject(payload) && isPlainObject(payload.tool_input) ? payload.tool_input : {};
+  return typeof input.name === 'string' && AGENT_NAME_RE.test(input.name) ? input.name : null;
+}
+
+function moveName(locations, sessionKey, name, agentId, limits = LIMITS, now = Date.now()) {
+  const root = namesDirectory(locations);
+  if (!root) return { moved: false, reason: 'store' };
+  let directory;
+  try {
+    directory = agentId ? ensurePrivateDirectory(root, [requireSessionKey(sessionKey)]) : sessionDirectory(root, sessionKey);
+  } catch {
+    return { moved: false, reason: 'store' };
+  }
+  let released = 0;
+  if (directory) {
+    for (const item of sessionFiles(directory, sessionKey, validateName, limits)) {
+      if (item.entry.name !== name && withinWait(item.entry.named_at_ms, limits, now)) continue;
+      if (consumeRecord(item.file, item.text, limits)) released += 1;
+    }
+  }
+  if (!agentId) return { moved: true, released };
+  const binding = { schema: SCHEMA, session_key: sessionKey, agent_id: agentId, name, named_at_ms: now };
+  try {
+    writeFileAtomic(directory, `${agentId}.json`, `${JSON.stringify(binding)}\n`);
+  } catch {
+    return { moved: false, reason: 'write', released };
+  }
+  return { moved: true, released };
+}
+
+function bindLaunchName(payload, locations, sessionKey, agentId, limits, now) {
+  const name = launchName(payload);
+  return name ? moveName(locations, sessionKey, name, agentId, limits, now) : null;
+}
+
+function sessionAgentIds(locations, sessionKey, limits) {
+  const ids = new Set();
+  const fanout = fanoutDirectory(locations, sessionKey);
+  if (fanout) for (const item of fanoutEntries(fanout, sessionKey, limits)) ids.add(item.entry.agent_id);
+  const loaded = loadRecord(path.join(locations.records, recordFileName(sessionKey)), sessionKey, limits);
+  if (loaded.record) ids.add(loaded.record.agent_id);
+  return ids;
+}
+
+function nameIndex(locations, sessionKey, limits = LIMITS, now = Date.now()) {
+  const root = namesDirectory(locations);
+  const directory = root ? sessionDirectory(root, sessionKey) : null;
+  if (!directory) return new Map();
+  const bindings = sessionFiles(directory, sessionKey, validateName, limits)
+    .map((item) => item.entry)
+    .filter((binding) => withinWait(binding.named_at_ms, limits, now));
+  const known = sessionAgentIds(locations, sessionKey, limits);
+  const holders = new Map();
+  for (const binding of bindings) {
+    known.add(binding.agent_id);
+    holders.set(binding.name, (holders.get(binding.name) || 0) + 1);
+  }
+  const aliases = new Map();
+  for (const binding of bindings) {
+    if (holders.get(binding.name) === 1 && !known.has(binding.name)) aliases.set(binding.name, binding.agent_id);
+  }
+  return aliases;
+}
+
+function namesFor(aliases, agentId) {
+  const names = [];
+  for (const [name, holder] of aliases) if (holder === agentId) names.push(name);
+  return names;
+}
+
+function nameAliases(options, limits = LIMITS) {
+  try {
+    const sessionKey = requireSessionKey(options.sessionKey);
+    return nameIndex(storeLocations(options.pluginData), sessionKey, limits, options.now === undefined ? Date.now() : options.now);
+  } catch {
+    return new Map();
+  }
+}
+
+function promptNameAliases(prompt, options, limits = LIMITS) {
+  if (typeof prompt !== 'string' || !hostFrame(promptLines(prompt))) return new Map();
+  return nameAliases(options, limits);
+}
+
+function releaseName(payload, options, limits = LIMITS) {
+  const sessionKey = requireSessionKey(options.sessionKey);
+  const name = launchName(payload);
+  if (!name) return { released: false, reason: 'name' };
+  let locations;
+  try {
+    locations = storeLocations(options.pluginData);
+  } catch {
+    return { released: false, reason: 'store' };
+  }
+  const moved = moveName(locations, sessionKey, name, null, limits, options.now === undefined ? Date.now() : options.now);
+  return moved.moved ? { released: true, count: moved.released } : { released: false, reason: moved.reason };
 }
 
 function pruneFanout(entries, limits, now) {
@@ -435,7 +578,8 @@ function recordFanout(payload, options, limits = LIMITS) {
   }
   sweepIdle(locations.records, recordFileName(sessionKey), limits, now);
   sweepIdle(locations.arrivals, recordFileName(sessionKey), limits, now);
-  sweepIdleFanout(locations.fanout, sessionKey, limits, now);
+  sweepIdleSessions(locations.fanout, sessionKey, limits, now);
+  sweepIdleNames(locations, sessionKey, limits, now);
   const fresh = pruneFanout(fanoutEntries(directory, sessionKey, limits), limits, now);
   if (!fresh.some((item) => item.entry.agent_id === agentId) && fresh.length >= limits.maxFanoutEntries) {
     return { recorded: false, reason: 'full' };
@@ -445,6 +589,7 @@ function recordFanout(payload, options, limits = LIMITS) {
   } catch {
     return { recorded: false, reason: 'write' };
   }
+  bindLaunchName(payload, locations, sessionKey, agentId, limits, now);
   return { recorded: true, agentId, ttlMinutes: ttlMinutes(limits) };
 }
 
@@ -475,7 +620,14 @@ function notificationBlocks(lines) {
   return blocks;
 }
 
-function scanLines(lines, agentId) {
+function hostFrame(lines) {
+  const index = lines[0] === PEER_LINE ? 1 : 0;
+  if (index + 1 >= lines.length) return null;
+  const open = FRAME_RE.exec(lines[index]);
+  return open && lines[index + 1].startsWith(HANDBACK_FRAME_LINE) ? { index, from: open[1] } : null;
+}
+
+function scanLines(lines, agentId, names = []) {
   if (!Array.isArray(lines) || typeof agentId !== 'string' || !AGENT_ID_RE.test(agentId)) {
     return { arrival: null };
   }
@@ -484,6 +636,10 @@ function scanLines(lines, agentId) {
     if (lines[index] === frame && lines[index + 1].startsWith(HANDBACK_FRAME_LINE)) {
       return { arrival: 'handback', status: COMPLETED_STATUS };
     }
+  }
+  if (names.length) {
+    const host = hostFrame(lines);
+    if (host && names.includes(host.from)) return { arrival: 'handback', status: COMPLETED_STATUS };
   }
   const idLine = new RegExp(`^<task-id>[ \\t]*${escapeRegExp(agentId)}[ \\t]*</task-id>$`);
   let status = null;
@@ -502,19 +658,23 @@ function scanPrompt(prompt, agentId) {
   return scanLines(promptLines(prompt), agentId);
 }
 
-function handbackReports(prompt) {
+function handbackReports(prompt, aliases = null) {
   if (typeof prompt !== 'string') return [];
   const lines = promptLines(prompt);
+  const host = aliases instanceof Map ? hostFrame(lines) : null;
   const reports = [];
   for (let index = 0; index + 1 < lines.length; index += 1) {
-    const open = /^<agent-message from="([^"]*)">$/.exec(lines[index]);
-    if (!open || !AGENT_ID_RE.test(open[1]) || !lines[index + 1].startsWith(HANDBACK_FRAME_LINE)) continue;
+    const open = FRAME_RE.exec(lines[index]);
+    if (!open || !lines[index + 1].startsWith(HANDBACK_FRAME_LINE)) continue;
+    const named = host !== null && host.index === index && aliases.has(open[1]);
+    const agentId = named ? aliases.get(open[1]) : open[1];
+    if (!named && !AGENT_ID_RE.test(agentId)) continue;
     const close = lines.indexOf('</agent-message>', index + 2);
     const body = lines.slice(index + 2, close === -1 ? lines.length : close);
     const indent = (line) => /^ */.exec(line)[0].length;
     const widths = body.filter((line) => line.trim() !== '').map(indent);
     const strip = widths.length ? Math.min(...widths) : 0;
-    reports.push({ agentId: open[1], report: body.map((line) => line.slice(Math.min(strip, indent(line)))).join('\n') });
+    reports.push({ agentId, report: body.map((line) => line.slice(Math.min(strip, indent(line)))).join('\n') });
     index = close === -1 ? lines.length : close;
   }
   return reports;
@@ -596,12 +756,16 @@ function retireArrival(locations, sessionKey, agentId, limits = LIMITS) {
   return dropArrival(file, loaded, limits);
 }
 
-function retireFanoutArrivals(locations, sessionKey, lines, limits = LIMITS) {
+function promptAliases(locations, sessionKey, lines, limits, now) {
+  return hostFrame(lines) ? nameIndex(locations, sessionKey, limits, now) : new Map();
+}
+
+function retireFanoutArrivals(locations, sessionKey, lines, aliases, limits = LIMITS) {
   const directory = fanoutDirectory(locations, sessionKey);
   if (!directory) return 0;
   let retired = 0;
   for (const item of fanoutEntries(directory, sessionKey, limits)) {
-    if (!scanLines(lines, item.entry.agent_id).arrival) continue;
+    if (!scanLines(lines, item.entry.agent_id, namesFor(aliases, item.entry.agent_id)).arrival) continue;
     if (consumeRecord(item.file, item.text, limits)) retired += 1;
   }
   return retired;
@@ -638,12 +802,14 @@ function noteArrival(payload, options, limits = LIMITS) {
     return idle('store');
   }
   const lines = promptLines(payload.prompt);
-  const retired = retireFanoutArrivals(locations, sessionKey, lines, limits);
+  const now = options.now === undefined ? Date.now() : options.now;
+  const aliases = promptAliases(locations, sessionKey, lines, limits, now);
+  const retired = retireFanoutArrivals(locations, sessionKey, lines, aliases, limits);
   const loaded = loadRecord(path.join(locations.records, recordFileName(sessionKey)), sessionKey, limits);
   const held = heldArrival(locations, sessionKey, loaded.record, limits);
   if (!loaded.record) return idle(loaded.reason, retired);
   const agentId = loaded.record.agent_id;
-  const scan = scanLines(lines, agentId);
+  const scan = scanLines(lines, agentId, namesFor(aliases, agentId));
   if (scan.arrival && scan.status === COMPLETED_STATUS) {
     if (!held.note) {
       const note = {
@@ -652,7 +818,7 @@ function noteArrival(payload, options, limits = LIMITS) {
         agent_id: agentId,
         ticket: loaded.record.ticket,
         arrival: scan.arrival,
-        arrived_at_ms: options.now === undefined ? Date.now() : options.now,
+        arrived_at_ms: now,
         holds: 0,
       };
       try {
@@ -679,12 +845,13 @@ function matchArrival(payload, options, limits = LIMITS) {
     return none('store');
   }
   const lines = promptLines(prompt);
-  const retired = retireFanoutArrivals(locations, sessionKey, lines, limits);
+  const aliases = promptAliases(locations, sessionKey, lines, limits, options.now === undefined ? Date.now() : options.now);
+  const retired = retireFanoutArrivals(locations, sessionKey, lines, aliases, limits);
   const file = path.join(locations.records, recordFileName(sessionKey));
   const loaded = loadRecord(file, sessionKey, limits);
   const held = heldArrival(locations, sessionKey, loaded.record, limits);
   if (!loaded.record) return none(loaded.reason, retired);
-  const scan = scanLines(lines, loaded.record.agent_id);
+  const scan = scanLines(lines, loaded.record.agent_id, namesFor(aliases, loaded.record.agent_id));
   if (!scan.arrival && !held.note) return none('no-arrival', retired);
   if (issuedTicket(options.stateFile, sessionKey, limits) !== loaded.record.ticket) {
     if (held.note) dropArrival(held.file, held.loaded, limits);
@@ -854,6 +1021,10 @@ function deferLine(result) {
   return result.spent ? `spent reason=${result.reason}` : `idle reason=${result.reason}`;
 }
 
+function unbindLine(result) {
+  return result.released ? `unbound count=${result.count}` : `idle reason=${result.reason}`;
+}
+
 function readStdin(maxBytes) {
   const raw = fs.readFileSync(0);
   if (raw.length > maxBytes) return null;
@@ -951,7 +1122,18 @@ function main(argv, env = process.env, io = {}) {
     write(`${waitLine(result)}\n`);
     return 0;
   }
-  process.stderr.write('usage: background-review-v1.js record|fanout|arrive|match|retire|defer|wait\n');
+  if (mode === 'unbind') {
+    let result;
+    try {
+      const payload = parsePayload(readInput(LIMITS.maxPayloadBytes));
+      result = payload ? releaseName(payload, envOptions(env)) : { released: false, reason: 'payload' };
+    } catch {
+      result = { released: false, reason: 'fault' };
+    }
+    write(`${unbindLine(result)}\n`);
+    return 0;
+  }
+  process.stderr.write('usage: background-review-v1.js record|fanout|arrive|match|retire|defer|wait|unbind\n');
   return 2;
 }
 
@@ -961,9 +1143,11 @@ module.exports = {
   RECORDS_SEGMENT,
   FANOUT_SEGMENT,
   ARRIVALS_SEGMENT,
+  NAMES_SEGMENT,
   RECORD_KEYS,
   FANOUT_KEYS,
   ARRIVAL_KEYS,
+  NAME_KEYS,
   FANOUT_TYPES,
   PERSONA_TYPE_RE,
   VERDICTS,
@@ -972,12 +1156,14 @@ module.exports = {
   ENVELOPES,
   LIMITS,
   AGENT_ID_RE,
+  AGENT_NAME_RE,
   BackgroundReviewError,
   limitsWith,
   ttlMinutes,
   validateRecord,
   validateFanout,
   validateArrival,
+  validateName,
   headerProblem,
   storeLocations,
   issuedTicket,
@@ -990,6 +1176,9 @@ module.exports = {
   consumeRecord,
   noteArrival,
   matchArrival,
+  nameAliases,
+  promptNameAliases,
+  releaseName,
   retireRecord,
   deferArrival,
   waitVerdict,
@@ -999,6 +1188,7 @@ module.exports = {
   retireLine,
   arriveLine,
   deferLine,
+  unbindLine,
   main,
 };
 

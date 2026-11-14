@@ -141,6 +141,14 @@ eq     "N2 gitlab normalize (resolvable & unresolved)" "$N2" '[{"threadId":"d1",
 nothas "N2b gitlab filters resolved d2"        "$N2" '"d2"'
 nothas "N2c gitlab filters non-resolvable d3"  "$N2" '"d3"'
 has    "N2d gitlab threadId==replyTo (discussion id)" "$N2" '"threadId":"d1","replyTo":"d1"'
+GL_PLAIN_AND_SYSTEM='[[{"id":"d-diff","individual_note":false,"notes":[{"id":1001,"type":"DiffNote","body":"fix the added line","system":false,"resolvable":true,"resolved":false,"author":{"username":"root"},"position":{"position_type":"text","old_path":"src/a.js","new_path":"src/a.js","old_line":null,"new_line":10}}]},{"id":"d-done","individual_note":false,"notes":[{"id":1002,"type":"DiscussionNote","body":"already fixed","system":false,"resolvable":true,"resolved":true,"author":{"username":"root"}}]},{"id":"d-summary","individual_note":true,"notes":[{"id":1003,"type":null,"body":"review summary","system":false,"resolvable":false,"author":{"username":"root"}}]},{"id":"d-approval","individual_note":true,"notes":[{"id":1004,"type":null,"body":"approved this merge request","system":true,"resolvable":false,"author":{"username":"root"}}]}]]'
+N2E="$(printf '%s' "$GL_PLAIN_AND_SYSTEM" | _zensu_vcs_normalize_threads gitlab 2>/dev/null)"; N2E_RC=$?
+eq     "N2e gitlab plain comments and system notes without a resolved flag leave the unresolved thread listed" "$N2E_RC $N2E" \
+  '0 [{"threadId":"d-diff","replyTo":"d-diff","path":"src/a.js","line":10,"body":"fix the added line","author":"root"}]'
+GL_THREAD_WITH_SYSTEM='[[{"id":"d-diff","individual_note":false,"notes":[{"id":1101,"type":"DiffNote","body":"fix the added line","system":false,"resolvable":true,"resolved":false,"author":{"username":"root"},"position":{"position_type":"text","old_path":"src/a.js","new_path":"src/a.js","old_line":null,"new_line":10}},{"id":1102,"type":"DiffNote","body":"changed this line in version 2 of the diff","system":true,"resolvable":false,"author":{"username":"root"},"position":{"position_type":"text","old_path":"src/a.js","new_path":"src/a.js","old_line":null,"new_line":10}}]}]]'
+N2F="$(printf '%s' "$GL_THREAD_WITH_SYSTEM" | _zensu_vcs_normalize_threads gitlab 2>/dev/null)"; N2F_RC=$?
+eq     "N2f a non-resolvable system note inside a resolvable thread leaves the root thread listed" "$N2F_RC $N2F" \
+  '0 [{"threadId":"d-diff","replyTo":"d-diff","path":"src/a.js","line":10,"body":"fix the added line","author":"root"}]'
 
 eq "N3 map_state github MERGED"  "$(printf '%s' '{"state":"MERGED"}'  | _zensu_vcs_map_state github)" "MERGED"
 eq "N4 map_state gitlab opened"  "$(printf '%s' '{"state":"opened"}'  | _zensu_vcs_map_state gitlab)" "OPEN"
@@ -247,6 +255,12 @@ if printf '%s' "$GL_CROSS_DISCUSSION_NOTE" | _zensu_vcs_normalize_threads gitlab
 else
   check "N13m one GitLab note ID cannot belong to two discussions" PASS
 fi
+GL_RESOLVABLE_NO_FLAG='[[{"id":"d-open","notes":[{"id":913,"resolvable":true,"body":"hidden"}]}]]'
+if printf '%s' "$GL_RESOLVABLE_NO_FLAG" | _zensu_vcs_normalize_threads gitlab >/dev/null 2>&1; then
+  check "N13n a resolvable GitLab note without a resolved flag fails closed" FAIL
+else
+  check "N13n a resolvable GitLab note without a resolved flag fails closed" PASS
+fi
 
 rs() { { printf '%s' "$2"; printf '\0'; printf '%s' "${3:-}"; } | _zensu_vcs_normalize_review_summary "$1"; }
 eq "R6 github approved decision" "$(rs github '{"reviewDecision":"APPROVED","latestReviews":[{"state":"COMMENTED"},{"state":"APPROVED"}]}')" '{"reviewed":true,"approved":true,"changesRequested":false}'
@@ -310,6 +324,25 @@ chmod +x "$NOPR_WORK/gh" "$NOPR_WORK/glab"
 locate_rc() { PATH="$NOPR_WORK:$PATH" bash "$LIB" --locate-pr "$@" >/dev/null 2>&1; printf '%s' "$?"; }
 eq "L1 github: no PR for the current branch exits 3"  "$(locate_rc --provider github)" "3"
 eq "L2 gitlab: no MR for the current branch exits 3"  "$(locate_rc --provider gitlab)" "3"
+mkdir -p "$NOPR_WORK/caps"
+cat > "$NOPR_WORK/caps/gh" <<'FAKE'
+#!/bin/bash
+printf 'No pull requests found for branch "feat"\n' >&2
+exit 1
+FAKE
+cat > "$NOPR_WORK/caps/glab" <<'FAKE'
+#!/bin/bash
+printf 'No open merge request available for "feat"\n' >&2
+exit 1
+FAKE
+chmod +x "$NOPR_WORK/caps/gh" "$NOPR_WORK/caps/glab"
+caps_locate_rc() { PATH="$NOPR_WORK/caps:$PATH" bash "$LIB" --locate-pr "$@" >/dev/null 2>&1; printf '%s' "$?"; }
+eq "L2b gitlab: the capitalized no-MR message of glab 1.113 and 1.122 exits 3" "$(caps_locate_rc --provider gitlab)" "3"
+eq "L1b github: a capitalized no-PR message exits 3" "$(caps_locate_rc --provider github)" "3"
+notmp_locate_rc() { TMPDIR="$NOPR_WORK/no-such-dir" PATH="$NOPR_WORK/caps:$PATH" bash "$LIB" --locate-pr "$@" >/dev/null 2>&1; printf '%s' "$?"; }
+eq "L2c gitlab: the no-MR message still exits 3 when no temporary file can be created" "$(notmp_locate_rc --provider gitlab)" "3"
+notmp_locate_err() { TMPDIR="$NOPR_WORK/no-such-dir" PATH="$NOPR_WORK/caps:$PATH" bash "$LIB" --locate-pr "$@" 2>&1 >/dev/null; }
+has "L2d gitlab: a numbered lookup without a temporary file reports the forge CLI's message" "$(notmp_locate_err --provider gitlab 42)" "No open merge request available for"
 eq "L3 a not-found for an explicit number stays exit 1" "$(locate_rc --provider github 42)" "1"
 eq "L4 the other forge's not-found wording is an error" "$(cp "$NOPR_WORK/glab" "$NOPR_WORK/gh"; locate_rc --provider github)" "1"
 cat > "$NOPR_WORK/gh" <<'FAKE'

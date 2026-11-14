@@ -764,7 +764,7 @@ toggle "$S_PL" --auto >/dev/null
 CTX_T22B="$(printf '{"hook_event_name":"PostToolUse","tool_name":"ExitPlanMode","session_id":"%s"}' "$S_PL" \
   | hook_ctx "$PLANHOOK" "$CFG_VANILLA")"
 case "$CTX_T22B" in
-  *"Vanilla implementation mode is in effect for this session"*)
+  *"with the evidence audits in vanilla mode, without RED→GREEN"*)
     check "T22b released, plan-approval is back on the configured mode" PASS ;;
   *) check "T22b released, plan-approval vanilla directive (got: ${CTX_T22B:0:60})" FAIL ;;
 esac
@@ -992,7 +992,7 @@ toggle "$S_RS" --auto >/dev/null
 CTX_T21C="$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s","prompt":"add a helper function"}' "$S_RS" \
   | hook_ctx "$REMINDER" "$CFG_STRICT")"
 case "$CTX_T21C" in
-  *"strict"*) check "T21c released, a strict config still reaches the reminder directive" PASS ;;
+  *"strict TDD flow"*) check "T21c released, a strict config still reaches the reminder directive" PASS ;;
   *) check "T21c released fallback ignores the config (got: ${CTX_T21C:0:60})" FAIL ;;
 esac
 ST_RS="$(toggle "$S_RS" --status "$CFG_STRICT")"

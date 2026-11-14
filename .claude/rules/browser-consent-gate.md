@@ -60,21 +60,39 @@ library's normalization or in the fallback's, and for a PowerShell payload also 
 The consent case of `tests/structure/hook-dispatch-v1.test.js` holds the spellings it must mark.
 
 **A PowerShell call is refused, not judged.** The lexer reads Bash, so a PowerShell call that
-carries both markers denies with `POWERSHELL_NOT_JUDGED`, which names the Bash tool and the Grep
-tool, and the recorder skips a PowerShell call (`powershell-call`). The markers are read over
-`spellings()` of `hooks/lib/powershell-command-v1.js`, which decodes backtick and Unicode escapes
-and joins string literals in both the Windows PowerShell 5.1 and the PowerShell 7 reading, and a
-call that reaches node while that module cannot load is refused. For a PowerShell payload the
-prefilter also forwards a text that names `wright` and `verify` or holds `u{`, because those
-spellings never name `playwright-cli` literally, and the pre hook's fallback counts any of
-`wright`, `verify` or `u{` as marked. V70 to V70g and H17g5-H17g6 pin both halves.
+carries both markers denies with `POWERSHELL_NOT_JUDGED`, one that names the CLI with a run
+directory or a config denies with `POWERSHELL_OFF_SESSION_NOT_JUDGED`, both naming the Bash tool
+and the Grep tool, and the recorder skips a PowerShell call (`powershell-call`). The markers are
+read over `spellings()` of `hooks/lib/powershell-command-v1.js`, which decodes backtick and
+Unicode escapes and joins string literals in both the Windows PowerShell 5.1 and the PowerShell 7
+reading, and a call that reaches node while that module cannot load is refused. For a PowerShell
+payload the prefilter's one `tr -d` pass also drops `+`, parentheses, `$`, blanks and the bytes of
+the typographic quotes U+2018 to U+201E, and its one `sed` pass also drops the JSON escapes `\n`,
+`\r`, `\t` and `‘` to `„`, so literals joined by `+` read as one word on one line or
+across lines (`'play' + 'wri' + 'ght-cli'`); it forwards a text that names `verify` or `config`,
+or holds `u{`, and every PowerShell call while the hook environment's `PLAYWRIGHT_CLI_SESSION`
+names a `zensu-verify-` session, because a split spelling never names `playwright-cli` literally
+and node's `spellings()` decides. `consentMarked` and the pre hook's fallback drop the same
+characters for a PowerShell payload and count any of `wright`, `verify`, `config` or `u{` as
+marked; `consentMarked` also counts that session variable, which the fallback never reads (H17d).
+V70 to V70g, V72, V72b, V72f to V72h and H17g5 to H17g8 pin both halves: V72f and H17g7 split a
+marker with raw typographic quotes, V72g and H17g8 with their JSON escapes, and V72h drives the
+session-variable arm with a control. `diff_passes_ps` clears an inherited `PLAYWRIGHT_CLI_SESSION`
+unless a case names one, because that arm marks every PowerShell call.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,
 `run-code`, cookies and state files — in every session, which is the overreach the MCP-era matcher
 already produced against a user's own `playwright` server. The cost is stated wherever the gate is
 described: a model that opens a browser under a session name it chose itself is outside the gate,
-and the skill's instruction to use only the printed session is prose, not a boundary.
+and the skill's instruction to use only the printed session is prose, not a boundary. **One
+exception, decided after a measured bypass:** a call on any session is judged when its text
+names a `verify-feature-runs` directory or passes a config, because a signed-in run config opened
+outside the gate restores its state unjudged (see "Other sessions" below). That exception costs a
+user's own browser skills something, stated here so it is not rediscovered as a defect: on every
+session their own config that restores a state, an INI config, a config the gate cannot read, a
+config held in a variable and a relative config handed to a wrapper are refused, and
+`STATE_CONFIG_OFF_SESSION` tells them a config of their own must leave the key out.
 
 **The order of judgement is the contract.**
 
@@ -87,8 +105,12 @@ and the skill's instruction to use only the printed session is prose, not a boun
    case-insensitively. The backtick matters for Bash too: an empty command substitution splits a
    marker without changing what runs, so ``` playwright-cl``i ``` runs `playwright-cli`; `H16q` and
    `H16r` hold that through the real pre hook and the module-absent copy.
-   It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session — or name the
-   CLI while the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. The third `case` arm, the
+   It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session, a
+   `verify-feature-runs` directory, `--config` or `playwright_mcp_config` — or name the CLI while
+   the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. For a PowerShell payload the same
+   `tr -d` pass also drops `+`, parentheses, `$`, blanks and the typographic quote bytes, the
+   `sed` pass also drops the JSON line and quote escapes, and its PowerShell arm forwards `verify`,
+   `config` or `u{`, and every call while that variable names a session. The third `case` arm, the
    JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
    Every other Bash call exits 0 with no output — which is what keeps the pair off the hot path of
    every Bash call and out of every bind-failure state for unrelated commands. It is also why the
@@ -174,9 +196,13 @@ and the skill's instruction to use only the printed session is prose, not a boun
    `--json/--raw/--help/--version` harmless everywhere and a repeated flag denied. `COMMAND_DENIED` and `FLAG_DENIED` scope the refusal to
    `/zensu:verify-feature` and forbid a retry under another session name or program. The arguments
    are parsed by `parseCliArgs`, a port of the CLI's own minimist parser MEASURED against
-   `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.21) and pinned by a golden fixture recorded from that
+   `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.24) and pinned by a golden fixture recorded from that
    version's own parser; an argument shape it does not recognize denies rather than admits — an
    unknown option on a gated call, and, through step 7, a `zensu-verify` name no call resolves.
+   A flag a newer CLI adds stays off the allowlist until a change admits it: 0.1.23 added
+   `tab-new --isolated-context`, `find --filename` and `--max-results`, and `--all` on `console`
+   and `requests`, and each denies `FLAG_DENIED`; `find --filename` would be a file-write channel
+   outside the run directory. The unknown-flag unit case holds all five; 0.1.24 adds no flag.
    **The per-call order matters:** the wrapper ladder decides only the deny REASON, never whether a
    call is admitted.
 5. **`open`** must carry `--config=<absolute path>`, and the gate reads that file itself through
@@ -217,10 +243,78 @@ and the skill's instruction to use only the printed session is prose, not a boun
 
 **The run config is where the browser's own fences live.** `buildConfig` writes an isolated browser,
 `--no-proxy-server`, one `--host-resolver-rules` pin per remote hostname, `serviceWorkers: 'block'`,
-`network.allowedOrigins`, and `outputDir` under the run directory. MEASURED with 0.1.21: a `goto` to
-an origin outside `allowedOrigins` fails with `net::ERR_BLOCKED_BY_CLIENT` and exit 1. A server
-REDIRECT to another origin is NOT refused by the browser (recorded as measured in `docs/gates.md`),
-so the skill reads the `Page URL` line after every navigating call — prose, not a boundary.
+`network.allowedOrigins`, and `outputDir` under the run directory. MEASURED with 0.1.21, and again
+with 0.1.23 and 0.1.24 driving Google Chrome 156.0.8078.81: a `goto` to an origin outside
+`allowedOrigins` fails with `net::ERR_BLOCKED_BY_CLIENT` and exit 1 before that origin's server
+sees a request. MEASURED with 0.1.23 and 0.1.24: a service-worker registration resolves to
+`undefined`, no worker is registered and its script is never fetched. A server REDIRECT to another
+origin is NOT refused by the browser (recorded as measured in `docs/gates.md`, and measured again
+with 0.1.23 and 0.1.24), so the skill reads the `Page URL` line after every navigating call —
+prose, not a boundary.
+
+**Signed-in sessions are a second rule set, keyed on the session prefix.** A run config may carry
+`browser.contextOptions.storageState` only at the canonical `auth/storage-state.json` beside it.
+Such a config opens only on a `zensu-verify-auth-` session after `checkStateFile` passed,
+`console` and `requests` deny on that session, the prompt says the browser opens signed in, its
+records carry `restoredState`, and the recorder consumes the state after `open`, also when it
+cannot bind a session. The read guard refuses a browser call that names a run directory without
+naming a `zensu-verify` session, which keeps a signed-in config off the sessions this gate never
+judges. The helper's login, the read guard, the version verdict and the gaps are in
+`.claude/rules/verify-auth-guard.md`.
+
+**Other sessions.** `commandMarkers` carries two more arms, `runs` (`RUNS_MARKER`, the
+`verify-feature-runs` directory name) and `config` (`CONFIG_FLAG` or `CONFIG_ENV`, `--config` and
+`PLAYWRIGHT_MCP_CONFIG`). When a command names the CLI and either arm, and no gated call exists,
+`evaluate` runs `offSessionReason` over `analysis.offSession`, which `analyzeCommand` builds in
+its one loop over the invocations from the same parse and session resolution the gated calls use:
+every invocation whose session is not a literal `zensu-verify-` name, a session from `-s`, an
+inline assignment, the hook environment or the CLI's default alike, an unexpanded one included.
+`hidden` marks a CLI another program runs: a word outside command position that is a CLI word or
+holds one as a token (`runsCli`: a token whose basename is a CLI name, or a path into the
+`@playwright/cli` package), any word the shell expands before it runs, the command word included,
+whose text names the CLI at all (`expandsIntoCli`: `~/bin/playwright-cli`, `$HOME/…`, a brace, a
+glob, `$'playwright-cli'`, `playwright-cli$''`, `"$(command -v playwright-cli)"`,
+`"${PW:-playwright-cli}"`), which is no invocation because only a literal word is, and a body the
+lexer cannot judge that names the CLI. A literal word that only contains the name, such as
+`playwright-cli.json` or a project folder named after the CLI, is no token, while an expanded one
+such as `"$HOME/playwright-cli.json"` counts, and the operand of `cd` or `pushd`
+(`DIRECTORY_BUILTINS`) never counts; the gated `indirect` test keeps its substring reading of
+literal words. With the `runs` arm an off-session call or a hidden
+CLI denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each
+inline `PLAYWRIGHT_MCP_CONFIG` assignment of an off-session call, in any letter case because
+Windows reads environment names that way, is read, and when the command is
+not one plain unwrapped call, or a CLI is hidden, `configMentions` also reads every config value
+the text sets: `--config <path>`, `--config=<path>` and a `PLAYWRIGHT_MCP_CONFIG` assignment in
+any letter case, in any segment, behind `export`, `declare`, `sudo` or `doas`, inside a word that
+holds a command string and inside nested bodies, heredocs and here-strings, up to `MAX_NEST`. A
+value assembled at run time, appended with `+=`, behind a lexer fault or past that depth, a
+`--config` with no word after it in its segment (`xargs` appends one), any other mention of the
+variable's name than a literal assignment or an `unset` (`read`, `printf -v`, `mapfile`, a
+reference or a bare `export`; `removesConfig` names the exemptions), an assignment value whose
+tilde the shell expands (`assignmentOf` reads `~` after `=` or `:` as unexpanded), and a
+relative path outside one plain unwrapped call, deny `CONFIG_UNRESOLVED_OFF_SESSION`. A literal
+path is read as given when absolute, else against the payload's `cwd`; `readBoundedConfig`
+refuses a path that starts with two slashes or backslashes unread, stats it and requires a
+regular file within `MAX_OFF_SESSION_CONFIG_BYTES` before it opens anything, opens it
+non-blocking, and requires the descriptor to be the same file; its byte-order mark is skipped and
+its text parsed as JSON. A key `browser.contextOptions.storageState` denies
+`STATE_CONFIG_OFF_SESSION`, and a file that cannot be read that way, or an `.ini` path, denies
+`CONFIG_UNJUDGED_OFF_SESSION`. Measured on 0.1.24 (`parseConfigFile` in `coreBundle.js`): an
+`.ini` path is INI, and a file that is no JSON and does not start with `{` falls back to INI,
+which is why a config the gate cannot parse is refused rather than passed. A command whose text
+names a `zensu-verify-` session keeps its shape denials (`marks.named` skips this pass), so a typo
+such as `-S=` still gets `SESSION_UNRESOLVED`. `powershellReason` refuses a PowerShell call with
+either arm as `POWERSHELL_OFF_SESSION_NOT_JUDGED`. All five reasons are final, and each names the
+Grep tool and a message file, because a commit message that names the CLI beside `--config` is
+judged like a call. The read guard's
+session rule stays beside this as a second, textual line. **Residual:** a config the gate never
+sees — the working directory's default `.playwright/cli.config.json`, the global config, which
+the CLI merges under every config, a `PLAYWRIGHT_MCP_CONFIG` the shell inherited, a flag or
+variable name assembled at run time (`--con$'f'ig=`, a variable holding `--config`), a file
+swapped after the gate read it, a program that spawns `playwright-cli` without naming it — still
+opens a signed-in browser outside the gate while the state file exists, that is, until the first
+gated `open` consumes it. Measured in the specification session: an
+ungated `-s=zvprobe-state1` session opening a `storageState` config came up signed in.
 
 **One floor and one policy parser.** `verify-navigation-floor-v1.js` owns origin classification and
 `parsePolicyTargets`, the full synchronous parse of `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
@@ -243,7 +337,9 @@ address, and measured on Chromium 1228 `MAP localhost 127.0.0.1` made a server b
 `[::1]` unreachable. MEASURED with playwright-cli 0.1.21 driving Google Chrome 154.0.8037.57: a run
 config allowing two `localhost` origins reached a server bound only to `[::1]` and one bound only to
 `127.0.0.1`, a `fetch` between them passed, and a third `localhost` origin outside
-`allowedOrigins` failed with `net::ERR_BLOCKED_BY_CLIENT` before its server saw a request.
+`allowedOrigins` failed with `net::ERR_BLOCKED_BY_CLIENT` before its server saw a request. The
+same run, MEASURED again with playwright-cli 0.1.23 and with 0.1.24, both driving Google Chrome
+156.0.8078.81, gave the same result.
 `localhost` and `127.0.0.1` stay different origins: a policy target or a consent for one never
 admits the other. Sites that move together: `LOCALHOST_NAME`, `isLocalHost`,
 `FLOOR_REASONS.LOCAL_LOOPBACK_ONLY` and `CONSENT_REMOTE_REASON` in the floor, both arms of
@@ -315,7 +411,8 @@ origin in a remote policy obeys the target floor, one in a local policy is loopb
 HTTPS (`FLOOR_REASONS.NETWORK_ONLY_HTTPS` otherwise), and the hostname rule
 (`FLOOR_REASONS.HOSTNAME_PATTERN`: an IP literal or `[a-z0-9._-]` only) binds targets too. That
 is a deliberate tightening, not a side effect: playwright-core turns each allowed origin into the
-URL glob `<origin>/**` (`originOrHostGlob` in the bundled `coreBundle.js` of 0.1.21), so a `*`,
+URL glob `<origin>/**` (`originOrHostGlob` in the bundled `coreBundle.js` of 0.1.21, unchanged in
+0.1.23 and 0.1.24), so a `*`,
 `{` or `,` in a hostname was a browser-side wildcard the parser used to accept. The run config
 stays ONE plain `network.allowedOrigins` list and `runConfigShape` keeps its key set, so
 navigability is derived, never written: `judgeOrigin` takes an optional `role` — `navigable` for
@@ -329,7 +426,9 @@ origin as an ordinary `--origin`. The redirect rule stays prose, and the reason 
 rather than argued: the browser has ONE class of allowed origin, so a page-initiated navigation
 onto a network-only origin is followed, and the triggering call prints that page's URL and title
 before the skill can stop. **WebSockets are outside the browser fence for every origin** —
-measured with playwright-cli 0.1.21 and Chrome 154: `context.route` does not intercept them —
+measured with playwright-cli 0.1.21 and Chrome 154, and again with 0.1.23 and with 0.1.24 and
+Chrome 156, where a page on an allowed origin opened one to a loopback origin outside
+`allowedOrigins` and received its message: `context.route` does not intercept them —
 so the docs say "every HTTP(S) request"; fencing them is a separate change. The decisions and the
 security analysis live in §11 of `docs/verify-feature-consent-spec.md`. **Version for this
 delta: `patch`**, by the route-retirement argument above — the policy is read from the launch
@@ -410,13 +509,19 @@ announces a prompt rather than a capability the plugin hands itself.
   (the install block and the troubleshooting table), `docs/gates.md` (the install command and the
   golden-recording sentence), the verify-feature troubleshooting row of `docs/operations.md`,
   `skills/doctor/SKILL.md`, `skills/autopilot/rules/config.md`, the
-  `### Upgrade notes` block of `CHANGELOG.md` (`P9a`), `evals/verify-feature/README.md` and this
-  rule file (step 4 and the run-config measurement), and as a literal into the unit pin beside the
+  `## [Unreleased]` upgrade note of `CHANGELOG.md` (`P9e`), `evals/verify-feature/README.md`, the
+  Electron sentence of `.claude/rules/verify-feature-drivers.md` and this rule file (step 4 and
+  the run-config measurement), and as a literal into the unit pin beside the
   constant. `P7e` derives the version from the module and requires the pinned install command, in
   backticks, in the skill, `README.md`, the three docs pages — in `docs/verify-feature.md` only the
   troubleshooting row carries that form — the doctor skill and the autopilot config rule; `P7h`
   pins the fenced install line of `docs/verify-feature.md`, the golden-recording sentence of
-  `docs/gates.md` and the eval README. No check reads this file's copies. The MSYS boundary suite
+  `docs/gates.md` and the eval README. `P9e` requires every `npm install -g @playwright/cli@…` in
+  the `## [Unreleased]` section of `CHANGELOG.md` to name the measured version, wrapped lines
+  included, and `P9f` and `P9g` are its controls, the second with the pin wrapped after `-g`;
+  `P9a` holds only the released `0.22.0` block, whose pin is history, and an Unreleased section
+  that names no pin passes `P9e`, so a bump that forgets its upgrade note stays a reviewer's
+  catch. No check reads this file's copies. The MSYS boundary suite
   derives it from the module, and so does `.github/scripts/playwright-cli-drift.sh` (see "The
   release signal" below), whose report names the recorder, the fixture, the module and
   `tests/structure/test-verify-consent.sh`; `PD14` fails when one of those paths moves.
@@ -436,7 +541,9 @@ announces a prompt rather than a capability the plugin hands itself.
   registered, a registration that could not be determined, a probe that did not complete — and the rule that
   each hook is named with its own state, because a model relaying an undetermined registration as
   a missing hook, or the gate's state as the recorder's, sends the user after a problem that is
-  not there. No check compares the bullet with the reasons.
+  not there. No check compares the bullet with the reasons. The verify-auth read guard's causes
+  are named in `skills/doctor/references/verify-auth-guard.md`, which the bullet points to, and
+  that file must name every guard cause the doctor prints.
 - `hooks/lib/hook-registration-v1.js` is the ONE reader of the host rule that decides which
   `hooks.json` groups fire for a tool. `hookRegistered` in `hooks/lib/verify-consent-v1.js`, behind
   `consentHookRegistered`/`consentRecorderRegistered`, calls its `registration` with
@@ -475,12 +582,13 @@ announces a prompt rather than a capability the plugin hands itself.
   points here for the grant row's side.
 - The ONE prefilter library, `hooks/lib/zensu-browser-consent-prefilter.sh`, ↔ `commandMarkers` /
   `normalizedText` in the module (a hand copy, see step 1): the continuation join with its
-  backslash pairing, the stripped character set, case-insensitivity, both markers, and the
+  backslash pairing, the stripped character set, case-insensitivity, both markers, the
+  run-directory and config arms (`RUNS_MARKER`, `CONFIG_FLAG`, `CONFIG_ENV`), and the
   `PLAYWRIGHT_CLI_SESSION` arm must agree. `CLI_MARKERS` is DERIVED from `CLI_BASENAMES` and
   `CLI_PACKAGE`; `H17` pins the library's one `sed` and one `tr -d` pass, `H17d` that both wrappers
   source it, carry no copy of its two-marker test and scan only in their library-unavailable
-  fallback, and `H17e` that it names every derived marker, the session prefix and the session
-  variable. Each wrapper's fallback test is its own copy, broader than the library in the markers
+  fallback, and `H17e` that it names every derived marker, the session prefix, the run-directory and
+  config markers and the session variable. Each wrapper's fallback test is its own copy, broader than the library in the markers
   it counts but blind to a marker split by an escaped backslash (step 1), and no check compares
   the two fallback copies.
 - The pre hook's deny prefix and its four plugin-integrity reasons (`prefilter library
@@ -560,16 +668,21 @@ section of `CHANGELOG.md`. It was written under `## [Unreleased]`: the workflow 
 generated section directly under that heading, ahead of the block, so the block closes the new
 release section and its notes. `P9b` in `tests/structure/test-verify-feature-skill.sh` runs the
 workflow's own two awk programs over the real file to hold that, and `P9d` holds that the
-released block survives the next release. `P9` follows only the block that names
+released block survives the next release. `P9a` to `P9d` follow only the block that names
 `mcp__plugin_zensu_playwright__`; a later block under `## [Unreleased]`, such as the route
-retirement's, rides the same mechanism with no check of its own.
+retirement's, rides the same mechanism with no placement check of its own, and `P9e` reads it only
+for its `@playwright/cli` install pins.
 
 **Known gaps, accepted and named:**
 
 - **Hooks switched off host-side leave `playwright-cli` unconstrained.** The retired broker refused
   to self-approve without the gate's marker, so a disabled hook ended in a refusal; nothing stands
   in that position now, and the doctor reports registration, never execution.
-- **Other session names are ungated** — see SCOPE.
+- **Other session names are ungated** — see SCOPE — except for the "Other sessions" rules, which
+  judge only what the command text shows, and which refuse a user's own state-restoring, INI,
+  unreadable or variable-held config on every session. A command that only echoes the CLI's name
+  beside a config, such as `eslint --config <file> && echo playwright-cli`, is judged as if the
+  CLI read that config, because the gate cannot tell which program would.
 - **The gate judges a URL only where a command names one.** `judgeCall` reads the URL of `open`,
   `goto` and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` carry none, so where
   they land is never judged. The browser follows a server redirect to another origin, a
@@ -580,7 +693,8 @@ retirement's, rides the same mechanism with no check of its own.
   screenshot; the skill reads it as that page's content, like fetched data, which is why
   `NETWORK_ONLY_NAVIGATION` denies evidence only to a page the browser lands on there.
 - **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
-  `main` and the measurement of one Chrome build; no suite drives a real browser, so a Chromium that
+  `main` and the measurements of two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
+  156.0.8078.81 with 0.1.23 and 0.1.24); no suite drives a real browser, so a Chromium that
   stopped serving `localhost` itself would let `/etc/hosts` steer it with every check green.
   `*.localhost` stays refused although the same Chromium code resolves it to loopback too.
 - **The consent memory is forgeable:** a record written through a Bash redirect skips the prompt for
@@ -704,3 +818,79 @@ policy, consent and consent-no-recipe rows, and the operator accounts listed abo
 `patch`** — the gate asks where it denied, the new refusals hit only inputs denied before, and no
 schema field, `decidedBy` value, key set, hook, matcher, config key or attestation moves; a new
 `decidedBy` value would force `minor`.
+
+**The 0.1.23 measurement (2026-11-09).** The fixture was re-recorded from the npm package,
+installed with `--ignore-scripts`; the recorder raised no refusal, and the recording differs
+from 0.1.21's only in `source.version` and `source.playwrightCore` (1.64.0-alpha-1789764292000
+to 1.65.0-alpha-2026-10-30), so the port needed no change. READ, comparing both installed
+packages: the CLI client's `minimist.js`, `registry.js` and `session.js` are byte-identical, no
+command was added or removed, and `validateFlags` in `program.js` now also accepts `--no-<flag>`
+where a command declares `no-<flag>`, which only `install-browser --no-shell` does and the gate
+denies by command. The new environment names are `PLAYWRIGHT_MCP_IGNORE_ROOTS` and
+`PLAYWRIGHT_MCP_REDACT_URL_PARAMS`, inside the prefix `ambientOverride` and `AMBIENT_TEXT_RE`
+already judge; `PW_PROFILE_DIR`, the renamed `PWTEST_PROFILE_DIR`, starts the CPU profiler and
+`XDG_RUNTIME_DIR` moves the daemon socket, so neither configures the browser, and an inline
+assignment of either on a gated call still denies `ENV_ASSIGNMENT`; `PLAYWRIGHT_SKIP_DIALOG_CHECK`
+and `PLAYWRIGHT_SKIP_INERT_CHECK` relax action checks only, and the new Firefox and WebKit names
+reach no Chromium run. The new config keys `ignoreRoots` and `redactUrlParams` lie outside
+`GLOBAL_CONFIG_HARMLESS`, so a global config carrying either is refused, and the config-file
+locations are unchanged. The four run-config fences keep their names and their readers:
+`network.allowedOrigins` through the same routes, which 0.1.23 also installs on every isolated
+context it creates; `browser.isolated`; the launch arguments, which `chromium.ts` still appends
+last; and `serviceWorkers: 'block'`, which now patches `ServiceWorkerContainer.prototype.register`
+rather than `navigator.serviceWorker.register`. The Chromium switch set changed beside them —
+0.1.23 no longer disables `HttpsUpgrades`, `Translate` or client-side phishing detection — and
+none of those is a fence the gate relies on. The entry point's once-a-day update check now runs
+`npm view` through a shell instead of a `fetch`, for `open`, `attach`, `list`, `install` and
+`install-browser`, unless `NO_UPDATE_NOTIFIER` or `CI` is set, and for every one of them but
+`install` the same check compares a `playwright-cli` skill under the working directory's
+`.claude/skills` or `.agents/skills` with its bundled copy; both run in the call's own working
+directory and environment, outside the gate. MEASURED with Google Chrome 156.0.8078.81: the
+run-config, `localhost` and WebSocket statements above, plus a `tab-new --isolated-context` to
+an origin outside `allowedOrigins`, which failed with `net::ERR_BLOCKED_BY_CLIENT`. MEASURED on
+2026-11-10: a `goto` and a `tab-new` on a session that was never opened each exit 1 with
+`The browser '<session>' is not open, please run open first`, start no browser and no daemon,
+and send no request, so a `goto` or `tab-new` still reaches only a browser that an `open`
+launched with its run config. UNMEASURED on 0.1.23: a remote HTTPS origin with a resolver pin,
+Windows, every other flag 0.1.23 added, and which `npm` binary and which `.npmrc` files the
+update check's shell resolves. **Release class: `patch`.** No
+schema field, key set, hook, matcher, config key or attestation moves, and the gate decides every
+call as before; the one consequence is that `checkReadiness` now refuses 0.1.21, which the
+`## [Unreleased]` upgrade note of `CHANGELOG.md` states.
+
+**The 0.1.24 measurement (2026-11-10).** 0.1.24 became npm `latest` before the 0.1.23 pin was
+released, so the pin moves from 0.1.21 to 0.1.24 in one release and 0.1.23 stays a measurement only. The fixture was
+re-recorded from the npm package, installed with `--ignore-scripts`; the recorder raised no
+refusal, and the recording differs from 0.1.23's only in `source.version` and
+`source.playwrightCore` (1.65.0-alpha-2026-10-30 to 1.66.0-alpha-1794252756000), so the port
+needed no change. READ, comparing both installed packages: `help.json` is identical, so no command
+or flag was added or removed; the CLI client's `minimist.js` and `registry.js` are identical, and
+`program.js` now exports `parseArgs`, which keeps the minimist call and the `-s`/`-g` folds the
+recorder asserts and which the entry point runs once, before its update check, to name the
+command. The new environment names are `PLAYWRIGHT_MCP_BACKGROUND` and
+`PLAYWRIGHT_MCP_NO_TAB_GROUP`, inside the prefix `ambientOverride` and `AMBIENT_TEXT_RE` already
+judge, and the Linux-only `CHROME_CONFIG_HOME`, `XDG_CONFIG_HOME` and `CHROME_USER_DATA_DIR`, which
+only the channel lookup of `list`, the `--cdp` channel endpoint of `attach` and extension mode
+read, so none configures the isolated browser an `open` starts, and an inline assignment of any of
+them on a gated call still denies `ENV_ASSIGNMENT`; `PLAYWRIGHT_SKIP_DIALOG_CHECK` and
+`PLAYWRIGHT_SKIP_INERT_CHECK` are gone. The new config keys `tabGroup`, `background` and
+`browser.contextOptions.locateOnlyVisible` lie outside `GLOBAL_CONFIG_HARMLESS`, so a global config
+carrying one is refused. A config file's relative paths now resolve against the file's real
+directory, which leaves the run config as it was, because `runConfigShape` requires an absolute
+`outputDir` beside the config. The four run-config fences keep their names and their readers:
+request interception, `originOrHostGlob` and isolated contexts in the backend context module, the
+service-worker block, and the user launch arguments, still appended last. 0.1.24 disables
+`HttpsUpgrades` again, together with `HttpsFirstBalancedModeAutoEnable`, so a loopback HTTP
+navigation stays on HTTP; neither is a fence the gate relies on. Console entries now carry 1-based
+line numbers, and the console count also includes the errors of page and context event handlers.
+MEASURED with Google Chrome 156.0.8078.81: the run-config, `localhost` and WebSocket statements
+above; a `tab-new --isolated-context` to an origin outside `allowedOrigins`, which failed with
+`net::ERR_BLOCKED_BY_CLIENT`; a `goto` and a `tab-new` on a session that was never opened, which
+exit 1 with the not-open message, start no browser and no daemon and send no request; and the
+response lines the eval grader parses: the `- Page URL:` line, a snapshot `[ref=…]`, the console
+`Errors:` count, a `[GET] … => [200]` request line and the screenshot link. UNMEASURED on 0.1.24:
+a remote HTTPS origin with a resolver pin, Windows, and which `npm` binary and which `.npmrc` files
+the update check's shell resolves. **Release class: `patch`.** No schema field, key set, hook,
+matcher, config key or attestation moves, and the gate decides every call as before; the one
+consequence is that `checkReadiness` now refuses every version but 0.1.24, 0.1.21 included, which
+the `## [Unreleased]` upgrade note of `CHANGELOG.md` states.

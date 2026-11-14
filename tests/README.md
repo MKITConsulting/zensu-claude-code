@@ -171,7 +171,8 @@ project and merge request with an added, a removed, a context, a renamed and an 
 drives every verb that reaches glab (`--post-review`, `--fetch-threads`, `--resolve-thread`,
 `--reconcile-review`, `--diff-refs`, `--pr-state`, `--scout-pr`, `--locate-pr`, `--review-markers`,
 `--review-summary` and `--open-pr`), and asserts what GitLab stored through its API. A second
-merge request, opened through `--open-pr`, carries resolvable discussions only. The summary line
+merge request, opened through `--open-pr`, starts with resolvable discussions only (`GL64`-`GL68`);
+its approval then adds a system note that `--fetch-threads` has to pass over (`GL71`, `GL72`). The summary line
 reads `N PASS / M FAIL / K XFAIL`.
 
 - **Known bugs are XFAIL, strictly.** `xeq` takes the fixed result and the result the reported

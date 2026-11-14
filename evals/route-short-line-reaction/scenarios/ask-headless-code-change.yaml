@@ -7,6 +7,7 @@ vars:
   expected_field: ask
   allowed_first: skill:zensu:build,ask
   anchor_clause: "If the ZENSU HUMAN PRESENT field below reads no or AskUserQuestion is refused, run the Zensu workflow without asking; the field, not auto mode, decides."
+  autopilot_option: absent
 assert:
   - type: javascript
     value: file://assertions/first-decisive.js
