@@ -263,7 +263,9 @@ every invocation whose session is not a literal `zensu-verify-` name, a session 
 inline assignment, the hook environment or the CLI's default alike, an unexpanded one included.
 `hidden` marks a CLI another program runs: a word outside command position that is a CLI word or
 holds one as a token (`runsCli`: a token whose basename is a CLI name, or a path into the
-`@playwright/cli` package), and a body the lexer cannot judge that names the CLI. A word that only
+`@playwright/cli` package), a command word the shell expands before it runs that holds one as a
+token (`~/bin/playwright-cli`, `$HOME/…`, a brace or a glob), which is no invocation because only a
+literal word is, and a body the lexer cannot judge that names the CLI. A word that only
 contains the name, such as `playwright-cli.json` or a project folder named after the CLI, is no
 token, and the operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never counts; the gated
 `indirect` test keeps its substring reading. With the `runs` arm an off-session call or a hidden

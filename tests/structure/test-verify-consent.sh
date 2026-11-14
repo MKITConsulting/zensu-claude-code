@@ -1629,6 +1629,10 @@ esac
   && [ "$(pre_verdict "export PLAYWRIGHT_MCP_CONFIG=$V71_DIR/restoring.json; playwright-cli -s=mine open" "$SID" "$PROJ")" = "DENY" ] \
   && check "V72d reading a run config passes, and a restoring config exported before the call is denied" PASS \
   || check "V72d reading a run config passes, and a restoring config exported before the call is denied" FAIL
+case "$(pre_reason "~/.local/bin/playwright-cli -s=mine open --config=$V71_DIR/restoring.json" "$SID" "$PROJ")" in
+  *'is refused on every session but a zensu-verify-auth one'*) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" PASS ;;
+  *) check "V72e the real pre hook denies a restoring config on a CLI path the shell expands first" FAIL ;;
+esac
 
 unit_check_done "V7z every unit file the registry gives this suite was graded"
 

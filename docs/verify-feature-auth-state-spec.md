@@ -165,7 +165,8 @@ the same config content.
   with the canonical run config. Any other session's call is denied with a final reason when the
   command names a run directory, or when its config file carries
   `browser.contextOptions.storageState`; a CLI another program runs (`xargs`, `stdbuf`, `env -S`,
-  `bash -c --`, a heredoc, a path into the `@playwright/cli` package) counts as such a call, a word
+  `bash -c --`, a heredoc, a path into the `@playwright/cli` package, a CLI path the shell
+  expands first such as `~/.local/bin/playwright-cli`) counts as such a call, a word
   that only contains the CLI's name (`playwright-cli.json`) does not. The gate reads every config
   value the text sets, behind `export`, `declare`, `sudo` or `doas` and inside a command string or
   heredoc included, as the CLI does, and refuses one it cannot read as JSON (missing, not a

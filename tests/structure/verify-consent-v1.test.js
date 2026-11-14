@@ -2296,6 +2296,7 @@ test('a playwright-cli call on any session but a zensu-verify one is denied with
     [`bash -c 'playwright-cli -s=mine open --config=${config}'`, {}],
     [`xargs playwright-cli -s=mine open --config < ${runDir}/list`, {}],
     [`grep -r playwright-cli ${runDir}`, {}],
+    [`~/bin/playwright-cli -s=mine open --config=${config}`, {}],
   ];
   for (const [command, env] of cases) assert.equal(denied(command, { env }), REASONS.RUN_DIR_OFF_SESSION, command);
   assert.notEqual(decide(cli(`open --config=${config}`)).reason, REASONS.RUN_DIR_OFF_SESSION);
@@ -2357,6 +2358,10 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
     `bash -c -- 'playwright-cli -s=mine open --config=${restoring}'`,
     `bash <<'EOF'\nplaywright-cli -s=mine open --config=${restoring}\nEOF`,
     `node /usr/local/lib/node_modules/@playwright/cli/cli.js -s=mine open --config=${restoring}`,
+    `~/.local/bin/playwright-cli -s=mine open --config=${restoring}`,
+    `$HOME/bin/playwright-cli -s=mine open --config ${restoring}`,
+    `{playwright-cli,} -s=mine open --config=${restoring}`,
+    `/opt/*/playwright-cli -s=mine open --config=${restoring}`,
     `eslint --config ${restoring} src && echo playwright-cli`,
   ]) assert.equal(reason(command), REASONS.STATE_CONFIG_OFF_SESSION, command);
   assert.equal(reason('playwright-cli open --config=missing.json', { PLAYWRIGHT_CLI_SESSION: 'mine' }), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
@@ -2387,6 +2392,7 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
   passes('playwright-cli -s=mine open --config=own.json');
   passes(`cd ${dir} && playwright-cli -s=mine open --config=${own}`);
   passes('playwright-cli -s=mine snapshot');
+  passes('~/bin/playwright-cli -s=mine snapshot');
   passes(`eslint --config ${own} src && echo playwright-cli`);
   passes(`stdbuf -oL playwright-cli -s=mine open --config=${own}`);
   if (process.platform === 'win32') return;

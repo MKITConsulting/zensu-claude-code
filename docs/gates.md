@@ -946,7 +946,9 @@ call on any other session is denied with a final reason when the command names a
 directory, in any position and behind any program the text shows, or when its config file
 carries `browser.contextOptions.storageState`. A CLI that another program receives as an
 argument counts as such a call — `xargs`, `stdbuf`, `caffeinate`, `env -S`, `bash -c --`, a
-heredoc fed to a shell, a path into the `@playwright/cli` package — while a word that only
+heredoc fed to a shell, a path into the `@playwright/cli` package — and so does a CLI path the
+shell expands first, such as `~/.local/bin/playwright-cli` or `$HOME/bin/playwright-cli`, while a
+word that only
 contains the CLI's name, such as the run config `playwright-cli.json` or a project folder named
 after the CLI, does not, and neither does the directory a `cd` or `pushd` enters. The gate reads
 that config as the CLI does: the path as given when it is absolute, else against the payload's

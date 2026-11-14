@@ -32,7 +32,7 @@ const CLI_MARKERS = Object.freeze([...new Set([
 ])]);
 const CLI_MARKER_RE = new RegExp(CLI_MARKERS.map((marker) => marker.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|'));
 const CLI_PACKAGE_PATH_RE = new RegExp(`${CLI_PACKAGE.toLowerCase().replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?:$|[@/])`);
-const CLI_TOKEN_BREAK_RE = /[\s;&|()<>=,]+/;
+const CLI_TOKEN_BREAK_RE = /[\s;&|()<>=,{}]+/;
 const CONFIG_ASSIGNMENT_RE = new RegExp(`^${CONFIG_ENV}(\\+?)=`, 'i');
 const DIRECTORY_BUILTINS = Object.freeze(['cd', 'pushd']);
 const REMOTE_CONFIG_RE = /^[\\/]{2}/;
@@ -881,10 +881,11 @@ function scanSegments(lexed, context, depth, found, inherited) {
     if (position.index >= words.length) {
       for (const assignment of position.assignments) if (assignment.name === SESSION_ENV) context.commandSession = assignment;
     }
+    const head = words[position.index];
+    if (head && head.unexpanded && runsCli(head.raw)) found.hidden = true;
     const others = words.filter((_word, offset) => offset !== position.index && !consumed.has(offset));
     if (!others.some((word) => isCliWord(word) || namesCli(word.value))) continue;
     if (context.marks.session) found.indirect = true;
-    const head = words[position.index];
     const directory = Boolean(head) && !head.quoted && DIRECTORY_BUILTINS.includes(head.value);
     if (!directory && others.some((word) => isCliWord(word) || runsCli(word.value))) found.hidden = true;
   }
