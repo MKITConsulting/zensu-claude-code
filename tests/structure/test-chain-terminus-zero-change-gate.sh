@@ -376,7 +376,7 @@ case "$ZC14" in (zc_?*) ZC14_SHAPE=zc ;; (*) ZC14_SHAPE=other ;; esac
 if [ "$ZC14_SHAPE" = "zc" ] && printf '%s' "$REASON14" | grep -qF "SELF-REVIEW-TICKET: $ZC14" \
   && printf '%s' "$REASON14" | grep -qF "skill='zensu:self-review'" \
   && printf '%s' "$REASON14" | grep -qF "No reviewer ran in this chain" \
-  && ! printf '%s' "$REASON14" | grep -qF "The code-reviewer chain has converged"; then
+  && ! printf '%s' "$REASON14" | grep -qF "The code-reviewer loop is closed"; then
   check "G9d the Stop hook mints a zc_ self-review ticket for a clean-tree mark and says no reviewer ran" PASS
 else
   check "G9d minted self-review ticket (ticket='$ZC14' reason='$REASON14')" FAIL

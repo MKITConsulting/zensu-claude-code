@@ -14,6 +14,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_MD="$PLUGIN_DIR/skills/ghost-scan/SKILL.md"
+SKILL_DIR="$PLUGIN_DIR/skills/ghost-scan"
 AGENT_MD="$PLUGIN_DIR/agents/zensu-plm.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
@@ -111,7 +112,7 @@ fi
 
 # P11 — English-only guard: high-signal German tokens (the source material was German) must be ABSENT
 GERMAN_RE='Dateien|Verzeichnis|verlinkt|behebbar|Versäumnis|durchziehen|prüf|änder'
-for f in "$SKILL_MD" "$AGENT_MD"; do
+for f in "$SKILL_MD" "$SKILL_DIR"/references/*.md "$AGENT_MD"; do
   if grep -qiE "$GERMAN_RE" "$f"; then
     check "P11 $(basename "$f") is English-only (found German tokens matching: $GERMAN_RE)" FAIL
   else
@@ -254,10 +255,10 @@ else
 fi
 
 # P28 — Phase 5b removed: the ghost-scan SKILL no longer drives a client-side create_revision baseline (now minted server-side by ghost_apply)
-if grep -qF 'create_revision' "$SKILL_MD"; then
-  check "P28 SKILL.md has no client create_revision (baseline is server-side)" FAIL
+if grep -rqF 'create_revision' "$SKILL_DIR"; then
+  check "P28 the ghost-scan skill tree has no client create_revision (baseline is server-side)" FAIL
 else
-  check "P28 SKILL.md has no client create_revision (baseline is server-side)" PASS
+  check "P28 the ghost-scan skill tree has no client create_revision (baseline is server-side)" PASS
 fi
 
 # P29 — agent mirrors the removal: no ghost-scan client-baseline step or rule

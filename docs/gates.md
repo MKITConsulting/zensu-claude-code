@@ -1711,7 +1711,7 @@ receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --
 - **Where it applies.** The ticket-bound standalone terminus, evaluated together with the
   full-suite and acceptance gates so one call names every refusal; the unqualified terminus when
   the change count is zero or cannot be evaluated; and a bound Autopilot chain that closes with
-  outcome `pass`. Outcomes `max-rounds` and `no-changes` are not gated. A chain without a receipt
+  outcome `pass` or `converged`. Outcomes `max-rounds` and `no-changes` are not gated. A chain without a receipt
   is exempt only while its change count is zero or cannot be evaluated (no `git`, a root outside a
   work tree, a HEAD that names no commit). On such a count a receipt exempts the chain too when it
   records `claims: 0` and the claim inventory of its run log completes with `claimed-files=0` and
@@ -1806,7 +1806,8 @@ reads the newest record, never a claim in the run log.
   quote, a dollar sign, a backtick, a backslash or a control character, the directive asks for
   no closing run and for a reply that says so.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
-  --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
+  --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass` or
+  `converged`. The
   unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A
   self-review ticket the Stop hook minted for a chain no reviewer saw (prefix `zc_`) does not
   reach the gate while the worktree reports a changed file: the terminus refuses it and reopens
@@ -1934,7 +1935,7 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   An `unresolved` cause names its own remedy, and `unavailable` names none.
 - **Where it applies.** The ticket-bound standalone terminus only. Both terminus gates are
   evaluated before either refuses, so one run of `--chain-done` names every problem. A bound
-  Autopilot chain that closes with outcome `pass` prints `ACCEPTANCE — not-checked`, and the
+  Autopilot chain that closes with outcome `pass` or `converged` prints `ACCEPTANCE — not-checked`, and the
   cause says whether the run's VALIDATE stage validates every criterion, whether the run was
   started with `--no-validate` so nothing was validated, or whether the option could not be read.
   Its other outcomes print nothing. The unqualified zero-change terminus is exempt and prints
