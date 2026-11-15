@@ -121,7 +121,8 @@ a shell-active anchor, and the summary it hands back has its backticks and `$(`/
 neutralized. A plain `$` stays valid because route files such as `posts.$slug.tsx` carry one. The
 log's secret scan still runs on every line, but it is a backstop, not a guarantee: a refused
 ledger line is rewritten without the value, never resent with the `zensu-secret-allow` marker or
-`ZENSU_SECRET_SCAN=off`.
+past the scan in any other way. The clause names no env-var escape, which
+`tests/structure/test-escape-wording.sh` holds for every text on the chain-closing path.
 
 **The severity rubric has ONE source.** `docs/review-severity.md` holds the
 `zensu:review-severity` block; `agents/review-aspect.md`, `agents/review-judge.md` and

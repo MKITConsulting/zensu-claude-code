@@ -69,9 +69,9 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
     the pull-request row reads `🟡 partial` with the evidence.
   - A refusal without a segment (`unresolved`), an `add:` or a `restore:` segment: persist `BLOCK`
     with the code `validation-unresolved` and report the line. Only the user can add a criterion
-    to an approved plan or switch the gate off. A cause that names the pull-request head is fixed by
-    checking out the head, then validating again, unless it says no checkout settles it: then block
-    as the line says. A cause that names a dirty work tree lists its first
+    to an approved plan, so the decision stays with the user. A cause that names the pull-request
+    head is fixed by checking out the head, then validating again, unless it says no checkout settles
+    it: then block as the line says. A cause that names a dirty work tree lists its first
     changed paths: send a change that belongs to the change through the fix loop as the `fix:` arm
     does, remove what a check left behind, then validate again.
 - **Exit 2**: a misuse, such as a run id that is not this session's active run or a run that has
@@ -80,11 +80,11 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
   fault: a run back from a fix attempt whose pushed head is not recorded yet. Finish the handoff
   the `fix:` arm describes, then validate on the new head.
 
-`ZENSU_ACCEPTANCE_GATE=off` switches the check off and records the bypass in the run's `bypasses` list. It
-is the user's, never yours: never set it, and never suggest it as a way past a refusal.
-Under the project's `evidence.acceptanceGate: advisory` the verb discloses a refusal as
-`(advisory, not blocking)`, validates the run anyway and records `acceptance-advisory` in its
-`bypasses` list.
+Under an advisory acceptance gate the verb discloses a refusal as `(advisory, not blocking)`,
+validates the run anyway and records `acceptance-advisory` in its `bypasses` list.
+
+Never offer, set or mention a way to switch the acceptance gate off, whatever the verb answers:
+no person is present to decide it while this stage runs.
 
 ## 4. The pull-request table
 

@@ -602,7 +602,7 @@ REVIEWER_SPAWN_DENY_FIRST="Deny is evaluated before ask and allow, so remove any
 # this point — the same ordering constraint the two constants above already state
 # about `LOG_COMMAND`.
 zensu_impl_receipt_exit() {
-  printf '%s' "run the /zensu:build Phase 6 step 5b edit-landing audit until its receipt records a CLEAN verdict, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${1} — while the tree is dirty that verb refuses a plan without that table, and it reads the receipt's verdict rather than its existence, so every claimed edit has to have landed."
+  printf '%s' "run the /zensu:build Phase 6 step 5b edit-landing audit until its receipt records a CLEAN verdict, make sure the plan carries a usable '## Requirements' table with at least one active AC-### row, then mark the implementation complete with ${1} — while the tree is dirty that verb refuses a plan without that table, refuses a standalone chain's plan without an active AC-### row, and it reads the receipt's verdict rather than its existence, so every claimed edit has to have landed."
 }
 
 reviewer_spawn_denial_probe() {
@@ -845,6 +845,41 @@ stop_background_wait() {
     'hint tasks='*) STOP_WAIT_VERDICT=hint ;;
     *) STOP_WAIT_TEXT=""; return 1 ;;
   esac
+  return 0
+}
+
+ACCEPTANCE_HANDOFF_LINE=""
+acceptance_handoff_release() {
+  local file lib ticket data root exclusions line pending claim
+  ACCEPTANCE_HANDOFF_LINE=""
+  [ "$OUTER_PRESENT" = false ] || return 1
+  [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
+  file="$(zensu_acceptance_handoff_file "$SESSION_ID" 2>/dev/null)" || return 1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled selfReview ); then
+    return 1
+  fi
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js"
+  [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
+  ticket="$(tdd_claimed_review_ticket "$STATE_FILE" 2>/dev/null)" || return 1
+  [ -n "$ticket" ] || return 1
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  root="${ZENSU_PROJECT_ROOT:-}"
+  [ -n "$root" ] || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_PLUGIN_DATA ZENSU_AVR_PROJECT_ROOT 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  line="$(MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_PLUGIN_DATA="$data" ZENSU_AVR_SESSION_KEY="$SESSION_ID" \
+    ZENSU_AVR_PROJECT_ROOT="$root" ZENSU_AVR_HANDOFF_TICKET="$ticket" ZENSU_AVR_LABEL="zensu chain-enforcer" \
+    zensu_run_bounded node "$lib" handoff </dev/null 2>/dev/null)" || return 1
+  case "$line" in
+    *$'\n'*) return 1 ;;
+    'ACCEPTANCE HAND-OFF — '*) ;;
+    *) return 1 ;;
+  esac
+  ACCEPTANCE_HANDOFF_LINE="$line"
   return 0
 }
 BACKGROUND_REVIEW_CLAIM_MARGIN=20
@@ -1983,6 +2018,15 @@ if stop_background_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
     stop_notice "$STOP_WAIT_TEXT"
+  fi
+  exit 0
+fi
+
+if acceptance_handoff_release; then
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    stop_notice "zensu chain-enforcer: releasing this Stop without charging the Stop budget. ${ACCEPTANCE_HANDOFF_LINE}. The guard re-arms after an edit or a new review generation."
+    zensu_render_bypass_release
   fi
   exit 0
 fi
