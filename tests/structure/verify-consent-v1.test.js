@@ -2331,6 +2331,11 @@ test('a playwright-cli call on any session but a zensu-verify one is denied with
     'ls "$HOME"/playwright-cli-tests/.zensu/verify-feature-runs',
     'ls ~/playwright-cli-tests/$(date +%Y)/.zensu/verify-feature-runs',
   ]) assert.deepEqual(decide(command), { verdict: 'none' }, command);
+  assert.deepEqual(
+    decide(`$(case x in x) basename playwright-cli.json .json;; esac) -s=mine open --config=${config}`),
+    { verdict: 'none' },
+    'a case pattern closing parenthesis ends the substitution in the lexer, so the name behind it is unseen, as docs/gates.md states',
+  );
   for (const key of ['RUN_DIR_OFF_SESSION', 'STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION', 'POWERSHELL_OFF_SESSION_NOT_JUDGED']) {
     assert.equal(consent.FINAL_REASONS.includes(key), true, key);
     assert.equal(consent.SHAPE_REASONS.includes(key), false, key);

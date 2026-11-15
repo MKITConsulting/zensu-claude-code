@@ -963,9 +963,12 @@ has opened earlier in the word, the name counts where a binary name can still en
 after it but the start of a `.cmd`, `.exe` or `.ps1` suffix, such as `~/.local/bin/playwright-cli`,
 `$'playwright-cli'` or `playwright-cli.{cmd,json}`. After such an opener it counts however it
 continues, because that construct can trim what follows, such as
-`"$(command -v playwright-cli)"` or `$(basename playwright-cli.json .json)`; the gate does not
-look for where the construct ends, so a word that opens one and then names a run's own
-`playwright-cli.json` is refused too. Only the characters after the name are read: a word that
+`"$(command -v playwright-cli)"` or `$(basename playwright-cli.json .json)`; the name rule does
+not look for where the construct ends, so a word that opens one and then names a run's own
+`playwright-cli.json` is refused too. The gate's own shell reading does end a substitution, at
+the first unmatched closing parenthesis that no quote, escape or backtick hides, so the closing
+parenthesis of a `case` pattern inside one ends it early and a name behind that pattern goes
+unseen. Only the characters after the name are read: a word that
 holds the CLI's name only inside a longer one, such as the run config `playwright-cli.json`
 behind a glob or a project folder `playwright-cli-demo`, does not count, while a folder that
 ends in the name, such as `~/my-playwright-cli`, does. The directory a `cd` or `pushd` enters
@@ -1119,8 +1122,10 @@ through Bash.
   not literal; only a CLI name assembled at run time stays unseen. A longer name that a variable's
   parameter modifier trims in the same command, such as `${X%.json}` after `X=playwright-cli.json`,
   is assembled at run time too and goes unseen, although the text names the CLI: only a trim
-  inside the word that runs is read, however its substitution closes, such as
-  `$(basename playwright-cli.json .json)`. The single-call and literal-argument rules bind only a call the
+  inside the word that runs is read, up to where the gate's own shell reading ends the
+  substitution, such as `$(basename playwright-cli.json .json)`. A quoted or escaped closer does
+  not end it; the closing parenthesis of a `case` pattern does, so a name behind such a pattern
+  goes unseen. The single-call and literal-argument rules bind only a call the
   gate judges, so they do not narrow this and do not make the gate a boundary. A function or
   alias named `playwright-cli` that the shell already has, such as one from a startup file, is
   judged as the plain call its text shows, and neither hook can see what it runs.
