@@ -12,7 +12,7 @@ const NAME_STEMS = Object.freeze([POSIX_LOOKUP[0], PACKAGE_NAME]);
 const NAME_SUFFIXES = Object.freeze(BINARY_NAMES.filter((name) => name.startsWith(POSIX_LOOKUP[0])).map((name) => name.slice(POSIX_LOOKUP[0].length)));
 const NAME_TAIL = /^[a-z0-9._-]*/;
 const NAME_TAIL_WINDOW = Math.max(...NAME_SUFFIXES.map((suffix) => suffix.length)) + 1;
-const CONSTRUCT_CLOSERS = Object.freeze({ '(': ')', '{': '}' });
+const CONSTRUCT_OPENERS = Object.freeze(['$(', '${', '`']);
 const MAX_MANIFEST_BYTES = 65536;
 const MANIFEST_DIRECTORIES = 4;
 const VERSION_TIMEOUT_MS = 5000;
@@ -161,33 +161,14 @@ function stemEndsName(spelling, stem) {
   return false;
 }
 
-function nameInsideConstruct(spelling) {
-  const open = [];
-  let tick = false;
-  for (let at = 0; at < spelling.length; at += 1) {
-    const char = spelling[at];
-    if ((tick || open.length > 0) && NAME_STEMS.some((stem) => spelling.startsWith(stem, at))) return true;
-    if (char === '`') {
-      tick = !tick;
-    } else if (char === '$' && CONSTRUCT_CLOSERS[spelling[at + 1]] !== undefined) {
-      open.push({ opener: spelling[at + 1], depth: 1 });
-      at += 1;
-    } else if (open.length > 0) {
-      const top = open[open.length - 1];
-      if (char === top.opener) {
-        top.depth += 1;
-      } else if (char === CONSTRUCT_CLOSERS[top.opener]) {
-        top.depth -= 1;
-        if (top.depth === 0) open.pop();
-      }
-    }
-  }
-  return false;
+function nameAfterConstruct(spelling) {
+  const opened = CONSTRUCT_OPENERS.map((opener) => spelling.indexOf(opener)).filter((at) => at !== -1);
+  return opened.length > 0 && NAME_STEMS.some((stem) => spelling.indexOf(stem, Math.min(...opened)) !== -1);
 }
 
 function holdsCliName(text) {
   const kept = String(text).replace(/\\\r?\n/g, '').replace(/['"]/g, '').toLowerCase();
-  return [kept, kept.replace(/[\\`]/g, '')].some((spelling) => nameInsideConstruct(spelling) || NAME_STEMS.some((stem) => stemEndsName(spelling, stem)));
+  return [kept, kept.replace(/[\\`]/g, '')].some((spelling) => nameAfterConstruct(spelling) || NAME_STEMS.some((stem) => stemEndsName(spelling, stem)));
 }
 
 function binaryStem(name) {

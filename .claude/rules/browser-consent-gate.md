@@ -278,24 +278,31 @@ whose text holds the CLI's name where a binary name can still end (`expandsIntoC
 is no invocation because only a literal word is, and a body the lexer cannot judge that names the
 CLI. That name test is `holdsCliName` in `hooks/lib/playwright-cli-version-v1.js`, and the read
 guard's expansion arm calls the same function. An occurrence of `playwright-cli` or
-`@playwright/cli` counts in two cases. Outside any substitution it counts only when the name
-characters after it (`[a-z0-9._-]`) are none or the start of a `.cmd`, `.exe` or `.ps1` suffix
-(`NAME_SUFFIXES`, derived from `BINARY_NAMES`), because a glob, brace, `~`, `$NAME` or quote keeps
-the text that follows the name. Inside a command substitution, a backtick pair or a `${…}` body
-(`nameInsideConstruct`) it counts however it continues, an unterminated construct included,
+`@playwright/cli` counts in two cases. When no command substitution, backtick or `${` has opened
+earlier in the word it counts only when the name characters after it (`[a-z0-9._-]`) are none or
+the start of a `.cmd`, `.exe` or `.ps1` suffix (`NAME_SUFFIXES`, derived from `BINARY_NAMES`),
+because a glob, brace, `~`, `$NAME` or quote keeps the text that follows the name. After the
+first such opener (`nameAfterConstruct`) every later occurrence counts however it continues,
 because that construct can trim what follows: `$(basename playwright-cli.json .json)` and zsh's
-`${${:-playwright-cli.json}:r}` run the CLI, and a name that a variable or a program assembled
-earlier stays the textual gap named below. The tail test reads two spellings: quotes and line
-continuations removed, where a backslash or a backtick ends the name characters, because bash
-truncates `$'playwright-cli\x00.json'` at the NUL and runs ``playwright-cli`true` `` as the CLI
-(both measured), and the same with backslashes and backticks removed, which joins a name that a
-backslash or an empty substitution splits. Only the characters after the name are read, so a
-word that holds the name only inside a longer one, such as `playwright-cli.json` behind a glob,
-`$(git rev-parse --show-toplevel)/…/playwright-cli.json` or a project folder
-`playwright-cli-demo`, is no token, while a folder that ends in the name, such as
-`~/my-playwright-cli`, counts: bounding the characters before it would have to undo escapes that
-decode to a slash. The operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never counts; the gated
-`indirect` test and the bodies the lexer cannot judge keep the substring reading of `namesCli`.
+`${${:-playwright-cli.json}:r}` run the CLI. The rule never looks for where the construct ends,
+since a quoted or escaped closer, a `case` pattern or a heredoc inside it would end it early and
+turn an under-count into a pass. The price is a false refusal, as at the old substring reading,
+for a word that opens a construct and then names a run's own `playwright-cli.json`, such as
+`"$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json"`; read that
+file through the Grep tool or a path that opens no substitution. A name that a variable or a
+program assembled earlier stays the textual gap named below. The tail test reads two spellings:
+quotes and line continuations removed, where a backslash or a backtick ends the name characters,
+because bash truncates `$'playwright-cli\x00.json'` at the NUL and runs ``playwright-cli`true` ``
+as the CLI (both measured), and the same with backslashes and backticks removed, which joins a
+name that a backslash or an empty substitution splits. Only the characters after the name are
+read, so a word that holds the name only inside a longer one, such as `playwright-cli.json`
+behind a glob or a project folder `playwright-cli-demo`, is no token, while a folder that ends in
+the name, such as `~/my-playwright-cli`, counts: bounding the characters before it would have to
+undo escapes that decode to a slash. The operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never
+counts; the gated `indirect` test and the bodies the lexer cannot judge keep the substring
+reading of `namesCli`. The lexer's own reading of where a substitution ends is the limit of this
+rule: a `case` pattern's `)` closes it early there, so a name the pattern hides stays unseen,
+exactly as at the old reading.
 `binaryStem` in the same module strips a binary suffix, so `CLI_MARKERS` and `cliToken` share the
 one suffix set. With the `runs` arm an off-session call or a hidden
 CLI denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each

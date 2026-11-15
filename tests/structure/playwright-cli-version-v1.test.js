@@ -205,11 +205,15 @@ test('the CLI prints one key per line and nothing a report could mistake for a r
   assert.deepEqual(printed, ['source=absent\nversion=\nowner=\n']);
 });
 
-test('holdsCliName counts a CLI name only where the name characters after it can still end a binary name, or where a substitution can rewrite them', () => {
+test('holdsCliName counts a CLI name only where the name characters after it can still end a binary name, or where a substitution has opened before it', () => {
   for (const text of [
     '$(basename playwright-cli.json .json)', '"$(basename playwright-cli.json .json)"', '${${:-playwright-cli.json}:r}',
     '`basename playwright-cli.json .json`', '${PW:-playwright-cli.json%.json}', '$(echo $(basename @playwright/cli.json .json))',
     '~/my-playwright-cli/bin', '/opt/my-playwright-cli', '$(unterminated playwright-cli.json',
+    "$(true ')'; basename playwright-cli.json .json)", '$(true \\); basename playwright-cli.json .json)',
+    '`echo \\`basename playwright-cli.json .json\\``', '$(case x in x) basename playwright-cli.json .json;; esac)',
+    '$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json', '"${HOME}"/playwright-cli-demo/bin',
+    '${A:-b}/playwright-cli.json', '`pwd`/playwright-cli-tests',
     'playwright-cli', '~/bin/playwright-cli', '$HOME/bin/PLAYWRIGHT-CLI', "$'playwright-cli'", "playwright-cli$''",
     '"$(command -v playwright-cli)"', '"${PW:-playwright-cli}"', '{playwright-cli,}', 'playwright-cli.{cmd,json}',
     'playwright-cli.c*', 'playwright-cli.EXE', '/opt/*/playwright-cli.ps1', 'playwright-cli`true`', "$'playwright-cli\\x00.json'",
@@ -219,8 +223,7 @@ test('holdsCliName counts a CLI name only where the name characters after it can
   for (const text of [
     '', 'playwright', '.zensu/verify-feature-runs/*/playwright-cli.json', '/u/playwright-cli-demo/.zensu/x', '~/playwright-cli-tests/*',
     "'playwright-cli'.json", 'playwright-cli.cmdx', 'playwright-cli.exe.bak', '@playwright/cli-tools/*', 'play\\wright-cli\\.json',
-    '$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json', '"${HOME}"/playwright-cli-demo/bin',
-    '${A:-b}/playwright-cli.json', '`pwd`/playwright-cli-tests', '$(pwd)', '${HOME}',
+    '$(pwd)', '${HOME}', '/u/playwright-cli-demo/${X}', 'playwright-cli.json$(true)', '~/playwright-cli-tests/`date`',
   ]) assert.equal(version.holdsCliName(text), false, text);
   assert.deepEqual(['playwright-cli', 'playwright-cli.cmd', 'PLAYWRIGHT-CLI.EXE', 'playwright-cli.ps1', 'a.exe', '@playwright/cli'].map(version.binaryStem), [
     'playwright-cli', 'playwright-cli', 'playwright-cli', 'playwright-cli', 'a', '@playwright/cli',

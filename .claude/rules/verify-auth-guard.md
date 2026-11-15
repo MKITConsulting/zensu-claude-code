@@ -89,16 +89,19 @@ one, starts with one and `@`, holds a path into the package (`PACKAGE_PATH_RE`: 
 followed by the end of the token, `@` or `/`), or holds an expansion character
 (`EXPANSION_TOKEN`) the shell acts on and holds the CLI's name where a binary name can still
 end. That last test is `holdsCliName` in `playwright-cli-version-v1.js`, the one the consent
-gate's `expandsIntoCli` calls: outside a substitution an occurrence of the name counts only when
-the name characters after it (`[a-z0-9._-]`) are none or the start of a `.cmd`, `.exe` or `.ps1`
-suffix, read once with a backslash or backtick ending them and once with both removed; inside a
-command substitution, a backtick pair or a `${…}` body (`nameInsideConstruct`) it counts however
-it continues, because the construct can trim what follows. Only the characters after the name
-are read, so a folder that ends in the name counts. The guard hands it the tokens of the masked
-text's shell spellings before quotes, backslashes and backticks are stripped, so a NUL escape in
-`$'playwright-cli\x00.json'` still ends the name, as does a backtick substitution in a token
-that also holds an expansion character the rule acts on, and an unquoted `${${:-…}:r}` token
-counts through its `${…}` body.
+gate's `expandsIntoCli` calls: while no command substitution, backtick or `${` has opened earlier
+in the token an occurrence of the name counts only when the name characters after it
+(`[a-z0-9._-]`) are none or the start of a `.cmd`, `.exe` or `.ps1` suffix, read once with a
+backslash or backtick ending them and once with both removed; after the first such opener
+(`nameAfterConstruct`) every later occurrence counts however it continues, because the construct
+can trim what follows, and the rule never looks for where it ends. Only the characters after the
+name are read, so a folder that ends in the name counts. The guard hands it the tokens of the
+masked text's shell spellings before quotes, backslashes and backticks are stripped, so a NUL
+escape in `$'playwright-cli\x00.json'` still ends the name, as does a backtick substitution in a
+token that also holds an expansion character the rule acts on, and an unquoted `${${:-…}:r}`
+token counts through its `${` opener. The price is a false refusal for an unquoted `${HOME}/…`
+path that names a project folder after the CLI, as at the old substring reading; the quoted
+`"$HOME"/…` and `~/…` spellings pass.
 `maskedQuotedExpansions` decides "acts on" for Bash text: it hides each such character inside
 single quotes, an ANSI-C string or behind a backslash, and every one but `$` inside double
 quotes, so `$'playwright-cli'`, `playwright-cli$''`, `"${PW:-playwright-cli}"`,
@@ -168,7 +171,7 @@ there instead of listing them, because its body sits on the shrink-only allowlis
 **Coupled sites:** `AUTH_SESSION_PREFIX`, `AUTH_GUARD_HOOK_FILE`, `AUTH_GUARD_TOOLS`,
 `AUTH_GUARD_MATCHER`, `AUTH_GUARD_PROBE_TOOLS`, the caps,
 `FAULTS` and `discardAuthState` in `verify-auth-state-v1.js`; `CLI_WORDS`, `SESSION_MARKER` and
-`REASONS.SESSION` and `PACKAGE_PATH_RE` in the guard; `holdsCliName`, `nameInsideConstruct`,
+`REASONS.SESSION` and `PACKAGE_PATH_RE` in the guard; `holdsCliName`, `nameAfterConstruct`,
 `binaryStem` and `NAME_SUFFIXES` in `playwright-cli-version-v1.js`, shared with the consent
 gate's `expandsIntoCli`, `CLI_MARKERS` and `cliToken`, with `V67b` in
 `tests/structure/test-verify-consent.sh` pinning the guard's side;
@@ -226,7 +229,7 @@ literal path into the package in the guard.
     splits at parentheses and sees only the longer token; a `$(command -v …)` that holds the
     bare name stays visible.
   - A `${…}` expansion that does the same inside double quotes, because the mask hides its
-    braces, so the span test of `holdsCliName` finds no construct. The unquoted form is counted.
+    braces, so `holdsCliName` finds no `${` opener. The unquoted form is counted.
   The spec and `docs/gates.md` name the four. Closing them here means rebuilding the guard's
   reading on the consent lexer, which the guard deliberately does not share.
 - The path rule over-denies on purpose: `**` at or above a run directory, a segment at the `auth`

@@ -169,11 +169,13 @@ the same config content.
   expands first such as `~/.local/bin/playwright-cli`) counts as such a call. A word that holds
   the CLI's name only inside a longer one (`playwright-cli.json` behind a glob, a folder
   `playwright-cli-demo`) does not; the consent gate and the read guard share that name rule,
-  which outside a substitution counts the name only where nothing follows it but the start of a
-  `.cmd`, `.exe` or `.ps1` suffix, and inside a command substitution, a backtick pair or a
-  `${…}` body counts it however it continues, because that construct can trim what follows
-  (`$(basename playwright-cli.json .json)`). Only the characters after the name are read, so a
-  folder that ends in the name (`~/my-playwright-cli`) counts. The guard reads fewer spellings
+  which counts the name only where nothing follows it but the start of a `.cmd`, `.exe` or `.ps1`
+  suffix, and counts it however it continues after a command substitution, a backtick or a
+  `${` has opened earlier in the word, because that construct can trim what follows
+  (`$(basename playwright-cli.json .json)`); the rule does not look for where the construct
+  ends, so a word that opens one and then names a run's own `playwright-cli.json` is refused
+  too. Only the characters after the name are read, so a folder that ends in the name
+  (`~/my-playwright-cli`) counts. The guard reads fewer spellings
   than the gate: a backtick substitution right after the bare name, zsh's leading `=`, a `$(…)`
   substitution that trims a longer name and a trimming `${…}` inside double quotes pass the guard
   and are refused by the gate. The gate reads every config

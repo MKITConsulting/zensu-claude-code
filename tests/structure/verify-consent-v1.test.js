@@ -2309,6 +2309,10 @@ test('a playwright-cli call on any session but a zensu-verify one is denied with
     [`"$(basename playwright-cli.json .json)" -s=mine open --config=${config}`, {}],
     [`\${\${:-playwright-cli.json}:r} -s=mine open --config=${config}`, {}],
     [`xargs $(basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    [`$(true ')'; basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    [`$(true \\); basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    ['`echo \\`basename playwright-cli.json .json\\`` -s=mine open --config=' + config, {}],
+    [`cat "$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json"`, {}],
   ];
   for (const [command, env] of cases) assert.equal(denied(command, { env }), REASONS.RUN_DIR_OFF_SESSION, command);
   assert.notEqual(decide(cli(`open --config=${config}`)).reason, REASONS.RUN_DIR_OFF_SESSION);
@@ -2325,8 +2329,7 @@ test('a playwright-cli call on any session but a zensu-verify one is denied with
     'cat /p/.zensu/verify-feature-runs/*/playwright-cli.json',
     'mkdir -p ~/playwright-cli-demo/.zensu/verify-feature-runs/r',
     'ls "$HOME"/playwright-cli-tests/.zensu/verify-feature-runs',
-    'ls "${HOME}"/playwright-cli-tests/.zensu/verify-feature-runs',
-    'cat "$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json"',
+    'ls ~/playwright-cli-tests/$(date +%Y)/.zensu/verify-feature-runs',
   ]) assert.deepEqual(decide(command), { verdict: 'none' }, command);
   for (const key of ['RUN_DIR_OFF_SESSION', 'STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION', 'POWERSHELL_OFF_SESSION_NOT_JUDGED']) {
     assert.equal(consent.FINAL_REASONS.includes(key), true, key);
