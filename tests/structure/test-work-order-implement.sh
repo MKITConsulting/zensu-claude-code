@@ -210,10 +210,9 @@ PLAN
 bash "$LOG_HELPER" --acceptance-status --run "$RUN" >"$SBOX/acc-status.out" 2>"$SBOX/acc-status.err"; RC=$?
 if [ "$RC" -eq 1 ] \
   && grep -qxF "ACCEPTANCE PLAN UNAPPROVED — work order $ORDER asks for no plan approval, so the criteria of autopilot run $RUN come from the session's own plan .zensu/plans/$ORDER.md, which no person approved" "$SBOX/acc-status.out" \
-  && grep -qF "ACCEPTANCE STATUS — autopilot run $RUN | plan: .zensu/plans/$ORDER.md | tree: " "$SBOX/acc-status.out" \
-  && grep -qF '| 0/1 active criteria pass | run: drive each criterion that does not pass again on this tree' "$SBOX/acc-status.out" \
-  && grep -q '^AC-001 missing | the feature file exists$' "$SBOX/acc-status.out"; then
-  check "I9a a work-order run without plan approval reads its criteria from the order's plan and says that no person approved it" PASS
+  && grep -qxF "ACCEPTANCE STATUS — unresolved | autopilot run $RUN: the run records no pull-request head, so there is no commit to validate | plan: .zensu/plans/$ORDER.md" "$SBOX/acc-status.out" \
+  && ! grep -q '^AC-001 ' "$SBOX/acc-status.out"; then
+  check "I9a a work-order run without plan approval reads its criteria from the order's plan, says that no person approved it, and lists no criterion before the run records a pull-request head" PASS
 else
   check "I9a a work-order run reads its criteria from the order's plan (rc=$RC $(cat "$SBOX/acc-status.out" "$SBOX/acc-status.err"))" FAIL
 fi

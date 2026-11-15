@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Autopilot validation gate**: an Autopilot run's VALIDATE stage now leaves only through
+  `zensu-log.sh --autopilot-validate --run <id> [--accept-partial <ids>]`, which applies
+  `VALIDATION_PASSED` itself once every active `AC-###` criterion of the plan the user approved has
+  a `pass` record on the clean pull-request head. On a run that validates, the plan-approval hook
+  stores the approved plan byte for byte as `.zensu/state/autopilot-approved-plan-<sha256>.md`,
+  and every check reads the criteria from that copy after it compares the digest. The acceptance
+  verbs take `--run <id>` in place of `--log`, `--evidence-run --scope acceptance --run <id>` runs
+  a check in the run's work tree, and a dirty tree or a `HEAD` other than the pull-request head
+  refuses the records, the status and the validation under every gate mode. A criterion this
+  environment cannot observe closes as partial only when the approved plan's
+  `## Manual Acceptance` table lists it; the run's ledger then records `acceptance-partial` and the
+  pull-request row reads 🟡. A session that resumes a validating run whose stored copy is missing
+  or changed is told so at session start, before VALIDATE refuses it.
+- **Acceptance consent**: a standalone `/zensu:build` chain whose criteria this environment cannot
+  observe (a real login, an account, a non-loopback host, a signed build, a driver that cannot
+  run here) now closes only with the user's consent for exactly those criteria.
+  `--chain-done --accept-partial <AC ids>` passes when the listed ids are exactly the open
+  criteria, every one is `partial` on the current tree and each has a row in the plan's new
+  optional `## Manual Acceptance` table, which the terminus reads; it records
+  `acceptance-partial` in the session bypass ledger (a consent the ledger does not take keeps the
+  chain open), and the chain-end summary renders it 🟡 with each criterion's reason. A refusal
+  whose open criteria are all `partial` ends with an `accept:` segment. `partial` is never a
+  must-fix in `/zensu:build` step 6d, `/zensu:verify-feature --chain` or `/zensu:self-review`:
+  they ask one question (provide access now, accept as partial, leave the chain open), write the
+  criterion's `## Manual Acceptance` row for an accepted one, and a gap foreseen at planning gets
+  its row then; `skills/verify-feature/rules/acceptance-consent.md` owns that question and that
+  row. Once the review has converged, a terminus refusal that waits only on the user lets the Stop
+  guard end the turn with an `ACCEPTANCE HAND-OFF — …` notice instead of blocking until the Stop
+  cap, and `--chain-status` prints the same line on stderr; an edit, a plan edit, a new acceptance
+  record or a new review generation re-arms the block. No remedy, refusal or skill text on the
+  chain-closing path names an environment-variable escape any more, and
+  `tests/structure/test-escape-wording.sh` holds that.
+
+### Upgrade notes
+
+- **An acceptance criterion before review**: `--tdd-complete` now refuses a standalone chain on a
+  changed tree whose plan carries no active `AC-###` row, and names the remedy (one `AC-###` row
+  per acceptance criterion, preferably one this environment can observe). A plan with only `FR-###`
+  rows used to pass there and was refused as `no-criteria` at the terminus, after the review. With
+  `evidence.acceptanceGate: advisory` the check prints a notice and completes, also when it cannot
+  run or cannot read the plan.
+- **`VALIDATION_PASSED` and `PLAN_APPROVED` are internal events**: `zensu-log.sh --autopilot-event`
+  now refuses `VALIDATION_PASSED`, which only `--autopilot-validate` applies, and `PLAN_APPROVED`,
+  which only the plan-approval hook records, and it reserves the event-id namespaces
+  `validation-passed:`, `validation-bypass:` and `plan-approved-` for them, whatever the event
+  type. `VALIDATION_FAILED` is still yours to send. A session that still holds the earlier
+  `/zensu:autopilot` text and sends `VALIDATION_PASSED` itself is refused with a line that names
+  `--autopilot-validate`.
+- **Runs approved before this release**: a validating run whose plan was approved before this
+  release has no stored plan copy, so `--autopilot-validate` refuses it as `unresolved` at
+  VALIDATE, and the session-start resume line reports `APPROVED_PLAN_COPY_UNAVAILABLE` for it.
+  The way out is yours to choose: validate it once under `ZENSU_ACCEPTANCE_GATE=off` or
+  `evidence.acceptanceGate: advisory`, each recorded in the run's ledger and its pull request and
+  neither lifting the pull-request head binding, or finish the change in a new run, whose approval
+  stores its copy.
+- **A validating plan needs an active criterion**: on a run that validates, the plan-approval hook
+  now refuses a plan without an active `AC-###` row in a `## Requirements` table as
+  `PLAN_CRITERIA_UNUSABLE`, a plan whose code fence never closes included, and keeps the run at
+  `PLANNING`, so the corrected plan is approved again; a requirements lister that cannot judge the
+  plan refuses as `PLAN_CRITERIA_UNREADABLE`. A work-order run that validates is refused the same
+  way at `--bind-spec`, with `plan-criteria-unusable` or `plan-criteria-unreadable`, before anyone
+  is asked to approve its plan.
+- **Autopilot spec template**: `templates/autopilot-spec.md` replaces its acceptance-criteria list
+  with a `## Requirements` table of `AC-###` rows and gains an optional `## Manual Acceptance`
+  table. A repository override at `.zensu/templates/autopilot-spec.md`, and a spec written from
+  the earlier template, needs that table before a validating run can be approved.
+- **Requirements lister exit 5**: `hooks/lib/zensu-plan-requirements.sh` now exits 5, not 2, for
+  a plan whose code fence never closes, and `--tdd-complete` reports such a plan as one that does
+  not parse and asks for the fence to be closed. A script that reads the lister's exit code and
+  took 2 for that case now sees 5.
+- **Accepting a gap in an Autopilot run**: an Autopilot run whose criterion this environment cannot
+  observe now stops at VALIDATE with `validation-unresolved` unless the approved plan lists that
+  criterion in its `## Manual Acceptance` table, because the run asks no question; put such a
+  criterion into that table before you approve the plan. A work-order plan no person approved
+  carries no consent, and a run validated from one records `acceptance-plan-unapproved` in its
+  ledger. `--accept-partial` takes the comma list of ids on both `--chain-done` and
+  `--autopilot-validate`, and a bare `--accept-partial` is refused on both.
+- **Run-mode records and an older installation**: an acceptance record of an Autopilot run names
+  its plan as `.zensu/state/autopilot-approved-plan-<sha256>.md`, which an installation that
+  predates this release reads as a malformed record, so an older plugin root that still serves a
+  session after the update can turn that session's acceptance verdict `invalid`.
+
 ## [0.39.0] - 2026-11-15
 
 ### Added
@@ -170,32 +254,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   note: `zensu wiki images upload` is now a gated mutation (`upload_wiki_image`), which the
   released gate did not know and let through; run it inside `/zensu:change`.
   `zensu wiki images policy` stays a read.
-- **Acceptance consent**: a standalone `/zensu:build` chain whose criteria this environment cannot
-  observe (a real login, an account, a non-loopback host, a signed build, a driver that cannot
-  run here) now closes only with the
-  user's consent for exactly those criteria. `--chain-done --accept-partial <AC ids>` passes when
-  the listed ids are exactly the open criteria and every one is `partial` on the current tree,
-  records `acceptance-partial` in the session bypass ledger (a consent the ledger does not take
-  keeps the chain open), and the chain-end summary renders it 🟡 with each criterion's reason. A refusal whose open criteria are all `partial` ends with an
-  `accept:` segment. `partial` is never a must-fix in `/zensu:build` step 6d,
-  `/zensu:verify-feature --chain` or `/zensu:self-review`: they ask one question (provide access
-  now, accept as partial, leave the chain open), and a gap foreseen at planning goes into the
-  plan's new optional `## Manual Acceptance` table; `skills/verify-feature/rules/acceptance-consent.md`
-  owns that question and that row. Once the review has converged, a terminus refusal that waits only
-  on the user lets the Stop guard end the turn with an `ACCEPTANCE HAND-OFF — …` notice instead of
-  blocking until the Stop cap, and `--chain-status` prints the same line on stderr; an edit, a plan edit, a
-  new acceptance record or a new review generation re-arms the block. No remedy, refusal or
-  skill text on the chain-closing path names an environment-variable escape any more, and
-  `tests/structure/test-escape-wording.sh` holds that.
 
 ### Upgrade notes
-
-- **An acceptance criterion before review**: `--tdd-complete` now refuses a standalone chain on a
-  changed tree whose plan carries no active `AC-###` row, and names the remedy (one `AC-###` row
-  per acceptance criterion, preferably one this environment can observe). A plan with only `FR-###`
-  rows used to pass there and was refused as `no-criteria` at the terminus, after the review. With
-  `evidence.acceptanceGate: advisory` the check prints a notice and completes, also when it cannot
-  run or cannot read the plan.
 
 - **Homebrew upgrade command**: the session banner, `/zensu:doctor`, `/zensu:setup`, the five skill
   prerequisites that name install commands, the README and `docs/operations.md` now give

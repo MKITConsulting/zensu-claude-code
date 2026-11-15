@@ -51,8 +51,11 @@ disabled gate must never render like a clean one — the rule this repo already 
 `reviewerSpawnPermissionCheck`), while `Gates bypassed` carries a NOT-READABLE arm, since
 its value is always read and the failure mode is an unreadable ledger rather than an absent
 one. Its 🟢 is bound to the literal `none`, its 🟡 to the literal `acceptance-partial` alone (a
-gap the user consented to, which only the terminus records), and everything else is 🔴, so a
-reworded ledger constant cannot render clean and an escape beside the consented gap stays 🔴. `Acceptance` follows the `Full suite` rule: it carries the terminus's `ACCEPTANCE — …`
+gap the user consented to through a row of the plan's `## Manual Acceptance` table, which only
+the `--chain-done` terminus and `--autopilot-validate` record, and the latter only from the
+approved plan), and everything else is 🔴, so a reworded ledger constant cannot render clean and
+an escape beside the consented gap stays 🔴. `acceptance-plan-unapproved` and
+`acceptance-advisory` are 🔴 for that reason. `Acceptance` follows the `Full suite` rule: it carries the terminus's `ACCEPTANCE — …`
 lines verbatim, 🟢 only for `pass`, 🟡 for the passing states that verified nothing on this tree,
 for `partial-accepted` and for an advisory `incomplete` that lists only missing criteria, 🔴 for
 everything else including `escaped`; both renderers carry it right after `Full suite`.

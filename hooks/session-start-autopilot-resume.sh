@@ -346,6 +346,25 @@ if (ownerSessionId !== currentSessionId) {
   process.exit(0);
 }
 
+const planCopyNote = (() => {
+  const options = state.options;
+  if (!options || typeof options !== 'object' || options.validate !== true) return '';
+  if (state.workOrder !== undefined && state.workOrder !== null) return '';
+  if (!sha256(state.approvedPlanSha256)) return '';
+  let approvedPlan;
+  let read;
+  try {
+    approvedPlan = require('./approved-plan-v1.js');
+    read = approvedPlan.readApprovedPlan(state.projectRoot, state.approvedPlanSha256);
+  } catch (_) {
+    return '';
+  }
+  if (!read || read.ok) return '';
+  const failures = approvedPlan.APPROVED_PLAN_FAILURES;
+  const reason = Object.values(failures).includes(read.reason) ? read.reason : failures.UNREADABLE;
+  const copy = approvedPlan.approvedPlanRelPath(state.approvedPlanSha256);
+  return ` ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE runId=${runId} copy=${copy} reason=${reason}. This run validates, and VALIDATE reads its acceptance criteria from this stored copy of the plan the user approved; the copy is missing or no longer matches the approved digest, so zensu-log.sh --autopilot-validate will refuse at VALIDATE. Report this to the user now and leave the decision to the user.`;
+})();
 const returnLabel = returnStage === null ? 'NONE' : returnStage;
 const chainLabel = chainId === null ? 'NONE' : chainId;
 const tddSessionLabel = tddSessionId === null ? 'NONE' : tddSessionId;
@@ -355,9 +374,12 @@ const actionFields = headUpdateRequired
 const actionDirective = headUpdateRequired
   ? `FIRST execute prerequisite action UPDATE_PR_HEAD: re-run the configured gates, push the fixes, read the resulting PR head, and persist the exact PR_HEAD_UPDATED event. Only after that succeeds continue stage action ${nextActionCode}: ${actionText[nextActionCode]}`
   : actionText[nextActionCode];
-emit(`ZENSU_AUTOPILOT_RESUME ACTIVE_RUN runId=${runId} ${actionFields} tddAttempt=${attempt} returnStage=${returnLabel} prStatus=${prStatus} teamReviewStatus=${reviewStatus} tddChainId=${chainLabel} tddSessionId=${tddSessionLabel} headUpdateRequired=${headUpdateRequired} evidence=${exactEvidence}. ${actionDirective} Continue this exact durable run only; do not restart completed stages, repeat remote effects, or mark DONE outside guarded state transitions.`);
+emit(`ZENSU_AUTOPILOT_RESUME ACTIVE_RUN runId=${runId} ${actionFields} tddAttempt=${attempt} returnStage=${returnLabel} prStatus=${prStatus} teamReviewStatus=${reviewStatus} tddChainId=${chainLabel} tddSessionId=${tddSessionLabel} headUpdateRequired=${headUpdateRequired} evidence=${exactEvidence}. ${actionDirective} Continue this exact durable run only; do not restart completed stages, repeat remote effects, or mark DONE outside guarded state transitions.${planCopyNote}`);
 NODE
 )"
-printf '%s' "$ACTIVE_STATE" | CURRENT_SESSION_ID="$SESSION_ID" node -e "$AUTOPILOT_RESUME_EMITTER"
+(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 0
+  printf '%s' "$ACTIVE_STATE" | CURRENT_SESSION_ID="$SESSION_ID" node -e "$AUTOPILOT_RESUME_EMITTER"
+)
 
 exit 0

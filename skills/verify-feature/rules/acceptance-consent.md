@@ -24,6 +24,12 @@ criterion the run could observe but did not prove is not `partial`: verify it ag
 Nothing else is consent: not an answer about another criterion, and not a guess about what the
 user would accept.
 
+The gate reads the table. `--chain-done --accept-partial <ids>` refuses an id the chain plan's
+`## Manual Acceptance` table does not list, and `--autopilot-validate --accept-partial <ids>` one
+the approved plan copy does not list, in work-order mode the plan a person approved. A work-order
+plan no person approved carries no consent. An answer to the ONE question therefore counts once
+its row is written.
+
 Consent binds only a chain whose terminus can take it. When the `--acceptance-status` summary or
 the terminus refusal ends with `review:` or `tree:` where `accept:` would stand, a zero-change
 self-review ticket or a tree the gate cannot fingerprint binds no consent: ask nothing, never pass
@@ -58,4 +64,5 @@ so the Consent cell names where and when the consent was given, never a person, 
 email address or an internal hostname. Its reason cell names the cause category of the
 `partial` record, one of those this file lists, so a row written while planning matches the
 record a later run writes. Write one row per accepted criterion before the `--accept-partial`
-close, so the check a person owes before release reaches the plan.
+close, so the check a person owes before release reaches the plan; the terminus refuses an id
+without one.

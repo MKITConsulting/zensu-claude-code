@@ -76,13 +76,15 @@ credentials, an account, a non-loopback host or a signed build, or its driver ca
 is `partial`, never a fix step:
 the skill asks the user once whether to provide access now, accept it as partial or leave the
 chain open (`skills/verify-feature/rules/acceptance-consent.md`), and an accepted criterion
-closes the chain only through `--chain-done --accept-partial` for exactly its id. Remote mode is
+closes the chain only through `--chain-done --accept-partial` for exactly its id, once the plan's
+`## Manual Acceptance` table holds its row. Remote mode is
 refused there, because a deployed URL runs other code than the tree the records bind to. The consent and policy rules below apply unchanged. In consent
 mode the later pass boots on the same loopback origin, so the prompt is not asked twice. An
 Autopilot-bound chain skips this stage: its VALIDATE stage verifies every criterion unless the
 run was started with `--no-validate`, and the chain's terminus line says which. That stage
 records against the run with `--run <id>` and passes only through `zensu-log.sh
---autopilot-validate`, which checks the records on the pull-request head.
+--autopilot-validate`, which checks the records on the pull-request head and accepts a `partial`
+criterion only for an id the approved plan's `## Manual Acceptance` table lists.
 
 ## What it can verify
 

@@ -322,9 +322,11 @@ _zensu_avr_prepare() {
   _zensu_transport_put "$label" "$_avr_dir" gate-mode "$(zensu_evidence_acceptance_gate)" || return 2
   _avr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _avr_bash="bash"
   _avr_msys_excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_DIR ZENSU_AVR_PLUGIN_DATA \
-    ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH ZENSU_AVR_WORK_TREE ZENSU_AVR_PLAN)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
+    ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH ZENSU_AVR_WORK_TREE)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
 }
+
+_ZENSU_AVR_MAIN_JS='require(process.env.ZENSU_AVR_LIB).main([process.env.ZENSU_AVR_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
 
 _zensu_avr_node() {
   MSYS2_ENV_CONV_EXCL="$_avr_msys_excl" \
@@ -345,18 +347,16 @@ _zensu_avr_node() {
   ZENSU_AVR_VALIDATE="${_avr_validate:-}" \
   ZENSU_AVR_EDIT_LANDING_ESCAPED="${_avr_escaped_el:-0}" \
   ZENSU_AVR_RUN="${_avr_run:-}" \
-  ZENSU_AVR_ACCEPT_PARTIAL="${_avr_accept_partial:-0}" \
   ZENSU_AVR_ACCEPT_PARTIAL_IDS="${_avr_accept_partial_ids:-}" \
   ZENSU_AVR_HANDOFF_TICKET="${_avr_handoff_ticket:-}" \
   ZENSU_AVR_GATES_PASSED="${_avr_gates_passed:-0}" \
   ZENSU_AVR_FIX_ROUND_SPENT="${_avr_fix_round_spent:-0}" \
   ZENSU_AVR_REVIEW_DONE="${_avr_review_done:-0}" \
   ZENSU_AVR_ZERO_CHANGE_TICKET="${_avr_zero_change_ticket:-0}" \
-  ZENSU_AVR_PLAN="${_avr_plan:-}" \
   ZENSU_AVR_BASH="${_avr_bash:-bash}" \
   ZENSU_AVR_LABEL="$1" \
   ZENSU_AVR_MODE="$2" \
-    node -e 'require(process.env.ZENSU_AVR_LIB).main([process.env.ZENSU_AVR_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
+    node -e "$_ZENSU_AVR_MAIN_JS"
 }
 
 _zensu_autopilot_validate_option() {
@@ -519,6 +519,13 @@ _zensu_avr_work_tree() {
   return 1
 }
 
+_zensu_avr_module_path() {
+  local dir
+  dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)" || return 1
+  [ -n "$dir" ] || return 1
+  printf '%s/acceptance-verify-v1.js\n' "$dir"
+}
+
 _zensu_active_run_json() {
   command -v autopilot_read_active_strict >/dev/null 2>&1 \
     || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" 2>/dev/null \
@@ -527,7 +534,7 @@ _zensu_active_run_json() {
 }
 
 _zensu_run_bind() {
-  local label="$1" run_id="$2" session="$3" rc=0 run_json facts
+  local label="$1" run_id="$2" session="$3" rc=0 run_json facts lib exclusions
   _rb_json=""
   _rb_stage=""
   _rb_validate=""
@@ -568,20 +575,13 @@ _zensu_run_bind() {
       return 2
       ;;
   esac
-  facts="$(printf '%s' "$run_json" | ZENSU_RB_RUN_ID="$run_id" node -e '
-    let s;
-    try { s = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch (_) { process.exit(3); }
-    if (!s || typeof s !== "object" || Array.isArray(s) || typeof s.stage !== "string") process.exit(3);
-    if (s.runId !== process.env.ZENSU_RB_RUN_ID) process.exit(4);
-    if (s.stage === "DONE" || s.stage === "CANCELLED") process.exit(5);
-    const options = s.options && typeof s.options === "object" ? s.options : {};
-    const validate = options.validate === true ? "on" : options.validate === false ? "off" : "-";
-    const pr = s.evidence && s.evidence.pr && typeof s.evidence.pr.headSha === "string" && /^[0-9a-fA-F]{7,64}$/.test(s.evidence.pr.headSha) ? s.evidence.pr.headSha : "-";
-    const events = Array.isArray(s.events) ? s.events : [];
-    const visit = events.filter((event) => event && event.toStage === "VALIDATE" && event.fromStage !== "VALIDATE").length;
-    const update = s.tdd && typeof s.tdd === "object" && typeof s.tdd.headUpdateRequired === "boolean" ? String(s.tdd.headUpdateRequired) : "-";
-    process.stdout.write([s.stage, validate, pr, String(visit), update].join("\t"));
-  ' 2>/dev/null)"
+  lib="$(_zensu_avr_module_path)" || {
+    echo "$label: the acceptance module cannot be resolved" >&2
+    return 2
+  }
+  exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  facts="$(printf '%s' "$run_json" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_RUN_ID="$run_id" \
+    ZENSU_AVR_LABEL="$label" ZENSU_AVR_MODE=run-facts node -e "$_ZENSU_AVR_MAIN_JS" 2>/dev/null)"
   rc=$?
   case "$rc" in
     (0) ;;
@@ -610,16 +610,16 @@ _zensu_run_bind() {
 }
 
 _zensu_accept_partial_ids() {
-  local label="zensu-log.sh --chain-done" lib exclusions
+  local label="${3:-zensu-log.sh --chain-done}" lib exclusions
   command -v node >/dev/null 2>&1 || { echo "$label: node is required to read --accept-partial" >&2; return 2; }
-  lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js")" || {
+  lib="$(_zensu_avr_module_path)" || {
     echo "$label: the acceptance module cannot be resolved" >&2
     return 2
   }
   exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_ACCEPT_PARTIAL_IDS="${1:-}" \
-    ZENSU_AVR_ACCEPT_CONTEXT="${2:-standalone}" ZENSU_AVR_LABEL="$label" \
-    node -e 'require(process.env.ZENSU_AVR_LIB).main(["accept-ids"]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
+    ZENSU_AVR_ACCEPT_CONTEXT="${2:-standalone}" ZENSU_AVR_LABEL="$label" ZENSU_AVR_MODE=accept-ids \
+    node -e "$_ZENSU_AVR_MAIN_JS"
 }
 
 _zensu_plan_criteria_unjudged() {
@@ -650,8 +650,8 @@ _zensu_plan_criteria_gate() {
   exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_PLAN ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_BASH 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_PLAN="$native_plan" \
     ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" ZENSU_AVR_BASH="$bash_path" ZENSU_AVR_LABEL="$label" \
-    ZENSU_AVR_CRITERIA_ADVISORY="$advisory" \
-    node -e 'require(process.env.ZENSU_AVR_LIB).main(["plan-criteria"]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })' \
+    ZENSU_AVR_CRITERIA_ADVISORY="$advisory" ZENSU_AVR_MODE=plan-criteria \
+    node -e "$_ZENSU_AVR_MAIN_JS" \
     || rc=$?
   [ "$rc" -eq 0 ] && return 0
   case "$rc" in
@@ -726,7 +726,8 @@ _zensu_avr_ask() {
   ZENSU_AVR_CHAIN_INPUTS="${_avr_chain_inputs:-0}" \
   ZENSU_AVR_GATE_MODE="${2:-}" \
   ZENSU_AVR_CAUSE="$1" \
-    node -e 'require(process.env.ZENSU_AVR_LIB).main(["unjudged"]).then((code) => { process.exitCode = code; }, () => { process.exitCode = 2; })' 2>/dev/null
+  ZENSU_AVR_MODE=unjudged \
+    node -e "$_ZENSU_AVR_MAIN_JS" 2>/dev/null
 }
 
 _zensu_acceptance_gate_unjudged() {
@@ -774,8 +775,6 @@ _zensu_acceptance_gate() {
     return 0
   fi
   [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
-  _avr_gates_passed=0
-  [ "${chain_gate_rc:-1}" = "0" ] && _avr_gates_passed=1
   if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session"; then
     command -v zensu_acceptance_handoff_reset >/dev/null 2>&1 && zensu_acceptance_handoff_reset "$session"
     _zensu_acceptance_gate_unjudged "$session" "the acceptance transport could not be prepared" && return 0
@@ -922,14 +921,12 @@ _evr_work_tree=""
 _evr_work_dir=""
 _avr_work_tree=""
 _avr_run=""
-_avr_accept_partial=0
 _avr_accept_partial_ids=""
 _avr_handoff_ticket=""
 _avr_gates_passed=0
 _avr_fix_round_spent=0
 _avr_review_done=0
 _avr_zero_change_ticket=0
-_avr_plan=""
 _fsw_tree=""
 _fsw_fault=""
 
@@ -1807,6 +1804,7 @@ case "${1:-}" in
     apv_run=""
     apv_run_seen=false
     apv_partial_seen=false
+    apv_partial_raw=""
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -1816,7 +1814,12 @@ case "${1:-}" in
           ;;
         --accept-partial)
           [ "$apv_partial_seen" = false ] || { echo "$apv_label: duplicate --accept-partial" >&2; exit 2; }
-          apv_partial_seen=true; _avr_accept_partial=1; shift
+          case "${2:-}" in
+            (''|-*)
+              echo "$apv_label: --accept-partial takes the comma list of criterion ids the approved plan's ## Manual Acceptance table lists, such as AC-004,AC-005" >&2
+              exit 2 ;;
+          esac
+          apv_partial_seen=true; apv_partial_raw="$2"; shift 2
           ;;
         *) echo "$apv_label: unknown argument '$1'" >&2; exit 2 ;;
       esac
@@ -1855,6 +1858,10 @@ case "${1:-}" in
       exit 2
     fi
     apv_head="$(printf '%s' "$_rb_head" | tr 'ABCDEF' 'abcdef')"
+    _avr_accept_partial_ids=""
+    if [ "$apv_partial_seen" = true ]; then
+      _avr_accept_partial_ids="$(_zensu_accept_partial_ids "$apv_partial_raw" run "$apv_label")" || exit 2
+    fi
     _avr_run="$apv_run"
     _avr_escape=0
     [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
@@ -1863,7 +1870,7 @@ case "${1:-}" in
       echo "$apv_label: the record of autopilot run $apv_run could not be written to the temporary directory (${TMPDIR:-/tmp}), so autopilot run $apv_run stays at VALIDATE" >&2
       exit 2
     }
-    if [ "$_avr_escape" != "1" ] && ! _zensu_avr_work_tree "$apv_session" "{\"runId\":\"$apv_run\"}"; then
+    if ! _zensu_avr_work_tree "$apv_session" "{\"runId\":\"$apv_run\"}"; then
       printf '%s' "$_bwt_fault" > "$_avr_dir/work-tree-fault" || {
         echo "$apv_label: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance check did not run. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --autopilot-validate again." >&2
         exit 2
@@ -1876,18 +1883,28 @@ case "${1:-}" in
       exit "$apv_rc"
     fi
     apv_state="$(cat "$_avr_dir/verdict-state" 2>/dev/null)" || apv_state=""
+    apv_mode="$(cat "$_avr_dir/verdict-mode" 2>/dev/null)" || apv_mode=""
     case "$apv_state" in
-      (pass) apv_gate="" ;;
-      (escaped) apv_gate="ZENSU_ACCEPTANCE_GATE" ;;
-      (partial-accepted) apv_gate="acceptance-partial" ;;
+      (pass) apv_gates="" ;;
+      (escaped) apv_gates="ZENSU_ACCEPTANCE_GATE" ;;
+      (partial-accepted) apv_gates="acceptance-partial" ;;
       ('')
         echo "$apv_label: the acceptance verdict could not be read back, so autopilot run $apv_run stays at VALIDATE; run --autopilot-validate again" >&2
         exit 2
         ;;
-      (*) apv_gate="acceptance-advisory" ;;
+      (*)
+        if [ "$apv_mode" != "advisory" ]; then
+          echo "$apv_label: the acceptance verdict passed with the state $apv_state under a gate that is not advisory, which validates no run, so autopilot run $apv_run stays at VALIDATE; persist BLOCK with the code validation-unresolved and report this line" >&2
+          exit 2
+        fi
+        apv_gates="acceptance-advisory"
+        ;;
     esac
+    if [ "$(cat "$_avr_dir/verdict-plan-unapproved" 2>/dev/null)" = "1" ]; then
+      apv_gates="${apv_gates:+$apv_gates }acceptance-plan-unapproved"
+    fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-    if [ -n "$apv_gate" ]; then
+    for apv_gate in $apv_gates; do
       autopilot_apply_event "$apv_run" "validation-bypass:$apv_gate:$_rb_visit:$apv_head" BYPASS_RECORDED \
         "{\"gate\":\"$apv_gate\"}" "${CLAUDE_PROJECT_DIR:-.}" "$apv_session"
       apv_rc=$?
@@ -1895,7 +1912,7 @@ case "${1:-}" in
         echo "$apv_label: the $apv_gate bypass could not be recorded in the ledger of autopilot run $apv_run (status $apv_rc), so autopilot run $apv_run stays at VALIDATE" >&2
         exit 2
       fi
-    fi
+    done
     autopilot_apply_event "$apv_run" "validation-passed:$_rb_visit:$apv_head" VALIDATION_PASSED \
       "{\"headSha\":\"$apv_head\"}" "${CLAUDE_PROJECT_DIR:-.}" "$apv_session"
     apv_rc=$?
@@ -1903,7 +1920,12 @@ case "${1:-}" in
       echo "$apv_label: VALIDATION_PASSED could not be applied to autopilot run $apv_run (status $apv_rc), so autopilot run $apv_run stays at VALIDATE" >&2
       exit 2
     fi
-    echo "zensu autopilot: run $apv_run validated at the pull-request head ${apv_head:0:12}${apv_gate:+, with the $apv_gate bypass recorded in its ledger}"
+    case "$apv_gates" in
+      ('') apv_note="" ;;
+      (*' '*) apv_note=", with the $(printf '%s' "$apv_gates" | sed 's/ / and /g') bypasses recorded in its ledger" ;;
+      (*) apv_note=", with the $apv_gates bypass recorded in its ledger" ;;
+    esac
+    echo "zensu autopilot: run $apv_run validated at the pull-request head ${apv_head:0:12}${apv_note}"
     exit 0
     ;;
   --autopilot-event)
@@ -2328,7 +2350,7 @@ case "${1:-}" in
           [ "$seen_accept_partial" = false ] || { echo "zensu-log.sh $verb: duplicate --accept-partial" >&2; exit 2; }
           case "${2:-}" in
             (''|-*)
-              echo "zensu-log.sh $verb: --accept-partial takes the comma list of criterion ids the user accepted as partial, such as AC-004,AC-005; only --autopilot-validate takes it without a value" >&2
+              echo "zensu-log.sh $verb: --accept-partial takes the comma list of criterion ids the user accepted as partial, such as AC-004,AC-005" >&2
               exit 2 ;;
           esac
           seen_accept_partial=true; accept_partial_val="$2"; shift 2 ;;
@@ -3556,6 +3578,8 @@ case "${1:-}" in
                     chain_gate_rc=0
                     _zensu_terminal_edit_landing_gate "$session_val" || chain_gate_rc=1
                     _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
+                    _avr_gates_passed=0
+                    [ "$chain_gate_rc" -eq 0 ] && _avr_gates_passed=1
                     _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
                     [ "$chain_gate_rc" -eq 0 ] || exit 1
                     if [ "${_avg_state:-}" = "partial-accepted" ]; then

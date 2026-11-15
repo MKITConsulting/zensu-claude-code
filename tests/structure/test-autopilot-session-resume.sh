@@ -343,6 +343,19 @@ else
 fi
 
 evidence_event evidence-findings FINDINGS_CLEARED "{\"headSha\":\"$EVIDENCE_HEAD\",\"unresolvedCount\":0}"
+bind_session "$EVIDENCE_OWNER_RAW" "$EVIDENCE_PROJECT" || EVIDENCE_READY=false
+OUT_VALIDATE="$(invoke "$EVIDENCE_PROJECT" "{\"source\":\"compact\",\"session_id\":\"$EVIDENCE_OWNER_RAW\"}")"
+EVIDENCE_COPY=".zensu/state/autopilot-approved-plan-1111111111111111111111111111111111111111111111111111111111111111.md"
+if [ "$EVIDENCE_READY" = true ] \
+  && printf '%s' "$OUT_VALIDATE" | valid_session_context 'ACTIVE_RUN' "$EVIDENCE_RUN" \
+  && printf '%s' "$OUT_VALIDATE" | session_context_contains 'stage=VALIDATE nextActionCode=VALIDATE_FEATURE' \
+  && printf '%s' "$OUT_VALIDATE" | session_context_contains 'Record every acceptance criterion observed on the pull-request head, then run zensu-log.sh --autopilot-validate --run with the run id; never send VALIDATION_PASSED yourself.' \
+  && printf '%s' "$OUT_VALIDATE" | session_context_contains "ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE runId=$EVIDENCE_RUN copy=$EVIDENCE_COPY reason=approved-plan-missing." \
+  && printf '%s' "$OUT_VALIDATE" | session_context_contains 'so zensu-log.sh --autopilot-validate will refuse at VALIDATE. Report this to the user now and leave the decision to the user.'; then
+  check "R8e VALIDATE recovery names the validate verb and reports a missing approved plan copy" PASS
+else
+  check "R8e VALIDATE recovery names the validate verb and reports a missing approved plan copy" FAIL
+fi
 evidence_event evidence-validation VALIDATION_PASSED "{\"headSha\":\"$EVIDENCE_HEAD\"}"
 evidence_event evidence-delivery DELIVERY_COMPLETE "{\"headSha\":\"$EVIDENCE_HEAD\"}"
 bind_session "$EVIDENCE_OWNER_RAW" "$EVIDENCE_PROJECT" || EVIDENCE_READY=false
@@ -396,6 +409,50 @@ if [ -z "$OUT_CANCELLED_HISTORY" ]; then
   check "R8d terminal history without a pointer remains absent-compatible" PASS
 else
   check "R8d terminal-only history does not create resume ownership" FAIL
+fi
+
+PLAN_COPY_PROJECT="$TMP/plan-copy-project"; mkdir -p "$PLAN_COPY_PROJECT"
+PLAN_COPY_RUN="resume_plan_copy_run_01"
+PLAN_COPY_OWNER_RAW="resume_plan_copy_owner_01"
+PLAN_COPY_OWNER="$(node "$CORE" session-key "$PLAN_COPY_OWNER_RAW")"
+PLAN_COPY_READY=true
+autopilot_begin_run "$PLAN_COPY_RUN" "$PLAN_COPY_OWNER" "$PLAN_COPY_PROJECT" >/dev/null 2>&1 || PLAN_COPY_READY=false
+PLAN_COPY_SHA="$(PROJECT_VALUE="$PLAN_COPY_PROJECT" LIB_DIR="$PLUGIN_DIR/hooks/lib" node -e '
+  const path = require("path");
+  const crypto = require("crypto");
+  const store = require(path.join(process.env.LIB_DIR, "approved-plan-v1.js"));
+  const bytes = Buffer.from("# Plan\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The resume hook reads the stored copy. | spec |\n");
+  const sha = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (!store.storeApprovedPlan(process.env.PROJECT_VALUE, sha, bytes).ok) process.exit(1);
+  process.stdout.write(sha);
+')" || PLAN_COPY_READY=false
+autopilot_apply_event "$PLAN_COPY_RUN" plan-copy-plan PLAN_APPROVED "{\"approvedPlanSha256\":\"$PLAN_COPY_SHA\"}" \
+  "$PLAN_COPY_PROJECT" >/dev/null 2>&1 || PLAN_COPY_READY=false
+bind_session "$PLAN_COPY_OWNER_RAW" "$PLAN_COPY_PROJECT" || PLAN_COPY_READY=false
+OUT_PLAN_COPY="$(invoke "$PLAN_COPY_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$PLAN_COPY_OWNER_RAW\"}")"
+printf 'tampered\n' > "$PLAN_COPY_PROJECT/.zensu/state/autopilot-approved-plan-$PLAN_COPY_SHA.md" || PLAN_COPY_READY=false
+OUT_PLAN_TAMPERED="$(invoke "$PLAN_COPY_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$PLAN_COPY_OWNER_RAW\"}")"
+NO_VALIDATE_PROJECT="$TMP/no-validate-project"; mkdir -p "$NO_VALIDATE_PROJECT"
+NO_VALIDATE_RUN="resume_no_validate_run_01"
+NO_VALIDATE_OWNER_RAW="resume_no_validate_owner_01"
+NO_VALIDATE_OWNER="$(node "$CORE" session-key "$NO_VALIDATE_OWNER_RAW")"
+autopilot_begin_run "$NO_VALIDATE_RUN" "$NO_VALIDATE_OWNER" "$NO_VALIDATE_PROJECT" false false >/dev/null 2>&1 \
+  || PLAN_COPY_READY=false
+autopilot_apply_event "$NO_VALIDATE_RUN" no-validate-plan PLAN_APPROVED \
+  '{"approvedPlanSha256":"4444444444444444444444444444444444444444444444444444444444444444"}' \
+  "$NO_VALIDATE_PROJECT" >/dev/null 2>&1 || PLAN_COPY_READY=false
+bind_session "$NO_VALIDATE_OWNER_RAW" "$NO_VALIDATE_PROJECT" || PLAN_COPY_READY=false
+OUT_NO_VALIDATE="$(invoke "$NO_VALIDATE_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$NO_VALIDATE_OWNER_RAW\"}")"
+if [ "$PLAN_COPY_READY" = true ] \
+  && printf '%s' "$OUT_PLAN_COPY" | valid_session_context 'ACTIVE_RUN' "$PLAN_COPY_RUN" \
+  && ! printf '%s' "$OUT_PLAN_COPY" | grep -qF 'APPROVED_PLAN_COPY_UNAVAILABLE' \
+  && printf '%s' "$OUT_PLAN_TAMPERED" | session_context_contains "APPROVED_PLAN_COPY_UNAVAILABLE runId=$PLAN_COPY_RUN copy=.zensu/state/autopilot-approved-plan-$PLAN_COPY_SHA.md reason=approved-plan-digest-mismatch." \
+  && printf '%s' "$OUT_NO_VALIDATE" | valid_session_context 'ACTIVE_RUN' "$NO_VALIDATE_RUN" \
+  && ! printf '%s' "$OUT_NO_VALIDATE" | grep -qF 'APPROVED_PLAN_COPY_UNAVAILABLE' \
+  && ! printf '%s' "$OUT_START" | grep -qF 'APPROVED_PLAN_COPY_UNAVAILABLE'; then
+  check "R8f the plan-copy report needs a validating run with an approved digest and an unreadable copy" PASS
+else
+  check "R8f the plan-copy report needs a validating run with an approved digest and an unreadable copy" FAIL
 fi
 
 OUT_AGENT="$(invoke "$PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER_RAW\",\"agent_id\":\"child-1\"}")"

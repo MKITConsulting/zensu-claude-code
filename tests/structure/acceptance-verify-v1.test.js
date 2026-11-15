@@ -33,6 +33,12 @@ function planText(rows) {
   return `# Plan\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n${body}\n\n## Steps\n`;
 }
 
+function manualTable(ids) {
+  if (ids.length === 0) return '';
+  const rows = ids.map((id) => `| ${id} | Run the check in the staging app | credentials | planning answer, 2026-11-15 |`).join('\n');
+  return `\n## Manual Acceptance\n| Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |\n|-----------|------------------------------------|----------------------------------------|---------|\n${rows}\n`;
+}
+
 function project(options = {}) {
   const root = tempDir('repo');
   if (options.git !== false) {
@@ -45,11 +51,11 @@ function project(options = {}) {
   fs.mkdirSync(path.join(root, '.zensu', 'plans'), { recursive: true });
   fs.mkdirSync(path.join(root, '.zensu', 'state'), { recursive: true });
   fs.writeFileSync(path.join(root, '.zensu', 'logs', `${STEM}.log`), 'BUILD STARTED\n');
-  fs.writeFileSync(path.join(root, '.zensu', 'plans', `${STEM}.md`), planText(options.rows || [
+  fs.writeFileSync(path.join(root, '.zensu', 'plans', `${STEM}.md`), `${planText(options.rows || [
     ['AC-001', 'The dashboard lists every project'],
     ['AC-002', 'The export button downloads a CSV'],
     ['FR-001', 'Projects are sorted by name'],
-  ]));
+  ])}${manualTable(options.manual || ['AC-001', 'AC-002'])}`);
   const receiptPath = path.join(root, '.zensu', 'state', 'edit-landing-test.json');
   if (options.receipt !== false) {
     fs.writeFileSync(receiptPath, JSON.stringify({ schema: 'edit-landing-v2', session: 'x', log: `.zensu/logs/${STEM}.log`, clean: true }));
@@ -867,9 +873,29 @@ test('--accept-partial closes a standalone chain only for exactly the open parti
   assert.match(result.lines[0], /^ACCEPTANCE — incomplete \| 2\/2 acceptance criteria pass on the current tree [0-9a-f]{12}; --accept-partial names AC-002, which is not open: every criterion passes, so run --chain-done again without --accept-partial \| plan: /);
   assert.equal(result.handoff, false);
   assert.equal(gate(allPass).state, 'pass');
-  for (const f of [fixture, two, missing, stale, allPass]) {
+  const unlisted = project({ manual: ['AC-001'] });
+  assert.equal(attest(unlisted, 'AC-001').code, 0);
+  assert.equal(attest(unlisted, 'AC-002', 'partial').code, 0);
+  result = gate(unlisted, { acceptPartialIds: 'AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.equal(result.passes, false);
+  assert.match(result.lines[0], /; --accept-partial takes consent from the plan's ## Manual Acceptance table, which has no row for AC-002; write its row as the plugin's skills\/verify-feature\/rules\/acceptance-consent\.md describes, then close again \| plan: .* \| gate: required \| accept: AC-002 could not be observed in this environment; /);
+  for (const f of [fixture, two, missing, stale, allPass, unlisted]) {
     for (const line of gate(f, { acceptPartialIds: 'AC-001,AC-002' }).lines) assert.doesNotMatch(line, /ZENSU_/);
   }
+});
+
+test('the Manual Acceptance ids come from the first table under its heading, outside code fences', () => {
+  const ids = (body) => av.manualAcceptanceIds(Buffer.from(body, 'utf8'));
+  const table = (rows) => `| Criterion | Check | Why | Consent |\n|---|---|---|---|\n${rows}\n`;
+  assert.deepEqual(ids(`# Plan\n\n## Manual Acceptance\n(Optional note.)\n\n${table('| AC-002 | check | credentials | planning |\n| \`AC-001\` | check | account | planning |\n| {AC-###} | x | y | z |\n| FR-001 | x | y | z |\n| AC-002 | again | y | z |')}`), ['AC-001', 'AC-002']);
+  assert.deepEqual(ids('# Plan\n\n```\n## Manual Acceptance\n| Criterion |\n|---|\n| AC-001 |\n```\n'), []);
+  assert.deepEqual(ids(`## Manual Acceptance\n${table('| AC-001 | a | b | c |')}\nText between tables.\n\n${table('| AC-002 | a | b | c |')}`), ['AC-001']);
+  assert.deepEqual(ids(`## Manual Acceptance\n\n## Steps\n${table('| AC-001 | a | b | c |')}`), []);
+  assert.deepEqual(ids(`## Requirements\n${table('| AC-001 | a | b | c |')}`), []);
+  assert.deepEqual(ids(`## Manual Acceptance\r\n${table('| AC-003 | a | b | c |').replace(/\n/g, '\r\n')}`), ['AC-003']);
+  assert.deepEqual(ids(`\`\`\`\n## Manual Acceptance\n\`\`\`\n## Manual Acceptance\n${table('| AC-004 | a | b | c |')}`), ['AC-004']);
+  assert.deepEqual(av.manualAcceptanceIds(null), []);
 });
 
 test('only user remedies hand the chain off, and a fix remedy only once the fix round is spent', () => {
@@ -927,6 +953,13 @@ test('a refusal that waits only on the user writes a hand-off bound to the ticke
   assert.equal(checked.code, 1);
   assert.match(checked.reason, /the plan changed since the terminus refused/);
   fs.writeFileSync(planPath, planBytes);
+  assert.equal(av.handoffStatus(base(fixture, { handoffTicket: ticket })).code, 0);
+  const secondName = path.join(tempDir('plan-link'), 'second-name.md');
+  fs.linkSync(planPath, secondName);
+  checked = av.handoffStatus(base(fixture, { handoffTicket: ticket }));
+  assert.equal(checked.code, 1);
+  assert.equal(checked.reason, `the plan .zensu/plans/${STEM}.md could not be read`);
+  fs.unlinkSync(secondName);
   assert.equal(av.handoffStatus(base(fixture, { handoffTicket: ticket })).code, 0);
   assert.equal(attest(fixture, 'AC-002', 'partial').code, 0);
   checked = av.handoffStatus(base(fixture, { handoffTicket: ticket }));
@@ -1051,6 +1084,17 @@ test('the CLI checks accept ids, answers the hand-off and judges the plan criter
   let run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-005,AC-004' });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout, 'AC-004,AC-005\n');
+  const facts = (input, runId = 'run_facts_01') => childProcess.spawnSync(process.execPath, [LIB, 'run-facts'], { env: { ...process.env, ZENSU_AVR_RUN_ID: runId }, input, encoding: 'utf8' });
+  const live = { runId: 'run_facts_01', stage: 'VALIDATE', options: { validate: true }, evidence: { pr: { headSha: 'abcdef0' } }, events: [{ fromStage: 'FIX_FINDINGS', toStage: 'VALIDATE' }, { fromStage: 'VALIDATE', toStage: 'VALIDATE' }], tdd: { headUpdateRequired: false } };
+  run = facts(JSON.stringify(live));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, 'VALIDATE\ton\tabcdef0\t1\tfalse');
+  run = facts(JSON.stringify({ ...live, options: {}, evidence: { pr: { headSha: 'a'.repeat(65) } }, tdd: null }));
+  assert.equal(run.stdout, 'VALIDATE\t-\t-\t1\t-');
+  assert.equal(facts(JSON.stringify(live), 'run_other_02').status, 4);
+  assert.equal(facts(JSON.stringify({ ...live, stage: 'CANCELLED' })).status, 5);
+  assert.equal(facts('not json').status, 3);
+  assert.equal(facts(JSON.stringify([live])).status, 3);
   run = cli('accept-ids', { ZENSU_AVR_ACCEPT_PARTIAL_IDS: '' });
   assert.equal(run.status, 2);
   assert.match(run.stderr, /^zensu-log\.sh --chain-done: --accept-partial needs the ids of the criteria the user accepted as partial/);
@@ -1131,7 +1175,7 @@ function runFixture(options = {}) {
   const bytes = Buffer.from(`${planText(options.rows || [
     ['AC-001', 'The dashboard lists every project'],
     ['AC-002', 'The export button downloads a CSV'],
-  ])}\n<!-- zensu-autopilot:${RUN_ID} -->\n`, 'utf8');
+  ])}${manualTable(options.manual || ['AC-001', 'AC-002'])}\n<!-- zensu-autopilot:${RUN_ID} -->\n`, 'utf8');
   const sha = sha256(bytes);
   if (options.store !== false) {
     const stored = approvedPlan.storeApprovedPlan(fixture.root, sha, bytes);
@@ -1182,6 +1226,8 @@ test('run mode reads the criteria from the approved plan the run stored and bind
   assert.equal(av.validateRecord(recorded.record), null);
   assert.equal(av.validateRecord({ ...recorded.record, plan: `.zensu/plans/autopilot-approved-plan-${fixture.sha}.md` }), 'malformed plan');
   assert.equal(av.validateRecord({ ...recorded.record, stem: 'autopilot-approved-plan-abc', plan: '.zensu/state/autopilot-approved-plan-abc.md' }), 'malformed plan');
+  assert.equal(av.validateRecord({ ...recorded.record, stem: 'autopilot-approved-plan-abc', plan: '.zensu/plans/autopilot-approved-plan-abc.md' }), null);
+  assert.equal(av.validateRecord({ ...recorded.record, stem: `autopilot-approved-plan-${fixture.sha}0`, plan: `.zensu/plans/autopilot-approved-plan-${fixture.sha}0.md` }), null);
   assert.equal(av.runChain(runBase(fixture)).planRel, copy);
   assert.match(runAttest(fixture, 'AC-009').error, /AC-009 is not an acceptance criterion of \.zensu\/state\/autopilot-approved-plan-[0-9a-f]{64}\.md \(active: AC-001, AC-002\)/);
   const both = runAttest(fixture, 'AC-001', 'pass', { logPath: fixture.logPath });
@@ -1211,6 +1257,20 @@ test('run mode refuses a run without a usable approved plan, names the cause and
   assert.match(runAttest(fixture, 'AC-001', 'pass', { run: { ...fixture.run, approvedPlanSha256: null } }).error, /records no approved plan/);
 });
 
+test('run mode keeps tracked and untracked .zensu files out of the clean-tree check when the project ignores only .zensu/state', () => {
+  const fixture = runFixture();
+  fs.writeFileSync(path.join(fixture.root, '.gitignore'), '.zensu/state/\n');
+  sh(fixture.root, 'git add .gitignore .zensu/logs && git commit -q -m "track the run logs"');
+  const run = withPrHead(fixture.run, sh(fixture.root, 'git rev-parse HEAD').trim());
+  assert.equal(runAttest(fixture, 'AC-001', 'pass', { run }).code, 0);
+  assert.equal(runAttest(fixture, 'AC-002', 'pass', { run }).code, 0);
+  fs.appendFileSync(path.join(fixture.root, '.zensu', 'logs', `${STEM}.log`), 'a later line of the tracked run log\n');
+  assert.match(sh(fixture.root, 'git status --porcelain=v1 --untracked-files=all').toString(), / M \.zensu\/logs\/.*\n\?\? \.zensu\/plans\//);
+  const gate = runGate(fixture, { run });
+  assert.equal(gate.state, 'pass', gate.lines.join('\n'));
+  assert.equal(gate.passes, true);
+});
+
 test('the run-mode verdict passes only at the pull-request head on a clean tree with every criterion passing', () => {
   const fixture = runFixture();
   assert.equal(runGate(fixture).state, 'incomplete');
@@ -1233,6 +1293,11 @@ test('the run-mode verdict passes only at the pull-request head on a clean tree 
   sh(fixture.root, `git checkout -q ${fixture.head}`);
   assert.equal(runGate(fixture).state, 'pass');
   assert.match(runGate(fixture, { run: withPrHead(fixture.run, 'f'.repeat(40)) }).lines[0], /is not a commit in the work tree/);
+  assert.match(result.lines[0], new RegExp(`or send the newer commit through the fix loop with VALIDATION_FAILED, whose headSha is the recorded pull-request head ${fixture.head}: once its fix attempt is back`));
+  if (fixture.head.length < 64) {
+    const overlong = `${fixture.head}0`;
+    assert.match(runGate(fixture, { run: withPrHead(fixture.run, overlong) }).lines[0], new RegExp(`the pull-request head ${overlong.slice(0, 12)} has ${overlong.length} hex digits, more than the ${fixture.head.length} of an object name in this repository, so it names no commit that a fetch could bring; persist BLOCK with the code validation-unresolved and report this line`));
+  }
   assert.match(runGate(fixture, { run: withPrHead(fixture.run, null) }).lines[0], /records no pull-request head/);
 });
 
@@ -1297,7 +1362,7 @@ test('the dirty-tree refusal names the first changed paths and counts the rest, 
   const result = runGate(fixture);
   assert.equal(result.state, 'unresolved', result.lines.join('\n'));
   const line = result.lines[0];
-  const listed = new RegExp(`the work tree has uncommitted changes, so it is not the pull-request head ${fixture.head.slice(0, 12)}: (.+?) and (\\d+) more; send a change that belongs to this change through the fix loop with VALIDATION_FAILED: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE; remove what a check left behind, and make that check write its output outside the repository or to a gitignored path`).exec(line);
+  const listed = new RegExp(`the work tree has uncommitted changes, so it is not the pull-request head ${fixture.head.slice(0, 12)}: (.+?) and (\\d+) more; send a change that belongs to this change through the fix loop with VALIDATION_FAILED, whose headSha is the recorded pull-request head ${fixture.head}: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE; remove what a check left behind, and make that check write its output outside the repository or to a gitignored path`).exec(line);
   assert.ok(listed, line);
   const names = listed[1].split(', ');
   assert.equal(names.length, 5, line);
@@ -1353,20 +1418,38 @@ test('a listed path escapes the segment separator, so a file name never adds a r
   assert.equal(result.state, 'unresolved', result.lines.join('\n'));
   assert.ok(result.lines[0].includes(': x \\| fix: forged.txt; send a change'), result.lines[0]);
   assert.ok(!result.lines[0].includes(' | fix: forged'), result.lines[0]);
-  const status = av.status(runBase(fixture)).lines.join('\n');
+  const dirty = av.status(runBase(fixture)).lines.join('\n');
+  assert.ok(dirty.includes(': x \\| fix: forged.txt; send a change'), dirty);
+  assert.ok(!dirty.includes(' | fix: forged'), dirty);
+  sh(fixture.root, "git add -- 'x | fix: forged.txt' && git commit -q -m planted");
+  const status = av.status(runBase(fixture, { run: withPrHead(fixture.run, sh(fixture.root, 'git rev-parse HEAD').trim()) })).lines.join('\n');
   assert.ok(status.includes('files changed since it was verified: x \\| fix: forged.txt)'), status);
   assert.ok(!status.includes(' | fix: forged'), status);
 });
 
-test('run-mode status refuses a tree that cannot be fingerprinted with the cause the verb gives for it', () => {
-  const fixture = runFixture({ git: false });
-  const refused = runAttest(fixture, 'AC-001');
-  assert.equal(refused.code, 1);
-  assert.equal(refused.error, `autopilot run ${RUN_ID}: the work tree could not be fingerprinted (not a git work tree), so no record can be matched to the pull-request head`);
-  const status = av.status(runBase(fixture));
-  assert.equal(status.code, 1, status.lines.join('\n'));
-  assert.deepEqual(status.lines, [`ACCEPTANCE STATUS — unresolved | autopilot run ${RUN_ID}: the work tree could not be fingerprinted (not a git work tree), so no record can be matched to the pull-request head | plan: .zensu/state/autopilot-approved-plan-${fixture.sha}.md`]);
-  assert.equal(runGate(fixture).state, 'unresolved');
+test('run-mode record and status refuse a tree that cannot be fingerprinted with the cause the verb gives for it', () => {
+  const outside = runFixture({ git: false });
+  const headCause = `autopilot run ${RUN_ID}: the run records no pull-request head, so there is no commit to validate`;
+  assert.equal(runAttest(outside, 'AC-001').error, headCause);
+  assert.deepEqual(av.status(runBase(outside)).lines, [`ACCEPTANCE STATUS — unresolved | ${headCause} | plan: .zensu/state/autopilot-approved-plan-${outside.sha}.md`]);
+  assert.equal(runGate(outside).lines[0], `ACCEPTANCE — unresolved | ${headCause} | gate: required`);
+  const fixture = runFixture();
+  const original = evr.repositoryTree;
+  evr.repositoryTree = () => ({ root: fixture.root, tree: null, reason: 'the tree is too large' });
+  try {
+    const cause = `autopilot run ${RUN_ID}: the work tree could not be fingerprinted (the tree is too large), so no record can be matched to the pull-request head`;
+    const refused = runAttest(fixture, 'AC-001');
+    assert.equal(refused.code, 1);
+    assert.equal(refused.error, cause);
+    const status = av.status(runBase(fixture));
+    assert.equal(status.code, 1, status.lines.join('\n'));
+    assert.deepEqual(status.lines, [`ACCEPTANCE STATUS — unresolved | ${cause} | plan: .zensu/state/autopilot-approved-plan-${fixture.sha}.md`]);
+    const gated = runGate(fixture);
+    assert.equal(gated.state, 'unresolved');
+    assert.ok(gated.lines[0].includes(cause), gated.lines[0]);
+  } finally {
+    evr.repositoryTree = original;
+  }
   const standalone = project({ git: false });
   assert.equal(attest(standalone, 'AC-001').code, 0);
   assert.equal(attest(standalone, 'AC-002').code, 0);
@@ -1404,30 +1487,70 @@ test('run mode reads the criteria from the bytes whose digest it checked, so a c
   }
 });
 
-test('--accept-partial passes only when every criterion that does not pass is partial', () => {
-  const fixture = runFixture();
+test('--accept-partial passes in run mode only for the exact open partial ids the approved plan lists under ## Manual Acceptance', () => {
+  const fixture = runFixture({ manual: ['AC-002'] });
   assert.equal(runAttest(fixture, 'AC-001').code, 0);
   assert.equal(runAttest(fixture, 'AC-002', 'partial').code, 0);
   let result = runGate(fixture);
   assert.equal(result.state, 'incomplete');
   assert.match(result.lines[0], /AC-002 partial/);
-  assert.match(result.lines[0], new RegExp(`\\| run: drive each criterion that does not pass again on this tree and record it with zensu-log\\.sh --acceptance-record --run ${RUN_ID}`));
-  assert.match(result.lines[0], new RegExp(`\\| accept: .*zensu-log\\.sh --autopilot-validate --run ${RUN_ID} --accept-partial`));
+  assert.doesNotMatch(result.lines[0], /\| run: /);
+  assert.match(result.lines[0], new RegExp(`\\| accept: AC-002 could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one, so zensu-log\\.sh --autopilot-validate --run ${RUN_ID} --accept-partial AC-002 records the gap in the run's ledger and validates the run$`));
   assert.doesNotMatch(result.lines[0], /verify-feature/);
-  result = runGate(fixture, { acceptPartial: true });
-  assert.equal(result.state, 'partial-accepted');
+  result = runGate(fixture, { acceptPartialIds: 'AC-002' });
+  assert.equal(result.state, 'partial-accepted', result.lines.join('\n'));
   assert.equal(result.passes, true);
   assert.match(result.lines[0], new RegExp(`^ACCEPTANCE — partial-accepted \\| autopilot run ${RUN_ID}: 1/2 acceptance criteria pass on the pull-request head [0-9a-f]{12}; accepted as partial: AC-002 \\| plan: `));
+  assert.match(result.lines[1], /^ACCEPTANCE — accepted as partial: AC-002 partial \| browser attested \| /);
   assert.ok(av.PASSING_STATES.includes('partial-accepted'));
-  assert.equal(runAttest(fixture, 'AC-002', 'fail').code, 0);
-  result = runGate(fixture, { acceptPartial: true });
+  result = runGate(fixture, { acceptPartialIds: 'AC-001,AC-002' });
   assert.equal(result.state, 'incomplete');
-  assert.match(result.lines[0], /--accept-partial covers only partial criteria/);
+  assert.match(result.lines[0], /--accept-partial names AC-001, which is not open/);
+  assert.equal(runAttest(fixture, 'AC-002', 'fail').code, 0);
+  result = runGate(fixture, { acceptPartialIds: 'AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /--accept-partial covers only partial criteria, not AC-002 fail/);
   assert.match(result.lines[0], /\| fix: .*VALIDATION_FAILED/);
   assert.doesNotMatch(result.lines[0], /\| accept:/);
+  const unlisted = runFixture({ manual: ['AC-001'] });
+  assert.equal(runAttest(unlisted, 'AC-001').code, 0);
+  assert.equal(runAttest(unlisted, 'AC-002', 'partial').code, 0);
+  result = runGate(unlisted);
+  assert.match(result.lines[0], /\| consent: AC-002 could not be observed in this environment, and the approved plan's ## Manual Acceptance table has no row for AC-002, so no consent covers it; persist BLOCK with the code validation-unresolved and report this line$/);
+  assert.doesNotMatch(result.lines[0], /\| accept:/);
+  result = runGate(unlisted, { acceptPartialIds: 'AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.equal(result.passes, false);
+  assert.match(result.lines[0], /; --accept-partial takes consent from the approved plan's ## Manual Acceptance table, which has no row for AC-002, so no consent covers it \| plan: /);
+  const allPass = runFixture();
+  assert.equal(runAttest(allPass, 'AC-001').code, 0);
+  assert.equal(runAttest(allPass, 'AC-002').code, 0);
+  result = runGate(allPass, { acceptPartialIds: 'AC-002' });
+  assert.equal(result.state, 'incomplete');
+  assert.match(result.lines[0], /--accept-partial names AC-002, which is not open: every criterion passes, so validate again without --accept-partial/);
   const fresh = runFixture();
   assert.equal(runAttest(fresh, 'AC-001', 'partial').code, 0);
-  assert.equal(runGate(fresh, { acceptPartial: true }).state, 'incomplete');
+  assert.equal(runGate(fresh, { acceptPartialIds: 'AC-001' }).state, 'incomplete');
+});
+
+test('run-mode records and status check HEAD against the pull-request head and the tree for changes before anything counts', () => {
+  const fixture = runFixture();
+  fs.writeFileSync(path.join(fixture.root, 'a.txt'), 'dirty\n');
+  const dirtyRecord = runAttest(fixture, 'AC-001');
+  assert.equal(dirtyRecord.code, 1);
+  assert.match(dirtyRecord.error, new RegExp(`^autopilot run ${RUN_ID}: the work tree has uncommitted changes, so it is not the pull-request head [0-9a-f]{12}: a\\.txt; `));
+  const dirtyStatus = av.status(runBase(fixture));
+  assert.equal(dirtyStatus.code, 1);
+  assert.match(dirtyStatus.lines[dirtyStatus.lines.length - 1], new RegExp(`^ACCEPTANCE STATUS — unresolved \\| autopilot run ${RUN_ID}: the work tree has uncommitted changes`));
+  fs.writeFileSync(path.join(fixture.root, 'a.txt'), 'one\n');
+  const moved = withPrHead(fixture.run, 'b'.repeat(40));
+  const movedRecord = runAttest(fixture, 'AC-001', 'pass', { run: moved });
+  assert.equal(movedRecord.code, 1);
+  assert.match(movedRecord.error, /the pull-request head bbbbbbbbbbbb is not a commit in the work tree/);
+  assert.equal(av.status(runBase(fixture, { run: moved })).code, 1);
+  assert.equal(runAttest(fixture, 'AC-001').code, 0);
+  assert.equal(runAttest(fixture, 'AC-002').code, 0);
+  assert.equal(av.status(runBase(fixture)).code, 0);
 });
 
 test('a run outside git is unresolved in run mode, never a tree-unverified pass', () => {
@@ -1440,7 +1563,7 @@ test('a run outside git is unresolved in run mode, never a tree-unverified pass'
   assert.doesNotMatch(result.lines.join('\n'), /pass-tree-unverified/);
 });
 
-test('the escape and the advisory gate keep their meaning in run mode', () => {
+test('the escape and the advisory gate keep their meaning in run mode, and neither waives the head binding', () => {
   const fixture = runFixture({ store: false });
   const escaped = runGate(fixture, { escape: true });
   assert.equal(escaped.state, 'escaped');
@@ -1449,7 +1572,24 @@ test('the escape and the advisory gate keep their meaning in run mode', () => {
   const advisory = runGate(fixture, { gateMode: 'advisory' });
   assert.equal(advisory.state, 'unresolved');
   assert.equal(advisory.passes, true);
+  assert.equal(advisory.blocking, false);
   assert.match(advisory.lines[0], /^ACCEPTANCE — unresolved \(advisory, not blocking\) \|/);
+  const moved = withPrHead(fixture.run, 'b'.repeat(40));
+  for (const overrides of [{ escape: true, run: moved }, { gateMode: 'advisory', run: moved }]) {
+    const refused = runGate(fixture, overrides);
+    assert.equal(refused.state, 'unresolved');
+    assert.equal(refused.passes, false);
+    assert.equal(refused.blocking, true);
+    assert.match(refused.lines[0], new RegExp(`^ACCEPTANCE — unresolved \\| autopilot run ${RUN_ID}: the pull-request head bbbbbbbbbbbb is not a commit in the work tree`));
+  }
+  fs.writeFileSync(path.join(fixture.root, 'a.txt'), 'dirty\n');
+  for (const overrides of [{ escape: true }, { gateMode: 'advisory' }]) {
+    const refused = runGate(fixture, overrides);
+    assert.equal(refused.state, 'unresolved');
+    assert.equal(refused.passes, false);
+    assert.doesNotMatch(refused.lines[0], /advisory, not blocking/);
+    assert.match(refused.lines[0], /the work tree has uncommitted changes, so it is not the pull-request head [0-9a-f]{12}: a\.txt; /);
+  }
 });
 
 test('a plan without an active criterion is a no-criteria refusal in run mode with its own remedy', () => {
@@ -1485,7 +1625,7 @@ test('a plan whose code fence never closes does not parse by path or by bytes, s
   const refused = runAttest(run, 'AC-001', 'pass', { run: fencedRun });
   assert.equal(refused.code, 1);
   assert.match(refused.error, new RegExp(`^\\.zensu/state/autopilot-approved-plan-${sha256(fenced)}\\.md: .*unterminated code fence`));
-  assert.doesNotMatch(refused.error, /zensu-acceptance-plan-/);
+  assert.doesNotMatch(refused.error, /zensu-plan-criteria-/);
   const runStatus = av.status(runBase(run, { run: fencedRun }));
   assert.equal(runStatus.code, 1, runStatus.lines.join('\n'));
   assert.match(runStatus.lines[runStatus.lines.length - 1], /^ACCEPTANCE STATUS — unresolved \|/);
@@ -1511,12 +1651,22 @@ test('a work-order run reads .zensu/plans/<order>.md and checks its digest only 
   assert.match(first.disclosures.join('\n'), new RegExp(`^ACCEPTANCE PLAN UNAPPROVED — work order ${ORDER_ID} asks for no plan approval`));
   const unapprovedGate = runGate(fixture, { run: unapproved });
   assert.equal(unapprovedGate.state, 'pass', unapprovedGate.lines.join('\n'));
+  assert.equal(unapprovedGate.planUnapproved, true);
   assert.match(unapprovedGate.lines.join('\n'), /ACCEPTANCE PLAN UNAPPROVED/);
+  assert.equal(runAttest(fixture, 'AC-001', 'partial', { run: unapproved }).code, 0);
+  const unconsented = runGate(fixture, { run: unapproved });
+  assert.match(unconsented.lines.join('\n'), new RegExp(`\\| consent: AC-001 could not be observed in this environment, and the criteria of autopilot run ${RUN_ID} come from a work-order plan no person approved, so no consent covers them; persist BLOCK with the code validation-unresolved and report this line$`, 'm'));
+  const refusedConsent = runGate(fixture, { run: unapproved, acceptPartialIds: 'AC-001' });
+  assert.equal(refusedConsent.state, 'incomplete');
+  assert.match(refusedConsent.lines.join('\n'), /--accept-partial takes consent only from a plan a person approved, and this work-order plan was not approved/);
+  assert.equal(runAttest(fixture, 'AC-001', 'pass', { run: unapproved }).code, 0);
   const approved = { ...unapproved, approvedPlanSha256: sha256(planBytes) };
   const second = runAttest(fixture, 'AC-001', 'pass', { run: approved });
   assert.equal(second.code, 0, second.error);
   assert.deepEqual(second.disclosures, []);
-  assert.equal(runGate(fixture, { run: approved }).state, 'pass');
+  const approvedGate = runGate(fixture, { run: approved });
+  assert.equal(approvedGate.state, 'pass');
+  assert.equal(approvedGate.planUnapproved, false);
   fs.appendFileSync(planPath, '| AC-002 | Added after the approval | spec |\n');
   assert.match(runAttest(fixture, 'AC-001', 'pass', { run: approved }).error, /no longer matches the plan a person approved/);
   assert.equal(runGate(fixture, { run: approved }).state, 'unresolved');
@@ -1535,10 +1685,15 @@ test('a run whose work tree is a nested worktree binds its records to the combin
   assert.equal(runAttest(fixture, 'AC-002', 'pass', { run, workTree: tree }).code, 0);
   assert.equal(runGate(fixture, { run, workTree: tree }).state, 'pass');
   fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
-  assert.match(av.status(runBase(fixture, { run, workTree: tree })).lines.join('\n'), /AC-001 stale \(files changed since it was verified: \.claude\/worktrees\/wt\/a\.txt\)/);
+  const dirty = av.status(runBase(fixture, { run, workTree: tree }));
+  assert.equal(dirty.code, 1);
+  assert.match(dirty.lines.join('\n'), /the work tree has uncommitted changes, so it is not the pull-request head [0-9a-f]{12}: \.claude\/worktrees\/wt\/a\.txt; /);
   const blocked = runGate(fixture, { run, workTree: tree });
   assert.equal(blocked.state, 'unresolved');
   assert.match(blocked.lines[0], /the work tree has uncommitted changes/);
+  sh(tree, 'git add a.txt && git commit -q -m edited');
+  const moved = withPrHead(fixture.run, sh(tree, 'git rev-parse HEAD').trim());
+  assert.match(av.status(runBase(fixture, { run: moved, workTree: tree })).lines.join('\n'), /AC-001 stale \(files changed since it was verified: \.claude\/worktrees\/wt\/a\.txt\)/);
 });
 
 function subdirectoryRunFixture() {
@@ -1572,20 +1727,26 @@ test('a run whose project root lies below the repository top binds the whole rep
   let result = runGate(fixture);
   assert.equal(result.state, 'pass', result.lines.join('\n'));
   fs.writeFileSync(path.join(fixture.top, 'shared', 'lib.txt'), 'edited outside the project root\n');
-  const status = av.status(runBase(fixture));
-  assert.equal(status.code, 1, status.lines.join('\n'));
-  assert.match(status.lines.join('\n'), /^AC-001 stale \(files changed since it was verified: \.\.\/shared\/lib\.txt\) \| browser attested \| /m);
+  const dirty = av.status(runBase(fixture));
+  assert.equal(dirty.code, 1, dirty.lines.join('\n'));
+  assert.ok(dirty.lines.join('\n').includes(': ../shared/lib.txt; send a change'), dirty.lines.join('\n'));
   result = runGate(fixture);
   assert.equal(result.state, 'unresolved');
   assert.match(result.lines[0], /the work tree has uncommitted changes/);
   assert.ok(result.lines[0].includes(': ../shared/lib.txt; send a change'), result.lines[0]);
   sh(fixture.top, 'git checkout -q -- shared/lib.txt');
   assert.equal(runGate(fixture).state, 'pass');
+  fs.writeFileSync(path.join(fixture.top, 'shared', 'lib.txt'), 'edited outside the project root\n');
+  sh(fixture.top, 'git add shared/lib.txt && git commit -q -m edited');
+  const status = av.status(runBase(fixture, { run: withPrHead(fixture.run, sh(fixture.top, 'git rev-parse HEAD').trim()) }));
+  assert.equal(status.code, 1, status.lines.join('\n'));
+  assert.match(status.lines.join('\n'), /^AC-001 stale \(files changed since it was verified: \.\.\/shared\/lib\.txt\) \| browser attested \| /m);
 });
 
 test('in run mode an evidence run that changed the repository names the repository its record binds to', async () => {
   const fixture = subdirectoryRunFixture();
   const mutating = await acceptanceRun(fixture, 'echo more >> ../shared/lib.txt', { treeMode: 'repository' });
+  sh(fixture.top, 'git checkout -q -- shared/lib.txt');
   assert.equal(
     runAttest(fixture, 'AC-001', 'pass', { driver: 'cli', evidenceRun: mutating.id, evidenceText: 'ran it' }).error,
     `evidence run ${mutating.id} changed the repository while it ran; make the check leave the repository unchanged, tracked and untracked non-ignored files alike, by writing its output outside the repository or to a gitignored path, then run it again`,
@@ -1618,12 +1779,24 @@ test('the CLI carries the run id, the run record and --accept-partial to the ver
   const blocked = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env, encoding: 'utf8' });
   assert.equal(blocked.status, 1, blocked.stderr);
   assert.equal(fs.readFileSync(path.join(transport, 'verdict-state'), 'utf8'), 'incomplete');
-  const accepted = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env: { ...env, ZENSU_AVR_ACCEPT_PARTIAL: '1' }, encoding: 'utf8' });
+  assert.equal(fs.readFileSync(path.join(transport, 'verdict-mode'), 'utf8'), 'required');
+  assert.equal(fs.existsSync(path.join(transport, 'verdict-plan-unapproved')), false);
+  const bare = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env: { ...env, ZENSU_AVR_ACCEPT_PARTIAL: '1' }, encoding: 'utf8' });
+  assert.equal(bare.status, 1, bare.stderr);
+  const accepted = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env: { ...env, ZENSU_AVR_ACCEPT_PARTIAL_IDS: 'AC-002' }, encoding: 'utf8' });
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(fs.readFileSync(path.join(transport, 'verdict-state'), 'utf8'), 'partial-accepted');
+  fs.writeFileSync(path.join(transport, 'gate-mode'), 'advisory');
+  assert.equal(runAttest(fixture, 'AC-002', 'fail').code, 0);
+  const advisory = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env, encoding: 'utf8' });
+  assert.equal(advisory.status, 0, advisory.stderr);
+  assert.equal(fs.readFileSync(path.join(transport, 'verdict-state'), 'utf8'), 'incomplete');
+  assert.equal(fs.readFileSync(path.join(transport, 'verdict-mode'), 'utf8'), 'advisory');
+  fs.rmSync(path.join(transport, 'gate-mode'));
+  assert.equal(runAttest(fixture, 'AC-002', 'partial').code, 0);
   const shown = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });
   assert.equal(shown.status, 1, shown.stdout + shown.stderr);
-  assert.match(shown.stdout, new RegExp(`^ACCEPTANCE STATUS — autopilot run ${RUN_ID} \\| plan: \\.zensu/state/autopilot-approved-plan-${fixture.sha}\\.md \\| tree: [0-9a-f]{12} \\| 1/2 active criteria pass \\| run: `));
+  assert.match(shown.stdout, new RegExp(`^ACCEPTANCE STATUS — autopilot run ${RUN_ID} \\| plan: \\.zensu/state/autopilot-approved-plan-${fixture.sha}\\.md \\| tree: [0-9a-f]{12} \\| 1/2 active criteria pass \\| accept: AC-002 could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one`));
   assert.match(shown.stdout, /^AC-001 pass \| browser attested \| record av1_[0-9]{13}_[0-9a-f]{12} \| evidence: Opened the page for AC-001; the snapshot shows it \| The dashboard lists every project$/m);
   fs.rmSync(path.join(transport, 'run.json'));
   const lost = childProcess.spawnSync(process.execPath, [LIB, 'status'], { env, encoding: 'utf8' });

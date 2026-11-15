@@ -12,7 +12,7 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 64, "skips": {"win32": 2},
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 67, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
       "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, retention, the Autopilot run mode that reads its criteria from the verified bytes of the approved plan copy and resolves the pull-request head among commits only, and the standalone consent close, the hand-off record and the plan-criteria check."
     },
@@ -117,7 +117,7 @@
       "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals, the O_NOFOLLOW fallback and the absence of the approved-plan store from the payload module."
     },
     {
-      "path": "tests/structure/approved-plan-v1.test.js", "registered": 7,
+      "path": "tests/structure/approved-plan-v1.test.js", "registered": 9, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-plan-payload-fallback.sh" }],
       "summary": "The digest-named approved-plan copy: its name, the private exact-byte store, reuse and restore, the refusals that write nothing, and the symlink and hard-link refusals on store and read."
     },

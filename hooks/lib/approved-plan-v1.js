@@ -26,6 +26,8 @@ const PLAN_CRITERIA_CONTENT_EXITS = Object.freeze([0, 3, 4, 5]);
 
 const PLAN_CRITERIA_TIMEOUT_MS = 60000;
 
+const AC_RE = /^AC-([0-9]+)([a-z]?)$/;
+
 const sha256Hex = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 
 const readFailure = (failure) => {
@@ -33,6 +35,20 @@ const readFailure = (failure) => {
   if (failure === REASONS.EMPTY) return APPROVED_PLAN_FAILURES.EMPTY;
   if (failure === REASONS.TOO_LARGE) return APPROVED_PLAN_FAILURES.TOO_LARGE;
   return APPROVED_PLAN_FAILURES.UNREADABLE;
+};
+
+const syncDirectory = (directory) => {
+  if (process.platform === "win32") return;
+  let descriptor = null;
+  try {
+    descriptor = fs.openSync(directory, "r");
+    fs.fsyncSync(descriptor);
+  } catch (_) {
+  } finally {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor); } catch (_) {}
+    }
+  }
 };
 
 const approvedPlanStem = (sha) =>
@@ -108,6 +124,7 @@ const storeApprovedPlan = (projectRoot, sha, bytes) => {
     fs.closeSync(descriptor);
     descriptor = null;
     fs.renameSync(temporary, planPath);
+    syncDirectory(located.directory);
   } catch (_) {
     if (descriptor !== null) {
       try { fs.closeSync(descriptor); } catch (_) {}
@@ -120,32 +137,61 @@ const storeApprovedPlan = (projectRoot, sha, bytes) => {
   return { ok: true, path: stored.path, rel: stored.rel, stem, reused: false };
 };
 
-const listPlanCriteria = (bytes, options = {}) => {
-  const lister = options.lister || nodePath.join(__dirname, "zensu-plan-requirements.sh");
-  if (!Buffer.isBuffer(bytes) || typeof lister !== "string") return { status: "unreadable", detail: "input-rejected" };
+const listedRows = (stdout) => {
+  const byId = new Map();
+  for (const line of String(stdout || "").split("\n")) {
+    if (line === "") continue;
+    const parts = line.split("\t");
+    if (parts.length < 3) continue;
+    const [id, state] = parts;
+    if (!AC_RE.test(id) || (state !== "active" && state !== "deprecated")) continue;
+    const previous = byId.get(id);
+    if (!previous || (previous.state === "deprecated" && state === "active")) byId.set(id, { id, state, text: parts.slice(2).join(" ") });
+  }
+  return [...byId.values()];
+};
+
+const listerVerdict = (result, planPath, label) => {
+  if (result.error) {
+    const cause = result.error.code || result.error.message || "error";
+    return { status: "error", kind: "spawn", detail: `spawn-${result.error.code || "error"}`, cause };
+  }
+  const raw = String(result.stderr || "").trim().split("\n").filter(Boolean).pop() || "";
+  const message = label === null ? raw : raw.split(planPath).join(label);
+  if (result.signal) return { status: "error", kind: "signal", detail: `signal-${result.signal}`, cause: result.signal, message };
+  if (!PLAN_CRITERIA_CONTENT_EXITS.includes(result.status)) {
+    return { status: "error", kind: "exit", detail: `exit-${result.status}`, exit: result.status, message };
+  }
+  if (result.status === 3) return { status: "no-section", exit: 3, message };
+  if (result.status === 5) return { status: "unparseable", exit: 5, message };
+  const rows = listedRows(result.stdout);
+  if (result.status === 4 && rows.length === 0) return { status: "unusable", exit: 4, message };
+  return { status: "ok", exit: result.status, rows };
+};
+
+const runLister = (lister, planPath, options) => childProcess.spawnSync(options.bashPath || "bash",
+  ["--noprofile", "--norc", lister, "--list", "--plan", planPath], {
+    encoding: "utf8",
+    timeout: options.timeoutMs || PLAN_CRITERIA_TIMEOUT_MS,
+    maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+const listRequirementRows = (plan, options = {}) => {
+  const lister = options.lister || nodePath.join(options.libDir || __dirname, "zensu-plan-requirements.sh");
+  if (typeof lister !== "string" || (typeof plan !== "string" && !Buffer.isBuffer(plan))) {
+    return { status: "error", kind: "input", detail: "input-rejected" };
+  }
+  if (typeof plan === "string") return listerVerdict(runLister(lister, plan, options), plan, null);
   let directory = null;
   try {
     directory = fs.mkdtempSync(nodePath.join(options.tmpDirectory || os.tmpdir(), "zensu-plan-criteria-"));
     const copy = nodePath.join(directory, "plan.md");
-    fs.writeFileSync(copy, bytes, { flag: "wx", mode: 0o600 });
-    const result = childProcess.spawnSync(options.bashPath || "bash", ["--noprofile", "--norc", lister, "--list", "--plan", copy], {
-      encoding: "utf8",
-      timeout: options.timeoutMs || PLAN_CRITERIA_TIMEOUT_MS,
-      maxBuffer: 16 * 1024 * 1024,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (result.error) return { status: "unreadable", detail: `spawn-${result.error.code || "error"}` };
-    if (result.signal) return { status: "unreadable", detail: `signal-${result.signal}` };
-    if (!PLAN_CRITERIA_CONTENT_EXITS.includes(result.status)) return { status: "unreadable", detail: `exit-${result.status}` };
-    let active = 0;
-    for (const line of String(result.stdout || "").split("\n")) {
-      const fields = line.split("\t");
-      if (fields.length >= 3 && /^AC-[0-9]/.test(fields[0]) && fields[1] === "active") active += 1;
-    }
-    return active > 0 ? { status: "ok", active } : { status: "unusable", detail: `exit-${result.status}` };
+    fs.writeFileSync(copy, plan, { flag: "wx", mode: 0o600 });
+    return listerVerdict(runLister(lister, copy, options), copy, options.label || "the approved plan");
   } catch (error) {
-    return { status: "unreadable", detail: `copy-${(error && error.code) || "error"}` };
+    return { status: "error", kind: "copy", detail: `copy-${(error && error.code) || "error"}`, cause: (error && (error.code || error.message)) || "error" };
   } finally {
     if (directory !== null) {
       try { fs.rmSync(directory, { recursive: true, force: true }); } catch (_) {}
@@ -153,7 +199,15 @@ const listPlanCriteria = (bytes, options = {}) => {
   }
 };
 
+const listPlanCriteria = (bytes, options = {}) => {
+  if (!Buffer.isBuffer(bytes)) return { status: "unreadable", detail: "input-rejected" };
+  const listed = listRequirementRows(bytes, options);
+  if (listed.status === "error") return { status: "unreadable", detail: listed.detail };
+  const active = listed.status === "ok" ? listed.rows.filter((row) => row.state === "active").length : 0;
+  return active > 0 ? { status: "ok", active } : { status: "unusable", detail: `exit-${listed.exit}` };
+};
+
 module.exports = {
-  APPROVED_PLAN_PREFIX, APPROVED_PLAN_FAILURES, PLAN_CRITERIA_CONTENT_EXITS, approvedPlanStem, approvedPlanRelPath,
-  readApprovedPlan, storeApprovedPlan, listPlanCriteria,
+  APPROVED_PLAN_PREFIX, APPROVED_PLAN_FAILURES, PLAN_CRITERIA_CONTENT_EXITS, AC_RE, approvedPlanStem, approvedPlanRelPath,
+  readApprovedPlan, storeApprovedPlan, listRequirementRows, listPlanCriteria,
 };

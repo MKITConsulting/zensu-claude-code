@@ -26,7 +26,7 @@ Authoring rules — this file is written to be COMMITTED. Consuming repos keep
 | {name} | CLI/secret/endpoint/fixture | `{verify_cmd}` | present/missing | install / substitute=`{user-named}` / skip |
 
 ## Manual Acceptance
-(Optional. One row per active `AC-###` criterion the user accepted as partial because this environment cannot observe it. The acceptance gate does not read this table: the chain terminus closes such a criterion only with `--accept-partial` for exactly its id. The Consent cell names where the consent was given and when, never a person, an account, an email address or an internal hostname, because plans are committed and may be published. Omit the section when no criterion was accepted.)
+(Optional. One row per active `AC-###` criterion the user accepted as partial because this environment cannot observe it. The acceptance gate reads this table: the chain terminus closes such a criterion only with `--accept-partial` for exactly its id, and only while this table holds its row. The Consent cell names where the consent was given and when, never a person, an account, an email address or an internal hostname, because plans are committed and may be published. Omit the section when no criterion was accepted.)
 
 | Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
 |-----------|------------------------------------|----------------------------------------|---------|

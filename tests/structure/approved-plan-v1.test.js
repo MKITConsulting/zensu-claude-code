@@ -11,7 +11,7 @@ const modulePath = process.env.ZENSU_APPROVED_PLAN_UNIT_TARGET
   || nodePath.join(__dirname, "..", "..", "hooks", "lib", "approved-plan-v1.js");
 const {
   APPROVED_PLAN_PREFIX, APPROVED_PLAN_FAILURES, approvedPlanStem, approvedPlanRelPath,
-  readApprovedPlan, storeApprovedPlan, listPlanCriteria,
+  readApprovedPlan, storeApprovedPlan, listRequirementRows, listPlanCriteria,
 } = require(modulePath);
 const { PLAN_FILE_MAX_BYTES } = require(nodePath.join(nodePath.dirname(modulePath), "plan-payload-v1.js"));
 
@@ -64,6 +64,45 @@ test("a second store reuses an intact copy, and an edited copy reads as a mismat
   assert.ok(fs.readFileSync(copyPath(root, digest)).equals(bytes));
 });
 
+test("the store syncs the state directory after it renames the copy into place", (t) => {
+  if (process.platform === "win32") {
+    t.skip("a directory cannot be opened for fsync on win32");
+    return;
+  }
+  const root = projectDir("sync");
+  const bytes = Buffer.from("# Spec\n\n| AC-001 | the rename is durable | spec |\n", "utf8");
+  const opened = new Map();
+  const synced = [];
+  let renamed = false;
+  const realOpen = fs.openSync;
+  const realFsync = fs.fsyncSync;
+  const realRename = fs.renameSync;
+  fs.openSync = function (...args) {
+    const descriptor = realOpen.apply(fs, args);
+    opened.set(descriptor, String(args[0]));
+    return descriptor;
+  };
+  fs.renameSync = function (...args) {
+    const result = realRename.apply(fs, args);
+    renamed = true;
+    return result;
+  };
+  fs.fsyncSync = function (descriptor) {
+    synced.push({ path: opened.get(descriptor), afterRename: renamed });
+    return realFsync.call(fs, descriptor);
+  };
+  let stored;
+  try {
+    stored = storeApprovedPlan(root, digestOf(bytes), bytes);
+  } finally {
+    fs.openSync = realOpen;
+    fs.fsyncSync = realFsync;
+    fs.renameSync = realRename;
+  }
+  assert.strictEqual(stored.ok, true);
+  assert.ok(synced.some((entry) => entry.path === nodePath.join(root, ".zensu", "state") && entry.afterRename), JSON.stringify(synced));
+});
+
 test("the store refuses a malformed digest, foreign bytes, an empty or oversized plan and a relative root, and writes nothing", () => {
   const root = projectDir("refuse");
   const bytes = Buffer.from("plan\n");
@@ -79,7 +118,7 @@ test("the store refuses a malformed digest, foreign bytes, an empty or oversized
   assert.strictEqual(fs.existsSync(nodePath.join(root, ".zensu")), false);
 });
 
-test("a missing copy reads as missing, and a symlinked state directory is refused on store and on read", () => {
+test("a missing copy reads as missing, and a symlinked state directory is refused on store and on read", (t) => {
   const root = projectDir("link");
   const elsewhere = projectDir("elsewhere");
   const bytes = Buffer.from("plan\n");
@@ -90,20 +129,26 @@ test("a missing copy reads as missing, and a symlinked state directory is refuse
   fs.rmdirSync(nodePath.join(root, ".zensu", "state"));
   let linked = true;
   try { fs.symlinkSync(elsewhere, nodePath.join(root, ".zensu", "state"), "dir"); } catch (_) { linked = false; }
-  if (!linked) return;
+  if (!linked) {
+    t.skip("this host cannot create a directory symlink");
+    return;
+  }
   assert.strictEqual(storeApprovedPlan(root, digest, bytes).reason, APPROVED_PLAN_FAILURES.STATE_DIRECTORY);
   assert.strictEqual(readApprovedPlan(root, digest).reason, APPROVED_PLAN_FAILURES.STATE_DIRECTORY);
   assert.deepStrictEqual(fs.readdirSync(elsewhere), []);
 });
 
-test("a copy that gained a second hard link is refused like a symlink", () => {
+test("a copy that gained a second hard link is refused like a symlink", (t) => {
   const root = projectDir("hardlink");
   const bytes = Buffer.from("plan\n");
   const digest = digestOf(bytes);
   assert.strictEqual(storeApprovedPlan(root, digest, bytes).ok, true);
   let linked = true;
   try { fs.linkSync(copyPath(root, digest), nodePath.join(root, "second-name.md")); } catch (_) { linked = false; }
-  if (!linked) return;
+  if (!linked) {
+    t.skip("this host cannot create a hard link");
+    return;
+  }
   assert.strictEqual(readApprovedPlan(root, digest).reason, APPROVED_PLAN_FAILURES.LINKED);
 });
 
@@ -119,5 +164,26 @@ test("the criteria are listed from a private copy of the verified bytes, and the
   assert.deepStrictEqual(listed(table, { lister: faulty }), { status: "unreadable", detail: "exit-2" });
   assert.strictEqual(listed(table, { bashPath: nodePath.join(scratch, "no-such-bash") }).status, "unreadable");
   assert.deepStrictEqual(listPlanCriteria("not a buffer"), { status: "unreadable", detail: "input-rejected" });
+  assert.deepStrictEqual(fs.readdirSync(scratch).filter((name) => name.startsWith("zensu-plan-criteria-")), []);
+});
+
+test("plan approval and the acceptance gate read one row set, because both list through listRequirementRows", () => {
+  const scratch = projectDir("shared-reader");
+  const libDir = nodePath.join(scratch, "lib");
+  fs.mkdirSync(libDir);
+  const lister = nodePath.join(libDir, "zensu-plan-requirements.sh");
+  const acceptance = require(nodePath.join(nodePath.dirname(modulePath), "acceptance-verify-v1.js"));
+  const bytes = Buffer.from("# Plan\n");
+  fs.writeFileSync(lister, "printf 'AC-1xy\\tactive\\tnot a criterion id\\nAC-002\\tdeprecated\\told\\nAC-002\\tactive\\tnew\\nFR-001\\tactive\\tfunctional\\n'\nexit 0\n");
+  assert.deepStrictEqual(listRequirementRows(bytes, { libDir, tmpDirectory: scratch }), { status: "ok", exit: 0, rows: [{ id: "AC-002", state: "active", text: "new" }] });
+  assert.deepStrictEqual(listPlanCriteria(bytes, { libDir, tmpDirectory: scratch }), { status: "ok", active: 1 });
+  assert.deepStrictEqual(acceptance.readCriteria(bytes, { libDir }), { status: "ok", criteria: [{ id: "AC-002", state: "active", text: "new" }] });
+  fs.writeFileSync(lister, "printf 'AC-1xy\\tactive\\tnot a criterion id\\n'\nexit 0\n");
+  assert.deepStrictEqual(listPlanCriteria(bytes, { libDir, tmpDirectory: scratch }), { status: "unusable", detail: "exit-0" });
+  assert.deepStrictEqual(acceptance.readCriteria(bytes, { libDir }), { status: "ok", criteria: [] });
+  fs.writeFileSync(lister, "echo \"zensu-plan-requirements.sh: plan has an unterminated code fence: $3\" >&2\nexit 5\n");
+  const fenced = listRequirementRows(bytes, { libDir, tmpDirectory: scratch, label: ".zensu/state/copy.md" });
+  assert.deepStrictEqual(fenced, { status: "unparseable", exit: 5, message: "zensu-plan-requirements.sh: plan has an unterminated code fence: .zensu/state/copy.md" });
+  assert.deepStrictEqual(listRequirementRows(42), { status: "error", kind: "input", detail: "input-rejected" });
   assert.deepStrictEqual(fs.readdirSync(scratch).filter((name) => name.startsWith("zensu-plan-criteria-")), []);
 });

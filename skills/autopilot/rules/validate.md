@@ -18,8 +18,10 @@ below reads that copy, never the plan text in this conversation. In work-order m
 
 Check out the pull-request head and leave the work tree clean: every record binds to the tree it
 was taken on, and `--autopilot-validate` refuses a work tree whose `HEAD` is not the pull-request
-head or that holds an uncommitted or untracked change outside `.zensu/`. Write throwaway output
-outside the repository or to a gitignored path.
+head or that holds an uncommitted or untracked change outside `.zensu/`. `--acceptance-record --run`
+and `--acceptance-status --run` refuse the same work tree with exit 1 and the same cause, so fix
+that cause before you drive. Write throwaway output outside the repository or to a gitignored
+path.
 
 ## 2. Record each criterion right after you observe it
 
@@ -38,10 +40,13 @@ EVIDENCE
 ```
 
 A UI driver (`browser`, `mobile`, `desktop`) records what it saw, without `--evidence-run`. A pass
-needs a run that exited 0, a `fail` one that did not. Record `partial` when only part of a
-criterion could be observed, such as a degraded driver from the degradation ladder, and say in the
-evidence which part is missing. What the evidence may contain, and what it must never contain, is
-`$ROOT/skills/verify-feature/rules/acceptance-evidence.md` §1.
+needs a run that exited 0, a `fail` one that did not. `partial` means what
+`$ROOT/skills/verify-feature/rules/acceptance-consent.md` §"What `partial` means" defines: this
+environment cannot observe the criterion, because it needs credentials, an account, a non-loopback
+host or a signed build, or because its driver cannot run here. Name that cause in the evidence. A
+criterion you could observe but did not prove is not `partial`: drive it again. An observation that
+contradicts the criterion is `fail`. What the evidence may contain, and what it must never
+contain, is `$ROOT/skills/verify-feature/rules/acceptance-evidence.md` §1.
 
 `--acceptance-status --run "$RUN_ID"` prints the state of every criterion on the current tree and
 the same remedy segments as a refusal; run it before `--autopilot-validate` when in doubt.
@@ -55,18 +60,24 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
 - **Exit 0**: the run moved to `COVER` or `DELIVER`. Leave the loop.
 - **Exit 1**: the `ACCEPTANCE —` line on stderr names every criterion that does not pass. Act on
   its segments:
-  - `run:` a criterion is `missing`, `stale` or `partial`: drive it again on this tree and record
-    it.
-  - `fix:` a criterion fails on this tree: persist `VALIDATION_FAILED` with the pull-request head,
+  - `run:` a criterion is `missing` or `stale`: drive it again on this tree and record it.
+  - `fix:` a criterion fails on this tree: persist `VALIDATION_FAILED` whose `headSha` is the
+    recorded pull-request head,
     fix it through `/zensu:build` (vanilla, scoped to the failing criteria, carrying
     `AUTOPILOT-RUN: <RUN_ID>`). When the fix attempt brings the run back to `VALIDATE`, finish the
     current-head handoff of `SKILL.md` before you validate: re-run the step-2 gates, push and record
     `PR_HEAD_UPDATED`. The run is then at `FIX_FINDINGS`, and `FINDINGS_CLEARED` on the new head
     returns it to `VALIDATE`. The new head makes every record stale, so every criterion is verified
     again.
-  - `accept:` every criterion that does not pass is `partial`: run the verb again with
-    `--accept-partial`. It records `acceptance-partial` in the run's `bypasses` list and validates the run;
-    the pull-request row reads `🟡 partial` with the evidence.
+  - `accept:` every criterion that does not pass is `partial`, and the approved plan's
+    `## Manual Acceptance` table lists each one: run the verb again with
+    `--accept-partial` and the comma list of ids the segment names. The ids must be exactly the
+    open criteria. It records `acceptance-partial` in the run's `bypasses` list and validates the
+    run; the pull-request row reads `🟡 partial` with the evidence.
+  - `consent:` every criterion that does not pass is `partial`, but the approved plan's
+    `## Manual Acceptance` table has no row for one of them, or the criteria come from a work-order
+    plan no person approved: no consent covers it, and this stage asks no question. Persist `BLOCK`
+    with the code `validation-unresolved` and report the line.
   - A refusal without a segment (`unresolved`), an `add:` or a `restore:` segment: persist `BLOCK`
     with the code `validation-unresolved` and report the line. Only the user can add a criterion
     to an approved plan, so the decision stays with the user. A cause that names the pull-request
@@ -74,6 +85,8 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
     it: then block as the line says. A cause that names a dirty work tree lists its first
     changed paths: send a change that belongs to the change through the fix loop as the `fix:` arm
     does, remove what a check left behind, then validate again.
+  - A refusal of `--accept-partial` itself: when every criterion passes, validate again without
+    it; when the ids differ from the open criteria, the line names the difference.
 - **Exit 2**: a misuse, such as a run id that is not this session's active run or a run that has
   ended, or a fault the line names, an `ACCEPTANCE — unavailable` verdict included. Never retry it
   blindly: persist `BLOCK` with `validation-unresolved` and report. One exit-2 refusal is no
@@ -81,7 +94,10 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
   the `fix:` arm describes, then validate on the new head.
 
 Under an advisory acceptance gate the verb discloses a refusal as `(advisory, not blocking)`,
-validates the run anyway and records `acceptance-advisory` in its `bypasses` list.
+validates the run anyway and records `acceptance-advisory` in its `bypasses` list. A cause that
+names the pull-request head or a dirty work tree refuses under every gate mode. In work-order mode,
+when no person approved the plan, the `ACCEPTANCE PLAN UNAPPROVED` line says so and the verb
+records `acceptance-plan-unapproved` in the run's `bypasses` list before it validates.
 
 Never offer, set or mention a way to switch the acceptance gate off, whatever the verb answers:
 no person is present to decide it while this stage runs.

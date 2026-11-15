@@ -1504,8 +1504,10 @@ plan must carry a usable `## Requirements` table.
   — but the gate then prints `REQUIREMENTS GATE UNRESOLVED` rather than passing silently, so
   "the table passed" and "no table was checked" never read the same.
 - **Refusal wording is typed.** A missing or placeholder-only table refuses as a verdict about
-  the plan; an unreadable path, a usage error, or a missing library refuses with "could not
-  judge the plan" instead — a load fault must never be reported as a judged table.
+  the plan (the lister's exits 3 and 4). A plan whose code fence never closes does not parse
+  (exit 5), so no table in it can be read: it refuses with "does not parse" and asks for the open
+  fence to be closed. An unreadable path, a usage error, or a missing library refuses with "could
+  not judge the plan" instead — a load fault must never be reported as a judged table.
 - **An active acceptance criterion, for a standalone chain.** Once the table is usable, a
   standalone chain's plan must also carry at least one active `AC-###` row, read through the
   acceptance gate's own criterion reader, or `--tdd-complete` refuses and names the remedy: add
@@ -1897,10 +1899,11 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   Passing states: `pass` (the cause gives the observed and attested split, and an earlier
   non-pass verdict on the same tree adds a `flaky` line), `pass-tree-unverified`,
   `not-applicable` (no edit-landing receipt and no changed file, or no git repository),
-  `partial-accepted` (every criterion that does not pass is `partial`; a standalone chain reaches
+  `partial-accepted` (every criterion that does not pass is `partial` and has a row in the plan's
+  `## Manual Acceptance` table; a standalone chain reaches
   it only through `--chain-done --accept-partial <ids>` with the user's consent for exactly those
-  ids, and Autopilot's VALIDATE stage through `--autopilot-validate --accept-partial`, which the
-  agent decides with no person present) and `escaped`. Refusing states: `incomplete` (names every criterion that does not pass, with a cause
+  ids, and Autopilot's VALIDATE stage through `--autopilot-validate --accept-partial <ids>` with
+  the ids its approved plan's table lists, a consent the user gave by approving that plan) and `escaped`. Refusing states: `incomplete` (names every criterion that does not pass, with a cause
   for the first twelve), `no-criteria` (the plan declares no active `AC-###` criterion),
   `unresolved` (no receipt names the chain's plan while the tree has changes), `invalid` (the
   newest record does not validate) and `unavailable`. A refusal exits `1` and leaves the chain
@@ -1923,20 +1926,23 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   driver cannot run here, so no code change turns it. A criterion the run could observe but did not
   prove is verified again, or recorded `fail` when what was observed contradicts it. `zensu-log.sh --chain-done
   --claimed-review-ticket <ticket> --accept-partial AC-004,AC-005` closes a chain whose open
-  criteria (active and not `pass`) are exactly the listed ids and are all `partial` on the
-  current tree. The verdict prints `ACCEPTANCE — partial-accepted` and one
+  criteria (active and not `pass`) are exactly the listed ids, are all `partial` on the
+  current tree and each have a row in the plan's `## Manual Acceptance` table. The verdict prints `ACCEPTANCE — partial-accepted` and one
   `ACCEPTANCE — accepted as partial:` line per criterion with its reason, and the terminus
   records `acceptance-partial` in the session bypass ledger, which the chain-end summary renders
   🟡. A `fail`, `missing`, `stale` or `dropped` row, a listed id that is not open and an open id
   that is not listed keep the verdict `incomplete`, and the refusal names the difference. The
   flag exits `1` on the zero-change terminus, with Autopilot binding arguments and with
-  `--outcome`; a malformed id list exits `2`, and so does a bare `--accept-partial`: only
-  `--autopilot-validate` takes the flag without ids. The consent comes from a row of the plan's
+  `--outcome`; a malformed id list exits `2`, and so does a bare `--accept-partial`, on every
+  verb that takes the flag. The consent comes from a row of the plan's
   `## Manual Acceptance` table whose reason names the same cause category as the `partial` record, which records
   an answer the user gave at planning or when the gap was found, or from the one question `/zensu:build` step 6d, `/zensu:verify-feature --chain` and
   `/zensu:self-review` ask when a gap is found (provide access now, accept as partial, leave the
-  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. Nothing makes the user approve the table itself, the gate does not read it, and it
-  cannot tell a relayed consent from an invented one, the same bound as every attested verdict.
+  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The gate
+  reads the table's ids, never a row's reason: a listed id without a row keeps the verdict
+  `incomplete`, and the refusal asks for the row, so an answer to the one question counts once
+  its row is written. Nothing makes the user approve the table itself, and the gate cannot tell a
+  relayed consent from an invented one, the same bound as every attested verdict.
 - **Leaving the chain open is a clean stop.** A standalone refusal whose every remedy is the
   user's (`accept:`, `add:`, `restore:`, or `fix:` once the single self-review fix round is
   spent, or at once while `hooks.selfReview` is off) writes a hand-off record, `$CLAUDE_PLUGIN_DATA/acceptance-handoff/v1/<session key>.json`,
@@ -1968,7 +1974,7 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
 - **Autopilot runs.** A run's VALIDATE stage applies the same records to the run itself. The
   acceptance verbs take `--run <id>` instead of `--log`, `zensu-log.sh --evidence-run --scope
   acceptance --run <id>` runs a check in the run's work tree, and
-  `zensu-log.sh --autopilot-validate --run <id> [--accept-partial]` is the only way past VALIDATE:
+  `zensu-log.sh --autopilot-validate --run <id> [--accept-partial <ids>]` is the only way past VALIDATE:
   `--autopilot-event` refuses `VALIDATION_PASSED`, and also `PLAN_APPROVED` and every event id in
   the `plan-approved-` namespace, which only the plan-approval hook records when the user approves
   a plan. The criteria are the `AC-###` rows of the plan the user approved, which the plan-approval
@@ -1978,17 +1984,30 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   requirements lister fails for another reason; a work-order run reads `.zensu/plans/<order-id>.md`.
   Every verb reads the criteria from the plan bytes whose digest it has just checked, never from a
   second read of the file, except for a work-order plan no person approved, which has no digest to
-  check: the verb reads that file and says so with `ACCEPTANCE PLAN UNAPPROVED`. The verb refuses unless `HEAD` of the work tree is the pull-request head and the tree
-  is clean. An abbreviated head is looked up among the repository's commits only, so a branch or
+  check: the verb reads that file, says so with `ACCEPTANCE PLAN UNAPPROVED`, and records
+  `acceptance-plan-unapproved` in the run's `bypasses` list when it validates. The verb refuses
+  unless `HEAD` of the work tree is the pull-request head and the tree is clean, and it checks
+  that before it reads a record or the gate mode, so neither `ZENSU_ACCEPTANCE_GATE=off` nor the
+  advisory setting lifts it; `--acceptance-record --run` and `--acceptance-status --run` refuse
+  the same work tree with exit `1` and the same cause, the record before it writes anything. An abbreviated head is looked up among the repository's commits only, so a branch or
   tag of the same name never stands in for it, and an abbreviation that several commits begin with
   refuses; a dirty tree refuses with its first five changed paths and the count of the rest. A
-  stored plan that no longer matches its digest, or a run approved before this release kept one,
-  is `unresolved`, and so is a tree that cannot be fingerprinted, for the verb and for
-  `--acceptance-status --run`, which then exits `1`. When the session's project root lies below the repository top, the records and
+  stored plan copy that is missing, as for a run approved before this release, or that no longer
+  matches its digest is `unresolved`, and `--acceptance-status --run` then exits `2`; a session
+  that resumes such a run is told so by the `ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE`
+  line, before VALIDATE refuses it. A tree that cannot be fingerprinted is `unresolved` too, and
+  `--acceptance-status --run` then exits `1`. When the session's project root lies below the repository top, the records and
   the clean-tree check cover the whole repository, so an edit outside the project root makes the
-  records stale too. `--accept-partial` validates a verdict whose every open criterion is `partial`
-  as `partial-accepted` and records `acceptance-partial` in the run's `bypasses` list;
-  `ZENSU_ACCEPTANCE_GATE=off` records `ZENSU_ACCEPTANCE_GATE` there. Exit 0 means the run moved
+  records stale too. `--accept-partial <ids>` validates a verdict whose open criteria are exactly
+  the listed ids, all `partial` and each listed in the approved plan's `## Manual Acceptance`
+  table, as `partial-accepted` and records `acceptance-partial` in the run's `bypasses` list; a
+  work-order plan no person approved carries no consent, so the ids are refused there. While
+  every open criterion is `partial`, the refusal ends with an `accept:` segment that names the
+  command when the table lists each one, and otherwise with a `consent:` segment, which tells the
+  run to block, because no person is present to give the consent. `ZENSU_ACCEPTANCE_GATE=off`
+  records `ZENSU_ACCEPTANCE_GATE` in the same list. A passing verdict in any other state validates
+  the run only under the advisory gate, recorded as `acceptance-advisory`; under a required gate
+  the verb refuses it with exit `2`. Exit 0 means the run moved
   on, 1 that it stays at VALIDATE, 2 a misuse or a fault. A run that came back to VALIDATE from a
   fix attempt is refused with exit 2, the switched-off gate included, until its pushed head is
   recorded with `PR_HEAD_UPDATED`. A work-order run that validates is refused at `--bind-spec`
@@ -1998,8 +2017,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
 - **Modes.** `evidence.acceptanceGate` is `required` (default) or `advisory`, which prints the same
   verdict marked `(advisory, not blocking)` and closes the chain. Under `advisory`,
   `--autopilot-validate` validates a run whose verdict did not pass and records
-  `acceptance-advisory` in its `bypasses` list. An unknown value acts as `required`, and the first
-  line says so.
+  `acceptance-advisory` in its `bypasses` list, except when the cause names the pull-request head
+  or a dirty work tree. An unknown value acts as `required`, and the first line says so.
 - **Bypass** with `ZENSU_ACCEPTANCE_GATE=off`, recorded in the bypass ledger only where the gate
   applies. A chain the gate finds `not-applicable` prints that state and records no escape.
 - **When its temporary files cannot be written.** As for the full-suite gate, the terminus then

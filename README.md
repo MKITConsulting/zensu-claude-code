@@ -128,7 +128,12 @@ already rely on:
   `/zensu:full-suite` moves the full suite to a verified CI pipeline instead.
   An Autopilot run that validates leaves its VALIDATE stage only through
   `zensu-log.sh --autopilot-validate`, once every acceptance criterion of the plan
-  you approved has a passing record on the clean pull-request head.
+  you approved has a passing record on the clean pull-request head. Two other
+  ways out are recorded in the run's ledger and the pull request: criteria this
+  environment cannot observe close as partial only when the approved plan's
+  `## Manual Acceptance` table lists them, and the advisory setting or the
+  switched-off gate validates without every record, while a dirty tree or
+  another head still refuses.
 - **`node` must be on `PATH`.** Claude Code starts the hook dispatcher, which
   runs the capability gate before every tool call, as `node` itself. Without
   `node` the dispatcher cannot start, and its registration makes Claude Code

@@ -25,9 +25,10 @@ for f in "$PLUGIN_DIR"/skills/build/references/*.md; do
 done
 
 scan() {
-  node - "$@" <<'NODE'
+  UNIT_REGISTRY_LIB="$PLUGIN_DIR/tests/structure/lib-unit-registry.js" node - "$@" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
+const { shellLines } = require(process.env.UNIT_REGISTRY_LIB);
 const [root, ...files] = process.argv.slice(2);
 const NAME = String.raw`(?:ZENSU_(?:[A-Z]+_)*GATE|ZENSU_CHAIN|ZENSU_SECRET_SCAN|ZENSU_TEST_WITNESS)(?![A-Z0-9_])`;
 const ESCAPE = new RegExp(String.raw`\b${NAME}|\bevidence\.(?:acceptance|fullSuite)Gate\b`);
@@ -73,6 +74,96 @@ const stripLookupNames = (line) => {
   }
   return judged + line.slice(cursor);
 };
+const REGEX_PREFIX = /[(,=:[!&|?{};+\-*%<>~^]$/;
+const REGEX_WORDS = /(?:^|[^\w$])(?:return|typeof|case|in|of|delete|void|new|throw|yield|await|else|do)$/;
+const templateLines = (text) => {
+  const inside = new Set();
+  const stack = [];
+  let line = 0;
+  let recent = '';
+  const newline = () => {
+    line += 1;
+    if (stack.length > 0 && stack[stack.length - 1] === 'template') inside.add(line);
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const top = stack.length > 0 ? stack[stack.length - 1] : 'code';
+    if (ch === '\n') {
+      newline();
+      continue;
+    }
+    if (top === 'template') {
+      if (ch === '\\') {
+        i += 1;
+        if (text[i] === '\n') newline();
+      } else if (ch === '`') {
+        stack.pop();
+        recent = 'x';
+      } else if (ch === '$' && text[i + 1] === '{') {
+        stack.push(0);
+        i += 1;
+        recent = '{';
+      }
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i + 1 < text.length && text[i + 1] !== '\n') i += 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2;
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) {
+        if (text[i] === '\n') newline();
+        i += 1;
+      }
+      i += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      i += 1;
+      while (i < text.length && text[i] !== ch && text[i] !== '\n') i += text[i] === '\\' ? 2 : 1;
+      recent = 'x';
+      continue;
+    }
+    if (ch === '`') {
+      stack.push('template');
+      continue;
+    }
+    if (ch === '/' && (recent === '' || REGEX_PREFIX.test(recent) || REGEX_WORDS.test(recent))) {
+      let klass = false;
+      i += 1;
+      while (i < text.length && text[i] !== '\n' && (klass || text[i] !== '/')) {
+        if (text[i] === '\\') i += 1;
+        else if (text[i] === '[') klass = true;
+        else if (text[i] === ']') klass = false;
+        i += 1;
+      }
+      recent = 'x';
+      continue;
+    }
+    if (typeof top === 'number') {
+      if (ch === '{') stack[stack.length - 1] += 1;
+      if (ch === '}') {
+        if (top === 0) {
+          stack.pop();
+          recent = 'x';
+          continue;
+        }
+        stack[stack.length - 1] -= 1;
+      }
+    }
+    if (!/\s/.test(ch)) recent = (recent + ch).slice(-12);
+  }
+  return inside;
+};
+const proseLines = (rel, text) => {
+  if (/\.sh$/.test(rel)) {
+    const lines = new Set();
+    shellLines(text).forEach((entry, index) => { if (entry.heredoc === true) lines.add(index); });
+    return lines;
+  }
+  return /\.(?:js|mjs|cjs)$/.test(rel) ? templateLines(text) : new Set();
+};
 const LEDGER_ARGUMENT = new RegExp(String.raw`\b((?:tdd_record_bypass|tdd_bypass_recorded)\s+(?:"[^"]*"|'[^']*'|\S+))\s+${NAME}`, 'g');
 const DISCLOSURES = [
   /ACCEPTANCE — escaped \|/,
@@ -95,10 +186,11 @@ for (const rel of files) {
   }
   scanned += 1;
   const code = /\.(?:sh|js|mjs|cjs)$/.test(rel);
+  const prose = proseLines(rel, text);
   text.split(/\r?\n/).forEach((line, index) => {
     if (!ESCAPE.test(line)) return;
     let judged = line;
-    if (code) {
+    if (code && !prose.has(index)) {
       const trimmed = line.trim();
       if (trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return;
       judged = judged.replace(LEDGER_ARGUMENT, '$1');
@@ -151,6 +243,7 @@ EOF
 echo "zensu-log.sh: refusing. Set ZENSU_FULL_SUITE_GATE=off to skip this check." >&2
 cat >&2 <<'MSG'
 Leave `ZENSU_ACCEPTANCE_GATE` to the user to close the chain.
+# or set ZENSU_CHAIN=off to close it
 MSG
 EOF
   cat > "$FIX/bad.js" <<'EOF'
@@ -161,6 +254,10 @@ EOF
   lines.push(['restore: or set', 'ZENSU_ACCEPTANCE_GATE', 'to off'].join(' '));
   return { remedy: 'ZENSU_ACCEPTANCE_GATE' };
   lines.push(`set ${'ZENSU_ACCEPTANCE_GATE'}=off`);
+  const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+  const help = `the chain stays open:
+  * or set ZENSU_ACCEPTANCE_GATE=off and close it
+  `;
 EOF
   cat > "$FIX/good.sh" <<'EOF'
 [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
@@ -173,14 +270,21 @@ EOF
   const ESCAPE_NAME = 'ZENSU_EDIT_LANDING_GATE';
   if (gate === 'ZENSU_ACCEPTANCE_GATE' || ["ZENSU_FULL_SUITE_GATE", 'ZENSU_CHAIN'].includes(gate)) {
     lines.push(`ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read | gate`);
+  const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+  // ZENSU_CHAIN is read by the hook and never offered
+  const note = `a note that spans
+  two lines`;
+  // a maintainer may read about ZENSU_ACCEPTANCE_GATE here
 EOF
   BAD="$(scan "$FIX" bad.md bad.sh bad.js | sed '1d')"
   GOOD="$(scan "$FIX" good.sh good.js)"
   BAD_COUNT="$(printf '%s\n' "$BAD" | grep -c ':[0-9][0-9]*: ')"
-  if [ "$BAD_COUNT" -eq 10 ] \
+  if [ "$BAD_COUNT" -eq 12 ] \
     && printf '%s\n' "$BAD" | grep -qF 'bad.md:1:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.sh:1:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.sh:3:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.sh:4:' \
+    && printf '%s\n' "$BAD" | grep -qF 'bad.js:10:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.js:1:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.js:2:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.js:3:' \
@@ -188,13 +292,13 @@ EOF
     && printf '%s\n' "$BAD" | grep -qF 'bad.js:5:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.js:6:' \
     && printf '%s\n' "$BAD" | grep -qF 'bad.js:7:'; then
-    check "W3 a fixture that names an env-var escape as a remedy fails the scan, a name quoted inside prose, joined from pieces, used as a value or interpolated included (10 findings)" PASS
+    check "W3 a fixture that names an env-var escape as a remedy fails the scan, a name quoted inside prose, joined from pieces, used as a value or interpolated included, and a heredoc or template-literal line that starts like a comment (12 findings)" PASS
   else
     check "W3 fixture escape remedies were not all found ($BAD_COUNT): $(printf '%s' "$BAD" | tr '\n' ';')" FAIL
   fi
   if [ "$(printf '%s\n' "$GOOD" | sed '1d' | grep -c .)" -eq 0 ] \
     && printf '%s\n' "$GOOD" | grep -qF 'scanned=2 disclosed=1'; then
-    check "W4 variable reads, ledger arguments, comments, name literals compared, assigned or looked up, and disclosures pass the scan" PASS
+    check "W4 variable reads, ledger arguments, comments, name literals compared, assigned or looked up, and disclosures pass the scan, a comment after a regex literal holding a backtick and after a closed template literal included" PASS
   else
     check "W4 the scan flagged code reads or disclosures: $(printf '%s' "$GOOD" | tr '\n' ';')" FAIL
   fi
@@ -220,12 +324,17 @@ const combos = [
 ];
 const chains = [null, { stem: '2026-11-10-2322_build-x' }, { runId: 'run_0123456789abcdef' }];
 const states = ['incomplete', 'no-criteria', 'unresolved', 'invalid', 'unavailable'];
-const contexts = [{}, { zeroChangeTicket: true }, { currentTree: { tree: null, reason: 'the tree could not be fingerprinted' } }];
+const contexts = [{}, { zeroChangeTicket: true }, { currentTree: { tree: null, reason: 'the tree could not be fingerprinted' } }, { consented: ['AC-001', 'AC-002', 'AC-003', 'AC-004'] }, { unapproved: true }];
 const segments = [];
+const runPrefixes = new Set();
 for (const chain of chains) {
   for (const state of states) {
     for (const rows of combos) {
-      for (const context of contexts) segments.push(...avr.remedies(state, rows, chain, '/project', context));
+      for (const context of contexts) {
+        const listed = avr.remedies(state, rows, chain, '/project', context);
+        segments.push(...listed);
+        if (chain && chain.runId) for (const segment of listed) runPrefixes.add(String(segment).slice(0, String(segment).indexOf(':')));
+      }
     }
   }
 }
@@ -236,6 +345,7 @@ const escaped = segments.filter((segment) => /ZENSU_|evidence\.(?:acceptance|ful
 const accept = avr.remedies('incomplete', [row('AC-001', 'partial'), row('AC-002', 'partial')], { stem: 's' }, '/project');
 const acceptLine = accept.find((segment) => segment.startsWith('accept:')) || '';
 process.stdout.write(`segments=${segments.length} escaped=${escaped.length}\n`);
+process.stdout.write(`runPrefixes=${[...runPrefixes].sort().join(',')}\n`);
 process.stdout.write(`accept=${/AC-001, AC-002/.test(acceptLine) && /--accept-partial AC-001,AC-002/.test(acceptLine) && /the user's consent for exactly these criteria/.test(acceptLine) && /acceptance-consent\.md/.test(acceptLine) && /## Manual Acceptance row/.test(acceptLine) ? 'ok' : 'missing'}\n`);
 for (const segment of escaped) process.stdout.write(`escaped: ${segment}\n`);
 NODE
@@ -252,6 +362,18 @@ if printf '%s\n' "$REMEDIES" | grep -qxF 'accept=ok'; then
   check "W6 an all-partial standalone refusal ends with an accept: segment that names the ids and the consent" PASS
 else
   check "W6 the all-partial accept: segment is missing or incomplete: $(printf '%s' "$REMEDIES" | tr '\n' ';')" FAIL
+fi
+
+RUN_PREFIXES="$(printf '%s\n' "$REMEDIES" | sed -n 's/^runPrefixes=//p')"
+VALIDATE_SECTION="$(awk '/^## 3\. Validate$/ { on = 1; next } /^## / { on = 0 } on' "$PLUGIN_DIR/skills/autopilot/rules/validate.md")"
+W7_MISSING=""
+for prefix in $(printf '%s' "$RUN_PREFIXES" | tr ',' ' '); do
+  printf '%s\n' "$VALIDATE_SECTION" | grep -qF "\`$prefix:\`" || W7_MISSING="$W7_MISSING $prefix"
+done
+if [ -n "$VALIDATE_SECTION" ] && [ "$RUN_PREFIXES" = "accept,add,consent,fix,restore,run" ] && [ -z "$W7_MISSING" ]; then
+  check "W7 every remedy prefix the run mode emits ($RUN_PREFIXES) is handled in section 3 of skills/autopilot/rules/validate.md" PASS
+else
+  check "W7 the run-mode remedy prefixes ($RUN_PREFIXES) are not all handled in section 3 of skills/autopilot/rules/validate.md:${W7_MISSING:- the section was not found}" FAIL
 fi
 
 echo "----"

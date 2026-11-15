@@ -17,7 +17,7 @@ paths:
   - "skills/self-review/references/acceptance.md"
   - "skills/verify-feature/rules/acceptance-consent.md"
   - "skills/build/references/audit.md"
-  - "skills/autopilot/rules/validate.md"
+  - "hooks/session-start-autopilot-resume.sh"
   - "tests/structure/test-requirements-table-gate.sh"
   - "tests/structure/test-escape-wording.sh"
 ---
@@ -96,13 +96,16 @@ for the first `LIMITS.listedCriteria` only.
 **The remedy is a segment, not the exit code.** A refusal, and the `--acceptance-status`
 summary line, end with one segment per remedy that applies (`remedies`): `run:` with the full
 `/zensu:verify-feature --chain --log <run log>` command for a `missing` or `stale` criterion and
-for `invalid` (`STANDALONE_VERIFY_AGAIN_STATES`; run mode keeps `partial` in
-`VERIFY_AGAIN_STATES`); `fix:` for a criterion that fails on the current tree; `add:` for
-`no-criteria`; `restore:` for a dropped criterion; `accept:` when every criterion that does not
-pass is `partial`, naming the ids, the user's consent with the file that owns its two sources, and
-the `## Manual Acceptance` row (§"Standalone consent"), or in
+for `invalid` (`VERIFY_AGAIN_STATES`, in both modes: a `partial` criterion is one this
+environment cannot observe, so driving it again changes nothing); `fix:` for a criterion that
+fails on the current tree; `add:` for `no-criteria`; `restore:` for a dropped criterion; `accept:`
+when every criterion that does not pass is `partial`, naming the ids, the user's consent with the
+file that owns its two sources, and the `## Manual Acceptance` row (§"Standalone consent"), or in
 its place `review:` on a minted `zc_` self-review ticket and `tree:` on a tree the gate cannot
-fingerprint, because consent binds to neither (`partialRemedy`). No segment names an escape. `unresolved` names its remedy in its cause, `unavailable` names none.
+fingerprint, because consent binds to neither (`partialRemedy`). `REMEDY_TEXTS` holds the wording
+of both modes, so one skeleton builds every segment; run mode words `accept:` only when the
+approved plan's `## Manual Acceptance` table lists every partial id, and `consent:` otherwise
+(§"Autopilot run mode"). No segment names an escape. `unresolved` names its remedy in its cause, `unavailable` names none.
 Every consumer acts on the segment: `/zensu:self-review`, the self-review-off `CLOSE_PASS` and
 verify-feature chain mode re-verify only after `run:`, because verifying an unchanged tree again
 cannot turn a `fail`, and a re-verify loop runs to the Stop cap. `partial` left `run:` because
@@ -179,13 +182,15 @@ ticket-bound standalone terminus. `zensu-log.sh` validates the list through the 
 `accept-ids` mode (`parseAcceptIds`, `AC_RE`, comma list, deduplicated and sorted; exit 2 on a
 malformed or empty list) and refuses with exit 1 on the zero-change terminus, with Autopilot
 binding arguments and with `--outcome`, before any gate runs; `--accept-partial` without a value,
-or followed by another flag, and a second `--accept-partial` exit 2 on every verb but
-`--autopilot-validate`, which takes the bare flag. `standaloneVerdict` turns the
-verdict into `partial-accepted` only when `acceptOpenRows` finds the listed ids EQUAL to the open
-rows (active, not `pass`) and every one `partial` on a tree the gate can fingerprint; otherwise it
-stays `incomplete` and the cause names the difference (`covers only partial criteria, not …`,
-`names …, which is not open`, `leaves … open`). Exact-set matching is the point: consent never
-covers a criterion the user was not shown. `standaloneVerdict` also refuses the ids on a minted `zc_`
+or followed by another flag, and a second `--accept-partial` exit 2 on every verb,
+`--autopilot-validate` included. `standaloneVerdict` turns the verdict into `partial-accepted`
+only when `consentDecision` finds, through `acceptOpenRows`, the listed ids EQUAL to the open rows
+(active, not `pass`) and every one `partial` on a tree the gate can fingerprint, and finds a row
+for each id in the plan's `## Manual Acceptance` table (`manualAcceptanceIds`: the first cell of
+each data row, outside code fences); otherwise it stays `incomplete` and the cause names the
+difference (`covers only partial criteria, not …`, `names …, which is not open`, `leaves … open`,
+`which has no row for …`). Exact-set matching is the point: consent never covers a criterion the
+user was not shown. `standaloneVerdict` also refuses the ids on a minted `zc_`
 self-review ticket by itself (`ZENSU_AVR_ZERO_CHANGE_TICKET`), so that rule does not rest on the
 shell's refusal alone. A `partial-accepted` close prints one
 `ACCEPTANCE — accepted as partial: …` line per criterion with its evidence and records
@@ -196,8 +201,10 @@ take, or ids given while the verdict state did not reach the terminus, refuses w
 the transition, so the chain stays open and the same call records the consent on a retry.
 `acceptance-partial` joined `ZENSU_BYPASS_GATE_ALLOWLIST` (shape-legal; an earlier installation's
 writer and reader filter it out rather than fail); it renders 🟡 alone and every escape 🔴
-(`status-marker-legend.md`), and `--bypass-note` refuses it, so only the terminus writes it. Run
-mode keeps #594's bare `--accept-partial`, which the agent decides without consent.
+(`status-marker-legend.md`), and `--bypass-note` refuses it, so only the terminus writes it to
+the session ledger, while `--autopilot-validate` writes it to the run's `bypasses` list. Run mode
+takes the same exact id list, and its consent is the approved plan's `## Manual Acceptance` table
+(§"Autopilot run mode").
 
 **Where consent comes from.** `skills/verify-feature/rules/acceptance-consent.md` is the one owner
 of what `partial` means (a criterion this environment cannot observe; one it could observe but did
@@ -210,10 +217,12 @@ category as the `partial` record, and the user's answer to that question. `/zens
 `/zensu:verify-feature --chain`, `/zensu:self-review` (`references/acceptance.md`) and the
 self-review-off `ACCEPTANCE_REVERIFY` directive name that file instead of restating it; step 6d, the
 self-review reference and the directive still say never to offer, set or mention a way to switch
-the gate off. The gate reads neither the table nor the answer.
+the gate off. The gate reads the table's ids, never a row's reason or the answer itself: a listed
+id without a row refuses with a remedy that asks for the row, so an answer counts once its row is
+written.
 
-**The hand-off.** A refused standalone terminus used to persist nothing, so the Stop enforcer could
-not tell "waiting on the user" from "stalled". `isHandoff` answers true for an `incomplete` or
+**The hand-off.** Without a record the Stop enforcer cannot tell "waiting on the user" from
+"stalled", so a refused standalone terminus writes one. `isHandoff` answers true for an `incomplete` or
 `no-criteria` verdict whose every segment is a user remedy (`USER_REMEDIES`: `accept`, `add`,
 `restore`) or a `fix:` once the shell reports the fix round spent (`ZENSU_AVR_FIX_ROUND_SPENT`:
 `tdd_self_review_fixed`, or `hooks.selfReview` off, because then no fix round follows the review);
@@ -225,8 +234,9 @@ temp then rename at `0600`) only when the shell passed the review ticket, the ed
 full-suite gates passed, the review converged (`ZENSU_AVR_REVIEW_DONE`), the tree has a
 fingerprint and the chain resolved, and removes it on every
 other answer of the same call, a pass included. Beside the ticket and the tree the record binds the
-plan (`plan` under `HANDOFF_PLAN_RE`, `plan_sha256` from `fileDigest`, bounded at
-`LIMITS.maxPlanBytes`) and the chain's acceptance records (`records_sha256` from
+plan (`plan` under `HANDOFF_PLAN_RE`, `plan_sha256` from `planDigest`, which reads it through
+`readPlanFile` of `plan-payload-v1.js`, that module's size bound and link checks included) and
+the chain's acceptance records (`records_sha256` from
 `recordSetDigest`), so a plan edit or a new record, neither of which moves the tree fingerprint,
 ends the hand-off; every remedy is at most `LIMITS.maxRemedyChars`. A sidecar, not a workflow-state
 field, so no schema moved; the store is in both protected-root lists of
@@ -247,11 +257,11 @@ block. `handoffLine` screens every remedy through the evidence runner's display 
 `--chain-status` prints the same line on stderr, so its stdout stays one JSON document.
 `tdd_review_gate_reset` removes the file at every review-generation restart (`--tdd-begin`,
 `--review-rearm`, a reopened `zc_` terminus, a deferred-review seed), and a failed transport
-preparation removes it too. The "a report never releases the guard" sentences stay as they are:
-they govern the stages before the terminus.
+preparation removes it too. Before the terminus a report never releases the guard; this record is
+the one release, and only a refused terminus writes it.
 
-**The criteria check at `--tdd-complete`.** `no-criteria` used to surface only at the terminus,
-after the review. `_zensu_plan_criteria_gate` runs the module's `plan-criteria` mode
+**The criteria check at `--tdd-complete`.** Without it `no-criteria` would surface only at the
+terminus, after the review. `_zensu_plan_criteria_gate` runs the module's `plan-criteria` mode
 (`planCriteria`, which reads criteria through `readCriteria` like the gate) inside the
 requirements-table gate's usable-table arm, for a standalone chain only (`complete_ctx` `{}`):
 an Autopilot plan approval already refuses `PLAN_CRITERIA_UNUSABLE`. It shares that gate's scope
@@ -275,9 +285,10 @@ notices (`stop_notice`) and the gates outside the chain (`pre-bash-zensu-gate.sh
 `skills/build/SKILL.md`, `pre-bash-source-write-gate.sh`) are outside its list; widening it is the
 follow-up.
 
-**Coupled sites of this section:** `STANDALONE_VERIFY_AGAIN_STATES`, `USER_REMEDIES`,
-`HANDOFF_*`, `LIMITS.maxPlanBytes` and `LIMITS.maxRemedyChars`, `remedies`, `partialRemedy`,
-`isHandoff`, `parseAcceptIds`, `acceptOpenRows`, `fileDigest`, `recordSetDigest`,
+**Coupled sites of this section:** `VERIFY_AGAIN_STATES`, `USER_REMEDIES`, `REMEDY_TEXTS`,
+`HANDOFF_*`, `LIMITS.maxRemedyChars`, `remedies`, `partialRemedy`, `isHandoff`,
+`parseAcceptIds`, `acceptOpenRows`, `consentDecision`, `manualAcceptanceIds`,
+`MANUAL_ACCEPTANCE_HEADING_RE`, `chainPlanBytes`, `planDigest`, `recordSetDigest`,
 `handoffEvidence`, `recordHandoff`, `handoffStatus`, `handoffLine`, `planCriteria`,
 `unjudgedCriteria` and the `accept-ids`, `handoff` and `plan-criteria` modes in
 `acceptance-verify-v1.js`; the `--accept-partial` parse and refusals, `_zensu_accept_partial_ids`,
@@ -297,8 +308,13 @@ of `planning.md`; chain mode points 5 and 6 of `skills/verify-feature/SKILL.md` 
 `templates/zensu-plan.md`; `docs/gates.md`, `docs/configuration.md`, `docs/build-workflow.md` and
 `docs/verify-feature.md`. Pins: the consent, hand-off, segment and plan-criteria cases of
 `acceptance-verify-v1.test.js`; `A0e`–`A0j` and `C1`–`C21` with `C7b` in
-`test-acceptance-gate.sh`; `AC1`–`AC8` in `test-requirements-table-gate.sh`; `W0`–`W6` in
-`test-escape-wording.sh`, whose quoted-name exemption admits only a whole code token.
+`test-acceptance-gate.sh`; `AC1`–`AC8` in `test-requirements-table-gate.sh`; `W0`–`W7` in
+`test-escape-wording.sh`, whose quoted-name exemption admits only a whole code token, which judges
+a heredoc body and a template literal's continuation line as prose rather than skipping a line
+that starts with a comment marker there (`W3`, `W4`), and whose `W7` holds every remedy prefix the
+run-mode `remedies` emits equal to the arms of `skills/autopilot/rules/validate.md` §3; and the
+hand-off record read denials of `test-reviewer-capability-gate.sh`, which write a real record and
+deny a reviewer, a neutral child and the PLM a `Read` of it.
 
 **Version: `minor`.** A standalone `--tdd-complete` now refuses a plan the previous release
 completed; the hook directives and the skills name `--chain-done --accept-partial`, which the
@@ -324,10 +340,10 @@ whose `HANDOFF_KEYS` no released reader knows.
 
 ## Autopilot run mode (`--run <id>` and `--autopilot-validate`)
 
-Autopilot's VALIDATE stage used to be self-reported: `VALIDATION_PASSED` carried only a head and
-any caller could send it. It now passes only through
-`zensu-log.sh --autopilot-validate --run <id> [--accept-partial]`, which applies the event itself,
-and `--autopilot-event` refuses `VALIDATION_PASSED` and the two event-id namespaces the verb uses
+A `VALIDATION_PASSED` event carries only a head, so whoever may send it decides whether a run
+validated. The stage therefore passes only through
+`zensu-log.sh --autopilot-validate --run <id> [--accept-partial <ids>]`, which applies the event
+itself, and `--autopilot-event` refuses `VALIDATION_PASSED` and the two event-id namespaces the verb uses
 (`validation-passed:`, `validation-bypass:`), the way `release-` is reserved. It refuses
 `PLAN_APPROVED` too, which only the plan-approval hook records, when the user approves the plan (on a
 run that validates it first stores the plan and checks its criteria), and the `plan-approved-` event-id namespace that hook writes, whatever the event type.
@@ -339,9 +355,14 @@ caller's own run through `autopilot_read_active_strict` inside a command substit
 library never loads into the verb's process (the evidence runner's E22/E23 rule), requires the
 named id to be that run and the run to be nonterminal, and maps the strict read's 1 to "owns no
 active run" and its 5 to the unreadable-state refusal; those two, another run's id and an ended run
-all exit 2, like every misuse. It takes a recorded pull-request head only within the 7 to 64 hex
-digits of the module's `RECORDED_HEAD_RE`, whose literal it repeats; `V16` holds the two literals
-equal and checks that the state machine's `sha` agrees with both. `--run` and `--log` exclude each other, and
+all exit 2, like every misuse. It reads the run's facts through the module's `run-facts` mode,
+which takes a recorded pull-request head only within the 7 to 64 hex digits of
+`RECORDED_HEAD_RE`, so the shell carries no second parser of the run record; `V16` checks that the
+state machine's `sha` agrees with that bound. The bind and the `--accept-partial` parse run before
+the phase library is loaded, so both name the module through `_zensu_avr_module_path`, which
+renders the plugin's `hooks/lib` with `zensu-host-path.sh` as `--evidence-run` does, never through
+`_tdd_native_path`: the suite sources that library and exports its functions to every child, which
+hid the missing function from every check but `V21` and `I9a`. `--run` and `--log` exclude each other, and
 `--evidence-run --run` takes `--scope acceptance` only. The run record reaches the module as the
 transport file `run.json`; the work tree comes from `{"runId":"<id>"}` handed to
 `_zensu_bound_work_tree` as the given context, so a run whose `workspaceRoot` is a worktree below
@@ -388,7 +409,13 @@ does not repeat the check, because the protocol reaches it only after `--bind-sp
 `plan-approval-required`.
 
 **Head binding.** `runHead` requires `HEAD` of the work tree to be the run's `evidence.pr.headSha`
-and the tree to be clean (`hasChanges`, `.zensu` excluded), before records are read. A full-length
+and the tree to be clean (`hasChanges`, `.zensu` excluded), before records are read.
+`runHeadCheck` runs it for the verdict, for `--acceptance-status --run` and for
+`--acceptance-record --run`, which refuse with exit 1 and the same cause, the record before it
+writes anything, so a criterion is never driven and recorded on a tree no record of which can
+count. The verdict runs it before the escape and before the gate mode is read: a cause that names
+the head or a dirty tree is `blocking`, which neither `ZENSU_ACCEPTANCE_GATE=off` nor the advisory
+gate lifts, while the plan copy is read after the escape. A full-length
 head is compared directly. An abbreviated one goes through `prCommit`: `git rev-parse
 --disambiguate=<prefix>` lists objects and never ref names, and `git cat-file --batch-check` keeps
 the commits among them. `rev-parse <prefix>^{commit}` resolves a branch or tag of the same name
@@ -419,9 +446,15 @@ the project root's own `.zensu` left out (the `excluded` option the external rev
 not, leave every record current. A project root that is the repository top keeps
 `computeTree(projectRoot)`, so its trees do not change.
 
-**States and exits.** A pass is `pass`; `--accept-partial` turns a verdict whose every open row is
-`partial` into `partial-accepted`, a passing state, and any `fail`, `missing`, `stale` or `dropped`
-row keeps it `incomplete`. The verb exits 0 after it applied `VALIDATION_PASSED`, 1 when the
+**States and exits.** A pass is `pass`; `--accept-partial <ids>` turns a verdict whose open rows
+are exactly the listed ids, every one `partial`, into `partial-accepted`, a passing state, only
+when `consentDecision` finds each id in the `## Manual Acceptance` table of the bytes whose digest
+was checked; any `fail`, `missing`, `stale` or `dropped` row, an id the table lacks, and a
+work-order plan no person approved keep it `incomplete`. User decision (2026-11-15): with no
+person present, the only consent VALIDATE may apply is one the user gave by approving the plan,
+so an agent never accepts a gap on its own. `runRemedyContext` hands `remedies` the table's ids
+and the approval, so a refusal over partial rows ends with `accept:` and the command when the
+table lists each id, and with `consent:` otherwise, whose text tells the run to block. The verb exits 0 after it applied `VALIDATION_PASSED`, 1 when the
 acceptance verdict refused (the run stays at `VALIDATE`), and 2 for a misuse or a fault: no active
 run of this session, another run, an ended run, a `--no-validate` run, a stage other than
 `VALIDATE`, a run back from a fix attempt whose pushed head is not recorded yet
@@ -434,8 +467,20 @@ an `unavailable` verdict, an unreadable state, or an event the library rejected.
 `bypasses[].gate` from `--autopilot-status`, names it. `evidence.acceptanceGate: advisory`
 discloses `(advisory, not blocking)` and validates, and the verb applies
 `{"gate":"acceptance-advisory"}` first for every verdict state other than `pass`, `escaped` and
-`partial-accepted`: only advisory mode lets such a state exit 0, and a run that validated with a
-gap must name it in the PR. `VALIDATION_PASSED` carries the run's own durable head.
+`partial-accepted`, and only when the verdict reports the advisory gate (`verdict-mode`): any
+other passing state under a required gate refuses with exit 2 and tells the run to block, because
+it validates no run, and an empty `verdict-state` read-back refuses with exit 2 too. A run that
+validated with a gap must name it in the PR. A work-order run whose plan no person approved also
+gets `{"gate":"acceptance-plan-unapproved"}` (`verdict-plan-unapproved`) when it validates,
+whatever else it records, except under the switched-off gate, which reads no plan. `VALIDATION_PASSED` carries the
+run's own durable head.
+
+**Resume.** `hooks/session-start-autopilot-resume.sh` reads the copy of an active validate-on run
+without a work-order binding through `readApprovedPlan`, required from the plugin's own `hooks/lib`
+and never from the project, and when it is missing or no longer matches appends
+`ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE runId=… copy=… reason=…` to its active-run
+line, with a reason from `APPROVED_PLAN_FAILURES`, so the user hears of it at the next session
+start rather than at VALIDATE. A module that does not load adds nothing.
 
 **Why the event ids carry a visit number.** A replay with the same id, type and payload exits 10
 in the worker, and `_autopilot_apply_critical` answers 0, so an id derived from the head alone
@@ -445,27 +490,42 @@ would let a second VALIDATE visit at an unchanged head report success while the 
 `VALIDATE` from another stage: a retry inside one visit replays idempotently, a new visit gets a
 new id.
 
-**Coupled sites of run mode:** `runFacts`, `runChain`, `runHead`, `prCommit`, `gitLines`,
-`changeList`, `pathList`, `chainCriteria`, `unfingerprintedCause`, `runOutcome`, `runVerdict`, `runRemedies`,
-`isRunCopyStem`, `expectedPlanRel`, the `name` and `outside` that `chainTree` returns,
-`LIMITS.listedChanges`, `LIMITS.headCandidates` and the `run.json` and `ZENSU_AVR_RUN` /
-`ZENSU_AVR_ACCEPT_PARTIAL` transport in `acceptance-verify-v1.js`; `repositoryRoot`,
+**Coupled sites of run mode:** `runFacts`, `runChain`, `runHead`, `runHeadCheck`, `prCommit`,
+`gitLines`, `changeList`, `pathList`, `chainCriteria`, `unfingerprintedCause`, `runOutcome`,
+`runVerdict`, `runRemedyContext`, the `run` texts of `REMEDY_TEXTS`, `consentDecision`,
+`manualAcceptanceIds`, `isRunCopyStem` (which also requires `approvedPlanStem` to rebuild the stem),
+`expectedPlanRel`, the `name` and `outside` that `chainTree` returns, `LIMITS.listedChanges`,
+`LIMITS.headCandidates`, the `run.json` and `ZENSU_AVR_RUN` / `ZENSU_AVR_ACCEPT_PARTIAL_IDS`
+transport and the `verdict-mode` and `verdict-plan-unapproved` files in
+`acceptance-verify-v1.js`; `repositoryRoot`,
 `repositoryTree`, the repository branch of `fingerprintChanges` and the `tree-mode` transport in
-`evidence-run-v1.js`; `_zensu_run_bind`, `_zensu_active_run_json`, the `--run` arms, the
+`evidence-run-v1.js`; `_zensu_run_bind`, `_zensu_active_run_json`, `_zensu_avr_module_path`, the `--run` arms, the
 `tree-mode` write and the `--autopilot-validate` arm in `zensu-log.sh`;
 the store, the three refusal codes and their `causes` and the lister exit mapping in
-`plan-approved-delegate.sh`; `APPROVED_PLAN_PREFIX`, `approvedPlanRelPath`, `readApprovedPlan` and
-`storeApprovedPlan` in `approved-plan-v1.js`; the `PLAN_APPROVED` and `plan-approved-` refusals of
-`--autopilot-event` in `zensu-log.sh`; the `## Requirements` table of `templates/autopilot-spec.md`; step 6 of
-`skills/autopilot/SKILL.md` and `skills/autopilot/rules/validate.md`; the `VALIDATE_FEATURE` line of
-`hooks/session-start-autopilot-resume.sh`; `planCriteriaRefusal` in `work-order-v1.js` and the
-`plan-criteria-unusable` paragraph of `skills/autopilot/rules/work-order.md` §4. Pins: `V1`-`V17`
-and `V7b` in `test-acceptance-gate.sh` (`V7b` the ended run, `V10` the advisory ledger entry,
-`V15` the pending head update and a third visit's event ids, `V16` the head bound, `V17` a branch
-named after an abbreviated head), the run cases of `acceptance-verify-v1.test.js` (the shadow
-branch, two crafted commits that share a 7-digit prefix, the dirty-path list, the unfingerprinted
-status, a copy swapped after the verified read and the named trees among them),
-`approved-plan-v1.test.js` through `F11f`, `F47c` to `F47e` in `test-plan-payload-fallback.sh`,
+`plan-approved-delegate.sh`; `APPROVED_PLAN_PREFIX`, `APPROVED_PLAN_FAILURES`, `approvedPlanStem`,
+`approvedPlanRelPath`, `readApprovedPlan`, `storeApprovedPlan` and its `syncDirectory`, which
+fsyncs the state directory after the rename on every host but win32, in `approved-plan-v1.js`; the
+`PLAN_APPROVED` and `plan-approved-` refusals of `--autopilot-event` in `zensu-log.sh`; the
+`## Requirements` table and the optional `## Manual Acceptance` section of
+`templates/autopilot-spec.md`; step 6 of `skills/autopilot/SKILL.md`,
+`skills/autopilot/rules/validate.md` and the `partial` sentence of `skills/autopilot/rules/drivers.md`;
+the `VALIDATE_FEATURE` line and `planCopyNote` of `hooks/session-start-autopilot-resume.sh`;
+`planCriteriaRefusal` in `work-order-v1.js` and the `plan-criteria-unusable` paragraph of
+`skills/autopilot/rules/work-order.md` §4. Pins: `V1`-`V21`, `V7b` and `V13b` in
+`test-acceptance-gate.sh` (`V7b` the ended run, `V10` the advisory ledger entry, `V13b` a run of
+another session in the same project, `V15` the pending head update and a third visit's event ids,
+`V16` the head bound, `V17` a branch named after an abbreviated head, `V18` an unexpected passing
+state under a required gate, `V19` a copy the plan-approval hook itself stored, validated through
+the records and the verb, and a tracked `.zensu/logs/` change that leaves the tree clean, and `V20`
+a work-order plan no person approved, whose validation records `acceptance-plan-unapproved` before
+`VALIDATION_PASSED`, and `V21` every run verb and `--autopilot-validate --accept-partial` in a shell
+that inherits no exported function), `R8e` and `R8f` in `test-autopilot-session-resume.sh` (the resume line for a
+missing copy; no line for a run that does not validate, and the line for a tampered copy), the run
+cases of
+`acceptance-verify-v1.test.js` (the shadow branch, two crafted commits that share a 7-digit prefix,
+the dirty-path list, the unfingerprinted status, a copy swapped after the verified read, the named
+trees, the overlong head, the head remedies and the tracked `.zensu` twin of `V19` among them),
+`approved-plan-v1.test.js` through `F11f` and its directory-sync case, `F47c` to `F47e` in `test-plan-payload-fallback.sh`,
 `C13b` in `test-autopilot-chain-integration.sh`, `I6` in `test-work-order-implement.sh`, which
 drives the state library because the CLI refuses `PLAN_APPROVED`, the repository-tree case of `evidence-run-v1.test.js`,
 `P17`-`P17i` in `test-autopilot-plan-delegate.sh`, `F47b` in `test-plan-payload-fallback.sh`,
@@ -485,9 +545,10 @@ run proves its command's exit code, not that the command checks the criterion; `
 the run record and the plugin store are writable from the session, and a direct library call
 skips the CLI refusal, so this bounds accidents, not intent; every commit after validation,
 `--cover` included, makes every record stale; records are per session key, so a new owner after
-`/zensu:autopilot-adopt` verifies again; a run in flight across this release has no stored copy and
-needs the user's escape; `--accept-partial` is available to the model, and what keeps it honest is
-the 🟡 row, the evidence and the ledger entry; a work-order plan the order timeline names under
+`/zensu:autopilot-adopt` verifies again; a run in flight across this release has no stored copy,
+which the resume line names, and needs the user's escape; the `## Manual Acceptance` table that
+carries consent is model-written plan text the user approved, so its consent is only as careful as
+that approval, while the 🟡 row, the evidence and the ledger entry keep the gap visible; a work-order plan the order timeline names under
 another path than `.zensu/plans/<order-id>.md` refuses as changed; and the run record travels to
 the bind's node child on stdin, while `_zensu_chain_work_tree` still hands it over in an
 environment variable, which a record near the 512-event bound can push past Linux's 128 KiB limit
