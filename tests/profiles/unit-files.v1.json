@@ -180,7 +180,7 @@
       "summary": "The consume-review gate: reviewer records, background launches completed from hand-backs, name-framed hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement."
     },
     {
-      "path": "tests/structure/review-ledger-v1.test.js", "registered": 42,
+      "path": "tests/structure/review-ledger-v1.test.js", "registered": 54,
       "runs": [{ "driver": "tests/structure/test-review-convergence.sh" }],
       "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
     },
