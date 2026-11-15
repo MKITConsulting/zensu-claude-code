@@ -1206,7 +1206,7 @@ cv_outcome_census() {
           seen[at] += 1;
           return;
         }
-        if (!word("converged").test(text)) missing.push(path.relative(root, file) + ":" + (index + 1));
+        if (!word("converged").test(text)) missing.push(path.relative(root, file).split(path.sep).join("/") + ":" + (index + 1));
       });
     }
     const bad = seen.map((count, at) => (count === 1 ? "" : "refused[" + at + "]=" + count)).filter(Boolean);
