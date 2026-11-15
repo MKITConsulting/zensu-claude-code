@@ -506,3 +506,244 @@ test('the report read carries open entries across two boundaries in generation o
   ]);
   assert.equal(after.open, 2);
 });
+
+function convergenceProject(lines, receipt) {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, '.zensu', 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.zensu', 'state'), { recursive: true });
+  if (lines !== null) fs.writeFileSync(path.join(root, '.zensu', 'logs', 'chain.log'), lines.join('\n') + '\n');
+  const receiptPath = path.join(root, '.zensu', 'state', 'edit-landing-scv1_test.json');
+  if (receipt !== null) {
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt || { schema: 'edit-landing-v2', log: '.zensu/logs/chain.log', claims: 0 }));
+  }
+  return { root, receipt: receiptPath };
+}
+
+function finalReview(round) {
+  return ledger.FINAL_REVIEW_HEAD + round;
+}
+
+function converge(project, extra) {
+  return ledger.convergence(Object.assign({ receipt: project.receipt, projectRoot: project.root, finalRound: 2 }, extra || {}));
+}
+
+test('openDefect names routed-unfixed, parked and deferred IMPORTANT or CRITICAL entries', () => {
+  const entry = (state, severity) => ({ id: 'R1-F1', state, severity });
+  assert.equal(ledger.openDefect(entry('routed-unfixed', 'SUGGESTION')), true);
+  assert.equal(ledger.openDefect(entry('parked', 'IMPORTANT')), true);
+  assert.equal(ledger.openDefect(entry('deferred', 'IMPORTANT')), true);
+  assert.equal(ledger.openDefect(entry('deferred', 'CRITICAL')), true);
+  assert.equal(ledger.openDefect(entry('deferred', 'SUGGESTION')), false);
+  assert.equal(ledger.openDefect(entry('fixed', 'CRITICAL')), false);
+  assert.equal(ledger.openDefect(entry('neutralized', 'IMPORTANT')), false);
+  assert.equal(ledger.openDefect(null), false);
+  assert.equal(ledger.openDefect('parked'), false);
+});
+
+test('a ledger whose only open entries are deferred suggestions converges', () => {
+  const project = convergenceProject(ROUND_ONE.concat([
+    line('R2-F1', 'deferred', 'SUGGESTION', 'src/d.ts:2', 'tighten wording'),
+    finalReview(2),
+  ]));
+  const verdict = converge(project);
+  assert.equal(verdict.converged, true);
+  assert.equal(verdict.reason, 'converged');
+  assert.equal(
+    verdict.line,
+    ledger.CONVERGENCE_HEAD + 'converged | the findings ledger holds no routed-unfixed or parked entry and no deferred IMPORTANT or CRITICAL entry (4 entries, 2 deferred suggestions still open)'
+  );
+});
+
+test('an open defect keeps the attempt unconverged and names at most five ids', () => {
+  const parked = convergenceProject(ROUND_ONE.concat([
+    line('R2-F1', 'parked', 'IMPORTANT', 'src/d.ts:2', 'missing bound'),
+    finalReview(2),
+  ]));
+  const one = converge(parked);
+  assert.equal(one.converged, false);
+  assert.equal(one.reason, 'open-defects');
+  assert.equal(one.line, ledger.CONVERGENCE_HEAD + 'not converged | the findings ledger holds 1 open defect: R2-F1 parked IMPORTANT');
+  const many = [];
+  for (let i = 1; i <= 6; i++) many.push(line('R2-F' + i, 'routed', 'CRITICAL', 'src/e.ts:' + i, 'unfixed blocker'));
+  const six = convergenceProject(many.concat([finalReview(2)]));
+  const verdict = converge(six);
+  assert.equal(verdict.converged, false);
+  assert.match(verdict.line, /holds 6 open defects: R2-F1 routed-unfixed CRITICAL, .*R2-F5 routed-unfixed CRITICAL, …$/);
+  assert.doesNotMatch(verdict.line, /R2-F6/);
+});
+
+test('a deferred CRITICAL entry is an open defect, a fixed one is not', () => {
+  const lines = [line('R2-F1', 'deferred', 'CRITICAL', 'src/f.ts:4', 'not reproduced')];
+  const open = convergenceProject(lines.concat([finalReview(2)]));
+  assert.equal(converge(open).converged, false);
+  const closed = convergenceProject(lines.concat([line('R2-F1', 'fixed', 'CRITICAL', 'src/f.ts:4', 'fixed by self-review'), finalReview(2)]));
+  assert.equal(converge(closed).converged, true);
+});
+
+test('an open entry carried across a reset stays a defect until a qualified fixed line closes it', () => {
+  const lines = [
+    line('R2-F1', 'parked', 'IMPORTANT', 'src/g.ts:5', 'parked before the reset'),
+    'REVIEW BUDGET RESET',
+    line('R1-F1', 'deferred', 'SUGGESTION', 'src/h.ts:1', 'new generation suggestion'),
+  ];
+  const carried = convergenceProject(lines.concat([finalReview(2)]));
+  const open = converge(carried);
+  assert.equal(open.converged, false);
+  assert.match(open.line, /G1:R2-F1 parked IMPORTANT$/);
+  const closed = convergenceProject(lines.concat([line('G1:R2-F1', 'fixed', 'IMPORTANT', 'src/g.ts:5', 'fixed in self-review'), finalReview(2)]));
+  assert.equal(converge(closed).converged, true);
+});
+
+test('a ledger that is not status=ok never converges', () => {
+  const partial = convergenceProject(ROUND_ONE.concat(['FINDING LEDGER — broken line', finalReview(2)]));
+  const verdict = converge(partial);
+  assert.equal(verdict.reason, 'ledger-partial');
+  assert.match(verdict.line, /answered status=partial \(malformed-line\)$/);
+  const empty = convergenceProject(['BUILD STARTED — demo | steps: 1', finalReview(2)]);
+  const none = converge(empty);
+  assert.equal(none.converged, false);
+  assert.equal(none.reason, 'ledger-empty');
+  const missing = convergenceProject(null);
+  const unread = converge(missing);
+  assert.equal(unread.converged, false);
+  assert.equal(unread.reason, 'ledger-degraded');
+  assert.match(unread.line, /answered status=degraded \(log-unreadable\)$/);
+});
+
+test('convergence needs the setting and a receipt that names the run log', () => {
+  const project = convergenceProject(ROUND_ONE.concat([finalReview(2)]));
+  const off = converge(project, { enabled: false });
+  assert.equal(off.converged, false);
+  assert.equal(off.reason, 'disabled');
+  assert.match(off.line, /hooks\.reviewConvergence is off/);
+  const absent = convergenceProject(ROUND_ONE.concat([finalReview(2)]), null);
+  const noReceipt = converge(absent);
+  assert.equal(noReceipt.reason, 'no-receipt');
+  const foreign = convergenceProject(ROUND_ONE.concat([finalReview(2)]), { schema: 'edit-landing-v9', log: '.zensu/logs/chain.log', claims: 0 });
+  const unknown = converge(foreign);
+  assert.equal(unknown.reason, 'receipt');
+  assert.match(unknown.line, /names no run log under a known schema, so no run log is bound to this chain$/);
+  const outside = convergenceProject(ROUND_ONE.concat([finalReview(2)]), { schema: 'edit-landing-v2', log: '../chain.log', claims: 0 });
+  assert.equal(converge(outside).reason, 'receipt');
+});
+
+test('convergence needs the review round that met the cap and a FINAL REVIEW LEDGERED line for it', () => {
+  const lines = ROUND_ONE.concat([line('R2-F1', 'deferred', 'SUGGESTION', 'src/d.ts:2', 'tighten wording')]);
+  const unmarked = convergenceProject(lines);
+  const noRound = ledger.convergence({ receipt: unmarked.receipt, projectRoot: unmarked.root });
+  assert.equal(noRound.converged, false);
+  assert.equal(noRound.reason, 'final-round');
+  assert.equal(
+    noRound.line,
+    ledger.CONVERGENCE_HEAD + "not converged | the chain's review round could not be read, so the review that met the cap cannot be matched to the findings ledger"
+  );
+  for (const bad of [0, -1, 1.5, '2', null]) assert.equal(converge(unmarked, { finalRound: bad }).reason, 'final-round');
+  const missing = converge(unmarked);
+  assert.equal(missing.converged, false);
+  assert.equal(missing.reason, 'final-review-unledgered');
+  assert.equal(
+    missing.line,
+    ledger.CONVERGENCE_HEAD + "not converged | no 'FINAL REVIEW LEDGERED — R2' line follows the last review budget reset, so the findings of the review that met the cap may never have reached the ledger"
+  );
+  assert.equal(converge(convergenceProject(lines.concat([finalReview(1)]))).reason, 'final-review-unledgered');
+  assert.equal(converge(convergenceProject([finalReview(2), 'REVIEW BUDGET RESET'].concat(lines))).reason, 'final-review-unledgered');
+  assert.equal(converge(convergenceProject(lines.concat(['note: ' + finalReview(2)]))).reason, 'final-review-unledgered');
+  assert.equal(converge(convergenceProject(lines.concat(['[2026-11-15 10:00:00] ' + finalReview(2) + ' ']))).converged, true);
+  assert.equal(converge(convergenceProject(lines.concat(['FINAL REVIEW LEDGERED - R2']))).converged, true);
+  assert.equal(ledger.finalReviewLedgered([finalReview(3), 'REVIEW BUDGET RESET', finalReview(2)].join('\n'), 2), true);
+  assert.equal(ledger.finalReviewLedgered([finalReview(2), 'REVIEW BUDGET RESET', finalReview(3)].join('\n'), 2), false);
+});
+
+test('a ledger line lost before the last reset keeps the attempt unconverged while the report read stays ok', () => {
+  const lines = [
+    'FINDING LEDGER — broken line',
+    'REVIEW BUDGET RESET',
+    line('R1-F1', 'deferred', 'SUGGESTION', 'src/h.ts:1', 'new generation suggestion'),
+    finalReview(2),
+  ];
+  const verdict = converge(convergenceProject(lines));
+  assert.equal(verdict.converged, false);
+  assert.equal(verdict.reason, 'ledger-lost');
+  assert.match(verdict.line, /could not read a line before its last review budget reset \(malformed-line\)$/);
+  const report = ledger.ledgerState({ text: lines.join('\n'), report: true });
+  assert.equal(report.status, 'ok');
+  assert.equal(report.lost, 'malformed-line');
+  const routing = ledger.ledgerState({ text: lines.join('\n') });
+  assert.equal(routing.status, 'ok');
+  assert.equal(routing.lost, undefined);
+  const twice = ledger.ledgerState({
+    text: ['FINDING LEDGER — first broken line', 'REVIEW BUDGET RESET', 'FINDING LEDGER — second broken line', 'REVIEW BUDGET RESET', line('R1-F1', 'deferred', 'SUGGESTION', 'src/h.ts:1', 'third generation')].join('\n'),
+    report: true,
+  });
+  assert.equal(twice.status, 'ok');
+  assert.equal(twice.lost, 'malformed-line');
+});
+
+test('a parked line for an earlier deferred suggestion blocks convergence, and a carried id cannot be parked', () => {
+  const parked = convergenceProject([
+    line('R1-F1', 'deferred', 'SUGGESTION', 'src/i.ts:3', 'deferred as a suggestion'),
+    line('R1-F1', 'parked', 'IMPORTANT', 'src/i.ts:3', 'the final review raised it again as important'),
+    finalReview(2),
+  ]);
+  const verdict = converge(parked);
+  assert.equal(verdict.converged, false);
+  assert.equal(verdict.line, ledger.CONVERGENCE_HEAD + 'not converged | the findings ledger holds 1 open defect: R1-F1 parked IMPORTANT');
+  const carried = convergenceProject([
+    line('R1-F1', 'deferred', 'SUGGESTION', 'src/i.ts:3', 'deferred as a suggestion'),
+    'REVIEW BUDGET RESET',
+    line('G1:R1-F1', 'parked', 'IMPORTANT', 'src/i.ts:3', 'a carried id takes only a fixed line'),
+    finalReview(2),
+  ]);
+  assert.equal(converge(carried).reason, 'ledger-partial');
+});
+
+test('reviewRoundOf reads a positive review round from a bounded regular file only', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'tdd-phase-scv1_test.json');
+  fs.writeFileSync(file, JSON.stringify({ reviewRound: 2 }));
+  assert.equal(ledger.reviewRoundOf(file), 2);
+  for (const value of [0, -1, 1.5, '2', null]) {
+    fs.writeFileSync(file, JSON.stringify({ reviewRound: value }));
+    assert.equal(ledger.reviewRoundOf(file), null);
+  }
+  fs.writeFileSync(file, '{not json');
+  assert.equal(ledger.reviewRoundOf(file), null);
+  fs.writeFileSync(file, JSON.stringify({ reviewRound: 2, pad: 'x'.repeat(1048576) }));
+  assert.equal(ledger.reviewRoundOf(file), null);
+  assert.equal(ledger.reviewRoundOf(path.join(dir, 'absent.json')), null);
+  assert.equal(ledger.reviewRoundOf(dir), null);
+  assert.equal(ledger.reviewRoundOf(''), null);
+  assert.equal(ledger.reviewRoundOf(undefined), null);
+  fs.writeFileSync(file, JSON.stringify({ reviewRound: 3 }));
+  const link = path.join(dir, 'linked.json');
+  let linked = true;
+  try {
+    fs.symlinkSync(file, link);
+  } catch (_) {
+    linked = false;
+  }
+  if (linked) assert.equal(ledger.reviewRoundOf(link), null);
+  assert.equal(ledger.reviewRoundOf(file), 3);
+});
+
+test('convergenceMain writes one line and answers 0 only for a converged ledger', () => {
+  const written = [];
+  const stdout = { write: (text) => written.push(text) };
+  const project = convergenceProject(ROUND_ONE.concat([finalReview(2)]));
+  const state = path.join(project.root, '.zensu', 'state', 'tdd-phase-scv1_test.json');
+  fs.writeFileSync(state, JSON.stringify({ reviewRound: 2 }));
+  const env = { ZENSU_RL_RECEIPT: project.receipt, ZENSU_RL_PROJECT_ROOT: project.root, ZENSU_RL_STATE: state };
+  assert.equal(ledger.convergenceMain(env, stdout), 0);
+  assert.equal(written.length, 1);
+  assert.ok(written[0].startsWith(ledger.CONVERGENCE_HEAD + 'converged | '));
+  assert.ok(!written[0].includes('\n'));
+  assert.equal(ledger.convergenceMain(Object.assign({}, env, { ZENSU_RL_CONVERGENCE: 'off' }), stdout), 3);
+  assert.ok(written[1].startsWith(ledger.CONVERGENCE_HEAD + 'not converged | hooks.reviewConvergence is off'));
+  assert.equal(ledger.convergenceMain(Object.assign({}, env, { ZENSU_RL_STATE: '' }), stdout), 3);
+  assert.ok(written[2].startsWith(ledger.CONVERGENCE_HEAD + "not converged | the chain's review round could not be read"));
+  fs.writeFileSync(state, JSON.stringify({ reviewRound: 3 }));
+  assert.equal(ledger.convergenceMain(env, stdout), 3);
+  assert.ok(written[3].includes("no 'FINAL REVIEW LEDGERED — R3' line follows"));
+  assert.equal(ledger.convergenceMain({}, stdout), 3);
+  assert.ok(written[4].startsWith(ledger.CONVERGENCE_HEAD + 'not converged | '));
+});

@@ -3140,7 +3140,7 @@ var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessi
   'evidence', 'blocked', 'bypasses', 'stopBudget', 'events'];
 var AUTOPILOT_TERMINAL_UNSHAPED = { terminalUnshaped: true };
 var AUTOPILOT_SHA256_RE = /^[a-fA-F0-9]{64}$/;
-var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds'];
+var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds', 'converged'];
 // The owner's `sha256` is a TYPE test as much as a pattern test, and the type half is
 // the load-bearing one here: `RegExp.prototype.test` applies ToString to its argument,
 // so `['a'.repeat(64)]` satisfies a bare `.test` and fails the owner. This predicate

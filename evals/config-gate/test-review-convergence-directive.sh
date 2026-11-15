@@ -200,6 +200,16 @@ case "$MAXOFF2" in
     check "MR2 the max-rounds close without self-review runs the full suite before the reply" PASS ;;
   *) check "MR2 the max-rounds close without self-review runs the full suite before the reply" FAIL ;;
 esac
+if [ -n "$MAX2" ] && [ "$(lacks "$MAX2" 'NEXT, ledger this final review')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'returns to its Autopilot stage as converged')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'FINAL REVIEW LEDGERED')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'run the terminus again with --outcome max-rounds')" = PASS ] \
+  && [ "$(has "$MAX2" 'rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'The code-reviewer loop is closed')" = PASS ]; then
+  check "MR3 the standalone max-rounds hand-off keeps its baseline sentence and carries no final-review ledger step, marker or converged outcome rule" PASS
+else
+  check "MR3 the standalone max-rounds hand-off keeps its baseline sentence and carries no final-review ledger step, marker or converged outcome rule" FAIL
+fi
 ONE1="$(context_of "$TMP_DIR/one-round/round-1.json")"
 ONE2="$(context_of "$TMP_DIR/one-round/round-2.json")"
 RPOFF2="$(context_of "$TMP_DIR/repro-off/round-2.json")"

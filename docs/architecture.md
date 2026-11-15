@@ -55,7 +55,7 @@ flowchart TD
         NEXT -->|"No"| K["code-reviewer Agent"]
         K --> L["Review Report"]
         L -->|"auto-fix (≤ autoFixMaxRounds)"| E
-        L -->|"converged (PASS / max rounds)"| SR["/zensu:self-review<br/>(terminal · ≤ 1 fix round)"]
+        L -->|"review loop closed (PASS / max rounds)"| SR["/zensu:self-review<br/>(terminal · ≤ 1 fix round)"]
         SR --> FR(["Final Report"])
         GATE["PreToolUse FSM gate"] -.guards.-> RED
         GATE -.-> IMPL

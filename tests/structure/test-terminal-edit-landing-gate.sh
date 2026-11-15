@@ -71,13 +71,13 @@ else
   check "T1a unqualified gate position (gate=$U_EL mark=$U_MARK)" FAIL
 fi
 OUTCOME_BLOCK="$(awk '/case "\$done_outcome" in/{on=1} on{print} on&&/^[[:space:]]*esac$/{exit}' "$LOG")"
-PASS_ARM="$(printf '%s\n' "$OUTCOME_BLOCK" | awk '/^[[:space:]]*pass\)$/{on=1;next} on&&/^[[:space:]]*;;$/{exit} on{print}')"
+PASS_ARM="$(printf '%s\n' "$OUTCOME_BLOCK" | awk '/^[[:space:]]*pass[|]converged\)$/{on=1;next} on&&/^[[:space:]]*;;$/{exit} on{print}')"
 MAX_ARM="$(printf '%s\n' "$OUTCOME_BLOCK" | awk '/^[[:space:]]*max-rounds\)$/{on=1;next} on&&/^[[:space:]]*;;$/{exit} on{print}')"
 B_EL="$(printf '%s\n' "$PASS_ARM" | grep -nF '_zensu_terminal_edit_landing_gate "$session_val" || exit 1' | cut -d: -f1)"
 B_FS="$(printf '%s\n' "$PASS_ARM" | grep -nF '_zensu_full_suite_gate "$session_val" bound "$autopilot_ctx" || exit 1' | cut -d: -f1)"
 if [ -n "$B_EL" ] && [ -n "$B_FS" ] && [ "$B_EL" -lt "$B_FS" ] && [ -n "$MAX_ARM" ] \
   && ! printf '%s\n' "$MAX_ARM" | grep -qF '_zensu_terminal_edit_landing_gate'; then
-  check "T1b an Autopilot pass runs the gate before the full-suite gate, and a max-rounds outcome is not gated" PASS
+  check "T1b an Autopilot pass or converged close runs the gate before the full-suite gate, and a max-rounds outcome is not gated" PASS
 else
   check "T1b bound gate position (pass-arm gate=$B_EL full-suite=$B_FS)" FAIL
 fi

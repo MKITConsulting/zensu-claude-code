@@ -4416,7 +4416,7 @@ const CHAIN_SNAPSHOT_RETURN_STAGES = Object.freeze([
   'VALIDATE',
   'COVER',
 ]);
-const CHAIN_SNAPSHOT_OUTCOMES = Object.freeze(['', 'pass', 'no-changes', 'max-rounds']);
+const CHAIN_SNAPSHOT_OUTCOMES = Object.freeze(['', 'pass', 'no-changes', 'max-rounds', 'converged']);
 
 function workflowChainSnapshot(state, sessionId) {
   const natural = (value) => Number.isSafeInteger(value) && value >= 0;

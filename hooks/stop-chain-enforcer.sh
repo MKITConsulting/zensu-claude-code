@@ -2212,7 +2212,7 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
   SELF_REVIEW_TICKET="$(tdd_ensure_self_review_ticket "$SESSION_ID" 2>/dev/null)" || SELF_REVIEW_TICKET=""
   if _tdd_review_ticket_shape_ok "$SELF_REVIEW_TICKET"; then
     SELF_REVIEW_TICKET_Q="$(printf '%q' "$SELF_REVIEW_TICKET")"
-    SELF_REVIEW_STATE="The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run."
+    SELF_REVIEW_STATE="The code-reviewer loop is closed (codeReviewDone) but the terminal self-review stage has not run."
     if _tdd_zero_change_ticket "$SELF_REVIEW_TICKET"; then
       SELF_REVIEW_STATE="No reviewer ran in this chain: its review mark (codeReviewDone) is the unqualified one, which stands only while the worktree reports no changed file, and the terminal self-review stage has not run. On a changed tree its terminus refuses and reopens the review instead of closing the chain."
     fi

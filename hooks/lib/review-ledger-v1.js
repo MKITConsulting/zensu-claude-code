@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const path = require("node:path");
 const scope = require("./review-round-scope-v1.js");
 
 const MAX_ENTRIES = 500;
@@ -14,6 +15,13 @@ const SHELL_ACTIVE = /`|\$[({]/;
 const REGISTRATIONS = new Set(["routed", "deferred", "neutralized"]);
 const OPEN_STATES = new Set(["deferred", "parked", "routed-unfixed"]);
 const LISTED = new Set(["ok", "partial"]);
+const DEFECT_STATES = new Set(["routed-unfixed", "parked"]);
+const BLOCKING_SEVERITIES = new Set(["CRITICAL", "IMPORTANT"]);
+const CONVERGENCE_HEAD = "CONVERGENCE — ";
+const LISTED_DEFECTS = 5;
+const FINAL_REVIEW_HEAD = "FINAL REVIEW LEDGERED — R";
+const FINAL_REVIEW = /^\s*(?:\[[^\]]*\]\s*)?FINAL REVIEW LEDGERED\s*[—–-]\s*R([1-9][0-9]{0,5})\s*$/;
+const MAX_STATE_BYTES = 1048576;
 
 function parseAnchor(raw) {
   const value = String(raw == null ? "" : raw);
@@ -92,6 +100,7 @@ function ledgerState(options) {
   const carried = new Map();
   let maxRound = 0;
   let issue = "";
+  let lost = "";
   const nextGeneration = () => {
     if (report) {
       for (const entry of entries.values()) {
@@ -107,6 +116,7 @@ function ledgerState(options) {
   for (const raw of text.split("\n")) {
     const line = raw.replace(/\r$/, "");
     if (scope.RESET.test(line)) {
+      if (report && issue && !lost) lost = issue;
       nextGeneration();
       issue = "";
       continue;
@@ -158,11 +168,12 @@ function ledgerState(options) {
   const byOrigin = (a, b) => (a.generation || 0) - (b.generation || 0) || a.round - b.round || a.index - b.index;
   const list = Array.from(carried.values()).sort(byOrigin).concat(Array.from(entries.values()).sort(byOrigin));
   const open = list.filter((entry) => OPEN_STATES.has(entry.state)).length;
-  if (issue) return { status: "partial", reason: issue, generation, entries: list, open };
+  const earlier = lost ? { lost } : {};
+  if (issue) return Object.assign({ status: "partial", reason: issue, generation, entries: list, open }, earlier);
   if (list.length === 0) {
-    return { status: "empty", reason: "no-entries", generation, entries: [], open: 0 };
+    return Object.assign({ status: "empty", reason: "no-entries", generation, entries: [], open: 0 }, earlier);
   }
-  return { status: "ok", reason: "", generation, entries: list, open };
+  return Object.assign({ status: "ok", reason: "", generation, entries: list, open }, earlier);
 }
 
 function render(report) {
@@ -187,6 +198,151 @@ function render(report) {
   if (report.status !== "ok") summary += " reason=" + report.reason;
   lines.push(summary);
   return lines.join("\n");
+}
+
+function openDefect(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  if (DEFECT_STATES.has(entry.state)) return true;
+  return entry.state === "deferred" && BLOCKING_SEVERITIES.has(entry.severity);
+}
+
+function notConverged(reason, text) {
+  return { converged: false, reason, line: CONVERGENCE_HEAD + "not converged | " + text };
+}
+
+function ledgerText(logPath, root) {
+  let rootReal;
+  try {
+    rootReal = fs.realpathSync.native(root);
+  } catch (_) {
+    return { ok: false, reason: "bad-root" };
+  }
+  return scope.readLog(logPath, rootReal);
+}
+
+function finalReviewLedgered(text, round) {
+  let seen = false;
+  for (const raw of String(text).split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (scope.RESET.test(line)) {
+      seen = false;
+      continue;
+    }
+    const match = FINAL_REVIEW.exec(line);
+    if (match && Number(match[1]) === round) seen = true;
+  }
+  return seen;
+}
+
+function convergence(options) {
+  const opts = options || {};
+  if (opts.enabled === false) {
+    return notConverged("disabled", "hooks.reviewConvergence is off, so no findings ledger records what the reviews left open");
+  }
+  const finalRound = opts.finalRound;
+  if (!Number.isSafeInteger(finalRound) || finalRound < 1) {
+    return notConverged("final-round", "the chain's review round could not be read, so the review that met the cap cannot be matched to the findings ledger");
+  }
+  let receipts;
+  try {
+    receipts = require("./edit-landing-receipt-v1.js");
+  } catch (_) {
+    return notConverged("receipt-reader", "the edit-landing receipt reader could not be loaded, so no run log is bound to this chain");
+  }
+  const bound = receipts.receiptRunLog({
+    receiptPath: typeof opts.receipt === "string" ? opts.receipt : "",
+    projectRoot: typeof opts.projectRoot === "string" ? opts.projectRoot : "",
+  });
+  if (bound.status === "absent") {
+    return notConverged("no-receipt", "this session has no edit-landing receipt, so no run log is bound to this chain");
+  }
+  if (bound.status !== "ok") {
+    return notConverged("receipt", (bound.reason || "the edit-landing receipt names no usable run log") + ", so no run log is bound to this chain");
+  }
+  const read = ledgerText(path.join(bound.root, ...bound.logRel.split("/")), bound.root);
+  if (!read.ok) {
+    return notConverged(
+      "ledger-degraded",
+      "the findings ledger of the run log the edit-landing receipt names answered status=degraded (" + read.reason + ")"
+    );
+  }
+  const report = ledgerState({ text: read.text, report: true });
+  if (report.status === "empty") {
+    return notConverged("ledger-empty", "the findings ledger of the run log the edit-landing receipt names holds no entry, so nothing records what the reviews left open");
+  }
+  if (report.status !== "ok") {
+    return notConverged(
+      "ledger-" + report.status,
+      "the findings ledger of the run log the edit-landing receipt names answered status=" + report.status + " (" + report.reason + ")"
+    );
+  }
+  if (report.lost) {
+    return notConverged(
+      "ledger-lost",
+      "the findings ledger of the run log the edit-landing receipt names could not read a line before its last review budget reset (" + report.lost + ")"
+    );
+  }
+  const open = report.entries.filter(openDefect);
+  if (open.length > 0) {
+    const listed = open.slice(0, LISTED_DEFECTS).map((entry) => entry.id + " " + entry.state + " " + entry.severity);
+    if (open.length > LISTED_DEFECTS) listed.push("…");
+    return notConverged(
+      "open-defects",
+      "the findings ledger holds " + open.length + " open defect" + (open.length === 1 ? "" : "s") + ": " + listed.join(", ")
+    );
+  }
+  if (!finalReviewLedgered(read.text, finalRound)) {
+    return notConverged(
+      "final-review-unledgered",
+      "no '" + FINAL_REVIEW_HEAD + finalRound + "' line follows the last review budget reset, so the findings of the review that met the cap may never have reached the ledger"
+    );
+  }
+  const deferred = report.entries.filter((entry) => OPEN_STATES.has(entry.state)).length;
+  return {
+    converged: true,
+    reason: "converged",
+    line:
+      CONVERGENCE_HEAD +
+      "converged | the findings ledger holds no routed-unfixed or parked entry and no deferred IMPORTANT or CRITICAL entry (" +
+      report.entries.length +
+      " entries, " +
+      deferred +
+      " deferred suggestion" +
+      (deferred === 1 ? "" : "s") +
+      " still open)",
+  };
+}
+
+function reviewRoundOf(file) {
+  if (typeof file !== "string" || file === "") return null;
+  let receipts;
+  try {
+    receipts = require("./edit-landing-receipt-v1.js");
+  } catch (_) {
+    return null;
+  }
+  const loaded = receipts.readBoundedJson(file, MAX_STATE_BYTES);
+  if (!loaded || !loaded.value || typeof loaded.value !== "object") return null;
+  const value = loaded.value.reviewRound;
+  return Number.isSafeInteger(value) && value >= 1 ? value : null;
+}
+
+function convergenceMain(env, stdout) {
+  const source = env || process.env;
+  const out = stdout || process.stdout;
+  let verdict;
+  try {
+    verdict = convergence({
+      receipt: source.ZENSU_RL_RECEIPT || "",
+      projectRoot: source.ZENSU_RL_PROJECT_ROOT || "",
+      enabled: source.ZENSU_RL_CONVERGENCE !== "off",
+      finalRound: reviewRoundOf(source.ZENSU_RL_STATE || ""),
+    });
+  } catch (_) {
+    verdict = notConverged("fault", "the convergence check failed inside review-ledger-v1.js");
+  }
+  out.write(verdict.line);
+  return verdict.converged ? 0 : 3;
 }
 
 function parseArgs(argv) {
@@ -234,5 +390,12 @@ if (require.main === module) {
     ledgerState,
     render,
     cliMain,
+    CONVERGENCE_HEAD,
+    FINAL_REVIEW_HEAD,
+    openDefect,
+    finalReviewLedgered,
+    reviewRoundOf,
+    convergence,
+    convergenceMain,
   };
 }

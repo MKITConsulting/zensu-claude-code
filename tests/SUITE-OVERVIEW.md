@@ -483,7 +483,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/restore-root-render-cases.test.js` | 79 | – | `test-restore-project-root.sh` | Restoring a vanished recorded project root: the verdict, restore and outcome renderers and their refusal arms. |
 | `structure/review-evidence-sweep-v1.test.js` | 32 | win32 6 | `test-versioned-plugin-upgrade.sh` | The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe. |
 | `structure/review-gate-v1.test.js` | 42 | – | `test-review-packet.sh` | The consume-review gate: reviewer records, background launches completed from hand-backs, name-framed hand-backs and completion notifications, canonical-packet equality, freshness and the primary-judge requirement. |
-| `structure/review-ledger-v1.test.js` | 42 | – | `test-review-convergence.sh` | The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts. |
+| `structure/review-ledger-v1.test.js` | 54 | – | `test-review-convergence.sh` | The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts. |
 | `structure/review-packet-v1.test.js` | 33 | – | `test-review-packet.sh` | The canonical review change set and the immutable per-round review packet. |
 | `structure/review-round-scope-v1.test.js` | 26 | – | `test-incremental-review-rounds.sh` | Delta-scoped review rounds: which files and findings a fix round reviews. |
 | `structure/reviewer-spawn-allow-v1.test.js` | 20 | – | `test-reviewer-spawn-allow.sh` | The reviewer-spawn grant: the derived agent set, its silence on every non-grant path and the one-definition scan. |
