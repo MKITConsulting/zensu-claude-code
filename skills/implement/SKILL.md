@@ -114,15 +114,18 @@ a file of this project) first, then follow it:
    The Markdown never goes into the command line itself: inside double quotes the shell
    runs its backtick spans and expands every `$NAME`, and a single quote ends at the first
    apostrophe. zensu-cli has no stdin or file form for `--content`, so write the text to a
-   temporary file through a heredoc whose delimiter is quoted (pick another delimiter if
-   the text holds that line), then pass the file:
+   temporary file through a heredoc whose delimiter is quoted, then pass the file. Replace
+   `<hex>` with eight random hex digits, new for each call and the same on both lines, so no
+   line of the text can end the heredoc early; `>|` writes even under `noclobber`, and
+   the `grep` line stops before an empty, blank or binary page reaches Zensu:
 
    ```bash
    f="$(mktemp)" || exit 1
    trap 'rm -f "$f"' EXIT
-   cat > "$f" <<'ZENSU_TEXT_END'
+   cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <markdown>
-   ZENSU_TEXT_END
+   ZENSU_TEXT_<hex>
+   grep -qI '[^[:space:]]' -- "$f" || exit 1
    ```
 
    - **The page exists:** `zensu wiki update <page-id> --content "$(cat "$f")" --change-summary "<what changed>"`.
@@ -166,6 +169,8 @@ Run `zensu features revision <feature-id>` to version the implementation:
 - `--coverage-target` (optional): Target coverage percentage (0-100)
 - `--docs-required` (optional): Whether docs are required for this revision
 - `--created-by` (optional): api | mcp | web-ui | github-sync
+
+`--scope-summary` and `--scope-details` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. Pass them as `--scope-summary "$(cat "$f")" --scope-details "$(cat "$d")"`, each file written and checked in the same Bash call as in Step 6, with `d="$(mktemp)" || exit 1` and the one trap widened to `trap 'rm -f "$f" "$d"' EXIT`.
 
 ### Step 8: Validate
 
