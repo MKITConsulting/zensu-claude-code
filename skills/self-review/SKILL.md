@@ -13,7 +13,7 @@ description: >
 <!-- /zensu:evidence-discipline -->
 
 Terminal self-reflection stage of the post-implementation review chain. After the
-`zensu:code-reviewer` chain converges (PASS, suggestions-only, or max-rounds), you
+`zensu:code-reviewer` loop closes (PASS, suggestions-only, or max-rounds), you
 re-read this session's work as an experienced senior engineer reviewing your own
 code, take at most ONE fix round if a must-fix surfaces, then render the final
 report and close the chain. This is the LAST instance — it never re-runs the
@@ -220,7 +220,7 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   the `/zensu:build` Phase 6 **step 1 full suite** over the amended tree through the
   evidence runner:
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope full --cmd '<full test command>' --log <run-log>`
-  — this is the chain's last edit, so this is
+  — the chain's last edit, so this is
   the run whose verdict describes the tree that ships, and Phase 5 checkpoints are
   scoped and cannot stand in for it.
   **In CI mode** — `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --full-suite-policy --chain`
@@ -266,11 +266,8 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   - re-invoke the whole `/zensu:build` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record — in CI mode on a missing, red, running, interrupted or stale local test run, and it passes as `deferred-ci` with a second `FULL SUITE — CI contract` line. On such a refusal the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. An `EDIT LANDING RECEIPT STALE — …` line means the receipt no longer describes this chain: run the audit its `Run:` line names, with a proof for every pending claim, then this step again. It applies the acceptance gate as well: it prints `ACCEPTANCE — <state> | …` lines and refuses while any active criterion lacks a `pass` on the current tree; on that refusal act on its remedy segments as `references/acceptance.md` states, then run this step again where a remedy lets you; an `accept:` segment closes only with the user's consent, as `--accept-partial <ids>` on this same call. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave the decision to the user. Any other failure is stale: stop and do not render a successful final report.
-  2. **Carry the full-suite verdict.** Copy every `FULL SUITE — …` line the terminus
-     printed — the verdict, plus the `flaky` line and the gate-mode disclosure when
-     present — into the `Full suite` verdict cell verbatim. Copy every `ACCEPTANCE — …`
-     line the same way into the `Acceptance` verdict cell.
+  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record — in CI mode on such a local test run, and it passes as `deferred-ci` with a second `FULL SUITE — CI contract` line. Then the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. An `EDIT LANDING RECEIPT STALE — …` line means the receipt no longer describes this chain: run the audit its `Run:` line names, proving every pending claim, then this step again. It applies the acceptance gate too: it prints `ACCEPTANCE — <state> | …` lines and refuses while an active criterion lacks a `pass` on the current tree; act on its remedy segments as `references/acceptance.md` states, then run this step again where a remedy lets you; an `accept:` segment closes only with the user's consent, as `--accept-partial <ids>` on this same call. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave the decision to the user. When such a stop follows a `CONVERGED CLOSE — …` line, rerun with `--outcome max-rounds` instead. Any other failure is stale: stop and do not render a successful final report.
+  2. **Carry the full-suite verdict.** Copy every `FULL SUITE — …` line the terminus printed into the `Full suite` cell verbatim, every `ACCEPTANCE — …` line into the `Acceptance` cell, and a `CONVERGENCE — …` line into the `How I built it` line, marked as refused by a gate after an `--outcome max-rounds` rerun.
   3. Render the final report (below), then stop.
 
 ### Final report
@@ -278,8 +275,7 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
 Render a CHAIN-END SUMMARY as TABLES, not prose: every section below is a table
 plus at most one line of text, never a paragraph — the sole exception is
 `## Open`, which ends with the bypass-ledger line followed, when it applies, by the
-converge offer. Keep it scannable — no restating, no narration of the process, no
-filler.
+converge offer. Keep it scannable: no restating, narration or filler.
 
 Mark every status and verdict cell with a leading marker: 🟢 good (passed, clean, done, met), 🟡 attention (partial, advisory, skipped, not measured), 🔴 bad (failed, must-fix, dropped, contradicted, blocked, not landed, unverified, unresolved predicate, verification degraded, a gate bypassed), ⚪ not applicable — admissible ONLY where the source of the value itself says the item does not apply, which today means exactly one case: a requirement row the plan already marks deprecated. An outcome that was merely not run is 🟡, never ⚪. The marker PREFIXES the cell value and NEVER replaces it: every verbatim literal keeps its own words unchanged after its marker, subject only to the pipe-escaping rule below, which the renderer undoes so the reader still sees the original text. A marker never stands alone and is never separated from the words it marks by a line break. The ## Open table has no status or verdict column and takes no marker.
 

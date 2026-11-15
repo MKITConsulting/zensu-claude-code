@@ -194,16 +194,26 @@ export function ledgerPaths(configRoot) {
 // Counting is bounded by MAX_EDGE_RECORDS for the same reason readEdges is —
 // this walks a directory any session on the machine can write.
 export function otherSchemaLedgers(configRoot) {
+  return schemaLedgerCensus(configRoot).ledgers;
+}
+
+export function schemaLedgerCensus(configRoot) {
   const base = path.dirname(ledgerPaths(configRoot).base);
+  const census = { base, ledgers: [], unread: [] };
   // The level above the two this function already lstats. `readdirSync` follows a
   // symlinked final component, so a link planted at `zensu` or `session-lineage`
   // was enumerated through and its contents rendered as "records this machine
   // already holds". Read-only, but that sentence is what tells an operator NOT to
   // reconstruct — so a planted directory could suppress a legitimate backfill.
-  if (!ledgerPathUnlinked(base, configRoot)) return [];
+  if (!ledgerPathUnlinked(base, configRoot)) {
+    census.unread.push(unreadSchemaLedger(null, base));
+    return census;
+  }
   let names;
-  try { names = fs.readdirSync(base); } catch { return []; }
-  const out = [];
+  try { names = fs.readdirSync(base); } catch (e) {
+    if (!(e && e.code === 'ENOENT')) census.unread.push(unreadSchemaLedger(null, base));
+    return census;
+  }
   for (const name of names) {
     const m = /^v(\d{1,9})$/.exec(name);
     if (!m) continue;
@@ -218,11 +228,21 @@ export function otherSchemaLedgers(configRoot) {
     // intermediate component and its `edges/` enumerated through it. The count
     // reported here becomes an instruction the operator acts on, and the config
     // root is writable by every session on the machine.
+    let vs;
+    let es;
     try {
-      const vs = fs.lstatSync(versionDir);
-      if (vs.isSymbolicLink() || !vs.isDirectory()) continue;
-      const es = fs.lstatSync(edges);
-      if (es.isSymbolicLink() || !es.isDirectory()) continue;
+      vs = fs.lstatSync(versionDir);
+      es = vs.isDirectory() ? fs.lstatSync(edges) : null;
+    } catch (e) {
+      if (!(e && e.code === 'ENOENT')) census.unread.push(unreadSchemaLedger(version, versionDir));
+      continue;
+    }
+    if (vs.isSymbolicLink() || (es && es.isSymbolicLink())) {
+      census.unread.push(unreadSchemaLedger(version, versionDir));
+      continue;
+    }
+    if (!vs.isDirectory() || !es.isDirectory()) continue;
+    try {
       // STREAMED, not materialized. This enumeration used to build an array holding
       // every name in a directory the comment above calls writable by every session on
       // the machine — and it now runs on every `lineage` invocation rather than only on
@@ -241,9 +261,12 @@ export function otherSchemaLedgers(configRoot) {
       } finally {
         try { dir.closeSync(); } catch { /* the count is what matters */ }
       }
-    } catch { continue; }
+    } catch {
+      census.unread.push(unreadSchemaLedger(version, versionDir));
+      continue;
+    }
     if (!records) continue;
-    out.push({
+    census.ledgers.push({
       version,
       dir: edges,
       // The TRUE count, plus a flag — the clamp bounded only the number reported
@@ -257,7 +280,13 @@ export function otherSchemaLedgers(configRoot) {
       relation: version < LEDGER_SCHEMA_VERSION ? 'older' : 'newer',
     });
   }
-  return out.sort((a, b) => a.version - b.version);
+  census.ledgers.sort((a, b) => a.version - b.version);
+  census.unread.sort((a, b) => (a.version === null ? -1 : a.version) - (b.version === null ? -1 : b.version));
+  return census;
+}
+
+function unreadSchemaLedger(version, dir) {
+  return { version, dir, records: null, truncated: false, relation: version === null ? 'unknown' : (version < LEDGER_SCHEMA_VERSION ? 'older' : 'newer') };
 }
 
 // Refused rather than created when any component is a symlink or a non-directory.

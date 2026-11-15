@@ -296,6 +296,55 @@ lean panel's re-review reads the edit but not the ledger, and `/zensu:self-revie
 `fixed` entry as a candidate. A `fixed` line written for an edit that missed its finding therefore
 stays closed unless a later review raises the defect again.
 
+#### Max rounds in an Autopilot-bound chain
+
+A chain that reaches `autoFixMaxRounds` hands off to `/zensu:self-review`, which takes its one
+fix round and closes the chain. For an Autopilot-bound chain that close also decides how the
+attempt ends, and the bound `--chain-done` terminus is the only place that decides it:
+
+- **`converged`.** The hand-off recorded `max-rounds`, the self-review closes with the ticket
+  the hand-off issued, `hooks.reviewConvergence` is on, the session's edit-landing receipt names
+  a run log, and that log's findings ledger, read the way the reports read it (`--report`),
+  answers `status=ok` with no `routed-unfixed` or `parked` entry, no `deferred` IMPORTANT or
+  CRITICAL entry and no line it could not read before the last `REVIEW BUDGET RESET`, and holds
+  a `FINAL REVIEW LEDGERED — R<n>` line after that reset for the review round that met the cap.
+  The attempt then meets the gates a `pass` meets (edit landing and full suite; acceptance answers
+  `not-checked` for a bound chain), and the run returns to its Autopilot stage as it does after a
+  `pass`. Deferred SUGGESTION entries
+  stay open in the report and do not block.
+- **`max-rounds`.** Every other case: an open defect, an empty, partial or unreadable ledger, a
+  missing `FINAL REVIEW LEDGERED` line, no receipt, a receipt that names no run log,
+  `hooks.reviewConvergence` off, or a check that could not run. The run blocks with
+  `TDD_MAX_ROUNDS` as before, and `/zensu:reset-review-limit` can resume it for another attempt.
+- **A converged close that a gate refuses.** The chain stays open, and the terminus has printed a
+  `CONVERGED CLOSE — …` line. A refusal that names a command to run, a record to wait for or an
+  audit to repeat is answered that way, and the terminus runs again. A cause only an edit can
+  remove, such as a failed full suite, takes the self-review's one fix round; once that round is
+  spent, `--chain-done --outcome max-rounds` closes the attempt as `max-rounds`, runs no pass gate
+  and blocks the run with `TDD_MAX_ROUNDS`, and the final report marks the converged verdict as
+  refused by a gate.
+
+The terminus prints the decision as one line before the gate lines,
+`CONVERGENCE — converged | …` or `CONVERGENCE — not converged | <reason>`, and names up to five
+open defects by ledger id, state and severity. The final review of the chain is never routed, so
+its findings would reach no ledger line; the bound hand-off therefore asks the main thread to
+ledger them before the self-review starts, a CRITICAL or IMPORTANT finding as `routed`, which
+makes it a must-fix candidate of the self-review's fix round, and a SUGGESTION as `deferred`. A
+CRITICAL or IMPORTANT finding the judge names in a `[STILL OPEN] <ledger-id> covers <panel-id>`
+line gets a `parked` line for the earlier id instead, so an earlier deferred suggestion that it
+raises again blocks the close. The hand-off then asks for the `FINAL REVIEW LEDGERED — R<n>`
+line, also when that review needed no ledger line. The `fixed` lines
+`--round-prepare --round self-review` writes for that round then close what it fixed. A candidate
+the self-review leaves unfixed gets no ledger transition, so it keeps the attempt at `max-rounds`.
+
+Only the terminus decides `converged`. `--chain-done --outcome converged`, like every `--outcome`
+other than `pass`, `no-changes` and `max-rounds`, is refused with exit `2` and changes nothing, an
+explicit `--outcome max-rounds` skips the check, and the workflow
+document can be sealed as `converged` only from a recorded `max-rounds` hand-off with the claimed
+review ticket. With `hooks.selfReview` off the post-review hook closes a bound chain at max rounds
+itself, and that close stays `max-rounds`, because no later stage could fix what the last review
+found.
+
 #### Background review agents
 
 A host may start every `Agent` spawn in the background: the Claude desktop app does, and its

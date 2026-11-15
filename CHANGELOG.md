@@ -50,6 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so an MCP tool, `WebFetch` or an agent prompt whose input spells a path inside a run's `auth/`
   directory is refused, and `/zensu:doctor` reports a registration that lists tools as not
   registered.
+- **Converged max-rounds attempts**: an Autopilot-bound `/zensu:build` attempt that reaches
+  `hooks.autoFixMaxRounds` now closes at the self-review terminus as `converged`, and its run
+  returns to its Autopilot stage, when the chain's findings ledger holds no routed-unfixed or
+  parked entry and no deferred IMPORTANT or CRITICAL entry, and records the final review with a
+  `FINAL REVIEW LEDGERED — R<n>` line. Such an attempt meets the gates a `pass` meets; when one
+  refuses for a cause only an edit can remove and the self-review's fix round is spent,
+  `--chain-done --outcome max-rounds` closes the attempt as before. Every other max-rounds
+  attempt still blocks the run with `TDD_MAX_ROUNDS`, and the terminus names the reason in a
+  `CONVERGENCE — …` line. A bound `--chain-done --outcome` other than `pass`, `no-changes` or
+  `max-rounds`, `converged` included, is refused with exit 2. The bound hand-off asks for ledger
+  lines for the final review's findings, and for
+  that marker, before the self-review starts. An installation that predates this release fails
+  closed on a run record or workflow document that holds `converged`.
 
 ## [0.38.0] - 2026-11-13
 

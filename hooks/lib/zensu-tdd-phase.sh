@@ -1393,7 +1393,7 @@ tdd_autopilot_context() {
         && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
         && ["GATES","CONVERGE","FIX_FINDINGS","VALIDATE","COVER"].includes(s.autopilotReturnStage)
         && linkId(s.chainId)
-        && (s.chainOutcome === "" || s.chainOutcome === "pass" || s.chainOutcome === "no-changes" || s.chainOutcome === "max-rounds");
+        && (s.chainOutcome === "" || s.chainOutcome === "pass" || s.chainOutcome === "no-changes" || s.chainOutcome === "max-rounds" || s.chainOutcome === "converged");
       if (!valid) process.exit(3);
       process.stdout.write(JSON.stringify({
         sessionId:process.env.EXPECTED_SESSION,
@@ -1559,7 +1559,7 @@ _tdd_set_chain_outcome_critical() {
       let s;
       try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
       catch (_) { process.exit(3); }
-      const outcomes = new Set(["", "pass", "no-changes", "max-rounds"]);
+      const outcomes = new Set(["", "pass", "no-changes", "max-rounds", "converged"]);
       const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
       const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
         && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
@@ -1647,7 +1647,7 @@ _tdd_finish_autopilot_chain_critical() {
       let s;
       try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
       catch (_) { process.exit(3); }
-      const outcomes = new Set(["", "pass", "no-changes", "max-rounds"]);
+      const outcomes = new Set(["", "pass", "no-changes", "max-rounds", "converged"]);
       const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
       const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
         && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
@@ -1681,9 +1681,10 @@ _tdd_finish_autopilot_chain_critical() {
       // that generation with another outcome (or ticket, rejected above) is a
       // conflict. A pre-persisted matching max-rounds outcome may be sealed.
       if (s.chainDone === true) process.exit(s.chainOutcome === process.env.OUTCOME ? 10 : 3);
-      if (s.chainDone !== false || (s.chainOutcome !== "" && s.chainOutcome !== process.env.OUTCOME)) {
-        process.exit(3);
-      }
+      const sealable = process.env.OUTCOME === "converged"
+        ? Boolean(ticket) && s.chainOutcome === "max-rounds" && s.codeReviewDone === true
+        : s.chainOutcome === "" || s.chainOutcome === process.env.OUTCOME;
+      if (s.chainDone !== false || !sealable) process.exit(3);
       s.chainOutcome = process.env.OUTCOME;
       s.chainDone = true;
       fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
@@ -1709,7 +1710,7 @@ tdd_finish_autopilot_chain() {
   _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
   _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
   _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
-  case "$outcome" in pass|no-changes|max-rounds) ;; *) return 1 ;; esac
+  case "$outcome" in pass|no-changes|max-rounds|converged) ;; *) return 1 ;; esac
   if [ -n "$ticket" ]; then _tdd_review_ticket_shape_ok "$ticket" || return 1; fi
   state_file="$(tdd_state_file "$session_id")"
   _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
@@ -1921,7 +1922,7 @@ _tdd_mark_autopilot_max_round_handoff_critical() {
         && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
           .includes(s.autopilotReturnStage)
         && linkId(s.chainId)
-        && ["", "pass", "no-changes", "max-rounds"].includes(s.chainOutcome);
+        && ["", "pass", "no-changes", "max-rounds", "converged"].includes(s.chainOutcome);
       const exact = completeLink
         && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
         && typeof s.phase === "string" && Array.isArray(s.history) && Array.isArray(s.bypasses)

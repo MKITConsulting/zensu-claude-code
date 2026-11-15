@@ -5,8 +5,7 @@ live in `.claude/rules/`, one file per subsystem. Each rule file declares `paths
 Claude Code loads it only when a matching file is read. When a task touches a subsystem without
 opening its files, open the rule file from the index at the end of this file.
 
-A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the rule
-file listed under that title in the index.
+A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the rule file listed under that title in the index.
 
 ## Keeping This File Small
 
@@ -20,10 +19,9 @@ file listed under that title in the index.
 
 ## Language
 
-**English only.** All code, comments, docs, commit messages, plan files, prompts,
-fixture content and pattern alternations must be in English, and so must every
-artifact the plugin emits. Consuming repositories commit `.zensu/plans/` and
-`.zensu/logs/` and may publish them.
+**English only.** All code, comments, docs, commit messages, plan files, prompts, fixture
+content and pattern alternations must be in English, and so must every artifact the plugin
+emits. Consuming repositories commit `.zensu/plans/` and `.zensu/logs/` and may publish them.
 
 Two narrow carve-outs admit non-English text, and only as match literals: verbatim
 user-utterance literals in hook directives (for example `'kein tdd'`), and eval
@@ -134,6 +132,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)** — rebuilding a missing workflow document without relaxing the deny: `.claude/rules/workflow-baseline-repair.md`
 - **Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)** — owner versus workspace scoping, release and adoption of durable runs: `.claude/rules/autopilot-run-scope.md`
 - **Autopilot Gate Re-entry (`transition` in `hooks/lib/zensu-autopilot-state.sh`)** — why stage edges are only ever added, the gate re-entry after a convergence fix and the bound on re-opening a pull request: `.claude/rules/autopilot-gate-reentry.md`
+- **Converged Max-Rounds Attempts (`_zensu_bound_convergence` + `convergence` in `review-ledger-v1.js`)** — when an Autopilot-bound attempt at the round cap returns to its stage as `converged` instead of blocking with `TDD_MAX_ROUNDS`, the one owner of that decision and the additive outcome value: `.claude/rules/converged-max-rounds.md`
 - **Owner-Scoped Active-Run Read (`autopilot_read_active_strict`)** — which callers read the owner-scoped question strictly, the read-only look on a held lease, the same separation in the Stop reconcile and the public workspace read, and the lease checks: `.claude/rules/autopilot-active-read.md`
 - **CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)** — which `zensu` CLI verbs the write-gate treats as mutations: `.claude/rules/cli-command-classification.md`
 - **zensu-cli Version Floor (`hooks/lib/zensu-cli-version-v1.js`)** — the oldest supported zensu-cli, its install commands, a probe that never runs a working-directory binary, and the prose copies pinned to it: `.claude/rules/zensu-cli-floor.md`

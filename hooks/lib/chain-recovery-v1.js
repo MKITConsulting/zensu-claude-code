@@ -25,7 +25,7 @@ const RECOVERY_HISTORY_REASON_PREFIX = 'chain-recovered: ';
 // while `hooks/lib/zen-anchor-v1.js` keys its own outcome allowlist on these
 // members - so a RENAMED member left a dead key there, and in that file's test
 // literals, with every check green and the blocked mark silently unreachable.
-const CHAIN_OUTCOMES = Object.freeze(['', 'pass', 'no-changes', 'max-rounds']);
+const CHAIN_OUTCOMES = Object.freeze(['', 'pass', 'no-changes', 'max-rounds', 'converged']);
 // FROZEN like every other exported shape table. `RECOVERABLE_SHAPES` is exported and feeds
 // `recoverable`, the flag that authorizes `--chain-recover`, while `STUCK_SHAPES` spreads it
 // at load — so a mutation would move `recoverable` and `blocked` without moving `wedged`.

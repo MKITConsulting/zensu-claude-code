@@ -888,6 +888,34 @@ _zensu_terminal_edit_landing_gate() {
   return 1
 }
 
+_zensu_bound_convergence() {
+  local session="$1" mode=on receipt state lib native_lib native_receipt="" native_state="" native_root line rc=0
+  _cvg_line=""
+  zensu_hook_enabled reviewConvergence || mode=off
+  command -v tdd_edit_landing_receipt >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+  receipt="$(tdd_edit_landing_receipt "$session" 2>/dev/null)" || receipt=""
+  state="$(tdd_state_file "$session" 2>/dev/null)" || state=""
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js"
+  native_lib="$(_tdd_native_path "$lib" 2>/dev/null || printf '%s' "$lib")"
+  [ -z "$receipt" ] || native_receipt="$(_tdd_native_path "$receipt" 2>/dev/null || printf '%s' "$receipt")"
+  [ -z "$state" ] || native_state="$(_tdd_native_path "$state" 2>/dev/null || printf '%s' "$state")"
+  native_root="$(_tdd_native_path "$CLAUDE_PROJECT_DIR" 2>/dev/null || printf '%s' "$CLAUDE_PROJECT_DIR")"
+  line="$(ZENSU_RL_LIB="$native_lib" ZENSU_RL_RECEIPT="$native_receipt" ZENSU_RL_PROJECT_ROOT="$native_root" \
+    ZENSU_RL_STATE="$native_state" ZENSU_RL_CONVERGENCE="$mode" \
+    node -e 'process.exitCode = require(process.env.ZENSU_RL_LIB).convergenceMain(process.env, process.stdout)' 2>/dev/null)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    case "$line" in
+      ("CONVERGENCE — converged | "*) _cvg_line="$line"; return 0 ;;
+    esac
+  fi
+  case "$line" in
+    ("CONVERGENCE — not converged | "*) _cvg_line="$line" ;;
+    (*) _cvg_line="CONVERGENCE — not converged | the convergence check in review-ledger-v1.js could not run, so this attempt closes as max-rounds" ;;
+  esac
+  return 1
+}
+
 _evr_dir=""
 _avr_dir=""
 _evr_work_tree=""
@@ -3588,6 +3616,17 @@ case "${1:-}" in
           echo "zensu-log.sh --chain-done: bound chain requires --autopilot-run, --autopilot-attempt, and --chain-id" >&2
           exit 2
         }
+        case "$chain_outcome_val" in
+          (''|pass|no-changes|max-rounds) ;;
+          (converged)
+            echo "zensu-log.sh --chain-done: --outcome converged is refused. Only this terminus decides that outcome, from a recorded max-rounds outcome and the chain's findings ledger; run --chain-done without --outcome." >&2
+            exit 2
+            ;;
+          (*)
+            echo "zensu-log.sh --chain-done: --outcome must be pass, no-changes or max-rounds." >&2
+            exit 2
+            ;;
+        esac
         done_fields="$(AUTOPILOT_CTX="$autopilot_ctx" REQUESTED_OUTCOME="$chain_outcome_val" \
           RUN="$autopilot_run_val" ATTEMPT="$autopilot_attempt_val" CHAIN="$chain_id_val" \
           RETURN_STAGE="$autopilot_return_stage_val" node -e '
@@ -3598,18 +3637,39 @@ case "${1:-}" in
               && c.chainId===process.env.CHAIN
               && (!process.env.RETURN_STAGE || c.returnStage===process.env.RETURN_STAGE);
             if(!exact)process.exit(3);
-            const outcome=process.env.REQUESTED_OUTCOME||c.outcome||"pass";
-            process.stdout.write([c.runId,c.attempt,c.chainId,outcome].join("\t"));
+            const requested=process.env.REQUESTED_OUTCOME||"";
+            if(requested && !["pass","no-changes","max-rounds"].includes(requested))process.exit(3);
+            const outcome=requested||c.outcome||"pass";
+            if(!["pass","no-changes","max-rounds","converged"].includes(outcome))process.exit(3);
+            process.stdout.write([c.runId,c.attempt,c.chainId,outcome,c.chainDone===true].join("\t"));
           } catch (_) { process.exit(3); }
         ' 2>/dev/null)" || {
           echo "zensu-log.sh --chain-done: stale or mismatched Autopilot generation" >&2
           exit 1
         }
-        IFS=$'\t' read -r done_run done_attempt done_chain done_outcome <<<"$done_fields"
+        IFS=$'\t' read -r done_run done_attempt done_chain done_outcome done_sealed <<<"$done_fields"
+        case "$done_sealed" in
+          (true|false) ;;
+          (*)
+            echo "zensu-log.sh --chain-done: stale or mismatched Autopilot generation" >&2
+            exit 1
+            ;;
+        esac
         _fsg_lines=""
         _avg_lines=""
+        if [ -z "$chain_outcome_val" ] && [ "$done_outcome" = "max-rounds" ] && [ "$done_sealed" = "false" ] \
+          && [ "$claimed_ticket_seen" = "true" ] \
+          && _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+          if _zensu_bound_convergence "$session_val"; then
+            done_outcome=converged
+            printf '%s\n' "$_cvg_line" >&2
+            echo "CONVERGED CLOSE — the edit-landing and full-suite gates below still decide this close. A refusal that names a command to run, a record to wait for or an audit to repeat keeps this attempt open: do that, then run this --chain-done again. When a gate refuses for a cause only an edit can remove, such as a failed full suite, and this attempt has no fix round left, run this --chain-done again with --outcome max-rounds: it closes the attempt as max-rounds and blocks the run with TDD_MAX_ROUNDS." >&2
+          else
+            printf '%s\n' "$_cvg_line" >&2
+          fi
+        fi
         case "$done_outcome" in
-          pass)
+          pass|converged)
             if [ "$claimed_ticket_seen" != "true" ] \
               || _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
               _zensu_terminal_edit_landing_gate "$session_val" || exit 1
