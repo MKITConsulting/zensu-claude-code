@@ -958,12 +958,16 @@ directory, in any position and behind any program the text shows, or when its co
 carries `browser.contextOptions.storageState`. A CLI that another program receives as an
 argument counts as such a call — `xargs`, `stdbuf`, `caffeinate`, `env -S`, `bash -c --`, a
 heredoc fed to a shell, a path into the `@playwright/cli` package — and so does any word the
-shell expands first whose text names the CLI where a binary name can still end, with nothing
-after the name but the start of a `.cmd`, `.exe` or `.ps1` suffix, such as
-`~/.local/bin/playwright-cli`, `$'playwright-cli'`, `"$(command -v playwright-cli)"` or
-`playwright-cli.{cmd,json}`, while a word that holds the CLI's name only inside a longer one,
-expanded or not, such as the run config `playwright-cli.json` behind a glob or a project folder
-`playwright-cli-demo`, does not, and neither does the directory a `cd` or `pushd` enters. The gate reads
+shell expands first whose text names the CLI. Outside a substitution the name counts where a
+binary name can still end, with nothing after it but the start of a `.cmd`, `.exe` or `.ps1`
+suffix, such as `~/.local/bin/playwright-cli`, `$'playwright-cli'` or
+`playwright-cli.{cmd,json}`; inside a command substitution, a backtick pair or a `${…}` body it
+counts however it continues, because that construct can trim what follows, such as
+`"$(command -v playwright-cli)"` or `$(basename playwright-cli.json .json)`. Only the characters
+after the name are read: a word that holds the CLI's name only inside a longer one, such as the
+run config `playwright-cli.json` behind a glob or a project folder `playwright-cli-demo`, does
+not count, while a folder that ends in the name, such as `~/my-playwright-cli`, does. The
+directory a `cd` or `pushd` enters never counts. The gate reads
 that config as the CLI does: the path as given when it is absolute, else against the payload's
 working directory when the call is one plain call without a wrapper, with a byte-order mark
 skipped and the text parsed as JSON. It reads every config value the command text sets —
@@ -977,7 +981,9 @@ path unless the command is one plain unwrapped call. A search of the CLI's own o
 command that is not read that way: in a command made only of plain calls of `playwright-cli`,
 `grep`, `egrep`, `fgrep`, `rg`, `cd` and `pushd`, with no word the shell expands, substitution,
 heredoc or here-string, only the config of the CLI calls themselves is read, so
-`playwright-cli --help | grep -- --config` passes. It confirms that the path names a
+`playwright-cli --help | grep -- --config` passes. None of those programs hands the CLI a flag
+together with its value; `rg --pre` runs a program on each path it searches, which receives the
+path and nothing else. It confirms that the path names a
 regular file before it opens it, so it never opens a FIFO or a device, and it refuses a path that
 starts with two slashes or backslashes, a network path, unread. The CLI reads an `.ini` path, and
 a file that is no JSON and does not start with `{`, as INI, so the gate refuses a config it cannot
@@ -1108,7 +1114,10 @@ through Bash.
   hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a call that spells
   `playwright-cli` literally is marked whatever its session, so a session assembled at run time —
   a variable, a substitution, an ANSI-C escape or an expansion inside the prefix — is denied as
-  not literal; only a CLI name assembled at run time stays unseen. The single-call and literal-argument rules bind only a call the
+  not literal; only a CLI name assembled at run time stays unseen. A longer name that a variable's
+  parameter modifier trims in the same command, such as `${X%.json}` after `X=playwright-cli.json`,
+  is assembled at run time too and goes unseen, although the text names the CLI: only a trim
+  inside the word that runs, such as `$(basename playwright-cli.json .json)`, is read. The single-call and literal-argument rules bind only a call the
   gate judges, so they do not narrow this and do not make the gate a boundary. A function or
   alias named `playwright-cli` that the shell already has, such as one from a startup file, is
   judged as the plain call its text shows, and neither hook can see what it runs.
@@ -1219,11 +1228,13 @@ and tells the model not to retry through another tool, path spelling or command.
   `..` or for no directory at all — a brace, a group, an expansion, a dot glob such as `.?` —
   makes every later segment a candidate, and so does `**` when a `..` follows it.
 - A `playwright-cli` call whose command names a run directory but no `zensu-verify` session, so
-  a signed-in run config never opens on a session the consent gate does not judge. A word the
-  shell expands counts as the CLI by the consent gate's rule, when nothing follows the name but
-  the start of a `.cmd`, `.exe` or `.ps1` suffix, so a glob path to a run's `playwright-cli.json`
-  passes. The deny names the Grep tool and a commit message file for text that only mentions the
-  CLI beside a run directory.
+  a signed-in run config never opens on a session the consent gate does not judge. A token that
+  holds `$`, `*`, `?`, `[`, `{`, `}` or `~` counts as the CLI by the consent gate's name test, so
+  a glob path to a run's `playwright-cli.json` passes and a name inside a `${…}` body counts
+  however it continues; a path into the `@playwright/cli` package counts too. The spellings this
+  line cannot read are left to the consent gate and named under the residuals below. The deny
+  names the Grep tool and a commit message file for text that only mentions the CLI beside a run
+  directory.
 - Any other tool — an MCP server's tool, `WebFetch`, `LSP`, `Artifact`, an agent or task
   prompt — whose payload names `verify-feature-runs` and whose input holds a string, a key
   included, that spells a path inside a run's `auth/` directory, read word by word as shell text
@@ -1267,6 +1278,12 @@ symlinked or unloadable guard module.
   shell text that reaches `auth/` through a symlink the model created to a runs directory or a run
   directory, and, on Windows, through an 8.3 short name such as `VERIFY~1`, is not judged; the file
   tools resolve a symlink, the 8.3 case is unverified.
+- **The session rule reads fewer spellings than the consent gate.** It splits the command at
+  parentheses and hides the braces of an expansion inside double quotes, so four words name the
+  CLI to the consent gate, which refuses the call with `RUN_DIR_OFF_SESSION`, and not to this
+  rule: a backtick substitution right after the bare name, zsh's leading `=` (`=playwright-cli`),
+  a `$(…)` substitution that trims a longer name back to the CLI's, and a `${…}` expansion that
+  does the same inside double quotes.
 - **Prose is judged as text.** A tool input outside the nine field-precise tools is read string
   by string, so a plan, a prompt or a message that spells a path inside a run's `auth/` directory
   is refused like a file read, a template such as `<run>/auth/` included; name that directory

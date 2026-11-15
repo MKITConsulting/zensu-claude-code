@@ -27,7 +27,7 @@ const CONFIG_FLAG = '--config';
 const CONFIG_ENV = 'PLAYWRIGHT_MCP_CONFIG';
 const MAX_OFF_SESSION_CONFIG_BYTES = 1048576;
 const CLI_MARKERS = Object.freeze([...new Set([
-  ...CLI_BASENAMES.map((name) => name.replace(/\.(cmd|exe|ps1)$/i, '').toLowerCase()),
+  ...CLI_BASENAMES.map(cliVersion.binaryStem),
   CLI_PACKAGE.toLowerCase(),
 ])]);
 const CLI_MARKER_RE = new RegExp(CLI_MARKERS.map((marker) => marker.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|'));
@@ -675,7 +675,7 @@ function assignmentOf(word) {
   if (!word) return null;
   const match = word.raw.match(/^([A-Za-z_][A-Za-z0-9_]*)(\+?)=/);
   if (!match) return null;
-  const expanded = ASSIGNMENT_EXPANSION_RE.test(word.raw.slice(match[0].length));
+  const expanded = ASSIGNMENT_EXPANSION_RE.test(word.bare.slice(match[0].length));
   return { name: match[1], value: word.value.slice(match[0].length), unexpanded: word.unexpanded || match[2] === '+' || expanded };
 }
 
@@ -807,7 +807,7 @@ function namesCli(text) {
 
 function cliToken(token) {
   if (token === '') return false;
-  return CLI_MARKERS.includes(cliBasename(token).replace(/\.(cmd|exe|ps1)$/, '')) || CLI_PACKAGE_PATH_RE.test(token);
+  return CLI_MARKERS.includes(cliVersion.binaryStem(cliBasename(token))) || CLI_PACKAGE_PATH_RE.test(token);
 }
 
 function runsCli(text) {

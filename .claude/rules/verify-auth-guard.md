@@ -2,10 +2,12 @@
 paths:
   - "hooks/lib/verify-auth-state-v1.js"
   - "hooks/lib/verify-auth-guard-v1.js"
+  - "hooks/lib/playwright-cli-version-v1.js"
   - "hooks/pre-verify-auth-guard.sh"
   - "scripts/verify-browser-config.js"
   - "tests/structure/verify-auth-state-v1.test.js"
   - "tests/structure/verify-auth-guard-v1.test.js"
+  - "tests/structure/playwright-cli-version-v1.test.js"
   - "tests/structure/verify-auth-login-e2e.test.js"
   - "skills/verify-feature/rules/browser-verification.md"
 ---
@@ -83,15 +85,20 @@ judges only `zensu-verify` sessions and a signed-in run config opened on another
 restore the state unjudged. That rule's markers derive from their owners: `CLI_WORDS` from
 `BINARY_NAMES` and `PACKAGE_NAME` of `playwright-cli-version-v1.js`, `SESSION_MARKER` from
 `AUTH_SESSION_PREFIX`. A token names the CLI when it equals a `CLI_WORDS` entry, ends in `/` and
-one, starts with one and `@`, or holds an expansion character (`EXPANSION_TOKEN`) the shell acts
-on and holds the CLI's name where a binary name can still end. That last test is `holdsCliName`
-in `playwright-cli-version-v1.js`, the one the consent gate's `expandsIntoCli` calls: an
-occurrence of the name counts only when the name characters after it (`[a-z0-9._-]`) are none or
-the start of a `.cmd`, `.exe` or `.ps1` suffix, read once with a backslash or backtick ending
-them and once with both removed. The guard hands it the tokens of the masked text's shell
-spellings before quotes, backslashes and backticks are stripped, so a NUL escape in
+one, starts with one and `@`, holds a path into the package (`PACKAGE_PATH_RE`: `@playwright/cli`
+followed by the end of the token, `@` or `/`), or holds an expansion character
+(`EXPANSION_TOKEN`) the shell acts on and holds the CLI's name where a binary name can still
+end. That last test is `holdsCliName` in `playwright-cli-version-v1.js`, the one the consent
+gate's `expandsIntoCli` calls: outside a substitution an occurrence of the name counts only when
+the name characters after it (`[a-z0-9._-]`) are none or the start of a `.cmd`, `.exe` or `.ps1`
+suffix, read once with a backslash or backtick ending them and once with both removed; inside a
+command substitution, a backtick pair or a `${…}` body (`nameInsideConstruct`) it counts however
+it continues, because the construct can trim what follows. Only the characters after the name
+are read, so a folder that ends in the name counts. The guard hands it the tokens of the masked
+text's shell spellings before quotes, backslashes and backticks are stripped, so a NUL escape in
 `$'playwright-cli\x00.json'` still ends the name, as does a backtick substitution in a token
-that also holds an expansion character the rule acts on.
+that also holds an expansion character the rule acts on, and an unquoted `${${:-…}:r}` token
+counts through its `${…}` body.
 `maskedQuotedExpansions` decides "acts on" for Bash text: it hides each such character inside
 single quotes, an ANSI-C string or behind a backslash, and every one but `$` inside double
 quotes, so `$'playwright-cli'`, `playwright-cli$''`, `"${PW:-playwright-cli}"`,
@@ -161,8 +168,10 @@ there instead of listing them, because its body sits on the shrink-only allowlis
 **Coupled sites:** `AUTH_SESSION_PREFIX`, `AUTH_GUARD_HOOK_FILE`, `AUTH_GUARD_TOOLS`,
 `AUTH_GUARD_MATCHER`, `AUTH_GUARD_PROBE_TOOLS`, the caps,
 `FAULTS` and `discardAuthState` in `verify-auth-state-v1.js`; `CLI_WORDS`, `SESSION_MARKER` and
-`REASONS.SESSION` in the guard; `holdsCliName` and `NAME_SUFFIXES` in
-`playwright-cli-version-v1.js`, shared with the consent gate's `expandsIntoCli`;
+`REASONS.SESSION` and `PACKAGE_PATH_RE` in the guard; `holdsCliName`, `nameInsideConstruct`,
+`binaryStem` and `NAME_SUFFIXES` in `playwright-cli-version-v1.js`, shared with the consent
+gate's `expandsIntoCli`, `CLI_MARKERS` and `cliToken`, with `V67b` in
+`tests/structure/test-verify-consent.sh` pinning the guard's side;
 `runConfigShape`, `judgeCall`, `evaluate`, `runPost`,
 `authGuardRegistered` and the `STATE_*` and `AUTH_SIGNAL_DENIED` reasons in
 `hooks/lib/verify-consent-v1.js`; `checkReadiness`, `signIn`, `sessionName`, `LOGIN_RESTORED`,
@@ -186,10 +195,11 @@ two commands it admitted on a signed-in session. The consent memory gains an opt
 permissively, which on its own would be a `patch`. The hardening that followed is `minor` too:
 the guard's matcher widened to `.*`, the consent gate refuses calls on other sessions it never
 judged, and the helper refuses `--auth-origin`. The name boundary, the search shape, the zsh `=`
-reading and the session deny remedy that came after are `patch`: no schema field, key set, hook,
-matcher, config key or attestation moved, the two gates refuse less for a longer name such as
-`playwright-cli.json` and for a search of the CLI's help, and refuse more only for a zsh `=`
-assignment, whose value they misread before.
+reading, the package-path arm and the session deny remedy that came after are `patch`: no schema
+field, key set, hook, matcher, config key or attestation moved, the two gates refuse less for a
+longer name such as `playwright-cli.json` outside a substitution and for a search of the CLI's
+help, and refuse more only for a zsh `=` assignment, whose value they misread before, and for a
+literal path into the package in the guard.
 
 **Known gaps, accepted and named:**
 
@@ -205,11 +215,20 @@ assignment, whose value they misread before.
   unverified. The session rule reads the command text too, so a copy of a signed-in run config
   outside a run directory escapes it; the consent gate's "Other sessions" rules read that copy
   when the call names it with `--config`.
-- A backtick is no expansion character to the session rule, so a backtick substitution right
-  after the bare CLI name, in a call that names a run directory, passes the guard; the consent
-  gate counts that word as a hidden CLI and refuses the call with `RUN_DIR_OFF_SESSION`.
-  Counting it here needs `maskedQuotedExpansions` to tell a single-quoted backtick from an
-  active one, and it hides only `EXPANSION_TOKEN` characters today.
+- The session rule reads fewer spellings than the consent gate, which counts each of these words
+  as a hidden CLI and refuses the call with `RUN_DIR_OFF_SESSION`, so they pass the guard in a
+  call that names a run directory:
+  - A backtick substitution right after the bare CLI name: a backtick is no expansion character
+    to the rule. Counting it needs `maskedQuotedExpansions` to tell a single-quoted backtick
+    from an active one, and it hides only `EXPANSION_TOKEN` characters today.
+  - zsh's leading `=` (`=playwright-cli`): `=` is no `EXPANSION_TOKEN` character either.
+  - A `$(…)` substitution that trims a longer name back to the CLI's, because the tokenizer
+    splits at parentheses and sees only the longer token; a `$(command -v …)` that holds the
+    bare name stays visible.
+  - A `${…}` expansion that does the same inside double quotes, because the mask hides its
+    braces, so the span test of `holdsCliName` finds no construct. The unquoted form is counted.
+  The spec and `docs/gates.md` name the four. Closing them here means rebuilding the guard's
+  reading on the consent lexer, which the guard deliberately does not share.
 - The path rule over-denies on purpose: `**` at or above a run directory, a segment at the `auth`
   position that is neither a plain name nor a glob whose head or tail rules `auth` out
   (`{a,b}.png`, `$NAME`), and, in PowerShell's whitespace-free spelling, an argument written right

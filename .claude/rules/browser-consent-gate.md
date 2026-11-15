@@ -277,17 +277,27 @@ whose text holds the CLI's name where a binary name can still end (`expandsIntoC
 `"$(command -v playwright-cli)"`, `"${PW:-playwright-cli}"`, `playwright-cli.{cmd,json}`), which
 is no invocation because only a literal word is, and a body the lexer cannot judge that names the
 CLI. That name test is `holdsCliName` in `hooks/lib/playwright-cli-version-v1.js`, and the read
-guard's expansion arm calls the same function: an occurrence of `playwright-cli` or
-`@playwright/cli` counts only when the name characters after it (`[a-z0-9._-]`) are none or the
-start of a `.cmd`, `.exe` or `.ps1` suffix (`NAME_SUFFIXES`, derived from `BINARY_NAMES`). It
-reads two spellings: quotes and line continuations removed, where a backslash or a backtick ends
-the name characters, because bash truncates `$'playwright-cli\x00.json'` at the NUL and runs
-``playwright-cli`true` `` as the CLI (both measured), and the same with backslashes and backticks
-removed, which joins a name that a backslash or an empty substitution splits. A word, literal or
-expanded, that holds the name only inside a longer one, such as `playwright-cli.json` or a
-project folder `playwright-cli-demo`, is no token, and the operand of `cd` or `pushd`
-(`DIRECTORY_BUILTINS`) never counts; the gated `indirect` test and the bodies the lexer cannot
-judge keep the substring reading of `namesCli`. With the `runs` arm an off-session call or a hidden
+guard's expansion arm calls the same function. An occurrence of `playwright-cli` or
+`@playwright/cli` counts in two cases. Outside any substitution it counts only when the name
+characters after it (`[a-z0-9._-]`) are none or the start of a `.cmd`, `.exe` or `.ps1` suffix
+(`NAME_SUFFIXES`, derived from `BINARY_NAMES`), because a glob, brace, `~`, `$NAME` or quote keeps
+the text that follows the name. Inside a command substitution, a backtick pair or a `${…}` body
+(`nameInsideConstruct`) it counts however it continues, an unterminated construct included,
+because that construct can trim what follows: `$(basename playwright-cli.json .json)` and zsh's
+`${${:-playwright-cli.json}:r}` run the CLI, and a name that a variable or a program assembled
+earlier stays the textual gap named below. The tail test reads two spellings: quotes and line
+continuations removed, where a backslash or a backtick ends the name characters, because bash
+truncates `$'playwright-cli\x00.json'` at the NUL and runs ``playwright-cli`true` `` as the CLI
+(both measured), and the same with backslashes and backticks removed, which joins a name that a
+backslash or an empty substitution splits. Only the characters after the name are read, so a
+word that holds the name only inside a longer one, such as `playwright-cli.json` behind a glob,
+`$(git rev-parse --show-toplevel)/…/playwright-cli.json` or a project folder
+`playwright-cli-demo`, is no token, while a folder that ends in the name, such as
+`~/my-playwright-cli`, counts: bounding the characters before it would have to undo escapes that
+decode to a slash. The operand of `cd` or `pushd` (`DIRECTORY_BUILTINS`) never counts; the gated
+`indirect` test and the bodies the lexer cannot judge keep the substring reading of `namesCli`.
+`binaryStem` in the same module strips a binary suffix, so `CLI_MARKERS` and `cliToken` share the
+one suffix set. With the `runs` arm an off-session call or a hidden
 CLI denies `RUN_DIR_OFF_SESSION`. With the `config` arm each literal `--config` value and each
 inline `PLAYWRIGHT_MCP_CONFIG` assignment of an off-session call, in any letter case because
 Windows reads environment names that way, is read, and when the command is
@@ -305,9 +315,13 @@ path outside one plain unwrapped call, deny `CONFIG_UNRESOLVED_OFF_SESSION`. `co
 not run for one shape, a search (`searchShape`): a command made only of calls whose command word
 is the CLI, `grep`, `egrep`, `fgrep`, `rg`, `cd` or `pushd` (`SEARCHERS`, `DIRECTORY_BUILTINS`),
 with no assignment or wrapper before it, and with no word the shell expands, substitution,
-heredoc or here-string anywhere. There a searcher's arguments are search data that reach no
-other program, and only the CLI calls' own config values are read, so
-`playwright-cli --help | grep -- --config` passes. Do not narrow the sentinel to segments that
+heredoc or here-string anywhere. There a searcher's arguments are search data, and only the CLI
+calls' own config values are read, so `playwright-cli --help | grep -- --config` passes. The
+admission test is that no admitted program hands the CLI a flag together with its value or sets
+its environment, not that a searcher starts no other program: an option such as `rg --pre` runs
+a program on each path operand, which receives a path and no flag with its value, and the unit
+file pins `rg --pre playwright-cli -e --config open` as a deliberate pass. A new `SEARCHERS`
+entry has to keep that invariant. Do not narrow the sentinel to segments that
 name the CLI or a word-appending program instead: six one-liners that spell the CLI, the flag and
 the value literally are refused by the sentinel alone and would pass under that rule, a
 here-string into `xargs -I`, `printf -- --config | xargs -I`, `$(echo --config)`, a function's
@@ -775,9 +789,10 @@ for its `@playwright/cli` install pins.
   names exactly `PLAYWRIGHT_CLI_SOURCE_VERSION` — a version the package declares, not a verified
   binary; the doctor's version row stays a WARN. The check runs only inside the helper: the gate
   judges `open` by `runConfigShape` and never reads the installed version (from the version module
-  it takes only `BINARY_NAMES` and `PACKAGE_NAME`, which build its markers, `binaryNames`, and
-  `holdsCliName`, a pure text test, never `installedVersion`, `probe` or `findBinary`; `V67` pins
-  that set), so a run config of that shape written another way, or a
+  it takes only `BINARY_NAMES` and `PACKAGE_NAME`, which build its markers, `binaryNames`,
+  `binaryStem` and `holdsCliName`, pure text tests, never `installedVersion`, `probe` or
+  `findBinary`; `V67` pins that set and `V67b` the read guard's own, `BINARY_NAMES`,
+  `PACKAGE_NAME` and `holdsCliName`), so a run config of that shape written another way, or a
   `playwright-cli` installed or put ahead on `PATH` after the helper ran, runs unmeasured. It
   calls the version module without `--execute`,
   so a binary is never run to learn its version. The module reads the

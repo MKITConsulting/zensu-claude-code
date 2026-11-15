@@ -39,6 +39,7 @@ const WORD_BREAKS = ';&|<>';
 const POSIX_BLANKS = ' \t\n';
 const ZSH_RANGE = /<\d*-\d*>/y;
 const CLI_WORDS = Object.freeze([...cliVersion.BINARY_NAMES, cliVersion.PACKAGE_NAME]);
+const PACKAGE_PATH_RE = new RegExp(`${cliVersion.PACKAGE_NAME.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?:$|[@/])`);
 const SESSION_MARKER = authState.AUTH_SESSION_PREFIX.slice(0, -'auth-'.length);
 const REASONS = Object.freeze({
   PATH: 'path-inside-run-auth-directory',
@@ -210,7 +211,7 @@ function cliSpellings(command, tool) {
 
 function namesCliWord(spellings, active) {
   const tokens = (text) => text.match(/[^\s;&|<>()]+/g) || [];
-  return spellings.some((text) => tokens(text).some((token) => CLI_WORDS.some((word) => token === word
+  return spellings.some((text) => tokens(text).some((token) => PACKAGE_PATH_RE.test(token) || CLI_WORDS.some((word) => token === word
     || token.endsWith(`/${word}`) || token.startsWith(`${word}@`))))
     || active.some((text) => tokens(text).some((token) => EXPANSION_TOKEN.test(token) && cliVersion.holdsCliName(token)));
 }

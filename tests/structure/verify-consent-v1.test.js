@@ -2305,6 +2305,10 @@ test('a playwright-cli call on any session but a zensu-verify one is denied with
     [`playwright-cli.{cmd,json} -s=mine open --config=${config}`, {}],
     [`playwright-cli\`true\` -s=mine open --config=${config}`, {}],
     [`$'playwright-cli\\x00.json' -s=mine open --config=${config}`, {}],
+    [`$(basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    [`"$(basename playwright-cli.json .json)" -s=mine open --config=${config}`, {}],
+    [`\${\${:-playwright-cli.json}:r} -s=mine open --config=${config}`, {}],
+    [`xargs $(basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
   ];
   for (const [command, env] of cases) assert.equal(denied(command, { env }), REASONS.RUN_DIR_OFF_SESSION, command);
   assert.notEqual(decide(cli(`open --config=${config}`)).reason, REASONS.RUN_DIR_OFF_SESSION);
@@ -2321,6 +2325,8 @@ test('a playwright-cli call on any session but a zensu-verify one is denied with
     'cat /p/.zensu/verify-feature-runs/*/playwright-cli.json',
     'mkdir -p ~/playwright-cli-demo/.zensu/verify-feature-runs/r',
     'ls "$HOME"/playwright-cli-tests/.zensu/verify-feature-runs',
+    'ls "${HOME}"/playwright-cli-tests/.zensu/verify-feature-runs',
+    'cat "$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json"',
   ]) assert.deepEqual(decide(command), { verdict: 'none' }, command);
   for (const key of ['RUN_DIR_OFF_SESSION', 'STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION', 'POWERSHELL_OFF_SESSION_NOT_JUDGED']) {
     assert.equal(consent.FINAL_REASONS.includes(key), true, key);
@@ -2378,6 +2384,8 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
     `$'playwright-cli' -s=mine open --config=${restoring}`,
     `node "$(command -v playwright-cli)" -s=mine open --config=${restoring}`,
     `"\${PW:-playwright-cli}" -s=mine open --config=${restoring}`,
+    `$(basename playwright-cli.json .json) -s=mine open --config=${restoring}`,
+    `\${\${:-playwright-cli.json}:r} -s=mine open --config=${restoring}`,
     `eslint --config ${restoring} src && echo playwright-cli`,
   ]) assert.equal(reason(command), REASONS.STATE_CONFIG_OFF_SESSION, command);
   assert.equal(reason('playwright-cli open --config=missing.json', { PLAYWRIGHT_CLI_SESSION: 'mine' }), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
@@ -2419,7 +2427,11 @@ test('a playwright-cli call on any session but a zensu-verify one is denied when
     'PATH=/tmp/bin grep -- --config && playwright-cli --help',
   ]) assert.equal(reason(command), REASONS.CONFIG_UNRESOLVED_OFF_SESSION, command);
   assert.equal(reason("PLAYWRIGHT_MCP_CONFIG='~/c.json' playwright-cli -s=mine open"), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  for (const value of ["'/nowhere/a:=b.json'", '"/nowhere/a:=b.json"', "'/nowhere/a:~b.json'", '/nowhere/a\\:=b.json']) {
+    assert.equal(reason(`PLAYWRIGHT_MCP_CONFIG=${value} playwright-cli -s=mine open`), REASONS.CONFIG_UNJUDGED_OFF_SESSION, value);
+  }
   passes("PLAYWRIGHT_MCP_CONFIG='=own.json' playwright-cli -s=mine open");
+  passes('rg --pre playwright-cli -e --config open');
   passes(`unset PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open --config=${own}`);
   passes('playwright-cli --help | grep -- --config');
   passes('playwright-cli open --help | grep -e --config');
