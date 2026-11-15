@@ -8,6 +8,12 @@ and this plugin adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-15
+
+### Fixed
+
+- **session-trail**: Close the linked-session gaps PR #589 deferred (#620)
+
 ## [1.0.0] - 2026-11-10
 
 ### Added
