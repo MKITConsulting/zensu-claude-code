@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-15
+
+### Added
+
+- **review-chain**: Return a converged max-rounds Autopilot attempt to its stage (#621)
+- **session-hub**: Add the session-hub@zensu companion plugin (#606)
+- **verify-feature**: Sign the browser in through a recipe login script (#615)
+
+### Changed
+
+- **agents**: Name every required flag in the plm work and plan catalog (#619)
+
+### Fixed
+
+- **session-trail**: Close the linked-session gaps PR #589 deferred (#620)
+- **verify-feature**: Judge other sessions, bind the login origin and guard every tool (#618)
+
 ### Added
 
 - **Session Hub companion plugin**: the `zensu` marketplace now also lists `session-hub@zensu`,

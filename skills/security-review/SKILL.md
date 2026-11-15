@@ -120,27 +120,32 @@ The command takes:
 - `--type`: `automated` with `--reviewer claude-code`; `manual` only for the person's own
   review and `external` only for an outside review the user names. The CLI defaults to
   `manual`, so always pass it.
-- `--findings`: the findings summary; `--conditions`: only for `conditional`
+- `--findings`: the findings summary; `--conditions`: only for `conditional`. Both are
+  Markdown: Zensu's Security tab renders headings, lists and code, so write structured
+  Markdown, not one unformatted paragraph
 
 The findings and the conditions are free text and never go into the command line
 itself: inside double quotes the shell runs every backtick span and expands every
 `$NAME`, and a single quote ends at the first apostrophe. zensu-cli has no stdin or file
 form for them, so write each one to a temporary file through a heredoc whose delimiter is
-quoted (pick another delimiter if the text holds that line):
+quoted. Replace `<hex>` with eight random hex digits, new for each call and the same on both
+lines, so no line of the text can end the heredoc early; `>|` writes even under `noclobber`,
+and the `grep` line stops before an empty, blank or binary value reaches Zensu:
 
 ```bash
 f="$(mktemp)" || exit 1
 trap 'rm -f "$f"' EXIT
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <findings-summary>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+grep -qI '[^[:space:]]' -- "$f" || exit 1
 zensu security review <feature-id> --reviewer claude-code --type automated \
   --status <status-the-user-chose> --findings "$(cat "$f")"
 ```
 
-For `conditional`, also run `c="$(mktemp)" || exit 1`, widen the trap to
-`trap 'rm -f "$f" "$c"' EXIT`, write the conditions to `"$c"` through a second quoted
-heredoc, and add `--conditions "$(cat "$c")"`.
+For `conditional`, also run `c="$(mktemp)" || exit 1`, widen the one trap to
+`trap 'rm -f "$f" "$c"' EXIT`, write the conditions to `"$c"` through a second heredoc of
+the same form, check it with `grep -qI '[^[:space:]]' -- "$c" || exit 1`, and add `--conditions "$(cat "$c")"`.
 
 ### Step 7: Validate Release Readiness
 
