@@ -345,6 +345,16 @@ test('a browser CLI call that names a verify-feature run directory needs a zensu
     ['Bash', `playwright-cli$'' -s=mine open ${config}`],
     ['Bash', `"\${PW:-playwright-cli}" -s=mine open ${config}`],
     ['Bash', `{playwright-cli,} -s=mine open ${config}`],
+    ['Bash', `~/bin/playwright-cli -s=mine open ${config}`],
+    ['Bash', `node "$(command -v playwright-cli)" -s=mine open ${config}`],
+    ['Bash', `playwright-cli.{cmd,json} -s=mine open ${config}`],
+    ['Bash', `~/bin/playwright-cli\`true\` -s=mine open ${config}`],
+    ['Bash', `$'playwright-cli\\x00.json' -s=mine open ${config}`],
+    ['Bash', `\${\${:-playwright-cli.json}:r} -s=mine open ${config}`],
+    ['Bash', `\${\${:-playwright-cli.json}%.json} -s=mine open ${config}`],
+    ['Bash', `\${HOME}/playwright-cli-tests/x -s=mine open ${config}`],
+    ['Bash', `node /usr/local/lib/node_modules/@playwright/cli/cli.js -s=mine open ${config}`],
+    ['Bash', `node $HOME/lib/node_modules/@playwright/cli/cli.js -s=mine open ${config}`],
     ['Bash', `cd ${RUN} && playwright-cli -s=mine open --config=${consent.RUN_CONFIG_NAME}`],
     ['PowerShell', `playwright-cli -s=mine open ${config}`],
   ];
@@ -359,11 +369,16 @@ test('a browser CLI call that names a verify-feature run directory needs a zensu
     'find .zensu/verify-feature-runs -name "playwright-cli*"',
     'ls .zensu/verify-feature-runs/run-a1/playwright-cli\\*',
     `echo '{"config":".zensu/verify-feature-runs/run-a1/${consent.RUN_CONFIG_NAME}"}'`,
+    `cat .zensu/verify-feature-runs/*/${consent.RUN_CONFIG_NAME}`,
+    'ls /u/playwright-cli-demo/.zensu/verify-feature-runs/*',
+    `jq . "$HOME"/playwright-cli-tests/.zensu/verify-feature-runs/run-a1/${consent.RUN_CONFIG_NAME}`,
+    'ls /u/@playwright/cli-notes/.zensu/verify-feature-runs/*',
   ];
   for (const command of allowed) assert.deepEqual(verdict('Bash', { command }), { deny: false, reason: guard.REASONS.CLEAN }, command);
   const reason = guard.denyReason({ deny: true, reason: guard.REASONS.SESSION });
   assert.ok(reason.startsWith(LEAD));
   assert.ok(reason.includes('-s=<session> exactly as the helper printed it'));
+  assert.ok(reason.includes('to search or commit text that merely names the browser CLI beside a run directory, use the Grep tool or a commit message file'), reason);
   assert.ok(!reason.includes('playwright-cli'));
 });
 

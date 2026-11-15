@@ -117,9 +117,9 @@
       "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
     },
     {
-      "path": "tests/structure/playwright-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 12},
+      "path": "tests/structure/playwright-cli-version-v1.test.js", "registered": 15, "skips": {"win32": 12},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
-      "summary": "The installed playwright-cli version identity, read from its package manifest without running the binary."
+      "summary": "The installed playwright-cli version identity, read from its package manifest without running the binary, and the shared rule for when a spelling holds the CLI's name."
     },
     {
       "path": "tests/structure/plugin-data-guard-v1.test.js", "registered": 37, "skips": {"win32": 4},
