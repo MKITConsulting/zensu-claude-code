@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-16
+
+### Added
+
+- **autopilot**: Validate a run only on machine-checked acceptance records (#594)
+
+### Fixed
+
+- **verify-feature**: Bound the CLI name, read help searches and zsh = in the gates (#623)
+- **skills**: State the text format of every Zensu free-text field (#613)
+
 ### Added
 
 - **Autopilot validation gate**: an Autopilot run's VALIDATE stage now leaves only through
