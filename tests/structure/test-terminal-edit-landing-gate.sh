@@ -57,11 +57,14 @@ single_line() {
 S_EL="$(single_line '_zensu_terminal_edit_landing_gate "$session_val" || chain_gate_rc=1')"
 S_FS="$(single_line '_zensu_full_suite_gate "$session_val" || chain_gate_rc=1')"
 S_AC="$(single_line '_zensu_acceptance_gate "$session_val" || chain_gate_rc=1')"
+S_GP=""
+[ -n "$S_FS" ] && S_GP="$(sed -n "$((S_FS + 1)),$((S_FS + 2))p" "$LOG" | sed 's/^[[:space:]]*//')"
 if [ -n "$S_EL" ] && [ -n "$S_FS" ] && [ -n "$S_AC" ] \
-  && [ $((S_FS - S_EL)) -eq 1 ] && [ $((S_AC - S_FS)) -eq 1 ]; then
-  check "T1 the ticket-bound standalone terminus evaluates the edit-landing gate together with the full-suite and acceptance gates" PASS
+  && [ $((S_FS - S_EL)) -eq 1 ] && [ $((S_AC - S_FS)) -eq 3 ] \
+  && [ "$S_GP" = "$(printf '%s\n%s' '_avr_gates_passed=0' '[ "$chain_gate_rc" -eq 0 ] && _avr_gates_passed=1')" ]; then
+  check "T1 the ticket-bound standalone terminus evaluates the edit-landing gate together with the full-suite and acceptance gates, and hands the acceptance gate the first two verdicts right before it" PASS
 else
-  check "T1 standalone gate order (edit-landing=$S_EL full-suite=$S_FS acceptance=$S_AC)" FAIL
+  check "T1 standalone gate order (edit-landing=$S_EL full-suite=$S_FS acceptance=$S_AC gates-passed='$S_GP')" FAIL
 fi
 U_EL="$(single_line '(0|unknown) _zensu_terminal_edit_landing_gate "$session_val" || exit 1 ;;')"
 U_MARK="$(single_line 'tdd_mark_unclaimed_review "$session_val" chainDone "$chain_change_count" || {')"
