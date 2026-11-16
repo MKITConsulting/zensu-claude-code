@@ -351,7 +351,7 @@ if [ "$EVIDENCE_READY" = true ] \
   && printf '%s' "$OUT_VALIDATE" | session_context_contains 'stage=VALIDATE nextActionCode=VALIDATE_FEATURE' \
   && printf '%s' "$OUT_VALIDATE" | session_context_contains 'Record every acceptance criterion observed on the pull-request head, then run zensu-log.sh --autopilot-validate --run with the run id; never send VALIDATION_PASSED yourself.' \
   && printf '%s' "$OUT_VALIDATE" | session_context_contains "ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE runId=$EVIDENCE_RUN copy=$EVIDENCE_COPY reason=approved-plan-missing." \
-  && printf '%s' "$OUT_VALIDATE" | session_context_contains 'so zensu-log.sh --autopilot-validate will refuse at VALIDATE. Report this to the user now and leave the decision to the user.'; then
+  && printf '%s' "$OUT_VALIDATE" | session_context_contains 'so VALIDATE cannot read this run'"'"'s acceptance criteria. Report this to the user now and leave the decision to the user.'; then
   check "R8e VALIDATE recovery names the validate verb and reports a missing approved plan copy" PASS
 else
   check "R8e VALIDATE recovery names the validate verb and reports a missing approved plan copy" FAIL

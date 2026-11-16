@@ -11,7 +11,7 @@ const modulePath = process.env.ZENSU_APPROVED_PLAN_UNIT_TARGET
   || nodePath.join(__dirname, "..", "..", "hooks", "lib", "approved-plan-v1.js");
 const {
   APPROVED_PLAN_PREFIX, APPROVED_PLAN_FAILURES, approvedPlanStem, approvedPlanRelPath,
-  readApprovedPlan, storeApprovedPlan, listRequirementRows, listPlanCriteria,
+  readApprovedPlan, storeApprovedPlan, listRequirementRows, listPlanCriteria, listManualAcceptanceIds,
 } = require(modulePath);
 const { PLAN_FILE_MAX_BYTES } = require(nodePath.join(nodePath.dirname(modulePath), "plan-payload-v1.js"));
 
@@ -175,12 +175,17 @@ test("plan approval and the acceptance gate read one row set, because both list 
   const acceptance = require(nodePath.join(nodePath.dirname(modulePath), "acceptance-verify-v1.js"));
   const bytes = Buffer.from("# Plan\n");
   fs.writeFileSync(lister, "printf 'AC-1xy\\tactive\\tnot a criterion id\\nAC-002\\tdeprecated\\told\\nAC-002\\tactive\\tnew\\nFR-001\\tactive\\tfunctional\\n'\nexit 0\n");
-  assert.deepStrictEqual(listRequirementRows(bytes, { libDir, tmpDirectory: scratch }), { status: "ok", exit: 0, rows: [{ id: "AC-002", state: "active", text: "new" }] });
+  assert.deepStrictEqual(listRequirementRows(bytes, { libDir, tmpDirectory: scratch }), { status: "ok", exit: 0, rows: [{ id: "AC-002", state: "active", text: "new" }], duplicates: [] });
   assert.deepStrictEqual(listPlanCriteria(bytes, { libDir, tmpDirectory: scratch }), { status: "ok", active: 1 });
   assert.deepStrictEqual(acceptance.readCriteria(bytes, { libDir }), { status: "ok", criteria: [{ id: "AC-002", state: "active", text: "new" }] });
   fs.writeFileSync(lister, "printf 'AC-1xy\\tactive\\tnot a criterion id\\n'\nexit 0\n");
   assert.deepStrictEqual(listPlanCriteria(bytes, { libDir, tmpDirectory: scratch }), { status: "unusable", detail: "exit-0" });
   assert.deepStrictEqual(acceptance.readCriteria(bytes, { libDir }), { status: "ok", criteria: [] });
+  fs.writeFileSync(lister, "printf 'AC-003\\tdeprecated\\told\\nAC-003\\tactive\\tfirst\\nAC-003\\tactive\\tsecond\\nAC-004\\tactive\\tother\\n'\nexit 0\n");
+  assert.deepStrictEqual(listRequirementRows(bytes, { libDir, tmpDirectory: scratch }), { status: "ok", exit: 0, rows: [{ id: "AC-003", state: "active", text: "first" }, { id: "AC-004", state: "active", text: "other" }], duplicates: ["AC-003"] });
+  assert.deepStrictEqual(listPlanCriteria(bytes, { libDir, tmpDirectory: scratch }), { status: "unusable", detail: "duplicate-AC-003" });
+  assert.deepStrictEqual(acceptance.readCriteria(bytes, { libDir }), { status: "duplicate", ids: ["AC-003"], reason: "the plan lists AC-003 on more than one active ## Requirements row, so one id names two criteria" });
+  assert.deepStrictEqual(listManualAcceptanceIds(bytes, { libDir, tmpDirectory: scratch }), { status: "ok", ids: ["AC-003", "AC-004"] });
   fs.writeFileSync(lister, "echo \"zensu-plan-requirements.sh: plan has an unterminated code fence: $3\" >&2\nexit 5\n");
   const fenced = listRequirementRows(bytes, { libDir, tmpDirectory: scratch, label: ".zensu/state/copy.md" });
   assert.deepStrictEqual(fenced, { status: "unparseable", exit: 5, message: "zensu-plan-requirements.sh: plan has an unterminated code fence: .zensu/state/copy.md" });

@@ -1444,6 +1444,10 @@ test('bind-spec of a validating run refuses a plan whose code fence never closes
   assert.match(fenced.message, new RegExp(`^plan-criteria-unusable: Autopilot run ${RUN} validates its result, but the plan \\.zensu/plans/${ORDER}\\.md does not parse \\(.*unterminated code fence, so the document could not be parsed: \\.zensu/plans/${ORDER}\\.md\\), so its VALIDATE stage would have no criterion to check; close the code fence the plan \\.zensu/plans/${ORDER}\\.md leaves open and keep its ## Requirements table, then run --bind-spec again$`));
   assert.doesNotMatch(fenced.message, /carries no active|write the plan to/);
   assert.equal(fenced.message.includes(box.project), false, fenced.message);
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The widget renders | spec |\n| AC-001 | The widget exports a CSV | spec |\n');
+  const doubled = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(doubled.exit, wo.EXIT.REFUSED, doubled.message);
+  assert.equal(doubled.message, `plan-criteria-unusable: Autopilot run ${RUN} validates its result, but the plan .zensu/plans/${ORDER}.md lists AC-001 on more than one active ## Requirements row, so one id names two criteria; give each acceptance criterion its own AC-### id in its ## Requirements table, then run --bind-spec again`);
   const original = acceptance.readCriteria;
   acceptance.readCriteria = (planPath) => ({ status: 'error', reason: `the requirements lister exited 2 for ${planPath}` });
   let faulted;

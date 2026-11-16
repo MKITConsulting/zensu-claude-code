@@ -59,8 +59,6 @@ const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/;
 const ORDER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const COMMIT_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const RECORDED_HEAD_RE = /^[0-9a-fA-F]{7,64}$/;
-const MANUAL_ACCEPTANCE_HEADING_RE = /^##[ \t]+Manual Acceptance[ \t]*$/;
-const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 const RECORD_KEYS = Object.freeze([
   'ac',
   'criterion',
@@ -397,12 +395,14 @@ function readCriteria(plan, options = {}) {
     return { status: 'unparseable', reason: listed.message ? clip(normalizeText(listed.message), 300) : 'the plan does not parse' };
   }
   if (listed.status === 'unusable') return { status: 'unusable', reason: 'the plan has no usable ## Requirements table' };
+  if (listed.duplicates.length > 0) {
+    return { status: 'duplicate', ids: listed.duplicates, reason: `the plan lists ${listed.duplicates.join(', ')} on more than one active ## Requirements row, so one id names two criteria` };
+  }
   return { status: 'ok', criteria: [...listed.rows].sort((left, right) => compareCriterionIds(left.id, right.id)) };
 }
 
 function chainCriteria(chain, options) {
-  if (Buffer.isBuffer(chain.planBytes)) return readCriteria(chain.planBytes, { ...options, planLabel: chain.planRel });
-  return readCriteria(chain.planPath, options);
+  return readCriteria(Buffer.isBuffer(chain.planBytes) ? chain.planBytes : chain.planPath, { ...options, planLabel: chain.planRel });
 }
 
 function gitEnvironment() {
@@ -584,11 +584,13 @@ function runChain(options) {
     return { root, stem: copy.stem, planPath: copy.path, planRel: copy.rel, planBytes: copy.bytes, unapproved: false, disclosures: [], runId: facts.runId, facts };
   }
   const stem = facts.workOrder.orderId;
-  const plan = planFor(root, stem);
-  if (plan.reason) return { error: plan.reason };
-  const disclosures = [];
-  let planBytes = null;
   const unapproved = facts.approved === facts.workOrder.specHash;
+  const disclosures = unapproved
+    ? [`ACCEPTANCE PLAN UNAPPROVED — work order ${stem} asks for no plan approval, so the criteria of ${facts.label} come from the session's own plan .zensu/plans/${stem}.md, which no person approved`]
+    : [];
+  const plan = planFor(root, stem);
+  if (plan.reason) return { error: plan.reason, unapproved, disclosures };
+  let planBytes = null;
   if (!unapproved) {
     const read = planPayload.readPlanFile(plan.planPath);
     if (read.failure) return { error: `the plan ${plan.planRel} of ${facts.label} cannot be read (${read.failure})` };
@@ -598,8 +600,6 @@ function runChain(options) {
       };
     }
     planBytes = read.bytes;
-  } else {
-    disclosures.push(`ACCEPTANCE PLAN UNAPPROVED — work order ${stem} asks for no plan approval, so the criteria of ${facts.label} come from the session's own plan ${plan.planRel}, which no person approved`);
   }
   return { root, stem, planPath: plan.planPath, planRel: plan.planRel, planBytes, unapproved, disclosures, runId: facts.runId, facts };
 }
@@ -927,7 +927,7 @@ function status(options) {
   const blocking = result.rows.filter((row) => row.state === 'dropped').length;
   const complete = passing === active.length && blocking === 0;
   const tree = result.currentTree.tree ? result.currentTree.tree.slice(0, 12) : `unverified (${result.currentTree.reason || 'no tree id'})`;
-  const context = chain.runId ? runRemedyContext(chain) : { currentTree: result.currentTree, zeroChangeTicket: options.zeroChangeTicket === true };
+  const context = chain.runId ? runRemedyContext(chain, options) : { currentTree: result.currentTree, zeroChangeTicket: options.zeroChangeTicket === true };
   const suffix = complete ? '' : remedies('incomplete', result.rows, chain, options.projectRoot, context).map((entry) => ` | ${entry}`).join('');
   const anchor = chain.runId ? `autopilot run ${chain.runId} | ` : '';
   const lines = [...chain.disclosures, `ACCEPTANCE STATUS — ${anchor}plan: ${chain.planRel} | tree: ${tree} | ${passing}/${active.length} active criteria pass${blocking > 0 ? ` | ${blocking} dropped` : ''}${suffix}`];
@@ -1076,7 +1076,7 @@ const REMEDY_TEXTS = Object.freeze({
   }),
   run: Object.freeze({
     add: () => 'add: the approved plan carries no active AC-### criterion, so this run cannot validate; report this refusal and leave the decision to the user',
-    run: (chain) => `run: drive each criterion that does not pass again on this tree and record it with zensu-log.sh --acceptance-record --run ${chain.runId}`,
+    run: (chain) => `run: drive each criterion that is missing, stale or has an invalid record again on this tree and record it with zensu-log.sh --acceptance-record --run ${chain.runId}`,
     fix: (chain) => `fix: a criterion that fails on this tree needs a code change; send VALIDATION_FAILED for autopilot run ${chain.runId} so the run returns to its fix loop`,
     restore: () => 'restore: a dropped criterion needs a pass, or report this refusal and leave the decision to the user',
     partial: (ids, chain, projectRoot, context) => {
@@ -1084,11 +1084,14 @@ const REMEDY_TEXTS = Object.freeze({
       if (context.unapproved) {
         return `consent: ${named} could not be observed in this environment, and the criteria of autopilot run ${chain.runId} come from a work-order plan no person approved, so no consent covers them; persist BLOCK with the code validation-unresolved and report this line`;
       }
+      if (context.consentFault) {
+        return `consent: ${named} could not be observed in this environment, and the approved plan's ## Manual Acceptance table could not be read (${context.consentFault}), so no consent covers ${ids.length === 1 ? 'it' : 'them'}; persist BLOCK with the code validation-unresolved and report this line`;
+      }
       const missing = ids.filter((id) => !(context.consented || []).includes(id));
       if (missing.length > 0) {
         return `consent: ${named} could not be observed in this environment, and the approved plan's ## Manual Acceptance table has no row for ${missing.join(', ')}, so no consent covers ${missing.length === 1 ? 'it' : 'them'}; persist BLOCK with the code validation-unresolved and report this line`;
       }
-      return `accept: ${named} could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one, so zensu-log.sh --autopilot-validate --run ${chain.runId} --accept-partial ${ids.join(',')} records the gap in the run's ledger and validates the run`;
+      return `accept: ${named} could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one; when each row's reason names the same cause category as the criterion's partial record, zensu-log.sh --autopilot-validate --run ${chain.runId} --accept-partial ${ids.join(',')} records the gap in the run's ledger and validates the run, and otherwise persist BLOCK with the code validation-unresolved and report this line`;
     },
   }),
 });
@@ -1160,39 +1163,21 @@ function acceptOpenRows(ids, open) {
   return problems.length === 0 ? { accepted: true } : { accepted: false, refusal: problems.join('; ') };
 }
 
-function manualAcceptanceIds(bytes) {
-  if (!Buffer.isBuffer(bytes)) return [];
-  const ids = [];
-  let fence = null;
-  let inSection = false;
-  let tableLines = 0;
-  for (const line of bytes.toString('utf8').split(/\r?\n/)) {
-    const marker = FENCE_RE.exec(line);
-    if (fence !== null) {
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && line.trim() === marker[1]) fence = null;
-      continue;
-    }
-    if (marker) {
-      if (tableLines > 0) break;
-      fence = marker[1];
-      continue;
-    }
-    if (!inSection) {
-      if (MANUAL_ACCEPTANCE_HEADING_RE.test(line)) inSection = true;
-      continue;
-    }
-    if (/^#{1,2}[ \t]/.test(line)) break;
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('|')) {
-      if (tableLines > 0) break;
-      continue;
-    }
-    tableLines += 1;
-    if (tableLines <= 2) continue;
-    const cell = trimmed.slice(1).split('|')[0].trim().replace(/^`([^`]*)`$/, '$1');
-    if (AC_RE.test(cell) && !ids.includes(cell)) ids.push(cell);
-  }
-  return ids.sort(compareCriterionIds);
+function manualAcceptanceRead(bytes, options = {}) {
+  if (!Buffer.isBuffer(bytes)) return { ids: [], reason: null };
+  const listed = approvedPlan.listManualAcceptanceIds(bytes, {
+    libDir: options.libDir,
+    bashPath: options.bashPath,
+    timeoutMs: LIMITS.listTimeoutMs,
+    label: options.planLabel,
+  });
+  if (listed.status === 'ok') return { ids: [...new Set(listed.ids)].sort(compareCriterionIds), reason: null };
+  if (listed.status === 'unparseable') return { ids: [], reason: listed.message ? clip(normalizeText(listed.message), 300) : 'the plan does not parse' };
+  return { ids: [], reason: listerFault(listed) };
+}
+
+function manualAcceptanceIds(bytes, options = {}) {
+  return manualAcceptanceRead(bytes, options).ids;
 }
 
 function chainPlanBytes(chain) {
@@ -1202,7 +1187,7 @@ function chainPlanBytes(chain) {
   return read.failure ? { reason: read.failure } : { bytes: read.bytes };
 }
 
-function consentDecision(ids, open, plan, runMode) {
+function consentDecision(ids, open, plan, runMode, options = {}) {
   const exact = acceptOpenRows(ids, open);
   if (!exact.accepted) return exact;
   if (plan.unapproved) {
@@ -1211,7 +1196,11 @@ function consentDecision(ids, open, plan, runMode) {
   if (!Buffer.isBuffer(plan.bytes)) {
     return { accepted: false, refusal: `--accept-partial takes consent from the plan's ## Manual Acceptance table, and the plan could not be read (${plan.reason || 'no bytes'})` };
   }
-  const listed = manualAcceptanceIds(plan.bytes);
+  const read = manualAcceptanceRead(plan.bytes, options);
+  if (read.reason) {
+    return { accepted: false, refusal: `--accept-partial takes consent from the plan's ## Manual Acceptance table, and that table could not be read (${read.reason})` };
+  }
+  const listed = read.ids;
   const missing = ids.filter((id) => !listed.includes(id));
   if (missing.length === 0) return { accepted: true };
   const named = missing.join(', ');
@@ -1403,9 +1392,22 @@ function planCriteria(options) {
   if (planPath === '') return unjudgedCriteria(options, 'the plan path did not reach the acceptance check');
   const relative = options.projectRoot ? path.relative(options.projectRoot, planPath) : '';
   const shown = display(relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : planPath, options.projectRoot);
-  const read = readCriteria(planPath, options);
+  const read = readCriteria(planPath, { ...options, planLabel: shown });
   if (read.status === 'error') return unjudgedCriteria(options, `the acceptance criteria of ${shown} could not be read: ${read.reason}`);
   if (read.status === 'ok' && read.criteria.some((criterion) => criterion.state === 'active')) return { code: 0, lines: [] };
+  if (read.status === 'duplicate') {
+    const named = `the plan ${shown} lists ${read.ids.join(', ')} on more than one active ## Requirements row, so one id names two criteria`;
+    if (options.criteriaAdvisory === true) {
+      return { code: 0, lines: [`ACCEPTANCE CRITERIA — advisory, not blocking | ${named} and the chain terminus will report it as unresolved after the review without blocking it`] };
+    }
+    return {
+      code: 1,
+      lines: [
+        `${named} and the chain terminus would refuse it as unresolved after the review`,
+        'Give each acceptance criterion its own AC-### id in the plan\'s ## Requirements table, then run --tdd-complete again.',
+      ],
+    };
+  }
   const cause = read.status !== 'ok'
     ? read.reason
     : (read.criteria.length === 0 ? 'its ## Requirements table has no AC-### row' : 'every AC-### row is deprecated');
@@ -1435,8 +1437,9 @@ function runHeadCheck(options, facts, limits) {
   return { head: head.head };
 }
 
-function runRemedyContext(chain) {
-  return { consented: manualAcceptanceIds(chain ? chain.planBytes : null), unapproved: Boolean(chain && chain.unapproved) };
+function runRemedyContext(chain, options = {}) {
+  const read = manualAcceptanceRead(chain ? chain.planBytes : null, { ...options, planLabel: chain ? chain.planRel : undefined });
+  return { consented: read.ids, consentFault: read.reason, unapproved: Boolean(chain && chain.unapproved) };
 }
 
 function runOutcome(options, chain, limits, headCommit) {
@@ -1458,7 +1461,7 @@ function runOutcome(options, chain, limits, headCommit) {
   if (accept.error || accept.ids.length > 0) {
     const decision = accept.error
       ? { accepted: false, refusal: accept.error }
-      : consentDecision(accept.ids, summary.open, { bytes: chain.planBytes, unapproved: chain.unapproved === true }, true);
+      : consentDecision(accept.ids, summary.open, { bytes: chain.planBytes, unapproved: chain.unapproved === true }, true, { ...options, planLabel: chain.planRel });
     if (decision.accepted) {
       return { state: 'partial-accepted', cause: `${where}; accepted as partial: ${summary.open.map((row) => row.criterion.id).join(', ')}${summary.deprecatedText}`, rows, accepted: summary.open };
     }
@@ -1472,6 +1475,7 @@ function runVerdict(options, gate, lines, limits) {
   let outcome;
   let chain = null;
   let planText = '';
+  let planUnapproved = false;
   const refusal = workTreeRefusal(options, limits);
   const facts = refusal ? null : runFacts(options);
   if (refusal) {
@@ -1487,7 +1491,9 @@ function runVerdict(options, gate, lines, limits) {
       return { state: 'escaped', passes: true, mode: gate.mode, blocking: false, planUnapproved: false, lines };
     } else {
       const resolved = runChain(options);
+      planUnapproved = resolved.unapproved === true;
       if (resolved.error) {
+        lines.push(...(resolved.disclosures || []));
         outcome = { state: 'unresolved', cause: resolved.error, rows: [] };
       } else {
         chain = resolved;
@@ -1498,10 +1504,10 @@ function runVerdict(options, gate, lines, limits) {
     }
   }
   const passes = PASSING_STATES.includes(outcome.state);
-  const segments = passes ? [] : remedies(outcome.state, outcome.rows, chain || { runId: options.runId }, options.projectRoot, runRemedyContext(chain));
+  const segments = passes ? [] : remedies(outcome.state, outcome.rows, chain || { runId: options.runId }, options.projectRoot, runRemedyContext(chain, options));
   verdictLines(lines, outcome, gate, planText, segments, options.projectRoot, limits);
   const blocking = outcome.blocking === true;
-  return { state: outcome.state, passes: passes || (gate.mode === 'advisory' && !blocking), mode: gate.mode, blocking, planUnapproved: Boolean(chain && chain.unapproved), lines };
+  return { state: outcome.state, passes: passes || (gate.mode === 'advisory' && !blocking), mode: gate.mode, blocking, planUnapproved, lines };
 }
 
 function verdict(options) {
@@ -1566,7 +1572,7 @@ function standaloneVerdict(options, gate, lines, limits) {
           decision = { accepted: false, refusal: `--accept-partial ${REVIEWED_CHAIN_ONLY}, which this zero-change self-review ticket is not` };
         } else if (accept.ids.length > 0) {
           decision = result.currentTree.tree
-            ? consentDecision(accept.ids, failing, chainPlanBytes(resolved.chain), false)
+            ? consentDecision(accept.ids, failing, chainPlanBytes(resolved.chain), false, { ...options, planLabel: resolved.chain.planRel })
             : { accepted: false, refusal: '--accept-partial needs a tree the gate can fingerprint, and this one could not be fingerprinted' };
         }
         if (decision && decision.accepted) {
@@ -1688,7 +1694,7 @@ async function main(argv, env = process.env) {
       try {
         fs.writeFileSync(options.verdictStatePath, result.state);
         fs.writeFileSync(path.join(path.dirname(options.verdictStatePath), 'verdict-mode'), result.mode);
-        if (result.planUnapproved) fs.writeFileSync(path.join(path.dirname(options.verdictStatePath), 'verdict-plan-unapproved'), '1');
+        fs.writeFileSync(path.join(path.dirname(options.verdictStatePath), 'verdict-plan-unapproved'), result.planUnapproved === true ? '1' : '0');
       } catch { }
     }
     if (result.state === 'unavailable' && (result.mode !== 'advisory' || result.blocking === true)) return 2;

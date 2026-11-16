@@ -1953,7 +1953,7 @@ if val_setup "val-main" "$VM" val_run_main false; then
 
   val_validate val_run_main; RC=$?
   if [ "$RC" -eq 1 ] \
-    && grep -qF "ACCEPTANCE — incomplete | autopilot run val_run_main: 0/2 acceptance criteria pass on the pull-request head ${VM_HEAD:0:12}; AC-001 missing; AC-002 missing | plan: $VM_COPY | gate: required | run: drive each criterion that does not pass again on this tree and record it with zensu-log.sh --acceptance-record --run val_run_main" "$WORK/verr" \
+    && grep -qF "ACCEPTANCE — incomplete | autopilot run val_run_main: 0/2 acceptance criteria pass on the pull-request head ${VM_HEAD:0:12}; AC-001 missing; AC-002 missing | plan: $VM_COPY | gate: required | run: drive each criterion that is missing, stale or has an invalid record again on this tree and record it with zensu-log.sh --acceptance-record --run val_run_main" "$WORK/verr" \
     && grep -qF 'zensu-log.sh --autopilot-validate: autopilot run val_run_main stays at VALIDATE' "$WORK/verr" \
     && [ ! -s "$WORK/vout" ] && [ "$(file_sha "$VM_FILE")" = "$VM_BEFORE" ]; then
     check "V2 a run without acceptance records stays at VALIDATE and names each missing criterion with its remedy" PASS
@@ -2146,7 +2146,7 @@ EVIDENCE
   run_json_ok "$VP_FILE" 'v.stage === "VALIDATE" && v.bypasses.length === 1 && v.bypasses[0].gate === "acceptance-partial"' || FAULT_STATE=1
   val_validate val_run_partial --accept-partial AC-001; RC=$?
   if [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ "$RC_PLAIN" -eq 1 ] \
-    && printf '%s' "$PLAIN_ERR" | grep -qF "| accept: AC-001 could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one, so zensu-log.sh --autopilot-validate --run val_run_partial --accept-partial AC-001 records the gap" \
+    && printf '%s' "$PLAIN_ERR" | grep -qF "| accept: AC-001 could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one; when each row's reason names the same cause category as the criterion's partial record, zensu-log.sh --autopilot-validate --run val_run_partial --accept-partial AC-001 records the gap" \
     && [ "$RC_BARE" -eq 2 ] && printf '%s' "$BARE_ERR" | grep -qF -- "--accept-partial takes the comma list of criterion ids the approved plan's ## Manual Acceptance table lists" \
     && [ "$RC_FAULT" -eq 2 ] && [ "$FAULT_STATE" -eq 0 ] \
     && printf '%s' "$FAULT_ERR" | grep -qF 'VALIDATION_PASSED could not be applied to autopilot run val_run_partial' \
@@ -2645,6 +2645,31 @@ EVIDENCE
 the page showed the saved value
 EVIDENCE
   RC_R2=$?
+  PLAN_FLAG_FAULT="$WORK/verdict-plan-unapproved-fault.js"
+  cat > "$PLAN_FLAG_FAULT" <<'JS'
+if (process.env.ZENSU_AVR_MODE === 'verdict') {
+  const fs = require('fs');
+  const write = fs.writeFileSync;
+  fs.writeFileSync = function (file, data, ...rest) {
+    if (typeof file === 'string' && file.endsWith('verdict-plan-unapproved')) throw new Error('the verdict-plan-unapproved write was lost');
+    return write.call(fs, file, data, ...rest);
+  };
+}
+JS
+  VO_BEFORE="$(file_sha "$VO_FILE")"
+  NODE_OPTIONS="--require=$PLAN_FLAG_FAULT" bash "$LOG" --autopilot-validate --run val_run_order >"$WORK/vout" 2>"$WORK/verr"; RC_FLAG=$?
+  FLAG_ERR="$(cat "$WORK/verr")"
+  if [ "$RC_FLAG" -eq 2 ] \
+    && printf '%s' "$FLAG_ERR" | grep -qF "ACCEPTANCE — pass | autopilot run val_run_order: 2/2 acceptance criteria pass on the pull-request head ${VO_HEAD:0:12}" \
+    && printf '%s' "$FLAG_ERR" | grep -qF 'the acceptance verdict could not be read back, so autopilot run val_run_order stays at VALIDATE; run --autopilot-validate again' \
+    && [ "$(file_sha "$VO_FILE")" = "$VO_BEFORE" ] \
+    && run_json_ok "$VO_FILE" 'v.stage === "VALIDATE" && v.bypasses.length === 0'; then
+    check "V20b a lost verdict-plan-unapproved write refuses the work-order run with exit 2 and records neither a bypass nor VALIDATION_PASSED" PASS
+  else
+    check "V20b a lost verdict-plan-unapproved write is refused (rc=$RC_FLAG)" FAIL
+    printf '%s\n' "$FLAG_ERR"
+    VERR
+  fi
   val_validate val_run_order; RC=$?
   if [ -n "$ORDER_EVR" ] && [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ "$RC" -eq 0 ] \
     && grep -qF "ACCEPTANCE PLAN UNAPPROVED — work order $VO_ORDER asks for no plan approval, so the criteria of autopilot run val_run_order come from the session's own plan .zensu/plans/$VO_ORDER.md, which no person approved" "$WORK/verr" \

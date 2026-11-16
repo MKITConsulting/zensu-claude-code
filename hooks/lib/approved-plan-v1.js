@@ -139,6 +139,7 @@ const storeApprovedPlan = (projectRoot, sha, bytes) => {
 
 const listedRows = (stdout) => {
   const byId = new Map();
+  const duplicates = [];
   for (const line of String(stdout || "").split("\n")) {
     if (line === "") continue;
     const parts = line.split("\t");
@@ -146,9 +147,13 @@ const listedRows = (stdout) => {
     const [id, state] = parts;
     if (!AC_RE.test(id) || (state !== "active" && state !== "deprecated")) continue;
     const previous = byId.get(id);
+    if (previous && previous.state === "active" && state === "active") {
+      if (!duplicates.includes(id)) duplicates.push(id);
+      continue;
+    }
     if (!previous || (previous.state === "deprecated" && state === "active")) byId.set(id, { id, state, text: parts.slice(2).join(" ") });
   }
-  return [...byId.values()];
+  return { rows: [...byId.values()], duplicates };
 };
 
 const listerVerdict = (result, planPath, label) => {
@@ -164,13 +169,13 @@ const listerVerdict = (result, planPath, label) => {
   }
   if (result.status === 3) return { status: "no-section", exit: 3, message };
   if (result.status === 5) return { status: "unparseable", exit: 5, message };
-  const rows = listedRows(result.stdout);
+  const { rows, duplicates } = listedRows(result.stdout);
   if (result.status === 4 && rows.length === 0) return { status: "unusable", exit: 4, message };
-  return { status: "ok", exit: result.status, rows };
+  return { status: "ok", exit: result.status, rows, duplicates };
 };
 
 const runLister = (lister, planPath, options) => childProcess.spawnSync(options.bashPath || "bash",
-  ["--noprofile", "--norc", lister, "--list", "--plan", planPath], {
+  ["--noprofile", "--norc", lister, "--list", ...(options.manualAcceptance === true ? ["--manual-acceptance"] : []), "--plan", planPath], {
     encoding: "utf8",
     timeout: options.timeoutMs || PLAN_CRITERIA_TIMEOUT_MS,
     maxBuffer: 16 * 1024 * 1024,
@@ -183,7 +188,9 @@ const listRequirementRows = (plan, options = {}) => {
   if (typeof lister !== "string" || (typeof plan !== "string" && !Buffer.isBuffer(plan))) {
     return { status: "error", kind: "input", detail: "input-rejected" };
   }
-  if (typeof plan === "string") return listerVerdict(runLister(lister, plan, options), plan, null);
+  if (typeof plan === "string") {
+    return listerVerdict(runLister(lister, plan, options), plan, typeof options.label === "string" && options.label !== "" ? options.label : null);
+  }
   let directory = null;
   try {
     directory = fs.mkdtempSync(nodePath.join(options.tmpDirectory || os.tmpdir(), "zensu-plan-criteria-"));
@@ -203,11 +210,19 @@ const listPlanCriteria = (bytes, options = {}) => {
   if (!Buffer.isBuffer(bytes)) return { status: "unreadable", detail: "input-rejected" };
   const listed = listRequirementRows(bytes, options);
   if (listed.status === "error") return { status: "unreadable", detail: listed.detail };
+  if (listed.status === "ok" && listed.duplicates.length > 0) return { status: "unusable", detail: `duplicate-${listed.duplicates.join(",")}` };
   const active = listed.status === "ok" ? listed.rows.filter((row) => row.state === "active").length : 0;
   return active > 0 ? { status: "ok", active } : { status: "unusable", detail: `exit-${listed.exit}` };
 };
 
+const listManualAcceptanceIds = (plan, options = {}) => {
+  const listed = listRequirementRows(plan, { ...options, manualAcceptance: true });
+  if (listed.status === "ok") return { status: "ok", ids: listed.rows.filter((row) => row.state === "active").map((row) => row.id) };
+  if (listed.status === "no-section" || listed.status === "unusable") return { status: "ok", ids: [] };
+  return { ...listed, ids: [] };
+};
+
 module.exports = {
   APPROVED_PLAN_PREFIX, APPROVED_PLAN_FAILURES, PLAN_CRITERIA_CONTENT_EXITS, AC_RE, approvedPlanStem, approvedPlanRelPath,
-  readApprovedPlan, storeApprovedPlan, listRequirementRows, listPlanCriteria,
+  readApprovedPlan, storeApprovedPlan, listRequirementRows, listPlanCriteria, listManualAcceptanceIds,
 };

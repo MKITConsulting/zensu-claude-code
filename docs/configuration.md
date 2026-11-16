@@ -314,7 +314,9 @@ EVIDENCE
 
 `--acceptance-status` prints one `ACCEPTANCE STATUS — …` line plus one line per criterion and
 exits 0 only when every active criterion passes on the current tree. The summary line ends with
-the remedy segments a `--chain-done` refusal would print (`run:`, `fix:`, `add:`, `restore:`, `accept:`);
+the remedy segments the matching refusal would print, a `--chain-done` refusal for a standalone
+chain and an `--autopilot-validate` refusal with `--run` (`run:`, `fix:`, `add:`, `restore:`,
+`accept:`, and in place of `accept:` a standalone chain's `review:` or `tree:` or a run's `consent:`);
 act on the segment, never on the exit code alone, because verifying an unchanged tree again
 cannot turn a failing criterion. Records live in
 `$CLAUDE_PLUGIN_DATA/acceptance-verify/v1/records/`; retention keeps the newest 20 records per

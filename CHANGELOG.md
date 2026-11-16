@@ -27,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run here) now closes only with the user's consent for exactly those criteria.
   `--chain-done --accept-partial <AC ids>` passes when the listed ids are exactly the open
   criteria, every one is `partial` on the current tree and each has a row in the plan's new
-  optional `## Manual Acceptance` table, which the terminus reads; it records
+  optional `## Manual Acceptance` table, which the terminus reads with the program that reads the
+  `## Requirements` table, so a decorated or comma-listed id counts and a struck-out id covers
+  nothing; it records
   `acceptance-partial` in the session bypass ledger (a consent the ledger does not take keeps the
   chain open), and the chain-end summary renders it 🟡 with each criterion's reason. A refusal
   whose open criteria are all `partial` ends with an `accept:` segment. `partial` is never a
@@ -71,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plan refuses as `PLAN_CRITERIA_UNREADABLE`. A work-order run that validates is refused the same
   way at `--bind-spec`, with `plan-criteria-unusable` or `plan-criteria-unreadable`, before anyone
   is asked to approve its plan.
+- **One id per criterion**: a plan that lists one `AC-###` id on two active `## Requirements`
+  rows is now refused at `--tdd-complete`, at a validating run's plan approval
+  (`PLAN_CRITERIA_UNUSABLE`) and at `--bind-spec` (`plan-criteria-unusable`), and the terminus
+  reads it as `unresolved`, because one acceptance record would answer for two criteria. Give each
+  criterion its own id; a deprecated row may still share its id with the active row that replaced
+  it.
 - **Autopilot spec template**: `templates/autopilot-spec.md` replaces its acceptance-criteria list
   with a `## Requirements` table of `AC-###` rows and gains an optional `## Manual Acceptance`
   table. A repository override at `.zensu/templates/autopilot-spec.md`, and a spec written from

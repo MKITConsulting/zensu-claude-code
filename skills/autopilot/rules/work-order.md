@@ -63,7 +63,8 @@ Autopilot's Phase 1 step 1, the `/zensu:build` run with the exact `AUTOPILOT-RUN
 Exit 8 with `plan-criteria-unusable` on stderr means the run validates and its plan carries no
 active `AC-###` row: add the `## Requirements` table §3 asks for and run `--bind-spec` again. When
 it says the plan does not parse, a code fence is left open: close it, keep the table and run
-`--bind-spec` again. The refusal comes before any stage report and before a person is asked to
+`--bind-spec` again. When it names an id on more than one active row, give each criterion its own
+`AC-###` id and run `--bind-spec` again. The refusal comes before any stage report and before a person is asked to
 approve the plan. Exit 8
 with `plan-criteria-unreadable` means the requirements lister could not judge the plan, which says
 nothing about its content: leave the plan as it is, run `/zensu:doctor`, and run `--bind-spec`

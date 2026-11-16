@@ -197,6 +197,44 @@ for list_locale in C en_US.UTF-8; do
 done
 [ "$LIST_OK" -eq 1 ]
 check "L24 --list expands a comma list, keeps the narrow deprecated markers and an unmarked row active, in both locales" "$(verdict $?)"
+cat > "$FIX/manual.md" <<'PLAN'
+# Plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | the requirement row | spec |
+| ~~AC-008~~ | a struck requirement row | spec |
+
+```text
+## Manual Acceptance
+| AC-009 | fenced | x | y |
+```
+
+## Manual Acceptance
+| Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
+|-----------|------------------------------------|----------------------------------------|---------|
+| **AC-002** | sign in with the real account | credentials | planning answer, 2026-11-16 |
+| [AC-003](#ac-003) | open the deployed page | non-loopback host | planning answer, 2026-11-16 |
+| AC-004, AC-005 | install the signed build | signed build | planning answer, 2026-11-16 |
+| ~~AC-007~~ | a withdrawn check | signed build | planning answer, 2026-11-16 |
+
+## Steps
+| AC-006 | outside | x | y |
+PLAN
+MAN_WANT="$(printf '%s\t%s\t%s\n' \
+  AC-002 active 'sign in with the real account' \
+  AC-003 active 'open the deployed page' \
+  AC-004 active 'install the signed build' \
+  AC-005 active 'install the signed build' \
+  AC-007 deprecated 'a withdrawn check')"
+MAN_HAVE="$(bash "$REQ" --list --manual-acceptance --plan "$FIX/manual.md" 2>/dev/null)"; MAN_RC=$?
+bash "$REQ" --list --manual-acceptance --plan "$FIX/list.md" >/dev/null 2>"$FIX/manual-none.err"; MAN_NONE=$?
+REQ_HAVE="$(bash "$REQ" --list --plan "$FIX/manual.md" 2>/dev/null)"
+[ "$MAN_RC" -eq 0 ] && [ "$MAN_HAVE" = "$MAN_WANT" ] && [ "$MAN_NONE" -eq 3 ] \
+  && grep -qF 'no "## Manual Acceptance" section' "$FIX/manual-none.err" \
+  && [ "$REQ_HAVE" = "$(printf '%s\t%s\t%s\n%s\t%s\t%s' AC-001 active 'the requirement row' AC-008 active 'a struck requirement row')" ]
+check "L24b --manual-acceptance lists the decorated, linked and comma-listed ids of the Manual Acceptance section only, outside fences, reads a struck-out id as withdrawn there while ## Requirements keeps it active, and exits 3 without one" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/rows-outside.md" >/dev/null 2>&1
 [ $? -eq 4 ]
 check "L8 an AC row under a LATER '## ' section is not counted" "$(verdict $?)"

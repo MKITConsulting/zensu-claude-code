@@ -48,6 +48,29 @@ characters (`*`, `_`, `~`, a backtick, a space); the rest must then start with `
 `–` or a spaced ` - `. `Deprecated-flag handling` and `deprecated/legacy path` stay active. An
 unmarked row is verified, because a broad match would let a criterion opt itself out.
 
+**One id, one criterion.** A second active row with an id already listed is a `duplicate`
+(`listedRows` in `approved-plan-v1.js` collects it beside the rows), because two criteria under one
+id would let one record answer for both. `readCriteria` answers `duplicate`, which the terminus and
+run mode read as `unresolved`, `planCriteria` refuses it at `--tdd-complete` (advisory under an
+advisory gate), the plan-approval hook refuses it as `PLAN_CRITERIA_UNUSABLE` (`listPlanCriteria`
+detail `duplicate-<ids>`), and `--bind-spec` as `plan-criteria-unusable`. A deprecated row and an
+active row of one id keep the active one and are no duplicate, so a dropped requirement's row can
+stay in place beside the row that replaced it.
+
+**The `## Manual Acceptance` table has the same parser.** `--list --manual-acceptance` runs the
+same awk program over the `## Manual Acceptance` section instead of `## Requirements`: the same
+heading and fence rules, the same id-cell reduction (emphasis, a code span, a link wrapper, a comma
+list), every table in the section, and the state judged on the second visible cell, the check a
+person runs. `listManualAcceptanceIds` in `approved-plan-v1.js` keeps the active `AC-###` ids and
+ignores a repeated one, and `manualAcceptanceRead` in the module runs it on the bytes the gate
+already holds. One rule is this mode's own: a tilde in the id cell marks the row `deprecated`,
+because a struck-out consent row reads as withdrawn, while in `## Requirements` a strike mark stays
+decoration and the row is verified. Both directions keep the safe side: a struck-out criterion is
+still checked, and a struck-out consent covers nothing. A check cell that is still a `{…}`
+placeholder carries no consent either. A plan whose fence never closes, or a lister that cannot
+run, reads as a table that could not be read, which refuses `--accept-partial` with the lister's
+cause and in run mode turns `accept:` into `consent:`.
+
 **The chain anchor is the edit-landing receipt, read through ONE reader.**
 `hooks/lib/edit-landing-receipt-v1.js` owns the receipt schemas, the bounded no-follow read and
 `receiptRunLog`. `acceptance-verify-v1.js` requires it, and `--tdd-complete` runs it through
@@ -186,10 +209,10 @@ or followed by another flag, and a second `--accept-partial` exit 2 on every ver
 `--autopilot-validate` included. `standaloneVerdict` turns the verdict into `partial-accepted`
 only when `consentDecision` finds, through `acceptOpenRows`, the listed ids EQUAL to the open rows
 (active, not `pass`) and every one `partial` on a tree the gate can fingerprint, and finds a row
-for each id in the plan's `## Manual Acceptance` table (`manualAcceptanceIds`: the first cell of
-each data row, outside code fences); otherwise it stays `incomplete` and the cause names the
+for each id in the plan's `## Manual Acceptance` table (`manualAcceptanceIds`, read through the
+lister as §"One row parser" describes); otherwise it stays `incomplete` and the cause names the
 difference (`covers only partial criteria, not …`, `names …, which is not open`, `leaves … open`,
-`which has no row for …`). Exact-set matching is the point: consent never covers a criterion the
+`which has no row for …`, `that table could not be read (…)`). Exact-set matching is the point: consent never covers a criterion the
 user was not shown. `standaloneVerdict` also refuses the ids on a minted `zc_`
 self-review ticket by itself (`ZENSU_AVR_ZERO_CHANGE_TICKET`), so that rule does not rest on the
 shell's refusal alone. A `partial-accepted` close prints one
@@ -288,7 +311,7 @@ follow-up.
 **Coupled sites of this section:** `VERIFY_AGAIN_STATES`, `USER_REMEDIES`, `REMEDY_TEXTS`,
 `HANDOFF_*`, `LIMITS.maxRemedyChars`, `remedies`, `partialRemedy`, `isHandoff`,
 `parseAcceptIds`, `acceptOpenRows`, `consentDecision`, `manualAcceptanceIds`,
-`MANUAL_ACCEPTANCE_HEADING_RE`, `chainPlanBytes`, `planDigest`, `recordSetDigest`,
+`manualAcceptanceRead`, `chainPlanBytes`, `planDigest`, `recordSetDigest`,
 `handoffEvidence`, `recordHandoff`, `handoffStatus`, `handoffLine`, `planCriteria`,
 `unjudgedCriteria` and the `accept-ids`, `handoff` and `plan-criteria` modes in
 `acceptance-verify-v1.js`; the `--accept-partial` parse and refusals, `_zensu_accept_partial_ids`,
@@ -452,9 +475,15 @@ when `consentDecision` finds each id in the `## Manual Acceptance` table of the 
 was checked; any `fail`, `missing`, `stale` or `dropped` row, an id the table lacks, and a
 work-order plan no person approved keep it `incomplete`. User decision (2026-11-15): with no
 person present, the only consent VALIDATE may apply is one the user gave by approving the plan,
-so an agent never accepts a gap on its own. `runRemedyContext` hands `remedies` the table's ids
-and the approval, so a refusal over partial rows ends with `accept:` and the command when the
-table lists each id, and with `consent:` otherwise, whose text tells the run to block. The verb exits 0 after it applied `VALIDATION_PASSED`, 1 when the
+so an agent never accepts a gap on its own. `runRemedyContext` hands `remedies` the table's ids,
+the table's read fault and the approval, so a refusal over partial rows ends with `accept:` and
+the command when the table lists each id, and with `consent:` otherwise (an id the table lacks, a
+table that could not be read, a work-order plan no person approved), whose text tells the run to
+block. The gate reads only the ids: `accept:` itself says the command holds only when each row's
+reason names the same cause category as the criterion's `partial` record, and to block otherwise,
+because no person is there to answer the one question. The run-mode `run:` segment names
+`--acceptance-record --run <id>` for the criteria that are missing, stale or carry an invalid
+record. The verb exits 0 after it applied `VALIDATION_PASSED`, 1 when the
 acceptance verdict refused (the run stays at `VALIDATE`), and 2 for a misuse or a fault: no active
 run of this session, another run, an ended run, a `--no-validate` run, a stage other than
 `VALIDATE`, a run back from a fix attempt whose pushed head is not recorded yet
@@ -472,7 +501,13 @@ other passing state under a required gate refuses with exit 2 and tells the run 
 it validates no run, and an empty `verdict-state` read-back refuses with exit 2 too. A run that
 validated with a gap must name it in the PR. A work-order run whose plan no person approved also
 gets `{"gate":"acceptance-plan-unapproved"}` (`verdict-plan-unapproved`) when it validates,
-whatever else it records, except under the switched-off gate, which reads no plan. `VALIDATION_PASSED` carries the
+whatever else it records, except under the switched-off gate, which reads no plan. The fact comes
+from the run record (`approvedPlanSha256` equal to `workOrder.specHash`), so it also holds when the
+plan file is missing and the verdict is `unresolved` under an advisory gate. The module writes
+`verdict-plan-unapproved` as `0` or `1` on every verdict, after `verdict-state` and `verdict-mode`,
+and the verb reads anything else, an absent file included, as a verdict it could not read back and
+refuses with exit 2; writing the flag last keeps a lost write from validating a run without its
+ledger entry. `VALIDATION_PASSED` carries the
 run's own durable head.
 
 **Resume.** `hooks/session-start-autopilot-resume.sh` reads the copy of an active validate-on run
@@ -493,7 +528,7 @@ new id.
 **Coupled sites of run mode:** `runFacts`, `runChain`, `runHead`, `runHeadCheck`, `prCommit`,
 `gitLines`, `changeList`, `pathList`, `chainCriteria`, `unfingerprintedCause`, `runOutcome`,
 `runVerdict`, `runRemedyContext`, the `run` texts of `REMEDY_TEXTS`, `consentDecision`,
-`manualAcceptanceIds`, `isRunCopyStem` (which also requires `approvedPlanStem` to rebuild the stem),
+`manualAcceptanceIds`, `manualAcceptanceRead`, `isRunCopyStem` (which also requires `approvedPlanStem` to rebuild the stem),
 `expectedPlanRel`, the `name` and `outside` that `chainTree` returns, `LIMITS.listedChanges`,
 `LIMITS.headCandidates`, the `run.json` and `ZENSU_AVR_RUN` / `ZENSU_AVR_ACCEPT_PARTIAL_IDS`
 transport and the `verdict-mode` and `verdict-plan-unapproved` files in
@@ -511,14 +546,16 @@ fsyncs the state directory after the rename on every host but win32, in `approve
 `skills/autopilot/rules/validate.md` and the `partial` sentence of `skills/autopilot/rules/drivers.md`;
 the `VALIDATE_FEATURE` line and `planCopyNote` of `hooks/session-start-autopilot-resume.sh`;
 `planCriteriaRefusal` in `work-order-v1.js` and the `plan-criteria-unusable` paragraph of
-`skills/autopilot/rules/work-order.md` §4. Pins: `V1`-`V21`, `V7b` and `V13b` in
+`skills/autopilot/rules/work-order.md` §4. Pins: `V1`-`V21`, `V7b`, `V13b` and `V20b` in
 `test-acceptance-gate.sh` (`V7b` the ended run, `V10` the advisory ledger entry, `V13b` a run of
 another session in the same project, `V15` the pending head update and a third visit's event ids,
 `V16` the head bound, `V17` a branch named after an abbreviated head, `V18` an unexpected passing
 state under a required gate, `V19` a copy the plan-approval hook itself stored, validated through
 the records and the verb, and a tracked `.zensu/logs/` change that leaves the tree clean, and `V20`
 a work-order plan no person approved, whose validation records `acceptance-plan-unapproved` before
-`VALIDATION_PASSED`, and `V21` every run verb and `--autopilot-validate --accept-partial` in a shell
+`VALIDATION_PASSED`, `V20b` a lost `verdict-plan-unapproved` write on that run, which the verb
+refuses with exit 2 before it records anything, and `V21` every run verb and
+`--autopilot-validate --accept-partial` in a shell
 that inherits no exported function), `R8e` and `R8f` in `test-autopilot-session-resume.sh` (the resume line for a
 missing copy; no line for a run that does not validate, and the line for a tampered copy), the run
 cases of

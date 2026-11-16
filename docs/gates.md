@@ -1556,6 +1556,8 @@ plan must carry a usable `## Requirements` table.
   switch, and it follows the acceptance gate's own mode as the terminus does:
   `evidence.acceptanceGate: advisory` turns the refusal into an
   `ACCEPTANCE CRITERIA — advisory, not blocking` notice, and `ZENSU_ACCEPTANCE_GATE=off` skips it.
+  A plan that lists one `AC-###` id on two active rows is refused the same way, because one record
+  would answer for two criteria; the terminus reads such a plan as `unresolved`.
 - **Scope.** A non-empty change set. That is NARROWER than the receipt gate above it, which
   multi-repo stage 1 also arms on a logged claim, so a zero-change chain whose work landed in
   another repository is gated there and not here. A chain that changed nothing has no plan
@@ -1944,16 +1946,26 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   `unresolved` (no receipt names the chain's plan while the tree has changes), `invalid` (the
   newest record does not validate) and `unavailable`. A refusal exits `1` and leaves the chain
   open. A refusal line ends with one segment per remedy that applies:
-  - `run: /zensu:verify-feature --chain --log <run log>` when verifying again can change the
-    verdict: a `missing` or `stale` criterion, or an `invalid` record. An Autopilot run's
-    remedy also names a `partial` one.
+  - `run:` when verifying again can change the verdict: a `missing` or `stale` criterion, or an
+    `invalid` record, in both modes. A standalone chain's segment names
+    `/zensu:verify-feature --chain --log <run log>`, and an Autopilot run's names
+    `zensu-log.sh --acceptance-record --run <id>`. A `partial` criterion never gets it, because
+    this environment observes it the same way again.
   - `fix:` when a criterion fails on the current tree. Only a code change can turn it, so
-    verifying the same tree again is never the remedy.
+    verifying the same tree again is never the remedy. An Autopilot run's segment sends
+    `VALIDATION_FAILED`, so the run returns to its fix loop.
   - `add:` for `no-criteria`, and `restore:` for a `dropped` criterion.
   - `accept:` when every criterion that does not pass is `partial`. It names the ids, says that
     they close only with the user's consent for exactly those criteria, names the file that owns
     the two sources of that consent, and asks for each criterion's `## Manual Acceptance` row
-    before `--accept-partial <ids>` on the same `--chain-done` call.
+    before `--accept-partial <ids>` on the same `--chain-done` call. In its place a standalone
+    chain gets `review:` on a minted zero-change self-review ticket and `tree:` on a tree the gate
+    cannot fingerprint, because consent binds to neither. An Autopilot run's `accept:` names
+    `--autopilot-validate --run <id> --accept-partial <ids>` when the approved plan's table lists
+    every id, and holds only for rows whose reason names the same cause category as the
+    criterion's `partial` record. A `consent:` segment stands in its place when the table lacks an
+    id or cannot be read, or when a work-order plan no person approved supplies the criteria, and
+    tells the run to persist `BLOCK` with the code `validation-unresolved`.
 
   An `unresolved` cause names its own remedy, and `unavailable` names none. No remedy names a
   way to switch the gate off.
@@ -1974,7 +1986,10 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   `## Manual Acceptance` table whose reason names the same cause category as the `partial` record, which records
   an answer the user gave at planning or when the gap was found, or from the one question `/zensu:build` step 6d, `/zensu:verify-feature --chain` and
   `/zensu:self-review` ask when a gap is found (provide access now, accept as partial, leave the
-  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The gate
+  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The table is
+  read by the program that reads the `## Requirements` table, so a decorated, linked or
+  comma-listed id counts, and a row whose id is struck out, or whose check is still a `{…}`
+  placeholder, covers nothing. The gate
   reads the table's ids, never a row's reason: a listed id without a row keeps the verdict
   `incomplete`, and the refusal asks for the row, so an answer to the one question counts once
   its row is written. Nothing makes the user approve the table itself, and the gate cannot tell a
@@ -2016,7 +2031,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   a plan. The criteria are the `AC-###` rows of the plan the user approved, which the plan-approval
   hook stores byte for byte as `.zensu/state/autopilot-approved-plan-<sha256>.md` on a run that
   validates, lists from a private copy of those bytes, and refuses as `PLAN_CRITERIA_UNUSABLE` when
-  it carries no active `AC-###` row or does not parse, or as `PLAN_CRITERIA_UNREADABLE` when the
+  it carries no active `AC-###` row, lists one id on two active rows or does not parse, or as
+  `PLAN_CRITERIA_UNREADABLE` when the
   requirements lister fails for another reason; a work-order run reads `.zensu/plans/<order-id>.md`.
   Every verb reads the criteria from the plan bytes whose digest it has just checked, never from a
   second read of the file, except for a work-order plan no person approved, which has no digest to
@@ -2047,8 +2063,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   on, 1 that it stays at VALIDATE, 2 a misuse or a fault. A run that came back to VALIDATE from a
   fix attempt is refused with exit 2, the switched-off gate included, until its pushed head is
   recorded with `PR_HEAD_UPDATED`. A work-order run that validates is refused at `--bind-spec`
-  with `plan-criteria-unusable` while its plan carries no active `AC-###` row or does not parse,
-  the latter with its own remedy to close the open code fence, and with
+  with `plan-criteria-unusable` while its plan carries no active `AC-###` row, lists one id on two
+  active rows or does not parse, the last with its own remedy to close the open code fence, and with
   `plan-criteria-unreadable` while the requirements lister cannot judge that plan.
 - **Modes.** `evidence.acceptanceGate` is `required` (default) or `advisory`, which prints the same
   verdict marked `(advisory, not blocking)` and closes the chain. Under `advisory`,

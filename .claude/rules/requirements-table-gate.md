@@ -151,7 +151,10 @@ binding).
 A change to what counts as a usable table has to reach all seven. An EIGHTH reader is
 mechanical and shares this library's own parser: `--list` prints every recognized row with its
 state (`active`, `deprecated`, `placeholder`), and `hooks/lib/acceptance-verify-v1.js` takes its
-criteria from it (`.claude/rules/acceptance-verification-gate.md`). Two further containment
+criteria from it (`.claude/rules/acceptance-verification-gate.md`). `--manual-acceptance` points
+the same program at the `## Manual Acceptance` section, the source of the acceptance gate's
+consent, so a change to the row grammar reaches that table too; that mode alone reads a tilde in
+the id cell as a withdrawn row. Two further containment
 predicates were added by this gate — the JS one in the derived-channel reader and the shell one
 in the explicit channel — which extend the hand-copied `within()` / `isInside()` family this file
 already tracks. The standing fix for the JS half is TAKEN: the reader is `receiptRunLog` /

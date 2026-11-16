@@ -272,7 +272,7 @@ _zensu_avr_prepare() {
   fi
   command -v tdd_edit_landing_receipt >/dev/null 2>&1 \
     || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-  _avr_lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js")" || {
+  _avr_lib="$(_zensu_avr_module_path)" || {
     echo "$label: the acceptance module cannot be resolved" >&2
     return 2
   }
@@ -581,10 +581,14 @@ _zensu_run_bind() {
   }
   exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   facts="$(printf '%s' "$run_json" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_RUN_ID="$run_id" \
-    ZENSU_AVR_LABEL="$label" ZENSU_AVR_MODE=run-facts node -e "$_ZENSU_AVR_MAIN_JS" 2>/dev/null)"
+    ZENSU_AVR_LABEL="$label" ZENSU_AVR_MODE=run-facts node -e "$_ZENSU_AVR_MAIN_JS")"
   rc=$?
   case "$rc" in
     (0) ;;
+    (3)
+      echo "$label: the record of the active Autopilot run could not be read" >&2
+      return 2
+      ;;
     (4)
       echo "$label: --run $run_id is not the active Autopilot run of this session" >&2
       return 2
@@ -594,7 +598,7 @@ _zensu_run_bind() {
       return 2
       ;;
     (*)
-      echo "$label: the record of the active Autopilot run could not be read" >&2
+      echo "$label: the acceptance module could not read the active Autopilot run (status $rc); run /zensu:doctor to check the plugin installation" >&2
       return 2
       ;;
   esac
@@ -641,7 +645,7 @@ _zensu_plan_criteria_gate() {
     _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance-criteria check needs node"
     return
   }
-  lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js")" || {
+  lib="$(_zensu_avr_module_path)" || {
     _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance module cannot be resolved"
     return
   }
@@ -1900,9 +1904,15 @@ case "${1:-}" in
         apv_gates="acceptance-advisory"
         ;;
     esac
-    if [ "$(cat "$_avr_dir/verdict-plan-unapproved" 2>/dev/null)" = "1" ]; then
-      apv_gates="${apv_gates:+$apv_gates }acceptance-plan-unapproved"
-    fi
+    apv_unapproved="$(cat "$_avr_dir/verdict-plan-unapproved" 2>/dev/null)" || apv_unapproved=""
+    case "$apv_unapproved" in
+      (0) ;;
+      (1) apv_gates="${apv_gates:+$apv_gates }acceptance-plan-unapproved" ;;
+      (*)
+        echo "$apv_label: the acceptance verdict could not be read back, so autopilot run $apv_run stays at VALIDATE; run --autopilot-validate again" >&2
+        exit 2
+        ;;
+    esac
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
     for apv_gate in $apv_gates; do
       autopilot_apply_event "$apv_run" "validation-bypass:$apv_gate:$_rb_visit:$apv_head" BYPASS_RECORDED \

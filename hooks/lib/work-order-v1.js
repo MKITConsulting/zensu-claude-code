@@ -1202,6 +1202,9 @@ function planCriteriaRefusal(context, run, runId) {
     if (read.status === 'error') {
       return `plan-criteria-unreadable: Autopilot run ${runId} validates its result, but the requirements lister could not judge the plan ${file} (${reason}), which says nothing about its content; leave the plan as it is, check the plugin installation with /zensu:doctor, then run --bind-spec again`;
     }
+    if (read.status === 'duplicate') {
+      return `plan-criteria-unusable: Autopilot run ${runId} validates its result, but the plan ${file} lists ${read.ids.join(', ')} on more than one active ## Requirements row, so one id names two criteria; give each acceptance criterion its own AC-### id in its ## Requirements table, then run --bind-spec again`;
+    }
     if (read.status === 'unparseable') {
       cause = `the plan ${file} does not parse (${reason})`;
       remedy = `close the code fence the plan ${file} leaves open and keep its ## Requirements table`;

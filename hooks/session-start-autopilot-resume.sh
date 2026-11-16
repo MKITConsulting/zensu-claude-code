@@ -363,7 +363,7 @@ const planCopyNote = (() => {
   const failures = approvedPlan.APPROVED_PLAN_FAILURES;
   const reason = Object.values(failures).includes(read.reason) ? read.reason : failures.UNREADABLE;
   const copy = approvedPlan.approvedPlanRelPath(state.approvedPlanSha256);
-  return ` ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE runId=${runId} copy=${copy} reason=${reason}. This run validates, and VALIDATE reads its acceptance criteria from this stored copy of the plan the user approved; the copy is missing or no longer matches the approved digest, so zensu-log.sh --autopilot-validate will refuse at VALIDATE. Report this to the user now and leave the decision to the user.`;
+  return ` ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE runId=${runId} copy=${copy} reason=${reason}. This run validates, and VALIDATE reads its acceptance criteria from this stored copy of the plan the user approved; the copy is missing or no longer matches the approved digest, so VALIDATE cannot read this run's acceptance criteria. Report this to the user now and leave the decision to the user.`;
 })();
 const returnLabel = returnStage === null ? 'NONE' : returnStage;
 const chainLabel = chainId === null ? 'NONE' : chainId;

@@ -70,14 +70,19 @@ CLAUDE_PLUGIN_DATA="…" bash "$LOG" --autopilot-validate --run "$RUN_ID"
     returns it to `VALIDATE`. The new head makes every record stale, so every criterion is verified
     again.
   - `accept:` every criterion that does not pass is `partial`, and the approved plan's
-    `## Manual Acceptance` table lists each one: run the verb again with
-    `--accept-partial` and the comma list of ids the segment names. The ids must be exactly the
-    open criteria. It records `acceptance-partial` in the run's `bypasses` list and validates the
-    run; the pull-request row reads `🟡 partial` with the evidence.
+    `## Manual Acceptance` table lists each one. First check that each row's reason names the same
+    cause category as that criterion's `partial` evidence, as
+    `$ROOT/skills/verify-feature/rules/acceptance-consent.md` §"Where consent comes from" requires;
+    the gate reads only the ids. When every row matches, run the verb again with `--accept-partial`
+    and the comma list of ids the segment names. The ids must be exactly the open criteria. It
+    records `acceptance-partial` in the run's `bypasses` list and validates the run; the
+    pull-request row reads `🟡 partial` with the evidence. A row whose reason names another
+    category carries no consent: take the `consent:` arm.
   - `consent:` every criterion that does not pass is `partial`, but the approved plan's
-    `## Manual Acceptance` table has no row for one of them, or the criteria come from a work-order
-    plan no person approved: no consent covers it, and this stage asks no question. Persist `BLOCK`
-    with the code `validation-unresolved` and report the line.
+    `## Manual Acceptance` table has no row for one of them, its table could not be read, a row
+    names another cause category than the criterion's `partial` evidence, or the criteria come from
+    a work-order plan no person approved: no consent covers it, and this stage asks no question.
+    Persist `BLOCK` with the code `validation-unresolved` and report the line.
   - A refusal without a segment (`unresolved`), an `add:` or a `restore:` segment: persist `BLOCK`
     with the code `validation-unresolved` and report the line. Only the user can add a criterion
     to an approved plan, so the decision stays with the user. A cause that names the pull-request

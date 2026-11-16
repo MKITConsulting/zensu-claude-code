@@ -37,7 +37,7 @@
 # requirements history for converge to audit against.
 #
 # Usage:
-#   zensu-plan-requirements.sh [--list] --plan <path>
+#   zensu-plan-requirements.sh [--list] [--manual-acceptance] --plan <path>
 #
 #   --plan  the Zensu plan document to judge (required)
 #
@@ -52,6 +52,7 @@ set -u
 
 PLAN_FILE=""
 LIST=0
+MANUAL=0
 
 die() { echo "zensu-plan-requirements.sh: $1" >&2; exit 2; }
 
@@ -59,6 +60,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --plan) [ $# -ge 2 ] || die "--plan requires a value"; PLAN_FILE="$2"; shift 2 ;;
     --list) LIST=1; shift ;;
+    --manual-acceptance) MANUAL=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
@@ -91,7 +93,7 @@ esac
 # form `name=value` as a variable assignment and then reads standard input
 # instead, and a leading `-` parses as an option. Both are reachable through an
 # explicit --plan. The program never uses FILENAME, so the redirect costs nothing.
-AWK_OUT="$(awk -v list="$LIST" '
+AWK_OUT="$(awk -v list="$LIST" -v manual="$MANUAL" '
   { sub(/\r$/, "") }
   # A fenced code block is DATA, not structure. Without this a plan that merely
   # illustrates the table shape inside a ``` fence reads as having a real table,
@@ -116,7 +118,8 @@ AWK_OUT="$(awk -v list="$LIST" '
     else if (fc == fchar && fn >= flen) { fence = 0 }
     next
   }
-  !fence && /^##[[:space:]]+Requirements[[:space:]]*$/ { heading = 1; in_section = 1; next }
+  !fence && !manual && /^##[[:space:]]+Requirements[[:space:]]*$/ { heading = 1; in_section = 1; next }
+  !fence && manual && /^##[[:space:]]+Manual Acceptance[[:space:]]*$/ { heading = 1; in_section = 1; next }
   # Any H1/H2 closes the section. `### Step ...` does not: its third character is
   # `#`, not a space, so a step subsection stays inside the table it belongs to.
   !fence && /^##?[[:space:]]/ { in_section = 0 }
@@ -184,6 +187,7 @@ AWK_OUT="$(awk -v list="$LIST" '
         gsub(/[{][^{}]*[}]/, "", bare)
         gsub(/[[:space:]]/, "", bare)
         if (bare == "") state = "placeholder"
+        if (manual && cell[idcol] ~ /~/) state = "deprecated"
         ids = split(probe, idlist, ",")
         for (k = 1; k <= ids; k++) printf "%s\t%s\t%s\n", idlist[k], state, raw
       }
@@ -234,7 +238,9 @@ if [ "$FENCE_OPEN" -ne 0 ]; then
 fi
 
 if [ "$HEADING" -eq 0 ]; then
-  say "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## Requirements\" section"
+  SECTION_NAME="Requirements"
+  [ "$MANUAL" -eq 1 ] && SECTION_NAME="Manual Acceptance"
+  say "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## ${SECTION_NAME}\" section"
   exit 3
 fi
 # The two exit-4 states are DIFFERENT edits and must not share one message. Zero
