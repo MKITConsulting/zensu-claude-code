@@ -1429,6 +1429,40 @@ test('bind-spec and plan-approval exit 8 on a refused planning stage, and a spec
   assert.match(pending.message, /the block is not delivered yet \(the zensu CLI failed without a status: read: connection reset by peer\); run --bind-spec again/);
 });
 
+test('bind-spec of a validating run refuses a plan whose code fence never closes as unusable with its own close-the-fence remedy and a lister fault as unreadable, both naming the plan project-relative, before it reports any stage', () => {
+  const acceptance = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'acceptance-verify-v1.js'));
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeBoundRun(box);
+  const runFile = path.join(box.project, '.zensu', 'state', `autopilot-run-${RUN}.json`);
+  fs.writeFileSync(runFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(runFile, 'utf8')), options: { cover: false, validate: true } }));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The widget renders | spec |\n\n```\nan example that is never closed\n');
+  const fenced = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(fenced.exit, wo.EXIT.REFUSED, fenced.message);
+  assert.match(fenced.message, new RegExp(`^plan-criteria-unusable: Autopilot run ${RUN} validates its result, but the plan \\.zensu/plans/${ORDER}\\.md does not parse \\(.*unterminated code fence, so the document could not be parsed: \\.zensu/plans/${ORDER}\\.md\\), so its VALIDATE stage would have no criterion to check; close the code fence the plan \\.zensu/plans/${ORDER}\\.md leaves open and keep its ## Requirements table, then run --bind-spec again$`));
+  assert.doesNotMatch(fenced.message, /carries no active|write the plan to/);
+  assert.equal(fenced.message.includes(box.project), false, fenced.message);
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The widget renders | spec |\n| AC-001 | The widget exports a CSV | spec |\n');
+  const doubled = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(doubled.exit, wo.EXIT.REFUSED, doubled.message);
+  assert.equal(doubled.message, `plan-criteria-unusable: Autopilot run ${RUN} validates its result, but the plan .zensu/plans/${ORDER}.md lists AC-001 on more than one active ## Requirements row, so one id names two criteria; give each acceptance criterion its own AC-### id in its ## Requirements table, then run --bind-spec again`);
+  const original = acceptance.readCriteria;
+  acceptance.readCriteria = (planPath) => ({ status: 'error', reason: `the requirements lister exited 2 for ${planPath}` });
+  let faulted;
+  try {
+    faulted = wo.bindSpec(context, { env: box.env, runId: RUN });
+  } finally {
+    acceptance.readCriteria = original;
+  }
+  assert.equal(faulted.exit, wo.EXIT.REFUSED, faulted.message);
+  assert.match(faulted.message, new RegExp(`^plan-criteria-unreadable: Autopilot run ${RUN} validates its result, but the requirements lister could not judge the plan \\.zensu/plans/${ORDER}\\.md \\(the requirements lister exited 2 for \\.zensu/plans/${ORDER}\\.md\\)`));
+  assert.equal(faulted.message.includes(box.project), false, faulted.message);
+  assert.match(faulted.message, /\/zensu:doctor/);
+  assert.equal(stageCalls(box).length, 0);
+});
+
 test('bind-spec hands over a plan-wide decision made after --start, and an automatic answer is no plan-wide decision', () => {
   const box = sandbox();
   const context = startedContext(box);

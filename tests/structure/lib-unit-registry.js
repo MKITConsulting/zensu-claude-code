@@ -496,7 +496,7 @@ function shellLines(source) {
   for (const raw of source.split('\n')) {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     if (heredocs.length) {
-      result.push({ code: '', text: '' });
+      result.push({ code: '', text: '', heredoc: true });
       if ((heredocs[0].strip ? line.replace(/^\t+/, '') : line) === heredocs[0].word) heredocs.shift();
       continue;
     }

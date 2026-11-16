@@ -260,6 +260,37 @@ if ! CLAUDE_PROJECT_DIR="$P10" bash "$LOG" \
   check "C13 public event CLI cannot forge the guarded inner TDD lifecycle" PASS
 else check "C13 internal TDD events remain private to composite commands" FAIL; fi
 
+CLAUDE_PROJECT_DIR="$P10" bash "$LOG" \
+  --autopilot-event --run "$R10" --event VALIDATION_PASSED --event-id forged-validation \
+  --payload '{"headSha":"aaaaaaa"}' >/dev/null 2>"$TMP/forged-validation.err"
+RC_VP=$?
+CLAUDE_PROJECT_DIR="$P10" bash "$LOG" \
+  --autopilot-event --run "$R10" --event VALIDATION_FAILED --event-id validation-bypass:forged:1:aaaaaaa \
+  --payload '{"headSha":"aaaaaaa"}' >/dev/null 2>"$TMP/forged-namespace.err"
+RC_NS=$?
+if [ "$RC_VP" -eq 2 ] && grep -qF -- 'use zensu-log.sh --autopilot-validate --run <id>' "$TMP/forged-validation.err" \
+  && [ "$RC_NS" -eq 2 ] && grep -qF -- 'event-id namespaces are reserved for --autopilot-validate' "$TMP/forged-namespace.err" \
+  && field_ok "$(autopilot_run_file "$R10" "$P10")" \
+    'j.stage==="AWAIT_TDD"&&!j.events.some(e=>e.eventType==="VALIDATION_PASSED"||e.eventId.startsWith("validation-"))'; then
+  check "C13a public event CLI refuses VALIDATION_PASSED and the validation event-id namespaces, naming --autopilot-validate" PASS
+else check "C13a public event CLI refuses VALIDATION_PASSED and the validation event-id namespaces (rc=$RC_VP/$RC_NS)" FAIL; fi
+
+C13B_EVENTS="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).events.length))' "$(autopilot_run_file "$R10" "$P10")" 2>/dev/null)"
+CLAUDE_PROJECT_DIR="$P10" bash "$LOG" \
+  --autopilot-event --run "$R10" --event PLAN_APPROVED --event-id forged-plan-approval \
+  --payload "{\"approvedPlanSha256\":\"$(printf 'c%.0s' $(seq 1 64))\"}" >/dev/null 2>"$TMP/forged-plan.err"
+RC_PA=$?
+CLAUDE_PROJECT_DIR="$P10" bash "$LOG" \
+  --autopilot-event --run "$R10" --event VALIDATION_FAILED --event-id plan-approved-forged \
+  --payload '{"headSha":"aaaaaaa"}' >/dev/null 2>"$TMP/forged-plan-namespace.err"
+RC_PN=$?
+if [ -n "$C13B_EVENTS" ] && [ "$RC_PA" -eq 2 ] \
+  && grep -qF -- 'PLAN_APPROVED is internal; the plan-approval hook records it when the user approves the plan, and on a run that validates it first stores the plan and checks its acceptance criteria' "$TMP/forged-plan.err" \
+  && [ "$RC_PN" -eq 2 ] && grep -qF -- "the 'plan-approved-' event-id namespace is reserved for the plan-approval hook" "$TMP/forged-plan-namespace.err" \
+  && field_ok "$(autopilot_run_file "$R10" "$P10")" "j.stage===\"AWAIT_TDD\"&&j.events.length===$C13B_EVENTS"; then
+  check "C13b public event CLI refuses PLAN_APPROVED and the plan-approved- event-id namespace, naming the plan-approval hook" PASS
+else check "C13b public event CLI refuses PLAN_APPROVED and the plan-approved- event-id namespace (rc=$RC_PA/$RC_PN)" FAIL; fi
+
 # A delayed attempt-1 caller must never arm or terminate attempt 2, even though
 # both generations reuse the same durable session file.
 P11="$TMP/stale-generation"; mkdir -p "$P11"

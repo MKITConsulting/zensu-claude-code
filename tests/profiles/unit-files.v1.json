@@ -12,9 +12,9 @@
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
-      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 35,
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 68, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
-      "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
+      "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, retention, the Autopilot run mode that reads its criteria from the verified bytes of the approved plan copy and resolves the pull-request head among commits only, and the standalone consent close, the hand-off record and the plan-criteria check."
     },
     {
       "path": "tests/structure/aspect-activation-v1.test.js", "registered": 21,
@@ -57,7 +57,7 @@
       "summary": "The persistent edit-landing audit scope: inherited dirty context, literal/hash proofs, git-fault preservation, receipt freshness and the missing-session refusal."
     },
     {
-      "path": "tests/structure/evidence-run-v1.test.js", "registered": 95, "skips": {"win32": 3},
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 96, "skips": {"win32": 3},
       "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
@@ -112,9 +112,14 @@
       "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
     },
     {
-      "path": "tests/structure/plan-payload-v1.test.js", "registered": 22,
+      "path": "tests/structure/plan-payload-v1.test.js", "registered": 23,
       "runs": [{ "driver": "tests/structure/test-plan-payload-fallback.sh" }],
-      "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
+      "summary": "The plan-source precedence table, the caller-origin refusals, the hardened plan-file reader refusals, the O_NOFOLLOW fallback and the absence of the approved-plan store from the payload module."
+    },
+    {
+      "path": "tests/structure/approved-plan-v1.test.js", "registered": 9, "skips": {"win32": 3},
+      "runs": [{ "driver": "tests/structure/test-plan-payload-fallback.sh" }],
+      "summary": "The digest-named approved-plan copy: its name, the private exact-byte store, reuse and restore, the refusals that write nothing, and the symlink and hard-link refusals on store and read."
     },
     {
       "path": "tests/structure/playwright-cli-version-v1.test.js", "registered": 15, "skips": {"win32": 12},
@@ -335,7 +340,7 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 106,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 107,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the Stop budget and its wait on in-flight review seats of the session's evidence leases, the gate with its cobra word reading, its redirections removed as the shell removes them after the released reading allowed a command, the command substitutions of an unquoted heredoc body, its refusal when that reader cannot load and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."

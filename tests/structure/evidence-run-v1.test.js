@@ -275,6 +275,31 @@ test('a nested project root fingerprints its own subtree', () => {
   assert.equal(evr.computeTree(path.join(root, 'sub'), scratch).tree, nested);
 });
 
+test('the repository tree of a nested project root covers the whole work tree and leaves the project state out', async () => {
+  const root = gitRepo();
+  const project = path.join(root, 'sub');
+  const plain = tempDir('plain');
+  const scratch = tempDir('scratch');
+  assert.deepEqual(evr.repositoryRoot(root), { root, excluded: [], reason: null });
+  assert.deepEqual(evr.repositoryRoot(project), { root, excluded: ['sub/.zensu'], reason: null });
+  assert.deepEqual(evr.repositoryRoot(plain), { root: plain, excluded: [], reason: null });
+  const before = evr.repositoryTree(project, scratch).tree;
+  assert.match(String(before), /^[0-9a-f]{40,64}$/);
+  fs.mkdirSync(path.join(project, '.zensu', 'state'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.zensu', 'state', 'run.json'), '{}\n');
+  assert.equal(evr.repositoryTree(project, scratch).tree, before);
+  fs.writeFileSync(path.join(root, 'a.txt'), 'outside the nested root\n');
+  const after = evr.repositoryTree(project, scratch).tree;
+  assert.notEqual(after, before);
+  assert.deepEqual(evr.fingerprintChanges(project, root, before, after), ['../a.txt']);
+  const data = pluginData();
+  const result = await runIn(project, data, { scope: 'acceptance', command: 'true', treeMode: 'repository' });
+  assert.equal(result.code, 0);
+  const [record] = recordsOf(data);
+  assert.equal(record.tree_end, after);
+  assert.notEqual(record.tree_end, evr.computeTree(project, scratch).tree);
+});
+
 test('a directory outside git yields no tree id and a reason', () => {
   const result = evr.computeTree(tempDir('plain'), tempDir('scratch'));
   assert.equal(result.tree, null);

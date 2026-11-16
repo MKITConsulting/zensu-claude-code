@@ -42,7 +42,17 @@ provision_session() {
 RUN="plan_run_01"; SID_RAW="plan_session_01"
 provision_session "$PROJECT" "$SID_RAW" main || exit 1
 SID="$PROVISIONED_KEY"; MAIN_DATA="$PROVISIONED_DATA"
-PLAN="# Approved feature\n\nImplement it.\n\n<!-- zensu-autopilot:${RUN} -->"
+CRITERIA_TABLE='## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | The approved feature works end to end. | spec |'
+PLAN="# Approved feature
+
+Implement it.
+
+$CRITERIA_TABLE
+
+<!-- zensu-autopilot:${RUN} -->"
 autopilot_begin_run "$RUN" "$SID" "$PROJECT" >/dev/null || exit 1
 CFG_OFF="$TMP/off.json"; printf '%s\n' '{"hooks":{"autoTdd":false}}' > "$CFG_OFF"
 
@@ -182,9 +192,11 @@ provision_session "$LEASE_PROJECT" lease_plan_session lease || exit 1
 LEASE_OWNER="$PROVISIONED_KEY"; LEASE_DATA="$PROVISIONED_DATA"
 autopilot_begin_run lease_plan_run "$LEASE_OWNER" "$LEASE_PROJECT" >/dev/null || exit 1
 LEASE_RUN_FILE="$(autopilot_run_file lease_plan_run "$LEASE_PROJECT")"
-LEASE_PLAN='# leased plan
+LEASE_PLAN="# leased plan
 
-<!-- zensu-autopilot:lease_plan_run -->'
+$CRITERIA_TABLE
+
+<!-- zensu-autopilot:lease_plan_run -->"
 LEASE_BEFORE="$(digest "$LEASE_RUN_FILE")"
 LEASE_OUT="$(
   unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
@@ -551,7 +563,13 @@ RUN_LEGACY="plan_run_legacy"; SID_LEGACY_RAW="plan_session_legacy"
 PROJECT_LEGACY="$TMP/project-legacy"; mkdir -p "$PROJECT_LEGACY"
 provision_session "$PROJECT_LEGACY" "$SID_LEGACY_RAW" legacy || exit 1
 SID_LEGACY="$PROVISIONED_KEY"; LEGACY_DATA="$PROVISIONED_DATA"
-PLAN_LEGACY="# Approved feature\n\nImplement it.\n\n<!-- zensu-autopilot:${RUN_LEGACY} -->"
+PLAN_LEGACY="# Approved feature
+
+Implement it.
+
+$CRITERIA_TABLE
+
+<!-- zensu-autopilot:${RUN_LEGACY} -->"
 if autopilot_begin_run "$RUN_LEGACY" "$SID_LEGACY" "$PROJECT_LEGACY" >/dev/null 2>&1; then
   OUT_LEGACY="$(invoke "$(payload_input_dialect "$PLAN_LEGACY" "$SID_LEGACY_RAW")" "$PROJECT_LEGACY" "$CFG_OFF" "$LEGACY_DATA")"
   LEGACY_RUN_FILE="$(autopilot_run_file "$RUN_LEGACY" "$PROJECT_LEGACY")"
@@ -564,6 +582,179 @@ if autopilot_begin_run "$RUN_LEGACY" "$SID_LEGACY" "$PROJECT_LEGACY" >/dev/null 
   fi
 else
   check "P16 legacy carrier fixture could not be armed" FAIL
+fi
+
+payload_response_file() {
+  FILE="$1" SID="$2" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SID,tool_name:"ExitPlanMode",tool_input:{_targetMode:"auto"},tool_response:{filePath:process.env.FILE,isAgent:false,hasTaskTool:true}}))'
+}
+text_digest() {
+  printf '%s' "$1" | node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex"));'
+}
+approved_copy() { printf '%s/.zensu/state/autopilot-approved-plan-%s.md' "$1" "$2"; }
+copy_count() {
+  local count=0 entry
+  for entry in "$1/.zensu/state"/autopilot-approved-plan-*.md; do
+    if [ -e "$entry" ] || [ -L "$entry" ]; then count=$((count + 1)); fi
+  done
+  printf '%s' "$count"
+}
+copy_intact() {
+  COPY="$1" SHA="$2" node -e '
+    const fs=require("fs"),crypto=require("crypto");
+    try {
+      const stat=fs.lstatSync(process.env.COPY);
+      if (!stat.isFile()||stat.nlink!==1) process.exit(1);
+      if (process.platform!=="win32"&&(stat.mode&0o777)!==0o600) process.exit(1);
+      const sha=crypto.createHash("sha256").update(fs.readFileSync(process.env.COPY)).digest("hex");
+      process.exit(sha===process.env.SHA?0:1);
+    } catch (_) { process.exit(1); }'
+}
+approved_with() {
+  RUN_FILE="$1" SHA="$2" node -e 'try{const j=require(process.env.RUN_FILE);process.exit(j.stage==="AWAIT_TDD"&&j.approvedPlanSha256===process.env.SHA?0:1)}catch(_){process.exit(1)}'
+}
+
+if copy_intact "$(approved_copy "$PROJECT" "$EXPECTED_SHA")" "$EXPECTED_SHA" \
+  && [ "$(copy_count "$PROJECT")" = 1 ]; then
+  check "P17 a validating run keeps the approved response plan byte for byte under its digest" PASS
+else check "P17 approved plan copy for the response carrier (copies=$(copy_count "$PROJECT"))" FAIL; fi
+
+if [ -n "${LEGACY_SHA:-}" ] \
+  && copy_intact "$(approved_copy "$PROJECT_LEGACY" "$LEGACY_SHA")" "$LEGACY_SHA"; then
+  check "P17a the legacy tool_input.plan carrier stores the same exact bytes it digests" PASS
+else check "P17a approved plan copy for the legacy carrier" FAIL; fi
+
+FILE_PROJECT="$TMP/file-carrier-project"; mkdir -p "$FILE_PROJECT"
+provision_session "$FILE_PROJECT" file_carrier_session file-carrier || exit 1
+FILE_DATA="$PROVISIONED_DATA"
+autopilot_begin_run file_carrier_run "$PROVISIONED_KEY" "$FILE_PROJECT" >/dev/null || exit 1
+FILE_PLAN="$TMP/file-carrier-plan.md"
+printf '# R\xc3\xa9sum\xc3\xa9 view \xe2\x80\x94 caf\xc3\xa9 menu\r\n\r\n## Requirements\r\n| ID | Requirement | Source |\r\n|----|-------------|--------|\r\n| AC-001 | The r\xc3\xa9sum\xc3\xa9 view lists the caf\xc3\xa9 menu. | spec |\r\n\r\n<!-- zensu-autopilot:file_carrier_run -->\r\n' > "$FILE_PLAN"
+FILE_SHA="$(digest "$FILE_PLAN")"
+FILE_OUT="$(invoke "$(payload_response_file "$FILE_PLAN" file_carrier_session)" "$FILE_PROJECT" "$CFG_OFF" "$FILE_DATA")"
+if printf '%s' "$FILE_OUT" | grep -qF 'PLAN_APPROVED runId=file_carrier_run' \
+  && approved_with "$(autopilot_run_file file_carrier_run "$FILE_PROJECT")" "$FILE_SHA" \
+  && copy_intact "$(approved_copy "$FILE_PROJECT" "$FILE_SHA")" "$FILE_SHA"; then
+  check "P17b a response filePath plan with UTF-8 and CRLF bytes is stored as exactly the bytes it was approved as" PASS
+else check "P17b file carrier copy (out=$(printf '%s' "$FILE_OUT" | head -c 200))" FAIL; fi
+
+CRIT_PROJECT="$TMP/criteria-refusal-project"; mkdir -p "$CRIT_PROJECT"
+provision_session "$CRIT_PROJECT" criteria_refusal_session criteria-refusal || exit 1
+CRIT_DATA="$PROVISIONED_DATA"
+autopilot_begin_run criteria_refusal_run "$PROVISIONED_KEY" "$CRIT_PROJECT" >/dev/null || exit 1
+CRIT_RUN_FILE="$(autopilot_run_file criteria_refusal_run "$CRIT_PROJECT")"
+CRIT_BEFORE="$(digest "$CRIT_RUN_FILE")"
+crit_refused() {
+  local out
+  out="$(invoke "$(payload "$1" criteria_refusal_session)" "$CRIT_PROJECT" "$CFG_OFF" "$CRIT_DATA")"
+  printf '%s' "$out" | grep -qF 'PLAN_GATE_BLOCKED code=PLAN_CRITERIA_UNUSABLE' \
+    && printf '%s' "$out" | grep -qF 'run stays at PLANNING' \
+    && ! printf '%s' "$out" | grep -qF 'PLAN_APPROVED' \
+    && [ "$(digest "$CRIT_RUN_FILE")" = "$CRIT_BEFORE" ] \
+    && [ "$(stage_of "$CRIT_RUN_FILE")" = PLANNING ] \
+    && [ "$(copy_count "$CRIT_PROJECT")" = 0 ]
+}
+stage_of() { RUN_FILE="$1" node -e 'try{process.stdout.write(String(require(process.env.RUN_FILE).stage))}catch(_){process.exit(1)}'; }
+if crit_refused '# Plan without criteria
+
+Implement it.
+
+<!-- zensu-autopilot:criteria_refusal_run -->'; then
+  check "P17c a validating run refuses a plan without a Requirements table, stays at PLANNING and keeps no copy" PASS
+else check "P17c plan without a Requirements table must be refused" FAIL; fi
+if crit_refused '# Plan with unusable rows
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | {acceptance criterion — machine-checkable} | spec |
+| AC-002 | (deprecated) The dropped criterion. | spec |
+| FR-001 | The functional requirement is filled in. | spec |
+
+<!-- zensu-autopilot:criteria_refusal_run -->'; then
+  check "P17d placeholder, deprecated and FR rows alone are no acceptance criterion" PASS
+else check "P17d a table without an active AC row must be refused" FAIL; fi
+if crit_refused "# Plan that does not parse
+
+$CRITERIA_TABLE
+
+\`\`\`
+an example that is never closed
+
+<!-- zensu-autopilot:criteria_refusal_run -->"; then
+  check "P17e a plan whose code fence never closes is refused rather than read" PASS
+else check "P17e an unparseable plan must be refused" FAIL; fi
+CORRECTED_PLAN="# Corrected plan
+
+$CRITERIA_TABLE
+
+<!-- zensu-autopilot:criteria_refusal_run -->"
+CORRECTED_SHA="$(text_digest "$CORRECTED_PLAN")"
+CORRECTED_OUT="$(invoke "$(payload "$CORRECTED_PLAN" criteria_refusal_session)" "$CRIT_PROJECT" "$CFG_OFF" "$CRIT_DATA")"
+if printf '%s' "$CORRECTED_OUT" | grep -qF 'PLAN_APPROVED runId=criteria_refusal_run' \
+  && approved_with "$CRIT_RUN_FILE" "$CORRECTED_SHA" \
+  && copy_intact "$(approved_copy "$CRIT_PROJECT" "$CORRECTED_SHA")" "$CORRECTED_SHA" \
+  && [ "$(copy_count "$CRIT_PROJECT")" = 1 ]; then
+  check "P17f the corrected plan is approved after the refusals and stored under its own digest" PASS
+else check "P17f corrected plan approval (out=$(printf '%s' "$CORRECTED_OUT" | head -c 200))" FAIL; fi
+
+NOVAL_PROJECT="$TMP/no-validate-project"; mkdir -p "$NOVAL_PROJECT"
+provision_session "$NOVAL_PROJECT" no_validate_session no-validate || exit 1
+NOVAL_DATA="$PROVISIONED_DATA"
+autopilot_begin_run no_validate_run "$PROVISIONED_KEY" "$NOVAL_PROJECT" false false >/dev/null || exit 1
+NOVAL_PLAN='# Plan for a run without validation
+
+<!-- zensu-autopilot:no_validate_run -->'
+NOVAL_OUT="$(invoke "$(payload "$NOVAL_PLAN" no_validate_session)" "$NOVAL_PROJECT" "$CFG_OFF" "$NOVAL_DATA")"
+if printf '%s' "$NOVAL_OUT" | grep -qF 'PLAN_APPROVED runId=no_validate_run' \
+  && approved_with "$(autopilot_run_file no_validate_run "$NOVAL_PROJECT")" "$(text_digest "$NOVAL_PLAN")" \
+  && [ "$(copy_count "$NOVAL_PROJECT")" = 0 ]; then
+  check "P17g a --no-validate run approves a plan without criteria and stores no copy" PASS
+else check "P17g --no-validate approval (out=$(printf '%s' "$NOVAL_OUT" | head -c 200))" FAIL; fi
+
+STORE_PROJECT="$TMP/store-failure-project"; mkdir -p "$STORE_PROJECT"
+provision_session "$STORE_PROJECT" store_failure_session store-failure || exit 1
+STORE_DATA="$PROVISIONED_DATA"
+autopilot_begin_run store_failure_run "$PROVISIONED_KEY" "$STORE_PROJECT" >/dev/null || exit 1
+STORE_RUN_FILE="$(autopilot_run_file store_failure_run "$STORE_PROJECT")"
+STORE_PLAN="# Plan whose copy is blocked
+
+$CRITERIA_TABLE
+
+<!-- zensu-autopilot:store_failure_run -->"
+STORE_SHA="$(text_digest "$STORE_PLAN")"
+mkdir -p "$(approved_copy "$STORE_PROJECT" "$STORE_SHA")"
+STORE_BEFORE="$(digest "$STORE_RUN_FILE")"
+STORE_OUT="$(invoke "$(payload "$STORE_PLAN" store_failure_session)" "$STORE_PROJECT" "$CFG_OFF" "$STORE_DATA")"
+STORE_AFTER_BLOCK="$(digest "$STORE_RUN_FILE")"
+rmdir "$(approved_copy "$STORE_PROJECT" "$STORE_SHA")"
+STORE_RETRY="$(invoke "$(payload "$STORE_PLAN" store_failure_session)" "$STORE_PROJECT" "$CFG_OFF" "$STORE_DATA")"
+if printf '%s' "$STORE_OUT" | grep -qF 'PLAN_GATE_BLOCKED code=APPROVED_PLAN_STORE_FAILED' \
+  && printf '%s' "$STORE_OUT" | grep -qF 'The store answered approved-plan-write-failed.' \
+  && ! printf '%s' "$STORE_OUT" | grep -qF 'PLAN_APPROVED' \
+  && [ "$STORE_AFTER_BLOCK" = "$STORE_BEFORE" ] \
+  && printf '%s' "$STORE_RETRY" | grep -qF 'PLAN_APPROVED runId=store_failure_run' \
+  && approved_with "$STORE_RUN_FILE" "$STORE_SHA" \
+  && copy_intact "$(approved_copy "$STORE_PROJECT" "$STORE_SHA")" "$STORE_SHA"; then
+  check "P17h a copy that cannot be written refuses the approval, and the same plan is approved once the path is free" PASS
+else check "P17h store failure (out=$(printf '%s' "$STORE_OUT" | head -c 240))" FAIL; fi
+
+WO_PROJECT="$TMP/work-order-plan-project"; mkdir -p "$WO_PROJECT"
+provision_session "$WO_PROJECT" work_order_plan_session work-order-plan || exit 1
+WO_DATA="$PROVISIONED_DATA"
+WO_ORDER='{"orderId":"7f3c2b1a-4d5e-4f60-8a7b-9c0d1e2f3a4b","attempt":1,"specHash":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}'
+if autopilot_begin_run work_order_plan_run "$PROVISIONED_KEY" "$WO_PROJECT" false true "" "$WO_ORDER" >/dev/null 2>&1; then
+  WO_RUN_FILE="$(autopilot_run_file work_order_plan_run "$WO_PROJECT")"
+  WO_BEFORE="$(digest "$WO_RUN_FILE")"
+  WO_OUT="$(invoke "$(payload '# Work-order plan
+
+<!-- zensu-autopilot:work_order_plan_run -->' work_order_plan_session)" "$WO_PROJECT" "$CFG_OFF" "$WO_DATA")"
+  if printf '%s' "$WO_OUT" | grep -qF 'PLAN_GATE_BLOCKED code=PLAN_TRANSITION_REJECTED' \
+    && [ "$(digest "$WO_RUN_FILE")" = "$WO_BEFORE" ] \
+    && [ "$(copy_count "$WO_PROJECT")" = 0 ]; then
+    check "P17i a work-order run is neither stored nor judged for criteria by the plan gate" PASS
+  else check "P17i work-order run plan gate (out=$(printf '%s' "$WO_OUT" | head -c 200))" FAIL; fi
+else
+  check "P17i work-order fixture could not be armed" FAIL
 fi
 
 

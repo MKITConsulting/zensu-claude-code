@@ -1186,6 +1186,38 @@ function planFileFor(orderId) {
   return `.zensu/plans/${orderId}.md`;
 }
 
+function planCriteriaRefusal(context, run, runId) {
+  if (!isObject(run.options) || run.options.validate !== true) return null;
+  const acceptance = require('./acceptance-verify-v1.js');
+  const orderId = run.workOrder.orderId;
+  const file = planFileFor(orderId);
+  const plan = acceptance.planFor(context.projectRoot, orderId);
+  let cause = null;
+  let remedy = `write the plan to ${file} with a ## Requirements table holding one | AC-### | criterion | source | row per acceptance criterion of the order`;
+  if (plan.reason) {
+    cause = plan.reason;
+  } else {
+    const read = acceptance.readCriteria(plan.planPath);
+    const reason = String(read.reason || '').split(plan.planPath).join(file);
+    if (read.status === 'error') {
+      return `plan-criteria-unreadable: Autopilot run ${runId} validates its result, but the requirements lister could not judge the plan ${file} (${reason}), which says nothing about its content; leave the plan as it is, check the plugin installation with /zensu:doctor, then run --bind-spec again`;
+    }
+    if (read.status === 'duplicate') {
+      return `plan-criteria-unusable: Autopilot run ${runId} validates its result, but the plan ${file} lists ${read.ids.join(', ')} on more than one active ## Requirements row, so one id names two criteria; give each acceptance criterion its own AC-### id in its ## Requirements table, then run --bind-spec again`;
+    }
+    if (read.status === 'unparseable') {
+      cause = `the plan ${file} does not parse (${reason})`;
+      remedy = `close the code fence the plan ${file} leaves open and keep its ## Requirements table`;
+    } else if (read.status !== 'ok') {
+      cause = `the plan ${file} carries no active AC-### criterion (${reason})`;
+    } else if (!read.criteria.some((criterion) => criterion.state === 'active')) {
+      cause = `the plan ${file} carries no active AC-### criterion (${read.criteria.length === 0 ? 'its ## Requirements table has no AC-### row' : 'every AC-### row is deprecated'})`;
+    }
+  }
+  if (cause === null) return null;
+  return `plan-criteria-unusable: Autopilot run ${runId} validates its result, but ${cause}, so its VALIDATE stage would have no criterion to check; ${remedy}, then run --bind-spec again`;
+}
+
 function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
   const bound = markerRun(context, runId);
@@ -1201,6 +1233,8 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   if (run.stage !== 'PLANNING') return { exit: EXIT.REFUSED, message: `Autopilot run ${bound.runId} is at ${run.stage}, not PLANNING` };
   const branch = currentBranch(context.projectRoot);
   if (branch && !branch.startsWith(orderBranchPrefix(context))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
+  const criteria = planCriteriaRefusal(context, run, bound.runId);
+  if (criteria) return { exit: EXIT.REFUSED, message: criteria };
   const reported = drain(context, { env, now });
   if (reported.verdict === 'ended') return endedResult(context, '');
   if (reported.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' };

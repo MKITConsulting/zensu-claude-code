@@ -9,6 +9,8 @@ const { redact, defaultHome } = require('./zensu-artifact-redact-v1.js');
 const { scan } = require('./secret-patterns.js');
 const evidenceRun = require('./evidence-run-v1.js');
 const receipts = require('./edit-landing-receipt-v1.js');
+const planPayload = require('./plan-payload-v1.js');
+const approvedPlan = require('./approved-plan-v1.js');
 
 const { canonical, resolveRunLog } = receipts;
 const SCHEMA = 'acceptance-verify-v1';
@@ -28,23 +30,35 @@ const VERDICT_STATES = Object.freeze([
   'not-applicable',
   'not-checked',
   'escaped',
+  'partial-accepted',
   'incomplete',
   'no-criteria',
   'unresolved',
   'invalid',
   'unavailable',
 ]);
-const PASSING_STATES = Object.freeze(['pass', 'pass-tree-unverified', 'not-applicable', 'not-checked', 'escaped']);
+const PASSING_STATES = Object.freeze(['pass', 'pass-tree-unverified', 'not-applicable', 'not-checked', 'escaped', 'partial-accepted']);
 const CRITERION_STATES = Object.freeze(['pass', 'fail', 'partial', 'stale', 'missing', 'deprecated', 'dropped']);
-const VERIFY_AGAIN_STATES = Object.freeze(['missing', 'stale', 'partial']);
+const VERIFY_AGAIN_STATES = Object.freeze(['missing', 'stale']);
+const HANDOFF_SCHEMA = 'acceptance-handoff-v1';
+const HANDOFF_SEGMENTS = Object.freeze(['acceptance-handoff', 'v1']);
+const HANDOFF_KEYS = Object.freeze(['open', 'plan', 'plan_sha256', 'records_sha256', 'remedies', 'schema', 'session_key', 'state', 'ticket', 'tree', 'written_at']);
+const HANDOFF_STATES = Object.freeze(['incomplete', 'no-criteria']);
+const USER_REMEDIES = Object.freeze(['accept', 'add', 'restore']);
+const HANDOFF_PLAN_RE = /^\.zensu\/plans\/([A-Za-z0-9][A-Za-z0-9._-]{0,199})\.md$/;
+const TICKET_RE = /^[A-Za-z0-9_-]{1,96}$/;
 const ID_RE = /^av1_[0-9]{13}_[0-9a-f]{12}$/;
 const RECORD_FILE_RE = /^av1_[0-9]{13}_[0-9a-f]{12}\.json$/;
 const SESSION_KEY_RE = /^scv1_[0-9a-f]{64}$/;
 const TREE_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const DIGEST_RE = /^[0-9a-f]{64}$/;
-const AC_RE = /^AC-([0-9]+)([a-z]?)$/;
+const { AC_RE } = approvedPlan;
 const EVIDENCE_RUN_RE = /^er1_[0-9]{13}_[0-9a-f]{12}$/;
 const STEM_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/;
+const ORDER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const COMMIT_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const RECORDED_HEAD_RE = /^[0-9a-fA-F]{7,64}$/;
 const RECORD_KEYS = Object.freeze([
   'ac',
   'criterion',
@@ -72,9 +86,12 @@ const LIMITS = Object.freeze({
   maxRecordsPerSession: 400,
   idleSessionMs: 14 * 24 * 60 * 60 * 1000,
   maxReceiptBytes: receipts.MAX_RECEIPT_BYTES,
+  maxRemedyChars: 1000,
   displayMax: 200,
   listedCriteria: 12,
   listedPaths: 10,
+  listedChanges: 5,
+  headCandidates: 16,
   listTimeoutMs: 60000,
   gitTimeoutMs: 120000,
 });
@@ -124,6 +141,16 @@ function nullableString(value, max) {
   return value === null || (typeof value === 'string' && value.length <= max);
 }
 
+function isRunCopyStem(stem) {
+  return typeof stem === 'string' && stem.startsWith(approvedPlan.APPROVED_PLAN_PREFIX)
+    && approvedPlan.approvedPlanStem(stem.slice(approvedPlan.APPROVED_PLAN_PREFIX.length)) === stem;
+}
+
+function expectedPlanRel(stem) {
+  if (isRunCopyStem(stem)) return approvedPlan.approvedPlanRelPath(stem.slice(approvedPlan.APPROVED_PLAN_PREFIX.length));
+  return `.zensu/plans/${stem}.md`;
+}
+
 function validateRecord(record, expected = {}) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return 'not an object';
   const keys = Object.keys(record).sort();
@@ -138,7 +165,7 @@ function validateRecord(record, expected = {}) {
   if (typeof record.project_root !== 'string' || record.project_root === '') return 'malformed project root';
   if (expected.projectRoot !== undefined && record.project_root !== expected.projectRoot) return 'bound to another project root';
   if (typeof record.stem !== 'string' || !STEM_RE.test(record.stem)) return 'malformed stem';
-  if (record.plan !== `.zensu/plans/${record.stem}.md`) return 'malformed plan';
+  if (record.plan !== expectedPlanRel(record.stem)) return 'malformed plan';
   if (typeof record.ac !== 'string' || !AC_RE.test(record.ac)) return 'malformed criterion id';
   if (typeof record.criterion !== 'string' || record.criterion.length > LIMITS.maxCriterionChars) return 'malformed criterion';
   if (typeof record.criterion_digest !== 'string' || !DIGEST_RE.test(record.criterion_digest)) return 'malformed criterion digest';
@@ -345,45 +372,46 @@ function planFor(root, stem) {
   return { planPath, planRel };
 }
 
-function readCriteria(planPath, options = {}) {
-  const lister = path.join(options.libDir || __dirname, 'zensu-plan-requirements.sh');
-  const result = childProcess.spawnSync(options.bashPath || 'bash', ['--noprofile', '--norc', lister, '--list', '--plan', planPath], {
-    encoding: 'utf8',
-    timeout: LIMITS.listTimeoutMs,
-    maxBuffer: 16 * 1024 * 1024,
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+function listerFault(listed) {
+  const message = listed.message ? clip(normalizeText(listed.message), 300) : '';
+  if (listed.kind === 'copy') return `the verified plan could not be handed to the requirements lister (${listed.cause})`;
+  if (listed.kind === 'spawn') return `the requirements lister could not run (${listed.cause})`;
+  if (listed.kind === 'input') return 'the plan could not be handed to the requirements lister (input-rejected)';
+  if (message) return message;
+  if (listed.kind === 'signal') return `the requirements lister was stopped by ${listed.cause}`;
+  return `the requirements lister exited ${listed.exit}`;
+}
+
+function readCriteria(plan, options = {}) {
+  const listed = approvedPlan.listRequirementRows(plan, {
+    libDir: options.libDir,
+    bashPath: options.bashPath,
+    timeoutMs: LIMITS.listTimeoutMs,
+    label: options.planLabel,
   });
-  if (result.error) {
-    return { status: 'error', reason: `the requirements lister could not run (${result.error.code || result.error.message})` };
+  if (listed.status === 'error') return { status: 'error', reason: listerFault(listed) };
+  if (listed.status === 'no-section') return { status: 'no-section', reason: 'the plan has no ## Requirements section' };
+  if (listed.status === 'unparseable') {
+    return { status: 'unparseable', reason: listed.message ? clip(normalizeText(listed.message), 300) : 'the plan does not parse' };
   }
-  const message = String(result.stderr || '').trim().split('\n').filter(Boolean).pop() || '';
-  if (result.status === 3) return { status: 'no-section', reason: 'the plan has no ## Requirements section' };
-  if (result.status !== 0 && result.status !== 4) {
-    return { status: 'error', reason: message ? clip(normalizeText(message), 300) : `the requirements lister exited ${result.status}` };
+  if (listed.status === 'unusable') return { status: 'unusable', reason: 'the plan has no usable ## Requirements table' };
+  if (listed.duplicates.length > 0) {
+    return { status: 'duplicate', ids: listed.duplicates, reason: `the plan lists ${listed.duplicates.join(', ')} on more than one active ## Requirements row, so one id names two criteria` };
   }
-  const byId = new Map();
-  for (const line of String(result.stdout || '').split('\n')) {
-    if (line === '') continue;
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    const id = parts[0];
-    const state = parts[1];
-    const text = parts.slice(2).join(' ');
-    if (!AC_RE.test(id) || (state !== 'active' && state !== 'deprecated')) continue;
-    const previous = byId.get(id);
-    if (!previous || (previous.state === 'deprecated' && state === 'active')) byId.set(id, { id, state, text });
-  }
-  if (result.status === 4 && byId.size === 0) return { status: 'unusable', reason: 'the plan has no usable ## Requirements table' };
-  return { status: 'ok', criteria: [...byId.values()].sort((left, right) => compareCriterionIds(left.id, right.id)) };
+  return { status: 'ok', criteria: [...listed.rows].sort((left, right) => compareCriterionIds(left.id, right.id)) };
+}
+
+function chainCriteria(chain, options) {
+  return readCriteria(Buffer.isBuffer(chain.planBytes) ? chain.planBytes : chain.planPath, { ...options, planLabel: chain.planRel });
 }
 
 function gitEnvironment() {
   return evidenceRun.gitEnvironment();
 }
 
-function hasChanges(root, limits = LIMITS) {
-  const result = childProcess.spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).zensu'], {
+function hasChanges(root, limits = LIMITS, excluded = []) {
+  const result = childProcess.spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).zensu',
+    ...excluded.map((entry) => `:(exclude,literal)${entry}`)], {
     env: gitEnvironment(),
     encoding: 'utf8',
     timeout: limits.gitTimeoutMs,
@@ -392,18 +420,35 @@ function hasChanges(root, limits = LIMITS) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.error || result.status !== 0) return { known: false };
-  return { known: true, changed: String(result.stdout || '').length > 0 };
+  const fields = String(result.stdout || '').split('\0');
+  const paths = [];
+  let count = 0;
+  for (let index = 0; index < fields.length; index += 1) {
+    const entry = fields[index];
+    if (entry.length < 4) continue;
+    count += 1;
+    if (paths.length < limits.listedChanges) paths.push(entry.slice(3));
+    if ('RC'.includes(entry[0]) || 'RC'.includes(entry[1])) index += 1;
+  }
+  return { known: true, changed: count > 0, paths, count };
 }
 
 function chainTree(options, scratchDirectory) {
   if (typeof options.workTree !== 'string' || options.workTree === '') {
-    return { root: options.projectRoot, tree: evidenceRun.computeTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS) };
+    if (options.runId) {
+      const repository = evidenceRun.repositoryTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS);
+      return { root: repository.root, name: 'the repository', outside: 'the repository', tree: { tree: repository.tree, reason: repository.reason } };
+    }
+    return { root: options.projectRoot, name: 'the project', outside: 'the project', tree: evidenceRun.computeTree(options.projectRoot, scratchDirectory, evidenceRun.LIMITS) };
   }
   const root = evidenceRun.fingerprintRoot(options.workTree, options.projectRoot, evidenceRun.LIMITS);
-  return { root, tree: evidenceRun.computeFingerprint(options.projectRoot, root, scratchDirectory, evidenceRun.LIMITS) };
+  const nested = typeof root === 'string' && root !== options.projectRoot;
+  const name = nested ? `the project and its work tree ${display(path.relative(options.projectRoot, root).split(path.sep).join('/'), options.projectRoot)}` : 'the project';
+  return { root, name, outside: 'the project', tree: evidenceRun.computeFingerprint(options.projectRoot, root, scratchDirectory, evidenceRun.LIMITS) };
 }
 
-function citedRun(options, runId, currentTree) {
+function citedRun(options, runId, current) {
+  const currentTree = current.tree;
   if (!EVIDENCE_RUN_RE.test(runId)) return { error: `--evidence-run ${JSON.stringify(runId)} is not an evidence-run record id` };
   let locations;
   try {
@@ -424,7 +469,7 @@ function citedRun(options, runId, currentTree) {
   const state = evidenceRun.effectiveState(run);
   if (state !== 'completed') return { error: `evidence run ${runId} is ${state}, not completed` };
   if (run.tree_start && run.tree_end && run.tree_start !== run.tree_end) {
-    return { error: `evidence run ${runId} changed the tree while it ran; make the check leave the working tree unchanged, tracked and untracked non-ignored files alike, by writing its output outside the project or to a gitignored path, then run it again` };
+    return { error: `evidence run ${runId} changed ${current.name} while it ran; make the check leave ${current.name} unchanged, tracked and untracked non-ignored files alike, by writing its output outside ${current.outside} or to a gitignored path, then run it again` };
   }
   if (currentTree.tree && run.tree_end !== currentTree.tree) {
     return { error: `evidence run ${runId} measured another tree than the current one; run the check again on this tree` };
@@ -468,6 +513,187 @@ function resolveChain(options) {
   return { root, stem, planPath: plan.planPath, planRel: plan.planRel, disclosures };
 }
 
+function bindFacts(run, runId) {
+  if (!run || typeof run !== 'object' || Array.isArray(run) || typeof run.stage !== 'string') return { code: 3 };
+  if (run.runId !== runId) return { code: 4 };
+  if (run.stage === 'DONE' || run.stage === 'CANCELLED') return { code: 5 };
+  const options = run.options && typeof run.options === 'object' ? run.options : {};
+  const validate = options.validate === true ? 'on' : options.validate === false ? 'off' : '-';
+  const pr = run.evidence && run.evidence.pr;
+  const head = pr && typeof pr.headSha === 'string' && RECORDED_HEAD_RE.test(pr.headSha) ? pr.headSha : '-';
+  const events = Array.isArray(run.events) ? run.events : [];
+  const visit = events.filter((event) => event && event.toStage === 'VALIDATE' && event.fromStage !== 'VALIDATE').length;
+  const update = run.tdd && typeof run.tdd === 'object' && typeof run.tdd.headUpdateRequired === 'boolean' ? String(run.tdd.headUpdateRequired) : '-';
+  return { code: 0, line: [run.stage, validate, head, String(visit), update].join('\t') };
+}
+
+function runFacts(options) {
+  const runId = options.runId;
+  if (typeof runId !== 'string' || !RUN_ID_RE.test(runId)) return { error: '--run must name an Autopilot run id' };
+  const label = `autopilot run ${runId}`;
+  const run = options.run;
+  if (!run || typeof run !== 'object' || Array.isArray(run)) {
+    return { error: `the record of ${label} did not reach the acceptance check; run the verb again` };
+  }
+  if (run.runId !== runId) {
+    return { error: `the run record handed to the acceptance check names run ${display(String(run.runId), options.projectRoot)}, not ${runId}` };
+  }
+  const validate = run.options && typeof run.options === 'object' ? run.options.validate : undefined;
+  if (validate === false) return { error: `${label} was begun with --no-validate, so it has no acceptance criteria to verify` };
+  if (validate !== true) return { error: `the record of ${label} carries no readable validate option` };
+  const approved = run.approvedPlanSha256;
+  if (approved === null || approved === undefined) return { error: `${label} records no approved plan, so it has no acceptance criteria to verify yet` };
+  if (typeof approved !== 'string' || !DIGEST_RE.test(approved)) return { error: `the record of ${label} carries a malformed approved-plan digest` };
+  let workOrder = null;
+  if (run.workOrder !== undefined && run.workOrder !== null) {
+    const order = run.workOrder;
+    if (typeof order !== 'object' || Array.isArray(order) || typeof order.orderId !== 'string' || !ORDER_ID_RE.test(order.orderId)
+      || typeof order.specHash !== 'string' || !DIGEST_RE.test(order.specHash)) {
+      return { error: `the record of ${label} carries a malformed work-order binding` };
+    }
+    workOrder = { orderId: order.orderId, specHash: order.specHash };
+  }
+  const pr = run.evidence && typeof run.evidence === 'object' ? run.evidence.pr : null;
+  const prHead = pr && typeof pr === 'object' && typeof pr.headSha === 'string' ? pr.headSha : null;
+  return { runId, label, approved, workOrder, prHead };
+}
+
+function approvedPlanRefusal(facts, reason) {
+  const copy = approvedPlan.approvedPlanRelPath(facts.approved);
+  const failures = approvedPlan.APPROVED_PLAN_FAILURES;
+  if (reason === failures.MISSING) {
+    return `${facts.label} has no stored copy of the plan it approved (${copy}): the plan was approved before this release kept one, or the copy was removed, so its acceptance criteria cannot be read; report this refusal and leave the decision to the user`;
+  }
+  if (reason === failures.MISMATCH) {
+    return `the stored copy ${copy} no longer matches the digest the run approved, so its acceptance criteria cannot be trusted; report this refusal and leave the decision to the user`;
+  }
+  if (reason === failures.STATE_DIRECTORY) {
+    return `the project .zensu/state directory is a symlink or not a directory, so the approved plan of ${facts.label} cannot be read`;
+  }
+  return `the stored copy ${copy} of the plan ${facts.label} approved cannot be read (${reason})`;
+}
+
+function runChain(options) {
+  const facts = runFacts(options);
+  if (facts.error) return { error: facts.error };
+  if (typeof options.projectRoot !== 'string' || options.projectRoot === '') return { error: 'no project root is bound' };
+  const root = canonical(path.resolve(options.projectRoot));
+  if (!facts.workOrder) {
+    const copy = approvedPlan.readApprovedPlan(root, facts.approved);
+    if (!copy.ok) return { error: approvedPlanRefusal(facts, copy.reason) };
+    return { root, stem: copy.stem, planPath: copy.path, planRel: copy.rel, planBytes: copy.bytes, unapproved: false, disclosures: [], runId: facts.runId, facts };
+  }
+  const stem = facts.workOrder.orderId;
+  const unapproved = facts.approved === facts.workOrder.specHash;
+  const disclosures = unapproved
+    ? [`ACCEPTANCE PLAN UNAPPROVED — work order ${stem} asks for no plan approval, so the criteria of ${facts.label} come from the session's own plan .zensu/plans/${stem}.md, which no person approved`]
+    : [];
+  const plan = planFor(root, stem);
+  if (plan.reason) return { error: plan.reason, unapproved, disclosures };
+  let planBytes = null;
+  if (!unapproved) {
+    const read = planPayload.readPlanFile(plan.planPath);
+    if (read.failure) return { error: `the plan ${plan.planRel} of ${facts.label} cannot be read (${read.failure})` };
+    if (crypto.createHash('sha256').update(read.bytes).digest('hex') !== facts.approved) {
+      return {
+        error: `the plan ${plan.planRel} no longer matches the plan a person approved for ${facts.label}, so its acceptance criteria cannot be trusted; restore the approved plan, or report this refusal and leave the decision to the user`,
+      };
+    }
+    planBytes = read.bytes;
+  }
+  return { root, stem, planPath: plan.planPath, planRel: plan.planRel, planBytes, unapproved, disclosures, runId: facts.runId, facts };
+}
+
+function commitOf(root, revision, limits) {
+  const result = childProcess.spawnSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', revision], {
+    env: gitEnvironment(),
+    encoding: 'utf8',
+    timeout: limits.gitTimeoutMs,
+    maxBuffer: 1024 * 1024,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) return null;
+  const value = String(result.stdout || '').trim().toLowerCase();
+  return COMMIT_RE.test(value) ? value : null;
+}
+
+function gitLines(root, args, limits, input) {
+  const result = childProcess.spawnSync('git', ['-C', root, ...args], {
+    env: gitEnvironment(),
+    encoding: 'utf8',
+    input,
+    timeout: limits.gitTimeoutMs,
+    maxBuffer: 1024 * 1024,
+    windowsHide: true,
+    stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) return null;
+  return String(result.stdout || '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+}
+
+function prCommit(root, name, head, limits) {
+  if (name === head) return { commit: head };
+  if (name.length > head.length) return { overlong: true };
+  if (name.length === head.length) return commitOf(root, `${name}^{commit}`, limits) === name ? { commit: name } : { missing: true };
+  const objects = gitLines(root, ['rev-parse', `--disambiguate=${name}`], limits);
+  if (objects === null) return { fault: true };
+  if (objects.length === 0) return { missing: true };
+  if (objects.length > limits.headCandidates) return { ambiguous: `more than ${limits.headCandidates} objects` };
+  const typed = gitLines(root, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], limits, `${objects.join('\n')}\n`);
+  if (typed === null) return { fault: true };
+  const commits = typed.map((line) => line.split(' ')).filter((fields) => fields.length === 2 && fields[1] === 'commit' && fields[0].length === head.length && fields[0].startsWith(name)).map((fields) => fields[0]);
+  if (commits.length === 0) return { missing: true };
+  if (commits.length > 1) return { ambiguous: `${commits.length} commits` };
+  return { commit: commits[0] };
+}
+
+function pathList(paths, rest, projectRoot, limits) {
+  const listed = paths.map((entry) => display(entry, projectRoot, limits).replace(/\|/g, '\\|'));
+  const tail = rest === true ? ' and more' : rest > 0 ? ` and ${rest} more` : '';
+  return `${listed.join(', ')}${tail}`;
+}
+
+function changeList(changes, root, projectRoot, limits) {
+  const rebased = changes.paths.map((entry) => path.relative(projectRoot, path.join(root, entry)).split(path.sep).join('/'));
+  return pathList(rebased, changes.count - rebased.length, projectRoot, limits);
+}
+
+function runHead(root, prHead, limits = LIMITS, excluded = [], projectRoot = root) {
+  if (typeof prHead !== 'string' || !RECORDED_HEAD_RE.test(prHead)) {
+    return { reason: 'the run records no pull-request head, so there is no commit to validate' };
+  }
+  const head = commitOf(root, 'HEAD', limits);
+  if (!head) return { reason: 'the HEAD commit of the work tree could not be read, so it cannot be compared with the pull-request head' };
+  const named = prHead.toLowerCase();
+  const short = named.slice(0, 12);
+  const resolved = prCommit(root, named, head, limits);
+  if (resolved.fault) return { reason: `git could not list the objects whose names begin with the pull-request head ${short}, so it cannot be compared with HEAD; no checkout settles that, so persist BLOCK with the code validation-unresolved and report this line` };
+  if (resolved.overlong) {
+    return { reason: `the pull-request head ${short} has ${named.length} hex digits, more than the ${head.length} of an object name in this repository, so it names no commit that a fetch could bring; persist BLOCK with the code validation-unresolved and report this line` };
+  }
+  if (resolved.missing) return { reason: `the pull-request head ${short} is not a commit in the work tree; fetch it, then validate again` };
+  if (resolved.ambiguous) {
+    return {
+      reason: `the pull-request head ${short} is an abbreviation that ${resolved.ambiguous} in the work tree begin with, so it names no single commit; no checkout settles that, so persist BLOCK with the code validation-unresolved and report this line`,
+    };
+  }
+  const pr = resolved.commit;
+  if (pr !== head) {
+    return {
+      reason: `HEAD of the work tree is ${head.slice(0, 12)}, not the pull-request head ${pr.slice(0, 12)}; check out ${pr.slice(0, 12)}, or send the newer commit through the fix loop with VALIDATION_FAILED, whose headSha is the recorded pull-request head ${named}: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE`,
+    };
+  }
+  const changes = hasChanges(root, limits, excluded);
+  if (!changes.known) return { reason: 'git status failed in the work tree, so whether it is clean is unknown' };
+  if (changes.changed) {
+    return {
+      reason: `the work tree has uncommitted changes, so it is not the pull-request head ${pr.slice(0, 12)}: ${changeList(changes, root, projectRoot, limits)}; send a change that belongs to this change through the fix loop with VALIDATION_FAILED, whose headSha is the recorded pull-request head ${named}: once its fix attempt is back, push it and record PR_HEAD_UPDATED, then FINDINGS_CLEARED on the new head returns the run to VALIDATE; remove what a check left behind, and make that check write its output outside the repository or to a gitignored path`,
+    };
+  }
+  return { head };
+}
+
 function workTreeRefusal(options, limits = LIMITS) {
   const fault = evidenceRun.workTreeFaultCause(options.workTreeFault);
   if (fault === null) return null;
@@ -486,14 +712,21 @@ function record(options) {
   if (typeof ac !== 'string' || !AC_RE.test(ac)) return { code: 2, error: '--ac must name an acceptance criterion id such as AC-001' };
   if (!VERDICTS.includes(options.verdict)) return { code: 2, error: `--verdict must be one of ${VERDICTS.join(', ')}` };
   if (!ACCEPTED_DRIVERS.includes(options.driver)) return { code: 2, error: `--driver must be one of ${DRIVERS.join(', ')}` };
-  if (!options.logPath) return { code: 2, error: '--log <this chain\'s run log> is required' };
+  if (options.runId && options.logPath) {
+    return { code: 2, error: '--log and --run name two different anchors; pass --run for an Autopilot run and --log for a standalone chain' };
+  }
+  if (!options.logPath && !options.runId) return { code: 2, error: '--log <this chain\'s run log> is required' };
   const refusal = workTreeRefusal(options, limits);
   if (refusal) return { code: 2, error: refusal };
   const evidence = cleanEvidence(options.evidenceText, options.projectRoot, limits);
   if (evidence.error) return { code: 1, error: evidence.error };
-  const chain = resolveChain(options);
+  const chain = options.runId ? runChain(options) : resolveChain(options);
   if (chain.error) return { code: 1, error: chain.error };
-  const criteria = readCriteria(chain.planPath, options);
+  if (chain.runId) {
+    const head = runHeadCheck(options, chain.facts, limits);
+    if (head.cause) return { code: 1, error: head.cause };
+  }
+  const criteria = chainCriteria(chain, options);
   if (criteria.status !== 'ok') return { code: 1, error: `${chain.planRel}: ${criteria.reason}` };
   const criterion = criteria.criteria.find((entry) => entry.id === ac);
   if (!criterion) {
@@ -507,7 +740,8 @@ function record(options) {
   } catch (error) {
     return { code: 2, error: error.message };
   }
-  const currentTree = chainTree(options, locations.scratch).tree;
+  const current = chainTree(options, locations.scratch);
+  if (options.runId && !current.tree.tree) return { code: 1, error: unfingerprintedCause(chain, current.tree) };
   const runId = typeof options.evidenceRun === 'string' && options.evidenceRun !== '' ? options.evidenceRun : null;
   const observed = OBSERVED_DRIVERS.includes(options.driver) || EARLIER_OBSERVED_DRIVERS.includes(options.driver);
   if (observed && !runId && options.verdict !== 'partial') {
@@ -517,7 +751,7 @@ function record(options) {
     };
   }
   if (runId) {
-    const cited = citedRun(options, runId, currentTree);
+    const cited = citedRun(options, runId, current);
     if (cited.error) return { code: 1, error: cited.error };
     if (options.verdict === 'pass' && cited.run.exit_code !== 0) {
       return { code: 1, error: `evidence run ${runId} exited ${cited.run.exit_code}, which contradicts --verdict pass` };
@@ -540,8 +774,8 @@ function record(options) {
     driver: RECORDED_DRIVER_SPELLINGS.get(options.driver) || options.driver,
     evidence: evidence.value,
     evidence_run: runId,
-    tree: currentTree.tree,
-    tree_reason: currentTree.tree ? null : clip(String(currentTree.reason || 'no tree id'), 400),
+    tree: current.tree.tree,
+    tree_reason: current.tree.tree ? null : clip(String(current.tree.reason || 'no tree id'), 400),
     recorded_at: new Date(options.now ? options.now() : Date.now()).toISOString(),
     plugin_version: readPluginVersion(),
   };
@@ -585,7 +819,7 @@ function evaluate(criteria, entries, currentTree, projectRoot, limits = LIMITS, 
       const last = matching[matching.length - 1];
       const paths = last.tree ? evidenceRun.fingerprintChanges(projectRoot, treeRoot, last.tree, currentTree.tree, { ...evidenceRun.LIMITS, listedPaths: limits.listedPaths }) : null;
       const listed = paths && paths.length > 0
-        ? `: ${paths.slice(0, limits.listedPaths).map((entry) => display(entry, projectRoot, limits)).join(', ')}${paths.length > limits.listedPaths ? ', …' : ''}`
+        ? `: ${pathList(paths.slice(0, limits.listedPaths), paths.length > limits.listedPaths, projectRoot, limits)}`
         : '';
       return { criterion, state: 'stale', record: last, cause: `files changed since it was verified${listed}` };
     }
@@ -618,7 +852,7 @@ function assess(options) {
     return { outcome: 'unavailable', reason: error.message };
   }
   const chain = options.chain;
-  const criteria = readCriteria(chain.planPath, options);
+  const criteria = chainCriteria(chain, options);
   if (criteria.status === 'no-section' || criteria.status === 'unusable') return { outcome: 'no-criteria', reason: criteria.reason, chain };
   if (criteria.status !== 'ok') return { outcome: 'unresolved', reason: `${chain.planRel}: ${criteria.reason}`, chain };
   const active = criteria.criteria.filter((entry) => entry.state === 'active');
@@ -653,7 +887,7 @@ function countKinds(rows) {
   return { observed, attested };
 }
 
-function describeRow(row, projectRoot, limits = LIMITS) {
+function describeRow(row, projectRoot, limits = LIMITS, withEvidence = false) {
   const id = row.criterion.id;
   const text = display(row.criterion.text, projectRoot, limits);
   if (row.state === 'missing' || row.state === 'deprecated') return `${id} ${row.state} | ${text}`;
@@ -661,29 +895,43 @@ function describeRow(row, projectRoot, limits = LIMITS) {
   const how = row.record
     ? ` | ${row.record.driver} ${row.record.evidence_run ? `observed ${row.record.evidence_run}` : 'attested'} | record ${row.record.id}`
     : '';
+  const evidence = withEvidence && row.record ? ` | evidence: ${display(row.record.evidence, projectRoot, limits)}` : '';
   const unverified = row.treeUnverified ? ' (tree unverified)' : '';
-  return `${id} ${row.state}${cause}${unverified}${how} | ${text}`;
+  return `${id} ${row.state}${cause}${unverified}${how}${evidence} | ${text}`;
+}
+
+function unfingerprintedCause(chain, currentTree) {
+  return `${chain.facts.label}: the work tree could not be fingerprinted (${currentTree.reason || 'no tree id'}), so no record can be matched to the pull-request head`;
 }
 
 function status(options) {
   const limits = limitsWith(options.limits);
   const refusal = workTreeRefusal(options, limits);
   if (refusal) return { code: 2, lines: [`ACCEPTANCE STATUS — unavailable | ${refusal}`] };
-  const chain = resolveChain(options);
+  const chain = options.runId ? runChain(options) : resolveChain(options);
   if (chain.error) return { code: 2, lines: [`ACCEPTANCE STATUS — unresolved | ${chain.error}`] };
+  if (chain.runId) {
+    const head = runHeadCheck(options, chain.facts, limits);
+    if (head.cause) return { code: 1, lines: [...chain.disclosures, `ACCEPTANCE STATUS — unresolved | ${head.cause} | plan: ${chain.planRel}`] };
+  }
   const result = assess({ ...options, chain });
   if (result.outcome !== 'evaluated') {
     const suffix = remedies(result.outcome, [], chain, options.projectRoot).map((entry) => ` | ${entry}`).join('');
     return { code: result.outcome === 'unavailable' ? 2 : 1, lines: [...chain.disclosures, `ACCEPTANCE STATUS — ${result.outcome} | ${result.reason} | plan: ${chain.planRel}${suffix}`] };
+  }
+  if (chain.runId && !result.currentTree.tree) {
+    return { code: 1, lines: [...chain.disclosures, `ACCEPTANCE STATUS — unresolved | ${unfingerprintedCause(chain, result.currentTree)} | plan: ${chain.planRel}`] };
   }
   const active = result.rows.filter((row) => row.criterion.state === 'active');
   const passing = active.filter((row) => row.state === 'pass').length;
   const blocking = result.rows.filter((row) => row.state === 'dropped').length;
   const complete = passing === active.length && blocking === 0;
   const tree = result.currentTree.tree ? result.currentTree.tree.slice(0, 12) : `unverified (${result.currentTree.reason || 'no tree id'})`;
-  const suffix = complete ? '' : remedies('incomplete', result.rows, chain, options.projectRoot).map((entry) => ` | ${entry}`).join('');
-  const lines = [...chain.disclosures, `ACCEPTANCE STATUS — plan: ${chain.planRel} | tree: ${tree} | ${passing}/${active.length} active criteria pass${blocking > 0 ? ` | ${blocking} dropped` : ''}${suffix}`];
-  for (const row of result.rows) lines.push(describeRow(row, options.projectRoot, limits));
+  const context = chain.runId ? runRemedyContext(chain, options) : { currentTree: result.currentTree, zeroChangeTicket: options.zeroChangeTicket === true };
+  const suffix = complete ? '' : remedies('incomplete', result.rows, chain, options.projectRoot, context).map((entry) => ` | ${entry}`).join('');
+  const anchor = chain.runId ? `autopilot run ${chain.runId} | ` : '';
+  const lines = [...chain.disclosures, `ACCEPTANCE STATUS — ${anchor}plan: ${chain.planRel} | tree: ${tree} | ${passing}/${active.length} active criteria pass${blocking > 0 ? ` | ${blocking} dropped` : ''}${suffix}`];
+  for (const row of result.rows) lines.push(describeRow(row, options.projectRoot, limits, Boolean(chain.runId)));
   return { code: complete ? 0 : 1, lines };
 }
 
@@ -713,7 +961,7 @@ function verdictChain(options) {
     } catch (error) {
       return { outcome: 'unavailable', reason: error.message };
     }
-    const newest = entries.filter((entry) => entry.record).pop();
+    const newest = entries.filter((entry) => entry.record && !isRunCopyStem(entry.record.stem)).pop();
     if (!newest) {
       return { outcome: 'unresolved', reason: 'ZENSU_EDIT_LANDING_GATE=off left no receipt to name this chain\'s plan, and no acceptance record names one either' };
     }
@@ -777,22 +1025,489 @@ function verifyRemedy(chain, projectRoot) {
   return `run: ${REMEDY}${log}`;
 }
 
-function remedies(state, rows, chain, projectRoot) {
-  if (state === 'no-criteria') {
-    return ['add: give the plan\'s ## Requirements table an active AC-### criterion, or leave ZENSU_ACCEPTANCE_GATE to the user'];
+function openRows(rows) {
+  return rows.filter((row) => row.state !== 'pass' && row.state !== 'deprecated');
+}
+
+function summarizeRows(rows) {
+  const active = rows.filter((row) => row.criterion.state === 'active');
+  const deprecated = rows.filter((row) => row.state === 'deprecated').map((row) => row.criterion.id);
+  return {
+    active: active.length,
+    passing: active.filter((row) => row.state === 'pass').length,
+    open: openRows(rows),
+    deprecatedText: deprecated.length > 0 ? `; deprecated: ${deprecated.join(', ')}` : '',
+    flaky: rows.filter((row) => row.earlierNonPass > 0).map((row) => `${row.criterion.id} had ${row.earlierNonPass} earlier non-pass verdict(s) on this same tree`),
+  };
+}
+
+function openListing(open, limits) {
+  return open.map((row, index) => `${row.criterion.id} ${row.state}${row.cause && index < limits.listedCriteria ? ` (${row.cause})` : ''}`).join('; ');
+}
+
+const REVIEWED_CHAIN_ONLY = 'closes only a chain whose review ticket a reviewer consumed';
+const ACCEPT_CONTEXT_REFUSALS = new Map([
+  ['standalone', ''],
+  ['run', ''],
+  ['bound', 'refusing --accept-partial — it belongs to the ticket-bound standalone terminus and takes no Autopilot binding and no --outcome; an Autopilot run checks its criteria in its VALIDATE stage. The chain stays open.'],
+  ['unticketed', `refusing --accept-partial on the zero-change terminus — consent to a partial criterion ${REVIEWED_CHAIN_ONLY}, so pass it with --claimed-review-ticket <the consumed review ticket>. The chain stays open.`],
+  ['zero-change', `refusing --accept-partial on the zero-change terminus — consent to a partial criterion ${REVIEWED_CHAIN_ONLY}, and no reviewer consumed this zero-change self-review ticket; report the refusal and leave the decision to the user. The chain stays open.`],
+]);
+const UNJUDGED_NEXT_STEP = 'Check the plan path and run /zensu:doctor; if the plan still cannot be read, report this refusal and leave the decision to the user.';
+
+function partialRemedy(ids, projectRoot, context) {
+  const named = ids.join(', ');
+  if (context.zeroChangeTicket === true) {
+    return `review: ${named} could not be observed in this environment, and consent to a partial criterion ${REVIEWED_CHAIN_ONLY}, which this zero-change self-review ticket is not; report the refusal and leave the decision to the user`;
   }
-  if (state === 'invalid') return [verifyRemedy(chain, projectRoot)];
+  if (context.currentTree && !context.currentTree.tree) {
+    return `tree: ${named} could not be observed in this environment, and consent binds to a tree the gate can fingerprint, which this one is not (${display(context.currentTree.reason || 'no tree id', projectRoot)}); report the refusal and leave the decision to the user`;
+  }
+  return `accept: ${named} could not be observed in this environment; they close only with the user's consent for exactly these criteria, from one of the two sources the plugin's skills/verify-feature/rules/acceptance-consent.md names, so once each has its ## Manual Acceptance row in the plan, add --accept-partial ${ids.join(',')} to the same --chain-done call`;
+}
+
+const REMEDY_TEXTS = Object.freeze({
+  standalone: Object.freeze({
+    add: () => 'add: give the plan\'s ## Requirements table an active AC-### criterion this environment can observe, or leave the refusal to the user',
+    run: (chain, projectRoot) => verifyRemedy(chain, projectRoot),
+    fix: () => 'fix: a criterion that fails on this tree needs a code change before it is verified again; without one, leave the refusal to the user',
+    restore: () => 'restore: a dropped criterion needs its row restored or un-deprecated and a pass, or leave the refusal to the user',
+    partial: (ids, chain, projectRoot, context) => partialRemedy(ids, projectRoot, context),
+  }),
+  run: Object.freeze({
+    add: () => 'add: the approved plan carries no active AC-### criterion, so this run cannot validate; report this refusal and leave the decision to the user',
+    run: (chain) => `run: drive each criterion that is missing, stale or has an invalid record again on this tree and record it with zensu-log.sh --acceptance-record --run ${chain.runId}`,
+    fix: (chain) => `fix: a criterion that fails on this tree needs a code change; send VALIDATION_FAILED for autopilot run ${chain.runId} so the run returns to its fix loop`,
+    restore: () => 'restore: a dropped criterion needs a pass, or report this refusal and leave the decision to the user',
+    partial: (ids, chain, projectRoot, context) => {
+      const named = ids.join(', ');
+      if (context.unapproved) {
+        return `consent: ${named} could not be observed in this environment, and the criteria of autopilot run ${chain.runId} come from a work-order plan no person approved, so no consent covers them; persist BLOCK with the code validation-unresolved and report this line`;
+      }
+      if (context.consentFault) {
+        return `consent: ${named} could not be observed in this environment, and the approved plan's ## Manual Acceptance table could not be read (${context.consentFault}), so no consent covers ${ids.length === 1 ? 'it' : 'them'}; persist BLOCK with the code validation-unresolved and report this line`;
+      }
+      const missing = ids.filter((id) => !(context.consented || []).includes(id));
+      if (missing.length > 0) {
+        return `consent: ${named} could not be observed in this environment, and the approved plan's ## Manual Acceptance table has no row for ${missing.join(', ')}, so no consent covers ${missing.length === 1 ? 'it' : 'them'}; persist BLOCK with the code validation-unresolved and report this line`;
+      }
+      return `accept: ${named} could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one; when each row's reason names the same cause category as the criterion's partial record, zensu-log.sh --autopilot-validate --run ${chain.runId} --accept-partial ${ids.join(',')} records the gap in the run's ledger and validates the run, and otherwise persist BLOCK with the code validation-unresolved and report this line`;
+    },
+  }),
+});
+
+function remedies(state, rows, chain, projectRoot, context = {}) {
+  const texts = chain && chain.runId ? REMEDY_TEXTS.run : REMEDY_TEXTS.standalone;
+  if (state === 'no-criteria') return [texts.add(chain, projectRoot)];
+  if (state === 'invalid') return [texts.run(chain, projectRoot)];
   if (state !== 'incomplete') return [];
   const found = new Set(rows.map((row) => row.state));
   const listed = [];
-  if (VERIFY_AGAIN_STATES.some((entry) => found.has(entry))) listed.push(verifyRemedy(chain, projectRoot));
-  if (found.has('fail')) {
-    listed.push('fix: a criterion that fails on this tree needs a code change before it is verified again; without one, leave the refusal to the user');
-  }
-  if (found.has('dropped')) {
-    listed.push('restore: a dropped criterion needs its row restored or un-deprecated and a pass, or ZENSU_ACCEPTANCE_GATE left to the user');
+  if (VERIFY_AGAIN_STATES.some((entry) => found.has(entry))) listed.push(texts.run(chain, projectRoot));
+  if (found.has('fail')) listed.push(texts.fix(chain, projectRoot));
+  if (found.has('dropped')) listed.push(texts.restore(chain, projectRoot));
+  const open = openRows(rows);
+  if (open.length > 0 && open.every((row) => row.state === 'partial')) {
+    listed.push(texts.partial(open.map((row) => row.criterion.id), chain, projectRoot, context || {}));
   }
   return listed;
+}
+
+function verdictLines(lines, outcome, gate, planText, segments, projectRoot, limits) {
+  const gateLabel = `gate: ${gate.mode}`;
+  if (PASSING_STATES.includes(outcome.state)) {
+    lines.push(`ACCEPTANCE — ${outcome.state} | ${outcome.cause}${planText} | ${gateLabel}`);
+    for (const entry of outcome.flaky || []) lines.push(`ACCEPTANCE — flaky: ${entry}`);
+    for (const row of outcome.accepted || []) lines.push(`ACCEPTANCE — accepted as partial: ${describeRow(row, projectRoot, limits, true)}`);
+    return;
+  }
+  const label = gate.mode === 'advisory' && outcome.blocking !== true ? `${outcome.state} (advisory, not blocking)` : outcome.state;
+  lines.push(`ACCEPTANCE — ${label} | ${outcome.cause}${planText} | ${gateLabel}${segments.map((entry) => ` | ${entry}`).join('')}`);
+}
+
+function remedyKind(segment) {
+  const colon = typeof segment === 'string' ? segment.indexOf(':') : -1;
+  return colon > 0 ? segment.slice(0, colon) : '';
+}
+
+function isHandoff(state, segments, fixRoundSpent) {
+  if (!HANDOFF_STATES.includes(state) || segments.length === 0) return false;
+  return segments.every((segment) => {
+    const kind = remedyKind(segment);
+    return USER_REMEDIES.includes(kind) || (kind === 'fix' && fixRoundSpent === true);
+  });
+}
+
+function parseAcceptIds(text) {
+  if (typeof text !== 'string' || text === '') return { ids: [] };
+  const ids = [];
+  for (const part of text.split(',')) {
+    const id = part.trim();
+    if (!AC_RE.test(id)) {
+      return { error: `--accept-partial takes a comma-separated list of acceptance criterion ids such as AC-004,AC-005, and ${JSON.stringify(clip(part, 40))} is not one` };
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return { ids: ids.sort(compareCriterionIds) };
+}
+
+function acceptOpenRows(ids, open) {
+  const openIds = open.map((row) => row.criterion.id);
+  const problems = [];
+  const notPartial = open.filter((row) => row.state !== 'partial').map((row) => `${row.criterion.id} ${row.state}`);
+  if (notPartial.length > 0) problems.push(`--accept-partial covers only partial criteria, not ${notPartial.join(', ')}`);
+  const notOpen = ids.filter((id) => !openIds.includes(id));
+  if (notOpen.length > 0) problems.push(`--accept-partial names ${notOpen.join(', ')}, which ${notOpen.length === 1 ? 'is' : 'are'} not open`);
+  const unlisted = openIds.filter((id) => !ids.includes(id));
+  if (unlisted.length > 0) problems.push(`--accept-partial leaves ${unlisted.join(', ')} open`);
+  return problems.length === 0 ? { accepted: true } : { accepted: false, refusal: problems.join('; ') };
+}
+
+function manualAcceptanceRead(bytes, options = {}) {
+  if (!Buffer.isBuffer(bytes)) return { ids: [], reason: null };
+  const listed = approvedPlan.listManualAcceptanceIds(bytes, {
+    libDir: options.libDir,
+    bashPath: options.bashPath,
+    timeoutMs: LIMITS.listTimeoutMs,
+    label: options.planLabel,
+  });
+  if (listed.status === 'ok') return { ids: [...new Set(listed.ids)].sort(compareCriterionIds), reason: null };
+  if (listed.status === 'unparseable') return { ids: [], reason: listed.message ? clip(normalizeText(listed.message), 300) : 'the plan does not parse' };
+  return { ids: [], reason: listerFault(listed) };
+}
+
+function manualAcceptanceIds(bytes, options = {}) {
+  return manualAcceptanceRead(bytes, options).ids;
+}
+
+function chainPlanBytes(chain) {
+  if (!chain) return { reason: 'no chain plan is bound' };
+  if (Buffer.isBuffer(chain.planBytes)) return { bytes: chain.planBytes };
+  const read = planPayload.readPlanFile(chain.planPath);
+  return read.failure ? { reason: read.failure } : { bytes: read.bytes };
+}
+
+function consentDecision(ids, open, plan, runMode, options = {}) {
+  const exact = acceptOpenRows(ids, open);
+  if (!exact.accepted) return exact;
+  if (plan.unapproved) {
+    return { accepted: false, refusal: '--accept-partial takes consent only from a plan a person approved, and this work-order plan was not approved, so no ## Manual Acceptance row in it carries consent' };
+  }
+  if (!Buffer.isBuffer(plan.bytes)) {
+    return { accepted: false, refusal: `--accept-partial takes consent from the plan's ## Manual Acceptance table, and the plan could not be read (${plan.reason || 'no bytes'})` };
+  }
+  const read = manualAcceptanceRead(plan.bytes, options);
+  if (read.reason) {
+    return { accepted: false, refusal: `--accept-partial takes consent from the plan's ## Manual Acceptance table, and that table could not be read (${read.reason})` };
+  }
+  const listed = read.ids;
+  const missing = ids.filter((id) => !listed.includes(id));
+  if (missing.length === 0) return { accepted: true };
+  const named = missing.join(', ');
+  if (runMode) {
+    return { accepted: false, refusal: `--accept-partial takes consent from the approved plan's ## Manual Acceptance table, which has no row for ${named}, so no consent covers ${missing.length === 1 ? 'it' : 'them'}` };
+  }
+  return {
+    accepted: false,
+    refusal: `--accept-partial takes consent from the plan's ## Manual Acceptance table, which has no row for ${named}; write ${missing.length === 1 ? 'its row' : 'one row for each'} as the plugin's skills/verify-feature/rules/acceptance-consent.md describes, then close again`,
+  };
+}
+
+function handoffDirectory(pluginData) {
+  try {
+    return ensurePrivateDirectory(pluginData, HANDOFF_SEGMENTS);
+  } catch (error) {
+    return fail(`acceptance hand-off store unavailable: ${error.message}`);
+  }
+}
+
+function handoffFile(pluginData, sessionKey) {
+  if (typeof sessionKey !== 'string' || !SESSION_KEY_RE.test(sessionKey)) fail('invalid session key');
+  return path.join(handoffDirectory(pluginData), `${sessionKey}.json`);
+}
+
+function validateHandoff(record, sessionKey) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return 'not an object';
+  const keys = Object.keys(record).sort();
+  if (keys.length !== HANDOFF_KEYS.length || keys.some((key, index) => key !== HANDOFF_KEYS[index])) return 'unexpected key set';
+  if (record.schema !== HANDOFF_SCHEMA) return 'unknown schema';
+  if (record.session_key !== sessionKey) return 'bound to another session';
+  if (typeof record.ticket !== 'string' || !TICKET_RE.test(record.ticket)) return 'malformed review ticket';
+  if (typeof record.tree !== 'string' || !TREE_RE.test(record.tree)) return 'malformed tree';
+  if (!HANDOFF_STATES.includes(record.state)) return 'unknown verdict state';
+  if (typeof record.plan !== 'string' || !HANDOFF_PLAN_RE.test(record.plan)) return 'malformed plan';
+  if (typeof record.plan_sha256 !== 'string' || !DIGEST_RE.test(record.plan_sha256)) return 'malformed plan digest';
+  if (typeof record.records_sha256 !== 'string' || !DIGEST_RE.test(record.records_sha256)) return 'malformed record-set digest';
+  if (!Array.isArray(record.open) || record.open.length > LIMITS.maxRecordsPerSession
+    || record.open.some((id) => typeof id !== 'string' || !AC_RE.test(id))) {
+    return 'malformed open criteria';
+  }
+  if (!Array.isArray(record.remedies) || record.remedies.length === 0 || record.remedies.length > 8
+    || record.remedies.some((segment) => typeof segment !== 'string' || segment.length > LIMITS.maxRemedyChars || /[\u0000-\u001f\u007f]/.test(segment)
+      || !(USER_REMEDIES.includes(remedyKind(segment)) || remedyKind(segment) === 'fix'))) {
+    return 'malformed remedies';
+  }
+  if (!isIsoTimestamp(record.written_at)) return 'malformed record time';
+  return null;
+}
+
+function planDigest(planPath) {
+  const read = planPayload.readPlanFile(planPath);
+  if (read.failure === planPayload.REASONS.EMPTY) return crypto.createHash('sha256').update(Buffer.alloc(0)).digest('hex');
+  if (read.failure) return null;
+  return crypto.createHash('sha256').update(read.bytes).digest('hex');
+}
+
+function recordSetDigest(options, stem) {
+  const entries = listRecords(storeLocations(options.pluginData, options.sessionKey), { sessionKey: options.sessionKey, projectRoot: options.projectRoot });
+  const hash = crypto.createHash('sha256');
+  for (const entry of entries) {
+    if (entry.record && entry.record.stem !== stem) continue;
+    hash.update(`${entry.id}\n${entry.record ? JSON.stringify(entry.record) : `invalid ${entry.invalid}`}\n`);
+  }
+  return hash.digest('hex');
+}
+
+function handoffEvidence(options, stem) {
+  const plan = planFor(canonical(path.resolve(options.projectRoot)), stem);
+  if (plan.reason) return { reason: plan.reason };
+  const digest = planDigest(plan.planPath);
+  if (!digest) return { reason: `the plan ${plan.planRel} could not be read` };
+  return { plan: plan.planRel, plan_sha256: digest, records_sha256: recordSetDigest(options, stem) };
+}
+
+function writeHandoff(options, record) {
+  const target = handoffFile(options.pluginData, options.sessionKey);
+  const problem = validateHandoff(record, options.sessionKey);
+  if (problem) fail(`refusing to write an invalid hand-off record: ${problem}`);
+  const directory = path.dirname(target);
+  const temporary = path.join(directory, `.${options.sessionKey}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  const descriptor = fs.openSync(temporary, 'wx', 0o600);
+  try {
+    fs.writeFileSync(descriptor, `${JSON.stringify(record)}\n`);
+    fs.fsyncSync(descriptor);
+  } catch (error) {
+    try { fs.closeSync(descriptor); } catch { }
+    try { fs.unlinkSync(temporary); } catch { }
+    throw error;
+  }
+  fs.closeSync(descriptor);
+  try {
+    fs.renameSync(temporary, target);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch { }
+    throw error;
+  }
+  syncDirectory(directory);
+  return target;
+}
+
+function removeHandoff(options) {
+  try {
+    fs.rmSync(handoffFile(options.pluginData, options.sessionKey), { force: true });
+  } catch { }
+}
+
+function handoffLine(record, projectRoot) {
+  const open = record.open.length > 0 ? record.open.join(', ') : 'none';
+  const shown = record.remedies.map((segment) => display(segment, projectRoot, { ...LIMITS, displayMax: LIMITS.maxRemedyChars }));
+  return `ACCEPTANCE HAND-OFF — the chain stays open, waiting on the user's acceptance decision | ${record.state} | open: ${open} | ${shown.join(' | ')} | review ticket ${record.ticket} | tree ${record.tree.slice(0, 12)}`;
+}
+
+function recordHandoff(options, result) {
+  if (typeof options.handoffTicket !== 'string' || options.handoffTicket === '') return;
+  const tree = result.currentTree && result.currentTree.tree;
+  if (!result.handoff || options.gatesPassed !== true || options.reviewDone !== true || !tree || !result.chain || !TICKET_RE.test(options.handoffTicket)) {
+    removeHandoff(options);
+    return;
+  }
+  try {
+    const evidence = handoffEvidence(options, result.chain.stem);
+    if (evidence.reason) {
+      removeHandoff(options);
+      return;
+    }
+    writeHandoff(options, {
+      schema: HANDOFF_SCHEMA,
+      session_key: options.sessionKey,
+      ticket: options.handoffTicket,
+      tree,
+      plan: evidence.plan,
+      plan_sha256: evidence.plan_sha256,
+      records_sha256: evidence.records_sha256,
+      state: result.state,
+      open: openRows(result.rows || []).map((row) => row.criterion.id),
+      remedies: result.segments,
+      written_at: new Date().toISOString(),
+    });
+  } catch {
+    removeHandoff(options);
+  }
+}
+
+function handoffStatus(options) {
+  if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return { code: 2, reason: 'invalid session key' };
+  if (typeof options.handoffTicket !== 'string' || !TICKET_RE.test(options.handoffTicket)) {
+    return { code: 1, reason: 'the chain holds no consumed review ticket' };
+  }
+  if (typeof options.projectRoot !== 'string' || options.projectRoot === '') return { code: 2, reason: 'no project root is bound' };
+  let file;
+  let locations;
+  try {
+    file = handoffFile(options.pluginData, options.sessionKey);
+    locations = storeLocations(options.pluginData, options.sessionKey);
+  } catch (error) {
+    return { code: 2, reason: error.message };
+  }
+  const loaded = evidenceRun.readRecordFile(file, LIMITS);
+  if (loaded.invalid) return { code: 1, reason: loaded.invalid };
+  const problem = validateHandoff(loaded.record, options.sessionKey);
+  if (problem) return { code: 1, reason: problem };
+  if (loaded.record.ticket !== options.handoffTicket) return { code: 1, reason: 'the hand-off names another review ticket' };
+  const current = chainTree({ ...options, runId: '', workTree: '' }, locations.scratch);
+  if (!current.tree.tree || current.tree.tree !== loaded.record.tree) return { code: 1, reason: 'the tree changed since the terminus refused' };
+  let evidence;
+  try {
+    evidence = handoffEvidence(options, HANDOFF_PLAN_RE.exec(loaded.record.plan)[1]);
+  } catch (error) {
+    return { code: 1, reason: error.message };
+  }
+  if (evidence.reason) return { code: 1, reason: evidence.reason };
+  if (evidence.plan !== loaded.record.plan || evidence.plan_sha256 !== loaded.record.plan_sha256) {
+    return { code: 1, reason: 'the plan changed since the terminus refused' };
+  }
+  if (evidence.records_sha256 !== loaded.record.records_sha256) return { code: 1, reason: 'the acceptance records changed since the terminus refused' };
+  return { code: 0, line: handoffLine(loaded.record, options.projectRoot) };
+}
+
+function unjudgedCriteria(options, cause) {
+  if (options.criteriaAdvisory === true) {
+    return { code: 0, lines: [`ACCEPTANCE CRITERIA — advisory, not blocking | ${cause}, so the plan was NOT judged`] };
+  }
+  return { code: 2, lines: [cause] };
+}
+
+function planCriteria(options) {
+  const planPath = typeof options.planPath === 'string' ? options.planPath : '';
+  if (planPath === '') return unjudgedCriteria(options, 'the plan path did not reach the acceptance check');
+  const relative = options.projectRoot ? path.relative(options.projectRoot, planPath) : '';
+  const shown = display(relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : planPath, options.projectRoot);
+  const read = readCriteria(planPath, { ...options, planLabel: shown });
+  if (read.status === 'error') return unjudgedCriteria(options, `the acceptance criteria of ${shown} could not be read: ${read.reason}`);
+  if (read.status === 'ok' && read.criteria.some((criterion) => criterion.state === 'active')) return { code: 0, lines: [] };
+  if (read.status === 'duplicate') {
+    const named = `the plan ${shown} lists ${read.ids.join(', ')} on more than one active ## Requirements row, so one id names two criteria`;
+    if (options.criteriaAdvisory === true) {
+      return { code: 0, lines: [`ACCEPTANCE CRITERIA — advisory, not blocking | ${named} and the chain terminus will report it as unresolved after the review without blocking it`] };
+    }
+    return {
+      code: 1,
+      lines: [
+        `${named} and the chain terminus would refuse it as unresolved after the review`,
+        'Give each acceptance criterion its own AC-### id in the plan\'s ## Requirements table, then run --tdd-complete again.',
+      ],
+    };
+  }
+  const cause = read.status !== 'ok'
+    ? read.reason
+    : (read.criteria.length === 0 ? 'its ## Requirements table has no AC-### row' : 'every AC-### row is deprecated');
+  if (options.criteriaAdvisory === true) {
+    return {
+      code: 0,
+      lines: [`ACCEPTANCE CRITERIA — advisory, not blocking | the plan ${shown} carries no active AC-### acceptance criterion (${cause}), so the chain terminus will report no-criteria after the review without blocking it`],
+    };
+  }
+  return {
+    code: 1,
+    lines: [
+      `the plan ${shown} carries no active AC-### acceptance criterion (${cause}), so the chain terminus would refuse it as no-criteria after the review`,
+      'Add one AC-### row to the plan\'s ## Requirements table for each acceptance criterion, then run --tdd-complete again. Prefer criteria this environment can observe (a test, a command or a page a verification driver reaches); a criterion only a person can check is an active AC-### row too, and with the user\'s consent it also gets a row in the plan\'s ## Manual Acceptance table.',
+    ],
+  };
+}
+
+function runHeadCheck(options, facts, limits) {
+  const bound = typeof options.workTree === 'string' && options.workTree !== '';
+  const repository = bound ? { root: options.workTree, excluded: [], reason: null } : evidenceRun.repositoryRoot(options.projectRoot, evidenceRun.LIMITS);
+  if (repository.root === null) {
+    return { cause: `${facts.label}: the repository of the project root could not be determined (${display(repository.reason || 'no reason', options.projectRoot, limits)}), so the pull-request head cannot be checked` };
+  }
+  const head = runHead(repository.root, facts.prHead, limits, repository.excluded, options.projectRoot);
+  if (head.reason) return { cause: `${facts.label}: ${head.reason}` };
+  return { head: head.head };
+}
+
+function runRemedyContext(chain, options = {}) {
+  const read = manualAcceptanceRead(chain ? chain.planBytes : null, { ...options, planLabel: chain ? chain.planRel : undefined });
+  return { consented: read.ids, consentFault: read.reason, unapproved: Boolean(chain && chain.unapproved) };
+}
+
+function runOutcome(options, chain, limits, headCommit) {
+  const result = assess({ ...options, chain });
+  if (result.outcome !== 'evaluated') return { state: result.outcome, cause: result.reason, rows: [] };
+  if (!result.currentTree.tree) return { state: 'unresolved', cause: unfingerprintedCause(chain, result.currentTree), rows: [] };
+  const rows = result.rows;
+  const summary = summarizeRows(rows);
+  const accept = parseAcceptIds(options.acceptPartialIds);
+  const where = `${chain.facts.label}: ${summary.passing}/${summary.active} acceptance criteria pass on the pull-request head ${headCommit.slice(0, 12)}`;
+  if (summary.open.length === 0) {
+    if (accept.error || accept.ids.length > 0) {
+      const refusal = accept.error || `${acceptOpenRows(accept.ids, []).refusal}: every criterion passes, so validate again without --accept-partial`;
+      return { state: 'incomplete', cause: `${where}${summary.deprecatedText}; ${refusal}`, rows };
+    }
+    const kinds = countKinds(rows);
+    return { state: 'pass', cause: `${where} (observed ${kinds.observed}, attested ${kinds.attested})${summary.deprecatedText}`, rows, flaky: summary.flaky };
+  }
+  if (accept.error || accept.ids.length > 0) {
+    const decision = accept.error
+      ? { accepted: false, refusal: accept.error }
+      : consentDecision(accept.ids, summary.open, { bytes: chain.planBytes, unapproved: chain.unapproved === true }, true, { ...options, planLabel: chain.planRel });
+    if (decision.accepted) {
+      return { state: 'partial-accepted', cause: `${where}; accepted as partial: ${summary.open.map((row) => row.criterion.id).join(', ')}${summary.deprecatedText}`, rows, accepted: summary.open };
+    }
+    return { state: 'incomplete', cause: `${where}; ${openListing(summary.open, limits)}${summary.deprecatedText}; ${decision.refusal}`, rows };
+  }
+  return { state: 'incomplete', cause: `${where}; ${openListing(summary.open, limits)}${summary.deprecatedText}`, rows };
+}
+
+function runVerdict(options, gate, lines, limits) {
+  const gateLabel = `gate: ${gate.mode}`;
+  let outcome;
+  let chain = null;
+  let planText = '';
+  let planUnapproved = false;
+  const refusal = workTreeRefusal(options, limits);
+  const facts = refusal ? null : runFacts(options);
+  if (refusal) {
+    outcome = { state: 'unavailable', cause: refusal, rows: [], blocking: true };
+  } else if (facts.error) {
+    outcome = { state: 'unresolved', cause: facts.error, rows: [] };
+  } else {
+    const head = runHeadCheck(options, facts, limits);
+    if (head.cause) {
+      outcome = { state: 'unresolved', cause: head.cause, rows: [], blocking: true };
+    } else if (options.escape) {
+      lines.push(`ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record of autopilot run ${options.runId} was read | ${gateLabel}`);
+      return { state: 'escaped', passes: true, mode: gate.mode, blocking: false, planUnapproved: false, lines };
+    } else {
+      const resolved = runChain(options);
+      planUnapproved = resolved.unapproved === true;
+      if (resolved.error) {
+        lines.push(...(resolved.disclosures || []));
+        outcome = { state: 'unresolved', cause: resolved.error, rows: [] };
+      } else {
+        chain = resolved;
+        lines.push(...chain.disclosures);
+        planText = ` | plan: ${chain.planRel}`;
+        outcome = runOutcome(options, chain, limits, head.head);
+      }
+    }
+  }
+  const passes = PASSING_STATES.includes(outcome.state);
+  const segments = passes ? [] : remedies(outcome.state, outcome.rows, chain || { runId: options.runId }, options.projectRoot, runRemedyContext(chain, options));
+  verdictLines(lines, outcome, gate, planText, segments, options.projectRoot, limits);
+  const blocking = outcome.blocking === true;
+  return { state: outcome.state, passes: passes || (gate.mode === 'advisory' && !blocking), mode: gate.mode, blocking, planUnapproved, lines };
 }
 
 function verdict(options) {
@@ -800,11 +1515,18 @@ function verdict(options) {
   const gate = normalizeGateMode(options.gateMode, options.projectRoot);
   const lines = [];
   if (gate.disclosure) lines.push(gate.disclosure);
-  const gateLabel = `gate: ${gate.mode}`;
+  if (options.runId) return runVerdict(options, gate, lines, limits);
   if (options.bound) {
     lines.push(boundLine(options.validate));
     return { state: 'not-checked', passes: true, mode: gate.mode, lines };
   }
+  const result = standaloneVerdict(options, gate, lines, limits);
+  recordHandoff(options, result);
+  return result;
+}
+
+function standaloneVerdict(options, gate, lines, limits) {
+  const gateLabel = `gate: ${gate.mode}`;
   const resolved = verdictChain(options);
   if (resolved.outcome === 'not-applicable') {
     lines.push(notApplicableLine(resolved.reason, gate.mode));
@@ -814,32 +1536,53 @@ function verdict(options) {
     lines.push(`ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read | ${gateLabel}`);
     return { state: 'escaped', passes: true, mode: gate.mode, lines };
   }
+  const accept = parseAcceptIds(options.acceptPartialIds);
   let state;
   let cause;
   let planText = '';
   let flaky = [];
   let rows = [];
+  let accepted = [];
+  let currentTree = null;
   if (resolved.chain) {
     lines.push(...resolved.chain.disclosures);
     planText = ` | plan: ${resolved.chain.planRel}`;
     const result = assess({ ...options, chain: resolved.chain });
     if (result.outcome === 'evaluated') {
       rows = result.rows;
-      const active = result.rows.filter((row) => row.criterion.state === 'active');
-      const deprecated = result.rows.filter((row) => row.state === 'deprecated').map((row) => row.criterion.id);
-      const failing = result.rows.filter((row) => row.state !== 'pass' && row.state !== 'deprecated');
-      const passing = active.filter((row) => row.state === 'pass').length;
+      currentTree = result.currentTree;
+      const summary = summarizeRows(result.rows);
+      const failing = summary.open;
       const tree = result.currentTree.tree ? `the current tree ${result.currentTree.tree.slice(0, 12)}` : `a tree that could not be fingerprinted (${result.currentTree.reason || 'no tree id'})`;
-      const deprecatedText = deprecated.length > 0 ? `; deprecated: ${deprecated.join(', ')}` : '';
-      if (failing.length === 0) {
+      const counted = `${summary.passing}/${summary.active} acceptance criteria pass on ${tree}`;
+      if (failing.length === 0 && (accept.error || accept.ids.length > 0)) {
+        state = 'incomplete';
+        const refusal = accept.error || `${acceptOpenRows(accept.ids, []).refusal}: every criterion passes, so run --chain-done again without --accept-partial`;
+        cause = `${counted}${summary.deprecatedText}; ${refusal}`;
+      } else if (failing.length === 0) {
         const kinds = countKinds(result.rows);
         state = result.currentTree.tree ? 'pass' : 'pass-tree-unverified';
-        cause = `${passing}/${active.length} acceptance criteria pass on ${tree} (observed ${kinds.observed}, attested ${kinds.attested})${deprecatedText}`;
-        flaky = result.rows.filter((row) => row.earlierNonPass > 0).map((row) => `${row.criterion.id} had ${row.earlierNonPass} earlier non-pass verdict(s) on this same tree`);
+        cause = `${counted} (observed ${kinds.observed}, attested ${kinds.attested})${summary.deprecatedText}`;
+        flaky = summary.flaky;
       } else {
-        state = 'incomplete';
-        const listed = failing.map((row, index) => `${row.criterion.id} ${row.state}${row.cause && index < limits.listedCriteria ? ` (${row.cause})` : ''}`);
-        cause = `${passing}/${active.length} acceptance criteria pass on ${tree}; ${listed.join('; ')}${deprecatedText}`;
+        let decision = null;
+        if (accept.error) {
+          decision = { accepted: false, refusal: accept.error };
+        } else if (accept.ids.length > 0 && options.zeroChangeTicket === true) {
+          decision = { accepted: false, refusal: `--accept-partial ${REVIEWED_CHAIN_ONLY}, which this zero-change self-review ticket is not` };
+        } else if (accept.ids.length > 0) {
+          decision = result.currentTree.tree
+            ? consentDecision(accept.ids, failing, chainPlanBytes(resolved.chain), false, { ...options, planLabel: resolved.chain.planRel })
+            : { accepted: false, refusal: '--accept-partial needs a tree the gate can fingerprint, and this one could not be fingerprinted' };
+        }
+        if (decision && decision.accepted) {
+          state = 'partial-accepted';
+          accepted = failing;
+          cause = `${counted}; accepted as partial: ${failing.map((row) => row.criterion.id).join(', ')}${summary.deprecatedText}`;
+        } else {
+          state = 'incomplete';
+          cause = `${counted}; ${openListing(failing, limits)}${summary.deprecatedText}${decision ? `; ${decision.refusal}` : ''}`;
+        }
       }
     } else {
       state = result.outcome;
@@ -850,15 +1593,18 @@ function verdict(options) {
     cause = resolved.reason;
   }
   const passes = PASSING_STATES.includes(state);
-  if (passes) {
-    lines.push(`ACCEPTANCE — ${state} | ${cause}${planText} | ${gateLabel}`);
-    for (const entry of flaky) lines.push(`ACCEPTANCE — flaky: ${entry}`);
-  } else {
-    const label = gate.mode === 'advisory' ? `${state} (advisory, not blocking)` : state;
-    const suffix = remedies(state, rows, resolved.chain, options.projectRoot).map((entry) => ` | ${entry}`).join('');
-    lines.push(`ACCEPTANCE — ${label} | ${cause}${planText} | ${gateLabel}${suffix}`);
+  const zeroChangeTicket = options.zeroChangeTicket === true;
+  const segments = passes ? [] : remedies(state, rows, resolved.chain, options.projectRoot, { currentTree, zeroChangeTicket });
+  verdictLines(lines, { state, cause, flaky, accepted }, gate, planText, segments, options.projectRoot, limits);
+  const handoff = !passes && gate.mode !== 'advisory' && !zeroChangeTicket && isHandoff(state, segments, options.fixRoundSpent === true);
+  if (handoff && !currentTree && options.handoffTicket) {
+    try {
+      currentTree = chainTree({ ...options, runId: '', workTree: '' }, storeLocations(options.pluginData, options.sessionKey).scratch).tree;
+    } catch {
+      currentTree = null;
+    }
   }
-  return { state, passes: passes || gate.mode === 'advisory', mode: gate.mode, lines };
+  return { state, passes: passes || gate.mode === 'advisory', mode: gate.mode, lines, rows, segments, currentTree, handoff, chain: resolved.chain || null };
 }
 
 function readTransportFile(directory, name) {
@@ -870,9 +1616,30 @@ function readTransportFile(directory, name) {
   }
 }
 
+function readRunTransport(directory) {
+  const text = readTransportFile(directory, 'run.json');
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 function transportOptions(env) {
   const directory = env.ZENSU_AVR_DIR || '';
   return {
+    runId: env.ZENSU_AVR_RUN || '',
+    run: readRunTransport(directory),
+    acceptPartialIds: env.ZENSU_AVR_ACCEPT_PARTIAL_IDS || '',
+    acceptContext: env.ZENSU_AVR_ACCEPT_CONTEXT || 'standalone',
+    handoffTicket: env.ZENSU_AVR_HANDOFF_TICKET || '',
+    gatesPassed: env.ZENSU_AVR_GATES_PASSED === '1',
+    fixRoundSpent: env.ZENSU_AVR_FIX_ROUND_SPENT === '1',
+    reviewDone: env.ZENSU_AVR_REVIEW_DONE === '1',
+    zeroChangeTicket: env.ZENSU_AVR_ZERO_CHANGE_TICKET === '1',
+    criteriaAdvisory: env.ZENSU_AVR_CRITERIA_ADVISORY === '1',
+    planPath: env.ZENSU_AVR_PLAN || '',
     pluginData: env.ZENSU_AVR_PLUGIN_DATA,
     sessionKey: env.ZENSU_AVR_SESSION_KEY,
     projectRoot: env.ZENSU_AVR_PROJECT_ROOT,
@@ -924,10 +1691,61 @@ async function main(argv, env = process.env) {
     const result = verdict(options);
     for (const line of result.lines) process.stderr.write(`${line}\n`);
     if (options.verdictStatePath) {
-      try { fs.writeFileSync(options.verdictStatePath, result.state); } catch { }
+      try {
+        fs.writeFileSync(options.verdictStatePath, result.state);
+        fs.writeFileSync(path.join(path.dirname(options.verdictStatePath), 'verdict-mode'), result.mode);
+        fs.writeFileSync(path.join(path.dirname(options.verdictStatePath), 'verdict-plan-unapproved'), result.planUnapproved === true ? '1' : '0');
+      } catch { }
     }
-    if (result.state === 'unavailable' && result.mode !== 'advisory') return 2;
+    if (result.state === 'unavailable' && (result.mode !== 'advisory' || result.blocking === true)) return 2;
     return result.passes ? 0 : 1;
+  }
+  if (mode === 'accept-ids') {
+    if (!ACCEPT_CONTEXT_REFUSALS.has(options.acceptContext)) {
+      process.stderr.write(`${label}: --accept-partial reached the acceptance module with the unknown context ${JSON.stringify(options.acceptContext)}\n`);
+      return 2;
+    }
+    const refusal = ACCEPT_CONTEXT_REFUSALS.get(options.acceptContext);
+    if (refusal) {
+      process.stderr.write(`${label}: ${refusal}\n`);
+      return 1;
+    }
+    const parsed = parseAcceptIds(options.acceptPartialIds);
+    if (!parsed.error && parsed.ids.length === 0) parsed.error = '--accept-partial needs the ids of the criteria the user accepted as partial, such as AC-004,AC-005';
+    if (parsed.error) {
+      process.stderr.write(`${label}: ${parsed.error}\n`);
+      return 2;
+    }
+    process.stdout.write(`${parsed.ids.join(',')}\n`);
+    return 0;
+  }
+  if (mode === 'run-facts') {
+    let run;
+    try {
+      run = JSON.parse(fs.readFileSync(0, 'utf8'));
+    } catch {
+      return 3;
+    }
+    const facts = bindFacts(run, env.ZENSU_AVR_RUN_ID);
+    if (facts.code === 0) process.stdout.write(facts.line);
+    return facts.code;
+  }
+  if (mode === 'handoff') {
+    const result = handoffStatus(options);
+    if (result.code === 0) process.stdout.write(`${result.line}\n`);
+    if (result.code === 2) process.stderr.write(`${label}: ${result.reason}\n`);
+    return result.code;
+  }
+  if (mode === 'plan-criteria') {
+    const result = planCriteria(options);
+    if (result.code === 0) {
+      for (const line of result.lines) process.stderr.write(`${line}\n`);
+    } else if (result.code === 1) {
+      process.stderr.write(`${label}: refusing to mark implementation complete — ${result.lines[0]}.\n${result.lines.slice(1).join('\n')}\n`);
+    } else if (result.code === 2) {
+      process.stderr.write(`${label}: ${result.lines[0]}, so the plan was NOT judged.\n${UNJUDGED_NEXT_STEP}\n`);
+    }
+    return result.code;
   }
   if (mode === 'unjudged') {
     const result = unjudged({
@@ -939,7 +1757,7 @@ async function main(argv, env = process.env) {
     for (const line of result.lines) process.stdout.write(`${line}\n`);
     return result.decided ? 0 : 3;
   }
-  process.stderr.write('usage: acceptance-verify-v1.js record|status|verdict|unjudged\n');
+  process.stderr.write('usage: acceptance-verify-v1.js record|status|verdict|accept-ids|handoff|plan-criteria|unjudged\n');
   return 2;
 }
 
@@ -959,6 +1777,12 @@ module.exports = {
   PASSING_STATES,
   CRITERION_STATES,
   VERIFY_AGAIN_STATES,
+  HANDOFF_SCHEMA,
+  HANDOFF_SEGMENTS,
+  HANDOFF_KEYS,
+  HANDOFF_STATES,
+  USER_REMEDIES,
+  ACCEPT_CONTEXT_REFUSALS,
   RECORD_KEYS,
   LIMITS,
   REMEDY,
@@ -977,9 +1801,14 @@ module.exports = {
   receiptRunLog,
   planFor,
   readCriteria,
+  bindFacts,
+  manualAcceptanceIds,
+  consentDecision,
   hasChanges,
   citedRun,
   resolveChain,
+  runChain,
+  runHead,
   recordLine,
   record,
   evaluate,
@@ -989,6 +1818,17 @@ module.exports = {
   boundLine,
   unjudged,
   remedies,
+  remedyKind,
+  isHandoff,
+  parseAcceptIds,
+  acceptOpenRows,
+  handoffFile,
+  validateHandoff,
+  writeHandoff,
+  removeHandoff,
+  handoffLine,
+  handoffStatus,
+  planCriteria,
   verdict,
   main,
 };

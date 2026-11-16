@@ -1,6 +1,7 @@
 ---
 paths:
   - "hooks/lib/plan-payload-v1.js"
+  - "hooks/lib/approved-plan-v1.js"
   - "tests/structure/test-plan-payload-fallback.sh"
   - "tests/structure/plan-payload-v1.test.js"
 ---
@@ -94,9 +95,11 @@ because the evaluator spans ~90 lines and a line-scoped grep would miss an argv 
 below it), and F49/F49a (a hard link refused through both carriers). The loader is one
 function, `plan_payload_load`, which the durable branch and the executor notice both call: F48b
 pins one definition, one directory render and the two calls, and F48's allowlist also covers the
-line that loads `foreign-executor-v1.js` beside the reader. Both module paths pass one guard,
-`plan_module_loadable`, whose `-f`/`-L`/`-r` body F48b pins with its two calls and the absence of
-an inline copy, and the notice path applies it to the classifier before node loads it.
+line that loads `foreign-executor-v1.js` beside the reader. Every module path passes one guard,
+`plan_module_loadable`, whose `-f`/`-L`/`-r` body F48b pins with its three calls and the absence of
+an inline copy: the reader, the classifier, which the notice path checks before node loads it, and
+the approved-plan store module `approved-plan-v1.js`, which a validating run's approval checks
+before it stores anything.
 
 **`PLAN_STAGE_MISMATCH` (exit 7) is unreachable and deliberately left so.** The shell `case`
 already filters the active document to `PLANNING|AWAIT_TDD`, and the evaluator re-reads
@@ -130,9 +133,13 @@ above.
 
 **The digest binds the bytes that TRAVELLED.** When source 3 wins, `approvedPlanSha256` is over
 the response string, not the file at source 4's path. The two agreed byte-for-byte in the
-capture and F44 pins that agreement, but they are not contracted to; `approvedPlanSha256` is
-only written and shape-validated, never re-derived, so a host whose response string and saved
-file disagree would silently bind the transported copy.
+capture and F44 pins that agreement, but they are not contracted to. On a run that validates,
+the hook stores those transported bytes as `.zensu/state/autopilot-approved-plan-<sha256>.md`
+(`storeApprovedPlan` in `hooks/lib/approved-plan-v1.js`), and at VALIDATE `readApprovedPlan`
+re-derives the digest from that copy and refuses one that no longer matches
+`approvedPlanSha256`. That re-derivation checks the copy, not the host: a host whose response
+string and saved file disagree still binds the transported copy, and the stored copy is exactly
+those bytes.
 
 **Port-relevant.** The module OWNS `SOURCES`; a port edits that table in its own copy of the
 file rather than calling in with a different one. `resolveApprovedPlan(payload, sources)` takes

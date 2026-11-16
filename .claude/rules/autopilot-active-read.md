@@ -123,6 +123,16 @@ the lenient verb is never mistaken for an oversight. The verdicts:
   `W33` holds the lease over an own run (the unchanged verb exited 1), `W34` holds it for a
   session without a run and requires exit 1 with the rc-1 disclosure, `W36` holds it over a
   `CANCELLED` own run and requires exit 0 with that record, and `W35` plants unsafe storage.
+- **`_zensu_run_bind` in `zensu-log.sh` — strict.** It binds `--acceptance-record --run`,
+  `--acceptance-status --run`, `--evidence-run --scope acceptance --run` and `--autopilot-validate`
+  to the caller's own run, read through `_zensu_active_run_json`, which runs
+  `autopilot_read_active_strict` inside a command substitution so the state library never loads into
+  the verb's process. A 1 refuses as `this session owns no active Autopilot run`, a 5 as the
+  unreadable-state refusal that names the lock and `/zensu:doctor`, a library that does not load as
+  its own refusal, and every other status as an unreadable or inconsistent state. Each exits 2
+  before the acceptance module runs, so a lease fault never reads as a run the verb may verify or
+  validate. `V13` in `tests/structure/test-acceptance-gate.sh` drives the 1; the 5 is driven by no
+  check.
 - **`session-start-autopilot-resume.sh` — lenient, deliberately.** It is advisory SessionStart
   context and guards nothing: its silence cannot release a Stop, arm a chain or approve a
   plan, each of those guards re-reads under its own lease, and the next Stop that reads the
