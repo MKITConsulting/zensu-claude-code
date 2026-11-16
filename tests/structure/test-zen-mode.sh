@@ -604,7 +604,7 @@ if command -v node >/dev/null 2>&1; then
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { bad.push("eval-dir:unreadable"); }
-    if (scenarios.length < 14) bad.push("eval-dir:expected-at-least-14-scenarios-got-" + scenarios.length);
+    if (scenarios.length < 18) bad.push("eval-dir:expected-at-least-18-scenarios-got-" + scenarios.length);
     // The floor above is an absolute one and cannot see the loss of a scenario
     // added AFTER it was written: deleting one together with its registration
     // used to leave a consistent smaller world in which nothing turned red, and
@@ -632,7 +632,7 @@ if command -v node >/dev/null 2>&1; then
     // floor is what closes that, and it is therefore the CURRENT scenario count
     // rather than a round number below it — raising it is the registration step
     // for a new scenario, exactly as `registered` in tests/profiles/unit-files.v1.json works.
-    if (registered < 14) {
+    if (registered < 18) {
       bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
     }
     if (scenarios.length < registered) {
@@ -1375,7 +1375,7 @@ zen_is_plain_number() {
 # Second, the off-verb stopped being named by a bare relative path.
 # That half made the directive SHORTER; the delimiters and the sentence naming
 # them are what cost the bytes.
-ZEN_DIRECTIVE_CEILING=5100
+ZEN_DIRECTIVE_CEILING=5726
 ZEN_DIRECTIVE_HEADROOM=95
 if ! command -v node >/dev/null 2>&1; then
   check "Z30 directive length bound did not run — node is not on PATH" FAIL
@@ -1420,7 +1420,7 @@ else
   fi
 fi
 
-ZEN_NONE_CEILING=3770
+ZEN_NONE_CEILING=4396
 ZEN_NONE_HEADROOM=95
 if command -v node >/dev/null 2>&1; then
   P30B="$(mktemp -d -t zenmode-z30b-XXXXXX)"; S30B="z30b-$$"
@@ -4779,8 +4779,8 @@ for Z101_NEEDLE in "the ZENSU CHAIN ANCHOR field closing this block reads none" 
 done
 [ "$(fire "$P101" "$S101" "third prompt" | anchor_of)" = "none" ] || Z101_BAD="$Z101_BAD [field not none]"
 printf '%s' "$Z101_SHORT" | grep -qF '{{ZENSU_CHAIN_ANCHOR}}' && Z101_BAD="$Z101_BAD [raw placeholder]"
-[ "${#Z101_SHORT}" -le 1990 ] && [ "${#Z101_SHORT}" -lt "${#Z101_FULL}" ] \
-  || Z101_BAD="$Z101_BAD [short ${#Z101_SHORT} vs full ${#Z101_FULL}, ceiling 1990]"
+[ "${#Z101_SHORT}" -le 2561 ] && [ "${#Z101_SHORT}" -lt "${#Z101_FULL}" ] \
+  || Z101_BAD="$Z101_BAD [short ${#Z101_SHORT} vs full ${#Z101_FULL}, ceiling 2561]"
 if [ -z "$Z101_BAD" ]; then
   check "Z101 the first ACTIVE prompt of a context generation carries the full contract and later ones a short body with every per-turn rule, the substance list, the ranking rule and its counterweight, the whole safety exception and the none field (${#Z101_FULL} then ${#Z101_SHORT} characters)" PASS
 else
@@ -4843,7 +4843,7 @@ Z104="$(HOOK="$HOOK" node -e '
   && check "Z104 the hook holds the full ACTIVE contract first and the short body second, and the short body carries the none-swap span exactly once" PASS \
   || check "Z104 ACTIVE heredoc layout is '${Z104:-unreadable}', want 2:full-first:1:1" FAIL
 
-ZEN_SHORT_ARMED_CEILING=2413
+ZEN_SHORT_ARMED_CEILING=2984
 ZEN_SHORT_ARMED_HEADROOM=95
 Z105_LEN="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" node -e '
   const fs = require("fs");
@@ -4898,6 +4898,62 @@ if [ -z "$Z106_BAD" ]; then
   check "Z106 all four directive variants and the skill ask for the result first and a closing session block, and none still asks for the retired opening recap" PASS
 else
   check "Z106 result-first or session-block rule broken:$Z106_BAD" FAIL
+fi
+
+Z117_BAD=""
+z117_scan() {
+  Z117_LABEL="$1"; Z117_TEXT="$2"; shift 2
+  if [ -z "$Z117_TEXT" ]; then
+    Z117_BAD="$Z117_BAD [$Z117_LABEL not captured]"
+    return 0
+  fi
+  for Z117_NEED in "$@"; do
+    printf '%s' "$Z117_TEXT" | grep -qF -- "$Z117_NEED" || Z117_BAD="$Z117_BAD [$Z117_LABEL missing: $Z117_NEED]"
+  done
+}
+for Z117_VARIANT in "full none" "full armed"; do
+  case "$Z117_VARIANT" in
+    ("full none") Z117_CAPTURED="$Z101_FULL" ;;
+    (*) Z117_CAPTURED="$Z103_ARMED_FULL" ;;
+  esac
+  z117_scan "$Z117_VARIANT" "$Z117_CAPTURED" \
+    "(7) End with exactly ONE next step, never two parallel suggestions. Once the work the user started this session for is finished and you checked that nothing holds the session open" \
+    "nothing an archive of its worktree would lose (uncommitted or unpushed work, a needed ignored file, a nested repository's work), nothing still running for it" \
+    "no pull request of its own still open" \
+    "no open question and no failed or unverified item" \
+    "that step says the session is done and can be archived or closed. A session that only answered questions keeps an ordinary next step instead, and in doubt the session stays open." \
+    "Never archive or close the session yourself; the EXCEPTION below never lifts that. SCOPE"
+done
+for Z117_VARIANT in "short none" "short armed"; do
+  case "$Z117_VARIANT" in
+    ("short none") Z117_CAPTURED="$Z101_SHORT" ;;
+    (*) Z117_CAPTURED="$Z103_ARMED_SHORT" ;;
+  esac
+  z117_scan "$Z117_VARIANT" "$Z117_CAPTURED" \
+    "exactly ONE next step at the end (once the session's work is finished and you checked that" \
+    "its worktree holds nothing an archive would lose, such as uncommitted or unpushed work, a needed ignored file or a nested repository's work, that nothing runs for it" \
+    "no pull request of its own is open" \
+    "no question or failed or unverified item is left" \
+    "that step says the session is done and can be archived or closed; a session that only answered questions keeps an ordinary next step, and in doubt it stays open), never archiving or closing the session yourself, not even under the exception below, and "
+done
+z117_scan "SKILL.md" "$(tr '\n' ' ' < "$SKILL" | tr -s ' ')" \
+  "nothing an archive of its worktree would lose (uncommitted or unpushed work, a needed ignored file, a nested repository's work), nothing still running for it" \
+  "no pull request of its own still open" \
+  "that step says the session is done and can be archived" \
+  "with every ignored file and every repository nested in it" \
+  "A session that only answered questions keeps an ordinary next step instead." \
+  "when in doubt the session is still open" \
+  "It never archives or closes a session either." \
+  "rule 9 included"
+z117_scan "configuration.md" "$(grep -F -- '| `user-prompt-zen-mode.sh` | UserPromptSubmit |' "$PLUGIN_DIR/docs/configuration.md")" \
+  "can be archived or closed once its work is finished and nothing holds it open" \
+  "ignored files and nested repositories included" \
+  "a session that only answered questions keeps an ordinary next step" \
+  "the model never archives or closes it itself, not even under the safety exception"
+if [ -z "$Z117_BAD" ]; then
+  check "Z117 all four directive variants, the skill and the operator row close a finished session with nothing left open on a step that says it is done and can be archived or closed, keep an ordinary next step for a session that only answered questions, and never let the model archive or close it itself" PASS
+else
+  check "Z117 archive signal broken:$Z117_BAD" FAIL
 fi
 
 P107="$(mktemp -d -t zenmode-XXXXXX)"; S107="z107-$$"

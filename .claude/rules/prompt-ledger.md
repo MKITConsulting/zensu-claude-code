@@ -37,18 +37,19 @@ The table is the measurement taken when the ledger landed. The texts have grown 
 zen-mode session block, the longer best-solution-first reminder, the context notice on a typed
 prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
 reminder's executor-plan clause, the zen-mode safety-warning sentence and its copy in the zen
-short body, and the reminder's Autopilot option the same suite measures 13,178 and 7,415 for a
-typed prompt, 4,194 and 2,459 for a task notification, a `!` input or a subagent hand-back, and
-4,558 and 2,823 for a CI-monitor event.
+short body, the reminder's Autopilot option and the zen-mode archive signal in rule (7) and the
+short body the same suite measures 13,804 and 7,986 for a typed prompt, 4,820 and 3,030 for a
+task notification, a `!` input or a subagent hand-back, and 5,184 and 3,394 for a CI-monitor
+event.
 
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety
 exception that lifts the one-question and one-next-step caps, the zen substance list and ranking
 rule, all five consent disclosures, the declined-call line and the human-present default of the
 reminder, what a typed preference does and that it records nothing, the own-text-only scoping of
-the decided line, the router's routing and its Plan-mode permission. Restating them is most of
+the decided line, the router's routing and its Plan-mode permission, and the zen archive signal with every condition that holds a session open. Restating them is most of
 what a later prompt costs. Do not trim a short line without checking that the obligation it drops
-is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z103` name them.
+is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103` and `Z117` name them.
 
 ## Which contract takes which path
 
@@ -109,9 +110,11 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   anti-inflation counterweight, the safety exception (the length, one-question and one-next-step
   limits lifted, a confirmation before an irreversible action never suppressed or settled as
   routine, and a style the user chose setting a warning's sentence form, never its length or
-  detail) and the field. The armed variant also places the anchor above the final step list when
-  the one-next-step rule is lifted. The none body is 1,985 characters; `Z105` holds the armed body,
-  measured with the longest anchor the module can produce, under 2,413. Its copy of the
+  detail), the archive signal with every condition that holds a session open, and the field. The
+  armed variant also places the anchor above the final step list when
+  the one-next-step rule is lifted. The none body is 2,556 characters; `Z105` holds the armed body,
+  measured with the longest anchor the module can produce, under 2,984. The archive signal adds
+  571 characters to every repeat total of the budget suite. The short body's copy of the
   safety-warning sentence adds 93 characters to every repeat total of the budget suite. The
   trust-only-the-markers clause lives in the armed variant only, exactly as in the full text, because
   the none swap replaces that span. The short body keeps the classify lead `zen-mode is ACTIVE`,
@@ -170,7 +173,7 @@ exists, and every record whose key directory is gone. It emits nothing.
   zen texts until the next prompt. That gap existed before; best-solution-first is now back at
   once through its `SessionStart` leg.
 - **Fade is unmeasured, and the short shapes have evals for part of their range.** The hooks
-  were written on the premise that a rule given once fades. Six `short-` scenarios in
+  were written on the premise that a rule given once fades. The `short-` scenarios in
   `evals/zen-mode-reaction/` embed the zen-mode short body with no full contract before it, which
   is the worst case of fade, in both anchor variants. `evals/route-short-line-reaction/` delivers
   the reminder's vanilla-mode ask short line, its two decided lines with

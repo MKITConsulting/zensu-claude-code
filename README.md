@@ -87,7 +87,9 @@ already rely on:
   this was measured and breaks it down per hook.
 - **zen-mode is on by default.** Replies put the result first, stay near eight
   lines and close with a short session block: what you started the session for,
-  what it has done so far and what this turn did, then one next step. Say "zen off"
+  what it has done so far and what this turn did, then one next step. Once the
+  work is finished and nothing is left open, that step says the session is done
+  and can be archived. Say "zen off"
   or run `/zensu:zen-mode --off` to leave it for the session; set
   `hooks.zenModeDefault: false` to make it opt-in again.
 - **Claude asks which delivery route to take.** After you approve a plan, Zensu

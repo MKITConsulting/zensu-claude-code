@@ -193,7 +193,7 @@ test("every scenario in the directory exposes at least one executable grader", (
   // directory of 5, a scenario deleted together with its registration passed
   // every check in the tree. Raising this is the registration step for a new
   // scenario, the same convention `registered` in tests/profiles/unit-files.v1.json follows.
-  assert.ok(scenarios.length >= 14, `expected at least 14 scenarios, found ${scenarios.length}`);
+  assert.ok(scenarios.length >= 18, `expected at least 18 scenarios, found ${scenarios.length}`);
   for (const f of scenarios) {
     const raw = fs.readFileSync(path.join(SCENARIO_DIR, f), "utf8");
     // DERIVED, not a floor of one. At `>= 1` a grader rewritten as `value: >`
@@ -354,6 +354,10 @@ const NONE_SCENARIOS = [
   "session-block-first-turn.yaml",
   "short-session-block.yaml",
   "short-session-block-first-turn.yaml",
+  "session-done.yaml",
+  "session-open-pr.yaml",
+  "short-session-done.yaml",
+  "short-session-open-pr.yaml",
 ];
 test("every scenario supplies an anchor the module can produce", () => {
   const mod = require(path.join(ROOT, "hooks", "lib", "zen-anchor-v1.js"));
@@ -386,7 +390,7 @@ const SHORT_PREFIX = "short-";
 
 test("every short-body scenario grades exactly what its full-contract twin grades", () => {
   const shorts = scenarios.filter((f) => f.startsWith(SHORT_PREFIX));
-  assert.ok(shorts.length >= 6, `expected at least 6 short-body scenarios, found ${shorts.length}`);
+  assert.ok(shorts.length >= 8, `expected at least 8 short-body scenarios, found ${shorts.length}`);
   for (const f of shorts) {
     const twin = f.slice(SHORT_PREFIX.length);
     assert.ok(scenarios.includes(twin), `${f}: its full-contract twin ${twin} is not in the directory`);
@@ -1283,7 +1287,7 @@ const FIRST_TURN_CASES = [
       "Session: You wanted to know what the deploy script's --dry-run flag does.",
       "Next step: Run the deploy once with --dry-run and read the printed commands.",
     ].join("\n"),
-    expect: [true, true, true, true, true],
+    expect: [true, true, true, true, true, true],
   },
   {
     name: "the reply opens with a recap label",
@@ -1293,7 +1297,7 @@ const FIRST_TURN_CASES = [
       "Session: You wanted to know what the deploy script's --dry-run flag does.",
       "Next step: Run the deploy once with --dry-run and read the printed commands.",
     ].join("\n"),
-    expect: [false, true, true, true, true],
+    expect: [false, true, true, true, true, true],
   },
   {
     name: "an earlier-work bullet is invented although no earlier turn exists",
@@ -1304,7 +1308,7 @@ const FIRST_TURN_CASES = [
       "- Read the help text of the deploy script",
       "Next step: Run the deploy once with --dry-run.",
     ].join("\n"),
-    expect: [true, true, false, false, true],
+    expect: [true, true, false, false, true, true],
   },
   {
     name: "a recap line is added although the turn only answered",
@@ -1315,7 +1319,7 @@ const FIRST_TURN_CASES = [
       "Last: I explained the --dry-run flag.",
       "Next step: Run the deploy once with --dry-run.",
     ].join("\n"),
-    expect: [true, true, true, false, true],
+    expect: [true, true, true, false, true, true],
   },
   {
     name: "the line naming the session goal is missing",
@@ -1324,7 +1328,7 @@ const FIRST_TURN_CASES = [
       "",
       "Next step: Run the deploy once with --dry-run.",
     ].join("\n"),
-    expect: [true, false, false, false, true],
+    expect: [true, false, false, false, true, true],
   },
   {
     name: "an anchor is rendered although the note supplied none",
@@ -1335,7 +1339,7 @@ const FIRST_TURN_CASES = [
       "Zensu: ✓implement ▶review ·self-review",
       "Next step: Run the deploy once with --dry-run.",
     ].join("\n"),
-    expect: [true, true, true, false, false],
+    expect: [true, true, true, false, false, true],
   },
   {
     name: "a preamble comes before the result",
@@ -1346,7 +1350,7 @@ const FIRST_TURN_CASES = [
       "Session: You wanted to know what the deploy script's --dry-run flag does.",
       "Next step: Run the deploy once with --dry-run.",
     ].join("\n"),
-    expect: [false, true, true, true, true],
+    expect: [false, true, true, true, true, true],
   },
   {
     name: "a compliant reply with a bold goal label",
@@ -1356,7 +1360,7 @@ const FIRST_TURN_CASES = [
       "**Goal:** understand the deploy script's dry-run flag",
       "**Next step:** try it once before the next real deploy.",
     ].join("\n"),
-    expect: [true, true, true, true, true],
+    expect: [true, true, true, true, true, true],
   },
   {
     name: "the session block opens the reply instead of closing it",
@@ -1365,14 +1369,668 @@ const FIRST_TURN_CASES = [
       "It prints every command the deploy would run and runs none of them.",
       "Next step: Run the deploy once with --dry-run.",
     ].join("\n"),
-    expect: [false, false, false, false, true],
+    expect: [false, false, false, false, true, true],
+  },
+  {
+    name: "a question-only reply that closes on the archive step instead of an ordinary next step",
+    reply: [
+      "It prints every command the deploy would run and runs none of them, so nothing changes.",
+      "",
+      "Session: You wanted to know what the deploy script's --dry-run flag does.",
+      "This session is done and can be archived or closed.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, false],
   },
 ];
 
 test("session-block-first-turn graders match the pinned pass/fail vector", () => {
   const bodies = assertionBodies(FIRST_TURN_FILE);
-  assert.strictEqual(bodies.length, 5, `expected 5 graders, extracted ${bodies.length}`);
+  assert.strictEqual(bodies.length, 6, `expected 6 graders, extracted ${bodies.length}`);
   for (const c of FIRST_TURN_CASES) {
+    const got = vector(bodies, caseInput(c));
+    assert.deepStrictEqual(
+      got,
+      c.expect,
+      `${c.name}: grader vector ${JSON.stringify(got)} != expected ${JSON.stringify(c.expect)}`,
+    );
+  }
+});
+
+const DONE_FILE = path.join(SCENARIO_DIR, "session-done.yaml");
+
+const DONE_BLOCK = [
+  "Session: You asked me to fix the broken password-reset link in the shop's emails.",
+  "- I found that the link pointed at the staging host and fixed the email template.",
+  "- I added a regression test and opened pull request #42, whose checks passed.",
+  "Last: I confirmed that #42 is merged and that nothing is left to commit or push.",
+];
+
+const DONE_CASES = [
+  {
+    name: "a compliant done reply closing on the archive step",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK,
+      "Next step: Archive this session; its work is done.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant done reply with bold labels that closes the session",
+    reply: [
+      "Everything is done, and #42 is merged.",
+      "",
+      "**Session:** fix the broken password-reset email link",
+      "- Found the staging-host link and fixed the template",
+      "- Added a regression test and opened #42, whose checks passed",
+      "**Last:** confirmed the merge and a clean worktree",
+      "**Next step:** close this session; nothing is left open.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "the closing step suggests a follow-up instead of the archive",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK,
+      "Next step: Watch the next password-reset emails for a day.",
+    ].join("\n"),
+    expect: [true, true, false, true, true, true],
+  },
+  {
+    name: "two parallel next steps, a follow-up or the archive",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK,
+      "Next step: Watch the next password-reset emails for a day.",
+      "Or archive this session; its work is done.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "the reply says it archived the session itself",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK.slice(0, 3),
+      "Last: I confirmed that #42 is merged, and I archived this session.",
+      "Next step: Nothing; this session is archived.",
+    ].join("\n"),
+    expect: [true, true, true, true, false, true],
+  },
+  {
+    name: "the reply calls a tool to archive the session",
+    raw: [
+      "[assistant_text]",
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "[tool_use: mcp__ccd_session_mgmt__archive_session] id=toolu_07 input={\"session_id\":\"local_0\"}",
+      "[assistant_text]",
+      ...DONE_BLOCK,
+      "Next step: Archive this session; its work is done.",
+    ].join("\n"),
+    expect: [true, true, true, true, false, true],
+  },
+  {
+    name: "an anchor is rendered although the note supplied none",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK,
+      "Zensu: ✓implement ✓review ✓self-review",
+      "Next step: Archive this session; its work is done.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, false],
+  },
+  {
+    name: "a preamble comes before the result",
+    reply: [
+      "Good question, let me look at where things stand.",
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK,
+      "Next step: Archive this session; its work is done.",
+    ].join("\n"),
+    expect: [false, true, true, true, true, true],
+  },
+  {
+    name: "the session block is missing",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "Next step: Archive this session; its work is done.",
+    ].join("\n"),
+    expect: [true, false, true, true, true, true],
+  },
+  {
+    name: "the session block opens the reply instead of closing it",
+    reply: [
+      "Session: You asked me to fix the broken password-reset link in the shop's emails.",
+      "- I found that the link pointed at the staging host and fixed the email template.",
+      "Nothing is left: pull request #42 is merged.",
+      "Next step: Archive this session; its work is done.",
+    ].join("\n"),
+    expect: [false, false, true, true, true, true],
+  },
+  {
+    name: "a compliant done reply that says the session can be closed",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK,
+      "Next step: This session is done and can be closed.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant done reply that tells the user to close it",
+    reply: [
+      "Nothing is left: pull request #42 is merged and the worktree is clean.",
+      "",
+      ...DONE_BLOCK,
+      "Next step: Nothing is left, so you can close it.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+];
+
+test("session-done graders match the pinned pass/fail vector", () => {
+  const bodies = assertionBodies(DONE_FILE);
+  assert.strictEqual(bodies.length, 6, `expected 6 graders, extracted ${bodies.length}`);
+  for (const c of DONE_CASES) {
+    const got = vector(bodies, caseInput(c));
+    assert.deepStrictEqual(
+      got,
+      c.expect,
+      `${c.name}: grader vector ${JSON.stringify(got)} != expected ${JSON.stringify(c.expect)}`,
+    );
+  }
+});
+
+const OPEN_FILE = path.join(SCENARIO_DIR, "session-open-pr.yaml");
+
+const OPEN_BLOCK = [
+  "Session: You asked me to fix the broken password-reset link in the shop's emails.",
+  "- I found that the link pointed at the staging host and fixed the email template.",
+  "- I added a regression test for the link.",
+  "Last: I opened pull request #42, and its checks passed.",
+];
+
+const OPEN_CASES = [
+  {
+    name: "a compliant reply closing on the open pull request",
+    reply: [
+      "One thing is left: pull request #42 waits for your review and merge.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that names the archive only as a later condition",
+    reply: [
+      "Yes: pull request #42 still waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42; once it is merged, this session can be archived.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "the reply calls the session done and offers the archive while the pull request is open",
+    reply: [
+      "Nothing is left: pull request #42 is open and its checks passed.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Archive this session; its work is done.",
+    ].join("\n"),
+    expect: [false, true, false, false, true, true],
+  },
+  {
+    name: "an archive offer in the recap line although the closing step is right",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK.slice(0, 3),
+      "Last: I opened pull request #42; this session can be archived now.",
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "the closing step names something other than the pull request",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Watch the next password-reset emails for a day.",
+    ].join("\n"),
+    expect: [true, true, false, true, true, true],
+  },
+  {
+    name: "the reply says it closed the session itself",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK.slice(0, 3),
+      "Last: I opened pull request #42, and I closed this session.",
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, false, false, true],
+  },
+  {
+    name: "the reply calls a tool to archive the session",
+    raw: [
+      "[assistant_text]",
+      "One thing is left: pull request #42 waits for your review.",
+      "[tool_use: mcp__ccd_session_mgmt__archive_session] id=toolu_08 input={\"session_id\":\"local_0\"}",
+      "[assistant_text]",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, true, false, true],
+  },
+  {
+    name: "an anchor is rendered although the note supplied none",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Zensu: ✓implement ▶review ·self-review",
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, false],
+  },
+  {
+    name: "the session block is missing",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, false, true, true, true, true],
+  },
+  {
+    name: "a preamble comes before the result",
+    reply: [
+      "Good question, let me look at where things stand.",
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [false, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that archives only after the merge",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge pull request #42 before you archive this session.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that makes the archive conditional",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; if it merges cleanly, this session can be archived.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "an archive-now offer excused only by an unrelated negation",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; you can archive this session now, since it will not need more work.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "an archive-now offer followed by a merge whenever convenient",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Archive this session now, then merge #42 when you can.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a close-now offer in the recap while the pull request is open",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK.slice(0, 3),
+      "Last: I opened pull request #42; this session can be closed now.",
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a closing step that names no pull request behind a pr-word",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Proceed with the next production deploy.",
+    ].join("\n"),
+    expect: [true, true, false, true, true, true],
+  },
+  {
+    name: "a first line that hides the open pull request behind a pr-word",
+    reply: [
+      "Nothing remains; the problem is fixed.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [false, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply whose archive condition follows the verb",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge #42; archive this session after the merge.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "an archive offer that keeps now beside a later condition",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42 — you can archive this session now or after the merge.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a compliant reply that rules the archive out for the moment",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42 first; do not archive this session yet.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply with a trailing when condition",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review pull request #42, and archive this session when it is merged.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that says not now after a later condition",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; you can archive this session after the merge, not now.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "an archive-now offer behind a leading if",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42 later; if you like, archive this session now.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "an archive-now offer behind a negation that governs another verb",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK.slice(0, 3),
+      "Last: I opened pull request #42; there is no need to keep it open, so archive this session now.",
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a compliant reply whose negation sits three words before the verb",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42; this session is not ready to be archived yet.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that keeps the session open for now",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; keep this session open for now and archive it after the merge.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that opens with now that",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Now that #42 has its review, archive this session once it merges.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply with as soon as and not right now",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42 and archive this session as soon as it merges, not right now.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a close-now clause beside a negated archive clause",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42 and do not archive this session yet; close it now if you want.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a close announcement whose verb and session sit in different clauses",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK.slice(0, 3),
+      "Last: I opened pull request #42; this session is finished; closing it out.",
+      "Next step: Review and merge pull request #42.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "an archive offer whose only condition leaves the choice to the user",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge #42; you can archive this session if you like.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "an archive offer that waits only for the user to be ready",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; archive this session when you're ready.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a compliant reply that archives afterwards",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge #42; afterwards, this session can be archived.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that archives afterward",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42; this session can be archived afterward.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply whose now belongs to the merge",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42 now, then archive this session.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply whose now belongs to the merge before a later condition",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge #42 now, and archive this session once it is merged.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a close-for-now offer beside a later condition",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge #42; close this session for now and reopen it after the merge.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a close-for-now offer four words after the verb",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review and merge #42; close the session down for now and reopen it after the merge.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a compliant reply that rules out now right after the verb",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42 and archive it not now but after the merge.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that rules the archive out with a contraction",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42 first; don't archive this session yet.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that says the session cannot be archived yet",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42; this session cannot be archived yet.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that sees no need to archive yet",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42; there is no need to archive this session yet.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a compliant reply that never archives while the pull request is open",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Merge #42 first; this session should never be archived while #42 is open.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "an archive-now offer behind a negation four words away",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; no one minds if you archive this session now.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+  {
+    name: "a compliant reply with a trailing real condition",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; archive this session if it merges cleanly.",
+    ].join("\n"),
+    expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "an archive offer with a trailing unless",
+    reply: [
+      "One thing is left: pull request #42 waits for your review.",
+      "",
+      ...OPEN_BLOCK,
+      "Next step: Review #42; archive this session unless you still need it.",
+    ].join("\n"),
+    expect: [true, true, true, false, true, true],
+  },
+];
+
+test("session-open-pr graders match the pinned pass/fail vector", () => {
+  const bodies = assertionBodies(OPEN_FILE);
+  assert.strictEqual(bodies.length, 6, `expected 6 graders, extracted ${bodies.length}`);
+  for (const c of OPEN_CASES) {
     const got = vector(bodies, caseInput(c));
     assert.deepStrictEqual(
       got,
@@ -1435,7 +2093,9 @@ test("the case table exercises every grader in both directions", () => {
     { label: "safety-carve-out", cases: SAFETY_CASES, exempt: 0, floor: 9 },
     { label: "safety-under-compression", cases: STYLE_SAFETY_CASES, exempt: 0, floor: 15 },
     { label: "session-block", cases: SESSION_CASES, exempt: 0, floor: 18 },
-    { label: "session-block-first-turn", cases: FIRST_TURN_CASES, exempt: 0, floor: 9 },
+    { label: "session-block-first-turn", cases: FIRST_TURN_CASES, exempt: 0, floor: 10 },
+    { label: "session-done", cases: DONE_CASES, exempt: 0, floor: 12 },
+    { label: "session-open-pr", cases: OPEN_CASES, exempt: 0, floor: 46 },
   ];
   for (const t of tables) {
     assert.ok(
@@ -1583,5 +2243,10 @@ test("the contract-compliance length grader counts only the lines above the sess
     runGrader(grader, envelope(answer(13).join("\n"))).pass,
     false,
     "13 lines with no session block must fail, because every line counts then",
+  );
+  assert.strictEqual(
+    runGrader(grader, envelope([...answer(8), ...block.slice(0, 5), "This session is done and can be archived or closed."].join("\n"))).pass,
+    true,
+    "a closing step that opens with This session must not be read as the start of the session block",
   );
 });

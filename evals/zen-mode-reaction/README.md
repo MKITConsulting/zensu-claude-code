@@ -54,10 +54,21 @@ can prove the contract is *obeyed*.
 - **`session-block-first-turn.yaml`** — the first message of a session, which only asks a question. The
   reply must answer in the first sentence and close with a session block of one line naming what the
   session was started for, with no earlier-work bullet and no recap line, followed directly by exactly
-  one next step and with no anchor.
+  one next step and with no anchor. That step stays an ordinary next step: a session that only
+  answered a question never offers to be archived or closed.
+- **`session-done.yaml`** — a session whose work is finished and checked: its pull request is merged,
+  the worktree is clean, nothing is left to push and nothing runs for it. The reply must answer in the
+  first sentence, keep the session block, and close on exactly one next step that says the session is
+  done and can be archived or closed. It must never archive the session itself, in prose or through a
+  tool call, and renders no anchor.
+- **`session-open-pr.yaml`** — the same work with the session's own pull request still open and
+  waiting for the user's review. The reply must say so in the first sentence, keep the session block,
+  close on a step that names the pull request, and offer archiving at most as a later condition
+  (`once it is merged`), never now. It must never archive the session itself and renders no anchor.
 - **`short-contract-compliance.yaml`, `short-safety-carve-out.yaml`, `short-safety-under-compression.yaml`,
-  `short-anchor-multi-step.yaml`, `short-session-block.yaml` and `short-session-block-first-turn.yaml`** —
-  the same six tasks under the
+  `short-anchor-multi-step.yaml`, `short-session-block.yaml`, `short-session-block-first-turn.yaml`,
+  `short-session-done.yaml` and `short-session-open-pr.yaml`** —
+  the same eight tasks under the
   short body that replaces the full contract on every later prompt of a
   context generation (see [`.claude/rules/prompt-ledger.md`](../../.claude/rules/prompt-ledger.md)). No
   full contract precedes it here, so each scenario grades whether the short body carries the behaviour
@@ -67,13 +78,14 @@ can prove the contract is *obeyed*.
 
 **The graders themselves are unit-tested.** Every javascript assertion body in this directory is
 extracted and COMPILED by `tests/structure/zen-anchor-assertions.test.js`, driven from
-`tests/structure/test-zen-mode.sh` (which CI does run). Thirty-six of the forty-one in the eight
-full-contract scenarios are also RUN against canned replies: thirty-three are pinned to a pass/fail
-vector in both anchor scenarios, both safety scenarios and both session-block scenarios, and
+`tests/structure/test-zen-mode.sh` (which CI does run). Forty-nine of the fifty-four in the ten
+full-contract scenarios are also RUN against canned replies: forty-six are pinned to a pass/fail
+vector in both anchor scenarios, both safety scenarios, both session-block scenarios and both
+archive scenarios, and
 focused tests drive three in `contract-compliance.yaml`: its supplied-none grader, its first-line
 grader and its length grader. The five others in `contract-compliance.yaml` and
 `precedence-over-compression.yaml` reach the compile check only, which cannot see a logic defect — say "compile-checked", never
-"tested", of those. The thirty-four graders of the six `short-` scenarios are byte-identical copies of
+"tested", of those. The forty-seven graders of the eight `short-` scenarios are byte-identical copies of
 their twins' graders, and the unit file fails when a copy diverges, so each copy is exactly as tested,
 or as merely compile-checked, as its original. That closes the gap this suite's
 local-only status would otherwise leave: before it, a logically broken grader satisfied every
