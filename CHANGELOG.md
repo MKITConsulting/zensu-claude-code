@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **zensu-cli coverage**: the text the plugin gives agents and users now matches the CLI it
+  drives. The `zensu-plm` catalog has a line for every command the CLI map knows, among them
+  `products get`, the ten `roadmap` verbs, `security score`, `knowledge context-search`,
+  `org users` and the five `ai-work` verbs, and C4 of `test-zensu-plm-arg-guidance.sh` fails
+  on a mapped command without one; the roadmap writes go through `/zensu:change`.
+  `/zensu:pulse` starts and ends a session with `--minimal-json`, treats `tracking_disabled`
+  as a clean no-op with no end, summary or retry, and records the start commit in the git
+  directory. It ends with one `--changed-file` per tracked path changed since the start commit
+  and per untracked, non-ignored file created or changed during the session, in place of
+  `--changed-files` and `HEAD~1`, skips nested repositories, stops above Zensu's limit of
+  1000 paths and asks before it sends paths that other authors' commits brought in;
+  `test-pulse-skill.sh` pins it. The SessionStart line reads
+  `zensu: pulse context — HEAD=… branch=…`, no longer claims a session and tells a repository
+  without a commit apart from no repository, and `/zensu:setup` and `docs/configuration.md`
+  describe `hooks.pulseSession` as that line only. README and `docs/configuration.md` document `ZENSU_TRUSTED_AUTH_HOSTS`, and
+  README Data & privacy names what the plan push and mock upload commands send.
+  `docs/documentation-guide.md` names CLI commands instead of MCP tools, and `/zensu:pilot`
+  finds a feature's journeys through `zensu journeys steps`.
+
 ## [0.40.1] - 2026-11-16
 
 ### Added

@@ -248,6 +248,15 @@ else
   check "P10b README badge shows version-$EXPECTED_VERSION-green" FAIL
 fi
 
+if printf '%s' "$NORMALIZED_SKILL" | grep -qF -- '`zensu journeys list --product <product-id> --json` for the journey ids (its items carry no steps)' \
+  && printf '%s' "$NORMALIZED_SKILL" | grep -qF -- 'read each journey'"'"'s steps with `zensu journeys steps --product <product-id> <journey-id> --json`, keep the journeys with a step whose `feature_id` is this feature'"'"'s UUID' \
+  && grep -qF -- '| `zensu journeys steps --product <pid> <jid> --json` | 1 |' "$SKILL_MD" \
+  && ! printf '%s' "$NORMALIZED_SKILL" | grep -qF -- 'keep the journeys whose steps reference this feature'; then
+  check "P11 the journey probe reads each journey's steps with zensu journeys steps and matches feature_id, and the CLI table lists that command" PASS
+else
+  check "P11 the journey probe reads each journey's steps with zensu journeys steps and matches feature_id, and the CLI table lists that command" FAIL
+fi
+
 echo "----"
 echo "test-pilot-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
