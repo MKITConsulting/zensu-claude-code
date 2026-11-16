@@ -582,12 +582,16 @@ from `, and anchor work that spans several turns` through `counter beside them.`
 sentence, by the same parameter expansion and with no process. A literal that loses either anchor
 emits the full clause with `none`, the safe direction. `Z30` in
 `tests/structure/test-zen-mode.sh` measures the armed variant (the static literal with the
-LONGEST producible token substituted: 5050 characters, ceiling 5100) and `Z30b` fires the hook
-with no chain armed and measures the none variant (3720, ceiling 3770). Both variants grew by 483
+LONGEST producible token substituted: 5676 characters, ceiling 5726) and `Z30b` fires the hook
+with no chain armed and measures the none variant (4346, ceiling 4396). Both variants grew by 483
 characters when rules (1) to (3) became the result-first rule and the closing session block, by
 78 more when the lead turned neutral and rules (4) and (5) gained the precedence and question-set
-clauses, and by 42 more when the carve-out's last sentence took the safety-warning wording that
-`Z110` pins across the skill, `docs/precedence.md`, this directive and its short body. Both measure through
+clauses, by 42 more when the carve-out's last sentence took the safety-warning wording that
+`Z110` pins across the skill, `docs/precedence.md`, this directive and its short body, and by 626
+more when rule (7) gained the archive signal, the closing step that says a finished session with
+nothing left open is done and can be archived or closed, which `Z117` pins across the four
+variants, the skill and the operator row. The short body grew by 571 for the same signal, because
+it must carry every condition alone. Both measure through
 `node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
 code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
 directions: growth past the ceiling fails, and so does a shrink further below it than the
@@ -603,6 +607,28 @@ variants, and both checks require the file name and the embedded body to agree: 
 short body from the hook source and capture its none variant by firing the hook a second time in the
 same session. `zen-anchor-assertions.test.js` requires each `short-` scenario to carry the graders and
 the anchor of its full-contract twin unchanged.
+
+**The archive signal of rule (7) has a second owner, and the condition list follows it.** The
+closing step may say a session is done and can be archived only when nothing an archive of its
+worktree would lose remains. What an archive removes is owned by `docs/worktree-keep.md`
+§"Nested repositories keep the marker": Claude Desktop's cleanup judges the worktree by a
+`git status` that lists no ignored files and deletes the directory whole, a gitignored nested
+repository with its unpushed commits included. The keep marker that delays it is held while a
+live anchor or a nested repository other than a submodule holds it, but only in a managed
+worktree, with `hooks.worktreeKeep` on and a build that carries the hold, so the directive
+cannot count on it and the list stays conservative. It names uncommitted or unpushed work, a
+needed ignored file and a nested repository's work, as the `release` verb of
+`/session-hub:session-trail` reports them before it calls an old session archivable. When that
+document changes what an archive removes, the list moves in every carrier: the full directive
+and the short body of `hooks/user-prompt-zen-mode.sh`, rule 5 of `skills/zen-mode/SKILL.md` and
+the hook row of `docs/configuration.md`, pinned by `Z117`, and the eighteen scenarios under
+`evals/zen-mode-reaction/scenarios/`, which embed the directive verbatim and are held to it by
+`Z19b` and `P8`. The signal stays model-judged at
+the end of the turn, because a `UserPromptSubmit` hook sees the state before the turn's work, and
+the model never archives or closes a session itself: the directive says the EXCEPTION never
+lifts that ban, and the skill states it in its Scope section, outside the rules rule 9 suspends.
+A session that only answered questions keeps an ordinary next step, and in doubt a session
+stays open, because a wrong done costs the user work while a missed one costs a line.
 
 **Known gap, accepted:** the per-turn totals in `docs/architecture.md` are hand-derived. The
 measurement that holds them is `tests/structure/test-user-prompt-budget.sh`
