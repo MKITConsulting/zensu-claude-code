@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-11-16
+
+### Added
+
+- **zen-mode**: Say when a finished session can be archived (#624)
+
 ## [0.40.0] - 2026-11-16
 
 ### Added
