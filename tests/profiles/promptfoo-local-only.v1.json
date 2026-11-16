@@ -95,6 +95,7 @@
     "test-prompt-ledger.sh",
     "test-promptfoo-config-refs.sh",
     "test-promptfoo-local-only.sh",
+    "test-pulse-skill.sh",
     "test-readme-hook-count-sync.sh",
     "test-release-session-control-gate.sh",
     "test-requirements-table-gate.sh",

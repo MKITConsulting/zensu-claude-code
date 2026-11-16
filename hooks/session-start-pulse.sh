@@ -19,7 +19,14 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
 zensu_hook_enabled pulseSession || exit 0
 
-HEAD=$(git rev-parse HEAD 2>/dev/null) || { echo "zensu: not a git repository, pulse session skipped"; exit 0; }
+HEAD=$(git rev-parse HEAD 2>/dev/null) || {
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "zensu: no commit yet, pulse context skipped"
+  else
+    echo "zensu: not a git repository, pulse context skipped"
+  fi
+  exit 0
+}
 BRANCH=$(git branch --show-current 2>/dev/null)
 [ -z "$BRANCH" ] && BRANCH="detached"
-echo "zensu: pulse session ready — HEAD=$HEAD branch=$BRANCH"
+echo "zensu: pulse context — HEAD=$HEAD branch=$BRANCH"

@@ -356,7 +356,7 @@ Not every hook can be turned off:
 
 | | Hooks | How |
 |-|-------|-----|
-| **Switched off by a config key** | The banner and primer, the pulse banner, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, automatic feature context, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
+| **Switched off by a config key** | The banner and primer, the pulse context line, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, automatic feature context, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
 | **Off unless you opt in** | The source-write gate's checks of Bash writes | `hooks.bashWriteGate: true` |
 | **Bypassed only through the environment** | The TDD phase gate | `ZENSU_TDD_GATE=off` in the environment Claude Code starts with |
 | **Always on while the plugin is enabled** | Session Control and the capability gate that confines subagents (`hooks.subagentShell: false` only withdraws their `Bash`), the Session Control check inside the source-write gate, evidence discipline, the plugin-data guard, the browser consent gate and its recorder, the artifact path redactor, the prompt-ledger reset, Autopilot resume context, the review-evidence hooks, the work-order hooks (inert outside a work-order session), the background-review hand-back and both automatic work-capture hooks | Disable the plugin ([Turn Zensu off or remove it](#turn-zensu-off-or-remove-it)) |
@@ -449,7 +449,7 @@ through it:
 | `/zensu:implement` | **A knowledge-search query** made of the feature title and key terms; linked test and source file paths; **the documentation it writes, as whole Markdown pages** (step 6); a free-text revision summary; status updates |
 | `/zensu:docs` | **The documentation it writes, as whole Markdown pages** in its default wiki mode; with `--repo-file`, the path of the file it writes into your repository instead |
 | `/zensu:security-review` | Classification attributes, the security tests it links, **a free-text findings summary** and approval conditions |
-| `/zensu:pulse` | HEAD SHA, branch, **the absolute path of your project root**, an optional product id and, at the end, the changed file paths |
+| `/zensu:pulse` | HEAD SHA, branch, **the absolute path of your project root**, an optional product id and, at the end, the paths of the tracked files that differ from the start commit, those that other authors' commits brought in only after you confirm them, and **of the untracked, non-ignored files created or changed during the session** |
 | `/zensu:pilot` | Feature status changes and release-gate checks |
 | `/zensu:work` | Stage events, heartbeats, questions and follow-ups for its work order |
 | Automatic work capture, any implementation task | The goal's title (at most 160 characters), its key and a criteria version or SHA-256 digest; the commit SHA of each new clean commit for that goal. Never transcripts, prompts, diffs, file lists, credentials or token usage |
@@ -457,7 +457,11 @@ through it:
 `/zensu:cover` and `/zensu:wargame` only read a feature record, and only when
 you name one; `/zensu:setup` and `/zensu:doctor` run `zensu auth status` and
 `zensu --version`. No skill uploads source files, but documentation and
-free-text summaries can quote code, signatures and endpoints. Pulse never
+free-text summaries can quote code, signatures and endpoints. Commands you run
+yourself send what you hand them: `zensu plan push` sends the work plan it
+parses from your Markdown file, with the file's relative path and a hash of its
+content, and `zensu mocks create`, which `/zensu:change` also runs, uploads the
+mock file. Pulse never
 records error messages or any other free text. Pulse sessions are retained for
 90 days by default.
 
@@ -468,6 +472,19 @@ Point the CLI at your own deployment with the `--api-url` flag, the
 
 ```bash
 export ZENSU_API_URL=https://api.example.internal
+```
+
+`zensu auth login` and the token refresh read the OAuth endpoints from your
+API's `/.well-known/oauth-authorization-server` document. They use the
+advertised endpoints only when both sit on the API's own origin or on a host
+named in `ZENSU_TRUSTED_AUTH_HOSTS`, a comma-separated list of host names, and
+never a plain `http://` endpoint under an `https://` API, not even on a listed
+host. Otherwise, and whenever discovery fails, they use
+`<api-url>/oauth/authorize` and `<api-url>/oauth/token`. Name your identity
+provider's host when it runs apart from the API:
+
+```bash
+export ZENSU_TRUSTED_AUTH_HOSTS=auth.example.internal
 ```
 
 The plugin ships no MCP server, so there is no Zensu API or hosted-MCP endpoint
