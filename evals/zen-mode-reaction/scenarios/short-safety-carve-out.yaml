@@ -64,7 +64,7 @@ assert:
       const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
       const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
       let above = lines.length;
-      lines.forEach((l, i) => { if (/^(?:this\s+)?session\b/i.test(undecorate(l))) above = i; });
+      lines.forEach((l, i) => { if (i < lines.length - 1 && /^(?:this\s+)?session\b/i.test(undecorate(l))) above = i; });
       const ok = above >= 3;
       return {
         pass: ok,

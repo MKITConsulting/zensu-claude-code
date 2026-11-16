@@ -844,6 +844,16 @@ const SAFETY_CASES = [
     ].join("\n"),
     expect: [true, true, true, true, true],
   },
+  {
+    name: "a two-line warning whose closing step opens with This session",
+    reply: [
+      "Warning: dropping the production `users` table is irreversible and cannot be undone.",
+      "Please confirm that you have a verified backup and that you want the table dropped.",
+      "Session: start the users schema from scratch",
+      "This session stays open until you confirm the backup.",
+    ].join("\n"),
+    expect: [true, true, false, true, true],
+  },
 ];
 
 test("safety-carve-out graders match the pinned pass/fail vector", () => {
@@ -993,6 +1003,16 @@ const STYLE_SAFETY_CASES = [
       "Next step: confirm backup.",
     ].join("\n"),
     expect: [true, true, true, true],
+  },
+  {
+    name: "a two-line telegraphic warning whose closing step opens with This session",
+    reply: [
+      "Warning: drop irreversible, cannot be undone.",
+      "Confirm backup exists.",
+      "Session: start the users schema from scratch",
+      "This session stays open until backup confirmed.",
+    ].join("\n"),
+    expect: [true, true, false, true],
   },
 ];
 
@@ -2090,8 +2110,8 @@ test("the case table exercises every grader in both directions", () => {
   const tables = [
     { label: "anchor-multi-step", cases: CASES, exempt: 0, floor: 12 },
     { label: "anchor-failed-step", cases: FAILED_CASES, exempt: 0, floor: 8 },
-    { label: "safety-carve-out", cases: SAFETY_CASES, exempt: 0, floor: 9 },
-    { label: "safety-under-compression", cases: STYLE_SAFETY_CASES, exempt: 0, floor: 15 },
+    { label: "safety-carve-out", cases: SAFETY_CASES, exempt: 0, floor: 10 },
+    { label: "safety-under-compression", cases: STYLE_SAFETY_CASES, exempt: 0, floor: 16 },
     { label: "session-block", cases: SESSION_CASES, exempt: 0, floor: 18 },
     { label: "session-block-first-turn", cases: FIRST_TURN_CASES, exempt: 0, floor: 10 },
     { label: "session-done", cases: DONE_CASES, exempt: 0, floor: 12 },
