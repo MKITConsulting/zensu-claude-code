@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **/zensu:pulse session end**: the session record that 0.40.2 introduced now lives in the
+  repository's common git directory and names the worktree the session started in, so a
+  session can end in another worktree of the same repository once the user confirms it, and
+  a lost session id is listed with its worktree, start commit and start time; a record that
+  0.40.2 kept in a linked worktree's own git directory is still found. The end checks the
+  worktree and other authors' commits before it lists or counts any path, and a second call
+  ends a session without any path when the user declines to send the paths. Untracked files
+  count by their change time, tested with one `find` per batch of paths rather than one per
+  file, so a file unpacked, copied or moved in during the session is sent even with an older
+  modification time. The README privacy row says which changes pass without the
+  confirmation, the `zensu-plm` agent names the end without paths, and `test-pulse-skill.sh`
+  pins each block whole. C4 of `test-zensu-plm-arg-guidance.sh` counts a catalog line only by
+  the command spans before its description.
+
 ## [0.40.2] - 2026-11-17
 
 ### Added
