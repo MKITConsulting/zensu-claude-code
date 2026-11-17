@@ -28,14 +28,15 @@ driver), and Phase 1 validates exactly these rows.
 ## Manual Acceptance
 (Optional. One row per active `AC-###` criterion this run's environment cannot observe, which the
 user accepts as partial when approving this spec: it needs credentials, an account, a
-non-loopback host or a signed build, or its driver cannot run here. VALIDATE accepts a `partial`
+non-loopback host or a signed build, or its driver cannot run here, or a driver fence rules the
+state out (the `browser` driver blocks service workers). VALIDATE accepts a `partial`
 criterion only when this table of the approved spec lists it, because the run asks no question.
 The Consent cell names where and when the consent was given, never a person, an account, an
 email address or an internal hostname. Omit the section when every criterion can be observed.)
 
 | Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
 |-----------|------------------------------------|----------------------------------------|---------|
-| {AC-###} | {the manual check} | {credentials / account / non-loopback host / signed build / driver cannot run here} | {consent source and date, e.g. spec approval, 2026-11-15} |
+| {AC-###} | {the manual check} | {credentials / account / non-loopback host / signed build / driver cannot run here / driver fence} | {consent source and date, e.g. spec approval, 2026-11-15} |
 
 ## Resolved recipe
 | Seam | Command / driver |

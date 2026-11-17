@@ -244,6 +244,31 @@ the gate off. The gate reads the table's ids, never a row's reason or the answer
 id without a row refuses with a remedy that asks for the row, so an answer counts once its row is
 written.
 
+**A driver fence is a cause of its own, and it changes the question.** A driver fence is a state
+the driver can never show, whoever drives it; today the only one is a service worker under the
+`browser` driver, whose run config blocks them (`.claude/rules/browser-consent-gate.md`). Planning
+names it as an observability gap and offers no access option for it, and the ONE question leaves
+out "Provide access now" for a criterion it rules out, whatever else that criterion needs,
+because no login, account, service or driver lifts it. A refusal of the consent gate is NOT a
+driver fence, because the driver could show that state: a denied command, or a navigation whose
+URL carries a query or a fragment. The owner file names no such case and no step for the user
+around one, on purpose: `skills/verify-feature/rules/browser-verification.md` says a denied call
+is never re-issued under another spelling, another session name or through another program, a
+shape denial being its one exception, which changes how a call is spelled and never what the
+gate refuses; the gate denies page code to the model because it can read authenticated data; and
+a criterion that needs a refused navigation has no cause category of its own. `A0k` fails when
+the owner file names page code or a query. The cause list is spelled at
+these sites, which move together: the owner file, Phase 1.5 of
+`skills/build/references/planning.md`, `skills/autopilot/rules/validate.md`, both plan templates,
+`docs/configuration.md`, `docs/gates.md` and `docs/verify-feature.md`; `A0h` and `A0k` to `A0m`
+in `tests/structure/test-acceptance-gate.sh` pin them. `P10o` and `P10p` in
+`tests/structure/test-verify-feature-skill.sh` pin the two rule files a browser run reads,
+section 3 of `skills/verify-feature/rules/drivers.md` and section 1 of
+`skills/verify-feature/rules/browser-verification.md`, and the operator doc. `P10o` also requires
+`scripts/verify-browser-config.js` to write `serviceWorkers: 'block'`, so lifting the block fails
+that check until this text is rewritten; lifting it removes that one instance and leaves the
+category.
+
 **The hand-off.** Without a record the Stop enforcer cannot tell "waiting on the user" from
 "stalled", so a refused standalone terminus writes one. `isHandoff` answers true for an `incomplete` or
 `no-criteria` verdict whose every segment is a user remedy (`USER_REMEDIES`: `accept`, `add`,
@@ -326,12 +351,14 @@ in `zensu-tdd-phase.sh`; the `acceptance-handoff` entries of both protected-root
 `ACCEPTANCE_REVERIFY` and the summary rules of `COMBINED_SUMMARY_DIRECTIVE` in
 `hooks/post-review-tdd-delegate.sh`;
 `skills/self-review/SKILL.md` and `references/acceptance.md`; step 6d of `audit.md` and Phase 1.5
-of `planning.md`; chain mode points 5 and 6 of `skills/verify-feature/SKILL.md` and
-`rules/acceptance-consent.md`; §3 of `skills/autopilot/rules/validate.md`;
-`templates/zensu-plan.md`; `docs/gates.md`, `docs/configuration.md`, `docs/build-workflow.md` and
-`docs/verify-feature.md`. Pins: the consent, hand-off, segment and plan-criteria cases of
-`acceptance-verify-v1.test.js`; `A0e`–`A0j` and `C1`–`C21` with `C7b` in
-`test-acceptance-gate.sh`; `AC1`–`AC8` in `test-requirements-table-gate.sh`; `W0`–`W7` in
+of `planning.md`; chain mode points 5 and 6 of `skills/verify-feature/SKILL.md`,
+`rules/acceptance-consent.md`, the driver-fence bullet in section 3 of `rules/drivers.md` and the
+last paragraph of section 1 of `rules/browser-verification.md`; §3 of
+`skills/autopilot/rules/validate.md`; `templates/zensu-plan.md`; `docs/gates.md`,
+`docs/configuration.md`, `docs/build-workflow.md` and `docs/verify-feature.md`. Pins: the consent,
+hand-off, segment and plan-criteria cases of `acceptance-verify-v1.test.js`; `A0e`–`A0m` and
+`C1`–`C21` with `C7b` in `test-acceptance-gate.sh`; `P10o` and `P10p` in
+`test-verify-feature-skill.sh`; `AC1`–`AC8` in `test-requirements-table-gate.sh`; `W0`–`W7` in
 `test-escape-wording.sh`, whose quoted-name exemption admits only a whole code token, which judges
 a heredoc body and a template literal's continuation line as prose rather than skipping a line
 that starts with a comment marker there (`W3`, `W4`), and whose `W7` holds every remedy prefix the

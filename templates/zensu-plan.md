@@ -30,7 +30,7 @@ Authoring rules — this file is written to be COMMITTED. Consuming repos keep
 
 | Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
 |-----------|------------------------------------|----------------------------------------|---------|
-| {AC-###} | {the manual check} | {credentials / account / non-loopback host / signed build / driver cannot run here} | {consent source and date, e.g. planning answer, 2026-11-10} |
+| {AC-###} | {the manual check} | {credentials / account / non-loopback host / signed build / driver cannot run here / driver fence} | {consent source and date, e.g. planning answer, 2026-11-10} |
 
 ## Cross-Layer Value Flow Pairings
 (Per Principle 2 — Cross-Layer Value Flow Pairing. Omit table body if no pairings; keep the heading so Phase 6 audit can detect absence vs zero rows.)
