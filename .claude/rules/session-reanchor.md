@@ -32,7 +32,9 @@ target top-level registered and not prunable, not already the anchor, not contai
 root, containing no other registered worktree, target document for this session absent or intact,
 no open Autopilot run this session owns under the recorded root, live claims. Keep the order: a
 cheap refusal must not hide behind a probe that takes a project-wide lock or touches other
-sessions' files, and the Autopilot rung takes the recorded root's Autopilot lock.
+sessions' files, and the Autopilot rung takes the recorded root's Autopilot lock. The record read
+is one `readContextLadder` call in `readRecord` naming all four readers; the walker paragraph of
+`.claude/rules/session-adoption.md` holds the rule for its rung list.
 
 **The Autopilot rung asks the Autopilot library, not the workflow document.** A run in `PLANNING`
 or `AWAIT_TDD` has no chain linked yet, so the document's `autopilotRunId` misses it, and after a
