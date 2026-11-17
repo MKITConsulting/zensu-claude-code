@@ -138,7 +138,7 @@ modes, the deny scopes, the Stop release, the doctor's pruned row, the re-anchor
 ladder and adoption need no change of their own.
 
 **A `record-unreadable` refusal names its cause.** `recordReaderRefusals` runs the
-three readers in ladder order, never throws, and returns one `{ reader, refusal }`
+four readers in ladder order, never throws, and returns one `{ reader, refusal }`
 per reader with the core's `session-control-v1: ` prefix stripped
 (`FAIL_PREFIX`). The adoption report renders one row per reader under the refusal
 (`readerRefusalRows`, read behind a `typeof` guard), the doctor's unbound row points
@@ -150,8 +150,8 @@ strictly more, one read-only export is added, and no record field, strict key se
 hook, matcher, config key or attestation moves. **The cost, stated:** with the minting tree gone, `runtime_digest`
 and `plugin_version` are shape-checked only and taken on the record's word. What
 still binds the record: session hash, schema, principal profiles, `plugin_data`
-equality, the recorded project root existing, the sibling cache directory, and the
-workflow document's schema. That is why such a record is **adopted once — automatically at
+equality, the recorded project root existing (or, in the combined state below, proven
+absent), the sibling cache directory, and the workflow document's schema when it is reachable. That is why such a record is **adopted once — automatically at
 the first hook contact, or by hand with `--confirm` — and never served** — serving stays
 strict at every strict read site
 (`resolveHookSession`, `currentClaudeSessionContext`, `zensu_resolve_project_dir`,
@@ -201,10 +201,20 @@ helper and the ladder; `P1ad3`/`P1ad4` in `tests/structure/test-doctor.sh` pin t
 row. In this state the bind fails inside the CORE, so the authoritative stderr
 diagnostic is the raw `session-control-v1: context plugin root does not exist`
 line rather than a binder-prefixed one, and Part D's gate helper tolerates exactly
-that line where AC-C04's tolerates only the prefix. **Composition with PR #272:**
-condition 1 becomes `strict → orphaned-project-root → pruned-plugin-root` when
-that PR lands; the COMBINED state — project root gone AND installation pruned —
-still refuses `record-unreadable`, and is the recorded gap. **Version: `patch`** —
+that line where AC-C04's tolerates only the prefix. **The COMBINED state — project root
+gone AND installation pruned — is adoptable.** It was the recorded gap, and it wedged a live
+session on 2026-11-17: each relaxed reader pinned the other's waiver off, so the record
+answered `record-unreadable` and every gate denied. Condition 1 is
+now `strict → orphaned-project-root → pruned-plugin-root → orphaned-and-pruned`. The last
+reader, `readOrphanedPrunedContext`, opts into both waivers and proves each absence through
+its own test, so it waives nothing a single-root reader keeps; a retired remnant counts as
+pruned there too. The verdict carries both flags, `adoptContext` re-mints around the absent
+project root with provenance `no-workflow-document`, and the session lands in the ordinary
+orphaned-project-root state. `restoreRootVerdict` and the re-anchor answer
+`not-served-by-executing-runtime` for the record until the adoption, so the order is adopt
+first, restore second, and the pruned deny scope, the gate's `PRUNED_ORPHAN_CLAUSE`, the Stop
+hook's pruned release and the doctor's pruned row each say so, because the pruned predicate
+cannot tell whether the project root still exists. **Version: `patch`** —
 no record or workflow field, no strict key set, no hook added, removed or renamed,
 no matcher change, no config key, no attestation change; every change relaxes a
 deny or names a state, and the new argv modes are a call convention inside one

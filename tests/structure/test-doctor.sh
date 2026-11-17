@@ -2516,6 +2516,13 @@ case "$OUT" in
     esac ;;
   *) check "P1ad4 pruned row without a pair (got: $OUT)" FAIL ;;
 esac
+case "$OUT" in
+  *'--restore-root --confirm'*|*'--confirm --restore-root'*)
+    check "P1ad4b the pruned row hands over the restore's complete invocation (got: $OUT)" FAIL ;;
+  *'If the recorded project root is gone as well, an adoption re-mints the record but leaves Edit, Write and MultiEdit denied until that exact directory is re-created; /zensu:adopt-session --restore-root reports on that AFTER the adoption'*)
+    check "P1ad4b the pruned row also covers a recorded project root that is gone and orders the restore after the adoption" PASS ;;
+  *) check "P1ad4b the pruned row names the combined state (got: $OUT)" FAIL ;;
+esac
 # All THREE adoptable rows say WHY the user is looking at them: adoption runs on its
 # own on the first hook contact, so a row still rendered means that adoption was
 # refused, opted out or did not complete, and the remedy is the report first, the

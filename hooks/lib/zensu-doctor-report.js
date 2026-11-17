@@ -5052,7 +5052,8 @@ function bindingLine() {
     case 'pruned-plugin-root':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
         + versions()
-        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY);
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY
+        + '. If the recorded project root is gone as well, an adoption re-mints the record but leaves Edit, Write and MultiEdit denied until that exact directory is re-created; /zensu:adopt-session --restore-root reports on that AFTER the adoption, because that repair requires the running installation to serve the record');
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage

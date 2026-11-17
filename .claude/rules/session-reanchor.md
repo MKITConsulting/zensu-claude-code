@@ -24,7 +24,8 @@ caller-named.
 trusted and never an argument.** `hooks/lib/zensu-session-reanchor.sh` captures `pwd -P` before
 its own `cd`, and the only argv token it accepts is `--confirm`. The verdict ladder in
 `hooks/lib/session-reanchor-v1.js`, in this order: strict record read (else orphan →
-`recorded-root-missing`, pruned → `not-served-by-executing-runtime`, else `record-unreadable`),
+`recorded-root-missing`, pruned or orphaned-and-pruned → `not-served-by-executing-runtime`,
+else `record-unreadable`),
 `plugin_data` equality, `servesRecordedRuntime`, own workflow document PRESENT and holding no open
 work, recorded root inside a git worktree, target inside a git worktree, SAME git common directory,
 target top-level registered and not prunable, not already the anchor, not containing the recorded

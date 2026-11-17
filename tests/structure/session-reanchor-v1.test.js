@@ -562,6 +562,18 @@ test('a record minted by a pruned installation refuses as not served', (t) => {
   assert.equal(verdict.reason, R.NOT_SERVED);
 });
 
+test('a record whose installation was pruned and whose recorded root is gone refuses as not served', (t) => {
+  const f = fixture(t);
+  const gone = f.worktree('pruned-gone');
+  const pruned = writeRuntime(path.join(RUNTIME.base, 'zensu', `9.8.5-${path.basename(f.base)}`), '9.8.5');
+  mint(f, 'pruned-and-gone', gone, pruned);
+  fs.rmSync(pruned, { recursive: true, force: true });
+  fs.rmSync(gone, { recursive: true, force: true });
+  const verdict = reanchor.reanchorVerdict(f.request({ sessionId: 'pruned-and-gone' }));
+  assert.equal(verdict.reason, R.NOT_SERVED);
+  assert.match(reanchor.REANCHOR_REMEDY[verdict.reason], /\/zensu:adopt-session first/);
+});
+
 test('an unreadable record refuses as record-unreadable', (t) => {
   const f = fixture(t);
   fs.writeFileSync(f.recordFile, '{}');

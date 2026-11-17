@@ -44,7 +44,10 @@ what bounds it — never as "every location is derived from the record".
 **`restoreRootVerdict` is disjoint from `adoptableRecord` by CONSTRUCTION for two of the three
 neighbouring states and by a CONJUNCT for the third**, and conflating those is the mistake this
 paragraph exists to prevent. The strict read must FAIL and the orphan read must SUCCEED, which
-excludes a healthy session and a pruned installation. A LINEAGE BREAK passes both reads —
+excludes a healthy session and a pruned installation. A pruned installation whose project root
+is gone as well fails the orphan read too; the verdict then tries `readOrphanedPrunedContext`
+and answers `not-served-by-executing-runtime` rather than `record-unreadable`, because adoption
+is the step that comes first there. A LINEAGE BREAK passes both reads —
 `allowMissingProjectRoot` waives only the recorded root's existence — and is excluded one clause
 later by `servesRecordedRuntime`. That is also why the remedy in the combined state is **adopt
 first, restore second**, and why every surface offering it must say so.

@@ -396,7 +396,12 @@ function readRecord(request) {
         core.readPrunedPluginRootContext(readerOptions);
         return { reason: REANCHOR_REFUSALS.NOT_SERVED };
       } catch {
-        return { reason: REANCHOR_REFUSALS.RECORD_UNREADABLE };
+        try {
+          core.readOrphanedPrunedContext(readerOptions);
+          return { reason: REANCHOR_REFUSALS.NOT_SERVED };
+        } catch {
+          return { reason: REANCHOR_REFUSALS.RECORD_UNREADABLE };
+        }
       }
     }
   }

@@ -670,11 +670,11 @@ function buildContext(options, buildOptions) {
 // and every other bound still holds; readPrunedPluginRootContext enumerates them.
 //
 // Both default to off, so every caller that does not opt in keeps the strict
-// behaviour. Each has exactly one opt-in caller —
-// readOrphanedProjectRootContext and readPrunedPluginRootContext — which
-// separately PROVES the path is absent (the pruned reader also admits a remnant
-// the host retired) and re-applies the shape half through
-// requireAbsentDirectoryPath. Waiving the check does not mean the field is
+// behaviour. Each has one single-root opt-in caller —
+// readOrphanedProjectRootContext and readPrunedPluginRootContext — and
+// readOrphanedPrunedContext opts into both; each separately PROVES the path is
+// absent (the pruned proof also admits a remnant the host retired) and
+// re-applies the shape half through requireAbsentDirectoryPath. Waiving the check does not mean the field is
 // unvalidated: the requireText loop below still rejects a missing or blank value.
 //
 // buildContext takes a waiver named `allowMissingProjectRoot` too, for the
@@ -1839,9 +1839,9 @@ function readContextInternal(options) {
   // With the minting installation gone there is nothing to re-measure: the
   // digest and the declared version stay shape-checked by validateContext and
   // are otherwise taken on the record's word. That is the stated cost of the
-  // pruned-root waiver, and readPrunedPluginRootContext — its only caller —
-  // proves the root is absent or a retired remnant before it hands the record
-  // to anyone.
+  // pruned-root waiver, and readPrunedPluginRootContext and
+  // readOrphanedPrunedContext — its only callers — prove the root is absent or a
+  // retired remnant before they hand the record to anyone.
   if (!options.allowMissingPluginRoot) {
     const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
     if (currentDigest !== context.runtime_digest) {
@@ -1890,6 +1890,10 @@ function readOrphanedProjectRootContext(options) {
     allowMissingProjectRoot: true,
     allowMissingPluginRoot: false,
   });
+  return requireOrphanedProjectRoot(context);
+}
+
+function requireOrphanedProjectRoot(context) {
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
   // but it would also waive that function's shape validation, and this value is
   // not inert: callers print it to stderr and into the /zensu:doctor report,
@@ -1898,8 +1902,8 @@ function readOrphanedProjectRootContext(options) {
   // ANSI escapes would classify as the relaxable state and get its bytes echoed
   // into a terminal and into the model's context — a record the strict
   // readContext fails closed on. Re-apply it, so EXISTENCE stays the only
-  // waived check ON THIS READER — the pruned-plugin-root reader below waives
-  // three, and the flag block above says which.
+  // check waived on the project root — the pruned-plugin-root reader below
+  // waives three on the plugin root, and the flag block above says which.
   //
   // NAMING THE TIGHTENING, because the extraction carried it in silently and the
   // reworded sentence above absorbs it without saying so. The inline code this
@@ -2008,6 +2012,10 @@ function readPrunedPluginRootContext(options) {
     allowMissingPluginRoot: true,
     allowMissingProjectRoot: false,
   });
+  return requirePrunedPluginRoot(context);
+}
+
+function requirePrunedPluginRoot(context) {
   requireAbsentDirectoryPath(context.plugin_root, 'context plugin root');
   canonicalDirectory(path.dirname(context.plugin_root), 'context plugin root parent');
   const state = retiredPluginRootState(context.plugin_root, context.host);
@@ -2017,10 +2025,20 @@ function readPrunedPluginRootContext(options) {
   fail(RETIRED_PLUGIN_ROOT_REFUSALS[state]);
 }
 
+function readOrphanedPrunedContext(options) {
+  const context = readContextInternal({
+    ...options,
+    allowMissingProjectRoot: true,
+    allowMissingPluginRoot: true,
+  });
+  return requirePrunedPluginRoot(requireOrphanedProjectRoot(context));
+}
+
 const RECORD_READERS = Object.freeze({
   STRICT: 'strict',
   ORPHANED_PROJECT_ROOT: 'orphaned-project-root',
   PRUNED_PLUGIN_ROOT: 'pruned-plugin-root',
+  ORPHANED_PRUNED: 'orphaned-and-pruned',
 });
 
 function readerRefusalText(error) {
@@ -2039,6 +2057,7 @@ function recordReaderRefusals(options) {
     [RECORD_READERS.STRICT, readContext],
     [RECORD_READERS.ORPHANED_PROJECT_ROOT, readOrphanedProjectRootContext],
     [RECORD_READERS.PRUNED_PLUGIN_ROOT, readPrunedPluginRootContext],
+    [RECORD_READERS.ORPHANED_PRUNED, readOrphanedPrunedContext],
   ].map(([reader, read]) => {
     try {
       read(readerOptions);
@@ -2175,11 +2194,12 @@ function adoptableRecord(options) {
     // reach adoption; it also enforces the context schema and that both recorded
     // roots exist.
     //
-    // TWO disagreements are admitted past that strict read, and only through it
-    // failing first. They arrived from different branches and are DISJOINT by
-    // construction, each reader pinning the other's waiver off, so a record with
-    // BOTH roots gone is refused by both and lands on `record-unreadable`. That
-    // disjointness is what makes the order below non-load-bearing.
+    // TWO disagreements are admitted past that strict read, alone or together,
+    // and only through it failing first. They arrived from different branches
+    // and their readers are DISJOINT by construction, each single-root reader
+    // pinning the other's waiver off, so a record with BOTH roots gone is refused
+    // by both and admitted only by readOrphanedPrunedContext, which proves both
+    // absences. That disjointness is what makes the order below non-load-bearing.
     //
     // A recorded project root that is GONE. It has to be admitted: `git worktree
     // remove` on a live session is an ordinary, documented cleanup, and combined
@@ -2209,7 +2229,7 @@ function adoptableRecord(options) {
     // or retirement of the waived root. The barrier was never the digest — it is the private
     // records directory. That is the stated cost, and the reason such a record is
     // adopted once rather than served. Every OTHER disagreement — plugin version,
-    // session hash, schema, principal profiles — throws in all three readers and
+    // session hash, schema, principal profiles — throws in all four readers and
     // still lands on `record-unreadable` below.
     const readerOptions = {
       recordsDir: options.recordsDir,
@@ -2223,8 +2243,14 @@ function adoptableRecord(options) {
         context = readOrphanedProjectRootContext(readerOptions);
         orphanedProjectRoot = true;
       } catch {
-        context = readPrunedPluginRootContext(readerOptions);
-        prunedPluginRoot = true;
+        try {
+          context = readPrunedPluginRootContext(readerOptions);
+          prunedPluginRoot = true;
+        } catch {
+          context = readOrphanedPrunedContext(readerOptions);
+          orphanedProjectRoot = true;
+          prunedPluginRoot = true;
+        }
       }
     }
   } catch {
@@ -2319,8 +2345,9 @@ function adoptableRecord(options) {
     // WHICH relaxed reader answered, carried rather than re-derived: the caller
     // must re-mint the record around the SAME value, and asking the filesystem a
     // second time would let a directory re-created between the two reads turn a
-    // waived check into a canonicalized one. The two are mutually exclusive —
-    // the readers pin each other's waiver off — so at most one is ever true.
+    // waived check into a canonicalized one. Both are true only for a record
+    // readOrphanedPrunedContext admitted, which proved both roots absent; the
+    // single-root readers pin each other's waiver off.
     orphanedProjectRoot,
     prunedPluginRoot,
   };
@@ -3311,7 +3338,14 @@ function restoreRootVerdict(options) {
     // The strict read failed for some OTHER reason — a digest mismatch, a schema
     // break, a pruned installation. Those have their own exits; this one must not
     // silently stand in for them.
-    return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+    try {
+      context = readOrphanedPrunedContext(readerOptions);
+    } catch {
+      return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+    }
+    return restoreRootRefusal(context.plugin_data === pluginData
+      ? RESTORE_ROOT_REFUSALS.NOT_SERVED
+      : RESTORE_ROOT_REFUSALS.PLUGIN_DATA);
   }
   if (context.plugin_data !== pluginData) {
     return restoreRootRefusal(RESTORE_ROOT_REFUSALS.PLUGIN_DATA);
@@ -6137,6 +6171,7 @@ module.exports = {
   readContext,
   readOrphanedProjectRootContext,
   readPrunedPluginRootContext,
+  readOrphanedPrunedContext,
   RETIRED_PLUGIN_ROOT_STATES,
   retiredPluginRootState,
   RECORD_READERS,

@@ -302,6 +302,12 @@ if printf '%s' "$UNRESOLVED_OUT" | grep -qF 'PLAN_GATE_BLOCKED' \
   && ! printf '%s' "$UNRESOLVED_OUT" | grep -qF 'AskUserQuestion'; then
   check "P8a an unresolvable owner fails closed while durable run artifacts exist" PASS
 else check "P8a unresolvable owner (out='$(printf '%s' "$UNRESOLVED_OUT" | head -c 120)')" FAIL; fi
+if printf '%s' "$UNRESOLVED_OUT" | grep -qF 'code=RUNTIME_UNAVAILABLE' \
+  && printf '%s' "$UNRESOLVED_OUT" | grep -qF 'The Session Control binding of this session is unavailable' \
+  && printf '%s' "$UNRESOLVED_OUT" | grep -qF '/zensu:doctor names which check failed' \
+  && ! printf '%s' "$UNRESOLVED_OUT" | grep -qF 'state artifact exists'; then
+  check "P8a2 the bind-failure receipt names the unavailable binding and never asserts that a durable Autopilot artifact exists" PASS
+else check "P8a2 bind-failure receipt wording (out='$(printf '%s' "$UNRESOLVED_OUT" | head -c 200)')" FAIL; fi
 
 # Only the owner-keyed pointer is present — no run file. The pre-scoping probe
 # would miss it, so this is what bites the glob added for the new pointer name.
