@@ -130,12 +130,13 @@ four steps:
   because results produced at a limit say nothing about the plugin. Any other error fails the
   step.
 - `run` runs `zen-mode-reaction` and `context-nudge-reaction` through the pinned Promptfoo from
-  `node_modules`, with a private Promptfoo home and telemetry off. Each `claude` call appends a
-  line with its cost, tokens, turns and models to a usage ledger. Each suite is judged only by the
-  ledger lines and the results file of its own Promptfoo run: an assertion that failed on an
-  answer without a usage-limit message marks it failed; otherwise a usage limit in its ledger
-  lines marks it inconclusive, and any other Promptfoo failure marks it failed. A usage limit in
-  its ledger lines also skips the later suites, and a failed suite turns the run red.
+  `node_modules`, with a private Promptfoo home and telemetry and update checks off. Each
+  `claude` call appends a line with its cost, tokens, turns and models to a usage ledger. Each
+  suite is judged only by the ledger lines and the results file of its own Promptfoo run: an
+  assertion that failed on an answer without a usage-limit message marks it failed; otherwise a
+  usage limit in its ledger lines marks it inconclusive, and any other Promptfoo failure marks it
+  failed. A usage limit in its ledger lines also skips the later suites, and a failed suite turns
+  the run red.
 - `summary` writes the Claude Code version, the model, each suite's status and the usage totals
   to the job summary.
 - `scrub` copies the results into a separate upload directory and leaves out every file that

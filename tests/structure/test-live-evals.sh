@@ -217,6 +217,30 @@ else
   check "L9 results (read: $RES | missing: $RES_MISSING | broken: $RES_BROKEN | relative rc=$RES_REL_RC)" FAIL
 fi
 
+mkdir -p "$WORK/race"
+mkfifo "$WORK/race/swapped.json"
+cat > "$WORK/race-listing.js" <<'JS'
+const fs = require('node:fs');
+const list = fs.readdirSync;
+fs.readdirSync = (dir, options) => list(dir, options).map((entry) => (entry.name === 'swapped.json'
+  ? { name: entry.name, isSymbolicLink: () => false, isDirectory: () => false, isFile: () => true }
+  : entry));
+JS
+cat > "$WORK/race-run.js" <<'JS'
+const { spawnSync } = require('node:child_process');
+const [listing, ledger, from, to] = process.argv.slice(2);
+const run = spawnSync(process.execPath, ['--require', listing, ledger, 'stage', from, to],
+  { encoding: 'utf8', timeout: 10000, killSignal: 'SIGKILL' });
+process.stdout.write(run.error ? `error=${run.error.code}\n` : `rc=${run.status}\n${run.stdout}`);
+JS
+RACE_OUT="$(env -i PATH="$BASE_PATH" node "$WORK/race-run.js" "$WORK/race-listing.js" "$RUN_LEDGER_JS" "$WORK/race" "$WORK/race-staged")"
+if [ "$RACE_OUT" = "$(printf 'rc=1\nremoved=swapped.json (not a regular file)\nstaged=complete')" ] \
+  && [ -d "$WORK/race-staged" ] && [ -z "$(ls -A "$WORK/race-staged")" ]; then
+  check "L10 stage opens each file without blocking, so a named pipe that the directory listing reported as a regular file is left out instead of hanging the step" PASS
+else
+  check "L10 named pipe behind a regular-file listing (got: $RACE_OUT)" FAIL
+fi
+
 dry_run() {
   env -i PATH="$BASE_PATH" HOME="$WORK/home" DRY_RUN=1 "$@" bash "$WRAPPER" 'p' '{}' 2>&1
 }
@@ -376,7 +400,10 @@ fi
 cat > "$WORK/bin/promptfoo" <<'STUB'
 #!/bin/bash
 suite="$(basename "$PWD")"
-printf '%s %s %s\n' "$suite" "${EVAL_SUITE:-}" "${PROMPTFOO_CONFIG_DIR:+config-dir}" >> "$STUB_CALLS"
+home="${PROMPTFOO_CONFIG_DIR:-unset}"
+[ -d "$home" ] || home="$home(missing)"
+printf '%s %s %s %s %s\n' "$suite" "${EVAL_SUITE:-}" "$home" "${PROMPTFOO_DISABLE_TELEMETRY:-unset}" \
+  "${PROMPTFOO_DISABLE_UPDATE:-unset}" >> "$STUB_CALLS"
 out=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --output ]; then out="$2"; shift; fi
@@ -410,6 +437,7 @@ esac
 exit 0
 STUB
 chmod 755 "$WORK/bin/promptfoo"
+PF_ENV="$WORK/out/promptfoo-home 1 1"
 
 run_in_out() {
   rm -f "$WORK/stub-calls"
@@ -423,15 +451,16 @@ run_suites() {
   run_in_out "$@"
 }
 
-R_OUT="$(run_suites)"
+R_OUT="$(run_suites PROMPTFOO_CONFIG_DIR="$WORK/home/.promptfoo" PROMPTFOO_DISABLE_TELEMETRY=0 PROMPTFOO_DISABLE_UPDATE=0)"
 R_RC=$?
+R_CALLS="$(cat "$WORK/stub-calls" 2>/dev/null)"
 if [ "$R_RC" = 0 ] \
   && [ "$(cat "$WORK/out/suites.tsv")" = "$(printf 'zen-mode-reaction\tpassed\t0\ncontext-nudge-reaction\tpassed\t0')" ] \
-  && [ "$(cat "$WORK/stub-calls")" = "$(printf 'zen-mode-reaction zen-mode-reaction config-dir\ncontext-nudge-reaction context-nudge-reaction config-dir')" ] \
+  && [ "$R_CALLS" = "$(printf 'zen-mode-reaction zen-mode-reaction %s\ncontext-nudge-reaction context-nudge-reaction %s' "$PF_ENV" "$PF_ENV")" ] \
   && [ -f "$WORK/out/zen-mode-reaction.json" ] && [ -f "$WORK/out/context-nudge-reaction.json" ]; then
-  check "R1 the run executes every registered suite from its own directory with its suite name, a private promptfoo home and a results file" PASS
+  check "R1 the run executes every registered suite from its own directory with its suite name and a results file, in a promptfoo home inside the results directory with telemetry and update checks off, whatever the caller set" PASS
 else
-  check "R1 run of all suites (rc=$R_RC, out: $R_OUT)" FAIL
+  check "R1 run of all suites (rc=$R_RC, calls: $R_CALLS, out: $R_OUT)" FAIL
 fi
 
 R_OUT="$(run_suites STUB_MODES=zen-mode-reaction=limit)"
@@ -461,7 +490,7 @@ R_RC=$?
 R_ONE_CALLS="$(cat "$WORK/stub-calls" 2>/dev/null)"
 R_BOGUS="$(run_suites EVAL_SUITES=bogus)"
 R_BOGUS_RC=$?
-if [ "$R_RC" = 0 ] && [ "$R_ONE_CALLS" = 'context-nudge-reaction context-nudge-reaction config-dir' ] \
+if [ "$R_RC" = 0 ] && [ "$R_ONE_CALLS" = "context-nudge-reaction context-nudge-reaction $PF_ENV" ] \
   && [ "$R_BOGUS_RC" = 1 ] && printf '%s\n' "$R_BOGUS" | grep -qF "unknown suite 'bogus'" && [ ! -e "$WORK/stub-calls" ]; then
   check "R4 a dispatch can run one suite, and an unknown suite stops the step before any suite runs" PASS
 else

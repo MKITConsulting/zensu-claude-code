@@ -8,6 +8,7 @@ const CREDENTIALS = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 const MIN_SECRET_LENGTH = 8;
 const ASSERT_FAILURE = 1;
 const NOFOLLOW = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+const NONBLOCK = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
 
 function fail(message) {
   process.stderr.write(`live-evals-ledger: ${message}\n`);
@@ -147,7 +148,7 @@ function results([file]) {
 }
 
 function readRegular(file) {
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW);
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NONBLOCK);
   try {
     if (!fs.fstatSync(fd).isFile()) return null;
     return fs.readFileSync(fd);

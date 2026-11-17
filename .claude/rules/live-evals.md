@@ -46,8 +46,10 @@ genuine failure that mentions a limit is never masked without a real limit hit.
 **Credentials never reach the artifact.** The credential is a secret of the `live-evals`
 environment, whose deployment branches the owner limits to `main`. Only the `probe`, `run` and
 `scrub` steps receive it, as step env. `scrub` stages a copy outside the results directory that
-holds only regular files, opened with `O_NOFOLLOW`, that contain no credential value of at least 8
-characters; symbolic links and other entries stay out. A left-out file fails the step, an unreadable
+holds only regular files that contain no credential value of at least 8 characters; symbolic links
+and other entries stay out. Each file is opened with `O_NOFOLLOW` and `O_NONBLOCK` and judged by its
+descriptor, so a named pipe swapped in after the directory listing is left out instead of blocking
+the step (L10 in `test-live-evals.sh`). A left-out file fails the step, an unreadable
 entry withholds `scrubbed=true`, and the upload runs only on that output and reads only the staged
 directory. Dependency install scripts stay off (`npm ci --ignore-scripts`) because the same runner
 later holds the credential. Measured locally on an install whose dependency install scripts had not
@@ -74,6 +76,10 @@ run: Promptfoo still ran an eval.
 - `evals/session-control/run-self-check.sh`, an offline eval of every CI run, scans every workflow
   except `live-evals.yml` for Promptfoo, the two credentials and the Session Control evals, and
   `live-evals.yml` for the Session Control evals only. Renaming the workflow fails that scan.
+- R1 in `test-live-evals.sh` pins what `cmd_run` exports for Promptfoo: the home
+  `$OUT/promptfoo-home` and `PROMPTFOO_DISABLE_TELEMETRY` and `PROMPTFOO_DISABLE_UPDATE` set to `1`,
+  over any value the caller set. Its stub cannot see whether Promptfoo still reads those names, so a
+  Promptfoo bump checks them in `node_modules/promptfoo/dist`; 0.121.20 reads all three.
 
 **Version: `patch`.** CI, tests and docs, plus wrapper knobs that are read only when set: no
 schema, strict key set, hook, matcher or attestation moves.
