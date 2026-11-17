@@ -71,6 +71,9 @@ run: Promptfoo still ran an eval.
 - The installer step's `run:` line is counted twice, by that shape check and by H11.
 - `test-live-evals.sh` is in `ciStructureTests` and skips every executed check on native Windows,
   with its `excluded` entry in `tests/profiles/windows-native-structure.v1.json`.
+- `evals/session-control/run-self-check.sh`, an offline eval of every CI run, scans every workflow
+  except `live-evals.yml` for Promptfoo, the two credentials and the Session Control evals, and
+  `live-evals.yml` for the Session Control evals only. Renaming the workflow fails that scan.
 
 **Version: `patch`.** CI, tests and docs, plus wrapper knobs that are read only when set: no
 schema, strict key set, hook, matcher or attestation moves.
