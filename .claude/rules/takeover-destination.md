@@ -167,8 +167,9 @@ that the host classifier commonly refuses the prefix, so the old wording pointed
 which usually cannot be taken. **The deny no longer names the escape at all.** The gate is
 opt-in now, and every reason rules (A)/(B)/(C) produce ends with `OPT_IN_NOTE` in
 `bash-source-write-parse.js`, which names `hooks.bashWriteGate` and leaves an intended command
-to the user; four of the hook's own denies carry the same sentence through its `OPT_IN_NOTE`
-variable, and the bound parser-failure deny names the key in a remedy of its own. The advice
+to the user; five of the hook's own denies carry the same sentence through its `OPT_IN_NOTE`
+variable, the bound parser-failure deny among them, which names Edit or Write inside the own
+worktree as its route (§"Git Mutation Tables"). The advice
 asserts exactly that shape; the gate suite pins the note and the prefix's absence
 (W32/W33/W87/W121), and `T35b` and `WT8v12`/`WT8v12b` pin each skill carrier's own wording,
 while nothing compares either carrier against the parser, as §"Git Mutation Tables" records. `WT8v8` asserts the negative direction, that no arm

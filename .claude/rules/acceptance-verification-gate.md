@@ -299,14 +299,11 @@ with `…, so the plan was NOT judged.` Its wording is the module's; the remedy 
 
 **Escape-free texts.** No refusal, remedy, hand-off or skill text on the chain-closing path names
 `ZENSU_*_GATE`, `ZENSU_CHAIN`, `ZENSU_SECRET_SCAN` or an `evidence.*Gate` value as an option or a
-prohibition. `tests/structure/test-escape-wording.sh` scans its file list (message literals in
-shell and JS, every line in Markdown) against a disclosure allowlist: the `escaped` lines, the
-`STEM UNCHECKED` lines, the `unresolved` cause naming a used edit-landing escape and the
-unrecognized-value notice, all printed only after the user set the value. Operator-facing Stop
-notices (`stop_notice`) and the gates outside the chain (`pre-bash-zensu-gate.sh`,
-`pre-edit-tdd-reminder.sh`, the `ZENSU_TDD_GATE=off` sentence of Principle 3 in
-`skills/build/SKILL.md`, `pre-bash-source-write-gate.sh`) are outside its list; widening it is the
-follow-up.
+prohibition, and the same now holds for every runtime file outside the chain.
+`tests/structure/test-escape-wording.sh` walks all of them (`.claude/rules/gate-disable-prefixes.md`
+§"Model-facing text names no escape"); the chain's disclosure lines are its `DISCLOSURES`: the
+`escaped` lines, the `STEM UNCHECKED` lines, the `unresolved` cause naming a used edit-landing
+escape and the unrecognized-value notice, all printed only after the user set the value.
 
 **Coupled sites of this section:** `VERIFY_AGAIN_STATES`, `USER_REMEDIES`, `REMEDY_TEXTS`,
 `HANDOFF_*`, `LIMITS.maxRemedyChars`, `remedies`, `partialRemedy`, `isHandoff`,
@@ -331,7 +328,7 @@ of `planning.md`; chain mode points 5 and 6 of `skills/verify-feature/SKILL.md` 
 `templates/zensu-plan.md`; `docs/gates.md`, `docs/configuration.md`, `docs/build-workflow.md` and
 `docs/verify-feature.md`. Pins: the consent, hand-off, segment and plan-criteria cases of
 `acceptance-verify-v1.test.js`; `A0e`–`A0j` and `C1`–`C21` with `C7b` in
-`test-acceptance-gate.sh`; `AC1`–`AC8` in `test-requirements-table-gate.sh`; `W0`–`W7` in
+`test-acceptance-gate.sh`; `AC1`–`AC8` in `test-requirements-table-gate.sh`; `W0`–`W9` in
 `test-escape-wording.sh`, whose quoted-name exemption admits only a whole code token, which judges
 a heredoc body and a template literal's continuation line as prose rather than skipping a line
 that starts with a comment marker there (`W3`, `W4`), and whose `W7` holds every remedy prefix the

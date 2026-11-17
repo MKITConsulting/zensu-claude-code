@@ -328,6 +328,21 @@ is_deny() {
 OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/app.ts","content":"const k = \"AKIA''IOSFODNN7RGY4Q2B\";"}}')"
 if is_deny "$OUT"; then check "F1 Write with AWS access key -> deny (parsed JSON verdict)" PASS; else check "F1 Write with AWS access key -> deny (parsed JSON verdict)" FAIL; fi
 case "$OUT" in *aws-access-key-id*zensu-secret-allow*) check "F1b deny reason names the rule + remediation" PASS;; *) check "F1b deny reason names the rule + remediation" FAIL;; esac
+case "$OUT" in
+  *'The allow marker stays visible in the diff, so a reviewer sees each exception.'*)
+    case "$OUT" in
+      *opt-out*|*docs/gates.md*|*'disabling the gate'*|*'turning the whole gate'*|*ZENSU_SECRET_SCAN*) check "F1c deny reason keeps the fixture remedies and points at no opt-out" FAIL ;;
+      *) check "F1c deny reason keeps the fixture remedies and points at no opt-out" PASS ;;
+    esac ;;
+  *) check "F1c deny reason keeps the fixture remedies and points at no opt-out (got: ${OUT:0:300})" FAIL ;;
+esac
+if grep -qF '"YOUR_...). The allow marker stays visible in the diff, so a reviewer sees each " +' "$HOOK_BODY" \
+   && grep -qF "'YOUR_...). The allow marker stays visible in the diff, so a reviewer sees each ' +" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js" \
+   && ! grep -qE 'blanket opt-out|turning the whole gate|over disabling the gate' "$HOOK_BODY" "$PLUGIN_DIR/hooks/lib/hook-dispatch-v1.js"; then
+  check "F1d the body's and the dispatcher's deny copies carry the same allow-marker sentence and no opt-out pointer" PASS
+else
+  check "F1d the body's and the dispatcher's deny copies carry the same allow-marker sentence and no opt-out pointer" FAIL
+fi
 
 OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/tests/unit/aws.txt","content":"AKIA''IOSFODNN7RGY4Q2B"}}')"
 [ -z "$OUT" ] && check "F2a tests/ path exemption" PASS || check "F2a tests/ path exemption" FAIL
