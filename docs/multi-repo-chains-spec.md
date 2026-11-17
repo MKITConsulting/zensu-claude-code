@@ -89,9 +89,9 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 
 **The write gate confines Bash writes while it is opted in, the edit gate does not confine
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!inUnion(p)`
-(`hooks/lib/bash-source-write-parse.js:2533`), whose union is the project root alone until a
-code root is declared, and rule (C) at the same predicate for git targets (`:2579`), with
-`projectRoot` taken from the passed `CLAUDE_PROJECT_DIR` (`:2399`).
+(`hooks/lib/bash-source-write-parse.js:2669`), whose union is the project root alone until a
+code root is declared, and rule (C) at the same predicate for git targets (`:2715`), with
+`projectRoot` taken from the passed `CLAUDE_PROJECT_DIR` (`:2535`).
 `hooks/checks/pre-edit-tdd-reminder.sh:132-152` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
