@@ -155,9 +155,17 @@ because at the default the gate allows every one of them. `P5b` in
 
 **The identity comes from `CLAUDE_CODE_SESSION_ID`, never from a module-private variable.** The
 source-write gate refuses a command-line rebind of that name, so `node session-reanchor-v1.js`
-with another live session's raw id is refused where the invocation is visible. It is not refused
-through an indirection — `bash -c`, a script file — which is the same residual every protected
-Session Control input has.
+with another live session's raw id is refused where the invocation is visible, which includes
+literal code handed to a shell, `eval` or `trap`. The module's own inputs are protected the same
+way: `REANCHOR_INPUTS` in `hooks/lib/bash-source-write-parse.js` holds every `ZREANCHOR_*` name
+the module reads and the wrapper sets, so a direct `node session-reanchor-v1.js` call cannot
+name the target, confirm the move or point the Autopilot probe at another shell, and the refusal
+names `/zensu:adopt-session --reanchor`, whose wrapper sets them inside its own process
+(`.claude/rules/git-mutation-tables.md`). Neither is refused through code the check cannot read
+in the command text of the Bash and PowerShell tools — a script file, a shell's standard input,
+code built at run time, interpreter code — or through a tool the check is not registered on,
+such as a main-thread `Monitor` command, which is the same residual every protected Session
+Control input has.
 
 **The report lists the target's uncommitted paths.** The claim probe finds where a live session
 started, is anchored or keeps an anchor, not where it edits; a session anchored elsewhere that

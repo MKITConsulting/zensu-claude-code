@@ -2076,6 +2076,179 @@ if grep -qF 'a `chmod` is the fix when you own it and a move when you do not' \
   check "R11n3 the skill names both arms of that remedy" PASS
 else check "R11n3 the skill names both arms of that remedy" FAIL; fi
 
+R11F_PROJ="$STATE_DIR/r11f-project"
+mkdir -p "$R11F_PROJ"
+R11F_GATE_ON="$STATE_DIR/r11f-gate-on.json"
+printf '%s' '{"hooks":{"bashWriteGate":true}}' > "$R11F_GATE_ON"
+R11F_FOREIGN=11111111-2222-4333-8444-555555555555
+R11F_OUT="$(
+  export CLAUDE_PROJECT_DIR="$R11F_PROJ" ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/r11f-data"
+  . "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" r11f-bound >/dev/null 2>&1 || { printf 'NO-BASELINE\n'; exit 0; }
+  R11F_DATA="$CLAUDE_PLUGIN_DATA"
+  r11f_case() {
+    local id="$1" tool="$2" cmd="$3" cfg cfgname verdict
+    for cfgname in default on; do
+      cfg="$ZENSU_CONFIG"
+      if [ "$cfgname" = on ]; then cfg="$R11F_GATE_ON"; fi
+      verdict="$(printf '%s' "$cmd" | R11F_TOOL="$tool" R11F_CWD="$R11F_PROJ" node -e '
+        let s = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (c) => { s += c; });
+        process.stdin.on("end", () => {
+          process.stdout.write(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: process.env.R11F_TOOL,
+            tool_input: { command: s }, cwd: process.env.R11F_CWD, session_id: "r11f-bound" }));
+        });
+      ' | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST \
+          -u ZENSU_PROJECT_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$R11F_PROJ" \
+          CLAUDE_ENV_FILE="$R11F_PROJ/.claude-env" ZENSU_CONFIG="$cfg" \
+          bash "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" 2>/dev/null | node -e '
+        let s = ""; process.stdin.on("data", (c) => { s += c; });
+        process.stdin.on("end", () => {
+          const t = s.trim();
+          if (!t) { process.stdout.write("ALLOW|"); return; }
+          let j;
+          try { j = JSON.parse(t); } catch (_) { process.stdout.write("BADJSON|"); return; }
+          const o = (j && j.hookSpecificOutput) || {};
+          process.stdout.write((o.permissionDecision === "deny" ? "DENY" : String(o.permissionDecision))
+            + "|" + String(o.permissionDecisionReason || "").replace(/\s+/g, " "));
+        });
+      ')"
+      printf '%s\t%s\t%s\n' "$id" "$cfgname" "$verdict"
+    done
+  }
+  r11f_case f1 Bash "CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm"
+  r11f_case c1 Bash "CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH"
+  r11f_case c2 Bash "CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root"
+  r11f_case c3 Bash "CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --confirm"
+  r11f_case c4 Bash "CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm"
+  r11f_case g1 Bash "ZADOPT_PLUGIN_DATA=$R11F_DATA node $ADOPT_REPORT"
+  r11f_case g2 Bash "ZADOPT_SESSION_ID=$R11F_FOREIGN node $ADOPT_REPORT"
+  r11f_case g3 Bash "ZADOPT_PLUGIN_ROOT=$PLUGIN_DIR node $ADOPT_REPORT"
+  r11f_case g4 Bash "ZADOPT_MODE=restore-root node $ADOPT_REPORT"
+  r11f_case g5 Bash "ZADOPT_CONFIRM=1 node $ADOPT_REPORT"
+  r11f_case g6 Bash "ZADOPT_PLUGIN_ROOT=$PLUGIN_DIR ZADOPT_PLUGIN_DATA=$R11F_DATA ZADOPT_SESSION_ID=$R11F_FOREIGN ZADOPT_MODE=restore-root ZADOPT_CONFIRM=1 node $ADOPT_REPORT"
+  r11f_case g7 Bash "export ZADOPT_SESSION_ID=$R11F_FOREIGN; node $ADOPT_REPORT"
+  r11f_case g8 Bash "env ZADOPT_SESSION_ID=$R11F_FOREIGN node $ADOPT_REPORT"
+  r11f_case n1 Bash "grep -n ZADOPT_SESSION_ID $ADOPT_REPORT"
+  r11f_case b1 Bash "bash -c 'CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case b2 Bash "sh -c 'CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case b3 Bash "env zsh -c \"CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN bash $ADOPT_SH --restore-root --confirm\""
+  r11f_case b4 Bash "bash -lc 'ZADOPT_SESSION_ID=$R11F_FOREIGN ZADOPT_MODE=restore-root ZADOPT_CONFIRM=1 node $ADOPT_REPORT'"
+  r11f_case b5 Bash "bash -c \"bash -c 'ZADOPT_SESSION_ID=$R11F_FOREIGN node $ADOPT_REPORT'\""
+  r11f_case b6 Bash "eval 'CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case b7 Bash "trap 'ZADOPT_SESSION_ID=$R11F_FOREIGN node $ADOPT_REPORT' EXIT"
+  r11f_case n2 Bash "bash -c 'echo CLAUDE_CODE_SESSION_ID'"
+  r11f_case r1 Bash "bash -c \"\$R11F_CODE\""
+  r11f_case p1 PowerShell "\$env:ZADOPT_SESSION_ID = '$R11F_FOREIGN'; node $ADOPT_REPORT"
+  r11f_case b8 Bash "bash -c + 'CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case b9 Bash "zsh -O -c 'CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case b10 Bash "bash -c '\"\$@\"' _ env CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm"
+  r11f_case b11 Bash "rbash -c 'ZADOPT_SESSION_ID=$R11F_FOREIGN node $ADOPT_REPORT'"
+  r11f_case h1 Bash "pwsh -c '\$env:CLAUDE_CODE_SESSION_ID = \"$R11F_FOREIGN\"; bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case e1 Bash "bash -c 'printf x >> $R11F_PROJ/.cl\"\"aude-env'"
+  r11f_case a1 Bash "ZREANCHOR_BASH=/usr/bin/false ZREANCHOR_CONFIRM=1 node $PLUGIN_DIR/hooks/lib/session-reanchor-v1.js"
+  r11f_case a2 Bash "unset ZREANCHOR_TARGET; node $PLUGIN_DIR/hooks/lib/session-reanchor-v1.js"
+  r11f_case b12 Bash "fish -c'CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case b13 Bash "bash -c 'shift; \"\$@\"; CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm' _ x printf -v CLAUDE_CODE_SESSION_ID %s $R11F_FOREIGN"
+  r11f_case b14 Bash "fish -C true -c'CLAUDE_CODE_SESSION_ID=$R11F_FOREIGN CLAUDE_PLUGIN_DATA=$R11F_DATA bash $ADOPT_SH --restore-root --confirm'"
+  r11f_case c5 Bash "command -v pwsh"
+  r11f_case c6 Bash "pwsh --version"
+  r11f_case c7 Bash "bash -ce 'echo ZADOPT_SESSION_ID'"
+)"
+R11F_ADOPT_REMEDY='zensu-session-adopt.sh sets it itself, so run /zensu:adopt-session in the session the repair is for.'
+R11F_REANCHOR_REMEDY='zensu-session-reanchor.sh sets it itself, so run /zensu:adopt-session --reanchor in the session the move is for.'
+r11f_expect() {
+  local label="$1" id="$2" want="$3" needle="$4" count=0 bad="" line verdict
+  while IFS= read -r line; do
+    [ "${line%%	*}" = "$id" ] || continue
+    count=$((count + 1))
+    verdict="${line#*	*	}"
+    case "$verdict" in
+      "$want|"*) ;;
+      *) bad="$bad [$verdict]" ;;
+    esac
+    if [ -n "$needle" ]; then
+      case "$verdict" in
+        *"$needle"*) ;;
+        *) bad="$bad [missing: $needle]" ;;
+      esac
+    fi
+  done <<R11F_LINES
+$R11F_OUT
+R11F_LINES
+  if [ "$count" -eq 2 ] && [ -z "$bad" ]; then check "$label" PASS
+  else check "$label (rows=$count$bad)" FAIL; fi
+}
+if [ "$R11F_OUT" = "NO-BASELINE" ] || [ -z "$R11F_OUT" ]; then
+  check "R11f-control the bound fixture session was minted" FAIL
+else
+  check "R11f-control the bound fixture session was minted" PASS
+fi
+r11f_expect "R11f  the documented route, a foreign CLAUDE_CODE_SESSION_ID on zensu-session-adopt.sh, is refused at the default config and opted in" \
+  f1 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID. Start a fresh Claude Code session instead.'
+r11f_expect "R11f-control the shipped read-only command stays admitted, at the default config and opted in" c1 ALLOW ''
+r11f_expect "R11f-control the shipped --restore-root command stays admitted, at the default config and opted in" c2 ALLOW ''
+r11f_expect "R11f-control the shipped --confirm command stays admitted, at the default config and opted in" c3 ALLOW ''
+r11f_expect "R11f-control the shipped --restore-root --confirm command stays admitted, at the default config and opted in" c4 ALLOW ''
+r11f_expect "R11g  ZADOPT_PLUGIN_DATA on the report module is refused with the adoption remedy" \
+  g1 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_PLUGIN_DATA. $R11F_ADOPT_REMEDY"
+r11f_expect "R11g  ZADOPT_SESSION_ID on the report module is refused with the adoption remedy" \
+  g2 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID. $R11F_ADOPT_REMEDY"
+r11f_expect "R11g  ZADOPT_PLUGIN_ROOT on the report module is refused with the adoption remedy" \
+  g3 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_PLUGIN_ROOT. $R11F_ADOPT_REMEDY"
+r11f_expect "R11g  ZADOPT_MODE on the report module is refused with the adoption remedy" \
+  g4 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_MODE. $R11F_ADOPT_REMEDY"
+r11f_expect "R11g  ZADOPT_CONFIRM on the report module is refused with the adoption remedy" \
+  g5 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_CONFIRM. $R11F_ADOPT_REMEDY"
+r11f_expect "R11g  every adoption input on one command is refused" \
+  g6 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_PLUGIN_ROOT."
+r11f_expect "R11g  an exported adoption input is refused" \
+  g7 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID."
+r11f_expect "R11g  an adoption input behind env is refused" \
+  g8 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID."
+r11f_expect "R11g-control a command that only names an adoption input stays admitted" n1 ALLOW ''
+r11f_expect "R11g2 bash -c carrying the documented route is refused" \
+  b1 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g2 sh -c carrying the route is refused" \
+  b2 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g2 zsh -c behind env, in double quotes, carrying the route is refused" \
+  b3 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g2 an option cluster before -c carrying the adoption inputs is refused" \
+  b4 DENY 'Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID.'
+r11f_expect "R11g2 a shell inside a shell carrying an adoption input is refused" \
+  b5 DENY 'Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID.'
+r11f_expect "R11g2 eval carrying the route is refused" \
+  b6 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g2 a trap action carrying an adoption input is refused" \
+  b7 DENY 'Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID.'
+r11f_expect "R11g2-control code handed to a shell that only names an input stays admitted" n2 ALLOW ''
+r11f_expect "R11g3 code the shell builds at run time stays unread, the residual the rule names" r1 ALLOW ''
+r11f_expect "R11g4 a PowerShell write of an adoption input is refused by the control verdict" \
+  p1 DENY "This check keeps model commands from rebinding Claude Code's Session Control inputs"
+r11f_expect "R11g2 a lone + after -c, carrying the route, is refused" \
+  b8 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g2 zsh -O before -c, carrying the route, is refused" \
+  b9 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g2 code that runs its positional words, handed the route, is refused" \
+  b10 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g2 rbash -c carrying an adoption input is refused" \
+  b11 DENY "Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID. $R11F_ADOPT_REMEDY"
+r11f_expect "R11g5 PowerShell code the Bash tool hands to pwsh, carrying the route, is refused" \
+  h1 DENY 'Blocked a Bash command that hands code to pwsh because it names the protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g6 a write to the env file inside literal bash -c code is refused" \
+  e1 DENY 'Blocked a Bash write to CLAUDE_ENV_FILE.'
+r11f_expect "R11g7 ZREANCHOR_BASH on the re-anchor module is refused with the re-anchor remedy" \
+  a1 DENY "Blocked a Bash rebind of protected Session Control input ZREANCHOR_BASH. $R11F_REANCHOR_REMEDY"
+r11f_expect "R11g7 removing a re-anchor input is refused with the re-anchor remedy" \
+  a2 DENY "Blocked removal of protected Session Control input ZREANCHOR_TARGET. $R11F_REANCHOR_REMEDY"
+r11f_expect "R11g2 fish code attached to its option word, carrying the route, is refused" \
+  b12 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g8 a positional word that names the identity input, run after a shift, is refused" \
+  b13 DENY 'Blocked a Bash command that hands the protected Session Control input CLAUDE_CODE_SESSION_ID to a shell as a positional word,'
+r11f_expect "R11g8-control a command -v lookup of pwsh stays admitted" c5 ALLOW ''
+r11f_expect "R11g8-control a pwsh version request stays admitted" c6 ALLOW ''
+r11f_expect "R11g2 fish code attached after an earlier option word, carrying the route, is refused" \
+  b14 DENY 'Blocked a Bash rebind of protected Session Control input CLAUDE_CODE_SESSION_ID.'
+r11f_expect "R11g8-control a POSIX -ce cluster keeps its code word out of the positional words" c7 ALLOW ''
+
 # --- R14: the lazy-table comment describes a path production can reach ---------
 #
 # M2/M13 (PR #312 panel). The comment above `restoreRemedyTable` made two claims. The
