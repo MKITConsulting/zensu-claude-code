@@ -175,10 +175,16 @@ pin at the front of `test-versioned-plugin-upgrade.sh`, both ways and with exact
   line as a remedy arm. Remedy and tail join as `remedy; tail.` in the `.*` gate and in the
   Stop hook's four release arms. The two named shell scopes put
   `The record is NOT damaged and NOT missing;` between them, and that join is unpinned.
-- **Limit clauses:** `ORPHAN_LIMIT_CLAUSE` and `PRUNED_DOWNGRADE_CLAUSE` are rendered by the
-  gate's typed arm AND its fallback arms, and are spelled word for word in the
-  `incompatible-runtime` and `pruned-plugin-root` scopes; the pin checks both the render
-  sites and the shell text. `lineageCause` / `prunedCause` / `UNBOUND_ADOPTION_REMEDY` are
+- **Limit clauses:** `ORPHAN_LIMIT_CLAUSE`, `PRUNED_DOWNGRADE_CLAUSE` and
+  `PRUNED_ORPHAN_CLAUSE` are rendered by the gate's typed arm AND its fallback arms, and are
+  spelled word for word in the `incompatible-runtime` and `pruned-plugin-root` scopes; the
+  pin checks both the render sites and the shell text. `PRUNED_ORPHAN_CLAUSE` always follows
+  `PRUNED_DOWNGRADE_CLAUSE`, because a pruned record may have lost its project root too.
+  `ADOPTION_REACH_CLAUSE` says where `/zensu:doctor` and `/zensu:adopt-session` stay
+  reachable: on macOS and Linux, typed by the user or as the Bash command the skill renders,
+  never through the Skill tool, which the gate denies like every other tool but Bash, and on
+  Windows not at all. The gate renders it at four sites and both named shell scopes spell it;
+  the pin counts both. `lineageCause` / `prunedCause` / `UNBOUND_ADOPTION_REMEDY` are
   the gate's other shared spellings.
 
 The `opted-out` remedy tells the model to report and ask the user, never to run

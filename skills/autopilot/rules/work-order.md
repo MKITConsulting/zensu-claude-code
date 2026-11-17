@@ -34,8 +34,10 @@ Probe as Autopilot's 0.B says, with two differences:
 
 ## 3. Plan
 
-Write the plan to `.zensu/plans/<order-id>.md`: the spec from the order, numbered acceptance
-criteria with stable `AC-###` ids, and the resolved recipe, shaped on the Autopilot spec template.
+Write the plan to `.zensu/plans/<order-id>.md`: the spec from the order, a `## Requirements` table
+with one row per acceptance criterion and stable `AC-###` ids, and the resolved recipe, shaped on
+the Autopilot spec template. The VALIDATE stage reads its criteria from this file, so a run that
+validates needs at least one active `AC-###` row there; `--bind-spec` refuses the plan otherwise.
 Settle every open question yourself with the safest reversible choice and record each choice in the
 plan under `## Decisions`. A choice a person should see goes to Zensu as a non-blocking question
 whose default option is that choice; a question the work cannot go past is a blocking one and ends
@@ -58,6 +60,16 @@ names another order.
 and records `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. On exit 0 continue with
 Autopilot's Phase 1 step 1, the `/zensu:build` run with the exact `AUTOPILOT-RUN: <RUN_ID>` line.
 
+Exit 8 with `plan-criteria-unusable` on stderr means the run validates and its plan carries no
+active `AC-###` row: add the `## Requirements` table §3 asks for and run `--bind-spec` again. When
+it says the plan does not parse, a code fence is left open: close it, keep the table and run
+`--bind-spec` again. When it names an id on more than one active row, give each criterion its own
+`AC-###` id and run `--bind-spec` again. The refusal comes before any stage report and before a person is asked to
+approve the plan. Exit 8
+with `plan-criteria-unreadable` means the requirements lister could not judge the plan, which says
+nothing about its content: leave the plan as it is, run `/zensu:doctor`, and run `--bind-spec`
+again once the plugin installation is intact.
+
 Exit 8 with `plan-approval-required` on stderr means a person must approve the plan first. Write
 the plan commit's message in the commit style, language and attribution practice
 `rules/conventions.md` §3 decides for this repository, then run:
@@ -65,9 +77,10 @@ the plan commit's message in the commit style, language and attribution practice
 ```bash
 MSG="$(mktemp)" || exit 1
 trap 'rm -f "$MSG"' EXIT
-cat > "$MSG" <<'ZENSU_TEXT_END'
+cat >| "$MSG" <<'ZENSU_TEXT_<hex>'
 <plan commit message>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+grep -qI '[^[:space:]]' -- "$MSG" || exit 1
 CLAUDE_PLUGIN_DATA="…" bash "$WO" --plan-approval --message-file "$MSG"
 ```
 
@@ -84,6 +97,12 @@ Exit 6 or 4 from either step: finish once and end.
 Run Autopilot's Phase 1 in order. After every Autopilot event you persist, run `"$WO" --drain`.
 These steps differ:
 
+- **Validation** (Phase 1 step 6): `--autopilot-validate` reads the criteria from
+  `.zensu/plans/<order-id>.md` and applies `VALIDATION_PASSED` itself; run `--drain` after it as
+  after an event you persist. When the order asked for no plan approval, its
+  `ACCEPTANCE PLAN UNAPPROVED` line says that no person approved those criteria: state that in the
+  pull request body. A plan a person approved and that no longer matches its digest refuses; never
+  edit it to get past a refusal.
 - **Every push** runs `"$WO" --push`, never `git push`. That holds inside `/zensu:pr-fix-findings`
   and in the validate loop too: where those steps push, run `--push` instead. Exit 8 from `--push`
   names its cause on stderr; never force past it. A working branch without the order's prefix means
@@ -91,8 +110,8 @@ These steps differ:
   again, unless the order's pull request was merged or closed, which ends the order with `--reason`.
   Every other exit 8, such as a remote that moved past the head Zensu recorded or a head Zensu
   refused to record, ends the order with `--reason`.
-- **Opening the pull request** (Phase 1 step 3): commit, run `"$WO" --push`, persist
-  `PR_OPEN_REQUESTED`, then run
+- **Opening the pull request** (Phase 1 step 3): run the head check of `rules/pr-open.md` §1,
+  run `"$WO" --push`, persist `PR_OPEN_REQUESTED` unless the run already records it, then run
   `"$WO" --open-pr --title "<title>" --body-file "<absolute path>"` instead of the driver's
   `--open-pr`. Its stdout is `{"value":{"url":…,"number":…,"base":…,"branch":…,"head":…}}`; persist
   `PR_OPENED` with that number, URL and head, then run `--drain`. When the order already has an open

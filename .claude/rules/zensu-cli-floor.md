@@ -17,6 +17,8 @@ paths:
   - "skills/doctor/SKILL.md"
   - "skills/doctor/references/zensu-cli.md"
   - "skills/pilot/SKILL.md"
+  - "skills/pulse/SKILL.md"
+  - "tests/structure/test-pulse-skill.sh"
   - "docs/work-order-mode.md"
   - "docs/operations.md"
   - "docs/cli-install-update.md"
@@ -143,8 +145,8 @@ the prose copies above. Tests: the unit file, driven by
 `tests/structure/test-session-start-banner.sh`; `P9a`-`P9d` and `P10a`-`P10f` in
 `tests/structure/test-setup-skill.sh`.
 
-**Sites outside this repository.** Five zensu-cli facts are copied here and nothing checks them
-against the CLI:
+**Sites outside this repository.** Six zensu-cli facts, the last one with the backend behaviour
+behind it, are copied here and nothing checks them against their source:
 
 - the `Not logged in` text of `zensu auth status`. This one fails open: if the CLI rewords it, a
   logged-out CLI reads as authenticated in the doctor, `/zensu:setup` and the `/zensu:pilot` ladder;
@@ -173,7 +175,24 @@ against the CLI:
   purpose: `knowledge search` matches whole words in its full-text default, so its hint in the plm
   prompt and in the truncated-pack advice of `hooks/lib/context-auto-load-v1.js` asks for a few
   terms the artifacts use, while `knowledge context-search` takes a task description by its own
-  help, so the discovery advice keeps `<specific task question>`.
+  help, so the discovery advice keeps `<specific task question>`;
+- the Pulse contract of zensu-cli 0.22.0 (`internal/cmd/pulse.go`, `printJSON` in
+  `internal/cmd/factory.go`) and of the Zensu backend at `7e5a52185`
+  (`backend/internal/handlers/pulse.go`, `backend/internal/services/pulse.go`, migration `000173`).
+  With `--minimal-json`, `pulse start` and `pulse end` print one JSON object indented by two
+  spaces that holds an `id` or `"status": "tracking_disabled"`, and they report every request error
+  as `Pulse request failed` and every malformed answer as `invalid Pulse response`; without the
+  flag the detailed error comes through, and a successful end prints `Ended session <id>`.
+  `--changed-file` repeats. The end refuses more than 1000 paths before it reads the tracking
+  setting, answers `tracking_disabled` when the user has no privacy row or tracking is off, and
+  refuses the whole list for one path that is empty, longer than 500 bytes, absolute, holds a
+  backslash or a control, format, line- or paragraph-separator character, or differs from its
+  `path.Clean` form, as a trailing `/` does. New accounts start with tracking off, and older rows
+  keep their setting. `skills/pulse/SKILL.md`, the Pulse lines of `agents/zensu-plm.md` and the
+  `/zensu:pulse` row of the README's Data & privacy table repeat these facts, and
+  `tests/structure/test-pulse-skill.sh` and `C5` of `tests/structure/test-zensu-plm-arg-guidance.sh`
+  pin the wording, not the facts: re-read the sources when a zensu-cli release changes a `pulse`
+  command and when the backend changes a Pulse limit or the privacy default.
 
 **Version: `patch`.** Advisory banner text, doctor rows and skill text: no schema field, key set,
 hook, matcher, config key or attestation moves.

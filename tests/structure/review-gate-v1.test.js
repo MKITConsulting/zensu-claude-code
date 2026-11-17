@@ -119,7 +119,7 @@ function chain(t, state = {}) {
   const launched = (agentId) => ({ status: 'async_launched', isAsync: true, agentId });
   const launch = (type, prompt, agentId) => gate.recordObservation({ root: w.root, session, payload: payload(type, prompt, launched(agentId)), now: tick });
   const prompted = (text) => ({ hook_event_name: 'UserPromptSubmit', session_id: session, prompt: text });
-  const handbackPrompt = (text) => gate.recordHandback({ root: w.root, session, payload: prompted(text), now: tick });
+  const handbackPrompt = (text, aliases) => gate.recordHandback({ root: w.root, session, payload: prompted(text), now: tick, aliases });
   const handback = (agent, report) => handbackPrompt(frame(agent, report));
   const checkLaunch = (prompt, agentId, options = {}) => gate.checkConsume({
     root: w.root, session, payload: payload('zensu:code-reviewer', prompt, launched(agentId)),
@@ -127,7 +127,7 @@ function chain(t, state = {}) {
   });
   const checkArrival = (text, agent, options = {}) => gate.checkConsume({
     root: w.root, session, payload: prompted(text), event: 'UserPromptSubmit', agent,
-    judge: options.judge || 'on', panel: options.panel || 'lean', ticket: options.ticket, now: tick,
+    judge: options.judge || 'on', panel: options.panel || 'lean', ticket: options.ticket, now: tick, aliases: options.aliases,
   });
   const checkHandback = (agent, report, options = {}) => checkArrival(frame(agent, report), agent, options);
   return { ...w, session, receipt, input, create, record, check, consumePrompt, judged, launch, handback, handbackPrompt, checkLaunch, checkArrival, checkHandback };
@@ -495,6 +495,104 @@ test('every column-zero hand-back frame of a prompt counts, and a frame quoted i
   const results = c.handbackPrompt(`${frame('aAspect1', quoted)}\n${frame('aAspect2', '## Aspect: security\n- (no findings)\n')}`);
   assert.deepEqual(results.map((result) => result.record.identity), ['aspect:correctness', 'aspect:security']);
   assert.match(c.check(c.consumePrompt(packet.text)).message, /no primary zensu:review-judge run completed/);
+});
+
+test('a hand-back framed with a spawn name completes the launch its binding names, and only in the host frame position', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.launch('zensu:review-aspect', `perspective: security\n${packet.text}\n`, 'aAspect1');
+  c.launch('zensu:review-judge', `${packet.text}\nmerged_panel_findings: none\n`, 'aJudge1');
+  const aliases = new Map([['aspect-security', 'aAspect1'], ['judge-primary', 'aJudge1'], ['aspect-design', 'aAspect2']]);
+  const peer = (text) => `Another Claude session sent a message:\n${text}`;
+  const security = '## Aspect: security\n- (no findings)\n';
+  assert.equal(c.handbackPrompt(peer(frame('aspect-security', security))).length, 0, 'without a binding a name frame names no launch');
+  const [aspect, ...others] = c.handbackPrompt(peer(frame('aspect-security', security)), aliases);
+  assert.equal(others.length, 0);
+  assert.equal(aspect.record.agentId, 'aAspect1');
+  assert.equal(aspect.record.identity, 'aspect:security');
+  assert.equal(aspect.record.reportSource, 'handback-prompt');
+  assert.equal(aspect.record.packetSha, packet.sha256);
+  assert.match(c.check(c.consumePrompt(packet.text)).message, /no primary zensu:review-judge run completed/);
+  const [judge] = c.handbackPrompt(frame('judge-primary', JUDGE_OK), aliases);
+  assert.equal(judge.record.agentId, 'aJudge1');
+  assert.equal(judge.record.valid, true);
+  assert.deepEqual(c.check(c.consumePrompt(packet.text)), { pass: true, reason: 'ok' });
+  c.launch('zensu:review-aspect', `perspective: design\n${packet.text}\n`, 'aAspect2');
+  assert.equal(c.handbackPrompt(`typed text first\n${frame('aspect-design', '## Aspect: design\n- (no findings)\n')}`, aliases).length, 0,
+    'a name frame away from the host frame position names no launch');
+  assert.equal(c.handbackPrompt(frame('aspect-design', '## Aspect: design\n- (no findings)\n'), aliases)[0].record.agentId, 'aAspect2');
+});
+
+test('the consume arrival check reads a name-framed report through its binding', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.record('zensu:review-aspect', packet.text);
+  c.record('zensu:review-judge', packet.text, c.judged(JUDGE_OK));
+  assert.deepEqual(c.checkLaunch(c.consumePrompt(packet.text), 'aConsume1'), { pass: true, reason: 'ok' });
+  const aliases = new Map([['consume-reviewer', 'aConsume1']]);
+  const invalid = frame('consume-reviewer', 'REVIEW PACKET INVALID: policy\n');
+  assert.match(c.checkArrival(invalid, 'aConsume1', { aliases }).message, /the consume reviewer answered REVIEW PACKET INVALID/);
+  assert.deepEqual(c.checkArrival(invalid, 'aConsume1'), { pass: true, reason: 'ok' }, 'without the binding the named report is not the consume report');
+  assert.deepEqual(c.checkArrival(frame('consume-reviewer', '- Verdict: PASS\n'), 'aConsume1', { aliases }), { pass: true, reason: 'ok' });
+});
+
+test('the CLI resolves a name frame through the bindings under --plugin-data, on a prompt event only', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.launch('zensu:review-judge', `${packet.text}\nmerged_panel_findings: none\n`, 'aJudge1');
+  const data = path.join(c.base, 'plugin-data');
+  fs.mkdirSync(data, { mode: 0o700 });
+  const key = core.sessionKey(c.session);
+  const bound = background.recordFanout({
+    hook_event_name: 'PostToolUse', session_id: c.session, tool_name: 'Agent',
+    tool_input: { subagent_type: 'zensu:review-judge', name: 'judge-primary', prompt: packet.text },
+    tool_response: { status: 'async_launched', isAsync: true, agentId: 'aJudge1' },
+  }, { pluginData: data, sessionKey: key });
+  assert.equal(bound.recorded, true);
+  const run = (args, payload) => spawnSync(process.execPath, [GATE, ...args], { input: payload, encoding: 'utf8' });
+  const prompt = (text) => JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: c.session, prompt: text });
+  const base = ['--root', c.root, '--session', key];
+  const report = prompt(frame('judge-primary', 'REVIEW PACKET INVALID: x\n'));
+  const unbound = run(['record', ...base, '--event', 'UserPromptSubmit'], report);
+  assert.equal(unbound.status, 0);
+  assert.equal(unbound.stdout, '', 'without --plugin-data the name frame names no launch');
+  const posted = run(['record', ...base, '--event', 'PostToolUse', '--plugin-data', data], report);
+  assert.equal(posted.status, 0, posted.stderr);
+  assert.equal(posted.stdout, '', 'a tool event resolves no name frame, so the launch stays open for the prompt below');
+  const recorded = run(['record', ...base, '--event', 'UserPromptSubmit', '--plugin-data', data], report);
+  assert.equal(recorded.status, 0, recorded.stderr);
+  assert.match(JSON.parse(recorded.stdout).hookSpecificOutput.additionalContext, /^PRIMARY JUDGE INCOMPLETE — the judge answered REVIEW PACKET INVALID/);
+  const missing = run(['record', ...base, '--event', 'UserPromptSubmit', '--plugin-data', path.join(c.base, 'missing')], prompt(frame('judge-primary', JUDGE_OK)));
+  assert.equal(missing.status, 0);
+  assert.equal(missing.stdout, '', 'an unreadable store resolves no name');
+  const checked = run(['check', ...base, '--judge', 'off', '--panel', 'lean', '--event', 'UserPromptSubmit', '--agent', 'aConsume9', '--plugin-data', data],
+    prompt(frame('judge-primary', '- Verdict: PASS\n')));
+  assert.equal(checked.status, 1);
+  assert.match(checked.stdout, /^REVIEW INCOMPLETE — the background consume reviewer aConsume9 was not checked by the review gate at its launch/);
+});
+
+test('the CLI consume check reads a named reviewer\'s report through its binding under --plugin-data', (t) => {
+  const c = chain(t);
+  const packet = c.create();
+  c.record('zensu:review-aspect', packet.text);
+  c.record('zensu:review-judge', packet.text, c.judged(JUDGE_OK));
+  assert.deepEqual(c.checkLaunch(c.consumePrompt(packet.text), 'aConsume9'), { pass: true, reason: 'ok' });
+  const data = path.join(c.base, 'plugin-data');
+  const key = core.sessionKey(c.session);
+  const names = path.join(data, ...background.STORE_SEGMENTS, background.NAMES_SEGMENT, key);
+  fs.mkdirSync(names, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(names, 'aConsume9.json'), JSON.stringify({
+    schema: background.SCHEMA, session_key: key, agent_id: 'aConsume9', name: 'consume-reviewer', named_at_ms: Date.now(),
+  }), { mode: 0o600 });
+  const run = (args, payload) => spawnSync(process.execPath, [GATE, ...args], { input: payload, encoding: 'utf8' });
+  const invalid = JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: c.session, prompt: frame('consume-reviewer', 'REVIEW PACKET INVALID: policy\n') });
+  const args = ['check', '--root', c.root, '--session', key, '--judge', 'on', '--panel', 'lean', '--event', 'UserPromptSubmit', '--agent', 'aConsume9'];
+  const bound = run([...args, '--plugin-data', data], invalid);
+  assert.equal(bound.status, 1, bound.stderr);
+  assert.match(bound.stdout, /the consume reviewer answered REVIEW PACKET INVALID/);
+  const unbound = run(args, invalid);
+  assert.equal(unbound.status, 0, unbound.stderr);
+  assert.equal(unbound.stdout, 'pass ok\n', 'without the binding the named report is not the consume report');
 });
 
 test('notificationReports reads the id, the status and the decoded result of every column-zero notification block', () => {

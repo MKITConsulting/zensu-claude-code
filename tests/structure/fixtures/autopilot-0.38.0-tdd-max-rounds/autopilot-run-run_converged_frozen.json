@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "runId": "run_converged_frozen",
+  "projectRoot": "@PROJECT_ROOT@",
+  "workspaceRoot": "@PROJECT_ROOT@",
+  "ownerSessionId": "session_converged_frozen",
+  "stage": "BLOCKED",
+  "nextActionCode": "AWAIT_RESUME",
+  "approvedPlanSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "options": {
+    "cover": false,
+    "validate": true
+  },
+  "tdd": {
+    "attempt": 1,
+    "chainId": "cv-chain-1",
+    "sessionId": "session_converged_frozen",
+    "returnStage": "GATES",
+    "outcome": "max-rounds",
+    "headUpdateRequired": false
+  },
+  "effects": {
+    "prOpen": {
+      "status": "none",
+      "operationKey": null
+    },
+    "teamReview": {
+      "status": "none",
+      "operationKey": null,
+      "provider": null
+    }
+  },
+  "evidence": {
+    "pr": null,
+    "gates": null,
+    "review": null,
+    "findings": null,
+    "validation": null,
+    "coverage": null,
+    "delivery": null
+  },
+  "blocked": {
+    "from": "AWAIT_TDD",
+    "code": "TDD_MAX_ROUNDS"
+  },
+  "bypasses": [],
+  "stopBudget": {
+    "stage": "BLOCKED",
+    "count": 0
+  },
+  "events": [
+    {
+      "eventId": "start",
+      "eventType": "START",
+      "payloadDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "payload": {},
+      "fromStage": null,
+      "toStage": "PLANNING"
+    },
+    {
+      "eventId": "cv-plan",
+      "eventType": "PLAN_APPROVED",
+      "payloadDigest": "ccccc36de7346f39075c1e50a6bdb4bf7f5d314c50e45aebf9382030646adc03",
+      "payload": {
+        "approvedPlanSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "fromStage": "PLANNING",
+      "toStage": "AWAIT_TDD"
+    },
+    {
+      "eventId": "cv-tdd-start-1",
+      "eventType": "TDD_STARTED",
+      "payloadDigest": "b1f07eba700f4b0df4a9249fcf489cad3f507ecbf73ae9db3835c9d6cf280e1d",
+      "payload": {
+        "attempt": 1,
+        "chainId": "cv-chain-1",
+        "sessionId": "session_converged_frozen"
+      },
+      "fromStage": "AWAIT_TDD",
+      "toStage": "TDD_RUNNING"
+    },
+    {
+      "eventId": "cv-tdd-done-1",
+      "eventType": "TDD_CHAIN_DONE",
+      "payloadDigest": "b92cdd37f4b520aad7d6fa575caaf0f6dfca1c20eda93067f54d3ddb987709e0",
+      "payload": {
+        "attempt": 1,
+        "chainId": "cv-chain-1",
+        "sessionId": "session_converged_frozen",
+        "outcome": "max-rounds"
+      },
+      "fromStage": "TDD_RUNNING",
+      "toStage": "BLOCKED"
+    }
+  ]
+}

@@ -3,17 +3,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const mod = await import(new URL('../../hooks/lib/session-hub-receipt-v1.mjs', import.meta.url));
-const lineage = await import(new URL('../../skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url));
-const contract = JSON.parse(fs.readFileSync(new URL('../../skills/session-trail/handover-contract.json', import.meta.url), 'utf8'));
+const mod = await import(new URL('../../plugins/session-hub/hooks/lib/session-hub-receipt-v1.mjs', import.meta.url));
+const lineage = await import(new URL('../../plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url));
+const contract = JSON.parse(fs.readFileSync(new URL('../../plugins/session-hub/skills/session-trail/handover-contract.json', import.meta.url), 'utf8'));
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-receipt-unit-')));
 const SID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const TOKEN = '9b2c4e6a8d0f1b3c5e7a9c1e3f5b7d90';
-const RAW = `/zensu:session-trail takeover ${SID} --all --receipt ${TOKEN}`;
-const tagged = (args, name = '/zensu:session-trail') =>
-  `<command-message>zensu:session-trail</command-message>\n<command-name>${name}</command-name>\n<command-args>${args}</command-args>`;
+const RAW = `/session-hub:session-trail takeover ${SID} --all --receipt ${TOKEN}`;
+const tagged = (args, name = '/session-hub:session-trail') =>
+  `<command-message>session-hub:session-trail</command-message>\n<command-name>${name}</command-name>\n<command-args>${args}</command-args>`;
 const payload = (prompt, extra = {}) => ({
   session_id: 'abc',
   cwd: '/tmp',
@@ -30,7 +32,7 @@ test('the raw command the Session Hub types yields its token', () => {
 
 test('the command-tag spelling yields the same token, in either tag order', () => {
   assert.equal(mod.receiptToken(tagged(`takeover ${SID} --all --receipt ${TOKEN}`)), TOKEN);
-  const reordered = `<command-name>/zensu:session-trail</command-name>\n<command-args> takeover ${SID} --all --receipt ${TOKEN} </command-args>`;
+  const reordered = `<command-name>/session-hub:session-trail</command-name>\n<command-args> takeover ${SID} --all --receipt ${TOKEN} </command-args>`;
   assert.equal(mod.receiptToken(reordered), TOKEN);
 });
 
@@ -54,13 +56,15 @@ test('every other shape yields no token', () => {
     RAW.replace(' --all', ' --all --force'),
     RAW.replace('takeover ', 'show '),
     RAW.replace('takeover ', 'takeover  '),
-    RAW.replace('/zensu:session-trail', '/session-trail'),
+    RAW.replace('/session-hub:session-trail', '/session-trail'),
+    RAW.replace('/session-hub:session-trail', '/zensu:session-trail'),
+    tagged(`takeover ${SID} --all --receipt ${TOKEN}`, '/zensu:session-trail'),
     `${RAW} --receipt ${TOKEN}`,
     tagged(`takeover ${SID} --all --receipt ${TOKEN}`, '/zensu:other'),
     tagged(`takeover ${SID} --all`),
     `${tagged(`takeover ${SID} --all --receipt ${TOKEN}`)}\ntrailing text`,
     `${tagged(`takeover ${SID} --all --receipt ${TOKEN}`)}\n<command-args>x</command-args>`,
-    '<command-message>zensu:session-trail</command-message>',
+    '<command-message>session-hub:session-trail</command-message>',
     '',
     `${'a'.repeat(300 * 1024)}${RAW}`,
   ];
@@ -87,7 +91,9 @@ test('a receipt carries exactly six fields and only for a UserPromptSubmit paylo
 
 test('the module speaks the command and directory its handover contract declares', () => {
   assert.equal(contract.schemaVersion, 1);
-  assert.equal(contract.takeover.contract, 1);
+  assert.equal(contract.takeover.contract, 2);
+  assert.equal(mod.COMMAND_NAME, '/session-hub:session-trail');
+  assert.equal(mod.TAKEOVER_PREFIX, `${mod.COMMAND_NAME} takeover `);
   assert.equal(contract.takeover.prefix, mod.TAKEOVER_PREFIX);
   assert.equal(contract.takeover.suffix, mod.TAKEOVER_SUFFIX);
   assert.equal(contract.takeover.receipt, mod.RECEIPT_FLAG);
@@ -96,9 +102,9 @@ test('the module speaks the command and directory its handover contract declares
   assert.equal(`${contract.takeover.prefix}${SID}${contract.takeover.suffix}${contract.takeover.receipt}${TOKEN}`, RAW);
 });
 
-test('the linked-sessions capability names the lineage ledger a takeover writes, beside an unchanged takeover contract', () => {
+test('the linked-sessions capability names the lineage ledger a takeover writes, beside takeover contract 2', () => {
   assert.deepEqual(Object.keys(contract), ['schemaVersion', 'takeover', 'receipts', 'linkedSessions']);
-  assert.equal(contract.takeover.contract, 1);
+  assert.equal(contract.takeover.contract, 2);
   assert.deepEqual(contract.linkedSessions, {
     contract: 1,
     lineage: { directory: 'zensu/session-lineage/v1/edges', schemaVersion: 1 },
@@ -196,4 +202,151 @@ test('recording needs the skill on disk and writes nothing for any other prompt'
   assert.equal(landed.plugin, '9.8.7');
   assert.deepEqual(fs.readdirSync(mod.receiptsDir(config)), [`${TOKEN}.json`]);
   assert.equal(mod.record(text, env, NOW, plugin), null);
+});
+
+const pluginTree = (version = '1.0.0') => {
+  const plugin = tmp();
+  fs.mkdirSync(path.join(plugin, 'skills', 'session-trail', 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(plugin, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(plugin, 'skills', 'session-trail', 'SKILL.md'), '# skill\n');
+  fs.writeFileSync(path.join(plugin, 'skills', 'session-trail', 'scripts', 'trail.mjs'), '\n');
+  fs.writeFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'session-hub', version }) + '\n');
+  return plugin;
+};
+const homeWith = (text) => {
+  const home = tmp();
+  if (text !== undefined) {
+    fs.mkdirSync(path.join(home, '.zensu'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.zensu', 'config.json'), text);
+  }
+  return home;
+};
+
+test('the switch is read from ~/.zensu/config.json alone, and only an explicit false turns receipts off', () => {
+  assert.equal(mod.CONFIG_KEY, 'sessionHubReceipt');
+  assert.equal(mod.receiptEnabled(homeWith()), true);
+  assert.equal(mod.receiptEnabled(homeWith('{"hooks":{"sessionHubReceipt":false}}')), false);
+  assert.equal(mod.receiptEnabled(homeWith('{"hooks":{"sessionHubReceipt":true}}')), true);
+  assert.equal(mod.receiptEnabled(homeWith('{"hooks":{"sessionHubReceipt":"false"}}')), true);
+  assert.equal(mod.receiptEnabled(homeWith('{"hooks":{"otherKey":false}}')), true);
+  assert.equal(mod.receiptEnabled(homeWith('{"hooks":[false]}')), true);
+  assert.equal(mod.receiptEnabled(homeWith('[{"hooks":{"sessionHubReceipt":false}}]')), true);
+  assert.equal(mod.receiptEnabled(homeWith('{not json')), true);
+  assert.equal(mod.receiptEnabled(homeWith(`{"hooks":{"sessionHubReceipt":false},"pad":"${'x'.repeat(1024 * 1024)}"}`)), true);
+  const directory = tmp();
+  fs.mkdirSync(path.join(directory, '.zensu', 'config.json'), { recursive: true });
+  assert.equal(mod.receiptEnabled(directory), true);
+  assert.equal(mod.receiptEnabled.length, 0);
+});
+
+test('only a main-thread payload records: an agent_id or agent_type key marks a subagent', () => {
+  assert.equal(mod.mainPrincipal(payload(RAW)), true);
+  assert.equal(mod.mainPrincipal(payload(RAW, { agent_id: 'agent-1' })), false);
+  assert.equal(mod.mainPrincipal(payload(RAW, { agent_type: 'code-reviewer' })), false);
+  assert.equal(mod.mainPrincipal(payload(RAW, { agent_id: undefined })), false);
+  assert.equal(mod.mainPrincipal(payload(RAW, { agent_id: '' })), false);
+});
+
+test('a declared plugin root must resolve to this installation, and an absent one is this installation', () => {
+  const plugin = pluginTree();
+  const link = path.join(tmp(), 'linked-root');
+  fs.symlinkSync(plugin, link);
+  assert.equal(mod.declaredRootMatches({}, plugin), true);
+  assert.equal(mod.declaredRootMatches({ CLAUDE_PLUGIN_ROOT: '' }, plugin), true);
+  assert.equal(mod.declaredRootMatches({ CLAUDE_PLUGIN_ROOT: plugin }, plugin), true);
+  assert.equal(mod.declaredRootMatches({ CLAUDE_PLUGIN_ROOT: link }, plugin), true);
+  assert.equal(mod.declaredRootMatches({ CLAUDE_PLUGIN_ROOT: tmp() }, plugin), false);
+  assert.equal(mod.declaredRootMatches({ CLAUDE_PLUGIN_ROOT: path.join(plugin, 'missing') }, plugin), false);
+  assert.equal(mod.pluginRoot(), path.resolve(fileURLToPath(new URL('../../plugins/session-hub', import.meta.url))));
+});
+
+test('the hook entry records only past every guard, and never throws', () => {
+  const plugin = pluginTree('1.0.0');
+  const home = homeWith();
+  const text = JSON.stringify(payload(RAW));
+  const run = (input, overrides = {}) => {
+    const config = tmp();
+    const env = { CLAUDE_CONFIG_DIR: config, CLAUDE_PLUGIN_ROOT: plugin, ...overrides.env };
+    const result = mod.hookMain(input, env, NOW, overrides.root || plugin, overrides.home || home);
+    return { result, landed: fs.existsSync(path.join(config, 'zensu')) };
+  };
+  const hit = run(text);
+  assert.equal(hit.result.token, TOKEN);
+  assert.equal(hit.result.plugin, '1.0.0');
+  assert.equal(hit.landed, true);
+  const misses = [
+    run(JSON.stringify(payload(RAW, { agent_id: 'agent-1' }))),
+    run(text, { home: homeWith('{"hooks":{"sessionHubReceipt":false}}') }),
+    run(text, { env: { CLAUDE_PLUGIN_ROOT: tmp() } }),
+    run(JSON.stringify(payload(RAW.replace(' --receipt ', ' --token ')))),
+    run(JSON.stringify(payload(RAW.replace('/session-hub:session-trail', '/zensu:session-trail')))),
+    run(JSON.stringify([payload(RAW)])),
+    run('{"prompt": "--receipt " '),
+    run(JSON.stringify(payload(`${RAW}${' '.repeat(300 * 1024)}`))),
+    run(JSON.stringify(payload(RAW)), { root: tmp() }),
+  ];
+  for (const [index, miss] of misses.entries()) {
+    assert.equal(miss.result, null, `case ${index}`);
+    assert.equal(miss.landed, false, `case ${index}`);
+  }
+  for (const value of [undefined, null, 7, {}, []]) assert.equal(mod.hookMain(value, {}, NOW, plugin, home), null);
+});
+
+test('a home handed to the hook entry without CLAUDE_CONFIG_DIR is the home its receipt lands under', () => {
+  const plugin = pluginTree('1.0.0');
+  const home = homeWith();
+  fs.mkdirSync(path.join(home, '.claude'));
+  const result = mod.hookMain(JSON.stringify(payload(RAW)), { CLAUDE_PLUGIN_ROOT: plugin }, NOW, plugin, home);
+  assert.equal(result.token, TOKEN);
+  assert.equal(fs.existsSync(path.join(mod.receiptsDir(path.join(home, '.claude')), `${TOKEN}.json`)), true);
+  assert.equal(mod.record(JSON.stringify(payload(RAW.replace(TOKEN, TOKEN.replace(/^9/, '8')))), {}, NOW, plugin, home).plugin, '1.0.0');
+  assert.equal(fs.existsSync(path.join(mod.receiptsDir(path.join(home, '.claude')), `${TOKEN.replace(/^9/, '8')}.json`)), true);
+});
+
+const HUB_ENTRY = fileURLToPath(new URL('../../plugins/session-hub/hooks/lib/session-hub-receipt-v1.mjs', import.meta.url));
+const HUB_ROOT = path.resolve(path.dirname(HUB_ENTRY), '..', '..');
+const preload = (source) => {
+  const file = path.join(tmp(), 'preload.cjs');
+  fs.writeFileSync(file, source);
+  return file;
+};
+const entryRun = (entry, root, preloaded) => {
+  const home = homeWith();
+  const config = tmp();
+  const result = spawnSync(process.execPath, preloaded === undefined ? [entry] : ['-r', preloaded, entry], {
+    input: JSON.stringify(payload(RAW)),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: config, CLAUDE_PLUGIN_ROOT: root },
+  });
+  return { status: result.status, stdout: result.stdout, landed: fs.existsSync(path.join(mod.receiptsDir(config), `${TOKEN}.json`)) };
+};
+
+test('the hook entry exits 0 with no output and lands nothing when the home lookup throws', () => {
+  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT), { status: 0, stdout: '', landed: true });
+  const homeless = preload("require('node:os').homedir = () => { throw new Error('no home directory'); };\n");
+  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT, homeless), { status: 0, stdout: '', landed: false });
+});
+
+test('any other throw on the entry path, such as a failing clock, still ends with exit 0 and no output', () => {
+  const clockless = preload("Date.now = () => { throw new Error('no clock'); };\n");
+  assert.deepEqual(entryRun(HUB_ENTRY, HUB_ROOT, clockless), { status: 0, stdout: '', landed: false });
+});
+
+test('a missing lineage module leaves the entry silent with exit 0, while the same tree with the module lands the receipt', () => {
+  const copy = (withLineage) => {
+    const plugin = pluginTree('1.0.0');
+    fs.mkdirSync(path.join(plugin, 'hooks', 'lib'), { recursive: true });
+    fs.copyFileSync(HUB_ENTRY, path.join(plugin, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'));
+    if (withLineage) {
+      fs.copyFileSync(
+        path.join(HUB_ROOT, 'skills', 'session-trail', 'scripts', 'session-lineage-v1.mjs'),
+        path.join(plugin, 'skills', 'session-trail', 'scripts', 'session-lineage-v1.mjs'),
+      );
+    }
+    return plugin;
+  };
+  const whole = copy(true);
+  assert.deepEqual(entryRun(path.join(whole, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), whole), { status: 0, stdout: '', landed: true });
+  const partial = copy(false);
+  assert.deepEqual(entryRun(path.join(partial, 'hooks', 'lib', 'session-hub-receipt-v1.mjs'), partial), { status: 0, stdout: '', landed: false });
 });

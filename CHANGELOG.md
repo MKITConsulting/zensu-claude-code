@@ -7,6 +7,258 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.2] - 2026-11-17
+
+### Added
+
+- **review-chain**: Wait for resumed reviewers and print readable Stop notes (#628)
+
+### Fixed
+
+- **session-control**: Adopt a record whose project root and installation are both gone (#629)
+- **cli**: Align the plugin's zensu-cli text with the CLI it drives (#627)
+
+### Fixed
+
+- **zensu-cli coverage**: the text the plugin gives agents and users now matches the CLI it
+  drives. The `zensu-plm` catalog has a line for every command the CLI map knows, among them
+  `products get`, the ten `roadmap` verbs, `security score`, `knowledge context-search`,
+  `org users` and the five `ai-work` verbs, and C4 of `test-zensu-plm-arg-guidance.sh` fails
+  on a mapped command without one; the roadmap writes go through `/zensu:change`.
+  `/zensu:pulse` starts and ends a session with `--minimal-json`, treats `tracking_disabled`
+  as a clean no-op with no end, summary or retry, and records the start commit in the git
+  directory. It ends with one `--changed-file` per tracked path changed since the start commit
+  and per untracked, non-ignored file created or changed during the session, in place of
+  `--changed-files` and `HEAD~1`, skips nested repositories, stops above Zensu's limit of
+  1000 paths and asks before it sends paths that other authors' commits brought in;
+  `test-pulse-skill.sh` pins it. The SessionStart line reads
+  `zensu: pulse context — HEAD=… branch=…`, no longer claims a session and tells a repository
+  without a commit apart from no repository, and `/zensu:setup` and `docs/configuration.md`
+  describe `hooks.pulseSession` as that line only. README and `docs/configuration.md` document `ZENSU_TRUSTED_AUTH_HOSTS`, and
+  README Data & privacy names what the plan push and mock upload commands send.
+  `docs/documentation-guide.md` names CLI commands instead of MCP tools, and `/zensu:pilot`
+  finds a feature's journeys through `zensu journeys steps`.
+
+## [0.40.1] - 2026-11-16
+
+### Added
+
+- **zen-mode**: Say when a finished session can be archived (#624)
+
+## [0.40.0] - 2026-11-16
+
+### Added
+
+- **autopilot**: Validate a run only on machine-checked acceptance records (#594)
+
+### Fixed
+
+- **verify-feature**: Bound the CLI name, read help searches and zsh = in the gates (#623)
+- **skills**: State the text format of every Zensu free-text field (#613)
+
+### Added
+
+- **Autopilot validation gate**: an Autopilot run's VALIDATE stage now leaves only through
+  `zensu-log.sh --autopilot-validate --run <id> [--accept-partial <ids>]`, which applies
+  `VALIDATION_PASSED` itself once every active `AC-###` criterion of the plan the user approved has
+  a `pass` record on the clean pull-request head. On a run that validates, the plan-approval hook
+  stores the approved plan byte for byte as `.zensu/state/autopilot-approved-plan-<sha256>.md`,
+  and every check reads the criteria from that copy after it compares the digest. The acceptance
+  verbs take `--run <id>` in place of `--log`, `--evidence-run --scope acceptance --run <id>` runs
+  a check in the run's work tree, and a dirty tree or a `HEAD` other than the pull-request head
+  refuses the records, the status and the validation under every gate mode. A criterion this
+  environment cannot observe closes as partial only when the approved plan's
+  `## Manual Acceptance` table lists it; the run's ledger then records `acceptance-partial` and the
+  pull-request row reads 🟡. A session that resumes a validating run whose stored copy is missing
+  or changed is told so at session start, before VALIDATE refuses it.
+- **Acceptance consent**: a standalone `/zensu:build` chain whose criteria this environment cannot
+  observe (a real login, an account, a non-loopback host, a signed build, a driver that cannot
+  run here) now closes only with the user's consent for exactly those criteria.
+  `--chain-done --accept-partial <AC ids>` passes when the listed ids are exactly the open
+  criteria, every one is `partial` on the current tree and each has a row in the plan's new
+  optional `## Manual Acceptance` table, which the terminus reads with the program that reads the
+  `## Requirements` table, so a decorated or comma-listed id counts and a struck-out id covers
+  nothing; it records
+  `acceptance-partial` in the session bypass ledger (a consent the ledger does not take keeps the
+  chain open), and the chain-end summary renders it 🟡 with each criterion's reason. A refusal
+  whose open criteria are all `partial` ends with an `accept:` segment. `partial` is never a
+  must-fix in `/zensu:build` step 6d, `/zensu:verify-feature --chain` or `/zensu:self-review`:
+  they ask one question (provide access now, accept as partial, leave the chain open), write the
+  criterion's `## Manual Acceptance` row for an accepted one, and a gap foreseen at planning gets
+  its row then; `skills/verify-feature/rules/acceptance-consent.md` owns that question and that
+  row. Once the review has converged, a terminus refusal that waits only on the user lets the Stop
+  guard end the turn with an `ACCEPTANCE HAND-OFF — …` notice instead of blocking until the Stop
+  cap, and `--chain-status` prints the same line on stderr; an edit, a plan edit, a new acceptance
+  record or a new review generation re-arms the block. No remedy, refusal or skill text on the
+  chain-closing path names an environment-variable escape any more, and
+  `tests/structure/test-escape-wording.sh` holds that.
+
+### Upgrade notes
+
+- **An acceptance criterion before review**: `--tdd-complete` now refuses a standalone chain on a
+  changed tree whose plan carries no active `AC-###` row, and names the remedy (one `AC-###` row
+  per acceptance criterion, preferably one this environment can observe). A plan with only `FR-###`
+  rows used to pass there and was refused as `no-criteria` at the terminus, after the review. With
+  `evidence.acceptanceGate: advisory` the check prints a notice and completes, also when it cannot
+  run or cannot read the plan.
+- **`VALIDATION_PASSED` and `PLAN_APPROVED` are internal events**: `zensu-log.sh --autopilot-event`
+  now refuses `VALIDATION_PASSED`, which only `--autopilot-validate` applies, and `PLAN_APPROVED`,
+  which only the plan-approval hook records, and it reserves the event-id namespaces
+  `validation-passed:`, `validation-bypass:` and `plan-approved-` for them, whatever the event
+  type. `VALIDATION_FAILED` is still yours to send. A session that still holds the earlier
+  `/zensu:autopilot` text and sends `VALIDATION_PASSED` itself is refused with a line that names
+  `--autopilot-validate`.
+- **Runs approved before this release**: a validating run whose plan was approved before this
+  release has no stored plan copy, so `--autopilot-validate` refuses it as `unresolved` at
+  VALIDATE, and the session-start resume line reports `APPROVED_PLAN_COPY_UNAVAILABLE` for it.
+  The way out is yours to choose: validate it once under `ZENSU_ACCEPTANCE_GATE=off` or
+  `evidence.acceptanceGate: advisory`, each recorded in the run's ledger and its pull request and
+  neither lifting the pull-request head binding, or finish the change in a new run, whose approval
+  stores its copy.
+- **A validating plan needs an active criterion**: on a run that validates, the plan-approval hook
+  now refuses a plan without an active `AC-###` row in a `## Requirements` table as
+  `PLAN_CRITERIA_UNUSABLE`, a plan whose code fence never closes included, and keeps the run at
+  `PLANNING`, so the corrected plan is approved again; a requirements lister that cannot judge the
+  plan refuses as `PLAN_CRITERIA_UNREADABLE`. A work-order run that validates is refused the same
+  way at `--bind-spec`, with `plan-criteria-unusable` or `plan-criteria-unreadable`, before anyone
+  is asked to approve its plan.
+- **One id per criterion**: a plan that lists one `AC-###` id on two active `## Requirements`
+  rows is now refused at `--tdd-complete`, at a validating run's plan approval
+  (`PLAN_CRITERIA_UNUSABLE`) and at `--bind-spec` (`plan-criteria-unusable`), and the terminus
+  reads it as `unresolved`, because one acceptance record would answer for two criteria. Give each
+  criterion its own id; a deprecated row may still share its id with the active row that replaced
+  it.
+- **Autopilot spec template**: `templates/autopilot-spec.md` replaces its acceptance-criteria list
+  with a `## Requirements` table of `AC-###` rows and gains an optional `## Manual Acceptance`
+  table. A repository override at `.zensu/templates/autopilot-spec.md`, and a spec written from
+  the earlier template, needs that table before a validating run can be approved.
+- **Requirements lister exit 5**: `hooks/lib/zensu-plan-requirements.sh` now exits 5, not 2, for
+  a plan whose code fence never closes, and `--tdd-complete` reports such a plan as one that does
+  not parse and asks for the fence to be closed. A script that reads the lister's exit code and
+  took 2 for that case now sees 5.
+- **Accepting a gap in an Autopilot run**: an Autopilot run whose criterion this environment cannot
+  observe now stops at VALIDATE with `validation-unresolved` unless the approved plan lists that
+  criterion in its `## Manual Acceptance` table, because the run asks no question; put such a
+  criterion into that table before you approve the plan. A work-order plan no person approved
+  carries no consent, and a run validated from one records `acceptance-plan-unapproved` in its
+  ledger. `--accept-partial` takes the comma list of ids on both `--chain-done` and
+  `--autopilot-validate`, and a bare `--accept-partial` is refused on both.
+- **Run-mode records and an older installation**: an acceptance record of an Autopilot run names
+  its plan as `.zensu/state/autopilot-approved-plan-<sha256>.md`, which an installation that
+  predates this release reads as a malformed record, so an older plugin root that still serves a
+  session after the update can turn that session's acceptance verdict `invalid`.
+
+## [0.39.0] - 2026-11-15
+
+### Added
+
+- **review-chain**: Return a converged max-rounds Autopilot attempt to its stage (#621)
+- **session-hub**: Add the session-hub@zensu companion plugin (#606)
+- **verify-feature**: Sign the browser in through a recipe login script (#615)
+
+### Changed
+
+- **agents**: Name every required flag in the plm work and plan catalog (#619)
+
+### Fixed
+
+- **session-trail**: Close the linked-session gaps PR #589 deferred (#620)
+- **verify-feature**: Judge other sessions, bind the login origin and guard every tool (#618)
+
+### Added
+
+- **Session Hub companion plugin**: the `zensu` marketplace now also lists `session-hub@zensu`,
+  the Zensu Session Hub companion in `plugins/session-hub/`, with its own version,
+  `session-hub--vX.Y.Z` tags, changelog and release workflow (`release-session-hub.yml`). It
+  carries `/session-hub:session-trail`, the handover receipt as one Node hook and the usage-feed
+  module, and needs neither this plugin nor a Zensu account; its handover contract 2 names the
+  prefix `/session-hub:session-trail takeover `. This plugin's `/zensu:session-trail`, its receipt
+  hook and its usage-feed module are frozen until a later release removes them, and the skill's
+  description names the companion. CI runs the companion's release gate on every pull request
+  with a pinned Claude Code (`claude plugin validate` on the marketplace and the companion, an
+  install through its `git-subdir` entry into an isolated config, and its suites) and the install
+  alone with the oldest supported Claude Code, 2.1.296, and this changelog leaves out commits
+  that touch only `plugins/session-hub/`.
+- **Session Hub takeover notice**: a new advisory hook, `user-prompt-session-hub-takeover-notice.sh`,
+  answers the companion's takeover command, typed raw or in the command-tag form, with one notice
+  while `hooks.bashWriteGate` is on: the opt-in source-write gate refuses source writes and git
+  commands outside the session's Session Control root, and `/zensu:adopt-session --reanchor` moves
+  that root. In a session without a usable Session Control record the notice names
+  `/zensu:doctor` instead. On every other prompt, and with the gate off, it prints nothing; a
+  linked session started from a takeover brief gets no notice, so the companion's briefs state
+  the rule themselves.
+
+### Upgrade notes
+
+- **Browser configs on every session**: the browser consent gate now also judges a
+  `playwright-cli` call on a session that is not a `zensu-verify-*` one when its command names a
+  `.zensu/verify-feature-runs/` directory or passes a config through `--config` or
+  `PLAYWRIGHT_MCP_CONFIG`. It denies such a call that names a run directory, and one whose config
+  restores a browser state (`browser.contextOptions.storageState`), is not a local JSON file of
+  at most 1 MiB it can read (an INI config included), or is a path it cannot pin down: a value
+  assembled at run time or appended with `+=`, or a relative path in a command that is not one
+  plain call without a wrapper. A browser skill of your own that passes such a config needs a
+  literal absolute path to a JSON config without that key. A PowerShell call that names the CLI
+  with a run directory or a config is refused; run it through the Bash tool.
+- **Run-config helper**: `scripts/verify-browser-config.js` no longer accepts `--auth-origin`.
+  A local signed-in run refuses a recipe that declares `auth.environment` or names an
+  `auth.appOrigin` or `auth.baseUrl` other than the run's first `--origin`, so a split local
+  frontend/API recipe cannot sign in in local mode.
+- **Read guard on every tool**: the verify-auth read guard is registered on every tool (`.*`),
+  so an MCP tool, `WebFetch` or an agent prompt whose input spells a path inside a run's `auth/`
+  directory is refused, and `/zensu:doctor` reports a registration that lists tools as not
+  registered.
+- **Converged max-rounds attempts**: an Autopilot-bound `/zensu:build` attempt that reaches
+  `hooks.autoFixMaxRounds` now closes at the self-review terminus as `converged`, and its run
+  returns to its Autopilot stage, when the chain's findings ledger holds no routed-unfixed or
+  parked entry and no deferred IMPORTANT or CRITICAL entry, and records the final review with a
+  `FINAL REVIEW LEDGERED — R<n>` line. Such an attempt meets the gates a `pass` meets; when one
+  refuses for a cause only an edit can remove and the self-review's fix round is spent,
+  `--chain-done --outcome max-rounds` closes the attempt as before. Every other max-rounds
+  attempt still blocks the run with `TDD_MAX_ROUNDS`, and the terminus names the reason in a
+  `CONVERGENCE — …` line. A bound `--chain-done --outcome` other than `pass`, `no-changes` or
+  `max-rounds`, `converged` included, is refused with exit 2. The bound hand-off asks for ledger
+  lines for the final review's findings, and for
+  that marker, before the self-review starts. An installation that predates this release fails
+  closed on a run record or workflow document that holds `converged`.
+
+## [0.38.0] - 2026-11-13
+
+### Added
+
+- **hooks**: Offer /zensu:autopilot in the reminder's route question (#601)
+
+### Changed
+
+- **vcs**: Document the reconcile-review and review-markers verbs (#612)
+- **vcs**: Correct the test references in the driver spec (#610)
+
+### Fixed
+
+- **zen-mode**: Read hooks.zenMode under the recorded project root (#595)
+- **hooks**: Read redirections the way the shell does in the work-order gate (#604)
+- **evidence-run**: Make every transport write fail closed (#590)
+- **hooks**: Pin the gh host, certify only jobs the workflow version runs, and bound every CI refresh (#605)
+- **autopilot**: Re-gate a convergence fix before the pull request opens (#599)
+- **hooks**: Judge a chain's CI full-suite policy by its own work tree (#603)
+- **zen-mode**: Settle the open points of #549 (#579)
+- **hooks**: Record a named reviewer's hand-back under its spawn's agent id (#602)
+- **hooks**: Keep one CI proof per workflow version so parallel worktrees stop voiding each other (#598)
+- **agents**: State what Zensu knowledge search indexes and how it ranks (#597)
+
+### Upgrade notes
+
+- **zen-mode keys follow the session's recorded project root**: the zen-mode hook,
+  `/zensu:zen-mode --status` and the `/zensu:doctor` session row now read `hooks.zenMode` and
+  `hooks.zenModeDefault` from the `.zensu/config.json` under the session's recorded project root,
+  where they already read the session marker, instead of the one under the directory Claude Code
+  sets as `CLAUDE_PROJECT_DIR`; the session banner reads both under the same root as its
+  delivery-route line. The two directories differ in a session whose working directory is a git
+  worktree and after `/zensu:adopt-session --reanchor`. An opt-out such as `"zenMode": false` or
+  `"zenModeDefault": false` that lives only in the host directory's `.zensu/config.json` no longer
+  reaches such a session: copy it into that worktree's `.zensu/config.json` or into
+  `~/.zensu/config.json`.
+
 ## [0.37.0] - 2026-11-10
 
 ### Added

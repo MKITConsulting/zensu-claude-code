@@ -61,8 +61,9 @@ the caller asserted where the plan is. A DERIVED path that is not there does NOT
 nothing was asserted — but the gate then prints `REQUIREMENTS GATE UNRESOLVED` instead of
 staying quiet, because "the table passed" and "no table was checked" reading the same is the
 exact failure this feature exists to remove. **Refusal wording is typed**: exits 3/4 are a
-verdict about the plan, exit 2 and anything else (a missing library included) refuse with
-"could not judge the plan" — the sibling rule CLAUDE.md already states for the plan-payload
+verdict about the plan, exit 5 is a plan that does not parse and refuses with a text that asks
+for the open code fence to be closed, and exit 2 and anything else (a missing library included)
+refuse with "could not judge the plan" — the sibling rule CLAUDE.md already states for the plan-payload
 gate, that a load fault must never be reported as a judged payload.
 
 **Scoping and the switch are copied from the edit-landing receipt gate**, which sits directly
@@ -150,7 +151,10 @@ binding).
 A change to what counts as a usable table has to reach all seven. An EIGHTH reader is
 mechanical and shares this library's own parser: `--list` prints every recognized row with its
 state (`active`, `deprecated`, `placeholder`), and `hooks/lib/acceptance-verify-v1.js` takes its
-criteria from it (`.claude/rules/acceptance-verification-gate.md`). Two further containment
+criteria from it (`.claude/rules/acceptance-verification-gate.md`). `--manual-acceptance` points
+the same program at the `## Manual Acceptance` section, the source of the acceptance gate's
+consent, so a change to the row grammar reaches that table too; that mode alone reads a tilde in
+the id cell as a withdrawn row. Two further containment
 predicates were added by this gate — the JS one in the derived-channel reader and the shell one
 in the explicit channel — which extend the hand-copied `within()` / `isInside()` family this file
 already tracks. The standing fix for the JS half is TAKEN: the reader is `receiptRunLog` /

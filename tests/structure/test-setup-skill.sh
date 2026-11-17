@@ -107,7 +107,7 @@ fi
 
 # P8 — version stays in sync across plugin.json + marketplace.json + README badge.
 # Adding a skill does NOT bump the version; this guards against accidental drift.
-MARKET_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKET_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 if [ "$MARKET_VERSION" = "$EXPECTED_VERSION" ]; then
   check "P8a marketplace.json version ($MARKET_VERSION) == plugin.json ($EXPECTED_VERSION)" PASS
 else
@@ -202,6 +202,34 @@ if [ "$ZC_OLD_RC" -eq 1 ]; then
   check "P10f README, docs, skills and hooks hold no copy of the old Homebrew upgrade spelling '$ZC_OLD_BREW_UP'" PASS
 else
   check "P10f the old Homebrew upgrade spelling '$ZC_OLD_BREW_UP' is back, or the scan failed (grep exit $ZC_OLD_RC): $(printf '%s' "$ZC_OLD_SITES" | tr '\n' ' ')" FAIL
+fi
+readme_section() {
+  awk -v heading="$1" '
+    $0 == heading { on = 1; next }
+    on && /^##/ { exit }
+    on
+  ' "$README_MD" | tr -s '[:space:]' ' '
+}
+SELF_HOSTING="$(readme_section '### Self-hosting')"
+TRUSTED_ROW="$(grep -F -- '| `ZENSU_TRUSTED_AUTH_HOSTS` | — | Comma-separated host names' "$PLUGIN_DIR/docs/configuration.md")"
+if printf '%s' "$SELF_HOSTING" | grep -qF -- 'on a host named in `ZENSU_TRUSTED_AUTH_HOSTS`, a comma-separated list of host names, and never a plain `http://` endpoint under an `https://` API, not even on a listed host.' \
+  && printf '%s' "$SELF_HOSTING" | grep -qF -- 'only when both sit on the API'"'"'s own origin' \
+  && printf '%s' "$SELF_HOSTING" | grep -qF -- '`<api-url>/oauth/authorize` and `<api-url>/oauth/token`' \
+  && printf '%s' "$SELF_HOSTING" | grep -qF -- 'export ZENSU_TRUSTED_AUTH_HOSTS=' \
+  && [ "$(printf '%s\n' "$TRUSTED_ROW" | grep -c .)" -eq 1 ] \
+  && printf '%s' "$TRUSTED_ROW" | grep -qF -- 'only on the API'"'"'s own origin (same host and port) or on a listed host' \
+  && printf '%s' "$TRUSTED_ROW" | grep -qF -- 'never as a plain `http://` endpoint under an `https://` API' \
+  && printf '%s' "$TRUSTED_ROW" | grep -qF -- '`<api-url>/oauth/authorize` and `<api-url>/oauth/token`'; then
+  check "P11a README Self-hosting and the docs/configuration.md environment row document ZENSU_TRUSTED_AUTH_HOSTS with its origin rule, its https rule and the fallback endpoints" PASS
+else
+  check "P11a README Self-hosting or the docs/configuration.md environment row misses ZENSU_TRUSTED_AUTH_HOSTS, its origin rule, its https rule or the fallback endpoints" FAIL
+fi
+DATA_PRIVACY="$(readme_section '## Data & privacy')"
+if printf '%s' "$DATA_PRIVACY" | grep -qF -- 'Commands you run yourself send what you hand them: `zensu plan push` sends the work plan it parses from your Markdown file' \
+  && printf '%s' "$DATA_PRIVACY" | grep -qF -- '`zensu mocks create`, which `/zensu:change` also runs, uploads the mock file.'; then
+  check "P11b README Data & privacy names what zensu plan push and zensu mocks create send" PASS
+else
+  check "P11b README Data & privacy does not name what zensu plan push and zensu mocks create send" FAIL
 fi
 
 echo "----"

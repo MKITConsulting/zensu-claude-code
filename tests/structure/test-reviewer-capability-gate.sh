@@ -266,6 +266,25 @@ assert_case "neutral Grep cannot search the full-suite evidence store" deny arbi
 assert_case "reviewer Read cannot open a full-suite evidence record" deny review-aspect Read "{\"file_path\":\"$PLUGIN_DATA/evidence-run/v1/records/scv1_x/er1_x.json\"}"
 assert_case "neutral Read cannot open an acceptance record" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN_DATA/acceptance-verify/v1/records/scv1_x/av1_x.json\"}"
 assert_case "reviewer Grep cannot search the acceptance store" deny review-aspect Grep "{\"pattern\":\"verdict\",\"path\":\"$PLUGIN_DATA/acceptance-verify\"}"
+HANDOFF_RECORD="$PLUGIN_DATA/acceptance-handoff/v1/$SESSION_KEY.json"
+node -e '
+  const avr = require(process.argv[1]);
+  const [pluginData, sessionKey] = process.argv.slice(2);
+  avr.writeHandoff({ pluginData, sessionKey }, {
+    schema: avr.HANDOFF_SCHEMA, session_key: sessionKey, ticket: "rt_fixture", tree: "a".repeat(40),
+    plan: ".zensu/plans/fixture.md", plan_sha256: "b".repeat(64), records_sha256: "c".repeat(64),
+    state: "incomplete", open: ["AC-001"], remedies: ["accept: AC-001 could not be observed in this environment"],
+    written_at: new Date().toISOString(),
+  });
+' "$PLUGIN/hooks/lib/acceptance-verify-v1.js" "$PLUGIN_DATA" "$SESSION_KEY" 2>/dev/null
+if [ -f "$HANDOFF_RECORD" ]; then
+  check "the acceptance hand-off writer stores this session's record at acceptance-handoff/v1/<session key>.json under plugin data" PASS
+else
+  check "the acceptance hand-off writer stores this session's record at acceptance-handoff/v1/<session key>.json under plugin data" FAIL
+fi
+assert_case "neutral Read cannot open the hand-off record the acceptance writer stored" deny arbitrary-custom Read "{\"file_path\":\"$HANDOFF_RECORD\"}"
+assert_case "reviewer Read cannot open the hand-off record the acceptance writer stored" deny review-aspect Read "{\"file_path\":\"$HANDOFF_RECORD\"}"
+assert_case "PLM Read cannot open the hand-off record the acceptance writer stored" deny zensu:zensu-plm Read "{\"file_path\":\"$HANDOFF_RECORD\"}"
 PLUGIN_CASE_ALIAS="$(node -e '
   const value = process.argv[1];
   const slash = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));

@@ -311,3 +311,10 @@ test("responseOrigin judges the caller without reading any plan source", () => {
     "a path the walk would refuse never decides the origin verdict",
   );
 });
+
+test("the payload module carries no approved-plan store", () => {
+  const exported = require(modulePath);
+  for (const name of ["APPROVED_PLAN_PREFIX", "APPROVED_PLAN_FAILURES", "approvedPlanStem", "approvedPlanRelPath", "readApprovedPlan", "storeApprovedPlan"]) {
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(exported, name), false, name);
+  }
+});

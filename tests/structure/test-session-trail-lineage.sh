@@ -21,7 +21,7 @@ umask 022
 # home directory must fail loudly here rather than quietly read the real machine.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TRAIL_MJS="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+TRAIL_MJS="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 
 PASS=0; FAIL=0; SKIP=0
 check() {
@@ -536,7 +536,7 @@ process.stdout.write(bad.length ? `BAD:${bad.length}` : "ALL_INFERRED");
 TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
 case "$TXT" in *"[inferred"*) check "L13d a rendered chain marks an inferred link, so a guess never reads like a measurement" PASS ;; *) check "L13d a rendered chain marks an inferred link" FAIL ;; esac
 
-# A reconstructed edge is stamped from the STALLED SESSION'S activity, never from the
+# A reconstructed edge is stamped from its successor's last write, never later than the
 # moment --apply ran. recordedAt is the sole ordering key at four sites, so an
 # apply-time stamp made every guess newer than every real handover by construction —
 # one backfill then promoted guesses above measurements permanently, and printChain
@@ -557,6 +557,38 @@ process.stdout.write(stamps[stamps.length - 1]);
 BEFORE="$(edge_count)"
 trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --apply --all >/dev/null
 [ "$(edge_count)" = "$BEFORE" ] && check "L13e a second --apply does not duplicate an edge the ledger already holds" PASS || check "L13e a second --apply does not duplicate (before $BEFORE, after $(edge_count))" FAIL
+
+SID_F="66666666-0000-0000-0000-00000000000f"
+SID_G="77777777-0000-0000-0000-000000000077"
+fix "$SID_F" "$DEAD_PID" 90 skew "$ACCT_A" stalled
+fix "$SID_G" "$DEAD_PID" -2880 skew "$ACCT_B"
+trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --apply --all >/dev/null
+SKEW_AFTER="$(node -e 'process.stdout.write(new Date().toISOString())')"
+SKEW_GOT="$(node -e '
+const fs = require("fs"), path = require("path");
+const [cfg, sidF, sidA, sidB, after] = process.argv.slice(1);
+const dir = path.join(cfg, "zensu", "session-lineage", "v1", "edges");
+const edges = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+const skew = edges.find((e) => e.from && e.from.sessionId === sidF);
+const past = edges.find((e) => e.from && e.from.sessionId === sidA && e.to && e.to.sessionId === sidB);
+const handover = path.join(cfg, "work", "handover").replace(/[^A-Za-z0-9]/g, "-");
+const pastStamp = new Date(fs.statSync(path.join(cfg, "projects", handover, `${sidB}.jsonl`)).mtimeMs).toISOString();
+const skewWord = skew ? (skew.recordedAt <= after ? "skew-clamped" : `skew-ahead:${skew.recordedAt}`) : "skew-missing";
+const pastWord = past ? (past.recordedAt === pastStamp ? "past-kept" : `past-moved:${past.recordedAt}/${pastStamp}`) : "past-missing";
+process.stdout.write(`${skewWord},${pastWord}`);
+' "$CFG" "$SID_F" "$SID_A" "$SID_B" "$SKEW_AFTER")"
+SKEW_REFUSED="$(jq_field "$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --json --all)" refusedRecords)"
+case "$SKEW_GOT:$SKEW_REFUSED" in
+  (skew-clamped,*:0) check "L13g a backfilled edge whose successor transcript was modified two days ahead is stamped no later than the apply, so the ledger read refuses nothing" PASS ;;
+  (*) check "L13g a backfilled edge whose successor was modified in the future is stamped no later than the apply (got $SKEW_GOT, refused records $SKEW_REFUSED)" FAIL ;;
+esac
+case "$SKEW_GOT" in
+  (*,past-kept) check "L13g-control a backfilled edge whose successor was modified in the past keeps that transcript's own modification time as its stamp" PASS ;;
+  (*) check "L13g-control a backfilled edge whose successor was modified in the past keeps that transcript's modification time (got $SKEW_GOT)" FAIL ;;
+esac
+SKEW_PROJECT="$(node -e 'process.stdout.write(require("path").join(process.argv[1], "work", "skew").replace(/[^A-Za-z0-9]/g, "-"))' "$CFG")"
+[ -n "$SKEW_PROJECT" ] && rm -rf "$CFG/projects/$SKEW_PROJECT" "$CFG/work/skew"
+rm -f "$CFG/sessions/$SID_F.json" "$CFG/sessions/$SID_G.json" "$STORE/$ACCT_A/ws-0001/local_host-$SID_F.json" "$STORE/$ACCT_B/ws-0001/local_host-$SID_G.json"
 
 # ── L14 — backfill discriminates: same account is a resume, not a handover ──
 reset_ledger
@@ -965,7 +997,7 @@ OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_C" --json)"
 # at source. updateLabels owns the whole read-modify-write; a caller that reads,
 # merges and calls writeLabels itself reintroduces exactly the lost update the
 # module gained updateLabels to close, and prints success while doing it.
-LBL_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+LBL_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 grep -q 'updateLabels(LABELS_FILE' "$LBL_SRC" && L33_USES=YES || L33_USES=NO
 grep -q 'writeLabels(LABELS_FILE' "$LBL_SRC" && L33_RAW=YES || L33_RAW=NO
 if [ "$L33_USES" = "YES" ] && [ "$L33_RAW" = "NO" ]; then
@@ -1053,7 +1085,7 @@ trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$LIVE_PID" >/dev/null
 # process whose ancestor names Claude, which a sandbox cannot fabricate. Pinned at
 # source instead, with a control -- a scan that matched nothing would pass for the
 # wrong reason.
-WL_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+WL_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 WL_BODY="$(awk '/^function windowLabel\(/{f=1} f{print} f&&/^\}/{exit}' "$WL_SRC")"
 case "$WL_BODY" in *windowKey*) L35D_USES=YES ;; *) L35D_USES=NO ;; esac
 case "$WL_BODY" in *'String(appPid)'*|*'[appPid]'*) L35D_BARE=YES ;; *) L35D_BARE=NO ;; esac
@@ -1088,7 +1120,7 @@ OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --json --all)"
 # Structural, because a payload added later cannot be caught behaviourally: every
 # payload that reports the ledger's other two failure signals must report this one.
 # Anchored on ledgerError, which is the field that marks a payload as ledger-aware.
-LG_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+LG_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 LG_ERR="$(grep -c 'ledgerError:' "$LG_SRC")"
 LG_TRUNC="$(grep -c 'ledgerTruncated:' "$LG_SRC")"
 [ "$LG_ERR" -ge 5 ] && check "L36b-control the ledger-aware payload anchor still matches ($LG_ERR sites)" PASS || check "L36b-control the ledgerError anchor matched $LG_ERR sites, so the count below is vacuous" FAIL
@@ -1114,7 +1146,7 @@ reset_ledger
 # needs a real ancestor process whose executable path contains "claude" and whose
 # basename does not, which means planting an executable and a two-level process
 # tree that would have to be skipped on Windows. Pinned at source with a control.
-WO_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+WO_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 WO_BODY="$(awk '/^function windowOf\(/{f=1} f{print} f&&/^\}/{exit}' "$WO_SRC")"
 [ -n "$WO_BODY" ] && check "L37-control the windowOf body was actually extracted" PASS || check "L37-control the windowOf body was not found, so the scan below is vacuous" FAIL
 case "$WO_BODY" in *"path.basename(next.comm)"*) L37_BASE=YES ;; *) L37_BASE=NO ;; esac
@@ -1132,7 +1164,7 @@ case "$L37_CTRL" in *"test(next.comm)"*) check "L37-control the whole-path needl
 # guessed edge can invert causality read the first one and stopped. A comment is
 # not testable, so this is a source pin -- but a stale claim about a SAFETY guard
 # is exactly the kind that gets believed.
-BF_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+BF_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 grep -q 'A successor whose start precedes the stall is skipped outright' "$BF_SRC" \
   && check "L38 the retired start-guard claim is gone from the backfill filter" FAIL \
   || check "L38 the retired start-guard claim is gone from the backfill filter" PASS
@@ -1151,7 +1183,7 @@ grep -q 'is NOT established for finished sessions' "$BF_SRC" \
 # to prevent. No behavioural check on a POSIX host can see any of this -- the
 # function is identity off win32 -- so the three call sites are pinned at source
 # and the module's reachability is proven by actually loading it.
-PR_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+PR_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 PR_LOAD="$(node -e '
 const { createRequire } = require("node:module");
 const r = createRequire(process.argv[1]);
@@ -1178,7 +1210,8 @@ for pair in 'defaultConfigRoot:CLAUDE_CONFIG_DIR' 'resolveRoots:configDir.trim()
 done
 [ "$PR_BY_NAME" = "3" ] && check "L39 each of the three externally supplied roots is normalised inside the function that reads it" PASS || check "L39 each of the three roots is normalised by name (got $PR_BY_NAME of 3)" FAIL
 PR_HOSTED="$(grep -o 'path.resolve(hostPath(' "$PR_SRC" | grep -c .)"
-[ "$PR_HOSTED" = "3" ] && check "L39-bound and there are exactly three such sites, so a fourth root cannot be added unnormalised in silence" PASS || check "L39-bound exactly three normalised sites (got $PR_HOSTED)" FAIL
+PR_PAIR="$(fn_body "$PR_SRC" canonicalPair | grep -o 'path.resolve(hostPath(' | grep -c .)"
+[ "$PR_HOSTED" = "5" ] && [ "$PR_PAIR" = "2" ] && check "L39-bound and there are exactly five such sites, the three roots and canonicalPair's two operands, so a further root cannot be added unnormalised in silence" PASS || check "L39-bound exactly five normalised sites, two of them in canonicalPair (got $PR_HOSTED, canonicalPair $PR_PAIR)" FAIL
 # `[[:space:]]`, not `\s`: this is a plain BRE grep, where `\s` is a GNU extension.
 # The first spelling of this rule used it, so on a BSD host the scan could not match
 # and reported a clean file for the wrong reason -- the same trap this suite's own
@@ -1401,14 +1434,14 @@ reset_ledger
 # between the two reads them.
 TDZ_TREE="$(mktemp -d -t zensu-tdz-XXXXXX)"
 mkdir -p "$TDZ_TREE/skills/session-trail/scripts"
-cp "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$TDZ_TREE/skills/session-trail/scripts/" 2>/dev/null
+cp "$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs" "$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs" "$TDZ_TREE/skills/session-trail/scripts/" 2>/dev/null
 TDZ_OUT="$( CLAUDE_CONFIG_DIR="$TDZ_TREE/cfg" HOME="$TDZ_TREE" USERPROFILE="$TDZ_TREE" node "$TDZ_TREE/skills/session-trail/scripts/trail.mjs" lineage --all 2>&1 )"
 case "$TDZ_OUT" in *ReferenceError*) check "L46 a tree without hooks/lib does not crash before its own diagnostic" FAIL ;; *) check "L46 a tree without hooks/lib does not crash before its own diagnostic" PASS ;; esac
 case "$TDZ_OUT" in *"plugin tree is incomplete"*) check "L46a and the authored diagnostic is what the user actually sees" PASS ;; *) check "L46a the authored diagnostic is what the user sees (got ${TDZ_OUT:-<empty>})" FAIL ;; esac
 # The control: with the shared module reachable the same invocation must still
 # work, or the two checks above would be satisfied by a build that never resolves
 # a root at all.
-TDZ_OK="$( CLAUDE_CONFIG_DIR="$TDZ_TREE/cfg2" HOME="$TDZ_TREE" USERPROFILE="$TDZ_TREE" node "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" lineage --all 2>&1 )"
+TDZ_OK="$( CLAUDE_CONFIG_DIR="$TDZ_TREE/cfg2" HOME="$TDZ_TREE" USERPROFILE="$TDZ_TREE" node "$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs" lineage --all 2>&1 )"
 case "$TDZ_OK" in *"No handover has been recorded yet"*) check "L46b-control the same invocation from the real tree still resolves its roots" PASS ;; *) check "L46b-control the same invocation from the real tree still works (got ${TDZ_OK:-<empty>})" FAIL ;; esac
 rm -rf "$TDZ_TREE"
 
@@ -1530,7 +1563,7 @@ reset_ledger
 # as unmeasured after it doubled. The unit suite proves the flag is COMPUTED (it
 # plants exactly that many); these pins prove every renderer consults it, and each
 # negative carries a planted control.
-TR_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+TR_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 TR_TEXT_SITES="$(grep -c 'ledgerTruncatedNote\|truncatedNote(' "$TR_SRC")"
 [ "$TR_TEXT_SITES" -ge 4 ] && check "L51 the record cap is rendered on the text channel, not only inside JSON payloads ($TR_TEXT_SITES sites)" PASS || check "L51 the record cap is rendered on the text channel (got $TR_TEXT_SITES sites, want >= 4)" FAIL
 # One owner for the sentence, as confidenceNote is for the tier: four hand-written
@@ -1600,7 +1633,7 @@ reset_ledger
 # guard rebuilt the very `from>to` key dedupeEdges abandoned. Both raised by the
 # review panel; both are the module's own stated invariant, contradicted one file
 # over.
-CMP_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+CMP_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 grep -q 'localeCompare(' "$CMP_SRC" && check "L53 the consumer holds the module's single timestamp comparison rule" FAIL || check "L53 the consumer holds the module's single timestamp comparison rule" PASS
 grep -q '`${e.from.sessionId}>${e.to.sessionId}`' "$CMP_SRC" && check "L53a the backfill duplicate key cannot be spelled by two different pairs" FAIL || check "L53a the backfill duplicate key cannot be spelled by two different pairs" PASS
 # Planted controls: a negative scan that cannot match reports a clean file for the
@@ -1756,7 +1789,7 @@ OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all --js
 # from source rather than hardcoded here, so a tenth command added to the
 # dispatcher without a flag table fails this check instead of quietly accepting
 # every flag in the namespace again.
-L56_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+L56_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 DISPATCHED="$(node -e '
 const fs = require("node:fs");
 const src = fs.readFileSync(process.argv[1], "utf8");
@@ -1844,7 +1877,7 @@ reset_ledger
 # MAX_EDGE_RECORDS + 1 files, whose cost L51 already measured and declined for a
 # suite whose Windows ceiling is recorded as unmeasured. Same decision, same
 # reason, and each negative carries the planted control L51 established.
-L57_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+L57_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 # --apply is refused while the read was capped, for the identical reason it is
 # refused while a record is unreadable: the duplicate guard is built from that
 # read, so a pair beyond the cap re-proposes and --apply mints a second copy of an
@@ -1964,7 +1997,7 @@ reset_ledger
 # hand-extending every time, which is how the twin survived a whole round. This
 # scans for the SHAPE instead: any interpolation of one of these identifiers,
 # unwrapped, on a line that prints or pushes.
-L61_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+L61_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 # Assignments as well as renders: the value can reach a printed line through an
 # intermediate local, which is how `${r.branch}` on a `const gitPart =` line
 # survived the first spelling of this scan while only `${gitPart}` reached the
@@ -1983,7 +2016,7 @@ L61_PAT='\br\.(wt|cwd|worktree|branch|title)\b'
 # rel/path.* take it as a prefix base, dirExists/worktreeRoot/gitState/gitDiffText/
 # findPlanDocs/nearestRepoRoot/releaseSubject take it as a filesystem path, Set/toLowerCase build
 # a match structure, and ===/!==/typeof/.length compare it.
-L61_OK='(oneLine|flatPath|briefPath|briefShellArg|writeAnchor|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|releaseSubject\(|firstRepositoryOf\(|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
+L61_OK='(oneLine|flatPath|briefPath|briefShellArg|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|releaseSubject\(|firstRepositoryOf\(|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
 # The `cd ${...}` exemption removes the exempted TOKEN, never the line, so a second
 # raw interpolation on one of those four lines stays visible.
 # Comment lines are excluded: they describe the rule rather than render anything,
@@ -2642,13 +2675,13 @@ elif [ -z "$WHERE_PRESENT" ] || [ -z "$WHERE_GONE" ]; then
   check "L70L-control the present/gone split of whereAdviceLines could not be taken, so this pin is vacuous" FAIL
 else
   printf '%s\n' "$WHERE_PRESENT" | grep -qF "session's own worktree root was not resolved" || L70L_MISS="$L70L_MISS [no-taker-reason]"
-  printf '%s\n' "$WHERE_PRESENT" | grep -qF 'path-comparison module did not load' || L70L_MISS="$L70L_MISS [gate-reason]"
+  printf '%s\n' "$WHERE_SRC" | grep -qF 'path-comparison module did not load' && L70L_MISS="$L70L_MISS [gate-arm-survives-in-the-companion]"
   printf '%s\n' "$WHERE_PRESENT" | grep -qF 'briefShellArg(row.wt)' || L70L_MISS="$L70L_MISS [present-leg-not-shell-quoted]"
   printf '%s\n' "$WHERE_PRESENT" | grep -qF 'flatPath(row.wt)' && L70L_MISS="$L70L_MISS [present-leg-uses-the-gone-helper]"
   printf '%s\n' "$WHERE_GONE" | grep -qF 'flatPath(row.wt)' || L70L_MISS="$L70L_MISS [gone-leg-not-flatPath]"
   printf '%s\n' "$WHERE_GONE" | grep -qF 'briefShellArg(row.wt)' && L70L_MISS="$L70L_MISS [gone-leg-shell-quotes-a-read-only-value]"
   if [ -z "$L70L_MISS" ]; then
-    check "L70L both unanswerable arms state their own cause on the leg that can reach them, and neither leg borrows the other's path helper" PASS
+    check "L70L the unanswerable arm states its own cause on the leg that can reach it, the companion carries no GATE arm, and neither leg borrows the other's path helper" PASS
   else
     check "L70L whereAdviceLines source pins:$L70L_MISS" FAIL
   fi
@@ -3058,7 +3091,7 @@ process.stdout.write("bare=" + bare.length + " def=" + def.length + " deref=" + 
 // so it could not have answered true even if anything had read it.
 process.stdout.write(def.join("\n") + "\n");
 process.stdout.write(bare.join("\n"));
-' "$TRAIL_MJS")"
+' "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs")"
 G70K_BARE="$(printf '%s\n' "$GATE_SRC" | sed -n 's/^bare=\([0-9][0-9]*\) .*$/\1/p')"
 G70K_DEF="$(printf '%s\n' "$GATE_SRC" | sed -n 's/^.* def=\([0-9][0-9]*\) .*$/\1/p')"
 G70K_DEREF="$(printf '%s\n' "$GATE_SRC" | sed -n 's/^.* deref=\([0-9][0-9]*\) .*$/\1/p')"

@@ -34,7 +34,12 @@ set -u
 # predicate the same way.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-SKILL_DIR="$PLUGIN_DIR/skills/session-trail"
+SKILL_DIR="$PLUGIN_DIR/plugins/session-hub/skills/session-trail"
+PLM_SKILL_DIR="$PLUGIN_DIR/skills/session-trail"
+PLM_TRAIL_MJS="$PLM_SKILL_DIR/scripts/trail.mjs"
+PLM_REF_COMMANDS="$PLM_SKILL_DIR/references/commands.md"
+PLM_REF_LIMITS="$PLM_SKILL_DIR/references/limits.md"
+PLM_REF_TAKEOVER="$PLM_SKILL_DIR/references/takeover.md"
 # Named the same way the lineage suite names its own file, and for the same
 # reason: T10c scans it for unsandboxed invocations of the script under test.
 SELF_SUITE_FILE="$PLUGIN_DIR/tests/structure/test-session-trail-skill.sh"
@@ -49,7 +54,7 @@ REF_GOTCHAS="$REF_DIR/gotchas.md"
 REF_DISCLOSURE="$REF_DIR/disclosure.md"
 TRAIL_MJS="$SKILL_DIR/scripts/trail.mjs"
 LEDGER_MJS="$SKILL_DIR/scripts/session-lineage-v1.mjs"
-PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
+PLUGIN_JSON="$PLUGIN_DIR/plugins/session-hub/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
 
 PLUGIN_ROOT_INVOCATION='${CLAUDE_PLUGIN_ROOT}/skills/session-trail/scripts/trail.mjs'
@@ -178,19 +183,23 @@ section_of() {
 all_md() {
   cat "$SKILL_MD" "$REF_DIR"/*.md
 }
+plm_all_md() {
+  cat "$PLM_SKILL_DIR/SKILL.md" "$PLM_SKILL_DIR/references"/*.md
+}
+
 
 if [ ! -f "$SKILL_MD" ]; then
-  check "T1 skills/session-trail/SKILL.md exists" FAIL
+  check "T1 plugins/session-hub/skills/session-trail/SKILL.md exists" FAIL
   echo "----"
   echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
   exit 1
 fi
-check "T1 skills/session-trail/SKILL.md exists" PASS
+check "T1 plugins/session-hub/skills/session-trail/SKILL.md exists" PASS
 
 if [ -f "$TRAIL_MJS" ]; then
-  check "T2 skills/session-trail/scripts/trail.mjs ships with the skill" PASS
+  check "T2 plugins/session-hub/skills/session-trail/scripts/trail.mjs ships with the skill" PASS
 else
-  check "T2 skills/session-trail/scripts/trail.mjs ships with the skill" FAIL
+  check "T2 plugins/session-hub/skills/session-trail/scripts/trail.mjs ships with the skill" FAIL
   echo "----"
   echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
   exit 1
@@ -205,26 +214,26 @@ else
   check "T3 frontmatter declares 'name: session-trail'" FAIL
 fi
 
-if grep -qxF 'description: >' "$SKILL_MD" && grep -qE '^ +\[Zensu\] ' "$SKILL_MD"; then
-  check "T4 description is a folded scalar carrying the '[Zensu]' marker" PASS
+if grep -qxF 'description: >' "$SKILL_MD" && grep -qE '^ +\[Zensu Session Hub\] ' "$SKILL_MD"; then
+  check "T4 description is a folded scalar carrying the '[Zensu Session Hub]' marker" PASS
 else
-  check "T4 description is a folded scalar carrying the '[Zensu]' marker" FAIL
+  check "T4 description is a folded scalar carrying the '[Zensu Session Hub]' marker" FAIL
 fi
 
 # T5 asserts the DESCRIPTION names the namespaced invocation. Scoping it to the
 # frontmatter is what keeps it independent of T6 — a bare substring search over
 # the whole file is satisfied by the H1 alone and can never fail on its own.
 FRONTMATTER="$(awk 'BEGIN{n=0} /^---$/{n++; next} n==1{print} n>=2{exit}' "$SKILL_MD")"
-if printf '%s\n' "$FRONTMATTER" | grep -qF '/zensu:session-trail'; then
-  check "T5 the frontmatter description names '/zensu:session-trail'" PASS
+if printf '%s\n' "$FRONTMATTER" | grep -qF '/session-hub:session-trail'; then
+  check "T5 the frontmatter description names '/session-hub:session-trail'" PASS
 else
-  check "T5 the frontmatter description names '/zensu:session-trail'" FAIL
+  check "T5 the frontmatter description names '/session-hub:session-trail'" FAIL
 fi
 
-if grep -qxF '# /zensu:session-trail' "$SKILL_MD"; then
-  check "T6 SKILL.md has the namespaced H1 '# /zensu:session-trail'" PASS
+if grep -qxF '# /session-hub:session-trail' "$SKILL_MD"; then
+  check "T6 SKILL.md has the namespaced H1 '# /session-hub:session-trail'" PASS
 else
-  check "T6 SKILL.md has the namespaced H1 '# /zensu:session-trail'" FAIL
+  check "T6 SKILL.md has the namespaced H1 '# /session-hub:session-trail'" FAIL
 fi
 
 # ── Control fixtures for the T0-block negative checks ───────────────────────
@@ -920,6 +929,7 @@ H5_RECORD_AT="$(printf '%s\n' "$H5_FLOW" | grep -nF '`takeover <selector> --all 
 # not an emission, and a `// print('…')` would otherwise satisfy the pin with the
 # live call deleted.
 TRAIL_CODE="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$TRAIL_MJS")"
+PLM_TRAIL_CODE="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$PLM_TRAIL_MJS")"
 printf '%s\n' "$TRAIL_CODE" | grep -qiF "$OLD_GO_NO_GO" && DOCTRINE_MISS="$DOCTRINE_MISS [script:retired-go-no-go-is-back]"
 [ "$(printf '%s\n' "$TRAIL_CODE" | grep -cE "code: 'source-(busy|unmeasured)', text: .*is the go\.")" = "2" ] || DOCTRINE_MISS="$DOCTRINE_MISS [script:release-blockers-ask]"
 # Two anchors, because the doctrine now has two shapes in the script. The
@@ -1363,7 +1373,7 @@ fi
 ESCAPE_LITERAL='ZENSU_BASH_WRITE_GATE'
 ORDINAL_NEEDLE='Flow 3 step'
 
-FLOW3="$(cat "$REF_TAKEOVER")"
+FLOW3="$(cat "$PLM_REF_TAKEOVER")"
 ANCHOR_MISS=""
 [ -n "$FLOW3" ] || ANCHOR_MISS="$ANCHOR_MISS [flow-3-heading-not-found]"
 printf '%s\n' "$FLOW3" | grep -qF 'anchored to that worktree' || ANCHOR_MISS="$ANCHOR_MISS [route-rule-missing]"
@@ -1473,11 +1483,11 @@ WRITES_MISS=""
 # derivation went empty, failing this check on a change that strengthened the
 # render. Anchoring on the body means any branch whose first rendered token is the
 # label supplies it.
-WRITES_LABEL="$(sed -n '/^function writesLines(/,/^}/p' "$TRAIL_MJS" | sed -n "s/.*['\`]\([A-Z][A-Z]*\)   [a-z].*/\1/p" | head -1)"
+WRITES_LABEL="$(sed -n '/^function writesLines(/,/^}/p' "$PLM_TRAIL_MJS" | sed -n "s/.*['\`]\([A-Z][A-Z]*\)   [a-z].*/\1/p" | head -1)"
 # Both quote styles: the `allowed` head is a plain string, the other two are
 # template literals. Matching only one style silently derives a single verb and
 # the loop below then pins a third of the vocabulary.
-WRITES_VERBS="$(sed -n "s/.*[\`']${WRITES_LABEL:-WRITES}   \([a-z]*\).*/\1/p" "$TRAIL_MJS" | sort -u | tr '\n' ' ')"
+WRITES_VERBS="$(sed -n "s/.*[\`']${WRITES_LABEL:-WRITES}   \([a-z]*\).*/\1/p" "$PLM_TRAIL_MJS" | sort -u | tr '\n' ' ')"
 WRITES_VERB_COUNT="$(printf '%s\n' $WRITES_VERBS | grep -c .)"
 # One implementation of the verb arm, so T27 and its T27b control cannot diverge.
 #
@@ -1554,7 +1564,7 @@ fi
 LIMITS_SECTION="$(section_of '## Limits of what this can know' "$REF_LIMITS")"
 LIMITS_MISS=""
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'but not commit it' || LIMITS_MISS="$LIMITS_MISS [asymmetry-bullet-missing]"
-printf '%s\n' "$LIMITS_SECTION" | grep -qF 'With the opt-in source-write gate on' || LIMITS_MISS="$LIMITS_MISS [asymmetry-not-bounded-to-the-opt-in]"
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'With Zensu PLM installed and its opt-in source-write gate on' || LIMITS_MISS="$LIMITS_MISS [asymmetry-not-bounded-to-plm-and-the-opt-in]"
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-edit-tdd-reminder.sh' || LIMITS_MISS="$LIMITS_MISS [edit-hook-not-named]"
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-write-secret-scan.sh' || LIMITS_MISS="$LIMITS_MISS [secret-scan-hook-not-named]"
 # The roster is only complete WITH the principal. A third hook on the `.*` matcher
@@ -1599,27 +1609,27 @@ CAUTION_MISS=""
 # Counted against COMMENT-STRIPPED source, the way T23 does it: an emission-shaped
 # line inside a comment is not an emission, and commenting both call sites out
 # would otherwise leave this pin green with the caution gone from both briefs.
-CAUTION_TOTAL="$(printf '%s\n' "$TRAIL_CODE" | grep -c 'writeAnchorCaution(')"
-CAUTION_DEF="$(printf '%s\n' "$TRAIL_CODE" | grep -c '^function writeAnchorCaution(')"
-CAUTION_USES="$(printf '%s\n' "$TRAIL_CODE" | grep -c 'L.push(writeAnchorCaution(')"
+CAUTION_TOTAL="$(printf '%s\n' "$PLM_TRAIL_CODE" | grep -c 'writeAnchorCaution(')"
+CAUTION_DEF="$(printf '%s\n' "$PLM_TRAIL_CODE" | grep -c '^function writeAnchorCaution(')"
+CAUTION_USES="$(printf '%s\n' "$PLM_TRAIL_CODE" | grep -c 'L.push(writeAnchorCaution(')"
 [ "$CAUTION_DEF" = "1" ] || CAUTION_MISS="$CAUTION_MISS [caution-definitions=$CAUTION_DEF]"
 [ "$CAUTION_USES" = "2" ] || CAUTION_MISS="$CAUTION_MISS [brief-renderers-emitting-it=$CAUTION_USES, expected takeover and handoff]"
 # Reconciled against the total, the way T25 reconciles its verdict call sites: a
 # third occurrence in some other spelling is invisible to a def+use count alone.
 [ "$((CAUTION_TOTAL - CAUTION_DEF))" = "$CAUTION_USES" ] \
   || CAUTION_MISS="$CAUTION_MISS [unaccounted-occurrences total=$CAUTION_TOTAL def=$CAUTION_DEF uses=$CAUTION_USES]"
-printf '%s\n' "$TRAIL_CODE" | grep -qF 'can edit files there but cannot commit' || CAUTION_MISS="$CAUTION_MISS [caution-text-missing]"
+printf '%s\n' "$PLM_TRAIL_CODE" | grep -qF 'can edit files there but cannot commit' || CAUTION_MISS="$CAUTION_MISS [caution-text-missing]"
 # The persisted sentence must state CONTAINMENT: it outlives any later correction,
 # because a brief already written to ~/.claude/handoffs/ is never re-measured.
-printf '%s\n' "$TRAIL_CODE" | grep -qF 'does not CONTAIN' || CAUTION_MISS="$CAUTION_MISS [caution-states-equality-not-containment]"
+printf '%s\n' "$PLM_TRAIL_CODE" | grep -qF 'does not CONTAIN' || CAUTION_MISS="$CAUTION_MISS [caution-states-equality-not-containment]"
 # And it must BOUND its transcript-derived path — the brief is persisted and read
 # by an instance that need not have this skill loaded.
-printf '%s\n' "$TRAIL_CODE" | grep -A3 '^function writeAnchorCaution(' | grep -qF 'briefPath(wt)' || CAUTION_MISS="$CAUTION_MISS [caution-path-unbounded]"
+printf '%s\n' "$PLM_TRAIL_CODE" | grep -A3 '^function writeAnchorCaution(' | grep -qF 'briefPath(wt)' || CAUTION_MISS="$CAUTION_MISS [caution-path-unbounded]"
 # Both raw-carrier scans are keyed on an EMITTER (`L.push(` / `print(`), so a
 # line-BUILDER that returns strings for someone else to emit is invisible to them.
 # `writesLines` is exactly that shape, and its emitting line carries no `${...}`
 # for the extraction to reach. Same bespoke treatment `writeAnchorCaution` gets.
-WRITES_LINES_BODY="$(printf '%s\n' "$TRAIL_CODE" | sed -n '/^function writesLines(/,/^}/p')"
+WRITES_LINES_BODY="$(printf '%s\n' "$PLM_TRAIL_CODE" | sed -n '/^function writesLines(/,/^}/p')"
 [ -n "$WRITES_LINES_BODY" ] || CAUTION_MISS="$CAUTION_MISS [writesLines-body-not-extracted]"
 for root in targetRoot callerRoot; do
   printf '%s\n' "$WRITES_LINES_BODY" | grep -qF "flatPath(w.${root})" \
@@ -1959,24 +1969,24 @@ T31_BAD=""
 # Every quoted literal on a line that mentions `reasonCode`, whatever shape the
 # expression takes — a bare value, a ternary, or a nested one. Keying on a single
 # spelling found three of the seven and made the loop below nearly vacuous.
-T31_CODES="$(grep -F 'reasonCode' "$TRAIL_MJS" | grep -oE "'[a-z][a-z-]+'" | tr -d "'" | sort -u)"
+T31_CODES="$(grep -F 'reasonCode' "$PLM_TRAIL_MJS" | grep -oE "'[a-z][a-z-]+'" | tr -d "'" | sort -u)"
 T31_N="$(printf '%s\n' "$T31_CODES" | grep -c . || true)"
 if [ "${T31_N:-0}" -lt 5 ]; then
   T31_BAD="$T31_BAD reasonCode-set-not-extractable(found=${T31_N:-0})"
 else
   for c in $T31_CODES; do
-    all_md | grep -qF "\`$c\`" || T31_BAD="$T31_BAD undocumented-reasonCode($c)"
+    plm_all_md | grep -qF "\`$c\`" || T31_BAD="$T31_BAD undocumented-reasonCode($c)"
   done
 fi
 # The branchable field must be NAMED as such, and the prose field marked as not one.
-all_md | grep -qF 'Branch on `writes.reasonCode`' || T31_BAD="$T31_BAD skill-does-not-name-the-branchable-field"
-all_md | grep -qF 'do not match on it' || T31_BAD="$T31_BAD skill-does-not-warn-against-matching-the-prose"
+plm_all_md | grep -qF 'Branch on `writes.reasonCode`' || T31_BAD="$T31_BAD skill-does-not-name-the-branchable-field"
+plm_all_md | grep -qF 'do not match on it' || T31_BAD="$T31_BAD skill-does-not-warn-against-matching-the-prose"
 # The fail-safe reading, which is the one a consumer gets wrong by writing the
 # natural `=== false`.
-all_md | grep -qF 'Treat `null` as denied' || T31_BAD="$T31_BAD skill-does-not-state-the-fail-safe-reading"
+plm_all_md | grep -qF 'Treat `null` as denied' || T31_BAD="$T31_BAD skill-does-not-state-the-fail-safe-reading"
 # `sourceTrusted` exists so the soundness downgrade stops being keyed on a display
 # label at two independent sites; a consumer needs to know which way it reads.
-all_md | grep -qF 'writes.sourceTrusted' || T31_BAD="$T31_BAD skill-does-not-document-sourceTrusted"
+plm_all_md | grep -qF 'writes.sourceTrusted' || T31_BAD="$T31_BAD skill-does-not-document-sourceTrusted"
 # Control: the extraction must find the codes it is meant to check, or the loop
 # above passes by iterating over nothing.
 case "$T31_CODES" in *weak-channel*) ;; *) T31_BAD="$T31_BAD extraction-missed-a-known-code" ;; esac
@@ -2458,10 +2468,10 @@ t36_cite() { # <cited-file> <needle> <citing-file> <citation-regex>
 }
 T36_SPEC="$PLUGIN_DIR/docs/multi-repo-chains-spec.md"
 T36_HTML="$PLUGIN_DIR/docs/multi-repo-chains-overview.html"
-t36_cite "$TRAIL_MJS" 'function gitState' "$T36_SPEC" 'skills/session-trail/scripts/trail\.mjs:[0-9]+'
-t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_SPEC" '`trail\.mjs:[0-9]+`'
-t36_cite "$REF_COMMANDS" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/references/commands\.md:[0-9]+'
-t36_cite "$REF_LIMITS" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/references/limits\.md:[0-9]+'
+t36_cite "$PLM_TRAIL_MJS" 'function gitState' "$T36_SPEC" 'skills/session-trail/scripts/trail\.mjs:[0-9]+'
+t36_cite "$PLM_TRAIL_MJS" 'claude --resume' "$T36_SPEC" '`trail\.mjs:[0-9]+`'
+t36_cite "$PLM_REF_COMMANDS" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/references/commands\.md:[0-9]+'
+t36_cite "$PLM_REF_LIMITS" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/references/limits\.md:[0-9]+'
 # For THESE three the HTML spells each citation as its own `<p class="src">` line, so the
 # two trail.mjs rows need distinguishing regexes. That is not a property of the document — elsewhere it puts two citations on one
 # `<p class="src">` line separated by a middot, which is what the match-count guard above
@@ -2479,7 +2489,7 @@ t36_cite "$REF_LIMITS" 'scopes by transcript-directory' "$T36_SPEC" 'skills/sess
 # An earlier wording of this paragraph claimed both moved with
 # the target, which contradicted the row comment directly beneath it from the round that
 # widened that second class.
-t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:2[0-9][0-9][0-9]'
+t36_cite "$PLM_TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:2[0-9][0-9][0-9]'
 # The HTML cites `trail.mjs` TWICE, so this row cannot use the generic `trail\.mjs:[0-9]+` its
 # spec-side siblings use — it would match the other citation. The class is the whole 3000-and-up
 # range rather than a fixed band: it still separates this citation from the `gitState` one in the
@@ -2488,8 +2498,8 @@ t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:2[0-9][0-9][0-
 # first time the citation crossed 4000 — a band is a hand-maintained numeral wearing a class's
 # clothes. A LOWER BOUND with an open top is what survives growth; it costs the ability to tell
 # this citation from a future third one above 3000, which is a trade to re-take if one lands.
-t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:[3-9][0-9][0-9][0-9]'
-t36_cite "$REF_LIMITS" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/references/limits\.md:[0-9]+'
+t36_cite "$PLM_TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:[3-9][0-9][0-9][0-9]'
+t36_cite "$PLM_REF_LIMITS" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/references/limits\.md:[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the
 # docs grew that no row covers — a `session-lineage-v1.mjs:NNN` would be graded by
@@ -2515,10 +2525,10 @@ fi
 # The positive half is DERIVED from `writeAnchor`'s own candidate labels, so a fourth
 # channel has to reach this sentence too; the negative half carries a control,
 # because a needle that stops matching would otherwise degrade into a free PASS.
-T37_LABELS="$(awk '/const candidates = \[/{f=1} f{print} f&&/\];/{exit}' "$TRAIL_MJS" \
+T37_LABELS="$(awk '/const candidates = \[/{f=1} f{print} f&&/\];/{exit}' "$PLM_TRAIL_MJS" \
   | grep -oE "label: '[A-Za-z:_-]+'" | sed "s/label: '//; s/'$//" | sed 's/^env://; s/^flag://' | sort -u)"
 T37_ABSOLUTE='**only** when `ZENSU_PROJECT_ROOT` or `CLAUDE_PROJECT_DIR` is present in its own environment'
-T37_LINE="$(grep -F 'answers `allowed` or `denied here`' "$REF_TAKEOVER" | head -1)"
+T37_LINE="$(grep -F 'answers `allowed` or `denied here`' "$PLM_REF_TAKEOVER" | head -1)"
 T37_MISS=""
 [ -n "$T37_LINE" ] || T37_MISS="$T37_MISS writes-sentence-not-found"
 [ -n "$T37_LABELS" ] || T37_MISS="$T37_MISS candidate-labels-not-derived"
@@ -2633,7 +2643,7 @@ t39_need activity-gotcha "$(t38_slice "**A session's activity" "$REF_GOTCHAS")" 
   'lastTurn.at' 'lastTurn.activityAt' '`lastActivity`' '(file last written' '`--days` scan window' 'lineage --backfill' \
   'a tool call writes its result record only when it returns'
 t39_need show-json-disclosure "$(t38_slice '**`show --json` discloses more than `show` does.**' "$REF_DISCLOSURE")" \
-  '`selfSkipped` describes this session too'
+  '`selfSkipped` describes **this** session'
 T39_ADOPT="$(t38_slice '**`adopt --json` and `lineage --backfill` disclose more' "$REF_DISCLOSURE")"
 T39_DOC_KEYS="$(printf '%s\n' "$T39_ADOPT" | grep -oE '`\{recorded: null[^}]*\}`' | head -1 | sed -E 's/^`\{//; s/\}`$//' | tr ',' '\n' | sed -E 's/^ *([A-Za-z]+).*$/\1/' | sort | tr '\n' ' ')"
 T39_CODE_KEYS="$(grep -F 'print(JSON.stringify({ recorded: null, file: null, error: why,' "$TRAIL_MJS" | head -1 | sed -E 's/.*JSON\.stringify\(\{ //; s/ \}, null, 2\).*//' | tr ',' '\n' | sed -E 's/^ *([A-Za-z]+).*$/\1/' | sort | tr '\n' ' ')"
@@ -2648,6 +2658,59 @@ if [ -z "$T39_MISS" ]; then
 else
   check "T39 own-session and turn-activity documentation drift:$T39_MISS" FAIL
 fi
+
+plm_gate_sites() {
+  node -e '
+    const fs = require("fs");
+    const [hubFile, plmFile] = process.argv.slice(1);
+    const t = fs.readFileSync(hubFile, "utf8");
+    const plm = fs.readFileSync(plmFile, "utf8");
+    const bad = [];
+    const count = (s, n) => s.split(n).length - 1;
+    const body = (name) => {
+      const lines = t.split("\n");
+      const start = lines.findIndex((l) => l.startsWith("function " + name + "("));
+      if (start < 0) return "";
+      const end = lines.findIndex((l, i) => i > start && l === "}");
+      return end < 0 ? "" : lines.slice(start, end + 1).join("\n");
+    };
+    if (count(t, "\nfunction plmGateCaution(") !== 1) bad.push("caution-definitions");
+    if (count(t, "\nconst PLM_GATE_SHOW_LINES = [") !== 1) bad.push("show-lines-definitions");
+    const cautionCall = "  L.push(plmGateCaution(briefPath(r.wt)));\n";
+    if (count(t, "plmGateCaution(") !== 3) bad.push("caution-references=" + count(t, "plmGateCaution("));
+    for (const fn of ["cmdTakeover", "cmdHandoff"]) if (count(body(fn), cautionCall.trimEnd()) !== 1) bad.push(fn + "-caution-call");
+    const showCall = "  for (const line of PLM_GATE_SHOW_LINES) print(line);";
+    if (count(t, "PLM_GATE_SHOW_LINES") !== 2 || count(body("cmdShow"), showCall) !== 1) bad.push("show-lines-call");
+    if (/plmGateCaution|PLM_GATE_SHOW_LINES/.test(plm)) bad.push("in-plm-copy");
+    process.stdout.write(bad.join(" "));
+  ' "$1" "$2" 2>&1
+}
+T40_BAD="$(plm_gate_sites "$TRAIL_MJS" "$PLM_TRAIL_MJS")"
+[ -z "$T40_BAD" ] \
+  && check "T40 the companion's trail.mjs defines plmGateCaution and PLM_GATE_SHOW_LINES once each, cmdTakeover and cmdHandoff push the caution once each, cmdShow prints the lines once, and PLM's frozen copy carries neither" PASS \
+  || check "T40 the companion's PLM-gate lines moved, doubled or lost a carrier: $T40_BAD" FAIL
+T40_SANDBOX="$(mktemp -d -t session-trail-t40-XXXXXX)"
+for spec in "handoff-call|cmdHandoff-caution-call|a handoff brief that no longer pushes the caution" "show-call|show-lines-call|a show that no longer prints the lines"; do
+  mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
+  T40_ERR="$(node -e '
+    const fs = require("fs");
+    const [src, mode, out] = process.argv.slice(1);
+    let t = fs.readFileSync(src, "utf8");
+    const cut = (from, needle) => { const at = t.indexOf(needle, t.indexOf(from)); if (t.indexOf(from) < 0 || at < 0) throw new Error("anchor missing: " + needle); t = t.slice(0, at) + t.slice(at + needle.length); };
+    if (mode === "handoff-call") cut("\nfunction cmdHandoff(", "  L.push(plmGateCaution(briefPath(r.wt)));\n");
+    if (mode === "show-call") cut("\nfunction cmdShow(", "  for (const line of PLM_GATE_SHOW_LINES) print(line);\n");
+    fs.writeFileSync(out, t);
+  ' "$TRAIL_MJS" "$mode" "$T40_SANDBOX/$mode.mjs" 2>&1)"
+  if [ -n "$T40_ERR" ]; then
+    check "T40-control $what could not be built ($T40_ERR)" FAIL
+    continue
+  fi
+  case " $(plm_gate_sites "$T40_SANDBOX/$mode.mjs" "$PLM_TRAIL_MJS") " in
+    (*" $want "*) check "T40-control $what fails the site check as $want" PASS ;;
+    (*) check "T40-control $what passes the site check" FAIL ;;
+  esac
+done
+rm -rf "$T40_SANDBOX"
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

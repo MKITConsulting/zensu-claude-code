@@ -42,10 +42,11 @@ consumer.
 **A chain terminus and a Stop release are both disclosure points**, because a gate escape
 needs no file change to be recorded — `ZENSU_TEST_WITNESS` and `ZENSU_MCP_GATE` are both
 reachable without one, so a zero-change chain is exactly where an undisclosed escape would
-hide. Four release paths therefore render the line themselves on **stderr**, the operator
+hide. Five release paths therefore render the line themselves on **stderr**, the operator
 channel every other Stop release message already uses: `ZENSU_CHAIN=off`,
-`hooks.chainEnforcer=false`, the cap release after a chain fails to converge (all three via
-`zensu_render_bypass_release` in `hooks/stop-chain-enforcer.sh`), and the `--chain-done`
+`hooks.chainEnforcer=false`, the cap release after a chain fails to converge, the acceptance
+hand-off release (`acceptance_handoff_release`, `.claude/rules/acceptance-verification-gate.md`)
+(all four via `zensu_render_bypass_release` in `hooks/stop-chain-enforcer.sh`), and the `--chain-done`
 verb itself via `zensu_render_terminus_bypasses` in `hooks/lib/zensu-log.sh`, which covers
 both the standalone and the bound spelling so either entry point discloses. A new release
 path added above the routing branches needs the same call.

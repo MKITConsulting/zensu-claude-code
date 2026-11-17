@@ -67,7 +67,7 @@ emit_session_runtime_missing_block() {
 
 emit_session_bind_failed_block() {
   DECISION_EMITTED=true
-  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Four bind failures are released before this point — a session with NO record at all, a record whose recorded project root no longer exists (a deleted or recycled worktree), an intact record served by a declared-incompatible plugin lineage, and an intact record whose minting installation was pruned from the plugin cache (both the shape of a mid-session plugin update; Zensu adopts such a record automatically on the first hook contact, and releases here only when that adoption was REFUSED or did not complete, naming the token) — so this is none of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest that drifted, or a root that still exists but no longer matches. Any release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. /zensu:doctor stays reachable in every bind failure and names the disagreement; where a record does disagree for any other reason, only a fresh Claude Code session helps."}'
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Four bind failures are released before this point — a session with NO record at all, a record whose recorded project root no longer exists (a deleted or recycled worktree), an intact record served by a declared-incompatible plugin lineage, and an intact record whose minting installation was pruned from the plugin cache (both the shape of a mid-session plugin update; Zensu adopts such a record automatically on the first hook contact, and releases here only when that adoption was REFUSED or did not complete, naming the token) — so this is none of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest that drifted, or a root that still exists but no longer matches. Any release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. /zensu:doctor names the disagreement, and on macOS and Linux it stays reachable in every bind failure when the user types it or as the Bash command its skill renders, never through the Skill tool; where a record does disagree for any other reason, only a fresh Claude Code session helps."}'
 }
 
 emit_session_record_unusable_block() {
@@ -340,15 +340,16 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # cache, so no installation can serve the record and nothing can re-verify it.
   # FOUR of the lineage release's statements carry over — the binding failed, the
   # chain cannot be read from here, the workflow document stays REACHABLE once the
-  # session re-binds (its project root is present by construction in this state;
+  # session re-binds while its project root exists (the predicate also matches a
+  # record whose project root is gone as well, so the message claims neither half;
   # reachable, never "survives": nothing on this path opens it), and an adoption
   # re-binds (automatically, at the bind above, so this arm too is reached only
   # by a REFUSED or incomplete adoption and names the token) — and it was the
   # state this hook still looped on: it fell
   # through to the block below, unbounded, in a session whose every other
   # channel was already denied. Disjoint from the lineage arm by construction
-  # (that predicate needs the strict read to succeed, this one needs it to
-  # fail), so the order of the two arms is immaterial. The version pair is
+  # (that predicate needs the recorded plugin root present and verified, this
+  # one needs it absent or retired), so the order of the two arms is immaterial. The version pair is
   # captured for the message and never leaked to stdout.
   #
   # INDUCIBILITY — stated here because both sibling arms state their own, and
@@ -392,7 +393,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       EXECUTING_VERSION="(unreadable)"
     fi
     stop_adoption_refusal
-    stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so a workflow document under it stays REACHABLE once the session re-binds; this arm establishes that the anchor resolved and claims nothing about the document's contents, which no probe on this path opened. What failed is the session binding, and this hook declines to read a chain it cannot bind, so no completion was proven, only an unprovable guard released. Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once the record is adopted, a later Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you."
+    stop_notice "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. What failed is the session binding, and this hook declines to read a chain it cannot bind, so no completion was proven, only an unprovable guard released. Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Whether the recorded project root still exists is not determined here, so this release asserts nothing about the workflow document: while that root exists, a workflow document under it stays reachable once the record is adopted, and a later Stop enforces the chain again; if it is gone as well, the adoption re-mints the record around that absent anchor and later Stops take the orphan release instead, while a zensu CLI call, Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created; /zensu:adopt-session --restore-root reports AFTER the adoption whether it can be, /zensu:adopt-session prints that path while it reports the record ADOPTABLE, and /zensu:doctor names it once the adoption has landed. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you."
     exit 0
   fi
   # The Stop counterpart of the `adoption-incomplete` deny scope. A bind that lost
@@ -412,7 +413,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
     echo "zensu chain-enforcer: a sibling hook adopted this session's Session Control record while this Stop was binding; the re-bind succeeded and the chain is enforced in this Stop." >&2
   fi
   if [ "$STOP_REBOUND" != true ] && ! zensu_stop_guard_opted_out; then
-    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. Four bind failures are released before this point — a session with no record at all, a record whose recorded project root no longer exists, a record that is intact but served by a declared-incompatible lineage, and a record whose minting installation was pruned from the plugin cache (both adopted automatically on the first hook contact, and released here only when that adoption was REFUSED or did not complete, naming the token) — so this is none of them: most often a record exists here and disagrees about something else (a foreign plugin installation, a runtime digest that drifted, a root that still exists but no longer matches, a tampered or unreadable record), though any release check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause, and it is authoritative over any inference. The record is immutable, so no Stop can ever prove completion from a record that disagrees: start a new session for further work. /zensu:doctor stays reachable in every bind failure and names the disagreement. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. Four bind failures are released before this point — a session with no record at all, a record whose recorded project root no longer exists, a record that is intact but served by a declared-incompatible lineage, and a record whose minting installation was pruned from the plugin cache (both adopted automatically on the first hook contact, and released here only when that adoption was REFUSED or did not complete, naming the token) — so this is none of them: most often a record exists here and disagrees about something else (a foreign plugin installation, a runtime digest that drifted, a root that still exists but no longer matches, a tampered or unreadable record), though any release check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause, and it is authoritative over any inference. The record is immutable, so no Stop can ever prove completion from a record that disagrees: start a new session for further work. /zensu:doctor names the disagreement, and on macOS and Linux it stays reachable in every bind failure when the user types it or as the Bash command its skill renders, never through the Skill tool. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
     emit_session_bind_failed_block
   fi
   [ "$STOP_REBOUND" = true ] || exit 0
@@ -602,7 +603,7 @@ REVIEWER_SPAWN_DENY_FIRST="Deny is evaluated before ask and allow, so remove any
 # this point — the same ordering constraint the two constants above already state
 # about `LOG_COMMAND`.
 zensu_impl_receipt_exit() {
-  printf '%s' "run the /zensu:build Phase 6 step 5b edit-landing audit until its receipt records a CLEAN verdict, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${1} — while the tree is dirty that verb refuses a plan without that table, and it reads the receipt's verdict rather than its existence, so every claimed edit has to have landed."
+  printf '%s' "run the /zensu:build Phase 6 step 5b edit-landing audit until its receipt records a CLEAN verdict, make sure the plan carries a usable '## Requirements' table with at least one active AC-### row, then mark the implementation complete with ${1} — while the tree is dirty that verb refuses a plan without that table, refuses a standalone chain's plan without an active AC-### row, and it reads the receipt's verdict rather than its existence, so every claimed edit has to have landed."
 }
 
 reviewer_spawn_denial_probe() {
@@ -691,12 +692,27 @@ reviewer_spawn_denied() {
   [ "$REVIEWER_DENIAL_STATUS" = "blocked" ]
 }
 
+WAIT_NOTE_LEAD='Zensu is waiting for '
+WAIT_NOTE_FALLBACK="${WAIT_NOTE_LEAD}the background review; the review chain continues when it reports back."
+WAIT_VERDICT_HEAD=""
+WAIT_VERDICT_NOTE=""
+split_wait_verdict() {
+  WAIT_VERDICT_HEAD="${1%%$'\n'*}"
+  WAIT_VERDICT_NOTE=""
+  case "$1" in
+    *$'\n'*) WAIT_VERDICT_NOTE="${1#*$'\n'}" ;;
+  esac
+  case "$WAIT_VERDICT_NOTE" in
+    *$'\n'*|*[[:cntrl:]]*) WAIT_VERDICT_NOTE="" ;;
+    "$WAIT_NOTE_LEAD"*) [ "${#WAIT_VERDICT_NOTE}" -le 600 ] || WAIT_VERDICT_NOTE="" ;;
+    *) WAIT_VERDICT_NOTE="" ;;
+  esac
+  [ -n "$WAIT_VERDICT_NOTE" ] || WAIT_VERDICT_NOTE="$WAIT_NOTE_FALLBACK"
+}
+
 external_review_workflow_wait() {
-  local lib data verdict word count max workflows names exclusions pending claim
-  EXTERNAL_REVIEW_WAIT_COUNT=""
-  EXTERNAL_REVIEW_WAIT_MAX=""
-  EXTERNAL_REVIEW_WAIT_WORKFLOWS=""
-  EXTERNAL_REVIEW_WAIT_NAMES=""
+  local lib data verdict word count max workflows rest exclusions pending claim
+  EXTERNAL_REVIEW_WAIT_NOTE=""
   case "$INPUT" in
     *'"background_tasks"'*'"workflow"'*) ;;
     *) zensu_external_review_wait_reset "$SESSION_ID"; return 1 ;;
@@ -717,20 +733,16 @@ external_review_workflow_wait() {
   exclusions="$(zensu_msys_env_exclusions ZENSU_XR_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_XR_PLUGIN_DATA="$data" \
     ZENSU_XR_SESSION_KEY="$SESSION_ID" zensu_run_bounded node "$lib" stop-wait 2>/dev/null)" || return 1
-  read -r word count max workflows names <<<"$verdict"
+  split_wait_verdict "$verdict"
+  read -r word count max workflows rest <<<"$WAIT_VERDICT_HEAD"
   [ "$word" = "wait" ] || return 1
   count="${count#count=}"
   max="${max#max=}"
   workflows="${workflows#workflows=}"
-  names="${names#names=}"
   case "$count" in ''|*[!0-9]*) return 1 ;; esac
   case "$max" in ''|*[!0-9]*) return 1 ;; esac
   case "$workflows" in ''|*[!0-9]*) return 1 ;; esac
-  case "$names" in ''|*[!A-Za-z0-9._:,\(\)-]*) names="(unnamed)" ;; esac
-  EXTERNAL_REVIEW_WAIT_COUNT="$count"
-  EXTERNAL_REVIEW_WAIT_MAX="$max"
-  EXTERNAL_REVIEW_WAIT_WORKFLOWS="$workflows"
-  EXTERNAL_REVIEW_WAIT_NAMES="$names"
+  EXTERNAL_REVIEW_WAIT_NOTE="$WAIT_VERDICT_NOTE"
   return 0
 }
 
@@ -740,19 +752,22 @@ BACKGROUND_REVIEW_AGENT=""
 BACKGROUND_REVIEW_AGE=""
 BACKGROUND_REVIEW_COUNT=""
 BACKGROUND_REVIEW_TTL=""
+BACKGROUND_REVIEW_NOTE=""
 background_review_wait() {
-  local store record fanout entry pending data native_state exclusions verdict word kind agent age count ttl
+  local store record fanout reviewers entry pending data native_state exclusions verdict word kind agent age count ttl
   BACKGROUND_REVIEW_PENDING=false
   BACKGROUND_REVIEW_KIND=""
   BACKGROUND_REVIEW_AGENT=""
   BACKGROUND_REVIEW_AGE=""
   BACKGROUND_REVIEW_COUNT=""
   BACKGROUND_REVIEW_TTL=""
+  BACKGROUND_REVIEW_NOTE=""
   zensu_session_key_canonical "$SESSION_ID" || return 1
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
   store="${CLAUDE_PLUGIN_DATA}/background-review/v1"
   record="${store}/records/${SESSION_ID}.json"
   fanout="${store}/fanout/${SESSION_ID}"
+  reviewers="${store}/reviewers/${SESSION_ID}"
   pending=false
   if [ -f "$record" ] && [ ! -L "$record" ]; then
     pending=true
@@ -764,14 +779,27 @@ background_review_wait() {
       fi
     done
   fi
+  if [ "$pending" = false ] && [ -d "$reviewers" ] && [ ! -L "$reviewers" ]; then
+    case "$INPUT" in
+      *'"background_tasks"'*'"subagent"'*)
+        for entry in "$reviewers"/*.json; do
+          if [ -f "$entry" ] && [ ! -L "$entry" ]; then
+            pending=true
+            break
+          fi
+        done
+        ;;
+    esac
+  fi
   [ "$pending" = true ] || return 1
   data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
   native_state="$(_tdd_native_project_path "$STATE_FILE" 2>/dev/null)" || return 1
   exclusions="$(zensu_msys_env_exclusions ZENSU_BR_PLUGIN_DATA ZENSU_BR_STATE_FILE 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
-  verdict="$(MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_BR_PLUGIN_DATA="$data" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
+  verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_BR_PLUGIN_DATA="$data" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
     ZENSU_BR_STATE_FILE="$native_state" \
-    zensu_run_bounded node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" wait </dev/null 2>/dev/null)" || return 1
-  read -r word kind agent age count ttl <<<"$verdict"
+    zensu_run_bounded node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" wait 2>/dev/null)" || return 1
+  split_wait_verdict "$verdict"
+  read -r word kind agent age count ttl <<<"$WAIT_VERDICT_HEAD"
   [ "$word" = "wait" ] || return 1
   kind="${kind#kind=}"
   agent="${agent#agent=}"
@@ -789,6 +817,7 @@ background_review_wait() {
   BACKGROUND_REVIEW_AGE="$age"
   BACKGROUND_REVIEW_COUNT="$count"
   BACKGROUND_REVIEW_TTL="$ttl"
+  BACKGROUND_REVIEW_NOTE="$WAIT_VERDICT_NOTE"
   [ "$OUTER_PRESENT" = false ] || return 1
   [ "$DEFERRED_ADOPTED" = false ] || return 1
   [ -z "$INNER_BOUND_RUN" ] || return 1
@@ -847,12 +876,48 @@ stop_background_wait() {
   esac
   return 0
 }
+
+ACCEPTANCE_HANDOFF_LINE=""
+acceptance_handoff_release() {
+  local file lib ticket data root exclusions line pending claim
+  ACCEPTANCE_HANDOFF_LINE=""
+  [ "$OUTER_PRESENT" = false ] || return 1
+  [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
+  file="$(zensu_acceptance_handoff_file "$SESSION_ID" 2>/dev/null)" || return 1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled selfReview ); then
+    return 1
+  fi
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js"
+  [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
+  ticket="$(tdd_claimed_review_ticket "$STATE_FILE" 2>/dev/null)" || return 1
+  [ -n "$ticket" ] || return 1
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  root="${ZENSU_PROJECT_ROOT:-}"
+  [ -n "$root" ] || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_PLUGIN_DATA ZENSU_AVR_PROJECT_ROOT 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  line="$(MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_PLUGIN_DATA="$data" ZENSU_AVR_SESSION_KEY="$SESSION_ID" \
+    ZENSU_AVR_PROJECT_ROOT="$root" ZENSU_AVR_HANDOFF_TICKET="$ticket" ZENSU_AVR_LABEL="zensu chain-enforcer" \
+    zensu_run_bounded node "$lib" handoff </dev/null 2>/dev/null)" || return 1
+  case "$line" in
+    *$'\n'*) return 1 ;;
+    'ACCEPTANCE HAND-OFF — '*) ;;
+    *) return 1 ;;
+  esac
+  ACCEPTANCE_HANDOFF_LINE="$line"
+  return 0
+}
 BACKGROUND_REVIEW_CLAIM_MARGIN=20
 BACKGROUND_REVIEW_HOOK_TIMEOUT=90
 BACKGROUND_REVIEW_ARRIVED=false
 BACKGROUND_REVIEW_HOLD_COUNTED=false
 BACKGROUND_REVIEW_DIRECTIVE=""
 BACKGROUND_REVIEW_ARRIVED_PENDING="The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop, so the claim stays pending: the next Stop or prompt retries it and, once it succeeds, hands you the routing directive."
+BACKGROUND_REVIEW_ARRIVED_NOTE="Zensu received the code review's report but could not record it yet; it tries again at the next Stop or prompt, and the review chain continues from there."
 BACKGROUND_REVIEW_ARRIVED_LEAD=""
 background_review_defer() {
   local held="${1:-}" data exclusions verdict word count of
@@ -1971,7 +2036,7 @@ fi
 if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
-    stop_notice "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:build Phase 6 review sequence."
+    stop_notice "$EXTERNAL_REVIEW_WAIT_NOTE"
   fi
   exit 0
 fi
@@ -1980,9 +2045,9 @@ if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && background_review_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
     if [ "$BACKGROUND_REVIEW_ARRIVED" = "true" ]; then
-      stop_notice "zensu chain-enforcer: releasing this Stop. ${BACKGROUND_REVIEW_ARRIVED_LEAD} The review chain stays armed."
+      stop_notice "$BACKGROUND_REVIEW_ARRIVED_NOTE"
     else
-      stop_notice "zensu chain-enforcer: releasing this Stop, still running: $(background_review_subject). The review chain stays armed: each report reaches the main thread as a hand-back or completion notification, a consume reviewer's report claims the ticket and routes the review, and the wait ends ${BACKGROUND_REVIEW_TTL} minutes after the newest launch."
+      stop_notice "$BACKGROUND_REVIEW_NOTE"
     fi
   fi
   exit 0
@@ -2000,6 +2065,15 @@ if stop_background_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
     stop_notice "$STOP_WAIT_TEXT"
+  fi
+  exit 0
+fi
+
+if acceptance_handoff_release; then
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    stop_notice "zensu chain-enforcer: releasing this Stop without charging the Stop budget. ${ACCEPTANCE_HANDOFF_LINE}. The guard re-arms after an edit or a new review generation."
+    zensu_render_bypass_release
   fi
   exit 0
 fi
@@ -2229,7 +2303,7 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
   SELF_REVIEW_TICKET="$(tdd_ensure_self_review_ticket "$SESSION_ID" 2>/dev/null)" || SELF_REVIEW_TICKET=""
   if _tdd_review_ticket_shape_ok "$SELF_REVIEW_TICKET"; then
     SELF_REVIEW_TICKET_Q="$(printf '%q' "$SELF_REVIEW_TICKET")"
-    SELF_REVIEW_STATE="The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run."
+    SELF_REVIEW_STATE="The code-reviewer loop is closed (codeReviewDone) but the terminal self-review stage has not run."
     if _tdd_zero_change_ticket "$SELF_REVIEW_TICKET"; then
       SELF_REVIEW_STATE="No reviewer ran in this chain: its review mark (codeReviewDone) is the unqualified one, which stands only while the worktree reports no changed file, and the terminal self-review stage has not run. On a changed tree its terminus refuses and reopens the review instead of closing the chain."
     fi

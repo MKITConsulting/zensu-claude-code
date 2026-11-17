@@ -71,6 +71,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu features update <id>` — Update feature properties (NOT status — use `zensu features status`)
 - `zensu features status <id> <status>` — Transition status (planned|in-progress|testing|released)
 - `zensu products list` — List all products
+- `zensu products get <product-id>` — Get one product by its UUID
 - `zensu products create` — Create a new product. **Required: `--name` + `--slug`** (`slug` = URL-safe id, e.g. `my-saas-app`; the CLI sends a create without it, and the server rejects that with `slug is required`). Optional: `--type` (`public_product`|`internal_product`|`hybrid`) and `--description`
 
 ### Subfeatures
@@ -88,6 +89,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu security posture <product-id>` — Product-wide security overview (product id is positional, not `--product`)
 - `zensu security analyze <id>` — Feature security analysis with score and requirements matrix (a read of the feature's security context, like `validate`, `suggest-tests` and `threat-model`; it persists nothing)
 - `zensu security validate <id>` — Check if feature passes release gate
+- `zensu security score <id>` — Get the feature's calculated security score and release-gate state
 - `zensu security add-test <id>` — Link a security test (`--file` and `--type` required: auth-bypass|injection|access-control|rate-limit|input-validation|data-exposure|header-security|dependency-scan|csrf|xss|ssrf)
 - `zensu security review <id>` — Complete a review (`--reviewer` and `--status` required: approved|rejected|conditional; optional `--type` manual|automated|external)
 - `zensu security suggest-tests <id>` — Get context for test recommendations
@@ -107,6 +109,19 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu tiers list --product <id>` — List all tiers for a product
 - `zensu tiers set-feature <feature-id>` — Replace a feature's tier assignments (`--tiers` required: a JSON array of `{tierId, gatingType}` entries, `gatingType` hard|soft|preview, optional `tierLimits`)
 - `zensu tiers matrix --product <id>` — Get the complete Feature × Tier matrix
+
+### Roadmaps & Milestones
+The product-level timeline (alias `zensu roadmaps`). A period is a quarter (`2026-Q2`), month (`2026-06`), week (`2026-W23`) or day (`2026-06-15`). Every write below goes through **change** (`/zensu:change`), which declares these writes in its window, checks for a duplicate before a create and asks before a command that removes or replaces data; recommend it for each roadmap or milestone write instead of a direct call.
+- `zensu roadmap list --product <id>` — List a product's roadmaps
+- `zensu roadmap get <roadmap-id>` — Get a roadmap with its features and milestones
+- `zensu roadmap create --product <id>` — Create a roadmap (`--title` required; optional `--period`, `--description`, a repeated `--goal`, and `--status` draft|active|completed|archived)
+- `zensu roadmap update <roadmap-id>` — Update a roadmap (`--title` is required here too; `--period`, `--description`, `--goal` and `--status` change only when passed)
+- `zensu roadmap delete <roadmap-id>` — Delete a roadmap; its features stay, only their membership goes
+- `zensu roadmap add-feature <roadmap-id>` — Add a feature (`--feature` UUID required; optional `--sort-order`, `--start-period` and `--end-period`)
+- `zensu roadmap remove-feature <roadmap-id> <feature-id>` — Take a feature off the roadmap; the feature stays
+- `zensu roadmap milestone-create <roadmap-id>` — Add a milestone (`--title` required; optional `--period` and `--status`)
+- `zensu roadmap milestone-list <roadmap-id>` — List a roadmap's milestones
+- `zensu roadmap milestone-delete <roadmap-id> <milestone-id>` — Delete a milestone
 
 ### User Journeys
 - `zensu journeys list --product <id>` — List journeys for a product
@@ -130,19 +145,29 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu plan push <plan-file>` — Create a work plan from a Markdown plan file (**person**; `--dry-run` previews it)
 - `zensu plan status <plan-id>` — Show a work plan and its orders (`--watch` follows it until it is merged or abandoned)
 - `zensu plan list --product <id>` — List the work plans of a product
-- `zensu plan approve|finalize|abandon|confirm-merge <plan-id>` — Approve a draft plan, record its final PR, abandon it, or confirm its final merge (**person**)
+- `zensu plan approve|abandon <plan-id>` — Approve a draft plan, or abandon it (**person**; abandon needs `--confirm-pr-closed` when an order has an open PR)
+- `zensu plan finalize <plan-id>` — Print the compare link for opening the plan's final PR, or record that PR (**person**; recording requires `--pr-url`, `--pr-number` and `--head-sha` together)
+- `zensu plan confirm-merge <plan-id>` — Confirm the merge of the plan's final PR (**person**; `--head-sha` required: the full SHA of the merged head of the final PR, which must match the head `finalize` recorded)
 - `zensu plan followups <plan-id>` — List the follow-ups the plan's sessions reported
 - `zensu plan followup accept|dismiss <plan-id> <followup-id>` — Accept or dismiss a reported follow-up (**person**)
 - `zensu work list` / `zensu work get <work-order-id>` / `zensu work events <work-order-id>` — List work orders, show one, or show its event timeline
 - `zensu work questions --plan <plan-id>` — List the questions of a work plan
-- `zensu work create --product <id>` — Create a one-item plan with one draft work order for a feature or revision (**person**)
-- `zensu work approve|requeue|cancel|confirm-merge <work-order-id>` — Approve, requeue, cancel, or confirm the merge of a work order (**person**)
-- `zensu work answer|overturn <question-id>` — Answer a session's question, or replace an automatic answer (**person**)
+- `zensu work create --product <id>` — Create a one-item plan with one draft work order for a feature or revision (**person**; `--repository` and exactly one of `--feature` or `--revision` required: `--repository` takes a registered repository URL, `--feature` a feature UUID or `KEY-N` reference whose active revision the order targets, `--revision` a revision UUID)
+- `zensu work approve|requeue|cancel <work-order-id>` — Approve, requeue, or cancel a work order (**person**; cancel needs `--confirm-pr-closed` when the order has an open PR)
+- `zensu work confirm-merge <work-order-id>` — Confirm the merge of a work order's PR (**person**; `--head-sha` required: the full SHA of the merged PR head)
+- `zensu work answer|overturn <question-id>` — Answer a session's question, or replace an automatic answer (**person**; `--answer` required)
 - `zensu work policy get|set --product <id>` — Show or change a product's automation policy (`set` is **person**)
-- `zensu work repositories list|add --product <id>` (alias `repos`) — List or register the repositories a product's work orders may use (`add` is **person**)
-- `zensu work repositories update|remove <repository-id>` (alias `repos`) — Replace a registered repository's risk paths, or remove it while no plan names it (**person**)
-- `zensu work claim|confirm|release|usage` — Claim the next work order, confirm or release the claim, and report a session's cost and token usage (**worker**)
-- `zensu work heartbeat|event|ask|followup <work-order-id>` — Renew the lease, report a stage, ask the humans behind the plan, or report out-of-scope work (**session**; heartbeat and event only through the `/zensu:work` helper)
+- `zensu work repositories list --product <id>` (alias `repos`) — List the repositories a product's work orders may use
+- `zensu work repositories add --product <id>` (alias `repos`) — Register a repository for a product's work orders (**person**; `--repository` required: an https repository URL; optional repeatable `--risk-path`)
+- `zensu work repositories update <repository-id> --product <id>` (alias `repos`) — Replace a registered repository's risk paths (**person**; `--risk-path` or `--clear` required: the repeatable `--risk-path` names every risk path the repository keeps, `--clear` removes them all)
+- `zensu work repositories remove <repository-id> --product <id>` (alias `repos`) — Remove a registered repository while no plan names it (**person**)
+- `zensu work claim` — Claim the next work order (**worker**; `--session-id` and `--repository` required: `--session-id` names the session that will run the order, the repeatable `--repository` every repository the worker can check out)
+- `zensu work confirm|usage <work-order-id>` — Confirm the claim once the session started, or report the session's cost and token usage (**worker**; `--session-id` and `--attempt` of the claim required)
+- `zensu work release <work-order-id>` — Release the claim when the session exits (**worker**; `--session-id`, `--attempt` and `--outcome` required: success|failure|rate_limited|runtime_cap|interrupted; `--outcome rate_limited` also requires `--not-before`)
+- `zensu work heartbeat <work-order-id>` — Renew the lease (**session**; only through the `/zensu:work` helper)
+- `zensu work event <work-order-id>` — Report a stage, an artifact or a block (**session**; only through the `/zensu:work` helper; exactly one of `--stage`, `--artifact` or `--blocked` required, and `--blocked` also requires `--reason`)
+- `zensu work ask <work-order-id>` — Ask the humans behind the plan (**session**; `--question` and `--category` required: clarification|technical_choice|product_decision|scope|risk|external; `--default-option` also required unless `--blocking` is set)
+- `zensu work followup <work-order-id>` — Report out-of-scope work (**session**; `--title`, `--rationale` and `--severity` required: low|medium|high|critical)
 
 ### Product Visions & Bootstrap
 - `zensu products vision-create` — Store a vision document (`--title` and `--content` required; optional `--product` and `--source` studio|import|claude-code)
@@ -166,6 +191,7 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu wiki images policy --product <id>` — Read the byte, pixel and dimension limits for wiki images
 
 ### Knowledge (Second-Brain)
+- `zensu knowledge context-search --query <task text>` — Find up to five feature candidates for a task before loading its context (`--product` narrows the candidates); a candidate is not a confirmed selection, and an empty result does not prove a product has no matching feature
 - `zensu knowledge context-pack <feature-ref> --json --agent claude-code` — Linked feature context, provenance and excerpts; inspect truncation and hydrate relevant real items before decisions
 - `zensu knowledge search --query <terms> --json` — Search the organization's knowledge pool with a few terms the artifacts use, not a whole question; returns ranked passages with provenance
 - `zensu knowledge get <id> --json` — Fetch a full knowledge item by id (complete content, excerpt, trust level, provenance)
@@ -173,10 +199,23 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 
 Indexed for search: each product's features, visions, journeys, wiki pages, feature-doc titles and links (not the linked files), mocks and design assets, plus Zensu's built-in product documentation. Sources of type external are registrations only and are not indexed (no connector yet), whatever their sync status shows. Ranking is full-text keyword matching unless the server has an embedding model configured; then it is hybrid (meaning plus keywords), falling back to full-text when the embedding endpoint fails.
 
+### AI Work Capture
+Automatic work capture drives these through `hooks/lib/ai-work-capture-v1.js`; `docs/ai-work-capture.md` names the CLI capabilities and flags each step needs. The CLI takes a personal `zensu auth login` only and refuses API keys and work-order session tokens. A submission reports a result version and never accepts it; the person accepts it in the web app.
+- `zensu ai-work context` — Show the selected capture host, without credentials
+- `zensu ai-work bind --product <id> --confirm` — Record the product the user explicitly confirmed for this repository; never run it on an inferred product
+- `zensu ai-work start` — Declare the agreed work objective of one goal
+- `zensu ai-work get <work-id>` — Read the current result and the capture history
+- `zensu ai-work submit <work-id>` — Submit an immutable result version
+
+### Organization
+- `zensu org users` — Search the organization's members by name or email (`--query`; omit it to list every member)
+
 ### Pulse (Developer Journal)
-- `zensu pulse start` — Start a dev session (the git HEAD SHA via `--head-sha`, required, and the branch via `--branch`)
-- `zensu pulse end <id>` — End a session (each changed file path via a repeated `--changed-file`)
+- `zensu pulse start` — Start a dev session (the git HEAD SHA via `--head-sha`, required, and the branch via `--branch`); with `--minimal-json` it prints only an indented JSON object that holds either the session's `"id"` or `"status": "tracking_disabled"`
+- `zensu pulse end <id>` — End a session (each changed file path via a repeated `--changed-file`; `--minimal-json` as for `start`)
 - `zensu pulse summary <id>` — Review session activity
+
+While Pulse tracking is off in the user's Zensu privacy settings, as it is for every new account until the user turns it on, `start` and `end` exit 0 with `tracking_disabled` and no session id: nothing was recorded, and there is no session to end or summarize.
 
 ### Ghost Scan
 - `zensu ghost scan --product <id> --candidates '<json>'` — Create a scan with feature candidates (it prints the scan id; no command lists scans)
@@ -234,10 +273,10 @@ No separate skill for the hybrid itself: step 2 runs inside the ghost-scan windo
 
 ### When the user asks about their dev session
 Use the `/zensu:pulse` skill workflow:
-1. Start session with git HEAD SHA
+1. Start the session with the git HEAD SHA; a `tracking_disabled` answer ends the workflow, because tracking is off and no session exists
 2. Work as normal (session captured at its boundaries)
-3. End session with changed files
-4. Review session summary
+3. End the session with every changed file
+4. Review the session summary
 
 ### When the user wants documentation
 **Read `docs/documentation-guide.md`** first, then follow its read-source-first procedure:
@@ -262,7 +301,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 - When a user mentions a specific feature ID (KEY-N, e.g. ZEN-42) and wants to code → start **implement** workflow
 - When a user asks about security of a feature → start **security review** workflow
 - When a user wants to import or scan an existing codebase → start **ghost scan** workflow
-- When a user asks "what did I work on?" or starts/ends a session → use **pulse** commands
+- When a user asks "what did I work on?" or starts/ends a session → run the **pulse** workflow (`/zensu:pulse`)
 - When a user asks about release readiness → use `zensu security validate` and `zensu journeys health`
 - When a user asks about tier pricing → read `zensu tiers matrix`, and run a tier change (`zensu tiers create`, `zensu tiers set-feature`) through `/zensu:change`
 - When a user wants to dispatch autonomous work or follow a work plan → use the `zensu plan` and `zensu work` commands; the verbs marked **person** are the user's to run (Important Rule 13)

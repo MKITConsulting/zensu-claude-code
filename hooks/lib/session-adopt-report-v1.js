@@ -567,7 +567,7 @@ function renderBaselineNotes(baseline, sessionId) {
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. The record may have been altered, or a persisted schema really did change in this release. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation pruned from the plugin cache, whether the host removed its directory or left a remnant it retired (an .orphaned_at marker and no manifest). A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned — each relaxed reader pins the other's waiver off, so nothing is left to anchor the record to — and so is having no record for this session at all. The rows below name why each of the three record readers refused this record. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. The record may have been altered, or a persisted schema really did change in this release. Three states that used to land here no longer do: a recorded project root that is merely GONE is adoptable, so is a minting installation pruned from the plugin cache, whether the host removed its directory or left a remnant it retired (an .orphaned_at marker and no manifest), and so are both at once — a pruned installation whose recorded project root is ALSO gone is adopted around that absent root, which leaves a zensu CLI call, Edit, Write and MultiEdit denied until /zensu:adopt-session --restore-root re-creates it. Having no record for this session at all still lands here. The rows below name why each of the four record readers refused this record. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -642,7 +642,7 @@ const restoreRemedyTable = () => {
   PLUGIN_DATA:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   NOT_SERVED:
-    "The executing installation may not serve this record, so it must not create the directory the record anchors. That is a lineage break with its own exit: run /zensu:adopt-session first, then this command again.",
+    "The executing installation may not serve this record, so it must not create the directory the record anchors. That is a lineage break or a pruned installation, with its own exit: run /zensu:adopt-session first, then this command again.",
   ROOT_PRESENT:
     "The recorded project root is there, so nothing is missing and nothing is created. If tools are still failing the cause is NOT necessarily a different one: the workflow document under that root may still be absent, including after an interrupted --restore-root --confirm, which creates the directory before it rebuilds the document. Run /zensu:adopt-session --confirm to rebuild it, then /zensu:doctor.",
   UNSAFE_ANCESTOR:
@@ -1246,6 +1246,7 @@ const READER_LABELS = Object.freeze({
   "strict": "strict read        ",
   "orphaned-project-root": "project root gone  ",
   "pruned-plugin-root": "installation pruned",
+  "orphaned-and-pruned": "both roots gone    ",
 });
 
 function readerRefusalRows(request, c) {
@@ -1457,9 +1458,9 @@ function main(deps = {}) {
     if (!verdict.orphanedProjectRoot) {
       process.stdout.write("The record is intact and this installation can take it over in place.\n");
     }
-    // The pruned branch keeps the unqualified sentence above: its project root is
-    // present, so condition 6 DID run. What it adds is why the record could not be
-    // re-measured in the first place.
+    // A pruned record whose project root is present keeps the unqualified sentence
+    // above, because condition 6 DID run there. What it adds is why the record could
+    // not be re-measured in the first place.
     if (verdict.prunedPluginRoot) {
       process.stdout.write(PRUNED_EXPLANATION);
     }
@@ -1471,7 +1472,8 @@ function main(deps = {}) {
       process.stdout.write("The record itself is readable and this installation can take it over in place.\n");
       process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");
       process.stdout.write("the workflow state unreachable from this record. Adoption still applies and is\n");
-      process.stdout.write("worth doing: it clears the lineage break, so Bash and the read-only diagnostics\n");
+      process.stdout.write("worth doing: it clears the " + (verdict.prunedPluginRoot ? "binding to a pruned installation" : "lineage break")
+        + ", so Bash and the read-only diagnostics\n");
       process.stdout.write("work again, except a zensu CLI call, whose gate needs a binding.\n");
       process.stdout.write("It does NOT restore the file tools — Edit, Write and MultiEdit stay denied, and so\n");
       process.stdout.write("does any Bash command the source-write gate can attribute as a write while that\n");
@@ -1598,7 +1600,9 @@ function main(deps = {}) {
     // CLI call and a write the opted-in source-write gate attributes with no usable
     // CLAUDE_PROJECT_DIR left; Edit, Write and MultiEdit do not. Saying otherwise would
     // send the user straight into a deny.
-    process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
+    const brokenBinding = adopted.prunedPluginRoot ? "binding to a pruned installation" : "lineage break";
+    if (adopted.prunedPluginRoot) process.stdout.write(PRUNED_EXPLANATION);
+    process.stdout.write("This session's " + brokenBinding + " is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
     process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work,\n");
     process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command\n");
@@ -1607,7 +1611,7 @@ function main(deps = {}) {
     process.stdout.write("cannot be attributed to a project that is not there. A zensu CLI call stays\n");
     process.stdout.write("denied as well, because its gate needs a binding. NotebookEdit still passes, as it\n");
     process.stdout.write("does in a healthy session. To restore Edit, Write and MultiEdit, run this command\n");
-    process.stdout.write("once more with --restore-root --confirm — now that the lineage break is cleared,\n");
+    process.stdout.write("once more with --restore-root --confirm — now that the " + brokenBinding + " is cleared,\n");
     process.stdout.write("this installation serves the record, which is what that repair requires. It\n");
     process.stdout.write("re-creates exactly that directory and rebuilds the workflow document in one step,\n");
     process.stdout.write("restoring the anchor and not the work: the directory comes back empty and the\n");

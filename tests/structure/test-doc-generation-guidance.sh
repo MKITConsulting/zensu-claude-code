@@ -90,6 +90,25 @@ check "D18 docs skill references the shared guide" \
 check "D19 docs skill has explicit Read imperative" \
   "$(has "$DOCS" "$READ_REF_ABS")"
 
+NORM_GUIDE="$(tr -s '[:space:]' ' ' < "$GUIDE")"
+D20_BAD=""
+for cli in 'zensu doc gen-context <feature-id> --doc-type <type>' 'zensu wiki list --product <id> --json' \
+  'zensu wiki create --product <id> --title <title> --content <markdown>' 'zensu wiki update <page-id> --content <markdown>' \
+  'zensu link docs <feature-id> --doc-type <type>'; do
+  printf '%s' "$NORM_GUIDE" | grep -qF -- "$cli" || D20_BAD="$D20_BAD missing:[$cli]"
+done
+for tool in get_doc_generation_context list_wiki_pages create_wiki_page update_wiki_page link_docs MCP; do
+  grep -qF -- "$tool" "$GUIDE" && D20_BAD="$D20_BAD names:$tool"
+done
+printf '%s' "$NORM_GUIDE" | grep -qF -- 'Create never changes an existing page' || D20_BAD="$D20_BAD missing:create-only-rule"
+printf '%s' "$NORM_GUIDE" | grep -qF -- 'zensu-cli sends this create-only request (`createOnly`) from 0.12.0 on, so every zensu-cli the plugin supports sends it.' || D20_BAD="$D20_BAD missing:createOnly-release"
+VERSION_MODULE="$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js"
+node -e 'const [major, minor] = require(process.argv[1]).MIN_VERSION.split(".").map(Number); process.exit(major > 0 || minor >= 12 ? 0 : 1)' "$VERSION_MODULE" || D20_BAD="$D20_BAD floor-below:0.12.0"
+FLOOR="$(node -p 'require(process.argv[1]).MIN_VERSION' "$VERSION_MODULE")"
+[ -n "$FLOOR" ] && ! grep -qF -- "$FLOOR" "$GUIDE" || D20_BAD="$D20_BAD copies-floor:${FLOOR:-unread}"
+[ -z "$D20_BAD" ] && check "D20 guide names its procedure and commands in zensu CLI terms, keeps the create-only rule with the first zensu-cli release that sends it, holds that release below the floor without copying the floor, and names no MCP tool" PASS \
+  || check "D20 guide drifts from the zensu CLI terms or the create-only rule:$D20_BAD" FAIL
+
 echo "----"
 echo "test-doc-generation-guidance: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

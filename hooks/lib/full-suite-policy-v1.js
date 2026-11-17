@@ -164,6 +164,12 @@ function normalizeConfig(config) {
   };
 }
 
+function chainContract(options, verifyOptions) {
+  const fault = evr.workTreeFaultCause(options.workTreeFault);
+  if (fault !== null) return { verified: false, reason: `the chain's work tree could not be resolved: ${fault}`, workTreeFault: fault, transient: false };
+  return verifyOptions.workflow ? contract.verify(verifyOptions) : contract.discover(verifyOptions);
+}
+
 function resolve(options) {
   const env = options.env || process.env;
   const projectRoot = options.projectRoot;
@@ -190,6 +196,7 @@ function resolve(options) {
   const job = config.job || (clone && clone.job) || null;
   const verifyOptions = {
     projectRoot,
+    workTree: options.workTree,
     pluginData: options.pluginData,
     workflow,
     job,
@@ -200,7 +207,7 @@ function resolve(options) {
     ghPath: options.ghPath,
     limits: options.limits,
   };
-  const result = workflow ? contract.verify(verifyOptions) : contract.discover(verifyOptions);
+  const result = chainContract(options, verifyOptions);
   if (ciIndex !== -1) {
     const rank = RANKS[ciIndex];
     if (!result.verified) {
@@ -223,6 +230,15 @@ function resolve(options) {
 
 function shown(text, projectRoot) {
   return evr.screen(String(text), projectRoot, DISPLAY);
+}
+
+function reasonText(policy, projectRoot, fallback) {
+  const reason = policy.reason || fallback;
+  const fault = policy.contract && typeof policy.contract.workTreeFault === 'string' ? policy.contract.workTreeFault : null;
+  if (fault === null) return shown(reason, projectRoot);
+  const tail = `: ${fault}`;
+  const head = reason.endsWith(tail) ? reason.slice(0, -tail.length) : reason;
+  return `${shown(head, projectRoot)} | work tree: ${shown(fault, projectRoot)}`;
 }
 
 function formatAge(milliseconds) {
@@ -273,7 +289,7 @@ function policyLines(policy, options) {
       `full suite: nothing is recorded yet. Ask the user once, then record the answer. Repository (this clone, every worktree): ${renderHelper(options.pluginData, '--ci --repo')} | this session only: ${renderHelper(options.pluginData, '--ci --session')} | stay local: ${renderHelper(options.pluginData, '--local --session')}`,
     ];
   }
-  return [`full suite: local | ${shown(policy.reason || 'local full-suite runs', projectRoot)} | decided by: ${policy.decidedBy}`];
+  return [`full suite: local | ${reasonText(policy, projectRoot, 'local full-suite runs')} | decided by: ${policy.decidedBy}`];
 }
 
 function snapshotPolicy(inputs, now = Date.now()) {
@@ -287,7 +303,7 @@ function snapshotLines(policy, projectRoot) {
     return [`full suite: ci | this chain began with the CI runner: ${shown(policy.contract.workflow, projectRoot)}, job "${shown(policy.contract.job, projectRoot)}" runs its full suite when a pull request against ${shown(policy.contract.base, projectRoot)} is opened or updated | decided by: ${policy.decidedBy}`];
   }
   if (policy.ciRequested === true) {
-    return [`full suite: local | ${shown(policy.reason || 'the CI pull-request pipeline is not verified', projectRoot)} | decided by: ${policy.decidedBy} | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before`];
+    return [`full suite: local | ${reasonText(policy, projectRoot, 'the CI pull-request pipeline is not verified')} | decided by: ${policy.decidedBy} | this chain began with the local runner, so it closes only on a local full-suite run, whatever --full-suite-policy printed before`];
   }
   return [];
 }
@@ -334,6 +350,8 @@ function inputsFromTransport(directory, env, names) {
     pluginData: env[names.pluginData],
     sessionKey: env[names.sessionKey],
     projectRoot: env[names.projectRoot],
+    workTree: env[names.workTree] || '',
+    workTreeFault: evr.readWorkTreeFault(directory),
     markerState: String(readTransport(directory, names.marker) || 'none').trim(),
     config: { ...transportConfig(readTransport(directory, 'ci-config.json')), fullSuiteCommand: readTransport(directory, 'full-suite-command') },
     env,
@@ -345,6 +363,7 @@ function policyInputs(env) {
     pluginData: 'ZENSU_FSP_PLUGIN_DATA',
     sessionKey: 'ZENSU_FSP_SESSION_KEY',
     projectRoot: 'ZENSU_FSP_PROJECT_ROOT',
+    workTree: 'ZENSU_FSP_WORK_TREE',
     marker: 'marker-state',
   });
 }
@@ -373,8 +392,8 @@ function setClone(inputs, env, now) {
   const config = normalizeConfig(inputs.config);
   const workflow = textOrNull(env.ZENSU_FSP_WORKFLOW) || config.workflow;
   const job = textOrNull(env.ZENSU_FSP_JOB) || config.job;
-  const verifyOptions = { projectRoot: inputs.projectRoot, pluginData: inputs.pluginData, workflow, job, localCommand: config.fullSuiteCommand, env, mode: 'cache', now };
-  const result = workflow ? contract.verify(verifyOptions) : contract.discover(verifyOptions);
+  const verifyOptions = { projectRoot: inputs.projectRoot, workTree: inputs.workTree, pluginData: inputs.pluginData, workflow, job, localCommand: config.fullSuiteCommand, env, mode: 'cache', now };
+  const result = chainContract(inputs, verifyOptions);
   if (!result.verified) {
     process.stderr.write(`full-suite: refusing to record CI full-suite runs for this clone — ${shown(result.reason, inputs.projectRoot)}\n`);
     return 2;
@@ -417,11 +436,12 @@ async function main(argv, env = process.env) {
       return 0;
     }
     if (mode === 'set-clone') return setClone(inputs, env, now);
+    if (mode === 'retire') return removeSnapshot(stores(inputs.pluginData), inputs.sessionKey) ? 0 : 2;
   } catch (error) {
     process.stderr.write(`full-suite-policy: ${error && error.message ? error.message : String(error)}\n`);
     return 2;
   }
-  process.stderr.write('usage: full-suite-policy-v1.js policy|status|snapshot|chain|effective|set-clone\n');
+  process.stderr.write('usage: full-suite-policy-v1.js policy|status|snapshot|chain|effective|set-clone|retire\n');
   return 2;
 }
 

@@ -876,6 +876,359 @@ else
   check "H7 delivery accepts the once-only review on its original head after final-head proofs pass" FAIL
 fi
 
+GR_HEAD_A="1111111111111111111111111111111111111111"
+GR_HEAD_B="2222222222222222222222222222222222222222"
+GR_HEAD_C="3333333333333333333333333333333333333333"
+GR_HEAD_MIXED="abcdefabcdefabcdefabcdefabcdefabcdefabcd"
+GR_HEAD_MIXED_UPPER="ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+GR_FROZEN="$PLUGIN_DIR/tests/structure/fixtures/autopilot-0.36.0-pr-head-gate-mismatch"
+gr_event() {
+  autopilot_apply_event "$GR_RUN" "$1" "$2" "$3" "$GR_PROJECT" >/dev/null 2>&1
+}
+gr_project() {
+  GR_RUN="$1"
+  GR_OWNER="$2"
+  GR_PROJECT="$ROOT/gate-reentry-$3"
+  GR_FILE="$GR_PROJECT/.zensu/state/autopilot-run-${GR_RUN}.json"
+}
+gr_begin() {
+  gr_project "run_gate_reentry_$1" "session_gate_reentry_$1" "$1"
+  mkdir -p "$GR_PROJECT" \
+    && autopilot_begin_run "$GR_RUN" "$GR_OWNER" "$GR_PROJECT" >/dev/null 2>&1 \
+    && gr_event gr-plan PLAN_APPROVED "{\"approvedPlanSha256\":\"$PLAN_SHA\"}"
+}
+gr_frozen() {
+  local native
+  gr_project run_gate_reentry_frozen session_gate_reentry_frozen frozen
+  mkdir -p "$GR_PROJECT/.zensu/state" \
+    && cp "$GR_FROZEN"/autopilot-active-*.json "$GR_PROJECT/.zensu/state/" \
+    && native="$(native_directory "$GR_PROJECT")" \
+    && GR_ROOT_NATIVE="$native" node -e '
+      const fs = require("fs");
+      const [source, target] = process.argv.slice(1);
+      const text = fs.readFileSync(source, "utf8");
+      fs.writeFileSync(target, text.split(JSON.stringify("@PROJECT_ROOT@")).join(JSON.stringify(process.env.GR_ROOT_NATIVE)));
+    ' "$GR_FROZEN/autopilot-run-${GR_RUN}.json" "$GR_FILE" \
+    && chmod 600 "$GR_PROJECT"/.zensu/state/*.json
+}
+gr_snapshot() {
+  cp "$GR_FILE" "$ROOT/gr-snapshot-$1.json"
+}
+gr_restore() {
+  cp "$ROOT/gr-snapshot-$1.json" "$GR_FILE"
+}
+gr_refused() {
+  local before
+  before="$(file_digest "$GR_FILE")" || return 1
+  if "$@"; then
+    return 1
+  fi
+  [ "$(file_digest "$GR_FILE")" = "$before" ]
+}
+gr_tdd() {
+  gr_event "gr-tdd-start-$1" TDD_STARTED "{\"attempt\":$1,\"chainId\":\"gr-chain-$1\",\"sessionId\":\"$GR_OWNER\"}" \
+    && gr_event "gr-tdd-done-$1" TDD_CHAIN_DONE "{\"attempt\":$1,\"chainId\":\"gr-chain-$1\",\"sessionId\":\"$GR_OWNER\",\"outcome\":\"pass\"}"
+}
+gr_pr_opened() {
+  gr_event "$1" PR_OPENED "{\"operationKey\":\"pr:$GR_RUN\",\"pr\":{\"number\":$2,\"url\":\"https://github.com/acme/repo/pull/$2\",\"headSha\":\"$3\"}}"
+}
+gr_converge_fix() {
+  gr_tdd 1 \
+    && gr_event gr-gates-a GATES_PASSED "{\"headSha\":\"$GR_HEAD_A\"}" \
+    && gr_event gr-converge-fail CONVERGENCE_FAILED '{"reason":"contradicts an active acceptance criterion","limitReached":false}' \
+    && gr_tdd 2 \
+    && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.tdd.returnStage === "CONVERGE" && value.evidence.gates.headSha === "1111111111111111111111111111111111111111"'
+}
+
+GR1_OK=false
+GR8_KEPT=false
+if gr_begin 001 && gr_converge_fix && gr_snapshot converge-fix \
+  && autopilot_increment_stop_budget "$GR_RUN" CONVERGE "$GR_PROJECT" >/dev/null 2>&1 \
+  && gr_event gr-gates-b GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.evidence.gates.passed === true && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"'; then
+  if json_ok "$GR_FILE" 'value.stopBudget.stage === "CONVERGE" && value.stopBudget.count === 1'; then
+    GR8_KEPT=true
+  fi
+  if gr_event gr-converge-pass CONVERGENCE_PASSED '{}' \
+    && gr_event gr-pr-request PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN\"}" \
+    && gr_pr_opened gr-pr-open 901 "$GR_HEAD_B" \
+    && autopilot_read_run "$GR_RUN" "$GR_PROJECT" > "$ROOT/gr-001-read.json" 2>/dev/null \
+    && json_ok "$ROOT/gr-001-read.json" 'value.stage === "TEAM_REVIEW" && value.effects.prOpen.status === "completed" && value.evidence.pr.headSha === "2222222222222222222222222222222222222222" && value.evidence.gates.headSha === value.evidence.pr.headSha'; then
+    GR1_OK=true
+  fi
+fi
+if [ "$GR1_OK" = true ]; then
+  check "GR1 a convergence fix that lands a new commit re-runs the gates and opens its PR on that commit" PASS
+else
+  check "GR1 a convergence fix that lands a new commit re-runs the gates and opens its PR on that commit" FAIL
+fi
+
+if gr_restore converge-fix \
+  && gr_event gr-gates-b-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_B\",\"reason\":\"type check failed on the fix\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "AWAIT_TDD" && value.tdd.returnStage === "GATES" && value.evidence.gates.passed === false && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"' \
+  && gr_tdd 3 \
+  && json_ok "$GR_FILE" 'value.stage === "GATES" && value.tdd.attempt === 3' \
+  && gr_event gr-gates-c GATES_PASSED "{\"headSha\":\"$GR_HEAD_C\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.evidence.gates.passed === true && value.evidence.gates.headSha === "3333333333333333333333333333333333333333"'; then
+  check "GR2 a gate failure after a convergence fix returns the run through GATES" PASS
+else
+  check "GR2 a gate failure after a convergence fix returns the run through GATES" FAIL
+fi
+
+GR_REQUESTED=false
+if gr_begin 004 && gr_tdd 1 \
+  && gr_event gr-gates-a GATES_PASSED "{\"headSha\":\"$GR_HEAD_A\"}" \
+  && gr_event gr-converge-pass CONVERGENCE_PASSED '{}' \
+  && gr_event gr-pr-request PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN\"}" \
+  && gr_snapshot requested; then
+  GR_REQUESTED=true
+fi
+
+if [ "$GR_REQUESTED" = true ] \
+  && gr_refused gr_pr_opened gr-pr-open-stale 904 "$GR_HEAD_B" \
+  && gr_event gr-gates-b GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.effects.prOpen.status === "requested" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_004" && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"' \
+  && gr_event gr-converge-pass-2 CONVERGENCE_PASSED '{}' \
+  && gr_refused gr_event gr-pr-request-again PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN:again\"}" \
+  && gr_pr_opened gr-pr-open 904 "$GR_HEAD_B" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.effects.prOpen.status === "completed" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_004" && value.evidence.pr.headSha === "2222222222222222222222222222222222222222"'; then
+  check "GR4 gates re-run after PR_OPEN_REQUESTED keep the requested operation, which completes on the new head" PASS
+else
+  check "GR4 gates re-run after PR_OPEN_REQUESTED keep the requested operation, which completes on the new head" FAIL
+fi
+
+if [ "$GR_REQUESTED" = true ] && gr_restore requested \
+  && gr_event gr-gates-b-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_B\",\"reason\":\"lint failed on the pushed head\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "AWAIT_TDD" && value.tdd.returnStage === "GATES" && value.effects.prOpen.status === "requested" && value.evidence.gates.passed === false' \
+  && gr_tdd 2 \
+  && gr_event gr-gates-c GATES_PASSED "{\"headSha\":\"$GR_HEAD_C\"}" \
+  && gr_event gr-converge-pass-2 CONVERGENCE_PASSED '{}' \
+  && gr_pr_opened gr-pr-open 905 "$GR_HEAD_C" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.evidence.pr.headSha === "3333333333333333333333333333333333333333" && value.evidence.gates.headSha === value.evidence.pr.headSha'; then
+  check "GR4b a gate failure after PR_OPEN_REQUESTED returns through GATES, and the requested operation completes on the fixed head" PASS
+else
+  check "GR4b a gate failure after PR_OPEN_REQUESTED returns through GATES, and the requested operation completes on the fixed head" FAIL
+fi
+
+GR7_REFUSED=false
+if [ "$GR_REQUESTED" = true ] && gr_restore requested \
+  && gr_pr_opened gr-pr-open 907 "$GR_HEAD_A" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW"' \
+  && gr_refused gr_event gr-gates-late GATES_PASSED "{\"headSha\":\"$GR_HEAD_C\"}" \
+  && gr_refused gr_event gr-gates-late-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_C\",\"reason\":\"late gate run\"}"; then
+  GR7_REFUSED=true
+fi
+
+if [ "$GR_REQUESTED" = true ] && gr_restore requested \
+  && gr_refused gr_event gr-gates-same GATES_PASSED "{\"headSha\":\"$GR_HEAD_A\"}" \
+  && gr_refused gr_event gr-gates-same-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_A\",\"reason\":\"re-run on the gated head\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "OPEN_PR" && value.effects.prOpen.status === "requested" && value.evidence.gates.passed === true'; then
+  check "GR9 OPEN_PR refuses a gate event for the head its gate evidence already records" PASS
+else
+  check "GR9 OPEN_PR refuses a gate event for the head its gate evidence already records" FAIL
+fi
+
+if gr_begin 006 && gr_tdd 1 \
+  && gr_event gr-gates-mixed GATES_PASSED "{\"headSha\":\"$GR_HEAD_MIXED\"}" \
+  && gr_event gr-converge-pass CONVERGENCE_PASSED '{}' \
+  && gr_event gr-pr-request PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN\"}" \
+  && gr_refused gr_pr_opened gr-pr-open-other 906 "$GR_HEAD_B" \
+  && gr_pr_opened gr-pr-open-upper 906 "$GR_HEAD_MIXED_UPPER" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.evidence.pr.headSha === "abcdefabcdefabcdefabcdefabcdefabcdefabcd"'; then
+  check "GR5 PR_OPENED refuses a head the gates did not test and accepts the gated head in any letter case" PASS
+else
+  check "GR5 PR_OPENED refuses a head the gates did not test and accepts the gated head in any letter case" FAIL
+fi
+
+GR6_VALID=false
+if gr_frozen \
+  && autopilot_read_run "$GR_RUN" "$GR_PROJECT" > "$ROOT/gr-frozen-read.json" 2>/dev/null \
+  && json_ok "$ROOT/gr-frozen-read.json" 'value.stage === "BLOCKED" && value.blocked.from === "OPEN_PR" && value.blocked.code === "PR_HEAD_GATE_MISMATCH" && value.effects.prOpen.status === "requested" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_frozen" && value.evidence.gates.headSha === "1111111111111111111111111111111111111111" && value.events.map(event => event.eventType).join(",") === "START,PLAN_APPROVED,TDD_STARTED,TDD_CHAIN_DONE,GATES_PASSED,CONVERGENCE_FAILED,TDD_STARTED,TDD_CHAIN_DONE,CONVERGENCE_PASSED,PR_OPEN_REQUESTED,BLOCK"'; then
+  GR6_VALID=true
+  if ! gr_refused gr_event gr-gates-blocked GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+    || ! gr_refused gr_event gr-gates-blocked-fail GATES_FAILED "{\"headSha\":\"$GR_HEAD_B\",\"reason\":\"gate run while blocked\"}"; then
+    GR7_REFUSED=false
+  fi
+fi
+if [ "$GR6_VALID" = true ] \
+  && gr_event gr-resume RESUME '{}' \
+  && json_ok "$GR_FILE" 'value.stage === "OPEN_PR" && value.effects.prOpen.status === "requested"' \
+  && gr_refused gr_event gr-pr-request-again PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$GR_RUN:again\"}" \
+  && gr_event gr-gates-b GATES_PASSED "{\"headSha\":\"$GR_HEAD_B\"}" \
+  && json_ok "$GR_FILE" 'value.stage === "CONVERGE" && value.effects.prOpen.status === "requested" && value.evidence.gates.headSha === "2222222222222222222222222222222222222222"' \
+  && gr_event gr-converge-pass-2 CONVERGENCE_PASSED '{}' \
+  && gr_pr_opened gr-pr-open 903 "$GR_HEAD_B" \
+  && json_ok "$GR_FILE" 'value.stage === "TEAM_REVIEW" && value.effects.prOpen.status === "completed" && value.effects.prOpen.operationKey === "pr:run_gate_reentry_frozen" && value.evidence.pr.headSha === "2222222222222222222222222222222222222222"'; then
+  check "GR3 a run the released library blocked as PR_HEAD_GATE_MISMATCH resumes, keeps its open request, re-runs the gates and opens its PR on the recorded key" PASS
+else
+  check "GR3 a run the released library blocked as PR_HEAD_GATE_MISMATCH resumes, keeps its open request, re-runs the gates and opens its PR on the recorded key" FAIL
+fi
+
+if [ "$GR6_VALID" = true ]; then
+  check "GR6 the frozen record the released library wrote for a PR_HEAD_GATE_MISMATCH block reads as valid" PASS
+else
+  check "GR6 the frozen record the released library wrote for a PR_HEAD_GATE_MISMATCH block reads as valid" FAIL
+fi
+
+if [ "$GR7_REFUSED" = true ] && [ "$GR6_VALID" = true ]; then
+  check "GR7 gate events stay refused in TEAM_REVIEW and in BLOCKED" PASS
+else
+  check "GR7 gate events stay refused in TEAM_REVIEW and in BLOCKED (refused=$GR7_REFUSED blocked-fixture=$GR6_VALID)" FAIL
+fi
+
+if [ "$GR8_KEPT" = true ]; then
+  check "GR8 a gate event in CONVERGE stores its evidence and keeps the stage's Stop budget" PASS
+else
+  check "GR8 a gate event in CONVERGE stores its evidence and keeps the stage's Stop budget" FAIL
+fi
+
+CV_RUN="run_converged_cap"
+CV_OWNER="session_converged_cap"
+CV_PROJECT="$ROOT/converged-cap"
+CV_FILE="$CV_PROJECT/.zensu/state/autopilot-run-${CV_RUN}.json"
+CV_OK=true
+cv_event() {
+  autopilot_apply_event "$CV_RUN" "$1" "$2" "$3" "$CV_PROJECT" >/dev/null 2>&1 || CV_OK=false
+}
+cv_tdd() {
+  cv_event "cv-tdd-start-$1" TDD_STARTED "{\"attempt\":$1,\"chainId\":\"cv-chain-$1\",\"sessionId\":\"$CV_OWNER\"}"
+  cv_event "cv-tdd-done-$1" TDD_CHAIN_DONE "{\"attempt\":$1,\"chainId\":\"cv-chain-$1\",\"sessionId\":\"$CV_OWNER\",\"outcome\":\"$2\"}"
+}
+mkdir -p "$CV_PROJECT"
+autopilot_begin_run "$CV_RUN" "$CV_OWNER" "$CV_PROJECT" false false >/dev/null 2>&1 || CV_OK=false
+cv_event cv-plan PLAN_APPROVED "{\"approvedPlanSha256\":\"$PLAN_SHA\"}"
+cv_tdd 1 converged
+if [ "$CV_OK" = true ] \
+  && json_ok "$CV_FILE" 'value.stage === "GATES" && value.nextActionCode === "RUN_GATES" && value.tdd.outcome === "converged" && value.tdd.headUpdateRequired === false && value.blocked.code === null'; then
+  check "CV1 a converged TDD completion returns to the recorded stage like a pass" PASS
+else
+  check "CV1 a converged TDD completion returns to the recorded stage like a pass" FAIL
+fi
+cv_event cv-gates GATES_PASSED "{\"headSha\":\"$HEAD_SHA\"}"
+cv_event cv-converge CONVERGENCE_PASSED '{}'
+cv_event cv-pr-request PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$CV_RUN\"}"
+cv_event cv-pr-open PR_OPENED "{\"operationKey\":\"pr:$CV_RUN\",\"pr\":{\"number\":714,\"url\":\"https://github.com/acme/repo/pull/714\",\"headSha\":\"$HEAD_SHA\"}}"
+CV_REVIEW_KEY="$(review_operation_key "$CV_RUN" "$HEAD_SHA")"
+cv_event cv-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$CV_REVIEW_KEY\",\"provider\":\"github\"}"
+CV_REVIEW_PAYLOAD="$ROOT/cv-review-payload.json"
+printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Converged review\",\"commit_id\":\"$HEAD_SHA\",\"comments\":[]}" > "$CV_REVIEW_PAYLOAD"
+autopilot_store_team_review_payload "$CV_RUN" "$CV_REVIEW_KEY" "$HEAD_SHA" \
+  "$CV_REVIEW_PAYLOAD" github "$CV_PROJECT" >/dev/null 2>&1 || CV_OK=false
+CV_REVIEW_META="$(_zensu_vcs_review_payload_meta github "$CV_REVIEW_PAYLOAD" "$HEAD_SHA" "$CV_REVIEW_KEY" 2>/dev/null || true)"
+CV_REVIEW_DIGEST="$(printf '%s' "$CV_REVIEW_META" | json_field_stdin payloadDigest 2>/dev/null || true)"
+CV_REVIEW_MARKER="$(review_marker "$CV_REVIEW_KEY" "$HEAD_SHA" "$CV_REVIEW_DIGEST" 1)"
+cv_event cv-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$CV_REVIEW_KEY\",\"marker\":\"$CV_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}"
+cv_event cv-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":1}"
+cv_tdd 2 converged
+if [ "$CV_OK" = true ] \
+  && json_ok "$CV_FILE" 'value.stage === "FIX_FINDINGS" && value.tdd.returnStage === "FIX_FINDINGS" && value.tdd.outcome === "converged" && value.tdd.headUpdateRequired === true'; then
+  check "CV2 a converged fix attempt in a head-update stage requires the head update like a pass" PASS
+else
+  check "CV2 a converged fix attempt in a head-update stage requires the head update like a pass" FAIL
+fi
+cv_event cv-head PR_HEAD_UPDATED "{\"previousHeadSha\":\"$HEAD_SHA\",\"headSha\":\"$HEAD_SHA_2\",\"gatesPassed\":true,\"pushCompleted\":true}"
+cv_event cv-findings-clear FINDINGS_CLEARED "{\"headSha\":\"$HEAD_SHA_2\",\"unresolvedCount\":0}"
+cv_event cv-delivery DELIVERY_COMPLETE "{\"headSha\":\"$HEAD_SHA_2\"}"
+if [ "$CV_OK" = true ] \
+  && json_ok "$CV_FILE" 'value.stage === "DONE" && value.tdd.outcome === "converged" && value.evidence.delivery.headSha === "cccccccccccccccccccccccccccccccccccccccc"' \
+  && autopilot_read_run "$CV_RUN" "$CV_PROJECT" >/dev/null 2>&1; then
+  check "CV3 a run whose last attempt converged completes delivery and reads back as valid" PASS
+else
+  check "CV3 a run whose last attempt converged completes delivery and reads back as valid" FAIL
+fi
+
+CV_FROZEN="$PLUGIN_DIR/tests/structure/fixtures/autopilot-0.38.0-tdd-max-rounds"
+CV_FROZEN_RUN="run_converged_frozen"
+CV_FROZEN_OWNER="session_converged_frozen"
+CV_FROZEN_PROJECT="$ROOT/converged-frozen"
+CV_FROZEN_FILE="$CV_FROZEN_PROJECT/.zensu/state/autopilot-run-${CV_FROZEN_RUN}.json"
+cv_frozen_event() {
+  autopilot_apply_event "$CV_FROZEN_RUN" "$1" "$2" "$3" "$CV_FROZEN_PROJECT" >/dev/null 2>&1
+}
+CV_FROZEN_VALID=false
+if mkdir -p "$CV_FROZEN_PROJECT/.zensu/state" \
+  && cp "$CV_FROZEN"/autopilot-active-*.json "$CV_FROZEN_PROJECT/.zensu/state/" \
+  && CV_FROZEN_NATIVE="$(native_directory "$CV_FROZEN_PROJECT")" \
+  && CV_ROOT_NATIVE="$CV_FROZEN_NATIVE" node -e '
+    const fs = require("fs");
+    const [source, target] = process.argv.slice(1);
+    const text = fs.readFileSync(source, "utf8");
+    fs.writeFileSync(target, text.split(JSON.stringify("@PROJECT_ROOT@")).join(JSON.stringify(process.env.CV_ROOT_NATIVE)));
+  ' "$CV_FROZEN/autopilot-run-${CV_FROZEN_RUN}.json" "$CV_FROZEN_FILE" \
+  && chmod 600 "$CV_FROZEN_PROJECT"/.zensu/state/*.json \
+  && autopilot_read_run "$CV_FROZEN_RUN" "$CV_FROZEN_PROJECT" > "$ROOT/cv-frozen-read.json" 2>/dev/null \
+  && json_ok "$ROOT/cv-frozen-read.json" 'value.stage === "BLOCKED" && value.blocked.from === "AWAIT_TDD" && value.blocked.code === "TDD_MAX_ROUNDS" && value.tdd.outcome === "max-rounds" && value.events.map(event => event.eventType + ":" + event.toStage).join(",") === "START:PLANNING,PLAN_APPROVED:AWAIT_TDD,TDD_STARTED:TDD_RUNNING,TDD_CHAIN_DONE:BLOCKED"'; then
+  CV_FROZEN_VALID=true
+  check "CV4 the frozen record the released library wrote for a max-rounds completion replays to BLOCKED TDD_MAX_ROUNDS" PASS
+else
+  check "CV4 the frozen record the released library wrote for a max-rounds completion replays to BLOCKED TDD_MAX_ROUNDS" FAIL
+fi
+if [ "$CV_FROZEN_VALID" = true ] \
+  && cv_frozen_event cv-frozen-resume RESUME '{}' \
+  && json_ok "$CV_FROZEN_FILE" 'value.stage === "AWAIT_TDD" && value.tdd.returnStage === "GATES"' \
+  && cv_frozen_event cv-frozen-tdd-start-2 TDD_STARTED "{\"attempt\":2,\"chainId\":\"cv-chain-2\",\"sessionId\":\"$CV_FROZEN_OWNER\"}" \
+  && cv_frozen_event cv-frozen-tdd-done-2 TDD_CHAIN_DONE "{\"attempt\":2,\"chainId\":\"cv-chain-2\",\"sessionId\":\"$CV_FROZEN_OWNER\",\"outcome\":\"converged\"}" \
+  && json_ok "$CV_FROZEN_FILE" 'value.stage === "GATES" && value.tdd.attempt === 2 && value.tdd.outcome === "converged" && value.blocked.code === null'; then
+  check "CV5 a run an earlier max-rounds attempt blocked resumes and returns to its stage once a fresh attempt converges" PASS
+else
+  check "CV5 a run an earlier max-rounds attempt blocked resumes and returns to its stage once a fresh attempt converges" FAIL
+fi
+cv_outcome_census() {
+  PLUGIN="$1" node -e '
+    const fs = require("fs"), path = require("path");
+    const root = process.env.PLUGIN;
+    const files = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(sh|js|mjs)$/.test(entry.name)) files.push(full);
+      }
+    };
+    walk(path.join(root, "hooks"));
+    const word = (name) => new RegExp("(^|[^A-Za-z0-9_-])" + name + "([^A-Za-z0-9_-]|$)");
+    const refused = [
+      "(\x27\x27|pass|no-changes|max-rounds) ;;",
+      "--outcome must be pass, no-changes or max-rounds.",
+      "if(requested && ![\"pass\",\"no-changes\",\"max-rounds\"].includes(requested))",
+      "case \"$outcome\" in pass|no-changes|max-rounds) ;; *) return 1 ;; esac",
+    ];
+    const seen = refused.map(() => 0);
+    const missing = [];
+    let lists = 0;
+    for (const file of files.sort()) {
+      fs.readFileSync(file, "utf8").split("\n").forEach((text, index) => {
+        if (/^\s*(#|\/\/|\*|\/\*)/.test(text)) return;
+        if (!word("pass").test(text) || !word("no-changes").test(text)) return;
+        lists += 1;
+        const at = refused.findIndex((needle) => text.includes(needle));
+        if (at >= 0) {
+          seen[at] += 1;
+          return;
+        }
+        if (!word("converged").test(text)) missing.push(path.relative(root, file).split(path.sep).join("/") + ":" + (index + 1));
+      });
+    }
+    const bad = seen.map((count, at) => (count === 1 ? "" : "refused[" + at + "]=" + count)).filter(Boolean);
+    const drift = missing.concat(bad);
+    if (lists <= refused.length) drift.push("vacuous");
+    process.stdout.write(drift.length ? "drift " + drift.join(" ") : "ok lists=" + lists);
+  ' 2>&1
+}
+CV6_VERDICT="$(cv_outcome_census "$PLUGIN_DIR")"
+CV6_MUTANT="$ROOT/cv6-mutant"
+mkdir -p "$CV6_MUTANT/hooks/lib" \
+  && sed 's/"max-rounds", "converged"]\.includes(state\.tdd\.outcome))/"max-rounds"].includes(state.tdd.outcome))/' \
+    "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" >"$CV6_MUTANT/hooks/lib/zensu-autopilot-state.sh" \
+  && cp "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" "$PLUGIN_DIR/hooks/lib/zensu-log.sh" "$CV6_MUTANT/hooks/lib/"
+CV6_MUTANT_VERDICT="$(cv_outcome_census "$CV6_MUTANT")"
+if [ "${CV6_VERDICT%% *}" = ok ] \
+  && case "$CV6_MUTANT_VERDICT" in (drift*hooks/lib/zensu-autopilot-state.sh:*) true ;; (*) false ;; esac; then
+  check "CV6 every outcome list under hooks/ names converged, except the four that refuse it by design" PASS
+else
+  check "CV6 every outcome list under hooks/ names converged, except the four that refuse it by design ($CV6_VERDICT | mutant: $CV6_MUTANT_VERDICT)" FAIL
+fi
+
 RUN2="run_blocking_002"
 RUN2_FILE="$PROJECT/.zensu/state/autopilot-run-${RUN2}.json"
 if autopilot_begin_run "$RUN2" "session_owner_002" "$PROJECT" >/dev/null \

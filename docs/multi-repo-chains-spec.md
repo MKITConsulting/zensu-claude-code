@@ -53,9 +53,9 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:2334`) and counts through the shared helper (`:2393`),
+(`hooks/lib/zensu-log.sh:2881`) and counts through the shared helper (`:2940`),
 which runs every `git` call with the discovery and config-injection variables unset
-(`:89`, `:130-131`). The `--chain-done` zero-change terminus counts through the same
+(`:89`, `:134-135`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
 `CLAUDE_PROJECT_DIR` that `zensu-log.sh` re-exports from `zensu_resolve_project_dir()`
 before any verb runs, so the `.` fallback never applies there. Which root the ambient
@@ -67,7 +67,7 @@ when it is unset, is an open question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:782-826`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:232`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:2323`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2870`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -103,9 +103,9 @@ at all, and `hooks/checks/pre-write-secret-scan.sh:85` references one only throu
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:670` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:673` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:630-632` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:632-634` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
@@ -429,7 +429,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:298`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:300-301`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming

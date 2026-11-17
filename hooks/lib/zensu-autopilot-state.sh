@@ -741,7 +741,7 @@ const payloadValid = (type, payload) => {
     case "TDD_CHAIN_DONE":
       return exact(payload, ["attempt", "chainId", "sessionId", "outcome"])
         && positive(payload.attempt) && identifier(payload.chainId) && identifier(payload.sessionId)
-        && ["pass", "no-changes", "max-rounds"].includes(payload.outcome);
+        && ["pass", "no-changes", "max-rounds", "converged"].includes(payload.outcome);
     case "GATES_PASSED":
     case "VALIDATION_PASSED":
     case "COVERAGE_PASSED":
@@ -901,7 +901,7 @@ const deliveryInvariants = state => {
       && sameSha(state.evidence.validation.headSha, head)))
     && (!state.options.cover || (state.evidence.coverage && state.evidence.coverage.passed
       && sameSha(state.evidence.coverage.headSha, head)))
-    && ["pass", "no-changes"].includes(state.tdd.outcome)
+    && ["pass", "no-changes", "converged"].includes(state.tdd.outcome)
   );
 };
 
@@ -918,7 +918,7 @@ const stateValid = state => {
   if (!exact(state.tdd, ["attempt", "chainId", "sessionId", "returnStage", "outcome", "headUpdateRequired"])
     || !natural(state.tdd.attempt) || !nullableIdentifier(state.tdd.chainId) || !nullableIdentifier(state.tdd.sessionId)
     || !(state.tdd.returnStage === null || RETURN_STAGES.has(state.tdd.returnStage))
-    || !(state.tdd.outcome === null || ["pass", "no-changes", "max-rounds"].includes(state.tdd.outcome))
+    || !(state.tdd.outcome === null || ["pass", "no-changes", "max-rounds", "converged"].includes(state.tdd.outcome))
     || typeof state.tdd.headUpdateRequired !== "boolean") return false;
   if (!exact(state.effects, ["prOpen", "teamReview"]) || !effectValid(state.effects.prOpen)
     || !teamReviewEffectValid(state.effects.teamReview) || !evidenceValid(state.evidence)) return false;
@@ -939,7 +939,7 @@ const stateValid = state => {
   if (state.tdd.headUpdateRequired) {
     const pendingStage = state.stage === "BLOCKED" ? state.blocked.from : state.stage;
     if (!HEAD_UPDATE_STAGES.has(pendingStage) || state.tdd.returnStage !== pendingStage
-      || !["pass", "no-changes"].includes(state.tdd.outcome)) return false;
+      || !["pass", "no-changes", "converged"].includes(state.tdd.outcome)) return false;
   }
   if (!Array.isArray(state.bypasses) || state.bypasses.length > 128
     || !state.bypasses.every(item => exact(item, ["gate", "stage"]) && identifier(item.gate) && STAGES.has(item.stage))) return false;
@@ -1231,7 +1231,21 @@ const transition = (state, type, payload, reject = fail) => {
       state.evidence.gates = { passed: true, headSha: payload.headSha.toLowerCase() };
       move(state, "CONVERGE");
       return;
+    case "CONVERGE:GATES_PASSED":
+      state.evidence.gates = { passed: true, headSha: payload.headSha.toLowerCase() };
+      return;
+    case "OPEN_PR:GATES_PASSED":
+      if (state.evidence.gates && sameSha(state.evidence.gates.headSha, payload.headSha)) reject(4, "gates already recorded for this head");
+      state.evidence.gates = { passed: true, headSha: payload.headSha.toLowerCase() };
+      move(state, "CONVERGE");
+      return;
     case "GATES:GATES_FAILED":
+    case "CONVERGE:GATES_FAILED":
+      state.evidence.gates = { passed: false, headSha: payload.headSha.toLowerCase() };
+      toAwaitTdd(state, "GATES");
+      return;
+    case "OPEN_PR:GATES_FAILED":
+      if (state.evidence.gates && sameSha(state.evidence.gates.headSha, payload.headSha)) reject(4, "gates already recorded for this head");
       state.evidence.gates = { passed: false, headSha: payload.headSha.toLowerCase() };
       toAwaitTdd(state, "GATES");
       return;
@@ -1253,7 +1267,7 @@ const transition = (state, type, payload, reject = fail) => {
     case "OPEN_PR:PR_OPENED":
       if (state.effects.prOpen.status !== "requested"
         || state.effects.prOpen.operationKey !== payload.operationKey) reject(4, "PR open operation key mismatch");
-      if (state.evidence.gates && state.evidence.gates.headSha !== payload.pr.headSha) reject(4, "PR head differs from gate evidence");
+      if (state.evidence.gates && !sameSha(state.evidence.gates.headSha, payload.pr.headSha)) reject(4, "PR head differs from gate evidence");
       state.effects.prOpen = { status: "completed", operationKey: payload.operationKey };
       state.evidence.pr = { number: payload.pr.number, url: payload.pr.url, headSha: payload.pr.headSha.toLowerCase() };
       move(state, "TEAM_REVIEW");
@@ -4596,7 +4610,7 @@ _autopilot_reconcile_stop_inner_critical() {
             process.stdout.write("pending");process.exit(0);
           }
           if(s.chainDone===true && s.implComplete===true
-              && ["pass","no-changes","max-rounds"].includes(a.outcome)){
+              && ["pass","no-changes","max-rounds","converged"].includes(a.outcome)){
             process.stdout.write(`done\t${a.outcome}`);process.exit(0);
           }
           process.exit(3);
@@ -4938,7 +4952,7 @@ autopilot_finish_tdd_attempt() {
     && _autopilot_identifier_ok "$session_id" && _autopilot_identifier_ok "$chain_id" || return 3
   case "$attempt" in ''|*[!0-9]*) return 3 ;; esac
   [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ] || return 3
-  case "$outcome" in pass|no-changes|max-rounds) ;; *) return 3 ;; esac
+  case "$outcome" in pass|no-changes|max-rounds|converged) ;; *) return 3 ;; esac
   case "$claimed_seen" in true|false) ;; *) return 3 ;; esac
   if [ "$claimed_seen" = "true" ]; then
     _tdd_review_ticket_shape_ok "$claimed_ticket" || return 3
@@ -4991,7 +5005,7 @@ _autopilot_rearm_review_critical() {
       ' 2>/dev/null)" || return 3
     IFS=$'\t' read -r inner_done outcome <<<"$reconcile_fields"
     if [ "$inner_done" = "true" ]; then
-      case "$outcome" in pass|no-changes|max-rounds) ;; *) return 3 ;; esac
+      case "$outcome" in pass|no-changes|max-rounds|converged) ;; *) return 3 ;; esac
       payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" OUTCOME="$outcome" node -e '
         process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID,outcome:process.env.OUTCOME}));
       ')" || return 5

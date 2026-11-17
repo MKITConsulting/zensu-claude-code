@@ -21,7 +21,16 @@ before. This wait releases such a Stop, explicitly and bounded.
 message, `ZENSU-AWAIT: <task id>` (optionally in backticks). The hook reads the Stop input's
 `last_assistant_message` and `background_tasks`; when a named task is in flight it releases the
 Stop with one notice through `stop_notice` (stderr and the Stop's `systemMessage`, the channel
-`.claude/rules/stop-latency.md` requires for every release) and charges nothing. The first Stop that sees running tasks and no
+`.claude/rules/stop-latency.md` requires for every release) and charges nothing. The notice is one
+sentence for the user (`renderReleaseNote`): each task's screened description in quotes, or
+`task <id>` without one, at most `LIMITS.listedTasks` (3) and a count of the rest, as in
+`Zensu is waiting for "E2E reproduction run"; the review chain continues when it reports back.`
+It carries no release count: the `systemMessage` of a released Stop never reaches the model
+(measured on 2026-11-16, `.claude/rules/background-review-completion.md` §"Resumed reviewers"),
+so an instruction there reached nobody, and the bound is the hook's business. The machine head
+line `wait release= max= tasks= ids=` carries the bound for the hook. A reviewer the chain
+recorded at launch reaches this path only past the bounds of the background review wait, which
+runs first (see Placement). The first Stop that sees running tasks and no
 such line blocks once with a dedicated reason that names every task in flight (id, type,
 description) and the line; that hint also charges nothing, and it is shown once per new task id
 and at most `LIMITS.hintsPerGeneration` (3) times per chain generation, so a later Stop that
@@ -73,7 +82,9 @@ past implementation (the first review, routed fix rounds and the self-review sta
 budget is below its cap. The implicit workflow wait keeps its own counter; once it is spent, a
 running workflow is an ordinary waking task here. A review agent the plugin recorded at launch
 releases through the background review wait first; once that wait's 60-minute window has passed,
-an agent that still runs is an ordinary `subagent` task here. Exclusions, all inside the function: a session that owns a live Autopilot run, an
+an agent that still runs is an ordinary `subagent` task here, and so is a resumed fan-out
+reviewer past its `LIMITS.maxRenewals` (3) renewals, idle bound or name binding, and a resumed
+consume-mode reviewer, which is never renewed. Exclusions, all inside the function: a session that owns a live Autopilot run, an
 Autopilot-bound chain, a Stop that adopted a deferred review, a project holding a deferred
 claim, and a refused reviewer spawn. A Stop input without a `background_tasks` entry returns at
 a `case` test before any config read, probe or child process (`B18`).
@@ -83,7 +94,12 @@ a `case` test before any config read, probe or child process (`B18`).
 the scope-sentence read uses (`B12`). `false` removes both the release and the hint.
 
 **Coupled sites.** The module (vocabulary, marker grammar, verdicts, bound, store, rendered
-hint and release note); `stop_background_wait` and its call site in `hooks/stop-chain-enforcer.sh`;
+hint and release note); `renderWaitingNote`, `waitingNote` and `inFlightTasks`, which
+`background-review-v1.js` requires for its own note and its renewal of resumed reviewers and
+`external-review-v1.js` for the workflow-wait note, so a change to the sentence or the vocabulary
+reaches both waits; `WAIT_NOTE_LEAD`, `WAIT_NOTE_FALLBACK` and `split_wait_verdict` in the Stop
+hook, which check every module note before it is shown and fall back to one sentence the renderer
+also produces (`BR21` compares them, `BR21b` drives each refusal); `stop_background_wait` and its call site in `hooks/stop-chain-enforcer.sh`;
 `zensu_stop_background_wait_file` / `_reset` in `hooks/lib/zensu-tdd-phase.sh` and the
 `--tdd-begin` call in `hooks/lib/zensu-log.sh`; `config.example.json`; the `false` entry in
 `evals/route-short-line-reaction/eval-config.json`, which `RS5` of

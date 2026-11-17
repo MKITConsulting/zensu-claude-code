@@ -6766,7 +6766,7 @@ test('a remnant whose manifest path cannot be read is not admitted', () => {
   );
 });
 
-test('a retired remnant relaxes neither the sibling root nor the strict read', () => {
+test('a retired remnant whose project root is gone is admitted only by the combined reader', () => {
   const f = prunedReaderFixture();
   const successor = successorInstallation(f, '10.0.0');
   retireToRemnant(f);
@@ -6780,7 +6780,164 @@ test('a retired remnant relaxes neither the sibling root nor the strict read', (
     () => core.readOrphanedProjectRootContext(f.readerOptions),
     /host-specific plugin manifest is missing/,
   );
-  assert.equal(core.adoptableRecord(adoptionOptions(f, successor)).reason, 'record-unreadable');
+  const combined = core.readOrphanedPrunedContext(f.readerOptions);
+  assert.equal(combined.plugin_root, f.currentContext.plugin_root);
+  assert.equal(combined.project_root, f.currentContext.project_root);
+  const verdict = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.orphanedProjectRoot, true);
+  assert.equal(verdict.prunedPluginRoot, true);
+});
+
+test('the combined reader admits a record whose project root and installation are both gone', () => {
+  const f = prunedReaderFixture();
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(() => core.readContext(f.readerOptions));
+  assert.throws(
+    () => core.readOrphanedProjectRootContext(f.readerOptions),
+    /context plugin root does not exist/,
+  );
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /context project root does not exist/,
+  );
+  const relaxed = core.readOrphanedPrunedContext(f.readerOptions);
+  assert.equal(relaxed.project_root, f.currentContext.project_root);
+  assert.equal(relaxed.plugin_root, f.currentContext.plugin_root);
+  assert.equal(relaxed.runtime_digest, f.currentContext.runtime_digest);
+  assert.equal(relaxed.plugin_version, '9.8.7');
+});
+
+test('the combined reader refuses a record that still has either of its roots', () => {
+  const projectGone = prunedReaderFixture();
+  fs.rmSync(projectGone.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(projectGone.readerOptions),
+    /^Error: session-control-v1: context plugin root still exists and still carries its manifest$/,
+  );
+  const pluginGone = prunedReaderFixture();
+  fs.rmSync(pluginGone.pluginRoot, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(pluginGone.readerOptions),
+    /^Error: session-control-v1: context project root still exists$/,
+  );
+  const healthy = prunedReaderFixture();
+  assert.throws(
+    () => core.readOrphanedPrunedContext(healthy.readerOptions),
+    /^Error: session-control-v1: context project root still exists$/,
+  );
+  const unmarked = prunedReaderFixture();
+  retireToRemnant(unmarked);
+  fs.rmSync(path.join(unmarked.pluginRoot, '.orphaned_at'));
+  fs.rmSync(unmarked.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(unmarked.readerOptions),
+    /^Error: session-control-v1: context plugin root still exists and carries no valid orphan marker$/,
+  );
+  if (process.platform !== 'win32') {
+    const dangling = prunedReaderFixture();
+    fs.rmSync(dangling.pluginRoot, { recursive: true, force: true });
+    fs.rmSync(dangling.currentContext.project_root, { recursive: true, force: true });
+    fs.symlinkSync(path.join(dangling.root, 'nowhere'), dangling.currentContext.project_root);
+    assert.throws(
+      () => core.readOrphanedPrunedContext(dangling.readerOptions),
+      /^Error: session-control-v1: context project root still exists$/,
+    );
+  }
+});
+
+test('the combined reader waives no check beyond the two proven absences', () => {
+  const gone = (f) => {
+    fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+    fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+    return f;
+  };
+  const tampered = gone(prunedReaderFixture());
+  rewriteJson(tampered.recordFile, (record) => {
+    record.session_id_hash = `sha256:${'f'.repeat(64)}`;
+    return record;
+  });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(tampered.readerOptions),
+    /context session hash mismatch/,
+  );
+  const drifted = gone(prunedReaderFixture());
+  rewriteJson(drifted.recordFile, (record) => {
+    record.source_revision = `sha256:${'e'.repeat(64)}`;
+    return record;
+  });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(drifted.readerOptions),
+    /source revision must equal its runtime content digest/,
+  );
+  const unparented = prunedReaderFixture();
+  fs.rmSync(unparented.currentContext.project_root, { recursive: true, force: true });
+  fs.rmSync(unparented.cacheParent, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedPrunedContext(unparented.readerOptions),
+    /context plugin root parent does not exist/,
+  );
+});
+
+test('a record with both roots gone is adopted around its absent project root', () => {
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '10.0.0');
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+  const verdict = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.orphanedProjectRoot, true);
+  assert.equal(verdict.prunedPluginRoot, true);
+  assert.equal(verdict.recorded, '9.8.7');
+  assert.equal(verdict.executing, '10.0.0');
+  assert.equal(
+    core.restoreRootVerdict(adoptionOptions(f, successor)).reason,
+    core.RESTORE_ROOT_REFUSALS.NOT_SERVED,
+  );
+  const adopted = core.adoptContext(adoptionOptions(f, successor));
+  assert.equal(adopted.orphanedProjectRoot, true);
+  assert.equal(adopted.prunedPluginRoot, true);
+  assert.equal(adopted.context.plugin_root, successor);
+  assert.equal(adopted.context.project_root, f.currentContext.project_root);
+  assert.equal(adopted.provenance, 'no-workflow-document');
+  assert.ok(fs.existsSync(adopted.supersededFile));
+  assert.equal(fs.existsSync(f.currentContext.project_root), false);
+  assert.throws(() => core.readContext(f.readerOptions), /context project root does not exist/);
+  assert.equal(core.readOrphanedProjectRootContext(f.readerOptions).plugin_root, successor);
+  assert.equal(core.adoptableRecord(adoptionOptions(f, successor)).reason, 'already-served');
+});
+
+test('the combined admission relaxes nothing else about adoption or the restore repair', () => {
+  const gone = (f) => {
+    fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+    fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+    return f;
+  };
+  const older = prunedReaderFixture();
+  const olderSuccessor = successorInstallation(older, '9.8.6');
+  gone(older);
+  assert.equal(
+    core.adoptableRecord(adoptionOptions(older, olderSuccessor)).reason,
+    'executing-runtime-older',
+  );
+  const foreign = prunedReaderFixture();
+  const foreignRoot = successorInstallation(foreign, '10.0.0');
+  const elsewhere = path.join(foreign.root, 'elsewhere');
+  fs.renameSync(foreignRoot, elsewhere);
+  gone(foreign);
+  assert.equal(
+    core.adoptableRecord(adoptionOptions(foreign, elsewhere)).reason,
+    'not-a-sibling-installation',
+  );
+  const otherStore = prunedReaderFixture();
+  const otherSuccessor = successorInstallation(otherStore, '10.0.0');
+  gone(otherStore);
+  const strangerData = path.join(otherStore.root, 'stranger-data');
+  fs.mkdirSync(strangerData);
+  const strangerOptions = { ...adoptionOptions(otherStore, otherSuccessor), pluginData: strangerData };
+  assert.equal(core.adoptableRecord(strangerOptions).reason, 'plugin-data-mismatch');
+  assert.equal(core.restoreRootVerdict(strangerOptions).reason, core.RESTORE_ROOT_REFUSALS.PLUGIN_DATA);
 });
 
 test('recordReaderRefusals names why each record reader refused the record', () => {
@@ -6796,7 +6953,9 @@ test('recordReaderRefusals names why each record reader refused the record', () 
     core.RECORD_READERS.STRICT,
     core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
     core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
   ]);
+  assert.equal(core.RECORD_READERS.ORPHANED_PRUNED, 'orphaned-and-pruned');
   const unmarkedCauses = byReader(unmarkedVerdicts);
   assert.match(unmarkedCauses.strict, /^host-specific plugin manifest is missing: /);
   assert.match(unmarkedCauses['orphaned-project-root'], /^host-specific plugin manifest is missing: /);
@@ -6804,6 +6963,7 @@ test('recordReaderRefusals names why each record reader refused the record', () 
     unmarkedCauses['pruned-plugin-root'],
     'context plugin root still exists and carries no valid orphan marker',
   );
+  assert.equal(unmarkedCauses['orphaned-and-pruned'], 'context project root still exists');
   assert.equal(core.adoptableRecord(adoptionOptions(unmarked, successor)).reason, 'record-unreadable');
 
   const healthy = prunedReaderFixture();
@@ -6814,22 +6974,32 @@ test('recordReaderRefusals names why each record reader refused the record', () 
     healthyCauses['pruned-plugin-root'],
     'context plugin root still exists and still carries its manifest',
   );
+  assert.equal(healthyCauses['orphaned-and-pruned'], 'context project root still exists');
 
   const retired = prunedReaderFixture();
   retireToRemnant(retired);
   assert.equal(byReader(core.recordReaderRefusals(options(retired)))['pruned-plugin-root'], null);
+
+  const bothGone = prunedReaderFixture();
+  fs.rmSync(bothGone.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(bothGone.currentContext.project_root, { recursive: true, force: true });
+  const bothGoneCauses = byReader(core.recordReaderRefusals(options(bothGone)));
+  assert.match(bothGoneCauses.strict, /does not exist/);
+  assert.equal(bothGoneCauses['orphaned-project-root'], 'context plugin root does not exist');
+  assert.equal(bothGoneCauses['pruned-plugin-root'], 'context project root does not exist');
+  assert.equal(bothGoneCauses['orphaned-and-pruned'], null);
 });
 
 test('recordReaderRefusals never throws and names a session that has no record', () => {
   const f = prunedReaderFixture();
   const missing = core.recordReaderRefusals({ recordsDir: f.recordsDir, sessionId: 'no such session', host: 'claude' });
-  assert.equal(missing.length, 3);
+  assert.equal(missing.length, 4);
   for (const entry of missing) {
     assert.match(entry.refusal, /^missing file: /, entry.reader);
   }
   for (const input of [undefined, null, 'not an object', {}]) {
     const verdicts = core.recordReaderRefusals(input);
-    assert.equal(verdicts.length, 3);
+    assert.equal(verdicts.length, 4);
     for (const entry of verdicts) {
       assert.equal(typeof entry.refusal, 'string', entry.reader);
       assert.equal(entry.refusal.startsWith('session-control-v1: '), false, entry.refusal);

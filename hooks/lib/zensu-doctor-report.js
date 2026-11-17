@@ -1948,6 +1948,7 @@ function deliveryRouteRow() {
 }
 
 var ZEN_YIELD = 'the user\'s own CLAUDE.md, output style or a style mode they chose outranks it';
+var ZEN_ROOT_SCOPE = 'the hook reads both zen-mode keys under each session\'s recorded project root, so the zen-mode: row says what this session resolves';
 
 function zenModeInstalled() {
   try {
@@ -1960,12 +1961,12 @@ function zenModeInstalled() {
 function zenModeConfigRow(cfgReads) {
   if (!zenModeInstalled()) return;
   if (hookFlagDisabled(cfgReads, 'zenMode')) {
-    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the zen-mode hook is switched off, so no prompt receives the low-noise contract');
+    line(OK, 'zen-mode default: off for every session (hooks.zenMode=false) — the config files this block reads switch the zen-mode hook off; ' + ZEN_ROOT_SCOPE);
   } else if (hookFlagDisabled(cfgReads, 'zenModeDefault')) {
-    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode');
+    line(OK, 'zen-mode default: opt-in (hooks.zenModeDefault=false) — a session gets low-noise answers only after /zensu:zen-mode; ' + ZEN_ROOT_SCOPE);
   } else {
     line(OK, 'zen-mode default: on (hooks.zenModeDefault) — every session gets low-noise answers, and ' + ZEN_YIELD
-      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in');
+      + '; "zen off" leaves it for one session, hooks.zenModeDefault=false makes it opt-in; ' + ZEN_ROOT_SCOPE);
   }
 }
 
@@ -1975,7 +1976,7 @@ function zenModeRow() {
   if (v === 'unknown') {
     line(WARN, 'zen-mode: not checked — no bound session key or recorded project root was available, so this session\'s zen-mode marker was never looked for; a missing check rather than an all-clear — ' + unboundSessionCause());
   } else if (v === 'unjudged') {
-    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session, shows what the hook resolves');
+    line(WARN, 'zen-mode: could not be read — the zen-mode libraries did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. The zen-mode helper\'s --status verb, run from the session as /zensu:zen-mode renders it, walks the hook\'s state ladder and its hooks.zenMode check under the recorded project root, as the hook does');
   } else if (v === 'on (session marker)' || v === 'on (hooks.zenModeDefault)') {
     line(OK, 'zen-mode: ' + v + ' — every prompt of this session gets the low-noise contract, and ' + ZEN_YIELD
       + '; "zen off" leaves it for this session');
@@ -2702,8 +2703,9 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
       + ' a note records it.) Counted in turns,'
       + ' never in elapsed time, so a paused session or a powered-off machine never reaches this row.'
       + ' The exit is the review chain: run the /zensu:build Phase 6 step 5b edit-landing audit until its'
-      + ' receipt records a CLEAN verdict, and give the plan a usable `## Requirements` table, because'
-      + ' while the tree is dirty the completion verb refuses a plan without that table and refuses a'
+      + ' receipt records a CLEAN verdict, and give the plan a usable `## Requirements` table with at least'
+      + ' one active AC-### row, because while the tree is dirty the completion verb refuses a plan without'
+      + ' that table, refuses a standalone chain\'s plan without an active AC-### row and refuses a'
       + ' receipt that is merely present — every claimed edit has to have landed.'
       // QUALIFIES, never withholds. The caveat is worded so that its absence costs
       // the reader nothing they can act wrongly on: with no live note the row is the
@@ -3139,7 +3141,7 @@ var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessi
   'evidence', 'blocked', 'bypasses', 'stopBudget', 'events'];
 var AUTOPILOT_TERMINAL_UNSHAPED = { terminalUnshaped: true };
 var AUTOPILOT_SHA256_RE = /^[a-fA-F0-9]{64}$/;
-var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds'];
+var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds', 'converged'];
 // The owner's `sha256` is a TYPE test as much as a pattern test, and the type half is
 // the load-bearing one here: `RegExp.prototype.test` applies ToString to its argument,
 // so `['a'.repeat(64)]` satisfies a bare `.test` and fails the owner. This predicate
@@ -5050,7 +5052,8 @@ function bindingLine() {
     case 'pruned-plugin-root':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
         + versions()
-        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY);
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY
+        + '. If the recorded project root is gone as well, an adoption re-mints the record, but a zensu CLI call, Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created; /zensu:adopt-session --restore-root reports on that AFTER the adoption, because that repair requires the running installation to serve the record');
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage

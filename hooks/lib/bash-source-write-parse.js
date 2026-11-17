@@ -2788,6 +2788,21 @@ function main() {
   return bypassMarkers();
 }
 
+function heredocBodies(s) {
+  const lines = s.split("\n");
+  const bodies = [];
+  let i = 0;
+  while (i < lines.length) {
+    for (const doc of heredocDelimiters(lines[i++])) {
+      const start = i;
+      i = skipHeredocs(lines, i, [doc]);
+      const closed = i > start && (doc.tabs ? lines[i - 1].replace(/^\t+/, "") : lines[i - 1]) === doc.delim;
+      bodies.push({ quoted: doc.quoted, body: lines.slice(start, closed ? i - 1 : i).join("\n") });
+    }
+  }
+  return bodies;
+}
+
 {
   // Copies, not the live tables. Object.freeze does NOT protect a Set — its
   // entries live in an internal slot, so a frozen Set still accepts .delete()
@@ -2799,6 +2814,7 @@ function main() {
     detectChannels,
     detectControlMutation,
     stripHeredocs,
+    heredocBodies,
     gitTargets,
     msysToDrive,
     programName,

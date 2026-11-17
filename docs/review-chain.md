@@ -181,8 +181,10 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   full-suite and acceptance gates run as for a panel review. A re-review never imports.
 - **The Stop guard waits for a running workflow.** When the review chain still awaits its
   first review and the Stop input's `background_tasks` lists a workflow whose status reads as
-  running, the guard releases that `Stop` without charging the review budget and says so on
-  stderr, at most three times in a row: after the third release every `Stop` blocks until one
+  running, the guard releases that `Stop` without charging the review budget and tells the user
+  in one sentence (the Stop's `systemMessage`, also on stderr) that names the workflow, for
+  example `Zensu is waiting for the workflow "review-changes"; the review chain continues when it
+  reports back.`, at most three times in a row: after the third release every `Stop` blocks until one
   sees no running workflow, which restarts the count, and arming a new chain with
   `--tdd-begin` restarts it too. A session that owns a live Autopilot run, a chain
   that adopted or holds a deferred review, a fix round, a converged chain, an Autopilot-bound
@@ -296,6 +298,55 @@ lean panel's re-review reads the edit but not the ledger, and `/zensu:self-revie
 `fixed` entry as a candidate. A `fixed` line written for an edit that missed its finding therefore
 stays closed unless a later review raises the defect again.
 
+#### Max rounds in an Autopilot-bound chain
+
+A chain that reaches `autoFixMaxRounds` hands off to `/zensu:self-review`, which takes its one
+fix round and closes the chain. For an Autopilot-bound chain that close also decides how the
+attempt ends, and the bound `--chain-done` terminus is the only place that decides it:
+
+- **`converged`.** The hand-off recorded `max-rounds`, the self-review closes with the ticket
+  the hand-off issued, `hooks.reviewConvergence` is on, the session's edit-landing receipt names
+  a run log, and that log's findings ledger, read the way the reports read it (`--report`),
+  answers `status=ok` with no `routed-unfixed` or `parked` entry, no `deferred` IMPORTANT or
+  CRITICAL entry and no line it could not read before the last `REVIEW BUDGET RESET`, and holds
+  a `FINAL REVIEW LEDGERED — R<n>` line after that reset for the review round that met the cap.
+  The attempt then meets the gates a `pass` meets (edit landing and full suite; acceptance answers
+  `not-checked` for a bound chain), and the run returns to its Autopilot stage as it does after a
+  `pass`. Deferred SUGGESTION entries
+  stay open in the report and do not block.
+- **`max-rounds`.** Every other case: an open defect, an empty, partial or unreadable ledger, a
+  missing `FINAL REVIEW LEDGERED` line, no receipt, a receipt that names no run log,
+  `hooks.reviewConvergence` off, or a check that could not run. The run blocks with
+  `TDD_MAX_ROUNDS` as before, and `/zensu:reset-review-limit` can resume it for another attempt.
+- **A converged close that a gate refuses.** The chain stays open, and the terminus has printed a
+  `CONVERGED CLOSE — …` line. A refusal that names a command to run, a record to wait for or an
+  audit to repeat is answered that way, and the terminus runs again. A cause only an edit can
+  remove, such as a failed full suite, takes the self-review's one fix round; once that round is
+  spent, `--chain-done --outcome max-rounds` closes the attempt as `max-rounds`, runs no pass gate
+  and blocks the run with `TDD_MAX_ROUNDS`, and the final report marks the converged verdict as
+  refused by a gate.
+
+The terminus prints the decision as one line before the gate lines,
+`CONVERGENCE — converged | …` or `CONVERGENCE — not converged | <reason>`, and names up to five
+open defects by ledger id, state and severity. The final review of the chain is never routed, so
+its findings would reach no ledger line; the bound hand-off therefore asks the main thread to
+ledger them before the self-review starts, a CRITICAL or IMPORTANT finding as `routed`, which
+makes it a must-fix candidate of the self-review's fix round, and a SUGGESTION as `deferred`. A
+CRITICAL or IMPORTANT finding the judge names in a `[STILL OPEN] <ledger-id> covers <panel-id>`
+line gets a `parked` line for the earlier id instead, so an earlier deferred suggestion that it
+raises again blocks the close. The hand-off then asks for the `FINAL REVIEW LEDGERED — R<n>`
+line, also when that review needed no ledger line. The `fixed` lines
+`--round-prepare --round self-review` writes for that round then close what it fixed. A candidate
+the self-review leaves unfixed gets no ledger transition, so it keeps the attempt at `max-rounds`.
+
+Only the terminus decides `converged`. `--chain-done --outcome converged`, like every `--outcome`
+other than `pass`, `no-changes` and `max-rounds`, is refused with exit `2` and changes nothing, an
+explicit `--outcome max-rounds` skips the check, and the workflow
+document can be sealed as `converged` only from a recorded `max-rounds` hand-off with the claimed
+review ticket. With `hooks.selfReview` off the post-review hook closes a bound chain at max rounds
+itself, and that close stays `max-rounds`, because no later stage could fix what the last review
+found.
+
 #### Background review agents
 
 A host may start every `Agent` spawn in the background: the Claude desktop app does, and its
@@ -305,7 +356,8 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
 - **Launch.** The post-review hook records each launch in the plugin's private data store under
   `background-review/v1/`, at mode `0600`. A `zensu:review-aspect`, `zensu:review-judge` or
   repo-local `zensu-review-*` persona launch becomes one entry per agent under
-  `fanout/<scv1-session-key>/`. The consume-mode
+  `fanout/<scv1-session-key>/`, and the same launch is remembered in the reviewer register under
+  `reviewers/<scv1-session-key>/`, which outlives the entry (see **Resumed reviewers**). The consume-mode
   `zensu:code-reviewer` becomes the session's one record under `records/`, holding the agent id,
   the ticket and the prompt's header lines, but only while its `REVIEW-TICKET` is the ticket the
   claim would accept. Its directive tells a standalone chain to end its turn and wait, and an
@@ -314,7 +366,12 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   it refuses is not recorded and gets the gate's refusal instead, and a passing one is recorded
   in the gate's store with the digest of the block it carried.
 - **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
-  the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
+  the agent id, then a completion notification. A reviewer spawned with the Agent tool's `name`
+  parameter hands back under that name instead, so its launch also binds the name to its agent id
+  under `names/`: the newest spawn of a name holds it, as the host gives it, any other named spawn
+  of the main thread releases it once its post-review hook runs after the binding was written, and
+  a name frame counts only on the prompt's first line or right after the
+  `Another Claude session sent a message:` line, where the host puts a real hand-back. `hooks/user-prompt-review-handback.sh` exits
   without a `node` child unless the prompt carries one of the two markers and the store holds a
   pending record or entry, or the store holds an arrival note. Its first `node` child,
   `background-review-v1.js arrive`, retires every fan-out entry the prompt names and, for a
@@ -364,8 +421,12 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   guard, its registered 90-second timeout, and stops a claim that has not reached the ticket by
   then, so a slow claim never costs the Stop its decision. While a consume record younger than 60
   minutes still matches the issued ticket, or a fan-out entry younger than 60 minutes exists, the
-  Stop guard releases a standalone chain's turn end with one stderr line and charges no review
-  budget. An Autopilot-bound chain is held instead: its Stop blocks, names the agents that still
+  Stop guard releases a standalone chain's turn end and charges no review budget. The user sees one
+  sentence (the Stop's `systemMessage`, also on stderr) that names the reviewers by the
+  descriptions the Stop input's `background_tasks` gives them, for example
+  `Zensu is waiting for "Correctness review of the change" and "Judge of the change"; the review chain continues when they report back.`,
+  or counts them when the input carries no description; it never prints an agent id. An
+  Autopilot-bound chain is held instead: its Stop blocks, names the agents that still
   run, and does not count against the inner Stop budget. When the claim from a note did not
   complete in that Stop, both say that the report arrived and its claim is pending instead. A Stop
   that is not released, such as an Autopilot-bound chain's or a standalone chain's whose wait
@@ -375,6 +436,24 @@ Agent tool offers no `run_in_background` parameter. Every review agent of the ch
   again. A session that owns a live Autopilot run
   without a bound chain, and a Stop that adopted a deferred review, take neither; their resume
   directive opens with a sentence naming the running agents, or the pending claim.
+- **Resumed reviewers.** An arrival that retires a fan-out entry, a failed run's notification
+  included, stamps the reviewer's register entry as arrived. When the main thread then resumes that
+  reviewer, for example with `SendMessage` after a rate limit stopped it, the next Stop finds it in
+  the Stop input's `background_tasks` as a running `subagent` under its agent id, writes its
+  fan-out entry again and waits for it exactly as for a fresh launch: the turn ends without a
+  `ZENSU-AWAIT:` line and without the explanation round of
+  [Waiting for background work](#waiting-for-background-work), and the register entry starts over,
+  so the next renewal needs the next arrival. A reviewer is renewed at most three times, so one
+  that fails again after every resume cannot keep the Stop budget still; past that it takes the
+  explicit wait below. A reviewer that is still on its first run when its entry passes the
+  60-minute bound is not renewed, so that bound keeps its meaning; nor is an entry idle for 24
+  hours, which that Stop removes, nor a reviewer spawned with `name` whose name binding is gone (a
+  renewal re-stamps a live binding, so the reviewer's hand-back under its name still counts), nor a
+  running subagent the register does not hold, nor the consume-mode `zensu:code-reviewer`: a failed
+  run retires its record, its ticket stays valid for the re-spawn the directive orders, and a
+  resumed run's report finds no record and claims nothing. The session's next fan-out launch
+  prunes every other idle entry, another session's register is swept like its fan-out entries, and
+  a register the store cannot use costs only the renewal.
 
 **Residuals.** The arrival relies on the host firing `UserPromptSubmit` for queued prompts, as
 measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
@@ -394,7 +473,13 @@ the hand-back first. With `hooks.reviewPacketGate` off, each fan-out hand-back s
 post-review hook, which binds the session and exits without output, because the hand-back hook
 reads no config. A claim the Stop completes from a note is checked without the report, so a
 consume reviewer that answered `REVIEW PACKET INVALID` in a hand-back whose claim was cut off is
-not refused there.
+not refused there. A name frame on a prompt's first line names that name's current holder,
+whoever wrote the prompt, because the hook payload does not tell a queued hand-back from a typed
+or pasted prompt, so a pasted earlier hand-back of a bound name can claim the pending consume
+ticket. Two spawns given one name in one tool message whose hooks run in the other order leave the
+name with the earlier one, so the later one's report is recorded for it, and when the earlier one
+is the consume reviewer that report claims the ticket. Spawning reviewers without `name` avoids
+both.
 
 #### Waiting for background work
 
@@ -407,9 +492,15 @@ says what it waits for:
   line of its own (backticks around it are accepted). While the `Stop` input's
   `background_tasks` lists that task as `running` or `pending`, with the type `shell` (a
   background shell or the Monitor tool), `monitor`, `subagent` or `workflow`, the guard
-  releases the `Stop` without charging the review budget and names the task in a notice the
-  user sees (the Stop's `systemMessage`, also on stderr). The chain stays armed, and the
-  harness wakes the session when the task reports.
+  releases the `Stop` without charging the review budget and names the task in one sentence the
+  user sees (the Stop's `systemMessage`, also on stderr): its description in quotes, or
+  `task <id>` when it has none, at most three of them and a count of the rest, for example
+  `Zensu is waiting for "E2E reproduction run"; the review chain continues when it reports back.`
+  The chain stays armed, and the harness wakes the session when the task reports. A review agent
+  the chain recorded at launch needs no line while the background review wait above takes its
+  `Stop` first, a resumed fan-out reviewer included for up to three renewals; past those bounds,
+  and for a resumed consume-mode reviewer or a subagent the chain never recorded, it is an
+  ordinary `subagent` task here.
 - **The guard explains the line once.** A `Stop` that sees such tasks running but no line
   naming one of them blocks once with a reason that lists every task (id, type and description)
   and the line, also without charging the budget. It does so once per new task and at most three
@@ -466,7 +557,7 @@ Four artifact skeletons ship as plugin defaults under `templates/` and resolve w
 | Template | Consumer | Mandatory sections |
 |----------|----------|--------------------|
 | `zensu-plan.md` | `/zensu:build` Phase 2 | `## Requirements` (ID/Covers), `## Preconditions`, `## Cross-Layer Value Flow Pairings`, Status Legend, Steps table with Status+Covers, `## Final Verification` |
-| `autopilot-spec.md` | `/zensu:autopilot` Phase 0.C | numbered stable `AC-###` criteria, out-of-scope section, resolved recipe |
+| `autopilot-spec.md` | `/zensu:autopilot` Phase 0.C | a `## Requirements` table of stable `AC-###` criteria, which the VALIDATE stage reads from the approved plan, out-of-scope section, resolved recipe |
 | `autopilot-pr-body.md` | `/zensu:autopilot` step 3 | per-AC checklist table (deprecated rows kept) whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix, `Gates bypassed during build:` audit line |
 | `pr-body.md` | `/zensu:pilot` "Commit + open PR" (shared default for any PR opener) | `## Acceptance criteria` table filled from the feature's `## Requirements` rows, with a stub-row fallback, whose `Status` cells carry the 🟢/🟡/🔴/⚪ marker prefix |
 
