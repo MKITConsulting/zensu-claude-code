@@ -87,8 +87,8 @@ grader and its length grader. The five others in `contract-compliance.yaml` and
 `precedence-over-compression.yaml` reach the compile check only, which cannot see a logic defect — say "compile-checked", never
 "tested", of those. The forty-seven graders of the eight `short-` scenarios are byte-identical copies of
 their twins' graders, and the unit file fails when a copy diverges, so each copy is exactly as tested,
-or as merely compile-checked, as its original. That closes the gap this suite's
-local-only status would otherwise leave: before it, a logically broken grader satisfied every
+or as merely compile-checked, as its original. That closes the gap that runs
+needing a model would otherwise leave: before it, a logically broken grader satisfied every
 structure check and surfaced only on a manual promptfoo run. Two real defects were found that way —
 a step-list branch that could never match a `-` bullet, and a tick guard that only fired on three
 hardcoded English step names.
@@ -135,9 +135,11 @@ hardcoded English step names.
   as a failure is worse than no check, because it teaches the reader to ignore red. Article density is
   measured, discriminating, and honest about being a proxy — it separates telegraphic from ordinary prose
   and claims nothing more. Treat a failure as a reason to read the transcript, not as a verdict.
-- **Live + advisory.** Running this costs API credits and can flake on model variance — NOT a CI gate.
-  Only the deterministic shape pin `tests/structure/test-promptfoo-zen-mode.sh` runs in
-  `tests/run-all.sh` (no API), and Promptfoo suites are local-only by policy.
+- **Live + advisory.** Running this costs API credits (or plan usage) and can flake on model variance —
+  NOT a CI gate. Only the deterministic shape pin `tests/structure/test-promptfoo-zen-mode.sh` runs in
+  `tests/run-all.sh` (no API). The scheduled, advisory `.github/workflows/live-evals.yml` runs the live
+  suite every night on the newest Claude Code release (`tests/README.md`, "Scheduled live evals"); no
+  pull request or release waits for it.
 
 ## What the first live run found
 

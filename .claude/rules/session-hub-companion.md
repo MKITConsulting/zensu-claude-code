@@ -6,6 +6,8 @@ paths:
   - ".github/workflows/release-session-hub.yml"
   - ".github/scripts/session-hub-*.sh"
   - ".github/scripts/bump-marketplace-entry.js"
+  - ".github/scripts/live-evals-install-claude-code.sh"
+  - ".github/workflows/live-evals.yml"
   - ".github/tools/**"
   - "LICENSE"
   - "cliff.toml"
@@ -213,12 +215,24 @@ reads the pin, for the installer and the probe alike. The installer runs
 install script to `@anthropic-ai/claude-code` alone, runs that package's own `install.cjs`, and
 checks `claude --version`. Measured: without that script the installed CLI reports its native
 binary missing. Read in the 2.1.317 package: its `install.cjs` makes no network call and copies
-the native binary from the platform package the lockfile pins. H11 pins the manifests, the lockfiles, that no file
-under `.github/workflows/` or `.github/scripts/` installs a versioned Claude Code another way,
+the native binary from the platform package the lockfile pins. The one exception is the live-eval
+canary: `.github/scripts/live-evals-install-claude-code.sh`, run only by `live-evals.yml`, resolves
+the newest release with `npm view` and installs it in a fresh directory with the same discipline
+(`npm install --ignore-scripts`, Claude Code as the only package with an install script, every
+lock entry resolved from the npm registry's `@anthropic-ai/claude-code` packages, its own
+`install.cjs`, the version check) and puts only a `claude` symlink on `PATH`, because that workflow
+exists to catch a break in the newest Claude Code release and a lockfile would hide it
+(`.claude/rules/live-evals.md`). H11 pins the manifests, the lockfiles, that no file
+under `.github/workflows/` or `.github/scripts/` installs a versioned Claude Code another way or
+pipes the native installer into a shell, that no file other than the two installers runs Claude
+Code's `install.cjs`, the canary's install discipline and its single caller,
 both CI callers and both release callers, the gate's `CLAUDE_CODE_TOOL`, the one pin owner and
 that neither the installer nor the probe holds a list or reader of its own, the floor below the
 pin and the README lines naming both, with a mutant each for an unlocked install, a second
-install script, a version range and a probe that reads the pin itself.
+install script, a version range, a probe that reads the pin itself, a canary that lets every
+package run its install script, a canary that accepts packages from any registry, a second
+workflow calling the canary, the native installer in
+`ci.yml` and another script that runs `install.cjs`.
 
 **The gate and its probe.** The gate runs `.github/scripts/session-hub-install-probe.sh` with
 `.github/tools/claude-code`, then the companion suites with `CLAUDE_CONFIG_DIR` unset. The probe

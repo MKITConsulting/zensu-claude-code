@@ -553,9 +553,12 @@ pin_facts() {
     };
     const pin = tool(".github/tools/claude-code");
     const floor = tool(".github/tools/claude-code-floor");
+    const installers = [".github/scripts/session-hub-install-claude-code.sh", ".github/scripts/live-evals-install-claude-code.sh"];
     for (const dir of [".github/workflows", ".github/scripts"]) for (const f of fs.readdirSync(path.join(root, dir)).sort()) {
       if (!fs.statSync(path.join(root, dir, f)).isFile()) continue;
-      if (/@anthropic-ai\/claude-code@|\bnpm\s+(?:i|install|add|exec)\b[^\n]*claude-code|\bnpx\b[^\n]*claude-code/.test(read(dir + "/" + f))) bad.add("unlocked-install:" + f);
+      const text = read(dir + "/" + f);
+      if (/@anthropic-ai\/claude-code@|\bnpm\s+(?:i|install|add|exec)\b[^\n]*claude-code|\bnpx\b[^\n]*claude-code|claude\.ai\/install/.test(text)) bad.add("unlocked-install:" + f);
+      if (/claude-code\/install\.cjs/.test(text) && !installers.includes(dir + "/" + f)) bad.add("unlisted-installer:" + f);
     }
     const job = (text, name) => {
       const lines = text.split("\n");
@@ -591,6 +594,16 @@ pin_facts() {
     const scriptedAt = install.indexOf("[ \"$SCRIPTED\" != \"node_modules/@anthropic-ai/claude-code\" ]");
     const runAt = install.indexOf("node node_modules/@anthropic-ai/claude-code/install.cjs");
     if (ciAt < 0 || scriptedAt < ciAt || runAt < scriptedAt || !install.includes("\"$WANT (Claude Code)\"")) bad.add("install-script");
+    const canary = read(".github/scripts/live-evals-install-claude-code.sh");
+    const canaryRun = "run: bash .github/scripts/live-evals-install-claude-code.sh\n";
+    const canaryCallers = fs.readdirSync(path.join(root, ".github/workflows")).sort()
+      .filter((f) => fs.statSync(path.join(root, ".github/workflows", f)).isFile() && read(".github/workflows/" + f).includes("live-evals-install-claude-code.sh"));
+    if (canaryCallers.join(" ") !== "live-evals.yml" || count(read(".github/workflows/live-evals.yml"), canaryRun) !== 1) bad.add("canary-callers");
+    const canaryIgnoreAt = canary.indexOf("npm install --ignore-scripts");
+    const canaryScriptedAt = canary.indexOf("[ \"$SCRIPTED\" != \"node_modules/@anthropic-ai/claude-code\" ]");
+    const canaryRegistryAt = canary.indexOf("startsWith(\"https://registry.npmjs.org/@anthropic-ai/claude-code\")");
+    const canaryRunAt = canary.indexOf("node node_modules/@anthropic-ai/claude-code/install.cjs");
+    if (!canary.includes("WANT=\"$(npm view \"$PACKAGE\" version") || canaryIgnoreAt < 0 || canaryScriptedAt < canaryIgnoreAt || canaryRegistryAt < canaryScriptedAt || canaryRunAt < canaryRegistryAt || !canary.includes("\"$WANT (Claude Code)\"")) bad.add("canary-install");
     const older = (a, b) => { const x = a.split(".").map(Number); const y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i]; return false; };
     if (pin && floor) {
       if (!older(floor, pin)) bad.add("floor-not-older");
@@ -602,14 +615,19 @@ pin_facts() {
 }
 PIN_FACTS="$(pin_facts "$PLUGIN_DIR")"
 case "$PIN_FACTS" in
-  ("ok "*) check "H11 every Claude Code install under .github/ runs session-hub-install-claude-code.sh from a committed manifest and lockfile with one exact pin, sha512 integrity, claude-code packages only and one install script, session-hub-claude-code-pin.sh alone holds the tool list and reads that pin for the installer and the probe, the gate names the tool, the floor job probes an older one, both CI jobs read only, and the README names both (${PIN_FACTS#ok })" PASS ;;
+  ("ok "*) check "H11 every Claude Code install under .github/ runs session-hub-install-claude-code.sh from a committed manifest and lockfile with one exact pin, sha512 integrity, claude-code packages only and one install script, session-hub-claude-code-pin.sh alone holds the tool list and reads that pin for the installer and the probe, the gate names the tool, the floor job probes an older one, both CI jobs read only, and the README names both; the one exception is the live-evals canary, which installs the newest release through live-evals-install-claude-code.sh with install scripts off except Claude Code's own, refuses a package that is not a Claude Code package on the npm registry and runs only from live-evals.yml, and no other file runs install.cjs or the native installer (${PIN_FACTS#ok })" PASS ;;
   (*) check "H11 the Claude Code installs are not locked, disagree or are not run: $PIN_FACTS" FAIL ;;
 esac
 PIN_PROBE="$WORK/pin-probe"
 for spec in "literal-install|unlocked-install:ci.yml|an npm install of a versioned Claude Code in ci.yml" \
   "second-script|.github/tools/claude-code-install-scripts|a lockfile that gives a second package an install script" \
   "floating-pin|.github/tools/claude-code-manifest|a manifest with a version range" \
-  "probe-own-pin|probe-own-pin|a probe that reads the pin itself again"; do
+  "probe-own-pin|probe-own-pin|a probe that reads the pin itself again" \
+  "canary-scripts|canary-install|a canary installer that lets every package run its install script" \
+  "canary-registry|canary-install|a canary installer that accepts packages from any registry" \
+  "canary-caller|canary-callers|a second workflow that runs the canary installer" \
+  "native-install|unlocked-install:ci.yml|the native installer piped into a shell in ci.yml" \
+  "unlisted-installer|unlisted-installer:extra-install.sh|another script that runs the install.cjs of Claude Code"; do
   mode="${spec%%|*}"; rest="${spec#*|}"; want="${rest%%|*}"; what="${rest#*|}"
   mkdir -p "$PIN_PROBE/$mode/.github" "$PIN_PROBE/$mode/plugins/session-hub"
   cp -R "$PLUGIN_DIR/.github/workflows" "$PLUGIN_DIR/.github/scripts" "$PLUGIN_DIR/.github/tools" "$PIN_PROBE/$mode/.github/"
@@ -623,6 +641,11 @@ for spec in "literal-install|unlocked-install:ci.yml|an npm install of a version
     if (mode === "second-script") edit(".github/tools/claude-code/package-lock.json", (t) => { const l = JSON.parse(t); l.packages["node_modules/@anthropic-ai/claude-code-linux-x64"].hasInstallScript = true; return JSON.stringify(l, null, 2) + "\n"; });
     if (mode === "floating-pin") edit(".github/tools/claude-code/package.json", (t) => t.replace(/("@anthropic-ai\/claude-code": ")([0-9])/, "$1^$2"));
     if (mode === "probe-own-pin") edit(".github/scripts/session-hub-install-probe.sh", (t) => t.split("WANT=\"$(bash .github/scripts/session-hub-claude-code-pin.sh \"$TOOL\")\" || {").join("WANT=\"$(jq -r " + q + ".dependencies[\"@anthropic-ai/claude-code\"]" + q + " \"$TOOL/package.json\")\" || {"));
+    if (mode === "canary-scripts") edit(".github/scripts/live-evals-install-claude-code.sh", (t) => t.split("npm install --ignore-scripts").join("npm install"));
+    if (mode === "canary-registry") edit(".github/scripts/live-evals-install-claude-code.sh", (t) => t.split("startsWith(\"https://registry.npmjs.org/@anthropic-ai/claude-code\")").join("startsWith(\"\")"));
+    if (mode === "canary-caller") edit(".github/workflows/ci.yml", (t) => t + "      - run: bash .github/scripts/live-evals-install-claude-code.sh\n");
+    if (mode === "native-install") edit(".github/workflows/ci.yml", (t) => t + "      - run: curl -fsSL https://claude.ai/install.sh | bash\n");
+    if (mode === "unlisted-installer") fs.writeFileSync(dir + "/.github/scripts/extra-install.sh", "node node_modules/@anthropic-ai/claude-code/install.cjs\n");
   ' "$PIN_PROBE/$mode" "$mode" 2>&1)"
   if [ -n "$MUTATE_ERR" ]; then
     check "H11-control $what could not be built ($MUTATE_ERR)" FAIL
