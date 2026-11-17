@@ -87,19 +87,25 @@
 #       * the strict readContext: the session-hash must match, the runtime digest
 #         is recomputed against the RECORDED root, and that root's manifest must
 #         still declare the recorded version;
-#       * else, when that root was PRUNED from the cache,
+#       * else, when only the recorded PROJECT root is gone,
+#         readOrphanedProjectRootContext, which PROVES that root absent and still
+#         re-measures the digest and the declared version of the plugin root;
+#       * else, when that plugin root was PRUNED from the cache,
 #         readPrunedPluginRootContext, which re-measures NEITHER the digest nor the
 #         declared version — nothing can read a tree that is gone or retired — and
 #         instead PROVES the root absent, or a remnant the host retired (a real
 #         directory, no host manifest, a 13-digit .orphaned_at), with its parent
-#         still present.
-#     On BOTH rungs: the session-hash match, the full schema and principal-profile
+#         still present;
+#       * else readOrphanedPrunedContext, which proves BOTH of those absences, so
+#         it takes the digest and the declared version on the record's word, and a
+#         gone project root leaves no workflow document for condition 6 to compare.
+#     On EVERY rung: the session-hash match, the full schema and principal-profile
 #     validation, source_revision === runtime_digest, the sibling-root bound, the
 #     plugin_data equality check, and ADOPTION_SAFE_VERSION_RE on both versions
 #     before either reaches a filename. So a record the caller authored under a
 #     directory it controls still cannot reach the write for a session it does not
-#     already own. What the pruned rung drops is a CONSISTENCY check, not a
-#     barrier: runtime_digest is a content hash of a readable tree computed by an
+#     already own. What the pruned and combined rungs drop is a CONSISTENCY
+#     check, not a barrier: runtime_digest is a content hash of a readable tree computed by an
 #     exported pure function, never a secret, so write access to the private
 #     records directory could always produce a matching one. That directory is the
 #     barrier. State it this way and not as "every location is derived from the

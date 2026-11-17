@@ -576,18 +576,21 @@ test('F1 a busy lock is not reported as an unsafe records directory', () => {
 });
 
 // The COMBINED state — recorded project root gone AND minting installation
-// pruned — still lands on record-unreadable: readPrunedPluginRootContext pins
-// allowMissingProjectRoot off, so validateContext throws on the vanished root
-// and the outer catch answers RECORD_UNREADABLE. The remedy has to name that
-// conjunction. Excluding pruning with a bare adverb sent exactly those users
+// pruned — no longer lands on record-unreadable: readOrphanedPrunedContext
+// proves both absences and the adoption re-mints around the absent root. The
+// remedy has to name that conjunction. Excluding pruning with a bare adverb sent exactly those users
 // looking for a disagreement that is not there, while pruning was half the cause.
-test('F2 the record-unreadable remedy names the pruned-AND-orphaned conjunction rather than excluding pruning outright', () => {
+test('F2 the record-unreadable remedy says the pruned-AND-orphaned conjunction is adopted, not refused', () => {
   const core = require(path.join(LIB, 'session-control-core-v1.js'));
   const { REMEDY } = report();
   const text = REMEDY[core.ADOPTION_REFUSALS.RECORD_UNREADABLE];
   assert.match(text, /pruned/i, 'the remedy still speaks to a pruned installation');
-  assert.match(text, /project root is (also|ALSO) gone/,
-    'it names the conjunction that still lands here');
+  assert.match(text, /so are both at once — a pruned installation whose recorded project root is ALSO gone is adopted around that absent root/,
+    'the conjunction is named among the states that no longer land here');
+  assert.match(text, /until \/zensu:adopt-session --restore-root re-creates it/,
+    'it names what still has to happen after such an adoption');
+  assert.equal(/--restore-root --confirm|--confirm --restore-root/.test(text), false,
+    'a diagnostic never hands over the restore\'s complete invocation');
   assert.equal(/no longer one of these/.test(text), false,
     'the bare exclusion is what made the remedy false in the combined state');
 });
@@ -597,7 +600,7 @@ test('F3 the record-unreadable remedy names the retired remnant and points at th
   const { REMEDY } = report();
   const text = REMEDY[core.ADOPTION_REFUSALS.RECORD_UNREADABLE];
   assert.match(text, /left a remnant it retired \(an \.orphaned_at marker and no manifest\)/);
-  assert.match(text, /The rows below name why each of the three record readers refused this record\./);
+  assert.match(text, /The rows below name why each of the four record readers refused this record\./);
   assert.equal(/cannot tell the remaining causes apart/.test(text), false);
   assert.equal(/cannot name the cause/.test(text), false);
 });
@@ -613,6 +616,7 @@ test('F4 the reader rows name each refusal and degrade to one sentence when the 
         { reader: 'strict', refusal: 'host-specific plugin manifest is missing: /cache/0.21.1/.claude-plugin/plugin.json' },
         { reader: 'orphaned-project-root', refusal: 'context project root still exists' },
         { reader: 'pruned-plugin-root', refusal: 'context plugin root still exists and carries no valid orphan marker' },
+        { reader: 'orphaned-and-pruned', refusal: 'context project root still exists' },
       ];
     },
   });
@@ -622,6 +626,7 @@ test('F4 the reader rows name each refusal and degrade to one sentence when the 
     + safe('host-specific plugin manifest is missing: /cache/0.21.1/.claude-plugin/plugin.json') + '\n'), rows);
   assert.ok(rows.includes('  project root gone   : context project root still exists\n'), rows);
   assert.ok(rows.includes('  installation pruned : context plugin root still exists and carries no valid orphan marker\n'), rows);
+  assert.ok(rows.includes('  both roots gone     : context project root still exists\n'), rows);
 
   assert.match(readerRefusalRows(request, {}), /cannot ask the record readers/);
   assert.match(readerRefusalRows(request, { recordReaderRefusals: () => { throw new Error('boom'); } }),

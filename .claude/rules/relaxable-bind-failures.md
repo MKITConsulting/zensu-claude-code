@@ -127,9 +127,9 @@ assert a workflow document that is gone.
 **The third and fourth predicates are DIAGNOSES, never further relaxations.**
 `zensu_session_incompatible_runtime` and `zensu_session_pruned_plugin_root`
 belong to this roster only because every gate that consults the two above must decide what
-to do about them too — and the answer is the same everywhere: keep denying. The pruned state
-is unrelaxed because a workflow document is still reachable there — its project root is
-present by construction. The lineage predicate matches TWO states, and they are unrelaxed for
+to do about them too — and the answer is the same everywhere: keep denying. The pruned
+predicate matches two states as well, since `readOrphanedPrunedContext` joined the ladder, and
+each stays unrelaxed for the matching reason given for the lineage predicate below. The lineage predicate matches TWO states, and they are unrelaxed for
 DIFFERENT reasons: with the recorded project root still present a workflow document is
 reachable, so relaxing would waive a live guarantee rather than a dead one; with that root
 gone the document is not reachable from this record, and what stands in for the guarantee is
