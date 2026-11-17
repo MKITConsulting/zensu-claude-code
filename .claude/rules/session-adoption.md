@@ -163,9 +163,11 @@ walks `RECORD_READER_LADDER`, the table `recordReaderRefusals` maps over, and bo
 request shape, which the private `recordReaderOptions` translates into the readers' own options. It
 tries only the `RECORD_READERS` rungs its caller names, always in ladder order whatever order the
 caller lists, stops at the first reader that admits the record and returns `{ reader, context }`, or
-`null` when none does; it never throws. A request without a non-empty `host` answers `null` before
-any read: `validateContext` checks the host only when one is named, so a caller that passed the
-readers' own `expectedHost` spelling would otherwise skip that check on every rung. Every caller maps the admitting reader to its own flags and refusals,
+`null` when none does; it never throws. A request without a non-empty `host` reads nothing:
+`recordReaderOptions` answers `null` for it, the walker then answers `null` and
+`recordReaderRefusals` refuses every rung with `host must be a non-empty string`, so the two never
+disagree about such a request. `validateContext` checks the host only when one is named, so a caller
+that passed the readers' own `expectedHost` spelling would otherwise skip that check on every rung. Every caller maps the admitting reader to its own flags and refusals,
 and names exactly the rungs it read before the walker existed, so no site reads the record or
 measures a runtime digest more often than it did: condition 1 of `adoptableRecord` and `readRecord`
 in `session-reanchor-v1.js` name all four; `restoreRootVerdict` names strict, orphaned-project-root

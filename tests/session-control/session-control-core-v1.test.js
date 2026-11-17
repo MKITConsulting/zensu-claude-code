@@ -7127,6 +7127,34 @@ test('readContextLadder never throws, walks no rung it was not given and reads n
   assert.equal(foreignHost.record, 4);
 });
 
+test('recordReaderRefusals refuses every rung of a request without a host, as readContextLadder does, and reads nothing', () => {
+  const ladderOrder = [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
+    core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
+  ];
+  const healthy = prunedReaderFixture();
+  for (const request of [
+    { recordsDir: healthy.recordsDir, sessionId: RAW_SESSION },
+    { ...ladderRequest(healthy), host: '' },
+    healthy.readerOptions,
+  ]) {
+    const label = JSON.stringify(Object.keys(request));
+    const walk = countedReads(healthy, () => core.readContextLadder(request, ladderOrder));
+    assert.equal(walk.result, null, label);
+    const refusals = countedReads(healthy, () => core.recordReaderRefusals(request));
+    assert.deepEqual(
+      refusals.result,
+      ladderOrder.map((reader) => ({ reader, refusal: 'host must be a non-empty string' })),
+      label,
+    );
+    assert.equal(refusals.record, 0, label);
+  }
+  const named = core.recordReaderRefusals(ladderRequest(healthy));
+  assert.equal(named.find((entry) => entry.reader === core.RECORD_READERS.STRICT).refusal, null);
+});
+
 test('the restore verdict and both binder predicates enter only the rungs they consulted before', () => {
   const combined = prunedReaderFixture();
   const combinedSuccessor = successorInstallation(combined, '10.0.0');

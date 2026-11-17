@@ -2050,6 +2050,7 @@ const RECORD_READER_LADDER = Object.freeze([
 
 function recordReaderOptions(request) {
   const source = request && typeof request === 'object' ? request : {};
+  if (typeof source.host !== 'string' || source.host === '') return null;
   return {
     recordsDir: source.recordsDir,
     sessionId: source.sessionId,
@@ -2059,7 +2060,7 @@ function recordReaderOptions(request) {
 
 function readContextLadder(request, readers) {
   const readerOptions = recordReaderOptions(request);
-  if (typeof readerOptions.expectedHost !== 'string' || readerOptions.expectedHost === '') return null;
+  if (readerOptions === null) return null;
   const requested = Array.isArray(readers) ? readers : [];
   for (const [reader, read] of RECORD_READER_LADDER) {
     if (!requested.includes(reader)) continue;
@@ -2082,6 +2083,7 @@ function readerRefusalText(error) {
 function recordReaderRefusals(options) {
   const readerOptions = recordReaderOptions(options);
   return RECORD_READER_LADDER.map(([reader, read]) => {
+    if (readerOptions === null) return { reader, refusal: 'host must be a non-empty string' };
     try {
       read(readerOptions);
       return { reader, refusal: null };
