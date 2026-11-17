@@ -51,7 +51,8 @@ is the step that comes first there. The three reads are ONE `readContextLadder` 
 strict, orphaned-project-root and orphaned-and-pruned rungs, and never the pruned-only rung: that
 reader would admit a pruned installation whose project root is present, which this verdict answers
 `record-unreadable` for, and it would add a record read to the combined and the unreadable
-states. A LINEAGE BREAK passes both reads —
+states. What the walker requires of a request, and the rule every caller's rung list follows, are
+in the walker paragraph of `.claude/rules/session-adoption.md`. A LINEAGE BREAK passes both reads —
 `allowMissingProjectRoot` waives only the recorded root's existence — and is excluded one clause
 later by `servesRecordedRuntime`. That is also why the remedy in the combined state is **adopt
 first, restore second**, and why every surface offering it must say so.

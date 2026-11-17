@@ -384,8 +384,7 @@ function ownedAutopilotRun(projectRoot, sessionId, bashPath) {
 }
 
 function readRecord(request) {
-  const readerOptions = { recordsDir: request.recordsDir, sessionId: request.sessionId, expectedHost: request.host };
-  const admitted = core.readContextLadder(readerOptions, [
+  const admitted = core.readContextLadder(request, [
     core.RECORD_READERS.STRICT,
     core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
     core.RECORD_READERS.PRUNED_PLUGIN_ROOT,

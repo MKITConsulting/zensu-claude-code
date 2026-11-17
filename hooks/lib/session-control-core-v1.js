@@ -2048,13 +2048,24 @@ const RECORD_READER_LADDER = Object.freeze([
   [RECORD_READERS.ORPHANED_PRUNED, readOrphanedPrunedContext],
 ]);
 
-function readContextLadder(options, readers) {
+function recordReaderOptions(request) {
+  const source = request && typeof request === 'object' ? request : {};
+  return {
+    recordsDir: source.recordsDir,
+    sessionId: source.sessionId,
+    expectedHost: source.host,
+  };
+}
+
+function readContextLadder(request, readers) {
+  const readerOptions = recordReaderOptions(request);
+  if (typeof readerOptions.expectedHost !== 'string' || readerOptions.expectedHost === '') return null;
   const requested = Array.isArray(readers) ? readers : [];
   for (const [reader, read] of RECORD_READER_LADDER) {
     if (!requested.includes(reader)) continue;
     let context;
     try {
-      context = read(options);
+      context = read(readerOptions);
     } catch {
       continue;
     }
@@ -2069,12 +2080,7 @@ function readerRefusalText(error) {
 }
 
 function recordReaderRefusals(options) {
-  const source = options && typeof options === 'object' ? options : {};
-  const readerOptions = {
-    recordsDir: source.recordsDir,
-    sessionId: source.sessionId,
-    expectedHost: source.host,
-  };
+  const readerOptions = recordReaderOptions(options);
   return RECORD_READER_LADDER.map(([reader, read]) => {
     try {
       read(readerOptions);
@@ -2246,12 +2252,7 @@ function adoptableRecord(options) {
     // adopted once rather than served. Every OTHER disagreement — plugin version,
     // session hash, schema, principal profiles — throws in all four readers and
     // still lands on `record-unreadable` below.
-    const readerOptions = {
-      recordsDir: options.recordsDir,
-      sessionId: options.sessionId,
-      expectedHost: options.host,
-    };
-    admitted = readContextLadder(readerOptions, [
+    admitted = readContextLadder(options, [
       RECORD_READERS.STRICT,
       RECORD_READERS.ORPHANED_PROJECT_ROOT,
       RECORD_READERS.PRUNED_PLUGIN_ROOT,
@@ -3328,12 +3329,7 @@ function restoreRootVerdict(options) {
   } catch {
     return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
   }
-  const readerOptions = {
-    recordsDir: options.recordsDir,
-    sessionId: options.sessionId,
-    expectedHost: options.host,
-  };
-  const admitted = readContextLadder(readerOptions, [
+  const admitted = readContextLadder(options, [
     RECORD_READERS.STRICT,
     RECORD_READERS.ORPHANED_PROJECT_ROOT,
     RECORD_READERS.ORPHANED_PRUNED,

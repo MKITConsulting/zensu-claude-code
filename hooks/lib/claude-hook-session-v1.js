@@ -260,16 +260,13 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
     const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
     const recordsDir = privateRecordsDirectory(pluginData, true);
     if (recordsDir === null) return null;
-    const readerOptions = {
-      recordsDir,
-      sessionId: payload.session_id,
-      expectedHost: 'claude',
-    };
-    const admitted = core.readContextLadder(readerOptions, [
+    const admitted = core.readContextLadder({ recordsDir, sessionId: payload.session_id, host: 'claude' }, [
       core.RECORD_READERS.STRICT,
       core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
     ]);
-    if (admitted === null) return null;
+    if (admitted === null
+      || (admitted.reader !== core.RECORD_READERS.STRICT
+        && admitted.reader !== core.RECORD_READERS.ORPHANED_PROJECT_ROOT)) return null;
     const { context } = admitted;
     const orphanedProjectRoot = admitted.reader === core.RECORD_READERS.ORPHANED_PROJECT_ROOT
       ? context.project_root
@@ -313,18 +310,19 @@ function resolvePrunedPluginRoot(payload, environment = process.env) {
     const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
     const recordsDir = privateRecordsDirectory(pluginData, true);
     if (recordsDir === null) return null;
-    const readerOptions = { recordsDir, sessionId: payload.session_id, expectedHost: 'claude' };
     // The strict read must FAIL: a record it accepts is either served or a
     // lineage question, and naming a pruned installation there would be a wrong
     // diagnosis. The relaxed read must then SUCCEED, which proves the absence of
     // the recorded plugin root, and at most of the recorded project root as well,
     // is all the strict read tripped on.
-    const admitted = core.readContextLadder(readerOptions, [
+    const admitted = core.readContextLadder({ recordsDir, sessionId: payload.session_id, host: 'claude' }, [
       core.RECORD_READERS.STRICT,
       core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
       core.RECORD_READERS.ORPHANED_PRUNED,
     ]);
-    if (admitted === null || admitted.reader === core.RECORD_READERS.STRICT) return null;
+    if (admitted === null
+      || (admitted.reader !== core.RECORD_READERS.PRUNED_PLUGIN_ROOT
+        && admitted.reader !== core.RECORD_READERS.ORPHANED_PRUNED)) return null;
     const { context } = admitted;
     if (context.plugin_data !== pluginData) return null;
     // The same sibling bound adoption applies: a pruned record of a FOREIGN
