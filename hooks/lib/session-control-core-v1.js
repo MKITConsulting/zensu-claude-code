@@ -2041,24 +2041,49 @@ const RECORD_READERS = Object.freeze({
   ORPHANED_PRUNED: 'orphaned-and-pruned',
 });
 
+const RECORD_READER_LADDER = Object.freeze([
+  [RECORD_READERS.STRICT, readContext],
+  [RECORD_READERS.ORPHANED_PROJECT_ROOT, readOrphanedProjectRootContext],
+  [RECORD_READERS.PRUNED_PLUGIN_ROOT, readPrunedPluginRootContext],
+  [RECORD_READERS.ORPHANED_PRUNED, readOrphanedPrunedContext],
+]);
+
+function recordReaderOptions(request) {
+  const source = request && typeof request === 'object' ? request : {};
+  if (typeof source.host !== 'string' || source.host === '') return null;
+  return {
+    recordsDir: source.recordsDir,
+    sessionId: source.sessionId,
+    expectedHost: source.host,
+  };
+}
+
+function readContextLadder(request, readers) {
+  const readerOptions = recordReaderOptions(request);
+  if (readerOptions === null) return null;
+  const requested = Array.isArray(readers) ? readers : [];
+  for (const [reader, read] of RECORD_READER_LADDER) {
+    if (!requested.includes(reader)) continue;
+    let context;
+    try {
+      context = read(readerOptions);
+    } catch {
+      continue;
+    }
+    return { reader, context };
+  }
+  return null;
+}
+
 function readerRefusalText(error) {
   const message = error && typeof error.message === 'string' ? error.message : String(error);
   return message.startsWith(FAIL_PREFIX) ? message.slice(FAIL_PREFIX.length) : message;
 }
 
 function recordReaderRefusals(options) {
-  const source = options && typeof options === 'object' ? options : {};
-  const readerOptions = {
-    recordsDir: source.recordsDir,
-    sessionId: source.sessionId,
-    expectedHost: source.host,
-  };
-  return [
-    [RECORD_READERS.STRICT, readContext],
-    [RECORD_READERS.ORPHANED_PROJECT_ROOT, readOrphanedProjectRootContext],
-    [RECORD_READERS.PRUNED_PLUGIN_ROOT, readPrunedPluginRootContext],
-    [RECORD_READERS.ORPHANED_PRUNED, readOrphanedPrunedContext],
-  ].map(([reader, read]) => {
+  const readerOptions = recordReaderOptions(options);
+  return RECORD_READER_LADDER.map(([reader, read]) => {
+    if (readerOptions === null) return { reader, refusal: 'host must be a non-empty string' };
     try {
       read(readerOptions);
       return { reader, refusal: null };
@@ -2182,9 +2207,7 @@ function adoptionWorkflowStatePath(projectRoot, sessionId) {
 function adoptableRecord(options) {
   let executingPluginRoot;
   let pluginData;
-  let context;
-  let orphanedProjectRoot = false;
-  let prunedPluginRoot = false;
+  let admitted = null;
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
@@ -2231,31 +2254,21 @@ function adoptableRecord(options) {
     // adopted once rather than served. Every OTHER disagreement — plugin version,
     // session hash, schema, principal profiles — throws in all four readers and
     // still lands on `record-unreadable` below.
-    const readerOptions = {
-      recordsDir: options.recordsDir,
-      sessionId: options.sessionId,
-      expectedHost: options.host,
-    };
-    try {
-      context = readContext(readerOptions);
-    } catch {
-      try {
-        context = readOrphanedProjectRootContext(readerOptions);
-        orphanedProjectRoot = true;
-      } catch {
-        try {
-          context = readPrunedPluginRootContext(readerOptions);
-          prunedPluginRoot = true;
-        } catch {
-          context = readOrphanedPrunedContext(readerOptions);
-          orphanedProjectRoot = true;
-          prunedPluginRoot = true;
-        }
-      }
-    }
+    admitted = readContextLadder(options, [
+      RECORD_READERS.STRICT,
+      RECORD_READERS.ORPHANED_PROJECT_ROOT,
+      RECORD_READERS.PRUNED_PLUGIN_ROOT,
+      RECORD_READERS.ORPHANED_PRUNED,
+    ]);
   } catch {
-    return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
+    admitted = null;
   }
+  if (admitted === null) return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
+  const { context } = admitted;
+  const orphanedProjectRoot = admitted.reader === RECORD_READERS.ORPHANED_PROJECT_ROOT
+    || admitted.reader === RECORD_READERS.ORPHANED_PRUNED;
+  const prunedPluginRoot = admitted.reader === RECORD_READERS.PRUNED_PLUGIN_ROOT
+    || admitted.reader === RECORD_READERS.ORPHANED_PRUNED;
   // Read once, here, because every refusal below reports it. executingPluginVersion
   // never throws and answers null for a manifest it cannot read, which is also what
   // the shape guard further down refuses on.
@@ -3312,41 +3325,30 @@ function restoreRootComponentLadder(projectRoot) {
 function restoreRootVerdict(options) {
   let executingPluginRoot;
   let pluginData;
-  let context;
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   } catch {
     return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
   }
-  const readerOptions = {
-    recordsDir: options.recordsDir,
-    sessionId: options.sessionId,
-    expectedHost: options.host,
-  };
-  let strictReadSucceeded = false;
-  try {
-    readContext(readerOptions);
-    strictReadSucceeded = true;
-  } catch {
-    // Expected in the state this repair exists for.
+  const admitted = readContextLadder(options, [
+    RECORD_READERS.STRICT,
+    RECORD_READERS.ORPHANED_PROJECT_ROOT,
+    RECORD_READERS.ORPHANED_PRUNED,
+  ]);
+  if (admitted !== null && admitted.reader === RECORD_READERS.STRICT) {
+    return restoreRootRefusal(RESTORE_ROOT_REFUSALS.ROOT_PRESENT);
   }
-  if (strictReadSucceeded) return restoreRootRefusal(RESTORE_ROOT_REFUSALS.ROOT_PRESENT);
-  try {
-    context = readOrphanedProjectRootContext(readerOptions);
-  } catch {
-    // The strict read failed for some OTHER reason — a digest mismatch, a schema
-    // break, a pruned installation. Those have their own exits; this one must not
-    // silently stand in for them.
-    try {
-      context = readOrphanedPrunedContext(readerOptions);
-    } catch {
-      return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
-    }
-    return restoreRootRefusal(context.plugin_data === pluginData
+  // The strict read failed for some OTHER reason — a digest mismatch, a schema
+  // break, a pruned installation. Those have their own exits; this one must not
+  // silently stand in for them.
+  if (admitted === null) return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+  if (admitted.reader !== RECORD_READERS.ORPHANED_PROJECT_ROOT) {
+    return restoreRootRefusal(admitted.context.plugin_data === pluginData
       ? RESTORE_ROOT_REFUSALS.NOT_SERVED
       : RESTORE_ROOT_REFUSALS.PLUGIN_DATA);
   }
+  const { context } = admitted;
   if (context.plugin_data !== pluginData) {
     return restoreRootRefusal(RESTORE_ROOT_REFUSALS.PLUGIN_DATA);
   }
@@ -6175,6 +6177,7 @@ module.exports = {
   RETIRED_PLUGIN_ROOT_STATES,
   retiredPluginRootState,
   RECORD_READERS,
+  readContextLadder,
   recordReaderRefusals,
   // Exported for the unit layer alone — no production caller requires it; all
   // of its call sites are in this file. Without a direct handle its three rules

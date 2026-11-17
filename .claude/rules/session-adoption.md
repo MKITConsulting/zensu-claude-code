@@ -158,6 +158,32 @@ strict at every strict read site
 SessionStart resume/compact, SubagentStart), and the re-minted record is
 re-verifiable again.
 
+**One walker owns the ladder order.** `readContextLadder({ recordsDir, sessionId, host }, readers)`
+walks `RECORD_READER_LADDER`, the table `recordReaderRefusals` maps over, and both take that one
+request shape, which the private `recordReaderOptions` translates into the readers' own options. It
+tries only the `RECORD_READERS` rungs its caller names, always in ladder order whatever order the
+caller lists, stops at the first reader that admits the record and returns `{ reader, context }`, or
+`null` when none does; it never throws. A request without a non-empty `host` reads nothing:
+`recordReaderOptions` answers `null` for it, the walker then answers `null` and
+`recordReaderRefusals` refuses every rung with `host must be a non-empty string`, so the two never
+disagree about such a request. `validateContext` checks the host only when one is named, so a caller
+that passed the readers' own `expectedHost` spelling would otherwise skip that check on every rung. Every caller maps the admitting reader to its own flags and refusals,
+and names exactly the rungs it read before the walker existed, so no site reads the record or
+measures a runtime digest more often than it did: condition 1 of `adoptableRecord` and `readRecord`
+in `session-reanchor-v1.js` name all four; `restoreRootVerdict` names strict, orphaned-project-root
+and orphaned-and-pruned; `resolvePrunedPluginRoot` names strict, pruned-plugin-root and
+orphaned-and-pruned, because the orphan reader measures the digest of a present plugin root;
+`resolveIncompatibleRuntime` names strict and orphaned-project-root. The two binder predicates name
+each reader they accept and answer `null` for any other, so a rung added to their list without a
+mapping stays outside the state they diagnose. Every rung is a relaxation, so
+the list is an inclusion list: a new reader reaches only the callers that name it, and each of them
+has to map it. The cases named for `readContextLadder`, and the case that counts the reads of the
+restore verdict and of both binder predicates, sit beside the `recordReaderRefusals` cases in
+`tests/session-control/session-control-core-v1.test.js`. They count record reads and plugin-tree
+opens, so a site that walks a rung it did not walk before fails there. **Version: `patch`** — one
+read-only export, and no record or workflow field, strict key set, hook, matcher, config key or
+attestation moves.
+
 **Disjoint from `incompatible-runtime` by construction, and blind to lineage on
 purpose.** `resolvePrunedPluginRoot` requires the STRICT read to fail and the
 relaxed read to succeed; the lineage predicate requires the strict read to succeed.
@@ -182,7 +208,7 @@ state, which that file's own neighbouring comments already count as five; the FO
 `stop-chain-enforcer.sh` plus its block reason and final stderr, which count four
 released states; the third probe in `zensu-doctor.sh` and the `pruned-plugin-root`
 case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → orphaned → pruned → orphaned-and-pruned),
-its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
+which is one `readContextLadder` call naming all four rungs, its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
 `adoptContext` result; `PRUNED_NOTE` / `PRUNED_EXPLANATION` and the reworded
 `record-unreadable` remedy in `session-adopt-report-v1.js`; and the operator
 accounts in `docs/session-control.md` §"Unbindable sessions",
@@ -547,7 +573,9 @@ exact drift in its own words ("state the base or the count means nothing"):
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
 the cross-host `session-control-core-v1.js` — and, since the vanished-root work and the
 pruned-installation state, also condition 1's strict-then-orphan-then-pruned-then-combined ladder,
-`readPrunedPluginRootContext`, `readOrphanedPrunedContext` with `requireOrphanedProjectRoot` and
+`readContextLadder` with its `RECORD_READER_LADDER` table and the `recordReaderOptions`
+translation it shares with `recordReaderRefusals`, through which every ladder caller of
+both halves walks, `readPrunedPluginRootContext`, `readOrphanedPrunedContext` with `requireOrphanedProjectRoot` and
 `requirePrunedPluginRoot`, the `allowMissingPluginRoot` waiver beside it,
 `requireAbsentDirectoryPath`, and `buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
 enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
