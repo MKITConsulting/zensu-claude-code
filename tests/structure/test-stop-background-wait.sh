@@ -115,7 +115,8 @@ numeric() {
 
 RUN_TASKS='[{"id":"run1","type":"shell","status":"running","description":"E2E reproduction run","command":"npx playwright test"},{"id":"srv1","type":"shell","status":"running","description":"Start the dev server","command":"npm run dev"}]'
 AWAIT_RUN=$'The E2E run is still going.\nZENSU-AWAIT: run1'
-RELEASE_NOTE='releasing this Stop while the background task(s) this turn waits for still run (run1)'
+RELEASE_NOTE='Zensu is waiting for "E2E reproduction run"; the review chain continues when it reports back.'
+WAIT_NOTE='Zensu is waiting for '
 HINT_LEAD="STOP intercepted by zensu chain-enforcer. This session's review chain is still armed"
 RESUME='Resume the /zensu:build Phase 6 review sequence'
 
@@ -166,7 +167,7 @@ fi
 
 OUT="$(stop_payload bw-hint "$RUN_TASKS" "$AWAIT_RUN" | bash "$STOP" 2>"$WORK/release.err")"; RC=$?
 AFTER_RELEASE="$(stop_count "$HINT_KEY")"
-if [ "$RC" -eq 0 ] && stop_notice_only "$OUT" "$WORK/release.err" "$RELEASE_NOTE; release 1 of 5 for each" \
+if [ "$RC" -eq 0 ] && stop_notice_only "$OUT" "$WORK/release.err" "$RELEASE_NOTE" \
   && [ "$AFTER_RELEASE" = "$AFTER_SECOND" ]; then
   check "B4 a ZENSU-AWAIT line naming a running task releases the Stop, names it in one notice on stderr and as the Stop's systemMessage, and charges no Stop budget" PASS
 else
@@ -200,7 +201,7 @@ OUT="$(stop_payload bw-gone "$RUN_TASKS" $'Waiting.\nZENSU-AWAIT: gone1' | bash 
 FIRST_GONE="$(printf '%s' "$OUT" | decision)"
 OUT="$(stop_payload bw-gone "$RUN_TASKS" $'Waiting.\nZENSU-AWAIT: gone1' | bash "$STOP" 2>>"$WORK/gone.err")"
 if [ "$FIRST_GONE" = "block" ] && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
-  && printf '%s' "$OUT" | reason | grep -qF "$RESUME" && ! grep -qF 'releasing this Stop' "$WORK/gone.err"; then
+  && printf '%s' "$OUT" | reason | grep -qF "$RESUME" && ! grep -qF "$WAIT_NOTE" "$WORK/gone.err"; then
   check "B7 a ZENSU-AWAIT line naming a task that is not in flight never releases" PASS
 else
   check "B7 named task not in flight (first=$FIRST_GONE out=$OUT)" FAIL
@@ -214,7 +215,7 @@ for tasks in '[{"id":"t1","type":"dream","status":"running","description":"memor
   RAW_NOW="bw-diff-$RANDOM"
   arm "$RAW_NOW" || DIFF_OK=false
   OUT="$(stop_payload "$RAW_NOW" "$tasks" $'Waiting.\nZENSU-AWAIT: t1' | bash "$STOP" 2>"$WORK/diff.err")"
-  if [ "$(printf '%s' "$OUT" | decision)" != "block" ] || grep -qF 'releasing this Stop' "$WORK/diff.err"; then DIFF_OK=false; fi
+  if [ "$(printf '%s' "$OUT" | decision)" != "block" ] || grep -qF "$WAIT_NOTE" "$WORK/diff.err"; then DIFF_OK=false; fi
   if [ "$(printf '%s' "$OUT" | reason | sed "s#$ARMED_DATA#DATA#g")" != "$(printf '%s' "$CONTROL_REASON" | sed "s#$CONTROL_DATA#DATA#g")" ]; then DIFF_OK=false; fi
 done
 if [ "$DIFF_OK" = "true" ]; then
@@ -260,7 +261,7 @@ OUT="$(stop_payload bw-off "$RUN_TASKS" "$AWAIT_RUN" | ZENSU_CONFIG="$OFF_CONFIG
 OFF_NAMED="$(printf '%s' "$OUT" | reason)"
 OUT="$(stop_payload bw-off "$RUN_TASKS" | ZENSU_CONFIG="$OFF_CONFIG" bash "$STOP" 2>>"$WORK/off.err")"
 if printf '%s' "$OFF_NAMED" | grep -qF "$RESUME" && printf '%s' "$OUT" | reason | grep -qF "$RESUME" \
-  && ! printf '%s' "$OUT" | reason | grep -qF "$HINT_LEAD" && ! grep -qF 'releasing this Stop' "$WORK/off.err" \
+  && ! printf '%s' "$OUT" | reason | grep -qF "$HINT_LEAD" && ! grep -qF "$WAIT_NOTE" "$WORK/off.err" \
   && [ ! -e "$ARMED_DATA/stop-background-wait/v1/$ARMED_KEY.json" ]; then
   check "B11 hooks.backgroundTaskWait=false neither releases nor hints" PASS
 else
@@ -299,7 +300,7 @@ DENIED_EOF
 arm bw-denied || { check "B13 arm" FAIL; finish; exit 1; }
 OUT="$(stop_payload bw-denied "$RUN_TASKS" "$AWAIT_RUN" "$DENIED_TRANSCRIPT" | bash "$STOP" 2>"$WORK/denied.err")"
 if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && printf '%s' "$OUT" | reason | grep -qF 'refused by the HOST permission layer' \
-  && ! grep -qF 'releasing this Stop' "$WORK/denied.err"; then
+  && ! grep -qF "$WAIT_NOTE" "$WORK/denied.err"; then
   check "B13 a refused reviewer spawn keeps its own block while a named task runs" PASS
 else
   check "B13 refused spawn (out=$OUT)" FAIL
@@ -309,7 +310,7 @@ export ZENSU_TEST_PLUGIN_DATA="$WORK/stop-data/bw-implementing"
 source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" bw-implementing || { check "B14 baseline" FAIL; finish; exit 1; }
 bash "$LOG" --tdd-begin --session "$ZENSU_SESSION_KEY" >/dev/null 2>&1
 OUT="$(stop_payload bw-implementing "$RUN_TASKS" | bash "$STOP" 2>"$WORK/impl.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && ! grep -qF 'releasing this Stop while the background' "$WORK/impl.err"; then
+if [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && ! grep -qF "$WAIT_NOTE" "$WORK/impl.err"; then
   check "B14 a chain still implementing is released by its own path, never hinted" PASS
 else
   check "B14 implementing (out=$OUT)" FAIL
@@ -322,7 +323,7 @@ cd "$CLAUDE_PROJECT_DIR" || exit 1
 arm bw-outer || { check "B15 arm" FAIL; finish; exit 1; }
 bash -c 'source "$1"; autopilot_begin_run run-bw-outer "$2" "$3"' _ "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" "$ARMED_KEY" "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1 || { check "B15 the Autopilot run fixture begins" FAIL; finish; exit 1; }
 OUT="$(stop_payload bw-outer "$RUN_TASKS" "$AWAIT_RUN" | bash "$STOP" 2>"$WORK/outer.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while the background' "$WORK/outer.err" \
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF "$WAIT_NOTE" "$WORK/outer.err" \
   && ! printf '%s' "$OUT" | reason | grep -qF "$HINT_LEAD" \
   && [ ! -e "$ARMED_DATA/stop-background-wait/v1/$ARMED_KEY.json" ]; then
   check "B15 a session that owns a live Autopilot run neither releases nor hints" PASS
@@ -341,7 +342,7 @@ OUT="$(stop_payload bw-adopt "$RUN_TASKS" "$AWAIT_RUN" | bash "$STOP" 2>"$WORK/a
 ADOPT_DECISION="$(printf '%s' "$OUT" | decision)"
 OUT="$(stop_payload bw-adopt "$RUN_TASKS" "$AWAIT_RUN" | bash "$STOP" 2>>"$WORK/adopt.err")"
 if [ "$ADOPT_DECISION" = "block" ] && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
-  && ! grep -qF 'releasing this Stop while the background' "$WORK/adopt.err" \
+  && ! grep -qF "$WAIT_NOTE" "$WORK/adopt.err" \
   && ! printf '%s' "$OUT" | reason | grep -qF "$HINT_LEAD" \
   && [ -e "$CLAUDE_PROJECT_DIR/.zensu/state/pending-review.json.claim" ]; then
   check "B16 a Stop that adopts a deferred review, and every later Stop while the claim is held, neither releases nor hints" PASS
@@ -446,7 +447,7 @@ CAP_UNNAMED="$(printf '%s' "$OUT" | decision)"
 OUT="$(stop_payload bw-cap "$RUN_TASKS" "$AWAIT_RUN" | bash "$STOP" 2>>"$WORK/cap.err")"
 if [ "$CAP_AT" = "5" ] && [ "$CAP_UNNAMED" = "allow" ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] \
   && [ "$(grep -cF 'did not converge after 5 blocked Stops' "$WORK/cap.err")" = "2" ] \
-  && ! grep -qF 'releasing this Stop while the background' "$WORK/cap.err" \
+  && ! grep -qF "$WAIT_NOTE" "$WORK/cap.err" \
   && [ ! -e "$CAP_DATA/stop-background-wait/v1/$CAP_KEY.json" ]; then
   check "B20 a chain at its Stop cap is released by the cap path with its disclosure, never hinted or released by the wait" PASS
 else

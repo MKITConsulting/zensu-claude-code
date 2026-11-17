@@ -719,8 +719,9 @@ fi
 N_COUNT="$(stop_count "$N")"
 N_RELEASE="$(stop_payload "$N_RAW" | PATH="$FAIL_BIN:$PATH" REAL_NODE="$REAL_NODE" ZENSU_STOP_DEADLINE_SECONDS=75 bash "$STOP" 2>"$WORK/arrived-release.err")"
 if [ "$(printf '%s' "$N_RELEASE" | decision)" = allow ] \
-  && stop_notice_only "$N_RELEASE" "$WORK/arrived-release.err" 'releasing this Stop. The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop' \
-  && ! grep -qF 'still running' "$WORK/arrived-release.err" \
+  && stop_notice_only "$N_RELEASE" "$WORK/arrived-release.err" "Zensu received the code review's report but could not record it yet; it tries again at the next Stop or prompt, and the review chain continues from there." \
+  && ! grep -qF 'already reached you' "$WORK/arrived-release.err" \
+  && ! grep -qF 'Zensu is waiting for ' "$WORK/arrived-release.err" \
   && [ "$(stop_count "$N")" = "$N_COUNT" ] && [ -f "$(record_file "$N")" ] && [ -f "$(arrival_file "$N")" ] \
   && [ "$(state_value "$N" reviewTicketConsumed)" = false ]; then
   check "BR9g a Stop whose claim from the arrival note fails releases a standalone chain with the arrived-report notice, charges no budget and keeps record and note" PASS
@@ -1021,11 +1022,10 @@ launch_payload "$G_RAW" "$(review_prompt "$ARMED_TICKET")" async_launched "$G_AG
 G_COUNT="$(stop_count "$G")"
 G_OUT="$(stop_payload "$G_RAW" | bash "$STOP" 2>"$WORK/stop-release.err")"; G_RC=$?
 if [ "$G_RC" -eq 0 ] && [ "$(printf '%s' "$G_OUT" | decision)" = allow ] \
-  && stop_notice_only "$G_OUT" "$WORK/stop-release.err" 'releasing this Stop, still running: the background zensu:code-reviewer' \
-  && grep -qE "releasing this Stop, still running: the background zensu:code-reviewer \\(agent $G_AGENT, launched [0-9]+ min ago\\) for the issued ticket" "$WORK/stop-release.err" \
-  && grep -qF 'the wait ends 60 minutes after the newest launch' "$WORK/stop-release.err" \
+  && stop_notice_only "$G_OUT" "$WORK/stop-release.err" 'Zensu is waiting for the code review; the review chain continues when it reports back.' \
+  && ! grep -qF "$G_AGENT" "$WORK/stop-release.err" \
   && case "$G_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$G")" = "$G_COUNT" ] && [ -f "$G_RECORD" ]; then
-  check "BR11 the Stop guard releases a standalone chain's Stop while a fresh pending record matches the issued ticket, and charges no Stop budget" PASS
+  check "BR11 the Stop guard releases a standalone chain's Stop while a fresh pending record matches the issued ticket, says so in one readable sentence without the agent id, and charges no Stop budget" PASS
 else
   check "BR11 release (rc=$G_RC out=$G_OUT count=$G_COUNT/$(stop_count "$G") err=$(cat "$WORK/stop-release.err"))" FAIL
 fi
@@ -1040,7 +1040,7 @@ node -e '
 G_EXPIRED_OUT="$(stop_payload "$G_RAW" | bash "$STOP" 2>"$WORK/stop-expired.err")"
 if [ "$(printf '%s' "$G_EXPIRED_OUT" | decision)" = block ] \
   && ! printf '%s' "$G_EXPIRED_OUT" | reason | grep -qF 'Still running:' \
-  && ! grep -qF 'releasing this Stop, still running' "$WORK/stop-expired.err" \
+  && ! grep -qF 'Zensu is waiting for ' "$WORK/stop-expired.err" \
   && [ "$(stop_count "$G")" = "$((G_COUNT + 1))" ]; then
   check "BR12 a pending record older than 60 minutes no longer releases the Stop, which blocks with the plain resume directive" PASS
 else
@@ -1058,7 +1058,8 @@ M_COUNT="$(stop_count "$M")"
 M_STOP_OUT="$(stop_payload "$M_RAW" | bash "$STOP" 2>"$WORK/fanout-release.err")"
 if [ -z "$M_ASPECT_OUT" ] && [ -f "$(fanout_file "$M" "$M_ASPECT")" ] && [ -f "$(fanout_file "$M" "$M_JUDGE")" ] \
   && [ "$(printf '%s' "$M_STOP_OUT" | decision)" = allow ] \
-  && grep -qE "releasing this Stop, still running: 2 background review agent\\(s\\) of this chain \\(the newest, agent a[0-9a-f]+, launched [0-9]+ min ago\\)" "$WORK/fanout-release.err" \
+  && stop_notice_only "$M_STOP_OUT" "$WORK/fanout-release.err" 'Zensu is waiting for 2 background reviewers; the review chain continues when they report back.' \
+  && ! grep -qF "$M_ASPECT" "$WORK/fanout-release.err" && ! grep -qF "$M_JUDGE" "$WORK/fanout-release.err" \
   && case "$M_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$M")" = "$M_COUNT" ]; then
   check "BR12b background review-aspect and review-judge launches are recorded silently, and the Stop guard releases while they run without charging the budget" PASS
 else
@@ -1070,7 +1071,7 @@ M_NOTE_OUT="$(counted_prompt "$M_RAW" "$(notification_text "$M_JUDGE" completed)
 M_AFTER_OUT="$(stop_payload "$M_RAW" | bash "$STOP" 2>"$WORK/fanout-after.err")"
 if [ -z "$M_ARRIVAL_OUT" ] && [ -z "$M_NOTE_OUT" ] && [ ! -e "$(fanout_file "$M" "$M_ASPECT")" ] && [ ! -e "$(fanout_file "$M" "$M_JUDGE")" ] \
   && [ "$(node_calls "$WORK/fanout-handback.calls")" -gt 1 ] && [ "$(node_calls "$WORK/fanout-notification.calls")" = 1 ] \
-  && [ "$(printf '%s' "$M_AFTER_OUT" | decision)" = block ] && ! grep -qF 'still running' "$WORK/fanout-after.err" \
+  && [ "$(printf '%s' "$M_AFTER_OUT" | decision)" = block ] && ! grep -qF 'Zensu is waiting for ' "$WORK/fanout-after.err" \
   && [ "$(stop_count "$M")" = "$((M_COUNT + 1))" ]; then
   check "BR12c a fan-out agent's hand-back retires its entry and starts the delegate for the review packet gate, its notification retires the entry through the arrive child alone, neither prints anything, and the next Stop blocks as before" PASS
 else
@@ -1087,6 +1088,132 @@ else
   check "BR12d fan-out result notification (out=$M_RESULT_OUT entry=$([ -e "$(fanout_file "$M" "$M_NOTED")" ] && echo present || echo absent) node=$(node_calls "$WORK/fanout-result.calls"))" FAIL
 fi
 
+stop_tasks_payload() {
+  RAW="$1" TASKS="$2" MESSAGE="$3" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "Stop",
+      session_id: process.env.RAW,
+      last_assistant_message: process.env.MESSAGE,
+      background_tasks: JSON.parse(process.env.TASKS),
+    }));
+  '
+}
+
+reviewer_file() {
+  printf '%s/background-review/v1/reviewers/%s/%s.json' "$CLAUDE_PLUGIN_DATA" "$1" "$2"
+}
+
+arm_chain br-resumed || { check "BR20 arm" FAIL; finish; exit 1; }
+Q_RAW=br-resumed
+Q="$STARTED_KEY"
+Q_ASPECT=a7c9e1a3b5c7d9e1f
+Q_JUDGE=a8d0f2b4d6f8a0c2e
+aspect_payload "$Q_RAW" zensu:review-aspect "$Q_ASPECT" | bash "$DELEGATE" >/dev/null 2>&1
+aspect_payload "$Q_RAW" zensu:review-judge "$Q_JUDGE" | bash "$DELEGATE" >/dev/null 2>&1
+prompt_payload "$Q_RAW" "$(notification_text "$Q_ASPECT" failed)" | bash "$PROMPT_HOOK" >/dev/null 2>&1
+prompt_payload "$Q_RAW" "$(notification_text "$Q_JUDGE" failed)" | bash "$PROMPT_HOOK" >/dev/null 2>&1
+Q_RETIRED=no
+[ -f "$(reviewer_file "$Q" "$Q_ASPECT")" ] && [ -f "$(reviewer_file "$Q" "$Q_JUDGE")" ] \
+  && [ ! -e "$(fanout_file "$Q" "$Q_ASPECT")" ] && [ ! -e "$(fanout_file "$Q" "$Q_JUDGE")" ] && Q_RETIRED=yes
+Q_TASKS="[{\"id\":\"$Q_ASPECT\",\"type\":\"subagent\",\"status\":\"running\",\"description\":\"Correctness review of the change\"},{\"id\":\"$Q_JUDGE\",\"type\":\"subagent\",\"status\":\"running\",\"description\":\"Judge of the change\"}]"
+Q_COUNT="$(stop_count "$Q")"
+Q_OUT="$(stop_tasks_payload "$Q_RAW" "$Q_TASKS" 'Waiting for the reports of the two reviewers.' | bash "$STOP" 2>"$WORK/resumed.err")"; Q_RC=$?
+if [ "$Q_RETIRED" = yes ] && [ "$Q_RC" -eq 0 ] && [ "$(printf '%s' "$Q_OUT" | decision)" = allow ] \
+  && stop_notice_only "$Q_OUT" "$WORK/resumed.err" 'Zensu is waiting for "Correctness review of the change" and "Judge of the change"; the review chain continues when they report back.' \
+  && ! grep -qF "$Q_ASPECT" "$WORK/resumed.err" && ! grep -qF "$Q_JUDGE" "$WORK/resumed.err" \
+  && ! grep -qF 'ZENSU-AWAIT' "$WORK/resumed.err" && ! grep -qF 'STOP intercepted' "$WORK/resumed.err" \
+  && [ -f "$(fanout_file "$Q" "$Q_ASPECT")" ] && [ -f "$(fanout_file "$Q" "$Q_JUDGE")" ] \
+  && case "$Q_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$Q")" = "$Q_COUNT" ]; then
+  check "BR20 a Stop whose payload lists this chain's fan-out reviewers running again after their failed runs is released without a ZENSU-AWAIT line or a hint, names them in one readable sentence and charges no Stop budget" PASS
+else
+  check "BR20 resumed reviewers (retired=$Q_RETIRED rc=$Q_RC out=$Q_OUT count=$Q_COUNT/$(stop_count "$Q") err=$(cat "$WORK/resumed.err"))" FAIL
+fi
+
+arm_chain br-unregistered || { check "BR20b arm" FAIL; finish; exit 1; }
+U_RAW=br-unregistered
+U="$STARTED_KEY"
+U_AGENT=a9e1a3c5e7a9c1e3a
+U_STRANGER=a0b1c2d3e4f5a6b7c
+aspect_payload "$U_RAW" zensu:review-aspect "$U_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+prompt_payload "$U_RAW" "$(notification_text "$U_AGENT" failed)" | bash "$PROMPT_HOOK" >/dev/null 2>&1
+U_TASKS="[{\"id\":\"$U_STRANGER\",\"type\":\"subagent\",\"status\":\"running\",\"description\":\"Explore the repository\"}]"
+U_OUT="$(stop_tasks_payload "$U_RAW" "$U_TASKS" 'Waiting for the explorer.' | bash "$STOP" 2>"$WORK/unregistered.err")"
+U_REASON="$(printf '%s' "$U_OUT" | reason)"
+if [ -f "$(reviewer_file "$U" "$U_AGENT")" ] && [ "$(printf '%s' "$U_OUT" | decision)" = block ] \
+  && printf '%s' "$U_REASON" | grep -qF 'STOP intercepted by zensu chain-enforcer' \
+  && printf '%s' "$U_REASON" | grep -qF "ZENSU-AWAIT: <task id>" && printf '%s' "$U_REASON" | grep -qF "$U_STRANGER" \
+  && ! grep -qF 'Zensu is waiting for ' "$WORK/unregistered.err" \
+  && [ ! -e "$(fanout_file "$U" "$U_STRANGER")" ] && [ ! -e "$(fanout_file "$U" "$U_AGENT")" ]; then
+  check "BR20b a running subagent this chain did not launch renews nothing, and its Stop takes the explicit ZENSU-AWAIT hint as before" PASS
+else
+  check "BR20b unregistered (out=$(printf '%s' "$U_OUT" | head -c 400) err=$(cat "$WORK/unregistered.err"))" FAIL
+fi
+
+system_message_is() {
+  OUT_TEXT="$1" EXPECT="$2" node -e '
+    let parsed;
+    try { parsed = JSON.parse(process.env.OUT_TEXT); } catch (_) { process.exit(1); }
+    process.exit(parsed && Object.keys(parsed).join() === "systemMessage" && parsed.systemMessage === process.env.EXPECT ? 0 : 1);
+  ' 2>/dev/null
+}
+
+WAIT_FALLBACK='Zensu is waiting for the background review; the review chain continues when it reports back.'
+SEAM_LEAD="$(sed -n "s/^WAIT_NOTE_LEAD='\\(.*\\)'\$/\\1/p" "$STOP")"
+SEAM_TAIL="$(sed -n 's/^WAIT_NOTE_FALLBACK="\${WAIT_NOTE_LEAD}\(.*\)"$/\1/p' "$STOP")"
+SEAM_RENDERED="$(node -e 'process.stdout.write(require(process.argv[1]).renderWaitingNote(["the background review"], 1))' "$PLUGIN_DIR/hooks/lib/stop-background-wait-v1.js" 2>/dev/null)"
+if [ -n "$SEAM_LEAD" ] && [ -n "$SEAM_TAIL" ] && [ "$SEAM_LEAD$SEAM_TAIL" = "$SEAM_RENDERED" ] && [ "$SEAM_RENDERED" = "$WAIT_FALLBACK" ] \
+  && [ "${SEAM_RENDERED#"$SEAM_LEAD"}" != "$SEAM_RENDERED" ]; then
+  check "BR21 the Stop hook's one fallback note is the shared renderer's sentence and starts with the lead its note check requires" PASS
+else
+  check "BR21 note seam (lead=$SEAM_LEAD tail=$SEAM_TAIL rendered=$SEAM_RENDERED)" FAIL
+fi
+
+NOTE_BIN="$WORK/note-bin"
+mkdir -p "$NOTE_BIN"
+cat > "$NOTE_BIN/node" <<'STUB'
+#!/bin/bash
+case "$*" in
+  (*'background-review-v1.js wait'*) cat "$WAIT_ANSWER"; exit 0 ;;
+esac
+exec "$REAL_NODE" "$@"
+STUB
+chmod +x "$NOTE_BIN/node"
+arm_chain br-notes || { check "BR21b arm" FAIL; finish; exit 1; }
+V_RAW=br-notes
+V="$STARTED_KEY"
+V_AGENT=a3c5e7a9c1e3a5c7e
+aspect_payload "$V_RAW" zensu:review-aspect "$V_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+V_HEAD="wait kind=fanout agent=$V_AGENT age=0 count=1 ttl=60"
+V_LONG="Zensu is waiting for $(printf '%0600d' 0 | tr 0 x); the review chain continues when it reports back."
+V_TAB="$(printf 'Zensu is waiting for "a\tb"; the review chain continues when it reports back.')"
+V_COUNT="$(stop_count "$V")"
+V_FAILED=""
+V_CASE=0
+for V_ANSWER in \
+  "$V_HEAD" \
+  "$V_HEAD"$'\n'"$V_TAB" \
+  "$V_HEAD"$'\n'"$V_LONG" \
+  "$V_HEAD"$'\n''Waiting for the reviewer.' \
+  "$V_HEAD"$'\n''Zensu is waiting for "x"; the review chain continues when it reports back.'$'\n''extra line' \
+  "wait kind=consume agent=$V_AGENT age=0 count=1 ttl=60" \
+  "wait kind=fanout agent=$V_AGENT age=0 count=3 ttl=60"; do
+  V_CASE=$((V_CASE + 1))
+  printf '%s\n' "$V_ANSWER" > "$WORK/wait-answer"
+  V_OUT="$(stop_payload "$V_RAW" | PATH="$NOTE_BIN:$PATH" REAL_NODE="$REAL_NODE" WAIT_ANSWER="$WORK/wait-answer" bash "$STOP" 2>"$WORK/note-$V_CASE.err")"
+  if ! system_message_is "$V_OUT" "$WAIT_FALLBACK" || grep -qF "$V_AGENT" "$WORK/note-$V_CASE.err"; then
+    V_FAILED="$V_FAILED $V_CASE"
+  fi
+done
+printf '%s\n' "$V_HEAD" 'Zensu is waiting for "Stub reviewer"; the review chain continues when it reports back.' > "$WORK/wait-answer"
+V_OK="$(stop_payload "$V_RAW" | PATH="$NOTE_BIN:$PATH" REAL_NODE="$REAL_NODE" WAIT_ANSWER="$WORK/wait-answer" bash "$STOP" 2>/dev/null)"
+if [ "$V_CASE" = 7 ] && [ -z "$V_FAILED" ] \
+  && system_message_is "$V_OK" 'Zensu is waiting for "Stub reviewer"; the review chain continues when it reports back.' \
+  && case "$V_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$V")" = "$V_COUNT" ]; then
+  check "BR21b a wait answer without a usable note line (none, a control character, over 600 characters, no lead, extra lines, a consume or a count answer) releases with the one fallback sentence and no agent id, and a valid line is printed as it came" PASS
+else
+  check "BR21b note fallback (cases=$V_CASE failed:$V_FAILED ok=$(printf '%s' "$V_OK" | head -c 300) count=$V_COUNT/$(stop_count "$V"))" FAIL
+fi
+
 PROBE_DATA="$WORK/probe-data"
 mkdir -p "$PROBE_DATA"
 chmod 700 "$PROBE_DATA"
@@ -1099,7 +1226,7 @@ printf '{"session_id_hash":"sha256:%s","phase":"IDLE","history":[],"bypasses":[]
 PROBE_RECORDED="$(launch_payload probe "$(review_prompt "$PROBE_TICKET")" async_launched "$PROBE_AGENT" \
   | ZENSU_BR_PLUGIN_DATA="$PROBE_DATA" ZENSU_BR_SESSION_KEY="$PROBE_KEY" ZENSU_BR_STATE_FILE="$PROBE_STATE" ZENSU_BR_ENVELOPE=standalone \
     node "$LIB" record 2>/dev/null)"
-WAIT_FN="$(sed -n '/^background_review_wait() {/,/^}/p' "$STOP")"
+WAIT_FN="$(sed -n -e '/^WAIT_NOTE_LEAD=/p' -e '/^WAIT_NOTE_FALLBACK=/p' -e '/^split_wait_verdict() {/,/^}/p' -e '/^background_review_wait() {/,/^}/p' "$STOP")"
 probe_wait() {
   OUTER="$1" ADOPTED="$2" BOUND="$3" WAIT_FN="$WAIT_FN" PLUGIN_DIR="$PLUGIN_DIR" PROBE_DATA="$PROBE_DATA" \
     PROBE_KEY="$PROBE_KEY" PROBE_STATE="$PROBE_STATE" bash -c '
@@ -1298,7 +1425,7 @@ if [ "$H_ARMED" = yes ] && [ -n "$H_TICKET" ] && printf '%s' "$H_LAUNCH" | grep 
   && printf '%s' "$H_STOP_REASON" | grep -qE "^Zensu review-chain Stop held, still running: the background zensu:code-reviewer \\(agent $H_AGENT, launched [0-9]+ min ago\\) for the issued ticket\\." \
   && printf '%s' "$H_STOP_REASON" | grep -qF 'this Stop does not count against the inner Stop budget' \
   && case "$H_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$H")" = "$H_COUNT" ] \
-  && ! grep -qF 'releasing this Stop' "$WORK/bound-stop.err"; then
+  && ! grep -qF 'releasing this Stop' "$WORK/bound-stop.err" && ! grep -qF 'Zensu is waiting for ' "$WORK/bound-stop.err"; then
   check "BR14 an Autopilot-bound chain records the background launch, keeps its turn, and its Stop is held without charging the inner Stop budget" PASS
 else
   check "BR14 bound launch and Stop (armed=$H_ARMED ticket=$H_TICKET launch=$(printf '%s' "$H_LAUNCH" | head -c 300) reason=$(printf '%s' "$H_STOP_REASON" | head -c 400) count=$H_COUNT/$(stop_count "$H") err=$(cat "$WORK/bound-stop.err"))" FAIL
@@ -1436,6 +1563,55 @@ if [ -n "$H_TICKET2" ] && printf '%s' "$H_RELAUNCH" | grep -qF 'the plugin recor
   check "BR15b a bound chain's Stop claims a later ticket from its arrival note once, routes the review with the Autopilot envelope without charging the inner Stop budget, and the next Stop claims nothing$([ "$H_RECOVERY_HELD" -eq 0 ] || printf ' [after %s held Stop(s) that deferred the claim under load]' "$H_RECOVERY_HELD")" PASS
 else
   check "BR15b bound Stop claim (ticket=$H_TICKET2 noted=$H_NOTED2 held=$H_RECOVERY_HELD reason=$(printf '%s' "$H_RECOVERED_REASON" | head -c 400) round=$(state_value "$H" reviewRound) count=$H_RECOVERY_COUNT/$H_RECOVERED_COUNT again=$(printf '%s' "$H_RECOVERED_AGAIN" | head -c 200))" FAIL
+fi
+
+RENEW_PROJECT="$WORK/bound-renewal-project"
+mkdir -p "$RENEW_PROJECT"
+RENEW_PROJECT="$(cd -P "$RENEW_PROJECT" && pwd -P)"
+export CLAUDE_PROJECT_DIR="$RENEW_PROJECT"
+cd "$RENEW_PROJECT" || exit 1
+start_session br-bound-renewal || { check "BR20c session" FAIL; finish; exit 1; }
+R_RAW=br-bound-renewal
+R="$STARTED_KEY"
+R_RUN=run-br-bound-renewal
+R_CHAIN=chain-br-bound-renewal
+R_AGENT=a6e8a0c2e4a6c8e0a
+R_ARMED=no
+if autopilot_begin_run "$R_RUN" "$R" "$RENEW_PROJECT" >/dev/null 2>&1 \
+  && autopilot_apply_event "$R_RUN" "plan-$R_RUN" PLAN_APPROVED "{\"approvedPlanSha256\":\"$H_SHA\"}" "$RENEW_PROJECT" "$R" >/dev/null 2>&1 \
+  && bash "$LOG" --tdd-begin --session "$R" --autopilot-run "$R_RUN" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$R_CHAIN" >/dev/null 2>&1 \
+  && bash "$LOG" --tdd-complete --session "$R" --autopilot-run "$R_RUN" --autopilot-attempt 1 \
+    --autopilot-return-stage GATES --chain-id "$R_CHAIN" >/dev/null 2>&1; then
+  R_ARMED=yes
+fi
+aspect_payload "$R_RAW" zensu:review-aspect "$R_AGENT" | bash "$DELEGATE" >/dev/null 2>&1
+R_TASKS="[{\"id\":\"$R_AGENT\",\"type\":\"subagent\",\"status\":\"running\",\"description\":\"Correctness review of the change\"}]"
+R_MAX="$(node -e 'process.stdout.write(String(require(process.argv[1]).LIMITS.maxRenewals))' "$LIB" 2>/dev/null)"
+case "$R_MAX" in ''|*[!0-9]*) R_MAX=0 ;; esac
+R_COUNT="$(stop_count "$R")"
+R_HELD=0
+R_CYCLE=0
+while [ "$R_CYCLE" -lt "$R_MAX" ]; do
+  R_CYCLE=$((R_CYCLE + 1))
+  prompt_payload "$R_RAW" "$(notification_text "$R_AGENT" failed)" | bash "$PROMPT_HOOK" >/dev/null 2>&1
+  R_OUT="$(stop_tasks_payload "$R_RAW" "$R_TASKS" 'Waiting for the reviewer.' | bash "$STOP" 2>/dev/null)"
+  if [ "$(printf '%s' "$R_OUT" | decision)" = block ] \
+    && printf '%s' "$R_OUT" | reason | grep -qF 'Zensu review-chain Stop held, still running' \
+    && [ "$(stop_count "$R")" = "$R_COUNT" ]; then
+    R_HELD=$((R_HELD + 1))
+  fi
+done
+prompt_payload "$R_RAW" "$(notification_text "$R_AGENT" failed)" | bash "$PROMPT_HOOK" >/dev/null 2>&1
+R_LAST="$(stop_tasks_payload "$R_RAW" "$R_TASKS" 'Waiting for the reviewer.' | bash "$STOP" 2>/dev/null)"
+if [ "$R_ARMED" = yes ] && [ "$R_MAX" -gt 0 ] && [ "$R_HELD" = "$R_MAX" ] \
+  && [ "$(printf '%s' "$R_LAST" | decision)" = block ] \
+  && ! printf '%s' "$R_LAST" | reason | grep -qF 'Stop held, still running' \
+  && case "$R_COUNT" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$(stop_count "$R")" = "$((R_COUNT + 1))" ] \
+  && [ ! -e "$(fanout_file "$R" "$R_AGENT")" ]; then
+  check "BR20c an Autopilot-bound chain holds a resumed reviewer's Stop without charging the inner budget for at most LIMITS.maxRenewals renewals, and the next resume is charged" PASS
+else
+  check "BR20c bound renewal cap (armed=$R_ARMED max=$R_MAX held=$R_HELD last=$(printf '%s' "$R_LAST" | head -c 300) count=$R_COUNT/$(stop_count "$R"))" FAIL
 fi
 
 cd "$PLUGIN_DIR" || exit 1

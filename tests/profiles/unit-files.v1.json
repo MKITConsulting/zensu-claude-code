@@ -22,9 +22,9 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
-      "path": "tests/structure/background-review-v1.test.js", "registered": 44, "skips": {"win32": 2},
+      "path": "tests/structure/background-review-v1.test.js", "registered": 54, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
-      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the name bindings that map a named spawn's hand-back to its agent id, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the reviewer register that renews a resumed fan-out reviewer at a Stop within its renewal, idle and name-binding bounds and the wait note it prints, the name bindings that map a named spawn's hand-back to its agent id, the claim predicate shared with the ticket claim, the arrival note with its count of held Stops and the arrival match that claims from a prompt or a note or retires, the Stop wait verdict and the idle sweeps."
     },
     {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
@@ -260,9 +260,9 @@
       "summary": "The state path walk the tdd-phase lease processes and _tdd_paths_safe share: link, kind and link-count refusals, unreadable components, trusted-root and fallback anchors, and malformed requests."
     },
     {
-      "path": "tests/structure/stop-background-wait-v1.test.js", "registered": 19,
+      "path": "tests/structure/stop-background-wait-v1.test.js", "registered": 21,
       "runs": [{ "driver": "tests/structure/test-stop-background-wait.sh" }],
-      "summary": "The Stop guard's background wait: the measured host vocabulary, the ZENSU-AWAIT line grammar, the wait, hint and nowait verdicts, the per-task release bound, the per-generation hint bound, the store and the CLI."
+      "summary": "The Stop guard's background wait: the measured host vocabulary, the ZENSU-AWAIT line grammar, the wait, hint and nowait verdicts, the per-task release bound, the per-generation hint bound, the readable release note and the shared list renderer, the store and the CLI."
     },
     {
       "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 27, "skips": {"win32": 2},
