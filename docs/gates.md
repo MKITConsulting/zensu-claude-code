@@ -425,17 +425,62 @@ the shell ends it, so no reading drops the lines after them. A command nested mo
 deep, or one whose reading would exceed a work bound proportional to its length, is refused with
 its own reason. W382 to W554 pin each spelling and the commands that stay allowed.
 
+**Code handed to a shell.** The rebind check also reads the literal code a command hands to a
+shell in its own arguments, and judges it as a command of its own with every refusal of that
+check, the write to the file behind `CLAUDE_ENV_FILE` included. Rules (A), (B) and (C) do not
+read it, so `bash -c 'git -C ../sibling add -A'` is judged by none of them. For `sh`, `bash`,
+`rbash`, `zsh`, `dash`, `ksh`, `mksh`, `ash`, `hush`, `yash`, `posh`, `lksh`, `oksh`, `pdksh`,
+`loksh`, `fish`, `csh` and `tcsh`, also under a versioned name such as `bash5.2` or `zsh-5.9`,
+behind a wrapper the check reads, behind a path, in another letter case or as a `busybox` applet,
+and for zsh's `emulate`, it reads every word after the first option word that holds a `c` (`-c`,
+`+c`, a cluster such as `-lc`, `--rcfile`, and for `fish` also `-C`) as code, each word on its own
+and the positional words joined into one command line, and it reads the code attached to that option
+word and to every later one that holds the letter as well (`fish -c'…'`, `fish --command=…`,
+`fish -C x -c'…'`). So no option grammar the check does not
+model can hide the code, and code that runs its positional words
+(`bash -c '"$@"' _ env NAME=… cmd`) is read with them. A positional word that names a protected
+input is refused with a reason of its own, because the code can run or assign its positional
+words in any slice or order (`shift; "$@"`, `"${@:2}"`, `printf -v "$1"`); a `$NAME` or `${NAME…}`
+there is the outer shell's value, not the name, and passes, as does a longer name that only
+contains a protected one. It also reads the operands of `eval` and the
+action of `trap`. So `bash -c 'CLAUDE_CODE_SESSION_ID=… …'`, `sh -c "export ZENSU_SESSION_KEY=…"`,
+`bash -c + '…'`, `zsh -O -c '…'`, `eval '…'` and `trap '…' EXIT` are refused like the command they
+carry, and so is a protected name inside a shell inside a shell, up to eight shells deep; a ninth
+is refused as nested too deep. The price is that a positional word that spells a protected
+assignment, or names a protected input at all, is refused even where the code only reads it
+(`bash -c 'echo $1' _ NAME=…`, `bash -c 'printenv "$1"' _ NAME`), and, because the first word
+after the option that is no option counts as the code, after an option that takes a value
+(`bash --rcfile <file> -c 'echo NAME'`) the code counts as a positional word; a script file and
+`bash -s` stay data. Code of `csh`, `tcsh` and `fish` is read with the POSIX
+grammar, so their own export forms (`setenv`, `set -x`) are not read. Code handed to `powershell`,
+`pwsh` or `cmd` goes to the PowerShell control verdict, which refuses any spelling of a protected
+input, an encoded command and a host left to read its command from standard input; a help request
+and a `pwsh` version request run no code and pass, and `command -v` or `-V` only looks a program
+up, so its operand is not read as code. The adoption report's `ZADOPT_*` inputs, which
+`zensu-session-adopt.sh` sets inside its own process, and the re-anchor module's `ZREANCHOR_*`
+inputs, which `zensu-session-reanchor.sh` sets the same way, are protected inputs as well: the
+refusal names `/zensu:adopt-session` or `/zensu:adopt-session --reanchor`, and the shipped commands
+of that skill set none of them and stay allowed. The unit case
+`the Session Control check protects the entry-point inputs and reads the code a command hands to a shell, eval or trap`
+in `tests/structure/git-repo-escape.test.js`, which derives each entry point's inputs from its
+module and its wrapper, and `R11f` to `R11g8` in `tests/structure/test-restore-project-root.sh` pin
+both.
+
 **What the reader still leaves alone.** zsh reads an unknown escape inside `$'…'` and a `$"…"`
 differently, expands `=git` to a path and runs the precommand modifiers `noglob`, `nocorrect` and
 `-`; where the Bash tool runs zsh, the gate still reads those spellings the bash way, so they pass.
 A variable name the shell builds at run time in a builtin or wrapper operand (`export "$N=…"`,
 `export $(cat .env | xargs)`, `unset "$v"`) stays allowed, because loading an environment file that
 way is common and `source` reaches the same assignments. A program word the shell builds at run
-time (`$GIT`, `$(…)`), an alias or a function, code the shell builds or stores to run later
-(`eval`, `trap`, `bash -c`, `source`, a script file, a `mapfile -C` callback), arithmetic that
+time (`$GIT`, `$(…)`), an alias or a function, code the shell builds at run time
+(`bash -c "$CODE"`, `eval "$(…)"`) or reads from outside the command text (`source`, a script file,
+a here-document, here-string or pipe into a shell, a `mapfile -C` callback), arithmetic that
 reaches a name through another variable's value (`x='NAME=1'; (( x ))`) or an integer attribute
 (`declare -i`), zsh's numeric `printf` arguments and module builtins (`zparseopts`, `strftime -s`,
-`zstat -A`) and a wrapper outside the list (`timeout`, `xargs`, `stdbuf`) are not followed either.
+`zstat -A`), interpreter code (`node -e`, `python -c`) and a wrapper outside the list (`timeout`,
+`xargs`, `stdbuf`, `su -c`, `find -exec`) are not followed either. The check reads the Bash and
+PowerShell tools only, so a command run through a tool it is not registered on, such as a
+main-thread `Monitor` command, is not read at all.
 The third reading is a hand-written approximation of the shell grammar, and a construct it misreads
 can hide the commands after it, so a spelling outside the pinned rows may still pass. The word
 reader and the whitespace reading still split
@@ -1411,6 +1456,16 @@ No argument names a directory anywhere in this mode, and neither literal it acce
 value, so the anchor never moves and the source-write gate, whenever it is opted in, compares
 against exactly the root it compared against before. Creating a directory at a path the record already names restores the
 authority the session already had and adds none.
+
+**The session it repairs comes from the environment, and the Bash gate is what keeps a foreign one
+out.** `zensu-session-adopt.sh` hands `CLAUDE_CODE_SESSION_ID` to the report module, and nothing in
+the core compares it with the session the calling process belongs to. The rebind check of the
+source-write gate, which runs whatever `hooks.bashWriteGate` says, refuses a command that sets
+that name or one of the report module's own `ZADOPT_*` inputs, on the command line or inside
+literal code handed to a shell, `eval` or `trap` (§Source-Write Gate). It reads the command text
+of the Bash and PowerShell tools, so code built at run time, a script file, a pipe into a shell,
+interpreter code and a command run through a tool the gate is not registered on, such as a
+main-thread `Monitor` command, still pass: the check prevents accidents and is not a sandbox.
 
 **Carried from the record is not the same as bounded, and only the first is true.** This is the
 one write class whose destination is an arbitrary absolute path: it is **not bounded by location**

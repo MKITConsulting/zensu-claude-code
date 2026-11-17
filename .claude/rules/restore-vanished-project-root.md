@@ -79,7 +79,9 @@ writes, and `renderRestoreOutcome`, which turns the outcome into lines — plus 
 verdict itself and owns the exit code, so the renderers return `{text, code}` and
 write no global. The retired single renderer was `renderRestoreRoot`; nothing in the
 tree defines that name any more, so a roster naming it sends a reader nowhere; the two-literal argv parser and the five-class header in
-`zensu-session-adopt.sh`; `RECOGNIZED.adopt.args` in `zensu-doctor-invocation.js`; the three
+`zensu-session-adopt.sh`; `ADOPTION_INPUTS` in `hooks/lib/bash-source-write-parse.js`, which
+names every `ZADOPT_*` input the report reads and the wrapper sets, a coupling the unit case
+derives from both files; `RECOGNIZED.adopt.args` in `zensu-doctor-invocation.js`; the three
 reserved-phase guard bodies; both binding rows in `zensu-doctor-report.js` PLUS the state row
 this feature added there, `projectRootRestoredRow`, together with the `RESTORE_HISTORY_PHASE`
 read that decides whether it can render at all and the `sharedWorkflowRead` it takes from its
@@ -285,26 +287,51 @@ matcher in a bound session produced exactly that deny. Do NOT restate this as "t
 the caller", and do not delete the gate's entry on the strength of the conjunct list — the two
 halves are what make the claim true together, and removing `CLAUDE_CODE_SESSION_ID` from
 `CONTROL_BINDINGS` would re-open class 5 to a foreign record with nothing else standing in the
-way. `R11f`/`R11g`/`R11g2` and their controls pin both clauses — NOT `R11d`/`R11e`,
-which grade `zensu_safe_display_path` in an unrelated block and were cited here for a
-release. A wrong pin id is worse than none: it reads as covered.
+way. `R11f` to `R11g8` and their controls in
+`tests/structure/test-restore-project-root.sh` pin the gate's half BEHAVIOURALLY: they drive
+`pre-bash-source-write-gate.sh` in a bound fixture session, with `hooks.bashWriteGate` absent
+and `true`. Nothing pins the core's half, the missing caller
+bind, because a check for an absent check would pin the gap. NOT `R11d`/`R11e`, which grade
+`zensu_safe_display_path` in an unrelated block. A wrong pin id is worse than none: it reads
+as covered.
 
-**AND THE SCOPE OF THAT REFUSAL IS NARROWER THAN THE PARAGRAPH ABOVE READS.** The gate
-covers one SPELLING of one CHANNEL. `buildRequest` reads this module's own inputs from
-`ZADOPT_PLUGIN_DATA`, `ZADOPT_SESSION_ID` and `ZADOPT_PLUGIN_ROOT`, and `main()` routes
-on `ZADOPT_MODE` and `ZADOPT_CONFIRM` — and no `ZADOPT_*` name is in `CONTROL_BINDINGS`,
-so a plain leading-assignment `ZADOPT_… node …/session-adopt-report-v1.js` needs no
-quoting subtlety at all to pass `bindingFromAssignment`. A second gap is the WRAPPER
-set: `WRAP` is `command builtin exec env sudo nohup nice time`, containing neither
-`bash` nor `sh`, so `bash -c '<assignment> <command>'` makes `bash` token 0, the
-leading-assignment loop exits immediately and no `export`/`unset` arm applies; `env` IS
-covered. Both halves are DERIVED from source and neither was measured, unlike the
-`CLAUDE_CODE_SESSION_ID` deny above, which was. What bounds the residual is that the
-destination still comes from a record in a readable store and the write is at most
-`RESTORE_MAX_MISSING_COMPONENTS` directories at mode 0755 — narrow, but not nothing.
-Covering `ZADOPT_*` is its own change to `CONTROL_BINDINGS` and is NOT taken here. The same
-channel reaches the adoption, and since `readOrphanedPrunedContext` it also reaches a record whose
-project root and minting installation are both gone, which every reader refused before.
+**THE CONTROL CHECK REFUSES THE ENTRY POINTS' OWN INPUTS AND THE LITERAL CODE A COMMAND HANDS
+TO A SHELL, AND ITS EDGE IS THE COMMAND TEXT OF THE BASH AND POWERSHELL TOOLS.** Two channels
+around the identity rebind above were MEASURED open, through `pre-bash-source-write-gate.sh`
+and through the whole dispatcher in a bound fixture session, with `hooks.bashWriteGate` absent
+and `true`, so the control check runs at either setting and both gaps were real. First,
+`buildRequest` reads `ZADOPT_PLUGIN_DATA`, `ZADOPT_SESSION_ID` and `ZADOPT_PLUGIN_ROOT` and
+`main()` routes on `ZADOPT_MODE` and `ZADOPT_CONFIRM`, so
+`ZADOPT_… node …/session-adopt-report-v1.js` skips the wrapper and the identity it reads. Those
+names are `ADOPTION_INPUTS`, spread into `CONTROL_BINDINGS`, so every reader of that set refuses
+them, the PowerShell control verdict included, and the re-anchor module's `ZREANCHOR_*` inputs
+are `REANCHOR_INPUTS` on the same terms. The refusal names the entry point rather than a fresh
+session: `zensu-session-adopt.sh sets it itself, so run /zensu:adopt-session in the session the
+repair is for.` Second, `WRAP` holds neither `bash` nor `sh`, so in
+`bash -c '<assignment> <command>'` the shell is the command word and its code one quoted
+operand, and `eval '…'` and `trap '…' EXIT` have the same shape. The control check reads that
+code as a command of its own; the reader, its fail-closed candidate rule and why the shells did
+not go into `WRAP` are recorded with the parser (`nestedCode`, `nestedFinding`,
+`.claude/rules/git-mutation-tables.md`). `/zensu:adopt-session` keeps working because
+`zensu-session-adopt.sh` sets its inputs inside its own process, where no PreToolUse gate
+looks, and the recognizer's `ASSIGNMENTS` allowlist holds no `ZADOPT_*` name. **What still
+passes is code the check cannot read in the command text of those two tools**: code built at
+run time (`bash -c "$CODE"`, `eval "$(…)"`), code a shell reads from standard input (a
+here-document, a here-string, a pipe), a script file, interpreter code (`node -e`), a wrapper
+outside `WRAP` that takes a command (`xargs`, `timeout`, `find -exec`), and a command run
+through a tool the check is not registered on, such as a main-thread `Monitor` command. Code
+handed to `powershell`, `pwsh` or `cmd` is not among them: it goes to the PowerShell control
+verdict, which refuses any spelling of a protected input. The bound on what passes is the one
+stated above: the destination still comes from a record in a readable store, and the write is
+at most `RESTORE_MAX_MISSING_COMPONENTS` directories at mode 0755. The uncompromised fix is a caller
+bind in the core, `restoreRootVerdict` and `adoptableRecord` comparing the session they act on
+with the session the calling process belongs to, read from a source a model's command cannot
+set, which the environment is not; it is NOT taken here. The same channels reach the adoption,
+and since `readOrphanedPrunedContext` they also reach a record whose project root and minting
+installation are both gone. **Version: `minor`**: the always-on control check refuses commands
+it admitted, which changes the capability set of every session a newer installation would
+serve (`.claude/rules/runtime-lineage.md`); no schema field, strict key set, hook registration,
+matcher, config key or attestation moves.
 
 **EEXIST is the ONE signal the mkdir primitive gives, and all three readings of it are decided
 from EVIDENCE rather than from the component's POSITION.** Position alone got two of them

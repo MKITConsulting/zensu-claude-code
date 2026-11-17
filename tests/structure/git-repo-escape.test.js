@@ -10,7 +10,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const path = require("node:path");
 
-const { gitTargets, msysToDrive, splitTempList, isUnsafeTempEntry, programName, segmentWords, joinContinuations, splitRedirects, commandWords, sedInPlace, detectChannels, detectControlMutation, GIT_MUTATIONS, GIT_OPTS_WITH_OPERAND, GIT_READONLY_FORMS } = require(
+const { gitTargets, msysToDrive, splitTempList, isUnsafeTempEntry, programName, segmentWords, joinContinuations, splitRedirects, commandWords, sedInPlace, detectChannels, detectControlMutation, controlVerdict, GIT_MUTATIONS, GIT_OPTS_WITH_OPERAND, GIT_READONLY_FORMS } = require(
   path.join(__dirname, "..", "..", "hooks", "lib", "bash-source-write-parse.js")
 );
 const LIB = path.join(__dirname, "..", "..", "hooks", "lib");
@@ -819,6 +819,190 @@ test("the Session Control check reads a word after quote removal, through every 
     /^Blocked a Bash command with more than 8 env -S split strings/);
 });
 
+test("the Session Control check protects the entry-point inputs and reads the code a command hands to a shell, eval or trap", () => {
+  const fs = require("node:fs");
+  const rebind = /^Blocked a Bash rebind of protected Session Control input (\w+)\. (.*)$/;
+  const removal = /^Blocked removal of protected Session Control input (\w+)\. (.*)$/;
+  const namesIn = (file, pattern) =>
+    Array.from(new Set(Array.from(fs.readFileSync(path.join(LIB, file), "utf8").matchAll(pattern), (m) => m[1]))).sort();
+  const entryPoints = [
+    {
+      module: namesIn("session-adopt-report-v1.js", /process\.env\.(ZADOPT_[A-Z_]+)/g),
+      wrapper: namesIn("zensu-session-adopt.sh", /^(ZADOPT_[A-Z_]+)=/gm),
+      remedy: "zensu-session-adopt.sh sets it itself, so run /zensu:adopt-session in the session the repair is for."
+    },
+    {
+      module: namesIn("session-reanchor-v1.js", /\bsource\.(ZREANCHOR_[A-Z_]+)/g),
+      wrapper: namesIn("zensu-session-reanchor.sh", /^(ZREANCHOR_[A-Z_]+)=/gm),
+      remedy: "zensu-session-reanchor.sh sets it itself, so run /zensu:adopt-session --reanchor in the session the move is for."
+    }
+  ];
+  for (const entry of entryPoints) {
+    assert.ok(entry.module.length > 0, entry.remedy);
+    assert.deepStrictEqual(entry.module, entry.wrapper, entry.remedy);
+    for (const name of entry.module) {
+      for (const cmd of [`${name}=x node r.js`, `export ${name}=x`, `env ${name}=x node r.js`, `printf -v ${name} %s x`, `bash -c '${name}=x node r.js'`]) {
+        const m = rebind.exec(detectControlMutation(cmd));
+        assert.ok(m, cmd);
+        assert.strictEqual(m[1], name, cmd);
+        assert.strictEqual(m[2], entry.remedy, cmd);
+      }
+      const m = removal.exec(detectControlMutation(`unset ${name}`));
+      assert.ok(m, name);
+      assert.strictEqual(m[1], name);
+      assert.strictEqual(m[2], entry.remedy);
+      const powershell = controlVerdict(JSON.stringify({ tool_name: "PowerShell", tool_input: { command: `$env:${name} = 'x'` } }));
+      assert.match(powershell, /^Blocked a PowerShell command because /, name);
+    }
+  }
+  const fresh = rebind.exec(detectControlMutation("CLAUDE_CODE_SESSION_ID=x env"));
+  assert.ok(fresh);
+  assert.strictEqual(fresh[2], "Start a fresh Claude Code session instead.");
+  const nested = {
+    "sh -c 'CLAUDE_CODE_SESSION_ID=x true'": "CLAUDE_CODE_SESSION_ID",
+    "zsh -c 'export ZENSU_SESSION_KEY=x'": "ZENSU_SESSION_KEY",
+    "bash -lc 'CLAUDE_CODE_SESSION_ID=x true'": "CLAUDE_CODE_SESSION_ID",
+    "bash -c \"ZADOPT_SESSION_ID=$ID node r.js\"": "ZADOPT_SESSION_ID",
+    "bash -o pipefail -c 'export ZADOPT_SESSION_ID=x'": "ZADOPT_SESSION_ID",
+    "bash -O extglob -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "bash --rcfile /dev/null -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "bash --norc --noprofile -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh --emulate sh -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "sudo -u nobody /bin/BASH -c -- 'ZADOPT_SESSION_ID=x node r.js'": "ZADOPT_SESSION_ID",
+    "exec dash -ec 'printf -v ZADOPT_PLUGIN_DATA %s x'": "ZADOPT_PLUGIN_DATA",
+    "busybox sh -c 'ZADOPT_CONFIRM=1 node r.js'": "ZADOPT_CONFIRM",
+    "env ksh -c 'ZENSU_PROJECT_ROOT=/x true'": "ZENSU_PROJECT_ROOT",
+    "mksh -c 'ZENSU_RUNTIME_DIGEST=x true'": "ZENSU_RUNTIME_DIGEST",
+    "ash -c 'ZENSU_SESSION_CONTEXT=x true'": "ZENSU_SESSION_CONTEXT",
+    "x=$(bash -c 'ZADOPT_SESSION_ID=x node r.js')": "ZADOPT_SESSION_ID",
+    "bash -c 'true; CLAUDE_CODE_SESSION_ID=x true'": "CLAUDE_CODE_SESSION_ID",
+    "bash -c \"bash -c 'ZADOPT_SESSION_ID=x node r.js'\"": "ZADOPT_SESSION_ID",
+    "eval 'ZADOPT_MODE=x node r.js'": "ZADOPT_MODE",
+    "eval -- 'export CLAUDE_CODE_SESSION_ID=x'": "CLAUDE_CODE_SESSION_ID",
+    "command eval 'ZADOPT_MODE=x node r.js'": "ZADOPT_MODE",
+    "trap 'ZADOPT_MODE=x node r.js' EXIT": "ZADOPT_MODE",
+    "bash -c + 'CLAUDE_CODE_SESSION_ID=x true'": "CLAUDE_CODE_SESSION_ID",
+    "bash -coo errexit nounset 'CLAUDE_CODE_SESSION_ID=x true'": "CLAUDE_CODE_SESSION_ID",
+    "bash -oo errexit pipefail -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "bash -login -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "bash -init-file /dev/null -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "bash -rcfile /dev/null -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "bash +c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "sh +c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh -coshwordsplit 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh -c -oshwordsplit 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh -oerrexit -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh -O -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh -c -1 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "rbash -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "bash5.2 -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh-5.9 -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "ksh93 -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "busybox hush -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "yash -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "fish -c 'env ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "fish -C 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "fish -c'CLAUDE_CODE_SESSION_ID=x bash a.sh'": "CLAUDE_CODE_SESSION_ID",
+    "fish --command='env ZADOPT_SESSION_ID=x node r.js'": "ZADOPT_SESSION_ID",
+    "fish -C'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "fish --init-command='ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "fish -C true -c'CLAUDE_CODE_SESSION_ID=x bash a.sh'": "CLAUDE_CODE_SESSION_ID",
+    "fish --no-config -c'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "fish --init-command=true -c'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "tcsh -c 'env ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "csh -c 'env ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "emulate sh -c 'ZADOPT_MODE=x true'": "ZADOPT_MODE",
+    "zsh -c 'emulate sh -c \"ZADOPT_MODE=x true\"'": "ZADOPT_MODE",
+    "bash -c 'echo $1' _ 'ZADOPT_SESSION_ID=x'": "ZADOPT_SESSION_ID",
+    "bash -c '\"$@\"' _ env CLAUDE_CODE_SESSION_ID=x bash a.sh": "CLAUDE_CODE_SESSION_ID",
+    "bash -c 'eval \"$1\"' _ 'ZADOPT_SESSION_ID=x node r.js'": "ZADOPT_SESSION_ID",
+    "sh -c '\"$0\" \"$@\"' env ZADOPT_MODE=x node r.js": "ZADOPT_MODE"
+  };
+  for (const [cmd, name] of Object.entries(nested)) {
+    const m = rebind.exec(detectControlMutation(cmd));
+    assert.ok(m, cmd);
+    assert.strictEqual(m[1], name, cmd);
+  }
+  const removed = removal.exec(detectControlMutation("trap -- 'unset ZENSU_PROJECT_ROOT' INT TERM"));
+  assert.ok(removed);
+  assert.strictEqual(removed[1], "ZENSU_PROJECT_ROOT");
+  assert.match(detectControlMutation("bash -c 'declare -n ref=x'"), /^Blocked a Bash nameref declaration/);
+  for (const cmd of ["grep -n ZADOPT_SESSION_ID r.js", "bash -c 'echo ZADOPT_SESSION_ID'", "echo 'declare -n ref=x'", "bash -c \"$CODE\"",
+    "eval \"$(cat recipe.sh)\"", "bash -s 'ZADOPT_SESSION_ID=x'", "bash script.sh 'ZADOPT_SESSION_ID=x'", "bash -c 'echo $1' _ hello",
+    "bash -- script.sh 'ZADOPT_SESSION_ID=x'", "bash -c --", "bash -C script.sh", "emulate -L zsh", "fish -c 'echo hi'", "tcsh -c 'echo hi'",
+    "trap - EXIT", "trap -p EXIT", "trap 'rm -f out.txt' EXIT", "bash -c 'git status'", "git commit -m \"bash -c 'ZADOPT_MODE=x'\"",
+    "xargs bash -c 'ZADOPT_SESSION_ID=x node r.js'", "echo 'ZADOPT_SESSION_ID=x node r.js' | bash", "bash <<'E'\nZADOPT_MODE=x true\nE",
+    "pwsh -c 'Get-Date'", "powershell -Command 'Get-ChildItem'", "cmd //c dir", "python3 -c 'print(1)'",
+    "command -v pwsh", "command -V powershell", "pwsh --version", "pwsh -v", "pwsh -?", "powershell -Help",
+    "fish -c'echo hi'", "fish --command='echo hi'", "bash -c 'printenv \"$1\"' _ \"$CLAUDE_CODE_SESSION_ID\"",
+    "bash -c 'printenv \"$1\"' _ \"${CLAUDE_CODE_SESSION_ID}\"", "bash -c 'echo \"$1\"' _ \"${ZENSU_SESSION_KEY:-x}\"",
+    "bash -c 'echo \"$1\"' _ ZENSU_SESSION_KEY_FILE", "bash -c 'echo \"$1\"' _ X_CLAUDE_CODE_SESSION_ID",
+    "bash -ce 'echo ZADOPT_SESSION_ID'", "bash --rcfile=/dev/null -c 'echo ZADOPT_SESSION_ID'",
+    "fish -C true --command='echo ZADOPT_SESSION_ID'"]) {
+    assert.strictEqual(detectControlMutation(cmd), "", cmd);
+  }
+  const quote = (text) => "'" + text.replace(/'/g, "'\\''") + "'";
+  const levels = (count) => {
+    let cmd = "ZADOPT_SESSION_ID=x true";
+    for (let k = 0; k < count; k++) cmd = "bash -c " + quote(cmd);
+    return cmd;
+  };
+  assert.match(detectControlMutation(levels(8)), /^Blocked a Bash rebind of protected Session Control input ZADOPT_SESSION_ID\./);
+  assert.strictEqual(detectControlMutation(levels(9)),
+    "Blocked a Bash command nested deeper than this check reads. Write the command with fewer nested substitutions or shells.");
+  let wide = "";
+  for (let k = 0; k < 400; k++) wide += "bash -c 'true " + k + "'; ";
+  assert.strictEqual(detectControlMutation(wide), "");
+  assert.match(detectControlMutation(wide + "bash -c 'ZADOPT_SESSION_ID=x node r.js'"), /input ZADOPT_SESSION_ID\./);
+  const positional = removal.exec(detectControlMutation("bash -c '\"$@\"' _ unset CLAUDE_CODE_SESSION_ID"));
+  assert.ok(positional);
+  assert.strictEqual(positional[1], "CLAUDE_CODE_SESSION_ID");
+  const positionalWord = /^Blocked a Bash command that hands the protected Session Control input (\w+) to a shell as a positional word, /;
+  for (const [cmd, name] of [
+    ["bash -c 'shift; \"$@\"' _ x printf -v CLAUDE_CODE_SESSION_ID %s v", "CLAUDE_CODE_SESSION_ID"],
+    ["bash -c '\"${@:2}\"' _ x printf -v CLAUDE_CODE_SESSION_ID %s v", "CLAUDE_CODE_SESSION_ID"],
+    ["bash -c 'printf -v \"$1\" %s \"$2\"' _ ZADOPT_SESSION_ID v", "ZADOPT_SESSION_ID"],
+    ["sh -c '\"$3\" \"$1\"' _ ZREANCHOR_TARGET v unset", "ZREANCHOR_TARGET"],
+    ["fish -c'set -gx $argv' ZENSU_SESSION_KEY", "ZENSU_SESSION_KEY"],
+    ["fish --no-config -c'set -gx $argv' ZENSU_SESSION_KEY", "ZENSU_SESSION_KEY"],
+    ["bash -c 'printf -v \"$1\" %s x' _ 'ZADOPT_SESSION_ID[0]'", "ZADOPT_SESSION_ID"],
+    ["bash -c 'cp \"$1\" \"$2\"' _ ZENSU_SESSION_KEY.bak y", "ZENSU_SESSION_KEY"],
+    ["bash --rcfile /dev/null -c 'echo ZADOPT_SESSION_ID'", "ZADOPT_SESSION_ID"]
+  ]) {
+    const m = positionalWord.exec(detectControlMutation(cmd));
+    assert.ok(m, cmd);
+    assert.strictEqual(m[1], name, cmd);
+  }
+  const foreign = /^Blocked a Bash command that hands code to (\w+) because (.+)\. This check keeps model commands /;
+  for (const [cmd, host] of [
+    ["powershell -Command '$env:CLAUDE_CODE_SESSION_ID=\"x\"; & bash a.sh'", "powershell"],
+    ["pwsh -c '$env:ZADOPT_SESSION_ID=\"x\"; node r.js'", "pwsh"],
+    ["/c/Windows/System32/WindowsPowerShell/v1.0/POWERSHELL.EXE -Command '$env:ZENSU_SESSION_KEY=1'", "powershell"],
+    ["powershell -EncodedCommand AAAA", "powershell"],
+    ["cmd //c \"set CLAUDE_CODE_SESSION_ID=x&& bash a.sh\"", "cmd"],
+    ["bash -c \"pwsh -c 'Remove-Item env:ZREANCHOR_TARGET'\"", "pwsh"]
+  ]) {
+    const m = foreign.exec(detectControlMutation(cmd));
+    assert.ok(m, cmd);
+    assert.strictEqual(m[1], host, cmd);
+  }
+  const envName = "CLAUDE_" + "ENV_FILE";
+  const saved = process.env[envName];
+  process.env[envName] = "/Users/Rünner/Session/.claude-env";
+  try {
+    for (const cmd of [
+      "bash -c 'printf x >> /Users/Rünner/Session/.cl\"\"aude-env'",
+      "eval 'printf x >> /Users/Rünner/Session/.cl\"\"aude-env'",
+      "trap 'printf x >> /Users/Rünner/Session/.cl\"\"aude-env' EXIT",
+      "bash -c 'printf x >> /Users/R\\ünner/Session/.claude-env'"
+    ]) assert.match(detectControlMutation(cmd), /^Blocked a Bash write to CLAUDE_ENV_FILE\./, cmd);
+    assert.strictEqual(detectControlMutation("bash -c 'cat /Users/Rünner/Session/.cl\"\"aude-env'"), "");
+  } finally {
+    if (saved === undefined) delete process.env[envName];
+    else process.env[envName] = saved;
+  }
+});
+
 test("the env-file path comparison folds letter case and Unicode normalization on every platform", () => {
   const name = "CLAUDE_" + "ENV_FILE";
   const saved = process.env[name];
@@ -908,6 +1092,30 @@ test("the shell readers of the source-write parser and the subagent shell guard,
   for (const [text, [parser, shellGuard]] of Object.entries(differ)) {
     assert.strictEqual(parserReads(text), parser, `parser ${text}`);
     assert.strictEqual(guardReads(text), shellGuard, `guard ${text}`);
+  }
+  const nested = {
+    "bash -c '{}'": [true, true],
+    "fish -c '{}'": [true, true],
+    "eval '{}'": [true, true],
+    "ash -c '{}'": [true, false],
+    "rbash -c '{}'": [true, false],
+    "busybox sh -c '{}'": [true, false],
+    "trap '{}' EXIT": [true, false],
+    "eval -- '{}'": [true, false],
+    "bash -co pipefail '{}'": [true, false],
+    "bash -c + '{}'": [true, false],
+    "emulate sh -c '{}'": [true, false],
+    "pwsh -c '{}'": [true, false],
+    "bash -c '\"$@\"' _ {}": [true, false],
+    "bash -c 'shift; \"$@\"' _ x {}": [true, false],
+    "fish -c'{}'": [true, false],
+    "bash <<'E'\n{}\nE": [false, true]
+  };
+  for (const [shape, [parser, shellGuard]] of Object.entries(nested)) {
+    const control = detectControlMutation(shape.replace("{}", "ZADOPT_MODE=x true")) !== "";
+    const cli = guard.commandInvocations(shape.replace("{}", "zensu product list"), { platform: "linux" }).some((i) => i.name === "zensu");
+    assert.strictEqual(control, parser, `parser ${shape}`);
+    assert.strictEqual(cli, shellGuard, `guard ${shape}`);
   }
 });
 
