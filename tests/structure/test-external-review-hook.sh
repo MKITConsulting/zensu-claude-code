@@ -547,7 +547,7 @@ WAIT_KEY="$ARMED_KEY"
 BEFORE="$(stop_count "$WAIT_KEY")"
 OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/wait.err")"; RC=$?
 AFTER="$(stop_count "$WAIT_KEY")"
-if [ "$RC" -eq 0 ] && stop_notice_only "$OUT" "$WORK/wait.err" 'releasing this Stop while 1 background workflow(s) run (review-changes); wait 1 of 3' \
+if [ "$RC" -eq 0 ] && stop_notice_only "$OUT" "$WORK/wait.err" 'Zensu is waiting for the workflow "review-changes"; the review chain continues when it reports back.' \
   && case "$BEFORE" in ''|*[!0-9]*) false ;; *) true ;; esac && [ "$BEFORE" = "$AFTER" ]; then
   check "X13 a workflow in flight releases the Stop, names it, and charges no inner Stop budget" PASS
 else
@@ -566,10 +566,12 @@ OUT="$(stop_payload stop-wait | bash "$STOP" 2>/dev/null)"
 RESET_DECISION="$(printf '%s' "$OUT" | decision)"
 OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/wait7.err")"
 AGAIN_DECISION="$(printf '%s' "$OUT" | decision)"
-if [ "$DECISIONS" = " allow allow block block" ] && ! grep -qF 'releasing this Stop while' "$WORK/wait5.err" \
+if [ "$DECISIONS" = " allow allow block block" ] && ! grep -qF 'Zensu is waiting for ' "$WORK/wait5.err" \
   && printf '%s' "$LIMIT_REASON" | grep -qF 't1 (workflow: "review")' \
   && printf '%s' "$LIMIT_REASON" | grep -qF "'ZENSU-AWAIT: <task id>'" \
-  && [ "$RESET_DECISION" = "block" ] && [ "$AGAIN_DECISION" = "allow" ] && grep -qF 'wait 1 of 3' "$WORK/wait7.err" \
+  && [ "$RESET_DECISION" = "block" ] && [ "$AGAIN_DECISION" = "allow" ] \
+  && grep -qF 'Zensu is waiting for the workflow "review-changes"' "$WORK/wait7.err" \
+  && [ "$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).count))' "$ARMED_DATA/external-review/v1/waits/$WAIT_KEY.json" 2>/dev/null)" = 1 ] \
   && [ "$(stop_count "$WAIT_KEY")" = "$((AFTER + 2))" ]; then
   check "X14 at most three waits; the first Stop past the limit offers the explicit ZENSU-AWAIT wait without charging the budget, and the limit holds until a Stop sees no workflow, which resets it" PASS
 else
@@ -591,7 +593,7 @@ for tasks in absent '[]' "$QUIET_TASKS" '"workflow"' '[{"type":"workflow","statu
   arm "stop-diff-$RANDOM" || DIFF_OK=false
   RAW_NOW="$(basename "$ZENSU_TEST_PLUGIN_DATA")"
   OUT="$(stop_payload "$RAW_NOW" "$tasks" | bash "$STOP" 2>"$WORK/diff.err")"
-  if [ "$(printf '%s' "$OUT" | decision)" != "block" ] || grep -qF 'releasing this Stop while' "$WORK/diff.err"; then DIFF_OK=false; fi
+  if [ "$(printf '%s' "$OUT" | decision)" != "block" ] || grep -qF 'Zensu is waiting for ' "$WORK/diff.err"; then DIFF_OK=false; fi
   if [ "$(printf '%s' "$OUT" | reason | sed "s#$ARMED_DATA#DATA#g")" != "$(printf '%s' "$CONTROL_REASON" | sed "s#$WORK/stop-data/stop-control#DATA#g")" ]; then DIFF_OK=false; fi
 done
 if [ "$DIFF_OK" = "true" ]; then
@@ -602,7 +604,7 @@ fi
 
 arm stop-flag-off || { check "X16 arm" FAIL; finish; exit 1; }
 OUT="$(stop_payload stop-flag-off "$WORKFLOW_TASKS" | ZENSU_CONFIG="$OFF_CONFIG" bash "$STOP" 2>"$WORK/off.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/off.err"; then
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'Zensu is waiting for ' "$WORK/off.err"; then
   check "X16 hooks.externalReviewImport=false keeps blocking while a workflow runs" PASS
 else
   check "X16 flag off (out=$OUT)" FAIL
@@ -614,7 +616,7 @@ FIRST="$(stop_payload stop-converged "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/c
 OUT="$(stop_payload stop-converged "$WORKFLOW_TASKS" | bash "$STOP" 2>>"$WORK/conv.err")"
 if [ "$(printf '%s' "$FIRST" | decision)" = "block" ] && printf '%s' "$FIRST" | reason | grep -qF 't1 (workflow: "review")' \
   && [ "$(printf '%s' "$OUT" | decision)" = "block" ] && printf '%s' "$OUT" | reason | grep -qF "skill='zensu:self-review'" \
-  && ! grep -qF 'releasing this Stop while' "$WORK/conv.err"; then
+  && ! grep -qF 'Zensu is waiting for ' "$WORK/conv.err"; then
   check "X17 a converged chain never takes the implicit workflow wait: it offers the explicit wait once, then keeps its self-review directive" PASS
 else
   check "X17 converged (out=$OUT)" FAIL
@@ -627,7 +629,7 @@ cat >"$DENIED_TRANSCRIPT" <<'DENIED_EOF'
 DENIED_EOF
 arm stop-denied || { check "X18 arm" FAIL; finish; exit 1; }
 OUT="$(stop_payload stop-denied "$WORKFLOW_TASKS" "$DENIED_TRANSCRIPT" | bash "$STOP" 2>"$WORK/denied.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/denied.err"; then
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'Zensu is waiting for ' "$WORK/denied.err"; then
   check "X18 a refused reviewer spawn keeps its block while a workflow runs" PASS
 else
   check "X18 refused spawn (out=$OUT)" FAIL
@@ -637,7 +639,7 @@ export ZENSU_TEST_PLUGIN_DATA="$WORK/stop-data/stop-implementing"
 source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" stop-implementing || { check "X19 baseline" FAIL; finish; exit 1; }
 bash "$LOG" --tdd-begin --session "$ZENSU_SESSION_KEY" >/dev/null 2>&1
 OUT="$(stop_payload stop-implementing "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/impl.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && ! grep -qF 'releasing this Stop while' "$WORK/impl.err"; then
+if [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && ! grep -qF 'Zensu is waiting for ' "$WORK/impl.err"; then
   check "X19 a chain still implementing is released by its own path, not by the wait" PASS
 else
   check "X19 implementing (out=$OUT)" FAIL
@@ -651,7 +653,7 @@ node -e '
   fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
 ' "$CLAUDE_PROJECT_DIR/.zensu/state/tdd-phase-$ARMED_KEY.json"
 OUT="$(stop_payload stop-fix-round "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/fix.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/fix.err" \
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'Zensu is waiting for ' "$WORK/fix.err" \
   && printf '%s' "$OUT" | reason | grep -qF "'ZENSU-AWAIT: <task id>'"; then
   check "X20 a fix round takes no implicit workflow wait: its Stop blocks with the explicit ZENSU-AWAIT hint while a workflow runs" PASS
 else
@@ -665,7 +667,7 @@ cd "$CLAUDE_PROJECT_DIR" || exit 1
 arm stop-outer || { check "X21 arm" FAIL; finish; exit 1; }
 bash -c 'source "$1"; autopilot_begin_run run-xr-outer "$2" "$3"' _ "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" "$ARMED_KEY" "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1 || { check "X21 the Autopilot run fixture begins" FAIL; finish; exit 1; }
 OUT="$(stop_payload stop-outer "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/outer.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/outer.err" \
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'Zensu is waiting for ' "$WORK/outer.err" \
   && [ ! -e "$ARMED_DATA/external-review/v1/waits/$ARMED_KEY.json" ]; then
   check "X21 a session that owns a live Autopilot run neither waits nor spends a wait" PASS
 else
@@ -681,19 +683,19 @@ source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" stop-adopt || 
 bash "$LOG" --pending-review --files "src/x.ts" --summary "queued work" >/dev/null 2>&1
 OUT="$(stop_payload stop-adopt "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/adopt.err")"
 if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && printf '%s' "$OUT" | reason | grep -qF 'zensu:code-reviewer' \
-  && ! grep -qF 'releasing this Stop while' "$WORK/adopt.err" && [ -e "$CLAUDE_PROJECT_DIR/.zensu/state/pending-review.json.claim" ]; then
+  && ! grep -qF 'Zensu is waiting for ' "$WORK/adopt.err" && [ -e "$CLAUDE_PROJECT_DIR/.zensu/state/pending-review.json.claim" ]; then
   check "X22 a Stop that adopts a deferred review blocks with its handoff while a workflow runs" PASS
 else
   check "X22 adopting Stop (out=$OUT err=$(cat "$WORK/adopt.err"))" FAIL
 fi
 OUT="$(stop_payload stop-adopt "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/adopt2.err")"
-if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/adopt2.err"; then
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'Zensu is waiting for ' "$WORK/adopt2.err"; then
   check "X23 a chain that holds a deferred-review claim never waits on a later Stop" PASS
 else
   check "X23 claimed chain (out=$OUT err=$(cat "$WORK/adopt2.err"))" FAIL
 fi
 
-WAIT_FN="$(sed -n '/^external_review_workflow_wait() {/,/^}/p' "$STOP")"
+WAIT_FN="$(sed -n -e '/^WAIT_NOTE_LEAD=/p' -e '/^WAIT_NOTE_FALLBACK=/p' -e '/^split_wait_verdict() {/,/^}/p' -e '/^external_review_workflow_wait() {/,/^}/p' "$STOP")"
 probe_wait() {
   BOUND="$1" MARK="$2" ADOPTED="${3:-false}" WAIT_FN="$WAIT_FN" PLUGIN_DIR="$PLUGIN_DIR" PROBE_DATA="$WORK/probe-data" bash -c '
     eval "$WAIT_FN"

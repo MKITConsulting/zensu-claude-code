@@ -23,6 +23,7 @@ const LIMITS = Object.freeze({
   maxTasks: 32,
   maxMessageChars: 64 * 1024,
   maxDescriptionChars: 80,
+  listedTasks: 3,
   maxPayloadBytes: 4 * 1024 * 1024,
   maxStateBytes: 64 * 1024,
   maxSweptEntries: 256,
@@ -36,7 +37,7 @@ function limitsWith(overrides = {}) {
 function screenDescription(value, limits = LIMITS) {
   if (typeof value !== 'string') return '';
   const flat = value
-    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}`"()]/gu, ' ')
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}`"()«»“-‟″‶＂〝-〟]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (flat.length <= limits.maxDescriptionChars) return flat;
@@ -215,9 +216,27 @@ function renderHint(tasks, limits = LIMITS) {
   ].join(' ');
 }
 
-function renderReleaseNote(tasks, release, limits = LIMITS) {
-  const ids = tasks.map((task) => task.id).join(', ');
-  return `zensu chain-enforcer: releasing this Stop while the background task(s) this turn waits for still run (${ids}); release ${release} of ${limits.releasesPerTask} for each. The review chain stays armed: when the task reports back, continue the current round.`;
+function joinNames(names) {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+function renderWaitingNote(names, total) {
+  const verb = total === 1 ? 'it reports' : 'they report';
+  return `Zensu is waiting for ${joinNames(names)}; the review chain continues when ${verb} back.`;
+}
+
+function waitingNote(names, total, unit, limits = LIMITS) {
+  const listed = names.slice(0, limits.listedTasks);
+  const rest = total - listed.length;
+  if (rest === 1 && listed.length === 0) listed.push(`a ${unit}`);
+  else if (rest > 0) listed.push(`${rest} ${listed.length ? 'more ' : ''}${unit}${rest === 1 ? '' : 's'}`);
+  return renderWaitingNote(listed, total);
+}
+
+function renderReleaseNote(tasks, limits = LIMITS) {
+  const names = tasks.map((task) => (task.description ? `"${task.description}"` : `task ${task.id}`));
+  return waitingNote(names, tasks.length, 'task', limits);
 }
 
 function nowait(reason, tasks) {
@@ -271,7 +290,7 @@ function stopWait(payload, options = {}, limits = LIMITS) {
       release,
       lines: [
         `wait release=${release} max=${limits.releasesPerTask} tasks=${eligible.length} ids=${eligible.map((task) => task.id).join(',')}`,
-        renderReleaseNote(eligible, release, limits),
+        renderReleaseNote(eligible, limits),
       ],
     };
   }
@@ -357,6 +376,8 @@ module.exports = {
   writeState,
   clearState,
   renderHint,
+  renderWaitingNote,
+  waitingNote,
   renderReleaseNote,
   stopWait,
   main,

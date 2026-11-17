@@ -691,12 +691,27 @@ reviewer_spawn_denied() {
   [ "$REVIEWER_DENIAL_STATUS" = "blocked" ]
 }
 
+WAIT_NOTE_LEAD='Zensu is waiting for '
+WAIT_NOTE_FALLBACK="${WAIT_NOTE_LEAD}the background review; the review chain continues when it reports back."
+WAIT_VERDICT_HEAD=""
+WAIT_VERDICT_NOTE=""
+split_wait_verdict() {
+  WAIT_VERDICT_HEAD="${1%%$'\n'*}"
+  WAIT_VERDICT_NOTE=""
+  case "$1" in
+    *$'\n'*) WAIT_VERDICT_NOTE="${1#*$'\n'}" ;;
+  esac
+  case "$WAIT_VERDICT_NOTE" in
+    *$'\n'*|*[[:cntrl:]]*) WAIT_VERDICT_NOTE="" ;;
+    "$WAIT_NOTE_LEAD"*) [ "${#WAIT_VERDICT_NOTE}" -le 600 ] || WAIT_VERDICT_NOTE="" ;;
+    *) WAIT_VERDICT_NOTE="" ;;
+  esac
+  [ -n "$WAIT_VERDICT_NOTE" ] || WAIT_VERDICT_NOTE="$WAIT_NOTE_FALLBACK"
+}
+
 external_review_workflow_wait() {
-  local lib data verdict word count max workflows names exclusions pending claim
-  EXTERNAL_REVIEW_WAIT_COUNT=""
-  EXTERNAL_REVIEW_WAIT_MAX=""
-  EXTERNAL_REVIEW_WAIT_WORKFLOWS=""
-  EXTERNAL_REVIEW_WAIT_NAMES=""
+  local lib data verdict word count max workflows rest exclusions pending claim
+  EXTERNAL_REVIEW_WAIT_NOTE=""
   case "$INPUT" in
     *'"background_tasks"'*'"workflow"'*) ;;
     *) zensu_external_review_wait_reset "$SESSION_ID"; return 1 ;;
@@ -717,20 +732,16 @@ external_review_workflow_wait() {
   exclusions="$(zensu_msys_env_exclusions ZENSU_XR_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_XR_PLUGIN_DATA="$data" \
     ZENSU_XR_SESSION_KEY="$SESSION_ID" zensu_run_bounded node "$lib" stop-wait 2>/dev/null)" || return 1
-  read -r word count max workflows names <<<"$verdict"
+  split_wait_verdict "$verdict"
+  read -r word count max workflows rest <<<"$WAIT_VERDICT_HEAD"
   [ "$word" = "wait" ] || return 1
   count="${count#count=}"
   max="${max#max=}"
   workflows="${workflows#workflows=}"
-  names="${names#names=}"
   case "$count" in ''|*[!0-9]*) return 1 ;; esac
   case "$max" in ''|*[!0-9]*) return 1 ;; esac
   case "$workflows" in ''|*[!0-9]*) return 1 ;; esac
-  case "$names" in ''|*[!A-Za-z0-9._:,\(\)-]*) names="(unnamed)" ;; esac
-  EXTERNAL_REVIEW_WAIT_COUNT="$count"
-  EXTERNAL_REVIEW_WAIT_MAX="$max"
-  EXTERNAL_REVIEW_WAIT_WORKFLOWS="$workflows"
-  EXTERNAL_REVIEW_WAIT_NAMES="$names"
+  EXTERNAL_REVIEW_WAIT_NOTE="$WAIT_VERDICT_NOTE"
   return 0
 }
 
@@ -740,19 +751,22 @@ BACKGROUND_REVIEW_AGENT=""
 BACKGROUND_REVIEW_AGE=""
 BACKGROUND_REVIEW_COUNT=""
 BACKGROUND_REVIEW_TTL=""
+BACKGROUND_REVIEW_NOTE=""
 background_review_wait() {
-  local store record fanout entry pending data native_state exclusions verdict word kind agent age count ttl
+  local store record fanout reviewers entry pending data native_state exclusions verdict word kind agent age count ttl
   BACKGROUND_REVIEW_PENDING=false
   BACKGROUND_REVIEW_KIND=""
   BACKGROUND_REVIEW_AGENT=""
   BACKGROUND_REVIEW_AGE=""
   BACKGROUND_REVIEW_COUNT=""
   BACKGROUND_REVIEW_TTL=""
+  BACKGROUND_REVIEW_NOTE=""
   zensu_session_key_canonical "$SESSION_ID" || return 1
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
   store="${CLAUDE_PLUGIN_DATA}/background-review/v1"
   record="${store}/records/${SESSION_ID}.json"
   fanout="${store}/fanout/${SESSION_ID}"
+  reviewers="${store}/reviewers/${SESSION_ID}"
   pending=false
   if [ -f "$record" ] && [ ! -L "$record" ]; then
     pending=true
@@ -764,14 +778,27 @@ background_review_wait() {
       fi
     done
   fi
+  if [ "$pending" = false ] && [ -d "$reviewers" ] && [ ! -L "$reviewers" ]; then
+    case "$INPUT" in
+      *'"background_tasks"'*'"subagent"'*)
+        for entry in "$reviewers"/*.json; do
+          if [ -f "$entry" ] && [ ! -L "$entry" ]; then
+            pending=true
+            break
+          fi
+        done
+        ;;
+    esac
+  fi
   [ "$pending" = true ] || return 1
   data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
   native_state="$(_tdd_native_project_path "$STATE_FILE" 2>/dev/null)" || return 1
   exclusions="$(zensu_msys_env_exclusions ZENSU_BR_PLUGIN_DATA ZENSU_BR_STATE_FILE 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
-  verdict="$(MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_BR_PLUGIN_DATA="$data" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
+  verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_BR_PLUGIN_DATA="$data" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
     ZENSU_BR_STATE_FILE="$native_state" \
-    zensu_run_bounded node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" wait </dev/null 2>/dev/null)" || return 1
-  read -r word kind agent age count ttl <<<"$verdict"
+    zensu_run_bounded node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" wait 2>/dev/null)" || return 1
+  split_wait_verdict "$verdict"
+  read -r word kind agent age count ttl <<<"$WAIT_VERDICT_HEAD"
   [ "$word" = "wait" ] || return 1
   kind="${kind#kind=}"
   agent="${agent#agent=}"
@@ -789,6 +816,7 @@ background_review_wait() {
   BACKGROUND_REVIEW_AGE="$age"
   BACKGROUND_REVIEW_COUNT="$count"
   BACKGROUND_REVIEW_TTL="$ttl"
+  BACKGROUND_REVIEW_NOTE="$WAIT_VERDICT_NOTE"
   [ "$OUTER_PRESENT" = false ] || return 1
   [ "$DEFERRED_ADOPTED" = false ] || return 1
   [ -z "$INNER_BOUND_RUN" ] || return 1
@@ -888,6 +916,7 @@ BACKGROUND_REVIEW_ARRIVED=false
 BACKGROUND_REVIEW_HOLD_COUNTED=false
 BACKGROUND_REVIEW_DIRECTIVE=""
 BACKGROUND_REVIEW_ARRIVED_PENDING="The report of the background zensu:code-reviewer already reached you, but its review ticket could not be claimed in this Stop, so the claim stays pending: the next Stop or prompt retries it and, once it succeeds, hands you the routing directive."
+BACKGROUND_REVIEW_ARRIVED_NOTE="Zensu received the code review's report but could not record it yet; it tries again at the next Stop or prompt, and the review chain continues from there."
 BACKGROUND_REVIEW_ARRIVED_LEAD=""
 background_review_defer() {
   local held="${1:-}" data exclusions verdict word count of
@@ -1989,7 +2018,7 @@ fi
 if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
-    stop_notice "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:build Phase 6 review sequence."
+    stop_notice "$EXTERNAL_REVIEW_WAIT_NOTE"
   fi
   exit 0
 fi
@@ -1998,9 +2027,9 @@ if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && background_review_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
     if [ "$BACKGROUND_REVIEW_ARRIVED" = "true" ]; then
-      stop_notice "zensu chain-enforcer: releasing this Stop. ${BACKGROUND_REVIEW_ARRIVED_LEAD} The review chain stays armed."
+      stop_notice "$BACKGROUND_REVIEW_ARRIVED_NOTE"
     else
-      stop_notice "zensu chain-enforcer: releasing this Stop, still running: $(background_review_subject). The review chain stays armed: each report reaches the main thread as a hand-back or completion notification, a consume reviewer's report claims the ticket and routes the review, and the wait ends ${BACKGROUND_REVIEW_TTL} minutes after the newest launch."
+      stop_notice "$BACKGROUND_REVIEW_NOTE"
     fi
   fi
   exit 0
