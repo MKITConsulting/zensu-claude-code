@@ -47,7 +47,11 @@ paragraph exists to prevent. The strict read must FAIL and the orphan read must 
 excludes a healthy session and a pruned installation. A pruned installation whose project root
 is gone as well fails the orphan read too; the verdict then tries `readOrphanedPrunedContext`
 and answers `not-served-by-executing-runtime` rather than `record-unreadable`, because adoption
-is the step that comes first there. A LINEAGE BREAK passes both reads —
+is the step that comes first there. The three reads are ONE `readContextLadder` call naming the
+strict, orphaned-project-root and orphaned-and-pruned rungs, and never the pruned-only rung: that
+reader would admit a pruned installation whose project root is present, which this verdict answers
+`record-unreadable` for, and it would add a record read to the combined and the unreadable
+states. A LINEAGE BREAK passes both reads —
 `allowMissingProjectRoot` waives only the recorded root's existence — and is excluded one clause
 later by `servesRecordedRuntime`. That is also why the remedy in the combined state is **adopt
 first, restore second**, and why every surface offering it must say so.
@@ -70,7 +74,8 @@ different outcomes.
 
 **Moving together:** the `RESTORE_*` constants, `restoreRootRefusal`,
 `isRestoreRootAlreadyPresent`, `restoreRootComponentLadder`, `restoreRootVerdict`,
-`restoreWorkflowProjectRoot` and their exports in `session-control-core-v1.js`; `RESTORE_REMEDY`
+`restoreWorkflowProjectRoot` and their exports in `session-control-core-v1.js`, plus
+`readContextLadder` and the rung list `restoreRootVerdict` hands it; `RESTORE_REMEDY`
 / `RESTORE_DISCLOSURE` / `RESTORE_TAMPER_NOTE` / `restoreNotRepairable` /
 `restoreBaselineRows` and the THREE module-scope functions the renderer split into —
 `renderRestoreVerdict`, which TAKES a verdict, `performRestore`, which owns the two

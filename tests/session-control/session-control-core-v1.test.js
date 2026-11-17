@@ -7003,6 +7003,153 @@ test('recordReaderRefusals never throws and names a session that has no record',
   }
 });
 
+function countedReads(f, action) {
+  const record = path.join(fs.realpathSync.native(f.recordsDir), path.basename(f.recordFile));
+  const pluginTree = path.join(fs.realpathSync.native(f.cacheParent), path.basename(f.pluginRoot)) + path.sep;
+  const originalOpen = fs.openSync;
+  const counts = { record: 0, pluginTree: 0 };
+  fs.openSync = function countingOpen(candidate, ...rest) {
+    const opened = path.resolve(String(candidate));
+    if (opened === record) counts.record += 1;
+    if (opened.startsWith(pluginTree)) counts.pluginTree += 1;
+    return originalOpen.call(fs, candidate, ...rest);
+  };
+  try {
+    return { result: action(), ...counts };
+  } finally {
+    fs.openSync = originalOpen;
+  }
+}
+
+function bothRootsGone(f) {
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+  return f;
+}
+
+test('readContextLadder names the reader that admitted the record', () => {
+  const everyRung = Object.values(core.RECORD_READERS);
+  const healthy = prunedReaderFixture();
+  const strict = core.readContextLadder(healthy.readerOptions, everyRung);
+  assert.equal(strict.reader, core.RECORD_READERS.STRICT);
+  assert.deepEqual(strict.context, core.readContext(healthy.readerOptions));
+
+  const orphaned = prunedReaderFixture();
+  fs.rmSync(orphaned.currentContext.project_root, { recursive: true, force: true });
+  const orphan = core.readContextLadder(orphaned.readerOptions, everyRung);
+  assert.equal(orphan.reader, core.RECORD_READERS.ORPHANED_PROJECT_ROOT);
+  assert.deepEqual(orphan.context, core.readOrphanedProjectRootContext(orphaned.readerOptions));
+
+  const pruned = prunedReaderFixture();
+  fs.rmSync(pruned.pluginRoot, { recursive: true, force: true });
+  const prunedAdmission = core.readContextLadder(pruned.readerOptions, everyRung);
+  assert.equal(prunedAdmission.reader, core.RECORD_READERS.PRUNED_PLUGIN_ROOT);
+  assert.deepEqual(prunedAdmission.context, core.readPrunedPluginRootContext(pruned.readerOptions));
+
+  const bothGone = bothRootsGone(prunedReaderFixture());
+  const combined = core.readContextLadder(bothGone.readerOptions, everyRung);
+  assert.equal(combined.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.deepEqual(combined.context, core.readOrphanedPrunedContext(bothGone.readerOptions));
+
+  const tampered = prunedReaderFixture();
+  rewriteJson(tampered.recordFile, (record) => {
+    record.session_id_hash = `sha256:${'f'.repeat(64)}`;
+    return record;
+  });
+  assert.equal(core.readContextLadder(tampered.readerOptions, everyRung), null);
+});
+
+test('readContextLadder enters only the rungs its caller names, in ladder order, and stops at the first admission', () => {
+  const everyRung = Object.values(core.RECORD_READERS);
+  const healthy = prunedReaderFixture();
+  const healthyWalk = countedReads(healthy, () => core.readContextLadder(healthy.readerOptions, everyRung));
+  assert.equal(healthyWalk.result.reader, core.RECORD_READERS.STRICT);
+  assert.equal(healthyWalk.record, 1);
+
+  const bothGone = bothRootsGone(prunedReaderFixture());
+  const fullWalk = countedReads(bothGone, () => core.readContextLadder(bothGone.readerOptions, everyRung));
+  assert.equal(fullWalk.result.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.equal(fullWalk.record, 4);
+  const shortWalk = countedReads(bothGone, () => core.readContextLadder(bothGone.readerOptions, [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
+  ]));
+  assert.equal(shortWalk.result.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.equal(shortWalk.record, 2);
+  const reversed = countedReads(bothGone, () => core.readContextLadder(bothGone.readerOptions, [
+    core.RECORD_READERS.ORPHANED_PRUNED,
+    core.RECORD_READERS.STRICT,
+  ]));
+  assert.equal(reversed.result.reader, core.RECORD_READERS.ORPHANED_PRUNED);
+  assert.equal(reversed.record, 2, 'the ladder order decides, never the order a caller lists');
+
+  const orphaned = prunedReaderFixture();
+  fs.rmSync(orphaned.currentContext.project_root, { recursive: true, force: true });
+  const skipped = countedReads(orphaned, () => core.readContextLadder(orphaned.readerOptions, [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
+  ]));
+  assert.equal(skipped.result, null);
+  assert.equal(skipped.record, 3);
+  assert.equal(skipped.pluginTree, 0);
+  const entered = countedReads(orphaned, () => core.readContextLadder(orphaned.readerOptions, everyRung));
+  assert.equal(entered.result.reader, core.RECORD_READERS.ORPHANED_PROJECT_ROOT);
+  assert.ok(entered.pluginTree > 0, 'the orphan rung measures the digest of a present plugin root');
+});
+
+test('readContextLadder never throws and walks no rung it was not given', () => {
+  const healthy = prunedReaderFixture();
+  for (const readers of [undefined, null, 'strict', {}, [], ['not-a-reader']]) {
+    const walk = countedReads(healthy, () => core.readContextLadder(healthy.readerOptions, readers));
+    assert.equal(walk.result, null, String(readers));
+    assert.equal(walk.record, 0, String(readers));
+  }
+  for (const options of [undefined, null, 'not an object', {}]) {
+    assert.equal(core.readContextLadder(options, Object.values(core.RECORD_READERS)), null);
+  }
+});
+
+test('the restore verdict and the pruned binder predicate enter only the rungs they consulted before', () => {
+  const combined = prunedReaderFixture();
+  const combinedSuccessor = successorInstallation(combined, '10.0.0');
+  bothRootsGone(combined);
+  const combinedWalk = countedReads(combined, () => core.restoreRootVerdict(adoptionOptions(combined, combinedSuccessor)));
+  assert.equal(combinedWalk.result.reason, core.RESTORE_ROOT_REFUSALS.NOT_SERVED);
+  assert.equal(combinedWalk.record, 3);
+
+  const pruned = prunedReaderFixture();
+  const prunedSuccessor = successorInstallation(pruned, '10.0.0');
+  fs.rmSync(pruned.pluginRoot, { recursive: true, force: true });
+  const prunedWalk = countedReads(pruned, () => core.restoreRootVerdict(adoptionOptions(pruned, prunedSuccessor)));
+  assert.equal(prunedWalk.result.reason, core.RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+  assert.equal(prunedWalk.record, 3);
+
+  const tampered = prunedReaderFixture();
+  const tamperedSuccessor = successorInstallation(tampered, '10.0.0');
+  rewriteJson(tampered.recordFile, (record) => {
+    record.session_id_hash = `sha256:${'f'.repeat(64)}`;
+    return record;
+  });
+  const tamperedWalk = countedReads(tampered, () => core.restoreRootVerdict(adoptionOptions(tampered, tamperedSuccessor)));
+  assert.equal(tamperedWalk.result.reason, core.RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+  assert.equal(tamperedWalk.record, 3);
+
+  const hookModule = require(path.join(path.dirname(process.env.SESSION_CONTROL_CORE), 'claude-hook-session-v1.js'));
+  const orphaned = prunedReaderFixture();
+  fs.rmSync(orphaned.currentContext.project_root, { recursive: true, force: true });
+  const binderWalk = countedReads(orphaned, () => hookModule.resolvePrunedPluginRoot(
+    { session_id: RAW_SESSION },
+    {
+      CLAUDE_PLUGIN_ROOT: path.resolve(path.dirname(process.env.SESSION_CONTROL_CORE), '..', '..'),
+      CLAUDE_PLUGIN_DATA: orphaned.pluginData,
+    },
+  ));
+  assert.equal(binderWalk.result, null);
+  assert.equal(binderWalk.record, 3);
+  assert.equal(binderWalk.pluginTree, 0);
+});
+
 // The safe-version shape is exported so every producer that renders a recorded
 // version applies ONE rule. It was module-private while the adoption path was its
 // only consumer; the pruned binder mode is a second consumer, and on that path the
