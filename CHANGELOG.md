@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.2] - 2026-11-17
+
+### Added
+
+- **review-chain**: Wait for resumed reviewers and print readable Stop notes (#628)
+
+### Fixed
+
+- **session-control**: Adopt a record whose project root and installation are both gone (#629)
+- **cli**: Align the plugin's zensu-cli text with the CLI it drives (#627)
+
 ### Fixed
 
 - **zensu-cli coverage**: the text the plugin gives agents and users now matches the CLI it

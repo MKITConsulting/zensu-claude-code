@@ -8,6 +8,7 @@ const { ensurePrivateDirectory } = require('./review-evidence-lease-v1.js');
 const { REVIEWER_SUBAGENT_TYPE } = require('./reviewer-spawn-denial-v1.js');
 const { claimableTicket } = require('./review-ticket-state-v1.js');
 const { sessionKey: canonicalSessionKey } = require('./session-control-core-v1.js');
+const { inFlightTasks, renderWaitingNote, waitingNote } = require('./stop-background-wait-v1.js');
 
 const SCHEMA = 'background-review-v1';
 const STORE_SEGMENTS = Object.freeze(['background-review', 'v1']);
@@ -15,6 +16,7 @@ const RECORDS_SEGMENT = 'records';
 const FANOUT_SEGMENT = 'fanout';
 const ARRIVALS_SEGMENT = 'arrivals';
 const NAMES_SEGMENT = 'names';
+const REVIEWERS_SEGMENT = 'reviewers';
 const SESSION_KEY_RE = /^scv1_[0-9a-f]{64}$/;
 const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
 const AGENT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -30,6 +32,7 @@ const RECORD_KEYS = Object.freeze(['agent_id', 'header', 'launched_at_ms', 'sche
 const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'session_key', 'subagent_type']);
 const ARRIVAL_KEYS = Object.freeze(['agent_id', 'arrival', 'arrived_at_ms', 'holds', 'schema', 'session_key', 'ticket']);
 const NAME_KEYS = Object.freeze(['agent_id', 'name', 'named_at_ms', 'schema', 'session_key']);
+const REVIEWER_KEYS = Object.freeze(['agent_id', 'arrived_at_ms', 'launched_at_ms', 'named', 'renewals', 'schema', 'session_key', 'subagent_type']);
 const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
   .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
 const PERSONA_TYPE_RE = /^zensu-review-[A-Za-z0-9_-]+$/;
@@ -56,6 +59,7 @@ const LIMITS = Object.freeze({
   maxSessionFiles: 256,
   waitTtlMs: 60 * 60 * 1000,
   maxArrivalHolds: 3,
+  maxRenewals: 3,
   idleMs: 24 * 60 * 60 * 1000,
   clockSkewMs: 5 * 60 * 1000,
 });
@@ -164,6 +168,21 @@ function validateName(binding, expected = {}) {
   return null;
 }
 
+function validateReviewer(entry, expected = {}) {
+  if (!exactKeys(entry, REVIEWER_KEYS)) return 'reviewer keys';
+  if (entry.schema !== SCHEMA) return 'reviewer schema';
+  if (typeof entry.session_key !== 'string' || !SESSION_KEY_RE.test(entry.session_key)) return 'reviewer session key';
+  if (expected.sessionKey !== undefined && entry.session_key !== expected.sessionKey) return 'reviewer session mismatch';
+  if (typeof entry.agent_id !== 'string' || !AGENT_ID_RE.test(entry.agent_id)) return 'reviewer agent id';
+  if (expected.agentId !== undefined && entry.agent_id !== expected.agentId) return 'reviewer agent mismatch';
+  if (!fanoutType(entry.subagent_type)) return 'reviewer subagent type';
+  if (!Number.isSafeInteger(entry.launched_at_ms) || entry.launched_at_ms < 0) return 'reviewer launch time';
+  if (!Number.isSafeInteger(entry.arrived_at_ms) || entry.arrived_at_ms < 0) return 'reviewer arrival time';
+  if (typeof entry.named !== 'boolean') return 'reviewer named';
+  if (!Number.isSafeInteger(entry.renewals) || entry.renewals < 0) return 'reviewer renewals';
+  return null;
+}
+
 function storeLocations(pluginData) {
   let root;
   try {
@@ -190,6 +209,19 @@ function namesDirectory(locations) {
 function sweepIdleNames(locations, keepKey, limits, now) {
   const names = namesDirectory(locations);
   return names ? sweepIdleSessions(names, keepKey, limits, now) : 0;
+}
+
+function reviewersDirectory(locations) {
+  try {
+    return ensurePrivateDirectory(locations.root, [REVIEWERS_SEGMENT]);
+  } catch {
+    return null;
+  }
+}
+
+function sweepIdleReviewers(locations, keepKey, limits, now) {
+  const reviewers = reviewersDirectory(locations);
+  return reviewers ? sweepIdleSessions(reviewers, keepKey, limits, now) : 0;
 }
 
 function recordFileName(sessionKey) {
@@ -380,6 +412,7 @@ function recordLaunch(payload, options, limits = LIMITS) {
   sweepIdle(locations.arrivals, name, limits, now);
   sweepIdleSessions(locations.fanout, sessionKey, limits, now);
   sweepIdleNames(locations, sessionKey, limits, now);
+  sweepIdleReviewers(locations, sessionKey, limits, now);
   const note = arrivalFile(locations, sessionKey);
   dropArrival(note, loadArrival(note, sessionKey, limits), limits);
   try {
@@ -551,6 +584,141 @@ function pruneFanout(entries, limits, now) {
   return fresh;
 }
 
+function reviewerDirectory(locations, sessionKey, create) {
+  const root = reviewersDirectory(locations);
+  if (!root) return null;
+  if (!create) return sessionDirectory(root, sessionKey);
+  try {
+    return ensurePrivateDirectory(root, [requireSessionKey(sessionKey)]);
+  } catch {
+    return null;
+  }
+}
+
+function loadReviewer(directory, sessionKey, agentId, limits = LIMITS) {
+  if (typeof agentId !== 'string' || !AGENT_ID_RE.test(agentId)) return null;
+  const file = path.join(directory, `${agentId}.json`);
+  const loaded = readBoundedFile(file, limits.maxRecordBytes);
+  if (loaded.invalid) return null;
+  let entry;
+  try {
+    entry = JSON.parse(loaded.text);
+  } catch {
+    return null;
+  }
+  return validateReviewer(entry, { sessionKey, agentId }) ? null : { file, text: loaded.text, entry };
+}
+
+function writeReviewer(directory, entry) {
+  try {
+    writeFileAtomic(directory, `${entry.agent_id}.json`, `${JSON.stringify(entry)}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function reviewerIdle(entry, limits, now) {
+  return now - Math.max(entry.launched_at_ms, entry.arrived_at_ms) >= limits.idleMs;
+}
+
+function rememberReviewer(locations, sessionKey, agentId, subagentType, named, limits = LIMITS, now = Date.now()) {
+  sweepIdleReviewers(locations, sessionKey, limits, now);
+  const directory = reviewerDirectory(locations, sessionKey, true);
+  if (!directory) return false;
+  let kept = 0;
+  for (const item of sessionFiles(directory, sessionKey, validateReviewer, limits)) {
+    if (item.entry.agent_id === agentId) continue;
+    if (reviewerIdle(item.entry, limits, now)) consumeRecord(item.file, item.text, limits);
+    else kept += 1;
+  }
+  if (kept >= limits.maxSessionFiles) return false;
+  return writeReviewer(directory, {
+    schema: SCHEMA,
+    session_key: sessionKey,
+    agent_id: agentId,
+    subagent_type: subagentType,
+    launched_at_ms: now,
+    arrived_at_ms: 0,
+    named: named === true,
+    renewals: 0,
+  });
+}
+
+function noteReviewerArrival(locations, sessionKey, agentId, limits = LIMITS, now = Date.now()) {
+  const directory = reviewerDirectory(locations, sessionKey, false);
+  const item = directory ? loadReviewer(directory, sessionKey, agentId, limits) : null;
+  if (!item) return false;
+  return writeReviewer(directory, { ...item.entry, arrived_at_ms: Math.max(now, item.entry.launched_at_ms) });
+}
+
+function resumable(entry) {
+  return entry.arrived_at_ms > 0 && entry.arrived_at_ms >= entry.launched_at_ms;
+}
+
+function restampName(locations, sessionKey, agentId, limits = LIMITS, now = Date.now()) {
+  const root = namesDirectory(locations);
+  const directory = root ? sessionDirectory(root, sessionKey) : null;
+  if (!directory) return false;
+  const loaded = readBoundedFile(path.join(directory, `${agentId}.json`), limits.maxRecordBytes);
+  if (loaded.invalid) return false;
+  let binding;
+  try {
+    binding = JSON.parse(loaded.text);
+  } catch {
+    return false;
+  }
+  if (validateName(binding, { sessionKey, agentId })) return false;
+  try {
+    writeFileAtomic(directory, `${agentId}.json`, `${JSON.stringify({ ...binding, named_at_ms: now })}\n`);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function renewResumedReviewers(locations, sessionKey, payload, limits = LIMITS, now = Date.now()) {
+  const running = inFlightTasks(payload).filter((task) => task.type === 'subagent' && AGENT_ID_RE.test(task.id));
+  if (running.length === 0) return 0;
+  const directory = reviewerDirectory(locations, sessionKey, false);
+  if (!directory) return 0;
+  let fanout;
+  try {
+    fanout = ensurePrivateDirectory(locations.fanout, [requireSessionKey(sessionKey)]);
+  } catch {
+    return 0;
+  }
+  const pending = new Set(pruneFanout(fanoutEntries(fanout, sessionKey, limits), limits, now).map((item) => item.entry.agent_id));
+  let renewed = 0;
+  for (const task of running) {
+    if (pending.has(task.id)) continue;
+    if (pending.size >= limits.maxFanoutEntries) break;
+    const item = loadReviewer(directory, sessionKey, task.id, limits);
+    if (!item || !resumable(item.entry) || item.entry.renewals >= limits.maxRenewals) continue;
+    if (reviewerIdle(item.entry, limits, now)) {
+      consumeRecord(item.file, item.text, limits);
+      continue;
+    }
+    if (item.entry.named && !restampName(locations, sessionKey, task.id, limits, now)) continue;
+    if (!writeReviewer(directory, { ...item.entry, launched_at_ms: now, arrived_at_ms: 0, renewals: item.entry.renewals + 1 })) continue;
+    const entry = {
+      schema: SCHEMA,
+      session_key: sessionKey,
+      agent_id: task.id,
+      subagent_type: item.entry.subagent_type,
+      launched_at_ms: now,
+    };
+    try {
+      writeFileAtomic(fanout, `${task.id}.json`, `${JSON.stringify(entry)}\n`);
+    } catch {
+      continue;
+    }
+    pending.add(task.id);
+    renewed += 1;
+  }
+  return renewed;
+}
+
 function recordFanout(payload, options, limits = LIMITS) {
   const sessionKey = requireSessionKey(options.sessionKey);
   if (!isPlainObject(payload)) return { recorded: false, reason: 'payload' };
@@ -589,6 +757,7 @@ function recordFanout(payload, options, limits = LIMITS) {
   } catch {
     return { recorded: false, reason: 'write' };
   }
+  rememberReviewer(locations, sessionKey, agentId, input.subagent_type, launchName(payload) !== null, limits, now);
   bindLaunchName(payload, locations, sessionKey, agentId, limits, now);
   return { recorded: true, agentId, ttlMinutes: ttlMinutes(limits) };
 }
@@ -760,13 +929,15 @@ function promptAliases(locations, sessionKey, lines, limits, now) {
   return hostFrame(lines) ? nameIndex(locations, sessionKey, limits, now) : new Map();
 }
 
-function retireFanoutArrivals(locations, sessionKey, lines, aliases, limits = LIMITS) {
+function retireFanoutArrivals(locations, sessionKey, lines, aliases, limits = LIMITS, now = Date.now()) {
   const directory = fanoutDirectory(locations, sessionKey);
   if (!directory) return 0;
   let retired = 0;
   for (const item of fanoutEntries(directory, sessionKey, limits)) {
     if (!scanLines(lines, item.entry.agent_id, namesFor(aliases, item.entry.agent_id)).arrival) continue;
-    if (consumeRecord(item.file, item.text, limits)) retired += 1;
+    if (!consumeRecord(item.file, item.text, limits)) continue;
+    retired += 1;
+    noteReviewerArrival(locations, sessionKey, item.entry.agent_id, limits, now);
   }
   return retired;
 }
@@ -804,7 +975,7 @@ function noteArrival(payload, options, limits = LIMITS) {
   const lines = promptLines(payload.prompt);
   const now = options.now === undefined ? Date.now() : options.now;
   const aliases = promptAliases(locations, sessionKey, lines, limits, now);
-  const retired = retireFanoutArrivals(locations, sessionKey, lines, aliases, limits);
+  const retired = retireFanoutArrivals(locations, sessionKey, lines, aliases, limits, now);
   const loaded = loadRecord(path.join(locations.records, recordFileName(sessionKey)), sessionKey, limits);
   const held = heldArrival(locations, sessionKey, loaded.record, limits);
   if (!loaded.record) return idle(loaded.reason, retired);
@@ -845,8 +1016,9 @@ function matchArrival(payload, options, limits = LIMITS) {
     return none('store');
   }
   const lines = promptLines(prompt);
-  const aliases = promptAliases(locations, sessionKey, lines, limits, options.now === undefined ? Date.now() : options.now);
-  const retired = retireFanoutArrivals(locations, sessionKey, lines, aliases, limits);
+  const now = options.now === undefined ? Date.now() : options.now;
+  const aliases = promptAliases(locations, sessionKey, lines, limits, now);
+  const retired = retireFanoutArrivals(locations, sessionKey, lines, aliases, limits, now);
   const file = path.join(locations.records, recordFileName(sessionKey));
   const loaded = loadRecord(file, sessionKey, limits);
   const held = heldArrival(locations, sessionKey, loaded.record, limits);
@@ -933,6 +1105,7 @@ function consumeWait(locations, sessionKey, options, limits, now) {
     wait: true,
     kind: 'consume',
     agentId: loaded.record.agent_id,
+    agents: [loaded.record.agent_id],
     ageMinutes: Math.max(0, Math.floor(age / 60000)),
     count: 1,
     ttlMinutes: ttlMinutes(limits),
@@ -945,10 +1118,12 @@ function fanoutWait(locations, sessionKey, limits, now) {
   const fresh = pruneFanout(fanoutEntries(directory, sessionKey, limits), limits, now);
   if (fresh.length === 0) return { wait: false };
   const newest = fresh.reduce((best, item) => (item.entry.launched_at_ms > best.entry.launched_at_ms ? item : best));
+  const ordered = [...fresh].sort((left, right) => left.entry.launched_at_ms - right.entry.launched_at_ms);
   return {
     wait: true,
     kind: 'fanout',
     agentId: newest.entry.agent_id,
+    agents: ordered.map((item) => item.entry.agent_id),
     ageMinutes: Math.max(0, Math.floor((now - newest.entry.launched_at_ms) / 60000)),
     count: fresh.length,
     ttlMinutes: ttlMinutes(limits),
@@ -964,10 +1139,25 @@ function waitVerdict(options, limits = LIMITS) {
   } catch {
     return { wait: false, reason: 'store' };
   }
+  if (isPlainObject(options.payload)) {
+    try {
+      renewResumedReviewers(locations, sessionKey, options.payload, limits, now);
+    } catch { }
+  }
   const consume = consumeWait(locations, sessionKey, options, limits, now);
   if (consume.wait) return consume;
   const fanout = fanoutWait(locations, sessionKey, limits, now);
   return fanout.wait ? fanout : consume;
+}
+
+function waitNote(result, payload) {
+  if (!result || !result.wait) return '';
+  if (result.kind === 'consume') return renderWaitingNote(['the code review'], 1);
+  const awaited = new Set(Array.isArray(result.agents) ? result.agents : []);
+  const names = inFlightTasks(isPlainObject(payload) ? payload : {})
+    .filter((task) => task.description && awaited.has(task.id))
+    .map((task) => `"${task.description}"`);
+  return waitingNote(names, result.count, 'background reviewer');
 }
 
 function matchLine(result) {
@@ -1114,12 +1304,15 @@ function main(argv, env = process.env, io = {}) {
   }
   if (mode === 'wait') {
     let result;
+    let payload = null;
     try {
-      result = waitVerdict(envOptions(env));
+      payload = parsePayload(readInput(LIMITS.maxPayloadBytes));
+      result = waitVerdict({ ...envOptions(env), payload });
     } catch {
       result = { wait: false, reason: 'fault' };
     }
     write(`${waitLine(result)}\n`);
+    if (result.wait) write(`${waitNote(result, payload)}\n`);
     return 0;
   }
   if (mode === 'unbind') {
@@ -1144,10 +1337,12 @@ module.exports = {
   FANOUT_SEGMENT,
   ARRIVALS_SEGMENT,
   NAMES_SEGMENT,
+  REVIEWERS_SEGMENT,
   RECORD_KEYS,
   FANOUT_KEYS,
   ARRIVAL_KEYS,
   NAME_KEYS,
+  REVIEWER_KEYS,
   FANOUT_TYPES,
   PERSONA_TYPE_RE,
   VERDICTS,
@@ -1164,6 +1359,7 @@ module.exports = {
   validateFanout,
   validateArrival,
   validateName,
+  validateReviewer,
   headerProblem,
   storeLocations,
   issuedTicket,
@@ -1182,6 +1378,7 @@ module.exports = {
   retireRecord,
   deferArrival,
   waitVerdict,
+  waitNote,
   matchLine,
   recordLine,
   waitLine,
