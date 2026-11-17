@@ -315,14 +315,14 @@ zensu_session_incompatible_runtime_model() {
 }
 
 # Returns 0 ONLY when a Session Control record is intact in every respect and the
-# SOLE disagreement is that the installation which minted it no longer exists on
-# disk — what the host's plugin-cache pruning produces for a session that
-# outlived a few releases. Like the lineage predicate above it is NAMED, never
-# relaxed: a workflow document is still reachable, and adoption re-mints the
-# record under the running installation. Disjoint from the lineage predicate by
-# construction (that one needs the strict read to succeed, this one needs it to
-# fail), and deliberately blind to lineage, because the remedy is the same
-# either way. The decision lives in claude-hook-session-v1.js.
+# disagreement is that its minting installation no longer exists on disk — the
+# host's plugin-cache pruning — alone or with a recorded project root gone too.
+# The output cannot tell those two apart, so no consumer may assert from it that
+# a workflow document is reachable. Like the lineage predicate above it is NAMED,
+# never relaxed: adoption re-mints the record under the running installation.
+# Disjoint from the lineage predicate by construction (that one needs the plugin
+# root present and verified, this one needs it absent or retired) and blind to
+# lineage, because the remedy is the same either way; see claude-hook-session-v1.js.
 #
 # On a match this PRINTS the same `recorded<TAB>executing` pair the lineage
 # predicate prints, so every consumer of that pair reads this one unchanged. The
@@ -391,8 +391,8 @@ zensu_session_adoption_tail() {
 # Both predicates PRINT `recorded<TAB>executing` on stdout, and inside a PreToolUse
 # gate stdout is the JSON decision channel, so each is captured into a variable and
 # never leaked. The two are disjoint by construction — the lineage one needs the
-# strict read to succeed, the pruned one needs it to fail — so their order is
-# immaterial. A caller that passes no fallback scope gets the generic deny.
+# recorded plugin root present and verified, the pruned one needs it absent or
+# retired — so their order is immaterial. A caller that passes no fallback scope gets the generic deny.
 zensu_emit_named_bind_deny() {
   local payload="${1:-}" fallback="${2:-}" audience="${3:-}"
   local pair refusal oversized
@@ -1039,7 +1039,7 @@ zensu_emit_hook_session_deny() {
     fi
     remedy="$(_zensu_adoption_refusal_remedy "$refusal")"
     tail="$(_zensu_adoption_tail "$refusal")"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record. Such a record is normally adopted automatically on the first hook contact, but Zensu tried to adopt this one and %s: %s. %s. The record is NOT damaged and NOT missing; %s. On macOS and Linux both stay reachable in this state when the user types them or as the Bash command the skill renders, never through the Skill tool; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session there. This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still re-mints the record under the running installation, but a zensu CLI call, Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case."}}\n' \
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record. Such a record is normally adopted automatically on the first hook contact, but Zensu tried to adopt this one and %s: %s. %s. The record is NOT damaged and NOT missing; %s. On macOS and Linux both stay reachable in this state when the user types them or as the Bash command the skill renders, never through the Skill tool; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session there. This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still re-mints the record under the running installation, but a zensu CLI call, Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:adopt-session prints that path while it reports the record ADOPTABLE, and /zensu:doctor names it once the adoption has landed."}}\n' \
       "$recorded" "$executing" "$attempt" "$refusal" "$remedy" "$tail"
     return
   fi
@@ -1076,7 +1076,7 @@ zensu_emit_hook_session_deny() {
       "$appended"
     return
   fi
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — on macOS and Linux it stays reachable in every bind failure when the user types it or as the Bash command its skill renders, never through the Skill tool — and it names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason. A Zensu plugin change that landed mid-session is adopted automatically when the persisted schemas are equal, and a compatible upgrade no longer denies, so a deny here means the disagreement is one adoption does not admit. Then start a fresh Claude Code session before using stateful tools.%s"}}\n' \
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — on macOS and Linux it stays reachable in every bind failure when the user types it or as the Bash command its skill renders — and it names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason. A Zensu plugin change that landed mid-session is adopted automatically when the persisted schemas are equal, and a compatible upgrade no longer denies, so a deny here means the disagreement is one adoption does not admit. Then start a fresh Claude Code session before using stateful tools.%s"}}\n' \
     "$appended"
 }
 

@@ -302,7 +302,9 @@ covered. Both halves are DERIVED from source and neither was measured, unlike th
 `CLAUDE_CODE_SESSION_ID` deny above, which was. What bounds the residual is that the
 destination still comes from a record in a readable store and the write is at most
 `RESTORE_MAX_MISSING_COMPONENTS` directories at mode 0755 — narrow, but not nothing.
-Covering `ZADOPT_*` is its own change to `CONTROL_BINDINGS` and is NOT taken here.
+Covering `ZADOPT_*` is its own change to `CONTROL_BINDINGS` and is NOT taken here. The same
+channel reaches the adoption, and since `readOrphanedPrunedContext` it also reaches a record whose
+project root and minting installation are both gone, which every reader refused before.
 
 **EEXIST is the ONE signal the mkdir primitive gives, and all three readings of it are decided
 from EVIDENCE rather than from the component's POSITION.** Position alone got two of them

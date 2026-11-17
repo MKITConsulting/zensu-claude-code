@@ -181,7 +181,7 @@ denier in `reviewer-capability-v1.js` — five deniers, the same set as the line
 state, which that file's own neighbouring comments already count as five; the FOURTH release arm in
 `stop-chain-enforcer.sh` plus its block reason and final stderr, which count four
 released states; the third probe in `zensu-doctor.sh` and the `pruned-plugin-root`
-case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → pruned),
+case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → orphaned → pruned → orphaned-and-pruned),
 its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
 `adoptContext` result; `PRUNED_NOTE` / `PRUNED_EXPLANATION` and the reworded
 `record-unreadable` remedy in `session-adopt-report-v1.js`; and the operator
@@ -546,8 +546,9 @@ exact drift in its own words ("state the base or the count means nothing"):
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
 the cross-host `session-control-core-v1.js` — and, since the vanished-root work and the
-pruned-installation state, also condition 1's strict-then-orphan-then-pruned ladder,
-`readPrunedPluginRootContext`, the `allowMissingPluginRoot` waiver beside it,
+pruned-installation state, also condition 1's strict-then-orphan-then-pruned-then-combined ladder,
+`readPrunedPluginRootContext`, `readOrphanedPrunedContext` with `requireOrphanedProjectRoot` and
+`requirePrunedPluginRoot`, the `allowMissingPluginRoot` waiver beside it,
 `requireAbsentDirectoryPath`, and `buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
 enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
 ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly

@@ -438,8 +438,8 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
       #
       # Between THESE two the order is immaterial, and the loop is what says so:
       # the predicates are disjoint by construction — the lineage one needs the
-      # strict read to succeed, the pruned one needs it to fail at the plugin root
-      # — so at most one can answer. Both render the same pair into the same two
+      # recorded plugin root present and verified, the pruned one needs it absent
+      # or retired — so at most one can answer. Both render the same pair into the same two
       # variables, because the row that consumes them is one shape with two
       # causes. `unbound` is the default rather than a trailing `else`, so a third
       # named state is one row in this list.

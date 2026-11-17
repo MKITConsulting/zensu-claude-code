@@ -297,7 +297,7 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
 // alone or together with a recorded project root that is gone as well, so
 // nothing can re-verify the record and no installation can serve it.
 // Disjoint from the lineage predicate above by construction — that one needs
-// the strict read to succeed, this one needs it to fail — and deliberately
+// the recorded plugin root present and verified, this one needs it absent or retired — and deliberately
 // blind to lineage: the state is reachable under a compatible lineage too, and
 // the remedy is the same either way. Adoption is the one exit, so like the
 // lineage state this is named, never relaxed.

@@ -30,7 +30,7 @@ emit_autopilot_runtime_blocked() {
 }
 
 emit_autopilot_binding_unavailable() {
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=RUNTIME_UNAVAILABLE. The Session Control binding of this session is unavailable, so the plan gate could not check whether a durable Autopilot run owns this plan. Do not implement, start unbound TDD, start or replace a run, or infer approval; restore the session binding first. /zensu:doctor names which check failed."}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=SESSION_CONTEXT_UNAVAILABLE. The Session Control binding of this session is unavailable, so the plan gate could not check whether a durable Autopilot run owns this plan. Do not implement, start unbound TDD, start or replace a run, or infer approval; restore the session binding first. /zensu:doctor names which check failed."}}'
 }
 
 NODE_AVAILABLE=true

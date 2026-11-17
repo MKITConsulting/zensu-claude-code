@@ -2519,7 +2519,7 @@ esac
 case "$OUT" in
   *'--restore-root --confirm'*|*'--confirm --restore-root'*)
     check "P1ad4b the pruned row hands over the restore's complete invocation (got: $OUT)" FAIL ;;
-  *'If the recorded project root is gone as well, an adoption re-mints the record but leaves Edit, Write and MultiEdit denied until that exact directory is re-created; /zensu:adopt-session --restore-root reports on that AFTER the adoption'*)
+  *'If the recorded project root is gone as well, an adoption re-mints the record, but a zensu CLI call, Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created; /zensu:adopt-session --restore-root reports on that AFTER the adoption'*)
     check "P1ad4b the pruned row also covers a recorded project root that is gone and orders the restore after the adoption" PASS ;;
   *) check "P1ad4b the pruned row names the combined state (got: $OUT)" FAIL ;;
 esac
