@@ -39,7 +39,11 @@ at most once. Neither literal takes a VALUE, which is what keeps a destination o
 of every invocation this gate admits. Every hook on the `Bash|PowerShell`
 matcher plus the all-tool capability gate must allow, because a deny from any one
 of them wins. The recognizer reads the Bash spelling only, so run both commands through the
-Bash tool; a PowerShell call in a bind failure gets the named deny. The adoption itself no longer needs the command: every hook adopts a
+Bash tool; a PowerShell call in a bind failure gets the named deny. The Skill tool
+is not a way in either: the all-tool capability gate denies it like every other
+non-Bash tool, so a command reaches the session when the user types it or as the
+Bash command its skill renders. On Windows the recognizer admits neither command,
+so a fresh Claude Code session is the way out there. The adoption itself no longer needs the command: every hook adopts a
 compatible-schema record automatically on its first failed bind
 (`hooks/lib/session-auto-adopt-v1.js`, opt-out `hooks.sessionAutoAdopt`), and the
 command is the report and the manual retry for a refusal. The full account is in

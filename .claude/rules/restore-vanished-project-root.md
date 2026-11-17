@@ -44,7 +44,10 @@ what bounds it — never as "every location is derived from the record".
 **`restoreRootVerdict` is disjoint from `adoptableRecord` by CONSTRUCTION for two of the three
 neighbouring states and by a CONJUNCT for the third**, and conflating those is the mistake this
 paragraph exists to prevent. The strict read must FAIL and the orphan read must SUCCEED, which
-excludes a healthy session and a pruned installation. A LINEAGE BREAK passes both reads —
+excludes a healthy session and a pruned installation. A pruned installation whose project root
+is gone as well fails the orphan read too; the verdict then tries `readOrphanedPrunedContext`
+and answers `not-served-by-executing-runtime` rather than `record-unreadable`, because adoption
+is the step that comes first there. A LINEAGE BREAK passes both reads —
 `allowMissingProjectRoot` waives only the recorded root's existence — and is excluded one clause
 later by `servesRecordedRuntime`. That is also why the remedy in the combined state is **adopt
 first, restore second**, and why every surface offering it must say so.
@@ -299,7 +302,9 @@ covered. Both halves are DERIVED from source and neither was measured, unlike th
 `CLAUDE_CODE_SESSION_ID` deny above, which was. What bounds the residual is that the
 destination still comes from a record in a readable store and the write is at most
 `RESTORE_MAX_MISSING_COMPONENTS` directories at mode 0755 — narrow, but not nothing.
-Covering `ZADOPT_*` is its own change to `CONTROL_BINDINGS` and is NOT taken here.
+Covering `ZADOPT_*` is its own change to `CONTROL_BINDINGS` and is NOT taken here. The same
+channel reaches the adoption, and since `readOrphanedPrunedContext` it also reaches a record whose
+project root and minting installation are both gone, which every reader refused before.
 
 **EEXIST is the ONE signal the mkdir primitive gives, and all three readings of it are decided
 from EVIDENCE rather than from the component's POSITION.** Position alone got two of them

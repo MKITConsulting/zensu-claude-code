@@ -76,9 +76,10 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // write classes that leave the plugin-data store, and the history entry is written on
 // the ordinary `--confirm` adoption as well, with no `already-served` qualifier —
 // calling the document write "the one" was false and understated the admission;
-// what BOUNDS those writes is readContext (session
-// hash, digest recomputed against the RECORDED root, that root's declared
-// version) plus the sibling-root and plugin_data checks — NOT derivation, since
+// what BOUNDS those writes is adoptableRecord's condition-1 ladder, whose
+// four rungs the zensu-session-adopt.sh header lists: the session hash on every
+// rung, the digest and declared version only while the recorded root exists, plus
+// the sibling-root and plugin_data checks — NOT derivation, since
 // CLAUDE_PLUGIN_DATA is a caller-supplied literal here exactly as it is for the
 // diagnostic. Without --confirm it is read-only.
 //

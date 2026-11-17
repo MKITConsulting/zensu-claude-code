@@ -287,7 +287,7 @@ else check "P7i held lease over an orphaned own run (out=$(printf '%s' "$LEASE_O
 # durable Autopilot artifacts, including one whose only artifact is the
 # owner-keyed pointer. Measured, not assumed: an unresolvable session id is
 # refused by `zensu_bind_hook_session` before the owner arm is reached, so the
-# code is RUNTIME_UNAVAILABLE and the SESSION_CONTEXT_UNAVAILABLE arm below it
+# binding-unavailable receipt answers, and the owner arm's receipt below it
 # is defense in depth rather than the live path. The fail-closed DIRECTION is
 # the property, and a fall-through is what would break it.
 UNRESOLVED_PROJECT="$TMP/unresolved-owner"; mkdir -p "$UNRESOLVED_PROJECT"
@@ -302,6 +302,12 @@ if printf '%s' "$UNRESOLVED_OUT" | grep -qF 'PLAN_GATE_BLOCKED' \
   && ! printf '%s' "$UNRESOLVED_OUT" | grep -qF 'AskUserQuestion'; then
   check "P8a an unresolvable owner fails closed while durable run artifacts exist" PASS
 else check "P8a unresolvable owner (out='$(printf '%s' "$UNRESOLVED_OUT" | head -c 120)')" FAIL; fi
+if printf '%s' "$UNRESOLVED_OUT" | grep -qF 'code=SESSION_CONTEXT_UNAVAILABLE' \
+  && printf '%s' "$UNRESOLVED_OUT" | grep -qF 'The Session Control binding of this session is unavailable' \
+  && printf '%s' "$UNRESOLVED_OUT" | grep -qF '/zensu:doctor names which check failed' \
+  && ! printf '%s' "$UNRESOLVED_OUT" | grep -qF 'state artifact exists'; then
+  check "P8a2 the bind-failure receipt names the unavailable binding and never asserts that a durable Autopilot artifact exists" PASS
+else check "P8a2 bind-failure receipt wording (out='$(printf '%s' "$UNRESOLVED_OUT" | head -c 200)')" FAIL; fi
 
 # Only the owner-keyed pointer is present — no run file. The pre-scoping probe
 # would miss it, so this is what bites the glob added for the new pointer name.
@@ -764,8 +770,8 @@ fi
 # stage branch further down already applies that rule to a terminal pointer.
 # This is a source pin because the arm is defense in depth and this suite
 # cannot enter it: an unresolvable session id is refused by
-# zensu_bind_hook_session first, which is why P8a observes RUNTIME_UNAVAILABLE
-# rather than SESSION_CONTEXT_UNAVAILABLE. What the pin protects is that the
+# zensu_bind_hook_session first, which is why P8a observes the binding-unavailable
+# receipt rather than this arm's. What the pin protects is that the
 # undecidable cases still fail closed — an unreadable directory, a record that
 # will not parse, a pointer naming a run with no record.
 P8E_OK=true
