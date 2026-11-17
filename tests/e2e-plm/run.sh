@@ -96,7 +96,7 @@ invoke_plm() {
   # Hermetic against the user's personal output-style plugins (e.g. caveman):
   # tests assert the agent NAMES its tools/sections, which a compressed style can
   # drop. Prepend a normal-mode directive so the run measures plugin behavior.
-  prompt="${ZENSU_E2E_NORMAL_PREAMBLE:-Normal mode — respond in full prose (NOT caveman/compressed/ultra). Name every MCP tool you would call by its exact name.}
+  prompt="${ZENSU_E2E_NORMAL_PREAMBLE:-Normal mode — respond in full prose (NOT caveman/compressed/ultra). Name every command or tool you would use by its exact name.}
 
 $prompt"
 
