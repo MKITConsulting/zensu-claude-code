@@ -250,7 +250,11 @@ sees a request. MEASURED with 0.1.23 and 0.1.24: a service-worker registration r
 `undefined`, no worker is registered and its script is never fetched. A server REDIRECT to another
 origin is NOT refused by the browser (recorded as measured in `docs/gates.md`, and measured again
 with 0.1.23 and 0.1.24), so the skill reads the `Page URL` line after every navigating call —
-prose, not a boundary.
+prose, not a boundary. Skill and doc text depends on the service-worker block: a criterion that
+needs a service worker is `partial` with the cause driver fence, at the sites
+`.claude/rules/acceptance-verification-gate.md` lists under "A driver fence is a cause of its
+own". `P10o` in `tests/structure/test-verify-feature-skill.sh` fails once the helper stops writing
+`serviceWorkers: 'block'`, so a change that lifts the block rewrites that text in the same commit.
 
 **Signed-in sessions are a second rule set, keyed on the session prefix.** A run config may carry
 `browser.contextOptions.storageState` only at the canonical `auth/storage-state.json` beside it.
