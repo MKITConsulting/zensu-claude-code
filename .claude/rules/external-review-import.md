@@ -110,7 +110,14 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   is in `RUNNING_TASK_STATUSES`, before the inner budget increment, after `outer_finish`, at
   most `LIMITS.maxWaits` (3) times in a row; after that this wait releases no Stop until one sees
   no running workflow, which deletes the counter, and `--tdd-begin` deletes it for every new chain
-  generation. A chain whose workflows end and start again therefore waits again. Past the limit,
+  generation. A chain whose workflows end and start again therefore waits again. Each release
+  tells the user in one sentence, `Zensu is waiting for the workflow "<name>"; the
+  review chain continues when it reports back.` (at most three names and a count of the rest, or
+  `a background workflow` for one without a name). The module renders it through `waitingNote` of
+  `stop-background-wait-v1.js` and prints it as the second line of its `stop-wait` answer; the hook
+  takes it through `split_wait_verdict`, which shows only one line that starts with
+  `WAIT_NOTE_LEAD`, holds no control character and is at most 600 characters long, and shows the
+  one fallback sentence otherwise. It names no wait count, which only the hook needs. Past the limit,
   and in a fix round or a converged chain, a workflow the turn names on a `ZENSU-AWAIT:` line is
   still released by the explicit wait of `.claude/rules/stop-background-wait.md`, which runs after
   this one. A session that owns a live Autopilot run (`OUTER_PRESENT`), an Autopilot-bound
@@ -219,7 +226,9 @@ the Stop hook's prefilter miss and `zensu-log.sh --tdd-begin` call through
 `--tdd-begin`, `X20`-`X23` the round, Autopilot and deferred-review exclusions, and `X24` the
 bound-chain exclusion by running the shipped function with stubbed collaborators; `X14`, `X17` and
 `X20` also expect the explicit wait's hint where a running workflow meets the limit, a converged
-chain or a fix round. The resume reason names the panel and the import path (`X12`). The store is in both
+chain or a fix round. The release sentence comes from `waitingNote`
+(`.claude/rules/stop-background-wait.md`): `X13` and `X14` pin it through the hook, and the unit
+file pins the second line of the module's `stop-wait` answer. The resume reason names the panel and the import path (`X12`). The store is in both
 protected-root lists of `reviewer-capability-v1.js` (`X1a`). The Phase 6.10 text lives in
 `skills/build/references/review-chain.md` steps 3, 4, 4b, 4c and 5, plus the `Subagent / Claude
 Code Workflow safety` and `Work sequentially` bullets of `skills/build/SKILL.md`, whose body
