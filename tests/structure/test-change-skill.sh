@@ -158,7 +158,7 @@ STEP6="$(awk '/^### Step 6/ { f = 1 } /^### Step 7/ { f = 0 } f' "$SKILL_MD")"
 S9="$(printf '%s' "$STEP6" | node -e '
   const t = require("fs").readFileSync(0, "utf8");
   const a = t.indexOf("After `zensu features create`");
-  const b = t.indexOf("`zensu features update <feature-id> --priority <priority> --description \"$(cat \"$f\")\"`");
+  const b = t.indexOf("`zensu features update <feature-id> --priority <priority> --description-file \"$f\"`");
   const c = t.indexOf("`zensu security classify <feature-id> --classification <level>`");
   process.stdout.write(a !== -1 && a < b && b < c && /structured Markdown/.test(t) && /report each result/.test(t) ? "ok" : "bad");
 ')"

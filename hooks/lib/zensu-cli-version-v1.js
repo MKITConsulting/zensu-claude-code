@@ -4,8 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const MIN_VERSION = '0.18.0';
-const FLOOR_REASON = "older releases cannot declare a goal's feature, so AI-work capture fails";
+const MIN_VERSION = '0.22.0';
+const FLOOR_REASON = 'older releases cannot read free text from a file, so skill calls that send documents, descriptions, findings or JSON to Zensu fail';
 const INSTALL = Object.freeze({
   homebrew: 'brew install --cask mkitconsulting/tap/zensu',
   homebrewUpgrade: 'brew update && brew upgrade --cask mkitconsulting/tap/zensu',

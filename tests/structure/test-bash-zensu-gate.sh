@@ -293,12 +293,19 @@ fi
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 
 B52_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat >| \"\$f\" <<'ZENSU_TEXT_3f9a1c7e'" \
-  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'ZENSU_TEXT_3f9a1c7e' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" \
-  'zensu link docs f1 \' '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content "$(cat "$f")"')"
+  '# Guide' 'Run `whoami` and read $HOME.' 'ZENSU_TEXT_END' 'ZENSU_TEXT_3f9a1c7e' \
+  'zensu link docs f1 \' '  --doc-type user_facing --title "Guide" --audience end_user \' '  --content-file "$f"')"
 tdd_workflow_begin gate-test "link_docs" "$(( $(date +%s) + 3600 ))" 2>/dev/null
-run "B52 the skills' free-text form (>| into a temporary file through a quoted heredoc with a random delimiter, a content check, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
+run "B52 the skills' file-flag form (>| into a temporary file through a quoted heredoc with a random delimiter, then --content-file \"\$f\") passes in a window that declares its tool" "$B52_CMD" '' ALLOW
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
-run "B52b the same free-text form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
+run "B52b the same file-flag form stays a mutation the gate denies outside that window" "$B52_CMD" '' DENY
+B52C_CMD="$(printf '%s\n' 'f="$(mktemp)" || exit 1' "trap 'rm -f \"\$f\"' EXIT" "cat >| \"\$f\" <<'ZENSU_TEXT_9c2e4b10'" \
+  'Shipped `whoami` for $USER.' 'ZENSU_TEXT_END' 'ZENSU_TEXT_9c2e4b10' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" \
+  'zensu features revision f1 --scope-summary "$(cat "$f")"')"
+tdd_workflow_begin gate-test "create_revision" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+run "B52c the inline form of a flag without a file flag (a content check, then \"\$(cat \"\$f\")\") passes in a window that declares its tool" "$B52C_CMD" '' ALLOW
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+run "B52d the same inline form stays a mutation the gate denies outside that window" "$B52C_CMD" '' DENY
 
 tdd_workflow_begin gate-test "upload_wiki_image" "$(( $(date +%s) + 3600 ))" 2>/dev/null
 run "B60f wiki images upload passes in a window that declares upload_wiki_image" "zensu wiki images upload --product p1 --file shot.png" '' ALLOW

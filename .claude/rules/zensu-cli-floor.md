@@ -2,7 +2,8 @@
 paths:
   - "hooks/lib/zensu-cli-version-v1.js"
   - "tests/structure/zensu-cli-version-v1.test.js"
-  - "tests/structure/fixtures/zensu-cli-0.18.0-ai-work-help.json"
+  - "tests/structure/fixtures/zensu-cli-*-floor-help.json"
+  - "tests/structure/fixtures/record-zensu-cli-floor-help.js"
   - "hooks/lib/ai-work-preflight-v1.js"
   - "hooks/lib/ai-work-capture-v1.js"
   - "hooks/lib/context-auto-load-v1.js"
@@ -28,20 +29,31 @@ paths:
 # zensu-cli Version Floor (`hooks/lib/zensu-cli-version-v1.js`)
 
 **One module owns the floor and the install commands.** `MIN_VERSION` is the oldest zensu-cli
-release the plugin supports: 0.18.0, because `REQUIRED` in `hooks/lib/ai-work-preflight-v1.js`
-asks for `ai-work context --feature`, `ai-work start --feature` and `--maintenance-reason`, which
-0.18.0 is the first release to declare, and `hooks/lib/ai-work-capture-v1.js` runs that check
-before every `begin`, so an older CLI answers `cli_incompatible` for every goal. The earlier floor,
-0.10.0, came from ghost-scan pagination (zensu-monorepo#954) and wiki list pages; 0.18.0 covers
-both. `REQUIRED` is the floor's lower bound, and the unit case `the floor release declares every
-flag the AI-work capture preflight requires` holds it: it replays the floor release's `ai-work`
-help, recorded from the release archive in
-`tests/structure/fixtures/zensu-cli-0.18.0-ai-work-help.json`, through `check()` and requires
-`compatible`, so a flag `REQUIRED` adds that the floor release lacks fails it, and it requires the
-fixture's version line to equal `MIN_VERSION`, so raising the floor re-records the fixture from the
-new floor release's binary. A second lower bound has no case: the capability probe of
+release the plugin supports: 0.22.0, because the skills pass long free text through the file
+flags `--content-file`, `--description-file`, `--candidates-file`, `--result-file`,
+`--findings-file` and `--conditions-file`, which zensu-cli 0.22.0 (`d466f49`, #52) is the first
+release to declare, and an older CLI refuses each such call with `unknown flag`
+(`.claude/rules/skill-argument-placeholders.md`). The floor before it, 0.18.0, came from
+`REQUIRED` in `hooks/lib/ai-work-preflight-v1.js`, which asks for `ai-work context --feature`,
+`ai-work start --feature` and `--maintenance-reason`; `hooks/lib/ai-work-capture-v1.js` runs that
+check before every `begin`, so a CLI older than 0.18.0 answers `cli_incompatible` for every goal.
+The floor before that, 0.10.0, came from ghost-scan pagination (zensu-monorepo#954) and wiki list
+pages. 0.22.0 covers all three. Two lower bounds have a case, and both read one fixture: the help
+of the floor release, recorded from its release archive in
+`tests/structure/fixtures/zensu-cli-<MIN_VERSION>-floor-help.json`. The unit case `the floor
+release declares every flag the AI-work capture preflight requires` replays its `ai-work` help
+through `check()` and requires `compatible`, so a flag `REQUIRED` adds that the floor release
+lacks fails it; `FT8` of `tests/structure/test-skill-workflow-markers.sh` holds every free-text
+flag site of the skills against the help of its command there. Both find the fixture by the
+floor's name and require its version line to equal `MIN_VERSION`, so raising the floor
+re-records the fixture from the new floor release's binary into the file named after the new floor:
+`node tests/structure/fixtures/record-zensu-cli-floor-help.js "<archive> of the zensu-cli v<floor> release, sha256 <digest>" <zensu binary> > tests/structure/fixtures/zensu-cli-<floor>-floor-help.json`
+writes the version line, the help of every `ai-work` subcommand `REQUIRED` names (the recorder
+reads the exported table) and the help of every command the skills send free text to, to stdout.
+`FT8` requires exactly one `zensu-cli-*-floor-help.json`, the one named after `MIN_VERSION`, so the
+previous floor's fixture must go in the same change. A third lower bound has no case: the capability probe of
 `hooks/lib/context-auto-load-v1.js` needs `knowledge context-pack --agent`,
-`knowledge get --context-load` and `knowledge context-search --query`, which the 0.18.0 archive
+`knowledge get --context-load` and `knowledge context-search --query`, which the 0.22.0 binary
 declares. `FLOOR_REASON` says that in one sentence, and the doctor's old row and the banner's
 old-CLI warning render it. `INSTALL` holds the Homebrew install and upgrade commands, `install.sh`
 and `install.ps1`. The doctor, the session banner, `/zensu:setup` and the work-order refusal in
@@ -62,11 +74,19 @@ banner's missing-CLI line and `docs/work-order-mode.md` — is pinned to the mod
 in `tests/structure/test-setup-skill.sh`. `P10a` and `P10e` also fail when the banner copies the
 upgrade command or the reason again, or stops naming `INSTALL.homebrewUpgrade` or `FLOOR_REASON`;
 `B16a` in `tests/structure/test-session-start-banner.sh` compares the warning the banner prints with
-the module. **Raising the floor is three edits, not one:** the constant, a new `FLOOR_REASON` that
-names what the releases below the new floor get wrong, and the prose those checks name. `P10e`
-then requires the new reason, word for word, in the README Requirements and in `/zensu:setup`
+the module. **Raising the floor is more than the constant.** The edits that move with it: the
+constant; a new `FLOOR_REASON` that names what the releases below the new floor get wrong; the
+prose those checks name; the consequence sentence of `skills/doctor/references/zensu-cli.md`; the
+floor fixture, re-recorded under the new name with the recorder above, and the old fixture
+deleted; every skill site `FT8` then names, because a flag the new floor declares as a file form
+turns its inline site into a finding; and the write-gate command tree
+`tests/structure/fixtures/zensu-cli-tree.txt` with whatever `Z2` of
+`tests/structure/test-zensu-cli-map-drift.sh` then names (`.claude/rules/cli-command-classification.md`).
+`P10e` requires the new reason, word for word, in the README Requirements and in `/zensu:setup`
 Phase 0; the banner and the doctor print it from the module. A floor raised without a new reason
-keeps telling users the previous floor's reason.
+keeps telling users the previous floor's reason. The 0.22.0 raise left the tree at 0.15.0: the
+0.22.0 tree adds `ai-work bind`, `ai-work recover` and `update`, and classifying `recover` and
+`update` for the write gate is a change of its own.
 
 **One Homebrew upgrade spelling.** `INSTALL.homebrewUpgrade` is
 `brew update && brew upgrade --cask mkitconsulting/tap/zensu`, one command that every surface
@@ -81,10 +101,12 @@ and when its scan cannot read the tree. It is the only earlier spelling the hist
 `CHANGELOG.md` keeps it as release history, and `P10f` does not read it.
 
 **Warn, never block.** No gate compares the version with the floor. An older CLI still runs, but
-AI-work capture refuses to begin with it: `check()` in `hooks/lib/ai-work-preflight-v1.js` reads
-the CLI's `ai-work` help for the flags `REQUIRED` names and answers `cli_incompatible`, a
-capability probe rather than a version check. The doctor row and the banner say what an older
-release gets wrong.
+every skill call that passes free text through a `-file` flag fails with `unknown flag`, which
+zensu-cli reports through `markFlagParseError` with pflag's own text. Below 0.18.0 AI-work capture
+also refuses to begin: `check()` in `hooks/lib/ai-work-preflight-v1.js` reads the CLI's `ai-work`
+help for the flags `REQUIRED` names and answers `cli_incompatible`, a capability probe rather than
+a version check. The doctor row and the banner say what an older release gets wrong, and
+`skills/doctor/references/zensu-cli.md` tells the model both consequences.
 
 **The PATH walk is a hand copy of `playwright-cli-version-v1.js`.** It walks `PATH` as the shell
 does and answers `cwd-relative` without running anything when an empty or relative entry comes
@@ -139,13 +161,16 @@ Phase 0 and Phase 1; the degradation
 ladder of `skills/pilot/SKILL.md`; `skills/doctor/SKILL.md` and its `references/zensu-cli.md`;
 `probe()` in `hooks/lib/work-order-v1.js`; `findBinary` in `hooks/lib/playwright-cli-version-v1.js`,
 through the drift case; `REQUIRED`, `check()` and `guidance` in `hooks/lib/ai-work-preflight-v1.js`,
-through the fixture case; the capability probe of `hooks/lib/context-auto-load-v1.js`, which no case holds;
+through the fixture case; the free-text flag sites of the skills, through `FT8` and the scanner
+`tests/structure/lib-skill-free-text.js`, whose command list the fixture recorder
+`tests/structure/fixtures/record-zensu-cli-floor-help.js` reads; the capability probe of
+`hooks/lib/context-auto-load-v1.js`, which no case holds;
 the prose copies above. Tests: the unit file, driven by
 `tests/structure/test-doctor.sh` (`P0zv`, `P0zw`); `P8z1`-`P8z15` there; `B16a`-`B16e` in
 `tests/structure/test-session-start-banner.sh`; `P9a`-`P9d` and `P10a`-`P10f` in
-`tests/structure/test-setup-skill.sh`.
+`tests/structure/test-setup-skill.sh`; `FT8` in `tests/structure/test-skill-workflow-markers.sh`.
 
-**Sites outside this repository.** Six zensu-cli facts, the last one with the backend behaviour
+**Sites outside this repository.** Seven zensu-cli facts, the last one with the backend behaviour
 behind it, are copied here and nothing checks them against their source:
 
 - the `Not logged in` text of `zensu auth status`. This one fails open: if the CLI rewords it, a
@@ -154,8 +179,16 @@ behind it, are copied here and nothing checks them against their source:
   and setup call starts the update check again, with its network call and its write of
   `version-check.json`;
 - the version line format of `internal/version`. A change there reads as `unread`, which only warns;
-- the `ai-work` help of zensu-cli 0.18.0 in the fixture. It proves that the floor release satisfies
-  `REQUIRED`, not that a later release still declares every flag;
+- the help of zensu-cli 0.22.0 in the floor fixture: the `ai-work` help and the help of every
+  command the skills send free text to. It proves that the floor release declares what
+  `REQUIRED` and the skills use, not that a later release still declares every flag;
+- the value-file rules of zensu-cli 0.22.0 (`internal/cmd/valuefile.go` at `d466f49`): a `-file`
+  flag refuses a missing or unreadable path, a file that is not a regular file, more than 256 KiB
+  of text or 4 MiB of JSON, invalid UTF-8, a NUL byte and an empty or whitespace-only value before
+  any request, strips a UTF-8 byte-order mark and trims trailing CR and LF from text. The
+  file-flag sites of the skills carry no shell content check because of it. The floor fixture
+  records only the two size limits, so a later release that accepted a blank file would let a
+  skill send an empty value while every check stays green;
 - the knowledge help of zensu-cli 0.20.1 (`knowledge search --help`, `knowledge sources --help`),
   which states the server's behaviour: search indexes each product's features, visions, journeys,
   wiki pages, feature-doc titles and links (not the linked files), mocks and design assets, plus

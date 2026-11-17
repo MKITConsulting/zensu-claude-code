@@ -28,7 +28,7 @@ This is the **brownfield** entry point — an existing codebase whose features a
 
 ## Prerequisites
 
-- Zensu CLI 0.18.0 or later on `PATH`; see `/zensu:doctor` for install/upgrade hints
+- Zensu CLI 0.22.0 or later on `PATH`; see `/zensu:doctor` for install/upgrade hints
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - Product ID known (create one first with `/zensu:bootstrap` if needed)
 - Working in the repository root (or a subdirectory)
@@ -179,7 +179,7 @@ is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
 
 ### Phase 3: Create Ghost Scan
 
-1. Never paste the candidates' JSON into the command line: a single quote ends at an apostrophe, and double quotes run backtick spans and expand `$NAME`. zensu-cli reads `--candidates` from no file or stdin, so write the JSON through a quoted heredoc. Replace `<hex>` with eight random hex digits, new for each call and the same on both lines; `>|` writes even under `noclobber`, and the `grep` line stops an empty, blank or binary upload. Keep one `trap` per call and widen it for each further file:
+1. Never paste the candidates' JSON into the command line: a single quote ends at an apostrophe, and double quotes run backtick spans and expand `$NAME`. Write the JSON through a quoted heredoc and pass the file with `--candidates-file`: zensu-cli reads up to 4 MiB of it and refuses an empty or blank file. Replace `<hex>` with eight random hex digits, new for each call and the same on both lines; `>|` writes even under `noclobber`. Keep one `trap` per call and widen it for each further file:
 
    ```bash
    f="$(mktemp)" || exit 1
@@ -187,8 +187,7 @@ is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
    cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <candidates-json>
    ZENSU_TEXT_<hex>
-   grep -qI '[^[:space:]]' -- "$f" || exit 1
-   zensu ghost scan --product <product-id> --repo-url <url> --branch <branch> --candidates "$(cat "$f")"
+   zensu ghost scan --product <product-id> --repo-url <url> --branch <branch> --candidates-file "$f"
    ```
 
    Each candidate carries its three detection arrays — populate all of them, and never omit `detectedTestFiles` or `detectedDocFiles`:
@@ -206,7 +205,7 @@ is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
    }
    ```
 
-   A candidate's optional `description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph. Keep it brief, because all candidates travel as one command-line argument and the operating system limits its size. Apply copies it into the feature it creates, which renders it; the scan's review page shows it unrendered.
+   A candidate's optional `description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph. Apply copies it into the feature it creates, which renders it; the scan's review page shows it unrendered.
 
 2. **Pre-submit self-check.** Sum `detectedTestFiles` **and** `detectedDocFiles` across all candidates. If the Phase 2 walk surfaced test or doc files but either sum is 0 — or far below what you saw — the per-candidate mapping is broken: STOP and re-glob each candidate's source dirs (steps 6–7) before submitting. Importing source without its tests or docs understates real maturity and skews release gates.
 3. Output: "Scan created with {n} candidates ({x} high, {y} medium, {z} low confidence), {t} tests and {d} docs mapped across candidates. Ready for review."
@@ -239,7 +238,7 @@ is the house pattern used by `/zensu:plan-review` and `/zensu:build` Phase 6.
    - "Reject specific: #13, #18" — reject individually
    - "Approve all" / "Reject all"
    - "Tell me more about #13" — detail view for individual decision
-4. Run `zensu ghost batch <scan-id> --product <product-id>` with `--approve-ids` and `--reject-ids` (JSON arrays of candidate UUIDs; at least one) to process all decisions in a single call. `--reject-reason` gives every rejected candidate one reason. It is plain text: Zensu does not render Markdown there, so do not use Markdown syntax; pass it as `"$(cat "$f")"`, written to `$f` in the same Bash call as in Phase 3 step 1.
+4. Run `zensu ghost batch <scan-id> --product <product-id>` with `--approve-ids` and `--reject-ids` (JSON arrays of candidate UUIDs; at least one) to process all decisions in a single call. `--reject-reason` gives every rejected candidate one reason. It is plain text: Zensu does not render Markdown there, so do not use Markdown syntax. It has no file flag: pass it as `--reject-reason "$(cat "$f")"`, written to `$f` as in Phase 3 step 1 and checked first with `grep -qI '[^[:space:]]' -- "$f" || exit 1`.
 5. If at least 1 approved: run `zensu ghost apply <scan-id> --product <product-id> --enrich-existing` if the product already has features (check Phase 1 feature list). Omit `--enrich-existing` only for the very first scan on an empty product.
 6. Summary: "{n} features created, {e} features enriched, {m} components created, {t} tests linked, {d} docs linked, {s} source files linked"
 7. **Backfilling a scan that missed tests.** If features were already created with zero linked tests, do NOT re-create them. Re-run Phase 2 with co-located test globbing, create a fresh scan that **reuses the exact existing slugs**, approve, and run `zensu ghost apply <scan-id> --product <product-id> --enrich-existing` — apply matches by slug and attaches the newly detected tests to the existing features, no duplicates. This costs ~2 calls per module (scan + apply) instead of one `zensu link test` per test file.
@@ -272,15 +271,16 @@ This mirrors `/zensu:bootstrap` Step 2.
      `--priority` ∈ critical|high|medium|low, `--persona` free text). Use only
      those `--type` values — the server rejects anything else. `--description` is Markdown:
      Zensu renders headings, lists and code, so write structured Markdown, not one unformatted
-     paragraph; pass it as `"$(cat "$f")"`, written to `$f` in the same Bash call as in Phase 3
-     step 1.
+     paragraph; pass it as `--description-file "$f"`, written to `$f` in the same Bash call as in
+     Phase 3 step 1.
    - `zensu journeys step <journey-id> --product <product-id>` per step (`--title` and a 1-based
      `--step-order` are required, `--feature` = the feature **UUID** from the map, never a slug,
      `--interaction-type` ∈ action|navigation|input|validation|output|wait,
      `--critical`). `--description` and `--expected-result` are plain text: Zensu does not
      render Markdown there, so do not use Markdown syntax. Pass them as `--description "$(cat "$f")"
-     --expected-result "$(cat "$e")"`, each file written and checked in the same Bash call, with
-     `e="$(mktemp)" || exit 1` and the one trap widened to both.
+     --expected-result "$(cat "$e")"`, which have no file flag, each file written and checked like
+     the reject reason in the same Bash call, with `e="$(mktemp)" || exit 1` and the one trap
+     widened to both.
    - `zensu journeys health --product <product-id> <journey-id>` on each created journey; report weak links to the user.
 
 > **Build-out baseline (automatic, server-side).** Each newly created feature is

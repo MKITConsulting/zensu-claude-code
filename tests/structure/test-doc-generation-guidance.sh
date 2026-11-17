@@ -93,7 +93,7 @@ check "D19 docs skill has explicit Read imperative" \
 NORM_GUIDE="$(tr -s '[:space:]' ' ' < "$GUIDE")"
 D20_BAD=""
 for cli in 'zensu doc gen-context <feature-id> --doc-type <type>' 'zensu wiki list --product <id> --json' \
-  'zensu wiki create --product <id> --title <title> --content <markdown>' 'zensu wiki update <page-id> --content <markdown>' \
+  'zensu wiki create --product <id> --title <title> --content-file <path>' 'zensu wiki update <page-id> --content-file <path>' \
   'zensu link docs <feature-id> --doc-type <type>'; do
   printf '%s' "$NORM_GUIDE" | grep -qF -- "$cli" || D20_BAD="$D20_BAD missing:[$cli]"
 done
