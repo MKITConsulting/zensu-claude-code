@@ -1248,6 +1248,28 @@ if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <
 else
   check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" FAIL
 fi
+if grep -qF "serviceWorkers: 'block'" "$BROWSER_CONFIG" \
+  && grep -qF "**A driver fence is never worked around.** The \`browser\` driver's run config blocks service workers, so a criterion that depends on one (an update prompt, an offline cache, push, background sync) cannot be observed by it." <<<"$DRIVERS_FLAT" \
+  && grep -qF 'Report that row PARTIAL with the cause `driver fence`, and in chain mode record the criterion `partial` with that cause.' <<<"$DRIVERS_FLAT" \
+  && grep -qF 'Never observe it through another browser session or another program.' <<<"$DRIVERS_FLAT" \
+  && grep -qF "name it in the report as the check for the criterion's \`## Manual Acceptance\` row (\`rules/acceptance-consent.md\`)." <<<"$DRIVERS_FLAT" \
+  && grep -qF 'The run config blocks service workers: a registration resolves without registering one, so a state that depends on a service worker (an update prompt, an offline cache, push, background sync) never appears in this browser.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Do not wait for it and do not look for another way to produce it.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Report the scenario PARTIAL with the cause `driver fence` (`rules/drivers.md` section 3).' <<<"$BROWSER_FLAT"; then
+  check "P10o a browser run reads that a service-worker criterion is a driver fence: PARTIAL with that cause, never worked around, and the helper still writes the block that text describes" PASS
+else
+  check "P10o a browser run reads that a service-worker criterion is a driver fence: PARTIAL with that cause, never worked around, and the helper still writes the block that text describes" FAIL
+fi
+if grep -qF "so the \`browser\` driver cannot verify a PWA's update prompt, its offline cache, push or background sync." <<<"$DOC_FLAT" \
+  && grep -qF 'That is a **driver fence**: a state the driver can never show, whoever drives it.' <<<"$DOC_FLAT" \
+  && grep -qF 'because no login, account or service lifts the fence, the skill asks only whether to accept the criterion as partial or leave the chain open' <<<"$DOC_FLAT" \
+  && grep -qF "name that test as the check in the plan's \`## Manual Acceptance\` row." <<<"$DOC_FLAT" \
+  && grep -qF 'or a driver fence rules the state out, as "How the browser is fenced" below describes)' <<<"$DOC_FLAT" \
+  && grep -qF 'and for a driver fence only the last two, because no access lifts it' <<<"$DOC_FLAT"; then
+  check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" PASS
+else
+  check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" FAIL
+fi
 ACCEPTANCE_RULE="$SKILL_DIR/rules/acceptance-evidence.md"
 ACCEPTANCE_FLAT="$(tr '\n' ' ' < "$ACCEPTANCE_RULE" 2>/dev/null | tr -s ' ')"
 if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \

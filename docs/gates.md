@@ -2030,7 +2030,9 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   way to switch the gate off.
 - **Consent to a partial criterion.** `partial` means this environment cannot observe a
   criterion: it needs credentials, an account, a non-loopback host or a signed build, or its
-  driver cannot run here, so no code change turns it. A criterion the run could observe but did not
+  driver cannot run here, so no code change turns it. A driver fence is one more such cause: a
+  state the driver can never show, whoever drives it, which today means a service worker under
+  the `browser` driver. A criterion the run could observe but did not
   prove is verified again, or recorded `fail` when what was observed contradicts it. `zensu-log.sh --chain-done
   --claimed-review-ticket <ticket> --accept-partial AC-004,AC-005` closes a chain whose open
   criteria (active and not `pass`) are exactly the listed ids, are all `partial` on the
@@ -2045,7 +2047,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   `## Manual Acceptance` table whose reason names the same cause category as the `partial` record, which records
   an answer the user gave at planning or when the gap was found, or from the one question `/zensu:build` step 6d, `/zensu:verify-feature --chain` and
   `/zensu:self-review` ask when a gap is found (provide access now, accept as partial, leave the
-  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The table is
+  chain open; a driver fence takes only the last two, because no access lifts it);
+  `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The table is
   read by the program that reads the `## Requirements` table, so a decorated, linked or
   comma-listed id counts, and a row whose id is struck out, or whose check is still a `{…}`
   placeholder, covers nothing. The gate

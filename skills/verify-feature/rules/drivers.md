@@ -74,6 +74,13 @@ recipe, a build driver derives its facts from tracked files as its rule file des
   screen is proven through `browser`, `mobile`, `desktop`, or `cli` for terminal output. Proving it
   only through `api`, `library`, `async` or a log caps that criterion at PARTIAL: backend evidence
   shows that the data exists, not that the user sees it.
+- **A driver fence is never worked around.** The `browser` driver's run config blocks service
+  workers, so a criterion that depends on one (an update prompt, an offline cache, push,
+  background sync) cannot be observed by it. Report that row PARTIAL with the cause
+  `driver fence`, and in chain mode record the criterion `partial` with that cause. Never observe
+  it through another browser session or another program. When the project has a durable test that
+  produces the state in a real browser, name it in the report as the check for the criterion's
+  `## Manual Acceptance` row (`rules/acceptance-consent.md`).
 - **Visual-only is allowed and named.** A `mobile` or `desktop` row without a hierarchy tool may
   pass on inspected screenshots together with app data or the app log; the report names its state
   plane `visual-only`.

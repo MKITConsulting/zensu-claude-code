@@ -113,6 +113,12 @@ The accessibility snapshot is the primary source for structure and actionable el
 Use screenshot pixels for appearance. Use network/console evidence for runtime behavior.
 None of these substitutes for the others.
 
+The run config blocks service workers: a registration resolves without registering one, so a
+state that depends on a service worker (an update prompt, an offline cache, push, background
+sync) never appears in this browser. Do not wait for it and do not look for another way to
+produce it. Report the scenario PARTIAL with the cause `driver fence` (`rules/drivers.md`
+section 3).
+
 ## 2. Interact in small observable steps
 
 For each scenario:
