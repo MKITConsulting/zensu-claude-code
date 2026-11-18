@@ -226,6 +226,11 @@ if [ -n "${EVAL_USAGE_LEDGER:-}" ]; then
     (*) echo "claude-promptfoo-wrapper: EVAL_USAGE_LEDGER must be an absolute path" >&2; exit 64 ;;
   esac
 fi
+case "${ZENSU_WRAPPER_ASK_TOOL:-}" in
+  ('') ;;
+  (1) CMD+=(--permission-prompt-tool stdio) ;;
+  (*) echo "claude-promptfoo-wrapper: ZENSU_WRAPPER_ASK_TOOL must be 1 or unset" >&2; exit 64 ;;
+esac
 CMD+=("$FULL_PROMPT")
 
 if [ "${DRY_RUN:-0}" = "1" ]; then

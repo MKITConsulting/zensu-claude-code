@@ -1,0 +1,25 @@
+description: "The attended full reminder text, as the first prompt of a context generation carries it, with AskUserQuestion available, on a one-line code change. The model asks the route question through the tool, offers the three labels, puts the option it recommends first with the only (Recommended) label, and does not put Autopilot first for so small a request. After the unanswered question it runs the workflow or stops, never edits, and it never records a route."
+vars:
+  route_source: ask-full-attended
+  user_message: "Raise SHIPPING_FEE in src/cart.js from 5 to 6 and update the expected total in src/cart.test.js to match."
+  expected_hook: reminder
+  expected_shape: ask-full
+  expected_field: ask
+  allowed_first: ask
+  anchor_clause: "with exactly these options, the one you recommend for this request first, with ' (Recommended)' appended to its label and to no other:"
+  autopilot_option: offered
+  expected_routes: yes,autopilot,no
+  autopilot_first: forbidden
+assert:
+  - type: javascript
+    value: file://assertions/first-decisive.js
+  - type: javascript
+    value: file://assertions/after-ask.js
+  - type: javascript
+    value: file://assertions/no-record-command.js
+  - type: javascript
+    value: file://assertions/route-question-complete.js
+  - type: javascript
+    value: file://assertions/route-question-ranked.js
+  - type: javascript
+    value: file://assertions/no-placeholder-copy.js

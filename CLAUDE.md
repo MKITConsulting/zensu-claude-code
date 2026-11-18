@@ -85,10 +85,9 @@ Full policy, exemptions and known gaps: `.claude/rules/runtime-lineage.md`.
 
 ## Shell Portability
 
-macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write
-every `case` pattern with the optional leading paren, `(pattern)`. The bare `pattern)`
-form closes the substitution early on bash 3.2, and `bash -n` does not catch it.
-Details: `.claude/rules/bash32-command-substitution.md`.
+macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write every `case`
+pattern with the optional leading paren, `(pattern)`. The bare `pattern)` form closes the substitution
+early on bash 3.2, and `bash -n` does not catch it. Details: `.claude/rules/bash32-command-substitution.md`.
 
 ## Pull Request Workflow
 
@@ -184,6 +183,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Stop Background Wait (`hooks/lib/stop-background-wait-v1.js`)** — the explicit `ZENSU-AWAIT:` release of an armed chain's Stop while a background task runs, its measured host vocabulary, the one-time hint and the per-task bound: `.claude/rules/stop-background-wait.md`
 - **Cross-Cutting Review (`hooks.reviewJudgeSecondRun` + the inherited-guarantee check)** — the first review's independent second judge run, the connection-mode check for inherited guarantees and the rule for deployment-dependent defects: `.claude/rules/cross-cutting-review.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
+- **Multi-Repo Code Roots (`hooks/lib/code-roots-v1.js`, dark launch)** — declared code roots behind `CODE_ROOTS_ENABLED`, the one reader, arming, the union count, `@<label>/` grading and the per-root protections: `.claude/rules/multi-repo-code-roots.md`
 - **Claim Syntax and the Chain's Work Tree (`edit-landing-claims-v1.js` + `--work-tree`)** — brace, glob and prose claims, audited corrections, and grading an Autopilot run's own worktree below the anchor: `.claude/rules/claim-syntax-and-work-tree.md`
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
 - **Signed-In Verify Runs (`verify-auth-state-v1.js` + `verify-auth-guard-v1.js` + `--login-recipe`)** — the recipe login inside the run-config helper, the one state setter, the consume-once recorder, the signed-in session rules and the textual read guard: `.claude/rules/verify-auth-guard.md`

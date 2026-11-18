@@ -46,9 +46,15 @@ const END_REASON = 'Not available in this environment; end your turn now with on
 const RETRY_REASON = 'This shell form is not supported in this run. Use plain read commands such as cat, sed -n, grep, ls or git status instead.';
 const CONTINUE_REASON = 'No person can answer questions in this run.';
 const SETUP_REASON = 'Worktrees and branches are not available in this environment; work in the current directory.';
+const CAPTURE_REASON = 'Zensu work capture is not part of this run; continue the task without it.';
+const CAPTURE_COMMAND = /ai-work-capture-v1\.js|(^|[^\w/.-])zensu\s+ai-work(\s|$)/;
+const SETUP_SIGNALS = new Set(['git:worktree', 'git:branch', 'git:checkout', 'git:switch']);
+const NODE_VARIABLE = /^node\s+\$\{?([A-Za-z_]\w*)\}?(?=\s|$)/;
 const RETRY_CAP = 3;
 const LIMIT = 4000;
 const PART_LIMIT = 200;
+const LABEL_CAP = 8;
+const QUESTION_CAP = 4;
 
 function bounded(value, limit) {
   const text = typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value);
@@ -68,6 +74,16 @@ function flattenQuestion(input) {
   }
   if (!parts.length && input && typeof input.question === 'string') parts.push(input.question);
   return bounded(parts.join(' | '), LIMIT);
+}
+
+function questionLabels(input) {
+  const questions = input && Array.isArray(input.questions) ? input.questions : [];
+  return questions
+    .filter((q) => q && typeof q === 'object')
+    .slice(0, QUESTION_CAP)
+    .map((q) => (Array.isArray(q.options) ? q.options : [])
+      .slice(0, LABEL_CAP)
+      .map((o) => (o && typeof o === 'object' && typeof o.label === 'string' ? bounded(o.label, PART_LIMIT) : '')));
 }
 
 function segments(command) {
@@ -350,14 +366,32 @@ function unproven(command) {
   return { code: 'unlisted', part: parts.find((p) => bashPart(p) === 'other') || command };
 }
 
+function helperVariables(parts) {
+  const names = new Set();
+  for (const p of parts) {
+    for (const w of p.words) {
+      const name = /^([A-Za-z_]\w*)=/.exec(w);
+      if (name && CAPTURE_COMMAND.test(w)) names.add(name[1]);
+    }
+  }
+  return names;
+}
+
 function bashVerdict(command) {
   const text = String(command || '');
   if (!text.trim()) return { decision: 'END', code: 'empty', part: '' };
+  const lexed = lex(text, 0);
+  const signals = signalsOf(text, lexed);
+  const capture = CAPTURE_COMMAND.test(text);
+  const held = capture ? helperVariables(lexed.parts) : new Set();
+  const runsHelper = (s) => CAPTURE_COMMAND.test(s.part) || (s.code === 'program:node' && held.has((NODE_VARIABLE.exec(s.part) || [])[1]));
+  const deciding = signals.filter((s) => !SETUP_SIGNALS.has(s.code) && !(capture && runsHelper(s)));
+  if (capture && !deciding.length) return { decision: 'SETUP', code: 'capture', part: '' };
   const proven = provenDecision(text);
   if (proven) return { decision: proven, code: proven === 'ALLOW' ? 'read' : 'setup', part: '' };
-  const lexed = lex(text, 0);
-  const signal = signalsOf(text, lexed)[0];
-  if (signal) return { decision: 'END', code: signal.code, part: signal.part };
+  if (deciding.length) return { decision: 'END', code: deciding[0].code, part: deciding[0].part };
+  if (signals.length && /[\r\n]/.test(text)) return { decision: 'END', code: 'multi-line', part: text.split(/\r?\n/)[0] };
+  if (signals.length) return { decision: 'SETUP', code: 'setup', part: signals[0].part };
   if (!lexed.parts.length) return { decision: 'END', code: 'empty', part: text };
   const cause = unproven(text);
   return { decision: 'RETRY', code: cause.code, part: cause.part };
@@ -379,9 +413,9 @@ function decide(tool, input) {
   return verdictFor(tool, input).decision;
 }
 
-function reasonFor(decision) {
+function reasonFor(decision, code) {
   if (decision === 'CONTINUE') return CONTINUE_REASON;
-  if (decision === 'SETUP') return SETUP_REASON;
+  if (decision === 'SETUP') return code === 'capture' ? CAPTURE_REASON : SETUP_REASON;
   if (decision === 'RETRY') return RETRY_REASON;
   return END_REASON;
 }
@@ -392,7 +426,10 @@ function record(tool, input, id, decision, detail) {
   if (tool === 'Skill' && input && input.args) entry.args = bounded(input.args, LIMIT);
   if (tool === 'Bash') entry.command = bounded((input && input.command) || '', 400);
   if (input && (input.file_path || input.path || input.pattern)) entry.path = bounded(input.file_path || input.path || input.pattern, 400);
-  if (tool === 'AskUserQuestion') entry.question = flattenQuestion(input);
+  if (tool === 'AskUserQuestion') {
+    entry.question = flattenQuestion(input);
+    entry.labels = questionLabels(input);
+  }
   if (detail && detail.code) entry.code = detail.code;
   if (detail && detail.part) entry.part = bounded(detail.part, PART_LIMIT);
   if (detail && detail.cap) entry.cap = true;
@@ -438,7 +475,7 @@ function main(raw, dir) {
   if (verdict.decision === 'RETRY' && retries(dir) >= RETRY_CAP) verdict = { ...verdict, decision: 'END', cap: true };
   append(dir, record(tool, input, payload.tool_use_id, verdict.decision, verdict));
   if (verdict.decision === 'ALLOW') return '';
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reasonFor(verdict.decision) } });
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reasonFor(verdict.decision, verdict.code) } });
 }
 
 if (require.main === module) {
@@ -467,7 +504,12 @@ module.exports = {
   RETRY_REASON,
   CONTINUE_REASON,
   SETUP_REASON,
+  CAPTURE_REASON,
+  CAPTURE_COMMAND,
+  SETUP_SIGNALS,
   RETRY_CAP,
+  LABEL_CAP,
+  QUESTION_CAP,
   segments,
   lex,
   signalsOf,
@@ -477,6 +519,7 @@ module.exports = {
   decide,
   reasonFor,
   flattenQuestion,
+  questionLabels,
   record,
   main,
 };
