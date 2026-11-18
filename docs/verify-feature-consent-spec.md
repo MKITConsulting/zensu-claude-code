@@ -39,6 +39,17 @@ resolves the candidate recipe and otherwise offers the guided setup, and a repos
 through its own checked-in `.zensu/runtime.yaml`. AC-010 is amended in place; every statement
 below about the monorepo adapter, its markers or its controller describes the retired design.
 
+**A query or fragment on a loopback navigation was admitted on 2026-11-18.** The floor refused
+every navigation target that carried one, for local and remote origins alike. A fixture switch
+such as `?scenario=empty` on a local dev URL is no signed-preview token, and it goes to the run's
+own loopback origin, which consent or a policy names, so the floor now refuses a query or fragment
+only for a non-loopback target, with the same reason. Consent, a policy and the memory judge the
+URL as they judge it without them, and a record names the path only. The residual is the redirect
+gap recorded for every origin: the browser follows a server redirect, so a query or fragment
+travels with one that the approved origin issues. AC-003 is narrowed in place; every
+statement below that a target with a query or fragment is refused describes the earlier rule for
+a loopback target.
+
 Status: implemented on 2026-09-02 by the chain recorded in
 `.zensu/plans/2026-09-02-2137_tdd-verify-consent.md`, with two deviations the plan's
 Requirements table records under the never-recycle rule: AC-007 (a local/remote class lock)
@@ -411,7 +422,7 @@ session can write.
 |----|-------------|--------|
 | AC-001 | With `ZENSU_VERIFY_NAVIGATION_POLICY_V1` unset and the consent hook registered, the broker starts in `consent` mode and `browser_navigate` to `http://127.0.0.1:<port>/` succeeds after the PreToolUse hook returned `ask`. | spec §6.2 |
 | AC-002 | With the variable unset and the consent hook absent from `hooks/hooks.json`, the broker starts in `deny` mode and every navigation is refused exactly as today. | spec §6.2 |
-| AC-003 | In consent mode a navigation to a non-loopback `http` origin, a hostname other than the exact name `localhost` (`app.localhost` and `localhost.` included), a private-range `https` origin, or a target with userinfo, query or fragment is refused by both the hook (deny) and the broker (floor), independently. Narrowed 2026-09-28 with AC-018. | spec §6.2, §6.3 |
+| AC-003 | In consent mode a navigation to a non-loopback `http` origin, a hostname other than the exact name `localhost` (`app.localhost` and `localhost.` included), a private-range `https` origin, a target with userinfo, or a target with a query or fragment unless its host is loopback, is refused by both the hook (deny) and the broker (floor), independently. Narrowed 2026-09-28 with AC-018 and 2026-11-18 for a loopback query or fragment. | spec §6.2, §6.3 |
 | AC-004 | The PreToolUse hook returns `ask` for the first navigation to each new loopback origin, and `allow` for every navigation to an origin the session consent memory already holds, whatever its route. | spec §6.3 |
 | AC-005 | The PostToolUse hook records exactly `(origin, route, decidedBy, at)` after an executed navigation — and no route set — and refuses to write when the memory path is a symlink, a non-file, or outside the session's project state directory. | spec §6.4 |
 | AC-006 | A sub-request or redirect to an origin outside the broker's approved set is blocked in consent mode. | spec §6.2 |

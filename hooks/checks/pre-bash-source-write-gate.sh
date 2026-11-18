@@ -107,7 +107,7 @@ fi
 # to ledger (kept ahead of the escape checks so all Bash gates share the order).
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_opted_in bashWriteGate || exit 0
-OPT_IN_NOTE="This gate is opt-in and runs because hooks.bashWriteGate is true in the Zensu config; if the command is intended, ask the user to run it or to switch the gate off."
+OPT_IN_NOTE="This gate is opt-in and runs because hooks.bashWriteGate is true in the Zensu config; if the command is intended, ask the user to run it."
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 ZENSU_SESSION_BOUND=true
@@ -277,7 +277,7 @@ if ! REASON="$(
   BSWG_MODE= PAYLOAD= BSWG_REANCHOR=1 CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
     node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
 )"; then
-  emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. This gate is opt-in, and switching it off is decided BEFORE the parser runs, so that still works here: ask the user to set hooks.bashWriteGate to false in the Zensu config layer that enables it — the .zensu/config.json under the host's project directory overrides ~/.zensu/config.json, and ZENSU_CONFIG, when set, replaces both."
+  emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. A file change inside your own worktree can still go through Edit or Write. ${OPT_IN_NOTE}"
   exit 0
 fi
 case "$REASON" in

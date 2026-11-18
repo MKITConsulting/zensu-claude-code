@@ -214,7 +214,7 @@ const GIT_OPTS_WITH_OPERAND = new Set(
 
 const OPT_IN_NOTE =
   " This gate is opt-in and runs because hooks.bashWriteGate is true in the Zensu config; " +
-  "if the command is intended, ask the user to run it or to switch the gate off.";
+  "if the command is intended, ask the user to run it.";
 
 function stripSlash(p) {
   return p && p.length > 1 && p.endsWith("/") ? p.replace(/\/+$/, "") : p;

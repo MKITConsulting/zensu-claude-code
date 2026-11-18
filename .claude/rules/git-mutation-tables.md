@@ -656,11 +656,13 @@ consent ladder exists to NAME a refusal, and one table would tie an admit-releva
 reason-only one. **A further coupling is
 PROSE rather than a table:** every reason rules (A), (B) and (C) produce ends with `OPT_IN_NOTE`,
 which names `hooks.bashWriteGate` and leaves an intended command to the user, and never the
-escape prefix. On the unbound path the hook appends its binding paragraph after that reason, so
-the deny contains the note without ending on it. Four of the hook's own denies — the no-anchor deny, the two unbound parser failures and the
-empty recorded root — carry the same sentence through its `OPT_IN_NOTE` shell variable, a
-hand-copy that W5b holds equal to the parser's exported constant; the bound parser-failure
-deny names `hooks.bashWriteGate` in a remedy of its own, which W218 pins. `skills/session-trail` (`references/takeover.md` and the emitted `MOVE_ALTERNATIVE`) ASSERTS
+escape prefix or a switch-off. On the unbound path the hook appends its binding paragraph after that reason, so
+the deny contains the note without ending on it. Five of the hook's own denies — the no-anchor deny, the two unbound parser failures, the
+empty recorded root and the bound parser failure — carry the same sentence through its `OPT_IN_NOTE` shell variable, a
+hand-copy that W5b holds equal to the parser's exported constant; the bound parser failure
+names Edit or Write inside the own worktree before the note and no `/zensu:doctor` run, because
+in a bound session the doctor's own Bash command reaches the same failing parser call, and W218
+pins both. `skills/session-trail` (`references/takeover.md` and the emitted `MOVE_ALTERNATIVE`) ASSERTS
 that shape — the refusal names the config key and no escape. W32, W33, W87 and W121 in
 `tests/structure/test-bash-source-write-gate.sh` pin the note's words and the prefix's
 absence on the parser side; `T35b` and `WT8v12`/`WT8v12b` pin each skill carrier's own

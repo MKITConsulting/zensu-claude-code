@@ -207,8 +207,8 @@ and the relevant slice of the status card as the skill's input. Rules:
    mutation**, never once per session. Run step iii regardless of the
    transition's outcome — a 409, auth error, or network failure still closes
    the window BEFORE the rejection is handled. If the gate denies a confirmed
-   transition, re-arm and retry; **never prefix `ZENSU_MCP_GATE=off`** — a
-   gate deny means the arming window is missing, not that a bypass is
+   transition, re-arm and retry; **never answer a gate deny with a bypass**
+   — a gate deny means the arming window is missing, not that a bypass is
    warranted.
 3. **`released` preflight:** before offering the `released` transition, re-run
    `zensu security validate <id>`. Offer it only on a green verdict; on red,
