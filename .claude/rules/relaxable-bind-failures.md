@@ -172,6 +172,14 @@ an induced release is currently silent — it cannot be ledgered, because the do
 bypass entry would live in is the one that became unreachable — so a detection surface (a
 sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missing.
 
+**Both diagnoses read the record through the shared walker.** `resolveIncompatibleRuntime` and
+`resolvePrunedPluginRoot` each make one `readContextLadder` call with a rung list of their own:
+strict and orphaned-project-root for the lineage predicate; strict, pruned-plugin-root and
+orphaned-and-pruned for the pruned one. Each answers `null` for every reader it does not name.
+Those lists are the reads each predicate made before the walker existed, and a rung added to
+either costs a record read or a runtime-digest walk in the states that reach it, so the walker
+paragraph of `.claude/rules/session-adoption.md` decides before one is added.
+
 **Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
 `readContextInternal`/`readOrphanedProjectRootContext`, and `requireAbsentDirectoryPath`,
 which is the shape-without-existence rule both that reader and `buildContext`'s waived

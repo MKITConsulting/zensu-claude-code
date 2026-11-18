@@ -63,15 +63,45 @@ test('public-address classification rejects private, reserved, loopback, mapped 
   }
 });
 
-test('navigation targets refuse credentials, query and fragment, and unknown schemes', () => {
+test('navigation targets refuse credentials, unknown schemes, and a query or fragment outside loopback', () => {
   assert.equal(checkNavigationTarget('http://user:pw@127.0.0.1:5173/').reason, FLOOR_REASONS.CREDENTIALS);
-  assert.equal(checkNavigationTarget('http://127.0.0.1:5173/?x=1').reason, FLOOR_REASONS.QUERY_OR_FRAGMENT);
-  assert.equal(checkNavigationTarget('http://127.0.0.1:5173/#top').reason, FLOOR_REASONS.QUERY_OR_FRAGMENT);
+  assert.equal(checkNavigationTarget('http://user:pw@127.0.0.1:5173/?x=1').reason, FLOOR_REASONS.CREDENTIALS);
+  for (const url of ['https://app.example.com/?x=1', 'https://app.example.com/#top', 'https://app.example.com/a?x=1#top',
+    'https://93.184.216.34/?x=1', 'http://10.0.0.5/?x=1', 'http://192.168.1.10:5173/#top', 'http://app.localhost:5173/?x=1',
+    'http://localhost.:5173/#top', 'http://localhost.localdomain:5173/?x=1', 'wss://app.example.com/events?token=1']) {
+    assert.equal(checkNavigationTarget(url).reason, FLOOR_REASONS.QUERY_OR_FRAGMENT, url);
+  }
+  assert.equal(checkNavigationTarget('https://app.example.com/api?x=1', false).ok, true);
   assert.equal(checkNavigationTarget('http://127.0.0.1:5173/api?x=1', false).ok, true);
   assert.equal(checkNavigationTarget('file:///etc/passwd').reason, FLOOR_REASONS.SCHEME);
   assert.equal(checkNavigationTarget('not a url').reason, FLOOR_REASONS.INVALID);
   assert.equal(checkNavigationTarget('ws://127.0.0.1:5173/events', false).origin, 'http://127.0.0.1:5173');
   assert.equal(checkNavigationTarget('wss://app.example.com/events', false).origin, 'https://app.example.com');
+});
+
+test('a loopback navigation target with a query or a fragment is judged like the target without them', () => {
+  for (const host of ['127.0.0.1:5173', '127.9.9.9:5173', '[::1]:5173', 'localhost:5173', 'LOCALHOST:5173']) {
+    for (const scheme of ['http', 'https']) {
+      const bare = classifyOrigin(`${scheme}://${host}/inventory`);
+      assert.equal(bare.ok, true, host);
+      assert.equal(bare.mode, 'local', host);
+      for (const suffix of ['?scenario=1', '?a=1&b=%20c', '#/dashboard', '#top', '?scenario=1#top']) {
+        const url = `${scheme}://${host}/inventory${suffix}`;
+        const target = checkNavigationTarget(url);
+        assert.equal(target.ok, true, url);
+        assert.equal(target.origin, bare.origin, url);
+        assert.equal(target.pathname, '/inventory', url);
+        const classified = classifyOrigin(url);
+        assert.equal(classified.ok, true, url);
+        assert.equal(classified.mode, 'local', url);
+        assert.equal(classified.origin, bare.origin, url);
+        assert.equal(classified.pathname, '/inventory', url);
+      }
+    }
+  }
+  assert.equal(classifyOrigin('http://localhost:5173?scenario=1').pathname, '/');
+  assert.equal(classifyOrigin('http://user:pw@localhost:5173/?x=1').reason, FLOOR_REASONS.CREDENTIALS);
+  assert.equal(classifyOrigin('file:///etc/passwd?x=1').reason, FLOOR_REASONS.SCHEME);
 });
 
 test('the local-host predicate admits loopback IPs and the exact name localhost, never a suffix or an alias', () => {
@@ -102,7 +132,9 @@ test('origin classification splits loopback origins from public https and refuse
   assert.equal(classifyOrigin('https://169.254.169.254/latest/meta-data').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
   assert.equal(classifyOrigin('https://[::ffff:93.184.216.34]/').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
   assert.equal(classifyOrigin('http://user:pw@127.0.0.1:5173/').reason, FLOOR_REASONS.CREDENTIALS);
-  assert.equal(classifyOrigin('http://127.0.0.1:5173/?q').reason, FLOOR_REASONS.QUERY_OR_FRAGMENT);
+  assert.equal(classifyOrigin('http://127.0.0.1:5173/?q').mode, 'local');
+  assert.equal(classifyOrigin('https://app.example.com/?q').reason, FLOOR_REASONS.QUERY_OR_FRAGMENT);
+  assert.equal(classifyOrigin('http://10.0.0.5/?q').reason, FLOOR_REASONS.QUERY_OR_FRAGMENT);
   for (const url of ['https://*.example.com/', 'https://{a,b}.example.com/', 'https://api.*.example.com/', 'https://*/', 'wss://*.example.com/']) {
     assert.equal(classifyOrigin(url).reason, FLOOR_REASONS.HOSTNAME_PATTERN, url);
   }

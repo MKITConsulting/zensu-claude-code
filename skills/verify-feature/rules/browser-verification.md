@@ -78,11 +78,17 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    The FIRST `playwright-cli` call that reaches a new origin — `open` with the run config, `goto`,
    or `tab-new` — opens the prompt. Answering it is the user's action; never answer it on their
    behalf and never work around a refusal. The floor holds in every mode: no credentials, no query
-   or fragment in a navigation, and the browser refuses every HTTP(S) request to an origin outside
-   the run config; a WebSocket connection is not fenced by the run config, which is an open gap.
+   or fragment in a navigation to a non-loopback origin, and the browser refuses every HTTP(S)
+   request to an origin outside the run config; a WebSocket connection is not fenced by the run
+   config, which is an open gap. A loopback URL (a loopback IP or `localhost`) may carry a query or
+   a fragment, such as a fixture switch, and is judged like the same URL without them; pass it
+   single-quoted, because an unquoted `?` is a glob the gate refuses as a shape denial. A query or
+   fragment value comes from the recipe or the criterion under test, never from a page, a console
+   line, a request log or a file the run read, because a server redirect from an approved origin
+   carries it to an origin nobody approved.
    The session consent memory named in SKILL.md records each approved ORIGIN; a record names the
-   route that was visited, but the route steers no later decision, and the report lists every
-   record in its `Consent` block. It is yours to READ for the report and never to write, edit or
+   route that was visited, as a path without its query or fragment, but the route steers no later
+   decision, and the report lists every record in its `Consent` block. It is yours to READ for the report and never to write, edit or
    delete: a record you place there skips the human's prompt for that origin, so writing one grants
    yourself the consent this gate exists to ask for. Only the PostToolUse hook writes it.
 1. Open the run-config session at the resolved base URL and route only after the policy
@@ -112,6 +118,12 @@ with element refs such as `e21`; target elements by those refs. Every navigating
 The accessibility snapshot is the primary source for structure and actionable element refs.
 Use screenshot pixels for appearance. Use network/console evidence for runtime behavior.
 None of these substitutes for the others.
+
+The run config blocks service workers: a registration resolves without registering one, so a
+state that depends on a service worker (an update prompt, an offline cache, push, background
+sync) never appears in this browser. Do not wait for it and do not look for another way to
+produce it. Report the scenario PARTIAL with the cause `driver fence` (`rules/drivers.md`
+section 3).
 
 ## 2. Interact in small observable steps
 

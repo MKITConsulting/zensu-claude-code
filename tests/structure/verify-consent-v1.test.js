@@ -939,7 +939,9 @@ test('without a reported permission mode consent mode refuses a remote target, a
     ['http://10.0.0.5/', FLOOR_REASONS.REMOTE_HTTPS],
     ['https://10.0.0.5/', FLOOR_REASONS.REMOTE_NOT_PUBLIC],
     ['http://user:pw@127.0.0.1:4200/', FLOOR_REASONS.CREDENTIALS],
-    ['http://127.0.0.1:4200/?token=1', FLOOR_REASONS.QUERY_OR_FRAGMENT],
+    ['https://app.example.com/?token=1', FLOOR_REASONS.QUERY_OR_FRAGMENT],
+    ['http://10.0.0.5/#x', FLOOR_REASONS.QUERY_OR_FRAGMENT],
+    ['http://app.localhost:4200/?token=1', FLOOR_REASONS.QUERY_OR_FRAGMENT],
     ['file:///etc/passwd', FLOOR_REASONS.SCHEME],
     ['not-a-url', FLOOR_REASONS.INVALID],
   ];
@@ -990,7 +992,8 @@ test('policy mode admits every route of a policy target without a prompt and, wi
   const policy = policyOf('local', [LOCAL_TARGET]);
   assert.equal(denied(cli('goto http://localhost:4300/'), { policy }), `http://localhost:4300: ${REASONS.NOT_POLICY_TARGET}`);
   assert.equal(denied(cli('goto http://app.localhost:4300/'), { policy }), FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
-  assert.equal(denied(cli(`goto 'http://127.0.0.1:4300/login?next=/admin'`), { policy }), FLOOR_REASONS.QUERY_OR_FRAGMENT);
+  assert.deepEqual(decide(cli(`goto 'http://127.0.0.1:4300/login?next=/admin'`), { policy }),
+    { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route: '/login', decidedBy: 'policy-mode' }] });
   const named = policyOf('local', [{ origin: 'http://localhost:4300', evidenceMode: 'declared-safe' }]);
   assert.deepEqual(decide(cli('goto http://localhost:4300/teams/t-81/sprints/s-7'), { policy: named }),
     { verdict: 'none', plan: [{ origin: 'http://localhost:4300', route: '/teams/t-81/sprints/s-7', decidedBy: 'policy-mode' }] });
@@ -1088,6 +1091,96 @@ test('judgeOrigin keeps the navigable and the network-only role apart and has no
 
 const HUMAN = Object.freeze({ permission_mode: 'default' });
 const APP_PIN = Object.freeze(['MAP app.example.com 93.184.216.34']);
+
+test('a loopback navigation with a query or a fragment is judged exactly like the same URL without them', (t) => {
+  const env = isolatedEnv(t);
+  const suffixes = ['?scenario=1', '#/dashboard', '?scenario=1&mode=empty#top'];
+  for (const host of ['127.0.0.1:4200', 'localhost:4200', '[::1]:4200']) {
+    const config = runConfig(t, [`http://${host}`]);
+    const bareUrl = `'http://${host}/login'`;
+    for (const verb of ['goto', 'tab-new']) {
+      const bare = decide(cli(`${verb} ${bareUrl}`));
+      assert.equal(bare.verdict, 'ask', `${verb} ${host}`);
+      assert.deepEqual(bare.plan.map((entry) => entry.route), ['/login']);
+      for (const suffix of suffixes) {
+        assert.deepEqual(decide(cli(`${verb} 'http://${host}/login${suffix}'`)), bare, `${verb} ${host}${suffix}`);
+      }
+    }
+    const bareOpen = decide(openCommand(config.file, bareUrl), { env });
+    assert.equal(bareOpen.verdict, 'ask', `open ${host}`);
+    assert.deepEqual(bareOpen.origins, [`http://${host}`]);
+    for (const suffix of suffixes) {
+      assert.deepEqual(decide(openCommand(config.file, `'http://${host}/login${suffix}'`), { env }), bareOpen, `open ${host}${suffix}`);
+    }
+  }
+  const remembered = [record('http://127.0.0.1:4200', '/login', 'asked')];
+  assert.deepEqual(decide(cli(`goto 'http://127.0.0.1:4200/login?scenario=1'`), { records: remembered }),
+    { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4200', route: '/login', decidedBy: 'remembered' }] });
+  const policy = policyOf('local', [LOCAL_TARGET]);
+  const configured = runConfig(t, ['http://127.0.0.1:4300']);
+  const admitted = { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route: '/login', decidedBy: 'policy-mode' }] };
+  for (const suffix of suffixes) {
+    for (const verb of ['goto', 'tab-new']) {
+      assert.deepEqual(decide(cli(`${verb} 'http://127.0.0.1:4300/login${suffix}'`), { policy }), admitted, `${verb} ${suffix}`);
+    }
+    assert.deepEqual(decide(openCommand(configured.file, `'http://127.0.0.1:4300/login${suffix}'`), { env, policy }), admitted, `open ${suffix}`);
+  }
+  assert.equal(denied(cli(`goto 'http://127.0.0.1:4301/login?scenario=1'`), { policy }), `http://127.0.0.1:4301: ${REASONS.NOT_POLICY_TARGET}`);
+  const withApi = networkOnlyPolicy('local', [LOCAL_TARGET], ['http://127.0.0.1:9090']);
+  const apiConfig = runConfig(t, ['http://127.0.0.1:4300', 'http://127.0.0.1:9090']);
+  const apiDenial = `http://127.0.0.1:9090: ${REASONS.NETWORK_ONLY_NAVIGATION}`;
+  for (const suffix of suffixes) {
+    for (const verb of ['goto', 'tab-new']) {
+      assert.equal(denied(cli(`${verb} 'http://127.0.0.1:9090/health${suffix}'`), { policy: withApi }), apiDenial, `${verb} ${suffix}`);
+    }
+    assert.equal(denied(openCommand(apiConfig.file, `'http://127.0.0.1:9090/health${suffix}'`), { env, policy: withApi }), apiDenial, `open ${suffix}`);
+  }
+});
+
+test('a remote navigation with a query or a fragment is still refused with the floor reason, under a policy and in consent mode', (t) => {
+  const env = isolatedEnv(t);
+  const remotePolicy = policyOf('remote', [REMOTE_APP_TARGET]);
+  const remoteConfig = runConfig(t, ['https://app.example.com'], APP_PIN);
+  for (const url of ['https://app.example.com/?x=1', 'https://app.example.com/#top', 'https://app.example.com/a?x=1#top']) {
+    for (const verb of ['goto', 'tab-new']) {
+      assert.equal(denied(cli(`${verb} '${url}'`), { policy: remotePolicy }), FLOOR_REASONS.QUERY_OR_FRAGMENT, `${verb} ${url}`);
+      assert.equal(denied(cli(`${verb} '${url}'`), { payload: HUMAN }), FLOOR_REASONS.QUERY_OR_FRAGMENT, `${verb} ${url}`);
+    }
+    assert.equal(denied(openCommand(remoteConfig.file, `'${url}'`), { env, policy: remotePolicy }), FLOOR_REASONS.QUERY_OR_FRAGMENT, `open ${url}`);
+    assert.equal(denied(openCommand(remoteConfig.file, `'${url}'`), { env, payload: HUMAN }), FLOOR_REASONS.QUERY_OR_FRAGMENT, `open ${url}`);
+  }
+  assert.equal(decide(cli(`goto 'https://app.example.com/a'`), { payload: HUMAN }).verdict, 'ask');
+  assert.equal(denied(cli(`goto 'http://user:pw@127.0.0.1:4200/?x=1'`)), FLOOR_REASONS.CREDENTIALS);
+});
+
+test('a loopback navigation with a query or a fragment records its path only, and no query value reaches the memory, the prompt or a refusal', (t) => {
+  const { root, memory } = project(t);
+  const env = { ...isolatedEnv(t), ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory };
+  const first = 'q-first-7f3a';
+  const second = 'q-second-91c2';
+  const target = (value) => `'http://localhost:4200/login?scenario=${value}&token=${value}#frag-${value}'`;
+  const asked = sink();
+  assert.equal(consent.runPre(bash(cli(`goto ${target(first)}`)), env, asked, sink()), true);
+  const output = JSON.parse(asked.text()).hookSpecificOutput;
+  assert.equal(output.permissionDecision, 'ask');
+  assert.match(output.permissionDecisionReason, /is about to reach http:\/\/localhost:4200 \(local loopback\)/);
+  const err = sink();
+  const recorded = consent.runPost(post(cli(`goto ${target(first)}`)), env, err);
+  assert.equal(recorded.ok, true);
+  assert.equal(recorded.duplicate, false);
+  assert.equal(consent.runPost(post(cli(`tab-new ${target(second)}`)), env, err).duplicate, true);
+  const read = consent.readConsentMemory(memory, root);
+  assert.deepEqual(read.records.map(({ origin, route, decidedBy }) => ({ origin, route, decidedBy })), [
+    { origin: 'http://localhost:4200', route: '/login', decidedBy: 'asked' },
+  ]);
+  const refused = sink();
+  assert.equal(consent.runPre(bash(cli(`goto 'https://app.example.com/?token=${first}'`)), env, refused, sink()), true);
+  assert.equal(JSON.parse(refused.text()).hookSpecificOutput.permissionDecisionReason, `${DENIED}${FLOOR_REASONS.QUERY_OR_FRAGMENT}`);
+  for (const text of [asked.text(), refused.text(), fs.readFileSync(memory, 'utf8'), err.text()]) {
+    for (const value of [first, second]) assert.equal(text.includes(value), false, value);
+  }
+  assert.equal(err.text(), '');
+});
 
 test('a person can answer the permission prompt only in default, acceptEdits, auto and plan mode', () => {
   assert.deepEqual([...consent.ANSWERABLE_MODES], ['default', 'acceptEdits', 'auto', 'plan']);

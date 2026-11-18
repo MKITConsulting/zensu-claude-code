@@ -119,7 +119,7 @@ test('a local run writes an isolated, origin-restricted config inside the run di
   assert.deepEqual(fs.readdirSync(dir), [helper.CONFIG_NAME]);
 });
 
-test('a local run refuses every origin the navigation floor refuses', async (t) => {
+test('a local run refuses every origin the navigation floor refuses and every origin that carries a query or a fragment', async (t) => {
   const dir = runDir(t);
   const refused = [
     ['http://app.localhost:5173', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
@@ -127,9 +127,10 @@ test('a local run refuses every origin the navigation floor refuses', async (t) 
     ['http://192.168.1.10:5173', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
     ['https://example.com', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
     ['http://user:pw@127.0.0.1:5173', FLOOR_REASONS.CREDENTIALS],
-    ['http://127.0.0.1:5173/?token=x', FLOOR_REASONS.QUERY_OR_FRAGMENT],
-    ['http://127.0.0.1:5173/#x', FLOOR_REASONS.QUERY_OR_FRAGMENT],
-    ['http://127.0.0.1:5173/?', FLOOR_REASONS.QUERY_OR_FRAGMENT],
+    ['http://127.0.0.1:5173/?token=x', FLOOR_REASONS.ORIGIN_QUERY_OR_FRAGMENT],
+    ['http://127.0.0.1:5173/#x', FLOOR_REASONS.ORIGIN_QUERY_OR_FRAGMENT],
+    ['http://127.0.0.1:5173/?', FLOOR_REASONS.ORIGIN_QUERY_OR_FRAGMENT],
+    ['http://localhost:5173/?scenario=empty', FLOOR_REASONS.ORIGIN_QUERY_OR_FRAGMENT],
     ['http://127.0.0.1:5173/app', /must not carry a path/],
     ['ws://127.0.0.1:5173', FLOOR_REASONS.SCHEME],
     ['file:///etc/passwd', FLOOR_REASONS.SCHEME],
