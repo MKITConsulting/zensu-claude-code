@@ -42,17 +42,19 @@ chain cannot close before a full-suite run and a live check of every acceptance 
 Stop hook holds the turn until the review chain closes; the option is usually ranked first and
 marked recommended, so a newcomer agreed to costs nobody named (newcomer audit 2026-10-18,
 P1-7). Its description now states that the turn waits for the review chain and, by default,
-for the full-suite run and the live acceptance check, names both keys, and names
-`/zensu:full-suite` as the way to leave the suite to the pull-request pipeline. That wording
+for the full-suite run and the live acceptance check, and names
+`/zensu:full-suite` as the way to leave the suite to the pull-request pipeline. It names neither
+key: a gate key beside a cost reads to the model as a switch to offer, so the keys stay in the
+operator rows of `docs/configuration.md` (`.claude/rules/gate-disable-prefixes.md`). That wording
 says "PR pipeline", never "CI": `D13` reads `\bCI\b` in the question block as unattended-run
 vocabulary, and the cost text must not weaken that grader. `D15b` pins the statement inside
 option (2) of both heredocs. The room came from the text itself, not from `D44`'s ceiling: the
 rationale after "never record it with --direct yourself", the repeated "The user changes a
 recorded route" sentence, "and in most cases ASK the user" (the question sentence already says
 so), the lead-in of the human-present sentence, which now opens with "The field's", and the
-vanilla option's cause clause went. Measured with `D44`'s method, the vanilla directive grows
-from 8,962 to 8,986 and the strict one from 8,826 to 8,960, because strict had no cause clause
-to trim.
+vanilla option's cause clause went. Measured with `D44`'s method after the evidence gate keys
+left option (2), the vanilla directive takes 8,932 and the strict one 8,906 of the 9,000
+characters.
 
 **An affirmation that asks for TDD runs that one chain strict.** The affirmation arm of `(B)`
 ensures the specification carries exactly one `TDD-MODE: strict` line and uses the status line

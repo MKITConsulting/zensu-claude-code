@@ -72,10 +72,12 @@ active criterion has a `pass` on the tree that ships
 ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). It verifies a criterion
 that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs
 a code change first. A criterion this environment cannot observe (it needs
-credentials, an account, a non-loopback host or a signed build, or its driver cannot run here)
+credentials, an account, a non-loopback host or a signed build, or its driver cannot run here,
+or a driver fence rules the state out, as "How the browser is fenced" below describes)
 is `partial`, never a fix step:
 the skill asks the user once whether to provide access now, accept it as partial or leave the
-chain open (`skills/verify-feature/rules/acceptance-consent.md`), and an accepted criterion
+chain open, and for a driver fence only the last two, because no access lifts it
+(`skills/verify-feature/rules/acceptance-consent.md`), and an accepted criterion
 closes the chain only through `--chain-done --accept-partial` for exactly its id, once the plan's
 `## Manual Acceptance` table holds its row. Remote mode is
 refused there, because a deployed URL runs other code than the tree the records bind to. The consent and policy rules below apply unchanged. In consent
@@ -136,6 +138,16 @@ to the run's origins (`network.allowedOrigins`) except a server redirect the bro
 WebSocket connection is not fenced by it, which is an open gap — blocks service workers, and
 keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
+
+Blocking service workers has a cost to plan for. A state that depends on a service worker never
+appears in this browser, so the `browser` driver cannot verify a PWA's update prompt, its offline
+cache, push or background sync. That is a **driver fence**: a state the driver can never show,
+whoever drives it. In a review chain such a criterion is `partial`, planning names the gap before
+any code is written, and because no login, account or service lifts the fence, the skill asks
+only whether to accept the criterion as partial or leave the chain open
+(`skills/verify-feature/rules/acceptance-consent.md`). Cover that behaviour with a test of your
+own that runs a real browser, and name that test as the check in the plan's
+`## Manual Acceptance` row.
 
 The **browser consent gate** — two hooks on the `Bash|PowerShell` matcher — reads Bash only, so
 it refuses a PowerShell call that names the CLI together with a `zensu-verify` session, a
@@ -208,10 +220,12 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
   `[::1]` or the exact name `localhost`; never `app.localhost` or another hostname). A remote run
   reaches only HTTPS origins whose host is named exactly, never a wildcard, and whose DNS
   answers are all public; the run-config helper pins each hostname to the address it resolved
-  before the browser starts. No credentials, no query or fragment in a navigation, and the
-  browser sends no HTTP(S) request to an origin outside the run config, except by following a
-  server redirect (below). A WebSocket connection is not fenced by the run config, which is an
-  open gap.
+  before the browser starts. No credentials, no query or fragment in a navigation to a
+  non-loopback origin, and the browser sends no HTTP(S) request to an origin outside the run
+  config, except by following a server redirect (below). A WebSocket connection is not fenced by
+  the run config, which is an open gap. A loopback URL may carry a query or a fragment, such as a
+  fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like the same URL without
+  them, and the consent record names the path only.
 - An API or identity origin of a deployed app that its pages call is passed to the run as one
   more origin: it is asked in the same prompt as the app and never navigated to.
 - Under bypass permissions or `dontAsk`, or when the host reports no permission mode, the gate

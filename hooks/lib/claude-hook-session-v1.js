@@ -260,22 +260,17 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
     const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
     const recordsDir = privateRecordsDirectory(pluginData, true);
     if (recordsDir === null) return null;
-    const readerOptions = {
-      recordsDir,
-      sessionId: payload.session_id,
-      expectedHost: 'claude',
-    };
-    let context;
-    let orphanedProjectRoot = null;
-    try {
-      context = core.readContext(readerOptions);
-    } catch {
-      // Only reached when the strict read failed. If THIS read also throws the
-      // whole function answers null through the outer catch, so a record that
-      // disagrees about anything else is never reclassified as this state.
-      context = core.readOrphanedProjectRootContext(readerOptions);
-      orphanedProjectRoot = context.project_root;
-    }
+    const admitted = core.readContextLadder({ recordsDir, sessionId: payload.session_id, host: 'claude' }, [
+      core.RECORD_READERS.STRICT,
+      core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
+    ]);
+    if (admitted === null
+      || (admitted.reader !== core.RECORD_READERS.STRICT
+        && admitted.reader !== core.RECORD_READERS.ORPHANED_PROJECT_ROOT)) return null;
+    const { context } = admitted;
+    const orphanedProjectRoot = admitted.reader === core.RECORD_READERS.ORPHANED_PROJECT_ROOT
+      ? context.project_root
+      : null;
     if (context.plugin_data !== pluginData) return null;
     // The disagreement must be the lineage and nothing else: if this root DOES
     // serve the record, the bind failed for some other reason and naming the
@@ -315,24 +310,20 @@ function resolvePrunedPluginRoot(payload, environment = process.env) {
     const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
     const recordsDir = privateRecordsDirectory(pluginData, true);
     if (recordsDir === null) return null;
-    const readerOptions = { recordsDir, sessionId: payload.session_id, expectedHost: 'claude' };
     // The strict read must FAIL: a record it accepts is either served or a
     // lineage question, and naming a pruned installation there would be a wrong
     // diagnosis. The relaxed read must then SUCCEED, which proves the absence of
     // the recorded plugin root, and at most of the recorded project root as well,
     // is all the strict read tripped on.
-    try {
-      core.readContext(readerOptions);
-      return null;
-    } catch {
-      // fall through to the relaxed read
-    }
-    let context;
-    try {
-      context = core.readPrunedPluginRootContext(readerOptions);
-    } catch {
-      context = core.readOrphanedPrunedContext(readerOptions);
-    }
+    const admitted = core.readContextLadder({ recordsDir, sessionId: payload.session_id, host: 'claude' }, [
+      core.RECORD_READERS.STRICT,
+      core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+      core.RECORD_READERS.ORPHANED_PRUNED,
+    ]);
+    if (admitted === null
+      || (admitted.reader !== core.RECORD_READERS.PRUNED_PLUGIN_ROOT
+        && admitted.reader !== core.RECORD_READERS.ORPHANED_PRUNED)) return null;
+    const { context } = admitted;
     if (context.plugin_data !== pluginData) return null;
     // The same sibling bound adoption applies: a pruned record of a FOREIGN
     // installation (a --plugin-dir checkout beside nothing) is a second

@@ -106,6 +106,6 @@ Say what changed, with IDs: the `KEY-N` and UUID of every feature, the ID of eve
 - One request, one window. A change the user adds later opens its own window.
 - One window per session, never nested. `--workflow-begin` replaces the tool list of a window another skill opened, such as the one of `/zensu:implement` or `/zensu:pilot`, and Step 7 closes it. While another skill's window is open, do not run this skill: offer the change as a follow-up once that workflow has closed its window.
 - A step that needs an answer and cannot get one, because AskUserQuestion is unavailable or refused, as in a bound work-order session, ends the run before Step 5: run no command, and report the change as one that needs a person.
-- When the gate still denies a command inside the window, that command maps to a tool the window does not declare. Stop, close the window and report the deny reason. Never answer a deny with the `ZENSU_MCP_GATE=off` prefix.
+- When the gate still denies a command inside the window, that command maps to a tool the window does not declare. Stop, close the window and report the deny reason. Never retry a denied command, with or without a prefix.
 - Never run a command the gate calls a person's decision, inside this skill or outside it.
 - A command run in a subagent is denied even while this window is open. Run every `zensu` call of this skill in the interactive main thread.
