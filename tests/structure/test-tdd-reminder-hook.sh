@@ -295,7 +295,7 @@ reminder_with_host() {
       CLAUDE_PLUGIN_DATA="$P30/plugin-data" CLAUDE_PROJECT_DIR="$P30" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null
 }
 autopilot_offer() {
-  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const t=JSON.parse(s).hookSpecificOutput.additionalContext;const label=/in this order: \x27Yes — (Zensu workflow|TDD flow)\x27, \x27Autopilot — \/zensu:autopilot\x27 and \x27No — implement directly\x27\./.test(t)||/"Yes — (Zensu workflow|TDD flow)", "Autopilot — \/zensu:autopilot" and "No — implement directly", in this order\./.test(t);const arm=/skill=\x27zensu:autopilot\x27|skill zensu:autopilot/.test(t);process.stdout.write(label&&arm?"offered":!label&&!arm?"absent":"partial")}catch(_){process.stdout.write("unparseable")}})'
+  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const t=JSON.parse(s).hookSpecificOutput.additionalContext;const label=/appended to its label and to no other: \x27Yes — (Zensu workflow|TDD flow)\x27, \x27Autopilot — \/zensu:autopilot\x27 and \x27No — implement directly\x27\./.test(t)||/"Yes — (Zensu workflow|TDD flow)", "Autopilot — \/zensu:autopilot" and "No — implement directly", the one you recommend first, with " \(Recommended\)" appended to its label and to no other\./.test(t);const arm=/skill=\x27zensu:autopilot\x27|skill zensu:autopilot/.test(t);process.stdout.write(label&&arm?"offered":!label&&!arm?"absent":"partial")}catch(_){process.stdout.write("unparseable")}})'
 }
 C30_BAD=""
 C30C_BAD=""

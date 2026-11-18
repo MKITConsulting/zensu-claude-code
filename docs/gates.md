@@ -897,9 +897,12 @@ session is prose, not a boundary.
 **The floor holds regardless of consent.** A hostname other than `localhost` in local mode —
 `app.localhost`, `localhost.` and `/etc/hosts` aliases included — a non-loopback `http` origin, a
 private, link-local, loopback-mapped or documentation address, credentials in the URL, and a
-query or fragment in a navigation are all refused. The one exception in local mode is a
+query or fragment in a navigation to a non-loopback origin are all refused. The one exception in local mode is a
 network-only origin a local policy declares (below), which may be a public `https://` origin, its
-hostname resolved and pinned like a remote target's. A local run admits **loopback origins
+hostname resolved and pinned like a remote target's. A navigation to a loopback origin may
+carry a query or a fragment, such as a fixture switch (`http://localhost:4200/?scenario=empty`),
+and is judged like the same URL without them: consent and policy decide on the origin alone, and
+the recorder stores the path only. A local run admits **loopback origins
 only**: a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with
 `[::1]` and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it,
 and the gate refuses a run config that pins `localhost` to an address. A remote origin, whether a
@@ -931,8 +934,8 @@ CLI spelling; a loopback origin asks as before. Measured on Claude Code 2.1.293 
 app's Auto mode: the gate's `ask` reached the user, and the transcript recorded the answer with
 `permissionDecision.source: user_temporary`, while the classifier's approvals in the same session
 read `reasonType: classifier`. The PostToolUse hook
-records an executed call as `(origin, route, decidedBy, at)` in
-`<project>/.zensu/state/verify-consent-<session-key>.json`,
+records an executed call as `(origin, route, decidedBy, at)`, the route being the path without any
+query or fragment, in `<project>/.zensu/state/verify-consent-<session-key>.json`,
 written by `O_EXCL` temp plus rename, contained to that directory, and never through a symlink.
 The decision, the prompt text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the
 address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
@@ -2043,7 +2046,9 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   way to switch the gate off.
 - **Consent to a partial criterion.** `partial` means this environment cannot observe a
   criterion: it needs credentials, an account, a non-loopback host or a signed build, or its
-  driver cannot run here, so no code change turns it. A criterion the run could observe but did not
+  driver cannot run here, so no code change turns it. A driver fence is one more such cause: a
+  state the driver can never show, whoever drives it, which today means a service worker under
+  the `browser` driver. A criterion the run could observe but did not
   prove is verified again, or recorded `fail` when what was observed contradicts it. `zensu-log.sh --chain-done
   --claimed-review-ticket <ticket> --accept-partial AC-004,AC-005` closes a chain whose open
   criteria (active and not `pass`) are exactly the listed ids, are all `partial` on the
@@ -2058,7 +2063,8 @@ live. `/zensu:build` Phase 6 step 6d runs `/zensu:verify-feature --chain` before
   `## Manual Acceptance` table whose reason names the same cause category as the `partial` record, which records
   an answer the user gave at planning or when the gap was found, or from the one question `/zensu:build` step 6d, `/zensu:verify-feature --chain` and
   `/zensu:self-review` ask when a gap is found (provide access now, accept as partial, leave the
-  chain open); `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The table is
+  chain open; a driver fence takes only the last two, because no access lifts it);
+  `skills/verify-feature/rules/acceptance-consent.md` owns both sources. The table is
   read by the program that reads the `## Requirements` table, so a decorated, linked or
   comma-listed id counts, and a row whose id is struck out, or whose check is still a `{…}`
   placeholder, covers nothing. The gate

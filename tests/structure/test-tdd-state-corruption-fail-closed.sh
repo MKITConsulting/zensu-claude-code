@@ -98,10 +98,12 @@ CLASSIFIER_FAILURE_OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_nam
   PATH="$CLASSIFIER_SHIM_DIR:$PATH" REAL_NODE_BIN="$REAL_NODE_BIN" bash "$PLUGIN_DIR/hooks/checks/pre-edit-tdd-reminder.sh" 2>/dev/null)"
 if [ "$(gate_decision "$SID")" = "allow" ] \
   && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -q '"permissionDecision":"deny"' \
-  && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -q 'existing session-state file is invalid or unreadable'; then
-  check "path-classifier execution failure blocks an otherwise allowed edit" PASS
+  && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -q 'existing session-state file is invalid or unreadable' \
+  && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -qF 'Start a fresh Claude Code session so Session Control v1 creates new state."' \
+  && ! printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -qF 'ZENSU_TDD_GATE'; then
+  check "path-classifier execution failure blocks an otherwise allowed edit, names the fresh-session remedy and no gate escape" PASS
 else
-  check "path-classifier execution failure blocks an otherwise allowed edit" FAIL
+  check "path-classifier execution failure blocks an otherwise allowed edit, names the fresh-session remedy and no gate escape" FAIL
 fi
 CLASSIFIER_FAULT="$WORK/classifier-fault.js"
 cat > "$CLASSIFIER_FAULT" <<'PRELOAD'

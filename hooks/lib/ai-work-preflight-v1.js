@@ -6,11 +6,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { INSTALL } = require('./zensu-cli-version-v1.js');
 const REQUIRED = Object.freeze({
-  bind: ['product', 'confirm'],
-  context: ['feature', 'feature-revision', 'cross-product'],
-  start: ['id', 'title', 'product', 'feature', 'feature-revision', 'maintenance-reason', 'cross-product-reason', 'source', 'source-version', 'run-kind'],
-  get: ['json'],
-  submit: ['event-id', 'expected-version', 'artifact', 'criteria-version', 'review-file'],
+  bind: Object.freeze(['product', 'confirm']),
+  context: Object.freeze(['feature', 'feature-revision', 'cross-product']),
+  start: Object.freeze(['id', 'title', 'product', 'feature', 'feature-revision', 'maintenance-reason', 'cross-product-reason', 'source', 'source-version', 'run-kind']),
+  get: Object.freeze(['json']),
+  submit: Object.freeze(['event-id', 'expected-version', 'artifact', 'criteria-version', 'review-file']),
 });
 const installGuide = path.resolve(__dirname, '../../docs/cli-install-update.md');
 const guidance = `If zensu is not installed, install it with ${INSTALL.homebrew}, ${INSTALL.script}, or on Windows ${INSTALL.powershell}. If it is installed, run zensu update, then verify zensu --version and the executable selected by PATH. If update is unknown, use the original installer: Homebrew users run ${INSTALL.homebrewUpgrade}; other users follow ${installGuide}. Do not replace a package-manager installation with another installer.`;
@@ -60,4 +60,4 @@ function resume(file) {
 function instructions() {
   return "Before implementation of an authorized task, use this same native helper with preflight (the same workspace/session identity, without task/title/criteria). This performs bounded local CLI capability checks and a read-only context check; it never starts work. If product_confirmation_required or feature_confirmation_required is returned, ask one concise question naming the exact product and this goal's feature or explicit maintenance reason, using verified CLI context. Reuse a valid product binding; never infer confirmation from discovery, a repository name or 'use Zensu'. Only pass feature/revision or exception flags after explicit confirmation for this goal. If reporting was explicitly declined, use pause instead of preflight, ask no scope questions, and do not begin or checkpoint; pause is local and preserves pending reports. Only an explicitly re-enabled, confirmed begin resumes reporting. If CLI compatibility fails, report the missing capabilities and installation/update guidance immediately; never silently install, drop flags or downgrade the protocol. Keep coding when scope or compatibility is unavailable. Call a green automated review 'plugin code review passed', never human acceptance.";
 }
-module.exports = { check, paused, pause, resume, instructions };
+module.exports = { check, paused, pause, resume, instructions, REQUIRED };

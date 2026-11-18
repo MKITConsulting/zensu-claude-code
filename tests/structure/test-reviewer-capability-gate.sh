@@ -195,6 +195,46 @@ assert_case "reviewer cannot use host-default Glob at a protected ancestor cwd" 
 assert_case "reviewer Grep path filters cannot escape a safe subtree" deny zensu:review-aspect Grep '{"pattern":"session-control|main-v1","path":"src","glob":"../.zensu/**"}'
 assert_case "reviewer Glob patterns cannot escape a safe subtree" deny zensu:review-judge Glob '{"pattern":"../.zensu/**","path":"src"}'
 assert_case "reviewer view_image is denied outside the exact read trio" deny zensu:review-judge view_image '{"path":"x.png"}'
+CR_DOC="$PROJECT/.zensu/state/tdd-phase-${SESSION_KEY}.json"
+CR_NESTED="$PROJECT/cr-nested"
+CR_OUTSIDE="$OTHER/cr-outside"
+mkdir -p "$CR_NESTED/.zensu/state" "$CR_NESTED/src" "$CR_OUTSIDE/.zensu/state"
+touch "$CR_NESTED/src/a.txt" "$CR_OUTSIDE/base.txt"
+cr_roots() {
+  [ -f "$CR_DOC" ] || return 1
+  node -e '
+    const fs = require("node:fs");
+    const [file, mode, nested, outside] = process.argv.slice(1);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (mode === "none") delete doc.codeRoots;
+    else {
+      const baseline = mode === "broken" ? "not-a-commit" : "unborn";
+      doc.codeRoots = [["nested", nested], ["outside", outside]].map(([label, top]) => ({
+        label, path: top, top, commonDir: `${top}/.git`, baseline,
+      }));
+    }
+    fs.writeFileSync(file, `${JSON.stringify(doc)}\n`);
+  ' "$CR_DOC" "$1" "$CR_NESTED" "$CR_OUTSIDE"
+}
+if cr_roots declared; then
+  assert_case "a reviewer cannot Grep a declared code root inside the project whose .zensu the traversal reaches" deny zensu:review-aspect Grep "{\"pattern\":\"x\",\"path\":\"$CR_NESTED\"}"
+  assert_case "the PLM cannot Glob a declared code root inside the project whose .zensu the traversal reaches" deny zensu:zensu-plm Glob "{\"pattern\":\"**/*\",\"path\":\"$CR_NESTED\"}"
+  assert_case "the PLM cannot Read the .zensu of a declared code root" deny zensu:zensu-plm Read "{\"file_path\":\"$CR_NESTED/.zensu/state/x.json\"}"
+  assert_case "a reviewer may still Read a source file of a declared code root inside the project" allow zensu:code-reviewer Read "{\"file_path\":\"$CR_NESTED/src/a.txt\"}"
+  assert_case "a neutral child cannot Read the .zensu of a declared code root outside the project" deny general-purpose Read "{\"file_path\":\"$CR_OUTSIDE/.zensu/state/x.json\"}"
+  assert_case "a neutral child may still Read a file of a declared code root outside the project" allow general-purpose Read "{\"file_path\":\"$CR_OUTSIDE/base.txt\"}"
+else
+  check "the workflow document takes a declared code-root list" FAIL
+fi
+if cr_roots broken; then
+  assert_case "a code-root list that breaks a string rule still keeps a reviewer traversal out of a declared root's .zensu" deny zensu:review-aspect Grep "{\"pattern\":\"x\",\"path\":\"$CR_NESTED\"}"
+  assert_case "a code-root list that breaks a string rule still keeps a neutral child out of a declared root's .zensu" deny general-purpose Read "{\"file_path\":\"$CR_OUTSIDE/.zensu/state/x.json\"}"
+  assert_case "a code-root list that breaks a string rule leaves the workflow document valid, so a reviewer may still Read a source file" allow zensu:code-reviewer Read "{\"file_path\":\"$CR_NESTED/src/a.txt\"}"
+else
+  check "the workflow document takes a code-root list that breaks a string rule" FAIL
+fi
+cr_roots none || check "the workflow document drops the code-root list again" FAIL
+rm -rf "$CR_NESTED" "$CR_OUTSIDE"
 assert_case "a bare PLM name is a neutral child, not the read-only PLM" allow zensu-plm Write '{"file_path":"x"}'
 assert_case "a bare reviewer name is a neutral child, not a read-only reviewer" allow code-reviewer Write '{"file_path":"x"}'
 assert_case "a bare reviewer name without agent_id is a neutral child too" allow no-id:review-aspect Write '{"file_path":"x"}'

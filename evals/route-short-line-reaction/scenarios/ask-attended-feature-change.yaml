@@ -1,0 +1,25 @@
+description: "The attended ask short line alone, with AskUserQuestion available, on a whole user-visible feature meant to reach a pull request. The model asks the route question through the tool, offers the three labels and puts the option it recommends first with the only (Recommended) label; Autopilot may lead here. After the unanswered question it runs the workflow or stops, never edits, and it never records a route."
+vars:
+  route_source: ask-attended
+  user_message: "Build a coupon feature for the cart and ship it as a pull request: a new src/coupons.js module with percentage and fixed-amount coupons, expiry-date validation and a rule that coupons never stack, applied in cartTotal before the shipping fee is added, with tests."
+  expected_hook: reminder
+  expected_shape: ask-short
+  expected_field: ask
+  allowed_first: ask
+  anchor_clause: "the one you recommend first, with \" (Recommended)\" appended to its label and to no other."
+  autopilot_option: offered
+  expected_routes: yes,autopilot,no
+  autopilot_first: allowed
+assert:
+  - type: javascript
+    value: file://assertions/first-decisive.js
+  - type: javascript
+    value: file://assertions/after-ask.js
+  - type: javascript
+    value: file://assertions/no-record-command.js
+  - type: javascript
+    value: file://assertions/route-question-complete.js
+  - type: javascript
+    value: file://assertions/route-question-ranked.js
+  - type: javascript
+    value: file://assertions/no-placeholder-copy.js
