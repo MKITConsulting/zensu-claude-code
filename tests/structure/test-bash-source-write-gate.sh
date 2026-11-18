@@ -217,8 +217,11 @@ HOOK_OPT_IN_NOTE="$(sed -n 's/^OPT_IN_NOTE="\(.*\)"$/\1/p' "$HOOK_BODY")"
 PARSER_OPT_IN_NOTE="$(node -e 'process.stdout.write(String(require(process.argv[1]).OPT_IN_NOTE).trim())' \
   "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
 { [ -n "$HOOK_OPT_IN_NOTE" ] && [ "$HOOK_OPT_IN_NOTE" = "$PARSER_OPT_IN_NOTE" ] \
-  && [ "$(grep -cF '${OPT_IN_NOTE}' "$HOOK_BODY")" -eq 4 ]; } \
-  && check "W5b the hook's OPT_IN_NOTE equals the parser's exported note and reaches the four hook-side denies that interpolate it" PASS \
+  && [ "$(grep -cF '${OPT_IN_NOTE}' "$HOOK_BODY")" -eq 5 ] \
+  && case "$HOOK_OPT_IN_NOTE" in (*'if the command is intended, ask the user to run it.') true ;; (*) false ;; esac \
+  && ! printf '%s' "$HOOK_OPT_IN_NOTE" | grep -qiF 'switch' \
+  && ! printf '%s' "$HOOK_OPT_IN_NOTE" | grep -qF 'false'; } \
+  && check "W5b the hook's OPT_IN_NOTE equals the parser's exported note, leaves an intended command to the user without a switch-off, and reaches the five hook-side denies that interpolate it" PASS \
   || check "W5b hook note '$HOOK_OPT_IN_NOTE' vs parser note '$PARSER_OPT_IN_NOTE'" FAIL
 
 # ── Behavioral harness ───────────────────────────────────────────────
@@ -1310,7 +1313,7 @@ REASON_GIT="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
   && ! printf '%s' "$REASON_GIT" | grep -qF "$NS_PROJ" \
   && ! printf '%s' "$REASON_GIT" | grep -qF 'git -C' \
   && ! printf '%s' "$REASON_GIT" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
-  && case "$REASON_GIT" in (*'ask the user to run it or to switch the gate off.') true ;; (*) false ;; esac; } \
+  && case "$REASON_GIT" in (*'if the command is intended, ask the user to run it.') true ;; (*) false ;; esac; } \
   && check "W121 rule-C deny names repo, subcommand, the re-anchor route and the opt-in note last, never the escape prefix or another worktree" PASS \
   || check "W121 rule-C deny reason (want repo '$NS_SIB', --reanchor, opt-in note last, no '$NS_PROJ', no git -C, no escape prefix; got '$REASON_GIT')" FAIL
 
@@ -1320,7 +1323,7 @@ REASON_WRITE_OUT="$(payload "printf x > $SIB/src/new.rs" | env CLAUDE_PLUGIN_ROO
   && printf '%s' "$REASON_WRITE_OUT" | grep -qF '/zensu:adopt-session --reanchor' \
   && ! printf '%s' "$REASON_WRITE_OUT" | grep -qF "$NS_PROJ" \
   && ! printf '%s' "$REASON_WRITE_OUT" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
-  && case "$REASON_WRITE_OUT" in (*'ask the user to run it or to switch the gate off.') true ;; (*) false ;; esac; } \
+  && case "$REASON_WRITE_OUT" in (*'if the command is intended, ask the user to run it.') true ;; (*) false ;; esac; } \
   && check "W121c rule-B deny names the re-anchor route and the opt-in note last, never the escape prefix or another worktree" PASS \
   || check "W121c rule-B deny reason (want '$NS_SIB', --reanchor, opt-in note last, no '$NS_PROJ', no escape prefix; got '$REASON_WRITE_OUT')" FAIL
 
@@ -1364,7 +1367,7 @@ printf '%s' "$REASON_GIT_WT" | grep -qF 'denies again' \
   || check "W163 designated-path remedy (got '$REASON_GIT_WT')" FAIL
 { printf '%s' "$REASON_GIT_WT" | grep -qF '/zensu:adopt-session --reanchor' \
   && ! printf '%s' "$REASON_GIT_WT" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
-  && case "$REASON_GIT_WT" in (*'ask the user to run it or to switch the gate off.') true ;; (*) false ;; esac; } \
+  && case "$REASON_GIT_WT" in (*'if the command is intended, ask the user to run it.') true ;; (*) false ;; esac; } \
   && check "W163c designated-path deny names the re-anchor route and keeps the opt-in note last, never the escape prefix" PASS \
   || check "W163c designated-path deny (want --reanchor, the opt-in note last and no escape prefix; got '$REASON_GIT_WT')" FAIL
 ! printf '%s' "$REASON_GIT_WT" | grep -qF "$NS_PROJ" \
@@ -1647,9 +1650,12 @@ REASON_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
 # bind failure both deny too. Only the bound arm emits this sentence.
 { [ "$OUT_PARSER_FAIL_BOUND" = "DENY" ] \
   && printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'could not be evaluated for this session' \
-  && printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'hooks.bashWriteGate to false in the Zensu config layer that enables it' \
-  && ! printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE'; } \
-  && check "W218 bound parser runtime failure denies with the bound-arm reason" PASS \
+  && printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'A file change inside your own worktree can still go through Edit or Write.' \
+  && case "$REASON_PARSER_FAIL_BOUND" in (*'This gate is opt-in and runs because hooks.bashWriteGate is true in the Zensu config; if the command is intended, ask the user to run it.') true ;; (*) false ;; esac \
+  && ! printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF '/zensu:doctor' \
+  && ! printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
+  && ! printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'to false'; } \
+  && check "W218 bound parser runtime failure denies with the bound-arm reason, keeps Edit or Write inside the own worktree as the route, names no doctor run the failing gate would refuse, and ends with the opt-in note, never a switch-off" PASS \
   || check "W218 bound parser failure (got '$OUT_PARSER_FAIL_BOUND' / '$REASON_PARSER_FAIL_BOUND')" FAIL
 
 # The relaxation covers exactly those two states. A record that exists but disagrees with the

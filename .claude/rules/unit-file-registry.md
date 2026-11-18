@@ -92,7 +92,10 @@ ceiling: their drivers leave native Windows before grading, so both entries decl
   was considered and refused: regex literals such as the one in `clock-shift-v1.test.js` hold
   quotes and backticks, and a reader that misses one could hide real cases. Keep fixture text
   that spells `test(`, `describe(` or a `node:test` import off the start of a line.
-- The driver audit reads each suite through `shellLines`, a small shell reader: quoted text,
+- The driver audit reads each suite through `shellLines`, a small shell reader, and
+  `tests/structure/test-escape-wording.sh` reads every shell file it walks through the same
+  function, taking its heredoc bodies as prose (`.claude/rules/gate-disable-prefixes.md`), so a
+  change to the reader changes both. For the driver audit, quoted text,
   comments and heredoc bodies never count, while parameter expansions and command
   substitutions do. A heredoc ends on the word bash reads after quote removal, so `<<\EOF`,
   `<<'END-STUB'` and `<<EOF-1` close where bash closes them, and a here-string (`<<<`) or a

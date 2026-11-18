@@ -884,9 +884,12 @@ session is prose, not a boundary.
 **The floor holds regardless of consent.** A hostname other than `localhost` in local mode —
 `app.localhost`, `localhost.` and `/etc/hosts` aliases included — a non-loopback `http` origin, a
 private, link-local, loopback-mapped or documentation address, credentials in the URL, and a
-query or fragment in a navigation are all refused. The one exception in local mode is a
+query or fragment in a navigation to a non-loopback origin are all refused. The one exception in local mode is a
 network-only origin a local policy declares (below), which may be a public `https://` origin, its
-hostname resolved and pinned like a remote target's. A local run admits **loopback origins
+hostname resolved and pinned like a remote target's. A navigation to a loopback origin may
+carry a query or a fragment, such as a fixture switch (`http://localhost:4200/?scenario=empty`),
+and is judged like the same URL without them: consent and policy decide on the origin alone, and
+the recorder stores the path only. A local run admits **loopback origins
 only**: a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with
 `[::1]` and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it,
 and the gate refuses a run config that pins `localhost` to an address. A remote origin, whether a
@@ -918,8 +921,8 @@ CLI spelling; a loopback origin asks as before. Measured on Claude Code 2.1.293 
 app's Auto mode: the gate's `ask` reached the user, and the transcript recorded the answer with
 `permissionDecision.source: user_temporary`, while the classifier's approvals in the same session
 read `reasonType: classifier`. The PostToolUse hook
-records an executed call as `(origin, route, decidedBy, at)` in
-`<project>/.zensu/state/verify-consent-<session-key>.json`,
+records an executed call as `(origin, route, decidedBy, at)`, the route being the path without any
+query or fragment, in `<project>/.zensu/state/verify-consent-<session-key>.json`,
 written by `O_EXCL` temp plus rename, contained to that directory, and never through a symlink.
 The decision, the prompt text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the
 address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
