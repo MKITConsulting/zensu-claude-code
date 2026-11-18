@@ -764,15 +764,15 @@ O29G2_BAD="$(GATE_SRC="$BASH_GATE_BODY" node -e '
     let start = i;
     while (start > 0 && /\\\s*$/.test(lines[start - 1])) start -= 1;
     const command = lines.slice(start, i + 1).join(" ");
-    if (!/<<<"\$INPUT"\s*$/.test(line)) bad.push((i + 1) + ":stdin");
+    if (!/<<<"\$\{BSWG_(?:EMPTY_)?FRAME\}\$\{INPUT\}"\s*$/.test(line)) bad.push((i + 1) + ":stdin");
     if (!/(^|\s)PAYLOAD=(\s|$)/.test(command) || /PAYLOAD=[^\s]/.test(command)) bad.push((i + 1) + ":payload");
   });
   process.stdout.write(sites === 4 ? bad.join(" ") : "call-sites=" + sites + " " + bad.join(" "));
 ' 2>&1)"
 if [ -z "$O29G2_BAD" ]; then
-  check "O29g2 all 4 parser calls in the gate read the payload on stdin and pass PAYLOAD empty" PASS
+  check "O29g2 all 4 parser calls in the gate read the framed payload on stdin and pass PAYLOAD empty" PASS
 else
-  check "O29g2 parser call sites not exactly 4, or not reading the payload on stdin ($O29G2_BAD)" FAIL
+  check "O29g2 parser call sites not exactly 4, or not reading the framed payload on stdin ($O29G2_BAD)" FAIL
 fi
 O29H_PAYLOAD_FILE="$STATE_DIR/long-target-payload.json"
 node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "printf x > src/" + "abcdefgh/".repeat(80000) + "x.rs" }, session_id: "orphan-gone", cwd: process.argv[2] }))' \
