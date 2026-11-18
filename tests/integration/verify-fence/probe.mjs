@@ -33,14 +33,20 @@ modes:
                          installation, and the reverse
 
 options:
-  --browser=<channel>    browser channel handed to open (default: the CLI's own default)
+  --browser=<channel>    browser channel handed to open (default: the CLI's own default);
+                         headless-shell names the bundled shell binary, which the CLI
+                         launches when a config names chromium without a channel
   --headed               open a visible browser window
   --out=<dir>            output directory (default: a fresh directory under the OS temp dir)
   --extra=<switch>       one more Chromium switch for a matrix or remote run, repeatable
+  --budget=<ms>          time budget of one page check (default 6000); raise it on a slow host
+                         to tell a slow request from a refused one
 `;
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const NAMES = Object.freeze({ app: 'fence-app.test', leak: 'fence-leak.test', suffix: 'xfence-app.test', hint: 'fence-hint.test' });
+const UNMAPPED_NAME = 'fence-unmapped.test';
+const DEFAULT_BUDGET_MS = 6000;
 const REMOTE = Object.freeze({ approved: 'example.com', unapproved: 'example.org', title: 'Example Domain' });
 const FENCE_PROXY = 'http://zensu-fence.invalid:9';
 const VARIANTS = Object.freeze({
@@ -86,13 +92,14 @@ function legacyArgs(pins) {
 }
 
 function parseOptions(argv) {
-  const options = { mode: argv[0] || '', variants: [], browser: '', headed: false, out: '', extra: [], released: '' };
+  const options = { mode: argv[0] || '', variants: [], browser: '', headed: false, out: '', extra: [], released: '', budget: DEFAULT_BUDGET_MS };
   for (const arg of argv.slice(1)) {
     if (arg === '--headed') options.headed = true;
     else if (arg.startsWith('--browser=')) options.browser = arg.slice('--browser='.length);
     else if (arg.startsWith('--out=')) options.out = arg.slice('--out='.length);
     else if (arg.startsWith('--extra=')) options.extra.push(arg.slice('--extra='.length));
     else if (arg.startsWith('--released-root=')) options.released = arg.slice('--released-root='.length);
+    else if (/^--budget=[1-9][0-9]{2,5}$/.test(arg)) options.budget = Number(arg.slice('--budget='.length));
     else if (!arg.startsWith('--') && options.mode === 'matrix') options.variants.push(arg);
     else throw new Error(USAGE);
   }
@@ -153,7 +160,7 @@ function wsHello(socket, key, text) {
 }
 
 const SHARED_HELPERS = `
-const T = 6000;
+const T = self.CFG.budget;
 const timeout = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
 const tryFetch = (url) => Promise.race([
   fetch(url, { mode: 'no-cors', cache: 'no-store' }).then(() => 'reached', (e) => 'blocked ' + e.message),
@@ -189,6 +196,7 @@ const PAGE_JS = `${SHARED_HELPERS}
   const C = self.CFG;
   const U = C.unapproved;
   const W = C.unapprovedWs;
+  const started = Date.now();
   const results = {};
   const checks = [];
   const add = (id, fn) => checks.push([id, fn]);
@@ -205,6 +213,7 @@ const PAGE_JS = `${SHARED_HELPERS}
   add('p-fetch-https', () => tryFetch(C.unapprovedTls.https + '/p-fetch-https'));
   add('p-wss', () => tryWs(C.unapprovedTls.wss + '/p-wss'));
   add('p-ws-name', () => tryWs(W.name + '/p-ws-name'));
+  add('p-ws-unmapped', () => tryWs(W.unmapped + '/p-ws-unmapped'));
   add('p-redirect-fetch', () => tryFetch('/redirect?to=' + encodeURIComponent(U.ip + '/p-redirect-fetch')));
   frame('p-iframe-nav', U.ip + '/p-iframe-nav');
   frame('p-iframe-redirect', '/redirect?to=' + encodeURIComponent(U.ip + '/p-iframe-redirect'));
@@ -258,6 +267,8 @@ const PAGE_JS = `${SHARED_HELPERS}
       if (value && typeof value === 'object') Object.assign(results, value); else results[id] = value;
     } catch (e) { results[id] = 'threw ' + e.message; }
   }));
+  results['user-agent'] = navigator.userAgent;
+  results['elapsed-ms'] = Date.now() - started;
   document.getElementById('s').textContent = 'done';
   await fetch('/report', { method: 'POST', body: JSON.stringify(results) });
 })();
@@ -496,7 +507,7 @@ function pageConfig(fixture, options) {
       name: `http://${NAMES.leak}:${P.CH}`,
       suffix: `http://${NAMES.suffix}:${P.H}`,
     },
-    unapprovedWs: { ip: `ws://127.0.0.1:${P.C4}`, name: `ws://${NAMES.leak}:${P.CH}` },
+    unapprovedWs: { ip: `ws://127.0.0.1:${P.C4}`, name: `ws://${NAMES.leak}:${P.CH}`, unmapped: `ws://${UNMAPPED_NAME}:${P.CH}` },
     unapprovedTls: { https: `https://127.0.0.1:${P.CS}`, wss: `wss://127.0.0.1:${P.CS}` },
     approved: {
       self: `http://127.0.0.1:${P.A}`,
@@ -507,6 +518,7 @@ function pageConfig(fixture, options) {
     },
     approvedWs: { self: `ws://127.0.0.1:${P.A}`, name: named ? `ws://${NAMES.app}:${P.H}` : '' },
     pushKey: options.push ? [...crypto.createECDH('prime256v1').generateKeys()] : null,
+    budget: options.budget,
   };
 }
 
@@ -580,8 +592,11 @@ function netlogFacts(file, allowed) {
     if (type === 'UDP_BYTES_SENT') udpBytesSent += 1;
   }
   const client = (data.constants && data.constants.clientInfo) || {};
+  const commandLine = String(client.command_line || '');
   return {
     readable: true,
+    binary: path.basename(commandLine.split(' --')[0]),
+    headless: /(^| )--headless/.test(commandLine),
     events: (data.events || []).length,
     browser: [client.name, client.version].filter(Boolean).join(' '),
     os: String(client.os_type || ''),
@@ -660,7 +675,7 @@ async function waitForReport(fixture) {
   const state = fixture.state;
   const waited = await Promise.race([
     new Promise((resolve) => { if (state.report) resolve('report'); else state.waiter = () => resolve('report'); }),
-    pause(REPORT_TIMEOUT_MS).then(() => 'no-report-timeout'),
+    pause(Math.max(REPORT_TIMEOUT_MS, state.cfg.budget * 10)).then(() => 'no-report-timeout'),
   ]);
   state.waiter = null;
   return waited === 'report' ? state.report : { error: waited };
@@ -809,7 +824,7 @@ function printLoopback(result, verdict, variant) {
   console.log(`  worker update: ${JSON.stringify(result.update)}; sink hits: ${JSON.stringify(result.updateHits)}`);
   if (result.netlog && result.netlog.readable) {
     const log = result.netlog;
-    console.log(`  net-log: ${log.events} events, ${log.browser || 'browser unnamed'} on ${log.os || 'os unnamed'}`);
+    console.log(`  net-log: ${log.events} events, ${log.browser || 'browser unnamed'} on ${log.os || 'os unnamed'}, binary ${log.binary || 'unnamed'}, headless switch ${log.headless}`);
     console.log(`  net-log resolver requests: ${JSON.stringify(log.requests)}; outside the run config: ${JSON.stringify(log.strangerRequests)}`);
     console.log(`  net-log resolver lookups (jobs, DNS transactions, system tasks): ${JSON.stringify(log.lookups)}`);
     console.log(`  net-log resolver event types: ${JSON.stringify(log.resolverTypes)}`);
@@ -831,16 +846,26 @@ function printLoopback(result, verdict, variant) {
 
 function header(options, out) {
   const installed = cliVersion.installedVersion(cleanEnv());
-  console.log(`fence-probe: mode=${options.mode} playwright-cli=${installed.version || installed.source} measured-pin=${consent.PLAYWRIGHT_CLI_SOURCE_VERSION} node=${process.version} platform=${process.platform}/${process.arch} browser-flag=${options.browser || '(default)'} headed=${options.headed}`);
+  console.log(`fence-probe: mode=${options.mode} playwright-cli=${installed.version || installed.source} measured-pin=${consent.PLAYWRIGHT_CLI_SOURCE_VERSION} node=${process.version} platform=${process.platform}/${process.arch} browser-flag=${options.browser || '(default)'} headed=${options.headed} budget=${options.budget}ms`);
   console.log(`fence-probe: output in ${out}`);
   return installed;
 }
 
+const SHELL_CHANNEL = 'headless-shell';
+
 function openFlags(options) {
   const flags = [];
-  if (options.browser) flags.push(`--browser=${options.browser}`);
+  if (options.browser && options.browser !== SHELL_CHANNEL) flags.push(`--browser=${options.browser}`);
   if (options.headed) flags.push('--headed');
   return flags;
+}
+
+function probeConfig(options, variant, args, origins, netlog, outputDir) {
+  const browser = { isolated: true, launchOptions: { args: [...args, `--log-net-log=${netlog}`, ...options.extra] }, contextOptions: { serviceWorkers: variant.serviceWorkers } };
+  if (options.browser === SHELL_CHANNEL) browser.browserName = 'chromium';
+  const config = { browser, outputDir };
+  if (variant.routes) config.network = { allowedOrigins: origins };
+  return config;
 }
 
 async function modeMatrix(options, out) {
@@ -853,16 +878,12 @@ async function modeMatrix(options, out) {
     for (const name of options.variants) {
       const variant = VARIANTS[name];
       fixture.reset();
-      fixture.state.cfg = pageConfig(fixture, { named: true, push: variant.fence });
+      fixture.state.cfg = pageConfig(fixture, { named: true, push: variant.fence, budget: options.budget });
       const origins = approvedOrigins(fixture, true);
       const netlog = path.join(out, `${name}.netlog.json`);
       const fencePins = new Map([[NAMES.app, '127.0.0.1']]);
       const args = variant.fence ? fenceArgs(origins, fencePins) : legacyArgs(pins);
-      const config = {
-        browser: { isolated: true, launchOptions: { args: [...args, `--log-net-log=${netlog}`, ...options.extra] }, contextOptions: { serviceWorkers: variant.serviceWorkers } },
-        outputDir: path.join(out, `${name}-browser`),
-      };
-      if (variant.routes) config.network = { allowedOrigins: origins };
+      const config = probeConfig(options, variant, args, origins, netlog, path.join(out, `${name}-browser`));
       const configPath = path.join(out, `${name}.config.json`);
       fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
       const driver = plainDriver(`fenceprobe-${name}-${process.pid}`, env, out);
@@ -911,11 +932,7 @@ async function modeRemote(options, out) {
       fixture.reset();
       const netlog = path.join(out, `remote-${name}.netlog.json`);
       const args = fenceArgs(origins, pins);
-      const config = {
-        browser: { isolated: true, launchOptions: { args: [...args, `--log-net-log=${netlog}`, ...options.extra] }, contextOptions: { serviceWorkers: variant.serviceWorkers } },
-        outputDir: path.join(out, `remote-${name}-browser`),
-      };
-      if (variant.routes) config.network = { allowedOrigins: origins };
+      const config = probeConfig(options, variant, args, origins, netlog, path.join(out, `remote-${name}-browser`));
       const configPath = path.join(out, `remote-${name}.config.json`);
       fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
       const driver = plainDriver(`fenceprobe-remote-${name}-${process.pid}`, env, out);
@@ -985,6 +1002,7 @@ async function modeRemote(options, out) {
 
 async function modeGated(options, out) {
   if (process.platform === 'win32' || !fs.existsSync('/bin/bash')) return { skip: 'the gated run needs /bin/bash to run the judged command text' };
+  if (options.browser === SHELL_CHANNEL) return { skip: 'a gated run config names no browser, so the shell binary is measured in matrix mode' };
   const fixture = await createFixture();
   const env = probeEnv(out);
   try {
@@ -992,7 +1010,7 @@ async function modeGated(options, out) {
     const runDir = path.join(root, '.zensu', 'verify-feature-runs', `fenceprobe-${process.pid}`);
     fs.mkdirSync(runDir, { recursive: true });
     fs.mkdirSync(path.join(root, '.zensu', 'state'), { mode: 0o700 });
-    fixture.state.cfg = pageConfig(fixture, { named: false, push: false });
+    fixture.state.cfg = pageConfig(fixture, { named: false, push: false, budget: options.budget });
     const origins = approvedOrigins(fixture, false);
     const helperArgs = [HELPER, '--run-dir', runDir, '--mode', 'local'];
     for (const origin of origins) helperArgs.push('--origin', origin);

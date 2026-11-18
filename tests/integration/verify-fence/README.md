@@ -28,13 +28,20 @@ node tests/integration/verify-fence/probe.mjs pairing --released-root=<plugin ro
 
 | Mode | What runs | Leaves loopback |
 |---|---|---|
-| `matrix` | The loopback checks under each named variant. `fence` (both layers) and `fence-alone` (the launch arguments without `network.allowedOrigins`) are judged; `routes-only` and `legacy` are reference columns that show what the routes hold without the network fence. `fence-alone` is the column that shows a drift of the launch arguments, because the routes hide it for HTTP(S) requests. | no; in the reference columns the browser's own start-up request goes out, as it does without the fence |
+| `matrix` | The loopback checks under each named variant. `fence` (both layers) and `fence-alone` (the launch arguments without `network.allowedOrigins`) are judged; `routes-only` and `legacy` are reference columns that show what the routes hold without the network fence. `fence-alone` is the column that shows a drift of the launch arguments, because the routes hide it for HTTP(S) requests. | no in the judged columns; in the reference columns the browser's own start-up request goes out, as it does without the fence, and one WebSocket names an unmapped `.test` host, so one resolver lookup for a reserved name leaves the browser |
 | `remote` | `https://example.com` approved with a resolver pin, `https://example.org` not approved, requested from the approved page over `https` and `wss` beside a loopback sink. | yes, to `example.com` only when the fence holds |
 | `gated` | The run-config helper of this checkout writes the config, the consent gate of this checkout judges every call before it runs, and a `zensu-verify` session loads the probe page and the worker-update fixture. | no |
 | `pairing` | The run config of this checkout under the gate of another installation, and the reverse. Starts no browser. | no |
 
-Options: `--browser=<channel>`, `--headed`, `--out=<dir>` and, for `matrix` and `remote`,
-`--extra=<chromium switch>`.
+Options: `--browser=<channel>`, `--headed`, `--out=<dir>`, `--budget=<ms>` and, for `matrix`
+and `remote`, `--extra=<chromium switch>`.
+
+- `--browser=chromium` runs the bundled Chrome for Testing build, headless or headed.
+  `--browser=headless-shell` runs the bundled shell binary, which the CLI launches when a config
+  names `chromium` without a channel. They are two binaries, so measure both.
+- `--budget` is the time one page check may take, 6000 ms by default. A slow host can overrun
+  it under request interception with nothing refused: the full build did so in a container,
+  with and without the fence. Raise the budget there to tell a slow request from a refused one.
 
 ## What counts as passed
 
@@ -42,8 +49,9 @@ A judged run passes when every approved check works, no sink logs a connection, 
 net-log holds no resolver request for a name outside the run config, no resolver lookup at all
 and no TCP connect attempt outside the run config. The probe prints the resolver event types
 the browser wrote, so a platform whose resolver writes other events is read off the output and
-not assumed. A run whose net-log shows no resolver request at all fails, because the count
-would then prove nothing.
+not assumed: run a reference column first, where the lookup for the unmapped `.test` host shows
+which events a real lookup writes there. A run whose net-log shows no resolver request at all
+fails, because the count would then prove nothing.
 
 WebRTC over UDP is outside the fence. The probe reports the datagrams the unapproved STUN sink
 received and does not judge them.
