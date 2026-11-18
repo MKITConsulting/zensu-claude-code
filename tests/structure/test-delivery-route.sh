@@ -952,7 +952,7 @@ R12_BAD=""
 for ctxname in CTX_ASK CTX_TDD CTX_DIRECT CTX_STRICT CTX_STRICT_TDD; do
   ctx="${!ctxname}"
   for needle in "(S) — read this before (A)" "and the route field reads 'ask'" "RECORD a Zensu-workflow answer before dispatching" \
-    "$PLAN_RECORD" "evidence.acceptanceGate). $WORKFLOW_OPT" "no evidence audit. $DIRECT_OPT" \
+    "$PLAN_RECORD" "acceptance criterion. $WORKFLOW_OPT" "no evidence audit. $DIRECT_OPT" \
     "$DECLINED_RECORD, then continue with the dispatch above" \
     "The 'No — implement directly' answer records nothing and decides this plan only: $DIRECT_NEVER_RECORDED" \
     "/zensu:delivery-route" "<!-- zensu:delivery-route -->" \

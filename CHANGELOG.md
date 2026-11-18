@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gate-escape hints outside the review chain**: no deny reason, directive or skill text an
+  agent reads names a gate escape any more, as an option, a hand-off or a prohibition, so
+  agents stop proposing to switch a gate off. The CLI write-gate's Bash, PowerShell and
+  subagent reasons drop the `ZENSU_MCP_GATE=off` sentence and the sentences that pointed at it,
+  and keep the skill, `--help` and localhost routes. The TDD edit gate's invalid-state deny
+  keeps the fresh-session remedy, and its phase-mismatch deny leaves `--tdd-reset` to the user in
+  a standalone chain and sends a chain an active Autopilot run owns to the TDD steps. The
+  source-write gate's opt-in note still names `hooks.bashWriteGate` as the reason the gate runs
+  but no longer offers to switch it off, and its bound parser-failure deny keeps Edit or Write
+  inside the own worktree as the route and ends with that note. The secret scan's deny no longer
+  points at its documented opt-out. `/zensu:build`, `/zensu:change` and `/zensu:pilot` drop the
+  escape sentences, and the plan-approval route question states the Zensu workflow's cost
+  without the evidence gate keys. Disclosures printed after the user set an escape,
+  operator-facing Stop notices and the `/zensu:zensu-help` routing row are unchanged, and every
+  escape still works. `tests/structure/test-escape-wording.sh` now walks every file under
+  `hooks/`, `skills/`, `agents/`, `templates/`, `scripts/` and each companion plugin's roots of
+  those names instead of a fixed list, recognizes the code reads it meets there, judges shell
+  case arms and quoted dollar spellings, holds file-scoped allowlists for the disclosures, the
+  operator notices, the routing row and two ledger values, fails on an allowlist entry that
+  matches no shipped line, and checks its names against the escape stems the gauntlet-loop
+  suite derives.
+
 ## [0.40.2] - 2026-11-17
 
 ### Added
