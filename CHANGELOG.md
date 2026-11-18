@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **`/zensu:verify-feature` fences its browser at the network level**: the browser now connects
+  only to the hosts and ports of the run's origins. A WebSocket endpoint on another host or port,
+  and the target of a redirect, used to pass and now fail with
+  `net::ERR_PROXY_CONNECTION_FAILED` unless the run declares them: list each one like an API
+  origin, in the recipe's `validate.networkOnly.origins` and, under a policy, in its
+  `networkOnlyOrigins`, a WebSocket endpoint by the `http` or `https` origin of its host and
+  port. A plain `ws://` endpoint outside loopback has no such origin and is no longer reached.
+  WebRTC over UDP is still not fenced.
+- **Service workers run in the verify browser**: an application that registers one now behaves
+  there as it does for a user, with a cache its worker fills on the first load and a page a new
+  worker can take over. An update prompt, a filled cache and a page under a worker's control can
+  be verified; offline behaviour, background sync and push cannot.
+- **A session that was open across the update keeps its old fence**: it keeps the installation it
+  loaded, helper and gate together, until it ends or `/reload-plugins` runs in it. After that the
+  gate refuses a run config an earlier helper wrote, with a reason that says to write it again
+  with the run-config helper of this installation, and an earlier gate refuses a run config this
+  release writes. One remedy covers every such case: start `/zensu:verify-feature` again in a
+  session started or reloaded after the update, so that helper and gate come from one
+  installation.
+
+## [0.41.0] - 2026-11-18
+
+### Added
+
+- **cli**: Pass skill free text through zensu-cli 0.22.0 file flags (#634)
+- **multi-repo**: Add the code-roots foundation behind a dark-launch switch (#540)
+
+### Changed
+
+- **rules**: Record the live named-spawn measurement on 0.40.1 (#636)
+- **review-gate**: Probe an unreadable name store while the launch is open (#616)
+- **session-control**: Walk the record-reader ladder through one helper (#631)
+
+### Fixed
+
+- **pulse**: Fix the deferred review findings of #627 (#635)
+- **hooks**: Rank the reminder's route question with the recommended option first (#640)
+- **gates**: Stop naming gate escapes in model-facing text outside the review chain (#638)
+- **verify-feature**: Admit a query or fragment on a loopback navigation (#644)
+- **build**: Treat a spec-named dependency as a precondition, not consent (#583)
+- **verify-feature**: Announce the service-worker limit before verification (#639)
+- **session-control**: Refuse Bash rebinds of the adopt and re-anchor entry-point inputs (#633)
+- **deps**: Clear all known advisories from the eval tooling lockfile (#558)
+
+### Changed
+
+- **zensu-cli 0.22.0 is the floor, and long free text goes through its file flags**:
+  `/zensu:docs`, `/zensu:implement`, `/zensu:bootstrap`, `/zensu:ghost-scan`,
+  `/zensu:security-review` and `/zensu:change` hand documents, descriptions, findings,
+  conditions and JSON to zensu-cli as `--content-file`, `--description-file`,
+  `--candidates-file`, `--result-file`, `--findings-file` and `--conditions-file`, so the CLI
+  reads the file itself (up to 256 KiB of text or 4 MiB of JSON) and the text no longer travels
+  as one command-line argument. The flags zensu-cli has no file form for keep the
+  `"$(cat "$f")"` recipe with its content check. README, `/zensu:setup`, the session banner and
+  `/zensu:doctor` name 0.22.0: older releases cannot read free text from a file, so skill calls
+  that send documents, descriptions, findings or JSON to Zensu fail. FT8 of
+  `test-skill-workflow-markers.sh` holds every free-text flag site against the help the floor
+  release recorded, and `record-zensu-cli-floor-help.js` re-records that fixture.
+
 ### Fixed
 
 - **Gate-escape hints outside the review chain**: no deny reason, directive or skill text an
@@ -30,28 +91,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operator notices, the routing row and two ledger values, fails on an allowlist entry that
   matches no shipped line, and checks its names against the escape stems the gauntlet-loop
   suite derives.
-
-### Upgrade notes
-
-- **`/zensu:verify-feature` fences its browser at the network level**: the browser now connects
-  only to the hosts and ports of the run's origins. A WebSocket endpoint on another host or port,
-  and the target of a redirect, used to pass and now fail with
-  `net::ERR_PROXY_CONNECTION_FAILED` unless the run declares them: list each one like an API
-  origin, in the recipe's `validate.networkOnly.origins` and, under a policy, in its
-  `networkOnlyOrigins`, a WebSocket endpoint by the `http` or `https` origin of its host and
-  port. A plain `ws://` endpoint outside loopback has no such origin and is no longer reached.
-  WebRTC over UDP is still not fenced.
-- **Service workers run in the verify browser**: an application that registers one now behaves
-  there as it does for a user, with a cache its worker fills on the first load and a page a new
-  worker can take over. An update prompt, a filled cache and a page under a worker's control can
-  be verified; offline behaviour, background sync and push cannot.
-- **A session that was open across the update keeps its old fence**: it keeps the installation it
-  loaded, helper and gate together, until it ends or `/reload-plugins` runs in it. After that the
-  gate refuses a run config an earlier helper wrote, with a reason that says to write it again
-  with the run-config helper of this installation, and an earlier gate refuses a run config this
-  release writes. One remedy covers every such case: start `/zensu:verify-feature` again in a
-  session started or reloaded after the update, so that helper and gate come from one
-  installation.
+- **/zensu:pulse session end**: the session record that 0.40.2 introduced now lives in the
+  repository's common git directory and names the worktree the session started in, so a
+  session can end in another worktree of the same repository once the user confirms it, and
+  a lost session id is listed with its worktree, start commit and start time; a record that
+  0.40.2 kept in a linked worktree's own git directory is still found. The end checks the
+  worktree and other authors' commits before it lists or counts any path, and a second call
+  ends a session without any path when the user declines to send the paths. Untracked files
+  count by their change time, tested with one `find` per batch of paths rather than one per
+  file, so a file unpacked, copied or moved in during the session is sent even with an older
+  modification time. The README privacy row says which changes pass without the
+  confirmation, the `zensu-plm` agent names the end without paths, and `test-pulse-skill.sh`
+  pins each block whole. C4 of `test-zensu-plm-arg-guidance.sh` counts a catalog line only by
+  the command spans before its description.
 
 ## [0.40.2] - 2026-11-17
 

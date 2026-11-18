@@ -7,7 +7,7 @@ const HOOK_ERROR = /^PreToolUse:\S+ hook error:/;
 
 function answeredByProbe(record, result) {
   if (record.decision === 'ALLOW') return !(result.isError && HOOK_ERROR.test(result.text));
-  return result.isError && result.text.includes(reasonFor(record.decision));
+  return result.isError && result.text.includes(reasonFor(record.decision, record.code));
 }
 
 module.exports = (output) => {

@@ -89,10 +89,10 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
    with its `id` and `path`. A feature-linked page lives at
    `/features/<feature slug>/<doc_type>`, an unlinked one at
    `/custom/<slug of the title>`.
-   - **The page exists:** `zensu wiki update <page-id> --content <markdown>
-     --change-summary <text>` replaces its markdown.
-   - **No page yet:** `zensu wiki create --product <id> --title <title> --content
-     <markdown> --entity-type feature --entity-id <feature-id> --doc-type <type>
+   - **The page exists:** `zensu wiki update <page-id> --content-file <path>
+     --change-summary <text>` replaces its markdown with the file's.
+   - **No page yet:** `zensu wiki create --product <id> --title <title> --content-file
+     <path> --entity-type feature --entity-id <feature-id> --doc-type <type>
      --audience <audience>`. Create never changes an existing page: when a page
      already exists at the new page's path, it fails, names that page's id and
      path, and leaves it unchanged. Update the page it names. Never retry the
@@ -109,15 +109,18 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
    `--external-url <url>`).
 
    *CLI one-call form.* For a feature that has no page for the `doc_type` yet,
-   `zensu link docs <feature-id> --doc-type <type> --content <markdown>` folds
-   these two steps into one — `--content` creates the feature-linked wiki page and
-   recomputes the score. It never changes an existing page, so a re-run updates
-   the page as above and then runs `zensu link docs` without `--content`. The
+   `zensu link docs <feature-id> --doc-type <type> --content-file <path>` folds
+   these two steps into one — `--content-file` creates the feature-linked wiki page
+   and recomputes the score. It never changes an existing page, so a re-run updates
+   the page as above and then runs `zensu link docs` without `--content-file`. The
    `/zensu:docs` skill uses this form under the same rule; the two-step
    `zensu wiki create` + `zensu link docs` above stays valid when you want
-   explicit control over the page. Every `--content` value is markdown: pass it
-   from a file as `/zensu:docs` does, never typed into a double-quoted argument,
-   where the shell runs its backtick spans and expands its `$` names.
+   explicit control over the page. Every `--content-file` names a file of
+   markdown: write it through a heredoc with a quoted delimiter as `/zensu:docs`
+   does, and never type the markdown into a double-quoted argument, where the shell
+   runs its backtick spans and expands its `$` names. zensu-cli reads the file
+   itself and refuses a missing, empty, blank or non-UTF-8 file before it sends
+   anything.
 
 ## CLI commands
 
@@ -125,8 +128,8 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
 |---------|------|
 | `zensu doc gen-context <feature-id> --doc-type <type>` | Fetch the context (the map). Read the named source before writing. |
 | `zensu wiki list --product <id> --json` | List a product's wiki pages with their `id` and `path`, to find the page a re-run updates. |
-| `zensu wiki create` / `zensu wiki update <page-id>` | Publish authored markdown to the wiki (`--content` is the full markdown). Create a new page with `zensu wiki create`; change a page that already exists with `zensu wiki update`. |
-| `zensu link docs <feature-id> --doc-type <type>` | Register a doc against a feature and update the docs score. With `--content <markdown>` it also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one; `--file` / `--external-url` register a repo or external doc. |
+| `zensu wiki create` / `zensu wiki update <page-id>` | Publish authored markdown to the wiki (`--content-file` names the file that holds the full markdown). Create a new page with `zensu wiki create`; change a page that already exists with `zensu wiki update`. |
+| `zensu link docs <feature-id> --doc-type <type>` | Register a doc against a feature and update the docs score. With `--content-file <path>` it also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one; `--file` / `--external-url` register a repo or external doc. |
 
 The rich `POST /api/features/{id}/docs/generate` streaming LLM path is
 **frontend-only** — no `zensu` command calls it. Agents do not call it;

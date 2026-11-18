@@ -22,7 +22,7 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 
 ## Prerequisites
 
-- Zensu CLI 0.18.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew update && brew upgrade --cask mkitconsulting/tap/zensu` or by running the installer again
+- Zensu CLI 0.22.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew update && brew upgrade --cask mkitconsulting/tap/zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - A feature ID to implement. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — a `KEY-N` id or a slug fails with `invalid feature id (status 400)`. Resolve it first (see Step 1).
 
@@ -113,11 +113,12 @@ a file of this project) first, then follow it:
    `zensu wiki list --product <product-id> --json` entry whose `path` is that path.
    The Markdown never goes into the command line itself: inside double quotes the shell
    runs its backtick spans and expands every `$NAME`, and a single quote ends at the first
-   apostrophe. zensu-cli has no stdin or file form for `--content`, so write the text to a
-   temporary file through a heredoc whose delimiter is quoted, then pass the file. Replace
-   `<hex>` with eight random hex digits, new for each call and the same on both lines, so no
-   line of the text can end the heredoc early; `>|` writes even under `noclobber`, and
-   the `grep` line stops before an empty, blank or binary page reaches Zensu:
+   apostrophe. So write the text to a temporary file through a heredoc whose delimiter is
+   quoted, then pass the file's path with `--content-file`: zensu-cli reads the file itself,
+   up to 256 KiB, and refuses a missing, empty, blank or non-UTF-8 file before it sends
+   anything. Replace `<hex>` with eight random hex digits, new for each call and the same on
+   both lines, so no line of the text can end the heredoc early; `>|` writes even under
+   `noclobber`:
 
    ```bash
    f="$(mktemp)" || exit 1
@@ -125,11 +126,10 @@ a file of this project) first, then follow it:
    cat >| "$f" <<'ZENSU_TEXT_<hex>'
    <markdown>
    ZENSU_TEXT_<hex>
-   grep -qI '[^[:space:]]' -- "$f" || exit 1
    ```
 
-   - **The page exists:** `zensu wiki update <page-id> --content "$(cat "$f")" --change-summary "<what changed>"`.
-   - **No page yet:** `zensu wiki create --product <product-id> --title "<title>" --content "$(cat "$f")"`
+   - **The page exists:** `zensu wiki update <page-id> --content-file "$f" --change-summary "<what changed>"`.
+   - **No page yet:** `zensu wiki create --product <product-id> --title "<title>" --content-file "$f"`
      (plus `--entity-type`, `--entity-id`, `--doc-type`, `--audience`). It creates new pages
      only: when a page already exists at the new page's path, it fails with
      `a wiki page already exists at <path> (<page-id>) and was left unchanged` and changes
@@ -142,18 +142,18 @@ a file of this project) first, then follow it:
 Then register the doc with `zensu link docs <feature-id>` (updates the feature's docs score):
 - `--doc-type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview
 - `--title` (optional): Document title
-- `--content` (optional): wiki page markdown — creates the linked wiki page when the feature has none for this doc type yet; it never changes an existing page
+- `--content-file` (optional): the file that holds the wiki page markdown — creates the linked wiki page when the feature has none for this doc type yet; it never changes an existing page
 - `--file` (optional): Path to the doc file
 - `--external-url` (optional): External URL
 - `--audience` (optional): end_user | developer | admin | internal
 - `--publication-status` (optional): draft | published | archived
 
-**One-call form.** When the feature has no page for this doc type yet, passing
-`--content "$(cat "$f")"`, written the same way as in step 4, to `zensu link docs` folds
+**One-call form.** When the feature has no page for this doc type yet, passing the file
+written in step 4 to `zensu link docs <feature-id>` as `--content-file "$f"` folds
 authoring + linking into a single call: it creates the feature-linked wiki page and
 recomputes the score, so the `wiki create` in step 4 is not needed. It never changes an
 existing page, so a re-run updates the page with `zensu wiki update` (step 4) and then runs
-`zensu link docs` without `--content`. The `/zensu:docs` skill uses this form under the same
+`zensu link docs` without `--content-file`. The `/zensu:docs` skill uses this form under the same
 rule; the two-step `wiki create` + `link docs` above stays valid when you want explicit
 control over the page (`--entity-*`, visibility).
 
@@ -170,7 +170,7 @@ Run `zensu features revision <feature-id>` to version the implementation:
 - `--docs-required` (optional): Whether docs are required for this revision
 - `--created-by` (optional): api | mcp | web-ui | github-sync
 
-`--scope-summary` and `--scope-details` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. Pass them as `--scope-summary "$(cat "$f")" --scope-details "$(cat "$d")"`, each file written and checked in the same Bash call as in Step 6, with `d="$(mktemp)" || exit 1` and the one trap widened to `trap 'rm -f "$f" "$d"' EXIT`.
+`--scope-summary` and `--scope-details` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. `zensu features revision` has no file flag for either, so pass them as `--scope-summary "$(cat "$f")" --scope-details "$(cat "$d")"`, each file written as in Step 6 in the same Bash call, with `d="$(mktemp)" || exit 1` and the one trap widened to `trap 'rm -f "$f" "$d"' EXIT`. Check both before the command with `grep -qI '[^[:space:]]' -- "$f" || exit 1` and the same line for `"$d"`: the shell hands an empty file on as an empty value.
 
 ### Step 8: Validate
 

@@ -35,7 +35,7 @@
 #     the one registry all four multi-repo doc suites read. X2 and X4 take the
 #     first `.md` entry; X6 and X8 take the first two `.html` entries.
 #   - X7 pins VERBATIM status prose. It requires the literal
-#     `stages 2 and 3 are REDESIGNED, NOT BUILT` in all three documents and
+#     `stages 2 and 3 are REDESIGNED, NOT ENABLED` in all three documents and
 #     forbids the retired `stages 2 and 3 are BLOCKED`, so rewording the status
 #     is a deliberate three-file edit and not an accident — but a paraphrase
 #     that keeps the meaning still fails, and that is the intended cost. Both
@@ -198,7 +198,7 @@ fi
 # X7 — the REDESIGNED status, and the bound the redesign states.
 #
 # The specification's own status line says stages 2 and 3 are REDESIGNED, NOT
-# BUILT, and §8.1 says plainly that the workflow document carries the root list
+# ENABLED, and §8.1 says plainly that the workflow document carries the root list
 # as a declaration that bounds accidents, not intent. A companion page that names
 # that carrier WITHOUT the bound hands a reader a capability grant the design no
 # longer makes — and the specification points readers at both pages, so a page is
@@ -228,8 +228,12 @@ folded_text() { tr -s '[:space:]' ' ' < "$1" | sed -e 's/<[^>]*>//g' -e 's/[*_`]
 x7=1
 for f in "${ALL[@]}"; do
   folded="$(folded_text "$f")"
-  printf '%s' "$folded" | grep -qF 'stages 2 and 3 are REDESIGNED, NOT BUILT' \
-    || { echo "  ---   ${f##*/} does not carry the REDESIGNED status of the specification"; x7=0; }
+  printf '%s' "$folded" | grep -qF 'stages 2 and 3 are REDESIGNED, NOT ENABLED' \
+    || { echo "  ---   ${f##*/} does not carry the REDESIGNED, NOT ENABLED status of the specification"; x7=0; }
+  if printf '%s' "$folded" | grep -qF 'stages 2 and 3 are REDESIGNED, NOT BUILT'; then
+    echo "  ---   ${f##*/} still carries the retired NOT BUILT status"
+    x7=0
+  fi
   if printf '%s' "$folded" | grep -qF 'stages 2 and 3 are BLOCKED'; then
     echo "  ---   ${f##*/} still carries the retired BLOCKED status"
     x7=0
