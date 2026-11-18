@@ -1,0 +1,15 @@
+{
+  "description": "A PNG that carries bytes after its IEND chunk.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "refusal": [
+      {
+        "code": "file.type",
+        "at": "files.d09de3df816b41c896ee0726c8b59c645823bc705fc158ee07e5e3b643c287dc.type"
+      }
+    ]
+  }
+}

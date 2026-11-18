@@ -164,7 +164,9 @@ stays in the store, counts toward retention and is listed as `unrendered`.
 - `<store>` defaults to `$CLAUDE_PLUGIN_DATA/evidence-report/v1`, beside the acceptance store in
   `$CLAUDE_PLUGIN_DATA/acceptance-verify/v1`. The path carries no plugin version, so it survives
   plugin updates. It lies outside every work tree, it survives the removal of a worktree, and the
-  plugin-data guard already denies `Edit` and `Write` there. `evidence.report.dir` moves it.
+  plugin-data guard already denies `Edit` and `Write` there. `evidence.report.dir` moves it, and
+  the configured directory holds the same `v1` directory, so `<store>` is
+  `<evidence.report.dir>/v1` and both stores share one layout.
 - `<repository key>` groups the reports of every worktree of one clone: the clone's directory
   name plus the first 10 hex digits of the SHA-256 of the realpath that
   `git rev-parse --git-common-dir` names. Outside git, the project root's realpath is hashed.
@@ -178,7 +180,9 @@ project-local implementation kept reports in a gitignored folder of each worktre
 ### 6.3 Manifest version 1
 
 Every object has a fixed key set. A reader refuses an unknown or a missing key, and a change is a
-new schema version. No field is trusted HTML: every renderer, the plugin's and Zensu's alike,
+new schema version. A reader checks `schema` first: a manifest or a binding that names a version
+it does not know is one `schema.version` fault naming that version, never a list of key faults,
+and `--report-list` shows the version as the report's state. No field is trusted HTML: every renderer, the plugin's and Zensu's alike,
 escapes every string, and the only formatting text may carry is inline code in backticks.
 
 ```jsonc
@@ -203,6 +207,7 @@ escapes every string, and the only formatting text may carry is inline code in b
     "branch": "feature/settings",
     "head": "<40 hex digits>",
     "tree": "<the acceptance gate's tree fingerprint>",
+    "begin_tree": "<the tree fingerprint at --report-begin>",
     "dirty": false,
     "origin": null
   },
@@ -262,6 +267,10 @@ Field rules:
   turns `true` once any row used a manual login.
 - `target.repository` comes from the origin remote with userinfo stripped, `null` without one.
   `target.origin` is set in remote mode only and holds scheme, host and port.
+- `target.tree` is the tree measured at render and `target.begin_tree` the one measured at
+  `--report-begin`; either is `null` where no tree can be fingerprinted, such as outside git. The
+  page shows the begin tree only when the two differ, and a changed or unmeasured begin tree
+  becomes a limitation line.
 - `coverage.source` is `acceptance-records` in chain mode and `matrix` otherwise. `state` is one
   of `pass`, `fail`, `partial`, `missing`, `stale` and `deprecated`; `record` is `null` in matrix
   mode.
@@ -311,7 +320,14 @@ unmeasured.
 
 The checks of AC-003 and AC-004 run at render. The verdict is checked against the states: a
 stated `PASS` needs every in-scope criterion and every P0 row passed; any failed criterion or
-failed P0 row requires `FAIL`; `PARTIAL` is refused only when something failed. These checks are
+failed P0 row requires `FAIL`; `PARTIAL` is refused only when something failed. A `PASS` also
+needs at least one passed criterion or passed P0 row (`verdict.empty`), and in local matrix mode a
+tree that was fingerprinted at `--report-begin` and at render and did not change between them
+(`verdict.tree-changed`), because the rows were recorded against the begin tree; a target outside
+git, where no tree, head, branch, repository or dirty state can be measured, is exempt. Chain mode needs
+no such tree rule: the acceptance states it folds are already bound to the tree at render, and
+when that tree cannot be fingerprinted the report says each criterion shows its newest record.
+These checks are
 necessary conditions, not the whole verdict rule of Phase 5, which also weighs console, network
 and visual evidence.
 
@@ -321,6 +337,13 @@ and visual evidence.
   and records the PNG's digest as `source_sha256`; the PNG itself is not kept. Without an encoder
   the PNG is stored. Lossy encoding is never used, because evidence must show the pixels that
   were captured.
+- **Pixels only, no metadata.** `--report-add` walks a PNG chunk by chunk to `IEND`: bytes after
+  it, a truncated chunk, an animation and an unknown critical chunk are refused, and text, EXIF,
+  time and private chunks are dropped before the file is stored. A WebP drops its EXIF, XMP and
+  unknown chunks the same way. The stored file is then not the captured one, so its entry keeps
+  the captured file's digest as `source_sha256`. A stored image that still carries such a chunk is
+  refused at render (`file.metadata`). Dropping instead of refusing keeps an ordinary capture
+  usable while no metadata reaches a report.
 - **Normalized at capture, never scaled afterwards.** A browser screenshot is taken at the run's
   viewport, 1440 by 900 CSS pixels at scale factor 1 by default, set once with the allowed
   `resize` command after `open`, and of the viewport only unless the criterion needs what lies
@@ -341,6 +364,8 @@ and visual evidence.
 - Caps: 50 MiB per file and 2,000 files per report, checked at `--report-add`, so every file a
   report holds can also be uploaded (§8.3). A report has no size cap of its own: it is split into
   files, and only `evidence.report.maxBytes` locally and the tenant's quota in Zensu bound it.
+  `--report-add` refuses a file that would take one report's files past `evidence.report.maxBytes`,
+  because the store could never hold that report.
   The review summary skips an image above 10 MB, the attachment limit recorded for a GitHub free
   plan.
 
@@ -362,7 +387,14 @@ attachment or an e-mail. That is how a report is shared without Zensu.
 
 The defaults are in §6.11. The sweep runs at `--report-begin`: by count in the calling repository
 and by size across the store, oldest first. It never deletes a report another call is still
-building: one whose lock is held, or an unrendered one touched within the last 14 days. A
+building: one whose lock is held, or an unrendered one touched within the last 14 days. The size
+pass deletes only when the reports it may delete can bring the store under the cap; when the
+reports it must keep hold more on their own, it deletes nothing for the cap and `--report-begin`
+names their size. A report's lock is the plugin's external process lock: a live holder keeps it,
+a holder that exited or whose process id was reused loses it at once, a call waits a bounded
+number of attempts and then refuses, and the sweep takes a lock without waiting. `--report-begin`
+holds the new report's lock from the creation of its directories until its binding is written,
+so no other call's sweep can delete it half-written. A
 published report counts like any other; deleting its
 local copy does not touch its copy in Zensu. Each host keeps its own store (§7.1).
 
@@ -374,7 +406,11 @@ Three moments, three rules:
    Screenshots never show credentials, tokens or personal data, and console and network output is
    read only on unauthenticated targets.
 2. **Write.** `--report-add` takes files only from the run directory (AC-006), and every text
-   passes the secret screen and the path redaction (AC-007). An image needs a caption that states
+   passes the secret screen and the path redaction (AC-007). The run directory must be ignored by
+   the work tree that holds it and lie outside `.git`, so a capture can never be committed and never moves the tree
+   fingerprint. The secret screen adds report-side rules to the shared patterns: authorization
+   values, bearer tokens, JWTs, credentials in a URL, session cookies and API-key headers. An
+   image needs a caption that states
    what it shows, because a screenshot filename without a description is not evidence.
 3. **Publish.** Opt-in and preview (AC-013). A report with `run.authenticated: true`, or from
    remote mode, is published only after the user confirms that fact in the same turn, even when
@@ -440,8 +476,8 @@ Every key belongs to the `evidence.*` family of `docs/configuration.md`.
 
 | Key | Default | Layers | Effect |
 |---|---|---|---|
-| `evidence.report.enabled` | `true` | merged | `false` writes no report; the chat report is unchanged. |
-| `evidence.report.dir` | `$CLAUDE_PLUGIN_DATA/evidence-report/v1` | merged | The store. Refused inside a work tree unless git reports the path ignored. |
+| `evidence.report.enabled` | `true` | merged; a project file can switch reports off but never on | `false` writes no report; the chat report is unchanged. |
+| `evidence.report.dir` | unset, which keeps the store at `$CLAUDE_PLUGIN_DATA/evidence-report/v1` | user-level only | The store's parent: reports go to its `v1` directory. Refused inside a work tree unless git reports the path ignored. |
 | `evidence.report.keep` | `30` | merged | Reports kept per repository; a begin trims only its own repository. |
 | `evidence.report.maxBytes` | `2147483648` | user-level only | Size cap of the whole store. A project file cannot set it, because the sweep deletes other repositories' reports. |
 | `evidence.report.webp` | `auto` | merged | `auto` transcodes losslessly when `cwebp` is on `PATH`; `off` keeps PNG. |
@@ -453,6 +489,10 @@ of `docs/configuration.md`. A committed `.zensu/config.json` must not make every
 screenshots leave their machine, so the project layer can withdraw publishing but never grant it.
 `evidence.report.maxBytes` is read from the user layers alone for a related reason: the size sweep
 deletes the reports of every repository in the store, so a committed file must not set it.
+`evidence.report.dir` is read from the user layers alone because it decides where every
+contributor's evidence is written, and `evidence.report.enabled` follows the `publish` rule: a
+user-level `false` stands, and a project file can switch reports off but never back on. Each
+ignored project value is disclosed by `--report-begin`.
 
 ### 6.12 Versioning
 
@@ -579,7 +619,8 @@ repeated open lists only what is still missing.
 Finalize verifies every file's SHA-256, validates the manifest against schema version 1, and
 re-runs the checks of AC-003 and AC-004. The service's implementation is its own, but its suite
 runs the conformance corpus of AC-019, vendored from this repository, so the plugin and the
-service accept and refuse the same reports. A finalized report is immutable. Every criterion
+service accept and refuse the same reports. A case may lower the manifest cap through its
+`limits.maxManifestBytes`, the one limit a case can set, and the service reads that case with it. A finalized report is immutable. Every criterion
 that carries a Zensu ref is matched to the feature's requirement row of that ref; whether
 finalize also sets that row's verification is decision 9.
 

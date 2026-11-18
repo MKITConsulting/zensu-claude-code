@@ -1,0 +1,12 @@
+{
+  "description": "A manifest.json that is a directory.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "manifest.unreadable",
+        "at": ""
+      }
+    ]
+  }
+}

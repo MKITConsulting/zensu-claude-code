@@ -3,14 +3,16 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { redact } = require('./zensu-artifact-redact-v1.js');
-const { scan, ALLOW_MARKER } = require('./secret-patterns.js');
+const { redact, rootSpellings } = require('./zensu-artifact-redact-v1.js');
+const { scan, ALLOW_MARKER, PLACEHOLDER } = require('./secret-patterns.js');
 const evidenceRun = require('./evidence-run-v1.js');
 const acceptance = require('./acceptance-verify-v1.js');
+const core = require('./session-control-core-v1.js');
 
 const SCHEMA = 'zensu-evidence-report/v1';
 const BINDING_SCHEMA = 'zensu-evidence-report-binding/v1';
-const STORE_SEGMENTS = Object.freeze(['evidence-report', 'v1']);
+const STORE_VERSION = 'v1';
+const STORE_SEGMENTS = Object.freeze(['evidence-report', STORE_VERSION]);
 const VERBS = Object.freeze(['begin', 'add', 'step', 'render', 'list', 'export']);
 const ID_RE = /^vr1_[0-9]{13}_[0-9a-f]{12}$/;
 const SESSION_KEY_RE = /^scv1_[0-9a-f]{64}$/;
@@ -35,9 +37,35 @@ const SIGNAL_CLASS_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
 const FEATURE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ZENSU_REF_RE = /^(?:AC|FR)-[0-9]+$/;
 const VIEWPORT_ARG_RE = /^([1-9][0-9]{0,5})x([1-9][0-9]{0,5})(?:@([0-9]{1,2}(?:\.[0-9]{1,2})?))?$/;
-const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
-const TEXT_FILE_FORBIDDEN_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
+const SCHEMA_NAME_RE = /^[A-Za-z0-9._/-]{1,80}$/;
+const CHARACTER_RANGES = Object.freeze({
+  layout: '\\u0009\\u000a\\u000d',
+  c0: '\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f',
+  c1: '\\u007f-\\u009f',
+  lineSeparators: '\\u2028\\u2029',
+  bidi: '\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069',
+});
+const SINGLE_LINE_FORBIDDEN = Object.freeze(['layout', 'c0', 'c1', 'lineSeparators', 'bidi']);
+const TEXT_FILE_FORBIDDEN = Object.freeze(['c0', 'c1', 'bidi']);
+const CONTROL_RE = characterClass(SINGLE_LINE_FORBIDDEN, 'g');
+const SINGLE_LINE_FORBIDDEN_RE = characterClass(SINGLE_LINE_FORBIDDEN);
+const TEXT_FILE_FORBIDDEN_RE = characterClass(TEXT_FILE_FORBIDDEN);
+const REPORT_SECRET_RULES = Object.freeze([
+  /\bauthorization["']?\s*[:=]\s*["']?(?:[A-Za-z0-9-]+\s+)?([^\s"']{12,})/gi,
+  /\bbearer\s+((?=[A-Za-z0-9._~+/-]*[0-9])[A-Za-z0-9._~+/-]{16,}=*)/gi,
+  /\b(eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,})/g,
+  /\b[a-z][a-z0-9+.-]*:\/\/([^\s/?#@:]+:[^\s/?#@]+)@/gi,
+  /\bx-api-key["']?\s*[:=]\s*["']?([^\s"']{12,})/gi,
+]);
+const COOKIE_HEADER_RE = /\b(?:set-)?cookie["']?\s*:\s*["']?([^\r\n"']*)/gi;
+const COOKIE_PAIR_RE = /^\s*[^\s=;:"']+=([^\s;"']*)/;
+const COOKIE_VALUE_MIN = 16;
+const NAME_CHARACTER_RE = /[A-Za-z0-9_.-]/;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_IMAGE_CHUNKS = Object.freeze(['IHDR', 'PLTE', 'IDAT', 'IEND', 'tRNS', 'cHRM', 'gAMA', 'iCCP', 'sBIT', 'sRGB', 'cICP', 'mDCV', 'cLLI', 'bKGD', 'hIST', 'pHYs', 'sPLT']);
+const PNG_ANIMATION_CHUNKS = Object.freeze(['acTL', 'fcTL', 'fdAT']);
+const WEBP_IMAGE_CHUNKS = Object.freeze(['VP8X', 'VP8L', 'ICCP', 'VP8 ', 'ALPH', 'ANIM', 'ANMF']);
+const WEBP_METADATA_FLAGS = 0x0c;
 
 const VERDICTS = Object.freeze(['PASS', 'FAIL', 'PARTIAL']);
 const MODES = Object.freeze(['local', 'remote']);
@@ -60,7 +88,7 @@ const DRIVER_SPELLINGS = new Map([['desktop-native', 'desktop']]);
 const MANIFEST_KEYS = Object.freeze(['coverage', 'created_at', 'evidence', 'files', 'id', 'plugin_version', 'rendered_at', 'run', 'schema', 'sections', 'steps', 'target', 'verdict']);
 const RUN_KEYS = Object.freeze(['attach', 'authenticated', 'chain', 'drivers', 'feature', 'host', 'mode', 'recipe']);
 const CHAIN_KEYS = Object.freeze(['plan', 'stem']);
-const TARGET_KEYS = Object.freeze(['branch', 'dirty', 'head', 'origin', 'repository', 'tree']);
+const TARGET_KEYS = Object.freeze(['begin_tree', 'branch', 'dirty', 'head', 'origin', 'repository', 'tree']);
 const COVERAGE_KEYS = Object.freeze(['criteria', 'source']);
 const CRITERION_KEYS = Object.freeze(['driver', 'evidence_run', 'id', 'note', 'record', 'state', 'steps', 'text', 'zensu']);
 const ZENSU_KEYS = Object.freeze(['feature', 'ref']);
@@ -77,7 +105,7 @@ const VIEWPORT_KEYS = Object.freeze(['height', 'scale', 'width']);
 const SECTIONS_KEYS = Object.freeze(['consent', 'console', 'limitations', 'network', 'resources']);
 const CONSENT_KEYS = Object.freeze(['decided_by', 'origin', 'route']);
 const BINDING_KEYS = Object.freeze(['created_at', 'criteria', 'evidence', 'files', 'id', 'plugin_version', 'project_root', 'rendered_at', 'run', 'run_dir', 'schema', 'session_key', 'steps', 'target']);
-const DRAFT_CRITERION_KEYS = Object.freeze(['id', 'text']);
+const DRAFT_CRITERION_KEYS = Object.freeze(['id', 'text', 'zensu']);
 
 const VERB_ARGUMENTS = Object.freeze({
   begin: Object.freeze(['run-dir', 'mode', 'drivers', 'attach', 'recipe', 'origin', 'log']),
@@ -107,8 +135,7 @@ const LIMITS = Object.freeze({
   defaultKeep: 30,
   maxKeep: 100000,
   defaultMaxBytes: 2147483648,
-  lockWaitMs: 10000,
-  lockStaleMs: 60000,
+  lockAttempts: 200,
   openReportMs: 14 * 24 * 60 * 60 * 1000,
   renderReserveBytes: 192 * 1024,
   chars: Object.freeze({
@@ -125,6 +152,15 @@ const LIMITS = Object.freeze({
     path: 512,
   }),
 });
+
+const FAULT_CODES = Object.freeze([
+  'schema.type', 'schema.unknown-key', 'schema.missing-key', 'schema.value', 'schema.limit', 'schema.duplicate', 'schema.version',
+  'manifest.too-large', 'manifest.unreadable', 'manifest.unparseable',
+  'criterion.absent', 'criterion.steps', 'criterion.no-image', 'step.unknown-criterion', 'step.unknown-evidence',
+  'evidence.unknown-file', 'evidence.file-type',
+  'file.unreferenced', 'file.missing', 'file.digest', 'file.size', 'file.type', 'file.metadata',
+  'verdict.contradiction', 'verdict.empty', 'verdict.tree-changed',
+]);
 
 const SCHEMA_REMEDY = 'write the manifest as schema version 1 describes it, or render the report again with --report-render';
 const STYLE = [
@@ -185,6 +221,14 @@ function isPlainObject(value) {
 
 function isString(value) {
   return typeof value === 'string';
+}
+
+function characterClass(names, flags) {
+  return new RegExp(`[${names.map((name) => CHARACTER_RANGES[name]).join('')}]`, flags);
+}
+
+function schemaName(value) {
+  return isString(value) && SCHEMA_NAME_RE.test(value) ? value : null;
 }
 
 function isoNow(now) {
@@ -309,39 +353,44 @@ function writeAtomic(directory, name, data, mode = 0o600) {
   return target;
 }
 
-function sleep(milliseconds) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+function lockTarget(repository, id) {
+  return { lockDirectory: repository, resourcePath: path.join(repository, `${id}.binding.json`) };
 }
 
-function withLock(lockPath, limits, action) {
-  const deadline = Date.now() + limits.lockWaitMs;
-  let descriptor;
-  for (;;) {
-    try {
-      descriptor = fs.openSync(lockPath, 'wx', 0o600);
-      break;
-    } catch (error) {
-      if (error.code !== 'EEXIST') unavailable(`the report lock ${lockPath} cannot be taken (${error.code || error.message})`);
-    }
-    let stat = null;
-    try { stat = fs.lstatSync(lockPath); } catch { }
-    if (stat !== null && (stat.isSymbolicLink() || !stat.isFile() || Date.now() - stat.mtimeMs > limits.lockStaleMs)) {
-      try {
-        fs.unlinkSync(lockPath);
-      } catch (error) {
-        if (error.code !== 'ENOENT') unavailable(`the stale report lock ${lockPath} cannot be removed (${error.code || error.message}); remove it once no other call runs`);
-      }
-      continue;
-    }
-    if (Date.now() >= deadline) unavailable('another call holds this report\'s lock; run the verb again once it has finished');
-    sleep(25);
+function acquireLock(target, attempts) {
+  try {
+    return core.acquireExternalProcessLock({ ...target, ownerPid: process.pid, attemptLimit: attempts }).token;
+  } catch (error) {
+    const reason = error && error.message ? error.message : String(error);
+    if (reason.includes('timed out acquiring external process lock')) unavailable('another call holds this report\'s lock; run the verb again once it has finished');
+    return unavailable(`the report lock cannot be taken (${reason})`);
   }
-  try { fs.writeSync(descriptor, String(process.pid)); } catch { }
-  try { fs.closeSync(descriptor); } catch { }
+}
+
+function releaseLock(target, token) {
+  try {
+    core.releaseExternalProcessLock({ ...target, ownerPid: process.pid, token });
+  } catch { }
+}
+
+function lockHeld(target) {
+  let lock;
+  try {
+    lock = core.inspectExternalProcessLock(target).lock;
+  } catch {
+    return true;
+  }
+  if (lock.state === 'absent') return false;
+  if (lock.state === 'owned' || lock.state === 'ownerless') return !lock.stale;
+  return true;
+}
+
+function withLock(target, limits, action) {
+  const token = acquireLock(target, limits.lockAttempts);
   try {
     return action();
   } finally {
-    try { fs.unlinkSync(lockPath); } catch { }
+    releaseLock(target, token);
   }
 }
 
@@ -388,26 +437,94 @@ function normalizedText(text) {
   return String(text).replace(CONTROL_RE, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function realValue(value) {
+  return !PLACEHOLDER.test(value);
+}
+
+function cookieSecret(text) {
+  for (const header of text.matchAll(COOKIE_HEADER_RE)) {
+    for (const pair of header[1].split(';')) {
+      const value = COOKIE_PAIR_RE.exec(pair);
+      if (value && value[1].length >= COOKIE_VALUE_MIN && realValue(value[1])) return true;
+    }
+  }
+  return false;
+}
+
+function secretMatch(text) {
+  if (scan(text).matches.length > 0 || cookieSecret(text)) return true;
+  return REPORT_SECRET_RULES.some((rule) => [...text.matchAll(rule)].some((match) => realValue(match[1])));
+}
+
+function ownRoots(context) {
+  return [context.projectRoot, context.home].filter((root) => isString(root) && path.isAbsolute(root)
+    && path.relative(path.parse(root).root, root).split(path.sep).filter(Boolean).length >= 2);
+}
+
+function ownPathMarks(context) {
+  const options = { projectRoot: context.projectRoot, home: context.home };
+  return ownRoots(context)
+    .flatMap((root) => rootSpellings(root).map((spelling) => ({ spelling, mark: redact(root, options) })))
+    .sort((a, b) => b.spelling.length - a.spelling.length);
+}
+
+function ownPathEnd(text, spelling, from) {
+  for (let at = text.indexOf(spelling, from); at !== -1; at = text.indexOf(spelling, at + 1)) {
+    let next = at + spelling.length;
+    while (text.charAt(next) === '.') next += 1;
+    if (!NAME_CHARACTER_RE.test(text.charAt(next))) return at;
+  }
+  return -1;
+}
+
+function namesOwnPath(text, context) {
+  return ownPathMarks(context).some(({ spelling }) => ownPathEnd(text, spelling, 0) !== -1);
+}
+
+function scrubOwnPaths(text, context) {
+  let out = text;
+  for (const { spelling, mark } of ownPathMarks(context)) {
+    for (let at = ownPathEnd(out, spelling, 0); at !== -1; at = ownPathEnd(out, spelling, at + mark.length)) {
+      out = `${out.slice(0, at)}${mark}${out.slice(at + spelling.length)}`;
+    }
+  }
+  return out;
+}
+
+function screenSecrets(text, context, label, options = {}) {
+  const hint = options.hint || 'describe it without the value';
+  if (text.includes(ALLOW_MARKER)) return { error: `${label} carries the ${ALLOW_MARKER} marker, which a report does not honor; remove it` };
+  if (secretMatch(text)) return { error: `${label} matches a secret pattern; ${hint}` };
+  if (options.paths === 'own' && namesOwnPath(text, context)) return { error: `${label} names a local path; ${hint}` };
+  const redacted = redact(scrubOwnPaths(text, context), { projectRoot: context.projectRoot, home: context.home });
+  if (secretMatch(redacted)) return { error: `${label} matches a secret pattern; ${hint}` };
+  if (options.paths === 'any' && redacted !== text) return { error: `${label} names a local path; ${hint}` };
+  return { value: options.paths === 'own' ? text : redacted };
+}
+
+function clipText(text, max) {
+  let end = max - 1;
+  if (/[\ud800-\udbff]/.test(text.charAt(end - 1))) end -= 1;
+  return `${text.slice(0, end).trimEnd()}\u2026`;
+}
+
 function screenText(text, context, max, label, options = {}) {
   if (!isString(text) || text.trim() === '') return { error: `${label} is empty` };
-  if (text.includes(ALLOW_MARKER)) return { error: `${label} carries the ${ALLOW_MARKER} marker, which a report does not honor; remove it` };
-  if (scan(text).matches.length > 0) return { error: `${label} matches a secret pattern; describe it without the value` };
-  const redacted = redact(text, { projectRoot: context.projectRoot, home: context.home });
-  if (scan(redacted).matches.length > 0) return { error: `${label} matches a secret pattern; describe it without the value` };
-  let cleaned = normalizedText(redacted);
+  const screened = screenSecrets(text, context, label);
+  if (screened.error) return screened;
+  let cleaned = normalizedText(screened.value);
   if (cleaned === '') return { error: `${label} is empty` };
   if (cleaned.length > max) {
     if (!options.clip) return { error: `${label} exceeds ${max} characters` };
-    cleaned = `${cleaned.slice(0, max - 1)}\u2026`;
+    cleaned = clipText(cleaned, max);
   }
-  if (scan(cleaned).matches.length > 0) return { error: `${label} matches a secret pattern; describe it without the value` };
+  if (secretMatch(cleaned)) return { error: `${label} matches a secret pattern; describe it without the value` };
   return { value: cleaned };
 }
 
-function screenValue(value, context, label) {
-  if (scan(value).matches.length > 0) return `${label} matches a secret pattern`;
-  if (value.includes(ALLOW_MARKER)) return `${label} carries the ${ALLOW_MARKER} marker`;
-  return null;
+function screenArgument(value, context, label, paths = 'any') {
+  const screened = screenSecrets(value, context, label, { paths });
+  if (screened.error) refuse(screened.error);
 }
 
 function parseFields(text, spec) {
@@ -448,6 +565,39 @@ function parseFields(text, spec) {
   return { single, repeat, criteria };
 }
 
+function withDropped(result, dropped, clean) {
+  if (dropped.length === 0) return result;
+  return { ...result, dropped: [...dropped].sort(), clean };
+}
+
+function sniffPng(bytes) {
+  if (bytes.length < 33 || bytes.readUInt32BE(8) !== 13 || bytes.toString('latin1', 12, 16) !== 'IHDR') {
+    return { error: 'the PNG has no IHDR header' };
+  }
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  if (width < 1 || height < 1) return { error: 'the PNG declares an empty image' };
+  const kept = [bytes.subarray(0, 8)];
+  const dropped = [];
+  let offset = 8;
+  for (;;) {
+    if (offset + 12 > bytes.length) return { error: 'the PNG has no IEND chunk' };
+    const size = bytes.readUInt32BE(offset);
+    const type = bytes.toString('latin1', offset + 4, offset + 8);
+    const end = offset + 12 + size;
+    if (!/^[A-Za-z]{4}$/.test(type)) return { error: 'the PNG holds a malformed chunk' };
+    if (size > 0x7fffffff || end > bytes.length) return { error: 'the PNG chunk list is truncated' };
+    if (PNG_ANIMATION_CHUNKS.includes(type)) return { error: 'an animated PNG is not an image a report stores' };
+    if (PNG_IMAGE_CHUNKS.includes(type)) kept.push(bytes.subarray(offset, end));
+    else if (/^[A-Z]/.test(type)) return { error: `the PNG holds the unknown critical chunk ${type}` };
+    else if (!dropped.includes(type)) dropped.push(type);
+    offset = end;
+    if (type === 'IEND') break;
+  }
+  if (offset !== bytes.length) return { error: 'the PNG carries bytes after its IEND chunk' };
+  return withDropped({ type: 'image/png', width, height }, dropped, () => Buffer.concat(kept));
+}
+
 function sniffWebp(bytes) {
   if (bytes.readUInt32LE(4) + 8 !== bytes.length) return { error: 'the WebP container size does not match the file' };
   let offset = 12;
@@ -456,6 +606,8 @@ function sniffWebp(bytes) {
   let lossless = false;
   let lossy = false;
   let animated = false;
+  const kept = [];
+  const dropped = [];
   while (offset + 8 <= bytes.length) {
     const fourcc = bytes.toString('latin1', offset, offset + 4);
     const size = bytes.readUInt32LE(offset + 4);
@@ -479,12 +631,24 @@ function sniffWebp(bytes) {
     } else if (fourcc === 'ANIM' || fourcc === 'ANMF') {
       animated = true;
     }
+    const next = Math.min(bytes.length, data + size + (size % 2));
+    if (WEBP_IMAGE_CHUNKS.includes(fourcc)) kept.push(bytes.subarray(offset, next));
+    else if (!dropped.includes(fourcc)) dropped.push(fourcc);
     offset = data + size + (size % 2);
   }
+  if (offset < bytes.length) return { error: 'the WebP chunk list is truncated' };
   if (animated) return { error: 'an animated WebP is not an image a report stores' };
   if (lossy) return { error: 'a lossy WebP is never stored as evidence; capture a PNG' };
   if (!lossless || width === null) return { error: 'the WebP holds no lossless image' };
-  return { type: 'image/webp', width, height };
+  return withDropped({ type: 'image/webp', width, height }, dropped, () => {
+    const body = Buffer.concat([bytes.subarray(8, 12), ...kept]);
+    const head = Buffer.alloc(8);
+    head.write('RIFF', 0, 'latin1');
+    head.writeUInt32LE(body.length, 4);
+    const clean = Buffer.concat([head, body]);
+    if (clean.length >= 21 && clean.toString('latin1', 12, 16) === 'VP8X') clean[20] &= ~WEBP_METADATA_FLAGS;
+    return clean;
+  });
 }
 
 function sniffText(bytes) {
@@ -501,15 +665,7 @@ function sniffText(bytes) {
 }
 
 function sniff(bytes) {
-  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(PNG_SIGNATURE)) {
-    if (bytes.length < 24 || bytes.readUInt32BE(8) !== 13 || bytes.toString('latin1', 12, 16) !== 'IHDR') {
-      return { error: 'the PNG has no IHDR header' };
-    }
-    const width = bytes.readUInt32BE(16);
-    const height = bytes.readUInt32BE(20);
-    if (width < 1 || height < 1) return { error: 'the PNG declares an empty image' };
-    return { type: 'image/png', width, height };
-  }
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(PNG_SIGNATURE)) return sniffPng(bytes);
   if (bytes.length >= 16 && bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP') {
     return sniffWebp(bytes);
   }
@@ -551,7 +707,7 @@ function exactKeys(value, keys, at, faults) {
 
 function textField(value, max, at, faults, options = {}) {
   if (options.nullable && value === null) return;
-  if (!isString(value) || value.length === 0 || value.length > max || /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(value) || value !== value.trim()) {
+  if (!isString(value) || value.length === 0 || value.length > max || SINGLE_LINE_FORBIDDEN_RE.test(value) || value !== value.trim()) {
     addFault(faults, 'schema.value', at, `${at} must be a single-line text of 1 to ${max} characters${options.nullable ? ', or null' : ''}`);
   }
 }
@@ -602,6 +758,12 @@ function uniqueArray(value, at, faults, itemCheck, max) {
   return ok;
 }
 
+function zensuField(value, at, faults) {
+  if (value === null || !exactKeys(value, ZENSU_KEYS, at, faults)) return;
+  patternField(value.feature, FEATURE_ID_RE, `${at}.feature`, faults, 'a feature id');
+  patternField(value.ref, ZENSU_REF_RE, `${at}.ref`, faults, 'a requirement ref such as AC-001');
+}
+
 function validateRun(run, faults, limits) {
   if (!exactKeys(run, RUN_KEYS, 'run', faults)) return;
   patternField(run.host, HOST_RE, 'run.host', faults, 'lowercase letters, digits and hyphens, 2 to 32 characters');
@@ -634,6 +796,7 @@ function validateTarget(target, run, faults) {
   patternField(target.branch, BRANCH_RE, 'target.branch', faults, 'a branch name', { nullable: true });
   patternField(target.head, COMMIT_RE, 'target.head', faults, 'a commit id', { nullable: true });
   patternField(target.tree, COMMIT_RE, 'target.tree', faults, 'a tree id', { nullable: true });
+  patternField(target.begin_tree, COMMIT_RE, 'target.begin_tree', faults, 'a tree id', { nullable: true });
   booleanField(target.dirty, 'target.dirty', faults, { nullable: true });
   patternField(target.origin, ORIGIN_RE, 'target.origin', faults, 'scheme, host and port', { nullable: true });
   if (isPlainObject(run) && run.mode === 'remote' && target.origin === null) {
@@ -848,10 +1011,7 @@ function validateCoverage(coverage, run, faults, limits) {
     if (coverage.source === 'matrix' && (criterion.record !== null || criterion.evidence_run !== null)) {
       addFault(faults, 'schema.value', `${at}.record`, `${at}.record and ${at}.evidence_run must be null in matrix mode`);
     }
-    if (criterion.zensu !== null && exactKeys(criterion.zensu, ZENSU_KEYS, `${at}.zensu`, faults)) {
-      patternField(criterion.zensu.feature, FEATURE_ID_RE, `${at}.zensu.feature`, faults, 'a feature id');
-      patternField(criterion.zensu.ref, ZENSU_REF_RE, `${at}.zensu.ref`, faults, 'a requirement ref such as AC-001');
-    }
+    zensuField(criterion.zensu, `${at}.zensu`, faults);
     if (uniqueArray(criterion.steps, `${at}.steps`, faults, (item, itemAt) => {
       if (!Number.isInteger(item) || item < 1) {
         addFault(faults, 'schema.value', itemAt, `${itemAt} must be a step number`);
@@ -905,8 +1065,12 @@ function validateManifest(manifest, limitsOverride) {
     addFault(faults, 'schema.type', '', 'the manifest is not a JSON object');
     return faults;
   }
+  if (manifest.schema !== SCHEMA) {
+    const name = schemaName(manifest.schema);
+    addFault(faults, 'schema.version', 'schema', name === null ? `the manifest names no schema this reader knows; schema must be ${SCHEMA}` : `the manifest names the schema ${name}, which this reader does not know`, `read it with a runtime that knows ${name === null ? 'its schema' : name}, or write it as ${SCHEMA}`);
+    return faults;
+  }
   if (!exactKeys(manifest, MANIFEST_KEYS, '', faults)) return faults;
-  if (manifest.schema !== SCHEMA) addFault(faults, 'schema.value', 'schema', `schema must be ${SCHEMA}`);
   patternField(manifest.id, ID_RE, 'id', faults, 'a vr1_ report id');
   patternField(manifest.created_at, ISO_RE, 'created_at', faults, 'a UTC timestamp');
   patternField(manifest.rendered_at, ISO_RE, 'rendered_at', faults, 'a UTC timestamp', { nullable: true });
@@ -928,6 +1092,10 @@ function inspectStoredFile(bytes) {
   return sniffed;
 }
 
+function targetOutsideGit(target) {
+  return ['repository', 'branch', 'head', 'tree', 'begin_tree', 'dirty'].every((key) => target[key] === null);
+}
+
 function verdictFaults(manifest) {
   const faults = [];
   const criteria = manifest.coverage.criteria;
@@ -937,13 +1105,28 @@ function verdictFaults(manifest) {
   if (failed.length > 0 && manifest.verdict !== 'FAIL') {
     addFault(faults, 'verdict.contradiction', 'verdict', `the stated verdict ${manifest.verdict} contradicts what failed: ${failed.join(', ')}`, 'state FAIL, because a failed criterion or a failed P0 row requires it');
   }
-  if (manifest.verdict === 'PASS') {
-    const open = criteria.filter((criterion) => criterion.state !== 'pass' && criterion.state !== 'deprecated').map((criterion) => `${criterion.id} ${criterion.state}`);
-    const openP0 = manifest.steps.filter((step) => step.priority === 'P0' && step.result !== 'pass').map((step) => `step ${step.n} ${step.result}`);
-    const unmet = [...open, ...openP0];
-    if (unmet.length > 0 && failed.length === 0) {
-      addFault(faults, 'verdict.contradiction', 'verdict', `the stated verdict PASS needs every in-scope criterion and every P0 row passed: ${unmet.join(', ')}`, 'state PARTIAL, or pass the open criteria and P0 rows first');
-    }
+  if (manifest.verdict !== 'PASS' || failed.length > 0) return faults;
+  const open = criteria.filter((criterion) => criterion.state !== 'pass' && criterion.state !== 'deprecated').map((criterion) => `${criterion.id} ${criterion.state}`);
+  const openP0 = manifest.steps.filter((step) => step.priority === 'P0' && step.result !== 'pass').map((step) => `step ${step.n} ${step.result}`);
+  const unmet = [...open, ...openP0];
+  if (unmet.length > 0) {
+    addFault(faults, 'verdict.contradiction', 'verdict', `the stated verdict PASS needs every in-scope criterion and every P0 row passed: ${unmet.join(', ')}`, 'state PARTIAL, or pass the open criteria and P0 rows first');
+    return faults;
+  }
+  const passedCriterion = criteria.some((criterion) => criterion.state === 'pass');
+  const passedP0 = manifest.steps.some((step) => step.priority === 'P0' && step.result === 'pass');
+  if (!passedCriterion && !passedP0) {
+    addFault(faults, 'verdict.empty', 'verdict', 'the stated verdict PASS rests on no passed criterion and no passed P0 row', 'state PARTIAL, or verify at least one criterion or P0 row first');
+  }
+  const { target } = manifest;
+  if (manifest.coverage.source !== 'matrix' || manifest.run.mode !== 'local') return faults;
+  if (target.begin_tree !== null && target.tree === null) {
+    addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded on a tree that could not be checked at --report-render (${target.begin_tree.slice(0, 12)} at --report-begin, not fingerprinted at --report-render)`, 'state PARTIAL, or render again once the working tree can be fingerprinted');
+  } else if (target.begin_tree !== null && target.begin_tree !== target.tree) {
+    addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded while the working tree changed (${target.begin_tree.slice(0, 12)} at --report-begin, ${target.tree.slice(0, 12)} at --report-render)`, 'state PARTIAL, or begin a new report and run the matrix again on the current tree');
+  } else if (target.begin_tree === null && !targetOutsideGit(target)) {
+    const atRender = target.tree === null ? ', and the tree at --report-render could not be fingerprinted either' : `, so the tree ${target.tree.slice(0, 12)} at --report-render cannot be compared with it`;
+    addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin${atRender}`, 'state PARTIAL, or begin a new report once the working tree can be fingerprinted');
   }
   return faults;
 }
@@ -1011,6 +1194,8 @@ function integrityFaults(manifest, readFile, options = {}) {
     const sniffed = inspectStoredFile(loaded.bytes);
     if (sniffed.type !== entry.type || (IMAGE_TYPES.includes(entry.type) && (sniffed.width !== entry.width || sniffed.height !== entry.height))) {
       addFault(faults, 'file.type', `files.${sha}.type`, `the file ${entry.name} is not the ${entry.type}${IMAGE_TYPES.includes(entry.type) ? ` of ${entry.width} x ${entry.height} pixels` : ''} the manifest declares`, 'state the type and size the content has, or add the evidence file again with --report-add');
+    } else if (sniffed.dropped) {
+      addFault(faults, 'file.metadata', `files.${sha}`, `the file ${entry.name} carries the metadata chunks ${sniffed.dropped.join(', ')}, which a report never stores`, 'add the evidence file again with --report-add, which drops metadata chunks');
     }
   }
   const stepByNumber = new Map(manifest.steps.map((step) => [step.n, step]));
@@ -1115,6 +1300,7 @@ function targetRows(manifest) {
     ['Branch', target.branch === null ? 'none' : escapeHtml(target.branch)],
     ['Head', target.head === null ? 'none' : `<code>${escapeHtml(target.head)}</code>`],
     ['Tree', target.tree === null ? 'not fingerprinted' : `<code>${escapeHtml(target.tree)}</code>`],
+    ...(target.begin_tree === target.tree ? [] : [['Tree at begin', target.begin_tree === null ? 'not fingerprinted' : `<code>${escapeHtml(target.begin_tree)}</code>`]]),
     ['Working tree', target.dirty === null ? 'unknown' : target.dirty ? 'has uncommitted changes' : 'clean'],
   ];
   if (target.origin !== null) rows.push(['Origin', `<code>${escapeHtml(target.origin)}</code>`]);
@@ -1288,8 +1474,32 @@ function renderDirectory(bundleDirectory, options = {}) {
   return { manifest: loaded.manifest, ...renderBundle(loaded.manifest, bundleDirectory, options) };
 }
 
+function combineConfigLayers(raw) {
+  const layers = isPlainObject(raw) ? raw : {};
+  const user = isPlainObject(layers.user) ? layers.user : {};
+  const project = isPlainObject(layers.project) ? layers.project : {};
+  const has = (layer, key) => Object.prototype.hasOwnProperty.call(layer, key);
+  const fromProject = (key) => has(project, key) && !(has(user, key) && JSON.stringify(user[key]) === JSON.stringify(project[key]));
+  const value = {};
+  if (user.enabled === false) {
+    value.enabled = false;
+    if (has(project, 'enabled') && project.enabled !== false) value.enabledFromProject = true;
+  } else if (has(project, 'enabled')) {
+    value.enabled = project.enabled;
+  } else if (has(user, 'enabled')) {
+    value.enabled = user.enabled;
+  }
+  if (has(user, 'dir')) value.dir = user.dir;
+  if (has(project, 'keep')) value.keep = project.keep;
+  else if (has(user, 'keep')) value.keep = user.keep;
+  if (has(user, 'maxBytes')) value.maxBytes = user.maxBytes;
+  if (fromProject('dir')) value.dirFromProject = true;
+  if (fromProject('maxBytes')) value.maxBytesFromProject = true;
+  return value;
+}
+
 function normalizeConfig(raw, limits = LIMITS) {
-  const value = isPlainObject(raw) ? raw : {};
+  const value = combineConfigLayers(raw);
   const disclosures = [];
   const enabled = value.enabled !== false;
   let dir = null;
@@ -1313,6 +1523,12 @@ function normalizeConfig(raw, limits = LIMITS) {
   if (value.maxBytesFromProject === true) {
     disclosures.push('evidence.report.maxBytes caps the whole store, so it is read from the user configuration only and the project configuration\'s value is ignored');
   }
+  if (value.dirFromProject === true) {
+    disclosures.push('evidence.report.dir decides where every contributor\'s evidence is written, so it is read from the user configuration only and the project configuration\'s value is ignored');
+  }
+  if (value.enabledFromProject === true) {
+    disclosures.push('the user configuration switched evidence reports off, and a project configuration can switch them off but never on');
+  }
   return { enabled, dir, keep, maxBytes, disclosures: disclosures.map((line) => `zensu evidence report: ${line}`) };
 }
 
@@ -1328,7 +1544,12 @@ function storeRoot(options, config, create) {
       return null;
     }
     assertRealDirectory(config.dir, 'the configured store');
-    return fs.realpathSync.native(config.dir);
+    const base = fs.realpathSync.native(config.dir);
+    if (create) return ensureDirectory(base, STORE_VERSION, 'the report store');
+    const versioned = path.join(base, STORE_VERSION);
+    if (!fs.existsSync(versioned)) return null;
+    assertRealDirectory(versioned, 'the report store');
+    return versioned;
   }
   if (!isString(options.pluginData) || !path.isAbsolute(options.pluginData)) unavailable('the plugin data directory is not an absolute path');
   assertRealDirectory(options.pluginData, 'the plugin data directory');
@@ -1404,7 +1625,7 @@ function repositoryFromRemote(url) {
 function measureTarget(options, scratch, mode, origin, chained) {
   const workTree = chained && options.chain && isString(options.chain.workTree) ? options.chain.workTree : '';
   const where = workTree || options.projectRoot;
-  const target = { repository: null, branch: null, head: null, tree: null, dirty: null, origin: mode === 'remote' ? origin : null };
+  const target = { repository: null, branch: null, head: null, tree: null, begin_tree: null, dirty: null, origin: mode === 'remote' ? origin : null };
   const inside = evidenceRun.git(where, ['rev-parse', '--is-inside-work-tree']);
   if (!inside.ok || inside.stdout.trim() !== 'true') return target;
   const head = evidenceRun.git(where, ['rev-parse', '--verify', '--quiet', 'HEAD']);
@@ -1460,14 +1681,17 @@ function locations(options, config, reportId, create) {
     bundle,
     files: path.join(bundle, 'files'),
     binding: path.join(repository, `${reportId}.binding.json`),
-    lock: path.join(repository, `${reportId}.lock`),
   };
 }
 
 function validateBinding(binding, expected, limits) {
+  if (!isPlainObject(binding)) return 'the binding is not an object';
+  if (binding.schema !== BINDING_SCHEMA) {
+    const name = schemaName(binding.schema);
+    return name === null ? `the binding names no schema this reader knows; it must be ${BINDING_SCHEMA}` : `the binding names the schema ${name}, which this reader does not know`;
+  }
   const faults = [];
   if (!exactKeys(binding, BINDING_KEYS, 'binding', faults)) return faults[0].message;
-  if (binding.schema !== BINDING_SCHEMA) return 'unknown binding schema';
   if (binding.id !== expected.id) return 'the binding names another report';
   if (!isString(binding.session_key) || !SESSION_KEY_RE.test(binding.session_key)) return 'malformed session key';
   if (!isString(binding.project_root) || !path.isAbsolute(binding.project_root)) return 'malformed project root';
@@ -1485,6 +1709,7 @@ function validateBinding(binding, expected, limits) {
     if (!exactKeys(criterion, DRAFT_CRITERION_KEYS, `criteria[${index}]`, faults)) return;
     patternField(criterion.id, AC_RE, `criteria[${index}].id`, faults, 'a criterion id');
     textField(criterion.text, limits.chars.criterion, `criteria[${index}].text`, faults);
+    zensuField(criterion.zensu, `criteria[${index}].zensu`, faults);
   });
   return faults.length > 0 ? `${faults[0].at}: ${faults[0].message}` : null;
 }
@@ -1543,23 +1768,58 @@ function serializeManifest(manifest) {
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
+function criterionRow(id, text, fields = {}) {
+  return { id, text, state: 'missing', driver: null, record: null, evidence_run: null, zensu: null, steps: [], note: null, ...fields };
+}
+
+function stepNumbers(binding, id) {
+  return binding.steps.filter((entry) => entry.criteria.includes(id)).map((entry) => entry.n);
+}
+
+function chainNoteReserve(limits) {
+  return 3 * limits.chars.note + 128;
+}
+
 function draftSize(binding, limits) {
-  const criteria = binding.run.chain === null
+  const rows = binding.run.chain === null
     ? matrixCoverage(binding).criteria
-    : binding.criteria.map((criterion) => ({ id: criterion.id, text: criterion.text, state: 'missing', driver: null, record: null, evidence_run: null, zensu: null, steps: [], note: null }));
-  for (const criterion of criteria) {
-    criterion.steps = binding.steps.filter((entry) => entry.criteria.includes(criterion.id)).map((entry) => entry.n);
-  }
+    : binding.criteria.map((criterion) => criterionRow(criterion.id, criterion.text, { zensu: criterion.zensu }));
+  const criteria = rows.map((row) => ({ ...row, steps: stepNumbers(binding, row.id) }));
   const sections = { console: 'not-checked', network: 'not-checked', consent: [], limitations: [], resources: [] };
   const manifest = manifestOf(binding, { renderedAt: binding.created_at, target: binding.target, verdict: 'PARTIAL', criteria, sections });
-  const notes = binding.run.chain === null ? 0 : binding.criteria.length * (2 * limits.chars.note + 128);
+  const notes = binding.run.chain === null ? 0 : binding.criteria.length * chainNoteReserve(limits);
   return Buffer.byteLength(serializeManifest(manifest)) + limits.renderReserveBytes + notes;
+}
+
+function planChanges(binding, criteria) {
+  if (binding.run.chain === null) return [];
+  const begun = new Map(binding.criteria.map((criterion) => [criterion.id, criterion.text]));
+  return criteria.filter((criterion) => begun.get(criterion.id) !== criterion.text).map((criterion) => criterion.id);
 }
 
 function checkDraftSize(binding, limits) {
   if (draftSize(binding, limits) > limits.maxManifestBytes) {
     refuse(`the report would outgrow the manifest cap of ${limits.maxManifestBytes} bytes, which keeps room for what --report-render adds; begin a new report for further evidence`);
   }
+}
+
+function fittingCriteria(binding, limits) {
+  let low = 0;
+  let high = binding.criteria.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (draftSize({ ...binding, criteria: binding.criteria.slice(0, middle) }, limits) <= limits.maxManifestBytes) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
+function checkBeginSize(binding, limits) {
+  if (draftSize(binding, limits) <= limits.maxManifestBytes) return;
+  if (binding.run.chain !== null) {
+    refuse(`a report of the chain's plan ${binding.run.chain.plan} would hold ${binding.criteria.length} criteria, but one report holds at most ${fittingCriteria(binding, limits)} of them, because each keeps ${chainNoteReserve(limits)} bytes of the ${limits.maxManifestBytes}-byte manifest free for the note --report-render adds; verify this chain without a report`);
+  }
+  refuse(`the report would outgrow the manifest cap of ${limits.maxManifestBytes} bytes before its first item; shorten the feature text or give fewer criteria`);
 }
 
 function chainOptions(options) {
@@ -1597,7 +1857,25 @@ function checkRunDirectory(given, projectRoot, root) {
   if (real === root || isInside(root, real) || isInside(real, root)) {
     refuse('the run directory must not overlap the report store');
   }
+  if (path.relative(base, real).split(path.sep).includes('.git')) {
+    refuse(`the run directory ${real} lies inside .git; create it under a path git ignores, such as .zensu/verify-feature-runs/`);
+  }
+  const own = evidenceRun.workTreeTop(real);
+  if (own.reason) unavailable(`whether git ignores the run directory could not be determined (${own.reason})`);
+  if (own.top !== null) requireIgnored(own.top, real);
   return real;
+}
+
+function requireIgnored(tree, real) {
+  const relative = path.relative(tree, real).split(path.sep);
+  const spelled = `${relative.join('/')}/`;
+  const ignored = evidenceRun.git(tree, ['check-ignore', '-q', '--', spelled]);
+  if (ignored.status === 1) {
+    const parent = relative.length > 1 ? `${relative.slice(0, -1).join('/')}/` : spelled;
+    const moved = relative[0] === '.zensu' ? '' : ' and every capture would move the tree fingerprint';
+    refuse(`git does not ignore the run directory ${real}, so its captures could be committed${moved}; have git ignore ${parent}, for example with the line ${parent} in the repository's .gitignore`);
+  }
+  if (!ignored.ok) unavailable(`whether git ignores the run directory could not be determined (${ignored.reason})`);
 }
 
 function begin(options) {
@@ -1628,8 +1906,7 @@ function begin(options) {
   if (args.has('recipe')) {
     recipe = args.get('recipe');
     if (!RECIPE_RE.test(recipe) || recipe.split('/').includes('..')) usage('--recipe must be a path relative to the project root, such as .zensu/runtime.yaml');
-    const screened = screenValue(recipe, ctx, '--recipe');
-    if (screened) refuse(screened);
+    screenArgument(recipe, ctx, '--recipe');
   }
   const fields = parseFields(stdinOf(options, limits), { single: ['feature'], repeat: [], criteria: true });
   if (fields.error) refuse(fields.error);
@@ -1643,7 +1920,7 @@ function begin(options) {
     seen.add(entry.id);
     const text = screenText(entry.text, ctx, limits.chars.criterion, `the text of ${entry.id}`);
     if (text.error) refuse(text.error);
-    criteria.push({ id: entry.id, text: text.value });
+    criteria.push({ id: entry.id, text: text.value, zensu: null });
   }
   if (criteria.length > limits.maxCriteria) refuse(`stdin lists more than ${limits.maxCriteria} criteria`);
   criteria.sort((left, right) => compareCriterionIds(left.id, right.id));
@@ -1662,22 +1939,30 @@ function begin(options) {
     for (const entry of listed.status === 'ok' ? listed.criteria : []) {
       const text = screenText(entry.text, ctx, limits.chars.criterion, `the plan text of ${entry.id}`, { clip: true });
       if (text.error) refuse(text.error);
-      criteria.push({ id: entry.id, text: text.value });
+      criteria.push({ id: entry.id, text: text.value, zensu: null });
     }
     if (criteria.length > limits.maxCriteria) refuse(`the chain's plan lists more than ${limits.maxCriteria} criteria`);
+    const assessed = acceptance.assess({ ...chainOptions(options), logPath: args.get('log'), chain: resolved });
+    if (assessed.outcome !== 'evaluated' && assessed.outcome !== 'no-criteria') refuse(`the acceptance states could not be read (${assessed.outcome}: ${assessed.reason})`);
+    const listedIds = new Set(criteria.map((criterion) => criterion.id));
+    for (const row of assessed.outcome === 'evaluated' ? assessed.rows.filter((entry) => entry.state === 'dropped' && !listedIds.has(entry.criterion.id)) : []) {
+      const text = screenText(row.criterion.text, ctx, limits.chars.criterion, `the plan text of ${row.criterion.id}`, { clip: true });
+      if (text.error) refuse(text.error);
+      criteria.push({ id: row.criterion.id, text: text.value, zensu: null });
+    }
+    if (criteria.length > limits.maxCriteria) refuse(`the chain's plan and the criteria dropped from it give more than ${limits.maxCriteria} criteria`);
   }
   const root = storeRoot(options, config, true);
   const placement = storePlacement(root);
   if (!placement.ok) refuse(placement.reason);
-  const runDirectory = checkRunDirectory(args.get('run-dir'), options.projectRoot, root);
+  const runDirectory = checkRunDirectory(args.get('run-dir'), options.projectRoot, config.dir ? path.dirname(root) : root);
   const now = clockValue(options);
   const id = newReportId(now);
   const key = repositoryKey(options.projectRoot);
   const repository = ensureDirectory(root, key, 'the repository store');
   const scratch = ensureDirectory(root, 'scratch', 'the report scratch directory');
   const target = measureTarget(options, scratch, mode, origin, chain !== null);
-  const bundle = ensureDirectory(repository, id, 'the report directory');
-  ensureDirectory(bundle, 'files', 'the report file directory');
+  target.begin_tree = target.tree;
   const binding = {
     schema: BINDING_SCHEMA,
     id,
@@ -1703,19 +1988,27 @@ function begin(options) {
     evidence: {},
     files: {},
   };
-  checkDraftSize(binding, limits);
-  writeBinding({ repository, binding: path.join(repository, `${id}.binding.json`) }, binding);
+  checkBeginSize(binding, limits);
+  const where = { repository, bundle: path.join(repository, id), binding: path.join(repository, `${id}.binding.json`) };
+  withLock(lockTarget(repository, id), limits, () => {
+    ensureDirectory(repository, id, 'the report directory');
+    ensureDirectory(where.bundle, 'files', 'the report file directory');
+    writeBinding(where, binding);
+  });
   const swept = sweep(root, { repositoryKey: key, keep: config.keep, maxBytes: config.maxBytes, protect: id, limits });
   const lines = [...config.disclosures, ...disclosures];
   lines.push(`zensu evidence report: begun ${id} | ${mode} | drivers ${orderedDrivers.join(', ')} | ${chain ? `chain ${chain.stem}` : `criteria ${criteria.length === 0 ? 'none' : criteria.map((criterion) => criterion.id).join(', ')}`}`);
-  lines.push(`zensu evidence report: bundle ${bundle}`);
+  lines.push(`zensu evidence report: bundle ${where.bundle}`);
   if (swept.removed.length > 0) {
     lines.push(`zensu evidence report: retention removed ${swept.removed.length} older report(s) (keep ${config.keep} per repository, at most ${config.maxBytes} bytes in total)`);
+  }
+  if (swept.kept !== null) {
+    lines.push(`zensu evidence report: retention deleted nothing for the size cap, because the reports it must keep (this one, reports still being built and locked reports) hold ${swept.kept} bytes, above evidence.report.maxBytes of ${config.maxBytes}`);
   }
   if (swept.failed.length > 0) {
     lines.push(`zensu evidence report: retention could not delete ${swept.failed.length} report(s): ${swept.failed.join(', ')}; delete them by hand`);
   }
-  return { code: 0, lines, id, bundle };
+  return { code: 0, lines, id, bundle: where.bundle };
 }
 
 function readContainedFile(given, runDirectory, limits) {
@@ -1758,7 +2051,7 @@ function storeFile(where, bytes, type) {
   return sha;
 }
 
-function addFileEvidence(options, args, binding, where, limits, kind) {
+function addFileEvidence(options, args, binding, where, limits, kind, config) {
   if (!args.has('file')) usage(`--kind ${kind} needs --file <evidence file inside the run directory>`);
   for (const key of ['method', 'path', 'status', 'source', 'class', 'evidence-run']) {
     if (args.has(key)) usage(`--${key} does not belong to --kind ${kind}`);
@@ -1782,15 +2075,15 @@ function addFileEvidence(options, args, binding, where, limits, kind) {
   if (kind === 'image') {
     if (!IMAGE_TYPES.includes(sniffed.type)) refuse('--kind image needs a PNG or a lossless WebP file');
     if (sniffed.width * sniffed.height > limits.maxPixels) refuse(`the image holds more than ${limits.maxPixels} pixels`);
-    entry = { name: '', type: sniffed.type, bytes: raw.length, width: sniffed.width, height: sniffed.height, viewport, source_sha256: null };
+    if (sniffed.dropped) bytes = sniffed.clean();
+    entry = { name: '', type: sniffed.type, bytes: bytes.length, width: sniffed.width, height: sniffed.height, viewport, source_sha256: sniffed.dropped ? sha256(raw) : null };
   } else {
     if (sniffed.type !== 'text/plain') refuse('--kind text needs a UTF-8 text file');
     if (raw.length > limits.maxTextFileBytes) refuse(`a text file holds at most ${limits.maxTextFileBytes} bytes`);
-    if (sniffed.text.includes(ALLOW_MARKER)) refuse(`the text file carries the ${ALLOW_MARKER} marker, which a report does not honor`);
-    if (scan(sniffed.text).matches.length > 0) refuse('the text file matches a secret pattern; capture it without the value');
-    const redacted = redact(sniffed.text, { projectRoot: ctx.projectRoot, home: ctx.home });
-    if (scan(redacted).matches.length > 0) refuse('the text file matches a secret pattern; capture it without the value');
-    bytes = Buffer.from(redacted, 'utf8');
+    const screened = screenSecrets(sniffed.text, ctx, 'the text file', { hint: 'capture it without the value' });
+    if (screened.error) refuse(screened.error);
+    if (secretMatch(normalizedText(screened.value))) refuse('the text file matches a secret pattern; capture it without the value');
+    bytes = Buffer.from(screened.value, 'utf8');
     if (bytes.length === 0 || bytes.length > limits.maxTextFileBytes) refuse(`a text file holds 1 to ${limits.maxTextFileBytes} bytes`);
     const stored = sniff(bytes);
     if (stored.type !== 'text/plain') {
@@ -1806,11 +2099,20 @@ function addFileEvidence(options, args, binding, where, limits, kind) {
     }
   } else if (Object.keys(binding.files).length >= limits.maxFiles) {
     refuse(`the report already holds ${limits.maxFiles} files, the cap per report; begin a new report for further evidence`);
+  } else {
+    const stored = Object.values(binding.files).reduce((sum, file) => sum + file.bytes, 0) + entry.bytes;
+    if (stored > config.maxBytes) {
+      refuse(`the report would hold ${stored} bytes of files, above evidence.report.maxBytes of ${config.maxBytes}; raise evidence.report.maxBytes in the user configuration, or begin a new report for further evidence`);
+    }
   }
-  storeFile(where, bytes, entry.type);
   entry.name = `files/${sha}.${FILE_TYPES[entry.type]}`;
   binding.files[sha] = known || entry;
-  return { item: { kind, file: sha, caption: caption.value, plane }, detail: `${entry.type}${entry.width ? ` ${entry.width}x${entry.height}` : ''} | ${entry.bytes} bytes | ${entry.name}` };
+  const stripped = sniffed.dropped ? ` | dropped the metadata chunks ${sniffed.dropped.join(', ')}` : '';
+  return {
+    item: { kind, file: sha, caption: caption.value, plane },
+    detail: `${entry.type}${entry.width ? ` ${entry.width}x${entry.height}` : ''} | ${entry.bytes} bytes | ${entry.name}${stripped}`,
+    store: () => storeFile(where, bytes, entry.type),
+  };
 }
 
 function addRequestEvidence(options, args, limits) {
@@ -1824,8 +2126,7 @@ function addRequestEvidence(options, args, limits) {
   if (!isString(requestPath) || requestPath.length > limits.chars.path || !ROUTE_RE.test(requestPath)) {
     usage('--path must be the request path without query or fragment, such as /api/settings');
   }
-  const screened = screenValue(requestPath, context(options), '--path');
-  if (screened) refuse(screened);
+  screenArgument(requestPath, context(options), '--path', 'own');
   const status = Number(args.get('status'));
   if (!/^[1-5][0-9]{2}$/.test(String(args.get('status'))) || status < 100 || status > 599) usage('--status must be an HTTP status from 100 to 599');
   return { item: { kind: 'request', method, path: requestPath, status }, detail: `${method} ${requestPath} ${status}` };
@@ -1839,8 +2140,7 @@ function addSignalEvidence(options, args, limits) {
   if (!SIGNAL_SOURCES.includes(source)) usage(`--source must be one of ${SIGNAL_SOURCES.join(', ')}`);
   const signalClass = args.get('class');
   if (!isString(signalClass) || !SIGNAL_CLASS_RE.test(signalClass)) usage('--class must name the signal class, such as error or warning');
-  const screenedClass = screenValue(signalClass, context(options), '--class');
-  if (screenedClass) refuse(screenedClass);
+  screenArgument(signalClass, context(options), '--class');
   const message = screenText(stdinOf(options, limits), context(options), limits.chars.message, 'the signal message on stdin');
   if (message.error) refuse(message.error);
   return { item: { kind: 'signal', source, class: signalClass, message: message.value }, detail: `${source} ${signalClass}` };
@@ -1875,27 +2175,44 @@ function addRunEvidence(options, args, limits) {
   };
 }
 
-function add(options) {
+const IMMUTABLE_REPORT = Object.freeze({
+  add: 'is rendered and immutable; begin a new report for further evidence',
+  step: 'is rendered and immutable; begin a new report for further rows',
+  render: 'is already rendered; begin a new report to render another',
+});
+
+function withReport(options, verb, action) {
   const limits = limitsWith(options.limits);
   const config = normalizeConfig(options.config, limits);
   requireContext(options);
-  const args = argumentMap(options, 'add');
+  const args = argumentMap(options, verb);
   const reportId = args.get('report');
   const where = locations(options, config, reportId, false);
-  return withLock(where.lock, limits, () => {
-    const binding = loadBinding(where, reportId, options, limits, true);
-    if (binding.rendered_at !== null) refuse(`report ${reportId} is rendered and immutable; begin a new report for further evidence`);
+  return withLock(lockTarget(where.repository, reportId), limits, () => {
+    const binding = loadBinding(where, reportId, options, limits, verb !== 'export');
+    if (verb === 'export' && binding.rendered_at === null) refuse(`report ${reportId} is not rendered; run --report-render first`);
+    if (verb !== 'export' && binding.rendered_at !== null) refuse(`report ${reportId} ${IMMUTABLE_REPORT[verb]}`);
+    if (verb !== 'export' && path.resolve(binding.project_root) !== path.resolve(options.projectRoot)) {
+      refuse(`report ${reportId} was begun in the project root ${binding.project_root}, but this session's project root is ${options.projectRoot}; begin a new report there`);
+    }
+    return action({ limits, config, args, reportId, where, binding });
+  });
+}
+
+function add(options) {
+  return withReport(options, 'add', ({ limits, config, args, reportId, where, binding }) => {
     const kind = args.get('kind');
     if (!EVIDENCE_KINDS.includes(kind)) usage(`--kind must be one of ${EVIDENCE_KINDS.join(', ')}`);
     if (Object.keys(binding.evidence).length >= limits.maxEvidence) refuse(`the report already holds ${limits.maxEvidence} evidence items`);
     let added;
-    if (FILE_KINDS.includes(kind)) added = addFileEvidence(options, args, binding, where, limits, kind);
+    if (FILE_KINDS.includes(kind)) added = addFileEvidence(options, args, binding, where, limits, kind, config);
     else if (kind === 'request') added = addRequestEvidence(options, args, limits);
     else if (kind === 'signal') added = addSignalEvidence(options, args, limits);
     else added = addRunEvidence(options, args, limits);
     const id = `e${Object.keys(binding.evidence).length + 1}`;
     binding.evidence[id] = added.item;
     checkDraftSize(binding, limits);
+    if (added.store) added.store();
     writeBinding(where, binding);
     return { code: 0, lines: [`zensu evidence report: ${id} added to ${reportId} | ${kind} | ${added.detail}`], id };
   });
@@ -1915,15 +2232,7 @@ function listArgument(value, pattern, label, max) {
 }
 
 function step(options) {
-  const limits = limitsWith(options.limits);
-  const config = normalizeConfig(options.config, limits);
-  requireContext(options);
-  const args = argumentMap(options, 'step');
-  const reportId = args.get('report');
-  const where = locations(options, config, reportId, false);
-  return withLock(where.lock, limits, () => {
-    const binding = loadBinding(where, reportId, options, limits, true);
-    if (binding.rendered_at !== null) refuse(`report ${reportId} is rendered and immutable; begin a new report for further rows`);
+  return withReport(options, 'step', ({ limits, args, reportId, where, binding }) => {
     const priority = args.get('priority');
     if (!PRIORITIES.includes(priority)) usage(`--priority must be one of ${PRIORITIES.join(', ')}`);
     const driver = args.get('driver');
@@ -1979,32 +2288,33 @@ function chainCoverage(options, binding, args, ctx, limits) {
   let rows = [];
   if (assessed.outcome === 'evaluated') rows = assessed.rows;
   else if (assessed.outcome !== 'no-criteria') refuse(`the acceptance states could not be read (${assessed.outcome}: ${assessed.reason})`);
+  const drafted = new Map(binding.criteria.map((criterion) => [criterion.id, criterion.zensu]));
   const criteria = [];
   for (const row of rows) {
-    if (!AC_RE.test(row.criterion.id)) continue;
     const text = screenText(row.criterion.text, ctx, limits.chars.criterion, `the plan text of ${row.criterion.id}`, { clip: true });
     if (text.error) refuse(text.error);
     let note = null;
-    const source = [row.cause, row.record ? row.record.evidence : null].filter((entry) => isString(entry) && entry.trim() !== '').join('; ');
+    const source = [row.treeUnverified ? 'tree unverified' : null, row.cause, row.record ? row.record.evidence : null].filter((entry) => isString(entry) && entry.trim() !== '').join('; ');
     if (source !== '') {
       const cleaned = screenText(source, ctx, limits.chars.note, `the note of ${row.criterion.id}`, { clip: true });
       if (cleaned.error) refuse(cleaned.error);
       note = cleaned.value;
     }
-    criteria.push({
-      id: row.criterion.id,
-      text: text.value,
+    criteria.push(criterionRow(row.criterion.id, text.value, {
       state: row.state === 'dropped' ? (row.record && row.record.verdict === 'fail' ? 'fail' : 'partial') : row.state,
       driver: row.record ? mapDriver(row.record.driver) : null,
       record: row.record ? row.record.id : null,
       evidence_run: row.record ? row.record.evidence_run : null,
-      zensu: null,
-      steps: [],
+      zensu: drafted.get(row.criterion.id) || null,
       note,
-    });
+    }));
   }
-  const inScope = rows.filter((row) => row.criterion.state === 'active' && AC_RE.test(row.criterion.id)).map((row) => row.criterion.id);
-  return { criteria, inScope, disclosures: resolved.disclosures || [] };
+  const inScope = rows.filter((row) => row.criterion.state === 'active').map((row) => row.criterion.id);
+  const disclosures = [...(resolved.disclosures || [])];
+  if (assessed.outcome === 'evaluated' && assessed.currentTree && assessed.currentTree.tree === null) {
+    disclosures.push(`The acceptance states could not be compared with the working tree at --report-render (${assessed.currentTree.reason || 'no tree id'}), so each criterion shows its newest record, whatever tree that record was taken on.`);
+  }
+  return { criteria, inScope, disclosures };
 }
 
 function matrixCoverage(binding) {
@@ -2018,7 +2328,7 @@ function matrixCoverage(binding) {
     }
     const ui = rows.find((entry) => UI_DRIVERS.includes(entry.driver));
     const driver = ui ? ui.driver : rows.length > 0 ? rows[0].driver : null;
-    return { id: criterion.id, text: criterion.text, state, driver, record: null, evidence_run: null, zensu: null, steps: [], note: null };
+    return criterionRow(criterion.id, criterion.text, { state, driver, zensu: criterion.zensu });
   });
   return { criteria, inScope: binding.criteria.map((criterion) => criterion.id), disclosures: [] };
 }
@@ -2044,10 +2354,7 @@ function parseSections(options, args, limits) {
     if (parts.length !== 3 || !ORIGIN_RE.test(parts[0]) || parts[1].length > limits.chars.path || !ROUTE_RE.test(parts[1]) || !CONSENT_DECISIONS.includes(parts[2])) {
       refuse(`a consent line must read '<origin> <route> <${CONSENT_DECISIONS.join('|')}>'`);
     }
-    for (const [part, label] of [[parts[0], 'the origin of a consent line'], [parts[1], 'the route of a consent line']]) {
-      const screened = screenValue(part, ctx, label);
-      if (screened) refuse(`${screened}; describe it without the value`);
-    }
+    for (const [part, label] of [[parts[0], 'the origin of a consent line'], [parts[1], 'the route of a consent line']]) screenArgument(part, ctx, label, 'own');
     sections.consent.push({ origin: parts[0], route: parts[1], decided_by: parts[2] });
   }
   if (sections.consent.length > limits.maxConsent) refuse(`stdin gives more than ${limits.maxConsent} consent lines`);
@@ -2059,24 +2366,14 @@ function faultLines(faults) {
 }
 
 function render(options) {
-  const limits = limitsWith(options.limits);
-  const config = normalizeConfig(options.config, limits);
-  requireContext(options);
-  const args = argumentMap(options, 'render');
-  const reportId = args.get('report');
-  const where = locations(options, config, reportId, false);
-  return withLock(where.lock, limits, () => {
-    const binding = loadBinding(where, reportId, options, limits, true);
-    if (binding.rendered_at !== null) refuse(`report ${reportId} is already rendered; begin a new report to render another`);
+  return withReport(options, 'render', ({ limits, args, reportId, where, binding }) => {
     const verdict = args.get('verdict');
     if (!VERDICTS.includes(verdict)) usage(`--verdict must be one of ${VERDICTS.join(', ')}`);
     if (binding.run.chain === null && args.has('log')) refuse(`report ${reportId} is in matrix mode; --log belongs to chain mode`);
     const sections = parseSections(options, args, limits);
     const ctx = context(options);
     const coverage = binding.run.chain === null ? matrixCoverage(binding) : chainCoverage(options, binding, args, ctx, limits);
-    for (const criterion of coverage.criteria) {
-      criterion.steps = binding.steps.filter((entry) => entry.criteria.includes(criterion.id)).map((entry) => entry.n);
-    }
+    for (const criterion of coverage.criteria) criterion.steps = stepNumbers(binding, criterion.id);
     for (const disclosure of coverage.disclosures) {
       const cleaned = screenText(disclosure, ctx, limits.chars.line, 'an acceptance disclosure', { clip: true });
       if (cleaned.error) refuse(cleaned.error);
@@ -2084,15 +2381,23 @@ function render(options) {
     }
     const scratch = ensureDirectory(where.root, 'scratch', 'the report scratch directory');
     const target = measureTarget(options, scratch, binding.run.mode, binding.target.origin, binding.run.chain !== null);
-    if (binding.target.tree !== null && target.tree !== binding.target.tree) {
-      const note = `The working tree changed during the run: ${binding.target.tree.slice(0, 12)} at --report-begin, ${target.tree === null ? 'not fingerprinted' : target.tree.slice(0, 12)} at --report-render.`;
-      if (!sections.limitations.includes(note)) sections.limitations.push(note);
+    target.begin_tree = binding.target.begin_tree;
+    let treeNote = null;
+    if (target.begin_tree !== null && target.tree === null) {
+      treeNote = `The working tree could not be fingerprinted at --report-render, so a change since ${target.begin_tree.slice(0, 12)} at --report-begin cannot be ruled out.`;
+    } else if (target.begin_tree !== null && target.tree !== target.begin_tree) {
+      treeNote = `The working tree changed during the run: ${target.begin_tree.slice(0, 12)} at --report-begin, ${target.tree.slice(0, 12)} at --report-render.`;
+    } else if (target.begin_tree === null && binding.run.mode === 'local') {
+      treeNote = 'The working tree was not fingerprinted at --report-begin, so a change during the run cannot be ruled out.';
     }
+    if (treeNote !== null && !sections.limitations.includes(treeNote)) sections.limitations.push(treeNote);
     const now = clockValue(options);
     const manifest = manifestOf(binding, { renderedAt: isoNow(now), target, verdict, criteria: coverage.criteria, sections });
     const serialized = serializeManifest(manifest);
     if (Buffer.byteLength(serialized) > limits.maxManifestBytes) {
-      return { code: 1, errors: faultLines([{ code: 'manifest.too-large', at: '', message: `the manifest holds ${Buffer.byteLength(serialized)} bytes, above the cap of ${limits.maxManifestBytes}`, remedy: 'split the evidence across two reports' }]) };
+      const changed = planChanges(binding, coverage.criteria);
+      const cause = changed.length > 0 ? `, because the chain's plan changed since --report-begin (${changed.join(', ')})` : '';
+      return { code: 1, errors: faultLines([{ code: 'manifest.too-large', at: '', message: `the manifest holds ${Buffer.byteLength(serialized)} bytes, above the cap of ${limits.maxManifestBytes}${cause}`, remedy: changed.length > 0 ? 'begin a new report on the current plan' : 'split the evidence across two reports' }]) };
     }
     const readFile = bundleReader(where.bundle, limits);
     const faults = checkManifest(manifest, readFile, { inScope: coverage.inScope, limits: options.limits });
@@ -2149,12 +2454,17 @@ function list(options) {
     let verdict = '-';
     let location = bundle;
     if (valid && binding.value.rendered_at === null) state = 'unrendered';
+    if (!binding.error && isPlainObject(binding.value) && binding.value.schema !== BINDING_SCHEMA && schemaName(binding.value.schema) !== null) {
+      state = `schema ${binding.value.schema}`;
+    }
     if (valid && binding.value.rendered_at !== null) {
       const manifest = readJson(path.join(bundle, 'manifest.json'), limits.maxManifestBytes);
       if (!manifest.error && validateManifest(manifest.value, options.limits).length === 0) {
         state = 'rendered';
         verdict = manifest.value.verdict;
         location = path.join(bundle, 'index.html');
+      } else if (!manifest.error && isPlainObject(manifest.value) && manifest.value.schema !== SCHEMA && schemaName(manifest.value.schema) !== null) {
+        state = `schema ${manifest.value.schema}`;
       }
     }
     const created = valid ? binding.value.created_at : '-';
@@ -2166,29 +2476,19 @@ function list(options) {
 }
 
 function exportReport(options) {
-  const limits = limitsWith(options.limits);
-  const config = normalizeConfig(options.config, limits);
-  requireContext(options);
-  const args = argumentMap(options, 'export');
-  const reportId = args.get('report');
-  const where = locations(options, config, reportId, false);
-  return withLock(where.lock, limits, () => exportLocked(options, where, reportId, limits));
-}
-
-function exportLocked(options, where, reportId, limits) {
-  const binding = loadBinding(where, reportId, options, limits, false);
-  if (binding.rendered_at === null) refuse(`report ${reportId} is not rendered; run --report-render first`);
-  const loaded = loadManifest(where.bundle, options.limits);
-  if (loaded.faults) return { code: 1, errors: faultLines(loaded.faults) };
-  const total = Object.values(isPlainObject(loaded.manifest) && isPlainObject(loaded.manifest.files) ? loaded.manifest.files : {}).reduce((sum, entry) => sum + (Number.isInteger(entry && entry.bytes) ? entry.bytes : 0), 0);
-  if (total > limits.maxExportBytes) {
-    refuse(`the report holds ${total} bytes of files, above the export cap of ${limits.maxExportBytes}; share it through the review summary or Zensu instead`);
-  }
-  const rendered = renderBundle(loaded.manifest, where.bundle, { mode: 'export', limits: options.limits });
-  if (rendered.faults) return { code: 1, errors: faultLines(rendered.faults) };
-  writeAtomic(where.bundle, 'export.html', rendered.html);
-  const target = path.join(where.bundle, 'export.html');
-  return { code: 0, lines: [`zensu evidence report: exported ${reportId} | ${Buffer.byteLength(rendered.html)} bytes | ${target}`], target };
+  return withReport(options, 'export', ({ limits, reportId, where }) => {
+    const loaded = loadManifest(where.bundle, options.limits);
+    if (loaded.faults) return { code: 1, errors: faultLines(loaded.faults) };
+    const total = Object.values(isPlainObject(loaded.manifest) && isPlainObject(loaded.manifest.files) ? loaded.manifest.files : {}).reduce((sum, entry) => sum + (Number.isInteger(entry && entry.bytes) ? entry.bytes : 0), 0);
+    if (total > limits.maxExportBytes) {
+      refuse(`the report holds ${total} bytes of files, above the export cap of ${limits.maxExportBytes}; share it through the review summary or Zensu instead`);
+    }
+    const rendered = renderBundle(loaded.manifest, where.bundle, { mode: 'export', limits: options.limits });
+    if (rendered.faults) return { code: 1, errors: faultLines(rendered.faults) };
+    writeAtomic(where.bundle, 'export.html', rendered.html);
+    const target = path.join(where.bundle, 'export.html');
+    return { code: 0, lines: [`zensu evidence report: exported ${reportId} | ${Buffer.byteLength(rendered.html)} bytes | ${target}`], target };
+  });
 }
 
 function directorySize(directory, budget) {
@@ -2212,15 +2512,6 @@ function directorySize(directory, budget) {
   return total;
 }
 
-function freshLock(lockPath, limits) {
-  try {
-    const stat = fs.lstatSync(lockPath);
-    return stat.isFile() && Date.now() - stat.mtimeMs <= limits.lockStaleMs;
-  } catch {
-    return false;
-  }
-}
-
 function openReport(repository, id, limits) {
   try {
     if (fs.lstatSync(path.join(repository, id, 'manifest.json')).isFile()) return false;
@@ -2234,20 +2525,14 @@ function openReport(repository, id, limits) {
 }
 
 function removeIdleReport(repository, id, limits) {
-  const lockPath = path.join(repository, `${id}.lock`);
-  let descriptor;
+  const target = lockTarget(repository, id);
+  let token;
   try {
-    descriptor = fs.openSync(lockPath, 'wx', 0o600);
+    token = acquireLock(target, 1);
   } catch (error) {
-    if (error.code !== 'EEXIST' || freshLock(lockPath, limits)) return { removed: false, fault: null };
-    try {
-      fs.unlinkSync(lockPath);
-      descriptor = fs.openSync(lockPath, 'wx', 0o600);
-    } catch {
-      return { removed: false, fault: null };
-    }
+    if (error instanceof ReportError) return { removed: false, fault: null };
+    throw error;
   }
-  try { fs.closeSync(descriptor); } catch { }
   try {
     if (openReport(repository, id, limits)) return { removed: false, fault: null };
     fs.rmSync(path.join(repository, id), { recursive: true, force: true });
@@ -2256,7 +2541,7 @@ function removeIdleReport(repository, id, limits) {
   } catch (error) {
     return { removed: false, fault: error.code || error.message };
   } finally {
-    try { fs.unlinkSync(lockPath); } catch { }
+    releaseLock(target, token);
   }
 }
 
@@ -2275,7 +2560,7 @@ function sweep(root, options) {
     return outcome.removed;
   };
   let repositories;
-  try { repositories = fs.readdirSync(root).filter((name) => REPO_KEY_RE.test(name)).sort(); } catch { return { removed, failed: [] }; }
+  try { repositories = fs.readdirSync(root).filter((name) => REPO_KEY_RE.test(name)).sort(); } catch { return { removed, failed: [], kept: null }; }
   for (const key of repositories) {
     const repository = path.join(root, key);
     try {
@@ -2305,14 +2590,18 @@ function sweep(root, options) {
     }
   }
   let total = survivors.reduce((sum, entry) => sum + entry.size, 0);
-  const oldestFirst = [...survivors].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : left.key < right.key ? -1 : 1));
+  if (total <= maxBytes) return { removed, failed: [...failed.values()], kept: null };
+  const spared = new Set(survivors.filter((entry) => entry.id === protect || openReport(entry.repository, entry.id, limits) || lockHeld(lockTarget(entry.repository, entry.id))));
+  const kept = [...spared].reduce((sum, entry) => sum + entry.size, 0);
+  if (kept > maxBytes) return { removed, failed: [...failed.values()], kept };
+  const oldestFirst = survivors.filter((entry) => !spared.has(entry)).sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : left.key < right.key ? -1 : 1));
   for (const entry of oldestFirst) {
     if (total <= maxBytes) break;
-    if (entry.id === protect || !remove(entry.key, entry.repository, entry.id)) continue;
+    if (!remove(entry.key, entry.repository, entry.id)) continue;
     removed.push(`${entry.key}/${entry.id}`);
     total -= entry.size;
   }
-  return { removed, failed: [...failed.values()] };
+  return { removed, failed: [...failed.values()], kept: null };
 }
 
 function readTransportFile(directory, name, maxBytes) {
@@ -2392,7 +2681,9 @@ async function main(argv, env = process.env) {
 module.exports = {
   SCHEMA,
   BINDING_SCHEMA,
+  STORE_VERSION,
   STORE_SEGMENTS,
+  FAULT_CODES,
   VERBS,
   VERB_ARGUMENTS,
   ID_RE,

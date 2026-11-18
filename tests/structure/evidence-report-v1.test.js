@@ -9,11 +9,18 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const test = require('node:test');
 
+const ISOLATED_HOME = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'erp-git-home-')));
+process.env.HOME = ISOLATED_HOME;
+process.env.XDG_CONFIG_HOME = path.join(ISOLATED_HOME, '.config');
+process.env.GIT_CONFIG_NOSYSTEM = '1';
+
 const ROOT = path.join(__dirname, '..', '..');
 const LIB = path.join(ROOT, 'hooks', 'lib', 'evidence-report-v1.js');
 const er = require(LIB);
 const av = require(path.join(ROOT, 'hooks', 'lib', 'acceptance-verify-v1.js'));
 const evr = require(path.join(ROOT, 'hooks', 'lib', 'evidence-run-v1.js'));
+const CORE = path.join(ROOT, 'hooks', 'lib', 'session-control-core-v1.js');
+const core = require(CORE);
 const CORPUS = path.join(ROOT, 'tests', 'fixtures', 'evidence-report', 'v1', 'cases');
 
 const SESSION = `scv1_${'a'.repeat(64)}`;
@@ -175,13 +182,36 @@ function repositoryDirectory(fx, overrides = {}) {
   return path.join(overrides.store || path.join(fx.data, 'evidence-report', 'v1'), er.repositoryKey(fx.root));
 }
 
+function lockOf(directory, id) {
+  return { lockDirectory: directory, resourcePath: path.join(directory, `${id}.binding.json`) };
+}
+
 function idle(fx, id) {
   const when = new Date(Date.now() - er.LIMITS.openReportMs - 24 * 60 * 60 * 1000);
   fs.utimesSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), when, when);
 }
 
+function footprint(started, fx) {
+  const directory = repositoryDirectory(fx);
+  const files = path.join(directory, started.id, 'files');
+  const stored = fs.readdirSync(files).reduce((sum, name) => sum + fs.statSync(path.join(files, name)).size, 0);
+  return stored + fs.statSync(path.join(directory, `${started.id}.binding.json`)).size;
+}
+
 function corpusCases() {
   return fs.readdirSync(CORPUS).sort().map((name) => ({ name, directory: path.join(CORPUS, name), spec: JSON.parse(fs.readFileSync(path.join(CORPUS, name, 'case.json'), 'utf8')) }));
+}
+
+const CASE_KEYS = Object.freeze(['description', 'inScope', 'limits', 'expect']);
+
+function caseFaults(name, spec) {
+  const faults = Object.keys(spec).filter((key) => !CASE_KEYS.includes(key)).map((key) => `${name}: case.json carries ${key}, which the corpus does not define`);
+  if (spec.limits === undefined) return faults;
+  const { limits } = spec;
+  if (limits === null || typeof limits !== 'object' || Array.isArray(limits)) return [...faults, `${name}: limits is no object`];
+  for (const key of Object.keys(limits).filter((item) => item !== 'maxManifestBytes')) faults.push(`${name}: limits carries ${key}, but a case may lower only maxManifestBytes`);
+  if ('maxManifestBytes' in limits && !(Number.isSafeInteger(limits.maxManifestBytes) && limits.maxManifestBytes > 0)) faults.push(`${name}: limits.maxManifestBytes is no positive integer`);
+  return faults;
 }
 
 function planText(rows) {
@@ -229,10 +259,17 @@ test('report ids are well formed and sort by creation time', () => {
 
 test('the conformance corpus renders or refuses every case as expected', () => {
   const cases = corpusCases();
-  assert.ok(cases.length >= 28, `the corpus holds ${cases.length} cases`);
+  assert.ok(cases.length >= 37, `the corpus holds ${cases.length} cases`);
+  assert.deepEqual(caseFaults('probe', { description: 'x', inScope: [], expect: {}, limits: { maxFileBytes: 1, maxManifestBytes: 0 }, extra: true }), [
+    'probe: case.json carries extra, which the corpus does not define',
+    'probe: limits carries maxFileBytes, but a case may lower only maxManifestBytes',
+    'probe: limits.maxManifestBytes is no positive integer',
+  ]);
+  assert.deepEqual(caseFaults('probe', { description: 'x', inScope: [], expect: {}, limits: [] }), ['probe: limits is no object']);
   const mismatches = [];
   for (const entry of cases) {
-    const result = er.renderDirectory(entry.directory, { inScope: entry.spec.inScope });
+    mismatches.push(...caseFaults(entry.name, entry.spec));
+    const result = er.renderDirectory(entry.directory, { inScope: entry.spec.inScope, limits: entry.spec.limits });
     if (entry.spec.expect.rendering) {
       if (result.faults) mismatches.push(`${entry.name}: refused ${JSON.stringify(result.faults.map((fault) => fault.code))}`);
       else if (digest(result.html) !== entry.spec.expect.rendering) mismatches.push(`${entry.name}: rendering digest ${digest(result.html)}`);
@@ -248,14 +285,19 @@ test('the conformance corpus renders or refuses every case as expected', () => {
   assert.deepEqual(mismatches, []);
 });
 
-test('the corpus names every integrity fault the renderer can raise', () => {
+test('the corpus names every fault code the module exports, and the module raises no code it does not export', () => {
   const codes = new Set();
   for (const entry of corpusCases()) {
     for (const fault of entry.spec.expect.refusal || []) codes.add(fault.code);
   }
-  for (const code of ['criterion.absent', 'step.unknown-criterion', 'step.unknown-evidence', 'criterion.steps', 'evidence.unknown-file', 'evidence.file-type', 'file.unreferenced', 'file.missing', 'file.digest', 'file.size', 'file.type', 'criterion.no-image', 'verdict.contradiction', 'manifest.unparseable', 'schema.unknown-key', 'schema.missing-key', 'schema.value']) {
-    assert.ok(codes.has(code), `the corpus lacks a case for ${code}`);
-  }
+  assert.ok(Object.isFrozen(er.FAULT_CODES));
+  for (const code of er.FAULT_CODES) assert.ok(codes.has(code), `the corpus lacks a case for ${code}`);
+  for (const code of codes) assert.ok(er.FAULT_CODES.includes(code), `the corpus names ${code}, which the module does not export`);
+  const source = fs.readFileSync(LIB, 'utf8');
+  const raised = new Set([...source.matchAll(/addFault\(faults, '([a-z-]+\.[a-z-]+)'/g), ...source.matchAll(/\bcode: '([a-z-]+\.[a-z-]+)'/g)].map((match) => match[1]));
+  assert.ok(raised.size >= er.FAULT_CODES.length);
+  assert.deepEqual([...raised].filter((code) => !er.FAULT_CODES.includes(code)), []);
+  assert.deepEqual(er.FAULT_CODES.filter((code) => !raised.has(code)), []);
   const hosts = new Set(corpusCases().filter((entry) => entry.spec.expect.rendering).map((entry) => JSON.parse(fs.readFileSync(path.join(entry.directory, 'manifest.json'), 'utf8')).run.host));
   assert.ok(hosts.size >= 2, 'the corpus renders reports of more than one host');
 });
@@ -308,6 +350,8 @@ test('the manifest validator refuses malformed values', () => {
     ['run.recipe', (m) => { m.run.recipe = '../outside.yaml'; }],
     ['run.feature', (m) => { m.run.feature = 'two\nlines'; }],
     ['target.head', (m) => { m.target.head = 'HEAD'; }],
+    ['target.begin_tree', (m) => { m.target.begin_tree = 'HEAD'; }],
+    ['run.feature', (m) => { m.run.feature = `left${String.fromCharCode(0x200e)}right`; }],
     ['target.origin', (m) => { m.target.origin = 'http://localhost:3000'; }],
     ['coverage.source', (m) => { m.coverage.source = 'acceptance-records'; }],
     ['coverage.criteria[0].state', (m) => { m.coverage.criteria[0].state = 'green'; }],
@@ -417,24 +461,31 @@ test('begin, add, step and render write a bundle that survives the deletion of t
   assert.deepEqual(er.checkManifest(manifest, er.bundleReader(started.bundle), { inScope: ['AC-001', 'AC-002'] }), []);
 });
 
-test('add accepts only a regular file inside the run directory, named by its physical path', { skip: NOT_ON_WINDOWS }, () => {
+test('add accepts only a regular file inside the run directory, named by an absolute normalized path', () => {
   const fx = fixture();
   const { id } = begin(fx);
   const inside = runFile(fx, 'shot.png', png(4, 3));
   const outside = path.join(fx.root, 'outside.png');
   fs.writeFileSync(outside, png(4, 3, 2));
   refused(call(fx, 'add', { report: id, kind: 'image', file: outside }, 'caption'), /lies outside the run directory/);
+  fs.mkdirSync(path.join(fx.runDir, 'folder'));
+  refused(call(fx, 'add', { report: id, kind: 'image', file: path.join(fx.runDir, 'folder') }, 'caption'), /not a regular file/);
+  refused(call(fx, 'add', { report: id, kind: 'image', file: `${fx.runDir}/folder/../shot.png` }, 'caption'), /normalized path/, 2);
+  refused(call(fx, 'add', { report: id, kind: 'image', file: 'shot.png' }, 'caption'), /absolute path/, 2);
+  refused(call(fx, 'add', { report: id, kind: 'image', file: path.join(fx.runDir, 'missing.png') }, 'caption'), /does not exist/);
+  ok(call(fx, 'add', { report: id, kind: 'image', file: inside }, 'caption'));
+});
+
+test('add refuses a symlink, a hard link, a file reached through a linked directory and a FIFO', { skip: NOT_ON_WINDOWS }, () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const inside = runFile(fx, 'shot.png', png(4, 3));
   const link = path.join(fx.runDir, 'link.png');
   fs.symlinkSync(inside, link);
   refused(call(fx, 'add', { report: id, kind: 'image', file: link }, 'caption'), /is a symlink/);
   const hard = path.join(fx.runDir, 'hard.png');
   fs.linkSync(runFile(fx, 'linked.png', png(4, 3, 3)), hard);
   refused(call(fx, 'add', { report: id, kind: 'image', file: hard }, 'caption'), /more than one link/);
-  fs.mkdirSync(path.join(fx.runDir, 'folder'));
-  refused(call(fx, 'add', { report: id, kind: 'image', file: path.join(fx.runDir, 'folder') }, 'caption'), /not a regular file/);
-  refused(call(fx, 'add', { report: id, kind: 'image', file: `${fx.runDir}/folder/../shot.png` }, 'caption'), /normalized path/, 2);
-  refused(call(fx, 'add', { report: id, kind: 'image', file: 'shot.png' }, 'caption'), /absolute path/, 2);
-  refused(call(fx, 'add', { report: id, kind: 'image', file: path.join(fx.runDir, 'missing.png') }, 'caption'), /does not exist/);
   const away = tempDir('away');
   fs.writeFileSync(path.join(away, 'shot.png'), png(4, 3, 4));
   fs.symlinkSync(away, path.join(fx.runDir, 'linked-dir'));
@@ -443,22 +494,71 @@ test('add accepts only a regular file inside the run directory, named by its phy
   if (childProcess.spawnSync('mkfifo', [fifo]).status === 0) {
     refused(call(fx, 'add', { report: id, kind: 'image', file: fifo }, 'caption'), /not a regular file/);
   }
-  ok(call(fx, 'add', { report: id, kind: 'image', file: inside }, 'caption'));
 });
 
-test('begin accepts only a physical run directory inside the work tree and apart from the store', { skip: NOT_ON_WINDOWS }, () => {
+test('begin accepts only a run directory inside the work tree that git ignores, outside .git and apart from the store', () => {
   const fx = fixture();
   refused(call(fx, 'begin', { 'run-dir': tempDir('elsewhere'), drivers: 'browser' }, FEATURE), /inside the project's work tree/);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, 'missing'), drivers: 'browser' }, FEATURE), /does not exist/);
+  refused(call(fx, 'begin', { 'run-dir': fx.root, drivers: 'browser' }, FEATURE), /inside the project's work tree/);
+  const source = path.join(fx.root, 'src');
+  fs.mkdirSync(source);
+  refused(call(fx, 'begin', { 'run-dir': source, drivers: 'browser' }, FEATURE), /git does not ignore the run directory .+ have git ignore src\//);
+  refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
+  refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git', 'objects'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
+  const store = path.join(fx.root, 'reports');
+  fs.writeFileSync(path.join(fx.root, '.gitignore'), '.zensu/\nreports/\n');
+  refused(call(fx, 'begin', { 'run-dir': path.join(store), drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }), /does not exist|must not overlap the report store/);
+  fs.mkdirSync(path.join(store, 'run'), { recursive: true });
+  refused(call(fx, 'begin', { 'run-dir': path.join(store, 'run'), drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }), /must not overlap the report store/);
+  ok(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE));
+});
+
+test('the run directory is judged by the work tree that holds it, and the refusal names its stable parent', () => {
+  const fx = fixture();
+  fs.writeFileSync(path.join(fx.root, '.gitignore'), '.zensu/\n.claude/worktrees/\n');
+  const nested = path.join(fx.root, '.claude', 'worktrees', 'wt');
+  git(fx.root, 'worktree', 'add', '-q', nested, '-b', 'wt');
+  const shots = path.join(nested, 'shots');
+  fs.mkdirSync(shots);
+  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; have git ignore shots\/, for example with the line shots\/ in the repository's \.gitignore$/);
+  const kept = path.join(nested, '.zensu', 'verify-feature-runs', 'r1');
+  fs.mkdirSync(kept, { recursive: true });
+  ok(call(fx, 'begin', { 'run-dir': kept, drivers: 'browser' }, FEATURE));
+  const plain = fixture({ root: tempDir('plain-holder') });
+  const inner = path.join(plain.root, 'app');
+  fs.mkdirSync(inner);
+  git(inner, 'init', '-q');
+  fs.writeFileSync(path.join(inner, '.gitignore'), '.zensu/\n');
+  const captures = path.join(inner, 'captures');
+  fs.mkdirSync(captures);
+  refused(call(plain, 'begin', { 'run-dir': captures, drivers: 'api' }, FEATURE), /git does not ignore the run directory .+ have git ignore captures\//);
+  ok(call(plain, 'begin', { 'run-dir': plain.runDir, drivers: 'api' }, FEATURE));
+  const trail = fixture({ ignore: '.zensu/state/\n.zensu/reviews/\n' });
+  refused(call(trail, 'begin', { 'run-dir': trail.runDir, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore \.zensu\/verify-feature-runs\/, for example with the line \.zensu\/verify-feature-runs\/ in the repository's \.gitignore$/);
+  fs.appendFileSync(path.join(trail.root, '.gitignore'), '.zensu/verify-feature-runs/\n');
+  ok(call(trail, 'begin', { 'run-dir': trail.runDir, drivers: 'browser' }, FEATURE));
+});
+
+test('add, step and render refuse a report begun in another worktree of the same clone, while export stays open', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const sibling = path.join(tempDir('sibling'), 'wt');
+  git(fx.root, 'worktree', 'add', '-q', sibling, '-b', 'sibling');
+  const moved = { ...fx, root: fs.realpathSync.native(sibling) };
+  const request = { report: id, kind: 'request', method: 'GET', path: '/', status: '200' };
+  refused(call(moved, 'add', request), /^report vr1_[^ ]+ was begun in the project root .+, but this session's project root is .+; begin a new report there$/);
+  refused(step(moved, id), /was begun in the project root/);
+  refused(call(moved, 'render', { report: id, verdict: 'PARTIAL' }), /was begun in the project root/);
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
+  ok(call(moved, 'export', { report: id }));
+});
+
+test('begin refuses a run directory named through a symlink', { skip: NOT_ON_WINDOWS }, () => {
+  const fx = fixture();
   const link = path.join(fx.root, 'run-link');
   fs.symlinkSync(fx.runDir, link);
   refused(call(fx, 'begin', { 'run-dir': link, drivers: 'browser' }, FEATURE), /is a symlink/);
-  refused(call(fx, 'begin', { 'run-dir': fx.root, drivers: 'browser' }, FEATURE), /inside the project's work tree/);
-  const store = path.join(fx.root, 'reports');
-  fs.writeFileSync(path.join(fx.root, '.gitignore'), '.zensu/\nreports/\n');
-  refused(call(fx, 'begin', { 'run-dir': path.join(store), drivers: 'browser' }, FEATURE, { config: { dir: store } }), /does not exist|must not overlap the report store/);
-  fs.mkdirSync(path.join(store, 'run'), { recursive: true });
-  refused(call(fx, 'begin', { 'run-dir': path.join(store, 'run'), drivers: 'browser' }, FEATURE, { config: { dir: store } }), /must not overlap the report store/);
 });
 
 test('add sniffs every file type from its content', () => {
@@ -488,6 +588,44 @@ test('add sniffs every file type from its content', () => {
   assert.deepEqual(Object.values(manifestFiles).map((entry) => entry.name.split('.').pop()), ['png']);
 });
 
+test('a PNG is walked to IEND and a PNG or WebP drops its metadata chunks before it is stored', () => {
+  const plain = png(5, 2);
+  const withChunk = (type, data) => Buffer.concat([plain.subarray(0, 33), pngChunk(type, data), plain.subarray(33)]);
+  const tagged = withChunk('tEXt', Buffer.from('Software\u0000Example capture tool', 'latin1'));
+  const sniffed = er.sniff(tagged);
+  assert.deepEqual([sniffed.type, sniffed.width, sniffed.height, sniffed.dropped], ['image/png', 5, 2, ['tEXt']]);
+  assert.deepEqual(sniffed.clean(), plain);
+  assert.deepEqual(er.sniff(withChunk('iDOT', Buffer.alloc(4))).dropped, ['iDOT']);
+  assert.deepEqual(er.sniff(withChunk('eXIf', Buffer.from('MM'))).dropped, ['eXIf']);
+  assert.match(er.sniff(Buffer.concat([plain, Buffer.from('appended text')])).error, /bytes after its IEND chunk/);
+  assert.match(er.sniff(plain.subarray(0, plain.length - 12)).error, /no IEND chunk/);
+  assert.match(er.sniff(plain.subarray(0, plain.length - 20)).error, /truncated|no IEND chunk/);
+  assert.match(er.sniff(withChunk('acTL', Buffer.alloc(8))).error, /animated PNG/);
+  assert.match(er.sniff(withChunk('ZZZZ', Buffer.alloc(1))).error, /unknown critical chunk ZZZZ/);
+  const lossless = corpusFile('render-chain-partial', 'webp');
+  assert.equal(lossless.toString('latin1', 12, 16), 'VP8L');
+  const vp8l = lossless.subarray(20, 20 + lossless.readUInt32LE(16));
+  const extended = riff([['VP8X', Buffer.from([0x0c, 0, 0, 0, 5, 0, 0, 3, 0, 0])], ['VP8L', vp8l], ['EXIF', Buffer.from('Exif data')], ['XMP ', Buffer.from('<x:xmpmeta/>')]]);
+  const webp = er.sniff(extended);
+  assert.deepEqual(webp.dropped, ['EXIF', 'XMP ']);
+  const cleaned = webp.clean();
+  assert.deepEqual(er.sniff(cleaned), { type: 'image/webp', width: 6, height: 4 });
+  assert.equal(cleaned[20] & 0x0c, 0);
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  const added = ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'tagged.png', tagged) }, 'A capture whose tool wrote a text chunk'));
+  assert.match(added.lines[0], /dropped the metadata chunks tEXt$/);
+  const binding = JSON.parse(fs.readFileSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), 'utf8'));
+  const [sha, entry] = Object.entries(binding.files)[0];
+  assert.equal(entry.source_sha256, crypto.createHash('sha256').update(tagged).digest('hex'));
+  assert.deepEqual(fs.readFileSync(path.join(bundle, entry.name)), plain);
+  assert.equal(sha, crypto.createHash('sha256').update(plain).digest('hex'));
+  refused(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'trailing.png', Buffer.concat([plain, Buffer.from('appended text')])) }, 'A capture with a tail'), /bytes after its IEND chunk/);
+  ok(step(fx, id, { criteria: 'AC-001', evidence: 'e1' }));
+  ok(step(fx, id, { priority: 'P1', driver: 'api', criteria: 'AC-002' }));
+  ok(call(fx, 'render', { report: id, verdict: 'PASS' }));
+});
+
 test('add checks the fixed protocol caps of 50 MiB per file and 2000 files per report', () => {
   assert.equal(er.LIMITS.maxFileBytes, 50 * 1024 * 1024);
   assert.equal(er.LIMITS.maxFiles, 2000);
@@ -504,6 +642,33 @@ test('add checks the fixed protocol caps of 50 MiB per file and 2000 files per r
   const binding = JSON.parse(fs.readFileSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), 'utf8'));
   assert.equal(Object.keys(binding.files).length, 2);
   assert.equal(Object.keys(binding.evidence).length, 3);
+});
+
+test('the file, text and pixel caps hold at their edges', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const image = png(4, 3, 7);
+  const file = runFile(fx, 'edge.png', image);
+  refused(call(fx, 'add', { report: id, kind: 'image', file }, 'One byte over the cap', { limits: { maxFileBytes: image.length - 1 } }), new RegExp(`above the cap of ${image.length - 1} bytes per file`));
+  ok(call(fx, 'add', { report: id, kind: 'image', file }, 'Exactly at the cap', { limits: { maxFileBytes: image.length } }));
+  refused(call(fx, 'add', { report: id, kind: 'text', file: runFile(fx, 'seventeen.txt', 'abcdefghijklmnopq') }, 'Seventeen bytes', { limits: { maxTextFileBytes: 16 } }), /at most 16 bytes/);
+  ok(call(fx, 'add', { report: id, kind: 'text', file: runFile(fx, 'sixteen.txt', 'abcdefghijklmnop') }, 'Sixteen bytes', { limits: { maxTextFileBytes: 16 } }));
+  const pixels = runFile(fx, 'pixels.png', png(4, 3, 8));
+  const fresh = begin(fx);
+  refused(call(fx, 'add', { report: fresh.id, kind: 'image', file: pixels }, 'Twelve pixels', { limits: { maxPixels: 11 } }), /more than 11 pixels/);
+  ok(call(fx, 'add', { report: fresh.id, kind: 'image', file: pixels }, 'Twelve pixels', { limits: { maxPixels: 12 } }));
+});
+
+test('add refuses a file that would take the report past evidence.report.maxBytes', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const first = png(4, 3, 1);
+  const second = png(4, 3, 2);
+  const cap = first.length + second.length - 1;
+  ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'one.png', first) }, 'First', { config: { user: { maxBytes: cap } } }));
+  refused(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'two.png', second) }, 'Second', { config: { user: { maxBytes: cap } } }), new RegExp(`would hold ${first.length + second.length} bytes of files, above evidence\\.report\\.maxBytes of ${cap}; raise evidence\\.report\\.maxBytes in the user configuration`));
+  ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'again.png', first) }, 'The first file again', { config: { user: { maxBytes: cap } } }));
+  ok(call(fx, 'add', { report: id, kind: 'image', file: runFile(fx, 'two.png', second) }, 'Second', { config: { user: { maxBytes: cap + 1 } } }));
 });
 
 test('every text field passes the secret screen and the path redaction', () => {
@@ -566,10 +731,12 @@ test('the default store lies outside every git work tree and a store inside one 
   const fx = fixture();
   begin(fx);
   const store = path.join(fx.root, 'reports');
-  refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { dir: store } }), /inside the git work tree .+ does not report it ignored/);
+  refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }), /inside the git work tree .+ does not report it ignored/);
   fs.writeFileSync(path.join(fx.root, '.gitignore'), '.zensu/\nreports/\n');
-  const accepted = ok(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { dir: store } }));
-  assert.ok(accepted.bundle.startsWith(fs.realpathSync(store)));
+  const accepted = ok(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { user: { dir: store } } }));
+  assert.equal(path.dirname(accepted.bundle), path.join(fs.realpathSync.native(store), er.STORE_VERSION, er.repositoryKey(fx.root)), 'a configured store holds the same versioned layout as the default one');
+  assert.deepEqual(fs.readdirSync(store), [er.STORE_VERSION]);
+  assert.equal(ok(call(fx, 'list', {}, '', { config: { user: { dir: store } } })).reports[0].id, accepted.id);
   const tracked = repo({ label: 'data-in-repo' });
   const data = path.join(tracked, 'plugin-data');
   fs.mkdirSync(data);
@@ -583,7 +750,7 @@ test('retention keeps the newest reports per repository and deletes the oldest f
   const fx = fixture();
   const ids = [];
   for (let index = 0; index < 4; index += 1) {
-    const started = begin(fx, {}, FEATURE, { config: { keep: 2 }, now: () => 1790000000000 + index });
+    const started = begin(fx, {}, FEATURE, { config: { user: { keep: 2 } }, now: () => 1790000000000 + index });
     idle(fx, started.id);
     ids.push(started.id);
     if (index >= 2) assert.ok(started.lines.some((line) => /retention removed 1 older report/.test(line)), started.lines.join('\n'));
@@ -605,44 +772,65 @@ test('retention holds the store under maxBytes across repositories, sparing the 
     idle(fx, started.id);
     reports.push(started);
   }
-  const footprint = (started, fx) => {
-    const directory = repositoryDirectory(fx);
-    const files = path.join(directory, started.id, 'files');
-    const stored = fs.readdirSync(files).reduce((sum, name) => sum + fs.statSync(path.join(files, name)).size, 0);
-    return stored + fs.statSync(path.join(directory, `${started.id}.binding.json`)).size;
-  };
   assert.ok(footprint(reports[0], first) > 4096);
   const cap = footprint(reports[1], first) + footprint(reports[2], second) + 4096;
-  const latest = begin(second, {}, FEATURE, { config: { maxBytes: cap }, now: () => clock });
+  const latest = begin(second, {}, FEATURE, { config: { user: { maxBytes: cap } }, now: () => clock });
   clock += 1;
   assert.ok(!fs.existsSync(path.join(repositoryDirectory(first), reports[0].id)), 'the oldest report is deleted first');
   assert.ok(fs.existsSync(path.join(repositoryDirectory(first), reports[1].id)));
   assert.ok(fs.existsSync(path.join(repositoryDirectory(second), reports[2].id)));
   assert.ok(fs.existsSync(latest.bundle));
   idle(second, latest.id);
-  fs.writeFileSync(path.join(repositoryDirectory(first), `${reports[1].id}.lock`), String(process.pid));
-  const newest = begin(first, {}, FEATURE, { config: { maxBytes: 1 }, now: () => clock });
+  const holder = core.acquireExternalProcessLock({ ...lockOf(repositoryDirectory(first), reports[1].id), ownerPid: process.pid });
+  const reachable = footprint(reports[1], first) + footprint(latest, second) + 256;
+  const newest = begin(first, {}, FEATURE, { config: { user: { maxBytes: reachable } }, now: () => clock });
+  core.releaseExternalProcessLock({ ...lockOf(repositoryDirectory(first), reports[1].id), ownerPid: process.pid, token: holder.token });
+  clock += 1;
   assert.ok(fs.existsSync(newest.bundle), 'the report being written survives');
   assert.ok(fs.existsSync(path.join(repositoryDirectory(first), reports[1].id)), 'a locked report survives');
   assert.ok(!fs.existsSync(path.join(repositoryDirectory(second), reports[2].id)));
   assert.ok(!fs.existsSync(latest.bundle));
+  idle(first, newest.id);
+  const removable = begin(second, {}, FEATURE, { now: () => clock });
+  clock += 1;
+  idle(second, removable.id);
+  const capped = begin(first, {}, FEATURE, { config: { user: { maxBytes: 1 } }, now: () => clock });
+  assert.ok(fs.existsSync(removable.bundle), 'when the reports it must keep exceed the cap, the size pass deletes nothing');
+  assert.ok(capped.lines.some((line) => /^zensu evidence report: retention deleted nothing for the size cap, because the reports it must keep \(this one, reports still being built and locked reports\) hold [0-9]+ bytes, above evidence\.report\.maxBytes of 1$/.test(line)), capped.lines.join('\n'));
 });
 
-test('retention ignores entries it does not own and never follows a symlink', { skip: NOT_ON_WINDOWS }, () => {
+test('retention ignores entries it does not own', () => {
+  const fx = fixture();
+  const first = begin(fx, {}, FEATURE, { now: () => 1790000000000 });
+  const directory = repositoryDirectory(fx);
+  fs.mkdirSync(path.join(directory, 'notes'));
+  fs.writeFileSync(path.join(directory, 'vr1_1780000000000_0123456789ab'), 'not a report');
+  fs.mkdirSync(path.join(path.dirname(directory), 'unrelated'));
+  idle(fx, first.id);
+  begin(fx, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000001 });
+  assert.ok(!fs.existsSync(first.bundle));
+  assert.ok(fs.existsSync(path.join(directory, 'notes')));
+  assert.equal(fs.readFileSync(path.join(directory, 'vr1_1780000000000_0123456789ab'), 'utf8'), 'not a report');
+  assert.ok(fs.existsSync(path.join(path.dirname(directory), 'unrelated')));
+  assert.deepEqual(er.sweep(tempDir('empty-store'), { keep: 1, maxBytes: 1 }).removed, []);
+});
+
+test('retention never follows a symlink', { skip: NOT_ON_WINDOWS }, () => {
   const fx = fixture();
   const first = begin(fx, {}, FEATURE, { now: () => 1790000000000 });
   const directory = repositoryDirectory(fx);
   const outside = tempDir('precious');
   fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
   fs.symlinkSync(outside, path.join(directory, 'vr1_1780000000000_0123456789ab'));
-  fs.mkdirSync(path.join(directory, 'notes'));
+  const foreign = tempDir('foreign-repository');
+  fs.mkdirSync(path.join(foreign, 'vr1_1780000000000_0123456789ab'));
+  fs.symlinkSync(foreign, path.join(path.dirname(directory), 'linked-0123456789'));
   idle(fx, first.id);
-  begin(fx, {}, FEATURE, { config: { keep: 1 }, now: () => 1790000000001 });
+  begin(fx, {}, FEATURE, { config: { user: { keep: 1, maxBytes: 1 } }, now: () => 1790000000001 });
   assert.ok(!fs.existsSync(first.bundle));
   assert.ok(fs.existsSync(path.join(outside, 'keep.txt')));
   assert.ok(fs.lstatSync(path.join(directory, 'vr1_1780000000000_0123456789ab')).isSymbolicLink());
-  assert.ok(fs.existsSync(path.join(directory, 'notes')));
-  assert.deepEqual(er.sweep(tempDir('empty-store'), { keep: 1, maxBytes: 1 }).removed, []);
+  assert.ok(fs.existsSync(path.join(foreign, 'vr1_1780000000000_0123456789ab')), 'a linked repository directory is never entered');
 });
 
 test('retention trims only the calling repository and spares a report another call is still building', () => {
@@ -652,24 +840,25 @@ test('retention trims only the calling repository and spares a report another ca
   const others = [0, 1].map((index) => begin(first, {}, FEATURE, { now: () => 1790000000000 + index }));
   for (const started of others) idle(first, started.id);
   const open = begin(second, {}, FEATURE, { now: () => 1790000000002 });
-  begin(second, {}, FEATURE, { config: { keep: 1 }, now: () => 1790000000003 });
+  const third = begin(second, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000003 });
   for (const started of others) assert.ok(fs.existsSync(started.bundle), 'the keep of one repository never trims another');
   assert.ok(fs.existsSync(open.bundle), 'an unrendered report touched within the window is still being built');
   addImage(second, open.id);
   ok(call(second, 'render', { report: open.id, verdict: 'PARTIAL' }));
-  begin(second, {}, FEATURE, { config: { keep: 1 }, now: () => 1790000000004 });
+  const fourth = begin(second, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000004 });
   assert.ok(!fs.existsSync(open.bundle), 'a rendered report beyond keep is deleted');
   const stale = begin(second, {}, FEATURE, { now: () => 1790000000005 });
   idle(second, stale.id);
   const building = begin(second, {}, FEATURE, { now: () => 1790000000006 });
-  begin(second, {}, FEATURE, { config: { keep: 1, maxBytes: 1 }, now: () => 1790000000007 });
+  const mustKeep = [third, fourth, building, building].reduce((sum, started) => sum + footprint(started, second), 0);
+  begin(second, {}, FEATURE, { config: { user: { keep: 1, maxBytes: mustKeep + 512 } }, now: () => 1790000000007 });
   assert.ok(!fs.existsSync(stale.bundle), 'an unrendered report idle beyond the window is deleted');
   assert.ok(fs.existsSync(building.bundle), 'the size pass spares a report still being built');
   for (const started of others) assert.ok(!fs.existsSync(started.bundle), 'the store-wide cap applies to every repository');
   const held = begin(second, {}, FEATURE, { now: () => 1790000000008 });
   idle(second, held.id);
-  fs.mkdirSync(path.join(repositoryDirectory(second), `${held.id}.lock`));
-  begin(second, {}, FEATURE, { config: { keep: 1 }, now: () => 1790000000009 });
+  fs.mkdirSync(core.inspectExternalProcessLock(lockOf(repositoryDirectory(second), held.id)).lockFile);
+  begin(second, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000009 });
   assert.ok(fs.existsSync(held.bundle), 'a lock that cannot be taken keeps its report');
 });
 
@@ -809,11 +998,14 @@ test('the target identity is measured again at render and a changed tree becomes
   const binding = JSON.parse(fs.readFileSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), 'utf8'));
   assert.equal(binding.target.dirty, false);
   assert.match(binding.target.head, /^[0-9a-f]{40}$/);
+  assert.match(binding.target.tree, /^[0-9a-f]{40}$/);
+  assert.equal(binding.target.begin_tree, binding.target.tree);
   fs.writeFileSync(path.join(fx.root, 'a.txt'), 'changed\n');
   ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
   const manifest = manifestOf(bundle);
   assert.equal(manifest.target.dirty, true);
   assert.notEqual(manifest.target.tree, binding.target.tree);
+  assert.equal(manifest.target.begin_tree, binding.target.tree);
   assert.ok(manifest.sections.limitations.some((line) => line.startsWith('The working tree changed during the run:')));
 });
 
@@ -863,7 +1055,20 @@ test('export writes a self-contained page and refuses an unrendered report or on
   assert.doesNotMatch(html, /src="files\//);
 });
 
-test('every write is atomic and a symlinked bundle, binding or output file is refused', { skip: NOT_ON_WINDOWS }, () => {
+test('every write is atomic and an output path that is not a regular file is refused', () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  addImage(fx, id);
+  const directory = repositoryDirectory(fx);
+  fs.mkdirSync(path.join(bundle, 'index.html'));
+  refused(call(fx, 'render', { report: id, verdict: 'PARTIAL' }), /index\.html is not a regular file, so it is not replaced/, 2);
+  fs.rmdirSync(path.join(bundle, 'index.html'));
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
+  const leftovers = [...fs.readdirSync(directory), ...fs.readdirSync(bundle), ...fs.readdirSync(path.join(bundle, 'files'))].filter((name) => name.endsWith('.tmp') || name.endsWith('.lock'));
+  assert.deepEqual(leftovers, []);
+});
+
+test('a symlinked bundle, binding or output file is refused', { skip: NOT_ON_WINDOWS }, () => {
   const fx = fixture();
   const { id, bundle } = begin(fx);
   addImage(fx, id);
@@ -873,16 +1078,12 @@ test('every write is atomic and a symlinked bundle, binding or output file is re
   fs.symlinkSync(decoy, path.join(bundle, 'index.html'));
   refused(call(fx, 'render', { report: id, verdict: 'PARTIAL' }), /is not a regular file, so it is not replaced/, 2);
   assert.equal(fs.readFileSync(decoy, 'utf8'), 'decoy');
-  fs.unlinkSync(path.join(bundle, 'index.html'));
-  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
-  const leftovers = [...fs.readdirSync(directory), ...fs.readdirSync(bundle), ...fs.readdirSync(path.join(bundle, 'files'))].filter((name) => name.endsWith('.tmp') || name.endsWith('.lock'));
-  assert.deepEqual(leftovers, []);
   const second = begin(fx);
   const bindingPath = path.join(directory, `${second.id}.binding.json`);
   const moved = path.join(tempDir('binding'), 'binding.json');
   fs.renameSync(bindingPath, moved);
   fs.symlinkSync(moved, bindingPath);
-  refused(call(fx, 'add', { report: second.id, kind: 'request', method: 'GET', path: '/', status: '200' }), /binding of .+ cannot be read \(symlink\)/, 2);
+  refused(call(fx, 'add', { report: second.id, kind: 'request', method: 'GET', path: '/', status: '200' }), /^the report lock cannot be taken \(session-control-v1: external process lock resource is unsafe\)$/, 2);
   const third = begin(fx);
   const real = path.join(tempDir('bundle'), 'moved');
   fs.renameSync(third.bundle, real);
@@ -890,39 +1091,57 @@ test('every write is atomic and a symlinked bundle, binding or output file is re
   refused(call(fx, 'add', { report: third.id, kind: 'request', method: 'GET', path: '/', status: '200' }), /is not a real directory/, 2);
 });
 
-test('a lock held by another call makes a verb wait and a stale lock is taken over', () => {
+test('a report lock another live call holds makes a verb wait and refuse, and the lock of a process that exited is taken over', () => {
   const fx = fixture();
   const { id } = begin(fx);
-  const lock = path.join(repositoryDirectory(fx), `${id}.lock`);
-  fs.writeFileSync(lock, '1');
+  const target = lockOf(repositoryDirectory(fx), id);
+  const request = { report: id, kind: 'request', method: 'GET', path: '/', status: '200' };
+  const held = core.acquireExternalProcessLock({ ...target, ownerPid: process.pid });
   const started = Date.now();
-  refused(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: '/', status: '200' }, '', { limits: { lockWaitMs: 150 } }), /another call holds this report's lock/, 2);
-  assert.ok(Date.now() - started >= 140, 'the verb waited for the lock');
-  const old = new Date(Date.now() - 5 * 60 * 1000);
-  fs.utimesSync(lock, old, old);
-  ok(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: '/', status: '200' }));
-  assert.ok(!fs.existsSync(lock));
+  refused(call(fx, 'add', request, '', { limits: { lockAttempts: 3 } }), /^another call holds this report's lock; run the verb again once it has finished$/, 2);
+  assert.ok(Date.now() - started >= 80, 'the verb waited for the lock');
+  core.releaseExternalProcessLock({ ...target, ownerPid: process.pid, token: held.token });
+  ok(call(fx, 'add', request));
+  assert.equal(core.inspectExternalProcessLock(target).lock.state, 'absent', 'the verb releases its lock');
+  const script = `require(${JSON.stringify(CORE)}).acquireExternalProcessLock({ lockDirectory: ${JSON.stringify(target.lockDirectory)}, resourcePath: ${JSON.stringify(target.resourcePath)}, ownerPid: process.pid })`;
+  const keeper = childProcess.spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+  assert.equal(keeper.status, 0, keeper.stderr);
+  assert.equal(core.inspectExternalProcessLock(target).lock.alive, false, 'the holder exited without releasing its lock');
+  ok(call(fx, 'add', request));
+  assert.equal(core.inspectExternalProcessLock(target).lock.state, 'absent', 'the lock of a process that exited is taken over and released');
 });
 
 test('the config keys are read permissively and every value not used is disclosed', () => {
   assert.deepEqual(er.normalizeConfig(undefined), { enabled: true, dir: null, keep: 30, maxBytes: 2147483648, disclosures: [] });
-  assert.equal(er.normalizeConfig({ enabled: false }).enabled, false);
-  assert.equal(er.normalizeConfig({ enabled: 'false' }).enabled, true);
-  const relative = er.normalizeConfig({ dir: 'reports' });
+  assert.equal(er.normalizeConfig({ user: { enabled: false } }).enabled, false);
+  assert.equal(er.normalizeConfig({ user: { enabled: 'false' } }).enabled, true);
+  const relative = er.normalizeConfig({ user: { dir: 'reports' } });
   assert.equal(relative.dir, null);
   assert.match(relative.disclosures[0], /evidence\.report\.dir is not an absolute path/);
-  const bad = er.normalizeConfig({ keep: 0, maxBytes: -1 });
+  const bad = er.normalizeConfig({ user: { keep: 0, maxBytes: -1 } });
   assert.equal(bad.keep, 30);
   assert.equal(bad.maxBytes, 2147483648);
   assert.equal(bad.disclosures.length, 2);
-  assert.deepEqual(er.normalizeConfig({ keep: 5, maxBytes: 1000 }), { enabled: true, dir: null, keep: 5, maxBytes: 1000, disclosures: [] });
-  assert.match(er.normalizeConfig({ maxBytesFromProject: true }).disclosures[0], /maxBytes caps the whole store, so it is read from the user configuration only/);
+  assert.deepEqual(er.normalizeConfig({ user: { keep: 5, maxBytes: 1000 } }), { enabled: true, dir: null, keep: 5, maxBytes: 1000, disclosures: [] });
+  const layered = er.normalizeConfig({ user: { maxBytes: 5000, dir: '/srv/user-reports' }, project: { keep: 2, maxBytes: 1, dir: '/srv/project-reports', enabled: false } });
+  assert.deepEqual([layered.enabled, layered.dir, layered.keep, layered.maxBytes, layered.disclosures.length], [false, path.resolve('/srv/user-reports'), 2, 5000, 2]);
+  const projectOnly = er.normalizeConfig({ project: { maxBytes: 7 } });
+  assert.deepEqual([projectOnly.maxBytes, projectOnly.disclosures.length], [2147483648, 1]);
+  assert.deepEqual(er.normalizeConfig({ user: { dir: '/srv/same' }, project: { dir: '/srv/same' } }).disclosures, []);
+  assert.equal(er.normalizeConfig({ user: { enabled: true }, project: { enabled: false } }).enabled, false);
+  assert.match(er.normalizeConfig({ user: { maxBytes: 5000 }, project: { maxBytes: 1 } }).disclosures[0], /maxBytes caps the whole store, so it is read from the user configuration only/);
+  const projectDir = er.normalizeConfig({ project: { dir: '/srv/project-reports' } });
+  assert.equal(projectDir.dir, null);
+  assert.match(projectDir.disclosures[0], /^zensu evidence report: evidence\.report\.dir decides where every contributor's evidence is written, so it is read from the user configuration only and the project configuration's value is ignored$/);
+  const switchedOff = er.normalizeConfig({ user: { enabled: false }, project: { enabled: true } });
+  assert.equal(switchedOff.enabled, false);
+  assert.match(switchedOff.disclosures[0], /^zensu evidence report: the user configuration switched evidence reports off, and a project configuration can switch them off but never on$/);
   const fx = fixture();
-  const disabled = call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { enabled: false } });
+  const disabled = call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser' }, FEATURE, { config: { user: { enabled: false } } });
   assert.equal(disabled.code, 3);
   assert.match(disabled.lines.join('\n'), /evidence\.report\.enabled is false/);
   assert.ok(!fs.existsSync(path.join(fx.data, 'evidence-report')));
-  const disclosed = begin(fx, {}, FEATURE, { config: { keep: 'many' } });
+  const disclosed = begin(fx, {}, FEATURE, { config: { user: { keep: 'many' } } });
   assert.match(disclosed.lines[0], /^zensu evidence report: evidence\.report\.keep must be an integer/);
 });
 
@@ -950,7 +1169,7 @@ test('the core module reads no host environment variable and every host fact ent
   assert.equal((source.match(/process\.env/g) || []).length, 1);
   assert.match(source, /async function main\(argv, env = process\.env\)/);
   const required = [...source.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1]).sort();
-  assert.deepEqual(required, ['./acceptance-verify-v1.js', './evidence-run-v1.js', './secret-patterns.js', './zensu-artifact-redact-v1.js', 'node:crypto', 'node:fs', 'node:path']);
+  assert.deepEqual(required, ['./acceptance-verify-v1.js', './evidence-run-v1.js', './secret-patterns.js', './session-control-core-v1.js', './zensu-artifact-redact-v1.js', 'node:crypto', 'node:fs', 'node:path']);
   const seen = new Set();
   const env = new Proxy({ ZENSU_ERP_HOST: 'kiro' }, { get(target, key) { seen.add(String(key)); return target[key]; } });
   const options = er.transportOptions(env);
@@ -1090,16 +1309,16 @@ test('main prints refusals on stderr under the label and answers the exit code',
   assert.match(listed.stdout, new RegExp(`^${id} \\| unrendered \\| - \\| `, 'm'));
 });
 
-test('a lock entry that cannot be removed is refused at once instead of spinning', () => {
+test('a lock entry the core lock cannot read is refused at once instead of spinning', () => {
   const fx = fixture();
   const { id } = begin(fx);
-  const lock = path.join(repositoryDirectory(fx), `${id}.lock`);
-  fs.mkdirSync(lock);
+  const { lockFile } = core.inspectExternalProcessLock(lockOf(repositoryDirectory(fx), id));
+  fs.mkdirSync(lockFile);
   const request = { report: id, kind: 'request', method: 'GET', path: '/api/items', status: '200' };
   const started = Date.now();
-  refused(call(fx, 'add', request), /the stale report lock .+ cannot be removed/, 2);
-  assert.ok(Date.now() - started < er.LIMITS.lockWaitMs, 'the refusal does not wait for the lock deadline');
-  fs.rmdirSync(lock);
+  refused(call(fx, 'add', request), /^the report lock cannot be taken \(session-control-v1: not a regular file: .+\)$/, 2);
+  assert.ok(Date.now() - started < 2000, 'the refusal does not wait for every attempt');
+  fs.rmdirSync(lockFile);
   ok(call(fx, 'add', request));
 });
 
@@ -1116,7 +1335,7 @@ test('a retention delete that fails is reported and does not abort --report-begi
   });
   let second;
   try {
-    second = begin(fx, {}, FEATURE, { config: { keep: 1 }, now: () => 1790000000001 });
+    second = begin(fx, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000001 });
   } finally {
     failing.mock.restore();
   }
@@ -1124,7 +1343,7 @@ test('a retention delete that fails is reported and does not abort --report-begi
   assert.ok(notice && notice.includes(`/${first.id} (EBUSY)`), second.lines.join('\n'));
   assert.ok(fs.existsSync(first.bundle), 'the report whose delete failed stays');
   assert.ok(fs.existsSync(second.bundle), 'the new report is kept');
-  const third = begin(fx, {}, FEATURE, { config: { keep: 1 }, now: () => 1790000000002 });
+  const third = begin(fx, {}, FEATURE, { config: { user: { keep: 1 } }, now: () => 1790000000002 });
   assert.ok(!fs.existsSync(first.bundle), 'a later begin deletes it once the delete succeeds');
   assert.ok(fs.existsSync(third.bundle));
 });
@@ -1244,4 +1463,406 @@ test('a git fault other than a missing work tree refuses begin instead of fallin
   fs.writeFileSync(path.join(root, '.git'), 'not a gitfile\n');
   const fx = fixture({ root });
   refused(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'api' }, FEATURE), /whether the run directory lies in the project's work tree could not be determined \(git rev-parse failed: fatal: invalid gitfile format/, 2);
+});
+
+test('add records a completed evidence run of this session and refuses every other run', async () => {
+  const fx = fixture();
+  const output = () => ({ text: '', write(chunk) { this.text += String(chunk); return true; } });
+  const stdout = output();
+  const stderr = output();
+  const code = await evr.run({ pluginData: fx.data, sessionKey: SESSION, projectRoot: fx.root, cwd: fx.root, scope: 'scoped', command: 'exit 0', show: 'tail', bashPath: 'bash', env: process.env, stdout, stderr });
+  assert.equal(code, 0, stderr.text);
+  const records = evr.storeLocations(fx.data, SESSION).records;
+  const [file] = fs.readdirSync(records).filter((name) => name.endsWith('.json'));
+  const runId = file.slice(0, -5);
+  const record = JSON.parse(fs.readFileSync(path.join(records, file), 'utf8'));
+  const { id, bundle } = begin(fx, { drivers: 'api' });
+  const runItem = (report, evidenceRun) => ({ report, kind: 'run', 'evidence-run': evidenceRun });
+  refused(call(fx, 'add', runItem(id, runId), 'The suite passed'), /^a run item carries no caption; pass nothing on stdin$/);
+  refused(call(fx, 'add', runItem(id, 'er1_bad')), /--evidence-run must name an er1_ evidence-run record/, 2);
+  refused(call(fx, 'add', runItem(id, 'er1_1790000000000_0123456789ab')), /^no evidence run er1_1790000000000_0123456789ab exists for this session$/);
+  const added = ok(call(fx, 'add', runItem(id, runId)));
+  assert.equal(added.lines[0], `zensu evidence report: e1 added to ${id} | run | ${runId} exit 0`);
+  const runningId = 'er1_1790000000001_0123456789ab';
+  fs.writeFileSync(path.join(records, `${runningId}.json`), JSON.stringify({ ...record, id: runningId, state: 'running', pid: process.pid, started_at: new Date().toISOString(), finished_at: null, exit_code: null, duration_ms: null }));
+  refused(call(fx, 'add', runItem(id, runningId)), new RegExp(`^evidence run ${runningId} is running, not completed$`));
+  const other = begin(fx, { drivers: 'api' }, FEATURE, { sessionKey: OTHER_SESSION });
+  refused(call(fx, 'add', runItem(other.id, runId), '', { sessionKey: OTHER_SESSION }), new RegExp(`^no evidence run ${runId} exists for this session$`));
+  fs.copyFileSync(path.join(records, file), path.join(evr.storeLocations(fx.data, OTHER_SESSION).records, file));
+  refused(call(fx, 'add', runItem(other.id, runId), '', { sessionKey: OTHER_SESSION }), new RegExp(`^evidence run ${runId} does not validate \\(bound to another session\\)$`));
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
+  assert.deepEqual(manifestOf(bundle).evidence.e1, { kind: 'run', record: runId, command: 'exit 0', exit_code: 0, duration_ms: record.duration_ms });
+});
+
+test('begin holds the new report\'s lock from the creation of its directories until its binding is written', (t) => {
+  const fx = fixture();
+  const realMkdir = fs.mkdirSync;
+  const seen = [];
+  t.mock.method(fs, 'mkdirSync', (target, ...rest) => {
+    const created = realMkdir.call(fs, target, ...rest);
+    const name = path.basename(String(target));
+    if (er.ID_RE.test(name) && seen.length === 0) {
+      const repository = path.dirname(String(target));
+      const swept = er.sweep(path.dirname(repository), { repositoryKey: path.basename(repository), keep: 0, maxBytes: 0 });
+      seen.push({ removed: swept.removed.length, lock: core.inspectExternalProcessLock(lockOf(repository, name)).lock.state });
+    }
+    return created;
+  });
+  const started = begin(fx);
+  assert.deepEqual(seen, [{ removed: 0, lock: 'owned' }]);
+  assert.ok(fs.existsSync(path.join(started.bundle, 'files')));
+  assert.ok(fs.existsSync(path.join(repositoryDirectory(fx), `${started.id}.binding.json`)));
+  assert.equal(core.inspectExternalProcessLock(lockOf(repositoryDirectory(fx), started.id)).lock.state, 'absent', 'begin releases the lock once the binding is written');
+});
+
+test('begin refuses a chain plan with more criteria than one report holds and names how many fit', () => {
+  const fx = chainFixture();
+  const planPath = path.join(fx.root, '.zensu', 'plans', `${STEM}.md`);
+  const rows = (count) => Array.from({ length: count }, (_, index) => [`AC-${String(index + 1).padStart(3, '0')}`, `Criterion number ${index + 1} holds`]);
+  const tight = { limits: { maxManifestBytes: 40000, renderReserveBytes: 0 } };
+  const args = { 'run-dir': fx.runDir, drivers: 'browser', log: fx.logPath };
+  const reports = () => fs.readdirSync(repositoryDirectory(fx)).filter((name) => name.startsWith('vr1_')).sort();
+  fs.writeFileSync(planPath, planText(rows(12)));
+  const refusal = refused(call(fx, 'begin', args, 'feature: The dashboard lists projects\n', tight), /^a report of the chain's plan \.zensu\/plans\/[^ ]+\.md would hold 12 criteria, but one report holds at most [0-9]+ of them, because each keeps 6128 bytes of the 40000-byte manifest free for the note --report-render adds; verify this chain without a report$/);
+  const fit = Number(/holds at most ([0-9]+) of them/.exec(refusal.errors[0])[1]);
+  assert.ok(fit > 0 && fit < 12, `${fit} criteria fit`);
+  assert.deepEqual(reports(), [], 'a refused begin creates no report');
+  fs.writeFileSync(planPath, planText(rows(fit)));
+  const started = ok(call(fx, 'begin', args, 'feature: The dashboard lists projects\n', tight));
+  fs.writeFileSync(planPath, planText(rows(fit + 1)));
+  refused(call(fx, 'begin', args, 'feature: The dashboard lists projects\n', tight), new RegExp(`would hold ${fit + 1} criteria, but one report holds at most ${fit} of them`));
+  assert.deepEqual(reports(), [started.id, `${started.id}.binding.json`]);
+});
+
+test('a chain report holding its fitting criteria renders with full multi-byte notes, and a plan that grew since begin is named', () => {
+  const fx = chainFixture();
+  const planPath = path.join(fx.root, '.zensu', 'plans', `${STEM}.md`);
+  const rows = (count) => Array.from({ length: count }, (_, index) => [`AC-${String(index + 1).padStart(3, '0')}`, `Criterion number ${index + 1} holds`]);
+  const tight = { limits: { maxManifestBytes: 40000, renderReserveBytes: 0 } };
+  const args = { 'run-dir': fx.runDir, drivers: 'browser', log: fx.logPath };
+  fs.writeFileSync(planPath, planText(rows(12)));
+  const fit = Number(/holds at most ([0-9]+) of them/.exec(refused(call(fx, 'begin', args, 'feature: The dashboard lists projects\n', tight), /holds at most/).errors[0])[1]);
+  fs.writeFileSync(planPath, planText(rows(fit)));
+  const started = ok(call(fx, 'begin', args, 'feature: The dashboard lists projects\n', tight));
+  const note = '一'.repeat(2000);
+  for (const [ac] of rows(fit)) attest(fx, ac, 'partial', note);
+  ok(call(fx, 'render', { report: started.id, verdict: 'PARTIAL', log: fx.logPath }, '', tight));
+  assert.ok(manifestOf(started.bundle).coverage.criteria.every((criterion) => criterion.note === note));
+  const grown = ok(call(fx, 'begin', args, 'feature: The dashboard lists projects\n', tight));
+  fs.writeFileSync(planPath, planText(rows(fit + 2)));
+  for (const [ac] of rows(fit + 2).slice(fit)) attest(fx, ac, 'partial', note);
+  const added = rows(fit + 2).slice(fit).map(([ac]) => ac).join(', ');
+  refused(call(fx, 'render', { report: grown.id, verdict: 'PARTIAL', log: fx.logPath }, '', tight), new RegExp(`^REPORT REFUSED — manifest\\.too-large: the manifest holds [0-9]+ bytes, above the cap of 40000, because the chain's plan changed since --report-begin \\(${added}\\) \\| remedy: begin a new report on the current plan$`));
+});
+
+test('begin counts a criterion dropped from the chain plan whose newest verdict is not a pass, and lists a deprecated one once', () => {
+  const fx = chainFixture();
+  attest(fx, 'AC-003', 'fail', 'Projects were listed unsorted');
+  fs.writeFileSync(path.join(fx.root, '.zensu', 'plans', `${STEM}.md`), planText([['AC-001', 'The dashboard lists every project'], ['AC-002', 'The export downloads a CSV file']]));
+  const { id, bundle } = begin(fx, { drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n');
+  const binding = JSON.parse(fs.readFileSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), 'utf8'));
+  assert.deepEqual(binding.criteria.map((criterion) => criterion.id), ['AC-001', 'AC-002', 'AC-003']);
+  ok(call(fx, 'render', { report: id, verdict: 'FAIL', log: fx.logPath }));
+  assert.deepEqual(manifestOf(bundle).coverage.criteria.map((criterion) => [criterion.id, criterion.state]), [['AC-001', 'missing'], ['AC-002', 'missing'], ['AC-003', 'fail']]);
+  const deprecated = chainFixture();
+  attest(deprecated, 'AC-003', 'fail', 'Projects were listed unsorted');
+  fs.writeFileSync(path.join(deprecated.root, '.zensu', 'plans', `${STEM}.md`), planText([['AC-001', 'The dashboard lists every project'], ['AC-002', 'The export downloads a CSV file'], ['AC-003', '(deprecated) Projects are sorted by name']]));
+  const listed = begin(deprecated, { drivers: 'browser', log: deprecated.logPath }, 'feature: The dashboard lists projects\n');
+  const ids = JSON.parse(fs.readFileSync(path.join(repositoryDirectory(deprecated), `${listed.id}.binding.json`), 'utf8')).criteria.map((criterion) => criterion.id);
+  assert.deepEqual(ids, ['AC-001', 'AC-002', 'AC-003']);
+});
+
+test('an add refused at the manifest cap leaves no file in the bundle', () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  const file = runFile(fx, 'late.png', png(4, 3, 7));
+  refused(call(fx, 'add', { report: id, kind: 'image', file }, 'The page after the last step', { limits: { maxManifestBytes: 2000 } }), /^the report would outgrow the manifest cap of 2000 bytes/);
+  assert.deepEqual(fs.readdirSync(path.join(bundle, 'files')), []);
+  ok(call(fx, 'add', { report: id, kind: 'image', file }, 'The page after the last step'));
+  assert.equal(fs.readdirSync(path.join(bundle, 'files')).length, 1);
+});
+
+test('a PASS that rests on no passed criterion and no passed P0 row is refused', () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx, { drivers: 'api' }, 'feature: A feature without criteria\n');
+  ok(step(fx, id, { priority: 'P1', driver: 'api' }));
+  refused(call(fx, 'render', { report: id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.empty at verdict: the stated verdict PASS rests on no passed criterion and no passed P0 row \| remedy: state PARTIAL, or verify at least one criterion or P0 row first$/);
+  ok(step(fx, id, { driver: 'api' }));
+  ok(call(fx, 'render', { report: id, verdict: 'PASS' }));
+  assert.equal(manifestOf(bundle).verdict, 'PASS');
+});
+
+test('a local matrix PASS over a tree that changed during the run is refused and the tree at begin is shown', () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  addImage(fx, id);
+  ok(step(fx, id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  fs.writeFileSync(path.join(fx.root, 'a.txt'), 'changed during the run\n');
+  refused(call(fx, 'render', { report: id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded while the working tree changed \([0-9a-f]{12} at --report-begin, [0-9a-f]{12} at --report-render\) \| remedy: state PARTIAL, or begin a new report and run the matrix again on the current tree$/);
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
+  const { target } = manifestOf(bundle);
+  assert.notEqual(target.begin_tree, target.tree);
+  assert.ok(fs.readFileSync(path.join(bundle, 'index.html'), 'utf8').includes(`<tr><th>Tree at begin</th><td><code>${target.begin_tree}</code></td></tr>`));
+  const steady = fixture();
+  const kept = begin(steady);
+  addImage(steady, kept.id);
+  ok(step(steady, kept.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  ok(call(steady, 'render', { report: kept.id, verdict: 'PASS' }));
+  assert.ok(!fs.readFileSync(path.join(kept.bundle, 'index.html'), 'utf8').includes('Tree at begin'));
+  const plain = fixture({ root: tempDir('plain-project') });
+  const unmeasured = begin(plain, { drivers: 'api' });
+  ok(call(plain, 'render', { report: unmeasured.id, verdict: 'PARTIAL' }));
+  const manifest = manifestOf(unmeasured.bundle);
+  assert.equal(manifest.target.tree, null);
+  assert.equal(manifest.target.begin_tree, null);
+  assert.ok(manifest.sections.limitations.includes('The working tree was not fingerprinted at --report-begin, so a change during the run cannot be ruled out.'), manifest.sections.limitations.join('\n'));
+});
+
+test('a local matrix PASS is refused when the tree at begin or at render cannot be fingerprinted inside git, and a PARTIAL says so', (t) => {
+  const late = fixture();
+  const atBegin = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  const unmeasured = begin(late);
+  atBegin.mock.restore();
+  addImage(late, unmeasured.id);
+  ok(step(late, unmeasured.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  refused(call(late, 'render', { report: unmeasured.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin, so the tree [0-9a-f]{12} at --report-render cannot be compared with it/);
+  ok(call(late, 'render', { report: unmeasured.id, verdict: 'PARTIAL' }));
+  assert.equal(manifestOf(unmeasured.bundle).target.begin_tree, null);
+  const blind = fixture();
+  const everywhere = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  const neither = begin(blind);
+  addImage(blind, neither.id);
+  ok(step(blind, neither.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  refused(call(blind, 'render', { report: neither.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin, and the tree at --report-render could not be fingerprinted either \| remedy: state PARTIAL, or begin a new report once the working tree can be fingerprinted$/);
+  ok(call(blind, 'render', { report: neither.id, verdict: 'PARTIAL' }));
+  everywhere.mock.restore();
+  const unseen = manifestOf(neither.bundle).target;
+  assert.deepEqual([unseen.begin_tree, unseen.tree, typeof unseen.head], [null, null, 'string']);
+  const plain = fixture({ root: tempDir('plain-project') });
+  const outside = begin(plain, { drivers: 'api' });
+  addImage(plain, outside.id);
+  ok(step(plain, outside.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  ok(call(plain, 'render', { report: outside.id, verdict: 'PASS' }));
+  assert.deepEqual([manifestOf(outside.bundle).verdict, manifestOf(outside.bundle).target.head, manifestOf(outside.bundle).target.tree], ['PASS', null, null]);
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  addImage(fx, id);
+  ok(step(fx, id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  refused(call(fx, 'render', { report: id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be checked at --report-render \([0-9a-f]{12} at --report-begin, not fingerprinted at --report-render\) \| remedy: state PARTIAL, or render again once the working tree can be fingerprinted$/);
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
+  const manifest = manifestOf(bundle);
+  assert.equal(manifest.target.tree, null);
+  assert.ok(manifest.sections.limitations.some((line) => /^The working tree could not be fingerprinted at --report-render, so a change since [0-9a-f]{12} at --report-begin cannot be ruled out\.$/.test(line)), manifest.sections.limitations.join('\n'));
+});
+
+test('a chain report whose tree cannot be fingerprinted at render marks each record tree unverified and says why', (t) => {
+  const fx = chainFixture();
+  attest(fx, 'AC-001', 'pass', 'Opened the dashboard; all four projects are listed');
+  const { id, bundle } = begin(fx, { drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n');
+  addImage(fx, id, 'dashboard.png');
+  ok(step(fx, id, { criteria: 'AC-001', evidence: 'e1' }));
+  t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: fx.logPath }));
+  const manifest = manifestOf(bundle);
+  const first = manifest.coverage.criteria.find((criterion) => criterion.id === 'AC-001');
+  assert.equal(first.state, 'pass');
+  assert.match(first.note, /^tree unverified; /);
+  assert.ok(manifest.sections.limitations.includes('The acceptance states could not be compared with the working tree at --report-render (git timed out), so each criterion shows its newest record, whatever tree that record was taken on.'), manifest.sections.limitations.join('\n'));
+});
+
+test('a text field holds exactly its cap, and a chain plan row longer than the criterion cap renders clipped', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const file = runFile(fx, 'cap.png', png(4, 3, 9));
+  const caps = { limits: { chars: { caption: 12 } } };
+  ok(call(fx, 'add', { report: id, kind: 'image', file }, 'x'.repeat(12), caps));
+  refused(call(fx, 'add', { report: id, kind: 'image', file }, 'x'.repeat(13), caps), /^the caption on stdin exceeds 12 characters; /);
+  const chain = chainFixture();
+  const long = Array.from({ length: 70 }, (_, index) => `word${index}`).join(' ');
+  assert.ok(long.length > er.LIMITS.chars.criterion);
+  fs.writeFileSync(path.join(chain.root, '.zensu', 'plans', `${STEM}.md`), planText([['AC-001', long], ['AC-002', 'The export downloads a CSV file']]));
+  const started = begin(chain, { drivers: 'browser', log: chain.logPath }, 'feature: The dashboard lists projects\n');
+  const clipped = `${long.slice(0, er.LIMITS.chars.criterion - 1).trimEnd()}\u2026`;
+  const binding = JSON.parse(fs.readFileSync(path.join(repositoryDirectory(chain), `${started.id}.binding.json`), 'utf8'));
+  assert.equal(binding.criteria[0].text, clipped);
+  ok(call(chain, 'render', { report: started.id, verdict: 'PARTIAL', log: chain.logPath }));
+  assert.equal(manifestOf(started.bundle).coverage.criteria[0].text, clipped);
+});
+
+test('chain mode refuses a renamed plan, a missing plan or receipt and an untrusted newest record, and ignores FR rows', () => {
+  const fx = chainFixture();
+  const planPath = path.join(fx.root, '.zensu', 'plans', `${STEM}.md`);
+  fs.writeFileSync(planPath, planText([
+    ['AC-001', 'The dashboard lists every project'],
+    ['FR-001', 'The service logs every export'],
+    ['AC-002', 'The export downloads a CSV file'],
+  ]));
+  const { id, bundle } = begin(fx, { drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n');
+  const binding = JSON.parse(fs.readFileSync(path.join(repositoryDirectory(fx), `${id}.binding.json`), 'utf8'));
+  assert.deepEqual(binding.criteria.map((criterion) => criterion.id), ['AC-001', 'AC-002'], 'an FR row is no criterion');
+  addImage(fx, id, 'dashboard.png');
+  ok(step(fx, id, { criteria: 'AC-001', evidence: 'e1' }));
+  const renamedStem = '2026-11-09-0300_build-renamed';
+  const renamedLog = path.join(fx.root, '.zensu', 'logs', `${renamedStem}.log`);
+  fs.writeFileSync(renamedLog, 'BUILD STARTED\n');
+  fs.copyFileSync(planPath, path.join(fx.root, '.zensu', 'plans', `${renamedStem}.md`));
+  const receipt = fs.readFileSync(fx.receiptPath, 'utf8');
+  fs.writeFileSync(fx.receiptPath, JSON.stringify({ ...JSON.parse(receipt), log: `.zensu/logs/${renamedStem}.log` }));
+  refused(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: renamedLog }), new RegExp(`^the chain's plan is now \\.zensu/plans/${renamedStem}\\.md, but report ${id} began on \\.zensu/plans/${STEM}\\.md; begin a new report$`));
+  fs.writeFileSync(fx.receiptPath, receipt);
+  fs.renameSync(planPath, `${planPath}.moved`);
+  refused(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: fx.logPath }), new RegExp(`^the plan \\.zensu/plans/${STEM}\\.md does not exist$`));
+  fs.renameSync(`${planPath}.moved`, planPath);
+  fs.renameSync(fx.receiptPath, `${fx.receiptPath}.moved`);
+  refused(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: fx.logPath }), /^no edit-landing receipt exists for this chain; run the Phase 6 step 5b Edit Landing Audit first/);
+  fs.renameSync(`${fx.receiptPath}.moved`, fx.receiptPath);
+  attest(fx, 'AC-001', 'pass', 'Opened the dashboard; all four projects are listed');
+  const untrusted = path.join(av.storeLocations(fx.data, SESSION).records, 'av1_9999999999999_ffffffffffff.json');
+  fs.writeFileSync(untrusted, '{');
+  refused(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: fx.logPath }), /^the acceptance states could not be read \(invalid: the newest acceptance record cannot be trusted \(av1_9999999999999_ffffffffffff: unparseable\); verify again\)$/);
+  fs.unlinkSync(untrusted);
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: fx.logPath }));
+  assert.deepEqual(manifestOf(bundle).coverage.criteria.map((criterion) => [criterion.id, criterion.state]), [['AC-001', 'pass'], ['AC-002', 'missing']]);
+});
+
+test('chain mode reports a dropped partial criterion as partial and a plan without an active criterion as empty', () => {
+  const fx = chainFixture();
+  attest(fx, 'AC-001', 'pass', 'Opened the dashboard; all four projects are listed');
+  attest(fx, 'AC-002', 'pass', 'Downloaded the CSV export');
+  attest(fx, 'AC-003', 'partial', 'Only the first page was checked');
+  fs.writeFileSync(path.join(fx.root, '.zensu', 'plans', `${STEM}.md`), planText([
+    ['AC-001', 'The dashboard lists every project'],
+    ['AC-002', 'The export downloads a CSV file'],
+    ['AC-003', '(deprecated) Projects are sorted by name'],
+  ]));
+  const { id, bundle } = begin(fx, { drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n');
+  addImage(fx, id, 'dashboard.png');
+  ok(step(fx, id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  refused(call(fx, 'render', { report: id, verdict: 'PASS', log: fx.logPath }), /verdict\.contradiction at verdict: the stated verdict PASS needs every in-scope criterion and every P0 row passed: AC-003 partial/);
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: fx.logPath }));
+  const row = manifestOf(bundle).coverage.criteria.find((criterion) => criterion.id === 'AC-003');
+  assert.equal(row.state, 'partial');
+  assert.equal(row.note, 'deprecated while its newest verdict is partial; Only the first page was checked');
+  const empty = chainFixture();
+  fs.writeFileSync(path.join(empty.root, '.zensu', 'plans', `${STEM}.md`), planText([['AC-001', '(deprecated) The legacy grid view renders']]));
+  const bare = begin(empty, { drivers: 'browser', log: empty.logPath }, 'feature: The legacy grid view is gone\n');
+  refused(call(empty, 'render', { report: bare.id, verdict: 'PASS', log: empty.logPath }), /^REPORT REFUSED — verdict\.empty at verdict/);
+  ok(call(empty, 'render', { report: bare.id, verdict: 'PARTIAL', log: empty.logPath }));
+  assert.deepEqual(manifestOf(bare.bundle).coverage.criteria, []);
+});
+
+test('stdin passes at exactly its cap and is refused one byte above it, in process and through the transport', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const signal = { report: id, kind: 'signal', source: 'console', class: 'error' };
+  const atCap = 'x'.repeat(er.LIMITS.maxStdinBytes);
+  const capped = refused(call(fx, 'add', signal, atCap), /^the signal message on stdin exceeds 500 characters$/);
+  assert.doesNotMatch(capped.errors.join('\n'), /65536 bytes/);
+  refused(call(fx, 'add', signal, `${atCap}x`), /^stdin exceeds 65536 bytes$/);
+  const directory = tempDir('stdin-edge');
+  fs.writeFileSync(path.join(directory, 'stdin'), atCap);
+  assert.equal(er.transportOptions({ ZENSU_ERP_DIR: directory }).stdinText, atCap);
+  fs.writeFileSync(path.join(directory, 'stdin'), `${atCap}x`);
+  const carried = er.transportOptions({ ZENSU_ERP_DIR: directory });
+  assert.equal(carried.stdinText.length, er.LIMITS.maxStdinBytes + 1, 'the transport carries one byte past the cap so the verb refuses it');
+  refused(call(fx, 'add', signal, carried.stdinText), /^stdin exceeds 65536 bytes$/);
+});
+
+test('the report-side secret rules refuse authorization values, JWTs, URL credentials, session cookies and API keys', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  const shapes = [
+    ['Authorization', ': ', 'Basic ', 'dXNlcjpwYXNzd29yZA'],
+    ['Bearer ', 'k3yValue', '1234', 'abcdefgh'],
+    ['eyJ', 'hbGciOiJIUzI1NiJ9', '.', 'eyJzdWIiOiIxIn0', '.', 'c2lnbmF0dXJlMDA'],
+    ['https://', 'deploy', ':', 'hunter2pass', '@', 'git.example.com/repo'],
+    ['Cookie', ': ', 'session', '=', 'abcdef0123456789xyz'],
+    ['X-Api-Key', ': ', 'k_live_', '0123456789'],
+    ['Authorization', ': ', 'k3yValue', '1234', 'abcdefgh'],
+    ['Authorization', ': ', 'Custom ', 'Zx9Lm3Np', '8Rt5Vw1'],
+    ['"authorization"', ': ', '"', 'Token ', 'Zx9Lm3Np', '8Rt5Vw1', '"'],
+    ['Cookie', ': ', 'theme=dark; ', 'session', '=', 'abcdef0123456789xyz'],
+    ['"cookie"', ': ', '"', 'sid', '=', 'abcdef0123456789xyz', '"'],
+    ['"x-api-key"', ': ', '"', 'k_live_', '0123456789', '"'],
+  ].map((parts) => parts.join(''));
+  const signal = { report: id, kind: 'signal', source: 'network', class: 'request' };
+  for (const shape of shapes) {
+    refused(call(fx, 'add', signal, `The request sent ${shape} upstream`), /^the signal message on stdin matches a secret pattern; describe it without the value$/);
+    refused(call(fx, 'add', { report: id, kind: 'text', file: runFile(fx, 'headers.txt', `GET /api\n${shape}\n`) }, 'The request headers'), /^the text file matches a secret pattern; capture it without the value$/);
+  }
+  for (const benign of ['The Authorization header was missing', 'Bearer tokens expire after an hour', 'Opened https://example.com/login', 'cookie: theme=dark', 'The x-api-key header is required', 'authorization: required']) {
+    ok(call(fx, 'add', signal, benign));
+  }
+});
+
+const PLACEHOLDER_SHAPES = ['Authorization: Bearer <access-token>', 'X-Api-Key: YOUR_API_KEY', 'https://<user>:<password>@git.example.com', 'Cookie: session=<session-id-value>'];
+
+test('placeholder spellings of the report secret shapes pass as documentation, in a signal message and in a chain plan row', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  for (const shape of PLACEHOLDER_SHAPES) ok(call(fx, 'add', { report: id, kind: 'signal', source: 'network', class: 'request' }, `The docs show ${shape}`));
+  const chained = chainFixture();
+  fs.writeFileSync(path.join(chained.root, '.zensu', 'plans', `${STEM}.md`), planText(PLACEHOLDER_SHAPES.map((shape, index) => [`AC-00${index + 1}`, `A request with ${shape} is answered 200`])));
+  const started = begin(chained, { drivers: 'browser', log: chained.logPath }, 'feature: The API accepts documented headers\n');
+  ok(call(chained, 'render', { report: started.id, verdict: 'PARTIAL', log: chained.logPath }));
+  assert.deepEqual(manifestOf(started.bundle).coverage.criteria.map((criterion) => criterion.text), PLACEHOLDER_SHAPES.map((shape) => `A request with ${shape} is answered 200`));
+});
+
+test('a text file whose secret label and value sit on two lines is refused', () => {
+  const fx = fixture();
+  const { id } = begin(fx);
+  refused(call(fx, 'add', { report: id, kind: 'text', file: runFile(fx, 'env.txt', `GET /api\n${SPLIT_KEY}:\n${SPLIT_VALUE}\n`) }, 'The environment dump'), /^the text file matches a secret pattern; capture it without the value$/);
+});
+
+test('a request path or consent route that only resembles a local path is recorded, one naming the project root or home is refused, and a text keeps neither', () => {
+  const fx = fixture();
+  const { id, bundle } = begin(fx);
+  for (const route of ['/home', '/root/admin', '/Users/42/edit']) ok(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: route, status: '200' }));
+  ok(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: '/root/settings', status: '200' }, '', { home: '/root' }));
+  for (const route of [`/@fs${fx.root}/src/App.tsx`, `${fx.home}/notes`]) {
+    refused(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: route, status: '200' }), /^--path names a local path; describe it without the value$/);
+  }
+  ok(call(fx, 'add', { report: id, kind: 'signal', source: 'network', class: 'request' }, `GET http://localhost:5173/@fs${fx.root}/src/App.tsx failed`));
+  ok(call(fx, 'add', { report: id, kind: 'signal', source: 'console', class: 'note' }, `Captured from ${fx.root}.`));
+  ok(call(fx, 'add', { report: id, kind: 'signal', source: 'console', class: 'note' }, `Captured from ${fx.root}.`, { home: path.dirname(fx.root) }));
+  ok(call(fx, 'add', { report: id, kind: 'signal', source: 'console', class: 'note' }, `Copied to ${fx.root}.bak/x`));
+  ok(call(fx, 'add', { report: id, kind: 'signal', source: 'console', class: 'note' }, `Captured from ${fx.root}...`));
+  ok(call(fx, 'add', { report: id, kind: 'signal', source: 'console', class: 'note' }, `Captured from ${fx.root}...`, { home: path.dirname(fx.root) }));
+  refused(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: `/@fs${fx.root}.`, status: '200' }), /^--path names a local path; describe it without the value$/);
+  refused(call(fx, 'render', { report: id, verdict: 'PARTIAL' }, `consent: http://localhost:3000 /@fs${fx.home}/x asked\n`), /^the route of a consent line names a local path; describe it without the value$/);
+  ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }, 'consent: http://localhost:3000 /home asked\nconsent: http://localhost:3000 /root/admin asked\n'));
+  const manifest = manifestOf(bundle);
+  assert.deepEqual(['e1', 'e2', 'e3', 'e4'].map((item) => manifest.evidence[item].path), ['/home', '/root/admin', '/Users/42/edit', '/root/settings']);
+  assert.equal(manifest.evidence.e5.message, 'GET http://localhost:5173/@fs<project>/src/App.tsx failed');
+  assert.deepEqual([manifest.evidence.e6.message, manifest.evidence.e7.message], ['Captured from <project>.', 'Captured from <project>.']);
+  assert.ok(!manifest.evidence.e8.message.includes('<project>'), manifest.evidence.e8.message);
+  assert.deepEqual([manifest.evidence.e9.message, manifest.evidence.e10.message], ['Captured from <project>...', 'Captured from <project>...']);
+  assert.deepEqual(manifest.sections.consent.map((entry) => entry.route), ['/home', '/root/admin']);
+});
+
+test('the manifest and the binding are read schema first and a schema this reader does not know is named', () => {
+  const faults = er.validateManifest({ schema: 'zensu-evidence-report/v2', extra: true, steps: 'none' });
+  assert.deepEqual(faults.map((fault) => [fault.code, fault.at]), [['schema.version', 'schema']]);
+  assert.equal(faults[0].message, 'the manifest names the schema zensu-evidence-report/v2, which this reader does not know');
+  assert.equal(er.validateManifest({ schema: 'two words' })[0].message, `the manifest names no schema this reader knows; schema must be ${er.SCHEMA}`);
+  const fx = fixture();
+  const { id } = begin(fx);
+  const bindingPath = path.join(repositoryDirectory(fx), `${id}.binding.json`);
+  const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf8'));
+  fs.writeFileSync(bindingPath, JSON.stringify({ ...binding, schema: 'zensu-evidence-report-binding/v2', future: true }));
+  assert.equal(ok(call(fx, 'list')).reports[0].state, 'schema zensu-evidence-report-binding/v2');
+  refused(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: '/', status: '200' }), /^the binding of vr1_[0-9_a-f]+ is invalid \(the binding names the schema zensu-evidence-report-binding\/v2, which this reader does not know\)$/, 2);
+  const drafted = begin(fx);
+  const draftPath = path.join(repositoryDirectory(fx), `${drafted.id}.binding.json`);
+  const draft = JSON.parse(fs.readFileSync(draftPath, 'utf8'));
+  const zensu = { feature: '0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b', ref: 'AC-001' };
+  draft.criteria[0].zensu = zensu;
+  draft.criteria[1].zensu = { feature: 'not-a-feature', ref: 'AC-002' };
+  fs.writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`);
+  refused(call(fx, 'render', { report: drafted.id, verdict: 'PARTIAL' }), /is invalid \(criteria\[1\]\.zensu\.feature: criteria\[1\]\.zensu\.feature must be a feature id\)$/, 2);
+  draft.criteria[1].zensu = null;
+  fs.writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`);
+  ok(call(fx, 'render', { report: drafted.id, verdict: 'PARTIAL' }));
+  assert.deepEqual(manifestOf(drafted.bundle).coverage.criteria.map((criterion) => criterion.zensu), [zensu, null]);
 });

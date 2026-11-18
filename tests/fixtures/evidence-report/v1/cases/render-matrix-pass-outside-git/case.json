@@ -1,0 +1,10 @@
+{
+  "description": "Matrix mode outside git, where no tree, head, branch or repository can be measured; verdict PASS.",
+  "inScope": [
+    "AC-001",
+    "AC-002"
+  ],
+  "expect": {
+    "rendering": "sha256:8fd36ce7f3708fb9c59f7830e31158441f9661187d443589227b503e2781bfee"
+  }
+}

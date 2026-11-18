@@ -1,0 +1,12 @@
+{
+  "description": "Steps given as an object instead of an array.",
+  "inScope": [],
+  "expect": {
+    "refusal": [
+      {
+        "code": "schema.type",
+        "at": "steps"
+      }
+    ]
+  }
+}

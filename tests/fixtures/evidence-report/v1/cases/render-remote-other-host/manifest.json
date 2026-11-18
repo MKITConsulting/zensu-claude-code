@@ -21,6 +21,7 @@
     "branch": null,
     "head": null,
     "tree": null,
+    "begin_tree": null,
     "dirty": null,
     "origin": "https://preview.example.com"
   },

@@ -286,23 +286,53 @@ else
   show
 fi
 
+normalized() {
+  printf '%s' "$1" | node -e 'const er = require(process.argv[1]); const c = er.normalizeConfig(JSON.parse(require("fs").readFileSync(0, "utf8"))); process.stdout.write(JSON.stringify({ enabled: c.enabled, dir: c.dir, keep: c.keep, maxBytes: c.maxBytes, disclosures: c.disclosures.length }))' "$PLUGIN_DIR/hooks/lib/evidence-report-v1.js"
+}
+
 printf '{"evidence":{"fullSuiteGate":"advisory","report":{"enabled":false,"dir":"/srv/reports","keep":3,"maxBytes":10,"other":1}}}\n' > "$WORK/reader.json"
 READ_ALL="$(ZENSU_CONFIG="$WORK/reader.json" bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_evidence_report_config_json' _ "$PLUGIN_DIR")"
 READ_NONE="$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_evidence_report_config_json' _ "$PLUGIN_DIR")"
-if [ "$READ_ALL" = '{"enabled":false,"dir":"/srv/reports","keep":3,"maxBytes":10}' ] && [ "$READ_NONE" = '{}' ]; then
-  check "R17 the config reader hands the four evidence.report keys to the module unjudged" PASS
+if [ "$READ_ALL" = '{"user":{"enabled":false,"dir":"/srv/reports","keep":3,"maxBytes":10,"other":1},"project":{}}' ] && [ "$READ_NONE" = '{"user":{},"project":{}}' ]; then
+  check "R17 the config reader hands both evidence.report layers to the module unjudged" PASS
 else
-  check "R17 the config reader hands the four evidence.report keys to the module unjudged ($READ_ALL / $READ_NONE)" FAIL
+  check "R17 the config reader hands both evidence.report layers to the module unjudged ($READ_ALL / $READ_NONE)" FAIL
 fi
 
 mkdir -p "$WORK/layers/home/.zensu" "$WORK/layers/project/.zensu"
 printf '{"evidence":{"report":{"maxBytes":5000}}}\n' > "$WORK/layers/home/.zensu/config.json"
 printf '{"evidence":{"report":{"keep":2,"maxBytes":1}}}\n' > "$WORK/layers/project/.zensu/config.json"
 READ_LAYERS="$(env -u ZENSU_CONFIG HOME="$WORK/layers/home" CLAUDE_PROJECT_DIR="$WORK/layers/project" bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_evidence_report_config_json' _ "$PLUGIN_DIR")"
-if [ "$READ_LAYERS" = '{"keep":2,"maxBytes":5000,"maxBytesFromProject":true}' ]; then
-  check "R17a the store-wide maxBytes comes from the user layers only, and a project value is flagged" PASS
+if [ "$READ_LAYERS" = '{"user":{"maxBytes":5000},"project":{"keep":2,"maxBytes":1}}' ] \
+  && [ "$(normalized "$READ_LAYERS")" = '{"enabled":true,"dir":null,"keep":2,"maxBytes":5000,"disclosures":1}' ]; then
+  check "R17a the store-wide maxBytes comes from the user layers only, and the module discloses the project value" PASS
 else
-  check "R17a the store-wide maxBytes comes from the user layers only, and a project value is flagged ($READ_LAYERS)" FAIL
+  check "R17a the store-wide maxBytes comes from the user layers only, and the module discloses the project value ($READ_LAYERS)" FAIL
+fi
+
+read_layers() {
+  env -u ZENSU_CONFIG HOME="$1" CLAUDE_PROJECT_DIR="$2" bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_evidence_report_config_json' _ "$PLUGIN_DIR"
+}
+mkdir -p "$WORK/layers2/home" "$WORK/layers2/project/.zensu"
+printf '{"evidence":{"report":{"maxBytes":7}}}\n' > "$WORK/layers2/project/.zensu/config.json"
+READ_PROJECT_ONLY="$(read_layers "$WORK/layers2/home" "$WORK/layers2/project")"
+if [ "$(normalized "$READ_PROJECT_ONLY")" = '{"enabled":true,"dir":null,"keep":30,"maxBytes":2147483648,"disclosures":1}' ]; then
+  check "R17b a maxBytes set in the project configuration alone is disclosed and never used" PASS
+else
+  check "R17b a maxBytes set in the project configuration alone is disclosed and never used ($READ_PROJECT_ONLY)" FAIL
+fi
+
+mkdir -p "$WORK/layers3/home/.zensu" "$WORK/layers3/project/.zensu"
+printf '{"evidence":{"report":{"enabled":false,"dir":"/srv/user-reports"}}}\n' > "$WORK/layers3/home/.zensu/config.json"
+printf '{"evidence":{"report":{"enabled":true,"dir":"/srv/project-reports"}}}\n' > "$WORK/layers3/project/.zensu/config.json"
+READ_OVERRIDE="$(read_layers "$WORK/layers3/home" "$WORK/layers3/project")"
+printf '{"evidence":{"report":{"enabled":false,"dir":"/srv/project-reports"}}}\n' > "$WORK/layers2/project/.zensu/config.json"
+READ_PROJECT_DIR="$(read_layers "$WORK/layers2/home" "$WORK/layers2/project")"
+if [ "$(normalized "$READ_OVERRIDE")" = '{"enabled":false,"dir":"/srv/user-reports","keep":30,"maxBytes":2147483648,"disclosures":2}' ] \
+  && [ "$(normalized "$READ_PROJECT_DIR")" = '{"enabled":false,"dir":null,"keep":30,"maxBytes":2147483648,"disclosures":1}' ]; then
+  check "R17c dir comes from the user layers only, and a project configuration switches reports off but never on" PASS
+else
+  check "R17c dir comes from the user layers only, and a project configuration switches reports off but never on ($READ_OVERRIDE / $READ_PROJECT_DIR)" FAIL
 fi
 
 STEM="2026-11-09-0100_build-report-fixture"
@@ -356,6 +386,25 @@ if [ "$RC" -eq 0 ] && node -e '
   check "R20 --report-render --log folds the chain's acceptance states into the coverage" PASS
 else
   check "R20 --report-render --log folds the chain's acceptance states into the coverage (rc=$RC)" FAIL
+  show
+fi
+
+bash "$LOG" --report-begin --run-dir "$RUN" --drivers api >"$OUT" 2>"$ERRF" <<'EOF'
+feature: The stdin cap of the transport
+EOF
+EDGE_ID="$(sed -n 's/^zensu evidence report: begun \(vr1_[0-9]*_[0-9a-f]*\) .*/\1/p' "$OUT")"
+printf '%*s' 65536 '' | tr ' ' x > "$WORK/stdin-at-cap"
+printf '%*s' 65537 '' | tr ' ' x > "$WORK/stdin-over-cap"
+bash "$LOG" --report-add --report "$EDGE_ID" --kind signal --source console --class error <"$WORK/stdin-at-cap" >"$OUT" 2>"$ERRF"
+RC_AT=$?
+AT_CAP=FAIL
+if grep -q 'the signal message on stdin exceeds 500 characters$' "$ERRF" && ! grep -q '65536 bytes' "$ERRF"; then AT_CAP=PASS; fi
+bash "$LOG" --report-add --report "$EDGE_ID" --kind signal --source console --class error <"$WORK/stdin-over-cap" >"$OUT" 2>"$ERRF"
+RC_OVER=$?
+if [ -n "$EDGE_ID" ] && [ "$RC_AT" -eq 1 ] && [ "$AT_CAP" = PASS ] && [ "$RC_OVER" -eq 1 ] && grep -q ': stdin exceeds 65536 bytes$' "$ERRF"; then
+  check "R21 stdin of exactly 65536 bytes reaches the verb and 65537 bytes is refused as over the cap" PASS
+else
+  check "R21 stdin of exactly 65536 bytes reaches the verb and 65537 bytes is refused as over the cap (rc=$RC_AT/$RC_OVER, at cap $AT_CAP)" FAIL
   show
 fi
 
