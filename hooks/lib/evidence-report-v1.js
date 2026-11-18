@@ -61,6 +61,9 @@ const COOKIE_HEADER_RE = /\b(?:set-)?cookie["']?\s*:\s*["']?([^\r\n"']*)/gi;
 const COOKIE_PAIR_RE = /^\s*[^\s=;:"']+=([^\s;"']*)/;
 const COOKIE_VALUE_MIN = 16;
 const NAME_CHARACTER_RE = /[A-Za-z0-9_.-]/;
+const OUTSIDE_GIT = 'not a git work tree';
+const TREE_FAILURE_RE = /^(?:work tree: )?(more than \d+ untracked files|untracked files exceed \d+ MiB|git timed out|not a git work tree)$/;
+const TREE_CAUSE_RE = /^(?:more than \d+ untracked files|untracked files exceed \d+ MiB|git timed out|not a git work tree|git failed)$/;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PNG_IMAGE_CHUNKS = Object.freeze(['IHDR', 'PLTE', 'IDAT', 'IEND', 'tRNS', 'cHRM', 'gAMA', 'iCCP', 'sBIT', 'sRGB', 'cICP', 'mDCV', 'cLLI', 'bKGD', 'hIST', 'pHYs', 'sPLT']);
 const PNG_ANIMATION_CHUNKS = Object.freeze(['acTL', 'fcTL', 'fdAT']);
@@ -104,7 +107,7 @@ const FILE_KEYS = Object.freeze(['bytes', 'height', 'name', 'source_sha256', 'ty
 const VIEWPORT_KEYS = Object.freeze(['height', 'scale', 'width']);
 const SECTIONS_KEYS = Object.freeze(['consent', 'console', 'limitations', 'network', 'resources']);
 const CONSENT_KEYS = Object.freeze(['decided_by', 'origin', 'route']);
-const BINDING_KEYS = Object.freeze(['created_at', 'criteria', 'evidence', 'files', 'id', 'plugin_version', 'project_root', 'rendered_at', 'run', 'run_dir', 'schema', 'session_key', 'steps', 'target']);
+const BINDING_KEYS = Object.freeze(['begin_failure', 'created_at', 'criteria', 'evidence', 'files', 'id', 'plugin_version', 'project_root', 'rendered_at', 'run', 'run_dir', 'schema', 'session_key', 'steps', 'target']);
 const DRAFT_CRITERION_KEYS = Object.freeze(['id', 'text', 'zensu']);
 
 const VERB_ARGUMENTS = Object.freeze({
@@ -1096,7 +1099,24 @@ function targetOutsideGit(target) {
   return ['repository', 'branch', 'head', 'tree', 'begin_tree', 'dirty'].every((key) => target[key] === null);
 }
 
-function verdictFaults(manifest) {
+function treeFailure(reason) {
+  const known = TREE_FAILURE_RE.exec(isString(reason) ? reason : '');
+  return known ? known[1] : 'git failed';
+}
+
+function treeCheck(target, context = {}) {
+  const atBegin = isString(context.beginFailure) ? context.beginFailure : null;
+  const atRender = isString(context.treeFailure) ? context.treeFailure : null;
+  if (target.begin_tree !== null) {
+    if (target.tree === null) return { state: 'render-unmeasured', atBegin: null, atRender };
+    return { state: target.tree === target.begin_tree ? 'unchanged' : 'changed', atBegin: null, atRender: null };
+  }
+  const inGit = !targetOutsideGit(target) || context.beganOutsideGit === false;
+  if (!inGit) return { state: 'outside', atBegin, atRender: null };
+  return { state: target.tree === null ? 'unmeasured' : 'begin-unmeasured', atBegin, atRender };
+}
+
+function verdictFaults(manifest, context = {}) {
   const faults = [];
   const criteria = manifest.coverage.criteria;
   const failedCriteria = criteria.filter((criterion) => criterion.state === 'fail').map((criterion) => criterion.id);
@@ -1120,13 +1140,15 @@ function verdictFaults(manifest) {
   }
   const { target } = manifest;
   if (manifest.coverage.source !== 'matrix' || manifest.run.mode !== 'local') return faults;
-  if (target.begin_tree !== null && target.tree === null) {
-    addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded on a tree that could not be checked at --report-render (${target.begin_tree.slice(0, 12)} at --report-begin, not fingerprinted at --report-render)`, 'state PARTIAL, or render again once the working tree can be fingerprinted');
-  } else if (target.begin_tree !== null && target.begin_tree !== target.tree) {
+  const check = treeCheck(target, context);
+  if (check.state === 'render-unmeasured') {
+    addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded on a tree that could not be checked at --report-render (${target.begin_tree.slice(0, 12)} at --report-begin, not fingerprinted at --report-render${check.atRender ? `: ${check.atRender}` : ''})`, 'state PARTIAL, or render again once the working tree can be fingerprinted');
+  } else if (check.state === 'changed') {
     addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded while the working tree changed (${target.begin_tree.slice(0, 12)} at --report-begin, ${target.tree.slice(0, 12)} at --report-render)`, 'state PARTIAL, or begin a new report and run the matrix again on the current tree');
-  } else if (target.begin_tree === null && !targetOutsideGit(target)) {
-    const atRender = target.tree === null ? ', and the tree at --report-render could not be fingerprinted either' : `, so the tree ${target.tree.slice(0, 12)} at --report-render cannot be compared with it`;
-    addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin${atRender}`, 'state PARTIAL, or begin a new report once the working tree can be fingerprinted');
+  } else if (check.state === 'begin-unmeasured' || check.state === 'unmeasured') {
+    const atBegin = check.atBegin ? ` (${check.atBegin})` : '';
+    const atRender = check.state === 'unmeasured' ? `, and the tree at --report-render could not be fingerprinted either${check.atRender ? ` (${check.atRender})` : ''}` : `, so the tree ${target.tree.slice(0, 12)} at --report-render cannot be compared with it`;
+    addFault(faults, 'verdict.tree-changed', 'verdict', `the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin${atBegin}${atRender}`, 'state PARTIAL, or begin a new report once the working tree can be fingerprinted');
   }
   return faults;
 }
@@ -1209,7 +1231,7 @@ function integrityFaults(manifest, readFile, options = {}) {
       addFault(faults, 'criterion.no-image', `coverage.criteria[${index}]`, `${criterion.id} is recorded pass through ${criterion.driver}, but no step that names it links an image`, `link an image already in the report to a step that names ${criterion.id}, or record ${criterion.id} partial`);
     }
   });
-  faults.push(...verdictFaults(manifest));
+  faults.push(...verdictFaults(manifest, options.verdictContext));
   return faults;
 }
 
@@ -1627,7 +1649,8 @@ function measureTarget(options, scratch, mode, origin, chained) {
   const where = workTree || options.projectRoot;
   const target = { repository: null, branch: null, head: null, tree: null, begin_tree: null, dirty: null, origin: mode === 'remote' ? origin : null };
   const inside = evidenceRun.git(where, ['rev-parse', '--is-inside-work-tree']);
-  if (!inside.ok || inside.stdout.trim() !== 'true') return target;
+  if (!inside.ok) return { target, failure: evidenceRun.outsideWorkTree(inside) ? OUTSIDE_GIT : treeFailure(inside.reason) };
+  if (inside.stdout.trim() !== 'true') return { target, failure: OUTSIDE_GIT };
   const head = evidenceRun.git(where, ['rev-parse', '--verify', '--quiet', 'HEAD']);
   if (head.ok && COMMIT_RE.test(head.stdout.trim())) target.head = head.stdout.trim();
   const branch = evidenceRun.git(where, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
@@ -1640,7 +1663,8 @@ function measureTarget(options, scratch, mode, origin, chained) {
   if (tree.tree && COMMIT_RE.test(tree.tree)) target.tree = tree.tree;
   const changes = acceptance.hasChanges(where);
   if (changes.known) target.dirty = changes.changed;
-  return target;
+  const failure = target.tree === null ? treeFailure(tree.reason) : null;
+  return { target, failure: failure === OUTSIDE_GIT ? 'git failed' : failure };
 }
 
 function readPluginVersion(manifestPath) {
@@ -1699,8 +1723,10 @@ function validateBinding(binding, expected, limits) {
   if (!isString(binding.created_at) || !ISO_RE.test(binding.created_at)) return 'malformed creation time';
   if (!(binding.rendered_at === null || (isString(binding.rendered_at) && ISO_RE.test(binding.rendered_at)))) return 'malformed render time';
   if (!(binding.plugin_version === null || (isString(binding.plugin_version) && VERSION_RE.test(binding.plugin_version)))) return 'malformed plugin version';
+  if (!(binding.begin_failure === null || (isString(binding.begin_failure) && TREE_CAUSE_RE.test(binding.begin_failure)))) return 'malformed begin failure';
   validateRun(binding.run, faults, limits);
   validateTarget(binding.target, binding.run, faults);
+  if (faults.length === 0 && (binding.begin_failure === null) !== (binding.target.begin_tree !== null)) return 'the begin failure contradicts the begin tree';
   validateFiles(binding.files, faults, limits);
   validateEvidence(binding.evidence, faults, limits);
   validateSteps(binding.steps, faults, limits);
@@ -1836,7 +1862,7 @@ function chainOptions(options) {
   };
 }
 
-function checkRunDirectory(given, projectRoot, root) {
+function checkRunDirectory(given, projectRoot, root, chainRoot = null) {
   if (!isString(given) || !path.isAbsolute(given)) usage('--run-dir must name the run directory by an absolute path');
   const runDirectory = nativeSpelling(given);
   if (path.resolve(runDirectory) !== runDirectory) usage('--run-dir must be a normalized path without . or .. segments');
@@ -1862,18 +1888,46 @@ function checkRunDirectory(given, projectRoot, root) {
   }
   const own = evidenceRun.workTreeTop(real);
   if (own.reason) unavailable(`whether git ignores the run directory could not be determined (${own.reason})`);
-  if (own.top !== null) requireIgnored(own.top, real);
+  if (own.top !== null) {
+    const projectReal = fs.realpathSync.native(projectRoot);
+    const trees = [{ root: projectReal, top: top.top }];
+    const chainReal = realDirectory(chainRoot);
+    if (chainReal !== null && !samePath(chainReal, projectReal)) trees.push({ root: chainReal, top: chainReal });
+    requireIgnored(own.top, real, projectReal, trees.some((tree) => tree.top !== null && samePath(tree.top, own.top) && fingerprinted(tree.root, real)));
+  }
   return real;
 }
 
-function requireIgnored(tree, real) {
+function realDirectory(directory) {
+  if (!isString(directory) || directory === '') return null;
+  try {
+    return fs.realpathSync.native(directory);
+  } catch {
+    return null;
+  }
+}
+
+function fingerprinted(treeRoot, real) {
+  const excluded = path.join(treeRoot, '.zensu');
+  return (samePath(real, treeRoot) || isInside(treeRoot, real)) && !samePath(real, excluded) && !isInside(excluded, real);
+}
+
+function ignoreTarget(tree, real, projectRoot, relative) {
+  const spelled = `${relative.join('/')}/`;
+  if (relative.length < 2 || !isInside(projectRoot, path.dirname(real))) return spelled;
+  const parent = `${relative.slice(0, -1).join('/')}/`;
+  const tracked = evidenceRun.git(tree, ['--literal-pathspecs', 'ls-files', '-z', '--', parent]);
+  return tracked.ok && tracked.stdout === '' ? parent : spelled;
+}
+
+function requireIgnored(tree, real, projectRoot, moves) {
   const relative = path.relative(tree, real).split(path.sep);
   const spelled = `${relative.join('/')}/`;
   const ignored = evidenceRun.git(tree, ['check-ignore', '-q', '--', spelled]);
   if (ignored.status === 1) {
-    const parent = relative.length > 1 ? `${relative.slice(0, -1).join('/')}/` : spelled;
-    const moved = relative[0] === '.zensu' ? '' : ' and every capture would move the tree fingerprint';
-    refuse(`git does not ignore the run directory ${real}, so its captures could be committed${moved}; have git ignore ${parent}, for example with the line ${parent} in the repository's .gitignore`);
+    const named = ignoreTarget(tree, real, projectRoot, relative);
+    const moved = moves ? ' and every capture would move the tree fingerprint' : '';
+    refuse(`git does not ignore the run directory ${real}, so its captures could be committed${moved}; have git ignore ${named}, for example with the line ${named} in the repository's .gitignore`);
   }
   if (!ignored.ok) unavailable(`whether git ignores the run directory could not be determined (${ignored.reason})`);
 }
@@ -1955,17 +2009,22 @@ function begin(options) {
   const root = storeRoot(options, config, true);
   const placement = storePlacement(root);
   if (!placement.ok) refuse(placement.reason);
-  const runDirectory = checkRunDirectory(args.get('run-dir'), options.projectRoot, config.dir ? path.dirname(root) : root);
+  const chainRoot = chain !== null && options.chain && isString(options.chain.workTree) && options.chain.workTree !== ''
+    ? evidenceRun.fingerprintRoot(options.chain.workTree, options.projectRoot, evidenceRun.LIMITS)
+    : null;
+  const runDirectory = checkRunDirectory(args.get('run-dir'), options.projectRoot, config.dir ? path.dirname(root) : root, chainRoot);
   const now = clockValue(options);
   const id = newReportId(now);
   const key = repositoryKey(options.projectRoot);
   const repository = ensureDirectory(root, key, 'the repository store');
   const scratch = ensureDirectory(root, 'scratch', 'the report scratch directory');
-  const target = measureTarget(options, scratch, mode, origin, chain !== null);
+  const measured = measureTarget(options, scratch, mode, origin, chain !== null);
+  const { target } = measured;
   target.begin_tree = target.tree;
   const binding = {
     schema: BINDING_SCHEMA,
     id,
+    begin_failure: measured.failure,
     session_key: options.sessionKey,
     project_root: options.projectRoot,
     run_dir: runDirectory,
@@ -1999,6 +2058,9 @@ function begin(options) {
   const lines = [...config.disclosures, ...disclosures];
   lines.push(`zensu evidence report: begun ${id} | ${mode} | drivers ${orderedDrivers.join(', ')} | ${chain ? `chain ${chain.stem}` : `criteria ${criteria.length === 0 ? 'none' : criteria.map((criterion) => criterion.id).join(', ')}`}`);
   lines.push(`zensu evidence report: bundle ${where.bundle}`);
+  if (chain === null && mode === 'local' && measured.failure !== null && measured.failure !== OUTSIDE_GIT) {
+    lines.push(`zensu evidence report: the working tree could not be fingerprinted at --report-begin (${measured.failure}), so --report-render will refuse a PASS; make the tree fingerprintable and begin again`);
+  }
   if (swept.removed.length > 0) {
     lines.push(`zensu evidence report: retention removed ${swept.removed.length} older report(s) (keep ${config.keep} per repository, at most ${config.maxBytes} bytes in total)`);
   }
@@ -2312,7 +2374,7 @@ function chainCoverage(options, binding, args, ctx, limits) {
   const inScope = rows.filter((row) => row.criterion.state === 'active').map((row) => row.criterion.id);
   const disclosures = [...(resolved.disclosures || [])];
   if (assessed.outcome === 'evaluated' && assessed.currentTree && assessed.currentTree.tree === null) {
-    disclosures.push(`The acceptance states could not be compared with the working tree at --report-render (${assessed.currentTree.reason || 'no tree id'}), so each criterion shows its newest record, whatever tree that record was taken on.`);
+    disclosures.push(`The acceptance states could not be compared with the working tree at --report-render (${treeFailure(assessed.currentTree.reason)}), so each criterion shows its newest record, whatever tree that record was taken on.`);
   }
   return { criteria, inScope, disclosures };
 }
@@ -2380,15 +2442,21 @@ function render(options) {
       if (!sections.limitations.includes(cleaned.value)) sections.limitations.push(cleaned.value);
     }
     const scratch = ensureDirectory(where.root, 'scratch', 'the report scratch directory');
-    const target = measureTarget(options, scratch, binding.run.mode, binding.target.origin, binding.run.chain !== null);
+    const measured = measureTarget(options, scratch, binding.run.mode, binding.target.origin, binding.run.chain !== null);
+    const { target } = measured;
     target.begin_tree = binding.target.begin_tree;
+    const verdictContext = { treeFailure: measured.failure, beginFailure: binding.begin_failure, beganOutsideGit: binding.begin_failure === OUTSIDE_GIT && targetOutsideGit(binding.target) };
+    const check = treeCheck(target, verdictContext);
     let treeNote = null;
-    if (target.begin_tree !== null && target.tree === null) {
-      treeNote = `The working tree could not be fingerprinted at --report-render, so a change since ${target.begin_tree.slice(0, 12)} at --report-begin cannot be ruled out.`;
-    } else if (target.begin_tree !== null && target.tree !== target.begin_tree) {
+    if (check.state === 'render-unmeasured') {
+      treeNote = `The working tree could not be fingerprinted at --report-render (${check.atRender}), so a change since ${target.begin_tree.slice(0, 12)} at --report-begin cannot be ruled out.`;
+    } else if (check.state === 'changed') {
       treeNote = `The working tree changed during the run: ${target.begin_tree.slice(0, 12)} at --report-begin, ${target.tree.slice(0, 12)} at --report-render.`;
     } else if (target.begin_tree === null && binding.run.mode === 'local') {
-      treeNote = 'The working tree was not fingerprinted at --report-begin, so a change during the run cannot be ruled out.';
+      const atBegin = check.atBegin ? ` (${check.atBegin})` : '';
+      treeNote = check.state === 'unmeasured'
+        ? `The working tree was not fingerprinted at --report-begin${atBegin}, and could not be fingerprinted at --report-render either (${check.atRender}), so a change during the run cannot be ruled out.`
+        : `The working tree was not fingerprinted at --report-begin${atBegin}, so a change during the run cannot be ruled out.`;
     }
     if (treeNote !== null && !sections.limitations.includes(treeNote)) sections.limitations.push(treeNote);
     const now = clockValue(options);
@@ -2400,7 +2468,7 @@ function render(options) {
       return { code: 1, errors: faultLines([{ code: 'manifest.too-large', at: '', message: `the manifest holds ${Buffer.byteLength(serialized)} bytes, above the cap of ${limits.maxManifestBytes}${cause}`, remedy: changed.length > 0 ? 'begin a new report on the current plan' : 'split the evidence across two reports' }]) };
     }
     const readFile = bundleReader(where.bundle, limits);
-    const faults = checkManifest(manifest, readFile, { inScope: coverage.inScope, limits: options.limits });
+    const faults = checkManifest(manifest, readFile, { inScope: coverage.inScope, limits: options.limits, verdictContext });
     if (faults.length > 0) return { code: 1, errors: faultLines(faults) };
     const html = renderHtml(manifest, readFile, { mode: 'bundle' });
     writeAtomic(where.bundle, 'manifest.json', serialized);

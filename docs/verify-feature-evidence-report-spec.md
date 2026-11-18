@@ -147,8 +147,9 @@ location is one line above it.
 Every verb that takes prose reads it from stdin through a quoted heredoc, as
 `--acceptance-record` does. That prose never names the browser CLI together with a
 `zensu-verify-` session, because the browser consent gate refuses a command whose text names
-both. The binding data, the session key and the physical run directory, lives in a sidecar file
-beside the bundle and is never published. Every write is atomic, a temporary file plus a rename,
+both. The binding data, the session key, the physical run directory and the cause of a tree
+`--report-begin` could not fingerprint, lives in a sidecar file beside the bundle and is never
+published. Every write is atomic, a temporary file plus a rename,
 and refuses symlinks, like the acceptance store. A report whose session ended before Phase 5
 stays in the store, counts toward retention and is listed as `unrendered`.
 
@@ -269,8 +270,12 @@ Field rules:
   `target.origin` is set in remote mode only and holds scheme, host and port.
 - `target.tree` is the tree measured at render and `target.begin_tree` the one measured at
   `--report-begin`; either is `null` where no tree can be fingerprinted, such as outside git. The
-  page shows the begin tree only when the two differ, and a changed or unmeasured begin tree
-  becomes a limitation line.
+  page shows the begin tree only when the two differ, and a changed tree or one that could not be
+  fingerprinted becomes a limitation line. A tree that could not be fingerprinted is named with its
+  cause from a fixed vocabulary (an untracked-file limit, `git timed out`, `not a git work tree`,
+  otherwise `git failed`), never with git output: the begin cause, which the binding keeps, and
+  the render cause unless neither measurement found the target inside git. In chain mode the same
+  vocabulary names the tree the acceptance states could not be compared with.
 - `coverage.source` is `acceptance-records` in chain mode and `matrix` otherwise. `state` is one
   of `pass`, `fail`, `partial`, `missing`, `stale` and `deprecated`; `record` is `null` in matrix
   mode.
@@ -324,7 +329,10 @@ failed P0 row requires `FAIL`; `PARTIAL` is refused only when something failed. 
 needs at least one passed criterion or passed P0 row (`verdict.empty`), and in local matrix mode a
 tree that was fingerprinted at `--report-begin` and at render and did not change between them
 (`verdict.tree-changed`), because the rows were recorded against the begin tree; a target outside
-git, where no tree, head, branch, repository or dirty state can be measured, is exempt. Chain mode needs
+git, where no tree, head, branch, repository or dirty state can be measured, is exempt when
+`--report-begin` also found it outside git, which render reads from the binding; a target whose
+work-tree probe failed at `--report-begin` is not exempt, and `--report-begin` says so at once
+when it could not fingerprint a local matrix target. Chain mode needs
 no such tree rule: the acceptance states it folds are already bound to the tree at render, and
 when that tree cannot be fingerprinted the report says each criterion shows its newest record.
 These checks are

@@ -503,7 +503,16 @@ test('begin accepts only a run directory inside the work tree that git ignores, 
   refused(call(fx, 'begin', { 'run-dir': fx.root, drivers: 'browser' }, FEATURE), /inside the project's work tree/);
   const source = path.join(fx.root, 'src');
   fs.mkdirSync(source);
-  refused(call(fx, 'begin', { 'run-dir': source, drivers: 'browser' }, FEATURE), /git does not ignore the run directory .+ have git ignore src\//);
+  refused(call(fx, 'begin', { 'run-dir': source, drivers: 'browser' }, FEATURE), /git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; have git ignore src\/, for example with the line src\/ in/);
+  fs.writeFileSync(path.join(source, 'app.js'), 'export {};\n');
+  git(fx.root, 'add', 'src/app.js');
+  git(fx.root, 'commit', '-q', '-m', 'add a tracked source file');
+  const sourceShots = path.join(source, 'shots');
+  fs.mkdirSync(sourceShots);
+  refused(call(fx, 'begin', { 'run-dir': sourceShots, drivers: 'browser' }, FEATURE), /; have git ignore src\/shots\/, for example with the line src\/shots\/ in the repository's \.gitignore$/);
+  const captureRun = path.join(fx.root, 'captures', 'r1');
+  fs.mkdirSync(captureRun, { recursive: true });
+  refused(call(fx, 'begin', { 'run-dir': captureRun, drivers: 'browser' }, FEATURE), /; have git ignore captures\/, for example with the line captures\/ in the repository's \.gitignore$/);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git', 'objects'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
   const store = path.join(fx.root, 'reports');
@@ -521,7 +530,21 @@ test('the run directory is judged by the work tree that holds it, and the refusa
   git(fx.root, 'worktree', 'add', '-q', nested, '-b', 'wt');
   const shots = path.join(nested, 'shots');
   fs.mkdirSync(shots);
-  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; have git ignore shots\/, for example with the line shots\/ in the repository's \.gitignore$/);
+  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore shots\/, for example with the line shots\/ in the repository's \.gitignore$/);
+  const outer = fixture();
+  const pkg = path.join(outer.root, 'pkg');
+  fs.mkdirSync(pkg);
+  const sub = fixture({ root: pkg });
+  const logs = path.join(outer.root, 'logs');
+  fs.mkdirSync(logs);
+  refused(call(sub, 'begin', { 'run-dir': logs, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore logs\//);
+  const pictures = path.join(pkg, 'pictures');
+  fs.mkdirSync(pictures);
+  refused(call(sub, 'begin', { 'run-dir': pictures, drivers: 'browser' }, FEATURE), /, so its captures could be committed and every capture would move the tree fingerprint; have git ignore pkg\/pictures\/, for example with the line pkg\/pictures\/ in the repository's \.gitignore$/);
+  const beside = path.join(outer.root, 'shared', 'runs');
+  fs.mkdirSync(beside, { recursive: true });
+  refused(call(sub, 'begin', { 'run-dir': beside, drivers: 'browser' }, FEATURE), /, so its captures could be committed; have git ignore shared\/runs\/, for example with the line shared\/runs\/ in the repository's \.gitignore$/);
+  ok(call(sub, 'begin', { 'run-dir': sub.runDir, drivers: 'browser' }, FEATURE));
   const kept = path.join(nested, '.zensu', 'verify-feature-runs', 'r1');
   fs.mkdirSync(kept, { recursive: true });
   ok(call(fx, 'begin', { 'run-dir': kept, drivers: 'browser' }, FEATURE));
@@ -1412,7 +1435,7 @@ test('chain mode carries the acceptance disclosures into the output and the limi
   assert.ok(manifestOf(started.bundle).sections.limitations.some((line) => line.startsWith('ACCEPTANCE STEM UNCHECKED')));
 });
 
-test('chain mode measures the target in the chain work tree through the acceptance fingerprint', () => {
+test('chain mode measures the target in the chain work tree through the acceptance fingerprint', (t) => {
   const fx = chainFixture({ ignore: '.zensu/\n.claude/\n' });
   const workTree = path.join(fx.root, '.claude', 'worktrees', 'bound');
   git(fx.root, 'worktree', 'add', '-q', '-b', 'bound-branch', workTree);
@@ -1425,6 +1448,29 @@ test('chain mode measures the target in the chain work tree through the acceptan
   assert.equal(target.head, git(workTree, 'rev-parse', 'HEAD').trim());
   assert.notEqual(target.head, git(fx.root, 'rev-parse', 'HEAD').trim());
   assert.equal(target.tree, av.chainTree({ projectRoot: fx.root, workTree }, tempDir('chain-tree')).tree.tree);
+  const shots = path.join(workTree, 'shots');
+  fs.mkdirSync(shots);
+  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n', bound), /, so its captures could be committed and every capture would move the tree fingerprint; have git ignore shots\//);
+  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser' }, FEATURE), /, so its captures could be committed; have git ignore shots\//);
+  const respelled = t.mock.method(evr, 'fingerprintRoot', () => `${workTree}${path.sep}`);
+  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n', bound), /, so its captures could be committed and every capture would move the tree fingerprint; have git ignore shots\//);
+  respelled.mock.restore();
+  attest(fx, 'AC-001', 'pass', 'Opened the dashboard; all four projects are listed');
+  const later = ok(call(fx, 'begin', { 'run-dir': fx.runDir, drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n', bound));
+  addImage(fx, later.id, 'dashboard.png');
+  ok(step(fx, later.id, { criteria: 'AC-001', evidence: 'e1' }));
+  fs.writeFileSync(path.join(workTree, 'notes.txt'), 'written in the work tree during the run\n');
+  const realFingerprint = evr.computeFingerprint;
+  const limited = t.mock.method(evr, 'computeFingerprint', (projectRoot, treeRoot, scratch, limits) => realFingerprint(projectRoot, treeRoot, scratch, { ...(limits || evr.LIMITS), untrackedMaxFiles: 0 }));
+  ok(call(fx, 'render', { report: later.id, verdict: 'PARTIAL', log: fx.logPath }, '', bound));
+  limited.mock.restore();
+  const chained = manifestOf(later.bundle).sections.limitations;
+  assert.ok(chained.some((line) => line.startsWith('The working tree could not be fingerprinted at --report-render (more than 0 untracked files), so a change since ')), chained.join('\n'));
+  assert.ok(chained.includes('The acceptance states could not be compared with the working tree at --report-render (more than 0 untracked files), so each criterion shows its newest record, whatever tree that record was taken on.'), chained.join('\n'));
+  fs.writeFileSync(path.join(workTree, '.gitignore'), 'node_modules/\n');
+  const stateRuns = path.join(workTree, '.zensu', 'runs', 'r1');
+  fs.mkdirSync(stateRuns, { recursive: true });
+  refused(call(fx, 'begin', { 'run-dir': stateRuns, drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n', bound), /, so its captures could be committed; have git ignore \.zensu\/runs\/, for example with the line \.zensu\/runs\/ in the repository's \.gitignore$/);
 });
 
 test('the draft check measures the manifest render writes, so the report that took its last item still renders', () => {
@@ -1615,7 +1661,8 @@ test('a local matrix PASS over a tree that changed during the run is refused and
   const manifest = manifestOf(unmeasured.bundle);
   assert.equal(manifest.target.tree, null);
   assert.equal(manifest.target.begin_tree, null);
-  assert.ok(manifest.sections.limitations.includes('The working tree was not fingerprinted at --report-begin, so a change during the run cannot be ruled out.'), manifest.sections.limitations.join('\n'));
+  assert.ok(manifest.sections.limitations.includes('The working tree was not fingerprinted at --report-begin (not a git work tree), so a change during the run cannot be ruled out.'), manifest.sections.limitations.join('\n'));
+  assert.ok(!unmeasured.lines.some((line) => line.includes('will refuse a PASS')), unmeasured.lines.join('\n'));
 });
 
 test('a local matrix PASS is refused when the tree at begin or at render cannot be fingerprinted inside git, and a PARTIAL says so', (t) => {
@@ -1625,35 +1672,119 @@ test('a local matrix PASS is refused when the tree at begin or at render cannot 
   atBegin.mock.restore();
   addImage(late, unmeasured.id);
   ok(step(late, unmeasured.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
-  refused(call(late, 'render', { report: unmeasured.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin, so the tree [0-9a-f]{12} at --report-render cannot be compared with it/);
+  assert.ok(unmeasured.lines.includes('zensu evidence report: the working tree could not be fingerprinted at --report-begin (git timed out), so --report-render will refuse a PASS; make the tree fingerprintable and begin again'), unmeasured.lines.join('\n'));
+  refused(call(late, 'render', { report: unmeasured.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin \(git timed out\), so the tree [0-9a-f]{12} at --report-render cannot be compared with it/);
   ok(call(late, 'render', { report: unmeasured.id, verdict: 'PARTIAL' }));
   assert.equal(manifestOf(unmeasured.bundle).target.begin_tree, null);
+  const beginOnly = 'The working tree was not fingerprinted at --report-begin (git timed out), so a change during the run cannot be ruled out.';
+  const outsideOnly = 'The working tree was not fingerprinted at --report-begin (not a git work tree), so a change during the run cannot be ruled out.';
+  const bothBlind = 'The working tree was not fingerprinted at --report-begin (git timed out), and could not be fingerprinted at --report-render either (git timed out), so a change during the run cannot be ruled out.';
+  assert.ok(manifestOf(unmeasured.bundle).sections.limitations.includes(beginOnly), manifestOf(unmeasured.bundle).sections.limitations.join('\n'));
   const blind = fixture();
   const everywhere = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
   const neither = begin(blind);
   addImage(blind, neither.id);
   ok(step(blind, neither.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
-  refused(call(blind, 'render', { report: neither.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin, and the tree at --report-render could not be fingerprinted either \| remedy: state PARTIAL, or begin a new report once the working tree can be fingerprinted$/);
+  refused(call(blind, 'render', { report: neither.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin \(git timed out\), and the tree at --report-render could not be fingerprinted either \(git timed out\) \| remedy: state PARTIAL, or begin a new report once the working tree can be fingerprinted$/);
   ok(call(blind, 'render', { report: neither.id, verdict: 'PARTIAL' }));
   everywhere.mock.restore();
   const unseen = manifestOf(neither.bundle).target;
   assert.deepEqual([unseen.begin_tree, unseen.tree, typeof unseen.head], [null, null, 'string']);
+  assert.ok(manifestOf(neither.bundle).sections.limitations.includes(bothBlind), manifestOf(neither.bundle).sections.limitations.join('\n'));
+  const left = fixture();
+  const beforeGit = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  const gone = begin(left);
+  beforeGit.mock.restore();
+  addImage(left, gone.id);
+  ok(step(left, gone.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  const gitRead = evr.git;
+  const noGit = t.mock.method(evr, 'git', (root, args, options) => (args.includes('--is-inside-work-tree') ? { ok: false, reason: 'git timed out' } : gitRead(root, args, options)));
+  refused(call(left, 'render', { report: gone.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin \(git timed out\), and the tree at --report-render could not be fingerprinted either \(git timed out\) \| remedy: /);
+  ok(call(left, 'render', { report: gone.id, verdict: 'PARTIAL' }));
+  noGit.mock.restore();
+  const away = manifestOf(gone.bundle).target;
+  assert.deepEqual([away.repository, away.branch, away.head, away.tree, away.begin_tree, away.dirty], [null, null, null, null, null, null]);
+  assert.ok(manifestOf(gone.bundle).sections.limitations.includes(bothBlind), manifestOf(gone.bundle).sections.limitations.join('\n'));
+  const lost = fixture();
+  const probeDown = t.mock.method(evr, 'git', (root, args, options) => (args.includes('--is-inside-work-tree') ? { ok: false, reason: 'git timed out' } : gitRead(root, args, options)));
+  const both = begin(lost);
+  addImage(lost, both.id);
+  ok(step(lost, both.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  refused(call(lost, 'render', { report: both.id, verdict: 'PASS' }), /could not be fingerprinted at --report-begin \(git timed out\), and the tree at --report-render could not be fingerprinted either \(git timed out\) \| remedy: /);
+  ok(call(lost, 'render', { report: both.id, verdict: 'PARTIAL' }));
+  probeDown.mock.restore();
+  assert.ok(both.lines.some((line) => line.includes('(git timed out), so --report-render will refuse a PASS')), both.lines.join('\n'));
+  const lostTarget = manifestOf(both.bundle).target;
+  assert.deepEqual([lostTarget.repository, lostTarget.head, lostTarget.tree, lostTarget.begin_tree], [null, null, null, null]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(repositoryDirectory(lost), `${both.id}.binding.json`), 'utf8')).begin_failure, 'git timed out');
+  assert.ok(manifestOf(both.bundle).sections.limitations.includes(bothBlind), manifestOf(both.bundle).sections.limitations.join('\n'));
+  const pruned = fixture();
+  const measuredAtBegin = begin(pruned);
+  addImage(pruned, measuredAtBegin.id);
+  ok(step(pruned, measuredAtBegin.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  const outsideAnswer = gitRead(tempDir('no-repo'), ['rev-parse', '--is-inside-work-tree']);
+  assert.equal(evr.outsideWorkTree(outsideAnswer), true);
+  const prunedGit = t.mock.method(evr, 'git', (root, args, options) => (args.includes('--is-inside-work-tree') ? outsideAnswer : gitRead(root, args, options)));
+  refused(call(pruned, 'render', { report: measuredAtBegin.id, verdict: 'PASS' }), /not fingerprinted at --report-render: not a git work tree\) \| remedy: /);
+  ok(call(pruned, 'render', { report: measuredAtBegin.id, verdict: 'PARTIAL' }));
+  prunedGit.mock.restore();
+  assert.ok(manifestOf(measuredAtBegin.bundle).sections.limitations.some((line) => line.startsWith('The working tree could not be fingerprinted at --report-render (not a git work tree), so a change since ')), manifestOf(measuredAtBegin.bundle).sections.limitations.join('\n'));
+  const flaky = fixture();
+  const treeProbeDown = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'not a git work tree' }));
+  const insideGit = begin(flaky);
+  treeProbeDown.mock.restore();
+  assert.ok(insideGit.lines.some((line) => line.includes('(git failed), so --report-render will refuse a PASS')), insideGit.lines.join('\n'));
+  const flakyPath = path.join(repositoryDirectory(flaky), `${insideGit.id}.binding.json`);
+  assert.deepEqual([JSON.parse(fs.readFileSync(flakyPath, 'utf8')).begin_failure, typeof JSON.parse(fs.readFileSync(flakyPath, 'utf8')).target.head], ['git failed', 'string']);
+  addImage(flaky, insideGit.id);
+  ok(step(flaky, insideGit.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  fs.writeFileSync(flakyPath, JSON.stringify({ ...JSON.parse(fs.readFileSync(flakyPath, 'utf8')), begin_failure: 'not a git work tree' }));
+  const flakyGit = t.mock.method(evr, 'git', (root, args, options) => (args.includes('--is-inside-work-tree') ? { ok: false, reason: 'git timed out' } : gitRead(root, args, options)));
+  refused(call(flaky, 'render', { report: insideGit.id, verdict: 'PASS' }), /could not be fingerprinted at --report-begin \(not a git work tree\), and the tree at --report-render could not be fingerprinted either \(git timed out\) \| remedy: /);
+  flakyGit.mock.restore();
   const plain = fixture({ root: tempDir('plain-project') });
   const outside = begin(plain, { drivers: 'api' });
   addImage(plain, outside.id);
   ok(step(plain, outside.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
   ok(call(plain, 'render', { report: outside.id, verdict: 'PASS' }));
   assert.deepEqual([manifestOf(outside.bundle).verdict, manifestOf(outside.bundle).target.head, manifestOf(outside.bundle).target.tree], ['PASS', null, null]);
+  assert.deepEqual(manifestOf(outside.bundle).sections.limitations.filter((line) => line.startsWith('The working tree ')), [outsideOnly]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(repositoryDirectory(plain), `${outside.id}.binding.json`), 'utf8')).begin_failure, 'not a git work tree');
   const fx = fixture();
   const { id, bundle } = begin(fx);
   addImage(fx, id);
   ok(step(fx, id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
-  t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
-  refused(call(fx, 'render', { report: id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be checked at --report-render \([0-9a-f]{12} at --report-begin, not fingerprinted at --report-render\) \| remedy: state PARTIAL, or render again once the working tree can be fingerprinted$/);
+  const atRender = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  refused(call(fx, 'render', { report: id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be checked at --report-render \([0-9a-f]{12} at --report-begin, not fingerprinted at --report-render: git timed out\) \| remedy: state PARTIAL, or render again once the working tree can be fingerprinted$/);
   ok(call(fx, 'render', { report: id, verdict: 'PARTIAL' }));
+  atRender.mock.restore();
   const manifest = manifestOf(bundle);
   assert.equal(manifest.target.tree, null);
-  assert.ok(manifest.sections.limitations.some((line) => /^The working tree could not be fingerprinted at --report-render, so a change since [0-9a-f]{12} at --report-begin cannot be ruled out\.$/.test(line)), manifest.sections.limitations.join('\n'));
+  assert.ok(manifest.sections.limitations.some((line) => /^The working tree could not be fingerprinted at --report-render \(git timed out\), so a change since [0-9a-f]{12} at --report-begin cannot be ruled out\.$/.test(line)), manifest.sections.limitations.join('\n'));
+  const realTree = evr.computeTree;
+  for (const [lowered, named] of [[{ untrackedMaxFiles: 0 }, 'more than 0 untracked files'], [{ untrackedMaxBytes: 1 }, 'untracked files exceed 0 MiB']]) {
+    const each = fixture();
+    const report = begin(each);
+    addImage(each, report.id);
+    ok(step(each, report.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+    fs.writeFileSync(path.join(each.root, 'notes.txt'), 'written during the run\n');
+    const limited = t.mock.method(evr, 'computeTree', (root, scratch, limits, options) => realTree(root, scratch, { ...limits, ...lowered }, options));
+    refused(call(each, 'render', { report: report.id, verdict: 'PASS' }), new RegExp(`not fingerprinted at --report-render: ${named}\\) \\| remedy: `));
+    ok(call(each, 'render', { report: report.id, verdict: 'PARTIAL' }));
+    limited.mock.restore();
+    assert.ok(manifestOf(report.bundle).sections.limitations.some((line) => line.startsWith(`The working tree could not be fingerprinted at --report-render (${named}), so a change since `)), manifestOf(report.bundle).sections.limitations.join('\n'));
+  }
+  const leaking = fixture();
+  const report = begin(leaking);
+  addImage(leaking, report.id);
+  ok(step(leaking, report.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  const failing = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git add failed: fatal: cannot read /private/secret-tree/index' }));
+  refused(call(leaking, 'render', { report: report.id, verdict: 'PASS' }), /not fingerprinted at --report-render: git failed\) \| remedy: /);
+  ok(call(leaking, 'render', { report: report.id, verdict: 'PARTIAL' }));
+  failing.mock.restore();
+  const written = fs.readFileSync(path.join(report.bundle, 'manifest.json'), 'utf8') + fs.readFileSync(path.join(report.bundle, 'index.html'), 'utf8');
+  assert.ok(written.includes('at --report-render (git failed), so a change since'), written);
+  assert.ok(!written.includes('secret-tree'));
 });
 
 test('a chain report whose tree cannot be fingerprinted at render marks each record tree unverified and says why', (t) => {
@@ -1662,13 +1793,32 @@ test('a chain report whose tree cannot be fingerprinted at render marks each rec
   const { id, bundle } = begin(fx, { drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n');
   addImage(fx, id, 'dashboard.png');
   ok(step(fx, id, { criteria: 'AC-001', evidence: 'e1' }));
-  t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  const timedOut = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
   ok(call(fx, 'render', { report: id, verdict: 'PARTIAL', log: fx.logPath }));
+  timedOut.mock.restore();
   const manifest = manifestOf(bundle);
   const first = manifest.coverage.criteria.find((criterion) => criterion.id === 'AC-001');
   assert.equal(first.state, 'pass');
   assert.match(first.note, /^tree unverified; /);
   assert.ok(manifest.sections.limitations.includes('The acceptance states could not be compared with the working tree at --report-render (git timed out), so each criterion shows its newest record, whatever tree that record was taken on.'), manifest.sections.limitations.join('\n'));
+  const leaky = chainFixture();
+  attest(leaky, 'AC-001', 'pass', 'Opened the dashboard; all four projects are listed');
+  const started = begin(leaky, { drivers: 'browser', log: leaky.logPath }, 'feature: The dashboard lists projects\n');
+  addImage(leaky, started.id, 'dashboard.png');
+  ok(step(leaky, started.id, { criteria: 'AC-001', evidence: 'e1' }));
+  const failing = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git add failed: fatal: cannot read /private/secret-tree/index' }));
+  ok(call(leaky, 'render', { report: started.id, verdict: 'PARTIAL', log: leaky.logPath }));
+  failing.mock.restore();
+  const written = fs.readFileSync(path.join(started.bundle, 'manifest.json'), 'utf8') + fs.readFileSync(path.join(started.bundle, 'index.html'), 'utf8');
+  assert.ok(manifestOf(started.bundle).sections.limitations.includes('The acceptance states could not be compared with the working tree at --report-render (git failed), so each criterion shows its newest record, whatever tree that record was taken on.'), manifestOf(started.bundle).sections.limitations.join('\n'));
+  assert.ok(!written.includes('secret-tree'), written);
+  const loose = chainFixture({ root: tempDir('chain-outside') });
+  attest(loose, 'AC-001', 'pass', 'Opened the dashboard; all four projects are listed');
+  const looseReport = begin(loose, { drivers: 'browser', log: loose.logPath }, 'feature: The dashboard lists projects\n');
+  addImage(loose, looseReport.id, 'dashboard.png');
+  ok(step(loose, looseReport.id, { criteria: 'AC-001', evidence: 'e1' }));
+  ok(call(loose, 'render', { report: looseReport.id, verdict: 'PARTIAL', log: loose.logPath }));
+  assert.ok(manifestOf(looseReport.bundle).sections.limitations.includes('The acceptance states could not be compared with the working tree at --report-render (not a git work tree), so each criterion shows its newest record, whatever tree that record was taken on.'), manifestOf(looseReport.bundle).sections.limitations.join('\n'));
 });
 
 test('a text field holds exactly its cap, and a chain plan row longer than the criterion cap renders clipped', () => {
@@ -1853,6 +2003,22 @@ test('the manifest and the binding are read schema first and a schema this reade
   fs.writeFileSync(bindingPath, JSON.stringify({ ...binding, schema: 'zensu-evidence-report-binding/v2', future: true }));
   assert.equal(ok(call(fx, 'list')).reports[0].state, 'schema zensu-evidence-report-binding/v2');
   refused(call(fx, 'add', { report: id, kind: 'request', method: 'GET', path: '/', status: '200' }), /^the binding of vr1_[0-9_a-f]+ is invalid \(the binding names the schema zensu-evidence-report-binding\/v2, which this reader does not know\)$/, 2);
+  const checked = begin(fx);
+  const checkedPath = path.join(repositoryDirectory(fx), `${checked.id}.binding.json`);
+  const original = JSON.parse(fs.readFileSync(checkedPath, 'utf8'));
+  assert.equal(original.begin_failure, null);
+  assert.match(original.target.begin_tree, /^[0-9a-f]{40}$/);
+  const request = { report: checked.id, kind: 'request', method: 'GET', path: '/', status: '200' };
+  for (const [rewritten, problem] of [
+    [{ ...original, begin_failure: 'git exploded' }, 'malformed begin failure'],
+    [{ ...original, begin_failure: 'git timed out' }, 'the begin failure contradicts the begin tree'],
+    [{ ...original, target: { ...original.target, begin_tree: null } }, 'the begin failure contradicts the begin tree'],
+  ]) {
+    fs.writeFileSync(checkedPath, JSON.stringify(rewritten));
+    refused(call(fx, 'add', request), new RegExp(`^the binding of vr1_[0-9_a-f]+ is invalid \\(${problem}\\)$`), 2);
+  }
+  fs.writeFileSync(checkedPath, JSON.stringify(original));
+  ok(call(fx, 'add', request));
   const drafted = begin(fx);
   const draftPath = path.join(repositoryDirectory(fx), `${drafted.id}.binding.json`);
   const draft = JSON.parse(fs.readFileSync(draftPath, 'utf8'));

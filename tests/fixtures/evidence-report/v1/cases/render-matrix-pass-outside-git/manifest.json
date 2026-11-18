@@ -152,7 +152,8 @@
       }
     ],
     "limitations": [
-      "No mobile viewport was checked."
+      "No mobile viewport was checked.",
+      "The working tree was not fingerprinted at --report-begin (not a git work tree), so a change during the run cannot be ruled out."
     ],
     "resources": [
       "A local dev server on port 3000, started by the run and stopped after it."

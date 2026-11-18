@@ -86,6 +86,13 @@ tree is fine, inside one only when `git check-ignore` reports the store ignored.
 tree (the project root outside git) and apart from the store. Inside a work tree it must lie
 outside `.git` and be ignored by git (`git check-ignore` of `<path>/`), so a capture can never be
 committed and never moves the tree fingerprint that the target identity and the verdict rules read.
+The refusal says that captures would move the fingerprint only for a run directory inside a tree
+the report fingerprints, in the same work tree and outside that tree's `.zensu` (`fingerprinted`):
+the project root, and in chain mode also the chain's fingerprint root, which is canonicalized with
+`fs.realpathSync.native` and compared through `samePath`, because `fingerprintRoot` returns git's
+spelling. The remedy names the run directory's parent only when that parent lies strictly inside
+the project root and git tracks nothing under it (`ignoreTarget`), and the run directory itself
+otherwise, so it never asks to ignore the project root or a tracked directory.
 `--report-add --file` takes an absolute, normalized path to a regular file with one link inside it,
 opened no-follow and matched by device and inode. The type is read from the content: PNG, a
 lossless WebP (`VP8L`; `VP8 ` and an animation are refused), or UTF-8 text without control
@@ -116,9 +123,11 @@ screened again, because the pattern reader judges one line at a time and a key a
 lines meet only after the collapse. Before `redact` runs, every spelling of the project root and
 of home with two or more segments is replaced by its mark wherever it ends a path, also after a name
 character such as the `@fs` of a dev-server URL and before a sentence-ending period
-(`scrubOwnPaths`), because `redact` leaves both alone. An argument value (`--recipe`, a request
-`--path`, a signal `--class`, the origin and route of a `consent:` line) is refused when the redaction would rewrite
-it (`screenArgument`), because an argument is stored as given. A text evidence file is screened
+(`scrubOwnPaths`), because `redact` leaves both alone. An argument value is stored as given, so
+`screenArgument` refuses `--recipe` and a signal `--class` whenever the scrub or `redact` would
+rewrite them, and a request `--path` and the origin and route of a `consent:` line only when they
+name the project root or home (`namesOwnPath`): a route such as `/home` or `/Users/42/edit` is the
+application's path, not a local one, and is kept. A text evidence file is screened
 and redacted the same way, and the stored bytes, not the captured ones, are hashed and sniffed
 again: a capture that opens with a redacted path would open with `<project>` or `<home>` and read
 as markup, so it is refused at add rather than at every later render. One named list,
@@ -144,9 +153,19 @@ and `FAIL` are free, because the skill's verdict also weighs console, network an
 `PASS` also needs at least one passed criterion or passed P0 row (`verdict.empty`), and in local
 matrix mode a `target.tree` equal to `target.begin_tree` (`verdict.tree-changed`), which a tree
 that could not be fingerprinted at begin or at render fails too, except outside git, where no
-target field git measures holds a value (`targetOutsideGit`). Chain mode needs no tree rule: its
+target field git measures holds a value (`targetOutsideGit`). Render hands `verdictFaults` a
+context the manifest lacks, read from the binding: `beganOutsideGit`, true only when begin's
+`begin_failure` is `not a git work tree` and the begin target holds no field git measures, plus
+`beginFailure` and `treeFailure`, the causes the
+refusal names. A target whose work-tree probe fails at render, at begin or at both is therefore
+refused rather than read as outside git. A project root that left git between begin and render
+never reaches the rule: its repository key changes, so render answers that no such report exists
+in this repository's store. `treeCheck` classifies the tree once, for the refusal and for render's
+limitation line. A port that validates a manifest alone passes no context and keeps the manifest
+rule. Chain mode needs no tree rule: its
 criterion states come from acceptance records bound to the tree at render, and when that tree
-cannot be fingerprinted the coverage says that each criterion shows its newest record.
+cannot be fingerprinted the coverage says that each criterion shows its newest record and names
+the cause from the `treeFailure` vocabulary below.
 
 **Coverage (FR-006).** Chain mode calls `resolveChain` and `readCriteria` of the acceptance module
 at begin, which stores the plan's `AC-###` rows in the binding, plus each row `assess` reports
@@ -164,7 +183,17 @@ draft criterion carries `zensu`, which both modes hand on to the manifest.
 
 **Target identity.** `--report-begin` measures the target and keeps its tree as `begin_tree`;
 render measures again and keeps `begin_tree`. A changed tree adds a limitation line, and so does a
-local report whose tree could not be fingerprinted at begin or at render. The page shows a
+local report whose tree could not be fingerprinted at begin or at render; the line names the begin
+cause from the binding's `begin_failure`, and the render cause unless neither measurement found
+the target inside git. `measureTarget` returns
+the cause beside the target, from a fixed vocabulary (`treeFailure`: an untracked-file limit,
+`git timed out`, `not a git work tree` for every answer `outsideWorkTree` reads as outside a work
+tree, otherwise `git failed`), so git output, which can hold a path, never reaches a report. Once
+its own probe answered inside a work tree, a tree failure `computeTree` labels `not a git work tree`
+is named `git failed`, because that label then only means its own probe failed.
+Begin keeps its cause in `begin_failure`, which the binding validator holds to that vocabulary and
+to its begin tree, and when a local matrix target it did not find outside git could not be
+fingerprinted, it prints that `--report-render` will refuse a PASS. The page shows a
 `Tree at begin` row only when the two trees differ. In chain mode the target is measured in the chain's work tree
 (`ZENSU_ERP_WORK_TREE`, else the project root), and its tree is the acceptance module's
 `chainTree`, the fingerprint the records bind to.
@@ -212,8 +241,12 @@ through `ucfg()` and the project layer through `pcfg()` of `_ZENSU_CFG_JS`, whic
 §6.2 to §6.11 of the spec; the corpus README; the unit file, its registry entry and
 `tests/structure/test-evidence-report.sh` in `ciStructureTests`; `DRIVERS` of
 `acceptance-verify-v1.js`, which the unit file pins equal to the manifest's driver enum; the exports
-`git`, `outsideWorkTree`, `workTreeTop`, `computeTree`, `LIMITS`, `storeLocations`, `readRecordFile`,
-`validateRecord`, `effectiveState`, `workTreeFaultCause` and `readWorkTreeFault` of `evidence-run-v1.js`;
+`git`, `outsideWorkTree`, `workTreeTop`, `fingerprintRoot`, `computeTree`, `LIMITS`, `storeLocations`,
+`readRecordFile`, `validateRecord`, `effectiveState`, `workTreeFaultCause` and `readWorkTreeFault` of
+`evidence-run-v1.js`, and the reason texts its `git`, `computeTree` and `computeFingerprint` return,
+which `TREE_FAILURE_RE` reads (the untracked-file limits, `git timed out`, `not a git work tree` and
+the `work tree: ` prefix), and which unit cases drive through the real functions, all but
+`git timed out`;
 `chainTree`, `readCriteria`, `resolveChain`, `assess`, `compareCriterionIds` and `hasChanges` of
 `acceptance-verify-v1.js`; `acquireExternalProcessLock`, `releaseExternalProcessLock` and
 `inspectExternalProcessLock` of `session-control-core-v1.js`; `redact` and `rootSpellings` of
@@ -224,8 +257,8 @@ in the same commit.
 **Version: `patch`.** A new module, new verbs, a new private store and sidecar, and a new config
 subtree read permissively. No context-record or workflow-state field moves, no strict key set an
 earlier reader knows changes (the manifest, the binding and the store ship for the first time, so
-`begin_tree`, the `v1` directory of a configured store and the draft's `zensu` reach no released
-reader), and no hook, matcher or attestation moves. The store was deliberately not added to the
+`begin_tree`, the binding's `begin_failure`, the `v1` directory of a configured store and the
+draft's `zensu` reach no released reader), and no hook, matcher or attestation moves. The store was deliberately not added to the
 protected-root lists of `reviewer-capability-v1.js`: a gate that denies more is a `minor`.
 
 **Known gaps.**
@@ -243,6 +276,8 @@ protected-root lists of `reviewer-capability-v1.js`: a gate that denies more is 
   structure shard. The short-name tolerance of `linkFree` rests on how `fs.realpathSync` walks a
   path; the unit case drives its win32 branch on every host, but no Windows run has measured an
   8.3 spelling.
-- A local target whose every git read failed at begin and at render reads as outside git, so its
-  PASS is not refused for the missing fingerprints; the limitation line still names the gap.
+- A manifest validated without its binding, as a port's corpus validates it, cannot tell a local
+  target whose every git read failed at render from one outside git, so it accepts that PASS;
+  only render, which reads `begin_failure` from the binding, refuses it unless begin found the
+  target outside git.
 - No ports were included.

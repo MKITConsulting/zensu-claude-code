@@ -152,7 +152,7 @@
       }
     ],
     "limitations": [
-      "The working tree was not fingerprinted at --report-begin, so a change during the run cannot be ruled out."
+      "The working tree was not fingerprinted at --report-begin (git timed out), and could not be fingerprinted at --report-render either (git timed out), so a change during the run cannot be ruled out."
     ],
     "resources": [
       "A local dev server on port 3000, started by the run and stopped after it."
