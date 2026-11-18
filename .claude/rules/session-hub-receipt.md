@@ -45,7 +45,8 @@ module's constants to equal it.
 `receipts`, so an added top-level key leaves every current Hub supported, while a `takeover.contract`
 above 1 makes it refuse the plugin as newer. `linkedSessions` is the first such key: it tells the
 Hub that the takeover offers the moved session's linked sessions and which lineage ledger proves a
-continuation (`.claude/rules/session-trail-linked-sessions.md`). The unit suite checks its
+continuation, and its `ownDataFolders` field that the takeover also finds a source session whose
+Claude Desktop runs on a data folder of its own (`.claude/rules/session-trail-linked-sessions.md`). The unit suite checks its
 directory and schema against `ledgerPaths` and `LEDGER_SCHEMA_VERSION`.
 
 **The grammar is exact.** The raw prompt, or the command-tag spelling with `command-name`

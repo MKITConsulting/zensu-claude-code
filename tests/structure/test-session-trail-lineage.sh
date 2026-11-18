@@ -1,6 +1,7 @@
 #!/bin/bash
 set -u
 umask 022
+unset ZENSU_CCD_EXTRA_STORES
 
 # Behavioural contract for the session-trail LINEAGE ledger.
 #
@@ -1181,7 +1182,7 @@ grep -q 'is NOT established for finished sessions' "$BF_SRC" \
 # nobody reads back. hooks/lib/claude-path-v1.js owns the one MSYS drive rule in
 # this repo; a private copy here is exactly the drift CLAUDE.md records that rule
 # to prevent. No behavioural check on a POSIX host can see any of this -- the
-# function is identity off win32 -- so the three call sites are pinned at source
+# function is identity off win32 -- so the four call sites are pinned at source
 # and the module's reachability is proven by actually loading it.
 PR_SRC="$PLUGIN_DIR/plugins/session-hub/skills/session-trail/scripts/trail.mjs"
 PR_LOAD="$(node -e '
@@ -1192,26 +1193,26 @@ process.stdout.write(typeof m.msysDrivePrefix === "function" ? "OK" : "MISSING")
 ' "$PR_SRC" 2>&1)"
 [ "$PR_LOAD" = "OK" ] && check "L39-control the shared path module resolves from the script's own directory" PASS || check "L39-control the shared path module resolves from the script's directory (got $PR_LOAD)" FAIL
 # By NAME, not by count. A bare count catches a removal but not a substitution: a
-# fourth externally supplied root added WITHOUT the normaliser holds the count at
-# three, and moving normalisation off one carrier onto another holds it too. The
+# fifth externally supplied root added WITHOUT the normaliser holds the count at
+# four, and moving normalisation off one carrier onto another holds it too. The
 # count is kept as a secondary bound, using -o so two calls on one line still count
 # as two.
-# Scoped to the enclosing FUNCTION, not to a single line: two of the three read
+# Scoped to the enclosing FUNCTION, not to a single line: three of the four read
 # their variable one line above the resolve, so a line-scoped match found only the
 # one that happens to name its carrier inline.
 fn_body() { awk -v f="$2" '$0 ~ ("^function " f "\\(") {inside=1} inside {print} inside && /^\}/ {exit}' "$1"; }
 PR_BY_NAME=0
-for pair in 'defaultConfigRoot:CLAUDE_CONFIG_DIR' 'resolveRoots:configDir.trim()' 'ccdStoreCandidates:ZENSU_CCD_STORE'; do
+for pair in 'defaultConfigRoot:CLAUDE_CONFIG_DIR' 'resolveRoots:configDir.trim()' 'ccdStoreCandidates:ZENSU_CCD_STORE' 'namedStoreCandidates:ZENSU_CCD_EXTRA_STORES'; do
   fn="${pair%%:*}"; carrier="${pair#*:}"
   body="$(fn_body "$PR_SRC" "$fn")"
   case "$body" in
     *"$carrier"*) case "$body" in *'path.resolve(hostPath('*) PR_BY_NAME=$((PR_BY_NAME+1)) ;; esac ;;
   esac
 done
-[ "$PR_BY_NAME" = "3" ] && check "L39 each of the three externally supplied roots is normalised inside the function that reads it" PASS || check "L39 each of the three roots is normalised by name (got $PR_BY_NAME of 3)" FAIL
+[ "$PR_BY_NAME" = "4" ] && check "L39 each of the four externally supplied roots is normalised inside the function that reads it" PASS || check "L39 each of the four roots is normalised by name (got $PR_BY_NAME of 3)" FAIL
 PR_HOSTED="$(grep -o 'path.resolve(hostPath(' "$PR_SRC" | grep -c .)"
 PR_PAIR="$(fn_body "$PR_SRC" canonicalPair | grep -o 'path.resolve(hostPath(' | grep -c .)"
-[ "$PR_HOSTED" = "5" ] && [ "$PR_PAIR" = "2" ] && check "L39-bound and there are exactly five such sites, the three roots and canonicalPair's two operands, so a further root cannot be added unnormalised in silence" PASS || check "L39-bound exactly five normalised sites, two of them in canonicalPair (got $PR_HOSTED, canonicalPair $PR_PAIR)" FAIL
+[ "$PR_HOSTED" = "6" ] && [ "$PR_PAIR" = "2" ] && check "L39-bound and there are exactly six such sites, the four roots and canonicalPair's two operands, so a further root cannot be added unnormalised in silence" PASS || check "L39-bound exactly six normalised sites, two of them in canonicalPair (got $PR_HOSTED, canonicalPair $PR_PAIR)" FAIL
 # `[[:space:]]`, not `\s`: this is a plain BRE grep, where `\s` is a GNU extension.
 # The first spelling of this rule used it, so on a BSD host the scan could not match
 # and reported a clean file for the wrong reason -- the same trap this suite's own
