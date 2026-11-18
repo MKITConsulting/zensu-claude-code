@@ -1,11 +1,17 @@
 ---
 paths:
   - "skills/session-trail/scripts/trail.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/references/gotchas.md"
+  - "plugins/session-hub/skills/session-trail/references/gotchas.md"
   - "tests/structure/test-session-trail-verdict.sh"
 ---
 
 # Session-Trail Fork Anchor (`sessionAnchor`, `forkOwnCwd` and `firstCwdOf` in `skills/session-trail/scripts/trail.mjs`)
+
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
 
 **A session's directory is the cwd of its first own record**: the first record that carries the
 session's own id (the transcript's file stem, `transcriptSessionId`) and a `cwd`. For a session

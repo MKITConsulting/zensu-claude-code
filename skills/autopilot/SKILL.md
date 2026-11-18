@@ -130,15 +130,16 @@ approved spec plus the exact line `AUTOPILOT-RUN: <RUN_ID>` to every initial or 
 fresh chain id, and uses the bound `--tdd-begin` form; its guarded `--chain-done` returns to
 that exact stage. Never start an unbound TDD generation during an active run.
 
-Every other transition goes through the closed API (stable event ids; exact JSON payload,
-written to a file because a `reason` is free text an apostrophe or backtick would break):
+Every other transition goes through the closed API (stable event ids; exact JSON payload via a
+file, as `reason` is free text):
 
 ```bash
 f="$(mktemp)" || exit 1
 trap 'rm -f "$f"' EXIT
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <exact-json>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
+grep -qI '[^[:space:]]' -- "$f" || exit 1
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
   --event-id <stable-id> --payload "$(cat "$f")"
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status
@@ -178,8 +179,8 @@ State-changing effects use these pairs: `PR_OPEN_REQUESTED` → `PR_OPENED`, the
 `TEAM_REVIEW_REQUESTED` → `TEAM_REVIEW_PUBLISHED`. The request event is written before the
 remote call, and retries reconcile the recorded operation before repeating it. Phase 1
 must also record `GATES_PASSED`/`GATES_FAILED`, `CONVERGENCE_PASSED`/
-`CONVERGENCE_FAILED`, `FIX_REQUIRED`/`FINDINGS_CLEARED`, `VALIDATION_PASSED`/
-`VALIDATION_FAILED`, optional `COVERAGE_PASSED`/`COVERAGE_FAILED`, and finally
+`CONVERGENCE_FAILED`, `FIX_REQUIRED`/`FINDINGS_CLEARED`, `VALIDATION_FAILED` (`--autopilot-validate`
+applies the pass), optional `COVERAGE_PASSED`/`COVERAGE_FAILED`, and finally
 `DELIVERY_COMPLETE`. Delivery requires the PR head, gates, cleared findings, validation, and
 optional coverage to name the same final head. The review need only be the durable once-only
 publication for this PR generation; it is not rewritten to pretend that it reviewed later
@@ -294,7 +295,7 @@ the detected app type — see `rules/drivers.md`.
 exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plugin root):
 1. A short **spec** — what it does, who it's for, who it's NOT for, success, out-of-scope.
    Read the relevant domain docs first if the feature touches an existing area.
-2. **Acceptance criteria** — a NUMBERED list with **stable `AC-###` IDs** (AC-001, AC-002, …),
+2. **Acceptance criteria** — the `## Requirements` table, one row per criterion with **stable `AC-###` IDs** (AC-001, AC-002, …),
    each one machine-checkable: verifiable by a test, a gate assertion, or a concrete
    observation through the validation driver. No vague ACs. **ID allocation is stable and
    never recycled**: IDs are assigned monotonically; a dropped criterion keeps its ID and is
@@ -307,11 +308,12 @@ exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plu
 3. **Every open question batched** — defaults, edge cases, scope cuts, data shape — asked
    in this phase. This is the only chance.
 
-**0.D — Confirm.** Present spec + numbered ACs + the resolved recipe (the boot / auth /
+**0.D — Confirm.** Present spec + the AC table + the resolved recipe (the boot / auth /
 gates / validate commands the probe chose, so the user sees exactly what will run) via
 **ExitPlanMode**, and wait for approval. If the probe wrote or would write
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
-without the user's explicit OK**. **Remove every pre-existing `<!-- zensu-autopilot:... -->` COMMENT from the plan CONTENT you are about to pass to
+without the user's explicit OK**. A plan without an active `AC-###` row is refused as
+`PLAN_CRITERIA_UNUSABLE`. **Remove every pre-existing `<!-- zensu-autopilot:... -->` COMMENT from the plan CONTENT you are about to pass to
 `ExitPlanMode` — leaving the rest of each line intact — before appending this run's
 marker.** Strip the comment, never the whole line: the gate's matcher is unanchored, so a
 marker can share a line with real requirement text that must survive. The plan content is
@@ -342,25 +344,27 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    Stay in the worktree.
    (Vanilla `/zensu:build` may ship thin coverage — `/zensu:cover` on the diff hardens the
    durable test net; opt in with `--cover`, applied in step 6b below.)
-2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
-   before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
-   Persist `GATES_PASSED` with the tested head SHA; on failure persist `GATES_FAILED`, then
-   run the bound `/zensu:build` fix attempt and return here.
+2. **Gates green** — commit (`rules/conventions.md`), then run the resolved `gates:` recipe;
+   every command must pass (e.g. type-check, lint, unit tests, per-file coverage floor).
+   Persist `GATES_PASSED` with the full tested head SHA; on failure persist `GATES_FAILED`, run
+   the bound `/zensu:build` fix attempt and return here. Step 3 sends a head the gates never
+   tested back here, without `GATES_FAILED` (`rules/pr-open.md`).
 2b. **Converge (report-only)** — run `/zensu:converge <session-plan-path>` (always the
    session plan, never mtime-resolved — scoped fix runs write newer plans): a
    `contradicts` finding on an active AC **blocks the PR open** until fixed via
-   `/zensu:build` (vanilla, scoped); after each fix re-run the converge report against the
-   SAME session plan — if `contradicts` persists after 2 fix attempts, treat it as a
+   `/zensu:build` (vanilla, scoped); after each fix re-run step 2 and this report — if
+   `contradicts` persists after 2 fix attempts, treat it as a
    stop-the-world blocker per The one rule (halt + report). `missing`/`partial`
    findings feed the step-6 validate loop; with `--no-validate`, `missing` on an
    active AC also blocks the PR open and `partial` is recorded unvalidated in the
    PR body's per-AC table. Flow-back edit proposals are reported only — never
    auto-applied in this non-interactive run. Persist `CONVERGENCE_PASSED` before PR open;
    each contradiction uses `CONVERGENCE_FAILED` and the bound TDD return path.
-3. **Open the PR** — commit (`rules/conventions.md`), push, then open the PR/MR
+3. **Open the PR** — push, then open the PR/MR
    against `--base` **through the driver** (run from `$REPO` so `gh`/`glab` resolve the host;
    GitHub → `gh pr create`, GitLab → `glab mr create` with `--source-branch`/`--target-branch`,
-   the driver picks per `$PROVIDER` and returns the PR/MR URL):
+   the driver picks per `$PROVIDER` and returns the PR/MR URL). Follow `rules/pr-open.md`:
+   the head check, the events, a requested PR/MR, the bound.
 
    ```bash
    REPO="$(git rev-parse --show-toplevel)"
@@ -371,12 +375,9 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    [ -n "$URL" ] || { echo "PR/MR open returned an empty URL — aborting"; exit 1; }
    ```
 
-   Persist `PR_OPEN_REQUESTED` with a deterministic operation key before calling the driver;
-   after success persist `PR_OPENED` with that same key, PR number/URL, and current head.
    `$HEAD` is the worktree's feature branch (already pushed above), `$BASE` the `--base` arg
-   (default `vcs.prBase`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open (auth
-   expired, an MR already exists on the branch, a push race) is a **stop-the-world blocker**
-   (The one rule) — halt and report; never run step 4+ against a PR/MR that was not created.
+   (default `vcs.prBase`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open is a
+   **stop-the-world blocker** (The one rule): never run step 4+ against a PR/MR not created.
 
    Render the title and body (`$BODY_FILE`) in the order of `rules/conventions.md` §4:
    `$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when `overrides`
@@ -390,7 +391,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    `Gates bypassed during build: <list|none|UNREADABLE — …>`
    from the bypass ledger: after EVERY `/zensu:build` chain of this run (the initial one and
    each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
-   and union the non-`none` entries. **Check its exit status, not just its output.** On a
+   and union the non-`none` entries with the run's `bypasses[].gate` (`rules/validate.md` §4).
+   **Check its exit status, not just its output.** On a
    non-zero exit the verb did not read a ledger: exit 3 prints an `UNREADABLE — …` line on
    stdout, and any other non-zero exit leaves stdout empty with the diagnosis on stderr.
    That sentence is NOT an entry to union — it is prose, and unioning it would splice it
@@ -403,8 +405,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    Persist the running union durably after every chain as a `Gates bypassed (build union):`
    line in the autopilot plan artifact — the PR body is rendered FROM that line, never from
    conversation memory, so a compaction or session restart between chains cannot
-   under-report. Render `none` when the union is empty; update the line whenever step 5/6
-   pushes.
+   under-report. Render `none` when the union is empty; re-apply the body on every push to an
+   open PR/MR (`rules/pr-open.md`).
 4. **Team review — ONCE** — derive the deterministic key and exact four-line envelope above,
    persist `TEAM_REVIEW_REQUESTED`, then run `/zensu:pr-team-review` on the PR. Its delegated
    path reconciles the write-ahead operation remotely and returns the structured receipt;
@@ -416,18 +418,13 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    advances the durable PR head, and resolves the addressed threads. Repeat only while its
    authoritative paginated re-fetch still reports unresolved threads. Persist
    `FINDINGS_CLEARED` only after that count is zero.
-6. **Validate ↔ fix LOOP** — only now exercise the running feature:
-   a. Run the resolved validation **driver** (see `rules/drivers.md`), authenticating via
-      the credential-blind login script if one is configured (see `rules/auth.md`). Assert
-      **every non-deprecated AC by its `AC-###` ID** and capture evidence per AC under that
-      ID (ACs marked deprecated are exempt — their rows stay in the table per the
-      never-recycle rule).
-   b. Every non-deprecated AC passes + gates green → persist `VALIDATION_PASSED` and
-      **exit the loop**.
-   c. Anything off → persist `VALIDATION_FAILED`, fix it through `/zensu:build` (vanilla,
-      scoped to the failing AC(s), carrying `AUTOPILOT-RUN: <RUN_ID>`),
-      re-run the step-2 gates, push to update the PR, then go back to (a).
-   d. Repeat (a)–(c) until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.
+6. **Validate ↔ fix LOOP** — only now exercise the running feature, per `rules/validate.md`:
+   a. On the clean PR head, drive **every non-deprecated AC by its `AC-###` ID** and record
+      each with `--acceptance-record --run "$RUN_ID"`.
+   b. `--autopilot-validate --run "$RUN_ID"` applies `VALIDATION_PASSED`; exit 0 **exits the loop**.
+   c. On a `fix:` refusal persist `VALIDATION_FAILED`, fix it through `/zensu:build` (vanilla,
+      scoped, carrying `AUTOPILOT-RUN: <RUN_ID>`), re-run the step-2 gates, push, back to (a).
+   d. Repeat until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.
 6b. **Persist coverage — opt-in `--cover`** — with `--cover`, after the loop exits green,
    invoke `/zensu:cover --from-acs` to emit the now-passing ACs as **durable committed
    tests** (one test per active `AC-###` ID, keyed by the ID; deprecated ACs are skipped),
@@ -500,8 +497,10 @@ worst case               → still a reviewed, tested PR — minus the live proo
   cross-cutting augments, on-demand drivers, and the `custom` escape hatch.
 - `rules/config.md` — `.zensu/autopilot.yaml` schema, a concrete worked instance, and the
   login-script prerequisite a project supplies.
+- `rules/validate.md` — step 6: acceptance records and `--autopilot-validate`.
 - `rules/work-order.md` — work-order mode: branch, plan file, spec binding, push and PR helpers.
 - `rules/conventions.md` — the repository's commit style, language, attribution and PR body order.
+- `rules/pr-open.md` — the head check before the push, a requested PR/MR, the body refresh, the bound.
 
 ## Critical Conventions
 

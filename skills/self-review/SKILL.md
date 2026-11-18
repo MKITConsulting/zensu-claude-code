@@ -13,7 +13,7 @@ description: >
 <!-- /zensu:evidence-discipline -->
 
 Terminal self-reflection stage of the post-implementation review chain. After the
-`zensu:code-reviewer` chain converges (PASS, suggestions-only, or max-rounds), you
+`zensu:code-reviewer` loop closes (PASS, suggestions-only, or max-rounds), you
 re-read this session's work as an experienced senior engineer reviewing your own
 code, take at most ONE fix round if a must-fix surfaces, then render the final
 report and close the chain. This is the LAST instance — it never re-runs the
@@ -128,8 +128,7 @@ branch is a chain terminus and carries the same disclosure duty as the Final
 report, so before stopping also run the `--bypass-list` command from the `## Open`
 section below and render its output as
 `Gates bypassed during this session: <output>`, under the same rules stated
-there. A gate escape needs no file change to be recorded — `ZENSU_MCP_GATE` is
-reachable without one — so a zero-change chain is
+there. A gate escape needs no file change to be recorded, so a zero-change chain is
 exactly where an undisclosed escape would otherwise hide. Then stop. Every command uses Claude's natively rendered `CLAUDE_PLUGIN_ROOT`
 directly inside a quoted shell parameter; never paste its value into shell source.
 
@@ -188,7 +187,7 @@ line, with its id exactly as listed and the state `fixed`, through
 fed by a heredoc whose delimiter is quoted, never through `--message`, so no finding text is
 shell-expanded and the report no longer lists it as open. When the log's secret scan refuses
 such a line, rewrite its summary without the value; never resend it with the
-`zensu-secret-allow` marker or `ZENSU_SECRET_SCAN=off`. `status=partial` also adds the
+`zensu-secret-allow` marker or past the scan in any other way. `status=partial` also adds the
 `## Open` row `FINDINGS LEDGER PARTIAL — <reason>`; `status=degraded` adds no candidates and
 the row `FINDINGS LEDGER UNAVAILABLE — <reason>`.
 
@@ -196,19 +195,11 @@ the row `FINDINGS LEDGER UNAVAILABLE — <reason>`.
 gated here, and its terminus line says whether its VALIDATE stage runs). Before you settle the
 must-fix list, run
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --acceptance-status --log <run-log>`
-over the run log named in the paragraph above. Exit 0 means every active `AC-###`
-criterion has a `pass` on the current tree. Otherwise follow the remedy its summary line
-names, never the exit code alone. A `run:` segment means invoke `/zensu:verify-feature` with
-`--chain --log <run-log>` (Skill tool, `skill='zensu:verify-feature'`), which drives only the
-criteria that are `missing`, `stale` or `partial`. A `fix:` segment means a criterion fails
-on this tree: it is a must-fix candidate for the one fix round below, exactly like a `parked`
-ledger entry, and so is a criterion that verification returns as `fail` or `partial`. An
-`add:` or `restore:` segment, or a summary with no remedy (`unresolved`, `unavailable`), is
-not yours to verify away: carry it into the report and leave it to the user. A fix round that
-edits anything makes every record stale, so pass 2 of this stage runs this paragraph again.
-Never drive a criterion again while it already has a `fail` on the current tree and nothing
-was edited since. When the run-log path is not known in this session, skip this read: the
-terminus refuses with the remedy.
+over the run log named above. Exit 0 means every active `AC-###` criterion has a `pass` on the
+current tree. Otherwise act on the remedy segments its summary line names, never on the exit
+code alone, as `references/acceptance.md` says, `partial` included (never a must-fix). Leaving
+the chain open still runs Phase 4 through its refused terminus before the turn ends. Without a
+known run-log path, skip this read: the terminus refuses with the remedy.
 
 ## Phase 4: Fix Round or Finalize
 
@@ -229,14 +220,14 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   the `/zensu:build` Phase 6 **step 1 full suite** over the amended tree through the
   evidence runner:
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope full --cmd '<full test command>' --log <run-log>`
-  — this is the chain's last edit, so this is
+  — the chain's last edit, so this is
   the run whose verdict describes the tree that ships, and Phase 5 checkpoints are
   scoped and cannot stand in for it.
-  **In CI mode** — `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --full-suite-policy`
+  **In CI mode** — `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --full-suite-policy --chain`
   prints `full suite: ci` — run the Phase 6 affected-suite command instead:
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope scoped --cmd '<the tests affected by the change>' --log <run-log>`,
   covering the suites of every file this chain changed, never `--scope full`: the
-  runner refuses it, and the repository's CI pull-request pipeline runs the full suite.
+  runner refuses it, and the CI pull-request pipeline runs the full suite.
   This stage is often forced cold and never ran `/zensu:build` Phase 1, so resolve the
   suite command in THIS order. (1) `evidence.fullSuiteCommand` — when the project
   configures it, drop `--cmd` and the runner uses it. (2) The project's own
@@ -261,8 +252,8 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   Exit 1 names a claim that did not land: answer a `PENDING PREDICATE` with the proof of
   step 5b b); otherwise log `CLAIM WITHDRAWN — {step_id}[: {file}]`, carry every
   `EDIT NOT LANDED` line into the CHAIN-END SUMMARY verbatim and stop: a withdrawal never
-  clears the receipt the terminus checks, and `ZENSU_EDIT_LANDING_GATE` stays with the
-  user. Then set the latch with
+  clears the receipt the terminus checks, and the decision stays with the user. Then set
+  the latch with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
   `/zensu:self-review` (pass 2 to confirm). The pass-2 invocation MUST carry the
   same captured `SELF-REVIEW-TICKET: <review-ticket>` line again and, for a
@@ -275,11 +266,8 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   - re-invoke the whole `/zensu:build` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record — in CI mode on a missing, red, running, interrupted or stale local test run, and it passes as `deferred-ci` with a second `FULL SUITE — CI contract` line. On such a refusal the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. An `EDIT LANDING RECEIPT STALE — …` line means the receipt no longer describes this chain: run the audit its `Run:` line names, with a proof for every pending claim, then this step again. It applies the acceptance gate as well: it prints `ACCEPTANCE — <state> | …` lines and refuses while any active criterion lacks a `pass` on the current tree; on that refusal follow the remedy the line names: a `run:` segment means run `/zensu:verify-feature --chain` with the log it names, then this step again; a `fix:` segment means a criterion fails on this tree and needs the one fix round; an `add:` or `restore:` segment, or a refusal with no remedy, goes into your report and to the user. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave `ZENSU_FULL_SUITE_GATE` to the user. The same holds for a criterion that is still `fail` or `partial` after the spent round: carry the `ACCEPTANCE — …` refusal into your report, stop, and leave `ZENSU_ACCEPTANCE_GATE` to the user. Any other failure is stale: stop and do not render a successful final report.
-  2. **Carry the full-suite verdict.** Copy every `FULL SUITE — …` line the terminus
-     printed — the verdict, plus the `flaky` line and the gate-mode disclosure when
-     present — into the `Full suite` verdict cell verbatim. Copy every `ACCEPTANCE — …`
-     line the same way into the `Acceptance` verdict cell.
+  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record — in CI mode on such a local test run, and it passes as `deferred-ci` with a second `FULL SUITE — CI contract` line. Then the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. An `EDIT LANDING RECEIPT STALE — …` line means the receipt no longer describes this chain: run the audit its `Run:` line names, proving every pending claim, then this step again. It applies the acceptance gate too: it prints `ACCEPTANCE — <state> | …` lines and refuses while an active criterion lacks a `pass` on the current tree; act on its remedy segments as `references/acceptance.md` states, then run this step again where a remedy lets you; an `accept:` segment closes only with the user's consent, as `--accept-partial <ids>` on this same call. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave the decision to the user. When such a stop follows a `CONVERGED CLOSE — …` line, rerun with `--outcome max-rounds` instead. Any other failure is stale: stop and do not render a successful final report.
+  2. **Carry the full-suite verdict.** Copy every `FULL SUITE — …` line the terminus printed into the `Full suite` cell verbatim, every `ACCEPTANCE — …` line into the `Acceptance` cell, and a `CONVERGENCE — …` line into the `How I built it` line, marked as refused by a gate after an `--outcome max-rounds` rerun.
   3. Render the final report (below), then stop.
 
 ### Final report
@@ -287,8 +275,7 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
 Render a CHAIN-END SUMMARY as TABLES, not prose: every section below is a table
 plus at most one line of text, never a paragraph — the sole exception is
 `## Open`, which ends with the bypass-ledger line followed, when it applies, by the
-converge offer. Keep it scannable — no restating, no narration of the process, no
-filler.
+converge offer. Keep it scannable: no restating, narration or filler.
 
 Mark every status and verdict cell with a leading marker: 🟢 good (passed, clean, done, met), 🟡 attention (partial, advisory, skipped, not measured), 🔴 bad (failed, must-fix, dropped, contradicted, blocked, not landed, unverified, unresolved predicate, verification degraded, a gate bypassed), ⚪ not applicable — admissible ONLY where the source of the value itself says the item does not apply, which today means exactly one case: a requirement row the plan already marks deprecated. An outcome that was merely not run is 🟡, never ⚪. The marker PREFIXES the cell value and NEVER replaces it: every verbatim literal keeps its own words unchanged after its marker, subject only to the pipe-escaping rule below, which the renderer undoes so the reader still sees the original text. A marker never stands alone and is never separated from the words it marks by a line break. The ## Open table has no status or verdict column and takes no marker.
 
@@ -314,8 +301,9 @@ is a title, a path, or a bare count with no target — that is Feature, Files
 modified, Plan and Log, and every other row above is marked. A count measured
 AGAINST a target IS a state, so `{N}/{M} GREEN` and `{N}/{M} files >= {threshold}`
 take 🟢 when the target was met, 🔴 when it was not, 🟡 when the run was skipped.
-**Gates bypassed** takes 🟢 ONLY for the literal `none` read from a valid document
-and 🔴 for anything else, including a named escape, the `UNREADABLE — …` form and
+**Gates bypassed** takes 🟢 ONLY for the literal `none` read from a valid document,
+🟡 ONLY for the literal `acceptance-partial` alone (criteria the user accepted as
+partial), and 🔴 for anything else, including a named escape, the `UNREADABLE — …` form and
 any wording this renderer does not recognize; it repeats the
 `## Open` bypass-ledger line rather than replacing it. Run the `--bypass-list`
 command from `## Open` ONCE before rendering this table and feed its output to
@@ -340,7 +328,7 @@ state, advisory or not, including `escaped`. Both verbatim cells follow the `## 
 the renderer drops the cells past the last column. **Acceptance** carries text VERBATIM
 under the same rule: the `ACCEPTANCE — …` lines `--chain-done` printed (Phase 4 finalize
 step 2), 🟢 only for `pass`; 🟡 for `pass-tree-unverified`, `not-applicable`,
-`not-checked` and an advisory `incomplete` that lists only missing criteria; 🔴 for
+`not-checked`, `partial-accepted` and an advisory `incomplete` that lists only missing criteria; 🔴 for
 every other state, advisory or not, including `escaped`.
 
 When the session plan carries a ## Requirements table, add a third table, columns:
@@ -390,7 +378,9 @@ exists to surface; the other order turns an already-escaped `\|`
 inside a shell command back into a delimiter. The same rule applies to every
 carried line in this report — the `Full suite`, `Acceptance` and `Edit landing`
 verdict cells in `## What I built`. Add one row per advisory `ACCEPTANCE —` line that did
-not pass and one per `EXTERNAL REVIEW DEGRADED — …` line, each verbatim under the same rule.
+not pass, one per `ACCEPTANCE — accepted as partial:` line and one per
+`EXTERNAL REVIEW DEGRADED — …` line, each verbatim under the same rule, and one per row
+of the plan's `## Manual Acceptance` table, whose check is the Next step.
 Write the single line `Nothing open.` only when that table has
 no rows at all, because a carried line is always a row.
 

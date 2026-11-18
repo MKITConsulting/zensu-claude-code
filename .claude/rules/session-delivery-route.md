@@ -418,8 +418,17 @@ into `hooks/lib/desktop-store-read-v1.js` changes none of its answers.
   removes the review chain for the session, as `autoTdd:false` already can from a committed file;
   only an explicit `/zensu:delivery-route --direct` writes one. No hook-emitted, user-visible
   notice fires when a marker decides `direct`; the model's status line is the per-dispatch notice.
-- With any recorded or configured route the four-route question is not asked, so
-  `/zensu:autopilot` and `/zensu:pilot` are reachable only by naming them in the approval message.
+- With any recorded or configured route neither question is asked, so `/zensu:autopilot` and
+  `/zensu:pilot` are reachable only by naming them in the approval message or invoking the skill.
+  Invoking either skill stays possible under every field, because the reminder answers no slash
+  command that invokes `/zensu:autopilot`, `/zensu:pilot` or `/zensu:work`, so its decided line
+  never steers one elsewhere. While the field reads `ask` and the human-present field reads `yes`,
+  the reminder's question offers `/zensu:autopilot` on a direct code request too, so a session that
+  starts without a plan sees it before a Yes records `build`. Its rule that a request asking for
+  Autopilot states no preference lives in the ask shapes only: the decided lines carry no Autopilot
+  text, which `R13f` pins, so under a decided field a request that names Autopilot in prose meets
+  the decided line's own action and no sentence about Autopilot. `docs/precedence.md` and the
+  delivery-route skill scope the rule the same way.
   Whether to ask anyway when the plan's own ranking would put Autopilot or Pilot first is an open
   product decision.
 - The project overlay wins per key, so a committed `direct` overrides a user's global `build` for

@@ -8,6 +8,11 @@ const PACKAGE_NAME = '@playwright/cli';
 const BINARY_NAMES = Object.freeze(['playwright-cli', 'playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']);
 const WINDOWS_LOOKUP = Object.freeze(['playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1', 'playwright-cli']);
 const POSIX_LOOKUP = Object.freeze(['playwright-cli']);
+const NAME_STEMS = Object.freeze([POSIX_LOOKUP[0], PACKAGE_NAME]);
+const NAME_SUFFIXES = Object.freeze(BINARY_NAMES.filter((name) => name.startsWith(POSIX_LOOKUP[0])).map((name) => name.slice(POSIX_LOOKUP[0].length)));
+const NAME_TAIL = /^[a-z0-9._-]*/;
+const NAME_TAIL_WINDOW = Math.max(...NAME_SUFFIXES.map((suffix) => suffix.length)) + 1;
+const CONSTRUCT_OPENERS = Object.freeze(['$(', '${', '`']);
 const MAX_MANIFEST_BYTES = 65536;
 const MANIFEST_DIRECTORIES = 4;
 const VERSION_TIMEOUT_MS = 5000;
@@ -147,6 +152,31 @@ function binaryNames(platform = process.platform) {
   return platform === 'win32' ? WINDOWS_LOOKUP : POSIX_LOOKUP;
 }
 
+function stemEndsName(spelling, stem) {
+  for (let at = spelling.indexOf(stem); at !== -1; at = spelling.indexOf(stem, at + 1)) {
+    const end = at + stem.length;
+    const tail = NAME_TAIL.exec(spelling.slice(end, end + NAME_TAIL_WINDOW))[0];
+    if (NAME_SUFFIXES.some((suffix) => suffix.startsWith(tail))) return true;
+  }
+  return false;
+}
+
+function nameAfterConstruct(spelling) {
+  const opened = CONSTRUCT_OPENERS.map((opener) => spelling.indexOf(opener)).filter((at) => at !== -1);
+  return opened.length > 0 && NAME_STEMS.some((stem) => spelling.indexOf(stem, Math.min(...opened)) !== -1);
+}
+
+function holdsCliName(text) {
+  const kept = String(text).replace(/\\\r?\n/g, '').replace(/['"]/g, '').toLowerCase();
+  return [kept, kept.replace(/[\\`]/g, '')].some((spelling) => nameAfterConstruct(spelling) || NAME_STEMS.some((stem) => stemEndsName(spelling, stem)));
+}
+
+function binaryStem(name) {
+  const lower = String(name).toLowerCase();
+  const suffix = NAME_SUFFIXES.find((candidate) => candidate !== '' && lower.endsWith(candidate));
+  return suffix === undefined ? lower : lower.slice(0, lower.length - suffix.length);
+}
+
 function lookup(env, platform, cwd) {
   const names = binaryNames(platform);
   const value = env ? env.PATH || env.Path || '' : '';
@@ -202,8 +232,10 @@ module.exports = {
   SOURCES,
   VERSION_TIMEOUT_MS,
   binaryNames,
+  binaryStem,
   cliMain,
   findBinary,
+  holdsCliName,
   installedVersion,
   probe,
   validName,

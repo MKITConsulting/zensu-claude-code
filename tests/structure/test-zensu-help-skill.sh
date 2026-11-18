@@ -68,7 +68,7 @@ else
 fi
 
 PLUGIN_VERSION="$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null)"
-MARKETPLACE_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKETPLACE_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 
 if [ "$PLUGIN_VERSION" = "$EXPECTED_VERSION" ]; then
   check "S6 plugin.json .version == $EXPECTED_VERSION (got: $PLUGIN_VERSION)" PASS
@@ -77,15 +77,15 @@ else
 fi
 
 if [ "$MARKETPLACE_VERSION" = "$EXPECTED_VERSION" ]; then
-  check "S7 marketplace.json .plugins[0].version == $EXPECTED_VERSION (got: $MARKETPLACE_VERSION)" PASS
+  check "S7 marketplace.json zensu entry version == $EXPECTED_VERSION (got: $MARKETPLACE_VERSION)" PASS
 else
-  check "S7 marketplace.json .plugins[0].version == $EXPECTED_VERSION (got: $MARKETPLACE_VERSION)" FAIL
+  check "S7 marketplace.json zensu entry version == $EXPECTED_VERSION (got: $MARKETPLACE_VERSION)" FAIL
 fi
 
 if [ "$PLUGIN_VERSION" = "$MARKETPLACE_VERSION" ] && [ -n "$PLUGIN_VERSION" ]; then
-  check "S8 plugin.json .version == marketplace.json .plugins[0].version (cross-file invariant)" PASS
+  check "S8 plugin.json .version == marketplace.json zensu entry version (cross-file invariant)" PASS
 else
-  check "S8 plugin.json .version ($PLUGIN_VERSION) == marketplace.json .plugins[0].version ($MARKETPLACE_VERSION)" FAIL
+  check "S8 plugin.json .version ($PLUGIN_VERSION) == marketplace.json zensu entry version ($MARKETPLACE_VERSION)" FAIL
 fi
 
 if [ -f "$README_MD" ] && grep -qF "version-${EXPECTED_VERSION}-green" "$README_MD"; then

@@ -1,11 +1,16 @@
 ---
 paths:
   - "skills/session-trail/scripts/session-lineage-v1.mjs"
+  - "plugins/session-hub/skills/session-trail/scripts/session-lineage-v1.mjs"
   - "tests/structure/session-lineage-v1.test.js"
   - "tests/structure/test-session-trail-lineage.sh"
 ---
 
 # Session Lineage Ledger (`skills/session-trail/scripts/session-lineage-v1.mjs`)
+
+**Two copies.** `/zensu:session-trail` is PLM's frozen copy of this skill; the
+`session-hub@zensu` companion carries the maintained one as `/session-hub:session-trail`.
+`.claude/rules/session-hub-companion.md` says which copy each check grades.
 
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
@@ -148,7 +153,7 @@ it into its checked set. Judging it instead made the two halves disagree about o
 a symlinked `~/.claude` is the ordinary shape under a dotfile manager, so the write path
 kept landing records while every read answered `ESYMLINK` and the only retraction channel
 refused forever. **All four readers of this store take the ceiling** — `readEdges`,
-`removeEdgeFiles`, `readLabels` and `otherSchemaLedgers` — because each one's WRITER
+`removeEdgeFiles`, `readLabels` and `schemaLedgerCensus`, behind `otherSchemaLedgers` — because each one's WRITER
 already refuses that tree, and a reader that did not made read and write disagree. **Every
 INTERNAL caller must thread it too**, which this sentence once implied and did not check:
 `updateLabels` held the ceiling, passed it to `writeLabels` and omitted it from its own
@@ -224,7 +229,13 @@ directory is empty beside a populated one reports a MIGRATION instead of "No han
 has been recorded yet" — which had been followed by an offer to reconstruct guesses
 for handovers the machine still held as measurements, one directory away. It does not
 READ those records, and closing that still means dropping the derived segment or
-teaching `readEdges` to enumerate siblings.
+teaching `readEdges` to enumerate siblings. `takeover`'s linked-session decision holds
+every start while a directory of a NEWER schema holds records or could not be inspected
+(`.claude/rules/session-trail-linked-sessions.md`); that is a hold, not a read.
+`schemaLedgerCensus` owns the enumeration and reports both kinds, the directories it
+counted and the ones it could not inspect; `otherSchemaLedgers` returns the counted
+ones alone, exactly what it returned before the census existed, so the migration
+disclosure of `lineage` is unchanged.
 
 **`recordedAt` is judged by SHAPE, not by parseability, and the two are not close.**
 It is the sole ordering key at four sites — the dedupe survivor, the branch `walkChain`
@@ -237,10 +248,13 @@ as the motivating defect — was still accepted; `"2026-02-31T00:00:00.000Z"` wa
 accepted as a February date meaning 3 March. The store is append-only and machine-wide,
 so one such record wins every ordering decision permanently. `isIsoInstant` is the one
 predicate, and the ordering comment beside `recordedAtKey` now points at it rather than
-asserting the shape it depends on. All three writers already produce that spelling
-(`nowStamp()` and the backfill's `new Date(mtime).toISOString()`), so the tightening
+asserting the shape it depends on. All three writers produce that spelling
+(`nowStamp()` and the backfill's `toISOString()` of the earlier of the successor's
+modification time and the moment it runs), and none stamps the future, so the tightening
 refuses nothing this tree writes — a fourth writer that does not is refused at READ
-time, which loses the record rather than mis-ordering the ledger. Ported from the
+time, which loses the record rather than mis-ordering the ledger. The backfill stamped the
+successor's modification time unclamped until `L13g` pinned the clamp, so a transcript
+modified more than a day ahead minted a record the skew bound refused. Ported from the
 parallel working copy, whose `isIsoInstant` this is.
 
 **A tightened field validator can make a neighbouring test vacuous, and one nearly

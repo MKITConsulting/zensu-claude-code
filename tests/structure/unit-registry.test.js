@@ -503,6 +503,7 @@ test('the shell reader blanks quoted text and comments, keeps expansions and sub
     "      ' rest",
   ]);
   assert.equal(lines[0].text, 'echo "a $X b" \'c d\' ');
+  assert.deepEqual(lines.map((line) => line.heredoc === true), [false, false, false, true, true, false, false, false]);
 });
 
 test('the shell reader closes each heredoc on the word bash reads, and a here-string or an arithmetic shift opens none', () => {

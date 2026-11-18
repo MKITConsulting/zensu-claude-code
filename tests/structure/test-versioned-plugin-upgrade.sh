@@ -432,28 +432,42 @@ REMEDY_LOCKSTEP="$(
     if (shell.split(" " + LEAD + " $(_zensu_adoption_attempt \"$2\"): $2. ").length - 1 !== 2) faults.push("the shell generic scopes do not carry the attempt lead-in twice");
     if (!/callerIsMain \? `\$\{adoptionRefusalRemedy\(refusal\)\}\.` : ADOPTION_CHILD_CLOSE/.test(gate)) faults.push("the generic arm does not split its remedy by the MAIN audience");
 
-    // The two LIMIT clauses: one constant each in the gate, rendered by both of its
-    // arms, and spelled word for word in the matching shell scope, once.
-    const clausePairs = [["ORPHAN_LIMIT_CLAUSE", "incompatible-runtime"], ["PRUNED_DOWNGRADE_CLAUSE", "pruned-plugin-root"]];
+    // The LIMIT clauses and the REACH clause: one constant each in the gate, rendered
+    // by every arm that offers the adoption, and spelled word for word in the shell
+    // scopes that carry them. The reach clause sits in both named scopes, so twice.
+    const clausePairs = [
+      ["ORPHAN_LIMIT_CLAUSE", "incompatible-runtime", 1],
+      ["PRUNED_DOWNGRADE_CLAUSE", "pruned-plugin-root", 1],
+      ["PRUNED_ORPHAN_CLAUSE", "pruned-plugin-root", 1],
+      ["ADOPTION_REACH_CLAUSE", "incompatible-runtime and pruned-plugin-root", 2],
+    ];
     const clauses = [];
-    for (const [name, scope] of clausePairs) {
+    for (const [name, scope, shellCount] of clausePairs) {
       const clause = constant(name);
       clauses.push(clause);
       if (clause === null) { faults.push(name + " not parsed from the gate"); continue; }
       if (gate.split(clause).length - 1 !== 1) faults.push("the gate spells " + name + " " + (gate.split(clause).length - 1) + " times, want the constant alone");
-      if (shell.split(clause).length - 1 !== 1) faults.push("the " + scope + " scope does not carry " + name + " word for word, once");
+      if (shell.split(clause).length - 1 !== shellCount) faults.push("the " + scope + " scope does not carry " + name + " word for word, " + shellCount + " time(s)");
     }
-    // Both arms RENDER the constants: one clause per arm, read where it is used. A
-    // typed arm that went back to an inline, shorter clause kept the constant and the
-    // shell in agreement while the deny it actually printed drifted.
+    const reach = constant("ADOPTION_REACH_CLAUSE") || "";
+    if (!/never through the Skill tool/.test(reach) || !/on Windows the Bash recognizer admits neither/.test(reach)) faults.push("the reach clause no longer excludes the Skill tool and Windows");
+    const prunedOrphan = constant("PRUNED_ORPHAN_CLAUSE") || "";
+    if (!/--restore-root/.test(prunedOrphan) || /--confirm/.test(prunedOrphan) || !/AFTER the adoption/.test(prunedOrphan)) faults.push("the pruned orphan clause does not order the restore after the adoption, or hands over a --confirm");
+    // Every arm RENDERS the constants, read where it is used. A typed arm that went
+    // back to an inline, shorter clause kept the constant and the shell in agreement
+    // while the deny it actually printed drifted.
     const renderSites = [
-      /^\s*const limit = adoption\.prunedPluginRoot \? PRUNED_DOWNGRADE_CLAUSE : ORPHAN_LIMIT_CLAUSE;$/m,
-      /^\s*denyBind\(`\$\{cause\} \$\{UNBOUND_ADOPTION_REMEDY\} \$\{ORPHAN_LIMIT_CLAUSE\}`\);$/m,
-      /^\s*denyBind\(`\$\{cause\} \$\{UNBOUND_ADOPTION_REMEDY\} \$\{PRUNED_DOWNGRADE_CLAUSE\}`\);$/m,
+      /^\s*const limit = adoption\.prunedPluginRoot \? `\$\{PRUNED_DOWNGRADE_CLAUSE\} \$\{PRUNED_ORPHAN_CLAUSE\}` : ORPHAN_LIMIT_CLAUSE;$/m,
+      /^\s*denyBind\(`\$\{cause\} \$\{adoptionRefusalRemedy\(reason\)\}; \$\{adoptionTail\(reason\)\}\. \$\{ADOPTION_REACH_CLAUSE\} \$\{limit\}`\);$/m,
+      /^\s*denyBind\(`\$\{cause\} \$\{UNBOUND_ADOPTION_REMEDY\} \$\{ADOPTION_REACH_CLAUSE\} \$\{ORPHAN_LIMIT_CLAUSE\}`\);$/m,
+      /^\s*denyBind\(`\$\{cause\} \$\{UNBOUND_ADOPTION_REMEDY\} \$\{ADOPTION_REACH_CLAUSE\} \$\{PRUNED_DOWNGRADE_CLAUSE\} \$\{PRUNED_ORPHAN_CLAUSE\}`\);$/m,
+      /^\s*denyBind\(`\$\{cause\} Run \/zensu:adopt-session to see the diagnosis, and \/zensu:adopt-session --confirm to rebuild the document\. \$\{ADOPTION_REACH_CLAUSE\} /m,
     ];
     renderSites.forEach((site, index) => {
-      if (!site.test(gate)) faults.push("limit clause render site " + (index + 1) + " (typed, lineage fallback, pruned fallback) is not spelled through the constants");
+      if (!site.test(gate)) faults.push("clause render site " + (index + 1) + " (typed limit, typed deny, lineage fallback, pruned fallback, baseline missing) is not spelled through the constants");
     });
+    const reachSites = gate.split("${ADOPTION_REACH_CLAUSE}").length - 1;
+    if (reachSites !== 4) faults.push("the gate renders the reach clause " + reachSites + " times, want 4 (typed, lineage fallback, pruned fallback, baseline missing)");
     const unbound = constant("UNBOUND_ADOPTION_REMEDY");
     if (unbound === null) faults.push("UNBOUND_ADOPTION_REMEDY not parsed from the gate");
     else if (gate.split(unbound).length - 1 !== 1) faults.push("the gate spells the unbound remedy more than once");
@@ -1774,7 +1788,7 @@ done
 # value of this list is that every member states why it cannot deny.
 adopt_hook_expected() {
   case "$1" in
-    pre-bash-zensu-gate.sh|pre-browser-navigation-consent.sh|pre-work-order-gate.sh) printf 'allow\n' ;;
+    pre-bash-zensu-gate.sh|pre-browser-navigation-consent.sh|pre-work-order-gate.sh|pre-verify-auth-guard.sh) printf 'allow\n' ;;
     *) printf '%s\n' "$2" ;;
   esac
 }
@@ -3449,7 +3463,9 @@ EOF
       && grep -qF 'it was REFUSED: opted-out' "$PRUNED_STOP_ERR" \
       && grep -qF 'version 0.17.0' "$PRUNED_STOP_ERR" \
       && grep -qF '/zensu:adopt-session --confirm' "$PRUNED_STOP_ERR" \
-      && grep -qF 'its recorded project root is intact' "$PRUNED_STOP_ERR" \
+      && grep -qF 'Whether the recorded project root still exists is not determined here' "$PRUNED_STOP_ERR" \
+      && grep -qF 'later Stops take the orphan release instead' "$PRUNED_STOP_ERR" \
+      && ! grep -qF 'its recorded project root is intact' "$PRUNED_STOP_ERR" \
       && ! grep -qF 'The binding that resolves the project root is what failed' "$PRUNED_STOP_ERR" \
       && grep -qF '"decision":"block"' "$PRUNED_STOP_CONTROL"; then
     check "AC-D08 Stop releases in the pruned state naming both versions and the remedy, and still blocks a pruned-and-tampered record" PASS
@@ -7104,6 +7120,190 @@ if auto_session_start "$AUTO_SWEEP_SESSION" "$AUTO_SWEEP_PROJECT" "$SYNTHETIC_CA
   rm -f "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$AUTO_SWEEP_KEY"
 else
   check "AUTO-29 fixture: the served-sweep sessions register under the candidate root" FAIL
+fi
+
+combined_payload() {
+  EVENT=PreToolUse SESSION="$1" CWD="$2" TOOL="$3" node -e '
+    const input = process.env.TOOL === "Edit"
+      ? {file_path: "README.md", old_string: "a", new_string: "b"}
+      : {file_path: "README.md"};
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT, session_id: process.env.SESSION, cwd: process.env.CWD,
+      tool_name: process.env.TOOL, tool_input: input,
+    }));
+  '
+}
+combined_gate() {
+  printf '%s' "$2" \
+    | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_CONFIG="$4" \
+      bash "$PRUNED_SUCCESSOR/hooks/$1" >"$3" 2>"$3.err" || { printf 'hook-exit-nonzero\n'; return; }
+  OUT_FILE="$3" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") { process.stdout.write("allow\n"); process.exit(0); }
+    try { process.stdout.write(`${JSON.parse(raw).hookSpecificOutput?.permissionDecision || "allow"}\n`); }
+    catch (_error) { process.stdout.write("unparseable\n"); }
+  '
+}
+combined_stop() {
+  printf '{"hook_event_name":"Stop","session_id":"%s"}' "$1" \
+    | env -u ZENSU_CHAIN CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" HOME="$AUTO_STOP_HOME" ZENSU_CONFIG="$4" \
+      bash "$PRUNED_SUCCESSOR/hooks/stop-chain-enforcer.sh" >"$2" 2>"$3"
+}
+combined_field() {
+  node -p "require(process.argv[1]).$2" "$1" 2>/dev/null || printf 'unreadable'
+}
+
+if [ -n "$PRUNED_SUCCESSOR" ]; then
+  COMBINED_AUTO_ROOT="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.17.0 "$ROOT_REVISION" 2>/dev/null)"
+  COMBINED_AUTO_SESSION='versioned-upgrade-combined-auto'
+  COMBINED_AUTO_PROJECT="$TMP/combined-auto-project"
+  COMBINED_AUTO_KEY="$(auto_key "$COMBINED_AUTO_SESSION")"
+  COMBINED_AUTO_RECORD="$PRUNED_DATA/session-control/v1/records/$COMBINED_AUTO_KEY.json"
+  mkdir -p "$COMBINED_AUTO_PROJECT"
+  if [ -n "$COMBINED_AUTO_ROOT" ] \
+      && auto_session_start "$COMBINED_AUTO_SESSION" "$COMBINED_AUTO_PROJECT" "$COMBINED_AUTO_ROOT" "$PRUNED_DATA" \
+      && [ -f "$COMBINED_AUTO_RECORD" ]; then
+    COMBINED_AUTO_ANCHOR="$(combined_field "$COMBINED_AUTO_RECORD" project_root)"
+    rm -rf "$COMBINED_AUTO_ROOT" "$COMBINED_AUTO_PROJECT"
+    COMBINED_AUTO_OUT="$TMP/combined-auto.out"
+    COMBINED_AUTO_READ="$(combined_gate pre-reviewer-capability-gate.sh \
+      "$(combined_payload "$COMBINED_AUTO_SESSION" "$COMBINED_AUTO_PROJECT" Read)" "$COMBINED_AUTO_OUT" "$HERMETIC_CONFIG")"
+    COMBINED_AUTO_SYSTEM="$(auto_stdout_field "$COMBINED_AUTO_OUT" systemMessage)"
+    COMBINED_AUTO_EDIT_OUT="$TMP/combined-auto-edit.out"
+    COMBINED_AUTO_EDIT="$(combined_gate pre-edit-tdd-reminder.sh \
+      "$(combined_payload "$COMBINED_AUTO_SESSION" "$COMBINED_AUTO_PROJECT" Edit)" "$COMBINED_AUTO_EDIT_OUT" "$HERMETIC_CONFIG")"
+    COMBINED_AUTO_EDIT_REASON="$(auto_reason_of "$COMBINED_AUTO_EDIT_OUT")"
+    COMBINED_AUTO_STOP_OUT="$TMP/combined-auto-stop.out"; COMBINED_AUTO_STOP_ERR="$TMP/combined-auto-stop.err"
+    COMBINED_AUTO_STOP_RC=0
+    combined_stop "$COMBINED_AUTO_SESSION" "$COMBINED_AUTO_STOP_OUT" "$COMBINED_AUTO_STOP_ERR" "$TMP/no-such-config.json" \
+      || COMBINED_AUTO_STOP_RC=$?
+    if [ "$COMBINED_AUTO_READ" = allow ] \
+        && printf '%s' "$COMBINED_AUTO_SYSTEM" | grep -qF 'updated from 0.17.0 to 0.18.0' \
+        && printf '%s' "$COMBINED_AUTO_SYSTEM" | grep -qF 'adopted automatically on this tool call' \
+        && printf '%s' "$COMBINED_AUTO_SYSTEM" | grep -qF 'The recorded project root is still gone' \
+        && [ "$(auto_record_version "$COMBINED_AUTO_RECORD")" = 0.18.0 ] \
+        && [ "$(combined_field "$COMBINED_AUTO_RECORD" plugin_root)" = "$PRUNED_SUCCESSOR" ] \
+        && [ "$(combined_field "$COMBINED_AUTO_RECORD" project_root)" = "$COMBINED_AUTO_ANCHOR" ] \
+        && [ -f "$PRUNED_DATA/session-control/v1/records/$COMBINED_AUTO_KEY.superseded-0.17.0.json" ] \
+        && [ ! -e "$COMBINED_AUTO_PROJECT" ] \
+        && [ "$COMBINED_AUTO_EDIT" = deny ] \
+        && printf '%s' "$COMBINED_AUTO_EDIT_REASON" | grep -qF 'the project root it records no longer exists' \
+        && printf '%s' "$COMBINED_AUTO_EDIT_REASON" | grep -qF '/zensu:adopt-session --restore-root' \
+        && ! printf '%s' "$COMBINED_AUTO_EDIT_REASON" | grep -qF 'removed from the plugin cache' \
+        && ! printf '%s' "$COMBINED_AUTO_EDIT_REASON" | grep -qF 'tried to adopt the record automatically' \
+        && [ "$COMBINED_AUTO_STOP_RC" = 0 ] && stop_notice_only "$COMBINED_AUTO_STOP_OUT" "$COMBINED_AUTO_STOP_ERR" \
+        && grep -qF 'no longer exists' "$COMBINED_AUTO_STOP_ERR" \
+        && ! grep -qF 'removed from the plugin cache' "$COMBINED_AUTO_STOP_ERR" \
+        && ! grep -qF 'declares an incompatible lineage' "$COMBINED_AUTO_STOP_ERR"; then
+      check "AUTO-30 a record whose minting installation was pruned AND whose recorded project root is gone adopts on the first hook contact around its absent anchor, announces the orphan clause, still denies Edit on the orphaned-root scope, and Stop takes the orphan release" PASS
+    else
+      check "AUTO-30 the combined state adopts on the first hook contact (read=$COMBINED_AUTO_READ edit=$COMBINED_AUTO_EDIT version=$(auto_record_version "$COMBINED_AUTO_RECORD") stop-rc=$COMBINED_AUTO_STOP_RC)" FAIL
+      printf '  gate: %.400s\n  gate stderr: %.300s\n  edit: %.300s\n  stop: %.300s\n' "$(cat "$COMBINED_AUTO_OUT" 2>/dev/null)" \
+        "$(cat "$COMBINED_AUTO_OUT.err" 2>/dev/null)" "$COMBINED_AUTO_EDIT_REASON" "$(cat "$COMBINED_AUTO_STOP_ERR" 2>/dev/null)"
+    fi
+  else
+    check "AUTO-30 fixture: a combined-state session could not be minted" FAIL
+  fi
+
+  COMBINED_OFF_ROOT="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.17.0 "$ROOT_REVISION" 2>/dev/null)"
+  COMBINED_OFF_SESSION='versioned-upgrade-combined-opted-out'
+  COMBINED_OFF_PROJECT="$TMP/combined-off-project"
+  COMBINED_OFF_KEY="$(auto_key "$COMBINED_OFF_SESSION")"
+  COMBINED_OFF_RECORD="$PRUNED_DATA/session-control/v1/records/$COMBINED_OFF_KEY.json"
+  COMBINED_OFF_COPY="$TMP/combined-off-record.copy"
+  mkdir -p "$COMBINED_OFF_PROJECT"
+  if [ -n "$COMBINED_OFF_ROOT" ] \
+      && auto_session_start "$COMBINED_OFF_SESSION" "$COMBINED_OFF_PROJECT" "$COMBINED_OFF_ROOT" "$PRUNED_DATA" \
+      && [ -f "$COMBINED_OFF_RECORD" ] && cp "$COMBINED_OFF_RECORD" "$COMBINED_OFF_COPY"; then
+    COMBINED_OFF_ANCHOR="$(combined_field "$COMBINED_OFF_RECORD" project_root)"
+    rm -rf "$COMBINED_OFF_ROOT" "$COMBINED_OFF_PROJECT"
+    COMBINED_OFF_CAP_OUT="$TMP/combined-off-cap.out"
+    COMBINED_OFF_CAP="$(combined_gate pre-reviewer-capability-gate.sh \
+      "$(combined_payload "$COMBINED_OFF_SESSION" "$COMBINED_OFF_PROJECT" Read)" "$COMBINED_OFF_CAP_OUT" "$OPT_OUT_CONFIG")"
+    COMBINED_OFF_CAP_REASON="$(auto_reason_of "$COMBINED_OFF_CAP_OUT")"
+    COMBINED_OFF_BASH_OUT="$TMP/combined-off-bash.out"
+    COMBINED_OFF_BASH="$(combined_gate pre-write-secret-scan.sh \
+      "$(bash_payload "$COMBINED_OFF_SESSION" 'echo probe')" "$COMBINED_OFF_BASH_OUT" "$OPT_OUT_CONFIG")"
+    COMBINED_OFF_BASH_REASON="$(auto_reason_of "$COMBINED_OFF_BASH_OUT")"
+    COMBINED_OFF_STOP_OUT="$TMP/combined-off-stop.out"; COMBINED_OFF_STOP_ERR="$TMP/combined-off-stop.err"
+    COMBINED_OFF_STOP_RC=0
+    combined_stop "$COMBINED_OFF_SESSION" "$COMBINED_OFF_STOP_OUT" "$COMBINED_OFF_STOP_ERR" "$OPT_OUT_CONFIG" \
+      || COMBINED_OFF_STOP_RC=$?
+    COMBINED_OFF_DOCTOR_OUT="$TMP/combined-off-doctor.out"
+    COMBINED_OFF_DOCTOR_HOME="$TMP/combined-off-doctor-home"; mkdir -p "$COMBINED_OFF_DOCTOR_HOME"
+    CLAUDE_CODE_SESSION_ID="$COMBINED_OFF_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" HOME="$COMBINED_OFF_DOCTOR_HOME" \
+      bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-doctor.sh" >"$COMBINED_OFF_DOCTOR_OUT" 2>/dev/null
+    COMBINED_OFF_REPORT_OUT="$TMP/combined-off-report.out"
+    CLAUDE_CODE_SESSION_ID="$COMBINED_OFF_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh" >"$COMBINED_OFF_REPORT_OUT" 2>&1 || true
+    COMBINED_OFF_UNCHANGED=no
+    cmp -s "$COMBINED_OFF_COPY" "$COMBINED_OFF_RECORD" \
+      && [ ! -e "$PRUNED_DATA/session-control/v1/records/$COMBINED_OFF_KEY.superseded-0.17.0.json" ] \
+      && COMBINED_OFF_UNCHANGED=yes
+    if [ "$COMBINED_OFF_CAP" = deny ] \
+        && printf '%s' "$COMBINED_OFF_CAP_REASON" | grep -qF 'removed from the plugin cache' \
+        && printf '%s' "$COMBINED_OFF_CAP_REASON" | grep -qF '(version 0.17.0)' \
+        && printf '%s' "$COMBINED_OFF_CAP_REASON" | grep -qF 'it was REFUSED: opted-out' \
+        && printf '%s' "$COMBINED_OFF_CAP_REASON" | grep -qF 'an adoption still re-mints the record under the running installation' \
+        && printf '%s' "$COMBINED_OFF_CAP_REASON" | grep -qF 'which must happen AFTER the adoption' \
+        && printf '%s' "$COMBINED_OFF_CAP_REASON" | grep -qF 'never through the Skill tool' \
+        && [ "$COMBINED_OFF_BASH" = deny ] \
+        && printf '%s' "$COMBINED_OFF_BASH_REASON" | grep -qF 'removed from the plugin cache' \
+        && printf '%s' "$COMBINED_OFF_BASH_REASON" | grep -qF 'an adoption still re-mints the record under the running installation' \
+        && printf '%s' "$COMBINED_OFF_BASH_REASON" | grep -qF 'never through the Skill tool' \
+        && [ "$COMBINED_OFF_STOP_RC" = 0 ] && stop_notice_only "$COMBINED_OFF_STOP_OUT" "$COMBINED_OFF_STOP_ERR" \
+        && grep -qF 'removed from the plugin cache' "$COMBINED_OFF_STOP_ERR" \
+        && grep -qF 'it was REFUSED: opted-out' "$COMBINED_OFF_STOP_ERR" \
+        && grep -qF 'Whether the recorded project root still exists is not determined here' "$COMBINED_OFF_STOP_ERR" \
+        && grep -qF 'removed from the plugin cache' "$COMBINED_OFF_DOCTOR_OUT" \
+        && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$COMBINED_OFF_DOCTOR_OUT" \
+        && grep -qF 'If the recorded project root is gone as well' "$COMBINED_OFF_DOCTOR_OUT" \
+        && ! grep -qF 'no valid Session Control record' "$COMBINED_OFF_DOCTOR_OUT" \
+        && grep -qF 'Zensu session adoption — ADOPTABLE' "$COMBINED_OFF_REPORT_OUT" \
+        && grep -qF 'installation pruned from the plugin cache' "$COMBINED_OFF_REPORT_OUT" \
+        && grep -qF 'The recorded project root no longer exists' "$COMBINED_OFF_REPORT_OUT" \
+        && [ "$COMBINED_OFF_UNCHANGED" = yes ]; then
+      check "AUTO-31 with the automatic path opted out, the combined state is named as a pruned installation by the capability gate and a Bash gate, both carrying the restore-after-adoption clause and the Bash-only reach, the Stop releases without claiming the project root either way, the doctor and the report name it, and every surface leaves the record byte-identical" PASS
+    else
+      check "AUTO-31 the opted-out combined state (cap=$COMBINED_OFF_CAP bash=$COMBINED_OFF_BASH stop-rc=$COMBINED_OFF_STOP_RC unchanged=$COMBINED_OFF_UNCHANGED)" FAIL
+      printf '  cap: %.400s\n  bash: %.300s\n  stop: %.300s\n' "$COMBINED_OFF_CAP_REASON" "$COMBINED_OFF_BASH_REASON" \
+        "$(cat "$COMBINED_OFF_STOP_ERR" 2>/dev/null)"
+      grep -F 'binding:' "$COMBINED_OFF_DOCTOR_OUT" 2>/dev/null; head -c 400 "$COMBINED_OFF_REPORT_OUT" 2>/dev/null; printf '\n'
+    fi
+
+    COMBINED_OFF_CONFIRM_OUT="$TMP/combined-off-confirm.out"
+    CLAUDE_CODE_SESSION_ID="$COMBINED_OFF_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" ZENSU_CONFIG="$OPT_OUT_CONFIG" \
+      bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh" --confirm >"$COMBINED_OFF_CONFIRM_OUT" 2>&1 || true
+    COMBINED_OFF_RESTORE_OUT="$TMP/combined-off-restore.out"
+    CLAUDE_CODE_SESSION_ID="$COMBINED_OFF_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh" --restore-root --confirm >"$COMBINED_OFF_RESTORE_OUT" 2>&1 || true
+    COMBINED_OFF_BOUND=no
+    if printf '%s' "$(combined_payload "$COMBINED_OFF_SESSION" "$PROJECT" Read)" \
+        | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+          node "$PRUNED_SUCCESSOR/hooks/lib/claude-hook-session-v1.js" >"$TMP/combined-off-bind.out" 2>/dev/null \
+        && grep -qF 'export ZENSU_SESSION_KEY=' "$TMP/combined-off-bind.out"; then
+      COMBINED_OFF_BOUND=yes
+    fi
+    if grep -qF 'ADOPTED' "$COMBINED_OFF_CONFIRM_OUT" \
+        && grep -qF 'The recorded project root is still gone' "$COMBINED_OFF_CONFIRM_OUT" \
+        && grep -qF 'Zensu project-root restore — RESTORED' "$COMBINED_OFF_RESTORE_OUT" \
+        && [ -d "$COMBINED_OFF_ANCHOR" ] \
+        && [ "$(auto_record_version "$COMBINED_OFF_RECORD")" = 0.18.0 ] \
+        && [ "$COMBINED_OFF_BOUND" = yes ]; then
+      check "AUTO-31b the combined state is repaired in the order every surface names: --confirm adopts it around the absent anchor, --restore-root --confirm then re-creates that directory, and the session binds strictly afterwards" PASS
+    else
+      check "AUTO-31b the combined-state repair order (bound=$COMBINED_OFF_BOUND version=$(auto_record_version "$COMBINED_OFF_RECORD"))" FAIL
+      head -c 400 "$COMBINED_OFF_CONFIRM_OUT" 2>/dev/null; printf '\n'; head -c 400 "$COMBINED_OFF_RESTORE_OUT" 2>/dev/null; printf '\n'
+    fi
+  else
+    check "AUTO-31 fixture: an opted-out combined-state session could not be minted" FAIL
+  fi
+else
+  check "AUTO-30 fixture: no pruned successor root" FAIL
 fi
 
 unit_check_done "every unit file the registry gives this suite was graded"

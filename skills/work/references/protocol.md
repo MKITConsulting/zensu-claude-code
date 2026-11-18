@@ -58,8 +58,10 @@ no `--client-name`.
 ## Binding the spec
 
 `--autopilot-begin --work-order <id>` stores the binding `{orderId, attempt, specHash}` in the run
-record. `--bind-spec --run <id>` then refuses a working branch without the order's prefix, reports
-`planning`, reads the order again, refuses a spec that changed since `--start`, reports
+record. `--bind-spec --run <id>` then refuses a working branch without the order's prefix, refuses
+a run that validates while `.zensu/plans/<order-id>.md` carries no active `AC-###` row
+(`plan-criteria-unusable`, exit 8, before any stage is reported), reports `planning`, reads the
+order again, refuses a spec that changed since `--start`, reports
 `implementing`, and only after Zensu accepted `implementing` records `ORDER_SPEC_BOUND`, which moves the run from `PLANNING` to `AWAIT_TDD`. Zensu claims only
 queued orders and starts every attempt at `claimed`, keeping the branch, the pull request and the
 head of the earlier attempt, so a new attempt reports `planning` and `implementing` again. An order
@@ -76,7 +78,10 @@ and compares the plan file at that commit with the plan file in the working tree
 attempt, not by list position, because Zensu sorts the timeline by event time and the session's
 events carry the worker's clock while the approval carries the server's. A difference blocks the order with
 `worker_error`. The run's `approvedPlanSha256` is the SHA-256 of the approved plan file; with
-`plan_approval = auto` it is the order's spec hash.
+`plan_approval = auto` it is the order's spec hash. The VALIDATE stage reads its acceptance
+criteria from `.zensu/plans/<order-id>.md`: `zensu-log.sh --autopilot-validate` checks that file
+against `approvedPlanSha256` when a person approved it, and with `auto` its
+`ACCEPTANCE PLAN UNAPPROVED` line says that no person did.
 
 ## Pushing
 
@@ -191,7 +196,12 @@ Outside work-order mode all three print nothing and exit 0.
   subcommand, because it can no longer tell which verb a call runs, and the denial says that the plugin installation is incomplete. It reads commands inside `bash -c`,
   `eval`, `env -S`, command substitutions and wrappers such as `env` or `sudo`. It reads every
   command three ways, with plain single quotes and with the ANSI-C quoting (`$'work'`) of bash and
-  of zsh, and denies when any reading finds a forbidden command. It denies an option between `-c`
+  of zsh, and denies when any reading finds a forbidden command. When none does and the command
+  holds `<`, `>` or `$`, through which an ANSI-C string can spell either, it reads it again with
+  each redirection removed as bash, zsh or a POSIX shell
+  removes it, so `2>/dev/null`, `>&2` or `&>file` in front of a program, a noun or a verb hides
+  none of them, and it reads the command substitutions of a heredoc body whose delimiter is
+  unquoted. It denies an option between `-c`
   and the command string, which it cannot judge. It renews the lease when due, and once the lease is
   lost or the session ended it denies every `gh`, `glab` and `zensu-vcs.sh` call, as it does while
   Zensu refused the lease and a send without an answer still waits for its replay; that denial

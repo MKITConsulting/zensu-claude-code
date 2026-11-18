@@ -159,6 +159,38 @@ function fannedOut(f, subagentType, agentId, extra = {}) {
   return result;
 }
 
+function named(payload, name) {
+  return { ...payload, tool_input: { ...payload.tool_input, name } };
+}
+
+function namePath(f, agentId, key = SESSION) {
+  return path.join(f.data, ...br.STORE_SEGMENTS, br.NAMES_SEGMENT, key, `${agentId}.json`);
+}
+
+function queued(from) {
+  return handback(from).split('\n').slice(1).join('\n');
+}
+
+function reviewerPath(f, agentId, key = SESSION) {
+  return path.join(f.data, ...br.STORE_SEGMENTS, br.REVIEWERS_SEGMENT, key, `${agentId}.json`);
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function runningPayload(pairs, type = 'subagent', status = 'running') {
+  return {
+    hook_event_name: 'Stop',
+    session_id: 'background-review-unit-session',
+    background_tasks: pairs.map(([id, description]) => ({ id, type, status, description })),
+  };
+}
+
+function failedRun(f, agentId, now) {
+  assert.equal(br.matchArrival(prompt(notification(agentId, 'failed')), options(f, { now })).retired, 1);
+}
+
 test('a standalone launch records one exact-key record at mode 0600', () => {
   const f = fixture();
   const result = recorded(f);
@@ -387,9 +419,10 @@ test('the wait verdict holds while a fresh record matches the issued ticket', ()
   const f = fixture();
   assert.deepEqual(br.waitVerdict(options(f)), { wait: false, reason: 'none' });
   recorded(f);
-  const held = { wait: true, kind: 'consume', agentId: AGENT, ageMinutes: 5, count: 1, ttlMinutes: 60 };
+  const held = { wait: true, kind: 'consume', agentId: AGENT, agents: [AGENT], ageMinutes: 5, count: 1, ttlMinutes: 60 };
   assert.deepEqual(br.waitVerdict(options(f, { now: BASE + 5 * MINUTE })), held);
   assert.equal(br.waitLine(held), `wait kind=consume agent=${AGENT} age=5 count=1 ttl=60`);
+  assert.equal(br.waitNote(held, runningPayload([[AGENT, 'Code review']])), 'Zensu is waiting for the code review; the review chain continues when it reports back.');
   assert.deepEqual(br.waitVerdict(options(f, { now: BASE + 60 * MINUTE })), { wait: false, reason: 'expired' });
   assert.deepEqual(br.waitVerdict(options(f, { now: BASE - 10 * MINUTE })), { wait: false, reason: 'clock' });
   assert.equal(br.waitVerdict(options(f, { now: BASE - 2 * MINUTE })).wait, true);
@@ -447,10 +480,10 @@ test('the wait verdict holds for fresh fan-out entries, reports the newest and p
   fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
   fannedOut(f, 'zensu:review-judge', JUDGE_AGENT, { now: BASE + 2 * MINUTE });
   const held = br.waitVerdict(options(f, { now: BASE + 5 * MINUTE }));
-  assert.deepEqual(held, { wait: true, kind: 'fanout', agentId: JUDGE_AGENT, ageMinutes: 3, count: 2, ttlMinutes: 60 });
+  assert.deepEqual(held, { wait: true, kind: 'fanout', agentId: JUDGE_AGENT, agents: [ASPECT_AGENT, JUDGE_AGENT], ageMinutes: 3, count: 2, ttlMinutes: 60 });
   assert.equal(br.waitLine(held), `wait kind=fanout agent=${JUDGE_AGENT} age=3 count=2 ttl=60`);
   const later = br.waitVerdict(options(f, { now: BASE + 61 * MINUTE }));
-  assert.deepEqual(later, { wait: true, kind: 'fanout', agentId: JUDGE_AGENT, ageMinutes: 59, count: 1, ttlMinutes: 60 });
+  assert.deepEqual(later, { wait: true, kind: 'fanout', agentId: JUDGE_AGENT, agents: [JUDGE_AGENT], ageMinutes: 59, count: 1, ttlMinutes: 60 });
   assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
   assert.deepEqual(br.waitVerdict(options(f, { now: BASE + 63 * MINUTE })), { wait: false, reason: 'none' });
   assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), false);
@@ -531,7 +564,7 @@ test('the CLI answers record, fanout, match, retire and wait through its environ
   assert.equal(fanout.stdout, `recorded agent=${ASPECT_AGENT} ttl=60\n`);
   const wait = run(['wait'], '');
   assert.equal(wait.status, 0);
-  assert.match(wait.stdout, new RegExp(`^wait kind=consume agent=${AGENT} age=\\d+ count=1 ttl=60\\n$`));
+  assert.match(wait.stdout, new RegExp(`^wait kind=consume agent=${AGENT} age=\\d+ count=1 ttl=60\\nZensu is waiting for the code review; the review chain continues when it reports back\\.\\n$`));
   const none = run(['match'], JSON.stringify(prompt('a typed prompt')));
   assert.deepEqual(JSON.parse(none.stdout), { verdict: 'none', reason: 'no-arrival', retired: 0 });
   const aspect = run(['match'], JSON.stringify(prompt(handback(ASPECT_AGENT))));
@@ -786,4 +819,416 @@ test('validateArrival rejects a foreign shape', () => {
   const { holds, ...withoutHolds } = note;
   assert.equal(holds, 0);
   assert.equal(br.validateArrival(withoutHolds), 'arrival keys');
+});
+
+test('a named background launch binds its name to its agent id at 0600 with an exact key set, and nothing else binds', () => {
+  const f = fixture();
+  const aspect = br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  assert.deepEqual(aspect, { recorded: true, agentId: ASPECT_AGENT, ttlMinutes: 60 });
+  const binding = JSON.parse(fs.readFileSync(namePath(f, ASPECT_AGENT), 'utf8'));
+  assert.deepEqual(Object.keys(binding).sort(), [...br.NAME_KEYS].sort());
+  assert.deepEqual(binding, { schema: br.SCHEMA, session_key: SESSION, agent_id: ASPECT_AGENT, name: 'aspect-security', named_at_ms: BASE });
+  assert.equal(br.validateName(binding, { sessionKey: SESSION, agentId: ASPECT_AGENT }), null);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(namePath(f, ASPECT_AGENT)).mode & 0o777, 0o600);
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  assert.equal(JSON.parse(fs.readFileSync(namePath(f, AGENT), 'utf8')).name, 'consume-reviewer');
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT);
+  assert.equal(fs.existsSync(namePath(f, JUDGE_AGENT)), false, 'an unnamed launch binds nothing');
+  for (const bad of ['', 'two words', 'x'.repeat(65), '-lead', 'a"b', 7]) {
+    br.recordFanout(named(fanoutPayload('zensu:review-aspect', OTHER_AGENT), bad), options(f));
+    assert.equal(fs.existsSync(namePath(f, OTHER_AGENT)), false, `the name ${JSON.stringify(bad)} binds nothing`);
+  }
+  assert.equal(br.recordFanout(named(fanoutPayload('zensu:review-aspect', PERSONA_AGENT, 'completed'), 'aspect-design'), options(f)).reason, 'not-async');
+  assert.equal(br.recordLaunch(named(launchPayload(standalonePrompt(OTHER_TICKET), PERSONA_AGENT), 'consume-again'), options(f)).reason, 'ticket-not-issued');
+  assert.equal(fs.existsSync(namePath(f, PERSONA_AGENT)), false, 'a launch the store refused binds nothing');
+});
+
+test('a hand-back framed with a bound name names its agent in either host frame position', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  br.recordFanout(named(fanoutPayload('zensu:review-judge', JUDGE_AGENT), 'judge-primary'), options(f));
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  assert.deepEqual(br.matchArrival(prompt(handback('aspect-security')), options(f)), { verdict: 'none', reason: 'no-arrival', retired: 1 });
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
+  assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), true);
+  assert.equal(br.noteArrival(arrivalPrompt(queued('judge-primary')), options(f)).retired, 1);
+  assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), false);
+  assert.deepEqual(br.noteArrival(arrivalPrompt(queued('consume-reviewer')), options(f)), { pending: true, agentId: AGENT, source: 'prompt', retired: 0 });
+  assert.equal(JSON.parse(fs.readFileSync(arrivalPath(f), 'utf8')).arrival, 'handback');
+  const claim = br.matchArrival(prompt(handback('consume-reviewer')), options(f));
+  assert.equal(claim.verdict, 'claim');
+  assert.equal(claim.arrival, 'handback');
+  assert.equal(claim.source, 'prompt');
+  assert.equal(claim.record.agent_id, AGENT);
+});
+
+test('a name frame counts only on the first line or right after the peer line, while an id frame counts anywhere at column zero', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  const late = `typed text\n${queued('aspect-security')}`;
+  const wrapped = `Another Claude session sent a message:\n<cross-session-message from="local_x">\n${queued('aspect-security')}\n</cross-session-message>`;
+  const indented = queued('aspect-security').split('\n').map((line) => `  ${line}`).join('\n');
+  for (const text of [late, wrapped, indented]) {
+    assert.equal(br.matchArrival(prompt(text), options(f)).retired, 0, text);
+  }
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(br.matchArrival(prompt(`typed text\n${queued(ASPECT_AGENT)}`), options(f)).retired, 1, 'an id frame keeps the column-zero rule');
+});
+
+test('the newest launch of a name holds it, and an older launch of that name is named by its agent id only', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-correctness'), options(f));
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', OTHER_AGENT), 'aspect-correctness'), options(f, { now: BASE + MINUTE }));
+  assert.equal(fs.existsSync(namePath(f, ASPECT_AGENT)), false);
+  assert.equal(JSON.parse(fs.readFileSync(namePath(f, OTHER_AGENT), 'utf8')).named_at_ms, BASE + MINUTE);
+  assert.equal(br.matchArrival(prompt(handback('aspect-correctness')), options(f)).retired, 1);
+  assert.equal(fs.existsSync(fanoutPath(f, OTHER_AGENT)), false);
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(br.matchArrival(prompt(handback('aspect-correctness')), options(f)).retired, 0, 'a repeated delivery names the retired holder, never the older launch');
+  assert.equal(br.matchArrival(prompt(handback(ASPECT_AGENT)), options(f)).retired, 1);
+});
+
+test('a named spawn the store does not record releases the name through unbind', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-correctness'), options(f));
+  const general = named({
+    hook_event_name: 'PostToolUse',
+    session_id: 'background-review-unit-session',
+    tool_name: 'Agent',
+    tool_input: { subagent_type: 'general-purpose', prompt: 'Summarize the change.' },
+    tool_response: { isAsync: true, status: 'async_launched', agentId: OTHER_AGENT },
+  }, 'aspect-correctness');
+  const env = { ...process.env, ZENSU_BR_PLUGIN_DATA: f.data, ZENSU_BR_SESSION_KEY: SESSION };
+  const run = (input, extra = {}) => spawnSync(process.execPath, [MODULE, 'unbind'], { env: { ...env, ...extra }, input, encoding: 'utf8' });
+  const released = run(JSON.stringify(general));
+  assert.equal(released.status, 0);
+  assert.equal(released.stdout, 'unbound count=1\n');
+  assert.equal(fs.existsSync(namePath(f, ASPECT_AGENT)), false);
+  assert.equal(br.matchArrival(prompt(handback('aspect-correctness')), options(f)).retired, 0);
+  assert.equal(br.matchArrival(prompt(handback(ASPECT_AGENT)), options(f)).retired, 1);
+  assert.equal(run(JSON.stringify(general)).stdout, 'unbound count=0\n');
+  assert.equal(run(JSON.stringify(named(general, ''))).stdout, 'idle reason=name\n');
+  assert.equal(run('not json').stdout, 'idle reason=payload\n');
+  assert.equal(run(JSON.stringify(general), { ZENSU_BR_SESSION_KEY: 'scv1_x' }).stdout, 'idle reason=fault\n');
+  assert.equal(run(JSON.stringify(general), { ZENSU_BR_PLUGIN_DATA: path.join(f.data, 'missing') }).stdout, 'idle reason=store\n');
+});
+
+test('a name held twice, a binding past the wait bound and a name equal to a known agent id name no agent', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT);
+  const bind = (agentId, name, at = BASE) => {
+    fs.mkdirSync(path.dirname(namePath(f, agentId)), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(namePath(f, agentId), JSON.stringify({ schema: br.SCHEMA, session_key: SESSION, agent_id: agentId, name, named_at_ms: at }), { mode: 0o600 });
+  };
+  bind(ASPECT_AGENT, 'twin');
+  bind(JUDGE_AGENT, 'twin');
+  assert.equal(br.matchArrival(prompt(handback('twin')), options(f)).retired, 0, 'two bindings of one name');
+  assert.deepEqual([...br.nameAliases(options(f))], []);
+  fs.rmSync(namePath(f, JUDGE_AGENT));
+  bind(ASPECT_AGENT, 'stale', BASE - 61 * MINUTE);
+  assert.equal(br.matchArrival(prompt(handback('stale')), options(f)).retired, 0, 'a binding past the wait bound');
+  bind(ASPECT_AGENT, JUDGE_AGENT);
+  assert.equal(br.matchArrival(prompt(handback(JUDGE_AGENT)), options(f)).retired, 1);
+  assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), false, 'the id frame names the judge');
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true, 'a name equal to a known agent id names nobody');
+  bind(ASPECT_AGENT, 'aspect-security');
+  assert.deepEqual([...br.nameAliases(options(f))], [['aspect-security', ASPECT_AGENT]]);
+  assert.deepEqual([...br.nameAliases(options(f, { pluginData: path.join(f.data, 'missing') }))], []);
+  assert.deepEqual([...br.nameAliases(options(f, { sessionKey: 'scv1_x' }))], []);
+});
+
+test('handbackReports resolves the frame in the host position through the aliases it is given', () => {
+  const aliases = new Map([['j1', JUDGE_AGENT], ['aspect-security', ASPECT_AGENT]]);
+  assert.deepEqual(br.handbackReports(queued('j1')), [], 'a short name is no agent id without its binding');
+  assert.deepEqual(br.handbackReports(queued('j1'), aliases).map((entry) => entry.agentId), [JUDGE_AGENT]);
+  assert.deepEqual(br.handbackReports(handback('aspect-security'), aliases), [{ agentId: ASPECT_AGENT, report: 'Verdict: PASS' }]);
+  assert.deepEqual(br.handbackReports(`${handback(AGENT)}\n${queued('aspect-security')}`, aliases).map((entry) => entry.agentId), [AGENT, 'aspect-security'],
+    'a name frame after the first frame is read as an agent id, as before');
+  assert.deepEqual(br.handbackReports(handback('aspect-security'), new Map()).map((entry) => entry.agentId), ['aspect-security']);
+});
+
+test('validateName rejects a foreign shape', () => {
+  const binding = { schema: br.SCHEMA, session_key: SESSION, agent_id: ASPECT_AGENT, name: 'aspect-security', named_at_ms: BASE };
+  assert.equal(br.validateName(binding, { sessionKey: SESSION, agentId: ASPECT_AGENT }), null);
+  const cases = [
+    [{ ...binding, extra: 1 }, 'name keys'],
+    [{ ...binding, schema: 'other' }, 'name schema'],
+    [{ ...binding, session_key: 'scv1_x' }, 'name session key'],
+    [{ ...binding, agent_id: '../x' }, 'name agent id'],
+    [{ ...binding, name: 'two words' }, 'name value'],
+    [{ ...binding, named_at_ms: -1 }, 'name time'],
+    [null, 'name keys'],
+  ];
+  for (const [value, reason] of cases) assert.equal(br.validateName(value), reason);
+  assert.equal(br.validateName(binding, { sessionKey: OTHER_SESSION }), 'name session mismatch');
+  assert.equal(br.validateName(binding, { agentId: JUDGE_AGENT }), 'name agent mismatch');
+});
+
+test('a host-position name frame without the hand-back line names no agent', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  for (const from of ['aspect-security', 'consume-reviewer']) {
+    const bare = `<agent-message from="${from}">\nVerdict: PASS\n</agent-message>`;
+    for (const text of [bare, `Another Claude session sent a message:\n${bare}`]) {
+      assert.deepEqual(br.noteArrival(arrivalPrompt(text), options(f)), { pending: false, reason: 'no-arrival', retired: 0 }, text);
+      assert.deepEqual(br.matchArrival(prompt(text), options(f)), { verdict: 'none', reason: 'no-arrival', retired: 0 }, text);
+    }
+  }
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), true);
+  assert.equal(fs.existsSync(recordPath(f)), true);
+  assert.equal(fs.existsSync(arrivalPath(f)), false);
+});
+
+test('a launch sweeps the name bindings of an idle session and keeps its own', () => {
+  const f = fixture();
+  br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f));
+  const idle = namePath(f, OTHER_AGENT, OTHER_SESSION);
+  fs.mkdirSync(path.dirname(idle), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(idle, '{}', { mode: 0o600 });
+  const old = new Date(BASE - 25 * 60 * MINUTE);
+  fs.utimesSync(idle, old, old);
+  fs.utimesSync(path.dirname(idle), old, old);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT, { now: BASE + MINUTE });
+  assert.equal(fs.existsSync(path.dirname(idle)), false);
+  assert.equal(JSON.parse(fs.readFileSync(namePath(f, ASPECT_AGENT), 'utf8')).name, 'aspect-security');
+});
+
+test('an unusable names segment costs only the name mapping', () => {
+  const f = fixture();
+  const store = path.join(f.data, ...br.STORE_SEGMENTS);
+  fs.mkdirSync(store, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(store, br.NAMES_SEGMENT), 'not a directory', { mode: 0o600 });
+  assert.equal(br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'aspect-security'), options(f)).recorded, true);
+  assert.equal(br.recordLaunch(named(launchPayload(), 'consume-reviewer'), options(f)).recorded, true);
+  assert.deepEqual([...br.nameAliases(options(f))], []);
+  assert.equal(br.matchArrival(prompt(handback('aspect-security')), options(f)).retired, 0);
+  assert.equal(br.matchArrival(prompt(handback(ASPECT_AGENT)), options(f)).retired, 1);
+  assert.deepEqual(br.noteArrival(arrivalPrompt(handback(AGENT)), options(f)), { pending: true, agentId: AGENT, source: 'prompt', retired: 0 });
+  assert.equal(br.matchArrival(prompt(handback(AGENT)), options(f)).verdict, 'claim');
+  assert.deepEqual(br.releaseName(named(fanoutPayload('general-purpose', OTHER_AGENT), 'aspect-security'), options(f)), { released: false, reason: 'store' });
+});
+
+test('a fan-out launch remembers its reviewer at 0600 with an exact key set, and the arrival that retires its entry stamps it', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  const remembered = readJson(reviewerPath(f, ASPECT_AGENT));
+  assert.deepEqual(Object.keys(remembered).sort(), [...br.REVIEWER_KEYS].sort());
+  assert.deepEqual(remembered, {
+    schema: br.SCHEMA,
+    session_key: SESSION,
+    agent_id: ASPECT_AGENT,
+    subagent_type: 'zensu:review-aspect',
+    launched_at_ms: BASE,
+    arrived_at_ms: 0,
+    named: false,
+    renewals: 0,
+  });
+  assert.equal(br.validateReviewer(remembered, { sessionKey: SESSION, agentId: ASPECT_AGENT }), null);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(reviewerPath(f, ASPECT_AGENT)).mode & 0o777, 0o600);
+  assert.equal(br.matchArrival(prompt('please review the change'), options(f, { now: BASE + MINUTE })).retired, 0);
+  assert.equal(readJson(reviewerPath(f, ASPECT_AGENT)).arrived_at_ms, 0);
+  failedRun(f, ASPECT_AGENT, BASE + 5 * MINUTE);
+  assert.equal(readJson(reviewerPath(f, ASPECT_AGENT)).arrived_at_ms, BASE + 5 * MINUTE);
+  assert.equal(readJson(reviewerPath(f, ASPECT_AGENT)).launched_at_ms, BASE);
+  recorded(f);
+  assert.equal(fs.existsSync(reviewerPath(f, AGENT)), false);
+});
+
+test('a Stop that lists a remembered reviewer as running again after its arrival renews its fan-out entry once per arrival', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT);
+  failedRun(f, ASPECT_AGENT, BASE + 5 * MINUTE);
+  failedRun(f, JUDGE_AGENT, BASE + 6 * MINUTE);
+  const resumedAt = BASE + 300 * MINUTE;
+  assert.deepEqual(br.waitVerdict(options(f, { now: resumedAt })), { wait: false, reason: 'none' });
+  const payload = runningPayload([[ASPECT_AGENT, 'Correctness review of the change'], [JUDGE_AGENT, 'Judge of the change']]);
+  const resumed = br.waitVerdict(options(f, { now: resumedAt, payload }));
+  assert.deepEqual(resumed, { wait: true, kind: 'fanout', agentId: ASPECT_AGENT, agents: [ASPECT_AGENT, JUDGE_AGENT], ageMinutes: 0, count: 2, ttlMinutes: 60 });
+  assert.equal(br.waitNote(resumed, payload), 'Zensu is waiting for "Correctness review of the change" and "Judge of the change"; the review chain continues when they report back.');
+  for (const [agentId, type] of [[ASPECT_AGENT, 'zensu:review-aspect'], [JUDGE_AGENT, 'zensu:review-judge']]) {
+    assert.deepEqual(readJson(fanoutPath(f, agentId)), { schema: br.SCHEMA, session_key: SESSION, agent_id: agentId, subagent_type: type, launched_at_ms: resumedAt });
+    assert.deepEqual([readJson(reviewerPath(f, agentId)).launched_at_ms, readJson(reviewerPath(f, agentId)).arrived_at_ms], [resumedAt, 0]);
+  }
+  const next = br.waitVerdict(options(f, { now: resumedAt + MINUTE, payload }));
+  assert.equal(next.count, 2);
+  assert.equal(next.ageMinutes, 1);
+  assert.equal(readJson(fanoutPath(f, ASPECT_AGENT)).launched_at_ms, resumedAt);
+  assert.equal(br.matchArrival(prompt(handback(ASPECT_AGENT)), options(f, { now: resumedAt + 10 * MINUTE })).retired, 1);
+  assert.equal(readJson(reviewerPath(f, ASPECT_AGENT)).arrived_at_ms, resumedAt + 10 * MINUTE);
+  const again = br.waitVerdict(options(f, { now: resumedAt + 20 * MINUTE, payload }));
+  assert.equal(again.count, 2);
+  assert.equal(readJson(fanoutPath(f, ASPECT_AGENT)).launched_at_ms, resumedAt + 20 * MINUTE);
+  assert.equal(readJson(fanoutPath(f, JUDGE_AGENT)).launched_at_ms, resumedAt);
+});
+
+test('nothing is renewed for an unknown agent, a reviewer without an arrival, the consume reviewer, another task type or status, or a malformed payload', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  const stale = BASE + 61 * MINUTE;
+  assert.deepEqual(br.waitVerdict(options(f, { now: stale, payload: runningPayload([[ASPECT_AGENT, 'Correctness review']]) })), { wait: false, reason: 'none' });
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
+  assert.deepEqual(br.waitVerdict(options(f, { now: stale, payload: runningPayload([[OTHER_AGENT, 'Explore the repository']]) })), { wait: false, reason: 'none' });
+  recorded(f, { now: stale });
+  assert.equal(br.matchArrival(prompt(notification(AGENT, 'failed')), options(f, { now: stale + MINUTE })).verdict, 'ended');
+  assert.deepEqual(br.waitVerdict(options(f, { now: stale + 2 * MINUTE, payload: runningPayload([[AGENT, 'Code review']]) })), { wait: false, reason: 'none' });
+  assert.equal(fs.existsSync(fanoutPath(f, AGENT)), false);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT, { now: stale });
+  failedRun(f, JUDGE_AGENT, stale + MINUTE);
+  const later = stale + 5 * MINUTE;
+  for (const payload of [
+    runningPayload([[JUDGE_AGENT, 'Judge']], 'shell'),
+    runningPayload([[JUDGE_AGENT, 'Judge']], 'subagent', 'completed'),
+    { background_tasks: 'not a list' },
+    { background_tasks: [{ id: '../x', type: 'subagent', status: 'running' }] },
+    null,
+  ]) {
+    assert.deepEqual(br.waitVerdict(options(f, { now: later, payload })), { wait: false, reason: 'none' });
+  }
+  assert.equal(fs.existsSync(fanoutPath(f, JUDGE_AGENT)), false);
+  assert.equal(readJson(reviewerPath(f, JUDGE_AGENT)).arrived_at_ms, stale + MINUTE);
+  assert.equal(br.waitVerdict(options(f, { now: later, payload: runningPayload([[JUDGE_AGENT, 'Judge']]) })).count, 1);
+});
+
+test('the reviewer register prunes its own idle entries, sweeps idle sessions, and an unusable segment costs only the renewal', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  const reviewersRoot = path.join(f.data, ...br.STORE_SEGMENTS, br.REVIEWERS_SEGMENT);
+  const idle = path.join(reviewersRoot, OTHER_SESSION);
+  fs.mkdirSync(idle, { mode: 0o700 });
+  fs.writeFileSync(path.join(idle, `${OTHER_AGENT}.json`), '{}');
+  const old = new Date(BASE - 25 * 60 * MINUTE);
+  fs.utimesSync(idle, old, old);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT, { now: BASE + 25 * 60 * MINUTE });
+  assert.equal(fs.existsSync(idle), false);
+  assert.equal(fs.existsSync(reviewerPath(f, ASPECT_AGENT)), false);
+  assert.equal(fs.existsSync(reviewerPath(f, JUDGE_AGENT)), true);
+  const g = fixture();
+  const store = path.join(g.data, ...br.STORE_SEGMENTS);
+  fs.mkdirSync(store, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(store, br.REVIEWERS_SEGMENT), 'not a directory', { mode: 0o600 });
+  assert.equal(br.recordFanout(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), options(g)).recorded, true);
+  assert.equal(br.matchArrival(prompt(notification(ASPECT_AGENT, 'failed')), options(g, { now: BASE + MINUTE })).retired, 1);
+  assert.deepEqual(br.waitVerdict(options(g, { now: BASE + 2 * MINUTE, payload: runningPayload([[ASPECT_AGENT, 'Correctness review']]) })), { wait: false, reason: 'none' });
+  assert.equal(fs.existsSync(fanoutPath(g, ASPECT_AGENT)), false);
+});
+
+test('waitNote names the awaited reviewers in the host order, lists three and counts the rest', () => {
+  const ids = ['a1000000000000001', 'a1000000000000002', 'a1000000000000003', 'a1000000000000004', 'a1000000000000005'];
+  const payload = runningPayload(ids.map((id, index) => [id, `Review ${index + 1}`]));
+  const fanout = (agents, count = agents.length) => ({ wait: true, kind: 'fanout', agents, count });
+  assert.equal(br.waitNote(fanout([ids[2], ids[0], ids[1]]), payload), 'Zensu is waiting for "Review 1", "Review 2" and "Review 3"; the review chain continues when they report back.');
+  assert.equal(br.waitNote(fanout(ids), payload), 'Zensu is waiting for "Review 1", "Review 2", "Review 3" and 2 more background reviewers; the review chain continues when they report back.');
+  assert.equal(br.waitNote(fanout([ids[0], OTHER_AGENT]), payload), 'Zensu is waiting for "Review 1" and 1 more background reviewer; the review chain continues when they report back.');
+  assert.equal(br.waitNote(fanout([OTHER_AGENT]), payload), 'Zensu is waiting for a background reviewer; the review chain continues when it reports back.');
+  assert.equal(br.waitNote(fanout([ids[0], ids[1], ids[2]]), null), 'Zensu is waiting for 3 background reviewers; the review chain continues when they report back.');
+  assert.equal(br.waitNote({ wait: false, reason: 'none' }, payload), '');
+  for (const note of [br.waitNote(fanout(ids), payload), br.waitNote(fanout([OTHER_AGENT]), payload)]) {
+    assert.doesNotMatch(note, /a1000000000000|still running|chain-enforcer|minutes/);
+  }
+});
+
+test('the CLI wait reads the Stop payload on stdin, renews a resumed reviewer and prints the note as a second line', () => {
+  const f = fixture();
+  const env = { ...process.env, ZENSU_BR_PLUGIN_DATA: f.data, ZENSU_BR_SESSION_KEY: SESSION, ZENSU_BR_STATE_FILE: f.stateFile };
+  const run = (args, input) => spawnSync(process.execPath, [MODULE, ...args], { env, input, encoding: 'utf8' });
+  assert.equal(run(['fanout'], JSON.stringify(fanoutPayload())).status, 0);
+  assert.deepEqual(JSON.parse(run(['match'], JSON.stringify(prompt(notification(ASPECT_AGENT, 'failed')))).stdout), { verdict: 'none', reason: 'absent', retired: 1 });
+  assert.equal(run(['wait'], '').stdout, 'nowait reason=none\n');
+  assert.equal(run(['wait'], '{broken').stdout, 'nowait reason=none\n');
+  const resumed = run(['wait'], JSON.stringify(runningPayload([[ASPECT_AGENT, 'Correctness review of the change']])));
+  assert.equal(resumed.status, 0);
+  assert.equal(resumed.stdout, `wait kind=fanout agent=${ASPECT_AGENT} age=0 count=1 ttl=60\nZensu is waiting for "Correctness review of the change"; the review chain continues when it reports back.\n`);
+});
+
+test('a renewal stops at the fan-out cap, and the register refuses a new entry at its session file cap', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  failedRun(f, ASPECT_AGENT, BASE + 5 * MINUTE);
+  fannedOut(f, 'zensu:review-judge', JUDGE_AGENT, { now: BASE + 10 * MINUTE });
+  fannedOut(f, 'zensu:review-aspect', OTHER_AGENT, { now: BASE + 11 * MINUTE });
+  const payload = runningPayload([[ASPECT_AGENT, 'Correctness review'], [JUDGE_AGENT, 'Judge'], [OTHER_AGENT, 'Design review']]);
+  const capped = br.waitVerdict(options(f, { now: BASE + 12 * MINUTE, payload }), br.limitsWith({ maxFanoutEntries: 2 }));
+  assert.equal(capped.count, 2);
+  assert.deepEqual(capped.agents, [JUDGE_AGENT, OTHER_AGENT]);
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
+  const kept = readJson(reviewerPath(f, ASPECT_AGENT));
+  assert.deepEqual([kept.arrived_at_ms, kept.renewals], [BASE + 5 * MINUTE, 0]);
+  const g = fixture();
+  const one = br.limitsWith({ maxSessionFiles: 1 });
+  assert.equal(br.recordFanout(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), options(g), one).recorded, true);
+  assert.equal(br.recordFanout(fanoutPayload('zensu:review-judge', JUDGE_AGENT), options(g, { now: BASE + MINUTE }), one).recorded, true);
+  assert.equal(fs.existsSync(fanoutPath(g, ASPECT_AGENT)), true);
+  assert.equal(fs.existsSync(fanoutPath(g, JUDGE_AGENT)), true);
+  assert.equal(fs.existsSync(reviewerPath(g, ASPECT_AGENT)), true);
+  assert.equal(fs.existsSync(reviewerPath(g, JUDGE_AGENT)), false);
+});
+
+test('a resumed reviewer is renewed at most LIMITS.maxRenewals times, and an entry idle past its bound is pruned rather than renewed', () => {
+  const f = fixture();
+  fannedOut(f, 'zensu:review-aspect', ASPECT_AGENT);
+  const payload = runningPayload([[ASPECT_AGENT, 'Correctness review of the change']]);
+  let now = BASE;
+  for (let renewal = 1; renewal <= br.LIMITS.maxRenewals; renewal += 1) {
+    now += 10 * MINUTE;
+    failedRun(f, ASPECT_AGENT, now);
+    now += MINUTE;
+    assert.equal(br.waitVerdict(options(f, { now, payload })).count, 1);
+    assert.equal(readJson(reviewerPath(f, ASPECT_AGENT)).renewals, renewal);
+  }
+  now += 10 * MINUTE;
+  failedRun(f, ASPECT_AGENT, now);
+  assert.deepEqual(br.waitVerdict(options(f, { now: now + MINUTE, payload })), { wait: false, reason: 'none' });
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
+  assert.equal(readJson(reviewerPath(f, ASPECT_AGENT)).renewals, br.LIMITS.maxRenewals);
+  const g = fixture();
+  fannedOut(g, 'zensu:review-judge', JUDGE_AGENT);
+  failedRun(g, JUDGE_AGENT, BASE + 5 * MINUTE);
+  const idle = BASE + 5 * MINUTE + br.LIMITS.idleMs;
+  assert.deepEqual(br.waitVerdict(options(g, { now: idle, payload: runningPayload([[JUDGE_AGENT, 'Judge of the change']]) })), { wait: false, reason: 'none' });
+  assert.equal(fs.existsSync(fanoutPath(g, JUDGE_AGENT)), false);
+  assert.equal(fs.existsSync(reviewerPath(g, JUDGE_AGENT)), false);
+});
+
+test('a renewal keeps a named reviewer\'s name binding alive, and a named reviewer whose binding is gone is not renewed', () => {
+  const f = fixture();
+  assert.equal(br.recordFanout(named(fanoutPayload('zensu:review-aspect', ASPECT_AGENT), 'correctness-review'), options(f)).recorded, true);
+  assert.equal(readJson(reviewerPath(f, ASPECT_AGENT)).named, true);
+  assert.equal(readJson(namePath(f, ASPECT_AGENT)).named_at_ms, BASE);
+  failedRun(f, ASPECT_AGENT, BASE + 5 * MINUTE);
+  const resumedAt = BASE + 90 * MINUTE;
+  const payload = runningPayload([[ASPECT_AGENT, 'Correctness review of the change']]);
+  assert.equal(br.waitVerdict(options(f, { now: resumedAt, payload })).count, 1);
+  assert.equal(readJson(namePath(f, ASPECT_AGENT)).named_at_ms, resumedAt);
+  assert.equal(br.matchArrival(prompt(handback('correctness-review')), options(f, { now: resumedAt + 10 * MINUTE })).retired, 1);
+  assert.equal(fs.existsSync(fanoutPath(f, ASPECT_AGENT)), false);
+  const g = fixture();
+  assert.equal(br.recordFanout(named(fanoutPayload('zensu:review-judge', JUDGE_AGENT), 'judge-run'), options(g)).recorded, true);
+  failedRun(g, JUDGE_AGENT, BASE + 5 * MINUTE);
+  fs.unlinkSync(namePath(g, JUDGE_AGENT));
+  assert.deepEqual(br.waitVerdict(options(g, { now: BASE + 90 * MINUTE, payload: runningPayload([[JUDGE_AGENT, 'Judge of the change']]) })), { wait: false, reason: 'none' });
+  assert.equal(fs.existsSync(fanoutPath(g, JUDGE_AGENT)), false);
+  assert.equal(readJson(reviewerPath(g, JUDGE_AGENT)).renewals, 0);
+  fannedOut(g, 'zensu:review-aspect', ASPECT_AGENT);
+  assert.equal(readJson(reviewerPath(g, ASPECT_AGENT)).named, false);
+});
+
+test('validateReviewer rejects a foreign shape', () => {
+  const entry = { schema: br.SCHEMA, session_key: SESSION, agent_id: ASPECT_AGENT, subagent_type: 'zensu:review-judge', launched_at_ms: BASE, arrived_at_ms: 0, named: false, renewals: 0 };
+  assert.equal(br.validateReviewer(entry, { sessionKey: SESSION, agentId: ASPECT_AGENT }), null);
+  assert.equal(br.validateReviewer({ ...entry, named: 'yes' }), 'reviewer named');
+  assert.equal(br.validateReviewer({ ...entry, renewals: -1 }), 'reviewer renewals');
+  const { renewals, ...withoutRenewals } = entry;
+  assert.equal(renewals, 0);
+  assert.equal(br.validateReviewer(withoutRenewals), 'reviewer keys');
+  assert.equal(br.validateReviewer({ ...entry, extra: 1 }), 'reviewer keys');
+  assert.equal(br.validateReviewer({ ...entry, schema: 'other' }), 'reviewer schema');
+  assert.equal(br.validateReviewer(entry, { sessionKey: OTHER_SESSION }), 'reviewer session mismatch');
+  assert.equal(br.validateReviewer(entry, { agentId: JUDGE_AGENT }), 'reviewer agent mismatch');
+  assert.equal(br.validateReviewer({ ...entry, agent_id: '../x' }), 'reviewer agent id');
+  assert.equal(br.validateReviewer({ ...entry, subagent_type: 'zensu:code-reviewer' }), 'reviewer subagent type');
+  assert.equal(br.validateReviewer({ ...entry, launched_at_ms: -1 }), 'reviewer launch time');
+  assert.equal(br.validateReviewer({ ...entry, arrived_at_ms: 1.5 }), 'reviewer arrival time');
 });

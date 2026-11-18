@@ -85,12 +85,14 @@ STATE_DIR="$PROJ/.zensu/state"
 # HOME is sandboxed: the config reader merges ~/.zensu/config.json, and the doctor
 # reads ~/.claude/settings.json — neither may reach the developer's real files.
 export HOME="$PROJ/home"; mkdir -p "$HOME"
+ZENSU_TEST_PLUGIN_DATA="$PROJ/.session-control-test/autopilot-plugin-data"
 for BASELINE_SID in \
   droute-helper droute-helper-cfg droute-plan droute-plan-strict droute-reminder \
-  droute-reminder-active droute-dir droute-resolve; do
+  droute-reminder-active droute-reminder-unknown droute-reminder-headless droute-dir droute-resolve; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$BASELINE_SID"
 done
+unset ZENSU_TEST_PLUGIN_DATA
 mkdir -p "$STATE_DIR"
 CFG_DEFAULT="$STATE_DIR/no-such-config.json"
 CFG_TDD="$STATE_DIR/cfg-tdd.json";       printf '%s' '{"hooks":{"defaultDeliveryRoute":"build"}}' > "$CFG_TDD"
@@ -1039,10 +1041,15 @@ S_R="droute-reminder"; MARKER_RM="$(marker_path "$S_R")"
 [ "$(grep -c "^cat <<'JSON' | emit_route_context$" "$REMINDER")" = "2" ] \
   && check "R13 both reminder heredocs are piped through emit_route_context" PASS \
   || check "R13 reminder heredoc pipe count" FAIL
-RCTX_ASK="$(prompt_payload "$S_R" | hook_ctx "$REMINDER")"
-RCTX_STRICT_ASK="$(prompt_payload "$S_R" | hook_ctx "$REMINDER" "$CFG_STRICT")"
-RCTX_ASK_SHORT="$(prompt_payload "$S_R" | hook_ctx "$REMINDER")"
-RCTX_STRICT_ASK_SHORT="$(prompt_payload "$S_R" | hook_ctx "$REMINDER" "$CFG_STRICT")"
+RCTX_ASK="$(export CLAUDE_CODE_ENTRYPOINT=cli; prompt_payload "$S_R" | hook_ctx "$REMINDER")"
+RCTX_STRICT_ASK="$(export CLAUDE_CODE_ENTRYPOINT=cli; prompt_payload "$S_R" | hook_ctx "$REMINDER" "$CFG_STRICT")"
+RCTX_ASK_SHORT="$(export CLAUDE_CODE_ENTRYPOINT=cli; prompt_payload "$S_R" | hook_ctx "$REMINDER")"
+RCTX_STRICT_ASK_SHORT="$(export CLAUDE_CODE_ENTRYPOINT=cli; prompt_payload "$S_R" | hook_ctx "$REMINDER" "$CFG_STRICT")"
+S_RU="droute-reminder-unknown"; S_RH="droute-reminder-headless"
+RCTX_ASK_UNKNOWN="$(unset CLAUDE_CODE_ENTRYPOINT; prompt_payload "$S_RU" | hook_ctx "$REMINDER")"
+RCTX_ASK_UNKNOWN_SHORT="$(unset CLAUDE_CODE_ENTRYPOINT; prompt_payload "$S_RU" | hook_ctx "$REMINDER")"
+RCTX_STRICT_ASK_HEADLESS="$(export CLAUDE_CODE_ENTRYPOINT=sdk-cli; prompt_payload "$S_RH" | hook_ctx "$REMINDER" "$CFG_STRICT")"
+RCTX_STRICT_ASK_HEADLESS_SHORT="$(export CLAUDE_CODE_ENTRYPOINT=sdk-cli; prompt_payload "$S_RH" | hook_ctx "$REMINDER" "$CFG_STRICT")"
 printf '%s\n' '{"route":"direct"}' > "$MARKER_RM"
 RCTX_DIRECT="$(prompt_payload "$S_R" | hook_ctx "$REMINDER")"
 RCTX_STRICT_DIRECT="$(prompt_payload "$S_R" | hook_ctx "$REMINDER" "$CFG_STRICT")"
@@ -1075,7 +1082,8 @@ rm -f "$PROJ/.zensu/config.json"; rm -rf "$R11C_OTHER"
 # The (s) clause promises "the field at the very end of this reminder": hold the
 # SUFFIX, the way D35 holds it for the plan hook, not only the field's presence.
 R13A2_BAD=""
-for ctxname in RCTX_ASK RCTX_STRICT_ASK RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT RCTX_DIRECT RCTX_TDD RCTX_STRICT RCTX_STRICT_DIRECT RCTX_STRICT_TDD; do
+for ctxname in RCTX_ASK RCTX_STRICT_ASK RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT RCTX_DIRECT RCTX_TDD RCTX_STRICT RCTX_STRICT_DIRECT RCTX_STRICT_TDD \
+  RCTX_ASK_UNKNOWN RCTX_ASK_UNKNOWN_SHORT RCTX_STRICT_ASK_HEADLESS RCTX_STRICT_ASK_HEADLESS_SHORT; do
   tailtxt="$(printf '%s' "${!ctxname}" | tail -c 120 | tr -d '\n')"
   case "$tailtxt" in
     *"ZENSU DELIVERY ROUTE: "*"<!-- /zensu:delivery-route -->") ;;
@@ -1084,6 +1092,16 @@ for ctxname in RCTX_ASK RCTX_STRICT_ASK RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT RCT
 done
 [ -z "$R13A2_BAD" ] && check "R13a2 the field is the LAST text of the reminder in every state" PASS \
   || check "R13a2 reminder suffix:$R13A2_BAD" FAIL
+AP_OPTION_YES="'Autopilot — /zensu:autopilot'"
+AP_RULE_YES="The Autopilot option MUST say that it plans with its own approval, then pushes a branch and opens a pull request unattended, and needs an authenticated gh or glab CLI. If the user chooses Autopilot → your next tool call is the Skill tool with skill='zensu:autopilot', passing this request as the feature description, and you begin that message with 'Executing via /zensu:autopilot'. That answer records nothing, and only that answer selects Autopilot, over every other sentence of this reminder, the last one included: a request that asks for it is neither preference below, so ask, and the route field, a default or a refused question never selects it."
+AP_RULE_ABSENT="This question offers no /zensu:autopilot, so never run it from this reminder, over every other sentence of this reminder, the last one included: a request that asks for it is neither preference below, and the user starts it by invoking /zensu:autopilot."
+AP_SHORT_OPTION_YES='"Autopilot — /zensu:autopilot"'
+AP_SHORT_RULE_YES='The Autopilot option says it plans with its own approval, then pushes a branch and opens a pull request unattended, and needs an authenticated gh or glab CLI. After Autopilot, run the Skill tool with skill zensu:autopilot and this request as the feature description, begin with "Executing via /zensu:autopilot" and record nothing; only that answer selects it, over every other sentence here, and a request that asks for it is no preference.'
+AP_SHORT_RULE_ABSENT='This question offers no /zensu:autopilot, so never run it from this reminder, over every other sentence here: a request that asks for it is no preference, and the user starts it by invoking /zensu:autopilot.'
+case "$REC_CMD" in
+  (*autopilot*) check "R13i the record command in every ask context carries a data path that names autopilot, so R13b, R13g and R13h prove that their Autopilot scans set that command aside" PASS ;;
+  (*) check "R13i the record command carries no path that names autopilot: $REC_CMD" FAIL ;;
+esac
 R13_BAD=""
 for ctxname in RCTX_ASK RCTX_STRICT_ASK; do
   ctx="${!ctxname}"
@@ -1093,14 +1111,72 @@ for ctxname in RCTX_ASK RCTX_STRICT_ASK; do
     "A No records nothing and decides this request only: $DIRECT_NEVER_RECORDED" \
     "When it reads 'build (…)', treat it exactly as the affirmation fast-path below; when it reads 'direct (…)', exactly as the negation fast-path below" \
     "/zensu:delivery-route" "an explicit preference in the request text itself still wins" \
-    "AskUserQuestion" "or the ZENSU HUMAN PRESENT field reads 'no' or AskUserQuestion is refused"; do
+    "AskUserQuestion" "or the ZENSU HUMAN PRESENT field reads 'no' or AskUserQuestion is refused" \
+    "'Skipping /zensu:build: user declined'. $AP_RULE_YES RECORD a Yes before acting" \
+    "ZENSU HUMAN PRESENT: yes"; do
     printf '%s' "$ctx" | grep -qF -- "$needle" || R13_BAD="$R13_BAD [$ctxname missing: $needle]"
   done
   printf '%s' "$ctx" | grep -qF '__ZENSU_' && R13_BAD="$R13_BAD [$ctxname raw placeholder]"
-  printf '%s' "$ctx" | grep -qF '/zensu:autopilot' && R13_BAD="$R13_BAD [$ctxname offers autopilot]"
+  R13_ROUTES="$(printf '%s' "$ctx" | AP_OPTION="$AP_OPTION_YES" AP_RULE="$AP_RULE_YES" REC_CMD="$REC_CMD" node -e '
+    const t = require("fs").readFileSync(0, "utf8").split(process.env.REC_CMD).join("<record command>");
+    const count = (needle) => t.split(needle).length - 1;
+    const question = t.indexOf("(c) Otherwise");
+    const fastPaths = t.indexOf("Fast-paths that skip the question");
+    const rest = t.replace(process.env.AP_OPTION, "").replace(process.env.AP_RULE, "");
+    const bad = [];
+    if (question < 0 || fastPaths < question) bad.push("anchors");
+    if (!/in this order: \x27Yes — (Zensu workflow|TDD flow)\x27, \x27Autopilot — \/zensu:autopilot\x27 and \x27No — implement directly\x27\./.test(t)) bad.push("labels-in-order");
+    if (count("zensu:autopilot") !== 3) bad.push("mentions=" + count("zensu:autopilot"));
+    if (count("skill=\x27zensu:autopilot\x27") !== 1) bad.push("dispatch");
+    if (count("<record command>") !== 1 || count("zensu-delivery-route.sh") !== 0) bad.push("record-commands=" + count("<record command>") + "+" + count("zensu-delivery-route.sh"));
+    if (/autopilot/i.test(t.slice(0, question))) bad.push("before-the-question");
+    if (/autopilot/i.test(t.slice(fastPaths))) bad.push("in-the-fast-paths");
+    if (rest === t || /autopilot/i.test(rest)) bad.push("outside-the-pinned-strings");
+    if (t.includes("zensu:pilot")) bad.push("offers-pilot");
+    process.stdout.write(bad.join(","));
+  ' 2>&1)"
+  [ -z "$R13_ROUTES" ] || R13_BAD="$R13_BAD [$ctxname routes: $R13_ROUTES]"
 done
-[ -z "$R13_BAD" ] && check "R13b the (s) clause with its fast-path mapping, the ask conjunct, the Yes/No scope sentence, the Yes-only RECORD sentence with the exact command and the declined-call line are present; the reminder still offers no outward-facing route" PASS \
+[ -z "$R13_BAD" ] && check "R13b the (s) clause with its fast-path mapping, the ask conjunct, the Yes/No scope sentence, the RECORD sentence as the one record command and the declined-call line are present; with a person present Autopilot is the second option, with its description, its one dispatch and its precedence over every other sentence right after the No arm, named nowhere else, and Pilot is not offered" PASS \
   || check "R13b reminder text:$R13_BAD" FAIL
+R13H_BAD=""
+for ctxname in RCTX_ASK_UNKNOWN RCTX_STRICT_ASK_HEADLESS; do
+  ctx="${!ctxname}"
+  case "$ctxname" in
+    (RCTX_ASK_UNKNOWN) yes_label="'Yes — Zensu workflow'"; human=unknown ;;
+    (*) yes_label="'Yes — TDD flow'"; human=no ;;
+  esac
+  for needle in "in this order: $yes_label and 'No — implement directly'. $SESSION_Q" \
+    "'Skipping /zensu:build: user declined'. $AP_RULE_ABSENT RECORD a Yes before acting" \
+    "ZENSU HUMAN PRESENT: $human"; do
+    printf '%s' "$ctx" | grep -qF -- "$needle" || R13H_BAD="$R13H_BAD [$ctxname missing: $needle]"
+  done
+  printf '%s' "$ctx" | grep -qF '__ZENSU_' && R13H_BAD="$R13H_BAD [$ctxname raw placeholder]"
+  norm="${ctx//"$REC_CMD"/<record command>}"
+  rest="${norm/"$AP_RULE_ABSENT"/}"
+  { [ "$rest" != "$norm" ] && ! printf '%s' "$rest" | grep -qi 'autopilot'; } \
+    || R13H_BAD="$R13H_BAD [$ctxname names Autopilot outside its one sentence]"
+done
+for ctxname in RCTX_ASK_UNKNOWN_SHORT RCTX_STRICT_ASK_HEADLESS_SHORT; do
+  ctx="${!ctxname}"
+  case "$ctxname" in
+    (RCTX_ASK_UNKNOWN_SHORT) yes_label='"Yes — Zensu workflow"'; human=unknown ;;
+    (*) yes_label='"Yes — TDD flow"'; human=no ;;
+  esac
+  for needle in "the full reminder given earlier in this context still applies" \
+    "options $yes_label and \"No — implement directly\", in this order." \
+    "never record it with --direct yourself. $AP_SHORT_RULE_ABSENT A question, explanation" \
+    "ZENSU HUMAN PRESENT: $human"; do
+    printf '%s' "$ctx" | grep -qF -- "$needle" || R13H_BAD="$R13H_BAD [$ctxname missing: $needle]"
+  done
+  printf '%s' "$ctx" | grep -qF '__ZENSU_' && R13H_BAD="$R13H_BAD [$ctxname raw placeholder]"
+  norm="${ctx//"$REC_CMD"/<record command>}"
+  rest="${norm/"$AP_SHORT_RULE_ABSENT"/}"
+  { [ "$rest" != "$norm" ] && ! printf '%s' "$rest" | grep -qi 'autopilot'; } \
+    || R13H_BAD="$R13H_BAD [$ctxname names Autopilot outside its one sentence]"
+done
+[ -z "$R13H_BAD" ] && check "R13h when the human-present field reads unknown or no, the full text and the short line offer only Yes and No and carry one sentence that Autopilot is never run from the reminder, and nothing else names it, in both modes" PASS \
+  || check "R13h reminder without a person present:$R13H_BAD" FAIL
 R13F_BAD=""
 for ctxname in RCTX_DIRECT RCTX_TDD RCTX_STRICT RCTX_STRICT_DIRECT RCTX_STRICT_TDD; do
   ctx="${!ctxname}"
@@ -1109,9 +1185,10 @@ for ctxname in RCTX_DIRECT RCTX_TDD RCTX_STRICT RCTX_STRICT_DIRECT RCTX_STRICT_T
     "$UNTRUSTED_PREFERENCE" "the user typed wins over the field for this request: "; do
     printf '%s' "$ctx" | grep -qF -- "$needle" || R13F_BAD="$R13F_BAD [$ctxname missing: $needle]"
   done
-  for needle in "AskUserQuestion" "__ZENSU_" "$REC_CMD" "/zensu:autopilot" "(s) — read this before (c)"; do
+  for needle in "AskUserQuestion" "__ZENSU_" "$REC_CMD" "(s) — read this before (c)"; do
     printf '%s' "$ctx" | grep -qF -- "$needle" && R13F_BAD="$R13F_BAD [$ctxname carries: $needle]"
   done
+  printf '%s' "$ctx" | grep -qi 'autopilot' && R13F_BAD="$R13F_BAD [$ctxname names Autopilot]"
   [ "${#ctx}" -le 1575 ] || R13F_BAD="$R13F_BAD [$ctxname is ${#ctx} characters]"
 done
 for ctxname in RCTX_TDD RCTX_STRICT_TDD; do
@@ -1167,15 +1244,24 @@ for ctxname in RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT; do
     "A preference the user typed skips the question and decides this request only: a negation implements directly without --tdd-begin, an affirmation runs" \
     "through the Skill tool, and neither is recorded." "$UNTRUSTED_PREFERENCE" \
     "If the ZENSU HUMAN PRESENT field below reads no or AskUserQuestion is refused" \
-    "If you are unsure whether the request changes executable code, ask."; do
+    "If you are unsure whether the request changes executable code, ask." \
+    "$AP_SHORT_OPTION_YES and \"No — implement directly\", in this order." \
+    "never record it with --direct yourself. $AP_SHORT_RULE_YES A question, explanation" \
+    "ZENSU HUMAN PRESENT: yes"; do
     printf '%s' "$ctx" | grep -qF -- "$needle" || R13G_BAD="$R13G_BAD [$ctxname missing: $needle]"
   done
-  for needle in "__ZENSU_" "(s) — read this before (c)"; do
+  for needle in "__ZENSU_" "(s) — read this before (c)" "zensu:pilot"; do
     printf '%s' "$ctx" | grep -qF -- "$needle" && R13G_BAD="$R13G_BAD [$ctxname carries: $needle]"
   done
-  [ "$(last_field "$ctx")" = "ZENSU DELIVERY ROUTE: ask" ] || R13G_BAD="$R13G_BAD [$ctxname field '$(last_field "$ctx")']"
+  r13g_autopilot="$(printf '%s' "$ctx" | grep -oF 'zensu:autopilot' | wc -l | tr -d ' ')"
+  [ "$r13g_autopilot" = "3" ] || R13G_BAD="$R13G_BAD [$ctxname names zensu:autopilot $r13g_autopilot times]"
   ctx_norm="${ctx//"$REC_CMD"/<record command>}"
-  [ "${#ctx_norm}" -le 2850 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
+  rest="${ctx_norm/"$AP_SHORT_OPTION_YES"/}"; rest="${rest/"$AP_SHORT_RULE_YES"/}"
+  printf '%s' "$rest" | grep -qi 'autopilot' && R13G_BAD="$R13G_BAD [$ctxname names Autopilot outside its pinned strings]"
+  r13g_record="$(printf '%s' "$ctx" | grep -oF 'zensu-delivery-route.sh' | wc -l | tr -d ' ')"
+  [ "$r13g_record" = "1" ] || R13G_BAD="$R13G_BAD [$ctxname names the record command $r13g_record times]"
+  [ "$(last_field "$ctx")" = "ZENSU DELIVERY ROUTE: ask" ] || R13G_BAD="$R13G_BAD [$ctxname field '$(last_field "$ctx")']"
+  [ "${#ctx_norm}" -le 3340 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
 done
 printf '%s' "$RCTX_ASK_SHORT" | grep -qF -- "and neither is recorded. $TDD_REQUEST_LINE" || R13G_BAD="$R13G_BAD [vanilla TDD-request sentence]"
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF -- "and neither is recorded. $TDD_REQUEST_LINE" || R13G_BAD="$R13G_BAD [strict TDD-request sentence]"
@@ -1185,10 +1271,14 @@ printf '%s' "$RCTX_ASK_SHORT" | grep -qF '"Yes — Zensu workflow"' || R13G_BAD=
 printf '%s' "$RCTX_ASK_SHORT" | grep -qF '"Executing via /zensu:build (vanilla mode)"' || R13G_BAD="$R13G_BAD [vanilla status]"
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF '"Yes — TDD flow"' || R13G_BAD="$R13G_BAD [strict label]"
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF '"Executing via /zensu:build";' || R13G_BAD="$R13G_BAD [strict status]"
-[ -z "$R13G_BAD" ] && check "R13g a repeat ask prompt in the same context generation gets a short line that still carries the flow it offers, the labels, the full consent disclosure, the record command and the declined-call line, both status lines, every skip case including a typed preference that records nothing, the TDD-request sentence and the field, in both modes" PASS \
+printf '%s' "$RCTX_ASK_SHORT" | grep -qF 'an affirmation runs the Zensu workflow through the Skill tool, and neither is recorded.' || R13G_BAD="$R13G_BAD [vanilla affirmation route]"
+printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF 'an affirmation runs the strict TDD flow through the Skill tool, and neither is recorded.' || R13G_BAD="$R13G_BAD [strict affirmation route]"
+printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF 'reads no or AskUserQuestion is refused, run the strict TDD flow without asking' || R13G_BAD="$R13G_BAD [strict human-present route]"
+[ -z "$R13G_BAD" ] && check "R13g a repeat ask prompt in the same context generation gets a short line that still carries the flow it offers, with a person present the three labels in order and the Autopilot description, dispatch and precedence as the only Autopilot text, the full consent disclosure, the record command once and the declined-call line, both status lines, every skip case with its own mode's route including a typed preference that records nothing, the TDD-request sentence and the field, in both modes" PASS \
   || check "R13g short reminder:$R13G_BAD" FAIL
 R13E_BAD=""
-for ctxname in RCTX_ASK RCTX_STRICT_ASK RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT RCTX_DIRECT RCTX_TDD RCTX_STRICT RCTX_STRICT_DIRECT RCTX_STRICT_TDD; do
+for ctxname in RCTX_ASK RCTX_STRICT_ASK RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT RCTX_DIRECT RCTX_TDD RCTX_STRICT RCTX_STRICT_DIRECT RCTX_STRICT_TDD \
+  RCTX_ASK_UNKNOWN RCTX_ASK_UNKNOWN_SHORT RCTX_STRICT_ASK_HEADLESS RCTX_STRICT_ASK_HEADLESS_SHORT; do
   printf '%s' "${!ctxname}" | grep -qF -- "$REC_CMD --direct" && R13E_BAD="$R13E_BAD [$ctxname]"
 done
 grep -qF -- '__ZENSU_ROUTE_COMMAND__ --direct' "$REMINDER" && R13E_BAD="$R13E_BAD [hook source]"

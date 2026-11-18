@@ -462,6 +462,19 @@ if [ -n "$PLAN_LIB" ] && [ -f "$PLAN_LIB" ] && [ -n "$EXECUTOR_LIB" ] && [ -f "$
 else
   check "plan-gate executor module loads beside the reader from the special plugin root" FAIL
 fi
+STORE_LIB="${PLAN_LIB_DIR:+$PLAN_LIB_DIR/approved-plan-v1.js}"
+if [ -n "$PLAN_LIB" ] && [ -f "$PLAN_LIB" ] && [ -n "$STORE_LIB" ] && [ -f "$STORE_LIB" ] \
+  && [ -r "$STORE_LIB" ] && [ ! -L "$STORE_LIB" ] \
+  && PLAN_PAYLOAD_LIB="$PLAN_LIB" node -e '
+    const store=require(require("path").join(require("path").dirname(process.env.PLAN_PAYLOAD_LIB),"approved-plan-v1.js"));
+    const sha="a".repeat(64);
+    process.exit(typeof store.storeApprovedPlan==="function" && typeof store.readApprovedPlan==="function"
+      && store.approvedPlanRelPath(sha)===".zensu/state/autopilot-approved-plan-"+sha+".md" ? 0 : 1);
+  ' 2>/dev/null; then
+  check "plan-gate store module and its sibling reader load beside the reader from the special plugin root" PASS
+else
+  check "plan-gate store module and its sibling reader load beside the reader from the special plugin root" FAIL
+fi
 
 # The artifact redactor is the second module carried this way, and it is the one
 # with a SIBLING require (`./claude-path-v1.js`) — so a conversion that produced a
