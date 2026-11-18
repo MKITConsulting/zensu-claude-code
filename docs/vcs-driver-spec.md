@@ -348,14 +348,16 @@ specified in `skills/autopilot/rules/conventions.md`.
     review presence from it, and a work-order run's review import uses it to recognize a review an
     earlier attempt published (`skills/work/references/protocol.md`). Tests N12-N14c and LV28 in
     `test-vcs-publish.sh`, GL56 and GL57 in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
-    RM1-RM1c and RM2-RM2d in `test-vcs-publish.sh` guard its fixture and its fake `gh`; RM3-RM10
+    RM1-RM1c and RM2-RM2h in `test-vcs-publish.sh` guard its fixture and its fake `gh`; RM3-RM10
     drive the GitHub listing against that fake, RM10 over a pull request without reviews. The fake
-    is modelled on gh 2.101.0: `--paginate --slurp` prints one array of pages, `--paginate` alone
-    prints them back to back, and only a query that declares `$endCursor: String`, pages on
-    `after:$endCursor` and selects `hasNextPage` and `endCursor` in `pageInfo` gets past the first
-    page. A `$endCursor` that is declared but unused, used but undeclared or declared `String!`,
-    and a `num` sent with `-f`, fail with gh's message; a review carries `body` only when the
-    query selects it, and flags may come before the endpoint.
+    is modelled on gh 2.101.0. It checks every variable of the query the way GitHub does and fails
+    with gh's message: first a variable declared but unused or used but undeclared, then, once the
+    declarations hold, a value of the wrong type or a missing non-null value, such as a `num` sent
+    with `-f` or left out, printing every problem of that phase on its own line. It serves only the
+    fields the query selects in `nodes` and `pageInfo`. `--paginate --slurp` prints one array of
+    pages, `--paginate` alone prints them back to back, and the next page is requested only while
+    the served page carries `hasNextPage: true` and an `endCursor`; the fake serves the page after
+    that cursor when the query passes it to `after:$endCursor`. Flags may precede the endpoint.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.

@@ -613,7 +613,11 @@ A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" DIR="$WORK/gh" node -e '
   var fs=require("fs"),e=process.env;
   function review(n,body){return {id:"PRR_"+n,body:body,url:"https://github.test/acme/widget/pull/42#pullrequestreview-"+n};}
   function page(nodes,next,cursor){return JSON.stringify({data:{repository:{pullRequest:{reviews:{nodes:nodes,pageInfo:{hasNextPage:next,endCursor:cursor}}}}}});}
-  fs.writeFileSync(e.DIR+"/page1.json",page([review(1,e.A1+"\n\nFirst part of the review."),review(2,e.A2+"\n\nSecond part of the review."),review(3,"Looks good to me."),review(4,e.C1+"\n\nA review only the first page carries.")],true,"cursor-4"));
+  var first=[review(1,e.A1+"\n\nFirst part of the review."),review(2,e.A2+"\n\nSecond part of the review."),review(3,"Looks good to me."),review(4,e.C1+"\n\nA review only the first page carries.")];
+  fs.writeFileSync(e.DIR+"/page1.json",page(first,true,"cursor-4"));
+  fs.writeFileSync(e.DIR+"/last.json",page(first,false,"cursor-4"));
+  fs.writeFileSync(e.DIR+"/nocursor.json",page(first,true,null));
+  fs.writeFileSync(e.DIR+"/middle.json",page([review(7,"A review between the two pages.")],true,"cursor-7"));
   fs.writeFileSync(e.DIR+"/page2.json",page([review(5,e.A1+"\n\nThe first part, posted again."),review(6,e.B1+"\n\nA review only the second page carries.")],false,"cursor-6"));
   fs.writeFileSync(e.DIR+"/empty.json",page([],false,null));'
 cat > "$WORK/gh/bin/gh" <<'FAKE'
@@ -621,85 +625,102 @@ cat > "$WORK/gh/bin/gh" <<'FAKE'
 set -u
 call="$*"
 printf '%s\n' "$call" >> "$FAKE_DIR/calls"
-unmodelled() {
+if [ "${1:-}" != api ]; then
   printf 'fake gh: unmodelled call: %s\n' "$call" >&2
   exit 2
-}
-[ "${1:-}" = api ] || unmodelled
+fi
 shift
-endpoint=""; paginate=0; slurp=0; query=""; owner=""; name=""; num=""; num_flag=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --paginate) paginate=1 ;;
-    --slurp) slurp=1 ;;
-    --hostname|-H|--header)
-      [ $# -ge 2 ] || unmodelled
-      shift ;;
-    -f|--raw-field|-F|--field)
-      [ $# -ge 2 ] || unmodelled
-      case "$2" in
-        query=*) query="${2#query=}" ;;
-        owner=*) owner="${2#owner=}" ;;
-        name=*) name="${2#name=}" ;;
-        num=*) num="${2#num=}"; num_flag="$1" ;;
-      esac
-      shift ;;
-    -*) unmodelled ;;
-    *)
-      [ -z "$endpoint" ] || unmodelled
-      endpoint="$1" ;;
-  esac
-  shift
-done
-[ "$endpoint" = graphql ] || unmodelled
-[ "$slurp" = 0 ] || [ "$paginate" = 1 ] || unmodelled
-refuse() {
-  if [ "$slurp" = 1 ]; then
-    printf '[{"errors":[{"message":"%s"}]}]\n' "$1"
-  else
-    printf '{"errors":[{"message":"%s"}]}\n' "$1"
-  fi
-  printf 'gh: %s\n' "$1" >&2
-  exit 1
-}
-[ "${FAKE_REVIEWS:-ok}" != fail ] || refuse 'fixture: the review listing failed'
-flat="$(printf '%s' "$query" | tr -d ' \t\n,')"
-declared=0; used=0; page_info=0
-case "$flat" in *'$endCursor:String'*) declared=1 ;; esac
-case "$flat" in *'after:$endCursor'*) used=1 ;; esac
-[ "$declared$used" != 10 ] || refuse 'Variable $endCursor is declared by anonymous query but not used'
-[ "$declared$used" != 01 ] || refuse 'Variable $endCursor is used by anonymous query but not declared'
-case "$num_flag" in -F|--field) ;; *) num="" ;; esac
-case "$num" in ''|*[!0-9]*) refuse 'Variable $num of type Int! was provided invalid value' ;; esac
-case "$flat" in *'$endCursor:String!'*) refuse 'Variable $endCursor of type String! was provided invalid value' ;; esac
-if [ "$owner/$name#$num" != 'acme/widget#42' ]; then
-  printf '%s\n' "gh: fixture: no pull request $owner/$name#$num" >&2
-  exit 1
-fi
-lbrace='{'; rbrace='}'
-info="${flat#*pageInfo$lbrace}"
-if [ "$info" != "$flat" ]; then
-  case "${info%%$rbrace*}" in *hasNextPage*endCursor*|*endCursor*hasNextPage*) page_info=1 ;; esac
-fi
-pages=1
-[ "$paginate$declared$used$page_info" = 1111 ] && pages=2
-dir="${FAKE_DIR%/*}"
-if [ "${FAKE_REVIEWS:-ok}" = empty ]; then
-  set -- "$dir/empty.json"
-elif [ "$pages" = 2 ]; then
-  set -- "$dir/page1.json" "$dir/page2.json"
-else
-  set -- "$dir/page1.json"
-fi
-QUERY="$query" SLURP="$slurp" node -e '
-  var fs=require("fs"),e=process.env,selection=/nodes\s*\{([^}]*)\}/.exec(e.QUERY);
-  var body=!!selection&&selection[1].split(/[\s,]+/).indexOf("body")>=0;
-  var pages=process.argv.slice(1).map(function(file){
-    var page=JSON.parse(fs.readFileSync(file,"utf8"));
-    if(!body)page.data.repository.pullRequest.reviews.nodes.forEach(function(review){delete review.body;});
-    return JSON.stringify(page);
-  });
-  process.stdout.write(e.SLURP==="1"?"["+pages.join(",")+"]":pages.join(""));' "$@"
+CALL="$call" FIXTURE="${FAKE_DIR%/*}" exec node -e '
+  var fs=require("fs"),e=process.env,args=process.argv.slice(1),own=Object.prototype.hasOwnProperty;
+  function unmodelled(){process.stderr.write("fake gh: unmodelled call: "+e.CALL+"\n");process.exit(2);}
+  var endpoint=null,paginate=false,slurp=false,query="",vars={};
+  for(var i=0;i<args.length;i++){
+    var a=args[i];
+    if(a==="--paginate")paginate=true;
+    else if(a==="--slurp")slurp=true;
+    else if(a==="--hostname"||a==="-H"||a==="--header"){if(++i>=args.length)unmodelled();}
+    else if(a==="-f"||a==="--raw-field"||a==="-F"||a==="--field"){
+      if(++i>=args.length)unmodelled();
+      var at=args[i].indexOf("=");if(at<1)unmodelled();
+      var key=args[i].slice(0,at),value=args[i].slice(at+1);
+      if(a==="-F"||a==="--field"){
+        if(value.charAt(0)==="@")unmodelled();
+        value=value==="true"?true:value==="false"?false:value==="null"?null:/^-?[0-9]+$/.test(value)?Number(value):value;
+      }
+      if(key==="query")query=String(value);else vars[key]=value;
+    }
+    else if(a.charAt(0)==="-")unmodelled();
+    else if(endpoint===null)endpoint=a;
+    else unmodelled();
+  }
+  if(endpoint!=="graphql"||(slurp&&!paginate))unmodelled();
+  function print(pages){process.stdout.write(slurp?"["+pages.join(",")+"]":pages.join(""));}
+  function refuse(messages){
+    print([JSON.stringify({errors:messages.map(function(m){return {message:m};})})]);
+    process.stderr.write("gh: "+messages.join("\n")+"\n");
+    process.exit(1);
+  }
+  if(e.FAKE_REVIEWS==="fail")refuse(["fixture: the review listing failed"]);
+  var head=/^\s*(?:query\s*(?:\(([^)]*)\))?\s*)?\{/.exec(query);if(!head)unmodelled();
+  var declaration=/\$(\w+)\s*:\s*(\w+)\s*(!?)/g,header=head[1]||"",declared=[],used=[],m;
+  if(header.replace(declaration,"").replace(/[\s,]/g,""))unmodelled();
+  while((m=declaration.exec(header))){
+    if(m[2]!=="String"&&m[2]!=="Int")unmodelled();
+    declared.push({name:m[1],type:m[2]+m[3],int:m[2]==="Int",nonNull:m[3]==="!"});
+  }
+  var usage=/\$(\w+)/g,body=query.slice(head[0].length);
+  while((m=usage.exec(body)))if(used.indexOf(m[1])<0)used.push(m[1]);
+  var names=declared.map(function(d){return d.name;}),problems=[];
+  declared.forEach(function(d){if(used.indexOf(d.name)<0)problems.push("Variable $"+d.name+" is declared by anonymous query but not used");});
+  used.forEach(function(name){if(names.indexOf(name)<0)problems.push("Variable $"+name+" is used by anonymous query but not declared");});
+  if(problems.length)refuse(problems);
+  function invalid(values){
+    return declared.filter(function(d){
+      var v=own.call(values,d.name)?values[d.name]:null;
+      return v===null?d.nonNull:d.int?!(typeof v==="number"&&Number.isInteger(v)&&Math.abs(v)<=2147483647):typeof v!=="string";
+    }).map(function(d){return "Variable $"+d.name+" of type "+d.type+" was provided invalid value";});
+  }
+  problems=invalid(vars);
+  if(problems.length)refuse(problems);
+  if(vars.owner!=="acme"||vars.name!=="widget"||vars.num!==42){
+    process.stderr.write("gh: fixture: no pull request "+vars.owner+"/"+vars.name+"#"+vars.num+"\n");
+    process.exit(1);
+  }
+  function selection(pattern){
+    var start=pattern.exec(body);if(!start)return null;
+    var depth=0,flat="";
+    for(var j=start.index+start[0].length;j<body.length;j++){
+      var c=body.charAt(j);
+      if(c==="{")depth++;
+      else if(c==="}"){if(!depth)break;depth--;}
+      else if(!depth)flat+=c;
+    }
+    return flat.replace(/\([^)]*\)/g," ").split(/[\s,]+/).filter(Boolean);
+  }
+  function pick(object,fields){var copy={};fields.forEach(function(f){if(own.call(object,f))copy[f]=object[f];});return copy;}
+  var nodeFields=selection(/\bnodes\s*\{/),infoFields=selection(/\bpageInfo\s*\{/);
+  var fixture=(e.FAKE_PAGES||"page1.json page2.json").split(" ").map(function(file){return JSON.parse(fs.readFileSync(e.FIXTURE+"/"+file,"utf8"));});
+  function reviews(page){return page.data.repository.pullRequest.reviews;}
+  function after(cursor){
+    if(cursor===null||cursor===undefined)return 0;
+    for(var k=0;k<fixture.length-1;k++)if(reviews(fixture[k]).pageInfo.endCursor===cursor)return k+1;
+    unmodelled();
+  }
+  var cursor=/\bafter\s*:\s*\$(\w+)/.exec(body),request=Object.assign({},vars),served=[],pages=[];
+  for(;;){
+    var index=after(cursor?request[cursor[1]]:null);
+    if(served.indexOf(index)>=0)unmodelled();
+    served.push(index);
+    var page=JSON.parse(JSON.stringify(fixture[index])),list=reviews(page);
+    if(nodeFields)list.nodes=list.nodes.map(function(review){return pick(review,nodeFields);});else delete list.nodes;
+    if(infoFields)list.pageInfo=pick(list.pageInfo,infoFields);else delete list.pageInfo;
+    pages.push(JSON.stringify(page));
+    var info=list.pageInfo;
+    if(!paginate||!info||info.hasNextPage!==true||typeof info.endCursor!=="string"||!info.endCursor)break;
+    request.endCursor=info.endCursor;
+    if(invalid(request).length)unmodelled();
+  }
+  print(pages);' -- "$@"
 FAKE
 chmod +x "$WORK/gh/bin/gh"
 rm_probe() {
@@ -712,33 +733,39 @@ rm_probe() {
       }).join(" / "));
     });' 2>/dev/null
 }
-rm_refusal() {
+rm_run() {
   local err rc=0
-  err="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f "query=$1" -f owner=acme -f name=widget -F num=42 2>&1 >/dev/null)" || rc=$?
+  err="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" "$@" 2>&1 >/dev/null)" || rc=$?
   printf 'rc=%s %s' "$rc" "$err"
+}
+rm_refusal() {
+  rm_run api graphql --paginate --slurp -f "query=$1" -f owner=acme -f name=widget -F num=42
 }
 GH_PAGE1="PRR_1,PRR_2,PRR_3,PRR_4"
 GH_BOTH="2 page(s) $GH_PAGE1 / PRR_5,PRR_6"
+GH_BODIES="PRR_1+body,PRR_2+body,PRR_3+body,PRR_4+body"
+RM_PAGING_QUERY='query=query($endCursor:String){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}'
 GH_PAGED="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f 'query=query($endCursor:String){reviews(after:$endCursor){nodes{id body url}pageInfo{hasNextPage endCursor}}}' -f owner=acme -f name=widget -F num=42 2>/dev/null)"
-eq "RM1 the fake gh slurps two review pages for a query that pages: a cross-page duplicate, a later part, a marker only each page carries and an unmarked review" \
+eq "RM1 the fake gh slurps two review pages for a query that pages: a cross-page duplicate, a later part, a marker only each page carries, an unmarked review and each page's pageInfo" \
   "$(printf '%s' "$GH_PAGED" | A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" node -e '
     var e=process.env,s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
       var pages;try{pages=JSON.parse(s);}catch(_){process.stdout.write("not one JSON document");return;}
       function count(test){return pages.map(function(p){return p.data.repository.pullRequest.reviews.nodes.filter(function(r){return test(r.body);}).length;}).join("+");}
       function marker(m){return count(function(b){return b.indexOf(m)>=0;});}
       process.stdout.write(pages.length+" pages | A part 1/2: "+marker(e.A1)+" | A part 2/2: "+marker(e.A2)+" | B part 1/1: "+marker(e.B1)
-        +" | C part 1/1: "+marker(e.C1)+" | unmarked: "+count(function(b){return b.indexOf("zensu-review:")<0;}));
+        +" | C part 1/1: "+marker(e.C1)+" | unmarked: "+count(function(b){return b.indexOf("zensu-review:")<0;})
+        +" | pageInfo: "+pages.map(function(p){var i=p.data.repository.pullRequest.reviews.pageInfo;return i.hasNextPage+" "+i.endCursor;}).join(" + "));
     });' 2>/dev/null)" \
-  "2 pages | A part 1/2: 1+1 | A part 2/2: 1+0 | B part 1/1: 0+1 | C part 1/1: 1+0 | unmarked: 1+0"
+  "2 pages | A part 1/2: 1+1 | A part 2/2: 1+0 | B part 1/1: 0+1 | C part 1/1: 1+0 | unmarked: 1+0 | pageInfo: true cursor-4 + false cursor-6"
 eq "RM1b the fake gh pages a query whose pageInfo selects other fields beside hasNextPage and endCursor, as gh 2.101.0 does" \
   "$(rm_probe api graphql --paginate --slurp -f 'query=query($endCursor:String){reviews(after:$endCursor){nodes{id}pageInfo{startCursor hasNextPage endCursor hasPreviousPage}}}')" "$GH_BOTH"
 eq "RM1c the fake gh takes a flag before the endpoint, as gh 2.101.0 does" \
-  "$(rm_probe api --hostname github.com graphql --paginate --slurp -f 'query=query($endCursor:String){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}')" "$GH_BOTH"
-GH_MISS="no cursor fields: $(rm_probe api graphql --paginate --slurp -f query=reviews)"
+  "$(rm_probe api --hostname github.com graphql --paginate --slurp -f "$RM_PAGING_QUERY")" "$GH_BOTH"
+GH_MISS="no cursor fields: $(rm_probe api graphql --paginate --slurp -f 'query=query{reviews{nodes{id}}}')"
 GH_MISS="$GH_MISS | no pageInfo: $(rm_probe api graphql --paginate --slurp -f 'query=query($endCursor:String){reviews(after:$endCursor){nodes{id}}}')"
 GH_MISS="$GH_MISS | no endCursor: $(rm_probe api graphql --paginate --slurp -f 'query=query($endCursor:String){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage}}}')"
 GH_MISS="$GH_MISS | no hasNextPage: $(rm_probe api graphql --paginate --slurp -f 'query=query($endCursor:String){reviews(after:$endCursor){nodes{id}pageInfo{endCursor}}}')"
-GH_MISS="$GH_MISS | no --paginate: $(rm_probe api graphql -f 'query=query($endCursor:String){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}')"
+GH_MISS="$GH_MISS | no --paginate: $(rm_probe api graphql -f "$RM_PAGING_QUERY")"
 eq "RM2 the fake gh serves only the first page to a query that misses one paging term and to a call without --paginate, as gh 2.101.0 does" "$GH_MISS" \
   "no cursor fields: 1 page(s) $GH_PAGE1 | no pageInfo: 1 page(s) $GH_PAGE1 | no endCursor: 1 page(s) $GH_PAGE1 | no hasNextPage: 1 page(s) $GH_PAGE1 | no --paginate: one document $GH_PAGE1"
 GH_REFUSED="$(rm_refusal 'query($endCursor:String){reviews{nodes{id}pageInfo{hasNextPage endCursor}}}')"
@@ -746,13 +773,36 @@ GH_REFUSED="$GH_REFUSED | $(rm_refusal 'query{reviews(after:$endCursor){nodes{id
 GH_REFUSED="$GH_REFUSED | $(rm_refusal 'query($endCursor:String!){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}')"
 eq "RM2b the fake gh refuses a cursor variable that is declared but unused, used but undeclared or declared String!, with the message of gh 2.101.0" "$GH_REFUSED" \
   'rc=1 gh: Variable $endCursor is declared by anonymous query but not used | rc=1 gh: Variable $endCursor is used by anonymous query but not declared | rc=1 gh: Variable $endCursor of type String! was provided invalid value'
-eq "RM2c the fake gh serves a review body only when the query selects it" \
-  "$(rm_probe api graphql -f 'query=query{reviews{nodes{id url}}}') | $(rm_probe api graphql -f 'query=query{reviews{nodes{id body url}}}')" \
-  "one document $GH_PAGE1 | one document PRR_1+body,PRR_2+body,PRR_3+body,PRR_4+body"
-GH_UNMODELLED_RC=0
-GH_UNMODELLED_ERR="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api repos/acme/widget/pulls/42/reviews 2>&1 >/dev/null)" || GH_UNMODELLED_RC=$?
-eq "RM2d the fake gh names a call it does not model on stderr and exits 2" \
-  "rc=$GH_UNMODELLED_RC $GH_UNMODELLED_ERR" "rc=2 fake gh: unmodelled call: api repos/acme/widget/pulls/42/reviews"
+eq "RM2c the fake gh serves a review body only when the query selects it, also after a nested selection" \
+  "$(rm_probe api graphql -f 'query=query{reviews{nodes{id url}}}') | $(rm_probe api graphql -f 'query=query{reviews{nodes{id body url}}}') | $(rm_probe api graphql -f 'query=query{reviews{nodes{id author{login} body}}}')" \
+  "one document $GH_PAGE1 | one document $GH_BODIES | one document $GH_BODIES"
+GH_UNMODELLED="$(rm_run api repos/acme/widget/pulls/42/reviews)"
+GH_UNMODELLED="$GH_UNMODELLED | $(rm_run api graphql -f 'query=query Listing{reviews{nodes{id}}}')"
+GH_UNMODELLED="$GH_UNMODELLED | $(rm_refusal 'query{reviews{nodes{id}pageInfo{hasNextPage endCursor}}}')"
+eq "RM2d the fake gh names a call it does not model on stderr and exits 2: another endpoint, a named operation and a paging query that never passes its cursor on" "$GH_UNMODELLED" \
+  "rc=2 fake gh: unmodelled call: api repos/acme/widget/pulls/42/reviews | rc=2 fake gh: unmodelled call: api graphql -f query=query Listing{reviews{nodes{id}}} | rc=2 fake gh: unmodelled call: api graphql --paginate --slurp -f query=query{reviews{nodes{id}pageInfo{hasNextPage endCursor}}} -f owner=acme -f name=widget -F num=42"
+RM_NUM_QUERY='query=query($num:Int!,$endCursor:String){pullRequest(number:$num){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}'
+GH_NUM="-F num: $(rm_probe api graphql --paginate --slurp -f "$RM_NUM_QUERY")"
+GH_NUM="$GH_NUM | -f num: $(rm_run api graphql --paginate --slurp -f "$RM_NUM_QUERY" -f owner=acme -f name=widget -f num=42)"
+GH_NUM="$GH_NUM | no num: $(rm_run api graphql --paginate --slurp -f "$RM_NUM_QUERY" -f owner=acme -f name=widget)"
+eq "RM2e the fake gh serves a query that declares \$num as Int! for -F num and refuses a num sent with -f and a call without num, with the message of gh 2.101.0" "$GH_NUM" \
+  "-F num: $GH_BOTH"' | -f num: rc=1 gh: Variable $num of type Int! was provided invalid value | no num: rc=1 gh: Variable $num of type Int! was provided invalid value'
+GH_VARS="$(rm_refusal 'query($owner:String!,$endCursor:String){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}')"
+GH_VARS="$GH_VARS | $(rm_refusal 'query($endCursor:String){repository(owner:$owner){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}')"
+GH_VARS="$GH_VARS | $(rm_run api graphql --paginate --slurp -f 'query=query($name:String!,$endCursor:String){repository(name:$name){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}' -f owner=acme -F num=42)"
+eq "RM2f the fake gh applies the declared, used and value rules to every variable: \$owner declared but unused, \$owner used but undeclared, \$name declared String! without a value" "$GH_VARS" \
+  'rc=1 gh: Variable $owner is declared by anonymous query but not used | rc=1 gh: Variable $owner is used by anonymous query but not declared | rc=1 gh: Variable $name of type String! was provided invalid value'
+GH_PHASES="$(rm_refusal 'query($zeta:String,$endCursor:String){reviews(after:$endCursor,before:$alpha){nodes{id}pageInfo{hasNextPage endCursor}}}')"
+GH_PHASES="$GH_PHASES | $(rm_refusal 'query($zeta:String,$endCursor:String!){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}')"
+GH_PHASES="$GH_PHASES | $(rm_run api graphql --paginate --slurp -f 'query=query($name:String!,$num:Int!,$endCursor:String){repository(name:$name){pullRequest(number:$num){reviews(after:$endCursor){nodes{id}pageInfo{hasNextPage endCursor}}}}}' -f owner=acme)"
+eq "RM2g the fake gh reports every problem of one phase on its own line, the unused declaration first, and checks values only once the declarations hold, as gh 2.101.0 does" "$GH_PHASES" \
+  "$(printf '%s\n%s | %s | %s\n%s' 'rc=1 gh: Variable $zeta is declared by anonymous query but not used' 'Variable $alpha is used by anonymous query but not declared' 'rc=1 gh: Variable $zeta is declared by anonymous query but not used' 'rc=1 gh: Variable $name of type String! was provided invalid value' 'Variable $num of type Int! was provided invalid value')"
+GH_FOLLOW="first page ends: $(FAKE_PAGES='last.json page2.json' rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_FOLLOW="$GH_FOLLOW | null cursor: $(FAKE_PAGES='nocursor.json page2.json' rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_FOLLOW="$GH_FOLLOW | three pages: $(FAKE_PAGES='page1.json middle.json page2.json' rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY")"
+GH_FOLLOW="$GH_FOLLOW | own cursor: $(rm_probe api graphql --paginate --slurp -f "$RM_PAGING_QUERY" -f endCursor=cursor-4)"
+eq "RM2h the fake gh asks for another page only while the served page carries hasNextPage true and an endCursor, and serves the fixture page after that cursor" "$GH_FOLLOW" \
+  "first page ends: 1 page(s) $GH_PAGE1 | null cursor: 1 page(s) $GH_PAGE1 | three pages: 3 page(s) $GH_PAGE1 / PRR_7 / PRR_5,PRR_6 | own cursor: 1 page(s) PRR_5,PRR_6"
 GH_OUT="$(FAKE_DIR="$WORK/gh/listing" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>/dev/null)"
 GH_RC=$?
 if [ "$GH_RC" -eq 0 ]; then
@@ -785,7 +835,7 @@ else
   check "RM9 a non-numeric pull request id makes --review-markers exit non-zero before gh runs (rc=$GH_REJECT_RC)" FAIL
 fi
 GH_EMPTY_RC=0
-FAKE_REVIEWS=empty FAKE_DIR="$WORK/gh/empty" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 >"$WORK/gh/empty/stdout" 2>/dev/null || GH_EMPTY_RC=$?
+FAKE_PAGES=empty.json FAKE_DIR="$WORK/gh/empty" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 >"$WORK/gh/empty/stdout" 2>/dev/null || GH_EMPTY_RC=$?
 if [ "$GH_EMPTY_RC" -eq 0 ] && [ -s "$WORK/gh/empty/calls" ] && [ -f "$WORK/gh/empty/stdout" ] && [ ! -s "$WORK/gh/empty/stdout" ]; then
   check "RM10 --review-markers on GitHub exits 0 and prints nothing for a pull request without reviews" PASS
 else
