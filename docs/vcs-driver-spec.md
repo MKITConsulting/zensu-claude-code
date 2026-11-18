@@ -348,11 +348,14 @@ specified in `skills/autopilot/rules/conventions.md`.
     review presence from it, and a work-order run's review import uses it to recognize a review an
     earlier attempt published (`skills/work/references/protocol.md`). Tests N12-N14c and LV28 in
     `test-vcs-publish.sh`, GL56 and GL57 in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
-    RM1 and RM2 in `test-vcs-publish.sh` guard its fixture and its fake `gh`; RM3-RM9 drive the
-    GitHub listing against that fake, which is modelled on gh 2.101.0: `--paginate --slurp` prints
-    one array of pages, `--paginate` alone prints them back to back, only a query that pages on
-    `after:$endCursor` and selects `pageInfo{hasNextPage endCursor}` gets past the first page, and
-    a `num` sent with `-f` fails as `Int!`.
+    RM1-RM1c and RM2-RM2d in `test-vcs-publish.sh` guard its fixture and its fake `gh`; RM3-RM10
+    drive the GitHub listing against that fake, RM10 over a pull request without reviews. The fake
+    is modelled on gh 2.101.0: `--paginate --slurp` prints one array of pages, `--paginate` alone
+    prints them back to back, and only a query that declares `$endCursor: String`, pages on
+    `after:$endCursor` and selects `hasNextPage` and `endCursor` in `pageInfo` gets past the first
+    page. A `$endCursor` that is declared but unused, used but undeclared or declared `String!`,
+    and a `num` sent with `-f`, fail with gh's message; a review carries `body` only when the
+    query selects it, and flags may come before the endpoint.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.
