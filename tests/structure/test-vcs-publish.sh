@@ -603,6 +603,129 @@ fi
 eq "LV32b a re-run finds every part in the publisher's own notes and posts nothing new" \
   "$(grep -c -- '--method POST' "$WORK/live/foreign/calls" || true)" "6"
 
+mkdir -p "$WORK/gh/bin" "$WORK/gh/fixture" "$WORK/gh/listing" "$WORK/gh/fail" "$WORK/gh/reject"
+RM_HEX_C="$(printf '%064d' 0 | tr 0 c)"
+RM_HEX_D="$(printf '%064d' 0 | tr 0 d)"
+RM_HEX_E="$(printf '%064d' 0 | tr 0 e)"
+RM_HEX_F="$(printf '%064d' 0 | tr 0 f)"
+GH_A1="<!-- zensu-review:v1:$RM_HEX_A:$RM_HEX_B:abcdef0:2:part=1/2 -->"
+GH_A2="<!-- zensu-review:v1:$RM_HEX_A:$RM_HEX_B:abcdef0:2:part=2/2 -->"
+GH_B1="<!-- zensu-review:v1:$RM_HEX_C:$RM_HEX_D:1234567:1:part=1/1 -->"
+GH_C1="<!-- zensu-review:v1:$RM_HEX_E:$RM_HEX_F:7654321:1:part=1/1 -->"
+A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" DIR="$WORK/gh" node -e '
+  var fs=require("fs"),e=process.env;
+  function review(n,body){return {id:"PRR_"+n,body:body,url:"https://github.test/acme/widget/pull/42#pullrequestreview-"+n};}
+  function page(nodes,next,cursor){return JSON.stringify({data:{repository:{pullRequest:{reviews:{nodes:nodes,pageInfo:{hasNextPage:next,endCursor:cursor}}}}}});}
+  fs.writeFileSync(e.DIR+"/page1.json",page([review(1,e.A1+"\n\nFirst part of the review."),review(2,e.A2+"\n\nSecond part of the review."),review(3,"Looks good to me."),review(4,e.C1+"\n\nA review only the first page carries.")],true,"cursor-4"));
+  fs.writeFileSync(e.DIR+"/page2.json",page([review(5,e.A1+"\n\nThe first part, posted again."),review(6,e.B1+"\n\nA review only the second page carries.")],false,"cursor-6"));'
+cat > "$WORK/gh/bin/gh" <<'FAKE'
+#!/bin/bash
+set -u
+printf '%s\n' "$*" >> "$FAKE_DIR/calls"
+[ "${1:-}" = api ] && [ "${2:-}" = graphql ] || exit 2
+shift 2
+paginate=0; slurp=0; query=""; owner=""; name=""; num=""; num_flag=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --paginate) paginate=1 ;;
+    --slurp) slurp=1 ;;
+    -f|--raw-field|-F|--field)
+      case "${2:-}" in
+        query=*) query="${2#query=}" ;;
+        owner=*) owner="${2#owner=}" ;;
+        name=*) name="${2#name=}" ;;
+        num=*) num="${2#num=}"; num_flag="$1" ;;
+      esac
+      shift ;;
+  esac
+  shift
+done
+if [ "${FAKE_REVIEWS:-ok}" = fail ]; then
+  printf '%s\n' '{"errors":[{"message":"fixture: the review listing failed"}]}'
+  printf '%s\n' 'gh: fixture: the review listing failed' >&2
+  exit 1
+fi
+case "$num_flag" in -F|--field) ;; *) num="" ;; esac
+case "$num" in
+  ''|*[!0-9]*)
+    printf '%s\n' '{"errors":[{"message":"Variable $num of type Int! was provided invalid value"}]}'
+    printf '%s\n' 'gh: Variable $num of type Int! was provided invalid value' >&2
+    exit 1 ;;
+esac
+if [ "$owner/$name#$num" != 'acme/widget#42' ]; then
+  printf '%s\n' "gh: fixture: no pull request $owner/$name#$num" >&2
+  exit 1
+fi
+flat="$(printf '%s' "$query" | tr -d ' \t\n,')"
+cursor=0; after=0; page_info=0
+case "$flat" in *'$endCursor:String'*) cursor=1 ;; esac
+case "$flat" in *'after:$endCursor'*) after=1 ;; esac
+case "$flat" in *'pageInfo{hasNextPageendCursor}'*|*'pageInfo{endCursorhasNextPage}'*) page_info=1 ;; esac
+pages=1
+[ "$paginate$cursor$after$page_info" = 1111 ] && pages=2
+dir="${FAKE_DIR%/*}"
+if [ "$paginate" = 1 ] && [ "$slurp" = 1 ] && [ "$pages" = 2 ]; then
+  printf '[%s,%s]' "$(cat "$dir/page1.json")" "$(cat "$dir/page2.json")"
+elif [ "$paginate" = 1 ] && [ "$slurp" = 1 ]; then
+  printf '[%s]' "$(cat "$dir/page1.json")"
+elif [ "$paginate" = 1 ] && [ "$pages" = 2 ]; then
+  cat "$dir/page1.json" "$dir/page2.json"
+elif [ "$slurp" = 0 ]; then
+  cat "$dir/page1.json"
+else
+  exit 2
+fi
+FAKE
+chmod +x "$WORK/gh/bin/gh"
+GH_PAGED="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f 'query=query($endCursor:String){reviews(after:$endCursor){pageInfo{hasNextPage endCursor}}}' -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+eq "RM1 the fake gh slurps two review pages for a query that pages: a cross-page duplicate, a later part, a marker only each page carries and an unmarked review" \
+  "$(printf '%s' "$GH_PAGED" | A1="$GH_A1" A2="$GH_A2" B1="$GH_B1" C1="$GH_C1" node -e '
+    var e=process.env,s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var pages;try{pages=JSON.parse(s);}catch(_){process.stdout.write("not one JSON document");return;}
+      function count(test){return pages.map(function(p){return p.data.repository.pullRequest.reviews.nodes.filter(function(r){return test(r.body);}).length;}).join("+");}
+      function marker(m){return count(function(b){return b.indexOf(m)>=0;});}
+      process.stdout.write(pages.length+" pages | A part 1/2: "+marker(e.A1)+" | A part 2/2: "+marker(e.A2)+" | B part 1/1: "+marker(e.B1)
+        +" | C part 1/1: "+marker(e.C1)+" | unmarked: "+count(function(b){return b.indexOf("zensu-review:")<0;}));
+    });' 2>/dev/null)" \
+  "2 pages | A part 1/2: 1+1 | A part 2/2: 1+0 | B part 1/1: 0+1 | C part 1/1: 1+0 | unmarked: 1+0"
+GH_UNPAGED="$(FAKE_DIR="$WORK/gh/fixture" "$WORK/gh/bin/gh" api graphql --paginate --slurp -f query=reviews -f owner=acme -f name=widget -F num=42 2>/dev/null)"
+eq "RM2 the fake gh slurps only the first page for a query without the cursor fields, as gh 2.101.0 does" \
+  "$(printf '%s' "$GH_UNPAGED" | node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var pages;try{pages=JSON.parse(s);}catch(_){process.stdout.write("not one JSON document");return;}
+      process.stdout.write(Array.isArray(pages)?pages.length+" page(s)":"not an array");
+    });' 2>/dev/null)" "1 page(s)"
+GH_OUT="$(FAKE_DIR="$WORK/gh/listing" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>/dev/null)"
+GH_RC=$?
+if [ "$GH_RC" -eq 0 ]; then
+  check "RM3 --review-markers on GitHub succeeds against a gh that serves the reviews in two pages" PASS
+else
+  check "RM3 --review-markers on GitHub succeeds against a gh that serves the reviews in two pages (rc=$GH_RC)" FAIL
+fi
+eq "RM4 --review-markers on GitHub lists each distinct first-part marker of both pages once, one per line" \
+  "$(printf '%s\n' "$GH_OUT" | LC_ALL=C sort)" "$(printf '%s\n' "$GH_A1" "$GH_B1" "$GH_C1" | LC_ALL=C sort)"
+GH_CALLS="$(cat "$WORK/gh/listing/calls" 2>/dev/null)"
+has "RM5 the GitHub listing passes --paginate --slurp to gh" "$GH_CALLS" "api graphql --paginate --slurp "
+has "RM6a the GitHub listing passes the pull request number as the typed field -F num" " $GH_CALLS " " -F num=42 "
+has "RM6b the GitHub listing sends the owner as a raw -f string" " $GH_CALLS " " -f owner=acme "
+has "RM6c the GitHub listing sends the repository name as a raw -f string" " $GH_CALLS " " -f name=widget "
+GH_FAIL_ERR="$(FAKE_REVIEWS=fail FAKE_DIR="$WORK/gh/fail" PATH="$WORK/gh/bin:$PATH" \
+  bash "$LIB" --review-markers --provider github --repo-id acme/widget 42 2>&1 >/dev/null)"
+GH_FAIL_RC=$?
+if [ "$GH_FAIL_RC" -ne 0 ]; then
+  check "RM7 a failed GitHub listing makes --review-markers exit non-zero" PASS
+else
+  check "RM7 a failed GitHub listing makes --review-markers exit non-zero" FAIL
+fi
+has "RM8 the failed GitHub listing is reported under the review-markers inventory label" "$GH_FAIL_ERR" "zensu-vcs: review-markers inventory (gh api graphql reviews) failed (rc=1): "
+GH_REJECT_RC=0
+FAKE_DIR="$WORK/gh/reject" PATH="$WORK/gh/bin:$PATH" bash "$LIB" --review-markers --provider github --repo-id acme/widget "@$WORK/gh/num" >/dev/null 2>&1 || GH_REJECT_RC=$?
+if [ "$GH_REJECT_RC" -ne 0 ] && [ ! -e "$WORK/gh/reject/calls" ]; then
+  check "RM9 a non-numeric pull request id makes --review-markers exit non-zero before gh runs" PASS
+else
+  check "RM9 a non-numeric pull request id makes --review-markers exit non-zero before gh runs (rc=$GH_REJECT_RC)" FAIL
+fi
+
 rm -rf "$WORK"
 
 echo "----"

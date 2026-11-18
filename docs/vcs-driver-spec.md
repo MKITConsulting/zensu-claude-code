@@ -348,7 +348,11 @@ specified in `skills/autopilot/rules/conventions.md`.
     review presence from it, and a work-order run's review import uses it to recognize a review an
     earlier attempt published (`skills/work/references/protocol.md`). Tests N12-N14c and LV28 in
     `test-vcs-publish.sh`, GL56 and GL57 in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
-    Known gap (follow-up): no fake-backed check drives the GitHub listing.
+    RM1 and RM2 in `test-vcs-publish.sh` guard its fixture and its fake `gh`; RM3-RM9 drive the
+    GitHub listing against that fake, which is modelled on gh 2.101.0: `--paginate --slurp` prints
+    one array of pages, `--paginate` alone prints them back to back, only a query that pages on
+    `after:$endCursor` and selects `pageInfo{hasNextPage endCursor}` gets past the first page, and
+    a `num` sent with `-f` fails as `Int!`.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.
