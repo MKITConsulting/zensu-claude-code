@@ -212,7 +212,7 @@ Automatic work capture drives these through `hooks/lib/ai-work-capture-v1.js`; `
 
 ### Pulse (Developer Journal)
 - `zensu pulse start` — Start a dev session (the git HEAD SHA via `--head-sha`, required, and the branch via `--branch`); with `--minimal-json` it prints only an indented JSON object that holds either the session's `"id"` or `"status": "tracking_disabled"`
-- `zensu pulse end <id>` — End a session (each changed file path via a repeated `--changed-file`; `--minimal-json` as for `start`)
+- `zensu pulse end <id>` — End a session (each changed file path via a repeated `--changed-file`, or none to end it without any path; `--minimal-json` as for `start`)
 - `zensu pulse summary <id>` — Review session activity
 
 While Pulse tracking is off in the user's Zensu privacy settings, as it is for every new account until the user turns it on, `start` and `end` exit 0 with `tracking_disabled` and no session id: nothing was recorded, and there is no session to end or summarize.
@@ -275,7 +275,7 @@ No separate skill for the hybrid itself: step 2 runs inside the ghost-scan windo
 Use the `/zensu:pulse` skill workflow:
 1. Start the session with the git HEAD SHA; a `tracking_disabled` answer ends the workflow, because tracking is off and no session exists
 2. Work as normal (session captured at its boundaries)
-3. End the session with every changed file
+3. End the session with every changed file, or without any path when the user chooses to send none
 4. Review the session summary
 
 ### When the user wants documentation

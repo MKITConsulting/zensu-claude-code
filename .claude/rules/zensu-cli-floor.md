@@ -216,7 +216,8 @@ behind it, are copied here and nothing checks them against their source:
   spaces that holds an `id` or `"status": "tracking_disabled"`, and they report every request error
   as `Pulse request failed` and every malformed answer as `invalid Pulse response`; without the
   flag the detailed error comes through, and a successful end prints `Ended session <id>`.
-  `--changed-file` repeats. The end refuses more than 1000 paths before it reads the tracking
+  `--changed-file` repeats, and an end without any sends an empty list, which the backend
+  accepts and maps no feature to. The end refuses more than 1000 paths before it reads the tracking
   setting, answers `tracking_disabled` when the user has no privacy row or tracking is off, and
   refuses the whole list for one path that is empty, longer than 500 bytes, absolute, holds a
   backslash or a control, format, line- or paragraph-separator character, or differs from its
