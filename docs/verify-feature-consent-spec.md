@@ -33,6 +33,13 @@ a remote origin approved mid-session could not be pinned — does not hold, beca
 written before `open` and the prompt is raised at that same `open`. AC-018 is amended in place,
 and §12 records the decisions.
 
+**The browser fence moved to the network level on 2026-11-18.** The run config now carries three
+derived launch arguments that refuse every connection to a host and port outside the run's
+origins, a WebSocket and a server redirect included, and service workers run. The design, its
+measurements and what stays open are in `docs/verify-feature-network-fence-spec.md`. Every
+statement below that says a WebSocket connection or a server redirect is not fenced, D12 and
+§11.3 among them, describes the earlier fence and stays as the record of that decision.
+
 **The bundled monorepo adapter was removed on 2026-10-12.** The plugin serves projects whose
 users cannot see the Zensu monorepo, so it no longer carries a start script for it. Phase 2
 resolves the candidate recipe and otherwise offers the guided setup, and a repository is verified

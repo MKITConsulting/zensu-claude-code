@@ -132,14 +132,17 @@ function sessionName(runDir, options = {}) {
 }
 
 function buildConfig(runDir, origins, rules, statePath = null) {
-  const args = ['--no-proxy-server'];
-  if (rules.length > 0) args.push(`--host-resolver-rules=${rules.join(',')}`);
-  const contextOptions = { serviceWorkers: 'block' };
+  const pins = new Map();
+  for (const rule of rules) {
+    const pin = consent.resolverPin(rule);
+    if (pin) pins.set(pin.host, pin.address);
+  }
+  const contextOptions = { serviceWorkers: 'allow' };
   if (statePath) contextOptions.storageState = statePath;
   return {
     browser: {
       isolated: true,
-      launchOptions: { args },
+      launchOptions: { args: consent.fenceArgs(origins, pins) },
       contextOptions,
     },
     network: { allowedOrigins: origins },

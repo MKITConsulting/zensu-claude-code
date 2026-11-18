@@ -780,6 +780,14 @@ case "$(PLAYWRIGHT_MCP_CONFIG=/nonexistent/config.json pre_reason "$OPEN_CMD" "$
     check "H11c open under an ambient PLAYWRIGHT_MCP_ override is denied" PASS ;;
   *) check "H11c open under an ambient PLAYWRIGHT_MCP_ override is denied" FAIL ;;
 esac
+case "$(PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK=1 pre_reason "$OPEN_CMD" "$SID" "$PROJ")" in
+  *'the launch environment sets PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK, which takes the requests of a service worker out of the request interception the run config relies on'*)
+    check "H11c2 open under a launch environment that detaches service workers from request interception is denied with a text of its own" PASS ;;
+  *) check "H11c2 open under a launch environment that detaches service workers from request interception is denied with a text of its own" FAIL ;;
+esac
+[ "$(PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK= pre_verdict "$OPEN_CMD" "$SID" "$PROJ")" = "ASK" ] \
+  && check "H11c3-control an empty value of that variable leaves the prompt" PASS \
+  || check "H11c3-control an empty value of that variable leaves the prompt" FAIL
 mkdir -p "$GLOBAL_HOME/.playwright"
 printf '%s\n' '{"browser":{"browserName":"firefox"}}' > "$GLOBAL_HOME/.playwright/cli.config.json"
 case "$(pre_reason "$OPEN_CMD" "$SID" "$PROJ")" in
@@ -1221,7 +1229,9 @@ fi
 DRIFT_MISSING=""
 for needle in 'The driver is user-supplied: the plugin ships no pin and no integrity check for `playwright-cli`.' \
   'a version the package declares, not a verified binary' \
-  '`network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules` pins, `browser.contextOptions.serviceWorkers`' \
+  '`network.allowedOrigins`, `browser.isolated`, the three launch arguments (`--proxy-server`, `--proxy-bypass-list` with `<-loopback>`, `--host-resolver-rules` with `^NOTFOUND`)' \
+  'A later Chrome can do the same to the three switches the network fence is made of' \
+  'the `PLAYWRIGHT_MCP_*` launch variables, `PLAYWRIGHT_DISABLE_SERVICE_WORKER_NETWORK`, `PLAYWRIGHT_MCP_` and `PWTEST_` text in a command, and the global `cli.config.json`' \
   'so a new environment or config channel of a later CLI is unjudged.'; do
   printf '%s' "$GATES_FLAT" | grep -qF -- "$needle" || DRIFT_MISSING="$DRIFT_MISSING [$needle]"
 done

@@ -48,7 +48,6 @@ const NAMES = Object.freeze({ app: 'fence-app.test', leak: 'fence-leak.test', su
 const UNMAPPED_NAME = 'fence-unmapped.test';
 const DEFAULT_BUDGET_MS = 6000;
 const REMOTE = Object.freeze({ approved: 'example.com', unapproved: 'example.org', title: 'Example Domain' });
-const FENCE_PROXY = 'http://zensu-fence.invalid:9';
 const VARIANTS = Object.freeze({
   legacy: Object.freeze({ fence: false, serviceWorkers: 'block', routes: true, judged: false }),
   'routes-only': Object.freeze({ fence: false, serviceWorkers: 'allow', routes: true, judged: false }),
@@ -58,33 +57,6 @@ const VARIANTS = Object.freeze({
 const CALL_TIMEOUT_MS = 90000;
 const REPORT_TIMEOUT_MS = 60000;
 const MEMORY_LEAF = `${consent.MEMORY_NAME_PREFIX}scv1_${'f'.repeat(64)}.json`;
-
-function fenceArgs(origins, pins) {
-  const bypass = ['<-loopback>'];
-  const maps = [];
-  const excludes = [];
-  const hosts = new Set();
-  for (const origin of origins) {
-    const parsed = new URL(origin);
-    const host = floor.normalizeHostname(parsed.hostname);
-    const port = parsed.port || (['https:', 'wss:'].includes(parsed.protocol) ? '443' : '80');
-    const entry = `${net.isIP(host) === 6 ? `[${host}]` : host}:${port}`;
-    if (!bypass.includes(entry)) bypass.push(entry);
-    if (hosts.has(host)) continue;
-    hosts.add(host);
-    if (net.isIP(host) || floor.isLocalHost(host)) {
-      excludes.push(`EXCLUDE ${host}`);
-    } else if (pins.has(host)) {
-      const address = pins.get(host);
-      maps.push(`MAP ${host} ${net.isIP(address) === 6 ? `[${address}]` : address}`);
-    }
-  }
-  return [
-    `--proxy-server=${FENCE_PROXY}`,
-    `--proxy-bypass-list=${bypass.join(';')}`,
-    `--host-resolver-rules=${[...maps, 'MAP * ^NOTFOUND', ...excludes].join(',')}`,
-  ];
-}
 
 function legacyArgs(pins) {
   const rules = [...pins].map(([host, address]) => `MAP ${host} ${net.isIP(address) === 6 ? `[${address}]` : address}`);
@@ -337,7 +309,7 @@ self.addEventListener('fetch', (e) => {
 
 const APP_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>fence probe app</title></head>
-<body><h1>fence probe app</h1><p id="state">app-worker starting</p><p id="banner" hidden></p>
+<body><h1>fence probe app</h1><p id="state">app-worker starting</p><p id="cache">app-cache pending</p><p id="banner" hidden></p>
 <script src="/app/app.js"></script>
 </body></html>`;
 
@@ -371,12 +343,18 @@ const APP_JS = `(async () => {
   }
   const controller = navigator.serviceWorker.controller;
   state.textContent = mine(controller) ? 'app-worker v' + await ask(controller) + ' controls this page' : 'app-worker registered without control';
+  const cached = await fetch('/app/cached.txt').then((response) => response.text()).catch((error) => 'failed ' + error.message);
+  document.getElementById('cache').textContent = 'app-cache ' + cached.slice(0, 40);
   registration.update().catch(() => {});
 })();
 `;
 
 const APP_SW_JS = (version) => `const VERSION = ${version};
+self.addEventListener('install', (event) => event.waitUntil(caches.open('fence-app').then((cache) => cache.put('/app/cached.txt', new Response('answered-from-cache-v' + VERSION)))));
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', (event) => {
+  if (new URL(event.request.url).pathname === '/app/cached.txt') event.respondWith(caches.match('/app/cached.txt').then((hit) => hit || new Response('cache-miss')));
+});
 self.addEventListener('message', (event) => { if (event.data === 'version' && event.ports[0]) event.ports[0].postMessage(VERSION); });
 `;
 
@@ -694,13 +672,14 @@ async function workerUpdate(driver, fixture, origin) {
     }
     return text;
   };
-  const marker = (text) => (text.match(/app-worker [^"'\n]*|app-update [^"'\n]*/g) || []).join(' | ');
+  const marker = (text) => (text.match(/app-worker [^"'\n]*|app-cache [^"'\n]*|app-update [^"'\n]*/g) || []).join(' | ');
   const opened = await driver.call(['goto', `${origin}/app/`]);
   out.goto = brief(opened);
   if (opened.code !== 0) return out;
-  const first = await snapshot(/app-worker (v\d+ controls|none|unsupported|failed|registered without)/);
+  const first = await snapshot(/app-worker (none|unsupported|failed|registered without)|app-cache (?!pending)/);
   out.first = marker(first);
   out.registered = /app-worker v1 controls this page/.test(first);
+  out.cached = /app-cache answered-from-cache-v1/.test(first);
   if (!out.registered) return out;
   state.workerVersion = 2;
   const reloaded = await driver.call(['reload']);
@@ -789,6 +768,7 @@ function judgeLoopback(result, variant, fixture, options) {
   }
   if (variant.serviceWorkers === 'allow' && result.update) {
     if (!result.update.registered) problems.push(`the fixture worker did not take control: ${JSON.stringify(result.update.first)}`);
+    if (result.update.registered && !result.update.cached) problems.push(`the worker's cache did not answer the page: ${JSON.stringify(result.update.first)}`);
     if (!result.update.updated) problems.push(`the worker update was not observed: ${JSON.stringify(result.update.second)}`);
   }
   if (result.netlog) {
@@ -882,7 +862,7 @@ async function modeMatrix(options, out) {
       const origins = approvedOrigins(fixture, true);
       const netlog = path.join(out, `${name}.netlog.json`);
       const fencePins = new Map([[NAMES.app, '127.0.0.1']]);
-      const args = variant.fence ? fenceArgs(origins, fencePins) : legacyArgs(pins);
+      const args = variant.fence ? consent.fenceArgs(origins, fencePins) : legacyArgs(pins);
       const config = probeConfig(options, variant, args, origins, netlog, path.join(out, `${name}-browser`));
       const configPath = path.join(out, `${name}.config.json`);
       fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -931,7 +911,7 @@ async function modeRemote(options, out) {
       const variant = VARIANTS[name];
       fixture.reset();
       const netlog = path.join(out, `remote-${name}.netlog.json`);
-      const args = fenceArgs(origins, pins);
+      const args = consent.fenceArgs(origins, pins);
       const config = probeConfig(options, variant, args, origins, netlog, path.join(out, `remote-${name}-browser`));
       const configPath = path.join(out, `remote-${name}.config.json`);
       fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);

@@ -11,8 +11,11 @@ recorded, with their versions, in `.claude/rules/browser-consent-gate.md`. The d
 ## What it does
 
 One Node process serves approved listeners and unapproved sinks on loopback, a probe page that
-runs every check against its own path, and a small application whose service worker changes
-between two loads. The browser is opened through the real `playwright-cli`, on a session name
+runs every check against its own path, and a small application whose service worker fills a
+cache, answers the page from it and changes between two loads. The run configs of the fenced
+columns carry the launch arguments of `fenceArgs` in `hooks/lib/verify-consent-v1.js`, the
+function the gate compares a run config with, so the probe measures the arguments the gate
+requires. The browser is opened through the real `playwright-cli`, on a session name
 the probe owns (`fenceprobe-…`, or the `zensu-verify-…` name the run-config helper prints in
 gated mode). The probe closes that session and never touches another one.
 
@@ -45,7 +48,9 @@ and `remote`, `--extra=<chromium switch>`.
 
 ## What counts as passed
 
-A judged run passes when every approved check works, no sink logs a connection, and the run's
+A judged run passes when every approved check works, no sink logs a connection, the fixture
+worker takes control, answers the page from its cache and is found updated on the second load,
+and the run's
 net-log holds no resolver request for a name outside the run config, no resolver lookup at all
 and no TCP connect attempt outside the run config. The probe prints the resolver event types
 the browser wrote, so a platform whose resolver writes other events is read off the output and

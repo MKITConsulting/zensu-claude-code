@@ -22,6 +22,8 @@ function runDir(t, name = 'run-abc123') {
 }
 
 const NO_POLICY = Object.freeze({});
+const FENCE_PROXY_ARG = '--proxy-server=http://zensu-fence.invalid:9';
+const fence = (bypass, rules) => [FENCE_PROXY_ARG, `--proxy-bypass-list=<-loopback>;${bypass}`, `--host-resolver-rules=${rules}`];
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const MEASURED = consent.PLAYWRIGHT_CLI_SOURCE_VERSION;
 const UNMEASURED = MEASURED.replace(/\d+$/, (patch) => String(Number(patch) + 1));
@@ -111,8 +113,13 @@ test('a local run writes an isolated, origin-restricted config inside the run di
   const written = JSON.parse(fs.readFileSync(result.configPath, 'utf8'));
   assert.deepEqual(written, result.config);
   assert.equal(written.browser.isolated, true);
-  assert.deepEqual(written.browser.launchOptions.args, ['--no-proxy-server']);
-  assert.equal(written.browser.contextOptions.serviceWorkers, 'block');
+  assert.deepEqual(written.browser.launchOptions.args, [
+    FENCE_PROXY_ARG,
+    '--proxy-bypass-list=<-loopback>;127.0.0.1:5173;[::1]:8080',
+    '--host-resolver-rules=MAP * ^NOTFOUND,EXCLUDE 127.0.0.1,EXCLUDE ::1',
+  ]);
+  assert.deepEqual(written.browser.contextOptions, { serviceWorkers: 'allow' });
+  assert.equal(consent.runConfigShape(written, result.configPath).ok, true);
   assert.deepEqual(written.network.allowedOrigins, result.origins);
   assert.equal(written.outputDir, path.join(dir, helper.OUTPUT_DIR_NAME));
   if (process.platform !== 'win32') assert.equal(fs.statSync(result.configPath).mode & 0o777, 0o600);
@@ -151,7 +158,7 @@ test('a local run admits localhost and pins no address for it', async (t) => {
   const result = await helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://localhost:4200', '--origin', 'http://localhost:9090'],
     neverResolves, NO_POLICY, READY);
   assert.deepEqual(result.origins, ['http://localhost:4200', 'http://localhost:9090']);
-  assert.deepEqual(result.config.browser.launchOptions.args, ['--no-proxy-server']);
+  assert.deepEqual(result.config.browser.launchOptions.args, fence('localhost:4200;localhost:9090', 'MAP * ^NOTFOUND,EXCLUDE localhost'));
   assert.deepEqual(result.config.network.allowedOrigins, ['http://localhost:4200', 'http://localhost:9090']);
   assert.equal(consent.runConfigShape(result.config, result.configPath).ok, true);
 });
@@ -171,10 +178,9 @@ test('a remote run pins every hostname to a public address and refuses the rest'
   const result = await helper.run(['--run-dir', dir, '--mode', 'remote',
     '--origin', 'https://preview.example.com', '--origin', 'https://v6.example.com', '--origin', 'https://93.184.216.34'], resolver, env, READY);
   assert.equal(result.mode, 'policy');
-  assert.deepEqual(result.config.browser.launchOptions.args, [
-    '--no-proxy-server',
-    '--host-resolver-rules=MAP preview.example.com 93.184.216.34,MAP v6.example.com [2606:2800:220:1:248:1893:25c8:1946]',
-  ]);
+  assert.deepEqual(result.config.browser.launchOptions.args, fence('preview.example.com:443;v6.example.com:443;93.184.216.34:443',
+    'MAP preview.example.com 93.184.216.34,MAP v6.example.com [2606:2800:220:1:248:1893:25c8:1946],MAP * ^NOTFOUND,EXCLUDE 93.184.216.34'));
+  assert.equal(consent.readRunConfig(result.configPath).ok, true);
   assert.deepEqual(result.config.network.allowedOrigins, ['https://preview.example.com', 'https://v6.example.com', 'https://93.184.216.34']);
   const refused = [
     ['https://mixed.example.com', /non-public/],
@@ -198,7 +204,8 @@ test('two remote origins that share a hostname are pinned once', async (t) => {
   const env = policyEnv('remote', [target('https://app.example.com'), target('https://app.example.com:8443')]);
   const result = await helper.run(['--run-dir', dir, '--mode', 'remote',
     '--origin', 'https://app.example.com', '--origin', 'https://app.example.com:8443'], resolver, env, READY);
-  assert.deepEqual(result.config.browser.launchOptions.args, ['--no-proxy-server', '--host-resolver-rules=MAP app.example.com 93.184.216.34']);
+  assert.deepEqual(result.config.browser.launchOptions.args,
+    fence('app.example.com:443;app.example.com:8443', 'MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND'));
   assert.deepEqual(result.origins, ['https://app.example.com', 'https://app.example.com:8443']);
   assert.equal(consent.readRunConfig(result.configPath).ok, true);
 });
@@ -208,7 +215,7 @@ test('the run config pins a remote origin for consent, and a policy pre-approves
   const resolver = publicResolver({ 'preview.example.com': ['93.184.216.34'] });
   const remote = await helper.run(['--run-dir', dir, '--mode', 'remote', '--origin', 'https://preview.example.com'], resolver, NO_POLICY, READY);
   assert.equal(remote.mode, 'consent');
-  assert.deepEqual(remote.config.browser.launchOptions.args, ['--no-proxy-server', '--host-resolver-rules=MAP preview.example.com 93.184.216.34']);
+  assert.deepEqual(remote.config.browser.launchOptions.args, fence('preview.example.com:443', 'MAP preview.example.com 93.184.216.34,MAP * ^NOTFOUND'));
   assert.equal(consent.readRunConfig(remote.configPath).ok, true);
   const local = policyEnv('local', [target('http://127.0.0.1:5173', ['/', '/login'])]);
   const admitted = await helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5173'], undefined, local, READY);
@@ -240,10 +247,8 @@ test('a remote run allows its network-only origins after its targets and pins ev
   assert.deepEqual(result.networkOnlyOrigins, ['https://api.example.org', 'https://id.example.org', 'https://93.184.216.36']);
   assert.deepEqual(result.config.network.allowedOrigins,
     ['https://app.example.com', 'https://api.example.org', 'https://id.example.org', 'https://93.184.216.36']);
-  assert.deepEqual(result.config.browser.launchOptions.args, [
-    '--no-proxy-server',
-    '--host-resolver-rules=MAP app.example.com 93.184.216.34,MAP api.example.org 93.184.216.35,MAP id.example.org [2606:2800:220:1:248:1893:25c8:1946]',
-  ]);
+  assert.deepEqual(result.config.browser.launchOptions.args, fence('app.example.com:443;api.example.org:443;id.example.org:443;93.184.216.36:443',
+    'MAP app.example.com 93.184.216.34,MAP api.example.org 93.184.216.35,MAP id.example.org [2606:2800:220:1:248:1893:25c8:1946],MAP * ^NOTFOUND,EXCLUDE 93.184.216.36'));
   assert.equal(consent.readRunConfig(result.configPath).ok, true);
 });
 
@@ -255,7 +260,8 @@ test('a local policy may allow a loopback API without a pin and a public HTTPS i
     '--network-only-origin', 'http://127.0.0.1:9090', '--network-only-origin', 'https://auth.example.com'], resolver, env, READY);
   assert.equal(result.mode, 'policy');
   assert.deepEqual(result.config.network.allowedOrigins, ['http://127.0.0.1:4200', 'http://127.0.0.1:9090', 'https://auth.example.com']);
-  assert.deepEqual(result.config.browser.launchOptions.args, ['--no-proxy-server', '--host-resolver-rules=MAP auth.example.com 93.184.216.34']);
+  assert.deepEqual(result.config.browser.launchOptions.args, fence('127.0.0.1:4200;127.0.0.1:9090;auth.example.com:443',
+    'MAP auth.example.com 93.184.216.34,MAP * ^NOTFOUND,EXCLUDE 127.0.0.1'));
   assert.equal(consent.readRunConfig(result.configPath).ok, true);
 });
 
@@ -660,6 +666,7 @@ test('a login run writes a signed-in run config whose private state keeps only t
   const statePath = path.join(project.dir, 'auth', 'storage-state.json');
   assert.equal(result.config.browser.contextOptions.storageState, statePath);
   assert.deepEqual(Object.keys(result.config.browser.contextOptions).sort(), ['serviceWorkers', 'storageState']);
+  assert.equal(result.config.browser.contextOptions.serviceWorkers, 'allow');
   assert.equal(consent.runConfigShape(result.config, result.configPath).statePath, statePath);
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.deepEqual(state.cookies.map((cookie) => cookie.name), ['sid']);
@@ -750,7 +757,7 @@ test('a remote login run needs the recipe to bind the application origin and dec
     const project = loginProject(t, { origin: remote, auth: auth(['  appOrigin: "https://app.example.com"', `  environment: ${environment}`, '  baseUrl: "https://app.example.com/"']) });
     const result = await helper.run(args(project), resolver, NO_POLICY, READY);
     assert.equal(result.login, 'state-restored', environment);
-    assert.deepEqual(result.config.browser.launchOptions.args, ['--no-proxy-server', '--host-resolver-rules=MAP app.example.com 93.184.216.34']);
+    assert.deepEqual(result.config.browser.launchOptions.args, fence('app.example.com:443', 'MAP app.example.com 93.184.216.34,MAP * ^NOTFOUND'));
   }
   for (const extra of [
     ['  appOrigin: "http://127.0.0.1:9"', '  baseUrl: "http://127.0.0.1:9"'],
