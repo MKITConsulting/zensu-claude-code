@@ -1,0 +1,11 @@
+description: "Preflight: proves that an attended source offers AskUserQuestion. The attended sources run the CLI with --permission-prompt-tool stdio, and the user asks for one AskUserQuestion call about something that is not a code change, so a probe record of that call answered CONTINUE, whose result carries the probe's own reason, shows that this CLI offers the tool and that the probe answers it before any permission channel. Without it, a missing tool fails every attended scenario in a way that reads like a model's choice."
+vars:
+  route_source: ask-attended
+  user_message: "Use the AskUserQuestion tool once now to ask me which of two colors I prefer, with the options Blue and Green. Change no file."
+  expected_shape: ask-short
+  expected_field: ask
+  autopilot_option: offered
+  anchor_clause: "the one you recommend first, with \" (Recommended)\" appended to its label and to no other."
+assert:
+  - type: javascript
+    value: file://assertions/ask-tool-offered.js

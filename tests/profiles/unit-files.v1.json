@@ -107,9 +107,9 @@
       "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports and the task-chip proposals."
     },
     {
-      "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
+      "path": "tests/structure/owned-process.test.js", "registered": 7, "skips": {"win32": 7},
       "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
-      "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
+      "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number, a group signal answered with EPERM once, a group that keeps answering it, and one that refuses the signals but answers the probe."
     },
     {
       "path": "tests/structure/plan-payload-v1.test.js", "registered": 23,
@@ -215,7 +215,7 @@
       "summary": "Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds."
     },
     {
-      "path": "tests/structure/route-short-line-graders.test.js", "registered": 38,
+      "path": "tests/structure/route-short-line-graders.test.js", "registered": 41,
       "runs": [{ "driver": "tests/structure/test-route-short-line-eval.sh" }],
       "summary": "The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions."
     },
