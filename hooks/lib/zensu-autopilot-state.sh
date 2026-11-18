@@ -437,6 +437,9 @@ _autopilot_node() {
     increment-budget|increment-budget-capped) path_indexes=(0 1 2 5) ;;
     *) return 3 ;;
   esac
+  if [ "$mode" = adopt ] && [ "${#args[@]}" -gt 10 ] && [ -n "${args[10]}" ]; then
+    path_indexes+=(10)
+  fi
   for index in "${path_indexes[@]}"; do
     [ "$index" -lt "${#args[@]}" ] || return 3
     native="$(_autopilot_native_project_path "${args[$index]}")" || return 2
@@ -1083,13 +1086,13 @@ const ownerLiveness = (stateDir, ownerSessionId, ttlHoursRaw, options = {}) => {
   if (ageMs < 0) return { verdict: "future", ageMs };
   return { verdict: ageMs < ttlHours * 3600000 ? "fresh" : "stale", ageMs };
 };
-const staleOwnerPointersFor = (stateDir, runId, callerSessionId) => {
-  const own = `${OWNER_POINTER_PREFIX}${rawDigest(callerSessionId)}.json`;
+const pointersNaming = (dir, runId, includeLegacy) => {
   let names;
-  try { names = fs.readdirSync(stateDir); } catch (_) { return []; }
-  return names.filter(name => /^autopilot-active-[0-9a-f]{64}\.json$/.test(name) && name !== own)
+  try { names = fs.readdirSync(dir); } catch (_) { return []; }
+  return names.filter(name => /^autopilot-active-[0-9a-f]{64}\.json$/.test(name)
+      || (includeLegacy && name === LEGACY_POINTER_NAME))
     .filter(name => {
-      const file = path.join(stateDir, name);
+      const file = path.join(dir, name);
       try {
         const stat = fs.lstatSync(file);
         if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_BYTES) return false;
@@ -1098,6 +1101,10 @@ const staleOwnerPointersFor = (stateDir, runId, callerSessionId) => {
       } catch (_) { return false; }
     })
     .sort();
+};
+const staleOwnerPointersFor = (stateDir, runId, callerSessionId) => {
+  const own = `${OWNER_POINTER_PREFIX}${rawDigest(callerSessionId)}.json`;
+  return pointersNaming(stateDir, runId, false).filter(name => name !== own);
 };
 const readPointer = file => {
   const pointer = readJson(file);
@@ -1118,7 +1125,7 @@ const rawOwnerOf = file => {
       ? parsed.ownerSessionId : null;
   } catch (_) { return null; }
 };
-const readRunInventory = (stateDir, expectedProjectRoot, ownerSessionId = "") => {
+const readRunInventory = (stateDir, expectedProjectRoot, ownerSessionId = "", skipRunId = "") => {
   let names;
   try { names = fs.readdirSync(stateDir, { encoding: "utf8" }); }
   catch (_) { fail(2, "cannot inspect Autopilot run inventory"); }
@@ -1128,6 +1135,7 @@ const readRunInventory = (stateDir, expectedProjectRoot, ownerSessionId = "") =>
     const match = envelope.exec(name);
     if (!match) return [];
     if (!identifier(match[1])) fail(2, `invalid run inventory artifact: ${name}`);
+    if (skipRunId !== "" && match[1] === skipRunId) return [];
     // A record this caller provably does not own is skipped before validation.
     // Anything unattributable still fails closed: we cannot prove it is not
     // ours, so it is judged as before.
@@ -1948,7 +1956,7 @@ if (mode === "release-work-order") {
 if (mode === "adopt") {
   const [runFile, runOutput, runId, expectedProjectRoot, callerSessionId,
     stateDir, callerWorkspace, ownerActivityTtlHours, callerPointerOutput,
-    reportMode = ""] = args;
+    reportMode = "", sourceDir = ""] = args;
   // `ownerIdentity`, the shared WRITE vocabulary: the assignment to
   // `state.ownerSessionId` below PERSISTS this value and `stateValid` judges it with
   // the same rule, so a looser check only defers the refusal to
@@ -1962,7 +1970,8 @@ if (mode === "adopt") {
     || !nonEmpty(stateDir, 4096) || !nonEmpty(callerWorkspace, 4096)
     || !nonEmpty(callerPointerOutput, 4096)
     || !/^[0-9]+$/.test(String(ownerActivityTtlHours))
-    || (reportMode !== "" && reportMode !== "report")) {
+    || (reportMode !== "" && reportMode !== "report")
+    || (sourceDir !== "" && !nonEmpty(sourceDir, 4096))) {
     fail(3, "invalid adopt arguments");
   }
   // The read-only half of this verb, and it is the SAME ladder rather than a second
@@ -2002,9 +2011,37 @@ if (mode === "adopt") {
       : `the recorded owner's workflow document was written ${minutes} minute(s) ago, outside the ${window} window, so the age check permits adoption`;
   };
   reportLine(`run ${runId} was not changed by this call: no record, no pointer and no provenance entry is written; it runs under the project lease, so it serializes against live writers rather than reading past one`);
-  const state = readState(runFile);
-  if (state.runId !== runId || state.projectRoot !== expectedProjectRoot) {
+  let sourceStateDir = "";
+  if (sourceDir !== "") {
+    try { sourceStateDir = fs.realpathSync.native(path.resolve(sourceDir)); } catch (_) { sourceStateDir = ""; }
+    if (sourceStateDir === "" || sourceStateDir !== path.join(callerWorkspace, ".zensu", "state")
+      || callerWorkspace === expectedProjectRoot || !contains(expectedProjectRoot, callerWorkspace)) {
+      fail(3, "invalid adopt arguments");
+    }
+  }
+  const recordFile = sourceStateDir !== "" && !regularFile(runFile)
+    ? path.join(sourceStateDir, path.basename(runFile)) : runFile;
+  const recordDir = recordFile === runFile ? stateDir : sourceStateDir;
+  const state = readState(recordFile);
+  if (state.runId !== runId || !path.isAbsolute(state.projectRoot)
+    || (recordFile !== runFile && state.projectRoot === expectedProjectRoot)) {
     fail(2, "run file identity or physical project root mismatch");
+  }
+  const relocation = state.projectRoot === expectedProjectRoot ? ""
+    : (recordFile === runFile ? "in-place" : "worktree");
+  if (relocation !== "") {
+    let recordedRootGone = false;
+    try { fs.lstatSync(state.projectRoot); } catch (error) {
+      recordedRootGone = Boolean(error) && (error.code === "ENOENT" || error.code === "ENOTDIR");
+    }
+    if (!recordedRootGone) {
+      fail(6, `run ${runId} records a project root that still exists or could not be inspected, so its storage did not move with its working tree; continue it from a session whose project root is that directory`);
+    }
+    if (Object.prototype.hasOwnProperty.call(state, "workspaceRoot") && state.workspaceRoot !== state.projectRoot) {
+      fail(6, `run ${runId} drives a working tree other than its recorded project root, so it was begun from a checkout that drives a nested worktree; continue it from a session whose project root is that checkout, and leave the run's worktree where it is`);
+    }
+    state.projectRoot = expectedProjectRoot;
+    state.workspaceRoot = relocation === "worktree" ? callerWorkspace : expectedProjectRoot;
   }
   if (TERMINAL.has(state.stage)) fail(3, "terminal run cannot be adopted");
   // Same scope control as release, and state its STRENGTH honestly rather than the
@@ -2024,6 +2061,70 @@ if (mode === "adopt") {
   if (!mayHoldWorkspace(state, callerWorkspace)) {
     fail(6, "run does not hold the caller's working tree; adopt it from the tree it holds");
   }
+  if (relocation === "worktree") {
+    reportLine(`--confirm would move run ${runId} out of the moved working tree's state directory ${sourceStateDir} into this project's state directory ${stateDir}, recording ${expectedProjectRoot} as its project root and ${callerWorkspace} as its working tree`);
+  } else if (relocation === "in-place") {
+    reportLine(`--confirm would rewrite run ${runId} in place: its recorded project root no longer exists, so it would record ${expectedProjectRoot} as its project root and as its working tree`);
+  }
+  const snapshotName = state.effects.teamReview.status !== "none"
+    && typeof state.effects.teamReview.operationKey === "string"
+    ? `autopilot-team-review-payload-${rawDigest(state.effects.teamReview.operationKey)}.json` : "";
+  const sameBytes = (left, right) => {
+    try { return fs.readFileSync(left).equals(fs.readFileSync(right)); } catch (_) { return false; }
+  };
+  const snapshotTags = [];
+  if (relocation === "worktree" && snapshotName !== ""
+    && regularFile(path.join(sourceStateDir, snapshotName))) {
+    if (!regularFile(path.join(stateDir, snapshotName))) {
+      snapshotTags.push(`snapshot\t${snapshotName}`);
+    } else if (!sameBytes(path.join(sourceStateDir, snapshotName), path.join(stateDir, snapshotName))) {
+      fail(2, `this project already holds a different team-review payload snapshot for run ${runId}; nothing was written`);
+    }
+    snapshotTags.push(`source-snapshot\t${snapshotName}`);
+    reportLine(`--confirm would also move the run's team-review payload snapshot ${snapshotName} into this project's state directory`);
+  }
+  const relocationTags = () => {
+    if (relocation === "") return [];
+    const tags = [`relocated\t${relocation}`, ...snapshotTags];
+    if (relocation === "worktree") {
+      tags.push(`source-run\t${path.basename(runFile)}`);
+      for (const name of pointersNaming(sourceStateDir, runId, true)) tags.push(`source-pointer\t${name}`);
+    }
+    return tags;
+  };
+  const leftoverTags = () => {
+    if (relocation !== "" || sourceStateDir === "") return [];
+    const recordName = path.basename(runFile);
+    const sourceRecord = path.join(sourceStateDir, recordName);
+    let present = true;
+    let copy;
+    try {
+      const stat = fs.lstatSync(sourceRecord);
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_BYTES) throw new Error("unsafe");
+      copy = JSON.parse(fs.readFileSync(sourceRecord, "utf8"));
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") {
+        process.stderr.write(`[zensu-autopilot-state] the moved working tree still holds a record of run ${runId} that could not be read, so its leftovers were left in place\n`);
+        return [];
+      }
+      present = false;
+    }
+    if (present && !(isObject(copy) && copy.runId === runId && typeof copy.projectRoot === "string"
+      && path.isAbsolute(copy.projectRoot) && copy.projectRoot !== expectedProjectRoot
+      && !fs.existsSync(copy.projectRoot) && Array.isArray(copy.events) && copy.events.length >= 1
+      && copy.events.length <= state.events.length
+      && copy.events.every((event, index) => isObject(event) && event.eventId === state.events[index].eventId
+        && event.payloadDigest === state.events[index].payloadDigest))) {
+      process.stderr.write(`[zensu-autopilot-state] the moved working tree still holds a record of run ${runId} that is not an older copy of this project's record, so its leftovers were left in place\n`);
+      return [];
+    }
+    const tags = present ? [`source-run\t${recordName}`] : [];
+    for (const name of pointersNaming(sourceStateDir, runId, true)) tags.push(`source-pointer\t${name}`);
+    if (snapshotName !== "" && sameBytes(path.join(sourceStateDir, snapshotName), path.join(stateDir, snapshotName))) {
+      tags.push(`source-snapshot\t${snapshotName}`);
+    }
+    return tags;
+  };
   // THREE outcomes live under "the caller already owns this record", and each one
   // gets its OWN exit code rather than a token inside stdout. A code cannot be
   // produced by a dropped write, so a lost stdout line on the takeover path falls
@@ -2036,6 +2137,7 @@ if (mode === "adopt") {
     // retry after an interrupted takeover lands on one of these two exits, and nothing
     // else can re-derive the filename once the previous owner has left the record.
     const staleNames = staleOwnerPointersFor(stateDir, runId, callerSessionId);
+    const ownerTags = relocation !== "" ? relocationTags() : leftoverTags();
     // In report mode the basenames must NOT travel: this stdout is prose a user
     // reads, the shell retires nothing here, and a bare filename in the middle of it
     // would read as a file that had already been removed. The COUNT is disclosed
@@ -2045,12 +2147,16 @@ if (mode === "adopt") {
         if (staleNames.length > 0) {
           reportLine(`--confirm would also retire ${staleNames.length} stale owner pointer${staleNames.length === 1 ? "" : "s"} that another session key still holds for this run`);
         }
+        if (relocation === "" && ownerTags.length > 0) {
+          reportLine(`--confirm would also retire ${ownerTags.length} leftover file${ownerTags.length === 1 ? "" : "s"} of this run that the moved working tree's state directory still holds`);
+        }
         return;
       }
       if (staleNames.length > 0) process.stdout.write(`${staleNames.join("\n")}\n`);
+      if (ownerTags.length > 0) process.stdout.write(`${ownerTags.join("\n")}\n`);
     };
     const ownPointer = activePointerFor(stateDir, callerSessionId, runId);
-    if (ownPointer && ownPointer.runId === runId) {
+    if (relocation === "" && ownPointer && ownPointer.runId === runId) {
       reportLine(`--confirm would change nothing: this session already owns run ${runId} and its owner pointer already designates it`);
       reportStale();
       process.exit(10);
@@ -2074,7 +2180,8 @@ if (mode === "adopt") {
     // shape that most needs the refusal — and it also sat ABOVE the `ownedElsewhere`
     // check the takeover path applies, so a caller owning a second run with no owner
     // pointer at all was never judged either. One owner-scoped filter covers both.
-    const shadowed = readRunInventory(stateDir, expectedProjectRoot, callerSessionId)
+    const shadowed = readRunInventory(stateDir, expectedProjectRoot, callerSessionId,
+      relocation === "in-place" ? runId : "")
       .find(candidate => candidate.runId !== runId && !TERMINAL.has(candidate.stage));
     if (shadowed) {
       fail(4, `caller already owns nonterminal run ${shadowed.runId}; finish it, or cancel it through the ordinary CANCEL event path, before repairing this one`);
@@ -2085,12 +2192,16 @@ if (mode === "adopt") {
     // and it would persist the normalization `readState` applies to a legacy record.
     // Stdout carries only the stale pointers: there is no previous owner to record,
     // and the exit code already carries the outcome.
-    reportLine(`--confirm would reinstall this session's owner pointer for run ${runId}; the record already names this session, so nothing would be taken over`);
+    reportLine(relocation === ""
+      ? `--confirm would reinstall this session's owner pointer for run ${runId}; the record already names this session, so nothing would be taken over`
+      : `--confirm would reinstall this session's owner pointer for run ${runId} and write its relocated record; the record already names this session, so nothing would be taken over`);
     if (report) {
       reportStale();
       process.exit(11);
     }
+    if (relocation !== "" && !stateValid(state)) fail(2, "adoption produced invalid state");
     install(callerPointerOutput, { schemaVersion: 1, runId });
+    if (relocation !== "") install(runOutput, state);
     reportStale();
     process.exit(11);
   }
@@ -2145,7 +2256,8 @@ if (mode === "adopt") {
   // It runs BEFORE the liveness block: this is a CALLER-side precondition, and a
   // caller that can never adopt anything must not first be told to wait for the
   // target's owner to go stale. It also keeps the inventory off the exit-7 path.
-  const ownedElsewhere = readRunInventory(stateDir, expectedProjectRoot, callerSessionId)
+  const ownedElsewhere = readRunInventory(stateDir, expectedProjectRoot, callerSessionId,
+    relocation === "in-place" ? runId : "")
     .filter(candidate => candidate.ownerSessionId === callerSessionId
       && candidate.runId !== runId
       && !TERMINAL.has(candidate.stage));
@@ -2166,14 +2278,14 @@ if (mode === "adopt") {
   // digest), but the CHOICE of file was, and `--autopilot-release` unlinks no
   // pointer at all, so this was the one place adoption reached further into another
   // session's state than its destructive sibling.
-  const ownerResolved = activePointerFileFor(stateDir, previousOwner, runId);
+  const ownerResolved = activePointerFileFor(recordDir, previousOwner, runId);
   const ownerPointer = ownerResolved ? ownerResolved.pointer : null;
   const ownerPointerDesignatesRun = Boolean(ownerPointer && ownerPointer.runId === runId);
   // A pointer that no longer designates the run is abandonment evidence that owes
   // nothing to a clock: without it the previous owner's own `read-active` returns
   // nothing, so it is not driving this run whatever its document mtime says. That is
   // why this verb passes the pointer precondition and release does not.
-  const liveness = ownerLiveness(stateDir, previousOwner, ownerActivityTtlHours,
+  const liveness = ownerLiveness(recordDir, previousOwner, ownerActivityTtlHours,
     { requirePointer: true, pointerDesignates: ownerPointerDesignatesRun });
   // Emitted BEFORE the two refusing arms, so the report carries the verdict on the
   // paths where `--confirm` would be refused as well. Those refusals name themselves
@@ -2227,10 +2339,12 @@ if (mode === "adopt") {
   // the file the resolution ACTUALLY read, never re-derived from the owner digest —
   // the legacy fallback wins often enough that a derived name pointed at nothing
   // while the pointer that designated the run survived.
-  const retiredBasename = ownerPointerDesignatesRun
+  const retiredBasename = ownerPointerDesignatesRun && recordDir === stateDir
     ? path.basename(ownerResolved.file)
     : "";
   process.stdout.write(`${retiredBasename}\t${previousOwner}\n`);
+  const takeoverTags = relocationTags();
+  if (takeoverTags.length > 0) process.stdout.write(`${takeoverTags.join("\n")}\n`);
   process.exit(0);
 }
 
@@ -2659,6 +2773,8 @@ autopilot_release_work_order_run() {
     "$root" "$run_id" "work-order-release-${below_attempt}" "$order_id" "$below_attempt"
 }
 
+_ZENSU_AP_ADOPT_SOURCE_DIR=""
+
 _autopilot_adopt_critical() {
   local root="$1" run_id="$2" caller_session_id="$3"
   # The mode is POSITIONALLY REQUIRED, not defaulted. Refusing an unrecognized value
@@ -2681,7 +2797,9 @@ _autopilot_adopt_critical() {
   local caller_workspace="$4" ttl_hours="$5" mode="$6"
   local state_dir="$root/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local source_dir="${_ZENSU_AP_ADOPT_SOURCE_DIR:-}"
   local caller_pointer caller_beacon run_tmp ptr_tmp ptr_prior="" retired retired_line stale_names="" rc
+  local worker_out relocated="" snapshot_name="" snapshot_tmp="" snapshot_installed=false
   # The two outcome names the CLI reads are module-scope on purpose (they must cross
   # this function's boundary), so they are STAGED here and published only after both
   # installs land. Assigning them at classification time made a failed install report
@@ -2723,9 +2841,15 @@ _autopilot_adopt_critical() {
   # make the phrase literally true; narrow the phrase instead, which is why the CLI
   # enumerates the three artifacts rather than claiming nothing happened.
   if [ "$mode" = report ]; then
-    _autopilot_node adopt "$run_file" "$state_dir/autopilot-adopt-report-run.unwritten" \
-      "$run_id" "$root" "$caller_session_id" "$state_dir" "$caller_workspace" \
-      "$ttl_hours" "$state_dir/autopilot-adopt-report-pointer.unwritten" report
+    if [ -n "$source_dir" ]; then
+      _autopilot_node adopt "$run_file" "$state_dir/autopilot-adopt-report-run.unwritten" \
+        "$run_id" "$root" "$caller_session_id" "$state_dir" "$caller_workspace" \
+        "$ttl_hours" "$state_dir/autopilot-adopt-report-pointer.unwritten" report "$source_dir"
+    else
+      _autopilot_node adopt "$run_file" "$state_dir/autopilot-adopt-report-run.unwritten" \
+        "$run_id" "$root" "$caller_session_id" "$state_dir" "$caller_workspace" \
+        "$ttl_hours" "$state_dir/autopilot-adopt-report-pointer.unwritten" report
+    fi
     rc=$?
     # 10 and 11 are successes here exactly as on the confirmed path, which collapses
     # them to 0; the report line already said which one it was.
@@ -2743,9 +2867,16 @@ _autopilot_adopt_critical() {
     _autopilot_adopt_refusal "temp allocation beside the owner pointer failed; nothing moved"
     return 5
   }
-  retired_line="$(_autopilot_node adopt "$run_file" "$run_tmp" "$run_id" "$root" \
-    "$caller_session_id" "$state_dir" "$caller_workspace" "$ttl_hours" "$ptr_tmp")"
+  if [ -n "$source_dir" ]; then
+    worker_out="$(_autopilot_node adopt "$run_file" "$run_tmp" "$run_id" "$root" \
+      "$caller_session_id" "$state_dir" "$caller_workspace" "$ttl_hours" "$ptr_tmp" "" "$source_dir")"
+  else
+    worker_out="$(_autopilot_node adopt "$run_file" "$run_tmp" "$run_id" "$root" \
+      "$caller_session_id" "$state_dir" "$caller_workspace" "$ttl_hours" "$ptr_tmp")"
+  fi
   rc=$?
+  retired_line="$(_autopilot_adopt_lines "" "$worker_out")"
+  relocated="$(_autopilot_adopt_lines relocated "$worker_out")"
   # THREE outcomes are successes and each arrives as its OWN exit code, so no token
   # travels inside stdout: 10 = record and pointer already agree, nothing to do;
   # 11 = the record was already ours and its pointer was reinstalled; 0 = a real
@@ -2756,6 +2887,7 @@ _autopilot_adopt_critical() {
     rm -f "$run_tmp" "$ptr_tmp"
     ZENSU_AUTOPILOT_ADOPT_OUTCOME=already-owned
     _autopilot_retire_stale_pointers "$state_dir" "$retired_line"
+    _autopilot_retire_source_items "$source_dir" "$run_id" "$worker_out" leftover
     return 0
   fi
   if [ "$rc" -eq 11 ]; then
@@ -2806,7 +2938,7 @@ _autopilot_adopt_critical() {
   # The rollback copy is taken BEFORE the first install, so undoing it needs no
   # allocation that could fail after something has already moved. The repair path has
   # nothing to roll back, because it installs no record.
-  if [ "$pending_outcome" = adopted ] && [ -f "$caller_pointer" ]; then
+  if { [ "$pending_outcome" = adopted ] || [ -n "$relocated" ]; } && [ -f "$caller_pointer" ]; then
     ptr_prior="$(_autopilot_mktemp_beside "$caller_pointer")" || {
       rm -f "$run_tmp" "$ptr_tmp"
       _autopilot_adopt_refusal "temp allocation for the owner pointer rollback copy failed; nothing moved"
@@ -2818,16 +2950,38 @@ _autopilot_adopt_critical() {
       return 5
     }
   fi
+  [ -z "$relocated" ] || snapshot_name="$(_autopilot_adopt_lines snapshot "$worker_out")"
+  if [ -n "$snapshot_name" ]; then
+    if ! _autopilot_payload_snapshot_basename_ok "$snapshot_name" || [ -z "$source_dir" ]; then
+      rm -f "$run_tmp" "$ptr_tmp" ${ptr_prior:+"$ptr_prior"}
+      _autopilot_adopt_refusal "the worker named a team-review payload snapshot that this verb cannot move; nothing moved"
+      return 5
+    fi
+    snapshot_tmp="$(_autopilot_mktemp_beside "$state_dir/$snapshot_name")" || {
+      rm -f "$run_tmp" "$ptr_tmp" ${ptr_prior:+"$ptr_prior"}
+      _autopilot_adopt_refusal "temp allocation beside the team-review payload snapshot failed; nothing moved"
+      return 5
+    }
+    if ! cat "$source_dir/$snapshot_name" > "$snapshot_tmp" \
+      || ! _tdd_atomic_replace_regular "$snapshot_tmp" "$state_dir/$snapshot_name"; then
+      rm -f "$run_tmp" "$ptr_tmp" "$snapshot_tmp" ${ptr_prior:+"$ptr_prior"}
+      _autopilot_adopt_refusal "the team-review payload snapshot could not be copied into this project; nothing moved"
+      return 5
+    fi
+    snapshot_installed=true
+  fi
   _tdd_atomic_replace_regular "$ptr_tmp" "$caller_pointer" || {
     rm -f "$run_tmp" "$ptr_tmp" ${ptr_prior:+"$ptr_prior"}
+    [ "$snapshot_installed" = false ] || rm -f "$state_dir/$snapshot_name"
     _autopilot_adopt_refusal "pointer install failed; nothing moved"
     return 5
   }
-  if [ "$pending_outcome" = repaired ]; then
+  if [ "$pending_outcome" = repaired ] && [ -z "$relocated" ]; then
     rm -f "$run_tmp"
   else
     _tdd_atomic_replace_regular "$run_tmp" "$run_file" || {
       rm -f "$run_tmp"
+      [ "$snapshot_installed" = false ] || rm -f "$state_dir/$snapshot_name"
       if { [ -n "$ptr_prior" ] && _tdd_atomic_replace_regular "$ptr_prior" "$caller_pointer"; } \
         || { [ -z "$ptr_prior" ] && rm -f "$caller_pointer"; }; then
         _autopilot_adopt_refusal "record install failed; the owner pointer was rolled back and nothing moved"
@@ -2857,6 +3011,7 @@ _autopilot_adopt_critical() {
   # that DOES install publishes here and only here.
   ZENSU_AUTOPILOT_ADOPT_OUTCOME="$pending_outcome"
   ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER="$pending_owner"
+  ZENSU_AUTOPILOT_ADOPT_RELOCATION="$relocated"
   # The worker prints a BASENAME; re-check its shape here so a value that reached
   # the run record from anywhere cannot name a file outside the state directory. A
   # pointer left behind does NOT go unnoticed — `read-active` builds an owner-scoped
@@ -2873,6 +3028,107 @@ _autopilot_adopt_critical() {
     _autopilot_retire_pointer "$state_dir" "$retired"
   fi
   _autopilot_retire_stale_pointers "$state_dir" "$stale_names"
+  if [ -n "$relocated" ]; then
+    _autopilot_retire_source_items "$source_dir" "$run_id" "$worker_out" moved
+  else
+    _autopilot_retire_source_items "$source_dir" "$run_id" "$worker_out" leftover
+  fi
+  return 0
+}
+
+_autopilot_adopt_lines() {
+  local tag="$1" text="$2" line
+  [ -n "$text" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      (relocated$'\t'*|snapshot$'\t'*|source-run$'\t'*|source-pointer$'\t'*|source-snapshot$'\t'*)
+        if [ -n "$tag" ] && [ "${line%%$'\t'*}" = "$tag" ]; then
+          printf '%s\n' "${line#*$'\t'}"
+        fi
+        ;;
+      (*)
+        if [ -z "$tag" ]; then
+          printf '%s\n' "$line"
+        fi
+        ;;
+    esac
+  done <<EOF
+$text
+EOF
+}
+
+_autopilot_payload_snapshot_basename_ok() {
+  local name="${1:-}" key
+  key="${name#autopilot-team-review-payload-}"
+  key="${key%.json}"
+  case "$key" in
+    (''|*[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#key}" -eq 64 ] && [ "autopilot-team-review-payload-${key}.json" = "$name" ]
+}
+
+_autopilot_retire_source_items() {
+  local source_dir="$1" run_id="$2" text="$3" kind="$4" name names
+  [ -n "$source_dir" ] && [ -n "$text" ] || return 0
+  name="$(_autopilot_adopt_lines source-run "$text")"
+  if [ -n "$name" ]; then
+    if [ "$name" = "autopilot-run-${run_id}.json" ] && rm -f "$source_dir/$name"; then
+      [ "$kind" = moved ] \
+        || printf '[zensu-autopilot-state] retired a leftover copy of run %s that the moved working tree still held\n' "$run_id" >&2
+    else
+      printf '[zensu-autopilot-state] the copy of run %s that the moved working tree holds was not retired and still sits in its state directory\n' "$run_id" >&2
+    fi
+  fi
+  names="$(_autopilot_adopt_lines source-pointer "$text")"
+  if [ -n "$names" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      if _autopilot_retire_pointer "$source_dir" "$name" && [ "$kind" != moved ]; then
+        printf '[zensu-autopilot-state] retired a leftover owner pointer that the moved working tree still held for this run: %s\n' "$name" >&2
+      fi
+    done <<EOF
+$names
+EOF
+  fi
+  name="$(_autopilot_adopt_lines source-snapshot "$text")"
+  if [ -n "$name" ]; then
+    if _autopilot_payload_snapshot_basename_ok "$name" && rm -f "$source_dir/$name"; then
+      [ "$kind" = moved ] \
+        || printf '[zensu-autopilot-state] retired a leftover team-review payload snapshot that the moved working tree still held: %s\n' "$name" >&2
+    else
+      printf '[zensu-autopilot-state] the team-review payload snapshot that the moved working tree holds was not retired and still sits in its state directory\n' >&2
+    fi
+  fi
+}
+
+_autopilot_adopt_source_dir() {
+  local root="$1" run_id="$2" workspace topology reason
+  workspace="$(_autopilot_shell_path "$3")" || return 0
+  case "$workspace" in
+    ("$root"/*) ;;
+    (*) return 0 ;;
+  esac
+  [ -d "$workspace/.zensu/state" ] || return 0
+  topology="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --work-tree-check "$workspace" --project "$root" 2>/dev/null </dev/null)" \
+    || topology=""
+  case "$topology" in
+    (work-tree$'\t'?*)
+      CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$workspace/.zensu/state" directory \
+        "$workspace/.zensu/state/autopilot-run-${run_id}.json" regular-or-absent || {
+        _autopilot_adopt_refusal "the state directory of the working tree this session stands in is unsafe"
+        return 2
+      }
+      printf '%s\n' "$workspace/.zensu/state"
+      return 0
+      ;;
+  esac
+  if [ ! -e "$root/.zensu/state/autopilot-run-${run_id}.json" ] \
+    && [ -e "$workspace/.zensu/state/autopilot-run-${run_id}.json" ]; then
+    reason="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --work-tree-check "$workspace" --project "$root" 2>&1 >/dev/null </dev/null)"
+    reason="${reason#zensu-edit-landing.sh: }"
+    _autopilot_adopt_refusal "the working tree this session stands in holds run $run_id but is not a worktree of this project's repository below the project root, so the run's record cannot move into this project: ${reason:-the work-tree check gave no answer}"
+    return 6
+  fi
   return 0
 }
 
@@ -2939,11 +3195,13 @@ autopilot_adopt_run() {
     return 3
   fi
   local run_id="${1:-}" root caller_session_id="${3:-}" mode="$4"
-  local caller_workspace ttl_hours ready_rc
+  local caller_workspace ttl_hours ready_rc source_dir rc
   # Cleared FIRST, so a previous call's value can never be read as this one's —
   # the same discipline `_autopilot_publish_workspace_refusal` follows.
   ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER=""
   ZENSU_AUTOPILOT_ADOPT_OUTCOME=""
+  ZENSU_AUTOPILOT_ADOPT_RELOCATION=""
+  _ZENSU_AP_ADOPT_SOURCE_DIR=""
   # `report` runs the whole ladder and writes nothing; it never publishes either name
   # above, so the CLI announces no outcome and writes no provenance for it. An
   # unrecognized mode is refused rather than defaulted, because the permissive
@@ -2982,6 +3240,15 @@ autopilot_adopt_run() {
   # guard whose job is to protect a live owner's run, and would emit a disclosure
   # blaming a config value the operator never set. Only a real configured 0 disables.
   case "$ttl_hours" in *[!0-9]*|'') ttl_hours=1 ;; esac
+  source_dir="$(_autopilot_adopt_source_dir "$root" "$run_id" "$caller_workspace")" || return $?
+  if [ -n "$source_dir" ] && [ ! -d "$root/.zensu/state" ]; then
+    _autopilot_prepare_storage "$root" || {
+      _autopilot_adopt_refusal "this project's Autopilot state directory could not be created"
+      return 2
+    }
+    [ "$mode" != report ] \
+      || printf '[zensu-autopilot-state] this report created the empty Autopilot state directory of this project, which the project lease needs; it wrote no record, no pointer and no provenance entry\n' >&2
+  fi
   # rc 1 and rc 2 are DIFFERENT conditions and only rc 2 is a fault. rc 1 is an
   # absent `.zensu/state`, which a fresh clone, a `git clean` and a removed worktree
   # all produce, and the skill's exit-1 row says so; asserting corruption there sent
@@ -2995,8 +3262,12 @@ autopilot_adopt_run() {
     fi
     return "$ready_rc"
   }
+  _ZENSU_AP_ADOPT_SOURCE_DIR="$source_dir"
   _autopilot_locked_run "$root" "$run_id" _autopilot_adopt_critical \
     "$root" "$run_id" "$caller_session_id" "$caller_workspace" "$ttl_hours" "$mode"
+  rc=$?
+  _ZENSU_AP_ADOPT_SOURCE_DIR=""
+  return "$rc"
 }
 
 # Chain ids share the 128-character durable identifier contract, while the

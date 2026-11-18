@@ -1921,7 +1921,7 @@ grep -qF 'refused under the project lock: run storage in this project is unsafe'
 # site must update B28_REFUSAL_CALLS_EXPECTED in the same commit. The USES equality
 # stays beside it for the other failure: a call spelled without the double quote the
 # CALLS count keys on. Its `+ 1` is the comment in the shared lock dispatcher.
-B28_REFUSAL_CALLS_EXPECTED=20
+B28_REFUSAL_CALLS_EXPECTED=26
 B28_REFUSAL_USES="$(grep -c '_autopilot_adopt_refusal' "$LIB")"
 B28_REFUSAL_CALLS="$(grep -c '_autopilot_adopt_refusal "' "$LIB")"
 B28_REFUSAL_DEF="$(grep -c '^_autopilot_adopt_refusal()' "$LIB")"
@@ -2031,6 +2031,321 @@ if [ "$B31_OK" = true ]; then
   check "B31 the owner write gate refuses each half-satisfying id, admits one satisfying both, and names its cause" PASS
 else
   check "B31 the owner write gate is not the intersection of the two vocabularies" FAIL
+fi
+
+BM_HEAD=cccccccccccccccccccccccccccccccccccccccc
+bm_event() {
+  autopilot_apply_event "$BM_RUN" "$1" "$2" "$3" "$BM_OLD" >/dev/null 2>&1
+}
+bm_fixture() {
+  local label="$1" stage="$2" layout="${3:-worktree}" root old review_key payload snapshot
+  BM_READY=false; BM_SNAPSHOT_NAME=""
+  root="$TMP/bm-$label"; mkdir -p "$root" || return 1
+  root="$(cd "$root" && pwd -P)" || return 1
+  ( cd "$root" && git init -q . && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m base ) >/dev/null 2>&1 || return 1
+  old="$TMP/bm-$label-old"
+  if [ "$layout" = clone ]; then
+    mkdir -p "$old" || return 1
+    ( cd "$old" && git init -q . && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m other ) >/dev/null 2>&1 || return 1
+  else
+    git -C "$root" worktree add -q -b "bm-$label" "$old" >/dev/null 2>&1 || return 1
+  fi
+  BM_OLD="$(cd "$old" && pwd -P)" || return 1
+  BM_ROOT="$root"
+  BM_RUN="bm_${label}_run"
+  activate_session "$BM_OLD" "bm_${label}_owner" || return 1
+  BM_OWNER="$ZENSU_SESSION_KEY"
+  autopilot_begin_run "$BM_RUN" "$BM_OWNER" "$BM_OLD" >/dev/null 2>&1 || return 1
+  if [ "$stage" != planning ]; then
+    bm_event bm-plan PLAN_APPROVED "{\"approvedPlanSha256\":\"$PLAN_SHA\"}" || return 1
+    bm_event bm-tdd-start TDD_STARTED "{\"attempt\":1,\"chainId\":\"bm-chain-01\",\"sessionId\":\"$BM_OWNER\"}" || return 1
+  fi
+  if [ "$stage" = review ]; then
+    bm_event bm-tdd-done TDD_CHAIN_DONE "{\"attempt\":1,\"chainId\":\"bm-chain-01\",\"sessionId\":\"$BM_OWNER\",\"outcome\":\"pass\"}" || return 1
+    bm_event bm-gates GATES_PASSED "{\"headSha\":\"$BM_HEAD\"}" || return 1
+    bm_event bm-converge CONVERGENCE_PASSED '{}' || return 1
+    bm_event bm-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:bm"}' || return 1
+    bm_event bm-pr-open PR_OPENED "{\"operationKey\":\"pr:bm\",\"pr\":{\"number\":238,\"url\":\"https://github.com/acme/repo/pull/238\",\"headSha\":\"$BM_HEAD\"}}" || return 1
+    review_key="$(autopilot_team_review_operation_key "$BM_RUN" "$BM_HEAD")" || return 1
+    bm_event bm-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$review_key\",\"provider\":\"github\"}" || return 1
+    payload="$TMP/bm-$label-payload.json"
+    printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Moved fixture review\",\"commit_id\":\"$BM_HEAD\",\"comments\":[]}" > "$payload"
+    snapshot="$(autopilot_store_team_review_payload "$BM_RUN" "$review_key" "$BM_HEAD" "$payload" github "$BM_OLD" 2>/dev/null)" || return 1
+    BM_SNAPSHOT_NAME="$(basename "$snapshot")"
+    [ -f "$BM_OLD/.zensu/state/$BM_SNAPSHOT_NAME" ] || return 1
+  fi
+  touch -t 202001010000 "$BM_OLD/.zensu/state/tdd-phase-$BM_OWNER.json" || return 1
+  mkdir -p "$root/.claude/worktrees" || return 1
+  if [ "$layout" = clone ]; then
+    mv "$BM_OLD" "$root/.claude/worktrees/moved" || return 1
+  else
+    git -C "$root" worktree move "$BM_OLD" "$root/.claude/worktrees/moved" >/dev/null 2>&1 || return 1
+  fi
+  BM_MOVED="$root/.claude/worktrees/moved"
+  [ -f "$BM_MOVED/.zensu/state/autopilot-run-$BM_RUN.json" ] && [ ! -e "$BM_OLD" ] || return 1
+  BM_READY=true
+}
+bm_verb() {
+  local raw="$1"; shift
+  activate_session "$BM_ROOT" "$raw" || return 90
+  ( cd "$BM_MOVED" && CLAUDE_PROJECT_DIR="$BM_ROOT" ZENSU_CONFIG="$TMP/missing-config.json" bash "$LOG" "$@" )
+}
+bm_listing() {
+  local dir="$1" name
+  [ -d "$dir" ] || { printf 'absent'; return 0; }
+  for name in $(ls -A "$dir" | grep '^autopilot-' | sort); do
+    printf '%s=%s ' "$name" "$(digest "$dir/$name")"
+  done
+}
+bm_unchanged() {
+  [ "$(bm_listing "$BM_MOVED/.zensu/state")" = "$BM_SRC_BEFORE" ] \
+    && [ "$(bm_listing "$BM_ROOT/.zensu/state")" = "$BM_DST_BEFORE" ]
+}
+bm_snapshot_listings() {
+  BM_SRC_BEFORE="$(bm_listing "$BM_MOVED/.zensu/state")"
+  BM_DST_BEFORE="$(bm_listing "$BM_ROOT/.zensu/state")"
+}
+bm_refusal() {
+  local label="$1" expect="$2" needle="$3" rc_name="$4" rc
+  bm_verb "bm_${label}_taker" --autopilot-adopt --run "$BM_RUN" --confirm >"$TMP/bm-$label.out" 2>"$TMP/bm-$label.err"
+  rc=$?
+  eval "$rc_name=\$rc"
+  [ "$rc" -eq "$expect" ] && grep -qF -- "$needle" "$TMP/bm-$label.err" && bm_unchanged
+}
+
+bm_fixture main review || check "BM0 the moved-worktree fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  activate_session "$BM_ROOT" bm_main_taker || exit 1
+  BM_TAKER="$ZENSU_SESSION_KEY"
+  BM_STATE="$BM_ROOT/.zensu/state"
+  BM_SOURCE="$BM_MOVED/.zensu/state"
+  cp -p "$BM_SOURCE/autopilot-run-$BM_RUN.json" "$TMP/bm-main-run.json"
+  BM_OWNER_POINTER_NAME="$(basename "$(_autopilot_active_path "$BM_SOURCE" "$BM_OWNER")")"
+  cp -p "$BM_SOURCE/$BM_OWNER_POINTER_NAME" "$TMP/bm-main-pointer.json"
+  cp -p "$BM_SOURCE/$BM_SNAPSHOT_NAME" "$TMP/bm-main-snapshot.json"
+  BM_SNAPSHOT_DIGEST="$(digest "$BM_SOURCE/$BM_SNAPSHOT_NAME")"
+  bm_snapshot_listings
+  bm_verb bm_main_taker --autopilot-adopt --run "$BM_RUN" >"$TMP/bm1.out" 2>"$TMP/bm1.err"
+  BM1_RC=$?
+  if [ "$BM1_RC" -eq 0 ] \
+    && grep -qF "report: --confirm would move run $BM_RUN out of the moved working tree's state directory $BM_SOURCE into this project's state directory $BM_STATE, recording $BM_ROOT as its project root and $BM_MOVED as its working tree" "$TMP/bm1.out" \
+    && grep -qF "report: --confirm would also move the run's team-review payload snapshot $BM_SNAPSHOT_NAME" "$TMP/bm1.out" \
+    && bm_unchanged; then
+    check "BM1 the report after a worktree move exits 0, names the moved storage, the new project root and the new working tree, and leaves both state directories byte-identical" PASS
+  else
+    check "BM1 relocation report (rc=$BM1_RC, stdout: $(head -c 300 "$TMP/bm1.out" 2>/dev/null))" FAIL
+  fi
+
+  bm_verb bm_main_taker --autopilot-adopt --run "$BM_RUN" --confirm >"$TMP/bm2.out" 2>"$TMP/bm2.err"
+  BM2_RC=$?
+  BM2_OK=true
+  [ "$BM2_RC" -eq 0 ] || BM2_OK=false
+  grep -qF "run $BM_RUN was relocated:" "$TMP/bm2.err" || BM2_OK=false
+  grep -qF "was taken over from $BM_OWNER" "$TMP/bm2.err" || BM2_OK=false
+  BM_RECORD="$BM_STATE/autopilot-run-$BM_RUN.json"
+  BEFORE_FILE="$TMP/bm-main-run.json" TAKER="$BM_TAKER" ROOT="$BM_ROOT" MOVED="$BM_MOVED" node -e '
+    const fs = require("fs");
+    const after = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const before = JSON.parse(fs.readFileSync(process.env.BEFORE_FILE, "utf8"));
+    const same = key => JSON.stringify(after[key]) === JSON.stringify(before[key]);
+    process.exit(after.ownerSessionId === process.env.TAKER && after.projectRoot === process.env.ROOT
+      && after.workspaceRoot === process.env.MOVED && after.stage === "TEAM_REVIEW"
+      && same("stage") && same("events") && same("evidence") && same("effects") && same("tdd") ? 0 : 1);
+  ' "$BM_RECORD" 2>/dev/null || BM2_OK=false
+  json_ok "$(_autopilot_active_path "$BM_STATE" "$BM_TAKER")" "value.runId === '$BM_RUN'" || BM2_OK=false
+  [ ! -e "$BM_SOURCE/autopilot-run-$BM_RUN.json" ] || BM2_OK=false
+  [ ! -e "$BM_SOURCE/$BM_OWNER_POINTER_NAME" ] || BM2_OK=false
+  [ ! -e "$BM_SOURCE/$BM_SNAPSHOT_NAME" ] || BM2_OK=false
+  [ "$(digest "$BM_STATE/$BM_SNAPSHOT_NAME" 2>/dev/null)" = "$BM_SNAPSHOT_DIGEST" ] || BM2_OK=false
+  [ -z "$(ls -A "$BM_SOURCE" | grep '^autopilot-' || true)" ] || BM2_OK=false
+  ( cd "$BM_ROOT" && CLAUDE_PROJECT_DIR="$BM_ROOT" ZENSU_CONFIG="$TMP/missing-config.json" \
+      bash "$LOG" --autopilot-status ) >"$TMP/bm2-status.out" 2>/dev/null
+  BM2_STATUS_RC=$?
+  [ "$BM2_STATUS_RC" -eq 0 ] && json_ok "$TMP/bm2-status.out" "value.stage === 'TEAM_REVIEW' && value.runId === '$BM_RUN'" \
+    || BM2_OK=false
+  json_ok "$BM_STATE/tdd-phase-$BM_TAKER.json" \
+    'Array.isArray(value.history) && value.history.some(e => e && e.phase === "AUTOPILOT_ADOPTED")' || BM2_OK=false
+  if [ "$BM2_OK" = true ]; then
+    check "BM2 the confirmed transfer lands record, pointer and payload snapshot in the taker's root with owner and both paths rewritten, retires the moved tree's copies, and the run reads at its stage" PASS
+  else
+    check "BM2 confirmed relocation (rc=$BM2_RC, status rc=$BM2_STATUS_RC, stderr: $(head -c 300 "$TMP/bm2.err" 2>/dev/null))" FAIL
+  fi
+
+  activate_session "$BM_ROOT" bm_main_taker || exit 1
+  BM3_OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' bm_main_taker \
+    | ( cd "$BM_ROOT" && CLAUDE_PROJECT_DIR="$BM_ROOT" ZENSU_CONFIG="$TMP/missing-config.json" \
+        bash "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh" 2>/dev/null ))"
+  if printf '%s' "$BM3_OUT" | node -e '
+      let s = ""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => {
+        try {
+          const j = JSON.parse(s);
+          process.exit(j.decision === "block" && String(j.reason).includes(process.argv[1]) ? 0 : 1);
+        } catch (_) { process.exit(1); }
+      });' "STOP intercepted by durable Zensu Autopilot run $BM_RUN. stage=TEAM_REVIEW"; then
+    check "BM3 the taker's next Stop carries the run's stage directive" PASS
+  else
+    check "BM3 taker Stop after relocation (output: $(printf '%s' "$BM3_OUT" | head -c 300))" FAIL
+  fi
+
+  BM4_RECORD_DIGEST="$(digest "$BM_RECORD")"
+  cp -p "$TMP/bm-main-run.json" "$BM_SOURCE/autopilot-run-$BM_RUN.json"
+  cp -p "$TMP/bm-main-pointer.json" "$BM_SOURCE/$BM_OWNER_POINTER_NAME"
+  cp -p "$TMP/bm-main-snapshot.json" "$BM_SOURCE/$BM_SNAPSHOT_NAME"
+  bm_verb bm_main_taker --autopilot-adopt --run "$BM_RUN" --confirm >"$TMP/bm4.out" 2>"$TMP/bm4.err"
+  BM4_RC=$?
+  if [ "$BM4_RC" -eq 0 ] \
+    && grep -qF "this session already owns run $BM_RUN" "$TMP/bm4.err" \
+    && grep -qF "retired a leftover copy of run $BM_RUN" "$TMP/bm4.err" \
+    && grep -qF "retired a leftover owner pointer" "$TMP/bm4.err" \
+    && grep -qF "retired a leftover team-review payload snapshot" "$TMP/bm4.err" \
+    && [ -z "$(ls -A "$BM_SOURCE" | grep '^autopilot-' || true)" ] \
+    && [ "$(digest "$BM_RECORD")" = "$BM4_RECORD_DIGEST" ] \
+    && [ "$(digest "$BM_STATE/$BM_SNAPSHOT_NAME")" = "$BM_SNAPSHOT_DIGEST" ]; then
+    check "BM4 a retry after a torn transfer exits 0 as already owned and retires the leftover record, pointer and snapshot in the moved tree" PASS
+  else
+    check "BM4 torn-transfer retry (rc=$BM4_RC, stderr: $(head -c 300 "$TMP/bm4.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_fixture inplace planning || check "BM0 the in-place fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  BM_SOURCE="$BM_MOVED/.zensu/state"
+  BM5_POINTER_NAME="$(basename "$(_autopilot_active_path "$BM_SOURCE" "$BM_OWNER")")"
+  activate_session "$BM_MOVED" bm_inplace_reanchored || exit 1
+  BM5_KEY="$ZENSU_SESSION_KEY"
+  ( cd "$BM_MOVED" && CLAUDE_PROJECT_DIR="$BM_MOVED" ZENSU_CONFIG="$TMP/missing-config.json" \
+      bash "$LOG" --autopilot-adopt --run "$BM_RUN" ) >"$TMP/bm5r.out" 2>"$TMP/bm5r.err"
+  BM5_REPORT_RC=$?
+  ( cd "$BM_MOVED" && CLAUDE_PROJECT_DIR="$BM_MOVED" ZENSU_CONFIG="$TMP/missing-config.json" \
+      bash "$LOG" --autopilot-adopt --run "$BM_RUN" --confirm ) >"$TMP/bm5.out" 2>"$TMP/bm5.err"
+  BM5_RC=$?
+  if [ "$BM5_REPORT_RC" -eq 0 ] && [ "$BM5_RC" -eq 0 ] \
+    && grep -qF "report: --confirm would rewrite run $BM_RUN in place" "$TMP/bm5r.out" \
+    && grep -qF "run $BM_RUN was relocated in place" "$TMP/bm5.err" \
+    && json_ok "$BM_SOURCE/autopilot-run-$BM_RUN.json" \
+      "value.ownerSessionId === '$BM5_KEY' && value.projectRoot === '$BM_MOVED' && value.workspaceRoot === '$BM_MOVED' && value.stage === 'PLANNING'" \
+    && json_ok "$(_autopilot_active_path "$BM_SOURCE" "$BM5_KEY")" "value.runId === '$BM_RUN'" \
+    && [ ! -e "$BM_SOURCE/$BM5_POINTER_NAME" ]; then
+    check "BM5 a taker re-anchored into the moved tree relocates the record in place, with project root and working tree both the moved tree" PASS
+  else
+    check "BM5 in-place relocation (report rc=$BM5_REPORT_RC, rc=$BM5_RC, stderr: $(head -c 300 "$TMP/bm5.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_fixture exists planning || check "BM0 the still-existing-root fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  mkdir -p "$BM_OLD"
+  activate_session "$BM_ROOT" bm_exists_taker || exit 1
+  bm_snapshot_listings
+  if bm_refusal exists 6 "records a project root that still exists" BM6_RC; then
+    check "BM6 a record whose project root still exists is refused with exit 6 and nothing is written" PASS
+  else
+    check "BM6 still-existing project root (rc=$BM6_RC, stderr: $(head -c 300 "$TMP/bm-exists.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_fixture wsdiff planning || check "BM0 the foreign-workspace fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  node -e '
+    const fs = require("fs");
+    const file = process.argv[1];
+    const state = JSON.parse(fs.readFileSync(file, "utf8"));
+    state.workspaceRoot = `${state.projectRoot}/nested-tree`;
+    fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+  ' "$BM_MOVED/.zensu/state/autopilot-run-$BM_RUN.json"
+  activate_session "$BM_ROOT" bm_wsdiff_taker || exit 1
+  bm_snapshot_listings
+  if bm_refusal wsdiff 6 "drives a working tree other than its recorded project root" BM7_RC; then
+    check "BM7 a record whose working tree differs from its project root is refused with exit 6 and nothing is written" PASS
+  else
+    check "BM7 foreign recorded workspace (rc=$BM7_RC, stderr: $(head -c 300 "$TMP/bm-wsdiff.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_fixture clone planning clone || check "BM0 the nested-clone fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  activate_session "$BM_ROOT" bm_clone_taker || exit 1
+  bm_snapshot_listings
+  if bm_refusal clone 6 "is not a worktree of this project's repository" BM8_RC; then
+    check "BM8 a moved tree that is not a worktree of the taker's repository is refused with exit 6 and nothing is written" PASS
+  else
+    check "BM8 nested clone (rc=$BM8_RC, stderr: $(head -c 300 "$TMP/bm-clone.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_fixture tdd tdd || check "BM0 the live-inner-chain fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  activate_session "$BM_ROOT" bm_tdd_taker || exit 1
+  bm_snapshot_listings
+  if bm_refusal tdd 3 "run has a live inner build chain driven by another session" BM9_RC; then
+    check "BM9 a moved run whose pending stage is TDD_RUNNING is refused with exit 3 and nothing is written" PASS
+  else
+    check "BM9 TDD_RUNNING relocation (rc=$BM9_RC, stderr: $(head -c 300 "$TMP/bm-tdd.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_fixture fresh planning || check "BM0 the fresh-owner fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  touch "$BM_MOVED/.zensu/state/tdd-phase-$BM_OWNER.json"
+  activate_session "$BM_ROOT" bm_fresh_taker || exit 1
+  bm_snapshot_listings
+  if bm_refusal fresh 7 "the owning session is still active" BM10_RC; then
+    check "BM10 a moved run whose previous owner acted inside the window is refused with exit 7 and nothing is written" PASS
+  else
+    check "BM10 fresh previous owner (rc=$BM10_RC, stderr: $(head -c 300 "$TMP/bm-fresh.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_fixture busy planning || check "BM0 the busy-taker fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  activate_session "$BM_ROOT" bm_busy_taker || exit 1
+  ( cd "$BM_ROOT" && autopilot_begin_run bm_busy_own "$ZENSU_SESSION_KEY" "$BM_ROOT" ) >/dev/null 2>&1
+  bm_snapshot_listings
+  if [ -f "$BM_ROOT/.zensu/state/autopilot-run-bm_busy_own.json" ] \
+    && bm_refusal busy 4 "caller already owns nonterminal run bm_busy_own" BM11_RC; then
+    check "BM11 a taker that already owns another nonterminal run is refused with exit 4 and nothing is written" PASS
+  else
+    check "BM11 busy taker (rc=${BM11_RC:-}, stderr: $(head -c 300 "$TMP/bm-busy.err" 2>/dev/null))" FAIL
+  fi
+fi
+
+bm_bare_verb() {
+  ( cd "$BM_MOVED" && CLAUDE_PROJECT_DIR="$BM_ROOT" ZENSU_CONFIG="$TMP/missing-config.json" bash "$LOG" "$@" )
+}
+bm_fixture bare planning || check "BM0 the state-less taker fixture could not be built — environment, not product" FAIL
+if [ "$BM_READY" = true ]; then
+  activate_session "$BM_ROOT" bm_bare_taker || exit 1
+  BM_SRC_BEFORE="$(bm_listing "$BM_MOVED/.zensu/state")"
+  if rm -f "$BM_ROOT/.zensu/state/"tdd-phase-*.json && rmdir "$BM_ROOT/.zensu/state"; then
+    bm_bare_verb --autopilot-adopt --run "$BM_RUN" >"$TMP/bm12.out" 2>"$TMP/bm12.err"
+    BM12_RC=$?
+    if [ "$BM12_RC" -eq 0 ] \
+      && grep -qF 'this report created the empty Autopilot state directory of this project, which the project lease needs; it wrote no record, no pointer and no provenance entry' "$TMP/bm12.err" \
+      && grep -qF "report: --confirm would move run $BM_RUN out of the moved working tree's state directory" "$TMP/bm12.out" \
+      && [ -d "$BM_ROOT/.zensu/state" ] && [ -z "$(ls -A "$BM_ROOT/.zensu/state")" ] \
+      && [ "$(bm_listing "$BM_MOVED/.zensu/state")" = "$BM_SRC_BEFORE" ]; then
+      check "BM12 a report into a project without an Autopilot state directory creates only that empty directory, says so on stderr, and leaves the moved tree byte-identical" PASS
+    else
+      check "BM12 state-less report (rc=$BM12_RC, stderr: $(head -c 300 "$TMP/bm12.err" 2>/dev/null))" FAIL
+    fi
+  else
+    check "BM12 the taker's state directory could not be emptied — environment, not product" FAIL
+  fi
+
+  if rmdir "$BM_ROOT/.zensu/state" && printf 'x' > "$BM_ROOT/.zensu/state"; then
+    bm_bare_verb --autopilot-adopt --run "$BM_RUN" --confirm >"$TMP/bm13.out" 2>"$TMP/bm13.err"
+    BM13_RC=$?
+    if [ "$BM13_RC" -eq 2 ] \
+      && grep -qF "refused: this project's Autopilot state directory could not be created" "$TMP/bm13.err" \
+      && [ -f "$BM_ROOT/.zensu/state" ] && [ "$(cat "$BM_ROOT/.zensu/state")" = x ] \
+      && [ "$(bm_listing "$BM_MOVED/.zensu/state")" = "$BM_SRC_BEFORE" ]; then
+      check "BM13 a confirmed adoption whose project state path is not a directory is refused with exit 2 and nothing moves" PASS
+    else
+      check "BM13 state path not a directory (rc=$BM13_RC, stderr: $(head -c 300 "$TMP/bm13.err" 2>/dev/null))" FAIL
+    fi
+  else
+    check "BM13 the taker's state path could not be replaced by a file — environment, not product" FAIL
+  fi
 fi
 
 b21_report

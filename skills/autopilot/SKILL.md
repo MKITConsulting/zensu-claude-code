@@ -152,10 +152,9 @@ genuine blocker and `CANCEL` only for an explicit cancellation. Only `DONE`, `BL
 `CANCELLED` permit the top-level task to stop; inner `chainDone` never does.
 
 Recovery is owner-bound: compaction, resume, or reopening the **same task/session** may
-continue its durable run, but a fresh top-level session cannot take ownership. If the owner
-task is unavailable, do not forge its session id or start a replacement run; return to that
-task to resume/cancel, or stop for explicit manual state recovery. There is currently no
-automatic ownership-transfer command.
+continue its durable run. Never forge the owner's session id or start a replacement run.
+`/zensu:autopilot-adopt` moves a run to this session on the user's yes, also after a
+session-trail takeover moved the run's worktree; otherwise return to the owner task.
 
 A successful TDD return to `FIX_FINDINGS`, `VALIDATE`, or `COVER` arms a mandatory current-head
 handoff. Re-run the gates, push the fix, read the resulting PR head, then apply exactly:

@@ -671,6 +671,49 @@ inventory skips and REFUSES with exit 2 rather than reporting no active run. Tha
 skips the unlink and never the adoption, and it DISCLOSES on stderr rather than discarding the
 `rm -f` status.
 
+**RELOCATION is the adoption of a run whose storage moved with its worktree
+(`_autopilot_adopt_source_dir` + the worker's `relocation`).** A session-trail takeover continues
+the work in a session whose project root differs from the old one, and its move route carries a
+run whose record lives in the old worktree along with that tree. The verb DERIVES the source state
+directory and never takes one: when the caller's workspace, the git toplevel of its cwd, lies
+strictly below the project root, holds a `.zensu/state`, and passes
+`zensu-edit-landing.sh --work-tree-check` as a worktree of the same repository, its state directory
+is the source, checked with `_tdd_paths_safe` (exit 2 when unsafe). A workspace that holds the run
+and fails the topology check refuses with exit 6 and names the library's reason. Inside the lease
+the worker reads the record from the source only when the destination lacks it (`worktree`), or
+rewrites a destination record whose recorded project root differs from the root (`in-place`, the
+re-anchored taker). Either is accepted only when the recorded `projectRoot` is gone
+(`ENOENT`/`ENOTDIR`) and `workspaceRoot` is absent or equal to it; anything else is `fail(6)`. The
+rewrite sets `projectRoot` to the root and `workspaceRoot` to the caller's workspace or the root,
+adds no field and writes no event. A relocation also runs from the already-owner branch, because a
+session that already owns a record naming a vanished root needs the same rewrite, so exit 10 is
+reserved for a relocation-free no-op.
+
+**A relocation installs the payload snapshot, then the pointer, then the record**, which deviates
+from the plan's first wording on purpose: the record is the file whose presence a retry treats as
+already owned, so it lands last. The snapshot that `effects.teamReview.operationKey` names is
+copied beside the destination and replaced atomically; a pointer or record failure removes it with
+the pointer rollback. After publication the shell retires the source items the worker tagged on
+stdout (`relocated`, `snapshot`, `source-run`, `source-pointer`, `source-snapshot`, each
+`<tag><TAB><basename>`), each through its basename gate, and discloses every retirement and every
+item it left. A torn relocation, both copies present, lands on the already-owner exit, whose
+leftover read retires the source copy only after proving it an OLDER copy: the same run id, an
+absolute recorded root that differs from the root and is gone, and an event list that is a prefix
+of the destination's by `eventId` and `payloadDigest`; a snapshot leaves only when its bytes
+equal the destination's. A project whose `.zensu/state` is missing gets that empty directory before
+the lease is taken, because the lease's lock lives there, in report mode too: the report says so on
+stderr, and a path there that is not a directory refuses with exit 2 before anything moves.
+`B28_REFUSAL_CALLS_EXPECTED` (26) counts the refusal call sites and `W19` the `ownerLiveness(`
+calls, which the source-side liveness read moved. `BM1` to `BM13` in
+`tests/structure/test-autopilot-adopt-cli.sh` drive a real git fixture: the report, the confirmed
+move, the Stop directive, the torn retry, the in-place case, the six refusals, the state directory
+a report creates and the state path that is not a directory. The session-trail
+half, its known gaps and the version verdict of the whole change are in
+`.claude/rules/session-trail-autopilot-runs.md`. Known gaps of this half: the source is found only
+from the caller's cwd, so a worktree moved anywhere but below the root stays unreachable; the
+older-copy proof trusts the session-writable state directory like every read there; a run begun
+from a checkout that drives a nested worktree is never moved across roots; Windows is unmeasured.
+
 **Each verb has its OWN owner-activity window, and the split is deliberate.**
 `hooks.autopilotOwnerActivityTtlHours` (default 1, bounds 0..8760) bounds adoption and
 `hooks.autopilotReleaseOwnerActivityTtlHours` (default 6, bounds 0..8760) bounds release. Both

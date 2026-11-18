@@ -2,8 +2,8 @@
 name: autopilot-adopt
 description: >
   [Zensu] Take over a durable Autopilot run whose owning session is gone, so its
-  work continues here. Use when a held workspace blocks Autopilot after a fork
-  or resume, or via /zensu:autopilot-adopt.
+  work continues here. Use when a held workspace blocks Autopilot after a fork,
+  resume or takeover, or via /zensu:autopilot-adopt.
 ---
 
 # /zensu:autopilot-adopt
@@ -24,6 +24,17 @@ Releasing such a run cancels work that is often already delivered — a pushed c
 pull request, a published review. Adoption is the constructive answer: the run keeps its
 stage, its attempt counters, its evidence and its pull-request linkage, and continues under
 the session that is actually working in its tree.
+
+**A session-trail takeover is the third way ownership falls behind.** `/zensu:session-trail`
+continues another session's work from a new session, and a run the old session owns does not
+follow: its record stays in the state directory it was written to. The takeover brief names
+such a run in its `## Autopilot run` section, with the route that carries it over. When the
+record lives in the old session's worktree, that route is the move route of the takeover:
+move the worktree into this session's project root, then run this skill from inside the moved
+tree. The verb then RELOCATES the run. It moves the record, the owner pointers the moved tree
+held for it and any team-review payload snapshot into this project's state directory, and
+records this project as the run's project root and the moved tree as its working tree. A
+session that was re-anchored into the moved tree relocates the record in place instead.
 
 **The machine cannot infer the takeover.** The SessionStart payload carries no predecessor
 id, and nothing else in the record establishes descent. That is why this needs a human to say
@@ -60,19 +71,28 @@ yes, and why the id must come from a surface that named it rather than from a di
   it simply reads as stale — so the absence of that line is not proof that the clock was
   consulted and passed. Relay every `owner liveness unchecked` line to the user, from the
   Step 1 report and from the `--confirm` run alike.
+- It does **not** move a run across repositories, and it does not move a run out of a checkout
+  that drives a nested worktree. A relocation is taken only when the recorded project root no
+  longer exists, the recorded working tree is that root or absent, and the tree this session
+  stands in is a worktree of this project's repository strictly below its project root.
+  Anything else refuses with exit `6` and writes nothing. A run begun from a checkout that
+  drives a nested worktree continues from a session whose project root is that checkout, and
+  its worktree stays where it is.
 - It never bypasses a review, and it records no bypass-ledger entry — it escapes no gate.
 
 ## Step 1 — report, do not act
 
 Take the run id from a surface that named it — a refusal, the `autopilot:` row of
-`/zensu:doctor`, or the `--autopilot-status` stderr disclosure. Do not list `.zensu/state/` to
+`/zensu:doctor`, the `--autopilot-status` stderr disclosure, or the `## Autopilot run`
+section of a `/zensu:session-trail` takeover or handoff brief. Do not list `.zensu/state/` to
 find one: a run id is an ordinary filename there, and a naming surface is what ties the id to
 the working tree the run holds, which is the tree this skill has to be run from (or one
 containing it or inside it).
 
 Then run the same command WITHOUT `--confirm`. It is a read-only report: it takes every check a
 confirmed adoption takes, prints what it found, and changes nothing — no record, no pointer, no
-provenance entry:
+provenance entry. Its one possible write is the empty Autopilot state directory of a project that
+has none, which the project lease needs; stderr says so when that happens:
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --autopilot-adopt --run <RUN_ID>
@@ -82,6 +102,19 @@ Its stdout lines start with `report:`. Its exit code is the one a confirmed run 
 when adoption would proceed, otherwise a refusal code from the table in Step 2, with the cause on
 stderr. **An exit `0` from this command adopts nothing.**
 
+For a run whose takeover brief says it moves with its worktree, run this command and the Step 2
+command with the moved worktree as the working directory, after the user agreed to the move and
+the move ran. The verb finds the run's storage in the tree it is run from and never takes a path,
+so a run from anywhere else reports that this project holds no such run:
+
+```bash
+cd -- '<MOVED_WORKTREE>' && CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --autopilot-adopt --run <RUN_ID>
+```
+
+Its report then says `--confirm would move run <RUN_ID> out of the moved working tree's state
+directory …`, or `--confirm would rewrite run <RUN_ID> in place` for a session re-anchored into
+that tree, followed by a line for a team-review payload snapshot that moves with it.
+
 Report to the user, in their language:
 
 - the run id and its stage, exactly as the naming surface stated them;
@@ -89,8 +122,8 @@ Report to the user, in their language:
   owner's workflow document is against which window, and — when it says `unchecked` — which of
   the stand-downs applies. An unchecked verdict means no clock stands between this takeover and
   a session that may still be working, so say that plainly rather than passing over it;
-- what `--confirm` would do, as the report's `--confirm would …` line states it — a takeover
-  from a named session, a pointer repair, or nothing at all;
+- what `--confirm` would do, as the report's `--confirm would …` lines state it — a takeover
+  from a named session, a relocation of a moved run, a pointer repair, or nothing at all;
 - that adoption makes THIS session the owner so the run can continue, and that
   `/zensu:autopilot-release` is the alternative that cancels it instead;
 - that nothing about the run's progress changes — no stage moves, no event is written.
@@ -138,11 +171,11 @@ codes here and break that check in both directions at once.
 |------|---------|------------|
 | 0 | The run is owned by this session. THREE outcomes share this code and the command NAMES each one on stderr, so silence is never an outcome: a real takeover; a pointer repair, when this session already owned the record but its owner pointer was missing OR designated a run that has already finished; and a no-op, when the record and the pointer already agreed. Internally the worker separates them by exit code (0, 11, 10) and the CLI collapses all three to 0 | Report the outcome the command named, never "adopted" for a repair or a no-op; continue the run normally |
 | 1 | No run storage in this project, OR the project lease could not be taken or released. The no-storage case now names itself as `this project holds no Autopilot run storage` and is NOT reported as corruption — an absent `.zensu/state` is what a fresh clone, a `git clean` and a removed worktree all produce | Nothing to adopt here — check the tree the refusal named. A lease-RELEASE fault arrives after the work completed, so read `--autopilot-status` before retrying: the takeover may already have landed, and its provenance entry is written on the outcome rather than on this code |
-| 2 | TWO unrelated classes. An INVOCATION fault — a missing `--run`, an unknown or duplicated flag, or no session identity. Or a STATE/PATH fault — an unresolvable project root or workspace, a refused owner-pointer path, an unreadable or schema-invalid run record anywhere in the project | The stderr line tells them apart, and the discriminator is the `[zensu-autopilot-state]` prefix, NOT the `--autopilot-adopt refused:` lead-in. A refusal this verb's own shell layer takes names itself as `[zensu-autopilot-state] --autopilot-adopt refused: <cause>`. A refusal the WORKER takes — a schema-invalid or unsafe run record anywhere in the project — names its own cause under the bare `[zensu-autopilot-state] <cause>` form instead, and a refusal taken under the project lock reads `[zensu-autopilot-state] refused under the project lock: …`, because that check serves every verb and must not name this one. An invocation fault carries NO `[zensu-autopilot-state]` prefix at all — fix the command; for anything that does carry it, run `/zensu:doctor` and do not retry blindly. A THIRD class shares this code and is named here rather than given an exit of its own: in report mode the report's own write guard also exits 2, with `the adoption report reached a write; nothing was written`. It is unreachable by construction — every `install` call sits below a report early exit — so it is a regression tripwire, not a state you can be in. Minting a code for it would put an exit in this table that no case can ever measure |
+| 2 | TWO unrelated classes. An INVOCATION fault — a missing `--run`, an unknown or duplicated flag, or no session identity. Or a STATE/PATH fault — an unresolvable project root or workspace, a refused owner-pointer path, an unreadable or schema-invalid run record anywhere in the project, an unsafe state directory in the moved tree a relocation reads, a state directory this project could not create, or a team-review payload snapshot this project already holds in another form | The stderr line tells them apart, and the discriminator is the `[zensu-autopilot-state]` prefix, NOT the `--autopilot-adopt refused:` lead-in. A refusal this verb's own shell layer takes names itself as `[zensu-autopilot-state] --autopilot-adopt refused: <cause>`. A refusal the WORKER takes — a schema-invalid or unsafe run record anywhere in the project — names its own cause under the bare `[zensu-autopilot-state] <cause>` form instead, and a refusal taken under the project lock reads `[zensu-autopilot-state] refused under the project lock: …`, because that check serves every verb and must not name this one. An invocation fault carries NO `[zensu-autopilot-state]` prefix at all — fix the command; for anything that does carry it, run `/zensu:doctor` and do not retry blindly. A THIRD class shares this code and is named here rather than given an exit of its own: in report mode the report's own write guard also exits 2, with `the adoption report reached a write; nothing was written`. It is unreachable by construction — every `install` call sits below a report early exit — so it is a regression tripwire, not a state you can be in. Minting a code for it would put an exit in this table that no case can ever measure |
 | 3 | SIX causes, each of which names itself on stderr: a malformed run id; a caller session id that is not a persistable owner identity (both verbs that PERSIST an owner id — this one and `--autopilot-begin` — gate on the same rule: the intersection of the schema identifier and the pointer-name charset, so nothing that passes can fail later at the pointer derivation); the owner pointer PATH could not be derived for this caller, which the id gate cannot pre-empt because it is a `node` execution failure rather than a bad value; a terminal run; a live inner build chain (pending stage `TDD_RUNNING`) driven by another session; or a pointer REPAIR on a run whose record names this session while that same kind of chain is driven by another session | Read the named cause. Check the id; for a live chain, the session driving it has to finish or cancel it — blocking it does not help, because this verb tests the pending stage, which a block preserves — or the whole run can be cancelled with `/zensu:autopilot-release`. That cancel is the exit for a FOREIGN run only: in the pointer-REPAIR sub-case the record names THIS session, the release verb skips its self-release guard in exactly that state, and following it would end this session's own generation — so the refusal there quotes no verb at all, and the step that is safe to take is the read-only `autopilot:` row of `/zensu:doctor`. For a derivation failure, check that `node` is on PATH |
 | 4 | This session already owns another nonterminal run. It applies to a pointer REPAIR as well as to a takeover: the repair installs a pointer at this session's own key, which would orphan that other run behind it | Finish it, or cancel it through the ordinary event path — `/zensu:autopilot-release` refuses a run this session still owns while its pointer still designates it |
-| 5 | A temp file or an atomic install failed, or the worker produced a malformed result line — a line with no TAB, or one whose previous-owner field is empty, either of which is a lost or short write rather than an outcome | No outcome is announced and no provenance entry is written, and a named stderr line always fires — but read WHICH it is, because the two classes differ in what moved. A MALFORMED RESULT LINE (no TAB, or an empty previous-owner field) says `no install was attempted and nothing moved`: it is a lost or short worker write, both temps are removed, and the two branches below do not apply. An INSTALL failure names which install it was: both the outcome and the provenance are published only after BOTH installs land, so this code never accompanies a takeover claim. If the FIRST install failed, nothing moved. If the SECOND did, the owner pointer is rolled back — restored to the bytes it replaced, or removed when there were none — and the line says `record install failed; the owner pointer was rolled back and nothing moved`. Only when that rollback ALSO failed does the line say so and name the pointer file: this session's owner pointer then names a run this session does not own, and `--autopilot-status` itself refuses with exit 2 (`active pointer references a run that is absent or owned by another session`). That refusal CONFIRMS the torn state rather than adding a second fault: re-run `--autopilot-adopt`, which re-enters every check and lands once they pass, or ask the user to remove that one pointer file. Do not route it to `/zensu:doctor` as the exit-2 row otherwise directs. A pointer REPAIR installs no record, so it has nothing to roll back |
-| 6 | The run does not hold this working tree | Run it from the tree the refusal named |
+| 5 | A temp file or an atomic install failed, or the worker produced a malformed result line — a line with no TAB, or one whose previous-owner field is empty, either of which is a lost or short write rather than an outcome | No outcome is announced and no provenance entry is written, and a named stderr line always fires — but read WHICH it is, because the two classes differ in what moved. A MALFORMED RESULT LINE (no TAB, or an empty previous-owner field) says `no install was attempted and nothing moved`: it is a lost or short worker write, both temps are removed, and the two branches below do not apply. An INSTALL failure names which install it was: both the outcome and the provenance are published only after BOTH installs land, so this code never accompanies a takeover claim. If the FIRST install failed, nothing moved. If the SECOND did, the owner pointer is rolled back — restored to the bytes it replaced, or removed when there were none — and the line says `record install failed; the owner pointer was rolled back and nothing moved`. Only when that rollback ALSO failed does the line say so and name the pointer file: this session's owner pointer then names a run this session does not own, and `--autopilot-status` itself refuses with exit 2 (`active pointer references a run that is absent or owned by another session`). That refusal CONFIRMS the torn state rather than adding a second fault: re-run `--autopilot-adopt`, which re-enters every check and lands once they pass, or ask the user to remove that one pointer file. Do not route it to `/zensu:doctor` as the exit-2 row otherwise directs. A pointer REPAIR installs no record, so it has nothing to roll back. A relocation installs the run's team-review payload snapshot first; when that copy fails the line says `nothing moved`, and when a later install fails the snapshot is removed again with the pointer |
+| 6 | The run does not hold this working tree, or a relocation is refused: the recorded project root still exists, the run drives a working tree other than its recorded project root, or the tree this session stands in holds the run but is not a worktree of this project's repository below its project root | Run it from the tree the refusal named. For a refused relocation, follow the refusal: continue the run from a session whose project root is the directory it names, and leave a nested worktree where it is |
 | 7 | The owning session still looks active, or its workflow document is dated in the future | Report it and READ the message: a live owner is asked to hand the run over, or its window has to pass; a future-dated document never ages, so waiting resolves nothing there |
 
 Exit 7 is not a bug to work around. Do not retry it in a loop. Do not lower or disable the
@@ -153,6 +186,10 @@ agent may edit a config file to widen its own reach, and the operator reference 
 key where the user reads it. Report the refusal and let them decide.
 
 ## Step 3 — confirm the outcome
+
+After a relocation the command also says the run `was relocated`, and a stderr line names each
+leftover file it retired from the moved tree. A retry after an interrupted relocation lands on
+the no-op outcome and retires the copies the moved tree still held, naming each one.
 
 Verify with a read, never from the exit code alone:
 

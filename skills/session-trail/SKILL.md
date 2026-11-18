@@ -25,6 +25,7 @@ Cross-instance session tracking. Every Claude Code session process on this machi
 | `<config root>/zensu/session-lineage/v1/edges/*.json` | the lineage ledger: one record per recorded handover, written by `takeover`, `adopt` and `lineage --backfill --apply` — the third is the one that mints `inferred` edges, so it writes guesses rather than measurements. **Machine-wide and append-only** — every window on the machine reads every chain, and nothing rewrites a record once it lands. `lineage --forget <session>` is the only way one leaves. The `v1` in the path is the record schema: a future schema writes beside this directory, not into it, and `lineage` reports the older one as a migration rather than as an empty history. |
 | the process ancestry | which `Claude.app` process owns a session — an account runs one, and the CLI session is its descendant. The independent second route to "which window", used when the desktop store is unreachable. |
 | the worktree itself | branch, ahead/behind, uncommitted files, commits, diffstat |
+| `<session folder>/.zensu/state/autopilot-run-*.json` | durable Autopilot run records in the session's own tree: the nonterminal runs it owns, with stage, next action, pull request and layout. Read bounded, regular files only, for the *Autopilot run* section of both briefs, the `AUTOPILOT` line of `show` and the `release` blocker |
 
 ## The tool
 

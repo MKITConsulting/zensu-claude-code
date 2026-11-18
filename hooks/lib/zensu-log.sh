@@ -1734,6 +1734,7 @@ case "${1:-}" in
     # side; neither is a demonstrated bypass, and both are one line.
     ZENSU_AUTOPILOT_ADOPT_OUTCOME=""
     ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER=""
+    ZENSU_AUTOPILOT_ADOPT_RELOCATION=""
     if ! command -v autopilot_adopt_run >/dev/null 2>&1; then
       echo "zensu-log.sh --autopilot-adopt: the Autopilot state library did not load; no run was adopted" >&2
       exit 2
@@ -1775,6 +1776,14 @@ case "${1:-}" in
         ;;
       already-owned)
         echo "zensu-log.sh --autopilot-adopt: this session already owns run $run_val and its owner pointer already designates it; ownership was not changed. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        ;;
+    esac
+    case "${ZENSU_AUTOPILOT_ADOPT_RELOCATION:-}" in
+      worktree)
+        echo "zensu-log.sh --autopilot-adopt: run $run_val was relocated: its record and any team-review payload snapshot moved out of the moved working tree into this project's state directory, the owner pointers the moved tree held for it were retired, and the record now names this project as its project root and the moved tree as its working tree." >&2
+        ;;
+      in-place)
+        echo "zensu-log.sh --autopilot-adopt: run $run_val was relocated in place: its recorded project root no longer existed, and the record now names this project as its project root and its working tree." >&2
         ;;
     esac
     # Gated on the OUTCOME, never on the return code. `_tdd_locked_run` returns 1

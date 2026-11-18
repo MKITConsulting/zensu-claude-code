@@ -13,6 +13,7 @@ import {
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
 import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
+import { readAutopilotRuns, autopilotRunLines, autopilotShowLine, autopilotReleaseBlockers } from './autopilot-runs-v1.mjs';
 
 // Shared, never re-spelled. CLAUDE.md records `msysDrivePrefix` in
 // hooks/lib/claude-path-v1.js as the ONE MSYS drive rule in this repo, and a
@@ -4954,7 +4955,8 @@ function cmdShow(opts) {
   const v = activityVerdict(r, opts.force);
   const w = writeAnchor(r.wt, opts);
   const cont = continuationPlan(r, w, g && g.branch);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, continuation: cont, worktreeAdvice: worktreeAdvice(r), selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
+  const ap = autopilotRunsOf(r);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, continuation: cont, worktreeAdvice: worktreeAdvice(r), autopilotRuns: ap, selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
   print(`SESSION  ${flatPath(r.sessionId)}${selfMark(r)}`);
   print(`TITLE    ${oneLine(flatPath(r.title), 200) || '(none)'}`);
   // Bounded like every other third-party value: the registry record is another
@@ -4984,7 +4986,9 @@ function cmdShow(opts) {
   const laterWrite = r.mtime - lastActive >= 60000 ? `   (file last written ${ago(r.mtime)} ago)` : '';
   print(`LAST     ${ago(lastActive)} ago   transcript ${flatPath(r.transcript)}${laterWrite}`);
   if (r.pr) print(`PR       #${r.pr.number}  ${r.pr.url}`);
-  if (r.stopCause && r.stopCause.final) print(`STOPPED  ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
+  const apLine = autopilotShowLine(ap);
+  if (apLine) print(apLine);
+  if (r.stopCause && r.stopCause.final) print(`STOPPED${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
   else if (r.stopCause) print(`NOTE     hit ${r.stopCause.error} at ${(r.stopCause.at || '').slice(0, 16)} but recovered (${r.stopCause.laterTurns} turns after, last ${(r.stopCause.resumedUntil || '').slice(0, 16)})`);
   if (r.truncated) print(`NOTE     transcript is large — head+tail only, middle not scanned, and ${QUEUE_WITHDRAWALS_UNFILTERED} the prompt timeline`);
   const sib = siblings(opts, r);
@@ -5541,6 +5545,8 @@ function cmdTakeover(opts) {
   const linkedLines = linkedSessionLines(linked, 'in the turn in which the user confirmed the plan, right after takeover has run with `--force` and before any other step', !opts.force);
   const reports = unreadReports(r);
   const reportLines = unreadReportLines(reports);
+  const apRuns = autopilotRunsOf(r);
+  const apLines = autopilotRunLines(apRuns, { pathText: briefPath, when: 'after the user has confirmed the plan and takeover has run with `--force`' });
   // Recorded before the --json branch on purpose: a caller that asked for JSON is
   // taking the session over just as much as one reading the markdown, and an edge
   // that only exists on the text path would be missing exactly when a tool drives
@@ -5560,7 +5566,7 @@ function cmdTakeover(opts) {
   // pointing into the wrong tree. The markdown keeps `writeAnchorCaution`'s static
   // sentence and no continuation at all.
   const tw = writeAnchor(r.wt, opts);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: tw, continuation: continuationPlan(r, tw, g && g.branch), worktreeAdvice: wtAdvice, openChips: chips, linkedSessions: linked, unreadReports: reports, selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: tw, continuation: continuationPlan(r, tw, g && g.branch), worktreeAdvice: wtAdvice, openChips: chips, linkedSessions: linked, unreadReports: reports, autopilotRuns: apRuns, selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(BRIEF_DATA_CAUTION);
   L.push('');
@@ -5628,6 +5634,8 @@ function cmdTakeover(opts) {
   L.push('');
   for (const line of reportLines) L.push(line);
   L.push('');
+  for (const line of apLines) L.push(line);
+  if (apLines.length) L.push('');
   L.push('## Recent instructions (verbatim, newest last)');
   const recent = (r.prompts || []).slice(-Math.max(1, opts.prompts));
   for (const p of recent) {
@@ -5831,6 +5839,9 @@ function cmdHandoff(opts) {
   L.push('');
   for (const line of unreadReportLines(unreadReports(r))) L.push(line);
   L.push('');
+  const apLinesH = autopilotRunLines(autopilotRunsOf(r), { pathText: briefPath, when: 'after the user has confirmed your plan' });
+  for (const line of apLinesH) L.push(line);
+  if (apLinesH.length) L.push('');
   L.push('## Open threads');
   L.push('<!-- FILL: unresolved questions, failing checks, decisions still pending -->');
   L.push('');
@@ -6259,6 +6270,16 @@ function keepKeyOf(core, sessionId) {
   try { return core.sessionKey(sessionId); } catch { return null; }
 }
 
+function sessionControlKey(sessionId) {
+  let core = null;
+  try { core = requireFromHere('../../../hooks/lib/session-control-core-v1.js'); } catch { core = null; }
+  return core && typeof core.sessionKey === 'function' ? keepKeyOf(core, sessionId) : null;
+}
+
+function autopilotRunsOf(r) {
+  return readAutopilotRuns(new Set([r.cwd, r.wt]), () => sessionControlKey(r.sessionId));
+}
+
 function pathSpellings(p) {
   const abs = trimDir(path.resolve(String(p)));
   let real = abs;
@@ -6413,6 +6434,7 @@ function cmdRelease(opts) {
   } else if (isUnmeasuredProbablyFree(v) && !v.authorized) {
     blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force: their request to release, or the takeover they confirmed, is the go.` });
   }
+  for (const blocker of autopilotReleaseBlockers(autopilotRunsOf(r), flatPath)) blockers.push(blocker);
   const hoursLeft = (record) => {
     const hours = Number.isInteger(record.idleHours) ? record.idleHours : keep.DEFAULT_IDLE_HOURS;
     return Math.max(1, Math.ceil((record.lastSeenAt + hours * 3600000 - now) / 3600000));

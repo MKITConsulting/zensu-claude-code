@@ -2834,7 +2834,7 @@ w19_code() { grep -F "$1" "$LIB" | grep -cvE '^[[:space:]]*//'; }
 W19_HELPER="$(w19_code 'const ownerLiveness = (stateDir, ownerSessionId, ttlHoursRaw, options = {}) => {')"
 W19_FUTURE_RETURN="$(w19_code 'if (ageMs < 0) return { verdict: "future", ageMs };')"
 W19_WINDOW="$(w19_code 'return { verdict: ageMs < ttlHours * 3600000 ? "fresh" : "stale", ageMs };')"
-W19_CALLS="$(w19_code 'ownerLiveness(stateDir, ')"
+W19_CALLS="$(w19_code '= ownerLiveness(')"
 W19_BOUNDS=0
 [ "$W19_HELPER" -eq 1 ] && [ "$W19_FUTURE_RETURN" -eq 1 ] && [ "$W19_WINDOW" -eq 1 ] \
   && [ "$W19_CALLS" -eq 2 ] && W19_BOUNDS=2

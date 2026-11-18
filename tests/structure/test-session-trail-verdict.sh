@@ -110,6 +110,7 @@ else
 fi
 
 unit_check "LS-unit the linked-sessions unit file passes, its two guarded cases included" "$PLUGIN_DIR/tests/structure/linked-sessions-v1.test.js"
+unit_check "AR-unit the Autopilot run reader unit file passes" "$PLUGIN_DIR/tests/structure/autopilot-runs-v1.test.js"
 unit_check "PL-unit the prompt-listing unit file passes, its five guarded cases included" "$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_FILE="$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_PULLBACKS="$(sed -n "s/^const QUEUE_PULLBACKS = new Set(\[\(.*\)\]);$/\1/p" "$TRAIL_MJS" | tr -d "' " | tr ',' '\n')"
@@ -2607,7 +2608,7 @@ writes_block() { grep -E -A4 '^WRITES' || true; }
 mutant_path() { # <tag> -> path to place the mutated trail.mjs at
   local d="$FAKE/mut-$1/skills/session-trail/scripts"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
-  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
+  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/autopilot-runs-v1.mjs" "$d/" 2>/dev/null
   cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
@@ -5626,7 +5627,7 @@ else
   cont_mutant() { # <tag> -> path to place the mutated trail.mjs at
     local d="$FAKE/cmut-$1/skills/session-trail/scripts"
     mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
-    cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
+    cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/autopilot-runs-v1.mjs" "$d/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     printf '%s' "$d/trail.mjs"
@@ -8923,7 +8924,7 @@ process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "TIMEOUT" : Strin
 
   OM_SB="$FAKE/om-sandbox"
   mkdir -p "$OM_SB/skills/session-trail/scripts" "$OM_SB/hooks/lib"
-  cp "$TRAIL_MJS" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
+  cp "$TRAIL_MJS" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/autopilot-runs-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
   cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
   OM_BAD=""
   OM_OUT="$(omrun "$OM_SB/skills/session-trail/scripts/trail.mjs" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>&1)"
@@ -9238,6 +9239,178 @@ fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".jso
   [ -z "$OM_BAD" ] \
     && check "OM11 a linked session started from a saved environment without sshConfig waits for the user to name it as presets-unread while the folder that holds ccd-session-presets.json grants group write, is world writable with the sticky bit or is named through a symbolic link, whether the file is missing or names the local preset, the refused folder counts once as skipped and the brief withholds the local preset's name; a preset the file names as SSH keeps its session and its name in that folder too, and the private folder, also named through ZENSU_CCD_STORE, decides and names as before (controls)" PASS \
     || check "OM11 presets folder:$OM_BAD" FAIL
+fi
+
+AP_HOME="$(cd "$FAKE" && pwd -P)/autopilot-home"
+AP_REPO="$AP_HOME/repo"
+AP_SRC_WT="$AP_REPO/.claude/worktrees/src-wt"
+AP_TDD_WT="$AP_REPO/.claude/worktrees/tdd-wt"
+AP_NESTED_WT="$AP_REPO/.claude/worktrees/nested-wt"
+AP_TAKER_WT="$AP_REPO/.claude/worktrees/taker-wt"
+AP_SRC=a1a10000-0000-4000-8000-000000000001
+AP_TDD=a1a20000-0000-4000-8000-000000000002
+AP_ORIGIN=a1a30000-0000-4000-8000-000000000003
+AP_TAKER=a1a40000-0000-4000-8000-000000000004
+AP_OTHER=a1a50000-0000-4000-8000-000000000005
+AP_PR_URL='https://github.com/example/fixture/pull/238'
+mkdir -p "$AP_HOME"
+cat > "$AP_HOME/mkap.mjs" <<'MKAP'
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+const [mode, ...rest] = process.argv.slice(2);
+if (mode === 'session') {
+  const [home, sid, cwd, ageSec] = rest;
+  const cfg = path.join(home, '.claude');
+  const last = Date.now() - Number(ageSec) * 1000;
+  const iso = (ms) => new Date(ms).toISOString();
+  const dir = path.join(cfg, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(cfg, 'sessions'), { recursive: true });
+  const records = [
+    { type: 'user', message: { role: 'user', content: 'drive the feature through Autopilot' }, cwd, gitBranch: 'claude/ap', isSidechain: false, timestamp: iso(last - 60000) },
+    ...Array.from({ length: 8 }, () => ({ type: 'padding', blob: 'x'.repeat(40) })),
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'waiting on the team review' }], stop_reason: 'end_turn' }, cwd, isSidechain: false, timestamp: iso(last) },
+  ];
+  const file = path.join(dir, `${sid}.jsonl`);
+  fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  fs.utimesSync(file, last / 1000, last / 1000);
+} else if (mode === 'run') {
+  const [lib, root, runId, ownerSid, extra] = rest;
+  const require = createRequire(import.meta.url);
+  const core = require(path.join(lib, 'session-control-core-v1.js'));
+  const dir = path.join(root, '.zensu', 'state');
+  const record = {
+    schemaVersion: 1, runId, projectRoot: root, workspaceRoot: root, ownerSessionId: core.sessionKey(ownerSid),
+    stage: 'TEAM_REVIEW', nextActionCode: 'RECONCILE_TEAM_REVIEW',
+    evidence: { pr: { number: 238, url: 'https://github.com/example/fixture/pull/238', headSha: 'abc1234' } },
+    ...JSON.parse(extra || '{}'),
+  };
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `autopilot-run-${runId}.json`), JSON.stringify(record));
+}
+MKAP
+ap_session() { node "$AP_HOME/mkap.mjs" session "$AP_HOME" "$@"; }
+ap_run() { node "$AP_HOME/mkap.mjs" run "$PLUGIN_DIR/hooks/lib" "$@"; }
+ap_trail() {
+  local at="$1"; shift
+  ( cd "$at" && env -u CLAUDE_CONFIG_DIR -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR -u ZENSU_CCD_STORE HOME="$AP_HOME" USERPROFILE="$AP_HOME" CLAUDE_CODE_SESSION_ID="$AP_TAKER" node "$TRAIL_MJS" "$@" --all --config-dir "$AP_HOME/.claude" )
+}
+ap_section() { printf '%s\n' "$1" | awk -v end="$2" '/^## Autopilot run$/{f=1; print; next} f && index($0, end) == 1 {exit} f'; }
+ap_json() { node -e '
+let o;
+try { o = JSON.parse(process.argv[1]); } catch { process.stdout.write("PARSE_ERROR"); process.exit(0); }
+const v = Function("o", "return (" + process.argv[2] + ");")(o);
+process.stdout.write(typeof v === "object" ? JSON.stringify(v) : String(v));
+' "$1" "$2"; }
+
+AP_OK=0
+if command -v git >/dev/null 2>&1 \
+  && git init -q "$AP_REPO" >/dev/null 2>&1 \
+  && printf '.zensu/\n.claude/\n' > "$AP_REPO/.gitignore" \
+  && git -C "$AP_REPO" add .gitignore >/dev/null 2>&1 \
+  && git -C "$AP_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && mkdir -p "$AP_REPO/.claude/worktrees" \
+  && git -C "$AP_REPO" worktree add -q "$AP_SRC_WT" -b claude/ap-src >/dev/null 2>&1 \
+  && git -C "$AP_REPO" worktree add -q "$AP_TDD_WT" -b claude/ap-tdd >/dev/null 2>&1 \
+  && git -C "$AP_REPO" worktree add -q "$AP_NESTED_WT" -b claude/ap-nested >/dev/null 2>&1 \
+  && git -C "$AP_REPO" worktree add -q "$AP_TAKER_WT" -b claude/ap-taker >/dev/null 2>&1 \
+  && ap_session "$AP_SRC" "$AP_SRC_WT" 3600 \
+  && ap_session "$AP_TDD" "$AP_TDD_WT" 3600 \
+  && ap_session "$AP_ORIGIN" "$AP_REPO" 3600 \
+  && ap_session "$AP_TAKER" "$AP_TAKER_WT" 600 \
+  && ap_run "$AP_SRC_WT" run_apsrc "$AP_SRC" \
+  && ap_run "$AP_SRC_WT" run_apforeign "$AP_OTHER" \
+  && ap_run "$AP_SRC_WT" run_apdone "$AP_SRC" '{"stage":"DONE","nextActionCode":"NONE"}' \
+  && printf '{' > "$AP_SRC_WT/.zensu/state/autopilot-run-run_apbad.json" \
+  && ap_run "$AP_TDD_WT" run_aptdd "$AP_TDD" '{"stage":"BLOCKED","nextActionCode":"AWAIT_RESUME","blocked":{"from":"TDD_RUNNING","code":"tdd-retry-limit"}}' \
+  && ap_run "$AP_REPO" run_aporigin "$AP_ORIGIN" "{\"workspaceRoot\":$(node -p 'JSON.stringify(process.argv[1])' "$AP_NESTED_WT")}"; then
+  AP_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "AP* git is not on PATH — the Autopilot run checks need real worktrees and are unverified in this run"
+elif [ "$AP_OK" != 1 ]; then
+  check "AP-fixture the Autopilot run fixture (worktrees, sessions and run records) could not be built" FAIL
+else
+  check "AP0 the Autopilot run fixture holds a worktree session with an own, a foreign, a finished and an unreadable run record, a session blocked out of its inner chain, an origin-checkout session and a taker" PASS
+
+  AP_MD="$(ap_trail "$AP_TAKER_WT" takeover "$AP_SRC" --no-record 2>/dev/null)"
+  AP_SEC="$(ap_section "$AP_MD" '## Recent instructions')"
+  AP_BAD=""
+  printf '%s\n' "$AP_MD" | grep -qxF '## Recent instructions (verbatim, newest last)' || AP_BAD="$AP_BAD no-recent-instructions"
+  for AP_NEED in '### Run `run_apsrc`' '- stage: `TEAM_REVIEW`, next action `RECONCILE_TEAM_REVIEW`' "- pull request: #238 $AP_PR_URL" 'git worktree move' '`/zensu:autopilot-adopt` with the moved worktree as its working directory' '`/zensu:autopilot-release` cancels one' 'is **unreadable**: it does not parse as JSON'; do
+    printf '%s\n' "$AP_SEC" | grep -qF -- "$AP_NEED" || AP_BAD="$AP_BAD [missing:$AP_NEED]"
+  done
+  for AP_FORBID in run_apforeign run_apdone '--confirm' 'zensu-log.sh'; do
+    printf '%s\n' "$AP_SEC" | grep -qF -- "$AP_FORBID" && AP_BAD="$AP_BAD [present:$AP_FORBID]"
+  done
+  [ -z "$AP_BAD" ] && check "AP1 takeover names the run this session owns with its stage, next action, pull request and the move route to /zensu:autopilot-adopt, names an unreadable record unreadable, leaves out a foreign and a finished run, and quotes no --confirm and no zensu-log.sh" PASS || check "AP1 takeover Autopilot section:$AP_BAD" FAIL
+
+  AP_SHOW="$(ap_trail "$AP_TAKER_WT" show "$AP_SRC" 2>/dev/null)"
+  AP_SHOW_JSON="$(ap_trail "$AP_TAKER_WT" show "$AP_SRC" --json 2>/dev/null)"
+  AP_TAKE_JSON="$(ap_trail "$AP_TAKER_WT" takeover "$AP_SRC" --no-record --json 2>/dev/null)"
+  AP_BAD=""
+  [ "$(printf '%s\n' "$AP_SHOW" | grep -c '^AUTOPILOT ')" = "1" ] || AP_BAD="$AP_BAD autopilot-lines=$(printf '%s\n' "$AP_SHOW" | grep -c '^AUTOPILOT ')"
+  printf '%s\n' "$AP_SHOW" | grep '^AUTOPILOT ' | grep -qF 'run_apsrc at TEAM_REVIEW (PR #238)' || AP_BAD="$AP_BAD show-line"
+  [ "$(ap_json "$AP_SHOW_JSON" 'o.autopilotRuns.runs.map((r) => r.runId + ":" + r.layout).join(",")')" = "run_apsrc:own-tree" ] || AP_BAD="$AP_BAD show-json=$(ap_json "$AP_SHOW_JSON" 'o.autopilotRuns')"
+  [ "$(ap_json "$AP_SHOW_JSON" '[o.autopilotRuns.others, o.autopilotRuns.terminal, o.autopilotRuns.unreadable.length].join("/")')" = "1/1/1" ] || AP_BAD="$AP_BAD counts=$(ap_json "$AP_SHOW_JSON" '[o.autopilotRuns.others, o.autopilotRuns.terminal, o.autopilotRuns.unreadable.length].join("/")')"
+  [ "$(ap_json "$AP_TAKE_JSON" 'o.autopilotRuns.runs.map((r) => r.runId).join(",")')" = "run_apsrc" ] || AP_BAD="$AP_BAD takeover-json"
+  [ -z "$AP_BAD" ] && check "AP2 show prints one AUTOPILOT line naming the run, and show --json and takeover --json carry autopilotRuns with the run, the foreign, finished and unreadable counts" PASS || check "AP2 show and --json:$AP_BAD" FAIL
+
+  AP_HMD="$(ap_trail "$AP_TAKER_WT" handoff "$AP_SRC" 2>/dev/null)"
+  AP_HSEC="$(ap_section "$AP_HMD" '## Open threads')"
+  AP_BAD=""
+  printf '%s\n' "$AP_HSEC" | grep -qF '### Run `run_apsrc`' || AP_BAD="$AP_BAD no-run-block"
+  printf '%s\n' "$AP_HSEC" | grep -qF 'carry it over after the user has confirmed your plan.' || AP_BAD="$AP_BAD no-when"
+  printf '%s\n' "$AP_HMD" | grep -qxF '## Open threads' || AP_BAD="$AP_BAD no-open-threads"
+  [ -z "$AP_BAD" ] && check "AP3 the handoff brief carries the same Autopilot run section above its open threads" PASS || check "AP3 handoff Autopilot section:$AP_BAD" FAIL
+
+  AP_TMD="$(ap_trail "$AP_TAKER_WT" takeover "$AP_TDD" --no-record 2>/dev/null)"
+  AP_TSEC="$(ap_section "$AP_TMD" '## Recent instructions')"
+  AP_BAD=""
+  printf '%s\n' "$AP_TSEC" | grep -qF -- '- stage: `BLOCKED` (blocked from `TDD_RUNNING` with code `tdd-retry-limit`), next action `AWAIT_RESUME`' || AP_BAD="$AP_BAD stage"
+  printf '%s\n' "$AP_TSEC" | grep -qF 'its inner build chain is still running under the old session' || AP_BAD="$AP_BAD no-inner-chain"
+  printf '%s\n' "$AP_TSEC" | grep -qF 'cancels the run with `/zensu:autopilot-release`' || AP_BAD="$AP_BAD no-release-exit"
+  printf '%s\n' "$AP_TSEC" | grep -qF 'git worktree move' && AP_BAD="$AP_BAD offers-move"
+  [ -z "$AP_BAD" ] && check "AP4 a run blocked out of its inner build chain gets the finish-or-release text and no move route" PASS || check "AP4 inner-chain run:$AP_BAD" FAIL
+
+  AP_OMD="$(ap_trail "$AP_TAKER_WT" takeover "$AP_ORIGIN" --no-record 2>/dev/null)"
+  AP_OSEC="$(ap_section "$AP_OMD" '## Recent instructions')"
+  AP_OJSON="$(ap_trail "$AP_TAKER_WT" takeover "$AP_ORIGIN" --no-record --json 2>/dev/null)"
+  AP_BAD=""
+  printf '%s\n' "$AP_OSEC" | grep -qF '### Run `run_aporigin`' || AP_BAD="$AP_BAD no-run-block"
+  printf '%s\n' "$AP_OSEC" | grep -qF 'Do not move that worktree' || AP_BAD="$AP_BAD no-stay"
+  printf '%s\n' "$AP_OSEC" | grep -qF 'Continue the run from a session whose project root is' || AP_BAD="$AP_BAD no-session-root"
+  printf '%s\n' "$AP_OSEC" | grep -qF 'git worktree move' && AP_BAD="$AP_BAD offers-move"
+  [ "$(ap_json "$AP_OJSON" 'o.autopilotRuns.runs.map((r) => r.layout + ":" + r.folder).join(",")')" = "nested-workspace:$AP_REPO" ] || AP_BAD="$AP_BAD json=$(ap_json "$AP_OJSON" 'o.autopilotRuns.runs')"
+  [ -z "$AP_BAD" ] && check "AP5 a run whose record lives in the origin checkout and drives a nested worktree names that checkout as the session root to continue from and says not to move the worktree" PASS || check "AP5 origin-checkout run:$AP_BAD" FAIL
+
+  AP_REL="$(ap_trail "$AP_TAKER_WT" release "$AP_SRC" --json 2>/dev/null)"
+  AP_BAD=""
+  [ "$(ap_json "$AP_REL" 'o.verdict')" = "blocked" ] || AP_BAD="$AP_BAD verdict=$(ap_json "$AP_REL" 'o.verdict')"
+  [ "$(ap_json "$AP_REL" 'o.blockers.map((b) => b.code).filter((c) => c.startsWith("autopilot")).join(",")')" = "autopilot-run,autopilot-unreadable" ] || AP_BAD="$AP_BAD codes=$(ap_json "$AP_REL" 'o.blockers.map((b) => b.code).join(",")')"
+  ap_json "$AP_REL" 'o.blockers.map((b) => b.text).join(" ")' | grep -qF 'durable Autopilot run run_apsrc at stage TEAM_REVIEW' || AP_BAD="$AP_BAD unnamed"
+  AP_ERR="$(ap_trail "$AP_TAKER_WT" release "$AP_SRC" --apply 2>&1 >/dev/null)"; AP_RC=$?
+  [ "$AP_RC" = "1" ] || AP_BAD="$AP_BAD apply-rc=$AP_RC"
+  printf '%s' "$AP_ERR" | grep -qF 'nothing was released' || AP_BAD="$AP_BAD apply-stderr=${AP_ERR:-<empty>}"
+  [ -f "$AP_SRC_WT/.zensu/state/autopilot-run-run_apsrc.json" ] || AP_BAD="$AP_BAD record-gone"
+  [ -z "$AP_BAD" ] && check "AP6 release lists the run this session owns and the unreadable record as blockers, and --apply refuses with exit 1 and releases nothing" PASS || check "AP6 release blocker:$AP_BAD" FAIL
+
+  rm -f "$AP_SRC_WT/.zensu/state/autopilot-run-run_apsrc.json" "$AP_SRC_WT/.zensu/state/autopilot-run-run_apbad.json"
+  AP_REL="$(ap_trail "$AP_TAKER_WT" release "$AP_SRC" --json 2>/dev/null)"
+  AP_BAD=""
+  [ "$(ap_json "$AP_REL" 'o.blockers.filter((b) => b.code.startsWith("autopilot")).length')" = "0" ] || AP_BAD="$AP_BAD codes=$(ap_json "$AP_REL" 'o.blockers.map((b) => b.code).join(",")')"
+  [ "$(ap_json "$AP_REL" 'o.verdict')" = "blocked" ] && AP_BAD="$AP_BAD still-blocked=$(ap_json "$AP_REL" 'o.blockers.map((b) => b.code).join(",")')"
+  [ -z "$AP_BAD" ] && check "AP7 once the run left the tree, release no longer blocks on it, while the finished and the foreign run left behind never did" PASS || check "AP7 release after transfer:$AP_BAD" FAIL
+
+  AP_CMD="$(ap_trail "$AP_TAKER_WT" takeover "$AP_TAKER" --no-record 2>/dev/null)"
+  AP_CSHOW="$(ap_trail "$AP_TAKER_WT" show "$AP_TAKER" --json 2>/dev/null)"
+  AP_BAD=""
+  printf '%s\n' "$AP_CMD" | grep -qxF '## Autopilot run' && AP_BAD="$AP_BAD section-present"
+  [ "$(ap_json "$AP_CSHOW" '[o.autopilotRuns.measured, o.autopilotRuns.runs.length, o.autopilotRuns.directories.length].join("/")')" = "true/0/0" ] || AP_BAD="$AP_BAD json=$(ap_json "$AP_CSHOW" 'o.autopilotRuns')"
+  ap_trail "$AP_TAKER_WT" show "$AP_TAKER" 2>/dev/null | grep -q '^AUTOPILOT ' && AP_BAD="$AP_BAD show-line"
+  [ -z "$AP_BAD" ] && check "AP8 a session whose tree holds no Autopilot run gets no section and no AUTOPILOT line (control)" PASS || check "AP8 control:$AP_BAD" FAIL
 fi
 
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
