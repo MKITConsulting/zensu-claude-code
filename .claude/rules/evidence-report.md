@@ -84,15 +84,28 @@ tree is fine, inside one only when `git check-ignore` reports the store ignored.
 
 **Containment (AC-006).** The run directory must be a physical directory strictly inside the work
 tree (the project root outside git) and apart from the store. Inside a work tree it must lie
-outside `.git` and be ignored by git (`git check-ignore` of `<path>/`), so a capture can never be
+outside `.git` and be ignored by git (`git check-ignore` of `./<path>/`), so a capture can never be
 committed and never moves the tree fingerprint that the target identity and the verdict rules read.
 The refusal says that captures would move the fingerprint only for a run directory inside a tree
 the report fingerprints, in the same work tree and outside that tree's `.zensu` (`fingerprinted`):
 the project root, and in chain mode also the chain's fingerprint root, which is canonicalized with
 `fs.realpathSync.native` and compared through `samePath`, because `fingerprintRoot` returns git's
-spelling. The remedy names the run directory's parent only when that parent lies strictly inside
-the project root and git tracks nothing under it (`ignoreTarget`), and the run directory itself
-otherwise, so it never asks to ignore the project root or a tracked directory.
+spelling. The remedy names the run directory's parent when that parent lies below the top of the
+work tree that holds the run directory, neither is nor holds the project root, and holds nothing
+git tracks and, unless it is `RUN_ROOT` at the top of that work tree or of the project root,
+whose other entries are run directories (`isRunRoot`), no untracked, unignored file outside the
+run directory (`ignoreTarget`), else the run directory itself when it neither is nor holds the project root and git tracks nothing under
+it. The line it suggests is that path anchored at the work tree's top, `/` plus the spelling with
+`\`, `*`, `?` and `[` escaped (`ignoreLine`), because an unanchored pattern matches a directory of
+that name at any depth; a spelling with a control character gets no line. When no directory
+qualifies, and for a run directory that is itself the top of a work tree, which that tree cannot
+ignore, the refusal names `RUN_ROOT`, `.zensu/verify-feature-runs/` at the top of the project's
+work tree, and says whether git ignores it (`runRootRemedy`, which the `.git` refusal shares). It
+therefore never asks to ignore the project root, a directory that holds it, or a directory with a
+tracked file. Every check-ignore probe, the store placement and `runRootRemedy` included, goes
+through `checkIgnore`, which prefixes the spelling with `./`: check-ignore reads a leading `:` as
+pathspec magic, so `:shots/` would be judged as `shots/`, and it refuses `--literal-pathspecs`
+with exit 128.
 `--report-add --file` takes an absolute, normalized path to a regular file with one link inside it,
 opened no-follow and matched by device and inode. The type is read from the content: PNG, a
 lossless WebP (`VP8L`; `VP8 ` and an animation are refused), or UTF-8 text without control
@@ -182,10 +195,13 @@ driver among its rows. Every coverage row, and the draft's, is built by `criteri
 draft criterion carries `zensu`, which both modes hand on to the manifest.
 
 **Target identity.** `--report-begin` measures the target and keeps its tree as `begin_tree`;
-render measures again and keeps `begin_tree`. A changed tree adds a limitation line, and so does a
-local report whose tree could not be fingerprinted at begin or at render; the line names the begin
-cause from the binding's `begin_failure`, and the render cause unless neither measurement found
-the target inside git. `measureTarget` returns
+render measures again and keeps `begin_tree`. In a local report a changed tree adds a limitation
+line, and so does a tree that could not be fingerprinted at begin or at render; a remote report
+verifies deployed code, so it gets no tree line. The line names the begin
+cause from the binding's `begin_failure`, and the render cause unless `treeCheck` reads the target
+as outside git: begin's cause is `not a git work tree` and neither the begin target nor the render
+target holds a field git measures. Two probes that both timed out therefore name both causes.
+`measureTarget` returns
 the cause beside the target, from a fixed vocabulary (`treeFailure`: an untracked-file limit,
 `git timed out`, `not a git work tree` for every answer `outsideWorkTree` reads as outside a work
 tree, otherwise `git failed`), so git output, which can hold a path, never reaches a report. Once
@@ -238,7 +254,9 @@ through `ucfg()` and the project layer through `pcfg()` of `_ZENSU_CFG_JS`, whic
 **Coupled sites.** The verb arm and `_zensu_report_native_dir` / `_zensu_report_native_file` in
 `zensu-log.sh`; `zensu_evidence_report_config_json` in `zensu-config.sh`; §Evidence Reports and the
 §Config Resolution Order deviation paragraph in `docs/configuration.md`, and `config.example.json`;
-§6.2 to §6.11 of the spec; the corpus README; the unit file, its registry entry and
+§6.2 to §6.11 of the spec; the corpus README; `RUN_ROOT`, which both run-directory refusals name,
+the root `skills/verify-feature/SKILL.md` Phase 2 creates run directories under and the ignore
+block of `docs/build-workflow.md` lists; the unit file, its registry entry and
 `tests/structure/test-evidence-report.sh` in `ciStructureTests`; `DRIVERS` of
 `acceptance-verify-v1.js`, which the unit file pins equal to the manifest's driver enum; the exports
 `git`, `outsideWorkTree`, `workTreeTop`, `fingerprintRoot`, `computeTree`, `LIMITS`, `storeLocations`,

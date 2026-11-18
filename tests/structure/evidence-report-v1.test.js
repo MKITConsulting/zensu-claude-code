@@ -503,17 +503,40 @@ test('begin accepts only a run directory inside the work tree that git ignores, 
   refused(call(fx, 'begin', { 'run-dir': fx.root, drivers: 'browser' }, FEATURE), /inside the project's work tree/);
   const source = path.join(fx.root, 'src');
   fs.mkdirSync(source);
-  refused(call(fx, 'begin', { 'run-dir': source, drivers: 'browser' }, FEATURE), /git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; have git ignore src\/, for example with the line src\/ in/);
+  refused(call(fx, 'begin', { 'run-dir': source, drivers: 'browser' }, FEATURE), /git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; have git ignore src\/, for example with the line \/src\/ in/);
   fs.writeFileSync(path.join(source, 'app.js'), 'export {};\n');
   git(fx.root, 'add', 'src/app.js');
   git(fx.root, 'commit', '-q', '-m', 'add a tracked source file');
+  refused(call(fx, 'begin', { 'run-dir': source, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
   const sourceShots = path.join(source, 'shots');
   fs.mkdirSync(sourceShots);
-  refused(call(fx, 'begin', { 'run-dir': sourceShots, drivers: 'browser' }, FEATURE), /; have git ignore src\/shots\/, for example with the line src\/shots\/ in the repository's \.gitignore$/);
+  refused(call(fx, 'begin', { 'run-dir': sourceShots, drivers: 'browser' }, FEATURE), /; have git ignore src\/shots\/, for example with the line \/src\/shots\/ in the repository's \.gitignore$/);
   const captureRun = path.join(fx.root, 'captures', 'r1');
   fs.mkdirSync(captureRun, { recursive: true });
-  refused(call(fx, 'begin', { 'run-dir': captureRun, drivers: 'browser' }, FEATURE), /; have git ignore captures\/, for example with the line captures\/ in the repository's \.gitignore$/);
-  refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
+  refused(call(fx, 'begin', { 'run-dir': captureRun, drivers: 'browser' }, FEATURE), /; have git ignore captures\/, for example with the line \/captures\/ in the repository's \.gitignore$/);
+  fs.writeFileSync(path.join(fx.root, 'captures', 'notes.md'), 'kept beside the run\n');
+  refused(call(fx, 'begin', { 'run-dir': captureRun, drivers: 'browser' }, FEATURE), /; have git ignore captures\/r1\/, for example with the line \/captures\/r1\/ in the repository's \.gitignore$/);
+  const bracket = path.join(fx.root, 'shots[1]');
+  fs.mkdirSync(bracket);
+  refused(call(fx, 'begin', { 'run-dir': bracket, drivers: 'browser' }, FEATURE), /; have git ignore shots\[1\]\/, for example with the line \/shots\\\[1\]\/ in the repository's \.gitignore$/);
+  fs.appendFileSync(path.join(fx.root, '.gitignore'), '/shots\\[1]/\n');
+  ok(call(fx, 'begin', { 'run-dir': bracket, drivers: 'browser' }, FEATURE));
+  if (process.platform !== 'win32') {
+    const tabbed = path.join(fx.root, 'tab\there');
+    fs.mkdirSync(tabbed);
+    refused(call(fx, 'begin', { 'run-dir': tabbed, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
+    const colon = path.join(fx.root, ':shots');
+    fs.mkdirSync(colon);
+    fs.appendFileSync(path.join(fx.root, '.gitignore'), '/shots/\n');
+    refused(call(fx, 'begin', { 'run-dir': colon, drivers: 'browser' }, FEATURE), /; have git ignore :shots\/, for example with the line \/:shots\/ in the repository's \.gitignore$/);
+    fs.appendFileSync(path.join(fx.root, '.gitignore'), '/:shots/\n');
+    ok(call(fx, 'begin', { 'run-dir': colon, drivers: 'browser' }, FEATURE));
+  }
+  const beginRow = fs.readFileSync(path.join(ROOT, 'docs', 'configuration.md'), 'utf8').split('\n').find((line) => line.startsWith('| `--report-begin` |'));
+  assert.match(beginRow, /escap/);
+  assert.match(beginRow, /control character/);
+  assert.match(beginRow, /untracked, unignored file/);
+  refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git'), drivers: 'browser' }, FEATURE), /^the run directory .+ lies inside \.git; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git', 'objects'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
   const store = path.join(fx.root, 'reports');
   fs.writeFileSync(path.join(fx.root, '.gitignore'), '.zensu/\nreports/\n');
@@ -530,7 +553,8 @@ test('the run directory is judged by the work tree that holds it, and the refusa
   git(fx.root, 'worktree', 'add', '-q', nested, '-b', 'wt');
   const shots = path.join(nested, 'shots');
   fs.mkdirSync(shots);
-  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore shots\/, for example with the line shots\/ in the repository's \.gitignore$/);
+  refused(call(fx, 'begin', { 'run-dir': shots, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore shots\/, for example with the line \/shots\/ in the repository's \.gitignore$/);
+  refused(call(fx, 'begin', { 'run-dir': nested, drivers: 'browser' }, FEATURE), /^the run directory .+ is the top of a git work tree, which that work tree cannot ignore; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
   const outer = fixture();
   const pkg = path.join(outer.root, 'pkg');
   fs.mkdirSync(pkg);
@@ -538,12 +562,23 @@ test('the run directory is judged by the work tree that holds it, and the refusa
   const logs = path.join(outer.root, 'logs');
   fs.mkdirSync(logs);
   refused(call(sub, 'begin', { 'run-dir': logs, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore logs\//);
+  refused(call(sub, 'begin', { 'run-dir': pkg, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
+  const web = path.join(outer.root, 'apps', 'web');
+  fs.mkdirSync(web, { recursive: true });
+  const deep = fixture({ root: web });
+  refused(call(deep, 'begin', { 'run-dir': path.join(outer.root, 'apps'), drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
+  const namesake = path.join(outer.root, 'web');
+  fs.mkdirSync(namesake);
+  refused(call(deep, 'begin', { 'run-dir': namesake, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore web\/, for example with the line \/web\/ in the repository's \.gitignore$/);
+  fs.appendFileSync(path.join(outer.root, '.gitignore'), '/web/\n');
+  ok(call(deep, 'begin', { 'run-dir': namesake, drivers: 'browser' }, FEATURE));
+  assert.equal(childProcess.spawnSync('git', ['check-ignore', '-q', '--', 'apps/web/'], { cwd: outer.root, env: evr.gitEnvironment() }).status, 1);
   const pictures = path.join(pkg, 'pictures');
   fs.mkdirSync(pictures);
-  refused(call(sub, 'begin', { 'run-dir': pictures, drivers: 'browser' }, FEATURE), /, so its captures could be committed and every capture would move the tree fingerprint; have git ignore pkg\/pictures\/, for example with the line pkg\/pictures\/ in the repository's \.gitignore$/);
+  refused(call(sub, 'begin', { 'run-dir': pictures, drivers: 'browser' }, FEATURE), /, so its captures could be committed and every capture would move the tree fingerprint; have git ignore pkg\/pictures\/, for example with the line \/pkg\/pictures\/ in the repository's \.gitignore$/);
   const beside = path.join(outer.root, 'shared', 'runs');
   fs.mkdirSync(beside, { recursive: true });
-  refused(call(sub, 'begin', { 'run-dir': beside, drivers: 'browser' }, FEATURE), /, so its captures could be committed; have git ignore shared\/runs\/, for example with the line shared\/runs\/ in the repository's \.gitignore$/);
+  refused(call(sub, 'begin', { 'run-dir': beside, drivers: 'browser' }, FEATURE), /, so its captures could be committed; have git ignore shared\/, for example with the line \/shared\/ in the repository's \.gitignore$/);
   ok(call(sub, 'begin', { 'run-dir': sub.runDir, drivers: 'browser' }, FEATURE));
   const kept = path.join(nested, '.zensu', 'verify-feature-runs', 'r1');
   fs.mkdirSync(kept, { recursive: true });
@@ -558,9 +593,22 @@ test('the run directory is judged by the work tree that holds it, and the refusa
   refused(call(plain, 'begin', { 'run-dir': captures, drivers: 'api' }, FEATURE), /git does not ignore the run directory .+ have git ignore captures\//);
   ok(call(plain, 'begin', { 'run-dir': plain.runDir, drivers: 'api' }, FEATURE));
   const trail = fixture({ ignore: '.zensu/state/\n.zensu/reviews/\n' });
-  refused(call(trail, 'begin', { 'run-dir': trail.runDir, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore \.zensu\/verify-feature-runs\/, for example with the line \.zensu\/verify-feature-runs\/ in the repository's \.gitignore$/);
+  refused(call(trail, 'begin', { 'run-dir': trail.runDir, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore \.zensu\/verify-feature-runs\/, for example with the line \/\.zensu\/verify-feature-runs\/ in the repository's \.gitignore$/);
   fs.appendFileSync(path.join(trail.root, '.gitignore'), '.zensu/verify-feature-runs/\n');
   ok(call(trail, 'begin', { 'run-dir': trail.runDir, drivers: 'browser' }, FEATURE));
+  const mono = fixture({ ignore: 'node_modules/\n' });
+  const site = path.join(mono.root, 'apps', 'site');
+  fs.mkdirSync(site, { recursive: true });
+  const app = fixture({ root: site });
+  const leaf = path.join(mono.root, '.zensu', 'verify-feature-runs', 'k3x9');
+  fs.mkdirSync(leaf, { recursive: true });
+  fs.writeFileSync(path.join(mono.runDir, 'resources.json'), '{}\n');
+  refused(call(app, 'begin', { 'run-dir': leaf, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore \.zensu\/verify-feature-runs\/, for example with the line \/\.zensu\/verify-feature-runs\/ in the repository's \.gitignore$/);
+  refused(call(app, 'begin', { 'run-dir': site, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed and every capture would move the tree fingerprint; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree and have git ignore that directory, for example with the line \/\.zensu\/verify-feature-runs\/ in the repository's \.gitignore$/);
+  const appLeaf = path.join(site, '.zensu', 'verify-feature-runs', 'k4y2');
+  fs.mkdirSync(appLeaf, { recursive: true });
+  fs.writeFileSync(path.join(app.runDir, 'resources.json'), '{}\n');
+  refused(call(app, 'begin', { 'run-dir': appLeaf, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore apps\/site\/\.zensu\/verify-feature-runs\/, for example with the line \/apps\/site\/\.zensu\/verify-feature-runs\/ in the repository's \.gitignore$/);
 });
 
 test('add, step and render refuse a report begun in another worktree of the same clone, while export stays open', () => {
@@ -767,6 +815,14 @@ test('the default store lies outside every git work tree and a store inside one 
   refused(call(inside, 'begin', { 'run-dir': inside.runDir, drivers: 'browser' }, FEATURE), /does not report it ignored/);
   assert.equal(er.storePlacement(tempDir('outside')).ok, true);
   assert.equal(er.storePlacement(tracked).ok, false);
+  if (process.platform !== 'win32') {
+    const colonStore = path.join(tracked, ':store');
+    fs.mkdirSync(colonStore);
+    fs.appendFileSync(path.join(tracked, '.gitignore'), '/store/\n');
+    assert.equal(er.storePlacement(colonStore).ok, false);
+    fs.appendFileSync(path.join(tracked, '.gitignore'), '/:store/\n');
+    assert.equal(er.storePlacement(colonStore).ok, true);
+  }
 });
 
 test('retention keeps the newest reports per repository and deletes the oldest first', () => {
@@ -1470,7 +1526,7 @@ test('chain mode measures the target in the chain work tree through the acceptan
   fs.writeFileSync(path.join(workTree, '.gitignore'), 'node_modules/\n');
   const stateRuns = path.join(workTree, '.zensu', 'runs', 'r1');
   fs.mkdirSync(stateRuns, { recursive: true });
-  refused(call(fx, 'begin', { 'run-dir': stateRuns, drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n', bound), /, so its captures could be committed; have git ignore \.zensu\/runs\/, for example with the line \.zensu\/runs\/ in the repository's \.gitignore$/);
+  refused(call(fx, 'begin', { 'run-dir': stateRuns, drivers: 'browser', log: fx.logPath }, 'feature: The dashboard lists projects\n', bound), /, so its captures could be committed; have git ignore \.zensu\/runs\/, for example with the line \/\.zensu\/runs\/ in the repository's \.gitignore$/);
 });
 
 test('the draft check measures the manifest render writes, so the report that took its last item still renders', () => {
@@ -1655,6 +1711,15 @@ test('a local matrix PASS over a tree that changed during the run is refused and
   ok(step(steady, kept.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
   ok(call(steady, 'render', { report: kept.id, verdict: 'PASS' }));
   assert.ok(!fs.readFileSync(path.join(kept.bundle, 'index.html'), 'utf8').includes('Tree at begin'));
+  const distant = fixture();
+  const deployed = begin(distant, { mode: 'remote', origin: 'https://preview.example.com' });
+  addImage(distant, deployed.id);
+  ok(step(distant, deployed.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
+  fs.writeFileSync(path.join(distant.root, 'a.txt'), 'changed during the run\n');
+  ok(call(distant, 'render', { report: deployed.id, verdict: 'PASS' }));
+  const remoteTarget = manifestOf(deployed.bundle).target;
+  assert.notEqual(remoteTarget.begin_tree, remoteTarget.tree);
+  assert.ok(!manifestOf(deployed.bundle).sections.limitations.some((line) => line.startsWith('The working tree')), manifestOf(deployed.bundle).sections.limitations.join('\n'));
   const plain = fixture({ root: tempDir('plain-project') });
   const unmeasured = begin(plain, { drivers: 'api' });
   ok(call(plain, 'render', { report: unmeasured.id, verdict: 'PARTIAL' }));
@@ -1673,6 +1738,18 @@ test('a local matrix PASS is refused when the tree at begin or at render cannot 
   addImage(late, unmeasured.id);
   ok(step(late, unmeasured.id, { criteria: 'AC-001,AC-002', evidence: 'e1' }));
   assert.ok(unmeasured.lines.includes('zensu evidence report: the working tree could not be fingerprinted at --report-begin (git timed out), so --report-render will refuse a PASS; make the tree fingerprintable and begin again'), unmeasured.lines.join('\n'));
+  const far = fixture();
+  const remoteDown = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  const remote = begin(far, { mode: 'remote', origin: 'https://preview.example.com' });
+  remoteDown.mock.restore();
+  const chained = chainFixture();
+  const chainDown = t.mock.method(evr, 'computeTree', () => ({ tree: null, reason: 'git timed out' }));
+  const inChain = begin(chained, { drivers: 'browser', log: chained.logPath }, 'feature: The dashboard lists projects\n');
+  chainDown.mock.restore();
+  for (const [owner, started] of [[far, remote], [chained, inChain]]) {
+    assert.equal(JSON.parse(fs.readFileSync(path.join(repositoryDirectory(owner), `${started.id}.binding.json`), 'utf8')).begin_failure, 'git timed out');
+    assert.ok(!started.lines.some((line) => line.includes('will refuse a PASS')), started.lines.join('\n'));
+  }
   refused(call(late, 'render', { report: unmeasured.id, verdict: 'PASS' }), /^REPORT REFUSED — verdict\.tree-changed at verdict: the stated verdict PASS rests on rows recorded on a tree that could not be fingerprinted at --report-begin \(git timed out\), so the tree [0-9a-f]{12} at --report-render cannot be compared with it/);
   ok(call(late, 'render', { report: unmeasured.id, verdict: 'PARTIAL' }));
   assert.equal(manifestOf(unmeasured.bundle).target.begin_tree, null);

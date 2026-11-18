@@ -62,6 +62,7 @@ const COOKIE_PAIR_RE = /^\s*[^\s=;:"']+=([^\s;"']*)/;
 const COOKIE_VALUE_MIN = 16;
 const NAME_CHARACTER_RE = /[A-Za-z0-9_.-]/;
 const OUTSIDE_GIT = 'not a git work tree';
+const RUN_ROOT = '.zensu/verify-feature-runs/';
 const TREE_FAILURE_RE = /^(?:work tree: )?(more than \d+ untracked files|untracked files exceed \d+ MiB|git timed out|not a git work tree)$/;
 const TREE_CAUSE_RE = /^(?:more than \d+ untracked files|untracked files exceed \d+ MiB|git timed out|not a git work tree|git failed)$/;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -1597,7 +1598,7 @@ function storePlacement(root) {
   if (relative === '') {
     return { ok: false, reason: `the store ${root} is the top level of a git work tree; move evidence.report.dir outside every git work tree` };
   }
-  const ignored = evidenceRun.git(topDirectory, ['check-ignore', '-q', '--', `${relative}/`]);
+  const ignored = checkIgnore(topDirectory, `${relative}/`);
   if (ignored.ok) return { ok: true, ignored: true };
   if (ignored.status === 1) {
     return { ok: false, reason: `the store ${root} lies inside the git work tree ${topDirectory} and git does not report it ignored; move evidence.report.dir outside every git work tree, or have git ignore ${relative}/` };
@@ -1884,16 +1885,17 @@ function checkRunDirectory(given, projectRoot, root, chainRoot = null) {
     refuse('the run directory must not overlap the report store');
   }
   if (path.relative(base, real).split(path.sep).includes('.git')) {
-    refuse(`the run directory ${real} lies inside .git; create it under a path git ignores, such as .zensu/verify-feature-runs/`);
+    refuse(`the run directory ${real} lies inside .git; ${runRootRemedy(top.top)}`);
   }
   const own = evidenceRun.workTreeTop(real);
   if (own.reason) unavailable(`whether git ignores the run directory could not be determined (${own.reason})`);
   if (own.top !== null) {
+    if (samePath(own.top, real)) refuse(`the run directory ${real} is the top of a git work tree, which that work tree cannot ignore; ${runRootRemedy(top.top)}`);
     const projectReal = fs.realpathSync.native(projectRoot);
     const trees = [{ root: projectReal, top: top.top }];
     const chainReal = realDirectory(chainRoot);
     if (chainReal !== null && !samePath(chainReal, projectReal)) trees.push({ root: chainReal, top: chainReal });
-    requireIgnored(own.top, real, projectReal, trees.some((tree) => tree.top !== null && samePath(tree.top, own.top) && fingerprinted(tree.root, real)));
+    requireIgnored(own.top, real, projectReal, trees.some((tree) => tree.top !== null && samePath(tree.top, own.top) && fingerprinted(tree.root, real)), top.top);
   }
   return real;
 }
@@ -1912,22 +1914,59 @@ function fingerprinted(treeRoot, real) {
   return (samePath(real, treeRoot) || isInside(treeRoot, real)) && !samePath(real, excluded) && !isInside(excluded, real);
 }
 
-function ignoreTarget(tree, real, projectRoot, relative) {
-  const spelled = `${relative.join('/')}/`;
-  if (relative.length < 2 || !isInside(projectRoot, path.dirname(real))) return spelled;
-  const parent = `${relative.slice(0, -1).join('/')}/`;
-  const tracked = evidenceRun.git(tree, ['--literal-pathspecs', 'ls-files', '-z', '--', parent]);
-  return tracked.ok && tracked.stdout === '' ? parent : spelled;
+function checkIgnore(tree, spelled) {
+  return evidenceRun.git(tree, ['check-ignore', '-q', '--', `./${spelled}`]);
 }
 
-function requireIgnored(tree, real, projectRoot, moves) {
+function untracked(tree, spelled) {
+  const tracked = evidenceRun.git(tree, ['--literal-pathspecs', 'ls-files', '-z', '--', spelled]);
+  return tracked.ok && tracked.stdout === '';
+}
+
+function holdsOnly(tree, parent, spelled) {
+  const others = evidenceRun.git(tree, ['--literal-pathspecs', 'ls-files', '-z', '--others', '--exclude-standard', '--', parent]);
+  return others.ok && others.stdout.split('\0').every((entry) => entry === '' || entry.startsWith(spelled));
+}
+
+function holdsPath(directory, inner) {
+  return samePath(directory, inner) || isInside(directory, inner);
+}
+
+function isRunRoot(directory, tree, projectRoot) {
+  return [tree, projectRoot].some((root) => samePath(directory, path.resolve(root, RUN_ROOT)));
+}
+
+function ignoreTarget(tree, real, projectRoot, relative) {
+  if (SINGLE_LINE_FORBIDDEN_RE.test(relative.join('/'))) return null;
+  const spelled = `${relative.join('/')}/`;
+  const parent = `${relative.slice(0, -1).join('/')}/`;
+  const above = path.dirname(real);
+  if (relative.length >= 2 && !holdsPath(above, projectRoot) && untracked(tree, parent) && (isRunRoot(above, tree, projectRoot) || holdsOnly(tree, parent, spelled))) return parent;
+  return !holdsPath(real, projectRoot) && untracked(tree, spelled) ? spelled : null;
+}
+
+function ignoreLine(spelled) {
+  return `/${spelled.replace(/[\\*?[]/g, (character) => `\\${character}`)}`;
+}
+
+function runRootRemedy(tree) {
+  const probed = isString(tree) ? checkIgnore(tree, RUN_ROOT) : null;
+  return probed !== null && probed.ok
+    ? `create it under ${RUN_ROOT} at the top of the work tree, which git ignores`
+    : `create it under ${RUN_ROOT} at the top of the work tree and have git ignore that directory, for example with the line /${RUN_ROOT} in the repository's .gitignore`;
+}
+
+function requireIgnored(tree, real, projectRoot, moves, runTree) {
   const relative = path.relative(tree, real).split(path.sep);
   const spelled = `${relative.join('/')}/`;
-  const ignored = evidenceRun.git(tree, ['check-ignore', '-q', '--', spelled]);
+  const ignored = checkIgnore(tree, spelled);
   if (ignored.status === 1) {
     const named = ignoreTarget(tree, real, projectRoot, relative);
     const moved = moves ? ' and every capture would move the tree fingerprint' : '';
-    refuse(`git does not ignore the run directory ${real}, so its captures could be committed${moved}; have git ignore ${named}, for example with the line ${named} in the repository's .gitignore`);
+    const remedy = named === null
+      ? runRootRemedy(runTree)
+      : `have git ignore ${named}, for example with the line ${ignoreLine(named)} in the repository's .gitignore`;
+    refuse(`git does not ignore the run directory ${real}, so its captures could be committed${moved}; ${remedy}`);
   }
   if (!ignored.ok) unavailable(`whether git ignores the run directory could not be determined (${ignored.reason})`);
 }
@@ -2447,12 +2486,13 @@ function render(options) {
     target.begin_tree = binding.target.begin_tree;
     const verdictContext = { treeFailure: measured.failure, beginFailure: binding.begin_failure, beganOutsideGit: binding.begin_failure === OUTSIDE_GIT && targetOutsideGit(binding.target) };
     const check = treeCheck(target, verdictContext);
+    const local = binding.run.mode === 'local';
     let treeNote = null;
-    if (check.state === 'render-unmeasured') {
+    if (local && check.state === 'render-unmeasured') {
       treeNote = `The working tree could not be fingerprinted at --report-render (${check.atRender}), so a change since ${target.begin_tree.slice(0, 12)} at --report-begin cannot be ruled out.`;
-    } else if (check.state === 'changed') {
+    } else if (local && check.state === 'changed') {
       treeNote = `The working tree changed during the run: ${target.begin_tree.slice(0, 12)} at --report-begin, ${target.tree.slice(0, 12)} at --report-render.`;
-    } else if (target.begin_tree === null && binding.run.mode === 'local') {
+    } else if (local && target.begin_tree === null) {
       const atBegin = check.atBegin ? ` (${check.atBegin})` : '';
       treeNote = check.state === 'unmeasured'
         ? `The working tree was not fingerprinted at --report-begin${atBegin}, and could not be fingerprinted at --report-render either (${check.atRender}), so a change during the run cannot be ruled out.`

@@ -270,11 +270,14 @@ Field rules:
   `target.origin` is set in remote mode only and holds scheme, host and port.
 - `target.tree` is the tree measured at render and `target.begin_tree` the one measured at
   `--report-begin`; either is `null` where no tree can be fingerprinted, such as outside git. The
-  page shows the begin tree only when the two differ, and a changed tree or one that could not be
-  fingerprinted becomes a limitation line. A tree that could not be fingerprinted is named with its
+  page shows the begin tree only when the two differ, and in a local report a changed tree or one
+  that could not be fingerprinted becomes a limitation line; a remote report verifies deployed code
+  and gets none. A tree that could not be fingerprinted is named with its
   cause from a fixed vocabulary (an untracked-file limit, `git timed out`, `not a git work tree`,
   otherwise `git failed`), never with git output: the begin cause, which the binding keeps, and
-  the render cause unless neither measurement found the target inside git. In chain mode the same
+  the render cause unless the target reads as outside git, that is, begin's cause is
+  `not a git work tree` and neither the begin target nor the render target holds a field git
+  measures, so two probes that both timed out name both causes. In chain mode the same
   vocabulary names the tree the acceptance states could not be compared with.
 - `coverage.source` is `acceptance-records` in chain mode and `matrix` otherwise. `state` is one
   of `pass`, `fail`, `partial`, `missing`, `stale` and `deprecated`; `record` is `null` in matrix
