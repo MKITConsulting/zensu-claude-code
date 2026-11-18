@@ -115,7 +115,7 @@ check "C17 judge findings are numbered after the panel findings" "$(has "$ALL1" 
 check "C18 a still-open finding and its covers line take no new id" "$(has "$ALL1" "covers <panel-id>' line names, and that line itself, get no new line and no new id")"
 check "C19 deferred findings are ledgered at classification time, before the review ticket" "$(has "$ALL1" 'Right after classifying, and before you issue the review ticket, append for every finding you retitled')"
 check "C20 a neutralized line records the Panel-FP reason" "$(has "$ALL1" "a 'neutralized' line's paraphrase states the Panel-FP reason")"
-check "C21 a refused ledger line is rewritten, never resent through a scan escape" "$(has "$ALL1" 'never resend the line with the zensu-secret-allow marker or ZENSU_SECRET_SCAN=off')"
+check "C21 a refused ledger line is rewritten, never resent through a scan escape" "$(has "$ALL1" 'never resend the line with the zensu-secret-allow marker or past the scan in any other way')"
 check "C22 an IMPORTANT deferral is ledgered as parked" "$(has "$ALL1" "'parked' for an IMPORTANT finding, 'deferred' for every other")"
 check "C23 a still-open IMPORTANT deferral parks the earlier id" "$(has "$ALL1" "deferring it as IMPORTANT appends 'parked' for that id")"
 check "C24 the clause names the real log command with --message-stdin" "$(has "$ALL1" 'zensu-log.sh append --log {log_file} --message-stdin')"
@@ -200,6 +200,16 @@ case "$MAXOFF2" in
     check "MR2 the max-rounds close without self-review runs the full suite before the reply" PASS ;;
   *) check "MR2 the max-rounds close without self-review runs the full suite before the reply" FAIL ;;
 esac
+if [ -n "$MAX2" ] && [ "$(lacks "$MAX2" 'NEXT, ledger this final review')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'returns to its Autopilot stage as converged')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'FINAL REVIEW LEDGERED')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'run the terminus again with --outcome max-rounds')" = PASS ] \
+  && [ "$(has "$MAX2" 'rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again')" = PASS ] \
+  && [ "$(lacks "$MAX2" 'The code-reviewer loop is closed')" = PASS ]; then
+  check "MR3 the standalone max-rounds hand-off keeps its baseline sentence and carries no final-review ledger step, marker or converged outcome rule" PASS
+else
+  check "MR3 the standalone max-rounds hand-off keeps its baseline sentence and carries no final-review ledger step, marker or converged outcome rule" FAIL
+fi
 ONE1="$(context_of "$TMP_DIR/one-round/round-1.json")"
 ONE2="$(context_of "$TMP_DIR/one-round/round-2.json")"
 RPOFF2="$(context_of "$TMP_DIR/repro-off/round-2.json")"

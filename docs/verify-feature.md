@@ -71,11 +71,22 @@ records one verdict per criterion, and the chain closes only when every
 active criterion has a `pass` on the tree that ships
 ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). It verifies a criterion
 that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs
-a code change first. Remote mode is refused there, because a deployed URL runs other code than
-the tree the records bind to. The consent and policy rules below apply unchanged. In consent
+a code change first. A criterion this environment cannot observe (it needs
+credentials, an account, a non-loopback host or a signed build, or its driver cannot run here,
+or a driver fence rules the state out, as "How the browser is fenced" below describes)
+is `partial`, never a fix step:
+the skill asks the user once whether to provide access now, accept it as partial or leave the
+chain open, and for a driver fence only the last two, because no access lifts it
+(`skills/verify-feature/rules/acceptance-consent.md`), and an accepted criterion
+closes the chain only through `--chain-done --accept-partial` for exactly its id, once the plan's
+`## Manual Acceptance` table holds its row. Remote mode is
+refused there, because a deployed URL runs other code than the tree the records bind to. The consent and policy rules below apply unchanged. In consent
 mode the later pass boots on the same loopback origin, so the prompt is not asked twice. An
 Autopilot-bound chain skips this stage: its VALIDATE stage verifies every criterion unless the
-run was started with `--no-validate`, and the chain's terminus line says which.
+run was started with `--no-validate`, and the chain's terminus line says which. That stage
+records against the run with `--run <id>` and passes only through `zensu-log.sh
+--autopilot-validate`, which checks the records on the pull-request head and accepts a `partial`
+criterion only for an id the approved plan's `## Manual Acceptance` table lists.
 
 ## What it can verify
 
@@ -128,9 +139,19 @@ WebSocket connection is not fenced by it, which is an open gap — blocks servic
 keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
+Blocking service workers has a cost to plan for. A state that depends on a service worker never
+appears in this browser, so the `browser` driver cannot verify a PWA's update prompt, its offline
+cache, push or background sync. That is a **driver fence**: a state the driver can never show,
+whoever drives it. In a review chain such a criterion is `partial`, planning names the gap before
+any code is written, and because no login, account or service lifts the fence, the skill asks
+only whether to accept the criterion as partial or leave the chain open
+(`skills/verify-feature/rules/acceptance-consent.md`). Cover that behaviour with a test of your
+own that runs a real browser, and name that test as the check in the plan's
+`## Manual Acceptance` row.
+
 The **browser consent gate** — two hooks on the `Bash|PowerShell` matcher — reads Bash only, so
-it refuses a PowerShell call that names the CLI and a `zensu-verify` session: run every browser
-call through the Bash tool. It is a textual gate: it judges a
+it refuses a PowerShell call that names the CLI together with a `zensu-verify` session, a
+verify-feature run directory or a config file: run every browser call through the Bash tool. It is a textual gate: it judges a
 `playwright-cli` call on a `zensu-verify` session before it runs only when the command text
 names the CLI and that session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one. A CLI name assembled at run time — an expansion inside
@@ -148,20 +169,23 @@ denied. A function or alias named
 plain call its text shows, and the gate cannot see what it runs, so the denials below bind only
 what the command text spells. While its
 prefilter library loads, the gate reaches no decision for a call on any other session whose
-command text names no `zensu-verify-` session, and denies a command that merely mentions both
-markers — a search, a commit message.
+command text names no `zensu-verify-` session, unless the command names a verify-feature run
+directory or passes a config, which section 6 covers, and denies a command that merely mentions
+both markers — a search, a commit message.
 That is the accepted cost of a textual gate: search with the Grep tool and commit with a message
 file. While the hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a
 call on any other session reaches no decision only when the command meets every condition that
 [Browser Consent Gate](gates.md#browser-consent-gate) lists for it, and every other command that
 names the CLI, a mere mention included, is denied. A known wrapper, a package launcher, a CLI
-path or an environment assignment is refused only on a `zensu-verify` session. For a
-`zensu-verify` call:
+path or an environment assignment is refused only on a `zensu-verify` session; on any other
+session the rules of section 6 still apply to such a call, so a relative config handed to a
+wrapper or passed after a `cd` is refused there. For a `zensu-verify` call:
 
 - only the commands a verification needs are admitted: opening and closing the session,
   navigation, snapshots, screenshots, console and request listings, clicks and typing, and
   display emulation. `eval`, `run-code`, every cookie, storage and state command, file upload,
-  request details, recording, tracing, `attach` and `close-all` are denied;
+  request details, recording, tracing, `attach` and `close-all` are denied, and on a signed-in
+  `zensu-verify-auth-…` session (section 6) `console` and `requests` are denied too;
 - `open` must name the run config, and the gate reads it itself before the browser starts;
 - calls must come from the main thread, name their session and arguments literally, and run as
   exactly one plain `playwright-cli` command — no second command, pipe, subshell, substitution,
@@ -535,7 +559,8 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 - The base URL is validated in memory before anything else happens: absolute, `https://`, no
   userinfo, no query, no fragment. A signed or token-bearing preview link is rejected and
   never echoed; use a credential-free entry URL plus a visible login in the headed browser.
-- Authentication is credential-blind: you log in yourself in the browser the skill opens, and
+- Authentication is credential-blind: you log in yourself in the browser the skill opens, or a
+  recipe's login script signs a dedicated test account in (section 6), and
   every page of the approved origin is then in scope, protected pages included, at any path.
   Without a login, authenticated scenarios are skipped and the run is PARTIAL. A configured
   `auth.appOrigin` must equal the validated base URL's origin exactly.
@@ -576,3 +601,111 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | PARTIAL; reason `remote mode supports the browser driver only` | `--mode=remote` was combined with a driver other than `browser` | verify the worktree's build in local mode |
 | the report's Resources line names a `kept` resource | the run-resource helper could not prove that a device, process, emulator serial, cluster, container or `tmux` socket was the run's own, or the tool that removes it failed | the skill keeps the run directory and names it under Limitations; check that the resource carries the run's `zensu-verify-<run>` prefix, then retry with `verify-run-resources.js teardown --run-dir <dir>` or remove it yourself |
 | a desktop scenario is PARTIAL because its data location already exists | the app shares its data location or its credential-store items with a copy installed on this machine, and the recipe names no isolation switch | add `validate.desktop.dataIsolation` to the recipe: a launch argument or environment variable that points the app's data and credential storage at `${ZENSU_VERIFY_RUN_DIR:?}` |
+| PARTIAL; `login failed: recipe` | the recipe's `auth` block lacks `mode: login-script`, `artifact: storageState` or a `loginScript`, uses a form other than one `key: scalar` line per key, or, in remote mode, its `appOrigin`, `baseUrl` or `environment` does not fit the run (section 6) | fix the block; the reader takes plain, single- or double-quoted scalars only |
+| PARTIAL; `login failed: timeout`, `exit <code>` or `contract` | the login script ran longer than 300 s, exited non-zero, or did not print exactly one `STORAGE_STATE=<path>` line | run the login script yourself in a terminal, with `ZENSU_AUTH_ARTIFACT_DIR` set to an empty directory, and fix it there; the skill never shows its output |
+| PARTIAL; `login failed: artifact-path`, `artifact-shape` or `artifact-scope` | the printed path is not a regular file beneath `ZENSU_AUTH_ARTIFACT_DIR`, the file is not Playwright storage state within 1 MiB, 256 cookies and 64 origins, or it holds nothing for the run's origins | write the state file beneath the directory the variable names, and sign the account in on the run's own origin |
+| PARTIAL before any browser call; reason starts `the verify-auth read guard is not ready` | a signed-in run needs the verify-auth guard hook registered on a matcher that covers every tool, and `hooks/hooks.json` does not register it (`unregistered`) or could not be read (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin |
+| `open` is denied because the signed-in state of the run config was already consumed or is missing | an earlier `open` consumed the state, or the file was removed | let the skill run the run-config helper again with `--login-recipe`, which logs in again and writes a fresh state |
+| a call is denied with `Zensu verify-auth guard: …` | the call reaches the `auth/` directory of a verify-feature run, where the signed-in state lives | nothing to repair; search or commit text that merely names such a path with the Grep tool or a commit message file |
+| a browser CLI call is denied with `Zensu verify-auth guard: this browser CLI call names a /zensu:verify-feature run directory but no zensu-verify session` | the call names a run directory, its config for example, without the `zensu-verify` session the run-config helper printed, so a signed-in config could open on a session the consent gate does not judge | name that session with `-s=<session>` exactly as the helper printed it; to search or commit text that only names the browser CLI beside a run directory, use the Grep tool or a commit message file |
+
+## 6. Signing in with a test account
+
+A recipe can sign the browser in for you, so a run reaches the pages behind a login without a
+manual login. You keep the password: the model never sees it, the login script's output or the
+browser state.
+
+**What you add.** An `auth` block in `.zensu/runtime.yaml` (or `.zensu/autopilot.yaml`), one
+`key: scalar` line per key:
+
+```yaml
+auth:
+  mode: login-script
+  loginScript: "./scripts/verify-login.sh"
+  artifact: storageState
+```
+
+A remote recipe also sets `appOrigin` (the exact origin of the app), optionally `baseUrl` (the
+origin the account signs in on, when it differs), and `environment: test` for a hosted test
+environment or `environment: production`. No caller argument names the origin the script signs
+in on: in local mode it is the run's own app origin, the first `--origin`, and in remote mode the
+one the recipe names, `baseUrl`, which must be one of the run's origins, or `appOrigin` without it.
+A local recipe may name that first origin as `appOrigin` or `baseUrl` and nothing else, and
+declares no `environment`: in local mode the helper refuses a recipe bound to another origin or
+to a deployed environment, so an account meant for a deployed app never signs in on a loopback
+origin. That also refuses a split local deployment whose API signs in on another loopback origin.
+
+**What the login script does.** It signs a dedicated test account in against
+`$ZENSU_APP_ORIGIN` (or `$ZENSU_AUTH_BASE_URL`), saves a Playwright storage-state file beneath
+`$ZENSU_AUTH_ARTIFACT_DIR`, and prints exactly one line, `STORAGE_STATE=<path>`. The run-config
+helper runs it with `bash -c` in the project root, in its own process group, with stdin closed
+and a 300 s timeout, and never shows its output. Resolve the password inside the script — from
+the macOS keychain, `pass` or your password manager's CLI rather than a plain environment
+variable, because an `env` dump in the model's shell prints every variable it can see.
+
+**What happens during a run.** The helper keeps only the cookies and storage entries of the
+run's origins, writes them owner-only to `auth/storage-state.json` in the run directory, behind
+a `.gitignore` of `*`, and names the session `zensu-verify-auth-<run>`. The consent gate checks
+that file before `open` — a regular owner-only file of at most 1 MiB holding valid storage state
+for the run's origins only — and its prompt says that the browser opens signed in. A loopback
+origin is asked once per session for a signed-in `open`, even when the same origin was approved
+without state; a remote origin is asked at every `open`; a policy target passes as before. The
+browser restores the state at `open`, and the consent recorder deletes the file right after. A
+second `open` of the same run config is denied, so a fresh browser means a fresh login.
+
+**Limits.**
+
+- Every cookie, local/session-storage and state command stays denied on every `zensu-verify`
+  session, and on a signed-in session `console` and `requests` are denied too, because a
+  signed-in page's console and network output can carry credentials. The runtime-signal evidence
+  of a signed-in scenario is therefore PARTIAL.
+- A signed-in run config opens only on the `zensu-verify-auth-…` session the helper printed: the
+  consent gate refuses it on any other `zensu-verify` session, and on every other session it
+  refuses a `playwright-cli` call that names a run directory, or that passes a config — through
+  `--config` or a `PLAYWRIGHT_MCP_CONFIG` assignment anywhere in the command, behind another
+  program included — whose file restores a browser state, cannot be read as JSON, or is a path it
+  cannot pin down, such as one another program appends, one read into the variable at run time or
+  a `~` the shell expands; `state-load` stays denied. Those refusals bind your own browser skills too:
+  their own config that restores a state, an INI config and a config behind a variable are
+  refused on any session. The read guard also refuses a `playwright-cli` call that names a run
+  directory without naming a `zensu-verify` session. A config the gate never sees still opens a
+  signed-in browser on another session while the state file exists, until the first gated `open`
+  consumes it: the CLI's default `.playwright/cli.config.json` in the working directory, the
+  global `~/.playwright/cli.config.json`, which the CLI merges under every config, a
+  `PLAYWRIGHT_MCP_CONFIG` the shell inherited, a flag or variable name assembled at run time, and
+  a program that starts `playwright-cli` without naming it in the command.
+- The **verify-auth read guard** judges every tool call. It denies every `Read`, `Grep`, `Glob`,
+  `NotebookEdit`, `Edit`, `Write` and `MultiEdit` call that reaches
+  `.zensu/verify-feature-runs/<run>/auth/`, every Bash or PowerShell command whose text names such
+  a path, and a call of any other tool, an MCP file reader or `WebFetch` included, whose input
+  names such a path. It is textual: a path assembled at run time, a command run from inside the
+  run directory that names the auth directory relatively, a recursive command started at or above
+  the run directory (a `grep -r`, `cp -r` or `tar` of the run directory itself), and shell text
+  that reaches `auth/` through a symlink or, on Windows, an 8.3 short name are not judged; a
+  recursive search relies on the auth directory's `.gitignore`, which ripgrep honours inside a git
+  work tree. A tool whose input does not spell the path, such as one that picks files on its own,
+  is not judged either, and a prompt or message that spells a path inside `auth/` is refused like
+  a file read, while one that only names both words, or a run path outside `auth/` followed by
+  punctuation, passes; such an input is read literally and resolves no link. Below a run
+  directory it reads a path
+  conservatively: a glob, brace, group or expansion that could stand for `auth/` counts as
+  `auth/`, so `ls <run>/*.png` passes while `ls <run>/*` and `ls <run>/$NAME` are denied.
+- The state file exists from the login until `open`, normally seconds. A refused consent prompt
+  or a failed `open` leaves it until Phase 4, which removes the run's `auth/` directory with the
+  helper's `--discard-state` before teardown, also when it keeps the run directory; a crash
+  before cleanup leaves an owner-only file in that ignored directory.
+- In local mode the login signs in on the run's own loopback app origin, which the run chooses; a
+  local recipe can confirm that origin but never move it, so a loopback listener the model started
+  on that origin would receive the credentials. Give a local recipe a throwaway account that only
+  the local app knows, seeded or derived by the run itself, never the password of a shared or
+  remote account; a recipe that names another origin or an `environment` is refused in local mode.
+- The restored cookies are scoped by host, not by port, and a cookie set on a parent domain
+  (`.example.com`) stays valid for its sibling hosts: every approved port of the same host, and a
+  sibling host a redirect reaches, receive the session cookie.
+- What the app renders reaches the model by design. Use a dedicated test account with synthetic
+  data, never your own account, and keep pages that show credentials, API keys or session lists
+  out of the scenarios.
+- Production is an explicit opt-in per recipe (`environment: production`): a test account in an
+  isolated organization with synthetic data only.
+- A login that needs a second factor or a CAPTCHA a script cannot pass keeps the visible manual
+  login, as does a recipe without an `auth` block.

@@ -1,0 +1,8 @@
+{
+  "name": "zensu-ci-claude-code",
+  "private": true,
+  "description": "The Claude Code CLI that the companion release gate, plugin-validate and the companion release run.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.317"
+  }
+}

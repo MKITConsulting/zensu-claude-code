@@ -53,8 +53,12 @@ as it is.
 | Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `2` |
 | Context compaction nudge | `context.compactionNudge` | bool | `true` |
 | Compaction nudge threshold (%) | `context.nudgeThreshold` | int 1–99 | `50` |
-| Pulse telemetry session | `hooks.pulseSession` | bool | `true` |
+| SessionStart pulse context line | `hooks.pulseSession` | bool | `true` |
 | Log timestamp style | `logging.timestampStyle` | enum `wall` \| `relative` \| `none` | `wall` |
+
+`hooks.pulseSession` controls only the `zensu: pulse context — HEAD=… branch=…` line the
+SessionStart hook prints. Pulse tracking itself is the tracking setting in the user's Zensu
+privacy settings: this key neither turns it on nor off, and `/zensu:pulse` does not read it.
 
 ## Phase 0 — Preflight
 

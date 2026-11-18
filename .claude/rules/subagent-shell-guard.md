@@ -260,8 +260,10 @@ grows past 64 directories is denied (`directories`).
   restate what `RESERVED_WORDS`, `SHELL_ASSIGNMENT`, `SHELL_WRAP` and `WRAPPER_OPTIONS` say in
   `hooks/lib/bash-source-write-parse.js`. The unit case `the shell readers of the source-write
   parser and the subagent shell guard, compared over one corpus` in
-  `tests/structure/git-repo-escape.test.js` pins where the two readers agree and the three places
-  they differ: `env -S`, `sudo -h` and the wrappers only this guard sees through.
+  `tests/structure/git-repo-escape.test.js` pins where the two readers agree and where they
+  differ: `env -S`, `sudo -h`, the wrappers only this guard sees through, and the code a command
+  hands to a shell, `eval` or `trap`, which the two read with separate shell lists and separate
+  code-operand rules (its `nested` map, `.claude/rules/git-mutation-tables.md`).
 - The neutral sentence of `renderHostContext` in `hooks/lib/session-control-core-v1.js`: pinned
   verbatim in `tests/structure/test-session-control-claude.sh` and
   `evals/session-control/tests/wrapper-selftest.sh`; `test-reviewer-capability-gate.sh` checks

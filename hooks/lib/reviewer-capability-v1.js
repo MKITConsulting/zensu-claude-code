@@ -113,21 +113,23 @@ const adoptionTail = (reason) => {
 const ADOPTION_CHILD_CLOSE = 'The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.';
 const BIND_CHILD_CLOSE = 'The diagnosis and the repair are reserved for the main thread, so neither is available here — report this to the main thread rather than retrying.';
 
-// The two CAUSES and the two limit clauses the typed arm and the fallback arms below
-// both render. Spelled once here, because the typed and fallback copies had already
-// drifted apart: the typed lineage clause lacked the --restore-root ordering the
-// fallback carried, and the typed pruned clause lacked the fresh-session case. The
-// two clauses are HAND COPIES of the `incompatible-runtime` and `pruned-plugin-root`
-// scopes of zensu_emit_hook_session_deny in hooks/lib/zensu-session.sh, pinned
-// sentence for sentence by the seam pin at the front of
-// tests/structure/test-versioned-plugin-upgrade.sh.
+// The two CAUSES, the limit clauses and the reach clause the typed arm and the
+// fallback arms below both render. Spelled once here, because the typed and fallback
+// copies had already drifted apart: the typed lineage clause lacked the --restore-root
+// ordering the fallback carried, and the typed pruned clause lacked the fresh-session
+// case. The clauses are HAND COPIES of the `incompatible-runtime` and
+// `pruned-plugin-root` scopes of zensu_emit_hook_session_deny in
+// hooks/lib/zensu-session.sh, pinned sentence for sentence by the seam pin at the
+// front of tests/structure/test-versioned-plugin-upgrade.sh.
 const lineageCause = (recorded, executing) => `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${recorded} and ${executing} is executing.`;
 const prunedCause = (recorded, executing) => `this session's Session Control record is intact, but the Zensu installation that minted it (version ${recorded}) has been removed from the plugin cache, so the running installation (${executing}) cannot re-verify the record.`;
 const ORPHAN_LIMIT_CLAUSE = 'If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but a zensu CLI call, Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case.';
 const PRUNED_DOWNGRADE_CLAUSE = 'This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.';
+const PRUNED_ORPHAN_CLAUSE = 'If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still re-mints the record under the running installation, but a zensu CLI call, Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:adopt-session prints that path while it reports the record ADOPTABLE, and /zensu:doctor names it once the adoption has landed.';
+const ADOPTION_REACH_CLAUSE = 'On macOS and Linux both stay reachable in this state when the user types them or as the Bash command the skill renders, never through the Skill tool; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session there.';
 // The remedy of the two FALLBACK arms, reached when no typed verdict travels on the
 // error — the adoption module could not be loaded, or the bind threw untyped.
-const UNBOUND_ADOPTION_REMEDY = 'Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state.';
+const UNBOUND_ADOPTION_REMEDY = 'Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand.';
 
 // An adoption THIS call performed, for a deny that follows it: a bind-failure deny
 // after the bind adopted, and a capability deny after the bind adopted and the
@@ -620,6 +622,7 @@ function protectedAccessViolation(payload, trusted) {
     path.join(trusted.pluginData, 'evidence-run'),
     path.join(trusted.pluginData, 'ci-contract'),
     path.join(trusted.pluginData, 'acceptance-verify'),
+    path.join(trusted.pluginData, 'acceptance-handoff'),
     path.join(trusted.pluginData, 'external-review'),
     path.join(trusted.pluginData, 'background-review'),
     path.join(trusted.projectRoot, '.zensu'),
@@ -758,6 +761,7 @@ function neutralViolation(payload, trusted) {
     path.join(trusted.pluginData, 'evidence-run'),
     path.join(trusted.pluginData, 'ci-contract'),
     path.join(trusted.pluginData, 'acceptance-verify'),
+    path.join(trusted.pluginData, 'acceptance-handoff'),
     path.join(trusted.pluginData, 'external-review'),
     path.join(trusted.pluginData, 'background-review'),
     path.join(trusted.projectRoot, '.zensu'),
@@ -968,10 +972,10 @@ function main(options = {}) {
         ? `${prunedCause(recorded, executing)} ${attempt}`
         : `${lineageCause(recorded, executing)} ${attempt}`;
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        const limit = adoption.prunedPluginRoot ? PRUNED_DOWNGRADE_CLAUSE : ORPHAN_LIMIT_CLAUSE;
+        const limit = adoption.prunedPluginRoot ? `${PRUNED_DOWNGRADE_CLAUSE} ${PRUNED_ORPHAN_CLAUSE}` : ORPHAN_LIMIT_CLAUSE;
         // The joiner is `remedy; tail.` The tails start in lower case, so a full
         // stop before them rendered a sentence starting mid-word.
-        denyBind(`${cause} ${adoptionRefusalRemedy(reason)}; ${adoptionTail(reason)}. Both stay reachable in this state. ${limit}`);
+        denyBind(`${cause} ${adoptionRefusalRemedy(reason)}; ${adoptionTail(reason)}. ${ADOPTION_REACH_CLAUSE} ${limit}`);
         return;
       }
       denyBind(`${cause} ${ADOPTION_CHILD_CLOSE}`);
@@ -1011,7 +1015,7 @@ function main(options = {}) {
     if (lineage) {
       const cause = lineageCause(safeVersion(lineage.recorded), safeVersion(lineage.executing));
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        denyBind(`${cause} ${UNBOUND_ADOPTION_REMEDY} ${ORPHAN_LIMIT_CLAUSE}`);
+        denyBind(`${cause} ${UNBOUND_ADOPTION_REMEDY} ${ADOPTION_REACH_CLAUSE} ${ORPHAN_LIMIT_CLAUSE}`);
         return;
       }
       denyBind(`${cause} ${ADOPTION_CHILD_CLOSE}`);
@@ -1032,7 +1036,7 @@ function main(options = {}) {
       // the adoption module itself could not be loaded.
       const cause = prunedCause(safeVersion(pruned.recorded), safeVersion(pruned.executing));
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        denyBind(`${cause} ${UNBOUND_ADOPTION_REMEDY} ${PRUNED_DOWNGRADE_CLAUSE}`);
+        denyBind(`${cause} ${UNBOUND_ADOPTION_REMEDY} ${ADOPTION_REACH_CLAUSE} ${PRUNED_DOWNGRADE_CLAUSE} ${PRUNED_ORPHAN_CLAUSE}`);
         return;
       }
       denyBind(`${cause} ${ADOPTION_CHILD_CLOSE}`);
@@ -1082,7 +1086,7 @@ function main(options = {}) {
       // "both stay reachable" is false in the one state where a wrong remedy has no fallback.
       const cause = "this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because git does not track .zensu/state/. It is NOT read as \"no chain was ever active\": that is why every tool is denied.";
       if (callerIsMain) {
-        denyBind(`${cause} Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.`);
+        denyBind(`${cause} Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. ${ADOPTION_REACH_CLAUSE} Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.`);
         return;
       }
       denyBind(`${cause} ${BIND_CHILD_CLOSE}`);
@@ -1210,6 +1214,8 @@ module.exports = {
   ADOPTION_CHILD_CLOSE,
   ORPHAN_LIMIT_CLAUSE,
   PRUNED_DOWNGRADE_CLAUSE,
+  PRUNED_ORPHAN_CLAUSE,
+  ADOPTION_REACH_CLAUSE,
   UNBOUND_ADOPTION_REMEDY,
   lineageCause,
   prunedCause,

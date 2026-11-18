@@ -323,22 +323,27 @@ fi
 # P4 — credential-blind auth; no token extraction/injection recipe.
 if grep -qiF 'credential-blind' "$SKILL_MD" && grep -qF 'use visible manual' "$SKILL_MD" \
   && grep -qF 'browser login or report the authenticated coverage as PARTIAL' "$SKILL_MD" \
+  && grep -qF "only the run-config helper runs a recipe's (§Authentication)" <<<"$SKILL_FLAT" \
   && grep -qF 'The browser consent gate denies every cookie, local/session-storage and state command on a `zensu-verify` session because they expose credential material.' <<<"$SKILL_FLAT"; then
-  check "P4a auth is visible-only and the gate denies every browser storage command" PASS
+  check "P4a auth is a helper-run recipe login or a visible login, and the gate denies every browser storage command" PASS
 else
-  check "P4a auth is visible-only and the gate denies every browser storage command" FAIL
+  check "P4a auth is a helper-run recipe login or a visible login, and the gate denies every browser storage command" FAIL
 fi
-if grep -qF 'not accept an auth artifact path' "$SKILL_MD" \
+if grep -qF 'Never accept an auth artifact path or run a login script yourself' "$SKILL_MD" \
+  && ! grep -qF 'not accept an auth artifact path' "$SKILL_MD" \
   && ! grep -rqF 'browser_set_storage_state' "$SKILL_DIR"; then
-  check "P4b verify-feature never accepts or restores storage-state artifacts" PASS
+  check "P4b verify-feature never accepts an artifact path or runs a login script itself" PASS
 else
-  check "P4b verify-feature never accepts or restores storage-state artifacts" FAIL
+  check "P4b verify-feature never accepts an artifact path or runs a login script itself" FAIL
 fi
-if grep -qF 'hard-denies every getter/exporter' "$SKILL_MD" \
-  && grep -qF 'Do not invoke `auth.loginScript`' <<<"$SKILL_FLAT"; then
-  check "P4e future opaque auth requires a narrow deny-by-default gate" PASS
+if grep -qF 'Never run `auth.loginScript`, read `STORAGE_STATE` or open a run'"'"'s `auth/` directory yourself; the verify-auth read guard denies it.' <<<"$SKILL_FLAT" \
+  && grep -qF '## 6. Signed-in runs (recipe login script)' "$BROWSER_MD" \
+  && grep -qF 'It refuses unless the verify-auth read guard is registered.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'The helper prints `login failed: <class>`' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'Do not invoke `auth.loginScript`' <<<"$SKILL_FLAT"; then
+  check "P4e a recipe login runs only inside the run-config helper, behind the verify-auth read guard" PASS
 else
-  check "P4e future opaque auth requires a narrow deny-by-default gate" FAIL
+  check "P4e a recipe login runs only inside the run-config helper, behind the verify-auth read guard" FAIL
 fi
 if grep -qF '$GIT_ROOT/.zensu/verify-feature-runs/<random>' "$SKILL_MD" \
   && grep -qF 'Remove only the unique leaf on cleanup.' "$SKILL_MD"; then
@@ -377,10 +382,14 @@ if grep -qF 'The evidence boundary is the ORIGIN, never the route.' <<<"$SKILL_F
 else
   check "P4q protected DOM and visual evidence reaches the model only from an approved origin, at any path" FAIL
 fi
-if grep -qF 'A future gate may re-enable opaque state only when it admits a path-contained setter and hard-denies every getter/exporter.' <<<"$SKILL_FLAT"; then
-  check "P4g browser state commands stay denied until a narrow gate exists" PASS
+if grep -qF '1. **Recipe login script:** when the selected recipe'"'"'s `auth` block sets `mode: login-script` and `artifact: storageState`, sign in through the helper'"'"'s `--login-recipe` as `rules/browser-verification.md` section 6 says.' <<<"$SKILL_FLAT" \
+  && grep -qF '`console` and `requests` are denied, so the runtime-signal plane of a signed-in row is PARTIAL.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Every cookie, storage and state command stays denied, as on every `zensu-verify` session.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'The recorder deletes the state file once `open` ran' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'A future gate may re-enable opaque state' <<<"$SKILL_FLAT"; then
+  check "P4g browser state restores only through the recipe login, and a signed-in session loses console and requests" PASS
 else
-  check "P4g browser state commands stay denied until a narrow gate exists" FAIL
+  check "P4g browser state restores only through the recipe login, and a signed-in session loses console and requests" FAIL
 fi
 if grep -qF 'baseUrl:     "http://localhost:5173" # same-origin /api proxy' "$AUTOPILOT_CONFIG" \
   && grep -qF 'appOrigin:   "http://localhost:5173" # exact browser/storage-state origin' "$AUTOPILOT_CONFIG"; then
@@ -1239,6 +1248,28 @@ if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <
 else
   check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" FAIL
 fi
+if grep -qF "serviceWorkers: 'block'" "$BROWSER_CONFIG" \
+  && grep -qF "**A driver fence is never worked around.** The \`browser\` driver's run config blocks service workers, so a criterion that depends on one (an update prompt, an offline cache, push, background sync) cannot be observed by it." <<<"$DRIVERS_FLAT" \
+  && grep -qF 'Report that row PARTIAL with the cause `driver fence`, and in chain mode record the criterion `partial` with that cause.' <<<"$DRIVERS_FLAT" \
+  && grep -qF 'Never observe it through another browser session or another program.' <<<"$DRIVERS_FLAT" \
+  && grep -qF "name it in the report as the check for the criterion's \`## Manual Acceptance\` row (\`rules/acceptance-consent.md\`)." <<<"$DRIVERS_FLAT" \
+  && grep -qF 'The run config blocks service workers: a registration resolves without registering one, so a state that depends on a service worker (an update prompt, an offline cache, push, background sync) never appears in this browser.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Do not wait for it and do not look for another way to produce it.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Report the scenario PARTIAL with the cause `driver fence` (`rules/drivers.md` section 3).' <<<"$BROWSER_FLAT"; then
+  check "P10o a browser run reads that a service-worker criterion is a driver fence: PARTIAL with that cause, never worked around, and the helper still writes the block that text describes" PASS
+else
+  check "P10o a browser run reads that a service-worker criterion is a driver fence: PARTIAL with that cause, never worked around, and the helper still writes the block that text describes" FAIL
+fi
+if grep -qF "so the \`browser\` driver cannot verify a PWA's update prompt, its offline cache, push or background sync." <<<"$DOC_FLAT" \
+  && grep -qF 'That is a **driver fence**: a state the driver can never show, whoever drives it.' <<<"$DOC_FLAT" \
+  && grep -qF 'because no login, account or service lifts the fence, the skill asks only whether to accept the criterion as partial or leave the chain open' <<<"$DOC_FLAT" \
+  && grep -qF "name that test as the check in the plan's \`## Manual Acceptance\` row." <<<"$DOC_FLAT" \
+  && grep -qF 'or a driver fence rules the state out, as "How the browser is fenced" below describes)' <<<"$DOC_FLAT" \
+  && grep -qF 'and for a driver fence only the last two, because no access lifts it' <<<"$DOC_FLAT"; then
+  check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" PASS
+else
+  check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" FAIL
+fi
 ACCEPTANCE_RULE="$SKILL_DIR/rules/acceptance-evidence.md"
 ACCEPTANCE_FLAT="$(tr '\n' ' ' < "$ACCEPTANCE_RULE" 2>/dev/null | tr -s ' ')"
 if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \
@@ -1249,7 +1280,10 @@ if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \
   && grep -qF 'a loopback port alone proves nothing.' <<<"$ACCEPTANCE_FLAT" \
   && grep -qF 'Never redact a log with a pattern and call the rest safe.' <<<"$ACCEPTANCE_FLAT" \
   && grep -qF 'keep the plain discarding form' <<<"$ACCEPTANCE_FLAT" \
-  && grep -qF 'A setup or launch failure does not show that the criterion fails: record `partial` with its category.' <<<"$ACCEPTANCE_FLAT"; then
+  && grep -qF 'A setup or launch failure does not show that the criterion fails: fix the setup and run the check again.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'only when its cause is one this environment cannot provide (`rules/acceptance-consent.md`).' <<<"$ACCEPTANCE_FLAT" \
+  && ! grep -qF 'record `partial` with its category.' <<<"$ACCEPTANCE_FLAT" \
+  && ! grep -qF 'and `partial` for one the failure left unproven' <<<"$ACCEPTANCE_FLAT"; then
   check "P12 an exit-code check prints only the bounded synthetic diagnostics of rules/acceptance-evidence.md, never raw output" PASS
 else
   check "P12 an exit-code check prints only the bounded synthetic diagnostics of rules/acceptance-evidence.md, never raw output" FAIL

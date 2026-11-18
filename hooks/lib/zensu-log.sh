@@ -100,7 +100,11 @@ _zensu_unqualified_change_count() {
   [ -n "$root" ] || { printf 'unavailable'; return 0; }
   command -v git >/dev/null 2>&1 || { printf 'unknown'; return 0; }
   if inside="$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)"; then
-    [ "$inside" = "true" ] || { printf 'unknown'; return 0; }
+    case "$inside" in
+      (true) ;;
+      (false) printf 'unknown'; return 0 ;;
+      (*) printf 'unavailable'; return 0 ;;
+    esac
   else
     inside_err="$(LC_ALL=C _tc_git -C "$root" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
     case "$inside_err" in
@@ -118,6 +122,16 @@ _zensu_unqualified_change_count() {
   tracked="$(_tc_git -C "$root" diff --name-only HEAD 2>/dev/null)" || { printf 'unavailable'; return 0; }
   untracked="$(_tc_git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" || { printf 'unavailable'; return 0; }
   printf '%s\n%s\n' "$tracked" "$untracked" | awk 'length($0) > 0 && !seen[$0]++ { n++ } END { print n + 0 }'
+}
+
+_zensu_transport_unwritten() {
+  echo "$1: the $2 transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space." >&2
+}
+
+_zensu_transport_put() {
+  printf '%s' "$4" > "$2/$3" && return 0
+  _zensu_transport_unwritten "$1" "$3"
+  return 2
 }
 
 _zensu_evr_prepare() {
@@ -143,14 +157,15 @@ _zensu_evr_prepare() {
     echo "$label: the temporary directory cannot be resolved" >&2
     return 2
   }
-  printf '%s' "$(zensu_evidence_full_suite_command)" > "$_evr_dir/full-suite-command"
-  printf '%s' "$(zensu_evidence_full_suite_gate)" > "$_evr_dir/gate-mode"
-  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
-    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix"
-  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
-    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix-scoped"
-  printf '%s' "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" > "$_evr_dir/full-suite-marker"
-  printf '%s' "$(zensu_evidence_ci_config_json)" > "$_evr_dir/ci-config.json"
+  _zensu_transport_put "$label" "$_evr_dir" full-suite-command "$(zensu_evidence_full_suite_command)" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" gate-mode "$(zensu_evidence_full_suite_gate)" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" remedy-prefix "$(printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" remedy-prefix-scoped "$(printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" full-suite-marker \
+    "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" || return 2
+  _zensu_transport_put "$label" "$_evr_dir" ci-config.json "$(zensu_evidence_ci_config_json)" || return 2
   _evr_msys_excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_DIR ZENSU_EVR_PLUGIN_DATA \
     ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH ZENSU_EVR_WORK_TREE ZENSU_EVR_WORK_DIR)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
@@ -192,9 +207,24 @@ _zensu_full_suite_ticket_matches() {
   [ -n "$current" ] && [ "$current" = "${2:-}" ]
 }
 
+_zensu_full_suite_not_applicable() {
+  local excl
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ -n "${_evr_lib_dir:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_PROJECT_ROOT)" || excl="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$excl" \
+  ZENSU_EVR_LIB="$_evr_lib_dir/evidence-run-v1.js" \
+  ZENSU_EVR_PROJECT_ROOT="$ZENSU_PROJECT_ROOT" \
+    node -e 'const where = require(process.env.ZENSU_EVR_LIB).workTree(process.env.ZENSU_EVR_PROJECT_ROOT); if (where.applicable !== false || typeof where.reason !== "string" || where.reason === "") process.exit(1); process.stdout.write(where.reason);' 2>/dev/null
+}
+
 _zensu_full_suite_gate_unjudged() {
-  local cause="${2:-the full-suite transport failed}" mode=required
+  local cause="${2:-the full-suite transport failed}" mode=required reason
   [ "$(zensu_evidence_full_suite_gate)" = "advisory" ] && mode=advisory
+  if reason="$(_zensu_full_suite_not_applicable)"; then
+    _fsg_lines="FULL SUITE — not-applicable | $reason, so no run can be bound to a tree ($cause) | gate: $mode"
+    return 0
+  fi
   if [ "$_evr_escape" = "1" ]; then
     tdd_record_bypass "${1:-}" ZENSU_FULL_SUITE_GATE >/dev/null 2>&1 || true
     _fsg_lines="FULL SUITE — escaped | ZENSU_FULL_SUITE_GATE=off switched this check off, so no run was read ($cause) | gate: $mode"
@@ -209,10 +239,12 @@ _zensu_full_suite_gate() {
   local session="$1" bound="${2:-}" rc=0
   _fsg_lines=""
   _evr_escape=0
+  _evr_lib_dir=""
   [ "${ZENSU_FULL_SUITE_GATE:-on}" = "off" ] && _evr_escape=1
   if ! _zensu_evr_prepare "zensu-log.sh --chain-done"; then
-    _zensu_full_suite_gate_unjudged "$session" "the full-suite transport could not be prepared"
-    return $?
+    _zensu_full_suite_gate_unjudged "$session" "the full-suite transport could not be prepared" && return 0
+    echo "zensu-log.sh --chain-done: the chain stays open; resolve the full-suite transport fault named above, then run --chain-done again." >&2
+    return 1
   fi
   if [ "$bound" = "bound" ] && ! _zensu_evr_work_tree "$session" "${3:-}"; then
     if ! printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault"; then
@@ -240,7 +272,7 @@ _zensu_avr_prepare() {
   fi
   command -v tdd_edit_landing_receipt >/dev/null 2>&1 \
     || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-  _avr_lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js")" || {
+  _avr_lib="$(_zensu_avr_module_path)" || {
     echo "$label: the acceptance module cannot be resolved" >&2
     return 2
   }
@@ -276,6 +308,7 @@ _zensu_avr_prepare() {
       && tdd_bypass_recorded "$state_file" ZENSU_EDIT_LANDING_GATE; then
       _avr_escaped_el=1
     fi
+    _avr_chain_inputs=1
   fi
   _avr_dir="$(mktemp -d 2>/dev/null)" || {
     echo "$label: no temporary directory available" >&2
@@ -286,12 +319,14 @@ _zensu_avr_prepare() {
     echo "$label: the temporary directory cannot be resolved" >&2
     return 2
   }
-  printf '%s' "$(zensu_evidence_acceptance_gate)" > "$_avr_dir/gate-mode"
+  _zensu_transport_put "$label" "$_avr_dir" gate-mode "$(zensu_evidence_acceptance_gate)" || return 2
   _avr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _avr_bash="bash"
   _avr_msys_excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_DIR ZENSU_AVR_PLUGIN_DATA \
     ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH ZENSU_AVR_WORK_TREE)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
 }
+
+_ZENSU_AVR_MAIN_JS='require(process.env.ZENSU_AVR_LIB).main([process.env.ZENSU_AVR_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
 
 _zensu_avr_node() {
   MSYS2_ENV_CONV_EXCL="$_avr_msys_excl" \
@@ -311,10 +346,17 @@ _zensu_avr_node() {
   ZENSU_AVR_BOUND="${_avr_bound:-0}" \
   ZENSU_AVR_VALIDATE="${_avr_validate:-}" \
   ZENSU_AVR_EDIT_LANDING_ESCAPED="${_avr_escaped_el:-0}" \
+  ZENSU_AVR_RUN="${_avr_run:-}" \
+  ZENSU_AVR_ACCEPT_PARTIAL_IDS="${_avr_accept_partial_ids:-}" \
+  ZENSU_AVR_HANDOFF_TICKET="${_avr_handoff_ticket:-}" \
+  ZENSU_AVR_GATES_PASSED="${_avr_gates_passed:-0}" \
+  ZENSU_AVR_FIX_ROUND_SPENT="${_avr_fix_round_spent:-0}" \
+  ZENSU_AVR_REVIEW_DONE="${_avr_review_done:-0}" \
+  ZENSU_AVR_ZERO_CHANGE_TICKET="${_avr_zero_change_ticket:-0}" \
   ZENSU_AVR_BASH="${_avr_bash:-bash}" \
   ZENSU_AVR_LABEL="$1" \
   ZENSU_AVR_MODE="$2" \
-    node -e 'require(process.env.ZENSU_AVR_LIB).main([process.env.ZENSU_AVR_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
+    node -e "$_ZENSU_AVR_MAIN_JS"
 }
 
 _zensu_autopilot_validate_option() {
@@ -467,7 +509,7 @@ _zensu_evr_work_tree() {
 
 _zensu_avr_work_tree() {
   _avr_work_tree=""
-  _zensu_bound_work_tree "${1:-}" "$_avr_dir"
+  _zensu_bound_work_tree "${1:-}" "$_avr_dir" ${2+"$2"}
   [ -z "$_bwt_fault" ] || return 1
   [ -n "$_bwt_tree" ] || return 0
   [ -z "$_bwt_dir_fault" ] || { _bwt_fault="$_bwt_dir_fault"; return 1; }
@@ -475,6 +517,163 @@ _zensu_avr_work_tree() {
   _avr_work_tree=""
   _bwt_fault="its path cannot be handed to node"
   return 1
+}
+
+_zensu_avr_module_path() {
+  local dir
+  dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)" || return 1
+  [ -n "$dir" ] || return 1
+  printf '%s/acceptance-verify-v1.js\n' "$dir"
+}
+
+_zensu_active_run_json() {
+  command -v autopilot_read_active_strict >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" 2>/dev/null \
+    || return 6
+  autopilot_read_active_strict "${CLAUDE_PROJECT_DIR:-.}" "$1" 2>/dev/null
+}
+
+_zensu_run_bind() {
+  local label="$1" run_id="$2" session="$3" rc=0 run_json facts lib exclusions
+  _rb_json=""
+  _rb_stage=""
+  _rb_validate=""
+  _rb_head=""
+  _rb_visit=""
+  _rb_head_update=""
+  case "$run_id" in
+    (''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.:-]*)
+      echo "$label: --run must name an Autopilot run id" >&2
+      return 2
+      ;;
+  esac
+  if [ "${#run_id}" -lt 3 ] || [ "${#run_id}" -gt 128 ]; then
+    echo "$label: --run must name an Autopilot run id" >&2
+    return 2
+  fi
+  if [ -z "$session" ]; then
+    echo "zensu-log.sh: Session Control session identity unavailable" >&2
+    return 2
+  fi
+  run_json="$(_zensu_active_run_json "$session")" || rc=$?
+  case "$rc" in
+    (0) ;;
+    (1)
+      echo "$label: this session owns no active Autopilot run, so --run $run_id names no run it may verify" >&2
+      return 2
+      ;;
+    (5)
+      echo "$label: the project-local Autopilot state could not be read: its lock could not be taken, or its storage or path failed a safety check. Retry once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor" >&2
+      return 2
+      ;;
+    (6)
+      echo "$label: the Autopilot state library could not be loaded" >&2
+      return 2
+      ;;
+    (*)
+      echo "$label: the Autopilot run state is unreadable or inconsistent (status $rc); use its explicit repair, resume or cancel path before verifying" >&2
+      return 2
+      ;;
+  esac
+  lib="$(_zensu_avr_module_path)" || {
+    echo "$label: the acceptance module cannot be resolved" >&2
+    return 2
+  }
+  exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  facts="$(printf '%s' "$run_json" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_RUN_ID="$run_id" \
+    ZENSU_AVR_LABEL="$label" ZENSU_AVR_MODE=run-facts node -e "$_ZENSU_AVR_MAIN_JS")"
+  rc=$?
+  case "$rc" in
+    (0) ;;
+    (3)
+      echo "$label: the record of the active Autopilot run could not be read" >&2
+      return 2
+      ;;
+    (4)
+      echo "$label: --run $run_id is not the active Autopilot run of this session" >&2
+      return 2
+      ;;
+    (5)
+      echo "$label: autopilot run $run_id has already ended" >&2
+      return 2
+      ;;
+    (*)
+      echo "$label: the acceptance module could not read the active Autopilot run (status $rc); run /zensu:doctor to check the plugin installation" >&2
+      return 2
+      ;;
+  esac
+  IFS=$'\t' read -r _rb_stage _rb_validate _rb_head _rb_visit _rb_head_update <<<"$facts"
+  [ "$_rb_validate" != "-" ] || _rb_validate=""
+  [ "$_rb_head_update" != "-" ] || _rb_head_update=""
+  [ "$_rb_head" != "-" ] || _rb_head=""
+  case "$_rb_visit" in
+    (''|*[!0-9]*) _rb_visit=0 ;;
+  esac
+  _rb_json="$run_json"
+  return 0
+}
+
+_zensu_accept_partial_ids() {
+  local label="${3:-zensu-log.sh --chain-done}" lib exclusions
+  command -v node >/dev/null 2>&1 || { echo "$label: node is required to read --accept-partial" >&2; return 2; }
+  lib="$(_zensu_avr_module_path)" || {
+    echo "$label: the acceptance module cannot be resolved" >&2
+    return 2
+  }
+  exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_ACCEPT_PARTIAL_IDS="${1:-}" \
+    ZENSU_AVR_ACCEPT_CONTEXT="${2:-standalone}" ZENSU_AVR_LABEL="$label" ZENSU_AVR_MODE=accept-ids \
+    node -e "$_ZENSU_AVR_MAIN_JS"
+}
+
+_zensu_plan_criteria_unjudged() {
+  local label="$1" advisory="$2" cause="$3"
+  if [ "$advisory" = "1" ]; then
+    echo "ACCEPTANCE CRITERIA — advisory, not blocking | $cause, so the plan was NOT judged" >&2
+    return 0
+  fi
+  echo "$label: $cause, so the plan was NOT judged." >&2
+  echo "Run /zensu:doctor; if the check still cannot run, report this refusal and leave the decision to the user." >&2
+  return 1
+}
+
+_zensu_plan_criteria_gate() {
+  local label="zensu-log.sh --tdd-complete" plan="${1:-}" lib native_plan bash_path exclusions advisory=0 rc=0
+  [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && return 0
+  [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && advisory=1
+  command -v node >/dev/null 2>&1 || {
+    _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance-criteria check needs node"
+    return
+  }
+  lib="$(_zensu_avr_module_path)" || {
+    _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance module cannot be resolved"
+    return
+  }
+  native_plan="$(_tdd_native_path "$plan" 2>/dev/null)" || native_plan="$plan"
+  bash_path="$(_zensu_config_native_path "${BASH:-bash}" 2>/dev/null)" || bash_path="bash"
+  exclusions="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_PLAN ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_BASH 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_AVR_LIB="$lib" ZENSU_AVR_PLAN="$native_plan" \
+    ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" ZENSU_AVR_BASH="$bash_path" ZENSU_AVR_LABEL="$label" \
+    ZENSU_AVR_CRITERIA_ADVISORY="$advisory" ZENSU_AVR_MODE=plan-criteria \
+    node -e "$_ZENSU_AVR_MAIN_JS" \
+    || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  case "$rc" in
+    (1|2) [ "$advisory" = "1" ] || return 1 ;;
+  esac
+  _zensu_plan_criteria_unjudged "$label" "$advisory" "the acceptance-criteria check did not complete (exit $rc)"
+}
+
+_zensu_acceptance_handoff_line() {
+  local session="${1:-}" file ticket line
+  file="$(zensu_acceptance_handoff_file "$session" 2>/dev/null)" || return 0
+  [ -f "$file" ] && [ ! -L "$file" ] || return 0
+  ticket="$(tdd_claimed_review_ticket "$(tdd_state_file "$session" 2>/dev/null)" 2>/dev/null)" || return 0
+  _zensu_avr_prepare "zensu-log.sh --chain-status" "$session" 1 2>/dev/null || return 0
+  _avr_handoff_ticket="$ticket"
+  line="$(_zensu_avr_node "zensu-log.sh --chain-status" handoff 2>/dev/null)" || return 0
+  [ -n "$line" ] && printf '%s\n' "$line"
+  return 0
 }
 
 _zensu_full_suite_work_tree() {
@@ -538,28 +737,91 @@ _zensu_report_native_file() {
   printf '%s' "$value"
 }
 
+_zensu_avr_ask() {
+  local excl
+  [ -n "${_avr_lib:-}" ] || return 2
+  command -v node >/dev/null 2>&1 || return 2
+  excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_PLUGIN_DATA ZENSU_AVR_PROJECT_ROOT \
+    ZENSU_AVR_RECEIPT ZENSU_AVR_GATE_MODE)" || excl="${MSYS2_ENV_CONV_EXCL:-}"
+  MSYS2_ENV_CONV_EXCL="$excl" \
+  ZENSU_AVR_LIB="$_avr_lib" \
+  ZENSU_AVR_DIR="" \
+  ZENSU_AVR_PLUGIN_DATA="${_avr_data:-}" \
+  ZENSU_AVR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+  ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
+  ZENSU_AVR_WORK_TREE="" \
+  ZENSU_AVR_RECEIPT="${_avr_receipt:-}" \
+  ZENSU_AVR_LOG="" \
+  ZENSU_AVR_AC="" \
+  ZENSU_AVR_VERDICT="" \
+  ZENSU_AVR_DRIVER="" \
+  ZENSU_AVR_EVIDENCE_RUN="" \
+  ZENSU_AVR_ESCAPE=0 \
+  ZENSU_AVR_BOUND="${_avr_bound:-0}" \
+  ZENSU_AVR_VALIDATE="${_avr_validate:-}" \
+  ZENSU_AVR_EDIT_LANDING_ESCAPED="${_avr_escaped_el:-0}" \
+  ZENSU_AVR_BASH=bash \
+  ZENSU_AVR_CHAIN_INPUTS="${_avr_chain_inputs:-0}" \
+  ZENSU_AVR_GATE_MODE="${2:-}" \
+  ZENSU_AVR_CAUSE="$1" \
+  ZENSU_AVR_MODE=unjudged \
+    node -e "$_ZENSU_AVR_MAIN_JS" 2>/dev/null
+}
+
+_zensu_acceptance_gate_unjudged() {
+  local cause="${2:-the acceptance transport failed}" mode=required raw answer lead="" rc=0 nl=$'\n'
+  raw="$(zensu_evidence_acceptance_gate)"
+  answer="$(_zensu_avr_ask "$cause" "$raw")" || rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$answer" ]; then
+    _avg_lines="$answer"
+    return 0
+  fi
+  [ "$rc" -eq 3 ] && lead="$answer"
+  [ "${_avr_bound:-0}" = "1" ] && return 0
+  [ "$raw" = "advisory" ] && mode=advisory
+  if [ "$_avr_escape" = "1" ]; then
+    tdd_record_bypass "${1:-}" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
+    _avg_lines="${lead:+$lead$nl}ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($cause) | gate: $mode"
+    return 0
+  fi
+  if [ "$mode" != "advisory" ]; then
+    [ -z "$lead" ] || printf '%s\n' "$lead" >&2
+    return 1
+  fi
+  _avg_lines="${lead:+$lead$nl}ACCEPTANCE — unavailable (advisory, not blocking) | $cause, so no acceptance record was read | gate: advisory"
+  return 0
+}
+
 _zensu_acceptance_gate() {
   local session="$1" rc=0
   _avg_lines=""
+  _avg_state=""
   _avr_bound="${2:-0}"
   _avr_validate="${3:-}"
   _avr_escape=0
+  _avr_lib=""
+  _avr_data=""
+  _avr_receipt=""
+  _avr_escaped_el=0
+  _avr_chain_inputs=0
   if [ "$_avr_bound" = "1" ]; then
-    _zensu_avr_prepare "zensu-log.sh --chain-done" "$session" 1 2>/dev/null || return 0
+    if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session" 1 2>/dev/null; then
+      _zensu_acceptance_gate_unjudged "$session" "the acceptance transport could not be prepared"
+      return 0
+    fi
     _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || _avg_lines=""
     return 0
   fi
   [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
   if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session"; then
-    if [ "$_avr_escape" = "1" ]; then
-      tdd_record_bypass "$session" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
-      return 0
-    fi
-    [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && return 0
+    command -v zensu_acceptance_handoff_reset >/dev/null 2>&1 && zensu_acceptance_handoff_reset "$session"
+    _zensu_acceptance_gate_unjudged "$session" "the acceptance transport could not be prepared" && return 0
+    echo "zensu-log.sh --chain-done: the chain stays open; resolve the acceptance transport fault named above, then run --chain-done again." >&2
     return 1
   fi
   _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || rc=$?
-  if [ "$(cat "$_avr_dir/verdict-state" 2>/dev/null)" = "escaped" ]; then
+  _avg_state="$(cat "$_avr_dir/verdict-state" 2>/dev/null)" || _avg_state=""
+  if [ "$_avg_state" = "escaped" ]; then
     tdd_record_bypass "$session" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
   fi
   [ "$rc" -eq 0 ] && return 0
@@ -663,11 +925,46 @@ _zensu_terminal_edit_landing_gate() {
   return 1
 }
 
+_zensu_bound_convergence() {
+  local session="$1" mode=on receipt state lib native_lib native_receipt="" native_state="" native_root line rc=0
+  _cvg_line=""
+  zensu_hook_enabled reviewConvergence || mode=off
+  command -v tdd_edit_landing_receipt >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+  receipt="$(tdd_edit_landing_receipt "$session" 2>/dev/null)" || receipt=""
+  state="$(tdd_state_file "$session" 2>/dev/null)" || state=""
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js"
+  native_lib="$(_tdd_native_path "$lib" 2>/dev/null || printf '%s' "$lib")"
+  [ -z "$receipt" ] || native_receipt="$(_tdd_native_path "$receipt" 2>/dev/null || printf '%s' "$receipt")"
+  [ -z "$state" ] || native_state="$(_tdd_native_path "$state" 2>/dev/null || printf '%s' "$state")"
+  native_root="$(_tdd_native_path "$CLAUDE_PROJECT_DIR" 2>/dev/null || printf '%s' "$CLAUDE_PROJECT_DIR")"
+  line="$(ZENSU_RL_LIB="$native_lib" ZENSU_RL_RECEIPT="$native_receipt" ZENSU_RL_PROJECT_ROOT="$native_root" \
+    ZENSU_RL_STATE="$native_state" ZENSU_RL_CONVERGENCE="$mode" \
+    node -e 'process.exitCode = require(process.env.ZENSU_RL_LIB).convergenceMain(process.env, process.stdout)' 2>/dev/null)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    case "$line" in
+      ("CONVERGENCE — converged | "*) _cvg_line="$line"; return 0 ;;
+    esac
+  fi
+  case "$line" in
+    ("CONVERGENCE — not converged | "*) _cvg_line="$line" ;;
+    (*) _cvg_line="CONVERGENCE — not converged | the convergence check in review-ledger-v1.js could not run, so this attempt closes as max-rounds" ;;
+  esac
+  return 1
+}
+
 _evr_dir=""
 _avr_dir=""
 _evr_work_tree=""
 _evr_work_dir=""
 _avr_work_tree=""
+_avr_run=""
+_avr_accept_partial_ids=""
+_avr_handoff_ticket=""
+_avr_gates_passed=0
+_avr_fix_round_spent=0
+_avr_review_done=0
+_avr_zero_change_ticket=0
 _fsw_tree=""
 _fsw_fault=""
 
@@ -681,10 +978,13 @@ case "${1:-}" in
     _evr_show="tail"
     _evr_if_stale=0
     _evr_local=0
+    _evr_run=""
+    _evr_run_seen=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --scope) _evr_scope="${2:-}"; shift 2 || break ;;
+        --run) _evr_run="${2:-}"; _evr_run_seen=true; shift 2 || break ;;
         --cmd) evr_cmd="${2:-}"; evr_cmd_seen=true; shift 2 || break ;;
         --show) _evr_show="${2:-}"; shift 2 || break ;;
         --if-stale) _evr_if_stale=1; shift ;;
@@ -702,8 +1002,24 @@ case "${1:-}" in
       tail|all) ;;
       *) echo "zensu-log.sh --evidence-run: --show must be tail or all" >&2; exit 2 ;;
     esac
+    _evr_ctx_args=()
+    if [ "$_evr_run_seen" = true ]; then
+      if [ "$_evr_scope" != "acceptance" ]; then
+        echo "zensu-log.sh --evidence-run: --run applies only to --scope acceptance, the checks an Autopilot run's acceptance records cite" >&2
+        exit 2
+      fi
+      _evr_session="$(zensu_resolve_session_id 2>/dev/null)" || _evr_session=""
+      _zensu_run_bind "zensu-log.sh --evidence-run" "$_evr_run" "$_evr_session" || exit $?
+      _evr_ctx_args=("{\"runId\":\"$_evr_run\"}")
+    fi
     _zensu_evr_prepare "zensu-log.sh --evidence-run" || exit 2
-    if ! _zensu_evr_work_tree "$(zensu_resolve_session_id 2>/dev/null)"; then
+    if [ "$_evr_run_seen" = true ]; then
+      printf 'repository' > "$_evr_dir/tree-mode" || {
+        echo "zensu-log.sh --evidence-run: the tree mode of autopilot run $_evr_run could not be written to the temporary directory, so neither the evidence-run module nor the command ran. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --evidence-run again." >&2
+        exit 2
+      }
+    fi
+    if ! _zensu_evr_work_tree "$(zensu_resolve_session_id 2>/dev/null)" ${_evr_ctx_args[@]+"${_evr_ctx_args[@]}"}; then
       printf '%s' "$_bwt_fault" > "$_evr_dir/work-tree-fault" || {
         echo "zensu-log.sh --evidence-run: the work-tree lookup failed and its cause could not be written to the temporary directory, so neither the evidence-run module nor the command ran. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --evidence-run again." >&2
         exit 2
@@ -712,10 +1028,10 @@ case "${1:-}" in
     _evr_cwd="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$PWD" 2>/dev/null)" || _evr_cwd=""
     _evr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _evr_bash="bash"
     if [ "$evr_cmd_seen" = true ]; then
-      printf '%s' "$evr_cmd" > "$_evr_dir/command"
+      _zensu_transport_put "zensu-log.sh --evidence-run" "$_evr_dir" command "$evr_cmd" || exit 2
     fi
     if [ "${_ZENSU_EVR_CALLER_PD_SET:-}" = "set" ]; then
-      printf '%s' "${_ZENSU_EVR_CALLER_PD:-}" > "$_evr_dir/caller-project-dir"
+      _zensu_transport_put "zensu-log.sh --evidence-run" "$_evr_dir" caller-project-dir "${_ZENSU_EVR_CALLER_PD:-}" || exit 2
     fi
     _zensu_evr_node "zensu-log.sh --evidence-run" run
     evr_rc=$?
@@ -826,10 +1142,12 @@ case "${1:-}" in
     _avr_verdict=""
     _avr_driver=""
     _avr_evidence_run=""
+    avr_run_seen=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --log) _avr_log="${2:-}"; shift 2 || break ;;
+        --run) _avr_run="${2:-}"; avr_run_seen=true; shift 2 || break ;;
         --start) avr_start="${2:-}"; shift 2 || break ;;
         --ac|--verdict|--driver|--evidence-run)
           if [ "$avr_verb" != "--acceptance-record" ]; then
@@ -847,8 +1165,12 @@ case "${1:-}" in
         *) echo "zensu-log.sh $avr_verb: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
-    if [ -z "$_avr_log" ]; then
-      echo "zensu-log.sh $avr_verb: --log <this chain's run log> is required" >&2
+    if [ "$avr_run_seen" = true ] && [ -n "$_avr_log" ]; then
+      echo "zensu-log.sh $avr_verb: --log and --run name two different anchors; pass --run for an Autopilot run and --log for a standalone chain" >&2
+      exit 2
+    fi
+    if [ "$avr_run_seen" = false ] && [ -z "$_avr_log" ]; then
+      echo "zensu-log.sh $avr_verb: --log <this chain's run log> is required, or --run <id> for an Autopilot run's VALIDATE stage" >&2
       exit 2
     fi
     avr_log_arg="$_avr_log"
@@ -856,15 +1178,33 @@ case "${1:-}" in
       echo "zensu-log.sh: Session Control session identity unavailable" >&2
       exit 2
     fi
+    avr_light=0
+    avr_ctx_args=()
+    if [ "$avr_run_seen" = true ]; then
+      _zensu_run_bind "zensu-log.sh $avr_verb" "$_avr_run" "$avr_session" || exit $?
+      avr_light=1
+      avr_ctx_args=("{\"runId\":\"$_avr_run\"}")
+    fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-    _zensu_avr_prepare "zensu-log.sh $avr_verb" "$avr_session" || exit 2
-    if ! _zensu_avr_work_tree "$avr_session"; then
+    _zensu_avr_prepare "zensu-log.sh $avr_verb" "$avr_session" "$avr_light" || exit 2
+    if [ "$avr_run_seen" = true ]; then
+      printf '%s' "$_rb_json" > "$_avr_dir/run.json" || {
+        echo "zensu-log.sh $avr_verb: the record of autopilot run $_avr_run could not be written to the temporary directory (${TMPDIR:-/tmp}), so the acceptance module did not run" >&2
+        exit 2
+      }
+    fi
+    if ! _zensu_avr_work_tree "$avr_session" ${avr_ctx_args[@]+"${avr_ctx_args[@]}"}; then
       printf '%s' "$_bwt_fault" > "$_avr_dir/work-tree-fault" || {
         echo "zensu-log.sh $avr_verb: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance module did not run. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run $avr_verb again." >&2
         exit 2
       }
     fi
     if [ "$avr_verb" = "--acceptance-status" ]; then
+      if [ "$avr_run_seen" = false ] \
+        && avr_claimed_ticket="$(tdd_claimed_review_ticket "$(tdd_state_file "$avr_session")" 2>/dev/null)" \
+        && _tdd_zero_change_ticket "$avr_claimed_ticket"; then
+        _avr_zero_change_ticket=1
+      fi
       _zensu_avr_node "zensu-log.sh --acceptance-status" status
       exit $?
     fi
@@ -872,10 +1212,13 @@ case "${1:-}" in
       echo "zensu-log.sh --acceptance-record: pass the evidence text on stdin through a quoted heredoc" >&2
       exit 2
     fi
-    head -c 65536 > "$_avr_dir/evidence"
+    head -c 65536 > "$_avr_dir/evidence" || {
+      _zensu_transport_unwritten "zensu-log.sh --acceptance-record" evidence
+      exit 2
+    }
     _zensu_avr_node "zensu-log.sh --acceptance-record" record
     avr_rc=$?
-    if [ "$avr_rc" -eq 0 ] && [ -s "$_avr_dir/run-log-line" ]; then
+    if [ "$avr_rc" -eq 0 ] && [ -n "$avr_log_arg" ] && [ -s "$_avr_dir/run-log-line" ]; then
       avr_line="$(cat "$_avr_dir/run-log-line")"
       if [ -n "$avr_start" ]; then
         bash "$0" append --log "$avr_log_arg" --message "$avr_line" --start "$avr_start" >/dev/null \
@@ -1484,7 +1827,15 @@ case "${1:-}" in
     done
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     if ! _tdd_bypass_shape_ok "$gate_val"; then
-      echo "zensu-log.sh --bypass-note requires a known gate name (one of: $ZENSU_BYPASS_GATE_ALLOWLIST)" >&2
+      bypass_note_names=""
+      for bypass_note_name in $ZENSU_BYPASS_GATE_ALLOWLIST; do
+        [ "$bypass_note_name" = "acceptance-partial" ] || bypass_note_names="${bypass_note_names:+$bypass_note_names }$bypass_note_name"
+      done
+      echo "zensu-log.sh --bypass-note requires a known gate name (one of: $bypass_note_names)" >&2
+      exit 2
+    fi
+    if [ "$gate_val" = "acceptance-partial" ]; then
+      echo "zensu-log.sh --bypass-note records gate escapes only: acceptance-partial is recorded by the --chain-done terminus that applies the user's consent through --accept-partial" >&2
       exit 2
     fi
     if [ -z "$session_val" ]; then
@@ -1643,6 +1994,141 @@ case "${1:-}" in
     fi
     exit "$begin_rc"
     ;;
+  --autopilot-validate)
+    apv_label="zensu-log.sh --autopilot-validate"
+    apv_run=""
+    apv_run_seen=false
+    apv_partial_seen=false
+    apv_partial_raw=""
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run)
+          [ "$apv_run_seen" = false ] && [ $# -ge 2 ] || { echo "$apv_label: duplicate/missing --run" >&2; exit 2; }
+          apv_run_seen=true; apv_run="$2"; shift 2
+          ;;
+        --accept-partial)
+          [ "$apv_partial_seen" = false ] || { echo "$apv_label: duplicate --accept-partial" >&2; exit 2; }
+          case "${2:-}" in
+            (''|-*)
+              echo "$apv_label: --accept-partial takes the comma list of criterion ids the approved plan's ## Manual Acceptance table lists, such as AC-004,AC-005" >&2
+              exit 2 ;;
+          esac
+          apv_partial_seen=true; apv_partial_raw="$2"; shift 2
+          ;;
+        *) echo "$apv_label: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ "$apv_run_seen" = true ] || { echo "$apv_label requires --run <id>" >&2; exit 2; }
+    apv_session="$(zensu_resolve_session_id)" || apv_session=""
+    _zensu_run_bind "$apv_label" "$apv_run" "$apv_session" || exit $?
+    case "$_rb_validate" in
+      (on) ;;
+      (off)
+        echo "$apv_label: autopilot run $apv_run was begun with --no-validate, so it has no VALIDATE stage and nothing to validate" >&2
+        exit 2
+        ;;
+      (*)
+        echo "$apv_label: the record of autopilot run $apv_run carries no readable validate option" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$_rb_stage" != "VALIDATE" ]; then
+      echo "$apv_label: autopilot run $apv_run is at stage $_rb_stage, not VALIDATE, so there is nothing to validate" >&2
+      exit 2
+    fi
+    case "$_rb_head_update" in
+      (false) ;;
+      (true)
+        echo "$apv_label: autopilot run $apv_run came back to VALIDATE from a fix attempt whose pushed head is not recorded yet, so it has no pull-request head to validate: re-run the gates, push the fix and record PR_HEAD_UPDATED; the run then rebuilds its proofs from FIX_FINDINGS, and FINDINGS_CLEARED on the new head brings it back to VALIDATE" >&2
+        exit 2
+        ;;
+      (*)
+        echo "$apv_label: the record of autopilot run $apv_run carries no readable head-update flag" >&2
+        exit 2
+        ;;
+    esac
+    if [ -z "$_rb_head" ]; then
+      echo "$apv_label: autopilot run $apv_run records no pull-request head, so there is no commit to validate" >&2
+      exit 2
+    fi
+    apv_head="$(printf '%s' "$_rb_head" | tr 'ABCDEF' 'abcdef')"
+    _avr_accept_partial_ids=""
+    if [ "$apv_partial_seen" = true ]; then
+      _avr_accept_partial_ids="$(_zensu_accept_partial_ids "$apv_partial_raw" run "$apv_label")" || exit 2
+    fi
+    _avr_run="$apv_run"
+    _avr_escape=0
+    [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
+    _zensu_avr_prepare "$apv_label" "$apv_session" 1 || exit 2
+    printf '%s' "$_rb_json" > "$_avr_dir/run.json" || {
+      echo "$apv_label: the record of autopilot run $apv_run could not be written to the temporary directory (${TMPDIR:-/tmp}), so autopilot run $apv_run stays at VALIDATE" >&2
+      exit 2
+    }
+    if ! _zensu_avr_work_tree "$apv_session" "{\"runId\":\"$apv_run\"}"; then
+      printf '%s' "$_bwt_fault" > "$_avr_dir/work-tree-fault" || {
+        echo "$apv_label: the work-tree lookup failed and its cause could not be written to the temporary directory, so the acceptance check did not run. Check that the temporary directory (${TMPDIR:-/tmp}) is writable and has free space, then run --autopilot-validate again." >&2
+        exit 2
+      }
+    fi
+    _zensu_avr_node "$apv_label" verdict
+    apv_rc=$?
+    if [ "$apv_rc" -ne 0 ]; then
+      echo "$apv_label: autopilot run $apv_run stays at VALIDATE; act on the ACCEPTANCE refusal above, then run --autopilot-validate again" >&2
+      exit "$apv_rc"
+    fi
+    apv_state="$(cat "$_avr_dir/verdict-state" 2>/dev/null)" || apv_state=""
+    apv_mode="$(cat "$_avr_dir/verdict-mode" 2>/dev/null)" || apv_mode=""
+    case "$apv_state" in
+      (pass) apv_gates="" ;;
+      (escaped) apv_gates="ZENSU_ACCEPTANCE_GATE" ;;
+      (partial-accepted) apv_gates="acceptance-partial" ;;
+      ('')
+        echo "$apv_label: the acceptance verdict could not be read back, so autopilot run $apv_run stays at VALIDATE; run --autopilot-validate again" >&2
+        exit 2
+        ;;
+      (*)
+        if [ "$apv_mode" != "advisory" ]; then
+          echo "$apv_label: the acceptance verdict passed with the state $apv_state under a gate that is not advisory, which validates no run, so autopilot run $apv_run stays at VALIDATE; persist BLOCK with the code validation-unresolved and report this line" >&2
+          exit 2
+        fi
+        apv_gates="acceptance-advisory"
+        ;;
+    esac
+    apv_unapproved="$(cat "$_avr_dir/verdict-plan-unapproved" 2>/dev/null)" || apv_unapproved=""
+    case "$apv_unapproved" in
+      (0) ;;
+      (1) apv_gates="${apv_gates:+$apv_gates }acceptance-plan-unapproved" ;;
+      (*)
+        echo "$apv_label: the acceptance verdict could not be read back, so autopilot run $apv_run stays at VALIDATE; run --autopilot-validate again" >&2
+        exit 2
+        ;;
+    esac
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+    for apv_gate in $apv_gates; do
+      autopilot_apply_event "$apv_run" "validation-bypass:$apv_gate:$_rb_visit:$apv_head" BYPASS_RECORDED \
+        "{\"gate\":\"$apv_gate\"}" "${CLAUDE_PROJECT_DIR:-.}" "$apv_session"
+      apv_rc=$?
+      if [ "$apv_rc" -ne 0 ]; then
+        echo "$apv_label: the $apv_gate bypass could not be recorded in the ledger of autopilot run $apv_run (status $apv_rc), so autopilot run $apv_run stays at VALIDATE" >&2
+        exit 2
+      fi
+    done
+    autopilot_apply_event "$apv_run" "validation-passed:$_rb_visit:$apv_head" VALIDATION_PASSED \
+      "{\"headSha\":\"$apv_head\"}" "${CLAUDE_PROJECT_DIR:-.}" "$apv_session"
+    apv_rc=$?
+    if [ "$apv_rc" -ne 0 ]; then
+      echo "$apv_label: VALIDATION_PASSED could not be applied to autopilot run $apv_run (status $apv_rc), so autopilot run $apv_run stays at VALIDATE" >&2
+      exit 2
+    fi
+    case "$apv_gates" in
+      ('') apv_note="" ;;
+      (*' '*) apv_note=", with the $(printf '%s' "$apv_gates" | sed 's/ / and /g') bypasses recorded in its ledger" ;;
+      (*) apv_note=", with the $apv_gates bypass recorded in its ledger" ;;
+    esac
+    echo "zensu autopilot: run $apv_run validated at the pull-request head ${apv_head:0:12}${apv_note}"
+    exit 0
+    ;;
   --autopilot-event)
     run_val=""
     event_val=""
@@ -1692,6 +2178,14 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-event: the 'work-order-release-' event-id namespace is reserved for zensu-work-order.sh" >&2
         exit 2
         ;;
+      validation-passed:*|validation-bypass:*)
+        echo "zensu-log.sh --autopilot-event: the 'validation-passed:' and 'validation-bypass:' event-id namespaces are reserved for --autopilot-validate" >&2
+        exit 2
+        ;;
+      plan-approved-*)
+        echo "zensu-log.sh --autopilot-event: the 'plan-approved-' event-id namespace is reserved for the plan-approval hook" >&2
+        exit 2
+        ;;
     esac
     case "$event_val" in
       TDD_STARTED|TDD_CHAIN_DONE)
@@ -1704,6 +2198,14 @@ case "${1:-}" in
         ;;
       TEAM_REVIEW_IMPORTED)
         echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-work-order.sh --review-import" >&2
+        exit 2
+        ;;
+      VALIDATION_PASSED)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-log.sh --autopilot-validate --run <id>, which checks the acceptance records on the pull-request head first" >&2
+        exit 2
+        ;;
+      PLAN_APPROVED)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; the plan-approval hook records it when the user approves the plan, and on a run that validates it first stores the plan and checks its acceptance criteria" >&2
         exit 2
         ;;
     esac
@@ -1996,6 +2498,7 @@ case "${1:-}" in
     chain_outcome_val=""
     tdd_mode_val=""
     plan_val=""
+    accept_partial_val=""
     seen_session=false
     seen_tools=false
     seen_claimed_ticket=false
@@ -2006,6 +2509,7 @@ case "${1:-}" in
     seen_outcome=false
     seen_tdd_mode=false
     seen_plan=false
+    seen_accept_partial=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -2043,6 +2547,14 @@ case "${1:-}" in
         --plan)
           [ "$seen_plan" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --plan" >&2; exit 2; }
           seen_plan=true; plan_val="$2"; shift 2 ;;
+        --accept-partial)
+          [ "$seen_accept_partial" = false ] || { echo "zensu-log.sh $verb: duplicate --accept-partial" >&2; exit 2; }
+          case "${2:-}" in
+            (''|-*)
+              echo "zensu-log.sh $verb: --accept-partial takes the comma list of criterion ids the user accepted as partial, such as AC-004,AC-005" >&2
+              exit 2 ;;
+          esac
+          seen_accept_partial=true; accept_partial_val="$2"; shift 2 ;;
         *) echo "zensu-log.sh $verb: unknown argument '$1'" >&2; exit 2 ;;
       esac
     done
@@ -2091,6 +2603,7 @@ case "${1:-}" in
     # added later inherits the refusal rather than silently accepting a flag only
     # --tdd-complete can act on.
     [ "$seen_plan" = false ] || [ "$verb" = "--tdd-complete" ] || invalid_known_flag=true
+    [ "$seen_accept_partial" = false ] || [ "$verb" = "--chain-done" ] || invalid_known_flag=true
     case "$verb" in
       --tdd-begin|--tdd-complete)
         [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
@@ -2321,8 +2834,8 @@ case "${1:-}" in
         #
         # State the strength honestly: this raises the cost of a CARELESS or
         # inherited prefix, it is not a defence against a determined session. The
-        # same session can write `ZENSU_REQUIREMENTS_GATE=off`, which is documented,
-        # named in the refusal text it just read, and costs it only a ledger line.
+        # same session can write `ZENSU_REQUIREMENTS_GATE=off`, which is documented
+        # and costs it only a ledger line.
         # The list is also a DENYLIST over an open-ended namespace: every variable
         # git grows needs an entry in `_tc_git` and nothing would notice a gap. It covers
         # discovery (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
@@ -2648,7 +3161,7 @@ case "${1:-}" in
           if [ ! -f "$_tc_receipt" ] || [ -L "$_tc_receipt" ]; then
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session (a symlink at that path is refused rather than followed, so it does not count as one). A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
             echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"${_tc_wt_flag}" >&2
-            echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
+            echo "If the audit cannot produce a clean receipt, report this refusal and leave the decision to the user." >&2
             exit 1
           fi
           if [ "$_tc_receipt_state" = "clean" ]; then
@@ -2789,7 +3302,7 @@ case "${1:-}" in
             esac
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session ${_tc_verdict_text}. Only a receipt recording \`clean: true\` establishes that the claimed edits landed; the audit writes the receipt BEFORE its own exit status, so its presence alone proves nothing. ${_tc_remedy_text} Re-run the Phase 6 step 5b audit:" >&2
             echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"${_tc_wt_flag}" >&2
-            echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
+            echo "If the audit cannot produce a clean receipt, report this refusal and leave the decision to the user." >&2
             exit 1
           fi
         fi
@@ -2978,7 +3491,7 @@ case "${1:-}" in
             # this refusal into a documented way around itself. Pointing at the plan
             # is the remedy that keeps the gate doing its job.
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — ${_rq_reason}. The requirements-table gate judges this session's own plan; pass the plan this chain wrote under ${_tc_root}/.zensu/plans/." >&2
-            echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
+            echo "If this cannot be resolved, report this refusal and leave the decision to the user." >&2
             exit 1
           fi
           if [ "$_rq_explicit" = true ] || { [ -n "$_rq_plan" ] && [ -f "$_rq_plan" ]; }; then
@@ -2987,15 +3500,11 @@ case "${1:-}" in
               # A load fault is NOT a verdict about the plan. Reporting it as one
               # would send the user editing a table that was never read.
               #
-              # This branch deliberately does NOT name the escape hatch, unlike the
-              # three refusal sites around it. A missing, unreadable or symlinked
-              # gate library is a plugin-INTEGRITY fault: something happened to the
-              # installation that nobody has explained, and the honest instruction is
-              # stop and repair, not skip. The other sites can at least argue the
-              # user might legitimately exempt a session whose plan is genuinely
-              # unjudgeable; this one cannot, and it is the model that reads the
-              # line. An operator who truly must proceed can still set the variable —
-              # they just should not learn it from the integrity failure itself.
+              # A missing, unreadable or symlinked gate library is a
+              # plugin-INTEGRITY fault: something happened to the installation that
+              # nobody has explained, and the honest instruction is stop and repair,
+              # not skip. Like every refusal of this verb, the line names no escape
+              # hatch, because it is the model that reads it.
               echo "zensu-log.sh --tdd-complete: the requirements-table check could not run — its library is missing, unreadable, or a symlink: ${_rq_lib}. The plan was NOT judged." >&2
               echo "Reinstall the plugin and run /zensu:doctor; the executing installation is not intact." >&2
               exit 1
@@ -3003,12 +3512,23 @@ case "${1:-}" in
             _rq_verdict="$(bash "$_rq_lib" --plan "$_rq_plan" 2>&1)"
             _rq_rc=$?
             case "$_rq_rc" in
-              0) ;;
+              0)
+                if [ "$complete_ctx" = '{}' ]; then
+                  _zensu_plan_criteria_gate "$_rq_plan" || exit 1
+                fi
+                ;;
               3|4)
                 echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's Zensu plan carries no usable \`## Requirements\` table, so /zensu:converge would audit nothing and still close clean:" >&2
                 echo "  ${_rq_verdict}" >&2
                 echo "Fill the table with AC-###/FR-### rows per Phase 2 step 1b, then re-run. Pass --plan <path> when the plan is not the run log's sibling under .zensu/plans/." >&2
-                echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
+                echo "If this cannot be resolved, report this refusal and leave the decision to the user." >&2
+                exit 1
+                ;;
+              5)
+                echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's Zensu plan does not parse, so its \`## Requirements\` table could not be read:" >&2
+                echo "  ${_rq_verdict}" >&2
+                echo "Close the code fence the plan leaves open, then re-run." >&2
+                echo "If this cannot be resolved, report this refusal and leave the decision to the user." >&2
                 exit 1
                 ;;
               *)
@@ -3017,7 +3537,7 @@ case "${1:-}" in
                 # wording: the remedy is the path or the file, not the contents.
                 echo "zensu-log.sh --tdd-complete: the requirements-table check could not judge the plan (exit ${_rq_rc}). The table was NOT read, so this is not a verdict about its contents:" >&2
                 echo "  ${_rq_verdict}" >&2
-                echo "Point --plan at a readable plan under .zensu/plans/, or set ZENSU_REQUIREMENTS_GATE=off for a session the user has explicitly exempted." >&2
+                echo "Point --plan at a readable plan under .zensu/plans/; if there is none, report this refusal and leave the decision to the user." >&2
                 exit 1
                 ;;
             esac
@@ -3073,7 +3593,11 @@ case "${1:-}" in
         chain_status_out="$(tdd_chain_diagnostics "$session_val")"
         chain_status_rc=$?
         case "$chain_status_rc" in
-          0) printf '%s\n' "$chain_status_out"; exit 0 ;;
+          0)
+            printf '%s\n' "$chain_status_out"
+            _zensu_acceptance_handoff_line "$session_val" >&2
+            exit 0
+            ;;
           1)
             echo "zensu-log.sh --chain-status: this session has no chain state" >&2
             exit 1
@@ -3205,6 +3729,17 @@ case "${1:-}" in
         exit 0
         ;;
       --chain-done)
+        if [ "$seen_accept_partial" = true ]; then
+          _avr_accept_context=standalone
+          if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ] || [ "$seen_outcome" = true ]; then
+            _avr_accept_context=bound
+          elif [ "$claimed_ticket_seen" != "true" ]; then
+            _avr_accept_context=unticketed
+          elif _tdd_zero_change_ticket "$claimed_ticket_val"; then
+            _avr_accept_context=zero-change
+          fi
+          _avr_accept_partial_ids="$(_zensu_accept_partial_ids "$accept_partial_val" "$_avr_accept_context")" || exit $?
+        fi
         if ! autopilot_ctx="$(tdd_autopilot_context "$(tdd_state_file "$session_val")" "$session_val" 2>/dev/null)"; then
           echo "zensu-log.sh --chain-done: corrupt or incomplete Autopilot linkage" >&2
           zensu_state_failure_hint --chain-done "$session_val"
@@ -3230,11 +3765,34 @@ case "${1:-}" in
               case "$chain_change_count" in
                 (''|0|unknown)
                   if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+                    _avr_handoff_ticket="$claimed_ticket_val"
+                    _avr_zero_change_ticket=0
+                    _tdd_zero_change_ticket "$claimed_ticket_val" && _avr_zero_change_ticket=1
+                    _avr_fix_round_spent=0
+                    _avr_review_done=0
+                    [ "$(tdd_self_review_fixed "$(tdd_state_file "$session_val")" 2>/dev/null)" = "true" ] && _avr_fix_round_spent=1
+                    [ "$(tdd_code_review_done "$(tdd_state_file "$session_val")" 2>/dev/null)" = "true" ] && _avr_review_done=1
+                    if ! zensu_hook_enabled selfReview; then
+                      _avr_fix_round_spent=1
+                      _avr_review_done=1
+                    fi
                     chain_gate_rc=0
                     _zensu_terminal_edit_landing_gate "$session_val" || chain_gate_rc=1
                     _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
+                    _avr_gates_passed=0
+                    [ "$chain_gate_rc" -eq 0 ] && _avr_gates_passed=1
                     _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
                     [ "$chain_gate_rc" -eq 0 ] || exit 1
+                    if [ "${_avg_state:-}" = "partial-accepted" ]; then
+                      tdd_add_bypass "$session_val" acceptance-partial >/dev/null 2>&1
+                      tdd_bypass_recorded "$(tdd_state_file "$session_val")" acceptance-partial || {
+                        echo "zensu-log.sh --chain-done: refusing to close the chain — the user's consent to the partial criteria ${_avr_accept_partial_ids} could not be recorded in the session bypass ledger as acceptance-partial, so the chain stays open. Run the same --chain-done call again; it records the consent before the chain closes." >&2
+                        exit 1
+                      }
+                    elif [ -n "${_avr_accept_partial_ids:-}" ] && [ -z "${_avg_state:-}" ]; then
+                      echo "zensu-log.sh --chain-done: refusing to close the chain — the acceptance verdict state did not reach the terminus, so it cannot tell whether the consent to ${_avr_accept_partial_ids} must be recorded in the session bypass ledger; the chain stays open. Run the same --chain-done call again." >&2
+                      exit 1
+                    fi
                   fi
                   ;;
               esac
@@ -3283,6 +3841,17 @@ case "${1:-}" in
           echo "zensu-log.sh --chain-done: bound chain requires --autopilot-run, --autopilot-attempt, and --chain-id" >&2
           exit 2
         }
+        case "$chain_outcome_val" in
+          (''|pass|no-changes|max-rounds) ;;
+          (converged)
+            echo "zensu-log.sh --chain-done: --outcome converged is refused. Only this terminus decides that outcome, from a recorded max-rounds outcome and the chain's findings ledger; run --chain-done without --outcome." >&2
+            exit 2
+            ;;
+          (*)
+            echo "zensu-log.sh --chain-done: --outcome must be pass, no-changes or max-rounds." >&2
+            exit 2
+            ;;
+        esac
         done_fields="$(AUTOPILOT_CTX="$autopilot_ctx" REQUESTED_OUTCOME="$chain_outcome_val" \
           RUN="$autopilot_run_val" ATTEMPT="$autopilot_attempt_val" CHAIN="$chain_id_val" \
           RETURN_STAGE="$autopilot_return_stage_val" node -e '
@@ -3293,18 +3862,39 @@ case "${1:-}" in
               && c.chainId===process.env.CHAIN
               && (!process.env.RETURN_STAGE || c.returnStage===process.env.RETURN_STAGE);
             if(!exact)process.exit(3);
-            const outcome=process.env.REQUESTED_OUTCOME||c.outcome||"pass";
-            process.stdout.write([c.runId,c.attempt,c.chainId,outcome].join("\t"));
+            const requested=process.env.REQUESTED_OUTCOME||"";
+            if(requested && !["pass","no-changes","max-rounds"].includes(requested))process.exit(3);
+            const outcome=requested||c.outcome||"pass";
+            if(!["pass","no-changes","max-rounds","converged"].includes(outcome))process.exit(3);
+            process.stdout.write([c.runId,c.attempt,c.chainId,outcome,c.chainDone===true].join("\t"));
           } catch (_) { process.exit(3); }
         ' 2>/dev/null)" || {
           echo "zensu-log.sh --chain-done: stale or mismatched Autopilot generation" >&2
           exit 1
         }
-        IFS=$'\t' read -r done_run done_attempt done_chain done_outcome <<<"$done_fields"
+        IFS=$'\t' read -r done_run done_attempt done_chain done_outcome done_sealed <<<"$done_fields"
+        case "$done_sealed" in
+          (true|false) ;;
+          (*)
+            echo "zensu-log.sh --chain-done: stale or mismatched Autopilot generation" >&2
+            exit 1
+            ;;
+        esac
         _fsg_lines=""
         _avg_lines=""
+        if [ -z "$chain_outcome_val" ] && [ "$done_outcome" = "max-rounds" ] && [ "$done_sealed" = "false" ] \
+          && [ "$claimed_ticket_seen" = "true" ] \
+          && _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+          if _zensu_bound_convergence "$session_val"; then
+            done_outcome=converged
+            printf '%s\n' "$_cvg_line" >&2
+            echo "CONVERGED CLOSE — the edit-landing and full-suite gates below still decide this close. A refusal that names a command to run, a record to wait for or an audit to repeat keeps this attempt open: do that, then run this --chain-done again. When a gate refuses for a cause only an edit can remove, such as a failed full suite, and this attempt has no fix round left, run this --chain-done again with --outcome max-rounds: it closes the attempt as max-rounds and blocks the run with TDD_MAX_ROUNDS." >&2
+          else
+            printf '%s\n' "$_cvg_line" >&2
+          fi
+        fi
         case "$done_outcome" in
-          pass)
+          pass|converged)
             if [ "$claimed_ticket_seen" != "true" ] \
               || _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
               _zensu_terminal_edit_landing_gate "$session_val" || exit 1
@@ -3758,12 +4348,12 @@ case "$cmd" in
               const hit = patterns.scan(message);
               if (hit && hit.matches && hit.matches.length) {
                 const rules = [...new Set(hit.matches.map((m) => m.rule))].join(", ");
-                // The surgical escape first, matching the sibling gate: the
-                // marker is visible in the committed artifact, the env opt-out
-                // is not.
+                // Only the surgical escape is named: the marker is visible in
+                // the committed artifact, and the env opt-out stays out of the
+                // text a model reads.
                 refuse("secret-value-detected: " + rules
-                  + " — remove it, or append the zensu-secret-allow marker to that line,"
-                  + " or set ZENSU_SECRET_SCAN=off for this call if it is a false positive");
+                  + " — remove it, or append the zensu-secret-allow marker to that line"
+                  + " if it is a false positive");
                 return;
               }
             } catch (_) {

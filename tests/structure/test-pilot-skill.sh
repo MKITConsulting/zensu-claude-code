@@ -233,7 +233,7 @@ done
 
 # P10 — version stays in sync across plugin.json + marketplace.json + README badge.
 # Adding a skill does NOT bump the version; this guards against accidental drift.
-MARKET_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKET_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 if [ -z "$EXPECTED_VERSION" ] || [ "$EXPECTED_VERSION" = "null" ]; then
   check "P10a plugin.json version is readable (got '${EXPECTED_VERSION:-}')" FAIL
 elif [ "$MARKET_VERSION" = "$EXPECTED_VERSION" ]; then
@@ -246,6 +246,15 @@ if grep -qE "version-${EXPECTED_VERSION_RE}-green" "$README_MD"; then
   check "P10b README badge shows version-$EXPECTED_VERSION-green" PASS
 else
   check "P10b README badge shows version-$EXPECTED_VERSION-green" FAIL
+fi
+
+if printf '%s' "$NORMALIZED_SKILL" | grep -qF -- '`zensu journeys list --product <product-id> --json` for the journey ids (its items carry no steps)' \
+  && printf '%s' "$NORMALIZED_SKILL" | grep -qF -- 'read each journey'"'"'s steps with `zensu journeys steps --product <product-id> <journey-id> --json`, keep the journeys with a step whose `feature_id` is this feature'"'"'s UUID' \
+  && grep -qF -- '| `zensu journeys steps --product <pid> <jid> --json` | 1 |' "$SKILL_MD" \
+  && ! printf '%s' "$NORMALIZED_SKILL" | grep -qF -- 'keep the journeys whose steps reference this feature'; then
+  check "P11 the journey probe reads each journey's steps with zensu journeys steps and matches feature_id, and the CLI table lists that command" PASS
+else
+  check "P11 the journey probe reads each journey's steps with zensu journeys steps and matches feature_id, and the CLI table lists that command" FAIL
 fi
 
 echo "----"

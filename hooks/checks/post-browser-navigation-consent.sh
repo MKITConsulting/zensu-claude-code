@@ -33,14 +33,18 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT _ZENSU_HOOK_DIR
 command -v node >/dev/null 2>&1 || skip "node unavailable"
 MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"
 [ -f "$MODULE" ] && [ ! -L "$MODULE" ] || skip "decision module absent or symlinked"
-source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh" 2>/dev/null || skip "session library unavailable"
-zensu_bind_hook_session "$INPUT" >/dev/null 2>&1 || skip "no bound session"
-ZENSU_VERIFY_PROJECT_ROOT="$(zensu_resolve_project_dir 2>/dev/null || true)"
-[ -n "$ZENSU_VERIFY_PROJECT_ROOT" ] && [ -n "${ZENSU_SESSION_KEY:-}" ] || skip "no project root"
-[ ! -L "$ZENSU_VERIFY_PROJECT_ROOT/.zensu" ] || skip "symlinked .zensu"
-[ ! -L "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" ] || skip "symlinked state directory"
-mkdir -p "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" 2>/dev/null || skip "state directory unavailable"
-ZENSU_VERIFY_CONSENT_MEMORY="$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
+ZENSU_VERIFY_CONSENT_MEMORY=""
+ZENSU_VERIFY_PROJECT_ROOT=""
+if source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh" 2>/dev/null \
+  && zensu_bind_hook_session "$INPUT" >/dev/null 2>&1; then
+  _ZENSU_CONSENT_ROOT="$(zensu_resolve_project_dir 2>/dev/null || true)"
+  if [ -n "$_ZENSU_CONSENT_ROOT" ] && [ -n "${ZENSU_SESSION_KEY:-}" ] \
+    && [ ! -L "$_ZENSU_CONSENT_ROOT/.zensu" ] && [ ! -L "$_ZENSU_CONSENT_ROOT/.zensu/state" ] \
+    && mkdir -p "$_ZENSU_CONSENT_ROOT/.zensu/state" 2>/dev/null; then
+    ZENSU_VERIFY_PROJECT_ROOT="$_ZENSU_CONSENT_ROOT"
+    ZENSU_VERIFY_CONSENT_MEMORY="$_ZENSU_CONSENT_ROOT/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
+  fi
+fi
 export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT
 
 printf '%s' "$INPUT" | (

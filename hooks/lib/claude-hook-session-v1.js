@@ -21,8 +21,9 @@
 // lineage, with or without a vanished project root — and on a match print
 // `recorded<TAB>executing`, two fields and never three; `pruned-plugin-root`
 // and its `model-` twin answer the same way — 0 when the record is intact and
-// the SOLE disagreement is that the installation which minted it no longer
-// exists on disk — and print the same two-field pair, so every parser of that
+// the disagreement is that the installation which minted it no longer exists on
+// disk, with or without a vanished project root — and print the same two-field
+// pair, so every parser of that
 // pair reads it unchanged; `orphaned-incompatible-root` and its `model-` twin
 // answer the third fact of the lineage state separately — 0 and the dead path
 // when the lineage is incompatible AND the recorded root is gone, **3** when it
@@ -259,22 +260,17 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
     const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
     const recordsDir = privateRecordsDirectory(pluginData, true);
     if (recordsDir === null) return null;
-    const readerOptions = {
-      recordsDir,
-      sessionId: payload.session_id,
-      expectedHost: 'claude',
-    };
-    let context;
-    let orphanedProjectRoot = null;
-    try {
-      context = core.readContext(readerOptions);
-    } catch {
-      // Only reached when the strict read failed. If THIS read also throws the
-      // whole function answers null through the outer catch, so a record that
-      // disagrees about anything else is never reclassified as this state.
-      context = core.readOrphanedProjectRootContext(readerOptions);
-      orphanedProjectRoot = context.project_root;
-    }
+    const admitted = core.readContextLadder({ recordsDir, sessionId: payload.session_id, host: 'claude' }, [
+      core.RECORD_READERS.STRICT,
+      core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
+    ]);
+    if (admitted === null
+      || (admitted.reader !== core.RECORD_READERS.STRICT
+        && admitted.reader !== core.RECORD_READERS.ORPHANED_PROJECT_ROOT)) return null;
+    const { context } = admitted;
+    const orphanedProjectRoot = admitted.reader === core.RECORD_READERS.ORPHANED_PROJECT_ROOT
+      ? context.project_root
+      : null;
     if (context.plugin_data !== pluginData) return null;
     // The disagreement must be the lineage and nothing else: if this root DOES
     // serve the record, the bind failed for some other reason and naming the
@@ -291,11 +287,12 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
 }
 
 
-// The FOURTH named bind failure: the record is intact and the SOLE disagreement
-// is that the installation which minted it has been pruned from the plugin
-// cache, so nothing can re-verify the record and no installation can serve it.
+// The FOURTH named bind failure: the record is intact and the disagreement is
+// that the installation which minted it has been pruned from the plugin cache,
+// alone or together with a recorded project root that is gone as well, so
+// nothing can re-verify the record and no installation can serve it.
 // Disjoint from the lineage predicate above by construction — that one needs
-// the strict read to succeed, this one needs it to fail — and deliberately
+// the recorded plugin root present and verified, this one needs it absent or retired — and deliberately
 // blind to lineage: the state is reachable under a compatible lineage too, and
 // the remedy is the same either way. Adoption is the one exit, so like the
 // lineage state this is named, never relaxed.
@@ -313,18 +310,20 @@ function resolvePrunedPluginRoot(payload, environment = process.env) {
     const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
     const recordsDir = privateRecordsDirectory(pluginData, true);
     if (recordsDir === null) return null;
-    const readerOptions = { recordsDir, sessionId: payload.session_id, expectedHost: 'claude' };
     // The strict read must FAIL: a record it accepts is either served or a
     // lineage question, and naming a pruned installation there would be a wrong
     // diagnosis. The relaxed read must then SUCCEED, which proves the absence of
-    // the recorded root is the only thing the strict read tripped on.
-    try {
-      core.readContext(readerOptions);
-      return null;
-    } catch {
-      // fall through to the relaxed read
-    }
-    const context = core.readPrunedPluginRootContext(readerOptions);
+    // the recorded plugin root, and at most of the recorded project root as well,
+    // is all the strict read tripped on.
+    const admitted = core.readContextLadder({ recordsDir, sessionId: payload.session_id, host: 'claude' }, [
+      core.RECORD_READERS.STRICT,
+      core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+      core.RECORD_READERS.ORPHANED_PRUNED,
+    ]);
+    if (admitted === null
+      || (admitted.reader !== core.RECORD_READERS.PRUNED_PLUGIN_ROOT
+        && admitted.reader !== core.RECORD_READERS.ORPHANED_PRUNED)) return null;
+    const { context } = admitted;
     if (context.plugin_data !== pluginData) return null;
     // The same sibling bound adoption applies: a pruned record of a FOREIGN
     // installation (a --plugin-dir checkout beside nothing) is a second
@@ -340,7 +339,7 @@ function resolvePrunedPluginRoot(payload, environment = process.env) {
     // answers null, the state is never named, and the session falls back to the
     // generic deny and the unbounded Stop block this whole feature exists to
     // remove. It fails CLOSED, which is why it was P3 rather than P1. The parent
-    // is proven to exist by readPrunedPluginRootContext, which canonicalDirectory's
+    // is proven to exist by either relaxed reader, which canonicalDirectory's
     // it before returning, so it always resolves on this branch; if it somehow
     // does not, this throws into the catch below and answers null exactly as the
     // string compare did.
@@ -758,8 +757,9 @@ function main() {
     return;
   }
   if (process.argv[2] === 'pruned-plugin-root' || process.argv[2] === 'model-pruned-plugin-root') {
-    // Exit 0 only when the record is intact and the SOLE disagreement is that
-    // the installation which minted it no longer exists, and on a match print
+    // Exit 0 only when the record is intact and the disagreement is that the
+    // installation which minted it no longer exists, with or without a vanished
+    // project root, and on a match print
     // `recorded<TAB>executing` — the same two-field pair the lineage mode
     // prints, so every parser of that pair reads this one unchanged. The two
     // spellings differ only in where the session id comes from, exactly as the

@@ -12,7 +12,9 @@ paths:
 long body is paid on every invocation. A skill's description is paid in a different place:
 the host's skill listing, which every session carries and which has a fixed budget shared
 with every other plugin and user skill on the machine. The suite bounds both, for every
-`skills/*/SKILL.md`.
+`skills/*/SKILL.md` and, root by root with an empty allowlist, for every
+`plugins/*/skills/*/SKILL.md` of a companion plugin such as `session-hub@zensu`, whose
+`/session-hub:session-trail` is one; `B0` requires both counts to match the files on disk.
 
 **How the host builds the listing.** Read from the Claude Code 2.1.280 CLI and 2.1.288
 desktop binaries, not from a documented contract, so re-check it when the host changes:
@@ -35,7 +37,10 @@ read the `skill_listing` attachment, which every session transcript records.
 
 - **Body ≤ 25,000 chars**, frontmatter excluded. Move detail into
   `skills/<name>/references/*.md` and name each file at the step that reads it; `B6`
-  fails a references file its `SKILL.md` never names.
+  fails a references file its `SKILL.md` never names, and a `references/<file>` its `SKILL.md`
+  names that does not exist. A path with a `/` before `references/` names another skill's file
+  and is not judged. A new reference is an untracked file until it is staged, so stage it by
+  path: `git commit -a` leaves it out.
 - **Larger bodies sit on a shrink-only allowlist** in the suite, holding each body's exact
   size. A grown body fails, a shrunk one must lower its entry in the same change, and an
   entry under the cap must leave the list. The list only ever gets shorter.
@@ -82,16 +87,21 @@ file names it through its router's placeholder: `{plugin_root}/docs/…` in `ski
 `skills/autopilot/`, whose router sets `ROOT="${CLAUDE_PLUGIN_ROOT}"`. `B8` derives the plugin
 docs from the files under `docs/` and fails on a bare or skill-relative (`../../docs/…`)
 spelling in a body, on `${CLAUDE_PLUGIN_ROOT}/docs/…` in a reference, where it is not
-rendered, and on a placeholder its router never defines. `B9` bites each arm on a fixture tree.
+rendered, and on a placeholder its router never defines. A companion plugin carries no `docs/`
+once installed, so in its skills `B8` judges the names of PLM's docs instead and accepts only
+the GitHub URL `https://github.com/MKITConsulting/zensu-claude-code/blob/main/docs/…`
+(`doc-foreign`). `B9` bites each arm on a fixture tree.
 A path that names no plugin doc, such as a project's `docs/*.md` glob or the docs skill's
 `docs/features/<KEY-N>-<slug>.md`, is not judged. Known gaps: only `docs/` is judged, so a bare
 `README.md` or `hooks/…` in prose stays a reviewer's catch (zensu-help, which reads them, spells
 every source absolute), and the router check is a substring test, so a router that mentions
 its placeholder without defining it passes.
 
-**Split so far:** `skills/session-trail/`, `skills/build/`, `skills/pr-team-review/` and the
-confidence heuristic of `skills/ghost-scan/` (`references/confidence-score.md`, moved to make
-room for the free-text file form of `.claude/rules/skill-argument-placeholders.md`). Each
+**Split so far:** `skills/session-trail/`, `skills/build/`, `skills/pr-team-review/` and two
+parts of `skills/ghost-scan/`: the confidence heuristic (`references/confidence-score.md`, moved
+to make room for the free-text file form of `.claude/rules/skill-argument-placeholders.md`) and
+the Phase 5b cross-component journey pass (`references/cross-component-journeys.md`, moved to
+make room for the text-format lines next to its candidate and journey fields). Each
 split lowers or removes its allowlist entry and re-points the suites that slice the moved
 text. A suite that compares line numbers across a split compares them inside one file, or
 orders the files by the router line that names them, as `P14aa` in

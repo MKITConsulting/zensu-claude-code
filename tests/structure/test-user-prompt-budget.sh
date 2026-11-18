@@ -221,7 +221,7 @@ ROSTER="$(node -e '
   process.stdout.write(out.join("\n"));
 ' "$HOOKS_JSON" 2>/dev/null)"
 
-BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-review-handback.sh"
+BUDGETED="user-prompt-context-auto-load.sh user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh user-prompt-session-hub-takeover-notice.sh user-prompt-review-handback.sh"
 
 budget() {
   case "${3:-first}:$1:$2" in
@@ -235,11 +235,12 @@ budget() {
     repeat:user-prompt-tdd-reminder.sh:typed) echo "1 3340" ;;
     *:user-prompt-tdd-reminder.sh:ci) echo "300 400" ;;
     *:user-prompt-tdd-reminder.sh:*) echo "0 0" ;;
-    first:user-prompt-zen-mode.sh:*) echo "3400 3770" ;;
-    repeat:user-prompt-zen-mode.sh:*) echo "1 1990" ;;
+    first:user-prompt-zen-mode.sh:*) echo "3400 4396" ;;
+    repeat:user-prompt-zen-mode.sh:*) echo "1 2561" ;;
     *:user-prompt-best-solution-first.sh:*) echo "300 540" ;;
     *:user-prompt-worktree-keep.sh:*) echo "0 0" ;;
     *:user-prompt-session-hub-receipt.sh:*) echo "0 0" ;;
+    *:user-prompt-session-hub-takeover-notice.sh:*) echo "0 0" ;;
     *:user-prompt-review-handback.sh:*) echo "0 0" ;;
     *) echo "" ;;
   esac
@@ -247,12 +248,12 @@ budget() {
 
 total_budget() {
   case "$2:$1" in
-    first:typed) echo 13200 ;;
-    first:ci) echo 4560 ;;
-    first:*) echo 4200 ;;
-    repeat:typed) echo 7438 ;;
-    repeat:ci) echo 2863 ;;
-    *) echo 2503 ;;
+    first:typed) echo 13826 ;;
+    first:ci) echo 5186 ;;
+    first:*) echo 4826 ;;
+    repeat:typed) echo 8009 ;;
+    repeat:ci) echo 3434 ;;
+    *) echo 3074 ;;
   esac
 }
 

@@ -91,17 +91,15 @@ Turn it off by hand with:
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-zen-mode.sh" --off
 ```
 
-`--status` reports `on` or `off`. Run it with the session's recorded project root as
-`CLAUDE_PROJECT_DIR`, because the Bash tool may not carry that variable and the
-`hooks.zenMode` check reads a project's config only through it:
+`--status` reports `on` or `off`. It reads the session marker, `hooks.zenModeDefault` and
+`hooks.zenMode` under the session's recorded project root, where the hook and `/zensu:doctor`
+read them too. That root differs from the directory the host sets in a session whose working
+directory is a git worktree and after `/zensu:adopt-session --reanchor`; the project overlay for
+both keys is then the recorded root's `.zensu/config.json`, and the three still agree:
 
 ```
-CLAUDE_PROJECT_DIR="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root)" CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-zen-mode.sh" --status
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-zen-mode.sh" --status
 ```
-
-After `/zensu:adopt-session --reanchor` the recorded root is no longer the directory the host
-set. The hook and `/zensu:doctor` still read `hooks.zenMode` from that directory, so on that one
-key `--status` can disagree with them; `/zensu:doctor` shows what the hook reads.
 
 ## The contract
 
@@ -139,7 +137,28 @@ the rules are recorded in English, the answer follows the user.
 4. **Stay short.** Aim for roughly eight lines above the session block. Go longer
    only when the user asks or when rule 9 requires it.
 5. **One next step.** End with exactly one clear next action, never two parallel
-   suggestions.
+   suggestions. Once the work the user started the session for is finished and
+   you checked that nothing holds the session open — nothing an archive of its
+   worktree would lose (uncommitted or unpushed work, a needed ignored file, a
+   nested repository's work), nothing still running for it (a background task,
+   another session, a CI run it waits on), no pull request of its own still
+   open, no open question and no failed or unverified item — that step says the
+   session is done and can be archived, or closed on a host that has no archive.
+   An archive deletes the worktree whole, with every ignored file and every
+   repository nested in it, and `git status` shows neither, so check them too
+   (`${CLAUDE_PLUGIN_ROOT}/docs/worktree-keep.md` says what the cleanup removes).
+   A session that only answered questions keeps an ordinary next step instead.
+   A wrong "done" sends the user to archive a session that still has work, while
+   a missed one costs only a line, so when in doubt the session is still open.
+   Archiving and closing stay the user's call, as the Scope section says.
+
+   ```
+   Session: You asked me to speed up the slow product search.
+   - I added an index on the product name column and cached the ten most frequent search terms.
+   - I opened a pull request with both changes, and its checks passed.
+   Last: I confirmed that the pull request is merged and nothing is left to commit or push.
+   Next step: Archive this session; its work is done.
+   ```
 6. **Anchor multi-step work.** Carry a one-line chain-progress anchor through
    anything that spans several turns, so the thread is recoverable after a
    break — but the anchor is never yours to invent. The zen-mode hook resolves
@@ -218,10 +237,15 @@ is verified, or what is reported. Do not drop a failing test, an unfinished step
 a risk, or a limitation to make an answer shorter — a compressed report that
 omits a problem is a wrong report. Shorten the prose, never the findings.
 
+It never archives or closes a session either. Rule 5 says when a session can be
+archived; archiving or closing it is the user's call alone, under every rule
+above, rule 9 included.
+
 ## Configuration
 
 Two independent flags, both in `~/.zensu/config.json` or the project-local
-`.zensu/config.json`:
+`.zensu/config.json` under the session's recorded project root, which in a session whose working
+directory is a git worktree is that worktree's own file:
 
 | Key | Default | Effect |
 | --- | --- | --- |

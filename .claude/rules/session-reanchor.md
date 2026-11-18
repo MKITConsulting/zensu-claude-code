@@ -24,14 +24,17 @@ caller-named.
 trusted and never an argument.** `hooks/lib/zensu-session-reanchor.sh` captures `pwd -P` before
 its own `cd`, and the only argv token it accepts is `--confirm`. The verdict ladder in
 `hooks/lib/session-reanchor-v1.js`, in this order: strict record read (else orphan →
-`recorded-root-missing`, pruned → `not-served-by-executing-runtime`, else `record-unreadable`),
+`recorded-root-missing`, pruned or orphaned-and-pruned → `not-served-by-executing-runtime`,
+else `record-unreadable`),
 `plugin_data` equality, `servesRecordedRuntime`, own workflow document PRESENT and holding no open
 work, recorded root inside a git worktree, target inside a git worktree, SAME git common directory,
 target top-level registered and not prunable, not already the anchor, not containing the recorded
 root, containing no other registered worktree, target document for this session absent or intact,
 no open Autopilot run this session owns under the recorded root, live claims. Keep the order: a
 cheap refusal must not hide behind a probe that takes a project-wide lock or touches other
-sessions' files, and the Autopilot rung takes the recorded root's Autopilot lock.
+sessions' files, and the Autopilot rung takes the recorded root's Autopilot lock. The record read
+is one `readContextLadder` call in `readRecord` naming all four readers; the walker paragraph of
+`.claude/rules/session-adoption.md` holds the rule for its rung list.
 
 **The Autopilot rung asks the Autopilot library, not the workflow document.** A run in `PLANNING`
 or `AWAIT_TDD` has no chain linked yet, so the document's `autopilotRunId` misses it, and after a
@@ -154,9 +157,17 @@ because at the default the gate allows every one of them. `P5b` in
 
 **The identity comes from `CLAUDE_CODE_SESSION_ID`, never from a module-private variable.** The
 source-write gate refuses a command-line rebind of that name, so `node session-reanchor-v1.js`
-with another live session's raw id is refused where the invocation is visible. It is not refused
-through an indirection — `bash -c`, a script file — which is the same residual every protected
-Session Control input has.
+with another live session's raw id is refused where the invocation is visible, which includes
+literal code handed to a shell, `eval` or `trap`. The module's own inputs are protected the same
+way: `REANCHOR_INPUTS` in `hooks/lib/bash-source-write-parse.js` holds every `ZREANCHOR_*` name
+the module reads and the wrapper sets, so a direct `node session-reanchor-v1.js` call cannot
+name the target, confirm the move or point the Autopilot probe at another shell, and the refusal
+names `/zensu:adopt-session --reanchor`, whose wrapper sets them inside its own process
+(`.claude/rules/git-mutation-tables.md`). Neither is refused through code the check cannot read
+in the command text of the Bash and PowerShell tools — a script file, a shell's standard input,
+code built at run time, interpreter code — or through a tool the check is not registered on,
+such as a main-thread `Monitor` command, which is the same residual every protected Session
+Control input has.
 
 **The report lists the target's uncommitted paths.** The claim probe finds where a live session
 started, is anchored or keeps an anchor, not where it edits; a session anchored elsewhere that

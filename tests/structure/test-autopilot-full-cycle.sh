@@ -273,6 +273,11 @@ PLAN="# Full-cycle fixture
 
 Exercise the complete durable lifecycle.
 
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | The durable lifecycle reaches DONE. | spec |
+
 <!-- zensu-autopilot:${RUN} -->"
 # The shape the CURRENT harness delivers: it strips the ExitPlanMode fields its
 # schema does not declare, so the approved plan arrives in the tool response.

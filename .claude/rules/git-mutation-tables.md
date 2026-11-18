@@ -479,8 +479,9 @@ gate suite, F8c and D10-D14 in `tests/structure/test-secret-scan-gate.sh`, and t
 readings (an unknown `$'…'` escape, `$"…"`, `=cmd`, `noglob`, `nocorrect`, `-`) are not applied,
 although the Bash tool runs zsh where that is the user's shell (measured on macOS); a program word
 built at run time, aliases and functions; a variable name the shell builds at run time in a
-builtin or wrapper operand; code built or stored at run time (`eval`, `trap`, `bash -c`, `source`,
-a script file, a `mapfile -C` callback); arithmetic through another variable's value or an integer
+builtin or wrapper operand; code built at run time (`bash -c "$CODE"`, `eval "$(…)"`) or read from
+outside the command text (`source`, a script file, a shell's standard input, a `mapfile -C`
+callback); arithmetic through another variable's value or an integer
 attribute; zsh's numeric `printf` arguments and module builtins; and wrappers outside `WRAP`. The
 third reading is a hand-written approximation of the shell grammar, and a construct it misreads
 can hide the commands after it, so every misreading is an allow. `lex()` still splits at a `;`, `&` or `|` inside quotes, so the two base
@@ -488,6 +489,96 @@ readers can refuse quoted text that spells a protected assignment. `[ … -eq �
 evaluate no arithmetic in bash 5 or zsh 5.9 (measured), so those operands are not read; the
 `-v NAME[…]` operand of `[[`, `[` and `test` does evaluate its subscript in bash 5.3 (measured),
 and `subscriptFinding` reads it.
+
+**Literal code a command hands to a shell is read as a command of its own.** `nestedCode`
+answers the candidate code of a simple command whose program, read through `programName` past
+the `WRAP` names, is a member of `NESTED_SHELLS` (the Bourne-family shells and their restricted
+spellings, `fish`, `csh` and `tcsh`), also with a version suffix that `shellProgram` drops
+(`bash5.2`, `zsh-5.9`, `ksh93`), `busybox` with one of them as its first operand, or zsh's
+`emulate`. `shellCodeCandidates` finds the first option word that starts with `-` or `+` and
+holds a `c`, for `fish` also a `C`, and returns the code attached to that word and to every later
+word that holds the letter (the text after its first `c` in a short cluster, after `=` in a long
+option, so `fish -c'…'`, `--command=…` and `fish -C x -c'…'` are read), every word after it on
+its own, and the words after the first and after
+the second joined with blanks. The reading is fail closed by construction, and that is the
+decision: no option grammar the parser does not model (`-o`, `-O`, `+c`, `--rcfile`,
+`-coshwordsplit`, `-c -1`) moves the code out of reach, and code that runs its positional
+parameters (`"$@"`, `eval "$1"`, `"$0" "$@"`) is read as the command those parameters form. The
+positional words, every word after the option but the first word that is no option, which a POSIX
+shell runs as its code whatever letters follow its `c` (`-ce`), and for `fish` with code attached
+to an option word every word but the option words that carry it, are also matched against
+`PROTECTED_WORD`: one that names a `CONTROL_BINDINGS` name
+not spelled as `$NAME` or `${NAME` is refused as kind `positional` with a reason of its own,
+because the code can run or assign its positional words in any slice or order (`shift; "$@"`,
+`"${@:2}"`, `printf -v "$1"`), which no join can enumerate. That rule runs after the candidates,
+so a positional assignment keeps the rebind reason. Its price is an over-read: a positional word
+that spells a protected assignment, or names a protected input at all, is refused even where the
+code only reads it (`bash -c 'printenv "$1"' _ CLAUDE_CODE_SESSION_ID`), and after an option that
+takes a value (`bash --rcfile <file> -c '…'`) the file counts as the code and the code as a
+positional word, which is the safe direction for a check that cannot be switched off: a long
+option such as `--rcfile` cannot be told from a long spelling of `-c` without modelling each
+shell's option grammar, and taking the first word after every such option as code would let a
+second `-c` after the real code hide a positional word. A script file, `bash -s`
+and code a shell reads from its standard input stay unread, and for the POSIX shells `-C` is
+noclobber, not code. `nestedCode` also answers the operands of `eval`, a leading `--` dropped,
+and the action of `trap` when a condition follows it and it is not an option.
+`readControlMutation` and the grammar reader's `commandFinding` hand each candidate to
+`nestedFinding`, which applies the env-file write refusal (`envFileWrite`, kind `envfile`,
+answered with `ENV_FILE_WRITE`) and then `controlFinding` with all three readings, so every
+refusal the always-on check gives a top-level command reaches nested code, a nameref inside
+`bash -c` included. Rules (A), (B) and (C) read no nested code. `MAX_SHELL_NESTING` bounds the
+depth, and a deeper shell is refused as `deep`. The memo in the context is keyed by depth and
+code, so the readings that meet one candidate read it once, and a call without a context starts
+a fresh one. The word-split reading looks for no nested code. Code handed to `powershell`,
+`powershell_ise`, `pwsh` or `cmd` (`FOREIGN_HOSTS`) goes to `controlVerdict` of
+`hooks/lib/powershell-command-v1.js` instead (`foreignFinding`), each argument as a
+single-quoted PowerShell literal, with `CONTROL_BINDINGS` and the env-file comparison. That
+verdict refuses any spelling of a protected name, an encoded command, a host left to read its
+command from standard input and code it cannot read, while a help request and a `pwsh` version
+request before any code run nothing and pass (`isTerminalOption` in the analyzer); the deny names
+the host and the verdict's reason, and a failed load refuses with `POWERSHELL_UNLOADED`.
+`command -v` and `-V` only look a program up, so `WRAPPER_OPTIONS.command` marks them with the
+`lookup` effect and `runsNested` reads no nested code for that command. `csh`, `tcsh` and `fish` code is read with the POSIX grammar, so an
+`env NAME=…` or an assignment word there is refused while `setenv` and fish's `set -x` are not
+read.
+
+**The entry points' own inputs are protected inputs.** The adoption report's inputs are
+`ADOPTION_INPUTS` and the re-anchor module's are `REANCHOR_INPUTS`, both spread into
+`CONTROL_BINDINGS`, so every reader of that set refuses them, the PowerShell control verdict
+included. Their reasons name the entry point instead of a fresh session, because
+`zensu-session-adopt.sh` and `zensu-session-reanchor.sh` set them inside their own processes,
+where no PreToolUse gate looks: `/zensu:adopt-session` and `/zensu:adopt-session --reanchor`
+keep working (`.claude/rules/restore-vanished-project-root.md`,
+`.claude/rules/session-reanchor.md`). The unit case derives each list from the module that reads
+it and from the wrapper that sets it, requires the two equal, and refuses every derived name with
+its entry point's remedy, so an input a module starts to read without joining its set fails
+there. Putting `bash` and `sh` into `WRAP` was weighed and refused: `WRAP` marks a transparent
+wrapper whose next word is a command, rule (C) and the CLI gate's hand copy anchor on it, and it
+would read an assignment only at the very start of the code.
+
+**Three shell readers keep three shell sets.** The parser's nested-code reader, the CLI gate's
+reader in `hooks/lib/subagent-shell-guard-v1.js` and `POSIX_SHELLS` in the PowerShell analyzer
+each carry their own shell list and their own code-operand rule. The guard reads `bash -c`,
+`fish -c`, `eval` and a here-document on a shell's standard input, and none of `ash`, `rbash`,
+`busybox`, `trap`, `emulate`, an option word around `-c`, the code attached to fish's option
+word, the positional join, the positional-word rule or a PowerShell host; the parser reads all of
+those and no standard input. The `nested` map of the unit case
+`the shell readers of the source-write parser and the subagent shell guard, compared over one
+corpus` pins each difference, so a change to either reader moves a pinned line; the analyzer's
+set is in no corpus. One owner for the shell list and the code-operand rule is the standing fix,
+and it is not taken here.
+
+**Known residuals of nested code, all stated in `docs/gates.md`:** code built at run time
+(`bash -c "$CODE"`, `eval "$(…)"`), a script file, `source`, code a shell reads from standard
+input, interpreter code (`node -e`, `python -c`), a wrapper outside `WRAP` that takes a command
+(`timeout`, `xargs`, `stdbuf`, `su -c`, `find -exec`), and a command run through a tool the
+check is not registered on, such as a main-thread `Monitor` command: the `source-write-gate`
+entry of `DISPATCHED_CHECKS` matches `Bash|PowerShell` only. Pins: the unit case `the Session
+Control check protects the entry-point inputs and reads the code a command hands to a shell,
+eval or trap` and the corpus case above in `tests/structure/git-repo-escape.test.js`, and
+`R11f` to `R11g8` in `tests/structure/test-restore-project-root.sh`. **Version: `minor`**: the
+always-on check refuses calls it let through, which changes the capability set of every session
+a newer installation would serve.
 
 **The env-file path comparison folds on every platform.** `controlPathNamespace` and
 `commandRefersToControlPath` pass both sides through `foldPath` (NFC, then
@@ -526,8 +617,8 @@ grammar (`RESERVED_WORDS`, `ASSIGNMENT_RE` for `SHELL_ASSIGNMENT`, `DIRECTORY_WR
 `SHELL_WRAP`, `WRAPPERS` for `WRAPPER_OPTIONS`); `WRAP` itself is derived from the keys of
 `WRAPPER_OPTIONS`, so a wrapper never lacks its option table. The unit case `the shell readers of
 the source-write parser and the subagent shell guard, compared over one corpus` pins where the two
-readers agree and their three differences (`env -S`, `sudo -h` and the guard's extra wrappers), so
-a change to either table moves a pinned line.
+readers agree and where they differ (`env -S`, `sudo -h`, the guard's extra wrappers and the
+nested code above), so a change to either table moves a pinned line.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
 `hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the

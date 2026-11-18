@@ -1,4 +1,4 @@
-description: "zen-mode model-reaction eval (contract compliance, a compression mode the user chose outranking it, the never-compress safety carve-out, a safety warning under a compression mode the user chose, which sets its sentence form and never its length or detail, the rule-6 chain-progress anchor, that anchor's failed-and-omitted half, the closing session block in a session with earlier work and on a first turn that only answers, and the short body every later prompt of a context generation carries, graded standing alone on contract compliance, the safety carve-out, the safety warning under a compression mode, the anchor and both session blocks). Grades how the model REACTS to the injected zen-mode contract."
+description: "zen-mode model-reaction eval (contract compliance, a compression mode the user chose outranking it, the never-compress safety carve-out, a safety warning under a compression mode the user chose, which sets its sentence form and never its length or detail, the rule-6 chain-progress anchor, that anchor's failed-and-omitted half, the closing session block in a session with earlier work and on a first turn that only answers, the closing step that says a finished session can be archived and offers no archive while the session's own pull request is open, and the short body every later prompt of a context generation carries, graded standing alone on contract compliance, the safety carve-out, the safety warning under a compression mode, the anchor, both session blocks and both archive cases). Grades how the model REACTS to the injected zen-mode contract."
 
 providers:
   - id: 'exec: ./provider.sh'
@@ -31,6 +31,10 @@ tests:
   - file://scenarios/session-block-first-turn.yaml
   - file://scenarios/short-session-block.yaml
   - file://scenarios/short-session-block-first-turn.yaml
+  - file://scenarios/session-done.yaml
+  - file://scenarios/session-open-pr.yaml
+  - file://scenarios/short-session-done.yaml
+  - file://scenarios/short-session-open-pr.yaml
 
 evaluateOptions:
   maxConcurrency: 2

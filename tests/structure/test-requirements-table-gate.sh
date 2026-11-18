@@ -197,6 +197,44 @@ for list_locale in C en_US.UTF-8; do
 done
 [ "$LIST_OK" -eq 1 ]
 check "L24 --list expands a comma list, keeps the narrow deprecated markers and an unmarked row active, in both locales" "$(verdict $?)"
+cat > "$FIX/manual.md" <<'PLAN'
+# Plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | the requirement row | spec |
+| ~~AC-008~~ | a struck requirement row | spec |
+
+```text
+## Manual Acceptance
+| AC-009 | fenced | x | y |
+```
+
+## Manual Acceptance
+| Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
+|-----------|------------------------------------|----------------------------------------|---------|
+| **AC-002** | sign in with the real account | credentials | planning answer, 2026-11-16 |
+| [AC-003](#ac-003) | open the deployed page | non-loopback host | planning answer, 2026-11-16 |
+| AC-004, AC-005 | install the signed build | signed build | planning answer, 2026-11-16 |
+| ~~AC-007~~ | a withdrawn check | signed build | planning answer, 2026-11-16 |
+
+## Steps
+| AC-006 | outside | x | y |
+PLAN
+MAN_WANT="$(printf '%s\t%s\t%s\n' \
+  AC-002 active 'sign in with the real account' \
+  AC-003 active 'open the deployed page' \
+  AC-004 active 'install the signed build' \
+  AC-005 active 'install the signed build' \
+  AC-007 deprecated 'a withdrawn check')"
+MAN_HAVE="$(bash "$REQ" --list --manual-acceptance --plan "$FIX/manual.md" 2>/dev/null)"; MAN_RC=$?
+bash "$REQ" --list --manual-acceptance --plan "$FIX/list.md" >/dev/null 2>"$FIX/manual-none.err"; MAN_NONE=$?
+REQ_HAVE="$(bash "$REQ" --list --plan "$FIX/manual.md" 2>/dev/null)"
+[ "$MAN_RC" -eq 0 ] && [ "$MAN_HAVE" = "$MAN_WANT" ] && [ "$MAN_NONE" -eq 3 ] \
+  && grep -qF 'no "## Manual Acceptance" section' "$FIX/manual-none.err" \
+  && [ "$REQ_HAVE" = "$(printf '%s\t%s\t%s\n%s\t%s\t%s' AC-001 active 'the requirement row' AC-008 active 'a struck requirement row')" ]
+check "L24b --manual-acceptance lists the decorated, linked and comma-listed ids of the Manual Acceptance section only, outside fences, reads a struck-out id as withdrawn there while ## Requirements keeps it active, and exits 3 without one" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/rows-outside.md" >/dev/null 2>&1
 [ $? -eq 4 ]
 check "L8 an AC row under a LATER '## ' section is not counted" "$(verdict $?)"
@@ -320,7 +358,7 @@ an opening fence that is never closed
 | AC-001 | a real requirement the fence swallows | spec |
 PLAN
 ERR_L19="$(bash "$REQ" --plan "$FIX/fence-unterminated.md" 2>&1 >/dev/null)"
-[ $? -eq 2 ] && printf '%s' "$ERR_L19" | grep -qF 'unterminated code fence'
+[ $? -eq 5 ] && printf '%s' "$ERR_L19" | grep -qF 'unterminated code fence'
 check "L19 an unterminated fence is a parse failure, not a verdict about the table" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/no-header.md" >/dev/null 2>&1
 check "L18 a table with no recognizable header row falls back to split index 3" "$(verdict $?)"
@@ -434,8 +472,8 @@ check "L23 a fence nested inside another fence does not flip parity (no false un
 # failure, and a table that lives only inside a fence is still not a table.
 printf '%s\n' '# Zensu Plan: still open' '' '## Requirements' '```' '| AC-001 | x | spec |' > "$FIX/still-open.md"
 bash "$REQ" --plan "$FIX/still-open.md" >/dev/null 2>&1
-[ $? -eq 2 ]
-check "L23b a genuinely unterminated fence is still exit 2" "$(verdict $?)"
+[ $? -eq 5 ]
+check "L23b a genuinely unterminated fence is still exit 5" "$(verdict $?)"
 rm -rf "$FIX"
 
 echo "== AC-004: a chain that changed nothing is out of scope =="
@@ -535,7 +573,8 @@ for SID in rq-missing rq-placeholder rq-filled rq-explicit rq-explicit-absent \
            rq-explicit-outside rq-explicit-stem rq-relative-log rq-outside-log \
            rq-wrong-schema rq-malformed rq-clean-tree rq-symlink-plans \
            rq-symlink-logs rq-no-stem rq-stem-unchecked rq-writer-seam rq-both-off \
-           rq-legacy-v1 rq-git-refused rq-git-refused-off; do
+           rq-legacy-v1 rq-git-refused rq-git-refused-off rq-explicit-fence rq-fr-only \
+           rq-fr-advisory rq-fr-escape rq-fr-fault rq-fr-unread rq-fr-fault-required; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -645,8 +684,9 @@ printf '%s' "$ERR_M" | grep -qF 'no usable `## Requirements` table'
 check "M2 the refusal names the missing table" "$(verdict $?)"
 printf '%s' "$ERR_M" | grep -qF '/zensu:converge'
 check "M3 the refusal explains what the table is for, not just that it failed" "$(verdict $?)"
-printf '%s' "$ERR_M" | grep -qF 'ZENSU_REQUIREMENTS_GATE=off'
-check "M4 the refusal documents the escape hatch instead of hiding it" "$(verdict $?)"
+printf '%s' "$ERR_M" | grep -qF 'report this refusal and leave the decision to the user' \
+  && ! printf '%s' "$ERR_M" | grep -qE 'ZENSU_[A-Z_]*GATE'
+check "M4 the refusal leaves the decision to the user and names no gate escape" "$(verdict $?)"
 printf '%s' "$ERR_M" | grep -qF '2026-01-01-0101_build-missing.md'
 check "M5 the refusal names the plan path it judged" "$(verdict $?)"
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_M")" implComplete)" != "true" ]
@@ -689,6 +729,97 @@ RC_D=$?
 # that never reached the gate at all (a session-state refusal exits above it).
 [ "$RC_D" -eq 0 ] && ! printf '%s' "$ERR_D" | grep -qF 'REQUIREMENTS GATE UNRESOLVED'
 check "D3 the accepted completion judged a plan rather than skipping (no UNRESOLVED line)" "$(verdict $?)"
+
+echo "== FR-008: a standalone plan needs an active acceptance criterion =="
+SID_FR="rq-fr-only"
+activate_session "$SID_FR"
+cat > "$BODIES/fr-only.md" <<'PLAN'
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| FR-001 | the gate refuses a plan with no table | spec |
+PLAN
+stage "$SID_FR" "2026-01-01-2424_build-fr-only" "$BODIES/fr-only.md"
+ERR_FR="$(bash "$LOG" --tdd-complete --session "$SID_FR" 2>&1 >/dev/null)"
+RC_FR=$?
+[ "$RC_FR" -eq 1 ] \
+  && printf '%s' "$ERR_FR" | grep -qF 'zensu-log.sh --tdd-complete: refusing to mark implementation complete — the plan .zensu/plans/2026-01-01-2424_build-fr-only.md carries no active AC-### acceptance criterion (its ## Requirements table has no AC-### row)' \
+  && printf '%s' "$ERR_FR" | grep -qF 'Prefer criteria this environment can observe' \
+  && ! printf '%s' "$ERR_FR" | grep -q 'ZENSU_' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FR")" implComplete)" != "true" ]
+check "AC1 a changed tree whose plan carries only FR rows is refused with the observable-criterion remedy and no escape" "$(verdict $?)"
+cp "$BODIES/filled.md" "$PROJ/.zensu/plans/2026-01-01-2424_build-fr-only.md"
+bash "$LOG" --tdd-complete --session "$SID_FR" >/dev/null 2>&1
+[ $? -eq 0 ] && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FR")" implComplete)" = "true" ]
+check "AC2 the same chain completes once the plan carries an active AC row" "$(verdict $?)"
+awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -A2 -F '              0)' | grep -qF "if [ \"\$complete_ctx\" = '{}' ]; then"
+check "AC3 the criterion check runs only for a standalone chain, after the table was judged usable" "$(verdict $?)"
+SID_FA="rq-fr-advisory"
+activate_session "$SID_FA"
+stage "$SID_FA" "2026-01-01-2525_build-fr-advisory" "$BODIES/fr-only.md"
+printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$SUITE_TMP/acceptance-advisory.json"
+ERR_FA="$(ZENSU_CONFIG="$SUITE_TMP/acceptance-advisory.json" bash "$LOG" --tdd-complete --session "$SID_FA" 2>&1 >/dev/null)"
+RC_FA=$?
+[ "$RC_FA" -eq 0 ] \
+  && printf '%s' "$ERR_FA" | grep -qF 'ACCEPTANCE CRITERIA — advisory, not blocking | the plan .zensu/plans/2026-01-01-2525_build-fr-advisory.md carries no active AC-### acceptance criterion' \
+  && printf '%s' "$ERR_FA" | grep -qF 'the chain terminus will report no-criteria after the review without blocking it' \
+  && ! printf '%s' "$ERR_FA" | grep -q 'ZENSU_' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FA")" implComplete)" = "true" ]
+check "AC4 an advisory acceptance gate completes an FR-only plan and says the terminus will report no-criteria" "$(verdict $?)"
+SID_FE="rq-fr-escape"
+activate_session "$SID_FE"
+stage "$SID_FE" "2026-01-01-2626_build-fr-escape" "$BODIES/fr-only.md"
+ERR_FE="$(ZENSU_ACCEPTANCE_GATE=off bash "$LOG" --tdd-complete --session "$SID_FE" 2>&1 >/dev/null)"
+RC_FE=$?
+[ "$RC_FE" -eq 0 ] \
+  && ! printf '%s' "$ERR_FE" | grep -qF 'carries no active AC-###' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FE")" implComplete)" = "true" ]
+check "AC5 a switched-off acceptance gate skips the criteria check at completion" "$(verdict $?)"
+CRITERIA_FAULT="$SUITE_TMP/criteria-fault.js"
+cat > "$CRITERIA_FAULT" <<'JS'
+if (process.env.ZENSU_AVR_CRITERIA_ADVISORY !== undefined && process.env.ZENSU_AVR_LABEL === 'zensu-log.sh --tdd-complete') {
+  if (process.env.ZENSU_TEST_CRITERIA_FAULT === 'unreadable') {
+    const childProcess = require('child_process');
+    const spawnSync = childProcess.spawnSync;
+    childProcess.spawnSync = function patchedSpawnSync(command, args) {
+      if (Array.isArray(args) && args.includes('--list')) {
+        return { error: Object.assign(new Error('fixture'), { code: 'EACCES' }), status: null, stdout: '', stderr: '' };
+      }
+      return spawnSync.apply(this, arguments);
+    };
+  } else {
+    process.exit(70);
+  }
+}
+JS
+SID_FX="rq-fr-fault"
+activate_session "$SID_FX"
+stage "$SID_FX" "2026-01-01-2727_build-fr-fault" "$BODIES/fr-only.md"
+ERR_FX="$(ZENSU_CONFIG="$SUITE_TMP/acceptance-advisory.json" NODE_OPTIONS="--require=$CRITERIA_FAULT" bash "$LOG" --tdd-complete --session "$SID_FX" 2>&1 >/dev/null)"
+RC_FX=$?
+[ "$RC_FX" -eq 0 ] \
+  && printf '%s\n' "$ERR_FX" | grep -qxF 'ACCEPTANCE CRITERIA — advisory, not blocking | the acceptance-criteria check did not complete (exit 70), so the plan was NOT judged' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FX")" implComplete)" = "true" ]
+check "AC6 an advisory acceptance gate completes with a not-judged notice when the criteria check faults" "$(verdict $?)"
+SID_FU="rq-fr-unread"
+activate_session "$SID_FU"
+stage "$SID_FU" "2026-01-01-2828_build-fr-unread" "$BODIES/fr-only.md"
+ERR_FU="$(ZENSU_CONFIG="$SUITE_TMP/acceptance-advisory.json" ZENSU_TEST_CRITERIA_FAULT=unreadable NODE_OPTIONS="--require=$CRITERIA_FAULT" bash "$LOG" --tdd-complete --session "$SID_FU" 2>&1 >/dev/null)"
+RC_FU=$?
+[ "$RC_FU" -eq 0 ] \
+  && printf '%s' "$ERR_FU" | grep -qF 'ACCEPTANCE CRITERIA — advisory, not blocking | the acceptance criteria of .zensu/plans/2026-01-01-2828_build-fr-unread.md could not be read: the requirements lister could not run (EACCES), so the plan was NOT judged' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FU")" implComplete)" = "true" ]
+check "AC7 an advisory acceptance gate completes with a not-judged notice when the criteria check cannot read the plan" "$(verdict $?)"
+SID_FR2="rq-fr-fault-required"
+activate_session "$SID_FR2"
+stage "$SID_FR2" "2026-01-01-2929_build-fr-fault-required" "$BODIES/filled.md"
+ERR_FR2="$(NODE_OPTIONS="--require=$CRITERIA_FAULT" bash "$LOG" --tdd-complete --session "$SID_FR2" 2>&1 >/dev/null)"
+RC_FR2=$?
+[ "$RC_FR2" -eq 1 ] \
+  && printf '%s' "$ERR_FR2" | grep -qF 'zensu-log.sh --tdd-complete: the acceptance-criteria check did not complete (exit 70), so the plan was NOT judged.' \
+  && printf '%s' "$ERR_FR2" | grep -qF 'Run /zensu:doctor; if the check still cannot run, report this refusal and leave the decision to the user.' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_FR2")" implComplete)" != "true" ]
+check "AC8 a required acceptance gate refuses --tdd-complete with its cause when the criteria check faults" "$(verdict $?)"
 
 echo "== AC-005: the explicit --plan channel =="
 SID_X="rq-explicit"
@@ -749,6 +880,17 @@ check "X3 --plan is refused on a verb that cannot act on it" "$(verdict $?)"
 ERR_X4="$(bash "$LOG" --tdd-complete --session "$SID_XA" --plan "" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_X4" | grep -qF 'must not be empty'
 check "X4 an empty --plan is a usage error, not a plan-content verdict" "$(verdict $?)"
+SID_XF="rq-explicit-fence"
+activate_session "$SID_XF"
+printf '%s\n' '# Zensu Plan: fence' '' '## Requirements' '| ID | Requirement | Source |' '|----|-------------|--------|' '| AC-001 | a requirement the open fence leaves unread | spec |' '' '```' 'an example that is never closed' > "$BODIES/fence-open.md"
+stage "$SID_XF" "2026-01-01-0606_build-explicit-fence" "$BODIES/fence-open.md"
+ERR_XF="$(bash "$LOG" --tdd-complete --session "$SID_XF" --plan "$PROJ/.zensu/plans/2026-01-01-0606_build-explicit-fence.md" 2>&1 >/dev/null)"
+RC_XF=$?
+[ "$RC_XF" -ne 0 ] && printf '%s' "$ERR_XF" | grep -qF 'does not parse' \
+  && printf '%s' "$ERR_XF" | grep -qF 'Close the code fence the plan leaves open' \
+  && ! printf '%s' "$ERR_XF" | grep -qF 'could not judge the plan' \
+  && ! printf '%s' "$ERR_XF" | grep -qF 'carries no usable'
+check "X2f a plan whose code fence never closes is refused as a plan that does not parse, with the fence as the remedy" "$(verdict $?)"
 
 echo "== AC-006: the escape hatch, and its independence =="
 SID_E="rq-escape"

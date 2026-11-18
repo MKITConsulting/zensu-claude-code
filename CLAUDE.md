@@ -19,10 +19,9 @@ A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the
 
 ## Language
 
-**English only.** All code, comments, docs, commit messages, plan files, prompts,
-fixture content and pattern alternations must be in English, and so must every
-artifact the plugin emits. Consuming repositories commit `.zensu/plans/` and
-`.zensu/logs/` and may publish them.
+**English only.** All code, comments, docs, commit messages, plan files, prompts, fixture
+content and pattern alternations must be in English, and so must every artifact the plugin
+emits. Consuming repositories commit `.zensu/plans/` and `.zensu/logs/` and may publish them.
 
 Two narrow carve-outs admit non-English text, and only as match literals: verbatim
 user-utterance literals in hook directives (for example `'kein tdd'`), and eval
@@ -38,12 +37,11 @@ section headings it appends to a pull request body.
 ## Version Bumps
 
 **Every plugin version bump MUST update `.claude-plugin/plugin.json`, the
-marketplace version, AND the marketplace source `ref` in the same commit.**
-
-The two files serve different consumers:
+marketplace version, AND the marketplace source `ref` in the same commit.** The files serve different consumers:
 
 - `.claude-plugin/plugin.json` — manifest read by claude-code when loading the installed plugin. Defines runtime agents/skills/hooks/mcpServers.
-- `.claude-plugin/marketplace.json` — catalog read by `claude plugin marketplace update <name>`. Its Zensu entry uses the official GitHub source object for `MKITConsulting/zensu-claude-code` and an immutable `v<plugin version>` ref. The `version` and `source.ref` of the entry named `zensu` must both match `plugin.json`. `release.yml`, `test-version-sync.sh`, `test-immutable-marketplace-release.sh` and the runtime install fixture select that entry by name, and the release bump (`.github/scripts/bump-marketplace-entry.js`) rewrites that entry alone, so another plugin's entry keeps its own version and ref. `test-autopilot-skill.sh`, `test-ghost-scan-test-detection.sh`, `test-pilot-skill.sh`, `test-plan-review-skill.sh`, `test-pr-team-review-skill.sh`, `test-self-review-skill.sh`, `test-setup-skill.sh`, `test-zensu-help-skill.sh`, `evals/session-control/run-self-check.sh` and `validateProductionMarketplace` in `evals/session-control/lib/create-local-marketplace-fixture.js` still read `.plugins[0]` or require exactly one entry, so the change that adds a second entry moves them first. A mutable branch source is forbidden.
+- `.claude-plugin/marketplace.json` — catalog read by `claude plugin marketplace update <name>`. Its Zensu entry uses the official GitHub source object for `MKITConsulting/zensu-claude-code` and an immutable `v<plugin version>` ref. The `version` and `source.ref` of the entry named `zensu` must both match `plugin.json`. `release.yml`, `test-version-sync.sh`, `test-immutable-marketplace-release.sh` and the runtime install fixture select that entry by name, and the release bump (`.github/scripts/bump-marketplace-entry.js`) rewrites that entry alone, so another plugin's entry keeps its own version and ref. Every other reader of the real catalog selects the `zensu` entry by name too, so the order of the entries carries no meaning. A mutable branch source is forbidden.
+- `plugins/session-hub/.claude-plugin/plugin.json` — the manifest of the second plugin, `session-hub@zensu`. Its `version` and the `version` and `source.ref` (`session-hub--v<version>`) of the `git-subdir` entry named `session-hub` move together, and only `.github/workflows/release-session-hub.yml` moves them: `.claude/rules/session-hub-companion.md`.
 
 Historical: `marketplace.json` was created at `0.2.0` (commit `a0a58b2`) and never re-bumped while `plugin.json` advanced through 0.2.x → 0.3.x. Result: every release between 0.2.0 and 0.3.15 was invisible to the directory marketplace and users running `claude plugin install zensu@zensu` could not pull the new code without uninstalling + manually clearing the cache directory. Fixed in PR #31; this convention prevents recurrence.
 
@@ -88,10 +86,9 @@ Full policy, exemptions and known gaps: `.claude/rules/runtime-lineage.md`.
 
 ## Shell Portability
 
-macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write
-every `case` pattern with the optional leading paren, `(pattern)`. The bare `pattern)`
-form closes the substitution early on bash 3.2, and `bash -n` does not catch it.
-Details: `.claude/rules/bash32-command-substitution.md`.
+macOS ships bash 3.2 as `/bin/bash`. Inside a command substitution `$( ... )`, write every
+`case` pattern with the optional leading paren, `(pattern)`. The bare `pattern)` form closes the
+substitution early on bash 3.2, and `bash -n` does not catch it. Details: `.claude/rules/bash32-command-substitution.md`.
 
 ## Pull Request Workflow
 
@@ -126,7 +123,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Requirements-Table Gate (`hooks/lib/zensu-plan-requirements.sh`)** — why `--tdd-complete` refuses a plan without a usable `## Requirements` table: `.claude/rules/requirements-table-gate.md`
 - **Evidence Runner and Full-Suite Gate (`hooks/lib/evidence-run-v1.js` + `zensu-log.sh --evidence-run` / `--chain-done`)** — the plugin-run full suite, its tree-bound record and the terminus gate: `.claude/rules/evidence-runner.md`
 - **Full Suite in CI (`ci-contract-v1.js` + `full-suite-policy-v1.js` + `/zensu:full-suite`)** — leaving a chain's full suite to the verified CI pull-request pipeline, the asymmetric ladder and the chain snapshot: `.claude/rules/full-suite-ci-deferral.md`
-- **Acceptance Verification Gate (`hooks/lib/acceptance-verify-v1.js` + `zensu-log.sh --acceptance-record` / `--acceptance-status` / `--chain-done`)** — per-criterion live verification records, the receipt-anchored plan and the terminus refusal: `.claude/rules/acceptance-verification-gate.md`
+- **Acceptance Verification Gate (`hooks/lib/acceptance-verify-v1.js` + `zensu-log.sh --acceptance-record` / `--acceptance-status` / `--chain-done` / `--autopilot-validate`)** — per-criterion live verification records, the receipt-anchored plan, the terminus refusal, the standalone close on the user's consent with its Stop hand-off, and the Autopilot run mode that reads the approved plan copy and is the only way past VALIDATE: `.claude/rules/acceptance-verification-gate.md`
 - **Evidence Report Core (`hooks/lib/evidence-report-v1.js` + `zensu-log.sh --report-*`)** — the host-agnostic report owner, its verbs and transport, the store and its placement, containment, the text screen, the fault codes, the corpus and retention: `.claude/rules/evidence-report.md`
 - **Windows Budget for `best-solution-first`** — why a Windows shard budget, not a suite cap, binds: `.claude/rules/windows-budget-best-solution-first.md`
 - **Runtime Lineage (`version_type` is load-bearing)** — the full `version_type` policy and its breaking-change list: `.claude/rules/runtime-lineage.md`
@@ -135,6 +132,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)** — rebuilding a missing workflow document without relaxing the deny: `.claude/rules/workflow-baseline-repair.md`
 - **Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)** — owner versus workspace scoping, release and adoption of durable runs: `.claude/rules/autopilot-run-scope.md`
 - **Autopilot Gate Re-entry (`transition` in `hooks/lib/zensu-autopilot-state.sh`)** — why stage edges are only ever added, the gate re-entry after a convergence fix and the bound on re-opening a pull request: `.claude/rules/autopilot-gate-reentry.md`
+- **Converged Max-Rounds Attempts (`_zensu_bound_convergence` + `convergence` in `review-ledger-v1.js`)** — when an Autopilot-bound attempt at the round cap returns to its stage as `converged` instead of blocking with `TDD_MAX_ROUNDS`, the one owner of that decision and the additive outcome value: `.claude/rules/converged-max-rounds.md`
 - **Owner-Scoped Active-Run Read (`autopilot_read_active_strict`)** — which callers read the owner-scoped question strictly, the read-only look on a held lease, the same separation in the Stop reconcile and the public workspace read, and the lease checks: `.claude/rules/autopilot-active-read.md`
 - **CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)** — which `zensu` CLI verbs the write-gate treats as mutations: `.claude/rules/cli-command-classification.md`
 - **zensu-cli Version Floor (`hooks/lib/zensu-cli-version-v1.js`)** — the oldest supported zensu-cli, its install commands, a probe that never runs a working-directory binary, and the prose copies pinned to it: `.claude/rules/zensu-cli-floor.md`
@@ -171,6 +169,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Session-Trail Targeted Lookup (`idCandidateRows` / `ccdApp` in `skills/session-trail/scripts/trail.mjs`)** — why a selector verb summarizes only the transcripts its answer needs and parses only the matching desktop records, and the one row builder every path shares: `.claude/rules/session-trail-targeted-lookup.md`
 - **Session-Trail Fork Anchor (`sessionAnchor` / `forkOwnCwd` in `skills/session-trail/scripts/trail.mjs`)** — why a forked session's worktree and branch come from its own records rather than the parent's copied ones, the live registry or the desktop record: `.claude/rules/session-trail-fork-anchor.md`
 - **Session Hub Receipt (`hooks/user-prompt-session-hub-receipt.sh` + `session-hub-receipt-v1.mjs`)** — the receipt the Zensu Session Hub waits for after it types a takeover, and the handover contract it checks first: `.claude/rules/session-hub-receipt.md`
+- **Session Hub Companion (`plugins/session-hub/` + `release-session-hub.yml`)** — the second plugin, `session-hub@zensu` with `/session-hub:session-trail`: its tree and byte-identical copies, PLM's frozen copy and which checks grade which, the takeover notice, the changelog split, the release path split at the credential and its supersede recovery, the Claude Code lockfiles and the go-live order: `.claude/rules/session-hub-companion.md`
 - **Session Hub Usage Feed (`hooks/usage-feed.ts` + `hooks/usage-feed-contract.json`)** — the optional hooks module that writes rate-limit readings for the Session Hub, its contract and its opt-in directory: `.claude/rules/session-hub-usage-feed.md`
 - **zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)** — the hook-supplied progress anchor of zen-mode: `.claude/rules/zen-mode-chain-anchor.md`
 - **bash 3.2 Command-Substitution Truncation (`test-bash32-portability.sh`)** — why `case` patterns inside `$( )` need the leading paren: `.claude/rules/bash32-command-substitution.md`
@@ -188,6 +187,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
 - **Claim Syntax and the Chain's Work Tree (`edit-landing-claims-v1.js` + `--work-tree`)** — brace, glob and prose claims, audited corrections, and grading an Autopilot run's own worktree below the anchor: `.claude/rules/claim-syntax-and-work-tree.md`
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
+- **Signed-In Verify Runs (`verify-auth-state-v1.js` + `verify-auth-guard-v1.js` + `--login-recipe`)** — the recipe login inside the run-config helper, the one state setter, the consume-once recorder, the signed-in session rules and the textual read guard: `.claude/rules/verify-auth-guard.md`
 - **Verification Drivers (`skills/verify-feature/rules/drivers.md` + `verify-run-resources.js`)** — the nine drivers, why only the browser is gated, and the run-resource helper's identity rules: `.claude/rules/verify-feature-drivers.md`
 - **PowerShell Tool Coverage (`hooks/lib/powershell-command-v1.js` + `shell-tool-coverage-v1.js`)** — how each shell hook judges or refuses a command from Claude Code's PowerShell tool, the shared analyzer and its residuals, when the host runs that tool, and the banner line and doctor row: `.claude/rules/powershell-tool-coverage.md`
 - **Worktree Keep (`hooks/lib/worktree-keep-v1.js` + three advisory hooks)** — keeping a live session's worktree out of the Claude Desktop pool, and the drift notice when it is taken anyway: `.claude/rules/worktree-keep.md`

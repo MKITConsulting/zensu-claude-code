@@ -138,7 +138,7 @@ modes, the deny scopes, the Stop release, the doctor's pruned row, the re-anchor
 ladder and adoption need no change of their own.
 
 **A `record-unreadable` refusal names its cause.** `recordReaderRefusals` runs the
-three readers in ladder order, never throws, and returns one `{ reader, refusal }`
+four readers in ladder order, never throws, and returns one `{ reader, refusal }`
 per reader with the core's `session-control-v1: ` prefix stripped
 (`FAIL_PREFIX`). The adoption report renders one row per reader under the refusal
 (`readerRefusalRows`, read behind a `typeof` guard), the doctor's unbound row points
@@ -150,13 +150,39 @@ strictly more, one read-only export is added, and no record field, strict key se
 hook, matcher, config key or attestation moves. **The cost, stated:** with the minting tree gone, `runtime_digest`
 and `plugin_version` are shape-checked only and taken on the record's word. What
 still binds the record: session hash, schema, principal profiles, `plugin_data`
-equality, the recorded project root existing, the sibling cache directory, and the
-workflow document's schema. That is why such a record is **adopted once — automatically at
+equality, the recorded project root existing (or, in the combined state below, proven
+absent), the sibling cache directory, and the workflow document's schema when it is reachable. That is why such a record is **adopted once — automatically at
 the first hook contact, or by hand with `--confirm` — and never served** — serving stays
 strict at every strict read site
 (`resolveHookSession`, `currentClaudeSessionContext`, `zensu_resolve_project_dir`,
 SessionStart resume/compact, SubagentStart), and the re-minted record is
 re-verifiable again.
+
+**One walker owns the ladder order.** `readContextLadder({ recordsDir, sessionId, host }, readers)`
+walks `RECORD_READER_LADDER`, the table `recordReaderRefusals` maps over, and both take that one
+request shape, which the private `recordReaderOptions` translates into the readers' own options. It
+tries only the `RECORD_READERS` rungs its caller names, always in ladder order whatever order the
+caller lists, stops at the first reader that admits the record and returns `{ reader, context }`, or
+`null` when none does; it never throws. A request without a non-empty `host` reads nothing:
+`recordReaderOptions` answers `null` for it, the walker then answers `null` and
+`recordReaderRefusals` refuses every rung with `host must be a non-empty string`, so the two never
+disagree about such a request. `validateContext` checks the host only when one is named, so a caller
+that passed the readers' own `expectedHost` spelling would otherwise skip that check on every rung. Every caller maps the admitting reader to its own flags and refusals,
+and names exactly the rungs it read before the walker existed, so no site reads the record or
+measures a runtime digest more often than it did: condition 1 of `adoptableRecord` and `readRecord`
+in `session-reanchor-v1.js` name all four; `restoreRootVerdict` names strict, orphaned-project-root
+and orphaned-and-pruned; `resolvePrunedPluginRoot` names strict, pruned-plugin-root and
+orphaned-and-pruned, because the orphan reader measures the digest of a present plugin root;
+`resolveIncompatibleRuntime` names strict and orphaned-project-root. The two binder predicates name
+each reader they accept and answer `null` for any other, so a rung added to their list without a
+mapping stays outside the state they diagnose. Every rung is a relaxation, so
+the list is an inclusion list: a new reader reaches only the callers that name it, and each of them
+has to map it. The cases named for `readContextLadder`, and the case that counts the reads of the
+restore verdict and of both binder predicates, sit beside the `recordReaderRefusals` cases in
+`tests/session-control/session-control-core-v1.test.js`. They count record reads and plugin-tree
+opens, so a site that walks a rung it did not walk before fails there. **Version: `patch`** — one
+read-only export, and no record or workflow field, strict key set, hook, matcher, config key or
+attestation moves.
 
 **Disjoint from `incompatible-runtime` by construction, and blind to lineage on
 purpose.** `resolvePrunedPluginRoot` requires the STRICT read to fail and the
@@ -181,8 +207,8 @@ denier in `reviewer-capability-v1.js` — five deniers, the same set as the line
 state, which that file's own neighbouring comments already count as five; the FOURTH release arm in
 `stop-chain-enforcer.sh` plus its block reason and final stderr, which count four
 released states; the third probe in `zensu-doctor.sh` and the `pruned-plugin-root`
-case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → pruned),
-its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
+case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → orphaned → pruned → orphaned-and-pruned),
+which is one `readContextLadder` call naming all four rungs, its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
 `adoptContext` result; `PRUNED_NOTE` / `PRUNED_EXPLANATION` and the reworded
 `record-unreadable` remedy in `session-adopt-report-v1.js`; and the operator
 accounts in `docs/session-control.md` §"Unbindable sessions",
@@ -201,10 +227,20 @@ helper and the ladder; `P1ad3`/`P1ad4` in `tests/structure/test-doctor.sh` pin t
 row. In this state the bind fails inside the CORE, so the authoritative stderr
 diagnostic is the raw `session-control-v1: context plugin root does not exist`
 line rather than a binder-prefixed one, and Part D's gate helper tolerates exactly
-that line where AC-C04's tolerates only the prefix. **Composition with PR #272:**
-condition 1 becomes `strict → orphaned-project-root → pruned-plugin-root` when
-that PR lands; the COMBINED state — project root gone AND installation pruned —
-still refuses `record-unreadable`, and is the recorded gap. **Version: `patch`** —
+that line where AC-C04's tolerates only the prefix. **The COMBINED state — project root
+gone AND installation pruned — is adoptable.** It was the recorded gap, and it wedged a live
+session on 2026-11-17: each relaxed reader pinned the other's waiver off, so the record
+answered `record-unreadable` and every gate denied. Condition 1 is
+now `strict → orphaned-project-root → pruned-plugin-root → orphaned-and-pruned`. The last
+reader, `readOrphanedPrunedContext`, opts into both waivers and proves each absence through
+its own test, so it waives nothing a single-root reader keeps; a retired remnant counts as
+pruned there too. The verdict carries both flags, `adoptContext` re-mints around the absent
+project root with provenance `no-workflow-document`, and the session lands in the ordinary
+orphaned-project-root state. `restoreRootVerdict` and the re-anchor answer
+`not-served-by-executing-runtime` for the record until the adoption, so the order is adopt
+first, restore second, and the pruned deny scope, the gate's `PRUNED_ORPHAN_CLAUSE`, the Stop
+hook's pruned release and the doctor's pruned row each say so, because the pruned predicate
+cannot tell whether the project root still exists. **Version: `patch`** —
 no record or workflow field, no strict key set, no hook added, removed or renamed,
 no matcher change, no config key, no attestation change; every change relaxes a
 deny or names a state, and the new argv modes are a call convention inside one
@@ -536,8 +572,11 @@ exact drift in its own words ("state the base or the count means nothing"):
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
 the cross-host `session-control-core-v1.js` — and, since the vanished-root work and the
-pruned-installation state, also condition 1's strict-then-orphan-then-pruned ladder,
-`readPrunedPluginRootContext`, the `allowMissingPluginRoot` waiver beside it,
+pruned-installation state, also condition 1's strict-then-orphan-then-pruned-then-combined ladder,
+`readContextLadder` with its `RECORD_READER_LADDER` table and the `recordReaderOptions`
+translation it shares with `recordReaderRefusals`, through which every ladder caller of
+both halves walks, `readPrunedPluginRootContext`, `readOrphanedPrunedContext` with `requireOrphanedProjectRoot` and
+`requirePrunedPluginRoot`, the `allowMissingPluginRoot` waiver beside it,
 `requireAbsentDirectoryPath`, and `buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
 enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
 ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly

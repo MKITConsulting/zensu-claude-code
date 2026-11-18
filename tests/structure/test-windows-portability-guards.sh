@@ -26,6 +26,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+APPROVED_PLAN="$ROOT/hooks/lib/approved-plan-v1.js"
 SESSION_LINEAGE="$ROOT/skills/session-trail/scripts/session-lineage-v1.mjs"
 ARTIFACT_REDACT="$ROOT/hooks/lib/zensu-artifact-redact-v1.js"
 BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
@@ -492,6 +493,14 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+if [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | platformNoFollow(), 0o600);' "$APPROVED_PLAN")" -eq 1 ] \
+  && grep -qF 'const { readPlanFile, platformNoFollow, PLAN_FILE_MAX_BYTES, REASONS } = require("./plan-payload-v1.js");' "$APPROVED_PLAN" \
+  && ! grep -qF 'O_NOFOLLOW' "$APPROVED_PLAN"; then
+  check "approved-plan store opens its temporary copy through the payload module O_NOFOLLOW gate" PASS
+else
+  check "approved-plan store opens its temporary copy through the payload module O_NOFOLLOW gate" FAIL
 fi
 
 # The session-lineage ledger reader is the third hardened open in a requireable
