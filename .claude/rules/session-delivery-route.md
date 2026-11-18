@@ -172,12 +172,25 @@ named in a brief acted as the user's own preference. The measurements and decisi
 **Lineage comes from the desktop's own records, located through the hook environment.**
 `hooks/lib/linked-session-v1.js` reads `CLAUDE_CODE_HOST_SESSION_ID`, `CLAUDE_CODE_ACCOUNT_UUID` and
 `CLAUDE_CODE_ORGANIZATION_UUID` (a `UserPromptSubmit` hook run by the desktop's own Claude Code
-2.1.299 binary saw all three), opens `<store>/<account>/<org>/<host id>.json` and follows
-`spawnedFrom.sessionId` to the parent's record in the same directory. A set `ZENSU_CCD_STORE`,
-trimmed and MSYS-mapped, is the only store candidate, with no fallback behind it, the rule of
-`ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, so a store the user pointed
-session-trail at is the store this module reads; a relative value names no store here, because a
-hook's working directory is not the user's. Binding checks: the shape of
+2.1.299 binary saw all three), looks for `<store>/<account>/<org>/<host id>.json` in every store
+candidate and follows `spawnedFrom.sessionId` to the parent's record in the directory that holds
+the own record. The candidates are every store `ZENSU_CCD_EXTRA_STORES` names, split by the
+platform's list separator (`;` on Windows, `:` elsewhere), each entry trimmed, MSYS-mapped and
+resolved, which drops a trailing separator; then
+the platform's default store; then, on macOS only, every Zensu Session Hub profile store,
+`~/Library/Application Support/Zensu Session Hub/Claude-Profile/<uuid>/claude-code-sessions`,
+whose folder name is a canonical lowercase UUID, in sorted order; each spelling once. A set
+`ZENSU_CCD_STORE`, trimmed, MSYS-mapped and resolved, is the only store candidate, with no
+fallback behind it. Those are the rules of `ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, so a
+store the user pointed session-trail at is a store this module reads; a relative value in either
+variable names no store here, because a hook's working directory is not the user's. Every
+candidate whose store, account and organization directories pass the binding checks that follow
+is searched, and a real organization directory that two spellings reach is searched once. The
+session answers `none` (`no-session-store`) when no candidate passes, `unresolved`
+(`own-record-missing`) when none holds an entry under the own record's name, and `none`
+(`own-record-ambiguous`) when two do, reading neither. Any entry under that name counts, a
+refused one included, while session-trail reads neither copy of a session id only when two
+stores hold records it accepts. Binding checks: the shape of
 each id; the store, account and organization directories real directories; each record a regular
 file opened without following a link and without blocking, at most 8 MiB, a read that keeps
 answering would-block retried 16 times 1 ms apart and then read as unreadable; off Windows, those
@@ -336,9 +349,14 @@ route: a route change moves only the field, and every shape of the reminder carr
   to `CLAUDE_PLUGIN_DATA` before `privateRecordsDirectory`; `SESSION_MARKERS` in
   `hooks/lib/session-reanchor-v1.js`, which moves `inherited-route` and then `linked-session` with
   the anchor and holds `linked-session` back when `inherited-route` did not move; `storeCandidates`
-  in the resolver and `ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, which apply
-  one `ZENSU_CCD_STORE` rule, so a change to either side's override moves both, together with
-  `.claude/rules/session-lineage-ledger.md`, which states that rule for session-trail;
+  in the resolver and `ccdStoreCandidates`, `namedStoreCandidates` and `hubProfileFolders` in
+  `skills/session-trail/scripts/trail.mjs`, which apply one `ZENSU_CCD_STORE` rule, one
+  `ZENSU_CCD_EXTRA_STORES` split, one Session Hub profile path and folder-name filter and one
+  candidate order, so a change to either side's rule moves both, and `L3o` in
+  `tests/structure/test-linked-session-route.sh` fails while the two macOS candidate lists
+  differ, together with
+  `.claude/rules/session-lineage-ledger.md` and `.claude/rules/session-trail-targeted-lookup.md`,
+  which state those rules for session-trail;
   `hooks/lib/desktop-store-read-v1.js`, the one owner of `writableOnlyByCaller`, `anyOwnerOrMode`,
   `realDirectory` with its required policy, `ownedRegularFile` and the bounded record reader, which
   the resolver and `trail.mjs` both load, so a change to the rule moves both readers, and
@@ -409,7 +427,11 @@ read, no config key, and the helper keeps its four verbs. An older runtime of th
 ignores both files and asks, which is the fail-safe direction. The resolver's owner and mode check
 is `patch` as well: no kind, reason or field changes, and it only turns a resolution into an
 existing `none`, `parent-record-unavailable` or `parent-context-unavailable` answer. Moving the check
-into `hooks/lib/desktop-store-read-v1.js` changes none of its answers.
+into `hooks/lib/desktop-store-read-v1.js` changes none of its answers. Reading the named and Session
+Hub profile stores is `patch` as well: no kind or field changes, the verdict line keeps its six
+fields, and the one new reason, `own-record-ambiguous`, comes under the existing kind `none`; the
+shell's tab-split `read` in `hooks/lib/zensu-linked-session.sh` discards the reason field, and no
+reason value is matched outside the resolver and its suite.
 
 ## Known bounds
 
@@ -500,14 +522,21 @@ into `hooks/lib/desktop-store-read-v1.js` changes none of its answers.
   the inherited rank, never a wrong route. Windows and Linux are unverified: `storeCandidates`
   takes `APPDATA`/`LOCALAPPDATA` and `XDG_CONFIG_HOME`/`~/.config`, inferred from
   `ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, and the three variables were
-  observed on macOS only. `ccdStoreCandidates` probes every platform's candidates on every host
-  and resolves a relative `ZENSU_CCD_STORE` against its working directory, while `storeCandidates`
-  takes only the platform's own and refuses a relative override; both name the same store wherever
-  Claude Desktop writes into its default data folder. `ccdStoreCandidates` also reads every Zensu
-  Session Hub profile store and every store `ZENSU_CCD_EXTRA_STORES` names
-  (`.claude/rules/session-trail-targeted-lookup.md`), and `storeCandidates` does not, so a linked
-  session started in a Claude Desktop that runs on a data folder of its own answers `none`
-  (`no-session-store`) and inherits nothing.
+  observed on macOS only. `ccdStoreCandidates` probes every platform's candidates on every host,
+  the Session Hub profile path included, and resolves a relative `ZENSU_CCD_STORE` or
+  `ZENSU_CCD_EXTRA_STORES` entry against its working directory, while `storeCandidates` takes only
+  the platform's own defaults, probes the profile path on macOS only and refuses a relative value;
+  both read the same stores wherever Claude Desktop writes into its default data folder, into a
+  Session Hub profile on macOS or into a store an absolute `ZENSU_CCD_EXTRA_STORES` entry names
+  (`.claude/rules/session-trail-targeted-lookup.md`). A linked session started in a Claude Desktop
+  that runs on any other data folder of its own answers `unresolved` (`own-record-missing`) when
+  another store holds the same account and organization folders and `none` (`no-session-store`)
+  when none does, and inherits nothing until that store is named in `ZENSU_CCD_EXTRA_STORES`. An
+  own record two stores hold answers `none` (`own-record-ambiguous`) and inherits nothing, because
+  which copy is the session's own cannot be told. That count takes every entry under the own
+  record's name, a refused one included, where session-trail counts only the records it accepts,
+  so a refused entry in a second store withholds the inherited route here while session-trail
+  still reads the accepted record; the stricter count only withholds, the fail-safe direction.
 - A `.zensu/state` that passes the writable test and still refuses the write, on a full disk for
   example, leaves the answer uncached, so the module starts again on the next prompt. The test
   covers the read-only and the foreign-owned directory, the common cases.
