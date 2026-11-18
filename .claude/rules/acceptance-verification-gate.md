@@ -250,8 +250,8 @@ the driver can never show, whoever drives it; today the only one is a service wo
 names it as an observability gap and offers no access option for it, and the ONE question leaves
 out "Provide access now" for a criterion it rules out, whatever else that criterion needs,
 because no login, account, service or driver lifts it. A refusal of the consent gate is NOT a
-driver fence, because the driver could show that state: a denied command, or a navigation whose
-URL carries a query or a fragment. The owner file names no such case and no step for the user
+driver fence, because the driver could show that state: a denied command, or a remote navigation
+whose URL carries a query or a fragment. The owner file names no such case and no step for the user
 around one, on purpose: `skills/verify-feature/rules/browser-verification.md` says a denied call
 is never re-issued under another spelling, another session name or through another program, a
 shape denial being its one exception, which changes how a call is spelled and never what the
