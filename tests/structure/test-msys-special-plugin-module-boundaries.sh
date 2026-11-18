@@ -426,7 +426,7 @@ PS_WRITE_OUT="$(powershell_payload "$PS_TICK_COMMAND" \
     bash "$PLUGIN/hooks/pre-bash-zensu-gate.sh" 2>"$RAW_TMP/powershell-cli-write.err")"
 if ! printf '%s' "$PS_READ_OUT" | grep -qF '"permissionDecision"' \
     && printf '%s' "$PS_WRITE_OUT" | grep -qF '"permissionDecision":"deny"' \
-    && printf '%s' "$PS_WRITE_OUT" | grep -qF 'A PowerShell command has no inline gate escape' \
+    && printf '%s' "$PS_WRITE_OUT" | grep -qF 'set ZENSU_API_URL to a literal localhost URL in the session environment.' \
     && ! printf '%s' "$PS_WRITE_OUT" | grep -qF 'could not be loaded'; then
   check "CLI gate loads the PowerShell analyzer from the special plugin root" PASS
 else

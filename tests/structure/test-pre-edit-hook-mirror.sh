@@ -114,11 +114,11 @@ C3B_REASON="$(printf '%s' "$OUT_C3" | node -e '
   });
 ' 2>/dev/null)"
 case "$C3B_REASON" in
-  *"read from the environment Claude Code was started in"*"no Edit, Write or Bash prefix can set it"*"Ask the user to choose"*"--tdd-reset"*"restart Claude Code with ZENSU_TDD_GATE=off"*)
+  *"Legitimate non-TDD edit in a standalone chain: ask the user whether to leave this chain with"*"--tdd-reset, and run it only on their yes. A chain an active Autopilot run owns cannot be reset, so take items 1-3 there."*)
     case "$C3B_REASON" in
-      *"Legitimate non-TDD edit: set ZENSU_TDD_GATE=off"*)
-        check "C3b deny reason routes a non-TDD edit to the user instead of an env var the model cannot set" FAIL ;;
-      *) check "C3b deny reason routes a non-TDD edit to the user instead of an env var the model cannot set" PASS ;;
+      *ZENSU_TDD_GATE*|*"restart Claude Code"*|*"bypass ledger"*)
+        check "C3b deny reason leaves a non-TDD edit to the user's --tdd-reset decision and names no gate escape" FAIL ;;
+      *) check "C3b deny reason leaves a non-TDD edit to the user's --tdd-reset decision and names no gate escape" PASS ;;
     esac ;;
   *) check "C3b deny reason routes a non-TDD edit to the user (got: ${C3B_REASON:0:400})" FAIL ;;
 esac

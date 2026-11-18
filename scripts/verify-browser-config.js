@@ -77,7 +77,7 @@ function checkOrigin(rawOrigin, mode, networkOnly = false) {
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error(FLOOR_REASONS.SCHEME);
   if (parsed.username || parsed.password) throw new Error(FLOOR_REASONS.CREDENTIALS);
   if (parsed.search || parsed.hash || rawOrigin.includes('?') || rawOrigin.includes('#')) {
-    throw new Error(FLOOR_REASONS.QUERY_OR_FRAGMENT);
+    throw new Error(FLOOR_REASONS.ORIGIN_QUERY_OR_FRAGMENT);
   }
   if (parsed.pathname !== '/') throw new Error('an origin must not carry a path');
   const classified = classifyOrigin(parsed.origin);

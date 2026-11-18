@@ -384,27 +384,18 @@ function ownedAutopilotRun(projectRoot, sessionId, bashPath) {
 }
 
 function readRecord(request) {
-  const readerOptions = { recordsDir: request.recordsDir, sessionId: request.sessionId, expectedHost: request.host };
-  try {
-    return { context: core.readContext(readerOptions) };
-  } catch {
-    try {
-      core.readOrphanedProjectRootContext(readerOptions);
-      return { reason: REANCHOR_REFUSALS.RECORDED_ROOT_MISSING };
-    } catch {
-      try {
-        core.readPrunedPluginRootContext(readerOptions);
-        return { reason: REANCHOR_REFUSALS.NOT_SERVED };
-      } catch {
-        try {
-          core.readOrphanedPrunedContext(readerOptions);
-          return { reason: REANCHOR_REFUSALS.NOT_SERVED };
-        } catch {
-          return { reason: REANCHOR_REFUSALS.RECORD_UNREADABLE };
-        }
-      }
-    }
+  const admitted = core.readContextLadder(request, [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
+    core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+    core.RECORD_READERS.ORPHANED_PRUNED,
+  ]);
+  if (admitted === null) return { reason: REANCHOR_REFUSALS.RECORD_UNREADABLE };
+  if (admitted.reader === core.RECORD_READERS.STRICT) return { context: admitted.context };
+  if (admitted.reader === core.RECORD_READERS.ORPHANED_PROJECT_ROOT) {
+    return { reason: REANCHOR_REFUSALS.RECORDED_ROOT_MISSING };
   }
+  return { reason: REANCHOR_REFUSALS.NOT_SERVED };
 }
 
 function verdictUnguarded(request) {
