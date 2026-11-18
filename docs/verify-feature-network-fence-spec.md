@@ -1,8 +1,8 @@
 # Verify-Feature Network-Level Browser Fence — Specification
 
-Status: proposed on 2026-11-18, not built. Nothing below is implemented, and §12 lists the
-decisions the owner takes first. Until a build lands, the current behaviour is the one
-[gates.md §Browser Consent Gate](gates.md#browser-consent-gate) and
+Status: accepted on 2026-11-18, not built. The owner took the three decisions of §12 that day,
+each as recommended. Nothing below is implemented. Until a build lands, the current behaviour is
+the one [gates.md §Browser Consent Gate](gates.md#browser-consent-gate) and
 [verify-feature.md](verify-feature.md) describe.
 
 Every claim about the code was read from `4b10a44d`. Every measurement was made on 2026-11-17 or
@@ -639,6 +639,9 @@ a run directory kept after an incomplete teardown.
 - **Windows verification** and the ports.
 
 ## 12. Decisions for the owner
+
+Taken on 2026-11-18: the owner chose the recommended option of each decision, 1(a), 2(a) and
+3(a). The other options stay below with their costs, as the record of what was weighed.
 
 1. **What ships.**
    - **(a) Recommended: the network fence and the lifted service-worker block in one `minor`,**
