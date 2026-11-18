@@ -329,17 +329,20 @@ CREATE_ROUTE='Run the matching skill — /zensu:change (one requested change), /
 CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T')"
 if [ "$(printf '%s' "$CREATE_OUT" | classify)" = DENY ] \
    && printf '%s' "$CREATE_OUT" | grep -qF "maps to 'create_feature'" \
-   && printf '%s' "$CREATE_OUT" | grep -qF "$CREATE_ROUTE" \
-   && printf '%s' "$CREATE_OUT" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off (honored inline)'; then
-  check "B61a a freelance features create is denied with a reason that names /zensu:change for one change and /zensu:bootstrap or /zensu:ghost-scan for onboarding, and keeps the escape sentence" PASS
+   && printf '%s' "$CREATE_OUT" | grep -qF "$CREATE_ROUTE --help is never gated, and neither is a write the gate can read as going to a localhost backend" \
+   && ! printf '%s' "$CREATE_OUT" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$CREATE_OUT" | grep -qF 'gate escape' \
+   && ! printf '%s' "$CREATE_OUT" | grep -qF 'one-off'; then
+  check "B61a a freelance features create is denied with a reason that names /zensu:change for one change and /zensu:bootstrap or /zensu:ghost-scan for onboarding, keeps the --help and localhost routes and names no gate escape" PASS
 else
   check "B61a features create deny reason (got '$(printf '%s' "$CREATE_OUT" | cut -c1-240)')" FAIL
 fi
 PS_CREATE_OUT="$(gate_out 'zensu features create --product p1 --component c1 --title T' '' PowerShell)"
 if [ "$(printf '%s' "$PS_CREATE_OUT" | classify)" = DENY ] \
-   && printf '%s' "$PS_CREATE_OUT" | grep -qF "$CREATE_ROUTE A PowerShell command has no inline gate escape." \
-   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF '(honored inline)'; then
-  check "B61b the PowerShell deny of features create names the same routes and no inline escape" PASS
+   && printf '%s' "$PS_CREATE_OUT" | grep -qF "$CREATE_ROUTE --help is never gated" \
+   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$PS_CREATE_OUT" | grep -qF 'gate escape'; then
+  check "B61b the PowerShell deny of features create names the same routes and no gate escape" PASS
 else
   check "B61b PowerShell features create deny reason (got '$(printf '%s' "$PS_CREATE_OUT" | cut -c1-240)')" FAIL
 fi
@@ -413,7 +416,8 @@ if printf '%s' "$SUB_REASON_OUT" | grep -qF '"permissionDecision":"deny"' \
    && printf '%s' "$SUB_REASON_OUT" | grep -qF 'which runs it through the matching skill — /zensu:security-review (classification/review), /zensu:change (one requested change).' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'ZENSU_MCP_GATE' \
    && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'prefix the command with' \
-   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'in the interactive main thread. For a deliberate one-off'; then
+   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'gate escape' \
+   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'one-off'; then
   check "B19b subagent deny reason: reports the operation to the main thread and names no escape" PASS
 else
   check "B19b subagent deny reason content" FAIL
@@ -747,21 +751,25 @@ OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROO
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=https://api.zensu.dev bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "DENY" ] && check "B36b process-env ZENSU_API_URL=prod -> DENY" PASS || check "B36b process-env prod (got '$OUT')" FAIL
 
-# B37 deny-reason advertises the narrowed escapes (inline off + localhost)
+# B37 deny reason names the localhost route and no gate escape
 REASON_N="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$REASON_N" | grep -qF 'ZENSU_MCP_GATE=off' && printf '%s' "$REASON_N" | grep -qiF 'localhost'; then
-  check "B37 deny reason advertises inline-off + localhost escapes" PASS
+if printf '%s' "$REASON_N" | grep -qiF 'localhost' \
+   && printf '%s' "$REASON_N" | grep -qF 'ZENSU_API_URL to a literal localhost URL' \
+   && ! printf '%s' "$REASON_N" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$REASON_N" | grep -qF 'one-off'; then
+  check "B37 the main-thread deny reason names the localhost route and no gate escape" PASS
 else
-  check "B37 deny reason narrowed-escape wording" FAIL
+  check "B37 main-thread deny reason wording (got '$(printf '%s' "$REASON_N" | cut -c1-400)')" FAIL
 fi
 REASON_S="$(payload 'ZENSU_MCP_GATE=off zensu security classify f1' general-purpose gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$REASON_S" | grep -qF 'never a route for a subagent. Do not retry this command, with or without a prefix.' \
-   && ! printf '%s' "$REASON_S" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off' \
+if printf '%s' "$REASON_S" | grep -qF "a subagent never borrows the main thread's skill window. Do not retry this command, with or without a prefix." \
+   && ! printf '%s' "$REASON_S" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$REASON_S" | grep -qF 'gate escape' \
    && ! printf '%s' "$REASON_S" | grep -qF 'ZENSU_API_URL' \
-   && ! printf '%s' "$REASON_N" | grep -qF 'never a route for a subagent'; then
-  check "B37b subagent deny reason withdraws the inline escapes; the main-thread reason does not" PASS
+   && ! printf '%s' "$REASON_N" | grep -qF 'a subagent never borrows'; then
+  check "B37b a subagent's prefixed call is denied with a reason that forbids the retry and names neither an escape nor the localhost route, and the main-thread reason is not the subagent's" PASS
 else
-  check "B37b subagent deny reason must name the withdrawn inline escape" FAIL
+  check "B37b subagent deny reason (got '$(printf '%s' "$REASON_S" | cut -c1-400)')" FAIL
 fi
 REASON_TEXT_ONLY="$(payload 'git commit -m "x; Zensu features create y"' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$REASON_TEXT_ONLY" | grep -qF 'pass that text through a file instead (git commit -F <file>, gh pr create --body-file <file>)' \
@@ -1209,10 +1217,10 @@ psrun "B40x7 PowerShell spaced cmd.exe operator is quoted"  "zensu features get 
 PS_MAIN="$(payload 'zensu security classify f1' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$PS_MAIN" | grep -qF "maps to 'set_security_classification'" \
    && printf '%s' "$PS_MAIN" | grep -qF '/zensu:security-review' \
-   && printf '%s' "$PS_MAIN" | grep -qF 'A PowerShell command has no inline gate escape' \
-   && ! printf '%s' "$PS_MAIN" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off' \
-   && ! printf '%s' "$PS_MAIN" | grep -qF '(honored inline)'; then
-  check "B40y PowerShell main-thread deny names the skills and no inline escape" PASS
+   && printf '%s' "$PS_MAIN" | grep -qF 'in the interactive main thread. --help is never gated' \
+   && ! printf '%s' "$PS_MAIN" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$PS_MAIN" | grep -qF 'gate escape'; then
+  check "B40y PowerShell main-thread deny names the skills and no gate escape" PASS
 else
   check "B40y PowerShell main-thread deny wording" FAIL
 fi

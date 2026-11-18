@@ -117,6 +117,32 @@ two general-purpose probes with one name in one tool message, and a census read 
   sit in a typed prompt that quoted frames. None of the 389 cross-session message bodies there is
   indented, so the host's indentation guards a report, never a peer message.
 
+## Measured live (named spawns, 2.1.325, plugin 0.40.1, 2026-11-17)
+
+A desktop session outside an armed chain spawned two named background `zensu:review-aspect`
+probes without a packet, then one named `general-purpose` probe that took the second name. The
+store was read after every step:
+
+- **The launch hook writes both files.** Right after a named spawn, `fanout/<key>/<agentId>.json`
+  and `names/<key>/<agentId>.json` existed at `0600`. The binding's `named_at_ms` equalled the
+  entry's `launched_at_ms`, and the earlier binding of the other name stayed.
+- **The host queues a hand-back with the frame on its first line.** The transcript stores each
+  hand-back as a `queued_command` attachment whose `prompt` opens with
+  `<agent-message from="<name>">`. The model's rendering of the same message adds a
+  `<system-reminder>` and the line `Another Claude session sent a message while you were working:`
+  above the frame; neither is in the stored prompt. No hook payload was logged. The completion
+  notification was queued as a command of its own about 180 ms later.
+- **Each fan-out entry was gone after its hand-back.** The notification names the agent id too, so
+  the live run alone does not show which arrival retired it. Replaying the stored hand-back prompt
+  over copies of the host-written files through `background-review-v1.js arrive` settled it:
+  - on 0.40.1 and on main at `31707fda`, the entry was retired with the binding and kept without it;
+  - on v0.36.0 it was kept in both cases.
+- **An unrecorded spawn releases the name.** The named `general-purpose` probe removed the second
+  probe's binding, kept the first one and wrote no fan-out entry.
+
+The packet gate's record of a named report and the consume claim were not driven: both need an
+armed review chain.
+
 ## The path
 
 1. **Launch.** On `async_launched`, `post-review-tdd-delegate.sh` records the launch in
@@ -602,8 +628,11 @@ explanation does, so release notes are written for the user alone.
   `<state>.next.XXXXXX`) beside the workflow document: `_tdd_consume_review_ticket_critical`
   creates them before its `node` child and removes them only on its own exits. Nothing reads or
   sweeps them. Observed after the `BR16` cancel.
-- **Not measured live.** The suite drives the real hooks with payloads shaped like the
-  measurements and a host-style cancel; no desktop session has run the patched plugin yet.
+- **Measured live only in part.** The run of 2026-11-17 (§"Measured live (named spawns, 2.1.325,
+  plugin 0.40.1, 2026-11-17)") measured four steps of a named fan-out reviewer: its launch record,
+  its binding, its retirement and the release of its name. It did not drive the consume claim from
+  a named hand-back or the packet gate's record of a named report. For those, and for a host-style
+  cancel, the suite drives the real hooks with payloads shaped like the measurements.
 - **Two named spawns of one name in one tool message.** The host gives the name to the later
   spawn. When their PostToolUse hooks run in the other order, the table names the earlier launch,
   the later one's report is recorded for it, and the earlier one's own id-framed report then reads

@@ -22,10 +22,9 @@ A pointer elsewhere in the tree that reads `CLAUDE.md §"<title>"` refers to the
 content and pattern alternations must be in English, and so must every artifact the plugin
 emits. Consuming repositories commit `.zensu/plans/` and `.zensu/logs/` and may publish them.
 
-Two narrow carve-outs admit non-English text, and only as match literals: verbatim
-user-utterance literals in hook directives (for example `'kein tdd'`), and eval
-grader alternations matched against model prose whose language the product does not
-control. Details: `.claude/rules/language.md`.
+Two narrow carve-outs admit non-English text, and only as match literals: verbatim user-utterance
+literals in hook directives (for example `'kein tdd'`), and eval grader alternations matched against
+model prose whose language the product does not control. Details: `.claude/rules/language.md`.
 
 A third clarification draws the line for consuming repositories. The commit messages,
 pull request text and review replies Zensu writes into a consuming repository follow
@@ -157,7 +156,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)** — the two hooks that inject a rule from a docs marker block: `.claude/rules/marker-block-carriers.md`
 - **Prompt Origin and the UserPromptSubmit Budget (`hooks/lib/zensu-prompt-origin.sh` + `test-user-prompt-budget.sh`)** — which prompt kinds each `UserPromptSubmit` hook answers, what the host sends, and the budget row a new hook owes: `.claude/rules/prompt-origin.md`
 - **Full Text Once Per Context Generation (`hooks/lib/zensu-prompt-ledger.sh` + `session-start-prompt-ledger.sh`)** — which contracts go out in full once per generation and as a short line after that, the ledger's fault direction and its known gaps: `.claude/rules/prompt-ledger.md`
-- **Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12** — adding a `ZENSU_*=off` escape means editing `ESCAPE_STEMS`: `.claude/rules/gate-disable-prefixes.md`
+- **Gate-Disable Prefixes (`ZENSU_*=off`), `test-gauntlet-loop-skill.sh` G12 and `test-escape-wording.sh`** — adding a `ZENSU_*=off` escape means editing `ESCAPE_STEMS`, and no model-facing runtime text names an escape: `.claude/rules/gate-disable-prefixes.md`
 - **Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)** — the promptfoo wrapper's transient-mutation detection: `.claude/rules/fixture-mutation-events.md`
 - **Session Lineage Ledger (`skills/session-trail/scripts/session-lineage-v1.mjs`)** — the machine-wide takeover ledger of `/zensu:session-trail`: `.claude/rules/session-lineage-ledger.md`
 - **Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)** — where a taken-over session continues, and the carry-over recipe: `.claude/rules/takeover-destination.md`
@@ -184,6 +183,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Stop Background Wait (`hooks/lib/stop-background-wait-v1.js`)** — the explicit `ZENSU-AWAIT:` release of an armed chain's Stop while a background task runs, its measured host vocabulary, the one-time hint and the per-task bound: `.claude/rules/stop-background-wait.md`
 - **Cross-Cutting Review (`hooks.reviewJudgeSecondRun` + the inherited-guarantee check)** — the first review's independent second judge run, the connection-mode check for inherited guarantees and the rule for deployment-dependent defects: `.claude/rules/cross-cutting-review.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
+- **Multi-Repo Code Roots (`hooks/lib/code-roots-v1.js`, dark launch)** — declared code roots behind `CODE_ROOTS_ENABLED`, the one reader, arming, the union count, `@<label>/` grading and the per-root protections: `.claude/rules/multi-repo-code-roots.md`
 - **Claim Syntax and the Chain's Work Tree (`edit-landing-claims-v1.js` + `--work-tree`)** — brace, glob and prose claims, audited corrections, and grading an Autopilot run's own worktree below the anchor: `.claude/rules/claim-syntax-and-work-tree.md`
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
 - **Signed-In Verify Runs (`verify-auth-state-v1.js` + `verify-auth-guard-v1.js` + `--login-recipe`)** — the recipe login inside the run-config helper, the one state setter, the consume-once recorder, the signed-in session rules and the textual read guard: `.claude/rules/verify-auth-guard.md`

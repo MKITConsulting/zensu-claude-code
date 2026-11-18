@@ -8,7 +8,7 @@ CAPTURE="$EVAL_DIR/lib/capture-injections.sh"
 INJECT="$EVAL_DIR/lib/inject-context.js"
 PROBE="$EVAL_DIR/lib/decision-probe.js"
 EVAL_CONFIG="$EVAL_DIR/eval-config.json"
-SOURCES=' none ask tdd-config direct-config router nonce '
+SOURCES=' none ask ask-attended ask-full-attended tdd-config direct-config router nonce '
 CLAUDE_HOME="${ROUTE_EVAL_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
 NL=$'\n'
 
@@ -24,6 +24,10 @@ esac
 SOURCE="${FIRST_LINE#route-eval-source: }"
 case "$SOURCES" in *" $SOURCE "*) ;; *) die "unknown route source '$SOURCE'" 64 ;; esac
 [ "$PROMPT" != "$FIRST_LINE" ] || die "the prompt carries no user message" 64
+ASK_TOOL=''
+case "$SOURCE" in
+  ask-attended|ask-full-attended) ASK_TOOL=1 ;;
+esac
 MESSAGE="${PROMPT#*"$NL"}"
 while [ "${MESSAGE%"$NL"}" != "$MESSAGE" ]; do MESSAGE="${MESSAGE%"$NL"}"; done
 [ -n "$MESSAGE" ] || die "the user message is empty" 64
@@ -96,7 +100,7 @@ CAPTURE_LINE="$(node -e '
 
 if [ "${ROUTE_EVAL_DRY_RUN:-0}" = "1" ]; then
   printf 'ROUTE_EVAL_DRY_RUN: settings %s\n' "$(cat "$RUN_DIR/settings.json")"
-  printf 'ROUTE_EVAL_DRY_RUN: env ZENSU_CONFIG=%s ZENSU_WRAPPER_SETTINGS=%s ZENSU_ROUTE_EVAL_DIR=<run> ZENSU_ROUTE_EVAL_HOOK=%s\n' "$EVAL_CONFIG" '<run>/settings.json' "$HOOK_NAME"
+  printf 'ROUTE_EVAL_DRY_RUN: env ZENSU_CONFIG=%s ZENSU_WRAPPER_SETTINGS=%s ZENSU_ROUTE_EVAL_DIR=<run> ZENSU_ROUTE_EVAL_HOOK=%s%s\n' "$EVAL_CONFIG" '<run>/settings.json' "$HOOK_NAME" "${ASK_TOOL:+ ZENSU_WRAPPER_ASK_TOOL=$ASK_TOOL}"
   printf 'ROUTE_EVAL_DRY_RUN: message %s\n' "$MESSAGE"
   printf '[route-eval-capture] %s\n' "$CAPTURE_LINE"
   exit 0
@@ -106,6 +110,7 @@ export ZENSU_CONFIG="$EVAL_CONFIG"
 export ZENSU_WRAPPER_SETTINGS="$RUN_DIR/settings.json"
 export ZENSU_ROUTE_EVAL_DIR="$RUN_DIR"
 export ZENSU_ROUTE_EVAL_HOOK="$HOOK_NAME"
+[ -z "$ASK_TOOL" ] || export ZENSU_WRAPPER_ASK_TOOL="$ASK_TOOL"
 bash "$WRAPPER" "$MESSAGE" "$OPTIONS_JSON"
 RC=$?
 if [ -f "$RUN_DIR/hook.log" ]; then

@@ -107,9 +107,9 @@
       "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports and the task-chip proposals."
     },
     {
-      "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
+      "path": "tests/structure/owned-process.test.js", "registered": 7, "skips": {"win32": 7},
       "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
-      "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
+      "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number, a group signal answered with EPERM once, a group that keeps answering it, and one that refuses the signals but answers the probe."
     },
     {
       "path": "tests/structure/plan-payload-v1.test.js", "registered": 23,
@@ -130,6 +130,12 @@
       "path": "tests/structure/plugin-data-guard-v1.test.js", "registered": 37, "skips": {"win32": 4},
       "runs": [{ "driver": "tests/structure/test-plugin-data-guard.sh" }],
       "summary": "Plugin-data containment: the separator classes, the resolution bounds, the truncated-walk refusal and the realpath fast path."
+    },
+    {
+      "path": "tests/structure/code-roots-v1.test.js", "registered": 35,
+      "notRunOn": {"win32": "test-code-roots.sh skips native Windows before grading, because its fixtures need POSIX symlinks, perl -pi and an assumed different git owner"},
+      "runs": [{ "driver": "tests/structure/test-code-roots.sh" }],
+      "summary": "The code-roots foundation of multi-repo chains: the dark-launch switch, the list reader and its string rules, arming validation and exclusivity, the per-root enumeration and count recipes, the anchor exclusions and the CLI the shell callers read."
     },
     {
       "path": "tests/structure/powershell-command-v1.test.js", "registered": 17, "skips": {"darwin": 1, "linux": 1, "root": 1},
@@ -215,7 +221,7 @@
       "summary": "Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds."
     },
     {
-      "path": "tests/structure/route-short-line-graders.test.js", "registered": 38,
+      "path": "tests/structure/route-short-line-graders.test.js", "registered": 41,
       "runs": [{ "driver": "tests/structure/test-route-short-line-eval.sh" }],
       "summary": "The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions."
     },
@@ -295,7 +301,7 @@
       "summary": "The playwright-cli run-config helper: the isolated origin-restricted config, the address pins of a remote run, the signed-in login step with its signal cleanup, and the discard verb."
     },
     {
-      "path": "tests/structure/verify-consent-v1.test.js", "registered": 139, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 3},
+      "path": "tests/structure/verify-consent-v1.test.js", "registered": 142, "skips": {"darwin": 1, "linux": 1, "root": 1, "win32": 3},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
       "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan, every refused indirection and the signed-in session rules."
     },
@@ -310,7 +316,7 @@
       "summary": "The free loopback port helper: argument parsing, occupied and excluded ports and the CLI contract."
     },
     {
-      "path": "tests/structure/verify-navigation-floor-v1.test.js", "registered": 21,
+      "path": "tests/structure/verify-navigation-floor-v1.test.js", "registered": 22,
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
       "summary": "The navigation floor the consent gate and the run-config helper share: local hosts, address classes and URL refusals."
     },
