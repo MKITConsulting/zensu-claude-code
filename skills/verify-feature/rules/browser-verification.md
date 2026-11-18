@@ -79,7 +79,11 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    or `tab-new` — opens the prompt. Answering it is the user's action; never answer it on their
    behalf and never work around a refusal. The floor holds in every mode: no credentials, no query
    or fragment in a navigation, and the browser refuses every HTTP(S) request to an origin outside
-   the run config; a WebSocket connection is not fenced by the run config, which is an open gap.
+   the run config except a followed server redirect and a shared worker's fetch; a WebSocket
+   connection is not fenced by the run config, which is an open gap. A shared worker's fetch is an
+   open gap too, measured with playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http`
+   origins: a dedicated worker's fetch is fenced, a shared worker's fetch is not. An `https`
+   target, a remote host, Windows and Linux were not measured.
    The session consent memory named in SKILL.md records each approved ORIGIN; a record names the
    route that was visited, but the route steers no later decision, and the report lists every
    record in its `Consent` block. It is yours to READ for the report and never to write, edit or

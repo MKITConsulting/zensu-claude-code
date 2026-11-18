@@ -1270,6 +1270,17 @@ if grep -qF "so the \`browser\` driver cannot verify a PWA's update prompt, its 
 else
   check "P10p the operator doc states the cost of blocking service workers beside the fence, and the question without the access option there and in the chain paragraph" FAIL
 fi
+if grep -qF "except a followed server redirect, a WebSocket and a shared worker's fetch." <<<"$SKILL_FLAT" \
+  && ! grep -qF 'every HTTP(S) subresource request' <<<"$SKILL_FLAT" \
+  && grep -qF "except a followed server redirect and a shared worker's fetch; a WebSocket connection is not fenced by the run config, which is an open gap." <<<"$BROWSER_FLAT" \
+  && grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not." <<<"$BROWSER_FLAT" \
+  && grep -qF 'measured with playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins' <<<"$BROWSER_FLAT" \
+  && grep -qF "a WebSocket connection and a shared worker's fetch are not fenced by it, which are open gaps" <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF "a dedicated worker's fetch is fenced, a shared worker's fetch is not." <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  check "P10q the skill text names a followed redirect, a WebSocket and a shared worker's fetch as the fence's exceptions, and the rule files carry the measurement" PASS
+else
+  check "P10q the skill text names a followed redirect, a WebSocket and a shared worker's fetch as the fence's exceptions, and the rule files carry the measurement" FAIL
+fi
 ACCEPTANCE_RULE="$SKILL_DIR/rules/acceptance-evidence.md"
 ACCEPTANCE_FLAT="$(tr '\n' ' ' < "$ACCEPTANCE_RULE" 2>/dev/null | tr -s ' ')"
 if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \

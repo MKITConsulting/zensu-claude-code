@@ -217,7 +217,8 @@ the same config content.
 - **Scope stays with the run's hosts.** The state holds cookies whose domain is the host of a
   run-config origin or, written with a leading dot, a parent domain of one, and origin entries
   for the run config's origins only, and the browser refuses every HTTP(S) request outside those
-  origins. Cookies are scoped by host, not by port, so every approved port of a host receives
+  origins except a followed server redirect, a WebSocket connection and a shared worker's fetch.
+  Cookies are scoped by host, not by port, so every approved port of a host receives
   them, and a parent-domain cookie also reaches a sibling host a redirect lands on before the
   redirect rule stops that page.
 - **Redirects** keep today's rule. A redirect to a login page or an identity provider on another
@@ -267,7 +268,7 @@ tell a production host from a test host by itself.
 | Error reflection | Gate and helper parse the state before `open` | Swap between gate check and launch (same class as the run-config residual in the consent spec §12) |
 | Snapshots / screenshots | Origin consent; test account with synthetic data; skill forbids driving credential pages (API keys, sessions, tokens) | What the app itself renders enters the context by design |
 | `console` / `requests` | Denied on signed-in sessions | Runtime-signal plane stays PARTIAL for signed-in rows (as today) |
-| Redirect / navigation exfiltration | `allowedOrigins`, no query/fragment/userinfo in navigation, redirect stop rule | Redirect followed before the check; WebSockets unfenced (D12) |
+| Redirect / navigation exfiltration | `allowedOrigins`, no query/fragment/userinfo in navigation, redirect stop rule | Redirect followed before the check; WebSockets (D12) and a shared worker's fetch unfenced |
 | State scope creep | Helper filters to run hosts and origins; gate rejects out-of-scope entries | Cookies are scoped by host, not port; a parent-domain cookie stays valid for a sibling host a redirect reaches |
 | Credential destination | The caller names no login origin; the login runs before any consent prompt, so the recipe binds it: in remote mode its `baseUrl`, which must be one of the run's origins, or its `appOrigin` without one; in local mode the run's own loopback app origin, and a local recipe that names another origin or declares an `environment` is refused | Local mode: the loopback app origin is still the caller's choice, so a local recipe signs in only a throwaway account the local app alone knows; a split local frontend/API deployment cannot sign in |
 | Run-config tampering | Only the canonical path beside the config is accepted; no inline state | Same as the consent spec §12 swap residual |

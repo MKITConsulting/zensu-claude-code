@@ -250,7 +250,8 @@ sees a request. MEASURED with 0.1.23 and 0.1.24: a service-worker registration r
 `undefined`, no worker is registered and its script is never fetched. A server REDIRECT to another
 origin is NOT refused by the browser (recorded as measured in `docs/gates.md`, and measured again
 with 0.1.23 and 0.1.24), so the skill reads the `Page URL` line after every navigating call —
-prose, not a boundary. Skill and doc text depends on the service-worker block: a criterion that
+prose, not a boundary. A WebSocket and a shared worker's fetch are not refused either (below, and
+Known gaps). Skill and doc text depends on the service-worker block: a criterion that
 needs a service worker is `partial` with the cause driver fence, at the sites
 `.claude/rules/acceptance-verification-gate.md` lists under "A driver fence is a cause of its
 own". `P10o` in `tests/structure/test-verify-feature-skill.sh` fails once the helper stops writing
@@ -474,7 +475,8 @@ before the skill can stop. **WebSockets are outside the browser fence for every 
 measured with playwright-cli 0.1.21 and Chrome 154, and again with 0.1.23 and with 0.1.24 and
 Chrome 156, where a page on an allowed origin opened one to a loopback origin outside
 `allowedOrigins` and received its message: `context.route` does not intercept them —
-so the docs say "every HTTP(S) request"; fencing them is a separate change. The decisions and the
+so the docs say "every HTTP(S) request" and name each exception beside it; fencing them is a
+separate change, and so is fencing a shared worker's fetch (Known gaps). The decisions and the
 security analysis live in §11 of `docs/verify-feature-consent-spec.md`. **Version for this
 delta: `patch`**, by the route-retirement argument above — the policy is read from the launch
 environment, which no runtime writes, and an installation that predates the key refuses a policy
@@ -654,6 +656,18 @@ announces a prompt rather than a capability the plugin hands itself.
   `Zensu capability gate (reviewer-capability-v1) deny:` reason stays deterministic (`scripts/session-control-claude-wrapper.sh`,
   `evals/session-control/lib/live-evidence.js`, `evals/session-control/tests/wrapper-selftest.sh`,
   `tests/structure/test-windows-portability-guards.sh`).
+- The three exceptions to "the browser refuses every HTTP(S) request outside the run config" — a
+  WebSocket connection, a followed server redirect and a shared worker's fetch — are stated
+  together at each of these sites: `docs/gates.md` (the floor paragraph and the fence bullet of the
+  known gaps), `docs/verify-feature.md` ("How the browser is fenced", the consent-mode floor
+  bullet, the redirect sentence, the network-only limits and the local-mode API bullet),
+  the "Redirects are not filtered by the browser" paragraph of `skills/verify-feature/SKILL.md`,
+  section 1 of `skills/verify-feature/rules/browser-verification.md`,
+  `skills/autopilot/rules/config.md`, §11 and §12 of `docs/verify-feature-consent-spec.md` and the
+  scope and residual rows of `docs/verify-feature-auth-state-spec.md`. A new exception, or the day
+  one closes, edits all of them with `V73` and `P10q`. `SKILL.md` sits at its allowlist
+  (`.claude/rules/skill-text-budget.md`), so its sentence stays a bare list and the measurement
+  lives in the rule file.
 
 **The release signal (`.github/workflows/playwright-cli-drift.yml`).** No live tier runs
 `playwright-cli`, and none is needed: the parser port is pinned by a fixture recorded from the
@@ -737,6 +751,17 @@ for its `@playwright/cli` install pins.
   a network-only origin renders inside that page, so its content reaches that page's snapshot and
   screenshot; the skill reads it as that page's content, like fetched data, which is why
   `NETWORK_ONLY_NAVIGATION` denies evidence only to a page the browser lands on there.
+- **A shared worker's fetch is outside the browser fence, like a WebSocket and a followed
+  redirect.** Measured on 2026-11-17 on macOS with playwright-cli 0.1.24 driving Google Chrome
+  157.0.8103.52, headless, on loopback `http` origins, once through playwright-core directly and
+  once through the real CLI with a run-config-shaped file: with the routes from
+  `network.allowedOrigins`, `serviceWorkers: 'block'` and `--no-proxy-server`, a page's fetch and
+  navigation to an origin outside `allowedOrigins` were blocked, a dedicated worker's fetch was
+  blocked, and a shared worker's fetch reached that origin's server. Not measured: `https` and
+  `wss` targets, a real remote host, Windows, Linux and other Chrome channels. Every doc and skill
+  text that says the browser refuses "every HTTP(S) request" names all three exceptions beside it;
+  `V73` pins the two operator docs and `P10q` the skill text. Closing the gap is a separate,
+  larger change that this text correction does not start.
 - **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
   `main` and the measurements of two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
   156.0.8078.81 with 0.1.23 and 0.1.24); no suite drives a real browser, so a Chromium that
