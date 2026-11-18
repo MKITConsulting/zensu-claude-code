@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-18
+
+### Added
+
+- **cli**: Pass skill free text through zensu-cli 0.22.0 file flags (#634)
+- **multi-repo**: Add the code-roots foundation behind a dark-launch switch (#540)
+
+### Changed
+
+- **rules**: Record the live named-spawn measurement on 0.40.1 (#636)
+- **review-gate**: Probe an unreadable name store while the launch is open (#616)
+- **session-control**: Walk the record-reader ladder through one helper (#631)
+
+### Fixed
+
+- **pulse**: Fix the deferred review findings of #627 (#635)
+- **hooks**: Rank the reminder's route question with the recommended option first (#640)
+- **gates**: Stop naming gate escapes in model-facing text outside the review chain (#638)
+- **verify-feature**: Admit a query or fragment on a loopback navigation (#644)
+- **build**: Treat a spec-named dependency as a precondition, not consent (#583)
+- **verify-feature**: Announce the service-worker limit before verification (#639)
+- **session-control**: Refuse Bash rebinds of the adopt and re-anchor entry-point inputs (#633)
+- **deps**: Clear all known advisories from the eval tooling lockfile (#558)
+
 ### Changed
 
 - **zensu-cli 0.22.0 is the floor, and long free text goes through its file flags**:
