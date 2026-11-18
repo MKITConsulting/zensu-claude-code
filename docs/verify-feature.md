@@ -220,10 +220,12 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
   `[::1]` or the exact name `localhost`; never `app.localhost` or another hostname). A remote run
   reaches only HTTPS origins whose host is named exactly, never a wildcard, and whose DNS
   answers are all public; the run-config helper pins each hostname to the address it resolved
-  before the browser starts. No credentials, no query or fragment in a navigation, and the
-  browser sends no HTTP(S) request to an origin outside the run config, except by following a
-  server redirect (below). A WebSocket connection is not fenced by the run config, which is an
-  open gap.
+  before the browser starts. No credentials, no query or fragment in a navigation to a
+  non-loopback origin, and the browser sends no HTTP(S) request to an origin outside the run
+  config, except by following a server redirect (below). A WebSocket connection is not fenced by
+  the run config, which is an open gap. A loopback URL may carry a query or a fragment, such as a
+  fixture switch (`http://localhost:4200/?scenario=empty`): it is judged like the same URL without
+  them, and the consent record names the path only.
 - An API or identity origin of a deployed app that its pages call is passed to the run as one
   more origin: it is asked in the same prompt as the app and never navigated to.
 - Under bypass permissions or `dontAsk`, or when the host reports no permission mode, the gate

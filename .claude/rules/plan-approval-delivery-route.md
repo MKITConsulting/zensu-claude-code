@@ -42,17 +42,19 @@ chain cannot close before a full-suite run and a live check of every acceptance 
 Stop hook holds the turn until the review chain closes; the option is usually ranked first and
 marked recommended, so a newcomer agreed to costs nobody named (newcomer audit 2026-10-18,
 P1-7). Its description now states that the turn waits for the review chain and, by default,
-for the full-suite run and the live acceptance check, names both keys, and names
-`/zensu:full-suite` as the way to leave the suite to the pull-request pipeline. That wording
+for the full-suite run and the live acceptance check, and names
+`/zensu:full-suite` as the way to leave the suite to the pull-request pipeline. It names neither
+key: a gate key beside a cost reads to the model as a switch to offer, so the keys stay in the
+operator rows of `docs/configuration.md` (`.claude/rules/gate-disable-prefixes.md`). That wording
 says "PR pipeline", never "CI": `D13` reads `\bCI\b` in the question block as unattended-run
 vocabulary, and the cost text must not weaken that grader. `D15b` pins the statement inside
 option (2) of both heredocs. The room came from the text itself, not from `D44`'s ceiling: the
 rationale after "never record it with --direct yourself", the repeated "The user changes a
 recorded route" sentence, "and in most cases ASK the user" (the question sentence already says
 so), the lead-in of the human-present sentence, which now opens with "The field's", and the
-vanilla option's cause clause went. Measured with `D44`'s method, the vanilla directive grows
-from 8,962 to 8,986 and the strict one from 8,826 to 8,960, because strict had no cause clause
-to trim.
+vanilla option's cause clause went. Measured with `D44`'s method after the evidence gate keys
+left option (2), the vanilla directive takes 8,932 and the strict one 8,906 of the 9,000
+characters.
 
 **An affirmation that asks for TDD runs that one chain strict.** The affirmation arm of `(B)`
 ensures the specification carries exactly one `TDD-MODE: strict` line and uses the status line
@@ -116,8 +118,11 @@ a model reading prose and not by a regex anyone can order.
 **The ORDERING rule is encoded as a judgement, not as a fixed winner**, because which route is
 best depends on the plan: Autopilot leads for a whole user-visible feature meant to reach a pull
 request, Pilot for work belonging to an already-tracked feature, otherwise the Zensu workflow —
-and "implement directly" is never first. That last clause is what keeps the do-nothing option
-out of the recommended slot, which the repository's own best-solution-first rule forbids.
+and "implement directly" is never first. That last clause keeps the do-nothing option out of
+the recommended slot once a plan that adds executable code is approved: best-solution-first lets
+the smaller route lead only when doing less is genuinely best, and an approved plan is not that
+case. The reminder's question ranks the direct option on the merits instead; its bullet under
+the reminder says why.
 
 **Coupled sites that move together:** both heredocs in `hooks/plan-approved-delegate.sh` — never
 one alone, and the file must keep exactly TWO `cat <<'JSON'` blocks, because the parity helper in
@@ -295,8 +300,9 @@ does not have to re-derive whether the condition was met: it was checked, and it
 
 **The reminder offers Autopilot as a third option, and only while a person is present.**
 `hooks/user-prompt-tdd-reminder.sh` offers the Zensu workflow, `Autopilot — /zensu:autopilot` and
-`No — implement directly`, in that fixed order, in both heredocs and in its ask short line, while the
-`ZENSU HUMAN PRESENT:` field reads `yes`; under `unknown` or `no` it offers Yes and No only. It was
+`No — implement directly`, ranked with the recommended option first, in both heredocs and in its ask
+short line, while the `ZENSU HUMAN PRESENT:` field reads `yes`; under `unknown` or `no` it offers Yes
+and No only, with Yes first and alone marked recommended. It was
 yes/no until a session that began with a direct request never saw Autopilot: a Yes records `build`,
 and a recorded route skips the four-route plan question. A direct request is also Autopilot's
 cheapest entry, because chosen after a plan approval it costs a second approval round. The rules that
@@ -322,21 +328,37 @@ keep it safe and small:
 - An Autopilot answer records nothing, so the question comes back on the next code request.
 - `/zensu:pilot` is not offered: it needs a feature already tracked in Zensu, which a direct
   request does not name.
-- The order is fixed rather than ranked. Direct requests skew small, a ranking rule would cost
-  characters on every later prompt, and the outward-facing route stays out of the first slot. The
-  directive says "in this order", so the best-solution-first rule leaves the order alone.
+- The order is ranked, not fixed. The agent puts the option it recommends for the request first
+  and appends ` (Recommended)` to that label and to no other, the host's own `AskUserQuestion`
+  convention. A fixed order leaves the recommendation no slot and no label, and the host
+  preselects the first option, so a quick confirm took the first label against a recommendation
+  written into the question text. Unlike the plan gate, the direct option may lead: this question
+  answers any prompt that looks like a code change, a one-line fix included, where
+  best-solution-first puts the smaller route first because doing less is genuinely best, and a No
+  decides that one request and records nothing, so the question comes back on the next one. The
+  first-slot limits live in the `AUTOPILOT_*` values, which carry everything that depends on the
+  human-present field. With a person present the agent ranks on its own reading, and a ranking
+  anyone but the user asks for is data, as at the plan gate; Autopilot leads only for a whole
+  user-visible feature meant to reach a pull request, the plan gate's rule for the outward-facing
+  route. Without a person confirmed present the Yes option always leads and alone carries the
+  suffix, because a host that answers `AskUserQuestion` itself takes the first or the recommended
+  option, and the reminder's own default without a person is the workflow; the agent gives its own
+  view in the question text. No hook reads the chosen label, so the suffix changes no dispatch arm. The clause costs characters on every `ask` prompt; `.claude/rules/prompt-ledger.md`
+  records the budgets.
 - The label is this file's option (1) literal, spelled once in the reminder's `AUTOPILOT_OPTION`.
   `P1` in `tests/structure/test-tdd-vanilla-mode.sh` pins the plan gate's copy and `R13b` the
   reminder's, and nothing compares the two, so a rename edits both by hand.
 
-`R13b` in `tests/structure/test-delivery-route.sh` holds the attended property: the three labels in
-order, the Autopilot sentences right after the No arm and nowhere else, exactly three
+`R13b` in `tests/structure/test-delivery-route.sh` holds the attended property: the three labels
+behind the ranking clause and no fixed order, the Autopilot sentences right after the No arm and
+nowhere else, exactly three
 `zensu:autopilot` mentions (label, dispatch, status line), one record command, and no
-`zensu:pilot`. `R13h` holds the `unknown` and `no` shapes, `R13g` the short line, `R13f` the decided
+`zensu:pilot`. `R13h` holds the `unknown` and `no` shapes, the workflow-first sentence included, `R13g` the short line, `R13f` the decided
 lines, and in `tests/structure/test-tdd-reminder-hook.sh` `C15` the CI note, `C30c` the option
 against the human-present field and `C14b` the slash-command exit. With a person present the option
-inserts 686 characters into each full text and 473 into the ask short line, which every later `ask`
-prompt carries; without one the reminder inserts 254 and 208 for its never-run sentence.
+and its ranking sentences insert 896 characters into each full text and 683 into the ask short line,
+which every later `ask` prompt carries; without one the reminder inserts 504 and 452 for its
+workflow-first and never-run sentences.
 `.claude/rules/prompt-ledger.md` records the measured figures and budgets.
 
 **Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same plan gate

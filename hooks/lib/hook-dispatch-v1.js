@@ -444,10 +444,8 @@ function secretScanDeny(rules, input) {
     'for the Write/Edit tools, place it under a test(s)/, __tests__/, spec(s)/, testdata/, ' +
     'evals/ or fixtures/ path or an *.example.* file; on any channel, append the ' +
     'zensu-secret-allow marker to that line or use an obvious placeholder (EXAMPLE, ' +
-    'YOUR_...). Prefer the surgical, auditable escape (the allow marker, visible in ' +
-    'the diff) over disabling the gate. A blanket opt-out exists but is documented in ' +
-    'docs/gates.md (§ Secret Scan) rather than inlined here, so turning the whole gate ' +
-    'off stays a deliberate, human choice.',
+    'YOUR_...). The allow marker stays visible in the diff, so a reviewer sees each ' +
+    'exception.',
   );
 }
 
@@ -573,7 +571,7 @@ function editGateAllows(context) {
   if (/[\0\r\n]/.test(spelled)) return false;
   if (process.platform === 'win32' && /^[\\/]/.test(spelled)) return false;
   const absolute = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(spelled) ? spelled : `${project}/${spelled}`;
-  return require('./edit-path-class-v1.js').editPathClass(absolute, stateDirectory) !== 'state';
+  return require('./edit-path-class-v1.js').editPathClass(absolute, stateDirectory, state) !== 'state';
 }
 
 function runEditGate(context, check) {

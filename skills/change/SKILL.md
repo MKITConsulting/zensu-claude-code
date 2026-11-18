@@ -31,7 +31,7 @@ Run one change the user asked for against tracked Zensu state in an existing pro
 
 ## Prerequisites
 
-- Zensu CLI 0.18.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew update && brew upgrade --cask mkitconsulting/tap/zensu` or by running the installer again
+- Zensu CLI 0.22.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew update && brew upgrade --cask mkitconsulting/tap/zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - The `zensu wiki images` commands are missing from older releases, and such a release answers `zensu wiki images --help` with the help of `zensu wiki` and exit status 0. When that output does not list `upload` and `policy`, tell the user to upgrade and leave that part of the change undone.
 
@@ -81,15 +81,14 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
 ZENSU_TEXT_<hex>
-grep -qI '[^[:space:]]' -- "$f" || exit 1
-zensu features update <feature-id> --description "$(cat "$f")"
+zensu features update <feature-id> --description-file "$f"
 ```
 
-Inside double quotes the shell would run every backtick span of the text and expand every `$NAME`; the quoted delimiter keeps the text literal. Replace `<hex>` with eight random hex digits, new for each call and the same on both lines, so no line of the text can end the heredoc early; `>|` writes even under `noclobber`, and the `grep` line stops before an empty, blank or binary value reaches Zensu. A second free text in the same call gets its own file, and the one `trap` widens to both. A short title, slug or one-line summary may stay inline in double quotes when it holds no backtick and no `$`.
+Inside double quotes the shell would run every backtick span of the text and expand every `$NAME`; the quoted delimiter keeps the text literal. Replace `<hex>` with eight random hex digits, new for each call and the same on both lines, so no line of the text can end the heredoc early; `>|` writes even under `noclobber`. A row whose command names a `-file` flag hands zensu-cli the file's path: the CLI reads the file itself and refuses a missing, empty, blank or non-UTF-8 one before it sends anything. A row without a file flag passes the file's text inline, as the quoted command substitution in its row shows, and runs `grep -qI '[^[:space:]]' -- "$f" || exit 1` before the command, because the shell hands an empty, blank or binary file on as a value. A second free text in the same call gets its own file, and the one `trap` widens to both. A short title, slug or one-line summary may stay inline in double quotes when it holds no backtick and no `$`.
 
 After `zensu features create`, finish the new feature in this order, and report each result:
 
-1. `zensu features update <feature-id> --priority <priority> --description "$(cat "$f")"`. The priority is the one the user named, else `medium`, and the report says which. The description is structured Markdown, because the Zensu web app renders a feature description as Markdown: a `## Summary` paragraph, then `## Scope`, `## Acceptance criteria` and `## Out of scope` as bullet lists. Write only what the user said or this conversation established, and leave a section out rather than invent its content.
+1. `zensu features update <feature-id> --priority <priority> --description-file "$f"`. The priority is the one the user named, else `medium`, and the report says which. The description is structured Markdown, because the Zensu web app renders a feature description as Markdown: a `## Summary` paragraph, then `## Scope`, `## Acceptance criteria` and `## Out of scope` as bullet lists. Write only what the user said or this conversation established, and leave a section out rather than invent its content.
 2. `zensu security classify <feature-id> --classification <level>`, plus `--data-sensitivity <kind>` when the feature handles personal, financial, health or credential data. Pick the level from what the feature handles, and say why in the report. Pass a boolean, spelled `--<flag>=true` or `--<flag>=false`, only when a `file:line` you read in this session shows it or the user stated it, and name that evidence in the report. Pass `--threat-model-status` or `--pentest-status` only on the user's own statement, because no file in a repository proves a passed pentest or a completed threat model. The CLI sends only the flags you pass. The classification is applied and reported, not asked, because it can be changed at any time and `/zensu:security-review` reviews it.
 
 A command that fails is reported with its own output. Never retry a mutation with other values without asking.
@@ -107,6 +106,6 @@ Say what changed, with IDs: the `KEY-N` and UUID of every feature, the ID of eve
 - One request, one window. A change the user adds later opens its own window.
 - One window per session, never nested. `--workflow-begin` replaces the tool list of a window another skill opened, such as the one of `/zensu:implement` or `/zensu:pilot`, and Step 7 closes it. While another skill's window is open, do not run this skill: offer the change as a follow-up once that workflow has closed its window.
 - A step that needs an answer and cannot get one, because AskUserQuestion is unavailable or refused, as in a bound work-order session, ends the run before Step 5: run no command, and report the change as one that needs a person.
-- When the gate still denies a command inside the window, that command maps to a tool the window does not declare. Stop, close the window and report the deny reason. Never answer a deny with the `ZENSU_MCP_GATE=off` prefix.
+- When the gate still denies a command inside the window, that command maps to a tool the window does not declare. Stop, close the window and report the deny reason. Never retry a denied command, with or without a prefix.
 - Never run a command the gate calls a person's decision, inside this skill or outside it.
 - A command run in a subagent is denied even while this window is open. Run every `zensu` call of this skill in the interactive main thread.
