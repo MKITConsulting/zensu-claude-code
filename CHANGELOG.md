@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **zensu-cli 0.22.0 is the floor, and long free text goes through its file flags**:
+  `/zensu:docs`, `/zensu:implement`, `/zensu:bootstrap`, `/zensu:ghost-scan`,
+  `/zensu:security-review` and `/zensu:change` hand documents, descriptions, findings,
+  conditions and JSON to zensu-cli as `--content-file`, `--description-file`,
+  `--candidates-file`, `--result-file`, `--findings-file` and `--conditions-file`, so the CLI
+  reads the file itself (up to 256 KiB of text or 4 MiB of JSON) and the text no longer travels
+  as one command-line argument. The flags zensu-cli has no file form for keep the
+  `"$(cat "$f")"` recipe with its content check. README, `/zensu:setup`, the session banner and
+  `/zensu:doctor` name 0.22.0: older releases cannot read free text from a file, so skill calls
+  that send documents, descriptions, findings or JSON to Zensu fail. FT8 of
+  `test-skill-workflow-markers.sh` holds every free-text flag site against the help the floor
+  release recorded, and `record-zensu-cli-floor-help.js` re-records that fixture.
+
 ### Fixed
 
 - **Gate-escape hints outside the review chain**: no deny reason, directive or skill text an

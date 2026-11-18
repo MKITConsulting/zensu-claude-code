@@ -35,7 +35,7 @@ source, never a shared README.
 
 ## Prerequisites
 
-- Zensu CLI 0.18.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew update && brew upgrade --cask mkitconsulting/tap/zensu` or by running the installer again.
+- Zensu CLI 0.22.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew update && brew upgrade --cask mkitconsulting/tap/zensu` or by running the installer again.
 - Authenticated: `zensu auth login` (check with `zensu auth status`). If any
   command fails with an auth error (`invalid_grant`, expired/invalid token, `401`,
   not authenticated), run `zensu auth login` and retry.
@@ -227,24 +227,24 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
 ZENSU_TEXT_<hex>
-grep -qI '[^[:space:]]' -- "$f" || exit 1
 zensu link docs <feature-id> \
   --doc-type <type> --title "<title>" --audience <audience> \
-  --content "$(cat "$f")"
+  --content-file "$f"
 ```
 
 **The Markdown never goes into the command line itself.** Inside double quotes the
 shell runs every backtick span of it and expands every `$NAME`, and a single quote ends
-at the first apostrophe. zensu-cli has no stdin or file form for `--content`, so the
-heredoc with the quoted delimiter writes the text to a temporary file unchanged, and
-`"$(cat "$f")"` hands it over as one argument the shell does not expand again. Replace
-`<hex>` with eight random hex digits, new for each call and the same on both lines, so no
-line of the Markdown can end the heredoc early; `>|` writes even under `noclobber`, and
-the `grep` line stops before an empty, blank or binary page reaches Zensu.
+at the first apostrophe. So the heredoc with the quoted delimiter writes the text to a
+temporary file unchanged, and `--content-file` hands zensu-cli the file's path: the CLI
+reads the file itself, up to 256 KiB, and refuses a missing, empty, blank or non-UTF-8
+file before it sends anything. Replace `<hex>` with eight random hex digits, new for each
+call and the same on both lines, so no line of the Markdown can end the heredoc early;
+`>|` writes even under `noclobber`.
 
-**The page exists** (a re-run, or a refresh after a code change): `--content`
+**The page exists** (a re-run, or a refresh after a code change): `--content-file`
 never changes an existing page, so update the page, then link the doc without
-`--content` to recompute the score:
+`--content-file` to recompute the score; the `&&` skips the link when the update
+fails:
 
 ```bash
 f="$(mktemp)" || exit 1
@@ -252,9 +252,8 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
 ZENSU_TEXT_<hex>
-grep -qI '[^[:space:]]' -- "$f" || exit 1
 zensu wiki update <page-id> \
-  --content "$(cat "$f")" --change-summary "<what changed>"
+  --content-file "$f" --change-summary "<what changed>" &&
 zensu link docs <feature-id> \
   --doc-type <type> --title "<title>" --audience <audience>
 ```
@@ -265,7 +264,7 @@ required type (`user_facing` and `tutorial`).
 
 > Sibling `/zensu:implement` Step 6 follows the same rule: it updates an existing
 > page with `zensu wiki update` and creates a missing one with `wiki create` or the
-> one-call `--content` form of `zensu link docs`. Both produce a feature-linked
+> one-call `--content-file` form of `zensu link docs`. Both produce a feature-linked
 > wiki page.
 
 **Repo-file mode (`--repo-file`).** Write a **unique per-feature** file, then link
@@ -342,8 +341,8 @@ never published green.
 | `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped (UUID only) |
 | `zensu doc gen-context` | 2 | Aggregated authoring context map (paths + posture, not source); only the main thread runs it, and Phase 3 reads its output |
 | `zensu wiki list` | 4 | Find a feature-linked page no doc links yet (`--json` lists each page's `id` and `path`) |
-| `zensu wiki update` | 4 | Change a page that already exists; `zensu link docs --content` never does |
-| `zensu link docs` | 4 | Create the page (via `--content`, when none exists) + link the doc; auto-recomputes the docs score |
+| `zensu wiki update` | 4 | Change a page that already exists; `zensu link docs --content-file` never does |
+| `zensu link docs` | 4 | Create the page (via `--content-file`, when none exists) + link the doc; auto-recomputes the docs score |
 
 ## Agents & Skills Used
 

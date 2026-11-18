@@ -81,7 +81,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 
 ### Linking Artifacts
 - `zensu link test <feature-id>` — Link a test file (`--file` and `--test-type` required: unit|integration|e2e|security|performance|accessibility)
-- `zensu link docs <feature-id>` — Link documentation to a feature (`--doc-type` required; `--content` also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one)
+- `zensu link docs <feature-id>` — Link documentation to a feature (`--doc-type` required; `--content-file <path>` or `--content` also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one)
 - `zensu link source <feature-id>` — Map source files (repeatable `--file`; covers bulk mapping)
 
 ### Security
@@ -170,7 +170,7 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu work followup <work-order-id>` — Report out-of-scope work (**session**; `--title`, `--rationale` and `--severity` required: low|medium|high|critical)
 
 ### Product Visions & Bootstrap
-- `zensu products vision-create` — Store a vision document (`--title` and `--content` required; optional `--product` and `--source` studio|import|claude-code)
+- `zensu products vision-create` — Store a vision document (`--title` required, and the document as `--content-file <path>` or `--content`; optional `--product` and `--source` studio|import|claude-code)
 - `zensu products vision-get <vision-id>` — Retrieve vision content for analysis
 - `zensu products bootstrap-apply <vision-id>` — Create components and features from a structured decomposition (`--result`)
 - `zensu products bootstrap-step <vision-id> <step>` — Track post-bootstrap progress (the step number is positional, not `--step`)
@@ -184,8 +184,8 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu doc gen-context <feature-id> --doc-type <type>` — Get the *context map* (source-file paths, symbols, security posture) to read the real source before writing docs — NOT a doc generator. See `docs/documentation-guide.md`.
 
 ### Wiki
-- `zensu wiki create` — Create a new wiki page (`--product`, `--title` and `--content` required); when a page already exists at the new page's path, it fails and names that page's id (an older CLI or server updates that page instead)
-- `zensu wiki update <page-id>` — Change an existing wiki page (`--content`, `--title`, `--change-summary`, `--visibility`)
+- `zensu wiki create` — Create a new wiki page (`--product` and `--title` required, and the page text as `--content-file <path>` or `--content`); when a page already exists at the new page's path, it fails and names that page's id (an older CLI or server updates that page instead)
+- `zensu wiki update <page-id>` — Change an existing wiki page (`--content-file <path>` or `--content`, `--title`, `--change-summary`, `--visibility`)
 - `zensu wiki list --product <id>` — List wiki pages (`--json` carries each page's `id` and `path`)
 - `zensu wiki images upload --product <id> --file <path>` — Upload a local PNG, JPEG or WebP image without publishing it; the result's `wiki-asset:<uuid>` reference goes into a page's Markdown, and unused uploads expire
 - `zensu wiki images policy --product <id>` — Read the byte, pixel and dimension limits for wiki images
@@ -218,7 +218,7 @@ Automatic work capture drives these through `hooks/lib/ai-work-capture-v1.js`; `
 While Pulse tracking is off in the user's Zensu privacy settings, as it is for every new account until the user turns it on, `start` and `end` exit 0 with `tracking_disabled` and no session id: nothing was recorded, and there is no session to end or summarize.
 
 ### Ghost Scan
-- `zensu ghost scan --product <id> --candidates '<json>'` — Create a scan with feature candidates (it prints the scan id; no command lists scans)
+- `zensu ghost scan --product <id> --candidates-file <path>` — Create a scan with feature candidates, read as JSON from the file (it prints the scan id; no command lists scans)
 - `zensu ghost candidates <scan-id> --product <id>` — Load candidates for review
 - `zensu ghost approve <scan-id> <candidate-id> --product <id>` — Approve a single scan candidate
 - `zensu ghost reject <scan-id> <candidate-id> --product <id>` — Reject a single scan candidate (optional `--reason`)
