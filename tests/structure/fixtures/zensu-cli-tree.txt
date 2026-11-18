@@ -1,0 +1,147 @@
+version 0.15.0
+leaf ai-work context
+leaf ai-work get
+leaf ai-work start
+leaf ai-work submit
+leaf auth login
+leaf auth logout
+leaf auth status
+leaf auth token
+leaf completion bash
+leaf completion fish
+leaf completion powershell
+leaf completion zsh
+leaf design context
+alias doc docs
+leaf doc claude-md
+leaf doc claude-md-context
+leaf doc gen-context
+alias features feature
+leaf features create
+leaf features deprecate
+leaf features get
+leaf features history
+leaf features list
+leaf features merge
+leaf features revision
+leaf features split
+leaf features status
+leaf features update
+leaf ghost apply
+leaf ghost approve
+leaf ghost batch
+leaf ghost candidates
+leaf ghost reject
+leaf ghost scan
+leaf help
+alias journeys journey
+leaf journeys create
+leaf journeys get
+leaf journeys health
+leaf journeys list
+leaf journeys step
+leaf journeys step-delete
+leaf journeys step-update
+leaf journeys steps
+leaf journeys suggest
+alias knowledge kb
+leaf knowledge context-pack
+leaf knowledge context-search
+leaf knowledge get
+leaf knowledge search
+leaf knowledge sources
+leaf link docs
+leaf link source
+leaf link test
+leaf meta scaffold-agent
+leaf meta suggest-workflow
+leaf meta workflow-guide
+alias mocks mock
+leaf mocks create
+leaf mocks get
+leaf mocks list
+leaf org users
+leaf plan abandon
+leaf plan approve
+leaf plan confirm-merge
+leaf plan finalize
+leaf plan followup accept
+leaf plan followup dismiss
+leaf plan followups
+leaf plan list
+leaf plan push
+leaf plan status
+alias products product
+leaf products bootstrap-apply
+leaf products bootstrap-step
+leaf products create
+leaf products get
+leaf products import
+leaf products list
+leaf products vision-create
+leaf products vision-get
+leaf pulse end
+leaf pulse start
+leaf pulse summary
+alias roadmap roadmaps
+leaf roadmap add-feature
+leaf roadmap create
+leaf roadmap delete
+leaf roadmap get
+leaf roadmap list
+leaf roadmap milestone-create
+leaf roadmap milestone-delete
+leaf roadmap milestone-list
+leaf roadmap remove-feature
+leaf roadmap update
+alias security sec
+leaf security add-test
+leaf security analyze
+leaf security classify
+leaf security posture
+leaf security review
+leaf security score
+leaf security suggest-tests
+leaf security threat-model
+leaf security validate
+alias subfeatures subfeature
+leaf subfeatures add
+leaf subfeatures list
+leaf subfeatures promote
+alias tiers tier
+leaf tiers create
+leaf tiers list
+leaf tiers matrix
+leaf tiers set-feature
+alias wiki wiki-pages
+leaf wiki create
+leaf wiki images policy
+leaf wiki images upload
+leaf wiki list
+leaf wiki update
+leaf work answer
+leaf work approve
+leaf work ask
+leaf work cancel
+leaf work claim
+leaf work confirm
+leaf work confirm-merge
+leaf work create
+leaf work event
+leaf work events
+leaf work followup
+leaf work get
+leaf work heartbeat
+leaf work list
+leaf work overturn
+leaf work policy get
+leaf work policy set
+leaf work questions
+leaf work release
+alias work repositories repos
+leaf work repositories add
+leaf work repositories list
+leaf work repositories remove
+leaf work repositories update
+leaf work requeue
+leaf work usage

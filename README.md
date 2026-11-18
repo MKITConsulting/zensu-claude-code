@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.36.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.40.2-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -87,13 +87,16 @@ already rely on:
   this was measured and breaks it down per hook.
 - **zen-mode is on by default.** Replies put the result first, stay near eight
   lines and close with a short session block: what you started the session for,
-  what it has done so far and what this turn did, then one next step. Say "zen off"
+  what it has done so far and what this turn did, then one next step. Once the
+  work is finished and nothing is left open, that step says the session is done
+  and can be archived. Say "zen off"
   or run `/zensu:zen-mode --off` to leave it for the session; set
   `hooks.zenModeDefault: false` to make it opt-in again.
 - **Claude asks which delivery route to take.** After you approve a plan, Zensu
   has Claude ask whether to use Autopilot, the Zensu workflow or Pilot, or to
   implement directly; on a direct code request it asks whether to use the Zensu
-  workflow. A plan that names its own executor, such as another plugin's
+  workflow or Autopilot, or to implement directly, and leaves Autopilot out when
+  no one is there to answer. A plan that names its own executor, such as another plugin's
   `superpowers:executing-plans`, gets a short notice instead: Claude carries it
   out with that skill and names `/zensu:build` as the way to use the Zensu
   workflow. `/zensu:delivery-route` or
@@ -125,6 +128,14 @@ already rely on:
   or set `ZENSU_FULL_SUITE_GATE=off` or `ZENSU_ACCEPTANCE_GATE=off` for one
   closing step; those two escapes are recorded in the chain's bypass ledger.
   `/zensu:full-suite` moves the full suite to a verified CI pipeline instead.
+  An Autopilot run that validates leaves its VALIDATE stage only through
+  `zensu-log.sh --autopilot-validate`, once every acceptance criterion of the plan
+  you approved has a passing record on the clean pull-request head. Two other
+  ways out are recorded in the run's ledger and the pull request: criteria this
+  environment cannot observe close as partial only when the approved plan's
+  `## Manual Acceptance` table lists them, and the advisory setting or the
+  switched-off gate validates without every record, while a dirty tree or
+  another head still refuses.
 - **`node` must be on `PATH`.** Claude Code starts the hook dispatcher, which
   runs the capability gate before every tool call, as `node` itself. Without
   `node` the dispatcher cannot start, and its registration makes Claude Code
@@ -156,12 +167,41 @@ claude plugin update zensu@zensu
 ```
 
 Optional, for feature tracking: install zensu-cli 0.18.0 or later with
-`brew install --cask mkitconsulting/tap/zensu` (upgrade with `brew upgrade --cask zensu`),
+`brew install --cask mkitconsulting/tap/zensu` (upgrade with
+`brew update && brew upgrade --cask mkitconsulting/tap/zensu`),
 `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
 `irm https://zensu.dev/install.ps1 | iex`, then run `zensu auth login`.
 
 Run `/zensu:setup` to configure Zensu step by step, or `/zensu:doctor` if
 something is not firing.
+
+## Two plugins
+
+The `zensu` marketplace lists two plugins. Each has its own version, tags and
+changelog, and neither needs the other.
+
+| Plugin | Install | What it is |
+|--------|---------|------------|
+| `zensu@zensu` | `claude plugin install zensu --scope project` | Zensu itself: everything this README describes |
+| `session-hub@zensu` | `claude plugin install session-hub@zensu` | The companion for the Zensu Session Hub: `/session-hub:session-trail`, the handover receipt and the usage feed, and nothing else. [Its README](plugins/session-hub/README.md) |
+
+The Session Hub types `/session-hub:session-trail takeover …` into the session
+it moves, so it needs the companion, not Zensu. Zensu still carries its own
+copy of `/zensu:session-trail`, its receipt hook and the usage feed, frozen
+until a later release removes them; with both plugins enabled, each receipt
+hook answers only its own command and both usage-feed copies write the same
+file. While `hooks.bashWriteGate` is on, Zensu adds one notice to a takeover
+command typed as `/session-hub:session-trail takeover …`: its opt-in
+source-write gate refuses source writes and git commands, commits included,
+outside the session's Session Control root, and
+`/zensu:adopt-session --reanchor` moves that root. A linked session started
+from a takeover brief gets no notice, so the companion's briefs state that rule
+themselves.
+
+`session-hub@zensu` installs once its first release, `session-hub--v1.0.0`, is
+published, right after the Zensu release that ships its marketplace entry; until
+then its install fails on a tag that does not exist yet. Moving a session
+through it also needs a Session Hub release that reads its handover contract 2.
 
 ## Try it
 
@@ -189,11 +229,15 @@ and imports it as tracked features. Needs a Zensu account.
 features, journeys, and tiers. Then `/zensu:implement KEY-1` builds the first one.
 Needs a Zensu account.
 
+**One change** — `/zensu:change` makes one change you ask for in a tracked
+product, such as a new feature, a roadmap entry or a deprecation. It checks for
+a duplicate first and asks before anything is removed. Needs a Zensu account.
+
 ## What's included
 
-### Skills (31)
+### Skills (32)
 
-> The count is the workflow skills in these tables. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of these tables (32 skills are registered in `plugin.json`).
+> The count is the workflow skills in these tables. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of these tables (33 skills are registered in `plugin.json`).
 
 The **Needs** column says what a skill needs beyond Claude Code: "Zensu account"
 means the `zensu` CLI, logged in; `gh` or `glab` means the forge CLI of your
@@ -206,6 +250,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:bootstrap` | Turn a vision document into tracked features, journeys, security profiles, and tiers | Zensu account |
 | `/zensu:ghost-scan` | Scan an existing repo, discover undocumented features, and import them | Zensu account |
+| `/zensu:change` | One change you ask for in a tracked product: a new feature, a roadmap entry, a tier, a link, a deprecation or a merge, with a duplicate check first and a confirmation before anything is removed or replaced | Zensu account |
 | `/zensu:docs` | Write code-grounded feature documentation that honestly clears the docs release gate | Zensu account |
 | `/zensu:security-review` | A tracked feature's security review: classification, OWASP analysis, STRIDE threat model, release-gate check | Zensu account |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions | Zensu account |
@@ -214,7 +259,7 @@ make no `zensu` call at all.
 
 | Skill | What it does | Needs |
 |-------|--------------|-------|
-| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; `/zensu:tdd-mode` or `hooks.tddImplementation` switches strict TDD on | — |
+| `/zensu:build` | The Zensu workflow: implement an approved plan in the main thread, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop. By default it runs without RED→GREEN; "with tdd" in a request or a plan approval runs that one chain strict unless a `/zensu:tdd-mode` session choice says vanilla, `/zensu:tdd-mode` switches strict TDD on for the session and `hooks.tddImplementation` for the project or globally | — |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys | `gh` or `glab` |
 | `/zensu:implement` | Implement a tracked feature through the Zensu workflow, then link its tests, sources and docs and create a revision | Zensu account |
 | `/zensu:pilot` | The guided route: probes a tracked feature's real state and offers the next step, one confirmed step at a time | Zensu account and a tracked feature; `gh` or `glab` for its pull request |
@@ -252,7 +297,7 @@ make no `zensu` call at all.
 |-------|--------------|-------|
 | `/zensu:setup` | Interactive first-run configuration | — (a Zensu account for its optional login step) |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A | — |
-| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over and then release the old one so it can be archived, and trace where a session was continued across windows and accounts | — |
+| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over and then release the old one so it can be archived, and trace where a session was continued across windows and accounts. Frozen: the Session Hub uses the companion's `/session-hub:session-trail` ([Two plugins](#two-plugins)) | — |
 
 #### Recovery
 
@@ -311,7 +356,7 @@ Not every hook can be turned off:
 
 | | Hooks | How |
 |-|-------|-----|
-| **Switched off by a config key** | The banner and primer, the pulse banner, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, automatic feature context, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
+| **Switched off by a config key** | The banner and primer, the pulse context line, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, automatic feature context, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
 | **Off unless you opt in** | The source-write gate's checks of Bash writes | `hooks.bashWriteGate: true` |
 | **Bypassed only through the environment** | The TDD phase gate | `ZENSU_TDD_GATE=off` in the environment Claude Code starts with |
 | **Always on while the plugin is enabled** | Session Control and the capability gate that confines subagents (`hooks.subagentShell: false` only withdraws their `Bash`), the Session Control check inside the source-write gate, evidence discipline, the plugin-data guard, the browser consent gate and its recorder, the artifact path redactor, the prompt-ledger reset, Autopilot resume context, the review-evidence hooks, the work-order hooks (inert outside a work-order session), the background-review hand-back and both automatic work-capture hooks | Disable the plugin ([Turn Zensu off or remove it](#turn-zensu-off-or-remove-it)) |
@@ -356,7 +401,8 @@ What stays behind:
   `.claude/worktrees/`, and the `.worktree-keep` line in the repository's
   `.git/info/exclude`.
 - `~/.claude/zensu/` (under `CLAUDE_CONFIG_DIR` when that is set): the session
-  lineage ledger of `/zensu:session-trail` and the Session Hub receipts.
+  lineage ledger that `/zensu:session-trail` shares with the companion's
+  `/session-hub:session-trail`, the Session Hub receipts and the usage files.
 - The `zensu` CLI and its stored login, which are a separate install. Run
   `zensu auth logout` before you remove the CLI.
 
@@ -399,10 +445,11 @@ through it:
 |-------|---------------|
 | `/zensu:bootstrap` | Product name, slug and type; **the full text of your vision or plan document**; the features, journeys, tiers and security profiles derived from it |
 | `/zensu:ghost-scan` | **The repository URL** and branch; per discovered feature its slug, title, component, confidence, security classification and the paths of its source, test and doc files |
+| `/zensu:change` | The values of the change you ask for: titles, slugs, priorities, periods, tier entries, **free-text descriptions and wiki pages as Markdown**, linked file paths, **an uploaded wiki image or mock file**, and a repository URL when you import one |
 | `/zensu:implement` | **A knowledge-search query** made of the feature title and key terms; linked test and source file paths; **the documentation it writes, as whole Markdown pages** (step 6); a free-text revision summary; status updates |
 | `/zensu:docs` | **The documentation it writes, as whole Markdown pages** in its default wiki mode; with `--repo-file`, the path of the file it writes into your repository instead |
 | `/zensu:security-review` | Classification attributes, the security tests it links, **a free-text findings summary** and approval conditions |
-| `/zensu:pulse` | HEAD SHA, branch, **the absolute path of your project root**, an optional product id and, at the end, the changed file paths |
+| `/zensu:pulse` | HEAD SHA, branch, **the absolute path of your project root**, an optional product id and, at the end, the paths of the tracked files that differ from the start commit, those that other authors' commits brought in only after you confirm them, and **of the untracked, non-ignored files created or changed during the session** |
 | `/zensu:pilot` | Feature status changes and release-gate checks |
 | `/zensu:work` | Stage events, heartbeats, questions and follow-ups for its work order |
 | Automatic work capture, any implementation task | The goal's title (at most 160 characters), its key and a criteria version or SHA-256 digest; the commit SHA of each new clean commit for that goal. Never transcripts, prompts, diffs, file lists, credentials or token usage |
@@ -410,7 +457,11 @@ through it:
 `/zensu:cover` and `/zensu:wargame` only read a feature record, and only when
 you name one; `/zensu:setup` and `/zensu:doctor` run `zensu auth status` and
 `zensu --version`. No skill uploads source files, but documentation and
-free-text summaries can quote code, signatures and endpoints. Pulse never
+free-text summaries can quote code, signatures and endpoints. Commands you run
+yourself send what you hand them: `zensu plan push` sends the work plan it
+parses from your Markdown file, with the file's relative path and a hash of its
+content, and `zensu mocks create`, which `/zensu:change` also runs, uploads the
+mock file. Pulse never
 records error messages or any other free text. Pulse sessions are retained for
 90 days by default.
 
@@ -423,40 +474,39 @@ Point the CLI at your own deployment with the `--api-url` flag, the
 export ZENSU_API_URL=https://api.example.internal
 ```
 
+`zensu auth login` and the token refresh read the OAuth endpoints from your
+API's `/.well-known/oauth-authorization-server` document. They use the
+advertised endpoints only when both sit on the API's own origin or on a host
+named in `ZENSU_TRUSTED_AUTH_HOSTS`, a comma-separated list of host names, and
+never a plain `http://` endpoint under an `https://` API, not even on a listed
+host. Otherwise, and whenever discovery fails, they use
+`<api-url>/oauth/authorize` and `<api-url>/oauth/token`. Name your identity
+provider's host when it runs apart from the API:
+
+```bash
+export ZENSU_TRUSTED_AUTH_HOSTS=auth.example.internal
+```
+
 The plugin ships no MCP server, so there is no Zensu API or hosted-MCP endpoint
 to redirect. If you operate under GDPR, CCPA, or similar regulations,
 self-hosting keeps the data under your control.
 
 ### Session Hub usage feed
 
-The plugin carries one optional hooks module, `hooks/usage-feed.ts`, for the
+Zensu still carries one optional hooks module, `hooks/usage-feed.ts`, for the
 Zensu Session Hub, a macOS app that shows the five-hour and weekly limits of
-several Claude accounts. The module writes only while the directory
-`<config root>/zensu/session-hub/v1/usage/` already exists, where the config
-root is `CLAUDE_CONFIG_DIR` when that names an absolute path and `~/.claude`
-otherwise. The Session Hub creates that directory; the module never creates it,
-so on a machine without the Session Hub nothing is written.
-
-While the directory exists, the module writes one file per Claude Code session,
-`<session id>.json`, when Claude Code measures the session and the reading is
-new: Claude has just answered a turn of the session, or a rate-limit window has
-just moved. The time in the file is that moment, so a reading the session took
-earlier never comes back under a newer time. It writes nothing when a session
-starts and nothing while a session is idle, so a file keeps the time of its last
-reading. The file holds the record's schema version, the session id, the time of
-the reading, and for each window its name (`five_hour`, `seven_day`), the
-percentage used and the reset time. It holds nothing else: no prompt, response,
-title, path, project or account data. To tell an answered turn, the module reads
-only how the turn ended, not its text. Each write replaces the whole file, the
-file stays on your machine, and the module sends nothing anywhere. Deleting the
-directory stops the feed; only a write already under way at that moment can
-create it once more.
-
-The module needs Claude Code 2.1.296 or newer and uses its early-access hooks
-module API, which can change between releases. Anthropic can also switch modules
-of installed plugins off at any time. The feed then writes nothing, every other
-Zensu hook keeps running, and the Session Hub reads the limits from Claude's
-usage popover as it does without the plugin.
+several Claude accounts. It is the same file the `session-hub` companion ships,
+and Zensu keeps it only until a later release leaves the feed to the companion.
+The module writes only while the directory
+`<config root>/zensu/session-hub/v1/usage/` already exists, a directory only the
+Session Hub creates, so on a machine without the Session Hub nothing is written.
+It then writes one file per session with the session id, the time of the
+reading and, for the five-hour and seven-day windows, the percentage used and
+the reset time: no prompt, response, title, path, project or account data, and
+nothing leaves your machine. With both plugins enabled, both copies write the
+same file under the same rule. When it writes, how to stop it and what happens
+when Claude Code switches the module off are described in the companion's
+[README](plugins/session-hub/README.md#usage-feed).
 
 ## Requirements
 
@@ -468,13 +518,14 @@ inside WSL, or install Git for Windows so that Claude Code runs the hooks throug
 Git Bash, whichever terminal you start `claude` from. Native Windows without Git
 Bash is not supported. With Git Bash, Claude Code may run shell commands through
 its PowerShell tool; Zensu's shell-command gates judge those too and refuse a
-PowerShell command they cannot judge, naming the Bash tool. To keep Claude on
+PowerShell command they cannot judge, naming the Bash tool, or the reinstall
+when the plugin installation is incomplete. To keep Claude on
 the Bash tool, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` in the environment that
 starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the
 known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
 driver additionally need `playwright-cli` on `PATH`
-(`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
+(`npm install -g @playwright/cli@0.1.24`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
 
 Feature tracking and AI-work capture need zensu-cli 0.18.0 or later: older
@@ -584,3 +635,12 @@ Upgrade the product-scope backend and CLI before the plugin. See the shipped
 `docs/ai-work-capture.md` for identity checks and legacy receipt handling.
 
 CLI setup and troubleshooting: [Install or update the CLI, including `zensu update` and older-version recovery](docs/cli-install-update.md).
+
+### Review context and source-system links
+
+Before handoff, the native capture helper accepts `checkpoint --review-file` with
+an explicit summary, acceptance criteria, evidence, limitations and optional
+`artifactUrl` for the exact commit. The URL is supplied deliberately, never inferred
+from a Git remote. Pending reports retain their original content for retries; a
+changed report creates a new result version without inherited acceptance.
+See [result reporting and disclosure scope](docs/ai-work-capture.md#explain-the-result-before-human-acceptance).

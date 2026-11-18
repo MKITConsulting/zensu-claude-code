@@ -26,6 +26,31 @@ echo "=== E0: unit layer ==="
 . "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 unit_check "E0a the session-reanchor unit file passes" "$UNIT"
 
+ZSR_TABLE="$(sed -n "/^done <<'ZSR_REQUIRED_MODULES'\$/,/^ZSR_REQUIRED_MODULES\$/p" "$REANCHOR" | grep '|' | sed 's/|.*//' | LC_ALL=C sort)"
+ZSR_BOUND="$(sed -nE 's/^\[ "\$_zsr_seen" -eq ([0-9]+) \] \|\| \{$/\1/p' "$REANCHOR")"
+ZSR_CLOSURE="$(node -e '
+const fs = require("fs"), path = require("path");
+const lib = process.argv[1], seen = new Set(), queue = ["session-reanchor-v1.js"];
+while (queue.length) {
+  const f = queue.shift();
+  if (seen.has(f)) continue;
+  seen.add(f);
+  let src = "";
+  try { src = fs.readFileSync(path.join(lib, f), "utf8"); } catch { continue; }
+  for (const m of src.matchAll(/^(?:const|let|var)\s[^\n]*?\brequire\(\s*["\x27]\.\/([A-Za-z0-9._-]+\.js)["\x27]\s*\)/gm)) {
+    if (!seen.has(m[1])) queue.push(m[1]);
+  }
+}
+process.stdout.write([...seen].sort().join("\n"));
+' "$PLUGIN_DIR/hooks/lib" 2>/dev/null || true)"
+if [ -n "$ZSR_CLOSURE" ] && [ "$ZSR_CLOSURE" = "$ZSR_TABLE" ]; then
+  check "E0r the re-anchor wrapper's required-module table equals session-reanchor-v1.js's top-level require closure" PASS
+else
+  check "E0r the re-anchor wrapper's required-module table equals session-reanchor-v1.js's top-level require closure (only_in_graph:$(comm -23 <(printf '%s\n' "$ZSR_CLOSURE") <(printf '%s\n' "$ZSR_TABLE") | tr '\n' ' ') only_in_table:$(comm -13 <(printf '%s\n' "$ZSR_CLOSURE") <(printf '%s\n' "$ZSR_TABLE") | tr '\n' ' '))" FAIL
+fi
+expect_eq "E0r2 the wrapper's row-count guard equals the number of table rows" \
+  "$(printf '%s\n' "$ZSR_TABLE" | grep -c .)" "$ZSR_BOUND"
+
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SESSION_KEY ZENSU_PROJECT_ROOT \
   ZENSU_SESSION_CONTEXT ZENSU_RUNTIME_DIGEST ZENSU_CLAUDE_PLUGIN_ROOT CLAUDE_CODE_SESSION_ID \
   ZENSU_SOURCE_REVISION ZENSU_SOURCE_REVISION_AUTHORITY CLAUDE_CONFIG_DIR 2>/dev/null || true

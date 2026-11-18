@@ -9,10 +9,10 @@ import {
   ledgerPaths, writeEdge, readEdges, dedupeEdges,
   makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainWalks,
   readLabels as readLabelsFile, updateLabels, emptyLabels, boundLabel,
-  removeEdgeFiles, otherSchemaLedgers, MAX_EDGE_RECORDS, byRecordedAtAsc,
+  removeEdgeFiles, otherSchemaLedgers, schemaLedgerCensus, MAX_EDGE_RECORDS, byRecordedAtAsc,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
-import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
+import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, storeFolderRemedy, storeFolderNote, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
 
 // Shared, never re-spelled. CLAUDE.md records `msysDrivePrefix` in
 // hooks/lib/claude-path-v1.js as the ONE MSYS drive rule in this repo, and a
@@ -958,14 +958,14 @@ function mainRootFromGitFile(gitFile) {
 // INFERRED from the usual Electron userData locations and have never been observed;
 // `lineage --diagnose` prints every probe so a wrong guess is visible in one command,
 // and $ZENSU_CCD_STORE overrides the list without a code change.
-function ccdStoreCandidates() {
+function ccdStoreCandidates(ignoreOverride = false) {
   const out = [];
   // An explicit override is AUTHORITATIVE, not merely first: falling through to a
   // guessed path when the named one is absent would silently attribute sessions to
   // accounts read out of a store the operator did not choose, and the fallback would
   // be invisible in every output except --diagnose.
   const env = process.env.ZENSU_CCD_STORE;
-  if (env && env.trim()) return [{ source: 'ZENSU_CCD_STORE (authoritative)', dir: path.resolve(hostPath(env.trim())) }];
+  if (!ignoreOverride && env && env.trim()) return [{ source: CCD_STORE_OVERRIDE, dir: path.resolve(hostPath(env.trim())) }];
   out.push({ source: 'macOS (verified)', dir: path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions') });
   const appData = process.env.APPDATA;
   if (appData && appData.trim()) out.push({ source: 'Windows APPDATA (unverified)', dir: path.join(appData.trim(), 'Claude', 'claude-code-sessions') });
@@ -982,7 +982,7 @@ function storeRead() {
   if (STORE_READ) return STORE_READ;
   let read = null;
   try { read = requireFromHere('../../../hooks/lib/desktop-store-read-v1.js'); } catch { read = null; }
-  const needed = ['writableOnlyByCaller', 'realDirectory', 'ownedRegularFile', 'readBoundedBytes'];
+  const needed = ['writableOnlyByCaller', 'realDirectory', 'ownedDirectoryRefusal', 'ownedRegularFile', 'readBoundedBytes'];
   if (!read || !needed.every((name) => typeof read[name] === 'function') || !Number.isInteger(read.DESKTOP_RECORD_MAX_BYTES)) {
     fail('hooks/lib/desktop-store-read-v1.js could not be loaded, so the Claude Desktop store cannot be checked — the plugin tree is incomplete');
   }
@@ -994,7 +994,7 @@ const STORE_REFUSED_REASON = 'the Claude Desktop session store was refused: anot
 const RECORD_REFUSED_REASON = 'its Claude Desktop record was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read';
 const RECORDS_REFUSED_REASON = 'Claude Desktop holds no readable record for this session, and some of its store entries were refused: another account owns them or can write them, they are symbolic links, of the wrong file type or larger than 8 MiB, or they could not be opened or read';
 const CCD_REFUSED = new Set();
-
+const CCD_UNREAD = new Set();
 function refuseStoreEntry(entry) {
   if (CCD_REFUSED.has(entry)) return;
   CCD_REFUSED.add(entry);
@@ -1056,7 +1056,7 @@ function ccdRecordFiles() {
   const walk = (dir, depth, accountUuid) => {
     if (depth > 3) return;
     let es;
-    try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch { SKIPPED += 1; return; }
+    try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch { SKIPPED += 1; CCD_UNREAD.add(dir); return; }
     for (const e of es) {
       const p = path.join(dir, e.name);
       if (e.isSymbolicLink()) {
@@ -1089,7 +1089,7 @@ function storeRecordBytes(file) {
 
 function storeRecordObject(file) {
   const read = storeRecordBytes(file);
-  if (read.state !== 'read') return { state: read.state === 'refused' ? 'refused' : 'unreadable', record: null };
+  if (read.state !== 'read') return { state: read.state === 'refused' || read.state === 'missing' ? read.state : 'unreadable', record: null };
   try { return { state: 'read', record: JSON.parse(read.bytes.toString('utf8')) }; } catch { return { state: 'unreadable', record: null }; }
 }
 
@@ -1110,8 +1110,8 @@ function ccdIndex() {
   const map = new Map();
   CCD_CACHE = map;
   for (const f of ccdRecordFiles()) {
-    const o = storeRecordObject(f.path).record;
-    if (!o || !o.cliSessionId) continue;
+    const { state, record: o } = storeRecordObject(f.path);
+    if (!o || !o.cliSessionId) { if (state === 'unreadable') CCD_UNREAD.add(f.path); continue; }
     CCD_RECORD_PATHS.set(o.cliSessionId, f.path);
     map.set(o.cliSessionId, ccdAppEntry(o, f.accountUuid));
   }
@@ -1164,7 +1164,7 @@ function ccdCandidates() {
   CCD_CANDIDATES = map;
   ccdRecordFiles().forEach((f, index) => {
     const read = storeRecordBytes(f.path);
-    if (read.state !== 'read') return;
+    if (read.state !== 'read') { if (read.state === 'changing') CCD_UNREAD.add(f.path); return; }
     for (const id of cliSessionIdsIn(read.bytes)) {
       const list = map.get(id);
       if (!list) map.set(id, [index]);
@@ -1180,8 +1180,8 @@ function ccdApp(sessionId) {
   const files = ccdRecordFiles();
   let found;
   for (const index of ccdCandidates().get(sessionId) || []) {
-    const o = storeRecordObject(files[index].path).record;
-    if (!o || !o.cliSessionId || o.cliSessionId !== sessionId) continue;
+    const { state, record: o } = storeRecordObject(files[index].path);
+    if (!o || !o.cliSessionId || o.cliSessionId !== sessionId) { if (state === 'unreadable') CCD_UNREAD.add(files[index].path); continue; }
     CCD_RECORD_PATHS.set(sessionId, files[index].path);
     found = ccdAppEntry(o, files[index].accountUuid);
   }
@@ -1597,7 +1597,7 @@ function ledgerRead() {
   // make visible. Per-record refusals stay a separate number: they are the narrow
   // half of the same hazard, one dropped record is one pair missing from the
   // duplicate guard, and the remedies differ.
-  return { edges, refused: refused.length, directoryError, schemaNewer, truncated };
+  return { edges, refused: refused.length, refusedFiles: refused, directoryError, schemaNewer, truncated };
 }
 
 
@@ -1690,8 +1690,8 @@ function endpointFromRow(row) {
 // `provisional`, while `--force` (the user's approval, on the command line) and
 // `adopt` (the confirmation verb) claim `confirmed`.
 //
-// `at` is when the handover HAPPENED, which for a reconstructed edge is the stalled
-// session's own last activity — not the moment `--apply` ran. Stamping every guess
+// `at` is when the handover HAPPENED; for a reconstructed edge it is the successor's
+// last write, never later than the moment `--apply` ran. Stamping every guess
 // with the apply instant made it newer than every real handover by construction, and
 // `recordedAt` is the sole ordering key at four sites, so one backfill promoted
 // guesses above measurements permanently and printChain printed the backfill date as
@@ -5284,24 +5284,77 @@ function accountOf(file) {
   return hit ? hit.accountUuid : null;
 }
 
+const CCD_STORE_OVERRIDE = 'ZENSU_CCD_STORE (authoritative)';
+let STORE_FOLDER = null;
+function storeFolderVerdict() {
+  if (STORE_FOLDER) return STORE_FOLDER;
+  const store = ccdStore();
+  if (!store) return null;
+  const dir = path.dirname(store.dir);
+  const { realDirectory, writableOnlyByCaller, ownedDirectoryRefusal } = storeRead();
+  const owned = realDirectory(dir, writableOnlyByCaller);
+  if (!owned) refuseStoreEntry(dir);
+  const cause = owned ? null : ownedDirectoryRefusal(dir) || 'uninspectable';
+  let realDir = null;
+  let realStore = null;
+  if (cause === 'symlink') {
+    try { realDir = fs.realpathSync(dir); realStore = fs.realpathSync(store.dir); } catch { realDir = null; realStore = null; }
+  }
+  const realCause = cause !== 'symlink' ? null : realDir ? ownedDirectoryRefusal(realDir) : 'uninspectable';
+  const override = store.source === CCD_STORE_OVERRIDE;
+  STORE_FOLDER = { dir, owned, cause, realDir, realStore, realCause, override, desktopOwn: !override || desktopOwnStore(store.dir) };
+  return STORE_FOLDER;
+}
+
+function desktopOwnStore(dir) {
+  return ccdStoreCandidates(true).some((candidate) => {
+    if (!dirExists(candidate.dir)) return false;
+    const [store, desktop] = canonicalPair(dir, candidate.dir);
+    return store === desktop;
+  });
+}
+
+function storeFolderState(folder, reads) {
+  if (!folder) return { storeFolderRefused: null, storeFolder: null };
+  const { dir, cause, realDir, realStore, realCause, override, desktopOwn } = folder;
+  return { storeFolderRefused: !folder.owned, storeFolder: { dir, cause, realDir, realStore, realCause, override, desktopOwn, remedy: storeFolderRemedy(folder), reads } };
+}
+
 function savedPresets(accountUuid) {
   const store = ccdStore();
-  if (!store || !accountUuid) return null;
-  const read = storeRecordObject(path.join(path.dirname(store.dir), 'ccd-session-presets.json'));
-  if (read.state !== 'read') return null;
-  try { return presetMap(read.record, accountUuid); } catch { return null; }
+  if (!store || !accountUuid) return { presets: null, complete: true, folder: null };
+  const folder = storeFolderVerdict();
+  const read = storeRecordObject(path.join(folder.dir, 'ccd-session-presets.json'));
+  if (read.state === 'missing') return { presets: null, complete: folder.owned, folder };
+  if (read.state !== 'read') return { presets: null, complete: false, folder };
+  try { return { presets: presetMap(read.record, accountUuid), complete: folder.owned, folder }; } catch { return { presets: null, complete: false, folder }; }
+}
+
+function hostNamedRecord() {
+  const host = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim();
+  if (!isSafeHostSessionId(host)) return null;
+  const hit = ccdRecordFiles().find((f) => path.basename(f.path) === `${host}.json`);
+  if (!hit) return null;
+  const read = storeRecordObject(hit.path);
+  return { file: hit.path, record: read.record, reason: read.state === 'read' ? null : read.state };
 }
 
 function startedContinuations() {
   const self = selfSessionId();
-  if (!self) return new Set();
-  const own = desktopRecordOf(self);
-  if (own.reason) return new Set();
+  if (!self) return { names: new Set(), complete: true, folder: null };
+  const folder = storeFolderVerdict();
+  const owned = !folder || folder.owned;
+  const found = desktopRecordOf(self);
+  const own = found.file ? found : hostNamedRecord();
+  if (!own) return { names: new Set(), complete: owned && CCD_REFUSED.size === 0 && CCD_UNREAD.size === 0, folder };
+  if (own.reason) return { names: new Set(), complete: false, folder };
   const run = runIdOf(own.record && typeof own.record === 'object' ? own.record.sessionId : null);
-  return run ? continuationsStartedBy(run, familyRecords(path.dirname(own.file)).records) : new Set();
+  if (!run) return { names: new Set(), complete: owned, folder };
+  const family = familyRecords(path.dirname(own.file));
+  return { names: continuationsStartedBy(run, family.records), complete: owned && family.listed && family.unreadable === 0, folder };
 }
 
-const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, sessions: [] });
+const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, newerSchemaLedgers: null, storeFolderRefused: null, storeFolder: null, sessions: [] });
 
 function linkedSessions(r, verdicts, planned = null) {
   const { sameRepository, oldRepositoryMeasured } = verdicts;
@@ -5313,12 +5366,18 @@ function linkedSessions(r, verdicts, planned = null) {
   const walk = familyWalk(own.record, family.records);
   if (!walk) return { measured: false, reason: 'its Claude Desktop record names no desktop session id', ...LINKED_NONE, unreadable: family.unreadable, plan, sameRepository, oldRepositoryMeasured };
   const led = walk.open.some((node) => typeof node.record.cliSessionId === 'string') ? ledgerRead() : null;
+  const census = led && !led.directoryError ? schemaLedgerCensus(CONFIG_ROOT) : null;
+  const newerSchemaLedgers = census ? [...census.ledgers, ...census.unread].filter((ledger) => ledger.relation !== 'older') : null;
+  const started = walk.open.length ? startedContinuations() : { names: new Set(), complete: true, folder: null };
+  const saved = walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(accountOf(own.file)) : { presets: null, complete: true, folder: null };
   const decided = decideLinked(walk, {
     edges: led ? led.edges : [],
-    ledgerComplete: !led || (!led.directoryError && !led.truncated),
-    started: walk.open.length ? startedContinuations() : new Set(),
+    ledgerComplete: !led || (!led.directoryError && !led.truncated && led.refused === 0 && newerSchemaLedgers.length === 0),
+    started: started.names,
+    startedComplete: started.complete,
     self: selfSessionId(),
-    presets: walk.open.some((node) => typeof node.record.startedFromEnvironmentId === 'string') ? savedPresets(accountOf(own.file)) : null,
+    presets: saved.presets,
+    presetsComplete: saved.complete,
     checkout: verdicts.checkout,
     sameRepository,
     planned,
@@ -5330,7 +5389,8 @@ function linkedSessions(r, verdicts, planned = null) {
     ...decided,
     oldRepositoryMeasured,
     unreadable: family.unreadable,
-    ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null,
+    ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null, ledgerRefused: led ? led.refused : null, newerSchemaLedgers,
+    ...storeFolderState(started.folder || saved.folder, [saved.folder ? 'presets' : null, started.folder ? 'started' : null].filter(Boolean)),
   };
 }
 
@@ -5406,7 +5466,17 @@ function linkedSessionLines(state, when, planPass = false) {
     return L;
   }
   if (state.unreadable) L.push(`_${state.unreadable} record(s) in its Claude Desktop folder could not be read, so a linked session may be missing below._`);
-  if (state.ledgerError || state.ledgerTruncated) L.push('_The lineage ledger could not be read completely, so whether a linked session already continues elsewhere is unknown: each such one starts only when the user names it._');
+  const newer = state.newerSchemaLedgers || [];
+  if (state.ledgerError || state.ledgerTruncated || state.ledgerRefused || newer.length) {
+    const detail = [];
+    if (state.ledgerRefused) detail.push(`${state.ledgerRefused} record(s) in \`${briefPath(LEDGER_DIR)}\` were refused, and \`/zensu:session-trail lineage --diagnose\` names each one`);
+    const newerRead = newer.filter((ledger) => ledger.records !== null);
+    const newerUnread = newer.filter((ledger) => ledger.records === null);
+    if (newerRead.length) detail.push(`${newerRead.reduce((n, ledger) => n + ledger.records, 0)} record(s) of a newer schema in ${newerRead.map((ledger) => `\`${briefPath(ledger.dir)}\``).join(', ')} cannot be read by this build, so update the plugin`);
+    if (newerUnread.length) detail.push(`${newerUnread.map((ledger) => `\`${briefPath(ledger.dir)}\``).join(', ')} may hold records of a newer schema and could not be inspected`);
+    L.push(`_The lineage ledger could not be read completely${detail.length ? ` (${detail.join('; ')})` : ''}, so whether a linked session already continues elsewhere is unknown: each such one starts only when the user names it._`);
+  }
+  if (state.storeFolderRefused && state.storeFolder) L.push(storeFolderNote(state.storeFolder, briefPath));
   if (unlisted) L.push(`_The plan answer named ${state.plan.unlisted.length} linked session(s) that this brief does not list, so none of them starts: ${unlisted}. Each was archived, detached or removed after the plan, or never was an open linked session of the old session; name each one to the user in one line._`);
   if (!state.sessions.length) {
     L.push('_the session had no open linked sessions_');
@@ -6203,14 +6273,14 @@ function cmdAdopt(opts) {
 }
 
 function gitChildEnvironment() {
-  let gitEnvironment = null;
+  let scrubGitEnvironment = null;
   try {
-    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/worktree-keep-v1.js'));
-  } catch { gitEnvironment = null; }
-  if (typeof gitEnvironment !== 'function') {
-    fail('hooks/lib/worktree-keep-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
+    ({ scrubGitEnvironment } = requireFromHere('../../../hooks/lib/git-environment-v1.js'));
+  } catch { scrubGitEnvironment = null; }
+  if (typeof scrubGitEnvironment !== 'function') {
+    fail('hooks/lib/git-environment-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
   }
-  return gitEnvironment(process.env);
+  return scrubGitEnvironment(process.env);
 }
 
 function worktreeKeepModules() {
@@ -6596,10 +6666,13 @@ function cmdRelease(opts) {
   }
 }
 
+const LEDGER_REFUSED_SHOWN = 20;
+
 function lineageDiagnose(opts) {
   const { probes, store: resolved } = ccdStoreProbe();
   const led = ledgerRead();
   const edges = led.edges;
+  const refusedShown = led.refusedFiles.slice(0, LEDGER_REFUSED_SHOWN);
   if (opts.json) {
     return print(JSON.stringify({
       configRoot: CONFIG_ROOT,
@@ -6609,6 +6682,8 @@ function lineageDiagnose(opts) {
       edgeCount: edges.length,
       ledgerTruncated: led.truncated, ledgerError: led.directoryError,
       schemaNewer: led.schemaNewer,
+      refusedRecords: led.refused,
+      refusedFiles: refusedShown.map((r) => ({ file: r.file, reason: r.reason })),
       store: resolved,
       probes,
       platform: process.platform,
@@ -6622,6 +6697,11 @@ function lineageDiagnose(opts) {
   { const t = truncatedNote(led); if (t) print(`LEDGER CAP   ${t}`); }
   if (led.directoryError) print(`LEDGER ERROR ${led.directoryError} — the count above is NOT a measurement of what exists.`);
   if (led.schemaNewer) print('LEDGER SCHEMA A record from a NEWER schema was refused; upgrade the plugin to read it.');
+  if (led.refused) {
+    print(`LEDGER REFUSED ${led.refused} record(s) could not be read; while one remains, takeover starts a linked session only when the user names it, and \`lineage --forget\` cannot remove it:`);
+    for (const r of refusedShown) print(`  ${r.reason}  ${oneLine(r.file, 200)}`);
+    if (led.refused > refusedShown.length) print(`  and ${led.refused - refusedShown.length} more not listed`);
+  }
   print(`START TIMES  ${processStartTimeHealth()}`);
   print(`LABELS       ${LABELS_FILE}`);
   print('');
@@ -6750,15 +6830,16 @@ function lineageBackfill(opts) {
   }
   const written = [];
   let writeError = null;
+  const appliedAt = Date.now();
   for (const c of candidates) {
-    // Stamped from the SUCCESSOR's first observable activity, not from now: this edge
+    // Stamped from the SUCCESSOR's last write, clamped to the moment --apply runs: this edge
     // reconstructs a handover that happened when the stalled session went quiet and
     // the next one picked the worktree up. `c.to.mtime` is that session's last write,
     // which is the closest observable instant the transcripts offer — and any past
     // stamp is enough to stop a guess from outranking every measurement by
     // construction. Stated rather than implied: it is an approximation of when, not a
     // measurement of it, which is exactly why the edge is `inferred`.
-    const occurredAt = new Date(c.to.mtime || c.from.mtime || Date.now()).toISOString();
+    const occurredAt = new Date(Math.min(c.to.mtime || c.from.mtime || appliedAt, appliedAt)).toISOString();
     const edge = buildEdge(c.from, endpointFromRow(c.to), c.from.stopCause.error || 'rate_limit', 'backfill', 'inferred', occurredAt);
     // Reported, not abandoned: a batch that dies mid-way had already written real
     // records, and claiming none were written is the wrong half of the truth.

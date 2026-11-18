@@ -174,7 +174,8 @@ Read in the code of Claude Desktop 2.19675.0 and not run: the agent tool `delete
 refuses a worktree that carries the marker.
 
 `/zensu:session-trail release <selector>`, run from the session that continues the work, lifts
-that protection on the old session's behalf. `retireAnchors` in `hooks/lib/worktree-keep-v1.js`
+that protection on the old session's behalf, and so does `/session-hub:session-trail release
+<selector>` of the `session-hub@zensu` companion, which carries a byte-identical copy of the module. `retireAnchors` in `hooks/lib/worktree-keep-v1.js`
 ends the old session's live anchor the way SessionEnd would have: it sets `endedAt` and keeps the
 record as the branch baseline. `reconcileKeep`, the one owner of the marker's lifecycle, then
 removes the marker when nothing else holds it. `retireAnchors` acts only inside an app-managed

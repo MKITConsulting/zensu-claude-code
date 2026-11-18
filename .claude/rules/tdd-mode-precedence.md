@@ -51,6 +51,31 @@ so they are vanilla out of the box, and it strips every `TDD-MODE:` line from th
 review-comment bodies it quotes. Rank 2 is reached only through a specification whose
 author asks for strict.
 
+**The two ask-hooks make the model that author for a TDD request the user typed.**
+`plan-approved-delegate.sh` and `user-prompt-tdd-reminder.sh` say that an affirmation asking
+for TDD (`with tdd`, `use tdd`) ensures the `/zensu:build` specification carries exactly one
+`TDD-MODE: strict` line and begins with `Executing via /zensu:build (strict TDD requested)`,
+and the foreign-executor notice says the same for an approval that asks for TDD. "Exactly
+one" matters because Phase 0 ignores the channel when a specification carries more than one
+such line. Before this, "with tdd" took the vanilla workflow in a vanilla session while the
+`/zensu:tdd-mode` description claimed the same phrase for a session switch, so a user who
+asked for TDD got none. The channel stays escalation-only, and the line is never recorded.
+The hooks see rank 1 only through the effective mode, which does not say whether the
+session's `/zensu:tdd-mode` choice or the config made a session vanilla, so the status line
+says "requested": a session whose `/zensu:tdd-mode` choice is vanilla keeps the chain
+vanilla, and `skills/build/references/modes.md` has the chain say so in one line and name
+the switch. Telling the model before dispatch would need each hook to read the marker state
+itself, which neither does. The rule is mode-independent in every carrier and a no-op
+escalation in strict mode: byte-identical in both plan-gate heredocs (`P1b6`), present in
+both reminder heredocs, and in `TDD_STRICT_ASK`, which both modes append to the decided
+lines and the ask short line. That also keeps a TDD request working when a hook reads
+`hooks.tddImplementation` from the harness root while `--tdd-begin` reads the recorded root
+and the two disagree. Pinned by `D15d` and the `D46` notice helper in
+`tests/structure/test-plan-approved-delegate.sh`, `P1` and `P2t` in
+`tests/structure/test-tdd-vanilla-mode.sh`, the `TDD_REQUEST_LINE` checks of `R13f` and
+`R13g` in `tests/structure/test-delivery-route.sh`, and the notice test in
+`tests/structure/foreign-executor-v1.test.js`.
+
 **Two sites FREEZE the resolved mode into a chain's `vanilla` flag**, and both resolve
 the same ladder for every rank that exists there: `zensu-log.sh --tdd-begin` (ranks
 1-4), and the Stop-hook adoption of a deferred review (`stop-chain-enforcer.sh`
@@ -107,7 +132,12 @@ ranks its fix chains follow and strips every `TDD-MODE:` line, the `TDD-MODE:` p
 §"Vanilla Implementation Mode" in `references/modes.md`, which states the ladder a THIRD time for the model,
 `skills/tdd-mode/SKILL.md`, `docs/configuration.md` (the `tddImplementation` row),
 `docs/gates.md` §Activation, `docs/build-workflow.md` §Vanilla implementation mode,
-and `docs/architecture.md`. A site left behind does not fail closed — it leaves a stale
+and `docs/architecture.md`. The per-request TDD rule and its rank-1 exception move together
+too: the TDD sub-arm of both ask-hooks and of `hooks/lib/foreign-executor-v1.js`, the
+plan-gate and reminder rows of `docs/configuration.md`, the `/zensu:build` row of
+`README.md`, precedence item 1 of `skills/delivery-route/SKILL.md` and of
+`.claude/rules/session-delivery-route.md`, and the body note of `skills/tdd-mode/SKILL.md`.
+A site left behind does not fail closed — it leaves a stale
 rank list the model reads while the helper resolves a different one.
 
 **A second site re-encodes the ORDER**, not just the ladder's prose: `--status` in

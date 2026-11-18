@@ -31,10 +31,11 @@ export ZENSU_CONFIG="$TMP_CFG"
 OUT_DISABLED="$(env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 EXIT_DISABLED=$?
 
-case "$OUT_DISABLED" in
-  *"pulse session ready"*) check "pulseSession=false: stdout does NOT contain 'pulse session ready'" FAIL ;;
-  *)                       check "pulseSession=false: stdout does NOT contain 'pulse session ready'" PASS ;;
-esac
+if [ -z "$OUT_DISABLED" ]; then
+  check "pulseSession=false: stdout is empty, no pulse context line" PASS
+else
+  check "pulseSession=false: stdout is empty, no pulse context line (out=$OUT_DISABLED)" FAIL
+fi
 
 if [ "$EXIT_DISABLED" = "0" ]; then
   check "pulseSession=false: exit code 0" PASS
@@ -49,10 +50,11 @@ EOF
 OUT_ENABLED="$(cd "$PLUGIN_DIR" && env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 EXIT_ENABLED=$?
 
-if [ "$EXIT_ENABLED" = "0" ] && printf '%s' "$OUT_ENABLED" | grep -qF 'zensu: pulse session ready — HEAD='; then
-  check "pulseSession=true: no legacy root export, rc=0, and HEAD banner emitted" PASS
+if [ "$EXIT_ENABLED" = "0" ] && printf '%s' "$OUT_ENABLED" | grep -qF 'zensu: pulse context — HEAD=' \
+  && ! printf '%s' "$OUT_ENABLED" | grep -qF 'pulse session'; then
+  check "pulseSession=true: no legacy root export, rc=0, and the pulse context line emitted without claiming a session" PASS
 else
-  check "pulseSession=true: no legacy root export, rc=0, and HEAD banner emitted (rc=$EXIT_ENABLED, out=$OUT_ENABLED)" FAIL
+  check "pulseSession=true: no legacy root export, rc=0, and the pulse context line emitted without claiming a session (rc=$EXIT_ENABLED, out=$OUT_ENABLED)" FAIL
 fi
 
 unset ZENSU_CONFIG
@@ -61,9 +63,22 @@ rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
 OUT_DEFAULT="$(cd "$PLUGIN_DIR" && env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 case "$OUT_DEFAULT" in
-  *"pulse session ready"*|*"not a git repository"*) check "no config (default): stdout contains banner (enabled)" PASS ;;
-  *)                                                  check "no config (default): stdout contains banner (enabled)" FAIL ;;
+  *"zensu: pulse context — HEAD="*|*"not a git repository, pulse context skipped"*) check "no config (default): stdout contains the pulse context line (enabled)" PASS ;;
+  *)                                                                              check "no config (default): stdout contains the pulse context line (enabled)" FAIL ;;
 esac
+
+EMPTY_REPO="$(mktemp -d)"
+NO_REPO="$(mktemp -d)"
+git init -q "$EMPTY_REPO" >/dev/null 2>&1
+OUT_EMPTY="$(cd "$EMPTY_REPO" && env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
+OUT_NO_REPO="$(cd "$NO_REPO" && GIT_CEILING_DIRECTORIES="$(dirname "$NO_REPO")" env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
+if [ "$OUT_EMPTY" = "zensu: no commit yet, pulse context skipped" ] \
+  && [ "$OUT_NO_REPO" = "zensu: not a git repository, pulse context skipped" ]; then
+  check "a repository without a commit and a directory outside any repository each get their own skip line" PASS
+else
+  check "a repository without a commit and a directory outside any repository each get their own skip line (empty=$OUT_EMPTY, none=$OUT_NO_REPO)" FAIL
+fi
+rm -rf "$EMPTY_REPO" "$NO_REPO"
 
 rm -f "$TMP_CFG"
 

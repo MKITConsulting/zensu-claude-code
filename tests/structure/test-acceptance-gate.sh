@@ -60,24 +60,37 @@ else
   check "A0d --chain-done gates the standalone terminus and passes the bound flag on an Autopilot pass" FAIL
 fi
 
-if grep -q '^ZENSU_BYPASS_GATE_ALLOWLIST=".* ZENSU_ACCEPTANCE_GATE"$' "$TDD_LIB" \
-  && [ "$(grep -c "path.join(trusted.pluginData, 'acceptance-verify')" "$CAPABILITY")" = "2" ]; then
-  check "A0e the escape is ledgered and the record store is in both protected-root lists" PASS
+if grep -q '^ZENSU_BYPASS_GATE_ALLOWLIST=".* ZENSU_ACCEPTANCE_GATE acceptance-partial"$' "$TDD_LIB" \
+  && [ "$(grep -c "path.join(trusted.pluginData, 'acceptance-verify')" "$CAPABILITY")" = "2" ] \
+  && [ "$(grep -c "path.join(trusted.pluginData, 'acceptance-handoff')" "$CAPABILITY")" = "2" ]; then
+  check "A0e the escape and the consented gap are ledgered and the record and hand-off stores are in both protected-root lists" PASS
 else
-  check "A0e the escape is ledgered and the record store is in both protected-root lists" FAIL
+  check "A0e the escape and the consented gap are ledgered and the record and hand-off stores are in both protected-root lists" FAIL
 fi
 
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
 TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/build")"
 SELF_REVIEW_SKILL="$PLUGIN_DIR/skills/self-review/SKILL.md"
+SELF_REVIEW_REF="$PLUGIN_DIR/skills/self-review/references/acceptance.md"
 VERIFY_SKILL="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
+VERIFY_CONSENT="$PLUGIN_DIR/skills/verify-feature/rules/acceptance-consent.md"
 PLAN_TEMPLATE="$PLUGIN_DIR/templates/zensu-plan.md"
 if grep -qF '6d. **Live Acceptance Verification**' "$TDD_SKILL" \
   && grep -qF -- '--acceptance-status --log {log_file}' "$TDD_SKILL" \
   && grep -qF 'the step 6d `ACCEPTANCE STATUS` lines' "$TDD_SKILL" \
   && grep -qF '**Acceptance re-verification**' "$SELF_REVIEW_SKILL" \
   && grep -qF 'Full suite, Acceptance, Build' "$SELF_REVIEW_SKILL" \
-  && grep -qF 'leave `ZENSU_ACCEPTANCE_GATE` to the user' "$SELF_REVIEW_SKILL" \
+  && grep -qF 'references/acceptance.md' "$SELF_REVIEW_SKILL" \
+  && grep -qF -- '--accept-partial <ids>' "$SELF_REVIEW_REF" \
+  && grep -qF '**Provide access now**' "$SELF_REVIEW_REF" \
+  && grep -qF '**Accept as partial**' "$SELF_REVIEW_REF" \
+  && grep -qF '**Leave the chain open**' "$SELF_REVIEW_REF" \
+  && grep -qF 'run the finalize step 1 terminus without' "$SELF_REVIEW_REF" \
+  && grep -qF 'the chain open still runs Phase 4 through its refused terminus' "$SELF_REVIEW_SKILL" \
+  && grep -qF '`rules/acceptance-consent.md`' "$VERIFY_SKILL" \
+  && grep -qF '**Accept as partial**' "$VERIFY_CONSENT" \
+  && grep -qxF '## Manual Acceptance' "$PLAN_TEMPLATE" \
+  && grep -qF -- "--accept-partial" "$TDD_SKILL" \
   && grep -qF '## Chain mode (`--chain`)' "$VERIFY_SKILL" \
   && grep -qF -- '--acceptance-record --ac AC-001 --verdict pass --driver browser' "$VERIFY_SKILL" \
   && grep -qF -- '--evidence-run --scope acceptance' "$VERIFY_SKILL" \
@@ -90,10 +103,97 @@ if grep -qF 'Full suite, Acceptance, Build' "$POSTREV" \
   && grep -qF 'The Acceptance verdict carries the ACCEPTANCE' "$POSTREV" \
   && grep -qF 'Add one row per advisory ACCEPTANCE — line that did not pass' "$POSTREV" \
   && grep -qF -- '--acceptance-status --log <run log>' "$POSTREV" \
+  && grep -qF 'otherwise run the --chain-done call below without it first, because its refusal records the hand-off' "$POSTREV" \
+  && grep -qF "after 'fix:', 'add:', 'restore:', 'review:' or 'tree:', or when the line names no remedy, verifying again cannot change the verdict" "$POSTREV" \
   && [ "$(grep -c 'ACCEPTANCE_REVERIFY' "$POSTREV")" -ge 3 ]; then
-  check "A0g the combined summary carries the Acceptance row and the self-review-off close re-verifies standalone chains" PASS
+  check "A0g the combined summary carries the Acceptance row and the self-review-off close re-verifies standalone chains and reports a review: or tree: segment" PASS
 else
-  check "A0g the combined summary carries the Acceptance row and the self-review-off close re-verifies standalone chains" FAIL
+  check "A0g the combined summary carries the Acceptance row and the self-review-off close re-verifies standalone chains and reports a review: or tree: segment" FAIL
+fi
+VALIDATE_RULE="$PLUGIN_DIR/skills/autopilot/rules/validate.md"
+GATES_DOC="$PLUGIN_DIR/docs/gates.md"
+CONFIG_DOC="$PLUGIN_DIR/docs/configuration.md"
+CONSENT_FLAT="$(tr '\n' ' ' < "$VERIFY_CONSENT" 2>/dev/null | tr -s ' ')"
+if ! grep -qF 'Anything not proven is `partial`' "$VERIFY_SKILL" \
+  && grep -qF 'Observable but unproven: verify again, or' "$VERIFY_SKILL" \
+  && ! grep -qF 'each verdict it yields is at most' "$VERIFY_SKILL" \
+  && grep -qF 'A criterion is `partial` only when this environment cannot observe it: it needs credentials, an account, a non-loopback host or a signed build, or the driver that observes it cannot run here' <<<"$CONSENT_FLAT" \
+  && grep -qF 'A criterion the run could observe but did not prove is not `partial`: verify it again, or record `fail` when what was observed contradicts it.' <<<"$CONSENT_FLAT" \
+  && grep -qF "the user's consent, and the row's reason names the same cause category as its \`partial\` record. Apply it without asking. A row that names another category does not cover this gap: ask." <<<"$CONSENT_FLAT" \
+  && grep -qF 'After **Provide access now** it verifies the criterion again and records that verdict.' <<<"$CONSENT_FLAT" \
+  && grep -qF 'publication rule included' <<<"$CONSENT_FLAT" \
+  && ! grep -qF 'whatever the answer is' <<<"$CONSENT_FLAT" \
+  && grep -qF 'driver cannot run here, so no code change turns it' "$GATES_DOC" \
+  && ! grep -qF 'a fact no driver can see' "$GATES_DOC"; then
+  check "A0h partial is a criterion this environment cannot observe, one cause list holds everywhere, and a recorded consent covers only its own cause category" PASS
+else
+  check "A0h partial is a criterion this environment cannot observe, one cause list holds everywhere, and a recorded consent covers only its own cause category" FAIL
+fi
+OPT_PROVIDE="$(grep -n '^- \*\*Provide access now\*\*:' "$VERIFY_CONSENT" | head -n 1 | cut -d: -f1)"
+OPT_ACCEPT="$(grep -n '^- \*\*Accept as partial\*\*:' "$VERIFY_CONSENT" | head -n 1 | cut -d: -f1)"
+OPT_OPEN="$(grep -n '^- \*\*Leave the chain open\*\*:' "$VERIFY_CONSENT" | head -n 1 | cut -d: -f1)"
+if [ -n "$OPT_PROVIDE" ] && [ -n "$OPT_ACCEPT" ] && [ -n "$OPT_OPEN" ] \
+  && [ "$OPT_PROVIDE" -lt "$OPT_ACCEPT" ] && [ "$OPT_ACCEPT" -lt "$OPT_OPEN" ] \
+  && grep -qF 'Never offer, set or mention a way to switch the acceptance gate off.' "$VERIFY_CONSENT" \
+  && grep -qF '`$ROOT/skills/verify-feature/rules/acceptance-consent.md`' "$SELF_REVIEW_REF" \
+  && grep -qF '`{plugin_root}/skills/verify-feature/rules/acceptance-consent.md` owns what `partial` means' "$TDD_SKILL" \
+  && grep -qF 'CONSENT_RULE="${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/rules/acceptance-consent.md"' "$POSTREV" \
+  && grep -qF 'you wrote their ## Manual Acceptance row first' "$POSTREV" \
+  && grep -qF 'A row covers only its own criterion' "$SELF_REVIEW_REF" \
+  && grep -qF 'Consent binds only a chain whose terminus can take it.' "$VERIFY_CONSENT" \
+  && grep -qF 'binds no consent: ask nothing, never pass `--accept-partial`, and report the line.' <<<"$CONSENT_FLAT" \
+  && grep -qF 'Whichever stage receives an **Accept as partial** answer, from that report or from its own question, writes the row at once, `/zensu:build` step 6d included' <<<"$CONSENT_FLAT" \
+  && grep -qF '`review:`, `tree:`, or no remedy' "$SELF_REVIEW_REF" \
+  && ! grep -qF 'explicit consent in this conversation' "$POSTREV"; then
+  check "A0i one file owns the consent question and its option order, the row writer and the review: or tree: rule, and the self-review reference, build step 6d and the self-review-off close defer to it" PASS
+else
+  check "A0i one file owns the consent question and its option order, the row writer and the review: or tree: rule, and the self-review reference, build step 6d and the self-review-off close defer to it" FAIL
+fi
+if grep -qF 'Never offer, set or mention a way to switch the acceptance gate off, whatever the verb answers:' "$VALIDATE_RULE" \
+  && grep -qF "Autopilot's VALIDATE stage through \`--autopilot-validate --accept-partial <ids>\`" "$GATES_DOC" \
+  && grep -qF 'it only through `--chain-done --accept-partial <ids>`' "$GATES_DOC" \
+  && grep -qF "so a standalone chain closes on it only with the user's consent" "$CONFIG_DOC"; then
+  check "A0j the VALIDATE rule forbids offering the gate switch and the docs name both producers of partial-accepted" PASS
+else
+  check "A0j the VALIDATE rule forbids offering the gate switch and the docs name both producers of partial-accepted" FAIL
+fi
+FENCE_RULE="$(grep -n 'takes no \*\*Provide access now\*\*' "$VERIFY_CONSENT" | head -n 1 | cut -d: -f1)"
+FENCE_SWITCH="$(grep -n 'Never offer, set or mention a way to switch the acceptance gate off\.' "$VERIFY_CONSENT" | head -n 1 | cut -d: -f1)"
+if grep -qF "or the driver's fence rules the state out for everyone (a **driver fence**)" <<<"$CONSENT_FLAT" \
+  && grep -qF "A driver fence is a state the driver can never show, whoever drives it. Today there is one: the \`browser\` driver's run config blocks service workers, so a criterion that depends on one (an update prompt, an offline cache, push, background sync) is never observed in that browser." <<<"$CONSENT_FLAT" \
+  && ! grep -qiF 'query' <<<"$CONSENT_FLAT" \
+  && ! grep -qiF 'page code' <<<"$CONSENT_FLAT" \
+  && grep -qF 'A criterion that a driver fence rules out takes no **Provide access now**, whatever else it needs: no login, account, service or driver lifts the fence.' <<<"$CONSENT_FLAT" \
+  && grep -qF 'Ask about it with the other two options, in their order, and name the fence in the question' <<<"$CONSENT_FLAT" \
+  && grep -qF 'name that test as the check its `## Manual Acceptance` row will carry' <<<"$CONSENT_FLAT" \
+  && grep -qF 'put both groups into the same `AskUserQuestion` call as two questions, so the user is still asked once.' <<<"$CONSENT_FLAT" \
+  && [ -n "$FENCE_RULE" ] && [ -n "$FENCE_SWITCH" ] && [ -n "$OPT_OPEN" ] \
+  && [ "$OPT_OPEN" -lt "$FENCE_RULE" ] && [ "$FENCE_RULE" -lt "$FENCE_SWITCH" ]; then
+  check "A0k the consent rule names the driver fence as today's only one, names neither a query nor page code, and asks about it without the access option whatever else the criterion needs" PASS
+else
+  check "A0k the consent rule names the driver fence as today's only one, names neither a query nor page code, and asks about it without the access option whatever else the criterion needs" FAIL
+fi
+if grep -qF 'Nor can one that a driver fence rules out (`{plugin_root}/skills/verify-feature/rules/acceptance-consent.md` §"What `partial` means"): the `browser` driver'"'"'s run config blocks service workers, so a criterion that depends on one (an update prompt, an offline cache, push, background sync) is never observed in that browser.' "$TDD_SKILL" \
+  && grep -qF 'it is `missing` when it needs anything the observability item lists' "$TDD_SKILL" \
+  && grep -qF 'A gap that is a driver fence takes only (b) and (c): no access lifts the fence, so never offer (a) for it, and name the fence in the question.' "$TDD_SKILL"; then
+  check "A0l planning names a service-worker criterion as an observability gap and offers no access option for a driver fence" PASS
+else
+  check "A0l planning names a service-worker criterion as an observability gap and offers no access option for a driver fence" FAIL
+fi
+SPEC_TEMPLATE="$PLUGIN_DIR/templates/autopilot-spec.md"
+VALIDATE_FLAT="$(tr '\n' ' ' < "$VALIDATE_RULE" 2>/dev/null | tr -s ' ')"
+SPEC_FLAT="$(tr '\n' ' ' < "$SPEC_TEMPLATE" 2>/dev/null | tr -s ' ')"
+GATES_FLAT="$(tr '\n' ' ' < "$GATES_DOC" 2>/dev/null | tr -s ' ')"
+if grep -qF 'or because its driver cannot run here, or because a driver fence rules the state out (the `browser` driver blocks service workers). Name that cause in the evidence.' <<<"$VALIDATE_FLAT" \
+  && grep -qF '{credentials / account / non-loopback host / signed build / driver cannot run here / driver fence}' "$PLAN_TEMPLATE" \
+  && grep -qF '{credentials / account / non-loopback host / signed build / driver cannot run here / driver fence}' "$SPEC_TEMPLATE" \
+  && grep -qF 'or its driver cannot run here, or a driver fence rules the state out (the `browser` driver blocks service workers). VALIDATE accepts a `partial`' <<<"$SPEC_FLAT" \
+  && grep -qF 'or its driver cannot run here, or a driver fence rules the state out (the `browser` driver blocks service workers). A criterion it could observe but did not prove is verified again, or recorded `fail`.' "$CONFIG_DOC" \
+  && grep -qF 'A driver fence is one more such cause: a state the driver can never show, whoever drives it, which today means a service worker under the `browser` driver.' <<<"$GATES_FLAT" \
+  && grep -qF 'a driver fence takes only the last two, because no access lifts it' <<<"$GATES_FLAT"; then
+  check "A0m every other cause list names the driver fence: the VALIDATE rule, both plan templates and the configuration and gates docs" PASS
+else
+  check "A0m every other cause list names the driver fence: the VALIDATE rule, both plan templates and the configuration and gates docs" FAIL
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
@@ -134,6 +234,15 @@ write_plan() {
 | AC-002 | ${2:-the page shows the saved value} | spec |
 | FR-001 | a functional fixture row that is never verified live | spec |
 PLAN
+  [ "${3:-}" = "no-manual" ] && return 0
+  cat >> "$1/$PLAN_REL" <<'PLAN'
+
+## Manual Acceptance
+| Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
+|-----------|------------------------------------|----------------------------------------|---------|
+| AC-001 | run the fixture command on the release host | non-loopback host | planning answer, 2026-11-15 |
+| AC-002 | open the page in the staging app | credentials | planning answer, 2026-11-15 |
+PLAN
 }
 
 review_to_done() {
@@ -152,8 +261,9 @@ review_to_done() {
     }));
   ')"
   printf '%s' "$ctx" | bash "$POSTREV" >/dev/null 2>&1
-  bash "$LOG" --code-review-done --claimed-review-ticket "$TICKET" >/dev/null 2>&1 || return 1
   SF="$(tdd_state_file "$sid")"
+  [ "${2:-}" = "consumed" ] && return 0
+  bash "$LOG" --code-review-done --claimed-review-ticket "$TICKET" >/dev/null 2>&1 || return 1
 }
 
 audit_receipt() {
@@ -171,7 +281,7 @@ arm() {
   printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/$STEM.log"
   audit_receipt "$sid" "$PROJ" || return 1
   bash "$LOG" --tdd-complete --plan "./$PLAN_REL" >/dev/null 2>&1 || return 1
-  review_to_done "$sid"
+  review_to_done "$sid" "${2:-}"
 }
 
 arm_plain() {
@@ -368,6 +478,498 @@ else
   check "A1 arm a ticket-bound chain with a receipt" FAIL
 fi
 
+STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+STOP_WORKER_FLAG="$( ( source "$PLUGIN_DIR/hooks/lib/zensu-stop-deadline.sh"; printf '%s' "$ZENSU_STOP_WORKER_FLAG" ) )"
+HANDOFF_NEEDLE="ACCEPTANCE HAND-OFF — the chain stays open, waiting on the user's acceptance decision"
+
+stop_hook() {
+  RAW="$1" node -e 'process.stdout.write(JSON.stringify({ hook_event_name: "Stop", session_id: process.env.RAW }))' \
+    | bash "$STOP" "$STOP_WORKER_FLAG" >"$WORK/stop-out" 2>"$WORK/stop-err"
+}
+
+stop_released() {
+  ! grep -q '"decision"' "$WORK/stop-out" \
+    && grep -qF "$HANDOFF_NEEDLE" "$WORK/stop-err" \
+    && grep -qF "$HANDOFF_NEEDLE" "$WORK/stop-out" \
+    && grep -qF 'releasing this Stop without charging the Stop budget' "$WORK/stop-err"
+}
+
+stop_blocked() {
+  grep -q '"decision": *"block"' "$WORK/stop-out" && ! grep -qF "$HANDOFF_NEEDLE" "$WORK/stop-out"
+}
+
+handoff_file() {
+  printf '%s/acceptance-handoff/v1/%s.json' "$CLAUDE_PLUGIN_DATA" "$ZENSU_SESSION_KEY"
+}
+
+block_count() {
+  tdd_get_counter "$SF" stopBlockCount 2>/dev/null
+}
+
+if arm "acc-consent"; then
+  observe 'printf ok'
+  acc_record AC-001 pass cli "$RUN_ID" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  acc_record AC-002 partial browser "" <<'EVIDENCE'
+the saved value sits behind a real account login, so only the login page could be observed
+EVIDENCE
+  RC_REC=$?
+  chain_done; RC=$?
+  if [ "$RC_REC" -eq 0 ] && [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -q "^ACCEPTANCE — incomplete | 1/2 acceptance criteria pass on the current tree [0-9a-f]\{12\}; AC-002 partial.* | plan: $PLAN_REL | gate: required | accept: AC-002 could not be observed in this environment; they close only with the user's consent for exactly these criteria, from one of the two sources the plugin's skills/verify-feature/rules/acceptance-consent.md names, so once each has its ## Manual Acceptance row in the plan, add --accept-partial AC-002 to the same --chain-done call$" "$WORK/err" \
+    && ! grep -q 'ZENSU_' "$WORK/err" \
+    && [ -f "$(handoff_file)" ]; then
+    check "C1 a refusal whose only open criterion is partial ends with an accept: segment, names no escape and leaves a hand-off record" PASS
+  else
+    check "C1 a partial-only refusal ends with an accept: segment (rec=$RC_REC rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+
+  bash "$LOG" --chain-status >"$WORK/cs-out" 2>"$WORK/cs-err"
+  if grep -q "^$HANDOFF_NEEDLE | incomplete | open: AC-002 | accept: AC-002 could not be observed in this environment; .* | review ticket $TICKET | tree [0-9a-f]\{12\}$" "$WORK/cs-err" \
+    && ! grep -qF "$HANDOFF_NEEDLE" "$WORK/cs-out" \
+    && node -e 'JSON.parse(require("fs").readFileSync(0, "utf8"))' <"$WORK/cs-out" 2>/dev/null; then
+    check "C2 --chain-status prints the hand-off line on stderr and keeps stdout one JSON document" PASS
+  else
+    check "C2 --chain-status prints the hand-off line" FAIL
+    cat "$WORK/cs-out" "$WORK/cs-err"
+  fi
+
+  C3_BEFORE="$(block_count)"
+  stop_hook "acc-consent"
+  C3_AFTER="$(block_count)"
+  if stop_released && [ -n "$C3_BEFORE" ] && [ "$C3_BEFORE" = "$C3_AFTER" ]; then
+    check "C3 a Stop while the chain waits only on the user is let through with the hand-off notice and charges no Stop budget" PASS
+  else
+    check "C3 the waiting chain's Stop is let through uncharged (before=$C3_BEFORE after=$C3_AFTER)" FAIL
+    cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+
+  write_plan "$PROJ" "" no-manual
+  bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qF "; --accept-partial takes consent from the plan's ## Manual Acceptance table, which has no row for AC-002; write its row as the plugin's skills/verify-feature/rules/acceptance-consent.md describes, then close again | plan: $PLAN_REL | gate: required | accept: AC-002 could not be observed in this environment; " "$WORK/err" \
+    && [ "$(bash "$LOG" --bypass-list 2>/dev/null)" = "none" ]; then
+    check "C4a --accept-partial refuses an id the plan's ## Manual Acceptance table does not list, keeps the chain open and records nothing" PASS
+  else
+    check "C4a the consented close without a Manual Acceptance row (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+  write_plan "$PROJ"
+
+  bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"; RC=$?
+  LEDGER="$(bash "$LOG" --bypass-list 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] \
+    && grep -q "^ACCEPTANCE — partial-accepted | 1/2 acceptance criteria pass on the current tree [0-9a-f]\{12\}; accepted as partial: AC-002 | plan: $PLAN_REL | gate: required$" "$WORK/err" \
+    && grep -q "^ACCEPTANCE — accepted as partial: AC-002 partial | browser attested | record av1_[0-9]\{13\}_[0-9a-f]\{12\} | evidence: the saved value sits behind a real account login, so only the login page could be observed | the page shows the saved value$" "$WORK/err" \
+    && grep -qx 'Gates bypassed during this session: acceptance-partial' "$WORK/err" \
+    && [ "$LEDGER" = "acceptance-partial" ] \
+    && [ ! -e "$(handoff_file)" ]; then
+    check "C4 --accept-partial for exactly the open partial criterion closes the chain, records acceptance-partial and removes the hand-off" PASS
+  else
+    check "C4 the consented close (rc=$RC done=$(done_flag) ledger=$LEDGER)" FAIL
+    ERR
+  fi
+
+  bash "$LOG" --bypass-note acceptance-partial >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if [ "$RC" -eq 2 ] && grep -qF 'acceptance-partial is recorded by the --chain-done terminus' "$WORK/err"; then
+    check "C5 --bypass-note refuses to record the consented gap by hand" PASS
+  else
+    check "C5 --bypass-note refuses acceptance-partial (rc=$RC)" FAIL
+    ERR
+  fi
+else
+  check "C1 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+if arm "acc-consent-refuse"; then
+  acc_record AC-002 partial browser "" <<'EVIDENCE'
+the saved value sits behind a real account login, so only the login page could be observed
+EVIDENCE
+  accept_done() {
+    bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial "$@" >"$WORK/out" 2>"$WORK/err"
+  }
+  C6_OK=1
+  C6_WHY=""
+  accept_done AC-002
+  [ $? -eq 1 ] && grep -qF -- '--accept-partial covers only partial criteria, not AC-001 missing' "$WORK/err" || { C6_OK=0; C6_WHY="$C6_WHY missing"; }
+  observe 'false'
+  acc_record AC-001 fail cli "$RUN_ID" <<'EVIDENCE'
+the fixture command exited non-zero
+EVIDENCE
+  accept_done AC-002
+  [ $? -eq 1 ] && grep -qF -- '--accept-partial covers only partial criteria, not AC-001 fail' "$WORK/err" || { C6_OK=0; C6_WHY="$C6_WHY fail"; }
+  observe 'printf ok'
+  acc_record AC-001 pass cli "$RUN_ID" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  printf 'v4\n' > "$PROJ/tracked.txt"
+  accept_done AC-002
+  [ $? -eq 1 ] && grep -qF -- '--accept-partial covers only partial criteria, not AC-001 stale, AC-002 stale' "$WORK/err" || { C6_OK=0; C6_WHY="$C6_WHY stale"; }
+  printf 'v2\n' > "$PROJ/tracked.txt"
+  accept_done AC-001,AC-002
+  [ $? -eq 1 ] && grep -qF -- '--accept-partial names AC-001, which is not open' "$WORK/err" || { C6_OK=0; C6_WHY="$C6_WHY not-open"; }
+  write_plan "$PROJ" "(deprecated) the page shows the saved value"
+  accept_done AC-002
+  [ $? -eq 1 ] && grep -qF -- '--accept-partial covers only partial criteria, not AC-002 dropped' "$WORK/err" || { C6_OK=0; C6_WHY="$C6_WHY dropped"; }
+  write_plan "$PROJ"
+  [ "$(done_flag)" = "false" ] && [ "$(bash "$LOG" --bypass-list 2>/dev/null)" = "none" ] || { C6_OK=0; C6_WHY="$C6_WHY state"; }
+  if [ "$C6_OK" -eq 1 ]; then
+    check "C6 --accept-partial keeps the chain open while an open criterion is missing, fail, stale or dropped, or when the ids differ from the open set" PASS
+  else
+    check "C6 --accept-partial refusals (failed:$C6_WHY)" FAIL
+    ERR
+  fi
+
+  C7_OK=1
+  C7_WHY=""
+  accept_done 'AC-002;x'
+  [ $? -eq 2 ] && grep -qF -- '--accept-partial takes a comma-separated list of acceptance criterion ids' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY malformed"; }
+  bash "$LOG" --chain-done --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"
+  [ $? -eq 1 ] && grep -qF 'refusing --accept-partial on the zero-change terminus' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY zero-change"; }
+  bash "$LOG" --chain-done --claimed-review-ticket zc_0123456789abcdef0123456789abcdef --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"
+  [ $? -eq 1 ] && grep -qF 'refusing --accept-partial on the zero-change terminus' "$WORK/err" \
+    && grep -qF 'no reviewer consumed this zero-change self-review ticket; report the refusal and leave the decision to the user' "$WORK/err" \
+    && ! grep -qF 'pass it with --claimed-review-ticket' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY zero-change-ticket"; }
+  accept_done AC-002 --autopilot-run acc_run_x --autopilot-attempt 1 --chain-id acc-chain-x
+  [ $? -eq 1 ] && grep -qF 'it belongs to the ticket-bound standalone terminus and takes no Autopilot binding and no --outcome' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY autopilot"; }
+  accept_done AC-002 --outcome pass
+  [ $? -eq 1 ] && grep -qF 'takes no Autopilot binding and no --outcome' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY outcome"; }
+  accept_done AC-002 --accept-partial AC-002
+  [ $? -eq 2 ] && grep -qF 'duplicate --accept-partial' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY duplicate"; }
+  bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial >"$WORK/out" 2>"$WORK/err"
+  [ $? -eq 2 ] && grep -qF -- '--accept-partial takes the comma list of criterion ids the user accepted as partial' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY bare"; }
+  accept_done --outcome pass
+  [ $? -eq 2 ] && grep -qF -- '--accept-partial takes the comma list of criterion ids the user accepted as partial' "$WORK/err" \
+    && ! grep -qF 'without a value' "$WORK/err" || { C7_OK=0; C7_WHY="$C7_WHY flag-as-value"; }
+  bash "$LOG" --tdd-complete --plan "./$PLAN_REL" --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"
+  [ $? -eq 2 ] || { C7_OK=0; C7_WHY="$C7_WHY other-verb"; }
+  [ "$(done_flag)" = "false" ] && [ "$(bash "$LOG" --bypass-list 2>/dev/null)" = "none" ] || { C7_OK=0; C7_WHY="$C7_WHY state"; }
+  cp "$SF" "$WORK/state-before-zc"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.reviewTicket = "zc_0123456789abcdef0123456789abcdef"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));' "$SF"
+  bash "$LOG" --acceptance-status --log "$RUN_LOG" >"$WORK/sout" 2>"$WORK/serr"
+  RC_ZC=$?
+  cp "$WORK/state-before-zc" "$SF"
+  [ "$RC_ZC" -eq 1 ] && grep -qF '| review: AC-002 could not be observed in this environment' "$WORK/sout" \
+    && ! grep -qF '| accept:' "$WORK/sout" || { C7_OK=0; C7_WHY="$C7_WHY zero-change-status"; }
+  bash "$LOG" --acceptance-status --log "$RUN_LOG" >"$WORK/sout" 2>"$WORK/serr"
+  grep -qF '| accept: AC-002 could not be observed in this environment' "$WORK/sout" || { C7_OK=0; C7_WHY="$C7_WHY consumed-status"; }
+  if [ "$C7_OK" -eq 1 ]; then
+    check "C7 --accept-partial is refused on the zero-change terminus and with a zero-change self-review ticket, with Autopilot binding arguments, with --outcome, malformed, without a value, twice and on another verb, and --acceptance-status names review: instead of accept: on a zero-change ticket" PASS
+  else
+    check "C7 --accept-partial misuse refusals (failed:$C7_WHY)" FAIL
+    ERR
+  fi
+else
+  check "C6 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+if arm "acc-consent-stop"; then
+  chain_done; RC_RUN=$?
+  RUN_HANDOFF=absent; [ -e "$(handoff_file)" ] && RUN_HANDOFF=present
+  stop_hook "acc-consent-stop"
+  if [ "$RC_RUN" -eq 1 ] && grep -qF '| run: /zensu:verify-feature --chain --log' "$WORK/err" \
+    && [ "$RUN_HANDOFF" = "absent" ] && stop_blocked; then
+    check "C7b a run: remedy writes no hand-off and the Stop stays blocked" PASS
+  else
+    check "C7b a run: remedy keeps the Stop blocked (rc=$RC_RUN handoff=$RUN_HANDOFF)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+  observe 'false'
+  acc_record AC-001 fail cli "$RUN_ID" <<'EVIDENCE'
+the fixture command exited non-zero
+EVIDENCE
+  acc_record AC-002 partial browser "" <<'EVIDENCE'
+the saved value sits behind a real account login, so only the login page could be observed
+EVIDENCE
+  chain_done; RC_FIRST=$?
+  FIRST_HANDOFF=absent; [ -e "$(handoff_file)" ] && FIRST_HANDOFF=present
+  stop_hook "acc-consent-stop"
+  if [ "$RC_FIRST" -eq 1 ] && grep -qF '| fix: a criterion that fails on this tree needs a code change' "$WORK/err" \
+    && [ "$FIRST_HANDOFF" = "absent" ] && stop_blocked; then
+    check "C8 a first-round fix: remedy writes no hand-off and the Stop stays blocked" PASS
+  else
+    check "C8 a first-round fix: remedy keeps the Stop blocked (rc=$RC_FIRST handoff=$FIRST_HANDOFF)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+
+  bash "$LOG" --self-review-fixed --claimed-review-ticket "$TICKET" >/dev/null 2>&1
+  chain_done; RC_SPENT=$?
+  stop_hook "acc-consent-stop"
+  if [ "$RC_SPENT" -eq 1 ] && [ -f "$(handoff_file)" ] && stop_released; then
+    check "C9 once the fix round is spent a fix: refusal hands off and the Stop is let through" PASS
+  else
+    check "C9 a spent fix round hands off (rc=$RC_SPENT)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+
+  printf 'v5\n' > "$PROJ/tracked.txt"
+  stop_hook "acc-consent-stop"
+  C10_EDIT=blocked; stop_blocked || C10_EDIT=released
+  printf 'v2\n' > "$PROJ/tracked.txt"
+  stop_hook "acc-consent-stop"
+  C10_BACK=released; stop_released || C10_BACK=blocked
+  if [ "$C10_EDIT" = "blocked" ] && [ "$C10_BACK" = "released" ]; then
+    check "C10 an edit re-arms the Stop block and the unchanged tree is let through again" PASS
+  else
+    check "C10 an edit re-arms the block (edit=$C10_EDIT back=$C10_BACK)" FAIL
+    cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+
+  bash "$LOG" --tdd-begin >/dev/null 2>&1
+  if [ ! -e "$(handoff_file)" ]; then
+    check "C11 --tdd-begin removes the hand-off record" PASS
+  else
+    check "C11 --tdd-begin removes the hand-off record" FAIL
+  fi
+else
+  check "C8 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+partial_refusal() {
+  observe 'printf ok'
+  acc_record AC-001 pass cli "$RUN_ID" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  acc_record AC-002 partial browser "" <<'EVIDENCE'
+the saved value sits behind a real account login, so only the login page could be observed
+EVIDENCE
+  chain_done
+}
+
+if arm "acc-consent-consumed" consumed; then
+  partial_refusal; RC=$?
+  C12_DONE="$(tdd_get_flag "$SF" codeReviewDone 2>/dev/null)"
+  C12_EARLY=absent; [ -e "$(handoff_file)" ] && C12_EARLY=present
+  stop_hook "acc-consent-consumed"
+  C12_EARLY_STOP=released; stop_blocked && C12_EARLY_STOP=blocked
+  bash "$LOG" --code-review-done --claimed-review-ticket "$TICKET" >/dev/null 2>&1
+  chain_done; RC_LATE=$?
+  stop_hook "acc-consent-consumed"
+  C12_LATE_STOP=blocked; stop_released && C12_LATE_STOP=released
+  if [ "$RC" -eq 1 ] && [ "$C12_DONE" = "false" ] && [ "$C12_EARLY" = "absent" ] && [ "$C12_EARLY_STOP" = "blocked" ] \
+    && [ "$RC_LATE" -eq 1 ] && [ -f "$(handoff_file)" ] && [ "$C12_LATE_STOP" = "released" ]; then
+    check "C12 with hooks.selfReview on a terminus before --code-review-done writes no hand-off and its Stop stays blocked, and after --code-review-done the same refusal hands off and the Stop is let through" PASS
+  else
+    check "C12 the hand-off waits for --code-review-done while hooks.selfReview is on (rc=$RC codeReviewDone=$C12_DONE early=$C12_EARLY/$C12_EARLY_STOP late=$RC_LATE/$C12_LATE_STOP)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+else
+  check "C12 arm a chain whose review ticket was consumed" FAIL
+fi
+
+if arm "acc-consent-claim"; then
+  partial_refusal; RC=$?
+  CLAIM="$PROJ/.zensu/state/pending-review.json.claim"
+  : > "$CLAIM"
+  stop_hook "acc-consent-claim"
+  C13_CLAIM=released; stop_blocked && C13_CLAIM=blocked
+  rm -f "$CLAIM"
+  stop_hook "acc-consent-claim"
+  C13_FREE=blocked; stop_released && C13_FREE=released
+  if [ "$RC" -eq 1 ] && [ "$C13_CLAIM" = "blocked" ] && [ "$C13_FREE" = "released" ]; then
+    check "C13 a deferred-review claim in the project keeps the Stop blocked despite a valid hand-off, and its removal lets it through" PASS
+  else
+    check "C13 the claim exclusion (rc=$RC claim=$C13_CLAIM free=$C13_FREE)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+else
+  check "C13 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+printf '{"evidence":{"fullSuiteGate":"advisory"},"hooks":{"selfReview":false}}\n' > "$ZENSU_CONFIG"
+if arm "acc-consent-selfoff" consumed; then
+  observe 'false'
+  acc_record AC-001 fail cli "$RUN_ID" <<'EVIDENCE'
+the fixture command exited non-zero
+EVIDENCE
+  acc_record AC-002 pass browser "" <<'EVIDENCE'
+the page showed the saved value after a reload
+EVIDENCE
+  chain_done; RC=$?
+  C14_HANDOFF=absent; [ -f "$(handoff_file)" ] && C14_HANDOFF=present
+  stop_hook "acc-consent-selfoff"
+  C14_OFF=blocked; stop_released && C14_OFF=released
+  printf '{"evidence":{"fullSuiteGate":"advisory"},"hooks":{"selfReview":true}}\n' > "$ZENSU_CONFIG"
+  stop_hook "acc-consent-selfoff"
+  C14_ON=released; stop_blocked && C14_ON=blocked
+  C14_KEPT=absent; [ -f "$(handoff_file)" ] && C14_KEPT=present
+  if [ "$RC" -eq 1 ] && grep -qF '| fix: a criterion that fails on this tree needs a code change' "$WORK/err" \
+    && [ "$C14_HANDOFF" = "present" ] && [ "$C14_OFF" = "released" ] \
+    && [ "$C14_ON" = "blocked" ] && [ "$C14_KEPT" = "present" ]; then
+    check "C14 with hooks.selfReview off no fix round follows the review, so a fix: refusal hands off and the Stop is let through; with hooks.selfReview on again the same record releases no Stop whose review is not marked done" PASS
+  else
+    check "C14 a fix: refusal with hooks.selfReview off hands off (rc=$RC handoff=$C14_HANDOFF off=$C14_OFF on=$C14_ON kept=$C14_KEPT)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+else
+  check "C14 arm a chain whose review ticket was consumed with hooks.selfReview off" FAIL
+fi
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+
+HANDOFF_FN="$(awk '/^acceptance_handoff_release\(\) \{/,/^}/' "$STOP")"
+if printf '%s\n' "$HANDOFF_FN" | grep -qF 'root="${ZENSU_PROJECT_ROOT:-}"' \
+  && printf '%s\n' "$HANDOFF_FN" | grep -qF 'ZENSU_AVR_PROJECT_ROOT="$root"' \
+  && ! printf '%s\n' "$HANDOFF_FN" | grep -qF 'zensu-host-path.sh" "${ZENSU_PROJECT_ROOT'; then
+  check "C15 the Stop hand-off check passes the recorded project root raw, the spelling the terminus binds the acceptance records to" PASS
+else
+  check "C15 the Stop hand-off check passes the recorded project root raw" FAIL
+fi
+
+if arm "acc-consent-two"; then
+  acc_record AC-001 partial cli "" <<'EVIDENCE'
+the fixture command runs only against a signed build this environment cannot produce
+EVIDENCE
+  acc_record AC-002 partial browser "" <<'EVIDENCE'
+the saved value sits behind a real account login, so only the login page could be observed
+EVIDENCE
+  bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial AC-002,AC-001 >"$WORK/out" 2>"$WORK/err"; RC=$?
+  LEDGER="$(bash "$LOG" --bypass-list 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] \
+    && grep -q "^ACCEPTANCE — partial-accepted | 0/2 acceptance criteria pass on the current tree [0-9a-f]\{12\}; accepted as partial: AC-001, AC-002 | plan: $PLAN_REL | gate: required$" "$WORK/err" \
+    && [ "$(grep -c '^ACCEPTANCE — accepted as partial: AC-00[12] partial | ' "$WORK/err")" -eq 2 ] \
+    && [ "$LEDGER" = "acceptance-partial" ]; then
+    check "C16 --accept-partial AC-002,AC-001 closes a chain whose two open criteria are partial and records acceptance-partial" PASS
+  else
+    check "C16 the two-id consented close (rc=$RC done=$(done_flag) ledger=$LEDGER)" FAIL
+    ERR
+  fi
+else
+  check "C16 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+if arm "acc-consent-none"; then
+  cat > "$PROJ/$PLAN_REL" <<'PLAN'
+# Fixture plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| FR-001 | a functional fixture row that is never verified live | spec |
+PLAN
+  chain_done; RC=$?
+  stop_hook "acc-consent-none"
+  if [ "$RC" -eq 1 ] && grep -q "^ACCEPTANCE — no-criteria | .* | gate: required | add: give the plan's ## Requirements table an active AC-### criterion" "$WORK/err" \
+    && [ -f "$(handoff_file)" ] && stop_released \
+    && grep -qF "$HANDOFF_NEEDLE | no-criteria | open: none | add: " "$WORK/stop-err"; then
+    check "C17 a no-criteria refusal on an FR-only plan hands off with no open criterion and its Stop is let through" PASS
+  else
+    check "C17 the no-criteria hand-off (rc=$RC)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+  write_plan "$PROJ"
+else
+  check "C17 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+if arm "acc-consent-guard"; then
+  partial_refusal; RC=$?
+  HF="$(handoff_file)"
+  stop_hook "acc-consent-guard"
+  C18_BASE=blocked; stop_released && C18_BASE=released
+  C18_SYM=skipped
+  if [ -f "$HF" ] && cp -p "$HF" "$WORK/handoff-copy.json" && rm -f "$HF" && ln -s "$WORK/handoff-copy.json" "$HF" 2>/dev/null && [ -L "$HF" ]; then
+    stop_hook "acc-consent-guard"
+    C18_SYM=released; stop_blocked && C18_SYM=blocked
+  fi
+  rm -f "$HF"
+  cp -p "$WORK/handoff-copy.json" "$HF"
+  stop_hook "acc-consent-guard"
+  C18_BACK=blocked; stop_released && C18_BACK=released
+  C18_OUTER=released
+  if autopilot_begin_run acc_guard_run "$ZENSU_SESSION_KEY" "$PROJ" false true >/dev/null 2>&1; then
+    stop_hook "acc-consent-guard"
+    stop_blocked && C18_OUTER=blocked
+    autopilot_apply_event acc_guard_run cancel-acc_guard_run CANCEL '{}' "$PROJ" >/dev/null 2>&1 || C18_OUTER=cancel-failed
+  else
+    C18_OUTER=begin-failed
+  fi
+  if [ "$RC" -eq 1 ] && [ "$C18_BASE" = "released" ] && [ "$C18_SYM" != "released" ] \
+    && [ "$C18_BACK" = "released" ] && [ "$C18_OUTER" = "blocked" ]; then
+    if [ "$C18_SYM" = "skipped" ]; then
+      check "C18 an owned Autopilot run keeps the Stop blocked despite a valid hand-off (SKIP the linked hand-off file: no symbolic link could be made here)" PASS
+    else
+      check "C18 a linked hand-off file and an owned Autopilot run each keep the Stop blocked despite a valid hand-off, while the restored file is let through" PASS
+    fi
+  else
+    check "C18 the Stop release guards (rc=$RC base=$C18_BASE link=$C18_SYM outer=$C18_OUTER back=$C18_BACK)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+else
+  check "C18 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+if printf '%s\n' "$HANDOFF_FN" | grep -qxF '  [ "$OUTER_PRESENT" = false ] || return 1' \
+  && printf '%s\n' "$HANDOFF_FN" | grep -qxF '  [ "$DEFERRED_ADOPTED" = false ] || return 1' \
+  && printf '%s\n' "$HANDOFF_FN" | grep -qxF '  [ -z "$INNER_BOUND_RUN" ] || return 1' \
+  && printf '%s\n' "$HANDOFF_FN" | grep -qxF '  [ -f "$file" ] && [ ! -L "$file" ] || return 1' \
+  && printf '%s\n' "$HANDOFF_FN" | grep -qF 'if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled selfReview ); then'; then
+  check "C19 the Stop hand-off check refuses an owned Autopilot run, an adopted deferred review, an Autopilot-bound chain, a linked hand-off file and, while hooks.selfReview is on, a chain before --code-review-done" PASS
+else
+  check "C19 the Stop hand-off guards" FAIL
+fi
+
+printf '{"evidence":{"fullSuiteGate":"required"}}\n' > "$ZENSU_CONFIG"
+if arm "acc-consent-suite"; then
+  partial_refusal; RC=$?
+  C20_HANDOFF=absent; [ -e "$(handoff_file)" ] && C20_HANDOFF=present
+  stop_hook "acc-consent-suite"
+  if [ "$RC" -eq 1 ] && grep -qF 'resolve the FULL SUITE refusal above' "$WORK/err" \
+    && grep -qF '| accept: AC-002 could not be observed in this environment' "$WORK/err" \
+    && [ "$C20_HANDOFF" = "absent" ] && stop_blocked; then
+    check "C20 a terminus whose full-suite gate refused writes no hand-off although every acceptance remedy is the user's, and its Stop stays blocked" PASS
+  else
+    check "C20 the full-suite refusal writes no hand-off (rc=$RC handoff=$C20_HANDOFF)" FAIL
+    ERR; cat "$WORK/stop-out" "$WORK/stop-err"
+  fi
+else
+  check "C20 arm a ticket-bound chain with a required full-suite gate" FAIL
+fi
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+
+LEDGER_FAULT="$WORK/ledger-fault.js"
+cat > "$LEDGER_FAULT" <<'JS'
+if (process.env.GATE === 'acceptance-partial' && typeof process.env.ALLOWLIST === 'string') process.exit(70);
+JS
+STATE_FAULT="$WORK/verdict-state-fault.js"
+cat > "$STATE_FAULT" <<'JS'
+if (process.env.ZENSU_AVR_MODE === 'verdict') {
+  const fs = require('fs');
+  const write = fs.writeFileSync;
+  fs.writeFileSync = function writeFileSync(file, ...rest) {
+    if (typeof file === 'string' && file.endsWith('verdict-state')) throw new Error('verdict-state fixture fault');
+    return write.call(this, file, ...rest);
+  };
+}
+JS
+if arm "acc-consent-ledger"; then
+  partial_refusal; RC=$?
+  NODE_OPTIONS="--require=$LEDGER_FAULT" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"; RC_LEDGER=$?
+  C21_LEDGER_ERR="$(cat "$WORK/err")"
+  C21_LEDGER_DONE="$(done_flag)"
+  C21_LEDGER_LIST="$(bash "$LOG" --bypass-list 2>/dev/null)"
+  NODE_OPTIONS="--require=$STATE_FAULT" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"; RC_STATE=$?
+  C21_STATE_ERR="$(cat "$WORK/err")"
+  C21_STATE_DONE="$(done_flag)"
+  C21_STATE_LIST="$(bash "$LOG" --bypass-list 2>/dev/null)"
+  bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" --accept-partial AC-002 >"$WORK/out" 2>"$WORK/err"; RC_RETRY=$?
+  C21_RETRY_LIST="$(bash "$LOG" --bypass-list 2>/dev/null)"
+  if [ "$RC" -eq 1 ] && [ "$RC_LEDGER" -eq 1 ] && [ "$C21_LEDGER_DONE" = "false" ] && [ "$C21_LEDGER_LIST" = "none" ] \
+    && printf '%s' "$C21_LEDGER_ERR" | grep -qF "the user's consent to the partial criteria AC-002 could not be recorded in the session bypass ledger as acceptance-partial, so the chain stays open" \
+    && [ "$RC_STATE" -eq 1 ] && [ "$C21_STATE_DONE" = "false" ] && [ "$C21_STATE_LIST" = "none" ] \
+    && printf '%s' "$C21_STATE_ERR" | grep -qF 'the acceptance verdict state did not reach the terminus' \
+    && [ "$RC_RETRY" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ "$C21_RETRY_LIST" = "acceptance-partial" ]; then
+    check "C21 a consented close whose ledger entry or verdict state is lost exits 1 and keeps the chain open, and a retry records acceptance-partial and closes it" PASS
+  else
+    check "C21 the consented close fails closed (rc=$RC ledger=$RC_LEDGER/$C21_LEDGER_DONE/$C21_LEDGER_LIST state=$RC_STATE/$C21_STATE_DONE/$C21_STATE_LIST retry=$RC_RETRY/$(done_flag)/$C21_RETRY_LIST)" FAIL
+    printf '%s\n%s\n' "$C21_LEDGER_ERR" "$C21_STATE_ERR"
+    ERR
+  fi
+else
+  check "C21 arm a ticket-bound chain with a receipt" FAIL
+fi
+
 if arm "acc-stale"; then
   observe 'printf ok'
   acc_record AC-001 pass cli "$RUN_ID" <<'EVIDENCE'
@@ -455,7 +1057,7 @@ the fixture command failed
 EVIDENCE
   RC_RED=$?
   RED_ERR="$(cat "$WORK/rerr")"
-  if [ "$RC_MUT" -eq 1 ] && printf '%s' "$MUT_ERR" | grep -qF 'changed the tree while it ran' \
+  if [ "$RC_MUT" -eq 1 ] && printf '%s' "$MUT_ERR" | grep -qF 'changed the project while it ran; make the check leave the project unchanged' \
     && [ "$RC_FULL" -eq 1 ] && printf '%s' "$FULL_ERR" | grep -qF 'has scope full; run the check with --evidence-run --scope acceptance' \
     && [ "$RC_RED" -eq 1 ] && printf '%s' "$RED_ERR" | grep -qF "evidence run $RED_RUN exited 3, which contradicts --verdict pass"; then
     check "A12 a cited run that mutated the tree, a full-scope run and a red run cannot back a pass" PASS
@@ -591,8 +1193,69 @@ if arm "acc-unknown-mode"; then
     check "A18 an unknown gate mode is disclosed and acts as required (rc=$RC)" FAIL
     ERR
   fi
+  A18_LINE="$(grep -m 1 '^ACCEPTANCE — evidence\.acceptanceGate value ' "$WORK/err")"
 else
   check "A18 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+source "$PLUGIN_DIR/tests/structure/lib-work-tree-fault-stub.sh"
+transport_fault_stub "$WORK/terminus-gate-mode-stub" gate-mode
+UNJUDGED_CAUSE='the acceptance transport could not be prepared'
+GATE_MODE_LINE="zensu-log.sh --chain-done: the gate-mode transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+ACCEPTANCE_STAYS_OPEN='zensu-log.sh --chain-done: the chain stays open; resolve the acceptance transport fault named above, then run --chain-done again.'
+unjudged_done() {
+  PATH="$WORK/terminus-gate-mode-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"
+}
+
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+if arm "acc-unjudged-escape"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ "$LEDGER" = "ZENSU_ACCEPTANCE_GATE" ] \
+    && grep -qF '/gate-mode: ' "$WORK/err" \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($UNJUDGED_CAUSE) | gate: required" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A34 an escaped terminus whose acceptance transport cannot be prepared is ledgered, closes and prints its ACCEPTANCE — escaped line" PASS
+  else
+    check "A34 an escaped terminus whose acceptance transport cannot be prepared is ledgered and closes (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A34 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+printf '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+if arm "acc-unjudged-advisory"; then
+  unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "ACCEPTANCE — unavailable (advisory, not blocking) | $UNJUDGED_CAUSE, so no acceptance record was read | gate: advisory" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A35 an advisory terminus whose acceptance transport cannot be prepared closes and prints its advisory ACCEPTANCE line" PASS
+  else
+    check "A35 an advisory terminus whose acceptance transport cannot be prepared closes (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A35 arm a ticket-bound chain with a receipt" FAIL
+fi
+
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+if arm "acc-unjudged-required"; then
+  unjudged_done; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && grep -qxF "$ACCEPTANCE_STAYS_OPEN" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — ' "$WORK/err"; then
+    check "A36 a required terminus whose acceptance transport cannot be prepared refuses with the shell's own lines and keeps the chain open" PASS
+  else
+    check "A36 a required terminus whose acceptance transport cannot be prepared refuses (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A36 arm a ticket-bound chain with a receipt" FAIL
 fi
 
 printf '{}\n' > "$ZENSU_CONFIG"
@@ -644,6 +1307,7 @@ if bound_arm "acc-bound-on" "$BOUND_ON" acc_run_on acc-chain-on true; then
     check "A26 a bound pass with live validation on closes as not-checked (rc=$RC done=$(done_flag))" FAIL
     ERR
   fi
+  A26_LINE="$(grep -m 1 '^ACCEPTANCE — not-checked | ' "$WORK/err")"
 else
   check "A26 arm an Autopilot-bound chain with a receipt and a dirty tree" FAIL
 fi
@@ -659,6 +1323,7 @@ if bound_arm "acc-bound-off" "$BOUND_OFF" acc_run_off acc-chain-off false; then
     check "A27 a bound pass of a --no-validate run says so (rc=$RC done=$(done_flag))" FAIL
     ERR
   fi
+  A27_LINE="$(grep -m 1 '^ACCEPTANCE — not-checked | ' "$WORK/err")"
 else
   check "A27 arm an Autopilot-bound chain started with --no-validate" FAIL
 fi
@@ -678,6 +1343,39 @@ if bound_arm "acc-bound-escape" "$BOUND_ESC" acc_run_esc acc-chain-esc true; the
   fi
 else
   check "A28 arm an Autopilot-bound chain for the escape case" FAIL
+fi
+
+BOUND_PREP="$WORK/bound-prepare"
+bound_project "$BOUND_PREP"
+if bound_arm "acc-bound-prepare" "$BOUND_PREP" acc_run_prep acc-chain-prep true; then
+  PATH="$WORK/terminus-gate-mode-stub:$PATH" bound_done "acc-bound-prepare" acc_run_prep acc-chain-prep; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] && [ -n "${A26_LINE:-}" ] \
+    && grep -qxF "$A26_LINE ($UNJUDGED_CAUSE)" "$WORK/err" \
+    && [ "$(grep -c '^ACCEPTANCE — ' "$WORK/err")" -eq 1 ]; then
+    check "A38 a bound pass whose acceptance transport cannot be prepared prints the module's not-checked line for a validating run, with the cause" PASS
+  else
+    check "A38 a bound pass whose acceptance transport cannot be prepared prints its not-checked line (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A38 arm an Autopilot-bound chain with a receipt and a dirty tree" FAIL
+fi
+
+BOUND_PREP_OFF="$WORK/bound-prepare-off"
+bound_project "$BOUND_PREP_OFF"
+if bound_arm "acc-bound-prepare-off" "$BOUND_PREP_OFF" acc_run_prep_off acc-chain-prep-off false; then
+  PATH="$WORK/terminus-gate-mode-stub:$PATH" bound_done "acc-bound-prepare-off" acc_run_prep_off acc-chain-prep-off; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] && [ -n "${A27_LINE:-}" ] \
+    && grep -qxF "$A27_LINE ($UNJUDGED_CAUSE)" "$WORK/err"; then
+    check "A38b a bound pass of a --no-validate run whose acceptance transport cannot be prepared prints the module's not-checked line for that run, with the cause" PASS
+  else
+    check "A38b a bound --no-validate pass whose acceptance transport cannot be prepared prints its not-checked line (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A38b arm an Autopilot-bound chain started with --no-validate" FAIL
 fi
 
 echo "== A chain bound to an Autopilot run that drives a worktree below the anchor =="
@@ -789,6 +1487,32 @@ EVIDENCE
     check "A32 a work-tree fault whose transport write fails stops both acceptance verbs (status=$RC_TST record=$RC_TREC)" FAIL
     cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr"
   fi
+
+  transport_fault_stub "$WORK/gate-mode-stub" gate-mode
+  transport_fault_stub "$WORK/evidence-stub" evidence
+  PATH="$WORK/gate-mode-stub:$PATH" bash "$LOG" --acceptance-status --log "$RUN_LOG" >"$WORK/sout" 2>"$WORK/serr"; RC_GST=$?
+  PATH="$WORK/gate-mode-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/rout" 2>"$WORK/rerr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_GREC=$?
+  PATH="$WORK/evidence-stub:$PATH" bash "$LOG" --acceptance-record --ac AC-001 --verdict pass --driver browser --log "$RUN_LOG" >"$WORK/vout" 2>"$WORK/verr" <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_VREC=$?
+  A33_TAIL="transport file could not be written to the temporary directory; check that ${TMPDIR:-/tmp} is writable and has free space."
+  if [ "$RC_GST" -eq 2 ] && [ "$RC_GREC" -eq 2 ] && [ "$RC_VREC" -eq 2 ] \
+    && [ ! -s "$WORK/sout" ] && [ ! -s "$WORK/rout" ] && [ ! -s "$WORK/vout" ] \
+    && grep -qF '/gate-mode: ' "$WORK/serr" \
+    && grep -qxF "zensu-log.sh --acceptance-status: the gate-mode $A33_TAIL" "$WORK/serr" \
+    && grep -qF '/gate-mode: ' "$WORK/rerr" \
+    && grep -qxF "zensu-log.sh --acceptance-record: the gate-mode $A33_TAIL" "$WORK/rerr" \
+    && grep -qF '/evidence: ' "$WORK/verr" \
+    && grep -qxF "zensu-log.sh --acceptance-record: the evidence $A33_TAIL" "$WORK/verr"; then
+    check "A33 a failed gate-mode or evidence transport write stops the acceptance verbs with exit 2 and the shell's own line, before the module runs" PASS
+  else
+    check "A33 a failed gate-mode or evidence transport write stops the acceptance verbs (status=$RC_GST record=$RC_GREC evidence=$RC_VREC)" FAIL
+    cat "$WORK/sout" "$WORK/serr" "$WORK/rout" "$WORK/rerr" "$WORK/vout" "$WORK/verr"
+  fi
 else
   check "A29 arm a chain bound to an Autopilot run that drives a worktree below the anchor" FAIL
 fi
@@ -806,9 +1530,195 @@ if arm_plain "acc-no-receipt-clean" "$PROJ"; then
     check "A20 a chain with no receipt and no changed file is not gated (rc=$RC)" FAIL
     ERR
   fi
+  A20_LINE="$(grep -m 1 '^ACCEPTANCE — not-applicable | ' "$WORK/err")"
 else
   check "A20 arm a ticket-bound chain without a receipt" FAIL
 fi
+
+with_cause() {
+  [ -n "$1" ] || return 1
+  printf '%s' "${1% | gate: *} ($2) | gate: ${1##* | gate: }"
+}
+
+unjudged_refused() {
+  [ "$1" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -qxF "$ACCEPTANCE_STAYS_OPEN" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — not-applicable' "$WORK/err"
+}
+
+if arm_plain "acc-unjudged-clean" "$PROJ"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A20_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — escaped' "$WORK/err"; then
+    check "A37 an escaped terminus whose acceptance transport cannot be prepared prints the module's not-applicable line with the cause on a clean tree without a receipt and records no escape" PASS
+  else
+    check "A37 an escaped terminus on a clean tree without a receipt records no escape (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-clean-required" "$PROJ"; then
+  unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A20_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && grep -qxF "$GATE_MODE_LINE" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A37c a required terminus whose acceptance transport cannot be prepared closes a clean chain without a receipt with the module's not-applicable line and the cause" PASS
+  else
+    check "A37c a required terminus on a clean tree without a receipt closes as not-applicable (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37c arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-dirty" "$PROJ"; then
+  printf 'late edit\n' > "$PROJ/tracked.txt"
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A39 a required terminus whose acceptance transport cannot be prepared refuses a changed tree without a receipt and says that the chain stays open" PASS
+  else
+    check "A39 a required terminus whose acceptance transport cannot be prepared refuses a changed tree without a receipt (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+  git -C "$PROJ" checkout -q -- tracked.txt
+else
+  check "A39 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-index-only" "$PROJ"; then
+  printf 'staged only\n' > "$PROJ/staged-only.txt"
+  git -C "$PROJ" add staged-only.txt
+  rm -f "$PROJ/staged-only.txt"
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A40 a change that exists only in the index refuses a required terminus whose acceptance transport cannot be prepared" PASS
+  else
+    check "A40 an index-only change refuses a required terminus whose acceptance transport cannot be prepared (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+  git -C "$PROJ" rm -q --cached staged-only.txt
+else
+  check "A40 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-landing-env" "$PROJ"; then
+  ZENSU_EDIT_LANDING_GATE=off unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A41 an edit-landing escape set in the environment keeps a clean chain without a receipt out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A41 an environment edit-landing escape keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A41 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-landing-ledger" "$PROJ" escape-edit-landing; then
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A42 an edit-landing escape recorded in the ledger keeps a clean chain without a receipt out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A42 a ledgered edit-landing escape keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A42 arm a ticket-bound chain with the edit-landing gate escaped" FAIL
+fi
+
+printf 'v2\n' > "$PROJ/tracked.txt"
+if arm "acc-unjudged-receipt-clean"; then
+  git -C "$PROJ" checkout -q -- tracked.txt
+  unjudged_done; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A43 an edit-landing receipt keeps a clean chain out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A43 a receipt keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A43 arm a ticket-bound chain with a receipt" FAIL
+fi
+git -C "$PROJ" checkout -q -- tracked.txt
+rm -rf "$PROJ/.zensu/plans" "$PROJ/.zensu/logs"
+
+mkdir -p "$WORK/status-fault-stub"
+printf '#!/bin/sh\nfor arg in "$@"; do\n  [ "$arg" = ":(exclude).zensu" ] && { echo "fatal: simulated git status failure" >&2; exit 128; }\ndone\nexec "%s" "$@"\n' "$(command -v git)" > "$WORK/status-fault-stub/git"
+chmod +x "$WORK/status-fault-stub/git"
+if arm_plain "acc-unjudged-git-fault" "$PROJ"; then
+  PATH="$WORK/status-fault-stub:$WORK/terminus-gate-mode-stub:$PATH" bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?
+  if unjudged_refused "$RC"; then
+    check "A44 a git status that fails keeps a clean chain without a receipt out of not-applicable when the acceptance transport cannot be prepared" PASS
+  else
+    check "A44 a failing git status keeps a clean chain out of not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A44 arm a ticket-bound chain without a receipt" FAIL
+fi
+
+if arm_plain "acc-unjudged-early-stop" "$PROJ" escape-edit-landing; then
+  _avr_log="$(printf 'unresolvable\nlog')" _avr_chain_inputs=1 chain_done; RC=$?
+  if unjudged_refused "$RC" \
+    && grep -qxF 'zensu-log.sh --chain-done: --log cannot be resolved' "$WORK/err"; then
+    check "A45 a preparation that stops before it resolves the edit-landing escape never asks for not-applicable, whatever inputs flag the caller exported" PASS
+  else
+    check "A45 a preparation that stops before the chain's inputs never asks for not-applicable (rc=$RC done=$(done_flag))" FAIL
+    ERR
+  fi
+else
+  check "A45 arm a ticket-bound chain with the edit-landing gate escaped" FAIL
+fi
+
+line_of() {
+  grep -nxF "$1" "$2" | head -n 1 | cut -d: -f1
+}
+
+printf '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"sometimes"}}\n' > "$ZENSU_CONFIG"
+printf 'v2\n' > "$PROJ/tracked.txt"
+if arm "acc-unjudged-unknown-mode"; then
+  unjudged_done; RC=$?
+  DISCLOSED="$(line_of "${A18_LINE:-}" "$WORK/err")"
+  OPEN_AT="$(line_of "$ACCEPTANCE_STAYS_OPEN" "$WORK/err")"
+  if unjudged_refused "$RC" && [ -n "${A18_LINE:-}" ] && [ -n "$DISCLOSED" ] && [ -n "$OPEN_AT" ] \
+    && [ "$DISCLOSED" -lt "$OPEN_AT" ] \
+    && [ "$(grep -c '^ACCEPTANCE — ' "$WORK/err")" -eq 1 ]; then
+    check "A46 an unknown gate mode is disclosed ahead of the refusal of a required terminus whose acceptance transport cannot be prepared" PASS
+  else
+    check "A46 an unknown gate mode is disclosed ahead of the refusal (rc=$RC done=$(done_flag) disclosed=$DISCLOSED open=$OPEN_AT)" FAIL
+    ERR
+  fi
+else
+  check "A46 arm a ticket-bound chain with a receipt" FAIL
+fi
+if arm "acc-unjudged-unknown-escape"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  ESCAPED_LINE="ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record was read ($UNJUDGED_CAUSE) | gate: required"
+  DISCLOSED="$(line_of "${A18_LINE:-}" "$WORK/err")"
+  ESCAPED_AT="$(line_of "$ESCAPED_LINE" "$WORK/err")"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ "$LEDGER" = "ZENSU_ACCEPTANCE_GATE" ] \
+    && [ -n "${A18_LINE:-}" ] && [ -n "$DISCLOSED" ] && [ -n "$ESCAPED_AT" ] \
+    && [ "$((DISCLOSED + 1))" -eq "$ESCAPED_AT" ]; then
+    check "A46b an unknown gate mode is disclosed on the line before the escaped line of a terminus whose acceptance transport cannot be prepared" PASS
+  else
+    check "A46b an unknown gate mode is disclosed before the escaped line (rc=$RC done=$(done_flag) ledger='$LEDGER' disclosed=$DISCLOSED escaped=$ESCAPED_AT)" FAIL
+    ERR
+  fi
+else
+  check "A46b arm a ticket-bound chain with a receipt" FAIL
+fi
+printf '%s\n' "$ADVISORY_SUITE" > "$ZENSU_CONFIG"
+git -C "$PROJ" checkout -q -- tracked.txt
+rm -rf "$PROJ/.zensu/plans" "$PROJ/.zensu/logs"
 
 if arm_plain "acc-no-receipt-dirty" "$PROJ"; then
   printf 'late edit\n' > "$PROJ/tracked.txt"
@@ -881,8 +1791,41 @@ if arm_plain "acc-plain" "$PLAIN"; then
     check "A23 a project outside git without a receipt is not gated (rc=$RC)" FAIL
     ERR
   fi
+  A23_LINE="$(grep -m 1 '^ACCEPTANCE — not-applicable | ' "$WORK/err")"
 else
   check "A23 arm a ticket-bound chain outside git" FAIL
+fi
+
+if arm_plain "acc-plain-unjudged" "$PLAIN"; then
+  ZENSU_ACCEPTANCE_GATE=off unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A23_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && ! grep -qF 'ACCEPTANCE — escaped' "$WORK/err"; then
+    check "A37b an escaped terminus outside git whose acceptance transport cannot be prepared prints the module's not-applicable line with the cause and records no escape" PASS
+  else
+    check "A37b an escaped terminus outside git whose acceptance transport cannot be prepared closes as not-applicable (rc=$RC ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37b arm a ticket-bound chain outside git" FAIL
+fi
+
+if arm_plain "acc-plain-unjudged-required" "$PLAIN"; then
+  unjudged_done; RC=$?
+  LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && [ -z "$LEDGER" ] \
+    && EXPECT="$(with_cause "${A23_LINE:-}" "$UNJUDGED_CAUSE")" \
+    && grep -qxF "$EXPECT" "$WORK/err" \
+    && ! grep -qF 'the chain stays open' "$WORK/err"; then
+    check "A37d a required terminus outside git whose acceptance transport cannot be prepared closes with the module's not-applicable line and the cause" PASS
+  else
+    check "A37d a required terminus outside git whose acceptance transport cannot be prepared closes as not-applicable (rc=$RC done=$(done_flag) ledger='$LEDGER')" FAIL
+    ERR
+  fi
+else
+  check "A37d arm a ticket-bound chain outside git" FAIL
 fi
 
 export CLAUDE_PROJECT_DIR="$PROJ"
@@ -897,6 +1840,941 @@ else
   check "A24 the unqualified zero-change terminus stays exempt and silent (rc=$RC)" FAIL
   ERR
 fi
+
+echo "== The Autopilot VALIDATE stage validates a run only on its acceptance records =="
+source "$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
+APPROVED_PLAN_LIB="$PLUGIN_DIR/hooks/lib/approved-plan-v1.js"
+VAL_PLAN_TEXT='# Fixture plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | the fixture command prints ok | spec |
+| AC-002 | the page shows the saved value | spec |
+| FR-001 | a functional fixture row that is never verified live | spec |
+'
+
+val_project() {
+  mkdir -p "$1"
+  git -C "$1" init -q
+  git -C "$1" config user.email t@example.invalid
+  git -C "$1" config user.name tester
+  printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$1/.gitignore"
+  printf 'v1\n' > "$1/tracked.txt"
+  git -C "$1" add .gitignore tracked.txt
+  git -C "$1" -c commit.gpgsign=false commit -qm baseline
+}
+
+val_store_plan() {
+  VAL_SHA="$(ROOT="$1" PLAN_TEXT="$VAL_PLAN_TEXT" LIB="$APPROVED_PLAN_LIB" node -e '
+    const crypto = require("crypto");
+    const bytes = Buffer.from(process.env.PLAN_TEXT, "utf8");
+    const sha = crypto.createHash("sha256").update(bytes).digest("hex");
+    const stored = require(process.env.LIB).storeApprovedPlan(process.env.ROOT, sha, bytes);
+    if (!stored || stored.ok !== true) process.exit(1);
+    process.stdout.write(sha);
+  ')" && [ -n "$VAL_SHA" ]
+}
+
+val_event() {
+  autopilot_apply_event "$1" "$2" "$3" "$4" "$5" >/dev/null 2>&1
+}
+
+val_drive() {
+  local run="$1" project="$2" sha="$3" head="$4" bind="${5:-plan}" key payload digest marker
+  case "$bind" in
+    (plan) val_event "$run" "plan-$run" PLAN_APPROVED "{\"approvedPlanSha256\":\"$sha\"}" "$project" || return 1 ;;
+    (approved) ;;
+    (*) val_event "$run" "spec-$run" ORDER_SPEC_BOUND "$bind" "$project" || return 1 ;;
+  esac
+  val_event "$run" "tdd-start-$run" TDD_STARTED \
+    "{\"attempt\":1,\"chainId\":\"chain-$run\",\"sessionId\":\"$ZENSU_SESSION_KEY\"}" "$project" || return 1
+  val_event "$run" "tdd-done-$run" TDD_CHAIN_DONE \
+    "{\"attempt\":1,\"chainId\":\"chain-$run\",\"sessionId\":\"$ZENSU_SESSION_KEY\",\"outcome\":\"pass\"}" "$project" || return 1
+  val_event "$run" "gates-$run" GATES_PASSED "{\"headSha\":\"$head\"}" "$project" || return 1
+  val_event "$run" "converge-$run" CONVERGENCE_PASSED '{}' "$project" || return 1
+  val_event "$run" "pr-request-$run" PR_OPEN_REQUESTED "{\"operationKey\":\"pr:$run\"}" "$project" || return 1
+  val_event "$run" "pr-open-$run" PR_OPENED \
+    "{\"operationKey\":\"pr:$run\",\"pr\":{\"number\":41,\"url\":\"https://github.test/acme/widget/pull/41\",\"headSha\":\"$head\"}}" "$project" || return 1
+  if [ -n "${VAL_ORDER_ID:-}" ]; then
+    key="$(autopilot_work_order_review_operation_key "$VAL_ORDER_ID" "$head" 2>/dev/null)"
+  else
+    key="$(autopilot_team_review_operation_key "$run" "$head" 2>/dev/null)"
+  fi
+  [ -n "$key" ] || return 1
+  val_event "$run" "review-request-$run" TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$key\",\"provider\":\"github\"}" "$project" || return 1
+  payload="$WORK/review-payload-$run.json"
+  printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Validate fixture review\",\"commit_id\":\"$head\",\"comments\":[]}" > "$payload"
+  autopilot_store_team_review_payload "$run" "$key" "$head" "$payload" github "$project" >/dev/null 2>&1 || return 1
+  digest="$(_zensu_vcs_review_payload_meta github "$payload" "$head" "$key" 2>/dev/null \
+    | node -e 'let d = ""; process.stdin.on("data", (c) => { d += c; }).on("end", () => { try { process.stdout.write(String(JSON.parse(d).payloadDigest || "")); } catch (_) {} });')"
+  [ -n "$digest" ] || return 1
+  marker="$(OPERATION_KEY="$key" HEAD_SHA="$head" PAYLOAD_DIGEST="$digest" node -e '
+    const op = require("crypto").createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${process.env.PAYLOAD_DIGEST}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+  ')"
+  val_event "$run" "review-published-$run" TEAM_REVIEW_PUBLISHED \
+    "{\"operationKey\":\"$key\",\"marker\":\"$marker\",\"headSha\":\"$head\",\"provider\":\"github\"}" "$project" || return 1
+  val_event "$run" "findings-clear-$run" FINDINGS_CLEARED "{\"headSha\":\"$head\",\"unresolvedCount\":0}" "$project"
+}
+
+val_setup() {
+  local sid="$1" dir="$2" run="$3" cover="${4:-false}" sha="${5:-}" abbreviate="${6:-}"
+  val_project "$dir" || return 1
+  export CLAUDE_PROJECT_DIR="$dir"
+  cd "$dir" || return 1
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$dir" "$cover" true >/dev/null 2>&1 || return 1
+  if [ -z "$sha" ]; then
+    val_store_plan "$dir" || return 1
+    sha="$VAL_SHA"
+  fi
+  VAL_HEAD="$(git -C "$dir" rev-parse HEAD)"
+  [ -z "$abbreviate" ] || VAL_HEAD="${VAL_HEAD:0:$abbreviate}"
+  val_drive "$run" "$dir" "$sha" "$VAL_HEAD" || return 1
+  VAL_RUN_FILE="$(autopilot_run_file "$run" "$dir")"
+  run_json_ok "$VAL_RUN_FILE" 'v.stage === "VALIDATE"'
+}
+
+run_json_ok() {
+  RUN_JSON_FILE="$1" RUN_JSON_EXPR="$2" node -e '
+    const v = JSON.parse(require("fs").readFileSync(process.env.RUN_JSON_FILE, "utf8"));
+    process.exit(Function("v", `return (${process.env.RUN_JSON_EXPR});`)(v) ? 0 : 1);
+  ' 2>/dev/null
+}
+
+file_sha() {
+  node -e 'process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))' "$1"
+}
+
+val_observe() {
+  VAL_EVR=""
+  bash "$LOG" --evidence-run --scope acceptance --run "$1" --cmd "$2" >"$WORK/veout" 2>"$WORK/veerr"
+  VAL_EVR="$(sed -n 's/.* record=\(er1_[0-9]*_[0-9a-f]*\) cmd=.*/\1/p' "$WORK/veout" | tail -n 1)"
+}
+
+val_record() {
+  if [ -n "${5:-}" ]; then
+    bash "$LOG" --acceptance-record --run "$1" --ac "$2" --verdict "$3" --driver "$4" --evidence-run "$5" >"$WORK/vrout" 2>"$WORK/vrerr"
+  else
+    bash "$LOG" --acceptance-record --run "$1" --ac "$2" --verdict "$3" --driver "$4" >"$WORK/vrout" 2>"$WORK/vrerr"
+  fi
+}
+
+val_validate() {
+  local run="$1"
+  shift
+  bash "$LOG" --autopilot-validate --run "$run" "$@" >"$WORK/vout" 2>"$WORK/verr"
+}
+
+VERR() { cat "$WORK/vout" "$WORK/verr" "$WORK/vrout" "$WORK/vrerr" "$WORK/veout" "$WORK/veerr" 2>/dev/null; }
+
+VM="$WORK/val-main"
+if val_setup "val-main" "$VM" val_run_main false; then
+  VM_HEAD="$VAL_HEAD"
+  VM_SHA="$VAL_SHA"
+  VM_FILE="$VAL_RUN_FILE"
+  VM_COPY=".zensu/state/autopilot-approved-plan-$VM_SHA.md"
+  VM_BEFORE="$(file_sha "$VM_FILE")"
+  bash "$LOG" --autopilot-event --run val_run_main --event VALIDATION_PASSED --event-id forged-validation \
+    --payload "{\"headSha\":\"$VM_HEAD\"}" >"$WORK/vout" 2>"$WORK/verr"; RC_EVT=$?
+  bash "$LOG" --autopilot-event --run val_run_main --event VALIDATION_FAILED --event-id "validation-passed:1:$VM_HEAD" \
+    --payload "{\"headSha\":\"$VM_HEAD\"}" >"$WORK/vout2" 2>"$WORK/verr2"; RC_NS=$?
+  if [ "$RC_EVT" -eq 2 ] && grep -qF -- 'VALIDATION_PASSED is internal; use zensu-log.sh --autopilot-validate --run <id>' "$WORK/verr" \
+    && [ "$RC_NS" -eq 2 ] && grep -qF -- "the 'validation-passed:' and 'validation-bypass:' event-id namespaces are reserved for --autopilot-validate" "$WORK/verr2" \
+    && [ "$(file_sha "$VM_FILE")" = "$VM_BEFORE" ]; then
+    check "V1 the event CLI refuses VALIDATION_PASSED and the validation event-id namespaces and leaves the run at VALIDATE" PASS
+  else
+    check "V1 the event CLI refuses VALIDATION_PASSED (rc=$RC_EVT/$RC_NS)" FAIL
+    VERR; cat "$WORK/verr2"
+  fi
+
+  val_validate val_run_main; RC=$?
+  if [ "$RC" -eq 1 ] \
+    && grep -qF "ACCEPTANCE — incomplete | autopilot run val_run_main: 0/2 acceptance criteria pass on the pull-request head ${VM_HEAD:0:12}; AC-001 missing; AC-002 missing | plan: $VM_COPY | gate: required | run: drive each criterion that is missing, stale or has an invalid record again on this tree and record it with zensu-log.sh --acceptance-record --run val_run_main" "$WORK/verr" \
+    && grep -qF 'zensu-log.sh --autopilot-validate: autopilot run val_run_main stays at VALIDATE' "$WORK/verr" \
+    && [ ! -s "$WORK/vout" ] && [ "$(file_sha "$VM_FILE")" = "$VM_BEFORE" ]; then
+    check "V2 a run without acceptance records stays at VALIDATE and names each missing criterion with its remedy" PASS
+  else
+    check "V2 a run without acceptance records stays at VALIDATE (rc=$RC)" FAIL
+    VERR
+  fi
+
+  printf 'dirty\n' > "$VM/tracked.txt"
+  val_record val_run_main AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value on a tree that was later reverted
+EVIDENCE
+  RC_STALE=$?
+  STALE_ERR="$(cat "$WORK/vrerr")"
+  git -C "$VM" checkout -q -- tracked.txt
+  val_observe val_run_main 'exit 1'
+  FAIL_EVR="$VAL_EVR"
+  val_record val_run_main AC-001 fail cli "$FAIL_EVR" <<'EVIDENCE'
+the fixture command exited 1
+EVIDENCE
+  RC_FAIL=$?
+  val_validate val_run_main; RC=$?
+  MIXED_ERR="$(cat "$WORK/verr")"
+  val_validate val_run_main --accept-partial AC-001,AC-002; RC_ACCEPT=$?
+  if [ "$RC_STALE" -eq 1 ] \
+    && printf '%s' "$STALE_ERR" | grep -qF "autopilot run val_run_main: the work tree has uncommitted changes, so it is not the pull-request head ${VM_HEAD:0:12}: tracked.txt; send a change" \
+    && [ -n "$FAIL_EVR" ] && [ "$RC_FAIL" -eq 0 ] && [ "$RC" -eq 1 ] && [ "$RC_ACCEPT" -eq 1 ] \
+    && printf '%s' "$MIXED_ERR" | grep -qF "; AC-001 fail; AC-002 missing | plan: $VM_COPY | gate: required | run: " \
+    && printf '%s' "$MIXED_ERR" | grep -qF "| fix: a criterion that fails on this tree needs a code change; send VALIDATION_FAILED for autopilot run val_run_main so the run returns to its fix loop" \
+    && ! printf '%s' "$MIXED_ERR" | grep -qF '| accept:' \
+    && grep -qF '; AC-001 fail; AC-002 missing; --accept-partial covers only partial criteria, not AC-001 fail, AC-002 missing | plan: ' "$WORK/verr" \
+    && [ "$(file_sha "$VM_FILE")" = "$VM_BEFORE" ]; then
+    check "V3 a record on a dirty tree is refused with the head-binding cause, and a failing and a missing criterion refuse with their fix and run remedies, which --accept-partial does not cover" PASS
+  else
+    check "V3 a dirty-tree record and a failing and a missing criterion refuse (dirty=$RC_STALE fail=$RC_FAIL rc=$RC accept=$RC_ACCEPT run=$FAIL_EVR)" FAIL
+    VERR
+  fi
+
+  printf 'stray\n' > "$VM/stray.txt"
+  val_observe val_run_main 'printf ok'
+  DIRTY_EVR="$VAL_EVR"
+  val_record val_run_main AC-001 pass cli "$DIRTY_EVR" <<'EVIDENCE'
+the fixture command printed ok on a tree with an untracked file
+EVIDENCE
+  RC_D1=$?
+  D1_ERR="$(cat "$WORK/vrerr")"
+  val_record val_run_main AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value on a tree with an untracked file
+EVIDENCE
+  RC_D2=$?
+  bash "$LOG" --acceptance-status --run val_run_main >"$WORK/vsout" 2>"$WORK/vserr"; RC_DST=$?
+  DST_OUT="$(cat "$WORK/vsout")"
+  val_validate val_run_main; RC_DIRTY=$?
+  DIRTY_ERR="$(cat "$WORK/verr")"
+  rm -f "$VM/stray.txt"
+  printf 'v2\n' > "$VM/tracked.txt"
+  git -C "$VM" -c commit.gpgsign=false commit -qam 'newer commit'
+  VM_NEWER="$(git -C "$VM" rev-parse HEAD)"
+  val_observe val_run_main 'printf ok'
+  AHEAD_EVR="$VAL_EVR"
+  val_record val_run_main AC-001 pass cli "$AHEAD_EVR" <<'EVIDENCE'
+the fixture command printed ok on a commit newer than the pull-request head
+EVIDENCE
+  RC_A1=$?
+  A1_ERR="$(cat "$WORK/vrerr")"
+  val_record val_run_main AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value on a commit newer than the pull-request head
+EVIDENCE
+  RC_A2=$?
+  val_validate val_run_main; RC_AHEAD=$?
+  git -C "$VM" reset -q --hard "$VM_HEAD"
+  if [ -n "$DIRTY_EVR" ] && [ "$RC_D1" -eq 1 ] && [ "$RC_D2" -eq 1 ] && [ "$RC_DST" -eq 1 ] && [ "$RC_DIRTY" -eq 1 ] \
+    && printf '%s' "$D1_ERR" | grep -qF "autopilot run val_run_main: the work tree has uncommitted changes, so it is not the pull-request head ${VM_HEAD:0:12}: stray.txt; send a change" \
+    && printf '%s' "$DST_OUT" | grep -qF "ACCEPTANCE STATUS — unresolved | autopilot run val_run_main: the work tree has uncommitted changes, so it is not the pull-request head ${VM_HEAD:0:12}: stray.txt; " \
+    && printf '%s' "$DIRTY_ERR" | grep -qF "ACCEPTANCE — unresolved | autopilot run val_run_main: the work tree has uncommitted changes, so it is not the pull-request head ${VM_HEAD:0:12}" \
+    && [ -n "$AHEAD_EVR" ] && [ "$RC_A1" -eq 1 ] && [ "$RC_A2" -eq 1 ] && [ "$RC_AHEAD" -eq 1 ] \
+    && printf '%s' "$A1_ERR" | grep -qF "autopilot run val_run_main: HEAD of the work tree is ${VM_NEWER:0:12}, not the pull-request head ${VM_HEAD:0:12}" \
+    && grep -qF "ACCEPTANCE — unresolved | autopilot run val_run_main: HEAD of the work tree is ${VM_NEWER:0:12}, not the pull-request head ${VM_HEAD:0:12}" "$WORK/verr" \
+    && [ "$(file_sha "$VM_FILE")" = "$VM_BEFORE" ]; then
+    check "V4 a record, the status and the verb refuse on an untracked file or on a HEAD other than the pull-request head and name the cause" PASS
+  else
+    check "V4 a dirty tree or another HEAD refuses the records, the status and the verb (d=$RC_D1/$RC_D2/$RC_DST/$RC_DIRTY a=$RC_A1/$RC_A2/$RC_AHEAD)" FAIL
+    printf '%s\n' "$DIRTY_ERR"
+    VERR
+  fi
+
+  cp "$VM/$VM_COPY" "$WORK/val-copy.pre"
+  printf 'appended after approval\n' >> "$VM/$VM_COPY"
+  val_validate val_run_main; RC=$?
+  bash "$LOG" --acceptance-status --run val_run_main >"$WORK/vsout" 2>"$WORK/vserr"; RC_ST=$?
+  cp "$WORK/val-copy.pre" "$VM/$VM_COPY"
+  if [ "$RC" -eq 1 ] \
+    && grep -qF "ACCEPTANCE — unresolved | the stored copy $VM_COPY no longer matches the digest the run approved" "$WORK/verr" \
+    && [ "$RC_ST" -eq 2 ] && grep -qF "ACCEPTANCE STATUS — unresolved | the stored copy $VM_COPY no longer matches" "$WORK/vsout" \
+    && [ "$(file_sha "$VM_FILE")" = "$VM_BEFORE" ]; then
+    check "V5 a stored plan copy that no longer matches the approved digest refuses as unresolved" PASS
+  else
+    check "V5 a tampered plan copy refuses as unresolved (rc=$RC status=$RC_ST)" FAIL
+    VERR; cat "$WORK/vsout" "$WORK/vserr"
+  fi
+
+  val_observe val_run_main 'printf ok'
+  PASS_EVR="$VAL_EVR"
+  val_record val_run_main AC-001 pass cli "$PASS_EVR" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_main AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value after a reload
+EVIDENCE
+  RC_R2=$?
+  bash "$LOG" --acceptance-status --run val_run_main >"$WORK/vsout" 2>"$WORK/vserr"; RC_ST=$?
+  val_validate val_run_main; RC=$?
+  if [ -n "$PASS_EVR" ] && [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ "$RC_ST" -eq 0 ] \
+    && grep -qF "ACCEPTANCE STATUS — autopilot run val_run_main | plan: $VM_COPY | tree: " "$WORK/vsout" \
+    && grep -q "^AC-001 pass | cli observed $PASS_EVR | record av1_[^ ]* | evidence: the fixture command printed ok | the fixture command prints ok$" "$WORK/vsout" \
+    && [ "$RC" -eq 0 ] \
+    && grep -qF "ACCEPTANCE — pass | autopilot run val_run_main: 2/2 acceptance criteria pass on the pull-request head ${VM_HEAD:0:12} (observed 1, attested 1) | plan: $VM_COPY | gate: required" "$WORK/verr" \
+    && grep -qF 'ACCEPTANCE — flaky: AC-001 had 1 earlier non-pass verdict(s) on this same tree' "$WORK/verr" \
+    && grep -qxF "zensu autopilot: run val_run_main validated at the pull-request head ${VM_HEAD:0:12}" "$WORK/vout" \
+    && run_json_ok "$VM_FILE" "v.stage === \"DELIVER\" && v.evidence.validation.passed === true && v.evidence.validation.headSha === \"$VM_HEAD\" && v.bypasses.length === 0 && v.events[v.events.length - 1].eventId === \"validation-passed:1:$VM_HEAD\""; then
+    check "V6 every criterion passing on a clean tree at the pull-request head applies VALIDATION_PASSED with the durable head" PASS
+  else
+    check "V6 every criterion passing applies VALIDATION_PASSED (r1=$RC_R1 r2=$RC_R2 status=$RC_ST rc=$RC run=$PASS_EVR)" FAIL
+    VERR; cat "$WORK/vsout" "$WORK/vserr"
+  fi
+
+  val_validate val_run_main; RC=$?
+  if [ "$RC" -eq 2 ] && grep -qF 'autopilot run val_run_main is at stage DELIVER, not VALIDATE, so there is nothing to validate' "$WORK/verr"; then
+    check "V7 a run past VALIDATE is refused rather than validated twice" PASS
+  else
+    check "V7 a run past VALIDATE is refused (rc=$RC)" FAIL
+    VERR
+  fi
+
+  val_event val_run_main "cancel-val_run_main" CANCEL '{}' "$VM"; RC_CANCEL=$?
+  VM_ENDED="$(file_sha "$VM_FILE")"
+  val_validate val_run_main; RC=$?
+  ENDED_ERR="$(cat "$WORK/verr")"
+  bash "$LOG" --acceptance-status --run val_run_main >"$WORK/vsout" 2>"$WORK/vserr"; RC_ST=$?
+  bash "$LOG" --evidence-run --scope acceptance --run val_run_main --cmd "touch '$WORK/val-ended-ran'" >"$WORK/veout" 2>"$WORK/veerr"; RC_EVR=$?
+  if [ "$RC_CANCEL" -eq 0 ] && run_json_ok "$VM_FILE" 'v.stage === "CANCELLED"' \
+    && [ "$RC" -eq 2 ] && printf '%s' "$ENDED_ERR" | grep -qF 'zensu-log.sh --autopilot-validate: autopilot run val_run_main has already ended' \
+    && [ "$RC_ST" -eq 2 ] && grep -qF 'zensu-log.sh --acceptance-status: autopilot run val_run_main has already ended' "$WORK/vserr" \
+    && [ "$RC_EVR" -eq 2 ] && [ ! -e "$WORK/val-ended-ran" ] \
+    && grep -qF 'zensu-log.sh --evidence-run: autopilot run val_run_main has already ended' "$WORK/veerr" \
+    && [ "$(file_sha "$VM_FILE")" = "$VM_ENDED" ]; then
+    check "V7b a run that has ended is refused with exit 2 by the verb, the status and the acceptance evidence run, and none of them changes it" PASS
+  else
+    check "V7b an ended run is refused with exit 2 (cancel=$RC_CANCEL rc=$RC status=$RC_ST evidence=$RC_EVR)" FAIL
+    printf '%s\n' "$ENDED_ERR"
+    VERR; cat "$WORK/vserr"
+  fi
+else
+  check "V1 drive an Autopilot run to VALIDATE with a stored approved plan" FAIL
+fi
+
+VAL_PLAN_BASE="$VAL_PLAN_TEXT"
+VAL_PLAN_TEXT="${VAL_PLAN_BASE}
+## Manual Acceptance
+| Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
+|-----------|------------------------------------|----------------------------------------|---------|
+| AC-001 | run the fixture command under every locale on the release host | non-loopback host | planning answer, 2026-11-15 |
+"
+PASSED_FAULT="$WORK/validation-passed-fault.js"
+cat > "$PASSED_FAULT" <<'JS'
+if (process.argv.includes('VALIDATION_PASSED')) process.exit(70);
+JS
+VP="$WORK/val-partial"
+val_setup "val-partial" "$VP" val_run_partial false; VP_SETUP=$?
+VAL_PLAN_TEXT="$VAL_PLAN_BASE"
+if [ "$VP_SETUP" -eq 0 ]; then
+  VP_HEAD="$VAL_HEAD"
+  VP_FILE="$VAL_RUN_FILE"
+  val_record val_run_partial AC-001 partial cli <<'EVIDENCE'
+the fixture command printed ok, but only for the default locale
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_partial AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_R2=$?
+  val_validate val_run_partial; RC_PLAIN=$?
+  PLAIN_ERR="$(cat "$WORK/verr")"
+  val_validate val_run_partial --accept-partial; RC_BARE=$?
+  BARE_ERR="$(cat "$WORK/verr")"
+  NODE_OPTIONS="--require=$PASSED_FAULT" bash "$LOG" --autopilot-validate --run val_run_partial --accept-partial AC-001 >"$WORK/vout" 2>"$WORK/verr"; RC_FAULT=$?
+  FAULT_ERR="$(cat "$WORK/verr")"
+  FAULT_STATE=0
+  run_json_ok "$VP_FILE" 'v.stage === "VALIDATE" && v.bypasses.length === 1 && v.bypasses[0].gate === "acceptance-partial"' || FAULT_STATE=1
+  val_validate val_run_partial --accept-partial AC-001; RC=$?
+  if [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ "$RC_PLAIN" -eq 1 ] \
+    && printf '%s' "$PLAIN_ERR" | grep -qF "| accept: AC-001 could not be observed in this environment, and the approved plan's ## Manual Acceptance table lists each one; when each row's reason names the same cause category as the criterion's partial record, zensu-log.sh --autopilot-validate --run val_run_partial --accept-partial AC-001 records the gap" \
+    && [ "$RC_BARE" -eq 2 ] && printf '%s' "$BARE_ERR" | grep -qF -- "--accept-partial takes the comma list of criterion ids the approved plan's ## Manual Acceptance table lists" \
+    && [ "$RC_FAULT" -eq 2 ] && [ "$FAULT_STATE" -eq 0 ] \
+    && printf '%s' "$FAULT_ERR" | grep -qF 'VALIDATION_PASSED could not be applied to autopilot run val_run_partial' \
+    && [ "$RC" -eq 0 ] \
+    && grep -qF "ACCEPTANCE — partial-accepted | autopilot run val_run_partial: 1/2 acceptance criteria pass on the pull-request head ${VP_HEAD:0:12}; accepted as partial: AC-001" "$WORK/verr" \
+    && grep -qxF "zensu autopilot: run val_run_partial validated at the pull-request head ${VP_HEAD:0:12}, with the acceptance-partial bypass recorded in its ledger" "$WORK/vout" \
+    && run_json_ok "$VP_FILE" "v.stage === \"DELIVER\" && v.bypasses.length === 1 && v.bypasses[0].gate === \"acceptance-partial\" && v.bypasses[0].stage === \"VALIDATE\" && v.events.some((e) => e.eventId === \"validation-bypass:acceptance-partial:1:$VP_HEAD\")"; then
+    check "V8 --accept-partial with the ids the approved plan's ## Manual Acceptance table lists records acceptance-partial and validates, a bare flag is refused, and a VALIDATION_PASSED that fails after the bypass retries without a second bypass" PASS
+  else
+    check "V8 the run-mode consent (r1=$RC_R1 r2=$RC_R2 plain=$RC_PLAIN bare=$RC_BARE fault=$RC_FAULT/$FAULT_STATE rc=$RC)" FAIL
+    printf '%s\n%s\n%s\n' "$PLAIN_ERR" "$BARE_ERR" "$FAULT_ERR"
+    VERR
+  fi
+else
+  check "V8 drive an Autopilot run to VALIDATE for the partial case" FAIL
+fi
+
+VN="$WORK/val-no-copy"
+if val_setup "val-no-copy" "$VN" val_run_nocopy false "$APPROVED_SHA"; then
+  VN_HEAD="$VAL_HEAD"
+  VN_FILE="$VAL_RUN_FILE"
+  VN_BEFORE="$(file_sha "$VN_FILE")"
+  val_validate val_run_nocopy; RC=$?
+  NOCOPY_ERR="$(cat "$WORK/verr")"
+  val_record val_run_nocopy AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_REC=$?
+  ZENSU_ACCEPTANCE_GATE=off val_validate val_run_nocopy; RC_ESC=$?
+  if [ "$RC" -eq 1 ] \
+    && printf '%s' "$NOCOPY_ERR" | grep -qF "ACCEPTANCE — unresolved | autopilot run val_run_nocopy has no stored copy of the plan it approved (.zensu/state/autopilot-approved-plan-$APPROVED_SHA.md)" \
+    && printf '%s' "$NOCOPY_ERR" | grep -qF 'report this refusal and leave the decision to the user | gate: required' \
+    && ! printf '%s' "$NOCOPY_ERR" | grep -q 'leave ZENSU_' \
+    && [ "$RC_REC" -eq 1 ] && grep -qF 'has no stored copy of the plan it approved' "$WORK/vrerr" \
+    && [ "$RC_ESC" -eq 0 ] \
+    && grep -qF 'ACCEPTANCE — escaped | ZENSU_ACCEPTANCE_GATE=off switched this check off, so no acceptance record of autopilot run val_run_nocopy was read | gate: required' "$WORK/verr" \
+    && run_json_ok "$VN_FILE" "v.stage === \"DELIVER\" && v.evidence.validation.headSha === \"$VN_HEAD\" && v.bypasses.length === 1 && v.bypasses[0].gate === \"ZENSU_ACCEPTANCE_GATE\" && v.bypasses[0].stage === \"VALIDATE\""; then
+    check "V9 a run without a stored plan refuses as unresolved, leaves the decision to the user, and an escape the user takes is ledgered" PASS
+  else
+    check "V9 a run without a stored plan refuses, and the escape is ledgered (rc=$RC rec=$RC_REC esc=$RC_ESC)" FAIL
+    printf '%s\n' "$NOCOPY_ERR"
+    VERR
+  fi
+else
+  check "V9 drive an Autopilot run to VALIDATE without a stored plan copy" FAIL
+fi
+
+VA="$WORK/val-advisory"
+printf '%s\n' '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"advisory"}}' > "$WORK/config-acceptance-advisory.json"
+if val_setup "val-advisory" "$VA" val_run_advisory false; then
+  VA_HEAD="$VAL_HEAD"
+  VA_FILE="$VAL_RUN_FILE"
+  ZENSU_CONFIG="$WORK/config-acceptance-advisory.json" val_validate val_run_advisory; RC=$?
+  if [ "$RC" -eq 0 ] \
+    && grep -qF "ACCEPTANCE — incomplete (advisory, not blocking) | autopilot run val_run_advisory: 0/2 acceptance criteria pass on the pull-request head ${VA_HEAD:0:12}" "$WORK/verr" \
+    && grep -qxF "zensu autopilot: run val_run_advisory validated at the pull-request head ${VA_HEAD:0:12}, with the acceptance-advisory bypass recorded in its ledger" "$WORK/vout" \
+    && run_json_ok "$VA_FILE" "v.stage === \"DELIVER\" && v.bypasses.length === 1 && v.bypasses[0].gate === \"acceptance-advisory\" && v.bypasses[0].stage === \"VALIDATE\" && v.events.some((e) => e.eventId === \"validation-bypass:acceptance-advisory:1:$VA_HEAD\")"; then
+    check "V10 an advisory acceptance gate discloses the missing criteria, records acceptance-advisory in the run's ledger and validates" PASS
+  else
+    check "V10 an advisory acceptance gate discloses and validates (rc=$RC)" FAIL
+    VERR
+  fi
+else
+  check "V10 drive an Autopilot run to VALIDATE for the advisory case" FAIL
+fi
+
+VW="$WORK/val-worktree"
+val_project "$VW"
+git -C "$VW" worktree add -q "$VW/.claude/worktrees/wt" -b val-wt 2>/dev/null
+VWT="$(cd -P "$VW/.claude/worktrees/wt" 2>/dev/null && pwd -P)"
+VW_OK=false
+if [ -n "$VWT" ]; then
+  printf 'worktree v2\n' > "$VWT/tracked.txt"
+  git -C "$VWT" -c commit.gpgsign=false commit -qam 'worktree change'
+  VW_HEAD="$(git -C "$VWT" rev-parse HEAD)"
+  export CLAUDE_PROJECT_DIR="$VW"
+  cd "$VW" || exit 1
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-worktree" \
+    && autopilot_begin_run val_run_wt "$ZENSU_SESSION_KEY" "$VW" true true "$VWT" >/dev/null 2>&1 \
+    && val_store_plan "$VW" \
+    && val_drive val_run_wt "$VW" "$VAL_SHA" "$VW_HEAD" \
+    && VW_OK=true
+fi
+if [ "$VW_OK" = true ]; then
+  VW_FILE="$(autopilot_run_file val_run_wt "$VW")"
+  val_observe val_run_wt 'pwd -P'
+  WT_EVR="$VAL_EVR"
+  WT_OUT="$(cat "$WORK/veout")"
+  WT_NOTE="$(cat "$WORK/veerr")"
+  val_record val_run_wt AC-001 pass cli "$WT_EVR" <<'EVIDENCE'
+the fixture command printed the worktree
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_wt AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_R2=$?
+  bash "$LOG" --acceptance-status --run val_run_wt >"$WORK/vsout" 2>"$WORK/vserr"; RC_ST=$?
+  printf 'worktree v3\n' > "$VWT/tracked.txt"
+  bash "$LOG" --acceptance-status --run val_run_wt >"$WORK/vsout2" 2>"$WORK/vserr2"; RC_STALE=$?
+  val_validate val_run_wt; RC_DIRTY=$?
+  git -C "$VWT" checkout -q -- tracked.txt
+  val_validate val_run_wt; RC=$?
+  if [ -n "$WT_EVR" ] && printf '%s\n' "$WT_OUT" | grep -qxF "$VWT" \
+    && printf '%s' "$WT_NOTE" | grep -qF "so the command runs in $VWT" \
+    && [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] \
+    && [ "$RC_ST" -eq 0 ] && grep -q '| 2/2 active criteria pass$' "$WORK/vsout" \
+    && [ "$RC_STALE" -eq 1 ] \
+    && grep -qF "ACCEPTANCE STATUS — unresolved | autopilot run val_run_wt: the work tree has uncommitted changes, so it is not the pull-request head ${VW_HEAD:0:12}: .claude/worktrees/wt/tracked.txt; " "$WORK/vsout2" \
+    && [ "$RC_DIRTY" -eq 1 ] \
+    && [ "$RC" -eq 0 ] \
+    && grep -qF "ACCEPTANCE — pass | autopilot run val_run_wt: 2/2 acceptance criteria pass on the pull-request head ${VW_HEAD:0:12}" "$WORK/verr" \
+    && run_json_ok "$VW_FILE" "v.stage === \"COVER\" && v.evidence.validation.headSha === \"$VW_HEAD\""; then
+    check "V11 a run that drives a worktree below the anchor runs, records and validates against the combined tree, and an uncommitted edit there refuses its status and its validation" PASS
+  else
+    check "V11 a worktree run binds the combined tree (run=$WT_EVR r1=$RC_R1 r2=$RC_R2 status=$RC_ST stale=$RC_STALE dirty=$RC_DIRTY rc=$RC)" FAIL
+    printf '%s\n%s\n' "$WT_OUT" "$WT_NOTE"
+    VERR; cat "$WORK/vsout" "$WORK/vserr" "$WORK/vsout2" "$WORK/vserr2"
+  fi
+else
+  check "V11 drive an Autopilot run that drives a worktree below the anchor to VALIDATE" FAIL
+fi
+
+VX="$WORK/val-no-validate"
+val_project "$VX"
+export CLAUDE_PROJECT_DIR="$VX"
+cd "$VX" || exit 1
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-no-validate"
+if autopilot_begin_run val_run_novalidate "$ZENSU_SESSION_KEY" "$VX" false false >/dev/null 2>&1; then
+  VX_FILE="$(autopilot_run_file val_run_novalidate "$VX")"
+  VX_BEFORE="$(file_sha "$VX_FILE")"
+  val_validate val_run_novalidate; RC=$?
+  NOVAL_ERR="$(cat "$WORK/verr")"
+  val_record val_run_novalidate AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_REC=$?
+  val_validate val_run_unknown; RC_OTHER=$?
+  OTHER_ERR="$(cat "$WORK/verr")"
+  bash "$LOG" --acceptance-status --log "$RUN_LOG" --run val_run_novalidate >"$WORK/vsout" 2>"$WORK/vserr"; RC_BOTH=$?
+  bash "$LOG" --evidence-run --scope full --run val_run_novalidate --cmd "touch '$WORK/val-full-ran'" >"$WORK/veout" 2>"$WORK/veerr"; RC_FULL=$?
+  if [ "$RC" -eq 2 ] \
+    && printf '%s' "$NOVAL_ERR" | grep -qF 'autopilot run val_run_novalidate was begun with --no-validate, so it has no VALIDATE stage and nothing to validate' \
+    && [ "$RC_REC" -eq 1 ] && grep -qF 'autopilot run val_run_novalidate was begun with --no-validate, so it has no acceptance criteria to verify' "$WORK/vrerr" \
+    && [ "$RC_OTHER" -eq 2 ] && printf '%s' "$OTHER_ERR" | grep -qF -- '--run val_run_unknown is not the active Autopilot run of this session' \
+    && [ "$RC_BOTH" -eq 2 ] && grep -qF -- '--log and --run name two different anchors' "$WORK/vserr" \
+    && [ "$RC_FULL" -eq 2 ] && [ ! -e "$WORK/val-full-ran" ] && grep -qF -- '--run applies only to --scope acceptance' "$WORK/veerr" \
+    && [ "$(file_sha "$VX_FILE")" = "$VX_BEFORE" ]; then
+    check "V12 a --no-validate run is refused by the verb and the records, another run id is refused, and --run excludes --log and every scope but acceptance" PASS
+  else
+    check "V12 the run-mode refusals (rc=$RC rec=$RC_REC other=$RC_OTHER both=$RC_BOTH full=$RC_FULL)" FAIL
+    printf '%s\n%s\n' "$NOVAL_ERR" "$OTHER_ERR"
+    VERR; cat "$WORK/vserr"
+  fi
+else
+  check "V12 begin a --no-validate Autopilot run" FAIL
+fi
+
+VZ="$WORK/val-no-run"
+val_project "$VZ"
+export CLAUDE_PROJECT_DIR="$VZ"
+cd "$VZ" || exit 1
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-no-run"
+val_validate val_run_main; RC=$?
+if [ "$RC" -eq 2 ] && grep -qF 'this session owns no active Autopilot run, so --run val_run_main names no run it may verify' "$WORK/verr"; then
+  check "V13 a session that owns no active run cannot validate another session's run" PASS
+else
+  check "V13 a session without a run is refused (rc=$RC)" FAIL
+  VERR
+fi
+
+VS="$WORK/val-subdirectory"
+val_project "$VS"
+printf '/.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$VS/.gitignore"
+mkdir -p "$VS/app" "$VS/shared"
+printf 'app v1\n' > "$VS/app/app.txt"
+printf 'shared v1\n' > "$VS/shared/lib.txt"
+git -C "$VS" add .gitignore app/app.txt shared/lib.txt
+git -C "$VS" -c commit.gpgsign=false commit -qm 'a project root below the repository top'
+VSA="$(cd -P "$VS/app" 2>/dev/null && pwd -P)"
+VS_OK=false
+if [ -n "$VSA" ]; then
+  VS_HEAD="$(git -C "$VS" rev-parse HEAD)"
+  export CLAUDE_PROJECT_DIR="$VSA"
+  cd "$VSA" || exit 1
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-subdirectory" \
+    && autopilot_begin_run val_run_sub "$ZENSU_SESSION_KEY" "$VSA" false true >/dev/null 2>&1 \
+    && val_store_plan "$VSA" \
+    && val_drive val_run_sub "$VSA" "$VAL_SHA" "$VS_HEAD" \
+    && VS_OK=true
+fi
+if [ "$VS_OK" = true ]; then
+  VS_FILE="$(autopilot_run_file val_run_sub "$VSA")"
+  val_observe val_run_sub 'printf ok'
+  SUB_EVR="$VAL_EVR"
+  val_record val_run_sub AC-001 pass cli "$SUB_EVR" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_sub AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_R2=$?
+  bash "$LOG" --acceptance-status --run val_run_sub >"$WORK/vsout" 2>"$WORK/vserr"; RC_ST=$?
+  printf 'shared v2\n' > "$VS/shared/lib.txt"
+  bash "$LOG" --acceptance-status --run val_run_sub >"$WORK/vsout2" 2>"$WORK/vserr2"; RC_STALE=$?
+  val_validate val_run_sub; RC_DIRTY=$?
+  SUB_DIRTY_ERR="$(cat "$WORK/verr")"
+  git -C "$VS" checkout -q -- shared/lib.txt
+  val_validate val_run_sub; RC=$?
+  if [ -n "$SUB_EVR" ] && [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] \
+    && [ "$RC_ST" -eq 0 ] && grep -q '| 2/2 active criteria pass$' "$WORK/vsout" \
+    && [ "$RC_STALE" -eq 1 ] \
+    && grep -qF "ACCEPTANCE STATUS — unresolved | autopilot run val_run_sub: the work tree has uncommitted changes, so it is not the pull-request head ${VS_HEAD:0:12}: ../shared/lib.txt; " "$WORK/vsout2" \
+    && [ "$RC_DIRTY" -eq 1 ] \
+    && printf '%s' "$SUB_DIRTY_ERR" | grep -qF "ACCEPTANCE — unresolved | autopilot run val_run_sub: the work tree has uncommitted changes, so it is not the pull-request head ${VS_HEAD:0:12}" \
+    && [ "$RC" -eq 0 ] \
+    && grep -qF "ACCEPTANCE — pass | autopilot run val_run_sub: 2/2 acceptance criteria pass on the pull-request head ${VS_HEAD:0:12}" "$WORK/verr" \
+    && run_json_ok "$VS_FILE" "v.stage === \"DELIVER\" && v.evidence.validation.headSha === \"$VS_HEAD\""; then
+    check "V14 a run whose project root lies below the repository top binds the whole repository: an edit outside the project root refuses its status and its validation until it is gone" PASS
+  else
+    check "V14 a subdirectory session binds the whole repository (run=$SUB_EVR r1=$RC_R1 r2=$RC_R2 status=$RC_ST stale=$RC_STALE dirty=$RC_DIRTY rc=$RC)" FAIL
+    printf '%s\n' "$SUB_DIRTY_ERR"
+    VERR; cat "$WORK/vsout" "$WORK/vserr" "$WORK/vsout2" "$WORK/vserr2"
+  fi
+else
+  check "V14 drive an Autopilot run whose project root lies below the repository top to VALIDATE" FAIL
+fi
+
+VH="$WORK/val-head-update"
+if val_setup "val-head-update" "$VH" val_run_head false; then
+  VH_HEAD="$VAL_HEAD"
+  VH_FILE="$VAL_RUN_FILE"
+  val_event val_run_head "validation-failed-1-val_run_head" VALIDATION_FAILED \
+      "{\"headSha\":\"$VH_HEAD\",\"reason\":\"a criterion fails on this tree\"}" "$VH" \
+    && val_event val_run_head "tdd-start-2-val_run_head" TDD_STARTED \
+      "{\"attempt\":2,\"chainId\":\"chain-fix-val_run_head\",\"sessionId\":\"$ZENSU_SESSION_KEY\"}" "$VH" \
+    && val_event val_run_head "tdd-done-2-val_run_head" TDD_CHAIN_DONE \
+      "{\"attempt\":2,\"chainId\":\"chain-fix-val_run_head\",\"sessionId\":\"$ZENSU_SESSION_KEY\",\"outcome\":\"pass\"}" "$VH" \
+    && run_json_ok "$VH_FILE" 'v.stage === "VALIDATE" && v.tdd.headUpdateRequired === true'
+  RC_LOOP=$?
+  VH_BACK="$(file_sha "$VH_FILE")"
+  val_validate val_run_head; RC_PENDING=$?
+  PENDING_ERR="$(cat "$WORK/verr")"
+  ZENSU_ACCEPTANCE_GATE=off val_validate val_run_head; RC_PENDING_ESC=$?
+  PENDING_ESC_ERR="$(cat "$WORK/verr")"
+  VH_REFUSED="$(file_sha "$VH_FILE")"
+  printf 'v2\n' > "$VH/tracked.txt"
+  git -C "$VH" -c commit.gpgsign=false commit -qam 'fix the failing criterion'
+  VH_NEW="$(git -C "$VH" rev-parse HEAD)"
+  val_event val_run_head "head:$VH_HEAD:$VH_NEW" PR_HEAD_UPDATED \
+    "{\"previousHeadSha\":\"$VH_HEAD\",\"headSha\":\"$VH_NEW\",\"gatesPassed\":true,\"pushCompleted\":true}" "$VH" \
+    && val_event val_run_head "findings-clear-2-val_run_head" FINDINGS_CLEARED "{\"headSha\":\"$VH_NEW\",\"unresolvedCount\":0}" "$VH" \
+    && run_json_ok "$VH_FILE" 'v.stage === "VALIDATE" && v.tdd.headUpdateRequired === false'
+  RC_HANDOFF=$?
+  ZENSU_ACCEPTANCE_GATE=off val_validate val_run_head; RC=$?
+  PENDING_TEXT='autopilot run val_run_head came back to VALIDATE from a fix attempt whose pushed head is not recorded yet, so it has no pull-request head to validate: re-run the gates, push the fix and record PR_HEAD_UPDATED'
+  if [ "$RC_LOOP" -eq 0 ] \
+    && [ "$RC_PENDING" -eq 2 ] && printf '%s' "$PENDING_ERR" | grep -qF "zensu-log.sh --autopilot-validate: $PENDING_TEXT" \
+    && [ "$RC_PENDING_ESC" -eq 2 ] && printf '%s' "$PENDING_ESC_ERR" | grep -qF "zensu-log.sh --autopilot-validate: $PENDING_TEXT" \
+    && [ "$VH_REFUSED" = "$VH_BACK" ] \
+    && [ "$RC_HANDOFF" -eq 0 ] \
+    && [ "$RC" -eq 0 ] \
+    && grep -qxF "zensu autopilot: run val_run_head validated at the pull-request head ${VH_NEW:0:12}, with the ZENSU_ACCEPTANCE_GATE bypass recorded in its ledger" "$WORK/vout" \
+    && run_json_ok "$VH_FILE" "v.stage === \"DELIVER\" && v.evidence.validation.headSha === \"$VH_NEW\" && v.bypasses.length === 1 && v.bypasses[0].gate === \"ZENSU_ACCEPTANCE_GATE\" && v.events.some((e) => e.eventId === \"validation-bypass:ZENSU_ACCEPTANCE_GATE:3:$VH_NEW\") && v.events[v.events.length - 1].eventId === \"validation-passed:3:$VH_NEW\""; then
+    check "V15 a run back at VALIDATE from a fix attempt is refused until its pushed head is recorded, the switched-off gate included, without a ledger entry, and its next visit validates under event ids of visit 3" PASS
+  else
+    check "V15 a pending head update refuses validation and the next visit validates (loop=$RC_LOOP pending=$RC_PENDING escaped=$RC_PENDING_ESC handoff=$RC_HANDOFF rc=$RC)" FAIL
+    printf '%s\n%s\n' "$PENDING_ERR" "$PENDING_ESC_ERR"
+    VERR
+  fi
+else
+  check "V15 drive an Autopilot run to VALIDATE for the head-update case" FAIL
+fi
+cd "$PROJ" || exit 1
+
+if PLUGIN_DIR="$PLUGIN_DIR" node -e '
+  const fs = require("fs");
+  const path = require("path");
+  const root = process.env.PLUGIN_DIR;
+  const log = fs.readFileSync(path.join(root, "hooks/lib/zensu-log.sh"), "utf8");
+  const start = log.indexOf("_zensu_run_bind() {");
+  const body = start < 0 ? "" : log.slice(start, log.indexOf("\n}\n", start));
+  if (!body.includes("ZENSU_AVR_MODE=run-facts") || /JSON\.parse|headSha|\.test\(/.test(body)) process.exit(2);
+  const lib = path.join(root, "hooks/lib/acceptance-verify-v1.js");
+  const recorded = [...fs.readFileSync(lib, "utf8").matchAll(/^const RECORDED_HEAD_RE = (\/[^\n]*\/);$/gm)].map((m) => m[1]);
+  const state = [...fs.readFileSync(path.join(root, "hooks/lib/zensu-autopilot-state.sh"), "utf8").matchAll(/^const sha = value => typeof value === "string" && (\/[^\n]*\/)\.test\(value\);$/gm)].map((m) => m[1]);
+  if (recorded.length !== 1 || state.length !== 1) process.exit(3);
+  const { bindFacts } = require(lib);
+  const bound = (sample) => {
+    const facts = bindFacts({ runId: "val_run_facts", stage: "VALIDATE", evidence: { pr: { headSha: sample } } }, "val_run_facts");
+    return facts.code === 0 && facts.line.split("\t")[2] === sample;
+  };
+  const forms = [recorded[0], state[0]].map((literal) => new RegExp(literal.slice(1, -1)));
+  const samples = ["", "abcdef", "abcdef0", "ABCDEF0", "gggggg0", "a".repeat(40), "A".repeat(64), "a".repeat(65), " abcdef0", "abcdef0 ", "abcdef0\n", "abc-def0"];
+  for (const sample of samples) {
+    const answers = [...forms.map((form) => form.test(sample)), bound(sample)];
+    if (answers.some((answer) => answer !== answers[0])) process.exit(4);
+  }
+  if (!forms[0].test("a".repeat(7)) || forms[0].test("a".repeat(6)) || !forms[0].test("a".repeat(64)) || forms[0].test("a".repeat(65))) process.exit(5);
+'; then
+  check "V16 the run bind reads the run through the module's run-facts mode, which takes a recorded pull-request head only within RECORDED_HEAD_RE, and the state machine's sha check agrees" PASS
+else
+  check "V16 the run bind, the run-facts mode and the state machine's sha check bound a pull-request head alike" FAIL
+fi
+
+VS="$WORK/val-shadow"
+if val_setup "val-shadow" "$VS" val_run_shadow false "" 7; then
+  VS_ABBREV="$VAL_HEAD"
+  VS_FULL="$(git -C "$VS" rev-parse HEAD)"
+  VS_FILE="$VAL_RUN_FILE"
+  val_observe val_run_shadow 'printf ok'
+  SHADOW_EVR="$VAL_EVR"
+  val_record val_run_shadow AC-001 pass cli "$SHADOW_EVR" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_shadow AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_R2=$?
+  git -C "$VS" -c commit.gpgsign=false commit -q --allow-empty -m 'a later commit'
+  VS_LATER="$(git -C "$VS" rev-parse HEAD)"
+  git -C "$VS" branch "$VS_ABBREV" "$VS_LATER"
+  VS_SHADOW="$(git -C "$VS" rev-parse --verify --quiet "$VS_ABBREV^{commit}")"
+  VS_BEFORE="$(file_sha "$VS_FILE")"
+  val_validate val_run_shadow; RC_SHADOW=$?
+  SHADOW_ERR="$(cat "$WORK/verr")"
+  VS_AFTER="$(file_sha "$VS_FILE")"
+  git -C "$VS" checkout -q "$VS_FULL"
+  val_validate val_run_shadow; RC=$?
+  if [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ -n "$SHADOW_EVR" ] && [ "$VS_SHADOW" = "$VS_LATER" ] \
+    && [ "$RC_SHADOW" -eq 1 ] \
+    && printf '%s' "$SHADOW_ERR" | grep -qF "HEAD of the work tree is ${VS_LATER:0:12}, not the pull-request head ${VS_FULL:0:12}" \
+    && [ "$VS_AFTER" = "$VS_BEFORE" ] \
+    && [ "$RC" -eq 0 ] \
+    && run_json_ok "$VS_FILE" "v.stage === \"DELIVER\" && v.evidence.validation.headSha === \"$VS_ABBREV\""; then
+    check "V17 an abbreviated pull-request head that a branch name equals is compared with the abbreviated commit, not the branch: the branch's commit refuses and the abbreviated commit validates" PASS
+  else
+    check "V17 an abbreviated pull-request head shadowed by a branch (r1=$RC_R1 r2=$RC_R2 shadow=$RC_SHADOW rc=$RC branch=$VS_SHADOW later=$VS_LATER)" FAIL
+    printf '%s\n' "$SHADOW_ERR"
+    VERR
+  fi
+else
+  check "V17 drive an Autopilot run with an abbreviated pull-request head to VALIDATE" FAIL
+fi
+
+VH="$WORK/val-hook"
+VH_PLAN="${VAL_PLAN_TEXT}
+<!-- zensu-autopilot:val_run_hook -->
+"
+VH_READY=false
+mkdir -p "$VH/.zensu/logs"
+git -C "$VH" init -q
+git -C "$VH" config user.email t@example.invalid
+git -C "$VH" config user.name tester
+printf '.zensu/state/\n.session-control-test/\n.claude/worktrees/\n' > "$VH/.gitignore"
+printf 'v1\n' > "$VH/tracked.txt"
+printf 'an earlier chain ran here\n' > "$VH/.zensu/logs/history.log"
+git -C "$VH" add .gitignore tracked.txt .zensu/logs/history.log
+git -C "$VH" -c commit.gpgsign=false commit -qm baseline
+export CLAUDE_PROJECT_DIR="$VH"
+cd "$VH" || exit 1
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-hook"
+if autopilot_begin_run val_run_hook "$ZENSU_SESSION_KEY" "$VH" false true >/dev/null 2>&1; then
+  VH_FILE="$(autopilot_run_file val_run_hook "$VH")"
+  PLAN="$VH_PLAN" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse", session_id: "val-hook", tool_name: "ExitPlanMode",
+      tool_input: { _targetMode: "auto" },
+      tool_response: { plan: process.env.PLAN, isAgent: false, hasTaskTool: true }
+    }));
+  ' | bash "$PLUGIN_DIR/hooks/plan-approved-delegate.sh" >"$WORK/vhout" 2>"$WORK/vherr"
+  VH_SHA="$(RUN_JSON_FILE="$VH_FILE" node -e '
+    const v = JSON.parse(require("fs").readFileSync(process.env.RUN_JSON_FILE, "utf8"));
+    process.stdout.write(typeof v.approvedPlanSha256 === "string" ? v.approvedPlanSha256 : "");
+  ' 2>/dev/null)"
+  VH_COPY=".zensu/state/autopilot-approved-plan-$VH_SHA.md"
+  VH_HEAD="$(git -C "$VH" rev-parse HEAD)"
+  if [ -n "$VH_SHA" ] && [ -f "$VH/$VH_COPY" ] && [ "$(file_sha "$VH/$VH_COPY")" = "$VH_SHA" ] \
+    && val_drive val_run_hook "$VH" "$VH_SHA" "$VH_HEAD" approved \
+    && run_json_ok "$VH_FILE" 'v.stage === "VALIDATE"'; then
+    VH_READY=true
+  fi
+fi
+if [ "$VH_READY" = true ]; then
+  VH_BEFORE="$(file_sha "$VH_FILE")"
+  (
+    source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-hook-other" >/dev/null 2>&1 || exit 9
+    val_validate val_run_hook
+  ); RC_OTHER=$?
+  OTHER_ERR="$(cat "$WORK/verr")"
+  (
+    source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-hook-other" >/dev/null 2>&1 || exit 9
+    printf 'the page showed the saved value\n' | bash "$LOG" --acceptance-record --run val_run_hook --ac AC-002 --verdict pass --driver browser >"$WORK/vrout" 2>"$WORK/vrerr"
+  ); RC_OTHER_REC=$?
+  if [ "$RC_OTHER" -eq 2 ] \
+    && printf '%s' "$OTHER_ERR" | grep -qF 'this session owns no active Autopilot run, so --run val_run_hook names no run it may verify' \
+    && [ "$RC_OTHER_REC" -eq 2 ] \
+    && grep -qF 'this session owns no active Autopilot run, so --run val_run_hook names no run it may verify' "$WORK/vrerr" \
+    && [ "$(file_sha "$VH_FILE")" = "$VH_BEFORE" ]; then
+    check "V13b another session in the same project cannot record for or validate a run it does not own, and the run is unchanged" PASS
+  else
+    check "V13b another session in the same project is refused (validate=$RC_OTHER record=$RC_OTHER_REC)" FAIL
+    printf '%s\n' "$OTHER_ERR"
+    VERR
+  fi
+
+  val_observe val_run_hook 'printf ok'
+  HOOK_EVR="$VAL_EVR"
+  val_record val_run_hook AC-001 pass cli "$HOOK_EVR" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_hook AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_R2=$?
+  printf 'a later line of a tracked run log\n' >> "$VH/.zensu/logs/history.log"
+  VH_TRACKED_DIRTY="$(git -C "$VH" status --porcelain -- .zensu/logs/history.log)"
+  VERDICT_FAULT="$WORK/verdict-state-fault.js"
+  cat > "$VERDICT_FAULT" <<'JS'
+if (process.env.ZENSU_AVR_MODE === 'verdict') {
+  const fs = require('fs');
+  const write = fs.writeFileSync;
+  fs.writeFileSync = function (file, data, ...rest) {
+    if (typeof file === 'string' && file.endsWith('verdict-state')) return write.call(fs, file, 'unresolved', ...rest);
+    return write.call(fs, file, data, ...rest);
+  };
+}
+JS
+  VH_BEFORE="$(file_sha "$VH_FILE")"
+  NODE_OPTIONS="--require=$VERDICT_FAULT" bash "$LOG" --autopilot-validate --run val_run_hook >"$WORK/vout" 2>"$WORK/verr"; RC_FAULT=$?
+  FAULT_ERR="$(cat "$WORK/verr")"
+  VH_FAULT_AFTER="$(file_sha "$VH_FILE")"
+  if [ "$RC_FAULT" -eq 2 ] \
+    && printf '%s' "$FAULT_ERR" | grep -qF "ACCEPTANCE — pass | autopilot run val_run_hook: 2/2 acceptance criteria pass on the pull-request head ${VH_HEAD:0:12}" \
+    && printf '%s' "$FAULT_ERR" | grep -qF 'the acceptance verdict passed with the state unresolved under a gate that is not advisory, which validates no run, so autopilot run val_run_hook stays at VALIDATE; persist BLOCK with the code validation-unresolved and report this line' \
+    && [ "$VH_FAULT_AFTER" = "$VH_BEFORE" ]; then
+    check "V18 a passing verdict read back as another state under a required gate is refused with exit 2 and records nothing" PASS
+  else
+    check "V18 an unexpected read-back state under a required gate is refused (rc=$RC_FAULT)" FAIL
+    printf '%s\n' "$FAULT_ERR"
+    VERR
+  fi
+
+  bash "$LOG" --acceptance-status --run val_run_hook >"$WORK/vsout" 2>"$WORK/vserr"; RC_ST=$?
+  val_validate val_run_hook; RC=$?
+  if [ -n "$HOOK_EVR" ] && [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ -n "$VH_TRACKED_DIRTY" ] \
+    && [ "$RC_ST" -eq 0 ] && grep -qF "ACCEPTANCE STATUS — autopilot run val_run_hook | plan: $VH_COPY | tree: " "$WORK/vsout" \
+    && [ "$RC" -eq 0 ] \
+    && grep -qF "ACCEPTANCE — pass | autopilot run val_run_hook: 2/2 acceptance criteria pass on the pull-request head ${VH_HEAD:0:12} (observed 1, attested 1) | plan: $VH_COPY | gate: required" "$WORK/verr" \
+    && grep -qxF "zensu autopilot: run val_run_hook validated at the pull-request head ${VH_HEAD:0:12}" "$WORK/vout" \
+    && run_json_ok "$VH_FILE" "v.stage === \"DELIVER\" && v.evidence.validation.headSha === \"$VH_HEAD\" && v.bypasses.length === 0"; then
+    check "V19 a plan copy the plan-approval hook stored validates through the records and the verb, and a tracked .zensu/logs edit leaves the tree clean" PASS
+  else
+    check "V19 the hook-stored copy validates (run=$HOOK_EVR r1=$RC_R1 r2=$RC_R2 dirty='$VH_TRACKED_DIRTY' status=$RC_ST rc=$RC)" FAIL
+    cat "$WORK/vhout" "$WORK/vherr"
+    VERR; cat "$WORK/vsout" "$WORK/vserr"
+  fi
+else
+  check "V13b drive a run whose plan the plan-approval hook stored to VALIDATE" FAIL
+  cat "$WORK/vhout" "$WORK/vherr" 2>/dev/null
+fi
+
+VO="$WORK/val-order"
+VO_ORDER="0c0ffee0-0000-4000-8000-000000000594"
+VO_SPEC="$(printf 'b%.0s' $(seq 1 64))"
+VO_READY=false
+val_project "$VO"
+export CLAUDE_PROJECT_DIR="$VO"
+cd "$VO" || exit 1
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "val-order"
+mkdir -p "$VO/.zensu/plans"
+printf '%s' "$VAL_PLAN_TEXT" > "$VO/.zensu/plans/$VO_ORDER.md"
+if autopilot_begin_run val_run_order "$ZENSU_SESSION_KEY" "$VO" false true "" \
+    "{\"orderId\":\"$VO_ORDER\",\"attempt\":1,\"specHash\":\"$VO_SPEC\"}" >/dev/null 2>&1; then
+  VO_FILE="$(autopilot_run_file val_run_order "$VO")"
+  VO_HEAD="$(git -C "$VO" rev-parse HEAD)"
+  VAL_ORDER_ID="$VO_ORDER"
+  if val_drive val_run_order "$VO" "$VO_SPEC" "$VO_HEAD" \
+      "{\"orderId\":\"$VO_ORDER\",\"attempt\":1,\"specHash\":\"$VO_SPEC\",\"approvedPlanSha256\":\"$VO_SPEC\"}" \
+    && run_json_ok "$VO_FILE" 'v.stage === "VALIDATE"'; then
+    VO_READY=true
+  fi
+  VAL_ORDER_ID=""
+fi
+if [ "$VO_READY" = true ]; then
+  val_observe val_run_order 'printf ok'
+  ORDER_EVR="$VAL_EVR"
+  val_record val_run_order AC-001 pass cli "$ORDER_EVR" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  RC_R1=$?
+  val_record val_run_order AC-002 pass browser <<'EVIDENCE'
+the page showed the saved value
+EVIDENCE
+  RC_R2=$?
+  PLAN_FLAG_FAULT="$WORK/verdict-plan-unapproved-fault.js"
+  cat > "$PLAN_FLAG_FAULT" <<'JS'
+if (process.env.ZENSU_AVR_MODE === 'verdict') {
+  const fs = require('fs');
+  const write = fs.writeFileSync;
+  fs.writeFileSync = function (file, data, ...rest) {
+    if (typeof file === 'string' && file.endsWith('verdict-plan-unapproved')) throw new Error('the verdict-plan-unapproved write was lost');
+    return write.call(fs, file, data, ...rest);
+  };
+}
+JS
+  VO_BEFORE="$(file_sha "$VO_FILE")"
+  NODE_OPTIONS="--require=$PLAN_FLAG_FAULT" bash "$LOG" --autopilot-validate --run val_run_order >"$WORK/vout" 2>"$WORK/verr"; RC_FLAG=$?
+  FLAG_ERR="$(cat "$WORK/verr")"
+  if [ "$RC_FLAG" -eq 2 ] \
+    && printf '%s' "$FLAG_ERR" | grep -qF "ACCEPTANCE — pass | autopilot run val_run_order: 2/2 acceptance criteria pass on the pull-request head ${VO_HEAD:0:12}" \
+    && printf '%s' "$FLAG_ERR" | grep -qF 'the acceptance verdict could not be read back, so autopilot run val_run_order stays at VALIDATE; run --autopilot-validate again' \
+    && [ "$(file_sha "$VO_FILE")" = "$VO_BEFORE" ] \
+    && run_json_ok "$VO_FILE" 'v.stage === "VALIDATE" && v.bypasses.length === 0'; then
+    check "V20b a lost verdict-plan-unapproved write refuses the work-order run with exit 2 and records neither a bypass nor VALIDATION_PASSED" PASS
+  else
+    check "V20b a lost verdict-plan-unapproved write is refused (rc=$RC_FLAG)" FAIL
+    printf '%s\n' "$FLAG_ERR"
+    VERR
+  fi
+  val_validate val_run_order; RC=$?
+  if [ -n "$ORDER_EVR" ] && [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ "$RC" -eq 0 ] \
+    && grep -qF "ACCEPTANCE PLAN UNAPPROVED — work order $VO_ORDER asks for no plan approval, so the criteria of autopilot run val_run_order come from the session's own plan .zensu/plans/$VO_ORDER.md, which no person approved" "$WORK/verr" \
+    && grep -qxF "zensu autopilot: run val_run_order validated at the pull-request head ${VO_HEAD:0:12}, with the acceptance-plan-unapproved bypass recorded in its ledger" "$WORK/vout" \
+    && run_json_ok "$VO_FILE" "v.stage !== \"VALIDATE\" && v.evidence.validation.passed === true && v.bypasses.length === 1 && v.bypasses[0].gate === \"acceptance-plan-unapproved\" && v.bypasses[0].stage === \"VALIDATE\" && v.events.findIndex((e) => e.eventId === \"validation-bypass:acceptance-plan-unapproved:1:$VO_HEAD\") >= 0 && v.events.findIndex((e) => e.eventId === \"validation-bypass:acceptance-plan-unapproved:1:$VO_HEAD\") < v.events.findIndex((e) => e.eventId === \"validation-passed:1:$VO_HEAD\")"; then
+    check "V20 a work-order run whose plan no person approved records acceptance-plan-unapproved in its ledger before VALIDATION_PASSED" PASS
+  else
+    check "V20 the unapproved work-order plan is ledgered (run=$ORDER_EVR r1=$RC_R1 r2=$RC_R2 rc=$RC)" FAIL
+    VERR
+  fi
+else
+  check "V20 drive a work-order run whose plan no person approved to VALIDATE" FAIL
+fi
+
+clean_env_run() {
+  local strip=() name
+  while IFS= read -r name; do
+    [ -n "$name" ] && strip+=(-u "$name")
+  done <<EOF
+$(env | sed -n 's/^\(BASH_FUNC_[^=]*\)=.*/\1/p')
+EOF
+  env ${strip[@]+"${strip[@]}"} "$@"
+}
+
+VC="$WORK/val-clean-env"
+VAL_PLAN_TEXT="${VAL_PLAN_BASE}
+## Manual Acceptance
+| Criterion | Check a person runs before release | Why this environment cannot observe it | Consent |
+|-----------|------------------------------------|----------------------------------------|---------|
+| AC-002 | open the saved page in the release browser | needs the release browser | planning answer, 2026-11-15 |
+"
+val_setup "val-clean-env" "$VC" val_run_clean false; VC_SETUP=$?
+VAL_PLAN_TEXT="$VAL_PLAN_BASE"
+if [ "$VC_SETUP" -eq 0 ]; then
+  VC_HEAD="$VAL_HEAD"
+  VC_FILE="$VAL_RUN_FILE"
+  VC_LEAK="$(bash -c 'declare -F _tdd_native_path >/dev/null && echo leaked || echo clean')"
+  VC_CLEAN="$(clean_env_run bash -c 'declare -F _tdd_native_path >/dev/null && echo leaked || echo clean')"
+  clean_env_run bash "$LOG" --acceptance-status --run val_run_clean >"$WORK/vcs-out" 2>"$WORK/vcs-err"; RC_ST=$?
+  clean_env_run bash "$LOG" --evidence-run --scope acceptance --run val_run_clean --cmd 'printf ok' >"$WORK/vce-out" 2>"$WORK/vce-err"; RC_EV=$?
+  VC_EVR="$(sed -n 's/.* record=\(er1_[0-9]*_[0-9a-f]*\) cmd=.*/\1/p' "$WORK/vce-out" | tail -n 1)"
+  clean_env_run bash "$LOG" --acceptance-record --run val_run_clean --ac AC-001 --verdict pass --driver cli --evidence-run "$VC_EVR" >"$WORK/vcr1-out" 2>"$WORK/vcr1-err" <<'EVIDENCE'
+the fixture command printed ok
+EVIDENCE
+  RC_R1=$?
+  clean_env_run bash "$LOG" --acceptance-record --run val_run_clean --ac AC-002 --verdict partial --driver browser >"$WORK/vcr2-out" 2>"$WORK/vcr2-err" <<'EVIDENCE'
+the release browser is not available in this environment
+EVIDENCE
+  RC_R2=$?
+  clean_env_run bash "$LOG" --autopilot-validate --run val_run_clean --accept-partial AC-002 >"$WORK/vcv-out" 2>"$WORK/vcv-err"; RC=$?
+  VC_ERR="$(cat "$WORK/vcs-err" "$WORK/vce-err" "$WORK/vcr1-err" "$WORK/vcr2-err" "$WORK/vcv-err" 2>/dev/null)"
+  if [ "$VC_LEAK" = leaked ] && [ "$VC_CLEAN" = clean ] \
+    && [ "$RC_ST" -eq 1 ] && [ "$RC_EV" -eq 0 ] && [ -n "$VC_EVR" ] && [ "$RC_R1" -eq 0 ] && [ "$RC_R2" -eq 0 ] && [ "$RC" -eq 0 ] \
+    && ! printf '%s' "$VC_ERR" | grep -qF 'command not found' \
+    && ! printf '%s' "$VC_ERR" | grep -qF 'the acceptance module cannot be resolved' \
+    && grep -qxF "zensu autopilot: run val_run_clean validated at the pull-request head ${VC_HEAD:0:12}, with the acceptance-partial bypass recorded in its ledger" "$WORK/vcv-out" \
+    && run_json_ok "$VC_FILE" 'v.stage === "DELIVER" && v.bypasses.length === 1 && v.bypasses[0].gate === "acceptance-partial"'; then
+    check "V21 the run-mode verbs and --autopilot-validate --accept-partial work in a shell that inherits no exported library function" PASS
+  else
+    check "V21 the run-mode verbs in a shell without inherited library functions (leak=$VC_LEAK clean=$VC_CLEAN status=$RC_ST run=$RC_EV/$VC_EVR r1=$RC_R1 r2=$RC_R2 rc=$RC)" FAIL
+    printf '%s\n' "$VC_ERR"
+    cat "$WORK/vcv-out" 2>/dev/null
+  fi
+else
+  check "V21 drive an Autopilot run to VALIDATE for the clean-environment case" FAIL
+fi
+cd "$PROJ" || exit 1
 
 rm -f "$TDD_SKILL"
 unit_check_done "A0z every unit file the registry gives this suite was graded"

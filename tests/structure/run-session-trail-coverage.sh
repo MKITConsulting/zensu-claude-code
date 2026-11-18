@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-# The three suites that exercise skills/session-trail/scripts/*.mjs, driven as ONE
+# The three suites that exercise plugins/session-hub/skills/session-trail/scripts/*.mjs, driven as ONE
 # process tree so a single c8 run measures all of them.
 #
 # This is a FILE rather than a `bash -c "…"` argument inside the npm script, and

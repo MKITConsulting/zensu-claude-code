@@ -239,10 +239,10 @@ BRANCH_P="wo-bbbbbbbb"
   bash "$WRAPPER" --start --order "$ORDER_P" >/dev/null 2>&1 || exit 91
   git -C "$PROJECT" checkout -q -b "$BRANCH_P"
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN_P1" --work-order "$ORDER_P" >/dev/null 2>&1 || exit 92
+  mkdir -p "$PROJECT/.zensu/plans"
+  printf '# Plan for the widget list\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The list shows active widgets only. | spec |\n' > "$PROJECT/.zensu/plans/$ORDER_P.md"
   bash "$WRAPPER" --bind-spec --run "$RUN_P1" >/dev/null 2>"$SBOX/plan-bind.err"
   echo "$?" > "$SBOX/plan-bind.rc"
-  mkdir -p "$PROJECT/.zensu/plans"
-  printf '# Plan for the widget list\n\n- AC-001 The list shows active widgets only.\n' > "$PROJECT/.zensu/plans/$ORDER_P.md"
   bash "$WRAPPER" --plan-approval > "$SBOX/plan.out" 2>"$SBOX/plan.err"
   echo "$?" > "$SBOX/plan.rc"
   json_get "$PROJECT/.zensu/state/autopilot-run-${RUN_P1}.json" 'value.stage' > "$SBOX/plan.stage"

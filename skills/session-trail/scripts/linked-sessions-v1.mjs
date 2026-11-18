@@ -31,7 +31,9 @@ export const LINKED_WHY = Object.freeze({
   started: 'this session already started its continuation, which waits for its own plan confirmation',
   place: 'its record names no usable folder, so a start cannot be placed in its repository: it starts only when the user names it in the plan answer',
   fork: 'a user fork starts only when the user names it in the plan answer',
+  'presets-unread': 'the saved environments could not be read or could not be trusted, so whether it runs over SSH is unknown: it starts only when the user names it in the plan answer',
   'ledger-unread': 'the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer',
+  'started-unread': 'whether this session already started its continuation is unknown, because this session\'s own Claude Desktop record, or a record beside it, could not be read, or the folder that holds the store could not be trusted: it starts only when the user names it in the plan answer',
   cap: `more than ${LINKED_START_CAP} linked sessions qualify, so it starts only when the user asks for it in a later message`,
   unplanned: 'the plan answer did not name it, so it starts only when the user asks for it in a later message',
 });
@@ -265,8 +267,9 @@ function entryOf(node, checkout) {
   };
 }
 
-function presetOf(presets, id) {
-  const hit = presets ? presets.get(id) : undefined;
+function presetOf(presets, id, complete) {
+  const found = presets ? presets.get(id) : undefined;
+  const hit = found && (complete || found.kind === 'ssh') ? found : undefined;
   return { id, name: hit ? hit.name : null, kind: hit ? hit.kind : null };
 }
 
@@ -295,8 +298,10 @@ export function decideLinked(walk, options = {}) {
   const edges = Array.isArray(options.edges) ? options.edges : [];
   const ledgerComplete = options.ledgerComplete !== false;
   const started = options.started instanceof Set ? options.started : new Set();
+  const startedComplete = options.startedComplete !== false;
   const self = typeof options.self === 'string' && options.self ? options.self : null;
   const presets = options.presets instanceof Map ? options.presets : null;
+  const presetsComplete = options.presetsComplete !== false;
   const cap = Number.isInteger(options.cap) && options.cap >= 0 ? options.cap : LINKED_START_CAP;
   const max = Number.isInteger(options.max) && options.max >= 0 ? options.max : LINKED_LIST_MAX;
   const checkout = typeof options.checkout === 'function' ? options.checkout : null;
@@ -309,7 +314,7 @@ export function decideLinked(walk, options = {}) {
   const factsOf = (node, nodeCheckout) => {
     const entry = entryOf(node, nodeCheckout);
     const ids = [entry.sessionId, ...entry.priorSessionIds].filter(Boolean);
-    const preset = entry.environment ? presetOf(presets, entry.environment) : null;
+    const preset = entry.environment ? presetOf(presets, entry.environment, presetsComplete) : null;
     const continued = ids.some((id) => confirmed.has(id)) ? true : (ledgerComplete ? false : null);
     return { entry, ids, preset, continued };
   };
@@ -322,6 +327,14 @@ export function decideLinked(walk, options = {}) {
     if (started.has(entry.name)) return 'started';
     return null;
   };
+  const conditionalWhy = ({ entry, continued }) => {
+    if (!entry.folder) return 'place';
+    if (entry.kind === 'fork') return 'fork';
+    if (entry.environment && !presetsComplete) return 'presets-unread';
+    if (continued === null) return 'ledger-unread';
+    if (!startedComplete) return 'started-unread';
+    return null;
+  };
   const follows = (node) => keptWhy(factsOf(node, null)) === null;
   let starts = 0;
   const sessions = walk.open.map((node, index) => {
@@ -330,7 +343,7 @@ export function decideLinked(walk, options = {}) {
     let why = keptWhy(facts);
     let decision = why ? 'stays' : null;
     if (!decision) {
-      const conditional = !entry.folder ? 'place' : (entry.kind === 'fork' ? 'fork' : (continued === null ? 'ledger-unread' : null));
+      const conditional = conditionalWhy(facts);
       if (planned && !planned.has(entry.name)) {
         decision = 'later';
         why = 'unplanned';
@@ -406,6 +419,41 @@ export function presetMap(doc, accountUuid) {
     if (name) presets.set(preset.id, { name, kind: kind || null });
   }
   return presets;
+}
+
+export function storeFolderRemedy(folder) {
+  if (!folder || !folder.cause) return null;
+  const cause = folder.cause === 'symlink' ? folder.realCause : folder.cause;
+  if (cause === null) return 'real-path';
+  if (cause === 'shared-write') return 'chmod';
+  if (cause === 'foreign-owner') return folder.override && folder.desktopOwn === false ? 'move' : 'admin';
+  return 'inspect';
+}
+
+const STORE_FOLDER_CAUSE = Object.freeze({
+  symlink: 'is a symbolic link',
+  'not-directory': 'is not a directory',
+  'foreign-owner': 'belongs to another account',
+  'shared-write': 'grants group or other write',
+  uninspectable: 'could not be inspected',
+});
+
+export function storeFolderNote(folder, shown) {
+  const linked = folder.cause === 'symlink' && Boolean(folder.realDir);
+  const reads = (folder.reads || []).map((read) => (read === 'presets' ? 'the saved environments' : 'the continuations this session started')).join(' and ') || 'what this brief read beside it';
+  const realStore = folder.realStore ? `\`${shown(folder.realStore)}\`` : 'the store\'s real path';
+  const subject = linked ? 'That real folder' : 'It';
+  const lead = `_The folder that holds the Claude Desktop store, \`${shown(folder.dir)}\`, ${STORE_FOLDER_CAUSE[folder.cause] || STORE_FOLDER_CAUSE.uninspectable}${linked ? ` to \`${shown(folder.realDir)}\`` : ''}, so ${reads} cannot be trusted, and each linked session that depends on them starts only when the user names it.`;
+  const remedy = {
+    'real-path': `That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, ${realStore}, whose folder is then judged instead.`,
+    chmod: linked
+      ? `That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, ${realStore}.`
+      : 'It belongs to the user, so remove its group and other write bits.',
+    move: `${subject} belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns.`,
+    admin: `${subject} belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write${linked ? `, after which \`ZENSU_CCD_STORE\` set to the store's real path, ${realStore}, has it judged` : ''}.`,
+    inspect: `Make it a directory of the user's own with no group or other write bit${folder.cause === 'symlink' ? ', then set `ZENSU_CCD_STORE` to the store\'s real path' : ''}.`,
+  }[storeFolderRemedy(folder)];
+  return `${lead}${remedy ? ` ${remedy}` : ''}_`;
 }
 
 export function unreadReportsOf(record, shown = UNREAD_REPORTS_SHOWN) {

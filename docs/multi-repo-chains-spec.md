@@ -53,9 +53,9 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:2030`) and counts through the shared helper (`:2081`),
+(`hooks/lib/zensu-log.sh:2597`) and counts through the shared helper (`:2656`),
 which runs every `git` call with the discovery and config-injection variables unset
-(`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
+(`:89`, `:122-123`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
 `CLAUDE_PROJECT_DIR` that `zensu-log.sh` re-exports from `zensu_resolve_project_dir()`
 before any verb runs, so the `.` fallback never applies there. Which root the ambient
@@ -67,7 +67,7 @@ when it is unset, is an open question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:593-633`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:229`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:2019`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:2586`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
@@ -89,9 +89,9 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 
 **The write gate confines Bash writes while it is opted in, the edit gate does not confine
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:2474`) and rule (C) at the same predicate
-for git targets (`:2520`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:2364`). `hooks/checks/pre-edit-tdd-reminder.sh:132-147` resolves a
+(`hooks/lib/bash-source-write-parse.js:2610`) and rule (C) at the same predicate
+for git targets (`:2656`), with `projectRoot` taken from the passed
+`CLAUDE_PROJECT_DIR` (`:2500`). `hooks/checks/pre-edit-tdd-reminder.sh:132-147` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
@@ -102,9 +102,9 @@ at all, and `hooks/checks/pre-write-secret-scan.sh:85` references one only throu
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:641` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:644` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:600-602` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:604-606` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
@@ -427,7 +427,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:296`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:300-301`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming
@@ -729,7 +729,7 @@ A cheaper first move exists and is not blocked on any of it — see §7.4.
 pass, Finding Verification Gate, the consuming reviewer, the self-review terminus
 — among what runs exactly as written in vanilla. A reviewer reports a finding; it
 does not demand a Characterization test. That demand is precisely why the
-Cross-Layer Value Flow Audit cannot run in vanilla (`:10`, `:13`), and
+Cross-Layer Value Flow Audit cannot run in vanilla (`:11`, `:14`), and
 the new stage does not inherit it.
 
 ### 7.2 What a reviewer may read
@@ -800,7 +800,7 @@ while part (b) only scans the diff.
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
 Drift Audit does the same (`skills/build/references/audit.md:63`) and runs in vanilla
-(`skills/build/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
+(`skills/build/references/modes.md:15`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
 (`skills/build/references/audit.md:69`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning

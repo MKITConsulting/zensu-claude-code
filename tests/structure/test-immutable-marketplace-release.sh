@@ -45,12 +45,13 @@ reject_text() {
 unit_check "run_step behavioural unit file passes" "$ROOT/tests/structure/release-run-step.test.js"
 
 VERSION="$(jq -r '.version' "$PLUGIN" 2>/dev/null)"
+ZENSU_ENTRY='[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0]'
 expect_jq "Production source uses the official GitHub source type" "$MARKETPLACE" \
-  '.plugins | length == 1 and .[0].source.source == "github"'
+  "$ZENSU_ENTRY | .source.source == \"github\""
 expect_jq "Production source pins the canonical repository" "$MARKETPLACE" \
-  '.plugins[0].source.repo == "MKITConsulting/zensu-claude-code"'
+  "$ZENSU_ENTRY | .source.repo == \"MKITConsulting/zensu-claude-code\""
 if jq -e --arg version "$VERSION" \
-  '.plugins[0].source.ref == ("v" + $version)' "$MARKETPLACE" >/dev/null 2>&1; then
+  "$ZENSU_ENTRY | .source.ref == (\"v\" + \$version)" "$MARKETPLACE" >/dev/null 2>&1; then
   check "Production source ref is the immutable plugin release tag" PASS
 else
   check "Production source ref is the immutable plugin release tag" FAIL
@@ -66,7 +67,22 @@ expect_text "Provisioner registers the fixture, not the source checkout" "$PROVI
 expect_text "Release bump updates the immutable source ref" "$WORKFLOW" \
   'marketplace source ref -> $TAG'
 expect_text "Release validates source ref equals the release tag" "$WORKFLOW" \
-  'test "$(jq -r '\''.plugins[0].source.ref'\'' .claude-plugin/marketplace.json)" = "$TAG"'
+  'test "$(jq -r "$ZENSU_ENTRY.source.ref" .claude-plugin/marketplace.json)" = "$TAG"'
+expect_text "Release bumps the marketplace entry named zensu through the shared bump script" "$WORKFLOW" \
+  'node .github/scripts/bump-marketplace-entry.js .claude-plugin/marketplace.json zensu "$VER" "$TAG"'
+if [ "$(grep -cF "ZENSU_ENTRY='[.plugins[] | select(.name == \"zensu\")] | select(length == 1) | .[0]'" "$WORKFLOW")" -eq 3 ]; then
+  check "prepare-commit, publish-plan and publish each check exactly one marketplace entry, the one named zensu" PASS
+else
+  check "prepare-commit, publish-plan and publish each check exactly one marketplace entry, the one named zensu" FAIL
+fi
+reject_text "Release reads no marketplace entry by its index" "$WORKFLOW" '.plugins[0]'
+if grep -Eq 'sed[[:space:]].*marketplace\.json' "$WORKFLOW"; then
+  check "Release rewrites marketplace.json only through the bump script, never with sed" FAIL
+else
+  check "Release rewrites marketplace.json only through the bump script, never with sed" PASS
+fi
+expect_text "Release finds the latest plugin release among the vX.Y.Z tags only" "$WORKFLOW" \
+  "LATEST=\"\$(git tag -l 'v*' | sort -V | tail -1)\""
 expect_text "Publish verifies the immutable source before the suite runs" "$WORKFLOW" \
   '- name: Verify immutable marketplace release target before the suite'
 expect_text "Publish rejects a malformed plugin version before go-live" "$WORKFLOW" \

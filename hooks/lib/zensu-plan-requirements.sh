@@ -37,7 +37,7 @@
 # requirements history for converge to audit against.
 #
 # Usage:
-#   zensu-plan-requirements.sh [--list] --plan <path>
+#   zensu-plan-requirements.sh [--list] [--manual-acceptance] --plan <path>
 #
 #   --plan  the Zensu plan document to judge (required)
 #
@@ -46,11 +46,13 @@
 # no row carried a recognizable id, or every recognized row's Requirement column
 # is still empty. Both are exit 4 because both mean the same thing to the caller
 # (converge would audit nothing), but they print DIFFERENT messages: they are
-# different edits, and "fill the table" is the wrong instruction for the first.
+# different edits, and "fill the table" is the wrong instruction for the first;
+# 5 the plan does not parse, because a code fence is never closed.
 set -u
 
 PLAN_FILE=""
 LIST=0
+MANUAL=0
 
 die() { echo "zensu-plan-requirements.sh: $1" >&2; exit 2; }
 
@@ -58,6 +60,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --plan) [ $# -ge 2 ] || die "--plan requires a value"; PLAN_FILE="$2"; shift 2 ;;
     --list) LIST=1; shift ;;
+    --manual-acceptance) MANUAL=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
@@ -90,7 +93,7 @@ esac
 # form `name=value` as a variable assignment and then reads standard input
 # instead, and a leading `-` parses as an option. Both are reachable through an
 # explicit --plan. The program never uses FILENAME, so the redirect costs nothing.
-AWK_OUT="$(awk -v list="$LIST" '
+AWK_OUT="$(awk -v list="$LIST" -v manual="$MANUAL" '
   { sub(/\r$/, "") }
   # A fenced code block is DATA, not structure. Without this a plan that merely
   # illustrates the table shape inside a ``` fence reads as having a real table,
@@ -101,7 +104,7 @@ AWK_OUT="$(awk -v list="$LIST" '
   # toggle flips on any marker line and a plan may legitimately nest one fence
   # inside another (` ``` ` inside a `~~~` block, or a longer run wrapping a
   # shorter one). A toggle then leaves odd parity, the heading below is read as
-  # fenced, and the run dies at exit 2 with "unterminated code fence" against a
+  # fenced, and the run dies at exit 5 with "unterminated code fence" against a
   # complete table; even parity is worse, because a heading that really was
   # inside an example reads as a real section. CommonMark closes a fence only
   # with a run of the SAME character at least as long as the opener.
@@ -115,7 +118,8 @@ AWK_OUT="$(awk -v list="$LIST" '
     else if (fc == fchar && fn >= flen) { fence = 0 }
     next
   }
-  !fence && /^##[[:space:]]+Requirements[[:space:]]*$/ { heading = 1; in_section = 1; next }
+  !fence && !manual && /^##[[:space:]]+Requirements[[:space:]]*$/ { heading = 1; in_section = 1; next }
+  !fence && manual && /^##[[:space:]]+Manual Acceptance[[:space:]]*$/ { heading = 1; in_section = 1; next }
   # Any H1/H2 closes the section. `### Step ...` does not: its third character is
   # `#`, not a space, so a step subsection stays inside the table it belongs to.
   !fence && /^##?[[:space:]]/ { in_section = 0 }
@@ -183,6 +187,7 @@ AWK_OUT="$(awk -v list="$LIST" '
         gsub(/[{][^{}]*[}]/, "", bare)
         gsub(/[[:space:]]/, "", bare)
         if (bare == "") state = "placeholder"
+        if (manual && cell[idcol] ~ /~/) state = "deprecated"
         ids = split(probe, idlist, ",")
         for (k = 1; k <= ids; k++) printf "%s\t%s\t%s\n", idlist[k], state, raw
       }
@@ -227,10 +232,15 @@ esac
 # is a parse failure, not a verdict about the table: reporting it as "no section"
 # would tell the author to fill a table that is already filled, and their only
 # remaining move would be the escape hatch and an undeserved ledger entry.
-[ "$FENCE_OPEN" -eq 0 ] || die "plan has an unterminated code fence, so the document could not be parsed: $PLAN_FILE"
+if [ "$FENCE_OPEN" -ne 0 ]; then
+  echo "zensu-plan-requirements.sh: plan has an unterminated code fence, so the document could not be parsed: $PLAN_FILE" >&2
+  exit 5
+fi
 
 if [ "$HEADING" -eq 0 ]; then
-  say "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## Requirements\" section"
+  SECTION_NAME="Requirements"
+  [ "$MANUAL" -eq 1 ] && SECTION_NAME="Manual Acceptance"
+  say "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## ${SECTION_NAME}\" section"
   exit 3
 fi
 # The two exit-4 states are DIFFERENT edits and must not share one message. Zero

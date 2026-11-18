@@ -94,6 +94,12 @@ new_project() {
   export ZENSU_TEST_PLUGIN_DATA="$SBOX/$name-plugin-data"
 }
 
+write_plan() {
+  mkdir -p "$PROJECT/.zensu/plans"
+  printf '# Work-order plan\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | the feature file exists | spec |\n' \
+    > "$PROJECT/.zensu/plans/$1.md"
+}
+
 ORDER="55555555-5555-4555-8555-555555555555"
 SESSION="wo-implement-session-0001"
 RUN="run_impl_0001"
@@ -135,11 +141,31 @@ bash "$LOG_HELPER" --autopilot-event --run "$RUN" --event ORDER_SPEC_BOUND --eve
   && check "I5 ORDER_SPEC_BOUND cannot be recorded through --autopilot-event" PASS \
   || check "I5 ORDER_SPEC_BOUND cannot be recorded through --autopilot-event (rc=$RC)" FAIL
 
-bash "$LOG_HELPER" --autopilot-event --run "$RUN" --event PLAN_APPROVED --event-id plan-approved \
-  --payload "{\"approvedPlanSha256\":\"$(printf 'b%.0s' $(seq 1 64))\"}" >/dev/null 2>&1; RC=$?
-[ "$RC" -ne 0 ] && [ "$(json_get "$RUN_FILE" 'value.stage')" = "PLANNING" ] \
-  && check "I6 a work-order run refuses PLAN_APPROVED" PASS \
-  || check "I6 a work-order run refuses PLAN_APPROVED (rc=$RC)" FAIL
+( source "$STATE_LIB" && autopilot_apply_event "$RUN" plan-approved-direct PLAN_APPROVED \
+  "{\"approvedPlanSha256\":\"$(printf 'b%.0s' $(seq 1 64))\"}" "$PROJECT" "$ZENSU_SESSION_KEY" ) \
+  >/dev/null 2>"$SBOX/plan-approved.err"; RC=$?
+[ "$RC" -eq 3 ] && grep -qF 'a work-order run binds its spec through ORDER_SPEC_BOUND, never through PLAN_APPROVED' "$SBOX/plan-approved.err" \
+  && [ "$(json_get "$RUN_FILE" 'value.stage')" = "PLANNING" ] \
+  && check "I6 the state machine refuses PLAN_APPROVED for a work-order run" PASS \
+  || check "I6 the state machine refuses PLAN_APPROVED for a work-order run (rc=$RC $(cat "$SBOX/plan-approved.err"))" FAIL
+
+mkdir -p "$PROJECT/.zensu/plans"
+bash "$WRAPPER" --bind-spec --run "$RUN" >/dev/null 2>"$SBOX/bind-noplan.err"; RC_NOPLAN=$?
+printf '# Work-order plan\n\n- AC-001 the feature file exists\n' > "$PROJECT/.zensu/plans/$ORDER.md"
+bash "$WRAPPER" --bind-spec --run "$RUN" >/dev/null 2>"$SBOX/bind-list.err"; RC_LIST=$?
+if [ "$RC_NOPLAN" -eq 8 ] \
+  && grep -qF "zensu work-order: plan-criteria-unusable: Autopilot run $RUN validates its result, but the plan .zensu/plans/$ORDER.md does not exist, so its VALIDATE stage would have no criterion to check" "$SBOX/bind-noplan.err" \
+  && [ "$RC_LIST" -eq 8 ] \
+  && grep -qF "but the plan .zensu/plans/$ORDER.md carries no active AC-### criterion (the plan has no ## Requirements section)" "$SBOX/bind-list.err" \
+  && grep -qF "then run --bind-spec again" "$SBOX/bind-list.err" \
+  && [ "$(json_get "$RUN_FILE" 'value.stage')" = "PLANNING" ] \
+  && [ "$(json_get "$RUN_FILE" 'value.events.some(e => e.eventType === "ORDER_SPEC_BOUND")')" = "false" ] \
+  && [ -z "$(stage_events)" ]; then
+  check "I6b --bind-spec refuses a validating run whose plan carries no active AC-### row before it reports any stage" PASS
+else
+  check "I6b --bind-spec refuses a plan without an active AC-### row (noplan=$RC_NOPLAN list=$RC_LIST events=$(stage_events) $(cat "$SBOX/bind-noplan.err" "$SBOX/bind-list.err"))" FAIL
+fi
+write_plan "$ORDER"
 
 bash "$WRAPPER" --bind-spec --run "$RUN" >"$SBOX/bind.out" 2>"$SBOX/bind.err"; RC=$?
 if [ "$RC" -eq 0 ] && [ "$(json_get "$RUN_FILE" 'value.stage')" = "AWAIT_TDD" ] \
@@ -170,6 +196,36 @@ if [ "$RC" -eq 0 ] && [ "$REMOTE_HEAD" = "$LOCAL_HEAD" ] \
   check "I9 --push pushes the branch and reports the new head with a same-status stage event" PASS
 else
   check "I9 --push pushes the branch and reports the new head (rc=$RC remote=$REMOTE_HEAD $(cat "$SBOX/push.err"))" FAIL
+fi
+
+mkdir -p "$PROJECT/.zensu/plans"
+cat > "$PROJECT/.zensu/plans/$ORDER.md" <<'PLAN'
+# Work-order plan
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | the feature file exists | spec |
+PLAN
+bash "$LOG_HELPER" --acceptance-status --run "$RUN" >"$SBOX/acc-status.out" 2>"$SBOX/acc-status.err"; RC=$?
+if [ "$RC" -eq 1 ] \
+  && grep -qxF "ACCEPTANCE PLAN UNAPPROVED — work order $ORDER asks for no plan approval, so the criteria of autopilot run $RUN come from the session's own plan .zensu/plans/$ORDER.md, which no person approved" "$SBOX/acc-status.out" \
+  && grep -qxF "ACCEPTANCE STATUS — unresolved | autopilot run $RUN: the run records no pull-request head, so there is no commit to validate | plan: .zensu/plans/$ORDER.md" "$SBOX/acc-status.out" \
+  && ! grep -q '^AC-001 ' "$SBOX/acc-status.out"; then
+  check "I9a a work-order run without plan approval reads its criteria from the order's plan, says that no person approved it, and lists no criterion before the run records a pull-request head" PASS
+else
+  check "I9a a work-order run reads its criteria from the order's plan (rc=$RC $(cat "$SBOX/acc-status.out" "$SBOX/acc-status.err"))" FAIL
+fi
+
+BEFORE_BYPASS="$(stage_events)"
+bash "$LOG_HELPER" --autopilot-event --run "$RUN" --event BYPASS_RECORDED --event-id bypass-drain-check \
+  --payload '{"gate":"acceptance-partial"}' >/dev/null 2>"$SBOX/bypass.err"; RC_BYPASS=$?
+bash "$WRAPPER" --drain >"$SBOX/drain.out" 2>"$SBOX/drain.err"; RC=$?
+if [ "$RC_BYPASS" -eq 0 ] && [ "$RC" -eq 0 ] && [ "$(stage_events)" = "$BEFORE_BYPASS" ] \
+  && [ "$(json_get "$RUN_FILE" 'value.bypasses.length === 1 && value.bypasses[0].gate === "acceptance-partial" && value.stage === "AWAIT_TDD"')" = "true" ]; then
+  check "I9b --drain over a recorded bypass sends no stage and keeps the run where it was" PASS
+else
+  check "I9b --drain over a recorded bypass sends no stage (bypass=$RC_BYPASS rc=$RC before=$BEFORE_BYPASS after=$(stage_events) $(cat "$SBOX/bypass.err" "$SBOX/drain.err"))" FAIL
 fi
 
 OTHER="$SBOX/alpha-other"
@@ -232,6 +288,7 @@ RUN2="run_impl_0002"
   : > "$FAKE_ZENSU_CALLS"
   bash "$WRAPPER" --start --order "$ORDER2" >/dev/null 2>&1 || exit 91
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN2" --work-order "$ORDER2" >/dev/null 2>&1 || exit 92
+  write_plan "$ORDER2"
   bash "$WRAPPER" --bind-spec --run "$RUN2" >/dev/null 2>"$SBOX/bind2.err"
   echo "$?" > "$SBOX/bind2.rc"
   json_get "$PROJECT/.zensu/state/autopilot-run-${RUN2}.json" 'value.stage' > "$SBOX/bind2.stage"
@@ -281,6 +338,7 @@ SEAT_STOP="$PLUGIN_DIR/hooks/review-evidence-subagent-stop.sh"
   bash "$WRAPPER" --start --order "$ORDER4" >/dev/null 2>&1 || exit 91
   git -C "$PROJECT" checkout -q -b "wo-99999999"
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN4" --work-order "$ORDER4" >/dev/null 2>&1 || exit 92
+  write_plan "$ORDER4"
   bash "$WRAPPER" --bind-spec --run "$RUN4" >/dev/null 2>&1 || exit 93
   REVIEW="$SBOX/delta-review"
   mkdir -p "$PROJECT/src" "$REVIEW" && chmod 700 "$REVIEW"
@@ -347,6 +405,7 @@ CHAIN_HOOK="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
   bash "$WRAPPER" --start --order "$ORDER5" >/dev/null 2>&1 || exit 91
   git -C "$PROJECT" checkout -q -b "wo-aaaaaaaa"
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN5" --work-order "$ORDER5" >/dev/null 2>&1 || exit 92
+  write_plan "$ORDER5"
   bash "$WRAPPER" --bind-spec --run "$RUN5" >/dev/null 2>&1 || exit 93
   REVIEW="$SBOX/echo-review"
   mkdir -p "$PROJECT/src" "$REVIEW" && chmod 700 "$REVIEW"

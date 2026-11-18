@@ -1,5 +1,5 @@
 // Unit contract for the takeover-destination advice in
-// skills/session-trail/scripts/trail.mjs — the whole EXPORTED advice surface plus the
+// plugins/session-hub/skills/session-trail/scripts/trail.mjs — the whole EXPORTED advice surface plus the
 // module-scope recipe constants it renders. Stated as the surface rather than as a list:
 // the list said four while the file drove seven, and a roster that enumerates is a roster
 // that goes stale on the next export.
@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const mod = await import(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url));
+const mod = await import(new URL('../../plugins/session-hub/skills/session-trail/scripts/trail.mjs', import.meta.url));
 
 // A present-directory record with no live process and no desktop-app record.
 // The arms read exactly four fields, so the fixture carries exactly four.
@@ -738,7 +738,7 @@ test('the leg decision has one implementation, and it answers both legs', () => 
 // function would have emitted a gone lead above a present body — the recorded directory
 // declared unreadable, immediately followed by the recipe that reads it.
 test('no renderer re-derives the leg by hand', () => {
-  const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../../plugins/session-hub/skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
   // COMMENTS ARE STRIPPED, as the three sibling whole-file walks in this file already do. This
   // one scanned raw source, so a future explanatory comment spelling `r.cwdExists` inside one of
   // these bodies would redden it for a reason unrelated to its contract — and `worktreeAdvice`'s
@@ -794,7 +794,7 @@ test('no renderer re-derives the leg by hand', () => {
 // standing instruction is prose, in `trail.mjs`'s header and in CLAUDE.md: before adding a
 // renderer that depends on the leg, grep `cwdExists`.
 test('the adviceLeg consumer set is exactly the five the carriers name', () => {
-  const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../../plugins/session-hub/skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
   const lines = src.split('\n');
   // The walk STOPS at a column-zero `}`. Without that it never sees a function END, so a
   // module-scope call site resolves to whichever top-level `function` precedes it textually —
@@ -868,9 +868,7 @@ test('the adviceLeg consumer set is exactly the five the carriers name', () => {
 // The enclosing walk is the one the `adviceLeg` consumer scan above uses, for the reason
 // stated there: it STOPS at a column-zero `}`, so a module-scope site cannot be attributed to
 // whichever `function` precedes it textually.
-const CENSUS_CASE_TITLE = 'the briefShellArg carrier population is derived, and a twelfth carrier fails here';
-test(CENSUS_CASE_TITLE, () => {
-  const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+function censusOf(src) {
   const lines = src.split('\n');
   const enclosing = (i) => {
     for (let j = i; j >= 0; j -= 1) {
@@ -888,8 +886,6 @@ test(CENSUS_CASE_TITLE, () => {
     const m = /^\s*const ([A-Za-z0-9_]+) = briefShellArg\(/.exec(l);
     if (m && !isComment(l)) bindings.set(m[1], i);
   });
-  assert.ok(bindings.size > 0,
-    'no `const <name> = briefShellArg(...)` binding found — the binding half of this walk is vacuous');
   const bindingLines = new Set(bindings.values());
   const carriers = [];
   lines.forEach((l, i) => {
@@ -952,11 +948,20 @@ test(CENSUS_CASE_TITLE, () => {
     if (/^\s*const ([A-Za-z0-9_]+) = briefShellArg\(/.test(l)) strictBindings.push(i);
     if (/=\s*briefShellArg\(/.test(l)) looseBindings.push(`  trail.mjs:${i + 1}  ${l.trim()}`);
   });
+  const table = carriers.map((c) => `  trail.mjs:${c.line}  ${c.cls}  ${c.fn}${c.onlyViaBinding ? '  (via binding)' : ''}`).join('\n');
+  const tally = (key) => carriers.reduce((acc, c) => { acc[c[key]] = (acc[c[key]] || 0) + 1; return acc; }, {});
+  return { bindings, carriers, strictBindings, looseBindings, table, tally };
+}
+
+const CENSUS_CASE_TITLE = 'the briefShellArg carrier population is derived, and a twelfth carrier fails here';
+test(CENSUS_CASE_TITLE, () => {
+  const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  const { bindings, carriers, strictBindings, looseBindings, table, tally } = censusOf(src);
+  assert.ok(bindings.size > 0,
+    'no `const <name> = briefShellArg(...)` binding found — the binding half of this walk is vacuous');
   assert.equal(looseBindings.length, strictBindings.length,
     'a briefShellArg binding uses an initializer form this walk does not recognize, so its '
     + '${name} uses are collected as nothing — widen the binding regex:\n' + looseBindings.join('\n'));
-  const table = carriers.map((c) => `  trail.mjs:${c.line}  ${c.cls}  ${c.fn}${c.onlyViaBinding ? '  (via binding)' : ''}`).join('\n');
-  const tally = (key) => carriers.reduce((acc, c) => { acc[c[key]] = (acc[c[key]] || 0) + 1; return acc; }, {});
   // The ROSTER, per enclosing function, and the expectation object below is the ONLY statement
   // of the count that can fail — this sentence is derived from it, never the other way round.
   // A previous spelling here said `continuationPlan` carries SEVEN and the census "moved from
@@ -1007,6 +1012,29 @@ test(CENSUS_CASE_TITLE, () => {
   assert.ok(src.includes('`' + CENSUS_CASE_TITLE + '`'),
     'the briefShellArg census in trail.mjs no longer quotes this case by name — rename both '
     + 'together, or the census points at a check that does not exist');
+});
+
+const HUB_CENSUS_CASE_TITLE = "the companion's briefShellArg carrier population is derived, and a sixth carrier fails here";
+test(HUB_CENSUS_CASE_TITLE, () => {
+  const src = fs.readFileSync(new URL('../../plugins/session-hub/skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  const census = censusOf(src);
+  assert.equal(census.bindings.size, 0, 'the companion holds a briefShellArg binding again — count its uses in this roster:\n' + census.table);
+  assert.equal(census.looseBindings.length, census.strictBindings.length,
+    'a briefShellArg binding uses an initializer form this walk does not recognize:\n' + census.looseBindings.join('\n'));
+  assert.deepEqual(census.tally('fn'), { printResume: 2, cmdTakeover: 1, cmdHandoff: 1, whereAdviceLines: 1 },
+    'the companion\'s briefShellArg carrier roster moved — update the census above `briefShellArg` in '
+    + 'its trail.mjs and this expectation together:\n' + census.table);
+  assert.equal(census.tally('cls').UNCLASSIFIED, undefined, 'a companion carrier matches none of the three classes:\n' + census.table);
+  assert.deepEqual(census.tally('cls'), { 'a (reach a worktree)': 4, 'c (placeholder mapping)': 1 },
+    'the companion\'s briefShellArg CLASS split moved:\n' + census.table);
+  const planted = censusOf(`${src}\nfunction plantedRenderer(row) {\n  const U = briefShellArg(row.cwd);\n  return ['  cd -- \${U}'];\n}\n`);
+  assert.ok(planted.carriers.some((c) => c.fn === 'plantedRenderer' && c.onlyViaBinding),
+    'a binding planted in a copy of the companion\'s trail.mjs is not resolved, so the binding half of this walk is decorative:\n' + planted.table);
+  for (const stale of ['CHECKING IT BY GREP', 'subtract those seven', 'subtract those six']) {
+    assert.equal(src.includes(stale), false, `the companion's briefShellArg census carries the hand-maintained grep arithmetic (${stale})`);
+  }
+  assert.ok(src.includes('`' + HUB_CENSUS_CASE_TITLE + '`'),
+    'the briefShellArg census in the companion\'s trail.mjs no longer quotes this case by name');
 });
 
 test('every advice line is a two-space command or column-zero prose, on every arm', () => {
@@ -1327,7 +1355,7 @@ test('the gone leg says its recorded path is for reading, not for pasting', () =
 // command that is otherwise pure. The derived population below is the cheaper half of the same
 // guarantee, and it is the shape the sibling census case already uses.
 test('every row field the advice path reads is supplied by the buildIndex row literal', () => {
-  const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../../plugins/session-hub/skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
   const lines = src.split('\n');
   const isComment = (l) => l.trim().startsWith('//');
   const start = lines.findIndex((l) => /^\s*const row = \{$/.test(l));

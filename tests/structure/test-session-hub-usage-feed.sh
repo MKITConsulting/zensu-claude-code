@@ -2,10 +2,13 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
-MODULE="$PLUGIN_DIR/hooks/usage-feed.ts"
-HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
-CONTRACT="$PLUGIN_DIR/hooks/usage-feed-contract.json"
-HANDOVER="$PLUGIN_DIR/skills/session-trail/handover-contract.json"
+HUB_DIR="$PLUGIN_DIR/plugins/session-hub"
+MODULE="$HUB_DIR/hooks/usage-feed.ts"
+HOOKS_JSON="$HUB_DIR/hooks/hooks.json"
+CONTRACT="$HUB_DIR/hooks/usage-feed-contract.json"
+HANDOVER="$HUB_DIR/skills/session-trail/handover-contract.json"
+PLM_MODULE="$PLUGIN_DIR/hooks/usage-feed.ts"
+PLM_CONTRACT="$PLUGIN_DIR/hooks/usage-feed-contract.json"
 MODULE_TEST="$PLUGIN_DIR/tests/mods/usage-feed.test.ts"
 MIN_CLAUDE_CODE='2.1.296'
 
@@ -39,7 +42,7 @@ REGISTRATION="$(node -e '
   process.stdout.write(JSON.stringify([Object.keys(doc).sort(), doc.modules]));
 ' "$HOOKS_JSON" 2>/dev/null)"
 if [ "$REGISTRATION" = '[["hooks","modules"],["./usage-feed.ts"]]' ] && [ -f "$MODULE" ] && [ ! -L "$MODULE" ]; then
-  check "U2 hooks.json names exactly the usage-feed module beside its classic hooks, and the module is a regular file" PASS
+  check "U2 the companion's hooks.json names exactly the usage-feed module beside its classic hooks, and the module is a regular file" PASS
 else
   check "U2 hooks.json keys and modules are ${REGISTRATION:-<unreadable>}, want hooks and modules [\"./usage-feed.ts\"]" FAIL
 fi
@@ -93,12 +96,15 @@ check "U8 the module imports nothing but types from claude-code" "$(fact imports
 [ -f "$MODULE_TEST" ] && grep -q "from 'claude-code/testing'" "$MODULE_TEST" \
   && check "U9 the claude plugin test file for the module is present" PASS \
   || check "U9 tests/mods/usage-feed.test.ts is missing or does not use the claude-code/testing kit" FAIL
+cmp -s "$MODULE" "$PLM_MODULE" && cmp -s "$CONTRACT" "$PLM_CONTRACT" \
+  && check "U9b the companion's module and contract are byte-identical to the frozen PLM copies the module test runs against" PASS \
+  || check "U9b the companion's usage-feed module or contract differs from the frozen PLM copy, so tests/mods/usage-feed.test.ts no longer covers it" FAIL
 
-FLOORS="$(grep -rhoE 'Claude Code[^.|]{0,12}[0-9]+\.[0-9]+\.[0-9]+[^.|]{0,6}(or newer|or later)' "$PLUGIN_DIR/README.md" "$PLUGIN_DIR/docs" 2>/dev/null \
+FLOORS="$(grep -rhoE 'Claude Code[^.|]{0,12}[0-9]+\.[0-9]+\.[0-9]+[^.|]{0,6}(or newer|or later)' "$PLUGIN_DIR/README.md" "$HUB_DIR/README.md" "$PLUGIN_DIR/docs" 2>/dev/null \
   | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -u | tr '\n' ' ')"
 [ "$FLOORS" = "$MIN_CLAUDE_CODE " ] \
-  && check "U10 README.md and docs/ state one minimum Claude Code version, the module's floor $MIN_CLAUDE_CODE" PASS \
-  || check "U10 README.md and docs/ state minimum Claude Code versions '${FLOORS:-none}', want only $MIN_CLAUDE_CODE" FAIL
+  && check "U10 README.md, the companion README and docs/ state one minimum Claude Code version, the module's floor $MIN_CLAUDE_CODE" PASS \
+  || check "U10 README.md, the companion README and docs/ state minimum Claude Code versions '${FLOORS:-none}', want only $MIN_CLAUDE_CODE" FAIL
 
 report
 [ "$FAIL" -eq 0 ]

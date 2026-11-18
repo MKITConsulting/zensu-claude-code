@@ -39,7 +39,7 @@ test('the floor is zensu-cli 0.18.0 and the install commands are the four publis
   assert.equal(cli.MIN_VERSION, '0.18.0');
   assert.deepEqual(cli.INSTALL, {
     homebrew: 'brew install --cask mkitconsulting/tap/zensu',
-    homebrewUpgrade: 'brew upgrade --cask zensu',
+    homebrewUpgrade: 'brew update && brew upgrade --cask mkitconsulting/tap/zensu',
     script: 'curl -fsSL https://zensu.dev/install.sh | sh',
     powershell: 'irm https://zensu.dev/install.ps1 | iex',
   });
@@ -70,6 +70,14 @@ test('the floor release declares every flag the AI-work capture preflight requir
   const refused = preflight.check(workspace, 8000);
   assert.equal(refused.status, 'cli_incompatible');
   assert.deepEqual(refused.missingCapabilities, ['start --maintenance-reason']);
+  assert.ok(refused.guidance.includes(`Homebrew users run ${cli.INSTALL.homebrewUpgrade};`), refused.guidance);
+  const installGuide = path.resolve(__dirname, '../../docs/cli-install-update.md');
+  assert.ok(fs.existsSync(installGuide), installGuide);
+  assert.ok(refused.guidance.includes(`other users follow ${installGuide}.`), refused.guidance);
+  childProcess.spawnSync = () => ({ error: Object.assign(new Error('spawnSync zensu ENOENT'), { code: 'ENOENT' }) });
+  const absent = preflight.check(workspace, 8000);
+  assert.equal(absent.status, 'cli_unavailable');
+  for (const command of [cli.INSTALL.homebrew, cli.INSTALL.script, cli.INSTALL.powershell]) assert.ok(absent.guidance.includes(command), absent.guidance);
 });
 
 test('the version is read from the first word after zensu on the version line', () => {

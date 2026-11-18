@@ -107,7 +107,7 @@ fi
 
 # P8 — version stays in sync across plugin.json + marketplace.json + README badge.
 # Adding a skill does NOT bump the version; this guards against accidental drift.
-MARKET_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKET_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 if [ "$MARKET_VERSION" = "$EXPECTED_VERSION" ]; then
   check "P8a marketplace.json version ($MARKET_VERSION) == plugin.json ($EXPECTED_VERSION)" PASS
 else
@@ -150,21 +150,27 @@ ZC_BREW="$(printf '%s\n' "$ZC_FACTS" | sed -n 1p)"
 ZC_BREW_UP="$(printf '%s\n' "$ZC_FACTS" | sed -n 2p)"
 ZC_SCRIPT="$(printf '%s\n' "$ZC_FACTS" | sed -n 3p)"
 ZC_PS="$(printf '%s\n' "$ZC_FACTS" | sed -n 4p)"
-zc_names_all() {
-  [ -n "$ZC_BREW" ] && [ -n "$ZC_BREW_UP" ] && [ -n "$ZC_SCRIPT" ] && [ -n "$ZC_PS" ] || return 1
+zc_names_install() {
+  [ -n "$ZC_BREW" ] && [ -n "$ZC_SCRIPT" ] && [ -n "$ZC_PS" ] || return 1
   local escaped_script escaped_ps
   escaped_script="$(printf '%s' "$ZC_SCRIPT" | sed 's/|/\\|/')"
   escaped_ps="$(printf '%s' "$ZC_PS" | sed 's/|/\\|/')"
-  grep -qF "$ZC_BREW" "$1" && grep -qF "$ZC_BREW_UP" "$1" \
+  grep -qF "$ZC_BREW" "$1" \
     && { grep -qF "$ZC_SCRIPT" "$1" || grep -qF "$escaped_script" "$1"; } \
     && { grep -qF "$ZC_PS" "$1" || grep -qF "$escaped_ps" "$1"; }
 }
+zc_names_all() {
+  [ -n "$ZC_BREW_UP" ] && grep -qF "$ZC_BREW_UP" "$1" && zc_names_install "$1"
+}
+ZC_BANNER="$PLUGIN_DIR/hooks/session-start-banner.sh"
 ZC_SITES_BAD=""
-for zc_site in README.md docs/operations.md skills/setup/SKILL.md hooks/session-start-banner.sh; do
+for zc_site in README.md docs/operations.md docs/cli-install-update.md skills/setup/SKILL.md; do
   zc_names_all "$PLUGIN_DIR/$zc_site" || ZC_SITES_BAD="$ZC_SITES_BAD $zc_site"
 done
-[ -z "$ZC_SITES_BAD" ] && check "P10a README, the operations troubleshooting row, /zensu:setup and the banner name the module's install and upgrade commands" PASS \
-  || check "P10a an install or upgrade command of the module is missing from:$ZC_SITES_BAD" FAIL
+zc_names_install "$ZC_BANNER" && [ -n "$ZC_BREW_UP" ] && ! grep -qF -- "$ZC_BREW_UP" "$ZC_BANNER" && grep -qF 'INSTALL.homebrewUpgrade' "$ZC_BANNER" \
+  || ZC_SITES_BAD="$ZC_SITES_BAD hooks/session-start-banner.sh"
+[ -z "$ZC_SITES_BAD" ] && check "P10a README, the operations troubleshooting row, the CLI install guide and /zensu:setup name the module's install and upgrade commands; the banner names the install commands on its missing-CLI line and reads the upgrade command from the module" PASS \
+  || check "P10a a site misses an install or upgrade command of the module, or the banner copies the upgrade command instead of reading it:$ZC_SITES_BAD" FAIL
 if [ -n "$ZC_FLOOR" ] && [ "$(grep -cF "zensu-cli $ZC_FLOOR or later" "$README_MD")" -ge 2 ] \
   && grep -qF "older than $ZC_FLOOR" "$PLUGIN_DIR/docs/operations.md" && grep -qF "names zensu-cli $ZC_FLOOR" "$PLUGIN_DIR/docs/work-order-mode.md"; then
   check "P10b README Install and Requirements, the operations row and the work-order doc name the module's floor" PASS
@@ -173,19 +179,57 @@ else
 fi
 ZC_FULL="- Zensu CLI $ZC_FLOOR or later on \`PATH\`: \`$ZC_BREW\`, \`$ZC_SCRIPT\`, or on Windows \`$ZC_PS\`; upgrade with \`$ZC_BREW_UP\` or by running the installer again"
 ZC_SKILLS_BAD=""
-for zc_skill in bootstrap implement pulse security-review docs; do
+for zc_skill in bootstrap implement pulse security-review docs change; do
   grep -qF -- "$ZC_FULL" "$PLUGIN_DIR/skills/$zc_skill/SKILL.md" || ZC_SKILLS_BAD="$ZC_SKILLS_BAD $zc_skill"
 done
 grep -qF -- "- Zensu CLI $ZC_FLOOR or later on \`PATH\`; see \`/zensu:doctor\` for install/upgrade hints" "$PLUGIN_DIR/skills/ghost-scan/SKILL.md" || ZC_SKILLS_BAD="$ZC_SKILLS_BAD ghost-scan"
-[ -n "$ZC_FLOOR" ] && [ -z "$ZC_SKILLS_BAD" ] && check "P10c the six skill prerequisites name the module's floor; five name the install commands and ghost-scan, on the shrink-only body allowlist, names /zensu:doctor" PASS \
+[ -n "$ZC_FLOOR" ] && [ -z "$ZC_SKILLS_BAD" ] && check "P10c the seven skill prerequisites name the module's floor; six name the install commands and ghost-scan, on the shrink-only body allowlist, names /zensu:doctor" PASS \
   || check "P10c a skill prerequisite does not match the module's floor or install commands:$ZC_SKILLS_BAD" FAIL
 ZC_STALE="$(grep -lF 'Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`)' "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null | tr '\n' ' ')"
 [ -z "$ZC_STALE" ] && check "P10d no skill keeps the curl-only install prerequisite" PASS || check "P10d a skill keeps the curl-only install prerequisite: $ZC_STALE" FAIL
 ZC_REASON="$(node -e 'process.stdout.write(require(process.argv[1]).FLOOR_REASON)' "$ZC_MODULE" 2>/dev/null)"
-if [ -n "$ZC_REASON" ] && grep -qF -- "$ZC_REASON" "$PLUGIN_DIR/hooks/session-start-banner.sh" && tr '\n' ' ' < "$README_MD" | grep -qF -- "$ZC_REASON"; then
-  check "P10e the banner and the README Requirements state the module's reason for the floor" PASS
+if [ -n "$ZC_REASON" ] && ! grep -qF -- "$ZC_REASON" "$ZC_BANNER" && grep -qF 'FLOOR_REASON' "$ZC_BANNER" \
+  && tr '\n' ' ' < "$README_MD" | grep -qF -- "$ZC_REASON" \
+  && tr -s '[:space:]' ' ' < "$SKILL_MD" | grep -qF -- "$ZC_REASON"; then
+  check "P10e the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor, and the banner reads it from the module instead of copying it" PASS
 else
-  check "P10e the banner and the README Requirements state the module's reason for the floor" FAIL
+  check "P10e the README Requirements and /zensu:setup Phase 0 state the module's reason for the floor, and the banner reads it from the module instead of copying it" FAIL
+fi
+ZC_OLD_BREW_UP='brew upgrade --cask zensu'
+ZC_OLD_SITES="$(cd "$PLUGIN_DIR" || exit 2; grep -rlF -- "$ZC_OLD_BREW_UP" README.md docs skills hooks)"
+ZC_OLD_RC=$?
+if [ "$ZC_OLD_RC" -eq 1 ]; then
+  check "P10f README, docs, skills and hooks hold no copy of the old Homebrew upgrade spelling '$ZC_OLD_BREW_UP'" PASS
+else
+  check "P10f the old Homebrew upgrade spelling '$ZC_OLD_BREW_UP' is back, or the scan failed (grep exit $ZC_OLD_RC): $(printf '%s' "$ZC_OLD_SITES" | tr '\n' ' ')" FAIL
+fi
+readme_section() {
+  awk -v heading="$1" '
+    $0 == heading { on = 1; next }
+    on && /^##/ { exit }
+    on
+  ' "$README_MD" | tr -s '[:space:]' ' '
+}
+SELF_HOSTING="$(readme_section '### Self-hosting')"
+TRUSTED_ROW="$(grep -F -- '| `ZENSU_TRUSTED_AUTH_HOSTS` | — | Comma-separated host names' "$PLUGIN_DIR/docs/configuration.md")"
+if printf '%s' "$SELF_HOSTING" | grep -qF -- 'on a host named in `ZENSU_TRUSTED_AUTH_HOSTS`, a comma-separated list of host names, and never a plain `http://` endpoint under an `https://` API, not even on a listed host.' \
+  && printf '%s' "$SELF_HOSTING" | grep -qF -- 'only when both sit on the API'"'"'s own origin' \
+  && printf '%s' "$SELF_HOSTING" | grep -qF -- '`<api-url>/oauth/authorize` and `<api-url>/oauth/token`' \
+  && printf '%s' "$SELF_HOSTING" | grep -qF -- 'export ZENSU_TRUSTED_AUTH_HOSTS=' \
+  && [ "$(printf '%s\n' "$TRUSTED_ROW" | grep -c .)" -eq 1 ] \
+  && printf '%s' "$TRUSTED_ROW" | grep -qF -- 'only on the API'"'"'s own origin (same host and port) or on a listed host' \
+  && printf '%s' "$TRUSTED_ROW" | grep -qF -- 'never as a plain `http://` endpoint under an `https://` API' \
+  && printf '%s' "$TRUSTED_ROW" | grep -qF -- '`<api-url>/oauth/authorize` and `<api-url>/oauth/token`'; then
+  check "P11a README Self-hosting and the docs/configuration.md environment row document ZENSU_TRUSTED_AUTH_HOSTS with its origin rule, its https rule and the fallback endpoints" PASS
+else
+  check "P11a README Self-hosting or the docs/configuration.md environment row misses ZENSU_TRUSTED_AUTH_HOSTS, its origin rule, its https rule or the fallback endpoints" FAIL
+fi
+DATA_PRIVACY="$(readme_section '## Data & privacy')"
+if printf '%s' "$DATA_PRIVACY" | grep -qF -- 'Commands you run yourself send what you hand them: `zensu plan push` sends the work plan it parses from your Markdown file' \
+  && printf '%s' "$DATA_PRIVACY" | grep -qF -- '`zensu mocks create`, which `/zensu:change` also runs, uploads the mock file.'; then
+  check "P11b README Data & privacy names what zensu plan push and zensu mocks create send" PASS
+else
+  check "P11b README Data & privacy does not name what zensu plan push and zensu mocks create send" FAIL
 fi
 
 echo "----"

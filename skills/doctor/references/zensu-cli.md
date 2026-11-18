@@ -16,8 +16,9 @@ identity it decodes from a stored token in the CLI's own `hosts.json`.
   that is done: the shell would run whatever binary that entry reaches.
 - **⚠️ zensu CLI: not found on PATH** → relay the install commands the row names.
 - **✅ zensu CLI version: … at or above …** → nothing to do.
-- **⚠️ zensu CLI version: … is older than …** → relay the upgrade commands the row names. An older
-  release still runs every command; the row says what it gets wrong.
+- **⚠️ zensu CLI version: … is older than …** → relay the reason and the upgrade commands the row
+  names. An older release still runs, but AI-work capture refuses to begin with it: the capture
+  preflight answers `cli_incompatible`.
 - **⚠️ zensu CLI version: a development build** → the floor was not checked. Nothing to do unless
   the user expects a release.
 - **⚠️ zensu CLI version: the shell found zensu but the version probe found none on PATH** → a

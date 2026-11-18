@@ -103,6 +103,101 @@ for t in $ZENSU_HUMAN_DECISION_TOOL_NAMES $ZENSU_WORK_ORDER_TOOL_NAMES; do
 done
 [ "$M_FAIL" -eq 0 ] && check "C3 every human-decision verb is marked **person** and every work-order verb **worker** or **session** in the catalog" PASS || check "C3 catalog marks drift from the classification lists ($M_FAIL)" FAIL
 
+MAP_FORMS="$(awk '
+  /^[[:space:]]*"[a-z][a-z -]*"(\|"[a-z][a-z -]*")*\)/ {
+    line = $0
+    sub(/^[[:space:]]*"/, "", line)
+    label = substr(line, 1, index(line, "\"") - 1)
+    group = index($0, "echo") ? "" : label
+    if (group == "") print label
+    next
+  }
+  group != "" && /^[[:space:]]*[a-z][a-z-]*\)/ { word = $1; sub(/\)$/, "", word); print group " " word; next }
+  group != "" && /esac/ { group = "" }
+' "$PLUGIN_DIR/hooks/lib/zensu-cli-map.sh")"
+CATALOG_SPANS="$(awk '
+  /^## Available CLI Commands$/ { on = 1; next }
+  /^## / { on = 0 }
+  on && index($0, "- `") == 1 {
+    rest = $0
+    while ((opening = index(rest, "`")) > 0) {
+      rest = substr(rest, opening + 1)
+      closing = index(rest, "`")
+      if (closing == 0) break
+      print substr(rest, 1, closing - 1)
+      rest = substr(rest, closing + 1)
+    }
+  }
+' "$AGENT")"
+catalog_names() {
+  printf '%s\n' "$1" | awk -v prefix="zensu ${2% *} " -v word="${2##* }" '
+    index($0, prefix) == 1 {
+      verb = substr($0, length(prefix) + 1)
+      sub(/ .*/, "", verb)
+      n = split(verb, parts, "|")
+      for (i = 1; i <= n; i++) if (parts[i] == word) found = 1
+    }
+    END { exit found ? 0 : 1 }
+  '
+}
+C4_FORMS=0; C4_MISSING=""
+while IFS= read -r form; do
+  [ -n "$form" ] || continue
+  C4_FORMS=$((C4_FORMS+1))
+  catalog_names "$CATALOG_SPANS" "$form" || C4_MISSING="$C4_MISSING '$form'"
+done <<EOF
+$MAP_FORMS
+EOF
+if [ "$C4_FORMS" -ge 100 ] && [ -z "$C4_MISSING" ]; then
+  check "C4 every one of the $C4_FORMS commands the CLI map knows has a catalog line" PASS
+else
+  check "C4 the catalog lacks a line for a command the CLI map knows ($C4_FORMS read):$C4_MISSING" FAIL
+fi
+if catalog_names 'zensu work list|get <id>' 'work get' \
+  && ! catalog_names 'zensu work order list' 'work list' \
+  && ! catalog_names 'zensu work events <id> --kind get' 'work get'; then
+  check "C4b the catalog match reads only the word right after the noun, split on |" PASS
+else
+  check "C4b the catalog match accepts a verb that does not follow the noun" FAIL
+fi
+
+PULSE_START_LINE="$(grep -F -- '- `zensu pulse start`' "$AGENT")"
+PULSE_END_LINE="$(grep -F -- '- `zensu pulse end <id>`' "$AGENT")"
+DEV_SESSION="$(awk '/^### When the user asks about their dev session$/ { on = 1; next } /^#/ { on = 0 } on' "$AGENT")"
+if printf '%s' "$PULSE_START_LINE" | grep -qF -- '--minimal-json' \
+  && printf '%s' "$PULSE_START_LINE" | grep -qF 'tracking_disabled' \
+  && printf '%s' "$PULSE_END_LINE" | grep -qF -- '--changed-file' \
+  && printf '%s' "$PULSE_END_LINE" | grep -qF -- '--minimal-json' \
+  && printf '%s' "$DEV_SESSION" | grep -qF '/zensu:pulse' \
+  && printf '%s' "$DEV_SESSION" | grep -qF 'tracking_disabled' \
+  && grep -qF -- "While Pulse tracking is off in the user's Zensu privacy settings, as it is for every new account until the user turns it on," "$AGENT" \
+  && ! grep -qF -- 'When the user turned Pulse tracking off' "$AGENT"; then
+  check "C5 the Pulse catalog and the dev-session workflow name --minimal-json and the tracking_disabled no-op, and new accounts start with tracking off" PASS
+else
+  check "C5 the Pulse catalog or the dev-session workflow lacks --minimal-json, the tracking_disabled no-op or the new-account default" FAIL
+fi
+
+source "$PLUGIN_DIR/hooks/lib/zensu-cli-map.sh"
+CHANGE_WINDOW="$(sed -n 's/.*--workflow-begin --tools "\([^"]*\)".*/\1/p' "$PLUGIN_DIR/skills/change/SKILL.md")"
+C6_WRITES=0; C6_UNDECLARED=""
+for verb in $(printf '%s\n' "$MAP_FORMS" | awk '$1 == "roadmap" { print $2 }'); do
+  tool="$(zensu_cli_to_tool roadmap "$verb")"
+  zensu_is_mutation_tool "$tool" || continue
+  C6_WRITES=$((C6_WRITES+1))
+  case ",$CHANGE_WINDOW," in
+    (*",$tool,"*) ;;
+    (*) C6_UNDECLARED="$C6_UNDECLARED $tool" ;;
+  esac
+done
+ROADMAPS="$(awk '/^### Roadmaps & Milestones$/ { on = 1; next } /^#/ { on = 0 } on' "$AGENT")"
+if [ "$C6_WRITES" -ge 7 ] && [ -z "$C6_UNDECLARED" ] \
+  && printf '%s' "$ROADMAPS" | grep -qF 'Every write below goes through **change** (`/zensu:change`), which declares these writes in its window' \
+  && ! printf '%s' "$ROADMAPS" | grep -qiF 'no skill window'; then
+  check "C6 the roadmap section sends its $C6_WRITES writes through /zensu:change, whose window declares each" PASS
+else
+  check "C6 the roadmap section and the /zensu:change window disagree (writes=$C6_WRITES, undeclared:${C6_UNDECLARED:- none})" FAIL
+fi
+
 echo "----"
 echo "test-zensu-plm-arg-guidance: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

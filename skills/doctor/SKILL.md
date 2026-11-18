@@ -422,7 +422,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   helper refuses to start `/zensu:verify-feature` until it reads the version from the package
   manifest. Relay the row and the pinned reinstall command it names.
 - **⚠️ playwright-cli: not found on PATH** → the user installs the version the browser consent
-  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.21` command the
+  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.24` command the
   row prints. `brew install playwright-cli` is unpinned: it installs whichever version Homebrew
   ships, which the run-config helper refuses unless it is the measured one. Never install it on
   their behalf.
@@ -459,10 +459,9 @@ classifier will refuse a spawn, not only when the whole table is green.
   `scripts/verify-browser-config.js` is missing, the decision module is a symlink (both consent
   hooks refuse one) or cannot be loaded, the run-config helper cannot be loaded, `hooks/hooks.json`
   does not register the GATE or the RECORDER on a matcher that covers Bash and PowerShell, a
-  registration there could not be determined, or the pair's registration probe did not complete.
-  Without the gate nothing judges a
-  `zensu-verify` session; without the recorder every navigation would prompt and nothing would
-  be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
+  registration there could not be determined, or the pair's registration probe did not complete;
+  a cause naming the verify-auth read guard → read `references/verify-auth-guard.md`, which says
+  which runs it blocks. Reinstall the plugin. The label is literal: the run-config helper writes no run
   config unless both hooks demonstrably answer registered, and a missing, symlinked or unloadable
   decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot
   drive a browser; tell the user not to start `/zensu:verify-feature` until this row clears. A
@@ -543,13 +542,12 @@ whether browser verification is enforced, not only when a row is red.
   the automatic path was either opted out
   through `hooks.sessionAutoAdopt: false` — the opt-out governs the automatic path only —
   or did not complete (a lock timeout, or a fault inside the adoption itself),
-  which a gate's deny names as `not-completed`, `lock-timeout` or `adoption-failed`.
-  Reading ADOPTABLE as the opt-out alone sends a user whose adoption merely timed out
-  looking for a config key nobody set. Then
+  which a gate's deny names as `not-completed`, `lock-timeout` or `adoption-failed`. Then
   `/zensu:adopt-session --confirm` retries by hand — it ignores the
   opt-out, so on an opted-out record ask the user before running it: the operator
   switched the automatic path off on purpose.
-  Both stay reachable in this state; so does this diagnostic. A refusal names the
+  Both stay reachable in this state through Bash outside Windows, never the Skill
+  tool; so does this diagnostic. A refusal names the
   exact condition that failed:
   `workflow-schema-mismatch` means a persisted shape really did change and a
   fresh session is the only way forward, and `executing-runtime-older` means the
@@ -559,9 +557,8 @@ whether browser verification is enforced, not only when a row is red.
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
   clears the lineage break while a `zensu` CLI call, `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes with no
-  usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. This row is reachable in that state — the doctor
-  falls back to it when the third-fact probe cannot answer — so the remedy
-  without the clause would promise what this check did not establish.
+  usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. The doctor
+  falls back to this row when the third-fact probe cannot answer.
 - **❌ binding: this session's Session Control record is readable, but BOTH the
   recorded project root … is gone and the running Zensu installation declares an
   incompatible lineage** → both of the two rows above at once, and it is its own
@@ -639,8 +636,10 @@ whether browser verification is enforced, not only when a row is red.
   lock timeout, or a fault inside the adoption itself), and
   `/zensu:adopt-session --confirm` retries by hand. The report marks the
   minting version `(installation pruned from the plugin cache)`. Both
-  commands and this diagnostic stay reachable, and `Stop` is released rather
-  than wedged. Do NOT tell the user to restart after a successful adoption.
+  commands and this diagnostic stay reachable through Bash outside Windows, never
+  the Skill tool, and `Stop` is released rather than wedged. Relay the row's clause
+  for a recorded project root that is gone as well, and do NOT tell the user to
+  restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated

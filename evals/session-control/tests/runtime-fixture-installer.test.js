@@ -827,8 +827,10 @@ test('returns an unpredictable immutable child root and leaves registry publicat
       fs.readFileSync(path.join(runtime, '.claude-plugin', 'marketplace.json'), 'utf8'),
     );
     assert.equal(manifest.version, '0.17.0');
-    assert.equal(marketplace.plugins[0].version, '0.17.0');
-    assert.equal(marketplace.plugins[0].source.ref, 'v0.17.0');
+    const zensuEntries = marketplace.plugins.filter((entry) => entry.name === 'zensu');
+    assert.equal(zensuEntries.length, 1);
+    assert.equal(zensuEntries[0].version, '0.17.0');
+    assert.equal(zensuEntries[0].source.ref, 'v0.17.0');
     assert.deepEqual(
       fs.readdirSync(cacheParent).filter((entry) => !entry.startsWith('.zensu-runtime-v')),
       [],

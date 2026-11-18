@@ -53,8 +53,12 @@ as it is.
 | Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `2` |
 | Context compaction nudge | `context.compactionNudge` | bool | `true` |
 | Compaction nudge threshold (%) | `context.nudgeThreshold` | int 1–99 | `50` |
-| Pulse telemetry session | `hooks.pulseSession` | bool | `true` |
+| SessionStart pulse context line | `hooks.pulseSession` | bool | `true` |
 | Log timestamp style | `logging.timestampStyle` | enum `wall` \| `relative` \| `none` | `wall` |
+
+`hooks.pulseSession` controls only the `zensu: pulse context — HEAD=… branch=…` line the
+SessionStart hook prints. Pulse tracking itself is the tracking setting in the user's Zensu
+privacy settings: this key neither turns it on nor off, and `/zensu:pulse` does not read it.
 
 ## Phase 0 — Preflight
 
@@ -69,9 +73,11 @@ as it is.
 3. When both `zensu` and `node` are present, check the version floor with
    `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-version-v1.js" --lookup`. It runs
    `zensu --version` once with the update check off and prints `state=`, `version=`
-   and `floor=` lines. On `state=old`, tell the user that Zensu skills need
-   zensu-cli 0.18.0 or later and name the upgrade: `brew upgrade --cask zensu`, or
-   running the installer again. On `dev`, `unread` or `absent` (the shell found
+   and `floor=` lines. On `state=old`, tell the user that this plugin supports
+   zensu-cli 0.18.0 or later: older releases cannot declare a goal's feature, so
+   AI-work capture fails. Name the upgrade:
+   `brew update && brew upgrade --cask mkitconsulting/tap/zensu`, or running the
+   installer again. On `dev`, `unread` or `absent` (the shell found
    `zensu`, but no binary on `PATH`), say that the floor was not checked and why.
    Warn only: continue either way. On `cwd-relative`, `PATH` reaches `zensu` through an
    empty or relative entry that the shell reads against the working directory, so

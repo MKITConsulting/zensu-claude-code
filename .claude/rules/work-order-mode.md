@@ -1,6 +1,7 @@
 ---
 paths:
   - "hooks/lib/work-order-v1.js"
+  - "hooks/lib/zensu-cli-words-v1.js"
   - "hooks/lib/zensu-work-order.sh"
   - "hooks/lib/zensu-work-order-hook.sh"
   - "hooks/pre-work-order-gate.sh"
@@ -75,13 +76,82 @@ validation messages and adds more, while Go's transport error has one shape. A c
 `error:` line and stays transient, with its first stderr line quoted. The error table lives in
 `skills/work/references/protocol.md`.
 
-**The gate reads a `zensu` call's words as cobra v1.10.2 does.** `zensuCommandWords` mirrors the
-subcommand search of zensu-cli v0.10.0, the same rule as the CLI write-gate's parser
-(`.claude/rules/cli-command-classification.md`): no group defines a flag, so every `--flag` and
-every two-character `-f` without `=` takes the next word, an empty word is skipped and `--` ends
-the search. `WORK_VERB_ALIASES` maps the CLI's one `zensu work` alias, `repos`, to `repositories`.
-`HUMAN_PLAN_VERBS` lists every plan verb whose tool `ZENSU_HUMAN_DECISION_TOOL_NAMES` holds, and
+**The gate reads a `zensu` call's words through `hooks/lib/zensu-cli-words-v1.js`**, the one owner
+of the rule it shares with the CLI write-gate (`.claude/rules/cli-command-classification.md`).
+`commandWords` is the subcommand search of cobra v1.10.2 as zensu-cli v0.10.0 uses it: no group
+defines a flag, so every `--flag` and every two-character `-f` without `=` takes the next word, an
+empty word is skipped and `--` ends the search. `commandNoun` gives the canonical noun, and
+`commandVerb` maps the CLI's one `zensu work` alias, `repos`, to `repositories`, and `isGroup` says
+whether the verb is itself a group, so a denial names its third word (`zensu work policy set`). The
+gate requires the module lazily inside its `zensu` branch, after the `--api-url` check, and when
+the module cannot load or lacks any one of those four functions it denies, with the `reader`
+finding, every call that holds a word that could name a subcommand. `couldNameSubcommand` decides
+that by the word's own shape, as the CLI write-gate does: a word counts unless it is empty, a flag,
+a redirection, a bare number or a path (it holds a `/`). So the target of a redirection and its
+descriptor number, which the plain readings of `shellCommands` keep among the words, do not count
+when they hold a `/` or are a bare number. A call without such a word, such as `command -v zensu >/dev/null 2>&1`, a
+bare `zensu` or `zensu --version 2>&1`, cannot reach a subcommand and passes, while a flag's value
+such as `--title t` still counts. A top-level require is the wrong place:
+`work-order-v1.js` would then fail to load, and a work-order hook whose `node` run fails prints
+nothing, so every rule of the gate would fall silent. The unit case `the Bash analysis denies every
+zensu call that can name a subcommand when the word reader cannot load` drives a copy of the module
+without its sibling, and one copy per function beside a sibling that lacks it. `HUMAN_PLAN_VERBS` lists every plan verb whose tool `ZENSU_HUMAN_DECISION_TOOL_NAMES` holds, and
 `test-skill-workflow-markers.sh` C6 holds the two equal, as C5 does for `SESSION_WORK_VERBS`.
+
+**The gate removes a redirection as the shell does, in a second pass.** `analyzeBash` first runs
+the released analysis, its `-c` and `eval` recursion included, through `analyzeReadings` in plain
+mode. Only when that pass refuses nothing and the text holds `<`, `>` or `$` does `analyzeText` run
+the whole analysis again in redirection mode, whose recursion runs both passes for each inner text.
+The readings create a character only inside an ANSI-C string, so an inner text at any depth can hold
+`<` or `>` only when the raw text holds one of the three: `bash -c $'zensu \x3e/dev/null auth login'`
+spells the operator in its own `$'…'`, and `bash -c eval\ \$\'git\ \\x3e/dev/null\ push\'` gets its
+`$'` only from the outer shell's quote removal. So
+every finding the released gate gave stays exactly as it was, a false one included (`>printenv`
+still reads as `printenv`), also where a `-c` string or an eval body would now give another one
+first (`bash -c 'printenv >/dev/null'; git push` stays `push`), and a redirection between a noun
+and its verb (`zensu work >/dev/null heartbeat 1`) keeps the plain finding, which names the target
+as the verb. A memo keyed by mode, depth and text analyzes each distinct text once per call: a
+1.4 MiB command took 453 ms against the released gate's 194 ms, and 4,000 nested `bash -c` calls
+with redirections 98 ms against 42 ms (measured on the development Mac).
+
+In redirection mode `shellCommands` drops the operator, its operand word, attached or after blanks,
+and a descriptor number or `{name}` glued to an operator that starts with `<` or `>`
+(`REDIRECTION_DESCRIPTOR_RE`); the `&` of `&>`, `2>&1` and `>&2` then no longer ends the command.
+Each reading has its own table in `REDIRECTION_OPERATORS`. `bash` reads `<`, `>`, `>>`, `<<`, `<<-`,
+`<<<`, `<>`, `<&`, `>&`, `>|`, `&>` and `&>>`. `posix` reads the same without `&>` and `&>>`,
+because a POSIX shell's `&` there ends the command: dash runs `printf` in `true &>f printf x`
+(measured). `zsh` adds the `!` and `|` override forms and `>>&`, and takes a single digit or
+`{name}` glued to an operator that starts with `&` as its descriptor
+(`ZSH_AMPERSAND_DESCRIPTOR_RE`): zsh 5.9 consumed `2` and `{fd}` before `&>` and kept `10`, while
+bash 3.2 kept all three as arguments (measured). The tables are this gate's own.
+`redirectOperator` in `hooks/lib/bash-source-write-parse.js` and the redirection branch of
+`parseScript` in `hooks/lib/subagent-shell-guard-v1.js` each read one merged grammar, while this gate
+keeps one per reading, so a spelling that only one shell reads as a redirection loses its operand
+only in that shell's reading: `git >! push origin HEAD` denies through the bash and posix tables,
+which read `>` with the operand `!`.
+
+The second pass also reads the `$(…)` and backtick spans of a heredoc body whose delimiter is
+unquoted, which the shell expands, through `heredocBodies` in `hooks/lib/bash-source-write-parse.js`,
+the scanner `stripHeredocs` uses, so both agree on where a body starts and ends. A quoted body, an
+escaped `\$(`, a `<(…)`, which a body does not expand, and a body's plain text are never read as
+commands. The second pass can therefore only add a deny: `zensu >/dev/null auth login`,
+`2>/dev/null git push`, `gh 2>/dev/null pr create`, `env > env.txt`, which writes the session token
+into a file, and `cat <<EOF` with a `$(git push)` line were allowed before. A generated corpus
+compared with the released gate left 951 redirect-free commands unchanged and changed no finding in
+210,378 placements of bash operators. It checked 47,810 placements of `&>` and `&>>` against their
+POSIX meaning too, 6 of which only that meaning denies. Of 71,715 placements of zsh-only spellings,
+8 report bash's finding, because bash keeps the digit before `&>` as an argument, and 10 leave a call
+open only where its deny needs bash's cut of an ANSI-C string at a NUL together with an operator
+that only zsh reads, which no single shell does (dash reads no `$'…'`, measured). The unit cases
+`the Bash analysis removes a redirection as the shell does, so no descriptor, operator or target
+hides the program, the noun or the verb`, `a redirection at any word boundary of a command never
+hides its finding, and in front of the program or at the end leaves it exactly`, `the redirection
+readings run only when the released analysis allows the command, so a finding it gave stays the
+same through a shell string or an eval body` and `the Bash analysis reads the command substitutions
+of a heredoc body whose delimiter is unquoted, and never its plain text or a quoted body` pin it.
+`heredocBodies` is a coupled site: without it in the parser's exports the second pass reads no
+heredoc body, which only the heredoc case notices, while a parser that cannot load at all leaves
+every body in the text, where both passes read it as commands.
 
 **No SessionStart text tells a token session to run `zensu auth login`.** While
 `ZENSU_SESSION_TOKEN` is set, zensu-cli sends the session token and never the stored login
@@ -236,6 +306,13 @@ two seats bound by the real SubagentStart hook while the stage also owes a head 
 gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release pipeline sets the
 version; never bump it by hand.
 
+**Version of the redirection readings: `minor`.** The gate denies Bash calls it used to allow, a
+redirected `zensu`, `git push`, `gh pr create` or environment dump and a command substitution in an
+unquoted heredoc body among them, and a gate that refuses more changes the capability set of every
+session a newer installation would serve (`.claude/rules/runtime-lineage.md`), although no matcher,
+hook, schema field or key set moves. The parser's new `heredocBodies` export writes nothing and
+changes no verdict of the source-write gate.
+
 **Version of the review-progress Stop budget: `patch`.** The stop state keeps its `{count, seen}`
 shape; only the value of `seen` gains a suffix, and a runtime that finds the bare spelling of the
 same ledger key keeps its count. The lease module gains only exports that write nothing
@@ -249,8 +326,16 @@ registration.
 
 - The gate reads command text; a script the session writes and then runs is not judged. It reads
   each command three ways, with plain single quotes and with the ANSI-C quoting of bash and of zsh,
-  so its deny set never shrinks below the plain reading; a reading the shell does not use can only
-  add a deny.
+  and, when those refuse nothing and the text holds `<`, `>` or `$`, each of them once more with its
+  redirections removed, so its deny set never shrinks below the plain reading; a
+  reading the shell does not use can only add a deny, as `true &>/dev/null git push` does under
+  bash, which runs only `true` there.
+- A heredoc or here-string that a shell reads as its script (`bash <<<'git push'`,
+  `bash <<EOF` with a `git push` line) is not judged: the redirection reading drops a here-string as
+  an operand and reads a heredoc body only for its command substitutions, and the plain reading
+  sees no `-c`. The CLI write-gate's walker judges such a script only for a `zensu` mutation, so a
+  `git push`, a `gh pr create` or `gh pr merge`, a `zensu auth` call, an order-file read or an
+  environment dump inside it passes both gates.
 - The gate reads a program name only as written, through `commandName`: no case fold and no
   `.exe` strip, so on macOS and Windows a `zensu` call or a wrapper spelled in another letter case
   (`ZENSU`, `ENV zensu`) or with `.exe` passes its checks, the token-host deny included. The CLI

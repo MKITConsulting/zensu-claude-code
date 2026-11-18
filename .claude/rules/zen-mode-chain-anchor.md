@@ -384,24 +384,73 @@ sets `ZEN_MODE_SOURCE` (`shape`, `marker`, `untraversable` or `default`) and, fo
 the reason in `ZEN_MODE_WHY`; each reader keeps its own consequence. The hook exits with its
 stderr line, `--status` prints `on` or `off` with the cause on stderr, and the doctor renders its
 row, asking `zen_marker_inactive` to tell a recorded `{"active":false}` from a marker that records
-no choice. Each reader also keeps its own `hooks.zenMode` check, because the hook reads it before
-any expensive step and a second read inside the resolver would cost a `node` start on a config
-that names the key. The resolver adds no process to the hook's path: an active marker still costs
+no choice. Each reader also keeps its own `hooks.zenMode` check, under the same root it hands the
+resolver, because the hook reads it before the state ladder and the anchor child, and a second read
+inside the resolver would cost a `node` start on a config that names the key. The resolver adds no process to the hook's path: an active marker still costs
 one `grep`. `Z109` in `tests/structure/test-zen-mode.sh` pins the one owner of the template and
 its derived directories, of the inactive question and of the ladder, that no reader and no other
 line of the library spells a marker directory, and that each reader resolves through it exactly once;
 `Z50`, `Z80` item 8, `Z89` and `Z95` read the ladder and its comments in the library, and the
 `Z107` family still drives the doctor row and `--status` against each other on every rung.
 
-**The default rung reads the config overlay under the root the reader passes**, through
-`zensu_zen_mode_default_on <root>`, as `zensu_default_delivery_route` does for the route. Read
-from the ambient `CLAUDE_PROJECT_DIR` instead, it paired the recorded root's marker with another
-tree's overlay: `--status` from a Bash tool without that variable answered `on` for a project whose
-overlay sets `zenModeDefault: false`, and the doctor and the hook did the same under a harness root
-other than the recorded one. `Z107e` drives all three. The `hooks.zenMode` checks stay
-harness-anchored, as `autoTdd` and its siblings do in the delivery-route hooks; moving them is its
-own change. The SessionStart banner keeps the argument-free form, because it discloses the
-configured default rather than a session's resolution.
+**The default rung and the `hooks.zenMode` check read the config overlay under the root the reader
+passes**, through `zensu_zen_mode_default_on <root>` and `zensu_hook_enabled zenMode <root>`, as
+`zensu_default_delivery_route` does for the route. The recorded root and the directory the host
+sets as `CLAUDE_PROJECT_DIR` differ in a session whose working directory is a git worktree and after
+`/zensu:adopt-session --reanchor`. Read from the ambient `CLAUDE_PROJECT_DIR` instead, the two keys
+paired the recorded root's marker with another tree's overlay: `--status` from a Bash tool without
+that variable answered `on` for a project whose overlay sets `zenModeDefault: false`, and `--status`
+and the hook or the doctor disagreed on `hooks.zenMode`, in one direction printing `off` while the
+hook kept injecting. Moving the reading root is visible to such a session: an opt-out written only
+to the host directory's `.zensu/config.json` stops applying there, so the `### Upgrade notes` block
+under `## [Unreleased]` in `CHANGELOG.md` tells users to copy it into the recorded root's file or
+into `~/.zensu/config.json`. `Z107e` drives the default rung through all three readers and `Z107g`
+the flag, each with `CLAUDE_PROJECT_DIR` naming another tree; `Z107g`'s overlays diverge in both
+directions, and it drives the SessionStart banner and the doctor's `zen-mode default:` row in the
+same two states. `zensu_hook_enabled` takes the root as an optional second argument and runs its
+node-free pre-check and its node read under it; every one-argument caller keeps the ambient reading,
+and `autoTdd` and its siblings in the delivery-route hooks stay harness-anchored, each a change of
+its own. `C2r` in `tests/structure/test-hook-process-budget.sh` holds the two-argument form: the
+root's overlay decides, the ambient one never does, and the pre-check starts no `node` when no file
+it reads names the key. The hook reads the flag under the root the session bind exported,
+`ZENSU_PROJECT_ROOT`, and only then resolves the recorded root for the marker through
+`zensu_resolve_project_dir`, so a session whose project sets `hooks.zenMode: false` exits without
+the root resolution, which reads the record a second time and measures the runtime digest. The
+order changes no answer: the exported root is the recorded root as the bind validated it, a root
+the resolver would refuse ends the hook silently whatever the flag read found, and on a POSIX host
+a root the resolver accepts renders to the same string. On MSYS and Cygwin the exported root is the
+host-native spelling, which this hook keeps away from shell builtins, so the hook renders it with
+`cd -P` first and exits when that fails: one subshell on every prompt there, none elsewhere. An
+empty exported root exits before the read, because `zensu_hook_enabled` would then read the global
+config alone. `Z107i` counts root verifications through a `node` shim that classifies the resolver
+by its `core.readContext({ recordsDir, sessionId: key })` literal, as the Stop latency suite does:
+none on the disabled path, one on the enabled path. Measured with that shim on macOS bash 3.2, the
+disabled path starts three `node` children where it started four, and the enabled path five, as
+before. `Z107j` runs the hook's lines from the session bind to the end of that render in a child
+`bash` under an MSYS, a Cygwin and a POSIX `OSTYPE`, against a symlinked, an empty and a missing
+root, and pins the flag read between that render and the resolver. `Z107h` pins the `--status`
+stderr line that names the recorded root as where the flag was read.
+`/zensu:zen-mode` renders the bare `--status` command, because the verb reads the
+recorded root itself; `Z107f` runs the rendered command under a diverging ambient root. The
+SessionStart banner reads both keys under the root its `hooks.defaultDeliveryRoute` disclosure
+reads, the binder's `resolveFreshHookProject` answer put into the shell spelling by `cd -P`, and
+keeps the argument-free form when that root is unavailable; it shares that disclosure's known limit,
+the race with the registrar on a fresh start (`.claude/rules/session-delivery-route.md`). The
+doctor's `zen-mode default:` config row keeps the argument-free form, because it discloses the
+config files of its Config block, whose project overlay sits under the ambient root like every other
+row there (`.claude/rules/foreign-chain-row.md`). Where the two roots differ it can name a
+`hooks.zenMode=false` that the session row, read under the recorded root, does not see, so each of
+its three texts ends with `ZEN_ROOT_SCOPE`, which says that the `zen-mode:` row describes the
+session, and `skills/doctor/references/coexistence.md` tells the model to relay that row. The
+`--status` paragraph and the configuration table of the skill, the `zenMode`, `zenModeDefault`,
+banner and hook rows of `docs/configuration.md`, item 2 of its Config Resolution Order and the
+anchoring clause of its `sessionAutoAdopt` row, the zen-mode section of
+`skills/doctor/references/coexistence.md`, the doctor's row for a state it cannot read and the
+upgrade note state the reading together and move together. **Version: `patch`**, walked against
+`.claude/rules/runtime-lineage.md`: `zensu_hook_enabled` gains an optional parameter that only
+callers of the same installation pass, no config key, strict key set, schema field, hook, matcher or
+attestation moves, the banner and the doctor change only advisory text, and the hook still emits
+only `additionalContext`.
 
 **TWO WRITERS LAND THAT MARKER, and hardening one of them left the guarantee false.**
 `hooks/lib/zensu-zen-mode.sh` is the OUT-OF-BAND remedy, and the hook NAMES it in the sentence
@@ -533,12 +582,16 @@ from `, and anchor work that spans several turns` through `counter beside them.`
 sentence, by the same parameter expansion and with no process. A literal that loses either anchor
 emits the full clause with `none`, the safe direction. `Z30` in
 `tests/structure/test-zen-mode.sh` measures the armed variant (the static literal with the
-LONGEST producible token substituted: 5050 characters, ceiling 5100) and `Z30b` fires the hook
-with no chain armed and measures the none variant (3720, ceiling 3770). Both variants grew by 483
+LONGEST producible token substituted: 5676 characters, ceiling 5726) and `Z30b` fires the hook
+with no chain armed and measures the none variant (4346, ceiling 4396). Both variants grew by 483
 characters when rules (1) to (3) became the result-first rule and the closing session block, by
 78 more when the lead turned neutral and rules (4) and (5) gained the precedence and question-set
-clauses, and by 42 more when the carve-out's last sentence took the safety-warning wording that
-`Z110` pins across the skill, `docs/precedence.md` and this directive. Both measure through
+clauses, by 42 more when the carve-out's last sentence took the safety-warning wording that
+`Z110` pins across the skill, `docs/precedence.md`, this directive and its short body, and by 626
+more when rule (7) gained the archive signal, the closing step that says a finished session with
+nothing left open is done and can be archived or closed, which `Z117` pins across the four
+variants, the skill and the operator row. The short body grew by 571 for the same signal, because
+it must carry every condition alone. Both measure through
 `node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
 code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
 directions: growth past the ceiling fails, and so does a shrink further below it than the
@@ -554,6 +607,28 @@ variants, and both checks require the file name and the embedded body to agree: 
 short body from the hook source and capture its none variant by firing the hook a second time in the
 same session. `zen-anchor-assertions.test.js` requires each `short-` scenario to carry the graders and
 the anchor of its full-contract twin unchanged.
+
+**The archive signal of rule (7) has a second owner, and the condition list follows it.** The
+closing step may say a session is done and can be archived only when nothing an archive of its
+worktree would lose remains. What an archive removes is owned by `docs/worktree-keep.md`
+§"Nested repositories keep the marker": Claude Desktop's cleanup judges the worktree by a
+`git status` that lists no ignored files and deletes the directory whole, a gitignored nested
+repository with its unpushed commits included. The keep marker that delays it is held while a
+live anchor or a nested repository other than a submodule holds it, but only in a managed
+worktree, with `hooks.worktreeKeep` on and a build that carries the hold, so the directive
+cannot count on it and the list stays conservative. It names uncommitted or unpushed work, a
+needed ignored file and a nested repository's work, as the `release` verb of
+`/session-hub:session-trail` reports them before it calls an old session archivable. When that
+document changes what an archive removes, the list moves in every carrier: the full directive
+and the short body of `hooks/user-prompt-zen-mode.sh`, rule 5 of `skills/zen-mode/SKILL.md` and
+the hook row of `docs/configuration.md`, pinned by `Z117`, and the eighteen scenarios under
+`evals/zen-mode-reaction/scenarios/`, which embed the directive verbatim and are held to it by
+`Z19b` and `P8`. The signal stays model-judged at
+the end of the turn, because a `UserPromptSubmit` hook sees the state before the turn's work, and
+the model never archives or closes a session itself: the directive says the EXCEPTION never
+lifts that ban, and the skill states it in its Scope section, outside the rules rule 9 suspends.
+A session that only answered questions keeps an ordinary next step, and in doubt a session
+stays open, because a wrong done costs the user work while a missed one costs a line.
 
 **Known gap, accepted:** the per-turn totals in `docs/architecture.md` are hand-derived. The
 measurement that holds them is `tests/structure/test-user-prompt-budget.sh`

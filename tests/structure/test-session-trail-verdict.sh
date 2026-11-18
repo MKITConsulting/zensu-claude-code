@@ -47,15 +47,31 @@ umask 022
 # machine's sessions.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TRAIL_MJS="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+HUB_SKILL_DIR="$PLUGIN_DIR/plugins/session-hub/skills/session-trail"
+HUB_TRAIL_MJS="$HUB_SKILL_DIR/scripts/trail.mjs"
+PLM_TRAIL_MJS="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+TRAIL_MJS="$HUB_TRAIL_MJS"
 
 PASS=0; FAIL=0; SKIP=0
+GRADED_COPY=""
+UNBOUND_LABELS=0
+graded_copy() {
+  COPY_TAG="$GRADED_COPY"
+  [ -n "$COPY_TAG" ] && return 0
+  case "$TRAIL_MJS" in
+    ("$HUB_TRAIL_MJS") COPY_TAG=hub ;;
+    ("$PLM_TRAIL_MJS") COPY_TAG=plm ;;
+    (*) COPY_TAG=unbound; UNBOUND_LABELS=$((UNBOUND_LABELS+1)) ;;
+  esac
+}
 check() {
-  local label="$1" cond="$2"
+  local label cond="$2"
+  graded_copy
+  label="[$COPY_TAG] $1"
   if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
-skip() { echo "  SKIP  $1"; SKIP=$((SKIP+1)); }
+skip() { graded_copy; echo "  SKIP  [$COPY_TAG] $1"; SKIP=$((SKIP+1)); }
 report() {
   echo "----"
   echo "test-session-trail-verdict: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
@@ -154,7 +170,7 @@ trap 'rm -rf "$FAKE"' EXIT
 # included, because --config-dir does not reach it. Either way those reads would
 # resolve against the developer's root instead of the sandbox, all while V0 still
 # passed.
-unset CLAUDE_CONFIG_DIR ZENSU_CCD_STORE
+unset CLAUDE_CONFIG_DIR ZENSU_CCD_STORE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_ACCOUNT_UUID CLAUDE_CODE_ORGANIZATION_UUID
 FAKE_CFG="$FAKE/.claude"
 trailrun() { env -u CLAUDE_CONFIG_DIR HOME="$FAKE" USERPROFILE="$FAKE" node "$TRAIL_MJS" "$@" --config-dir "$FAKE_CFG"; }
 # USERPROFILE too: the probe has to measure the environment trailrun uses, or it
@@ -1017,7 +1033,7 @@ v11g_carrier() { # <label> <body>
 # placeholders, and `continuationPlan`'s further down through `cont.lines`. Matching the whole
 # body meant the first one could be deleted and the second would satisfy every needle, so the
 # arm's bite depended on which branch `continuationPlan` happened to take in this fixture. The
-# slice is the WHERE block: from the advice head down to the WRITES section that follows it.
+# slice is the WHERE block: from the advice head down to the prompt timeline that follows it.
 #
 # THE TERMINATOR IS ASSERTED, not assumed. `[ -z "$SHOW_ADVICE" ]` alone could not see the
 # failure this slice exists to prevent: with no `^WRITES` line the awk runs to EOF, the slice
@@ -1034,17 +1050,17 @@ v11g_carrier() { # <label> <body>
 # so hoisting `writesLines(w)` above the WHERE block kept it green, ran the slice to EOF, and
 # restored exactly the vacuity this control was added to close. The offset comparison is the
 # instrument `L70m` already uses for the same class of question.
-SHOW_ADVICE="$(printf '%s\n' "$SHOW_MD" | awk '/^WHERE /{f=1} f && /^WRITES/{exit} f{print}')"
+SHOW_ADVICE="$(printf '%s\n' "$SHOW_MD" | awk '/^WHERE /{f=1} f && /^--- PROMPT TIMELINE ---/{exit} f{print}')"
 V11G_WHERE_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^WHERE ' | head -1 | cut -d: -f1)"
-V11G_WRITES_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^WRITES' | head -1 | cut -d: -f1)"
+V11G_WRITES_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^--- PROMPT TIMELINE ---' | head -1 | cut -d: -f1)"
 if [ -z "$SHOW_ADVICE" ]; then
   check "V11g-control the WHERE block could not be sliced out of show, so the show arm is vacuous" FAIL
 elif [ -z "$V11G_WRITES_AT" ]; then
-  check "V11g-control show renders no ^WRITES head, so the WHERE slice ran to EOF and the show arm is vacuous" FAIL
+  check "V11g-control show renders no prompt-timeline head, so the WHERE slice ran to EOF and the show arm is vacuous" FAIL
 elif [ -z "$V11G_WHERE_AT" ]; then
   check "V11g-control show renders no ^WHERE head, so the slice has no anchor and the show arm is vacuous" FAIL
 elif [ "$V11G_WRITES_AT" -le "$V11G_WHERE_AT" ]; then
-  check "V11g-control the WRITES head does not follow the WHERE head (where@$V11G_WHERE_AT writes@$V11G_WRITES_AT), so the slice ran to EOF and the show arm is vacuous" FAIL
+  check "V11g-control the prompt-timeline head does not follow the WHERE head (where@$V11G_WHERE_AT timeline@$V11G_WRITES_AT), so the slice ran to EOF and the show arm is vacuous" FAIL
 fi
 v11g_carrier TAKEOVER_MD "$TAKEOVER_MD"
 v11g_carrier HANDOFF_MD "$HANDOFF_MD"
@@ -2572,6 +2588,7 @@ CLOCK_IDLE="$(field aaaaaaaa-0000-0000-0000-000000000001 takeover.idleMin)"
 # `canonicalDir` and both sides keep their lexical spelling — which is why W1b
 # exists: without a spelling-divergent pair nothing here would fail if the
 # normalization were deleted.
+TRAIL_MJS="$PLM_TRAIL_MJS"
 WT_A="$FAKE/work/wt-aaaaaaaa"
 SID_A=aaaaaaaa-0000-0000-0000-000000000001
 
@@ -2605,10 +2622,11 @@ writes_block() { grep -E -A4 '^WRITES' || true; }
 # at once. `bash-source-write-parse.js` is deliberately NOT staged, because W22's whole
 # subject is that gate being absent.
 mutant_path() { # <tag> -> path to place the mutated trail.mjs at
-  local d="$FAKE/mut-$1/skills/session-trail/scripts"
+  local d="$FAKE/mut-$1/skills/session-trail/scripts" src="${TRAIL_MJS%/*}"
+  local lib="$src/../../../hooks/lib"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
-  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
+  cp "$src/session-lineage-v1.mjs" "$src/linked-sessions-v1.mjs" "$d/" 2>/dev/null
+  cp "$lib/claude-path-v1.js" "$lib/git-environment-v1.js" "$lib/worktree-keep-v1.js" "$lib/desktop-store-read-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
 
@@ -2985,6 +3003,7 @@ else
   check "W7b brief structural invariants:$W7B_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 W7C_BAD=""
 W7C_CAUTION="$(node -e 'const s=require("fs").readFileSync(process.argv[1],"utf8");const m=s.match(/^const BRIEF_DATA_CAUTION = \x27((?:[^\x27\\]|\\.)*)\x27;$/m);process.stdout.write(m?m[1].replace(/\\(.)/g,"$1"):"")' "$TRAIL_MJS")"
 [ -n "$W7C_CAUTION" ] || W7C_BAD="$W7C_BAD caution-constant-not-extracted"
@@ -3011,6 +3030,7 @@ else
   check "W7c rendered data caution:$W7C_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W8 — the write-anchor caution BOUNDS its transcript-derived path. The brief is
 # persisted and read by an instance that need not have this skill loaded, so a
 # newline in the worktree path could fabricate a line — including this brief's own
@@ -3099,6 +3119,7 @@ else
   check "W8 write-anchor caution bounding:$W8_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W8b — `show`'s own path lines. `flatPath` bounds them, and nothing exercised it:
 # the only fixture carrying a newline in its path was driven through the two BRIEF
 # renderers alone, so deleting the strip left both suites green while a transcript
@@ -3270,6 +3291,7 @@ else
   check "W9 runnable cd quoting:$W9_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W10 — `CLAUDE_PROJECT_DIR` is not the anchor the gate compares, so it may never
 # produce an "allowed". `hooks/lib/claude-hook-session-v1.js` reads that variable
 # only as the LAST RESORT when no Session Control record exists — the header over
@@ -3455,6 +3477,7 @@ else
   check "W12 brief control-class bound:$W12_BAD (head='$(printf '%s' "$W12_BRIEF" | head -3 | tr -d '\033' | tr '\n' '/')')" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W13 — the desktop store's account UUID, on `list`'s `appTag` row and `show`'s
 # OWNER row. `appTag` used `oneLine(app.instance, 8)`, which got BOTH halves wrong:
 # `oneLine` then collapsed `/\s+/` only, so a CSI sequence survived into a row a
@@ -3507,6 +3530,7 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
   fi
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W14 — `canonicalDir`'s two normalization decisions, neither of which any probe
 # reached. The arms are of different kinds and the labels say which is which.
 #
@@ -3587,6 +3611,7 @@ else
   check "W14b filesystem-root guard:$W14B_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # (c) The win32 drive root, on ANY host. `trimDir` is extracted from the source and
 # evaluated against `path.win32`, so the guard the POSIX arm cannot discriminate —
 # `path.parse(p).root === p` versus the `p.length > 1` spelling it replaced — is
@@ -3611,6 +3636,7 @@ else
   check "W14c win32 drive-root guard: $W14C" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # (d) MIXED canonicalization: the anchor EXISTS, the target does not. Every other
 # fixture in this block leaves both absent, so both keep their lexical spelling and
 # the namespace split cannot show. Under a per-operand canonicalization the real
@@ -3643,6 +3669,7 @@ else
   skip "W14d mixed-canonicalization arm (could not create the anchor directory)"
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W16 — `resumedUntil`, the one bound on `stopCause` that was executed but never
 # OBSERVED. It renders in exactly one place: `cmdShow`'s RECOVERED branch, the
 # `else if (r.stopCause)` arm that runs only when the api-error record is NOT the
@@ -3765,6 +3792,7 @@ else
   check "W17 registry cwd fallback:$W17_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W18 — two reason/attribution defects the round-1 review found, and one field the
 # `cwd` repair left behind. All three are about a renderer telling the reader
 # something the code beside it knows to be false.
@@ -4043,6 +4071,7 @@ else
   check "W20 relative target operand:$W20_BAD" FAIL
 fi
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # W23 — the shared control class must cover the zero-advance and bidi block. It did
 # not: `CONTROL_RUN` enumerated C0/C1 plus U+2028/2029, while `ZERO_WIDTH` — defined
 # in the same file for `instanceId` — strips exactly `\p{Cf}\p{Mn}\p{Me}`. Those
@@ -4229,6 +4258,7 @@ else
   check "W24 renderer-bound values:$W24_BAD" FAIL
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # W25 — the deny head asserted a containment relation nothing measured. Off the weak
 # channel it read "the anchor the gate compares lies inside it", which requires
 # ZENSU_PROJECT_ROOT to be contained in CLAUDE_PROJECT_DIR — true for a session that
@@ -4416,6 +4446,7 @@ else
 fi
 
 
+TRAIL_MJS="$HUB_TRAIL_MJS"
 # V-clock — the budget stated at the fixture block, asserted. Runs LAST, so it
 # reports the state every preceding V check actually saw (the reading itself is
 # taken above, before the W block). A lapsed budget is not a
@@ -4998,7 +5029,65 @@ elif [ -z "$WT8R_BAD" ]; then
 else
   check "WT8r cwdExists branch rendering:$WT8R_BAD" FAIL
 fi
-# The consumer side of the same property, end to end rather than by convention.
+PG_WT="$FAKE/work/wt-${WT8_ADOPT:0:8}"
+PG_HEAD='- **Commits, when Zensu PLM is installed:** this plugin refuses no write.'
+PG_SHOW_1='COMMITS  not measured: this plugin refuses no write. While Zensu PLM runs in this session with its'
+PG_SHOW_2='         opt-in source-write gate on (hooks.bashWriteGate: true), Bash source writes and working-tree git'
+PG_SHOW_3='         commands outside its Session Control root are refused; /zensu:adopt-session --reanchor, run from'
+PG_SHOW_4='         inside the worktree to work in, moves that root. A missing PLM notice is no evidence the gate is off.'
+pg_brief() {
+  printf '%s\n' "$1" | awk -v head="$PG_HEAD" -v wt="$PG_WT" '
+    index($0, head) == 1 && index($0, "(`hooks.bashWriteGate: true`, off by default)") && index($0, "`/zensu:adopt-session --reanchor`, run from inside that worktree") && index($0, "does not contain `" wt "` can edit and test there but not commit") && index($0, "so a missing notice is no evidence that the gate is off.") { n += 1 }
+    index($0, head) == 1 { seen += 1 }
+    END { print (n + 0) ":" (seen + 0) }
+  '
+}
+pg_show() {
+  printf '%s\n' "$1" | awk -v a="$PG_SHOW_1" -v b="$PG_SHOW_2" -v c="$PG_SHOW_3" -v d="$PG_SHOW_4" '
+    { line[NR] = $0 }
+    $0 ~ /^COMMITS / { seen += 1 }
+    END { n = 0; for (i = 1; i + 3 <= NR; i++) if (line[i] == a && line[i + 1] == b && line[i + 2] == c && line[i + 3] == d) n += 1; print n ":" (seen + 0) }
+  '
+}
+PG_SHOW_TXT="$(trailrun show "$WT8_ADOPT" --all 2>/dev/null)"
+PG_MUT="$(mutant_path plm-gate)"
+PG_MUT_ERR="$(node -e '
+  const fs = require("fs");
+  const [src, out] = process.argv.slice(1);
+  let t = fs.readFileSync(src, "utf8");
+  for (const needle of ["  L.push(plmGateCaution(briefPath(r.wt)));\n", "  for (const line of PLM_GATE_SHOW_LINES) print(line);\n"]) {
+    if (!t.includes(needle)) throw new Error("anchor missing: " + needle);
+    t = t.split(needle).join("");
+  }
+  fs.writeFileSync(out, t);
+' "$TRAIL_MJS" "$PG_MUT" 2>&1)"
+pg_mutrun() { env -u CLAUDE_CONFIG_DIR HOME="$FAKE" USERPROFILE="$FAKE" node "$PG_MUT" "$@" --config-dir "$FAKE_CFG"; }
+if [ -n "$PG_MUT_ERR" ]; then
+  PG_MUT_MD=""; PG_MUT_HO=""; PG_MUT_SHOW=""
+else
+  PG_MUT_MD="$(pg_mutrun takeover "$WT8_ADOPT" --all --force --no-record 2>/dev/null)"
+  PG_MUT_HO="$(pg_mutrun handoff "$WT8_ADOPT" --all --force 2>/dev/null)"
+  PG_MUT_SHOW="$(pg_mutrun show "$WT8_ADOPT" --all 2>/dev/null)"
+fi
+for spec in "PG1|takeover brief|brief|WT8_PRESENT_MD|PG_MUT_MD" "PG2|handoff brief|brief|WT8_PRESENT_HO|PG_MUT_HO" "PG3|show|show|PG_SHOW_TXT|PG_MUT_SHOW"; do
+  id="${spec%%|*}"; rest="${spec#*|}"; what="${rest%%|*}"; rest="${rest#*|}"; kind="${rest%%|*}"; rest="${rest#*|}"; real_var="${rest%%|*}"; mut_var="${rest#*|}"
+  real_txt="${!real_var}"; mut_txt="${!mut_var}"
+  if [ "$kind" = brief ]; then real_n="$(pg_brief "$real_txt")"; mut_n="$(pg_brief "$mut_txt")"; else real_n="$(pg_show "$real_txt")"; mut_n="$(pg_show "$mut_txt")"; fi
+  if [ -z "$real_txt" ]; then
+    check "$id the $what could not be rendered, so its PLM-gate lines are unchecked" FAIL
+  elif [ "$real_n" = "1:1" ]; then
+    check "$id the $what renders the PLM-gate lines once, with the opt-in key, the reanchor recipe and the missing-notice clause$([ "$kind" = brief ] && printf ', naming the worktree of the session it describes')" PASS
+  else
+    check "$id the $what renders the PLM-gate lines as complete:seen=$real_n, want 1:1" FAIL
+  fi
+  if [ -n "$PG_MUT_ERR" ]; then
+    check "$id-control the planted copy without the PLM-gate carriers could not be built ($PG_MUT_ERR)" FAIL
+  elif [ -n "$mut_txt" ] && [ "$mut_n" = "0:0" ]; then
+    check "$id-control a copy whose $what drops the PLM-gate lines still renders and fails the check" PASS
+  else
+    check "$id-control a copy whose $what drops the PLM-gate lines rendered ${#mut_txt} bytes with complete:seen=$mut_n" FAIL
+  fi
+done
 if printf '%s\n' "$HANDOFF_MD" | grep -B1 -F 'git worktree add' | grep -qF '```bash'; then
   check "WT8p2 the handoff brief renders the advice's git command inside a bash fence" PASS
 else
@@ -5113,6 +5202,7 @@ else
   check "WT8-ids all $WT8_N worktree-advice fixture ids hold distinct 8-char prefixes, so no two share a cwd" PASS
 fi
 
+TRAIL_MJS="$PLM_TRAIL_MJS"
 # ===========================================================================
 # CONTINUE — the continuation-worktree plan (WC*)
 # ===========================================================================
@@ -5627,7 +5717,7 @@ else
     local d="$FAKE/cmut-$1/skills/session-trail/scripts"
     mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
     cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
+    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$PLUGIN_DIR/hooks/lib/desktop-store-read-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     printf '%s' "$d/trail.mjs"
   }
@@ -6169,6 +6259,7 @@ $(printf '%s' "$2" | cut -d'|' -f2)"
     fi
   fi
 fi
+TRAIL_MJS="$HUB_TRAIL_MJS"
 
 V21_SID=3e7a0001-0000-0000-0000-0000000000b1
 V21_AGED_SID=3e7a0002-0000-0000-0000-0000000000b2
@@ -7354,7 +7445,7 @@ CH_AT_THREADS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open threads' | head -1 
 [ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_THREADS" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_THREADS" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_THREADS"
 [ -z "$CH_BAD" ] && check "CH5 the handoff brief carries the same open chips ahead of its open threads, their folders judged by repository there too" PASS || check "CH5 handoff brief chips:$CH_BAD" FAIL
 
-CH_REF="$PLUGIN_DIR/skills/session-trail/references/takeover.md"
+CH_REF="$HUB_SKILL_DIR/references/takeover.md"
 CH_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
 CH_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
 CH_STEP="$(grep -F "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1)"
@@ -7364,7 +7455,7 @@ for CH_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `own_initiative
   case "$CH_STEP" in *"$CH_NEEDLE"*) ;; *) CH_BAD="$CH_BAD [missing:$CH_NEEDLE]" ;; esac
 done
 grep -qF 'how many open task chips the brief lists' "$CH_REF" || CH_BAD="$CH_BAD confirmation-line-absent"
-grep -rqF 'spawn_task' "$PLUGIN_DIR/skills/session-trail" && CH_BAD="$CH_BAD spawn-task-named"
+grep -rqF 'spawn_task' "$HUB_SKILL_DIR" && CH_BAD="$CH_BAD spawn-task-named"
 [ -z "$CH_BAD" ] && check "CH6 references/takeover.md proposes the chips with start_session own_initiative before the release step, with the plan confirmation line and the fallback, and the skill names no spawn_task" PASS || check "CH6 takeover.md chip step:$CH_BAD" FAIL
 
 CH7_SID=cdcdcdcd-0000-0000-0000-0000000000c4
@@ -7688,7 +7779,7 @@ printf '%s\n' "$LS_MD" | grep -qF 'never more than 8 in one takeover, with `init
 printf '%s\n' "$LS_MD" | grep -qxF '### Linked session 1: start' || LS_BAD="$LS_BAD heading-absent"
 printf '%s\n' "$LS_MD" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
 printf '%s\n' "$LS_MD" | grep -qxF 'Alpha[2K side' || LS_BAD="$LS_BAD title-absent"
-printf '%s\n' "$LS_MD" | grep -qF -- '- takeover command: `/zensu:session-trail takeover c1c1c1c1-0000-4000-8000-000000000001 --all`' || LS_BAD="$LS_BAD command-absent"
+printf '%s\n' "$LS_MD" | grep -qF -- '- takeover command: `/session-hub:session-trail takeover c1c1c1c1-0000-4000-8000-000000000001 --all`' || LS_BAD="$LS_BAD command-absent"
 printf '%s\n' "$LS_MD" | grep -qF -- '- saved environment: `Env Fixture`; pass it as `preset` only when `list_start_targets` lists a local preset of exactly this name' || LS_BAD="$LS_BAD preset-absent"
 printf '%s\n' "$LS_MD" | grep -qxF -- '- why: it runs over SSH, not on this Mac' || LS_BAD="$LS_BAD ssh-why-absent"
 [ "$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')" = "2" ] || LS_BAD="$LS_BAD cwd-blocks=$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')"
@@ -7757,7 +7848,7 @@ LS_AT_QUOTE="$(grep -nF "Put the names in single quotes, \`--linked-start 'cont-
 [ -n "$LS_AT_DRIFT" ] && [ "$LS_AT_DRIFT" = "$LS_AT_START" ] || LS_BAD="$LS_BAD carried-run-rule-not-in-step-4=$LS_AT_DRIFT/$LS_AT_START"
 LS_AT_HANDOFF_READER="$(grep -nF "A reader that holds only a handoff brief, with no \`--force\` run, has no carried plan answer: start each session that brief marks **start** that the user's answer did not name to leave out and each session it marks **if named** that the answer named, as that brief's lead says" "$CH_REF" | head -1 | cut -d: -f1)"
 [ -n "$LS_AT_HANDOFF_READER" ] && [ "$LS_AT_HANDOFF_READER" = "$LS_AT_START" ] || LS_BAD="$LS_BAD handoff-reader-rule-not-in-step-4=$LS_AT_HANDOFF_READER/$LS_AT_START"
-LS_HANDOFF_REF="$PLUGIN_DIR/skills/session-trail/references/handoff.md"
+LS_HANDOFF_REF="$HUB_SKILL_DIR/references/handoff.md"
 grep -qF -- 'Its plan confirmation names every linked session the brief marks start, each of which belongs to the yes' "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-4-pointer-absent"
 grep -qF -- 'each of which belongs to the yes unless the user names it to leave out' "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-5-pointer-absent"
 grep -qF -- "\`takeover <selector> --all --force\` with the plan answer's \`--linked-start\` value" "$LS_HANDOFF_REF" || LS_BAD="$LS_BAD handoff-flow-5-linked-start-absent"
@@ -7877,7 +7968,7 @@ const o = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
 process.stdout.write([o.linkedSessions.measured, o.linkedSessions.plan.names.join(","), o.linkedSessions.plan.unlisted.join(",")].join(":"));
 ' "$LS_UNREAD_CARRIED_JSON" 2>/dev/null)"
 [ "$LS_GOT" = "false:cont-00000001:cont-00000001" ] || LS_BAD="$LS_BAD unread-plan-json=$LS_GOT"
-LS_COMMANDS_REF="$PLUGIN_DIR/skills/session-trail/references/commands.md"
+LS_COMMANDS_REF="$HUB_SKILL_DIR/references/commands.md"
 grep -qF -- '`--linked-start <names>` (`takeover --force` only: `none`, or the comma-separated `cont-` names of the linked sessions the plan answer starts' "$LS_COMMANDS_REF" || LS_BAD="$LS_BAD commands-flag-absent"
 grep -qF -- 'in single quotes as the plan brief spells them, because PowerShell passes an unquoted comma list as separate arguments; with it, `takeover` refuses an operand besides the selector' "$LS_COMMANDS_REF" || LS_BAD="$LS_BAD commands-quote-absent"
 grep -qF -- 'On `takeover` it also needs `--linked-start` while a listed linked session could start' "$LS_COMMANDS_REF" || LS_BAD="$LS_BAD commands-force-absent"
@@ -7998,7 +8089,7 @@ for DR_VERB in takeover handoff; do
   if [ -z "$DR_MD" ]; then DR_BAD="$DR_BAD $DR_VERB-brief-absent"; continue; fi
   printf '%s\n' "$DR_MD" | grep -qF -- "$DR_PREFIX" && DR_BAD="$DR_BAD $DR_VERB-brief-names-the-account"
 done
-DR_REF="$PLUGIN_DIR/skills/session-trail/references/disclosure.md"
+DR_REF="$HUB_SKILL_DIR/references/disclosure.md"
 grep -qF 'NEITHER brief carries an account-adjacent value at all' "$DR_REF" || DR_BAD="$DR_BAD disclosure-claim-gone"
 grep -qF 'never its account' "$DR_REF" || DR_BAD="$DR_BAD disclosure-source-sentence-gone"
 [ -z "$DR_BAD" ] \
@@ -8700,6 +8791,26 @@ elif [ "$FK_OK" != 1 ]; then
 else
   check "FK0 the fork fixture holds a transcript whose first record carries its parent's session id and worktree, a live registry entry, a desktop fork record naming the parent's worktree, and a fork past the full-read limit whose fork point lies between the head and the tail" PASS
 
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --json 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD wt=$(wr_json "$FK_OUT" 'o.wt')"
+  [ "$(wr_json "$FK_OUT" 'o.cwd')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwd=$(wr_json "$FK_OUT" 'o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwdLast=$(wr_json "$FK_OUT" 'o.cwdLast')"
+  [ "$(wr_json "$FK_OUT" 'o.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD branch=$(wr_json "$FK_OUT" 'o.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
+  [ "$(wr_json "$FK_OUT" '("writes" in o) + ":" + ("continuation" in o)')" = "false:false" ] || FK_BAD="$FK_BAD write-anchor-keys-present"
+  [ -z "$FK_BAD" ] && check "FK1 show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and it carries no write-anchor keys" PASS || check "FK1 fork show --json:$FK_BAD" FAIL
+
+  FK_TXT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" 2>/dev/null)"
+  FK_BAD=""
+  printf '%s\n' "$FK_TXT" | grep -qxF "WORKTREE $FK_FORK_WT" || FK_BAD="$FK_BAD worktree-line"
+  printf '%s\n' "$FK_TXT" | grep -qxF "BRANCH   claude/fork-wt" || FK_BAD="$FK_BAD branch-line"
+  printf '%s\n' "$FK_TXT" | grep -qE '^(WRITES|CONTINUE) ' && FK_BAD="$FK_BAD write-anchor-lines-present"
+  printf '%s\n' "$FK_TXT" | grep -qxF "  cd -- '$FK_FORK_WT' && claude --resume '$FK_FORK'" || FK_BAD="$FK_BAD resume-line"
+  printf '%s\n' "$FK_TXT" | grep -E '^(WORKTREE|CWD|BRANCH|WRITES|CONTINUE) ' | grep -qF 'parent-wt' && FK_BAD="$FK_BAD names-the-parent-worktree"
+  [ -z "$FK_BAD" ] && check "FK2 show names the fork's own worktree and branch in its WORKTREE and BRANCH lines and in its resume line, renders no WRITES or CONTINUE line, and never names the parent's" PASS || check "FK2 fork show text:$FK_BAD" FAIL
+
+  TRAIL_MJS="$PLM_TRAIL_MJS"
   FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --json --anchor "$FK_FORK_WT" 2>/dev/null)"
   FK_BAD=""
   [ "$(wr_json "$FK_OUT" 'o.wt')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD wt=$(wr_json "$FK_OUT" 'o.wt')"
@@ -8709,7 +8820,7 @@ else
   [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
   [ "$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')" = "$FK_FORK_WT:true" ] || FK_BAD="$FK_BAD writes=$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')"
   [ "$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')" = "not-needed:$FK_FORK_WT" ] || FK_BAD="$FK_BAD continuation=$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')"
-  [ -z "$FK_BAD" ] && check "FK1 show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and its WRITES and CONTINUE verdicts judge that worktree" PASS || check "FK1 fork show --json:$FK_BAD" FAIL
+  [ -z "$FK_BAD" ] && check "FK1p PLM's frozen copy: show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and its WRITES and CONTINUE verdicts judge that worktree" PASS || check "FK1p fork show --json:$FK_BAD" FAIL
 
   FK_TXT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --anchor "$FK_FORK_WT" 2>/dev/null)"
   FK_BAD=""
@@ -8719,7 +8830,8 @@ else
   printf '%s\n' "$FK_TXT" | grep -qE '^CONTINUE not needed' || FK_BAD="$FK_BAD continue-line"
   printf '%s\n' "$FK_TXT" | grep -qxF "  cd -- '$FK_FORK_WT' && claude --resume '$FK_FORK'" || FK_BAD="$FK_BAD resume-line"
   printf '%s\n' "$FK_TXT" | grep -E '^(WORKTREE|CWD|BRANCH|WRITES|CONTINUE) ' | grep -qF 'parent-wt' && FK_BAD="$FK_BAD names-the-parent-worktree"
-  [ -z "$FK_BAD" ] && check "FK2 show names the fork's own worktree and branch in its WORKTREE, BRANCH, WRITES and CONTINUE lines and in its resume line, and never the parent's" PASS || check "FK2 fork show text:$FK_BAD" FAIL
+  [ -z "$FK_BAD" ] && check "FK2p PLM's frozen copy: show names the fork's own worktree and branch in its WORKTREE, BRANCH, WRITES and CONTINUE lines and in its resume line, and never the parent's" PASS || check "FK2p fork show text:$FK_BAD" FAIL
+  TRAIL_MJS="$HUB_TRAIL_MJS"
 
   FK_OUT="$(fkrun "$FK_TAKER_WT" release "$FK_FORK" --json --force 2>/dev/null)"; FK_RC=$?
   FK_BAD=""
@@ -8923,8 +9035,8 @@ process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "TIMEOUT" : Strin
 
   OM_SB="$FAKE/om-sandbox"
   mkdir -p "$OM_SB/skills/session-trail/scripts" "$OM_SB/hooks/lib"
-  cp "$TRAIL_MJS" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
+  cp "$TRAIL_MJS" "$HUB_SKILL_DIR/scripts/session-lineage-v1.mjs" "$HUB_SKILL_DIR/scripts/linked-sessions-v1.mjs" "$OM_SB/skills/session-trail/scripts/" 2>/dev/null
+  cp "$PLUGIN_DIR/plugins/session-hub/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/plugins/session-hub/hooks/lib/git-environment-v1.js" "$PLUGIN_DIR/plugins/session-hub/hooks/lib/worktree-keep-v1.js" "$OM_SB/hooks/lib/" 2>/dev/null
   OM_BAD=""
   OM_OUT="$(omrun "$OM_SB/skills/session-trail/scripts/trail.mjs" show "$OM_SID" --all --no-git --json --config-dir "$OM_CFG" 2>&1)"
   OM_RC=$?
@@ -9002,7 +9114,452 @@ process.stdout.write(r.error && r.error.code === "ETIMEDOUT" ? "TIMEOUT" : Strin
   [ -z "$OM_BAD" ] \
     && check "OM7b a refused store candidate listed after the store that wins is never read and never counted: lineage --diagnose still marks it REFUSED, show stays clean, and a session absent from the winning store keeps the missing-record wording" PASS \
     || check "OM7b refused candidate after the winning store:$OM_BAD" FAIL
+
+  OM8_PRESETS="$LS_HOME/Library/Application Support/Claude/ccd-session-presets.json"
+  OM8_ASIDE="$LS_HOME/om8-presets-aside.json"
+  om8_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om8.json" 2>/dev/null
+    ls_eval "$LS_HOME/om8.json" 'pick(10).decision + "/" + pick(10).why'
+  }
+  OM_BAD=""
+  cp "$OM8_PRESETS" "$OM8_ASIDE"
+  node -e '
+const fs = require("node:fs");
+const [file, acct] = process.argv.slice(1);
+fs.writeFileSync(file, JSON.stringify({ byAccount: { [acct]: { presets: [{ id: "aaaaaaaa-0000-4000-8000-000000000001", name: "Env Fixture", target: { kind: "ssh" } }] } } }));
+' "$OM8_PRESETS" "$LS_ACCT" 2>/dev/null
+  chmod 644 "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "stays/ssh" ] || OM_BAD="$OM_BAD private=$OM_GOT"
+  chmod 664 "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "if-named/presets-unread" ] || OM_BAD="$OM_BAD group-write=$OM_GOT"
+  OM8_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM8_MD" | grep -qxF -- '- why: the saved environments could not be read or could not be trusted, so whether it runs over SSH is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
+  chmod 644 "$OM8_PRESETS"
+  printf '{"byAccount": ' > "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "if-named/presets-unread" ] || OM_BAD="$OM_BAD unparsable=$OM_GOT"
+  rm -f "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "start/null" ] || OM_BAD="$OM_BAD missing=$OM_GOT"
+  mv "$OM8_ASIDE" "$OM8_PRESETS"
+  chmod 644 "$OM8_PRESETS"
+  OM_GOT="$(om8_take)"
+  [ "$OM_GOT" = "start/null" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM8 a linked session started from an SSH saved environment without sshConfig stays while ccd-session-presets.json is private, waits for the user to name it as presets-unread while that file grants group write or does not parse, and keeps starting while the file is missing or names a local preset (controls)" PASS \
+    || check "OM8 SSH preset decision:$OM_BAD" FAIL
+
+  OM9_ACCT=acc22222-0000-4000-8000-000000000002
+  OM9_ORG=0a9a0a9a-0000-4000-8000-000000000009
+  OM9_DIR="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/$OM9_ACCT/$OM9_ORG"
+  OM9_HOST=local_0a9a0a9a-1111-4111-8111-000000000009
+  OM9_SELF=0a9a0a9a-0000-4000-8000-000000000009
+  OM9_REC="$OM9_DIR/$OM9_HOST.json"
+  OM9_BESIDE="$OM9_DIR/local_0a9a0a9a-1111-4111-8111-000000000010.json"
+  OM9_FULL="CLAUDE_CODE_HOST_SESSION_ID=$OM9_HOST CLAUDE_CODE_ACCOUNT_UUID=$OM9_ACCT CLAUDE_CODE_ORGANIZATION_UUID=$OM9_ORG"
+  OM9_ENV=""
+  mkdir -p "$OM9_DIR"
+  node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [dir, host, self, beside] = process.argv.slice(1);
+fs.writeFileSync(path.join(dir, `${host}.json`), JSON.stringify({ sessionId: host, cliSessionId: self, isArchived: false, title: "om9 running session", createdAt: 4 }));
+fs.writeFileSync(beside, JSON.stringify({ sessionId: path.basename(beside, ".json"), cliSessionId: "0a9a0a9a-0000-4000-8000-000000000010", isArchived: false, title: "om9 started", createdAt: 5, spawnedFrom: { sessionId: host, taskId: "task_om9", title: "om9 started", sideSession: true, name: "cont-00000014" } }));
+' "$OM9_DIR" "$OM9_HOST" "$OM9_SELF" "$OM9_BESIDE" 2>/dev/null
+  om9run() { local self="$1"; shift; env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME -u CLAUDE_CODE_HOST_SESSION_ID -u CLAUDE_CODE_ACCOUNT_UUID -u CLAUDE_CODE_ORGANIZATION_UUID $OM9_ENV CLAUDE_CODE_SESSION_ID="$self" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" "$@" --config-dir "$LS_HOME/.claude"; }
+  om9_take() {
+    (cd "$LS_TAKER" && om9run "$1" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om9.json" 2>/dev/null
+    ls_eval "$LS_HOME/om9.json" '[14, 15].map((n) => pick(n).decision + "/" + pick(n).why).join(",")'
+  }
+  OM9_UNREAD="if-named/started-unread,if-named/started-unread"
+  OM9_OTHER=0a9a0a9a-0000-4000-8000-0000000000ff
+  OM9_SPARE="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/acc33333-0000-4000-8000-000000000003"
+  OM9_BODY="$(cat "$OM9_REC")"
+  OM_BAD=""
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  chmod 664 "$OM9_REC"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record=$OM_GOT"
+  OM9_MD="$(cd "$LS_TAKER" && om9run "$OM9_SELF" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  OM9_WHY="- why: whether this session already started its continuation is unknown, because this session's own Claude Desktop record, or a record beside it, could not be read, or the folder that holds the store could not be trusted: it starts only when the user names it in the plan answer"
+  printf '%s\n' "$OM9_MD" | grep -qxF -- "$OM9_WHY" || OM_BAD="$OM_BAD brief-why"
+  OM9_ENV="CLAUDE_CODE_HOST_SESSION_ID=$OM9_HOST"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record-host-id=$OM_GOT"
+  OM9_ENV=""
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD own-record-no-host=$OM_GOT"
+  chmod 644 "$OM9_REC"
+  printf '{"sessionId":"%s","cliSessionId":"%s",' "$OM9_HOST" "$OM9_SELF" > "$OM9_REC"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD unparsable-no-host=$OM_GOT"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD unparsable=$OM_GOT"
+  printf '%s' "$OM9_BODY" > "$OM9_REC"
+  chmod 775 "$OM9_DIR"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD folder=$OM_GOT"
+  OM9_ENV=""
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD folder-no-host=$OM_GOT"
+  chmod 755 "$OM9_DIR"
+  if [ "$(id -u)" != 0 ]; then
+    chmod 300 "$OM9_DIR"
+    OM_GOT="$(om9_take "$OM9_SELF")"
+    [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD unlisted-folder=$OM_GOT"
+    chmod 755 "$OM9_DIR"
+  fi
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD mismatch=$OM_GOT"
+  OM9_ENV="CLAUDE_CODE_HOST_SESSION_ID=$OM9_HOST"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD mismatch-host-id=$OM_GOT"
+  chmod 664 "$OM9_BESIDE"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD mismatch-beside=$OM_GOT"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD beside=$OM_GOT"
+  chmod 644 "$OM9_BESIDE"
+  OM9_ENV=""
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "start/null,later/cap" ] || OM_BAD="$OM_BAD absent=$OM_GOT"
+  mkdir -p "$OM9_SPARE"
+  chmod 775 "$OM9_SPARE"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "$OM9_UNREAD" ] || OM_BAD="$OM_BAD absent-refused-folder=$OM_GOT"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD found-refused-folder=$OM_GOT"
+  chmod 755 "$OM9_SPARE"
+  rmdir "$OM9_SPARE"
+  OM9_ENV=""
+  chmod 664 "$OM8_PRESETS"
+  OM_GOT="$(om9_take "$OM9_OTHER")"
+  [ "$OM_GOT" = "start/null,start/null" ] || OM_BAD="$OM_BAD absent-presets-refused=$OM_GOT"
+  chmod 644 "$OM8_PRESETS"
+  OM9_ENV="$OM9_FULL"
+  OM_GOT="$(om9_take "$OM9_SELF")"
+  [ "$OM_GOT" = "stays/started,start/null" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  OM9_ENV=""
+  [ -z "$OM_BAD" ] \
+    && check "OM9 a running session whose own record is refused or does not parse, or lies in a folder that is refused or cannot be listed, keeps every linked session that could start waiting for its name as started-unread under the full host environment, the host id alone and none; a session id its record does not carry reads the record the host id names, so the session that record started stays and a refused record beside it leaves the set unknown; with no own record a refused folder anywhere in the store leaves the set unknown, while a clean store and a refused presets file, read after the started set, keep every start (controls)" PASS \
+    || check "OM9 started set of the running session:$OM_BAD" FAIL
+
+  OM10_EDGES="$LS_HOME/.claude/zensu/session-lineage/v1/edges"
+  OM10_EDGE="$OM10_EDGES/1760000000001-fixture.json"
+  OM10_NEWER="$OM10_EDGES/1760000000003-fixture.json"
+  OM10_BODY="$(cat "$OM10_EDGE")"
+  OM10_UNREAD="if-named/ledger-unread"
+  om10_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om10.json" 2>/dev/null
+    ls_eval "$LS_HOME/om10.json" '[8, 13, 1].map((n) => pick(n).decision + "/" + pick(n).why).join(",") + ":" + o.linkedSessions.schemaNewer + ":" + o.linkedSessions.ledgerRefused'
+  }
+  om10_diagnose() {
+    (cd "$LS_TAKER" && lsrun "" lineage --diagnose --json --all) > "$LS_HOME/om10d.json" 2>/dev/null
+    ls_eval "$LS_HOME/om10d.json" 'o.refusedRecords + ":" + o.refusedFiles.map((r) => r.reason + "/" + r.file).join(",")'
+  }
+  OM10_NOTE='_The lineage ledger could not be read completely'
+  OM_BAD=""
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "stays/continued,start/null,start/null:false:0" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  OM10_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM10_MD" | grep -qF -- "$OM10_NOTE" && OM_BAD="$OM_BAD control-note"
+  OM_GOT="$(om10_diagnose)"
+  [ "$OM_GOT" = "0:" ] || OM_BAD="$OM_BAD control-diagnose=$OM_GOT"
+  printf '%s' "${OM10_BODY%?}" > "$OM10_EDGE"
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "$OM10_UNREAD,$OM10_UNREAD,$OM10_UNREAD:false:1" ] || OM_BAD="$OM_BAD corrupt-edge=$OM_GOT"
+  OM10_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM10_MD" | grep -qxF -- '- why: the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
+  printf '%s\n' "$OM10_MD" | grep -F -- "$OM10_NOTE (1 record(s) in " | grep -F -- ' were refused, and `/session-hub:session-trail lineage --diagnose` names each one), so whether a linked session already continues elsewhere is unknown' | grep -qF -- '/session-lineage/v1/edges`' || OM_BAD="$OM_BAD brief-note"
+  OM_GOT="$(om10_diagnose)"
+  [ "$OM_GOT" = "1:corrupt/1760000000001-fixture.json" ] || OM_BAD="$OM_BAD corrupt-diagnose=$OM_GOT"
+  OM10_DT="$(cd "$LS_TAKER" && lsrun "" lineage --diagnose --all 2>/dev/null)"
+  printf '%s\n' "$OM10_DT" | grep -qF -- 'LEDGER REFUSED 1 record(s) could not be read' || OM_BAD="$OM_BAD diagnose-head"
+  printf '%s\n' "$OM10_DT" | grep -qxF -- '  corrupt  1760000000001-fixture.json' || OM_BAD="$OM_BAD diagnose-record"
+  printf '%s' "$OM10_BODY" > "$OM10_EDGE"
+  printf '%s' '{"schemaVersion":2,"from":{"sessionId":"c1c1c1c1-0000-4000-8000-000000000001"},"to":{"sessionId":"d1d1d1d1-0000-4000-8000-000000000001"},"confidence":"confirmed","inferred":false,"reason":"manual","recordedAt":"2026-10-17T10:00:00.000Z"}' > "$OM10_NEWER"
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "stays/continued,$OM10_UNREAD,$OM10_UNREAD:true:1" ] || OM_BAD="$OM_BAD newer-schema=$OM_GOT"
+  OM_GOT="$(om10_diagnose)"
+  [ "$OM_GOT" = "1:schema-newer/1760000000003-fixture.json" ] || OM_BAD="$OM_BAD newer-diagnose=$OM_GOT"
+  rm -f "$OM10_NEWER"
+  OM_GOT="$(om10_take)"
+  [ "$OM_GOT" = "stays/continued,start/null,start/null:false:0" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM10 a linked session whose confirmed lineage edge is a record the ledger read refused, and every session that could start beside a refused record of a newer schema, waits for the user to name it as ledger-unread, the why line in the brief included, while a confirmed edge that was read keeps its session continued; the brief's ledger note and takeover --json count the refused record and lineage --diagnose names it with its reason in both forms; the intact ledger and the restored one decide as before, with no note and nothing refused (controls)" PASS \
+    || check "OM10 refused ledger records:$OM_BAD" FAIL
+
+  OM11_DIR="$LS_HOME/Library/Application Support/Claude"
+  OM11_PRESETS="$OM11_DIR/ccd-session-presets.json"
+  OM11_ASIDE="$LS_HOME/om11-presets-aside.json"
+  OM11_LINK="$LS_HOME/om11-claude-link"
+  om11_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om11.json" 2>/dev/null
+    ls_eval "$LS_HOME/om11.json" 'pick(10).decision + "/" + pick(10).why + "/" + pick(10).preset.name + ":" + o.skipped'
+  }
+  om11_store() {
+    (cd "$LS_TAKER" && env -u CLAUDE_CONFIG_DIR -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME CLAUDE_CODE_SESSION_ID="" ZENSU_CCD_STORE="$1" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" takeover "$LS_ROOT" --all --no-record --json --config-dir "$LS_HOME/.claude") > "$LS_HOME/om11.json" 2>/dev/null
+    ls_eval "$LS_HOME/om11.json" 'pick(10).decision + "/" + pick(10).why + "/" + pick(10).preset.name'
+  }
+  OM_BAD=""
+  cp "$OM11_PRESETS" "$OM11_ASIDE"
+  printf '{"byAccount":{"%s":{"presets":[{"id":"aaaaaaaa-0000-4000-8000-000000000001","name":"Env Fixture","target":{"kind":"ssh"}}]}}}' "$LS_ACCT" > "$OM11_PRESETS"
+  chmod 644 "$OM11_PRESETS"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  OM11_SKIPPED="${OM_GOT##*:}"
+  [ "${OM_GOT%:*}" = "stays/ssh/Env Fixture" ] || OM_BAD="$OM_BAD private-ssh=$OM_GOT"
+  chmod 775 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "${OM_GOT%:*}" = "stays/ssh/Env Fixture" ] || OM_BAD="$OM_BAD group-write-ssh=$OM_GOT"
+  rm -f "$OM11_PRESETS"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "if-named/presets-unread/null:$((OM11_SKIPPED + 1))" ] || OM_BAD="$OM_BAD group-write-missing=$OM_GOT"
+  chmod 1777 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "if-named/presets-unread/null:$((OM11_SKIPPED + 1))" ] || OM_BAD="$OM_BAD sticky-missing=$OM_GOT"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "start/null/null:$OM11_SKIPPED" ] || OM_BAD="$OM_BAD private-missing=$OM_GOT"
+  cp "$OM11_ASIDE" "$OM11_PRESETS"
+  chmod 644 "$OM11_PRESETS"
+  chmod 775 "$OM11_DIR"
+  OM_GOT="$(om11_take)"
+  [ "${OM_GOT%:*}" = "if-named/presets-unread/null" ] || OM_BAD="$OM_BAD group-write-local=$OM_GOT"
+  OM11_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM11_MD" | grep -qxF -- '- saved environment: it could not be named here, so it starts without it; say so in the plan' || OM_BAD="$OM_BAD brief-unnamed"
+  printf '%s\n' "$OM11_MD" | grep -qF -- '- saved environment: `Env Fixture`' && OM_BAD="$OM_BAD brief-named"
+  chmod 755 "$OM11_DIR"
+  OM11_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM11_MD" | grep -qF -- '- saved environment: `Env Fixture`; pass it as `preset`' || OM_BAD="$OM_BAD private-brief-unnamed"
+  ln -s "$OM11_DIR" "$OM11_LINK"
+  OM_GOT="$(om11_store "$OM11_LINK/claude-code-sessions")"
+  [ "$OM_GOT" = "if-named/presets-unread/null" ] || OM_BAD="$OM_BAD symlink-local=$OM_GOT"
+  OM_GOT="$(om11_store "$OM11_DIR/claude-code-sessions")"
+  [ "$OM_GOT" = "start/null/Env Fixture" ] || OM_BAD="$OM_BAD private-override-local=$OM_GOT"
+  rm -f "$OM11_LINK"
+  OM_GOT="$(om11_take)"
+  [ "$OM_GOT" = "start/null/Env Fixture:$OM11_SKIPPED" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  rm -f "$OM11_ASIDE"
+  [ -z "$OM_BAD" ] \
+    && check "OM11 a linked session started from a saved environment without sshConfig waits for the user to name it as presets-unread while the folder that holds ccd-session-presets.json grants group write, is world writable with the sticky bit or is named through a symbolic link, whether the file is missing or names the local preset, the refused folder counts once as skipped and the brief withholds the local preset's name; a preset the file names as SSH keeps its session and its name in that folder too, and the private folder, also named through ZENSU_CCD_STORE, decides and names as before (controls)" PASS \
+    || check "OM11 presets folder:$OM_BAD" FAIL
+
+  OM12_LINK="$LS_HOME/om12-claude-link"
+  om12run() { local self="$1" host="$2" store="$3"; shift 3; env -u CLAUDE_CONFIG_DIR -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME -u CLAUDE_CODE_ACCOUNT_UUID -u CLAUDE_CODE_ORGANIZATION_UUID CLAUDE_CODE_SESSION_ID="$self" CLAUDE_CODE_HOST_SESSION_ID="$host" ZENSU_CCD_STORE="$store" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" "$@" --config-dir "$LS_HOME/.claude"; }
+  om12_take() {
+    (cd "$LS_TAKER" && om12run "$1" "$2" "$3" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om12.json" 2>/dev/null
+    ls_eval "$LS_HOME/om12.json" '[14, 15].map((n) => pick(n).decision + "/" + pick(n).why).join(",") + ":" + o.linkedSessions.storeFolderRefused + ":" + o.skipped'
+  }
+  OM12_STARTED="stays/started,if-named/started-unread"
+  OM12_READS="so the saved environments and the continuations this session started cannot be trusted, and each linked session that depends on them starts only when the user names it."
+  OM12_NOTE="_The folder that holds the Claude Desktop store, \`$OM11_DIR\`, grants group or other write, $OM12_READS It belongs to the user, so remove its group and other write bits._"
+  OM12_REAL="$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$OM11_DIR" 2>/dev/null)"
+  OM12_LINKED="_The folder that holds the Claude Desktop store, \`$OM12_LINK\`, is a symbolic link to \`$OM12_REAL\`, $OM12_READS That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`$OM12_REAL/claude-code-sessions\`, whose folder is then judged instead._"
+  OM12_LINKED_CHMOD="_The folder that holds the Claude Desktop store, \`$OM12_LINK\`, is a symbolic link to \`$OM12_REAL\`, $OM12_READS That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, \`$OM12_REAL/claude-code-sessions\`._"
+  OM12_MOVE="belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns._"
+  OM_BAD=""
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  OM12_SKIPPED="${OM_GOT##*:}"
+  [ "${OM_GOT%:*}" = "stays/started,start/null:false" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qF -- '_The folder that holds the Claude Desktop store, ' && OM_BAD="$OM_BAD control-note"
+  chmod 775 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  [ "$OM_GOT" = "$OM12_STARTED:true:$((OM12_SKIPPED + 1))" ] || OM_BAD="$OM_BAD group-write=$OM_GOT"
+  OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.storeFolder.cause, o.linkedSessions.storeFolder.remedy, o.linkedSessions.storeFolder.override, o.linkedSessions.storeFolder.desktopOwn, o.linkedSessions.storeFolder.reads.join("+")].join(":")')"
+  [ "$OM_GOT" = "shared-write:chmod:false:true:presets+started" ] || OM_BAD="$OM_BAD folder-json=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_NOTE" || OM_BAD="$OM_BAD brief-note"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM9_WHY" || OM_BAD="$OM_BAD brief-why"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" handoff "$LS_ROOT" --all 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_NOTE" || OM_BAD="$OM_BAD handoff-note"
+  OM_GOT="$(om12_take "$OM9_OTHER" "" "")"
+  [ "${OM_GOT%:*}" = "if-named/started-unread,if-named/started-unread:true" ] || OM_BAD="$OM_BAD no-own-record=$OM_GOT"
+  OM12_REC_BODY="$(cat "$OM9_REC")"
+  node -e 'const fs = require("node:fs"); const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); o.sessionId = "om12-not-a-run"; fs.writeFileSync(process.argv[1], JSON.stringify(o));' "$OM9_REC" 2>/dev/null
+  OM_GOT="$(om12_take "$OM9_SELF" "" "")"
+  [ "${OM_GOT%:*}" = "if-named/started-unread,if-named/started-unread:true" ] || OM_BAD="$OM_BAD no-run-id=$OM_GOT"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "" "")"
+  [ "${OM_GOT%:*}" = "start/null,later/cap:false" ] || OM_BAD="$OM_BAD no-run-id-control=$OM_GOT"
+  printf '%s' "$OM12_REC_BODY" > "$OM9_REC"
+  chmod 1777 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  [ "${OM_GOT%:*}" = "$OM12_STARTED:true" ] || OM_BAD="$OM_BAD sticky=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_NOTE" || OM_BAD="$OM_BAD sticky-note"
+  chmod 755 "$OM11_DIR"
+  ln -s "$OM11_DIR" "$OM12_LINK"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "$OM12_LINK/claude-code-sessions")"
+  [ "${OM_GOT%:*}" = "$OM12_STARTED:true" ] || OM_BAD="$OM_BAD symlink=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "$OM12_LINK/claude-code-sessions" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_LINKED" || OM_BAD="$OM_BAD symlink-note"
+  OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.storeFolder.cause, o.linkedSessions.storeFolder.remedy, o.linkedSessions.storeFolder.override, o.linkedSessions.storeFolder.desktopOwn].join(":")')"
+  [ "$OM_GOT" = "symlink:real-path:true:true" ] || OM_BAD="$OM_BAD symlink-json=$OM_GOT"
+  chmod 775 "$OM11_DIR"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "$OM12_LINK/claude-code-sessions" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qxF -- "$OM12_LINKED_CHMOD" || OM_BAD="$OM_BAD symlink-chmod-note"
+  chmod 755 "$OM11_DIR"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "$OM11_DIR/claude-code-sessions")"
+  [ "${OM_GOT%:*}" = "stays/started,start/null:false" ] || OM_BAD="$OM_BAD real-path=$OM_GOT"
+  rm -f "$OM12_LINK"
+  OM12_FOREIGN_TMP="$(node -e 'const fs = require("node:fs"); let st = null; try { st = fs.statSync(fs.realpathSync("/tmp")); } catch {} process.stdout.write(st && typeof process.getuid === "function" && st.uid !== process.getuid() ? "foreign" : "");' 2>/dev/null)"
+  if [ "$OM12_FOREIGN_TMP" = foreign ]; then
+    OM12_TMP_STORE="$(mktemp -d /tmp/zensu-om12-store.XXXXXX)"
+    cp -R "$OM11_DIR/claude-code-sessions/." "$OM12_TMP_STORE/"
+    OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "$OM12_TMP_STORE")"
+    [ "${OM_GOT%:*}" = "$OM12_STARTED:true" ] || OM_BAD="$OM_BAD shared-tmp=$OM_GOT"
+    OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.storeFolder.remedy, o.linkedSessions.storeFolder.override, o.linkedSessions.storeFolder.desktopOwn].join(":")')"
+    [ "$OM_GOT" = "move:true:false" ] || OM_BAD="$OM_BAD shared-tmp-json=$OM_GOT"
+    OM12_MD="$(cd "$LS_TAKER" && om12run "$OM9_SELF" "$OM9_HOST" "$OM12_TMP_STORE" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+    printf '%s\n' "$OM12_MD" | grep -F -- '_The folder that holds the Claude Desktop store, ' | grep -qF -- "$OM12_MOVE" || OM_BAD="$OM_BAD shared-tmp-note"
+    printf '%s\n' "$OM12_MD" | grep -qF -- 'group and other write bits' && OM_BAD="$OM_BAD shared-tmp-chmod"
+    rm -rf "$OM12_TMP_STORE"
+  fi
+  OM12_C10="$LS_STORE/local_00000010-1111-4111-8111-000000000010.json"
+  OM12_C10_BODY="$(cat "$OM12_C10")"
+  node -e 'const fs = require("node:fs"); const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); delete o.startedFromEnvironmentId; fs.writeFileSync(process.argv[1], JSON.stringify(o));' "$OM12_C10" 2>/dev/null
+  chmod 775 "$OM11_DIR"
+  (cd "$LS_TAKER" && om12run "" "" "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om12.json" 2>/dev/null
+  OM_GOT="$(ls_eval "$LS_HOME/om12.json" '[o.linkedSessions.measured, o.linkedSessions.storeFolderRefused, o.linkedSessions.storeFolder].map(String).join(":")')"
+  [ "$OM_GOT" = "true:null:null" ] || OM_BAD="$OM_BAD unjudged=$OM_GOT"
+  OM12_MD="$(cd "$LS_TAKER" && om12run "" "" "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM12_MD" | grep -qF -- '_The folder that holds the Claude Desktop store, ' && OM_BAD="$OM_BAD unjudged-note"
+  chmod 755 "$OM11_DIR"
+  printf '%s' "$OM12_C10_BODY" > "$OM12_C10"
+  OM_GOT="$(om12_take "$OM9_SELF" "$OM9_HOST" "")"
+  [ "$OM_GOT" = "stays/started,start/null:false:$OM12_SKIPPED" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM12 with a running session id, a folder that holds the store and grants group write, is world writable with the sticky bit, or is named through a symbolic link in ZENSU_CCD_STORE leaves the started set unknown, so every linked session that could start waits for its name as started-unread whether or not the running session's own record is found and whether or not that record names a run, while the continuation the read found stays started; the refused folder counts once as skipped, takeover --json names its cause, its remedy, whether its location makes the store Claude Desktop's own, also when ZENSU_CCD_STORE names it, and the reads that judged it, and both briefs name the folder with the remedy its cause and store call for: removing the write bits of a folder the user owns, the store's real path for a link to such a folder, both for a link to a group-writable folder of the user's, and moving a store that is not Claude Desktop's own out of a folder another account owns, never a permission change there; a measured run in which no read judged the folder reports null with no note, while the private folder, also named through its real path, decides as before with no note (controls)" PASS \
+    || check "OM12 store folder:$OM_BAD" FAIL
+
+  OM13_BASE="$LS_HOME/.claude/zensu/session-lineage"
+  om13_take() {
+    (cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/om13.json" 2>/dev/null
+    ls_eval "$LS_HOME/om13.json" '[8, 13, 1].map((n) => pick(n).decision + "/" + pick(n).why).join(",") + ":" + (Array.isArray(o.linkedSessions.newerSchemaLedgers) ? o.linkedSessions.newerSchemaLedgers.map((l) => l.version + "=" + l.records).join("+") || "none" : String(o.linkedSessions.newerSchemaLedgers))'
+  }
+  OM13_KEPT="stays/continued,start/null,start/null:none"
+  OM13_HELD="stays/continued,$OM10_UNREAD,$OM10_UNREAD"
+  OM_BAD=""
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD control=$OM_GOT"
+  mkdir -p "$OM13_BASE/v2/edges"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD empty-newer=$OM_GOT"
+  printf '%s' '{"schemaVersion":2}' > "$OM13_BASE/v2/edges/1760000000009-fixture.json"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_HELD:2=1" ] || OM_BAD="$OM_BAD newer=$OM_GOT"
+  OM13_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+  printf '%s\n' "$OM13_MD" | grep -F -- "$OM10_NOTE (1 record(s) of a newer schema in \`$OM13_BASE/v2/edges\` cannot be read by this build, so update the plugin), so whether a linked session already continues elsewhere is unknown" >/dev/null || OM_BAD="$OM_BAD brief-note"
+  printf '%s\n' "$OM13_MD" | grep -qxF -- '- why: the lineage ledger could not be read completely, so whether it already continues is unknown: it starts only when the user names it in the plan answer' || OM_BAD="$OM_BAD brief-why"
+  if [ "$(id -u)" != 0 ]; then
+    chmod 000 "$OM13_BASE/v2/edges"
+    OM_GOT="$(om13_take)"
+    [ "$OM_GOT" = "$OM13_HELD:2=null" ] || OM_BAD="$OM_BAD unreadable-newer=$OM_GOT"
+    OM13_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+    printf '%s\n' "$OM13_MD" | grep -F -- "$OM10_NOTE (\`$OM13_BASE/v2\` may hold records of a newer schema and could not be inspected), so whether a linked session already continues elsewhere is unknown" >/dev/null || OM_BAD="$OM_BAD unreadable-note"
+    chmod 755 "$OM13_BASE/v2/edges"
+    chmod 300 "$OM13_BASE"
+    OM_GOT="$(om13_take)"
+    [ "$OM_GOT" = "$OM13_HELD:null=null" ] || OM_BAD="$OM_BAD unlisted-base=$OM_GOT"
+    chmod 755 "$OM13_BASE"
+  fi
+  rm -rf "$OM13_BASE/v2"
+  mkdir -p "$LS_HOME/om13-elsewhere/edges"
+  printf '%s' '{"schemaVersion":2}' > "$LS_HOME/om13-elsewhere/edges/1760000000009-fixture.json"
+  ln -s "$LS_HOME/om13-elsewhere" "$OM13_BASE/v2"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_HELD:2=null" ] || OM_BAD="$OM_BAD linked-newer=$OM_GOT"
+  rm -f "$OM13_BASE/v2"
+  rm -rf "$LS_HOME/om13-elsewhere"
+  mkdir -p "$OM13_BASE/v0/edges"
+  printf '%s' '{"schemaVersion":0}' > "$OM13_BASE/v0/edges/1760000000009-fixture.json"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD older=$OM_GOT"
+  rm -rf "$OM13_BASE/v0"
+  OM_GOT="$(om13_take)"
+  [ "$OM_GOT" = "$OM13_KEPT" ] || OM_BAD="$OM_BAD restored=$OM_GOT"
+  [ -z "$OM_BAD" ] \
+    && check "OM13 a record in a ledger directory of a newer schema beside the v1 ledger, and a newer-schema directory that cannot be listed, is a symbolic link or sits in a folder that cannot be listed, keeps every linked session that could start waiting for its name as ledger-unread, with the why line and a ledger note that names each such directory in the brief, while a confirmed edge the v1 read found keeps its session continued and takeover --json lists each directory in newerSchemaLedgers with its record count, or null for one it could not read; an empty newer directory, a populated older one and the restored ledger decide as before with an empty list (controls)" PASS \
+    || check "OM13 newer-schema ledger:$OM_BAD" FAIL
 fi
+
+pl_run() {
+  local script="$1"; shift
+  env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME CLAUDE_CODE_SESSION_ID="" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$script" "$@" --config-dir "$LS_HOME/.claude"
+}
+pl_compare() {
+  node -e '
+    const fs = require("node:fs");
+    const [plmFile, hubFile, root] = process.argv.slice(1);
+    const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+    const PLM_ONLY = new Set(["writes", "continuation"]);
+    const named = (v) => {
+      if (typeof v === "string") return v.split("/session-hub:session-trail").join("/zensu:session-trail").split("session-hub:session-trail").join("zensu:session-trail").split("Zensu Session Hub plugin").join("Zensu plugin");
+      if (Array.isArray(v)) return v.map(named);
+      if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, named(x)]));
+      return v;
+    };
+    const shared = (v) => {
+      if (Array.isArray(v)) return v.map(shared);
+      if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).filter(([k]) => !PLM_ONLY.has(k)).map(([k, x]) => [k, shared(x)]));
+      return v;
+    };
+    const plm = read(plmFile);
+    const hub = read(hubFile);
+    if (!plm || !hub) { process.stdout.write("unreadable"); process.exit(0); }
+    if (!JSON.stringify(plm).includes(root)) { process.stdout.write("no-session"); process.exit(0); }
+    const diffs = [];
+    const walk = (a, b, at) => {
+      if (JSON.stringify(a) === JSON.stringify(b)) return;
+      if (a && b && typeof a === "object" && typeof b === "object" && Array.isArray(a) === Array.isArray(b)) {
+        for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) walk(a[k], b[k], at + "." + k);
+        return;
+      }
+      diffs.push(at);
+    };
+    walk(shared(plm), shared(named(hub)), "$");
+    process.stdout.write(diffs.length ? diffs.slice(0, 12).join(" ") : "equal");
+  ' "$1" "$2" "$3" 2>&1
+}
+PL_DIR="$LS_HOME/pl"
+mkdir -p "$PL_DIR"
+for pl_side in plm hub; do
+  pl_script="$PLM_TRAIL_MJS"
+  [ "$pl_side" = hub ] && pl_script="$HUB_TRAIL_MJS"
+  (cd "$LS_TAKER" && pl_run "$pl_script" show "$LS_ROOT" --all --json) > "$PL_DIR/show-$pl_side.json" 2>/dev/null
+  (cd "$LS_TAKER" && pl_run "$pl_script" takeover "$LS_ROOT" --all --no-record --json) > "$PL_DIR/takeover-$pl_side.json" 2>/dev/null
+done
+PL_SHOW="$(pl_compare "$PL_DIR/show-plm.json" "$PL_DIR/show-hub.json" "$LS_ROOT")"
+PL_TAKE="$(pl_compare "$PL_DIR/takeover-plm.json" "$PL_DIR/takeover-hub.json" "$LS_ROOT")"
+GRADED_COPY=both
+[ "$PL_SHOW" = equal ] && [ "$PL_TAKE" = equal ] \
+  && check "PL1 PLM's frozen trail.mjs and the companion's answer show --all --json and takeover --all --no-record --json for the LS family identically, apart from the command name and PLM's writes and continuation keys" PASS \
+  || check "PL1 PLM's frozen trail.mjs and the companion's disagree (show: $PL_SHOW; takeover: $PL_TAKE)" FAIL
+node -e '
+  const fs = require("node:fs");
+  const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const k = Object.keys(o).find((key) => key !== "writes" && key !== "continuation");
+  o[k] = "drift";
+  fs.writeFileSync(process.argv[2], JSON.stringify(o));
+' "$PL_DIR/takeover-hub.json" "$PL_DIR/takeover-drift.json" 2>/dev/null
+case "$(pl_compare "$PL_DIR/takeover-plm.json" "$PL_DIR/takeover-drift.json" "$LS_ROOT")" in
+  (equal|unreadable|no-session) check "PL1-control a changed field in the companion's takeover --json is not detected" FAIL ;;
+  (*) check "PL1-control a changed field in the companion's takeover --json makes the comparison fail" PASS ;;
+esac
+GRADED_COPY=""
+[ "$UNBOUND_LABELS" -eq 0 ] \
+  && check "PL-copy every check and skip label of this suite named the trail.mjs copy it graded" PASS \
+  || check "PL-copy $UNBOUND_LABELS check or skip labels ran while TRAIL_MJS named neither copy" FAIL
 
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
 report

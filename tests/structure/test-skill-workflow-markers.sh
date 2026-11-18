@@ -5,6 +5,8 @@ set -u
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh" 2>/dev/null || true
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh" 2>/dev/null || true
 source "${CLAUDE_PLUGIN_ROOT}/tests/structure/lib-skill-text.sh" 2>/dev/null || true
+CLI_NOUN_ALIASES="$(node -e 'process.stdout.write(Object.entries(require(process.argv[1]).NOUN_ALIASES).map((pair) => pair.join("=")).join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-words-v1.js" 2>/dev/null)"
+CLI_VERB_ALIASES="$(node -e 'process.stdout.write(Object.entries(require(process.argv[1]).VERB_ALIASES).flatMap(([noun, aliases]) => Object.entries(aliases).map(([alias, verb]) => noun + ":" + alias + "=" + verb)).join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-words-v1.js" 2>/dev/null)"
 
 # Flags a skill that calls a Zensu mutation outside the --workflow-begin/-end
 # markers. Detects two forms: a `zensu <noun> <verb>` CLI invocation that maps to
@@ -19,15 +21,16 @@ skill_cli_mutations() {
 }
 
 skill_cli_tools() {
-  local f="$1" line rest noun verb third
+  local f="$1" line rest noun verb third pair
   for line in $(grep -oE 'zensu +[a-z][a-z-]+ +[a-z][a-z-]+( +[a-z][a-z-]+)?' "$f" | sed -E 's/ +/=/g'); do
     rest="${line#zensu=}"; noun="${rest%%=*}"; rest="${rest#*=}"; verb="${rest%%=*}"; third=""
     case "$rest" in *=*) third="${rest#*=}" ;; esac
-    case "$noun" in                                                # normalize CLI noun aliases (mirror the gate's ALIAS map)
-      product) noun=products ;; feature) noun=features ;; subfeature) noun=subfeatures ;;
-      roadmaps) noun=roadmap ;; tier) noun=tiers ;; sec) noun=security ;;
-      journey) noun=journeys ;; mock) noun=mocks ;; docs) noun=doc ;; kb) noun=knowledge ;; wiki-pages) noun=wiki ;;
-    esac
+    for pair in $CLI_NOUN_ALIASES; do
+      if [ "${pair%%=*}" = "$noun" ]; then noun="${pair#*=}"; break; fi
+    done
+    for pair in $CLI_VERB_ALIASES; do
+      if [ "${pair%%=*}" = "$noun:$verb" ]; then verb="${pair#*=}"; break; fi
+    done
     zensu_cli_to_tool "$noun" "$verb" "$third"
   done
 }
@@ -71,6 +74,25 @@ if zensu_is_zensu_tool "mcpGate" 2>/dev/null || zensu_is_mutation_tool "hooks" 2
   check "T-nontool non-tool token not classified as tool/mutation" FAIL
 else
   check "T-nontool non-tool token not classified as tool/mutation" PASS
+fi
+
+case " $CLI_NOUN_ALIASES " in
+  *" sec=security "*) check "T-alias the CLI noun aliases come from hooks/lib/zensu-cli-words-v1.js" PASS ;;
+  *) check "T-alias the CLI noun aliases could not be read from hooks/lib/zensu-cli-words-v1.js (got '$CLI_NOUN_ALIASES')" FAIL ;;
+esac
+case " $CLI_VERB_ALIASES " in
+  *" work:repos=repositories "*) check "T-verbalias the CLI verb aliases come from hooks/lib/zensu-cli-words-v1.js" PASS ;;
+  *) check "T-verbalias the CLI verb aliases could not be read from hooks/lib/zensu-cli-words-v1.js (got '$CLI_VERB_ALIASES')" FAIL ;;
+esac
+VA_FX="$(mktemp -t skillverb-XXXXXX)"
+printf 'Run `zensu work pol set p1` here.\n' > "$VA_FX"
+VA_PLANTED="$(CLI_VERB_ALIASES="work:pol=policy" skill_cli_tools "$VA_FX")"
+VA_BARE="$(CLI_VERB_ALIASES="" skill_cli_tools "$VA_FX")"
+rm -f "$VA_FX"
+if [ "$VA_PLANTED" = "set_automation_policy" ] && [ -z "$VA_BARE" ]; then
+  check "T-verbalias-apply a verb alias in the module's table reaches the map in its canonical spelling" PASS
+else
+  check "T-verbalias-apply verb alias normalization (planted='$VA_PLANTED' bare='$VA_BARE')" FAIL
 fi
 
 FXD="$(mktemp -d -t skillmark-XXXXXX)"
@@ -257,6 +279,87 @@ for v in $(printf '%s\n' $WO_PLAN_VERBS $MAP_PLAN_VERBS | sort -u); do
 done
 [ "$H_FAIL" -eq 0 ] && check "C6 the work-order gate's HUMAN_PLAN_VERBS are exactly the plan verbs that record a person's decision" PASS || check "C6 HUMAN_PLAN_VERBS drift from the human-decision plan tools ($H_FAIL)" FAIL
 
+window_rows() {
+  local d f t
+  for d in "$1"/skills/*/; do
+    [ -f "${d}SKILL.md" ] || continue
+    f="$(skill_text_file "${d%/}" 2>/dev/null)" || continue
+    for t in $(grep -oE -- '--workflow-begin --tools "[^"]*"' "$f" | sed -E 's/.*"([^"]*)"/\1/' | tr ',\n' '  '); do
+      printf '%s %s\n' "$(basename "$d")" "$t"
+    done
+    rm -f "$f"
+  done
+}
+
+agent_tools() {
+  local t
+  for t in $(grep -oE 'echo "[a-z_]+"' "$1" | sed -E 's/echo "([a-z_]+)"/\1/' | LC_ALL=C sort -u); do
+    zensu_is_mutation_tool "$t" || continue
+    zensu_is_human_decision_tool "$t" && continue
+    zensu_is_work_order_tool "$t" && continue
+    zensu_tool_in_list "$t" "$ZENSU_AI_WORK_CAPTURE_TOOL_NAMES" && continue
+    printf '%s\n' "$t"
+  done
+}
+
+undeclared_tools() {
+  local t
+  for t in $2; do
+    printf '%s\n' "$1" | grep -q " $t\$" || printf '%s\n' "$t"
+  done
+}
+
+route_drift() {
+  local t routes skill entry known=" $(printf '%s ' $2)"
+  for t in $2; do
+    routes="$(zensu_tool_routes "$t")" || { printf 'no-route %s\n' "$t"; continue; }
+    for skill in ${routes//,/ }; do
+      printf '%s\n' "$1" | grep -qxF "$skill $t" || printf 'undeclared-route %s %s\n' "$t" "$skill"
+    done
+  done
+  for entry in $ZENSU_TOOL_ROUTES; do
+    case "$known" in
+      (*" ${entry%%=*} "*) ;;
+      (*) printf 'stale-route %s\n' "${entry%%=*}" ;;
+    esac
+  done
+  for t in $(printf '%s\n' $ZENSU_TOOL_ROUTES | sed 's/=.*//' | LC_ALL=C sort | uniq -d); do
+    printf 'duplicate-route %s\n' "$t"
+  done
+}
+
+WINDOW_ROWS="$(window_rows "$CLAUDE_PLUGIN_ROOT")"
+AGENT_TOOLS="$(agent_tools "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh")"
+AGENT_N="$(printf '%s\n' "$AGENT_TOOLS" | grep -c .)"
+C7_OUT="$(undeclared_tools "$WINDOW_ROWS" "$AGENT_TOOLS")"
+if [ "$AGENT_N" -gt 0 ] && [ -n "$WINDOW_ROWS" ] && [ -z "$C7_OUT" ]; then
+  check "C7 every agent-runnable mutation the CLI map emits ($AGENT_N tools, without person-only decisions, work-order verbs and AI-work capture) is declared by at least one skill window" PASS
+else
+  printf '%s\n' "$C7_OUT" | sed 's/^/      no skill window declares /'
+  check "C7 agent-runnable mutations without a skill window" FAIL
+fi
+C8_OUT="$(route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+if [ "$AGENT_N" -gt 0 ] && [ -z "$C8_OUT" ]; then
+  check "C8 zensu_tool_routes names at least one skill for every agent-runnable mutation, every skill it names declares that tool, and ZENSU_TOOL_ROUTES holds no stale or duplicate entry" PASS
+else
+  printf '%s\n' "$C8_OUT" | sed 's/^/      /'
+  check "C8 the route table drifts from the skill windows" FAIL
+fi
+C7_BITE="$(undeclared_tools "$(printf '%s\n' "$WINDOW_ROWS" | grep -vxF 'change create_roadmap')" "$AGENT_TOOLS")"
+[ "$C7_BITE" = create_roadmap ] \
+  && check "C7b dropping create_roadmap from the /zensu:change window makes C7 name it" PASS \
+  || check "C7b C7 did not name the dropped window tool (got '$C7_BITE')" FAIL
+C8_BITE_MISSING="$(ZENSU_TOOL_ROUTES="${ZENSU_TOOL_ROUTES/create_roadmap=change /}"; route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+C8_BITE_WRONG="$(ZENSU_TOOL_ROUTES="${ZENSU_TOOL_ROUTES/create_roadmap=change /create_roadmap=change,bootstrap }"; route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+C8_BITE_STALE="$(ZENSU_TOOL_ROUTES="$ZENSU_TOOL_ROUTES retired_tool=change create_mock=change"; route_drift "$WINDOW_ROWS" "$AGENT_TOOLS")"
+if [ "$C8_BITE_MISSING" = "no-route create_roadmap" ] \
+  && [ "$C8_BITE_WRONG" = "undeclared-route create_roadmap bootstrap" ] \
+  && [ "$C8_BITE_STALE" = "$(printf '%s\n' 'stale-route retired_tool' 'duplicate-route create_mock')" ]; then
+  check "C8b a dropped route entry, a route to a skill whose window lacks the tool, a stale entry and a duplicate entry each make C8 name it" PASS
+else
+  check "C8b C8 bites (missing '$C8_BITE_MISSING' wrong '$C8_BITE_WRONG' stale '$C8_BITE_STALE')" FAIL
+fi
+
 if command -v node >/dev/null 2>&1; then
   check "AP0 node is available for the argument-placeholder lint" PASS
 else
@@ -394,11 +497,17 @@ for d in "${CLAUDE_PLUGIN_ROOT}"/skills/*/; do
   [ -f "${d}SKILL.md" ] || continue
   PH_SKILLS+=("skills/$(basename "$d")/SKILL.md")
 done
+PH_COMPANION=0
+for d in "${CLAUDE_PLUGIN_ROOT}"/plugins/*/skills/*/; do
+  [ -f "${d}SKILL.md" ] || continue
+  PH_SKILLS+=("${d#"${CLAUDE_PLUGIN_ROOT}"/}SKILL.md")
+  PH_COMPANION=$((PH_COMPANION + 1))
+done
 PH_OUT="$(ph_scan "$CLAUDE_PLUGIN_ROOT" "$PH_ALLOW" ${PH_SKILLS[@]+"${PH_SKILLS[@]}"})"
 PH_BAD="$(printf '%s\n' "$PH_OUT" | grep -E '^(HIT|ALLOW-MISMATCH) ')"
 PH_SCANNED="$(printf '%s\n' "$PH_OUT" | sed -n 's/^SCANNED //p')"
-if [ -z "$PH_BAD" ] && [ "${#PH_SKILLS[@]}" -gt 1 ] && [ "$PH_SCANNED" = "${#PH_SKILLS[@]}" ]; then
-  check "AP1 no skill body carries an argument placeholder in a code span or fenced block beyond the allowlist ($PH_SCANNED skills scanned)" PASS
+if [ -z "$PH_BAD" ] && [ "${#PH_SKILLS[@]}" -gt 1 ] && [ "$PH_COMPANION" -gt 0 ] && [ "$PH_SCANNED" = "${#PH_SKILLS[@]}" ]; then
+  check "AP1 no skill body, the companion plugins' $PH_COMPANION included, carries an argument placeholder in a code span or fenced block beyond the allowlist ($PH_SCANNED skills scanned)" PASS
 else
   printf '%s\n' "${PH_BAD:-$PH_OUT}" | sed 's/^/      /'
   echo "      pass a value into a shell snippet through a named environment variable, or allowlist a deliberate use in PH_ALLOW"
@@ -527,7 +636,7 @@ FT_PROBE="$(mktemp -t skillft-XXXXXX)"
 cat > "$FT_PROBE" <<'NODE'
 'use strict';
 const fs = require('fs');
-const FREE_TEXT = /markdown|json|document|findings|conditions/i;
+const FREE_TEXT = /markdown|json|document|description|findings|conditions/i;
 const ARGUMENT = /--[A-Za-z][\w-]*(?:=|[ \t]+)(["']?)<([^<>\n]+)>\1/g;
 let scanned = 0;
 for (const file of process.argv.slice(2)) {
@@ -558,7 +667,7 @@ FT_OUT="$(ft_scan "$CLAUDE_PLUGIN_ROOT" ${FT_FILES[@]+"${FT_FILES[@]}"})"
 FT_BAD="$(printf '%s\n' "$FT_OUT" | grep -E '^HIT ')"
 FT_SCANNED="$(printf '%s\n' "$FT_OUT" | sed -n 's/^SCANNED //p')"
 if [ -z "$FT_BAD" ] && [ "${#FT_FILES[@]}" -gt 1 ] && [ "$FT_SCANNED" = "${#FT_FILES[@]}" ]; then
-  check "FT1 no skill file passes a Markdown, JSON, document or findings placeholder as a quoted or unquoted flag value ($FT_SCANNED files scanned)" PASS
+  check "FT1 no skill file passes a Markdown, JSON, document, description or findings placeholder as a quoted or unquoted flag value ($FT_SCANNED files scanned)" PASS
 else
   printf '%s\n' "${FT_BAD:-$FT_OUT}" | sed 's/^/      /'
   echo "      write free text to a temporary file through a heredoc with a quoted delimiter and pass \"\$(cat \"\$f\")\""
@@ -566,15 +675,16 @@ else
 fi
 
 FT_MISSING=""
-for ft_skill in docs implement bootstrap ghost-scan security-review autopilot; do
+for ft_skill in docs implement bootstrap ghost-scan security-review autopilot change; do
   ft_md="$CLAUDE_PLUGIN_ROOT/skills/$ft_skill/SKILL.md"
-  grep -qF "<<'ZENSU_TEXT_END'" "$ft_md" && grep -qxF 'ZENSU_TEXT_END' <(sed 's/^ *//' "$ft_md") \
+  grep -qF "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" "$ft_md" && grep -qxF 'ZENSU_TEXT_<hex>' <(sed 's/^ *//' "$ft_md") \
+    && grep -qxF "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" <(sed 's/^ *//' "$ft_md") \
     && grep -qF '"$(cat "$f")"' "$ft_md" && grep -qF "trap 'rm -f \"\$f\"" "$ft_md" \
     || FT_MISSING="$FT_MISSING $ft_skill"
 done
 [ -z "$FT_MISSING" ] \
-  && check "FT2 every skill that uploads free text writes it through a quoted heredoc into a temporary file and passes \"\$(cat \"\$f\")\"" PASS \
-  || check "FT2 skills without the quoted-heredoc file form for free text:$FT_MISSING" FAIL
+  && check "FT2 every skill that uploads free text writes it with >| through a quoted heredoc with a random <hex> delimiter, stops on an empty, blank or binary file and passes \"\$(cat \"\$f\")\"" PASS \
+  || check "FT2 skills without the free-text file form (>|, a <hex> delimiter, the content check, the trap and \"\$(cat \"\$f\")\"):$FT_MISSING" FAIL
 
 FT_FIX="$(mktemp -d -t skillftfix-XXXXXX)"
 mkdir -p "$FT_FIX/bad" "$FT_FIX/good"
@@ -587,15 +697,16 @@ zensu link docs <id> --content "<authored-markdown>"
 zensu ghost scan --candidates '<json>'
 zensu products vision-create --content <plan-document> --source claude-code
 zensu security review <id> --findings="<findings-summary>"
+zensu journeys create --product <id> --description "<journey-description>"
 EOF
 cat > "$FT_FIX/good/SKILL.md" <<'EOF'
 ---
 name: good
 ---
 f="$(mktemp)" || exit 1
-cat > "$f" <<'ZENSU_TEXT_END'
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <authored-markdown>
-ZENSU_TEXT_END
+ZENSU_TEXT_<hex>
 zensu link docs <feature-id> --title "<title>" --content "$(cat "$f")"
 bash "$LOG" --payload '{"headSha":"<sha>"}'
 Return the `<markdown>` you authored, never a `<json>` dump.
@@ -606,13 +717,96 @@ ft_has 'HIT bad/SKILL.md:5 --content "<authored-markdown>"' \
   && ft_has "HIT bad/SKILL.md:6 --candidates '<json>'" \
   && ft_has 'HIT bad/SKILL.md:7 --content <plan-document>' \
   && ft_has 'HIT bad/SKILL.md:8 --findings="<findings-summary>"' \
-  && check "FT3 a double-quoted, a single-quoted, an unquoted and an equals-joined free-text placeholder are flagged at their lines" PASS \
-  || check "FT3 a double-quoted, a single-quoted, an unquoted and an equals-joined free-text placeholder are flagged at their lines" FAIL
-ft_has 'SCANNED 2' && [ "$(printf '%s\n' "$FT_FX_OUT" | grep -c '^HIT ')" = 4 ] \
+  && ft_has 'HIT bad/SKILL.md:9 --description "<journey-description>"' \
+  && check "FT3 a double-quoted, a single-quoted, an unquoted, an equals-joined and a description free-text placeholder are flagged at their lines" PASS \
+  || check "FT3 a double-quoted, a single-quoted, an unquoted, an equals-joined and a description free-text placeholder are flagged at their lines" FAIL
+ft_has 'SCANNED 2' && [ "$(printf '%s\n' "$FT_FX_OUT" | grep -c '^HIT ')" = 5 ] \
   && ! printf '%s\n' "$FT_FX_OUT" | grep -qF 'HIT good/' \
   && check "FT4 frontmatter, a heredoc body, a short placeholder, a JSON literal and prose stay outside the lint" PASS \
   || { printf '%s\n' "$FT_FX_OUT" | sed 's/^/      /'; check "FT4 frontmatter, a heredoc body, a short placeholder, a JSON literal and prose stay outside the lint" FAIL; }
 rm -rf "$FT_FIX" "$FT_PROBE"
+
+FF_PROBE="$(mktemp -t skillff-XXXXXX)"
+cat > "$FF_PROBE" <<'NODE'
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const MD = 'renders headings, lists and code, so write structured Markdown, not one unformatted paragraph';
+const PLAIN = 'plain text: Zensu does not render Markdown there, so do not use Markdown syntax';
+const FILE_FORM = '"$(cat "$';
+const SITES = [
+  ['skills/bootstrap/SKILL.md', 'with name, slug, and product type', MD, true],
+  ['skills/bootstrap/SKILL.md', 'with the structured JSON containing components and features', MD, false],
+  ['skills/bootstrap/SKILL.md', 'Rewrite a vague or unformatted description with', MD, true],
+  ['skills/bootstrap/SKILL.md', 'Create approved journeys with', MD, true],
+  ['skills/bootstrap/SKILL.md', '`--expected-result` are plain text', PLAIN, true],
+  ['skills/bootstrap/SKILL.md', 'for each tier (`--tier-order` ascending', PLAIN, true],
+  ['skills/ghost-scan/SKILL.md', "A candidate's optional `description`", MD, false],
+  ['skills/ghost-scan/SKILL.md', 'per approved journey', MD, true],
+  ['skills/ghost-scan/SKILL.md', 'per step (`--title` and a 1-based', PLAIN, true],
+  ['skills/ghost-scan/SKILL.md', '`--reject-reason` gives every rejected candidate one reason', PLAIN, true],
+  ['skills/ghost-scan/references/cross-component-journeys.md', 'citation into the step `--description`', PLAIN, true],
+  ['skills/security-review/SKILL.md', '`--findings`: the findings summary', MD, false],
+  ['skills/implement/SKILL.md', '`--scope-details` are plain text', PLAIN, true],
+];
+const blocksOf = (raw) => {
+  const blocks = [];
+  let cur = [];
+  for (const line of raw.replace(/\r\n/g, '\n').split('\n')) {
+    const starts = /^\s*$/.test(line) || /^\s*([-*]|\d+\.)\s/.test(line) || /^#/.test(line) || /^\s*```/.test(line);
+    if (starts && cur.length) { blocks.push(cur.join(' ')); cur = []; }
+    if (!/^\s*$/.test(line)) cur.push(line.trim());
+  }
+  if (cur.length) blocks.push(cur.join(' '));
+  return blocks;
+};
+let checked = 0;
+for (const [file, anchor, phrase, fileForm] of SITES) {
+  const blocks = blocksOf(fs.readFileSync(path.join(process.argv[2], file), 'utf8')).filter((b) => b.includes(anchor));
+  const ok = blocks.length === 1 && blocks[0].includes(phrase) && (!fileForm || blocks[0].includes(FILE_FORM));
+  if (!ok) console.log('MISS ' + file + ' ' + anchor + ' (blocks=' + blocks.length + ')');
+  checked++;
+}
+console.log('CHECKED ' + checked);
+NODE
+FF_OUT="$(node "$FF_PROBE" "$CLAUDE_PLUGIN_ROOT" 2>&1)"
+if ! printf '%s\n' "$FF_OUT" | grep -q '^MISS ' && printf '%s\n' "$FF_OUT" | grep -qx 'CHECKED 13'; then
+  check "FT5 each of the 13 free-text field sites of bootstrap, ghost-scan, security-review and implement states its text format, and each flag site passes its value through the file form" PASS
+else
+  printf '%s\n' "$FF_OUT" | sed 's/^/      /'
+  check "FT5 a free-text field site lost its text-format sentence or its file form" FAIL
+fi
+rm -f "$FF_PROBE"
+
+ft6_scan() {
+  grep -rnF --include='*.md' 'ZENSU_TEXT_END' "$1" | sed 's/^/FIXED /'
+  grep -rnE --include='*.md' 'cat[[:space:]]+>[[:space:]]*"\$[A-Za-z_][A-Za-z0-9_]*"[[:space:]]*<<' "$1" | sed 's/^/PLAIN /'
+  grep -rnE --include='*.md' '\[ -s "\$[A-Za-z_][A-Za-z0-9_]*" \] \|\| exit 1' "$1" | sed 's/^/WEAK /'
+}
+FT6_OUT="$(ft6_scan "$CLAUDE_PLUGIN_ROOT/skills")"
+FT6_FIX="$(mktemp -d -t skillft6-XXXXXX)"
+mkdir -p "$FT6_FIX/old" "$FT6_FIX/new"
+printf '%s\n' 'f="$(mktemp)" || exit 1' "cat > \"\$f\" <<'ZENSU_TEXT_END'" '<text>' 'ZENSU_TEXT_END' '[ -s "$f" ] || exit 1' > "$FT6_FIX/old/SKILL.md"
+printf '%s\n' 'f="$(mktemp)" || exit 1' "cat >| \"\$f\" <<'ZENSU_TEXT_<hex>'" '<text>' 'ZENSU_TEXT_<hex>' "grep -qI '[^[:space:]]' -- \"\$f\" || exit 1" > "$FT6_FIX/new/SKILL.md"
+FT6_OLD="$(ft6_scan "$FT6_FIX/old")"
+FT6_NEW="$(ft6_scan "$FT6_FIX/new")"
+rm -rf "$FT6_FIX"
+if [ -z "$FT6_OUT" ] && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^FIXED ')" = 2 ] \
+  && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^PLAIN ')" = 1 ] \
+  && [ "$(printf '%s\n' "$FT6_OLD" | grep -c '^WEAK ')" = 1 ] && [ -z "$FT6_NEW" ]; then
+  check "FT6 no skill file spells the fixed delimiter ZENSU_TEXT_END, writes a heredoc into a temporary file with a plain > or checks it with the weaker [ -s ], and a fixture with all three is flagged" PASS
+else
+  printf '%s\n' "$FT6_OUT" | sed 's/^/      /'
+  check "FT6 a skill file keeps the fixed delimiter, a plain > heredoc write or the weaker [ -s ] check (fixture old='$FT6_OLD' new='$FT6_NEW')" FAIL
+fi
+
+FT7_MD="$CLAUDE_PLUGIN_ROOT/skills/bootstrap/SKILL.md"
+if grep -qxF "[ -f \"\$p\" ] && grep -qI '[^[:space:]]' -- \"\$p\" || exit 1" <(sed 's/^ *//' "$FT7_MD") \
+  && grep -qF -- '--content "$(cat "$p")"' "$FT7_MD" && ! grep -qF '"~/' "$FT7_MD"; then
+  check "FT7 bootstrap passes a plan file by path only after its regular-file and content check, and spells no ~/ path inside double quotes" PASS
+else
+  check "FT7 bootstrap's by-path plan form lacks its regular-file and content check, or spells a ~/ path inside double quotes" FAIL
+fi
 
 echo "----"
 echo "test-skill-workflow-markers: $PASS PASS / $FAIL FAIL"

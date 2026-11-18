@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const mod = await import(new URL('../../skills/session-trail/scripts/linked-sessions-v1.mjs', import.meta.url));
+const mod = await import(new URL('../../plugins/session-hub/skills/session-trail/scripts/linked-sessions-v1.mjs', import.meta.url));
 
 const ESC = String.fromCharCode(27);
 const C1 = String.fromCharCode(0x9b);
@@ -159,6 +159,67 @@ test('an incomplete ledger read starts nothing on its own: each one waits for th
   assert.deepEqual(got, [[true, 'stays', 'continued'], [null, 'if-named', 'ledger-unread'], [null, 'if-named', 'fork']]);
 });
 
+test('a session started from a saved environment waits for the user to name it while the saved environments could not be read, and sshConfig or an SSH preset the incomplete read did find still keeps an SSH session here, while the name of any other preset that read found is withheld', () => {
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-ssh' }),
+    child(2, { startedFromEnvironmentId: 'env-ssh', sshConfig: { host: 'box' } }),
+    child(3),
+    child(4, { startedFromEnvironmentId: 'x'.repeat(129) }),
+  ];
+  const unread = decide(records, { presetsComplete: false });
+  assert.deepEqual(unread.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'presets-unread'], ['stays', 'ssh'], ['start', null], ['start', null]]);
+  assert.ok(unread.sessions[0].start, 'a session that waits for its name carries its start call');
+  assert.deepEqual(unread.sessions[0].preset, { id: 'env-ssh', name: null, kind: null });
+  const presets = mod.presetMap({ byAccount: { acc1: { presets: [{ id: 'env-ssh', name: 'Remote box', target: { kind: 'ssh' } }] } } }, 'acc1');
+  assert.deepEqual(decide(records, { presets }).sessions.map((entry) => entry.why), ['ssh', 'ssh', null, null]);
+  const sshUnread = decide(records, { presets, presetsComplete: false });
+  assert.deepEqual(sshUnread.sessions.map((entry) => [entry.decision, entry.why]), [['stays', 'ssh'], ['stays', 'ssh'], ['start', null], ['start', null]]);
+  assert.deepEqual(sshUnread.sessions[0].preset, { id: 'env-ssh', name: 'Remote box', kind: 'ssh' });
+  const local = mod.presetMap({ byAccount: { acc1: { presets: [{ id: 'env-ssh', name: 'Local box', target: { kind: 'local' } }] } } }, 'acc1');
+  const localUnread = decide(records, { presets: local, presetsComplete: false });
+  assert.deepEqual(localUnread.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'presets-unread'], ['stays', 'ssh'], ['start', null], ['start', null]]);
+  assert.deepEqual(localUnread.sessions[0].preset, { id: 'env-ssh', name: null, kind: null }, 'an incomplete read never names a preset that could place a start');
+  assert.deepEqual(decide(records, { presets: local }).sessions[0].preset, { id: 'env-ssh', name: 'Local box', kind: 'local' });
+  assert.deepEqual(decide(records).sessions.map((entry) => entry.decision), ['start', 'stays', 'start', 'start']);
+  assert.deepEqual(decide(records, { presetsComplete: false, planned: ['cont-00000001'] }).sessions.map((entry) => [entry.decision, entry.why]), [['start', null], ['stays', 'ssh'], ['later', 'unplanned'], ['later', 'unplanned']]);
+  assert.match(mod.LINKED_WHY['presets-unread'], /saved environments could not be read or could not be trusted, so whether it runs over SSH is unknown/);
+});
+
+test('an incomplete started set keeps every session that could start from starting until the user names it, and every stay row still wins', () => {
+  const edges = [{ confidence: 'confirmed', from: { sessionId: cli(5) }, to: { sessionId: 'd1d1d1d1-0000-4000-8000-000000000005' } }];
+  const records = [
+    child(1),
+    child(2),
+    child(3, { sshConfig: { host: 'box' } }),
+    child(4),
+    child(5),
+    child(6, {}, { sideSession: undefined }),
+  ];
+  const options = { edges, self: cli(4), started: new Set(['cont-00000002']), startedComplete: false };
+  const state = decide(records, options);
+  assert.deepEqual(state.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'started-unread'], ['stays', 'started'], ['stays', 'ssh'], ['stays', 'self'], ['stays', 'continued'], ['if-named', 'started-unread']]);
+  assert.ok(state.sessions[0].start && state.sessions[5].start, 'a session that waits for its name carries its start call');
+  assert.deepEqual(decide(records, { ...options, startedComplete: true }).sessions.map((entry) => entry.decision), ['start', 'stays', 'stays', 'stays', 'stays', 'start']);
+  assert.deepEqual(decide(records, { ...options, planned: ['cont-00000006'] }).sessions.map((entry) => [entry.decision, entry.why]), [['later', 'unplanned'], ['stays', 'started'], ['stays', 'ssh'], ['stays', 'self'], ['stays', 'continued'], ['start', null]]);
+  assert.match(mod.LINKED_WHY['started-unread'], /whether this session already started its continuation is unknown/);
+});
+
+test('the rows that wait for a name match in table order, place, fork, presets-unread, ledger-unread, started-unread, and a carried plan that names them starts them all', () => {
+  const env = { startedFromEnvironmentId: 'env-local' };
+  const records = [
+    child(1, { ...env, originCwd: 'relative/path' }, { userFork: true }),
+    child(2, env, { userFork: true }),
+    child(3, env),
+    child(4),
+  ];
+  const unread = { presetsComplete: false, ledgerComplete: false, startedComplete: false };
+  assert.deepEqual(decide(records, unread).sessions.map((entry) => entry.why), ['place', 'fork', 'presets-unread', 'ledger-unread']);
+  assert.deepEqual(decide(records, { ...unread, ledgerComplete: true }).sessions.map((entry) => entry.why), ['place', 'fork', 'presets-unread', 'started-unread']);
+  assert.deepEqual(decide(records, { startedComplete: false }).sessions.map((entry) => entry.why), ['place', 'fork', 'started-unread', 'started-unread']);
+  const names = records.map((record) => mod.continuationName(record.sessionId));
+  assert.deepEqual(decide(records, { ...unread, planned: names }).sessions.map((entry) => [entry.decision, entry.why, entry.planned]), Array(4).fill(['start', null, true]));
+});
+
 test('at most eight sessions start, in creation order, and the rest wait for a later message', () => {
   const records = Array.from({ length: 11 }, (_, i) => child(i + 1, { createdAt: 5000 - i }));
   const state = decide(records);
@@ -238,7 +299,7 @@ test('sessions that cannot or must not be continued stay, each with its reason',
   ], { self: cli(3), started: new Set(['cont-00000004']) });
   const got = state.sessions.map((entry) => [entry.decision, entry.why, entry.start === null]);
   assert.deepEqual(got, [['stays', 'no-session-id', true], ['stays', 'ssh', true], ['stays', 'self', true], ['stays', 'started', true], ['start', null, false]]);
-  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'place', 'fork', 'ledger-unread', 'cap', 'unplanned']) {
+  for (const why of ['no-session-id', 'ssh', 'self', 'started', 'continued', 'btw', 'place', 'fork', 'presets-unread', 'ledger-unread', 'started-unread', 'cap', 'unplanned']) {
     assert.ok(mod.LINKED_WHY[why], why);
   }
 });
@@ -383,8 +444,9 @@ test('the start call is the one the takeover step names, with a bounded title an
   for (const needle of [
     `Continue the linked session "${call.title}"`,
     `Take over Claude Code session ${cli(1)}`,
-    `\`/zensu:session-trail takeover ${cli(1)} --all\``,
-    `the Skill tool with skill \`zensu:session-trail\` and args \`takeover ${cli(1)} --all\``,
+    `\`/session-hub:session-trail takeover ${cli(1)} --all\``,
+    `the Skill tool with skill \`session-hub:session-trail\` and args \`takeover ${cli(1)} --all\``,
+    'with the Zensu Session Hub plugin',
     'steps 0 to 4',
     '`references/takeover.md`',
     'ask your own user in this session to confirm the plan before anything durable',
@@ -542,4 +604,57 @@ test('every chip is listed when this session works in another repository, and on
   }
   assert.equal(mod.chipProposal({ title: 't', prompt: 'p', cwd: REPO }, { checkout, sameRepository: true }).why, null);
   assert.ok(mod.CHIP_WHY.repository.includes('ran outside the repository of the session taken over'));
+});
+
+test('the store-folder remedy fits its cause and its store: a folder the user owns is fixed in place, a folder another account owns is never changed, and Claude Desktop\'s own store is never moved, also when ZENSU_CCD_STORE names it', () => {
+  assert.equal(mod.storeFolderRemedy(null), null);
+  assert.equal(mod.storeFolderRemedy({ cause: null, override: true, desktopOwn: false }), null);
+  assert.equal(mod.storeFolderRemedy({ cause: 'shared-write', override: false, desktopOwn: true }), 'chmod');
+  assert.equal(mod.storeFolderRemedy({ cause: 'shared-write', override: true, desktopOwn: false }), 'chmod');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: true, desktopOwn: false }), 'move');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: true, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'foreign-owner', override: false, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: null, override: false, desktopOwn: true }), 'real-path');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: null, override: true, desktopOwn: false }), 'real-path');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'shared-write', override: true, desktopOwn: true }), 'chmod');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'foreign-owner', override: true, desktopOwn: false }), 'move');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'foreign-owner', override: true, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'foreign-owner', override: false, desktopOwn: true }), 'admin');
+  assert.equal(mod.storeFolderRemedy({ cause: 'symlink', realCause: 'uninspectable', override: true, desktopOwn: false }), 'inspect');
+  assert.equal(mod.storeFolderRemedy({ cause: 'not-directory', override: false, desktopOwn: true }), 'inspect');
+  assert.equal(mod.storeFolderRemedy({ cause: 'uninspectable', override: true, desktopOwn: false }), 'inspect');
+});
+
+test('the store-folder note names the folder, its cause, the reads it decided and the remedy text of every cause and store, with and without a link', () => {
+  const shown = (p) => p;
+  const lead = (dir, cause, reads) => `_The folder that holds the Claude Desktop store, \`${dir}\`, ${cause}, so ${reads} cannot be trusted, and each linked session that depends on them starts only when the user names it.`;
+  const both = 'the saved environments and the continuations this session started';
+  const plain = { dir: '/s', realDir: null, realStore: null, realCause: null, reads: ['presets', 'started'] };
+  const link = { dir: '/l', realDir: '/r', realStore: '/r/store', reads: ['presets', 'started'] };
+  const linkLead = lead('/l', 'is a symbolic link to `/r`', both);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'shared-write', override: false, desktopOwn: true }, shown),
+    `${lead('/s', 'grants group or other write', both)} It belongs to the user, so remove its group and other write bits._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: null, override: false, desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`, whose folder is then judged instead._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'shared-write', override: false, desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to the user and grants group or other write, so remove those bits from it, then set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'foreign-owner', override: true, desktopOwn: false }, shown),
+    `${lead('/s', 'belongs to another account', both)} It belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'foreign-owner', override: true, desktopOwn: false }, shown),
+    `${linkLead} That real folder belongs to another account, and the store, named through \`ZENSU_CCD_STORE\`, is not Claude Desktop's own, so move it into a private folder of the user's own, such as one \`mktemp -d\` makes, and point \`ZENSU_CCD_STORE\` there; never change the permissions of a folder another account owns._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'foreign-owner', override: true, desktopOwn: true }, shown),
+    `${lead('/s', 'belongs to another account', both)} It belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: 'foreign-owner', override: false, desktopOwn: true }, shown),
+    `${linkLead} That real folder belongs to another account and the store is Claude Desktop's own, so never move the store, because Claude Desktop keeps writing there: only an administrator can give that folder back to the user's account without group or other write, after which \`ZENSU_CCD_STORE\` set to the store's real path, \`/r/store\`, has it judged._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'not-directory', override: false, desktopOwn: true }, shown),
+    `${lead('/s', 'is not a directory', both)} Make it a directory of the user's own with no group or other write bit._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'symlink', realDir: null, realCause: 'uninspectable', override: false, desktopOwn: true }, shown),
+    `${lead('/s', 'is a symbolic link', both)} Make it a directory of the user's own with no group or other write bit, then set \`ZENSU_CCD_STORE\` to the store's real path._`);
+  assert.equal(mod.storeFolderNote({ ...link, cause: 'symlink', realCause: null, override: false, desktopOwn: true, reads: ['started'] }, shown),
+    `${lead('/l', 'is a symbolic link to `/r`', 'the continuations this session started')} That real folder belongs to the user and grants no group or other write, so set \`ZENSU_CCD_STORE\` to the store's real path, \`/r/store\`, whose folder is then judged instead._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'uninspectable', override: false, desktopOwn: true, reads: ['presets'] }, (p) => `<${p}>`),
+    `${lead('</s>', 'could not be inspected', 'the saved environments')} Make it a directory of the user's own with no group or other write bit._`);
+  assert.equal(mod.storeFolderNote({ ...plain, cause: 'unknown-cause', override: false, desktopOwn: true, reads: [] }, shown),
+    `${lead('/s', 'could not be inspected', 'what this brief read beside it')} Make it a directory of the user's own with no group or other write bit._`);
 });

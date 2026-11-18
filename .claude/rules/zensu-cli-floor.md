@@ -6,6 +6,9 @@ paths:
   - "hooks/lib/ai-work-preflight-v1.js"
   - "hooks/lib/ai-work-capture-v1.js"
   - "hooks/lib/context-auto-load-v1.js"
+  - "agents/zensu-plm.md"
+  - "skills/implement/references/knowledge-context.md"
+  - "tests/structure/test-knowledge-context.sh"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/session-start-banner.sh"
@@ -14,8 +17,11 @@ paths:
   - "skills/doctor/SKILL.md"
   - "skills/doctor/references/zensu-cli.md"
   - "skills/pilot/SKILL.md"
+  - "skills/pulse/SKILL.md"
+  - "tests/structure/test-pulse-skill.sh"
   - "docs/work-order-mode.md"
   - "docs/operations.md"
+  - "docs/cli-install-update.md"
   - "tests/structure/test-setup-skill.sh"
 ---
 
@@ -36,20 +42,49 @@ fixture's version line to equal `MIN_VERSION`, so raising the floor re-records t
 new floor release's binary. A second lower bound has no case: the capability probe of
 `hooks/lib/context-auto-load-v1.js` needs `knowledge context-pack --agent`,
 `knowledge get --context-load` and `knowledge context-search --query`, which the 0.18.0 archive
-declares. `FLOOR_REASON` says that in one sentence, and the doctor's old row renders it. `INSTALL`
-holds the Homebrew install and upgrade commands, `install.sh` and `install.ps1`. The doctor, the
-session banner, `/zensu:setup` and the work-order refusal in `probe()` of
-`hooks/lib/work-order-v1.js` read the module. Every prose copy — README Install and Requirements,
-the `docs/operations.md` troubleshooting row, the six skill prerequisites, `/zensu:setup`, the
-banner's literals and `docs/work-order-mode.md` — is pinned to it by `P10a`-`P10e` in
-`tests/structure/test-setup-skill.sh`. **Raising the floor is three edits, not one:** the constant,
-a new `FLOOR_REASON` that names what the releases below the new floor get wrong, and the prose
-those checks name. `P10e` then requires the new reason, word for word, in the banner and in the
-README Requirements; a floor raised without a new reason keeps telling users the previous floor's
-reason.
+declares. `FLOOR_REASON` says that in one sentence, and the doctor's old row and the banner's
+old-CLI warning render it. `INSTALL` holds the Homebrew install and upgrade commands, `install.sh`
+and `install.ps1`. The doctor, the session banner, `/zensu:setup` and the work-order refusal in
+`probe()` of `hooks/lib/work-order-v1.js` read the module, and so does the AI-work capture
+preflight, whose `cli_unavailable` and `cli_incompatible` guidance takes the install commands and
+`INSTALL.homebrewUpgrade` from it and names the plugin's install guide by absolute path.
 
-**Warn, never block.** No gate reads the version. An older CLI still runs every command; the doctor
-row and the banner say what an older release gets wrong.
+**The banner's old-CLI warning holds no copy.** The banner's lookup `node` call writes
+`FLOOR_REASON`, `INSTALL.homebrewUpgrade`, `INSTALL.script` and `INSTALL.powershell` as `reason=`,
+`upgrade=`, `script=` and `powershell=` lines after the lookup's own `state=`, `version=` and
+`floor=` lines, and `_zensu_cli_field` reads each line back. The warning runs only when that call
+reported `state=old`, so the module has always loaded by then. The missing-CLI line keeps literal
+install commands, because it must print even when the module did not load.
+
+Every prose copy — README Install and Requirements, the `docs/operations.md` troubleshooting row,
+the §Update block of `docs/cli-install-update.md`, the seven skill prerequisites, `/zensu:setup`, the
+banner's missing-CLI line and `docs/work-order-mode.md` — is pinned to the module by `P10a`-`P10e`
+in `tests/structure/test-setup-skill.sh`. `P10a` and `P10e` also fail when the banner copies the
+upgrade command or the reason again, or stops naming `INSTALL.homebrewUpgrade` or `FLOOR_REASON`;
+`B16a` in `tests/structure/test-session-start-banner.sh` compares the warning the banner prints with
+the module. **Raising the floor is three edits, not one:** the constant, a new `FLOOR_REASON` that
+names what the releases below the new floor get wrong, and the prose those checks name. `P10e`
+then requires the new reason, word for word, in the README Requirements and in `/zensu:setup`
+Phase 0; the banner and the doctor print it from the module. A floor raised without a new reason
+keeps telling users the previous floor's reason.
+
+**One Homebrew upgrade spelling.** `INSTALL.homebrewUpgrade` is
+`brew update && brew upgrade --cask mkitconsulting/tap/zensu`, one command that every surface
+names verbatim. `brew upgrade` runs `brew update` only once `HOMEBREW_AUTO_UPDATE_SECS` has passed
+(brew(1)), so on its own it can miss a release the tap published since, and the tap-qualified name
+is the one `INSTALL.homebrew` installs. The unit file pins the value, and its floor-release case
+requires the preflight's refusal guidance to name it and the install guide's absolute path, and the
+guidance for an absent CLI to name the three install commands. `P10a` proves only that the current
+spelling is present, so the earlier `brew upgrade --cask zensu` could return beside it; `P10f`
+fails when that spelling appears in `README.md` or in any file under `docs/`, `skills/` or `hooks/`,
+and when its scan cannot read the tree. It is the only earlier spelling the history holds.
+`CHANGELOG.md` keeps it as release history, and `P10f` does not read it.
+
+**Warn, never block.** No gate compares the version with the floor. An older CLI still runs, but
+AI-work capture refuses to begin with it: `check()` in `hooks/lib/ai-work-preflight-v1.js` reads
+the CLI's `ai-work` help for the flags `REQUIRED` names and answers `cli_incompatible`, a
+capability probe rather than a version check. The doctor row and the banner say what an older
+release gets wrong.
 
 **The PATH walk is a hand copy of `playwright-cli-version-v1.js`.** It walks `PATH` as the shell
 does and answers `cwd-relative` without running anything when an empty or relative entry comes
@@ -91,26 +126,27 @@ sits on the shrink-only allowlist of `tests/structure/test-skill-text-budget.sh`
 so the skill carries only a pointer to the reference. `P8z15` holds every row phrase against the
 report and the reference, and the pointer against the skill.
 
-**ghost-scan is the exception among the six skills.** Its body sits on the same allowlist at its
+**ghost-scan is the exception among the seven skills.** Its body sits on the same allowlist at its
 exact size, so its prerequisite line keeps the old line's length and names the floor and
 `/zensu:doctor` instead of the commands. Moving detail from that body into `references/` is what
 would make room for the full line.
 
 **Coupled sites.** The module and its unit file; the lookup, the auth probe and the header of
 `hooks/lib/zensu-doctor.sh`; `zensuCliVersionModule`, `zensuInstallClause`, `zensuVersionRow` and
-the `unchecked` arm of `toolBlock` in `hooks/lib/zensu-doctor-report.js`; the CLI lines of
-`hooks/session-start-banner.sh`; `skills/setup/SKILL.md` Phase 0 and Phase 1; the degradation
+the `unchecked` arm of `toolBlock` in `hooks/lib/zensu-doctor-report.js`; the lookup call,
+`_zensu_cli_field` and the CLI lines of `hooks/session-start-banner.sh`; `skills/setup/SKILL.md`
+Phase 0 and Phase 1; the degradation
 ladder of `skills/pilot/SKILL.md`; `skills/doctor/SKILL.md` and its `references/zensu-cli.md`;
 `probe()` in `hooks/lib/work-order-v1.js`; `findBinary` in `hooks/lib/playwright-cli-version-v1.js`,
-through the drift case; `REQUIRED` and `check()` in `hooks/lib/ai-work-preflight-v1.js`, through
-the fixture case; the capability probe of `hooks/lib/context-auto-load-v1.js`, which no case holds;
+through the drift case; `REQUIRED`, `check()` and `guidance` in `hooks/lib/ai-work-preflight-v1.js`,
+through the fixture case; the capability probe of `hooks/lib/context-auto-load-v1.js`, which no case holds;
 the prose copies above. Tests: the unit file, driven by
 `tests/structure/test-doctor.sh` (`P0zv`, `P0zw`); `P8z1`-`P8z15` there; `B16a`-`B16e` in
-`tests/structure/test-session-start-banner.sh`; `P9a`-`P9d` and `P10a`-`P10e` in
+`tests/structure/test-session-start-banner.sh`; `P9a`-`P9d` and `P10a`-`P10f` in
 `tests/structure/test-setup-skill.sh`.
 
-**Sites outside this repository.** Four zensu-cli facts are copied here and nothing checks them
-against the CLI:
+**Sites outside this repository.** Six zensu-cli facts, the last one with the backend behaviour
+behind it, are copied here and nothing checks them against their source:
 
 - the `Not logged in` text of `zensu auth status`. This one fails open: if the CLI rewords it, a
   logged-out CLI reads as authenticated in the doctor, `/zensu:setup` and the `/zensu:pilot` ladder;
@@ -119,7 +155,44 @@ against the CLI:
   `version-check.json`;
 - the version line format of `internal/version`. A change there reads as `unread`, which only warns;
 - the `ai-work` help of zensu-cli 0.18.0 in the fixture. It proves that the floor release satisfies
-  `REQUIRED`, not that a later release still declares every flag.
+  `REQUIRED`, not that a later release still declares every flag;
+- the knowledge help of zensu-cli 0.20.1 (`knowledge search --help`, `knowledge sources --help`),
+  which states the server's behaviour: search indexes each product's features, visions, journeys,
+  wiki pages, feature-doc titles and links (not the linked files), mocks and design assets, plus
+  Zensu's built-in documentation; a source of type external is a registration nothing indexes; and
+  ranking is full-text unless the server has an embedding model, then hybrid, falling back to
+  full-text when the embedding endpoint fails. The search help puts the mocks right after "but not
+  the linked files", which reads as if they were excluded; the sources help lists `mock` and
+  `design` among the sources Zensu syncs, which settles that they are indexed. The Knowledge
+  section of `agents/zensu-plm.md` repeats these facts and
+  `tests/structure/test-knowledge-context.sh` pins that wording, so the suite stays green when the
+  server changes: re-read both help texts when a connector, an artifact type or a ranking mode
+  ships. The trust rule there, Important Rule 14, and its copy in
+  `skills/implement/references/knowledge-context.md` are unconditional on purpose, because the
+  server marks the text members and agents write `internal_verified`, so a rule that exempted that
+  level would invite following it. Search results spell the field `trustLevel`; `knowledge get`
+  items and context-pack nodes spell it `trust_level`. The `--query` placeholders differ on
+  purpose: `knowledge search` matches whole words in its full-text default, so its hint in the plm
+  prompt and in the truncated-pack advice of `hooks/lib/context-auto-load-v1.js` asks for a few
+  terms the artifacts use, while `knowledge context-search` takes a task description by its own
+  help, so the discovery advice keeps `<specific task question>`;
+- the Pulse contract of zensu-cli 0.22.0 (`internal/cmd/pulse.go`, `printJSON` in
+  `internal/cmd/factory.go`) and of the Zensu backend at `7e5a52185`
+  (`backend/internal/handlers/pulse.go`, `backend/internal/services/pulse.go`, migration `000173`).
+  With `--minimal-json`, `pulse start` and `pulse end` print one JSON object indented by two
+  spaces that holds an `id` or `"status": "tracking_disabled"`, and they report every request error
+  as `Pulse request failed` and every malformed answer as `invalid Pulse response`; without the
+  flag the detailed error comes through, and a successful end prints `Ended session <id>`.
+  `--changed-file` repeats. The end refuses more than 1000 paths before it reads the tracking
+  setting, answers `tracking_disabled` when the user has no privacy row or tracking is off, and
+  refuses the whole list for one path that is empty, longer than 500 bytes, absolute, holds a
+  backslash or a control, format, line- or paragraph-separator character, or differs from its
+  `path.Clean` form, as a trailing `/` does. New accounts start with tracking off, and older rows
+  keep their setting. `skills/pulse/SKILL.md`, the Pulse lines of `agents/zensu-plm.md` and the
+  `/zensu:pulse` row of the README's Data & privacy table repeat these facts, and
+  `tests/structure/test-pulse-skill.sh` and `C5` of `tests/structure/test-zensu-plm-arg-guidance.sh`
+  pin the wording, not the facts: re-read the sources when a zensu-cli release changes a `pulse`
+  command and when the backend changes a Pulse limit or the privacy default.
 
 **Version: `patch`.** Advisory banner text, doctor rows and skill text: no schema field, key set,
 hook, matcher, config key or attestation moves.

@@ -119,7 +119,7 @@ else
 fi
 
 # P6 — version sync across plugin.json, marketplace.json, README badge
-MARKET_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+MARKET_VERSION="$(jq -r '[.plugins[] | select(.name == "zensu")] | select(length == 1) | .[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
 if [ "$MARKET_VERSION" = "$EXPECTED_VERSION" ]; then
   check "P6a marketplace.json version ($MARKET_VERSION) == plugin.json ($EXPECTED_VERSION)" PASS
 else

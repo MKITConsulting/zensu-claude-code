@@ -919,7 +919,8 @@ still covers only the LEGACY pointer by name.
 
 - The `SESSION_CONTEXT_UNAVAILABLE` arm in `plan-approved-delegate.sh` is defense in depth, not
   the live path: `zensu_bind_hook_session` refuses an unresolvable session earlier, so the receipt
-  a caller actually sees in that state is `RUNTIME_UNAVAILABLE`. Measured by P8a-P8c in
+  a caller actually sees in that state is the binding-unavailable one, which carries the same
+  `SESSION_CONTEXT_UNAVAILABLE` code. Measured by P8a-P8c in
   `tests/structure/test-autopilot-plan-delegate.sh`, which therefore pin the fail-closed DIRECTION
   (a `PLAN_GATE_BLOCKED` receipt rather than the standalone policy) and not the specific code.
 - `_autopilot_storage_safe` validates the legacy pointer by name; the owner-keyed one is

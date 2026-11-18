@@ -33,6 +33,7 @@ review/fix rounds.
 - Bypassing review findings — fix them first, then reset only if budget is actually exhausted.
 - Disabling the auto-fix loop entirely — use `hooks.autoFix:false` in `~/.zensu/config.json` instead.
 - Raising the cap permanently — set `hooks.autoFixMaxRounds` in the config file.
+- A durable Autopilot attempt whose terminus closed it as `converged` — its run already returned to its stage, so no exhausted chain is left to rearm.
 
 ## Strict Scope
 

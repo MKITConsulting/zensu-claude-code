@@ -132,7 +132,7 @@ test('the gate rides the Bash and PowerShell matcher and names two hook files th
   assert.deepEqual([...consent.CLI_BASENAMES], ['playwright-cli', 'playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']);
   assert.equal(consent.RUN_CONFIG_NAME, 'playwright-cli.json');
   assert.equal(consent.RUN_OUTPUT_DIR_NAME, 'browser');
-  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.21');
+  assert.equal(consent.PLAYWRIGHT_CLI_SOURCE_VERSION, '0.1.24');
 });
 
 test('SESSION_RE admits only a lower-case zensu-verify name of bounded length', () => {
@@ -841,6 +841,10 @@ test('an unknown, denied or repeated flag is refused and the harmless flags pass
   assert.equal(denied(cli('goto --foo http://127.0.0.1:4200/')), `flag '--foo' ${REASONS.FLAG_DENIED}`);
   assert.equal(denied(cli('screenshot --filename=shot.png')), `flag '--filename' ${REASONS.FLAG_DENIED}`);
   assert.equal(denied(cli('open --save-video=run.webm --config=/tmp/playwright-cli.json')), `flag '--save-video' ${REASONS.FLAG_DENIED}`);
+  for (const [rest, flag] of [['tab-new --isolated-context=probe http://127.0.0.1:4200/', 'isolated-context'], ['find --filename=hits.md login', 'filename'],
+    ['find --max-results=3 login', 'max-results'], ['console --all', 'all'], ['requests --all', 'all']]) {
+    assert.equal(denied(cli(rest)), `flag '--${flag}' ${REASONS.FLAG_DENIED}`, rest);
+  }
   assert.equal(denied(cli('snapshot --depth=3 --depth=4')), "flag '--depth' is given more than once");
   assert.equal(denied(cli('open --config=/a.json --config=/b.json')), "flag '--config' is given more than once");
   assert.deepEqual(decide(cli('snapshot --json')), { verdict: 'none', plan: [] });
@@ -2019,4 +2023,484 @@ test('the CLI entry answers pre and post and refuses any other mode', () => {
   assert.equal(recorded.status, 0, recorded.stderr);
   assert.equal(recorded.stdout, '');
   assert.equal(recorded.stderr.includes('zensu: verify consent memory not written (no bound session)\n'), true);
+});
+
+const AUTH_SESSION = 'zensu-verify-auth-run1';
+const STATE_SECRET = 'eyJhbGciOiJIUzI1NiJ9.signed-in-session';
+const COMMANDS_FIXTURE = path.join(__dirname, 'fixtures', 'playwright-cli-commands.v1.json');
+const LOOPBACK = 'http://127.0.0.1:4200';
+const STATE_SHAPE_FAULT = 'the run config may restore a signed-in state only from auth/storage-state.json beside it, inside a .zensu/verify-feature-runs run directory';
+
+function authCli(rest) {
+  return `playwright-cli -s=${AUTH_SESSION} ${rest}`;
+}
+
+function signedInState(origin) {
+  return {
+    cookies: [{ name: 'sid', value: STATE_SECRET, domain: new URL(origin).hostname, path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' }],
+    origins: [{ origin, localStorage: [{ name: 'token', value: STATE_SECRET }] }],
+  };
+}
+
+function stateRun(t, origins, rules = [], options = {}) {
+  const root = tempDir(t, 'zensu-state-project-');
+  const runDir = path.join(root, '.zensu', 'verify-feature-runs', options.leaf || 'run1');
+  fs.mkdirSync(runDir, { recursive: true });
+  const config = buildConfig(runDir, origins, rules);
+  const statePath = path.join(runDir, 'auth', 'storage-state.json');
+  config.browser.contextOptions.storageState = statePath;
+  const file = path.join(runDir, consent.RUN_CONFIG_NAME);
+  fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  fs.mkdirSync(path.dirname(statePath), { mode: 0o700 });
+  const state = options.state === undefined ? signedInState(origins[0]) : options.state;
+  const mode = options.mode || 0o600;
+  fs.writeFileSync(statePath, typeof state === 'string' ? state : JSON.stringify(state), { mode });
+  if (process.platform !== 'win32') fs.chmodSync(statePath, mode);
+  return { root, runDir, file, statePath, config };
+}
+
+function restoringOpen(run, origin = LOOPBACK) {
+  return authCli(`open --config='${run.file}' ${origin}/`);
+}
+
+test('a run config restores state only from auth/storage-state.json beside it, inside a verify-feature run directory', (t) => {
+  const run = stateRun(t, [LOOPBACK]);
+  const shape = consent.runConfigShape(run.config, run.file);
+  assert.equal(shape.ok, true, shape.fault);
+  assert.equal(shape.statePath, run.statePath);
+  assert.equal(consent.readRunConfig(run.file).statePath, run.statePath);
+  const plain = runConfig(t, [LOOPBACK]);
+  assert.equal(consent.runConfigShape(plain.config, plain.file).statePath, null);
+  const variant = (mutate, base = run) => {
+    const copy = structuredClone(base.config);
+    mutate(copy);
+    return consent.runConfigShape(copy, base.file).fault;
+  };
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = signedInState(LOOPBACK); }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = 'auth/storage-state.json'; }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(run.runDir, 'storage-state.json'); }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(run.runDir, 'auth', 'other.json'); }), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.storageState = path.join(plain.runDir, 'auth', 'storage-state.json'); }, plain), STATE_SHAPE_FAULT);
+  assert.equal(variant((c) => { c.browser.contextOptions.viewport = { width: 1, height: 1 }; }),
+    'the run config must block service workers and set nothing else on the context');
+  assert.equal(variant((c) => { c.browser.contextOptions.serviceWorkers = 'allow'; }),
+    'the run config must block service workers and set nothing else on the context');
+});
+
+test('a restoring open runs only on a zensu-verify-auth session, asks with the signed-in sentence and is remembered only by a restored record', (t) => {
+  const env = isolatedEnv(t);
+  const run = stateRun(t, [LOOPBACK]);
+  assert.equal(denied(cli(`open --config='${run.file}' ${LOOPBACK}/`), { env }), REASONS.STATE_NEEDS_AUTH_SESSION);
+  const asked = decide(restoringOpen(run), { env });
+  assert.equal(asked.verdict, 'ask');
+  assert.match(asked.prompt, /The browser opens signed in: its state was restored from the recipe's login script, so the model can reach every page that account can reach on this origin\./);
+  assert.equal(asked.prompt.includes(STATE_SECRET), false);
+  assert.deepEqual(asked.plan, [{ origin: LOOPBACK, route: '/', decidedBy: 'asked', restoredState: true }]);
+  assert.equal(decide(restoringOpen(run), { env, records: [record(LOOPBACK)] }).verdict, 'ask');
+  const restored = [{ ...record(LOOPBACK), restoredState: true }];
+  const remembered = decide(restoringOpen(run), { env, records: restored });
+  assert.equal(remembered.verdict, 'none');
+  assert.deepEqual(remembered.plan, [{ origin: LOOPBACK, route: '/', decidedBy: 'remembered', restoredState: true }]);
+  const plain = runConfig(t, [LOOPBACK]);
+  assert.equal(decide(cli(`open --config='${plain.file}' ${LOOPBACK}/`), { env, records: restored }).verdict, 'none');
+  const plainOnAuth = decide(authCli(`open --config='${plain.file}' ${LOOPBACK}/`), { env });
+  assert.equal(plainOnAuth.verdict, 'ask');
+  assert.equal(plainOnAuth.prompt.includes('signed in'), false);
+  assert.equal(plainOnAuth.plan[0].restoredState, undefined);
+  const navigation = decide(authCli('goto http://127.0.0.1:4201/'), { env, records: [record('http://127.0.0.1:4201')] });
+  assert.equal(navigation.verdict, 'ask');
+  assert.match(navigation.prompt, /The browser session is signed in: its state was restored from the recipe's login script/);
+  assert.equal(decide(authCli(`goto ${LOOPBACK}/admin`), { env, records: restored }).verdict, 'none');
+  assert.equal(decide(cli('goto http://127.0.0.1:4201/'), { env, records: [record('http://127.0.0.1:4201')] }).verdict, 'none');
+});
+
+test('a restored remote open asks at every open with the signed-in sentence, and a policy target passes silently', (t) => {
+  const env = isolatedEnv(t);
+  const run = stateRun(t, ['https://app.example.com'], [...APP_PIN]);
+  const restored = [{ ...record('https://app.example.com'), restoredState: true }];
+  const asked = decide(restoringOpen(run, 'https://app.example.com'), { env, records: restored, payload: HUMAN });
+  assert.equal(asked.verdict, 'ask');
+  assert.match(asked.prompt, /\(remote\)\. The browser opens signed in:/);
+  assert.equal(asked.plan[0].restoredState, true);
+  const policy = policyOf('remote', [{ origin: 'https://app.example.com', evidenceMode: 'declared-safe' }]);
+  const silent = decide(restoringOpen(run, 'https://app.example.com'), { env, policy, payload: { permission_mode: 'bypassPermissions' } });
+  assert.equal(silent.verdict, 'none');
+  assert.deepEqual(silent.plan, [{ origin: 'https://app.example.com', route: '/', decidedBy: 'policy-mode', restoredState: true }]);
+});
+
+test('a restoring open is denied with a fixed reason when its state file is missing, unsafe, out of scope or not storage state', (t) => {
+  const env = isolatedEnv(t);
+  const open = (run) => denied(restoringOpen(run), { env });
+  const missing = stateRun(t, [LOOPBACK]);
+  fs.rmSync(missing.statePath);
+  assert.equal(open(missing), REASONS.STATE_CONSUMED);
+  const garbage = stateRun(t, [LOOPBACK], [], { state: STATE_SECRET });
+  const reason = open(garbage);
+  assert.equal(reason, REASONS.STATE_INVALID);
+  assert.equal(reason.includes('eyJ'), false);
+  const scoped = stateRun(t, [LOOPBACK], [], { state: { cookies: [{ name: 'sid', value: 'v', domain: 'tracker.example.net' }], origins: [] } });
+  assert.equal(open(scoped), REASONS.STATE_INVALID);
+  const empty = stateRun(t, [LOOPBACK], [], { state: { cookies: [], origins: [] } });
+  assert.equal(open(empty), REASONS.STATE_INVALID);
+  const outsideOrigin = stateRun(t, [LOOPBACK], [], { state: { cookies: [], origins: [{ origin: 'http://127.0.0.1:9999', localStorage: [] }] } });
+  assert.equal(open(outsideOrigin), REASONS.STATE_INVALID);
+  for (const key of ['STATE_NEEDS_AUTH_SESSION', 'STATE_CONSUMED', 'STATE_UNSAFE', 'STATE_INVALID', 'AUTH_SIGNAL_DENIED']) {
+    assert.equal(consent.FINAL_REASONS.includes(key), true, key);
+    assert.equal(consent.SHAPE_REASONS.includes(key), false, key);
+  }
+  if (process.platform === 'win32') return;
+  const wide = stateRun(t, [LOOPBACK], [], { mode: 0o644 });
+  assert.equal(open(wide), REASONS.STATE_UNSAFE);
+  const linked = stateRun(t, [LOOPBACK]);
+  const elsewhere = path.join(linked.runDir, 'elsewhere.json');
+  fs.renameSync(linked.statePath, elsewhere);
+  fs.symlinkSync(elsewhere, linked.statePath);
+  assert.equal(open(linked), REASONS.STATE_UNSAFE);
+});
+
+test('console and requests are denied on every zensu-verify-auth session and stay available on a plain one', () => {
+  assert.deepEqual([...consent.AUTH_SIGNAL_COMMANDS], ['console', 'requests']);
+  assert.equal(consent.AUTH_SESSION_PREFIX, 'zensu-verify-auth-');
+  for (const command of ['console', 'console error', 'console --clear', 'requests', 'requests --static', 'requests --clear']) {
+    const name = command.split(' ')[0];
+    assert.equal(denied(authCli(command)), `command '${name}' ${REASONS.AUTH_SIGNAL_DENIED}`, command);
+    assert.equal(decide(cli(command)).verdict, 'none', command);
+  }
+  for (const command of ['snapshot', 'screenshot', 'click e1', 'tab-list', 'close', 'list']) {
+    assert.equal(decide(authCli(command)).verdict, 'none', command);
+  }
+});
+
+test('every command of the measured playwright-cli outside the allowlist, every getter and exporter of the auth specification included, is denied on plain and signed-in sessions', () => {
+  const fixture = JSON.parse(fs.readFileSync(COMMANDS_FIXTURE, 'utf8'));
+  assert.equal(fixture.version, consent.PLAYWRIGHT_CLI_SOURCE_VERSION);
+  const names = Object.keys(fixture.commands);
+  assert.equal(names.length, 102);
+  for (const name of Object.keys(consent.ALLOWED_COMMANDS)) assert.equal(names.includes(name), true, `${name} is a measured command`);
+  const named = ['state-save', 'state-load', 'eval', 'run-code', 'config-print', 'request', 'route', 'route-list', 'unroute',
+    'network-state-set', 'delete-data', 'upload', 'drop', 'pdf', 'attach', 'detach', 'close-all', 'kill-all'];
+  const families = [/^cookie-/, /^localstorage-/, /^sessionstorage-/, /^request-/, /^response-/, /^recording-/, /^tracing-/, /^video-/, /^install/];
+  for (const name of named) assert.equal(names.includes(name), true, `${name} is a measured command`);
+  for (const family of families) assert.equal(names.some((name) => family.test(name)), true, String(family));
+  const outside = names.filter((name) => !Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, name));
+  const credentialRevealing = [...named, ...names.filter((name) => families.some((family) => family.test(name)))];
+  for (const name of credentialRevealing) assert.equal(outside.includes(name), true, `${name} stays outside the allowlist`);
+  for (const session of [SESSION, AUTH_SESSION]) {
+    for (const name of outside) {
+      assert.equal(denied(`playwright-cli -s=${session} ${name}`), `command '${name}' ${REASONS.COMMAND_DENIED}`, `${session} ${name}`);
+    }
+  }
+  const required = { filename: false, persistent: false, profile: false };
+  for (const session of [SESSION, AUTH_SESSION]) {
+    for (const [command, flags] of Object.entries(fixture.commands)) {
+      if (!Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, command)) continue;
+      for (const flag of flags) {
+        if (consent.ALLOWED_COMMANDS[command].includes(flag) || ['json', 'raw', 'help', 'version'].includes(flag)) continue;
+        if (Object.prototype.hasOwnProperty.call(required, flag)) required[flag] = true;
+        const spelled = consent.CLI_BOOLEAN_OPTIONS.includes(flag) ? `--${flag}` : `--${flag}=x`;
+        const expected = session === AUTH_SESSION && consent.AUTH_SIGNAL_COMMANDS.includes(command)
+          ? `command '${command}' ${REASONS.AUTH_SIGNAL_DENIED}`
+          : `flag '--${flag}' ${REASONS.FLAG_DENIED}`;
+        assert.equal(denied(`playwright-cli -s=${session} ${command} ${spelled}`), expected, `${session} ${command} ${spelled}`);
+      }
+    }
+  }
+  assert.deepEqual(required, { filename: true, persistent: true, profile: true });
+});
+
+test('the recorded command list equals the help.json of the installed playwright-cli when the measured version is installed', (t) => {
+  const installed = cliVersion.installedVersion(process.env);
+  if (installed.source !== 'manifest' || installed.version !== consent.PLAYWRIGHT_CLI_SOURCE_VERSION) {
+    t.skip(`playwright-cli ${consent.PLAYWRIGHT_CLI_SOURCE_VERSION} is not installed here (${installed.source})`);
+    return;
+  }
+  const packageDir = path.dirname(fs.realpathSync(cliVersion.findBinary(process.env)));
+  const tail = ['playwright-core', 'lib', 'tools', 'cli-client', 'help.json'];
+  const help = [path.join(packageDir, 'node_modules', ...tail), path.join(packageDir, '..', '..', ...tail)].find((file) => fs.existsSync(file));
+  if (!help) {
+    t.skip('the installed playwright-cli carries no playwright-core help.json beside it');
+    return;
+  }
+  const doc = JSON.parse(fs.readFileSync(help, 'utf8'));
+  const recorded = {};
+  for (const name of Object.keys(doc.commands).sort()) recorded[name] = Object.keys(doc.commands[name].flags || {}).sort();
+  assert.deepEqual(recorded, JSON.parse(fs.readFileSync(COMMANDS_FIXTURE, 'utf8')).commands);
+});
+
+test('the recorder deletes the restored state after every open that reached it, interrupted or not, and records the approval as restored', (t) => {
+  const { root, memory } = project(t);
+  const env = { ...isolatedEnv(t), ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory };
+  const err = sink();
+  const run = stateRun(t, [LOOPBACK]);
+  const result = consent.runPost(post(restoringOpen(run)), env, err);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.consumed, [run.statePath]);
+  assert.equal(fs.existsSync(run.statePath), false);
+  const read = consent.readConsentMemory(memory, root);
+  assert.deepEqual(read.records.map(({ origin, route, decidedBy, restoredState }) => ({ origin, route, decidedBy, restoredState })),
+    [{ origin: LOOPBACK, route: '/', decidedBy: 'asked', restoredState: true }]);
+  assert.equal(denied(restoringOpen(run), { env, records: read.records }), REASONS.STATE_CONSUMED);
+  const interrupted = stateRun(t, [LOOPBACK], [], { leaf: 'run2' });
+  const skipped = consent.runPost(post(restoringOpen(interrupted), { tool_response: { interrupted: true } }), env, err);
+  assert.deepEqual(skipped, { ok: true, skipped: 'interrupted', consumed: [interrupted.statePath] });
+  assert.equal(fs.existsSync(interrupted.statePath), false);
+  const unbound = stateRun(t, [LOOPBACK], [], { leaf: 'run3' });
+  assert.deepEqual(consent.runPost(post(restoringOpen(unbound)), { PWTEST_CLI_GLOBAL_CONFIG: env.PWTEST_CLI_GLOBAL_CONFIG }, sink()),
+    { ok: false, reason: 'no-bound-session', consumed: [unbound.statePath] });
+  const kept = stateRun(t, [LOOPBACK], [], { leaf: 'run4' });
+  assert.deepEqual(consent.runPost(post(authCli('snapshot')), env, err), { ok: true, skipped: 'nothing-to-record' });
+  assert.deepEqual(consent.runPost(post(`ls '${kept.statePath}'`), env, err), { ok: true, skipped: 'nothing-to-record' });
+  assert.equal(fs.existsSync(kept.statePath), true);
+  assert.equal(err.text(), '');
+});
+
+test('consent records carry restoredState only as true, and a restored and a plain approval of one route are kept apart', (t) => {
+  const { root, memory } = project(t);
+  const plain = record(LOOPBACK);
+  const restored = { ...record(LOOPBACK), restoredState: true };
+  assert.equal(consent.validRecord(restored), true);
+  assert.equal(consent.validRecord({ ...plain, restoredState: false }), false);
+  assert.equal(consent.validRecord({ ...plain, restoredState: 'yes' }), false);
+  assert.equal(consent.appendRecord(memory, plain, { projectRoot: root }).duplicate, false);
+  assert.equal(consent.appendRecord(memory, restored, { projectRoot: root }).duplicate, false);
+  assert.equal(consent.appendRecord(memory, restored, { projectRoot: root }).duplicate, true);
+  assert.equal(consent.appendRecord(memory, plain, { projectRoot: root }).duplicate, true);
+  const read = consent.readConsentMemory(memory, root);
+  assert.equal(read.ok, true);
+  assert.deepEqual(read.records.map((entry) => entry.restoredState === true), [false, true]);
+  assert.equal(JSON.parse(fs.readFileSync(memory, 'utf8')).version, consent.MEMORY_VERSION);
+});
+
+test('commandMarkers marks a run directory and a config channel beside the session markers', () => {
+  const pick = (marks) => ({ cli: marks.cli, runs: marks.runs, config: marks.config });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine open --config=/p/.zensu/verify-feature-runs/r/playwright-cli.json', {})), { cli: true, runs: true, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine open --con"fig" x.json', {})), { cli: true, runs: false, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('PLAYWRIGHT_MCP_CONFIG=x.json playwright-cli open', {})), { cli: true, runs: false, config: true });
+  assert.deepEqual(pick(consent.commandMarkers('ls .zensu\\VERIFY-FEATURE-RUNS', {})), { cli: false, runs: true, config: false });
+  assert.deepEqual(pick(consent.commandMarkers('playwright-cli -s=mine snapshot', {})), { cli: true, runs: false, config: false });
+});
+
+test('a playwright-cli call on any session but a zensu-verify one is denied with a final reason when its command names a run directory', () => {
+  const runDir = '/p/.zensu/verify-feature-runs/run-a1';
+  const config = `${runDir}/playwright-cli.json`;
+  const cases = [
+    [`playwright-cli -s=zvprobe-state1 open --config=${config}`, {}],
+    [`playwright-cli open --config ${config}`, {}],
+    [`PLAYWRIGHT_CLI_SESSION=mine playwright-cli open --config=${config}`, {}],
+    [`playwright-cli open --config=${config}`, { PLAYWRIGHT_CLI_SESSION: 'mine' }],
+    [`playwright-cli -s=mine open --config=${config}`, { PLAYWRIGHT_CLI_SESSION: SESSION }],
+    [`playwright-cli -s=mine state-load ${runDir}/auth/storage-state.json`, {}],
+    [`PLAYWRIGHT_MCP_STORAGE_STATE=${runDir}/auth/storage-state.json playwright-cli -s=mine open`, {}],
+    [`cp ${config} /tmp/c.json && playwright-cli -s=mine open --config=/tmp/c.json`, {}],
+    [`playwright-cli -s="$S" open --config=${config}`, {}],
+    [`bash -c 'playwright-cli -s=mine open --config=${config}'`, {}],
+    [`xargs playwright-cli -s=mine open --config < ${runDir}/list`, {}],
+    [`grep -r playwright-cli ${runDir}`, {}],
+    [`~/bin/playwright-cli -s=mine open --config=${config}`, {}],
+    [`$'playwright-cli' -s=mine open --config=${config}`, {}],
+    [`playwright-cli$'' -s=mine open --config=${config}`, {}],
+    [`node "$(command -v playwright-cli)" -s=mine open --config=${config}`, {}],
+    [`"\${PW:-playwright-cli}" -s=mine open --config=${config}`, {}],
+    [`{playwright-cli,} -s=mine open --config=${config}`, {}],
+    [`playwright-cli.{cmd,json} -s=mine open --config=${config}`, {}],
+    [`playwright-cli\`true\` -s=mine open --config=${config}`, {}],
+    [`$'playwright-cli\\x00.json' -s=mine open --config=${config}`, {}],
+    [`$(basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    [`"$(basename playwright-cli.json .json)" -s=mine open --config=${config}`, {}],
+    [`\${\${:-playwright-cli.json}:r} -s=mine open --config=${config}`, {}],
+    [`xargs $(basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    [`$(true ')'; basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    [`$(true \\); basename playwright-cli.json .json) -s=mine open --config=${config}`, {}],
+    ['`echo \\`basename playwright-cli.json .json\\`` -s=mine open --config=' + config, {}],
+    [`cat "$(git rev-parse --show-toplevel)/.zensu/verify-feature-runs/r/playwright-cli.json"`, {}],
+  ];
+  for (const [command, env] of cases) assert.equal(denied(command, { env }), REASONS.RUN_DIR_OFF_SESSION, command);
+  assert.notEqual(decide(cli(`open --config=${config}`)).reason, REASONS.RUN_DIR_OFF_SESSION);
+  assert.equal(denied(`playwright-cli -S=${SESSION} open --config=${config}`), REASONS.SESSION_UNRESOLVED);
+  assert.deepEqual(decide('playwright-cli -s=mine snapshot'), { verdict: 'none' });
+  assert.deepEqual(decide(`ls ${runDir}/browser`), { verdict: 'none' });
+  for (const command of [
+    `cat ${config}`,
+    `jq . ${config}`,
+    `cp ${config} /tmp/copy.json`,
+    `cd /u/playwright-cli && rm -rf ${runDir}`,
+    'node scripts/verify-browser-config.js --discard-state --run-dir /u/playwright-cli-demo/.zensu/verify-feature-runs/r',
+    'mkdir -p /u/playwright-cli-demo/.zensu/verify-feature-runs/r',
+    'cat /p/.zensu/verify-feature-runs/*/playwright-cli.json',
+    'mkdir -p ~/playwright-cli-demo/.zensu/verify-feature-runs/r',
+    'ls "$HOME"/playwright-cli-tests/.zensu/verify-feature-runs',
+    'ls ~/playwright-cli-tests/$(date +%Y)/.zensu/verify-feature-runs',
+  ]) assert.deepEqual(decide(command), { verdict: 'none' }, command);
+  assert.deepEqual(
+    decide(`$(case x in x) basename playwright-cli.json .json;; esac) -s=mine open --config=${config}`),
+    { verdict: 'none' },
+    'a case pattern closing parenthesis ends the substitution in the lexer, so the name behind it is unseen, as docs/gates.md states',
+  );
+  for (const key of ['RUN_DIR_OFF_SESSION', 'STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION', 'POWERSHELL_OFF_SESSION_NOT_JUDGED']) {
+    assert.equal(consent.FINAL_REASONS.includes(key), true, key);
+    assert.equal(consent.SHAPE_REASONS.includes(key), false, key);
+  }
+});
+
+test('a playwright-cli call on any session but a zensu-verify one is denied when its config restores a browser state or cannot be judged', (t) => {
+  const dir = tempDir(t, 'zensu-offsession-');
+  const write = (name, body) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, body);
+    return file;
+  };
+  const restoring = write('restoring.json', JSON.stringify({ browser: { contextOptions: { storageState: '/elsewhere/state.json' } } }));
+  const escaped = write('escaped.json', '{"browser":{"contextOptions":{"storag\\u0065State":"x"}}}');
+  const bom = write('bom.json', `\ufeff${JSON.stringify({ browser: { contextOptions: { storageState: 'x' } } })}`);
+  const own = write('own.json', JSON.stringify({ browser: { contextOptions: { viewport: null } }, outputDir: '/tmp/out' }));
+  const ini = write('own.ini', 'browser.contextOptions.storageState=x\n');
+  const iniText = write('text.conf', 'browser.contextOptions.storageState=x\n');
+  const broken = write('broken.json', '{"browser":');
+  const large = write('large.json', JSON.stringify({ pad: 'x'.repeat(1048576) }));
+  write('=own.json', JSON.stringify({ outputDir: '/tmp/out' }));
+  const payload = { cwd: dir };
+  const reason = (command, env = {}) => denied(command, { payload, env });
+  const passes = (command, env = {}) => assert.deepEqual(decide(command, { payload, env }), { verdict: 'none' }, command);
+  for (const command of [
+    `playwright-cli -s=zvprobe-state1 open --config=${restoring}`,
+    `playwright-cli -s=mine open --config=${escaped}`,
+    `playwright-cli -s=mine open --config=${bom}`,
+    `playwright-cli -s=mine attach --config ${restoring}`,
+    `PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `playwright_mcp_config=${restoring} playwright-cli -s=mine open`,
+    `env PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    'playwright-cli open --config restoring.json',
+    `playwright-cli -s=mine open --config=${own} --config=${restoring}`,
+    `export PLAYWRIGHT_MCP_CONFIG=${restoring}; playwright-cli -s=mine open`,
+    `declare -x PLAYWRIGHT_MCP_CONFIG=${restoring} && playwright-cli -s=mine open`,
+    `set -a; PLAYWRIGHT_MCP_CONFIG=${restoring}; playwright-cli -s=mine open`,
+    `sudo PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `doas PLAYWRIGHT_MCP_CONFIG=${restoring} playwright-cli -s=mine open`,
+    `stdbuf -oL playwright-cli -s=mine open --config=${restoring}`,
+    `caffeinate -i playwright-cli -s=mine open --config ${restoring}`,
+    `setsid playwright-cli -s=mine open --config=${restoring}`,
+    `xargs playwright-cli -s=mine open --config=${restoring} < /dev/null`,
+    `env -S 'playwright-cli -s=mine open --config=${restoring}'`,
+    `bash -c -- 'playwright-cli -s=mine open --config=${restoring}'`,
+    `bash <<'EOF'\nplaywright-cli -s=mine open --config=${restoring}\nEOF`,
+    `node /usr/local/lib/node_modules/@playwright/cli/cli.js -s=mine open --config=${restoring}`,
+    `~/.local/bin/playwright-cli -s=mine open --config=${restoring}`,
+    `$HOME/bin/playwright-cli -s=mine open --config ${restoring}`,
+    `{playwright-cli,} -s=mine open --config=${restoring}`,
+    `/opt/*/playwright-cli -s=mine open --config=${restoring}`,
+    `playwright-cli$'' -s=mine open --config=${restoring}`,
+    `$'playwright-cli' -s=mine open --config=${restoring}`,
+    `node "$(command -v playwright-cli)" -s=mine open --config=${restoring}`,
+    `"\${PW:-playwright-cli}" -s=mine open --config=${restoring}`,
+    `$(basename playwright-cli.json .json) -s=mine open --config=${restoring}`,
+    `\${\${:-playwright-cli.json}:r} -s=mine open --config=${restoring}`,
+    `eslint --config ${restoring} src && echo playwright-cli`,
+  ]) assert.equal(reason(command), REASONS.STATE_CONFIG_OFF_SESSION, command);
+  assert.equal(reason('playwright-cli open --config=missing.json', { PLAYWRIGHT_CLI_SESSION: 'mine' }), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  for (const command of [
+    `playwright-cli -s=mine open --config=${ini}`,
+    `playwright-cli -s=mine open --config=${iniText}`,
+    `playwright-cli -s=mine open --config=${broken}`,
+    `playwright-cli -s=mine open --config=${large}`,
+    `playwright-cli -s=mine open --config=${path.join(dir, 'missing.json')}`,
+    `playwright-cli -s=mine open --config=${dir}`,
+    'playwright-cli -s=mine open --config=//server/share/c.json',
+  ]) assert.equal(reason(command), REASONS.CONFIG_UNJUDGED_OFF_SESSION, command);
+  for (const command of [
+    `cd ${dir} && playwright-cli -s=mine open --config=own.json`,
+    `env -C ${dir} playwright-cli -s=mine open --config=own.json`,
+    'playwright-cli -s=mine open --config="$CFG"',
+    `PLAYWRIGHT_MCP_CONFIG+=${restoring} playwright-cli -s=mine open`,
+    'export PLAYWRIGHT_MCP_CONFIG="$HOME/cfg.json"; playwright-cli -s=mine open',
+    'stdbuf -oL playwright-cli -s=mine open --config=own.json',
+    'find . -name x.json -exec playwright-cli -s=mine open --config {} \\;',
+    'xargs playwright-cli -s=mine open --config < /tmp/list',
+    'read PLAYWRIGHT_MCP_CONFIG < /tmp/p; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open',
+    "printf -v PLAYWRIGHT_MCP_CONFIG '%s' /tmp/c.json; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open",
+    'mapfile -t PLAYWRIGHT_MCP_CONFIG < /tmp/p; export PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG=~/c.json playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG=a:~/c.json playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG==cmd playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG=a:=cmd playwright-cli -s=mine open',
+    'PLAYWRIGHT_MCP_CONFIG==own.json playwright-cli -s=mine open',
+    `xargs -I{} playwright-cli -s=mine open {} ${restoring} <<< --config`,
+    `printf -- --config | xargs -I{} playwright-cli -s=mine open {} ${restoring}`,
+    `playwright-cli -s=mine open $(echo --config) ${restoring}`,
+    `f() { playwright-cli -s=mine open "$@" ${restoring}; }; f --config`,
+    `X='xargs playwright-cli'; printf ${restoring} | $X -s=mine open --config`,
+    `printf '%s' 'playwright-cli -s=mine open "$1" ${restoring}' | sh -s -- --config`,
+    'playwright-cli --help; echo --config',
+    'playwright-cli --help | grep -- --config | xargs echo',
+    'playwright-cli --help | grep -- "$PATTERN" --config',
+    'PATH=/tmp/bin grep -- --config && playwright-cli --help',
+  ]) assert.equal(reason(command), REASONS.CONFIG_UNRESOLVED_OFF_SESSION, command);
+  assert.equal(reason("PLAYWRIGHT_MCP_CONFIG='~/c.json' playwright-cli -s=mine open"), REASONS.CONFIG_UNJUDGED_OFF_SESSION);
+  for (const value of ["'/nowhere/a:=b.json'", '"/nowhere/a:=b.json"', "'/nowhere/a:~b.json'", '/nowhere/a\\:=b.json']) {
+    assert.equal(reason(`PLAYWRIGHT_MCP_CONFIG=${value} playwright-cli -s=mine open`), REASONS.CONFIG_UNJUDGED_OFF_SESSION, value);
+  }
+  passes("PLAYWRIGHT_MCP_CONFIG='=own.json' playwright-cli -s=mine open");
+  passes('rg --pre playwright-cli -e --config open');
+  passes(`unset PLAYWRIGHT_MCP_CONFIG; playwright-cli -s=mine open --config=${own}`);
+  passes('playwright-cli --help | grep -- --config');
+  passes('playwright-cli open --help | grep -e --config');
+  passes(`cd ${dir} && playwright-cli open --help 2>&1 | rg -F -- --config`);
+  passes(`playwright-cli --help | grep -- --config ${restoring}`);
+  assert.equal(reason(`playwright-cli -s=mine open --config=${restoring} | grep -- --config`), REASONS.STATE_CONFIG_OFF_SESSION);
+  assert.equal(reason('playwright-cli -s=mine open --config=own.json | grep -- --config'), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
+  assert.equal(reason('git commit -m "fix playwright-cli --config handling"'), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
+  for (const key of ['STATE_CONFIG_OFF_SESSION', 'CONFIG_UNJUDGED_OFF_SESSION', 'CONFIG_UNRESOLVED_OFF_SESSION']) {
+    assert.match(REASONS[key], /search or commit text that names playwright-cli beside a config through the Grep tool or a message file$/, key);
+  }
+  assert.equal(denied('playwright-cli -s=mine open --config=own.json', { payload: {} }), REASONS.CONFIG_UNRESOLVED_OFF_SESSION);
+  passes(`playwright-cli -s=mine open --config=${own}`);
+  passes('playwright-cli -s=mine open --config=own.json');
+  passes(`cd ${dir} && playwright-cli -s=mine open --config=${own}`);
+  passes('playwright-cli -s=mine snapshot');
+  passes('~/bin/playwright-cli -s=mine snapshot');
+  passes(`eslint --config ${own} src && echo playwright-cli`);
+  passes(`stdbuf -oL playwright-cli -s=mine open --config=${own}`);
+  if (process.platform === 'win32') return;
+  const link = path.join(dir, 'link.json');
+  fs.symlinkSync(restoring, link);
+  assert.equal(reason(`playwright-cli -s=mine open --config=${link}`), REASONS.STATE_CONFIG_OFF_SESSION);
+  const fifo = path.join(dir, 'fifo.json');
+  const unopened = [dir, '//server/share/c.json'];
+  if (spawnSync('mkfifo', [fifo]).status === 0) unopened.push(fifo);
+  const opened = [];
+  const openSync = fs.openSync;
+  t.after(() => { fs.openSync = openSync; });
+  fs.openSync = (file, ...rest) => {
+    opened.push(String(file));
+    return openSync(file, ...rest);
+  };
+  for (const file of unopened) assert.equal(reason(`playwright-cli -s=mine open --config=${file}`), REASONS.CONFIG_UNJUDGED_OFF_SESSION, file);
+  passes(`playwright-cli -s=mine open --config=${own}`);
+  fs.openSync = openSync;
+  assert.deepEqual(opened.filter((file) => unopened.includes(file)), []);
+  assert.ok(opened.includes(own), JSON.stringify(opened));
+});
+
+test('a PowerShell call that names playwright-cli with a run directory or a config file is refused, and one without stays unjudged', () => {
+  const err = sink();
+  const powershell = (command) => ({ tool_name: 'PowerShell', tool_input: { command } });
+  for (const command of [
+    'playwright-cli -s=mine open --config=C:\\p\\own.json',
+    'playwright-cli -s=mine open --config=C:\\p\\.zensu\\verify-feature-runs\\r\\playwright-cli.json',
+    '$env:PLAYWRIGHT_MCP_CONFIG = "C:\\p\\own.json"; playwright-cli -s=mine open',
+    "& ('play' + 'wri' + 'ght-cli') -s=mine open ('--con' + 'fig') C:\\p\\own.json",
+  ]) {
+    const out = sink();
+    assert.equal(consent.runPre(powershell(command), {}, out, err), true, command);
+    assert.deepEqual(JSON.parse(out.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_OFF_SESSION_NOT_JUDGED }), command);
+  }
+  const plain = sink();
+  assert.equal(consent.runPre(powershell('playwright-cli -s=mine snapshot'), {}, plain, err), false);
+  assert.equal(plain.text(), '');
+  const gated = sink();
+  assert.equal(consent.runPre(powershell(`playwright-cli -s=${SESSION} open --config=C:\\p\\own.json`), {}, gated, err), true);
+  assert.deepEqual(JSON.parse(gated.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }));
+  const split = sink();
+  assert.equal(consent.runPre(powershell("& ('play' + 'wri' + 'ght-cli') ('-s=zensu-ver' + 'ify-auth-x') cookie-list"), {}, split, err), true);
+  assert.deepEqual(JSON.parse(split.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }));
+  assert.equal(err.text(), '');
 });

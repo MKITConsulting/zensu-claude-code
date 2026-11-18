@@ -32,7 +32,10 @@ its interactive planning gate, and no `zensu work` command runs.
    `--autopilot-begin --work-order <id>`, which stores the order binding in the run record. Zensu,
    not the plan-approval gate, binds the plan: `zensu-work-order.sh --bind-spec` reports `planning`
    and `implementing`, and only after Zensu accepted `implementing` records the internal event
-   `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. When the order needs a plan approval,
+   `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. A run that validates its result is
+   refused first, with `plan-criteria-unusable` and exit 8, while `.zensu/plans/<order-id>.md`
+   carries no active `AC-###` row or lists one id on two active rows, because its VALIDATE stage
+   reads its criteria from that file. When the order needs a plan approval,
    `--plan-approval` commits the plan file with the message the session wrote in the repository's
    own commit conventions (`--message-file <absolute path>`), pushes it, attaches it to the order
    as the plan artifact and asks for the approval, which ends the session. A later attempt binds the approved plan and
@@ -95,7 +98,19 @@ The `zensu plan` verbs it denies are the ones that record a person's decision: `
 `finalize`, `abandon`, `confirm-merge` and `followup accept|dismiss`; `status`, `list` and
 `followups` pass. It finds the noun and the verb of a `zensu` call the way the CLI does, so a value
 flag or an empty word in front of them, as in `zensu --reason x plan abandon <id>`, hides neither,
-and it reads the `repos` alias of `zensu work repositories` as the full name.
+and it reads the `repos` alias of `zensu work repositories` as the full name. It reads those words
+through `hooks/lib/zensu-cli-words-v1.js`, the module the CLI write-gate reads them through as well;
+when that module cannot load, it denies every `zensu` call that holds a word that could name a
+subcommand. It removes a redirection the way the shell does before it reads a command's words, so
+`2>/dev/null`, `>&2`, `&>file` or `<<<word` in front of a program, a noun or a verb hides none of
+them, and a dump of the environment into a file, such as `env > env.txt`, is refused like the dump
+itself. It reads the redirections of bash, of zsh, which also takes a single digit or `{name}`
+before `&>` as the descriptor and has the `!` and `|` override forms, and of a POSIX shell such as
+dash, where the `&` of `&>` ends the command. It also reads the command substitutions in a heredoc
+body whose delimiter is unquoted, because the shell runs them, so a `$(git push)` line there is
+refused; a quoted body and the plain text of a body are never read as commands. It does all this
+only when its reading with the redirection's target and descriptor kept as words refuses nothing,
+so every command it refused before is refused for the same reason.
 
 A work-order session never runs `zensu auth login`: the CLI uses the session token and ignores any
 stored login while `ZENSU_SESSION_TOKEN` is set, and no person is there to sign in. So in a session

@@ -153,7 +153,7 @@ scenarios.forEach((file, i) => {
     t(`RS4 ${name}: expected_status is the captured status template with the field's source filled in`,
       Boolean(template && source) && template[1].includes(placeholder) && template[1].split(placeholder).join(source[1]) === v.expected_status);
   }
-  if (v.expected_shape === 'ask-short') t(`RS4 ${name}: the graders recognise the captured route labels and every disclosure the line promises`, envelope.covers(text, 'reminder') && route.missing(text).length === 0);
+  if (v.expected_shape === 'ask-short') t(`RS4 ${name}: the graders recognise the captured route labels and every disclosure the line promises, with the Autopilot option exactly as the scenario declares it`, envelope.covers(text, 'reminder') && (v.autopilot_option === 'offered' || v.autopilot_option === 'absent') && route.missing(text, v.autopilot_option === 'offered').length === 0);
   if (v.expected_shape === 'router-short') t(`RS4 ${name}: the graders recognise the three triage questions the captured line names`, envelope.covers(text, 'router'));
   if (v.route_source === 'nonce') t(`RS4 ${name}: the nonce capture carries a fresh nonce and the directive that names it`, Boolean(cap) && /^ROUTE-EVAL-NONCE-[0-9a-f]{16}$/.test(cap.nonce || '') && text.startsWith(`Begin your reply with the exact line ${cap.nonce} `));
   seen.add(v.route_source);

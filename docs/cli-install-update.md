@@ -54,8 +54,7 @@ upgrade from an older version, use your original installer:
 
 ```sh
 # Existing Homebrew installation
-brew update
-brew upgrade --cask mkitconsulting/tap/zensu
+brew update && brew upgrade --cask mkitconsulting/tap/zensu
 
 # Existing install-script installation on Linux / macOS
 curl -fsSL https://zensu.dev/install.sh | sh

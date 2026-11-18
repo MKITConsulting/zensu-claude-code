@@ -77,7 +77,10 @@ review. The driver avoids that three ways:
 
 ## Idempotency and delegated reconciliation
 
-Standalone `--post-review` retains its existing summary-plus-discussions behavior. An
+Standalone `--post-review` retains its existing summary-plus-discussions behavior. Its re-run
+skips a part only when the part's `<!-- zensu:pr<iid>:<tag> -->` marker opens a non-system note
+of the publishing account (`glab api user`); a marker that another account quotes or copies
+counts for nothing. An
 Autopilot delegation instead uses `--reconcile-review` with the durable operation key and
 expected head. For `N = 1 + comments.length`, every part carries a unique full marker:
 
@@ -159,3 +162,8 @@ allows the first three and hides the comments.
   still posts, anchored at `line`.
 - The summary note returns no `html_url`; the skill reports the MR URL from the scout
   metadata plus the count of posted threads.
+- A publish first lists every note and discussion of the merge request to find the parts it
+  already posted. When that listing is not JSON, or the notes and discussions together exceed
+  32 MiB, the driver refuses with a labelled error and posts nothing. Anyone who can comment on
+  the merge request can push it past that size, which blocks the standalone publish and the
+  delegated reconciliation alike until the notes shrink below it.

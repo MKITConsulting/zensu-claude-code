@@ -218,11 +218,11 @@ const actionText = Object.freeze({
   START_TDD: 'Start the delegated build chain for the current attempt.',
   AWAIT_TDD_CHAIN: 'Resume the bound build chain and wait for its ticket-bound terminal outcome.',
   RUN_GATES: 'Run the configured quality gates and persist their evidence.',
-  RUN_CONVERGENCE: 'Run the convergence checks before any pull-request effect.',
+  RUN_CONVERGENCE: 'Commit and re-run the gates when the working tree holds changes outside .zensu/ or HEAD differs from the gate evidence, then run the convergence checks before any pull-request effect.',
   RECONCILE_PR: 'Reconcile the pull-request operation key before creating or updating a PR.',
   RECONCILE_TEAM_REVIEW: 'Reconcile the team-review operation key before publishing review output.',
   FIX_REVIEW_FINDINGS: 'Inspect unresolved review threads and route required fixes through the bound build chain.',
-  VALIDATE_FEATURE: 'Validate the running feature against every acceptance criterion.',
+  VALIDATE_FEATURE: 'Record every acceptance criterion observed on the pull-request head, then run zensu-log.sh --autopilot-validate --run with the run id; never send VALIDATION_PASSED yourself.',
   RUN_COVERAGE: 'Run the configured coverage phase and persist its evidence.',
   DELIVER_PR: 'Verify delivery invariants and report the ready pull request without merging or deploying.',
   AWAIT_RESUME: 'Remain blocked until an explicit, audited resume or cancel event is applied.',
@@ -346,6 +346,25 @@ if (ownerSessionId !== currentSessionId) {
   process.exit(0);
 }
 
+const planCopyNote = (() => {
+  const options = state.options;
+  if (!options || typeof options !== 'object' || options.validate !== true) return '';
+  if (state.workOrder !== undefined && state.workOrder !== null) return '';
+  if (!sha256(state.approvedPlanSha256)) return '';
+  let approvedPlan;
+  let read;
+  try {
+    approvedPlan = require('./approved-plan-v1.js');
+    read = approvedPlan.readApprovedPlan(state.projectRoot, state.approvedPlanSha256);
+  } catch (_) {
+    return '';
+  }
+  if (!read || read.ok) return '';
+  const failures = approvedPlan.APPROVED_PLAN_FAILURES;
+  const reason = Object.values(failures).includes(read.reason) ? read.reason : failures.UNREADABLE;
+  const copy = approvedPlan.approvedPlanRelPath(state.approvedPlanSha256);
+  return ` ZENSU_AUTOPILOT_RESUME APPROVED_PLAN_COPY_UNAVAILABLE runId=${runId} copy=${copy} reason=${reason}. This run validates, and VALIDATE reads its acceptance criteria from this stored copy of the plan the user approved; the copy is missing or no longer matches the approved digest, so VALIDATE cannot read this run's acceptance criteria. Report this to the user now and leave the decision to the user.`;
+})();
 const returnLabel = returnStage === null ? 'NONE' : returnStage;
 const chainLabel = chainId === null ? 'NONE' : chainId;
 const tddSessionLabel = tddSessionId === null ? 'NONE' : tddSessionId;
@@ -355,9 +374,12 @@ const actionFields = headUpdateRequired
 const actionDirective = headUpdateRequired
   ? `FIRST execute prerequisite action UPDATE_PR_HEAD: re-run the configured gates, push the fixes, read the resulting PR head, and persist the exact PR_HEAD_UPDATED event. Only after that succeeds continue stage action ${nextActionCode}: ${actionText[nextActionCode]}`
   : actionText[nextActionCode];
-emit(`ZENSU_AUTOPILOT_RESUME ACTIVE_RUN runId=${runId} ${actionFields} tddAttempt=${attempt} returnStage=${returnLabel} prStatus=${prStatus} teamReviewStatus=${reviewStatus} tddChainId=${chainLabel} tddSessionId=${tddSessionLabel} headUpdateRequired=${headUpdateRequired} evidence=${exactEvidence}. ${actionDirective} Continue this exact durable run only; do not restart completed stages, repeat remote effects, or mark DONE outside guarded state transitions.`);
+emit(`ZENSU_AUTOPILOT_RESUME ACTIVE_RUN runId=${runId} ${actionFields} tddAttempt=${attempt} returnStage=${returnLabel} prStatus=${prStatus} teamReviewStatus=${reviewStatus} tddChainId=${chainLabel} tddSessionId=${tddSessionLabel} headUpdateRequired=${headUpdateRequired} evidence=${exactEvidence}. ${actionDirective} Continue this exact durable run only; do not restart completed stages, repeat remote effects, or mark DONE outside guarded state transitions.${planCopyNote}`);
 NODE
 )"
-printf '%s' "$ACTIVE_STATE" | CURRENT_SESSION_ID="$SESSION_ID" node -e "$AUTOPILOT_RESUME_EMITTER"
+(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 0
+  printf '%s' "$ACTIVE_STATE" | CURRENT_SESSION_ID="$SESSION_ID" node -e "$AUTOPILOT_RESUME_EMITTER"
+)
 
 exit 0

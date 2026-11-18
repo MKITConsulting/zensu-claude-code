@@ -66,8 +66,9 @@ function deliveredReport(text) {
   return !DELIVERY_STUB_RE.test(text.trim()) && !UNDELIVERED_STUB_RE.test(text.trim());
 }
 
-function arrivedReports(prompt) {
-  const handbacks = background.handbackReports(prompt).map((frame) => ({ ...frame, source: 'handback-prompt' }));
+function arrivedReports(prompt, aliases = null) {
+  const resolved = typeof aliases === 'function' ? aliases(prompt) : aliases;
+  const handbacks = background.handbackReports(prompt, resolved).map((frame) => ({ ...frame, source: 'handback-prompt' }));
   const notified = background.notificationReports(prompt)
     .filter((entry) => entry.status === 'completed' && deliveredReport(entry.report))
     .map((entry) => ({ agentId: entry.agentId, report: entry.report, source: 'notification-prompt' }));
@@ -239,7 +240,7 @@ function recordObservation(options) {
 
 function recordHandback(options) {
   const payload = options.payload || {};
-  const frames = arrivedReports(payload.prompt);
+  const frames = arrivedReports(payload.prompt, options.aliases);
   if (frames.length === 0) return [];
   const root = packets.canonicalRoot(options.root);
   const state = packets.chainState(root, options.session);
@@ -319,7 +320,7 @@ function consumeSubject(options) {
     return {
       agent,
       report: () => {
-        const frame = arrivedReports(payload.prompt).filter((entry) => entry.agentId === agent).pop();
+        const frame = arrivedReports(payload.prompt, options.aliases).filter((entry) => entry.agentId === agent).pop();
         return { text: frame ? frame.report : '', source: frame ? frame.source : 'none' };
       },
       packet: (records, round) => {
@@ -512,18 +513,29 @@ function eventFlag(value) {
   return value;
 }
 
+function aliasesFor(event, flags) {
+  if (event !== 'UserPromptSubmit' || flags['--plugin-data'] === undefined) return null;
+  let sessionKey;
+  try {
+    sessionKey = require('./session-control-core-v1.js').sessionKey(flags['--session']);
+  } catch {
+    return null;
+  }
+  return (prompt) => background.promptNameAliases(prompt, { pluginData: flags['--plugin-data'], sessionKey });
+}
+
 function main(argv, io = {}) {
   const stdout = io.stdout || process.stdout;
   const stderr = io.stderr || process.stderr;
   const [verb, ...args] = argv;
   try {
     if (verb === 'record') {
-      const flags = packets.parseFlags(args, ['--root', '--session', '--event']);
+      const flags = packets.parseFlags(args, ['--root', '--session', '--event', '--plugin-data']);
       const event = eventFlag(flags['--event']);
       let advice = '';
       try {
         const payload = io.payload || readPayload();
-        const options = { root: flags['--root'], session: flags['--session'], payload };
+        const options = { root: flags['--root'], session: flags['--session'], payload, aliases: aliasesFor(event, flags) };
         const results = event === 'UserPromptSubmit' ? recordHandback(options) : [recordObservation(options)];
         advice = results.map(observationAdvice).filter(Boolean).join(' ');
       } catch (error) {
@@ -533,7 +545,7 @@ function main(argv, io = {}) {
       return 0;
     }
     if (verb === 'check') {
-      const flags = packets.parseFlags(args, ['--root', '--session', '--judge', '--panel', '--ticket', '--event', '--agent']);
+      const flags = packets.parseFlags(args, ['--root', '--session', '--judge', '--panel', '--ticket', '--event', '--agent', '--plugin-data']);
       if (!['on', 'off'].includes(flags['--judge'])) fail('--judge must be on or off');
       if (!['lean', 'full'].includes(flags['--panel'])) fail('--panel must be lean or full');
       const event = eventFlag(flags['--event']);
@@ -541,7 +553,7 @@ function main(argv, io = {}) {
       if (flags['--agent'] !== undefined && !AGENT_ID_RE.test(flags['--agent'])) fail('--agent is not an agent id');
       const payload = io.payload || readPayload();
       const verdict = checkConsume({ root: flags['--root'], session: flags['--session'], payload, judge: flags['--judge'], panel: flags['--panel'],
-        ticket: flags['--ticket'], event, agent: flags['--agent'] });
+        ticket: flags['--ticket'], event, agent: flags['--agent'], aliases: aliasesFor(event, flags) });
       if (verdict.pass) {
         stdout.write(`pass ${verdict.reason}\n`);
         return 0;
@@ -558,7 +570,7 @@ function main(argv, io = {}) {
       resetStore({ root: flags['--root'], session: flags['--session'] });
       return 0;
     }
-    fail('usage: review-gate-v1.js record|check|reset --root <dir> --session <id> [--event PostToolUse|UserPromptSubmit] [--judge on|off --panel lean|full [--ticket <review ticket>] [--agent <agent id>]]');
+    fail('usage: review-gate-v1.js record|check|reset --root <dir> --session <id> [--event PostToolUse|UserPromptSubmit] [--plugin-data <dir>] [--judge on|off --panel lean|full [--ticket <review ticket>] [--agent <agent id>]]');
   } catch (error) {
     const known = error instanceof ReviewGateError || error instanceof packets.ReviewPacketError;
     stderr.write(`review-gate-v1: ${known ? error.message : `unexpected failure (${error.message})`}\n`);

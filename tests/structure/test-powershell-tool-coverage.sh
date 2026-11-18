@@ -62,6 +62,7 @@ PreToolUse	pre-bash-source-write-gate.sh	test-bash-source-write-gate.sh	psrun "W
 PreToolUse	pre-write-secret-scan.sh	test-secret-scan-gate.sh	check "F8p PowerShell write
 PreToolUse	pre-browser-navigation-consent.sh	test-verify-consent.sh	"V70 the real pre hook denies a PowerShell call
 PostToolUse	post-browser-navigation-consent.sh	test-verify-consent.sh	"V70d the recorder writes no consent record for a PowerShell call
+PreToolUse	pre-verify-auth-guard.sh	verify-auth-guard-v1.test.js	['PowerShell', 'Get-Content .zensu/verify-feature-runs/run-a1/auth/storage-state.json']
 PostToolUse	post-artifact-redact.sh	test-artifact-redaction.sh	"hand-rolled PowerShell log write"
 PreToolUse	pre-work-order-gate.sh	work-order-v1.test.js	payload('PowerShell', 'Get-ChildItem')
 PostToolUse	post-work-order.sh	work-order-v1.test.js	postToolUpdate(context, { tool_name: 'PowerShell'

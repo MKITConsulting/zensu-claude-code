@@ -79,6 +79,7 @@
     "structure/test-pretool-config-prompts.sh": 1,
     "structure/test-promptfoo-config-refs.sh": 1,
     "structure/test-promptfoo-local-only.sh": 1,
+    "structure/test-pulse-skill.sh": 1,
     "structure/test-readme-hook-count-sync.sh": 1,
     "structure/test-release-session-control-gate.sh": 1,
     "structure/test-requirements-table-gate.sh": 130,

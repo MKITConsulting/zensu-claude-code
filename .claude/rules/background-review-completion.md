@@ -89,24 +89,65 @@ payload, and a census of the live desktop transcripts of the three days before 2
   or `The subagent ended without delivering a report through SubagentHandback, so no report was
   delivered. …` (16).
 
+## Measured (named spawns, 2.1.321, 2026-11-10)
+
+The KS-1c chain (desktop Code tab, plugin 0.36.0, PR #597) spawned its panel, its judge pair and
+its consume reviewer with the Agent tool's `name` parameter. A desktop session the same day spawned
+two general-purpose probes with one name in one tool message, and a census read the transcripts:
+
+- **A named spawn hands back under its name.** The six named spawns handed back as
+  `<agent-message from="<name>">`, the four unnamed ones as `<agent-message from="<agentId>">`.
+  Their completion notifications still carry `<task-id><agentId></task-id>`, and in auto mode the
+  `<result>` stub reads `delivered to you as a message from "<name>"`. Every named seat's gate
+  launch record stayed `async_launched`, and the consume review was refused until the primary
+  judge ran again without `name`, whose hand-back `handback-prompt` then recorded.
+- **The launch names both.** The Agent tool result (`toolUseResult`) has no `name` key; the call's
+  input carries it. The PostToolUse hook input is `{…, tool_name, tool_input, tool_response,
+  tool_use_id, …}`, and `tool_input` is the object the tool is called with, read from the 2.1.321
+  bundle, so the launch hook sees `tool_input.name` beside `tool_response.agentId`. No hook payload
+  was logged for it.
+- **The newest spawn holds the name.** The host accepted both probes. The later one handed back
+  under the name, the earlier one under its agent id, also after the later one had finished. Both
+  `subagents/agent-<id>.meta.json` files record the requested `name`, so the meta files cannot
+  tell which agent holds it. The transcript stores each hand-back's `origin` with the agent id as
+  `senderTaskId`, but the hook payload carries no `origin` (`.claude/rules/prompt-origin.md`).
+- **The host puts a hand-back frame in one of two places.** The 3,839 transcripts modified in the
+  twelve days before 2026-11-10 hold 8,339 hand-back frames, 932 of them named: 3,432 open the
+  prompt (a queued prompt), 4,905 follow the line `Another Claude session sent a message:`, and two
+  sit in a typed prompt that quoted frames. None of the 389 cross-session message bodies there is
+  indented, so the host's indentation guards a report, never a peer message.
+
 ## The path
 
 1. **Launch.** On `async_launched`, `post-review-tdd-delegate.sh` records the launch in
    `<CLAUDE_PLUGIN_DATA>/background-review/v1/` (temp file then rename at `0600`, exact key sets).
    A `zensu:review-aspect`, `zensu:review-judge` or repo-local `zensu-review-*` persona launch
    becomes one entry per agent under `fanout/<scv1-key>/<agentId>.json`
-   (`background-review-v1.js fanout`). The consume-mode
+   (`background-review-v1.js fanout`), and the same launch writes the reviewer register entry
+   `reviewers/<scv1-key>/<agentId>.json` (`rememberReviewer`, exact key set `REVIEWER_KEYS`,
+   `0600`, temp file then rename, `arrived_at_ms` 0, `renewals` 0, `named` true when the launch
+   carried a name the Agent tool's pattern admits), which outlives the fan-out entry (§"Resumed
+   reviewers"). The consume-mode
    `zensu:code-reviewer`, after the header, envelope and preflight checks, becomes the session's
    one record `records/<scv1-key>.json` (`record`), written only while the prompt's ticket is the
    ticket the claim would accept; an arrival note the session still holds is dropped then. Its
    directive tells a standalone chain to end its turn and wait, and an Autopilot-bound chain to
-   keep its turn.
+   keep its turn. Either launch whose `tool_input.name` matches the Agent tool's name pattern
+   (`AGENT_NAME_RE`) also binds that name to its agent id, `names/<scv1-key>/<agentId>.json`
+   (`moveName`, exact key set `NAME_KEYS`, `0600`, temp file then rename), after removing every
+   binding of that name and every binding past the wait bound. Every other named main-thread spawn
+   releases the name: the delegate runs `background-review-v1.js unbind` for any PostToolUse
+   payload that names one while the session holds a binding, before the type arms, so a recorded
+   launch binds it again right after.
 2. **Arrival.** `hooks/user-prompt-review-handback.sh` exits in bash, before any `node` child,
    unless the payload contains `<agent-message from=` or `<task-notification>` AND the store holds
    a regular `records/scv1_*.json` or `fanout/scv1_*/*.json`, or the store holds a regular
    `arrivals/scv1_*.json` of any session. Its first `node` child is `background-review-v1.js
    arrive`, which derives the session key from the payload, retires every fan-out entry whose
-   agent the prompt names, any status, and, for a completed arrival of the session's pending
+   agent the prompt names, any status, where a hand-back frame names an agent by its id or, only
+   in the host's frame position (`hostFrame`), by the name the session's bindings hold for it
+   (`nameIndex`), stamps each retired agent's register entry with `arrived_at_ms`
+   (`noteReviewerArrival`), and, for a completed arrival of the session's pending
    consume reviewer, writes the arrival note `arrivals/<scv1-key>.json` (exact key set, `0600`,
    temp file then rename) before anything is claimed. It prints
    `pending agent=<id> source=<prompt|note> retired=<n>` or `idle reason=<r> retired=<n>`, and the
@@ -131,10 +172,21 @@ payload, and a census of the live desktop transcripts of the three days before 2
    `outer_finish`. With `hooks.reviewPacketGate` on, `review_gate_check` passes `UserPromptSubmit`
    as the event there, because the gate accepts only that and `PostToolUse`, and the gate judges
    the claim on the round's records alone, as for a notification-only arrival.
-   `background_review_wait` asks `wait` while a record or a fan-out entry exists.
-   A consume record younger than the bound that still matches the issued ticket, or any fan-out
-   entry younger than the bound, releases a standalone chain's Stop with one stderr line and no
-   budget charge. An Autopilot-bound chain's Stop is held: it blocks, names the running agents,
+   `background_review_wait` asks `wait` while a record or a fan-out entry exists, and while the
+   Stop input names a `"subagent"` inside `"background_tasks"` and the session's register holds an
+   entry; it hands `wait` the Stop input on stdin. `wait` first renews a resumed reviewer
+   (§"Resumed reviewers"), then answers as before on its first line and prints the user-facing
+   note on a second line (`waitNote`): the reviewers' screened task descriptions in the host's
+   order, at most `LIMITS.listedTasks` (3) of `stop-background-wait-v1.js` and a count of the rest,
+   or a count alone, through that module's `waitingNote`, the one list renderer every wait note
+   uses. A consume record younger
+   than the bound that still matches the issued ticket, or any fan-out entry younger than the
+   bound, releases a standalone chain's Stop with that note (`stop_notice`) and no budget charge;
+   `split_wait_verdict` in the Stop hook, which the workflow wait shares, takes the note only as one
+   line that starts `WAIT_NOTE_LEAD` (`Zensu is waiting for `) and holds no control character, at
+   most 600 characters, and otherwise prints the one fixed sentence `WAIT_NOTE_FALLBACK`
+   (`Zensu is waiting for the background review; the review chain continues when it reports
+   back.`), so the release never prints an agent id. An Autopilot-bound chain's Stop is held: it blocks, names the running agents,
    and skips the inner Stop budget increment. An owned Autopilot run without a bound chain and an
    adopted deferred review take neither; their resume reason is led by one sentence naming the
    running agents. When the recovery left record and note in place, the Stop hook runs
@@ -147,9 +199,70 @@ payload, and a census of the live desktop transcripts of the three days before 2
    it raises the note's `holds` count and retires both once the count would pass
    `LIMITS.maxArrivalHolds`. It prints `hold count=<n> of=<max>`, `release`,
    `spent reason=<expired|holds>` or `idle reason=<r>`. Only `hold` and `release` make the
-   release, the hold and that sentence say that the report arrived and its claim is pending
-   (`BACKGROUND_REVIEW_ARRIVED_LEAD`), and after `hold` they name the attempt. After `spent` the
-   Stop takes the plain resume directive, whose fresh ticket runs the review again.
+   hold and that sentence say that the report arrived and its claim is pending
+   (`BACKGROUND_REVIEW_ARRIVED_LEAD`), and after `hold` they name the attempt. The release tells the
+   user the same in one sentence of its own (`BACKGROUND_REVIEW_ARRIVED_NOTE`), because a release
+   `systemMessage` reaches only the user (§"Resumed reviewers"), and the lead stays with the
+   model-facing hold and resume reasons. After `spent` the Stop takes the plain resume directive,
+   whose fresh ticket runs the review again.
+
+## Resumed reviewers
+
+Measured on 2026-11-16 (desktop, plugin 0.38.0): three aspect reviewers failed on the weekly rate
+limit, their failed notifications retired their fan-out entries, and the main thread resumed them
+with `SendMessage`, whose result names the agent as `resumedAgentId`. The next Stop's input listed
+all three under their agent ids as running `subagent` tasks with their spawn descriptions; with no
+entry left, the background review wait did not release, `stop_background_wait` blocked once with
+its explanation, the model answered with three `ZENSU-AWAIT:` lines, and the release notice named
+three raw agent ids. The user read all three as noise. The release `systemMessage` never reached
+the model: none of the 52 later API request records of that session holds it, while the blocking
+explanation does, so release notes are written for the user alone.
+
+- **Renewed at the Stop, from the host's task list, never from a `SendMessage` hook.** A dispatched
+  `PostToolUse` check would add a registry entry, an entry point and their enumerations, and the
+  `SendMessage` hook payload was never logged, while the Stop input's `background_tasks` was read
+  above. `renewResumedReviewers` takes the in-flight `subagent` tasks through `inFlightTasks` of
+  `stop-background-wait-v1.js`, so the host vocabulary keeps one owner, and renews a task whose id
+  the register holds, that has no fresh fan-out entry, whose entry arrived since its last
+  launch (`resumable`: `arrived_at_ms > 0` and not before `launched_at_ms`), that has fewer than
+  `LIMITS.maxRenewals` renewals, that is not idle, and, for a named launch, whose name binding
+  still exists.
+- **Every renewal needs an arrival.** A reviewer still on its first run when its entry passes
+  `LIMITS.waitTtlMs` has no arrival, so it is not renewed and the wait bound keeps its meaning. A
+  renewal rewrites the register entry first (`launched_at_ms` now, `arrived_at_ms` 0, `renewals`
+  plus one) and the fan-out entry second, so a fan-out write that fails leaves an entry that cannot
+  renew again before the next arrival, instead of one that renews on every Stop.
+- **At most `LIMITS.maxRenewals` (3) renewals per reviewer.** Every arrival unlocks one renewal,
+  a failed notification included, so a reviewer that fails again after each resume would otherwise
+  keep a standalone chain's Stop released without a charge and an Autopilot-bound chain's Stop held
+  without the inner budget increment, and the Stop cap would never come. Past the cap the Stop takes
+  the explicit path, which the marker's own bounds limit (`.claude/rules/stop-background-wait.md`),
+  and a bound chain is charged again. 3 is a judgement: the measured incident needed one.
+- **An idle entry is not renewed.** An entry idle for `LIMITS.idleMs` (24 hours, both timestamps
+  older) is removed at the Stop instead of renewed, so the bound holds without a fan-out launch in
+  between; the session's next fan-out launch prunes the rest, and another session's sweep removes
+  a whole idle register.
+- **A named reviewer keeps its name.** A reviewer spawned with the Agent tool's `name` hands back
+  under that name, and a binding past `LIMITS.waitTtlMs` maps no agent (`nameIndex`), so a renewal
+  that left it stale would let the renewed entry release Stops for up to the wait bound after the
+  reviewer reported. The renewal therefore re-stamps the agent's own binding
+  `names/<scv1-key>/<agentId>.json` (`restampName`, `named_at_ms` now) before it writes the register,
+  and a named reviewer whose binding is gone, released by a later launch of that name or swept, is
+  not renewed. The chain spawns its reviewers without `name`, so this guards a spawn that ignored
+  that rule.
+- **The consume reviewer is excluded.** Only fan-out launches write the register. A failed consume
+  run's notification retires its record (`ended`); its ticket stays valid for the re-spawn the
+  ended directive orders, with the same header lines, so a resumed run's report finds no record and
+  claims nothing, and waiting for it silently would wait for a report the chain cannot use.
+- **Bounded like the other segments.** `rememberReviewer` removes the session's own entries idle
+  for `LIMITS.idleMs` (both timestamps older) and refuses a new one while `LIMITS.maxSessionFiles`
+  entries remain; another session's register is swept with `sweepIdleSessions` at every launch,
+  as `names/` is; `reviewersDirectory` is the one place that ensures the segment, and every caller
+  reads its failure as an empty register, so a broken `reviewers/` costs only the renewal. A
+  renewal respects `LIMITS.maxFanoutEntries`.
+- **A renewed entry is an ordinary fan-out entry.** The hand-back of the resumed reviewer therefore
+  passes the prompt hook's prefilter, `arrive` retires the entry and starts the delegate for the
+  review packet gate, as for a first run's report, and the next Stop waits as for a fresh launch.
 
 ## Decisions
 
@@ -168,6 +281,35 @@ payload, and a census of the live desktop transcripts of the three days before 2
   line that opens with `<result>` to the first line that closes with `</result>`, decoded. The
   host escapes the result, so no line inside it can be a tag line, and no report can forge the
   block, its id or its status.
+- **A named reviewer is matched through its launch's name binding, never refused.** The binding is
+  exact where it is made: the launch payload carries `tool_input.name` beside
+  `tool_response.agentId`, and the host gives a name to the newest spawn that asks for it, which
+  across tool messages is the order the main thread's PostToolUse events arrive in. So the table
+  holds, for each name, the newest recorded launch that took it, and a frame names that launch only
+  while no later spawn took the name: `unbind` releases it for every named spawn the store does not
+  record, any agent type, because the host's holder is then an agent whose report must never count
+  as a reviewer's. Refusing a named spawn was rejected: a PreToolUse deny is a hook that can return
+  a `permissionDecision`, a `minor` by `.claude/rules/runtime-lineage.md`, the reviewer-spawn grant
+  must only grant or stay silent (`.claude/rules/review-packet-gate.md`), and each refusal costs a
+  re-spawn. A spawn-time warning was rejected for the same re-run and because it rests on the model,
+  which named 932 hand-backs in the census. The host's `meta.json` files were rejected as the
+  source: they record every spawn's requested name, not the holder.
+- **A name frame counts only in the host's frame position** (`hostFrame`): the first line of the
+  prompt, or the line right after `Another Claude session sent a message:`. A name is chosen by the
+  main thread and predictable, so it cannot carry the agent id's unguessability, and a cross-session
+  message, whose body the host does not indent, holds its wrapper in those two lines. An id frame
+  keeps the column-zero rule above. **Every ambiguity names no agent:** two bindings of one name,
+  which two hooks that bound it in parallel leave, a binding past `LIMITS.waitTtlMs`, and a name
+  equal to an agent id the session's store knows (`nameIndex`). The review packet gate reads the
+  same bindings by the same rule: the delegate passes `--plugin-data` to its `record --event
+  UserPromptSubmit` and to `review_gate_check`, and the gate asks `promptNameAliases`, which answers
+  no alias unless the prompt has a host frame, only when it reads a report. The match and the gate
+  read the store one after the other, so they agree unless a binding passes its bound or is rebound
+  between the two reads (Known gaps).
+- **A broken `names/` costs only the name mapping.** `storeLocations` does not ensure `names/`;
+  `namesDirectory` does, and every caller reads its failure as no binding: `moveName` answers
+  `store`, `nameIndex` an empty index and the idle sweep nothing, so records, fan-out entries and
+  arrival notes still work by agent id.
 - **The arrival is noted before the claim, by the prompt hook's first `node` child.** The host's
   cancel kills the hook's whole process group, so only state written before the kill survives it,
   and the claim is the expensive part. `arrive` is one child that reads no workflow state and
@@ -291,9 +433,28 @@ payload, and a census of the live desktop transcripts of the three days before 2
 ## Coupled sites
 
 - The store layout is spelled in `storeLocations`, `fanoutDirectory` and `arrivalFile`, in
-  `background_review_wait` (record path and fan-out directory, so a Stop with nothing pending
-  spawns no `node` child), in `background_review_recover` (record and note paths), and in the
-  prefilter of `user-prompt-review-handback.sh`, which must stay a superset of all three.
+  `background_review_wait` (record path, fan-out directory and the register directory beside the
+  `"background_tasks"`/`"subagent"` case, so a Stop with nothing pending spawns no `node` child),
+  in `background_review_recover` (record and note paths), and in the prefilter of
+  `user-prompt-review-handback.sh`, which must stay a superset of all three. The register needs no
+  place in that prefilter: it is stamped only when `arrive` retires a fan-out entry, which the
+  prefilter already admits.
+- The reviewer register is spelled in `REVIEWERS_SEGMENT`, `REVIEWER_KEYS`, `validateReviewer`,
+  `reviewersDirectory`, `reviewerDirectory`, `loadReviewer`, `rememberReviewer`,
+  `noteReviewerArrival`, `resumable`, `restampName`, `renewResumedReviewers` and
+  `LIMITS.maxRenewals`, the `named` argument `recordFanout` passes from `launchName`, and in the
+  register glob of `background_review_wait`. It lives under the store root that both
+  protected-root lists of `reviewer-capability-v1.js` name (`BR1a`). The note is `waitNote`, built
+  on `renderWaitingNote`, `waitingNote` and `inFlightTasks` of `stop-background-wait-v1.js`;
+  `background_review_wait` takes it from the second line of the `wait` answer through
+  `split_wait_verdict`, whose one fallback `WAIT_NOTE_FALLBACK` is the renderer's sentence for "the
+  background review" (`BR21` compares the two, so a reword of `renderWaitingNote` fails there).
+  `BR11`, `BR12b` and `BR20` pin the module's notes, `BR21b` every arm of the note check through a
+  stubbed `wait` answer, `BR20` the renewal through the real hooks, `BR20b` the explanation for a
+  running subagent the register does not hold, and `BR20c` the renewal cap on an Autopilot-bound
+  chain; the unit file holds the register, the arrival stamp, the renewal, its cap, its idle and
+  name-binding arms, the fan-out and session-file limits, each refusal, the note and the CLI.
+  `BACKGROUND_REVIEW_ARRIVED_NOTE` is the arrived-report release sentence, and `BR9g` pins it.
 - The arrival markers are spelled in `scanLines` and in the prefilter's `case`, which must stay a
   superset of what `scanLines` accepts. `handbackReports` reads the same frame grammar with the
   same line splitter and exports it, with `AGENT_ID_RE`, to the review packet gate, which takes
@@ -317,7 +478,30 @@ payload, and a census of the live desktop transcripts of the three days before 2
   from completion notifications alone.
 - The claim predicate is `review-ticket-state-v1.js`; `_ZENSU_TDD_TICKET_STATE` is in the export
   list of `zensu-tdd-phase.sh` beside `_ZENSU_TDD_CHAIN_RECOVERY`.
-- The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, the
+- The name bindings are spelled in `NAMES_SEGMENT`, `NAME_KEYS`, `validateName`, `moveName`,
+  `nameIndex` and `nameAliases`, and in `background_review_unbind` of the delegate, which globs
+  `names/<scv1-key>/*.json` before it starts `unbind`, so a named spawn in a session without a
+  binding spawns no `node` child. `AGENT_NAME_RE` is the host Agent tool's `name` pattern (its
+  2.1.321 schema), `PEER_LINE` the line the host stores above a hand-back frame, which
+  `zensu_prompt_origin` in `hooks/lib/zensu-prompt-origin.sh` and `promptText` in
+  `hooks/lib/context-auto-load-v1.js` spell too, and `hostFrame` is shared by `scanLines`,
+  `handbackReports` and `promptNameAliases`. `names/` shares `sessionFiles`, `SESSION_FILE_RE`,
+  `LIMITS.maxSessionFiles` and `sweepIdleSessions` with `fanout/`, so a change to any of them moves
+  both segments, and `namesDirectory` is the one place that ensures `names/`. The gate takes the
+  bindings through `--plugin-data` on `record` and `check` (`aliasesFor` in
+  `hooks/lib/review-gate-v1.js`, which hands `arrivedReports` a resolver over `promptNameAliases`),
+  which the delegate's arrival `record` call and `review_gate_check` pass. `RP33` to `RP33d` in
+  `tests/structure/test-review-packet.sh` drive the shipped hooks: a named panel with a persona and
+  a named consume claim with the gate on, a name a later unrecorded spawn took, a named consume
+  claim with the gate off, and a named consume report that answers `REVIEW PACKET INVALID`; the
+  unit files hold the binding rules, the frame position, every ambiguity, the idle sweep and the
+  unusable segment. The operator accounts are the delegate
+  row of `docs/configuration.md`, the Arrival bullet of `docs/review-chain.md` and the step-10
+  lead of `skills/build/references/review-chain.md`, which tells the main thread to spawn
+  reviewers without `name`.
+- The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, which
+  reads only the first line with `read` and takes a second line as the note, so an older hook reads
+  the newer answer unchanged and an older module's single line gets the fallback sentence, the
   `recorded agent= ttl=` line by the delegate's launch arm, the `pending agent=` prefix and the
   `idle reason= retired=` form of the `arrive` line by the prompt hook's `case`, the `source` field
   of the `match` claim line by the delegate's verdict parse, and the `hold count= of=` and `release`
@@ -420,6 +604,42 @@ payload, and a census of the live desktop transcripts of the three days before 2
   sweeps them. Observed after the `BR16` cancel.
 - **Not measured live.** The suite drives the real hooks with payloads shaped like the
   measurements and a host-style cancel; no desktop session has run the patched plugin yet.
+- **Two named spawns of one name in one tool message.** The host gives the name to the later
+  spawn. When their PostToolUse hooks run in the other order, the table names the earlier launch,
+  the later one's report is recorded for it, and the earlier one's own id-framed report then reads
+  as a second completion. When the earlier spawn is the consume reviewer and the later an agent
+  the store does not record, that agent's hand-back claims the review ticket and routes as the
+  code review; only a report that answers `REVIEW PACKET INVALID` is refused. Two hooks that bind
+  in parallel leave two bindings and name no agent. Neither order was measured. Spawning reviewers
+  without `name` avoids all of these.
+- **A prompt that opens with a frame of a bound name** names that name's current holder, whoever
+  wrote the prompt. The hook payload does not tell a queued hand-back from a typed or pasted prompt
+  (`.claude/rules/prompt-origin.md`), and a name, unlike an agent id, is predictable and can repeat
+  across rounds, so a pasted earlier hand-back of a bound name can claim the pending consume ticket.
+- **The match and the gate read the bindings one after the other.** A binding that passes
+  `LIMITS.waitTtlMs` or is rebound between the delegate's `match` and the gate's `check` leaves the
+  gate without the report, so a `REVIEW PACKET INVALID` answer in that hand-back is not refused
+  there, as for a claim the Stop completes from a note.
+- **A named spawn whose PostToolUse hook did not run** (cancelled, or without a session key)
+  leaves the earlier binding in place, so a frame of the new holder names the earlier reviewer.
+  `unbind` sees only the main thread's `Agent` and `Task` calls, so a name the host hands out
+  another way is not seen either.
+- **The frame position for a name was measured in stored transcripts**, not in a logged hook
+  payload. A host that put another line above the frame would leave a named reviewer unmatched,
+  which is the behaviour before this change. An id frame keeps the column-zero rule, although the
+  census found every real frame in the host's position.
+- **A resumed reviewer is renewed at the next Stop, not at the resume.** A resumed reviewer whose
+  hand-back reaches the main thread before that Stop finds no fan-out entry, so, as before this
+  change, its hand-back starts no delegate unless another entry is pending, and the packet gate
+  does not read that report. A reviewer resumed more than `LIMITS.idleMs` after its last arrival, or
+  for the fourth time, and a named reviewer whose binding is gone take the explicit `ZENSU-AWAIT:`
+  path.
+- **The register is last-writer-wins.** An arrival stamp and a Stop renewal that race on one entry
+  can leave the stamp over the renewal; the next renewal then needs no new arrival, which costs at
+  most one more wait bound for that reviewer while the host still lists it as running.
+- **The `background_tasks` entry of a resumed agent was read once**, from the 2026-11-16 desktop
+  transcript through the explanation it produced, not from a logged Stop payload. A host that
+  listed a resumed agent under another id or type renews nothing and leaves the explicit path.
 - **Windows is unmeasured.** The suite is in `ciStructureTests` and in no blocking Windows shard;
   `tests/profiles/windows-native-structure.v1.json` lists it as excluded, because BR2's host
   branch is a native-Windows marker that `windows-ci-contract.test.js` audits. The cancel
@@ -448,4 +668,25 @@ here before: the record and fan-out key sets shipped for the first time, the add
 only `additionalContext`, and the claim read its predicate from `review-ticket-state-v1.js` with the
 same field test. Starting the delegate for a notification that carries `<result>` is `patch` on the
 same walk: the hook's registration, matcher and output kind stay as they are, and the store's key
-sets do not move.
+sets do not move. The name bindings are `patch` too: `NAME_KEYS` is strict but ships for the first
+time, in a segment of its own, so no released reader or writer predates it, and the record,
+fan-out and arrival key sets do not move. An older installation of the same lineage never reads
+`names/` and matches by id as before; a newer one finds no binding in an older store and does the
+same. `unbind` is a new verb and `--plugin-data` a new optional gate flag, each called only from
+this tree. No hook is added, removed or renamed and no matcher changes; the delegate still returns
+only `additionalContext`, and starts one more `node` child only for a named spawn while the session
+holds a binding. `promptNameAliases` and `namesDirectory` move no persisted shape either: the gate
+builds the index only for a prompt with a host frame, and an unusable `names/` no longer fails the
+other segments. The reviewer register is `patch` on the same walk: `REVIEWER_KEYS` is strict but
+ships for the first time, in a segment of its own, so no released reader or writer predates it,
+and the record, fan-out, arrival and name key sets do not move; a renewed fan-out entry has the
+exact `FANOUT_KEYS` shape an older installation of the same lineage reads. `wait` reading the Stop
+input on stdin and printing a second line keeps its first line, so an older Stop hook, which passes
+`/dev/null` and reads one line, sees no change, and a newer hook over an older module gets one line
+and its fallback sentence. The same holds for the note line `external-review-v1.js stop-wait` now
+prints. No hook is added, removed or renamed and no matcher changes. The Stop decisions change in
+one place: a resumed fan-out reviewer's Stop, which an older installation hinted (standalone) or
+charged to the inner budget (Autopilot-bound), is now released or held without that increment, at
+most `LIMITS.maxRenewals` times per reviewer; both are outputs the hook already emitted, so no
+`permissionDecision` and no output kind moves. Every other Stop releases and blocks where it did,
+with another notice text that only the user reads, and no config key or attestation moves.
