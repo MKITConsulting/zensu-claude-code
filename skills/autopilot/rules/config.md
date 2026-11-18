@@ -192,7 +192,7 @@ is not globally routable and pins each hostname to an approved address for the b
 and the gate refuses to open a run config whose remote hostname carries no pin. The browser
 refuses every HTTP(S) request to an origin outside the run config — a WebSocket connection is
 not fenced by it, which is an open gap — and the gate reapplies the
-credential/query/fragment rule to every navigation command. A server
+credential rule, and for a non-loopback origin the query/fragment rule, to every navigation command. A server
 redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
 every navigation. Missing/invalid declarations, unsupported evidence modes, or unsupported policy
 versions fail closed, and so does a hostname that is not exact: every origin
