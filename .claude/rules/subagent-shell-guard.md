@@ -202,8 +202,8 @@ grows past 64 directories is denied (`directories`).
 - `ZENSU_CONFIG` adds only its own file, and the project root and its ancestors are never
   protected parents: a config file beside the project would otherwise make the project's
   parent untouchable, and removing those directories is the project-root rule's case.
-- The CLI gate ignores the inline `ZENSU_MCP_GATE=off` prefix for a subagent, its deny reason
-  for a subagent leaves the prefix out, and the guard also denies that assignment.
+- The CLI gate ignores the inline `ZENSU_MCP_GATE=off` prefix for a subagent, its deny reasons
+  name no escape for a subagent or the main thread, and the guard also denies that assignment.
 - `mcpGate: false` and a host-environment `ZENSU_MCP_GATE=off` switch the CLI gate off for the
   subagent too. The operator chose that; the guard does not re-implement the CLI map.
 - The CLI gate gates every invocation that `commandInvocations`, this module's walker over

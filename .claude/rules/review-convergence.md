@@ -122,7 +122,7 @@ neutralized. A plain `$` stays valid because route files such as `posts.$slug.ts
 log's secret scan still runs on every line, but it is a backstop, not a guarantee: a refused
 ledger line is rewritten without the value, never resent with the `zensu-secret-allow` marker or
 past the scan in any other way. The clause names no env-var escape, which
-`tests/structure/test-escape-wording.sh` holds for every text on the chain-closing path.
+`tests/structure/test-escape-wording.sh` holds for every runtime file.
 
 **The severity rubric has ONE source.** `docs/review-severity.md` holds the
 `zensu:review-severity` block; `agents/review-aspect.md`, `agents/review-judge.md` and

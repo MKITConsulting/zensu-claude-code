@@ -109,3 +109,82 @@ test('a descendant forked by a TERM handler remains inside the owned group and i
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a group signal answered with EPERM, as macOS answers for a group of zombies, still reports the child exit status', posixProcessGroups, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-owned-eperm-'));
+  const stub = path.join(root, 'eperm-once.js');
+  fs.writeFileSync(stub, `
+    const real = process.kill.bind(process);
+    let answered = false;
+    process.kill = (pid, signal) => {
+      if (!answered && pid < 0 && signal !== 0 && signal !== undefined) {
+        answered = true;
+        const error = new Error('kill EPERM');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return real(pid, signal);
+    };
+  `);
+  const handle = spawn(process.execPath, ['--require', stub, ownedProcess, process.execPath, '-e', 'process.exit(7)'], { stdio: 'ignore' });
+  try {
+    assert.equal(await waitForExit(handle), 7);
+  } finally {
+    try { handle.kill('SIGKILL'); } catch (_error) {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a group that keeps answering EPERM fails with exit 1 and a message that names the refusal', posixProcessGroups, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-owned-eperm-always-'));
+  const stub = path.join(root, 'eperm-always.js');
+  fs.writeFileSync(stub, `
+    const real = process.kill.bind(process);
+    process.kill = (pid, signal) => {
+      if (pid < 0) {
+        const error = new Error('kill EPERM');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return real(pid, signal);
+    };
+  `);
+  const handle = spawn(process.execPath, ['--require', stub, ownedProcess, process.execPath, '-e', 'process.exit(0)'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  handle.stderr.on('data', (chunk) => { stderr += chunk; });
+  try {
+    assert.equal(await waitForExit(handle), 1);
+    assert.match(stderr, /still refuses signals with EPERM after SIGKILL/);
+  } finally {
+    try { handle.kill('SIGKILL'); } catch (_error) {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a group that refuses the signals but answers the probe is reported as one that survived SIGKILL', posixProcessGroups, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-owned-eperm-alive-'));
+  const stub = path.join(root, 'eperm-signals.js');
+  fs.writeFileSync(stub, `
+    const real = process.kill.bind(process);
+    process.kill = (pid, signal) => {
+      if (pid < 0 && signal !== 0) {
+        const error = new Error('kill EPERM');
+        error.code = 'EPERM';
+        throw error;
+      }
+      if (pid < 0) return true;
+      return real(pid, signal);
+    };
+  `);
+  const handle = spawn(process.execPath, ['--require', stub, ownedProcess, process.execPath, '-e', 'process.exit(0)'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  handle.stderr.on('data', (chunk) => { stderr += chunk; });
+  try {
+    assert.equal(await waitForExit(handle), 1);
+    assert.match(stderr, /survived SIGKILL/);
+    assert.doesNotMatch(stderr, /EPERM/);
+  } finally {
+    try { handle.kill('SIGKILL'); } catch (_error) {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
