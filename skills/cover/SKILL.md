@@ -100,9 +100,9 @@ esac
 On GitHub the read takes no `--repo-id`, so gh resolves the base repository from the checkout's
 remotes, as this step's earlier unpinned read did; `gh repo set-default` fixes that choice for a
 checkout with several remotes, such as a fork beside its upstream. GitLab needs `--repo-id`,
-which names the project of the remote `--detect` reads: the one the branch tracks, else `origin`.
-When that is not the project holding the PR/MR (a fork checkout), or when the checkout has
-neither, which leaves `repo=` empty, start the block with
+which names the project of the remote `--detect` reads: the one the branch tracks, else `origin`,
+else the remotes when they all name one project. When that is not the project holding the PR/MR
+(a fork checkout), or when no remote qualifies, which leaves `repo=` empty, start the block with
 `export ZENSU_VCS_REMOTE="$(git remote get-url <remote>)"`, `<remote>` naming the remote of the
 project that holds the PR/MR (`git remote -v` lists them). When the forge is unknown, ask the
 user which one holds the PR/MR, inside the one batched question of 0.D, instead of reading
