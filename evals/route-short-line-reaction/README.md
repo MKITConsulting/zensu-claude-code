@@ -296,6 +296,6 @@ promptfoo eval --no-cache --no-share -c promptfooconfig.yaml
 ```
 
 Both are live: they need the `claude` CLI, promptfoo and an enabled `zensu@zensu` install, and they
-cost API credits. Like every promptfoo eval in this repository, this one is local-only and never a
-CI gate. `ROUTE_EVAL_DRY_RUN=1 ./provider.sh "$(printf 'route-eval-source: ask\nhello')"` prints the
+cost API credits. This eval is local-only and never a CI gate: the scheduled `live-evals.yml` does not
+run it, because its provider needs a user-scope `zensu@zensu` install that the runner does not have. `ROUTE_EVAL_DRY_RUN=1 ./provider.sh "$(printf 'route-eval-source: ask\nhello')"` prints the
 settings, environment and capture of a run without starting a model.
