@@ -9540,6 +9540,7 @@ AP_ORIGIN=a1a30000-0000-4000-8000-000000000003
 AP_TAKER=a1a40000-0000-4000-8000-000000000004
 AP_OTHER=a1a50000-0000-4000-8000-000000000005
 AP_SUB=a1a60000-0000-4000-8000-000000000006
+AP_CLAIM=a1a70000-0000-4000-8000-000000000007
 AP_PR_URL='https://github.com/example/fixture/pull/238'
 ap_session() { node "$AP_MKAP" session "$AP_HOME" "$@"; }
 ap_run() { node "$AP_MKAP" run "$PLUGIN_DIR/hooks/lib" "$@"; }
@@ -9713,13 +9714,47 @@ for AP_SIDE in hub plm; do
     [ "$(ap_json "$AP_CSHOW" '[o.autopilotRuns.measured, o.autopilotRuns.runs.length, o.autopilotRuns.directories.length].join("/")')" = "true/0/0" ] || AP_BAD="$AP_BAD json=$(ap_json "$AP_CSHOW" 'o.autopilotRuns')"
     ap_trail "$AP_TAKER_WT" show "$AP_TAKER" 2>/dev/null | grep -q '^AUTOPILOT ' && AP_BAD="$AP_BAD show-line"
     [ -z "$AP_BAD" ] && check "AP8 a session whose tree holds no Autopilot run gets no section and no AUTOPILOT line (control)" PASS || check "AP8 control:$AP_BAD" FAIL
+
+    AP_CLAIM_WT="$AP_REPO/.claude/worktrees/claim-wt"
+    AP_CLAIM_FILE="$AP_CLAIM_WT/.zensu/state/autopilot-relocating-run_apclaim.json"
+    AP_BAD=""
+    if git -C "$AP_REPO" worktree add -q "$AP_CLAIM_WT" -b claude/ap-claim >/dev/null 2>&1 \
+      && ap_session "$AP_CLAIM" "$AP_CLAIM_WT" 3600 \
+      && ap_run "$AP_CLAIM_WT" run_apclaim "$AP_CLAIM" \
+      && mv "$AP_CLAIM_WT/.zensu/state/autopilot-run-run_apclaim.json" "$AP_CLAIM_FILE" \
+      && ap_run "$AP_CLAIM_WT" run_apwo "$AP_CLAIM" '{"workOrder":{"id":"wo_fixture"}}'; then
+      AP_CMD="$(ap_trail "$AP_TAKER_WT" takeover "$AP_CLAIM" --no-record 2>/dev/null)"
+      AP_CSEC="$(ap_section "$AP_CMD" '## Recent instructions')"
+      ap_keep claim-section "$AP_CSEC"
+      for AP_NEED in "**A move of a durable Autopilot run was interrupted in the old session's tree**" '- `run_apclaim` at `TEAM_REVIEW`, next action `RECONCILE_TEAM_REVIEW`: the claim `' '-relocating-run_apclaim.json` waits for `/zensu:autopilot-adopt` from a session whose project root contains `' 'claim-wt`, standing inside `' '### Run `run_apwo`' 'it is a work-order run, whose plan lives in the `.zensu/plans` of that worktree' 'Do not move that worktree.'; do
+        printf '%s\n' "$AP_CSEC" | grep -qF -- "$AP_NEED" || AP_BAD="$AP_BAD [missing:$AP_NEED]"
+      done
+      for AP_FORBID in 'git worktree move' '--confirm' 'zensu-log.sh'; do
+        printf '%s\n' "$AP_CSEC" | grep -qF -- "$AP_FORBID" && AP_BAD="$AP_BAD [present:$AP_FORBID]"
+      done
+      ap_trail "$AP_TAKER_WT" show "$AP_CLAIM" 2>/dev/null | grep '^AUTOPILOT ' | grep -qF 'an interrupted move left the relocation claim of the Autopilot run run_apclaim at TEAM_REVIEW in its tree as what may be the only copy' || AP_BAD="$AP_BAD show-line"
+      AP_CJSON="$(ap_trail "$AP_TAKER_WT" show "$AP_CLAIM" --json 2>/dev/null)"
+      [ "$(ap_json "$AP_CJSON" 'o.autopilotRuns.claims.map((r) => r.runId + ":" + r.owned).join(",")')" = "run_apclaim:true" ] || AP_BAD="$AP_BAD claims=$(ap_json "$AP_CJSON" 'o.autopilotRuns.claims')"
+      [ "$(ap_json "$AP_CJSON" 'o.autopilotRuns.runs.map((r) => r.runId + ":" + r.workOrder).join(",")')" = "run_apwo:true" ] || AP_BAD="$AP_BAD runs=$(ap_json "$AP_CJSON" 'o.autopilotRuns.runs')"
+      AP_REL="$(ap_trail "$AP_TAKER_WT" release "$AP_CLAIM" --json 2>/dev/null)"
+      ap_keep claim-blockers "$(ap_json "$AP_REL" 'o.blockers.filter((b) => b.code.startsWith("autopilot"))')"
+      [ "$(ap_json "$AP_REL" 'o.blockers.map((b) => b.code).filter((c) => c.startsWith("autopilot")).join(",")')" = "autopilot-run,autopilot-claim" ] || AP_BAD="$AP_BAD codes=$(ap_json "$AP_REL" 'o.blockers.map((b) => b.code).join(",")')"
+      ap_json "$AP_REL" 'o.blockers.map((b) => b.text).join(" ")' | grep -qF 'It is a work-order run, so moving that worktree does not carry it over' || AP_BAD="$AP_BAD work-order-blocker"
+      ap_json "$AP_REL" 'o.blockers.map((b) => b.text).join(" ")' | grep -qF 'relocation claim of the durable Autopilot run run_apclaim at stage TEAM_REVIEW' || AP_BAD="$AP_BAD claim-blocker"
+      ap_trail "$AP_TAKER_WT" release "$AP_CLAIM" --apply >/dev/null 2>&1; AP_RC=$?
+      [ "$AP_RC" = "1" ] || AP_BAD="$AP_BAD apply-rc=$AP_RC"
+      [ -f "$AP_CLAIM_FILE" ] || AP_BAD="$AP_BAD claim-gone"
+    else
+      AP_BAD="$AP_BAD [fixture]"
+    fi
+    [ -z "$AP_BAD" ] && check "AP11 a relocation claim is named as an interrupted move in takeover, show and --json and blocks release --apply, and an own-tree work-order run gets the route that keeps its worktree" PASS || check "AP11 claim and work-order run:$AP_BAD" FAIL
   fi
 done
 TRAIL_MJS="$HUB_TRAIL_MJS"
 
 if [ "$AP_OK" = 1 ]; then
   AP_BAD=""
-  for AP_KEPT in takeover-section show-line show-json takeover-json handoff-section inside-section inside-blockers release-blockers; do
+  for AP_KEPT in takeover-section show-line show-json takeover-json handoff-section inside-section inside-blockers release-blockers claim-section claim-blockers; do
     if [ ! -s "$AP_OUT/$AP_KEPT.hub" ] || [ ! -s "$AP_OUT/$AP_KEPT.plm" ]; then
       AP_BAD="$AP_BAD [missing:$AP_KEPT]"
     elif ! cmp -s "$AP_OUT/$AP_KEPT.hub" "$AP_OUT/$AP_KEPT.plm"; then

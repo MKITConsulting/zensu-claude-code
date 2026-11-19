@@ -6875,38 +6875,66 @@ fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+AP_GONE_HOLDING="$SBOX/ap-gone-holding"
+AP_GONE_CLAIMING="$SBOX/ap-gone-claiming"
+AP_GONE_EMPTY="$SBOX/ap-gone-empty"
+mkdir -p "$AP_GONE_HOLDING/.zensu/state" "$AP_GONE_CLAIMING/.zensu/state" "$AP_GONE_EMPTY"
+: > "$AP_GONE_HOLDING/.zensu/state/autopilot-run-run_gone_live.json"
+: > "$AP_GONE_CLAIMING/.zensu/state/autopilot-relocating-run_gone_claim.json"
 ap_run run_gone_a GATES "$AP_FOREIGN" "-" "/nonexistent/moved/root"
 ap_run run_gone_b TEAM_REVIEW "$AP_OWN" "/nonexistent/moved/root" "/nonexistent/moved/root"
 ap_run run_gone_ws GATES "$AP_FOREIGN" "/w/t" "/nonexistent/moved/root"
-ap_run run_gone_live GATES "$AP_FOREIGN" "-" "$SBOX"
+ap_run run_gone_live GATES "$AP_FOREIGN" "-" "$AP_GONE_HOLDING"
+ap_run run_gone_claim GATES "$AP_FOREIGN" "-" "$AP_GONE_CLAIMING"
+ap_run run_gone_empty GATES "$AP_FOREIGN" "-" "$AP_GONE_EMPTY"
 ap_run run_gone_done DONE "$AP_FOREIGN" "-" "/nonexistent/moved/root"
 AP_GONE_OUT="$(ap_report bound "$AP_OWN")"
 AP_GONE_ROW="$(printf '%s\n' "$AP_GONE_OUT" | grep -F 'whose recorded project root no longer exists')"
 AP_GONE_UNREAD="$(printf '%s\n' "$AP_GONE_OUT" | grep -F 'could not be read')"
+AP_GONE_MAIN=""
+if [ ! -e "$AP_P/.git" ] && mkdir "$AP_P/.git"; then
+  AP_GONE_MAIN="$(ap_report bound "$AP_OWN" | grep -F 'whose recorded project root no longer exists')"
+  rmdir "$AP_P/.git"
+fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 ap_run run_gone_ctl GATES "$AP_FOREIGN" "/w/t" "/nonexistent/moved/root"
 AP_GONE_CTL="$(ap_report bound "$AP_OWN")"
 rm -f "$AP_STATE"/autopilot-run-*.json
-if printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot: 2 durable run document(s) whose recorded project root no longer exists' \
+if printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot: 3 durable run document(s) whose recorded project root no longer exists or no longer holds the run' \
   && printf '%s' "$AP_GONE_ROW" | grep -qF '⚠️' \
   && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_a.json' \
   && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_b.json' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'autopilot-run-run_gone_empty.json' \
   && printf '%s' "$AP_GONE_ROW" | grep -qF '/zensu:autopilot-adopt, run from a session whose project root is this project' \
   && ! printf '%s' "$AP_GONE_ROW" | grep -qF -- '--confirm' \
   && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'zensu-log.sh' \
   && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_ws' \
   && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_live' \
-  && printf '%s' "$AP_GONE_UNREAD" | grep -qF '2 durable run document(s) that could not be read' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'run_gone_claim' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF '3 durable run document(s) that could not be read' \
   && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_ws.json' \
   && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_live.json' \
+  && printf '%s' "$AP_GONE_UNREAD" | grep -qF 'autopilot-run-run_gone_claim.json' \
   && ! printf '%s' "$AP_GONE_UNREAD" | grep -qF 'run_gone_a' \
+  && ! printf '%s' "$AP_GONE_UNREAD" | grep -qF 'run_gone_empty' \
   && printf '%s' "$AP_GONE_OUT" | grep -F 'recorded stage is terminal' | grep -qF 'autopilot-run-run_gone_done.json' \
   && ! printf '%s' "$AP_GONE_OUT" | grep -qF 'nonterminal durable run run_gone_b' \
   && printf '%s' "$AP_GONE_CTL" | grep -qF '1 durable run document(s) that could not be read' \
   && ! printf '%s' "$AP_GONE_CTL" | grep -qF 'whose recorded project root no longer exists'; then
-  check "P1nz21 a nonterminal record whose recorded root is gone and whose working tree is that root gets its own row routing to /zensu:autopilot-adopt" PASS
+  check "P1nz21 a nonterminal record whose recorded root is gone or no longer holds the run, and whose working tree is that root, gets its own row routing to /zensu:autopilot-adopt, while a root that still holds its record or claim stays unreadable" PASS
 else
   check "P1nz21 the vanished-root row (row=$AP_GONE_ROW unread=$AP_GONE_UNREAD ctl=$AP_GONE_CTL)" FAIL
+fi
+if printf '%s' "$AP_GONE_MAIN" | grep -qF 'autopilot: 3 durable run document(s) whose recorded project root no longer exists or no longer holds the run' \
+  && printf '%s' "$AP_GONE_MAIN" | grep -qF 'This project is the main checkout of its repository, not a linked worktree' \
+  && printf '%s' "$AP_GONE_MAIN" | grep -qF 'move this checkout back to the project root the record names' \
+  && ! printf '%s' "$AP_GONE_MAIN" | grep -qF 'reports whether it can rewrite the record in place' \
+  && ! printf '%s' "$AP_GONE_MAIN" | grep -qF -- '--confirm' \
+  && printf '%s' "$AP_GONE_ROW" | grep -qF 'reports whether it can rewrite the record in place' \
+  && ! printf '%s' "$AP_GONE_ROW" | grep -qF 'main checkout'; then
+  check "P1nz21b in a project that is a main checkout the released-root row names the way back instead of the in-place rewrite /zensu:autopilot-adopt refuses there, and only there" PASS
+else
+  check "P1nz21b the main-checkout released-root row (main=$AP_GONE_MAIN)" FAIL
 fi
 
 # P1nz11 — `ownerWouldAccept` must mirror the owner's `sha256` as a TYPE test, not only

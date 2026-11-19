@@ -50,14 +50,18 @@ another owner is counted in `others`. When that owner is the running session's o
 computed the same lazy way through `selfSessionId`), the run is already carried and nothing more is
 said. Every other owner's nonterminal run that classifies is listed in `foreign`: an earlier id of
 the old session after a fork or a resume, or a third session. A `DONE` or `CANCELLED` run of the
-old session is counted in `terminal` and named on no carrier.
+old session is counted in `terminal` and named on no carrier. The reader also lists every
+`autopilot-relocating-<id>.json` (`CLAIM_ENVELOPE`) through the same run-id gate, bounded read and
+record checks, and keeps each nonterminal claim in `claims` whatever its owner, marked `owned` when
+the old session owns it: an interrupted relocation can leave the claim as the only copy of its run,
+so freeing its tree could delete the run.
 
 **Classification.** A run is `own-tree` when its `workspaceRoot` is absent or equals its
 `projectRoot`; `project-root-in-worktree` when its project root lies strictly inside its working
 tree, as for a session recorded in a subdirectory of its worktree, and then `tree` names that
 worktree; and `nested-workspace` otherwise, the origin-checkout layout. `innerChain` is a pending
 stage of `TDD_RUNNING`, read from `blocked.from` for a `BLOCKED` run, because the adopt verb refuses
-that run with exit 3. `folder`, the directory that holds the record's state directory, names the
+that run with exit 3. `workOrder` says that the record carries a `workOrder` member. `folder`, the directory that holds the record's state directory, names the
 tree and the session root in every route text, since the recorded root may already be gone. Stage,
 next action and blocked code are rendered only when they match a strict shape, and a pull request
 only when its number is a positive integer of at most `PR_NUMBER_MAX` and its URL matches
@@ -71,17 +75,23 @@ the reader "this session", as the chips and linked-session sections do. Every ca
 session: the release verb reads only its caller root's state directory and refuses a caller that
 owns the run. For the two layouts whose record moves with a worktree, `own-tree` and
 `project-root-in-worktree`, the cancel works only before that worktree moves, and the texts say so;
-`nested-workspace` keeps its record in place. Only `own-tree` offers the move route; the other two
-say not to move the worktree and to continue from a session rooted at `folder`.
+`nested-workspace` keeps its record in place. Only an `own-tree` run that is no work-order run offers
+the move route, because the adopt verb refuses a worktree relocation of a work-order run with exit
+6: its plan lives in the `.zensu/plans` of its worktree. The other layouts and a work-order run say
+not to move the worktree and to continue from a session rooted at `folder`. A relocation claim names
+the one exit that finishes it, `/zensu:autopilot-adopt` from a session whose project root contains
+`folder`, standing inside `folder`.
 
 **Four carriers.** Both briefs render `## Autopilot run` after their linked-session reports, the
 takeover before `## Recent instructions` and the handoff before `## Open threads`, and render
-nothing when the tree holds no run of the session, no unread record and no foreign run. `show`
-prints one `AUTOPILOT` line under the same rule. `show --json` and `takeover --json` carry the
-whole state as `autopilotRuns`, the `foreign` list included. `release` pushes `autopilot-run` for
+nothing when the tree holds no run of the session, no relocation claim, no unread record and no
+foreign run; every claim gets one line naming its run, its stage and the exit that finishes the move.
+`show` prints one `AUTOPILOT` line under the same rule. `show --json` and `takeover --json` carry the
+whole state as `autopilotRuns`, the `foreign` and `claims` lists included. `release` pushes `autopilot-run` for
 every owned nonterminal run, `autopilot-unreadable` for an unreadable record or a read cut at the
-budget, `autopilot-unattributed` for an unattributed tree and `autopilot-foreign-run` for every
-foreign run, so a dry run lists them and `--apply` exits 1. A transferred run left the tree or
+budget, `autopilot-unattributed` for an unattributed tree, `autopilot-foreign-run` for every
+foreign run and `autopilot-claim` for every relocation claim, so a dry run lists them and `--apply`
+exits 1. A transferred run left the tree or
 changed its owner to the running session, so it no longer blocks.
 
 **A foreign run is counted in the brief and named by `release`, and that split is the approved
@@ -106,9 +116,9 @@ names that question in the confirmation and never lets the plan answer stand in 
 runs it after the move, and flows 4 and 5 of `references/handoff.md` carry the runs with it.
 
 **The hand copies are pinned.** `TERMINAL_STAGES`, `RUN_RECORD_MAX_BYTES`, `RUN_ENVELOPE`,
-`RUN_ID_SHAPE`, `RUN_ID_MIN`, `RUN_ID_MAX` and `RUN_SCHEMA_VERSION` copy the state library's
-`TERMINAL`, `MAX_BYTES`, run-file envelope, `identifier`, its length bounds and the schema version
-`readState` requires; `STAGE_SHAPE` and `ACTION_SHAPE` must accept
+`CLAIM_ENVELOPE`, `RUN_ID_SHAPE`, `RUN_ID_MIN`, `RUN_ID_MAX` and `RUN_SCHEMA_VERSION` copy the state
+library's `TERMINAL`, `MAX_BYTES`, run-file envelope, the claim name `claimNameOf` builds,
+`identifier`, its length bounds and the schema version `readState` requires; `STAGE_SHAPE` and `ACTION_SHAPE` must accept
 every member of its `STAGES` and `NEXT_ACTION`. The case `the run vocabulary matches the state
 library it mirrors` reads all of them but the schema version from
 `hooks/lib/zensu-autopilot-state.sh`, and the schema-version case reads that one, so a one-sided
@@ -136,8 +146,10 @@ which imports the companion's copy and whose `registered` count and win32 skip c
 - The folders come from the transcript. A session re-anchored to a sibling worktree, or one whose
   tree moved before the takeover ran, keeps its run where this reader does not look, and the
   carriers then say nothing. A tree that is gone holds no readable run either.
-- A record an interrupted relocation claimed, `autopilot-relocating-<id>.json`, is not listed: it
-  lies in a tree that already moved, where a retried adoption from that tree finishes the move.
+- A relocation claim lies in the tree that already moved, so it is named only when a folder the
+  transcript records holds it, as for the session that ran the interrupted adoption from inside that
+  tree (`AP11`). A takeover of the session that drove the run before the move reads the old path and
+  finds nothing there.
 - The record lives in a session-writable directory, so a planted record can make a carrier name a
   run or make `release` refuse. The adopt verb re-validates everything before it moves anything.
 - The section tells the reader which route carries a run; nothing verifies that the route was

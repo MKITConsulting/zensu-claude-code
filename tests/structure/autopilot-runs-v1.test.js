@@ -173,14 +173,54 @@ test('a linked record, a hard-linked record and a linked state folder hold no re
     return;
   }
   fs.linkSync(target, path.join(dir, 'autopilot-run-run_hard.json'));
+  const behind = folderOf();
+  writeRun(behind, 'run_behind_link');
   const linked = folderOf();
-  fs.symlinkSync(path.join(folder, '.zensu'), path.join(linked, '.zensu'));
-  const state = mod.readAutopilotRuns([folder, linked], KEY);
+  fs.symlinkSync(path.join(behind, '.zensu'), path.join(linked, '.zensu'));
+  const stateLinked = folderOf();
+  fs.mkdirSync(path.join(stateLinked, '.zensu'));
+  fs.symlinkSync(path.join(behind, '.zensu', 'state'), path.join(stateLinked, '.zensu', 'state'));
+  const state = mod.readAutopilotRuns([folder, linked, stateLinked], KEY);
   const reasons = Object.fromEntries(state.unreadable.map((entry) => [path.basename(entry.file), entry.reason]));
   assert.equal(reasons['autopilot-run-run_link.json'], 'it is a symbolic link');
   assert.equal(reasons['autopilot-run-run_hard.json'], 'it is a hard link');
   assert.equal(reasons['autopilot-run-run_target.json'], 'it is a hard link');
   assert.deepEqual(state.directories, [dir]);
+  assert.ok(!state.runs.some((run) => run.runId === 'run_behind_link'));
+});
+
+test('a folder, a .zensu or a state directory that cannot be inspected or listed is named unreadable and blocks release', (t) => {
+  if (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0)) {
+    t.skip('permission bits do not deny this process on this host');
+    return;
+  }
+  const listing = folderOf();
+  writeRun(listing, 'run_unlisted');
+  const listingState = stateDir(listing);
+  const stateless = folderOf();
+  writeRun(stateless, 'run_uninspected');
+  const statelessZensu = path.join(stateless, '.zensu');
+  const zensuless = folderOf();
+  writeRun(zensuless, 'run_unreached');
+  fs.chmodSync(listingState, 0o300);
+  fs.chmodSync(statelessZensu, 0o600);
+  fs.chmodSync(zensuless, 0o600);
+  t.after(() => {
+    fs.chmodSync(listingState, 0o700);
+    fs.chmodSync(statelessZensu, 0o700);
+    fs.chmodSync(zensuless, 0o700);
+  });
+  const state = mod.readAutopilotRuns([listing, stateless, zensuless], KEY);
+  assert.deepEqual(state.unreadable.map((entry) => [entry.file, entry.reason]), [
+    [path.join(statelessZensu, 'state'), 'it could not be inspected'],
+    [path.join(zensuless, '.zensu'), 'it could not be inspected'],
+    [listingState, 'its listing could not be read'],
+  ]);
+  assert.deepEqual(state.directories, [listingState]);
+  assert.equal(state.runs.length, 0);
+  const blockers = mod.autopilotReleaseBlockers(state, (p) => p);
+  assert.equal(blockers[0].code, 'autopilot-unreadable');
+  assert.ok(blockers[0].text.startsWith('3 Autopilot run record(s) in the old session\'s tree could not be read'));
 });
 
 test('the owner key is asked for only when a run record exists, and a key that cannot be computed leaves the tree unattributed', () => {
@@ -411,6 +451,56 @@ test('release blocks on an owned run with a route per layout, and never on a ter
   assert.ok(byRun.run_tdd.text.includes('Its inner build chain is still running, so adoption refuses it'));
 });
 
+test('a relocation claim is read as an interrupted move whoever owns it, and release refuses while it is there', () => {
+  const folder = folderOf();
+  const claimOf = (file, runId) => {
+    const claim = path.join(path.dirname(file), `autopilot-relocating-${runId}.json`);
+    fs.renameSync(file, claim);
+    return claim;
+  };
+  const own = claimOf(writeRun(folder, 'run_cl'), 'run_cl');
+  const foreign = claimOf(writeRun(folder, 'run_cf', { ownerSessionId: OTHER }), 'run_cf');
+  claimOf(writeRun(folder, 'run_cd', { stage: 'DONE', nextActionCode: 'NONE' }), 'run_cd');
+  fs.writeFileSync(path.join(stateDir(folder), 'autopilot-relocating-bad name.json'), '{}');
+  const state = mod.readAutopilotRuns([folder], KEY);
+  assert.equal(state.runs.length, 0);
+  assert.equal(state.foreign.length, 0);
+  assert.deepEqual(state.claims.map((run) => [run.runId, run.owned, run.record]), [['run_cf', false, foreign], ['run_cl', true, own]]);
+  assert.deepEqual(state.unreadable.map((entry) => [path.basename(entry.file), entry.reason]), [['autopilot-relocating-bad name.json', 'its name carries no run id']]);
+  const lines = mod.autopilotRunLines(state, { pathText: (p) => p });
+  assert.ok(lines.includes('## Autopilot run'));
+  assert.ok(lines.some((line) => line.includes("Moves of 2 durable Autopilot runs were interrupted in the old session's tree")));
+  assert.ok(lines.includes(`- \`run_cl\` at \`TEAM_REVIEW\`, next action \`RECONCILE_TEAM_REVIEW\`: the claim \`${own}\` waits for \`/zensu:autopilot-adopt\` from a session whose project root contains \`${folder}\`, standing inside \`${folder}\``));
+  assert.match(mod.autopilotShowLine(state), /the relocation claim of 2 Autopilot runs: run_cf at TEAM_REVIEW, run_cl at TEAM_REVIEW in its tree as what may be the only copy/);
+  const blockers = mod.autopilotReleaseBlockers(state, (p) => p).filter((b) => b.code === 'autopilot-claim');
+  assert.deepEqual(blockers.map((b) => b.text.match(/Autopilot run (\S+) at stage/)[1]), ['run_cf', 'run_cl']);
+  assert.ok(blockers[1].text.includes(`Finish the move with /zensu:autopilot-adopt from a session whose project root contains ${folder}, standing inside ${folder}, then run release again.`));
+  const none = mod.readAutopilotRuns([folderOf()], KEY);
+  assert.deepEqual(none.claims, []);
+  assert.deepEqual(mod.autopilotRunLines(none), []);
+});
+
+test('an own-tree work-order run keeps its worktree in the brief and in the release blocker', () => {
+  const folder = folderOf();
+  writeRun(folder, 'run_wo', { workOrder: { id: 'wo_1' } });
+  writeRun(folder, 'run_plain');
+  const state = mod.readAutopilotRuns([folder], KEY);
+  const byId = Object.fromEntries(state.runs.map((run) => [run.runId, run]));
+  assert.equal(byId.run_wo.workOrder, true);
+  assert.equal(byId.run_plain.workOrder, false);
+  const lines = mod.autopilotRunLines(state, { pathText: (p) => p });
+  const route = (runId) => lines.slice(lines.indexOf(`### Run \`${runId}\``)).find((line) => line.startsWith('- route: '));
+  assert.ok(route('run_wo').includes('it is a work-order run, whose plan lives in the `.zensu/plans` of that worktree'));
+  assert.ok(route('run_wo').includes(`Do not move that worktree. Continue the run from a session whose project root is \`${folder}\``));
+  assert.ok(!route('run_wo').includes('git worktree move'));
+  assert.ok(route('run_plain').includes('git worktree move'));
+  const blockers = mod.autopilotReleaseBlockers(state, (p) => p);
+  const byRun = Object.fromEntries(blockers.map((b) => [b.text.match(/Autopilot run (\S+) at stage/)[1], b.text]));
+  assert.ok(byRun.run_wo.includes(`It is a work-order run, so moving that worktree does not carry it over: continue it with /zensu:autopilot-adopt from a session whose project root is ${folder}`));
+  assert.ok(!byRun.run_wo.includes('move that worktree into your project root'));
+  assert.ok(byRun.run_plain.includes('move that worktree into your project root'));
+});
+
 test('no rendered line quotes a confirmation flag or the CLI helper, and no record value carries a control character into one', () => {
   const folder = folderOf();
   writeRun(folder, 'run_own', { nextActionCode: `RUN${ESC}X`, evidence: { pr: { number: 9, url: `https://example.test/${C1}` } } });
@@ -441,6 +531,9 @@ test('the run vocabulary matches the state library it mirrors', () => {
   assert.equal(mod.RUN_RECORD_MAX_BYTES, 1024 * 1024);
   assert.ok(lib.includes('const envelope = /^autopilot-run-(.*)\\.json$/;'));
   assert.equal(mod.RUN_ENVELOPE.source, '^autopilot-run-(.*)\\.json$');
+  assert.ok(lib.includes('const claimNameOf = id => `autopilot-relocating-${id}.json`;'));
+  assert.equal(mod.CLAIM_ENVELOPE.source, '^autopilot-relocating-(.*)\\.json$');
+  assert.ok(lib.includes('if (relocation === "worktree" && Object.prototype.hasOwnProperty.call(state, "workOrder")) {'));
   assert.ok(lib.includes(`&& value.length >= ${mod.RUN_ID_MIN} && value.length <= ${mod.RUN_ID_MAX} && /${mod.RUN_ID_SHAPE.source}/.test(value);`));
   assert.equal(mod.runIdOk('a'.repeat(mod.RUN_ID_MIN)), true);
   assert.equal(mod.runIdOk('a'.repeat(mod.RUN_ID_MIN - 1)), false);

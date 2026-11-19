@@ -680,24 +680,66 @@ strictly below the project root and holds a `.zensu/state`, ONE run of
 `zensu-edit-landing.sh --work-tree-check` decides. A worktree of the same repository makes its
 state directory the source, checked with `_tdd_paths_safe`: exit 2 when it is unsafe, unless the
 root already holds the record, in which case stderr names the unsafe directory and its leftovers
-are not read. A workspace that holds the run or its claim and fails the check refuses with exit 6
-and names the library's reason, and a check that could not run refuses with exit 2.
+are not read. In check mode the library prints `refused<TAB><reason>` on stdout beside its stderr
+refusal, and `_autopilot_adopt_source_dir` maps that VERDICT, never the message text: a workspace
+that holds the run or its claim and is answered with an exact `anchor<TAB>` line or a `refused` line
+refuses with exit 6 and names the reason, and every other answer, a refusal spelled only on stderr
+included, refuses with exit 2 as unchecked. Only a topology refusal prints the verdict line: the
+argument and run-log refusals of the check mode print none, nor does a git fault, which dies as
+`could not be checked`, and the other modes never print one.
 `_autopilot_adopt_critical` takes that source as its seventh operand, empty when the record lives
 in this project, and refuses a call that omits it. Inside the root's lease the worker reads the
 record, or its claim, from the source only when the destination lacks it (`worktree`), or rewrites
 a destination record whose recorded project root differs from the root (`in-place`, the
-re-anchored taker). Either is accepted only when `recordedRootGone` finds the recorded
-`projectRoot` gone (`ENOENT`/`ENOTDIR`), the one rule the leftover proof below uses as well, and
-`workspaceRoot` is absent or equal to it; anything else is `fail(6)`, with a reason that names no
-layout. `recordedRootGone` answers "not gone" for a root that starts with two slashes or
-backslashes without inspecting it, because the root is a value from a session-writable record and
-an `lstat` of a network path can reach another host. A worktree relocation of a work-order run is
+re-anchored taker). Either is accepted only when `recordedRootReleased` finds the recorded
+`projectRoot` released, the one rule the leftover proof below uses as well, and `workspaceRoot` is
+absent or equal to it; anything else is `fail(6)`, with a reason that names no layout. A root is
+released when it is absent (`ENOENT`/`ENOTDIR`), or when it is a real directory whose `.zensu/state`
+holds neither `autopilot-run-<id>.json` nor `autopilot-relocating-<id>.json` of this run: the create
+route of a takeover, or a new checkout at the old path, re-creates the directory without the run,
+and the run must still be able to move. A root that still holds the record or the claim, a link, a
+non-directory and every inspection fault answer unreleased, because the run may live on there.
+`recordedRootReleased` answers unreleased for a root that starts with two slashes or backslashes
+without inspecting it, because the root is a value from a session-writable record and an `lstat` of
+a network path can reach another host. A worktree relocation of a work-order run is
 `fail(6)` as well: its plan lives in the `.zensu/plans` of the folder that holds its record, and
 the verb does not move that plan across project roots. The rewrite sets `projectRoot` to the root and `workspaceRoot` to the caller's workspace or
 the root, so a record written without `workspaceRoot` gains that member of its schema, and it
 writes no event. A relocation also runs from the already-owner branch, because a session that
 already owns a record naming a vanished root needs the same rewrite, so exit 10 is reserved for a
 relocation-free no-op.
+
+**A relocation also proves where the tree came from.** A released root says only that the old home
+no longer holds the run; a copied or restored tree carries a record that may be a copy of a run that
+lives on elsewhere. `placementOf` therefore requires the tree the record moves with, the caller's
+workspace for a `worktree` relocation and this project for an `in-place` one, to be a linked
+worktree git placed where it stands: its `.git` is a regular file naming `gitdir: <admin>`, the
+admin directory's parent is named `worktrees`, and the admin `gitdir` file resolves to that tree's
+`.git` again. Every other answer is `fail(6)` with nothing written, and each reason names its own
+way out. A main checkout, whose `.git` is a directory, carries no back-reference that tells a move
+from a copy, so its refusal says to move it back to the recorded root and continue or cancel the run
+from a session rooted there. A copy, whose admin `gitdir` still names a live worktree that shares
+the registration, holds a copy of a run that lives on there, so its refusal names that worktree and
+no repair: `git worktree repair` inside the copy would take the registration away from the live
+tree. The tree is `moved` when its admin `gitdir` names a place where no checkout leads back to the
+registration: the path is gone, holds no `.git`, or holds a checkout whose `.git` is a directory,
+names another admin directory, names one that does not exist, or names none. A worktree moved by
+hand looks like that, and so does a tree copied or restored from a worktree deleted outside git
+while another copy may still hold its run, and nothing in git tells the two apart. So the refusal
+reports what it saw and names `git worktree repair` inside the tree only for after the user
+confirms that the tree is that worktree moved by hand and that no other copy of it exists; the
+repair then records the tree where it stands. A `.git` at that place that cannot be read (a failed
+open, a second link, a file over 4 KiB, a short read) or whose pointer cannot be followed for any
+reason but its absence is `unreadable`: it may name this tree's admin directory, which makes the
+tree a copy of the checkout there, so that refusal names the file and no repair. Reading and
+following stay apart for that reason, because an empty answer from the read is no proof that the
+checkout there leads elsewhere. Anything else, an unreadable pointer of the tree itself included,
+refuses as not placed. The shell then asks `git ls-files` through `_autopilot_git_tracked`, with the
+discovery variables unset, `--no-optional-locks`, `core.fsmonitor=false` and stdin from
+`/dev/null`, whether git tracks the record or the claim the relocation would move; it hands the
+worker `rootTracked` for this project's copy and `sourceTracked` for the moved tree's, each `""`,
+`tracked` or `unknown`. A tracked copy is `fail(6)`, because every checkout of that branch carries
+it and its presence proves no move, and one git cannot judge is `fail(2)`.
 
 **An adoption from a nested worktree holds that tree's own lease around the whole critical section,
 and a worktree relocation claims the record first.** The lease is not relocation-only: whenever
@@ -721,7 +763,11 @@ shell installs anything, so an in-place adoption from the moved tree finds no re
 with exit 1, naming the claim, and a source that holds both a record and a claim refuses with exit 2.
 `_autopilot_adopt_unclaim` renames the claim back when an install fails; when that rename fails too,
 it says the claim still waits, and a retried adoption from inside the moved tree reads the claim as
-the source record and finishes the move.
+the source record and finishes the move. It reverses a leftover claim the same way: the worker
+reports the claim it made of an older leftover copy as `leftover-claimed<TAB><basename>`, and the
+abort renames exactly that file back, never one keyed on another tag, so a failed install leaves no
+leftover renamed; when that rename fails, it says the copy waits as a claim that a retried adoption
+from inside that tree retires.
 
 **A relocation rewrites the other run records that moved with it.** `readRunInventory` validates
 every `autopilot-run-*.json` of a state directory, and `begin` and `read-workspace` read it without
@@ -760,15 +806,22 @@ discloses every retirement and every item it left; the outcome line points at th
 of asserting them. A torn relocation, the destination record beside the source's claim or
 copy, lands on the already-owner exit, whose leftover read retires the source copy only after
 proving it an OLDER copy: the same run id, an absolute recorded root that differs from the root and
-is gone, and an event list that is a prefix of the destination's by `eventId` and `payloadDigest`;
+is released, and an event list that is a prefix of the destination's by `eventId` and `payloadDigest`;
 a snapshot leaves only when its bytes equal the destination's. Every one of those reads goes
 through `guardedRead`, the no-follow, non-blocking, bounded read, so a FIFO cannot stall the verb
-under the lease, and a copy that is not an older one, a newer copy or one whose root exists again,
-stays and is named. A project whose `.zensu/state` is missing gets that empty directory before the
+under the lease, and a copy that is not an older one, a newer copy or one whose root holds the run
+again, stays and is named. The takeover exit reads the moved tree's leftovers the same way, so a
+second session that takes the run over from inside that tree retires an older copy and the old
+owner's pointer there, and its report counts them. Both exits claim a leftover copy before they
+retire it, and a leftover read is skipped, with a stderr line, while git tracks or cannot judge the
+moved tree's copy. A project whose `.zensu/state` is missing gets that empty directory before the
 lease is taken, because the lease's lock lives there, in report mode too: the report says so on
 stderr, and a path there that is not a directory refuses with exit 2 before anything moves.
-`B28_REFUSAL_CALLS_EXPECTED` (33) counts the refusal call sites and `W19` the `ownerLiveness(`
-calls, which the source-side liveness read moved. `BM1` to `BM37` in
+`B28_REFUSAL_CALLS_EXPECTED` (19) counts the direct refusal call sites and
+`B28_ABORT_CALLS_EXPECTED` (15) the install-ladder refusals that run through `_autopilot_adopt_abort`,
+which removes the temps it allocated and an installed snapshot or plan copy and renames the claim
+back before it names the refusal, reading the caller's locals through bash's dynamic scope; `W19`
+counts the `ownerLiveness(` calls, which the source-side liveness read moved. `BM1` to `BM47` in
 `tests/structure/test-autopilot-adopt-cli.sh` drive a real git fixture: the report, the confirmed
 move, the Stop directive, the torn retry, the in-place case, the six refusals, the state directory
 a report creates and the state path that is not a directory; then a newer copy and a copy whose
@@ -785,12 +838,34 @@ inside the moved tree, relocating in place past its own finished record and refu
 one; then that owner refused with exit 2 for a copy of the run record that the sibling scan refuses,
 which stays in its owner-scoped read, and a second session that finished its own run in the old
 worktree, registered again inside the moved tree, taking the run over in place past that record and
-refused for an unfinished one. `BM33` holds `PLAN_COPY_MAX_BYTES` equal
+refused for an unfinished one; then a claim retried against a destination that already holds the
+snapshot and the pointer, a call from a subdirectory of the moved tree with a record without
+`workspaceRoot` and a sibling whose working tree is nested, a worktree moved outside the root, which
+the verb never reaches, the work-tree verdict mapping through a stub library, the snapshot and
+plan-copy install failures, an in-place relocation from a copied tree, a record git tracks or cannot
+judge in both arms, and a takeover from inside the moved tree that retires an older copy and the old
+owner's pointer; then a renamed main checkout, refused with the way back, and a failed install after
+a leftover claim, which renames that copy back. `BM48` runs the released-root predicates of the
+worker and the doctor over the same roots. `BM49` to `BM53` drive the placement refusals of a
+`worktree` relocation: a worktree moved with a plain `mv`, refused as `moved` with the repair only
+after the user confirms the move, the same verdict once its old path holds another checkout
+(`BM50`), a linked worktree of another repository (`BM50b`) or a `.git` naming an absent admin
+directory (`BM50c`), the unreadable verdict with no repair for a `.git` there that cannot be read
+(`BM50d`), the retry that relocates after `git worktree repair`, a copy of a placed worktree below the root, refused
+as a copy with no repair, and a tree whose `.git` names no worktree administration, refused as not
+placed. `BM6` holds the released-root rule: a root that holds the record, the claim or a
+file refuses, and an empty re-created directory relocates. `BM33` holds `PLAN_COPY_MAX_BYTES` equal
 to `PLAN_FILE_MAX_BYTES`. The
 session-trail half, its known gaps and the version verdict of the whole change are in
 `.claude/rules/session-trail-autopilot-runs.md`. Known gaps of this half: the source is found only
-from the caller's cwd, so a worktree moved anywhere but below the root stays unreachable; the
-older-copy proof trusts the session-writable state directory like every read there; a run whose
+from the caller's cwd, so a worktree moved anywhere but below the root stays unreachable (`BM40`);
+the older-copy proof, the released-root rule and the placement proof read files in session-writable
+directories and a git admin directory, so they bound accidents, a copied or restored tree, not a
+deliberate forgery; a main checkout renamed by hand is never relocated in place, because only a
+linked worktree carries the back-reference the placement proof reads: the refusal names the way
+back, and until the checkout moves back its record keeps `begin` and `read-workspace`, and with them
+the standalone `--tdd-begin` fence, failing closed for the whole project, which the doctor's
+released-root row states for that layout (`BM46`); a run whose
 working tree differs from its project root, below it or around it, is never moved across roots;
 once its worktree moved, `/zensu:autopilot-release` no longer reaches the run, because it reads
 only the caller root's state directory, so every text names that cancel only before the move;
@@ -1025,13 +1100,18 @@ still covers only the LEGACY pointer by name.
   documents it could not read and a THIRD counting those it does not accept whose recorded stage
   is terminal. The second row's count deliberately EXCLUDES the third's, so the two are disjoint
   and neither is the total. A FOURTH row counts the nonterminal documents whose recorded project
-  root no longer exists and whose `workspaceRoot` is absent or equal to that root, the shape the
+  root no longer exists or no longer holds the run and whose `workspaceRoot` is absent or equal to
+  that root, the shape the
   in-place relocation of `/zensu:autopilot-adopt` accepts, and routes them to that skill, while a
   record of the same kind that drives another working tree stays in the second row, because the
-  verb refuses it with exit 6. `autopilotRootGoneRelocatable` mirrors the worker's
-  `recordedRootGone` and its workspace rule, one more member of the hand-copy family below, and
-  `P1nz21` in `tests/structure/test-doctor.sh` pins the row, its disjointness from the other two
-  and that it quotes no `--confirm`. Every OTHER surface stays as enumerated: the `--autopilot-begin`
+  verb refuses it with exit 6. `autopilotRootReleasedRelocatable` mirrors the worker's
+  `recordedRootReleased` and its workspace rule, and `autopilotMainCheckout` the main-checkout arm
+  of `placementOf`, so for a project that is a main checkout the row names the way back instead of
+  the in-place rewrite the verb refuses there; both are members of the hand-copy family below.
+  `P1nz21` and `P1nz21b` in `tests/structure/test-doctor.sh` pin the row, its main-checkout text,
+  its disjointness from the other two and that it quotes no `--confirm`, and `BM48` in
+  `tests/structure/test-autopilot-adopt-cli.sh` runs the doctor's released-root predicate and the
+  worker's over the same roots. Every OTHER surface stays as enumerated: the `--autopilot-begin`
   refusal, the standalone-TDD begin refusal, the deferred-review Stop refusal (which names the
   holding run whenever it can be read — including when it belongs to this session, where the guided
   `/zensu:autopilot-adopt` is offered and only the release COMMAND is withheld — and names no run
@@ -1404,8 +1484,8 @@ the same remedy applies. TRIGGER: a fifth carrier, or the next change that has t
 every carrier anyway.
 
 Moving together with the scope: `autopilot_adopt_run` / `_autopilot_adopt_critical` and the
-`adopt` worker mode with its `path_indexes=(0 1 3 5 8)` entry, the operands 10 to 12 (the source
-state directory, the snapshot temp and the plan-copy temp) it appends when they are non-empty, PLUS
+`adopt` worker mode with its `path_indexes=(0 1 3 5 8)` entry, the operands 10 to 14 (the source
+state directory, the snapshot temp, the plan-copy temp and the two git-tracked verdicts), PLUS
 its `projectRootIndex: 3` and
 `workspaceRootIndex: 6` entries — all THREE operand tables, as `release` has — and its
 owner-pointer pre-check, the THREE global

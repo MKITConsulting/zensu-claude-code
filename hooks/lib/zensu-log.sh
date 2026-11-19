@@ -2496,7 +2496,7 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-adopt: run $run_val was relocated: its record, any team-review payload snapshot and any approved-plan copy moved out of the moved working tree into this project's state directory, and the record now names this project as its project root and the moved tree as its working tree; the lines above name each file of the moved tree that was retired or left in place." >&2
         ;;
       in-place)
-        echo "zensu-log.sh --autopilot-adopt: run $run_val was relocated in place: its recorded project root no longer existed, and the record now names this project as its project root and its working tree." >&2
+        echo "zensu-log.sh --autopilot-adopt: run $run_val was relocated in place: its recorded project root no longer held it, and the record now names this project as its project root and its working tree." >&2
         ;;
     esac
     # Gated on the OUTCOME, never on the return code. `_tdd_locked_run` returns 1

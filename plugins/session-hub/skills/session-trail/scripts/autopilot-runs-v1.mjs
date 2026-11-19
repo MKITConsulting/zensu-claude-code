@@ -6,6 +6,7 @@ export const RUN_READ_BUDGET_BYTES = 256 * RUN_RECORD_MAX_BYTES;
 export const RUN_SCHEMA_VERSION = 1;
 export const TERMINAL_STAGES = Object.freeze(['DONE', 'CANCELLED']);
 export const RUN_ENVELOPE = /^autopilot-run-(.*)\.json$/;
+export const CLAIM_ENVELOPE = /^autopilot-relocating-(.*)\.json$/;
 export const RUN_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 export const RUN_ID_MIN = 3;
 export const RUN_ID_MAX = 128;
@@ -15,6 +16,12 @@ export const PR_NUMBER_MAX = 999999999;
 export const STAGE_SHAPE = /^[A-Z][A-Z_]{1,31}$/;
 export const ACTION_SHAPE = /^[A-Z][A-Z_]{1,63}$/;
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/u;
+const NOFOLLOW = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+  ? fs.constants.O_NOFOLLOW
+  : 0;
+const NONBLOCK = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
+  ? fs.constants.O_NONBLOCK
+  : 0;
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -59,10 +66,9 @@ function readBounded(file, remaining) {
   if (before.nlink !== 1) return { error: 'it is a hard link' };
   if (before.size > RUN_RECORD_MAX_BYTES) return { error: `it is larger than ${RUN_RECORD_MAX_BYTES} bytes` };
   if (before.size > remaining) return { overBudget: true };
-  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
   let fd = null;
   try {
-    fd = fs.openSync(file, flags);
+    fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NONBLOCK);
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > RUN_RECORD_MAX_BYTES || stat.ino !== before.ino || stat.dev !== before.dev) {
       return { error: 'it changed while it was read' };
@@ -143,6 +149,7 @@ function classify(file, parsed, folder) {
       layout,
       tree: layout === 'project-root-in-worktree' ? path.resolve(folder, path.relative(projectRoot, workspaceRoot)) : null,
       innerChain: pendingStage === 'TDD_RUNNING',
+      workOrder: Object.prototype.hasOwnProperty.call(parsed, 'workOrder'),
     },
   };
 }
@@ -155,6 +162,7 @@ export function readAutopilotRuns(folders, ownerKey, selfKey = null, budgetBytes
     directories: found.directories,
     runs: [],
     foreign: [],
+    claims: [],
     unreadable: [...found.unreadable],
     others: 0,
     terminal: 0,
@@ -181,10 +189,11 @@ export function readAutopilotRuns(folders, ownerKey, selfKey = null, budgetBytes
       state.unreadable.push({ file: directory, reason: 'its listing could not be read' });
       continue;
     }
-    const files = names.filter((name) => RUN_ENVELOPE.test(name)).sort();
+    const files = names.filter((name) => RUN_ENVELOPE.test(name) || CLAIM_ENVELOPE.test(name)).sort();
     for (const name of files) {
       const file = path.join(directory, name);
-      const id = RUN_ENVELOPE.exec(name)[1];
+      const claim = CLAIM_ENVELOPE.test(name);
+      const id = (claim ? CLAIM_ENVELOPE : RUN_ENVELOPE).exec(name)[1];
       if (!runIdOk(id)) {
         state.unreadable.push({ file, reason: 'its name carries no run id' });
         continue;
@@ -227,9 +236,16 @@ export function readAutopilotRuns(folders, ownerKey, selfKey = null, budgetBytes
           measured: false,
           reason: 'the Session Control key of the session could not be computed, so no run record could be attributed to it',
           runs: [],
+          claims: [],
         };
       }
       const folder = path.dirname(path.dirname(directory));
+      if (claim) {
+        const verdict = classify(file, parsed, folder);
+        if (verdict.error) state.unreadable.push({ file, reason: verdict.error });
+        else if (!verdict.terminal) state.claims.push({ ...verdict.run, owned: parsed.ownerSessionId === sessionKey });
+        continue;
+      }
       if (parsed.ownerSessionId !== sessionKey) {
         state.others += 1;
         if (parsed.ownerSessionId === self()) continue;
@@ -271,13 +287,16 @@ function routeText(run, pathText) {
   if (run.layout === 'project-root-in-worktree') {
     return `its record lives in \`${pathText(run.folder)}\`, a directory inside the worktree \`${pathText(run.tree)}\` it drives, and moves with that tree, but \`/zensu:autopilot-adopt\` does not carry a run whose project root lies inside its worktree into another project. Do not move that worktree. Continue the run from a session whose project root is \`${pathText(run.folder)}\` by running \`/zensu:autopilot-adopt\` there; a session rooted anywhere else cannot take it over. To cancel it instead, run ${cancelText(run, pathText)}.`;
   }
+  if (run.workOrder) {
+    return `its record lives in the worktree \`${pathText(run.folder)}\`, and it is a work-order run, whose plan lives in the \`.zensu/plans\` of that worktree, so \`/zensu:autopilot-adopt\` does not carry it into another project. Do not move that worktree. Continue the run from a session whose project root is \`${pathText(run.folder)}\` by running \`/zensu:autopilot-adopt\` there; a session rooted anywhere else cannot take it over. To cancel it instead, run ${cancelText(run, pathText)}.`;
+  }
   return `its record lives in the worktree \`${pathText(run.folder)}\` and moves with that tree. To continue the run here, take the move route of the worktree advice: move that worktree into this session's project root with \`git worktree move\`, then run \`/zensu:autopilot-adopt\` with the moved worktree as its working directory. Its report says the run moves into this project; once the user agrees, the run continues under this session from its stage. After the move the old session no longer reaches the run, so while its last turn lies inside the owner-activity window of that skill, one hour by default, the report refuses and names the window, and the adoption waits until it has passed. The create route leaves the run with the old session: say so in the plan confirmation, and expect \`release\` to refuse to free that worktree while the run is still in it. To cancel the run instead, run ${cancelText(run, pathText)}.`;
 }
 
 export function autopilotRunLines(state, options = {}) {
   const pathText = typeof options.pathText === 'function' ? options.pathText : (value) => String(value);
   const when = typeof options.when === 'string' && options.when ? options.when : 'after the user has confirmed the plan';
-  if (state.measured && !state.runs.length && !state.unreadable.length && !state.truncated && !state.foreign.length) return [];
+  if (state.measured && !state.runs.length && !state.claims.length && !state.unreadable.length && !state.truncated && !state.foreign.length) return [];
   const L = ['## Autopilot run'];
   if (!state.measured) {
     L.push(`_Not attributed: ${state.reason}. The old session's tree holds Autopilot run records, so ask the user whether one of them belongs to the old session before that tree is moved or released._`);
@@ -295,6 +314,14 @@ export function autopilotRunLines(state, options = {}) {
     if (run.pr) L.push(`- pull request: [#${run.pr.number}](${run.pr.url})`);
     L.push(`- record: \`${pathText(run.record)}\``);
     L.push(`- route: ${routeText(run, pathText)}`);
+  }
+  const claims = state.claims.length;
+  if (claims) {
+    L.push('');
+    L.push(`**${claims === 1 ? 'A move of a durable Autopilot run was' : `Moves of ${claims} durable Autopilot runs were`} interrupted in the old session's tree**, so ${claims === 1 ? 'its relocation claim may be the only copy of that run' : 'each relocation claim may be the only copy of its run'}. Name ${claims === 1 ? 'it' : 'them'} in the plan confirmation, finish the move ${when}, and move or release that tree only after it has finished.`);
+    for (const run of state.claims) {
+      L.push(`- \`${run.runId}\` at ${stageText(run)}: the claim \`${pathText(run.record)}\` waits for \`/zensu:autopilot-adopt\` from a session whose project root contains \`${pathText(run.folder)}\`, standing inside \`${pathText(run.folder)}\``);
+    }
   }
   const unread = state.unreadable.length + state.truncated;
   if (unread) {
@@ -316,13 +343,16 @@ export function autopilotShowLine(state) {
   const runs = state.runs.map((run) => `${run.runId} at ${run.stage}${run.pr ? ` (PR #${run.pr.number})` : ''}`);
   const unread = state.unreadable.length + state.truncated;
   const foreign = state.foreign.length;
-  if (!runs.length && !unread && !foreign) return null;
+  const claims = state.claims.map((run) => `${run.runId} at ${run.stage}`);
+  if (!runs.length && !unread && !foreign && !claims.length) return null;
   const parts = [];
   if (runs.length === 1) parts.push(`the session shown owns the durable Autopilot run ${runs[0]}`);
   else if (runs.length) parts.push(`the session shown owns ${runs.length} durable Autopilot runs: ${runs.join(', ')}`);
+  if (claims.length) parts.push(`an interrupted move left the relocation claim of ${claims.length === 1 ? `the Autopilot run ${claims[0]}` : `${claims.length} Autopilot runs: ${claims.join(', ')}`} in its tree as what may be the only copy, which release refuses to leave behind`);
   if (unread) parts.push(`${unread} Autopilot run record(s) in its tree could not be read`);
   if (foreign) parts.push(`${foreign} unfinished Autopilot run(s) of another session sit in its tree, which release refuses to leave behind`);
-  const route = runs.length || unread ? `; takeover or handoff names the route that carries ${runs.length === 1 && !unread ? 'it' : 'each'} over` : '';
+  const carried = runs.length + claims.length;
+  const route = carried || unread ? `; takeover or handoff names the route that carries ${carried === 1 && !unread ? 'it' : 'each'} over` : '';
   return `AUTOPILOT ${parts.join('; ')}${route}`;
 }
 
@@ -343,12 +373,18 @@ export function autopilotReleaseBlockers(state, pathText = (value) => String(val
     } else if (run.layout === 'project-root-in-worktree') {
       where = `Its record lives in ${pathText(run.folder)}, inside the worktree ${pathText(run.tree)}, so freeing that worktree would let Claude Desktop delete the run with it.`;
       route = `Moving that worktree does not carry the run over: continue it with /zensu:autopilot-adopt from a session whose project root is ${pathText(run.folder)}, or ${cancel}, then run release again.`;
+    } else if (run.workOrder) {
+      where = `Its record lives in the worktree ${pathText(run.folder)}, so freeing that worktree would let Claude Desktop delete the run with it.`;
+      route = `It is a work-order run, so moving that worktree does not carry it over: continue it with /zensu:autopilot-adopt from a session whose project root is ${pathText(run.folder)}, or ${cancel}, then run release again.`;
     } else {
       where = `Its record lives in the worktree ${pathText(run.folder)}, so freeing that worktree would let Claude Desktop delete the run with it.`;
       route = `Carry it over first: move that worktree into your project root and run /zensu:autopilot-adopt from inside it, or ${cancel}, then run release again.`;
     }
     if (run.innerChain) route = `Its inner build chain is still running, so adoption refuses it: let the old session finish that chain, or ${cancel}, then run release again.`;
     blockers.push({ code: 'autopilot-run', text: `The old session still owns the durable Autopilot run ${run.runId} at stage ${run.stage}. ${where} ${route}` });
+  }
+  for (const run of state.claims) {
+    blockers.push({ code: 'autopilot-claim', text: `The old session's tree holds the relocation claim of the durable Autopilot run ${run.runId} at stage ${run.stage}, which an interrupted move left there as what may be the only copy of that run, so freeing that tree could let Claude Desktop delete the run with it. Finish the move with /zensu:autopilot-adopt from a session whose project root contains ${pathText(run.folder)}, standing inside ${pathText(run.folder)}, then run release again.` });
   }
   const unread = state.unreadable.length + state.truncated;
   if (unread) {
