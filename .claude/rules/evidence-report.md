@@ -100,14 +100,22 @@ it. The line it suggests is that path anchored at the work tree's top, `/` plus 
 that name at any depth; a spelling with a control character gets no line. When no directory
 qualifies, and for a run directory that is itself the top of a work tree, which that tree cannot
 ignore, the refusal names `RUN_ROOT`, `.zensu/verify-feature-runs/` at the top of the project's
-work tree, and says whether git ignores it; for a project outside git it names `RUN_ROOT` in the
-project root, which lies outside git and needs no ignore line (`runRootRemedy`, which the `.git`
-refusal shares). It therefore never asks to ignore the project root, a directory that holds it, or
-a directory with a tracked file, and never names a work tree that a project outside git lacks.
+work tree, and says whether git ignores it: only an exit status of 1 from the probe asks for the
+ignore line, and any other answer, such as a timeout, says that this could not be determined and
+names the probe's reason. For a project outside git it names `RUN_ROOT` in the project root, which
+lies outside git and needs no ignore line (`runRootRemedy`, which the `.git` refusal shares). When
+`.zensu` or `RUN_ROOT` there is a symbolic link, the remedy says so before any probe and asks for a
+directory in place of the link or for another run directory (`linkedRunRoot`): `linkFree` refuses
+a run directory reached through the link, its physical path lies wherever the link points, and
+git's probe exits 128 there. It therefore never asks to ignore the project root, a directory that
+holds it, or a directory with a tracked file, never asks to ignore a run root whose probe failed,
+never names a run root that no run directory can use, and never names a work tree that a project
+outside git lacks.
 Every check-ignore probe, the store placement and `runRootRemedy` included, goes
-through `checkIgnore`, which prefixes the spelling with `./`: check-ignore reads a leading `:` as
-pathspec magic, so `:shots/` would be judged as `shots/`, and it refuses `--literal-pathspecs`
-with exit 128.
+through `checkIgnore`, which classifies git's answer for every caller (exit 0 ignored, exit 1 not
+ignored, anything else undetermined with its reason) and prefixes the spelling with `./`:
+check-ignore reads a leading `:` as pathspec magic, so `:shots/` would be judged as `shots/`, and
+it refuses `--literal-pathspecs` with exit 128.
 `--report-add --file` takes an absolute, normalized path to a regular file with one link inside it,
 opened no-follow and matched by device and inode. The type is read from the content: PNG, a
 lossless WebP (`VP8L`; `VP8 ` and an animation are refused), or UTF-8 text without control

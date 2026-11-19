@@ -1598,12 +1598,12 @@ function storePlacement(root) {
   if (relative === '') {
     return { ok: false, reason: `the store ${root} is the top level of a git work tree; move evidence.report.dir outside every git work tree` };
   }
-  const ignored = checkIgnore(topDirectory, `${relative}/`);
-  if (ignored.ok) return { ok: true, ignored: true };
-  if (ignored.status === 1) {
+  const probe = checkIgnore(topDirectory, `${relative}/`);
+  if (probe.ignored === true) return { ok: true, ignored: true };
+  if (probe.ignored === false) {
     return { ok: false, reason: `the store ${root} lies inside the git work tree ${topDirectory} and git does not report it ignored; move evidence.report.dir outside every git work tree, or have git ignore ${relative}/` };
   }
-  return { ok: false, reason: `whether git ignores the store could not be determined (${ignored.reason})` };
+  return { ok: false, reason: `whether git ignores the store could not be determined (${probe.reason})` };
 }
 
 function repositoryKey(projectRoot) {
@@ -1885,12 +1885,12 @@ function checkRunDirectory(given, projectRoot, root, chainRoot = null) {
     refuse('the run directory must not overlap the report store');
   }
   if (path.relative(base, real).split(path.sep).includes('.git')) {
-    refuse(`the run directory ${real} lies inside .git; ${runRootRemedy(top.top)}`);
+    refuse(`the run directory ${real} lies inside .git; ${runRootRemedy(top.top, base)}`);
   }
   const own = evidenceRun.workTreeTop(real);
   if (own.reason) unavailable(`whether git ignores the run directory could not be determined (${own.reason})`);
   if (own.top !== null) {
-    if (samePath(own.top, real)) refuse(`the run directory ${real} is the top of a git work tree, which that work tree cannot ignore; ${runRootRemedy(top.top)}`);
+    if (samePath(own.top, real)) refuse(`the run directory ${real} is the top of a git work tree, which that work tree cannot ignore; ${runRootRemedy(top.top, base)}`);
     const projectReal = fs.realpathSync.native(projectRoot);
     const trees = [{ root: projectReal, top: top.top }];
     const chainReal = realDirectory(chainRoot);
@@ -1915,7 +1915,10 @@ function fingerprinted(treeRoot, real) {
 }
 
 function checkIgnore(tree, spelled) {
-  return evidenceRun.git(tree, ['check-ignore', '-q', '--', `./${spelled}`]);
+  const answer = evidenceRun.git(tree, ['check-ignore', '-q', '--', `./${spelled}`]);
+  if (answer.ok) return { ignored: true };
+  if (answer.status === 1) return { ignored: false };
+  return { ignored: null, reason: answer.reason };
 }
 
 function untracked(tree, spelled) {
@@ -1949,26 +1952,50 @@ function ignoreLine(spelled) {
   return `/${spelled.replace(/[\\*?[]/g, (character) => `\\${character}`)}`;
 }
 
-function runRootRemedy(tree) {
-  if (!isString(tree)) return `create it under ${RUN_ROOT} in the project root, which lies outside git`;
-  return checkIgnore(tree, RUN_ROOT).ok
-    ? `create it under ${RUN_ROOT} at the top of the work tree, which git ignores`
-    : `create it under ${RUN_ROOT} at the top of the work tree and have git ignore that directory, for example with the line /${RUN_ROOT} in the repository's .gitignore`;
+function linkedRunRoot(root) {
+  if (!isString(root)) return null;
+  const segments = RUN_ROOT.split('/').filter((segment) => segment !== '');
+  for (let count = 1; count <= segments.length; count += 1) {
+    let stat;
+    try {
+      stat = fs.lstatSync(path.join(root, ...segments.slice(0, count)), { throwIfNoEntry: false });
+    } catch {
+      return null;
+    }
+    if (stat === undefined) return null;
+    if (stat.isSymbolicLink()) return segments.slice(0, count).join('/');
+  }
+  return null;
+}
+
+function runRootRemedy(tree, projectRoot) {
+  const outside = !isString(tree);
+  const linked = linkedRunRoot(outside ? projectRoot : tree);
+  if (linked !== null) {
+    return outside
+      ? `${RUN_ROOT} cannot hold it, because ${linked} in the project root is a symbolic link; replace that link with a directory, or create the run directory in another directory of the project root`
+      : `${RUN_ROOT} cannot hold it, because ${linked} at the top of the work tree is a symbolic link; replace that link with a directory that git ignores, or create the run directory in another directory of the work tree that git ignores`;
+  }
+  if (outside) return `create it under ${RUN_ROOT} in the project root, which lies outside git`;
+  const probe = checkIgnore(tree, RUN_ROOT);
+  if (probe.ignored === true) return `create it under ${RUN_ROOT} at the top of the work tree, which git ignores`;
+  if (probe.ignored === false) return `create it under ${RUN_ROOT} at the top of the work tree and have git ignore that directory, for example with the line /${RUN_ROOT} in the repository's .gitignore`;
+  return `create it under ${RUN_ROOT} at the top of the work tree; whether git ignores that directory could not be determined (${probe.reason})`;
 }
 
 function requireIgnored(tree, real, projectRoot, moves, runTree) {
   const relative = path.relative(tree, real).split(path.sep);
   const spelled = `${relative.join('/')}/`;
-  const ignored = checkIgnore(tree, spelled);
-  if (ignored.status === 1) {
+  const probe = checkIgnore(tree, spelled);
+  if (probe.ignored === false) {
     const named = ignoreTarget(tree, real, projectRoot, relative);
     const moved = moves ? ' and every capture would move the tree fingerprint' : '';
     const remedy = named === null
-      ? runRootRemedy(runTree)
+      ? runRootRemedy(runTree, projectRoot)
       : `have git ignore ${named}, for example with the line ${ignoreLine(named)} in the repository's .gitignore`;
     refuse(`git does not ignore the run directory ${real}, so its captures could be committed${moved}; ${remedy}`);
   }
-  if (!ignored.ok) unavailable(`whether git ignores the run directory could not be determined (${ignored.reason})`);
+  if (probe.ignored === null) unavailable(`whether git ignores the run directory could not be determined (${probe.reason})`);
 }
 
 function begin(options) {
