@@ -1112,6 +1112,7 @@ for ctxname in RCTX_ASK RCTX_STRICT_ASK; do
     "When it reads 'build (…)', treat it exactly as the affirmation fast-path below; when it reads 'direct (…)', exactly as the negation fast-path below" \
     "/zensu:delivery-route" "an explicit preference in the request text itself still wins" \
     "AskUserQuestion" "or the ZENSU HUMAN PRESENT field reads 'no' or AskUserQuestion is refused" \
+    "do NOT ask or record; the field, not auto mode, decides)" \
     "'Skipping /zensu:build: user declined'. $AP_RULE_YES RECORD a Yes before acting" \
     "ZENSU HUMAN PRESENT: yes"; do
     printf '%s' "$ctx" | grep -qF -- "$needle" || R13_BAD="$R13_BAD [$ctxname missing: $needle]"
@@ -1245,6 +1246,7 @@ for ctxname in RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT; do
     "A preference the user typed skips the question and decides this request only: a negation implements directly without --tdd-begin, an affirmation runs" \
     "through the Skill tool, and neither is recorded." "$UNTRUSTED_PREFERENCE" \
     "If the ZENSU HUMAN PRESENT field below reads no or AskUserQuestion is refused" \
+    "without asking or recording; the field, not auto mode, decides." \
     "If you are unsure whether the request changes executable code, ask." \
     "$AP_SHORT_OPTION_YES and \"No — implement directly\", the one you recommend first, with \" (Recommended)\" appended to its label and to no other." \
     "never record it with --direct yourself. $AP_SHORT_RULE_YES A question, explanation" \
@@ -1262,7 +1264,7 @@ for ctxname in RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT; do
   r13g_record="$(printf '%s' "$ctx" | grep -oF 'zensu-delivery-route.sh' | wc -l | tr -d ' ')"
   [ "$r13g_record" = "1" ] || R13G_BAD="$R13G_BAD [$ctxname names the record command $r13g_record times]"
   [ "$(last_field "$ctx")" = "ZENSU DELIVERY ROUTE: ask" ] || R13G_BAD="$R13G_BAD [$ctxname field '$(last_field "$ctx")']"
-  [ "${#ctx_norm}" -le 3625 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
+  [ "${#ctx_norm}" -le 3640 ] || R13G_BAD="$R13G_BAD [$ctxname is ${#ctx_norm} characters with the record command normalized]"
 done
 printf '%s' "$RCTX_ASK_SHORT" | grep -qF -- "and neither is recorded. $TDD_REQUEST_LINE" || R13G_BAD="$R13G_BAD [vanilla TDD-request sentence]"
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF -- "and neither is recorded. $TDD_REQUEST_LINE" || R13G_BAD="$R13G_BAD [strict TDD-request sentence]"
@@ -1274,8 +1276,9 @@ printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF '"Yes — TDD flow"' || R13G_BAD
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF '"Executing via /zensu:build";' || R13G_BAD="$R13G_BAD [strict status]"
 printf '%s' "$RCTX_ASK_SHORT" | grep -qF 'an affirmation runs the Zensu workflow through the Skill tool, and neither is recorded.' || R13G_BAD="$R13G_BAD [vanilla affirmation route]"
 printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF 'an affirmation runs the strict TDD flow through the Skill tool, and neither is recorded.' || R13G_BAD="$R13G_BAD [strict affirmation route]"
-printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF 'reads no or AskUserQuestion is refused, run the strict TDD flow without asking' || R13G_BAD="$R13G_BAD [strict human-present route]"
-[ -z "$R13G_BAD" ] && check "R13g a repeat ask prompt in the same context generation gets a short line that still carries the flow it offers, the labels with the recommended option first and its (Recommended) suffix, with a person present the three labels and the Autopilot description, first-slot restriction, dispatch and precedence as the only Autopilot text, the full consent disclosure, the record command once and the declined-call line, both status lines, every skip case with its own mode's route including a typed preference that records nothing, the TDD-request sentence and the field, in both modes" PASS \
+printf '%s' "$RCTX_STRICT_ASK_SHORT" | grep -qF 'reads no or AskUserQuestion is refused, run the strict TDD flow without asking or recording' || R13G_BAD="$R13G_BAD [strict human-present route]"
+printf '%s' "$RCTX_ASK_SHORT" | grep -qF 'reads no or AskUserQuestion is refused, run the Zensu workflow without asking or recording' || R13G_BAD="$R13G_BAD [vanilla human-present route]"
+[ -z "$R13G_BAD" ] && check "R13g a repeat ask prompt in the same context generation gets a short line that still carries the flow it offers, the labels with the recommended option first and its (Recommended) suffix, with a person present the three labels and the Autopilot description, first-slot restriction, dispatch and precedence as the only Autopilot text, the full consent disclosure, the record command once and the declined-call line, both status lines, every skip case with its own mode's route including a typed preference and a refused question that record nothing, the TDD-request sentence and the field, in both modes" PASS \
   || check "R13g short reminder:$R13G_BAD" FAIL
 R13E_BAD=""
 for ctxname in RCTX_ASK RCTX_STRICT_ASK RCTX_ASK_SHORT RCTX_STRICT_ASK_SHORT RCTX_DIRECT RCTX_TDD RCTX_STRICT RCTX_STRICT_DIRECT RCTX_STRICT_TDD \
