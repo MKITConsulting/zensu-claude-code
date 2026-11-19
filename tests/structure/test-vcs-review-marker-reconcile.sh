@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
+export GH_GRAPHQL_MODEL="$PLUGIN_DIR/tests/structure/lib-fake-gh-graphql.js"
 PASS=0; FAIL=0
 check() {
   local label="$1" cond="$2"
@@ -450,7 +451,7 @@ run_gh() {
   local payload="${1:-$WORK/a.json}"
   local run_tmpdir="${RUN_TMPDIR:-$WORK/state/tmp}"
   mkdir -p "$run_tmpdir"
-  FAKE_DIR="$WORK/state" GH_GRAPHQL_MODEL="$PLUGIN_DIR/tests/structure/lib-fake-gh-graphql.js" FAKE_MUTATE_PAYLOAD="${FAKE_MUTATE_PAYLOAD:-0}" \
+  FAKE_DIR="$WORK/state" FAKE_MUTATE_PAYLOAD="${FAKE_MUTATE_PAYLOAD:-0}" \
     FAKE_MUTATE_PRIVATE_PAYLOAD="${FAKE_MUTATE_PRIVATE_PAYLOAD:-0}" \
     ORIGINAL_PAYLOAD="${ORIGINAL_PAYLOAD:-$payload}" \
     FAKE_COMPOSITE_STATE="${FAKE_COMPOSITE_STATE:-0}" \
