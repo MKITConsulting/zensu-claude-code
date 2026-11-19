@@ -3140,6 +3140,37 @@ var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessi
   'stage', 'nextActionCode', 'approvedPlanSha256', 'options', 'tdd', 'effects',
   'evidence', 'blocked', 'bypasses', 'stopBudget', 'events'];
 var AUTOPILOT_TERMINAL_UNSHAPED = { terminalUnshaped: true };
+var AUTOPILOT_ROOT_RELEASED = { rootReleased: true };
+
+function autopilotRootReleasedRelocatable(parsed) {
+  var recorded = parsed.projectRoot;
+  if (!path.isAbsolute(recorded) || /^[\\/]{2}/.test(recorded)) return false;
+  if (Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot') && parsed.workspaceRoot !== recorded) return false;
+  var vanished = function (e) { return !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'); };
+  var stat;
+  try { stat = fs.lstatSync(recorded); } catch (e) { return vanished(e); }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+  var names = ['autopilot-run-' + parsed.runId + '.json', 'autopilot-relocating-' + parsed.runId + '.json'];
+  for (var i = 0; i < names.length; i++) {
+    try {
+      fs.lstatSync(path.join(recorded, '.zensu', 'state', names[i]));
+      return false;
+    } catch (e) {
+      if (!vanished(e)) return false;
+    }
+  }
+  return true;
+}
+
+function autopilotMainCheckout(root) {
+  if (typeof root !== 'string' || !path.isAbsolute(root)) return false;
+  try {
+    var stat = fs.lstatSync(path.join(root, '.git'));
+    return stat.isDirectory() && !stat.isSymbolicLink();
+  } catch (e) {
+    return false;
+  }
+}
 var AUTOPILOT_SHA256_RE = /^[a-fA-F0-9]{64}$/;
 var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds', 'converged'];
 // The owner's `sha256` is a TYPE test as much as a pattern test, and the type half is
@@ -3304,7 +3335,9 @@ function autopilotRun(file, stem, projectRoot) {
   // `/private/var` case the canonicalization was added for is still fixed, because
   // the mismatch was always on the caller's side — `stateProjectRoot()` returns a
   // `path.resolve`, not a realpath.
-  if (parsed.projectRoot !== autopilotCanonical(projectRoot)) return shapeReject;
+  if (parsed.projectRoot !== autopilotCanonical(projectRoot)) {
+    return shapeReject === null && autopilotRootReleasedRelocatable(parsed) ? AUTOPILOT_ROOT_RELEASED : shapeReject;
+  }
   // ABSENT and PRESENT-BUT-UNUSABLE are different answers and the row says so.
   // A record minted before workspace scoping carries no `workspaceRoot` at all,
   // and `mayHoldWorkspace` short-circuits on that: it then holds EVERY tree in
@@ -3976,6 +4009,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   var unscanned = candidates.length - scanned.length;
   var unreadable = [];
   var terminalUnshaped = [];
+  var releasedRoots = [];
   var rows = [];
   var ownerActivityWin = ownerActivityWindow();
   var releaseActivityWin = releaseOwnerActivityWindow();
@@ -3992,7 +4026,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   // test, so counting it here would state a code this report did not establish — the
   // same standard the green glyph is already held to one function down.
   var ownHoldsOwnRun = ownKey !== '' && parsedRuns.some(function (p) {
-    return p.run && p.run !== AUTOPILOT_TERMINAL_UNSHAPED && p.run.owner === ownKey
+    return p.run && p.run !== AUTOPILOT_TERMINAL_UNSHAPED && p.run !== AUTOPILOT_ROOT_RELEASED && p.run.owner === ownKey
       && p.run.ownerWouldAccept === true
       && AUTOPILOT_TERMINAL.indexOf(p.run.stage) === -1;
   });
@@ -4016,6 +4050,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     // one — but `readRunInventory` never consults terminality, so it can still fail
     // every Autopilot verb closed for the whole project. Its own row says that.
     if (run === AUTOPILOT_TERMINAL_UNSHAPED) { terminalUnshaped.push(c.name); return; }
+    if (run === AUTOPILOT_ROOT_RELEASED) { releasedRoots.push(c.name); return; }
     if (!run) { unreadable.push(c.name); return; }
     if (AUTOPILOT_TERMINAL.indexOf(run.stage) !== -1) return;
     // THREE cases, never two. `ownKey` is empty for every binding verdict but
@@ -4394,6 +4429,25 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
         + ' not establish the name is safe to echo — a stem the Autopilot writer could not'
         + ' have minted, a character this report will not echo, or a display-safety rule that'
         + ' could not be applied; list ' + foldPath(dir, ' directly.') + ' directly.' : ''));
+  }
+  if (releasedRoots.length) {
+    var releasedSafe = autopilotSafeNames(releasedRoots);
+    var releasedWithheld = releasedRoots.length - releasedSafe.length;
+    line(WARN, 'autopilot: ' + releasedRoots.length + ' durable run document(s) whose recorded project root'
+      + ' no longer exists or no longer holds the run — such a record moved here with its working tree, and until it names this'
+      + ' project as its root, `--autopilot-begin` and the workspace-occupancy check fail closed for'
+      + ' this project.'
+      + (autopilotMainCheckout(projectRoot)
+        ? ' This project is the main checkout of its repository, not a linked worktree, so'
+          + ' /zensu:autopilot-adopt cannot show that it was moved rather than copied and refuses to'
+          + ' rewrite such a record in place: move this checkout back to the project root the record'
+          + ' names and continue or cancel the run from a session whose project root is that directory.'
+        : ' /zensu:autopilot-adopt, run from a session whose project root is this project,'
+          + ' reports whether it can rewrite the record in place; it refuses a run whose inner build chain'
+          + ' another session still drives.')
+      + (releasedSafe.length ? ' Inspect ' + truncatedList(releasedSafe) + ' in ' + foldPath(dir, '.') + '.' : '')
+      + (releasedWithheld ? ' ' + releasedWithheld + ' further name(s) are withheld because this report could'
+        + ' not establish the name is safe to echo; list ' + foldPath(dir, ' directly.') + ' directly.' : ''));
   }
   // The row above may not carry these: it asserts the record "still holds its working
   // tree", and a DONE or CANCELLED one does not. That was the whole reason for the

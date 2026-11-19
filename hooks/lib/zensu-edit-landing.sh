@@ -429,7 +429,14 @@ work_tree_common_dir() {
 }
 
 work_tree_refused() {
-  die "work tree refused — $(render_claim_value "$WORK_TREE_CANON") $1"
+  local message
+  message="work tree refused — $(render_claim_value "$WORK_TREE_CANON") $1"
+  [ "$WORK_TREE_CHECK" -ne 1 ] || printf 'refused\t%s\n' "$message"
+  die "$message"
+}
+
+work_tree_unjudged() {
+  die "the work tree $(render_claim_value "$WORK_TREE_CANON") could not be checked: $1"
 }
 
 if [ "$WORK_TREE_SEEN" -eq 1 ] || [ "$WORK_TREE_CHECK" -eq 1 ]; then
@@ -451,7 +458,11 @@ if [ "$WORK_TREE_SEEN" -eq 1 ] || [ "$WORK_TREE_CHECK" -eq 1 ]; then
     WORK_TREE_RC=$?
     if [ "$WORK_TREE_RC" -ne 0 ]; then
       git_fault "$WORK_TREE_RC" "$WORK_TREE_CANON" rev-parse --show-toplevel
-      work_tree_refused "is not inside a git work tree: $(render_claim_value "$GIT_FAULT")"
+      case "$GIT_FAULT" in
+        (*[Nn]"ot a git repository"*|*"must be run in a work tree"*)
+          work_tree_refused "is not inside a git work tree: $(render_claim_value "$GIT_FAULT")" ;;
+      esac
+      work_tree_unjudged "$(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC}: $(render_claim_value "$GIT_FAULT")"
     fi
     if [ -n "$WORK_TREE_TOP" ]; then
       WORK_TREE_TOP="$(cd "$WORK_TREE_TOP" 2>/dev/null && pwd -P)" || WORK_TREE_TOP=""
@@ -461,7 +472,7 @@ if [ "$WORK_TREE_SEEN" -eq 1 ] || [ "$WORK_TREE_CHECK" -eq 1 ]; then
     ANCHOR_COMMON="$(work_tree_common_dir "$REPO_ROOT")" || ANCHOR_COMMON=""
     WORK_TREE_COMMON="$(work_tree_common_dir "$WORK_TREE_CANON")" || WORK_TREE_COMMON=""
     { [ -n "$ANCHOR_COMMON" ] && [ -n "$WORK_TREE_COMMON" ]; } \
-      || work_tree_refused "could not be compared with the anchor, because git named no common directory for one of the two trees"
+      || work_tree_unjudged "git named no common directory for it or for the anchor, so it could not be compared with the anchor"
     [ "$WORK_TREE_COMMON" = "$ANCHOR_COMMON" ] \
       || work_tree_refused "belongs to another repository: its git common directory $(render_claim_value "$WORK_TREE_COMMON") is not the anchor's $(render_claim_value "$ANCHOR_COMMON"), as for a clone or a submodule"
     REPO_ROOT="$WORK_TREE_CANON"
