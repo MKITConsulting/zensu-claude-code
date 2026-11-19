@@ -25,7 +25,7 @@ Slash form: `/zensu:cover [<target>] [--flag=value ...]`.
 
 | Arg | Required | Default | Notes |
 |---|---|---|---|
-| `<target>` | no | working diff | What to cover: a feature id (`zensu features get`), a PR number (`gh`), a path glob, or a free-text behavior. |
+| `<target>` | no | working diff | What to cover: a feature id (`zensu features get`), a PR/MR number (the driver's `--pr-diff`), a path glob, or a free-text behavior. |
 | `--base=<branch>` | no | `main` | Diff base for the default `git diff <base>...HEAD` scope. |
 | `--level=unit\|integration\|e2e\|auto` | no | `auto` | Force a level; `auto` lets the matrix in `rules/levels.md` decide per behavior. |
 | `--layer=fe\|be\|fullstack\|auto` | no | `auto` | Force the scope; `auto` follows the changed code. |
@@ -40,7 +40,7 @@ Slash form: `/zensu:cover [<target>] [--flag=value ...]`.
   Conventions).
 - A test runner for each layer it will touch. The probe detects it; if a layer has none,
   the skill says so and degrades that layer rather than inventing a framework.
-- `gh` CLI authenticated only when `<target>` is a PR number.
+- The detected forge's CLI (`gh` or `glab`) authenticated only when `<target>` is a PR/MR number.
 - Everything else — stacks, frameworks, existing test conventions, how the app is exercised
   — the skill **discovers itself** in Phase 0.
 
@@ -77,8 +77,38 @@ report names them. See Critical Conventions.
 `git diff <base>...HEAD` (the working change). A feature id resolves via
 `zensu features get <feature-uuid>` (UUID only — a `KEY-N` id or slug fails with
 `invalid feature id (status 400)`, so map it through
-`zensu features list --product <product-id> --json` first); a PR number via
-`gh pr diff`; a glob selects files; free text is matched against the diff. Produce the concrete set of changed behaviors to cover.
+`zensu features list --product <product-id> --json` first); a PR/MR number via the driver's
+`--pr-diff`, which pins the pull request's host (the PR/MR read below); a glob selects files;
+free text is matched against the diff. Produce the concrete set of changed behaviors to cover.
+
+**The PR/MR read.** Run it inside the checkout as one Bash call that captures the `--detect`
+lines into variables, so no value of the remote is retyped into a command:
+
+```bash
+VCS="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-vcs.sh"
+DETECT="$(bash "$VCS" --detect --repo "$(git rev-parse --show-toplevel)")"
+PROVIDER="$(printf '%s\n' "$DETECT" | sed -n 's/^provider=//p')"
+REPOID="$(printf '%s\n' "$DETECT" | sed -n 's/^repo=//p')"
+case "$PROVIDER" in
+  github) bash "$VCS" --pr-diff --provider github <n> ;;
+  gitlab) bash "$VCS" --pr-diff --provider gitlab --repo-id "$REPOID" <n> ;;
+  *) echo "forge unknown: provider=$PROVIDER" >&2; exit 1 ;;
+esac
+```
+
+On GitHub the read takes no `--repo-id`, so gh resolves the base repository from the checkout's
+remotes, as this step's earlier unpinned read did; `gh repo set-default` fixes that choice for a
+checkout with several remotes, such as a fork beside its upstream. GitLab needs `--repo-id`,
+which names the project of the remote `--detect` reads: the one the branch tracks, else `origin`.
+When that is not the project holding the PR/MR (a fork checkout), or when the checkout has
+neither, which leaves `repo=` empty, start the block with
+`export ZENSU_VCS_REMOTE="$(git remote get-url <remote>)"`, `<remote>` naming the remote of the
+project that holds the PR/MR (`git remote -v` lists them). When the forge is unknown, ask the
+user which one holds the PR/MR, inside the one batched question of 0.D, instead of reading
+anything. After the answer, run the same block once more with that forge forced on detection,
+so `--detect` prints the `repo=` value the GitLab read needs: replace its `DETECT=` line with
+`DETECT="$(bash "$VCS" --detect --provider <github|gitlab> --repo "$(git rev-parse --show-toplevel)")"`,
+the answer in place of `<github|gitlab>`, and keep the `export` line when the checkout needs it.
 
 **0.C — Probe (per layer).** Detect stacks, test runners, existing test directories +
 naming conventions, and any E2E harness — per `rules/probe.md`. Read 1–2 nearby existing

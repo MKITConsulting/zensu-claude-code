@@ -136,6 +136,12 @@ else
   check "P13d skill enforces neither a .claude/worktrees worktree nor English" PASS
 fi
 
+pin "P14a SKILL.md reads a pull request's diff through the driver's pinned --pr-diff" "$SKILL_MD" 'github) bash "$VCS" --pr-diff --provider github <n> ;;'
+pin "P14b SKILL.md re-detects with the forge the user named after an unknown-forge answer" "$SKILL_MD" 'DETECT="$(bash "$VCS" --detect --provider <github|gitlab> --repo "$(git rev-parse --show-toplevel)")"'
+pin "P14c SKILL.md reads a merge request's diff on GitLab with the repo= value of --detect" "$SKILL_MD" 'gitlab) bash "$VCS" --pr-diff --provider gitlab --repo-id "$REPOID" <n> ;;'
+pin "P14d SKILL.md takes REPOID from the repo= line of --detect" "$SKILL_MD" "REPOID=\"\$(printf '%s\\n' \"\$DETECT\" | sed -n 's/^repo=//p')\""
+pin "P14e SKILL.md names the remote override for a checkout whose remote --detect cannot read" "$SKILL_MD" 'export ZENSU_VCS_REMOTE="$(git remote get-url <remote>)"'
+
 echo "----"
 echo "test-cover-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

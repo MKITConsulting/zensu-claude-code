@@ -116,6 +116,29 @@ fails "G9 post-review github repo-id needs slash" --post-review --provider githu
 fails "G10 post-review non-numeric id rejected" --post-review --provider github --repo-id acme/widget abc "$PAY"
 fails "G11 post-review unknown provider"        --post-review --provider bogus --repo-id x/y 1 "$PAY"
 
+eq "A18 post-comment github posts one review comment, on the remote's host" \
+  "$(argv --post-comment --provider github --repo-id acme/widget 42 "$PAY")" "gh api -X POST repos/acme/widget/pulls/42/comments --input $PAY --hostname github.com"
+FR_ARGV="$(argv --fetch-review --provider github --repo-id acme/widget 42 7)"
+eq "A19 fetch-review github reads the review, on the remote's host" \
+  "$(printf '%s\n' "$FR_ARGV" | sed -n 1p)" "gh api repos/acme/widget/pulls/42/reviews/7 --hostname github.com"
+eq "A19b fetch-review github reads every page of the review's comments, on the remote's host" \
+  "$(printf '%s\n' "$FR_ARGV" | sed -n 2p)" "gh api --paginate --slurp repos/acme/widget/pulls/42/reviews/7/comments?per_page=100 --hostname github.com"
+eq "A19c fetch-review github makes exactly those two reads" "$(printf '%s\n' "$FR_ARGV" | grep -c .)" "2"
+refused() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; { [ -z "$o" ] && [ "$rc" -eq 1 ]; } && check "$l" PASS || check "$l (out='$o' rc=$rc)" FAIL; }
+refused "G17 post-comment refuses gitlab, which posts every comment through --post-review" --post-comment --provider gitlab --repo-id grp%2Fproj 7 "$PAY"
+refused "G17b post-comment requires repo-id"          --post-comment --provider github 42 "$PAY"
+refused "G17c post-comment requires a payload"        --post-comment --provider github --repo-id acme/widget 42
+refused "G17d post-comment rejects a non-numeric id"  --post-comment --provider github --repo-id acme/widget abc "$PAY"
+refused "G17e post-comment refuses an unknown flag"   --post-comment --provider github --repo-id acme/widget --diff-refs-json '{}' 42 "$PAY"
+refused "G17f post-comment requires --provider"       --post-comment --repo-id acme/widget 42 "$PAY"
+refused "G17g post-comment refuses a third positional" --post-comment --provider github --repo-id acme/widget 42 "$PAY" extra
+refused "G18 fetch-review refuses gitlab"             --fetch-review --provider gitlab --repo-id grp%2Fproj 7 1
+refused "G18b fetch-review rejects a non-numeric review id" --fetch-review --provider github --repo-id acme/widget 42 'r?1'
+refused "G18c fetch-review requires a review id"      --fetch-review --provider github --repo-id acme/widget 42
+refused "G18d fetch-review requires a valid repo-id"  --fetch-review --provider github --repo-id noslash 42 7
+refused "G18e fetch-review refuses a third positional" --fetch-review --provider github --repo-id acme/widget 42 7 8
+refused "G18f fetch-review rejects a non-numeric id"  --fetch-review --provider github --repo-id acme/widget x 7
+
 . "$PLUGIN_DIR/tests/structure/lib-gh-host-fake.sh"
 mkdir -p "$WORK/hostpin/bin"
 gh_host_fake_write "$WORK/hostpin/bin/gh" <<'FAKE'
@@ -128,8 +151,28 @@ case "${1:-} ${2:-}" in
     esac
     exit 0 ;;
   "api -X")
-    [ "${3:-}" = POST ] && [ "${4:-}" = repos/acme/widget/pulls/42/reviews ] || exit 2
-    printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}'
+    [ "${3:-}" = POST ] || exit 2
+    case "${4:-}" in
+      repos/acme/widget/pulls/42/reviews)
+        printf '%s' '{"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-1"}' ;;
+      repos/acme/widget/pulls/42/comments)
+        input="" previous=""
+        for arg in "$@"; do
+          [ "$previous" = --input ] && input="$arg"
+          previous="$arg"
+        done
+        [ -n "$input" ] && [ -s "$input" ] || exit 3
+        [ -z "${FAKE_GH_COMMENT_LOG:-}" ] || cat -- "$input" > "$FAKE_GH_COMMENT_LOG"
+        printf '%s' '{"id":901,"html_url":"https://github.test/acme/widget/pull/42#discussion_r901"}' ;;
+      *) exit 2 ;;
+    esac
+    exit 0 ;;
+  "api repos/acme/widget/pulls/42/reviews/7")
+    printf '%s' '{"id":7,"user":{"login":"zensu-bot"},"state":"COMMENTED","submitted_at":"2026-11-19T10:00:00Z","html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}'
+    exit 0 ;;
+  "api --paginate")
+    [ "${3:-}" = --slurp ] && [ "${4:-}" = 'repos/acme/widget/pulls/42/reviews/7/comments?per_page=100' ] || exit 2
+    printf '%s' '[[{"id":1,"pull_request_review_id":7},{"id":2,"pull_request_review_id":7}],[{"id":3,"pull_request_review_id":7}]]'
     exit 0 ;;
 esac
 exit 2
@@ -150,10 +193,10 @@ hs_run() {
   HS_ERR="$(cat "$WORK/hostpin/err")"; HS_HOSTS="$(cat "$WORK/hostpin/hosts")"; HS_ENV="$(cat "$WORK/hostpin/env")"
 }
 hs_reached() {
-  local label="$1" want="$2" host="$3" count stray
+  local label="$1" want="$2" host="$3" calls="${4:-1}" count stray
   count="$(printf '%s\n' "$HS_HOSTS" | grep -c .)"
   stray="$(printf '%s\n' "$HS_HOSTS" | grep -v "^$host " | grep -c .)"
-  if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = 1 ] && [ "$stray" = 0 ]; then check "$label" PASS
+  if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = "$calls" ] && [ "$stray" = 0 ]; then check "$label" PASS
   else check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' err='$HS_ERR')" FAIL; fi
 }
 HS_SCOUT='{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug"]}'
@@ -182,9 +225,108 @@ if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = ghe.example.com ]; then
 else
   check "HS9 --post-review to a host accepted for its stored login posts without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
 fi
+CPAY="$WORK/hostpin/comment.json"
+printf '%s' '{"path":"src/a.js","line":10,"side":"RIGHT","body":"fix `this` for $HOME","commit_id":"abc123"}' > "$CPAY"
+HS_COMMENT_URL='https://github.test/acme/widget/pull/42#discussion_r901'
+HS_REVIEW='{"id":"7","state":"COMMENTED","author":"zensu-bot","submittedAt":"2026-11-19T10:00:00Z","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":3}'
+HS_TOKENS=(GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4)
+hs_run FAKE_GH_COMMENT_LOG="$WORK/hostpin/sent.json" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS10 --post-comment posts to github.com while GH_HOST names another host and prints the comment URL" "$HS_COMMENT_URL" github.com
+if cmp -s "$CPAY" "$WORK/hostpin/sent.json"; then
+  check "HS10b --post-comment hands gh the payload file it was given" PASS
+else
+  check "HS10b --post-comment hands gh the payload file it was given" FAIL
+fi
+hs_run "${HS_GHE[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS11 --post-comment posts to the GitHub Enterprise host of the remote" "$HS_COMMENT_URL" ghe.example.com
+hs_run ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
+  bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+hs_reached "HS11b --post-comment posts to the GitHub Enterprise host of an SSH remote while GH_HOST names another host" "$HS_COMMENT_URL" ghe.example.com
+hs_run bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+hs_reached "HS12 --fetch-review reads the review and every page of its comments from github.com while GH_HOST names another host" "$HS_REVIEW" github.com 2
+hs_run "${HS_GHE[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+hs_reached "HS13 --fetch-review reads both from the GitHub Enterprise host of the remote" "$HS_REVIEW" ghe.example.com 2
+hs_run "${HS_GHE[@]}" "${HS_TOKENS[@]}" bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = ghe.example.com ]; then
+  check "HS14 --post-comment to a host accepted for its stored login posts without the environment tokens" PASS
+else
+  check "HS14 --post-comment to a host accepted for its stored login posts without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
+hs_run "${HS_GHE[@]}" "${HS_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = "$(printf 'ghe.example.com\nghe.example.com')" ]; then
+  check "HS14b both --fetch-review reads to that host run without the environment tokens" PASS
+else
+  check "HS14b both --fetch-review reads to that host run without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
+hs_run "${HS_TOKENS[@]}" bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+HS_KEPT='github.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN'
+if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = "$(printf '%s\n%s' "$HS_KEPT" "$HS_KEPT")" ]; then
+  check "HS14c --fetch-review reads to github.com keep the environment tokens" PASS
+else
+  check "HS14c --fetch-review reads to github.com keep the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
+fi
+hs_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-comment.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_HOSTS" ]; then
+  check "HS15 a missing comment payload is refused before any gh api call" PASS
+else
+  check "HS15 a missing comment payload is refused before any gh api call (rc=$HS_RC hosts='$HS_HOSTS')" FAIL
+fi
+hs_run FAKE_GH_PR_HOST=elsewhere.example bash "$LIB" --fetch-review --provider github --repo-id acme/widget 42 7
+if [ "$HS_RC" -ne 0 ] && [ -z "$HS_OUT" ]; then
+  case "$HS_ERR" in
+    *"fetch-review"*"error connecting to github.com"*) check "HS16 a failed review read fails the verb with gh's message" PASS ;;
+    *) check "HS16 a failed review read fails the verb with gh's message (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS16 a failed review read fails the verb with gh's message (rc=$HS_RC out='$HS_OUT')" FAIL
+fi
+: > "$WORK/hostpin/empty.json"
+hs_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ]; then
+  case "$HS_ERR" in
+    *"post-comment refused: the payload file is missing or empty"*) check "HS17 an empty comment payload is refused with a reason and posts nothing" PASS ;;
+    *) check "HS17 an empty comment payload is refused with a reason and posts nothing (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS17 an empty comment payload is refused with a reason and posts nothing (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS')" FAIL
+fi
+hs_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ]; then
+  case "$HS_ERR" in
+    *"post-review refused: the payload file is missing or empty"*) check "HS18 an empty review payload is refused with a reason and posts nothing" PASS ;;
+    *) check "HS18 an empty review payload is refused with a reason and posts nothing (err='$HS_ERR')" FAIL ;;
+  esac
+else
+  check "HS18 an empty review payload is refused with a reason and posts nothing (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS')" FAIL
+fi
 
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
+
+nr() { { printf '%s' "$2"; printf '\0'; printf '%s' "$3"; } | _zensu_vcs_normalize_review "$1"; }
+NR_OK='{"id":7,"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-11-19T10:00:00Z","html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}'
+eq "NR1 fetch-review normalizes the review and counts every page of its comments" \
+  "$(nr 7 "$NR_OK" '[[{"id":1,"pull_request_review_id":7},{"id":2}],[{"id":3,"pull_request_review_id":7}]]')" \
+  '{"id":"7","state":"COMMENTED","author":"alice","submittedAt":"2026-11-19T10:00:00Z","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":3}'
+eq "NR2 a review without an author, a submission time or inline comments counts zero" \
+  "$(nr 7 '{"id":7,"user":null,"state":"APPROVED","submitted_at":null,"html_url":"https://github.test/acme/widget/pull/42#pullrequestreview-7"}' '[[]]')" \
+  '{"id":"7","state":"APPROVED","author":"","submittedAt":"","url":"https://github.test/acme/widget/pull/42#pullrequestreview-7","comments":0}'
+eq "NR2b a comment listed on two pages counts once" \
+  "$(nr 7 "$NR_OK" '[[{"id":1}],[{"id":1},{"id":2}]]' | node -e 'var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){try{process.stdout.write(String(JSON.parse(s).comments));}catch(_){process.stdout.write("unparsed");}});')" "2"
+NR_BAD=""
+nr 7 "$NR_OK" '[[{"id":1}]]' >/dev/null 2>&1 || NR_BAD="$NR_BAD control-refused"
+nr 7 'not json' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD review-not-json"
+nr 8 "$NR_OK" '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD other-review-id"
+nr 7 '{"id":7,"user":{"login":"a"},"state":"COMMENTED","submitted_at":null,"html_url":"ftp://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD non-http-url"
+nr 7 '{"id":7,"user":{"login":"a"},"state":"","submitted_at":null,"html_url":"https://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD empty-state"
+nr 7 '{"id":7,"user":{"login":5},"state":"COMMENTED","submitted_at":null,"html_url":"https://github.test/x"}' '[[]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD author-not-text"
+nr 7 "$NR_OK" '{"id":1}' >/dev/null 2>&1 && NR_BAD="$NR_BAD comments-not-pages"
+nr 7 "$NR_OK" '[[{"id":"one"}]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-id-not-integer"
+nr 7 "$NR_OK" '[[1,2]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-not-object"
+nr 7 "$NR_OK" '[[{"id":1,"pull_request_review_id":8}]]' >/dev/null 2>&1 && NR_BAD="$NR_BAD comment-of-another-review"
+printf '%s' "$NR_OK" | _zensu_vcs_normalize_review 7 >/dev/null 2>&1 && NR_BAD="$NR_BAD no-comments-document"
+[ -z "$NR_BAD" ] && check "NR3 the fetch-review normalizer accepts the control and fails closed on every malformed answer" PASS \
+  || check "NR3 the fetch-review normalizer:$NR_BAD" FAIL
 
 GH_SCOUT='{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","headRefName":"feat","baseRefName":"main","author":{"login":"alice"},"labels":[{"name":"bug"},{"name":"p1"}]}'
 eq "N1 normalize_scout github" "$(printf '%s' "$GH_SCOUT" | _zensu_vcs_normalize_scout github)" '{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug","p1"]}'

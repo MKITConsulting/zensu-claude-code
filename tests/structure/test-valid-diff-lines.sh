@@ -109,11 +109,14 @@ fi
 FALLBACK_SECTION="$(awk '/^## Standalone-only fallback: Per-comment posting$/,/^## Verification After Post$/' "$PUBLISH_MD")"
 if [ -z "$FALLBACK_SECTION" ]; then
   check "P3l fallback section '## Standalone-only fallback: Per-comment posting' not found in github-publish.md" FAIL
-elif printf '%s\n' "$FALLBACK_SECTION" | grep -qF 'jq -n --arg' \
+elif printf '%s\n' "$FALLBACK_SECTION" | grep -qF "jq '{event: \"COMMENT\", body: .body}' \"\$WORKDIR/_synthesis.json\" > \"\$WORKDIR/_body-review.json\" \\" \
+   && printf '%s\n' "$FALLBACK_SECTION" | grep -qF "jq --argjson i '<i>' '.comments[\$i] + {commit_id: .commit_id}' \"\$WORKDIR/_synthesis.json\" > \"\$WORKDIR/_comment.json\" \\" \
+   && [ "$(printf '%s\n' "$FALLBACK_SECTION" | grep -c '^  && (cd "\$REPO" && bash "\$VCS" --post-')" = 2 ] \
+   && ! printf '%s\n' "$FALLBACK_SECTION" | grep -qE -- "--arg (path|body) |'<markdown>'|'<path>'" \
    && ! printf '%s\n' "$FALLBACK_SECTION" | grep -qE -- '(-f|-F) ?(path|body)='; then
-  check "P3l fallback posting builds JSON via jq (no raw interpolation)" PASS
+  check "P3l fallback posting builds every request from the validated payload via jq, chained to its post (no raw interpolation)" PASS
 else
-  check "P3l fallback posting builds JSON via jq (no raw interpolation)" FAIL
+  check "P3l fallback posting builds every request from the validated payload via jq, chained to its post (no raw interpolation)" FAIL
 fi
 
 # P4 — reference-doc clause (scoped to a line naming the pr-team-review skill)

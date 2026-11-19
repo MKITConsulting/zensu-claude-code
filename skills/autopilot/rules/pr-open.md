@@ -60,9 +60,16 @@ again, which the forge refuses for a branch that has a PR/MR. Instead:
 The body's `Gates bypassed during build:` line comes from the plan artifact's
 `Gates bypassed (build union):` line, and every fix chain can change that union. Whenever a push
 reaches an open PR/MR, in the re-entry above and in steps 5 and 6, render the body again in the
-order of `rules/conventions.md` §4 and apply it from `$REPO`:
-`gh pr edit <id> --body-file "$BODY_FILE"` on GitHub, and
-`glab mr update <id> --description "$(cat "$BODY_FILE")"` on GitLab.
+order of `rules/conventions.md` §4 and apply it from `$REPO` with
+`bash "$VCS" --edit-pr-body --provider "$PROVIDER" --body-file "$BODY_FILE" <id>`; GitLab also
+takes `--repo-id` with the `repo=` value of `$DETECT`. On GitHub the verb pins the pull request's
+host as every other GitHub verb does; on GitLab it sends the body as the description in a JSON
+`PUT`, so no part of it reaches a command line. It prints the PR/MR URL and refuses an empty or
+missing body file before any forge call, naming the refusal on stderr.
+
+A non-zero exit leaves the old body on the PR/MR, and that body can understate the gates the
+build bypassed. Render the body again and run the same call once more; when it fails again,
+persist `BLOCK` with code `PR_BODY_UPDATE_FAILED` and halt.
 
 ## 5. The bound
 
