@@ -194,7 +194,9 @@ therefore lists, in this order:
   when it was measured. A profiles folder that exists and cannot be listed counts once as unread in
   `ccdStoreProbe` and nowhere else; `lineage --diagnose` names it on an `UNREAD` line and as
   `profilesUnread`, and a session no read store holds then reads `PROFILES_UNREAD_REASON` rather
-  than a plain miss (`DF11`).
+  than a plain miss (`DF11`). A takeover whose saved-environment read went past the record's own
+  presets file names it too, as `linkedSessions.presetsProfilesUnread` and in a brief note (`DF12`,
+  `.claude/rules/session-trail-linked-sessions.md`).
 
 **No store comes from a process's arguments (decision 2026-11-18).** A confined process of the same
 user can start a process named `Claude`, the genuine Claude binary included, on a folder of its own

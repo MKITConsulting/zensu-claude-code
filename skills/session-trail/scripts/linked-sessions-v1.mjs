@@ -510,6 +510,10 @@ export function presetsFileNote(unread, shown) {
     : `${head} could not be read or did not parse. ${held}; if Claude Desktop was writing it, running the takeover again reads it._`;
 }
 
+export function presetsProfilesNote(folder, shown) {
+  return `_The Zensu Session Hub profiles folder \`${shown(folder)}\` could not be listed, so the saved environments file of each profile in it was not read. Each linked session whose saved environment one of those files could decide starts only when the user names it; once this account can list the folder, running the takeover again reads them._`;
+}
+
 export function unreadReportsOf(record, shown = UNREAD_REPORTS_SHOWN) {
   const notes = record && typeof record === 'object' && Array.isArray(record.queuedSideSessionNotes) ? record.queuedSideSessionNotes : [];
   const usable = [];

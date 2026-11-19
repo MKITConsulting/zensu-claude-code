@@ -13,7 +13,7 @@ import {
   removeEdgeFiles, otherSchemaLedgers, schemaLedgerCensus, MAX_EDGE_RECORDS, byRecordedAtAsc,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
-import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, presetsAcrossStores, linkedEnvironments, presetsFileNote, storeFolderRemedy, storeFolderNote, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
+import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, presetsAcrossStores, linkedEnvironments, presetsFileNote, presetsProfilesNote, storeFolderRemedy, storeFolderNote, unreadReportsOf, isoOf, chipProposal, linkedStartNames, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
 import { readAutopilotRuns, autopilotRunLines, autopilotShowLine, autopilotReleaseBlockers } from './autopilot-runs-v1.mjs';
 
 // Shared, never re-spelled. CLAUDE.md records `msysDrivePrefix` in
@@ -4583,7 +4583,7 @@ function presetsBeside(storeDir, accountUuid) {
   try { return { presets: presetMap(read.record, accountUuid), complete: folder.owned, folder, file, state: 'read' }; } catch { return { presets: null, complete: false, folder, file, state: 'unreadable' }; }
 }
 
-const SAVED_NONE = Object.freeze({ presets: null, complete: true, settled: new Set(), folders: [], unread: [] });
+const SAVED_NONE = Object.freeze({ presets: null, complete: true, settled: new Set(), folders: [], unread: [], profilesUnread: null });
 
 function savedPresets(file, wanted) {
   const hit = recordFileOf(file);
@@ -4594,12 +4594,14 @@ function savedPresets(file, wanted) {
   const others = across ? probe.probes.filter((store) => store.exists && !store.sameAs && store.dir !== hit.store).map((store) => presetsBeside(store.dir, hit.accountUuid)).filter(Boolean) : [];
   const reads = [own, ...others];
   const merged = presetsAcrossStores(own, others);
+  const profilesUnread = across ? probe.profilesUnread : null;
   return {
     presets: merged.presets,
-    complete: reads.every((read) => read.complete) && !(across && probe.profilesUnread),
+    complete: reads.every((read) => read.complete) && !profilesUnread,
     settled: merged.settled,
     folders: reads.map((read) => read.folder),
     unread: reads.filter((read) => read.state === 'refused' || read.state === 'unreadable').map((read) => ({ file: read.file, state: read.state })),
+    profilesUnread,
   };
 }
 
@@ -4630,7 +4632,7 @@ function startedContinuations() {
   return { names: continuationsStartedBy(run, family.records), complete: owned && family.listed && family.unreadable === 0, folders };
 }
 
-const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, newerSchemaLedgers: null, presetsUnread: null, storeFolderRefused: null, storeFolder: null, storeFolders: null, sessions: [] });
+const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, ledgerRefused: null, newerSchemaLedgers: null, presetsUnread: null, presetsProfilesUnread: null,storeFolderRefused: null, storeFolder: null, storeFolders: null, sessions: [] });
 
 function linkedSessions(r, verdicts, planned = null) {
   const { sameRepository, oldRepositoryMeasured } = verdicts;
@@ -4669,6 +4671,7 @@ function linkedSessions(r, verdicts, planned = null) {
     unreadable: family.unreadable,
     ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null, ledgerRefused: led ? led.refused : null, newerSchemaLedgers,
     presetsUnread: saved.unread,
+    presetsProfilesUnread: saved.profilesUnread,
     ...storeFolderStates([...saved.folders.map((folder) => ({ folder, read: 'presets' })), ...started.folders.map((folder) => ({ folder, read: 'started' }))]),
   };
 }
@@ -4757,6 +4760,7 @@ function linkedSessionLines(state, when, planPass = false) {
   }
   for (const folder of state.storeFolders || []) if (folder.refused) L.push(storeFolderNote(folder, briefPath));
   for (const unread of state.presetsUnread || []) L.push(presetsFileNote(unread, briefPath));
+  if (state.presetsProfilesUnread) L.push(presetsProfilesNote(state.presetsProfilesUnread, briefPath));
   if (unlisted) L.push(`_The plan answer named ${state.plan.unlisted.length} linked session(s) that this brief does not list, so none of them starts: ${unlisted}. Each was archived, detached or removed after the plan, or never was an open linked session of the old session; name each one to the user in one line._`);
   if (!state.sessions.length) {
     L.push('_the session had no open linked sessions_');

@@ -538,6 +538,11 @@ test('the presets-file note names the file and why it was not read, and says tha
   assert.equal(mod.presetsFileNote({ file: '/b/ccd-session-presets.json', state: 'unreadable' }, shown), '_The saved environments file `</b/ccd-session-presets.json>` could not be read or did not parse. Each linked session whose saved environment it could decide starts only when the user names it; if Claude Desktop was writing it, running the takeover again reads it._');
 });
 
+test('the profiles-folder note names the folder that could not be listed and holds what its profiles could decide until it can be listed', () => {
+  const shown = (value) => `<${value}>`;
+  assert.equal(mod.presetsProfilesNote('/h/Library/Application Support/Zensu Session Hub/Claude-Profile', shown), '_The Zensu Session Hub profiles folder `</h/Library/Application Support/Zensu Session Hub/Claude-Profile>` could not be listed, so the saved environments file of each profile in it was not read. Each linked session whose saved environment one of those files could decide starts only when the user names it; once this account can list the folder, running the takeover again reads them._');
+});
+
 test('the start call is the one the takeover step names, with a bounded title and the rendered brief', () => {
   const long = `A${ESC}[2K very${LS}long${PS} title ${'x'.repeat(80)}`;
   const state = decide([child(1, { title: long }), child(2, { title: '' }), child(3, { title: undefined }, { title: '' })], { checkout: (folder) => folder === REPO, sameRepository: true });

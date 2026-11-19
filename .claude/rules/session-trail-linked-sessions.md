@@ -119,7 +119,11 @@ unknown answer is an **if named** row of its own:
   hold the description that decides. `decideLinked` takes those settled ids as `presetsSettled`
   beside `presetsComplete`. `linkedSessions.presetsUnread` lists each presets file the read reached
   that was refused or unreadable, as `{ file, state }`, and both briefs print `presetsFileNote` for
-  each, so a broken file in another profile is named rather than holding sessions silently.
+  each, so a broken file in another profile is named rather than holding sessions silently. When the
+  read went past the own file while the Session Hub profiles folder could not be listed,
+  `linkedSessions.presetsProfilesUnread` names that folder, `null` otherwise, and both briefs print
+  `presetsProfilesNote` for it; a read the own file settled never names it, because the folder did
+  not hold that read.
 - **A `ZENSU_CCD_STORE` directly under a shared sticky folder such as `/tmp` reads its presets as
   unread and its started set as unknown.** The folder that holds the presets file is then that shared folder, which every account
   can write, so it fails the rule; on macOS `/tmp` is also a symbolic link to `/private/tmp`
@@ -481,8 +485,8 @@ fences each body and clips it at `REPORT_TEXT_MAX` (4000); `takeover --json` car
   running session's record, or every accepted store's folder when it finds none; both return their
   verdicts beside their answers, `linkedSessions` merges what they returned through
   `storeFolderStates` into `storeFolders`, `storeFolderRefused` and `storeFolder`, and
-  `linkedSessionLines` renders `storeFolderNote` for each refused entry and `presetsFileNote` for
-  each entry of `presetsUnread`, so
+  `linkedSessionLines` renders `storeFolderNote` for each refused entry, `presetsFileNote` for
+  each entry of `presetsUnread` and `presetsProfilesNote` for `presetsProfilesUnread`, so
   a new reader of that folder calls it rather than `realDirectory` again and returns its verdict too. `storeFolderNote`, its cause words in `STORE_FOLDER_CAUSE` and
   `storeFolderRemedy` live in the module, where the unit file drives the remedy and every note text;
   `linkedSessionLines` passes `briefPath` to show each path. `ccdStoreCandidates(true)` is the one
@@ -595,7 +599,8 @@ drives an untrusted own read, which settles nothing and whose local description 
 elsewhere, against a trusted one whose ids `presetsSettled` lets start under an incomplete read,
 and a settled list that is no `Set`. `the saved environments a takeover looks up are the ids the
 decision reads, …` holds `linkedEnvironments` to the ids `decideLinked` gives a preset, and `the
-presets-file note names the file, …` compares both note texts. `DF12` in the verdict suite runs both
+presets-file note names the file, …` compares both note texts, and `the profiles-folder note names
+the folder that could not be listed, …` compares that note. `DF12` in the verdict suite runs both
 `trail.mjs` copies in a home of its own. A record in a profile store has linked sessions that name a
 saved environment only Claude's default folder lists (named, in `--json` and on the brief's line),
 one the own file describes differently from the default folder (the own name), one two other files
@@ -613,12 +618,16 @@ file names its preset SSH, also for a record whose own file lists every saved en
 group-writable default store still has its folder's presets file read, and so does a default store
 that is a symbolic link to the store `ZENSU_CCD_EXTRA_STORES` names, where only that folder lists
 an SSH preset (stays) and a local one (starts named) until an unlistable Session Hub profiles folder
-leaves the read incomplete (skipped as root). A record whose own file names every saved environment
+leaves the read incomplete (skipped as root). There `presetsProfilesUnread` names that folder and the
+brief prints its note, while the case that names every preset reports `null` and no note, and an own presets file beside
+that store which lists both saved environments keeps the key `null` and the sessions decided by it,
+the folder still unlistable. A record whose own file names every saved environment
 reads and reports no other store's file, and `ZENSU_CCD_STORE` set to the profile store names only
-what that store's own file lists. Eight planted mutants were each caught by `DF12` against the code
+what that store's own file lists. Eleven planted mutants were each caught by `DF12` against the code
 of this change: the store lookup limited to accepted stores, the stay line, the settled ids ignored,
 the early return without the completeness check, an empty `presetsUnread`, a `presetsUnread` without
-its `refused` arm, an own read trusted whatever its state and the profiles folder ignored. The unit case `the store-folder remedy fits its cause and
+its `refused` arm, an own read trusted whatever its state, the profiles folder ignored, the profiles
+folder never named, named whatever the read reached, and its note dropped. The unit case `the store-folder remedy fits its cause and
 its store: …` drives `storeFolderRemedy` for every cause, both sources, a known and an unknown
 `desktopOwn` and every real-folder cause of a link, and `the store-folder note names the folder, …`
 compares the whole note for every remedy with and without a link, each read set and an unknown
@@ -768,8 +777,9 @@ and its `LEDGER_SCHEMA_VERSION`, `makeEndpoint`, `ENDPOINT_KEYS` and `buildEdge`
 the edge record's shape is byte for byte the same; `desktop-store-read-v1.js` gains
 `ownedDirectoryRefusal`, which decides nothing. Reading the presets beside every store read is
 `patch` on the same walk: it adds no `why` value or persisted field, `storeFolders` lists more
-entries of its existing shape, `linkedSessions.presetsUnread` is a new key of an exchanged shape no
-strict validator reads, `presetsAcrossStores`, `linkedEnvironments` and `presetsFileNote` are new
+entries of its existing shape, `linkedSessions.presetsUnread` and `presetsProfilesUnread` are new
+keys of an exchanged shape no strict validator reads, `presetsAcrossStores`, `linkedEnvironments`,
+`presetsFileNote` and `presetsProfilesNote` are new
 exports of the module and `presetsSettled` a new `decideLinked` option read permissively, and a
 conflicting description only ever names nothing or keeps a session as `ssh`, an answer an older
 brief reader already handles.
