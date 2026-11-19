@@ -147,7 +147,7 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 | `detect` | all | remote+probe | remote+probe |
 | `conventions(repo)` | autopilot, pilot, fix, cover, implement | tracked files + `git log` | tracked files + `git log` |
 | `locate_pr(branch\|num)` | fix, autopilot, pilot | `gh pr view` | `glab mr view --output json` |
-| `review_summary(id)` | pilot | `gh pr view -R <repo-id> <n> --json reviewDecision,latestReviews` | `GET …/merge_requests/:iid/approvals` + `GET …/merge_requests/:iid` (`detailed_merge_status`) |
+| `review_summary(id)` | pilot | `gh pr view -R <host>/<repo-id> <n> --json reviewDecision,latestReviews` | `GET …/merge_requests/:iid/approvals` + `GET …/merge_requests/:iid` (`detailed_merge_status`) |
 | `review_markers(id)` | pilot, work-order review import | the `zensu-review:v1` first-part markers of the PR's reviews (GraphQL) | the same markers in the MR's notes and discussions |
 | `pr_state(id)` | all (pre-push guard) | `gh pr view <n> --json state,mergedAt` | `glab mr view <iid> --output json` → `.state` |
 | `fetch_pr_ref(id)` | team-review | `git fetch origin pull/<n>/head` | `git fetch origin merge-requests/<iid>/head` |
@@ -159,6 +159,107 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 | `post_review(id, payload)` | team-review | 1× `gh api -X POST …/pulls/<n>/reviews --input` | 1× summary note + N× inline discussions (see §7) |
 | `reconcile_review(id, payload, operation, head)` | team-review (Autopilot-delegated) | 1× marker-tagged `gh api -X POST …/pulls/<n>/reviews --input -`, only when no review carries the operation's marker | the parts of the summary note + N× inline discussions that no note carries yet (see Phase 3) |
 | `reply_and_resolve(thread,body)` | fix | reply comment + GraphQL `resolveReviewThread` | `POST …/discussions/:id/notes` + `PUT …/discussions/:id?resolved=true` |
+
+**The GitHub host (`_zensu_vcs_gh_host`).** Every GitHub verb pins the pull request's own
+host, because gh otherwise answers from `GH_HOST` or from the only host it is logged in to:
+a `gh api` call ends with `--hostname <host>`, `gh pr view -R` takes `<host>/<owner>/<name>`,
+and a repo-context `gh pr` call runs as `env GH_HOST=<host> GH_REPO= gh pr …`, because gh takes
+the base repository from `GH_REPO` before the git remotes: measured with gh 2.101.0, a
+three-part `GH_REPO` moves `gh pr view` to its own host whatever `GH_HOST` and the remote name,
+and an empty one counts as unset. The host comes from the remote `--detect` reads
+(`ZENSU_VCS_REMOTE`, else the remote the current branch tracks, else `origin`), through the same
+`_zensu_vcs_split_url`; a tracking remote without a URL, such as the `.` of a branch that tracks
+a local branch, falls back to `origin`, for `--detect` too. When that ladder selects no remote,
+the verbs read every remote of the work tree and pin the host they all name, compared as
+written and lowercased; remotes that name different hosts are refused with a message that names
+`ZENSU_VCS_REMOTE` and `git branch --set-upstream-to`. Every GitHub verb reads the remote of the
+working directory it runs in: `--repo-id` names the repository on that host and never moves the
+host, so a caller runs the verbs from the pull request's work tree or sets `ZENSU_VCS_REMOTE`.
+Run from another checkout, a verb pins that checkout's host or refuses. A work tree without any
+remote, or a directory outside every repository, pins github.com, as `--detect --provider github`
+reports the cloud edition for an empty host. The remotes come from git itself, so a directory
+reached through a symlink and a bare repository read the remotes git reads. Only when git cannot
+list them does a walk decide whether the directory lies inside a repository, never git failing
+alone: it climbs from the physical working directory, as git does, for a `.git` entry or a bare
+repository (`HEAD`, `objects` and `refs`), counts a set `GIT_DIR` as inside, and stops where
+`GIT_CEILING_DIRECTORIES` stops git: measured with git 2.51.0, an entry before the first empty
+one is resolved through symlinks, a later one is compared as written, and a relative one is
+ignored. A work tree whose remotes git cannot read, such as one with a malformed configuration
+or one `safe.directory` refuses, is therefore refused instead of pinned to github.com, and so is
+a working directory whose physical path cannot be read. A remote URL that yields
+no host, such as a local path, is refused. An SSH remote (scp-like, `ssh://`,
+`git+ssh://`, `ssh+git://`, or a URL whose part before `://` is no valid scheme, which git
+reads as scp-like) is translated through `ssh -G -- <alias>` and its `hostname` line, and
+`ssh.github.com` reads as github.com; the host is lowercased and a leading `www.` is dropped.
+Measured with gh 2.101.0, that is how gh itself reads the host of a remote. Before ssh runs,
+the alias must be 1 to 253 characters of lowercase letters, digits, `.`, `_` and `-` that do
+not start with `-`, so a `Host gh_work` alias is translated rather than refused. The host that
+is pinned, the translation or else the alias, must be a valid host name (lowercase letters,
+digits, `-` and `.`, labels of 1 to 63 characters that neither start nor end with `-`, at most
+253 characters); any other is refused before gh runs.
+
+**Which hosts gh may reach, and with which token.** A host is accepted when it is github.com,
+the host `GH_HOST` names, or a host gh holds a stored login for: `gh config get user -h <host>`
+exits 0 and prints a non-empty account name. Any other host is refused before gh runs, with a
+message that names only `gh auth login --hostname <host>`. github.com and the `GH_HOST` host
+run gh with the environment unchanged. A host accepted for its stored login alone runs gh with
+`GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` set to the
+empty string, which gh reads as unset, so gh authenticates that host with its own stored
+token. Measured with gh 2.101.0, gh otherwise hands `GH_ENTERPRISE_TOKEN` or
+`GITHUB_ENTERPRISE_TOKEN` to an enterprise host ahead of its stored token, whatever `GH_HOST`
+names, and `GH_TOKEN` or `GITHUB_TOKEN` to a `*.ghe.com` host, so without the cleared
+variables a token set for one host would reach the remote's host on every call. An operator
+whose environment token is meant for the remote's host sets `GH_HOST` to that host in the
+environment the session starts with. The refusal does not offer that route, because whoever
+controls a remote chooses its host. A github.com remote keeps its behaviour, and `--detect`
+keeps its classification and its `gh auth status` readiness check.
+
+- Tests: `HD1`-`HD43` in `test-vcs-detect.sh` drive the derivation with a fake ssh, a fake gh
+  and git fixtures for a local upstream, a tracked remote and an `origin` beside a remote on
+  another host, remotes on different hosts, a sole remote not named `origin`, remotes on one
+  host, an unreadable configuration, bare repositories, directories reached through a symlink,
+  ceilings (plain, spelled through a symlink, after an empty entry, relative) and a work tree
+  without a remote; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9` in `test-vcs-publish.sh` and
+  `HR1`-`HR5` in `test-vcs-review-marker-reconcile.sh` run every GitHub verb under
+  `GH_HOST=example.invalid`, against a github.com remote, a GitHub Enterprise remote gh is
+  logged in to and one it is not. `HP17`, `HP17b`, `HS9` and `HR5` set all four token
+  variables and require that no call to a host accepted for its stored login alone carries
+  one; `HP18` and `HP19` require that github.com and the `GH_HOST` host keep them; `HP20` and
+  `HP20b` set `GH_REPO=other.example/acme/x`. Every fake gh of those suites starts with the
+  header of `tests/structure/lib-gh-host-fake.sh`, which selects the host as
+  `tests/structure/fixtures/gh-api-stub.js` does (`--hostname`, else `GH_HOST`, else
+  github.com, with the host of a `-R HOST/OWNER/REPO`, else of a three-part `GH_REPO`, first for
+  `gh pr`),
+  answers `gh config get user -h` from `FAKE_GH_LOGINS` (exit 0 with an empty answer for a host
+  in `FAKE_GH_EMPTY_LOGINS`), appends the host and the names of the non-empty token variables
+  of each call to `FAKE_GH_ENV_LOG`, and refuses any host other than `FAKE_GH_PR_HOST`
+  (github.com by default) with `error connecting to <host>`. The dry argv checks name the pin
+  as well.
+- Known gaps: `--detect` classifies the host as the remote spells it: it translates no SSH
+  alias, keeps letter case and a leading `www.`, and does not map `ssh.github.com`, so its
+  `edition` and `apiBase` can name an alias the verbs translate, and with `--provider github`
+  it reports the enterprise edition for a remote spelled `GitHub.com` or `www.github.com`, or
+  an SSH remote on `ssh.github.com`, each of which the verbs pin to github.com, and it reads
+  no remote when the branch tracks none and no `origin` exists, where the verbs fall back to
+  remotes that agree; one normalization shared by `--detect` and the verbs is the standing
+  fix. The walk does not stop at a file system boundary, where git stops unless
+  `GIT_DISCOVERY_ACROSS_FILESYSTEM` is set, so a directory on another file system below a work
+  tree, where git finds no repository, reads as inside one, and the verb refuses. The pin covers the
+  driver's verbs only: the gh calls the skills run themselves carry no host, so gh picks one
+  as it would without the driver. They are the diff
+  read for anchor validation in `skills/pr-team-review/rules/github-publish.md`, which
+  publishes the review body alone when that read comes back empty, the fallback `gh pr review`
+  and `gh api -X POST …/comments` writes and the verification reads in the same file and in
+  `skills/pr-team-review/references/publish.md`, `gh pr edit <id> --body-file` in
+  `skills/autopilot/rules/pr-open.md` and `gh pr diff` in `skills/cover/SKILL.md`; driver
+  verbs for a pull request's diff and body, pinned the same way, are the standing fix. A verb
+  takes no `--repo DIR`, so a caller outside the pull request's work tree has only
+  `ZENSU_VCS_REMOTE`. The host carries no port, as `apiBase` carries none, so a GitHub
+  Enterprise server that answers only on a non-default HTTPS port is not reached; `ssh -G`
+  evaluates the user's ssh configuration, `Match exec` included, as gh does; and an alias
+  whose ssh configuration `ssh -G` cannot read, such as one a `GIT_SSH_COMMAND` or
+  `core.sshCommand` supplies, keeps its own name, which must then pass the host-name rule and
+  hold a gh login.
 
 ### Step 3 — Config schema (extends `autopilot.yaml` `vcs:` node)
 
@@ -215,11 +316,15 @@ specified in `skills/autopilot/rules/conventions.md`.
   - Subcommands: `--pr-state <id>` → `OPEN|MERGED|CLOSED`; `--locate-pr [<num>]` →
     `{id,url,state,base,head}`; `--fetch-threads <id>` → normalized unresolved-thread
     array; `--resolve-thread <id> <threadId> [<replyTo>] [--reply <text>]`.
-  - Each op = a pure argv-builder (dry-printable via `ZENSU_VCS_PRINT_ARGV=1` under
-    `ZENSU_VCS_TEST=1`) + a thin runner + a `node` normalizer. Live `gh` execution is
+  - Each op = an argv-builder (dry-printable via `ZENSU_VCS_PRINT_ARGV=1` under
+    `ZENSU_VCS_TEST=1`) + a thin runner + a `node` normalizer. A GitHub builder first derives
+    the pinned host (Step 2, "The GitHub host"): it reads the git remote, runs `ssh -G` for an
+    SSH remote and `gh config get user -h` for a host other than github.com and the `GH_HOST`
+    host, and prints no argv and exits 1 when it refuses the host. Live `gh` execution is
     untested; glab runs live against a disposable GitLab (Step 5). The hermetic seam is the
-    argv-builder + normalizer, same stance as the Phase-1 probe. Test: `test-vcs-pr-ops.sh`,
-    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
+    argv-builder + normalizer, same stance as the Phase-1 probe; a hermetic GitHub dry run sets
+    `ZENSU_VCS_REMOTE` to an HTTPS github.com remote, which runs neither ssh nor gh. Test:
+    `test-vcs-pr-ops.sh`, `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - **Normalized thread shape**: `{threadId, replyTo, path, line, body, author}`.
     `threadId` is the **resolve** handle (GitHub GraphQL thread id / GitLab discussion
     id); `replyTo` is the **reply** target (GitHub REST comment id / the same GitLab
@@ -228,16 +333,19 @@ specified in `skills/autopilot/rules/conventions.md`.
     `--repo-id` in **API-path form** (`owner/repo` for GitHub, url-encoded
     `ns%2Fproj` for GitLab, as `--detect` emits `repo`). `id` is validated numeric,
     `threadId`/`replyTo` against a safe charset; string GraphQL vars use `gh -f`
-    (raw, no `@`-file magic). Known limits (follow-up): GitHub `reviewThreads` caps at
-    `first:100` (no cursor paging yet); GitLab discussions use `--paginate`.
+    (raw, no `@`-file magic). GitHub `reviewThreads` is read 100 threads a page through
+    `gh api graphql --paginate --slurp` on `after:$endCursor` until `hasNextPage` is false, and
+    a broken or truncated page sequence fails closed (A6f-A6h and N13b in `test-vcs-pr-ops.sh`);
+    GitLab discussions use `--paginate`.
 - **Phase 3 — DONE**: team-review publish ops on the helper + `pr-team-review` wired to them.
   - Subcommands: `--scout-pr [<num>]` → normalized
     `{id,url,state,title,body,base,head,author,labels}`; `--fetch-pr-ref <id>` → the git
     refspec (`pull/<n>/head` / `merge-requests/<iid>/head`); `--diff-refs <id>` →
     `{base_sha,start_sha,head_sha}` (GitLab live `diff_refs`; GitHub `headRefOid` only);
     `--post-review <id> <payload>` (optional `--diff-refs-json`).
-  - **GitHub publish** is one atomic `gh api -X POST …/pulls/<n>/reviews --input <payload>`
-    (byte-identical to the pre-driver call). **GitLab publish** degrades per §7 to a LOOP: one
+  - **GitHub publish** is one atomic
+    `gh api -X POST …/pulls/<n>/reviews --input <payload> --hostname <host>`, the pre-driver
+    call plus the host pin. **GitLab publish** degrades per §7 to a LOOP: one
     summary note + N inline discussions, each carrying a `position` object resolved against the
     MR diff before the first write (`base_sha`/`start_sha`/`head_sha`, `old_path` and `new_path`,
     `new_line` for an added line, `old_line` for a removed one, both for an unchanged context
@@ -251,7 +359,8 @@ specified in `skills/autopilot/rules/conventions.md`.
     that opens with a copied marker still does. The verdict rides in the summary-note text;
     the driver NEVER calls `glab mr approve`/`merge` (§9.3). Dry mode
     (`ZENSU_VCS_PRINT_ARGV=1`) prints the ordered argv sequence (note first, then each
-    discussion) — the same hermetic seam as Phases 1-2. Live `gh` execution is untested; glab
+    discussion) — the same hermetic seam as Phases 1-2, with the same `ZENSU_VCS_REMOTE`
+    for the GitHub argv. Live `gh` execution is untested; glab
     runs live against a disposable GitLab (Step 5).
     Test: `test-vcs-publish.sh`, `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
   - `pr-team-review`: Step 0 resolves the driver; Phase A.1 detects the forge (repo-scoped) +
@@ -326,8 +435,9 @@ specified in `skills/autopilot/rules/conventions.md`.
     Without `--provider` the verb runs the `--detect` ladder first. Tests: the unit file
     `tests/structure/repo-conventions-v1.test.js`, driven by `test-vcs-detect.sh` (C1-C8).
   - `--review-summary --provider <p> [--repo-id R] <id>` → `{reviewed, approved, changesRequested}`.
-    GitHub reads `reviewDecision` and `latestReviews`, pinned with `-R` to the repository a given
-    `--repo-id` names, as `--fetch-threads` pins it; GitLab reads the approvals endpoint and the
+    GitHub reads `reviewDecision` and `latestReviews`, pinned with `-R <host>/<repo-id>` to the
+    repository a given `--repo-id` names on the host of the remote, as `--fetch-threads` pins it;
+    GitLab reads the approvals endpoint and the
     MR's `detailed_merge_status`, and requires `--repo-id`. GitLab's `approved` is true on Enterprise
     Edition when no approval rule applies even with nobody approving, so `approved` also needs a
     non-empty `approved_by`. The GitLab answer is a mapping, not a 1:1 equivalent of `reviewDecision`:
@@ -397,9 +507,14 @@ Consequences to spec explicitly:
 ## 8. Credential-blind (unchanged principle)
 
 `gh` holds the GitHub token; `glab` holds the GitLab token. The driver **never
-reads or prints a token**. The only auth surface is the `*.auth status` check and
-the "run `<cli> auth login`" recovery hint. Dropping Bitbucket is what preserves
-this cleanly — no raw `*_TOKEN` env ever touches the model's shell.
+reads or prints a token**. The auth surface is the `*.auth status` check, the
+"run `<cli> auth login`" recovery hint and, for the GitHub verbs, one per-host login
+lookup (§6 Step 2, "The GitHub host"): `gh config get user -h <host>` reads gh's
+configuration, and the driver only checks that the account name it prints is not empty
+and then discards it. For a host accepted on that lookup alone the driver runs gh with
+the four GitHub token variables set to the empty string; it clears them and never reads
+them. Dropping Bitbucket is what preserves this cleanly — no raw `*_TOKEN` env ever
+touches the model's shell.
 
 ## 9. Resolved decisions
 

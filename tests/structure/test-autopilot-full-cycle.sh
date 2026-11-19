@@ -44,6 +44,7 @@ mkdir -p "$PROJECT" "$FAKE_BIN" "$FAKE_STATE"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PROJECT_DIR="$PROJECT"
 export ZENSU_CONFIG="$ROOT/config.json"
+export ZENSU_VCS_REMOTE=https://github.com/acme/widget.git
 printf '%s\n' '{"hooks":{"autoTdd":false}}' > "$ZENSU_CONFIG"
 
 RUN="full_cycle_run_001"
