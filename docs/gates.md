@@ -910,11 +910,14 @@ policy target or one the human approves at the prompt, is HTTPS with its host na
 run-config helper resolves each hostname once, refuses a non-public or mixed answer, and writes
 the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
 an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
-itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
-fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
+itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`, with three
+exceptions. It does NOT fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
-line after every navigating call and stops a scenario that left the approved set. Nothing
-enforces routes: the evidence boundary is the origin, which the launch policy names or the human
+line after every navigating call and stops a scenario that left the approved set. Nor does it
+fence a shared worker's fetch, an open gap too — measured with playwright-cli 0.1.24 driving
+Google Chrome 157 on loopback `http` origins: a dedicated worker's fetch is fenced, a shared
+worker's fetch is not. An `https` target, a remote host, Windows and Linux were not measured.
+Nothing enforces routes: the evidence boundary is the origin, which the launch policy names or the human
 approves at the prompt, and an approved origin covers every page on it, at any path.
 
 **Consent and memory.** For an origin no policy names, the PreToolUse hook returns
@@ -1172,6 +1175,12 @@ through Bash.
   not a boundary. A frame a target page embeds from a network-only origin renders inside that
   page, so its content reaches that page's snapshot and screenshot, where the skill reads it as
   that page's content, like data the page fetched.
+- **Three kinds of request leave the run-config fence.** A WebSocket connection and a shared
+  worker's fetch reach an origin outside the run config, and the browser follows a server
+  redirect to one. No check of any kind answers the first two; the third has only the skill's
+  `Page URL` check, which is prose. Measurements: the WebSocket with playwright-cli 0.1.21,
+  0.1.23 and 0.1.24, the shared worker with playwright-cli 0.1.24 driving Google Chrome 157 on
+  loopback `http` origins.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
