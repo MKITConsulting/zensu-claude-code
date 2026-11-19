@@ -392,6 +392,10 @@ hp_reached() {
   if [ "$HP_RC" -eq 0 ] && [ "$HP_OUT" = "$want" ] && [ "$count" = "$calls" ] && [ "$stray" = 0 ]; then check "$label" PASS
   else check "$label (rc=$HP_RC out='$HP_OUT' hosts='$HP_HOSTS' err='$HP_ERR')" FAIL; fi
 }
+hp_tokens() {
+  if [ "$HP_RC" -eq 0 ] && gh_host_fake_env_all "$HP_ENV" "$2"; then check "$1" PASS
+  else check "$1 (rc=$HP_RC env='$HP_ENV' err='$HP_ERR')" FAIL; fi
+}
 PR_JSON='{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","base":"main","head":"feat"}'
 THREADS_JSON='[{"threadId":"RT_1","replyTo":"111","path":"a.js","line":10,"body":"fix this","author":"alice"}]'
 SUMMARY_JSON='{"reviewed":true,"approved":true,"changesRequested":false}'
@@ -410,8 +414,9 @@ hp_reached "HP6 --resolve-thread sends the reply and the resolve to github.com w
 hp_run bash "$LIB" --open-pr --provider github --base main --head feat --title T --body-file "$HP/body.md"
 hp_reached "HP7 --open-pr reaches github.com while GH_HOST names another host" https://github.test/acme/widget/pull/43 github.com 1
 hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
-  bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
+  "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
 hp_reached "HP8 --fetch-threads reaches the GitHub Enterprise host of the remote while GH_HOST names another host" "$THREADS_JSON" ghe.example.com 1
+hp_tokens "HP8b --fetch-threads sends no environment token to a host accepted for its stored gh login" ghe.example.com
 hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
   bash "$LIB" --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111
 hp_reached "HP9 --resolve-thread writes to the GitHub Enterprise host of the remote while GH_HOST names another host" "" ghe.example.com 2
@@ -429,31 +434,28 @@ fi
 HP_GHE=(ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com)
 hp_run "${HP_GHE[@]}" bash "$LIB" --pr-state --provider github 42
 hp_reached "HP11 --pr-state reaches the GitHub Enterprise host of the remote while GH_HOST names another host" OPEN ghe.example.com 1
-hp_run "${HP_GHE[@]}" bash "$LIB" --locate-pr --provider github
+hp_run "${HP_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --locate-pr --provider github
 hp_reached "HP12 --locate-pr of the current branch reaches the GitHub Enterprise host of the remote" "$PR_JSON" ghe.example.com 1
-hp_run "${HP_GHE[@]}" bash "$LIB" --locate-pr --provider github 42
+hp_tokens "HP12b --locate-pr of the current branch sends no environment token to that host" ghe.example.com
+hp_run "${HP_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --locate-pr --provider github 42
 hp_reached "HP13 --locate-pr by number reaches the GitHub Enterprise host of the remote" "$PR_JSON" ghe.example.com 1
-hp_run "${HP_GHE[@]}" bash "$LIB" --review-summary --provider github --repo-id acme/widget 42
+hp_tokens "HP13b --locate-pr by number sends no environment token to that host" ghe.example.com
+hp_run "${HP_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --review-summary --provider github --repo-id acme/widget 42
 hp_reached "HP14 --review-summary with --repo-id reaches the GitHub Enterprise host of the remote" "$SUMMARY_JSON" ghe.example.com 1
-hp_run "${HP_GHE[@]}" bash "$LIB" --review-summary --provider github 42
+hp_tokens "HP14b --review-summary with --repo-id sends no environment token to that host" ghe.example.com
+hp_run "${HP_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --review-summary --provider github 42
 hp_reached "HP15 --review-summary without --repo-id reaches the GitHub Enterprise host of the remote" "$SUMMARY_JSON" ghe.example.com 1
-hp_run "${HP_GHE[@]}" bash "$LIB" --open-pr --provider github --base main --head feat --title T --body-file "$HP/body.md"
+hp_tokens "HP15b --review-summary without --repo-id sends no environment token to that host" ghe.example.com
+hp_run "${HP_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --open-pr --provider github --base main --head feat --title T --body-file "$HP/body.md"
 hp_reached "HP16 --open-pr reaches the GitHub Enterprise host of the remote" https://github.test/acme/widget/pull/43 ghe.example.com 1
-hp_tokens() {
-  local label="$1" want="$2" lines bad
-  lines="$(printf '%s\n' "$HP_ENV" | grep -c .)"
-  bad="$(printf '%s\n' "$HP_ENV" | grep -v -x -F -e "$want" | grep -c .)"
-  if [ "$HP_RC" -eq 0 ] && [ "$lines" -ge 1 ] && [ "$bad" = 0 ]; then check "$label" PASS
-  else check "$label (rc=$HP_RC env='$HP_ENV' err='$HP_ERR')" FAIL; fi
-}
-HP_TOKENS=(GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4)
-hp_run "${HP_GHE[@]}" "${HP_TOKENS[@]}" bash "$LIB" --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111
+hp_tokens "HP16b --open-pr sends no environment token to that host" ghe.example.com
+hp_run "${HP_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111
 hp_tokens "HP17 a host accepted for its stored gh login gets every write without the environment tokens" ghe.example.com
-hp_run "${HP_GHE[@]}" "${HP_TOKENS[@]}" bash "$LIB" --pr-state --provider github 42
+hp_run "${HP_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --pr-state --provider github 42
 hp_tokens "HP17b a repo-context call to that host runs without the environment tokens too" ghe.example.com
-hp_run "${HP_TOKENS[@]}" bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
+hp_run "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
 hp_tokens "HP18 a github.com call keeps the environment tokens" "github.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN"
-hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com GH_HOST=ghe.example.com "${HP_TOKENS[@]}" \
+hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com GH_HOST=ghe.example.com "${GH_HOST_FAKE_TOKENS[@]}" \
   bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
 hp_tokens "HP19 the host GH_HOST names keeps the environment tokens" "ghe.example.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN"
 hp_run GH_REPO=other.example/acme/x bash "$LIB" --pr-state --provider github 42

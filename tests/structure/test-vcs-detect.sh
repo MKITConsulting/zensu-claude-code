@@ -145,6 +145,17 @@ O="$(env -i PATH=/dev/null ZENSU_VCS_REMOTE='git@github.com:o/r.git' "$BASH_ABS"
 expect "D18 no-node degrade -> unknown" "$O" provider unknown
 expect "D18 no-node degrade -> empty repo" "$O" repo     ""
 
+TMP="$(mktemp -d -t vcsdetect-XXXXXX)"; mkdir -p "$TMP/.github/workflows"
+O="$(det 'file:///srv/git/widget.git' none '' '' "$TMP")"
+expect "D18b a file:// remote names no host, whatever the repo markers say" "$O" provider unknown
+expect "D18b a file:// remote names no host, whatever the repo markers say" "$O" apiBase  ""
+expect "D18b a file:// remote names no host, whatever the repo markers say" "$O" repo     ""
+O="$(det 'C:\repos\widget.git' none '' '' "$TMP")"
+expect "D18c a drive-letter path names no host, whatever the repo markers say" "$O" provider unknown
+expect "D18c a drive-letter path names no host, whatever the repo markers say" "$O" apiBase  ""
+expect "D18c a drive-letter path names no host, whatever the repo markers say" "$O" repo     ""
+rm -rf "$TMP"
+
 ML="$(mktemp -d -t vcsdetect-ssrf-XXXXXX)"
 for badhost in 127.0.0.1 169.254.169.254 10.0.0.5 192.168.1.1; do
   O="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_REMOTE="git@${badhost}:g/p.git" bash "$LIB" --detect --repo "$ML" 2>/dev/null)"
@@ -552,6 +563,28 @@ hd_run /srv/git/widget.git
 hd_refused "HD29 a remote URL that yields no host is refused instead of read as github.com" "names no GitHub host"
 { [ "$HD_RC" -ne 0 ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD29b the hostless remote reaches neither ssh nor gh" PASS \
   || check "HD29b the hostless remote reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+case "$HD_ERR" in
+  *"set ZENSU_VCS_REMOTE to the URL of the GitHub remote for a verb given --repo-id"*"git branch --set-upstream-to <remote>/<branch>"*"ssh://<alias>/<path>"*)
+    check "HD29j the no-host refusal names its routes: ZENSU_VCS_REMOTE, git branch --set-upstream-to and the ssh:// spelling of an alias" PASS ;;
+  *) check "HD29j the no-host refusal names its routes: ZENSU_VCS_REMOTE, git branch --set-upstream-to and the ssh:// spelling of an alias (err='$HD_ERR')" FAIL ;;
+esac
+hd_hostless() {
+  local label="$1" remote="$2" artifact="$3"
+  hd_run "$remote" FAKE_GH_LOGINS="$artifact"
+  if [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; then
+    case "$HD_ERR" in *"names no GitHub host"*) check "$label" PASS ;; *) check "$label (err='$HD_ERR')" FAIL ;; esac
+  else check "$label (rc=$HD_RC out='$HD_OUT' ssh='$HD_SSH' config='$HD_CONFIG')" FAIL; fi
+}
+hd_hostless "HD29c a file:// remote names no GitHub host, even while gh holds a login for file" file:///srv/git/widget.git file
+hd_hostless "HD29d a file:// remote with a host part names no GitHub host either" file://localhost/srv/git/widget.git localhost
+hd_hostless "HD29e a drive-letter path with backslashes names no GitHub host" 'C:\repos\widget.git' c
+hd_hostless "HD29f a drive-letter path with forward slashes names no GitHub host" C:/repos/widget.git c
+hd_hostless "HD29h a file:// scheme spelled in capitals names no GitHub host" FILE:///srv/git/widget.git file
+hd_hostless "HD29i a lowercase drive letter names no GitHub host" c:/repos/widget.git c
+hd_run g:acme/widget.git FAKE_GH_LOGINS=g
+{ [ "$HD_RC" -eq 0 ] && [ "$HD_OUT" = g ] && [ "$HD_SSH" = "-G -- g" ] && [ "$HD_CONFIG" = g ]; } \
+  && check "HD29g a one-letter SSH alias before a relative path stays an SSH remote" PASS \
+  || check "HD29g a one-letter SSH alias before a relative path stays an SSH remote (rc=$HD_RC out='$HD_OUT' ssh='$HD_SSH' config='$HD_CONFIG' err='$HD_ERR')" FAIL
 hd_run "git@$(printf '%0254d' 0 | tr 0 a):acme/widget.git"
 hd_refused "HD30 an SSH alias longer than 253 characters is refused" "not a valid host name"
 [ -z "$HD_SSH" ] && check "HD30b the overlong alias reaches no ssh" PASS \
@@ -560,18 +593,61 @@ hd_run 'git@-gh-work:acme/widget.git'
 hd_refused "HD31 an SSH alias that starts with a hyphen is refused" "not a valid host name"
 [ -z "$HD_SSH" ] && check "HD31b the hyphen-led alias reaches no ssh" PASS \
   || check "HD31b the hyphen-led alias reaches no ssh (ssh='$HD_SSH')" FAIL
+hd_repo "$HD/ghe-only" && git -C "$HD/ghe-only" remote add upstream https://ghe.example.com/acme/widget.git
+hd_run_in "$HD/ghe-only" FAKE_GH_LOGINS=ghe.example.com
+hd_host "HD32 a branch without an upstream in a work tree whose only remote is not origin reads the host of that remote" ghe.example.com
 hd_repo "$HD/github-only" && git -C "$HD/github-only" remote add github https://github.com/acme/widget.git
 hd_run_in "$HD/github-only"
-hd_host "HD32 a branch without an upstream in a work tree whose only remote is not origin reads the host of that remote" github.com
+hd_host "HD32b a sole remote not named origin on github.com reads as github.com" github.com
 hd_repo "$HD/agree" && git -C "$HD/agree" remote add upstream https://ghe.example.com/acme/widget.git \
   && git -C "$HD/agree" remote add fork git@ghe.example.com:me/widget.git
 hd_run_in "$HD/agree" FAKE_GH_LOGINS=ghe.example.com
 hd_host "HD33 remotes that all name one host pin that host when the branch tracks none of them" ghe.example.com
+printf '[remote "origin"]\n\tprune = true\n' > "$HD/global-origin.cfg"
+hd_repo "$HD/global-only" && git -C "$HD/global-only" remote add upstream file:///srv/git/widget.git
+hd_run_in "$HD/global-only" GIT_CONFIG_GLOBAL="$HD/global-origin.cfg"
+hd_refused "HD33b a remote only the global git config names takes no part, so a sole file:// remote beside it is refused" "names no GitHub host"
+hd_repo "$HD/global-none"
+hd_run_in "$HD/global-none" GIT_CONFIG_GLOBAL="$HD/global-origin.cfg"
+hd_host "HD33c a remote only the global git config names is no remote, so the work tree reads as github.com" github.com
 hd_repo "$HD/unreadable" && printf '[remote "origin"\n\turl = https://ghe.example.com/acme/widget.git\n' >> "$HD/unreadable/.git/config"
 hd_run_in "$HD/unreadable" FAKE_GH_LOGINS=ghe.example.com
 hd_refused "HD34 a work tree whose remotes git cannot read is refused instead of read as github.com" "git cannot read the remotes"
 { [ "$HD_RC" -ne 0 ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD34b the unreadable work tree reaches neither ssh nor gh" PASS \
   || check "HD34b the unreadable work tree reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
+HD_REMEDIES=1
+for hd_needle in "repair its git configuration" "set ZENSU_VCS_REMOTE for a verb given --repo-id" \
+  "git config --global --add safe.directory <path>" "is for the user to decide, not for an agent"; do
+  case "$HD_ERR" in *"$hd_needle"*) ;; *) HD_REMEDIES=0 ;; esac
+done
+[ "$HD_REMEDIES" = 1 ] \
+  && check "HD34c that refusal names its remedies and leaves a safe.directory exception to the user" PASS \
+  || check "HD34c that refusal names its remedies and leaves a safe.directory exception to the user (err='$HD_ERR')" FAIL
+HD_GITDIAG="$(cd "$HD/unreadable" && LC_ALL=C git -C . remote 2>&1 >/dev/null | head -n 1)"
+{ [ -n "$HD_GITDIAG" ] && case "$HD_ERR" in *"($HD_GITDIAG)"*) true ;; *) false ;; esac; } \
+  && check "HD34d that refusal relays the first line of the untranslated git diagnostic" PASS \
+  || check "HD34d that refusal relays the first line of the untranslated git diagnostic (git='$HD_GITDIAG' err='$HD_ERR')" FAIL
+mkdir -p "$HD/nogit-bin" && printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v node)" > "$HD/nogit-bin/node" && chmod +x "$HD/nogit-bin/node"
+HD_OUT="$(cd "$HD/agree" && env -i PATH="$HD/nogit-bin" HOME="$HOME" "$BASH_ABS" -c 'source "$1" && _zensu_vcs_gh_host' _ "$LIB" 2>"$HD/err")"
+HD_RC=$?; HD_ERR="$(cat "$HD/err")"
+hd_refused "HD34e without git a work tree is refused, and the refusal names installing git" "git is not installed"
+case "$HD_ERR" in
+  *safe.directory*|*"repair its git configuration"*) check "HD34f the missing-git refusal names no git configuration remedy (err='$HD_ERR')" FAIL ;;
+  *) check "HD34f the missing-git refusal names no git configuration remedy" PASS ;;
+esac
+mkdir -p "$HD/foreign-home"
+hd_repo "$HD/foreign" && git -C "$HD/foreign" remote add origin https://ghe.example.com/acme/widget.git
+HD_FOREIGN=(HOME="$HD/foreign-home" XDG_CONFIG_HOME="$HD/foreign-home/.config" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1)
+HD_GITDIAG="$(cd "$HD/foreign" && env "${HD_FOREIGN[@]}" LC_ALL=C git -C . remote 2>&1 >/dev/null)"
+HD_FIRST="$(printf '%s\n' "$HD_GITDIAG" | head -n 1)"
+{ [ "$(printf '%s\n' "$HD_GITDIAG" | grep -c .)" -ge 2 ] && case "$HD_FIRST" in *"detected dubious ownership"*) true ;; *) false ;; esac; } \
+  && check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line" PASS \
+  || check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line (git='$HD_GITDIAG')" FAIL
+hd_run_in "$HD/foreign" "${HD_FOREIGN[@]}" FAKE_GH_LOGINS=ghe.example.com
+{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -n "$HD_FIRST" ] && [ "$(printf '%s\n' "$HD_ERR" | grep -c .)" = 1 ] \
+  && case "$HD_ERR" in *"To add an exception"*) false ;; *"git cannot read the remotes of this work tree ($HD_FIRST)"*) true ;; *) false ;; esac; } \
+  && check "HD34h that work tree is refused with only the first line of the diagnostic, never the exception command git prints after it" PASS \
+  || check "HD34h that work tree is refused with only the first line of the diagnostic, never the exception command git prints after it (rc=$HD_RC err='$HD_ERR')" FAIL
 hd_repo "$HD/ceiling" && mkdir -p "$HD/ceiling/sub" && git -C "$HD/ceiling" remote add origin https://ghe.example.com/acme/widget.git
 hd_run_in "$HD/ceiling/sub" GIT_CEILING_DIRECTORIES="$HD/ceiling"
 hd_host "HD35 a directory GIT_CEILING_DIRECTORIES keeps out of the repository above it reads as github.com" github.com

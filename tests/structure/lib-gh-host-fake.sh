@@ -67,3 +67,13 @@ gh_host_fake_write() {
   { gh_host_fake_header; cat; } > "$target" || return 1
   chmod +x "$target"
 }
+
+GH_HOST_FAKE_TOKENS=(GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4)
+
+gh_host_fake_env_all() {
+  local log="${1:-}" want="${2:-}" lines bad
+  [ -n "$want" ] || return 1
+  lines="$(printf '%s\n' "$log" | grep -c .)"
+  bad="$(printf '%s\n' "$log" | grep -v -x -F -e "$want" | grep -c .)"
+  [ "$lines" -ge 1 ] && [ "$bad" = 0 ]
+}

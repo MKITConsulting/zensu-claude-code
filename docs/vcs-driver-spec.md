@@ -89,6 +89,10 @@ cliState=ready|unauthed|missing   # distinguishes "CLI absent" from "present-but
    - `github.com`, `*.github.*`, `api.github.com` → github/cloud
    - `gitlab.com` → gitlab/cloud
    - unknown host → **API probe** (step 3)
+   - no host: a local path, a `file://` URL or a Windows drive-letter path (`C:\…`, `C:/…`)
+     → `provider=unknown` with an empty `apiBase` and `repo`, whatever the repo markers say
+     (`D18b`, `D18c` in `test-vcs-detect.sh`); `repoIdentity` in `hooks/lib/ci-contract-v1.js`
+     reads such a remote the same way, as no usable git remote
 3. **API probe** (self-hosted disambiguation) — an HTTP liveness check
    (`curl -sS -o /dev/null -w '%{http_code}' --max-time 5`) treating **200/401/403**
    as "endpoint present":
@@ -186,8 +190,25 @@ repository (`HEAD`, `objects` and `refs`), counts a set `GIT_DIR` as inside, and
 one is resolved through symlinks, a later one is compared as written, and a relative one is
 ignored. A work tree whose remotes git cannot read, such as one with a malformed configuration
 or one `safe.directory` refuses, is therefore refused instead of pinned to github.com, and so is
-a working directory whose physical path cannot be read. A remote URL that yields
-no host, such as a local path, is refused. An SSH remote (scp-like, `ssh://`,
+a working directory whose physical path cannot be read. That refusal carries the first line of
+git's own diagnostic, read under `LC_ALL=C` so it is never translated and clamped like a failed
+call's output, so its causes stay apart. It names the remedies: repair the git configuration, or
+set `ZENSU_VCS_REMOTE` for a verb given `--repo-id`, because a verb without one runs gh in the
+work tree, where gh reads the same remotes. It names
+`git config --global --add safe.directory <path>` only as a decision for the user, not for an
+agent, because that command changes the global git configuration and widens which repositories
+git trusts. Without git installed, the refusal names installing git instead. A remote that git
+lists but that has no URL, such as a `remote.<name>.prune` setting in the global git
+configuration, takes no part in the agreement of the remotes. A remote URL that yields no host
+is refused as naming no GitHub host before ssh or gh runs, whatever login gh holds: a local path,
+a `file://` URL in any letter case, with or without a host part, and a Windows drive-letter path
+(a letter in either case, a colon, then a slash or a backslash). A one-letter SSH alias before a
+relative path (`g:owner/repo`) stays an SSH remote; before an absolute path (`g:/srv/repo`) it
+reads as a drive-letter path and is refused. That refusal names the ways past it: set
+`ZENSU_VCS_REMOTE` to the URL of the GitHub remote for a verb given `--repo-id`, make the
+current branch track a remote on the GitHub host with
+`git branch --set-upstream-to <remote>/<branch>`, or spell a one-letter SSH alias as
+`ssh://<alias>/<path>`. An SSH remote (scp-like, `ssh://`,
 `git+ssh://`, `ssh+git://`, or a URL whose part before `://` is no valid scheme, which git
 reads as scp-like) is translated through `ssh -G -- <alias>` and its `hostname` line, and
 `ssh.github.com` reads as github.com; the host is lowercased and a leading `www.` is dropped.
@@ -216,15 +237,26 @@ keeps its classification and its `gh auth status` readiness check.
 
 - Tests: `HD1`-`HD43` in `test-vcs-detect.sh` drive the derivation with a fake ssh, a fake gh
   and git fixtures for a local upstream, a tracked remote and an `origin` beside a remote on
-  another host, remotes on different hosts, a sole remote not named `origin`, remotes on one
+  another host, remotes on different hosts, a sole remote not named `origin` (on a GitHub
+  Enterprise host in `HD32`, on github.com in `HD32b`), remotes on one
   host, an unreadable configuration, bare repositories, directories reached through a symlink,
   ceilings (plain, spelled through a symlink, after an empty entry, relative) and a work tree
-  without a remote; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9` in `test-vcs-publish.sh` and
+  without a remote; `HD29c`-`HD29f` refuse `file://` URLs and drive-letter paths while gh holds a
+  login for the name the URL parse once produced, `HD29h` and `HD29i` do so for a capitalized
+  scheme and a lowercase drive letter, `HD29g` keeps a one-letter alias before a relative path an
+  SSH remote, and `HD29j` requires the ways past the no-host refusal; `HD33b` and `HD33c` give a
+  remote without a URL no part in the agreement; `HD34c` requires the remedies of the
+  unreadable-remotes refusal and leaves the `safe.directory` exception to the user, `HD34d` its
+  untranslated git diagnostic, and `HD34g` and `HD34h` only the first line of that diagnostic for
+  a work tree git treats as owned by another account, never the exception command git prints
+  after it; `HD34e` and `HD34f` require the missing-git refusal, which names no git configuration
+  remedy; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9` in `test-vcs-publish.sh` and
   `HR1`-`HR5` in `test-vcs-review-marker-reconcile.sh` run every GitHub verb under
   `GH_HOST=example.invalid`, against a github.com remote, a GitHub Enterprise remote gh is
-  logged in to and one it is not. `HP17`, `HP17b`, `HS9` and `HR5` set all four token
-  variables and require that no call to a host accepted for its stored login alone carries
-  one; `HP18` and `HP19` require that github.com and the `GH_HOST` host keep them; `HP20` and
+  logged in to and one it is not. The GitHub Enterprise run of every GitHub verb sets all four
+  token variables and requires that no call to a host accepted for its stored login alone
+  carries one (`HP8b`, `HP12b`-`HP16b`, `HP17`, `HP17b`, `HS6b`-`HS8b`, `HS9`, `HR4b` and `HR5`);
+  `HP18` and `HP19` require that github.com and the `GH_HOST` host keep them; `HP20` and
   `HP20b` set `GH_REPO=other.example/acme/x`. Every fake gh of those suites starts with the
   header of `tests/structure/lib-gh-host-fake.sh`, which selects the host as
   `tests/structure/fixtures/gh-api-stub.js` does (`--hostname`, else `GH_HOST`, else
@@ -233,8 +265,10 @@ keeps its classification and its `gh auth status` readiness check.
   answers `gh config get user -h` from `FAKE_GH_LOGINS` (exit 0 with an empty answer for a host
   in `FAKE_GH_EMPTY_LOGINS`), appends the host and the names of the non-empty token variables
   of each call to `FAKE_GH_ENV_LOG`, and refuses any host other than `FAKE_GH_PR_HOST`
-  (github.com by default) with `error connecting to <host>`. The dry argv checks name the pin
-  as well.
+  (github.com by default) with `error connecting to <host>`. The same file holds the four token
+  assignments every token run sets (`GH_HOST_FAKE_TOKENS`) and the check each token test applies
+  to that log (`gh_host_fake_env_all`: at least one line, and every line exactly the expected
+  host and token names). The dry argv checks name the pin as well.
 - Known gaps: `--detect` classifies the host as the remote spells it: it translates no SSH
   alias, keeps letter case and a leading `www.`, and does not map `ssh.github.com`, so its
   `edition` and `apiBase` can name an alias the verbs translate, and with `--provider github`

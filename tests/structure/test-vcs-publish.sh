@@ -156,6 +156,10 @@ hs_reached() {
   if [ "$HS_RC" -eq 0 ] && [ "$HS_OUT" = "$want" ] && [ "$count" = 1 ] && [ "$stray" = 0 ]; then check "$label" PASS
   else check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' err='$HS_ERR')" FAIL; fi
 }
+hs_tokens() {
+  if [ "$HS_RC" -eq 0 ] && gh_host_fake_env_all "$HS_ENV" ghe.example.com; then check "$1" PASS
+  else check "$1 (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL; fi
+}
 HS_SCOUT='{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug"]}'
 hs_run bash "$LIB" --scout-pr --provider github
 hs_reached "HS1 --scout-pr of the current branch reaches the remote's github.com while GH_HOST names another host" "$HS_SCOUT" github.com
@@ -169,19 +173,17 @@ hs_run ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.
   bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
 hs_reached "HS5 --post-review posts to the GitHub Enterprise host of an SSH remote while GH_HOST names another host" "https://github.test/acme/widget/pull/42#pullrequestreview-1" ghe.example.com
 HS_GHE=(ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com)
-hs_run "${HS_GHE[@]}" bash "$LIB" --scout-pr --provider github
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --scout-pr --provider github
 hs_reached "HS6 --scout-pr of the current branch reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
-hs_run "${HS_GHE[@]}" bash "$LIB" --scout-pr --provider github 42
+hs_tokens "HS6b --scout-pr of the current branch sends no environment token to a host accepted for its stored gh login"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --scout-pr --provider github 42
 hs_reached "HS7 --scout-pr by number reaches the GitHub Enterprise host of the remote" "$HS_SCOUT" ghe.example.com
-hs_run "${HS_GHE[@]}" bash "$LIB" --diff-refs --provider github 42
+hs_tokens "HS7b --scout-pr by number sends no environment token to that host"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --diff-refs --provider github 42
 hs_reached "HS8 --diff-refs reaches the GitHub Enterprise host of the remote" '{"base_sha":"","start_sha":"","head_sha":"abcdef0"}' ghe.example.com
-hs_run "${HS_GHE[@]}" GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4 \
-  bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
-if [ "$HS_RC" -eq 0 ] && [ "$HS_ENV" = ghe.example.com ]; then
-  check "HS9 --post-review to a host accepted for its stored login posts without the environment tokens" PASS
-else
-  check "HS9 --post-review to a host accepted for its stored login posts without the environment tokens (rc=$HS_RC env='$HS_ENV' err='$HS_ERR')" FAIL
-fi
+hs_tokens "HS8b --diff-refs sends no environment token to that host"
+hs_run "${HS_GHE[@]}" "${GH_HOST_FAKE_TOKENS[@]}" bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$PAY"
+hs_tokens "HS9 --post-review to a host accepted for its stored login posts without the environment tokens"
 
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
