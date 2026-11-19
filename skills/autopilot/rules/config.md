@@ -190,11 +190,13 @@ must spell the same one. In `remote`
 mode every origin must be non-loopback HTTPS; the run-config helper rejects any DNS answer that
 is not globally routable and pins each hostname to an approved address for the browser process,
 and the gate refuses to open a run config whose remote hostname carries no pin. The browser
-refuses every HTTP(S) request to an origin outside the run config — a WebSocket connection is
-not fenced by it, which is an open gap — and the gate reapplies the
+refuses every HTTP(S) request to an origin outside the run config — a WebSocket connection and a
+shared worker's fetch are not fenced by it, which are open gaps — and the gate reapplies the
 credential rule, and for a non-loopback origin the query/fragment rule, to every navigation command. A server
 redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
-every navigation. Missing/invalid declarations, unsupported evidence modes, or unsupported policy
+every navigation. The shared worker case was measured with playwright-cli 0.1.24 driving Google
+Chrome 157 on loopback `http` origins: a dedicated worker's fetch is fenced, a shared worker's
+fetch is not. Missing/invalid declarations, unsupported evidence modes, or unsupported policy
 versions fail closed, and so does a hostname that is not exact: every origin
 in either list must name an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only,
 because the browser turns each allowed origin into a URL glob and would read `*`, `{` or `,` as

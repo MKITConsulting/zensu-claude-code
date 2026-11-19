@@ -9,6 +9,7 @@ source "$PLUGIN_DIR/hooks/lib/zensu-mcp-tools.sh"
 source "$PLUGIN_DIR/hooks/lib/zensu-cli-map.sh"
 
 NEUTRAL_GROUPS="auth completion help"
+NEUTRAL_LEAVES="update"
 INTENTIONALLY_UNMAPPED="meta scaffold-agent"
 
 PASS=0; FAIL=0
@@ -32,11 +33,13 @@ GATE_STATUS=$?
 
 gate_has() { printf '%s\n' "$GATE_SETS" | grep -qxF -- "$1"; }
 neutral() { case " $NEUTRAL_GROUPS " in (*" $1 "*) return 0 ;; esac; return 1; }
+neutral_leaf() { case " $NEUTRAL_LEAVES " in (*" $1 "*) return 0 ;; esac; return 1; }
 intentionally_unmapped() { [ "$1" = "$INTENTIONALLY_UNMAPPED" ]; }
 
 leaf_scan() {
   local g="${1:-}" v="${2:-}" s="${3:-}"
   neutral "$g" && return 0
+  [ "$#" -eq 1 ] && neutral_leaf "$g" && return 0
   gate_has "noun $g" || echo "group-not-parsed $g"
   [ -n "$v" ] || { echo "group-without-verbs $g"; return 0; }
   [ "$#" -le 3 ] || { echo "leaf-too-deep $*"; return 0; }
@@ -102,7 +105,7 @@ fi
 
 DRIFT="$(drift_scan "$TREE" | awk '!seen[$0]++')"
 if [ -z "$DRIFT" ]; then
-  check "Z2 every leaf, group alias and verb alias of zensu-cli $TREE_VERSION outside auth, completion and help is mapped, parsed and grouped the way the gate reads it" PASS
+  check "Z2 every leaf, group alias and verb alias of zensu-cli $TREE_VERSION outside auth, completion, help and the bare update leaf is mapped, parsed and grouped the way the gate reads it" PASS
 else
   printf '%s\n' "$DRIFT" | sed 's/^/      /'
   check "Z2 the gate drifts from the recorded command tree of zensu-cli $TREE_VERSION; map each new leaf in hooks/lib/zensu-cli-map.sh and classify its tool, add each new noun, alias or group to hooks/lib/zensu-cli-words-v1.js, or list a leaf as intentionally unmapped here" FAIL
@@ -126,12 +129,14 @@ leaf work policy get
 leaf meta scaffold-agent
 leaf auth login
 alias auth au
+leaf update
+leaf update channel
 TREE
 GOT="$(drift_scan "$FIX" | LC_ALL=C sort)"
-WANT="$(printf '%s\n' 'alias-not-in-NOUN_ALIASES feat features' 'alias-not-in-VERB_ALIASES work pol' 'alias-not-parsed feat' 'group-not-in-GROUPS wiki snapshots' 'unmapped features teleport' 'unmapped wiki snapshots take' 'verb-alias-unmapped work pol get' | LC_ALL=C sort)"
+WANT="$(printf '%s\n' 'alias-not-in-NOUN_ALIASES feat features' 'alias-not-in-VERB_ALIASES work pol' 'alias-not-parsed feat' 'group-not-in-GROUPS wiki snapshots' 'group-not-parsed update' 'unmapped features teleport' 'unmapped update channel' 'unmapped wiki snapshots take' 'verb-alias-unmapped work pol get' | LC_ALL=C sort)"
 rm -f "$FIX"
 if [ "$GOT" = "$WANT" ]; then
-  check "Z4 a tree with an unmapped leaf, an unread group, an unknown alias and an unread verb alias fails and names each one, while the exempt and neutral lines stay quiet" PASS
+  check "Z4 a tree with an unmapped leaf, an unread group, an unknown alias, an unread verb alias and a subcommand under the bare update leaf fails and names each one, while the exempt and neutral lines stay quiet" PASS
 else
   printf '%s\n' "$GOT" | sed 's/^/      got: /'
   check "Z4 the drift scan did not name exactly the planted drift" FAIL

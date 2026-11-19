@@ -23,6 +23,16 @@ bash -n "$LIB" 2>/dev/null && check "R2 bash -n syntax check passes" PASS || che
 
 field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
+SSH_STUB="$(mktemp -d -t vcsreconcile-ssh-XXXXXX)"; mkdir -p "$SSH_STUB/bin"
+cat > "$SSH_STUB/bin/ssh" <<STUB
+#!/bin/sh
+printf '%s\n' "\$*" >> "$SSH_STUB/ssh.log"
+for a in "\$@"; do h="\$a"; done
+printf 'user git\nhostname %s\nport 22\n' "\$h"
+STUB
+chmod +x "$SSH_STUB/bin/ssh"
+PATH="$SSH_STUB/bin:$PATH"; export PATH
+
 det2() {
   local remote="$1" auth="$2" prov="${3:-}"
   local a="--detect"
@@ -44,6 +54,10 @@ O="$(det2 'git@gitlab.com:g/p.git' ready)"
 expect "C1 gitlab ready"    "$O" cliName  glab
 expect "C1 gitlab ready"    "$O" cliReady true
 expect "C1 gitlab ready"    "$O" cliState ready
+case "$(cat "$SSH_STUB/ssh.log" 2>/dev/null)" in
+  *"-G -- gitlab.com"*) check "C1b an SSH remote reaches the suite's identity ssh, never the machine's ssh configuration" PASS ;;
+  *) check "C1b an SSH remote reaches the suite's identity ssh, never the machine's ssh configuration" FAIL ;;
+esac
 
 O="$(det2 'git@gitlab.com:g/p.git' missing)"
 expect "C2 gitlab CLI missing" "$O" cliName  glab
@@ -78,6 +92,7 @@ if [ "$N1" = glab ] && [ "$N1" = "$N2" ] && [ "$N2" = "$N3" ]; then
 else
   check "C7 cliName invariant (ready='$N1' missing='$N2' unauthed='$N3')" FAIL
 fi
+rm -rf "$SSH_STUB"
 
 echo "----"
 echo "test-vcs-reconcile: $PASS PASS / $FAIL FAIL"

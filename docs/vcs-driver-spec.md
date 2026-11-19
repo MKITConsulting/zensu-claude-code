@@ -84,10 +84,12 @@ cliState=ready|unauthed|missing   # distinguishes "CLI absent" from "present-but
 **Resolution ladder** (first hit wins):
 
 1. Explicit `--provider` flag / `vcs.provider` in `.zensu/autopilot.yaml`.
-2. **Remote URL** of the tracking remote (fallback `origin`), host extracted
-   from both SSH (`git@host:path`) and HTTPS (`https://host/path`) forms:
-   - `github.com`, `*.github.*`, `api.github.com` → github/cloud
-   - `gitlab.com` → gitlab/cloud
+2. **Remote URL** of the tracking remote (fallback `origin`, then the remotes that agree on one
+   host and one repository), host extracted from both SSH (`git@host:path`) and HTTPS
+   (`https://host/path`) forms and read as the GitHub verbs pin it (Step 2, "What `--detect`
+   classifies"):
+   - `github.com` → github/cloud (also `www.github.com`, and `ssh.github.com` over SSH)
+   - `gitlab.com` → gitlab/cloud (also `www.gitlab.com`, and `altssh.gitlab.com` over SSH)
    - unknown host → **API probe** (step 3)
    - no host: a local path, a `file://` URL or a Windows drive-letter path (`C:\…`, `C:/…`)
      → `provider=unknown` with an empty `apiBase` and `repo`, whatever the repo markers say
@@ -174,8 +176,11 @@ and an empty one counts as unset. The host comes from the remote `--detect` read
 (`ZENSU_VCS_REMOTE`, else the remote the current branch tracks, else `origin`), through the same
 `_zensu_vcs_split_url`; a tracking remote without a URL, such as the `.` of a branch that tracks
 a local branch, falls back to `origin`, for `--detect` too. When that ladder selects no remote,
-the verbs read every remote of the work tree and pin the host they all name, compared as
-written and lowercased; remotes that name different hosts are refused with a message that names
+the verbs read every remote of the work tree and pin the host they all name, each compared as
+the host it would pin. A remote whose URL yields no host, such as a local path, is left out, and
+when every remote is left out the first one is read, so the work tree is refused as naming no
+GitHub host. A remote whose host the pin refuses is compared by its spelling and never agrees
+with a pinned host. Remotes that name different hosts are refused with a message that names
 `ZENSU_VCS_REMOTE` and `git branch --set-upstream-to`. Every GitHub verb reads the remote of the
 working directory it runs in: `--repo-id` names the repository on that host and never moves the
 host, so a caller runs the verbs from the pull request's work tree or sets `ZENSU_VCS_REMOTE`.
@@ -202,24 +207,46 @@ git trusts. Without git installed, the refusal names installing git instead. A r
 configuration names (git answers `get-url` only for a remote of the repository's own
 configuration, even when the global one gives it a URL), takes no part in the agreement of the
 remotes. A remote URL that yields no host
-is refused as naming no GitHub host before ssh or gh runs, whatever login gh holds: a local path,
-a `file://` URL in any letter case, with or without a host part, and a Windows drive-letter path
-(a letter in either case, a colon, then a slash or a backslash). A one-letter SSH alias before a
+is refused as naming no GitHub host before ssh or gh runs, whatever login gh holds, and the
+fallback over every remote leaves it out: a local path, a `file://` URL in any letter case, with
+or without a host part, and a Windows drive-letter path (a letter in either case, a colon, then a
+slash or a backslash). A one-letter SSH alias before a
 relative path (`g:owner/repo`) stays an SSH remote; before an absolute path (`g:/srv/repo`) it
 reads as a drive-letter path and is refused. That refusal names the ways past it: set
 `ZENSU_VCS_REMOTE` to the URL of the GitHub remote for a verb given `--repo-id`, make the
 current branch track a remote on the GitHub host with
 `git branch --set-upstream-to <remote>/<branch>`, or spell a one-letter SSH alias as
-`ssh://<alias>/<path>`. An SSH remote (scp-like, `ssh://`,
-`git+ssh://`, `ssh+git://`, or a URL whose part before `://` is no valid scheme, which git
-reads as scp-like) is translated through `ssh -G -- <alias>` and its `hostname` line, and
+`ssh://<alias>/<path>`. One helper, `_zensu_vcs_pinned_host <url> <host>`, takes a remote's URL
+to the host it pins, for the verbs, the comparison above and `--detect` alike. An SSH remote
+(scp-like, `ssh://`, `git+ssh://`, `ssh+git://`, or a URL whose part before `://` is no valid
+scheme, which git reads as scp-like) is translated through `ssh -G -- <alias>` and its
+`hostname` line, and
 `ssh.github.com` reads as github.com; the host is lowercased and a leading `www.` is dropped.
-Measured with gh 2.101.0, that is how gh itself reads the host of a remote. Before ssh runs,
+Measured with gh 2.101.0, that is how gh itself reads the host of a remote. An SSH remote of
+`altssh.gitlab.com`, GitLab's host for SSH over port 443, reads as gitlab.com in the same step,
+so it agrees with an https gitlab.com remote of the same project. Before ssh runs,
 the alias must be 1 to 253 characters of lowercase letters, digits, `.`, `_` and `-` that do
 not start with `-`, so a `Host gh_work` alias is translated rather than refused. The host that
 is pinned, the translation or else the alias, must be a valid host name (lowercase letters,
 digits, `-` and `.`, labels of 1 to 63 characters that neither start nor end with `-`, at most
 253 characters); any other is refused before gh runs.
+
+**What `--detect` classifies.** `--detect` reads the remote the verbs read and classifies the host
+`_zensu_vcs_pinned_host` pins for it, so its `edition` and `apiBase` name the host the GitHub
+verbs call. Its fallback is narrower than theirs: it reads the remotes that agree on one host only
+when they also name one repository, with paths compared without letter case, leading or trailing
+`/` and a trailing `.git`. The remotes of a fork beside its upstream are not read, so `provider`
+stays `unknown`, as for a work tree without a remote, and no consumer receives a provider without
+a `repo`. Two exceptions remain. A host the pin refuses is classified as spelled: the GitLab verbs
+leave the host to glab, so a self-hosted GitLab name the GitHub host-name rule refuses, such as
+one with an underscore, still classifies. When the pinned host is no cloud host and its probe
+identifies no forge, the host the remote spells, lowercased and without a leading `www.`, is
+probed as well before the marker tiebreak, unless it is a cloud host: an `ssh -G` translation to
+an IP address, which is never probed, leaves the forge to the remote's own name, and the host
+whose probe answers is the one `apiBase` names. A cloud name the translation moved elsewhere is
+neither classified by its name nor probed. Each probe runs through `_zensu_vcs_probeable_host` and
+the IP pinning, so a translated host and a spelled one are guarded alike. `ssh -G` runs in
+`--detect` too, also under `ZENSU_VCS_NO_PROBE`, which skips HTTP requests only.
 
 **Which hosts gh may reach, and with which token.** A host is accepted when it is github.com,
 the host `GH_HOST` names, or a host gh holds a stored login for: `gh config get user -h <host>`
@@ -235,15 +262,18 @@ variables a token set for one host would reach the remote's host on every call. 
 whose environment token is meant for the remote's host sets `GH_HOST` to that host in the
 environment the session starts with. The refusal does not offer that route, because whoever
 controls a remote chooses its host. A github.com remote keeps its behaviour, and `--detect`
-keeps its classification and its `gh auth status` readiness check.
+keeps its `gh auth status` readiness check.
 
-- Tests: `HD1`-`HD43` in `test-vcs-detect.sh` drive the derivation with a fake ssh, a fake gh
+- Tests: `HD1`-`HD49` in `test-vcs-detect.sh` drive the derivation with a fake ssh, a fake gh
   and git fixtures for a local upstream, a tracked remote and an `origin` beside a remote on
   another host, remotes on different hosts, a sole remote not named `origin` (on a GitHub
   Enterprise host in `HD32`, on github.com in `HD32b`), remotes on one
   host, an unreadable configuration, bare repositories, directories reached through a symlink,
-  ceilings (plain, spelled through a symlink, after an empty entry, relative) and a work tree
-  without a remote; `HD29c`-`HD29f` refuse `file://` URLs and drive-letter paths while gh holds a
+  ceilings (plain, spelled through a symlink, after an empty entry, relative), a work tree
+  without a remote, and an SSH alias, a `www.` and an `ssh.github.com` spelling, a local path, a
+  `file://` URL, a drive-letter path and a refused alias beside another remote (`HD47b` and
+  `HD47c` for the `file://` URL and the drive-letter path); `HD29c`-`HD29f` refuse `file://`
+  URLs and drive-letter paths while gh holds a
   login for the name the URL parse once produced, `HD29h` and `HD29i` do so for a capitalized
   scheme and a lowercase drive letter, `HD29g` keeps a one-letter alias before a relative path an
   SSH remote, and `HD29j` requires the ways past the no-host refusal; `HD33b` and `HD33c` give a
@@ -253,8 +283,22 @@ keeps its classification and its `gh auth status` readiness check.
   outside the C locale (`HD34i` shows the shim marks such a call); `HD34g` shows that git refuses a work tree it treats as owned by another
   account with a diagnostic of more than one line that ends in the exception command, and `HD34h`
   requires the refusal to carry only the first line, never that command; `HD34e` and `HD34f`
-  require the missing-git refusal, which names no git configuration remedy; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9` in `test-vcs-publish.sh` and
-  `HR1`-`HR5` in `test-vcs-review-marker-reconcile.sh` run every GitHub verb under
+  require the missing-git refusal, which names no git configuration remedy; `HD50`-`HD66b` drive
+  `--detect` with the same fake ssh, a sentinel curl and the probe off or stubbed, for those
+  spellings, `--provider github`, the fallback to remotes that agree, name different hosts or
+  name different repositories, a `file://` remote beside another remote (`HD56b`), remotes
+  of one repository spelled with other letter case, a leading or trailing slash or `.git`, a
+  spelled host equal to the pinned one, which is probed once, and an uppercase `www.` spelling,
+  which is probed lowercased and without it, a gitlab.com SSH remote
+  under the `altssh.gitlab.com` translation beside its https remote, the two exceptions, a cloud
+  name the translation moves elsewhere, a translated or spelled host that resolves privately or
+  publicly, a pinned host whose probe answers beside a probeable spelled name, and a spelled host
+  whose probe answers none beside a CI marker; `D1b`, `C1b` in `test-vcs-reconcile.sh` and `P4i`
+  in `test-doctor.sh` show that
+  the older `--detect` drives with SSH remotes reach an identity ssh stub, never the machine's ssh
+  configuration; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9`
+  in `test-vcs-publish.sh` and `HR1`-`HR5` in `test-vcs-review-marker-reconcile.sh` run every
+  GitHub verb under
   `GH_HOST=example.invalid`, against a github.com remote, a GitHub Enterprise remote gh is
   logged in to and one it is not. The GitHub Enterprise run of every GitHub verb sets all four
   token variables and requires that no call to a host accepted for its stored login alone
@@ -272,14 +316,10 @@ keeps its classification and its `gh auth status` readiness check.
   assignments every token run sets (`GH_HOST_FAKE_TOKENS`) and the check each token test applies
   to that log (`gh_host_fake_env_all`: at least one line, and every line exactly the expected
   host and token names). The dry argv checks name the pin as well.
-- Known gaps: `--detect` classifies the host as the remote spells it: it translates no SSH
-  alias, keeps letter case and a leading `www.`, and does not map `ssh.github.com`, so its
-  `edition` and `apiBase` can name an alias the verbs translate, and with `--provider github`
-  it reports the enterprise edition for a remote spelled `GitHub.com` or `www.github.com`, or
-  an SSH remote on `ssh.github.com`, each of which the verbs pin to github.com, and it reads
-  no remote when the branch tracks none and no `origin` exists, where the verbs fall back to
-  remotes that agree; one normalization shared by `--detect` and the verbs is the standing
-  fix. The walk does not stop at a file system boundary, where git stops unless
+- Known gaps: in its two exceptions `--detect` and the GitHub verbs still name different hosts:
+  a host the pin refuses classifies while the verbs refuse it, and a spelled host whose probe
+  answers where the translation's did not is the host `apiBase` names while the verbs pin the
+  translation. The walk does not stop at a file system boundary, where git stops unless
   `GIT_DISCOVERY_ACROSS_FILESYSTEM` is set, so a directory on another file system below a work
   tree, where git finds no repository, reads as inside one, and the verb refuses. The pin covers the
   driver's verbs only: the gh calls the skills run themselves carry no host, so gh picks one
@@ -293,7 +333,8 @@ keeps its classification and its `gh auth status` readiness check.
   takes no `--repo DIR`, so a caller outside the pull request's work tree has only
   `ZENSU_VCS_REMOTE`. The host carries no port, as `apiBase` carries none, so a GitHub
   Enterprise server that answers only on a non-default HTTPS port is not reached; `ssh -G`
-  evaluates the user's ssh configuration, `Match exec` included, as gh does; and an alias
+  evaluates the user's ssh configuration, `Match exec` included, as gh does, for `--detect` as
+  for the verbs; and an alias
   whose ssh configuration `ssh -G` cannot read, such as one a `GIT_SSH_COMMAND` or
   `core.sshCommand` supplies, keeps its own name, which must then pass the host-name rule and
   hold a gh login.
@@ -495,7 +536,30 @@ specified in `skills/autopilot/rules/conventions.md`.
     review presence from it, and a work-order run's review import uses it to recognize a review an
     earlier attempt published (`skills/work/references/protocol.md`). Tests N12-N14c and LV28 in
     `test-vcs-publish.sh`, GL56 and GL57 in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
-    Known gap (follow-up): no fake-backed check drives the GitHub listing.
+    RM1-RM1c, RM2-RM2s and RM11 in `test-vcs-publish.sh` guard its fixture and its fake `gh`, the
+    model in `tests/structure/lib-fake-gh-graphql.js` that `test-vcs-review-marker-reconcile.sh`
+    also answers its GraphQL listing with; RM3-RM10 drive the GitHub listing against that fake,
+    RM10 over a pull request without reviews, and RM11 the inventory fetch `--reconcile-review`
+    shares. The fake is modelled on gh 2.101.0 and serves one pull request, `acme/widget#42`, read
+    from the variables the query binds to `repository(owner:, name:)` and `pullRequest(number:)`;
+    any other one fails with GitHub's not-found message. It checks the `String` and `Int`
+    variables of an anonymous query the way GitHub does and fails with gh's message: first a
+    variable declared but unused or used but undeclared, then, once the declarations hold, a value
+    of the wrong type or a missing non-null value, such as a `num` sent with `-f` or left out,
+    printing every problem of that phase on its own line. `-F` types `true`, `false`, `null` and
+    an integer within 64 bits as gh does. It serves only the fields the query selects in `nodes`
+    and `pageInfo`. `--paginate --slurp` prints one array of pages, `--paginate` alone prints them
+    back to back, and the next page is requested only while the served page carries
+    `hasNextPage: true` and a non-empty `endCursor`; the fake serves the page after that cursor
+    when the query passes it to `after:$endCursor`. Flags may precede the endpoint. Once the pull
+    request resolves, the `reviews` connection needs a `first` from 0 to 100: without `first` or
+    `last`, with both, or with a `first` out of that range the fake fails with GitHub's message,
+    as GitHub does. A call outside that model exits 2 and names the call on stderr: another
+    subcommand or endpoint, an unknown flag, an `@file` value, a named operation, a default value,
+    a list type or another variable type, a query that leaves that path or selects beside it, a
+    field the fixture lacks, `last` alone, a variable `first` or another `reviews` argument, a
+    `first` below the size of a served page, a `before` cursor with a value on any page, a
+    cursor the fixture lacks, or a paging query whose cursor never advances.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.

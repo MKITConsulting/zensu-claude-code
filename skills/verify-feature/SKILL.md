@@ -264,8 +264,8 @@ report and never written, edited or deleted: a record placed there skips the hum
 that origin.
 
 **Redirects are not filtered by the browser.** `network.allowedOrigins` blocks a direct
-navigation and every HTTP(S) subresource request outside the run config, but the browser
-follows a server redirect to another origin. After every call that can navigate — `open`,
+navigation and HTTP(S) requests outside the run config, except a followed server redirect, a
+WebSocket and a shared worker's fetch. After every call that can navigate — `open`,
 `goto`, `go-back`, `go-forward`, `reload`, `tab-new`, `tab-select`, `tab-close`, and any click or
 key press that follows a link or submits a form — read the `Page URL` line `playwright-cli`
 prints. A page can also navigate itself onto a network-only origin: the browser knows one class

@@ -82,6 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirmation, the `zensu-plm` agent names the end without paths, and `test-pulse-skill.sh`
   pins each block whole. C4 of `test-zensu-plm-arg-guidance.sh` counts a catalog line only by
   the command spans before its description.
+- **CLI write-gate**: zensu-cli 0.22.0's `zensu ai-work recover` is an AI-work capture
+  mutation, `recover_ai_work_capture`. The main thread runs it without a skill window, also in
+  direct mode, and a subagent is denied with a reason that leaves the command to the main
+  thread. A localhost backend reading never lifts that deny, also without the word reader,
+  because the verb sends no request but changes the local capture receipts. The recorded CLI
+  tree moves to 0.22.0, the drift test exempts only the bare `update` leaf, and the
+  `pulse-session` live scenario expects `zensu pulse start` or `zensu pulse summary`.
 
 ## [0.40.2] - 2026-11-17
 

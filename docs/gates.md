@@ -89,11 +89,21 @@ To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`;
 
 ## CLI Write-Gate
 
-The main thread may run `ai-work start` and `ai-work submit` without a workflow
-window to report an agreed goal and result during direct implementation. They
-remain classified as mutations and are denied to subagents; this narrow exception
-does not admit other commands chained after them. Personal OAuth and the separate
-capture API enforce the account. There is no CLI acceptance/revocation command.
+The main thread may run the AI-work capture commands without a workflow window,
+also during direct implementation: `ai-work bind` records the product the person
+confirmed, `ai-work start` and `ai-work submit` report an agreed goal and result,
+and `ai-work recover` inspects, archives or restores the local capture receipts of
+the capture key its `--session` names. They remain classified as mutations and are
+denied to subagents; this narrow exception does not admit other commands chained
+after them. `recover` sends no request, but its `--archive` form moves the active
+receipt that capture reports from into the archive and its `--restore` form copies an
+archived receipt back into an empty active slot, and the gate classifies the verb, not
+its flags, so its inspection is denied to a subagent as well. It reaches no backend,
+so a localhost backend reading never lifts that deny. The gate does not compare the
+`--session` key with the session's own capture key: the plugin supplies that key,
+and only the rule in `docs/ai-work-capture.md` keeps a call to it. Personal OAuth
+and the separate capture API enforce the reporting account of every capture command
+that reaches the backend. There is no CLI acceptance/revocation command.
 
 The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or
 updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
@@ -191,7 +201,9 @@ flowchart TD
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off (env or inline)<br/>or hooks.mcpGate=false<br/>or localhost backend?"}
     C -->|"yes (escape hatch)"| ALLOW
-    C -->|"no"| E{"Inside an active main-thread skill workflow?<br/>workflowActive = true<br/>AND tool in workflowTools (per-skill scope)"}
+    C -->|"no"| K{"AI-work capture command?<br/>ai-work bind / start / submit / recover"}
+    K -->|"yes (main thread only)"| ALLOW
+    K -->|"no"| E{"Inside an active main-thread skill workflow?<br/>workflowActive = true<br/>AND tool in workflowTools (per-skill scope)"}
     E -->|"yes"| ALLOW
     E -->|"no"| W{"zensu work ask / followup<br/>in a bound work-order session?"}
     W -->|"yes (the work-order gate decides)"| ALLOW
@@ -247,7 +259,8 @@ In a Bash command a `--help` or `-h` word right after a word the shell expands a
 value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
-report the operation to the main thread, which runs it through the matching skill. In a bound
+report the operation to the main thread, which runs it through the matching skill, or, for an
+AI-work capture command, directly without a skill window. In a bound
 work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
 gate, which allows them there ([Work-order mode](work-order-mode.md)). That gate reads the CLI
 name only as `zensu`, in lowercase and without `.exe`, so in such a session on macOS and Windows a
@@ -897,11 +910,14 @@ policy target or one the human approves at the prompt, is HTTPS with its host na
 run-config helper resolves each hostname once, refuses a non-public or mixed answer, and writes
 the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
 an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
-itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
-fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
+itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`, with three
+exceptions. It does NOT fence a WebSocket connection — measured with playwright-cli 0.1.21, 0.1.23 and 0.1.24, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
-line after every navigating call and stops a scenario that left the approved set. Nothing
-enforces routes: the evidence boundary is the origin, which the launch policy names or the human
+line after every navigating call and stops a scenario that left the approved set. Nor does it
+fence a shared worker's fetch, an open gap too — measured with playwright-cli 0.1.24 driving
+Google Chrome 157 on loopback `http` origins: a dedicated worker's fetch is fenced, a shared
+worker's fetch is not. An `https` target, a remote host, Windows and Linux were not measured.
+Nothing enforces routes: the evidence boundary is the origin, which the launch policy names or the human
 approves at the prompt, and an approved origin covers every page on it, at any path.
 
 **Consent and memory.** For an origin no policy names, the PreToolUse hook returns
@@ -1159,6 +1175,12 @@ through Bash.
   not a boundary. A frame a target page embeds from a network-only origin renders inside that
   page, so its content reaches that page's snapshot and screenshot, where the skill reads it as
   that page's content, like data the page fetched.
+- **Three kinds of request leave the run-config fence.** A WebSocket connection and a shared
+  worker's fetch reach an origin outside the run config, and the browser follows a server
+  redirect to one. No check of any kind answers the first two; the third has only the skill's
+  `Page URL` check, which is prose. Measurements: the WebSocket with playwright-cli 0.1.21,
+  0.1.23 and 0.1.24, the shared worker with playwright-cli 0.1.24 driving Google Chrome 157 on
+  loopback `http` origins.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
