@@ -129,11 +129,11 @@ The probe answers each call with one of five decisions:
 
 | Decision | Calls | Effect |
 |---|---|---|
-| `ALLOW` | `Read`, `Glob`, `Grep`, `LS`, `LSP`, `WebSearch`, `WebFetch`, `BashOutput`, task-list tools, `ToolSearch`, and a single-line Bash command whose every part is a plain `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `tree`, `file`, `stat`, `cd`, `grep`, `rg`, `find`, `echo`, `printf` or `nl`, `true`, `test` or `[` (none of these three with `-v` or `-R`), a `sed -n` that prints a numbered line range, the fixture's test command, a read-only `git status`, `log`, `diff`, `show`, `ls-files`, `rev-parse` or `check-ignore`, `git remote` with at most `-v`, or exactly `node --version` or `node -v`, with no substitution, no redirection except to `/dev/null` or of stderr to stdout, and no flag that writes, runs a program or waits (`--stdin` included) | runs; not decisive |
+| `ALLOW` | `Read`, `Glob`, `Grep`, `LS`, `LSP`, `WebSearch`, `WebFetch`, `BashOutput`, task-list tools, `ToolSearch`, and a single-line Bash command whose every part is a plain `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `tree`, `file`, `stat`, `cd`, `grep`, `rg`, `find`, `echo`, `printf` or `nl`, `true`, `test` or `[` (none of these three with `-v` or `-R`), a `sed -n` that prints a numbered line range, the fixture's test command, a read-only `git status`, `log`, `diff`, `show`, `ls-files`, `rev-parse`, `check-ignore` or `version`, `git remote` with at most `-v`, a `git config` that only reads (the `get` or `list` subcommand, or `--get`, `--get-all`, `--get-regexp`, `--list`, `-l` or one dotted key name alone, where only scope, display, type, matching and include options such as `--global`, `--show-origin`, `--type=bool`, `--fixed-value` or `--includes` stand before the key, with a config file from `-f`, `--file` or `--blob` that is neither standard input nor a path under `/dev` or `/proc`, and no unquoted `*`, `?` or `[`), or exactly `node --version`, `node -v` or `git --version`, with no substitution, no unquoted brace expansion such as `{a,b}` or `{1..3}` (`HEAD@{1}` is none), no redirection except to `/dev/null` or of stderr to stdout, and no flag that writes, runs a program or waits (`--stdin` included) | runs; not decisive |
 | `SETUP` | `EnterWorktree`; a Bash command that runs `git worktree`, `git branch`, `checkout` or `switch`, listings included and also behind `--no-pager`, beside nothing but allowed parts, or on one line whose only signals are such commands; and a Bash command that names the installed runtime's work-capture helper `ai-work-capture-v1.js` or runs `zensu ai-work`, when its only signals are such commands and the parts that name the helper or run it with `node` through a variable the same command sets to its path | denied with "work in the current directory", a capture call with "continue the task without it"; not decisive |
 | `CONTINUE` | `AskUserQuestion` | denied with "no person can answer"; decisive when it is a route or triage question; its record carries the flattened question and the option labels of each question in order |
-| `RETRY` | a Bash command the probe cannot prove read-only that shows no write, execution or route signal: an unlisted program, a loop, a `$` expansion or substitution, a line break, an unparsable quote, or a flag that waits, such as `tail -f` or `--watch`; at most three per run | denied with "use plain read commands"; not decisive |
-| `END` | every other Bash command with a signal (a write or execution program, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a worktree or branch command on a command of several lines, `zensu-delivery-route.sh --build` or `--direct`, `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
+| `RETRY` | a Bash command the probe cannot prove read-only that shows no write, execution or route signal: an unlisted program, a version query the probe does not prove (a program named without a path whose only argument is `--version`, or `npx -v`), a loop, a `$` expansion or substitution, an unquoted brace expansion, a `git config` read with an unquoted `*`, `?` or `[`, a line break, an unparsable quote, or a flag that waits, such as `tail -f` or `--watch`; at most three per run | denied with "use plain read commands"; not decisive |
+| `END` | every other Bash command with a signal (a write or execution program that does more than report its version, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a `git config` that sets, unsets or edits included, every word after the key being its value even when it starts with `-`, and one that reads its config file from standard input or from a path under `/dev` or `/proc`, a worktree or branch command on a command of several lines, `zensu-delivery-route.sh --build` or `--direct`, `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
 
 The probe reads a Bash command twice. The first reading proves it read-only or setup: it splits
 the command at `&&`, `||`, `|`, `;` and parentheses, outside quotes only. A quoted string counts
@@ -144,7 +144,15 @@ reading without a proof. A command the first reading cannot prove gets the secon
 looks for signals: it splits at line breaks too, follows `$(…)`, backticks and process
 substitutions into the commands they run, input redirections included, skips loop headers and shell keywords, and reads each
 command's program and flags, quoted text included. A command with a signal gets `END`, and one
-without gets `RETRY`. The record of every Bash call carries the decision's code, such as
+without gets `RETRY`. Neither a `git config` read nor a version query the second reading accepts
+carries a signal, so neither decides an `END`, while a write, a run or a route record beside one
+still does. The first reading cannot see where a quoted value starts or ends, so the second
+reading's judgment of a `git config` call, which reads its words as the shell does (quotes,
+backslashes, a `#` comment and a descriptor number before a redirection included), overrides a
+first-reading proof: `git config user.name ""` sets an empty name and gets `END`. Neither reading
+expands braces or globs, so the first reading proves no part with an unquoted brace expansion and no
+`git config` with an unquoted `*`, `?` or `[`; such a command gets `RETRY` at best. The record of
+every Bash call carries the decision's code, such as
 `program:mkdir`, `redirect`, `expansion` or `unlisted`, and for a denied call the part that
 decided it. A worktree, branch or work-capture part never decides an `END`: the record names the
 first other signal, or the code `multi-line` and the first line when worktree or branch commands
@@ -174,11 +182,17 @@ labels too. The session-memory disclosure is judged per sentence: a Yes, choice 
 remembered, saved, stored or kept, or that holds for, to or through the rest of this session,
 counts in either word order, and so does such a phrase, or a memory verb scoped to this session,
 in the Yes option's own description, the segment right after its label. A negation such as not,
-never, nothing or a contraction, a scope of this request, a last pick before the subject that
-names No, or a `/zensu:delivery-route` mention before the phrase refuses the match, while
-"won't be asked again" still counts. After a memory verb only the words up to the session it
-names are judged, and a phrase before its subject also needs the rest of the subject's clause to
-be affirmative. Its
+never, nothing or a contraction, a single-request scope (this, that, the or one request, while
+each or every request spans the session), a last pick before the subject that names No, or a
+`/zensu:delivery-route` mention before the phrase refuses the match, while "won't be asked
+again" still counts. After a memory verb only the words up to the session it names are judged,
+and a phrase before its subject also needs the rest of the subject's clause to be affirmative. A
+rest-of-the-session phrase that opens its clause, or that only punctuation or a conjunction
+separates from its subject, also needs the clause after it not to negate a verb that keeps the
+choice, such as remembered, kept, recorded, applies, holds, stays or carries over, so "Your
+answer, for the rest of this session, is not remembered." fails, while "If you pick Yes, for the
+rest of this session I will not ask again." and "Your choice holds, for the rest of this session,
+unless /zensu:delivery-route changes it." count. Its
 `autopilot_option` var says whether the injected line offers Autopilot: `offered` also requires the
 Autopilot label, the branch push and pull request and the gh or glab CLI, and `absent` fails a
 question that offers Autopilot anyway. The ask scenario sets `absent`, because the capture runs with
@@ -241,7 +255,13 @@ silent under `eval-config.json`, and runs the provider dry.
   task without it" when nothing beside the capture call carries a signal: the call never runs and is
   not graded, while a write bundled with it still ends the run. Two of the other three bundled a host
   rule's worktree setup with reads on one line, which the probe now answers as `SETUP` as well; the
-  third added a `git config` call, which the probe does not list as a read, so it still ends the run.
+  third added a `git config --get` call, which the probe now proves as a read, so that line gets
+  `SETUP` too. Two of twelve later attended runs ended on a read-only inspection, a version query
+  or a `git config` read, before any route question, so neither decides a run any more: `git config`
+  reads, `git --version` and `node --version` run as proven reads, and a version query of another
+  program named without a path, whose only argument is `--version` or, for npm, npx, pnpm and yarn,
+  `-v`, is denied with `RETRY` and never runs. A path-named program, and a write or run program
+  with `-v` or with a version flag beside other arguments, still end the run.
 - **The other enabled plugins are switched off through `--settings`.** That `enabledPlugins` in a
   `--settings` file overrides the user's settings is an assumption until a live run shows no other
   plugin's skills or hooks in the transcript.

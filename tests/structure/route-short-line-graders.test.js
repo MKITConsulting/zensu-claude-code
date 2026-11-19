@@ -19,6 +19,7 @@ const DISCLOSURES = 'A Yes is remembered for the rest of this session, later app
 const AUTOPILOT_DISCLOSURE = 'Autopilot plans with its own approval, then pushes a branch and opens a pull request unattended, and needs an authenticated gh or glab CLI.';
 const COMPLETE_ROUTE_QUESTION = `${THREE_OPTION_QUESTION} | ${DISCLOSURES} ${AUTOPILOT_DISCLOSURE}`;
 const COMPLETE_TWO_OPTION_QUESTION = `${ROUTE_QUESTION} | ${DISCLOSURES}`;
+const PER_OPTION_QUESTION = 'Route | Run the Zensu workflow for this change? | Yes — Zensu workflow (Recommended) | Runs /zensu:build. Applies for the rest of this session, later approved plans included, through one Bash call you may be asked to allow. | No — implement directly | Decides this request only and is not remembered. /zensu:delivery-route changes the session route.';
 const TRIAGE = 'Is the code already built? Is there a plan or spec document? Does the plan hold unbuilt items?';
 const ATTESTED = { init_git: true, tracked_clean: true };
 const LIVE = { root: '/plugin', version: '0.25.0', silent_hooks: 6, leaks: 0, control_chars: 5690 };
@@ -361,7 +362,8 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'zensu ai-work bind --product p --confirm > out.txt' }, 'END'],
     ['Bash', { command: 'git status && git branch -a && git worktree list && find . -type f -print | sort | head' }, 'SETUP'],
     ['Bash', { command: 'echo "dir=$(git rev-parse --git-dir)" && git worktree add w -b b' }, 'SETUP'],
-    ['Bash', { command: 'git worktree add w -b b && git config --get core.excludesfile' }, 'END'],
+    ['Bash', { command: 'git worktree add w -b b && git config --get core.excludesfile' }, 'SETUP'],
+    ['Bash', { command: 'git worktree add w -b b && git config core.excludesfile x' }, 'END'],
     ['Bash', { command: 'git worktree add w -b b && rm -rf src' }, 'END'],
     ['Bash', { command: 'git status && git branch -a | sort\nrm -rf src' }, 'END'],
     ['Bash', { command: 'git -C . status' }, 'ALLOW'],
@@ -465,7 +467,7 @@ test('the probe reads a Bash command it cannot prove for signals, and names the 
   assert.deepEqual(probe.bashVerdict('git status && git worktree list'), { decision: 'SETUP', code: 'setup', part: '' });
   assert.deepEqual(probe.bashVerdict('node /h/hooks/lib/ai-work-capture-v1.js preflight'), { decision: 'SETUP', code: 'capture', part: '' });
   assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git worktree list && cat .gitignore | sort'), { decision: 'SETUP', code: 'setup', part: 'git worktree add w -b b' });
-  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git config --get core.excludesfile'), { decision: 'END', code: 'git:config', part: 'git config --get core.excludesfile' });
+  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git config core.excludesfile x'), { decision: 'END', code: 'git:config', part: 'git config core.excludesfile x' });
   assert.deepEqual(probe.bashVerdict('git status\ngit checkout -b feat'), { decision: 'END', code: 'multi-line', part: 'git status' });
   assert.deepEqual(probe.bashVerdict("node /h/hooks/lib/ai-work-capture-v1.js preflight && sed -i 's/5/6/' src/cart.js"), { decision: 'END', code: 'program:sed', part: 'sed -i s/5/6/ src/cart.js' });
   assert.deepEqual(probe.bashVerdict('export H=/h/hooks/lib/ai-work-capture-v1.js; node "${H}" preflight'), { decision: 'SETUP', code: 'capture', part: '' });
@@ -719,6 +721,129 @@ test('the second reading ends every write, run and route command the review trie
   assert.equal(probe.bashVerdict('cat <<< "$(rm -rf src)"').code, 'program:rm');
   assert.equal(probe.bashVerdict('git -c core.fsmonitor=x status').code, 'git:-c');
   assert.equal(probe.bashVerdict('[[ -f package.json ]] && cat package.json').decision, 'RETRY');
+});
+
+test('the probe never decides a run on a read-only inspection, and a write, run or route record beside one still ends it', () => {
+  const allowed = [
+    'git config --get core.excludesfile',
+    'git config user.name',
+    'git config --global --get user.email',
+    'git config --get-all include.path',
+    "git -C . config --get-regexp 'remote\\..*\\.url'",
+    'git config --list --show-origin',
+    'git --no-pager config -l',
+    'git config get --all remote.origin.url',
+    'git config list --global --name-only',
+    'git config --type=bool --get core.bare',
+    'git config -f .gitmodules --get-regexp path',
+    'git config --blob HEAD:.gitmodules --list',
+    'git --version',
+    'git version',
+    'node --version && git config --get user.name 2>/dev/null || true',
+    'git config --get core.excludesfile | head -1',
+  ];
+  const unproven = [
+    'python3 --version',
+    'npx --version',
+    'npx -v',
+    'docker --version',
+    'sed --version',
+    'node --version && npm --version && npx --version',
+    'which python3 && python3 --version',
+    'git config --file "$HOME/.gitconfig" --get user.name',
+  ];
+  const decisive = [
+    'git config user.name Jane',
+    'git config --global user.email x',
+    'git config --add core.x y',
+    'git config --unset user.name',
+    'git config --unset-all user.name',
+    'git config --replace-all user.name x',
+    'git config --edit',
+    'git config -e',
+    'git config edit',
+    'git config set user.name x',
+    'git config unset user.name',
+    'git config --rename-section a b',
+    'git config -f - --list',
+    'git config --file=- --list',
+    'git config --get --edit user.name',
+    'git config --get user.name > name.txt',
+    'git -c core.pager=less config --list',
+    '/usr/bin/python3 --version',
+    './scripts/setup.sh --version',
+    'python3 --version --verbose',
+    'python3 -v',
+    'npx --version prettier',
+    'npx -v prettier',
+    'python3 --version && rm -rf src',
+    'git config --get user.name && touch x',
+    'node --version; node -e 1',
+    'git config --get user.name && bash /p/hooks/lib/zensu-delivery-route.sh --direct',
+  ];
+  for (const command of allowed) assert.equal(probe.bashDecision(command), 'ALLOW', command);
+  for (const command of unproven) assert.equal(probe.bashDecision(command), 'RETRY', command);
+  for (const command of decisive) assert.equal(probe.bashDecision(command), 'END', command);
+  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git config --get core.excludesfile'), { decision: 'SETUP', code: 'setup', part: '' });
+  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && python3 --version'), { decision: 'SETUP', code: 'setup', part: 'git worktree add w -b b' });
+  assert.deepEqual(probe.bashVerdict('python3 --version'), { decision: 'RETRY', code: 'unlisted', part: 'python3 --version' });
+  assert.deepEqual(probe.bashVerdict('git config --unset user.name'), { decision: 'END', code: 'git:config', part: 'git config --unset user.name' });
+});
+
+test('the probe reads a git config command word by word as the shell does, so no quoted, escaped, commented, expanded or misplaced value runs as a read', () => {
+  const decisive = [
+    'git config --global user.name ""',
+    "git config --global user.email ''",
+    'git config user.name " "',
+    'git config user.name "x --get"',
+    'git config user.name Jane\\ --list',
+    'git config --global alias.br "branch --list"',
+    'git config --global user.name Jane # check: git config --list',
+    'git config user.name Jane\u00a0--list',
+    'git config --global user.name --show-origin',
+    'git config --global user.name --list',
+    'git config user.email --get',
+    'git config user.name --global',
+    'git config user.name \\2>/dev/null',
+    'git config user.name "2">/dev/null',
+    "git config user.name ''2>/dev/null",
+    'git config user.name \\2>&1',
+    'git config -f /dev/stdin --list',
+    'git config --file=/dev/fd/0 --list',
+    'git config -f /proc/self/fd/0 --list',
+    'git config --file=/proc/self/fd/0 --list',
+    'git config -f //dev/stdin --list',
+    'git config -f ../../dev/stdin --list',
+    'git worktree add w -b b && git config user.name ""',
+  ];
+  const unproven = [
+    'git config {user.name,Jane}',
+    'git config user.name{,}',
+    'git config *.json',
+    'git config ?.json',
+    'git config [ab].json',
+    'find . {-delete,-print}',
+    'find . {-delete,{x}}',
+    'git diff {--output=x,HEAD}',
+    'git config {a..b}.x',
+    'ls src/{a,b}.js',
+    'git config core.excludesfile 0</dev/null',
+  ];
+  const allowed = [
+    'git config get user.name --show-origin',
+    'git config core.excludesfile 2>/dev/null',
+    'git config core.hooksPath 2>/dev/null || echo none',
+    'grep -nE "a{2,}" src/cart.js',
+    "grep -n 'foo.*bar' src/cart.js",
+    'find . -name "{a,b}"',
+    'git diff --stat HEAD@{1} HEAD',
+    'git log --oneline HEAD@{1}..HEAD@{2}',
+  ];
+  for (const command of decisive) assert.equal(probe.bashDecision(command), 'END', command);
+  for (const command of unproven) assert.equal(probe.bashDecision(command), 'RETRY', command);
+  for (const command of allowed) assert.equal(probe.bashDecision(command), 'ALLOW', command);
+  assert.deepEqual(probe.bashVerdict('git config --global user.name ""'), { decision: 'END', code: 'git:config', part: 'git config --global user.name ' });
+  assert.deepEqual(probe.bashVerdict('git worktree add w -b b && git config user.name ""'), { decision: 'END', code: 'git:config', part: 'git config user.name ' });
 });
 
 test('the probe flattens a question into one bounded line', () => {
@@ -1048,9 +1173,8 @@ test('route-question-complete scores a route question by its labels and disclosu
   const holds = ['If you pick Yes, it applies for the rest of this session, including plans you approve later.', "Pick Yes and you won't be asked again for the rest of this session.", 'Your choice holds for the rest of the session.', 'A Yes is remembered for the rest of this session.', 'It applies for the rest of this session if you pick Yes.', 'Your choice applies to the rest of the session.', 'If you pick No, nothing is recorded, and if you pick Yes, your choice is remembered for the rest of this session.', 'A Yes is remembered for this session until /zensu:delivery-route changes it.', 'A Yes is remembered for this session but not across sessions.', "You won't need to choose again: your choice is remembered for the rest of this session."];
   const lacks = ['Your answer applies to this request, not the rest of the session.', 'If you pick Yes, the workflow runs for this request.', 'Yes runs the workflow. The rest of this session is unchanged.', 'A Yes does not carry over for the rest of this session.', "Your choice doesn't apply to the rest of the session.", "Your answer won't apply to the rest of this session.", 'Your answer decides this request only and does not apply to the rest of the session.', 'Pick Yes or No; /zensu:delivery-route changes the route for the rest of the session.', 'Your answer applies to this request only and is not remembered.', 'If you pick No, your choice is kept for this request only.', 'A Yes is remembered only for this request.', 'Nothing is remembered for this session.', 'If you pick No, nothing is stored for this session.', 'Pick Yes or No, and /zensu:delivery-route changes the route for the rest of the session.', 'Run the Zensu workflow for this change? Yes — Zensu workflow | No — implement directly; the rest of this session keeps asking.', 'Decides this request only — for the rest of the session your answer is not stored.', 'For the rest of this session, your answer is not remembered.', 'Run the Zensu workflow? | Yes — Zensu workflow | No — implement directly (asks again for the rest of this session)', 'Pick Yes — Zensu workflow or No — implement directly | Asks again for the rest of this session.', 'Run the Zensu workflow? | Yes — Zensu workflow | Runs /zensu:build. | No — implement directly | Asks again for the rest of this session.', 'If you pick No, your choice is remembered for the rest of this session.', 'If you answer No, your choice is stored for this session.', 'Neither answer is saved for this session.', 'Your choice is kept for none of the later requests.', 'Nor is your choice kept for the rest of this session.'];
   assert.deepEqual([...holds, ...lacks].map((t) => remembered.test(t)), [...holds.map(() => true), ...lacks.map(() => false)]);
-  const perOption = 'Route | Run the Zensu workflow for this change? | Yes — Zensu workflow (Recommended) | Runs /zensu:build. Applies for the rest of this session, later approved plans included, through one Bash call you may be asked to allow. | No — implement directly | Decides this request only and is not remembered. /zensu:delivery-route changes the session route.';
-  const perOptionMissing = (replacement) => route.missing(perOption.replace('Applies for the rest of this session', replacement), false);
-  assert.deepEqual(route.missing(perOption, false), []);
+  const perOptionMissing = (replacement) => route.missing(PER_OPTION_QUESTION.replace('Applies for the rest of this session', replacement), false);
+  assert.deepEqual(route.missing(PER_OPTION_QUESTION, false), []);
   for (const replacement of ['Remembered for this session', 'Remembered for this session — /zensu:delivery-route changes it']) assert.deepEqual(perOptionMissing(replacement), []);
   for (const replacement of ['Not for the rest of this session', '/zensu:delivery-route changes the route for the rest of this session', 'The rest of this session is unchanged', 'Nothing is remembered for this session', 'Does not run /zensu:build for the rest of this session']) assert.deepEqual(perOptionMissing(replacement), ['a Yes is remembered for the session']);
   assert.deepEqual(route.missing(`${ROUTE_QUESTION} | A Yes runs the workflow, later approved plans included, through one Bash call you may be asked to allow. A No decides this request only and is not remembered. /zensu:delivery-route changes the route saved for this session.`, false), ['a Yes is remembered for the session']);
@@ -1069,6 +1193,67 @@ test('route-question-complete scores a route question by its labels and disclosu
   assert.equal(grade('route-question-complete', afterEnd, offered).reason, 'no route question was asked; nothing to check');
   const toolAfterEnd = output({ probe: [{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:build' }, { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }] });
   assert.equal(passes('route-question-complete', toolAfterEnd, offered), true);
+});
+
+test('the session-memory needle reads each or every request as the session, and a rest-of-the-session phrase before its own verb by that verb', () => {
+  const route = require(path.join(EVAL, 'assertions', 'route-question-complete.js'));
+  const remembered = route.NEEDLES.find(([name]) => name === 'a Yes is remembered for the session')[1];
+  const holds = [
+    'A Yes is remembered for every request in this session.',
+    'Your choice is kept for each request in this session.',
+    'Your answer, for the rest of this session, is remembered.',
+    'If you pick Yes, for the rest of this session the workflow runs without asking again.',
+    'Your choice — for the rest of this session — holds.',
+    'A Yes (for the rest of this session) is remembered.',
+    'Pick Yes, and for the rest of this session it is remembered.',
+    'Your choice, for the rest of this session, holds, not just for this request.',
+    'Your choice applies for the rest of this session, not only to this request.',
+    'If you pick Yes, for the rest of this session I will not ask again.',
+    'Your choice holds, for the rest of this session, unless /zensu:delivery-route changes it.',
+    'Your answer applies, for the rest of this session, not just to this request.',
+    'Your choice, for the rest of this session, holds until /zensu:delivery-route changes it.',
+    'A Yes (for the rest of this session) holds until /zensu:delivery-route changes it.',
+    'Your choice for the rest of this session holds until /zensu:delivery-route changes it.',
+    'Your choice, for the rest of this session, is kept and not asked for again.',
+    'If you pick Yes, for the rest of this session you will not be asked again and it applies.',
+    'Your choice applies for the rest of this session, and it does not carry over to later sessions.',
+    'If you pick Yes, for the rest of this session it applies, while a No is not remembered.',
+  ];
+  const lacks = [
+    'A Yes is remembered for one request.',
+    'Your choice is kept for that request only.',
+    'Your answer, for the rest of this session, is not remembered.',
+    'Your answer for the rest of this session is not remembered.',
+    'Your answer — for the rest of this session — is not remembered.',
+    'Your choice (for the rest of the session) is not saved.',
+    'Pick Yes, and for the rest of this session it is not remembered.',
+    'Pick Yes, but for the rest of this session it is not remembered.',
+    'Pick Yes, so for the rest of this session it is not stored.',
+    'Pick Yes, then for the rest of this session it is never saved.',
+    'Your choice, for the rest of this session, is not kept.',
+    'Your choice, for the rest of this session, is not recorded.',
+    'Your choice, for the rest of this session, does not apply.',
+    'Your choice, for the rest of this session, no longer holds.',
+    'Your choice, for the rest of this session, does not carry over.',
+    "Your answer, for the rest of this session, won't be remembered.",
+    'Your choice, for the rest of this session, is not held.',
+    'Your choice, for the rest of this session, does not last.',
+    'Your choice, for the rest of this session, does not stay.',
+    'Your choice, for the rest of this session, does not remain.',
+    'Your choice, for the rest of this session, does not persist.',
+    'Pick Yes, but for the rest of this session Zensu never keeps it.',
+    'Pick Yes, but for the rest of this session Zensu never remembers it.',
+  ];
+  assert.deepEqual([...holds, ...lacks].map((t) => remembered.test(t)), [...holds.map(() => true), ...lacks.map(() => false)]);
+  const disclosed = 'A Yes is remembered for the rest of this session,';
+  const everyRequest = COMPLETE_TWO_OPTION_QUESTION.replace(disclosed, 'A Yes is remembered for every request in this session,');
+  const setOff = COMPLETE_TWO_OPTION_QUESTION.replace(disclosed, 'Your answer, for the rest of this session, is not remembered,');
+  assert.deepEqual([everyRequest, setOff].map((t) => t === COMPLETE_TWO_OPTION_QUESTION), [false, false]);
+  assert.deepEqual(route.missing(everyRequest, false), []);
+  assert.deepEqual(route.missing(setOff, false), ['a Yes is remembered for the session']);
+  const perOptionMissing = (replacement) => route.missing(PER_OPTION_QUESTION.replace('Applies for the rest of this session', replacement), false);
+  for (const replacement of ['For the rest of this session, until /zensu:delivery-route changes it', 'For the rest of this session it stays on until /zensu:delivery-route changes it']) assert.deepEqual(perOptionMissing(replacement), [], replacement);
+  assert.deepEqual(perOptionMissing('For the rest of this session, it is not remembered'), ['a Yes is remembered for the session']);
 });
 
 test('route-question-ranked requires the recommended option first and the only one marked', () => {

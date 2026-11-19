@@ -6,13 +6,16 @@ const SUBJECT = /\b(?:yes|choice|answer)\b/gi;
 const MEMORY = /\b(?:remember(?:ed)?|saved|stored|kept)\b/gi;
 const DURATION = /\b(?:for|to|through|throughout|during|over)\s+the\s+rest\s+of\s+(?:this|the)\s+session\b/gi;
 const SESSION_SCOPE = /\b(?:this|the)\s+session\b/i;
-const REQUEST_SCOPE = /\b(?:this|that|the|each|every|one)\s+request\b/i;
+const REQUEST_SCOPE = /\b(?:this|that|the|one)\s+request\b/i;
 const NEGATION = /\b(?:not|never|cannot|no longer|nothing|none|neither|nor|rather than|instead of)\b|n['’]t\b/i;
 const ASKED_AGAIN = /\b(?:won['’]t|will not|isn['’]t|is not|not|never)\s+(?:be\s+)?asked\s+again\b/gi;
 const PICK = /\b(?:pick|picks|choose|chooses|select|selects|answer|answers|say|says)\s+[*_"'“‘]*(yes|no)\b/gi;
 const ROUTE_CHANGE = /\/zensu:delivery-route\b/i;
 const CLAUSE_BREAK = /[,;]|:(?=\s|$)/;
 const LABEL_LEAD = /^[\s*_`"'“”‘’>•-]+/;
+const LEAD_ONLY = /^\W*(?:(?:and|but|so|then)\b\W*)*$/i;
+const CLOSING = /^[^\w/]+/;
+const HOLDING = /\b(?:remember(?:s|ed)?|sav(?:e|es|ed)|stor(?:e|es|ed)|keeps?|kept|record(?:s|ed)?|appl(?:y|ies|ied)|holds?|held|carr(?:y|ies|ied)|lasts?|stays?|remains?|persists?)\b/i;
 const GAP = 80;
 
 function affirmative(span) {
@@ -39,6 +42,17 @@ function unblocked(sentence, predicate) {
   return affirmative(clauseBefore(sentence, predicate.start)) && !ROUTE_CHANGE.test(sentence.slice(0, predicate.start));
 }
 
+function negatesHolding(clause) {
+  const text = clause.replace(ASKED_AGAIN, ' ');
+  const negation = NEGATION.exec(text);
+  return Boolean(negation) && HOLDING.test(text.slice(negation.index));
+}
+
+function settled(sentence, duration) {
+  const lead = clauseBefore(sentence, duration.start).split(SUBJECT).pop();
+  return !LEAD_ONLY.test(lead) || !negatesHolding(sentence.slice(duration.end).replace(CLOSING, '').split(CLAUSE_BREAK)[0]);
+}
+
 function memoryHolds(sentence, memory) {
   const after = clauseAfter(sentence, memory.end);
   return unblocked(sentence, memory) && affirmative(after.split(SESSION_SCOPE)[0]) && !REQUEST_SCOPE.test(after);
@@ -62,7 +76,7 @@ function startsWith(segment, label) {
 function disclosesYes(sentence, tied) {
   const subjects = spans(SUBJECT, sentence).filter((s) => !pickedNo(sentence, s));
   const memories = spans(MEMORY, sentence).filter((m) => memoryHolds(sentence, m));
-  const durations = spans(DURATION, sentence).filter((d) => unblocked(sentence, d));
+  const durations = spans(DURATION, sentence).filter((d) => unblocked(sentence, d) && settled(sentence, d));
   const predicates = [...memories, ...durations];
   if (subjects.some((s) => predicates.some((p) => joined(sentence, s, p)))) return true;
   return tied && (durations.length > 0 || memories.some((m) => SESSION_SCOPE.test(clauseAfter(sentence, m.end))));
