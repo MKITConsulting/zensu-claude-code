@@ -497,7 +497,30 @@ specified in `skills/autopilot/rules/conventions.md`.
     review presence from it, and a work-order run's review import uses it to recognize a review an
     earlier attempt published (`skills/work/references/protocol.md`). Tests N12-N14c and LV28 in
     `test-vcs-publish.sh`, GL56 and GL57 in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
-    Known gap (follow-up): no fake-backed check drives the GitHub listing.
+    RM1-RM1c, RM2-RM2s and RM11 in `test-vcs-publish.sh` guard its fixture and its fake `gh`, the
+    model in `tests/structure/lib-fake-gh-graphql.js` that `test-vcs-review-marker-reconcile.sh`
+    also answers its GraphQL listing with; RM3-RM10 drive the GitHub listing against that fake,
+    RM10 over a pull request without reviews, and RM11 the inventory fetch `--reconcile-review`
+    shares. The fake is modelled on gh 2.101.0 and serves one pull request, `acme/widget#42`, read
+    from the variables the query binds to `repository(owner:, name:)` and `pullRequest(number:)`;
+    any other one fails with GitHub's not-found message. It checks the `String` and `Int`
+    variables of an anonymous query the way GitHub does and fails with gh's message: first a
+    variable declared but unused or used but undeclared, then, once the declarations hold, a value
+    of the wrong type or a missing non-null value, such as a `num` sent with `-f` or left out,
+    printing every problem of that phase on its own line. `-F` types `true`, `false`, `null` and
+    an integer within 64 bits as gh does. It serves only the fields the query selects in `nodes`
+    and `pageInfo`. `--paginate --slurp` prints one array of pages, `--paginate` alone prints them
+    back to back, and the next page is requested only while the served page carries
+    `hasNextPage: true` and a non-empty `endCursor`; the fake serves the page after that cursor
+    when the query passes it to `after:$endCursor`. Flags may precede the endpoint. Once the pull
+    request resolves, the `reviews` connection needs a `first` from 0 to 100: without `first` or
+    `last`, with both, or with a `first` out of that range the fake fails with GitHub's message,
+    as GitHub does. A call outside that model exits 2 and names the call on stderr: another
+    subcommand or endpoint, an unknown flag, an `@file` value, a named operation, a default value,
+    a list type or another variable type, a query that leaves that path or selects beside it, a
+    field the fixture lacks, `last` alone, a variable `first` or another `reviews` argument, a
+    `first` below the size of a served page, a `before` cursor with a value on any page, a
+    cursor the fixture lacks, or a paging query whose cursor never advances.
   - `pilot`: detection, PR lookup, review state, thread count and PR creation go through
     `--detect`, `--locate-pr`, `--review-summary`, `--review-markers`, `--fetch-threads` and
     `--open-pr`.
