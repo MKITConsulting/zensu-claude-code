@@ -197,9 +197,11 @@ set `ZENSU_VCS_REMOTE` for a verb given `--repo-id`, because a verb without one 
 work tree, where gh reads the same remotes. It names
 `git config --global --add safe.directory <path>` only as a decision for the user, not for an
 agent, because that command changes the global git configuration and widens which repositories
-git trusts. Without git installed, the refusal names installing git instead. A remote that git
-lists but that has no URL, such as a `remote.<name>.prune` setting in the global git
-configuration, takes no part in the agreement of the remotes. A remote URL that yields no host
+git trusts. Without git installed, the refusal names installing git instead. A remote that
+`git remote` lists but `git remote get-url` refuses, such as one that only the global git
+configuration names (git answers `get-url` only for a remote of the repository's own
+configuration, even when the global one gives it a URL), takes no part in the agreement of the
+remotes. A remote URL that yields no host
 is refused as naming no GitHub host before ssh or gh runs, whatever login gh holds: a local path,
 a `file://` URL in any letter case, with or without a host part, and a Windows drive-letter path
 (a letter in either case, a colon, then a slash or a backslash). A one-letter SSH alias before a
@@ -245,12 +247,13 @@ keeps its classification and its `gh auth status` readiness check.
   login for the name the URL parse once produced, `HD29h` and `HD29i` do so for a capitalized
   scheme and a lowercase drive letter, `HD29g` keeps a one-letter alias before a relative path an
   SSH remote, and `HD29j` requires the ways past the no-host refusal; `HD33b` and `HD33c` give a
-  remote without a URL no part in the agreement; `HD34c` requires the remedies of the
-  unreadable-remotes refusal and leaves the `safe.directory` exception to the user, `HD34d` its
-  untranslated git diagnostic, and `HD34g` and `HD34h` only the first line of that diagnostic for
-  a work tree git treats as owned by another account, never the exception command git prints
-  after it; `HD34e` and `HD34f` require the missing-git refusal, which names no git configuration
-  remedy; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9` in `test-vcs-publish.sh` and
+  remote that only the global git configuration names no part in the agreement; `HD34c` requires
+  the remedies of the unreadable-remotes refusal and leaves the `safe.directory` exception to the
+  user, and `HD34d` its untranslated git diagnostic, through a git shim that marks every call made
+  outside the C locale (`HD34i` shows the shim marks such a call); `HD34g` shows that git refuses a work tree it treats as owned by another
+  account with a diagnostic of more than one line that ends in the exception command, and `HD34h`
+  requires the refusal to carry only the first line, never that command; `HD34e` and `HD34f`
+  require the missing-git refusal, which names no git configuration remedy; `HP1`-`HP20b` in `test-vcs-pr-ops.sh`, `HS1`-`HS9` in `test-vcs-publish.sh` and
   `HR1`-`HR5` in `test-vcs-review-marker-reconcile.sh` run every GitHub verb under
   `GH_HOST=example.invalid`, against a github.com remote, a GitHub Enterprise remote gh is
   logged in to and one it is not. The GitHub Enterprise run of every GitHub verb sets all four

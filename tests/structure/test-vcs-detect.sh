@@ -611,7 +611,19 @@ hd_repo "$HD/global-none"
 hd_run_in "$HD/global-none" GIT_CONFIG_GLOBAL="$HD/global-origin.cfg"
 hd_host "HD33c a remote only the global git config names is no remote, so the work tree reads as github.com" github.com
 hd_repo "$HD/unreadable" && printf '[remote "origin"\n\turl = https://ghe.example.com/acme/widget.git\n' >> "$HD/unreadable/.git/config"
-hd_run_in "$HD/unreadable" FAKE_GH_LOGINS=ghe.example.com
+mkdir -p "$HD/locale-bin"
+{ cat <<'SHIM'
+#!/bin/sh
+case " $* " in
+  *" remote "*) [ "${LC_ALL:-}" = C ] || printf 'zensu-test: git ran outside the C locale\n' >&2 ;;
+esac
+SHIM
+printf 'exec "%s" "$@"\n' "$(command -v git)"; } > "$HD/locale-bin/git" && chmod +x "$HD/locale-bin/git"
+HD_MARK="$(cd "$HD/unreadable" && LC_ALL=POSIX "$HD/locale-bin/git" -C . remote 2>&1 >/dev/null | head -n 1)"
+[ "$HD_MARK" = "zensu-test: git ran outside the C locale" ] \
+  && check "HD34i the locale shim marks a git remote call made outside the C locale" PASS \
+  || check "HD34i the locale shim marks a git remote call made outside the C locale (got='$HD_MARK')" FAIL
+hd_run_in "$HD/unreadable" FAKE_GH_LOGINS=ghe.example.com LC_ALL=POSIX PATH="$HD/locale-bin:$HD/bin:$PATH"
 hd_refused "HD34 a work tree whose remotes git cannot read is refused instead of read as github.com" "git cannot read the remotes"
 { [ "$HD_RC" -ne 0 ] && [ -z "$HD_SSH" ] && [ -z "$HD_CONFIG" ]; } && check "HD34b the unreadable work tree reaches neither ssh nor gh" PASS \
   || check "HD34b the unreadable work tree reaches neither ssh nor gh (ssh='$HD_SSH' config='$HD_CONFIG')" FAIL
@@ -624,9 +636,9 @@ done
   && check "HD34c that refusal names its remedies and leaves a safe.directory exception to the user" PASS \
   || check "HD34c that refusal names its remedies and leaves a safe.directory exception to the user (err='$HD_ERR')" FAIL
 HD_GITDIAG="$(cd "$HD/unreadable" && LC_ALL=C git -C . remote 2>&1 >/dev/null | head -n 1)"
-{ [ -n "$HD_GITDIAG" ] && case "$HD_ERR" in *"($HD_GITDIAG)"*) true ;; *) false ;; esac; } \
-  && check "HD34d that refusal relays the first line of the untranslated git diagnostic" PASS \
-  || check "HD34d that refusal relays the first line of the untranslated git diagnostic (git='$HD_GITDIAG' err='$HD_ERR')" FAIL
+{ [ -n "$HD_GITDIAG" ] && case "$HD_ERR" in *"outside the C locale"*) false ;; *"($HD_GITDIAG)"*) true ;; *) false ;; esac; } \
+  && check "HD34d that refusal relays the first line of the untranslated git diagnostic, also for a caller outside the C locale" PASS \
+  || check "HD34d that refusal relays the first line of the untranslated git diagnostic, also for a caller outside the C locale (git='$HD_GITDIAG' err='$HD_ERR')" FAIL
 mkdir -p "$HD/nogit-bin" && printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v node)" > "$HD/nogit-bin/node" && chmod +x "$HD/nogit-bin/node"
 HD_OUT="$(cd "$HD/agree" && env -i PATH="$HD/nogit-bin" HOME="$HOME" "$BASH_ABS" -c 'source "$1" && _zensu_vcs_gh_host' _ "$LIB" 2>"$HD/err")"
 HD_RC=$?; HD_ERR="$(cat "$HD/err")"
@@ -640,12 +652,14 @@ hd_repo "$HD/foreign" && git -C "$HD/foreign" remote add origin https://ghe.exam
 HD_FOREIGN=(HOME="$HD/foreign-home" XDG_CONFIG_HOME="$HD/foreign-home/.config" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1)
 HD_GITDIAG="$(cd "$HD/foreign" && env "${HD_FOREIGN[@]}" LC_ALL=C git -C . remote 2>&1 >/dev/null)"
 HD_FIRST="$(printf '%s\n' "$HD_GITDIAG" | head -n 1)"
-{ [ "$(printf '%s\n' "$HD_GITDIAG" | grep -c .)" -ge 2 ] && case "$HD_FIRST" in *"detected dubious ownership"*) true ;; *) false ;; esac; } \
-  && check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line" PASS \
-  || check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line (git='$HD_GITDIAG')" FAIL
+HD_EXC="$(printf '%s\n' "$HD_GITDIAG" | grep . | tail -n 1 | sed 's/^[[:space:]]*//')"
+{ [ "$(printf '%s\n' "$HD_GITDIAG" | grep -c .)" -ge 2 ] && case "$HD_FIRST" in *"detected dubious ownership"*) true ;; *) false ;; esac \
+  && case "$HD_EXC" in "git config --global --add safe.directory "?*) true ;; *) false ;; esac; } \
+  && check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line that ends in the exception command" PASS \
+  || check "HD34g git refuses a work tree it treats as owned by another account with a diagnostic of more than one line that ends in the exception command (git='$HD_GITDIAG')" FAIL
 hd_run_in "$HD/foreign" "${HD_FOREIGN[@]}" FAKE_GH_LOGINS=ghe.example.com
-{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -n "$HD_FIRST" ] && [ "$(printf '%s\n' "$HD_ERR" | grep -c .)" = 1 ] \
-  && case "$HD_ERR" in *"To add an exception"*) false ;; *"git cannot read the remotes of this work tree ($HD_FIRST)"*) true ;; *) false ;; esac; } \
+{ [ "$HD_RC" -ne 0 ] && [ -z "$HD_OUT" ] && [ -n "$HD_FIRST" ] && [ -n "$HD_EXC" ] && [ "$(printf '%s\n' "$HD_ERR" | grep -c .)" = 1 ] \
+  && case "$HD_ERR" in *"To add an exception"*|*"$HD_EXC"*) false ;; *"git cannot read the remotes of this work tree ($HD_FIRST)"*) true ;; *) false ;; esac; } \
   && check "HD34h that work tree is refused with only the first line of the diagnostic, never the exception command git prints after it" PASS \
   || check "HD34h that work tree is refused with only the first line of the diagnostic, never the exception command git prints after it (rc=$HD_RC err='$HD_ERR')" FAIL
 hd_repo "$HD/ceiling" && mkdir -p "$HD/ceiling/sub" && git -C "$HD/ceiling" remote add origin https://ghe.example.com/acme/widget.git
