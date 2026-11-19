@@ -100,9 +100,11 @@ it. The line it suggests is that path anchored at the work tree's top, `/` plus 
 that name at any depth; a spelling with a control character gets no line. When no directory
 qualifies, and for a run directory that is itself the top of a work tree, which that tree cannot
 ignore, the refusal names `RUN_ROOT`, `.zensu/verify-feature-runs/` at the top of the project's
-work tree, and says whether git ignores it (`runRootRemedy`, which the `.git` refusal shares). It
-therefore never asks to ignore the project root, a directory that holds it, or a directory with a
-tracked file. Every check-ignore probe, the store placement and `runRootRemedy` included, goes
+work tree, and says whether git ignores it; for a project outside git it names `RUN_ROOT` in the
+project root, which lies outside git and needs no ignore line (`runRootRemedy`, which the `.git`
+refusal shares). It therefore never asks to ignore the project root, a directory that holds it, or
+a directory with a tracked file, and never names a work tree that a project outside git lacks.
+Every check-ignore probe, the store placement and `runRootRemedy` included, goes
 through `checkIgnore`, which prefixes the spelling with `./`: check-ignore reads a leading `:` as
 pathspec magic, so `:shots/` would be judged as `shots/`, and it refuses `--literal-pathspecs`
 with exit 128.

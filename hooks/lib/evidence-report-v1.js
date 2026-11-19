@@ -1880,7 +1880,7 @@ function checkRunDirectory(given, projectRoot, root, chainRoot = null) {
   const top = evidenceRun.workTreeTop(projectRoot);
   if (top.reason) unavailable(`whether the run directory lies in the project's work tree could not be determined (${top.reason})`);
   const base = top.top || fs.realpathSync.native(projectRoot);
-  if (!isInside(base, real)) refuse(`the run directory must lie inside the project's work tree ${base}`);
+  if (!isInside(base, real)) refuse(top.top === null ? `the run directory must lie inside the project root ${base}, which lies outside git` : `the run directory must lie inside the project's work tree ${base}`);
   if (real === root || isInside(root, real) || isInside(real, root)) {
     refuse('the run directory must not overlap the report store');
   }
@@ -1950,8 +1950,8 @@ function ignoreLine(spelled) {
 }
 
 function runRootRemedy(tree) {
-  const probed = isString(tree) ? checkIgnore(tree, RUN_ROOT) : null;
-  return probed !== null && probed.ok
+  if (!isString(tree)) return `create it under ${RUN_ROOT} in the project root, which lies outside git`;
+  return checkIgnore(tree, RUN_ROOT).ok
     ? `create it under ${RUN_ROOT} at the top of the work tree, which git ignores`
     : `create it under ${RUN_ROOT} at the top of the work tree and have git ignore that directory, for example with the line /${RUN_ROOT} in the repository's .gitignore`;
 }

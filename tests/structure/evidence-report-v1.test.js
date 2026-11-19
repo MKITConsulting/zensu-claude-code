@@ -533,9 +533,7 @@ test('begin accepts only a run directory inside the work tree that git ignores, 
     ok(call(fx, 'begin', { 'run-dir': colon, drivers: 'browser' }, FEATURE));
   }
   const beginRow = fs.readFileSync(path.join(ROOT, 'docs', 'configuration.md'), 'utf8').split('\n').find((line) => line.startsWith('| `--report-begin` |'));
-  assert.match(beginRow, /escap/);
-  assert.match(beginRow, /control character/);
-  assert.match(beginRow, /untracked, unignored file/);
+  assert.ok(beginRow.includes("The refusal suggests an ignore line anchored at the top of the work tree that holds the run directory, with `\\`, `*`, `?` and `[` escaped: for the run directory's parent when it lies below that top, neither is nor holds the project root, and holds nothing git tracks and, unless it is `.zensu/verify-feature-runs/` at the top of that work tree or of the project root, no untracked, unignored file outside the run directory, else for the run directory itself when it neither is nor holds the project root and holds nothing git tracks. When neither qualifies or the spelling holds a control character, which gets no line, and for a run directory inside `.git` or at the top of a work tree, it asks for a run directory under `.zensu/verify-feature-runs/` at the top of the project's work tree and says whether git ignores that directory, or, for a project outside git, under `.zensu/verify-feature-runs/` in the project root, which lies outside git."), beginRow);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git'), drivers: 'browser' }, FEATURE), /^the run directory .+ lies inside \.git; create it under \.zensu\/verify-feature-runs\/ at the top of the work tree, which git ignores$/);
   refused(call(fx, 'begin', { 'run-dir': path.join(fx.root, '.git', 'objects'), drivers: 'browser' }, FEATURE), /lies inside \.git/);
   const store = path.join(fx.root, 'reports');
@@ -591,6 +589,14 @@ test('the run directory is judged by the work tree that holds it, and the refusa
   const captures = path.join(inner, 'captures');
   fs.mkdirSync(captures);
   refused(call(plain, 'begin', { 'run-dir': captures, drivers: 'api' }, FEATURE), /git does not ignore the run directory .+ have git ignore captures\//);
+  const innerSource = path.join(inner, 'src');
+  fs.mkdirSync(innerSource);
+  fs.writeFileSync(path.join(innerSource, 'app.js'), 'export {};\n');
+  git(inner, 'add', 'src/app.js');
+  refused(call(plain, 'begin', { 'run-dir': innerSource, drivers: 'api' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; create it under \.zensu\/verify-feature-runs\/ in the project root, which lies outside git$/);
+  refused(call(plain, 'begin', { 'run-dir': inner, drivers: 'api' }, FEATURE), /^the run directory .+ is the top of a git work tree, which that work tree cannot ignore; create it under \.zensu\/verify-feature-runs\/ in the project root, which lies outside git$/);
+  refused(call(plain, 'begin', { 'run-dir': path.join(inner, '.git'), drivers: 'api' }, FEATURE), /^the run directory .+ lies inside \.git; create it under \.zensu\/verify-feature-runs\/ in the project root, which lies outside git$/);
+  refused(call(plain, 'begin', { 'run-dir': tempDir('elsewhere'), drivers: 'api' }, FEATURE), /^the run directory must lie inside the project root .+, which lies outside git$/);
   ok(call(plain, 'begin', { 'run-dir': plain.runDir, drivers: 'api' }, FEATURE));
   const trail = fixture({ ignore: '.zensu/state/\n.zensu/reviews/\n' });
   refused(call(trail, 'begin', { 'run-dir': trail.runDir, drivers: 'browser' }, FEATURE), /^git does not ignore the run directory .+, so its captures could be committed; have git ignore \.zensu\/verify-feature-runs\/, for example with the line \/\.zensu\/verify-feature-runs\/ in the repository's \.gitignore$/);
