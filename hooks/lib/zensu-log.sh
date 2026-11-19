@@ -2434,15 +2434,16 @@ case "${1:-}" in
     # source is needed here; the redundant one only made this arm look like it had a
     # dependency the sibling verb lacked.
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-    # Both names are cleared HERE as well as inside the verb, and the reason is the
-    # ordering: they decide the stderr assertion below AND gate the reserved
+    # All three names are cleared HERE as well as inside the verb, and the reason is
+    # the ordering: they decide the stderr lines below AND gate the reserved
     # AUTOPILOT_ADOPTED write, while the only other clear lives inside the function a
     # failed `source` would leave undefined. This file runs under `set -u` but not
     # `set -e`, so that failure would fall through with an INHERITED environment still
-    # deciding both. Refusing on a missing verb closes the same hole from the other
-    # side; neither is a demonstrated bypass, and both are one line.
+    # deciding them. Refusing on a missing verb closes the same hole from the other
+    # side; neither is a demonstrated bypass, and both cost a few lines.
     ZENSU_AUTOPILOT_ADOPT_OUTCOME=""
     ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER=""
+    ZENSU_AUTOPILOT_ADOPT_RELOCATION=""
     if ! command -v autopilot_adopt_run >/dev/null 2>&1; then
       echo "zensu-log.sh --autopilot-adopt: the Autopilot state library did not load; no run was adopted" >&2
       exit 2
@@ -2480,10 +2481,22 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-adopt: run $run_val was taken over from ${ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER:-an unrecorded owner}; this session is now its owner." >&2
         ;;
       repaired)
-        echo "zensu-log.sh --autopilot-adopt: this session already owned run $run_val; its owner pointer was missing or named a run that has already finished, and has been reinstalled. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        if [ -n "${ZENSU_AUTOPILOT_ADOPT_RELOCATION:-}" ]; then
+          echo "zensu-log.sh --autopilot-adopt: this session already owned run $run_val; its record was relocated as the next line says, and its owner pointer was written beside it. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        else
+          echo "zensu-log.sh --autopilot-adopt: this session already owned run $run_val; its owner pointer was missing or named a run that has already finished, and has been reinstalled. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        fi
         ;;
       already-owned)
         echo "zensu-log.sh --autopilot-adopt: this session already owns run $run_val and its owner pointer already designates it; ownership was not changed. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        ;;
+    esac
+    case "${ZENSU_AUTOPILOT_ADOPT_RELOCATION:-}" in
+      worktree)
+        echo "zensu-log.sh --autopilot-adopt: run $run_val was relocated: its record, any team-review payload snapshot and any approved-plan copy moved out of the moved working tree into this project's state directory, and the record now names this project as its project root and the moved tree as its working tree; the lines above name each file of the moved tree that was retired or left in place." >&2
+        ;;
+      in-place)
+        echo "zensu-log.sh --autopilot-adopt: run $run_val was relocated in place: its recorded project root no longer held it, and the record now names this project as its project root and its working tree." >&2
         ;;
     esac
     # Gated on the OUTCOME, never on the return code. `_tdd_locked_run` returns 1
