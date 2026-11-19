@@ -850,7 +850,7 @@ if [ "$GH_EMPTY_RC" -eq 0 ] && [ -s "$WORK/gh/empty/calls" ] && [ -f "$WORK/gh/e
 else
   check "RM10 --review-markers on GitHub exits 0 and prints nothing for a pull request without reviews (rc=$GH_EMPTY_RC)" FAIL
 fi
-GH_INVENTORY="$(FAKE_DIR="$WORK/gh/inventory" PATH="$WORK/gh/bin:$PATH" "$BASH_ABS" -c 'source "$1"; _zensu_vcs_review_fetch_inventory github acme/widget 42 "reconcile inventory"' _ "$LIB" 2>/dev/null)"
+GH_INVENTORY="$(FAKE_DIR="$WORK/gh/inventory" PATH="$WORK/gh/bin:$PATH" "$BASH_ABS" -c 'source "$1"; _zensu_vcs_review_fetch_inventory github acme/widget 42 "reconcile inventory" github.com' _ "$LIB" 2>/dev/null)"
 eq "RM11 the GitHub inventory fetch that --reconcile-review shares selects id, body and url: every review the fake serves on both pages carries all three as strings" \
   "$(printf '%s' "$GH_INVENTORY" | node -e '
     var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
