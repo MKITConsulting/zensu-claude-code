@@ -302,6 +302,7 @@ export function decideLinked(walk, options = {}) {
   const self = typeof options.self === 'string' && options.self ? options.self : null;
   const presets = options.presets instanceof Map ? options.presets : null;
   const presetsComplete = options.presetsComplete !== false;
+  const presetsSettled = options.presetsSettled instanceof Set ? options.presetsSettled : new Set();
   const cap = Number.isInteger(options.cap) && options.cap >= 0 ? options.cap : LINKED_START_CAP;
   const max = Number.isInteger(options.max) && options.max >= 0 ? options.max : LINKED_LIST_MAX;
   const checkout = typeof options.checkout === 'function' ? options.checkout : null;
@@ -314,7 +315,7 @@ export function decideLinked(walk, options = {}) {
   const factsOf = (node, nodeCheckout) => {
     const entry = entryOf(node, nodeCheckout);
     const ids = [entry.sessionId, ...entry.priorSessionIds].filter(Boolean);
-    const preset = entry.environment ? presetOf(presets, entry.environment, presetsComplete) : null;
+    const preset = entry.environment ? presetOf(presets, entry.environment, presetsComplete || presetsSettled.has(entry.environment)) : null;
     const continued = ids.some((id) => confirmed.has(id)) ? true : (ledgerComplete ? false : null);
     return { entry, ids, preset, continued };
   };
@@ -330,7 +331,7 @@ export function decideLinked(walk, options = {}) {
   const conditionalWhy = ({ entry, continued }) => {
     if (!entry.folder) return 'place';
     if (entry.kind === 'fork') return 'fork';
-    if (entry.environment && !presetsComplete) return 'presets-unread';
+    if (entry.environment && !presetsComplete && !presetsSettled.has(entry.environment)) return 'presets-unread';
     if (continued === null) return 'ledger-unread';
     if (!startedComplete) return 'started-unread';
     return null;
@@ -407,6 +408,11 @@ export function continuationsStartedBy(run, records) {
   return names;
 }
 
+export function linkedEnvironments(walk) {
+  const open = walk && Array.isArray(walk.open) ? walk.open : [];
+  return open.map((node) => (node && node.record ? environmentOf(node.record.startedFromEnvironmentId) : null)).filter(Boolean);
+}
+
 export function presetMap(doc, accountUuid) {
   const presets = new Map();
   const byAccount = doc && typeof doc === 'object' && doc.byAccount && typeof doc.byAccount === 'object' ? doc.byAccount : null;
@@ -419,6 +425,27 @@ export function presetMap(doc, accountUuid) {
     if (name) presets.set(preset.id, { name, kind: kind || null });
   }
   return presets;
+}
+
+export function presetsAcrossStores(own, others) {
+  const trusted = Boolean(own) && own.complete === true && own.presets instanceof Map;
+  const merged = trusted ? new Map(own.presets) : new Map();
+  const reads = [...(trusted ? [] : [own]), ...(Array.isArray(others) ? others : [])];
+  const elsewhere = new Map();
+  for (const read of reads) {
+    if (!read || !(read.presets instanceof Map)) continue;
+    for (const [id, preset] of read.presets) {
+      if (merged.has(id)) continue;
+      if (elsewhere.has(id)) elsewhere.get(id).push(preset);
+      else elsewhere.set(id, [preset]);
+    }
+  }
+  for (const [id, described] of elsewhere) {
+    const [first] = described;
+    if (described.every((preset) => preset.name === first.name && preset.kind === first.kind)) merged.set(id, first);
+    else if (described.some((preset) => preset.kind === 'ssh')) merged.set(id, { name: null, kind: 'ssh' });
+  }
+  return { presets: merged, settled: new Set(trusted ? own.presets.keys() : []) };
 }
 
 function storeNamedBy(folder) {
@@ -473,6 +500,14 @@ export function storeFolderNote(folder, shown) {
     inspect: `Make it a directory of the user's own with no group or other write bit${folder.cause === 'symlink' ? `, then ${realPathStep(folder, null)}` : ''}.`,
   }[storeFolderRemedy(folder)];
   return `${lead}${remedy ? ` ${remedy}` : ''}_`;
+}
+
+export function presetsFileNote(unread, shown) {
+  const head = `_The saved environments file \`${shown(unread.file)}\``;
+  const held = 'Each linked session whose saved environment it could decide starts only when the user names it';
+  return unread.state === 'refused'
+    ? `${head} was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read. ${held}._`
+    : `${head} could not be read or did not parse. ${held}; if Claude Desktop was writing it, running the takeover again reads it._`;
 }
 
 export function unreadReportsOf(record, shown = UNREAD_REPORTS_SHOWN) {

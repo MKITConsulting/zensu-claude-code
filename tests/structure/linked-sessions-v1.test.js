@@ -426,6 +426,118 @@ test('a saved environment is named from the account presets, and an SSH preset k
   assert.ok(state.sessions.every((entry) => !entry.start || !('preset' in entry.start)));
 });
 
+test('a saved environment the own presets file does not list is named from the other stores, the own description wins, and an id they describe alike counts once', () => {
+  const own = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-own', name: 'Own Name', target: { kind: 'local' } },
+    { id: 'env-both', name: 'Own Version', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const defaultFolder = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-both', name: 'Default Version', target: { kind: 'ssh' } },
+    { id: 'env-fallback', name: 'Fallback Env', target: { kind: 'local' } },
+    { id: 'env-alike', name: 'Alike Env', target: { kind: 'local' } },
+  ] }, acc2: { presets: [{ id: 'env-foreign', name: 'Other account', target: { kind: 'local' } }] } } }, 'acc1');
+  const profile = mod.presetMap({ byAccount: { acc1: { presets: [{ id: 'env-alike', name: 'Alike Env', target: { kind: 'local' } }] } } }, 'acc1');
+  const read = (presets, complete = true) => ({ presets, complete });
+  const merged = mod.presetsAcrossStores(read(own), [read(defaultFolder), read(profile)]);
+  assert.deepEqual([...merged.presets.keys()].sort(), ['env-alike', 'env-both', 'env-fallback', 'env-own']);
+  assert.deepEqual(merged.presets.get('env-own'), { name: 'Own Name', kind: 'local' });
+  assert.deepEqual(merged.presets.get('env-both'), { name: 'Own Version', kind: 'local' });
+  assert.deepEqual(merged.presets.get('env-fallback'), { name: 'Fallback Env', kind: 'local' });
+  assert.deepEqual(merged.presets.get('env-alike'), { name: 'Alike Env', kind: 'local' });
+  assert.deepEqual([...merged.settled].sort(), ['env-both', 'env-own']);
+  assert.equal(own.size, 2);
+  assert.deepEqual([...mod.presetsAcrossStores(read(own), [null, undefined, 'x', read('x'), read(defaultFolder), read(profile)]).presets], [...merged.presets]);
+  const ownless = mod.presetsAcrossStores(null, [read(defaultFolder)]);
+  assert.deepEqual([...ownless.presets.keys()].sort(), ['env-alike', 'env-both', 'env-fallback']);
+  assert.equal(ownless.settled.size, 0);
+  assert.equal(mod.presetsAcrossStores(read(own), null).presets.size, 2);
+  const state = decide([
+    child(1, { startedFromEnvironmentId: 'env-fallback' }),
+    child(2, { startedFromEnvironmentId: 'env-both' }),
+  ], { presets: merged.presets, presetsSettled: merged.settled });
+  assert.deepEqual(state.sessions.map((entry) => [entry.preset, entry.decision]), [
+    [{ id: 'env-fallback', name: 'Fallback Env', kind: 'local' }, 'start'],
+    [{ id: 'env-both', name: 'Own Version', kind: 'local' }, 'start'],
+  ]);
+});
+
+test('an id the other stores describe differently is named by none of them, and stays here without a name when one description names SSH', () => {
+  const first = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-split', name: 'Split A', target: { kind: 'local' } },
+    { id: 'env-split-ssh', name: 'Local box', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const second = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-split', name: 'Split B', target: { kind: 'local' } },
+    { id: 'env-split-ssh', name: 'Remote box', target: { kind: 'ssh' } },
+  ] } } }, 'acc1');
+  const merged = mod.presetsAcrossStores({ presets: new Map(), complete: true }, [{ presets: first, complete: true }, { presets: second, complete: true }]);
+  assert.equal(merged.presets.has('env-split'), false);
+  assert.deepEqual(merged.presets.get('env-split-ssh'), { name: null, kind: 'ssh' });
+  assert.equal(merged.settled.size, 0);
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-split' }),
+    child(2, { startedFromEnvironmentId: 'env-split-ssh' }),
+  ];
+  const state = decide(records, { presets: merged.presets });
+  assert.deepEqual(state.sessions.map((entry) => [entry.preset, entry.decision, entry.why]), [
+    [{ id: 'env-split', name: null, kind: null }, 'start', null],
+    [{ id: 'env-split-ssh', name: null, kind: 'ssh' }, 'stays', 'ssh'],
+  ]);
+  const unread = decide(records, { presets: merged.presets, presetsComplete: false });
+  assert.deepEqual(unread.sessions.map((entry) => [entry.decision, entry.why]), [['if-named', 'presets-unread'], ['stays', 'ssh']]);
+});
+
+test('an own presets file that cannot be trusted settles nothing and is one more description, so an SSH description elsewhere keeps its session here, while a trusted own file settles its ids for an incomplete read', () => {
+  const own = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-own', name: 'Own Name', target: { kind: 'local' } },
+    { id: 'env-remote', name: 'Looks Local', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const other = mod.presetMap({ byAccount: { acc1: { presets: [
+    { id: 'env-remote', name: 'Remote box', target: { kind: 'ssh' } },
+    { id: 'env-other', name: 'Other Env', target: { kind: 'local' } },
+  ] } } }, 'acc1');
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-own' }),
+    child(2, { startedFromEnvironmentId: 'env-remote' }),
+    child(3, { startedFromEnvironmentId: 'env-other' }),
+  ];
+  const outcome = (merged, extra = {}) => decide(records, { presets: merged.presets, presetsComplete: false, presetsSettled: merged.settled, ...extra }).sessions.map((entry) => [entry.decision, entry.why, entry.preset.name]);
+  const untrusted = mod.presetsAcrossStores({ presets: own, complete: false }, [{ presets: other, complete: true }]);
+  assert.equal(untrusted.settled.size, 0);
+  assert.deepEqual(untrusted.presets.get('env-own'), { name: 'Own Name', kind: 'local' });
+  assert.deepEqual(untrusted.presets.get('env-remote'), { name: null, kind: 'ssh' });
+  assert.deepEqual(outcome(untrusted), [['if-named', 'presets-unread', null], ['stays', 'ssh', null], ['if-named', 'presets-unread', null]]);
+  const trusted = mod.presetsAcrossStores({ presets: own, complete: true }, [{ presets: other, complete: false }]);
+  assert.deepEqual([...trusted.settled].sort(), ['env-own', 'env-remote']);
+  assert.deepEqual(trusted.presets.get('env-remote'), { name: 'Looks Local', kind: 'local' });
+  assert.deepEqual(outcome(trusted), [['start', null, 'Own Name'], ['start', null, 'Looks Local'], ['if-named', 'presets-unread', null]]);
+  assert.deepEqual(outcome(trusted, { presetsSettled: ['env-own'] }), [['if-named', 'presets-unread', null], ['if-named', 'presets-unread', null], ['if-named', 'presets-unread', null]], 'a settled list that is no Set settles nothing');
+  assert.deepEqual(outcome(trusted, { presetsComplete: true }), [['start', null, 'Own Name'], ['start', null, 'Looks Local'], ['start', null, 'Other Env']]);
+});
+
+test('the saved environments a takeover looks up are the ids the decision reads, so an empty, over-long, control-character or non-string id is none', () => {
+  const records = [
+    child(1, { startedFromEnvironmentId: 'env-a' }),
+    child(2, { startedFromEnvironmentId: '' }),
+    child(3, { startedFromEnvironmentId: 'x'.repeat(129) }),
+    child(4, { startedFromEnvironmentId: `env${ESC}b` }),
+    child(5, { startedFromEnvironmentId: 7 }),
+    child(6),
+    child(7, { startedFromEnvironmentId: 'y'.repeat(128) }),
+  ];
+  const walk = mod.familyWalk(root(), records);
+  assert.deepEqual(mod.linkedEnvironments(walk), ['env-a', 'y'.repeat(128)]);
+  assert.deepEqual(mod.linkedEnvironments(walk), mod.decideLinked(walk).sessions.filter((entry) => entry.preset).map((entry) => entry.preset.id));
+  assert.deepEqual(mod.linkedEnvironments(null), []);
+  assert.deepEqual(mod.linkedEnvironments({ open: [null, {}, { record: null }] }), []);
+});
+
+test('the presets-file note names the file and why it was not read, and says that a file caught mid-write is read on the next takeover', () => {
+  const shown = (value) => `<${value}>`;
+  assert.equal(mod.presetsFileNote({ file: '/a/ccd-session-presets.json', state: 'refused' }, shown), '_The saved environments file `</a/ccd-session-presets.json>` was refused: another account owns it or can write it, it is not a regular file, it is larger than 8 MiB, or it could not be opened or read. Each linked session whose saved environment it could decide starts only when the user names it._');
+  assert.equal(mod.presetsFileNote({ file: '/b/ccd-session-presets.json', state: 'unreadable' }, shown), '_The saved environments file `</b/ccd-session-presets.json>` could not be read or did not parse. Each linked session whose saved environment it could decide starts only when the user names it; if Claude Desktop was writing it, running the takeover again reads it._');
+});
+
 test('the start call is the one the takeover step names, with a bounded title and the rendered brief', () => {
   const long = `A${ESC}[2K very${LS}long${PS} title ${'x'.repeat(80)}`;
   const state = decide([child(1, { title: long }), child(2, { title: '' }), child(3, { title: undefined }, { title: '' })], { checkout: (folder) => folder === REPO, sameRepository: true });

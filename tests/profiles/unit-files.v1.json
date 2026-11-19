@@ -103,13 +103,13 @@
       "summary": "The tool-call dispatcher: which checks run for each tool, the wrapper and body each check names, the failure policy, the exec-form registration, the host's aggregation order and the fast-path pre-checks."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 35,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 40,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
       ],
       "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
-      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, the unread reports, the task-chip proposals and the store-folder note with the remedy each store's source calls for."
+      "summary": "The session-trail linked-session reader: the family walk and its open-below counts, the kinds, the start decisions and calls, the plan names a takeover carries into its run after the yes, the saved presets, their trust-aware merge across stores and the ids it settles, the saved environments a takeover looks up, the unread reports, the task-chip proposals, the presets-file note and the store-folder note with the remedy each store's source calls for."
     },
     {
       "path": "tests/structure/owned-process.test.js", "registered": 7, "skips": {"win32": 7},

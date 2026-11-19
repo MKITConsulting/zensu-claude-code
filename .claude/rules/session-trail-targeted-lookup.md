@@ -109,8 +109,10 @@ account owns or that grants group or other write:
   `realDirectory(dir, writableOnlyByCaller)`, and every candidate that passes is a store the
   lookup reads (`stores`, `store` being the first of them). A refused candidate never is, and
   `lineage --diagnose` marks it `REFUSED`; when no candidate resolves, it names the permission
-  fix rather than `ZENSU_CCD_STORE`, which is judged by the same rule. Every refused candidate
-  counts as a refused entry, wherever it sits in the list, because the session's record could be
+  fix rather than `ZENSU_CCD_STORE`, which is judged by the same rule. The one read that reaches
+  past a refused candidate is the saved-environment read, which judges the folder that holds it and
+  reads the presets file there (`.claude/rules/session-trail-linked-sessions.md`). Every refused
+  candidate counts as a refused entry, wherever it sits in the list, because the session's record could be
   in it: a session found in no accepted store reads as refused entries rather than as missing
   (`OM7`, `OM7b`). `ZENSU_CCD_STORE` stays authoritative, so a refused override leaves no store
   at all.
@@ -234,7 +236,10 @@ variables (`DF6`), the folders that are no candidate and the absent process sour
 host account across stores (`DF8`), a profile folder that is a symbolic link and the additive remedy
 that reads it through its real folder (`DF9`), the store folder each read judged and the started
 set's branches with a running session (`DF10`, `.claude/rules/session-trail-linked-sessions.md`)
-and an unlistable profiles folder (`DF11`, skipped as root). `WR4b` pins the release line for a
+and an unlistable profiles folder (`DF11`, skipped as root). `DF12` runs in two homes of its own, one
+with a default store and two profile stores and one whose default store is a symbolic link to a
+store `ZENSU_CCD_EXTRA_STORES` names, and pins the saved environments a record's linked sessions
+name across stores, refused candidates included (`.claude/rules/session-trail-linked-sessions.md`). `WR4b` pins the release line for a
 source in another data folder of the same account.
 
 **Bounds, accepted and named.**
@@ -247,7 +252,10 @@ source in another data folder of the same account.
   every linked session that could start as `started-unread`, because the host id names a record
   no read store holds.
 - A refused candidate that is another spelling of an accepted store is counted as refused,
-  although the store is read through the accepted spelling; that is the fail-safe direction.
+  although the store is read through the accepted spelling; that is the fail-safe direction. The
+  folder that holds a refused candidate is still judged, and its `ccd-session-presets.json` read,
+  when the saved environments look past the record's own presets file, because Claude Desktop keeps
+  that file beside the store spelling it writes (`DF12`).
 - The resolver of a linked session's delivery route, `storeCandidates` in
   `hooks/lib/linked-session-v1.js`, still probes the default list alone
   (`.claude/rules/session-delivery-route.md`).
