@@ -927,11 +927,28 @@ for its `@playwright/cli` install pins.
   word to it and runs unjudged while the library is missing (step 1). Pairing the backslashes
   first, as the library does, closes it; `V68` pins the docs sentence that states the gap and
   must change with that fix.
+- **WebRTC over UDP is outside the fence.** UDP passes no proxy: in every column of every probe
+  run the unapproved STUN sink received the page's datagrams. WebRTC over TCP is refused by
+  layer 1. Measured for the specification: the switch
+  `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` changed nothing in the installed
+  Chrome. Closing UDP is a follow-up the specification names.
+- **Layer 1 fences by host and port, not by origin.** Any scheme on an approved host and port
+  passes it, which is what lets the application's own WebSocket work. Layer 2 is exact about the
+  scheme, for the requests it sees.
+- **A managed browser policy is unread and unmeasured.** Whether a managed proxy policy outranks
+  the three switches was neither read in Chromium nor measured on a managed profile.
+- **The browser's own traffic fails under the fence.** Nothing a probe run needed broke, but a
+  feature under test that depends on a vendor service of the browser would. Measured for the
+  specification, once: a top-level navigation that ends in a name error makes Chrome query a
+  fixed vendor name through DNS, outside the resolver rules. With the derived rules no approved
+  host ends in a name error, so that query ran in no fenced column, and it carries no page data.
 - **Windows is UNVERIFIED end to end.** `CLI_BASENAMES` recognizes the `.cmd`/`.exe`/`.ps1`
   spellings, but no Windows run has driven a real `playwright-cli` through the gate. On Git Bash
   both hooks hand node the memory path in the MSYS-converted `C:/…` spelling while the state
   directory node derives reads `C:\…`, so `memoryPathAllowed` compares the directory after
-  `nativeSeparators`; nothing collapses a `..` segment, so one still refuses.
+  `nativeSeparators`; nothing collapses a `..` segment, so one still refuses. The three launch
+  arguments of the network fence were never run there. Where they do not hold, layer 2 keeps
+  what it holds and a service worker's WebSocket is open, because service workers run.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included; each must
   re-decide whether its host fires a pre-tool hook on its shell tool and can render an `ask`.
 
@@ -1079,3 +1096,79 @@ the update check's shell resolves. **Release class: `patch`.** No schema field, 
 matcher, config key or attestation moves, and the gate decides every call as before; the one
 consequence is that `checkReadiness` now refuses every version but 0.1.24, 0.1.21 included, which
 the `## [Unreleased]` upgrade note of `CHANGELOG.md` states.
+
+**The network fence measurement (2026-11-18 and 2026-11-19).** Every run below is one of the
+fence probe (`tests/integration/verify-fence/probe.mjs`) with playwright-cli 0.1.24, on a session
+name the probe owns. A judged run passed when every approved check worked, no unapproved sink
+logged a connection, and its net-log held no resolver request for a name outside the run config,
+no resolver lookup and no TCP connect attempt outside the run config. `fence` carries both
+layers, `fence-alone` the three launch arguments without `network.allowedOrigins`. M1 to M4 ran
+before the gate changed, as the specification orders; the run configs they left carry exactly
+the three arguments `fenceArgs` returns, compared byte for byte afterwards, and `matrix`,
+`remote` and `gated` ran again on the built derivation.
+
+- **The matrix, macOS 26.7.2 arm64, Google Chrome 157.0.8103.79, headless.** Both columns
+  passed with 10 of 10 approved checks, a pinned hostname, both `localhost` listeners, an IPv6
+  literal and the page's own WebSocket among them, and no sink connection from a page, a
+  dedicated worker, a shared worker or a service worker. The reference columns show what the
+  fence adds: with the routes alone a WebSocket, a shared worker's request, a redirect target, a
+  TLS sink and WebRTC over TCP reached a sink.
+- **M1, a real remote host.** `https://example.com` approved with the pin the helper resolved
+  (104.20.23.154), `https://example.org` not approved, Google Chrome 157.0.8103.79: the approved
+  page loaded with its certificate, the requests to the unapproved host over `https` and `wss`
+  and to a loopback sink failed, and the only TCP connect attempt went to the pin on 443. Both
+  columns passed.
+- **M2, the bundled channel.** Chrome for Testing 158.0.8127.18 (revision 1254), which
+  `--browser=chromium` runs, headless and headed, and the separate shell binary
+  (`HeadlessChrome/158.0.8127.18`), which the CLI launches when a config names `chromium`
+  without a channel: both columns passed for each. `chromium` therefore stays in
+  `CHROMIUM_BROWSERS`.
+- **M3, headed.** Google Chrome 157.0.8103.79 in a visible window: both columns passed.
+- **M4, Linux.** Debian 12 in a `node:22-bookworm-slim` container, kernel 6.10.14-linuxkit on
+  aarch64, Node 22.23.5, Chrome for Testing 158.0.8127.18 and its shell binary; no Google Chrome
+  build exists for linux-arm64. The shell binary passed in both columns. The full build passed
+  `fence-alone` twice and `fence` on a second run and with a 20 s budget; its first `fence` run
+  overran the probe's six-second check budget with no sink connection, and the unfenced
+  `routes-only` column stalled the same way, so the delay belongs to request interception in
+  that container and not to the fence.
+- **M5, the gated path.** The helper of this change wrote the config, the gate of this change
+  judged every call and answered `ask` for the `open` in consent mode, and a `zensu-verify`
+  session loaded the probe page with Google Chrome 157.0.8103.79: 8 of 8 approved checks, no
+  sink connection. A `goto` to an unapproved loopback origin failed with
+  `net::ERR_BLOCKED_BY_CLIENT`, and a `goto` to an approved URL that redirects to an unapproved
+  target failed with `net::ERR_PROXY_CONNECTION_FAILED`, each with exit 1.
+- **M6, a worker update.** On the probe's fixture application the worker took control, answered
+  the page from the cache it filled, and the second load showed the page's update prompt for the
+  changed worker script, on the gated path and in both matrix columns.
+- **M13, the pairing.** The gate of the released 0.40.1 refuses a config this helper wrote with
+  `the run config must block service workers and set nothing else on the context`, a fault that
+  cannot name the cause, and this gate refuses a config the 0.40.1 helper wrote with the context
+  fault that ends in `RUN_CONFIG_REMEDY`.
+- **M11, a push subscription.** From the service worker it fails with `AbortError: Registration
+  failed - permission denied` in both fenced columns, so the permission rules it out, not the
+  fence. No unfenced column ran it, on purpose: a subscription that succeeds registers with the
+  browser vendor's push service.
+
+UNMEASURED: Windows (M8); `msedge`, its prerelease channels and the prerelease Chrome channels
+(M9); Linux on x86-64; a service worker that stopped and started again (M7); a managed proxy
+policy (M12); a push subscription without the fence; and the skill's own flow in the live eval
+`evals/verify-feature`. That eval ran once on 2026-11-19 and no scenario of it reached a
+browser: the local scenario's fixture did not start inside the eval wrapper's macOS sandbox
+profile, which refused a signal to the fixture's own child process, and the provider of both
+remote scenarios did not spawn under promptfoo 0.121.20, before any model call. Neither cause
+lies in the fence, and the eval therefore says nothing about it. **Release class: `minor`.** No entry of
+the breaking list in §"Runtime Lineage" fits by the letter: no context-record or workflow-state
+field, no key set, hook, matcher, config key or attestation moves. The class follows the verdict
+the rule files record for a gate that refuses calls it let through
+(`.claude/rules/git-mutation-tables.md`, `.claude/rules/powershell-tool-coverage.md`): this gate
+refuses an `open` with a run config of the earlier shape, a launch environment that sets one more
+variable, and a policy or a run whose hostname starts with a dot. The strict run-config
+validator points the same way although its key set stays, because an installation of one shape
+cannot read the config the other writes. **Migration:** nothing stored migrates, since the skill
+writes a fresh run config for every run. A session that was open across the update keeps the
+installation it loaded, helper and gate together, until it ends or reloads its plugins. After
+that, this gate refuses a config an earlier helper wrote, with a fault that names the remedy,
+and an earlier gate refuses a config this helper wrote. There is no dual acceptance: a gate that
+took both shapes would let a hand-written config choose the weaker fence. The
+`## [Unreleased]` upgrade note of `CHANGELOG.md` names the one remedy for all of them, to start
+`/zensu:verify-feature` again in a session started or reloaded after the update.
