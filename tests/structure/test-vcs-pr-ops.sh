@@ -771,18 +771,18 @@ case "$(uname -s 2>/dev/null)" in
     mkdir -p "$ST/bin" "$ST/tmp"
     gh_host_fake_write "$ST/bin/gh" <<'FAKE'
 case "${1:-} ${2:-}" in
-  "pr diff") printf 'diff --git a/a b/a\n'; kill -TERM "$PPID"; exit 0 ;;
+  "pr diff") printf 'diff --git a/a b/a\n'; : > "$FAKE_ST_FLAG"; kill -TERM "$PPID"; exit 0 ;;
 esac
 exit 2
 FAKE
     env PATH="$ST/bin:$PATH" TMPDIR="$ST/tmp" GH_HOST=example.invalid ZENSU_VCS_REMOTE=https://github.com/acme/widget.git \
-      bash "$LIB" --pr-diff --provider github --repo-id acme/widget 42 >"$ST/out" 2>/dev/null
+      FAKE_ST_FLAG="$ST/term-sent" bash "$LIB" --pr-diff --provider github --repo-id acme/widget 42 >"$ST/out" 2>/dev/null
     ST_RC=$?
     ST_LEFT="$(find "$ST/tmp" -name 'zensu-vcs-*' | grep -c .)"
-    if [ "$ST_RC" -ne 0 ] && [ "$ST_LEFT" = 0 ] && [ ! -s "$ST/out" ]; then
-      check "ST1 a stream interrupted by TERM removes both temporary files and prints nothing" PASS
+    if [ "$ST_RC" -eq 143 ] && [ -f "$ST/term-sent" ] && [ "$ST_LEFT" = 0 ] && [ ! -s "$ST/out" ]; then
+      check "ST1 a stream interrupted by TERM exits 143, removes both temporary files and prints nothing" PASS
     else
-      check "ST1 a stream interrupted by TERM removes both temporary files and prints nothing (rc=$ST_RC left=$ST_LEFT)" FAIL
+      check "ST1 a stream interrupted by TERM exits 143, removes both temporary files and prints nothing (rc=$ST_RC term-sent=$([ -f "$ST/term-sent" ] && echo yes || echo no) left=$ST_LEFT)" FAIL
     fi
     rm -rf "$ST" ;;
 esac
@@ -790,7 +790,8 @@ esac
 EX_LIST="$(grep '^export -f' "$LIB" | tr ' ' '\n' | grep -E '^_zensu_vcs_[A-Za-z0-9_]+$' | tr '\n' ' ')"
 EX_ABSENT=""
 for EX_F in _zensu_vcs_stream _zensu_vcs_render_gitlab_diff _zensu_vcs_pr_diff _zensu_vcs_edit_pr_body \
-            _zensu_vcs_post_comment _zensu_vcs_normalize_review _zensu_vcs_fetch_review _zensu_vcs_gitlab_send_json; do
+            _zensu_vcs_post_comment _zensu_vcs_normalize_review _zensu_vcs_fetch_review _zensu_vcs_gitlab_send_json \
+            _zensu_vcs_require_file; do
   case " $EX_LIST" in *" $EX_F "*) ;; *) EX_ABSENT="$EX_ABSENT $EX_F" ;; esac
 done
 eq "EX1 the export line names the four new verbs and their helpers" "$EX_ABSENT" ""

@@ -149,7 +149,8 @@ Inline comment structure (Markdown), one per `comments[]` entry:
 A P2 comment opens with `🟡 **Should fix** · **F<n>** · <category>`; P3 findings never
 become inline comments. The `suggestion` block is optional and is emitted only under the
 conditions in `rules/github-publish.md` § Suggested changes (on GitLab its fence reads
-`suggestion:-0+0`, `rules/gitlab-publish.md`). The `Evidence` block is optional too. The
+`suggestion:-0+0`, `rules/gitlab-publish.md`, and its anchor condition takes the GitLab form
+stated in that section). The `Evidence` block is optional too. The
 closing marker is invisible metadata for tools: the same ID as the body, the finding's
 severity, its category as a slug of lower-case letters, digits, and single hyphens
 (`docs-drift`), and the short head SHA. It never spells `zensu-review:v1`, the driver's

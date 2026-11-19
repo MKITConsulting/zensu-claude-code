@@ -179,6 +179,7 @@ exit 2
 FAKE
 cat > "$WORK/hostpin/bin/ssh" <<'FAKE'
 #!/bin/bash
+[ -z "${FAKE_SSH_LOG:-}" ] || printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
 [ "${1:-}" = -G ] || exit 255
 shift
 [ "${1:-}" = -- ] && shift
@@ -299,6 +300,68 @@ if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ]; then
 else
   check "HS18 an empty review payload is refused with a reason and posts nothing (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS')" FAIL
 fi
+HS_LOOKUP=(ZENSU_VCS_REMOTE=git@ghe.example.com:acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com
+  FAKE_GH_CONFIG_LOG="$WORK/hostpin/config" FAKE_SSH_LOG="$WORK/hostpin/ssh")
+hs_lookup_run() {
+  : > "$WORK/hostpin/config"; : > "$WORK/hostpin/ssh"
+  hs_run "${HS_LOOKUP[@]}" "$@"
+  HS_CONFIG="$(cat "$WORK/hostpin/config")"; HS_SSH="$(cat "$WORK/hostpin/ssh")"
+}
+hs_refused_early() {
+  local label="$1" reason="$2"
+  if [ "$HS_RC" -eq 1 ] && [ -z "$HS_OUT" ] && [ -z "$HS_HOSTS" ] && [ -z "$HS_CONFIG" ] && [ -z "$HS_SSH" ]; then
+    case "$HS_ERR" in
+      *"$reason"*) check "$label" PASS ;;
+      *) check "$label (err='$HS_ERR')" FAIL ;;
+    esac
+  else
+    check "$label (rc=$HS_RC out='$HS_OUT' hosts='$HS_HOSTS' config='$HS_CONFIG' ssh='$HS_SSH')" FAIL
+  fi
+}
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$CPAY"
+if [ "$HS_RC" -eq 0 ] && [ "$HS_CONFIG" = ghe.example.com ] && [ "$HS_SSH" = '-G -- ghe.example.com' ]; then
+  check "HS19 control: a usable comment payload for an SSH GitHub Enterprise remote runs ssh -G and the login lookup" PASS
+else
+  check "HS19 control: a usable comment payload for an SSH GitHub Enterprise remote runs ssh -G and the login lookup (rc=$HS_RC config='$HS_CONFIG' ssh='$HS_SSH' err='$HS_ERR')" FAIL
+fi
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+hs_refused_early "HS19b an empty comment payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-comment refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-comment.json"
+hs_refused_early "HS19c a missing comment payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-comment refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+hs_refused_early "HS20 an empty review payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-review refused: the payload file is missing or empty"
+hs_lookup_run bash "$LIB" --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/no-such-review.json"
+hs_refused_early "HS20b a missing review payload is refused before ssh -G and the login lookup of an SSH GitHub Enterprise remote" \
+  "post-review refused: the payload file is missing or empty"
+refused_with() {
+  local l="$1" reason="$2" o rc e; shift 2
+  o="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>"$WORK/hostpin/refused.err")"; rc=$?
+  e="$(cat "$WORK/hostpin/refused.err")"
+  if [ -z "$o" ] && [ "$rc" -eq 1 ]; then
+    case "$e" in
+      *"$reason"*) check "$l" PASS ;;
+      *) check "$l (err='$e')" FAIL ;;
+    esac
+  else
+    check "$l (out='$o' rc=$rc)" FAIL
+  fi
+}
+refused_with "G19 post-comment refuses an empty payload file in dry-print mode too" \
+  "post-comment refused: the payload file is missing or empty" \
+  --post-comment --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+refused_with "G19b post-review on GitHub refuses an empty payload file in dry-print mode too" \
+  "post-review refused: the payload file is missing or empty" \
+  --post-review --provider github --repo-id acme/widget 42 "$WORK/hostpin/empty.json"
+refused_with "G19c post-review on GitLab refuses an empty payload file in dry-print mode too" \
+  "post-review refused: the payload file is missing or empty" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/hostpin/empty.json"
+printf '%s' '{"event":"COMMENT","body":"cut off' > "$WORK/hostpin/truncated.json"
+refused_with "G19d post-review on GitLab refuses a payload that is not a JSON object in dry-print mode too" \
+  "post-review refused: the payload file is not a JSON object" \
+  --post-review --provider gitlab --repo-id grp%2Fproj --diff-refs-json '{"base_sha":"B","start_sha":"S","head_sha":"H"}' 7 "$WORK/hostpin/truncated.json"
 
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
@@ -491,6 +554,8 @@ cat > "$WORK/live/bin/glab" <<'FAKE'
 #!/bin/bash
 set -u
 printf '%s\n' "$*" >> "$FAKE_DIR/calls"
+[ -z "${FAKE_CLOBBER:-}" ] || printf '%s' '{"event":"COMMENT","body":"cut' > "$FAKE_CLOBBER"
+[ -z "${FAKE_TMP_SEEN:-}" ] || ls "${TMPDIR:-/tmp}"/zensu-vcs-payload.* >> "$FAKE_TMP_SEEN" 2>/dev/null
 path="${*: -1}"
 if [ "${1:-}" = api ] && [ "$path" = 'projects/grp%2Fproj/merge_requests/7' ]; then
   printf '%s' '{"diff_refs":{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}}'
@@ -773,6 +838,97 @@ else
 fi
 has "LV35b the unparseable answer is reported under the post-review publisher id label" "$(cat "$WORK/live/user/stderr-html" 2>/dev/null)" "zensu-vcs: post-review publisher id failed: the glab api user answer is not JSON"
 eq "LV36 a refused publisher lookup posts nothing" "$(grep -c -- '--method POST' "$WORK/live/user/calls" || true)" "0"
+
+mkdir -p "$WORK/live/payload-refusal"
+: > "$WORK/live/payload-refusal/empty.json"
+printf '%s' '{"event":"COMMENT","body":"cut off' > "$WORK/live/payload-refusal/truncated.json"
+printf '%s' '[{"event":"COMMENT","body":"in an array"}]' > "$WORK/live/payload-refusal/array.json"
+lv_refused() {
+  local label="$1" reason="$2" payload="$3" state="$WORK/live/payload-refusal/$4" out rc err
+  mkdir -p "$state"
+  out="$(FAKE_DIR="$state" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$payload" 2>"$state/stderr")"
+  rc=$?
+  err="$(cat "$state/stderr")"
+  if [ "$rc" -eq 1 ] && [ -z "$out" ] && [ ! -e "$state/calls" ]; then
+    case "$err" in
+      *"$reason"*) check "$label" PASS ;;
+      *) check "$label (err='$err')" FAIL ;;
+    esac
+  else
+    check "$label (rc=$rc out='$out' calls='$(cat "$state/calls" 2>/dev/null)')" FAIL
+  fi
+}
+lv_refused "LV37 an empty review payload on GitLab is refused with a reason before any glab call" \
+  "post-review refused: the payload file is missing or empty" "$WORK/live/payload-refusal/empty.json" empty
+lv_refused "LV38 a missing review payload on GitLab is refused with a reason before any glab call" \
+  "post-review refused: the payload file is missing or empty" "$WORK/live/payload-refusal/no-such.json" missing
+lv_refused "LV39 a truncated review payload on GitLab is refused as not a JSON object before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/truncated.json" truncated
+lv_refused "LV39b a review payload that is a JSON array is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/array.json" array
+printf '%s' '42' > "$WORK/live/payload-refusal/scalar.json"
+printf '%s' 'null' > "$WORK/live/payload-refusal/null.json"
+lv_refused "LV39c a review payload that is a JSON scalar is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/scalar.json" scalar
+lv_refused "LV39d a review payload that is JSON null is refused on GitLab before any glab call" \
+  "post-review refused: the payload file is not a JSON object" "$WORK/live/payload-refusal/null.json" null
+cp "$WORK/live/payload.json" "$WORK/live/payload-refusal/unreadable.json"
+chmod 000 "$WORK/live/payload-refusal/unreadable.json"
+if [ -r "$WORK/live/payload-refusal/unreadable.json" ]; then
+  echo "  SKIP  LV40 an unreadable review payload is refused as unreadable (this host reads a mode-000 file)"
+else
+  lv_refused "LV40 an unreadable review payload is refused on GitLab as unreadable before any glab call" \
+    "post-review refused: the payload file cannot be read" "$WORK/live/payload-refusal/unreadable.json" unreadable
+fi
+chmod 600 "$WORK/live/payload-refusal/unreadable.json"
+mkdir -p "$WORK/live/clobber"
+cp "$WORK/live/payload.json" "$WORK/live/clobber/payload.json"
+FAKE_CLOBBER="$WORK/live/clobber/payload.json" FAKE_DIR="$WORK/live/clobber" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/clobber/payload.json" >/dev/null 2>&1
+CLOBBER_RC=$?
+CLOBBER_POSTED="$(cat "$WORK/live/clobber/posted" 2>/dev/null)"
+if [ "$CLOBBER_RC" -eq 0 ] && [ "$(grep -c -- '--method POST' "$WORK/live/clobber/calls" 2>/dev/null)" = 6 ] \
+   && [ "$(cat "$WORK/live/clobber/payload.json")" = '{"event":"COMMENT","body":"cut' ]; then
+  has "LV41 a payload cut short by the first glab call still posts the review that was checked, from one private copy" \
+    "$(nth_json "$CLOBBER_POSTED" 1 request.body)" "Live review body."
+else
+  check "LV41 a payload cut short by the first glab call still posts the review that was checked, from one private copy (rc=$CLOBBER_RC posts=$(grep -c -- '--method POST' "$WORK/live/clobber/calls" 2>/dev/null))" FAIL
+fi
+mkdir -p "$WORK/live/tmp-post/tmp" "$WORK/live/tmp-refuse/tmp" "$WORK/live/tmp-unreadable/tmp"
+TMPDIR="$WORK/live/tmp-post/tmp" FAKE_TMP_SEEN="$WORK/live/tmp-post/seen" FAKE_DIR="$WORK/live/tmp-post" PATH="$WORK/live/bin:$PATH" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload.json" >/dev/null 2>&1
+TMP_RC=$?
+TMP_LEFT="$(find "$WORK/live/tmp-post/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+if [ "$TMP_RC" -eq 0 ] && [ -s "$WORK/live/tmp-post/seen" ] && [ "$TMP_LEFT" = 0 ]; then
+  check "LV42 a live GitLab post removes its private payload copy, which glab saw in TMPDIR while the run lasted" PASS
+else
+  check "LV42 a live GitLab post removes its private payload copy, which glab saw in TMPDIR while the run lasted (rc=$TMP_RC seen=$(grep -c . "$WORK/live/tmp-post/seen" 2>/dev/null) left=$TMP_LEFT)" FAIL
+fi
+TMPDIR="$WORK/live/tmp-refuse/tmp" FAKE_DIR="$WORK/live/tmp-refuse" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload-refusal/truncated.json" >/dev/null 2>&1
+TMP_RC=$?
+TMP_LEFT="$(find "$WORK/live/tmp-refuse/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+if [ "$TMP_RC" -eq 1 ] && [ "$TMP_LEFT" = 0 ]; then
+  check "LV42b a payload refused as not a JSON object leaves no private copy in TMPDIR" PASS
+else
+  check "LV42b a payload refused as not a JSON object leaves no private copy in TMPDIR (rc=$TMP_RC left=$TMP_LEFT)" FAIL
+fi
+chmod 000 "$WORK/live/payload-refusal/unreadable.json"
+if [ -r "$WORK/live/payload-refusal/unreadable.json" ]; then
+  echo "  SKIP  LV42c an unreadable payload leaves no private copy in TMPDIR (this host reads a mode-000 file)"
+else
+  TMPDIR="$WORK/live/tmp-unreadable/tmp" FAKE_DIR="$WORK/live/tmp-unreadable" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$LIB" --post-review --provider gitlab --repo-id grp%2Fproj 7 "$WORK/live/payload-refusal/unreadable.json" >/dev/null 2>&1
+  TMP_RC=$?
+  TMP_LEFT="$(find "$WORK/live/tmp-unreadable/tmp" -name 'zensu-vcs-payload.*' | grep -c .)"
+  if [ "$TMP_RC" -eq 1 ] && [ "$TMP_LEFT" = 0 ]; then
+    check "LV42c an unreadable payload leaves no private copy in TMPDIR" PASS
+  else
+    check "LV42c an unreadable payload leaves no private copy in TMPDIR (rc=$TMP_RC left=$TMP_LEFT)" FAIL
+  fi
+fi
+chmod 600 "$WORK/live/payload-refusal/unreadable.json"
 
 mkdir -p "$WORK/live/foreign-src" "$WORK/live/foreign"
 if FAKE_DIR="$WORK/live/foreign-src" PATH="$WORK/live/bin:$PATH" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \

@@ -78,8 +78,9 @@ report names them. See Critical Conventions.
 `zensu features get <feature-uuid>` (UUID only — a `KEY-N` id or slug fails with
 `invalid feature id (status 400)`, so map it through
 `zensu features list --product <product-id> --json` first); a PR/MR number via the driver's
-`--pr-diff`, which pins the pull request's host (the PR/MR read below); a glob selects files;
-free text is matched against the diff. Produce the concrete set of changed behaviors to cover.
+`--pr-diff`, which pins the pull request's host on GitHub only (the PR/MR read below); a glob
+selects files; free text is matched against the diff. Produce the concrete set of changed
+behaviors to cover.
 
 **The PR/MR read.** Run it inside the checkout as one Bash call that captures the `--detect`
 lines into variables, so no value of the remote is retyped into a command:

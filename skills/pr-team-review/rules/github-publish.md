@@ -77,7 +77,8 @@ empty rather than truncated.
 This validation is GitHub's. On GitLab the driver's `--post-review` runs its own anchor
 preflight over every page of the merge request's diffs and turns an anchor it cannot place into
 a positionless discussion with the path in its body (`rules/gitlab-publish.md`), so the skill
-runs no `--pr-diff` read there.
+runs no `--pr-diff` read there, and a suggestion takes the GitLab form of the anchor condition
+in § Suggested changes.
 
 Replace `<absolute-plugin-root>` with the concrete absolute `ROOT` established
 by the parent `SKILL.md`; this supporting file is loaded through `Read` and does
@@ -154,7 +155,11 @@ only when every condition holds:
 - The fix replaces exactly the commented lines. If it also needs a line outside the
   commented range, describe the fix in prose instead.
 - The anchor validated as `valid` on side `RIGHT`. A remapped anchor, a `LEFT` anchor, and a
-  body-only finding never carry a suggestion.
+  body-only finding never carry a suggestion. On GitLab, where the skill validates no anchor,
+  this condition reads: the anchor is one line on side `RIGHT`, so a `LEFT` anchor, a comment
+  without a line and a body-only finding never carry one. The driver's preflight then places
+  the anchor or degrades its discussion, and GitLab cannot apply the block of a degraded one
+  (`rules/gitlab-publish.md`).
 - The lead has read the commented lines itself — in the Stage-2 read of the Finding
   Verification Gate, or in a direct `Read` of `$WORKTREE` when the gate is off — and the
   block repeats every unchanged character of those lines exactly, indentation included.
@@ -248,8 +253,8 @@ back to two driver verbs, both run from `$REPO` so each pins the pull request's 
 build their request from `$WORKDIR/_synthesis.json`, the payload the submission above sent,
 whose anchors are already validated: the path and the body are attacker-influenced, and this
 way no part of either reaches a command line. Each post is chained to the `jq` that writes its
-file, so a failed `jq` posts nothing, and both verbs refuse an empty payload file before gh
-runs.
+file, so a failed `jq` posts nothing, and both verbs refuse a missing or empty payload file
+before any gh call, the host lookup included.
 
 First the overall body alone, as a review with no inline comments:
 

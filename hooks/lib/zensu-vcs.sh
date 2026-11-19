@@ -2031,6 +2031,13 @@ _zensu_vcs_reconcile_review() (
   _zensu_vcs_review_result "$status" "$marker" "$head" "$part_count" "$posted_count" "$url" "$provider"
 )
 
+_zensu_vcs_require_file() {
+  if ! [ -f "$3" ] || ! [ -s "$3" ]; then
+    printf 'zensu-vcs: %s refused: the %s file is missing or empty, so %s\n' "$1" "$2" "$4" >&2
+    return 1
+  fi
+}
+
 _zensu_vcs_post_review() {
   local provider="" repoid="" diffrefs="" id="" payload=""
   local pos=0
@@ -2054,6 +2061,11 @@ _zensu_vcs_post_review() {
   [ -n "$repoid" ] || return 1
   [ -n "$payload" ] || return 1
   case "$provider" in
+    github|gitlab) ;;
+    *) return 1 ;;
+  esac
+  _zensu_vcs_require_file post-review payload "$payload" 'nothing was posted' || return 1
+  case "$provider" in
     github)
       _zensu_vcs_is_gh_repoid "$repoid" || return 1
       local host; host="$(_zensu_vcs_gh_host)" || return 1
@@ -2061,10 +2073,6 @@ _zensu_vcs_post_review() {
       local owner="${repoid%%/*}" name="${repoid#*/}"
       local argv=("${_zensu_vcs_gh_argv[@]}" api -X POST "repos/$owner/$name/pulls/$id/reviews" --input "$payload" --hostname "$host")
       if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
-      if ! [ -f "$payload" ] || ! [ -s "$payload" ]; then
-        printf 'zensu-vcs: post-review refused: the payload file is missing or empty, so nothing was posted\n' >&2
-        return 1
-      fi
       local resp
       resp="$(_zensu_vcs_run 'post-review POST (gh api pulls reviews)' "${argv[@]}")" || return 1
       printf '%s' "$resp" | _zensu_vcs_json_http_url_field html_url ;;
@@ -2074,11 +2082,31 @@ _zensu_vcs_post_review() {
   esac
 }
 
-_zensu_vcs_post_review_gitlab() {
-  local repoid="$1" id="$2" payload="$3" diffrefs="$4"
+_zensu_vcs_post_review_gitlab() (
+  local repoid="$1" id="$2" source_payload="$3" diffrefs="$4" payload=""
   command -v node >/dev/null 2>&1 || return 1
   _zensu_vcs_is_gl_repoid "$repoid" || return 1
-  if ! _zensu_vcs_dry; then [ -f "$payload" ] || return 1; fi
+  trap '[ -z "$payload" ] || rm -f -- "$payload"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if ! payload="$(mktemp "${TMPDIR:-/tmp}/zensu-vcs-payload.XXXXXXXX" 2>/dev/null)"; then
+    payload=""
+    printf 'zensu-vcs: post-review failed: no temporary file could be created\n' >&2
+    return 1
+  fi
+  if ! cat -- "$source_payload" > "$payload" 2>/dev/null; then
+    printf 'zensu-vcs: post-review refused: the payload file cannot be read, so nothing was posted\n' >&2
+    return 1
+  fi
+  local native_payload
+  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
+  if ! ZENSU_PL_PAYLOAD="$native_payload" node -e '
+    var v;try{v=JSON.parse(require("fs").readFileSync(process.env.ZENSU_PL_PAYLOAD,"utf8"));}catch(_){process.exit(1);}
+    if(!v||typeof v!=="object"||Array.isArray(v))process.exit(1);' 2>/dev/null; then
+    printf 'zensu-vcs: post-review refused: the payload file is not a JSON object, so nothing was posted\n' >&2
+    return 1
+  fi
   if [ -z "$diffrefs" ]; then
     if _zensu_vcs_dry; then
       diffrefs='{"base_sha":"BASE_SHA","start_sha":"START_SHA","head_sha":"HEAD_SHA"}'
@@ -2088,15 +2116,14 @@ _zensu_vcs_post_review_gitlab() {
       diffrefs="$(printf '%s' "$diff_response" | _zensu_vcs_normalize_diff_refs gitlab)" || return 1
     fi
   fi
-  local native_payload
-  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
   local ZPLAN='
     var fs=require("fs"),crypto=require("crypto");
     var mode=process.env.ZENSU_PL_MODE||"count";
     var idx=parseInt(process.env.ZENSU_PL_IDX||"0",10);
     var iid=process.env.ZENSU_PL_IID||"";
     var dr={};try{dr=JSON.parse(process.env.ZENSU_PL_DIFFREFS||"{}");}catch(_){}
-    var pl={};try{pl=JSON.parse(fs.readFileSync(process.env.ZENSU_PL_PAYLOAD,"utf8"));}catch(_){}
+    var pl;try{pl=JSON.parse(fs.readFileSync(process.env.ZENSU_PL_PAYLOAD,"utf8"));}catch(_){process.exit(1);}
+    if(!pl||typeof pl!=="object"||Array.isArray(pl))process.exit(1);
     var plan=null;if(process.env.ZENSU_PL_ANCHORS){try{plan=JSON.parse(process.env.ZENSU_PL_ANCHORS);}catch(_){process.exit(1);}
       if(!plan||typeof plan!=="object"||!Array.isArray(plan.comments))process.exit(1);}
     function h(x){return crypto.createHash("sha256").update(String(x)).digest("hex").slice(0,8);}
@@ -2177,7 +2204,7 @@ _zensu_vcs_post_review_gitlab() {
     i=$((i + 1))
   done
   return 0
-}
+)
 
 _zensu_vcs_extract_url() {
   command -v node >/dev/null 2>&1 || { grep -oE 'https?://[^[:space:]]+/(pull|merge_requests)/[0-9]+[^[:space:]]*' | head -n1 | tr -d '[:cntrl:]'; return 0; }
@@ -2417,10 +2444,7 @@ _zensu_vcs_edit_pr_body() {
       printf 'zensu-vcs: edit-pr-body refused: --provider must be github or gitlab\n' >&2
       return 1 ;;
   esac
-  if ! [ -f "$bodyfile" ] || ! [ -s "$bodyfile" ]; then
-    printf 'zensu-vcs: edit-pr-body refused: the body file is missing or empty, so no forge call was made\n' >&2
-    return 1
-  fi
+  _zensu_vcs_require_file edit-pr-body body "$bodyfile" 'no forge call was made' || return 1
   local argv=() host out native_body request_json
   case "$provider" in
     github)
@@ -2476,15 +2500,12 @@ _zensu_vcs_post_comment() {
   _zensu_vcs_is_num "$id" || return 1
   _zensu_vcs_is_gh_repoid "$repoid" || return 1
   [ -n "$payload" ] || return 1
+  _zensu_vcs_require_file post-comment payload "$payload" 'nothing was posted' || return 1
   local host resp owner="${repoid%%/*}" name="${repoid#*/}"
   host="$(_zensu_vcs_gh_host)" || return 1
   _zensu_vcs_gh_cmd "$host"
   local argv=("${_zensu_vcs_gh_argv[@]}" api -X POST "repos/$owner/$name/pulls/$id/comments" --input "$payload" --hostname "$host")
   if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
-  if ! [ -f "$payload" ] || ! [ -s "$payload" ]; then
-    printf 'zensu-vcs: post-comment refused: the payload file is missing or empty, so nothing was posted\n' >&2
-    return 1
-  fi
   resp="$(_zensu_vcs_run 'post-comment POST (gh api pulls comments)' "${argv[@]}")" || return 1
   printf '%s' "$resp" | _zensu_vcs_json_http_url_field html_url
 }
@@ -2568,7 +2589,7 @@ _zensu_vcs_fetch_review() {
   { printf '%s' "$review_json"; printf '\0'; printf '%s' "$comments_json"; } | _zensu_vcs_normalize_review "$review"
 }
 
-export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_gh_host_valid _zensu_vcs_ssh_alias_valid _zensu_vcs_inside_repo _zensu_vcs_sole_remote_url _zensu_vcs_gh_host _zensu_vcs_gh_cmd _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_send_json _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_body_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions _zensu_vcs_stream _zensu_vcs_render_gitlab_diff _zensu_vcs_pr_diff _zensu_vcs_edit_pr_body _zensu_vcs_post_comment _zensu_vcs_normalize_review _zensu_vcs_fetch_review 2>/dev/null || true
+export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_gh_host_valid _zensu_vcs_ssh_alias_valid _zensu_vcs_inside_repo _zensu_vcs_sole_remote_url _zensu_vcs_gh_host _zensu_vcs_gh_cmd _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_gitlab_send_json _zensu_vcs_gitlab_post_json _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_require_file _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_body_markers _zensu_vcs_open_pr _zensu_vcs_no_pr_message _zensu_vcs_review_summary _zensu_vcs_normalize_review_summary _zensu_vcs_conventions _zensu_vcs_stream _zensu_vcs_render_gitlab_diff _zensu_vcs_pr_diff _zensu_vcs_edit_pr_body _zensu_vcs_post_comment _zensu_vcs_normalize_review _zensu_vcs_fetch_review 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in

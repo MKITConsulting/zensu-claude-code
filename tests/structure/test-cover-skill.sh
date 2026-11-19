@@ -141,6 +141,7 @@ pin "P14b SKILL.md re-detects with the forge the user named after an unknown-for
 pin "P14c SKILL.md reads a merge request's diff on GitLab with the repo= value of --detect" "$SKILL_MD" 'gitlab) bash "$VCS" --pr-diff --provider gitlab --repo-id "$REPOID" <n> ;;'
 pin "P14d SKILL.md takes REPOID from the repo= line of --detect" "$SKILL_MD" "REPOID=\"\$(printf '%s\\n' \"\$DETECT\" | sed -n 's/^repo=//p')\""
 pin "P14e SKILL.md names the remote override for a checkout whose remote --detect cannot read" "$SKILL_MD" 'export ZENSU_VCS_REMOTE="$(git remote get-url <remote>)"'
+pin "P14f SKILL.md says the --pr-diff read pins the host on GitHub only" "$SKILL_MD" "\`--pr-diff\`, which pins the pull request's host on GitHub only"
 
 echo "----"
 echo "test-cover-skill: $PASS PASS / $FAIL FAIL"

@@ -841,6 +841,18 @@ else
   check "P17g suggestions only on validated RIGHT anchors, dropped on remap, single-line on GitLab" FAIL
 fi
 
+if grep -qF 'this condition reads: the anchor is one line on side `RIGHT`, so a `LEFT` anchor, a comment' "$PUBLISH_RULE" \
+   && grep -qF 'a suggestion takes the GitLab form of the anchor condition' "$PUBLISH_RULE" \
+   && grep -qF '`rules/github-publish.md` § Suggested changes apply, the anchor condition in the GitLab form' "$GITLAB_RULE" \
+   && grep -qF '`suggestion:-0+0`, `rules/gitlab-publish.md`, and its anchor condition takes the GitLab form' "$SKILL_DIR/references/publish.md" \
+   && ! grep -qF 'one line on side' "$GITLAB_RULE" \
+   && ! grep -qF 'one line on side' "$SKILL_DIR/references/publish.md" \
+   && ! grep -qF '§ Suggested changes apply unchanged' "$GITLAB_RULE"; then
+  check "P17j the GitLab anchor condition of a suggestion is stated once, in the GitHub rule, and the other publish texts point at it" PASS
+else
+  check "P17j the GitLab anchor condition of a suggestion is stated once, in the GitHub rule, and the other publish texts point at it" FAIL
+fi
+
 if grep -qF '**Collapsing.**' "$WORKFLOW_MD" \
    && grep -qF 'Never collapse a P1 finding, the verdict, or the uncovered-files list.' "$WORKFLOW_MD" \
    && grep -qF '**Angle brackets.**' "$WORKFLOW_MD" \

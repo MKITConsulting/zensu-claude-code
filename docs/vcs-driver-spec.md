@@ -234,10 +234,20 @@ keeps its classification and its `gh auth status` readiness check.
   `HP29` that a failed read prints no partial diff, and `HP30`-`HP30c` that the body file reaches
   gh and that an empty or missing one is refused before any gh call, and `EB1` that the refusal
   names itself on stderr before the login lookup of a GitHub Enterprise host. `ST1` stops a
-  `--pr-diff` read with `TERM` and requires both temporary files of `_zensu_vcs_stream` gone.
+  `--pr-diff` read with `TERM` and requires exit status 143, the flag file the fake gh writes
+  right before it sends the signal, and both temporary files of `_zensu_vcs_stream` gone.
   `HS10`-`HS16` drive `--post-comment` and both `--fetch-review` reads, and `HS17` and `HS18`
   require that `--post-comment` and `--post-review` refuse an empty payload file with a reason
-  and post nothing. `NR1`-`NR3` in `test-vcs-publish.sh` hold the
+  and post nothing. `HS19b`-`HS20b` require that both verbs refuse a missing or empty payload
+  before `ssh -G` and the login lookup of an SSH GitHub Enterprise remote, against the `HS19`
+  control that a usable payload runs both; `G19`-`G19d` that dry-print mode refuses an empty
+  payload and one that is not a JSON object too; `LV37`-`LV40` that the GitLab arm of
+  `--post-review` refuses a missing or empty payload, one that is not a JSON object (cut short,
+  an array, a scalar, `null`) and one it cannot read before any glab call; `LV41` that it
+  plans every request from one private copy of the payload, so a payload cut short during the
+  run still posts the review it checked; and `LV42`-`LV42c` that the copy is gone after a post,
+  against the control that glab saw it in `TMPDIR` during the run, and after each refusal.
+  `NR1`-`NR3` in `test-vcs-publish.sh` hold the
   review normalizer to the requested review id and count each comment once across pages, and
   `GD1`-`GD4` and `GB1`-`GB4` in `test-vcs-pr-ops.sh` drive the GitLab arms with a fake glab: the
   diff rebuilt from two pages of `/diffs`, a listing refused for a missing or unsafe path, a
@@ -494,8 +504,11 @@ specified in `skills/autopilot/rules/conventions.md`.
     call and prints the PR/MR URL; on GitLab it requires `--repo-id` and sends
     `{"description": …}` in one JSON `PUT` on stdin. `--post-comment` and `--fetch-review` are
     GitHub-only and refuse `--provider gitlab` with a message that says why; `--post-comment`
-    and `--post-review` refuse an empty payload file with a reason, so a failed payload build
-    posts nothing; `--fetch-review` prints `{id,state,author,submittedAt,url,comments}`,
+    and `--post-review` refuse a missing or empty payload file with a reason before any gh or
+    glab call, the host lookup included, and the GitLab arm of `--post-review` also refuses a
+    payload it cannot read or that is not a JSON object and plans every request from one
+    private copy of it, so a failed payload build posts nothing;
+    `--fetch-review` prints `{id,state,author,submittedAt,url,comments}`,
     `comments` counting the review's inline comments over every page. `skills/pr-team-review`
     runs them for the GitHub anchor-validation diff read (on GitLab the driver's own anchor
     preflight decides), the body-only and per-comment fallbacks, which build each request from
@@ -504,9 +517,9 @@ specified in `skills/autopilot/rules/conventions.md`.
     `--edit-pr-body`; `skills/cover` step 0.B reads a pull request's diff with the repo-context
     form on GitHub, which leaves the base repository to gh as before, and with `--repo-id` on
     GitLab. Tests: `D1`-`D4i`, `E1`-`E4h`, `HP21`-`HP30c`, `EB1`, `ST1`, `PD1`, `PD2`, `GD1`-`GD4`,
-    `GB1`-`GB5`, `SK1`-`SK1d` and `EX1`-`EX2b` in `test-vcs-pr-ops.sh`; `A18`-`A19c`, `G17`-`G18f`,
-    `HS10`-`HS18` and `NR1`-`NR3` in `test-vcs-publish.sh`; `GL58`-`GL59b`, `GL73` and `GL74` in
-    `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
+    `GB1`-`GB5`, `SK1`-`SK1d` and `EX1`-`EX2b` in `test-vcs-pr-ops.sh`; `A18`-`A19c`, `G17`-`G19d`,
+    `HS10`-`HS20b`, `LV37`-`LV42c` and `NR1`-`NR3` in `test-vcs-publish.sh`; `GL58`-`GL59b`,
+    `GL73` and `GL74` in `tests/integration/gitlab/test-vcs-gitlab-live.sh`.
 
 ---
 
