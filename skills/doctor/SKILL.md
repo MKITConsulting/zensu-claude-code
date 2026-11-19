@@ -69,8 +69,8 @@ CAS workflow documents are never deleted.
 
 ## Prerequisites
 
-None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, `zensu auth status`). The `playwright-cli` version is read by
+None: no MCP connection, API key or network. Every probe is local: `command -v`,
+`--version`, `zensu auth status`, `ssh -G`. The `playwright-cli` version is read by
 `hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
 package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest
 within four directories of the resolved binary — without running it. A manifest that names
