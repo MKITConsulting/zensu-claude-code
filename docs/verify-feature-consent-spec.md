@@ -35,10 +35,11 @@ and §12 records the decisions.
 
 **The browser fence moved to the network level on 2026-11-18.** The run config now carries three
 derived launch arguments that refuse every connection to a host and port outside the run's
-origins, a WebSocket and a server redirect included, and service workers run. The design, its
-measurements and what stays open are in `docs/verify-feature-network-fence-spec.md`. Every
-statement below that says a WebSocket connection or a server redirect is not fenced, D12 and
-§11.3 among them, describes the earlier fence and stays as the record of that decision.
+origins, a WebSocket, a shared worker's request and a server redirect included, and service
+workers run. The design, its measurements and what stays open are in
+`docs/verify-feature-network-fence-spec.md`. Every statement below that says a WebSocket
+connection, a shared worker's fetch or a server redirect is not fenced, D12 and §11.3 among
+them, describes the earlier fence and stays as the record of that decision.
 
 **The bundled monorepo adapter was removed on 2026-10-12.** The plugin serves projects whose
 users cannot see the Zensu monorepo, so it no longer carries a start script for it. Phase 2
@@ -514,7 +515,8 @@ them as targets, which made an API origin navigable and evidence-eligible.
   `auth.baseUrl`.
 - **What stays denied.** `open`, `goto` and `tab-new` aimed at a network-only origin, the
   navigation commands that name a URL; every origin in neither list; every HTTP(S) request to an
-  origin outside the run config other than a server redirect the browser follows; `eval`,
+  origin outside the run config other than a server redirect the browser follows, a WebSocket
+  connection and a shared worker's fetch; `eval`,
   `run-code`, request-detail and storage commands; any network-only origin in consent mode.
 - **Residuals, named.** The browser has one class of allowed origin, so a page can navigate itself
   onto a network-only origin — measured: a link click to a second allowed origin was followed,
@@ -526,8 +528,10 @@ them as targets, which made an API origin navigable and evidence-eligible.
   renders inside that page, so its content reaches that page's snapshot and screenshot; the skill
   reads it as that page's content, the same exposure as the data the page fetches, and only a page
   the browser lands on at a network-only origin is never evidence. WebSockets
-  are outside the fence for every origin (D12). The run config is still read twice, by the gate at
-  `open` and by the CLI at launch.
+  are outside the fence for every origin (D12), and so is a shared worker's fetch, measured on
+  2026-11-17 with playwright-cli 0.1.24 driving Google Chrome 157 on loopback `http` origins: a
+  dedicated worker's fetch is fenced, a shared worker's fetch is not. The run config is still read
+  twice, by the gate at `open` and by the CLI at launch.
 
 ## 12. Remote consent (2026-10-09)
 
@@ -604,4 +608,4 @@ was local XOR remote, switched off local consent everywhere.
     cannot show the prompt may boot a whole runtime for an origin the gate then denies at `open`.
     The stderr note is the early signal, and the skill's rules stop on it in such a session; that
     is prose, not a gate.
-  - WebSockets stay unfenced (D12).
+  - WebSockets (D12) and a shared worker's fetch (§11.3) stay unfenced.

@@ -531,11 +531,16 @@ network-only class: without a policy the role is refused, and the skill passes a
 origin as an ordinary `--origin`. The `Page URL` rule stays prose, and the reason is measured
 rather than argued: the browser has ONE class of allowed target, so a page-initiated navigation
 onto a network-only origin is followed, and the triggering call prints that page's URL and title
-before the skill can stop. **A WebSocket is fenced by layer 1 alone.** `context.route` does not
-intercept one: measured with playwright-cli 0.1.21 and Chrome 154, and again with 0.1.23 and with
-0.1.24 and Chrome 156, a page on an allowed origin opened one to a loopback origin outside
-`allowedOrigins` and received its message while only the routes fenced the browser. So where
-layer 1 does not hold, a WebSocket to any target is open, a service worker's included. The decisions and the
+before the skill can stop. **A WebSocket and a shared worker's request are fenced by layer 1
+alone.** `context.route` intercepts neither: measured with playwright-cli 0.1.21 and Chrome 154,
+and again with 0.1.23 and with 0.1.24 and Chrome 156, a page on an allowed origin opened a
+WebSocket to a loopback origin outside `allowedOrigins` and received its message while only the
+routes fenced the browser; measured on 2026-11-17 with playwright-cli 0.1.24 driving Google
+Chrome 157.0.8103.52 on loopback `http` origins, a dedicated worker's fetch to such an origin was
+blocked and a shared worker's fetch reached its server. The fence probe's reference columns
+showed both again on 2026-11-18, and its judged columns showed layer 1 refusing both. So where
+layer 1 does not hold, a WebSocket and a shared worker's request reach any target, a service
+worker's WebSocket included. The decisions and the
 security analysis live in §11 of `docs/verify-feature-consent-spec.md`. **Version for this
 delta: `patch`**, by the route-retirement argument above — the policy is read from the launch
 environment, which no runtime writes, and an installation that predates the key refuses a policy
@@ -734,6 +739,20 @@ announces a prompt rather than a capability the plugin hands itself.
   `Zensu capability gate (reviewer-capability-v1) deny:` reason stays deterministic (`scripts/session-control-claude-wrapper.sh`,
   `evals/session-control/lib/live-evidence.js`, `evals/session-control/tests/wrapper-selftest.sh`,
   `tests/structure/test-windows-portability-guards.sh`).
+- What leaves the fence is stated together at each of these sites: `docs/gates.md` (the floor
+  paragraph and the WebRTC bullet of the known gaps), `docs/verify-feature.md` ("How the browser
+  is fenced", the consent-mode floor bullet, the redirect sentence, the network-only limits and
+  the local-mode API bullet), the opening sentence of the redirect paragraph of
+  `skills/verify-feature/SKILL.md`, section 1 of
+  `skills/verify-feature/rules/browser-verification.md` and `skills/autopilot/rules/config.md`:
+  layer 1 refuses every connection to a host and port outside the run config, WebRTC over UDP
+  excepted, and layer 2 sees neither a WebSocket nor a shared worker's request. A new exception,
+  or a layer that stops holding one, edits all of them with `V73`, which pins the operator docs,
+  and `P10q`, which pins the skill and rule texts; both also refuse the wording of the earlier
+  fence, under which a WebSocket, a followed redirect and a shared worker's fetch passed. §11 and
+  §12 of `docs/verify-feature-consent-spec.md` and the scope and residual rows of
+  `docs/verify-feature-auth-state-spec.md` keep that earlier account as a record: the consent
+  spec's dated opening and the auth-state spec's header defer to the operator docs.
 
 **The release signal (`.github/workflows/playwright-cli-drift.yml`).** No live tier runs
 `playwright-cli`, and none is needed: the parser port is pinned by a fixture recorded from the
@@ -818,6 +837,12 @@ for its `@playwright/cli` install pins.
   a network-only origin renders inside that page, so its content reaches that page's snapshot and
   screenshot; the skill reads it as that page's content, like fetched data, which is why
   `NETWORK_ONLY_NAVIGATION` denies evidence only to a page the browser lands on there.
+- **Layer 2 holds neither a WebSocket nor a shared worker's request.** Where the three launch
+  arguments do not hold, on Windows, on the Edge and prerelease Chrome channels and after a Chrome
+  change to one of the switches, both reach any target, as they did before the network fence. The
+  shared worker was measured under the routes alone once through playwright-core directly and
+  once through the real CLI with a run-config-shaped file (the WebSocket paragraph above); a
+  shared worker's `https` or `wss` target and a remote host were measured for layer 1 only.
 - **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
   `main` and the measurements of two Chrome builds (154.0.8037.57 with playwright-cli 0.1.21,
   156.0.8078.81 with 0.1.23 and 0.1.24); no suite drives a real browser, so a Chromium that
@@ -948,7 +973,8 @@ for its `@playwright/cli` install pins.
   directory node derives reads `C:\…`, so `memoryPathAllowed` compares the directory after
   `nativeSeparators`; nothing collapses a `..` segment, so one still refuses. The three launch
   arguments of the network fence were never run there. Where they do not hold, layer 2 keeps
-  what it holds and a service worker's WebSocket is open, because service workers run.
+  what it holds, which leaves a WebSocket and a shared worker's request open, a service worker's
+  WebSocket included, because service workers run.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included; each must
   re-decide whether its host fires a pre-tool hook on its shell tool and can render an `ask`.
 

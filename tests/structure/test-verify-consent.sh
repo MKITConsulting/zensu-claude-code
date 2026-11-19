@@ -1240,6 +1240,18 @@ if [ -z "$DRIFT_MISSING" ]; then
 else
   check "V49 docs/gates.md names the version-drift gap: user-supplied driver, manifest-only guard, run-config fences and channels (missing:$DRIFT_MISSING)" FAIL
 fi
+if printf '%s' "$GATES_FLAT" | grep -qF "a shared worker's request and a server redirect to any other target fail with \`net::ERR_PROXY_CONNECTION_FAILED\`" \
+  && printf '%s' "$GATES_FLAT" | grep -qF "it sees neither a WebSocket nor a shared worker's request" \
+  && printf '%s' "$GATES_FLAT" | grep -qF "and so did a shared worker's fetch with playwright-cli 0.1.24 driving Google Chrome 157 on loopback \`http\` origins, where a dedicated worker's fetch was blocked" \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF "It does not see a WebSocket or a shared worker's request, which the first layer alone refuses." \
+  && ! printf '%s' "$GATES_FLAT" | grep -qF "a shared worker's fetch is not" \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF "a shared worker's fetch is not" \
+  && ! printf '%s' "$GATES_FLAT" | grep -qF 'Three kinds of request leave the run-config fence' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'it refuses every other HTTP(S) request there'; then
+  check "V73 docs/gates.md and docs/verify-feature.md say which layer refuses a shared worker's request and which does not see it, with the routes-alone measurement, and keep no earlier exception wording" PASS
+else
+  check "V73 docs/gates.md and docs/verify-feature.md say which layer refuses a shared worker's request and which does not see it, with the routes-alone measurement, and keep no earlier exception wording" FAIL
+fi
 if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL' \
   && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'the skill reports the affected scenario PARTIAL rather than working around it'; then
   check "V50 docs/verify-feature.md separates a shape denial's one re-issue from a final denial" PASS

@@ -38,7 +38,8 @@ zen-mode session block, the longer best-solution-first reminder, the context not
 prompt, the yield sentence of `docs/precedence.md`, the rewritten zen-mode contract, the
 reminder's executor-plan clause, the zen-mode safety-warning sentence and its copy in the zen
 short body, the reminder's Autopilot option, the zen-mode archive signal in rule (7) and the
-short body, and the reminder's ranking clause with its first-slot rules the same suite measures 14,107 and 8,271 for a typed
+short body, the reminder's ranking clause with its first-slot rules, and the record-nothing words
+of its refused-question default the same suite measures 14,117 and 8,284 for a typed
 prompt, 4,820 and 3,030 for a
 task notification, a `!` input or a subagent hand-back, and 5,184 and 3,394 for a CI-monitor
 event.
@@ -64,7 +65,8 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
   declined-call line (say in one line that nothing was recorded and that the question will come
   back, then continue), both status lines, never recording `--direct`, every skip case (not a code
   change, Plan mode or an active chain, an explicit preference the user typed, which decides this
-  request only and records nothing, a human-present field reading `no` or a refused question)
+  request only and records nothing, a human-present field reading `no` or a refused question,
+  which runs the flow and records nothing)
   and the uncertainty rule, followed by the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
   arrives once as well.
 - **`user-prompt-tdd-reminder.sh`, route `build` or `direct`:** the decided line on EVERY prompt,
@@ -78,7 +80,7 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
   exactly one `TDD-MODE: strict` line and gives it its own status line
   (`.claude/rules/tdd-mode-precedence.md`). Measured with the config source: 1,569 characters
   for `build` and 1,525 for `direct` in vanilla mode, 1,539 and 1,509 in strict mode, against
-  6,611 for the full vanilla text.
+  6,621 for the full vanilla text.
 
   **Three budgets rose with that sentence, and only those three.** The decided line's cap in
   `U10` and `R13f` went from 1,500 to 1,575, the ask short line's from 2,750 to 2,850 (the budget
@@ -109,12 +111,20 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101`, `Z103`
   option first. Each is an obligation its shape must carry alone. The reminder's first-prompt row
   went from 6,320 to 6,620 and the first typed total from 13,826 to 14,130; the ask short line's cap
   went from 3,340 to 3,625 (the budget suite's repeat row and `R13g`) and the typed repeat total
-  from 8,009 to 8,295. The suite measures 6,611 for the vanilla full text, 3,613 for the vanilla
-  short line and 14,107 and 8,271 for the two typed totals, and `R13g`, with its own normalization
-  of the record command, 3,590 for the attended vanilla short line. With a person present the
-  option and its ranking sentences insert 896 characters into each full text and 683 into the short
-  line. The workflow-first sentence of the shapes without a person is in no budget row, because
-  the suite measures the attended shapes only; `R13h` pins its text.
+  from 8,009 to 8,295. The suite then measured 6,611 for the vanilla full text, 3,613 for the
+  vanilla short line and 14,107 and 8,271 for the two typed totals, and `R13g`, with its own
+  normalization of the record command, 3,590 for the attended vanilla short line. With a person
+  present the option and its ranking sentences insert 896 characters into each full text and 683
+  into the short line. The workflow-first sentence of the shapes without a person is in no budget
+  row, because the suite measures the attended shapes only; `R13h` pins its text.
+
+  **The refused-question default raised two budgets.** Its sentence now says that the run records
+  nothing, ` or recording` in the short line and ` or record` in both full texts, because a live
+  run told only to skip the question borrowed the Yes arm and recorded `build`. The reminder's
+  first-prompt row went from 6,620 to 6,630 and the ask short line's cap from 3,625 to 3,640 (the
+  budget suite's repeat row and `R13g`); the typed totals keep 14,130 and 8,295. The suite measures
+  6,621 for the vanilla full text, 3,626 for the vanilla short line and 14,117 and 8,284 for the
+  two typed totals.
 - **`user-prompt-intent-router.sh`:** the full notice on the first keyword prompt of a
   generation, then a short line with the triage asked instead of guessed, its Plan-mode
   permission, the routing to `/zensu:bootstrap`,

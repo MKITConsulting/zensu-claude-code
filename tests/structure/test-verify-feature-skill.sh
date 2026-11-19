@@ -1282,6 +1282,17 @@ if grep -qF "Service workers run in this browser, as they do in a user's." <<<"$
 else
   check "P10p the operator doc states the two fence layers, says service workers run and what still cannot be driven, and keeps the driver fence as a category with its two-option question in the chain paragraph" FAIL
 fi
+if grep -qF 'A request, a WebSocket or a server redirect to any other target fails; WebRTC over UDP is the one exception.' <<<"$SKILL_FLAT" \
+  && ! grep -qF "a shared worker's fetch" <<<"$SKILL_FLAT" \
+  && ! grep -qF 'every HTTP(S) subresource request' <<<"$SKILL_FLAT" \
+  && grep -qF "A request, a WebSocket, a worker's request and a server redirect are refused alike" <<<"$BROWSER_FLAT" \
+  && ! grep -qF "a shared worker's fetch is not" <<<"$BROWSER_FLAT" \
+  && grep -qF 'a WebSocket and a server redirect included; WebRTC over UDP is the one exception' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && ! grep -qF 'which are open gaps' <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  check "P10q the skill text and the rule files name WebRTC over UDP as the fence's one exception and a worker's request among the refused ones, and keep no earlier exception wording" PASS
+else
+  check "P10q the skill text and the rule files name WebRTC over UDP as the fence's one exception and a worker's request among the refused ones, and keep no earlier exception wording" FAIL
+fi
 ACCEPTANCE_RULE="$SKILL_DIR/rules/acceptance-evidence.md"
 ACCEPTANCE_FLAT="$(tr '\n' ' ' < "$ACCEPTANCE_RULE" 2>/dev/null | tr -s ' ')"
 if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \

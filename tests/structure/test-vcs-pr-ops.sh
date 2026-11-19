@@ -25,13 +25,14 @@ eq()  { local l="$1" g="$2" w="$3"; [ "$g" = "$w" ] && check "$l" PASS || check 
 has() { local l="$1" g="$2" n="$3"; case "$g" in *"$n"*) check "$l" PASS ;; *) check "$l (missing '$n')" FAIL ;; esac; }
 nothas() { local l="$1" g="$2" n="$3"; case "$g" in *"$n"*) check "$l (unexpected '$n')" FAIL ;; *) check "$l" PASS ;; esac; }
 
+export ZENSU_VCS_REMOTE=https://github.com/acme/widget.git
 argv() { env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1 bash "$LIB" "$@" 2>/dev/null; }
 
 # ---- argv builders (hermetic; no gh/glab execution) ----
-eq  "A1 pr-state github"        "$(argv --pr-state --provider github 42)"  "gh pr view --json state -- 42"
+eq  "A1 pr-state github"        "$(argv --pr-state --provider github 42)"  "env GH_HOST=github.com GH_REPO= gh pr view --json state -- 42"
 eq  "A2 pr-state gitlab"        "$(argv --pr-state --provider gitlab 42)"  "glab mr view --output json -- 42"
-eq  "A3 locate-pr github num"   "$(argv --locate-pr --provider github 42)" "gh pr view --json number,url,state,headRefName,baseRefName -- 42"
-eq  "A4 locate-pr github branch" "$(argv --locate-pr --provider github)"   "gh pr view --json number,url,state,headRefName,baseRefName"
+eq  "A3 locate-pr github num"   "$(argv --locate-pr --provider github 42)" "env GH_HOST=github.com GH_REPO= gh pr view --json number,url,state,headRefName,baseRefName -- 42"
+eq  "A4 locate-pr github branch" "$(argv --locate-pr --provider github)"   "env GH_HOST=github.com GH_REPO= gh pr view --json number,url,state,headRefName,baseRefName"
 eq  "A5 locate-pr gitlab branch" "$(argv --locate-pr --provider gitlab)"   "glab mr view --output json"
 eq  "A5b locate-pr gitlab num"  "$(argv --locate-pr --provider gitlab 7)"  "glab mr view --output json -- 7"
 
@@ -44,6 +45,7 @@ has "A6e fetch github num var"           "$GHF" "num=42"
 has "A6f fetch github exhausts pagination" "$GHF" "--paginate --slurp"
 has "A6g fetch github query exposes pageInfo" "$GHF" "pageInfo{hasNextPage endCursor}"
 has "A6h fetch github query accepts cursor" "$GHF" 'after:$endCursor'
+has "A6i fetch github pins the remote's host after the fields" "$GHF" " -F num=42 --hostname github.com"
 eq  "A7 fetch gitlab -> paginated JSON discussions" "$(argv --fetch-threads --provider gitlab --repo-id grp%2Fproj 7)" "glab api --paginate --output json projects/grp%2Fproj/merge_requests/7/discussions"
 
 GHR="$(argv --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111)"
@@ -51,6 +53,8 @@ has "A8a resolve github mutation"        "$GHR" "resolveReviewThread"
 has "A8b resolve github thread var"      "$GHR" "t=RT_1"
 has "A8c resolve github reply endpoint"  "$GHR" "pulls/42/comments/111/replies"
 nothas "A8d resolve github not glab"     "$GHR" "glab"
+eq "A8e resolve github pins the remote's host on the reply and on the mutation" \
+  "$(printf '%s\n' "$GHR" | grep -c -- ' --hostname github.com$')" "2"
 
 GLR="$(argv --resolve-thread --provider gitlab --repo-id grp%2Fproj 7 d1)"
 has "A9a resolve gitlab PUT resolved"    "$GLR" "--method PUT"
@@ -87,7 +91,7 @@ has    "A11 resolve github reply_to defaults to threadId" "$GHRF" "comments/RT_1
 # ---- open-pr (autopilot; hermetic, no gh/glab execution) ----
 OPBF="$(mktemp)"; printf 'PR body content\n' > "$OPBF"
 GHOP="$(argv --open-pr --provider github --base main --head feat --title 'My PR' --body-file "$OPBF")"
-eq     "O1 open-pr github argv"              "$GHOP" "gh pr create --title My PR --body-file $OPBF --base main --head feat"
+eq     "O1 open-pr github argv"              "$GHOP" "env GH_HOST=github.com GH_REPO= gh pr create --title My PR --body-file $OPBF --base main --head feat"
 nothas "O1b open-pr github not glab"         "$GHOP" "glab"
 
 GLOP="$(argv --open-pr --provider gitlab --base main --head feat --title 'My PR' --body-file "$OPBF")"
@@ -107,8 +111,8 @@ fails "O7 open-pr requires --body-file"  --open-pr --provider github --base main
 fails "O8 open-pr requires --title"      --open-pr --provider github --base main --head feat --body-file "$OPBF"
 rm -f "$OPBF"
 
-eq    "R1 review-summary github argv" "$(argv --review-summary --provider github 42)" "gh pr view --json reviewDecision,latestReviews -- 42"
-eq    "R1b review-summary github pins the repository given as --repo-id" "$(argv --review-summary --provider github --repo-id acme/widgets 42)" "gh pr view -R acme/widgets --json reviewDecision,latestReviews -- 42"
+eq    "R1 review-summary github argv" "$(argv --review-summary --provider github 42)" "env GH_HOST=github.com GH_REPO= gh pr view --json reviewDecision,latestReviews -- 42"
+eq    "R1b review-summary github pins the repository given as --repo-id, on the remote's host" "$(argv --review-summary --provider github --repo-id acme/widgets 42)" "gh pr view -R github.com/acme/widgets --json reviewDecision,latestReviews -- 42"
 eq    "R2 review-summary gitlab argv reads the approvals, then the MR" "$(argv --review-summary --provider gitlab --repo-id grp%2Fproj 7)" "glab api projects/grp%2Fproj/merge_requests/7/approvals
 glab api projects/grp%2Fproj/merge_requests/7"
 fails "R3 review-summary requires --provider"         --review-summary 42
@@ -291,13 +295,12 @@ rs bogus '{}' >/dev/null 2>&1 && R_BAD="$R_BAD unknown-provider"
 
 # A producer that emits valid JSON and then exits non-zero must never be
 # laundered into success by a downstream normalizer.
+. "$PLUGIN_DIR/tests/structure/lib-gh-host-fake.sh"
 PIPE_WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-pipeline.XXXXXXXX")"
-cat > "$PIPE_WORK/gh" <<'FAKE'
-#!/bin/bash
+gh_host_fake_write "$PIPE_WORK/gh" <<'FAKE'
 printf '%s' '{"state":"OPEN","number":42,"url":"https://github.test/acme/widget/pull/42","headRefName":"feat","baseRefName":"main","headRefOid":"abcdef0","title":"T","body":"B","author":{"login":"a"},"labels":[]}'
 exit 23
 FAKE
-chmod +x "$PIPE_WORK/gh"
 producer_failure() {
   local label="$1"; shift
   if PATH="$PIPE_WORK:$PATH" "$@" >/dev/null 2>&1; then check "$label" FAIL; else check "$label" PASS; fi
@@ -310,8 +313,7 @@ producer_failure "N19 review-summary preserves CLI failure after valid JSON" _ze
 rm -rf "$PIPE_WORK"
 
 NOPR_WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-nopr.XXXXXXXX")"
-cat > "$NOPR_WORK/gh" <<'FAKE'
-#!/bin/bash
+gh_host_fake_write "$NOPR_WORK/gh" <<'FAKE'
 printf 'no pull requests found for branch "feat"\n' >&2
 exit 1
 FAKE
@@ -320,13 +322,12 @@ cat > "$NOPR_WORK/glab" <<'FAKE'
 printf 'no open merge request available for "feat"\n' >&2
 exit 1
 FAKE
-chmod +x "$NOPR_WORK/gh" "$NOPR_WORK/glab"
+chmod +x "$NOPR_WORK/glab"
 locate_rc() { PATH="$NOPR_WORK:$PATH" bash "$LIB" --locate-pr "$@" >/dev/null 2>&1; printf '%s' "$?"; }
 eq "L1 github: no PR for the current branch exits 3"  "$(locate_rc --provider github)" "3"
 eq "L2 gitlab: no MR for the current branch exits 3"  "$(locate_rc --provider gitlab)" "3"
 mkdir -p "$NOPR_WORK/caps"
-cat > "$NOPR_WORK/caps/gh" <<'FAKE'
-#!/bin/bash
+gh_host_fake_write "$NOPR_WORK/caps/gh" <<'FAKE'
 printf 'No pull requests found for branch "feat"\n' >&2
 exit 1
 FAKE
@@ -335,7 +336,7 @@ cat > "$NOPR_WORK/caps/glab" <<'FAKE'
 printf 'No open merge request available for "feat"\n' >&2
 exit 1
 FAKE
-chmod +x "$NOPR_WORK/caps/gh" "$NOPR_WORK/caps/glab"
+chmod +x "$NOPR_WORK/caps/glab"
 caps_locate_rc() { PATH="$NOPR_WORK/caps:$PATH" bash "$LIB" --locate-pr "$@" >/dev/null 2>&1; printf '%s' "$?"; }
 eq "L2b gitlab: the capitalized no-MR message of glab 1.113 and 1.122 exits 3" "$(caps_locate_rc --provider gitlab)" "3"
 eq "L1b github: a capitalized no-PR message exits 3" "$(caps_locate_rc --provider github)" "3"
@@ -345,14 +346,121 @@ notmp_locate_err() { TMPDIR="$NOPR_WORK/no-such-dir" PATH="$NOPR_WORK/caps:$PATH
 has "L2d gitlab: a numbered lookup without a temporary file reports the forge CLI's message" "$(notmp_locate_err --provider gitlab 42)" "No open merge request available for"
 eq "L3 a not-found for an explicit number stays exit 1" "$(locate_rc --provider github 42)" "1"
 eq "L4 the other forge's not-found wording is an error" "$(cp "$NOPR_WORK/glab" "$NOPR_WORK/gh"; locate_rc --provider github)" "1"
-cat > "$NOPR_WORK/gh" <<'FAKE'
-#!/bin/bash
+gh_host_fake_write "$NOPR_WORK/gh" <<'FAKE'
 printf 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n' >&2
 exit 1
 FAKE
 eq  "L5 any other failure stays exit 1" "$(locate_rc --provider github)" "1"
 has "L6 the error names the forge CLI's message on stderr" "$(PATH="$NOPR_WORK:$PATH" bash "$LIB" --locate-pr --provider github 2>&1 >/dev/null)" "locate-pr failed (rc=1): HTTP 401: Bad credentials"
 rm -rf "$NOPR_WORK"
+
+HP="$(mktemp -d "${TMPDIR:-/tmp}/vcs-host-pin.XXXXXXXX")"
+mkdir -p "$HP/bin"
+printf 'PR body\n' > "$HP/body.md"
+gh_host_fake_write "$HP/bin/gh" <<'FAKE'
+set -u
+case "${1:-} ${2:-}" in
+  "pr view")
+    case "$*" in
+      *reviewDecision*) printf '%s' '{"reviewDecision":"APPROVED","latestReviews":[{"state":"APPROVED"}]}' ;;
+      *"--json state "*) printf '%s' '{"state":"OPEN"}' ;;
+      *) printf '%s' '{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","headRefName":"feat","baseRefName":"main"}' ;;
+    esac
+    exit 0 ;;
+  "pr create") printf 'https://github.test/acme/widget/pull/43\n'; exit 0 ;;
+  "api graphql")
+    case "$*" in
+      *resolveReviewThread*) printf '%s' '{"data":{"resolveReviewThread":{"thread":{"id":"RT_1"}}}}' ;;
+      *) printf '%s' '[{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_1","isResolved":false,"comments":{"nodes":[{"databaseId":111,"body":"fix this","path":"a.js","line":10,"author":{"login":"alice"}}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]' ;;
+    esac
+    exit 0 ;;
+  "api repos/acme/widget/pulls/42/comments/111/replies") printf '%s' '{"id":5}'; exit 0 ;;
+esac
+exit 2
+FAKE
+hp_run() {
+  : > "$HP/hosts"; : > "$HP/env"
+  HP_OUT="$(env PATH="$HP/bin:$PATH" GH_HOST=example.invalid FAKE_GH_HOSTS_LOG="$HP/hosts" FAKE_GH_ENV_LOG="$HP/env" \
+    ZENSU_VCS_REMOTE=https://github.com/acme/widget.git "$@" 2>"$HP/err")"
+  HP_RC=$?
+  HP_ERR="$(cat "$HP/err")"; HP_HOSTS="$(cat "$HP/hosts")"; HP_ENV="$(cat "$HP/env")"
+}
+hp_reached() {
+  local label="$1" want="$2" host="$3" calls="$4" count stray
+  count="$(printf '%s\n' "$HP_HOSTS" | grep -c .)"
+  stray="$(printf '%s\n' "$HP_HOSTS" | grep -v "^$host " | grep -c .)"
+  if [ "$HP_RC" -eq 0 ] && [ "$HP_OUT" = "$want" ] && [ "$count" = "$calls" ] && [ "$stray" = 0 ]; then check "$label" PASS
+  else check "$label (rc=$HP_RC out='$HP_OUT' hosts='$HP_HOSTS' err='$HP_ERR')" FAIL; fi
+}
+PR_JSON='{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","base":"main","head":"feat"}'
+THREADS_JSON='[{"threadId":"RT_1","replyTo":"111","path":"a.js","line":10,"body":"fix this","author":"alice"}]'
+SUMMARY_JSON='{"reviewed":true,"approved":true,"changesRequested":false}'
+hp_run bash "$LIB" --pr-state --provider github 42
+hp_reached "HP1 --pr-state reaches the remote's github.com while GH_HOST names another host" OPEN github.com 1
+hp_run bash "$LIB" --locate-pr --provider github
+hp_reached "HP2 --locate-pr of the current branch reaches github.com while GH_HOST names another host" "$PR_JSON" github.com 1
+hp_run bash "$LIB" --review-summary --provider github --repo-id acme/widget 42
+hp_reached "HP3 --review-summary with --repo-id reaches github.com while GH_HOST names another host" "$SUMMARY_JSON" github.com 1
+hp_run bash "$LIB" --review-summary --provider github 42
+hp_reached "HP4 --review-summary without --repo-id reaches github.com while GH_HOST names another host" "$SUMMARY_JSON" github.com 1
+hp_run bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
+hp_reached "HP5 --fetch-threads reaches github.com while GH_HOST names another host" "$THREADS_JSON" github.com 1
+hp_run bash "$LIB" --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111
+hp_reached "HP6 --resolve-thread sends the reply and the resolve to github.com while GH_HOST names another host" "" github.com 2
+hp_run bash "$LIB" --open-pr --provider github --base main --head feat --title T --body-file "$HP/body.md"
+hp_reached "HP7 --open-pr reaches github.com while GH_HOST names another host" https://github.test/acme/widget/pull/43 github.com 1
+hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
+  bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
+hp_reached "HP8 --fetch-threads reaches the GitHub Enterprise host of the remote while GH_HOST names another host" "$THREADS_JSON" ghe.example.com 1
+hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com \
+  bash "$LIB" --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111
+hp_reached "HP9 --resolve-thread writes to the GitHub Enterprise host of the remote while GH_HOST names another host" "" ghe.example.com 2
+hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com \
+  bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
+if [ "$HP_RC" -ne 0 ] && [ -z "$HP_OUT" ] && [ -z "$HP_HOSTS" ]; then
+  case "$HP_ERR" in
+    *GH_HOST*) check "HP10 a remote host gh knows no login for refuses before any gh api call and names only the login command (err='$HP_ERR')" FAIL ;;
+    *"gh auth login --hostname ghe.example.com"*) check "HP10 a remote host gh knows no login for refuses before any gh api call and names only the login command" PASS ;;
+    *) check "HP10 a remote host gh knows no login for refuses before any gh api call and names only the login command (err='$HP_ERR')" FAIL ;;
+  esac
+else
+  check "HP10 a remote host gh knows no login for refuses before any gh api call and names only the login command (rc=$HP_RC out='$HP_OUT' hosts='$HP_HOSTS')" FAIL
+fi
+HP_GHE=(ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com FAKE_GH_LOGINS=ghe.example.com)
+hp_run "${HP_GHE[@]}" bash "$LIB" --pr-state --provider github 42
+hp_reached "HP11 --pr-state reaches the GitHub Enterprise host of the remote while GH_HOST names another host" OPEN ghe.example.com 1
+hp_run "${HP_GHE[@]}" bash "$LIB" --locate-pr --provider github
+hp_reached "HP12 --locate-pr of the current branch reaches the GitHub Enterprise host of the remote" "$PR_JSON" ghe.example.com 1
+hp_run "${HP_GHE[@]}" bash "$LIB" --locate-pr --provider github 42
+hp_reached "HP13 --locate-pr by number reaches the GitHub Enterprise host of the remote" "$PR_JSON" ghe.example.com 1
+hp_run "${HP_GHE[@]}" bash "$LIB" --review-summary --provider github --repo-id acme/widget 42
+hp_reached "HP14 --review-summary with --repo-id reaches the GitHub Enterprise host of the remote" "$SUMMARY_JSON" ghe.example.com 1
+hp_run "${HP_GHE[@]}" bash "$LIB" --review-summary --provider github 42
+hp_reached "HP15 --review-summary without --repo-id reaches the GitHub Enterprise host of the remote" "$SUMMARY_JSON" ghe.example.com 1
+hp_run "${HP_GHE[@]}" bash "$LIB" --open-pr --provider github --base main --head feat --title T --body-file "$HP/body.md"
+hp_reached "HP16 --open-pr reaches the GitHub Enterprise host of the remote" https://github.test/acme/widget/pull/43 ghe.example.com 1
+hp_tokens() {
+  local label="$1" want="$2" lines bad
+  lines="$(printf '%s\n' "$HP_ENV" | grep -c .)"
+  bad="$(printf '%s\n' "$HP_ENV" | grep -v -x -F -e "$want" | grep -c .)"
+  if [ "$HP_RC" -eq 0 ] && [ "$lines" -ge 1 ] && [ "$bad" = 0 ]; then check "$label" PASS
+  else check "$label (rc=$HP_RC env='$HP_ENV' err='$HP_ERR')" FAIL; fi
+}
+HP_TOKENS=(GH_TOKEN=t1 GITHUB_TOKEN=t2 GH_ENTERPRISE_TOKEN=t3 GITHUB_ENTERPRISE_TOKEN=t4)
+hp_run "${HP_GHE[@]}" "${HP_TOKENS[@]}" bash "$LIB" --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111
+hp_tokens "HP17 a host accepted for its stored gh login gets every write without the environment tokens" ghe.example.com
+hp_run "${HP_GHE[@]}" "${HP_TOKENS[@]}" bash "$LIB" --pr-state --provider github 42
+hp_tokens "HP17b a repo-context call to that host runs without the environment tokens too" ghe.example.com
+hp_run "${HP_TOKENS[@]}" bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
+hp_tokens "HP18 a github.com call keeps the environment tokens" "github.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN"
+hp_run ZENSU_VCS_REMOTE=https://ghe.example.com/acme/widget.git FAKE_GH_PR_HOST=ghe.example.com GH_HOST=ghe.example.com "${HP_TOKENS[@]}" \
+  bash "$LIB" --fetch-threads --provider github --repo-id acme/widget 42
+hp_tokens "HP19 the host GH_HOST names keeps the environment tokens" "ghe.example.com GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN"
+hp_run GH_REPO=other.example/acme/x bash "$LIB" --pr-state --provider github 42
+hp_reached "HP20 a GH_REPO in the environment does not move --pr-state off the host of the remote" OPEN github.com 1
+hp_run "${HP_GHE[@]}" GH_REPO=other.example/acme/x bash "$LIB" --open-pr --provider github --base main --head feat --title T --body-file "$HP/body.md"
+hp_reached "HP20b a GH_REPO in the environment does not move --open-pr off the GitHub Enterprise host of the remote" https://github.test/acme/widget/pull/43 ghe.example.com 1
+rm -rf "$HP"
 
 echo "----"
 echo "test-vcs-pr-ops: $PASS PASS / $FAIL FAIL"

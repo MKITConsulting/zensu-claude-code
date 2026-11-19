@@ -1957,6 +1957,33 @@ check "WT10 an empty value, a subdirectory, a clone, a worktree outside the proj
 WT_LOG_ERR="$(bash "$LIB" --work-tree-check "$WTW" --project "$WTA_CANON" --log "$WTA/.zensu/logs/run.log" 2>&1 >/dev/null)"; WT_LOG_RC=$?
 { [ "$WT_LOG_RC" -eq 2 ] && printf '%s' "$WT_LOG_ERR" | grep -qF 'reads no run log'; }
 check "WT11 --work-tree-check is read-only and refuses a run log" "$(verdict $?)"
+wt_refused_line() {
+  local dir="$1" out err rc
+  out="$(bash "$LIB" --work-tree-check "$dir" --project "$WTA_CANON" 2>"$WORK/wt10b.err")"; rc=$?
+  err="$(grep '^zensu-edit-landing.sh: ' "$WORK/wt10b.err" | tail -n 1)"
+  [ "$rc" -eq 2 ] && [ -n "$err" ] \
+    && [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 1 ] \
+    && [ "$out" = "$(printf 'refused\t%s' "${err#zensu-edit-landing.sh: }")" ]
+}
+WT10B_OK=0
+wt_refused_line "$WTA_CANON/sub" || WT10B_OK=1
+wt_refused_line "$WTA_CANON/.claude/clone" || WT10B_OK=1
+wt_refused_line "$WORK/wt-outside" || WT10B_OK=1
+wt_refused_line "$WTA_CANON/.git" || WT10B_OK=1
+[ -z "$(bash "$LIB" --work-tree-check "" --project "$WTA_CANON" 2>/dev/null)" ] || WT10B_OK=1
+[ -z "$(bash "$LIB" --work-tree-check "$WTW" --project "$WTA_CANON" --log "$WTA/.zensu/logs/run.log" 2>/dev/null)" ] || WT10B_OK=1
+[ -z "$(bash "$LIB" --change-set --project "$WTA_CANON" --work-tree "$WTA_CANON/sub" 2>/dev/null)" ] || WT10B_OK=1
+[ "$WT10B_OK" -eq 0 ]
+check "WT10b --work-tree-check prints one refused line carrying the stderr reason for a refused tree, and none for an argument or run-log refusal or outside the check mode" "$(verdict $?)"
+WT10C_SHIM="$WORK/wt10c-shim"
+mkdir -p "$WT10C_SHIM"
+printf '#!/bin/sh\ncase " $* " in (*" -C %s rev-parse --show-toplevel "*) echo "fatal: planted fault" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' "$WTW" "$(command -v git)" > "$WT10C_SHIM/git"
+chmod +x "$WT10C_SHIM/git"
+WT10C_OUT="$(PATH="$WT10C_SHIM:$PATH" bash "$LIB" --work-tree-check "$WTW" --project "$WTA_CANON" 2>"$WORK/wt10c.err")"; WT10C_RC=$?
+{ [ "$WT10C_RC" -eq 2 ] && [ -z "$WT10C_OUT" ] \
+  && grep -qF "the work tree $WTW could not be checked: git rev-parse --show-toplevel exited 128: planted fault" "$WORK/wt10c.err" \
+  && ! grep -qF 'is not inside a git work tree' "$WORK/wt10c.err"; }
+check "WT10c a git fault in the work-tree check dies as could not be checked, naming the command, its status and git's message, and prints no refused verdict" "$(verdict $?)"
 printf '%s\n' '[10:00:00] S5 IMPL completed — files: locales/{en,de}/settings.json, locales/*/ghost.json' > "$WTA/.zensu/logs/ref.log"
 WT_REF_OUT="$(run_audit --log "$WTA/.zensu/logs/ref.log" --project "$WTA_CANON" --work-tree "$WTW" --receipt "$WTA/.zensu/state/ref.json")"; WT_REF_RC=$?
 { [ "$WT_REF_RC" -eq 0 ] && grep -qF '"clean":true' "$WTA/.zensu/state/ref.json" \

@@ -209,7 +209,12 @@ done
 for t in $ZENSU_HUMAN_DECISION_TOOL_NAMES; do
   zensu_is_work_order_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      '$t' is both a human decision and a work-order tool"; }
 done
-[ "$C_FAIL" -eq 0 ] && check "C1 no mutation classifies as a read; human-decision and work-order names are mutations; session names are work-order names; the two families are disjoint" PASS || check "C1 classification invariants ($C_FAIL)" FAIL
+for t in $ZENSU_AI_WORK_CAPTURE_TOOL_NAMES; do
+  zensu_is_mutation_tool "$t" || { C_FAIL=$((C_FAIL+1)); echo "      capture tool '$t' is not in ZENSU_MUTATION_TOOL_NAMES"; }
+  zensu_is_human_decision_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      capture tool '$t' is also a human decision"; }
+  zensu_is_work_order_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      capture tool '$t' is also a work-order tool"; }
+done
+[ "$C_FAIL" -eq 0 ] && check "C1 no mutation classifies as a read; human-decision, work-order and AI-work capture names are mutations; session names are work-order names; the human-decision, work-order and capture families are disjoint" PASS || check "C1 classification invariants ($C_FAIL)" FAIL
 
 M_FAIL=0
 for t in $(grep -oE 'echo "[a-z_]+"' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh" | sed -E 's/echo "([a-z_]+)"/\1/' | sort -u); do

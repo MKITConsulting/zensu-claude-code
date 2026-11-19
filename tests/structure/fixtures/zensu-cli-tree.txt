@@ -1,6 +1,8 @@
-version 0.15.0
+version 0.22.0
+leaf ai-work bind
 leaf ai-work context
 leaf ai-work get
+leaf ai-work recover
 leaf ai-work start
 leaf ai-work submit
 leaf auth login
@@ -113,6 +115,7 @@ leaf tiers create
 leaf tiers list
 leaf tiers matrix
 leaf tiers set-feature
+leaf update
 alias wiki wiki-pages
 leaf wiki create
 leaf wiki images policy
